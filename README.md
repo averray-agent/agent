@@ -88,6 +88,8 @@ The repository now also includes a Ponder indexer workspace:
 - Typecheck: `npm run typecheck:indexer`
 - Render checklist: [indexer/RENDER_DEPLOY.md](/Users/pascalkuriger/repo/Polkadot/indexer/RENDER_DEPLOY.md)
 
+For ultra-cheap hosted testing, the indexer also supports a low-memory mode via env vars. That mode skips treasury indexing, starts at `latest` for new escrow/reputation events, disables cache, and is intended only to validate viability on very small instances.
+
 The indexer tracks Polkadot Hub TestNet events for:
 
 - `TreasuryPolicy`
