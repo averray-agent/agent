@@ -1,20 +1,20 @@
 {
   "name": "Polkadot Agent Treasury Platform",
   "version": "0.1.0",
-  "baseUrl": "https://agent-vwq4.onrender.com",
-  "discoveryUrl": "https://agent-vwq4.onrender.com/onboarding",
+  "baseUrl": "https://api.averray.com",
+  "discoveryUrl": "https://averray.com/.well-known/agent-tools.json",
   "protocols": [
     "mcp",
     "a2a",
     "http"
   ],
   "protocolEndpoints": {
-    "http": "https://agent-vwq4.onrender.com",
-    "mcp": "https://agent-vwq4.onrender.com/onboarding",
-    "a2a": "https://agent-vwq4.onrender.com/onboarding"
+    "http": "https://api.averray.com",
+    "mcp": "https://api.averray.com/onboarding",
+    "a2a": "https://api.averray.com/onboarding"
   },
   "onboarding": {
-    "entrypoint": "https://agent-vwq4.onrender.com/onboarding",
+    "entrypoint": "https://api.averray.com/onboarding",
     "starterFlow": [
       "connect-wallet",
       "fetch-account-summary",
@@ -45,5 +45,5 @@
     "getVerificationResult",
     "listVerifierHandlers"
   ],
-  "health": "https://agent-vwq4.onrender.com/health"
+  "health": "https://api.averray.com/health"
 }
