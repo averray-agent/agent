@@ -97,3 +97,21 @@ The indexer tracks Polkadot Hub TestNet events for:
 - `TreasuryPolicy`
 - `EscrowCore`
 - `ReputationSBT`
+
+## VPS operations
+
+The current self-hosted deployment uses an OVH VPS with Docker Compose under `/srv/agent-stack`.
+
+Operational helpers now live in:
+
+- [scripts/ops/backup-postgres.sh](/Users/pascalkuriger/repo/Polkadot/scripts/ops/backup-postgres.sh)
+- [scripts/ops/redeploy-backend.sh](/Users/pascalkuriger/repo/Polkadot/scripts/ops/redeploy-backend.sh)
+- [VPS_RUNBOOK.md](/Users/pascalkuriger/repo/Polkadot/VPS_RUNBOOK.md)
+
+Typical production-like flows:
+
+```bash
+cd /srv/agent-stack/app
+./scripts/ops/backup-postgres.sh
+./scripts/ops/redeploy-backend.sh
+```
