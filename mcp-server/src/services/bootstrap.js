@@ -82,13 +82,15 @@ const reputations = new Map([
 ]);
 
 export function createPlatformService() {
-  return new PlatformService(jobs, profiles, accounts, reputations, new BlockchainGateway(), createStateStore());
+  const gateway = new BlockchainGateway();
+  const stateStore = createStateStore();
+  return new PlatformService(jobs, profiles, accounts, reputations, gateway, stateStore);
 }
 
 export function createPlatformRuntime() {
   const gateway = new BlockchainGateway();
   const stateStore = createStateStore();
   const platformService = new PlatformService(jobs, profiles, accounts, reputations, gateway, stateStore);
-  const verifierService = new VerifierService(platformService, gateway);
+  const verifierService = new VerifierService(platformService, stateStore, gateway);
   return { platformService, verifierService, gateway, stateStore };
 }

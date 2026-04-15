@@ -1,11 +1,11 @@
 import { VerifierRegistry } from "./verifier-handlers.js";
 
 export class VerifierService {
-  constructor(platformService, blockchainGateway = undefined, registry = new VerifierRegistry()) {
+  constructor(platformService, stateStore, blockchainGateway = undefined, registry = new VerifierRegistry()) {
     this.platformService = platformService;
+    this.stateStore = stateStore;
     this.blockchainGateway = blockchainGateway;
     this.registry = registry;
-    this.stateStore = platformService.stateStore;
   }
 
   async verifySubmission({ sessionId, evidence = "", metadataURI = "ipfs://pending-badge" }) {
