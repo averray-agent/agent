@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import { createPlatformRuntime } from "../../services/bootstrap.js";
 import { normalizeError } from "../../core/errors.js";
 
-const { platformService: service, verifierService, stateStore, gateway } = createPlatformRuntime();
+const { platformService: service, verifierService, stateStore, gateway, pimlicoClient } = createPlatformRuntime();
 const port = Number(process.env.PORT ?? 8787);
 
 function respond(response, statusCode, payload) {
@@ -57,6 +57,10 @@ const server = createServer(async (request, response) => {
           "/sessions",
           "/jobs",
           "/jobs/recommendations",
+          "/gas/health",
+          "/gas/capabilities",
+          "/gas/quote",
+          "/gas/sponsor",
           "/verifier/handlers",
           "/admin/jobs"
         ]
@@ -64,16 +68,18 @@ const server = createServer(async (request, response) => {
     }
 
     if (request.method === "GET" && pathname === "/health") {
-      const [storeHealth, chainHealth] = await Promise.all([
+      const [storeHealth, chainHealth, gasHealth] = await Promise.all([
         stateStore.healthCheck?.() ?? { ok: true, backend: stateStore.constructor.name },
-        gateway?.healthCheck?.() ?? { ok: true, backend: "blockchain", enabled: false, mode: "disabled" }
+        gateway?.healthCheck?.() ?? { ok: true, backend: "blockchain", enabled: false, mode: "disabled" },
+        pimlicoClient?.healthCheck?.() ?? { ok: true, backend: "pimlico", enabled: false, mode: "disabled" }
       ]);
-      const overallOk = Boolean(storeHealth.ok) && Boolean(chainHealth.ok);
+      const overallOk = Boolean(storeHealth.ok) && Boolean(chainHealth.ok) && Boolean(gasHealth.ok);
       return respond(response, overallOk ? 200 : 503, {
         status: overallOk ? "ok" : "degraded",
         components: {
           stateStore: storeHealth,
-          blockchain: chainHealth
+          blockchain: chainHealth,
+          gasSponsor: gasHealth
         }
       });
     }
@@ -126,6 +132,14 @@ const server = createServer(async (request, response) => {
       return respond(response, 200, service.listJobs());
     }
 
+    if (request.method === "GET" && pathname === "/gas/health") {
+      return respond(response, 200, await pimlicoClient.healthCheck());
+    }
+
+    if (request.method === "GET" && pathname === "/gas/capabilities") {
+      return respond(response, 200, pimlicoClient.getCapabilities());
+    }
+
     if (request.method === "GET" && pathname === "/jobs/definition") {
       return respond(response, 200, service.getJobDefinition(url.searchParams.get("jobId") ?? ""));
     }
@@ -133,6 +147,20 @@ const server = createServer(async (request, response) => {
     if (request.method === "POST" && pathname === "/admin/jobs") {
       const payload = await readJsonBody(request);
       return respond(response, 201, service.createJob(payload));
+    }
+
+    if (request.method === "POST" && pathname === "/gas/quote") {
+      const payload = await readJsonBody(request);
+      return respond(response, 200, await pimlicoClient.quoteUserOperation(payload.userOperation));
+    }
+
+    if (request.method === "POST" && pathname === "/gas/sponsor") {
+      const payload = await readJsonBody(request);
+      return respond(
+        response,
+        200,
+        await pimlicoClient.sponsorUserOperation(payload.userOperation, payload.context ?? {})
+      );
     }
 
     if (request.method === "POST" && pathname === "/jobs/claim") {

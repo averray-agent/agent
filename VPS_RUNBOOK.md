@@ -21,6 +21,7 @@ This runbook captures the production-like setup currently running on the OVH VPS
 - App: [https://app.averray.com](https://app.averray.com)
 - API: [https://api.averray.com](https://api.averray.com)
 - Indexer: [https://index.averray.com](https://index.averray.com)
+- Gas sponsor health: [https://api.averray.com/gas/health](https://api.averray.com/gas/health)
 
 ## Quick health checks
 
@@ -30,6 +31,7 @@ Run these on the VPS:
 cd /srv/agent-stack
 docker ps
 curl -fsS https://api.averray.com/health
+curl -fsS https://api.averray.com/gas/health
 curl -fsS https://index.averray.com/
 curl -fsS https://averray.com/.well-known/agent-tools.json
 ```
@@ -37,6 +39,7 @@ curl -fsS https://averray.com/.well-known/agent-tools.json
 Expected signals:
 
 - API health returns `status: ok`
+- Gas health returns Pimlico status or a clean disabled mode
 - Indexer root returns `status: ok`
 - Discovery manifest returns JSON with `baseUrl` set to `https://api.averray.com`
 
@@ -67,6 +70,19 @@ This will:
 1. fast-forward the repo to `origin/main`
 2. rebuild `agent-backend`
 3. hit the live API health endpoint
+
+### Remote hosted-stack smoke test
+
+From the repo checkout:
+
+```bash
+cd /srv/agent-stack/app/mcp-server
+REMOTE_E2E_BASE_URL=https://api.averray.com \
+REMOTE_E2E_WALLET=0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519 \
+npm run demo:e2e:remote
+```
+
+This creates a unique remote job, runs the full claim/submit/verify flow, and confirms the session lands in hosted history.
 
 ## Backups
 
@@ -123,6 +139,14 @@ Important server-side files:
 - `/srv/agent-stack/backend.env`
 - `/srv/agent-stack/indexer.env`
 - `/srv/agent-stack/Caddyfile`
+
+Optional gas sponsorship vars for `/gas/*` endpoints:
+
+- `PIMLICO_BUNDLER_URL`
+- `PIMLICO_PAYMASTER_URL`
+- `PIMLICO_ENTRY_POINT`
+- `PIMLICO_SPONSORSHIP_POLICY_ID`
+- `PIMLICO_CHAIN_ID`
 
 Do not commit server secrets back into the repository.
 

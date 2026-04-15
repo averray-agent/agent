@@ -53,6 +53,27 @@ REDIS_NAMESPACE=agent-platform
 
 Without `REDIS_URL`, the service falls back to in-memory state for local development.
 
+## Pimlico / ERC-4337 gas sponsorship
+
+The hosted API can now expose a minimal Pimlico-backed gas sponsorship surface when these env vars are set:
+
+```bash
+PIMLICO_BUNDLER_URL=https://...
+PIMLICO_PAYMASTER_URL=https://...
+PIMLICO_ENTRY_POINT=0x...
+PIMLICO_SPONSORSHIP_POLICY_ID=...
+PIMLICO_CHAIN_ID=...
+```
+
+Once configured, the HTTP server exposes:
+
+- `GET /gas/health`
+- `GET /gas/capabilities`
+- `POST /gas/quote`
+- `POST /gas/sponsor`
+
+These endpoints are intended for ERC-4337 user operation quoting and sponsorship. They do not replace the current direct signer flow yet; they add the hosted gas-management path so the platform can evolve toward smart-account execution.
+
 To verify Redis-backed resumability across separate runtimes:
 
 ```bash
@@ -79,6 +100,26 @@ npm run demo:e2e
 ```
 
 The demo mints mock DOT, deposits into `AgentAccountCore`, creates a funded job, claims it as a worker, submits work, resolves escrow through the verifier role, and checks that payout plus SBT minting completed.
+
+## End-to-end remote demo
+
+To run a real hosted-stack smoke test against the production-like API:
+
+```bash
+cd mcp-server
+REMOTE_E2E_BASE_URL=https://api.averray.com \
+REMOTE_E2E_WALLET=0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519 \
+npm run demo:e2e:remote
+```
+
+That script:
+
+- checks live API health
+- creates a unique remote job via `/admin/jobs`
+- claims it
+- submits work
+- runs verification
+- confirms the session appears in hosted history
 
 ## Render deployment
 

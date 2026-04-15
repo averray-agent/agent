@@ -3,6 +3,7 @@ import { createStateStore } from "../core/state-store.js";
 import { BlockchainGateway } from "../blockchain/gateway.js";
 import { VerifierService } from "./verifier-service.js";
 import { loadLocalEnv } from "./env-loader.js";
+import { PimlicoClient } from "./pimlico-client.js";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -89,8 +90,9 @@ export function createPlatformService() {
 
 export function createPlatformRuntime() {
   const gateway = new BlockchainGateway();
+  const pimlicoClient = new PimlicoClient();
   const stateStore = createStateStore();
   const platformService = new PlatformService(jobs, profiles, accounts, reputations, gateway, stateStore);
   const verifierService = new VerifierService(platformService, stateStore, gateway);
-  return { platformService, verifierService, gateway, stateStore };
+  return { platformService, verifierService, gateway, pimlicoClient, stateStore };
 }
