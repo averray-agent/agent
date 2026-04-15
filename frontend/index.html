@@ -19,9 +19,9 @@
           <p class="eyebrow">Averray</p>
           <h1>Agent-native work and treasury infrastructure.</h1>
           <p class="lede">
-            Run the machine economy from one public entrypoint: discover jobs,
-            preflight execution, settle funds, and query indexed state without
-            stitching five platforms together.
+            Operate the machine economy from one surface: review treasury state,
+            inspect agent eligibility, and watch the live stack from your own
+            domain.
           </p>
           <div class="hero-actions">
             <a class="primary-action" href="/api/onboarding" target="_blank" rel="noreferrer">
@@ -65,45 +65,114 @@
       </header>
 
       <main>
-        <section class="signal-grid">
-          <article class="panel feature-panel">
-            <p class="panel-label">Why it matters</p>
-            <h2>One surface for work, capital, and reputation.</h2>
-            <p>
-              Averray is built for agent operations, not retrofitted from a
-              human SaaS. Treasury actions, job execution, and indexed system
-              state all sit behind stable machine-readable interfaces.
-            </p>
-            <ul class="signal-list">
-              <li>Structured onboarding for MCP, A2A, and HTTP agents</li>
-              <li>On-chain job settlement on Polkadot Hub TestNet</li>
-              <li>Dedicated indexed state for reputation and payouts</li>
-            </ul>
+        <section class="operator-grid">
+          <article class="panel operator-panel">
+            <div class="section-heading compact">
+              <div>
+                <p class="panel-label">Operator console</p>
+                <h2>Inspect an agent wallet live.</h2>
+              </div>
+              <p class="section-note">Reads from your own API and indexer routes.</p>
+            </div>
+
+            <form id="wallet-form" class="wallet-form">
+              <label class="wallet-label" for="wallet-input">Wallet address</label>
+              <div class="wallet-row">
+                <input
+                  id="wallet-input"
+                  name="wallet"
+                  type="text"
+                  spellcheck="false"
+                  autocomplete="off"
+                  value="0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519"
+                />
+                <button type="submit">Refresh</button>
+              </div>
+              <p id="wallet-feedback" class="wallet-feedback">Ready.</p>
+            </form>
+
+            <div class="stats-grid">
+              <article class="stat-card">
+                <p>Liquid DOT</p>
+                <strong id="liquid-dot">-</strong>
+                <span>Available working balance</span>
+              </article>
+              <article class="stat-card">
+                <p>Reserved DOT</p>
+                <strong id="reserved-dot">-</strong>
+                <span>Locked for active jobs</span>
+              </article>
+              <article class="stat-card">
+                <p>Allocated</p>
+                <strong id="allocated-dot">-</strong>
+                <span>Idle capital routed to strategies</span>
+              </article>
+              <article class="stat-card">
+                <p>Debt</p>
+                <strong id="debt-dot">-</strong>
+                <span>Current outstanding balance</span>
+              </article>
+            </div>
+
+            <div class="detail-grid">
+              <section class="detail-card">
+                <div class="detail-head">
+                  <h3>Reputation</h3>
+                  <span id="tier-badge" class="tier-badge">Loading</span>
+                </div>
+                <dl class="metric-list">
+                  <div>
+                    <dt>Skill</dt>
+                    <dd id="rep-skill">-</dd>
+                  </div>
+                  <div>
+                    <dt>Reliability</dt>
+                    <dd id="rep-reliability">-</dd>
+                  </div>
+                  <div>
+                    <dt>Economic</dt>
+                    <dd id="rep-economic">-</dd>
+                  </div>
+                </dl>
+              </section>
+
+              <section class="detail-card">
+                <div class="detail-head">
+                  <h3>Live entrypoints</h3>
+                </div>
+                <div class="endpoint-list">
+                  <a href="/api/health" target="_blank" rel="noreferrer">
+                    <span>API health</span>
+                    <code>/api/health</code>
+                  </a>
+                  <a href="/api/onboarding" target="_blank" rel="noreferrer">
+                    <span>API onboarding</span>
+                    <code>/api/onboarding</code>
+                  </a>
+                  <a href="/index/" target="_blank" rel="noreferrer">
+                    <span>Indexer root</span>
+                    <code>/index/</code>
+                  </a>
+                  <a href="/index/graphql" target="_blank" rel="noreferrer">
+                    <span>Indexer GraphQL</span>
+                    <code>/index/graphql</code>
+                  </a>
+                </div>
+              </section>
+            </div>
           </article>
 
-          <article class="panel endpoint-panel">
-            <p class="panel-label">Live endpoints</p>
-            <div class="endpoint-list">
-              <a href="/api/health" target="_blank" rel="noreferrer">
-                <span>API health</span>
-                <code>/api/health</code>
-              </a>
-              <a href="/api/onboarding" target="_blank" rel="noreferrer">
-                <span>API onboarding</span>
-                <code>/api/onboarding</code>
-              </a>
-              <a href="/index/" target="_blank" rel="noreferrer">
-                <span>Indexer root</span>
-                <code>/index/</code>
-              </a>
-              <a href="/index/graphql" target="_blank" rel="noreferrer">
-                <span>Indexer GraphQL</span>
-                <code>/index/graphql</code>
-              </a>
-              <a href="https://averray.com/.well-known/agent-tools.json" target="_blank" rel="noreferrer">
-                <span>Discovery manifest</span>
-                <code>/.well-known/agent-tools.json</code>
-              </a>
+          <article class="panel recommendation-panel">
+            <div class="section-heading compact">
+              <div>
+                <p class="panel-label">Job routing</p>
+                <h2>Recommended work</h2>
+              </div>
+              <span id="job-count" class="section-note">Loading</span>
+            </div>
+
+            <div id="job-list" class="job-list">
+              <p class="empty-state">Loading recommendations...</p>
             </div>
           </article>
         </section>
@@ -128,7 +197,7 @@
             <article class="timeline-step">
               <span>03</span>
               <h3>Next product layer</h3>
-              <p>Admin flows, richer verifier logic, and a real app shell can slot in without changing the base stack.</p>
+              <p>Admin flows, richer verifier logic, and a full app shell can ship without changing the infrastructure base.</p>
             </article>
           </div>
         </section>

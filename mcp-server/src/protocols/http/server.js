@@ -18,7 +18,7 @@ const server = createServer(async (request, response) => {
       return respond(response, 200, {
         name: "agent-platform",
         status: "ok",
-        endpoints: ["/health", "/onboarding", "/account", "/jobs/recommendations", "/verifier/handlers"]
+        endpoints: ["/health", "/onboarding", "/account", "/reputation", "/jobs/recommendations", "/verifier/handlers"]
       });
     }
 
@@ -35,6 +35,10 @@ const server = createServer(async (request, response) => {
 
     if (request.method === "GET" && pathname === "/account") {
       return respond(response, 200, await service.getAccountSummary(url.searchParams.get("wallet") ?? "0xagent"));
+    }
+
+    if (request.method === "GET" && pathname === "/reputation") {
+      return respond(response, 200, await service.getReputation(url.searchParams.get("wallet") ?? "0xagent"));
     }
 
     if (request.method === "GET" && pathname === "/jobs/recommendations") {
