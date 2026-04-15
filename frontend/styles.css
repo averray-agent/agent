@@ -242,6 +242,8 @@ main {
   display: grid;
   gap: 1.25rem;
   align-content: start;
+  align-self: start;
+  height: fit-content;
 }
 
 .section-note {
@@ -427,8 +429,10 @@ main {
 
 .action-details dd {
   margin: 0;
-  font-size: 0.95rem;
+  font-size: 0.9rem;
   font-weight: 700;
+  line-height: 1.45;
+  word-break: break-word;
   overflow-wrap: anywhere;
 }
 
