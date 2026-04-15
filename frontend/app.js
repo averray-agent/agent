@@ -1,9 +1,18 @@
 const DEFAULT_WALLET = "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519";
 const UI_STATE_KEY = "averray:ui-state";
 
+const DEFAULT_POSTER_TERMS = {
+  benchmark: "complete\nverified\nsummary",
+  deterministic: "governance-approved-summary\nvote-yes rationale",
+  human_fallback: ""
+};
+
+const DEFAULT_ESCALATION_MESSAGE = "Escalate to a human reviewer if the submission is contested.";
+
 const state = {
   wallet: DEFAULT_WALLET,
   recommendations: [],
+  catalog: [],
   selectedJobId: "",
   selectedJob: undefined,
   session: undefined,
@@ -54,9 +63,15 @@ function readPersistedState() {
 }
 
 async function requestJson(path, init = {}) {
+  const headers = new Headers(init.headers ?? {});
+  headers.set("accept", "application/json");
+  if (init.body && !headers.has("content-type")) {
+    headers.set("content-type", "application/json");
+  }
+
   const response = await fetch(path, {
-    headers: { accept: "application/json" },
-    ...init
+    ...init,
+    headers
   });
 
   const text = await response.text();
@@ -73,8 +88,11 @@ async function readJson(path) {
   return requestJson(path);
 }
 
-async function postJson(path) {
-  return requestJson(path, { method: "POST" });
+async function postJson(path, body = undefined) {
+  return requestJson(path, {
+    method: "POST",
+    body: body === undefined ? undefined : JSON.stringify(body)
+  });
 }
 
 function buildEvidenceTemplate(job) {
@@ -89,6 +107,27 @@ function buildEvidenceTemplate(job) {
   }
 
   return `submission for ${job.id}`;
+}
+
+function describeVerifier(job) {
+  if (!job?.verifierConfig) return "Verifier config unavailable.";
+
+  if (job.verifierConfig.handler === "benchmark") {
+    return `Keywords: ${job.verifierConfig.requiredKeywords.join(", ")}. Need ${job.verifierConfig.minimumMatches} matches.`;
+  }
+
+  if (job.verifierConfig.handler === "deterministic") {
+    return `Expected outputs (${job.verifierConfig.matchMode}): ${job.verifierConfig.expectedOutputs.join(", ")}.`;
+  }
+
+  return job.verifierConfig.escalationMessage;
+}
+
+function parseTerms(value) {
+  return String(value ?? "")
+    .split("\n")
+    .map((term) => term.trim())
+    .filter(Boolean);
 }
 
 function renderRecommendations(recommendations) {
@@ -119,6 +158,41 @@ function renderRecommendations(recommendations) {
           </div>
           <button class="job-select-button" type="button" data-job-id="${job.jobId}">
             ${job.jobId === state.selectedJobId ? "Selected" : "Select job"}
+          </button>
+        </article>
+      `
+    )
+    .join("");
+}
+
+function renderCatalog(jobs) {
+  const root = document.getElementById("catalog-list");
+  if (!root) return;
+
+  if (!jobs.length) {
+    root.innerHTML = '<p class="empty-state">No jobs are live yet.</p>';
+    return;
+  }
+
+  root.innerHTML = jobs
+    .map(
+      (job) => `
+        <article class="catalog-card ${job.id === state.selectedJobId ? "job-selected" : ""}">
+          <div class="job-topline">
+            <h3>${job.id}</h3>
+            <span class="eligibility-pill ${job.requiresSponsoredGas ? "eligible-yes" : "eligible-no"}">
+              ${job.requiresSponsoredGas ? "Sponsored gas" : "Self-funded gas"}
+            </span>
+          </div>
+          <div class="catalog-meta">
+            <span>${job.category}</span>
+            <span>${job.tier}</span>
+            <span>${formatAmount(job.rewardAmount)} ${job.rewardAsset}</span>
+            <span>${job.verifierMode}</span>
+          </div>
+          <p>${describeVerifier(job)}</p>
+          <button class="job-select-button" type="button" data-catalog-job-id="${job.id}">
+            ${job.id === state.selectedJobId ? "Loaded in flow" : "Load in flow"}
           </button>
         </article>
       `
@@ -221,6 +295,8 @@ function updateSelectedJob(job) {
     evidenceInput.value = buildEvidenceTemplate(job);
   }
 
+  renderRecommendations(state.recommendations);
+  renderCatalog(state.catalog);
   persistUiState();
   refreshActionPanel();
 }
@@ -253,7 +329,6 @@ async function restoreSession(sessionId) {
 async function selectJob(jobId) {
   const job = await readJson(`/api/jobs/definition?jobId=${encodeURIComponent(jobId)}`);
   updateSelectedJob(job);
-  renderRecommendations(state.recommendations);
 
   const persisted = readPersistedState();
   const expectedSessionId = persisted.wallet === state.wallet && persisted.selectedJobId === job.id
@@ -303,10 +378,17 @@ async function loadWallet(wallet) {
 
   if (nextJobId) {
     await selectJob(nextJobId);
-  } else {
+  } else if (!state.selectedJobId) {
     updateSelectedJob(undefined);
     setText("action-feedback", "No action flow available until recommendations appear.");
   }
+}
+
+async function loadCatalog() {
+  const jobs = await readJson("/api/jobs");
+  state.catalog = jobs;
+  renderCatalog(jobs);
+  setText("catalog-count", `${jobs.length} jobs live`);
 }
 
 async function claimSelectedJob() {
@@ -370,6 +452,53 @@ async function refreshCurrentSession() {
   setText("action-feedback", `Refreshed session ${state.session.sessionId}.`);
 }
 
+function syncPosterDefaults(force = false) {
+  const verifierMode = document.getElementById("poster-verifier-mode")?.value ?? "benchmark";
+  const terms = document.getElementById("poster-verifier-terms");
+  const escalation = document.getElementById("poster-escalation");
+
+  if (terms && (force || !terms.value.trim())) {
+    terms.value = DEFAULT_POSTER_TERMS[verifierMode] ?? "";
+  }
+
+  if (escalation && (force || !escalation.value.trim())) {
+    escalation.value = DEFAULT_ESCALATION_MESSAGE;
+  }
+}
+
+async function createPosterJob() {
+  const form = document.getElementById("poster-form");
+  const formData = new FormData(form);
+  const category = String(formData.get("category") ?? "").trim().toLowerCase();
+  const verifierMode = String(formData.get("verifierMode") ?? "benchmark");
+  const outputSchemaRef = String(formData.get("outputSchemaRef") ?? "").trim() || `schema://jobs/${category}-output`;
+
+  const payload = {
+    id: String(formData.get("id") ?? "").trim(),
+    category,
+    tier: String(formData.get("tier") ?? "starter"),
+    rewardAmount: Number(formData.get("rewardAmount") ?? 0),
+    verifierMode,
+    outputSchemaRef,
+    inputSchemaRef: `schema://jobs/${category}-input`,
+    claimTtlSeconds: Number(formData.get("claimTtlSeconds") ?? 3600),
+    retryLimit: Number(formData.get("retryLimit") ?? 1),
+    requiresSponsoredGas: formData.get("requiresSponsoredGas") === "on",
+    verifierTerms: parseTerms(formData.get("verifierTerms")),
+    verifierMatchMode: String(formData.get("verifierMatchMode") ?? "contains_all"),
+    verifierMinimumMatches: Number(formData.get("verifierMinimumMatches") ?? 2),
+    escalationMessage: String(formData.get("escalationMessage") ?? "").trim() || DEFAULT_ESCALATION_MESSAGE,
+    autoApprove: formData.get("autoApprove") === "on"
+  };
+
+  setText("poster-feedback", `Creating ${payload.id || "job"}...`);
+  const job = await postJson("/api/admin/jobs", payload);
+  setText("poster-feedback", `Created ${job.id}. Refreshing catalog and operator view...`);
+  await Promise.all([loadCatalog(), loadWallet(state.wallet)]);
+  await selectJob(job.id);
+  setText("poster-feedback", `Created ${job.id} and loaded it into the execution flow.`);
+}
+
 async function boot() {
   const walletInput = document.getElementById("wallet-input");
   const walletForm = document.getElementById("wallet-form");
@@ -378,9 +507,14 @@ async function boot() {
   const submitButton = document.getElementById("submit-button");
   const verifyButton = document.getElementById("verify-button");
   const refreshButton = document.getElementById("refresh-session-button");
+  const posterForm = document.getElementById("poster-form");
+  const refreshCatalogButton = document.getElementById("refresh-catalog-button");
+  const catalogList = document.getElementById("catalog-list");
+  const verifierModeSelect = document.getElementById("poster-verifier-mode");
   const initialWallet = localStorage.getItem("averray:last-wallet") || DEFAULT_WALLET;
 
   if (walletInput) walletInput.value = initialWallet;
+  syncPosterDefaults(true);
 
   try {
     const [health, onboarding, index] = await Promise.all([
@@ -404,11 +538,12 @@ async function boot() {
   }
 
   try {
-    await loadWallet(initialWallet);
+    await Promise.all([loadWallet(initialWallet), loadCatalog()]);
   } catch (error) {
     console.error(error);
     setText("wallet-feedback", error.message ?? "Failed to load wallet data.");
     renderRecommendations([]);
+    setText("poster-feedback", error.message ?? "Failed to load poster workspace.");
   }
 
   walletForm?.addEventListener("submit", async (event) => {
@@ -436,6 +571,19 @@ async function boot() {
     } catch (error) {
       console.error(error);
       setText("action-feedback", error.message ?? "Failed to load job definition.");
+    }
+  });
+
+  catalogList?.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-catalog-job-id]");
+    if (!button) return;
+
+    try {
+      await selectJob(button.dataset.catalogJobId);
+      setText("poster-feedback", `Loaded ${button.dataset.catalogJobId} into the execution flow.`);
+    } catch (error) {
+      console.error(error);
+      setText("poster-feedback", error.message ?? "Failed to load catalog job.");
     }
   });
 
@@ -473,6 +621,31 @@ async function boot() {
       console.error(error);
       setText("action-feedback", error.message ?? "Refresh failed.");
     }
+  });
+
+  posterForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      await createPosterJob();
+    } catch (error) {
+      console.error(error);
+      setText("poster-feedback", error.message ?? "Create job failed.");
+    }
+  });
+
+  refreshCatalogButton?.addEventListener("click", async () => {
+    try {
+      setText("poster-feedback", "Refreshing live catalog...");
+      await loadCatalog();
+      setText("poster-feedback", "Catalog refreshed.");
+    } catch (error) {
+      console.error(error);
+      setText("poster-feedback", error.message ?? "Catalog refresh failed.");
+    }
+  });
+
+  verifierModeSelect?.addEventListener("change", () => {
+    syncPosterDefaults(true);
   });
 
   refreshActionPanel();

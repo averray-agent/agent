@@ -9,6 +9,25 @@ function respond(response, statusCode, payload) {
   response.end(JSON.stringify(payload, null, 2));
 }
 
+async function readJsonBody(request) {
+  let body = "";
+  for await (const chunk of request) {
+    body += chunk;
+  }
+
+  if (!body.trim()) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(body);
+  } catch {
+    const error = new Error("Invalid JSON body.");
+    error.name = "ValidationError";
+    throw error;
+  }
+}
+
 const server = createServer(async (request, response) => {
   const url = new URL(request.url ?? "/", "http://localhost");
   const pathname = url.pathname.replace(/\/+$/, "") || "/";
@@ -18,7 +37,17 @@ const server = createServer(async (request, response) => {
       return respond(response, 200, {
         name: "agent-platform",
         status: "ok",
-        endpoints: ["/health", "/onboarding", "/account", "/reputation", "/session", "/jobs/recommendations", "/verifier/handlers"]
+        endpoints: [
+          "/health",
+          "/onboarding",
+          "/account",
+          "/reputation",
+          "/session",
+          "/jobs",
+          "/jobs/recommendations",
+          "/verifier/handlers",
+          "/admin/jobs"
+        ]
       });
     }
 
@@ -57,8 +86,17 @@ const server = createServer(async (request, response) => {
       return respond(response, 200, await service.recommendJobs(url.searchParams.get("wallet") ?? "0xagent"));
     }
 
+    if (request.method === "GET" && pathname === "/jobs") {
+      return respond(response, 200, service.listJobs());
+    }
+
     if (request.method === "GET" && pathname === "/jobs/definition") {
       return respond(response, 200, service.getJobDefinition(url.searchParams.get("jobId") ?? ""));
+    }
+
+    if (request.method === "POST" && pathname === "/admin/jobs") {
+      const payload = await readJsonBody(request);
+      return respond(response, 201, service.createJob(payload));
     }
 
     if (request.method === "POST" && pathname === "/jobs/claim") {
@@ -92,6 +130,9 @@ const server = createServer(async (request, response) => {
 
     return respond(response, 404, { error: "not_found" });
   } catch (error) {
+    if (error.name === "ValidationError") {
+      return respond(response, 400, { error: error.message ?? "invalid_request" });
+    }
     return respond(response, 500, { error: error.message ?? "internal_error" });
   }
 });

@@ -69,6 +69,25 @@ export interface JobDefinition {
   verifierConfig: JobVerifierConfig;
 }
 
+export interface CreateJobInput {
+  id: string;
+  category: string;
+  tier: "starter" | "pro" | "elite";
+  rewardAmount: number;
+  rewardAsset?: string;
+  verifierMode: VerifierMode;
+  inputSchemaRef?: string;
+  outputSchemaRef?: string;
+  claimTtlSeconds?: number;
+  retryLimit?: number;
+  requiresSponsoredGas?: boolean;
+  verifierTerms?: string[];
+  verifierMatchMode?: "exact" | "contains_all";
+  verifierMinimumMatches?: number;
+  escalationMessage?: string;
+  autoApprove?: boolean;
+}
+
 export interface Recommendation {
   jobId: string;
   fitScore: number;

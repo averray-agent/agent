@@ -17,6 +17,15 @@ const DEFAULT_AGENT_PROFILE = {
   autoUnwindStrategies: false
 };
 
+const VALID_TIERS = new Set(["starter", "pro", "elite"]);
+const VALID_VERIFIER_MODES = new Set(["benchmark", "deterministic", "human_fallback"]);
+
+function createValidationError(message) {
+  const error = new Error(message);
+  error.name = "ValidationError";
+  return error;
+}
+
 export class PlatformService {
   constructor(jobs, profiles, accounts, reputations, blockchainGateway = undefined, stateStore = createStateStore()) {
     this.jobs = jobs;
@@ -43,8 +52,10 @@ export class PlatformService {
       tools: [
         "getPlatformCapabilities",
         "getAccountSummary",
+        "listJobs",
         "recommendJobs",
         "getJobDefinition",
+        "createJob",
         "preflightJob",
         "explainEligibility",
         "estimateNetReward",
@@ -61,6 +72,20 @@ export class PlatformService {
         "getVerificationResult"
       ]
     };
+  }
+
+  listJobs() {
+    return [...this.jobs];
+  }
+
+  createJob(input) {
+    const job = this.normalizeJobInput(input);
+    if (this.jobs.some((candidate) => candidate.id === job.id)) {
+      throw createValidationError(`Job already exists: ${job.id}`);
+    }
+
+    this.jobs.unshift(job);
+    return job;
   }
 
   async getAccountSummary(wallet) {
@@ -352,5 +377,103 @@ export class PlatformService {
       throw new Error(`Unknown session: ${sessionId}`);
     }
     return session;
+  }
+
+  normalizeJobInput(input) {
+    const id = this.normalizeId(input?.id);
+    const category = String(input?.category ?? "").trim().toLowerCase();
+    const tier = String(input?.tier ?? "").trim().toLowerCase();
+    const verifierMode = String(input?.verifierMode ?? "").trim().toLowerCase();
+    const rewardAmount = Number(input?.rewardAmount ?? 0);
+    const claimTtlSeconds = Number(input?.claimTtlSeconds ?? 3600);
+    const retryLimit = Number(input?.retryLimit ?? 1);
+    const rewardAsset = String(input?.rewardAsset ?? "DOT").trim().toUpperCase();
+
+    if (!id) {
+      throw createValidationError("Job id is required.");
+    }
+    if (!category) {
+      throw createValidationError("Category is required.");
+    }
+    if (!VALID_TIERS.has(tier)) {
+      throw createValidationError(`Invalid tier: ${tier}`);
+    }
+    if (!VALID_VERIFIER_MODES.has(verifierMode)) {
+      throw createValidationError(`Invalid verifier mode: ${verifierMode}`);
+    }
+    if (!Number.isFinite(rewardAmount) || rewardAmount <= 0) {
+      throw createValidationError("Reward amount must be greater than zero.");
+    }
+    if (!Number.isInteger(claimTtlSeconds) || claimTtlSeconds < 60) {
+      throw createValidationError("Claim TTL must be at least 60 seconds.");
+    }
+    if (!Number.isInteger(retryLimit) || retryLimit < 0) {
+      throw createValidationError("Retry limit must be zero or higher.");
+    }
+
+    return {
+      id,
+      category,
+      tier,
+      rewardAsset,
+      rewardAmount,
+      verifierMode,
+      verifierConfig: this.buildVerifierConfig(verifierMode, input),
+      inputSchemaRef: String(input?.inputSchemaRef ?? `schema://jobs/${category}-input`).trim(),
+      outputSchemaRef: String(input?.outputSchemaRef ?? `schema://jobs/${category}-output`).trim(),
+      claimTtlSeconds,
+      retryLimit,
+      requiresSponsoredGas: Boolean(input?.requiresSponsoredGas)
+    };
+  }
+
+  buildVerifierConfig(verifierMode, input) {
+    const verifierTerms = Array.isArray(input?.verifierTerms)
+      ? input.verifierTerms.map((value) => String(value).trim()).filter(Boolean)
+      : [];
+
+    if (verifierMode === "benchmark") {
+      const minimumMatches = Number(input?.verifierMinimumMatches ?? Math.min(verifierTerms.length || 1, 2));
+      if (!verifierTerms.length) {
+        throw createValidationError("Benchmark jobs need at least one verifier keyword.");
+      }
+      if (!Number.isInteger(minimumMatches) || minimumMatches < 1) {
+        throw createValidationError("Benchmark minimum matches must be at least 1.");
+      }
+      return {
+        handler: "benchmark",
+        requiredKeywords: verifierTerms,
+        minimumMatches: Math.min(minimumMatches, verifierTerms.length)
+      };
+    }
+
+    if (verifierMode === "deterministic") {
+      const matchMode = String(input?.verifierMatchMode ?? "contains_all").trim();
+      if (!verifierTerms.length) {
+        throw createValidationError("Deterministic jobs need at least one expected output.");
+      }
+      if (!["exact", "contains_all"].includes(matchMode)) {
+        throw createValidationError(`Invalid deterministic match mode: ${matchMode}`);
+      }
+      return {
+        handler: "deterministic",
+        expectedOutputs: verifierTerms,
+        matchMode
+      };
+    }
+
+    return {
+      handler: "human_fallback",
+      escalationMessage: String(input?.escalationMessage ?? "Escalate to human reviewer.").trim(),
+      autoApprove: Boolean(input?.autoApprove)
+    };
+  }
+
+  normalizeId(value) {
+    return String(value ?? "")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9-]+/g, "-")
+      .replace(/^-+|-+$/g, "");
   }
 }

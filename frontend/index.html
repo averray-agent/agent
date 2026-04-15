@@ -243,6 +243,128 @@
           </article>
         </section>
 
+        <section class="poster-grid">
+          <article class="panel poster-panel">
+            <div class="section-heading compact">
+              <div>
+                <p class="panel-label">Poster flow</p>
+                <h2>Create a live job from the app.</h2>
+              </div>
+              <p class="section-note">New jobs land in the same runtime the claim flow uses.</p>
+            </div>
+
+            <form id="poster-form" class="poster-form">
+              <div class="form-grid">
+                <label>
+                  <span>Job id</span>
+                  <input id="poster-job-id" name="id" type="text" value="starter-review-002" required />
+                </label>
+                <label>
+                  <span>Category</span>
+                  <input id="poster-category" name="category" type="text" value="coding" required />
+                </label>
+                <label>
+                  <span>Tier</span>
+                  <select name="tier" id="poster-tier">
+                    <option value="starter" selected>starter</option>
+                    <option value="pro">pro</option>
+                    <option value="elite">elite</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Reward (DOT)</span>
+                  <input name="rewardAmount" type="number" min="1" step="0.5" value="6" required />
+                </label>
+                <label>
+                  <span>Verifier mode</span>
+                  <select name="verifierMode" id="poster-verifier-mode">
+                    <option value="benchmark" selected>benchmark</option>
+                    <option value="deterministic">deterministic</option>
+                    <option value="human_fallback">human fallback</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Output schema</span>
+                  <input name="outputSchemaRef" type="text" value="schema://jobs/coding-review-output" />
+                </label>
+                <label>
+                  <span>Claim TTL (sec)</span>
+                  <input name="claimTtlSeconds" type="number" min="60" step="60" value="3600" />
+                </label>
+                <label>
+                  <span>Retry limit</span>
+                  <input name="retryLimit" type="number" min="0" step="1" value="1" />
+                </label>
+                <label>
+                  <span>Deterministic match mode</span>
+                  <select name="verifierMatchMode">
+                    <option value="contains_all" selected>contains_all</option>
+                    <option value="exact">exact</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Benchmark minimum matches</span>
+                  <input name="verifierMinimumMatches" type="number" min="1" step="1" value="2" />
+                </label>
+              </div>
+
+              <label class="poster-full-span">
+                <span>Verifier rules</span>
+                <textarea
+                  id="poster-verifier-terms"
+                  name="verifierTerms"
+                  rows="5"
+                  placeholder="One rule per line. For benchmark: keywords. For deterministic: expected outputs."
+                >complete
+verified
+summary</textarea>
+              </label>
+
+              <label class="poster-full-span">
+                <span>Escalation message</span>
+                <textarea
+                  id="poster-escalation"
+                  name="escalationMessage"
+                  rows="3"
+                  placeholder="Only used for human fallback verifier mode."
+                >Escalate to a human reviewer if the submission is contested.</textarea>
+              </label>
+
+              <div class="poster-toggle-row">
+                <label class="toggle-chip">
+                  <input type="checkbox" name="requiresSponsoredGas" checked />
+                  <span>Sponsored gas</span>
+                </label>
+                <label class="toggle-chip">
+                  <input type="checkbox" name="autoApprove" />
+                  <span>Auto-approve human fallback</span>
+                </label>
+              </div>
+
+              <div class="action-row">
+                <button type="submit">Create job</button>
+                <button id="refresh-catalog-button" type="button">Refresh catalog</button>
+              </div>
+
+              <p id="poster-feedback" class="wallet-feedback">Seed a new job template and publish it into the live runtime.</p>
+            </form>
+          </article>
+
+          <article class="panel catalog-panel">
+            <div class="section-heading compact">
+              <div>
+                <p class="panel-label">Catalog</p>
+                <h2>Live job inventory</h2>
+              </div>
+              <span id="catalog-count" class="section-note">Loading</span>
+            </div>
+
+            <div id="catalog-list" class="catalog-list">
+              <p class="empty-state">Loading job inventory...</p>
+            </div>
+          </article>
+        </section>
+
         <section class="roadmap">
           <div class="section-heading">
             <p class="panel-label">Roadmap-ready</p>
