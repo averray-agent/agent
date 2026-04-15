@@ -6,6 +6,7 @@ import {
   applyVerificationState,
   refreshActionPanel,
   renderCatalog,
+  renderHistory,
   renderRecommendations,
   setActionFeedback,
   setPosterFeedback,
@@ -49,6 +50,14 @@ async function restoreSession(sessionId) {
   }
 
   refreshActionPanel();
+  renderHistory(state.history);
+}
+
+async function loadHistoryForCurrentWallet() {
+  const history = await readJson(`/api/sessions?wallet=${encodeURIComponent(state.wallet)}&limit=8`);
+  state.history = history;
+  renderHistory(history);
+  setText("history-count", `${history.length} recent sessions`);
 }
 
 async function selectJob(jobId) {
@@ -80,18 +89,22 @@ async function loadWallet(wallet) {
   state.wallet = wallet;
   setWalletFeedback("Refreshing live operator view...", "loading");
 
-  const [account, reputation, recommendations] = await Promise.all([
+  const [account, reputation, recommendations, history] = await Promise.all([
     readJson(`/api/account?wallet=${encodeURIComponent(wallet)}`),
     readJson(`/api/reputation?wallet=${encodeURIComponent(wallet)}`),
-    readJson(`/api/jobs/recommendations?wallet=${encodeURIComponent(wallet)}`)
+    readJson(`/api/jobs/recommendations?wallet=${encodeURIComponent(wallet)}`),
+    readJson(`/api/sessions?wallet=${encodeURIComponent(wallet)}&limit=8`)
   ]);
 
   state.recommendations = recommendations;
+  state.history = history;
 
   updateAccount(account);
   updateReputation(reputation);
   renderRecommendations(recommendations);
+  renderHistory(history);
   setText("job-count", `${recommendations.length} recommendations`);
+  setText("history-count", `${history.length} recent sessions`);
   setWalletFeedback(`Loaded live data for ${wallet}.`, "success");
   localStorage.setItem("averray:last-wallet", wallet);
 
@@ -130,6 +143,7 @@ async function claimSelectedJob() {
   setActionFeedback(`Claimed ${state.selectedJobId}. Session ${session.sessionId} is ready for submission.`, "success");
   showToast(`Claimed ${state.selectedJobId}.`, "success");
   refreshActionPanel();
+  await loadHistoryForCurrentWallet();
 }
 
 async function submitSelectedWork() {
@@ -147,6 +161,7 @@ async function submitSelectedWork() {
   setActionFeedback("Submission stored. Run the verifier to settle the result.", "success");
   showToast("Submission stored.", "success");
   refreshActionPanel();
+  await loadHistoryForCurrentWallet();
 }
 
 async function verifySelectedWork() {
@@ -173,6 +188,7 @@ async function verifySelectedWork() {
     result.outcome === "approved" ? "success" : "neutral"
   );
   refreshActionPanel();
+  await loadHistoryForCurrentWallet();
 }
 
 async function refreshCurrentSession() {
@@ -282,6 +298,28 @@ function wireCatalogSelection(catalogList) {
   });
 }
 
+function wireHistorySelection(historyList) {
+  historyList?.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-session-id]");
+    if (!button) return;
+
+    try {
+      const sessionId = button.dataset.sessionId;
+      const matchingHistory = state.history.find((entry) => entry.sessionId === sessionId);
+      if (matchingHistory) {
+        const job = await readJson(`/api/jobs/definition?jobId=${encodeURIComponent(matchingHistory.jobId)}`);
+        updateSelectedJob(job);
+      }
+      await restoreSession(sessionId);
+      setActionFeedback(`Loaded session ${sessionId}.`, "success");
+    } catch (error) {
+      console.error(error);
+      setActionFeedback(error.message ?? "Failed to load session history.", "error");
+      showToast(error.message ?? "Failed to load session history.", "error");
+    }
+  });
+}
+
 function wireActionButtons({ claimButton, submitButton, verifyButton, refreshButton }) {
   claimButton?.addEventListener("click", async () => {
     try {
@@ -386,6 +424,7 @@ async function boot() {
   const posterForm = document.getElementById("poster-form");
   const refreshCatalogButton = document.getElementById("refresh-catalog-button");
   const catalogList = document.getElementById("catalog-list");
+  const historyList = document.getElementById("history-list");
   const verifierModeSelect = document.getElementById("poster-verifier-mode");
   const initialWallet = localStorage.getItem("averray:last-wallet") || DEFAULT_WALLET;
 
@@ -407,6 +446,7 @@ async function boot() {
   wireWalletForm(walletForm, walletInput);
   wireJobSelection(jobList);
   wireCatalogSelection(catalogList);
+  wireHistorySelection(historyList);
   wireActionButtons({ claimButton, submitButton, verifyButton, refreshButton });
   wirePosterControls({ posterForm, refreshCatalogButton, verifierModeSelect });
   refreshActionPanel();

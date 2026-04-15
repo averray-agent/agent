@@ -4,6 +4,7 @@ export const state = {
   wallet: DEFAULT_WALLET,
   recommendations: [],
   catalog: [],
+  history: [],
   selectedJobId: "",
   selectedJob: undefined,
   session: undefined,

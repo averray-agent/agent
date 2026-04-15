@@ -6,6 +6,7 @@ export class MemoryStateStore {
     this.sessions = new Map();
     this.idempotency = new Map();
     this.jobSessions = new Map();
+    this.walletSessions = new Map();
     this.verificationResults = new Map();
     this.claimLocks = new Map();
   }
@@ -15,10 +16,22 @@ export class MemoryStateStore {
   }
 
   async upsertSession(session) {
-    this.sessions.set(session.sessionId, session);
-    this.idempotency.set(session.idempotencyKey, session.sessionId);
-    this.jobSessions.set(session.jobId, session.sessionId);
-    return session;
+    const persistedSession = {
+      ...session,
+      updatedAt: new Date().toISOString()
+    };
+
+    this.sessions.set(persistedSession.sessionId, persistedSession);
+    this.idempotency.set(persistedSession.idempotencyKey, persistedSession.sessionId);
+    this.jobSessions.set(persistedSession.jobId, persistedSession.sessionId);
+
+    const existing = this.walletSessions.get(persistedSession.wallet) ?? [];
+    this.walletSessions.set(
+      persistedSession.wallet,
+      [persistedSession.sessionId, ...existing.filter((sessionId) => sessionId !== persistedSession.sessionId)]
+    );
+
+    return persistedSession;
   }
 
   async findSessionByIdempotencyKey(idempotencyKey) {
@@ -38,6 +51,11 @@ export class MemoryStateStore {
   async upsertVerificationResult(sessionId, result) {
     this.verificationResults.set(sessionId, result);
     return result;
+  }
+
+  async listSessionsByWallet(wallet, limit = 10) {
+    const sessionIds = (this.walletSessions.get(wallet) ?? []).slice(0, limit);
+    return sessionIds.map((sessionId) => this.sessions.get(sessionId)).filter(Boolean);
   }
 
   async acquireClaimLock(lockId, owner, ttlSeconds = 30) {
@@ -86,10 +104,18 @@ export class RedisStateStore {
 
   async upsertSession(session) {
     await this.connect();
-    await this.client.set(this.key("session", session.sessionId), JSON.stringify(session));
-    await this.client.set(this.key("idempotency", session.idempotencyKey), session.sessionId);
-    await this.client.set(this.key("job", session.jobId), session.sessionId);
-    return session;
+    const persistedSession = {
+      ...session,
+      updatedAt: new Date().toISOString()
+    };
+    await this.client.set(this.key("session", persistedSession.sessionId), JSON.stringify(persistedSession));
+    await this.client.set(this.key("idempotency", persistedSession.idempotencyKey), persistedSession.sessionId);
+    await this.client.set(this.key("job", persistedSession.jobId), persistedSession.sessionId);
+    await this.client.zAdd(this.key("wallet-sessions", persistedSession.wallet), {
+      score: Date.now(),
+      value: persistedSession.sessionId
+    });
+    return persistedSession;
   }
 
   async findSessionByIdempotencyKey(idempotencyKey) {
@@ -114,6 +140,15 @@ export class RedisStateStore {
     await this.connect();
     await this.client.set(this.key("verification", sessionId), JSON.stringify(result));
     return result;
+  }
+
+  async listSessionsByWallet(wallet, limit = 10) {
+    await this.connect();
+    const sessionIds = await this.client.zRange(this.key("wallet-sessions", wallet), 0, Math.max(limit - 1, 0), {
+      REV: true
+    });
+    const sessions = await Promise.all(sessionIds.map((sessionId) => this.getSession(sessionId)));
+    return sessions.filter(Boolean);
   }
 
   async acquireClaimLock(lockId, owner, ttlSeconds = 30) {

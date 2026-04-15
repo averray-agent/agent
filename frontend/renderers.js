@@ -72,6 +72,40 @@ export function renderCatalog(jobs) {
     .join("");
 }
 
+export function renderHistory(entries) {
+  const root = document.getElementById("history-list");
+  if (!root) return;
+
+  if (!entries.length) {
+    root.innerHTML = '<p class="empty-state">No sessions recorded for this wallet yet.</p>';
+    return;
+  }
+
+  root.innerHTML = entries
+    .map(
+      (entry) => `
+        <article class="history-card ${entry.sessionId === state.session?.sessionId ? "job-selected" : ""}">
+          <div class="job-topline">
+            <p class="job-id">${entry.jobId}</p>
+            <span class="eligibility-pill ${entry.status === "resolved" ? "eligible-yes" : "eligible-no"}">
+              ${entry.status}
+            </span>
+          </div>
+          <div class="catalog-meta">
+            <span>${entry.protocolHistory?.join(" / ") ?? "-"}</span>
+            <span>${entry.verification?.outcome ?? "pending"}</span>
+            <span>${entry.updatedAt ? new Date(entry.updatedAt).toLocaleString("en-CH", { dateStyle: "short", timeStyle: "short" }) : "-"}</span>
+          </div>
+          <p>${entry.sessionId}</p>
+          <button class="job-select-button" type="button" data-session-id="${entry.sessionId}">
+            ${entry.sessionId === state.session?.sessionId ? "Current session" : "Load session"}
+          </button>
+        </article>
+      `
+    )
+    .join("");
+}
+
 export function updateReputation(reputation) {
   setText("rep-skill", formatAmount(reputation.skill));
   setText("rep-reliability", formatAmount(reputation.reliability));

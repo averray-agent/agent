@@ -410,6 +410,33 @@ main {
   margin-top: 1rem;
 }
 
+.history-shell {
+  display: grid;
+  gap: 1rem;
+  padding-top: 1.15rem;
+  border-top: 1px solid var(--line);
+}
+
+.history-list {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.history-card {
+  display: grid;
+  gap: 0.8rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.54);
+}
+
+.history-card p {
+  margin: 0;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
 .endpoint-list a {
   display: flex;
   align-items: center;

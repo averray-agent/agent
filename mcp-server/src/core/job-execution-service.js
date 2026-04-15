@@ -91,6 +91,16 @@ export class JobExecutionService {
     return this.requireSession(sessionId);
   }
 
+  async listSessionHistory(wallet, limit = 10) {
+    const sessions = await this.stateStore.listSessionsByWallet?.(wallet, limit) ?? [];
+    return Promise.all(
+      sessions.map(async (session) => ({
+        ...session,
+        verification: await this.stateStore.getVerificationResult(session.sessionId) ?? undefined
+      }))
+    );
+  }
+
   async requireSession(sessionId) {
     const session = await this.stateStore.getSession(sessionId);
     if (!session) {

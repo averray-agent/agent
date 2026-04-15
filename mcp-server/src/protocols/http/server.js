@@ -44,6 +44,7 @@ const server = createServer(async (request, response) => {
           "/account",
           "/reputation",
           "/session",
+          "/sessions",
           "/jobs",
           "/jobs/recommendations",
           "/verifier/handlers",
@@ -90,6 +91,12 @@ const server = createServer(async (request, response) => {
         }
         throw normalized;
       }
+    }
+
+    if (request.method === "GET" && pathname === "/sessions") {
+      const wallet = url.searchParams.get("wallet") ?? "0xagent";
+      const limit = Number(url.searchParams.get("limit") ?? 8);
+      return respond(response, 200, await service.listSessionHistory(wallet, Number.isFinite(limit) ? limit : 8));
     }
 
     if (request.method === "GET" && pathname === "/jobs/recommendations") {
