@@ -92,6 +92,26 @@
               <p id="wallet-feedback" class="wallet-feedback">Ready.</p>
             </form>
 
+            <section class="funding-shell">
+              <div class="funding-head">
+                <div>
+                  <p class="panel-label">Funding</p>
+                  <h3>Mint and deposit Mock DOT</h3>
+                </div>
+                <span class="section-note">Native faucet DOT does not count toward claim stake.</span>
+              </div>
+              <div class="funding-row">
+                <label class="wallet-label" for="fund-amount-input">Top-up amount</label>
+                <div class="wallet-row">
+                  <input id="fund-amount-input" type="number" min="0.01" step="0.01" value="1" />
+                  <button id="fund-account-button" type="button">Fund Mock DOT</button>
+                </div>
+              </div>
+              <p id="funding-feedback" class="wallet-feedback">
+                Mints Mock DOT to the configured signer wallet and deposits it into AgentAccountCore.
+              </p>
+            </section>
+
             <div class="stats-grid">
               <article class="stat-card">
                 <p>Liquid DOT</p>

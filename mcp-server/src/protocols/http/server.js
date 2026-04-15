@@ -79,6 +79,7 @@ const server = createServer(async (request, response) => {
           "/onboarding",
           "/events",
           "/account",
+          "/account/fund",
           "/reputation",
           "/session",
           "/sessions",
@@ -160,6 +161,13 @@ const server = createServer(async (request, response) => {
 
     if (request.method === "GET" && pathname === "/account") {
       return respond(response, 200, await service.getAccountSummary(requireWallet(url)));
+    }
+
+    if (request.method === "POST" && pathname === "/account/fund") {
+      const wallet = requireWallet(url);
+      const asset = url.searchParams.get("asset")?.trim() || "DOT";
+      const amount = Number(url.searchParams.get("amount") ?? "0");
+      return respond(response, 200, await service.fundAccount(wallet, asset, amount));
     }
 
     if (request.method === "GET" && pathname === "/reputation") {

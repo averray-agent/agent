@@ -3,6 +3,7 @@ import { AccountMutationService } from "./account-mutation-service.js";
 import { JobCatalogService } from "./job-catalog-service.js";
 import { JobExecutionService } from "./job-execution-service.js";
 import { VerificationIngestionService } from "../services/verification-ingestion-service.js";
+import { ValidationError } from "./errors.js";
 
 const STARTER_REPUTATION = {
   skill: 0,
@@ -60,6 +61,7 @@ export class PlatformService {
       tools: [
         "getPlatformCapabilities",
         "getAccountSummary",
+        "fundAccount",
         "listJobs",
         "recommendJobs",
         "getJobDefinition",
@@ -139,6 +141,22 @@ export class PlatformService {
       jobStakeLocked: {},
       debtOutstanding: {}
     };
+  }
+
+  async fundAccount(wallet, asset, amount) {
+    if (this.blockchainGateway?.isEnabled()) {
+      return this.blockchainGateway.fundAccount(wallet, asset, amount);
+    }
+
+    const numericAmount = Number(amount);
+    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+      throw new ValidationError("Funding amount must be greater than zero.");
+    }
+
+    const account = await this.getAccountSummary(wallet);
+    account.liquid[asset] = (account.liquid[asset] ?? 0) + numericAmount;
+    this.accounts.set(wallet, account);
+    return account;
   }
 
   async getDefaultClaimStakeBps() {

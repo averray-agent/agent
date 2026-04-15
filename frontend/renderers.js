@@ -407,6 +407,10 @@ export function setWalletFeedback(message, tone = "neutral") {
   setFeedback("wallet-feedback", message, tone);
 }
 
+export function setFundingFeedback(message, tone = "neutral") {
+  setFeedback("funding-feedback", message, tone);
+}
+
 export function setPosterFeedback(message, tone = "neutral") {
   setFeedback("poster-feedback", message, tone);
 }

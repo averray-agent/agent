@@ -111,6 +111,33 @@ export class BlockchainGateway {
     return this.withGatewayError("getDefaultClaimStakeBps", async () => Number(await this.policyContract.defaultClaimStakeBps()));
   }
 
+  async fundAccount(wallet, assetSymbol, amount) {
+    return this.withGatewayError("fundAccount", async () => {
+      this.requireSigner("fundAccount");
+      const asset = this.requireAsset(assetSymbol);
+      const parsedAmount = Number(amount);
+      if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+        throw new ValidationError("Funding amount must be greater than zero.");
+      }
+
+      const signerAddress = await this.signer.getAddress();
+      if (wallet.toLowerCase() !== signerAddress.toLowerCase()) {
+        throw new ValidationError(
+          `Funding is only supported for the configured signer wallet ${signerAddress}.`
+        );
+      }
+
+      const token = new Contract(asset.address, ERC20_MOCK_ABI, this.signer);
+      const mintTx = await token.mint(signerAddress, parsedAmount);
+      await mintTx.wait();
+      const approveTx = await token.approve(this.config.agentAccountAddress, parsedAmount);
+      await approveTx.wait();
+      const depositTx = await this.accountContract.deposit(asset.address, parsedAmount);
+      await depositTx.wait();
+      return this.getAccountSummary(wallet);
+    });
+  }
+
   async ensureClaimStakeLiquidity(assetSymbol, amount) {
     return this.withGatewayError("ensureClaimStakeLiquidity", async () => {
       if (amount <= 0) {

@@ -12,6 +12,7 @@ import {
   renderHistory,
   renderRecommendations,
   setActionFeedback,
+  setFundingFeedback,
   setPosterFeedback,
   setWalletFeedback,
   updateAccount,
@@ -236,6 +237,21 @@ async function loadWallet(wallet) {
   }
 
   restartEventSubscription();
+}
+
+async function fundCurrentWallet() {
+  const amountInput = document.getElementById("fund-amount-input");
+  const amount = Number(amountInput?.value ?? "0");
+  setFundingFeedback(`Funding ${state.wallet} with ${amount} Mock DOT...`, "loading");
+
+  const account = await postJson(
+    `/api/account/fund?wallet=${encodeURIComponent(state.wallet)}&asset=DOT&amount=${encodeURIComponent(amount)}`
+  );
+
+  updateAccount(account);
+  setFundingFeedback(`Minted and deposited ${amount} Mock DOT into AgentAccountCore.`, "success");
+  showToast(`Funded ${amount} Mock DOT.`, "success");
+  await refreshWalletPanels();
 }
 
 async function loadCatalog() {
@@ -481,7 +497,7 @@ function wireCatalogActivitySelection() {
   });
 }
 
-function wireActionButtons({ claimButton, submitButton, verifyButton, refreshButton }) {
+function wireActionButtons({ claimButton, submitButton, verifyButton, refreshButton, fundButton }) {
   claimButton?.addEventListener("click", async () => {
     try {
       await runWithBusyButton(claimButton, "Claiming...", claimSelectedJob);
@@ -519,6 +535,16 @@ function wireActionButtons({ claimButton, submitButton, verifyButton, refreshBut
       console.error(error);
       setActionFeedback(error.message ?? "Refresh failed.", "error");
       showToast(error.message ?? "Refresh failed.", "error");
+    }
+  });
+
+  fundButton?.addEventListener("click", async () => {
+    try {
+      await runWithBusyButton(fundButton, "Funding...", fundCurrentWallet);
+    } catch (error) {
+      console.error(error);
+      setFundingFeedback(error.message ?? "Funding failed.", "error");
+      showToast(error.message ?? "Funding failed.", "error");
     }
   });
 }
@@ -582,6 +608,7 @@ async function boot() {
   const submitButton = document.getElementById("submit-button");
   const verifyButton = document.getElementById("verify-button");
   const refreshButton = document.getElementById("refresh-session-button");
+  const fundButton = document.getElementById("fund-account-button");
   const posterForm = document.getElementById("poster-form");
   const refreshCatalogButton = document.getElementById("refresh-catalog-button");
   const catalogList = document.getElementById("catalog-list");
@@ -610,7 +637,7 @@ async function boot() {
   wireHistorySelection(historyList);
   wireJobRunSelection();
   wireCatalogActivitySelection();
-  wireActionButtons({ claimButton, submitButton, verifyButton, refreshButton });
+  wireActionButtons({ claimButton, submitButton, verifyButton, refreshButton, fundButton });
   wirePosterControls({ posterForm, refreshCatalogButton, verifierModeSelect });
   refreshActionPanel();
 }
