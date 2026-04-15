@@ -18,7 +18,7 @@ const server = createServer(async (request, response) => {
       return respond(response, 200, {
         name: "agent-platform",
         status: "ok",
-        endpoints: ["/health", "/onboarding", "/account", "/reputation", "/jobs/recommendations", "/verifier/handlers"]
+        endpoints: ["/health", "/onboarding", "/account", "/reputation", "/session", "/jobs/recommendations", "/verifier/handlers"]
       });
     }
 
@@ -39,6 +39,18 @@ const server = createServer(async (request, response) => {
 
     if (request.method === "GET" && pathname === "/reputation") {
       return respond(response, 200, await service.getReputation(url.searchParams.get("wallet") ?? "0xagent"));
+    }
+
+    if (request.method === "GET" && pathname === "/session") {
+      const sessionId = url.searchParams.get("sessionId") ?? "";
+      try {
+        return respond(response, 200, await service.resumeSession(sessionId));
+      } catch (error) {
+        if ((error.message ?? "").startsWith("Unknown session:")) {
+          return respond(response, 404, { status: "not_found", sessionId });
+        }
+        throw error;
+      }
     }
 
     if (request.method === "GET" && pathname === "/jobs/recommendations") {
