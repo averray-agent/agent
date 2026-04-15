@@ -121,4 +121,80 @@ contract AgentPlatformTest is Test {
         assertEq(assignedWorker, address(0));
         assertEq(uint256(state), uint256(EscrowCore.JobState.Open));
     }
+
+    function testReclaimedJobGetsFreshClaimExpiry() public {
+        bytes32 jobId = keccak256("job/timeout/2");
+
+        vm.prank(poster);
+        escrow.createSinglePayoutJob(jobId, address(dot), 50 ether, 5 ether, 5 ether, 1 days, bytes32("AUTO"), bytes32("DATA"));
+
+        vm.prank(worker);
+        escrow.claimJob(jobId);
+
+        vm.warp(block.timestamp + 2 days);
+        escrow.handleClaimTimeout(jobId);
+
+        address replacementWorker = address(0xBEEF);
+        vm.prank(replacementWorker);
+        escrow.claimJob(jobId);
+
+        (
+            ,
+            address assignedWorker,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            uint256 claimExpiry,
+            ,
+            EscrowCore.JobState state
+        ) = escrow.jobs(jobId);
+
+        assertEq(assignedWorker, replacementWorker);
+        assertEq(claimExpiry, block.timestamp + 1 days);
+        assertEq(uint256(state), uint256(EscrowCore.JobState.Claimed));
+    }
+
+    function testMilestoneResolutionRefreshesClaimExpiryForNextStage() public {
+        bytes32 jobId = keccak256("job/milestone/refresh");
+        uint256[] memory milestones = new uint256[](2);
+        milestones[0] = 25 ether;
+        milestones[1] = 25 ether;
+
+        vm.prank(poster);
+        escrow.createMilestoneJob(jobId, address(dot), milestones, 5 ether, 5 ether, 1 days, bytes32("AUTO"), bytes32("DATA"));
+
+        vm.prank(worker);
+        escrow.claimJob(jobId);
+
+        vm.warp(block.timestamp + 12 hours);
+
+        vm.prank(worker);
+        escrow.submitWork(jobId, keccak256("milestone-work"));
+
+        vm.prank(verifier);
+        escrow.resolveMilestone(jobId, 0, true, bytes32("OK"), "ipfs://badge/milestone");
+
+        (
+            ,
+            address assignedWorker,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            uint256 claimExpiry,
+            ,
+            EscrowCore.JobState state
+        ) = escrow.jobs(jobId);
+
+        assertEq(assignedWorker, worker);
+        assertEq(claimExpiry, block.timestamp + 1 days);
+        assertEq(uint256(state), uint256(EscrowCore.JobState.Claimed));
+    }
 }

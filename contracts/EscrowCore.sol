@@ -45,6 +45,7 @@ contract EscrowCore {
     mapping(bytes32 => mapping(uint256 => bool)) public milestoneReleased;
     mapping(bytes32 => mapping(bytes32 => bool)) public settlementExecuted;
     mapping(bytes32 => bytes32) public latestEvidence;
+    mapping(bytes32 => uint256) public claimTtls;
 
     event JobFunded(bytes32 indexed jobId, address indexed poster, address indexed asset, uint256 totalReserved, PayoutMode payoutMode);
     event JobClaimed(bytes32 indexed jobId, address indexed worker, uint256 claimExpiry);
@@ -105,6 +106,7 @@ contract EscrowCore {
             payoutMode: PayoutMode.Single,
             state: JobState.Open
         });
+        claimTtls[jobId] = claimTtl;
 
         uint256 total = reward + opsReserve + contingencyReserve;
         accounts.reserveForJob(msg.sender, asset, total);
@@ -141,6 +143,7 @@ contract EscrowCore {
             payoutMode: PayoutMode.Milestone,
             state: JobState.Open
         });
+        claimTtls[jobId] = claimTtl;
         uint256 total = reward + opsReserve + contingencyReserve;
         accounts.reserveForJob(msg.sender, asset, total);
         emit JobFunded(jobId, msg.sender, asset, total, PayoutMode.Milestone);
@@ -151,7 +154,7 @@ contract EscrowCore {
         if (job.state == JobState.None) revert UnknownJob();
         if (job.state != JobState.Open) revert InvalidState();
         job.worker = msg.sender;
-        job.claimExpiry = block.timestamp + job.claimExpiry;
+        job.claimExpiry = block.timestamp + claimTtls[jobId];
         job.state = JobState.Claimed;
         emit JobClaimed(jobId, msg.sender, job.claimExpiry);
     }
@@ -170,6 +173,7 @@ contract EscrowCore {
         if (job.state != JobState.Claimed) revert InvalidState();
         require(block.timestamp > job.claimExpiry, "NOT_EXPIRED");
         job.worker = address(0);
+        job.claimExpiry = 0;
         job.state = JobState.Open;
         emit JobReopened(jobId);
     }
@@ -245,6 +249,7 @@ contract EscrowCore {
             reputation.updateReputation(job.worker, 200, 150, job.reward);
             emit JobClosed(jobId, job.worker, job.reward);
         } else {
+            job.claimExpiry = block.timestamp + claimTtls[jobId];
             job.state = JobState.Claimed;
         }
     }
@@ -284,4 +289,3 @@ contract EscrowCore {
         emit JobRejected(jobId, reasonCode);
     }
 }
-
