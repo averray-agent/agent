@@ -106,10 +106,10 @@ export class BlockchainGateway {
     await tx.wait();
   }
 
-  async ensureJob(job) {
+  async ensureJob(job, instanceJobId = job.id) {
     this.requireSigner("ensureJob");
     const asset = this.requireAsset(job.rewardAsset);
-    const live = await this.getJob(job.id);
+    const live = await this.getJob(instanceJobId);
     if (live.state !== 0) {
       return live;
     }
@@ -135,7 +135,7 @@ export class BlockchainGateway {
     }
 
     const createTx = await this.escrowContract.createSinglePayoutJob(
-      this.toJobId(job.id),
+      this.toJobId(instanceJobId),
       asset.address,
       job.rewardAmount,
       0,
@@ -145,7 +145,7 @@ export class BlockchainGateway {
       id(job.category)
     );
     await createTx.wait();
-    return this.getJob(job.id);
+    return this.getJob(instanceJobId);
   }
 
   async submitWork(jobId, evidence) {

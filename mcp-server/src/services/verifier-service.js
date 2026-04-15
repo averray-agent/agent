@@ -11,11 +11,12 @@ export class VerifierService {
   async verifySubmission({ sessionId, evidence = "", metadataURI = "ipfs://pending-badge" }) {
     const session = await this.platformService.resumeSession(sessionId);
     const job = this.platformService.getJobDefinition(session.jobId);
+    const chainJobId = session.chainJobId ?? session.jobId;
     const verdict = this.registry.evaluate(job, evidence);
 
     if (this.blockchainGateway?.isEnabled() && this.blockchainGateway.resolveSinglePayout) {
       await this.blockchainGateway.resolveSinglePayout(
-        session.jobId,
+        chainJobId,
         verdict.outcome === "approved",
         verdict.reasonCode,
         metadataURI

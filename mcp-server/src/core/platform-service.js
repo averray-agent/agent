@@ -190,17 +190,23 @@ export class PlatformService {
       return existing;
     }
     const job = this.requireJob(jobId);
+    let chainJobId = jobId;
     if (this.blockchainGateway?.isEnabled()) {
-      if (this.blockchainGateway.ensureJob) {
-        await this.blockchainGateway.ensureJob(job);
+      const live = await this.blockchainGateway.getJob(jobId);
+      if (live.state !== 0 && live.state !== 1) {
+        chainJobId = `${jobId}:${idempotencyKey}`;
       }
-      await this.blockchainGateway.claimJob(jobId);
+      if (this.blockchainGateway.ensureJob) {
+        await this.blockchainGateway.ensureJob(job, chainJobId);
+      }
+      await this.blockchainGateway.claimJob(chainJobId);
     }
 
     const session = {
       sessionId: `${jobId}:${wallet}`,
       wallet,
       jobId,
+      chainJobId,
       idempotencyKey,
       status: "claimed",
       protocolHistory: [protocol]
@@ -212,7 +218,7 @@ export class PlatformService {
   async submitWork(sessionId, protocol, evidence = "submitted-via-service") {
     const session = await this.requireSession(sessionId);
     if (this.blockchainGateway?.isEnabled()) {
-      await this.blockchainGateway.submitWork(session.jobId, evidence);
+      await this.blockchainGateway.submitWork(session.chainJobId ?? session.jobId, evidence);
     }
     const protocolHistory = [...new Set([...session.protocolHistory, protocol])];
     return this.stateStore.upsertSession({

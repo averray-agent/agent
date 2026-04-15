@@ -81,6 +81,7 @@ export interface JobSession {
   sessionId: string;
   wallet: string;
   jobId: string;
+  chainJobId?: string;
   idempotencyKey: string;
   status: "preflighted" | "claimed" | "submitted" | "verifying" | "resolved" | "disputed";
   protocolHistory: ProtocolSurface[];
