@@ -197,4 +197,70 @@ contract AgentPlatformTest is Test {
         assertEq(claimExpiry, block.timestamp + 1 days);
         assertEq(uint256(state), uint256(EscrowCore.JobState.Claimed));
     }
+
+    function testRejectedJobCanBeFinalizedAfterDisputeWindow() public {
+        bytes32 jobId = keccak256("job/rejected/finalize");
+
+        vm.prank(poster);
+        escrow.createSinglePayoutJob(jobId, address(dot), 50 ether, 5 ether, 5 ether, 1 days, bytes32("AUTO"), bytes32("DATA"));
+
+        vm.prank(worker);
+        escrow.claimJob(jobId);
+
+        vm.prank(worker);
+        escrow.submitWork(jobId, keccak256("rejected-work"));
+
+        vm.prank(verifier);
+        escrow.resolveSinglePayout(jobId, false, bytes32("REJECTED"), "ipfs://badge/rejected");
+
+        (bool finalizedEarly,) = address(escrow).call(abi.encodeCall(escrow.finalizeRejectedJob, (jobId)));
+        require(!finalizedEarly, "EXPECTED_DISPUTE_WINDOW_REVERT");
+
+        vm.warp(block.timestamp + escrow.DISPUTE_WINDOW() + 1);
+        escrow.finalizeRejectedJob(jobId);
+
+        (uint256 liquidPoster, uint256 reservedPoster,,,) = accounts.positions(poster, address(dot));
+        assertEq(liquidPoster, 5_000 ether);
+        assertEq(reservedPoster, 0);
+
+        (
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            uint256 claimExpiry,
+            ,
+            EscrowCore.JobState state
+        ) = escrow.jobs(jobId);
+        assertEq(claimExpiry, 0);
+        assertEq(uint256(state), uint256(EscrowCore.JobState.Closed));
+    }
+
+    function testRejectedJobCannotBeFinalizedAfterDisputeOpened() public {
+        bytes32 jobId = keccak256("job/rejected/disputed");
+
+        vm.prank(poster);
+        escrow.createSinglePayoutJob(jobId, address(dot), 50 ether, 5 ether, 5 ether, 1 days, bytes32("AUTO"), bytes32("DATA"));
+
+        vm.prank(worker);
+        escrow.claimJob(jobId);
+
+        vm.prank(worker);
+        escrow.submitWork(jobId, keccak256("rejected-work"));
+
+        vm.prank(verifier);
+        escrow.resolveSinglePayout(jobId, false, bytes32("REJECTED"), "ipfs://badge/rejected");
+
+        vm.prank(worker);
+        escrow.openDispute(jobId);
+
+        vm.warp(block.timestamp + escrow.DISPUTE_WINDOW() + 1);
+        (bool finalizedDisputed,) = address(escrow).call(abi.encodeCall(escrow.finalizeRejectedJob, (jobId)));
+        require(!finalizedDisputed, "EXPECTED_INVALID_STATE_REVERT");
+    }
 }

@@ -6,6 +6,8 @@ import {AgentAccountCore} from "./AgentAccountCore.sol";
 import {ReputationSBT} from "./ReputationSBT.sol";
 
 contract EscrowCore {
+    uint256 public constant DISPUTE_WINDOW = 1 days;
+
     TreasuryPolicy public immutable policy;
     AgentAccountCore public immutable accounts;
     ReputationSBT public immutable reputation;
@@ -46,6 +48,7 @@ contract EscrowCore {
     mapping(bytes32 => mapping(bytes32 => bool)) public settlementExecuted;
     mapping(bytes32 => bytes32) public latestEvidence;
     mapping(bytes32 => uint256) public claimTtls;
+    mapping(bytes32 => uint256) public rejectionTimestamps;
 
     event JobFunded(bytes32 indexed jobId, address indexed poster, address indexed asset, uint256 totalReserved, PayoutMode payoutMode);
     event JobClaimed(bytes32 indexed jobId, address indexed worker, uint256 claimExpiry);
@@ -184,6 +187,7 @@ contract EscrowCore {
 
         if (!approved) {
             job.state = JobState.Rejected;
+            rejectionTimestamps[jobId] = block.timestamp;
             emit JobRejected(jobId, reasonCode);
             return;
         }
@@ -216,6 +220,7 @@ contract EscrowCore {
 
         if (!approved) {
             job.state = JobState.Rejected;
+            rejectionTimestamps[jobId] = block.timestamp;
             emit JobRejected(jobId, reasonCode);
             return;
         }
@@ -257,8 +262,22 @@ contract EscrowCore {
     function openDispute(bytes32 jobId) external onlyParticipant(jobId) {
         JobEscrow storage job = jobs[jobId];
         if (job.state != JobState.Rejected && job.state != JobState.Submitted) revert InvalidState();
+        rejectionTimestamps[jobId] = 0;
         job.state = JobState.Disputed;
         emit DisputeOpened(jobId, msg.sender);
+    }
+
+    function finalizeRejectedJob(bytes32 jobId) external {
+        JobEscrow storage job = jobs[jobId];
+        if (job.state != JobState.Rejected) revert InvalidState();
+        require(rejectionTimestamps[jobId] != 0, "NO_REJECTION_TIMESTAMP");
+        require(block.timestamp > rejectionTimestamps[jobId] + DISPUTE_WINDOW, "DISPUTE_WINDOW_ACTIVE");
+
+        _refundPosterBalances(job);
+        rejectionTimestamps[jobId] = 0;
+        job.claimExpiry = 0;
+        job.state = JobState.Closed;
+        emit JobClosed(jobId, job.worker, job.released);
     }
 
     function resolveDispute(bytes32 jobId, uint256 workerPayout, bytes32 reasonCode, string calldata metadataURI) external onlyArbitrator {
@@ -270,6 +289,18 @@ contract EscrowCore {
             job.released += workerPayout;
         }
 
+        _refundPosterBalances(job);
+        rejectionTimestamps[jobId] = 0;
+        job.claimExpiry = 0;
+        job.state = JobState.Closed;
+        if (workerPayout > 0) {
+            reputation.mintBadge(job.worker, job.category, 1, metadataURI);
+        }
+        emit JobClosed(jobId, job.worker, job.released);
+        emit JobRejected(jobId, reasonCode);
+    }
+
+    function _refundPosterBalances(JobEscrow storage job) internal {
         uint256 rewardRefund = job.reward - job.released;
         if (rewardRefund > 0) {
             accounts.refundReserved(job.poster, job.asset, rewardRefund);
@@ -280,12 +311,5 @@ contract EscrowCore {
         if (job.contingencyReserve > 0) {
             accounts.refundReserved(job.poster, job.asset, job.contingencyReserve);
         }
-
-        job.state = JobState.Closed;
-        if (workerPayout > 0) {
-            reputation.mintBadge(job.worker, job.category, 1, metadataURI);
-        }
-        emit JobClosed(jobId, job.worker, job.released);
-        emit JobRejected(jobId, reasonCode);
     }
 }
