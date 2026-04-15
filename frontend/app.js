@@ -7,12 +7,24 @@ import {
   refreshActionPanel,
   renderCatalog,
   renderRecommendations,
+  setActionFeedback,
+  setPosterFeedback,
+  setWalletFeedback,
   updateAccount,
   updateReputation,
   updateSelectedJob
 } from "./renderers.js";
 import { readPersistedState, state } from "./state.js";
-import { setOverallStatus, setText } from "./ui-helpers.js";
+import { setButtonBusy, setOverallStatus, setText, showToast } from "./ui-helpers.js";
+
+async function runWithBusyButton(button, busyLabel, action) {
+  setButtonBusy(button, true, busyLabel);
+  try {
+    return await action();
+  } finally {
+    setButtonBusy(button, false);
+  }
+}
 
 async function restoreSession(sessionId) {
   if (!sessionId) {
@@ -50,7 +62,7 @@ async function selectJob(jobId) {
   if (expectedSessionId) {
     try {
       await restoreSession(expectedSessionId);
-      setText("action-feedback", `Restored prior session ${expectedSessionId}.`);
+      setActionFeedback(`Restored prior session ${expectedSessionId}.`, "success");
       return;
     } catch {
       applySessionState(undefined);
@@ -60,13 +72,13 @@ async function selectJob(jobId) {
 
   applySessionState(undefined);
   applyVerificationState(undefined);
-  setText("action-feedback", `Loaded ${job.id}. Claim it when you are ready.`);
+  setActionFeedback(`Loaded ${job.id}. Claim it when you are ready.`, "neutral");
   refreshActionPanel();
 }
 
 async function loadWallet(wallet) {
   state.wallet = wallet;
-  setText("wallet-feedback", "Refreshing live operator view...");
+  setWalletFeedback("Refreshing live operator view...", "loading");
 
   const [account, reputation, recommendations] = await Promise.all([
     readJson(`/api/account?wallet=${encodeURIComponent(wallet)}`),
@@ -80,7 +92,7 @@ async function loadWallet(wallet) {
   updateReputation(reputation);
   renderRecommendations(recommendations);
   setText("job-count", `${recommendations.length} recommendations`);
-  setText("wallet-feedback", `Loaded live data for ${wallet}.`);
+  setWalletFeedback(`Loaded live data for ${wallet}.`, "success");
   localStorage.setItem("averray:last-wallet", wallet);
 
   const persisted = readPersistedState();
@@ -92,7 +104,7 @@ async function loadWallet(wallet) {
     await selectJob(nextJobId);
   } else if (!state.selectedJobId) {
     updateSelectedJob(undefined);
-    setText("action-feedback", "No action flow available until recommendations appear.");
+    setActionFeedback("No action flow available until recommendations appear.", "neutral");
   }
 }
 
@@ -107,7 +119,7 @@ async function claimSelectedJob() {
   if (!state.selectedJobId) return;
 
   const idempotencyKey = `ui:${state.wallet}:${state.selectedJobId}`;
-  setText("action-feedback", `Claiming ${state.selectedJobId}...`);
+  setActionFeedback(`Claiming ${state.selectedJobId}...`, "loading");
 
   const session = await postJson(
     `/api/jobs/claim?wallet=${encodeURIComponent(state.wallet)}&jobId=${encodeURIComponent(state.selectedJobId)}&idempotencyKey=${encodeURIComponent(idempotencyKey)}`
@@ -115,7 +127,8 @@ async function claimSelectedJob() {
 
   applySessionState(session);
   applyVerificationState(undefined);
-  setText("action-feedback", `Claimed ${state.selectedJobId}. Session ${session.sessionId} is ready for submission.`);
+  setActionFeedback(`Claimed ${state.selectedJobId}. Session ${session.sessionId} is ready for submission.`, "success");
+  showToast(`Claimed ${state.selectedJobId}.`, "success");
   refreshActionPanel();
 }
 
@@ -125,13 +138,14 @@ async function submitSelectedWork() {
   const evidenceInput = document.getElementById("evidence-input");
   const evidence = evidenceInput?.value?.trim() || buildEvidenceTemplate(state.selectedJob);
 
-  setText("action-feedback", `Submitting work for ${state.session.sessionId}...`);
+  setActionFeedback(`Submitting work for ${state.session.sessionId}...`, "loading");
   const session = await postJson(
     `/api/jobs/submit?sessionId=${encodeURIComponent(state.session.sessionId)}&evidence=${encodeURIComponent(evidence)}`
   );
 
   applySessionState(session);
-  setText("action-feedback", "Submission stored. Run the verifier to settle the result.");
+  setActionFeedback("Submission stored. Run the verifier to settle the result.", "success");
+  showToast("Submission stored.", "success");
   refreshActionPanel();
 }
 
@@ -141,7 +155,7 @@ async function verifySelectedWork() {
   const evidenceInput = document.getElementById("evidence-input");
   const evidence = evidenceInput?.value?.trim() || buildEvidenceTemplate(state.selectedJob);
 
-  setText("action-feedback", `Running verifier for ${state.session.sessionId}...`);
+  setActionFeedback(`Running verifier for ${state.session.sessionId}...`, "loading");
   const result = await postJson(
     `/api/verifier/run?sessionId=${encodeURIComponent(state.session.sessionId)}&evidence=${encodeURIComponent(evidence)}`
   );
@@ -153,15 +167,20 @@ async function verifySelectedWork() {
       ? `Verifier approved the submission with ${result.reasonCode}.`
       : `Verifier returned ${result.outcome} with ${result.reasonCode}.`
   );
+  document.getElementById("action-feedback")?.setAttribute("data-tone", result.outcome === "approved" ? "success" : "neutral");
+  showToast(
+    result.outcome === "approved" ? "Verification approved." : `Verification ${result.outcome}.`,
+    result.outcome === "approved" ? "success" : "neutral"
+  );
   refreshActionPanel();
 }
 
 async function refreshCurrentSession() {
   if (!state.session?.sessionId) return;
 
-  setText("action-feedback", `Refreshing ${state.session.sessionId}...`);
+  setActionFeedback(`Refreshing ${state.session.sessionId}...`, "loading");
   await restoreSession(state.session.sessionId);
-  setText("action-feedback", `Refreshed session ${state.session.sessionId}.`);
+  setActionFeedback(`Refreshed session ${state.session.sessionId}.`, "success");
 }
 
 function syncPosterDefaults(force = false) {
@@ -203,12 +222,13 @@ async function createPosterJob() {
     autoApprove: formData.get("autoApprove") === "on"
   };
 
-  setText("poster-feedback", `Creating ${payload.id || "job"}...`);
+  setPosterFeedback(`Creating ${payload.id || "job"}...`, "loading");
   const job = await postJson("/api/admin/jobs", payload);
-  setText("poster-feedback", `Created ${job.id}. Refreshing catalog and operator view...`);
+  setPosterFeedback(`Created ${job.id}. Refreshing catalog and operator view...`, "loading");
   await Promise.all([loadCatalog(), loadWallet(state.wallet)]);
   await selectJob(job.id);
-  setText("poster-feedback", `Created ${job.id} and loaded it into the execution flow.`);
+  setPosterFeedback(`Created ${job.id} and loaded it into the execution flow.`, "success");
+  showToast(`Created ${job.id}.`, "success");
 }
 
 function wireWalletForm(walletForm, walletInput) {
@@ -217,6 +237,7 @@ function wireWalletForm(walletForm, walletInput) {
     const wallet = walletInput?.value?.trim();
     if (!wallet) {
       setText("wallet-feedback", "Enter a wallet address first.");
+      document.getElementById("wallet-feedback")?.setAttribute("data-tone", "error");
       return;
     }
 
@@ -224,7 +245,8 @@ function wireWalletForm(walletForm, walletInput) {
       await loadWallet(wallet);
     } catch (error) {
       console.error(error);
-      setText("wallet-feedback", error.message ?? "Failed to load wallet data.");
+      setWalletFeedback(error.message ?? "Failed to load wallet data.", "error");
+      showToast(error.message ?? "Failed to load wallet data.", "error");
     }
   });
 }
@@ -238,7 +260,8 @@ function wireJobSelection(jobList) {
       await selectJob(button.dataset.jobId);
     } catch (error) {
       console.error(error);
-      setText("action-feedback", error.message ?? "Failed to load job definition.");
+      setActionFeedback(error.message ?? "Failed to load job definition.", "error");
+      showToast(error.message ?? "Failed to load job definition.", "error");
     }
   });
 }
@@ -250,10 +273,11 @@ function wireCatalogSelection(catalogList) {
 
     try {
       await selectJob(button.dataset.catalogJobId);
-      setText("poster-feedback", `Loaded ${button.dataset.catalogJobId} into the execution flow.`);
+      setPosterFeedback(`Loaded ${button.dataset.catalogJobId} into the execution flow.`, "success");
     } catch (error) {
       console.error(error);
-      setText("poster-feedback", error.message ?? "Failed to load catalog job.");
+      setPosterFeedback(error.message ?? "Failed to load catalog job.", "error");
+      showToast(error.message ?? "Failed to load catalog job.", "error");
     }
   });
 }
@@ -261,37 +285,41 @@ function wireCatalogSelection(catalogList) {
 function wireActionButtons({ claimButton, submitButton, verifyButton, refreshButton }) {
   claimButton?.addEventListener("click", async () => {
     try {
-      await claimSelectedJob();
+      await runWithBusyButton(claimButton, "Claiming...", claimSelectedJob);
     } catch (error) {
       console.error(error);
-      setText("action-feedback", error.message ?? "Claim failed.");
+      setActionFeedback(error.message ?? "Claim failed.", "error");
+      showToast(error.message ?? "Claim failed.", "error");
     }
   });
 
   submitButton?.addEventListener("click", async () => {
     try {
-      await submitSelectedWork();
+      await runWithBusyButton(submitButton, "Submitting...", submitSelectedWork);
     } catch (error) {
       console.error(error);
-      setText("action-feedback", error.message ?? "Submit failed.");
+      setActionFeedback(error.message ?? "Submit failed.", "error");
+      showToast(error.message ?? "Submit failed.", "error");
     }
   });
 
   verifyButton?.addEventListener("click", async () => {
     try {
-      await verifySelectedWork();
+      await runWithBusyButton(verifyButton, "Verifying...", verifySelectedWork);
     } catch (error) {
       console.error(error);
-      setText("action-feedback", error.message ?? "Verification failed.");
+      setActionFeedback(error.message ?? "Verification failed.", "error");
+      showToast(error.message ?? "Verification failed.", "error");
     }
   });
 
   refreshButton?.addEventListener("click", async () => {
     try {
-      await refreshCurrentSession();
+      await runWithBusyButton(refreshButton, "Refreshing...", refreshCurrentSession);
     } catch (error) {
       console.error(error);
-      setText("action-feedback", error.message ?? "Refresh failed.");
+      setActionFeedback(error.message ?? "Refresh failed.", "error");
+      showToast(error.message ?? "Refresh failed.", "error");
     }
   });
 }
@@ -299,22 +327,27 @@ function wireActionButtons({ claimButton, submitButton, verifyButton, refreshBut
 function wirePosterControls({ posterForm, refreshCatalogButton, verifierModeSelect }) {
   posterForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
+    const submitButton = posterForm.querySelector('button[type="submit"]');
     try {
-      await createPosterJob();
+      await runWithBusyButton(submitButton, "Creating...", createPosterJob);
     } catch (error) {
       console.error(error);
-      setText("poster-feedback", error.message ?? "Create job failed.");
+      setPosterFeedback(error.message ?? "Create job failed.", "error");
+      showToast(error.message ?? "Create job failed.", "error");
     }
   });
 
   refreshCatalogButton?.addEventListener("click", async () => {
     try {
-      setText("poster-feedback", "Refreshing live catalog...");
-      await loadCatalog();
-      setText("poster-feedback", "Catalog refreshed.");
+      await runWithBusyButton(refreshCatalogButton, "Refreshing...", async () => {
+        setPosterFeedback("Refreshing live catalog...", "loading");
+        await loadCatalog();
+      });
+      setPosterFeedback("Catalog refreshed.", "success");
     } catch (error) {
       console.error(error);
-      setText("poster-feedback", error.message ?? "Catalog refresh failed.");
+      setPosterFeedback(error.message ?? "Catalog refresh failed.", "error");
+      showToast(error.message ?? "Catalog refresh failed.", "error");
     }
   });
 
@@ -365,9 +398,10 @@ async function boot() {
     await Promise.all([loadWallet(initialWallet), loadCatalog()]);
   } catch (error) {
     console.error(error);
-    setText("wallet-feedback", error.message ?? "Failed to load wallet data.");
+    setWalletFeedback(error.message ?? "Failed to load wallet data.", "error");
     renderRecommendations([]);
-    setText("poster-feedback", error.message ?? "Failed to load poster workspace.");
+    setPosterFeedback(error.message ?? "Failed to load poster workspace.", "error");
+    showToast(error.message ?? "Failed to load poster workspace.", "error");
   }
 
   wireWalletForm(walletForm, walletInput);

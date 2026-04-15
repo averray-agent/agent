@@ -1,6 +1,6 @@
 import { persistUiState, state } from "./state.js";
 import { buildEvidenceTemplate, describeVerifier } from "./job-utils.js";
-import { formatAmount, setActionStatus, setText } from "./ui-helpers.js";
+import { formatAmount, setActionStatus, setFeedback, setText } from "./ui-helpers.js";
 
 export function renderRecommendations(recommendations) {
   const root = document.getElementById("job-list");
@@ -171,4 +171,16 @@ export function updateSelectedJob(job) {
   renderCatalog(state.catalog);
   persistUiState();
   refreshActionPanel();
+}
+
+export function setActionFeedback(message, tone = "neutral") {
+  setFeedback("action-feedback", message, tone);
+}
+
+export function setWalletFeedback(message, tone = "neutral") {
+  setFeedback("wallet-feedback", message, tone);
+}
+
+export function setPosterFeedback(message, tone = "neutral") {
+  setFeedback("poster-feedback", message, tone);
 }
