@@ -283,6 +283,15 @@ export class JobCatalogService {
       throw new ValidationError("Retry limit must be zero or higher.");
     }
 
+    // Optional sub-job lineage. When an agent spawns a sub-job from inside
+    // its own session, include `parentSessionId` so the indexer + profile
+    // surfaces can reconstruct who hired whom. We validate the shape but
+    // do not enforce that it points to a real session — state-store
+    // consistency is surfaced by the dashboard, not the contract.
+    const parentSessionId = typeof input?.parentSessionId === "string"
+      ? input.parentSessionId.trim()
+      : "";
+
     return {
       id,
       category,
@@ -295,7 +304,8 @@ export class JobCatalogService {
       outputSchemaRef: String(input?.outputSchemaRef ?? `schema://jobs/${category}-output`).trim(),
       claimTtlSeconds,
       retryLimit,
-      requiresSponsoredGas: Boolean(input?.requiresSponsoredGas)
+      requiresSponsoredGas: Boolean(input?.requiresSponsoredGas),
+      ...(parentSessionId ? { parentSessionId } : {})
     };
   }
 
