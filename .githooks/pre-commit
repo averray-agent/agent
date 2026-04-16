@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+#
+# Pre-commit guard against accidental secret leaks.
+#
+# Scope:
+#   1. Reject any staged `.env*` file that isn't `.env.example`.
+#   2. Scan the staged diff for common secret patterns (EVM private keys,
+#      AWS access keys, Slack tokens, GitHub PATs, generic "BEGIN PRIVATE
+#      KEY" blocks).
+#   3. Emit a non-zero exit with a clear message if anything is flagged so
+#      git aborts the commit.
+#
+# Bypass (emergencies only):
+#   SKIP_SECRET_SCAN=1 git commit …
+#
+# Install: `./scripts/install-hooks.sh` wires this via git's core.hooksPath.
+set -euo pipefail
+
+if [[ "${SKIP_SECRET_SCAN:-}" == "1" ]]; then
+  echo "[pre-commit] SKIP_SECRET_SCAN=1 set — skipping secret scan." >&2
+  exit 0
+fi
+
+red()   { printf '\033[31m%s\033[0m\n' "$*"; }
+yellow(){ printf '\033[33m%s\033[0m\n' "$*"; }
+
+# ---- 1. Block .env* except .env.example -----------------------------------
+blocked_env_files=$(git diff --cached --name-only --diff-filter=AM | \
+  grep -E '(^|/)\.env($|\.)' | grep -v '\.env\.example$' || true)
+
+if [[ -n "$blocked_env_files" ]]; then
+  red "ERROR: refusing to commit environment files:"
+  printf '  %s\n' $blocked_env_files >&2
+  yellow "These usually contain secrets. If you really meant to commit a"
+  yellow "redacted sample, name it '.env.example' instead."
+  exit 1
+fi
+
+# ---- 2. Scan staged diff for known secret shapes --------------------------
+# Collect just the added lines so we don't false-positive on removed secrets.
+# Strip the leading `+` so the body of the line is what the regex sees.
+added_lines=$(git diff --cached --diff-filter=AM -U0 | awk '/^\+[^+]/ { sub(/^\+/, ""); print }')
+
+# POSIX extended regex (works with both BSD and GNU grep). Each entry is a
+# descriptive label followed by a regex. We deliberately skip `\b` (not in
+# POSIX ERE) and rely on surrounding punctuation for word boundaries.
+named_patterns=(
+  'EVM private key:[=:"][[:space:]]*(0x)?[a-fA-F0-9]{64}([^a-fA-F0-9]|$)'
+  'AWS access key id:AKIA[0-9A-Z]{16}'
+  'AWS secret access key line:aws_secret_access_key[[:space:]]*=[[:space:]]*[A-Za-z0-9/+=]{40}'
+  'Slack token:xox[baprs]-[0-9A-Za-z-]{10,}'
+  'GitHub PAT:ghp_[A-Za-z0-9]{36}'
+  'PEM private key block:-----BEGIN [A-Z ]*PRIVATE KEY-----'
+)
+
+findings=()
+
+for entry in "${named_patterns[@]}"; do
+  label="${entry%%:*}"
+  pattern="${entry#*:}"
+  # Use `-e` so patterns starting with `-` (e.g., the PEM block header) are
+  # interpreted as the pattern and not as grep flags.
+  match=$(printf '%s\n' "$added_lines" | grep -En -e "$pattern" | head -3 || true)
+  if [[ -n "$match" ]]; then
+    findings+=("$label")
+    while IFS= read -r line; do
+      findings+=("  $line")
+    done <<<"$match"
+  fi
+done
+
+if (( ${#findings[@]} > 0 )); then
+  red "ERROR: the staged diff appears to contain secret-shaped strings:"
+  for line in "${findings[@]}"; do
+    printf '  %s\n' "$line" >&2
+  done
+  yellow ""
+  yellow "If this is a false positive (hashes, test vectors, etc.):"
+  yellow "  SKIP_SECRET_SCAN=1 git commit …"
+  yellow ""
+  yellow "If this is a real secret:"
+  yellow "  1. unstage with \`git reset HEAD <file>\`"
+  yellow "  2. rotate the secret (assume it leaked the moment it was typed)"
+  yellow "  3. scrub the working tree before re-attempting the commit"
+  exit 1
+fi
+
+exit 0

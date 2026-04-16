@@ -8,6 +8,25 @@ This repository contains a greenfield implementation of an agent-first treasury 
 
 The `mcp-server` workspace currently uses a JavaScript runtime source tree. There is no parallel TypeScript build step to maintain.
 
+## Development setup
+
+After cloning, install the git hooks once so staged commits are scanned for
+accidentally-staged `.env` files and private-key-shaped strings:
+
+```bash
+./scripts/install-hooks.sh
+```
+
+Run the full test matrix locally:
+
+```bash
+npm test               # backend + frontend + forge
+npm run typecheck:indexer
+```
+
+CI runs the same four jobs on every push to `main` and every PR via
+[.github/workflows/ci.yml](/.github/workflows/ci.yml).
+
 ## Local deployment flow
 
 1. Start a local Anvil chain:

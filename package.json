@@ -6,7 +6,10 @@
     "indexer"
   ],
   "scripts": {
-    "test:contracts": "source /Users/pascalkuriger/.zshenv && forge test",
+    "test": "npm run test:backend && npm run test:frontend && npm run test:contracts",
+    "test:backend": "npm --workspace mcp-server test",
+    "test:frontend": "node --test frontend/ui-helpers.test.js frontend/config.test.js",
+    "test:contracts": "forge test",
     "dev:indexer": "npm --workspace indexer run dev",
     "start:indexer": "npm --workspace indexer run start",
     "typecheck:indexer": "npm --workspace indexer run typecheck"

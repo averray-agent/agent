@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel in-progress runs for the same ref when a new push lands — avoids
+# wasting CI minutes on commits that are already obsolete.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  solidity:
+    name: Solidity — forge test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: forge build
+        run: forge build --sizes
+
+      - name: forge test
+        run: forge test -vv
+
+  backend:
+    name: Backend — node --test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install workspace dependencies
+        # This is an npm workspace monorepo, so the root package-lock.json
+        # resolves both mcp-server and indexer. `npm ci` enforces the lock.
+        run: npm ci
+
+      - name: Unit tests
+        run: npm test --workspace mcp-server
+
+      - name: HTTP smoke tests
+        # Full integration tests that spin up the real HTTP server in a
+        # child process and make real fetch() calls. Kept opt-in for
+        # local dev to stay fast; always on for CI.
+        env:
+          RUN_HTTP_SMOKE: "1"
+        working-directory: mcp-server
+        run: node --test --test-timeout=30000 src/protocols/http/server.smoke.test.js
+
+  frontend:
+    name: Frontend — escape helpers + config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Run frontend tests
+        # The frontend is static-served vanilla JS — there is no package
+        # install step. Run the node --test suites directly against the
+        # source files.
+        run: node --test frontend/ui-helpers.test.js frontend/config.test.js
+
+  indexer:
+    name: Indexer — typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck:indexer
