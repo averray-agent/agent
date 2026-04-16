@@ -139,6 +139,7 @@ Protected routes require a signed-in JWT issued via Sign-In with Ethereum
 POST /auth/nonce   { wallet }              → { nonce, message }
 personal_sign(message) via wallet provider → signature
 POST /auth/verify  { message, signature }  → { token, wallet, expiresAt }
+POST /auth/logout  (Authorization header)  → revokes the token's jti
 ```
 
 Subsequent requests pass the token as `Authorization: Bearer <token>`. For SSE
@@ -147,9 +148,14 @@ endpoints (`/events`) the token goes as `?token=...` because the browser
 the server logs a warning if a token is supplied via query string on any
 non-SSE route.
 
-Public routes (no auth required): `/`, `/health`, `/onboarding`, `/jobs`,
-`/jobs/definition`, `/gas/health`, `/gas/capabilities`, `/verifier/handlers`,
-`/auth/nonce`, `/auth/verify`.
+Logout revokes the current token by writing its `jti` into a TTL-bounded
+blacklist in the state store. Any subsequent request with that token returns
+`401 token_revoked`. Blacklist entries auto-expire alongside the token's own
+`exp` so Redis does not grow unbounded.
+
+Public routes (no auth required): `/`, `/health`, `/metrics`, `/onboarding`,
+`/jobs`, `/jobs/definition`, `/gas/health`, `/gas/capabilities`,
+`/verifier/handlers`, `/auth/nonce`, `/auth/verify`.
 
 `AUTH_MODE=strict` (production default) rejects unauthenticated requests on
 protected routes with 401. `AUTH_MODE=permissive` (dev default) falls back to

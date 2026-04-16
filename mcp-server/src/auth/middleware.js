@@ -19,8 +19,11 @@ import { hasRole, resolveRoles } from "./config.js";
  * both modes — permissive fallback wallets are resolved against
  * `authConfig.adminWallets` / `authConfig.verifierWallets` to avoid locking
  * admins out of local dev.
+ *
+ * A `stateStore` with `isTokenRevoked(jti)` is optional. When supplied the
+ * middleware rejects tokens whose `jti` is in the revocation list.
  */
-export function createAuthMiddleware({ authConfig, logger = console }) {
+export function createAuthMiddleware({ authConfig, stateStore, logger = console }) {
   return async function requireAuth(request, url, { allowQueryToken = false, requireRole = undefined } = {}) {
     const headerToken = extractBearer(request);
     const queryToken = allowQueryToken ? (url.searchParams.get("token") ?? "").trim() || undefined : undefined;
@@ -62,6 +65,13 @@ export function createAuthMiddleware({ authConfig, logger = console }) {
     const claims = verifyToken(token, { secrets: authConfig.secrets });
     if (!claims?.sub) {
       throw new AuthenticationError("Token missing subject claim.", "missing_subject");
+    }
+
+    if (stateStore?.isTokenRevoked && claims.jti) {
+      const revoked = await stateStore.isTokenRevoked(claims.jti);
+      if (revoked) {
+        throw new AuthenticationError("Token has been revoked.", "token_revoked");
+      }
     }
 
     enforceRole(claims, requireRole);

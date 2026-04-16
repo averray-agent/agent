@@ -168,7 +168,21 @@ export async function signIn() {
   };
 }
 
-export function signOut() {
+export async function signOut() {
+  // Best-effort server-side revocation. If the call fails (network, server
+  // already down, etc.) we still clear the local session — revocation only
+  // matters as long as the token could still authenticate an attacker.
+  const token = getAuthToken();
+  if (token) {
+    try {
+      await fetch(apiUrl("/auth/logout"), {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}` }
+      });
+    } catch (error) {
+      debug.warn("[auth] logout call failed; clearing local session anyway", error);
+    }
+  }
   clearSession("signed_out");
 }
 

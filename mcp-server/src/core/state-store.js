@@ -181,6 +181,28 @@ export class MemoryStateStore {
     };
   }
 
+  async revokeToken(jti, ttlSeconds) {
+    if (!this.revokedTokens) {
+      this.revokedTokens = new Map();
+    }
+    // Memory backend honours sub-second TTLs so tests can exercise expiry
+    // quickly; the Redis backend ceils to whole seconds because Redis `EX`
+    // only accepts integer seconds.
+    const expiresAt = Date.now() + Math.max(0, ttlSeconds) * 1000;
+    this.revokedTokens.set(jti, expiresAt);
+  }
+
+  async isTokenRevoked(jti) {
+    if (!this.revokedTokens) return false;
+    const expiresAt = this.revokedTokens.get(jti);
+    if (expiresAt === undefined) return false;
+    if (expiresAt <= Date.now()) {
+      this.revokedTokens.delete(jti);
+      return false;
+    }
+    return true;
+  }
+
   async healthCheck() {
     return {
       ok: true,
@@ -331,6 +353,21 @@ export class RedisStateStore {
       remaining: Math.max(limit - count, 0),
       resetAt
     };
+  }
+
+  async revokeToken(jti, ttlSeconds) {
+    await this.connect();
+    // `EX` + a sentinel value. Expiry matches the JWT's remaining lifetime so
+    // Redis auto-cleans revocations rather than growing unbounded.
+    await this.client.set(this.key("revoked", jti), "1", {
+      EX: Math.max(1, Math.ceil(ttlSeconds))
+    });
+  }
+
+  async isTokenRevoked(jti) {
+    await this.connect();
+    const reply = await this.client.get(this.key("revoked", jti));
+    return reply !== null && reply !== undefined;
   }
 
   async healthCheck() {

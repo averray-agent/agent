@@ -177,6 +177,28 @@ test("http smoke: OPTIONS preflight returns CORS headers only for allowed origin
   });
 });
 
+test("http smoke: /auth/logout revokes the current token", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const token = issueToken(ADMIN_WALLET, { roles: ["admin"] });
+    const authHeader = { authorization: `Bearer ${token}` };
+
+    // Token works before logout.
+    const preLogout = await fetch(`${base}/account`, { headers: authHeader });
+    assert.equal(preLogout.status, 200);
+
+    const logout = await fetch(`${base}/auth/logout`, { method: "POST", headers: authHeader });
+    assert.equal(logout.status, 200);
+    const payload = await logout.json();
+    assert.equal(payload.status, "logged_out");
+
+    // Same token now rejected with token_revoked.
+    const postLogout = await fetch(`${base}/account`, { headers: authHeader });
+    assert.equal(postLogout.status, 401);
+    const errBody = await postLogout.json();
+    assert.equal(errBody.error, "token_revoked");
+  });
+});
+
 test("http smoke: /metrics emits Prometheus text format with baseline series", { skip: !RUN }, async () => {
   await runWithServer(async (base) => {
     // Warm the metrics: one unauthenticated admin call to populate counters.

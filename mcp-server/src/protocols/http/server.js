@@ -267,6 +267,7 @@ const server = createServer(async (request, response) => {
           "/onboarding",
           "/auth/nonce",
           "/auth/verify",
+          "/auth/logout",
           "/events",
           "/account",
           "/account/fund",
@@ -438,6 +439,23 @@ const server = createServer(async (request, response) => {
         roles,
         expiresAt: new Date(claims.exp * 1000).toISOString(),
         tokenType: "Bearer"
+      });
+    }
+
+    if (request.method === "POST" && pathname === "/auth/logout") {
+      // Revoke the current JWT by its `jti`. Requires authentication so a
+      // random caller can't revoke someone else's token.
+      const auth = await authMiddleware(request, url);
+      const jti = auth.claims?.jti;
+      const exp = auth.claims?.exp;
+      if (jti && Number.isFinite(exp)) {
+        const ttlSeconds = Math.max(1, exp - Math.floor(Date.now() / 1000));
+        await stateStore.revokeToken?.(jti, ttlSeconds);
+      }
+      return respond(response, 200, {
+        status: "logged_out",
+        wallet: auth.wallet,
+        jti
       });
     }
 

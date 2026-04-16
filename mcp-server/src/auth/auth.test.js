@@ -382,3 +382,40 @@ test("requireAuth in permissive mode rejects unauthorized wallets for role-gated
     (error) => error instanceof AuthorizationError && error.code === "missing_role"
   );
 });
+
+test("requireAuth rejects a token whose jti has been revoked", async () => {
+  const authConfig = {
+    secrets: [LONG_SECRET],
+    signingSecret: LONG_SECRET,
+    permissive: false,
+    strict: true,
+    adminWallets: new Set(),
+    verifierWallets: new Set()
+  };
+  const store = new MemoryStateStore();
+  const middleware = createAuthMiddleware({ authConfig, stateStore: store, logger: silentLogger() });
+  const { token, claims } = signToken(
+    { sub: "0xffffffffffffffffffffffffffffffffffffffff", roles: [] },
+    { secret: LONG_SECRET, expiresInSeconds: 60 }
+  );
+  await store.revokeToken(claims.jti, 60);
+  const request = { method: "GET", headers: { authorization: `Bearer ${token}` } };
+  const url = new URL("http://localhost/api/account");
+  await assert.rejects(
+    () => middleware(request, url),
+    (error) => error instanceof AuthenticationError && error.code === "token_revoked"
+  );
+});
+
+test("MemoryStateStore revokeToken expires after its TTL", async () => {
+  const store = new MemoryStateStore();
+  await store.revokeToken("jti-x", 0.01);
+  assert.equal(await store.isTokenRevoked("jti-x"), true);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(await store.isTokenRevoked("jti-x"), false);
+});
+
+test("MemoryStateStore isTokenRevoked is false for unknown jti", async () => {
+  const store = new MemoryStateStore();
+  assert.equal(await store.isTokenRevoked("never-seen"), false);
+});

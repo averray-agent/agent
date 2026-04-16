@@ -724,8 +724,11 @@ function wireAuthControls() {
     }
   });
 
-  signOutBtn?.addEventListener("click", () => {
-    signOut();
+  signOutBtn?.addEventListener("click", async () => {
+    // `signOut` awaits a best-effort server-side revocation; we fire-and-forget
+    // here so the UI still updates immediately. Any failure is caught inside
+    // signOut() and the local session is cleared regardless.
+    void signOut();
     stopEventStream?.();
     stopEventStream = undefined;
     state.wallet = "";

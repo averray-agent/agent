@@ -129,7 +129,7 @@ export async function createPlatformRuntime() {
   );
   void eventListener?.start?.();
 
-  const authMiddleware = createAuthMiddleware({ authConfig, logger });
+  const authMiddleware = createAuthMiddleware({ authConfig, stateStore, logger });
   const rateLimiter = createRateLimiter({ stateStore, logger });
   const rateLimitConfig = loadRateLimitConfig();
   const httpConfig = loadHttpConfig();
