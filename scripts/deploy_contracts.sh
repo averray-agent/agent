@@ -177,6 +177,28 @@ send_tx "$TREASURY_POLICY" "setDisputeLossReliabilityPenalty(uint256)" "$DISPUTE
 echo "Configuring pauser: $PAUSER_ADDRESS"
 send_tx "$TREASURY_POLICY" "setPauser(address)" "$PAUSER_ADDRESS"
 
+# Optional: deploy + register the MockVDotAdapter for testnet demos.
+# Guarded behind WITH_VDOT_MOCK=1 so mainnet deploys can't accidentally
+# enable the simulateYield governance knob.
+VDOT_ADAPTER=""
+VDOT_STRATEGY_ID=""
+if [[ "${WITH_VDOT_MOCK:-}" == "1" ]]; then
+  if [[ "$PROFILE" == "mainnet" ]]; then
+    fail "WITH_VDOT_MOCK=1 is not allowed on PROFILE=mainnet (see docs/strategies/vdot.md for the real mainnet path)"
+  fi
+  VDOT_STRATEGY_ID="${VDOT_STRATEGY_ID_HEX:-0x56444f545f56315f4d4f434b0000000000000000000000000000000000000000}"  # bytes32("VDOT_V1_MOCK")
+  echo "Deploying MockVDotAdapter"
+  VDOT_ADAPTER="$(extract_address "$(forge_deploy contracts/strategies/MockVDotAdapter.sol:MockVDotAdapter --constructor-args "$TREASURY_POLICY" "$TOKEN_ADDRESS" "$VDOT_STRATEGY_ID")")"
+  echo "MockVDotAdapter:         $VDOT_ADAPTER"
+  # The adapter must be a service operator so AgentAccountCore (a future
+  # wiring PR) can route allocateIdleFunds → adapter.deposit calls through
+  # policy-gated paths. Also mark it as an approved strategy so the
+  # registry accepts it.
+  send_tx "$TREASURY_POLICY" "setApprovedStrategy(address,bool)" "$VDOT_ADAPTER" true
+  send_tx "$TREASURY_POLICY" "setServiceOperator(address,bool)" "$VDOT_ADAPTER" true
+  send_tx "$STRATEGY_REGISTRY" "registerStrategy(address)" "$VDOT_ADAPTER"
+fi
+
 # Ownership transfer last so all earlier config calls succeed while the
 # deployer still holds the owner role. After this the deployer cannot touch
 # admin operations — only the multisig (or whatever address OWNER points at)
@@ -184,6 +206,18 @@ send_tx "$TREASURY_POLICY" "setPauser(address)" "$PAUSER_ADDRESS"
 if [[ "$OWNER_ADDRESS" != "$DEPLOYER_ADDRESS" ]]; then
   echo "Transferring ownership to: $OWNER_ADDRESS"
   send_tx "$TREASURY_POLICY" "transferOwnership(address)" "$OWNER_ADDRESS"
+fi
+
+STRATEGIES_JSON="[]"
+if [[ -n "$VDOT_ADAPTER" ]]; then
+  STRATEGIES_JSON="[
+    {
+      \"strategyId\": \"$VDOT_STRATEGY_ID\",
+      \"adapter\": \"$VDOT_ADAPTER\",
+      \"kind\": \"mock_vdot\",
+      \"riskLabel\": \"Mock vDOT liquid staking (testnet). Not a real yield source.\"
+    }
+  ]"
 fi
 
 cat > "$manifest_path" <<JSON
@@ -203,7 +237,8 @@ cat > "$manifest_path" <<JSON
     "reputationSbt": "$REPUTATION_SBT",
     "escrowCore": "$ESCROW_CORE",
     "token": "$TOKEN_ADDRESS"
-  }
+  },
+  "strategies": $STRATEGIES_JSON
 }
 JSON
 echo "Wrote $manifest_path"

@@ -28,6 +28,7 @@ const {
   rateLimiter,
   rateLimitConfig,
   httpConfig,
+  strategies,
   trustProxy,
   logger,
   metrics,
@@ -204,6 +205,7 @@ function metricPathLabel(pathname) {
     "/jobs/claim",
     "/jobs/submit",
     "/jobs/tiers",
+    "/strategies",
     "/admin/jobs",
     "/account",
     "/account/fund",
@@ -294,6 +296,7 @@ const server = createServer(async (request, response) => {
           "/sessions",
           "/jobs",
           "/jobs/tiers",
+          "/strategies",
           "/jobs/preflight",
           "/jobs/recommendations",
           "/gas/health",
@@ -351,6 +354,22 @@ const server = createServer(async (request, response) => {
 
     if (request.method === "GET" && pathname === "/jobs") {
       return respond(response, 200, service.listJobs());
+    }
+
+    if (request.method === "GET" && pathname === "/strategies") {
+      // Public read: which yield/strategy adapters are registered for
+      // this deployment. Populated from STRATEGIES_JSON env (copied from
+      // the deployment manifest). Returns an empty list when no strategy
+      // adapter is registered — that's the expected state on dev/Anvil.
+      return respond(
+        response,
+        200,
+        {
+          strategies,
+          docs: "https://github.com/depre-dev/agent/blob/main/docs/strategies/vdot.md"
+        },
+        { "cache-control": "public, max-age=300" }
+      );
     }
 
     if (request.method === "GET" && pathname === "/jobs/tiers") {

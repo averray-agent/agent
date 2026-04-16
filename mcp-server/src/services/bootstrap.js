@@ -133,6 +133,7 @@ export async function createPlatformRuntime() {
   const rateLimiter = createRateLimiter({ stateStore, logger });
   const rateLimitConfig = loadRateLimitConfig();
   const httpConfig = loadHttpConfig();
+  const strategies = loadStrategiesConfig(process.env, { logger });
   const trustProxy = parseBooleanEnv(process.env.TRUST_PROXY);
   if (authConfig.permissive) {
     logger.warn(
@@ -153,6 +154,7 @@ export async function createPlatformRuntime() {
     rateLimiter,
     rateLimitConfig,
     httpConfig,
+    strategies,
     trustProxy,
     logger,
     metrics,
@@ -233,4 +235,50 @@ function parseBooleanEnv(raw) {
     return false;
   }
   return ["1", "true", "yes", "on"].includes(String(raw).trim().toLowerCase());
+}
+
+/**
+ * Load the list of registered strategy adapters the backend should
+ * surface at `GET /strategies`. Operators populate `STRATEGIES_JSON`
+ * with the `strategies` array copied verbatim from the deployment
+ * manifest (deployments/<profile>.json). Invalid JSON logs a warning and
+ * falls back to an empty list rather than crashing the boot — strategy
+ * discovery is a nice-to-have, not a boot-blocking dependency.
+ */
+export function loadStrategiesConfig(env = process.env, { logger = console } = {}) {
+  const raw = (env.STRATEGIES_JSON ?? "").trim();
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      throw new Error("STRATEGIES_JSON must decode to an array");
+    }
+    return parsed.map((entry, idx) => normaliseStrategyEntry(entry, idx));
+  } catch (error) {
+    logger.warn?.(
+      { err: error instanceof Error ? error : new Error(String(error)) },
+      "strategies.config_parse_failed"
+    );
+    return [];
+  }
+}
+
+function normaliseStrategyEntry(entry, idx) {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    throw new Error(`strategies[${idx}] must be an object`);
+  }
+  const { strategyId, adapter, kind, riskLabel, asset } = entry;
+  if (typeof strategyId !== "string" || !/^0x[a-fA-F0-9]{64}$/u.test(strategyId)) {
+    throw new Error(`strategies[${idx}].strategyId must be 0x + 32-byte hex`);
+  }
+  if (typeof adapter !== "string" || !/^0x[a-fA-F0-9]{40}$/u.test(adapter)) {
+    throw new Error(`strategies[${idx}].adapter must be 0x + 20-byte EVM address`);
+  }
+  return {
+    strategyId,
+    adapter: adapter.toLowerCase(),
+    kind: typeof kind === "string" ? kind : "unknown",
+    riskLabel: typeof riskLabel === "string" ? riskLabel : "",
+    asset: typeof asset === "string" && /^0x[a-fA-F0-9]{40}$/u.test(asset) ? asset.toLowerCase() : undefined
+  };
 }

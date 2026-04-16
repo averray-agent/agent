@@ -357,6 +357,16 @@ test("http smoke: /agents/:wallet rejects non-address path segments", { skip: !R
   });
 });
 
+test("http smoke: /strategies defaults to empty when STRATEGIES_JSON is unset", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const response = await fetch(`${base}/strategies`);
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.deepEqual(body.strategies, []);
+    assert.ok(typeof body.docs === "string" && body.docs.includes("vdot"));
+  });
+});
+
 test("http smoke: /jobs/tiers returns the public tier ladder without auth", { skip: !RUN }, async () => {
   await runWithServer(async (base) => {
     const response = await fetch(`${base}/jobs/tiers`);
