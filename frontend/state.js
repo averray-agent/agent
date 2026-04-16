@@ -8,6 +8,7 @@ export const state = {
   recommendations: [],
   catalog: [],
   history: [],
+  historyFilter: "all",
   jobHistory: [],
   catalogJobActivity: [],
   catalogActivityFilter: "all",

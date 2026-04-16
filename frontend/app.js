@@ -168,7 +168,6 @@ async function refreshWalletPanels() {
   renderRecommendations(recommendations);
   renderHistory(history);
   setText("job-count", `${recommendations.length} recommendations`);
-  setText("history-count", `${history.length} recent sessions`);
 
   if (state.selectedJobId) {
     const job = await loadJobDefinitionWithPreflight(state.selectedJobId);
@@ -230,7 +229,6 @@ async function loadHistoryForCurrentWallet() {
   const history = await readJson(`/api/sessions?wallet=${encodeURIComponent(state.wallet)}&limit=8`);
   state.history = history;
   renderHistory(history);
-  setText("history-count", `${history.length} recent sessions`);
 }
 
 async function loadSelectedJobHistory() {
@@ -310,7 +308,6 @@ async function loadWallet(wallet) {
   renderRecommendations(recommendations);
   renderHistory(history);
   setText("job-count", `${recommendations.length} recommendations`);
-  setText("history-count", `${history.length} recent sessions`);
   setWalletFeedback(`Loaded live data for ${wallet}.`, "success");
   setText("funding-wallet-value", wallet);
   localStorage.setItem("averray:last-wallet", wallet);
@@ -552,6 +549,13 @@ function wireHistorySelection(historyList) {
   });
 }
 
+function wireHistoryFilter(historyFilter) {
+  historyFilter?.addEventListener("change", () => {
+    state.historyFilter = historyFilter.value || "all";
+    renderHistory(state.history);
+  });
+}
+
 function wireJobRunSelection() {
   const detailHistory = document.getElementById("job-detail-history");
   detailHistory?.addEventListener("click", async (event) => {
@@ -709,7 +713,7 @@ function wireAuthControls() {
     setAuthFeedback("Waiting for wallet signature...", "loading");
     try {
       const result = await signIn();
-      setAuthFeedback(`Signed in as ${result.wallet}. Loading your workspace...`, "success");
+      setAuthFeedback(`Signed in as ${result.wallet}. Loading your operator workspace...`, "success");
       await loadWallet(result.wallet);
       setAuthFeedback(`Signed in as ${result.wallet}. Token expires ${result.expiresAt}.`, "success");
     } catch (error) {
@@ -731,7 +735,7 @@ function wireAuthControls() {
     state.session = undefined;
     state.verification = undefined;
     state.activity = [];
-    setAuthFeedback("Signed out. Sign in again to resume live data.", "neutral");
+    setAuthFeedback("Signed out. Sign in again to reopen the operator workspace.", "neutral");
     // Clear the wallet-scoped panels so stale data doesn't linger on screen.
     updateAccount({ wallet: "", liquid: {}, reserved: {}, strategyAllocated: {}, collateralLocked: {}, jobStakeLocked: {}, debtOutstanding: {} });
     updateReputation({ skill: 0, reliability: 0, economic: 0, tier: "starter" });
@@ -741,7 +745,6 @@ function wireAuthControls() {
     renderHistory([]);
     renderActivityFeed([]);
     setText("job-count", "0 recommendations");
-    setText("history-count", "0 recent sessions");
     setText("funding-wallet-value", "No wallet signed in");
     setText("auth-wallet-value", "No wallet signed in");
   });
@@ -764,6 +767,7 @@ async function boot() {
   const refreshCatalogButton = document.getElementById("refresh-catalog-button");
   const catalogList = document.getElementById("catalog-list");
   const historyList = document.getElementById("history-list");
+  const historyFilter = document.getElementById("history-filter");
   const verifierModeSelect = document.getElementById("poster-verifier-mode");
   const catalogActivityFilter = document.getElementById("catalog-activity-filter");
 
@@ -803,7 +807,7 @@ async function boot() {
       renderRecommendations([]);
     }
   } else {
-    setAuthFeedback("Sign in with your wallet to load balances, reputation, and the action flow.", "neutral");
+    setAuthFeedback("Sign in with your wallet to unlock balances, reputation, and the worker action flow.", "neutral");
   }
 
   wireAuthControls();
@@ -811,6 +815,7 @@ async function boot() {
   wireJobSelection(jobList);
   wireCatalogSelection(catalogList);
   wireHistorySelection(historyList);
+  wireHistoryFilter(historyFilter);
   wireJobRunSelection();
   wireCatalogActivitySelection();
   wireCatalogActivityFilter(catalogActivityFilter);

@@ -366,6 +366,22 @@ function catalogFilterLabel(filter) {
   }
 }
 
+function filterHistoryEntries(entries) {
+  const filter = state.historyFilter ?? "all";
+  switch (filter) {
+    case "active":
+      return entries.filter((entry) => ["claimed", "submitted", "verifying", "rejected", "disputed"].includes(entry.status));
+    case "approved":
+      return entries.filter((entry) => entry.verification?.outcome === "approved" || entry.status === "resolved");
+    case "rejected":
+      return entries.filter((entry) => entry.verification?.outcome === "rejected" || entry.status === "rejected");
+    case "disputed":
+      return entries.filter((entry) => entry.status === "disputed" || entry.verification?.outcome === "disputed");
+    default:
+      return entries;
+  }
+}
+
 function renderFundingReadiness() {
   const readiness = getFundingReadiness();
   setStatusPill("funding-readiness-pill", readiness.label, readiness.tone);
@@ -385,7 +401,9 @@ export function renderActivityFeed(entries = state.activity) {
 
   if (!entries.length) {
     root.innerHTML =
-      '<p class="empty-state">Sign in and keep this page open to watch claim, verification, stake, and reputation events arrive in real time.</p>';
+      state.wallet
+        ? '<p class="empty-state">Realtime activity will appear here as this wallet claims jobs, submits evidence, receives verifier outcomes, and moves stake or reputation on-chain.</p>'
+        : '<p class="empty-state">Sign in and keep this page open to watch claim, verification, stake, and reputation events arrive in real time.</p>';
     return;
   }
 
@@ -427,7 +445,9 @@ export function renderSessionDetail() {
   if (!session?.sessionId) {
     count.textContent = "Awaiting session";
     root.innerHTML =
-      '<p class="empty-state">Claim a job or open a past run to inspect session metadata, settlement status, and impact notes here.</p>';
+      state.wallet
+        ? '<p class="empty-state">Open any run from history or claim a job to inspect session metadata, settlement status, and impact notes here.</p>'
+        : '<p class="empty-state">Sign in and open a run to inspect session metadata, settlement status, and impact notes here.</p>';
     return;
   }
 
@@ -501,7 +521,9 @@ export function renderRecommendations(recommendations) {
   if (!root) return;
 
   if (!recommendations.length) {
-    root.innerHTML = '<p class="empty-state">No recommendations returned for this wallet yet.</p>';
+    root.innerHTML = state.wallet
+      ? '<p class="empty-state">No recommendations are ready for this wallet yet. Try funding Mock DOT, raising reputation, or creating a fresh job from the poster panel.</p>'
+      : '<p class="empty-state">Sign in to load recommendations tailored to the active worker wallet.</p>';
     return;
   }
 
@@ -536,7 +558,7 @@ export function renderCatalog(jobs) {
   if (!root) return;
 
   if (!jobs.length) {
-    root.innerHTML = '<p class="empty-state">No jobs are live yet.</p>';
+    root.innerHTML = '<p class="empty-state">No jobs are live yet. Publish one from the poster panel to seed the live catalog.</p>';
     return;
   }
 
@@ -568,14 +590,33 @@ export function renderCatalog(jobs) {
 
 export function renderHistory(entries) {
   const root = document.getElementById("history-list");
+  const count = document.getElementById("history-count");
   if (!root) return;
 
+  const filteredEntries = filterHistoryEntries(entries);
+  const approvedRuns = entries.filter((entry) => entry.verification?.outcome === "approved" || entry.status === "resolved").length;
+  const activeRuns = entries.filter((entry) => ["claimed", "submitted", "verifying", "rejected", "disputed"].includes(entry.status)).length;
+  const rejectedRuns = entries.filter((entry) => entry.verification?.outcome === "rejected" || entry.status === "rejected").length;
+  const disputedRuns = entries.filter((entry) => entry.status === "disputed" || entry.verification?.outcome === "disputed").length;
+
+  if (count) {
+    count.textContent = `${filteredEntries.length} shown · ${entries.length} total · ${activeRuns} active · ${approvedRuns} approved · ${rejectedRuns} rejected · ${disputedRuns} disputed`;
+  }
+
   if (!entries.length) {
-    root.innerHTML = '<p class="empty-state">No sessions recorded for this wallet yet.</p>';
+    root.innerHTML = state.wallet
+      ? '<p class="empty-state">This wallet has not run any jobs yet. Claim a job to start building session history.</p>'
+      : '<p class="empty-state">Sign in to load the recent session history for the active worker wallet.</p>';
     return;
   }
 
-  const cards = entries.map((entry) => {
+  if (!filteredEntries.length) {
+    root.innerHTML =
+      '<p class="empty-state">No sessions match the current filter yet. Switch filters or open another run state from the full history.</p>';
+    return;
+  }
+
+  const cards = filteredEntries.map((entry) => {
     const isCurrent = entry.sessionId === state.session?.sessionId;
     const updated = entry.updatedAt
       ? new Date(entry.updatedAt).toLocaleString("en-CH", { dateStyle: "short", timeStyle: "short" })
@@ -611,9 +652,9 @@ export function renderJobDetail(job, jobHistory) {
   if (!summaryRoot || !historyRoot || !historyCount) return;
 
   if (!job) {
-    summaryRoot.innerHTML = '<p class="empty-state">Select a job to inspect its verifier, rules, and recent runs.</p>';
-    historyRoot.innerHTML = '<p class="empty-state">No job selected yet.</p>';
-    historyCount.textContent = "Awaiting selection";
+    summaryRoot.innerHTML = '<p class="empty-state">Select a job to inspect its verifier rules, stake requirement, and recent run history for this wallet.</p>';
+    historyRoot.innerHTML = '<p class="empty-state">Job-specific run history will appear here after you select a job.</p>';
+    historyCount.textContent = "No job selected";
     return;
   }
 
@@ -622,7 +663,7 @@ export function renderJobDetail(job, jobHistory) {
 
   const latestRunLabel = latestRun
     ? `${latestRun.status} · ${latestRun.verification?.reasonCode ?? "pending verification"}`
-    : "No runs yet for this wallet.";
+    : "This wallet has not run the selected job yet.";
 
   renderHtml(
     summaryRoot,
@@ -679,7 +720,7 @@ export function renderJobDetail(job, jobHistory) {
   historyCount.textContent = `${jobHistory.length} runs for this job`;
 
   if (!jobHistory.length) {
-    historyRoot.innerHTML = '<p class="empty-state">No runs recorded for this job and wallet yet.</p>';
+    historyRoot.innerHTML = '<p class="empty-state">This wallet has not run the selected job yet. Claim it to create the first session.</p>';
     return;
   }
 
@@ -718,9 +759,9 @@ export function renderCatalogJobActivity(job, entries) {
   if (!summaryRoot || !historyRoot || !countRoot) return;
 
   if (!job) {
-    summaryRoot.innerHTML = '<p class="empty-state">Load a catalog job to inspect poster-side activity and worker runs.</p>';
-    historyRoot.innerHTML = '<p class="empty-state">No catalog job selected yet.</p>';
-    countRoot.textContent = "Awaiting selection";
+    summaryRoot.innerHTML = '<p class="empty-state">Load any catalog job to inspect worker activity, outcomes, and poster-side monitoring metrics.</p>';
+    historyRoot.innerHTML = '<p class="empty-state">Poster-side run activity will appear here after you load a catalog job.</p>';
+    countRoot.textContent = "No job selected";
     return;
   }
 
@@ -738,7 +779,7 @@ export function renderCatalogJobActivity(job, entries) {
   } · TTL ${job.claimTtlSeconds}s · retries ${job.retryLimit}`;
   const latestRunLabel = latestRun
     ? `${latestRun.wallet ?? "unknown_wallet"} · ${latestRun.status} · ${latestRun.verification?.reasonCode ?? "pending verification"}`
-    : "No runs recorded for this job yet.";
+    : "No worker runs have been recorded for this job yet.";
   const monitoringFocus = activeRuns
     ? `${activeRuns} run(s) still need poster attention across claim, submit, reject, or dispute stages.`
     : "No active runs right now. This job is currently quiet.";
@@ -790,14 +831,16 @@ export function renderCatalogJobActivity(job, entries) {
   countRoot.textContent = `${filteredEntries.length} ${filterLabel} runs · ${entries.length} total`;
 
   if (!entries.length) {
-    historyRoot.innerHTML = '<p class="empty-state">No poster-side activity recorded for this job yet.</p>';
+    historyRoot.innerHTML = '<p class="empty-state">No worker activity has been recorded for this job yet. Once claims start, runs will appear here.</p>';
     return;
   }
 
   if (!filteredEntries.length) {
     renderHtml(
       historyRoot,
-      html`<p class="empty-state">No ${filterLabel} runs match the current filter for this job yet.</p>`
+      html`<p class="empty-state">
+        No ${filterLabel} runs match the current filter for this job yet. Switch filters to inspect other worker outcomes.
+      </p>`
     );
     return;
   }
