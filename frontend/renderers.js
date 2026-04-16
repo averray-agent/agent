@@ -328,6 +328,37 @@ function getExecutionState() {
   };
 }
 
+function filterCatalogEntries(entries) {
+  const filter = state.catalogActivityFilter ?? "all";
+  switch (filter) {
+    case "active":
+      return entries.filter((entry) => ["claimed", "submitted", "verifying", "rejected", "disputed"].includes(entry.status));
+    case "approved":
+      return entries.filter((entry) => entry.verification?.outcome === "approved" || entry.status === "resolved");
+    case "rejected":
+      return entries.filter((entry) => entry.verification?.outcome === "rejected" || entry.status === "rejected");
+    case "disputed":
+      return entries.filter((entry) => entry.status === "disputed" || entry.verification?.outcome === "disputed");
+    default:
+      return entries;
+  }
+}
+
+function catalogFilterLabel(filter) {
+  switch (filter) {
+    case "active":
+      return "active";
+    case "approved":
+      return "approved";
+    case "rejected":
+      return "rejected";
+    case "disputed":
+      return "disputed";
+    default:
+      return "total";
+  }
+}
+
 function renderFundingReadiness() {
   const readiness = getFundingReadiness();
   setStatusPill("funding-readiness-pill", readiness.label, readiness.tone);
@@ -670,8 +701,13 @@ export function renderCatalogJobActivity(job, entries) {
   }
 
   const approvedRuns = entries.filter((entry) => entry.verification?.outcome === "approved").length;
+  const rejectedRuns = entries.filter((entry) => entry.verification?.outcome === "rejected" || entry.status === "rejected").length;
+  const disputedRuns = entries.filter((entry) => entry.status === "disputed" || entry.verification?.outcome === "disputed").length;
+  const activeRuns = entries.filter((entry) => ["claimed", "submitted", "verifying", "rejected", "disputed"].includes(entry.status)).length;
   const distinctWallets = new Set(entries.map((entry) => entry.wallet).filter(Boolean)).size;
   const latestRun = entries[0];
+  const filteredEntries = filterCatalogEntries(entries);
+  const filterLabel = catalogFilterLabel(state.catalogActivityFilter);
 
   summaryRoot.innerHTML = `
     <div class="job-detail-grid">
@@ -691,6 +727,14 @@ export function renderCatalogJobActivity(job, entries) {
         <dt>Workers / approved</dt>
         <dd>${distinctWallets} / ${approvedRuns}</dd>
       </div>
+      <div class="detail-stat">
+        <dt>Active runs</dt>
+        <dd>${activeRuns}</dd>
+      </div>
+      <div class="detail-stat">
+        <dt>Rejected / disputed</dt>
+        <dd>${rejectedRuns} / ${disputedRuns}</dd>
+      </div>
       <div class="detail-stat detail-span">
         <dt>Poster summary</dt>
         <dd>${job.requiresSponsoredGas ? "Sponsored gas enabled" : "Workers self-fund gas"} · TTL ${job.claimTtlSeconds}s · retries ${job.retryLimit}</dd>
@@ -699,17 +743,30 @@ export function renderCatalogJobActivity(job, entries) {
         <dt>Latest run</dt>
         <dd>${latestRun ? `${latestRun.wallet ?? "unknown_wallet"} · ${latestRun.status} · ${latestRun.verification?.reasonCode ?? "pending verification"}` : "No runs recorded for this job yet."}</dd>
       </div>
+      <div class="detail-stat detail-span">
+        <dt>Monitoring focus</dt>
+        <dd>${
+          activeRuns
+            ? `${activeRuns} run(s) still need poster attention across claim, submit, reject, or dispute stages.`
+            : "No active runs right now. This job is currently quiet."
+        }</dd>
+      </div>
     </div>
   `;
 
-  countRoot.textContent = `${entries.length} runs across the catalog`;
+  countRoot.textContent = `${filteredEntries.length} ${filterLabel} runs · ${entries.length} total`;
 
   if (!entries.length) {
     historyRoot.innerHTML = '<p class="empty-state">No poster-side activity recorded for this job yet.</p>';
     return;
   }
 
-  historyRoot.innerHTML = entries
+  if (!filteredEntries.length) {
+    historyRoot.innerHTML = `<p class="empty-state">No ${filterLabel} runs match the current filter for this job yet.</p>`;
+    return;
+  }
+
+  historyRoot.innerHTML = filteredEntries
     .map(
       (entry) => `
         <article class="job-run-card ${entry.sessionId === state.session?.sessionId ? "job-selected" : ""}">

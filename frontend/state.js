@@ -10,6 +10,7 @@ export const state = {
   history: [],
   jobHistory: [],
   catalogJobActivity: [],
+  catalogActivityFilter: "all",
   selectedJobId: "",
   selectedJob: undefined,
   session: undefined,

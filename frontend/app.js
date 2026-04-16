@@ -590,6 +590,13 @@ function wireCatalogActivitySelection() {
   });
 }
 
+function wireCatalogActivityFilter(filterSelect) {
+  filterSelect?.addEventListener("change", () => {
+    state.catalogActivityFilter = filterSelect.value || "all";
+    renderCatalogJobActivity(state.selectedJob, state.catalogJobActivity);
+  });
+}
+
 function wireActionButtons({ claimButton, submitButton, verifyButton, refreshButton, fundButton }) {
   claimButton?.addEventListener("click", async () => {
     try {
@@ -758,6 +765,7 @@ async function boot() {
   const catalogList = document.getElementById("catalog-list");
   const historyList = document.getElementById("history-list");
   const verifierModeSelect = document.getElementById("poster-verifier-mode");
+  const catalogActivityFilter = document.getElementById("catalog-activity-filter");
 
   syncPosterDefaults(true);
   await loadPlatformStatus();
@@ -805,6 +813,7 @@ async function boot() {
   wireHistorySelection(historyList);
   wireJobRunSelection();
   wireCatalogActivitySelection();
+  wireCatalogActivityFilter(catalogActivityFilter);
   wireActionButtons({ claimButton, submitButton, verifyButton, refreshButton, fundButton });
   wirePosterControls({ posterForm, refreshCatalogButton, verifierModeSelect });
   renderActivityFeed([]);

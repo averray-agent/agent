@@ -537,7 +537,19 @@ summary</textarea>
             <section class="catalog-detail-shell">
               <div class="detail-head">
                 <h3>Poster detail</h3>
-                <span id="catalog-job-count" class="section-note">Awaiting selection</span>
+                <div class="detail-actions">
+                  <label class="inline-filter" for="catalog-activity-filter">
+                    <span>Run filter</span>
+                    <select id="catalog-activity-filter">
+                      <option value="all" selected>All runs</option>
+                      <option value="active">Active</option>
+                      <option value="approved">Approved</option>
+                      <option value="rejected">Rejected</option>
+                      <option value="disputed">Disputed</option>
+                    </select>
+                  </label>
+                  <span id="catalog-job-count" class="section-note">Awaiting selection</span>
+                </div>
               </div>
               <div id="catalog-job-summary" class="job-detail-summary">
                 <p class="empty-state">Load a catalog job to inspect poster-side activity and worker runs.</p>
