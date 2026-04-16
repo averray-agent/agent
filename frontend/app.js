@@ -1,3 +1,4 @@
+import { getAuthSnapshot, getAuthWallet, onAuthChange, signIn, signOut } from "./auth.js";
 import { DEFAULT_ESCALATION_MESSAGE, DEFAULT_POSTER_TERMS, DEFAULT_WALLET } from "./constants.js";
 import { startEventStream } from "./events.js";
 import { postJson, readJson } from "./http-client.js";
@@ -24,6 +25,56 @@ import { setButtonBusy, setOverallStatus, setText, showToast } from "./ui-helper
 
 let stopEventStream = undefined;
 let liveRefreshTimer = undefined;
+let authMode = "strict";
+
+function shortenWallet(wallet) {
+  if (!wallet) return "";
+  return wallet.length > 10 ? `${wallet.slice(0, 6)}…${wallet.slice(-4)}` : wallet;
+}
+
+function setAuthFeedback(text, tone = "neutral") {
+  const feedback = document.getElementById("auth-feedback");
+  if (!feedback) return;
+  feedback.textContent = text;
+  feedback.setAttribute("data-tone", tone);
+}
+
+function renderAuthUi(snapshot = getAuthSnapshot()) {
+  const panel = document.getElementById("auth-panel");
+  const signInBtn = document.getElementById("auth-signin-button");
+  const signOutBtn = document.getElementById("auth-signout-button");
+  const pill = document.getElementById("auth-session-pill");
+  const walletForm = document.getElementById("wallet-form");
+
+  if (panel) {
+    panel.setAttribute("data-auth", snapshot.authenticated ? "signed-in" : "signed-out");
+  }
+  if (signInBtn) {
+    signInBtn.hidden = snapshot.authenticated;
+    signInBtn.textContent = snapshot.authenticated ? "Re-sign" : "Connect & Sign In";
+  }
+  if (signOutBtn) {
+    signOutBtn.hidden = !snapshot.authenticated;
+  }
+  if (pill) {
+    pill.hidden = false;
+    if (snapshot.authenticated) {
+      pill.className = "status-pill status-ok";
+      pill.textContent = `Signed in · ${shortenWallet(snapshot.wallet)}`;
+      pill.title = `Signed in as ${snapshot.wallet}\nToken expires ${snapshot.expiresAt}`;
+    } else {
+      pill.className = "status-pill status-pending";
+      pill.textContent = "Not signed in";
+      pill.title = snapshot.lastReason ? `Last reason: ${snapshot.lastReason}` : "";
+    }
+  }
+
+  // The legacy wallet-input form is only useful when the API is in permissive
+  // mode — otherwise every request will be rejected until the user signs in.
+  if (walletForm) {
+    walletForm.hidden = authMode !== "permissive" || snapshot.authenticated;
+  }
+}
 
 async function runWithBusyButton(button, busyLabel, action) {
   setButtonBusy(button, true, busyLabel);
@@ -585,6 +636,7 @@ async function loadPlatformStatus() {
   try {
     const [health, onboarding, index] = await Promise.all([readJson("/api/health"), readJson("/api/onboarding"), readJson("/index/")]);
 
+    authMode = health?.auth?.mode ?? onboarding?.authMode ?? authMode;
     setText("api-status", health.status === "ok" ? "Healthy" : "Unexpected");
     setText("index-status", index.status === "ok" ? "Serving" : "Unexpected");
     setText("protocol-status", onboarding.protocols.join(" / ").toUpperCase());
@@ -598,6 +650,44 @@ async function loadPlatformStatus() {
     setText("starter-flow", "Waiting for API");
     setOverallStatus("Attention needed", "status-pending");
   }
+}
+
+function wireAuthControls() {
+  const signInBtn = document.getElementById("auth-signin-button");
+  const signOutBtn = document.getElementById("auth-signout-button");
+
+  signInBtn?.addEventListener("click", async () => {
+    setAuthFeedback("Waiting for wallet signature...", "loading");
+    try {
+      const result = await signIn();
+      setAuthFeedback(`Signed in as ${result.wallet}. Loading your workspace...`, "success");
+      await loadWallet(result.wallet);
+      setAuthFeedback(`Signed in as ${result.wallet}. Token expires ${result.expiresAt}.`, "success");
+    } catch (error) {
+      console.error(error);
+      setAuthFeedback(error.message ?? "Sign in failed.", "error");
+      showToast(error.message ?? "Sign in failed.", "error");
+    }
+  });
+
+  signOutBtn?.addEventListener("click", () => {
+    signOut();
+    stopEventStream?.();
+    stopEventStream = undefined;
+    state.wallet = "";
+    setAuthFeedback("Signed out. Sign in again to resume live data.", "neutral");
+    // Clear the wallet-scoped panels so stale data doesn't linger on screen.
+    updateAccount({ wallet: "", liquid: {}, reserved: {}, strategyAllocated: {}, collateralLocked: {}, jobStakeLocked: {}, debtOutstanding: {} });
+    updateReputation({ skill: 0, reliability: 0, economic: 0, tier: "starter" });
+    renderRecommendations([]);
+    renderHistory([]);
+    setText("job-count", "0 recommendations");
+    setText("history-count", "0 recent sessions");
+  });
+
+  onAuthChange((snapshot) => {
+    renderAuthUi(snapshot);
+  });
 }
 
 async function boot() {
@@ -614,23 +704,47 @@ async function boot() {
   const catalogList = document.getElementById("catalog-list");
   const historyList = document.getElementById("history-list");
   const verifierModeSelect = document.getElementById("poster-verifier-mode");
-  const initialWallet = localStorage.getItem("averray:last-wallet") || DEFAULT_WALLET;
 
-  if (walletInput) walletInput.value = initialWallet;
   syncPosterDefaults(true);
-
   await loadPlatformStatus();
 
+  // Render initial auth UI *after* we know the auth mode so the permissive
+  // fallback form shows up correctly on dev deployments.
+  renderAuthUi();
+
   try {
-    await Promise.all([loadWallet(initialWallet), loadCatalog()]);
+    await loadCatalog();
   } catch (error) {
     console.error(error);
-    setWalletFeedback(error.message ?? "Failed to load wallet data.", "error");
-    renderRecommendations([]);
     setPosterFeedback(error.message ?? "Failed to load poster workspace.", "error");
     showToast(error.message ?? "Failed to load poster workspace.", "error");
   }
 
+  // Bootstrap wallet loading decision tree:
+  //   1. If the user already has a valid JWT → reuse its wallet.
+  //   2. Else in permissive mode → fall back to the last-used wallet (or default).
+  //   3. Else (strict + no token) → show the sign-in prompt and wait.
+  const authenticatedWallet = getAuthWallet();
+  const permissiveWallet = authMode === "permissive"
+    ? (localStorage.getItem("averray:last-wallet") || DEFAULT_WALLET)
+    : undefined;
+  const initialWallet = authenticatedWallet ?? permissiveWallet;
+
+  if (walletInput && permissiveWallet) walletInput.value = permissiveWallet;
+
+  if (initialWallet) {
+    try {
+      await loadWallet(initialWallet);
+    } catch (error) {
+      console.error(error);
+      setWalletFeedback(error.message ?? "Failed to load wallet data.", "error");
+      renderRecommendations([]);
+    }
+  } else {
+    setAuthFeedback("Sign in with your wallet to load balances, reputation, and the action flow.", "neutral");
+  }
+
+  wireAuthControls();
   wireWalletForm(walletForm, walletInput);
   wireJobSelection(jobList);
   wireCatalogSelection(catalogList);

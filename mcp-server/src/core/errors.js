@@ -58,6 +58,18 @@ export class BorrowCapacityExceededError extends ConflictError {
   }
 }
 
+export class AuthenticationError extends AppError {
+  constructor(message = "Authentication required.", code = "unauthorized", details = undefined) {
+    super(message, { name: "AuthenticationError", code, statusCode: 401, details });
+  }
+}
+
+export class AuthorizationError extends AppError {
+  constructor(message = "Forbidden.", code = "forbidden", details = undefined) {
+    super(message, { name: "AuthorizationError", code, statusCode: 403, details });
+  }
+}
+
 export function normalizeError(error) {
   if (error instanceof AppError) {
     return error;

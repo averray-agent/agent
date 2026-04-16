@@ -111,18 +111,65 @@ To run a real hosted-stack smoke test against the production-like API:
 ```bash
 cd mcp-server
 REMOTE_E2E_BASE_URL=https://api.averray.com \
-REMOTE_E2E_WALLET=0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519 \
+REMOTE_E2E_PRIVATE_KEY=0xyour-test-agent-private-key \
 npm run demo:e2e:remote
 ```
+
+When `REMOTE_E2E_PRIVATE_KEY` is set, the script runs the full SIWE sign-in
+flow — `POST /auth/nonce` → `personal_sign` → `POST /auth/verify` — and uses
+the returned JWT on every protected call. Against a `AUTH_MODE=permissive`
+deployment you may instead supply only `REMOTE_E2E_WALLET` and skip signing.
 
 That script:
 
 - checks live API health
+- signs in with SIWE (when a private key is provided)
 - creates a unique remote job via `/admin/jobs`
 - claims it
 - submits work
 - runs verification
 - confirms the session appears in hosted history
+
+## Authentication
+
+Protected routes require a signed-in JWT issued via Sign-In with Ethereum
+(EIP-4361). The flow:
+
+```
+POST /auth/nonce   { wallet }              → { nonce, message }
+personal_sign(message) via wallet provider → signature
+POST /auth/verify  { message, signature }  → { token, wallet, expiresAt }
+```
+
+Subsequent requests pass the token as `Authorization: Bearer <token>`. For SSE
+endpoints (`/events`) the token goes as `?token=...` because the browser
+`EventSource` API cannot set custom headers — this is the only exception and
+the server logs a warning if a token is supplied via query string on any
+non-SSE route.
+
+Public routes (no auth required): `/`, `/health`, `/onboarding`, `/jobs`,
+`/jobs/definition`, `/gas/health`, `/gas/capabilities`, `/verifier/handlers`,
+`/auth/nonce`, `/auth/verify`.
+
+`AUTH_MODE=strict` (production default) rejects unauthenticated requests on
+protected routes with 401. `AUTH_MODE=permissive` (dev default) falls back to
+the legacy `?wallet=` query param and logs a warning — useful for local demos
+until every caller has been migrated.
+
+Environment variables (see `mcp-server/.env.example`):
+
+- `AUTH_MODE` — `strict` | `permissive`
+- `AUTH_JWT_SECRETS` — comma-separated HS256 secrets. First entry signs new
+  tokens; rest remain accepted during verification to support zero-downtime
+  rotation. Each must be ≥32 characters.
+- `AUTH_DOMAIN` — SIWE `domain` and expected verifier check.
+- `AUTH_CHAIN_ID` — SIWE `chainId` and expected verifier check.
+- `AUTH_TOKEN_TTL_SECONDS` (default 86400) — JWT lifetime.
+- `AUTH_NONCE_TTL_SECONDS` (default 300) — SIWE nonce lifetime.
+
+Key rotation: prepend the new secret to `AUTH_JWT_SECRETS`, redeploy, then
+drop the old secret after `AUTH_TOKEN_TTL_SECONDS` has elapsed so that every
+token issued under the old key has expired.
 
 ## Render deployment
 

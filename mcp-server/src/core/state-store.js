@@ -8,6 +8,14 @@ end
 return 0
 `;
 
+const CONSUME_NONCE_SCRIPT = `
+local value = redis.call("get", KEYS[1])
+if value then
+  redis.call("del", KEYS[1])
+end
+return value
+`;
+
 export class MemoryStateStore {
   constructor() {
     this.sessions = new Map();
@@ -18,6 +26,7 @@ export class MemoryStateStore {
     this.walletSessions = new Map();
     this.verificationResults = new Map();
     this.claimLocks = new Map();
+    this.nonces = new Map();
   }
 
   async getSession(sessionId) {
@@ -104,6 +113,37 @@ export class MemoryStateStore {
     const existing = this.claimLocks.get(lockId);
     if (existing?.owner === owner) {
       this.claimLocks.delete(lockId);
+    }
+  }
+
+  async storeNonce(nonce, wallet, ttlSeconds = 300) {
+    this._evictExpiredNonces();
+    if (this.nonces.has(nonce)) {
+      return false;
+    }
+    this.nonces.set(nonce, {
+      wallet,
+      expiresAt: Date.now() + (ttlSeconds * 1000)
+    });
+    return true;
+  }
+
+  async consumeNonce(nonce) {
+    this._evictExpiredNonces();
+    const entry = this.nonces.get(nonce);
+    if (!entry) {
+      return undefined;
+    }
+    this.nonces.delete(nonce);
+    return entry.wallet;
+  }
+
+  _evictExpiredNonces() {
+    const now = Date.now();
+    for (const [nonce, entry] of this.nonces) {
+      if (entry.expiresAt <= now) {
+        this.nonces.delete(nonce);
+      }
     }
   }
 
@@ -217,6 +257,25 @@ export class RedisStateStore {
       keys: [key],
       arguments: [owner]
     });
+  }
+
+  async storeNonce(nonce, wallet, ttlSeconds = 300) {
+    await this.connect();
+    const reply = await this.client.set(this.key("nonce", nonce), wallet, {
+      NX: true,
+      EX: ttlSeconds
+    });
+    return reply === "OK";
+  }
+
+  async consumeNonce(nonce) {
+    await this.connect();
+    const key = this.key("nonce", nonce);
+    const reply = await this.client.eval(CONSUME_NONCE_SCRIPT, {
+      keys: [key],
+      arguments: []
+    });
+    return reply ?? undefined;
   }
 
   async healthCheck() {
