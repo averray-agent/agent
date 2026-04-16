@@ -335,6 +335,31 @@ main {
   margin: 0;
 }
 
+.auth-panel {
+  margin: 0 0 1rem;
+  padding: 0.85rem 1rem;
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid var(--line);
+}
+
+.auth-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.auth-row .status-pill {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.auth-panel[data-auth="signed-in"] {
+  border-color: rgba(30, 102, 66, 0.28);
+  background: rgba(214, 234, 223, 0.45);
+}
+
 .wallet-row {
   display: flex;
   gap: 0.85rem;

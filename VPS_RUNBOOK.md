@@ -20,7 +20,7 @@ This runbook captures the production-like setup currently running on the OVH VPS
 - Discovery: [https://averray.com/.well-known/agent-tools.json](https://averray.com/.well-known/agent-tools.json)
 - App: [https://app.averray.com](https://app.averray.com)
 - API: [https://api.averray.com](https://api.averray.com)
-- API SSE: [https://app.averray.com/api/events?wallet=0x...](https://app.averray.com/api/events?wallet=0x...)
+- API SSE: `https://app.averray.com/api/events?token=<jwt>` (strict mode) or `?wallet=0x...` (permissive only)
 - Indexer: [https://index.averray.com](https://index.averray.com)
 - Gas sponsor health: [https://api.averray.com/gas/health](https://api.averray.com/gas/health)
 
@@ -81,11 +81,11 @@ From the repo checkout:
 ```bash
 cd /srv/agent-stack/app/mcp-server
 REMOTE_E2E_BASE_URL=https://api.averray.com \
-REMOTE_E2E_WALLET=0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519 \
+REMOTE_E2E_PRIVATE_KEY=0xyour-test-agent-private-key \
 npm run demo:e2e:remote
 ```
 
-This creates a unique remote job, runs the full claim/submit/verify flow, and confirms the session lands in hosted history.
+This signs in with SIWE, creates a unique remote job, runs the full claim/submit/verify flow, and confirms the session lands in hosted history. On `AUTH_MODE=permissive` deployments you may drop the private key and pass `REMOTE_E2E_WALLET=0x...` instead.
 
 ## Backups
 
@@ -157,6 +157,42 @@ Required contract env vars for the current live-chain backend:
 - `AGENT_ACCOUNT_ADDRESS`
 - `ESCROW_CORE_ADDRESS`
 - `REPUTATION_SBT_ADDRESS`
+
+Required authentication env vars (backend, strict mode):
+
+- `AUTH_MODE=strict`
+- `AUTH_JWT_SECRETS` (comma-separated HS256 secrets, each ≥32 chars)
+- `AUTH_DOMAIN=api.averray.com`
+- `AUTH_CHAIN_ID=420420422`
+
+### JWT secret rotation
+
+Zero-downtime rotation uses the multi-secret list — the **first** entry signs
+new tokens, every entry in the list is accepted at verification time.
+
+1. Generate a fresh secret (32+ chars of entropy):
+   ```bash
+   openssl rand -base64 48
+   ```
+2. Prepend it to `AUTH_JWT_SECRETS` in `/srv/agent-stack/backend.env`:
+   ```text
+   AUTH_JWT_SECRETS=<new>,<previous>
+   ```
+3. Restart the backend so new tokens are signed with the new secret:
+   ```bash
+   cd /srv/agent-stack/app
+   ./scripts/ops/redeploy-backend.sh
+   ```
+4. Wait at least `AUTH_TOKEN_TTL_SECONDS` (default 24h) so every token issued
+   under the old secret has expired.
+5. Drop the old secret:
+   ```text
+   AUTH_JWT_SECRETS=<new>
+   ```
+   and redeploy again.
+
+If a secret is believed compromised, skip the wait and cut the old secret
+immediately — every active session is invalidated and users must re-sign.
 
 Matching contract env vars for the indexer:
 

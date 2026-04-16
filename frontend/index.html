@@ -76,8 +76,19 @@
               <p class="section-note">Reads from your own API and indexer routes.</p>
             </div>
 
-            <form id="wallet-form" class="wallet-form">
-              <label class="wallet-label" for="wallet-input">Wallet address</label>
+            <div id="auth-panel" class="auth-panel" data-auth="signed-out">
+              <div class="auth-row">
+                <button id="auth-signin-button" type="button" class="primary-action">Connect &amp; Sign In</button>
+                <button id="auth-signout-button" type="button" class="secondary-action" hidden>Sign out</button>
+                <span id="auth-session-pill" class="status-pill status-pending" hidden>Not signed in</span>
+              </div>
+              <p id="auth-feedback" class="wallet-feedback">
+                Sign in with your wallet to load balances, reputation, and the action flow.
+              </p>
+            </div>
+
+            <form id="wallet-form" class="wallet-form" data-permissive-only="true" hidden>
+              <label class="wallet-label" for="wallet-input">Wallet address (permissive mode fallback)</label>
               <div class="wallet-row">
                 <input
                   id="wallet-input"
@@ -85,7 +96,6 @@
                   type="text"
                   spellcheck="false"
                   autocomplete="off"
-                  value="0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519"
                 />
                 <button type="submit">Refresh</button>
               </div>

@@ -6,6 +6,8 @@ import { loadLocalEnv } from "./env-loader.js";
 import { PimlicoClient } from "./pimlico-client.js";
 import { EventBus } from "../core/event-bus.js";
 import { EventListener } from "../blockchain/event-listener.js";
+import { loadAuthConfig } from "../auth/config.js";
+import { createAuthMiddleware } from "../auth/middleware.js";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -101,5 +103,22 @@ export function createPlatformRuntime() {
   const verifierService = new VerifierService(platformService, stateStore, gateway);
   const eventListener = gateway.isEnabled() ? new EventListener(gateway, eventBus, stateStore) : undefined;
   void eventListener?.start?.();
-  return { platformService, verifierService, gateway, pimlicoClient, stateStore, eventBus, eventListener };
+  const authConfig = loadAuthConfig();
+  const authMiddleware = createAuthMiddleware({ authConfig });
+  if (authConfig.permissive) {
+    console.warn(
+      `[auth] AUTH_MODE=permissive — legacy ?wallet= is accepted without signature. Do not use in production.`
+    );
+  }
+  return {
+    platformService,
+    verifierService,
+    gateway,
+    pimlicoClient,
+    stateStore,
+    eventBus,
+    eventListener,
+    authConfig,
+    authMiddleware
+  };
 }

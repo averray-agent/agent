@@ -1,3 +1,5 @@
+import { getAuthToken, requestReauth } from "./auth.js";
+
 const EVENT_TOPICS = [
   "session.claimed",
   "session.submitted",
@@ -28,7 +30,14 @@ export function startEventStream({ wallet, sessionId, jobId, topics = [], onEven
   if (jobId) params.set("jobId", jobId);
   if (topics.length) params.set("topics", topics.join(","));
 
+  // EventSource cannot set custom headers, so authentication piggy-backs on a
+  // short-lived JWT passed via ?token=. See mcp-server/src/auth/middleware.js
+  // which accepts this when the route is opened with `allowQueryToken: true`.
+  const token = getAuthToken();
+  if (token) params.set("token", token);
+
   const source = new EventSource(`/api/events?${params.toString()}`);
+  let reauthInFlight = false;
 
   for (const topic of EVENT_TOPICS) {
     source.addEventListener(topic, (event) => {
@@ -42,6 +51,17 @@ export function startEventStream({ wallet, sessionId, jobId, topics = [], onEven
   }
 
   source.onerror = (event) => {
+    // EventSource masks HTTP status (401 shows up as a generic error with the
+    // stream in CLOSED state). Best-effort heuristic: if we had a token and the
+    // stream is closed, assume the token expired mid-session and kick off a
+    // re-auth → caller is expected to restart the stream from its auth-change
+    // listener.
+    if (source.readyState === EventSource.CLOSED && token && !reauthInFlight) {
+      reauthInFlight = true;
+      requestReauth("sse_closed").catch((error) => {
+        console.warn("[events] re-auth failed after SSE close", error);
+      });
+    }
     onError?.(event);
   };
 
