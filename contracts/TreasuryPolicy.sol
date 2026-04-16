@@ -3,6 +3,12 @@ pragma solidity ^0.8.24;
 
 contract TreasuryPolicy {
     address public owner;
+    /// @dev Separate hot-key role authorised to flip the pause bit without
+    ///      requiring owner (multisig) signatures. Intentionally scoped to
+    ///      exactly one capability — `setPaused` — so a compromised pauser
+    ///      key can grief but cannot drain, reconfigure, or rotate roles.
+    ///      Owner can rotate or revoke the pauser at any time.
+    address public pauser;
     bool public paused;
     uint256 public dailyOutflowCap;
     uint256 public perAccountBorrowCap;
@@ -23,6 +29,7 @@ contract TreasuryPolicy {
     uint256 public outflowToday;
 
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+    event PauserUpdated(address indexed previousPauser, address indexed newPauser);
     event PauseUpdated(bool paused);
     event AssetApprovalUpdated(address indexed asset, bool approved);
     event StrategyApprovalUpdated(address indexed strategy, bool approved);
@@ -60,6 +67,11 @@ contract TreasuryPolicy {
         _;
     }
 
+    modifier onlyOwnerOrPauser() {
+        if (msg.sender != owner && msg.sender != pauser) revert Unauthorized();
+        _;
+    }
+
     modifier whenNotPaused() {
         if (paused) revert Paused();
         _;
@@ -71,7 +83,15 @@ contract TreasuryPolicy {
         owner = newOwner;
     }
 
-    function setPaused(bool newPaused) external onlyOwner {
+    /// @notice Rotate the hot-key pauser. Passing address(0) disables pause
+    ///         delegation so only the owner (multisig) can pause — useful if
+    ///         the hot key is believed compromised and needs revocation.
+    function setPauser(address newPauser) external onlyOwner {
+        emit PauserUpdated(pauser, newPauser);
+        pauser = newPauser;
+    }
+
+    function setPaused(bool newPaused) external onlyOwnerOrPauser {
         paused = newPaused;
         emit PauseUpdated(newPaused);
     }

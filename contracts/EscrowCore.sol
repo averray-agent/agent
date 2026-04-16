@@ -4,9 +4,15 @@ pragma solidity ^0.8.24;
 import {TreasuryPolicy} from "./TreasuryPolicy.sol";
 import {AgentAccountCore} from "./AgentAccountCore.sol";
 import {ReputationSBT} from "./ReputationSBT.sol";
+import {ReentrancyGuard} from "./lib/ReentrancyGuard.sol";
 
-contract EscrowCore {
+contract EscrowCore is ReentrancyGuard {
     uint256 public constant DISPUTE_WINDOW = 1 days;
+    // Caps the per-job milestone count so the settlement loop in
+    // resolveMilestone() has a known upper gas bound. 32 leaves plenty of
+    // headroom for multi-stage deliverables while ruling out griefing via
+    // unbounded arrays.
+    uint256 public constant MAX_MILESTONES = 32;
     bytes32 public constant REASON_REJECTED = bytes32("REJECTED");
     bytes32 public constant REASON_DISPUTE_LOST = bytes32("DISPUTE_LOST");
 
@@ -65,6 +71,8 @@ contract EscrowCore {
     error Unauthorized();
     error InvalidState();
     error UnknownJob();
+    error ProtocolPaused();
+    error MilestoneLimitExceeded();
 
     constructor(TreasuryPolicy policy_, AgentAccountCore accounts_, ReputationSBT reputation_) {
         policy = policy_;
@@ -88,6 +96,17 @@ contract EscrowCore {
         _;
     }
 
+    /// @dev Kill-switch: when TreasuryPolicy is paused, all state-mutating
+    ///      entrypoints on this contract revert. AgentAccountCore already
+    ///      enforces `whenNotPaused` on its mutating entrypoints, so the
+    ///      paused state already halts value movement; this modifier makes
+    ///      the escrow state machine fail fast with a clearer error instead
+    ///      of bubbling an opaque ProtocolPaused from a nested call.
+    modifier whenNotPaused() {
+        if (policy.paused()) revert ProtocolPaused();
+        _;
+    }
+
     function jobs(bytes32 jobId) external view returns (JobEscrow memory) {
         return _jobs[jobId];
     }
@@ -101,7 +120,7 @@ contract EscrowCore {
         uint256 claimTtl,
         bytes32 verifierMode,
         bytes32 category
-    ) external {
+    ) external whenNotPaused nonReentrant {
         if (_jobs[jobId].state != JobState.None) revert InvalidState();
         _jobs[jobId] = JobEscrow({
             poster: msg.sender,
@@ -135,8 +154,9 @@ contract EscrowCore {
         uint256 claimTtl,
         bytes32 verifierMode,
         bytes32 category
-    ) external {
+    ) external whenNotPaused nonReentrant {
         if (_jobs[jobId].state != JobState.None) revert InvalidState();
+        if (milestones.length == 0 || milestones.length > MAX_MILESTONES) revert MilestoneLimitExceeded();
         uint256 reward;
         for (uint256 i = 0; i < milestones.length; i++) {
             milestoneAmounts[jobId].push(milestones[i]);
@@ -164,7 +184,7 @@ contract EscrowCore {
         emit JobFunded(jobId, msg.sender, asset, total, PayoutMode.Milestone);
     }
 
-    function claimJob(bytes32 jobId) external {
+    function claimJob(bytes32 jobId) external whenNotPaused nonReentrant {
         JobEscrow storage job = _jobs[jobId];
         if (job.state == JobState.None) revert UnknownJob();
         if (job.state != JobState.Open) revert InvalidState();
@@ -183,7 +203,7 @@ contract EscrowCore {
         emit JobClaimed(jobId, msg.sender, job.claimExpiry, claimStake);
     }
 
-    function submitWork(bytes32 jobId, bytes32 evidenceHash) external {
+    function submitWork(bytes32 jobId, bytes32 evidenceHash) external whenNotPaused {
         JobEscrow storage job = _jobs[jobId];
         if (job.state != JobState.Claimed) revert InvalidState();
         if (msg.sender != job.worker) revert Unauthorized();
@@ -193,7 +213,7 @@ contract EscrowCore {
     }
 
     /// @dev Permissionless by design so any party can finalize an expired claim and reopen the job.
-    function handleClaimTimeout(bytes32 jobId) external {
+    function handleClaimTimeout(bytes32 jobId) external whenNotPaused nonReentrant {
         JobEscrow storage job = _jobs[jobId];
         if (job.state != JobState.Claimed) revert InvalidState();
         require(block.timestamp > job.claimExpiry, "NOT_EXPIRED");
@@ -210,7 +230,12 @@ contract EscrowCore {
         emit JobReopened(jobId);
     }
 
-    function resolveSinglePayout(bytes32 jobId, bool approved, bytes32 reasonCode, string calldata metadataURI) external onlyVerifier {
+    function resolveSinglePayout(bytes32 jobId, bool approved, bytes32 reasonCode, string calldata metadataURI)
+        external
+        whenNotPaused
+        nonReentrant
+        onlyVerifier
+    {
         JobEscrow storage job = _jobs[jobId];
         if (job.state != JobState.Submitted || job.payoutMode != PayoutMode.Single) revert InvalidState();
 
@@ -243,7 +268,12 @@ contract EscrowCore {
         emit JobClosed(jobId, job.worker, job.reward);
     }
 
-    function resolveMilestone(bytes32 jobId, uint256 milestoneIndex, bool approved, bytes32 reasonCode, string calldata metadataURI) external onlyVerifier {
+    function resolveMilestone(bytes32 jobId, uint256 milestoneIndex, bool approved, bytes32 reasonCode, string calldata metadataURI)
+        external
+        whenNotPaused
+        nonReentrant
+        onlyVerifier
+    {
         JobEscrow storage job = _jobs[jobId];
         if (job.state != JobState.Submitted || job.payoutMode != PayoutMode.Milestone) revert InvalidState();
         if (milestoneReleased[jobId][milestoneIndex]) revert InvalidState();
@@ -290,7 +320,7 @@ contract EscrowCore {
         }
     }
 
-    function openDispute(bytes32 jobId) external onlyParticipant(jobId) {
+    function openDispute(bytes32 jobId) external whenNotPaused onlyParticipant(jobId) {
         JobEscrow storage job = _jobs[jobId];
         if (job.state != JobState.Rejected && job.state != JobState.Submitted) revert InvalidState();
         rejectionTimestamps[jobId] = 0;
@@ -298,7 +328,7 @@ contract EscrowCore {
         emit DisputeOpened(jobId, msg.sender);
     }
 
-    function finalizeRejectedJob(bytes32 jobId) external {
+    function finalizeRejectedJob(bytes32 jobId) external whenNotPaused nonReentrant {
         JobEscrow storage job = _jobs[jobId];
         if (job.state != JobState.Rejected) revert InvalidState();
         require(rejectionTimestamps[jobId] != 0, "NO_REJECTION_TIMESTAMP");
@@ -312,7 +342,12 @@ contract EscrowCore {
         emit JobClosed(jobId, job.worker, job.released);
     }
 
-    function resolveDispute(bytes32 jobId, uint256 workerPayout, bytes32 reasonCode, string calldata metadataURI) external onlyArbitrator {
+    function resolveDispute(bytes32 jobId, uint256 workerPayout, bytes32 reasonCode, string calldata metadataURI)
+        external
+        whenNotPaused
+        nonReentrant
+        onlyArbitrator
+    {
         JobEscrow storage job = _jobs[jobId];
         if (job.state != JobState.Disputed) revert InvalidState();
         require(workerPayout <= (job.reward - job.released), "EXCESS_PAYOUT");

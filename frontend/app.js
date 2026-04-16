@@ -1,5 +1,5 @@
 import { getAuthSnapshot, getAuthWallet, onAuthChange, signIn, signOut } from "./auth.js";
-import { DEFAULT_ESCALATION_MESSAGE, DEFAULT_POSTER_TERMS, DEFAULT_WALLET } from "./constants.js";
+import { DEFAULT_ESCALATION_MESSAGE, DEFAULT_POSTER_TERMS } from "./constants.js";
 import { startEventStream } from "./events.js";
 import { postJson, readJson } from "./http-client.js";
 import { buildEvidenceTemplate, parseTerms } from "./job-utils.js";
@@ -22,7 +22,7 @@ import {
   updateSelectedJob
 } from "./renderers.js";
 import { readPersistedState, state } from "./state.js";
-import { setButtonBusy, setOverallStatus, setText, showToast } from "./ui-helpers.js";
+import { debug, setButtonBusy, setOverallStatus, setText, showToast } from "./ui-helpers.js";
 
 let stopEventStream = undefined;
 let liveRefreshTimer = undefined;
@@ -192,7 +192,7 @@ function scheduleLiveRefresh(event = undefined) {
         showToast(`${event.topic} received.`, "success");
       }
     } catch (error) {
-      console.error(error);
+      debug.error(error);
       setWalletFeedback(error.message ?? "Live refresh failed.", "error");
     }
   }, 250);
@@ -491,7 +491,7 @@ function wireWalletForm(walletForm, walletInput) {
     try {
       await loadWallet(wallet);
     } catch (error) {
-      console.error(error);
+      debug.error(error);
       setWalletFeedback(error.message ?? "Failed to load wallet data.", "error");
       showToast(error.message ?? "Failed to load wallet data.", "error");
     }
@@ -506,7 +506,7 @@ function wireJobSelection(jobList) {
     try {
       await selectJob(button.dataset.jobId);
     } catch (error) {
-      console.error(error);
+      debug.error(error);
       setActionFeedback(error.message ?? "Failed to load job definition.", "error");
       showToast(error.message ?? "Failed to load job definition.", "error");
     }
@@ -522,7 +522,7 @@ function wireCatalogSelection(catalogList) {
       await selectJob(button.dataset.catalogJobId);
       setPosterFeedback(`Loaded ${button.dataset.catalogJobId} into the execution flow.`, "success");
     } catch (error) {
-      console.error(error);
+      debug.error(error);
       setPosterFeedback(error.message ?? "Failed to load catalog job.", "error");
       showToast(error.message ?? "Failed to load catalog job.", "error");
     }
@@ -545,7 +545,7 @@ function wireHistorySelection(historyList) {
       await restoreSession(sessionId);
       setActionFeedback(`Loaded session ${sessionId}.`, "success");
     } catch (error) {
-      console.error(error);
+      debug.error(error);
       setActionFeedback(error.message ?? "Failed to load session history.", "error");
       showToast(error.message ?? "Failed to load session history.", "error");
     }
@@ -562,7 +562,7 @@ function wireJobRunSelection() {
       await restoreSession(button.dataset.sessionId);
       setActionFeedback(`Loaded run ${button.dataset.sessionId}.`, "success");
     } catch (error) {
-      console.error(error);
+      debug.error(error);
       setActionFeedback(error.message ?? "Failed to load job run.", "error");
       showToast(error.message ?? "Failed to load job run.", "error");
     }
@@ -583,7 +583,7 @@ function wireCatalogActivitySelection() {
       await restoreSession(button.dataset.catalogSessionId);
       setPosterFeedback(`Loaded run ${button.dataset.catalogSessionId} from poster activity.`, "success");
     } catch (error) {
-      console.error(error);
+      debug.error(error);
       setPosterFeedback(error.message ?? "Failed to load poster run.", "error");
       showToast(error.message ?? "Failed to load poster run.", "error");
     }
@@ -602,7 +602,7 @@ function wireActionButtons({ claimButton, submitButton, verifyButton, refreshBut
     try {
       await runWithBusyButton(claimButton, "Claiming...", claimSelectedJob);
     } catch (error) {
-      console.error(error);
+      debug.error(error);
       setActionFeedback(error.message ?? "Claim failed.", "error");
       showToast(error.message ?? "Claim failed.", "error");
     }
@@ -612,7 +612,7 @@ function wireActionButtons({ claimButton, submitButton, verifyButton, refreshBut
     try {
       await runWithBusyButton(submitButton, "Submitting...", submitSelectedWork);
     } catch (error) {
-      console.error(error);
+      debug.error(error);
       setActionFeedback(error.message ?? "Submit failed.", "error");
       showToast(error.message ?? "Submit failed.", "error");
     }
@@ -622,7 +622,7 @@ function wireActionButtons({ claimButton, submitButton, verifyButton, refreshBut
     try {
       await runWithBusyButton(verifyButton, "Verifying...", verifySelectedWork);
     } catch (error) {
-      console.error(error);
+      debug.error(error);
       setActionFeedback(error.message ?? "Verification failed.", "error");
       showToast(error.message ?? "Verification failed.", "error");
     }
@@ -632,7 +632,7 @@ function wireActionButtons({ claimButton, submitButton, verifyButton, refreshBut
     try {
       await runWithBusyButton(refreshButton, "Refreshing...", refreshCurrentSession);
     } catch (error) {
-      console.error(error);
+      debug.error(error);
       setActionFeedback(error.message ?? "Refresh failed.", "error");
       showToast(error.message ?? "Refresh failed.", "error");
     }
@@ -642,7 +642,7 @@ function wireActionButtons({ claimButton, submitButton, verifyButton, refreshBut
     try {
       await runWithBusyButton(fundButton, "Funding...", fundCurrentWallet);
     } catch (error) {
-      console.error(error);
+      debug.error(error);
       setFundingFeedback(error.message ?? "Funding failed.", "error");
       showToast(error.message ?? "Funding failed.", "error");
     }
@@ -656,7 +656,7 @@ function wirePosterControls({ posterForm, refreshCatalogButton, verifierModeSele
     try {
       await runWithBusyButton(submitButton, "Creating...", createPosterJob);
     } catch (error) {
-      console.error(error);
+      debug.error(error);
       setPosterFeedback(error.message ?? "Create job failed.", "error");
       showToast(error.message ?? "Create job failed.", "error");
     }
@@ -670,7 +670,7 @@ function wirePosterControls({ posterForm, refreshCatalogButton, verifierModeSele
       });
       setPosterFeedback("Catalog refreshed.", "success");
     } catch (error) {
-      console.error(error);
+      debug.error(error);
       setPosterFeedback(error.message ?? "Catalog refresh failed.", "error");
       showToast(error.message ?? "Catalog refresh failed.", "error");
     }
@@ -692,7 +692,7 @@ async function loadPlatformStatus() {
     setText("starter-flow", `${onboarding.onboarding.starterFlow.length} live steps`);
     setOverallStatus("Online", "status-ok");
   } catch (error) {
-    console.error(error);
+    debug.error(error);
     setText("api-status", "Unavailable");
     setText("index-status", "Unavailable");
     setText("protocol-status", "Check routes");
@@ -713,7 +713,7 @@ function wireAuthControls() {
       await loadWallet(result.wallet);
       setAuthFeedback(`Signed in as ${result.wallet}. Token expires ${result.expiresAt}.`, "success");
     } catch (error) {
-      console.error(error);
+      debug.error(error);
       setAuthFeedback(error.message ?? "Sign in failed.", "error");
       showToast(error.message ?? "Sign in failed.", "error");
     }
@@ -777,7 +777,7 @@ async function boot() {
   try {
     await loadCatalog();
   } catch (error) {
-    console.error(error);
+    debug.error(error);
     setPosterFeedback(error.message ?? "Failed to load poster workspace.", "error");
     showToast(error.message ?? "Failed to load poster workspace.", "error");
   }
@@ -788,9 +788,9 @@ async function boot() {
   //   3. Else (strict + no token) → show the sign-in prompt and wait.
   const authenticatedWallet = getAuthWallet();
   const permissiveWallet = authMode === "permissive"
-    ? (localStorage.getItem("averray:last-wallet") || DEFAULT_WALLET)
-    : undefined;
-  const initialWallet = authenticatedWallet ?? permissiveWallet;
+    ? (localStorage.getItem("averray:last-wallet") || "")
+    : "";
+  const initialWallet = authenticatedWallet ?? (permissiveWallet || undefined);
 
   if (walletInput && permissiveWallet) walletInput.value = permissiveWallet;
 
@@ -798,7 +798,7 @@ async function boot() {
     try {
       await loadWallet(initialWallet);
     } catch (error) {
-      console.error(error);
+      debug.error(error);
       setWalletFeedback(error.message ?? "Failed to load wallet data.", "error");
       renderRecommendations([]);
     }

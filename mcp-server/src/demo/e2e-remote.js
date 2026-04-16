@@ -72,9 +72,12 @@ async function main() {
 
   console.log(`Job: ${jobId}`);
 
-  // /admin/jobs is intentionally unauthenticated for now (pending RBAC).
+  // /admin/jobs requires an "admin" role claim on the JWT. When running this
+  // demo against a strict deployment, the signing wallet must be listed in the
+  // server's AUTH_ADMIN_WALLETS env var.
   const createdJob = await readJson(baseUrl, "/admin/jobs", {
     method: "POST",
+    headers: { ...authHeader },
     body: JSON.stringify({
       id: jobId,
       category: "coding",
@@ -112,11 +115,13 @@ async function main() {
   );
   assert(submitted.status === "submitted", `Expected submitted session, got ${submitted.status}`);
 
-  // /verifier/run is intentionally unauthenticated for now (pending RBAC).
+  // /verifier/run requires a "verifier" role claim on the JWT. When running
+  // this demo against a strict deployment, the signing wallet must be listed
+  // in the server's AUTH_VERIFIER_WALLETS env var.
   const verification = await readJson(
     baseUrl,
     `/verifier/run?sessionId=${encodeURIComponent(claim.sessionId)}&evidence=${encodeURIComponent(evidence)}`,
-    { method: "POST" }
+    { method: "POST", headers: { ...authHeader } }
   );
   assert(verification.outcome === "approved", `Expected approved outcome, got ${verification.outcome}`);
 

@@ -166,6 +166,15 @@ Environment variables (see `mcp-server/.env.example`):
 - `AUTH_CHAIN_ID` — SIWE `chainId` and expected verifier check.
 - `AUTH_TOKEN_TTL_SECONDS` (default 86400) — JWT lifetime.
 - `AUTH_NONCE_TTL_SECONDS` (default 300) — SIWE nonce lifetime.
+- `AUTH_ADMIN_WALLETS` — comma-separated EVM addresses granted the `admin`
+  role claim at sign-in. Required to call `POST /admin/jobs`.
+- `AUTH_VERIFIER_WALLETS` — comma-separated EVM addresses granted the
+  `verifier` role claim at sign-in. Required to call `POST /verifier/run`.
+
+Roles are pinned at sign-in time by env config; a user picks up role claims
+when they SIWE-login, so rotating the env lists invalidates authority at the
+next sign-in rather than on every request. Each protected route that needs a
+role checks the JWT claim and returns `403 missing_role` on a mismatch.
 
 Key rotation: prepend the new secret to `AUTH_JWT_SECRETS`, redeploy, then
 drop the old secret after `AUTH_TOKEN_TTL_SECONDS` has elapsed so that every

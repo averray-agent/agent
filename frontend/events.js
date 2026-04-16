@@ -1,4 +1,5 @@
 import { getAuthToken, requestReauth } from "./auth.js";
+import { debug } from "./ui-helpers.js";
 
 const EVENT_TOPICS = [
   "session.claimed",
@@ -23,13 +24,48 @@ const EVENT_TOPICS = [
   "gap"
 ];
 
-export function startEventStream({ wallet, sessionId, jobId, topics = [], onEvent, onGap, onError }) {
+// Server pings every 15s (see mcp-server/src/protocols/http/server.js). A 45s
+// idle window accounts for a skipped heartbeat without triggering spurious
+// reconnects on slow networks.
+const HEARTBEAT_TIMEOUT_MS = 45_000;
+// Hard cap on sequential reconnect attempts before we stop trying. Prevents a
+// wedged backend from burning battery on infinite reconnect loops.
+const MAX_RECONNECT_ATTEMPTS = 30;
+
+export function startEventStream({ wallet, sessionId, jobId, topics = [], onEvent, onGap, onError, onStalled }) {
   let source = undefined;
   let stopped = false;
   let reconnectDelayMs = 1000;
   let reconnectTimer = undefined;
+  let heartbeatTimer = undefined;
+  let reconnectAttempts = 0;
   let lastEventId = "";
   let reauthInFlight = false;
+
+  const bumpHeartbeat = () => {
+    clearTimeout(heartbeatTimer);
+    heartbeatTimer = setTimeout(() => {
+      debug.warn("[events] no traffic within heartbeat window, forcing reconnect");
+      source?.close();
+      scheduleReconnect();
+    }, HEARTBEAT_TIMEOUT_MS);
+  };
+
+  const scheduleReconnect = () => {
+    clearTimeout(reconnectTimer);
+    if (stopped) {
+      return;
+    }
+    reconnectAttempts += 1;
+    if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
+      debug.error("[events] reconnect cap reached; giving up");
+      stopped = true;
+      onStalled?.({ reconnectAttempts });
+      return;
+    }
+    reconnectTimer = setTimeout(connect, reconnectDelayMs);
+    reconnectDelayMs = Math.min(reconnectDelayMs * 2, 10_000);
+  };
 
   const connect = () => {
     clearTimeout(reconnectTimer);
@@ -54,12 +90,27 @@ export function startEventStream({ wallet, sessionId, jobId, topics = [], onEven
 
     source = new EventSource(`/api/events?${params.toString()}`);
 
+    source.onopen = () => {
+      reconnectAttempts = 0;
+      reconnectDelayMs = 1000;
+      bumpHeartbeat();
+    };
+
+    // Raw `message` handler catches server comments/heartbeats too. Server
+    // pings are `: ping` lines which the browser doesn't surface as message
+    // events, so we also bump the watchdog on every named event below.
+    source.onmessage = () => {
+      bumpHeartbeat();
+    };
+
     for (const topic of EVENT_TOPICS) {
       source.addEventListener(topic, (event) => {
+        bumpHeartbeat();
         if (event.lastEventId) {
           lastEventId = event.lastEventId;
         }
         reconnectDelayMs = 1000;
+        reconnectAttempts = 0;
         const payload = parseEvent(event);
         if (topic === "gap") {
           onGap?.(payload);
@@ -81,15 +132,15 @@ export function startEventStream({ wallet, sessionId, jobId, topics = [], onEven
         reauthInFlight = true;
         requestReauth("sse_closed")
           .catch((error) => {
-            console.warn("[events] re-auth failed after SSE close", error);
+            debug.warn("[events] re-auth failed after SSE close", error);
           })
           .finally(() => {
             reauthInFlight = false;
           });
       }
       source?.close();
-      reconnectTimer = setTimeout(connect, reconnectDelayMs);
-      reconnectDelayMs = Math.min(reconnectDelayMs * 2, 10_000);
+      clearTimeout(heartbeatTimer);
+      scheduleReconnect();
     };
   };
 
@@ -98,6 +149,7 @@ export function startEventStream({ wallet, sessionId, jobId, topics = [], onEven
   return () => {
     stopped = true;
     clearTimeout(reconnectTimer);
+    clearTimeout(heartbeatTimer);
     source?.close();
   };
 }

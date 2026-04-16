@@ -104,6 +104,36 @@ export class PimlicoClient {
     if (!userOperation || typeof userOperation !== "object" || Array.isArray(userOperation)) {
       throw new ValidationError("userOperation payload is required.");
     }
+    // ERC-4337 user operations are a fixed-shape object. Reject missing or
+    // non-string entries early instead of forwarding malformed calldata to the
+    // bundler (which returns an opaque JSON-RPC error).
+    const requiredHexFields = [
+      "sender",
+      "nonce",
+      "callData",
+      "callGasLimit",
+      "verificationGasLimit",
+      "preVerificationGas",
+      "maxFeePerGas",
+      "maxPriorityFeePerGas",
+      "signature"
+    ];
+    for (const field of requiredHexFields) {
+      const value = userOperation[field];
+      if (typeof value !== "string" || value.length === 0) {
+        throw new ValidationError(`userOperation.${field} is required and must be a non-empty string.`);
+      }
+      if (value.length > 32 * 1024) {
+        throw new ValidationError(`userOperation.${field} exceeds 32KiB; likely malformed.`);
+      }
+    }
+    // Optional fields, if present, must still be strings to keep the bundler
+    // request schema-valid.
+    for (const optionalField of ["initCode", "paymasterAndData"]) {
+      if (optionalField in userOperation && typeof userOperation[optionalField] !== "string") {
+        throw new ValidationError(`userOperation.${optionalField} must be a string when provided.`);
+      }
+    }
   }
 
   async rpc(url, method, params = []) {

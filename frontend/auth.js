@@ -14,6 +14,8 @@
  * `onAuthChange(listener)` and update their own DOM.
  */
 
+import { debug } from "./ui-helpers.js";
+
 const TOKEN_KEY = "averray:auth-token";
 const WALLET_KEY = "averray:auth-wallet";
 const EXPIRES_KEY = "averray:auth-expires-at";
@@ -65,7 +67,7 @@ function notify() {
     try {
       listener(snapshot);
     } catch (error) {
-      console.error("[auth] listener threw", error);
+      debug.error("[auth] listener threw", error);
     }
   }
 }

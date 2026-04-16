@@ -1,7 +1,7 @@
-import { DEFAULT_WALLET, UI_STATE_KEY } from "./constants.js";
+import { UI_STATE_KEY } from "./constants.js";
 
 export const state = {
-  wallet: DEFAULT_WALLET,
+  wallet: "",
   account: undefined,
   reputation: undefined,
   activity: [],

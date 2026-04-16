@@ -70,6 +70,12 @@ export class AuthorizationError extends AppError {
   }
 }
 
+export class RateLimitError extends AppError {
+  constructor(message = "Rate limit exceeded.", details = undefined) {
+    super(message, { name: "RateLimitError", code: "rate_limited", statusCode: 429, details });
+  }
+}
+
 export function normalizeError(error) {
   if (error instanceof AppError) {
     return error;

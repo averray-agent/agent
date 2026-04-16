@@ -9,6 +9,8 @@ import {
 } from "../../core/errors.js";
 import { buildSiweMessage, verifySiweMessage } from "../../auth/siwe.js";
 import { signToken } from "../../auth/jwt.js";
+import { extractClientKey } from "../../auth/rate-limit.js";
+import { resolveRequestId } from "../../core/logger.js";
 
 const {
   platformService: service,
@@ -18,31 +20,55 @@ const {
   pimlicoClient,
   eventBus,
   authConfig,
-  authMiddleware
+  authMiddleware,
+  rateLimiter,
+  rateLimitConfig,
+  httpConfig,
+  trustProxy,
+  logger
 } = createPlatformRuntime();
 const port = Number(process.env.PORT ?? 8787);
 
 const SIWE_STATEMENT = "Sign in to the Agent Platform.";
 
-function respond(response, statusCode, payload) {
-  response.writeHead(statusCode, { "content-type": "application/json" });
+function respond(response, statusCode, payload, extraHeaders = {}) {
+  const headers = {
+    "content-type": "application/json",
+    ...(response._corsHeaders ?? {}),
+    ...extraHeaders
+  };
+  if (response._requestId && !headers["x-request-id"]) {
+    headers["x-request-id"] = response._requestId;
+  }
+  response.writeHead(statusCode, headers);
   response.end(JSON.stringify(payload, null, 2));
 }
 
 function respondSse(response) {
-  response.writeHead(200, {
+  const headers = {
     "content-type": "text/event-stream",
     "cache-control": "no-cache, no-transform",
-    connection: "keep-alive"
-  });
+    connection: "keep-alive",
+    ...(response._corsHeaders ?? {})
+  };
+  if (response._requestId) {
+    headers["x-request-id"] = response._requestId;
+  }
+  response.writeHead(200, headers);
 }
 
-async function readJsonBody(request) {
-  let body = "";
+async function readJsonBody(request, { maxBytes = httpConfig.maxBodyBytes } = {}) {
+  const chunks = [];
+  let received = 0;
   for await (const chunk of request) {
-    body += chunk;
+    received += chunk.length;
+    if (received > maxBytes) {
+      throw new ValidationError(`Request body exceeds ${maxBytes} bytes.`);
+    }
+    chunks.push(chunk);
   }
 
+  const body = Buffer.concat(chunks).toString("utf8");
   if (!body.trim()) {
     return {};
   }
@@ -94,9 +120,73 @@ async function ensureSessionOwnership(sessionId, wallet) {
   return session;
 }
 
+function clientIp(request) {
+  return extractClientKey(request, { trustProxy });
+}
+
+function resolveCorsHeaders(request) {
+  const origin = request.headers?.origin;
+  if (!origin || typeof origin !== "string") {
+    return {};
+  }
+  if (httpConfig.allowAllOrigins) {
+    return buildCorsHeaders("*");
+  }
+  if (httpConfig.allowedOrigins.has(origin)) {
+    return buildCorsHeaders(origin);
+  }
+  return {};
+}
+
+function buildCorsHeaders(allowOrigin) {
+  return {
+    "access-control-allow-origin": allowOrigin,
+    "access-control-allow-methods": httpConfig.allowedMethods,
+    "access-control-allow-headers": httpConfig.allowedHeaders,
+    "access-control-expose-headers": httpConfig.exposedHeaders,
+    "access-control-max-age": String(httpConfig.maxAgeSeconds),
+    vary: "origin"
+  };
+}
+
+async function enforceLimit(bucket, key, limits) {
+  if (!rateLimiter) {
+    return;
+  }
+  await rateLimiter(bucket, key, limits);
+}
+
 const server = createServer(async (request, response) => {
   const url = new URL(request.url ?? "/", "http://localhost");
   const pathname = url.pathname.replace(/\/+$/, "") || "/";
+  const requestId = resolveRequestId(request);
+  const requestLogger = logger.child({ requestId });
+  const startedAt = process.hrtime.bigint();
+  // Stash CORS headers + request id on the response so `respond`/`respondSse`
+  // can echo them back without each route needing to thread them through.
+  response._corsHeaders = resolveCorsHeaders(request);
+  response._requestId = requestId;
+  response.on("finish", () => {
+    const durationMs = Number((process.hrtime.bigint() - startedAt) / 1_000_000n);
+    requestLogger.info(
+      {
+        method: request.method,
+        path: pathname,
+        status: response.statusCode,
+        durationMs,
+        ip: extractClientKey(request, { trustProxy })
+      },
+      "http.response"
+    );
+  });
+
+  if (request.method === "OPTIONS") {
+    // CORS preflight: only acknowledge origins on the allowlist. Unlisted
+    // origins get a 204 with no CORS headers, so the browser rejects them.
+    response.writeHead(204, response._corsHeaders);
+    response.end();
+    return;
+  }
 
   try {
     // ---------- public routes ----------
@@ -180,6 +270,7 @@ const server = createServer(async (request, response) => {
     // ---------- auth routes ----------
 
     if (request.method === "POST" && pathname === "/auth/nonce") {
+      await enforceLimit("auth_nonce", clientIp(request), rateLimitConfig.authNonce);
       const payload = await readJsonBody(request);
       const wallet = String(payload?.wallet ?? "").trim();
       if (!/^0x[a-fA-F0-9]{40}$/u.test(wallet)) {
@@ -214,11 +305,21 @@ const server = createServer(async (request, response) => {
     }
 
     if (request.method === "POST" && pathname === "/auth/verify") {
+      await enforceLimit("auth_verify", clientIp(request), rateLimitConfig.authVerify);
       const payload = await readJsonBody(request);
       const message = typeof payload?.message === "string" ? payload.message : "";
       const signature = typeof payload?.signature === "string" ? payload.signature : "";
       if (!message || !signature) {
         throw new ValidationError("message and signature are required.");
+      }
+      if (message.length > 4096) {
+        throw new ValidationError("SIWE message exceeds 4096 characters.");
+      }
+      // EIP-191 personal_sign signatures are 65 bytes -> 132 chars incl. 0x.
+      // Some wallets return r/s/v concatenated without 0x; accept both but cap
+      // the length to discourage callers from submitting unrelated payloads.
+      if (!/^(0x)?[0-9a-fA-F]{130,132}$/u.test(signature)) {
+        throw new ValidationError("signature must be a 65-byte hex string.");
       }
       if (!authConfig.signingSecret) {
         throw new AuthenticationError(
@@ -240,14 +341,16 @@ const server = createServer(async (request, response) => {
         throw new AuthenticationError("Nonce was issued for a different wallet.", "nonce_wallet_mismatch");
       }
 
+      const roles = authConfig.resolveRoles?.(verified.recoveredAddress) ?? [];
       const { token, claims } = signToken(
-        { sub: verified.recoveredAddress },
+        { sub: verified.recoveredAddress, roles },
         { secret: authConfig.signingSecret, expiresInSeconds: authConfig.tokenTtlSeconds }
       );
 
       return respond(response, 200, {
         token,
         wallet: verified.recoveredAddress,
+        roles,
         expiresAt: new Date(claims.exp * 1000).toISOString(),
         tokenType: "Bearer"
       });
@@ -257,6 +360,7 @@ const server = createServer(async (request, response) => {
 
     if (request.method === "GET" && pathname === "/events") {
       const auth = await authMiddleware(request, url, { allowQueryToken: true });
+      await enforceLimit("events", auth.wallet, rateLimitConfig.events);
       respondSse(response);
       const filter = {
         wallet: auth.wallet,
@@ -366,7 +470,8 @@ const server = createServer(async (request, response) => {
     }
 
     if (request.method === "POST" && pathname === "/admin/jobs") {
-      // TODO(auth-rbac): gate behind admin scope once RBAC lands.
+      const auth = await authMiddleware(request, url, { requireRole: "admin" });
+      await enforceLimit("admin_jobs", auth.wallet, rateLimitConfig.adminJobs);
       const payload = await readJsonBody(request);
       return respond(response, 201, service.createJob(payload));
     }
@@ -398,12 +503,19 @@ const server = createServer(async (request, response) => {
       const auth = await authMiddleware(request, url);
       const sessionId = url.searchParams.get("sessionId") ?? "";
       const evidence = url.searchParams.get("evidence") ?? "submitted-via-http";
+      if (!sessionId) {
+        throw new ValidationError("sessionId is required.");
+      }
+      if (evidence.length > 16 * 1024) {
+        throw new ValidationError("evidence exceeds 16 KiB. Submit long payloads via evidenceURI once supported.");
+      }
       await ensureSessionOwnership(sessionId, auth.wallet);
       return respond(response, 200, await service.submitWork(sessionId, "http", evidence));
     }
 
     if (request.method === "POST" && pathname === "/verifier/run") {
-      // TODO(auth-rbac): gate behind verifier scope once RBAC lands.
+      const auth = await authMiddleware(request, url, { requireRole: "verifier" });
+      await enforceLimit("verifier_run", auth.wallet, rateLimitConfig.verifierRun);
       const sessionId = url.searchParams.get("sessionId") ?? "";
       const evidence = url.searchParams.get("evidence") ?? "";
       const metadataURI = url.searchParams.get("metadataURI") ?? "ipfs://pending-badge";
@@ -413,14 +525,45 @@ const server = createServer(async (request, response) => {
     return respond(response, 404, { error: "not_found" });
   } catch (error) {
     const normalized = normalizeError(error);
-    return respond(response, normalized.statusCode ?? 500, {
-      error: normalized.code ?? "internal_error",
-      message: normalized.message ?? "internal_error",
-      details: normalized.details
-    });
+    const extraHeaders = { "x-request-id": requestId };
+    const retryAfter = normalized.details?.retryAfterSeconds;
+    if (normalized.statusCode === 429 && Number.isFinite(retryAfter)) {
+      extraHeaders["retry-after"] = String(Math.max(1, Math.ceil(retryAfter)));
+    }
+    const logLevel = (normalized.statusCode ?? 500) >= 500 ? "error" : "warn";
+    requestLogger[logLevel](
+      {
+        method: request.method,
+        path: pathname,
+        status: normalized.statusCode ?? 500,
+        code: normalized.code,
+        err: error instanceof Error ? error : new Error(String(error))
+      },
+      "http.error"
+    );
+    return respond(
+      response,
+      normalized.statusCode ?? 500,
+      {
+        error: normalized.code ?? "internal_error",
+        message: normalized.message ?? "internal_error",
+        details: normalized.details,
+        requestId
+      },
+      extraHeaders
+    );
   }
 });
 
 server.listen(port, () => {
-  console.log(`HTTP adapter listening on :${port} (auth: ${authConfig.mode})`);
+  logger.info(
+    {
+      port,
+      authMode: authConfig.mode,
+      stateStoreBackend: stateStore.constructor.name,
+      blockchainEnabled: Boolean(gateway?.isEnabled?.()),
+      pimlicoEnabled: Boolean(pimlicoClient?.isEnabled?.())
+    },
+    "http.listening"
+  );
 });

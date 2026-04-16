@@ -1,6 +1,13 @@
 import { persistUiState, state } from "./state.js";
 import { buildEvidenceTemplate, describeVerifier } from "./job-utils.js";
-import { formatAmount, setActionStatus, setFeedback, setText } from "./ui-helpers.js";
+import {
+  formatAmount,
+  html,
+  renderHtml,
+  setActionStatus,
+  setFeedback,
+  setText
+} from "./ui-helpers.js";
 
 function outcomeTone(status) {
   return ["approved", "resolved", "closed"].includes(status) ? "eligible-yes" : "eligible-no";
@@ -382,28 +389,30 @@ export function renderActivityFeed(entries = state.activity) {
     return;
   }
 
-  root.innerHTML = entries
-    .map((event) => {
-      const summary = summarizeEvent(event);
-      return `
-        <article class="activity-card">
-          <div class="job-topline">
-            <div>
-              <p class="job-id">${summary.title}</p>
-              <p class="activity-meta">${event.topic}</p>
-            </div>
-            <span class="status-pill ${summary.tone}">${formatEventTime(event.timestamp)}</span>
+  const cards = entries.map((event) => {
+    const summary = summarizeEvent(event);
+    const txHashShort = event.txHash
+      ? `${event.txHash.slice(0, 8)}…${event.txHash.slice(-6)}`
+      : "platform event";
+    return html`
+      <article class="activity-card">
+        <div class="job-topline">
+          <div>
+            <p class="job-id">${summary.title}</p>
+            <p class="activity-meta">${event.topic}</p>
           </div>
-          <p class="activity-copy">${summary.body}</p>
-          <div class="catalog-meta">
-            <span>${event.jobId ?? "no job"}</span>
-            <span>${event.sessionId ?? "no session"}</span>
-            <span>${event.txHash ? `${event.txHash.slice(0, 8)}…${event.txHash.slice(-6)}` : "platform event"}</span>
-          </div>
-        </article>
-      `;
-    })
-    .join("");
+          <span class="status-pill ${summary.tone}">${formatEventTime(event.timestamp)}</span>
+        </div>
+        <p class="activity-copy">${summary.body}</p>
+        <div class="catalog-meta">
+          <span>${event.jobId ?? "no job"}</span>
+          <span>${event.sessionId ?? "no session"}</span>
+          <span>${txHashShort}</span>
+        </div>
+      </article>
+    `;
+  });
+  renderHtml(root, html`${cards}`);
 }
 
 export function renderSessionDetail() {
@@ -423,66 +432,68 @@ export function renderSessionDetail() {
   }
 
   count.textContent = session.status ?? "active";
-  root.innerHTML = `
-    <div class="job-detail-grid">
-      <div class="detail-stat">
-        <dt>Session id</dt>
-        <dd>${session.sessionId}</dd>
+  const evidenceTrace = verification?.metadataURI
+    ? `Verifier metadata URI: ${verification.metadataURI}`
+    : "Raw evidence text is used in the active run, but it is not yet persisted in session history. That should stay on the v2 backlog.";
+  renderHtml(
+    root,
+    html`
+      <div class="job-detail-grid">
+        <div class="detail-stat">
+          <dt>Session id</dt>
+          <dd>${session.sessionId}</dd>
+        </div>
+        <div class="detail-stat">
+          <dt>Wallet</dt>
+          <dd>${session.wallet ?? state.wallet ?? "-"}</dd>
+        </div>
+        <div class="detail-stat">
+          <dt>Job</dt>
+          <dd>${session.jobId ?? "-"}</dd>
+        </div>
+        <div class="detail-stat">
+          <dt>Protocol trail</dt>
+          <dd>${session.protocolHistory?.join(" / ") ?? "-"}</dd>
+        </div>
+        <div class="detail-stat">
+          <dt>Session status</dt>
+          <dd>${session.status ?? "-"}</dd>
+        </div>
+        <div class="detail-stat">
+          <dt>Verifier outcome</dt>
+          <dd>${verification?.outcome ?? "pending"}</dd>
+        </div>
+        <div class="detail-stat">
+          <dt>Reason code</dt>
+          <dd>${verification?.reasonCode ?? "pending"}</dd>
+        </div>
+        <div class="detail-stat">
+          <dt>Claim stake</dt>
+          <dd>${formatAmount(session.claimStake)} ${rewardAsset}</dd>
+        </div>
+        <div class="detail-stat detail-span">
+          <dt>Chain job id</dt>
+          <dd>${session.chainJobId ?? "Using logical job id only for this run."}</dd>
+        </div>
+        <div class="detail-stat detail-span">
+          <dt>Stake impact</dt>
+          <dd>${describeStakeImpact(session, verification, rewardAsset)}</dd>
+        </div>
+        <div class="detail-stat detail-span">
+          <dt>Reputation impact</dt>
+          <dd>${describeReputationImpact(session, verification)}</dd>
+        </div>
+        <div class="detail-stat detail-span">
+          <dt>Evidence trace</dt>
+          <dd>${evidenceTrace}</dd>
+        </div>
+        <div class="detail-stat detail-span">
+          <dt>Last updated</dt>
+          <dd>${session.updatedAt ? formatEventTime(session.updatedAt) : "Not available"}</dd>
+        </div>
       </div>
-      <div class="detail-stat">
-        <dt>Wallet</dt>
-        <dd>${session.wallet ?? state.wallet ?? "-"}</dd>
-      </div>
-      <div class="detail-stat">
-        <dt>Job</dt>
-        <dd>${session.jobId ?? "-"}</dd>
-      </div>
-      <div class="detail-stat">
-        <dt>Protocol trail</dt>
-        <dd>${session.protocolHistory?.join(" / ") ?? "-"}</dd>
-      </div>
-      <div class="detail-stat">
-        <dt>Session status</dt>
-        <dd>${session.status ?? "-"}</dd>
-      </div>
-      <div class="detail-stat">
-        <dt>Verifier outcome</dt>
-        <dd>${verification?.outcome ?? "pending"}</dd>
-      </div>
-      <div class="detail-stat">
-        <dt>Reason code</dt>
-        <dd>${verification?.reasonCode ?? "pending"}</dd>
-      </div>
-      <div class="detail-stat">
-        <dt>Claim stake</dt>
-        <dd>${formatAmount(session.claimStake)} ${rewardAsset}</dd>
-      </div>
-      <div class="detail-stat detail-span">
-        <dt>Chain job id</dt>
-        <dd>${session.chainJobId ?? "Using logical job id only for this run."}</dd>
-      </div>
-      <div class="detail-stat detail-span">
-        <dt>Stake impact</dt>
-        <dd>${describeStakeImpact(session, verification, rewardAsset)}</dd>
-      </div>
-      <div class="detail-stat detail-span">
-        <dt>Reputation impact</dt>
-        <dd>${describeReputationImpact(session, verification)}</dd>
-      </div>
-      <div class="detail-stat detail-span">
-        <dt>Evidence trace</dt>
-        <dd>${
-          verification?.metadataURI
-            ? `Verifier metadata URI: ${verification.metadataURI}`
-            : "Raw evidence text is used in the active run, but it is not yet persisted in session history. That should stay on the v2 backlog."
-        }</dd>
-      </div>
-      <div class="detail-stat detail-span">
-        <dt>Last updated</dt>
-        <dd>${session.updatedAt ? formatEventTime(session.updatedAt) : "Not available"}</dd>
-      </div>
-    </div>
-  `;
+    `
+  );
 }
 
 export function renderRecommendations(recommendations) {
@@ -494,30 +505,30 @@ export function renderRecommendations(recommendations) {
     return;
   }
 
-  root.innerHTML = recommendations
-    .map(
-      (job) => `
-        <article class="job-card ${job.jobId === state.selectedJobId ? "job-selected" : ""}">
-          <div class="job-topline">
-            <p class="job-id">${job.jobId}</p>
-            <span class="eligibility-pill ${job.eligible ? "eligible-yes" : "eligible-no"}">
-              ${job.eligible ? "Eligible" : "Blocked"}
-            </span>
-          </div>
-          <div class="job-metrics">
-            <span>Fit score ${job.fitScore}</span>
-            <span>Net reward ${formatAmount(job.netReward)} DOT</span>
-          </div>
-          <div class="job-copy">
-            <p>${job.explanation}</p>
-          </div>
-          <button class="job-select-button" type="button" data-job-id="${job.jobId}">
-            ${job.jobId === state.selectedJobId ? "Selected" : "Select job"}
-          </button>
-        </article>
-      `
-    )
-    .join("");
+  const cards = recommendations.map((job) => {
+    const isSelected = job.jobId === state.selectedJobId;
+    return html`
+      <article class="job-card ${isSelected ? "job-selected" : ""}">
+        <div class="job-topline">
+          <p class="job-id">${job.jobId}</p>
+          <span class="eligibility-pill ${job.eligible ? "eligible-yes" : "eligible-no"}">
+            ${job.eligible ? "Eligible" : "Blocked"}
+          </span>
+        </div>
+        <div class="job-metrics">
+          <span>Fit score ${job.fitScore}</span>
+          <span>Net reward ${formatAmount(job.netReward)} DOT</span>
+        </div>
+        <div class="job-copy">
+          <p>${job.explanation}</p>
+        </div>
+        <button class="job-select-button" type="button" data-job-id="${job.jobId}">
+          ${isSelected ? "Selected" : "Select job"}
+        </button>
+      </article>
+    `;
+  });
+  renderHtml(root, html`${cards}`);
 }
 
 export function renderCatalog(jobs) {
@@ -529,30 +540,30 @@ export function renderCatalog(jobs) {
     return;
   }
 
-  root.innerHTML = jobs
-    .map(
-      (job) => `
-        <article class="catalog-card ${job.id === state.selectedJobId ? "job-selected" : ""}">
-          <div class="job-topline">
-            <h3>${job.id}</h3>
-            <span class="eligibility-pill ${job.requiresSponsoredGas ? "eligible-yes" : "eligible-no"}">
-              ${job.requiresSponsoredGas ? "Sponsored gas" : "Self-funded gas"}
-            </span>
-          </div>
-          <div class="catalog-meta">
-            <span>${job.category}</span>
-            <span>${job.tier}</span>
-            <span>${formatAmount(job.rewardAmount)} ${job.rewardAsset}</span>
-            <span>${job.verifierMode}</span>
-          </div>
-          <p>${describeVerifier(job)}</p>
-          <button class="job-select-button" type="button" data-catalog-job-id="${job.id}">
-            ${job.id === state.selectedJobId ? "Loaded in flow" : "Load in flow"}
-          </button>
-        </article>
-      `
-    )
-    .join("");
+  const cards = jobs.map((job) => {
+    const isSelected = job.id === state.selectedJobId;
+    return html`
+      <article class="catalog-card ${isSelected ? "job-selected" : ""}">
+        <div class="job-topline">
+          <h3>${job.id}</h3>
+          <span class="eligibility-pill ${job.requiresSponsoredGas ? "eligible-yes" : "eligible-no"}">
+            ${job.requiresSponsoredGas ? "Sponsored gas" : "Self-funded gas"}
+          </span>
+        </div>
+        <div class="catalog-meta">
+          <span>${job.category}</span>
+          <span>${job.tier}</span>
+          <span>${formatAmount(job.rewardAmount)} ${job.rewardAsset}</span>
+          <span>${job.verifierMode}</span>
+        </div>
+        <p>${describeVerifier(job)}</p>
+        <button class="job-select-button" type="button" data-catalog-job-id="${job.id}">
+          ${isSelected ? "Loaded in flow" : "Load in flow"}
+        </button>
+      </article>
+    `;
+  });
+  renderHtml(root, html`${cards}`);
 }
 
 export function renderHistory(entries) {
@@ -564,29 +575,32 @@ export function renderHistory(entries) {
     return;
   }
 
-  root.innerHTML = entries
-    .map(
-      (entry) => `
-        <article class="history-card ${entry.sessionId === state.session?.sessionId ? "job-selected" : ""}">
-          <div class="job-topline">
-            <p class="job-id">${entry.jobId}</p>
-            <span class="eligibility-pill ${outcomeTone(entry.verification?.outcome ?? entry.status)}">
-              ${entry.status}
-            </span>
-          </div>
-          <div class="catalog-meta">
-            <span>${entry.protocolHistory?.join(" / ") ?? "-"}</span>
-            <span>${entry.verification?.outcome ?? "pending"}</span>
-            <span>${entry.updatedAt ? new Date(entry.updatedAt).toLocaleString("en-CH", { dateStyle: "short", timeStyle: "short" }) : "-"}</span>
-          </div>
-          <p>${entry.sessionId}</p>
-          <button class="job-select-button" type="button" data-session-id="${entry.sessionId}">
-            ${entry.sessionId === state.session?.sessionId ? "Current session" : "Load session"}
-          </button>
-        </article>
-      `
-    )
-    .join("");
+  const cards = entries.map((entry) => {
+    const isCurrent = entry.sessionId === state.session?.sessionId;
+    const updated = entry.updatedAt
+      ? new Date(entry.updatedAt).toLocaleString("en-CH", { dateStyle: "short", timeStyle: "short" })
+      : "-";
+    return html`
+      <article class="history-card ${isCurrent ? "job-selected" : ""}">
+        <div class="job-topline">
+          <p class="job-id">${entry.jobId}</p>
+          <span class="eligibility-pill ${outcomeTone(entry.verification?.outcome ?? entry.status)}">
+            ${entry.status}
+          </span>
+        </div>
+        <div class="catalog-meta">
+          <span>${entry.protocolHistory?.join(" / ") ?? "-"}</span>
+          <span>${entry.verification?.outcome ?? "pending"}</span>
+          <span>${updated}</span>
+        </div>
+        <p>${entry.sessionId}</p>
+        <button class="job-select-button" type="button" data-session-id="${entry.sessionId}">
+          ${isCurrent ? "Current session" : "Load session"}
+        </button>
+      </article>
+    `;
+  });
+  renderHtml(root, html`${cards}`);
 }
 
 export function renderJobDetail(job, jobHistory) {
@@ -606,54 +620,61 @@ export function renderJobDetail(job, jobHistory) {
   const approvedRuns = jobHistory.filter((entry) => entry.verification?.outcome === "approved").length;
   const latestRun = jobHistory[0];
 
-  summaryRoot.innerHTML = `
-    <div class="job-detail-grid">
-      <div class="detail-stat">
-        <dt>Tier</dt>
-        <dd>${job.tier}</dd>
+  const latestRunLabel = latestRun
+    ? `${latestRun.status} · ${latestRun.verification?.reasonCode ?? "pending verification"}`
+    : "No runs yet for this wallet.";
+
+  renderHtml(
+    summaryRoot,
+    html`
+      <div class="job-detail-grid">
+        <div class="detail-stat">
+          <dt>Tier</dt>
+          <dd>${job.tier}</dd>
+        </div>
+        <div class="detail-stat">
+          <dt>Claim TTL</dt>
+          <dd>${job.claimTtlSeconds}s</dd>
+        </div>
+        <div class="detail-stat">
+          <dt>Retry limit</dt>
+          <dd>${job.retryLimit}</dd>
+        </div>
+        <div class="detail-stat">
+          <dt>Gas</dt>
+          <dd>${job.requiresSponsoredGas ? "Sponsored" : "Self-funded"}</dd>
+        </div>
+        <div class="detail-stat">
+          <dt>Verifier</dt>
+          <dd>${job.verifierMode}</dd>
+        </div>
+        <div class="detail-stat">
+          <dt>Claim stake</dt>
+          <dd>${formatAmount(job.preflight?.claimStake)} ${job.rewardAsset}</dd>
+        </div>
+        <div class="detail-stat">
+          <dt>Runs / approved</dt>
+          <dd>${jobHistory.length} / ${approvedRuns}</dd>
+        </div>
+        <div class="detail-stat detail-span">
+          <dt>Output schema</dt>
+          <dd>${job.outputSchemaRef}</dd>
+        </div>
+        <div class="detail-stat detail-span">
+          <dt>Verifier rules</dt>
+          <dd>${describeVerifier(job)}</dd>
+        </div>
+        <div class="detail-stat detail-span">
+          <dt>Worker liquidity</dt>
+          <dd>${formatAmount(job.preflight?.availableLiquidity)} ${job.rewardAsset} available before claim</dd>
+        </div>
+        <div class="detail-stat detail-span">
+          <dt>Latest run</dt>
+          <dd>${latestRunLabel}</dd>
+        </div>
       </div>
-      <div class="detail-stat">
-        <dt>Claim TTL</dt>
-        <dd>${job.claimTtlSeconds}s</dd>
-      </div>
-      <div class="detail-stat">
-        <dt>Retry limit</dt>
-        <dd>${job.retryLimit}</dd>
-      </div>
-      <div class="detail-stat">
-        <dt>Gas</dt>
-        <dd>${job.requiresSponsoredGas ? "Sponsored" : "Self-funded"}</dd>
-      </div>
-      <div class="detail-stat">
-        <dt>Verifier</dt>
-        <dd>${job.verifierMode}</dd>
-      </div>
-      <div class="detail-stat">
-        <dt>Claim stake</dt>
-        <dd>${formatAmount(job.preflight?.claimStake)} ${job.rewardAsset}</dd>
-      </div>
-      <div class="detail-stat">
-        <dt>Runs / approved</dt>
-        <dd>${jobHistory.length} / ${approvedRuns}</dd>
-      </div>
-      <div class="detail-stat detail-span">
-        <dt>Output schema</dt>
-        <dd>${job.outputSchemaRef}</dd>
-      </div>
-      <div class="detail-stat detail-span">
-        <dt>Verifier rules</dt>
-        <dd>${describeVerifier(job)}</dd>
-      </div>
-      <div class="detail-stat detail-span">
-        <dt>Worker liquidity</dt>
-        <dd>${formatAmount(job.preflight?.availableLiquidity)} ${job.rewardAsset} available before claim</dd>
-      </div>
-      <div class="detail-stat detail-span">
-        <dt>Latest run</dt>
-        <dd>${latestRun ? `${latestRun.status} · ${latestRun.verification?.reasonCode ?? "pending verification"}` : "No runs yet for this wallet."}</dd>
-      </div>
-    </div>
-  `;
+    `
+  );
 
   historyCount.textContent = `${jobHistory.length} runs for this job`;
 
@@ -662,28 +683,31 @@ export function renderJobDetail(job, jobHistory) {
     return;
   }
 
-  historyRoot.innerHTML = jobHistory
-    .map(
-      (entry) => `
-        <article class="job-run-card ${entry.sessionId === state.session?.sessionId ? "job-selected" : ""}">
-          <div class="job-topline">
-            <p class="job-id">${entry.sessionId}</p>
-            <span class="eligibility-pill ${outcomeTone(entry.verification?.outcome ?? entry.status)}">
-              ${entry.verification?.outcome ?? entry.status}
-            </span>
-          </div>
-          <div class="catalog-meta">
-            <span>${entry.status}</span>
-            <span>${entry.verification?.reasonCode ?? "pending"}</span>
-            <span>${entry.updatedAt ? new Date(entry.updatedAt).toLocaleString("en-CH", { dateStyle: "short", timeStyle: "short" }) : "-"}</span>
-          </div>
-          <button class="job-select-button" type="button" data-session-id="${entry.sessionId}">
-            ${entry.sessionId === state.session?.sessionId ? "Current run" : "Open run"}
-          </button>
-        </article>
-      `
-    )
-    .join("");
+  const runCards = jobHistory.map((entry) => {
+    const isCurrent = entry.sessionId === state.session?.sessionId;
+    const updated = entry.updatedAt
+      ? new Date(entry.updatedAt).toLocaleString("en-CH", { dateStyle: "short", timeStyle: "short" })
+      : "-";
+    return html`
+      <article class="job-run-card ${isCurrent ? "job-selected" : ""}">
+        <div class="job-topline">
+          <p class="job-id">${entry.sessionId}</p>
+          <span class="eligibility-pill ${outcomeTone(entry.verification?.outcome ?? entry.status)}">
+            ${entry.verification?.outcome ?? entry.status}
+          </span>
+        </div>
+        <div class="catalog-meta">
+          <span>${entry.status}</span>
+          <span>${entry.verification?.reasonCode ?? "pending"}</span>
+          <span>${updated}</span>
+        </div>
+        <button class="job-select-button" type="button" data-session-id="${entry.sessionId}">
+          ${isCurrent ? "Current run" : "Open run"}
+        </button>
+      </article>
+    `;
+  });
+  renderHtml(historyRoot, html`${runCards}`);
 }
 
 export function renderCatalogJobActivity(job, entries) {
@@ -709,50 +733,59 @@ export function renderCatalogJobActivity(job, entries) {
   const filteredEntries = filterCatalogEntries(entries);
   const filterLabel = catalogFilterLabel(state.catalogActivityFilter);
 
-  summaryRoot.innerHTML = `
-    <div class="job-detail-grid">
-      <div class="detail-stat">
-        <dt>Category</dt>
-        <dd>${job.category}</dd>
+  const posterSummary = `${
+    job.requiresSponsoredGas ? "Sponsored gas enabled" : "Workers self-fund gas"
+  } · TTL ${job.claimTtlSeconds}s · retries ${job.retryLimit}`;
+  const latestRunLabel = latestRun
+    ? `${latestRun.wallet ?? "unknown_wallet"} · ${latestRun.status} · ${latestRun.verification?.reasonCode ?? "pending verification"}`
+    : "No runs recorded for this job yet.";
+  const monitoringFocus = activeRuns
+    ? `${activeRuns} run(s) still need poster attention across claim, submit, reject, or dispute stages.`
+    : "No active runs right now. This job is currently quiet.";
+
+  renderHtml(
+    summaryRoot,
+    html`
+      <div class="job-detail-grid">
+        <div class="detail-stat">
+          <dt>Category</dt>
+          <dd>${job.category}</dd>
+        </div>
+        <div class="detail-stat">
+          <dt>Reward</dt>
+          <dd>${formatAmount(job.rewardAmount)} ${job.rewardAsset}</dd>
+        </div>
+        <div class="detail-stat">
+          <dt>Verifier</dt>
+          <dd>${job.verifierMode}</dd>
+        </div>
+        <div class="detail-stat">
+          <dt>Workers / approved</dt>
+          <dd>${distinctWallets} / ${approvedRuns}</dd>
+        </div>
+        <div class="detail-stat">
+          <dt>Active runs</dt>
+          <dd>${activeRuns}</dd>
+        </div>
+        <div class="detail-stat">
+          <dt>Rejected / disputed</dt>
+          <dd>${rejectedRuns} / ${disputedRuns}</dd>
+        </div>
+        <div class="detail-stat detail-span">
+          <dt>Poster summary</dt>
+          <dd>${posterSummary}</dd>
+        </div>
+        <div class="detail-stat detail-span">
+          <dt>Latest run</dt>
+          <dd>${latestRunLabel}</dd>
+        </div>
+        <div class="detail-stat detail-span">
+          <dt>Monitoring focus</dt>
+          <dd>${monitoringFocus}</dd>
+        </div>
       </div>
-      <div class="detail-stat">
-        <dt>Reward</dt>
-        <dd>${formatAmount(job.rewardAmount)} ${job.rewardAsset}</dd>
-      </div>
-      <div class="detail-stat">
-        <dt>Verifier</dt>
-        <dd>${job.verifierMode}</dd>
-      </div>
-      <div class="detail-stat">
-        <dt>Workers / approved</dt>
-        <dd>${distinctWallets} / ${approvedRuns}</dd>
-      </div>
-      <div class="detail-stat">
-        <dt>Active runs</dt>
-        <dd>${activeRuns}</dd>
-      </div>
-      <div class="detail-stat">
-        <dt>Rejected / disputed</dt>
-        <dd>${rejectedRuns} / ${disputedRuns}</dd>
-      </div>
-      <div class="detail-stat detail-span">
-        <dt>Poster summary</dt>
-        <dd>${job.requiresSponsoredGas ? "Sponsored gas enabled" : "Workers self-fund gas"} · TTL ${job.claimTtlSeconds}s · retries ${job.retryLimit}</dd>
-      </div>
-      <div class="detail-stat detail-span">
-        <dt>Latest run</dt>
-        <dd>${latestRun ? `${latestRun.wallet ?? "unknown_wallet"} · ${latestRun.status} · ${latestRun.verification?.reasonCode ?? "pending verification"}` : "No runs recorded for this job yet."}</dd>
-      </div>
-      <div class="detail-stat detail-span">
-        <dt>Monitoring focus</dt>
-        <dd>${
-          activeRuns
-            ? `${activeRuns} run(s) still need poster attention across claim, submit, reject, or dispute stages.`
-            : "No active runs right now. This job is currently quiet."
-        }</dd>
-      </div>
-    </div>
-  `;
+    `
+  );
 
   countRoot.textContent = `${filteredEntries.length} ${filterLabel} runs · ${entries.length} total`;
 
@@ -762,32 +795,43 @@ export function renderCatalogJobActivity(job, entries) {
   }
 
   if (!filteredEntries.length) {
-    historyRoot.innerHTML = `<p class="empty-state">No ${filterLabel} runs match the current filter for this job yet.</p>`;
+    renderHtml(
+      historyRoot,
+      html`<p class="empty-state">No ${filterLabel} runs match the current filter for this job yet.</p>`
+    );
     return;
   }
 
-  historyRoot.innerHTML = filteredEntries
-    .map(
-      (entry) => `
-        <article class="job-run-card ${entry.sessionId === state.session?.sessionId ? "job-selected" : ""}">
-          <div class="job-topline">
-            <p class="job-id">${entry.wallet ?? "unknown_wallet"}</p>
-            <span class="eligibility-pill ${outcomeTone(entry.verification?.outcome ?? entry.status)}">
-              ${entry.verification?.outcome ?? entry.status}
-            </span>
-          </div>
-          <div class="catalog-meta">
-            <span>${entry.sessionId}</span>
-            <span>${entry.verification?.reasonCode ?? "pending"}</span>
-            <span>${entry.updatedAt ? new Date(entry.updatedAt).toLocaleString("en-CH", { dateStyle: "short", timeStyle: "short" }) : "-"}</span>
-          </div>
-          <button class="job-select-button" type="button" data-catalog-session-id="${entry.sessionId}" data-catalog-job-id="${entry.jobId}">
-            ${entry.sessionId === state.session?.sessionId ? "Current run" : "Open run"}
-          </button>
-        </article>
-      `
-    )
-    .join("");
+  const runCards = filteredEntries.map((entry) => {
+    const isCurrent = entry.sessionId === state.session?.sessionId;
+    const updated = entry.updatedAt
+      ? new Date(entry.updatedAt).toLocaleString("en-CH", { dateStyle: "short", timeStyle: "short" })
+      : "-";
+    return html`
+      <article class="job-run-card ${isCurrent ? "job-selected" : ""}">
+        <div class="job-topline">
+          <p class="job-id">${entry.wallet ?? "unknown_wallet"}</p>
+          <span class="eligibility-pill ${outcomeTone(entry.verification?.outcome ?? entry.status)}">
+            ${entry.verification?.outcome ?? entry.status}
+          </span>
+        </div>
+        <div class="catalog-meta">
+          <span>${entry.sessionId}</span>
+          <span>${entry.verification?.reasonCode ?? "pending"}</span>
+          <span>${updated}</span>
+        </div>
+        <button
+          class="job-select-button"
+          type="button"
+          data-catalog-session-id="${entry.sessionId}"
+          data-catalog-job-id="${entry.jobId}"
+        >
+          ${isCurrent ? "Current run" : "Open run"}
+        </button>
+      </article>
+    `;
+  });
+  renderHtml(historyRoot, html`${runCards}`);
 }
 
 export function updateReputation(reputation) {

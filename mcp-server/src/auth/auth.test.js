@@ -2,12 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { Wallet } from "ethers";
 
-import { loadAuthConfig } from "./config.js";
+import { loadAuthConfig, resolveRoles, hasRole } from "./config.js";
 import { signToken, verifyToken } from "./jwt.js";
 import { buildSiweMessage, parseSiweMessage, verifySiweMessage } from "./siwe.js";
 import { createAuthMiddleware } from "./middleware.js";
 import { MemoryStateStore } from "../core/state-store.js";
-import { AuthenticationError, ConfigError } from "../core/errors.js";
+import { AuthenticationError, AuthorizationError, ConfigError } from "../core/errors.js";
 
 const LONG_SECRET = "x".repeat(40);
 const OTHER_SECRET = "y".repeat(40);
@@ -260,4 +260,125 @@ test("requireAuth accepts ?token= when allowQueryToken is true", async () => {
   const result = await middleware(request, url, { allowQueryToken: true });
   assert.equal(result.wallet.toLowerCase(), "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
   assert.equal(result.via, "query_token");
+});
+
+test("loadAuthConfig parses admin and verifier wallet lists", () => {
+  const config = loadAuthConfig({
+    AUTH_MODE: "strict",
+    AUTH_JWT_SECRETS: LONG_SECRET,
+    AUTH_DOMAIN: "example.com",
+    AUTH_CHAIN_ID: "1",
+    AUTH_ADMIN_WALLETS: "0x1111111111111111111111111111111111111111,0x2222222222222222222222222222222222222222",
+    AUTH_VERIFIER_WALLETS: "0x3333333333333333333333333333333333333333"
+  });
+  assert.equal(config.adminWallets.size, 2);
+  assert.equal(config.verifierWallets.size, 1);
+  assert.deepEqual(config.resolveRoles("0x1111111111111111111111111111111111111111"), ["admin"]);
+  assert.deepEqual(config.resolveRoles("0x3333333333333333333333333333333333333333"), ["verifier"]);
+  assert.deepEqual(config.resolveRoles("0x4444444444444444444444444444444444444444"), []);
+});
+
+test("loadAuthConfig rejects malformed admin wallet entries", () => {
+  assert.throws(
+    () =>
+      loadAuthConfig({
+        AUTH_MODE: "strict",
+        AUTH_JWT_SECRETS: LONG_SECRET,
+        AUTH_ADMIN_WALLETS: "not-an-address"
+      }),
+    ConfigError
+  );
+});
+
+test("resolveRoles is case-insensitive and deduplicates via set membership", () => {
+  const roles = resolveRoles("0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", {
+    adminWallets: new Set(["0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]),
+    verifierWallets: new Set(["0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"])
+  });
+  assert.deepEqual(roles, ["admin", "verifier"]);
+});
+
+test("hasRole returns false for invalid role names", () => {
+  assert.equal(hasRole({ roles: ["admin"] }, "superuser"), false);
+  assert.equal(hasRole({ roles: ["admin"] }, "admin"), true);
+  assert.equal(hasRole({}, "admin"), false);
+  assert.equal(hasRole(undefined, "admin"), false);
+});
+
+test("requireAuth accepts token with required role", async () => {
+  const authConfig = {
+    secrets: [LONG_SECRET],
+    signingSecret: LONG_SECRET,
+    permissive: false,
+    strict: true,
+    adminWallets: new Set(),
+    verifierWallets: new Set()
+  };
+  const middleware = createAuthMiddleware({ authConfig, logger: silentLogger() });
+  const { token } = signToken(
+    { sub: "0xcccccccccccccccccccccccccccccccccccccccc", roles: ["admin"] },
+    { secret: LONG_SECRET, expiresInSeconds: 60 }
+  );
+  const request = { method: "POST", headers: { authorization: `Bearer ${token}` } };
+  const url = new URL("http://localhost/api/admin/jobs");
+  const result = await middleware(request, url, { requireRole: "admin" });
+  assert.deepEqual(result.claims.roles, ["admin"]);
+});
+
+test("requireAuth rejects token missing required role", async () => {
+  const authConfig = {
+    secrets: [LONG_SECRET],
+    signingSecret: LONG_SECRET,
+    permissive: false,
+    strict: true,
+    adminWallets: new Set(),
+    verifierWallets: new Set()
+  };
+  const middleware = createAuthMiddleware({ authConfig, logger: silentLogger() });
+  const { token } = signToken(
+    { sub: "0xcccccccccccccccccccccccccccccccccccccccc", roles: [] },
+    { secret: LONG_SECRET, expiresInSeconds: 60 }
+  );
+  const request = { method: "POST", headers: { authorization: `Bearer ${token}` } };
+  const url = new URL("http://localhost/api/admin/jobs");
+  await assert.rejects(
+    () => middleware(request, url, { requireRole: "admin" }),
+    (error) => error instanceof AuthorizationError && error.code === "missing_role"
+  );
+});
+
+test("requireAuth in permissive mode resolves roles from env wallet lists", async () => {
+  const adminWallet = "0xdddddddddddddddddddddddddddddddddddddddd";
+  const authConfig = {
+    secrets: [],
+    signingSecret: undefined,
+    permissive: true,
+    strict: false,
+    adminWallets: new Set([adminWallet]),
+    verifierWallets: new Set()
+  };
+  const middleware = createAuthMiddleware({ authConfig, logger: silentLogger() });
+  const request = { method: "POST", headers: {} };
+  const url = new URL(`http://localhost/api/admin/jobs?wallet=${adminWallet}`);
+  const result = await middleware(request, url, { requireRole: "admin" });
+  assert.equal(result.via, "permissive_query");
+  assert.deepEqual(result.claims.roles, ["admin"]);
+});
+
+test("requireAuth in permissive mode rejects unauthorized wallets for role-gated routes", async () => {
+  const authConfig = {
+    secrets: [],
+    signingSecret: undefined,
+    permissive: true,
+    strict: false,
+    adminWallets: new Set(),
+    verifierWallets: new Set()
+  };
+  const middleware = createAuthMiddleware({ authConfig, logger: silentLogger() });
+  const request = { method: "POST", headers: {} };
+  const url = new URL("http://localhost/api/admin/jobs?wallet=0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee");
+  await assert.rejects(
+    () => middleware(request, url, { requireRole: "admin" }),
+    (error) => error instanceof AuthorizationError && error.code === "missing_role"
+  );
 });

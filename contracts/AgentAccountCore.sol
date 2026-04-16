@@ -3,13 +3,10 @@ pragma solidity ^0.8.24;
 
 import {TreasuryPolicy} from "./TreasuryPolicy.sol";
 import {StrategyAdapterRegistry} from "./StrategyAdapterRegistry.sol";
+import {ReentrancyGuard} from "./lib/ReentrancyGuard.sol";
+import {SafeTransfer} from "./lib/SafeTransfer.sol";
 
-interface IERC20Like {
-    function transfer(address to, uint256 amount) external returns (bool);
-    function transferFrom(address from, address to, uint256 amount) external returns (bool);
-}
-
-contract AgentAccountCore {
+contract AgentAccountCore is ReentrancyGuard {
     TreasuryPolicy public immutable policy;
     StrategyAdapterRegistry public immutable registry;
 
@@ -79,18 +76,18 @@ contract AgentAccountCore {
         _;
     }
 
-    function deposit(address asset, uint256 amount) external whenNotPaused onlySupportedAsset(asset) {
+    function deposit(address asset, uint256 amount) external nonReentrant whenNotPaused onlySupportedAsset(asset) {
         require(amount > 0, "ZERO_AMOUNT");
         positions[msg.sender][asset].liquid += amount;
-        require(IERC20Like(asset).transferFrom(msg.sender, address(this), amount), "TRANSFER_FAILED");
+        SafeTransfer.safeTransferFrom(asset, msg.sender, address(this), amount);
         emit Deposited(msg.sender, asset, amount);
     }
 
-    function withdraw(address asset, uint256 amount) external whenNotPaused onlySupportedAsset(asset) {
+    function withdraw(address asset, uint256 amount) external nonReentrant whenNotPaused onlySupportedAsset(asset) {
         AssetPosition storage position = positions[msg.sender][asset];
         if (position.liquid < amount) revert InsufficientLiquidity();
         position.liquid -= amount;
-        require(IERC20Like(asset).transfer(msg.sender, amount), "TRANSFER_FAILED");
+        SafeTransfer.safeTransfer(asset, msg.sender, amount);
         emit Withdrawn(msg.sender, asset, amount);
     }
 
@@ -110,12 +107,16 @@ contract AgentAccountCore {
         emit ReservationReleased(account, asset, amount);
     }
 
-    function settleReservedTo(address account, address asset, address recipient, uint256 amount) external onlyOperator {
+    function settleReservedTo(address account, address asset, address recipient, uint256 amount)
+        external
+        nonReentrant
+        onlyOperator
+    {
         AssetPosition storage position = positions[account][asset];
         if (position.reserved < amount) revert InsufficientReserved();
         position.reserved -= amount;
         policy.recordOutflow(amount);
-        require(IERC20Like(asset).transfer(recipient, amount), "TRANSFER_FAILED");
+        SafeTransfer.safeTransfer(asset, recipient, amount);
         emit ReservationSettled(account, recipient, asset, amount);
     }
 
@@ -166,11 +167,11 @@ contract AgentAccountCore {
         emit Borrowed(msg.sender, asset, amount);
     }
 
-    function repay(address asset, uint256 amount) external whenNotPaused onlySupportedAsset(asset) {
+    function repay(address asset, uint256 amount) external nonReentrant whenNotPaused onlySupportedAsset(asset) {
         AssetPosition storage position = positions[msg.sender][asset];
         require(position.debtOutstanding >= amount, "OVERPAY");
-        require(IERC20Like(asset).transferFrom(msg.sender, address(this), amount), "TRANSFER_FAILED");
         position.debtOutstanding -= amount;
+        SafeTransfer.safeTransferFrom(asset, msg.sender, address(this), amount);
         emit Repaid(msg.sender, asset, amount);
     }
 
@@ -210,6 +211,7 @@ contract AgentAccountCore {
 
     function slashJobStake(address account, address asset, uint256 amount, address posterRecipient)
         external
+        nonReentrant
         onlyOperator
         whenNotPaused
         onlySupportedAsset(asset)
@@ -226,7 +228,7 @@ contract AgentAccountCore {
         uint256 treasuryAmount = amount - posterAmount;
 
         if (posterAmount > 0) {
-            require(IERC20Like(asset).transfer(posterRecipient, posterAmount), "TRANSFER_FAILED");
+            SafeTransfer.safeTransfer(asset, posterRecipient, posterAmount);
         }
         if (treasuryAmount > 0) {
             policy.recordOutflow(treasuryAmount);

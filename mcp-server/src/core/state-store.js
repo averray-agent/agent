@@ -16,6 +16,18 @@ end
 return value
 `;
 
+// Fixed-window rate limit: INCR the counter, set TTL on first hit so the
+// window closes cleanly, then return both count and remaining TTL so the
+// caller can compute reset-at. Returned as a two-element array {count, ttl}.
+const RATE_LIMIT_SCRIPT = `
+local current = redis.call("incr", KEYS[1])
+if current == 1 then
+  redis.call("pexpire", KEYS[1], ARGV[1])
+end
+local ttl = redis.call("pttl", KEYS[1])
+return {current, ttl}
+`;
+
 export class MemoryStateStore {
   constructor() {
     this.sessions = new Map();
@@ -27,6 +39,7 @@ export class MemoryStateStore {
     this.verificationResults = new Map();
     this.claimLocks = new Map();
     this.nonces = new Map();
+    this.rateLimits = new Map();
   }
 
   async getSession(sessionId) {
@@ -145,6 +158,27 @@ export class MemoryStateStore {
         this.nonces.delete(nonce);
       }
     }
+  }
+
+  async consumeRateLimit(bucket, key, { limit, windowSeconds }) {
+    const mapKey = `${bucket}:${key}`;
+    const now = Date.now();
+    const windowMs = windowSeconds * 1000;
+    const entry = this.rateLimits.get(mapKey);
+    if (!entry || entry.resetAt <= now) {
+      const resetAt = now + windowMs;
+      this.rateLimits.set(mapKey, { count: 1, resetAt });
+      return { allowed: 1 <= limit, count: 1, limit, remaining: Math.max(limit - 1, 0), resetAt };
+    }
+    entry.count += 1;
+    this.rateLimits.set(mapKey, entry);
+    return {
+      allowed: entry.count <= limit,
+      count: entry.count,
+      limit,
+      remaining: Math.max(limit - entry.count, 0),
+      resetAt: entry.resetAt
+    };
   }
 
   async healthCheck() {
@@ -278,6 +312,27 @@ export class RedisStateStore {
     return reply ?? undefined;
   }
 
+  async consumeRateLimit(bucket, key, { limit, windowSeconds }) {
+    await this.connect();
+    const redisKey = this.key(`rl:${bucket}`, key);
+    const windowMs = windowSeconds * 1000;
+    const reply = await this.client.eval(RATE_LIMIT_SCRIPT, {
+      keys: [redisKey],
+      arguments: [String(windowMs)]
+    });
+    const [countRaw, ttlRaw] = Array.isArray(reply) ? reply : [0, windowMs];
+    const count = Number(countRaw);
+    const ttlMs = Number(ttlRaw);
+    const resetAt = Date.now() + (ttlMs > 0 ? ttlMs : windowMs);
+    return {
+      allowed: count <= limit,
+      count,
+      limit,
+      remaining: Math.max(limit - count, 0),
+      resetAt
+    };
+  }
+
   async healthCheck() {
     try {
       await this.connect();
@@ -309,9 +364,35 @@ export class RedisStateStore {
   }
 }
 
-export function createStateStore(env = process.env) {
+export function createStateStore(env = process.env, { logger = console } = {}) {
   if (env.REDIS_URL) {
     return new RedisStateStore(env.REDIS_URL, env.REDIS_NAMESPACE ?? "agent-platform");
   }
+
+  // A missing REDIS_URL in production means every restart wipes sessions,
+  // nonces, claim locks, and rate-limit counters — that's an availability and
+  // security bug, not an operational convenience. Require an explicit override
+  // (STATE_STORE_ALLOW_MEMORY=1) before booting without Redis.
+  const isProduction = env.NODE_ENV === "production";
+  const isStrictAuth = env.AUTH_MODE === "strict" || (!env.AUTH_MODE && isProduction);
+  const allowMemory = ["1", "true", "yes", "on"].includes(
+    String(env.STATE_STORE_ALLOW_MEMORY ?? "").trim().toLowerCase()
+  );
+
+  if ((isProduction || isStrictAuth) && !allowMemory) {
+    throw new ExternalServiceError(
+      "REDIS_URL is required in production / strict-auth mode. " +
+        "Set REDIS_URL (preferred) or STATE_STORE_ALLOW_MEMORY=1 to opt into ephemeral memory state."
+    );
+  }
+
+  logger.warn?.(
+    {
+      backend: "memory",
+      nodeEnv: env.NODE_ENV ?? "development",
+      authMode: env.AUTH_MODE ?? "unset"
+    },
+    "state-store.memory_fallback"
+  );
   return new MemoryStateStore();
 }

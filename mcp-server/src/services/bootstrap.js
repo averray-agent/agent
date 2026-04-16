@@ -8,6 +8,8 @@ import { EventBus } from "../core/event-bus.js";
 import { EventListener } from "../blockchain/event-listener.js";
 import { loadAuthConfig } from "../auth/config.js";
 import { createAuthMiddleware } from "../auth/middleware.js";
+import { createRateLimiter } from "../auth/rate-limit.js";
+import { createLogger } from "../core/logger.js";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -95,19 +97,43 @@ export function createPlatformService() {
 }
 
 export function createPlatformRuntime() {
-  const gateway = new BlockchainGateway();
-  const pimlicoClient = new PimlicoClient();
-  const stateStore = createStateStore();
-  const eventBus = new EventBus();
-  const platformService = new PlatformService(jobs, profiles, accounts, reputations, gateway, stateStore, eventBus);
-  const verifierService = new VerifierService(platformService, stateStore, gateway);
-  const eventListener = gateway.isEnabled() ? new EventListener(gateway, eventBus, stateStore) : undefined;
+  const logger = createLogger({
+    name: "agent-platform",
+    level: process.env.LOG_LEVEL ?? (process.env.NODE_ENV === "production" ? "info" : "debug")
+  });
+
+  // Each init step is wrapped so a failing step logs a structured error with
+  // the step name before the process exits. Without this, a cryptic stack
+  // trace is the only signal that a required env var was missing.
+  const authConfig = initStep("load-auth-config", logger, () => loadAuthConfig());
+  const gateway = initStep("init-blockchain-gateway", logger, () => new BlockchainGateway());
+  const pimlicoClient = initStep("init-pimlico-client", logger, () => new PimlicoClient());
+  const stateStore = initStep("init-state-store", logger, () => createStateStore(process.env, { logger }));
+  const eventBus = initStep("init-event-bus", logger, () => new EventBus());
+  const platformService = initStep(
+    "init-platform-service",
+    logger,
+    () => new PlatformService(jobs, profiles, accounts, reputations, gateway, stateStore, eventBus)
+  );
+  const verifierService = initStep(
+    "init-verifier-service",
+    logger,
+    () => new VerifierService(platformService, stateStore, gateway)
+  );
+  const eventListener = initStep("init-event-listener", logger, () =>
+    gateway.isEnabled() ? new EventListener(gateway, eventBus, stateStore) : undefined
+  );
   void eventListener?.start?.();
-  const authConfig = loadAuthConfig();
-  const authMiddleware = createAuthMiddleware({ authConfig });
+
+  const authMiddleware = createAuthMiddleware({ authConfig, logger });
+  const rateLimiter = createRateLimiter({ stateStore, logger });
+  const rateLimitConfig = loadRateLimitConfig();
+  const httpConfig = loadHttpConfig();
+  const trustProxy = parseBooleanEnv(process.env.TRUST_PROXY);
   if (authConfig.permissive) {
-    console.warn(
-      `[auth] AUTH_MODE=permissive — legacy ?wallet= is accepted without signature. Do not use in production.`
+    logger.warn(
+      { mode: "permissive" },
+      "AUTH_MODE=permissive — legacy ?wallet= is accepted without signature. Do not use in production."
     );
   }
   return {
@@ -119,6 +145,75 @@ export function createPlatformRuntime() {
     eventBus,
     eventListener,
     authConfig,
-    authMiddleware
+    authMiddleware,
+    rateLimiter,
+    rateLimitConfig,
+    httpConfig,
+    trustProxy,
+    logger
   };
+}
+
+function initStep(name, logger, factory) {
+  try {
+    return factory();
+  } catch (error) {
+    logger.error(
+      { step: name, err: error instanceof Error ? error : new Error(String(error)) },
+      "bootstrap.init_failed"
+    );
+    throw error;
+  }
+}
+
+function loadRateLimitConfig(env = process.env) {
+  return {
+    authNonce: buildLimit(env, "RATE_LIMIT_AUTH_NONCE", { limit: 10, windowSeconds: 60 }),
+    authVerify: buildLimit(env, "RATE_LIMIT_AUTH_VERIFY", { limit: 10, windowSeconds: 60 }),
+    adminJobs: buildLimit(env, "RATE_LIMIT_ADMIN_JOBS", { limit: 60, windowSeconds: 60 }),
+    verifierRun: buildLimit(env, "RATE_LIMIT_VERIFIER_RUN", { limit: 120, windowSeconds: 60 }),
+    events: buildLimit(env, "RATE_LIMIT_EVENTS", { limit: 30, windowSeconds: 60 })
+  };
+}
+
+export function loadHttpConfig(env = process.env) {
+  const maxBodyBytes = parsePositiveInt(env.HTTP_MAX_BODY_BYTES, 64 * 1024); // 64 KiB default
+  const allowedOrigins = (env.CORS_ALLOWED_ORIGINS ?? "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  const allowAllOrigins = allowedOrigins.includes("*");
+  return {
+    maxBodyBytes,
+    allowedOrigins: new Set(allowedOrigins),
+    allowAllOrigins,
+    allowedMethods: "GET, POST, OPTIONS",
+    allowedHeaders: "authorization, content-type, last-event-id, x-request-id",
+    exposedHeaders: "x-request-id, retry-after",
+    maxAgeSeconds: parsePositiveInt(env.CORS_MAX_AGE_SECONDS, 600)
+  };
+}
+
+function buildLimit(env, prefix, defaults) {
+  const limit = parsePositiveInt(env[`${prefix}_LIMIT`], defaults.limit);
+  const windowSeconds = parsePositiveInt(env[`${prefix}_WINDOW_SECONDS`], defaults.windowSeconds);
+  return { limit, windowSeconds };
+}
+
+function parsePositiveInt(raw, fallback) {
+  if (raw === undefined || raw === null || raw === "") {
+    return fallback;
+  }
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value <= 0) {
+    return fallback;
+  }
+  return value;
+}
+
+function parseBooleanEnv(raw) {
+  if (raw === undefined || raw === null || raw === "") {
+    return false;
+  }
+  return ["1", "true", "yes", "on"].includes(String(raw).trim().toLowerCase());
 }

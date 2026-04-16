@@ -6,6 +6,7 @@
   "description": "Shared service layer for MCP, A2A, and HTTP access to the agent-native treasury platform.",
   "scripts": {
     "start:http": "node src/protocols/http/server.js",
+    "test": "node --test src/**/*.test.js",
     "demo:e2e": "node src/demo/e2e-local.js",
     "demo:e2e:remote": "node src/demo/e2e-remote.js",
     "check:redis": "node src/demo/redis-persistence-check.js"
