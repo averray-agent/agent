@@ -10,7 +10,7 @@
 
 ## Required environment variables
 
-- `RPC_URL`
+- `DWELLER_RPC_URL` (preferred) or `POLKADOT_RPC_URL` or `RPC_URL`
 - `SIGNER_PRIVATE_KEY`
 - `AGENT_ACCOUNT_ADDRESS`
 - `ESCROW_CORE_ADDRESS`
@@ -36,4 +36,3 @@ Successful deployment should return JSON like:
 ```
 
 If `persistence` reports `MemoryStateStore`, `REDIS_URL` is missing or not being loaded correctly.
-

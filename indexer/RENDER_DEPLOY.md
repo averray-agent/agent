@@ -18,13 +18,13 @@ silent fallback to pre-existing testnet addresses.
 - `ESCROW_CORE_ADDRESS`
 - `AGENT_ACCOUNT_ADDRESS`
 - `REPUTATION_SBT_ADDRESS`
-- `POLKADOT_RPC_URL` (preferred) — or the legacy `PONDER_RPC_URL_<chainId>` form
+- `DWELLER_RPC_URL` (preferred) — or `POLKADOT_RPC_URL` — or the legacy `PONDER_RPC_URL_<chainId>` form
 
 For a Polkadot Hub TestNet deployment:
 
 - `POLKADOT_CHAIN_ID=420420417` (default, can be omitted)
 - `POLKADOT_CHAIN_NAME=polkadotHubTestnet` (default, can be omitted)
-- `POLKADOT_RPC_URL=https://eth-rpc-testnet.polkadot.io/`
+- `DWELLER_RPC_URL=https://your-dweller-rpc`
 
 For mainnet cutover, set the new chain id, chain name, and RPC plus the
 mainnet contract addresses. The config will not start without them.

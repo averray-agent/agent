@@ -321,6 +321,12 @@ Important server-side files:
 - `/srv/agent-stack/indexer.env`
 - `/srv/agent-stack/Caddyfile`
 
+Preferred RPC env convention:
+
+- `DWELLER_RPC_URL` for the private/provider RPC
+- `POLKADOT_RPC_URL` as a generic explicit override
+- `RPC_URL` as the legacy fallback still used by older tooling
+
 Important repo-side static roots:
 
 - `/srv/agent-stack/app/site`
@@ -395,7 +401,7 @@ Do not commit server secrets back into the repository.
    docker compose logs --tail=100 backend
    ```
 2. Confirm:
-   - RPC connectivity
+   - RPC connectivity (`DWELLER_RPC_URL`, `POLKADOT_RPC_URL`, or `RPC_URL`)
    - Redis connectivity
    - env file values
 3. Redeploy backend if the code was just updated.
@@ -408,7 +414,7 @@ Do not commit server secrets back into the repository.
    ```
 2. Confirm:
    - Postgres reachable
-   - RPC reachable
+   - RPC reachable (`DWELLER_RPC_URL`, `POLKADOT_RPC_URL`, or `PONDER_RPC_URL_<chainId>`)
    - `DATABASE_URL` and `DATABASE_SCHEMA` correct
 
 ### TLS / domain issues

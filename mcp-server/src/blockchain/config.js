@@ -19,19 +19,26 @@ function parseAssets(rawAssets) {
 }
 
 export function loadBlockchainConfig(env = process.env) {
+  const rpcUrl = resolveRpcUrl(env);
   const requiredFields = [
-    "RPC_URL",
-    "SIGNER_PRIVATE_KEY",
-    "TREASURY_POLICY_ADDRESS",
-    "AGENT_ACCOUNT_ADDRESS",
-    "ESCROW_CORE_ADDRESS",
-    "REPUTATION_SBT_ADDRESS",
-    "SUPPORTED_ASSETS"
+    {
+      key: "RPC_URL",
+      configured: Boolean(rpcUrl),
+      missingLabel: "RPC_URL (or DWELLER_RPC_URL / POLKADOT_RPC_URL)"
+    },
+    { key: "SIGNER_PRIVATE_KEY", configured: Boolean(env.SIGNER_PRIVATE_KEY) },
+    { key: "TREASURY_POLICY_ADDRESS", configured: Boolean(env.TREASURY_POLICY_ADDRESS) },
+    { key: "AGENT_ACCOUNT_ADDRESS", configured: Boolean(env.AGENT_ACCOUNT_ADDRESS) },
+    { key: "ESCROW_CORE_ADDRESS", configured: Boolean(env.ESCROW_CORE_ADDRESS) },
+    { key: "REPUTATION_SBT_ADDRESS", configured: Boolean(env.REPUTATION_SBT_ADDRESS) },
+    { key: "SUPPORTED_ASSETS", configured: Boolean(env.SUPPORTED_ASSETS) }
   ];
-  const configuredFields = requiredFields.filter((key) => Boolean(env[key]));
+  const configuredFields = requiredFields.filter((field) => field.configured).map((field) => field.key);
   const hasPartialConfig = configuredFields.length > 0 && configuredFields.length < requiredFields.length;
   if (hasPartialConfig) {
-    const missing = requiredFields.filter((key) => !env[key]);
+    const missing = requiredFields
+      .filter((field) => !field.configured)
+      .map((field) => field.missingLabel ?? field.key);
     throw new ConfigError(
       `Incomplete blockchain configuration. Missing: ${missing.join(", ")}`,
       { missing, configured: configuredFields }
@@ -47,7 +54,7 @@ export function loadBlockchainConfig(env = process.env) {
 
   return {
     enabled,
-    rpcUrl: env.RPC_URL ?? "",
+    rpcUrl,
     signerPrivateKey: env.SIGNER_PRIVATE_KEY ?? "",
     treasuryPolicyAddress: env.TREASURY_POLICY_ADDRESS ?? "",
     agentAccountAddress: env.AGENT_ACCOUNT_ADDRESS ?? "",
@@ -55,4 +62,8 @@ export function loadBlockchainConfig(env = process.env) {
     reputationSbtAddress: env.REPUTATION_SBT_ADDRESS ?? "",
     supportedAssets
   };
+}
+
+function resolveRpcUrl(env = process.env) {
+  return env.DWELLER_RPC_URL?.trim() || env.POLKADOT_RPC_URL?.trim() || env.RPC_URL?.trim() || "";
 }
