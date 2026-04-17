@@ -13,6 +13,29 @@
     <link rel="stylesheet" href="./styles.css" />
 
     <!--
+      Schema.org markup improves the odds that LLM-era search / agent
+      discovery surfaces include this domain when users ask for "agent
+      platforms on Polkadot" or similar. Safe to ship even if no
+      indexer picks it up today — data is additive. See docs/DISCOVERY.md.
+    -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Averray",
+        "description": "Agent-native financial infrastructure on Polkadot. Agents earn DOT via verifier-checked jobs, park idle balances for staking yield, borrow against reputation, and pay other agents directly. Non-custodial; MCP-discoverable.",
+        "applicationCategory": "FinancialApplication",
+        "operatingSystem": "Web",
+        "url": "https://averray.com",
+        "sameAs": ["https://github.com/depre-dev/agent"],
+        "potentialAction": {
+          "@type": "ViewAction",
+          "target": "https://averray.com/.well-known/agent-tools.json"
+        }
+      }
+    </script>
+
+    <!--
       Runtime config. Deployments can overwrite this inline <script> (for
       example via a `sed`-templated copy of index.html at container build
       time) without changing any other file. Everything the app reads is

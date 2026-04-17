@@ -292,6 +292,14 @@ export class JobCatalogService {
       ? input.parentSessionId.trim()
       : "";
 
+    // Optional recurring-job schedule. v1 just normalises + validates the
+    // schedule field; the actual scheduler worker is a follow-up (see
+    // docs/patterns/recurring-jobs.md). A recurring template is a job
+    // record with `recurring: true` and a cron-style `schedule.cron`
+    // expression; each firing mints a derivative job with its own id.
+    const recurring = Boolean(input?.recurring);
+    const schedule = normaliseSchedule(input?.schedule, recurring);
+
     return {
       id,
       category,
@@ -305,8 +313,41 @@ export class JobCatalogService {
       claimTtlSeconds,
       retryLimit,
       requiresSponsoredGas: Boolean(input?.requiresSponsoredGas),
-      ...(parentSessionId ? { parentSessionId } : {})
+      ...(parentSessionId ? { parentSessionId } : {}),
+      ...(recurring ? { recurring: true } : {}),
+      ...(schedule ? { schedule } : {})
     };
+  }
+
+  /**
+   * Instantiate a new derivative job from a recurring template. Returns
+   * the derivative job record (already inserted into the catalog) so
+   * the HTTP layer can echo it to the caller. The derivative's id is
+   * deterministic from the template id + ISO timestamp so dashboards
+   * can group a template's runs together. The template itself is
+   * preserved in the catalog so future fires continue from the same
+   * source record.
+   */
+  fireRecurringJob(templateId, { firedAt = new Date() } = {}) {
+    const template = this.requireJob(templateId);
+    if (!template.recurring) {
+      throw new ValidationError(`${templateId} is not a recurring template`);
+    }
+    const stamp = firedAt.toISOString().replace(/[:.]/g, "-").replace("Z", "").slice(0, 19);
+    const derivativeId = this.normalizeId(`${templateId}-run-${stamp}`);
+    if (this.jobs.some((candidate) => candidate.id === derivativeId)) {
+      throw new ConflictError(`Derivative already exists: ${derivativeId}`, "recurring_job_collision");
+    }
+    const derivative = {
+      ...template,
+      id: derivativeId,
+      recurring: false,
+      templateId,
+      firedAt: firedAt.toISOString()
+    };
+    delete derivative.schedule;
+    this.jobs.unshift(derivative);
+    return derivative;
   }
 
   buildVerifierConfig(verifierMode, input) {
@@ -358,6 +399,45 @@ export class JobCatalogService {
       .replace(/[^a-z0-9-]+/g, "-")
       .replace(/^-+|-+$/g, "");
   }
+}
+
+/**
+ * Validate an input schedule block and return a canonicalised copy, or
+ * undefined when the caller didn't supply one. Requires a 5-field cron
+ * string; the scheduler worker (future) reads `schedule.cron`. Other
+ * fields (`timezone`, `startAt`, `endAt`) are recorded but not yet
+ * enforced — documented as v2 in docs/patterns/recurring-jobs.md.
+ */
+function normaliseSchedule(raw, recurring) {
+  if (!raw && !recurring) return undefined;
+  if (!raw) {
+    throw new ValidationError("recurring jobs must include a schedule");
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new ValidationError("schedule must be an object");
+  }
+  const cron = typeof raw.cron === "string" ? raw.cron.trim() : "";
+  if (!cron) {
+    throw new ValidationError("schedule.cron is required for recurring jobs");
+  }
+  const parts = cron.split(/\s+/u);
+  if (parts.length !== 5) {
+    throw new ValidationError(`schedule.cron must have 5 fields; got: "${cron}"`);
+  }
+  const normalised = { cron };
+  if (typeof raw.timezone === "string" && raw.timezone.trim()) {
+    normalised.timezone = raw.timezone.trim();
+  }
+  for (const key of ["startAt", "endAt"]) {
+    if (typeof raw[key] === "string" && raw[key].trim()) {
+      const parsed = Date.parse(raw[key]);
+      if (Number.isNaN(parsed)) {
+        throw new ValidationError(`schedule.${key} must be ISO-8601 if provided`);
+      }
+      normalised[key] = new Date(parsed).toISOString();
+    }
+  }
+  return normalised;
 }
 
 /**

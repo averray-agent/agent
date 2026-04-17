@@ -47,15 +47,19 @@ export class PlatformService {
 
   getPlatformCapabilities() {
     return {
+      name: "Averray — agent-native treasury + job runtime",
+      discoveryUrl: "https://averray.com/.well-known/agent-tools.json",
       protocols: ["mcp", "a2a", "http"],
       onboarding: {
         starterFlow: [
-          "connect-wallet",
+          "discover-tiers",
+          "sign-in-with-ethereum",
           "fetch-account-summary",
           "run-preflight-job",
-          "claim-sponsored-starter-job",
+          "claim-starter-job",
           "submit-structured-work",
-          "poll-verification-status"
+          "poll-verification-status",
+          "inspect-earned-badge"
         ]
       },
       tools: [
@@ -69,17 +73,25 @@ export class PlatformService {
         "preflightJob",
         "explainEligibility",
         "estimateNetReward",
+        "getJobTierLadder",
         "reserveForJob",
         "claimJob",
         "submitWork",
         "resumeSession",
+        "sendToAgent",
         "allocateIdleFunds",
+        "listStrategies",
         "getBorrowCapacity",
         "borrow",
         "repay",
         "getReputation",
+        "getAgentProfile",
+        "getAgentBadge",
         "verifySubmission",
-        "getVerificationResult"
+        "getVerificationResult",
+        "listVerifierHandlers",
+        "signIn",
+        "signOut"
       ]
     };
   }
@@ -90,6 +102,10 @@ export class PlatformService {
 
   createJob(input) {
     return this.jobCatalogService.createJob(input);
+  }
+
+  fireRecurringJob(templateId, options = {}) {
+    return this.jobCatalogService.fireRecurringJob(templateId, options);
   }
 
   getJobDefinition(jobId) {

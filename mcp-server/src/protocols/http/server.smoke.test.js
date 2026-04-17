@@ -461,6 +461,69 @@ test("http smoke: /jobs/recommendations includes per-job tierGate with missing-s
   });
 });
 
+test("http smoke: /admin/jobs/fire produces a derivative from a recurring template", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
+
+    // 1. Post a recurring template.
+    const template = await fetch(`${base}/admin/jobs`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({
+        id: "recurring-smoke-digest",
+        category: "coding",
+        tier: "starter",
+        rewardAmount: 2,
+        verifierMode: "benchmark",
+        verifierTerms: ["complete"],
+        verifierMinimumMatches: 1,
+        recurring: true,
+        schedule: { cron: "0 9 * * 1", timezone: "Europe/Zurich" }
+      })
+    });
+    assert.equal(template.status, 201);
+
+    // 2. Fire one instance.
+    const fireResponse = await fetch(`${base}/admin/jobs/fire`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({
+        templateId: "recurring-smoke-digest",
+        firedAt: "2026-04-20T09:00:00.000Z"
+      })
+    });
+    assert.equal(fireResponse.status, 201);
+    const derivative = await fireResponse.json();
+    assert.equal(derivative.templateId, "recurring-smoke-digest");
+    assert.equal(derivative.recurring, false);
+    assert.match(derivative.id, /^recurring-smoke-digest-run-/);
+  });
+});
+
+test("http smoke: /admin/jobs rejects recurring template with missing schedule", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
+    const response = await fetch(`${base}/admin/jobs`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({
+        id: "bad-recurring-job",
+        category: "coding",
+        tier: "starter",
+        rewardAmount: 1,
+        verifierMode: "benchmark",
+        verifierTerms: ["complete"],
+        verifierMinimumMatches: 1,
+        recurring: true
+      })
+    });
+    assert.equal(response.status, 400);
+    const body = await response.json();
+    assert.equal(body.error, "invalid_request");
+    assert.match(body.message, /schedule/);
+  });
+});
+
 test("http smoke: /metrics emits Prometheus text format with baseline series", { skip: !RUN }, async () => {
   await runWithServer(async (base) => {
     // Warm the metrics: one unauthenticated admin call to populate counters.
