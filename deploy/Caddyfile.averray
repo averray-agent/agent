@@ -29,11 +29,11 @@ averray.com, www.averray.com {
 app.averray.com {
   encode zstd gzip
 
-  handle /api/* {
+  handle_path /api/* {
     reverse_proxy backend:8787
   }
 
-  handle /index/* {
+  handle_path /index/* {
     reverse_proxy indexer:42069
   }
 
