@@ -28,7 +28,9 @@ run_step() {
   "$@"
 }
 
-require_command npm
+if [[ "$RUN_FRONTEND_TESTS" == "1" || "$RUN_BACKEND_TESTS" == "1" || "$RUN_SITE_BUILD" == "1" || "$RUN_INDEXER_TYPECHECK" == "1" ]]; then
+  require_command npm
+fi
 
 if [[ "$RUN_CONTRACT_VERIFY" == "1" ]]; then
   require_command cast
