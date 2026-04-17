@@ -556,6 +556,97 @@ main {
   background: rgba(255, 255, 255, 0.54);
 }
 
+.work-runbook-shell,
+.admin-console-shell {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.work-runbook-grid,
+.admin-console-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.work-step-card,
+.admin-console-card {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.95rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.work-step-card p,
+.admin-console-card p {
+  margin: 0;
+  font-size: 0.76rem;
+  font-weight: 800;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.work-step-card strong,
+.admin-console-card strong {
+  font-size: 1rem;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.work-step-card span,
+.admin-console-card span {
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.work-step-card.is-active,
+.admin-console-card-strong {
+  border-color: rgba(30, 102, 66, 0.18);
+  background: rgba(214, 234, 223, 0.52);
+}
+
+.work-step-card.is-complete {
+  border-color: rgba(30, 102, 66, 0.14);
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.work-focus-card {
+  display: grid;
+  gap: 0.3rem;
+  padding: 1rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(30, 102, 66, 0.12);
+  background: rgba(17, 19, 21, 0.04);
+}
+
+.work-focus-card h3 {
+  margin-bottom: 0;
+  font-size: 1.12rem;
+}
+
+.admin-console-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.admin-console-actions .secondary-action,
+.admin-console-actions .primary-action {
+  min-height: 2.65rem;
+}
+
+.admin-console-actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .funding-head {
   display: flex;
   align-items: flex-start;
@@ -1510,6 +1601,8 @@ main {
   .detail-grid,
   .job-detail-grid,
   .form-grid,
+  .work-runbook-grid,
+  .admin-console-grid,
   .admin-summary-grid,
   .admin-inline-metrics,
   .action-details,
@@ -1527,6 +1620,7 @@ main {
   .endpoint-list a,
   .job-topline,
   .action-row,
+  .admin-console-actions,
   .poster-toggle-row,
   .auth-shell,
   .auth-actions,

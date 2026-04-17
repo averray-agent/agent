@@ -261,7 +261,43 @@
               <p id="wallet-feedback" class="wallet-feedback">Permissive-mode fallback is ready for local testing.</p>
             </form>
 
-            <section class="funding-shell">
+            <section class="work-runbook-shell">
+              <div class="detail-head">
+                <h3>Worker runbook</h3>
+                <span id="work-focus-pill" class="status-pill status-pending">Waiting for wallet</span>
+              </div>
+              <div class="work-runbook-grid">
+                <article class="work-step-card" id="work-step-auth">
+                  <p>1. Sign in</p>
+                  <strong>Connect wallet</strong>
+                  <span>Authenticate the operator identity first.</span>
+                </article>
+                <article class="work-step-card" id="work-step-funding">
+                  <p>2. Cover stake</p>
+                  <strong>Load Mock DOT</strong>
+                  <span>Fund the wallet if the selected run needs claim stake.</span>
+                </article>
+                <article class="work-step-card" id="work-step-execution">
+                  <p>3. Run work</p>
+                  <strong>Claim then submit</strong>
+                  <span>Move the selected job into an active session.</span>
+                </article>
+                <article class="work-step-card" id="work-step-settlement">
+                  <p>4. Settle</p>
+                  <strong>Verify result</strong>
+                  <span>Close the session with a verifier response.</span>
+                </article>
+              </div>
+              <div class="work-focus-card">
+                <p class="panel-label">Current focus</p>
+                <h3 id="work-focus-title">Sign in to start the worker loop.</h3>
+                <p id="work-focus-copy" class="section-note">
+                  Once the wallet is signed in, this panel will point to the single next step that matters most.
+                </p>
+              </div>
+            </section>
+
+            <section class="funding-shell" id="work-funding">
               <div class="funding-head">
                 <div>
                   <p class="panel-label">Funding</p>
@@ -325,7 +361,7 @@
               <p class="empty-state">Recommendations will load here once the worker wallet and preflight data are ready.</p>
             </div>
 
-            <section class="action-shell">
+            <section class="action-shell" id="work-execution">
               <div class="detail-head">
                 <h3>Execution flow</h3>
                 <span id="action-pill" class="status-pill status-pending">Choose a job</span>
@@ -467,6 +503,31 @@
               Sign in first, then this surface will show whether the current wallet can create jobs, fire recurring templates, and settle verifier runs.
             </p>
 
+            <section class="admin-console-shell">
+              <div class="detail-head">
+                <h3>Command deck</h3>
+                <span id="admin-console-pill" class="status-pill status-pending">Awaiting sign-in</span>
+              </div>
+              <div class="admin-console-grid">
+                <article class="admin-console-card admin-console-card-strong">
+                  <p>Console state</p>
+                  <strong id="admin-console-state">Locked</strong>
+                  <span id="admin-console-copy">Sign in with an admin or verifier-scoped wallet to unlock internal commands.</span>
+                </article>
+                <article class="admin-console-card">
+                  <p>Next move</p>
+                  <strong id="admin-console-next">Authenticate</strong>
+                  <span id="admin-console-hint">The command deck will point to the most useful next action for this session.</span>
+                </article>
+              </div>
+              <div class="admin-console-actions">
+                <button id="admin-console-create-button" type="button" class="primary-action">Jump to create job</button>
+                <button id="admin-console-fire-button" type="button" class="secondary-action">Jump to recurring fire</button>
+                <button id="admin-console-status-button" type="button" class="secondary-action">Jump to status</button>
+                <button id="admin-console-catalog-button" type="button" class="secondary-action">Jump to catalog</button>
+              </div>
+            </section>
+
             <div class="admin-summary-grid">
               <article class="admin-card admin-card-strong">
                 <p>Control wallet</p>
@@ -500,7 +561,7 @@
               </article>
             </div>
 
-            <details class="operator-disclosure">
+            <details class="operator-disclosure" id="admin-status-details">
               <summary>
                 <span>Admin status and maintenance</span>
                 <span class="operator-disclosure-copy">Expand for recurring templates, maintenance posture, and release docs.</span>
@@ -527,7 +588,7 @@
               </section>
             </details>
 
-            <section class="admin-fire-shell">
+            <section class="admin-fire-shell" id="admin-fire-zone">
               <div class="detail-head">
                 <h3>Manual recurring fire</h3>
                 <span class="section-note">Generate one live derivative from a recurring template before the scheduler lands.</span>

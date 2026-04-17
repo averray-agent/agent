@@ -76,6 +76,17 @@ function setWorkspaceMode(mode = "work", options = {}) {
   }
 }
 
+function jumpToSection(id, options = {}) {
+  const { mode = undefined, expandId = undefined } = options;
+  if (mode) setWorkspaceMode(mode);
+  if (expandId) {
+    document.getElementById(expandId)?.setAttribute("open", "");
+  }
+  requestAnimationFrame(() => {
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+}
+
 function wireWorkspaceModes() {
   const buttons = document.querySelectorAll("[data-workspace-mode]");
   const adminLink = document.getElementById("auth-admin-link");
@@ -251,6 +262,85 @@ function renderMaintenanceStatus(maintenance = undefined) {
   );
 }
 
+function refreshAdminConsole(snapshot = getAuthSnapshot()) {
+  const adminEnabled = hasRole("admin", snapshot.roles ?? []);
+  const verifierEnabled = hasRole("verifier", snapshot.roles ?? []);
+  const recurringTemplateInput = document.getElementById("admin-template-id");
+  const selectedRecurring = Boolean(state.selectedJob?.recurring);
+  const consolePill = document.getElementById("admin-console-pill");
+  const createButton = document.getElementById("admin-console-create-button");
+  const fireButton = document.getElementById("admin-console-fire-button");
+  const statusButton = document.getElementById("admin-console-status-button");
+  const catalogButton = document.getElementById("admin-console-catalog-button");
+
+  setText(
+    "admin-console-state",
+    !snapshot.authenticated
+      ? "Locked"
+      : adminEnabled && verifierEnabled
+        ? "Admin + verifier"
+        : adminEnabled
+          ? "Admin ready"
+          : verifierEnabled
+            ? "Verifier ready"
+            : "Worker-only"
+  );
+
+  if (!snapshot.authenticated) {
+    if (consolePill) consolePill.className = "status-pill status-pending";
+    setText("admin-console-pill", "Awaiting sign-in");
+    setText("admin-console-next", "Authenticate");
+    setText("admin-console-copy", "Sign in with an admin or verifier-scoped wallet to unlock internal commands.");
+    setText("admin-console-hint", "No control-plane actions are available until the operator wallet is authenticated.");
+  } else if (adminEnabled) {
+    if (consolePill) consolePill.className = "status-pill status-ok";
+    setText("admin-console-pill", "Console live");
+    setText("admin-console-next", selectedRecurring ? "Fire recurring template" : "Create or review jobs");
+    setText(
+      "admin-console-copy",
+      selectedRecurring
+        ? `Selected template ${state.selectedJob.id} can be fired directly from the command deck.`
+        : `Catalog has ${platformStatus.catalogCount} live jobs. Use the create form or inspect status before changing live state.`
+    );
+    setText(
+      "admin-console-hint",
+      selectedRecurring
+        ? "The current recurring template is ready to drop into the fire form."
+        : "Jump straight to the create form, recurring fire, status, or catalog activity."
+    );
+  } else if (verifierEnabled) {
+    if (consolePill) consolePill.className = "status-pill status-pending";
+    setText("admin-console-pill", "Verifier only");
+    setText("admin-console-next", "Settle from Work mode");
+    setText("admin-console-copy", "This wallet can settle submitted sessions but cannot create jobs or fire templates.");
+    setText("admin-console-hint", "Switch back to Work mode to run verifier settlement on submitted sessions.");
+  } else {
+    if (consolePill) consolePill.className = "status-pill status-pending";
+    setText("admin-console-pill", "Worker-only");
+    setText("admin-console-next", "No admin actions");
+    setText("admin-console-copy", "This wallet can inspect the control plane, but it cannot mutate admin state.");
+    setText("admin-console-hint", "Admin-scoped wallets unlock job creation and recurring template actions.");
+  }
+
+  if (createButton) {
+    createButton.disabled = !adminEnabled;
+    createButton.title = adminEnabled ? "" : "Admin role required.";
+  }
+  if (fireButton) {
+    fireButton.disabled = !adminEnabled;
+    fireButton.title = adminEnabled ? "" : "Admin role required.";
+  }
+  if (statusButton) {
+    statusButton.disabled = !snapshot.authenticated;
+  }
+  if (catalogButton) {
+    catalogButton.disabled = platformStatus.catalogCount === 0;
+  }
+  if (recurringTemplateInput && adminEnabled && selectedRecurring && !recurringTemplateInput.value.trim()) {
+    recurringTemplateInput.value = state.selectedJob.id;
+  }
+}
+
 function formatExpiry(expiresAt) {
   if (!expiresAt) return "No active token";
   const date = new Date(expiresAt);
@@ -358,6 +448,7 @@ function syncRoleGatedControls(snapshot = getAuthSnapshot()) {
     }
   }
 
+  refreshAdminConsole(snapshot);
   refreshActionPanel();
   void refreshAdminWorkspace(snapshot);
 }
@@ -602,6 +693,7 @@ async function loadSelectedCatalogJobActivity() {
 async function selectJob(jobId) {
   const job = await loadJobDefinitionWithPreflight(jobId);
   updateSelectedJob(job);
+  refreshAdminConsole();
   const templateInput = document.getElementById("admin-template-id");
   if (templateInput && job?.recurring && !templateInput.value.trim()) {
     templateInput.value = job.id;
@@ -703,6 +795,7 @@ async function loadCatalog() {
   if (hasRole("admin")) {
     void refreshAdminWorkspace();
   }
+  refreshAdminConsole();
 }
 
 async function claimSelectedJob() {
@@ -1256,6 +1349,21 @@ function wireAuthControls() {
   });
 }
 
+function wireAdminConsoleControls() {
+  document.getElementById("admin-console-create-button")?.addEventListener("click", () => {
+    jumpToSection("poster-form", { mode: "admin" });
+  });
+  document.getElementById("admin-console-fire-button")?.addEventListener("click", () => {
+    jumpToSection("admin-fire-zone", { mode: "admin" });
+  });
+  document.getElementById("admin-console-status-button")?.addEventListener("click", () => {
+    jumpToSection("admin-status-details", { mode: "admin", expandId: "admin-status-details" });
+  });
+  document.getElementById("admin-console-catalog-button")?.addEventListener("click", () => {
+    jumpToSection("catalog-workspace", { mode: "admin" });
+  });
+}
+
 async function boot() {
   // Init Sentry (no-op when sentryDsn is empty; the browser SDK auto-loads).
   initObservability();
@@ -1321,6 +1429,7 @@ async function boot() {
   }
 
   wireAuthControls();
+  wireAdminConsoleControls();
   wireWalletForm(walletForm, walletInput);
   wireJobSelection(jobList);
   wireCatalogSelection(catalogList);
@@ -1339,6 +1448,7 @@ async function boot() {
     useSelectedTemplateButton
   });
   renderActivityFeed([]);
+  refreshAdminConsole();
   refreshActionPanel();
 }
 

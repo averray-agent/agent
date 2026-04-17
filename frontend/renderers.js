@@ -943,6 +943,104 @@ export function applyVerificationState(result = undefined) {
   renderSessionDetail();
 }
 
+function setRunbookStepState(id, status, title, copy) {
+  const card = document.getElementById(id);
+  if (!card) return;
+  card.classList.toggle("is-active", status === "active");
+  card.classList.toggle("is-complete", status === "complete");
+  const strong = card.querySelector("strong");
+  const span = card.querySelector("span");
+  if (strong) strong.textContent = title;
+  if (span) span.textContent = copy;
+}
+
+function updateWorkRunbook(readiness, hasSession, hasVerification, hasVerifierRole) {
+  const focusPill = document.getElementById("work-focus-pill");
+  const walletReady = Boolean(state.wallet);
+  const canClaim = Boolean(readiness?.canClaim);
+  const sessionStatus = state.session?.status ?? "";
+  const submitted = sessionStatus === "submitted";
+  const settled = Boolean(hasVerification);
+
+  setRunbookStepState(
+    "work-step-auth",
+    walletReady ? "complete" : "active",
+    walletReady ? "Wallet connected" : "Connect wallet",
+    walletReady ? "Worker identity is authenticated and ready." : "Authenticate the operator identity first."
+  );
+  setRunbookStepState(
+    "work-step-funding",
+    !walletReady ? "default" : canClaim || hasSession ? "complete" : "active",
+    canClaim || hasSession ? "Stake covered" : "Load Mock DOT",
+    canClaim || hasSession
+      ? "The wallet can cover the selected claim stake."
+      : "Fund the wallet if the selected run needs claim stake."
+  );
+  setRunbookStepState(
+    "work-step-execution",
+    !walletReady || (!canClaim && !hasSession) ? "default" : hasSession ? "active" : "complete",
+    hasSession ? (submitted ? "Submission stored" : "Claimed and in progress") : "Claim then submit",
+    hasSession
+      ? "Move from claimed work to submitted evidence."
+      : "Select and claim a job, then submit evidence."
+  );
+  setRunbookStepState(
+    "work-step-settlement",
+    settled ? "complete" : submitted ? "active" : "default",
+    settled ? "Result settled" : hasVerifierRole ? "Verify result" : "Await verifier",
+    settled
+      ? "The current run already has a verifier outcome."
+      : submitted
+        ? (hasVerifierRole ? "Run the verifier to settle this submission." : "A verifier-scoped wallet must settle this submission.")
+        : "Settlement starts after evidence is submitted."
+  );
+
+  if (focusPill) {
+    if (!walletReady) {
+      focusPill.className = "status-pill status-pending";
+      focusPill.textContent = "Waiting for wallet";
+      setText("work-focus-title", "Connect and sign in first.");
+      setText("work-focus-copy", "The worker loop starts by authenticating the wallet that will fund, claim, and submit.");
+      return;
+    }
+    if (!canClaim && !hasSession) {
+      focusPill.className = "status-pill status-pending";
+      focusPill.textContent = readiness?.label ?? "Fund first";
+      setText("work-focus-title", "Cover the claim stake for the selected run.");
+      setText("work-focus-copy", readiness?.guidance ?? "Add Mock DOT until the selected claim is fully covered.");
+      return;
+    }
+    if (!hasSession) {
+      focusPill.className = "status-pill status-ok";
+      focusPill.textContent = "Ready to claim";
+      setText("work-focus-title", "Claim the selected job.");
+      setText("work-focus-copy", "The wallet is funded and the selected run is eligible, so you can open the session now.");
+      return;
+    }
+    if (sessionStatus === "claimed") {
+      focusPill.className = "status-pill status-ok";
+      focusPill.textContent = "Prepare submission";
+      setText("work-focus-title", "Complete the evidence payload and submit.");
+      setText("work-focus-copy", "This run is already claimed. Use the evidence editor, then submit the result for settlement.");
+      return;
+    }
+    if (submitted && !settled) {
+      focusPill.className = hasVerifierRole ? "status-pill status-ok" : "status-pill status-pending";
+      focusPill.textContent = hasVerifierRole ? "Ready to verify" : "Verifier required";
+      setText("work-focus-title", hasVerifierRole ? "Settle the submitted run." : "Switch to a verifier-scoped wallet.");
+      setText("work-focus-copy", hasVerifierRole
+        ? "The submission is in place. Run verification when you are ready to settle it."
+        : "This submission is ready, but the current wallet cannot settle it without the verifier role.");
+      return;
+    }
+
+    focusPill.className = "status-pill status-ok";
+    focusPill.textContent = "Run settled";
+    setText("work-focus-title", "Pick the next run or inspect the result.");
+    setText("work-focus-copy", "The current session already has an outcome, so the next useful action is to open another job or review the history.");
+  }
+}
+
 export function refreshActionPanel() {
   const claimButton = document.getElementById("claim-button");
   const submitButton = document.getElementById("submit-button");
@@ -965,6 +1063,7 @@ export function refreshActionPanel() {
   submitButton.disabled = !canSubmit;
   verifyButton.disabled = !canVerify;
   refreshButton.disabled = !hasSession;
+  updateWorkRunbook(readiness, hasSession, hasVerification, hasVerifierRole);
 
   setText("execution-stage", execution.stage);
   setText("execution-next-step", execution.next);
