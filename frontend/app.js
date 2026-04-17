@@ -73,6 +73,8 @@ function renderRolePills(rootId, roles = state.authRoles) {
     const pill = document.createElement("span");
     pill.className = `role-pill role-pill-${role}`;
     pill.textContent = role.toUpperCase();
+    pill.title = "Role badge";
+    pill.setAttribute("aria-label", `${role} role badge`);
     root.appendChild(pill);
   }
   root.hidden = false;
@@ -192,12 +194,14 @@ function syncPublicProfileLinks(wallet = "") {
   const links = document.getElementById("auth-profile-links");
   const pageLink = document.getElementById("auth-profile-page-link");
   const jsonLink = document.getElementById("auth-profile-json-link");
+  const adminLink = document.getElementById("auth-admin-link");
   if (!links || !pageLink || !jsonLink) return;
 
   if (!wallet) {
     links.hidden = true;
     pageLink.href = "./agent.html";
     jsonLink.href = apiUrl("/agents/");
+    if (adminLink) adminLink.hidden = true;
     return;
   }
 
@@ -205,6 +209,7 @@ function syncPublicProfileLinks(wallet = "") {
   links.hidden = false;
   pageLink.href = `./agent.html?wallet=${encodedWallet}`;
   jsonLink.href = apiUrl(`/agents/${wallet}`);
+  if (adminLink) adminLink.href = "#admin-workspace";
 }
 
 function syncRoleGatedControls(snapshot = getAuthSnapshot()) {
@@ -217,6 +222,7 @@ function syncRoleGatedControls(snapshot = getAuthSnapshot()) {
   const verifyButton = document.getElementById("verify-button");
   const posterForm = document.getElementById("poster-form");
   const fireForm = document.getElementById("admin-fire-form");
+  const adminLink = document.getElementById("auth-admin-link");
 
   const adminEnabled = hasRole("admin", roles);
   const verifierEnabled = hasRole("verifier", roles);
@@ -257,6 +263,10 @@ function syncRoleGatedControls(snapshot = getAuthSnapshot()) {
   setText("admin-role-value", roleSummary(roles));
   setText("admin-admin-capability", adminEnabled ? "Unlocked" : "Locked");
   setText("admin-verifier-capability", verifierEnabled ? "Unlocked" : "Locked");
+  if (adminLink) {
+    adminLink.hidden = !(snapshot.authenticated && (adminEnabled || verifierEnabled));
+    adminLink.textContent = adminEnabled ? "Open admin workspace" : "Open control workspace";
+  }
   setText(
     "admin-surface-copy",
     !snapshot.authenticated

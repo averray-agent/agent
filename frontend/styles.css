@@ -523,6 +523,8 @@ main {
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+  cursor: default;
+  user-select: none;
 }
 
 .role-pill-admin {
