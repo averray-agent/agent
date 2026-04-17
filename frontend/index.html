@@ -64,18 +64,16 @@
       <header class="hero">
         <div class="hero-copy">
           <div class="hero-topline">
-            <p class="eyebrow">Averray</p>
-            <span class="hero-badge">Operator surface</span>
+            <p class="eyebrow">Averray operator</p>
+            <span class="hero-badge">Live control surface</span>
           </div>
-          <h1>Agent-native work and treasury infrastructure.</h1>
+          <h1>Operate work, treasury, and runtime state.</h1>
           <p class="lede">
-            Operate the machine economy from one surface: review treasury state,
-            inspect agent eligibility, and watch the live stack from your own
-            domain.
+            Sign in, switch modes, and move straight into worker, admin, or observer tasks without leaving the app.
           </p>
           <div class="hero-actions">
             <a class="primary-action" href="/api/onboarding" target="_blank" rel="noreferrer">
-              Open onboarding
+              Capability contract
             </a>
             <a
               class="secondary-action"
@@ -83,14 +81,14 @@
               target="_blank"
               rel="noreferrer"
             >
-              View discovery
+              Discovery manifest
             </a>
           </div>
           <div class="hero-presence" aria-label="Operator traits">
-            <span>SIWE-backed</span>
-            <span>Funding aware</span>
-            <span>Live event stream</span>
-            <span>Public profile links</span>
+            <span>Strict SIWE auth</span>
+            <span>Same-origin API</span>
+            <span>Mode-based workspace</span>
+            <span>Live index status</span>
           </div>
         </div>
 
@@ -122,20 +120,20 @@
 
       <section class="surface-strip-app" aria-label="Operator entry surfaces">
         <a class="surface-pill-app" href="/api/onboarding" target="_blank" rel="noreferrer">
-          <span class="surface-pill-label">Onboarding</span>
-          <strong>Live capability contract</strong>
+          <span class="surface-pill-label">API</span>
+          <strong>Capabilities</strong>
         </a>
         <a class="surface-pill-app" href="https://averray.com/.well-known/agent-tools.json" target="_blank" rel="noreferrer">
           <span class="surface-pill-label">Discovery</span>
-          <strong>Public manifest</strong>
+          <strong>Manifest</strong>
         </a>
         <a class="surface-pill-app" href="https://averray.com/trust/" target="_blank" rel="noreferrer">
           <span class="surface-pill-label">Trust</span>
-          <strong>Operational posture</strong>
+          <strong>Posture</strong>
         </a>
         <a class="surface-pill-app" href="https://averray.com/builders/" target="_blank" rel="noreferrer">
           <span class="surface-pill-label">Builders</span>
-          <strong>Integration guide</strong>
+          <strong>Guide</strong>
         </a>
       </section>
 
@@ -174,11 +172,11 @@
 
             <div id="auth-panel" class="auth-panel" data-auth="signed-out">
               <div class="auth-shell">
-                <div class="auth-copy">
-                  <p class="panel-label">Identity</p>
-                  <h3>SIWE-backed operator session</h3>
+              <div class="auth-copy">
+                  <p class="panel-label">Session</p>
+                  <h3>Signed-in operator identity</h3>
                   <p id="auth-hint" class="section-note">
-                    Strict mode is live. Sign in with your wallet before the operator workspace, funding tools, and event stream unlock.
+                    Sign in once to unlock worker, admin, and live event flows.
                   </p>
                 </div>
                 <div class="auth-actions">
@@ -190,29 +188,29 @@
 
               <div class="auth-summary-grid">
                 <article class="auth-stat auth-stat-wide">
-                  <p>Signed-in wallet</p>
+                  <p>Wallet</p>
                   <strong id="auth-wallet-value">No wallet signed in</strong>
-                  <span>Wallet-scoped reads and mutations now follow the authenticated signer.</span>
+                  <span>Reads and mutations now follow the authenticated signer.</span>
                 </article>
                 <article class="auth-stat">
-                  <p>Auth mode</p>
+                  <p>Auth</p>
                   <strong id="auth-mode-value">Strict JWT mode</strong>
-                  <span>Permissive fallback only appears on local dev deployments.</span>
+                  <span>Permissive fallback only exists on local dev.</span>
                 </article>
                 <article class="auth-stat">
-                  <p>Token window</p>
+                  <p>Token</p>
                   <strong id="auth-expiry-value">Awaiting SIWE sign-in</strong>
-                  <span>Re-auth happens automatically if the session expires mid-run.</span>
+                  <span>Re-auth happens automatically when needed.</span>
                 </article>
                 <article class="auth-stat">
-                  <p>Role claims</p>
+                  <p>Roles</p>
                   <strong id="auth-role-summary">No control-plane roles</strong>
                   <div id="auth-role-pills" class="role-pill-list" hidden></div>
                 </article>
                 <article class="auth-stat">
-                  <p>Unlocked controls</p>
+                  <p>Access</p>
                   <strong id="auth-capability-summary">Sign in to inspect control-plane access.</strong>
-                  <span>Create jobs, fire recurring templates, and verifier runs only unlock when the current JWT carries the right role claims.</span>
+                  <span>Admin and verifier actions unlock from JWT role claims.</span>
                 </article>
               </div>
               <p id="auth-feedback" class="wallet-feedback">
