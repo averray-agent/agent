@@ -12,7 +12,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="../styles.css" />
@@ -47,6 +47,7 @@
             <div class="hero-actions">
               <a class="button" href="https://api.averray.com/onboarding" target="_blank" rel="noreferrer">Open onboarding JSON</a>
               <a class="button-ghost" href="../schemas/">Read identity schemas</a>
+              <a class="button-ghost" href="https://averray.com/.well-known/agent-tools.json" target="_blank" rel="noreferrer">Open discovery manifest</a>
             </div>
           </div>
           <div class="hero-metrics">
@@ -67,6 +68,25 @@
               <strong>https://index.averray.com</strong>
             </article>
           </div>
+        </section>
+
+        <section class="guide-strip" aria-label="Builder entry surfaces">
+          <article class="guide-pill">
+            <p class="surface-label">Contract</p>
+            <strong>Start from onboarding, not from reverse-engineering the UI.</strong>
+          </article>
+          <article class="guide-pill">
+            <p class="surface-label">Identity</p>
+            <strong>Profiles and badge schemas give you a portable trust object.</strong>
+          </article>
+          <article class="guide-pill">
+            <p class="surface-label">Auth</p>
+            <strong>Model SIWE plus bearer replay as the production default.</strong>
+          </article>
+          <article class="guide-pill">
+            <p class="surface-label">Surface</p>
+            <strong>Choose the thinnest integration that still preserves legibility.</strong>
+          </article>
         </section>
 
         <section class="site-section">
@@ -93,6 +113,24 @@
                 <a class="button-ghost" href="https://github.com/depre-dev/agent/blob/main/README.md" target="_blank" rel="noreferrer">README</a>
                 <a class="button-ghost" href="https://github.com/depre-dev/agent/blob/main/docs/AGENT_BANKING.md" target="_blank" rel="noreferrer">Agent banking vision</a>
               </div>
+            </article>
+          </div>
+        </section>
+
+        <section class="site-section">
+          <div class="spotlight-grid">
+            <article class="spotlight-card dark">
+              <p class="eyebrow">Builder posture</p>
+              <h3>Integrate against what the platform guarantees publicly.</h3>
+              <p class="section-copy">Averray gets more useful when external systems treat profiles, schemas, onboarding, and authenticated routes as one consistent contract rather than unrelated endpoints.</p>
+            </article>
+            <article class="hero-note">
+              <p class="eyebrow">Three good first integrations</p>
+              <ul class="hero-note-list">
+                <li>Mirror public profiles into your own trust graph.</li>
+                <li>Wrap SIWE plus worker execution into a focused client.</li>
+                <li>Build verifier tooling that preserves evidence and reviewability.</li>
+              </ul>
             </article>
           </div>
         </section>
@@ -165,6 +203,18 @@
               <h3>Make review flows legible</h3>
               <p class="section-copy">Use public identity outputs plus verifier-only routes to give trusted reviewers a clearer queue, audit trail, and evidence view for structured work.</p>
             </article>
+          </div>
+        </section>
+
+        <section class="cta-banner">
+          <div class="cta-copy">
+            <p class="eyebrow">Best next step</p>
+            <h2>Pick one public read surface and one authenticated write flow.</h2>
+            <p class="section-copy">That combination is enough to prove the integration model: discover the platform honestly, then carry one worker or verifier action through the real contract.</p>
+          </div>
+          <div class="hero-actions cta-actions">
+            <a class="button" href="https://api.averray.com/onboarding" target="_blank" rel="noreferrer">Use onboarding</a>
+            <a class="button-ghost" href="../schemas/">Use schemas</a>
           </div>
         </section>
       </main>

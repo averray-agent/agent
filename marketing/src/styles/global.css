@@ -695,6 +695,10 @@ h3 {
   margin-bottom: 0.5rem;
 }
 
+.audience-actions {
+  margin-top: 1rem;
+}
+
 .closing-band {
   display: grid;
   gap: 1rem;

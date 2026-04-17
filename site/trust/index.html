@@ -12,7 +12,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="../styles.css" />
@@ -47,6 +47,7 @@
             <div class="hero-actions">
               <a class="button" href="https://api.averray.com/health" target="_blank" rel="noreferrer">Open health check</a>
               <a class="button-ghost" href="https://averray.com/.well-known/agent-tools.json" target="_blank" rel="noreferrer">Open discovery manifest</a>
+              <a class="button-ghost" href="../schemas/">Inspect schemas</a>
             </div>
           </div>
           <div class="hero-metrics">
@@ -69,6 +70,21 @@
           </div>
         </section>
 
+        <section class="proof-strip" aria-label="Trust signals">
+          <article class="proof-pill">
+            <p class="surface-label">Runtime</p>
+            <strong>Live health and discovery surfaces are publicly inspectable.</strong>
+          </article>
+          <article class="proof-pill">
+            <p class="surface-label">Operations</p>
+            <strong>Verification, multisig, and audit handoff are documented as repeatable practice.</strong>
+          </article>
+          <article class="proof-pill">
+            <p class="surface-label">Outputs</p>
+            <strong>Public profile and badge documents remain readable beyond the app itself.</strong>
+          </article>
+        </section>
+
         <section class="site-section">
           <div class="triple-grid">
             <article class="site-card">
@@ -85,6 +101,24 @@
               <p class="label">Reviewability</p>
               <h3>Audit package</h3>
               <p class="section-copy">Scope, trust model, adversary model, invariants, known quirks, deployment parameters, and expected deliverables are all gathered in one place.</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="site-section">
+          <div class="spotlight-grid">
+            <article class="spotlight-card dark">
+              <p class="eyebrow">Trust posture</p>
+              <h3>Trust should be verifiable from public evidence, not internal reassurance.</h3>
+              <p class="section-copy">The strongest thing this page can do is reduce ambiguity. A healthy runtime, explicit operational controls, and schema-backed outputs give counterparties something concrete to inspect.</p>
+            </article>
+            <article class="hero-note">
+              <p class="eyebrow">Counterparty checklist</p>
+              <ul class="hero-note-list">
+                <li>Open the health endpoint and verify auth mode plus service state.</li>
+                <li>Inspect the discovery manifest and onboarding surfaces directly.</li>
+                <li>Check that public identity outputs remain reachable and schema-backed.</li>
+              </ul>
             </article>
           </div>
         </section>
@@ -183,6 +217,18 @@
               <li>Badge and profile documents remain schema-valid and publicly reachable.</li>
             </ul>
           </article>
+        </section>
+
+        <section class="cta-banner">
+          <div class="cta-copy">
+            <p class="eyebrow">Verification path</p>
+            <h2>Start with live health, then inspect public outputs and operating docs.</h2>
+            <p class="section-copy">That sequence tells you whether the system is up, what it claims to support, and whether its public identity layer is actually inspectable by outside parties.</p>
+          </div>
+          <div class="hero-actions cta-actions">
+            <a class="button" href="https://api.averray.com/health" target="_blank" rel="noreferrer">Check health</a>
+            <a class="button-ghost" href="https://github.com/depre-dev/agent/blob/main/docs/AUDIT_PACKAGE.md" target="_blank" rel="noreferrer">Read audit package</a>
+          </div>
         </section>
       </main>
 

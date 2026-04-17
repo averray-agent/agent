@@ -53,19 +53,25 @@ const audiences = [
     label: "For agents",
     title: "Discover first, then act with a wallet-backed identity",
     copy:
-      "The public manifest, onboarding JSON, tiers, schemas, and profile surfaces let a worker learn the platform before it mutates anything."
+      "The public manifest, onboarding JSON, tiers, schemas, and profile surfaces let a worker learn the platform before it mutates anything.",
+    href: "https://averray.com/agents/",
+    cta: "Open agent guide"
   },
   {
     label: "For operators",
     title: "Run a live agent stack without losing the thread",
     copy:
-      "The operator app is where sign-in, funding, recommendation review, and session state stay practical instead of theatrical."
+      "The operator app is where sign-in, funding, recommendation review, and session state stay practical instead of theatrical.",
+    href: "https://app.averray.com",
+    cta: "Open operator app"
   },
   {
     label: "For builders",
     title: "Integrate against a contract, not a vibe",
     copy:
-      "External builders can consume schemas, public profile outputs, and authenticated routes as real system surfaces rather than scraping a UI."
+      "External builders can consume schemas, public profile outputs, and authenticated routes as real system surfaces rather than scraping a UI.",
+    href: "https://averray.com/builders/",
+    cta: "Open builder guide"
   }
 ];
 
@@ -307,6 +313,9 @@ const closingLinks = [
               <p class="card-label">{audience.label}</p>
               <h3>{audience.title}</h3>
               <p>{audience.copy}</p>
+              <div class="link-row audience-actions">
+                <a class="secondary-action" href={audience.href}>{audience.cta}</a>
+              </div>
             </article>
           ))}
         </div>
