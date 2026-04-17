@@ -182,6 +182,16 @@
                   <strong id="auth-expiry-value">Awaiting SIWE sign-in</strong>
                   <span>Re-auth happens automatically if the session expires mid-run.</span>
                 </article>
+                <article class="auth-stat">
+                  <p>Role claims</p>
+                  <strong id="auth-role-summary">No control-plane roles</strong>
+                  <div id="auth-role-pills" class="role-pill-list" hidden></div>
+                </article>
+                <article class="auth-stat">
+                  <p>Unlocked controls</p>
+                  <strong id="auth-capability-summary">Sign in to inspect control-plane access.</strong>
+                  <span>Create jobs, fire recurring templates, and verifier runs only unlock when the current JWT carries the right role claims.</span>
+                </article>
               </div>
               <p id="auth-feedback" class="wallet-feedback">
                 Sign in with your wallet to unlock the worker workspace, funding tools, and live event stream.
@@ -524,11 +534,96 @@
           <article class="panel poster-panel">
             <div class="section-heading compact">
               <div>
-                <p class="panel-label">Poster flow</p>
-                <h2>Create a live job from the app.</h2>
+                <p class="panel-label">Admin workspace</p>
+                <h2>Operate internal control-plane actions.</h2>
               </div>
-              <p class="section-note">Jobs created here land in the same live runtime the worker flow uses.</p>
+              <span id="admin-surface-pill" class="status-pill status-pending">Awaiting sign-in</span>
             </div>
+            <p id="admin-surface-copy" class="section-note">
+              Sign in first, then this surface will show whether the current wallet can create jobs, fire recurring templates, and settle verifier runs.
+            </p>
+
+            <div class="admin-summary-grid">
+              <article class="admin-card admin-card-strong">
+                <p>Control wallet</p>
+                <strong id="admin-wallet-value">No wallet signed in</strong>
+                <span>The admin surface follows the same SIWE session as the rest of the operator app.</span>
+              </article>
+              <article class="admin-card">
+                <p>Role claims</p>
+                <strong id="admin-role-value">No control-plane roles</strong>
+                <div id="admin-role-pills" class="role-pill-list" hidden></div>
+              </article>
+              <article class="admin-card">
+                <p>Admin controls</p>
+                <strong id="admin-admin-capability">Locked</strong>
+                <span>Create jobs, post recurring templates, and mint derivatives from templates.</span>
+              </article>
+              <article class="admin-card">
+                <p>Verifier controls</p>
+                <strong id="admin-verifier-capability">Locked</strong>
+                <span>Run settlement on submitted sessions directly from the execution flow.</span>
+              </article>
+              <article class="admin-card">
+                <p>Verifier modes</p>
+                <strong id="admin-verifier-modes">Loading…</strong>
+                <span>Supported handlers exposed by <code>/api/verifier/handlers</code>.</span>
+              </article>
+              <article class="admin-card">
+                <p>Control plane</p>
+                <strong id="admin-platform-summary">Loading…</strong>
+                <span id="admin-auth-mode">Checking auth mode and index readiness.</span>
+              </article>
+            </div>
+
+            <section class="admin-status-shell">
+              <div class="detail-head">
+                <h3>Recurring template status</h3>
+                <span id="admin-recurring-count" class="section-note">Waiting for admin status</span>
+              </div>
+              <div id="admin-recurring-status" class="admin-status-list">
+                <p class="empty-state">Recurring templates will appear here once an admin-scoped wallet is signed in and templates exist in the live catalog.</p>
+              </div>
+            </section>
+
+            <section class="admin-status-shell">
+              <div class="detail-head">
+                <h3>Maintenance posture</h3>
+                <span class="section-note">Pause state, policy roles, and release docs in one place.</span>
+              </div>
+              <div id="admin-maintenance-status" class="admin-status-list">
+                <p class="empty-state">Sign in with an admin-scoped wallet to load maintenance and release posture.</p>
+              </div>
+            </section>
+
+            <section class="admin-fire-shell">
+              <div class="detail-head">
+                <h3>Manual recurring fire</h3>
+                <span class="section-note">Generate one live derivative from a recurring template before the scheduler lands.</span>
+              </div>
+
+              <form id="admin-fire-form" class="admin-fire-form">
+                <div class="form-grid">
+                  <label>
+                    <span>Template id</span>
+                    <input id="admin-template-id" name="templateId" type="text" placeholder="weekly-digest" />
+                  </label>
+                  <label>
+                    <span>Fire at (optional)</span>
+                    <input id="admin-fired-at" name="firedAt" type="datetime-local" />
+                  </label>
+                </div>
+
+                <div class="action-row">
+                  <button id="admin-use-selected-template-button" type="button">Use selected job</button>
+                  <button id="admin-fire-button" type="submit">Fire recurring job</button>
+                </div>
+
+                <p id="admin-fire-feedback" class="wallet-feedback">
+                  Only admin-scoped wallets can fire recurring templates. Load one from the catalog or type the template id directly.
+                </p>
+              </form>
+            </section>
 
             <form id="poster-form" class="poster-form">
               <div class="form-grid">
@@ -573,6 +668,10 @@
                   <input name="retryLimit" type="number" min="0" step="1" value="1" />
                 </label>
                 <label>
+                  <span>Parent session id</span>
+                  <input name="parentSessionId" type="text" placeholder="Optional sub-job lineage" />
+                </label>
+                <label>
                   <span>Deterministic match mode</span>
                   <select name="verifierMatchMode">
                     <option value="contains_all" selected>contains_all</option>
@@ -613,17 +712,29 @@ summary</textarea>
                   <span>Sponsored gas</span>
                 </label>
                 <label class="toggle-chip">
+                  <input id="poster-recurring-toggle" type="checkbox" name="recurring" />
+                  <span>Recurring template</span>
+                </label>
+                <label class="toggle-chip">
                   <input type="checkbox" name="autoApprove" />
                   <span>Auto-approve human fallback</span>
                 </label>
               </div>
+
+              <label class="poster-full-span">
+                <span>Schedule cron</span>
+                <input id="poster-schedule-cron" name="scheduleCron" type="text" placeholder="Optional unless recurring is enabled" />
+                <small id="poster-schedule-hint" class="field-help">
+                  Enable recurring only for reusable templates. One-shot jobs can leave the schedule blank.
+                </small>
+              </label>
 
               <div class="action-row">
                 <button type="submit">Create job</button>
                 <button id="refresh-catalog-button" type="button">Refresh catalog</button>
               </div>
 
-              <p id="poster-feedback" class="wallet-feedback">Create a job here to publish it directly into the live runtime.</p>
+              <p id="poster-feedback" class="wallet-feedback">Create one-shot or recurring jobs here to publish them directly into the live runtime.</p>
             </form>
           </article>
 

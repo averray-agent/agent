@@ -111,6 +111,65 @@ export class BlockchainGateway {
     return this.withGatewayError("getDefaultClaimStakeBps", async () => Number(await this.policyContract.defaultClaimStakeBps()));
   }
 
+  async getTreasuryPolicyStatus() {
+    return this.withGatewayError("getTreasuryPolicyStatus", async () => {
+      if (!this.isEnabled()) {
+        return {
+          enabled: false,
+          policyAddress: this.config.treasuryPolicyAddress || undefined,
+          paused: undefined,
+          owner: undefined,
+          pauser: undefined,
+          risk: {}
+        };
+      }
+
+      const [
+        owner,
+        pauser,
+        paused,
+        dailyOutflowCap,
+        perAccountBorrowCap,
+        minimumCollateralRatioBps,
+        defaultClaimStakeBps,
+        rejectionSkillPenalty,
+        rejectionReliabilityPenalty,
+        disputeLossSkillPenalty,
+        disputeLossReliabilityPenalty
+      ] = await Promise.all([
+        this.policyContract.owner(),
+        this.policyContract.pauser(),
+        this.policyContract.paused(),
+        this.policyContract.dailyOutflowCap(),
+        this.policyContract.perAccountBorrowCap(),
+        this.policyContract.minimumCollateralRatioBps(),
+        this.policyContract.defaultClaimStakeBps(),
+        this.policyContract.rejectionSkillPenalty(),
+        this.policyContract.rejectionReliabilityPenalty(),
+        this.policyContract.disputeLossSkillPenalty(),
+        this.policyContract.disputeLossReliabilityPenalty()
+      ]);
+
+      return {
+        enabled: true,
+        policyAddress: this.config.treasuryPolicyAddress,
+        paused: Boolean(paused),
+        owner,
+        pauser,
+        risk: {
+          dailyOutflowCap: Number(dailyOutflowCap),
+          perAccountBorrowCap: Number(perAccountBorrowCap),
+          minimumCollateralRatioBps: Number(minimumCollateralRatioBps),
+          defaultClaimStakeBps: Number(defaultClaimStakeBps),
+          rejectionSkillPenalty: Number(rejectionSkillPenalty),
+          rejectionReliabilityPenalty: Number(rejectionReliabilityPenalty),
+          disputeLossSkillPenalty: Number(disputeLossSkillPenalty),
+          disputeLossReliabilityPenalty: Number(disputeLossReliabilityPenalty)
+        }
+      };
+    });
+  }
+
   async fundAccount(wallet, assetSymbol, amount) {
     return this.withGatewayError("fundAccount", async () => {
       this.requireSigner("fundAccount");

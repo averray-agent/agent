@@ -20,6 +20,7 @@ import { debug } from "./ui-helpers.js";
 const TOKEN_KEY = "averray:auth-token";
 const WALLET_KEY = "averray:auth-wallet";
 const EXPIRES_KEY = "averray:auth-expires-at";
+const ROLES_KEY = "averray:auth-roles";
 const REAUTH_REASON_KEY = "averray:auth-last-reason";
 // Refresh slightly before expiry so an in-flight request never hits the wire
 // with an already-expired token.
@@ -39,13 +40,23 @@ function readSession() {
   if (!Number.isFinite(expiresMs) || expiresMs - EXPIRY_SAFETY_MARGIN_MS <= Date.now()) {
     return undefined;
   }
-  return { token, wallet, expiresAt };
+  return { token, wallet, expiresAt, roles: readRoles() };
 }
 
-function writeSession({ token, wallet, expiresAt }) {
+function readRoles() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(ROLES_KEY) ?? "[]");
+    return Array.isArray(parsed) ? parsed.filter((role) => typeof role === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeSession({ token, wallet, expiresAt, roles = [] }) {
   localStorage.setItem(TOKEN_KEY, token);
   localStorage.setItem(WALLET_KEY, wallet);
   localStorage.setItem(EXPIRES_KEY, expiresAt);
+  localStorage.setItem(ROLES_KEY, JSON.stringify(Array.isArray(roles) ? roles : []));
   localStorage.removeItem(REAUTH_REASON_KEY);
   notify();
 }
@@ -54,6 +65,7 @@ function clearSession(reason) {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(WALLET_KEY);
   localStorage.removeItem(EXPIRES_KEY);
+  localStorage.removeItem(ROLES_KEY);
   if (reason) {
     localStorage.setItem(REAUTH_REASON_KEY, reason);
   } else {
@@ -85,6 +97,7 @@ export function getAuthSnapshot() {
     authenticated: Boolean(session),
     wallet: session?.wallet,
     expiresAt: session?.expiresAt,
+    roles: session?.roles ?? [],
     lastReason: localStorage.getItem(REAUTH_REASON_KEY) ?? undefined
   };
 }
@@ -159,12 +172,14 @@ export async function signIn() {
   writeSession({
     token: verifyPayload.token,
     wallet: verifyPayload.wallet ?? rawAddress,
-    expiresAt: verifyPayload.expiresAt
+    expiresAt: verifyPayload.expiresAt,
+    roles: Array.isArray(verifyPayload.roles) ? verifyPayload.roles : []
   });
 
   return {
     wallet: verifyPayload.wallet ?? rawAddress,
-    expiresAt: verifyPayload.expiresAt
+    expiresAt: verifyPayload.expiresAt,
+    roles: Array.isArray(verifyPayload.roles) ? verifyPayload.roles : []
   };
 }
 
@@ -204,7 +219,12 @@ export function requestReauth(reason = "expired") {
 
 // Cross-tab sync: signing in/out in one tab updates the others.
 window.addEventListener("storage", (event) => {
-  if (event.key === TOKEN_KEY || event.key === WALLET_KEY || event.key === EXPIRES_KEY) {
+  if (
+    event.key === TOKEN_KEY ||
+    event.key === WALLET_KEY ||
+    event.key === EXPIRES_KEY ||
+    event.key === ROLES_KEY
+  ) {
     notify();
   }
 });

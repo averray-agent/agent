@@ -311,6 +311,7 @@ const server = createServer(async (request, response) => {
           "/verifier/handlers",
           "/admin/jobs",
           "/admin/jobs/fire",
+          "/admin/status",
           "/badges/:sessionId",
           "/agents/:wallet"
         ]
@@ -762,6 +763,11 @@ const server = createServer(async (request, response) => {
         throw new ValidationError("firedAt must be ISO-8601 if provided.");
       }
       return respond(response, 201, service.fireRecurringJob(templateId, { firedAt }));
+    }
+
+    if (request.method === "GET" && pathname === "/admin/status") {
+      await authMiddleware(request, url, { requireRole: "admin" });
+      return respond(response, 200, await service.getAdminStatus());
     }
 
     if (request.method === "POST" && pathname === "/gas/quote") {

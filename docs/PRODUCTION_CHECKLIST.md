@@ -94,6 +94,8 @@ RUN_FRONTEND_TESTS=0 RUN_BACKEND_TESTS=0 RUN_SITE_BUILD=0 RUN_INDEXER_TYPECHECK=
 - [ ] Backend Sentry is configured for the active environment.
 - [ ] Frontend Sentry runtime config is set if browser error reporting is required.
 - [ ] Structured logs are visible from the current deploy target.
+- [ ] An alert destination is configured for hosted smoke-check failures.
+- [ ] [INCIDENT_RESPONSE.md](./INCIDENT_RESPONSE.md) has named on-call ownership.
 
 ---
 

@@ -506,6 +506,35 @@ main {
   line-height: 1.6;
 }
 
+.role-pill-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.65rem;
+}
+
+.role-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.9rem;
+  padding: 0 0.75rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.role-pill-admin {
+  background: rgba(30, 102, 66, 0.12);
+  color: var(--accent);
+}
+
+.role-pill-verifier {
+  background: rgba(167, 97, 34, 0.12);
+  color: var(--warn);
+}
+
 .funding-card-strong {
   background: rgba(214, 234, 223, 0.46);
   border-color: rgba(30, 102, 66, 0.16);
@@ -998,24 +1027,149 @@ main {
   overflow-wrap: anywhere;
 }
 
+.admin-fire-form .wallet-feedback {
+  margin: 0;
+  padding: 0.85rem 1rem;
+  border-radius: 1rem;
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.5);
+  overflow-wrap: anywhere;
+}
+
 .action-shell .wallet-feedback[data-tone="loading"],
-.poster-form .wallet-feedback[data-tone="loading"] {
+.poster-form .wallet-feedback[data-tone="loading"],
+.admin-fire-form .wallet-feedback[data-tone="loading"] {
   border-color: rgba(30, 102, 66, 0.16);
   background: rgba(214, 234, 223, 0.44);
 }
 
 .action-shell .wallet-feedback[data-tone="success"],
-.poster-form .wallet-feedback[data-tone="success"] {
+.poster-form .wallet-feedback[data-tone="success"],
+.admin-fire-form .wallet-feedback[data-tone="success"] {
   border-color: rgba(30, 102, 66, 0.18);
   background: rgba(214, 234, 223, 0.56);
 }
 
 .action-shell .wallet-feedback[data-tone="error"],
-.poster-form .wallet-feedback[data-tone="error"] {
+.poster-form .wallet-feedback[data-tone="error"],
+.admin-fire-form .wallet-feedback[data-tone="error"] {
   border-color: rgba(167, 97, 34, 0.18);
   background: rgba(244, 227, 207, 0.62);
 }
 
+.admin-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+
+.admin-card,
+.admin-fire-shell {
+  display: grid;
+  gap: 0.5rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.admin-card p,
+.field-help {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.admin-card strong {
+  font-size: 1rem;
+  font-weight: 800;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.admin-card span {
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.admin-card-strong {
+  background: rgba(214, 234, 223, 0.42);
+  border-color: rgba(30, 102, 66, 0.16);
+}
+
+.admin-status-shell {
+  display: grid;
+  gap: 1rem;
+}
+
+.admin-status-list,
+.admin-maintenance-grid {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.admin-status-card {
+  display: grid;
+  gap: 0.75rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.54);
+}
+
+.admin-status-topline,
+.admin-meta-row,
+.admin-doc-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.admin-status-topline {
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.admin-status-card h3 {
+  margin-bottom: 0;
+}
+
+.admin-meta-row span {
+  padding: 0.4rem 0.65rem;
+  border-radius: 999px;
+  background: rgba(17, 19, 21, 0.06);
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.admin-inline-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.admin-inline-metrics div {
+  padding: 0.85rem 0.9rem;
+  border-radius: 0.9rem;
+  background: rgba(17, 19, 21, 0.04);
+}
+
+.admin-inline-metrics dt {
+  margin: 0 0 0.3rem;
+  font-size: 0.76rem;
+  font-weight: 800;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.admin-inline-metrics dd {
+  margin: 0;
+  font-weight: 800;
+}
+
+.admin-fire-form,
 .poster-form {
   display: grid;
   gap: 1rem;
@@ -1044,6 +1198,7 @@ main {
 
 .form-grid input,
 .form-grid select,
+.poster-full-span input,
 .poster-full-span textarea {
   width: 100%;
   min-height: 3rem;
@@ -1059,6 +1214,19 @@ main {
   min-height: 7rem;
   padding: 0.9rem 1rem;
   resize: vertical;
+}
+
+.poster-full-span input {
+  min-height: 3rem;
+}
+
+.field-help {
+  line-height: 1.6;
+}
+
+.poster-form[data-admin-enabled="false"],
+.admin-fire-form[data-admin-enabled="false"] {
+  opacity: 0.76;
 }
 
 .poster-toggle-row {
@@ -1200,6 +1368,8 @@ main {
   .detail-grid,
   .job-detail-grid,
   .form-grid,
+  .admin-summary-grid,
+  .admin-inline-metrics,
   .action-details,
   .auth-summary-grid,
   .funding-summary-grid,

@@ -527,6 +527,7 @@ For the human-readable checklist that goes with this command, see
 - Structured logs are JSON on stdout with a per-request `requestId`. Filter with
   `docker compose logs backend | jq 'select(.requestId == "...")'`.
 - For an external uptime runner or cron smoke check, use:
+- For an external uptime runner or cron smoke check, use:
   ```bash
   cd /srv/agent-stack/app
   ./scripts/ops/check-hosted-stack.sh
@@ -535,6 +536,16 @@ For the human-readable checklist that goes with this command, see
   health, onboarding contract, indexer root, indexer readiness, and indexer
   status freshness. A non-zero exit should page someone if the stack is meant
   to be available.
+- To turn that into an actual webhook-driven alert path, use:
+  ```bash
+  cd /srv/agent-stack/app
+  ALERT_WEBHOOK_URL=https://your-alert-webhook \
+  ALERT_SERVICE_NAME=averray-hosted-stack \
+  ALERT_ENVIRONMENT=production-like \
+  ./scripts/ops/check-hosted-stack-and-alert.sh
+  ```
+  It runs the same smoke check and POSTs a JSON alert payload to the webhook
+  if the check fails.
 
 ## Monthly backup-restore drill
 
@@ -613,6 +624,9 @@ Fill these in as the signer set grows:
 - Backup oncall: <TBD>
 - Multisig signers: <TBD>
 - External party auth (if any): <TBD>
+
+For the fuller severity matrix, ownership model, and post-incident template,
+see [docs/INCIDENT_RESPONSE.md](/Users/pascalkuriger/repo/Polkadot/docs/INCIDENT_RESPONSE.md).
 
 ### Commands you'll reach for
 

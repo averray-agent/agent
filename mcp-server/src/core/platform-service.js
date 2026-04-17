@@ -62,6 +62,32 @@ export class PlatformService {
     return this.jobCatalogService.fireRecurringJob(templateId, options);
   }
 
+  async getAdminStatus() {
+    const [policy, recurring] = await Promise.all([
+      this.blockchainGateway?.getTreasuryPolicyStatus?.() ?? {
+        enabled: false,
+        policyAddress: undefined,
+        paused: undefined,
+        owner: undefined,
+        pauser: undefined,
+        risk: {}
+      },
+      this.jobCatalogService.getRecurringTemplateStatus()
+    ]);
+
+    return {
+      maintenance: {
+        policy,
+        release: {
+          checklistDoc: "https://github.com/depre-dev/agent/blob/main/docs/PRODUCTION_CHECKLIST.md",
+          incidentDoc: "https://github.com/depre-dev/agent/blob/main/docs/INCIDENT_RESPONSE.md",
+          multisigDoc: "https://github.com/depre-dev/agent/blob/main/docs/MULTISIG_SETUP.md"
+        }
+      },
+      recurring: recurring
+    };
+  }
+
   getJobDefinition(jobId) {
     return this.jobCatalogService.getJobDefinition(jobId);
   }

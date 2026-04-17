@@ -957,7 +957,8 @@ export function refreshActionPanel() {
   const hasSubmitted = sessionStatus === "submitted" || sessionStatus === "resolved" || sessionStatus === "verifying" || sessionStatus === "disputed";
   const hasVerification = Boolean(state.verification?.outcome);
   const canSubmit = hasSession && sessionStatus === "claimed" && !hasVerification;
-  const canVerify = hasSession && sessionStatus === "submitted" && !hasVerification;
+  const hasVerifierRole = state.authRoles.includes("verifier");
+  const canVerify = hasSession && sessionStatus === "submitted" && !hasVerification && hasVerifierRole;
   const claimBlocked = !hasJob || !readiness.canClaim || hasSession;
 
   claimButton.disabled = claimBlocked;
@@ -1002,6 +1003,15 @@ export function refreshActionPanel() {
     setText(
       "action-guidance",
       "This run is provisionally rejected. Stake and reputation stay pending until the dispute window closes or arbitration resolves the outcome."
+    );
+    return;
+  }
+
+  if (hasSession && sessionStatus === "submitted" && !hasVerification && !hasVerifierRole) {
+    setActionStatus("Verifier required", "status-pending");
+    setText(
+      "action-guidance",
+      "This submission is ready, but the current wallet does not have the verifier role. Sign in with a verifier-scoped wallet to settle it from this surface."
     );
     return;
   }

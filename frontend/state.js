@@ -2,6 +2,7 @@ import { UI_STATE_KEY } from "./constants.js";
 
 export const state = {
   wallet: "",
+  authRoles: [],
   account: undefined,
   reputation: undefined,
   activity: [],

@@ -104,3 +104,18 @@ test("fireRecurringJob rejects collisions (same template + same second)", () => 
     (err) => err.code === "recurring_job_collision"
   );
 });
+
+test("getRecurringTemplateStatus summarizes templates and latest derivatives", () => {
+  const service = makeService();
+  service.createJob(TEMPLATE);
+  service.fireRecurringJob("weekly-digest", { firedAt: new Date("2026-04-20T09:00:00.000Z") });
+  service.fireRecurringJob("weekly-digest", { firedAt: new Date("2026-04-27T09:00:00.000Z") });
+
+  const status = service.getRecurringTemplateStatus();
+  assert.equal(status.count, 1);
+  assert.equal(status.templates[0].templateId, "weekly-digest");
+  assert.equal(status.templates[0].derivativeCount, 2);
+  assert.equal(status.templates[0].lastFiredAt, "2026-04-27T09:00:00.000Z");
+  assert.equal(status.templates[0].lastDerivativeId, "weekly-digest-run-2026-04-27t09-00-00");
+  assert.deepEqual(status.templates[0].schedule, { cron: "0 9 * * 1", timezone: "Europe/Zurich" });
+});

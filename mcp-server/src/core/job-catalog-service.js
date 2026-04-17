@@ -99,6 +99,44 @@ export class JobCatalogService {
     return job;
   }
 
+  getRecurringTemplateStatus() {
+    const templates = this.jobs.filter((job) => job.recurring);
+    const entries = templates
+      .map((template) => {
+        const derivatives = this.jobs
+          .filter((job) => job.templateId === template.id)
+          .sort((left, right) => String(right.firedAt ?? "").localeCompare(String(left.firedAt ?? "")));
+        const latest = derivatives[0];
+        return {
+          templateId: template.id,
+          category: template.category,
+          tier: template.tier,
+          rewardAmount: template.rewardAmount,
+          rewardAsset: template.rewardAsset,
+          verifierMode: template.verifierMode,
+          schedule: template.schedule,
+          derivativeCount: derivatives.length,
+          lastFiredAt: latest?.firedAt,
+          lastDerivativeId: latest?.id,
+          latestRun: latest
+            ? {
+                id: latest.id,
+                firedAt: latest.firedAt,
+                category: latest.category,
+                tier: latest.tier,
+                verifierMode: latest.verifierMode
+              }
+            : undefined
+        };
+      })
+      .sort((left, right) => left.templateId.localeCompare(right.templateId));
+
+    return {
+      count: entries.length,
+      templates: entries
+    };
+  }
+
   async recommendJobs(wallet) {
     const profile = this.requireProfile(wallet);
     const account = await this.getAccountSummary(wallet);

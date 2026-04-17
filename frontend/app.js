@@ -24,15 +24,58 @@ import {
   updateSelectedJob
 } from "./renderers.js";
 import { readPersistedState, state } from "./state.js";
-import { debug, setButtonBusy, setOverallStatus, setText, showToast } from "./ui-helpers.js";
+import { debug, html, renderHtml, setButtonBusy, setOverallStatus, setText, showToast } from "./ui-helpers.js";
 
 let stopEventStream = undefined;
 let liveRefreshTimer = undefined;
 let authMode = "strict";
+const platformStatus = {
+  protocols: [],
+  verifierModes: [],
+  authMode: "strict",
+  catalogCount: 0,
+  indexReady: false
+};
+
+function formatAdminNumber(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "Unknown";
+  if (number === Number.MAX_SAFE_INTEGER || number >= 1e15) return "Unlimited";
+  return number.toLocaleString("en-US");
+}
 
 function shortenWallet(wallet) {
   if (!wallet) return "";
   return wallet.length > 10 ? `${wallet.slice(0, 6)}…${wallet.slice(-4)}` : wallet;
+}
+
+function hasRole(role, roles = state.authRoles) {
+  return Array.isArray(roles) && roles.includes(role);
+}
+
+function roleSummary(roles = state.authRoles) {
+  if (!Array.isArray(roles) || roles.length === 0) {
+    return "No control-plane roles";
+  }
+  return roles.map((role) => role.toUpperCase()).join(" · ");
+}
+
+function renderRolePills(rootId, roles = state.authRoles) {
+  const root = document.getElementById(rootId);
+  if (!root) return;
+  root.innerHTML = "";
+  if (!Array.isArray(roles) || roles.length === 0) {
+    root.hidden = true;
+    return;
+  }
+
+  for (const role of roles) {
+    const pill = document.createElement("span");
+    pill.className = `role-pill role-pill-${role}`;
+    pill.textContent = role.toUpperCase();
+    root.appendChild(pill);
+  }
+  root.hidden = false;
 }
 
 function setAuthFeedback(text, tone = "neutral") {
@@ -40,6 +83,102 @@ function setAuthFeedback(text, tone = "neutral") {
   if (!feedback) return;
   feedback.textContent = text;
   feedback.setAttribute("data-tone", tone);
+}
+
+function setAdminFeedback(text, tone = "neutral") {
+  const feedback = document.getElementById("admin-fire-feedback");
+  if (!feedback) return;
+  feedback.textContent = text;
+  feedback.setAttribute("data-tone", tone);
+}
+
+function renderRecurringStatus(status = undefined) {
+  const root = document.getElementById("admin-recurring-status");
+  const count = document.getElementById("admin-recurring-count");
+  if (!root || !count) return;
+
+  if (!status?.templates?.length) {
+    count.textContent = status ? "No recurring templates" : "Waiting for admin status";
+    renderHtml(root, html`<p class="empty-state">Recurring templates will appear here once an admin-scoped wallet is signed in and templates exist in the live catalog.</p>`);
+    return;
+  }
+
+  count.textContent = `${status.templates.length} template${status.templates.length === 1 ? "" : "s"}`;
+  renderHtml(
+    root,
+    html`${status.templates.map((entry) => html`
+      <article class="admin-status-card">
+        <div class="admin-status-topline">
+          <div>
+            <p class="panel-label">Template</p>
+            <h3>${entry.templateId}</h3>
+          </div>
+          <span class="status-pill ${entry.derivativeCount > 0 ? "status-ok" : "status-pending"}">
+            ${entry.derivativeCount > 0 ? "Fired before" : "Awaiting first fire"}
+          </span>
+        </div>
+        <div class="admin-meta-row">
+          <span>${entry.category}</span>
+          <span>${entry.tier}</span>
+          <span>${entry.verifierMode}</span>
+          <span>${entry.schedule?.cron ?? "No cron"}</span>
+        </div>
+        <p class="section-note">
+          ${entry.derivativeCount} derivative run${entry.derivativeCount === 1 ? "" : "s"} so far.
+          ${entry.lastFiredAt ? `Last fired ${formatExpiry(entry.lastFiredAt)}.` : "No derivative has been minted yet."}
+        </p>
+      </article>
+    `)}`,
+  );
+}
+
+function renderMaintenanceStatus(maintenance = undefined) {
+  const root = document.getElementById("admin-maintenance-status");
+  if (!root) return;
+
+  if (!maintenance) {
+    renderHtml(root, html`<p class="empty-state">Sign in with an admin-scoped wallet to load maintenance and release posture.</p>`);
+    return;
+  }
+
+  const policy = maintenance.policy ?? {};
+  const release = maintenance.release ?? {};
+  renderHtml(
+    root,
+    html`
+      <div class="admin-maintenance-grid">
+        <article class="admin-status-card">
+          <div class="admin-status-topline">
+            <div>
+              <p class="panel-label">Treasury policy</p>
+              <h3>${policy.policyAddress ?? "Unavailable"}</h3>
+            </div>
+            <span class="status-pill ${policy.paused ? "tier-warn" : "status-ok"}">
+              ${policy.paused ? "Paused" : policy.enabled ? "Live" : "Off-chain"}
+            </span>
+          </div>
+          <p class="section-note">Owner ${policy.owner ?? "unknown"} · Pauser ${policy.pauser ?? "unknown"}</p>
+        </article>
+        <article class="admin-status-card">
+          <p class="panel-label">Risk parameters</p>
+          <dl class="admin-inline-metrics">
+            <div><dt>Daily outflow cap</dt><dd>${formatAdminNumber(policy.risk?.dailyOutflowCap)}</dd></div>
+            <div><dt>Borrow cap</dt><dd>${formatAdminNumber(policy.risk?.perAccountBorrowCap)}</dd></div>
+            <div><dt>Collateral ratio</dt><dd>${formatAdminNumber(policy.risk?.minimumCollateralRatioBps)} bps</dd></div>
+            <div><dt>Claim stake</dt><dd>${formatAdminNumber(policy.risk?.defaultClaimStakeBps)} bps</dd></div>
+          </dl>
+        </article>
+        <article class="admin-status-card">
+          <p class="panel-label">Release posture</p>
+          <div class="admin-doc-links">
+            <a class="secondary-action" href="${release.checklistDoc}" target="_blank" rel="noreferrer">Production checklist</a>
+            <a class="secondary-action" href="${release.incidentDoc}" target="_blank" rel="noreferrer">Incident response</a>
+            <a class="secondary-action" href="${release.multisigDoc}" target="_blank" rel="noreferrer">Multisig guide</a>
+          </div>
+        </article>
+      </div>
+    `
+  );
 }
 
 function formatExpiry(expiresAt) {
@@ -66,6 +205,107 @@ function syncPublicProfileLinks(wallet = "") {
   links.hidden = false;
   pageLink.href = `./agent.html?wallet=${encodedWallet}`;
   jsonLink.href = apiUrl(`/agents/${wallet}`);
+}
+
+function syncRoleGatedControls(snapshot = getAuthSnapshot()) {
+  const roles = snapshot.roles ?? [];
+  state.authRoles = roles;
+
+  const createJobButton = document.querySelector('#poster-form button[type="submit"]');
+  const fireJobButton = document.getElementById("admin-fire-button");
+  const useSelectedTemplateButton = document.getElementById("admin-use-selected-template-button");
+  const verifyButton = document.getElementById("verify-button");
+  const posterForm = document.getElementById("poster-form");
+  const fireForm = document.getElementById("admin-fire-form");
+
+  const adminEnabled = hasRole("admin", roles);
+  const verifierEnabled = hasRole("verifier", roles);
+
+  if (posterForm) {
+    posterForm.setAttribute("data-admin-enabled", adminEnabled ? "true" : "false");
+  }
+  if (fireForm) {
+    fireForm.setAttribute("data-admin-enabled", adminEnabled ? "true" : "false");
+  }
+  if (createJobButton) {
+    createJobButton.disabled = !adminEnabled;
+    createJobButton.title = adminEnabled ? "" : "Sign in with an admin-scoped wallet to create jobs.";
+  }
+  if (fireJobButton) {
+    fireJobButton.disabled = !adminEnabled;
+    fireJobButton.title = adminEnabled ? "" : "Sign in with an admin-scoped wallet to fire recurring templates.";
+  }
+  if (useSelectedTemplateButton) {
+    useSelectedTemplateButton.disabled = !adminEnabled;
+    useSelectedTemplateButton.title = adminEnabled ? "" : "Admin role required.";
+  }
+  if (verifyButton && !verifierEnabled) {
+    verifyButton.title = "Sign in with a verifier-scoped wallet to run settlement.";
+  }
+
+  renderRolePills("auth-role-pills", roles);
+  renderRolePills("admin-role-pills", roles);
+  setText("auth-role-summary", roleSummary(roles));
+  setText("auth-capability-summary", adminEnabled || verifierEnabled
+    ? [
+        adminEnabled ? "Can create jobs and fire recurring templates" : undefined,
+        verifierEnabled ? "Can settle submitted sessions" : undefined
+      ].filter(Boolean).join(" · ")
+    : "Sign in with an admin or verifier wallet to unlock internal controls.");
+
+  setText("admin-wallet-value", snapshot.wallet ?? "No wallet signed in");
+  setText("admin-role-value", roleSummary(roles));
+  setText("admin-admin-capability", adminEnabled ? "Unlocked" : "Locked");
+  setText("admin-verifier-capability", verifierEnabled ? "Unlocked" : "Locked");
+  setText(
+    "admin-surface-copy",
+    !snapshot.authenticated
+      ? "Sign in first, then this surface will show whether the current wallet can create jobs, fire recurring templates, and settle verifier runs."
+      : adminEnabled || verifierEnabled
+        ? "This wallet now exposes the internal control-plane actions it is allowed to perform."
+        : "This wallet can still operate worker flows, but it does not currently carry admin or verifier claims."
+  );
+
+  const surfacePill = document.getElementById("admin-surface-pill");
+  if (surfacePill) {
+    if (!snapshot.authenticated) {
+      surfacePill.className = "status-pill status-pending";
+      surfacePill.textContent = "Awaiting sign-in";
+    } else if (adminEnabled || verifierEnabled) {
+      surfacePill.className = "status-pill status-ok";
+      surfacePill.textContent = "Control plane unlocked";
+    } else {
+      surfacePill.className = "status-pill status-pending";
+      surfacePill.textContent = "Worker-only session";
+    }
+  }
+
+  refreshActionPanel();
+  void refreshAdminWorkspace(snapshot);
+}
+
+async function refreshAdminWorkspace(snapshot = getAuthSnapshot()) {
+  if (!snapshot.authenticated || !hasRole("admin", snapshot.roles ?? [])) {
+    renderRecurringStatus(undefined);
+    renderMaintenanceStatus(undefined);
+    return;
+  }
+
+  try {
+    const status = await readJson("/api/admin/status");
+    renderRecurringStatus(status.recurring);
+    renderMaintenanceStatus(status.maintenance);
+  } catch (error) {
+    debug.error(error);
+    renderHtml(
+      document.getElementById("admin-recurring-status"),
+      html`<p class="empty-state">Admin status could not be loaded right now. Check the API logs and the signed-in wallet's role claims.</p>`
+    );
+    renderHtml(
+      document.getElementById("admin-maintenance-status"),
+      html`<p class="empty-state">Maintenance posture is temporarily unavailable.</p>`
+    );
+  }
 }
 
 function renderAuthUi(snapshot = getAuthSnapshot()) {
@@ -119,6 +359,7 @@ function renderAuthUi(snapshot = getAuthSnapshot()) {
   }
 
   syncPublicProfileLinks(snapshot.authenticated ? snapshot.wallet ?? "" : "");
+  syncRoleGatedControls(snapshot);
 
   // The legacy wallet-input form is only useful when the API is in permissive
   // mode — otherwise every request will be rejected until the user signs in.
@@ -283,6 +524,10 @@ async function loadSelectedCatalogJobActivity() {
 async function selectJob(jobId) {
   const job = await loadJobDefinitionWithPreflight(jobId);
   updateSelectedJob(job);
+  const templateInput = document.getElementById("admin-template-id");
+  if (templateInput && job?.recurring && !templateInput.value.trim()) {
+    templateInput.value = job.id;
+  }
 
   const persisted = readPersistedState();
   const expectedSessionId =
@@ -368,8 +613,18 @@ async function fundCurrentWallet() {
 async function loadCatalog() {
   const jobs = await readJson("/api/jobs");
   state.catalog = jobs;
+  platformStatus.catalogCount = jobs.length;
   renderCatalog(jobs);
   setText("catalog-count", `${jobs.length} jobs live`);
+  if (platformStatus.protocols.length || platformStatus.indexReady) {
+    setText(
+      "admin-platform-summary",
+      `${platformStatus.catalogCount} live jobs · ${platformStatus.protocols.length || 0} protocols · ${platformStatus.indexReady ? "index ready" : "index warning"}`
+    );
+  }
+  if (hasRole("admin")) {
+    void refreshAdminWorkspace();
+  }
 }
 
 async function claimSelectedJob() {
@@ -414,6 +669,9 @@ async function submitSelectedWork() {
 
 async function verifySelectedWork() {
   if (!state.session?.sessionId) return;
+  if (!hasRole("verifier")) {
+    throw new Error("This wallet does not have the verifier role required to settle submissions.");
+  }
 
   const evidenceInput = document.getElementById("evidence-input");
   const evidence = evidenceInput?.value?.trim() || buildEvidenceTemplate(state.selectedJob);
@@ -465,12 +723,40 @@ function syncPosterDefaults(force = false) {
   }
 }
 
+function syncPosterAdvancedFields() {
+  const recurringToggle = document.getElementById("poster-recurring-toggle");
+  const scheduleInput = document.getElementById("poster-schedule-cron");
+  const scheduleHint = document.getElementById("poster-schedule-hint");
+  const checked = recurringToggle?.checked ?? false;
+
+  if (scheduleInput) {
+    scheduleInput.required = checked;
+    scheduleInput.placeholder = checked ? "0 9 * * 1" : "Optional unless recurring is enabled";
+  }
+  if (scheduleHint) {
+    scheduleHint.textContent = checked
+      ? "Recurring templates must include a cron schedule. Fire them manually below until the scheduler ships."
+      : "Enable recurring only for reusable templates. One-shot jobs can leave the schedule blank.";
+  }
+}
+
 async function createPosterJob() {
+  if (!hasRole("admin")) {
+    throw new Error("This wallet does not have the admin role required to create jobs.");
+  }
+
   const form = document.getElementById("poster-form");
   const formData = new FormData(form);
   const category = String(formData.get("category") ?? "").trim().toLowerCase();
   const verifierMode = String(formData.get("verifierMode") ?? "benchmark");
   const outputSchemaRef = String(formData.get("outputSchemaRef") ?? "").trim() || `schema://jobs/${category}-output`;
+  const recurring = formData.get("recurring") === "on";
+  const scheduleCron = String(formData.get("scheduleCron") ?? "").trim();
+  const parentSessionId = String(formData.get("parentSessionId") ?? "").trim();
+
+  if (recurring && !scheduleCron) {
+    throw new Error("Recurring templates need a cron schedule.");
+  }
 
   const payload = {
     id: String(formData.get("id") ?? "").trim(),
@@ -487,7 +773,9 @@ async function createPosterJob() {
     verifierMatchMode: String(formData.get("verifierMatchMode") ?? "contains_all"),
     verifierMinimumMatches: Number(formData.get("verifierMinimumMatches") ?? 2),
     escalationMessage: String(formData.get("escalationMessage") ?? "").trim() || DEFAULT_ESCALATION_MESSAGE,
-    autoApprove: formData.get("autoApprove") === "on"
+    autoApprove: formData.get("autoApprove") === "on",
+    ...(parentSessionId ? { parentSessionId } : {}),
+    ...(recurring ? { recurring: true, schedule: { cron: scheduleCron } } : {})
   };
 
   setPosterFeedback(`Creating ${payload.id || "job"}...`, "loading");
@@ -495,8 +783,52 @@ async function createPosterJob() {
   setPosterFeedback(`Created ${job.id}. Refreshing catalog and operator view...`, "loading");
   await Promise.all([loadCatalog(), loadWallet(state.wallet)]);
   await selectJob(job.id);
+  await refreshAdminWorkspace();
   setPosterFeedback(`Created ${job.id} and loaded it into the execution flow.`, "success");
   showToast(`Created ${job.id}.`, "success");
+}
+
+async function fireRecurringTemplate() {
+  if (!hasRole("admin")) {
+    throw new Error("This wallet does not have the admin role required to fire recurring templates.");
+  }
+
+  const templateInput = document.getElementById("admin-template-id");
+  const firedAtInput = document.getElementById("admin-fired-at");
+  const templateId = templateInput?.value?.trim() ?? "";
+  const firedAt = firedAtInput?.value?.trim() ?? "";
+
+  if (!templateId) {
+    throw new Error("Enter a recurring template id first.");
+  }
+  if (firedAt && Number.isNaN(new Date(firedAt).getTime())) {
+    throw new Error("firedAt must be a valid date and time.");
+  }
+
+  setAdminFeedback(`Firing ${templateId}...`, "loading");
+  const derivative = await postJson("/api/admin/jobs/fire", {
+    templateId,
+    ...(firedAt ? { firedAt: new Date(firedAt).toISOString() } : {})
+  });
+
+  await Promise.all([loadCatalog(), loadWallet(state.wallet)]);
+  await selectJob(derivative.id);
+  await refreshAdminWorkspace();
+  setAdminFeedback(`Fired ${templateId}. Loaded derivative ${derivative.id}.`, "success");
+  showToast(`Fired ${templateId}.`, "success");
+}
+
+function useSelectedTemplate() {
+  const templateInput = document.getElementById("admin-template-id");
+  if (!templateInput) return;
+  if (!state.selectedJobId) {
+    throw new Error("Load a recurring template from the live catalog first.");
+  }
+  if (!state.selectedJob?.recurring) {
+    throw new Error("The selected job is not marked as a recurring template.");
+  }
+  templateInput.value = state.selectedJobId;
+  setAdminFeedback(`Loaded ${state.selectedJobId} into the recurring fire form.`, "neutral");
 }
 
 function wireWalletForm(walletForm, walletInput) {
@@ -677,7 +1009,14 @@ function wireActionButtons({ claimButton, submitButton, verifyButton, refreshBut
   });
 }
 
-function wirePosterControls({ posterForm, refreshCatalogButton, verifierModeSelect }) {
+function wirePosterControls({
+  posterForm,
+  refreshCatalogButton,
+  verifierModeSelect,
+  recurringToggle,
+  fireForm,
+  useSelectedTemplateButton
+}) {
   posterForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const submitButton = posterForm.querySelector('button[type="submit"]');
@@ -707,17 +1046,63 @@ function wirePosterControls({ posterForm, refreshCatalogButton, verifierModeSele
   verifierModeSelect?.addEventListener("change", () => {
     syncPosterDefaults(true);
   });
+
+  recurringToggle?.addEventListener("change", () => {
+    syncPosterAdvancedFields();
+  });
+
+  useSelectedTemplateButton?.addEventListener("click", () => {
+    try {
+      useSelectedTemplate();
+    } catch (error) {
+      debug.error(error);
+      setAdminFeedback(error.message ?? "Failed to load selected template.", "error");
+      showToast(error.message ?? "Failed to load selected template.", "error");
+    }
+  });
+
+  fireForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const fireButton = document.getElementById("admin-fire-button");
+    try {
+      await runWithBusyButton(fireButton, "Firing...", fireRecurringTemplate);
+    } catch (error) {
+      debug.error(error);
+      setAdminFeedback(error.message ?? "Recurring fire failed.", "error");
+      showToast(error.message ?? "Recurring fire failed.", "error");
+    }
+  });
 }
 
 async function loadPlatformStatus() {
   try {
-    const [health, onboarding, index] = await Promise.all([readJson("/api/health"), readJson("/api/onboarding"), readJson("/index/")]);
+    const [health, onboarding, index, verifierHandlers] = await Promise.all([
+      readJson("/api/health"),
+      readJson("/api/onboarding"),
+      readJson("/index/"),
+      readJson("/api/verifier/handlers")
+    ]);
 
-    authMode = health?.auth?.mode ?? onboarding?.authMode ?? authMode;
+    platformStatus.protocols = onboarding.protocols ?? [];
+    platformStatus.verifierModes = Array.isArray(verifierHandlers?.handlers)
+      ? verifierHandlers.handlers.map((entry) => entry.mode).filter(Boolean)
+      : [];
+    platformStatus.authMode = health?.auth?.mode ?? onboarding?.authMode ?? authMode;
+    platformStatus.indexReady = index.status === "ok";
+
+    authMode = platformStatus.authMode;
     setText("api-status", health.status === "ok" ? "Healthy" : "Unexpected");
     setText("index-status", index.status === "ok" ? "Serving" : "Unexpected");
     setText("protocol-status", onboarding.protocols.join(" / ").toUpperCase());
     setText("starter-flow", `${onboarding.onboarding.starterFlow.length} live steps`);
+    setText("admin-verifier-modes", platformStatus.verifierModes.length ? platformStatus.verifierModes.join(" · ") : "No handlers exposed");
+    setText("admin-platform-summary", `${platformStatus.protocols.length || 0} protocols · ${platformStatus.indexReady ? "index ready" : "index warning"}`);
+    setText(
+      "admin-auth-mode",
+      authMode === "permissive"
+        ? "Permissive auth is only appropriate for local demos."
+        : "Strict auth is live. Admin and verifier actions follow JWT role claims."
+    );
     setOverallStatus("Online", "status-ok");
   } catch (error) {
     debug.error(error);
@@ -725,6 +1110,9 @@ async function loadPlatformStatus() {
     setText("index-status", "Unavailable");
     setText("protocol-status", "Check routes");
     setText("starter-flow", "Waiting for API");
+    setText("admin-verifier-modes", "Unavailable");
+    setText("admin-platform-summary", "Check API and indexer");
+    setText("admin-auth-mode", "Control-plane status is unavailable until the API responds.");
     setOverallStatus("Attention needed", "status-pending");
   }
 }
@@ -755,6 +1143,7 @@ function wireAuthControls() {
     stopEventStream?.();
     stopEventStream = undefined;
     state.wallet = "";
+    state.authRoles = [];
     state.account = undefined;
     state.reputation = undefined;
     state.history = [];
@@ -779,6 +1168,9 @@ function wireAuthControls() {
     setText("job-count", "0 recommendations");
     setText("funding-wallet-value", "No wallet signed in");
     setText("auth-wallet-value", "No wallet signed in");
+    setPosterFeedback("Create one-shot or recurring jobs here to publish them directly into the live runtime.", "neutral");
+    setAdminFeedback("Only admin-scoped wallets can fire recurring templates. Load one from the catalog or type the template id directly.", "neutral");
+    syncRoleGatedControls({ authenticated: false, wallet: undefined, expiresAt: undefined, roles: [], lastReason: "signed_out" });
   });
 
   onAuthChange((snapshot) => {
@@ -800,6 +1192,9 @@ async function boot() {
   const fundButton = document.getElementById("fund-account-button");
   const posterForm = document.getElementById("poster-form");
   const refreshCatalogButton = document.getElementById("refresh-catalog-button");
+  const recurringToggle = document.getElementById("poster-recurring-toggle");
+  const fireForm = document.getElementById("admin-fire-form");
+  const useSelectedTemplateButton = document.getElementById("admin-use-selected-template-button");
   const catalogList = document.getElementById("catalog-list");
   const historyList = document.getElementById("history-list");
   const historyFilter = document.getElementById("history-filter");
@@ -807,6 +1202,7 @@ async function boot() {
   const catalogActivityFilter = document.getElementById("catalog-activity-filter");
 
   syncPosterDefaults(true);
+  syncPosterAdvancedFields();
   await loadPlatformStatus();
 
   // Render initial auth UI *after* we know the auth mode so the permissive
@@ -855,7 +1251,14 @@ async function boot() {
   wireCatalogActivitySelection();
   wireCatalogActivityFilter(catalogActivityFilter);
   wireActionButtons({ claimButton, submitButton, verifyButton, refreshButton, fundButton });
-  wirePosterControls({ posterForm, refreshCatalogButton, verifierModeSelect });
+  wirePosterControls({
+    posterForm,
+    refreshCatalogButton,
+    verifierModeSelect,
+    recurringToggle,
+    fireForm,
+    useSelectedTemplateButton
+  });
   renderActivityFeed([]);
   refreshActionPanel();
 }

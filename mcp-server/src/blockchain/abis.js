@@ -45,6 +45,12 @@ export const REPUTATION_SBT_ABI = [
 ];
 
 export const TREASURY_POLICY_ABI = [
+  "function owner() view returns (address)",
+  "function pauser() view returns (address)",
+  "function paused() view returns (bool)",
+  "function dailyOutflowCap() view returns (uint256)",
+  "function perAccountBorrowCap() view returns (uint256)",
+  "function minimumCollateralRatioBps() view returns (uint256)",
   "function defaultClaimStakeBps() view returns (uint16)",
   "function rejectionSkillPenalty() view returns (uint256)",
   "function rejectionReliabilityPenalty() view returns (uint256)",

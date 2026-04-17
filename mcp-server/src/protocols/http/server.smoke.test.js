@@ -150,6 +150,37 @@ test("http smoke: /admin/jobs accepts admin-scoped token", { skip: !RUN }, async
   });
 });
 
+test("http smoke: /admin/status returns recurring + maintenance data for admin tokens", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const token = issueToken(ADMIN_WALLET, { roles: ["admin"] });
+
+    await fetch(`${base}/admin/jobs`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        id: "weekly-digest",
+        category: "coding",
+        tier: "starter",
+        rewardAmount: 2,
+        verifierMode: "benchmark",
+        verifierTerms: ["complete"],
+        verifierMinimumMatches: 1,
+        recurring: true,
+        schedule: { cron: "0 9 * * 1" }
+      })
+    });
+
+    const response = await fetch(`${base}/admin/status`, {
+      headers: { authorization: `Bearer ${token}` }
+    });
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.recurring.count, 1);
+    assert.equal(payload.recurring.templates[0].templateId, "weekly-digest");
+    assert.equal(typeof payload.maintenance.release.checklistDoc, "string");
+  });
+});
+
 test("http smoke: /auth/nonce returns 429 once the window limit is crossed", { skip: !RUN }, async () => {
   await runWithServer(async (base) => {
     const body = JSON.stringify({ wallet: Wallet.createRandom().address });
