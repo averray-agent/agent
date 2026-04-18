@@ -48,7 +48,7 @@ jq -e '.baseUrl == "https://api.averray.com"' >/dev/null <<<"$discovery_json"
 
 echo "Checking operator app shell"
 app_html="$(fetch "$APP_URL")"
-grep -q "Operator surface" <<<"$app_html" || {
+grep -q 'id="auth-signin-button"' <<<"$app_html" || {
   echo "Operator app did not return the expected shell" >&2
   exit 1
 }
