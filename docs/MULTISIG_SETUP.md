@@ -1,5 +1,10 @@
 # Native Pallet Multisig Setup
 
+Before using this runbook, read:
+
+- [docs/MULTISIG_DECISION.md](/Users/pascalkuriger/repo/Polkadot/docs/MULTISIG_DECISION.md)
+- [docs/SIGNER_POLICY.md](/Users/pascalkuriger/repo/Polkadot/docs/SIGNER_POLICY.md)
+
 This guide walks a solo operator through standing up a **2-of-3 pallet
 multisig** on Polkadot Hub, transferring `TreasuryPolicy.owner` to the
 multisig's EVM-mapped address, and rehearsing pause/unpause before any
