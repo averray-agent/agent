@@ -12,6 +12,8 @@ INDEXER_READY_URL=${INDEXER_READY_URL:-https://index.averray.com/ready}
 INDEXER_STATUS_URL=${INDEXER_STATUS_URL:-https://index.averray.com/status}
 INDEXER_MAX_STALENESS_SEC=${INDEXER_MAX_STALENESS_SEC:-1800}
 TIMEOUT_SEC=${TIMEOUT_SEC:-20}
+APP_BASIC_AUTH_USER=${APP_BASIC_AUTH_USER:-}
+APP_BASIC_AUTH_PASSWORD=${APP_BASIC_AUTH_PASSWORD:-}
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -24,7 +26,12 @@ require_command curl
 require_command jq
 
 fetch() {
-  curl -fsS --max-time "$TIMEOUT_SEC" "$1"
+  local url="$1"
+  local curl_args=(-fsS --max-time "$TIMEOUT_SEC")
+  if [[ "$url" == "$APP_URL"* && -n "$APP_BASIC_AUTH_USER" && -n "$APP_BASIC_AUTH_PASSWORD" ]]; then
+    curl_args+=(-u "$APP_BASIC_AUTH_USER:$APP_BASIC_AUTH_PASSWORD")
+  fi
+  curl "${curl_args[@]}" "$url"
 }
 
 echo "Checking public site"

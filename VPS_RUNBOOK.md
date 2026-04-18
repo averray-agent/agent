@@ -44,6 +44,13 @@ The repo-owned template lives at:
 /Users/pascalkuriger/repo/Polkadot/deploy/Caddyfile.averray
 ```
 
+To protect only the operator surface with browser basic auth, render the
+live file through:
+
+```text
+/Users/pascalkuriger/repo/Polkadot/scripts/ops/render-caddyfile.sh
+```
+
 On the VPS, the live file should be:
 
 ```text
@@ -76,6 +83,53 @@ cp deploy/Caddyfile.averray /srv/agent-stack/Caddyfile
 cd /srv/agent-stack
 docker compose restart caddy
 docker compose logs --tail=100 caddy
+```
+
+### Protecting `app.averray.com` with browser basic auth
+
+This is the recommended setup while the operator/admin surface is still
+actively evolving in public.
+
+1. Pick a username, for example `operator`.
+2. Pick a strong password and store it in your password manager.
+3. Render the live Caddyfile instead of copying the raw template:
+
+```bash
+cd /srv/agent-stack/app
+APP_BASIC_AUTH_USER=operator \
+APP_BASIC_AUTH_PASSWORD='replace-with-a-strong-password' \
+./scripts/ops/render-caddyfile.sh /srv/agent-stack/Caddyfile
+```
+
+4. Restart Caddy:
+
+```bash
+cd /srv/agent-stack
+docker compose restart caddy
+docker compose logs --tail=100 caddy
+```
+
+What this protects:
+
+- `https://app.averray.com/`
+- `https://app.averray.com/api/*`
+- `https://app.averray.com/index/*`
+
+What stays public:
+
+- `https://averray.com/`
+- `https://api.averray.com/`
+- `https://index.averray.com/`
+
+### Hosted smoke checks when app auth is enabled
+
+If `app.averray.com` is behind browser basic auth, pass the same
+credentials into the smoke check:
+
+```bash
+APP_BASIC_AUTH_USER=operator \
+APP_BASIC_AUTH_PASSWORD='replace-with-a-strong-password' \
+./scripts/ops/check-hosted-stack.sh
 ```
 
 ## Quick health checks
@@ -125,6 +179,10 @@ If the Caddy routing shape changed too, also restart Caddy:
 cd /srv/agent-stack
 docker compose restart caddy
 ```
+
+If the operator app is protected with browser basic auth, re-render
+`/srv/agent-stack/Caddyfile` through `scripts/ops/render-caddyfile.sh`
+after pulling, then restart Caddy.
 
 ### Backend changes
 

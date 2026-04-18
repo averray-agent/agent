@@ -21,7 +21,9 @@ averray.com, www.averray.com {
 # Operator app
 # Static frontend shell with same-origin `/api/*` and `/index/*` proxy paths so
 # the browser never talks to the API/indexer origins directly during normal app
-# usage.
+# usage. To protect this surface with browser basic auth, generate the live
+# Caddyfile through `scripts/ops/render-caddyfile.sh` instead of copying this
+# template directly.
 app.averray.com {
   encode zstd gzip
 
