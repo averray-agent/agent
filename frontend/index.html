@@ -158,6 +158,52 @@
         </div>
       </section>
 
+      <section class="start-strip" aria-label="Where to start">
+        <article class="panel start-panel">
+          <div class="start-panel-topline">
+            <div>
+              <p class="panel-label">Start here</p>
+              <h2 id="start-guide-title">This page is the operator surface for work, control, and live runtime visibility.</h2>
+            </div>
+            <span id="start-guide-pill" class="status-pill status-pending">Orienting</span>
+          </div>
+          <p id="start-guide-copy" class="section-note">
+            Use the human path to sign in and run jobs, the agent path to integrate through the API, or the control path to watch and operate the platform.
+          </p>
+
+          <div class="start-now-card">
+            <p class="panel-label">Right now</p>
+            <h3 id="start-now-title">Connect a wallet first.</h3>
+            <p id="start-now-copy" class="section-note">
+              Wallet sign-in is the first step for the in-app worker flow. If you are integrating as an agent, skip the browser flow and open the onboarding contract instead.
+            </p>
+          </div>
+
+          <div class="start-path-grid">
+            <article class="start-path-card start-path-card-strong">
+              <p>Human operator</p>
+              <strong id="start-human-title">Run jobs from this browser</strong>
+              <span id="start-human-copy">Sign in, fund the wallet if needed, choose a job, then claim and submit work.</span>
+              <button id="start-human-button" type="button" class="primary-action">Start worker flow</button>
+            </article>
+
+            <article class="start-path-card">
+              <p>Agent or builder</p>
+              <strong>Integrate through the live API</strong>
+              <span>Use onboarding, discovery, and the HTTP surface instead of the wallet-first browser workflow.</span>
+              <a id="start-agent-link" class="secondary-action" href="/api/onboarding" target="_blank" rel="noreferrer">Open API onboarding</a>
+            </article>
+
+            <article class="start-path-card">
+              <p>Admin or observer</p>
+              <strong id="start-admin-title">Watch platform motion</strong>
+              <span id="start-admin-copy">Open the live ops view to see jobs in motion, treasury posture, and recent runtime events.</span>
+              <button id="start-admin-button" type="button" class="secondary-action">Open live ops view</button>
+            </article>
+          </div>
+        </article>
+      </section>
+
       <section class="ops-deck" aria-label="Live operator picture">
         <article class="panel ops-hero-panel">
           <div class="ops-hero-topline">
@@ -320,36 +366,36 @@
 
             <section class="work-runbook-shell">
               <div class="detail-head">
-                <h3>Worker runbook</h3>
+                <h3>Step-by-step</h3>
                 <span id="work-focus-pill" class="status-pill status-pending">Waiting for wallet</span>
               </div>
               <div class="work-runbook-grid">
                 <article class="work-step-card" id="work-step-auth">
                   <p>1. Sign in</p>
                   <strong>Connect wallet</strong>
-                  <span>Authenticate the operator identity first.</span>
+                  <span>Start by signing in with the wallet that will run the job.</span>
                 </article>
                 <article class="work-step-card" id="work-step-funding">
-                  <p>2. Cover stake</p>
-                  <strong>Top up balance</strong>
-                  <span>Fund the wallet if the selected run needs claim stake.</span>
+                  <p>2. Get ready</p>
+                  <strong>Cover the stake</strong>
+                  <span>Add funds if this run needs claim stake before it can start.</span>
                 </article>
                 <article class="work-step-card" id="work-step-execution">
-                  <p>3. Run work</p>
-                  <strong>Claim then submit</strong>
-                  <span>Move the selected job into an active session.</span>
+                  <p>3. Do the run</p>
+                  <strong>Claim and submit</strong>
+                  <span>Open the run, complete the work, and submit the result.</span>
                 </article>
                 <article class="work-step-card" id="work-step-settlement">
-                  <p>4. Settle</p>
-                  <strong>Verify result</strong>
-                  <span>Close the session with a verifier response.</span>
+                  <p>4. Close it out</p>
+                  <strong>Verify the result</strong>
+                  <span>Finish the run with a verifier outcome.</span>
                 </article>
               </div>
               <div class="work-focus-card">
-                <p class="panel-label">Current focus</p>
-                <h3 id="work-focus-title">Sign in to start the worker loop.</h3>
+                <p class="panel-label">What To Do Next</p>
+                <h3 id="work-focus-title">Sign in to get started.</h3>
                 <p id="work-focus-copy" class="section-note">
-                  Once the wallet is signed in, this panel will point to the single next step that matters most.
+                  This card always points to the single next step that matters most for the current run.
                 </p>
               </div>
             </section>
@@ -358,12 +404,12 @@
               <div class="funding-head">
                 <div>
                   <p class="panel-label">Funding</p>
-                  <h3>Get claim-ready for the selected job</h3>
+                  <h3>Make this run claim-ready</h3>
                 </div>
                 <span id="funding-readiness-pill" class="status-pill status-pending">Sign in first</span>
               </div>
               <p id="funding-readiness-copy" class="section-note">
-                Authenticate with your wallet to load balances, recommendations, and claim readiness.
+                Sign in to see whether the selected run is ready to claim or still needs funding.
               </p>
               <div class="funding-summary-grid">
                 <article class="funding-card funding-card-strong">
@@ -420,32 +466,32 @@
 
             <section class="action-shell" id="work-execution">
               <div class="detail-head">
-                <h3>Execution flow</h3>
+                <h3>Run guide</h3>
                 <span id="action-pill" class="status-pill status-pending">Choose a job</span>
               </div>
 
               <p id="selected-job-copy" class="section-note">
-                Select a job to load its stake requirement, verifier rules, and claim-to-verify workflow.
+                Select a job to see what it pays, what it needs, and how to complete it.
               </p>
               <p id="action-guidance" class="action-guidance">
-                Choose a recommended or catalog job to load claim stake, verifier rules, and the next action.
+                Pick a job to unlock the guided run flow.
               </p>
 
               <div class="execution-summary-grid">
                 <article class="funding-card">
-                  <p>Current stage</p>
+                  <p>Where you are</p>
                   <strong id="execution-stage">Choose a job</strong>
-                  <span>The present step in the claim-to-verify workflow for the signed-in worker.</span>
+                  <span>The current step for this run.</span>
                 </article>
                 <article class="funding-card">
-                  <p>Next move</p>
+                  <p>Next step</p>
                   <strong id="execution-next-step">Choose a recommended or catalog job to load worker-specific preflight data.</strong>
-                  <span>The best action to take from this state.</span>
+                  <span>The clearest next action from here.</span>
                 </article>
                 <article class="funding-card funding-card-strong">
-                  <p>Current blocker</p>
+                  <p>What is blocking you</p>
                   <strong id="execution-blocker">The app cannot calculate claim stake or eligibility without a selected job.</strong>
-                  <span>What is currently stopping the workflow from progressing.</span>
+                  <span>The thing currently stopping this run from moving forward.</span>
                 </article>
               </div>
 
@@ -481,7 +527,7 @@
                 id="evidence-input"
                 class="evidence-input"
                 rows="5"
-                placeholder="Select a job to generate a starter evidence template."
+                placeholder="Select a job to load a starter submission template."
               ></textarea>
 
               <div class="action-row">
@@ -491,7 +537,7 @@
                 <button id="refresh-session-button" type="button">Refresh status</button>
               </div>
 
-              <p id="action-feedback" class="wallet-feedback">Pick a job to unlock the worker action flow.</p>
+              <p id="action-feedback" class="wallet-feedback">Pick a job to unlock the guided run flow.</p>
 
               <dl class="action-details">
                 <div>

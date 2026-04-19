@@ -274,16 +274,16 @@ function getExecutionState() {
   if (!state.wallet) {
     return {
       stage: "Signed out",
-      next: "Connect and sign in with the worker wallet you want to operate.",
-      blocker: "All wallet-scoped reads and mutations are locked until SIWE sign-in completes."
+      next: "Connect and sign in with the wallet you want to use for this run.",
+      blocker: "The run cannot start until a wallet is signed in."
     };
   }
 
   if (!hasJob) {
     return {
-      stage: "Job not selected",
-      next: "Choose a recommended or catalog job to load the worker-specific preflight data.",
-      blocker: "The app cannot calculate claim stake or eligibility without a selected job."
+      stage: "No job selected",
+      next: "Choose a recommended or catalog job to load its run details.",
+      blocker: "Nothing else can move until you pick a job."
     };
   }
 
@@ -292,35 +292,35 @@ function getExecutionState() {
       stage: state.verification.outcome === "approved" ? "Verified" : "Pending dispute window",
       next:
         state.verification.outcome === "approved"
-          ? "Review the run details or move on to another job."
-          : "Wait for the dispute window or the future dispute workflow before expecting final penalties.",
+          ? "Review the result or move on to another run."
+          : "Wait for the dispute window or the future dispute flow before expecting final penalties.",
       blocker:
         state.verification.outcome === "approved"
-          ? "No blocker. This run is settled."
-          : "Terminal penalties and refunds are deferred until the rejection becomes final or is disputed."
+          ? "Nothing is blocking this run anymore. It is settled."
+          : "Penalties and refunds wait until the rejection becomes final or is disputed."
     };
   }
 
   if (sessionStatus === "submitted") {
     return {
       stage: "Ready to verify",
-      next: "Run the verifier to settle the submission.",
-      blocker: "Nothing blocks verification; this run is waiting for the verifier action."
+      next: "Run the verifier to settle this submission.",
+      blocker: "This run is waiting on the verifier step."
     };
   }
 
   if (sessionStatus === "claimed") {
     return {
       stage: "Claimed",
-      next: "Edit the evidence payload if needed, then submit it.",
-      blocker: "Verification stays unavailable until the run reaches the submitted state."
+      next: "Finish the submission and send it.",
+      blocker: "Verification cannot start until the run is submitted."
     };
   }
 
   if (!readiness.canClaim) {
     return {
       stage: readiness.label,
-      next: readiness.shortfall > 0 ? "Top up deposited DOT in AgentAccountCore." : "Pick another eligible job or improve the worker profile.",
+      next: readiness.shortfall > 0 ? "Top up deposited DOT for this run." : "Pick another eligible job or improve the worker profile.",
       blocker: readiness.guidance
     };
   }
@@ -328,15 +328,15 @@ function getExecutionState() {
   if (hasSession) {
     return {
       stage: "In progress",
-      next: "Continue the run from the current session state.",
-      blocker: "Use Refresh status if the session looks stale."
+      next: "Continue from the current session state.",
+      blocker: "Use Refresh status if this run looks stale."
     };
   }
 
   return {
     stage: "Ready",
-    next: "Claim the selected job to open a new session.",
-    blocker: "No blocker. The worker is funded and eligible for this job."
+    next: "Claim this job to open the run.",
+    blocker: "Nothing is blocking the run. The wallet is funded and eligible."
   };
 }
 
@@ -1083,33 +1083,33 @@ function updateWorkRunbook(readiness, hasSession, hasVerification, hasVerifierRo
     "work-step-auth",
     walletReady ? "complete" : "active",
     walletReady ? "Wallet connected" : "Connect wallet",
-    walletReady ? "Worker identity is authenticated and ready." : "Authenticate the operator identity first."
+    walletReady ? "This wallet is signed in and ready." : "Start by signing in with the wallet that will run the job."
   );
   setRunbookStepState(
     "work-step-funding",
     !walletReady ? "default" : canClaim || hasSession ? "complete" : "active",
     canClaim || hasSession ? "Stake covered" : "Top up balance",
     canClaim || hasSession
-      ? "The wallet can cover the selected claim stake."
-      : "Fund the wallet if the selected run needs claim stake."
+      ? "This wallet already covers the required claim stake."
+      : "Add funds if this run needs claim stake before it can start."
   );
   setRunbookStepState(
     "work-step-execution",
     !walletReady || (!canClaim && !hasSession) ? "default" : hasSession ? "active" : "complete",
-    hasSession ? (submitted ? "Submission stored" : "Claimed and in progress") : "Claim then submit",
+    hasSession ? (submitted ? "Submission sent" : "Run in progress") : "Claim and submit",
     hasSession
-      ? "Move from claimed work to submitted evidence."
-      : "Select and claim a job, then submit evidence."
+      ? "Move from claimed work to a finished submission."
+      : "Open the run, complete the work, and submit the result."
   );
   setRunbookStepState(
     "work-step-settlement",
     settled ? "complete" : submitted ? "active" : "default",
     settled ? "Result settled" : hasVerifierRole ? "Verify result" : "Await verifier",
     settled
-      ? "The current run already has a verifier outcome."
+      ? "This run already has a verifier outcome."
       : submitted
-        ? (hasVerifierRole ? "Run the verifier to settle this submission." : "A verifier-scoped wallet must settle this submission.")
-        : "Settlement starts after evidence is submitted."
+        ? (hasVerifierRole ? "Run the verifier to close out this submission." : "A verifier-scoped wallet must close out this submission.")
+        : "This step unlocks after the submission is sent."
   );
 
   if (focusPill) {
@@ -1117,44 +1117,44 @@ function updateWorkRunbook(readiness, hasSession, hasVerification, hasVerifierRo
       focusPill.className = "status-pill status-pending";
       focusPill.textContent = "Waiting for wallet";
       setText("work-focus-title", "Connect and sign in first.");
-      setText("work-focus-copy", "The worker loop starts by authenticating the wallet that will fund, claim, and submit.");
+      setText("work-focus-copy", "Start with the wallet that will fund, claim, and submit the run.");
       return;
     }
     if (!canClaim && !hasSession) {
       focusPill.className = "status-pill status-pending";
       focusPill.textContent = readiness?.label ?? "Fund first";
-      setText("work-focus-title", "Cover the claim stake for the selected run.");
-      setText("work-focus-copy", readiness?.guidance ?? "Add deposited DOT until the selected claim is fully covered.");
+      setText("work-focus-title", "Make this run claim-ready.");
+      setText("work-focus-copy", readiness?.guidance ?? "Add deposited DOT until this run is fully covered.");
       return;
     }
     if (!hasSession) {
       focusPill.className = "status-pill status-ok";
       focusPill.textContent = "Ready to claim";
-      setText("work-focus-title", "Claim the selected job.");
-      setText("work-focus-copy", "The wallet is funded and the selected run is eligible, so you can open the session now.");
+      setText("work-focus-title", "Claim this job.");
+      setText("work-focus-copy", "The wallet is ready, so you can open the run now.");
       return;
     }
     if (sessionStatus === "claimed") {
       focusPill.className = "status-pill status-ok";
-      focusPill.textContent = "Prepare submission";
-      setText("work-focus-title", "Complete the evidence payload and submit.");
-      setText("work-focus-copy", "This run is already claimed. Use the evidence editor, then submit the result for settlement.");
+      focusPill.textContent = "Finish the submission";
+      setText("work-focus-title", "Complete the work and submit it.");
+      setText("work-focus-copy", "This run is already open. Use the editor, then send the result.");
       return;
     }
     if (submitted && !settled) {
       focusPill.className = hasVerifierRole ? "status-pill status-ok" : "status-pill status-pending";
       focusPill.textContent = hasVerifierRole ? "Ready to verify" : "Verifier required";
-      setText("work-focus-title", hasVerifierRole ? "Settle the submitted run." : "Switch to a verifier-scoped wallet.");
+      setText("work-focus-title", hasVerifierRole ? "Verify this run." : "Switch to a verifier wallet.");
       setText("work-focus-copy", hasVerifierRole
-        ? "The submission is in place. Run verification when you are ready to settle it."
-        : "This submission is ready, but the current wallet cannot settle it without the verifier role.");
+        ? "The submission is in place. Run verification when you are ready to close it out."
+        : "This submission is ready, but the current wallet cannot settle it.");
       return;
     }
 
     focusPill.className = "status-pill status-ok";
     focusPill.textContent = "Run settled";
-    setText("work-focus-title", "Pick the next run or inspect the result.");
-    setText("work-focus-copy", "The current session already has an outcome, so the next useful action is to open another job or review the history.");
+    setText("work-focus-title", "Review the result or pick the next run.");
+    setText("work-focus-copy", "This run already has an outcome, so the next useful action is to open another job or review the history.");
   }
 }
 
@@ -1188,13 +1188,13 @@ export function refreshActionPanel() {
 
   if (!state.wallet) {
     setActionStatus("Sign in", "status-pending");
-    setText("action-guidance", "Authenticate first, then top up deposited DOT if the selected job needs claim stake coverage.");
+    setText("action-guidance", "Sign in first. After that, this panel will guide you through funding, claiming, submitting, and settling.");
     return;
   }
 
   if (!hasJob) {
     setActionStatus("Awaiting job", "status-pending");
-    setText("action-guidance", "Choose a recommended or catalog job to load claim stake, verifier rules, and the next action.");
+    setText("action-guidance", "Choose a recommended or catalog job to load what it pays, what it needs, and what to do next.");
     return;
   }
 
@@ -1208,7 +1208,7 @@ export function refreshActionPanel() {
     setText(
       "action-guidance",
       approved
-        ? "This run is settled. Pick another job or review the session history for the final payout and reputation trail."
+        ? "This run is settled. Review the result or move on to another job."
         : "The verifier has responded. If the result is contested, wait for or open the dispute flow before expecting stake or reputation changes."
     );
     return;
@@ -1227,20 +1227,20 @@ export function refreshActionPanel() {
     setActionStatus("Verifier required", "status-pending");
     setText(
       "action-guidance",
-      "This submission is ready, but the current wallet does not have the verifier role. Sign in with a verifier-scoped wallet to settle it from this surface."
+      "This submission is ready, but the current wallet does not have the verifier role. Sign in with a verifier wallet to finish it here."
     );
     return;
   }
 
   if (hasSubmitted) {
     setActionStatus("Submitted", "status-ok");
-    setText("action-guidance", "Evidence is stored. Run the verifier when you are ready to settle this submission.");
+    setText("action-guidance", "The submission is stored. Run the verifier when you are ready to close out this run.");
     return;
   }
 
   if (hasSession) {
     setActionStatus("Claimed", "status-ok");
-    setText("action-guidance", "The job is claimed. Fill in or edit the evidence payload, then submit it for verification.");
+    setText("action-guidance", "The run is open. Fill in or edit the submission, then send it for verification.");
     return;
   }
 
@@ -1251,7 +1251,7 @@ export function refreshActionPanel() {
   }
 
   setActionStatus("Ready", "status-ok");
-  setText("action-guidance", "Claim is unlocked for this wallet. The required stake is covered, so you can begin the run now.");
+  setText("action-guidance", "This run is ready. The required stake is covered, so you can claim it now.");
 }
 
 export function updateSelectedJob(job) {
@@ -1267,8 +1267,8 @@ export function updateSelectedJob(job) {
   setText(
     "selected-job-copy",
     job
-      ? `${job.category} job, ${job.claimTtlSeconds}s claim TTL, ${job.retryLimit} retry limit, ${formatAmount(job.preflight?.claimStake ?? 0)} ${job.rewardAsset} stake, ${formatAmount(job.preflight?.availableLiquidity ?? 0)} ${job.rewardAsset} already deposited.`
-      : "Select a job to load its exact stake requirement, verifier rules, and operator guidance."
+      ? `${job.category} job · ${job.claimTtlSeconds}s to claim · ${job.retryLimit} retries · ${formatAmount(job.preflight?.claimStake ?? 0)} ${job.rewardAsset} stake required · ${formatAmount(job.preflight?.availableLiquidity ?? 0)} ${job.rewardAsset} already deposited.`
+      : "Select a job to see what it pays, what it needs, and how to complete it."
   );
 
   const evidenceInput = document.getElementById("evidence-input");

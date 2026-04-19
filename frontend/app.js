@@ -422,6 +422,102 @@ function buildAdminOpsSnapshot(status = {}) {
   };
 }
 
+function renderStartGuide(snapshot = getAuthSnapshot()) {
+  const isAdmin = hasRole("admin", snapshot.roles ?? []);
+  const isVerifier = hasRole("verifier", snapshot.roles ?? []);
+  const hasJob = Boolean(state.selectedJobId);
+  const hasSession = Boolean(state.session?.sessionId);
+  const sessionStatus = state.session?.status ?? "";
+  const hasOutcome = Boolean(state.verification?.outcome);
+  const workReady = Boolean(state.wallet);
+  const guidePill = document.getElementById("start-guide-pill");
+  const humanButton = document.getElementById("start-human-button");
+  const adminButton = document.getElementById("start-admin-button");
+
+  let nowTitle = "Connect a wallet first.";
+  let nowCopy = "Wallet sign-in is the first step for the in-app worker flow. If you are integrating as an agent, open the onboarding contract instead of the browser flow.";
+  let guideTitle = "This page is the operator surface for work, control, and live runtime visibility.";
+  let guideCopy = "Use the human path to sign in and run jobs, the agent path to integrate through the API, or the control path to watch and operate the platform.";
+  let humanTitle = "Run jobs from this browser";
+  let humanCopy = "Sign in, fund the wallet if needed, choose a job, then claim and submit work.";
+  let humanButtonLabel = "Start worker flow";
+  let adminTitle = isAdmin || isVerifier ? "Operate or watch the platform" : "Watch platform motion";
+  let adminCopy = isAdmin || isVerifier
+    ? "Open the control surface to create jobs, inspect recurring runtime, or settle runs."
+    : "Open the live ops view to see jobs in motion, treasury posture, and recent runtime events.";
+  let adminButtonLabel = isAdmin || isVerifier ? "Open control workspace" : "Open live ops view";
+  let pillLabel = "Orienting";
+  let pillTone = "status-pending";
+
+  if (workReady && !hasJob) {
+    nowTitle = "Choose a job next.";
+    nowCopy = "The wallet is authenticated. Pick a recommendation to load the stake requirement and the run flow.";
+    humanTitle = "Open the worker queue";
+    humanCopy = "Recommendations are ready. The next useful move is to select one run and inspect its stake and verifier requirements.";
+    humanButtonLabel = "Choose a job";
+    pillLabel = "Worker ready";
+    pillTone = "status-ok";
+  } else if (workReady && hasJob && !hasSession) {
+    nowTitle = "Claim the selected job.";
+    nowCopy = "You already have a wallet and a selected run. The next step is to open the session from the execution flow.";
+    humanTitle = "Move the selected run into session";
+    humanCopy = "Claim opens the active session. After that, submit the evidence payload and settle it.";
+    humanButtonLabel = "Open execution flow";
+    pillLabel = "Run selected";
+    pillTone = "status-ok";
+  } else if (hasSession && sessionStatus === "claimed") {
+    nowTitle = "Submit the evidence payload.";
+    nowCopy = "The job is already claimed. Stay in Work mode and move the run from claimed to submitted.";
+    humanTitle = "Finish the claimed run";
+    humanCopy = "Complete the evidence editor, submit the result, and then hand off to settlement.";
+    humanButtonLabel = "Finish submission";
+    pillLabel = "Run in progress";
+    pillTone = "status-ok";
+  } else if (hasSession && sessionStatus === "submitted") {
+    nowTitle = isVerifier ? "Settle the submitted run." : "Switch to a verifier wallet or inspect the submitted run.";
+    nowCopy = isVerifier
+      ? "This run is ready for settlement. The verifier action is the next step."
+      : "The run is already submitted. A verifier-scoped wallet is needed for the settlement step.";
+    humanTitle = isVerifier ? "Complete settlement" : "Inspect the submitted run";
+    humanCopy = isVerifier
+      ? "Use the verify action now to close the run and publish the outcome."
+      : "You have reached the handoff point. The remaining step is verifier settlement.";
+    humanButtonLabel = "Open current run";
+    pillLabel = isVerifier ? "Ready to settle" : "Verifier needed";
+    pillTone = isVerifier ? "status-ok" : "tier-warn";
+  } else if (hasOutcome) {
+    nowTitle = "Inspect the result or start the next run.";
+    nowCopy = "This session already has an outcome. Review the result, then move back into the queue for another run.";
+    humanTitle = "Return to the queue";
+    humanCopy = "The current run is no longer the bottleneck. Use the recommendations and history to decide the next move.";
+    humanButtonLabel = "Pick next run";
+    pillLabel = "Outcome recorded";
+    pillTone = "status-ok";
+  }
+
+  if (isAdmin || isVerifier) {
+    guideTitle = "This page works as both a live operator room and a control surface.";
+    guideCopy = "You can run jobs from Work mode, operate templates and job creation from Admin mode, or stay in Observe mode to watch the runtime.";
+  } else if (!workReady) {
+    guideTitle = "Start as either a human operator or an agent integration.";
+  }
+
+  setText("start-guide-title", guideTitle);
+  setText("start-guide-copy", guideCopy);
+  setText("start-now-title", nowTitle);
+  setText("start-now-copy", nowCopy);
+  setText("start-human-title", humanTitle);
+  setText("start-human-copy", humanCopy);
+  setText("start-admin-title", adminTitle);
+  setText("start-admin-copy", adminCopy);
+  if (humanButton) humanButton.textContent = humanButtonLabel;
+  if (adminButton) adminButton.textContent = adminButtonLabel;
+  if (guidePill) {
+    guidePill.textContent = pillLabel;
+    guidePill.className = `status-pill ${pillTone}`;
+  }
+}
+
 async function refreshOpsDeck(snapshot = getAuthSnapshot()) {
   if (snapshot.authenticated && hasRole("admin", snapshot.roles ?? [])) {
     try {
@@ -713,6 +809,7 @@ function renderAuthUi(snapshot = getAuthSnapshot()) {
   if (walletForm) {
     walletForm.hidden = authMode !== "permissive" || snapshot.authenticated;
   }
+  renderStartGuide(snapshot);
 }
 
 async function runWithBusyButton(button, busyLabel, action) {
@@ -729,6 +826,7 @@ async function restoreSession(sessionId) {
     applySessionState(undefined);
     applyVerificationState(undefined);
     refreshActionPanel();
+    renderStartGuide();
     return;
   }
 
@@ -747,6 +845,7 @@ async function restoreSession(sessionId) {
   }
 
   refreshActionPanel();
+  renderStartGuide();
   renderHistory(state.history);
   renderJobDetail(state.selectedJob, state.jobHistory);
   renderCatalogJobActivity(state.selectedJob, state.catalogJobActivity);
@@ -790,6 +889,7 @@ async function refreshWalletPanels() {
     await restoreSession(state.session.sessionId);
   } else {
     refreshActionPanel();
+    renderStartGuide();
   }
   await refreshOpsDeck();
 }
@@ -899,6 +999,7 @@ async function selectJob(jobId) {
   applyVerificationState(undefined);
   setActionFeedback(`Loaded ${job.id}. Claim it when you are ready.`, "neutral");
   refreshActionPanel();
+  renderStartGuide();
   await Promise.all([loadSelectedJobHistory(), loadSelectedCatalogJobActivity()]);
 }
 
@@ -942,6 +1043,7 @@ async function loadWallet(wallet) {
     renderJobDetail(undefined, []);
     renderCatalogJobActivity(undefined, []);
     setActionFeedback("No action flow available until recommendations appear.", "neutral");
+    renderStartGuide();
   }
 
   restartEventSubscription();
@@ -996,6 +1098,7 @@ async function claimSelectedJob() {
   setActionFeedback(`Claimed ${state.selectedJobId}. Session ${session.sessionId} is ready for submission.`, "success");
   showToast(`Claimed ${state.selectedJobId}.`, "success");
   refreshActionPanel();
+  renderStartGuide();
   await loadHistoryForCurrentWallet();
   await Promise.all([loadSelectedJobHistory(), loadSelectedCatalogJobActivity()]);
 }
@@ -1016,6 +1119,7 @@ async function submitSelectedWork() {
   setActionFeedback("Submission stored. Run the verifier to settle the result.", "success");
   showToast("Submission stored.", "success");
   refreshActionPanel();
+  renderStartGuide();
   await loadHistoryForCurrentWallet();
   await Promise.all([loadSelectedJobHistory(), loadSelectedCatalogJobActivity()]);
 }
@@ -1050,6 +1154,7 @@ async function verifySelectedWork() {
     result.outcome === "approved" ? "success" : "neutral"
   );
   refreshActionPanel();
+  renderStartGuide();
   await loadHistoryForCurrentWallet();
   await Promise.all([loadSelectedJobHistory(), loadSelectedCatalogJobActivity()]);
 }
@@ -1060,6 +1165,7 @@ async function refreshCurrentSession() {
   setActionFeedback(`Refreshing ${state.session.sessionId}...`, "loading");
   await restoreSession(state.session.sessionId);
   setActionFeedback(`Refreshed session ${state.session.sessionId}.`, "success");
+  renderStartGuide();
 }
 
 function syncPosterDefaults(force = false) {
@@ -1547,6 +1653,32 @@ function wireAdminConsoleControls() {
   });
 }
 
+function wireStartGuideControls() {
+  document.getElementById("start-human-button")?.addEventListener("click", () => {
+    if (!state.wallet) {
+      jumpToSection("workspace-core", { mode: "work" });
+      return;
+    }
+    if (!state.selectedJobId) {
+      jumpToSection("jobs-workspace", { mode: "work" });
+      return;
+    }
+    if (!state.session?.sessionId) {
+      jumpToSection("work-execution", { mode: "work" });
+      return;
+    }
+    jumpToSection("work-execution", { mode: "work" });
+  });
+
+  document.getElementById("start-admin-button")?.addEventListener("click", () => {
+    if (hasRole("admin") || hasRole("verifier")) {
+      jumpToSection("admin-workspace", { mode: "admin" });
+      return;
+    }
+    jumpToSection("ops-details", { mode: "observe" });
+  });
+}
+
 async function boot() {
   // Init Sentry (no-op when sentryDsn is empty; the browser SDK auto-loads).
   initObservability();
@@ -1612,6 +1744,7 @@ async function boot() {
   }
 
   wireAuthControls();
+  wireStartGuideControls();
   wireAdminConsoleControls();
   wireWalletForm(walletForm, walletInput);
   wireJobSelection(jobList);
