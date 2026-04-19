@@ -71,6 +71,23 @@
           <p class="lede">
             Work. Treasury. Control.
           </p>
+          <div class="hero-telemetry" aria-label="Top operator telemetry">
+            <article class="hero-telemetry-card">
+              <p>Session</p>
+              <strong id="hero-session-state">Waiting for wallet</strong>
+              <span id="hero-session-copy">No operator session</span>
+            </article>
+            <article class="hero-telemetry-card">
+              <p>Work lane</p>
+              <strong id="hero-work-state">-</strong>
+              <span id="hero-work-copy">Queue offline</span>
+            </article>
+            <article class="hero-telemetry-card">
+              <p>Treasury</p>
+              <strong id="hero-treasury-state">-</strong>
+              <span id="hero-treasury-copy">No treasury data</span>
+            </article>
+          </div>
           <div class="hero-actions">
             <a class="primary-action" href="/api/onboarding" target="_blank" rel="noreferrer">
               Capability contract
@@ -117,33 +134,19 @@
         </aside>
       </header>
 
-      <section class="surface-strip-app" aria-label="Operator entry surfaces">
-        <a class="surface-pill-app" href="/api/onboarding" target="_blank" rel="noreferrer">
-          <span class="surface-pill-label">API</span>
-          <strong>Capabilities</strong>
-        </a>
-        <a class="surface-pill-app" href="https://averray.com/.well-known/agent-tools.json" target="_blank" rel="noreferrer">
-          <span class="surface-pill-label">Discovery</span>
-          <strong>Manifest</strong>
-        </a>
-        <a class="surface-pill-app" href="https://averray.com/trust/" target="_blank" rel="noreferrer">
-          <span class="surface-pill-label">Trust</span>
-          <strong>Posture</strong>
-        </a>
-        <a class="surface-pill-app" href="https://averray.com/builders/" target="_blank" rel="noreferrer">
-          <span class="surface-pill-label">Builders</span>
-          <strong>Guide</strong>
-        </a>
-      </section>
-
-      <section class="product-map" aria-label="What Averray operates">
-        <article class="panel product-map-panel">
-          <div class="product-map-topline">
+      <section class="mission-board" aria-label="Operator mission board">
+        <article class="panel mission-panel">
+          <div class="mission-topline">
             <div>
-              <p class="panel-label">Product map</p>
-              <h2>Jobs are one lane. The platform also moves capital and control.</h2>
+              <p class="panel-label">Mission board</p>
+              <h2 id="start-guide-title">Current mission</h2>
             </div>
-            <span id="product-map-pill" class="status-pill status-pending">Loading picture</span>
+            <span id="start-guide-pill" class="status-pill status-pending">Orienting</span>
+          </div>
+
+          <div class="mission-now">
+            <strong id="start-now-title">Connect a wallet first.</strong>
+            <p id="start-now-copy">No active operator session yet.</p>
           </div>
 
           <div class="product-lane-grid">
@@ -154,7 +157,7 @@
                 <b id="product-lane-work-metric">Waiting for wallet</b>
                 <small id="product-lane-work-support">Run lane offline</small>
               </div>
-              <button id="product-lane-work-button" type="button" class="primary-action">Open work mode</button>
+              <button id="product-lane-work-button" type="button" class="primary-action">Open work</button>
             </article>
 
             <article class="product-lane-card">
@@ -164,7 +167,7 @@
                 <b id="product-lane-treasury-metric">Waiting for balances</b>
                 <small id="product-lane-treasury-support">Treasury lane offline</small>
               </div>
-              <button id="product-lane-treasury-button" type="button" class="secondary-action">Open treasury view</button>
+              <button id="product-lane-treasury-button" type="button" class="secondary-action">Open treasury</button>
             </article>
 
             <article class="product-lane-card">
@@ -174,8 +177,17 @@
                 <b id="product-lane-control-metric">Waiting for roles</b>
                 <small id="product-lane-control-support">Control lane locked</small>
               </div>
-              <button id="product-lane-control-button" type="button" class="secondary-action">Open control view</button>
+              <button id="product-lane-control-button" type="button" class="secondary-action">Open control</button>
             </article>
+          </div>
+
+          <div class="mission-actions">
+            <button id="start-human-button" type="button" class="primary-action">Start worker flow</button>
+            <button id="start-admin-button" type="button" class="secondary-action">Open live ops view</button>
+            <a id="start-agent-link" class="secondary-action" href="/api/onboarding" target="_blank" rel="noreferrer">API onboarding</a>
+            <a class="secondary-action" href="https://averray.com/.well-known/agent-tools.json" target="_blank" rel="noreferrer">Discovery</a>
+            <a class="secondary-action" href="https://averray.com/trust/" target="_blank" rel="noreferrer">Trust</a>
+            <a class="secondary-action" href="https://averray.com/builders/" target="_blank" rel="noreferrer">Builders</a>
           </div>
         </article>
       </section>
@@ -201,49 +213,6 @@
         </div>
       </section>
 
-      <section class="start-strip" aria-label="Where to start">
-        <article class="panel start-panel">
-          <div class="start-panel-topline">
-            <div>
-              <p class="panel-label">Start here</p>
-              <h2 id="start-guide-title">Current mission</h2>
-            </div>
-            <span id="start-guide-pill" class="status-pill status-pending">Orienting</span>
-          </div>
-
-          <div class="start-now-card">
-            <p class="panel-label">Right now</p>
-            <h3 id="start-now-title">Connect a wallet first.</h3>
-            <p id="start-now-copy" class="section-note">
-              No active operator session yet.
-            </p>
-          </div>
-
-          <div class="start-path-grid">
-            <article class="start-path-card start-path-card-strong">
-              <p>Human operator</p>
-              <strong id="start-human-title">Run jobs from this browser</strong>
-              <span id="start-human-copy">Use the signed-in wallet and move the next run.</span>
-              <button id="start-human-button" type="button" class="primary-action">Start worker flow</button>
-            </article>
-
-            <article class="start-path-card">
-              <p>Agent or builder</p>
-              <strong>Integrate through the live API</strong>
-              <span>Skip the browser flow and open the contract surface.</span>
-              <a id="start-agent-link" class="secondary-action" href="/api/onboarding" target="_blank" rel="noreferrer">Open API onboarding</a>
-            </article>
-
-            <article class="start-path-card">
-              <p>Admin or observer</p>
-              <strong id="start-admin-title">Watch platform motion</strong>
-              <span id="start-admin-copy">Jump straight to capital, control, and live platform state.</span>
-              <button id="start-admin-button" type="button" class="secondary-action">Open live ops view</button>
-            </article>
-          </div>
-        </article>
-      </section>
-
       <section class="ops-deck" aria-label="Live operator picture">
         <article class="panel ops-hero-panel">
           <div class="ops-hero-topline">
@@ -253,9 +222,6 @@
             </div>
             <span id="ops-pulse-pill" class="status-pill status-pending">Syncing</span>
           </div>
-          <p id="ops-copy" class="section-note">
-            The operator deck is warming up. Once the API and session data respond, this strip will show jobs in motion, capital at work, and platform pulse.
-          </p>
           <div class="ops-metric-grid">
             <article class="ops-metric-card ops-metric-card-strong">
               <p>Runs in motion</p>

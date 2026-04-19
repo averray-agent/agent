@@ -456,6 +456,11 @@ function renderProductMap(snapshot = getAuthSnapshot()) {
   let controlMetric = "Waiting for roles";
   let controlSupport = "Control lane locked";
 
+  let heroWorkState = "Waiting for wallet";
+  let heroWorkCopy = "Queue offline";
+  let heroTreasuryState = "-";
+  let heroTreasuryCopy = "No treasury data";
+
   if (authenticated) {
     pillLabel = isAdmin || isVerifier ? "Full platform view" : "Operator wallet live";
     pillTone = isAdmin || isVerifier ? "status-ok" : "status-pending";
@@ -467,12 +472,18 @@ function renderProductMap(snapshot = getAuthSnapshot()) {
     workSupport = activeSessionCount > 0
       ? "In-flight sessions on this wallet"
       : "Queue ready";
+    heroWorkState = activeSessionCount > 0
+      ? `${formatCompactCount(activeSessionCount)} active`
+      : `${formatCompactCount(recommendationCount)} ready`;
+    heroWorkCopy = activeSessionCount > 0 ? "Runs in motion" : "Queue ready";
 
     treasuryTitle = "See where account capital is sitting";
     treasuryMetric = `${formatOpsAmount(liquidDot)} liquid · ${formatOpsAmount(allocatedDot)} allocated`;
     treasurySupport = debtDot > 0
       ? `${formatOpsAmount(debtDot)} debt active`
       : "No debt active";
+    heroTreasuryState = formatOpsAmount(liquidDot);
+    heroTreasuryCopy = debtDot > 0 ? `${formatOpsAmount(debtDot)} debt` : `${formatOpsAmount(allocatedDot)} allocated`;
 
     if (isAdmin || isVerifier) {
       controlTitle = isAdmin ? "Operate the market side of the platform" : "Settle and monitor platform flow";
@@ -497,6 +508,10 @@ function renderProductMap(snapshot = getAuthSnapshot()) {
   setText("product-lane-control-title", controlTitle);
   setText("product-lane-control-metric", controlMetric);
   setText("product-lane-control-support", controlSupport);
+  setText("hero-work-state", heroWorkState);
+  setText("hero-work-copy", heroWorkCopy);
+  setText("hero-treasury-state", heroTreasuryState);
+  setText("hero-treasury-copy", heroTreasuryCopy);
   if (productPill) {
     productPill.textContent = pillLabel;
     productPill.className = `status-pill ${pillTone}`;
@@ -516,78 +531,73 @@ function renderStartGuide(snapshot = getAuthSnapshot()) {
   const adminButton = document.getElementById("start-admin-button");
 
   let nowTitle = "Connect a wallet first.";
-  let nowCopy = "Wallet sign-in is the first step for the in-app worker flow. If you are integrating as an agent, open the onboarding contract instead of the browser flow.";
-  let guideTitle = "This page is the operator surface for earning, treasury, and control.";
-  let humanTitle = "Run earning flows from this browser";
-  let humanCopy = "Sign in, fund the wallet if needed, choose a run, then move it through claim, submission, and settlement.";
+  let nowCopy = "No active operator session yet.";
+  let guideTitle = "Current mission";
   let humanButtonLabel = "Start worker flow";
-  let adminTitle = isAdmin || isVerifier ? "Operate or watch the platform" : "Watch platform motion";
-  let adminCopy = isAdmin || isVerifier
-    ? "Open the control surface to create supply, inspect recurring runtime, and watch treasury and policy posture."
-    : "Open the live ops view to see capital, treasury posture, and recent runtime events.";
   let adminButtonLabel = isAdmin || isVerifier ? "Open control workspace" : "Open live ops view";
   let pillLabel = "Orienting";
   let pillTone = "status-pending";
+  let heroSessionState = "Waiting for wallet";
+  let heroSessionCopy = "No operator session";
 
   if (workReady && !hasJob) {
     nowTitle = "Choose a job next.";
-    nowCopy = "The wallet is authenticated. Pick a recommendation to load the stake requirement and the run flow.";
-    humanTitle = "Open the worker queue";
-    humanCopy = "Recommendations are ready. The next useful move is to select one run and inspect its stake and verifier requirements.";
+    nowCopy = "Wallet live. Queue is ready.";
     humanButtonLabel = "Choose a job";
     pillLabel = "Worker ready";
     pillTone = "status-ok";
+    heroSessionState = "Wallet live";
+    heroSessionCopy = "Ready to work";
   } else if (workReady && hasJob && !hasSession) {
     nowTitle = "Claim the selected job.";
-    nowCopy = "You already have a wallet and a selected run. The next step is to open the session from the execution flow.";
-    humanTitle = "Move the selected run into session";
-    humanCopy = "Claim opens the active session. After that, submit the evidence payload and settle it.";
+    nowCopy = "Wallet and run selected. Session not open yet.";
     humanButtonLabel = "Open execution flow";
     pillLabel = "Run selected";
     pillTone = "status-ok";
+    heroSessionState = "Run selected";
+    heroSessionCopy = "Session not open";
   } else if (hasSession && sessionStatus === "claimed") {
     nowTitle = "Submit the evidence payload.";
-    nowCopy = "The job is already claimed. Stay in Work mode and move the run from claimed to submitted.";
-    humanTitle = "Finish the claimed run";
-    humanCopy = "Complete the evidence editor, submit the result, and then hand off to settlement.";
+    nowCopy = "Claimed run is waiting for submission.";
     humanButtonLabel = "Finish submission";
     pillLabel = "Run in progress";
     pillTone = "status-ok";
+    heroSessionState = "Claimed";
+    heroSessionCopy = "Waiting for submit";
   } else if (hasSession && sessionStatus === "submitted") {
     nowTitle = isVerifier ? "Settle the submitted run." : "Switch to a verifier wallet or inspect the submitted run.";
     nowCopy = isVerifier
-      ? "This run is ready for settlement. The verifier action is the next step."
-      : "The run is already submitted. A verifier-scoped wallet is needed for the settlement step.";
-    humanTitle = isVerifier ? "Complete settlement" : "Inspect the submitted run";
-    humanCopy = isVerifier
-      ? "Use the verify action now to close the run and publish the outcome."
-      : "You have reached the handoff point. The remaining step is verifier settlement.";
+      ? "Submission is ready for verifier settlement."
+      : "Submitted run is waiting for a verifier wallet.";
     humanButtonLabel = "Open current run";
     pillLabel = isVerifier ? "Ready to settle" : "Verifier needed";
     pillTone = isVerifier ? "status-ok" : "tier-warn";
+    heroSessionState = isVerifier ? "Ready to settle" : "Verifier needed";
+    heroSessionCopy = isVerifier ? "Submission ready" : "Submitted run";
   } else if (hasOutcome) {
     nowTitle = "Inspect the result or start the next run.";
-    nowCopy = "This session already has an outcome. Review the result, then move back into the queue for another run.";
-    humanTitle = "Return to the queue";
-    humanCopy = "The current run is no longer the bottleneck. Use the recommendations and history to decide the next move.";
+    nowCopy = "Outcome recorded. Queue the next move.";
     humanButtonLabel = "Pick next run";
     pillLabel = "Outcome recorded";
     pillTone = "status-ok";
+    heroSessionState = "Outcome recorded";
+    heroSessionCopy = "Ready for next run";
+  } else if (workReady) {
+    heroSessionState = "Wallet live";
+    heroSessionCopy = "Operator session active";
   }
 
   if (isAdmin || isVerifier) {
-    guideTitle = "This page works as a live operator room for earnings, treasury, and control.";
+    guideTitle = "Operator room live";
   } else if (!workReady) {
-    guideTitle = "Start as either a human operator, an agent integration, or a treasury observer.";
+    guideTitle = "Open a lane";
   }
 
   setText("start-guide-title", guideTitle);
   setText("start-now-title", nowTitle);
   setText("start-now-copy", nowCopy);
-  setText("start-human-title", humanTitle);
-  setText("start-human-copy", humanCopy);
-  setText("start-admin-title", adminTitle);
-  setText("start-admin-copy", adminCopy);
+  setText("hero-session-state", heroSessionState);
+  setText("hero-session-copy", heroSessionCopy);
   if (humanButton) humanButton.textContent = humanButtonLabel;
   if (adminButton) adminButton.textContent = adminButtonLabel;
   if (guidePill) {

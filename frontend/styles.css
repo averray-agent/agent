@@ -224,6 +224,46 @@ h2 {
   gap: 0.7rem;
 }
 
+.hero-telemetry {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.7rem;
+  margin-bottom: 0.95rem;
+}
+
+.hero-telemetry-card {
+  display: grid;
+  gap: 0.22rem;
+  padding: 0.8rem 0.85rem;
+  border: 1px solid rgba(17, 19, 21, 0.08);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.hero-telemetry-card p,
+.hero-telemetry-card span {
+  margin: 0;
+}
+
+.hero-telemetry-card p {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.hero-telemetry-card strong {
+  font-family: var(--display);
+  font-size: 0.98rem;
+  letter-spacing: -0.03em;
+}
+
+.hero-telemetry-card span {
+  color: var(--muted);
+  line-height: 1.35;
+}
+
 .hero-presence {
   display: flex;
   flex-wrap: wrap;
@@ -395,56 +435,51 @@ main {
   scroll-margin-top: 1.25rem;
 }
 
-.surface-strip-app {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0.85rem;
-  margin-top: 1.1rem;
-}
-
-.surface-pill-app {
-  display: grid;
-  gap: 0.35rem;
-  padding: 0.85rem 0.95rem;
-  border-radius: 1.15rem;
-  border: 1px solid var(--line);
-  background: rgba(255, 253, 247, 0.76);
-  box-shadow: var(--shadow);
-}
-
-.surface-pill-label {
-  font-size: 0.76rem;
-  font-weight: 900;
-  color: var(--accent);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-
-.surface-pill-app strong {
-  font-family: var(--display);
-  font-size: 0.9rem;
-  line-height: 1.25;
-  letter-spacing: -0.025em;
-}
-
-.product-map {
+.mission-board {
   margin-top: 1rem;
 }
 
-.product-map-panel {
+.mission-panel {
   display: grid;
-  gap: 1rem;
-  padding: 1.35rem;
+  gap: 0.9rem;
+  padding: 1.15rem 1.2rem;
   background:
-    radial-gradient(circle at top right, rgba(30, 102, 66, 0.1), transparent 18rem),
-    linear-gradient(180deg, rgba(255, 253, 247, 0.96), rgba(249, 244, 235, 0.92));
+    linear-gradient(180deg, rgba(255, 253, 247, 0.96), rgba(247, 242, 232, 0.92));
+  border-radius: 1.4rem;
 }
 
-.product-map-topline {
+.mission-topline {
   display: flex;
   justify-content: space-between;
   align-items: start;
   gap: 1rem;
+}
+
+.mission-now {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 0.95rem;
+  border: 1px solid rgba(17, 19, 21, 0.08);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.mission-now strong,
+.mission-now p {
+  margin: 0;
+}
+
+.mission-now strong {
+  font-family: var(--display);
+  font-size: 1.1rem;
+  letter-spacing: -0.03em;
+}
+
+.mission-now p {
+  color: var(--muted);
+  line-height: 1.45;
 }
 
 .product-lane-grid {
@@ -455,11 +490,11 @@ main {
 
 .product-lane-card {
   display: grid;
-  gap: 0.5rem;
-  padding: 1rem;
-  border: 1px solid var(--line);
-  border-radius: 1rem;
-  background: rgba(255, 255, 255, 0.8);
+  gap: 0.45rem;
+  padding: 0.95rem;
+  border: 1px solid rgba(17, 19, 21, 0.08);
+  border-radius: 0.95rem;
+  background: rgba(255, 255, 255, 0.9);
 }
 
 .product-lane-card p,
@@ -486,10 +521,10 @@ main {
 .product-lane-meta {
   display: grid;
   gap: 0.18rem;
-  padding: 0.8rem 0.85rem;
+  padding: 0.7rem 0.8rem;
   border: 1px solid rgba(17, 19, 21, 0.08);
-  border-radius: 0.95rem;
-  background: rgba(255, 255, 255, 0.74);
+  border-radius: 0.8rem;
+  background: rgba(248, 245, 238, 0.86);
 }
 
 .product-lane-meta b {
@@ -504,9 +539,14 @@ main {
 }
 
 .product-lane-card-strong {
-  border-color: rgba(30, 102, 66, 0.18);
-  background:
-    linear-gradient(180deg, rgba(214, 234, 223, 0.78), rgba(255, 255, 255, 0.88));
+  border-color: rgba(30, 102, 66, 0.24);
+  background: linear-gradient(180deg, rgba(222, 239, 230, 0.88), rgba(255, 255, 255, 0.92));
+}
+
+.mission-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
 }
 
 .workspace-modebar {
@@ -516,12 +556,12 @@ main {
   display: grid;
   grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
   gap: 1rem;
-  margin-top: 1rem;
-  padding: 0.85rem;
-  border: 1px solid var(--line);
-  border-radius: 1.2rem;
-  background: rgba(255, 253, 247, 0.86);
-  box-shadow: var(--shadow);
+  margin-top: 0.9rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid rgba(17, 19, 21, 0.08);
+  border-radius: 1rem;
+  background: rgba(255, 253, 247, 0.94);
+  box-shadow: 0 16px 34px rgba(34, 43, 36, 0.06);
   backdrop-filter: blur(10px);
 }
 
@@ -580,81 +620,6 @@ main {
 
 .workspace-mode-panel[hidden] {
   display: none !important;
-}
-
-.start-strip {
-  margin-top: 1.1rem;
-}
-
-.start-panel {
-  display: grid;
-  gap: 1rem;
-  padding: 1.35rem;
-  background:
-    radial-gradient(circle at top left, rgba(30, 102, 66, 0.08), transparent 18rem),
-    linear-gradient(180deg, rgba(255, 253, 247, 0.96), rgba(249, 244, 235, 0.92));
-}
-
-.start-panel-topline {
-  display: flex;
-  justify-content: space-between;
-  align-items: start;
-  gap: 1rem;
-}
-
-.start-now-card {
-  display: grid;
-  gap: 0.35rem;
-  padding: 0.9rem 1rem;
-  border: 1px solid rgba(30, 102, 66, 0.14);
-  border-radius: 1rem;
-  background: rgba(214, 234, 223, 0.5);
-}
-
-.start-now-card .panel-label,
-.start-path-card p {
-  margin-bottom: 0;
-}
-
-.start-path-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.9rem;
-}
-
-.start-path-card {
-  display: grid;
-  gap: 0.45rem;
-  padding: 1rem;
-  border: 1px solid var(--line);
-  border-radius: 1rem;
-  background: rgba(255, 255, 255, 0.76);
-}
-
-.start-path-card-strong {
-  border-color: rgba(30, 102, 66, 0.18);
-  background:
-    linear-gradient(180deg, rgba(214, 234, 223, 0.78), rgba(255, 255, 255, 0.86));
-}
-
-.start-path-card p {
-  font-size: 0.78rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--accent);
-}
-
-.start-path-card strong {
-  font-family: var(--display);
-  font-size: 1.08rem;
-  letter-spacing: -0.03em;
-  line-height: 1.2;
-}
-
-.start-path-card span {
-  color: var(--muted);
-  line-height: 1.45;
 }
 
 .treasury-overview-shell,
@@ -814,10 +779,8 @@ main {
 }
 
 .ops-hero-panel {
-  padding: 1.35rem;
-  background:
-    radial-gradient(circle at top right, rgba(30, 102, 66, 0.12), transparent 18rem),
-    linear-gradient(180deg, rgba(255, 253, 247, 0.96), rgba(249, 244, 235, 0.92));
+  padding: 1.15rem 1.2rem;
+  background: linear-gradient(180deg, rgba(255, 253, 247, 0.96), rgba(247, 242, 232, 0.92));
 }
 
 .ops-hero-topline {
@@ -836,17 +799,16 @@ main {
 .ops-metric-card {
   display: grid;
   gap: 0.35rem;
-  min-height: 8.5rem;
-  padding: 1rem;
-  border: 1px solid var(--line);
-  border-radius: 1rem;
-  background: rgba(255, 255, 255, 0.74);
+  min-height: 7.6rem;
+  padding: 0.9rem;
+  border: 1px solid rgba(17, 19, 21, 0.08);
+  border-radius: 0.95rem;
+  background: rgba(255, 255, 255, 0.82);
 }
 
 .ops-metric-card-strong {
-  background:
-    linear-gradient(180deg, rgba(214, 234, 223, 0.82), rgba(255, 255, 255, 0.82));
-  border-color: rgba(30, 102, 66, 0.16);
+  background: linear-gradient(180deg, rgba(222, 239, 230, 0.88), rgba(255, 255, 255, 0.88));
+  border-color: rgba(30, 102, 66, 0.2);
 }
 
 .ops-metric-card p {
@@ -1978,9 +1940,8 @@ main {
   .operator-grid,
   .poster-grid,
   .observe-grid,
-  .start-path-grid,
   .ops-deck,
-  .surface-strip-app,
+  .mission-now,
   .product-lane-grid,
   .timeline,
   .workspace-modebar {
@@ -2058,8 +2019,7 @@ main {
   .card-header,
   .detail-head,
   .section-heading.compact,
-  .product-map-topline,
-  .start-panel-topline,
+  .mission-topline,
   .ops-hero-topline {
     align-items: flex-start;
     flex-direction: column;
@@ -2079,24 +2039,6 @@ main {
     grid-template-columns: 1fr;
   }
 
-  .surface-strip-app {
-    grid-auto-flow: column;
-    grid-auto-columns: minmax(15rem, 82vw);
-    grid-template-columns: none;
-    overflow-x: auto;
-    padding-bottom: 0.25rem;
-    scrollbar-width: none;
-    scroll-snap-type: x proximity;
-  }
-
-  .surface-strip-app::-webkit-scrollbar {
-    display: none;
-  }
-
-  .surface-pill-app {
-    scroll-snap-align: start;
-  }
-
   .product-lane-grid {
     grid-auto-flow: column;
     grid-auto-columns: minmax(16rem, 84vw);
@@ -2113,6 +2055,12 @@ main {
 
   .product-lane-card {
     scroll-snap-align: start;
+  }
+
+  .mission-now,
+  .mission-actions {
+    flex-direction: column;
+    align-items: flex-start;
   }
 
   .workspace-modebar {
