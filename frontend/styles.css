@@ -210,7 +210,10 @@ h2 {
 .lede {
   max-width: 34rem;
   margin-bottom: 1rem;
-  font-size: 0.98rem;
+  font-size: 0.9rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   line-height: 1.65;
   color: var(--muted);
 }
@@ -480,12 +483,6 @@ main {
   letter-spacing: -0.03em;
 }
 
-.product-lane-card span {
-  color: var(--muted);
-  font-size: 0.9rem;
-  line-height: 1.55;
-}
-
 .product-lane-meta {
   display: grid;
   gap: 0.18rem;
@@ -608,7 +605,7 @@ main {
 .start-now-card {
   display: grid;
   gap: 0.35rem;
-  padding: 1rem 1.05rem;
+  padding: 0.9rem 1rem;
   border: 1px solid rgba(30, 102, 66, 0.14);
   border-radius: 1rem;
   background: rgba(214, 234, 223, 0.5);
@@ -657,7 +654,7 @@ main {
 
 .start-path-card span {
   color: var(--muted);
-  line-height: 1.6;
+  line-height: 1.45;
 }
 
 .treasury-overview-shell,
@@ -669,7 +666,7 @@ main {
 
 .treasury-overview-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0.85rem;
 }
 
@@ -788,6 +785,17 @@ main {
 
 .strategy-doc-link {
   justify-self: start;
+}
+
+.observe-quicknav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.observe-quicknav .secondary-action {
+  min-height: 2.45rem;
+  padding: 0 0.95rem;
 }
 
 .ops-deck {

@@ -33,28 +33,22 @@ function renderTreasuryOverview() {
   const collateral = Number(account.collateralLocked?.DOT ?? 0);
   const debt = Number(account.debtOutstanding?.DOT ?? 0);
   const capitalAtWork = allocated + stakeLocked;
+  const borrowHeadroom = Math.max((collateral / 1.5) - debt, 0);
 
   if (!state.wallet) {
     setStatusPill("treasury-overview-pill", "Waiting for wallet", "status-pending");
-    setText("treasury-overview-copy", "This section treats the agent account like the platform bank account: spendable balance, capital at work, collateral, and debt in one place.");
     setText("treasury-spendable-now", "-");
     setText("treasury-spendable-copy", "Sign in to load the spendable deposited balance.");
     setText("treasury-capital-at-work", "-");
     setText("treasury-capital-copy", "Strategy allocation and claim stake appear after the wallet session loads.");
     setText("treasury-credit-posture", "-");
     setText("treasury-credit-copy", "Collateral and debt posture need the wallet account state.");
+    setText("treasury-borrow-headroom", "-");
+    setText("treasury-borrow-copy", "Headroom appears once collateral and debt are loaded.");
     return;
   }
 
   setStatusPill("treasury-overview-pill", debt > 0 ? "Credit active" : capitalAtWork > 0 ? "Capital in motion" : "Treasury ready", debt > 0 ? "tier-warn" : "status-ok");
-  setText(
-    "treasury-overview-copy",
-    debt > 0
-      ? "This wallet is using the account layer as both a treasury and a credit surface: liquid balance, capital at work, and outstanding debt all matter together."
-      : capitalAtWork > 0
-        ? "This wallet already has capital in motion across strategy allocation or claim stake. Think of this as the agent bank account, not only a job wallet."
-        : "This wallet has a clean treasury posture right now: spendable balance is liquid and no debt is outstanding."
-  );
   setText("treasury-spendable-now", `${formatAmount(liquid)} DOT`);
   setText(
     "treasury-spendable-copy",
@@ -78,6 +72,15 @@ function renderTreasuryOverview() {
         ? `${formatAmount(collateral)} DOT is already acting as collateral, but nothing is borrowed right now.`
         : "No collateral or debt is active in this account right now."
   );
+  setText("treasury-borrow-headroom", `${formatAmount(borrowHeadroom)} DOT`);
+  setText(
+    "treasury-borrow-copy",
+    borrowHeadroom > 0
+      ? "Estimated headroom from current collateral and debt."
+      : collateral > 0
+        ? "No additional headroom remains at the current collateral ratio."
+        : "Borrowing stays locked until collateral is posted."
+  );
 }
 
 function renderStrategyShelf() {
@@ -92,12 +95,6 @@ function renderStrategyShelf() {
     if (countLabel) {
       countLabel.textContent = state.wallet ? "No strategy adapters reported" : "Loading strategy posture";
     }
-    setText(
-      "strategy-copy",
-      state.wallet
-        ? "This deployment is not reporting any registered strategy adapter right now, so the treasury view stays liquid-first."
-        : "Idle DOT can move into strategy adapters instead of sitting fully liquid. This panel shows what the current deployment exposes and how the wallet would use it."
-    );
     renderHtml(root, html`<p class="empty-state">No strategy adapters are visible for this deployment yet.</p>`);
     return;
   }
@@ -105,12 +102,6 @@ function renderStrategyShelf() {
   if (countLabel) {
     countLabel.textContent = `${strategies.length} strategy lane${strategies.length === 1 ? "" : "s"} visible`;
   }
-  setText(
-    "strategy-copy",
-    allocated > 0
-      ? `${formatAmount(allocated)} DOT is already routed into the strategy bucket. Use this shelf to understand what that capital lane represents.`
-      : "These are the current yield and capital lanes the deployment exposes. Once idle DOT is allocated, it moves from liquid balance into this shelf."
-  );
 
   renderHtml(
     root,
@@ -132,8 +123,11 @@ function renderStrategyShelf() {
               ${isMock ? "Testnet mock" : "Registered"}
             </span>
           </div>
-          <p class="strategy-risk-copy">${riskLabel}</p>
           <div class="strategy-meta-grid">
+            <div>
+              <dt>Status</dt>
+              <dd>${riskLabel}</dd>
+            </div>
             <div>
               <dt>Lane</dt>
               <dd>${strategy.strategyId ?? "Unknown id"}</dd>

@@ -67,9 +67,9 @@
             <p class="eyebrow">Averray operator</p>
             <span class="hero-badge">Live control surface</span>
           </div>
-          <h1>Operate work, treasury, and runtime state.</h1>
+          <h1>Operate work, treasury, and control.</h1>
           <p class="lede">
-            Sign in, switch modes, and move straight into worker, admin, or observer tasks without leaving the app.
+            Work. Treasury. Control.
           </p>
           <div class="hero-actions">
             <a class="primary-action" href="/api/onboarding" target="_blank" rel="noreferrer">
@@ -86,9 +86,8 @@
           </div>
           <div class="hero-presence" aria-label="Operator traits">
             <span>Strict SIWE auth</span>
-            <span>Same-origin API</span>
-            <span>Mode-based workspace</span>
-            <span>Live index status</span>
+            <span>Live treasury</span>
+            <span>Control modes</span>
           </div>
         </div>
 
@@ -146,18 +145,14 @@
             </div>
             <span id="product-map-pill" class="status-pill status-pending">Loading picture</span>
           </div>
-          <p id="product-map-copy" class="section-note">
-            Use this page to run earning flows, monitor treasury posture, and operate the supply side of the platform from one surface.
-          </p>
 
           <div class="product-lane-grid">
             <article class="product-lane-card product-lane-card-strong">
               <p>Earn</p>
               <strong id="product-lane-work-title">Run agent work</strong>
-              <span id="product-lane-work-copy">Choose a job, cover claim stake, submit evidence, and settle the run.</span>
               <div class="product-lane-meta">
                 <b id="product-lane-work-metric">Waiting for wallet</b>
-                <small id="product-lane-work-support">Jobs and sessions will appear after sign-in.</small>
+                <small id="product-lane-work-support">Run lane offline</small>
               </div>
               <button id="product-lane-work-button" type="button" class="primary-action">Open work mode</button>
             </article>
@@ -165,10 +160,9 @@
             <article class="product-lane-card">
               <p>Treasury</p>
               <strong id="product-lane-treasury-title">Move capital through the account layer</strong>
-              <span id="product-lane-treasury-copy">Track liquid balance, capital at work, strategy allocation, and debt posture.</span>
               <div class="product-lane-meta">
                 <b id="product-lane-treasury-metric">Waiting for balances</b>
-                <small id="product-lane-treasury-support">Observe mode centers treasury, reputation, and runtime state.</small>
+                <small id="product-lane-treasury-support">Treasury lane offline</small>
               </div>
               <button id="product-lane-treasury-button" type="button" class="secondary-action">Open treasury view</button>
             </article>
@@ -176,10 +170,9 @@
             <article class="product-lane-card">
               <p>Control</p>
               <strong id="product-lane-control-title">Operate supply and policy</strong>
-              <span id="product-lane-control-copy">Create jobs, fire recurring templates, and inspect maintenance and verifier posture.</span>
               <div class="product-lane-meta">
                 <b id="product-lane-control-metric">Waiting for roles</b>
-                <small id="product-lane-control-support">Admin mode becomes active when the signed-in wallet carries control-plane claims.</small>
+                <small id="product-lane-control-support">Control lane locked</small>
               </div>
               <button id="product-lane-control-button" type="button" class="secondary-action">Open control view</button>
             </article>
@@ -213,19 +206,16 @@
           <div class="start-panel-topline">
             <div>
               <p class="panel-label">Start here</p>
-              <h2 id="start-guide-title">This page is the operator surface for work, control, and live runtime visibility.</h2>
+              <h2 id="start-guide-title">Current mission</h2>
             </div>
             <span id="start-guide-pill" class="status-pill status-pending">Orienting</span>
           </div>
-          <p id="start-guide-copy" class="section-note">
-            Use the human path to sign in and run jobs, the agent path to integrate through the API, or the control path to watch and operate the platform.
-          </p>
 
           <div class="start-now-card">
             <p class="panel-label">Right now</p>
             <h3 id="start-now-title">Connect a wallet first.</h3>
             <p id="start-now-copy" class="section-note">
-              Wallet sign-in is the first step for the in-app worker flow. If you are integrating as an agent, skip the browser flow and open the onboarding contract instead.
+              No active operator session yet.
             </p>
           </div>
 
@@ -233,21 +223,21 @@
             <article class="start-path-card start-path-card-strong">
               <p>Human operator</p>
               <strong id="start-human-title">Run jobs from this browser</strong>
-              <span id="start-human-copy">Sign in, fund the wallet if needed, choose a job, then claim and submit work.</span>
+              <span id="start-human-copy">Use the signed-in wallet and move the next run.</span>
               <button id="start-human-button" type="button" class="primary-action">Start worker flow</button>
             </article>
 
             <article class="start-path-card">
               <p>Agent or builder</p>
               <strong>Integrate through the live API</strong>
-              <span>Use onboarding, discovery, and the HTTP surface instead of the wallet-first browser workflow.</span>
+              <span>Skip the browser flow and open the contract surface.</span>
               <a id="start-agent-link" class="secondary-action" href="/api/onboarding" target="_blank" rel="noreferrer">Open API onboarding</a>
             </article>
 
             <article class="start-path-card">
               <p>Admin or observer</p>
               <strong id="start-admin-title">Watch platform motion</strong>
-              <span id="start-admin-copy">Open the live ops view to see jobs in motion, treasury posture, and recent runtime events.</span>
+              <span id="start-admin-copy">Jump straight to capital, control, and live platform state.</span>
               <button id="start-admin-button" type="button" class="secondary-action">Open live ops view</button>
             </article>
           </div>
@@ -939,17 +929,18 @@ summary</textarea>
                   <p class="panel-label">Observe</p>
                   <h2>Track treasury, reputation, and runtime posture.</h2>
                 </div>
-                <p class="section-note">Use this mode when the goal is to understand capital, credit, activity, and platform health without touching the control plane.</p>
+                <div class="observe-quicknav" role="group" aria-label="Observe quick jump">
+                  <button id="observe-nav-summary" type="button" class="secondary-action">Balance sheet</button>
+                  <button id="observe-nav-strategies" type="button" class="secondary-action">Yield lanes</button>
+                  <button id="observe-nav-activity" type="button" class="secondary-action">Live feed</button>
+                </div>
               </div>
 
-              <section class="treasury-overview-shell">
+              <section class="treasury-overview-shell" id="observe-balance-sheet">
                 <div class="detail-head">
                   <h3>Agent account overview</h3>
                   <span id="treasury-overview-pill" class="status-pill status-pending">Waiting for wallet</span>
                 </div>
-                <p id="treasury-overview-copy" class="section-note">
-                  This section treats the agent account like the platform bank account: spendable balance, capital at work, collateral, and debt in one place.
-                </p>
                 <div class="treasury-overview-grid">
                   <article class="treasury-overview-card treasury-overview-card-strong">
                     <p>Spendable now</p>
@@ -965,6 +956,11 @@ summary</textarea>
                     <p>Collateral and debt</p>
                     <strong id="treasury-credit-posture">-</strong>
                     <span id="treasury-credit-copy">Borrow posture appears here once the account state is loaded.</span>
+                  </article>
+                  <article class="treasury-overview-card">
+                    <p>Borrow headroom</p>
+                    <strong id="treasury-borrow-headroom">-</strong>
+                    <span id="treasury-borrow-copy">Headroom appears once collateral and debt are loaded.</span>
                   </article>
                 </div>
               </section>
@@ -1050,21 +1046,18 @@ summary</textarea>
                 </section>
               </div>
 
-              <section class="strategy-shell">
+              <section class="strategy-shell" id="observe-strategy-lanes">
                 <div class="detail-head">
                   <h3>Money strategies and yield lanes</h3>
                   <span id="strategy-count" class="section-note">Loading strategy posture</span>
                 </div>
-                <p id="strategy-copy" class="section-note">
-                  Idle DOT can move into strategy adapters instead of sitting fully liquid. This panel shows what the current deployment exposes and how the wallet would use it.
-                </p>
                 <div id="strategy-shelf" class="strategy-shelf">
                   <p class="empty-state">Strategy lanes will appear here once the deployment reports them.</p>
                 </div>
               </section>
             </article>
 
-            <article class="panel observe-panel">
+            <article class="panel observe-panel" id="observe-live-feed">
               <div class="section-heading compact">
                 <div>
                   <p class="panel-label">Observe</p>
