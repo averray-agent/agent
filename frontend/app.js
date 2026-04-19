@@ -89,6 +89,27 @@ function inferWorkspaceModeFromHash(hash = window.location.hash) {
   return undefined;
 }
 
+function railTargetForSection(id = "") {
+  if (["workspace-core", "jobs-workspace", "work-execution"].includes(id)) return "workspace-core";
+  if (["observe-balance-sheet", "observe-treasury-console", "observe-strategy-lanes", "ops-details"].includes(id)) {
+    return "observe-treasury-console";
+  }
+  if (["admin-workspace", "catalog-workspace", "poster-form", "admin-fire-zone", "admin-status-details"].includes(id)) {
+    return "admin-workspace";
+  }
+  if (id === "observe-live-feed") return "observe-live-feed";
+  return "overview-hub";
+}
+
+function setActiveRailButton(targetId = "overview-hub") {
+  const normalizedTarget = railTargetForSection(targetId);
+  document.querySelectorAll("[data-rail-target]").forEach((button) => {
+    const active = button.getAttribute("data-rail-target") === normalizedTarget;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-current", active ? "page" : "false");
+  });
+}
+
 function setWorkspaceMode(mode = "work", options = {}) {
   const { persist = true, focusTargetId = undefined } = options;
   const nextMode = WORKSPACE_MODES.includes(mode) ? mode : "work";
@@ -124,6 +145,7 @@ function jumpToSection(id, options = {}) {
   if (expandId) {
     document.getElementById(expandId)?.setAttribute("open", "");
   }
+  setActiveRailButton(id);
   requestAnimationFrame(() => {
     document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
   });
@@ -137,6 +159,7 @@ function wireWorkspaceModes() {
     || "work";
 
   setWorkspaceMode(initialMode, { persist: false });
+  setActiveRailButton(window.location.hash ? window.location.hash.replace(/^#/, "") : "overview-hub");
 
   buttons.forEach((button) => {
     button.addEventListener("click", () => {
@@ -146,6 +169,7 @@ function wireWorkspaceModes() {
 
   adminLink?.addEventListener("click", (event) => {
     event.preventDefault();
+    setActiveRailButton("admin-workspace");
     setWorkspaceMode("admin", { focusTargetId: "admin-workspace" });
     window.history.replaceState(null, "", "#admin-workspace");
   });
@@ -155,6 +179,17 @@ function wireWorkspaceModes() {
     if (mode) {
       setWorkspaceMode(mode, { persist: false });
     }
+    setActiveRailButton(window.location.hash ? window.location.hash.replace(/^#/, "") : "overview-hub");
+  });
+}
+
+function wireOperatorRail() {
+  document.querySelectorAll("[data-rail-target]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const targetId = button.getAttribute("data-rail-target") ?? "overview-hub";
+      const mode = button.getAttribute("data-rail-workspace-mode") ?? undefined;
+      jumpToSection(targetId, { mode });
+    });
   });
 }
 
@@ -632,6 +667,8 @@ function renderStartGuide(snapshot = getAuthSnapshot()) {
   setText("start-now-copy", nowCopy);
   setText("hero-session-state", heroSessionState);
   setText("hero-session-copy", heroSessionCopy);
+  setText("rail-session-state", heroSessionState);
+  setText("rail-session-copy", heroSessionCopy);
   if (humanButton) humanButton.textContent = humanButtonLabel;
   if (adminButton) adminButton.textContent = adminButtonLabel;
   if (guidePill) {
@@ -2099,6 +2136,7 @@ async function boot() {
   }
 
   wireAuthControls();
+  wireOperatorRail();
   wireStartGuideControls();
   wireProductMapControls();
   wireObserveQuickNav();

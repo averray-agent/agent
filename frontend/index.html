@@ -61,6 +61,51 @@
   <body>
     <div id="toast-stack" class="toast-stack" aria-live="polite" aria-atomic="false"></div>
     <div class="page-shell">
+      <div class="operator-shell">
+        <aside class="operator-rail" aria-label="Operator navigation">
+          <div class="operator-rail-brand">
+            <p class="eyebrow">Averray ops</p>
+            <strong>Control room</strong>
+            <span>Runs, treasury, control, and activity in one place.</span>
+          </div>
+
+          <div class="operator-rail-status">
+            <p class="panel-label">Operator state</p>
+            <strong id="rail-session-state">Waiting for wallet</strong>
+            <span id="rail-session-copy">Overview is ready. Sign in to unlock the live workspace.</span>
+          </div>
+
+          <nav class="operator-rail-nav">
+            <button id="rail-overview-button" type="button" class="operator-rail-button is-active" data-rail-target="overview-hub">
+              <span>Overview</span>
+              <small>Mission, lane status, and platform attention.</small>
+            </button>
+            <button id="rail-runs-button" type="button" class="operator-rail-button" data-rail-target="workspace-core" data-rail-workspace-mode="work">
+              <span>Runs</span>
+              <small>Sign in, choose work, claim, submit, settle.</small>
+            </button>
+            <button id="rail-treasury-button" type="button" class="operator-rail-button" data-rail-target="observe-treasury-console" data-rail-workspace-mode="observe">
+              <span>Treasury</span>
+              <small>Balance sheet, strategy routing, borrow, repay.</small>
+            </button>
+            <button id="rail-control-button" type="button" class="operator-rail-button" data-rail-target="admin-workspace" data-rail-workspace-mode="admin">
+              <span>Control</span>
+              <small>Catalog, recurring actions, policy, verifier access.</small>
+            </button>
+            <button id="rail-activity-button" type="button" class="operator-rail-button" data-rail-target="observe-live-feed" data-rail-workspace-mode="observe">
+              <span>Activity</span>
+              <small>Live events, session history, runtime motion.</small>
+            </button>
+          </nav>
+
+          <div class="operator-rail-links">
+            <a class="secondary-action" href="/api/onboarding" target="_blank" rel="noreferrer">API onboarding</a>
+            <a class="secondary-action" href="https://averray.com/.well-known/agent-tools.json" target="_blank" rel="noreferrer">Discovery</a>
+          </div>
+        </aside>
+
+        <div class="operator-canvas">
+      <section id="overview-hub" class="overview-stack">
       <header class="hero">
         <div class="hero-copy">
           <div class="hero-topline">
@@ -193,27 +238,6 @@
         </article>
       </section>
 
-      <section class="workspace-modebar" aria-label="Operator workspace modes">
-        <div class="workspace-mode-copy">
-          <p class="panel-label">Control modes</p>
-          <h2>Switch between earning, treasury, and control views.</h2>
-        </div>
-        <div class="workspace-mode-actions" role="tablist" aria-label="Workspace modes">
-          <button class="workspace-mode-button is-active" id="workspace-mode-work" type="button" data-workspace-mode="work" role="tab" aria-selected="true">
-            <span>Work</span>
-            <small>Earn through runs and settlement</small>
-          </button>
-          <button class="workspace-mode-button" id="workspace-mode-admin" type="button" data-workspace-mode="admin" role="tab" aria-selected="false">
-            <span>Admin</span>
-            <small>Shape supply, policy, and recurring flow</small>
-          </button>
-          <button class="workspace-mode-button" id="workspace-mode-observe" type="button" data-workspace-mode="observe" role="tab" aria-selected="false">
-            <span>Observe</span>
-            <small>Track treasury, reputation, and runtime motion</small>
-          </button>
-        </div>
-      </section>
-
       <section class="ops-deck" aria-label="Live operator picture">
         <article class="panel ops-hero-panel">
           <div class="ops-hero-topline">
@@ -266,6 +290,7 @@
             <p class="empty-state">Recent events, anomalies, and treasury posture will appear here once the operator snapshot is loaded.</p>
           </div>
         </article>
+      </section>
       </section>
 
       <main>
@@ -1201,6 +1226,8 @@ summary</textarea>
         </details>
         </section>
       </main>
+        </div>
+      </div>
     </div>
 
     <script type="module" src="./app.js"></script>

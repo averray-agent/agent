@@ -104,9 +104,117 @@ a:focus-visible {
 }
 
 .page-shell {
-  width: min(1220px, calc(100% - 2rem));
+  width: min(1440px, calc(100% - 2rem));
   margin: 0 auto;
   padding: 2rem 0 4rem;
+}
+
+.operator-shell {
+  display: grid;
+  grid-template-columns: 17rem minmax(0, 1fr);
+  gap: 1.35rem;
+  align-items: start;
+}
+
+.operator-canvas {
+  display: grid;
+  gap: 1.25rem;
+  min-width: 0;
+}
+
+.operator-rail {
+  position: sticky;
+  top: 1rem;
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 1.4rem;
+  background:
+    linear-gradient(180deg, rgba(255, 253, 247, 0.98), rgba(247, 242, 232, 0.94));
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(10px);
+}
+
+.operator-rail-brand,
+.operator-rail-status {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.85rem 0.9rem;
+  border: 1px solid rgba(17, 19, 21, 0.08);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.operator-rail-brand strong,
+.operator-rail-status strong {
+  font-family: var(--display);
+  font-size: 1.08rem;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+}
+
+.operator-rail-brand span,
+.operator-rail-status span {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.operator-rail-brand .eyebrow,
+.operator-rail-status .panel-label {
+  margin-bottom: 0.1rem;
+}
+
+.operator-rail-nav {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.operator-rail-button {
+  display: grid;
+  gap: 0.22rem;
+  width: 100%;
+  padding: 0.85rem 0.95rem;
+  border: 1px solid rgba(17, 19, 21, 0.08);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.74);
+  color: var(--ink);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.operator-rail-button span {
+  font-family: var(--display);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.operator-rail-button small {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.operator-rail-button.is-active {
+  border-color: rgba(30, 102, 66, 0.24);
+  background: rgba(214, 234, 223, 0.74);
+  box-shadow: inset 0 0 0 1px rgba(30, 102, 66, 0.12);
+}
+
+.operator-rail-links {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.operator-rail-links .secondary-action {
+  width: 100%;
+  justify-content: flex-start;
+}
+
+.overview-stack {
+  display: grid;
+  gap: 1rem;
 }
 
 .hero {
@@ -422,7 +530,6 @@ h2 {
 }
 
 main {
-  margin-top: 1.5rem;
   display: grid;
   gap: 1.5rem;
 }
@@ -433,10 +540,6 @@ main {
 #catalog-workspace,
 #ops-details {
   scroll-margin-top: 1.25rem;
-}
-
-.mission-board {
-  margin-top: 1rem;
 }
 
 .mission-panel {
@@ -922,7 +1025,6 @@ main {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(18rem, 0.9fr) minmax(18rem, 0.9fr);
   gap: 1.25rem;
-  margin-top: 1.25rem;
   align-items: start;
 }
 
@@ -2098,6 +2200,7 @@ main {
 }
 
 @media (max-width: 1080px) {
+  .operator-shell,
   .hero,
   .operator-grid,
   .poster-grid,
@@ -2108,6 +2211,15 @@ main {
   .timeline,
   .workspace-modebar {
     grid-template-columns: 1fr;
+  }
+
+  .operator-rail {
+    position: static;
+  }
+
+  .operator-rail-nav,
+  .operator-rail-links {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -2155,6 +2267,8 @@ main {
 
   .status-grid,
   .stats-grid,
+  .operator-rail-nav,
+  .operator-rail-links,
   .treasury-overview-grid,
   .treasury-console-grid,
   .treasury-console-metrics,
@@ -2238,6 +2352,15 @@ main {
   .mission-actions {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .operator-rail {
+    padding: 0.9rem;
+    border-radius: 1.2rem;
+  }
+
+  .operator-rail-button {
+    min-height: 4.15rem;
   }
 
   .workspace-modebar {
