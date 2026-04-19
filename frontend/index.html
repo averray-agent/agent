@@ -327,25 +327,20 @@
                   <span>Signer for reads and mutations.</span>
                 </article>
                 <article class="auth-stat">
-                  <p>Auth</p>
+                  <p>Session</p>
                   <strong id="auth-mode-value">Strict JWT mode</strong>
-                  <span>Hosted deployments stay strict.</span>
-                </article>
-                <article class="auth-stat">
-                  <p>Token</p>
-                  <strong id="auth-expiry-value">Awaiting SIWE sign-in</strong>
-                  <span>Re-auth on expiry.</span>
-                </article>
-                <article class="auth-stat">
-                  <p>Roles</p>
-                  <strong id="auth-role-summary">No control-plane roles</strong>
-                  <span>JWT role claims.</span>
-                  <div id="auth-role-pills" class="role-pill-list" hidden></div>
+                  <span id="auth-expiry-value">Awaiting SIWE sign-in</span>
                 </article>
                 <article class="auth-stat">
                   <p>Access</p>
-                  <strong id="auth-capability-summary">Sign in to inspect control-plane access.</strong>
-                  <span>Unlocked actions from those claims.</span>
+                  <strong id="auth-role-summary">No control-plane roles</strong>
+                  <span id="auth-capability-summary">Sign in to inspect control-plane access.</span>
+                  <div id="auth-role-pills" class="role-pill-list" hidden></div>
+                </article>
+                <article class="auth-stat">
+                  <p>Operator state</p>
+                  <strong id="auth-session-summary">Ready for wallet sign-in</strong>
+                  <span>Admin and verifier actions unlock from wallet session and role claims.</span>
                 </article>
               </div>
               <p id="auth-feedback" class="wallet-feedback">

@@ -846,6 +846,14 @@ function syncRoleGatedControls(snapshot = getAuthSnapshot()) {
         verifierEnabled ? "Can settle submitted sessions" : undefined
       ].filter(Boolean).join(" · ")
     : "Sign in with an admin or verifier wallet to unlock internal controls.");
+  setText(
+    "auth-session-summary",
+    !snapshot.authenticated
+      ? "Ready for wallet sign-in"
+      : adminEnabled || verifierEnabled
+        ? "Control actions available"
+        : "Worker session live"
+  );
 
   setText("admin-wallet-value", snapshot.wallet ?? "No wallet signed in");
   setText("admin-role-value", roleSummary(roles));

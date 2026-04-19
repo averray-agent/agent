@@ -1152,9 +1152,10 @@ main {
 
 .operator-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.08fr) minmax(24rem, 0.92fr);
+  grid-template-columns: 1fr;
   gap: 1.5rem;
   align-items: start;
+  max-width: 70rem;
 }
 
 .poster-grid {
@@ -1445,7 +1446,7 @@ main {
 
 .auth-summary-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.7rem;
   margin-top: 0.8rem;
 }
@@ -1806,6 +1807,11 @@ main {
 .recommendation-panel .section-heading.compact h2,
 .operator-panel .section-heading.compact h2 {
   max-width: 22rem;
+}
+
+.recommendation-panel {
+  border-top: 1px solid rgba(17, 19, 21, 0.08);
+  padding-top: 1.25rem;
 }
 
 .job-detail-shell {
