@@ -299,19 +299,18 @@
           <article class="panel operator-panel" id="workspace-core">
             <div class="section-heading compact">
               <div>
-                <p class="panel-label">Operator console</p>
-                <h2>Run earning flows from the signed-in workspace.</h2>
+                <p class="panel-label">Runs workspace</p>
+                <h2>Connect the wallet, load a run, and move it forward.</h2>
               </div>
-              <p class="section-note">Use this mode when the goal is to take work, move it through the run lifecycle, and turn activity into earnings.</p>
             </div>
 
             <div id="auth-panel" class="auth-panel" data-auth="signed-out">
               <div class="auth-shell">
               <div class="auth-copy">
-                  <p class="panel-label">Session</p>
-                  <h3>Signed-in operator identity</h3>
+                  <p class="panel-label">1. Connect wallet</p>
+                  <h3>Operator session</h3>
                   <p id="auth-hint" class="section-note">
-                    Browser access and wallet sign-in are separate. After the page loads, sign in with your wallet to unlock worker, admin, and live event flows.
+                    Browser access opens the page. Wallet sign-in unlocks the actual operator session.
                   </p>
                 </div>
                 <div class="auth-actions">
@@ -325,27 +324,28 @@
                 <article class="auth-stat auth-stat-wide">
                   <p>Wallet</p>
                   <strong id="auth-wallet-value">No wallet signed in</strong>
-                  <span>Reads and mutations now follow the authenticated signer.</span>
+                  <span>Signer for reads and mutations.</span>
                 </article>
                 <article class="auth-stat">
                   <p>Auth</p>
                   <strong id="auth-mode-value">Strict JWT mode</strong>
-                  <span>Permissive fallback only exists on local dev.</span>
+                  <span>Hosted deployments stay strict.</span>
                 </article>
                 <article class="auth-stat">
                   <p>Token</p>
                   <strong id="auth-expiry-value">Awaiting SIWE sign-in</strong>
-                  <span>Re-auth happens automatically when needed.</span>
+                  <span>Re-auth on expiry.</span>
                 </article>
                 <article class="auth-stat">
                   <p>Roles</p>
                   <strong id="auth-role-summary">No control-plane roles</strong>
+                  <span>JWT role claims.</span>
                   <div id="auth-role-pills" class="role-pill-list" hidden></div>
                 </article>
                 <article class="auth-stat">
                   <p>Access</p>
                   <strong id="auth-capability-summary">Sign in to inspect control-plane access.</strong>
-                  <span>Admin and verifier actions unlock from JWT role claims.</span>
+                  <span>Unlocked actions from those claims.</span>
                 </article>
               </div>
               <p id="auth-feedback" class="wallet-feedback">
@@ -398,7 +398,7 @@
 
             <section class="work-runbook-shell">
               <div class="detail-head">
-                <h3>Step-by-step</h3>
+                <h3>2. Current run</h3>
                 <span id="work-focus-pill" class="status-pill status-pending">Waiting for wallet</span>
               </div>
               <div class="work-runbook-grid">
@@ -424,7 +424,7 @@
                 </article>
               </div>
               <div class="work-focus-card">
-                <p class="panel-label">What To Do Next</p>
+                <p class="panel-label">Next action</p>
                 <h3 id="work-focus-title">Sign in to get started.</h3>
                 <p id="work-focus-copy" class="section-note">
                   This card always points to the single next step that matters most for the current run.
@@ -435,8 +435,8 @@
             <section class="funding-shell" id="work-funding">
               <div class="funding-head">
                 <div>
-                  <p class="panel-label">Funding</p>
-                  <h3>Fund the agent account for this run</h3>
+                  <p class="panel-label">3. Cover stake</p>
+                  <h3>Fund the account only if this run needs it</h3>
                 </div>
                 <span id="funding-readiness-pill" class="status-pill status-pending">Sign in first</span>
               </div>
@@ -486,8 +486,8 @@
           <article class="panel recommendation-panel" id="jobs-workspace">
             <div class="section-heading compact">
               <div>
-                <p class="panel-label">Job routing</p>
-                <h2>Recommended work</h2>
+                <p class="panel-label">4. Pick work</p>
+                <h2>Recommended runs</h2>
               </div>
               <span id="job-count" class="section-note">Waiting for recommendations</span>
             </div>
@@ -498,15 +498,15 @@
 
             <section class="action-shell" id="work-execution">
               <div class="detail-head">
-                <h3>Run guide</h3>
+                <h3>Loaded run</h3>
                 <span id="action-pill" class="status-pill status-pending">Choose a job</span>
               </div>
 
               <p id="selected-job-copy" class="section-note">
-                Select a job to see what it pays, what it needs, and how to complete it.
+                Select a job to load pay, stake, and the next action.
               </p>
               <p id="action-guidance" class="action-guidance">
-                Pick a job to unlock the guided run flow.
+                Pick a job, then claim it, submit the work, and settle it.
               </p>
 
               <div class="execution-summary-grid">
