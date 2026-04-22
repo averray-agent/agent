@@ -7,6 +7,7 @@ test("resolveCapabilities returns base capabilities for signed-in wallets", () =
   const capabilities = resolveCapabilities({ roles: [] });
   assert.ok(capabilities.includes("jobs:claim"));
   assert.ok(capabilities.includes("session:timeline"));
+  assert.ok(capabilities.includes("xcm:read"));
 });
 
 test("resolveCapabilities expands admin and verifier capabilities", () => {
@@ -15,6 +16,8 @@ test("resolveCapabilities expands admin and verifier capabilities", () => {
   assert.ok(capabilities.includes("jobs:pause-recurring"));
   assert.ok(capabilities.includes("verifier:run"));
   assert.ok(capabilities.includes("subjobs:create"));
+  assert.ok(capabilities.includes("xcm:observe"));
+  assert.ok(capabilities.includes("xcm:finalize"));
 });
 
 test("capabilityMatrix exposes base and role capability groups", () => {
@@ -22,6 +25,10 @@ test("capabilityMatrix exposes base and role capability groups", () => {
   assert.ok(matrix.base.includes("jobs:list"));
   assert.ok(matrix.base.includes("jobs:submit"));
   assert.ok(matrix.roles.admin.includes("jobs:fire-recurring"));
+  assert.ok(matrix.roles.admin.includes("xcm:observe"));
+  assert.ok(matrix.roles.admin.includes("xcm:finalize"));
   assert.ok(matrix.roles.verifier.includes("verifier:replay"));
   assert.deepEqual(matrix.routes["/admin/jobs/pause"], ["jobs:pause-recurring"]);
+  assert.deepEqual(matrix.routes["/admin/xcm/observe"], ["xcm:observe"]);
+  assert.deepEqual(matrix.routes["/admin/xcm/finalize"], ["xcm:finalize"]);
 });

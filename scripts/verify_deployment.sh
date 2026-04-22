@@ -60,6 +60,7 @@ STRATEGY_REGISTRY="$(echo "$manifest" | jq -r '.contracts.strategyAdapterRegistr
 AGENT_ACCOUNT="$(echo "$manifest" | jq -r '.contracts.agentAccountCore')"
 REPUTATION_SBT="$(echo "$manifest" | jq -r '.contracts.reputationSbt')"
 ESCROW_CORE="$(echo "$manifest" | jq -r '.contracts.escrowCore')"
+XCM_WRAPPER="$(echo "$manifest" | jq -r '.contracts.xcmWrapper // empty')"
 TOKEN_ADDRESS="$(echo "$manifest" | jq -r '.contracts.token')"
 
 fail=0
@@ -132,6 +133,16 @@ for pair in \
   fi
 done
 
+if [[ -n "$XCM_WRAPPER" ]]; then
+  code=$(cast code --rpc-url "$RPC_URL" "$XCM_WRAPPER" 2>/dev/null || echo "0x")
+  if [[ "$code" == "0x" ]]; then
+    printf "  [FAIL] %s at %s has no bytecode\n" "XcmWrapper" "$XCM_WRAPPER"
+    fail=1
+  else
+    printf "  [ok] %s at %s\n" "XcmWrapper" "$XCM_WRAPPER"
+  fi
+fi
+
 echo ""
 echo "TreasuryPolicy roles:"
 owner_raw=$(call "$TREASURY_POLICY" "owner()(address)")
@@ -149,6 +160,9 @@ echo ""
 echo "Operator + verifier registration:"
 check_bool "serviceOperator(EscrowCore)"   "true" "$(call "$TREASURY_POLICY" "serviceOperators(address)(bool)" "$ESCROW_CORE")"
 check_bool "serviceOperator(AgentAccount)" "true" "$(call "$TREASURY_POLICY" "serviceOperators(address)(bool)" "$AGENT_ACCOUNT")"
+if [[ -n "$XCM_WRAPPER" ]]; then
+  check_bool "serviceOperator(XcmWrapper)" "true" "$(call "$TREASURY_POLICY" "serviceOperators(address)(bool)" "$XCM_WRAPPER")"
+fi
 check_bool "verifier"                      "true" "$(call "$TREASURY_POLICY" "verifiers(address)(bool)" "$EXPECTED_VERIFIER")"
 check_bool "arbitrator"                    "true" "$(call "$TREASURY_POLICY" "arbitrators(address)(bool)" "$EXPECTED_ARBITRATOR")"
 check_bool "approvedAsset(token)"          "true" "$(call "$TREASURY_POLICY" "approvedAssets(address)(bool)" "$TOKEN_ADDRESS")"

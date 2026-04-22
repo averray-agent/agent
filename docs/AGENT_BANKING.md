@@ -324,7 +324,8 @@ product page.
 
 - `https://averray.com/.well-known/agent-tools.json` — tool manifest.
 - MCP server exposes tools over the standard MCP protocol.
-- `supportedProtocols: ["mcp", "a2a", "http"]` is in the profile schema.
+- Public discovery currently advertises `mcp` + `http`. `a2a` remains a
+  roadmap item until the protocol surface actually exists.
 
 ### What's missing
 
@@ -332,9 +333,9 @@ product page.
    community MCP catalogues. This is where Claude/GPT agents go when a
    human tells them "find a job platform."
 
-2. **A2A protocol endpoint.** We advertise support but haven't implemented
-   the Agent2Agent protocol surface. Without it, discovery via A2A
-   doesn't work.
+2. **A2A protocol endpoint.** The Agent2Agent protocol surface is not yet
+   implemented. Do not re-add it to public discovery until the endpoint,
+   auth posture, and docs all exist.
 
 3. **Agent profile resolution.** `GET /agents/:wallet` (see Identity
    pillar) needs to be in the MCP tool list too, so one agent can look up

@@ -20,6 +20,12 @@ silent fallback to pre-existing testnet addresses.
 - `REPUTATION_SBT_ADDRESS`
 - `DWELLER_RPC_URL` (preferred) — or `POLKADOT_RPC_URL` — or the legacy `PONDER_RPC_URL_<chainId>` form
 
+Optional:
+
+- `XCM_WRAPPER_ADDRESS`
+  Enable indexing of async XCM request lifecycle events when
+  `contracts/XcmWrapper.sol` has been deployed for the target environment.
+
 For a Polkadot Hub TestNet deployment:
 
 - `POLKADOT_CHAIN_ID=420420417` (default, can be omitted)
@@ -73,6 +79,7 @@ backfills from the deployment block of each contract rather than genesis:
 - `PONDER_START_BLOCK_TREASURY`
 - `PONDER_START_BLOCK_ESCROW`
 - `PONDER_START_BLOCK_REPUTATION`
+- `PONDER_START_BLOCK_XCM` when `XCM_WRAPPER_ADDRESS` is set
 
 The AgentAccountCore events piggy-back on the escrow start block. If any of
 these is omitted it defaults to `0` (full backfill) unless
@@ -88,6 +95,12 @@ these is omitted it defaults to `0` (full backfill) unless
   GraphQL API for indexed data.
 - `/sql/*`
   SQL client endpoint exposed by Ponder.
+- `/xcm/outcomes`
+  Cursor-based feed of terminal XCM request outcomes. This is the
+  producer-facing contract the MCP server relay can consume via
+  `XCM_OBSERVER_FEED_URL`.
+- `/xcm/outcomes/status`
+  Runtime status for the external outcome publisher worker.
 
 ## Notes
 
@@ -96,3 +109,25 @@ these is omitted it defaults to `0` (full backfill) unless
   state survives restarts and redeploys.
 - The indexer tracks `TreasuryPolicy`, `EscrowCore`, `AgentAccountCore`, and
   `ReputationSBT` on whichever chain is configured.
+- When `XCM_WRAPPER_ADDRESS` is configured, it also indexes `RequestQueued`,
+  `RequestPayloadStored`, and `RequestStatusUpdated` from `XcmWrapper`.
+- The `/xcm/outcomes` feed currently serves terminal outcomes from the
+  indexed `XcmWrapper` request ledger.
+- When `XCM_EXTERNAL_SOURCE_TYPE=feed` and `XCM_EXTERNAL_SOURCE_URL` is
+  configured, the indexer starts an external outcome publisher worker that
+  polls the upstream watcher feed, persists published outcomes in
+  Postgres/PGlite, and makes `/xcm/outcomes` serve that published feed
+  instead of relying only on the indexed ledger.
+- When `XCM_EXTERNAL_SOURCE_TYPE=subscan_xcm` plus
+  `XCM_SUBSCAN_API_HOST` and `XCM_SUBSCAN_API_KEY` are configured, the same
+  publisher uses Subscan's official XCM API transport as the upstream source.
+- The Subscan integration currently relies on documented transport details
+  and defensive response-field normalization. The `POST /api/scan/xcm/list`
+  endpoint and `x-api-key` auth are documented by Subscan, but the exact
+  terminal-outcome field mapping should still be validated against your paid
+  plan payload before mainnet use.
+- Use [scripts/ops/validate-subscan-xcm-source.mjs](../scripts/ops/validate-subscan-xcm-source.mjs)
+  once a staging key is configured. It validates the direct Subscan
+  transport, can capture a sanitized sample report, and can verify that the
+  indexer is serving the published external feed instead of only the indexed
+  fallback.

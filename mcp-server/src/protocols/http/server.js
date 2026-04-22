@@ -10,8 +10,9 @@ import {
 import { buildSiweMessage, verifySiweMessage } from "../../auth/siwe.js";
 import { signToken } from "../../auth/jwt.js";
 import { extractClientKey } from "../../auth/rate-limit.js";
+import { hasRole } from "../../auth/config.js";
 import { resolveRequestId } from "../../core/logger.js";
-import { getAddress } from "ethers";
+import { getAddress, keccak256, toUtf8Bytes } from "ethers";
 import { buildBadgeFromSession } from "../../core/badge-metadata.js";
 import { buildAgentProfile } from "../../core/agent-profile.js";
 import { buildDiscoveryManifest } from "../../core/discovery-manifest.js";
@@ -137,6 +138,18 @@ async function ensureSessionOwnership(sessionId, wallet) {
   return session;
 }
 
+function ensureXcmRequestOwnership(record, auth) {
+  if (hasRole(auth.claims, "admin")) {
+    return;
+  }
+  if (!walletsMatch(record.account, auth.wallet)) {
+    throw new AuthorizationError(
+      `XCM request ${record.requestId} does not belong to authenticated wallet.`,
+      "xcm_request_not_owned"
+    );
+  }
+}
+
 function clientIp(request) {
   return extractClientKey(request, { trustProxy });
 }
@@ -212,6 +225,8 @@ function metricPathLabel(pathname) {
     "/admin/jobs",
     "/admin/jobs/pause",
     "/admin/jobs/resume",
+    "/admin/xcm/observe",
+    "/admin/xcm/finalize",
     "/account",
     "/account/fund",
     "/auth/session",
@@ -220,6 +235,7 @@ function metricPathLabel(pathname) {
     "/session",
     "/session/timeline",
     "/sessions",
+    "/xcm/request",
     "/jobs/sub",
     "/events",
     "/auth/nonce",
@@ -257,6 +273,65 @@ function resolveAssetSymbol(assetAddress) {
   const supportedAssets = gateway?.config?.supportedAssets ?? [];
   const match = supportedAssets.find((asset) => asset.address?.toLowerCase() === assetAddress.toLowerCase());
   return match?.symbol ?? "DOT";
+}
+
+function resolveStrategyAssetSymbol(strategy) {
+  return strategy?.assetConfig?.symbol ?? resolveAssetSymbol(strategy?.asset);
+}
+
+function findStrategyConfig(strategyId) {
+  if (!strategyId) return undefined;
+  const normalized = gateway?.normalizeStrategyId?.(strategyId) ?? strategyId;
+  return strategies.find((entry) => entry.strategyId === strategyId || entry.strategyId === normalized);
+}
+
+function normalizeAsyncWeight(input = undefined) {
+  const refTime = Number(input?.refTime ?? input?.ref_time ?? 0);
+  const proofSize = Number(input?.proofSize ?? input?.proof_size ?? 0);
+  return {
+    refTime: Number.isFinite(refTime) && refTime > 0 ? Math.trunc(refTime) : 0,
+    proofSize: Number.isFinite(proofSize) && proofSize > 0 ? Math.trunc(proofSize) : 0
+  };
+}
+
+function deriveAsyncNonce(seed) {
+  const hash = keccak256(toUtf8Bytes(seed));
+  return Number.parseInt(hash.slice(2, 14), 16);
+}
+
+function parseAsyncTreasuryOptions(payload = {}, url, { defaultRecipient = undefined } = {}) {
+  const queryWeight = {
+    refTime: url.searchParams.get("maxWeightRefTime"),
+    proofSize: url.searchParams.get("maxWeightProofSize")
+  };
+  const maxWeight = normalizeAsyncWeight(
+    payload?.maxWeight && typeof payload.maxWeight === "object"
+      ? payload.maxWeight
+      : queryWeight
+  );
+  const idempotencyKey = typeof payload?.idempotencyKey === "string" && payload.idempotencyKey.trim()
+    ? payload.idempotencyKey.trim()
+    : undefined;
+  const nonceRaw = payload?.nonce ?? url.searchParams.get("nonce");
+  const nonce = Number.isFinite(Number(nonceRaw)) && Number(nonceRaw) >= 0
+    ? Math.trunc(Number(nonceRaw))
+    : undefined;
+  const recipient = typeof payload?.recipient === "string" && payload.recipient.trim()
+    ? payload.recipient.trim()
+    : (url.searchParams.get("recipient")?.trim() || defaultRecipient);
+  const requestedSharesRaw = payload?.requestedShares ?? payload?.shares ?? url.searchParams.get("shares");
+  const requestedShares = Number.isFinite(Number(requestedSharesRaw)) && Number(requestedSharesRaw) > 0
+    ? Number(requestedSharesRaw)
+    : undefined;
+  return {
+    destination: payload?.destination ?? url.searchParams.get("destination") ?? "0x",
+    message: payload?.message ?? url.searchParams.get("message") ?? "0x",
+    maxWeight,
+    idempotencyKey,
+    nonce,
+    recipient,
+    requestedShares
+  };
 }
 
 function buildLaneAttention({ shares, isMock, debtTotal, borrowCapacity, deploymentShareBps }) {
@@ -381,6 +456,7 @@ const server = createServer(async (request, response) => {
           "/events",
           "/account",
           "/account/fund",
+          "/xcm/request",
           "/payments/send",
           "/reputation",
           "/session",
@@ -404,6 +480,8 @@ const server = createServer(async (request, response) => {
           "/admin/jobs/fire",
           "/admin/jobs/pause",
           "/admin/jobs/resume",
+          "/admin/xcm/observe",
+          "/admin/xcm/finalize",
           "/admin/status",
           "/badges/:sessionId",
           "/agents/:wallet"
@@ -847,7 +925,32 @@ const server = createServer(async (request, response) => {
         ? payload.strategyId.trim()
         : (url.searchParams.get("strategyId")?.trim() || "default-low-risk");
       const amount = Number(payload?.amount ?? url.searchParams.get("amount") ?? "0");
-      return respond(response, 200, await service.allocateIdleFunds(auth.wallet, asset, amount, strategyId));
+      const strategy = findStrategyConfig(strategyId);
+      if (strategy?.executionMode === "async_xcm") {
+        const strategyAsset = resolveStrategyAssetSymbol(strategy);
+        const options = parseAsyncTreasuryOptions(payload, url);
+        const mutationKey = options.idempotencyKey
+          ? `${auth.wallet}:${strategyId}:${options.idempotencyKey}`
+          : undefined;
+        const existing = mutationKey ? await stateStore.getMutationReceipt?.("account_allocate_async", mutationKey) : undefined;
+        if (existing) {
+          return respond(response, 200, existing);
+        }
+        const nonce = options.nonce ?? (mutationKey ? deriveAsyncNonce(mutationKey) : Date.now());
+        const result = await service.allocateIdleFunds(
+          auth.wallet,
+          strategyAsset,
+          amount,
+          strategyId,
+          strategy,
+          { ...options, nonce }
+        );
+        if (mutationKey) {
+          await stateStore.upsertMutationReceipt?.("account_allocate_async", mutationKey, result);
+        }
+        return respond(response, 200, result);
+      }
+      return respond(response, 200, await service.allocateIdleFunds(auth.wallet, asset, amount, strategyId, strategy));
     }
 
     if (request.method === "POST" && pathname === "/account/deallocate") {
@@ -860,7 +963,34 @@ const server = createServer(async (request, response) => {
         ? payload.strategyId.trim()
         : (url.searchParams.get("strategyId")?.trim() || "default-low-risk");
       const amount = Number(payload?.amount ?? url.searchParams.get("amount") ?? "0");
-      return respond(response, 200, await service.deallocateIdleFunds(auth.wallet, asset, amount, strategyId));
+      const strategy = findStrategyConfig(strategyId);
+      if (strategy?.executionMode === "async_xcm") {
+        const strategyAsset = resolveStrategyAssetSymbol(strategy);
+        const options = parseAsyncTreasuryOptions(payload, url, {
+          defaultRecipient: gateway?.config?.agentAccountAddress
+        });
+        const mutationKey = options.idempotencyKey
+          ? `${auth.wallet}:${strategyId}:${options.idempotencyKey}`
+          : undefined;
+        const existing = mutationKey ? await stateStore.getMutationReceipt?.("account_deallocate_async", mutationKey) : undefined;
+        if (existing) {
+          return respond(response, 200, existing);
+        }
+        const nonce = options.nonce ?? (mutationKey ? deriveAsyncNonce(mutationKey) : Date.now());
+        const result = await service.deallocateIdleFunds(
+          auth.wallet,
+          strategyAsset,
+          amount,
+          strategyId,
+          strategy,
+          { ...options, nonce }
+        );
+        if (mutationKey) {
+          await stateStore.upsertMutationReceipt?.("account_deallocate_async", mutationKey, result);
+        }
+        return respond(response, 200, result);
+      }
+      return respond(response, 200, await service.deallocateIdleFunds(auth.wallet, asset, amount, strategyId, strategy));
     }
 
     if (request.method === "GET" && pathname === "/account/strategies") {
@@ -870,15 +1000,24 @@ const server = createServer(async (request, response) => {
       const adapterTelemetryByStrategy = gateway?.isEnabled?.()
         ? Object.fromEntries((await gateway.getStrategyTelemetry(strategies)).map((entry) => [entry.strategyId, entry]))
         : {};
+      const strategyPositions = gateway?.isEnabled?.()
+        ? await gateway.getStrategyPositions(auth.wallet, strategies)
+        : [];
       const sharesByStrategy = gateway?.isEnabled?.()
-        ? Object.fromEntries((await gateway.getStrategyPositions(auth.wallet, strategies)).map((entry) => [entry.strategyId, entry.shares]))
+        ? Object.fromEntries(strategyPositions.map((entry) => [entry.strategyId, entry.shares]))
         : (account.strategyShares ?? {});
+      const pendingByStrategy = gateway?.isEnabled?.()
+        ? Object.fromEntries(strategyPositions.map((entry) => [entry.strategyId, entry]))
+        : (account.strategyPending ?? {});
       const totalLiquid = sumNumericValues(account.liquid);
       const debtTotal = sumNumericValues(account.debtOutstanding);
       const strategyActivity = account.strategyActivity ?? {};
       const strategyAccounting = account.strategyAccounting ?? {};
       const positions = strategies.map((strategy) => {
         const shares = Number(sharesByStrategy[strategy.strategyId] ?? 0);
+        const pendingPosition = pendingByStrategy[strategy.strategyId] ?? {};
+        const pendingDepositAssets = Number(pendingPosition.pendingDepositAssets ?? 0);
+        const pendingWithdrawalShares = Number(pendingPosition.pendingWithdrawalShares ?? 0);
         const lastMovement = strategyActivity[strategy.strategyId];
         const accounting = strategyAccounting[strategy.strategyId] ?? {};
         const isMock = String(strategy.kind ?? "").includes("mock");
@@ -892,15 +1031,25 @@ const server = createServer(async (request, response) => {
         return {
           strategyId: strategy.strategyId,
           asset: strategy.asset,
-          assetSymbol: resolveAssetSymbol(strategy.asset),
+          assetConfig: strategy.assetConfig,
+          assetSymbol: resolveStrategyAssetSymbol(strategy),
+          executionMode: strategy.executionMode ?? "sync",
           shares,
           shareCount: shares,
+          pendingDepositAssets,
+          pendingWithdrawalShares,
           routedAmount,
           principalValue,
           unrealizedYield,
           realizedYield,
           totalYield: realizedYield + unrealizedYield,
-          statusLabel: shares > 0 ? "Routed" : "Idle",
+          statusLabel: pendingDepositAssets > 0
+            ? "Pending deposit"
+            : pendingWithdrawalShares > 0
+              ? "Pending withdraw"
+              : shares > 0
+                ? "Routed"
+                : "Idle",
           yieldReported: Boolean(telemetry?.reported),
           yieldStatus: telemetry?.reported ? (isMock ? "simulated" : "live") : (isMock ? "simulated_unreported" : "unreported"),
           yieldLabel: formatAdapterYieldLabel({ telemetry, isMock, shares }),
@@ -1023,6 +1172,17 @@ const server = createServer(async (request, response) => {
       const sessionId = url.searchParams.get("sessionId") ?? "";
       await ensureSessionOwnership(sessionId, auth.wallet);
       return respond(response, 200, await service.getSessionTimeline(sessionId));
+    }
+
+    if (request.method === "GET" && pathname === "/xcm/request") {
+      const auth = await authMiddleware(request, url);
+      const requestId = url.searchParams.get("requestId") ?? "";
+      if (!requestId) {
+        throw new ValidationError("requestId is required.");
+      }
+      const record = await service.getXcmRequest(requestId);
+      ensureXcmRequestOwnership(record, auth);
+      return respond(response, 200, record);
     }
 
     if (request.method === "GET" && pathname === "/sessions") {
@@ -1151,6 +1311,70 @@ const server = createServer(async (request, response) => {
     if (request.method === "GET" && pathname === "/admin/status") {
       const auth = await authMiddleware(request, url, { requireRole: "admin" });
       return respond(response, 200, await service.getAdminStatus({ auth }));
+    }
+
+    if (request.method === "POST" && pathname === "/admin/xcm/observe") {
+      const auth = await authMiddleware(request, url, { requireRole: "admin" });
+      await enforceLimit("admin_jobs", auth.wallet, rateLimitConfig.adminJobs);
+      const payload = await readJsonBody(request);
+      const requestId = typeof payload?.requestId === "string" && payload.requestId.trim()
+        ? payload.requestId.trim()
+        : (url.searchParams.get("requestId") ?? "");
+      if (!requestId) {
+        throw new ValidationError("requestId is required.");
+      }
+      const idempotencyKey = typeof payload?.idempotencyKey === "string" && payload.idempotencyKey.trim()
+        ? payload.idempotencyKey.trim()
+        : undefined;
+      const mutationKey = idempotencyKey ? `${auth.wallet}:${requestId}:${idempotencyKey}` : undefined;
+      const existing = mutationKey ? await stateStore.getMutationReceipt?.("admin_xcm_observe", mutationKey) : undefined;
+      if (existing) {
+        return respond(response, 200, existing);
+      }
+      const observed = await service.observeXcmOutcome(requestId, {
+        status: payload?.status,
+        settledAssets: Number(payload?.settledAssets ?? 0),
+        settledShares: Number(payload?.settledShares ?? 0),
+        remoteRef: payload?.remoteRef,
+        failureCode: payload?.failureCode,
+        source: payload?.source ?? "admin_observer",
+        observedAt: payload?.observedAt
+      });
+      if (mutationKey) {
+        await stateStore.upsertMutationReceipt?.("admin_xcm_observe", mutationKey, observed);
+      }
+      return respond(response, 200, observed);
+    }
+
+    if (request.method === "POST" && pathname === "/admin/xcm/finalize") {
+      const auth = await authMiddleware(request, url, { requireRole: "admin" });
+      await enforceLimit("admin_jobs", auth.wallet, rateLimitConfig.adminJobs);
+      const payload = await readJsonBody(request);
+      const requestId = typeof payload?.requestId === "string" && payload.requestId.trim()
+        ? payload.requestId.trim()
+        : (url.searchParams.get("requestId") ?? "");
+      if (!requestId) {
+        throw new ValidationError("requestId is required.");
+      }
+      const idempotencyKey = typeof payload?.idempotencyKey === "string" && payload.idempotencyKey.trim()
+        ? payload.idempotencyKey.trim()
+        : undefined;
+      const mutationKey = idempotencyKey ? `${auth.wallet}:${requestId}:${idempotencyKey}` : undefined;
+      const existing = mutationKey ? await stateStore.getMutationReceipt?.("admin_xcm_finalize", mutationKey) : undefined;
+      if (existing) {
+        return respond(response, 200, existing);
+      }
+      const finalized = await service.finalizeXcmRequest(requestId, {
+        status: payload?.status,
+        settledAssets: Number(payload?.settledAssets ?? 0),
+        settledShares: Number(payload?.settledShares ?? 0),
+        remoteRef: payload?.remoteRef,
+        failureCode: payload?.failureCode
+      });
+      if (mutationKey) {
+        await stateStore.upsertMutationReceipt?.("admin_xcm_finalize", mutationKey, finalized);
+      }
+      return respond(response, 200, finalized);
     }
 
     if (request.method === "POST" && pathname === "/gas/quote") {

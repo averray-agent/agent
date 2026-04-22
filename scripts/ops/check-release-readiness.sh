@@ -12,6 +12,7 @@ RUN_SITE_BUILD=${RUN_SITE_BUILD:-1}
 RUN_INDEXER_TYPECHECK=${RUN_INDEXER_TYPECHECK:-1}
 RUN_CONTRACT_VERIFY=${RUN_CONTRACT_VERIFY:-1}
 RUN_HOSTED_CHECK=${RUN_HOSTED_CHECK:-1}
+RUN_SUBSCAN_XCM_VALIDATION=${RUN_SUBSCAN_XCM_VALIDATION:-0}
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -42,6 +43,10 @@ if [[ "$RUN_HOSTED_CHECK" == "1" ]]; then
   require_command jq
 fi
 
+if [[ "$RUN_SUBSCAN_XCM_VALIDATION" == "1" ]]; then
+  require_command node
+fi
+
 echo "Release readiness profile: $PROFILE"
 
 if [[ "$RUN_FRONTEND_TESTS" == "1" ]]; then
@@ -70,6 +75,10 @@ fi
 
 if [[ "$RUN_HOSTED_CHECK" == "1" ]]; then
   run_step "Hosted stack smoke check" "$APP_ROOT/scripts/ops/check-hosted-stack.sh"
+fi
+
+if [[ "$RUN_SUBSCAN_XCM_VALIDATION" == "1" ]]; then
+  run_step "Subscan XCM source validation" node "$APP_ROOT/scripts/ops/validate-subscan-xcm-source.mjs" --require-published
 fi
 
 echo

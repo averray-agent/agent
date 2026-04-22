@@ -5,7 +5,7 @@ import { PlatformService } from "./platform-service.js";
 
 const WALLET = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
-function makePlatformService() {
+function makePlatformService(blockchainGateway = undefined) {
   const jobs = [
     {
       id: "parent-job-001",
@@ -53,7 +53,7 @@ function makePlatformService() {
   const reputations = new Map([
     [WALLET, { skill: 50, reliability: 50, economic: 50, tier: "starter" }]
   ]);
-  return new PlatformService(jobs, profiles, accounts, reputations);
+  return new PlatformService(jobs, profiles, accounts, reputations, blockchainGateway);
 }
 
 test("createSubJob links the child job to the active parent session", async () => {
@@ -128,4 +128,66 @@ test("getAdminStatus surfaces recurring scheduler anomalies", async () => {
 
   assert.equal(status.auth.wallet, WALLET);
   assert.ok(status.anomalies.some((entry) => entry.code === "recurring_attention"));
+});
+
+test("finalizeXcmRequest records async treasury settlement when the request is strategy-backed", async () => {
+  const gateway = {
+    isEnabled: () => true,
+    getAccountSummary: async (wallet) => ({
+      wallet,
+      liquid: { DOT: 10 },
+      reserved: {},
+      strategyAllocated: {},
+      collateralLocked: {},
+      jobStakeLocked: {},
+      debtOutstanding: {}
+    }),
+    finalizeXcmRequest: async () => ({
+      requestId: "0xrequest",
+      strategyRequest: {
+        account: WALLET,
+        strategyId: "0xstrategy",
+        assetSymbol: "DOT",
+        kindLabel: "deposit",
+        statusLabel: "succeeded",
+        requestedAssets: 5,
+        settledAssets: 5
+      }
+    })
+  };
+  const service = makePlatformService(gateway);
+
+  const finalized = await service.finalizeXcmRequest("0xrequest", {
+    status: "succeeded",
+    settledAssets: 5,
+    settledShares: 5
+  });
+  const account = await service.getAccountSummary(WALLET);
+
+  assert.equal(finalized.requestId, "0xrequest");
+  assert.equal(account.strategyAccounting["0xstrategy"].principal, 5);
+  assert.equal(account.treasuryTimeline[0].type, "allocate");
+});
+
+test("getAdminStatus surfaces XCM observation relay status", async () => {
+  const service = makePlatformService();
+  service.xcmObservationRelay = {
+    getStatus() {
+      return {
+        enabled: true,
+        running: true,
+        syncing: false,
+        feedUrl: "https://observer.example/outcomes",
+        batchSize: 25,
+        pollIntervalMs: 30_000,
+        cursor: "cursor-1",
+        lastObservedCount: 2,
+        lastSyncedAt: "2026-04-22T10:00:00.000Z"
+      };
+    }
+  };
+
+  const status = await service.getAdminStatus();
+  assert.equal(status.xcmObservationRelay.enabled, true);
+  assert.equal(status.xcmObservationRelay.cursor, "cursor-1");
 });

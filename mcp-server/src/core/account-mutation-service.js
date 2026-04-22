@@ -26,6 +26,7 @@ export class AccountMutationService {
       strategyAllocated: {},
       strategyShares: {},
       strategyActivity: {},
+      strategyPending: {},
       strategyAccounting: {},
       treasuryTimeline: [],
       collateralLocked: {},
@@ -39,6 +40,7 @@ export class AccountMutationService {
   ensureTreasuryMetadata(account) {
     account.strategyShares = account.strategyShares ?? {};
     account.strategyActivity = account.strategyActivity ?? {};
+    account.strategyPending = account.strategyPending ?? {};
     account.strategyAccounting = account.strategyAccounting ?? {};
     account.treasuryTimeline = account.treasuryTimeline ?? [];
     return account;
@@ -55,6 +57,10 @@ export class AccountMutationService {
       strategyActivity: {
         ...(liveAccount.strategyActivity ?? {}),
         ...(stored.strategyActivity ?? {})
+      },
+      strategyPending: {
+        ...(liveAccount.strategyPending ?? {}),
+        ...(stored.strategyPending ?? {})
       },
       strategyAccounting: {
         ...(liveAccount.strategyAccounting ?? {}),
@@ -78,6 +84,23 @@ export class AccountMutationService {
       account.strategyAccounting[strategyId].asset = asset;
     }
     return account.strategyAccounting[strategyId];
+  }
+
+  getStrategyPending(account, strategyId, asset = "DOT") {
+    this.ensureTreasuryMetadata(account);
+    account.strategyPending[strategyId] = account.strategyPending[strategyId] ?? {
+      asset,
+      pendingDepositAssets: 0,
+      pendingWithdrawalShares: 0,
+      lastRequestId: undefined,
+      lastStatus: undefined,
+      lastKind: undefined,
+      updatedAt: undefined
+    };
+    if (!account.strategyPending[strategyId].asset) {
+      account.strategyPending[strategyId].asset = asset;
+    }
+    return account.strategyPending[strategyId];
   }
 
   recordTreasuryEvent(account, event) {
@@ -293,6 +316,42 @@ export class AccountMutationService {
     return account;
   }
 
+  async requestStrategyDeposit(wallet, asset, amount, strategyId = "default-low-risk", strategy = {}, options = {}) {
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new ValidationError("amount must be a positive number");
+    }
+    if (strategy.executionMode !== "async_xcm") {
+      return this.allocateIdleFunds(wallet, asset, amount, strategyId);
+    }
+    if (!this.blockchainGateway?.isEnabled()) {
+      throw new ValidationError("Async strategy requests require the blockchain gateway.");
+    }
+
+    const liveAccount = await this.blockchainGateway.requestStrategyDeposit(wallet, strategy, amount, options);
+    const account = this.attachStoredTreasuryMetadata(wallet, liveAccount);
+    const pending = this.getStrategyPending(account, strategyId, asset);
+    pending.pendingDepositAssets = Number(pending.pendingDepositAssets ?? 0) + Number(liveAccount?.xcmRequest?.requestedAssets ?? amount);
+    pending.lastRequestId = liveAccount?.requestId;
+    pending.lastStatus = liveAccount?.xcmRequest?.statusLabel ?? "pending";
+    pending.lastKind = "deposit";
+    pending.updatedAt = new Date().toISOString();
+    this.markStrategyActivity(account, strategyId, "allocate_requested", amount, asset);
+    this.recordTreasuryEvent(account, {
+      type: "allocate_requested",
+      strategyId,
+      asset,
+      amount,
+      requestId: liveAccount?.requestId
+    });
+    this.accounts.set(wallet, account);
+    return {
+      ...account,
+      requestId: liveAccount?.requestId,
+      xcmRequest: liveAccount?.xcmRequest,
+      strategyRequest: liveAccount?.strategyRequest
+    };
+  }
+
   async deallocateIdleFunds(wallet, asset, amount, strategyId = "default-low-risk") {
     if (!Number.isFinite(amount) || amount <= 0) {
       throw new ValidationError("amount must be a positive number");
@@ -326,6 +385,49 @@ export class AccountMutationService {
     return account;
   }
 
+  async requestStrategyWithdraw(wallet, asset, amount, strategyId = "default-low-risk", strategy = {}, options = {}) {
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new ValidationError("amount must be a positive number");
+    }
+    if (strategy.executionMode !== "async_xcm") {
+      return this.deallocateIdleFunds(wallet, asset, amount, strategyId);
+    }
+    if (!this.blockchainGateway?.isEnabled()) {
+      throw new ValidationError("Async strategy requests require the blockchain gateway.");
+    }
+
+    const liveAccount = await this.blockchainGateway.requestStrategyWithdraw(wallet, strategy, amount, options);
+    const account = this.attachStoredTreasuryMetadata(wallet, liveAccount);
+    const pending = this.getStrategyPending(account, strategyId, asset);
+    pending.pendingWithdrawalShares = Number(pending.pendingWithdrawalShares ?? 0) + Number(
+      liveAccount?.strategyRequest?.requestedShares ??
+      liveAccount?.xcmRequest?.requestedShares ??
+      liveAccount?.requestedShares ??
+      amount
+    );
+    pending.lastRequestId = liveAccount?.requestId;
+    pending.lastStatus = liveAccount?.xcmRequest?.statusLabel ?? "pending";
+    pending.lastKind = "withdraw";
+    pending.updatedAt = new Date().toISOString();
+    this.markStrategyActivity(account, strategyId, "deallocate_requested", amount, asset);
+    this.recordTreasuryEvent(account, {
+      type: "deallocate_requested",
+      strategyId,
+      asset,
+      amount,
+      requestedShares: pending.pendingWithdrawalShares,
+      requestId: liveAccount?.requestId
+    });
+    this.accounts.set(wallet, account);
+    return {
+      ...account,
+      requestId: liveAccount?.requestId,
+      requestedShares: liveAccount?.requestedShares,
+      xcmRequest: liveAccount?.xcmRequest,
+      strategyRequest: liveAccount?.strategyRequest
+    };
+  }
+
   markStrategyActivity(account, strategyId, action, amount, asset) {
     this.ensureTreasuryMetadata(account);
     account.strategyActivity[strategyId] = {
@@ -334,6 +436,61 @@ export class AccountMutationService {
       asset,
       at: new Date().toISOString()
     };
+  }
+
+  async recordAsyncStrategySettlement(result = {}) {
+    const wallet = result?.strategyRequest?.account ?? result?.account;
+    const strategyId = result?.strategyRequest?.strategyId;
+    const asset = result?.strategyRequest?.assetSymbol;
+    if (!wallet || !strategyId || !asset) {
+      return result;
+    }
+
+    const account = this.attachStoredTreasuryMetadata(wallet, await this.getAccountSummary(wallet));
+    const pending = this.getStrategyPending(account, strategyId, asset);
+    const kind = result?.strategyRequest?.kindLabel;
+    const status = result?.strategyRequest?.statusLabel ?? result?.statusLabel ?? "unknown";
+    const requestedAssets = Number(result?.strategyRequest?.requestedAssets ?? 0);
+    const requestedShares = Number(result?.strategyRequest?.requestedShares ?? 0);
+    const settledAssets = Number(result?.strategyRequest?.settledAssets ?? result?.settledAssets ?? 0);
+
+    if (kind === "deposit") {
+      pending.pendingDepositAssets = Math.max(Number(pending.pendingDepositAssets ?? 0) - requestedAssets, 0);
+      if (status === "succeeded") {
+        this.updateStrategyAccountingOnAllocate(account, strategyId, asset, settledAssets || requestedAssets);
+      } else {
+        this.recordTreasuryEvent(account, {
+          type: "allocate_failed",
+          strategyId,
+          asset,
+          amount: requestedAssets,
+          requestId: result?.requestId,
+          failureCode: result?.strategyRequest?.failureCodeLabel ?? result?.failureCodeLabel
+        });
+      }
+    } else if (kind === "withdraw") {
+      pending.pendingWithdrawalShares = Math.max(Number(pending.pendingWithdrawalShares ?? 0) - requestedShares, 0);
+      if (status === "succeeded") {
+        this.updateStrategyAccountingOnDeallocate(account, strategyId, asset, settledAssets);
+      } else {
+        this.recordTreasuryEvent(account, {
+          type: "deallocate_failed",
+          strategyId,
+          asset,
+          amount: settledAssets || requestedAssets,
+          requestedShares,
+          requestId: result?.requestId,
+          failureCode: result?.strategyRequest?.failureCodeLabel ?? result?.failureCodeLabel
+        });
+      }
+    }
+
+    pending.lastRequestId = result?.requestId;
+    pending.lastStatus = status;
+    pending.lastKind = kind;
+    pending.updatedAt = new Date().toISOString();
+    this.accounts.set(wallet, account);
+    return account;
   }
 
   async getBorrowCapacity(wallet, asset) {

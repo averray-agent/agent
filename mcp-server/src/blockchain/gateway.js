@@ -1,7 +1,37 @@
-import { Contract, JsonRpcProvider, Wallet, id, keccak256, toUtf8Bytes } from "ethers";
-import { AGENT_ACCOUNT_ABI, ERC20_MOCK_ABI, ESCROW_CORE_ABI, REPUTATION_SBT_ABI, STRATEGY_ADAPTER_ABI, TREASURY_POLICY_ABI } from "./abis.js";
+import {
+  AbiCoder,
+  Contract,
+  JsonRpcProvider,
+  Wallet,
+  decodeBytes32String,
+  encodeBytes32String,
+  id,
+  keccak256,
+  toUtf8Bytes
+} from "ethers";
+import {
+  AGENT_ACCOUNT_ABI,
+  ERC20_MOCK_ABI,
+  ESCROW_CORE_ABI,
+  REPUTATION_SBT_ABI,
+  STRATEGY_ADAPTER_ABI,
+  TREASURY_POLICY_ABI,
+  XCM_WRAPPER_ABI,
+  ZERO_BYTES32
+} from "./abis.js";
 import { loadBlockchainConfig } from "./config.js";
-import { BlockchainRevertError, ConfigError, ExternalServiceError, InsufficientLiquidityError, ValidationError } from "../core/errors.js";
+import {
+  BlockchainRevertError,
+  ConfigError,
+  ExternalServiceError,
+  InsufficientLiquidityError,
+  NotFoundError,
+  ValidationError
+} from "../core/errors.js";
+
+const REQUEST_KIND_LABELS = ["deposit", "withdraw", "claim"];
+const REQUEST_STATUS_LABELS = ["unknown", "pending", "succeeded", "failed", "cancelled"];
+const abiCoder = AbiCoder.defaultAbiCoder();
 
 export class BlockchainGateway {
   constructor(config = loadBlockchainConfig()) {
@@ -13,6 +43,7 @@ export class BlockchainGateway {
       this.accountContract = undefined;
       this.escrowContract = undefined;
       this.reputationContract = undefined;
+      this.xcmWrapperContract = undefined;
       return;
     }
 
@@ -40,6 +71,13 @@ export class BlockchainGateway {
       REPUTATION_SBT_ABI,
       this.provider
     );
+    this.xcmWrapperContract = config.xcmWrapperAddress
+      ? new Contract(
+          config.xcmWrapperAddress,
+          XCM_WRAPPER_ABI,
+          this.signer ?? this.provider
+        )
+      : undefined;
   }
 
   isEnabled() {
@@ -63,7 +101,8 @@ export class BlockchainGateway {
         backend: "blockchain",
         enabled: true,
         blockNumber,
-        signerConfigured: Boolean(this.signer)
+        signerConfigured: Boolean(this.signer),
+        xcmWrapperConfigured: this.hasXcmWrapper()
       };
     } catch (error) {
       return {
@@ -71,6 +110,7 @@ export class BlockchainGateway {
         backend: "blockchain",
         enabled: true,
         signerConfigured: Boolean(this.signer),
+        xcmWrapperConfigured: this.hasXcmWrapper(),
         error: this.wrapGatewayError("healthCheck", error).message
       };
     }
@@ -118,13 +158,19 @@ export class BlockchainGateway {
     return this.withGatewayError("getStrategyPositions", async () => {
       const entries = [];
       for (const strategy of strategies) {
-        const rawShares = await this.accountContract.strategyShares(
-          wallet,
-          this.normalizeStrategyId(strategy.strategyId)
-        );
+        const normalizedStrategyId = this.normalizeStrategyId(strategy.strategyId);
+        const [rawShares, rawPendingWithdrawalShares, rawPendingDepositAssets] = await Promise.all([
+          this.accountContract.strategyShares(wallet, normalizedStrategyId),
+          this.accountContract.pendingStrategyWithdrawalShares(wallet, normalizedStrategyId),
+          strategy.asset
+            ? this.accountContract.pendingStrategyAssets(wallet, strategy.asset)
+            : Promise.resolve(0n)
+        ]);
         entries.push({
           strategyId: strategy.strategyId,
-          shares: Number(rawShares)
+          shares: Number(rawShares),
+          pendingWithdrawalShares: Number(rawPendingWithdrawalShares),
+          pendingDepositAssets: Number(rawPendingDepositAssets)
         });
       }
       return entries;
@@ -329,6 +375,88 @@ export class BlockchainGateway {
     });
   }
 
+  async requestStrategyDeposit(wallet, strategy, amount, {
+    destination = "0x",
+    message = "0x",
+    maxWeight = undefined,
+    nonce = Date.now()
+  } = {}) {
+    return this.withGatewayError("requestStrategyDeposit", async () => {
+      this.requireSigner("requestStrategyDeposit");
+      this.requireAsyncStrategyConfig(strategy, "requestStrategyDeposit");
+      const requestId = this.previewStrategyRequestId({
+        strategyId: strategy.strategyId,
+        kind: 0,
+        account: wallet,
+        asset: strategy.asset,
+        recipient: wallet,
+        assets: amount,
+        shares: 0,
+        nonce
+      });
+      const tx = await this.accountContract.requestStrategyDeposit(wallet, {
+        strategyId: this.normalizeStrategyId(strategy.strategyId),
+        amount,
+        destination: this.toBytesPayload(destination, "destination"),
+        message: this.toBytesPayload(message, "message"),
+        maxWeight: this.normalizeWeight(maxWeight),
+        nonce
+      });
+      await tx.wait();
+      return {
+        ...(await this.getAccountSummary(wallet)),
+        requestId,
+        xcmRequest: await this.getXcmRequest(requestId),
+        strategyRequest: await this.getStrategyRequest(requestId)
+      };
+    });
+  }
+
+  async requestStrategyWithdraw(wallet, strategy, amount, {
+    recipient = this.config.agentAccountAddress,
+    destination = "0x",
+    message = "0x",
+    maxWeight = undefined,
+    nonce = Date.now(),
+    requestedShares = undefined
+  } = {}) {
+    return this.withGatewayError("requestStrategyWithdraw", async () => {
+      this.requireSigner("requestStrategyWithdraw");
+      this.requireAsyncStrategyConfig(strategy, "requestStrategyWithdraw");
+      const shares = Number.isFinite(Number(requestedShares)) && Number(requestedShares) > 0
+        ? Number(requestedShares)
+        : await this.quoteStrategySharesForAssets(strategy, amount);
+      const requestId = this.previewStrategyRequestId({
+        strategyId: strategy.strategyId,
+        kind: 1,
+        account: wallet,
+        asset: strategy.asset,
+        recipient,
+        assets: 0,
+        shares,
+        nonce
+      });
+      const tx = await this.accountContract.requestStrategyWithdraw(wallet, {
+        strategyId: this.normalizeStrategyId(strategy.strategyId),
+        shares,
+        recipient,
+        destination: this.toBytesPayload(destination, "destination"),
+        message: this.toBytesPayload(message, "message"),
+        maxWeight: this.normalizeWeight(maxWeight),
+        nonce
+      });
+      await tx.wait();
+      return {
+        ...(await this.getAccountSummary(wallet)),
+        requestId,
+        requestedShares: shares,
+        requestedAssets: amount,
+        xcmRequest: await this.getXcmRequest(requestId),
+        strategyRequest: await this.getStrategyRequest(requestId)
+      };
+    });
+  }
+
   async borrow(assetSymbol, amount) {
     return this.withGatewayError("borrow", async () => {
       this.requireSigner("borrow");
@@ -463,12 +591,146 @@ export class BlockchainGateway {
     });
   }
 
+  hasXcmWrapper() {
+    return Boolean(this.xcmWrapperContract);
+  }
+
+  async getXcmRequest(requestId) {
+    return this.withGatewayError("getXcmRequest", async () => {
+      const contract = this.requireXcmWrapper("getXcmRequest");
+      const normalizedRequestId = this.toRequestId(requestId);
+      const record = await contract.getRequest(normalizedRequestId);
+      if (!record?.context?.account || record.context.account === "0x0000000000000000000000000000000000000000") {
+        throw new NotFoundError(`XCM request ${normalizedRequestId} not found.`, "xcm_request_not_found");
+      }
+      return {
+        requestId: normalizedRequestId,
+        strategyId: record.context.strategyId,
+        strategyIdLabel: this.decodeBytes32Label(record.context.strategyId),
+        kind: Number(record.context.kind),
+        kindLabel: REQUEST_KIND_LABELS[Number(record.context.kind)] ?? "unknown",
+        account: record.context.account,
+        asset: record.context.asset,
+        assetSymbol: this.resolveAssetSymbol(record.context.asset),
+        recipient: record.context.recipient,
+        requestedAssets: Number(record.context.assets),
+        requestedShares: Number(record.context.shares),
+        nonce: Number(record.context.nonce),
+        status: Number(record.status),
+        statusLabel: REQUEST_STATUS_LABELS[Number(record.status)] ?? "unknown",
+        settledAssets: Number(record.settledAssets),
+        settledShares: Number(record.settledShares),
+        remoteRef: this.normalizeOptionalBytes32(record.remoteRef),
+        remoteRefLabel: this.decodeBytes32Label(record.remoteRef),
+        failureCode: this.normalizeOptionalBytes32(record.failureCode),
+        failureCodeLabel: this.decodeBytes32Label(record.failureCode),
+        createdAt: Number(record.createdAt),
+        updatedAt: Number(record.updatedAt)
+      };
+    });
+  }
+
+  async getStrategyRequest(requestId) {
+    return this.withGatewayError("getStrategyRequest", async () => {
+      const normalizedRequestId = this.toRequestId(requestId);
+      const record = await this.accountContract.strategyRequests(normalizedRequestId);
+      if (!record?.account || record.account === "0x0000000000000000000000000000000000000000") {
+        throw new NotFoundError(`Strategy request ${normalizedRequestId} not found.`, "strategy_request_not_found");
+      }
+      return {
+        requestId: normalizedRequestId,
+        strategyId: record.strategyId,
+        strategyIdLabel: this.decodeBytes32Label(record.strategyId),
+        adapter: record.adapter,
+        account: record.account,
+        asset: record.asset,
+        assetSymbol: this.resolveAssetSymbol(record.asset),
+        recipient: record.recipient,
+        kind: Number(record.kind),
+        kindLabel: REQUEST_KIND_LABELS[Number(record.kind)] ?? "unknown",
+        status: Number(record.status),
+        statusLabel: REQUEST_STATUS_LABELS[Number(record.status)] ?? "unknown",
+        requestedAssets: Number(record.requestedAssets),
+        requestedShares: Number(record.requestedShares),
+        settledAssets: Number(record.settledAssets),
+        settledShares: Number(record.settledShares),
+        remoteRef: this.normalizeOptionalBytes32(record.remoteRef),
+        remoteRefLabel: this.decodeBytes32Label(record.remoteRef),
+        failureCode: this.normalizeOptionalBytes32(record.failureCode),
+        failureCodeLabel: this.decodeBytes32Label(record.failureCode),
+        settled: Boolean(record.settled)
+      };
+    });
+  }
+
+  async finalizeXcmRequest(requestId, {
+    status,
+    settledAssets = 0,
+    settledShares = 0,
+    remoteRef = ZERO_BYTES32,
+    failureCode = ZERO_BYTES32
+  } = {}) {
+    return this.withGatewayError("finalizeXcmRequest", async () => {
+      this.requireSigner("finalizeXcmRequest");
+      const normalizedRequestId = this.toRequestId(requestId);
+      const normalizedStatus = this.toXcmStatus(status);
+      const normalizedRemoteRef = this.toBytes32Value(remoteRef, "remoteRef");
+      const normalizedFailureCode = this.toBytes32Value(failureCode, "failureCode");
+      let strategyRequest;
+      try {
+        strategyRequest = await this.getStrategyRequest(normalizedRequestId);
+      } catch (error) {
+        if (error?.code !== "strategy_request_not_found") {
+          throw error;
+        }
+      }
+
+      const tx = strategyRequest
+        ? await this.accountContract.settleStrategyRequest(
+            normalizedRequestId,
+            normalizedStatus,
+            settledAssets,
+            settledShares,
+            normalizedRemoteRef,
+            normalizedFailureCode
+          )
+        : await this.requireXcmWrapper("finalizeXcmRequest").finalizeRequest(
+            normalizedRequestId,
+            normalizedStatus,
+            settledAssets,
+            settledShares,
+            normalizedRemoteRef,
+            normalizedFailureCode
+          );
+      await tx.wait();
+      return {
+        ...(await this.getXcmRequest(normalizedRequestId)),
+        strategyRequest: await this.getStrategyRequest(normalizedRequestId).catch(() => undefined),
+        settledVia: strategyRequest ? "agent_account" : "xcm_wrapper"
+      };
+    });
+  }
+
   requireAsset(symbol) {
     const asset = this.config.supportedAssets.find((candidate) => candidate.symbol === symbol);
     if (!asset) {
       throw new ValidationError(`Unsupported asset symbol: ${symbol}`);
     }
     return asset;
+  }
+
+  requireAsyncStrategyConfig(strategy, operation) {
+    if (!strategy?.strategyId || !strategy?.adapter || !strategy?.asset) {
+      throw new ValidationError(`${operation} requires a strategy with strategyId, adapter, and asset metadata.`);
+    }
+  }
+
+  resolveAssetSymbol(assetAddress) {
+    if (!assetAddress) {
+      return "DOT";
+    }
+    const match = this.config.supportedAssets.find((asset) => asset.address?.toLowerCase() === assetAddress.toLowerCase());
+    return match?.symbol ?? "DOT";
   }
 
   requireSigner(operation) {
@@ -486,6 +748,138 @@ export class BlockchainGateway {
 
   toReasonCode(reasonCode) {
     return id(reasonCode);
+  }
+
+  toRequestId(requestId) {
+    if (typeof requestId !== "string" || !/^0x[a-fA-F0-9]{64}$/.test(requestId)) {
+      throw new ValidationError("requestId must be a 0x-prefixed 32-byte hex string.");
+    }
+    return requestId;
+  }
+
+  toXcmStatus(status) {
+    if (typeof status === "number" && Number.isInteger(status) && status >= 2 && status <= 4) {
+      return status;
+    }
+    if (typeof status === "string") {
+      const normalized = status.trim().toLowerCase();
+      const index = REQUEST_STATUS_LABELS.indexOf(normalized);
+      if (index >= 2) {
+        return index;
+      }
+    }
+    throw new ValidationError("status must be one of succeeded, failed, cancelled, or a matching numeric code.");
+  }
+
+  toBytes32Value(value, label) {
+    if (value === undefined || value === null || value === "") {
+      return ZERO_BYTES32;
+    }
+    if (typeof value === "string" && /^0x[a-fA-F0-9]{64}$/.test(value)) {
+      return value;
+    }
+    if (typeof value === "string") {
+      if (value.length <= 31) {
+        return encodeBytes32String(value);
+      }
+      return id(value);
+    }
+    throw new ValidationError(`${label} must be empty, a short string, or a 0x-prefixed 32-byte hex string.`);
+  }
+
+  decodeBytes32Label(value) {
+    const normalized = this.normalizeOptionalBytes32(value);
+    if (!normalized) {
+      return undefined;
+    }
+    try {
+      return decodeBytes32String(normalized);
+    } catch {
+      return undefined;
+    }
+  }
+
+  normalizeOptionalBytes32(value) {
+    if (typeof value !== "string" || value.toLowerCase() === ZERO_BYTES32) {
+      return undefined;
+    }
+    return value;
+  }
+
+  requireXcmWrapper(operation) {
+    if (!this.xcmWrapperContract) {
+      throw new ConfigError(`${operation} requires XCM_WRAPPER_ADDRESS`);
+    }
+    return this.xcmWrapperContract;
+  }
+
+  normalizeWeight(weight = undefined) {
+    const refTime = Number(weight?.refTime ?? 0);
+    const proofSize = Number(weight?.proofSize ?? 0);
+    if (!Number.isFinite(refTime) || refTime < 0 || !Number.isFinite(proofSize) || proofSize < 0) {
+      throw new ValidationError("maxWeight.refTime and maxWeight.proofSize must be non-negative numbers.");
+    }
+    return {
+      refTime: Math.trunc(refTime),
+      proofSize: Math.trunc(proofSize)
+    };
+  }
+
+  toBytesPayload(value, label) {
+    if (value === undefined || value === null || value === "") {
+      return "0x";
+    }
+    if (typeof value === "string") {
+      if (/^0x[a-fA-F0-9]*$/u.test(value) && value.length % 2 === 0) {
+        return value;
+      }
+      return toUtf8Bytes(value);
+    }
+    if (typeof value === "object") {
+      return toUtf8Bytes(JSON.stringify(value));
+    }
+    throw new ValidationError(`${label} must be empty, a hex string, a UTF-8 string, or a JSON object.`);
+  }
+
+  previewStrategyRequestId({
+    strategyId,
+    kind,
+    account,
+    asset,
+    recipient,
+    assets,
+    shares,
+    nonce
+  }) {
+    return keccak256(
+      abiCoder.encode(
+        ["bytes32", "uint8", "address", "address", "address", "uint256", "uint256", "uint64"],
+        [
+          this.normalizeStrategyId(strategyId),
+          kind,
+          account,
+          asset,
+          recipient,
+          assets,
+          shares,
+          nonce
+        ]
+      )
+    );
+  }
+
+  async quoteStrategySharesForAssets(strategy, assets) {
+    const adapterContract = new Contract(strategy.adapter, STRATEGY_ADAPTER_ABI, this.provider);
+    const [rawTotalAssets, rawTotalShares] = await Promise.all([
+      adapterContract.totalAssets(),
+      adapterContract.totalShares()
+    ]);
+    const totalAssets = Number(rawTotalAssets ?? 0);
+    const totalShares = Number(rawTotalShares ?? 0);
+    if (!(totalAssets > 0) || !(totalShares > 0)) {
+      return Number(assets);
+    }
+    return Math.ceil((Number(assets) * totalShares) / totalAssets);
   }
 
   async withGatewayError(operation, action) {

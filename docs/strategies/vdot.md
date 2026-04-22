@@ -84,15 +84,34 @@ shape:
    storage that reports the accrued exchange rate. `totalAssets` becomes
    a view that computes `totalShares * bifrostRate`.
 
-2. **Cross-chain deposit/withdraw.** On Polkadot Hub, EVM contracts can
-   call the XCM precompile to send DOT to the vDOT pallet on Bifrost.
-   Returned vDOT shares come back via the same precompile. The adapter
-   needs:
+   2. **Cross-chain deposit/withdraw.** On Polkadot Hub, EVM contracts can
+      call the XCM precompile at
+      `0x00000000000000000000000000000000000a0000` to send DOT to the vDOT
+   pallet on Bifrost. The official Polkadot docs are explicit that this
+   precompile is barebones: messages must be SCALE-encoded and
+   `weighMessage` is part of the execution flow. Returned vDOT shares
+   come back via the same precompile. The adapter therefore needs:
    - A deposit path that XCM-sends DOT and waits for the callback that
      credits vDOT shares.
    - A withdraw path that XCM-sends a redeem request and waits for DOT
      to settle back into the adapter's asset-hub balance.
    - Idempotency + partial-failure handling, because XCM is async.
+      In practice this likely means a dedicated XCM-wrapper layer rather
+      than embedding raw precompile calls directly into vault accounting.
+      The transport seam now lives at
+      [`contracts/interfaces/IXcmWrapper.sol`](../../contracts/interfaces/IXcmWrapper.sol),
+      and the first concrete async request ledger is
+      [`contracts/XcmWrapper.sol`](../../contracts/XcmWrapper.sol). That
+      wrapper already gives us deterministic request IDs, payload-hash
+      pinning, and explicit finalize semantics before the real Bifrost
+      message builders exist. The backend and indexer can now already
+      inspect and finalize those request records through the optional
+      `XCM_WRAPPER_ADDRESS` path, so the remaining missing piece is the
+      production adapter that queues real Bifrost-bound messages. The
+      first production-shaped version of that adapter now exists at
+      [`contracts/strategies/XcmVdotAdapter.sol`](../../contracts/strategies/XcmVdotAdapter.sol):
+      it queues deposit/withdraw requests through `IXcmWrapper` and only
+      mutates adapter accounting once settlement is finalized.
 
 3. **Audit.** The v1 adapter uses `ReentrancyGuard` + `SafeTransfer` +
    `whenNotPaused` — but any XCM-extended adapter adds message-parsing
@@ -109,6 +128,12 @@ shape:
      alongside the existing instant `withdraw` for large exits.
    - Fee accounting. Bifrost takes a validator commission. The adapter
      should expose it so `maxWithdraw` is honest about the net.
+   - Asset identity and precompile derivation. Polkadot Hub's ERC20
+     precompile model distinguishes trust-backed assets from foreign
+     assets, and foreign assets use a runtime-assigned index rather than
+     a raw XCM location as the address derivation input. Mainnet config
+     should model that explicitly instead of relying on a single static
+     token-address assumption.
 
 5. **Removal of the owner knob.** `simulateYieldBps` must be deleted
    before mainnet deploy. The audit signs off on the code in the repo,
@@ -155,6 +180,20 @@ section with the adapter address and its `strategyId`. The backend reads
 that manifest so `/strategies` surfaces the registered adapter in its
 list.
 
+For backend config, the preferred `STRATEGIES_JSON` shape is now the
+explicit asset-metadata form rather than a bare asset address. That lets
+the backend carry:
+
+- asset class (`trust_backed`, `foreign`, `pool`, `custom`)
+- asset ID or foreign asset index
+- derived ERC20 precompile address
+- symbol / decimals
+- optional XCM location context for foreign assets
+
+This is especially important for mainnet vDOT, where the asset identity
+is not just "one token address" but part of the real Polkadot Hub asset
+model.
+
 ---
 
 ## What an agent sees
@@ -176,9 +215,79 @@ agent account (strategyAllocated) + accrued yield
     agent account (liquid) ← DOT back
 ```
 
-For v1 on testnet: the `allocateIdleFunds` path on `AgentAccountCore`
-records shares 1:1 with amount and does NOT currently invoke the
-adapter's `deposit`. That integration (the contract-level wiring between
-`AgentAccountCore` and `IStrategyAdapter`) is a follow-up PR that will
-land alongside the first adapter redeploy. The adapter shape is pinned
-now so the contract-side wiring has a stable target.
+That is still the correct flow for the synchronous mock adapter on
+testnet.
+
+For the real async XCM lane, the flow is now split explicitly:
+
+```
+agent account (liquid)
+  --requestStrategyDeposit(...)-->
+    agent account (pendingStrategyAssets)  ← local DOT reserved for async lane
+    XcmVdotAdapter.requestDeposit(...)     ← wrapper-backed XCM request queued
+
+XCM settles later
+
+operator / watcher
+  --settleStrategyRequest(...)-->
+    success: strategy shares booked, strategyAllocated refreshed
+    failure: local DOT refunded back to liquid
+```
+
+And for exits:
+
+```
+agent account (strategy shares)
+  --requestStrategyWithdraw(...)-->
+    pendingStrategyWithdrawalShares       ← shares reserved for async exit
+    XcmVdotAdapter.requestWithdraw(...)   ← wrapper-backed withdraw queued
+
+XCM settles later
+
+operator / watcher
+  --settleStrategyRequest(...)-->
+    success: shares burned, DOT credited back to liquid if recipient is AgentAccountCore
+    failure: shares remain with the agent
+```
+
+So the repo now has both lanes:
+- synchronous mock treasury flow through `allocateIdleFunds` /
+  `deallocateIdleFunds`
+- production-shaped async treasury flow through
+  `requestStrategyDeposit` / `requestStrategyWithdraw` /
+  `settleStrategyRequest`
+
+That async lane is now exposed through the hosted backend too:
+- strategy config can mark a lane as `async_xcm`
+- `/account/allocate` and `/account/deallocate` will queue async XCM
+  requests for those lanes instead of calling the sync adapter surface
+- `/account/strategies` reports pending async posture
+- `/admin/xcm/finalize` now settles the strategy-backed request through
+  `AgentAccountCore`
+- the backend now also has an XCM settlement watcher that can ingest
+  observed outcomes and auto-finalize pending requests
+- the backend also now includes `XcmObservationRelayService`, which polls
+  an external observer feed, stores its cursor durably, and relays
+  terminal XCM outcomes into that watcher automatically
+- the indexer now exposes the matching cursor-based producer contract at
+  `/xcm/outcomes`, so the feed shape is fixed before the full
+  network-specific Bifrost watcher lands
+- the indexer now also supports a durable publisher worker behind that
+  contract: when configured with `XCM_EXTERNAL_SOURCE_TYPE=feed`, it polls
+  the upstream watcher feed and persists published outcomes for
+  `/xcm/outcomes`
+- the same publisher can now also run with
+  `XCM_EXTERNAL_SOURCE_TYPE=subscan_xcm`, using Subscan's official XCM API
+  transport as the first concrete external source shape
+- the Subscan field mapping is still intentionally defensive and should be
+  validated against real paid-plan payloads before we treat it as mainnet
+  settlement truth
+- the repo now ships `scripts/ops/validate-subscan-xcm-source.mjs` for that
+  staging validation pass, including direct transport checks, sample capture,
+  and optional confirmation that the indexer published feed is actually live
+
+What is still missing is the network-specific observer feed itself: the
+repo now supports `observer feed -> durable cursor -> observe outcome ->
+durable queue -> auto-finalize`, but operators still need a real
+Bifrost/XCM relayer that exposes those terminal outcomes through
+`XCM_OBSERVER_FEED_URL`.

@@ -49,3 +49,13 @@ services:
         value: https://eth-rpc-testnet.polkadot.io/
       - key: DATABASE_URL
         sync: false
+      - key: XCM_EXTERNAL_SOURCE_TYPE
+        sync: false
+      - key: XCM_EXTERNAL_SOURCE_URL
+        sync: false
+      - key: XCM_EXTERNAL_SOURCE_AUTH_TOKEN
+        sync: false
+      - key: XCM_SUBSCAN_API_HOST
+        sync: false
+      - key: XCM_SUBSCAN_API_KEY
+        sync: false

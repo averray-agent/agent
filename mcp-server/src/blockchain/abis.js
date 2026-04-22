@@ -1,3 +1,5 @@
+export const ZERO_BYTES32 = `0x${"0".repeat(64)}`;
+
 export const AGENT_ACCOUNT_ABI = [
   "function positions(address account, address asset) view returns (uint256 liquid, uint256 reserved, uint256 strategyAllocated, uint256 collateralLocked, uint256 jobStakeLocked, uint256 debtOutstanding)",
   "function getBorrowCapacity(address account, address asset) view returns (uint256)",
@@ -8,7 +10,13 @@ export const AGENT_ACCOUNT_ABI = [
   "function slashJobStake(address account, address asset, uint256 amount, address posterRecipient)",
   "function allocateIdleFunds(address account, bytes32 strategyId, uint256 amount)",
   "function deallocateIdleFunds(address account, bytes32 strategyId, uint256 amount)",
+  "function requestStrategyDeposit(address account, (bytes32 strategyId, uint256 amount, bytes destination, bytes message, (uint64 refTime, uint64 proofSize) maxWeight, uint64 nonce) params) returns (bytes32)",
+  "function requestStrategyWithdraw(address account, (bytes32 strategyId, uint256 shares, address recipient, bytes destination, bytes message, (uint64 refTime, uint64 proofSize) maxWeight, uint64 nonce) params) returns (bytes32)",
+  "function settleStrategyRequest(bytes32 requestId, uint8 status, uint256 settledAssets, uint256 settledShares, bytes32 remoteRef, bytes32 failureCode)",
   "function strategyShares(address account, bytes32 strategyId) view returns (uint256)",
+  "function pendingStrategyAssets(address account, address asset) view returns (uint256)",
+  "function pendingStrategyWithdrawalShares(address account, bytes32 strategyId) view returns (uint256)",
+  "function strategyRequests(bytes32 requestId) view returns (bytes32 strategyId, address adapter, address account, address asset, address recipient, uint8 kind, uint8 status, uint256 requestedAssets, uint256 requestedShares, uint256 settledAssets, uint256 settledShares, bytes32 remoteRef, bytes32 failureCode, bool settled)",
   "function borrow(address asset, uint256 amount)",
   "function repay(address asset, uint256 amount)",
   "function sendToAgent(address recipient, address asset, uint256 amount)",
@@ -70,4 +78,12 @@ export const STRATEGY_ADAPTER_ABI = [
   "function totalAssets() view returns (uint256)",
   "function totalShares() view returns (uint256)",
   "function riskLabel() view returns (string)"
+];
+
+export const XCM_WRAPPER_ABI = [
+  "function getRequest(bytes32 requestId) view returns (((bytes32 strategyId, uint8 kind, address account, address asset, address recipient, uint256 assets, uint256 shares, uint64 nonce) context, uint8 status, uint256 settledAssets, uint256 settledShares, bytes32 remoteRef, bytes32 failureCode, uint64 createdAt, uint64 updatedAt))",
+  "function finalizeRequest(bytes32 requestId, uint8 status, uint256 settledAssets, uint256 settledShares, bytes32 remoteRef, bytes32 failureCode)",
+  "event RequestQueued(bytes32 indexed requestId, bytes32 indexed strategyId, uint8 indexed kind, address account, address asset, address recipient, uint256 assets, uint256 shares, uint64 nonce)",
+  "event RequestPayloadStored(bytes32 indexed requestId, bytes32 destinationHash, bytes32 messageHash, uint64 refTime, uint64 proofSize)",
+  "event RequestStatusUpdated(bytes32 indexed requestId, uint8 indexed status, uint256 settledAssets, uint256 settledShares, bytes32 remoteRef, bytes32 failureCode)"
 ];

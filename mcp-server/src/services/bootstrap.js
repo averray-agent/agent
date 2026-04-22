@@ -14,6 +14,9 @@ import { createLogger } from "../core/logger.js";
 import { MetricRegistry } from "../core/metrics.js";
 import { createObservability } from "../core/observability.js";
 import { RecurringSchedulerService } from "./recurring-scheduler.js";
+import { XcmSettlementWatcherService } from "./xcm-settlement-watcher.js";
+import { XcmObservationRelayService } from "./xcm-observation-relay.js";
+import { normaliseStrategyAssetConfig } from "./strategy-asset-config.js";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -63,7 +66,7 @@ const profiles = new Map([
   ["0xagent", {
     wallet: "0xagent",
     capabilities: ["claim_job", "submit_work", "allocate_idle_funds"],
-    supportedProtocols: ["mcp", "a2a", "http"],
+    supportedProtocols: ["mcp", "http"],
     preferredCategories: ["coding", "governance"],
     preferredRiskLevel: "low",
     verifierCompatibility: ["benchmark", "deterministic", "human_fallback"],
@@ -136,8 +139,33 @@ export async function createPlatformRuntime() {
       logger
     })
   );
+  const xcmSettlementWatcher = initStep("init-xcm-settlement-watcher", logger, () =>
+    new XcmSettlementWatcherService(platformService, stateStore, eventBus, {
+      enabled: process.env.XCM_SETTLEMENT_WATCHER_ENABLED === undefined
+        ? gateway.isEnabled()
+        : parseBooleanEnv(process.env.XCM_SETTLEMENT_WATCHER_ENABLED),
+      pollIntervalMs: parsePositiveInt(process.env.XCM_SETTLEMENT_WATCHER_POLL_MS, 15_000),
+      logger
+    })
+  );
+  const xcmObservationRelay = initStep("init-xcm-observation-relay", logger, () =>
+    new XcmObservationRelayService(platformService, stateStore, eventBus, {
+      enabled: process.env.XCM_OBSERVER_ENABLED === undefined
+        ? (gateway.isEnabled() && Boolean(process.env.XCM_OBSERVER_FEED_URL?.trim()))
+        : parseBooleanEnv(process.env.XCM_OBSERVER_ENABLED),
+      feedUrl: process.env.XCM_OBSERVER_FEED_URL?.trim(),
+      authToken: process.env.XCM_OBSERVER_AUTH_TOKEN?.trim(),
+      pollIntervalMs: parsePositiveInt(process.env.XCM_OBSERVER_POLL_MS, 30_000),
+      batchSize: parsePositiveInt(process.env.XCM_OBSERVER_BATCH_SIZE, 25),
+      logger
+    })
+  );
   platformService.recurringScheduler = recurringScheduler;
+  platformService.xcmSettlementWatcher = xcmSettlementWatcher;
+  platformService.xcmObservationRelay = xcmObservationRelay;
   recurringScheduler.start();
+  xcmSettlementWatcher.start();
+  xcmObservationRelay.start();
 
   const authMiddleware = createAuthMiddleware({ authConfig, stateStore, logger });
   const rateLimiter = createRateLimiter({ stateStore, logger });
@@ -160,6 +188,8 @@ export async function createPlatformRuntime() {
     eventBus,
     eventListener,
     recurringScheduler,
+    xcmSettlementWatcher,
+    xcmObservationRelay,
     authConfig,
     authMiddleware,
     authCapabilities: {
@@ -282,7 +312,8 @@ function normaliseStrategyEntry(entry, idx) {
   if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
     throw new Error(`strategies[${idx}] must be an object`);
   }
-  const { strategyId, adapter, kind, riskLabel, asset } = entry;
+  const { strategyId, adapter, kind, riskLabel, asset, executionMode } = entry;
+  const assetConfig = normaliseStrategyAssetConfig(asset, idx);
   if (typeof strategyId !== "string" || !/^0x[a-fA-F0-9]{64}$/u.test(strategyId)) {
     throw new Error(`strategies[${idx}].strategyId must be 0x + 32-byte hex`);
   }
@@ -293,7 +324,26 @@ function normaliseStrategyEntry(entry, idx) {
     strategyId,
     adapter: adapter.toLowerCase(),
     kind: typeof kind === "string" ? kind : "unknown",
+    executionMode: normaliseStrategyExecutionMode(executionMode, typeof kind === "string" ? kind : "unknown", idx),
     riskLabel: typeof riskLabel === "string" ? riskLabel : "",
-    asset: typeof asset === "string" && /^0x[a-fA-F0-9]{40}$/u.test(asset) ? asset.toLowerCase() : undefined
+    asset: assetConfig?.address,
+    assetConfig
   };
+}
+
+function normaliseStrategyExecutionMode(rawExecutionMode, kind, idx) {
+  if (rawExecutionMode === undefined || rawExecutionMode === null || rawExecutionMode === "") {
+    if (String(kind).trim().toLowerCase() === "polkadot_vdot") {
+      return "async_xcm";
+    }
+    return "sync";
+  }
+  if (typeof rawExecutionMode !== "string") {
+    throw new Error(`strategies[${idx}].executionMode must be a string`);
+  }
+  const normalized = rawExecutionMode.trim().toLowerCase().replace(/[\s-]+/gu, "_");
+  if (normalized === "sync" || normalized === "async_xcm") {
+    return normalized;
+  }
+  throw new Error(`strategies[${idx}].executionMode must be "sync" or "async_xcm"`);
 }

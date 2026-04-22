@@ -94,24 +94,31 @@ npx @polkadot/api-cli --ws <HUB_WSS> \
 `TreasuryPolicy.owner` is an `address` (20 bytes), so the Substrate SS58
 multisig needs an EVM counterpart.
 
-On Polkadot Hub, the EVM mapping takes the last 20 bytes of the 32-byte
-`AccountId32`:
+Do **not** derive this by taking the last 20 bytes of the 32-byte
+`AccountId32`. The official Polkadot Hub account docs describe a
+different model:
 
-```bash
-# Substrate public key (32 bytes hex, via subkey or Polkadot.js Apps)
-ACCOUNT_ID_HEX=0x<32-byte-hex>
+- Ethereum-style 20-byte addresses map into 32-byte accounts through a
+  reversible `0xEE` suffix convention.
+- Native 32-byte Polkadot accounts need `pallet_revive.map_account()`
+  for explicit Ethereum compatibility.
+- Unmapped native accounts can fall back to a hashed 20-byte address,
+  but that is not a safe operator assumption for contract ownership.
 
-# EVM-mapped address: last 20 bytes, 0x-prefixed
-printf '0x%s\n' "${ACCOUNT_ID_HEX: -40}"
-```
+Use an address that is explicitly verified to control EVM-side admin
+transactions on Polkadot Hub TestNet first. In practice that means one
+of:
 
-Record this as your `OWNER` value. When operators sign admin ops the
-PolkadotJS extension surfaces them for approval by the threshold signers.
+- an EVM-native operator / multisig address, or
+- a native Polkadot account that has been intentionally mapped through
+  `pallet_revive.map_account()` and then tested end to end
 
-> **Double-check convention**: Polkadot Hub's EVM mapping is `last 20 bytes
-> of the Substrate public key`. Confirm against the Hub docs before cutover
-> — getting this wrong means your "owner" is an unreachable address and the
-> contract is permanently frozen out of admin ops.
+Record the verified 20-byte address as your `OWNER` value only after the
+testnet rehearsal succeeds.
+
+> **Important**: if the owner address is wrong, the contract is not
+> "partially degraded" — it is effectively frozen out of admin control.
+> Treat owner-address verification as a launch gate, not a clerical step.
 
 ---
 

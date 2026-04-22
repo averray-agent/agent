@@ -113,3 +113,52 @@ export const treasuryOutflow = onchainTable("treasury_outflow", (p) => ({
   blockNumber: p.bigint().notNull(),
   timestamp: p.bigint().notNull()
 }));
+
+export const xcmRequest = onchainTable("xcm_request", (p) => ({
+  id: p.text().primaryKey(),
+  strategyId: p.hex().notNull(),
+  strategyIdLabel: p.text().notNull(),
+  kind: p.integer().notNull(),
+  kindLabel: p.text().notNull(),
+  account: p.hex().notNull(),
+  asset: p.hex().notNull(),
+  recipient: p.hex().notNull(),
+  requestedAssets: p.bigint().notNull(),
+  requestedShares: p.bigint().notNull(),
+  nonce: p.bigint().notNull(),
+  status: p.integer().notNull(),
+  statusLabel: p.text().notNull(),
+  destinationHash: p.hex(),
+  messageHash: p.hex(),
+  maxWeightRefTime: p.bigint(),
+  maxWeightProofSize: p.bigint(),
+  settledAssets: p.bigint().notNull(),
+  settledShares: p.bigint().notNull(),
+  remoteRef: p.hex(),
+  failureCode: p.hex(),
+  createdAtBlock: p.bigint().notNull(),
+  createdAtTimestamp: p.bigint().notNull(),
+  updatedAtBlock: p.bigint().notNull(),
+  updatedAtTimestamp: p.bigint().notNull(),
+  queuedTxHash: p.hex().notNull(),
+  lastTxHash: p.hex().notNull()
+}));
+
+export const xcmRequestEvent = onchainTable("xcm_request_event", (p) => ({
+  id: p.text().primaryKey(),
+  requestId: p.text().notNull(),
+  kind: p.text().notNull(),
+  status: p.integer(),
+  statusLabel: p.text(),
+  destinationHash: p.hex(),
+  messageHash: p.hex(),
+  maxWeightRefTime: p.bigint(),
+  maxWeightProofSize: p.bigint(),
+  settledAssets: p.bigint(),
+  settledShares: p.bigint(),
+  remoteRef: p.hex(),
+  failureCode: p.hex(),
+  txHash: p.hex().notNull(),
+  blockNumber: p.bigint().notNull(),
+  timestamp: p.bigint().notNull()
+}));

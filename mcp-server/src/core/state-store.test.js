@@ -62,6 +62,48 @@ test("MemoryStateStore mutation receipts round-trip", async () => {
   assert.deepEqual(loaded, receipt);
 });
 
+test("MemoryStateStore xcm observations round-trip and clear from pending when processed", async () => {
+  const store = new MemoryStateStore();
+  await store.upsertXcmObservation({
+    requestId: "0x1111111111111111111111111111111111111111111111111111111111111111",
+    status: "succeeded",
+    settledAssets: 5,
+    processed: false
+  });
+
+  const pending = await store.listPendingXcmObservations(10);
+  assert.equal(pending.length, 1);
+  assert.equal(pending[0].settledAssets, 5);
+
+  await store.markXcmObservationProcessed(
+    "0x1111111111111111111111111111111111111111111111111111111111111111",
+    { settledVia: "agent_account" }
+  );
+
+  const after = await store.listPendingXcmObservations(10);
+  assert.equal(after.length, 0);
+});
+
+test("MemoryStateStore service state round-trips and merges", async () => {
+  const store = new MemoryStateStore();
+  await store.upsertServiceState("xcm-observer", {
+    cursor: "cursor-1",
+    lastObservedCount: 2
+  });
+
+  const updated = await store.upsertServiceState("xcm-observer", {
+    lastObservedCount: 3,
+    lastError: undefined
+  });
+
+  assert.equal(updated.cursor, "cursor-1");
+  assert.equal(updated.lastObservedCount, 3);
+
+  const loaded = await store.getServiceState("xcm-observer");
+  assert.equal(loaded.cursor, "cursor-1");
+  assert.equal(loaded.lastObservedCount, 3);
+});
+
 test("MemoryStateStore lists recent sessions in latest-first order", async () => {
   const store = new MemoryStateStore();
   await store.upsertSession({

@@ -4,7 +4,8 @@ import {
   AgentAccountCoreAbi,
   EscrowCoreAbi,
   ReputationSbtAbi,
-  TreasuryPolicyAbi
+  TreasuryPolicyAbi,
+  XcmWrapperAbi
 } from "./abis/contractsAbi";
 
 type Address = `0x${string}`;
@@ -37,6 +38,9 @@ const reputationSbtAddress = requireAddress(
   process.env.PONDER_REPUTATION_SBT_ADDRESS ?? process.env.REPUTATION_SBT_ADDRESS,
   "REPUTATION_SBT_ADDRESS"
 );
+const xcmWrapperAddress = optionalAddress(
+  process.env.PONDER_XCM_WRAPPER_ADDRESS ?? process.env.XCM_WRAPPER_ADDRESS
+);
 
 const treasuryStartBlock = parseStartBlock(
   process.env.PONDER_START_BLOCK_TREASURY,
@@ -50,6 +54,47 @@ const reputationStartBlock = parseStartBlock(
   process.env.PONDER_START_BLOCK_REPUTATION,
   lowMemoryMode ? "latest" : 0
 );
+const xcmStartBlock = parseStartBlock(
+  process.env.PONDER_START_BLOCK_XCM,
+  lowMemoryMode ? "latest" : 0
+);
+
+const contracts = {
+  TreasuryPolicy: {
+    chain: chainName,
+    abi: TreasuryPolicyAbi,
+    address: treasuryPolicyAddress,
+    startBlock: treasuryStartBlock
+  },
+  EscrowCore: {
+    chain: chainName,
+    abi: EscrowCoreAbi,
+    address: escrowCoreAddress,
+    startBlock: escrowStartBlock
+  },
+  AgentAccountCore: {
+    chain: chainName,
+    abi: AgentAccountCoreAbi,
+    address: agentAccountAddress,
+    startBlock: escrowStartBlock
+  },
+  ReputationSBT: {
+    chain: chainName,
+    abi: ReputationSbtAbi,
+    address: reputationSbtAddress,
+    startBlock: reputationStartBlock
+  },
+  ...(xcmWrapperAddress
+    ? {
+        XcmWrapper: {
+          chain: chainName,
+          abi: XcmWrapperAbi,
+          address: xcmWrapperAddress,
+          startBlock: xcmStartBlock
+        }
+      }
+    : {})
+};
 
 export default createConfig({
   chains: {
@@ -61,32 +106,7 @@ export default createConfig({
       ethGetLogsBlockRange: lowMemoryMode ? 25 : undefined
     }
   },
-  contracts: {
-    TreasuryPolicy: {
-      chain: chainName,
-      abi: TreasuryPolicyAbi,
-      address: treasuryPolicyAddress,
-      startBlock: treasuryStartBlock
-    },
-    EscrowCore: {
-      chain: chainName,
-      abi: EscrowCoreAbi,
-      address: escrowCoreAddress,
-      startBlock: escrowStartBlock
-    },
-    AgentAccountCore: {
-      chain: chainName,
-      abi: AgentAccountCoreAbi,
-      address: agentAccountAddress,
-      startBlock: escrowStartBlock
-    },
-    ReputationSBT: {
-      chain: chainName,
-      abi: ReputationSbtAbi,
-      address: reputationSbtAddress,
-      startBlock: reputationStartBlock
-    }
-  }
+  contracts
 });
 
 function parseStartBlock(value: string | undefined, fallback: number | "latest") {
@@ -131,6 +151,15 @@ function requireAddress(raw: string | undefined, name: string): Address {
   }
   if (!/^0x[0-9a-fA-F]{40}$/u.test(value)) {
     throw new Error(`Ponder: ${name}=${value} is not a valid 20-byte EVM address.`);
+  }
+  return value as Address;
+}
+
+function optionalAddress(raw: string | undefined): Address | undefined {
+  const value = raw?.trim();
+  if (!value) return undefined;
+  if (!/^0x[0-9a-fA-F]{40}$/u.test(value)) {
+    throw new Error(`Ponder: optional address ${value} is not a valid 20-byte EVM address.`);
   }
   return value as Address;
 }

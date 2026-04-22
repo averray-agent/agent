@@ -16,6 +16,7 @@ function makeService() {
       strategyAllocated: {},
       strategyShares: {},
       strategyActivity: {},
+      strategyPending: {},
       strategyAccounting: {},
       treasuryTimeline: [],
       collateralLocked: {},
@@ -37,6 +38,7 @@ async function fund(accounts, wallet, asset, amount) {
     strategyAllocated: {},
     strategyShares: {},
     strategyActivity: {},
+    strategyPending: {},
     strategyAccounting: {},
     treasuryTimeline: [],
     collateralLocked: {},
@@ -140,6 +142,59 @@ test("allocateIdleFunds rejects zero and negative amounts", async () => {
   await assert.rejects(() => service.allocateIdleFunds("0xAlice", "DOT", -1), ValidationError);
 });
 
+test("requestStrategyDeposit delegates async lanes to the blockchain gateway and records pending state", async () => {
+  const calls = [];
+  const gateway = {
+    isEnabled: () => true,
+    requestStrategyDeposit: async (...args) => {
+      calls.push(args);
+      return {
+        wallet: "0xAlice",
+        liquid: { DOT: 14 },
+        reserved: {},
+        strategyAllocated: { DOT: 0 },
+        collateralLocked: {},
+        jobStakeLocked: {},
+        debtOutstanding: {},
+        requestId: "0xreq",
+        xcmRequest: { statusLabel: "pending", requestedAssets: 6 },
+        strategyRequest: { strategyId: "0xstrategy", requestedAssets: 6, requestedShares: 0 }
+      };
+    }
+  };
+  const accounts = new Map();
+  const getAccountSummary = async (wallet) => ({
+    wallet,
+    liquid: { DOT: 14 },
+    reserved: {},
+    strategyAllocated: { DOT: 0 },
+    strategyShares: {},
+    strategyActivity: {},
+    strategyPending: {},
+    strategyAccounting: {},
+    treasuryTimeline: [],
+    collateralLocked: {},
+    jobStakeLocked: {},
+    debtOutstanding: {}
+  });
+  const service = new AccountMutationService(accounts, gateway, getAccountSummary);
+
+  const updated = await service.requestStrategyDeposit(
+    "0xAlice",
+    "DOT",
+    6,
+    "0xstrategy",
+    { strategyId: "0xstrategy", executionMode: "async_xcm", asset: "0xdot" },
+    { destination: "0x01", message: "0x02", nonce: 7 }
+  );
+
+  assert.equal(calls.length, 1);
+  assert.equal(updated.requestId, "0xreq");
+  assert.equal(updated.strategyPending["0xstrategy"].pendingDepositAssets, 6);
+  assert.equal(updated.strategyActivity["0xstrategy"].action, "allocate_requested");
+  assert.equal(updated.treasuryTimeline[0].type, "allocate_requested");
+});
+
 test("borrow uses live borrow capacity and updates liquid plus debt", async () => {
   const { service, accounts } = makeService();
   const account = await service.getAccountSummary("0xAlice");
@@ -189,6 +244,55 @@ test("deallocateIdleFunds rejects when strategy shares are insufficient", async 
   );
 });
 
+test("requestStrategyWithdraw delegates async lanes to the blockchain gateway and records pending shares", async () => {
+  const gateway = {
+    isEnabled: () => true,
+    requestStrategyWithdraw: async () => ({
+      wallet: "0xAlice",
+      liquid: { DOT: 5 },
+      reserved: {},
+      strategyAllocated: { DOT: 10 },
+      collateralLocked: {},
+      jobStakeLocked: {},
+      debtOutstanding: {},
+      requestId: "0xwithdraw",
+      requestedShares: 4,
+      xcmRequest: { statusLabel: "pending", requestedShares: 4 },
+      strategyRequest: { strategyId: "0xstrategy", requestedAssets: 3, requestedShares: 4 }
+    })
+  };
+  const accounts = new Map();
+  const getAccountSummary = async (wallet) => ({
+    wallet,
+    liquid: { DOT: 5 },
+    reserved: {},
+    strategyAllocated: { DOT: 10 },
+    strategyShares: { "0xstrategy": 10 },
+    strategyActivity: {},
+    strategyPending: {},
+    strategyAccounting: {},
+    treasuryTimeline: [],
+    collateralLocked: {},
+    jobStakeLocked: {},
+    debtOutstanding: {}
+  });
+  const service = new AccountMutationService(accounts, gateway, getAccountSummary);
+
+  const updated = await service.requestStrategyWithdraw(
+    "0xAlice",
+    "DOT",
+    3,
+    "0xstrategy",
+    { strategyId: "0xstrategy", executionMode: "async_xcm", asset: "0xdot" },
+    { destination: "0x01", message: "0x02", nonce: 8, recipient: "0xReceiver" }
+  );
+
+  assert.equal(updated.requestId, "0xwithdraw");
+  assert.equal(updated.strategyPending["0xstrategy"].pendingWithdrawalShares, 4);
+  assert.equal(updated.strategyActivity["0xstrategy"].action, "deallocate_requested");
+  assert.equal(updated.treasuryTimeline[0].type, "deallocate_requested");
+});
+
 test("recordStrategySnapshots updates mark-to-market and appends a yield event on change", async () => {
   const { service, accounts } = makeService();
   await fund(accounts, "0xAlice", "DOT", 10);
@@ -216,4 +320,32 @@ test("recordStrategySnapshots updates mark-to-market and appends a yield event o
   assert.equal(updated.strategyAccounting["mock-vdot"].sharePrice, 1.1);
   assert.equal(updated.treasuryTimeline.length, timelineBefore + 1);
   assert.equal(updated.treasuryTimeline[0].type, "yield_mark");
+});
+
+test("recordAsyncStrategySettlement updates accounting and clears pending state", async () => {
+  const { service, accounts } = makeService();
+  const account = await service.getAccountSummary("0xAlice");
+  account.strategyPending["0xstrategy"] = {
+    asset: "DOT",
+    pendingDepositAssets: 6,
+    pendingWithdrawalShares: 0
+  };
+  accounts.set("0xAlice", account);
+
+  const updated = await service.recordAsyncStrategySettlement({
+    requestId: "0xreq",
+    strategyRequest: {
+      account: "0xAlice",
+      strategyId: "0xstrategy",
+      assetSymbol: "DOT",
+      kindLabel: "deposit",
+      statusLabel: "succeeded",
+      requestedAssets: 6,
+      settledAssets: 6
+    }
+  });
+
+  assert.equal(updated.strategyPending["0xstrategy"].pendingDepositAssets, 0);
+  assert.equal(updated.strategyAccounting["0xstrategy"].principal, 6);
+  assert.equal(updated.treasuryTimeline[0].type, "allocate");
 });

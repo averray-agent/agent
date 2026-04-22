@@ -170,6 +170,14 @@ echo "ReputationSBT:           $REPUTATION_SBT"
 ESCROW_CORE="$(extract_address "$(forge_deploy contracts/EscrowCore.sol:EscrowCore --constructor-args "$TREASURY_POLICY" "$AGENT_ACCOUNT" "$REPUTATION_SBT")")"
 echo "EscrowCore:              $ESCROW_CORE"
 
+XCM_WRAPPER=""
+XCM_WRAPPER_PRECOMPILE_ADDRESS="${XCM_WRAPPER_PRECOMPILE_ADDRESS:-0x0000000000000000000000000000000000000000}"
+if [[ "${WITH_XCM_WRAPPER:-}" == "1" ]]; then
+  echo "Deploying XcmWrapper"
+  XCM_WRAPPER="$(extract_address "$(forge_deploy contracts/XcmWrapper.sol:XcmWrapper --constructor-args "$TREASURY_POLICY" "$XCM_WRAPPER_PRECOMPILE_ADDRESS")")"
+  echo "XcmWrapper:              $XCM_WRAPPER"
+fi
+
 if [[ "$PROFILE" == "dev" && -z "${TOKEN_ADDRESS:-}" ]]; then
   TOKEN_ADDRESS="$(extract_address "$(forge_deploy contracts/mocks/MockERC20.sol:MockERC20 --constructor-args "$DOT_NAME" "$DOT_SYMBOL")")"
   echo "MockDOT (dev only):      $TOKEN_ADDRESS"
@@ -179,6 +187,9 @@ echo "Configuring TreasuryPolicy"
 send_tx "$TREASURY_POLICY" "setApprovedAsset(address,bool)" "$TOKEN_ADDRESS" true
 send_tx "$TREASURY_POLICY" "setServiceOperator(address,bool)" "$AGENT_ACCOUNT" true
 send_tx "$TREASURY_POLICY" "setServiceOperator(address,bool)" "$ESCROW_CORE" true
+if [[ -n "$XCM_WRAPPER" ]]; then
+  send_tx "$TREASURY_POLICY" "setServiceOperator(address,bool)" "$XCM_WRAPPER" true
+fi
 send_tx "$TREASURY_POLICY" "setVerifier(address,bool)" "$VERIFIER_ADDRESS" true
 send_tx "$TREASURY_POLICY" "setArbitrator(address,bool)" "$ARBITRATOR_ADDRESS" true
 send_tx "$TREASURY_POLICY" "setDailyOutflowCap(uint256)" "$DAILY_OUTFLOW_CAP"
@@ -227,6 +238,10 @@ if [[ "$OWNER_ADDRESS" != "$DEPLOYER_ADDRESS" ]]; then
 fi
 
 STRATEGIES_JSON="[]"
+XCM_WRAPPER_JSON="null"
+if [[ -n "$XCM_WRAPPER" ]]; then
+  XCM_WRAPPER_JSON="\"$XCM_WRAPPER\""
+fi
 if [[ -n "$VDOT_ADAPTER" ]]; then
   STRATEGIES_JSON="[
     {
@@ -254,6 +269,7 @@ cat > "$manifest_path" <<JSON
     "agentAccountCore": "$AGENT_ACCOUNT",
     "reputationSbt": "$REPUTATION_SBT",
     "escrowCore": "$ESCROW_CORE",
+    "xcmWrapper": $XCM_WRAPPER_JSON,
     "token": "$TOKEN_ADDRESS"
   },
   "strategies": $STRATEGIES_JSON

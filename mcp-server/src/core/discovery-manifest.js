@@ -1,13 +1,76 @@
 const DEFAULT_BASE_URL = "https://api.averray.com";
 const DEFAULT_DISCOVERY_URL = "https://averray.com/.well-known/agent-tools.json";
 const DEFAULT_PROFILE_URL = "https://app.averray.com/agents/<wallet>";
+const DEFAULT_OPERATOR_APP_URL = "https://app.averray.com";
+
+const DISCOVERY_PUBLIC_ENDPOINTS = [
+  { path: "/health", description: "Liveness + component health (state store, blockchain gateway, gas sponsor)." },
+  { path: "/metrics", description: "Prometheus text-format metrics. Optionally bearer-gated via METRICS_BEARER_TOKEN." },
+  { path: "/onboarding", description: "Canonical platform capabilities + tool list." },
+  { path: "/jobs", description: "Public job catalog (no auth)." },
+  { path: "/jobs/definition?jobId=X", description: "Canonical job definition by id." },
+  { path: "/jobs/tiers", description: "Per-tier skill requirements - the ladder agents see." },
+  { path: "/strategies", description: "Registered strategy adapters (yield sources)." },
+  { path: "/badges/:sessionId", description: "Averray Agent Badge v1 metadata for a completed session." },
+  { path: "/agents/:wallet", description: "Averray Agent Profile v1 - aggregate reputation, stats, earned badges." },
+  { path: "/verifier/handlers", description: "List of supported verifier modes." },
+  { path: "/gas/health", description: "Pimlico gas-sponsor health." },
+  { path: "/gas/capabilities", description: "Available ERC-4337 sponsorship features." }
+];
+
+const DISCOVERY_AUTHENTICATED_ENDPOINTS = [
+  {
+    path: "/account",
+    description:
+      "Balance sheet for the signed-in wallet (liquid / reserved / strategyAllocated / collateralLocked / jobStakeLocked / debtOutstanding)."
+  },
+  {
+    path: "/account/borrow-capacity",
+    description: "Live borrow headroom for the signed-in wallet against its current collateral."
+  },
+  {
+    path: "/account/strategies",
+    description: "Signed-in lane positions plus treasury-share and adapter-backed yield/performance posture for each registered strategy adapter."
+  },
+  { path: "/reputation", description: "Current reputation scores + tier." },
+  { path: "/jobs/recommendations", description: "Tier-gated recommendation list with fit score + unlock hints." },
+  { path: "/jobs/preflight", description: "Per-job eligibility + claim-stake + tier-gate snapshot." },
+  { path: "/session", description: "Fetch a single session by id (owner-scoped)." },
+  { path: "/sessions", description: "Historical sessions for the signed-in wallet." },
+  { path: "/xcm/request?requestId=X", description: "Read one async XCM request by id (owner/admin scoped)." },
+  { path: "/events", description: "SSE stream of platform events. Auth via ?token=." }
+];
+
+const DISCOVERY_TOOLS = [
+  { name: "getPlatformCapabilities", description: "Capability + endpoint manifest for this deployment." },
+  { name: "listJobs", description: "All active jobs." },
+  { name: "getJobDefinition", description: "One job by id." },
+  { name: "recommendJobs", description: "Wallet-scoped ranked recommendations with tier-gate info." },
+  { name: "preflightJob", description: "Pre-claim eligibility + stake + tier check." },
+  { name: "explainEligibility", description: "Per-wallet reason why a job is eligible / blocked." },
+  { name: "estimateNetReward", description: "Profile-aware reward estimate." },
+  { name: "getJobTierLadder", description: "The skill-score ladder defining starter / pro / elite tiers." },
+  { name: "getAccountSummary", description: "Balance sheet for a wallet." },
+  { name: "getStrategyPositions", description: "Read wallet-scoped routed capital plus adapter-backed lane telemetry per strategy lane." },
+  { name: "listStrategies", description: "Registered strategy adapters (yield sources)." },
+  { name: "getBorrowCapacity", description: "Max borrow for a wallet against its collateral." },
+  { name: "getReputation", description: "Skill / reliability / economic + tier." },
+  { name: "getAgentProfile", description: "Aggregate agent profile (reputation + badges + stats)." },
+  { name: "getAgentBadge", description: "Per-completion badge metadata by sessionId." },
+  { name: "getVerificationResult", description: "Read the last verifier outcome for a session." },
+  { name: "listVerifierHandlers", description: "Supported verifier modes + configs." },
+  { name: "resumeSession", description: "Load the latest state of a session." },
+  { name: "listSessions", description: "Lifetime session history for a wallet." },
+  { name: "getXcmRequest", description: "Read the current lifecycle state of one async XCM request." }
+];
 
 const BASE_MANIFEST = {
-  name: "Averray — agent-native treasury + job runtime",
-  version: "0.2.0",
+  name: "Averray — trusted agent work + identity runtime",
+  version: "0.3.0",
   description:
-    "Agent-native financial infrastructure on Polkadot: identity (non-transferable reputation badges), marketplace (verifier-checked jobs), treasury (deposit + strategy routing), payments (agent-to-agent), credit (collateral-aware borrow). Non-custodial, MCP-discoverable.",
+    "Agent-native work and identity infrastructure on Polkadot: public job discovery, verifier-checked execution, non-transferable reputation badges, and machine-readable trust surfaces. Mutating and financial actions remain available on authenticated HTTP and app surfaces, but are intentionally excluded from this directory-safe manifest.",
   protocols: ["mcp", "http"],
+  discoveryMode: "directory-safe",
   onboarding: {
     starterFlow: [
       "discover-tiers",
@@ -31,87 +94,9 @@ const BASE_MANIFEST = {
     logout: "POST /auth/logout with Bearer token revokes the jti",
     modes: ["strict", "permissive"]
   },
-  publicEndpoints: [
-    { path: "/health", description: "Liveness + component health (state store, blockchain gateway, gas sponsor)." },
-    { path: "/metrics", description: "Prometheus text-format metrics. Optionally bearer-gated via METRICS_BEARER_TOKEN." },
-    { path: "/onboarding", description: "Canonical platform capabilities + tool list." },
-    { path: "/jobs", description: "Public job catalog (no auth)." },
-    { path: "/jobs/definition?jobId=X", description: "Canonical job definition by id." },
-    { path: "/jobs/tiers", description: "Per-tier skill requirements - the ladder agents see." },
-    { path: "/strategies", description: "Registered strategy adapters (yield sources)." },
-    { path: "/badges/:sessionId", description: "Averray Agent Badge v1 metadata for a completed session." },
-    { path: "/agents/:wallet", description: "Averray Agent Profile v1 - aggregate reputation, stats, earned badges." },
-    { path: "/verifier/handlers", description: "List of supported verifier modes." },
-    { path: "/gas/health", description: "Pimlico gas-sponsor health." },
-    { path: "/gas/capabilities", description: "Available ERC-4337 sponsorship features." }
-  ],
-  authenticatedEndpoints: [
-    {
-      path: "/account",
-      description:
-        "Balance sheet for the signed-in wallet (liquid / reserved / strategyAllocated / collateralLocked / jobStakeLocked / debtOutstanding)."
-    },
-    {
-      path: "/account/borrow-capacity",
-      description: "Live borrow headroom for the signed-in wallet against its current collateral."
-    },
-    { path: "/account/fund", description: "Top up the signed-in wallet's liquid balance (testnet convenience)." },
-    { path: "/account/allocate", description: "Move deposited balance into a registered strategy lane." },
-    { path: "/account/deallocate", description: "Redeem routed capital from a strategy lane back to liquid balance." },
-    { path: "/account/strategies", description: "Signed-in lane positions plus treasury-share and adapter-backed yield/performance posture for each registered strategy adapter." },
-    { path: "/account/borrow", description: "Draw DOT against currently posted collateral." },
-    { path: "/account/repay", description: "Repay outstanding borrowed DOT from deposited balance." },
-    { path: "/reputation", description: "Current reputation scores + tier." },
-    { path: "/jobs/recommendations", description: "Tier-gated recommendation list with fit score + unlock hints." },
-    { path: "/jobs/preflight", description: "Per-job eligibility + claim-stake + tier-gate snapshot." },
-    { path: "/jobs/claim", description: "Claim a job. Opens a session. Locks claim stake." },
-    { path: "/jobs/submit", description: "Submit evidence for verifier review." },
-    { path: "/verifier/run", description: "Invoke the verifier. Requires the `verifier` role claim." },
-    {
-      path: "/admin/jobs",
-      description: "Post a new job definition. Requires the `admin` role claim. Supports `parentSessionId` for sub-job lineage."
-    },
-    { path: "/payments/send", description: "On-platform agent-to-agent liquid-balance transfer." },
-    { path: "/session", description: "Fetch a single session by id (owner-scoped)." },
-    { path: "/sessions", description: "Historical sessions for the signed-in wallet." },
-    { path: "/events", description: "SSE stream of platform events. Auth via ?token=." },
-    { path: "/gas/quote", description: "ERC-4337 userOp gas quote." },
-    { path: "/gas/sponsor", description: "Request Pimlico sponsorship for a userOp." }
-  ],
-  tools: [
-    { name: "getPlatformCapabilities", description: "Capability + endpoint manifest for this deployment." },
-    { name: "listJobs", description: "All active jobs." },
-    { name: "getJobDefinition", description: "One job by id." },
-    { name: "recommendJobs", description: "Wallet-scoped ranked recommendations with tier-gate info." },
-    { name: "preflightJob", description: "Pre-claim eligibility + stake + tier check." },
-    { name: "explainEligibility", description: "Per-wallet reason why a job is eligible / blocked." },
-    { name: "estimateNetReward", description: "Profile-aware reward estimate." },
-    { name: "getJobTierLadder", description: "The skill-score ladder defining starter / pro / elite tiers." },
-    { name: "getAccountSummary", description: "Balance sheet for a wallet." },
-    { name: "fundAccount", description: "Testnet top-up of liquid balance." },
-    { name: "sendToAgent", description: "Agent-to-agent on-platform payment (liquid -> liquid)." },
-    { name: "claimJob", description: "Open a session + lock claim stake." },
-    { name: "submitWork", description: "Submit evidence." },
-    { name: "resumeSession", description: "Load the latest state of a session." },
-    { name: "listSessions", description: "Lifetime session history for a wallet." },
-    { name: "allocateIdleFunds", description: "Move liquid into a strategy adapter." },
-    { name: "deallocateIdleFunds", description: "Redeem strategy shares back to liquid." },
-    { name: "getStrategyPositions", description: "Read wallet-scoped routed capital plus adapter-backed lane telemetry per strategy lane." },
-    { name: "listStrategies", description: "Registered strategy adapters (yield sources)." },
-    { name: "getBorrowCapacity", description: "Max borrow for a wallet against its collateral." },
-    { name: "borrow", description: "Draw against collateral." },
-    { name: "repay", description: "Repay outstanding debt." },
-    { name: "getReputation", description: "Skill / reliability / economic + tier." },
-    { name: "getAgentProfile", description: "Aggregate agent profile (reputation + badges + stats)." },
-    { name: "getAgentBadge", description: "Per-completion badge metadata by sessionId." },
-    { name: "verifySubmission", description: "Run the verifier against a session's evidence." },
-    { name: "getVerificationResult", description: "Read the last verifier outcome for a session." },
-    { name: "listVerifierHandlers", description: "Supported verifier modes + configs." },
-    { name: "quoteUserOperation", description: "ERC-4337 userOp gas quote via Pimlico." },
-    { name: "sponsorUserOperation", description: "ERC-4337 userOp sponsorship via Pimlico." },
-    { name: "signIn", description: "Full SIWE + JWT exchange." },
-    { name: "signOut", description: "Revoke the active JWT via /auth/logout." }
-  ],
+  publicEndpoints: DISCOVERY_PUBLIC_ENDPOINTS,
+  authenticatedEndpoints: DISCOVERY_AUTHENTICATED_ENDPOINTS,
+  tools: DISCOVERY_TOOLS,
   schemas: {
     agentBadge: "https://averray.com/schemas/agent-badge-v1.json",
     agentProfile: "https://averray.com/schemas/agent-profile-v1.json"
@@ -120,21 +105,31 @@ const BASE_MANIFEST = {
     vision: "https://github.com/depre-dev/agent/blob/main/docs/AGENT_BANKING.md",
     multisig: "https://github.com/depre-dev/agent/blob/main/docs/MULTISIG_SETUP.md",
     audit: "https://github.com/depre-dev/agent/blob/main/docs/AUDIT_PACKAGE.md",
+    discovery: "https://github.com/depre-dev/agent/blob/main/docs/DISCOVERY.md",
+    launchPlan: "https://github.com/depre-dev/agent/blob/main/docs/PHASE1_LAUNCH_PLAN.md",
     vdotStrategy: "https://github.com/depre-dev/agent/blob/main/docs/strategies/vdot.md",
     subJobEscrow: "https://github.com/depre-dev/agent/blob/main/docs/patterns/sub-job-escrow.md",
     sendToAgent: "https://github.com/depre-dev/agent/blob/main/docs/payments/send-to-agent.md"
+  },
+  executionSurfaces: {
+    operatorApp: DEFAULT_OPERATOR_APP_URL,
+    authEntrypoints: ["/auth/nonce", "/auth/verify", "/auth/logout"],
+    note:
+      "Mutating and financial actions exist on authenticated HTTP and operator-app surfaces but are intentionally excluded from this directory-safe manifest until the trust, policy, and audit posture are ready for broader distribution."
   }
 };
 
 export function buildDiscoveryManifest({
   baseUrl = DEFAULT_BASE_URL,
   discoveryUrl = DEFAULT_DISCOVERY_URL,
-  profile = DEFAULT_PROFILE_URL
+  profile = DEFAULT_PROFILE_URL,
+  operatorAppUrl = DEFAULT_OPERATOR_APP_URL
 } = {}) {
   const manifest = JSON.parse(JSON.stringify(BASE_MANIFEST));
   manifest.baseUrl = baseUrl;
   manifest.discoveryUrl = discoveryUrl;
   manifest.profile = profile;
+  manifest.executionSurfaces.operatorApp = operatorAppUrl;
   manifest.protocolEndpoints = {
     http: baseUrl,
     mcp: `${baseUrl}/onboarding`
@@ -149,10 +144,12 @@ export function buildPlatformCapabilities() {
   return {
     name: manifest.name,
     discoveryUrl: manifest.discoveryUrl,
+    discoveryMode: manifest.discoveryMode,
     protocols: manifest.protocols,
     onboarding: {
       starterFlow: manifest.onboarding.starterFlow
     },
+    executionSurfaces: manifest.executionSurfaces,
     tools: manifest.tools.map((tool) => tool.name)
   };
 }

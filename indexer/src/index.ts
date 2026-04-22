@@ -7,6 +7,9 @@ import { EscrowCoreAbi } from "../abis/contractsAbi";
 
 const payoutModeLabels = ["single", "milestone"] as const;
 const jobStateLabels = ["none", "open", "claimed", "submitted", "rejected", "disputed", "closed"] as const;
+const requestKindLabels = ["deposit", "withdraw", "claim"] as const;
+const requestStatusLabels = ["unknown", "pending", "succeeded", "failed", "cancelled"] as const;
+const zeroHash = `0x${"0".repeat(64)}` as `0x${string}`;
 
 const decodeBytes32 = (value: string) => {
   try {
@@ -17,6 +20,8 @@ const decodeBytes32 = (value: string) => {
 };
 
 const toEventId = (txHash: string, logIndex: number | bigint) => `${txHash}-${logIndex.toString()}`;
+const nullIfZeroHash = (value: `0x${string}`): `0x${string}` | null =>
+  value.toLowerCase() === zeroHash ? null : value;
 
 const toTier = (skill: bigint) => {
   if (skill >= 200n) return "elite";
@@ -337,6 +342,202 @@ ponder.on("AgentAccountCore:JobStakeSlashed", async ({ event, context }) => {
     amount: event.args.amount,
     posterAmount: event.args.posterAmount,
     treasuryAmount: event.args.treasuryAmount,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp
+  });
+});
+
+ponder.on("XcmWrapper:RequestQueued" as any, async ({ event, context }: any) => {
+  const kind = Number(event.args.kind);
+  await context.db
+    .insert(schema.xcmRequest)
+    .values({
+      id: event.args.requestId,
+      strategyId: event.args.strategyId,
+      strategyIdLabel: decodeBytes32(event.args.strategyId),
+      kind,
+      kindLabel: requestKindLabels[kind] ?? "unknown",
+      account: event.args.account,
+      asset: event.args.asset,
+      recipient: event.args.recipient,
+      requestedAssets: event.args.assets,
+      requestedShares: event.args.shares,
+      nonce: BigInt(event.args.nonce),
+      status: 1,
+      statusLabel: requestStatusLabels[1],
+      destinationHash: null,
+      messageHash: null,
+      maxWeightRefTime: null,
+      maxWeightProofSize: null,
+      settledAssets: 0n,
+      settledShares: 0n,
+      remoteRef: null,
+      failureCode: null,
+      createdAtBlock: event.block.number,
+      createdAtTimestamp: event.block.timestamp,
+      updatedAtBlock: event.block.number,
+      updatedAtTimestamp: event.block.timestamp,
+      queuedTxHash: event.transaction.hash,
+      lastTxHash: event.transaction.hash
+    })
+    .onConflictDoUpdate((row: any) => ({
+      strategyId: row.strategyId,
+      strategyIdLabel: row.strategyIdLabel,
+      kind: row.kind,
+      kindLabel: row.kindLabel,
+      account: row.account,
+      asset: row.asset,
+      recipient: row.recipient,
+      requestedAssets: row.requestedAssets,
+      requestedShares: row.requestedShares,
+      nonce: row.nonce,
+      updatedAtBlock: row.updatedAtBlock,
+      updatedAtTimestamp: row.updatedAtTimestamp,
+      lastTxHash: row.lastTxHash
+    }));
+
+  await context.db.insert(schema.xcmRequestEvent).values({
+    id: toEventId(event.transaction.hash, event.log.logIndex),
+    requestId: event.args.requestId,
+    kind: "queued",
+    status: 1,
+    statusLabel: requestStatusLabels[1],
+    destinationHash: null,
+    messageHash: null,
+    maxWeightRefTime: null,
+    maxWeightProofSize: null,
+    settledAssets: null,
+    settledShares: null,
+    remoteRef: null,
+    failureCode: null,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp
+  });
+});
+
+ponder.on("XcmWrapper:RequestPayloadStored" as any, async ({ event, context }: any) => {
+  await context.db
+    .insert(schema.xcmRequest)
+    .values({
+      id: event.args.requestId,
+      strategyId: zeroHash,
+      strategyIdLabel: "",
+      kind: 0,
+      kindLabel: "unknown",
+      account: "0x0000000000000000000000000000000000000000",
+      asset: "0x0000000000000000000000000000000000000000",
+      recipient: "0x0000000000000000000000000000000000000000",
+      requestedAssets: 0n,
+      requestedShares: 0n,
+      nonce: 0n,
+      status: 0,
+      statusLabel: requestStatusLabels[0],
+      destinationHash: event.args.destinationHash,
+      messageHash: event.args.messageHash,
+      maxWeightRefTime: BigInt(event.args.refTime),
+      maxWeightProofSize: BigInt(event.args.proofSize),
+      settledAssets: 0n,
+      settledShares: 0n,
+      remoteRef: null,
+      failureCode: null,
+      createdAtBlock: event.block.number,
+      createdAtTimestamp: event.block.timestamp,
+      updatedAtBlock: event.block.number,
+      updatedAtTimestamp: event.block.timestamp,
+      queuedTxHash: event.transaction.hash,
+      lastTxHash: event.transaction.hash
+    })
+    .onConflictDoUpdate((row: any) => ({
+      destinationHash: row.destinationHash,
+      messageHash: row.messageHash,
+      maxWeightRefTime: row.maxWeightRefTime,
+      maxWeightProofSize: row.maxWeightProofSize,
+      updatedAtBlock: row.updatedAtBlock,
+      updatedAtTimestamp: row.updatedAtTimestamp,
+      lastTxHash: row.lastTxHash
+    }));
+
+  await context.db.insert(schema.xcmRequestEvent).values({
+    id: toEventId(event.transaction.hash, event.log.logIndex),
+    requestId: event.args.requestId,
+    kind: "payload_stored",
+    status: null,
+    statusLabel: null,
+    destinationHash: event.args.destinationHash,
+    messageHash: event.args.messageHash,
+    maxWeightRefTime: BigInt(event.args.refTime),
+    maxWeightProofSize: BigInt(event.args.proofSize),
+    settledAssets: null,
+    settledShares: null,
+    remoteRef: null,
+    failureCode: null,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp
+  });
+});
+
+ponder.on("XcmWrapper:RequestStatusUpdated" as any, async ({ event, context }: any) => {
+  const status = Number(event.args.status);
+  await context.db
+    .insert(schema.xcmRequest)
+    .values({
+      id: event.args.requestId,
+      strategyId: zeroHash,
+      strategyIdLabel: "",
+      kind: 0,
+      kindLabel: "unknown",
+      account: "0x0000000000000000000000000000000000000000",
+      asset: "0x0000000000000000000000000000000000000000",
+      recipient: "0x0000000000000000000000000000000000000000",
+      requestedAssets: 0n,
+      requestedShares: 0n,
+      nonce: 0n,
+      status,
+      statusLabel: requestStatusLabels[status] ?? "unknown",
+      destinationHash: null,
+      messageHash: null,
+      maxWeightRefTime: null,
+      maxWeightProofSize: null,
+      settledAssets: event.args.settledAssets,
+      settledShares: event.args.settledShares,
+      remoteRef: nullIfZeroHash(event.args.remoteRef),
+      failureCode: nullIfZeroHash(event.args.failureCode),
+      createdAtBlock: event.block.number,
+      createdAtTimestamp: event.block.timestamp,
+      updatedAtBlock: event.block.number,
+      updatedAtTimestamp: event.block.timestamp,
+      queuedTxHash: event.transaction.hash,
+      lastTxHash: event.transaction.hash
+    })
+    .onConflictDoUpdate((row: any) => ({
+      status: row.status,
+      statusLabel: row.statusLabel,
+      settledAssets: row.settledAssets,
+      settledShares: row.settledShares,
+      remoteRef: row.remoteRef,
+      failureCode: row.failureCode,
+      updatedAtBlock: row.updatedAtBlock,
+      updatedAtTimestamp: row.updatedAtTimestamp,
+      lastTxHash: row.lastTxHash
+    }));
+
+  await context.db.insert(schema.xcmRequestEvent).values({
+    id: toEventId(event.transaction.hash, event.log.logIndex),
+    requestId: event.args.requestId,
+    kind: "status_updated",
+    status,
+    statusLabel: requestStatusLabels[status] ?? "unknown",
+    destinationHash: null,
+    messageHash: null,
+    maxWeightRefTime: null,
+    maxWeightProofSize: null,
+    settledAssets: event.args.settledAssets,
+    settledShares: event.args.settledShares,
+    remoteRef: nullIfZeroHash(event.args.remoteRef),
+    failureCode: nullIfZeroHash(event.args.failureCode),
     txHash: event.transaction.hash,
     blockNumber: event.block.number,
     timestamp: event.block.timestamp

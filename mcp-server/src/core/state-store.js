@@ -42,6 +42,8 @@ export class MemoryStateStore {
     this.nonces = new Map();
     this.rateLimits = new Map();
     this.mutationReceipts = new Map();
+    this.xcmObservations = new Map();
+    this.serviceStates = new Map();
   }
 
   async getSession(sessionId) {
@@ -199,6 +201,73 @@ export class MemoryStateStore {
   async upsertMutationReceipt(bucket, key, receipt) {
     this.mutationReceipts.set(`${bucket}:${key}`, receipt);
     return receipt;
+  }
+
+  async getXcmObservation(requestId) {
+    return this.xcmObservations.get(requestId);
+  }
+
+  async upsertXcmObservation(observation) {
+    const existing = this.xcmObservations.get(observation.requestId) ?? {};
+    const merged = {
+      ...existing,
+      ...observation,
+      observedAt: observation.observedAt ?? existing.observedAt ?? new Date().toISOString(),
+      processed: Boolean(observation.processed ?? existing.processed),
+      attemptCount: Number(observation.attemptCount ?? existing.attemptCount ?? 0)
+    };
+    this.xcmObservations.set(observation.requestId, merged);
+    return merged;
+  }
+
+  async listPendingXcmObservations(limit = 50) {
+    return [...this.xcmObservations.values()]
+      .filter((entry) => !entry.processed)
+      .sort((left, right) => String(left.observedAt ?? "").localeCompare(String(right.observedAt ?? "")))
+      .slice(0, Math.max(limit, 0));
+  }
+
+  async markXcmObservationProcessed(requestId, result = undefined) {
+    const current = this.xcmObservations.get(requestId);
+    if (!current) return undefined;
+    const updated = {
+      ...current,
+      processed: true,
+      processedAt: new Date().toISOString(),
+      result,
+      lastError: undefined
+    };
+    this.xcmObservations.set(requestId, updated);
+    return updated;
+  }
+
+  async markXcmObservationFailed(requestId, error) {
+    const current = this.xcmObservations.get(requestId);
+    if (!current) return undefined;
+    const updated = {
+      ...current,
+      processed: false,
+      attemptCount: Number(current.attemptCount ?? 0) + 1,
+      lastError: error?.message ?? String(error ?? "unknown_error"),
+      lastTriedAt: new Date().toISOString()
+    };
+    this.xcmObservations.set(requestId, updated);
+    return updated;
+  }
+
+  async getServiceState(scope) {
+    return this.serviceStates.get(scope);
+  }
+
+  async upsertServiceState(scope, state) {
+    const existing = this.serviceStates.get(scope) ?? {};
+    const merged = {
+      ...existing,
+      ...state,
+      updatedAt: new Date().toISOString()
+    };
+    this.serviceStates.set(scope, merged);
+    return merged;
   }
 
   async revokeToken(jti, ttlSeconds) {
@@ -404,6 +473,98 @@ export class RedisStateStore {
     await this.connect();
     await this.client.set(this.key("mutation-receipt", `${bucket}:${key}`), JSON.stringify(receipt));
     return receipt;
+  }
+
+  async getXcmObservation(requestId) {
+    await this.connect();
+    const raw = await this.client.get(this.key("xcm-observation", requestId));
+    return raw ? JSON.parse(raw) : undefined;
+  }
+
+  async upsertXcmObservation(observation) {
+    await this.connect();
+    const existing = await this.getXcmObservation(observation.requestId);
+    const merged = {
+      ...existing,
+      ...observation,
+      observedAt: observation.observedAt ?? existing?.observedAt ?? new Date().toISOString(),
+      processed: Boolean(observation.processed ?? existing?.processed),
+      attemptCount: Number(observation.attemptCount ?? existing?.attemptCount ?? 0)
+    };
+    await this.client.set(this.key("xcm-observation", observation.requestId), JSON.stringify(merged));
+    if (!merged.processed) {
+      await this.client.zAdd(this.key("xcm-observations", "pending"), {
+        score: Date.parse(merged.observedAt) || Date.now(),
+        value: observation.requestId
+      });
+    } else {
+      await this.client.zRem(this.key("xcm-observations", "pending"), observation.requestId);
+    }
+    return merged;
+  }
+
+  async listPendingXcmObservations(limit = 50) {
+    await this.connect();
+    const requestIds = await this.client.zRange(
+      this.key("xcm-observations", "pending"),
+      0,
+      Math.max(limit - 1, 0)
+    );
+    const entries = await Promise.all(requestIds.map((requestId) => this.getXcmObservation(requestId)));
+    return entries.filter((entry) => entry && !entry.processed);
+  }
+
+  async markXcmObservationProcessed(requestId, result = undefined) {
+    await this.connect();
+    const current = await this.getXcmObservation(requestId);
+    if (!current) return undefined;
+    const updated = {
+      ...current,
+      processed: true,
+      processedAt: new Date().toISOString(),
+      result,
+      lastError: undefined
+    };
+    await this.client.set(this.key("xcm-observation", requestId), JSON.stringify(updated));
+    await this.client.zRem(this.key("xcm-observations", "pending"), requestId);
+    return updated;
+  }
+
+  async markXcmObservationFailed(requestId, error) {
+    await this.connect();
+    const current = await this.getXcmObservation(requestId);
+    if (!current) return undefined;
+    const updated = {
+      ...current,
+      processed: false,
+      attemptCount: Number(current.attemptCount ?? 0) + 1,
+      lastError: error?.message ?? String(error ?? "unknown_error"),
+      lastTriedAt: new Date().toISOString()
+    };
+    await this.client.set(this.key("xcm-observation", requestId), JSON.stringify(updated));
+    await this.client.zAdd(this.key("xcm-observations", "pending"), {
+      score: Date.parse(updated.observedAt) || Date.now(),
+      value: requestId
+    });
+    return updated;
+  }
+
+  async getServiceState(scope) {
+    await this.connect();
+    const raw = await this.client.get(this.key("service-state", scope));
+    return raw ? JSON.parse(raw) : undefined;
+  }
+
+  async upsertServiceState(scope, state) {
+    await this.connect();
+    const existing = await this.getServiceState(scope);
+    const merged = {
+      ...(existing ?? {}),
+      ...state,
+      updatedAt: new Date().toISOString()
+    };
+    await this.client.set(this.key("service-state", scope), JSON.stringify(merged));
+    return merged;
   }
 
   async revokeToken(jti, ttlSeconds) {

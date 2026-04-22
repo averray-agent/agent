@@ -4,6 +4,8 @@ pragma solidity ^0.8.24;
 import {TreasuryPolicy} from "./TreasuryPolicy.sol";
 import {StrategyAdapterRegistry} from "./StrategyAdapterRegistry.sol";
 import {IStrategyAdapter} from "./interfaces/IStrategyAdapter.sol";
+import {IXcmStrategyAdapter} from "./interfaces/IXcmStrategyAdapter.sol";
+import {IXcmWrapper} from "./interfaces/IXcmWrapper.sol";
 import {ReentrancyGuard} from "./lib/ReentrancyGuard.sol";
 import {SafeTransfer} from "./lib/SafeTransfer.sol";
 
@@ -20,8 +22,47 @@ contract AgentAccountCore is ReentrancyGuard {
         uint256 debtOutstanding;
     }
 
+    struct StrategyRequest {
+        bytes32 strategyId;
+        address adapter;
+        address account;
+        address asset;
+        address recipient;
+        IXcmWrapper.RequestKind kind;
+        IXcmWrapper.RequestStatus status;
+        uint256 requestedAssets;
+        uint256 requestedShares;
+        uint256 settledAssets;
+        uint256 settledShares;
+        bytes32 remoteRef;
+        bytes32 failureCode;
+        bool settled;
+    }
+
+    struct StrategyDepositRequestParams {
+        bytes32 strategyId;
+        uint256 amount;
+        bytes destination;
+        bytes message;
+        IXcmWrapper.Weight maxWeight;
+        uint64 nonce;
+    }
+
+    struct StrategyWithdrawRequestParams {
+        bytes32 strategyId;
+        uint256 shares;
+        address recipient;
+        bytes destination;
+        bytes message;
+        IXcmWrapper.Weight maxWeight;
+        uint64 nonce;
+    }
+
     mapping(address => mapping(address => AssetPosition)) public positions;
     mapping(address => mapping(bytes32 => uint256)) public strategyShares;
+    mapping(bytes32 => StrategyRequest) public strategyRequests;
+    mapping(address => mapping(address => uint256)) public pendingStrategyAssets;
+    mapping(address => mapping(bytes32 => uint256)) public pendingStrategyWithdrawalShares;
 
     event Deposited(address indexed account, address indexed asset, uint256 amount);
     event Withdrawn(address indexed account, address indexed asset, uint256 amount);
@@ -30,6 +71,24 @@ contract AgentAccountCore is ReentrancyGuard {
     event ReservationSettled(address indexed account, address indexed recipient, address indexed asset, uint256 amount);
     event StrategyAllocated(address indexed account, bytes32 indexed strategyId, address indexed asset, uint256 amount);
     event StrategyDeallocated(address indexed account, bytes32 indexed strategyId, address indexed asset, uint256 amount);
+    event StrategyRequestQueued(
+        address indexed account,
+        bytes32 indexed strategyId,
+        bytes32 indexed requestId,
+        IXcmWrapper.RequestKind kind,
+        uint256 requestedAssets,
+        uint256 requestedShares,
+        address recipient
+    );
+    event StrategyRequestSettled(
+        address indexed account,
+        bytes32 indexed strategyId,
+        bytes32 indexed requestId,
+        IXcmWrapper.RequestStatus status,
+        uint256 settledAssets,
+        uint256 settledShares,
+        address recipient
+    );
     event CollateralLocked(address indexed account, address indexed asset, uint256 amount);
     event CollateralUnlocked(address indexed account, address indexed asset, uint256 amount);
     event JobStakeLocked(address indexed account, address indexed asset, uint256 amount);
@@ -55,6 +114,7 @@ contract AgentAccountCore is ReentrancyGuard {
     error InvalidRecipient();
     error ZeroAmount();
     error InvalidStrategy();
+    error InvalidStrategyRequest();
 
     constructor(TreasuryPolicy policy_, StrategyAdapterRegistry registry_) {
         policy = policy_;
@@ -129,6 +189,7 @@ contract AgentAccountCore is ReentrancyGuard {
         if (amount == 0) revert ZeroAmount();
         StrategyAdapterRegistry.StrategyMetadata memory strategy = registry.getStrategy(strategyId);
         if (strategy.adapter == address(0) || !strategy.active) revert InvalidStrategy();
+        if (_supportsAsyncStrategyAdapter(strategy.adapter)) revert InvalidStrategy();
         AssetPosition storage position = positions[account][strategy.asset];
         if (position.liquid < amount) revert InsufficientLiquidity();
 
@@ -145,7 +206,8 @@ contract AgentAccountCore is ReentrancyGuard {
     function deallocateIdleFunds(address account, bytes32 strategyId, uint256 amount) external whenNotPaused onlyOwnerOrOperator(account) {
         if (amount == 0) revert ZeroAmount();
         StrategyAdapterRegistry.StrategyMetadata memory strategy = registry.getStrategy(strategyId);
-        if (strategy.adapter == address(0)) revert InvalidStrategy();
+        if (strategy.adapter == address(0) || !strategy.active) revert InvalidStrategy();
+        if (_supportsAsyncStrategyAdapter(strategy.adapter)) revert InvalidStrategy();
         AssetPosition storage position = positions[account][strategy.asset];
         IStrategyAdapter adapter = IStrategyAdapter(strategy.adapter);
         uint256 accountShares = strategyShares[account][strategyId];
@@ -162,6 +224,154 @@ contract AgentAccountCore is ReentrancyGuard {
         position.liquid += assetsReturned;
         _refreshStrategyAllocated(account, strategy.asset);
         emit StrategyDeallocated(account, strategyId, strategy.asset, assetsReturned);
+    }
+
+    function requestStrategyDeposit(address account, StrategyDepositRequestParams calldata params)
+        external
+        whenNotPaused
+        onlyOwnerOrOperator(account)
+        returns (bytes32 requestId)
+    {
+        if (params.amount == 0) revert ZeroAmount();
+
+        (address adapterAddress, address asset) = _requireActiveStrategy(params.strategyId);
+
+        requestId = _previewDepositRequestId(params.strategyId, account, asset, params.amount, params.nonce);
+
+        if (strategyRequests[requestId].account == address(0)) {
+            _createPendingDepositRequest(params.strategyId, adapterAddress, asset, account, requestId, params.amount);
+        }
+
+        require(
+            _requireAsyncStrategyAdapter(adapterAddress).requestDeposit(
+                account,
+                params.amount,
+                params.destination,
+                params.message,
+                params.maxWeight,
+                params.nonce
+            ) == requestId,
+            "REQUEST_ID_MISMATCH"
+        );
+    }
+
+    function requestStrategyWithdraw(address account, StrategyWithdrawRequestParams calldata params)
+        external
+        whenNotPaused
+        onlyOwnerOrOperator(account)
+        returns (bytes32 requestId)
+    {
+        if (params.shares == 0) revert ZeroAmount();
+        if (params.recipient == address(0)) revert InvalidRecipient();
+
+        if (strategyShares[account][params.strategyId] < pendingStrategyWithdrawalShares[account][params.strategyId] + params.shares) {
+            revert InsufficientLiquidity();
+        }
+
+        (address adapterAddress, address asset) = _requireActiveStrategy(params.strategyId);
+
+        requestId = _previewWithdrawRequestId(params.strategyId, account, asset, params.recipient, params.shares, params.nonce);
+
+        if (strategyRequests[requestId].account == address(0)) {
+            _createPendingWithdrawRequest(
+                params.strategyId,
+                adapterAddress,
+                asset,
+                account,
+                requestId,
+                params.shares,
+                params.recipient
+            );
+        }
+
+        require(
+            _requireAsyncStrategyAdapter(adapterAddress).requestWithdraw(
+                account,
+                params.shares,
+                params.recipient,
+                params.destination,
+                params.message,
+                params.maxWeight,
+                params.nonce
+            ) == requestId,
+            "REQUEST_ID_MISMATCH"
+        );
+    }
+
+    function settleStrategyRequest(
+        bytes32 requestId,
+        IXcmWrapper.RequestStatus status,
+        uint256 settledAssets,
+        uint256 settledShares,
+        bytes32 remoteRef,
+        bytes32 failureCode
+    ) external whenNotPaused onlyOperator {
+        if (status == IXcmWrapper.RequestStatus.Unknown || status == IXcmWrapper.RequestStatus.Pending) {
+            revert InvalidStrategyRequest();
+        }
+
+        StrategyRequest storage request = strategyRequests[requestId];
+        if (request.account == address(0)) revert InvalidStrategyRequest();
+        if (request.settled) {
+            if (
+                request.status == status &&
+                request.settledAssets == settledAssets &&
+                request.settledShares == settledShares &&
+                request.remoteRef == remoteRef &&
+                request.failureCode == failureCode
+            ) {
+                return;
+            }
+            revert InvalidStrategyRequest();
+        }
+
+        IXcmStrategyAdapter(request.adapter).settleRequest(
+            requestId,
+            status,
+            settledAssets,
+            settledShares,
+            remoteRef,
+            failureCode
+        );
+
+        if (request.kind == IXcmWrapper.RequestKind.Deposit) {
+            pendingStrategyAssets[request.account][request.asset] -= request.requestedAssets;
+            if (status == IXcmWrapper.RequestStatus.Succeeded) {
+                strategyShares[request.account][request.strategyId] += settledShares;
+            } else {
+                positions[request.account][request.asset].liquid += request.requestedAssets;
+            }
+        } else if (request.kind == IXcmWrapper.RequestKind.Withdraw) {
+            pendingStrategyWithdrawalShares[request.account][request.strategyId] -= request.requestedShares;
+            if (status == IXcmWrapper.RequestStatus.Succeeded) {
+                uint256 accountShares = strategyShares[request.account][request.strategyId];
+                if (accountShares < request.requestedShares) revert InsufficientLiquidity();
+                strategyShares[request.account][request.strategyId] = accountShares - request.requestedShares;
+                if (request.recipient == address(this)) {
+                    positions[request.account][request.asset].liquid += settledAssets;
+                }
+            }
+        } else {
+            revert InvalidStrategyRequest();
+        }
+
+        request.status = status;
+        request.settledAssets = settledAssets;
+        request.settledShares = settledShares;
+        request.remoteRef = remoteRef;
+        request.failureCode = failureCode;
+        request.settled = true;
+
+        _refreshStrategyAllocated(request.account, request.asset);
+        emit StrategyRequestSettled(
+            request.account,
+            request.strategyId,
+            requestId,
+            status,
+            settledAssets,
+            settledShares,
+            request.recipient
+        );
     }
 
     function lockCollateral(address asset, uint256 amount) external whenNotPaused onlySupportedAsset(asset) {
@@ -358,5 +568,154 @@ contract AgentAccountCore is ReentrancyGuard {
             totalAllocated += _assetValueForShares(shares, adapter.totalAssets(), adapter.totalShares());
         }
         positions[account][asset].strategyAllocated = totalAllocated;
+    }
+
+    function _createPendingDepositRequest(
+        bytes32 strategyId,
+        address adapter,
+        address asset,
+        address account,
+        bytes32 requestId,
+        uint256 amount
+    ) internal {
+        AssetPosition storage position = positions[account][asset];
+        if (position.liquid < amount) revert InsufficientLiquidity();
+
+        position.liquid -= amount;
+        pendingStrategyAssets[account][asset] += amount;
+        strategyRequests[requestId] = StrategyRequest({
+            strategyId: strategyId,
+            adapter: adapter,
+            account: account,
+            asset: asset,
+            recipient: account,
+            kind: IXcmWrapper.RequestKind.Deposit,
+            status: IXcmWrapper.RequestStatus.Pending,
+            requestedAssets: amount,
+            requestedShares: 0,
+            settledAssets: 0,
+            settledShares: 0,
+            remoteRef: bytes32(0),
+            failureCode: bytes32(0),
+            settled: false
+        });
+
+        SafeTransfer.safeApprove(asset, adapter, 0);
+        SafeTransfer.safeApprove(asset, adapter, amount);
+        emit StrategyRequestQueued(
+            account,
+            strategyId,
+            requestId,
+            IXcmWrapper.RequestKind.Deposit,
+            amount,
+            0,
+            account
+        );
+    }
+
+    function _createPendingWithdrawRequest(
+        bytes32 strategyId,
+        address adapter,
+        address asset,
+        address account,
+        bytes32 requestId,
+        uint256 shares,
+        address recipient
+    ) internal {
+        pendingStrategyWithdrawalShares[account][strategyId] += shares;
+        strategyRequests[requestId] = StrategyRequest({
+            strategyId: strategyId,
+            adapter: adapter,
+            account: account,
+            asset: asset,
+            recipient: recipient,
+            kind: IXcmWrapper.RequestKind.Withdraw,
+            status: IXcmWrapper.RequestStatus.Pending,
+            requestedAssets: 0,
+            requestedShares: shares,
+            settledAssets: 0,
+            settledShares: 0,
+            remoteRef: bytes32(0),
+            failureCode: bytes32(0),
+            settled: false
+        });
+
+        emit StrategyRequestQueued(
+            account,
+            strategyId,
+            requestId,
+            IXcmWrapper.RequestKind.Withdraw,
+            0,
+            shares,
+            recipient
+        );
+    }
+
+    function _requireActiveStrategy(bytes32 strategyId) internal view returns (address adapter, address asset) {
+        StrategyAdapterRegistry.StrategyMetadata memory strategy = registry.getStrategy(strategyId);
+        if (strategy.adapter == address(0) || !strategy.active) revert InvalidStrategy();
+        return (strategy.adapter, strategy.asset);
+    }
+
+    function _requireAsyncStrategyAdapter(address adapter) internal view returns (IXcmStrategyAdapter) {
+        if (!_supportsAsyncStrategyAdapter(adapter)) revert InvalidStrategy();
+        return IXcmStrategyAdapter(adapter);
+    }
+
+    function _supportsAsyncStrategyAdapter(address adapter) internal view returns (bool) {
+        (bool ok,) = adapter.staticcall(abi.encodeWithSelector(IXcmStrategyAdapter.pendingDepositAssets.selector));
+        return ok;
+    }
+
+    function _previewStrategyRequestId(
+        bytes32 strategyId,
+        IXcmWrapper.RequestKind kind,
+        address account,
+        address asset,
+        address recipient,
+        uint256 assets,
+        uint256 shares,
+        uint64 nonce
+    ) internal pure returns (bytes32 requestId) {
+        return keccak256(abi.encode(strategyId, kind, account, asset, recipient, assets, shares, nonce));
+    }
+
+    function _previewDepositRequestId(
+        bytes32 strategyId,
+        address account,
+        address asset,
+        uint256 amount,
+        uint64 nonce
+    ) internal pure returns (bytes32 requestId) {
+        return _previewStrategyRequestId(
+            strategyId,
+            IXcmWrapper.RequestKind.Deposit,
+            account,
+            asset,
+            account,
+            amount,
+            0,
+            nonce
+        );
+    }
+
+    function _previewWithdrawRequestId(
+        bytes32 strategyId,
+        address account,
+        address asset,
+        address recipient,
+        uint256 shares,
+        uint64 nonce
+    ) internal pure returns (bytes32 requestId) {
+        return _previewStrategyRequestId(
+            strategyId,
+            IXcmWrapper.RequestKind.Withdraw,
+            account,
+            asset,
+            recipient,
+            0,
+            shares,
+            nonce
+        );
     }
 }

@@ -84,6 +84,10 @@ ALLOW_PAUSED=1 ./scripts/ops/check-release-readiness.sh testnet
 # If you only want the live hosted checks from a VPS shell:
 RUN_FRONTEND_TESTS=0 RUN_BACKEND_TESTS=0 RUN_SITE_BUILD=0 RUN_INDEXER_TYPECHECK=0 \
   ./scripts/ops/check-release-readiness.sh testnet
+
+# If a staging Subscan key is configured and the XCM publisher is part of
+# the release candidate:
+RUN_SUBSCAN_XCM_VALIDATION=1 ./scripts/ops/check-release-readiness.sh testnet
 ```
 
 ---
@@ -130,3 +134,28 @@ This checklist improves release discipline, but it does not replace:
 
 Until those are done, treat the stack as production-like testnet, not
 irreversible real-funds infrastructure.
+
+---
+
+## 9. XCM observer validation
+
+- [ ] A staging Subscan key has been exercised against the current
+  `subscan_xcm` source adapter.
+- [ ] A sanitized validation report has been captured from the current
+  staging deploy.
+- [ ] `/xcm/outcomes/status` shows `source.type == "subscan_xcm"` for the
+  environment being validated.
+- [ ] `/xcm/outcomes` is serving the published external feed, not only the
+  indexed fallback, when `REQUIRE_PUBLISHED=1` is used.
+- [ ] Any response-field drift found during validation has been reflected
+  in the adapter before promotion.
+
+Run:
+
+```bash
+XCM_SUBSCAN_API_HOST=https://assethub-polkadot.api.subscan.io \
+XCM_SUBSCAN_API_KEY=replace-me \
+INDEXER_URL=https://index.averray.com \
+XCM_CAPTURE_PATH=artifacts/xcm/subscan-validation-report.json \
+npm run validate:subscan-xcm -- --require-published
+```

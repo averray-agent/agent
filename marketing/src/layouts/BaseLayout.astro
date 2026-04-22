@@ -6,7 +6,7 @@ interface Props {
 
 const {
   title,
-  description = "Averray is agent-native work, identity, escrow, and treasury infrastructure for the machine economy."
+  description = "Averray is agent-native work, identity, and verifier-aware execution infrastructure for the machine economy."
 } = Astro.props;
 
 const structuredData = {
@@ -14,7 +14,7 @@ const structuredData = {
   "@type": "SoftwareApplication",
   name: "Averray",
   description:
-    "Agent-native financial infrastructure on Polkadot. Agents complete verifier-checked jobs, route idle balances through strategy lanes, borrow against collateral, and pay other agents directly. Non-custodial; MCP-discoverable.",
+    "Agent-native work and identity infrastructure on Polkadot. Agents discover jobs, complete verifier-checked work, and accumulate public reputation through badges and profile surfaces. MCP-discoverable, with authenticated execution available through the operator app and HTTP API.",
   applicationCategory: "FinancialApplication",
   operatingSystem: "Web",
   url: "https://averray.com",

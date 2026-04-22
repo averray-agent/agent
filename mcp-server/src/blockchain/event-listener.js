@@ -212,6 +212,70 @@ export class EventListener {
           newEconomic: args.newEconomic.toString()
         }
       }));
+
+    this.registerXcm("RequestQueued", "xcm.request_queued", async ({ args, payload }) =>
+      this.buildChainEvent({
+        topic: "xcm.request_queued",
+        args,
+        payload,
+        wallet: args.account,
+        wallets: [args.account],
+        data: {
+          requestId: args.requestId,
+          strategyId: args.strategyId,
+          kind: Number(args.kind),
+          asset: args.asset,
+          recipient: args.recipient,
+          assets: args.assets.toString(),
+          shares: args.shares.toString(),
+          nonce: Number(args.nonce)
+        }
+      }));
+
+    this.registerXcm("RequestPayloadStored", "xcm.request_payload_stored", async ({ args, payload }) => {
+      const request = await this.gateway.getXcmRequest(args.requestId);
+      return this.buildChainEvent({
+        topic: "xcm.request_payload_stored",
+        args,
+        payload,
+        wallet: request.account,
+        wallets: [request.account],
+        data: {
+          requestId: args.requestId,
+          strategyId: request.strategyId,
+          kind: request.kind,
+          status: request.status,
+          destinationHash: args.destinationHash,
+          messageHash: args.messageHash,
+          refTime: Number(args.refTime),
+          proofSize: Number(args.proofSize)
+        }
+      });
+    });
+
+    this.registerXcm("RequestStatusUpdated", "xcm.request_status_updated", async ({ args, payload }) => {
+      const request = await this.gateway.getXcmRequest(args.requestId);
+      return this.buildChainEvent({
+        topic: "xcm.request_status_updated",
+        args,
+        payload,
+        wallet: request.account,
+        wallets: [request.account],
+        data: {
+          requestId: args.requestId,
+          strategyId: request.strategyId,
+          kind: request.kind,
+          status: Number(args.status),
+          statusLabel: request.statusLabel,
+          settledAssets: args.settledAssets.toString(),
+          settledShares: args.settledShares.toString(),
+          remoteRef: request.remoteRef,
+          remoteRefLabel: request.remoteRefLabel,
+          failureCode: request.failureCode,
+          failureCodeLabel: request.failureCodeLabel
+        }
+      });
+    });
   }
 
   registerEscrow(eventName, _topic, build) {
@@ -226,7 +290,14 @@ export class EventListener {
     this.register(this.gateway.accountContract, eventName, build);
   }
 
+  registerXcm(eventName, _topic, build) {
+    this.register(this.gateway.xcmWrapperContract, eventName, build);
+  }
+
   register(contract, eventName, build) {
+    if (!contract?.on) {
+      return;
+    }
     const handler = async (...args) => {
       if (!this.running) {
         return;

@@ -32,6 +32,8 @@ export class PlatformService {
     this.stateStore = stateStore;
     this.eventBus = eventBus;
     this.recurringScheduler = recurringScheduler;
+    this.xcmSettlementWatcher = undefined;
+    this.xcmObservationRelay = undefined;
 
     this.accountMutationService = new AccountMutationService(
       this.accounts,
@@ -184,7 +186,26 @@ export class PlatformService {
         }
       },
       recurring: recurring,
-      scheduler
+      scheduler,
+      xcmSettlementWatcher: await this.xcmSettlementWatcher?.getStatus?.() ?? {
+        enabled: false,
+        running: false,
+        pendingCount: 0,
+        pending: []
+      },
+      xcmObservationRelay: await this.xcmObservationRelay?.getStatus?.() ?? {
+        enabled: false,
+        running: false,
+        syncing: false,
+        feedUrl: undefined,
+        batchSize: 0,
+        pollIntervalMs: 0,
+        cursor: undefined,
+        lastObservedCount: 0,
+        lastSyncedAt: undefined,
+        lastError: undefined,
+        updatedAt: undefined
+      }
     };
   }
 
@@ -414,11 +435,17 @@ export class PlatformService {
     return this.accountMutationService.agentTransfer(from, recipient, asset, amount);
   }
 
-  async allocateIdleFunds(wallet, asset, amount, strategyId = "default-low-risk") {
+  async allocateIdleFunds(wallet, asset, amount, strategyId = "default-low-risk", strategy = undefined, options = {}) {
+    if (strategy?.executionMode === "async_xcm") {
+      return this.accountMutationService.requestStrategyDeposit(wallet, asset, amount, strategyId, strategy, options);
+    }
     return this.accountMutationService.allocateIdleFunds(wallet, asset, amount, strategyId);
   }
 
-  async deallocateIdleFunds(wallet, asset, amount, strategyId = "default-low-risk") {
+  async deallocateIdleFunds(wallet, asset, amount, strategyId = "default-low-risk", strategy = undefined, options = {}) {
+    if (strategy?.executionMode === "async_xcm") {
+      return this.accountMutationService.requestStrategyWithdraw(wallet, asset, amount, strategyId, strategy, options);
+    }
     return this.accountMutationService.deallocateIdleFunds(wallet, asset, amount, strategyId);
   }
 
@@ -436,6 +463,31 @@ export class PlatformService {
 
   async repay(wallet, asset, amount) {
     return this.accountMutationService.repay(wallet, asset, amount);
+  }
+
+  async getXcmRequest(requestId) {
+    if (!this.blockchainGateway?.isEnabled()) {
+      throw new ValidationError("XCM request lookup requires the blockchain gateway.");
+    }
+    return this.blockchainGateway.getXcmRequest(requestId);
+  }
+
+  async finalizeXcmRequest(requestId, outcome) {
+    if (!this.blockchainGateway?.isEnabled()) {
+      throw new ValidationError("XCM request finalization requires the blockchain gateway.");
+    }
+    const finalized = await this.blockchainGateway.finalizeXcmRequest(requestId, outcome);
+    if (finalized?.strategyRequest?.account) {
+      await this.accountMutationService.recordAsyncStrategySettlement(finalized);
+    }
+    return finalized;
+  }
+
+  async observeXcmOutcome(requestId, outcome) {
+    if (!this.xcmSettlementWatcher) {
+      throw new ValidationError("XCM outcome observation requires the settlement watcher.");
+    }
+    return this.xcmSettlementWatcher.observeOutcome(requestId, outcome);
   }
 
   async ingestVerification(sessionId, verdict) {

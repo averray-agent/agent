@@ -16,7 +16,8 @@ const BASE_CAPABILITIES = [
   "session:read",
   "session:timeline",
   "strategies:list",
-  "subjobs:read"
+  "subjobs:read",
+  "xcm:read"
 ];
 
 const ROLE_CAPABILITIES = {
@@ -26,7 +27,9 @@ const ROLE_CAPABILITIES = {
     "jobs:fire-recurring",
     "jobs:pause-recurring",
     "jobs:resume-recurring",
-    "subjobs:create"
+    "subjobs:create",
+    "xcm:observe",
+    "xcm:finalize"
   ],
   verifier: [
     "verifier:handlers:read",
@@ -70,6 +73,7 @@ export function capabilityMatrix() {
       "/session": ["session:read"],
       "/session/timeline": ["session:timeline"],
       "/events": ["events:read"],
+      "/xcm/request": ["xcm:read"],
       "/payments/send": ["payments:send"],
       "/reputation": ["reputation:read"],
       "/strategies": ["strategies:list"],
@@ -78,6 +82,8 @@ export function capabilityMatrix() {
       "/admin/jobs/fire": ["jobs:fire-recurring"],
       "/admin/jobs/pause": ["jobs:pause-recurring"],
       "/admin/jobs/resume": ["jobs:resume-recurring"],
+      "/admin/xcm/observe": ["xcm:observe"],
+      "/admin/xcm/finalize": ["xcm:finalize"],
       "/verifier/handlers": ["verifier:handlers:read"],
       "/verifier/result": ["verifier:result:read"],
       "/verifier/replay": ["verifier:replay"],

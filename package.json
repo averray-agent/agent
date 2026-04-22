@@ -16,6 +16,7 @@
     "build:site": "npm run build:marketing && node scripts/sync-marketing-site.mjs",
     "dev:indexer": "npm --workspace indexer run dev",
     "start:indexer": "npm --workspace indexer run start",
-    "typecheck:indexer": "npm --workspace indexer run typecheck"
+    "typecheck:indexer": "npm --workspace indexer run typecheck",
+    "validate:subscan-xcm": "node scripts/ops/validate-subscan-xcm-source.mjs"
   }
 }

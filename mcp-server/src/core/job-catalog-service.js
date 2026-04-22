@@ -7,7 +7,7 @@ import { isBuiltinJobSchemaRef } from "./job-schema-registry.js";
 
 const DEFAULT_AGENT_PROFILE = {
   capabilities: ["claim_job", "submit_work", "allocate_idle_funds"],
-  supportedProtocols: ["mcp", "a2a", "http"],
+  supportedProtocols: ["mcp", "http"],
   preferredCategories: ["coding"],
   preferredRiskLevel: "low",
   verifierCompatibility: ["benchmark", "deterministic", "human_fallback"],

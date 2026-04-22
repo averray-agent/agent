@@ -44,3 +44,113 @@ test("loadBlockchainConfig treats missing RPC across all aliases as incomplete c
     /RPC_URL \(or DWELLER_RPC_URL \/ POLKADOT_RPC_URL\)/
   );
 });
+
+test("loadBlockchainConfig accepts explicit SUPPORTED_ASSETS_JSON metadata", () => {
+  const config = loadBlockchainConfig({
+    ...baseEnv,
+    RPC_URL: "https://legacy.example",
+    SUPPORTED_ASSETS: "",
+    SUPPORTED_ASSETS_JSON: JSON.stringify([
+      {
+        symbol: "USDt",
+        assetClass: "trust_backed",
+        assetId: 1984,
+        decimals: 6
+      },
+      {
+        symbol: "vDOT",
+        assetClass: "foreign",
+        foreignAssetIndex: 5,
+        decimals: 10,
+        xcmLocation: "{ parents: 1, interior: X1(Parachain(2030)) }"
+      }
+    ])
+  });
+
+  assert.equal(config.enabled, true);
+  assert.deepEqual(config.supportedAssets, [
+    {
+      symbol: "USDt",
+      assetClass: "trust_backed",
+      assetId: 1984,
+      decimals: 6,
+      address: "0x000007c000000000000000000000000001200000"
+    },
+    {
+      symbol: "vDOT",
+      assetClass: "foreign",
+      foreignAssetIndex: 5,
+      decimals: 10,
+      xcmLocation: "{ parents: 1, interior: X1(Parachain(2030)) }",
+      address: "0x0000000500000000000000000000000002200000"
+    }
+  ]);
+});
+
+test("loadBlockchainConfig prefers SUPPORTED_ASSETS_JSON when both config formats are present", () => {
+  const config = loadBlockchainConfig({
+    ...baseEnv,
+    RPC_URL: "https://legacy.example",
+    SUPPORTED_ASSETS: "DOT:0x5555555555555555555555555555555555555555",
+    SUPPORTED_ASSETS_JSON: JSON.stringify([
+      {
+        symbol: "USDC",
+        assetClass: "trust_backed",
+        assetId: 1337,
+        decimals: 6
+      }
+    ])
+  });
+
+  assert.deepEqual(config.supportedAssets, [
+    {
+      symbol: "USDC",
+      assetClass: "trust_backed",
+      assetId: 1337,
+      decimals: 6,
+      address: "0x0000053900000000000000000000000001200000"
+    }
+  ]);
+});
+
+test("loadBlockchainConfig rejects mismatched derived addresses in SUPPORTED_ASSETS_JSON", () => {
+  assert.throws(
+    () =>
+      loadBlockchainConfig({
+        ...baseEnv,
+        RPC_URL: "https://legacy.example",
+        SUPPORTED_ASSETS: "",
+        SUPPORTED_ASSETS_JSON: JSON.stringify([
+          {
+            symbol: "USDt",
+            assetClass: "trust_backed",
+            assetId: 1984,
+            address: "0x1111111111111111111111111111111111111111"
+          }
+        ])
+      }),
+    /does not match derived trust_backed precompile address/
+  );
+});
+
+test("loadBlockchainConfig accepts optional XCM_WRAPPER_ADDRESS", () => {
+  const config = loadBlockchainConfig({
+    ...baseEnv,
+    RPC_URL: "https://legacy.example",
+    XCM_WRAPPER_ADDRESS: "0x6666666666666666666666666666666666666666"
+  });
+
+  assert.equal(config.xcmWrapperAddress, "0x6666666666666666666666666666666666666666");
+});
+
+test("loadBlockchainConfig rejects malformed optional XCM_WRAPPER_ADDRESS", () => {
+  assert.throws(
+    () =>
+      loadBlockchainConfig({
+        ...baseEnv,
+        RPC_URL: "https://legacy.example",
+        XCM_WRAPPER_ADDRESS: "not-an-address"
+      }),
+    /XCM_WRAPPER_ADDRESS must be a 0x \+ 20-byte EVM address/
+  );
+});
