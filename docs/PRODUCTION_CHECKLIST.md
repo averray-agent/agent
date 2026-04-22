@@ -51,11 +51,16 @@ Restore drills are documented in [VPS_RUNBOOK.md](../VPS_RUNBOOK.md).
 - [ ] API health is green at `https://api.averray.com/health`.
 - [ ] Indexer readiness is green at `https://index.averray.com/ready`.
 - [ ] Indexer freshness is within the accepted lag budget.
+- [ ] When an admin JWT is available, `/admin/status` reports the async XCM
+  watcher lane cleanly.
 
 Run:
 
 ```bash
 ./scripts/ops/check-hosted-stack.sh
+
+# Optional: include the async XCM operator lane in the smoke check
+ADMIN_JWT='<admin-jwt>' ./scripts/ops/check-hosted-stack.sh
 ```
 
 ---

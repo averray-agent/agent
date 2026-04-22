@@ -106,6 +106,9 @@ relay that accepts JSON POSTs.
    ```bash
    cd /srv/agent-stack/app
    ./scripts/ops/check-hosted-stack.sh
+
+   # If an admin JWT is available, include async XCM operator status too:
+   ADMIN_JWT='<admin-jwt>' ./scripts/ops/check-hosted-stack.sh
    ```
 2. Check:
    ```bash

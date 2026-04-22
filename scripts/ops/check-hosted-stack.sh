@@ -7,6 +7,7 @@ DISCOVERY_URL=${DISCOVERY_URL:-https://averray.com/.well-known/agent-tools.json}
 APP_URL=${APP_URL:-https://app.averray.com/}
 API_HEALTH_URL=${API_HEALTH_URL:-https://api.averray.com/health}
 API_ONBOARDING_URL=${API_ONBOARDING_URL:-https://api.averray.com/onboarding}
+API_ADMIN_STATUS_URL=${API_ADMIN_STATUS_URL:-https://api.averray.com/admin/status}
 INDEXER_URL=${INDEXER_URL:-https://index.averray.com/}
 INDEXER_READY_URL=${INDEXER_READY_URL:-https://index.averray.com/ready}
 INDEXER_STATUS_URL=${INDEXER_STATUS_URL:-https://index.averray.com/status}
@@ -14,6 +15,7 @@ INDEXER_MAX_STALENESS_SEC=${INDEXER_MAX_STALENESS_SEC:-1800}
 TIMEOUT_SEC=${TIMEOUT_SEC:-20}
 APP_BASIC_AUTH_USER=${APP_BASIC_AUTH_USER:-}
 APP_BASIC_AUTH_PASSWORD=${APP_BASIC_AUTH_PASSWORD:-}
+ADMIN_JWT=${ADMIN_JWT:-}
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -32,6 +34,14 @@ fetch() {
     curl_args+=(-u "$APP_BASIC_AUTH_USER:$APP_BASIC_AUTH_PASSWORD")
   fi
   curl "${curl_args[@]}" "$url"
+}
+
+fetch_admin_json() {
+  local url="$1"
+  curl -fsS --max-time "$TIMEOUT_SEC" \
+    -H "accept: application/json" \
+    -H "authorization: Bearer $ADMIN_JWT" \
+    "$url"
 }
 
 echo "Checking public site"
@@ -80,5 +90,17 @@ jq -e --argjson maxAge "$INDEXER_MAX_STALENESS_SEC" '
   | max as $latest
   | (now - $latest) <= $maxAge
 ' >/dev/null <<<"$indexer_status_json"
+
+if [[ -n "$ADMIN_JWT" ]]; then
+  echo "Checking admin async XCM status"
+  admin_status_json="$(fetch_admin_json "$API_ADMIN_STATUS_URL")"
+  jq -e '.maintenance.policy.enabled == true' >/dev/null <<<"$admin_status_json"
+  jq -e '.xcmSettlementWatcher.enabled == true' >/dev/null <<<"$admin_status_json"
+  jq -e '.xcmSettlementWatcher.pendingCount >= 0' >/dev/null <<<"$admin_status_json"
+  jq -e '
+    (.xcmObservationRelay | type) == "object" and
+    (.xcmObservationRelay.enabled | type) == "boolean"
+  ' >/dev/null <<<"$admin_status_json"
+fi
 
 echo "Hosted stack smoke check passed."
