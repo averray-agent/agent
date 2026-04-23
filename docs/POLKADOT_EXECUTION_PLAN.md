@@ -193,6 +193,8 @@ Work:
 - keep discovery manifest narrower than authenticated execution
 - finish replayable verification
 - enforce schema-native jobs at runtime
+- expose canonical built-in job schemas over HTTP so builders can fetch
+  them directly from the platform
 - centralize the session state machine
 - strengthen idempotency for recurring and admin writes
 - build one canonical timeline for claim, submit, verify, settle

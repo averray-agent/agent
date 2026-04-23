@@ -158,14 +158,30 @@ const BUILTIN_JOB_SCHEMAS = new Map([
 ]);
 
 export function getBuiltinJobSchema(schemaRef) {
-  if (BUILTIN_JOB_SCHEMAS.has(schemaRef)) {
-    return BUILTIN_JOB_SCHEMAS.get(schemaRef);
+  const normalized = normalizeBuiltinJobSchemaRef(schemaRef);
+  if (!normalized) {
+    return undefined;
   }
-  if (schemaRef.startsWith("schema://jobs/sub-")) {
-    const category = schemaRef.slice("schema://jobs/sub-".length);
-    return BUILTIN_JOB_SCHEMAS.get(`schema://jobs/${category}-output`);
+  if (BUILTIN_JOB_SCHEMAS.has(normalized)) {
+    return BUILTIN_JOB_SCHEMAS.get(normalized);
   }
   return undefined;
+}
+
+export function getBuiltinJobSchemaByName(name) {
+  const normalizedName = String(name ?? "").trim().replace(/\.json$/u, "");
+  if (!/^[a-z0-9-]+$/u.test(normalizedName)) {
+    return undefined;
+  }
+  return getBuiltinJobSchema(`schema://jobs/${normalizedName}`);
+}
+
+export function getPublicBuiltinJobSchemaByName(name) {
+  const schema = getBuiltinJobSchemaByName(name);
+  if (!schema) {
+    return undefined;
+  }
+  return toPublicSchemaDocument(schema);
 }
 
 export function isBuiltinJobSchemaRef(schemaRef) {
@@ -183,8 +199,61 @@ export function validateStructuredSubmission(schemaRef, submission, { path = "su
   return submission;
 }
 
-export function listBuiltinJobSchemas() {
-  return [...BUILTIN_JOB_SCHEMAS.values()].map((schema) => ({ $id: schema.$id, description: schema.description }));
+export function listBuiltinJobSchemas({ includeDefinitions = false } = {}) {
+  return [...BUILTIN_JOB_SCHEMAS.values()].map((schema) => ({
+    $id: schema.$id,
+    description: schema.description,
+    ...(includeDefinitions ? { schema: cloneSchema(schema) } : {})
+  }));
+}
+
+function normalizeBuiltinJobSchemaRef(schemaRef) {
+  if (typeof schemaRef !== "string") {
+    return undefined;
+  }
+  const trimmed = schemaRef.trim();
+  if (BUILTIN_JOB_SCHEMAS.has(trimmed)) {
+    return trimmed;
+  }
+  if (trimmed.startsWith("schema://jobs/sub-")) {
+    const category = trimmed.slice("schema://jobs/sub-".length);
+    return `schema://jobs/${category}-output`;
+  }
+  return undefined;
+}
+
+function cloneSchema(schema) {
+  return JSON.parse(JSON.stringify(schema));
+}
+
+function toPublicSchemaDocument(schema) {
+  return {
+    $schema: "http://json-schema.org/draft-07/schema#",
+    ...cloneSchema(schema)
+  };
+}
+
+export function schemaRefToJobSchemaPath(schemaRef) {
+  const normalized = normalizeBuiltinJobSchemaRef(schemaRef);
+  if (!normalized) {
+    return undefined;
+  }
+  return `/schemas/jobs/${normalized.slice("schema://jobs/".length)}.json`;
+}
+
+export function jobSchemaPathToRef(pathname) {
+  const raw = String(pathname ?? "").trim().replace(/^\/+/, "");
+  if (!raw) {
+    return undefined;
+  }
+  const withoutPrefix = raw.startsWith("schemas/jobs/")
+    ? raw.slice("schemas/jobs/".length)
+    : raw;
+  const normalizedName = withoutPrefix.replace(/\.json$/u, "");
+  if (!/^[a-z0-9-]+$/u.test(normalizedName)) {
+    return undefined;
+  }
+  return normalizeBuiltinJobSchemaRef(`schema://jobs/${normalizedName}`);
 }
 
 export function validateAgainstSchema(value, schema, path = "value") {

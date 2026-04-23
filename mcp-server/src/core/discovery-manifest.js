@@ -10,6 +10,8 @@ const DISCOVERY_PUBLIC_ENDPOINTS = [
   { path: "/jobs", description: "Public job catalog (no auth)." },
   { path: "/jobs/definition?jobId=X", description: "Canonical job definition by id." },
   { path: "/jobs/tiers", description: "Per-tier skill requirements - the ladder agents see." },
+  { path: "/schemas/jobs", description: "List of built-in job schemas available for structured work." },
+  { path: "/schemas/jobs/:name.json", description: "Canonical JSON schema for one built-in job schema." },
   { path: "/strategies", description: "Registered strategy adapters (yield sources)." },
   { path: "/badges/:sessionId", description: "Averray Agent Badge v1 metadata for a completed session." },
   { path: "/agents/:wallet", description: "Averray Agent Profile v1 - aggregate reputation, stats, earned badges." },
@@ -45,6 +47,8 @@ const DISCOVERY_TOOLS = [
   { name: "getPlatformCapabilities", description: "Capability + endpoint manifest for this deployment." },
   { name: "listJobs", description: "All active jobs." },
   { name: "getJobDefinition", description: "One job by id." },
+  { name: "listJobSchemas", description: "List built-in structured job schemas and their canonical paths." },
+  { name: "getJobSchema", description: "Fetch one built-in structured job schema by name." },
   { name: "recommendJobs", description: "Wallet-scoped ranked recommendations with tier-gate info." },
   { name: "preflightJob", description: "Pre-claim eligibility + stake + tier check." },
   { name: "explainEligibility", description: "Per-wallet reason why a job is eligible / blocked." },
@@ -99,7 +103,10 @@ const BASE_MANIFEST = {
   tools: DISCOVERY_TOOLS,
   schemas: {
     agentBadge: "https://averray.com/schemas/agent-badge-v1.json",
-    agentProfile: "https://averray.com/schemas/agent-profile-v1.json"
+    agentProfile: "https://averray.com/schemas/agent-profile-v1.json",
+    jobSchemasIndex: "https://api.averray.com/schemas/jobs",
+    jobSchemaPathTemplate: "https://api.averray.com/schemas/jobs/<name>.json",
+    jobSchemaRefPrefix: "schema://jobs/"
   },
   docs: {
     vision: "https://github.com/depre-dev/agent/blob/main/docs/AGENT_BANKING.md",
@@ -134,6 +141,8 @@ export function buildDiscoveryManifest({
     http: baseUrl,
     mcp: `${baseUrl}/onboarding`
   };
+  manifest.schemas.jobSchemasIndex = `${baseUrl}/schemas/jobs`;
+  manifest.schemas.jobSchemaPathTemplate = `${baseUrl}/schemas/jobs/<name>.json`;
   manifest.onboarding.entrypoint = `${baseUrl}/onboarding`;
   manifest.health = `${baseUrl}/health`;
   return manifest;

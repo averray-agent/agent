@@ -17,6 +17,11 @@ import { buildBadgeFromSession } from "../../core/badge-metadata.js";
 import { buildAgentProfile } from "../../core/agent-profile.js";
 import { buildDiscoveryManifest } from "../../core/discovery-manifest.js";
 import { TIER_REQUIREMENTS } from "../../core/job-catalog-service.js";
+import {
+  getPublicBuiltinJobSchemaByName,
+  listBuiltinJobSchemas,
+  schemaRefToJobSchemaPath
+} from "../../core/job-schema-registry.js";
 
 const {
   platformService: service,
@@ -580,6 +585,34 @@ const server = createServer(async (request, response) => {
         },
         { "cache-control": "public, max-age=300" }
       );
+    }
+
+    if (request.method === "GET" && pathname === "/schemas/jobs") {
+      const schemas = listBuiltinJobSchemas().map((entry) => ({
+        ...entry,
+        path: schemaRefToJobSchemaPath(entry.$id)
+      }));
+      return respond(
+        response,
+        200,
+        {
+          schemas,
+          count: schemas.length,
+          docs: "https://github.com/depre-dev/agent/tree/main/docs/schemas/jobs"
+        },
+        { "cache-control": "public, max-age=300" }
+      );
+    }
+
+    if (request.method === "GET" && pathname.startsWith("/schemas/jobs/")) {
+      const schema = getPublicBuiltinJobSchemaByName(decodeURIComponent(pathname.slice("/schemas/jobs/".length)));
+      if (!schema) {
+        return respond(response, 404, {
+          status: "not_found",
+          message: "Unknown built-in job schema."
+        });
+      }
+      return respond(response, 200, schema, { "cache-control": "public, max-age=300" });
     }
 
     if (request.method === "GET" && pathname === "/jobs/definition") {
