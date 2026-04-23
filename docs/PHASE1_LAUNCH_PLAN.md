@@ -132,7 +132,7 @@ Owner: backend + DX
 Suggested outputs:
 
 - `examples/claim-starter-job/`
-- `examples/profile-lookup/`
+- `examples/profile-lookup/` — shipped as a public discovery/schema/lifecycle/profile read example
 - `examples/verification-replay/`
 - `sdk/typescript/`
 

@@ -189,3 +189,24 @@ INDEXER_URL=https://index.averray.com \
 XCM_CAPTURE_PATH=artifacts/xcm/subscan-validation-report.json \
 npm run validate:subscan-xcm -- --require-published
 ```
+
+---
+
+## 11. Native observer gate
+
+- [ ] [NATIVE_XCM_OBSERVER.md](./NATIVE_XCM_OBSERVER.md) has a completed
+  correlation decision for deposit and withdrawal requests.
+- [ ] One staged deposit and one staged withdrawal have native Hub/Bifrost
+  evidence linked back to the Averray `requestId`.
+- [ ] Captured evidence passes
+  `npm run validate:native-xcm-evidence -- --file <capture.json>`.
+- [ ] Captured evidence was assembled with
+  `npm run capture:native-xcm-evidence` or contains the same
+  `native-xcm-observer-evidence-v1` fields.
+- [ ] The observer cursor survives restart without duplicate settlement.
+- [ ] Native observer output agrees with the internal
+  `observe -> auto-finalize` staging flow for success and failure cases.
+- [ ] Captured evidence is retained for audit and incident review.
+
+Until this is green, Subscan or manual observation can help staging, but the
+native observer is not production settlement truth.

@@ -24,6 +24,10 @@ type PublisherOptions = {
   authToken?: string;
   apiHost?: string;
   apiKey?: string;
+  nativeHubWs?: string;
+  nativeBifrostWs?: string;
+  nativeStartBlock?: number;
+  nativeConfirmations?: number;
   pollIntervalMs?: number;
   batchSize?: number;
   scope?: string;
@@ -61,6 +65,10 @@ export class XcmOutcomePublisherService {
     authToken = undefined,
     apiHost = undefined,
     apiKey = undefined,
+    nativeHubWs = undefined,
+    nativeBifrostWs = undefined,
+    nativeStartBlock = undefined,
+    nativeConfirmations = undefined,
     pollIntervalMs = 30_000,
     batchSize = 25,
     scope = DEFAULT_SCOPE,
@@ -88,6 +96,10 @@ export class XcmOutcomePublisherService {
         authToken: this.authToken,
         apiHost: this.apiHost,
         apiKey,
+        nativeHubWs,
+        nativeBifrostWs,
+        nativeStartBlock,
+        nativeConfirmations,
         fetchImpl: this.fetchImpl
       })
       : undefined;

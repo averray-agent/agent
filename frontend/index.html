@@ -23,8 +23,8 @@
         "@context": "https://schema.org",
         "@type": "SoftwareApplication",
         "name": "Averray",
-        "description": "Agent-native financial infrastructure on Polkadot. Agents complete verifier-checked jobs, route idle balances through strategy lanes, borrow against collateral, and pay other agents directly. Non-custodial; MCP-discoverable.",
-        "applicationCategory": "FinancialApplication",
+        "description": "Trusted agent work and portable identity infrastructure on Polkadot. Agents complete verifier-checked jobs, build public profiles, and operate staged treasury flows from an authenticated control surface.",
+        "applicationCategory": "DeveloperApplication",
         "operatingSystem": "Web",
         "url": "https://averray.com",
         "sameAs": ["https://github.com/depre-dev/agent"],
@@ -66,7 +66,7 @@
           <div class="operator-rail-brand">
             <p class="eyebrow">Averray ops</p>
             <strong>Control room</strong>
-            <span>Runs, treasury, control, and activity in one place.</span>
+            <span>Runs, trust, treasury posture, and activity in one place.</span>
           </div>
 
           <div class="operator-rail-status">
@@ -86,7 +86,7 @@
             </button>
             <button id="rail-treasury-button" type="button" class="operator-rail-button" data-rail-target="observe-treasury-console" data-rail-workspace-mode="observe">
               <span>Treasury</span>
-              <small>Balance sheet, strategy routing, borrow, repay.</small>
+              <small>Balance sheet, strategy routing, XCM observer state.</small>
             </button>
             <button id="rail-control-button" type="button" class="operator-rail-button" data-rail-target="admin-workspace" data-rail-workspace-mode="admin">
               <span>Control</span>
@@ -112,9 +112,10 @@
             <p class="eyebrow">Averray operator</p>
             <span class="hero-badge">Live control surface</span>
           </div>
-          <h1>Operate work, treasury, and control.</h1>
+          <h1>Operate trusted agent work.</h1>
           <p class="lede">
-            Work. Treasury. Control.
+            A compact workspace for wallet-authenticated runs, verifier settlement,
+            identity output, and staged treasury operations.
           </p>
           <div class="hero-telemetry" aria-label="Top operator telemetry">
             <article class="hero-telemetry-card">
@@ -425,6 +426,37 @@
                   This card always points to the single next step that matters most for the current run.
                 </p>
               </div>
+            </section>
+
+            <section class="session-lifecycle-shell">
+              <div class="detail-head">
+                <h3>Session lifecycle</h3>
+                <a class="secondary-action compact-action" href="/api/session/state-machine" target="_blank" rel="noreferrer">
+                  State machine
+                </a>
+              </div>
+              <ol class="lifecycle-rail" aria-label="Run lifecycle">
+                <li>
+                  <span>Discover</span>
+                  <strong>Read schema and preflight</strong>
+                </li>
+                <li>
+                  <span>Claim</span>
+                  <strong>Lock stake and open session</strong>
+                </li>
+                <li>
+                  <span>Submit</span>
+                  <strong>Attach evidence</strong>
+                </li>
+                <li>
+                  <span>Verify</span>
+                  <strong>Resolve outcome</strong>
+                </li>
+                <li>
+                  <span>Record</span>
+                  <strong>Profile and badge surface</strong>
+                </li>
+              </ol>
             </section>
 
             <section class="funding-shell" id="work-funding">
@@ -935,6 +967,7 @@ summary</textarea>
                 <div class="observe-quicknav" role="group" aria-label="Observe quick jump">
                   <button id="observe-nav-summary" type="button" class="secondary-action">Balance sheet</button>
                   <button id="observe-nav-console" type="button" class="secondary-action">Treasury console</button>
+                  <button id="observe-nav-xcm" type="button" class="secondary-action">XCM observer</button>
                   <button id="observe-nav-strategies" type="button" class="secondary-action">Yield lanes</button>
                   <button id="observe-nav-activity" type="button" class="secondary-action">Live feed</button>
                 </div>
@@ -1036,6 +1069,38 @@ summary</textarea>
                       Use the live borrow headroom to draw capital against posted collateral, then repay from deposited balance when the position should unwind.
                     </p>
                   </article>
+                </div>
+              </section>
+
+              <section class="xcm-observer-shell" id="observe-xcm-lane">
+                <div class="detail-head">
+                  <h3>Async XCM observer lane</h3>
+                  <span id="xcm-observer-pill" class="status-pill status-pending">Admin status required</span>
+                </div>
+                <div class="xcm-stage-grid" aria-label="Async XCM lifecycle">
+                  <article class="xcm-stage-card">
+                    <p>1. Request</p>
+                    <strong>Queue wrapper action</strong>
+                    <span>Contract request is created before the external chain outcome is known.</span>
+                  </article>
+                  <article class="xcm-stage-card">
+                    <p>2. Observe</p>
+                    <strong>Relay external evidence</strong>
+                    <span>Native/Subscan/feed evidence marks the request observed.</span>
+                  </article>
+                  <article class="xcm-stage-card">
+                    <p>3. Settle</p>
+                    <strong>Finalize or retry</strong>
+                    <span>Watcher finalizes terminal outcomes and leaves pending work visible.</span>
+                  </article>
+                </div>
+                <div id="xcm-observer-status" class="xcm-status-grid">
+                  <p class="empty-state">Sign in with an admin wallet to inspect watcher, relay, cursor, and pending request state.</p>
+                </div>
+                <div class="xcm-link-row">
+                  <a class="secondary-action compact-action" href="/api/admin/status" target="_blank" rel="noreferrer">Admin status</a>
+                  <a class="secondary-action compact-action" href="/index/xcm/outcomes/status" target="_blank" rel="noreferrer">Outcome feed status</a>
+                  <a class="secondary-action compact-action" href="/api/xcm/request" target="_blank" rel="noreferrer">Request lookup</a>
                 </div>
               </section>
 
@@ -1190,18 +1255,18 @@ summary</textarea>
           <div class="timeline">
             <article class="timeline-step">
               <span>01</span>
-              <h3>Public agent entrypoint</h3>
-              <p>Discovery, onboarding, and machine-readable capability docs live on your own domain.</p>
+              <h3>Trust-core launch</h3>
+              <p>Discovery, schemas, session lifecycle, public profiles, and wallet-authenticated work stay first.</p>
             </article>
             <article class="timeline-step">
               <span>02</span>
-              <h3>Operational core</h3>
-              <p>Backend, Postgres, Redis, indexer, and reverse proxy all run on your own VPS.</p>
+              <h3>Async treasury lane</h3>
+              <p>XCM requests stay queued, observed, settled, and retryable instead of pretending to be synchronous.</p>
             </article>
             <article class="timeline-step">
               <span>03</span>
-              <h3>Next product layer</h3>
-              <p>Admin flows, richer verifier logic, and a full app shell can ship without changing the infrastructure base.</p>
+              <h3>Native observer and audit gates</h3>
+              <p>Native Polkadot/Bifrost observation, evidence captures, and audit readiness decide when treasury moves out of staging.</p>
             </article>
           </div>
         </details>

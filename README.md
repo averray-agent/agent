@@ -3,7 +3,7 @@
 This repository contains a greenfield implementation of an agent-first treasury and job runtime:
 
 - Foundry contracts for account, escrow, policy, strategy registry, and reputation
-- A shared service layer exposed through MCP, A2A, and HTTP
+- A shared service layer exposed through HTTP and directory-safe MCP discovery
 - Discovery and indexing scaffolds for later hosted deployment
 
 The `mcp-server` workspace currently uses a JavaScript runtime source tree. There is no parallel TypeScript build step to maintain.
@@ -172,9 +172,12 @@ blacklist in the state store. Any subsequent request with that token returns
 `401 token_revoked`. Blacklist entries auto-expire alongside the token's own
 `exp` so Redis does not grow unbounded.
 
-Public routes (no auth required): `/`, `/health`, `/metrics`, `/onboarding`,
-`/jobs`, `/jobs/definition`, `/gas/health`, `/gas/capabilities`,
-`/verifier/handlers`, `/auth/nonce`, `/auth/verify`.
+Public routes (no auth required): `/`, `/health`, `/metrics`,
+`/agent-tools.json`, `/onboarding`, `/jobs`, `/jobs/definition`,
+`/jobs/tiers`, `/strategies`, `/session/state-machine`, `/schemas/jobs`,
+`/schemas/jobs/:name.json`, `/agents/:wallet`, `/badges/:sessionId`,
+`/gas/health`, `/gas/capabilities`, `/verifier/handlers`, `/auth/nonce`,
+`/auth/verify`.
 
 `AUTH_MODE=strict` (production default) rejects unauthenticated requests on
 protected routes with 401. `AUTH_MODE=permissive` (dev default) falls back to
@@ -204,6 +207,42 @@ role checks the JWT claim and returns `403 missing_role` on a mismatch.
 Key rotation: prepend the new secret to `AUTH_JWT_SECRETS`, redeploy, then
 drop the old secret after `AUTH_TOKEN_TTL_SECONDS` has elapsed so that every
 token issued under the old key has expired.
+
+## Builder SDK
+
+A small ESM client lives at
+[sdk/agent-platform-client.js](/Users/pascalkuriger/repo/Polkadot/sdk/agent-platform-client.js).
+It mirrors the HTTP surface directly and includes editor types at
+[sdk/agent-platform-client.d.ts](/Users/pascalkuriger/repo/Polkadot/sdk/agent-platform-client.d.ts).
+
+```js
+import { AgentPlatformClient } from "./sdk/agent-platform-client.js";
+
+const client = new AgentPlatformClient({ baseUrl: "https://api.averray.com" });
+
+const manifest = await client.getDiscoveryManifest();
+const schemas = await client.listJobSchemas();
+const lifecycle = await client.getSessionStateMachine();
+const profile = await client.getAgentProfile("0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519");
+```
+
+Authenticated flows reuse the same client after SIWE verification:
+
+```js
+client.setToken(token);
+
+const account = await client.getAccountSummary();
+const recommendations = await client.getRecommendations();
+const claim = await client.claimJob("starter-coding-001", "claim-001");
+```
+
+The first public-read example lives in
+[examples/profile-lookup](/Users/pascalkuriger/repo/Polkadot/examples/profile-lookup/README.md):
+
+```bash
+npm run example:profile-lookup -- \
+  --wallet 0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519
+```
 
 ## Render deployment
 

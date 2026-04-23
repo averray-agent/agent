@@ -1,0 +1,42 @@
+{
+  "schemaVersion": "native-xcm-observer-evidence-v1",
+  "requestId": "0x1111111111111111111111111111111111111111111111111111111111111111",
+  "direction": "deposit",
+  "status": "succeeded",
+  "settledAssets": "5000000000000",
+  "settledShares": "4900000000000",
+  "remoteRef": "0x2222222222222222222222222222222222222222222222222222222222222222",
+  "failureCode": null,
+  "observedAt": "2026-04-23T12:00:00.000Z",
+  "correlation": {
+    "method": "remote_ref",
+    "confidence": "staging",
+    "notes": "Sample only. Replace with evidence captured from a Chopsticks/PAPI replay."
+  },
+  "hub": {
+    "chain": "polkadot-hub",
+    "blockNumber": "123",
+    "blockHash": "0x3333333333333333333333333333333333333333333333333333333333333333",
+    "extrinsicHash": "0x4444444444444444444444444444444444444444444444444444444444444444",
+    "messageHash": "0x5555555555555555555555555555555555555555555555555555555555555555",
+    "eventIndex": "123-7"
+  },
+  "bifrost": {
+    "chain": "bifrost-polkadot",
+    "blockNumber": "456",
+    "blockHash": "0x6666666666666666666666666666666666666666666666666666666666666666",
+    "eventIndex": "456-12",
+    "assetLocation": {
+      "parents": 1,
+      "interior": "Here"
+    },
+    "amount": "5000000000000"
+  },
+  "decision": {
+    "status": "succeeded",
+    "settledAssets": "5000000000000",
+    "settledShares": "4900000000000",
+    "remoteRef": "0x2222222222222222222222222222222222222222222222222222222222222222",
+    "reason": "matched_terminal_bifrost_event"
+  }
+}

@@ -43,8 +43,10 @@ external libraries beyond the two files under `contracts/lib/`.
 Three-layer stack:
 
 1. **Solidity contracts** on Polkadot Hub (Ethereum-compatible).
-2. **mcp-server** — Node.js service exposing HTTP, MCP, and A2A protocols.
-   Authenticated via Sign-In with Ethereum (EIP-4361) → HS256 JWT.
+2. **mcp-server** — Node.js service exposing HTTP plus directory-safe MCP
+   discovery surfaces. A2A is intentionally out of the public product
+   contract until a real protocol endpoint exists. Authenticated via
+   Sign-In with Ethereum (EIP-4361) -> HS256 JWT.
 3. **Frontend** — vanilla JS served as static files.
 
 A worker's lifecycle:

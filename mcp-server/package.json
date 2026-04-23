@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Shared service layer for MCP, A2A, and HTTP access to the agent-native treasury platform.",
+  "description": "Shared service layer for HTTP and directory-safe MCP discovery for the agent-native treasury platform.",
   "scripts": {
     "start:http": "node src/protocols/http/server.js",
     "test": "node --test src/**/*.test.js",

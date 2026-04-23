@@ -28,6 +28,42 @@ export class AgentPlatformClient {
     return this.request("/onboarding");
   }
 
+  async getDiscoveryManifest() {
+    return this.request("/agent-tools.json");
+  }
+
+  async getJobTierLadder() {
+    return this.request("/jobs/tiers");
+  }
+
+  async listStrategies() {
+    return this.request("/strategies");
+  }
+
+  async getSessionStateMachine() {
+    return this.request("/session/state-machine");
+  }
+
+  async listJobSchemas() {
+    return this.request("/schemas/jobs");
+  }
+
+  async getJobSchema(name) {
+    return this.request(`/schemas/jobs/${encodeURIComponent(name)}`);
+  }
+
+  async getAgentProfile(wallet) {
+    return this.request(`/agents/${encodeURIComponent(wallet)}`);
+  }
+
+  async getAgentBadge(sessionId) {
+    return this.request(`/badges/${encodeURIComponent(sessionId)}`);
+  }
+
+  async listVerifierHandlers() {
+    return this.request("/verifier/handlers");
+  }
+
   async issueNonce(wallet) {
     return this.request("/auth/nonce", {
       method: "POST",
@@ -44,6 +80,46 @@ export class AgentPlatformClient {
 
   async getAuthSession() {
     return this.request("/auth/session");
+  }
+
+  async getAccountSummary() {
+    return this.request("/account");
+  }
+
+  async getBorrowCapacity(asset = "DOT") {
+    return this.request(`/account/borrow-capacity?asset=${encodeURIComponent(asset)}`);
+  }
+
+  async getStrategyPositions() {
+    return this.request("/account/strategies");
+  }
+
+  async fundAccount({ asset = "DOT", amount } = {}) {
+    return this.request("/account/fund", {
+      method: "POST",
+      body: { asset, amount }
+    });
+  }
+
+  async allocateIdleFunds({ asset = "DOT", amount, strategyId = "default-low-risk", ...options } = {}) {
+    return this.request("/account/allocate", {
+      method: "POST",
+      body: compact({ asset, amount, strategyId, ...options })
+    });
+  }
+
+  async deallocateIdleFunds({ asset = "DOT", amount, strategyId = "default-low-risk", ...options } = {}) {
+    return this.request("/account/deallocate", {
+      method: "POST",
+      body: compact({ asset, amount, strategyId, ...options })
+    });
+  }
+
+  async sendToAgent({ recipient, asset = "DOT", amount } = {}) {
+    return this.request("/payments/send", {
+      method: "POST",
+      body: { recipient, asset, amount }
+    });
   }
 
   async listJobs() {

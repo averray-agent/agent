@@ -32,6 +32,27 @@ type FeedItem = {
 
 type FetchLike = typeof fetch;
 
+type NativePapiSourceConfig = {
+  hubWs: string;
+  bifrostWs: string;
+  startBlock?: number;
+  confirmations?: number;
+};
+
+export type NativeXcmEvidence = {
+  requestId: string;
+  status: string;
+  settledAssets?: unknown;
+  settledShares?: unknown;
+  remoteRef?: unknown;
+  failureCode?: unknown;
+  observedAt?: unknown;
+  source?: unknown;
+  hub?: Record<string, unknown>;
+  bifrost?: Record<string, unknown>;
+  decision?: Record<string, unknown>;
+};
+
 export interface XcmUpstreamSourceAdapter {
   type: string;
   describe(): Record<string, unknown>;
@@ -94,6 +115,66 @@ function normalizeFeedItem(item: unknown, fallbackSource = "external_xcm_source"
       ? sourceItem.source.trim()
       : fallbackSource
   };
+}
+
+export function encodeNativePapiCursor({
+  hubBlock,
+  bifrostBlock
+}: {
+  hubBlock: number;
+  bifrostBlock: number;
+}) {
+  if (!Number.isInteger(hubBlock) || hubBlock < 0 || !Number.isInteger(bifrostBlock) || bifrostBlock < 0) {
+    throw new Error("Native PAPI cursor blocks must be non-negative integers.");
+  }
+  return Buffer.from(JSON.stringify({ hubBlock, bifrostBlock }), "utf8").toString("base64url");
+}
+
+export function decodeNativePapiCursor(cursor: string | undefined, fallbackStartBlock = 0) {
+  if (!cursor) {
+    return {
+      hubBlock: fallbackStartBlock,
+      bifrostBlock: fallbackStartBlock
+    };
+  }
+  try {
+    const decoded = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as {
+      hubBlock?: unknown;
+      bifrostBlock?: unknown;
+    };
+    const hubBlock = Number(decoded.hubBlock);
+    const bifrostBlock = Number(decoded.bifrostBlock);
+    if (
+      Number.isInteger(hubBlock) &&
+      hubBlock >= 0 &&
+      Number.isInteger(bifrostBlock) &&
+      bifrostBlock >= 0
+    ) {
+      return { hubBlock, bifrostBlock };
+    }
+  } catch {}
+  return {
+    hubBlock: fallbackStartBlock,
+    bifrostBlock: fallbackStartBlock
+  };
+}
+
+export function normalizeNativeXcmEvidence(evidence: NativeXcmEvidence): PublishedOutcome {
+  if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) {
+    throw new Error("Native XCM evidence must be an object.");
+  }
+  return normalizeFeedItem({
+    requestId: evidence.requestId,
+    status: evidence.status,
+    settledAssets: evidence.settledAssets ?? evidence.decision?.settledAssets ?? 0,
+    settledShares: evidence.settledShares ?? evidence.decision?.settledShares ?? 0,
+    remoteRef: evidence.remoteRef ?? evidence.decision?.remoteRef,
+    failureCode: evidence.failureCode ?? evidence.decision?.failureCode,
+    observedAt: evidence.observedAt ?? evidence.decision?.observedAt,
+    source: typeof evidence.source === "string" && evidence.source.trim()
+      ? evidence.source.trim()
+      : "native_papi_observer"
+  }, "native_papi_observer");
 }
 
 export class HttpFeedSourceAdapter implements XcmUpstreamSourceAdapter {
@@ -279,12 +360,74 @@ export class SubscanXcmSourceAdapter implements XcmUpstreamSourceAdapter {
   }
 }
 
+export class NativePapiXcmSourceAdapter implements XcmUpstreamSourceAdapter {
+  type = "native_papi";
+  hubWs: string;
+  bifrostWs: string;
+  startBlock: number;
+  confirmations: number;
+
+  constructor({
+    hubWs,
+    bifrostWs,
+    startBlock = 0,
+    confirmations = 2
+  }: NativePapiSourceConfig) {
+    this.hubWs = hubWs;
+    this.bifrostWs = bifrostWs;
+    this.startBlock = startBlock;
+    this.confirmations = confirmations;
+    if (!this.hubWs || !this.bifrostWs) {
+      throw new Error("Native PAPI XCM source requires XCM_NATIVE_HUB_WS and XCM_NATIVE_BIFROST_WS.");
+    }
+    if (!Number.isInteger(this.startBlock) || this.startBlock < 0) {
+      throw new Error("XCM_NATIVE_START_BLOCK must be a non-negative integer when provided.");
+    }
+    if (!Number.isInteger(this.confirmations) || this.confirmations < 0) {
+      throw new Error("XCM_NATIVE_CONFIRMATIONS must be a non-negative integer when provided.");
+    }
+  }
+
+  describe() {
+    return {
+      type: this.type,
+      hubWs: this.hubWs,
+      bifrostWs: this.bifrostWs,
+      startBlock: this.startBlock,
+      confirmations: this.confirmations
+    };
+  }
+
+  decodeCursor(cursor: string | undefined) {
+    return decodeNativePapiCursor(cursor, this.startBlock);
+  }
+
+  encodeCursor(cursor: { hubBlock: number; bifrostBlock: number }) {
+    return encodeNativePapiCursor(cursor);
+  }
+
+  evidenceToOutcome(evidence: NativeXcmEvidence) {
+    return normalizeNativeXcmEvidence(evidence);
+  }
+
+  async fetchBatch({ cursor }: UpstreamFetchContext): Promise<SourcePayload> {
+    this.decodeCursor(cursor);
+    throw new Error(
+      "Native PAPI XCM source is configured but live chain reads are not implemented yet. Complete the requestId correlation gate in docs/NATIVE_XCM_OBSERVER.md before enabling settlement from native_papi."
+    );
+  }
+}
+
 export function createXcmUpstreamSourceAdapter({
   type = "feed",
   url,
   authToken,
   apiHost,
   apiKey,
+  nativeHubWs,
+  nativeBifrostWs,
+  nativeStartBlock,
+  nativeConfirmations,
   fetchImpl
 }: {
   type?: string;
@@ -292,6 +435,10 @@ export function createXcmUpstreamSourceAdapter({
   authToken?: string;
   apiHost?: string;
   apiKey?: string;
+  nativeHubWs?: string;
+  nativeBifrostWs?: string;
+  nativeStartBlock?: number;
+  nativeConfirmations?: number;
   fetchImpl?: FetchLike;
 }) {
   if (type === "subscan_xcm") {
@@ -302,6 +449,17 @@ export function createXcmUpstreamSourceAdapter({
       apiHost,
       apiKey,
       fetchImpl
+    });
+  }
+  if (type === "native_papi") {
+    if (!nativeHubWs || !nativeBifrostWs) {
+      throw new Error("Native PAPI XCM source requires XCM_NATIVE_HUB_WS and XCM_NATIVE_BIFROST_WS.");
+    }
+    return new NativePapiXcmSourceAdapter({
+      hubWs: nativeHubWs,
+      bifrostWs: nativeBifrostWs,
+      startBlock: nativeStartBlock,
+      confirmations: nativeConfirmations
     });
   }
   if (!url) {

@@ -189,3 +189,9 @@ Expected:
 
 This is the current-lane proof we can run before paying for Subscan or
 before building the native Polkadot/Bifrost observer.
+
+For the next native-observer lane, see
+[NATIVE_XCM_OBSERVER.md](./NATIVE_XCM_OBSERVER.md). That design keeps the
+existing `/xcm/outcomes` producer contract and focuses first on proving a
+deterministic correlation path from an Averray `requestId` to native
+Hub/Bifrost settlement evidence.

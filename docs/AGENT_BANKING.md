@@ -1,16 +1,30 @@
-# Agent Banking — Product Vision
+# Agent Banking — Product Direction
 
 The platform is not a job marketplace. It's **agent-native financial
 infrastructure**: identity, a bank, a workshop, credit, and a payment rail,
 on one rail that AI agents discover, evaluate, and use autonomously.
 
 This doc exists so every code change can be checked against a single, shared
-picture of what we're building. If a feature doesn't serve one of the five
+picture of what we're building. If a feature doesn't serve one of the six
 pillars below, it probably shouldn't ship.
+
+Current launch stance:
+
+- Lead publicly with trusted work, portable identity, verifier-backed
+  execution, and directory-safe discovery.
+- Keep treasury, credit, and payments available as authenticated execution
+  rails, but describe them as staged/beta until the async XCM observer path,
+  audit scope, and mainnet rehearsals are complete.
+- Do not advertise A2A as a supported public protocol until the endpoint,
+  auth posture, and docs exist.
+
+For the implementation sequence behind this stance, use
+[`docs/POLKADOT_EXECUTION_PLAN.md`](POLKADOT_EXECUTION_PLAN.md) as the
+canonical plan.
 
 ---
 
-## The five pillars
+## The six pillars
 
 ```
               ┌─────────────────────────────────────────┐
@@ -70,10 +84,20 @@ See [`ReputationSBT.sol`](../contracts/ReputationSBT.sol) — the
 - Indexer (Ponder) tracks `BadgeMinted`, `ReputationUpdated`,
   `ReputationSlashed` events — so the full history is queryable off-chain.
 
-### What's missing (to make it feel like LinkedIn)
+### What exists beyond the contract
 
-1. **Standardized badge metadata schema.** Today `metadataURI` is a free-form
-   string (`"ipfs://pending-badge"` in most tests). Needs a JSON schema so
+- Standard agent profile schema:
+  [`docs/schemas/agent-profile-v1.json`](schemas/agent-profile-v1.json).
+- Badge metadata schema:
+  [`docs/schemas/agent-badge-v1.json`](schemas/agent-badge-v1.json).
+- Public profile JSON at `GET /agents/:wallet`.
+- Human-readable profile surface at `/agents/:wallet`.
+- Public discovery advertises profile lookup and schema endpoints.
+
+### Current gaps
+
+1. **Make badge metadata production-fed.** The schema exists, but live
+   badge metadata still needs durable production generation and hosting so
    every badge is self-describing:
 
    ```json
@@ -92,22 +116,12 @@ See [`ReputationSBT.sol`](../contracts/ReputationSBT.sol) — the
    }
    ```
 
-2. **Public agent-profile endpoint.** `GET /agents/:wallet` → a resume JSON
-   that aggregates on-chain reputation + indexed badge history + derived
-   stats (completion rate, average reward, preferred categories,
-   time-to-submit median). Publicly reachable, no auth, so any other agent
-   or human can verify.
+2. **Indexer-backed profile completeness.** The profile endpoint exists and
+   aggregates current platform state. The next quality bar is to make the
+   indexed badge/event history the durable production source for all
+   long-lived stats.
 
-3. **Agent-readable discovery.** The MCP server advertises an
-   `agent.profile.lookup` tool so one agent can query another agent's
-   reputation before deciding to sub-contract work. Endpoint returns the
-   same resume JSON.
-
-4. **Human-readable profile page.** A static route `/agents/:wallet` in the
-   frontend renders the same data. Shareable URL. Think
-   `linkedin.com/in/<handle>` but for a wallet.
-
-5. **Cross-platform portability.** The contract addresses + schema should
+3. **Cross-platform portability.** The contract addresses + schema should
    be documented so a third party's platform can also mint compatible
    badges (or at least read ours). Network effects: more places minting =
    more valuable resume.
@@ -133,8 +147,8 @@ Identity is what turns this from "crypto app with vault + marketplace" into
 ### Vision
 
 Agents deposit idle DOT and earn real yield on the balance, without
-platform custody risk. Withdraw anytime (modulo underlying strategy
-liquidity).
+platform custody risk. Withdrawals follow each lane's explicit liquidity
+and settlement rules.
 
 ### What exists
 
@@ -144,22 +158,28 @@ liquidity).
 - `allocateIdleFunds(account, strategyId, amount)` moves from `liquid` into
   `strategyAllocated` and records shares in `strategyShares[account][strategyId]`.
 - `StrategyAdapterRegistry` exists as the registration point.
+- `MockVDotAdapter` exists for testnet rehearsal only.
+- The production-shaped async path now exists through `XcmWrapper`,
+  `XcmVdotAdapter`, and `AgentAccountCore.requestStrategyDeposit` /
+  `requestStrategyWithdraw` / `settleStrategyRequest`.
+- The hosted backend can queue async strategy deposits/withdrawals, observe
+  terminal XCM outcomes, and auto-finalize pending requests when an observer
+  feed is configured.
 
-### What's missing
+### Current gaps
 
-1. **At least one real strategy adapter.** `StrategyAdapterRegistry` is
-   empty. First adapter: **Bifrost vDOT liquid staking**. Agents deposit
-   DOT, adapter stakes into vDOT, shares track their entitlement. APY is
-   real Polkadot staking yield (~11–14%), no custody risk at the platform
-   layer because the underlying is audited liquid staking.
+1. **A real network observer.** The repo has the async request ledger,
+   backend watcher, indexer feed contract, and Subscan validation harness.
+   Operators still need a validated Bifrost/XCM observer source before
+   settlement can be treated as production truth.
 
-2. **Deposit/withdraw UX.** The MCP `deposit` and `withdraw` tools need to
-   surface the current strategy options + projected APY. An agent should be
-   able to `deposit(amount=50DOT, strategy=vDOT-bifrost)` in one call.
+2. **Production yield source.** `simulateYieldBps` remains mock-only. The
+   real lane needs validated Bifrost/vDOT settlement and rate data before
+   public APY claims.
 
-3. **Yield accounting.** When vDOT appreciates relative to DOT, the
-   `strategyShares` value implicitly grows. Need a read path that converts
-   shares back to "underlying DOT earned" so agents see their yield.
+3. **Deposit/withdraw UX hardening.** The operator app surfaces strategies
+   and pending async posture, but mainnet UX must make delay, failure, and
+   withdrawal-queue semantics impossible to miss.
 
 4. **Strategy adapter audit surface.** Each adapter is an `IStrategyAdapter`
    contract that can lose funds if it's buggy. Every new adapter is a fresh
@@ -192,12 +212,12 @@ Identity**.
 - Verifier modes: benchmark (keyword matching), deterministic (exact match),
   human_fallback.
 
-### What to add
+### Current gaps
 
 1. **Tier gates enforced by reputation.** Jobs at tier `pro` require
-   `reputation.skill >= 100`; `elite` requires `>= 200`. This is partially
-   wired — [`job-catalog-service.js`](../mcp-server/src/core/job-catalog-service.js) lines 160-162
-   reference it. Surface it cleanly:
+   `reputation.skill >= 100`; `elite` requires `>= 200`. Recommendations
+   now surface tier posture; the next product pass is making "what unlocks
+   next" clearer in the operator and agent-facing views:
 
    ```
    GET /jobs/recommendations?wallet=...
@@ -207,14 +227,15 @@ Identity**.
    So an agent sees both available work AND the next tier it could unlock.
 
 2. **Recurring / subscription-shaped jobs.** One-shot jobs are terrible for
-   retention. Subscription jobs (`run this verifier every Monday 9am`) are
-   brilliant. The job metadata already has TTL + retry; needs a cron-style
-   schedule field and a `recurring: true` flag.
+   retention. The repo now supports recurring templates, manual fire, admin
+   visibility, and a scheduler service. The product gap is proving the
+   scheduler safely under hosted load and making recurring history visible
+   in timelines.
 
-3. **Sub-job escrow.** Agents hire other agents. An agent that claimed a
-   big job can spawn sub-jobs from its own wallet. Mechanically this just
-   means the same agent acts as both worker and poster. No new contract
-   code — just a UX flow + ops docs.
+3. **Sub-job escrow.** Agents hire other agents. `parentSessionId` is
+   preserved, helper tooling exists, and the backend can create/list
+   sub-jobs. The product gap is making lineage obvious in the UI and agent
+   profile surfaces.
 
 ### Non-goals for v1
 
@@ -277,29 +298,30 @@ liquidation threshold is conservative.
 
 ### Vision
 
-Agents pay each other using platform balances. Cheaper than ERC20 transfer
-(no on-chain tx per micro-payment), richer than ERC20 transfer (reputation
-gating, auto-escrow, atomic multi-party).
+Agents pay each other using platform balances. The primitive avoids a
+separate ERC20 transfer for each payment and gives the platform room for
+reputation gates, auto-escrow, and atomic multi-party flows.
 
 ### What exists
 
 - `AgentAccountCore.settleReservedTo(from, asset, to, amount)` already
   moves balance between accounts inside the system, currently only usable
   by escrow contract via operator role.
+- `AgentAccountCore.sendToAgent` lets a wallet transfer from its own
+  liquid balance to another agent.
+- `AgentAccountCore.sendToAgentFor` lets the authenticated backend relay
+  the same transfer for a signed-in wallet.
+- `POST /payments/send` exposes the authenticated HTTP surface.
+- [`docs/payments/send-to-agent.md`](payments/send-to-agent.md) documents
+  the primitive and risk posture.
 
-### What to build
+### Current gaps
 
-1. **`sendToAgent(to, asset, amount)` primitive.** Thin wrapper that lets
-   an agent transfer from their own `liquid` balance to another agent's
-   `liquid` balance, bypassing on-chain ERC20 tx entirely. Gas-free for the
-   payer after the initial deposit. Records on-platform only — withdraw to
-   external wallet requires explicit `withdraw()`.
-
-2. **Reputation-gated payments.** Optional modifier: "won't send to
+1. **Reputation-gated payments.** Optional modifier: "won't send to
    recipient with `reputation.reliability < N`." Protects agents from
    paying strangers.
 
-3. **Auto-escrow for sub-contracting.** When agent A pays agent B for a
+2. **Auto-escrow for sub-contracting.** When agent A pays agent B for a
    task, optionally hold the payment in escrow and only release on
    verifier approval — same machinery as the Workshop pillar, just micro-
    scaled. This is the killer use case for agent-to-agent commerce.
@@ -323,7 +345,7 @@ product page.
 ### What exists
 
 - `https://averray.com/.well-known/agent-tools.json` — tool manifest.
-- MCP server exposes tools over the standard MCP protocol.
+- The API mirror exposes a directory-safe manifest at `/agent-tools.json`.
 - Public discovery currently advertises `mcp` + `http`. `a2a` remains a
   roadmap item until the protocol surface actually exists.
 
@@ -337,19 +359,19 @@ product page.
    implemented. Do not re-add it to public discovery until the endpoint,
    auth posture, and docs all exist.
 
-3. **Agent profile resolution.** `GET /agents/:wallet` (see Identity
-   pillar) needs to be in the MCP tool list too, so one agent can look up
-   another agent's reputation via standard tool-calling.
+3. **Agent profile resolution quality.** `GET /agents/:wallet` exists and
+   is advertised as a public read surface. The remaining work is improving
+   durable profile completeness and adding more builder examples.
 
 4. **Public tool catalog.** Right now tools are documented in the manifest
    but there's no human-browsable page that says "here's what agents can
    do." A `/tools` page on the app would help agent operators evaluate
    integration.
 
-5. **Schema.org Agent markup + LLM training signal.** Adding
-   `<script type="application/ld+json">` with `@type: "Agent"` on the
-   landing page increases the odds that GPT / Claude training data
-   indexes the platform.
+5. **Schema.org and LLM training signal.** The landing page already ships
+   `SoftwareApplication` structured data. We can add narrower agent/profile
+   markup later once the public profile examples are stable enough to be
+   canonical.
 
 ### Non-goals for v1
 
@@ -365,16 +387,16 @@ Each step unlocks the next. Don't skip ahead.
 | # | Item | Pillar | Rough effort | Unlocks |
 |---|---|---|---|---|
 | 0 | Hardened testnet redeploy with pauser + ReentrancyGuard | All | Done; you execute | Everything below |
-| 1 | Badge metadata schema + validator | Identity | 3-5 days | Every future badge mints are self-describing |
-| 2 | Public `GET /agents/:wallet` endpoint | Identity | 3-5 days | Reputation-as-resume is externally addressable |
-| 3 | Agent profile page `/agents/:wallet` in frontend | Identity | 2-3 days | Human-shareable resume URL |
-| 4 | `vDOT` adapter (Bifrost) + `allocate/deallocate` UX | Bank | 2-3 weeks | Real yield on idle balances |
-| 5 | Tier gate surfacing in recommendations | Workshop | 1 week | Agents see what unlocks at next tier |
-| 6 | `sendToAgent(to, asset, amount)` primitive | Payments | 1 week | Agent-to-agent commerce baseline |
-| 7 | Sub-job escrow doc + helper script | Workshop | 3 days | Agents hire other agents |
-| 8 | Reputation-weighted borrow cap | Credit | 1 week | Credit actually scales with behavior |
-| 9 | MCP registry listing + discovery polish | Discovery | 1 week | Agents can find the platform unprompted |
-| 10 | Recurring / subscription jobs | Workshop | 2-3 weeks | Retention compound |
+| 1 | Badge metadata schema + validator | Identity | Shipped; harden production metadata hosting | Every future badge mints are self-describing |
+| 2 | Public `GET /agents/:wallet` endpoint | Identity | Shipped; improve indexed durability | Reputation-as-resume is externally addressable |
+| 3 | Agent profile page `/agents/:wallet` in frontend | Identity | Shipped | Human-shareable resume URL |
+| 4 | Async vDOT path + observer rehearsal | Bank | In progress | Honest Polkadot treasury lane |
+| 5 | Tier gate surfacing in recommendations | Workshop | Shipped; keep improving UX | Agents see what unlocks at next tier |
+| 6 | `sendToAgent(to, asset, amount)` primitive | Payments | Shipped; add reputation gates later | Agent-to-agent commerce baseline |
+| 7 | Sub-job escrow doc + helper script | Workshop | Shipped; surface lineage better | Agents hire other agents |
+| 8 | Reputation-weighted borrow cap | Credit | Next credit milestone | Credit actually scales with behavior |
+| 9 | MCP registry listing + discovery polish | Discovery | Wait for launch gates | Agents can find the platform unprompted |
+| 10 | Recurring / subscription jobs | Workshop | Shipped as templates + scheduler; prove hosted operations | Retention compound |
 
 Each numbered step should have its own PR with tests + docs update.
 
@@ -390,8 +412,9 @@ Things this platform is explicitly NOT trying to be:
   the agent's own address; we don't take discretionary custody.
 - **An LLM provider.** The verifier modes are deterministic or keyword-
   based, not LLM-judged. Agents use their own LLM.
-- **A chat / social app.** Agent-to-agent communication happens via A2A
-  or MCP tool calls, not a messaging layer.
+- **A chat / social app.** Agent-to-agent communication happens through
+  explicit platform APIs and, later, protocol surfaces such as A2A once
+  those are real. It is not a messaging layer.
 
 ---
 
@@ -434,7 +457,8 @@ Mitigations:
   [MULTISIG_SETUP.md](MULTISIG_SETUP.md)).
 - Immutable contracts — no upgrade keys, no discretionary changes.
 - Indexer + API are reproducible from the on-chain state.
-- Every deposit can always withdraw (no "emergency freeze" on user funds).
+- Withdrawals should stay user-directed and non-discretionary, subject to
+  explicit pause controls and underlying strategy liquidity.
 
 ### Sybil attacks on reputation
 
@@ -452,14 +476,12 @@ with self-owned posters. Mitigations:
 
 ## The pitch, in one paragraph
 
-> Averray is where AI agents keep their balance sheet. Earn DOT by
-> completing verifier-checked jobs. Keep idle balances earning real
-> Polkadot staking yield without giving up custody. Borrow against your
-> on-chain reputation to take on bigger work. Pay other agents directly,
-> with optional reputation gates. Every completed job mints a non-
-> transferable badge — a verifiable resume that lives on-chain forever
-> and travels with the wallet. Discoverable via MCP, auditable via public
-> indexer, non-custodial by construction.
+> Averray is where AI agents turn work into portable trust. Earn DOT by
+> completing verifier-checked jobs, build a public wallet-linked resume,
+> and use authenticated treasury/payment rails when the work needs capital
+> movement. The public story is trusted work and identity first; the
+> Polkadot treasury lane is deliberately staged until async XCM settlement,
+> observer validation, and audit gates are production-ready.
 
 ---
 
@@ -467,8 +489,9 @@ with self-owned posters. Mitigations:
 
 Things we haven't decided yet:
 
-1. **Which chain for mainnet?** Polkadot Hub mainnet looks likely but
-   Moonbeam / Astar are alternatives with different EVM-compat trade-offs.
+1. **Mainnet launch profile.** Polkadot Hub is the primary target. The
+   open question is not "which chain first?" but which exact launch limits,
+   observer source, and audit gates are acceptable for real funds.
 2. **Second strategy adapter?** After vDOT, do we add a money market
    (Hydration / Acala) or a stable-yield option? Decision: wait until
    vDOT has real deposits to inform the call.

@@ -1,0 +1,11 @@
+{
+  "chain": "bifrost-polkadot",
+  "blockNumber": "456",
+  "blockHash": "0x6666666666666666666666666666666666666666666666666666666666666666",
+  "eventIndex": "456-12",
+  "assetLocation": {
+    "parents": 1,
+    "interior": "Here"
+  },
+  "amount": "5000000000000"
+}

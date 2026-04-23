@@ -297,3 +297,8 @@ repo now supports `observer feed -> durable cursor -> observe outcome ->
 durable queue -> auto-finalize`, but operators still need a real
 Bifrost/XCM relayer that exposes those terminal outcomes through
 `XCM_OBSERVER_FEED_URL`.
+
+The native observer design lives in
+[`docs/NATIVE_XCM_OBSERVER.md`](../NATIVE_XCM_OBSERVER.md). Its first gate is
+not a watcher loop; it is proving deterministic correlation between an
+Averray `requestId` and native Hub/Bifrost settlement evidence.

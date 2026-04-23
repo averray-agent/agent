@@ -17,6 +17,10 @@ const xcmOutcomePublisher = await new XcmOutcomePublisherService({
   authToken: process.env.XCM_EXTERNAL_SOURCE_AUTH_TOKEN?.trim(),
   apiHost: process.env.XCM_SUBSCAN_API_HOST?.trim(),
   apiKey: process.env.XCM_SUBSCAN_API_KEY?.trim(),
+  nativeHubWs: process.env.XCM_NATIVE_HUB_WS?.trim(),
+  nativeBifrostWs: process.env.XCM_NATIVE_BIFROST_WS?.trim(),
+  nativeStartBlock: parseOptionalNonNegativeInt(process.env.XCM_NATIVE_START_BLOCK),
+  nativeConfirmations: parseOptionalNonNegativeInt(process.env.XCM_NATIVE_CONFIRMATIONS),
   pollIntervalMs: parsePositiveInt(process.env.XCM_OUTCOME_PUBLISHER_POLL_MS, 30_000),
   batchSize: parsePositiveInt(process.env.XCM_OUTCOME_PUBLISHER_BATCH_SIZE, 25)
 }).init();
@@ -71,5 +75,17 @@ function inferPublisherEnabled(sourceType: string) {
       process.env.XCM_SUBSCAN_API_KEY?.trim()
     );
   }
+  if (sourceType === "native_papi") {
+    return Boolean(
+      process.env.XCM_NATIVE_HUB_WS?.trim() &&
+      process.env.XCM_NATIVE_BIFROST_WS?.trim()
+    );
+  }
   return Boolean(process.env.XCM_EXTERNAL_SOURCE_URL?.trim());
+}
+
+function parseOptionalNonNegativeInt(raw: string | undefined) {
+  if (!raw) return undefined;
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : undefined;
 }

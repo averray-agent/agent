@@ -344,6 +344,92 @@ function renderMaintenanceStatus(maintenance = undefined) {
   );
 }
 
+function formatXcmInterval(value) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount <= 0) return "-";
+  if (amount >= 60000) return `${Math.round(amount / 60000)} min`;
+  if (amount >= 1000) return `${Math.round(amount / 1000)} sec`;
+  return `${amount} ms`;
+}
+
+function renderXcmObserverStatus(status = undefined) {
+  const root = document.getElementById("xcm-observer-status");
+  const pill = document.getElementById("xcm-observer-pill");
+  if (!root) return;
+
+  if (!status) {
+    if (pill) {
+      pill.textContent = "Admin status required";
+      pill.className = "status-pill status-pending";
+    }
+    renderHtml(
+      root,
+      html`<p class="empty-state">Sign in with an admin wallet to inspect watcher, relay, cursor, and pending request state.</p>`
+    );
+    return;
+  }
+
+  const watcher = status.xcmSettlementWatcher ?? {};
+  const relay = status.xcmObservationRelay ?? {};
+  const pendingCount = Number(watcher.pendingCount ?? watcher.pending?.length ?? 0);
+  const relayError = relay.lastError ? String(relay.lastError) : "";
+  const watcherLive = Boolean(watcher.enabled && watcher.running);
+  const relayLive = Boolean(relay.enabled && relay.running);
+  const tone = relayError ? "tier-warn" : watcherLive || relayLive ? "status-ok" : "status-pending";
+  const label = relayError
+    ? "Observer attention"
+    : pendingCount > 0
+      ? `${pendingCount} pending`
+      : watcherLive || relayLive
+        ? "Observer live"
+        : "Observer staged";
+
+  if (pill) {
+    pill.textContent = label;
+    pill.className = `status-pill ${tone}`;
+  }
+
+  const pending = Array.isArray(watcher.pending) ? watcher.pending.slice(0, 4) : [];
+  renderHtml(
+    root,
+    html`
+      <article class="xcm-status-card xcm-status-card-strong">
+        <p>Settlement watcher</p>
+        <strong>${watcherLive ? "Running" : watcher.enabled ? "Enabled, stopped" : "Disabled"}</strong>
+        <span>${pendingCount} pending request${pendingCount === 1 ? "" : "s"} · ${watcher.running ? "auto-finalize active" : "manual observe/finalize only"}</span>
+      </article>
+      <article class="xcm-status-card">
+        <p>Observation relay</p>
+        <strong>${relayLive ? "Running" : relay.enabled ? "Enabled, stopped" : "Disabled"}</strong>
+        <span>${relay.syncing ? "Syncing now" : "Idle"} · ${formatXcmInterval(relay.pollIntervalMs)} poll · ${relay.lastObservedCount ?? 0} last observed</span>
+      </article>
+      <article class="xcm-status-card">
+        <p>Cursor</p>
+        <strong>${relay.cursor ?? "No cursor yet"}</strong>
+        <span>${relay.lastSyncedAt ? `Last synced ${formatExpiry(relay.lastSyncedAt)}` : "No sync timestamp yet"}</span>
+      </article>
+      <article class="xcm-status-card ${relayError ? "xcm-status-card-alert" : ""}">
+        <p>Last error</p>
+        <strong>${relayError || "None reported"}</strong>
+        <span>${relay.feedUrl ? `Feed ${relay.feedUrl}` : "No external feed URL configured"}</span>
+      </article>
+      ${pending.length ? html`
+        <article class="xcm-status-card xcm-status-card-wide">
+          <p>Pending requests</p>
+          <div class="xcm-pending-list">
+            ${pending.map((entry) => html`
+              <span>
+                <strong>${entry.requestId ?? "unknown request"}</strong>
+                <small>${entry.status ?? "pending"} · ${entry.strategyId ?? entry.kind ?? "xcm"}</small>
+              </span>
+            `)}
+          </div>
+        </article>
+      ` : ""}
+    `
+  );
+}
+
 function buildLocalOpsSnapshot() {
   const activeStatuses = new Set(["claimed", "submitted", "disputed", "rejected"]);
   const recentSessions = (state.history ?? []).slice(0, 6);
@@ -430,6 +516,8 @@ function buildLocalOpsSnapshot() {
 function buildAdminOpsSnapshot(status = {}) {
   const ops = status.ops ?? {};
   const policy = status.maintenance?.policy ?? {};
+  const watcher = status.xcmSettlementWatcher ?? {};
+  const relay = status.xcmObservationRelay ?? {};
   const treasuryLabel = policy.paused
     ? "Paused"
     : policy.enabled
@@ -447,6 +535,26 @@ function buildAdminOpsSnapshot(status = {}) {
     label: entry.severity ?? "Attention",
     tone: entry.severity === "high" ? "eligible-no" : "tier-warn"
   }));
+  const xcmPulseItems = [
+    Number(watcher.pendingCount ?? 0) > 0
+      ? {
+          kind: "anomaly",
+          title: "XCM requests pending",
+          body: `${watcher.pendingCount} async request${watcher.pendingCount === 1 ? "" : "s"} waiting for observation or settlement.`,
+          label: "XCM",
+          tone: "tier-warn"
+        }
+      : undefined,
+    relay.lastError
+      ? {
+          kind: "anomaly",
+          title: "XCM relay reported an error",
+          body: String(relay.lastError),
+          label: "Observer",
+          tone: "eligible-no"
+        }
+      : undefined
+  ].filter(Boolean);
 
   return {
     headline: ops.activeSessions
@@ -480,14 +588,14 @@ function buildAdminOpsSnapshot(status = {}) {
       }
     },
     flowLabel: `${(ops.topJobs ?? []).length} hot job lanes · ${(ops.recentSessions ?? []).length} recent runs`,
-    pulseLabel: `${(status.anomalies ?? []).length} anomalies · ${(ops.recentEvents ?? []).length} recent events`,
+    pulseLabel: `${(status.anomalies ?? []).length + xcmPulseItems.length} attention items · ${(ops.recentEvents ?? []).length} recent events`,
     topJobs: ops.topJobs ?? [],
     recentSessions: (ops.recentSessions ?? []).map((entry) => ({
       ...entry,
       wallet: compactOpsWallet(entry.wallet),
       claimStakeLabel: formatOpsAmount(entry.claimStake ?? 0)
     })),
-    pulseItems: [...anomalies, ...(ops.recentEvents ?? []).slice(0, 7)],
+    pulseItems: [...anomalies, ...xcmPulseItems, ...(ops.recentEvents ?? []).slice(0, 7)],
     emptyFlow: "No recent platform runs are available yet.",
     emptyPulse: "No recent platform events are buffered right now."
   };
@@ -1001,6 +1109,7 @@ async function refreshAdminWorkspace(snapshot = getAuthSnapshot()) {
   if (!snapshot.authenticated || !hasRole("admin", snapshot.roles ?? [])) {
     renderRecurringStatus(undefined);
     renderMaintenanceStatus(undefined);
+    renderXcmObserverStatus(undefined);
     renderOpsDeck(buildLocalOpsSnapshot());
     return;
   }
@@ -1009,6 +1118,7 @@ async function refreshAdminWorkspace(snapshot = getAuthSnapshot()) {
     const status = await readJson("/api/admin/status");
     renderRecurringStatus(status.recurring);
     renderMaintenanceStatus(status.maintenance);
+    renderXcmObserverStatus(status);
     renderOpsDeck(buildAdminOpsSnapshot(status));
   } catch (error) {
     debug.error(error);
@@ -1020,6 +1130,7 @@ async function refreshAdminWorkspace(snapshot = getAuthSnapshot()) {
       document.getElementById("admin-maintenance-status"),
       html`<p class="empty-state">Maintenance posture is temporarily unavailable.</p>`
     );
+    renderXcmObserverStatus(undefined);
     renderOpsDeck(buildLocalOpsSnapshot());
   }
 }
@@ -2106,6 +2217,9 @@ function wireObserveQuickNav() {
   });
   document.getElementById("observe-nav-console")?.addEventListener("click", () => {
     jumpToSection("observe-treasury-console", { mode: "observe" });
+  });
+  document.getElementById("observe-nav-xcm")?.addEventListener("click", () => {
+    jumpToSection("observe-xcm-lane", { mode: "observe" });
   });
   document.getElementById("observe-nav-strategies")?.addEventListener("click", () => {
     jumpToSection("observe-strategy-lanes", { mode: "observe" });

@@ -126,6 +126,17 @@ these is omitted it defaults to `0` (full backfill) unless
   endpoint and `x-api-key` auth are documented by Subscan, but the exact
   terminal-outcome field mapping should still be validated against your paid
   plan payload before mainnet use.
+- `XCM_EXTERNAL_SOURCE_TYPE=native_papi` is reserved for the native
+  Polkadot/Bifrost observer lane. It currently validates
+  `XCM_NATIVE_HUB_WS`, `XCM_NATIVE_BIFROST_WS`,
+  `XCM_NATIVE_START_BLOCK`, and `XCM_NATIVE_CONFIRMATIONS`, then fails
+  clearly until the request-id correlation gate in
+  [docs/NATIVE_XCM_OBSERVER.md](../docs/NATIVE_XCM_OBSERVER.md) is complete.
+- Captured native evidence should pass
+  `npm run validate:native-xcm-evidence -- --file <capture.json>` before it
+  is used to justify enabling live native observer reads.
+- Use `npm run capture:native-xcm-evidence` to assemble a capture from
+  Hub-side and Bifrost-side replay/PAPI artifacts.
 - Use [scripts/ops/validate-subscan-xcm-source.mjs](../scripts/ops/validate-subscan-xcm-source.mjs)
   once a staging key is configured. It validates the direct Subscan
   transport, can capture a sanitized sample report, and can verify that the

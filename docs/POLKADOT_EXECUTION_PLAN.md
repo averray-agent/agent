@@ -436,6 +436,10 @@ Current status:
     Polkadot/Bifrost observer source
 - the repo now includes `scripts/ops/exercise-async-xcm-request.mjs` and
   `docs/ASYNC_XCM_STAGING.md` as the current-lane rehearsal package
+- the native observer lane now has an implementation-oriented design note at
+  [docs/NATIVE_XCM_OBSERVER.md](/Users/pascalkuriger/repo/Polkadot/docs/NATIVE_XCM_OBSERVER.md)
+  that defines the correlation gate, `native_papi` source-adapter shape,
+  evidence model, and Chopsticks/PAPI validation plan
 
 Ship gate:
 

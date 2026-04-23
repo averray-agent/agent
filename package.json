@@ -7,9 +7,12 @@
     "marketing"
   ],
   "scripts": {
-    "test": "npm run test:backend && npm run test:frontend && npm run test:contracts",
+    "test": "npm run test:backend && npm run test:frontend && npm run test:sdk && npm run test:examples && npm run test:indexer:api && npm run test:contracts",
     "test:backend": "npm --workspace mcp-server test",
     "test:frontend": "node --test frontend/ui-helpers.test.js frontend/config.test.js",
+    "test:sdk": "node --test sdk/agent-platform-client.test.mjs",
+    "test:examples": "node --test examples/**/*.test.mjs",
+    "test:indexer:api": "npm --workspace indexer run test:api",
     "test:contracts": "forge test",
     "dev:marketing": "npm --workspace marketing run dev",
     "build:marketing": "ASTRO_TELEMETRY_DISABLED=1 npm --workspace marketing run build",
@@ -17,7 +20,10 @@
     "dev:indexer": "npm --workspace indexer run dev",
     "start:indexer": "npm --workspace indexer run start",
     "typecheck:indexer": "npm --workspace indexer run typecheck",
+    "capture:native-xcm-evidence": "node scripts/ops/capture-native-xcm-evidence.mjs",
     "validate:subscan-xcm": "node scripts/ops/validate-subscan-xcm-source.mjs",
-    "exercise:async-xcm": "node scripts/ops/exercise-async-xcm-request.mjs"
+    "validate:native-xcm-evidence": "node scripts/ops/validate-native-xcm-evidence.mjs",
+    "exercise:async-xcm": "node scripts/ops/exercise-async-xcm-request.mjs",
+    "example:profile-lookup": "node examples/profile-lookup/index.mjs"
   }
 }
