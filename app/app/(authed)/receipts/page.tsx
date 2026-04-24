@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ReceiptsTopbar } from "@/components/receipts/ReceiptsTopbar";
 import {
   ReceiptsKpiStrip,
@@ -20,11 +20,13 @@ import {
 } from "@/components/receipts/ReceiptShapesLegend";
 import { KindChip } from "@/components/receipts/KindChip";
 import { DetailDrawer } from "@/components/shell/DetailDrawer";
+import { ReceiptDrawerBody } from "@/components/receipts/ReceiptDrawerBody";
 import {
-  ReceiptDrawerBody,
-  type LinkedArtifact,
-  type SignatureEntry,
-} from "@/components/receipts/ReceiptDrawerBody";
+  buildReceiptDrawer,
+  extractReceiptRows,
+  type ReceiptRowWithMeta,
+} from "@/lib/api/receipt-adapters";
+import { useBadge, useBadges } from "@/lib/api/hooks";
 
 // TODO(data): wire to useApi("/badges") and useApi(`/badges/${sessionId}`).
 // Fixture matches the handoff exactly so the page reads correctly until
@@ -274,45 +276,19 @@ const SHAPES: ShapeEntry[] = [
   },
 ];
 
-// The evidence JSON shown in the drawer for the seeded r_4e12a run.
-// Kept as a fixture until /badges/:sessionId returns live content.
-const EVIDENCE_JSON = `// signed JSON — first 14 lines
-{
-  "kind": "run-receipt",
-  "id": "r_4e12a",
-  "run": "run-2742",
-  "policy": "writer-gov/cited@v3",
-  "artifact_hash": "0x7a0c…b11e",
-  "signers": [
-    "0xFd2EAE2043…Fd6519",
-    "0x9A13BC58f7…A0cb2"
-  ],
-  "verdict": "pass",
-  "signed_at": "2026-04-24T14:08:42Z",
-  "block": 18204917,
-}`;
-
 export default function ReceiptsPage() {
+  const badgesRequest = useBadges();
   const [selectedId, setSelectedId] = useState<string | null>("r_4e12a");
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const selected = ROWS.find((r) => r.id === selectedId) ?? null;
-
-  const signatures: SignatureEntry[] =
-    selected?.signers.map((s) => ({
-      role: s.role,
-      address: s.address,
-      time: selected.signedAt.replace(" UTC", ""),
-      pending: s.address === "pending…",
-    })) ?? [];
-
-  const links: LinkedArtifact[] = selected
-    ? [
-        { role: "Origin run", ref: selected.subject },
-        { role: "Settled by", ref: "r_4e13b · settle" },
-        { role: "Policy ref", ref: selected.policy },
-        { role: "Session", ref: "sess_a91c…4412" },
-      ]
-    : [];
+  const liveRows = useMemo(() => extractReceiptRows(badgesRequest.data), [badgesRequest.data]);
+  const rows = useMemo(
+    () => (liveRows.length ? liveRows : ROWS.map(fixtureReceiptRow)),
+    [liveRows]
+  );
+  const kpis = useMemo(() => receiptKpis(rows, liveRows.length > 0), [liveRows.length, rows]);
+  const selected = selectedId ? rows.find((r) => r.id === selectedId) ?? null : null;
+  const detailRequest = useBadge(drawerOpen && selected ? selected.sessionId : null);
+  const drawerModel = selected ? buildReceiptDrawer(selected, detailRequest.data) : null;
 
   return (
     <div className="flex w-full max-w-[1100px] flex-col gap-5">
@@ -334,17 +310,17 @@ export default function ReceiptsPage() {
         </p>
       </header>
 
-      <ReceiptsKpiStrip kpis={KPIS} />
+      <ReceiptsKpiStrip kpis={kpis} />
       <ReceiptsFilters groups={FILTERS} />
       <ReceiptsTable
-        rows={ROWS}
+        rows={rows}
         selectedId={selectedId}
         onSelect={(row) => {
           setSelectedId(row.id);
           setDrawerOpen(true);
         }}
-        shownCount={48}
-        totalCount={2134}
+        shownCount={rows.length}
+        totalCount={liveRows.length ? rows.length : 2134}
       />
       <ReceiptShapesLegend shapes={SHAPES} />
 
@@ -368,21 +344,67 @@ export default function ReceiptsPage() {
               <KindChip kind={selected.kind} />
               <span className="text-[var(--avy-ink)]">{selected.policy}</span>
               <span>·</span>
-              <span>2026-04-24 · {selected.signedAt}</span>
+              <span>{selected.issuedAtIso ? receiptDate(selected.issuedAtIso) : "2026-04-24"} · {selected.signedAt}</span>
             </div>
           ) : null
         }
       >
-        {selected ? (
+        {drawerModel ? (
           <ReceiptDrawerBody
-            signatures={signatures}
-            evidenceJson={EVIDENCE_JSON}
-            evidenceMeta={`${selected.size} · application/jose+json`}
-            evidenceRawHref={`/badges/${selected.subject}`}
-            links={links}
+            signatures={drawerModel.signatures}
+            evidenceJson={drawerModel.evidenceJson}
+            evidenceMeta={drawerModel.evidenceMeta}
+            evidenceRawHref={drawerModel.evidenceRawHref}
+            links={drawerModel.links}
           />
         ) : null}
       </DetailDrawer>
     </div>
   );
+}
+
+function fixtureReceiptRow(row: ReceiptRow): ReceiptRowWithMeta {
+  return {
+    ...row,
+    sessionId: row.subject,
+    issuedAtIso: "",
+  };
+}
+
+function receiptKpis(rows: ReceiptRowWithMeta[], live: boolean): ReceiptsKpi[] {
+  if (!live) return KPIS;
+  const now = Date.now();
+  const signed24h = rows.filter((row) => {
+    const parsed = Date.parse(row.issuedAtIso);
+    return Number.isFinite(parsed) && now - parsed <= 24 * 60 * 60 * 1000;
+  }).length;
+  const coSigned = rows.filter((row) => row.signers.length > 1).length;
+  const coSignedPct = rows.length ? Math.round((coSigned / rows.length) * 1000) / 10 : 0;
+
+  return [
+    {
+      ...KPIS[0],
+      value: rows.length.toLocaleString(),
+      unit: "indexed",
+      meta: "from /badges",
+    },
+    {
+      ...KPIS[1],
+      value: signed24h.toLocaleString(),
+      meta: "signed in the last 24h",
+    },
+    {
+      ...KPIS[2],
+      value: coSignedPct.toFixed(1),
+      meta: `${coSigned} of ${rows.length} receipts · signer chain present`,
+      metaTone: coSignedPct >= 95 ? "ok" : "warn",
+    },
+    KPIS[3],
+  ];
+}
+
+function receiptDate(value: string): string {
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) return value;
+  return new Date(parsed).toISOString().slice(0, 10);
 }
