@@ -5,6 +5,10 @@ const BASE_CAPABILITIES = [
   "account:deallocate",
   "account:borrow",
   "account:repay",
+  "agents:list",
+  "badges:list",
+  "disputes:list",
+  "disputes:read",
   "events:read",
   "jobs:list",
   "jobs:claim",
@@ -23,6 +27,7 @@ const BASE_CAPABILITIES = [
 const ROLE_CAPABILITIES = {
   admin: [
     "admin:status",
+    "disputes:release",
     "jobs:create",
     "jobs:fire-recurring",
     "jobs:pause-recurring",
@@ -32,6 +37,7 @@ const ROLE_CAPABILITIES = {
     "xcm:finalize"
   ],
   verifier: [
+    "disputes:verdict",
     "verifier:handlers:read",
     "verifier:result:read",
     "verifier:replay",
@@ -64,6 +70,12 @@ export function capabilityMatrix() {
       "/account/deallocate": ["account:deallocate"],
       "/account/borrow": ["account:borrow"],
       "/account/repay": ["account:repay"],
+      "/agents": ["agents:list"],
+      "/badges": ["badges:list"],
+      "/disputes": ["disputes:list"],
+      "/disputes/:id": ["disputes:read"],
+      "/disputes/:id/verdict": ["disputes:verdict"],
+      "/disputes/:id/release": ["disputes:release"],
       "/jobs": ["jobs:list"],
       "/jobs/recommendations": ["jobs:recommend"],
       "/jobs/preflight": ["jobs:preflight"],

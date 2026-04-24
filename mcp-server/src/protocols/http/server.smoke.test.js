@@ -316,6 +316,11 @@ test("http smoke: /badges/:sessionId returns schema-compliant JSON for approved 
     assert.match(badge.averray.chainJobId, /^0x[a-fA-F0-9]{64}$/);
     assert.match(badge.averray.evidenceHash, /^0x[a-fA-F0-9]{64}$/);
     assert.ok(Array.isArray(badge.attributes) && badge.attributes.length >= 3);
+
+    const listResponse = await fetch(`${base}/badges`);
+    assert.equal(listResponse.status, 200);
+    const receipts = await listResponse.json();
+    assert.ok(receipts.some((receipt) => receipt.sessionId === sessionId));
   });
 });
 
@@ -390,6 +395,93 @@ test("http smoke: /agents/:wallet aggregates approved sessions into badges", { s
     assert.equal(profile.badges[0].category, "coding");
     assert.equal(profile.badges[0].level, 1);
     assert.deepEqual(profile.categoryLevels, { coding: 1 });
+
+    const listResponse = await fetch(`${base}/agents`);
+    assert.equal(listResponse.status, 200);
+    const agents = await listResponse.json();
+    const row = agents.find((agent) => agent.wallet === ADMIN_WALLET.toLowerCase());
+    assert.ok(row);
+    assert.equal(row.tier, "apprentice");
+    assert.equal(row.totalJobs, 1);
+  });
+});
+
+test("http smoke: /disputes exposes human-review sessions and records verdict/release receipts", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
+    const verifierToken = issueToken(VERIFIER_WALLET, { roles: ["verifier"] });
+
+    await fetch(`${base}/admin/jobs`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({
+        id: "dispute-smoke-job-001",
+        category: "coding",
+        tier: "starter",
+        rewardAmount: 3,
+        verifierMode: "human_fallback",
+        escalationMessage: "Needs operator review",
+        autoApprove: false,
+        outputSchemaRef: "schema://jobs/dispute-smoke"
+      })
+    });
+
+    await fetch(`${base}/account/fund?asset=DOT&amount=10`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${adminToken}` }
+    });
+
+    const claim = await fetch(
+      `${base}/jobs/claim?jobId=dispute-smoke-job-001&idempotencyKey=dispute-smoke-claim`,
+      { method: "POST", headers: { authorization: `Bearer ${adminToken}` } }
+    );
+    const { sessionId } = await claim.json();
+
+    await fetch(
+      `${base}/jobs/submit?sessionId=${encodeURIComponent(sessionId)}&evidence=${encodeURIComponent("needs review")}`,
+      { method: "POST", headers: { authorization: `Bearer ${adminToken}` } }
+    );
+
+    await fetch(`${base}/verifier/run?sessionId=${encodeURIComponent(sessionId)}`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${verifierToken}` }
+    });
+
+    const list = await fetch(`${base}/disputes`, {
+      headers: { authorization: `Bearer ${adminToken}` }
+    });
+    assert.equal(list.status, 200);
+    const disputes = await list.json();
+    const dispute = disputes.find((entry) => entry.sessionId === sessionId);
+    assert.ok(dispute);
+    assert.equal(dispute.status, "open");
+    assert.equal(dispute.verdict, null);
+
+    const detail = await fetch(`${base}/disputes/${encodeURIComponent(dispute.id)}`, {
+      headers: { authorization: `Bearer ${adminToken}` }
+    });
+    assert.equal(detail.status, 200);
+    assert.equal((await detail.json()).sessionId, sessionId);
+
+    const verdict = await fetch(`${base}/disputes/${encodeURIComponent(dispute.id)}/verdict`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${verifierToken}` },
+      body: JSON.stringify({ verdict: "upheld", rationale: "Submission needs correction." })
+    });
+    assert.equal(verdict.status, 200);
+    const verdictBody = await verdict.json();
+    assert.equal(verdictBody.status, "resolved");
+    assert.equal(verdictBody.verdict, "upheld");
+
+    const release = await fetch(`${base}/disputes/${encodeURIComponent(dispute.id)}/release`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({ action: "release", amount: 0.15 })
+    });
+    assert.equal(release.status, 200);
+    const releaseBody = await release.json();
+    assert.equal(releaseBody.release.action, "release");
+    assert.equal(releaseBody.release.amount, 0.15);
   });
 });
 

@@ -56,8 +56,20 @@ export class AgentPlatformClient {
     return this.request(`/agents/${encodeURIComponent(wallet)}`);
   }
 
+  async listAgents({ limit = undefined } = {}) {
+    const params = new URLSearchParams();
+    if (limit !== undefined) params.set("limit", String(limit));
+    return this.request(`/agents${params.size ? `?${params.toString()}` : ""}`);
+  }
+
   async getAgentBadge(sessionId) {
     return this.request(`/badges/${encodeURIComponent(sessionId)}`);
+  }
+
+  async listBadges({ limit = undefined } = {}) {
+    const params = new URLSearchParams();
+    if (limit !== undefined) params.set("limit", String(limit));
+    return this.request(`/badges${params.size ? `?${params.toString()}` : ""}`);
   }
 
   async listVerifierHandlers() {
@@ -171,6 +183,30 @@ export class AgentPlatformClient {
     if (limit !== undefined) params.set("limit", String(limit));
     if (jobId) params.set("jobId", jobId);
     return this.request(`/sessions${params.size ? `?${params.toString()}` : ""}`);
+  }
+
+  async listDisputes({ limit = undefined } = {}) {
+    const params = new URLSearchParams();
+    if (limit !== undefined) params.set("limit", String(limit));
+    return this.request(`/disputes${params.size ? `?${params.toString()}` : ""}`);
+  }
+
+  async getDispute(id) {
+    return this.request(`/disputes/${encodeURIComponent(id)}`);
+  }
+
+  async submitDisputeVerdict(id, { verdict, rationale = undefined } = {}) {
+    return this.request(`/disputes/${encodeURIComponent(id)}/verdict`, {
+      method: "POST",
+      body: compact({ verdict, rationale })
+    });
+  }
+
+  async releaseDisputeStake(id, payload = {}) {
+    return this.request(`/disputes/${encodeURIComponent(id)}/release`, {
+      method: "POST",
+      body: payload
+    });
   }
 
   async listSubJobs(parentSessionId) {

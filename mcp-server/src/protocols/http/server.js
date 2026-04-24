@@ -167,6 +167,217 @@ function safeChecksum(raw) {
   }
 }
 
+function parseLimit(url, fallback = 50, max = 250) {
+  const raw = Number(url.searchParams.get("limit") ?? fallback);
+  if (!Number.isFinite(raw) || raw <= 0) {
+    return fallback;
+  }
+  return Math.min(Math.trunc(raw), max);
+}
+
+function profileTierToOperatorTier(reputation = {}) {
+  const skill = Number(reputation.skill ?? 0);
+  if (skill >= 300) return "master";
+  if (reputation.tier === "elite" || skill >= 200) return "expert";
+  if (reputation.tier === "pro" || skill >= 100) return "journeyman";
+  return "apprentice";
+}
+
+function handleForWallet(wallet) {
+  const normalized = String(wallet ?? "").toLowerCase();
+  return `agent-${normalized.slice(2, 6)}-${normalized.slice(-4)}`;
+}
+
+function buildAgentDirectoryRow(profile) {
+  const reputation = profile.reputation ?? {};
+  const approvedCount = Number(profile.stats?.approvedCount ?? 0);
+  const rejectedCount = Number(profile.stats?.rejectedCount ?? 0);
+  const totalJobs = approvedCount + rejectedCount;
+  return {
+    wallet: profile.wallet,
+    handle: handleForWallet(profile.wallet),
+    tier: profileTierToOperatorTier(reputation),
+    reputationScore:
+      Number(reputation.skill ?? 0) +
+      Number(reputation.reliability ?? 0) +
+      Number(reputation.economic ?? 0),
+    successRate: profile.stats?.completionRate ?? null,
+    totalJobs,
+    activeStake: 0,
+    badges: profile.badges ?? [],
+    slashEvents: []
+  };
+}
+
+async function buildAgentDirectory(limit = 50) {
+  const sessions = await service.listRecentSessions(limit);
+  const wallets = [...new Set(sessions.map((session) => session.wallet).filter(Boolean))];
+  const rows = await Promise.all(wallets.map(async (wallet) => {
+    const checksummed = safeChecksum(wallet);
+    const [reputation, history] = await Promise.all([
+      service.getReputation(checksummed),
+      service.collectSessionHistory(checksummed, { logger })
+    ]);
+    const profile = buildAgentProfile({
+      wallet: wallet.toLowerCase(),
+      reputation,
+      sessions: history,
+      getJobDefinition: (jobId) => {
+        try {
+          return service.getJobDefinition(jobId);
+        } catch {
+          return undefined;
+        }
+      },
+      publicBaseUrl: process.env.PUBLIC_BASE_URL
+    });
+    return buildAgentDirectoryRow(profile);
+  }));
+  return rows.sort((left, right) => {
+    if (right.reputationScore !== left.reputationScore) {
+      return right.reputationScore - left.reputationScore;
+    }
+    return String(left.wallet).localeCompare(String(right.wallet));
+  });
+}
+
+function buildBadgeReceipt(badge) {
+  const averray = badge.averray ?? {};
+  return {
+    sessionId: averray.sessionId,
+    jobId: averray.jobId,
+    worker: averray.worker,
+    kind: "badge",
+    issuedAt: averray.completedAt,
+    signers: [
+      { wallet: averray.poster, status: "posted" },
+      { wallet: averray.verifier, status: "signed" }
+    ],
+    evidenceHash: averray.evidenceHash,
+    blockRef: averray.chainJobId,
+    badge
+  };
+}
+
+async function listBadgeReceipts(limit = 100) {
+  const sessions = await service.listRecentSessions(limit);
+  const receipts = [];
+  for (const session of sessions) {
+    let badge;
+    try {
+      badge = buildBadgeFromSession({
+        session,
+        job: service.getJobDefinition(session.jobId),
+        verification: session.verification,
+        context: {
+          publicBaseUrl: process.env.PUBLIC_BASE_URL,
+          posterAddress: process.env.DEFAULT_POSTER_ADDRESS,
+          verifierAddress: process.env.DEFAULT_VERIFIER_ADDRESS
+        }
+      });
+    } catch {
+      continue;
+    }
+    receipts.push(buildBadgeReceipt(badge));
+  }
+  return receipts;
+}
+
+function disputeIdForSession(sessionId) {
+  return `dispute-${keccak256(toUtf8Bytes(String(sessionId))).slice(2, 14)}`;
+}
+
+function compactObject(value) {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, entry]) => entry !== undefined && entry !== null)
+  );
+}
+
+function addHoursIso(value, hours) {
+  const parsed = Date.parse(value ?? "");
+  const base = Number.isFinite(parsed) ? parsed : Date.now();
+  return new Date(base + hours * 60 * 60 * 1000).toISOString();
+}
+
+async function buildDisputeFromSession(session) {
+  const id = disputeIdForSession(session.sessionId);
+  const [verdictReceipt, releaseReceipt] = await Promise.all([
+    stateStore.getMutationReceipt?.("dispute_verdict", id),
+    stateStore.getMutationReceipt?.("dispute_release", id)
+  ]);
+  const openedAt = session.disputedAt ?? session.updatedAt ?? new Date().toISOString();
+  const windowEndsAt = addHoursIso(openedAt, 72);
+  const timeline = (session.statusHistory ?? []).map((entry, index) => ({
+    id: `${id}:session:${index}`,
+    at: entry.at,
+    actor: "system",
+    action: entry.reason ?? `session_${entry.to}`,
+    data: entry
+  }));
+  if (verdictReceipt) {
+    timeline.push({
+      id: `${id}:verdict`,
+      at: verdictReceipt.decidedAt,
+      actor: verdictReceipt.decidedBy,
+      action: "verdict_submitted",
+      data: verdictReceipt
+    });
+  }
+  if (releaseReceipt) {
+    timeline.push({
+      id: `${id}:release`,
+      at: releaseReceipt.releasedAt,
+      actor: releaseReceipt.releasedBy,
+      action: "stake_release_recorded",
+      data: releaseReceipt
+    });
+  }
+
+  let job;
+  try {
+    job = service.getJobDefinition(session.jobId);
+  } catch {
+    job = undefined;
+  }
+
+  return {
+    id,
+    status: releaseReceipt || verdictReceipt ? "resolved" : "open",
+    sessionId: session.sessionId,
+    claimant: session.wallet,
+    respondent: process.env.DEFAULT_VERIFIER_ADDRESS ?? "0x0000000000000000000000000000000000000000",
+    openedAt,
+    windowEndsAt,
+    evidence: {
+      before: compactObject({
+        jobId: session.jobId,
+        jobTitle: job?.title,
+        requirements: job?.verifierTerms,
+        claimStake: session.claimStake
+      }),
+      after: compactObject({
+        submission: session.submission,
+        verification: session.verification ?? session.verificationSummary
+      })
+    },
+    verdict: verdictReceipt?.verdict ?? null,
+    stakedAmount: Number(session.claimStake ?? 0),
+    release: releaseReceipt ?? null,
+    timeline: timeline.sort((left, right) => String(left.at ?? "").localeCompare(String(right.at ?? "")))
+  };
+}
+
+async function listDisputes(limit = 100) {
+  const sessions = await service.listRecentSessions(limit);
+  const disputed = sessions.filter((session) => session.status === "disputed");
+  return Promise.all(disputed.map((session) => buildDisputeFromSession(session)));
+}
+
+async function findDispute(id, limit = 250) {
+  const disputes = await listDisputes(limit);
+  return disputes.find((dispute) => dispute.id === id);
+}
+
 function resolveCorsHeaders(request) {
   const origin = request.headers?.origin;
   if (!origin || typeof origin !== "string") {
@@ -246,6 +457,9 @@ function metricPathLabel(pathname) {
     "/events",
     "/auth/nonce",
     "/auth/verify",
+    "/agents",
+    "/badges",
+    "/disputes",
     "/verifier/handlers",
     "/verifier/result",
     "/verifier/replay",
@@ -258,6 +472,9 @@ function metricPathLabel(pathname) {
   if (known.has(pathname)) return pathname;
   // Collapse sessionId/wallet-scoped routes to a single label so Prometheus
   // doesn't create one series per session or wallet.
+  if (/^\/disputes\/[^/]+\/verdict$/u.test(pathname)) return "/disputes/:id/verdict";
+  if (/^\/disputes\/[^/]+\/release$/u.test(pathname)) return "/disputes/:id/release";
+  if (pathname.startsWith("/disputes/")) return "/disputes/:id";
   if (pathname.startsWith("/badges/")) return "/badges/:sessionId";
   if (pathname.startsWith("/agents/")) return "/agents/:wallet";
   return "other";
@@ -471,6 +688,14 @@ const server = createServer(async (request, response) => {
           "/jobs",
           "/jobs/sub",
           "/jobs/tiers",
+          "/agents",
+          "/agents/:wallet",
+          "/badges",
+          "/badges/:sessionId",
+          "/disputes",
+          "/disputes/:id",
+          "/disputes/:id/verdict",
+          "/disputes/:id/release",
           "/strategies",
           "/admin/jobs/pause",
           "/admin/jobs/resume",
@@ -488,9 +713,7 @@ const server = createServer(async (request, response) => {
           "/admin/jobs/resume",
           "/admin/xcm/observe",
           "/admin/xcm/finalize",
-          "/admin/status",
-          "/badges/:sessionId",
-          "/agents/:wallet"
+          "/admin/status"
         ]
       });
     }
@@ -656,6 +879,14 @@ const server = createServer(async (request, response) => {
       return respond(response, 200, await verifierService.replayVerification(sessionId));
     }
 
+    // Public agent directory for the new operator app. It is derived from
+    // the same recent session + reputation source as the per-wallet profile.
+    if (request.method === "GET" && pathname === "/agents") {
+      return respond(response, 200, await buildAgentDirectory(parseLimit(url, 50, 250)), {
+        "cache-control": "public, max-age=30"
+      });
+    }
+
     // Public agent profile — the aggregate "LinkedIn for agents" resume.
     // Returns reputation + per-category levels + lifetime stats + ordered
     // badges. Public (no auth) so other agents/humans can verify. See
@@ -692,6 +923,12 @@ const server = createServer(async (request, response) => {
         publicBaseUrl: process.env.PUBLIC_BASE_URL
       });
       return respond(response, 200, profile, { "cache-control": "public, max-age=30" });
+    }
+
+    if (request.method === "GET" && pathname === "/badges") {
+      return respond(response, 200, await listBadgeReceipts(parseLimit(url, 100, 500)), {
+        "cache-control": "public, max-age=30"
+      });
     }
 
     // Public badge metadata — the "LinkedIn for agents" read surface.
@@ -737,6 +974,116 @@ const server = createServer(async (request, response) => {
         }
         throw normalized;
       }
+    }
+
+    if (request.method === "GET" && pathname === "/disputes") {
+      await authMiddleware(request, url);
+      return respond(response, 200, await listDisputes(parseLimit(url, 100, 500)));
+    }
+
+    if (request.method === "GET" && pathname.startsWith("/disputes/")) {
+      await authMiddleware(request, url);
+      const id = decodeURIComponent(pathname.slice("/disputes/".length));
+      if (!id || id.includes("/")) {
+        throw new ValidationError("dispute id path segment is required.");
+      }
+      const dispute = await findDispute(id);
+      if (!dispute) {
+        return respond(response, 404, { status: "not_found", id });
+      }
+      return respond(response, 200, dispute);
+    }
+
+    if (request.method === "POST" && /^\/disputes\/[^/]+\/verdict$/u.test(pathname)) {
+      const auth = await authMiddleware(request, url, { requireRole: "verifier" });
+      const id = decodeURIComponent(pathname.slice("/disputes/".length, -"/verdict".length));
+      const dispute = await findDispute(id);
+      if (!dispute) {
+        return respond(response, 404, { status: "not_found", id });
+      }
+      const payload = await readJsonBody(request);
+      const verdict = String(payload?.verdict ?? payload?.outcome ?? "").trim();
+      if (!["upheld", "dismissed", "split"].includes(verdict)) {
+        throw new ValidationError("verdict must be one of upheld, dismissed, split.");
+      }
+      const receipt = {
+        id,
+        disputeId: id,
+        sessionId: dispute.sessionId,
+        verdict,
+        rationale: typeof payload?.rationale === "string" ? payload.rationale.trim() : undefined,
+        decidedBy: auth.wallet,
+        decidedAt: new Date().toISOString()
+      };
+      await stateStore.upsertMutationReceipt?.("dispute_verdict", id, receipt);
+      eventBus?.publish({
+        id: `dispute-verdict-${id}-${Date.now()}`,
+        topic: "escrow.dispute_resolved",
+        wallet: dispute.claimant,
+        wallets: [dispute.claimant, auth.wallet],
+        sessionId: dispute.sessionId,
+        timestamp: receipt.decidedAt,
+        data: { disputeId: id, verdict }
+      });
+      return respond(response, 200, {
+        ...dispute,
+        status: "resolved",
+        verdict,
+        timeline: [
+          ...dispute.timeline,
+          {
+            id: `${id}:verdict`,
+            at: receipt.decidedAt,
+            actor: receipt.decidedBy,
+            action: "verdict_submitted",
+            data: receipt
+          }
+        ]
+      });
+    }
+
+    if (request.method === "POST" && /^\/disputes\/[^/]+\/release$/u.test(pathname)) {
+      const auth = await authMiddleware(request, url, { requireRole: "admin" });
+      const id = decodeURIComponent(pathname.slice("/disputes/".length, -"/release".length));
+      const dispute = await findDispute(id);
+      if (!dispute) {
+        return respond(response, 404, { status: "not_found", id });
+      }
+      const payload = await readJsonBody(request);
+      const receipt = {
+        id,
+        disputeId: id,
+        sessionId: dispute.sessionId,
+        action: typeof payload?.action === "string" && payload.action.trim() ? payload.action.trim() : "release",
+        amount: Number(payload?.amount ?? dispute.stakedAmount ?? 0),
+        releasedBy: auth.wallet,
+        releasedAt: new Date().toISOString()
+      };
+      await stateStore.upsertMutationReceipt?.("dispute_release", id, receipt);
+      eventBus?.publish({
+        id: `dispute-release-${id}-${Date.now()}`,
+        topic: "account.job_stake_released",
+        wallet: dispute.claimant,
+        wallets: [dispute.claimant, auth.wallet],
+        sessionId: dispute.sessionId,
+        timestamp: receipt.releasedAt,
+        data: { disputeId: id, amount: receipt.amount, action: receipt.action }
+      });
+      return respond(response, 200, {
+        ...dispute,
+        status: "resolved",
+        release: receipt,
+        timeline: [
+          ...dispute.timeline,
+          {
+            id: `${id}:release`,
+            at: receipt.releasedAt,
+            actor: receipt.releasedBy,
+            action: "stake_release_recorded",
+            data: receipt
+          }
+        ]
+      });
     }
 
     // ---------- auth routes ----------

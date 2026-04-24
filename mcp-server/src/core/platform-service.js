@@ -261,6 +261,10 @@ export class PlatformService {
     return this.jobExecutionService.listSessionHistory({ wallet, limit, jobId });
   }
 
+  async listRecentSessions(limit = 10) {
+    return this.jobExecutionService.listRecentSessions(limit);
+  }
+
   async getSessionTimeline(sessionId) {
     const session = await this.jobExecutionService.resumeSession(sessionId);
     const verification = await this.stateStore.getVerificationResult(sessionId)
