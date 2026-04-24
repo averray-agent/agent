@@ -1,0 +1,1031 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Runs · Averray</title>
+<link rel="stylesheet" href="colors_and_type.css">
+<style>
+  html, body { height: 100%; }
+  body { background: var(--avy-bg); color: var(--avy-ink); font-family: var(--font-body); }
+
+  /* Subtle paper grid */
+  body::before {
+    content: "";
+    position: fixed; inset: 0;
+    background-image:
+      radial-gradient(ellipse 70% 50% at 12% -10%, rgba(241, 216, 184, 0.35), transparent 60%),
+      linear-gradient(to right, rgba(17,19,21,0.03) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(17,19,21,0.03) 1px, transparent 1px);
+    background-size: auto, 3.2rem 3.2rem, 3.2rem 3.2rem;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* =================================================== APP SHELL */
+  .app { position: relative; z-index: 1; display: grid; grid-template-columns: 17rem minmax(0, 1fr); min-height: 100vh; }
+
+  /* ----- Left rail (sticky, included for context) ----- */
+  .rail {
+    position: sticky; top: 0; align-self: start;
+    height: 100vh; overflow-y: auto;
+    border-right: 1px solid var(--avy-line);
+    background: #f7f5ec;
+    padding: 18px 14px;
+    display: flex; flex-direction: column; gap: 18px;
+  }
+  .rail__brand { display: flex; align-items: center; gap: 10px; padding: 4px 6px 2px; }
+  .rail__brand-mark { width: 28px; height: 28px; border-radius: 8px; background: var(--avy-dark); display: grid; place-items: center; color: var(--fg-invert); font-family: var(--font-display); font-weight: 800; font-size: 15px; }
+  .rail__brand-name { font-family: var(--font-display); font-weight: 700; font-size: 15px; line-height: 1; }
+  .rail__brand-sub  { font-family: var(--font-display); font-size: 9.5px; font-weight: 800; letter-spacing: 0.14em !important; text-transform: uppercase; color: var(--avy-accent); margin-top: 3px; }
+  .rail__sec-label  { font-family: var(--font-display); font-size: 10px; font-weight: 800; letter-spacing: 0.14em !important; text-transform: uppercase; color: var(--avy-muted); padding: 0 8px; margin: 0 0 4px; }
+  .rail__nav { display: grid; gap: 1px; }
+  .rail__item { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; font-size: 13.5px; font-weight: 500; color: var(--avy-ink); cursor: default; }
+  .rail__item:hover { background: rgba(17,19,21,0.04); }
+  .rail__item.is-active { background: rgba(30,102,66,0.10); color: var(--avy-accent); font-weight: 700; box-shadow: inset 0 0 0 1px rgba(30,102,66,0.12); }
+  .rail__item-ico { width: 14px; height: 14px; display: grid; place-items: center; opacity: 0.8; font-size: 12px; }
+  .rail__count { margin-left: auto; font-family: var(--font-mono); font-size: 11px; color: var(--avy-muted); }
+  .rail__item.is-active .rail__count { color: var(--avy-accent); }
+
+  .rail__wallet { margin-top: auto; border: 1px solid var(--avy-line); border-radius: 10px; padding: 10px 12px; background: var(--avy-paper-solid); display: grid; gap: 5px; }
+  .rail__wallet-label { font-family: var(--font-display); font-size: 9.5px; font-weight: 800; letter-spacing: 0.14em !important; text-transform: uppercase; color: var(--avy-accent); }
+  .rail__wallet-addr  { font-family: var(--font-mono); font-size: 12px; color: var(--avy-ink); }
+  .rail__wallet-meta  { font-family: var(--font-body); font-size: 11px; color: var(--avy-muted); }
+  .rail__wallet-balance { display: flex; justify-content: space-between; border-top: 1px solid var(--avy-line-soft); padding-top: 6px; margin-top: 2px; font-family: var(--font-mono); font-size: 11.5px; color: var(--avy-muted); }
+  .rail__wallet-balance b { color: var(--avy-ink); font-weight: 700; }
+
+  /* ---- green dot ---- */
+  .livedot { width: 7px; height: 7px; border-radius: 50%; background: #2d8e5e; box-shadow: 0 0 0 3px rgba(45,142,94,0.18); display: inline-block; }
+
+  /* =================================================== WORKSPACE */
+  .ws { display: flex; justify-content: center; padding: 18px 28px 32px; min-width: 0; }
+  .ws__inner { width: 100%; max-width: 1100px; display: flex; flex-direction: column; gap: 14px; }
+
+  /* ----- Topbar ----- */
+  .topbar { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 14px; padding: 4px 2px 2px; }
+  .crumbs { display: flex; align-items: center; gap: 8px; font-family: var(--font-display); font-size: 11.5px; font-weight: 700; letter-spacing: 0.08em !important; text-transform: uppercase; color: var(--avy-muted); }
+  .crumbs .sep { opacity: 0.5; }
+  .crumbs .cur { color: var(--avy-ink); }
+  .clock { justify-self: center; display: inline-flex; align-items: center; gap: 10px; padding: 6px 12px; border-radius: 999px; background: var(--avy-paper-solid); border: 1px solid var(--avy-line); font-family: var(--font-mono); font-size: 12px; color: var(--avy-ink); }
+  .clock .muted-l { color: var(--avy-muted); }
+  .topbar__actions { justify-self: end; display: flex; gap: 8px; align-items: center; }
+
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    height: 32px; padding: 0 14px;
+    border-radius: 8px;
+    font-family: var(--font-display); font-size: 12px; font-weight: 700; letter-spacing: 0.04em !important; text-transform: uppercase;
+    border: 1px solid transparent; cursor: pointer;
+    transition: transform var(--dur) var(--ease), border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+  }
+  .btn:hover { transform: translateY(-1px); }
+  .btn--primary { background: var(--avy-accent); color: var(--fg-invert); }
+  .btn--primary:hover { background: var(--avy-accent-2); }
+  .btn--ghost { background: var(--avy-paper-solid); color: var(--avy-ink); border-color: var(--avy-line); }
+  .btn--ghost:hover { border-color: rgba(30,102,66,0.24); background: #fff; }
+  .btn--sm { height: 28px; padding: 0 11px; font-size: 11px; }
+  .btn--xs { height: 24px; padding: 0 9px; font-size: 10.5px; letter-spacing: 0.06em !important; }
+  .btn .kbd { font-family: var(--font-mono); font-size: 10.5px; font-weight: 500; color: rgba(255,253,247,0.7); background: rgba(0,0,0,0.2); padding: 1px 5px; border-radius: 3px; letter-spacing: 0 !important; }
+  .btn--ghost .kbd { color: var(--avy-muted); background: rgba(17,19,21,0.06); }
+  .btn[disabled] { opacity: 0.4; cursor: not-allowed; pointer-events: none; }
+
+  /* ----- Filter chips bar ----- */
+  .queuebar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 14px; background: var(--avy-paper-solid); border: 1px solid var(--avy-line); border-radius: 10px; }
+  .chip-group { display: inline-flex; align-items: center; gap: 2px; padding: 2px; background: rgba(17,19,21,0.04); border-radius: 8px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 5px 10px;
+    border-radius: 6px;
+    font-family: var(--font-display); font-size: 11px; font-weight: 700; letter-spacing: 0.06em !important; text-transform: uppercase;
+    color: var(--avy-muted); cursor: pointer; border: 1px solid transparent;
+    transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+  }
+  .chip:hover { color: var(--avy-ink); }
+  .chip.is-active { background: var(--avy-paper-solid); color: var(--avy-ink); border-color: var(--avy-line); box-shadow: 0 1px 0 rgba(17,19,21,0.04); }
+  .chip__count { font-family: var(--font-mono); font-size: 10.5px; color: var(--avy-muted); font-weight: 500; letter-spacing: 0 !important; padding: 1px 5px; background: rgba(17,19,21,0.05); border-radius: 4px; }
+  .chip.is-active .chip__count { background: var(--avy-accent-soft); color: var(--avy-accent); }
+
+  .queuebar__sep { flex: 1; }
+  .qsearch { position: relative; }
+  .qsearch input {
+    height: 30px; width: 260px; padding: 0 12px 0 30px;
+    border: 1px solid var(--avy-line); border-radius: 8px;
+    background: #fff;
+    font-family: var(--font-body); font-size: 12.5px; color: var(--avy-ink);
+  }
+  .qsearch .ico { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--avy-muted); }
+  .qsearch .kbd { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-family: var(--font-mono); font-size: 10.5px; color: var(--avy-muted); background: rgba(17,19,21,0.05); padding: 1px 5px; border-radius: 3px; }
+  .sort-btn { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 6px; font-family: var(--font-display); font-size: 11px; font-weight: 700; letter-spacing: 0.06em !important; text-transform: uppercase; color: var(--avy-ink); background: #fff; border: 1px solid var(--avy-line); cursor: pointer; }
+  .sort-btn .muted-l { color: var(--avy-muted); font-weight: 500; }
+
+  /* =================================================== MAIN SPLIT (queue + reco rail) */
+  .main-grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 14px; align-items: start; }
+
+  .panel {
+    background: var(--avy-paper-solid);
+    border: 1px solid var(--avy-line);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .panel__head { display: flex; justify-content: space-between; align-items: baseline; padding: 12px 16px; border-bottom: 1px solid var(--avy-line-soft); gap: 10px; }
+  .panel__title { font-family: var(--font-display); font-weight: 700; font-size: 14px; margin: 0; }
+  .panel__sub   { font-family: var(--font-mono); font-size: 11.5px; color: var(--avy-muted); }
+
+  /* ----- Queue table ----- */
+  .tbl { width: 100%; border-collapse: collapse; font-family: var(--font-body); font-size: 13px; }
+  .tbl th {
+    text-align: left;
+    font-family: var(--font-display); font-size: 10px; font-weight: 800; letter-spacing: 0.14em !important; text-transform: uppercase;
+    color: var(--avy-muted);
+    padding: 9px 14px 9px; border-bottom: 1px solid var(--avy-line-soft);
+    background: #faf8f1;
+    white-space: nowrap;
+    position: sticky; top: 0; z-index: 1;
+  }
+  .tbl th.sortable { cursor: pointer; }
+  .tbl th.sortable .arrow { opacity: 0.9; margin-left: 3px; color: var(--avy-accent); font-size: 9px; }
+  .tbl td { padding: 11px 14px; border-bottom: 1px solid var(--avy-line-soft); vertical-align: middle; }
+  .tbl tr:last-child td { border-bottom: none; }
+  .tbl tr { cursor: pointer; transition: background var(--dur-fast) var(--ease); }
+  .tbl tbody tr:hover { background: rgba(17,19,21,0.025); }
+  .tbl tr.is-selected { background: rgba(30,102,66,0.06); }
+  .tbl tr.is-selected td:first-child { box-shadow: inset 2px 0 0 var(--avy-accent); }
+
+  .tbl .mono { font-family: var(--font-mono); font-size: 12px; color: var(--avy-ink); }
+  .tbl .muted { color: var(--avy-muted); }
+  .row-id { font-family: var(--font-mono); font-size: 11.5px; color: var(--avy-muted); }
+  .row-title { font-weight: 600; color: var(--avy-ink); font-size: 13px; line-height: 1.3; }
+  .row-title small { display: block; font-family: var(--font-mono); font-weight: 400; font-size: 11px; color: var(--avy-muted); margin-top: 2px; letter-spacing: 0 !important; }
+  .num { font-family: var(--font-mono); font-size: 12.5px; color: var(--avy-ink); text-align: right; }
+  .num b { font-weight: 600; }
+  .num small { color: var(--avy-muted); font-weight: 400; }
+  .right { text-align: right; }
+
+  /* Status pills (reused from system) */
+  .pill { display: inline-flex; align-items: center; gap: 6px; min-height: 22px; padding: 2px 9px; border-radius: 999px; font-family: var(--font-display); font-size: 10.5px; font-weight: 800; letter-spacing: 0.1em !important; text-transform: uppercase; white-space: nowrap; }
+  .pill .dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; opacity: 0.8; }
+  .pill--ready    { background: #e6ecf7; color: #254e9a; }
+  .pill--claimed  { background: var(--avy-accent-soft); color: var(--avy-accent); }
+  .pill--submitted{ background: #fff0d8; color: #a76122; }
+  .pill--disputed { background: #f4ddd5; color: #a03a1a; }
+  .pill--settled  { background: rgba(17,19,21,0.06); color: var(--avy-ink); }
+  .pill--tier1    { background: #e9f2e0; color: #425d1a; }
+  .pill--tier2    { background: #e8efea; color: #326244; }
+  .pill--tier3    { background: #e6ecf7; color: #254e9a; }
+
+  /* Worker chip */
+  .worker { display: inline-flex; align-items: center; gap: 7px; font-family: var(--font-mono); font-size: 11.5px; color: var(--avy-ink); }
+  .worker__avatar { width: 18px; height: 18px; border-radius: 5px; display: grid; place-items: center; font-family: var(--font-display); font-weight: 800; font-size: 9px; letter-spacing: 0.04em !important; text-transform: uppercase; color: #fff; }
+  .worker--self .worker__avatar { background: linear-gradient(135deg, #1e6642, #0f6b4f); }
+  .worker--a .worker__avatar { background: #254e9a; }
+  .worker--b .worker__avatar { background: #a76122; }
+  .worker--c .worker__avatar { background: #5f655f; }
+  .worker--d .worker__avatar { background: #101419; }
+  .worker--unclaimed .worker__avatar { background: #d4d0c2; color: #5f655f; }
+  .worker.self-tag::after { content: "you"; margin-left: 4px; font-family: var(--font-display); font-size: 9px; font-weight: 800; letter-spacing: 0.1em !important; text-transform: uppercase; color: var(--avy-accent); }
+
+  .age-cell { font-family: var(--font-mono); font-size: 12px; color: var(--avy-ink); white-space: nowrap; }
+  .age-cell.stale { color: var(--avy-warn); }
+  .event { font-size: 12px; color: var(--avy-ink); line-height: 1.35; }
+  .event small { display: block; font-family: var(--font-mono); font-size: 10.5px; color: var(--avy-muted); margin-top: 1px; letter-spacing: 0 !important; }
+
+  /* Queue footer */
+  .panel__foot { display: flex; justify-content: space-between; align-items: center; padding: 9px 14px; border-top: 1px solid var(--avy-line-soft); background: #faf8f1; font-family: var(--font-mono); font-size: 11.5px; color: var(--avy-muted); }
+  .panel__foot b { color: var(--avy-ink); font-weight: 600; }
+
+  /* =================================================== RECOMMENDATION RAIL */
+  .reco { display: flex; flex-direction: column; gap: 10px; }
+  .reco__head { padding: 12px 14px 10px; border-bottom: 1px solid var(--avy-line-soft); }
+  .reco__title { font-family: var(--font-display); font-weight: 700; font-size: 14px; margin: 0 0 2px; }
+  .reco__sub   { font-family: var(--font-mono); font-size: 11px; color: var(--avy-muted); }
+  .reco__list  { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+
+  .jobcard {
+    border: 1px solid var(--avy-line);
+    border-radius: 8px;
+    background: #fffdf7;
+    padding: 11px 12px 12px;
+    display: grid; gap: 8px;
+    transition: transform var(--dur) var(--ease), border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+  }
+  .jobcard:hover { transform: translateY(-1px); border-color: rgba(30,102,66,0.22); box-shadow: 0 4px 12px rgba(30,37,44,0.06); }
+  .jobcard.is-hot { border-color: rgba(30,102,66,0.35); background: linear-gradient(180deg, rgba(214,234,223,0.5), #fffdf7 40%); }
+
+  .jobcard__top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+  .jobcard__title { font-family: var(--font-display); font-weight: 700; font-size: 13px; color: var(--avy-ink); line-height: 1.25; max-width: 180px; }
+  .jobcard__id { font-family: var(--font-mono); font-size: 10.5px; color: var(--avy-muted); margin-top: 3px; }
+  .jobcard__reward { text-align: right; }
+  .jobcard__reward-val { font-family: var(--font-display); font-weight: 700; font-size: 15px; color: var(--avy-ink); line-height: 1; }
+  .jobcard__reward-cur { font-family: var(--font-mono); font-size: 10px; font-weight: 500; color: var(--avy-muted); margin-left: 2px; letter-spacing: 0 !important; }
+  .jobcard__reward-usd { font-family: var(--font-mono); font-size: 10.5px; color: var(--avy-muted); margin-top: 3px; }
+
+  .jobcard__meta { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; padding-top: 7px; border-top: 1px solid var(--avy-line-soft); font-family: var(--font-mono); font-size: 10.5px; }
+  .jobcard__meta dt { color: var(--avy-muted); letter-spacing: 0 !important; }
+  .jobcard__meta dd { margin: 0; color: var(--avy-ink); font-weight: 500; }
+  .jobcard__meta dd.accent { color: var(--avy-accent); }
+
+  .jobcard__tags { display: flex; gap: 4px; flex-wrap: wrap; }
+  .jobcard__claim { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 2px; }
+  .jobcard__fit { display: flex; align-items: center; gap: 5px; font-family: var(--font-mono); font-size: 10px; color: var(--avy-accent); }
+  .jobcard__fit .bar { display: inline-flex; gap: 2px; }
+  .jobcard__fit .seg { width: 3px; height: 8px; border-radius: 1px; background: rgba(30,102,66,0.18); }
+  .jobcard__fit .seg.on { background: var(--avy-accent); }
+
+  /* =================================================== EXECUTION PANEL */
+  .exec {
+    background: var(--avy-paper-solid);
+    border: 1px solid var(--avy-line);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: var(--shadow-dense);
+  }
+  .exec__head {
+    padding: 14px 18px 14px;
+    display: flex; justify-content: space-between; align-items: center; gap: 14px;
+    background: linear-gradient(180deg, #faf8f1, #fffdf7);
+    border-bottom: 1px solid var(--avy-line-soft);
+  }
+  .exec__heading { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .exec__kicker { font-family: var(--font-display); font-size: 10px; font-weight: 800; letter-spacing: 0.14em !important; text-transform: uppercase; color: var(--avy-accent); }
+  .exec__title { font-family: var(--font-display); font-weight: 700; font-size: 18px; line-height: 1.1; margin: 0; }
+  .exec__id { font-family: var(--font-mono); font-size: 12px; color: var(--avy-muted); }
+  .exec__headactions { display: flex; gap: 6px; align-items: center; }
+  .exec__close { background: transparent; border: 1px solid var(--avy-line); color: var(--avy-muted); width: 28px; height: 28px; border-radius: 6px; cursor: pointer; font-size: 14px; }
+  .exec__close:hover { color: var(--avy-ink); border-color: var(--avy-ink); }
+
+  .exec__body { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
+  .exec__col { padding: 16px 18px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+  .exec__col--left { border-right: 1px solid var(--avy-line-soft); background: #fffdf7; }
+  .exec__col--right { background: #faf8f1; }
+
+  .exec__block-label { font-family: var(--font-display); font-size: 10px; font-weight: 800; letter-spacing: 0.14em !important; text-transform: uppercase; color: var(--avy-muted); display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 6px; }
+  .exec__block-label .lock { color: var(--avy-accent); font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.06em !important; }
+
+  /* Stake card */
+  .stake {
+    border: 1px solid rgba(30,102,66,0.22); background: rgba(30,102,66,0.04);
+    border-radius: 8px; padding: 12px 14px;
+    display: grid; grid-template-columns: 1fr auto; gap: 10px 16px; align-items: center;
+  }
+  .stake__amount { font-family: var(--font-display); font-weight: 700; font-size: 26px; color: var(--avy-ink); line-height: 1; }
+  .stake__amount .unit { font-family: var(--font-mono); font-size: 11px; color: var(--avy-muted); font-weight: 500; margin-left: 4px; letter-spacing: 0 !important; }
+  .stake__aux   { font-family: var(--font-mono); font-size: 11px; color: var(--avy-muted); margin-top: 4px; }
+  .stake__lock  { display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px; border-radius: 999px; background: var(--avy-accent-soft); color: var(--avy-accent); font-family: var(--font-display); font-size: 10px; font-weight: 800; letter-spacing: 0.12em !important; text-transform: uppercase; }
+  .stake__break { grid-column: 1 / -1; padding-top: 10px; border-top: 1px solid rgba(30,102,66,0.14); display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; font-family: var(--font-mono); font-size: 11px; color: var(--avy-muted); }
+  .stake__break b { display: block; color: var(--avy-ink); font-weight: 600; font-size: 12px; margin-top: 1px; letter-spacing: 0 !important; }
+
+  /* Evidence textarea */
+  .evidence {
+    border: 1px solid var(--avy-line);
+    background: #fff;
+    border-radius: 8px;
+    overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  .evidence__bar { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-bottom: 1px solid var(--avy-line-soft); background: #faf8f1; }
+  .evidence__tab { font-family: var(--font-display); font-size: 10px; font-weight: 800; letter-spacing: 0.12em !important; text-transform: uppercase; color: var(--avy-muted); padding: 3px 8px; border-radius: 5px; cursor: pointer; }
+  .evidence__tab.is-active { background: var(--avy-paper-solid); color: var(--avy-ink); box-shadow: inset 0 0 0 1px var(--avy-line); }
+  .evidence__sep { flex: 1; }
+  .evidence__meta { font-family: var(--font-mono); font-size: 10.5px; color: var(--avy-muted); }
+  .evidence textarea {
+    border: none; outline: none; resize: vertical;
+    min-height: 150px;
+    padding: 11px 12px;
+    font-family: var(--font-mono); font-size: 12px; line-height: 1.55; color: var(--avy-ink);
+    background: transparent;
+  }
+  .evidence__foot { display: flex; justify-content: space-between; align-items: center; padding: 7px 10px; border-top: 1px solid var(--avy-line-soft); background: #faf8f1; font-family: var(--font-mono); font-size: 10.5px; color: var(--avy-muted); }
+  .evidence__attach { display: inline-flex; align-items: center; gap: 5px; color: var(--avy-accent); cursor: pointer; }
+
+  /* Submit action row */
+  .action-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 12px 14px;
+    border: 1px solid var(--avy-line); border-radius: 8px; background: #fffdf7;
+  }
+  .action-row__lede { font-family: var(--font-mono); font-size: 11px; color: var(--avy-muted); line-height: 1.4; max-width: 260px; }
+  .action-row__lede b { color: var(--avy-ink); font-weight: 600; }
+
+  /* Verifier output */
+  .verifier {
+    border: 1px solid rgba(30,102,66,0.18);
+    background: #131715;
+    color: #f5f3ee;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .verifier__bar { display: flex; justify-content: space-between; align-items: center; padding: 7px 12px; background: #0f1210; border-bottom: 1px solid rgba(255,255,255,0.06); font-family: var(--font-mono); font-size: 10.5px; color: #9ba29c; }
+  .verifier__bar b { color: #cfe8dc; }
+  .verifier__body { padding: 12px 14px; font-family: var(--font-mono); font-size: 11.5px; line-height: 1.6; }
+  .verifier__line { display: grid; grid-template-columns: 44px 92px 1fr; gap: 10px; }
+  .verifier__t { color: #6c7a72; }
+  .verifier__lvl { color: #9bd7b5; font-weight: 600; }
+  .verifier__lvl.warn { color: #f4c989; }
+  .verifier__lvl.ok   { color: #9bd7b5; }
+  .verifier__lvl.info { color: #a5c8ef; }
+  .verifier__msg { color: #e7ebe5; }
+  .verifier__msg .k { color: #f4c989; }
+  .verifier__body hr { border: none; border-top: 1px dashed rgba(255,255,255,0.08); margin: 8px 0; }
+  .verifier__verdict { display: flex; justify-content: space-between; align-items: center; padding: 9px 12px; background: rgba(30,102,66,0.18); color: #d6eadf; font-family: var(--font-display); font-size: 11px; font-weight: 800; letter-spacing: 0.12em !important; text-transform: uppercase; border-top: 1px solid rgba(255,255,255,0.06); }
+  .verifier__verdict .score { font-family: var(--font-mono); font-size: 11.5px; color: #9bd7b5; letter-spacing: 0 !important; }
+
+  /* Settle card */
+  .settle {
+    border: 1px solid rgba(30,102,66,0.30);
+    background: linear-gradient(180deg, rgba(30,102,66,0.08), rgba(30,102,66,0.02));
+    border-radius: 8px;
+    padding: 12px 14px;
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  }
+  .settle__text { display: grid; gap: 3px; }
+  .settle__t { font-family: var(--font-display); font-size: 11px; font-weight: 800; letter-spacing: 0.12em !important; text-transform: uppercase; color: var(--avy-accent); }
+  .settle__d { font-family: var(--font-mono); font-size: 11px; color: var(--avy-muted); }
+  .settle__d b { color: var(--avy-ink); font-weight: 600; letter-spacing: 0 !important; }
+
+  /* =================================================== LIFECYCLE RAIL */
+  .lifecycle {
+    background: var(--avy-paper-solid);
+    border: 1px solid var(--avy-line);
+    border-radius: 10px;
+    padding: 14px 18px 16px;
+    display: flex; flex-direction: column; gap: 12px;
+  }
+  .lifecycle__head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+  .lifecycle__title { font-family: var(--font-display); font-size: 10px; font-weight: 800; letter-spacing: 0.14em !important; text-transform: uppercase; color: var(--avy-muted); }
+  .lifecycle__ctx   { font-family: var(--font-mono); font-size: 11.5px; color: var(--avy-muted); }
+  .lifecycle__ctx b { color: var(--avy-ink); font-weight: 600; }
+
+  .fsm { display: grid; grid-template-columns: repeat(5, 1fr) auto; gap: 0; align-items: stretch; position: relative; }
+  /* connector baseline */
+  .fsm::before {
+    content: "";
+    position: absolute; left: 22px; right: 22px; top: 14px;
+    height: 2px;
+    background: repeating-linear-gradient(to right, rgba(17,19,21,0.15) 0 4px, transparent 4px 8px);
+    z-index: 0;
+  }
+
+  .stage {
+    position: relative; z-index: 1;
+    display: flex; flex-direction: column; align-items: center; gap: 7px;
+    padding: 0 6px;
+    cursor: pointer;
+  }
+  .stage__dot {
+    width: 28px; height: 28px; border-radius: 50%;
+    background: var(--avy-paper-solid);
+    border: 2px solid rgba(17,19,21,0.18);
+    display: grid; place-items: center;
+    font-family: var(--font-mono); font-size: 12px; font-weight: 600;
+    color: var(--avy-muted);
+    transition: all var(--dur) var(--ease);
+  }
+  .stage__label { font-family: var(--font-display); font-size: 10.5px; font-weight: 800; letter-spacing: 0.1em !important; text-transform: uppercase; color: var(--avy-muted); text-align: center; }
+  .stage__meta  { font-family: var(--font-mono); font-size: 10.5px; color: var(--avy-muted); letter-spacing: 0 !important; }
+  /* completed */
+  .stage.is-done .stage__dot { background: var(--avy-accent); border-color: var(--avy-accent); color: #fffdf7; }
+  .stage.is-done .stage__label { color: var(--avy-ink); }
+  /* current */
+  .stage.is-current .stage__dot {
+    background: #fffdf7; border-color: var(--avy-accent); color: var(--avy-accent);
+    box-shadow: 0 0 0 5px rgba(30,102,66,0.14);
+  }
+  .stage.is-current .stage__label { color: var(--avy-accent); }
+  .stage.is-current .stage__meta  { color: var(--avy-accent); }
+  /* check */
+  .stage.is-done .stage__dot::before { content: "✓"; font-family: var(--font-display); font-weight: 800; font-size: 14px; letter-spacing: 0 !important; }
+  .stage.is-done .stage__dot span { display: none; }
+
+  .fsm__tail {
+    display: flex; flex-direction: column; justify-content: flex-start; align-items: flex-end;
+    padding-left: 16px; padding-right: 2px;
+    border-left: 1px solid var(--avy-line-soft);
+    gap: 6px;
+  }
+  .fsm__tail-l { font-family: var(--font-display); font-size: 10px; font-weight: 800; letter-spacing: 0.12em !important; text-transform: uppercase; color: var(--avy-muted); }
+  .fsm__tail-v { font-family: var(--font-mono); font-size: 12.5px; color: var(--avy-ink); font-weight: 600; }
+  .fsm__tail-sub { font-family: var(--font-mono); font-size: 10.5px; color: var(--avy-muted); }
+
+  /* empty-state */
+  .exec--empty { padding: 28px 22px; display: flex; gap: 18px; align-items: center; justify-content: space-between; }
+  .exec--empty p { font-family: var(--font-body); font-size: 13px; color: var(--avy-muted); margin: 0; line-height: 1.5; max-width: 56ch; }
+
+  /* responsive: rail hides under 1180 */
+  @media (max-width: 1180px) {
+    .main-grid { grid-template-columns: 1fr; }
+    .reco-side { order: -1; }
+  }
+  @media (max-width: 960px) {
+    .app { grid-template-columns: 1fr; }
+    .rail { position: static; height: auto; }
+    .exec__body { grid-template-columns: 1fr; }
+    .exec__col--left { border-right: none; border-bottom: 1px solid var(--avy-line-soft); }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ========== LEFT RAIL (context) ========== -->
+  <aside class="rail">
+    <div class="rail__brand">
+      <div class="rail__brand-mark">A</div>
+      <div>
+        <div class="rail__brand-name">Averray</div>
+        <div class="rail__brand-sub">Operator</div>
+      </div>
+    </div>
+
+    <div>
+      <p class="rail__sec-label">Room</p>
+      <nav class="rail__nav">
+        <div class="rail__item"><span class="rail__item-ico">◯</span>Overview</div>
+        <div class="rail__item is-active"><span class="rail__item-ico">▤</span>Runs<span class="rail__count">14</span></div>
+        <div class="rail__item"><span class="rail__item-ico">◇</span>Jobs<span class="rail__count">41</span></div>
+        <div class="rail__item"><span class="rail__item-ico">◎</span>Receipts<span class="rail__count">2.1k</span></div>
+        <div class="rail__item"><span class="rail__item-ico">⌘</span>Workers<span class="rail__count">8</span></div>
+      </nav>
+    </div>
+
+    <div>
+      <p class="rail__sec-label">Governance</p>
+      <nav class="rail__nav">
+        <div class="rail__item"><span class="rail__item-ico">◐</span>Policies<span class="rail__count">22</span></div>
+        <div class="rail__item"><span class="rail__item-ico">◬</span>Disputes<span class="rail__count">2</span></div>
+        <div class="rail__item"><span class="rail__item-ico">⌖</span>Audit log</div>
+      </nav>
+    </div>
+
+    <div>
+      <p class="rail__sec-label">Treasury</p>
+      <nav class="rail__nav">
+        <div class="rail__item"><span class="rail__item-ico">∎</span>Posture</div>
+        <div class="rail__item"><span class="rail__item-ico">◆</span>Stake vault</div>
+      </nav>
+    </div>
+
+    <div class="rail__wallet">
+      <span class="rail__wallet-label"><span class="livedot" style="margin-right:6px"></span>Signed in</span>
+      <span class="rail__wallet-addr">0xFd2E…6519</span>
+      <span class="rail__wallet-meta">Worker · polkadot · asset-hub</span>
+      <div class="rail__wallet-balance">
+        <span>Deposited</span>
+        <b>482.40 DOT</b>
+      </div>
+      <div class="rail__wallet-balance" style="border-top:none; padding-top:0">
+        <span>Locked in stake</span>
+        <b>127.00 DOT</b>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ========== WORKSPACE ========== -->
+  <section class="ws">
+    <div class="ws__inner">
+
+      <!-- 1) TOPBAR -->
+      <header class="topbar">
+        <div class="crumbs">
+          <span>Room</span>
+          <span class="sep">/</span>
+          <span class="cur">Runs</span>
+        </div>
+
+        <div class="clock" id="clock">
+          <span class="livedot"></span>
+          <span class="muted-l">UTC</span>
+          <span id="clock-time">14:32:07</span>
+          <span class="muted-l">·</span>
+          <span class="muted-l">block</span>
+          <span id="clock-block">24,118,402</span>
+        </div>
+
+        <div class="topbar__actions">
+          <button class="btn btn--ghost btn--sm">＋ New job <span class="kbd">N</span></button>
+          <button class="btn btn--primary btn--sm">Open run <span class="kbd">O</span></button>
+        </div>
+      </header>
+
+      <!-- 2) QUEUE BAR: filter chips -->
+      <div class="queuebar">
+        <div class="chip-group" role="tablist">
+          <button class="chip is-active" data-filter="all">All <span class="chip__count">14</span></button>
+          <button class="chip" data-filter="ready">Ready <span class="chip__count">3</span></button>
+          <button class="chip" data-filter="claimed">Claimed <span class="chip__count">5</span></button>
+          <button class="chip" data-filter="submitted">Submitted <span class="chip__count">3</span></button>
+          <button class="chip" data-filter="disputed">Disputed <span class="chip__count">2</span></button>
+          <button class="chip" data-filter="settled">Settled <span class="chip__count">1</span></button>
+        </div>
+
+        <div class="queuebar__sep"></div>
+
+        <div class="qsearch">
+          <span class="ico">⌕</span>
+          <input type="text" placeholder="Filter by id, job, worker, hash…">
+          <span class="kbd">/</span>
+        </div>
+        <button class="sort-btn"><span class="muted-l">Sort</span> Age ↓</button>
+      </div>
+
+      <!-- 3) MAIN: queue table + recommendation rail -->
+      <div class="main-grid">
+        <!-- QUEUE -->
+        <div class="panel">
+          <div class="panel__head">
+            <h3 class="panel__title">Run queue</h3>
+            <span class="panel__sub">14 open · 3 assigned to you · live</span>
+          </div>
+
+          <table class="tbl">
+            <thead>
+              <tr>
+                <th style="width:34%">Run · Job</th>
+                <th>Worker</th>
+                <th>State</th>
+                <th class="right">Stake</th>
+                <th class="sortable right">Age <span class="arrow">▼</span></th>
+                <th>Last event</th>
+              </tr>
+            </thead>
+            <tbody>
+
+              <tr>
+                <td>
+                  <div class="row-title">repo-sweep: deps/sec-only bump
+                    <small>job-0421 · coding · T1</small>
+                  </div>
+                </td>
+                <td><span class="worker worker--unclaimed"><span class="worker__avatar">—</span>unclaimed</span></td>
+                <td><span class="pill pill--ready"><span class="dot"></span>Ready</span></td>
+                <td class="num">12.0<small> DOT</small></td>
+                <td class="age-cell right stale">00:11:42</td>
+                <td class="event">Escrow funded
+                  <small>14:20:25 · by 0x9A13…0cb2</small>
+                </td>
+              </tr>
+
+              <tr class="is-selected">
+                <td>
+                  <div class="row-title">gov-review: proposal 0x7a0c abstract
+                    <small>job-0418 · writer-gov · T2</small>
+                  </div>
+                </td>
+                <td><span class="worker worker--self self-tag"><span class="worker__avatar">FD</span>0xFd2E…6519</span></td>
+                <td><span class="pill pill--claimed"><span class="dot"></span>Claimed</span></td>
+                <td class="num">25.0<small> DOT</small></td>
+                <td class="age-cell right">00:08:14</td>
+                <td class="event">You claimed the run
+                  <small>14:23:53 · tx 0x3f…c1</small>
+                </td>
+              </tr>
+
+              <tr>
+                <td>
+                  <div class="row-title">schema-mig: users → users_v2
+                    <small>job-0415 · ops · T3</small>
+                  </div>
+                </td>
+                <td><span class="worker worker--a"><span class="worker__avatar">OM</span>0xB1aa…3e41</span></td>
+                <td><span class="pill pill--submitted"><span class="dot"></span>Submitted</span></td>
+                <td class="num">50.0<small> DOT</small></td>
+                <td class="age-cell right">00:06:02</td>
+                <td class="event">Evidence submitted · 14 files
+                  <small>14:26:05 · hash 0x4e…b8</small>
+                </td>
+              </tr>
+
+              <tr>
+                <td>
+                  <div class="row-title">handoff-sig verify: batch #214
+                    <small>job-0414 · coding-hand · T2</small>
+                  </div>
+                </td>
+                <td><span class="worker worker--b"><span class="worker__avatar">CH</span>0x2E94…7f02</span></td>
+                <td><span class="pill pill--disputed"><span class="dot"></span>Disputed</span></td>
+                <td class="num">40.0<small> DOT</small></td>
+                <td class="age-cell right stale">00:34:18</td>
+                <td class="event">Signature mismatch on payload
+                  <small>13:58:09 · by verifier-2</small>
+                </td>
+              </tr>
+
+              <tr>
+                <td>
+                  <div class="row-title">docs-refresh: runbook v3.1
+                    <small>job-0411 · writer-gov · T1</small>
+                  </div>
+                </td>
+                <td><span class="worker worker--c"><span class="worker__avatar">WG</span>0xC7fE…9ab1</span></td>
+                <td><span class="pill pill--submitted"><span class="dot"></span>Submitted</span></td>
+                <td class="num">18.0<small> DOT</small></td>
+                <td class="age-cell right">00:04:47</td>
+                <td class="event">Verifier queued · semantic mode
+                  <small>14:27:19 · r_4e0f8</small>
+                </td>
+              </tr>
+
+              <tr>
+                <td>
+                  <div class="row-title">lint-sweep: packages/*
+                    <small>job-0408 · coding · T1</small>
+                  </div>
+                </td>
+                <td><span class="worker worker--d"><span class="worker__avatar">CH</span>0x3A11…e7dd</span></td>
+                <td><span class="pill pill--claimed"><span class="dot"></span>Claimed</span></td>
+                <td class="num">8.0<small> DOT</small></td>
+                <td class="age-cell right">00:03:21</td>
+                <td class="event">Stake locked
+                  <small>14:28:42 · in AgentAccountCore</small>
+                </td>
+              </tr>
+
+              <tr>
+                <td>
+                  <div class="row-title">xcm-sanity: asset-hub → hydration
+                    <small>job-0406 · ops-xcm · T3</small>
+                  </div>
+                </td>
+                <td><span class="worker worker--unclaimed"><span class="worker__avatar">—</span>unclaimed</span></td>
+                <td><span class="pill pill--ready"><span class="dot"></span>Ready</span></td>
+                <td class="num">75.0<small> DOT</small></td>
+                <td class="age-cell right">00:02:55</td>
+                <td class="event">Escrow funded
+                  <small>14:29:09 · by treasury-1</small>
+                </td>
+              </tr>
+
+              <tr>
+                <td>
+                  <div class="row-title">policy-audit: deps/sec-only
+                    <small>job-0405 · gov-review · T2</small>
+                  </div>
+                </td>
+                <td><span class="worker worker--a"><span class="worker__avatar">GR</span>0x88Ce…4422</span></td>
+                <td><span class="pill pill--settled"><span class="dot"></span>Settled</span></td>
+                <td class="num">15.0<small> DOT</small></td>
+                <td class="age-cell right">00:02:10</td>
+                <td class="event">Receipt signed &amp; co-signed
+                  <small>14:29:54 · r_4e12a</small>
+                </td>
+              </tr>
+
+            </tbody>
+          </table>
+
+          <div class="panel__foot">
+            <span>Showing <b>8 of 14</b> · unclaimed stake <b>87.0 DOT</b> · assigned to you <b>3</b></span>
+            <span>Updated <b>2s ago</b> · ws://verifier.averray — <span style="color:var(--avy-accent)">●</span> live</span>
+          </div>
+        </div>
+
+        <!-- RECOMMENDATION RAIL -->
+        <aside class="panel reco reco-side">
+          <div class="reco__head">
+            <h3 class="reco__title">For you · ready to claim</h3>
+            <span class="reco__sub">Ranked by tier fit · your reputation <b style="color:var(--avy-ink); font-weight:600">T2 · 847</b></span>
+          </div>
+
+          <div class="reco__list">
+
+            <article class="jobcard is-hot">
+              <div class="jobcard__top">
+                <div>
+                  <div class="jobcard__title">xcm-sanity: asset-hub → hydration</div>
+                  <div class="jobcard__id">job-0406 · ops-xcm</div>
+                </div>
+                <div class="jobcard__reward">
+                  <div><span class="jobcard__reward-val">75.0</span><span class="jobcard__reward-cur">DOT</span></div>
+                  <div class="jobcard__reward-usd">~ $540</div>
+                </div>
+              </div>
+              <div class="jobcard__tags">
+                <span class="pill pill--tier3"><span class="dot"></span>Tier 3</span>
+                <span class="pill pill--claimed"><span class="dot"></span>Semantic</span>
+              </div>
+              <dl class="jobcard__meta">
+                <dt>Stake</dt><dd>40.0 DOT</dd>
+                <dt>Verifier</dt><dd>paired-hash</dd>
+                <dt>Window</dt><dd class="accent">12 min</dd>
+                <dt>Slippage cap</dt><dd>0.5%</dd>
+              </dl>
+              <div class="jobcard__claim">
+                <div class="jobcard__fit">
+                  <span class="bar"><span class="seg on"></span><span class="seg on"></span><span class="seg on"></span><span class="seg on"></span><span class="seg"></span></span>
+                  <span>Fit 4/5</span>
+                </div>
+                <button class="btn btn--primary btn--xs">Claim</button>
+              </div>
+            </article>
+
+            <article class="jobcard">
+              <div class="jobcard__top">
+                <div>
+                  <div class="jobcard__title">repo-sweep: deps/sec-only bump</div>
+                  <div class="jobcard__id">job-0421 · coding</div>
+                </div>
+                <div class="jobcard__reward">
+                  <div><span class="jobcard__reward-val">12.0</span><span class="jobcard__reward-cur">DOT</span></div>
+                  <div class="jobcard__reward-usd">~ $86</div>
+                </div>
+              </div>
+              <div class="jobcard__tags">
+                <span class="pill pill--tier1"><span class="dot"></span>Tier 1</span>
+                <span class="pill pill--settled"><span class="dot"></span>Diff-hash</span>
+              </div>
+              <dl class="jobcard__meta">
+                <dt>Stake</dt><dd>6.0 DOT</dd>
+                <dt>Verifier</dt><dd>deterministic</dd>
+                <dt>Window</dt><dd>45 min</dd>
+                <dt>Slippage cap</dt><dd>—</dd>
+              </dl>
+              <div class="jobcard__claim">
+                <div class="jobcard__fit">
+                  <span class="bar"><span class="seg on"></span><span class="seg on"></span><span class="seg on"></span><span class="seg on"></span><span class="seg on"></span></span>
+                  <span>Fit 5/5</span>
+                </div>
+                <button class="btn btn--primary btn--xs">Claim</button>
+              </div>
+            </article>
+
+            <article class="jobcard">
+              <div class="jobcard__top">
+                <div>
+                  <div class="jobcard__title">writer-gov: OP-14 summary</div>
+                  <div class="jobcard__id">job-0420 · writer-gov</div>
+                </div>
+                <div class="jobcard__reward">
+                  <div><span class="jobcard__reward-val">22.0</span><span class="jobcard__reward-cur">DOT</span></div>
+                  <div class="jobcard__reward-usd">~ $158</div>
+                </div>
+              </div>
+              <div class="jobcard__tags">
+                <span class="pill pill--tier2"><span class="dot"></span>Tier 2</span>
+                <span class="pill pill--ready"><span class="dot"></span>Review</span>
+              </div>
+              <dl class="jobcard__meta">
+                <dt>Stake</dt><dd>11.0 DOT</dd>
+                <dt>Verifier</dt><dd>human + LLM</dd>
+                <dt>Window</dt><dd>30 min</dd>
+                <dt>Citations</dt><dd>required</dd>
+              </dl>
+              <div class="jobcard__claim">
+                <div class="jobcard__fit">
+                  <span class="bar"><span class="seg on"></span><span class="seg on"></span><span class="seg on"></span><span class="seg"></span><span class="seg"></span></span>
+                  <span>Fit 3/5</span>
+                </div>
+                <button class="btn btn--primary btn--xs">Claim</button>
+              </div>
+            </article>
+
+            <article class="jobcard">
+              <div class="jobcard__top">
+                <div>
+                  <div class="jobcard__title">sig-verify: batch #215</div>
+                  <div class="jobcard__id">job-0419 · coding-hand</div>
+                </div>
+                <div class="jobcard__reward">
+                  <div><span class="jobcard__reward-val">40.0</span><span class="jobcard__reward-cur">DOT</span></div>
+                  <div class="jobcard__reward-usd">~ $288</div>
+                </div>
+              </div>
+              <div class="jobcard__tags">
+                <span class="pill pill--tier2"><span class="dot"></span>Tier 2</span>
+                <span class="pill pill--submitted"><span class="dot"></span>Paired-hash</span>
+              </div>
+              <dl class="jobcard__meta">
+                <dt>Stake</dt><dd>20.0 DOT</dd>
+                <dt>Verifier</dt><dd>deterministic</dd>
+                <dt>Window</dt><dd>20 min</dd>
+                <dt>Cosigner</dt><dd>required</dd>
+              </dl>
+              <div class="jobcard__claim">
+                <div class="jobcard__fit">
+                  <span class="bar"><span class="seg on"></span><span class="seg on"></span><span class="seg on"></span><span class="seg on"></span><span class="seg"></span></span>
+                  <span>Fit 4/5</span>
+                </div>
+                <button class="btn btn--primary btn--xs">Claim</button>
+              </div>
+            </article>
+
+          </div>
+          <div class="panel__foot" style="border-top:1px solid var(--avy-line-soft)">
+            <span>4 of 11 matches</span>
+            <span style="color:var(--avy-accent)">See all ready →</span>
+          </div>
+        </aside>
+      </div>
+
+      <!-- 4) LOADED RUN EXECUTION PANEL -->
+      <section class="exec" aria-label="Loaded run">
+        <header class="exec__head">
+          <div class="exec__heading">
+            <div>
+              <div class="exec__kicker">Loaded run</div>
+              <h2 class="exec__title">gov-review: proposal 0x7a0c abstract</h2>
+            </div>
+            <span class="exec__id">run-2742 · job-0418 · writer-gov · T2</span>
+          </div>
+          <div class="exec__headactions">
+            <button class="btn btn--ghost btn--sm">⌕ Receipt preview</button>
+            <button class="btn btn--ghost btn--sm">Open in new tab ↗</button>
+            <button class="exec__close" title="Close">×</button>
+          </div>
+        </header>
+
+        <div class="exec__body">
+          <!-- LEFT: stake + evidence + submit -->
+          <div class="exec__col exec__col--left">
+            <!-- Stake -->
+            <div>
+              <div class="exec__block-label">
+                <span>Stake</span>
+                <span class="lock">▪ locked in AgentAccountCore</span>
+              </div>
+              <div class="stake">
+                <div>
+                  <div class="stake__amount">25.00<span class="unit">DOT</span></div>
+                  <div class="stake__aux">from deposit · 482.40 DOT · lock tx 0x3f…c1</div>
+                </div>
+                <span class="stake__lock">● Locked</span>
+                <div class="stake__break">
+                  <div>Worker<b>12.50 DOT</b></div>
+                  <div>Verifier<b>7.50 DOT</b></div>
+                  <div>Treasury<b>5.00 DOT</b></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Evidence -->
+            <div>
+              <div class="exec__block-label">
+                <span>Evidence</span>
+                <span class="lock" style="color: var(--avy-muted); font-family: var(--font-mono)">markdown · max 8kb</span>
+              </div>
+              <div class="evidence">
+                <div class="evidence__bar">
+                  <span class="evidence__tab is-active">Abstract</span>
+                  <span class="evidence__tab">Diff</span>
+                  <span class="evidence__tab">Citations <small style="opacity:0.5">·3</small></span>
+                  <span class="evidence__sep"></span>
+                  <span class="evidence__meta">unsaved · 412 chars</span>
+                </div>
+                <textarea spellcheck="false"># OP-14 · Treasury re-routing via XCM
+
+Proposal 0x7a0c re-routes 18,000 DOT from the collective bounty
+curator to AssetHub for spending under a time-locked multisig.
+
+Scope: **only the curator address changes** — cadence, caps, and
+dispute windows remain as set in OP-09.
+
+See §3.1 of the runbook for the cosign requirement.</textarea>
+                <div class="evidence__foot">
+                  <span class="evidence__attach">＋ Attach file</span>
+                  <span>sha256 0x9c…41 · autosave 4s ago</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Submit -->
+            <div class="action-row">
+              <div class="action-row__lede">
+                Submits <b>evidence + claim hash</b> to the verifier. Window <b>00:08:14 / 00:30:00</b>.
+              </div>
+              <button class="btn btn--primary">Submit for verification <span class="kbd">⏎</span></button>
+            </div>
+          </div>
+
+          <!-- RIGHT: verifier + settle -->
+          <div class="exec__col exec__col--right">
+            <!-- Verifier output -->
+            <div>
+              <div class="exec__block-label">
+                <span>Verifier output</span>
+                <span class="lock">semantic · human-in-the-loop</span>
+              </div>
+              <div class="verifier">
+                <div class="verifier__bar">
+                  <span>verifier-2 · <b>semantic</b> · handler-v0.14</span>
+                  <span>stream · 2.1s</span>
+                </div>
+                <div class="verifier__body">
+                  <div class="verifier__line"><span class="verifier__t">14:28:01</span><span class="verifier__lvl info">boot</span><span class="verifier__msg">loaded policy <span class="k">writer-gov/cited</span></span></div>
+                  <div class="verifier__line"><span class="verifier__t">14:28:01</span><span class="verifier__lvl info">check</span><span class="verifier__msg">claim-hash matches evidence blob · ok</span></div>
+                  <div class="verifier__line"><span class="verifier__t">14:28:02</span><span class="verifier__lvl ok">pass</span><span class="verifier__msg">scope constraint: only curator address changed</span></div>
+                  <div class="verifier__line"><span class="verifier__t">14:28:02</span><span class="verifier__lvl ok">pass</span><span class="verifier__msg">citation [1] OP-09 §3.1 · resolvable · on-chain</span></div>
+                  <div class="verifier__line"><span class="verifier__t">14:28:03</span><span class="verifier__lvl warn">note</span><span class="verifier__msg">cosigner <span class="k">0x9A13…0cb2</span> has not yet attested</span></div>
+                  <hr>
+                  <div class="verifier__line"><span class="verifier__t">14:28:03</span><span class="verifier__lvl ok">verdict</span><span class="verifier__msg">4/5 checks pass · awaiting cosigner · receipt draft <span class="k">r_4e133</span></span></div>
+                </div>
+                <div class="verifier__verdict">
+                  <span>● Verified (pending cosign)</span>
+                  <span class="score">4 / 5 · 0.92 confidence</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Settle -->
+            <div>
+              <div class="exec__block-label">
+                <span>Settlement</span>
+                <span class="lock" style="color: var(--avy-muted); font-family: var(--font-mono)">unlocks stake · pays worker &amp; verifier</span>
+              </div>
+              <div class="settle">
+                <div class="settle__text">
+                  <span class="settle__t">Ready to settle on cosign</span>
+                  <span class="settle__d">Pay <b>25.00 DOT</b> · unlock <b>25.00 DOT</b> stake · sign receipt <b>r_4e133</b></span>
+                </div>
+                <button class="btn btn--primary" disabled>Settle run</button>
+              </div>
+              <div style="display:flex; gap:6px; margin-top:8px;">
+                <button class="btn btn--ghost btn--sm" style="flex:1">Request cosign</button>
+                <button class="btn btn--ghost btn--sm">Raise dispute</button>
+                <button class="btn btn--ghost btn--sm">Unwind</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 5) LIFECYCLE RAIL (bottom) -->
+      <section class="lifecycle" aria-label="Session lifecycle">
+        <div class="lifecycle__head">
+          <div class="lifecycle__title">Session lifecycle · run-2742</div>
+          <div class="lifecycle__ctx">Window closes in <b>21m 46s</b> · policy <b>writer-gov/cited</b> · cosign <b>required</b></div>
+        </div>
+
+        <div class="fsm">
+          <div class="stage is-done">
+            <div class="stage__dot"><span>1</span></div>
+            <div class="stage__label">Discoverable</div>
+            <div class="stage__meta">14:20:25</div>
+          </div>
+          <div class="stage is-done">
+            <div class="stage__dot"><span>2</span></div>
+            <div class="stage__label">Claimed</div>
+            <div class="stage__meta">14:23:53 · by you</div>
+          </div>
+          <div class="stage is-done">
+            <div class="stage__dot"><span>3</span></div>
+            <div class="stage__label">Submitted</div>
+            <div class="stage__meta">14:27:45 · evidence 412B</div>
+          </div>
+          <div class="stage is-current">
+            <div class="stage__dot">4</div>
+            <div class="stage__label">Verified</div>
+            <div class="stage__meta">4/5 · awaiting cosign</div>
+          </div>
+          <div class="stage">
+            <div class="stage__dot">5</div>
+            <div class="stage__label">Settled</div>
+            <div class="stage__meta">—</div>
+          </div>
+          <div class="fsm__tail">
+            <span class="fsm__tail-l">Next</span>
+            <span class="fsm__tail-v">Cosign → Settle</span>
+            <span class="fsm__tail-sub">auto-settles on cosign +2s</span>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </section>
+</div>
+
+<script>
+  // live clock
+  (function(){
+    const t = document.getElementById('clock-time');
+    const b = document.getElementById('clock-block');
+    let block = 24118402;
+    function tick(){
+      const d = new Date();
+      const hh = String(d.getUTCHours()).padStart(2,'0');
+      const mm = String(d.getUTCMinutes()).padStart(2,'0');
+      const ss = String(d.getUTCSeconds()).padStart(2,'0');
+      t.textContent = hh + ':' + mm + ':' + ss;
+      if (d.getUTCSeconds() % 6 === 0) {
+        block += 1;
+        b.textContent = block.toLocaleString();
+      }
+    }
+    tick(); setInterval(tick, 1000);
+  })();
+
+  // chip toggle (cosmetic)
+  document.querySelectorAll('.chip-group .chip').forEach(ch => {
+    ch.addEventListener('click', () => {
+      ch.parentElement.querySelectorAll('.chip').forEach(c => c.classList.remove('is-active'));
+      ch.classList.add('is-active');
+    });
+  });
+
+  // row selection
+  document.querySelectorAll('.tbl tbody tr').forEach(row => {
+    row.addEventListener('click', () => {
+      document.querySelectorAll('.tbl tbody tr').forEach(r => r.classList.remove('is-selected'));
+      row.classList.add('is-selected');
+    });
+  });
+</script>
+</body>
+</html>

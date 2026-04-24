@@ -1,0 +1,229 @@
+/* =========================================================
+   Averray Design System — colors_and_type.css
+   Single source of truth for color, type, spacing, radius,
+   elevation, and semantic tokens for both surfaces:
+     - Operator control room (app.averray.com)
+     - Marketing site (averray.com)
+   Values reconciled from depre-dev/agent@main:
+     frontend/styles.css  (operator)
+     site/styles.css      (marketing)
+   ========================================================= */
+
+/* --- Fonts: loaded from Google Fonts. Substitute bundled
+   files into /fonts and update @font-face if offline-safe
+   copy is required. ---------------------------------------- */
+@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&family=JetBrains+Mono:wght@400;500;600&display=swap");
+
+:root {
+  color-scheme: light;
+
+  /* ----- Palette: operator (warm beige, paper cream) ----- */
+  --avy-bg:          #f3f1ea;                        /* page canvas */
+  --avy-bg-marketing:#f6f1e8;                        /* marketing canvas */
+  --avy-paper:       rgba(255, 253, 247, 0.88);      /* translucent card */
+  --avy-paper-solid: #fffdf7;                        /* solid card */
+  --avy-paper-alt:   #f7f9fa;
+
+  --avy-ink:         #111315;                        /* primary text */
+  --avy-muted:       #5f655f;                        /* secondary text */
+  --avy-line:        rgba(17, 19, 21, 0.12);         /* hairline border */
+  --avy-line-soft:   rgba(17, 19, 21, 0.08);         /* inner hairline */
+
+  --avy-accent:      #1e6642;                        /* sage — primary */
+  --avy-accent-2:    #0f6b4f;                        /* deeper sage (redesign) */
+  --avy-accent-soft: #d6eadf;                        /* sage wash */
+  --avy-accent-wash: rgba(30, 102, 66, 0.10);        /* pill / active */
+
+  --avy-warm:        #f1d8b8;                        /* clay highlight */
+  --avy-warn:        #a76122;                        /* amber ink */
+  --avy-warn-soft:   #f4e3cf;                        /* amber wash */
+
+  --avy-blue:        #254e9a;                        /* infra blue */
+  --avy-dark:        #101419;                        /* deep hero */
+  --avy-dark-soft:   #171f28;
+
+  /* ----- Semantic: text roles ----- */
+  --fg1: var(--avy-ink);         /* primary */
+  --fg2: var(--avy-muted);       /* secondary */
+  --fg-accent: var(--avy-accent);
+  --fg-warn:   var(--avy-warn);
+  --fg-invert: #fffdf7;
+
+  /* ----- Semantic: surfaces ----- */
+  --bg1: var(--avy-bg);
+  --bg-paper: var(--avy-paper);
+  --bg-wash:  rgba(255, 255, 255, 0.70);
+  --bg-deep:  var(--avy-dark);
+
+  /* ----- Type families ----- */
+  --font-display: "Space Grotesk", "Manrope", ui-sans-serif, system-ui, sans-serif;
+  --font-body:    "Manrope", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono:    "JetBrains Mono", "SFMono-Regular", "Menlo", "Monaco", ui-monospace, monospace;
+
+  /* ----- Type scale (fluid) ----- */
+  --fs-h1: clamp(2.1rem, 3.8vw, 3.6rem);
+  --fs-h2: clamp(1.6rem, 2vw, 2.2rem);
+  --fs-h3: 1.12rem;
+  --fs-eyebrow: 0.78rem;
+  --fs-body: 1rem;
+  --fs-small: 0.88rem;
+  --fs-tiny:  0.76rem;
+  --fs-hero-marketing: clamp(2.9rem, 5vw, 5.3rem);
+
+  /* ----- Line heights ----- */
+  --lh-tight: 0.98;
+  --lh-snug:  1.18;
+  --lh-body:  1.65;
+  --lh-loose: 1.72;
+
+  /* ----- Tracking ----- */
+  --tracking-display: 0;
+  --tracking-marketing-display: -0.04em;
+  --tracking-eyebrow: 0.12em;
+  --tracking-eyebrow-tight: 0.08em;
+  --tracking-eyebrow-wide:  0.16em;
+
+  /* ----- Spacing scale ----- */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+
+  /* ----- Radii -----
+     Modernist 8px system the shipped build settled on,
+     with legacy organic radii preserved for opt-in. */
+  --radius-sm: 6px;
+  --radius:    8px;   /* default — chips, buttons, cards, panels */
+  --radius-pill: 999px;
+  --radius-organic-chip:   0.5rem;
+  --radius-organic-card:   0.875rem;
+  --radius-organic-panel:  1.25rem;
+
+  /* ----- Elevation ----- */
+  --shadow-card:     0 24px 60px rgba(34, 43, 36, 0.08);
+  --shadow-card-mkt: 0 24px 70px rgba(28, 36, 30, 0.08);
+  --shadow-dense:    0 16px 42px rgba(30, 37, 44, 0.10);
+  --shadow-hero:     0 24px 70px rgba(0, 0, 0, 0.24);
+
+  /* ----- Layout ----- */
+  --rail-width: 17rem;
+  --max-app:       1440px;
+  --max-marketing: 1180px;
+
+  /* ----- Motion ----- */
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --dur-fast: 160ms;
+  --dur:      180ms;
+}
+
+/* ============ Semantic element defaults ============ */
+
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  color: var(--fg1);
+  background: var(--bg1);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Global: kill decorative tracking everywhere — shipped behavior */
+* { letter-spacing: 0 !important; }
+
+h1, h2, h3, h4, h5, h6 {
+  margin: 0 0 0.45rem;
+  font-family: var(--font-display);
+  font-weight: 700;
+  color: var(--fg1);
+  line-height: var(--lh-tight);
+}
+
+h1 { font-size: var(--fs-h1); line-height: 0.98; max-width: 13ch; }
+h2 { font-size: var(--fs-h2); line-height: 1.08; }
+h3 { font-size: var(--fs-h3); line-height: 1.18; }
+
+p { margin: 0 0 0.75rem; line-height: var(--lh-body); }
+.muted, p.muted { color: var(--fg2); }
+
+a { color: inherit; text-decoration: none; }
+
+code, kbd, samp {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  padding: 0.15rem 0.35rem;
+  border-radius: var(--radius-sm);
+  background: rgba(17,19,21,0.06);
+  color: var(--fg1);
+}
+
+pre, .code-block {
+  font-family: var(--font-mono);
+  margin: 0;
+  padding: 1rem 1.1rem;
+  border-radius: var(--radius);
+  background: #131715;
+  color: #f5f3ee;
+  overflow-x: auto;
+  line-height: 1.6;
+  font-size: 0.88rem;
+}
+
+/* ============ Utility classes ============ */
+
+.eyebrow {
+  display: inline-block;
+  margin: 0 0 0.75rem;
+  font-family: var(--font-display);
+  font-size: var(--fs-eyebrow);
+  font-weight: 800;
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  color: var(--fg-accent);
+}
+
+.mono { font-family: var(--font-mono); }
+
+.hairline { border: 1px solid var(--avy-line); }
+
+/* Pills — 999px, UPPERCASE, sage/amber/neutral. */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2rem;
+  padding: 0 0.85rem;
+  border-radius: var(--radius-pill);
+  font-family: var(--font-display);
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: var(--tracking-eyebrow-tight);
+  text-transform: uppercase;
+}
+.pill--ok      { background: var(--avy-accent-soft); color: var(--avy-accent); }
+.pill--warn    { background: var(--avy-warn-soft);   color: var(--avy-warn); }
+.pill--neutral { background: #ebe7da;                color: #756d58; }
+
+/* Card — the translucent console-window primitive. */
+.card {
+  padding: 1.15rem;
+  border: 1px solid var(--avy-line);
+  border-radius: var(--radius);
+  background: var(--bg-paper);
+  box-shadow: var(--shadow-card);
+  backdrop-filter: blur(10px);
+}
+
+/* Focus state — sage ring */
+:where(a, button, input, select, textarea):focus-visible {
+  outline: 2px solid rgba(30, 102, 66, 0.26);
+  outline-offset: 3px;
+}

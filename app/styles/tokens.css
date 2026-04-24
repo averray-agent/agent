@@ -1,0 +1,140 @@
+/*
+ * Averray design tokens — single source of truth.
+ *
+ * Reconciled from the Claude Design handoff bundle:
+ *   handoffs/averray-operator-overview/project/colors_and_type.css
+ *
+ * The --avy-* names are the canonical surface (used by all Claude Design
+ * exports). Legacy short aliases (--bg, --ink, --accent…) map onto the same
+ * values so components written before the handoff continue to work without
+ * modification.
+ */
+
+:root {
+  color-scheme: light;
+
+  /* ----- Palette: operator (warm beige, paper cream) ----- */
+  --avy-bg:           #f3f1ea;
+  --avy-bg-marketing: #f6f1e8;
+  --avy-paper:        rgba(255, 253, 247, 0.88);
+  --avy-paper-solid:  #fffdf7;
+  --avy-paper-alt:    #f7f9fa;
+
+  --avy-ink:          #111315;
+  --avy-muted:        #5f655f;
+  --avy-line:         rgba(17, 19, 21, 0.12);
+  --avy-line-soft:    rgba(17, 19, 21, 0.08);
+
+  --avy-accent:       #1e6642;
+  --avy-accent-2:     #0f6b4f;
+  --avy-accent-soft:  #d6eadf;
+  --avy-accent-wash:  rgba(30, 102, 66, 0.10);
+
+  --avy-warm:         #f1d8b8;
+  --avy-warn:         #a76122;
+  --avy-warn-soft:    #f4e3cf;
+
+  --avy-blue:         #254e9a;
+  --avy-dark:         #101419;
+  --avy-dark-soft:    #171f28;
+
+  /* ----- Semantic: text roles ----- */
+  --fg1:        var(--avy-ink);
+  --fg2:        var(--avy-muted);
+  --fg-accent:  var(--avy-accent);
+  --fg-warn:    var(--avy-warn);
+  --fg-invert:  #fffdf7;
+
+  /* ----- Semantic: surfaces ----- */
+  --bg1:       var(--avy-bg);
+  --bg-paper:  var(--avy-paper);
+  --bg-wash:   rgba(255, 255, 255, 0.70);
+  --bg-deep:   var(--avy-dark);
+
+  /* ----- Type families ----- */
+  --font-display: "Space Grotesk", "Manrope", ui-sans-serif, system-ui, sans-serif;
+  --font-body:    "Manrope", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono:    "JetBrains Mono", "SFMono-Regular", "Menlo", "Monaco", ui-monospace, monospace;
+
+  /* ----- Type scale (fluid) ----- */
+  --fs-h1:             clamp(2.1rem, 3.8vw, 3.6rem);
+  --fs-h2:             clamp(1.6rem, 2vw, 2.2rem);
+  --fs-h3:             1.12rem;
+  --fs-eyebrow:        0.78rem;
+  --fs-body:           1rem;
+  --fs-small:          0.88rem;
+  --fs-tiny:           0.76rem;
+  --fs-hero-marketing: clamp(2.9rem, 5vw, 5.3rem);
+
+  /* ----- Line heights ----- */
+  --lh-tight: 0.98;
+  --lh-snug:  1.18;
+  --lh-body:  1.65;
+  --lh-loose: 1.72;
+
+  /* ----- Tracking ----- */
+  --tracking-display:           0;
+  --tracking-marketing-display: -0.04em;
+  --tracking-eyebrow:           0.12em;
+  --tracking-eyebrow-tight:     0.08em;
+  --tracking-eyebrow-wide:      0.16em;
+
+  /* ----- Spacing scale ----- */
+  --space-1:  0.25rem;
+  --space-2:  0.5rem;
+  --space-3:  0.75rem;
+  --space-4:  1rem;
+  --space-5:  1.25rem;
+  --space-6:  1.5rem;
+  --space-8:  2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+
+  /* ----- Radii ----- */
+  --radius-sm:             6px;
+  --radius:                8px;
+  --radius-pill:           999px;
+  --radius-organic-chip:   0.5rem;
+  --radius-organic-card:   0.875rem;
+  --radius-organic-panel:  1.25rem;
+
+  /* ----- Elevation ----- */
+  --shadow-card:     0 24px 60px rgba(34, 43, 36, 0.08);
+  --shadow-card-mkt: 0 24px 70px rgba(28, 36, 30, 0.08);
+  --shadow-dense:    0 16px 42px rgba(30, 37, 44, 0.10);
+  --shadow-hero:     0 24px 70px rgba(0, 0, 0, 0.24);
+
+  /* ----- Layout ----- */
+  --rail-width:    17rem;
+  --max-app:       1440px;
+  --max-marketing: 1180px;
+
+  /* ----- Motion ----- */
+  --ease:     cubic-bezier(0.2, 0.7, 0.2, 1);
+  --dur-fast: 160ms;
+  --dur:      180ms;
+
+  /* ----- Legacy aliases — pre-handoff component code targets these.
+        Keep until every component is migrated to --avy-* names. ----- */
+  --bg:           var(--avy-bg);
+  --paper:        var(--avy-paper);
+  --paper-solid:  var(--avy-paper-solid);
+  --ink:          var(--avy-ink);
+  --muted:        var(--avy-muted);
+  --line:         var(--avy-line);
+  --line-strong:  rgba(17, 19, 21, 0.22);
+  --accent:       var(--avy-accent);
+  --accent-hover: var(--avy-accent-2);
+  --accent-soft:  var(--avy-accent-soft);
+  --warm:         var(--avy-warm);
+  --warn:         var(--avy-warn);
+  --warn-soft:    var(--avy-warn-soft);
+  --shadow-sm:    0 1px 2px rgba(34, 43, 36, 0.06);
+  --shadow:       var(--shadow-card);
+  --shadow-lg:    0 40px 80px rgba(34, 43, 36, 0.12);
+  --radius-lg:    1.25rem;
+}
+
+/* Global type rule from the handoff — kill decorative tracking everywhere
+   except where explicitly opted in via !important on letter-spacing. */
+* { letter-spacing: 0; }

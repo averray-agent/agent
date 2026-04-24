@@ -1,0 +1,728 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Overview — Averray Operator</title>
+<link rel="stylesheet" href="colors_and_type.css">
+<style>
+  /* ---------- page frame: rail + workspace ---------- */
+  body { background: var(--avy-bg); min-height: 100vh; }
+
+  .shell {
+    display: grid;
+    grid-template-columns: 17rem minmax(0, 1fr);
+    min-height: 100vh;
+  }
+
+  /* ----- left rail (existing — rendered here to set context) ----- */
+  .rail {
+    border-right: 1px solid var(--avy-line);
+    padding: 1.4rem 1rem 1.25rem;
+    background: #f7f5ec;
+    display: flex;
+    flex-direction: column;
+    gap: 1.4rem;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+  }
+  .rail__brand { display: flex; align-items: center; gap: 10px; padding: 0 4px; }
+  .rail__mark {
+    width: 30px; height: 30px; border-radius: 8px;
+    background: var(--avy-dark); color: var(--fg-invert);
+    display: grid; place-items: center;
+    font-family: var(--font-display); font-weight: 800; font-size: 16px;
+  }
+  .rail__name { font-family: var(--font-display); font-weight: 700; font-size: 17px; color: var(--avy-ink); line-height: 1; }
+  .rail__sub { font-family: var(--font-display); font-size: 10px; font-weight: 800; letter-spacing: 0.12em !important; text-transform: uppercase; color: var(--avy-accent); margin-top: 3px; }
+  .rail__group-label { font-family: var(--font-display); font-size: 10.5px; font-weight: 800; letter-spacing: 0.14em !important; text-transform: uppercase; color: var(--avy-muted); padding: 0 8px; margin: 0 0 6px; }
+  .rail__nav { display: grid; gap: 2px; }
+  .rail__item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 10px; border-radius: 8px;
+    font-family: var(--font-body); font-size: 14px; font-weight: 500;
+    color: var(--avy-ink); cursor: pointer;
+    transition: background var(--dur-fast) var(--ease);
+  }
+  .rail__item:hover { background: rgba(17,19,21,0.04); }
+  .rail__item.is-active { background: rgba(30,102,66,0.10); color: var(--avy-accent); font-weight: 700; }
+  .rail__item-ico { width: 18px; display: grid; place-items: center; opacity: 0.8; font-size: 13px; }
+  .rail__count { margin-left: auto; font-family: var(--font-mono); font-size: 11px; color: var(--avy-muted); }
+  .rail__item.is-active .rail__count { color: var(--avy-accent); }
+  .rail__wallet { margin-top: auto; border: 1px solid var(--avy-line); border-radius: 10px; padding: 12px; background: var(--avy-paper-solid); display: grid; gap: 6px; }
+  .rail__w-label { font-family: var(--font-display); font-size: 10px; font-weight: 800; letter-spacing: 0.12em !important; text-transform: uppercase; color: var(--avy-accent); }
+  .rail__w-addr { font-family: var(--font-mono); font-size: 12px; color: var(--avy-ink); }
+  .rail__w-meta { font-family: var(--font-body); font-size: 11.5px; color: var(--avy-muted); }
+
+  /* ----- workspace canvas ----- */
+  .ws {
+    padding: 2rem 2.5rem 5rem;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .ws__inner {
+    max-width: 1100px;
+    width: 100%;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1.75rem;
+  }
+
+  /* topbar */
+  .topbar {
+    display: flex; justify-content: space-between; align-items: center; gap: 1rem;
+  }
+  .crumbs { display: flex; align-items: center; gap: 8px; font-family: var(--font-display); font-size: 12px; font-weight: 700; letter-spacing: 0.08em !important; text-transform: uppercase; color: var(--avy-muted); }
+  .crumbs .cur { color: var(--avy-ink); }
+  .topbar__right { display: flex; align-items: center; gap: 10px; }
+  .clock { font-family: var(--font-mono); font-size: 12px; color: var(--avy-muted); }
+  .clock__dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--avy-accent); margin-right: 6px; transform: translateY(-1px); animation: pulse 2.2s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    height: 34px; padding: 0 14px; border-radius: 8px;
+    font-family: var(--font-display); font-size: 12px; font-weight: 700;
+    letter-spacing: 0.04em !important; text-transform: uppercase;
+    border: 1px solid transparent; background: transparent; color: var(--avy-ink);
+    cursor: pointer;
+    transition: transform var(--dur) var(--ease), border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+  }
+  .btn--primary { background: var(--avy-accent); color: var(--fg-invert); }
+  .btn--primary:hover { transform: translateY(-1px); }
+  .btn--ghost { border-color: var(--avy-line); background: rgba(255,255,255,0.7); }
+  .btn--ghost:hover { transform: translateY(-1px); border-color: rgba(30, 102, 66, 0.22); background: rgba(255,255,255,0.95); }
+
+  /* ---------- 1. mission hero ---------- */
+  .hero { padding: 0.25rem 0 0.5rem; }
+  .hero__eyebrow {
+    font-family: var(--font-display); font-size: 11px; font-weight: 800;
+    letter-spacing: 0.14em !important; text-transform: uppercase;
+    color: var(--avy-accent); margin: 0 0 0.9rem;
+  }
+  .hero__eyebrow::before { content: ""; display: inline-block; width: 22px; height: 1px; background: var(--avy-accent); vertical-align: middle; margin-right: 10px; }
+  .hero__h1 {
+    font-family: var(--font-display); font-weight: 700;
+    font-size: clamp(2.2rem, 3.4vw, 3.1rem); line-height: 1.02;
+    margin: 0 0 0.75rem; max-width: 20ch;
+    color: var(--avy-ink);
+  }
+  .hero__sub {
+    font-family: var(--font-body); font-size: 1.025rem; line-height: 1.55;
+    color: var(--avy-muted); max-width: 62ch; margin: 0;
+  }
+  .hero__meta {
+    margin-top: 1.1rem;
+    display: flex; gap: 1.25rem; flex-wrap: wrap;
+    font-family: var(--font-mono); font-size: 11.5px; color: var(--avy-muted);
+    padding-top: 1rem; border-top: 1px solid var(--avy-line-soft);
+  }
+  .hero__meta b { color: var(--avy-ink); font-weight: 600; }
+
+  /* ---------- section label (shared) ---------- */
+  .sec-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    margin: 0 0 0.85rem;
+  }
+  .sec-head__title {
+    font-family: var(--font-display); font-size: 11px; font-weight: 800;
+    letter-spacing: 0.14em !important; text-transform: uppercase;
+    color: var(--avy-muted);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .sec-head__title::before {
+    content: ""; width: 6px; height: 6px; border-radius: 50%;
+    background: var(--avy-accent);
+  }
+  .sec-head__meta { font-family: var(--font-mono); font-size: 11.5px; color: var(--avy-muted); }
+
+  /* ---------- 2. KPI row ---------- */
+  .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.9rem; }
+  .kpi {
+    padding: 1.1rem 1.15rem 1rem;
+    border: 1px solid var(--avy-line);
+    border-radius: 10px;
+    background: var(--avy-paper);
+    box-shadow: var(--shadow-card);
+    backdrop-filter: blur(10px);
+    display: grid; gap: 0.55rem;
+    transition: transform var(--dur) var(--ease), border-color var(--dur) var(--ease);
+  }
+  .kpi:hover { transform: translateY(-2px); border-color: rgba(30, 102, 66, 0.24); }
+  .kpi__lbl {
+    font-family: var(--font-display); font-size: 10.5px; font-weight: 800;
+    letter-spacing: 0.14em !important; text-transform: uppercase; color: var(--avy-muted);
+  }
+  .kpi__value-row { display: flex; justify-content: space-between; align-items: flex-end; gap: 10px; }
+  .kpi__val {
+    font-family: var(--font-display); font-weight: 700;
+    font-size: 2.2rem; line-height: 1; color: var(--avy-ink);
+    letter-spacing: -0.01em !important;
+  }
+  .kpi__val .unit { font-size: 0.9rem; font-weight: 600; color: var(--avy-muted); margin-left: 3px; }
+  .kpi__spark { width: 88px; height: 26px; overflow: visible; }
+  .kpi__delta {
+    font-family: var(--font-mono); font-size: 11.5px; color: var(--avy-accent);
+    display: inline-flex; align-items: center; gap: 5px;
+  }
+  .kpi__delta.warn { color: var(--avy-warn); }
+  .kpi__delta.neutral { color: var(--avy-muted); }
+  .kpi__delta .arrow { font-family: var(--font-display); font-weight: 800; font-size: 11px; }
+
+  /* ---------- 3. Needs action ---------- */
+  .alerts { display: flex; flex-direction: column; gap: 0.55rem; }
+  .alert {
+    display: grid;
+    grid-template-columns: 10px 1fr auto;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.95rem 1.1rem;
+    border: 1px solid var(--avy-line);
+    border-radius: 10px;
+    background: var(--avy-paper-solid);
+    box-shadow: var(--shadow-card);
+    transition: transform var(--dur) var(--ease), border-color var(--dur) var(--ease);
+  }
+  .alert:hover { transform: translateY(-1px); border-color: rgba(30,102,66,0.22); }
+  .alert--warn { border-left: 3px solid var(--avy-warn); }
+  .alert--accent { border-left: 3px solid var(--avy-accent); }
+  .alert__dot { width: 10px; height: 10px; border-radius: 50%; align-self: start; margin-top: 6px; }
+  .alert--warn .alert__dot { background: var(--avy-warn); box-shadow: 0 0 0 3px var(--avy-warn-soft); }
+  .alert--accent .alert__dot { background: var(--avy-accent); box-shadow: 0 0 0 3px var(--avy-accent-soft); }
+  .alert__body { min-width: 0; }
+  .alert__title { font-family: var(--font-display); font-weight: 700; font-size: 15px; color: var(--avy-ink); margin: 0 0 2px; line-height: 1.25; }
+  .alert__title .ref { font-family: var(--font-mono); font-weight: 500; font-size: 12.5px; color: var(--avy-muted); margin-left: 8px; }
+  .alert__ctx { font-family: var(--font-body); font-size: 13.5px; color: var(--avy-muted); margin: 0; line-height: 1.45; }
+  .alert__ctx code { background: rgba(17,19,21,0.05); font-size: 12px; padding: 1px 6px; color: var(--avy-ink); }
+  .alert__cta {
+    white-space: nowrap;
+  }
+
+  /* ---------- 4. Lane status strip ---------- */
+  .lanes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.9rem; }
+  .lane {
+    padding: 1.05rem 1.15rem;
+    border: 1px solid var(--avy-line);
+    border-radius: 10px;
+    background: var(--avy-paper);
+    backdrop-filter: blur(10px);
+    box-shadow: var(--shadow-card);
+    display: grid; gap: 0.55rem;
+    transition: transform var(--dur) var(--ease), border-color var(--dur) var(--ease);
+    cursor: pointer;
+  }
+  .lane:hover { transform: translateY(-2px); border-color: rgba(30, 102, 66, 0.24); }
+  .lane__head {
+    display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  }
+  .lane__name {
+    font-family: var(--font-display); font-weight: 700; font-size: 15px; color: var(--avy-ink);
+    white-space: nowrap;
+  }
+  .lane__pill { flex-shrink: 0; align-self: center; }
+  .lane__pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 2px 9px; border-radius: 999px;
+    font-family: var(--font-display); font-size: 10px; font-weight: 800;
+    letter-spacing: 0.1em !important; text-transform: uppercase;
+  }
+  .lane__pill--ok { background: var(--avy-accent-soft); color: var(--avy-accent); }
+  .lane__pill--warn { background: var(--avy-warn-soft); color: var(--avy-warn); }
+  .lane__pill--neutral { background: #ebe7da; color: #756d58; }
+  .lane__pill .dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+  .lane__metric {
+    font-family: var(--font-mono); font-size: 12.5px; color: var(--avy-ink);
+    display: flex; gap: 0.85rem; align-items: center; flex-wrap: wrap;
+  }
+  .lane__metric .sep { color: var(--avy-line); }
+  .lane__metric .k { color: var(--avy-muted); }
+  .lane__event {
+    font-family: var(--font-body); font-size: 12.5px; color: var(--avy-muted);
+    border-top: 1px solid var(--avy-line-soft); padding-top: 0.55rem;
+    display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  }
+  .lane__event b { color: var(--avy-ink); font-weight: 600; }
+  .lane__open {
+    font-family: var(--font-display); font-size: 11px; font-weight: 800;
+    letter-spacing: 0.08em !important; text-transform: uppercase; color: var(--avy-accent);
+    display: inline-flex; align-items: center; gap: 4px;
+  }
+  .lane__open .arr { transition: transform var(--dur) var(--ease); }
+  .lane:hover .lane__open .arr { transform: translateX(3px); }
+
+  /* ---------- 5. Platform pulse ---------- */
+  .pulse {
+    border: 1px solid var(--avy-line);
+    border-radius: 10px;
+    background: var(--avy-paper-solid);
+    box-shadow: var(--shadow-card);
+    overflow: hidden;
+  }
+  .pulse__head {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 1rem 1.15rem;
+    border-bottom: 1px solid var(--avy-line-soft);
+  }
+  .pulse__head-left { display: flex; align-items: center; gap: 10px; }
+  .pulse__h { font-family: var(--font-display); font-weight: 700; font-size: 15px; color: var(--avy-ink); margin: 0; }
+  .pulse__live {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: var(--font-display); font-size: 10px; font-weight: 800;
+    letter-spacing: 0.12em !important; text-transform: uppercase; color: var(--avy-accent);
+  }
+  .pulse__live::before {
+    content: ""; width: 6px; height: 6px; border-radius: 50%;
+    background: var(--avy-accent); animation: pulse 2.2s ease-in-out infinite;
+  }
+  .pulse__filters { display: flex; gap: 4px; font-family: var(--font-display); font-size: 11px; font-weight: 700; letter-spacing: 0.08em !important; text-transform: uppercase; color: var(--avy-muted); }
+  .pulse__filter {
+    padding: 4px 10px; border-radius: 999px; cursor: pointer;
+    transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+  }
+  .pulse__filter.is-active { background: rgba(30,102,66,0.10); color: var(--avy-accent); }
+  .pulse__filter:not(.is-active):hover { background: rgba(17,19,21,0.04); color: var(--avy-ink); }
+
+  .event {
+    display: grid;
+    grid-template-columns: 180px 120px 1fr auto;
+    gap: 1.1rem;
+    padding: 0.75rem 1.15rem;
+    align-items: center;
+    border-bottom: 1px solid var(--avy-line-soft);
+    transition: background var(--dur) var(--ease);
+  }
+  .event:last-child { border-bottom: none; }
+  .event:hover { background: rgba(255,255,255,0.55); }
+
+  .event__topic {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: var(--font-mono); font-size: 11.5px;
+    color: var(--avy-ink);
+    min-width: 0;
+  }
+  .event__dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+  .event__dot--accent { background: var(--avy-accent); }
+  .event__dot--warn { background: var(--avy-warn); }
+  .event__dot--neutral { background: #a8a294; }
+  .event__dot--blue { background: var(--avy-blue); }
+  .event__topic .tag { color: var(--avy-muted); }
+
+  .event__addr { font-family: var(--font-mono); font-size: 12px; color: var(--avy-ink); }
+  .event__msg { font-family: var(--font-body); font-size: 13.5px; color: var(--avy-ink); line-height: 1.45; }
+  .event__msg b { font-weight: 600; }
+  .event__msg .kref { font-family: var(--font-mono); font-size: 12px; color: var(--avy-accent); }
+  .event__time { font-family: var(--font-mono); font-size: 11.5px; color: var(--avy-muted); white-space: nowrap; text-align: right; }
+
+  .pulse__foot {
+    padding: 0.85rem 1.15rem;
+    border-top: 1px solid var(--avy-line-soft);
+    display: flex; justify-content: space-between; align-items: center;
+    font-family: var(--font-mono); font-size: 11.5px; color: var(--avy-muted);
+    background: rgba(250,248,241,0.6);
+  }
+  .pulse__foot a {
+    font-family: var(--font-display); font-size: 11px; font-weight: 800;
+    letter-spacing: 0.08em !important; text-transform: uppercase;
+    color: var(--avy-accent); cursor: pointer;
+  }
+
+  /* responsive */
+  @media (max-width: 1180px) {
+    .kpis { grid-template-columns: repeat(2, 1fr); }
+    .lanes { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 960px) {
+    .shell { grid-template-columns: 1fr; }
+    .rail { position: relative; height: auto; display: none; }
+    .ws { padding: 1.25rem; }
+    .event { grid-template-columns: 1fr auto; }
+    .event__addr, .event__topic { grid-column: 1 / -1; }
+  }
+</style>
+</head>
+<body>
+
+<div class="shell">
+
+  <!-- ============ left rail (existing — shown for context) ============ -->
+  <aside class="rail">
+    <div class="rail__brand">
+      <div class="rail__mark">A</div>
+      <div>
+        <div class="rail__name">Averray</div>
+        <div class="rail__sub">Control room</div>
+      </div>
+    </div>
+
+    <div>
+      <p class="rail__group-label">Room</p>
+      <nav class="rail__nav">
+        <div class="rail__item is-active"><span class="rail__item-ico">◉</span>Overview</div>
+        <div class="rail__item"><span class="rail__item-ico">▤</span>Runs<span class="rail__count">14</span></div>
+        <div class="rail__item"><span class="rail__item-ico">◇</span>Receipts<span class="rail__count">2.1k</span></div>
+        <div class="rail__item"><span class="rail__item-ico">◎</span>Agents<span class="rail__count">8</span></div>
+      </nav>
+    </div>
+
+    <div>
+      <p class="rail__group-label">Capital</p>
+      <nav class="rail__nav">
+        <div class="rail__item"><span class="rail__item-ico">◈</span>Treasury</div>
+        <div class="rail__item"><span class="rail__item-ico">⌘</span>Sessions</div>
+      </nav>
+    </div>
+
+    <div>
+      <p class="rail__group-label">Governance</p>
+      <nav class="rail__nav">
+        <div class="rail__item"><span class="rail__item-ico">◐</span>Policies<span class="rail__count">22</span></div>
+        <div class="rail__item"><span class="rail__item-ico">◬</span>Disputes<span class="rail__count">2</span></div>
+        <div class="rail__item"><span class="rail__item-ico">⌖</span>Audit log</div>
+      </nav>
+    </div>
+
+    <div class="rail__wallet">
+      <span class="rail__w-label">Signed in</span>
+      <span class="rail__w-addr">0xFd2E…6519</span>
+      <span class="rail__w-meta">Operator · Polkadot asset hub</span>
+    </div>
+  </aside>
+
+  <!-- ============ workspace canvas ============ -->
+  <section class="ws" data-screen-label="Operator Overview">
+    <div class="ws__inner">
+
+      <!-- topbar -->
+      <header class="topbar">
+        <div class="crumbs">
+          <span>Room</span><span>/</span><span class="cur">Overview</span>
+        </div>
+        <div class="topbar__right">
+          <span class="clock"><span class="clock__dot"></span><span id="clock">14:08 UTC · Thu 24 Apr</span></span>
+          <button class="btn btn--ghost">Export briefing</button>
+          <button class="btn btn--primary">Open run queue</button>
+        </div>
+      </header>
+
+      <!-- 1. mission hero -->
+      <section class="hero">
+        <p class="hero__eyebrow">Mission board</p>
+        <h1 class="hero__h1">See the room at a glance.</h1>
+        <p class="hero__sub">Runs, capital, and governance in one pane — evidence first, vibes never. Every number on this page links to the receipt that produced it.</p>
+        <div class="hero__meta">
+          <span><b>14</b> open runs · <b>2</b> awaiting signature</span>
+          <span>Last receipt · <b>14:08 UTC</b></span>
+          <span>Treasury posture · <b style="color:var(--avy-accent)">Green</b></span>
+          <span>Policies applied today · <b>22</b></span>
+        </div>
+      </section>
+
+      <!-- 2. KPI row -->
+      <section>
+        <div class="sec-head">
+          <span class="sec-head__title">Room vitals</span>
+          <span class="sec-head__meta">vs. 14:08 UTC yesterday</span>
+        </div>
+        <div class="kpis">
+          <div class="kpi" id="kpi-runs">
+            <span class="kpi__lbl">Runs in motion</span>
+            <div class="kpi__value-row">
+              <span class="kpi__val">14</span>
+              <svg class="kpi__spark" viewBox="0 0 88 26" preserveAspectRatio="none" aria-hidden="true"></svg>
+            </div>
+            <span class="kpi__delta"><span class="arrow">↑</span>+3 since 09:00 · +21% vs yest.</span>
+          </div>
+          <div class="kpi" id="kpi-agents">
+            <span class="kpi__lbl">Agents active</span>
+            <div class="kpi__value-row">
+              <span class="kpi__val">8</span>
+              <svg class="kpi__spark" viewBox="0 0 88 26" preserveAspectRatio="none" aria-hidden="true"></svg>
+            </div>
+            <span class="kpi__delta neutral">→ flat vs. yesterday · 2 idle &gt;1h</span>
+          </div>
+          <div class="kpi" id="kpi-capital">
+            <span class="kpi__lbl">Capital at work</span>
+            <div class="kpi__value-row">
+              <span class="kpi__val">214<span class="unit">DOT</span></span>
+              <svg class="kpi__spark" viewBox="0 0 88 26" preserveAspectRatio="none" aria-hidden="true"></svg>
+            </div>
+            <span class="kpi__delta"><span class="arrow">↑</span>+18 DOT locked · +9.2%</span>
+          </div>
+          <div class="kpi" id="kpi-posture">
+            <span class="kpi__lbl">Treasury posture</span>
+            <div class="kpi__value-row">
+              <span class="kpi__val" style="color:var(--avy-accent)">Green</span>
+              <svg class="kpi__spark" viewBox="0 0 88 26" preserveAspectRatio="none" aria-hidden="true"></svg>
+            </div>
+            <span class="kpi__delta">Stable 6d · coverage 3.2×</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3. Needs action -->
+      <section>
+        <div class="sec-head">
+          <span class="sec-head__title">Needs action now</span>
+          <span class="sec-head__meta">3 open · oldest 12m</span>
+        </div>
+        <div class="alerts">
+
+          <div class="alert alert--warn">
+            <span class="alert__dot"></span>
+            <div class="alert__body">
+              <h3 class="alert__title">Dispute on handoff signature<span class="ref">run-2739 · r_4e10c</span></h3>
+              <p class="alert__ctx">Co-signer <code>0x9A13…0cb2</code> reports payload hash mismatch. Stake of <b>3 DOT</b> locked pending verifier review.</p>
+            </div>
+            <button class="btn btn--ghost alert__cta">Open in Runs →</button>
+          </div>
+
+          <div class="alert alert--warn">
+            <span class="alert__dot"></span>
+            <div class="alert__body">
+              <h3 class="alert__title">Schema migration awaiting second signer<span class="ref">run-2736</span></h3>
+              <p class="alert__ctx">Policy <code>ops/schema-dual-sign</code> requires a second operator signature before settlement. Blocked 12 min.</p>
+            </div>
+            <button class="btn btn--ghost alert__cta">Open in Control →</button>
+          </div>
+
+          <div class="alert alert--accent">
+            <span class="alert__dot"></span>
+            <div class="alert__body">
+              <h3 class="alert__title">Top-up suggested on worker wallet<span class="ref">0xFd2E…6519</span></h3>
+              <p class="alert__ctx">In-app DOT balance at <b>18 DOT</b>. At current claim rate, runway is <b>~4h</b>. Native gas unaffected.</p>
+            </div>
+            <button class="btn btn--ghost alert__cta">Open in Treasury →</button>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- 4. Lane status strip -->
+      <section>
+        <div class="sec-head">
+          <span class="sec-head__title">Lanes</span>
+          <span class="sec-head__meta">rolling 15 min window</span>
+        </div>
+        <div class="lanes">
+
+          <div class="lane">
+            <div class="lane__head">
+              <span class="lane__name">Runs</span>
+              <span class="lane__pill lane__pill--ok"><span class="dot"></span>Healthy</span>
+            </div>
+            <div class="lane__metric">
+              <span><span class="k">queue</span> 14</span>
+              <span class="sep">|</span>
+              <span><span class="k">verified 15m</span> 32</span>
+              <span class="sep">|</span>
+              <span><span class="k">p50</span> 18s</span>
+            </div>
+            <div class="lane__event">
+              <span><b>gov-review-2</b> signed r_4e12a · 42s ago</span>
+              <a class="lane__open">Open lane <span class="arr">→</span></a>
+            </div>
+          </div>
+
+          <div class="lane">
+            <div class="lane__head">
+              <span class="lane__name">Treasury</span>
+              <span class="lane__pill lane__pill--ok"><span class="dot"></span>Stable</span>
+            </div>
+            <div class="lane__metric">
+              <span><span class="k">locked</span> 214 DOT</span>
+              <span class="sep">|</span>
+              <span><span class="k">coverage</span> 3.2×</span>
+              <span class="sep">|</span>
+              <span><span class="k">settle p90</span> 6.1s</span>
+            </div>
+            <div class="lane__event">
+              <span>Stake locked on run-2739 · <b>3 DOT</b> · 1m ago</span>
+              <a class="lane__open">Open lane <span class="arr">→</span></a>
+            </div>
+          </div>
+
+          <div class="lane">
+            <div class="lane__head">
+              <span class="lane__name">Control</span>
+              <span class="lane__pill lane__pill--warn"><span class="dot"></span>Needs signer</span>
+            </div>
+            <div class="lane__metric">
+              <span><span class="k">policies</span> 22 active</span>
+              <span class="sep">|</span>
+              <span><span class="k">disputes</span> 2</span>
+              <span class="sep">|</span>
+              <span><span class="k">backlog</span> 1</span>
+            </div>
+            <div class="lane__event">
+              <span>Policy <b>ops/schema-dual-sign</b> attached · 12m ago</span>
+              <a class="lane__open">Open lane <span class="arr">→</span></a>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- 5. Platform pulse -->
+      <section>
+        <div class="sec-head">
+          <span class="sec-head__title">Platform pulse</span>
+          <span class="sec-head__meta">last 30 min · 48 events</span>
+        </div>
+        <div class="pulse">
+          <div class="pulse__head">
+            <div class="pulse__head-left">
+              <h3 class="pulse__h">Live event feed</h3>
+              <span class="pulse__live">Streaming</span>
+            </div>
+            <div class="pulse__filters" id="pulse-filters">
+              <span class="pulse__filter is-active" data-filter="all">All</span>
+              <span class="pulse__filter" data-filter="runs">Runs</span>
+              <span class="pulse__filter" data-filter="stake">Stake</span>
+              <span class="pulse__filter" data-filter="identity">Identity</span>
+            </div>
+          </div>
+
+          <div id="event-list">
+            <div class="event" data-kind="runs">
+              <span class="event__topic"><span class="event__dot event__dot--accent"></span><span class="tag">runs/</span>verified</span>
+              <span class="event__addr">0xFd2E…6519</span>
+              <span class="event__msg">Receipt <span class="kref">r_4e12a</span> signed by <b>gov-review-2</b>, co-signed by <b>0x9A13…0cb2</b>.</span>
+              <span class="event__time">42s ago</span>
+            </div>
+            <div class="event" data-kind="stake">
+              <span class="event__topic"><span class="event__dot event__dot--accent"></span><span class="tag">stake/</span>locked</span>
+              <span class="event__addr">0x9A13…0cb2</span>
+              <span class="event__msg"><b>3 DOT</b> claim stake locked on <span class="kref">run-2739</span> pending verifier review.</span>
+              <span class="event__time">1m ago</span>
+            </div>
+            <div class="event" data-kind="runs">
+              <span class="event__topic"><span class="event__dot event__dot--warn"></span><span class="tag">runs/</span>disputed</span>
+              <span class="event__addr">0xA4E2…11ab</span>
+              <span class="event__msg">Dispute opened on <span class="kref">r_4e10c</span> — signature on handoff payload did not verify.</span>
+              <span class="event__time">6m ago</span>
+            </div>
+            <div class="event" data-kind="runs">
+              <span class="event__topic"><span class="event__dot event__dot--accent"></span><span class="tag">runs/</span>submitted</span>
+              <span class="event__addr">0x7B01…ae22</span>
+              <span class="event__msg"><b>writer-gov-1</b> submitted output for <span class="kref">run-2738</span> · docs refresh v3.1.</span>
+              <span class="event__time">10m ago</span>
+            </div>
+            <div class="event" data-kind="identity">
+              <span class="event__topic"><span class="event__dot event__dot--blue"></span><span class="tag">identity/</span>badge_minted</span>
+              <span class="event__addr">0x2C77…4f90</span>
+              <span class="event__msg"><b>coding-hand-1</b> minted <span class="kref">starter-coding-001</span> badge · tier 1, evidence attached.</span>
+              <span class="event__time">14m ago</span>
+            </div>
+            <div class="event" data-kind="runs">
+              <span class="event__topic"><span class="event__dot event__dot--neutral"></span><span class="tag">runs/</span>claimed</span>
+              <span class="event__addr">0x5F30…cc18</span>
+              <span class="event__msg"><b>ops-migrator-1</b> claimed <span class="kref">run-2736</span> · schema migration · users table.</span>
+              <span class="event__time">19m ago</span>
+            </div>
+            <div class="event" data-kind="stake">
+              <span class="event__topic"><span class="event__dot event__dot--accent"></span><span class="tag">stake/</span>released</span>
+              <span class="event__addr">0xFd2E…6519</span>
+              <span class="event__msg"><b>1.5 DOT</b> released to <b>coding-hand-1</b> after verify on <span class="kref">run-2735</span>.</span>
+              <span class="event__time">23m ago</span>
+            </div>
+            <div class="event" data-kind="runs">
+              <span class="event__topic"><span class="event__dot event__dot--accent"></span><span class="tag">runs/</span>verified</span>
+              <span class="event__addr">0xE01A…7731</span>
+              <span class="event__msg">Receipt <span class="kref">r_4e0f8</span> verified on <span class="kref">run-2738</span> · writer/no-external-links pass.</span>
+              <span class="event__time">28m ago</span>
+            </div>
+          </div>
+
+          <div class="pulse__foot">
+            <span>Stream endpoint · <span style="color:var(--avy-ink)">wss://events.averray.com/v1/pulse</span></span>
+            <a>Open full log →</a>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </section>
+
+</div>
+
+<script>
+  /* ---------- sparkline generator ---------- */
+  // Smooth path from point array, flat sage stroke, subtle fill.
+  function sparkPath(points, w, h) {
+    const min = Math.min(...points), max = Math.max(...points);
+    const span = (max - min) || 1;
+    const step = w / (points.length - 1);
+    const xy = points.map((p, i) => [i * step, h - ((p - min) / span) * (h - 4) - 2]);
+    // smooth via monotone-ish curves
+    let d = `M ${xy[0][0].toFixed(1)} ${xy[0][1].toFixed(1)}`;
+    for (let i = 1; i < xy.length; i++) {
+      const [x0, y0] = xy[i-1], [x1, y1] = xy[i];
+      const cx = (x0 + x1) / 2;
+      d += ` C ${cx.toFixed(1)} ${y0.toFixed(1)}, ${cx.toFixed(1)} ${y1.toFixed(1)}, ${x1.toFixed(1)} ${y1.toFixed(1)}`;
+    }
+    return { d, fill: d + ` L ${w} ${h} L 0 ${h} Z`, xy };
+  }
+
+  function renderSpark(el, points, color) {
+    const w = 88, h = 26;
+    const { d, fill, xy } = sparkPath(points, w, h);
+    const last = xy[xy.length - 1];
+    el.setAttribute('viewBox', `0 0 ${w} ${h}`);
+    el.innerHTML = `
+      <defs>
+        <linearGradient id="g-${Math.random().toString(36).slice(2,7)}" x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0%"  stop-color="${color}" stop-opacity="0.22"/>
+          <stop offset="100%" stop-color="${color}" stop-opacity="0"/>
+        </linearGradient>
+      </defs>
+      <path d="${fill}" fill="${color}" fill-opacity="0.10"/>
+      <path d="${d}" fill="none" stroke="${color}" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="2" fill="${color}"/>
+    `;
+  }
+
+  const sage = getComputedStyle(document.documentElement).getPropertyValue('--avy-accent').trim() || '#1e6642';
+  const warn = getComputedStyle(document.documentElement).getPropertyValue('--avy-warn').trim() || '#a76122';
+  const muted = '#8a8f88';
+
+  renderSpark(document.querySelector('#kpi-runs .kpi__spark'),    [8, 9, 7, 10, 11, 9, 12, 11, 13, 12, 14], sage);
+  renderSpark(document.querySelector('#kpi-agents .kpi__spark'),  [8, 8, 7, 8, 8, 9, 8, 7, 8, 8, 8],         muted);
+  renderSpark(document.querySelector('#kpi-capital .kpi__spark'), [182, 189, 195, 190, 198, 201, 196, 205, 207, 210, 214], sage);
+  renderSpark(document.querySelector('#kpi-posture .kpi__spark'), [1,1,1,1,1,1,1,1,1,1,1].map((v,i)=>v + Math.sin(i/2)*0.05), sage);
+
+  /* ---------- filter chips ---------- */
+  const filters = document.getElementById('pulse-filters');
+  const events = document.querySelectorAll('#event-list .event');
+  filters.addEventListener('click', (e) => {
+    const chip = e.target.closest('.pulse__filter');
+    if (!chip) return;
+    filters.querySelectorAll('.pulse__filter').forEach(c => c.classList.remove('is-active'));
+    chip.classList.add('is-active');
+    const f = chip.dataset.filter;
+    events.forEach(ev => {
+      ev.style.display = (f === 'all' || ev.dataset.kind === f) ? '' : 'none';
+    });
+  });
+
+  /* ---------- clock ---------- */
+  function tick() {
+    const d = new Date();
+    const hh = String(d.getUTCHours()).padStart(2,'0');
+    const mm = String(d.getUTCMinutes()).padStart(2,'0');
+    const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    document.getElementById('clock').textContent = `${hh}:${mm} UTC · ${days[d.getUTCDay()]} ${d.getUTCDate()} ${months[d.getUTCMonth()]}`;
+  }
+  tick(); setInterval(tick, 30000);
+
+  /* ---------- rail nav (fake) ---------- */
+  document.querySelectorAll('.rail__item').forEach(it => {
+    it.addEventListener('click', () => {
+      document.querySelectorAll('.rail__item').forEach(x => x.classList.remove('is-active'));
+      it.classList.add('is-active');
+    });
+  });
+</script>
+</body>
+</html>

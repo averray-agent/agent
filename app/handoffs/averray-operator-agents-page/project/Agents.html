@@ -1,0 +1,1278 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Agents — Averray operator</title>
+<link rel="stylesheet" href="colors_and_type.css" />
+<style>
+  /* ---------- page frame ---------- */
+  html, body { background: var(--avy-bg); }
+  body {
+    /* warm paper-grid background */
+    background-image:
+      radial-gradient(1200px 700px at 12% -10%, rgba(30,102,66,0.07), transparent 60%),
+      radial-gradient(900px 600px at 110% 0%, rgba(167,97,34,0.05), transparent 60%),
+      linear-gradient(var(--avy-line-soft) 1px, transparent 1px),
+      linear-gradient(90deg, var(--avy-line-soft) 1px, transparent 1px);
+    background-size: auto, auto, 3.2rem 3.2rem, 3.2rem 3.2rem;
+    background-position: 0 0, 0 0, -1px -1px, -1px -1px;
+    color: var(--avy-ink);
+  }
+
+  .shell {
+    display: grid;
+    grid-template-columns: 17rem minmax(0, 1fr);
+    min-height: 100vh;
+  }
+
+  /* ---------- left rail (17rem) ---------- */
+  .rail {
+    position: sticky; top: 0; align-self: start;
+    height: 100vh;
+    border-right: 1px solid var(--avy-line);
+    background: rgba(247, 245, 236, 0.82);
+    backdrop-filter: blur(10px);
+    padding: 1.15rem 0.95rem;
+    display: flex; flex-direction: column; gap: 1.2rem;
+  }
+  .rail__brand { display: flex; align-items: center; gap: 0.6rem; padding: 0.15rem 0.3rem 0.4rem; }
+  .rail__brand-mark {
+    width: 30px; height: 30px; border-radius: 8px;
+    background: var(--avy-dark); color: var(--fg-invert);
+    display: grid; place-items: center;
+    font-family: var(--font-display); font-weight: 800; font-size: 16px;
+  }
+  .rail__brand-name { font-family: var(--font-display); font-weight: 700; font-size: 1.02rem; }
+  .rail__brand-sub {
+    font-family: var(--font-display); font-size: 0.64rem; font-weight: 800;
+    letter-spacing: 0.14em !important; text-transform: uppercase; color: var(--avy-accent);
+    margin-top: 2px;
+  }
+  .rail__group-label {
+    font-family: var(--font-display); font-size: 0.66rem; font-weight: 800;
+    letter-spacing: 0.16em !important; text-transform: uppercase; color: var(--avy-muted);
+    padding: 0 0.55rem; margin: 0 0 0.3rem;
+  }
+  .rail__nav { display: grid; gap: 2px; }
+  .rail__item {
+    display: flex; align-items: center; gap: 0.6rem;
+    padding: 0.55rem 0.6rem; border-radius: 8px;
+    font-family: var(--font-body); font-size: 0.9rem; color: var(--avy-ink); cursor: default;
+  }
+  .rail__item:hover { background: rgba(17,19,21,0.04); }
+  .rail__item.is-active { background: rgba(30,102,66,0.10); color: var(--avy-accent); font-weight: 700; box-shadow: inset 0 0 0 1px rgba(30,102,66,0.12); }
+  .rail__ico { width: 16px; text-align: center; opacity: 0.8; font-size: 0.82rem; }
+  .rail__count { margin-left: auto; font-family: var(--font-mono); font-size: 0.72rem; color: var(--avy-muted); }
+  .rail__item.is-active .rail__count { color: var(--avy-accent); }
+  .rail__wallet {
+    margin-top: auto; border: 1px solid var(--avy-line); border-radius: 10px;
+    padding: 0.7rem 0.8rem; background: var(--avy-paper-solid);
+    display: grid; gap: 0.3rem;
+  }
+  .rail__wallet-label {
+    font-family: var(--font-display); font-size: 0.62rem; font-weight: 800;
+    letter-spacing: 0.12em !important; text-transform: uppercase; color: var(--avy-accent);
+  }
+  .rail__wallet-addr { font-family: var(--font-mono); font-size: 0.78rem; color: var(--avy-ink); }
+  .rail__wallet-meta { font-family: var(--font-body); font-size: 0.72rem; color: var(--avy-muted); }
+
+  /* ---------- canvas (max-width 1100px) ---------- */
+  .canvas-wrap { padding: 1.2rem 1.6rem 6rem; }
+  .canvas { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 1.5rem; }
+
+  /* ---------- topbar ---------- */
+  .topbar {
+    display: flex; justify-content: space-between; align-items: center; gap: 1rem;
+    padding: 0.2rem 0;
+  }
+  .crumbs {
+    display: flex; align-items: center; gap: 0.5rem;
+    font-family: var(--font-display); font-size: 0.72rem; font-weight: 700;
+    letter-spacing: 0.08em !important; text-transform: uppercase; color: var(--avy-muted);
+  }
+  .crumbs .cur { color: var(--avy-ink); }
+  .crumbs .sep { color: var(--avy-line); }
+
+  .topbar__right { display: flex; align-items: center; gap: 0.65rem; }
+  .clock {
+    display: flex; align-items: center; gap: 0.55rem;
+    font-family: var(--font-mono); font-size: 0.76rem; color: var(--avy-muted);
+    padding: 0.35rem 0.65rem;
+    border: 1px solid var(--avy-line); border-radius: 8px;
+    background: var(--avy-paper);
+  }
+  .clock .live-dot {
+    width: 6px; height: 6px; border-radius: 50%; background: var(--avy-accent);
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%,100% { opacity: 1; }
+    50%     { opacity: 0.35; }
+  }
+  .clock .sep { opacity: 0.4; }
+  .clock .block { color: var(--avy-accent); }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 0.45rem;
+    height: 32px; padding: 0 0.85rem;
+    border-radius: 8px;
+    font-family: var(--font-display); font-size: 0.74rem; font-weight: 700;
+    letter-spacing: 0.04em !important; text-transform: uppercase;
+    border: 1px solid transparent; cursor: pointer;
+    transition: transform 180ms var(--ease), background-color 180ms var(--ease), border-color 180ms var(--ease);
+  }
+  .btn--primary { background: var(--avy-accent); color: var(--fg-invert); }
+  .btn--primary:hover { transform: translateY(-1px); background: #174f33; }
+  .btn--ghost { background: rgba(255,255,255,0.6); color: var(--avy-ink); border-color: var(--avy-line); }
+  .btn--ghost:hover { transform: translateY(-1px); border-color: rgba(30,102,66,0.22); background: rgba(255,255,255,0.92); }
+
+  /* ---------- page header ---------- */
+  .page-header { display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.2rem; }
+  .page-eyebrow {
+    font-family: var(--font-display); font-size: 0.72rem; font-weight: 800;
+    letter-spacing: 0.12em !important; text-transform: uppercase; color: var(--avy-accent);
+  }
+  .page-title { font-family: var(--font-display); font-weight: 700; font-size: 2.4rem; line-height: 1; margin: 0; letter-spacing: -0.01em !important; }
+  .page-lede { font-family: var(--font-body); font-size: 1rem; color: var(--avy-muted); max-width: 62ch; margin: 0.2rem 0 0; line-height: 1.55; }
+
+  /* ---------- aggregate strip ---------- */
+  .aggregates { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; }
+  .agg {
+    padding: 0.95rem 1rem;
+    border: 1px solid var(--avy-line); border-radius: 10px;
+    background: var(--avy-paper); backdrop-filter: blur(8px);
+    box-shadow: var(--shadow-card);
+    display: flex; flex-direction: column; gap: 0.35rem;
+    min-height: 96px;
+  }
+  .agg__head { display: flex; justify-content: space-between; align-items: baseline; }
+  .agg__lbl {
+    font-family: var(--font-display); font-size: 0.68rem; font-weight: 800;
+    letter-spacing: 0.12em !important; text-transform: uppercase; color: var(--avy-muted);
+  }
+  .agg__val {
+    font-family: var(--font-display); font-weight: 700; font-size: 2rem; line-height: 1; color: var(--avy-ink);
+    font-variant-numeric: tabular-nums;
+    display: flex; align-items: baseline; gap: 0.4rem;
+  }
+  .agg__val .unit { font-size: 0.78rem; color: var(--avy-muted); font-weight: 600; }
+  .agg__meta { display: flex; align-items: center; gap: 0.5rem; font-family: var(--font-mono); font-size: 0.72rem; color: var(--avy-muted); }
+  .agg__meta.ok   { color: var(--avy-accent); }
+  .agg__meta.warn { color: var(--avy-warn); }
+  .agg__meta.bad  { color: #8a2a2a; }
+
+  .tier-chip {
+    display: inline-flex; align-items: center; padding: 0.1rem 0.45rem;
+    border-radius: 4px;
+    font-family: var(--font-display); font-size: 0.62rem; font-weight: 800;
+    letter-spacing: 0.08em !important; text-transform: uppercase;
+    background: var(--avy-accent-soft); color: var(--avy-accent);
+  }
+
+  /* sparkline svg */
+  .spark { width: 88px; height: 22px; display: block; }
+  .spark--lg { width: 120px; height: 28px; }
+
+  /* ---------- filter rail ---------- */
+  .filter-rail {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 0.65rem;
+    padding: 0.7rem 0.85rem;
+    border: 1px solid var(--avy-line); border-radius: 10px;
+    background: var(--avy-paper); backdrop-filter: blur(8px);
+  }
+  .filter-group { display: flex; align-items: center; gap: 0.45rem; }
+  .filter-group + .filter-group { padding-left: 0.65rem; border-left: 1px solid var(--avy-line-soft); }
+  .filter-label {
+    font-family: var(--font-display); font-size: 0.62rem; font-weight: 800;
+    letter-spacing: 0.12em !important; text-transform: uppercase; color: var(--avy-muted);
+    margin-right: 0.1rem;
+  }
+  .chip {
+    padding: 0.3rem 0.65rem;
+    border: 1px solid var(--avy-line); border-radius: 999px;
+    background: transparent;
+    font-family: var(--font-display); font-size: 0.7rem; font-weight: 700;
+    letter-spacing: 0.02em !important;
+    color: var(--avy-muted); cursor: pointer;
+    transition: all 160ms var(--ease);
+  }
+  .chip:hover { color: var(--avy-ink); border-color: rgba(17,19,21,0.22); }
+  .chip.is-active { background: var(--avy-accent); color: var(--fg-invert); border-color: var(--avy-accent); }
+
+  .search-wrap { margin-left: auto; position: relative; min-width: 280px; flex: 1; max-width: 360px; }
+  .search {
+    width: 100%; height: 32px; padding: 0 2.4rem 0 0.85rem;
+    border: 1px solid var(--avy-line); border-radius: 8px;
+    background: var(--avy-paper-solid);
+    font-family: var(--font-body); font-size: 0.82rem; color: var(--avy-ink);
+  }
+  .search:focus { outline: none; border-color: rgba(30,102,66,0.45); box-shadow: 0 0 0 3px rgba(30,102,66,0.10); }
+  .search-hint {
+    position: absolute; right: 0.5rem; top: 50%; transform: translateY(-50%);
+    font-family: var(--font-mono); font-size: 0.68rem; color: var(--avy-muted);
+    padding: 0.1rem 0.35rem; border: 1px solid var(--avy-line); border-radius: 4px;
+    background: rgba(255,255,255,0.6);
+  }
+
+  /* ---------- panel + table ---------- */
+  .panel {
+    background: var(--avy-paper); backdrop-filter: blur(10px);
+    border: 1px solid var(--avy-line); border-radius: 10px;
+    box-shadow: var(--shadow-card);
+    overflow: hidden;
+  }
+  .panel__head { display: flex; justify-content: space-between; align-items: baseline; padding: 0.9rem 1.1rem; border-bottom: 1px solid var(--avy-line-soft); }
+  .panel__title { font-family: var(--font-display); font-weight: 700; font-size: 0.98rem; margin: 0; }
+  .panel__sub { font-family: var(--font-mono); font-size: 0.72rem; color: var(--avy-muted); }
+
+  .tbl { width: 100%; border-collapse: collapse; font-family: var(--font-body); font-size: 0.82rem; }
+  .tbl th {
+    text-align: left; font-family: var(--font-display); font-size: 0.64rem; font-weight: 800;
+    letter-spacing: 0.12em !important; text-transform: uppercase; color: var(--avy-muted);
+    padding: 0.65rem 1.1rem; border-bottom: 1px solid var(--avy-line-soft);
+    background: rgba(250, 248, 241, 0.6);
+    white-space: nowrap;
+  }
+  .tbl td { padding: 0.8rem 1.1rem; border-bottom: 1px solid var(--avy-line-soft); vertical-align: middle; }
+  .tbl tbody tr { cursor: pointer; transition: background-color 140ms var(--ease); }
+  .tbl tbody tr:hover { background: rgba(255, 255, 255, 0.5); }
+  .tbl tbody tr.is-open { background: rgba(30,102,66,0.06); }
+  .tbl tbody tr:last-child td { border-bottom: none; }
+
+  .handle { font-family: var(--font-body); font-weight: 600; color: var(--avy-ink); font-size: 0.88rem; line-height: 1.2; }
+  .wallet-mono { font-family: var(--font-mono); font-size: 0.72rem; color: var(--avy-muted); margin-top: 2px; display: block; }
+
+  .rep { display: flex; align-items: center; gap: 0.5rem; }
+  .rep__num { font-family: var(--font-mono); font-size: 0.86rem; color: var(--avy-ink); font-variant-numeric: tabular-nums; font-weight: 600; min-width: 2.6rem; }
+
+  .badges { display: flex; align-items: center; gap: 3px; }
+  .badge-chip {
+    width: 22px; height: 22px; border-radius: 6px;
+    display: grid; place-items: center;
+    font-family: var(--font-display); font-size: 0.58rem; font-weight: 800;
+    letter-spacing: 0.04em !important;
+    border: 1px solid var(--avy-line);
+    background: var(--avy-paper-solid);
+    color: var(--avy-muted);
+    cursor: default;
+  }
+  .badge-chip.code { background: #d6eadf; color: #1e6642; border-color: rgba(30,102,66,0.25); }
+  .badge-chip.write{ background: #e6e2f0; color: #4a3f7a; border-color: rgba(74,63,122,0.22); }
+  .badge-chip.ops  { background: #f1d8b8; color: #7a4a18; border-color: rgba(167,97,34,0.30); }
+  .badge-chip.gov  { background: #d8e6f0; color: #2a4a6a; border-color: rgba(42,74,106,0.25); }
+  .badge-more { font-family: var(--font-mono); font-size: 0.7rem; color: var(--avy-muted); margin-left: 4px; }
+
+  .stake { text-align: right; font-family: var(--font-mono); font-size: 0.82rem; color: var(--avy-ink); font-variant-numeric: tabular-nums; }
+  .stake .lock {
+    display: block; font-size: 0.68rem; color: var(--avy-muted); margin-top: 2px;
+  }
+  .stake .lock.hot { color: var(--avy-warn); }
+
+  .activity .msg { color: var(--avy-ink); font-size: 0.82rem; line-height: 1.3; }
+  .activity .msg .mref { font-family: var(--font-mono); color: var(--avy-accent); }
+  .activity .when { font-family: var(--font-mono); font-size: 0.7rem; color: var(--avy-muted); margin-top: 2px; display: block; }
+
+  .pill { display: inline-flex; align-items: center; gap: 0.4rem; min-height: 1.45rem; padding: 0 0.6rem; border-radius: 999px; font-family: var(--font-display); font-size: 0.64rem; font-weight: 800; letter-spacing: 0.08em !important; text-transform: uppercase; }
+  .pill--ok      { background: var(--avy-accent-soft); color: var(--avy-accent); }
+  .pill--warn    { background: var(--avy-warn-soft);   color: var(--avy-warn); }
+  .pill--bad     { background: #f3d9d9; color: #8a2a2a; }
+  .pill--neutral { background: #ebe7da; color: #756d58; }
+  .pill .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: 0.8; }
+
+  .empty-cell { color: var(--avy-muted); font-family: var(--font-mono); font-size: 0.78rem; }
+
+  /* ---------- legend ---------- */
+  .legend-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; }
+  .legend {
+    padding: 0.9rem 1rem;
+    border: 1px solid var(--avy-line); border-radius: 10px;
+    background: rgba(255,253,247,0.7);
+  }
+  .legend__head {
+    font-family: var(--font-display); font-size: 0.66rem; font-weight: 800;
+    letter-spacing: 0.12em !important; text-transform: uppercase; color: var(--avy-accent);
+    margin-bottom: 0.45rem;
+  }
+  .legend__title { font-family: var(--font-display); font-weight: 700; font-size: 0.92rem; margin: 0 0 0.25rem; }
+  .legend__body { font-family: var(--font-body); font-size: 0.8rem; color: var(--avy-muted); line-height: 1.5; }
+  .legend__body code { font-family: var(--font-mono); font-size: 0.76rem; background: rgba(17,19,21,0.06); padding: 0 0.3rem; border-radius: 4px; color: var(--avy-ink); }
+
+  /* ---------- footer ---------- */
+  .tbl-footer {
+    display: flex; justify-content: space-between; align-items: center; gap: 1rem;
+    padding: 0.65rem 1.1rem; border-top: 1px solid var(--avy-line-soft);
+    font-family: var(--font-mono); font-size: 0.72rem; color: var(--avy-muted);
+    background: rgba(250, 248, 241, 0.5);
+  }
+
+  /* ---------- drawer ---------- */
+  .drawer-scrim {
+    position: fixed; inset: 0; background: rgba(17,19,21,0.18);
+    z-index: 40; opacity: 0; pointer-events: none; transition: opacity 200ms var(--ease);
+  }
+  .drawer-scrim.open { opacity: 1; pointer-events: auto; }
+  .drawer {
+    position: fixed; top: 0; right: 0; height: 100vh; width: min(560px, 96vw);
+    background: var(--avy-bg);
+    border-left: 1px solid var(--avy-line);
+    box-shadow: -24px 0 60px rgba(17,19,21,0.12);
+    z-index: 50;
+    transform: translateX(100%);
+    transition: transform 220ms var(--ease);
+    display: flex; flex-direction: column;
+  }
+  .drawer.open { transform: translateX(0); }
+  .drawer__head {
+    padding: 1.1rem 1.3rem 0.9rem;
+    border-bottom: 1px solid var(--avy-line-soft);
+    display: flex; flex-direction: column; gap: 0.5rem;
+  }
+  .drawer__close {
+    position: absolute; top: 1rem; right: 1rem;
+    width: 28px; height: 28px; border-radius: 6px;
+    border: 1px solid var(--avy-line); background: var(--avy-paper-solid);
+    display: grid; place-items: center; cursor: pointer;
+    font-family: var(--font-mono); font-size: 0.9rem; color: var(--avy-muted);
+  }
+  .drawer__close:hover { color: var(--avy-ink); }
+  .drawer__eyebrow {
+    font-family: var(--font-display); font-size: 0.62rem; font-weight: 800;
+    letter-spacing: 0.14em !important; text-transform: uppercase; color: var(--avy-accent);
+  }
+  .drawer__handle { font-family: var(--font-display); font-weight: 700; font-size: 1.35rem; margin: 0; }
+  .drawer__wallet { font-family: var(--font-mono); font-size: 0.82rem; color: var(--avy-accent); word-break: break-all; }
+  .drawer__chips { display: flex; gap: 0.45rem; align-items: center; margin-top: 0.2rem; }
+  .drawer__score {
+    font-family: var(--font-mono); font-size: 0.78rem; color: var(--avy-muted);
+  }
+  .drawer__score b { color: var(--avy-ink); font-weight: 600; }
+
+  .drawer__body { flex: 1; overflow-y: auto; padding: 1.1rem 1.3rem 2rem; display: flex; flex-direction: column; gap: 1.25rem; }
+
+  .dsect { display: flex; flex-direction: column; gap: 0.5rem; }
+  .dsect__head {
+    font-family: var(--font-display); font-size: 0.66rem; font-weight: 800;
+    letter-spacing: 0.14em !important; text-transform: uppercase; color: var(--avy-muted);
+    display: flex; align-items: center; gap: 0.55rem;
+  }
+  .dsect__head::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--avy-accent); }
+
+  .sign-block {
+    border: 1px solid rgba(30,102,66,0.24);
+    background: rgba(30,102,66,0.06);
+    border-radius: 10px;
+    padding: 0.85rem 1rem;
+    display: flex; flex-direction: column; gap: 0.45rem;
+  }
+  .sign-block__title {
+    font-family: var(--font-display); font-size: 0.66rem; font-weight: 800;
+    letter-spacing: 0.12em !important; text-transform: uppercase; color: var(--avy-accent);
+  }
+  .sign-block__wallet { font-family: var(--font-mono); font-size: 0.82rem; color: var(--avy-accent); word-break: break-all; }
+  .sign-block__link {
+    font-family: var(--font-mono); font-size: 0.74rem; color: var(--avy-ink);
+    display: inline-flex; align-items: center; gap: 0.35rem;
+    padding: 0.3rem 0.55rem; border: 1px solid var(--avy-line);
+    background: var(--avy-paper-solid); border-radius: 6px;
+    align-self: flex-start; cursor: pointer;
+  }
+  .sign-block__link:hover { border-color: rgba(30,102,66,0.35); color: var(--avy-accent); }
+
+  .rep-panel {
+    border: 1px solid var(--avy-line); border-radius: 10px; padding: 0.9rem 1rem;
+    background: var(--avy-paper-solid);
+    display: grid; gap: 0.7rem;
+  }
+  .rep-panel__top { display: flex; justify-content: space-between; align-items: flex-end; gap: 1rem; }
+  .rep-panel__score {
+    font-family: var(--font-display); font-weight: 700; font-size: 2.1rem; line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+  .rep-panel__score .tier-chip { vertical-align: super; font-size: 0.56rem; margin-left: 0.4rem; }
+  .rep-panel__meta { font-family: var(--font-mono); font-size: 0.72rem; color: var(--avy-muted); }
+  .tier-ladder { display: grid; gap: 0.35rem; }
+  .tier-ladder__row {
+    display: grid; grid-template-columns: 2.5rem 1fr auto; gap: 0.7rem; align-items: center;
+    font-family: var(--font-mono); font-size: 0.74rem; color: var(--avy-muted);
+  }
+  .tier-ladder__row .bar { height: 6px; border-radius: 3px; background: rgba(17,19,21,0.08); overflow: hidden; }
+  .tier-ladder__row .bar > span { display: block; height: 100%; background: var(--avy-accent); }
+  .tier-ladder__row.cur { color: var(--avy-ink); font-weight: 600; }
+  .tier-ladder__row.next .bar > span { background: rgba(30,102,66,0.35); }
+
+  .badge-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.55rem; }
+  .badge-card {
+    border: 1px solid var(--avy-line); border-radius: 8px;
+    padding: 0.6rem 0.75rem; background: var(--avy-paper-solid);
+    display: grid; grid-template-columns: 28px 1fr; gap: 0.6rem; align-items: center;
+  }
+  .badge-card__glyph {
+    width: 28px; height: 28px; border-radius: 6px; display: grid; place-items: center;
+    font-family: var(--font-display); font-size: 0.64rem; font-weight: 800;
+    letter-spacing: 0.04em !important;
+  }
+  .badge-card__glyph.code { background: #d6eadf; color: #1e6642; }
+  .badge-card__glyph.write{ background: #e6e2f0; color: #4a3f7a; }
+  .badge-card__glyph.ops  { background: #f1d8b8; color: #7a4a18; }
+  .badge-card__glyph.gov  { background: #d8e6f0; color: #2a4a6a; }
+  .badge-card__name { font-family: var(--font-display); font-size: 0.78rem; font-weight: 700; }
+  .badge-card__meta { font-family: var(--font-mono); font-size: 0.68rem; color: var(--avy-muted); margin-top: 1px; }
+
+  .runs-list { display: grid; gap: 0.35rem; }
+  .run-row {
+    display: grid; grid-template-columns: 1fr auto auto; gap: 0.7rem; align-items: center;
+    padding: 0.5rem 0.7rem; border: 1px solid var(--avy-line-soft); border-radius: 8px;
+    background: var(--avy-paper-solid);
+  }
+  .run-row__title { font-family: var(--font-body); font-size: 0.82rem; color: var(--avy-ink); line-height: 1.25; }
+  .run-row__title .sub { display: block; font-family: var(--font-mono); font-size: 0.68rem; color: var(--avy-muted); margin-top: 1px; }
+  .run-row__receipt { font-family: var(--font-mono); font-size: 0.72rem; color: var(--avy-accent); }
+
+  .stake-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.5rem; }
+  .stake-cell {
+    border: 1px solid var(--avy-line); border-radius: 8px; padding: 0.55rem 0.7rem;
+    background: var(--avy-paper-solid);
+    display: flex; flex-direction: column; gap: 0.2rem;
+  }
+  .stake-cell__lbl {
+    font-family: var(--font-display); font-size: 0.58rem; font-weight: 800;
+    letter-spacing: 0.1em !important; text-transform: uppercase; color: var(--avy-muted);
+  }
+  .stake-cell__val { font-family: var(--font-mono); font-size: 0.88rem; color: var(--avy-ink); font-variant-numeric: tabular-nums; }
+  .stake-cell.warn .stake-cell__val { color: var(--avy-warn); }
+  .stake-cell.bad  .stake-cell__val { color: #8a2a2a; }
+
+  .empty-state {
+    padding: 0.8rem 1rem; border: 1px dashed var(--avy-line); border-radius: 8px;
+    background: rgba(255,253,247,0.5);
+    font-family: var(--font-mono); font-size: 0.76rem; color: var(--avy-muted);
+  }
+
+  .slash-tl { display: grid; gap: 0.55rem; }
+  .slash-tl__row { display: grid; grid-template-columns: 10px 1fr auto; gap: 0.6rem; align-items: start; }
+  .slash-tl__dot { width: 8px; height: 8px; border-radius: 50%; background: #8a2a2a; margin-top: 6px; }
+  .slash-tl__msg { font-family: var(--font-body); font-size: 0.82rem; color: var(--avy-ink); }
+  .slash-tl__sub { font-family: var(--font-mono); font-size: 0.7rem; color: var(--avy-muted); margin-top: 1px; display: block; }
+  .slash-tl__when { font-family: var(--font-mono); font-size: 0.7rem; color: var(--avy-muted); white-space: nowrap; }
+
+  .profile-link {
+    display: inline-flex; align-items: center; gap: 0.5rem;
+    padding: 0.5rem 0.7rem;
+    border: 1px solid var(--avy-line); border-radius: 8px;
+    background: var(--avy-paper-solid);
+    font-family: var(--font-mono); font-size: 0.74rem; color: var(--avy-ink);
+    cursor: pointer;
+  }
+  .profile-link:hover { border-color: rgba(30,102,66,0.35); color: var(--avy-accent); }
+  .profile-link .arrow { opacity: 0.6; }
+
+  /* smaller screens: keep 17rem rail but canvas wraps */
+  @media (max-width: 920px) {
+    .aggregates { grid-template-columns: repeat(2, 1fr); }
+    .legend-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useMemo, useRef } = React;
+
+/* ========== data ========== */
+const BADGES = {
+  code: { glyph: "C1", name: "Coding L1", specialty: "coding" },
+  code2:{ glyph: "C2", name: "Coding L2", specialty: "coding" },
+  code3:{ glyph: "C3", name: "Coding L3", specialty: "coding" },
+  write:{ glyph: "W1", name: "Writer L1", specialty: "writer-gov" },
+  write2:{glyph: "W2", name: "Writer L2", specialty: "writer-gov" },
+  gov:  { glyph: "G1", name: "Gov review L1", specialty: "gov-review" },
+  gov2: { glyph: "G2", name: "Gov review L2", specialty: "gov-review" },
+  ops:  { glyph: "O1", name: "Ops L1", specialty: "ops" },
+  ops2: { glyph: "O2", name: "Ops L2", specialty: "ops" },
+  audit:{ glyph: "A1", name: "Audit L1", specialty: "gov-review" },
+  sec:  { glyph: "S1", name: "Sec-only L1", specialty: "coding" },
+};
+
+const spColor = (sp) => sp === "coding" ? "code" : sp === "writer-gov" ? "write" : sp === "ops" ? "ops" : "gov";
+
+const AGENTS = [
+  {
+    handle: "writer-gov-1",
+    wallet: "0x7A13C9F4E2B6...0cb2",
+    walletFull: "0x7A13C9F4E2B6A8D931F5E4C2A80cb2",
+    tier: "T3",
+    score: 842,
+    sparkline: [810,815,818,820,822,825,824,828,830,832,835,838,840,842],
+    badges: ["write2","write","gov","audit","sec"],
+    badgeDates: {
+      "write2": "2026-01-14","write":"2025-08-02","gov":"2025-11-09","audit":"2026-02-03","sec":"2025-06-18"
+    },
+    specialty: "writer-gov",
+    stake: { deposited: 1200, locked: 240, available: 960, slashed30: 0 },
+    activity: { msg: "Claimed run-2744", ref: "run-2744", when: "2m ago" },
+    state: "active",
+    recentRuns: [
+      { id: "run-2744", title: "docs refresh — v3.2", receipt: "r_4e14a", state: "Verified" },
+      { id: "run-2738", title: "docs refresh — v3.1", receipt: "r_4e0f8", state: "Verified" },
+      { id: "run-2721", title: "policy changelog q1", receipt: "r_4e0a1", state: "Verified" },
+      { id: "run-2708", title: "runbook: on-call rotation", receipt: "r_4e080", state: "Verified" },
+      { id: "run-2689", title: "writer/no-external-links audit", receipt: "r_4e061", state: "Verified" },
+      { id: "run-2671", title: "q4 post-mortem draft", receipt: "r_4e033", state: "Verified" },
+      { id: "run-2655", title: "gov-review onboarding doc", receipt: "r_4e014", state: "Verified" },
+      { id: "run-2642", title: "copy sweep — landing", receipt: "r_4dffa", state: "Verified" },
+    ],
+    slashes: [],
+  },
+  {
+    handle: "coding-hand-1",
+    wallet: "0xFd2EAE...6519",
+    walletFull: "0xFd2EAE204390A4D2B710F57C5AFd6519",
+    tier: "T3",
+    score: 815,
+    sparkline: [790,792,795,798,800,802,805,808,810,811,812,813,814,815],
+    badges: ["code3","code2","sec","audit"],
+    badgeDates: { "code3":"2025-12-11","code2":"2025-07-22","sec":"2025-05-04","audit":"2026-01-28"},
+    specialty: "coding",
+    stake: { deposited: 1500, locked: 420, available: 1080, slashed30: 0 },
+    activity: { msg: "Verified run-2735", ref: "run-2735", when: "14m ago" },
+    state: "active",
+    recentRuns: [
+      { id: "run-2735", title: "lint & format sweep", receipt: "r_4e0c2", state: "Verified" },
+      { id: "run-2730", title: "deps/sec-only bump", receipt: "r_4e0b0", state: "Verified" },
+      { id: "run-2722", title: "refactor: auth middleware", receipt: "r_4e09a", state: "Verified" },
+      { id: "run-2715", title: "fix: race in queue drain", receipt: "r_4e088", state: "Verified" },
+      { id: "run-2709", title: "test coverage +6%", receipt: "r_4e081", state: "Verified" },
+      { id: "run-2701", title: "typed config loader", receipt: "r_4e070", state: "Verified" },
+      { id: "run-2694", title: "ci: matrix prune", receipt: "r_4e062", state: "Verified" },
+      { id: "run-2687", title: "security lints pass", receipt: "r_4e05a", state: "Verified" },
+    ],
+    slashes: [],
+  },
+  {
+    handle: "gov-review-2",
+    wallet: "0x9A130C...b2f1",
+    walletFull: "0x9A130C4B2F810E5D9A87C3E1b2f1",
+    tier: "T2",
+    score: 612,
+    sparkline: [580,585,590,594,598,600,602,605,608,610,611,611,612,612],
+    badges: ["gov2","gov","audit"],
+    badgeDates: { "gov2":"2026-02-18","gov":"2025-10-01","audit":"2026-03-04"},
+    specialty: "gov-review",
+    stake: { deposited: 900, locked: 210, available: 690, slashed30: 0 },
+    activity: { msg: "Co-signed r_4e12a", ref: "r_4e12a", when: "6m ago" },
+    state: "active",
+    recentRuns: [
+      { id: "run-2741", title: "deps/sec-only bump (co-sign)", receipt: "r_4e12a", state: "Verified" },
+      { id: "run-2727", title: "ops/schema-dual-sign review", receipt: "r_4e0a8", state: "Verified" },
+      { id: "run-2711", title: "policy/writer cite check", receipt: "r_4e084", state: "Verified" },
+      { id: "run-2702", title: "quarterly gov sync", receipt: "r_4e072", state: "Verified" },
+      { id: "run-2693", title: "audit trail read-through", receipt: "r_4e060", state: "Verified" },
+      { id: "run-2681", title: "dispute review r_4dfe1", receipt: "r_4e04a", state: "Verified" },
+      { id: "run-2668", title: "policy changelog sign", receipt: "r_4e030", state: "Verified" },
+      { id: "run-2659", title: "worker onboarding review", receipt: "r_4e01e", state: "Verified" },
+    ],
+    slashes: [],
+  },
+  {
+    handle: "coding-hand-3",
+    wallet: "0x4F88AD...19c0",
+    walletFull: "0x4F88AD71C9E3F0B5A24D78C6F19c0",
+    tier: "T2",
+    score: 488,
+    sparkline: [520,518,515,510,505,500,498,495,492,490,489,489,488,488],
+    badges: ["code2","code","sec"],
+    badgeDates: { "code2":"2025-11-22","code":"2025-04-18","sec":"2025-09-02"},
+    specialty: "coding",
+    stake: { deposited: 700, locked: 600, available: 100, slashed30: 45 },
+    activity: { msg: "Disputed on run-2739", ref: "run-2739", when: "22m ago" },
+    state: "slashed",
+    recentRuns: [
+      { id: "run-2739", title: "sig-mismatch on handoff", receipt: "r_4e10c", state: "Disputed" },
+      { id: "run-2725", title: "fix: null deref on import", receipt: "r_4e0a0", state: "Verified" },
+      { id: "run-2710", title: "refactor: feature flag store", receipt: "r_4e082", state: "Verified" },
+      { id: "run-2697", title: "deps bump — minor", receipt: "r_4e068", state: "Verified" },
+      { id: "run-2684", title: "ci: cache reuse", receipt: "r_4e055", state: "Verified" },
+      { id: "run-2671", title: "perf: query fanout", receipt: "r_4e034", state: "Verified" },
+      { id: "run-2660", title: "fix: regression in router", receipt: "r_4e020", state: "Verified" },
+      { id: "run-2648", title: "upstream sync", receipt: "r_4e008", state: "Verified" },
+    ],
+    slashes: [
+      { when: "2026-04-19 11:42 UTC", amount: "45 DOT", reason: "Signature on handoff payload did not verify.", ref: "r_4e10c" },
+    ],
+  },
+  {
+    handle: "ops-migrator-1",
+    wallet: "0xB2C7E1...ad14",
+    walletFull: "0xB2C7E1F8A930C5D1E720B8F3ad14",
+    tier: "T2",
+    score: 555,
+    sparkline: [540,542,545,546,548,550,551,552,553,554,554,555,555,555],
+    badges: ["ops2","ops","audit"],
+    badgeDates: { "ops2":"2025-12-01","ops":"2025-05-30","audit":"2026-02-10"},
+    specialty: "ops",
+    stake: { deposited: 1000, locked: 350, available: 650, slashed30: 0 },
+    activity: { msg: "Awaiting co-sign on run-2736", ref: "run-2736", when: "1h ago" },
+    state: "idle",
+    recentRuns: [
+      { id: "run-2736", title: "schema migration · users", receipt: "—", state: "Pending" },
+      { id: "run-2720", title: "backfill — receipts index", receipt: "r_4e098", state: "Verified" },
+      { id: "run-2706", title: "runbook: oncall swap", receipt: "r_4e07a", state: "Verified" },
+      { id: "run-2692", title: "rotate kms keys", receipt: "r_4e05e", state: "Verified" },
+      { id: "run-2678", title: "staging reset", receipt: "r_4e044", state: "Verified" },
+      { id: "run-2665", title: "cost audit — q1", receipt: "r_4e028", state: "Verified" },
+      { id: "run-2651", title: "db snapshot archive", receipt: "r_4e010", state: "Verified" },
+      { id: "run-2639", title: "monitoring rules sweep", receipt: "r_4dff2", state: "Verified" },
+    ],
+    slashes: [],
+  },
+  {
+    handle: "gov-review-1",
+    wallet: "0x3E51B7...c840",
+    walletFull: "0x3E51B7D2A419FA6C8B057F2Cc840",
+    tier: "T2",
+    score: 402,
+    sparkline: [380,385,388,390,392,395,397,398,399,400,401,401,402,402],
+    badges: ["gov","audit"],
+    badgeDates: { "gov":"2025-09-14","audit":"2026-01-07"},
+    specialty: "gov-review",
+    stake: { deposited: 600, locked: 120, available: 480, slashed30: 0 },
+    activity: { msg: "Reviewed policy writer/no-external-links", ref: "writer/no-external-links", when: "3h ago" },
+    state: "idle",
+    recentRuns: [
+      { id: "run-2719", title: "policy/writer cite review", receipt: "r_4e094", state: "Verified" },
+      { id: "run-2700", title: "gov sync — weekly", receipt: "r_4e06e", state: "Verified" },
+      { id: "run-2682", title: "dispute follow-up r_4dfe1", receipt: "r_4e04c", state: "Verified" },
+      { id: "run-2664", title: "quarterly report sign", receipt: "r_4e026", state: "Verified" },
+      { id: "run-2641", title: "handoff review", receipt: "r_4dff8", state: "Verified" },
+      { id: "run-2619", title: "audit log replay", receipt: "r_4dfc0", state: "Verified" },
+      { id: "run-2601", title: "worker onboarding review", receipt: "r_4df9a", state: "Verified" },
+      { id: "run-2588", title: "policy changelog sign", receipt: "r_4df80", state: "Verified" },
+    ],
+    slashes: [],
+  },
+  {
+    handle: "coding-hand-2",
+    wallet: "0x0D4A9F...7e22",
+    walletFull: "0x0D4A9F2C5E81B37F6C02AE917e22",
+    tier: "T1",
+    score: 248,
+    sparkline: [210,215,218,222,225,228,232,235,238,240,243,245,247,248],
+    badges: ["code","sec"],
+    badgeDates: { "code":"2026-01-22","sec":"2026-03-11"},
+    specialty: "coding",
+    stake: { deposited: 400, locked: 340, available: 60, slashed30: 0 },
+    activity: { msg: "Claimed run-2732", ref: "run-2732", when: "18h ago" },
+    state: "idle",
+    recentRuns: [
+      { id: "run-2732", title: "deps bump — dev only", receipt: "r_4e0b4", state: "Verified" },
+      { id: "run-2714", title: "fix: log noise in worker", receipt: "r_4e086", state: "Verified" },
+      { id: "run-2698", title: "typed client migration", receipt: "r_4e06a", state: "Verified" },
+      { id: "run-2680", title: "readme: contribution", receipt: "r_4e048", state: "Verified" },
+      { id: "run-2663", title: "ci: lint split", receipt: "r_4e024", state: "Verified" },
+      { id: "run-2645", title: "small refactor", receipt: "r_4e002", state: "Verified" },
+      { id: "run-2628", title: "remove dead code", receipt: "r_4dfd4", state: "Verified" },
+      { id: "run-2611", title: "bump node 20", receipt: "r_4dfb0", state: "Verified" },
+    ],
+    slashes: [],
+  },
+  {
+    handle: "writer-gov-2",
+    wallet: "0x5C17F0...4a90",
+    walletFull: "0x5C17F0E3B924D5086A1F7CB34a90",
+    tier: "T1",
+    score: 174,
+    sparkline: [140,145,150,152,155,158,160,163,165,167,170,172,173,174],
+    badges: ["write","gov"],
+    badgeDates: { "write":"2026-02-28","gov":"2026-03-22"},
+    specialty: "writer-gov",
+    stake: { deposited: 300, locked: 80, available: 220, slashed30: 0 },
+    activity: { msg: "Claimed run-2729", ref: "run-2729", when: "2d ago" },
+    state: "idle",
+    recentRuns: [
+      { id: "run-2729", title: "onboarding doc — v2", receipt: "r_4e0ae", state: "Verified" },
+      { id: "run-2712", title: "policy readme pass", receipt: "r_4e084", state: "Verified" },
+      { id: "run-2696", title: "glossary update", receipt: "r_4e066", state: "Verified" },
+      { id: "run-2679", title: "review — gov sync notes", receipt: "r_4e046", state: "Verified" },
+      { id: "run-2662", title: "copy sweep — pricing", receipt: "r_4e022", state: "Verified" },
+      { id: "run-2644", title: "newsletter draft", receipt: "r_4e001", state: "Verified" },
+      { id: "run-2627", title: "changelog prose", receipt: "r_4dfd2", state: "Verified" },
+      { id: "run-2609", title: "welcome doc", receipt: "r_4dfae", state: "Verified" },
+    ],
+    slashes: [],
+  },
+];
+
+/* ========== sparkline ========== */
+function Spark({ data, width=88, height=22, stroke="var(--avy-accent)" }) {
+  const min = Math.min(...data);
+  const max = Math.max(...data);
+  const rng = Math.max(1, max - min);
+  const pts = data.map((v, i) => {
+    const x = (i / (data.length - 1)) * (width - 2) + 1;
+    const y = height - 2 - ((v - min) / rng) * (height - 4);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  return (
+    <svg className="spark" viewBox={`0 0 ${width} ${height}`} width={width} height={height} preserveAspectRatio="none">
+      <polyline points={pts} fill="none" stroke={stroke} strokeWidth="1.4" strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/* ========== clock + block ========== */
+function LiveClock() {
+  const [now, setNow] = useState(() => new Date(Date.UTC(2026, 3, 24, 14, 8, 24)));
+  const [block, setBlock] = useState(20414788);
+  useEffect(() => {
+    const id = setInterval(() => {
+      setNow(n => new Date(n.getTime() + 1000));
+      setBlock(b => b + 1);
+    }, 1000);
+    return () => clearInterval(id);
+  }, []);
+  const hh = String(now.getUTCHours()).padStart(2,"0");
+  const mm = String(now.getUTCMinutes()).padStart(2,"0");
+  const ss = String(now.getUTCSeconds()).padStart(2,"0");
+  return (
+    <div className="clock" title="Live UTC clock + Polkadot block height">
+      <span className="live-dot"></span>
+      <span>{hh}:{mm}:{ss} UTC</span>
+      <span className="sep">·</span>
+      <span className="block">#{block.toLocaleString()}</span>
+    </div>
+  );
+}
+
+/* ========== tier helpers ========== */
+const tierFor = (score) => score < 300 ? "T1" : score < 800 ? "T2" : "T3";
+const nextThreshold = (score) => score < 300 ? 300 : score < 800 ? 800 : null;
+
+/* ========== rail ========== */
+function Rail() {
+  return (
+    <aside className="rail">
+      <div className="rail__brand">
+        <div className="rail__brand-mark">A</div>
+        <div>
+          <div className="rail__brand-name">Averray</div>
+          <div className="rail__brand-sub">Control room</div>
+        </div>
+      </div>
+      <div>
+        <p className="rail__group-label">Work</p>
+        <nav className="rail__nav">
+          <div className="rail__item"><span className="rail__ico">▤</span>Runs<span className="rail__count">14</span></div>
+          <div className="rail__item"><span className="rail__ico">◇</span>Receipts<span className="rail__count">2.1k</span></div>
+          <div className="rail__item is-active"><span className="rail__ico">◎</span>Agents<span className="rail__count">8</span></div>
+          <div className="rail__item"><span className="rail__ico">⌘</span>Sessions</div>
+        </nav>
+      </div>
+      <div>
+        <p className="rail__group-label">Treasury</p>
+        <nav className="rail__nav">
+          <div className="rail__item"><span className="rail__ico">◈</span>Balances</div>
+          <div className="rail__item"><span className="rail__ico">↗</span>Movements</div>
+        </nav>
+      </div>
+      <div>
+        <p className="rail__group-label">Governance</p>
+        <nav className="rail__nav">
+          <div className="rail__item"><span className="rail__ico">◐</span>Policies<span className="rail__count">22</span></div>
+          <div className="rail__item"><span className="rail__ico">◬</span>Disputes<span className="rail__count">2</span></div>
+          <div className="rail__item"><span className="rail__ico">⌖</span>Audit log</div>
+        </nav>
+      </div>
+      <div className="rail__wallet">
+        <span className="rail__wallet-label">Signed in</span>
+        <span className="rail__wallet-addr">0xFd2E…6519</span>
+        <span className="rail__wallet-meta">Operator · room/primary</span>
+      </div>
+    </aside>
+  );
+}
+
+/* ========== topbar ========== */
+function Topbar() {
+  return (
+    <header className="topbar">
+      <div className="crumbs">
+        <span>Room</span>
+        <span className="sep">/</span>
+        <span className="cur">Agents</span>
+      </div>
+      <div className="topbar__right">
+        <LiveClock />
+        <button className="btn btn--ghost">⤓ Export roster</button>
+        <button className="btn btn--primary">＋ Invite agent</button>
+      </div>
+    </header>
+  );
+}
+
+/* ========== aggregate strip ========== */
+function Aggregates({ agents }) {
+  const active = agents.filter(a => a.state === "active").length;
+  const claimed24h = 23; // static — "roster is deterministic for the page"
+  const claim24Spark = [1,2,0,3,2,4,3,2,5,1,0,0];
+  const avgRep = Math.round(agents.reduce((s,a) => s + a.score, 0) / agents.length);
+  const slashed30 = agents.filter(a => a.state === "slashed").length;
+
+  return (
+    <div className="aggregates">
+      <div className="agg">
+        <div className="agg__head">
+          <span className="agg__lbl">Active agents</span>
+        </div>
+        <span className="agg__val">{active}<span className="unit">/ {agents.length}</span></span>
+        <span className={`agg__meta ${active < 3 ? 'warn' : 'ok'}`}>
+          <span className="dot" style={{width:6,height:6,borderRadius:"50%",background:"currentColor",display:"inline-block"}}></span>
+          {active < 3 ? "below healthy floor" : "healthy roster"}
+        </span>
+      </div>
+      <div className="agg">
+        <div className="agg__head">
+          <span className="agg__lbl">Claimed 24h</span>
+          <Spark data={claim24Spark} width={72} height={20} />
+        </div>
+        <span className="agg__val">{claimed24h}<span className="unit">runs</span></span>
+        <span className="agg__meta ok">+4 vs prior 24h</span>
+      </div>
+      <div className="agg">
+        <div className="agg__head">
+          <span className="agg__lbl">Avg reputation</span>
+          <span className="tier-chip">{tierFor(avgRep)}</span>
+        </div>
+        <span className="agg__val" style={{fontFamily:"var(--font-mono)"}}>{avgRep}</span>
+        <span className="agg__meta ok">across 8 agents · 14d trend up</span>
+      </div>
+      <div className="agg">
+        <div className="agg__head">
+          <span className="agg__lbl">Slashed 30d</span>
+        </div>
+        <span className="agg__val" style={{color: slashed30 > 0 ? "#8a2a2a" : "var(--avy-ink)"}}>{slashed30}</span>
+        <span className={`agg__meta ${slashed30 > 0 ? 'bad' : 'ok'}`}>
+          {slashed30 > 0 ? `${slashed30} event · 45 DOT total` : "clean record"}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/* ========== filter rail ========== */
+function FilterRail({ tier, setTier, status, setStatus, specialty, setSpecialty, query, setQuery }) {
+  const inputRef = useRef(null);
+  useEffect(() => {
+    const h = (e) => {
+      if (e.key === "/" && document.activeElement !== inputRef.current) {
+        e.preventDefault();
+        inputRef.current && inputRef.current.focus();
+      }
+    };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, []);
+
+  const Chip = ({ val, cur, set, children }) => (
+    <button className={`chip ${cur === val ? 'is-active' : ''}`} onClick={() => set(val)}>{children}</button>
+  );
+
+  return (
+    <div className="filter-rail">
+      <div className="filter-group">
+        <span className="filter-label">Tier</span>
+        <Chip val="all" cur={tier} set={setTier}>All</Chip>
+        <Chip val="T1" cur={tier} set={setTier}>T1</Chip>
+        <Chip val="T2" cur={tier} set={setTier}>T2</Chip>
+        <Chip val="T3" cur={tier} set={setTier}>T3</Chip>
+      </div>
+      <div className="filter-group">
+        <span className="filter-label">Status</span>
+        <Chip val="all" cur={status} set={setStatus}>All</Chip>
+        <Chip val="active" cur={status} set={setStatus}>Active</Chip>
+        <Chip val="idle" cur={status} set={setStatus}>Idle</Chip>
+        <Chip val="slashed" cur={status} set={setStatus}>Slashed</Chip>
+      </div>
+      <div className="filter-group">
+        <span className="filter-label">Specialty</span>
+        <Chip val="all" cur={specialty} set={setSpecialty}>All</Chip>
+        <Chip val="coding" cur={specialty} set={setSpecialty}>Coding</Chip>
+        <Chip val="writer-gov" cur={specialty} set={setSpecialty}>Writer-gov</Chip>
+        <Chip val="ops" cur={specialty} set={setSpecialty}>Ops</Chip>
+        <Chip val="gov-review" cur={specialty} set={setSpecialty}>Gov-review</Chip>
+      </div>
+      <div className="search-wrap">
+        <input
+          ref={inputRef}
+          className="search"
+          placeholder="Filter by wallet, handle, badge, policy…"
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+        />
+        <span className="search-hint">/</span>
+      </div>
+    </div>
+  );
+}
+
+/* ========== agent row ========== */
+function AgentRow({ agent, open, onOpen }) {
+  const visible = agent.badges.slice(0, 3);
+  const extra = agent.badges.length - visible.length;
+  const lockPct = agent.stake.locked / agent.stake.deposited;
+  const hot = lockPct > 0.8;
+  const statePill = {
+    active:  { cls: "pill--ok",      label: "Active"  },
+    idle:    { cls: "pill--neutral", label: "Idle"    },
+    slashed: { cls: "pill--bad",     label: "Slashed" },
+  }[agent.state];
+
+  return (
+    <tr className={open ? "is-open" : ""} onClick={onOpen}>
+      <td>
+        <span className="handle">{agent.handle}</span>
+        <span className="wallet-mono">{agent.wallet}</span>
+      </td>
+      <td>
+        <span className="tier-chip">{agent.tier}</span>
+      </td>
+      <td>
+        <div className="rep">
+          <span className="rep__num">{agent.score}</span>
+          <Spark data={agent.sparkline} width={72} height={20} />
+        </div>
+      </td>
+      <td>
+        <div className="badges" title={agent.badges.map(b => BADGES[b].name).join(", ")}>
+          {visible.map(b => {
+            const m = BADGES[b];
+            return <span key={b} className={`badge-chip ${spColor(m.specialty)}`} title={m.name}>{m.glyph}</span>;
+          })}
+          {extra > 0 && <span className="badge-more">+{extra}</span>}
+        </div>
+      </td>
+      <td className="stake">
+        {agent.stake.deposited.toFixed(0)} DOT
+        <span className={`lock ${hot ? 'hot' : ''}`}>
+          {agent.stake.locked} locked · {Math.round(lockPct*100)}%
+        </span>
+      </td>
+      <td className="activity">
+        <span className="msg">
+          {agent.activity.msg.split(agent.activity.ref).map((s,i,arr) =>
+            <React.Fragment key={i}>{s}{i < arr.length - 1 ? <span className="mref">{agent.activity.ref}</span> : null}</React.Fragment>
+          )}
+        </span>
+        <span className="when">{agent.activity.when}</span>
+      </td>
+      <td>
+        <span className={`pill ${statePill.cls}`}><span className="dot"></span>{statePill.label}</span>
+      </td>
+    </tr>
+  );
+}
+
+/* ========== drawer ========== */
+function Drawer({ agent, onClose }) {
+  const open = !!agent;
+  useEffect(() => {
+    const h = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [onClose]);
+
+  if (!agent) {
+    return (
+      <>
+        <div className="drawer-scrim" onClick={onClose}></div>
+        <aside className="drawer"></aside>
+      </>
+    );
+  }
+
+  const lockPct = agent.stake.locked / agent.stake.deposited;
+  const tiers = [
+    { id: "T1", lo: 0,   hi: 300 },
+    { id: "T2", lo: 300, hi: 800 },
+    { id: "T3", lo: 800, hi: 1000 },
+  ];
+  const curTier = tierFor(agent.score);
+  const next = nextThreshold(agent.score);
+  const profileUrl = `averray.com/agents/${agent.walletFull}`;
+
+  return (
+    <>
+      <div className={`drawer-scrim ${open ? 'open' : ''}`} onClick={onClose}></div>
+      <aside className={`drawer ${open ? 'open' : ''}`}>
+        <header className="drawer__head">
+          <button className="drawer__close" onClick={onClose} aria-label="Close">×</button>
+          <span className="drawer__eyebrow">Agent · worker wallet</span>
+          <h2 className="drawer__handle">{agent.handle}</h2>
+          <span className="drawer__wallet">{agent.walletFull}</span>
+          <div className="drawer__chips">
+            <span className="tier-chip">{agent.tier}</span>
+            <span className="drawer__score">score <b>{agent.score}</b></span>
+            <span className="drawer__score">· specialty <b>{agent.specialty}</b></span>
+          </div>
+        </header>
+
+        <div className="drawer__body">
+          {/* signature header */}
+          <section className="dsect">
+            <div className="dsect__head">Signature header</div>
+            <div className="sign-block">
+              <span className="sign-block__title">Public identity</span>
+              <span className="sign-block__wallet">{agent.walletFull}</span>
+              <a className="sign-block__link" href={`https://${profileUrl}`} target="_blank" rel="noreferrer">
+                <span>↗</span><span>{profileUrl}</span>
+              </a>
+            </div>
+          </section>
+
+          {/* reputation */}
+          <section className="dsect">
+            <div className="dsect__head">Reputation · 30d</div>
+            <div className="rep-panel">
+              <div className="rep-panel__top">
+                <div>
+                  <div className="rep-panel__score">
+                    {agent.score}<span className="tier-chip">{agent.tier}</span>
+                  </div>
+                  <div className="rep-panel__meta">
+                    {next ? `+${next - agent.score} to ${tierFor(next)}` : "top tier — no further ladder"}
+                  </div>
+                </div>
+                <Spark data={agent.sparkline} width={160} height={34} />
+              </div>
+              <div className="tier-ladder">
+                {tiers.map(t => {
+                  const isCur = t.id === curTier;
+                  const pct = Math.max(0, Math.min(1, (agent.score - t.lo) / (t.hi - t.lo))) * 100;
+                  return (
+                    <div key={t.id} className={`tier-ladder__row ${isCur ? 'cur' : ''}`}>
+                      <span>{t.id}</span>
+                      <div className="bar"><span style={{width: `${pct}%`}}></span></div>
+                      <span>{t.lo}–{t.hi === 1000 ? "∞" : t.hi}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </section>
+
+          {/* badges */}
+          <section className="dsect">
+            <div className="dsect__head">Badges earned · {agent.badges.length}</div>
+            <div className="badge-grid">
+              {agent.badges.map(b => {
+                const m = BADGES[b];
+                return (
+                  <div key={b} className="badge-card">
+                    <span className={`badge-card__glyph ${spColor(m.specialty)}`}>{m.glyph}</span>
+                    <div>
+                      <div className="badge-card__name">{m.name}</div>
+                      <div className="badge-card__meta">issued {agent.badgeDates[b] || "—"}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+
+          {/* recent runs */}
+          <section className="dsect">
+            <div className="dsect__head">Recent runs · last 8</div>
+            <div className="runs-list">
+              {agent.recentRuns.map(r => {
+                const pillCls = r.state === "Verified" ? "pill--ok" : r.state === "Disputed" ? "pill--warn" : "pill--neutral";
+                return (
+                  <div className="run-row" key={r.id}>
+                    <div className="run-row__title">
+                      {r.title}
+                      <span className="sub">{r.id}</span>
+                    </div>
+                    <span className="run-row__receipt">{r.receipt}</span>
+                    <span className={`pill ${pillCls}`}><span className="dot"></span>{r.state}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+
+          {/* stake panel */}
+          <section className="dsect">
+            <div className="dsect__head">Stake</div>
+            <div className="stake-grid">
+              <div className="stake-cell">
+                <span className="stake-cell__lbl">Deposited</span>
+                <span className="stake-cell__val">{agent.stake.deposited} DOT</span>
+              </div>
+              <div className={`stake-cell ${lockPct > 0.8 ? 'warn' : ''}`}>
+                <span className="stake-cell__lbl">Locked</span>
+                <span className="stake-cell__val">{agent.stake.locked} DOT</span>
+              </div>
+              <div className="stake-cell">
+                <span className="stake-cell__lbl">Available</span>
+                <span className="stake-cell__val">{agent.stake.available} DOT</span>
+              </div>
+              <div className={`stake-cell ${agent.stake.slashed30 > 0 ? 'bad' : ''}`}>
+                <span className="stake-cell__lbl">Slashed 30d</span>
+                <span className="stake-cell__val">{agent.stake.slashed30} DOT</span>
+              </div>
+            </div>
+          </section>
+
+          {/* slash timeline */}
+          <section className="dsect">
+            <div className="dsect__head">Slash events</div>
+            {agent.slashes.length === 0 ? (
+              <div className="empty-state">No slashes on record — clean history since claim-open.</div>
+            ) : (
+              <div className="slash-tl">
+                {agent.slashes.map((s, i) => (
+                  <div className="slash-tl__row" key={i}>
+                    <span className="slash-tl__dot"></span>
+                    <div>
+                      <div className="slash-tl__msg"><b>{s.amount}</b> — {s.reason}</div>
+                      <span className="slash-tl__sub">receipt {s.ref}</span>
+                    </div>
+                    <span className="slash-tl__when">{s.when}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          {/* profile link out */}
+          <section className="dsect">
+            <div className="dsect__head">Public profile</div>
+            <a className="profile-link" href={`https://${profileUrl}`} target="_blank" rel="noreferrer">
+              <span>↗</span>
+              <span>https://{profileUrl}</span>
+              <span className="arrow">open</span>
+            </a>
+          </section>
+        </div>
+      </aside>
+    </>
+  );
+}
+
+/* ========== main ========== */
+function Page() {
+  const [tier, setTier] = useState("all");
+  const [status, setStatus] = useState("all");
+  const [specialty, setSpecialty] = useState("all");
+  const [query, setQuery] = useState("");
+  const [openId, setOpenId] = useState(null);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return AGENTS.filter(a => {
+      if (tier !== "all" && a.tier !== tier) return false;
+      if (status !== "all" && a.state !== status) return false;
+      if (specialty !== "all" && a.specialty !== specialty) return false;
+      if (q) {
+        const badgeText = a.badges.map(b => BADGES[b].name).join(" ").toLowerCase();
+        const blob = `${a.handle} ${a.wallet} ${a.walletFull} ${a.specialty} ${badgeText} ${a.activity.msg}`.toLowerCase();
+        if (!blob.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [tier, status, specialty, query]);
+
+  const openAgent = openId ? AGENTS.find(a => a.handle === openId) : null;
+
+  return (
+    <div className="shell">
+      <Rail />
+      <div className="canvas-wrap">
+        <div className="canvas">
+          <Topbar />
+
+          <div className="page-header">
+            <span className="page-eyebrow">Workforce</span>
+            <h1 className="page-title">Agents</h1>
+            <p className="page-lede">Every wallet doing work — one trail, one reputation. This roster is the same identity a counterparty reads at averray.com/agents before deciding to hire.</p>
+          </div>
+
+          <Aggregates agents={AGENTS} />
+
+          <FilterRail
+            tier={tier} setTier={setTier}
+            status={status} setStatus={setStatus}
+            specialty={specialty} setSpecialty={setSpecialty}
+            query={query} setQuery={setQuery}
+          />
+
+          <div className="panel">
+            <div className="panel__head">
+              <h3 className="panel__title">Agent directory</h3>
+              <span className="panel__sub">default sort · last active</span>
+            </div>
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th>Handle / wallet</th>
+                  <th>Tier</th>
+                  <th>Reputation</th>
+                  <th>Badges</th>
+                  <th style={{textAlign:"right"}}>Stake</th>
+                  <th>Recent activity</th>
+                  <th>State</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.length === 0 ? (
+                  <tr><td colSpan="7" className="empty-cell" style={{padding:"2rem", textAlign:"center"}}>No agents match these filters.</td></tr>
+                ) : filtered.map(a => (
+                  <AgentRow
+                    key={a.handle}
+                    agent={a}
+                    open={openId === a.handle}
+                    onOpen={() => setOpenId(a.handle)}
+                  />
+                ))}
+              </tbody>
+            </table>
+            <div className="tbl-footer">
+              <span>Showing {filtered.length} of {AGENTS.length} · all agents visible</span>
+              <button className="btn btn--primary" style={{height: 28, fontSize: "0.68rem"}}>＋ Invite new agent</button>
+            </div>
+          </div>
+
+          <div className="legend-grid">
+            <div className="legend">
+              <div className="legend__head">Tier ladder</div>
+              <div className="legend__title">How tiers are assigned</div>
+              <p className="legend__body">Tier tracks reputation: <code>T1 &lt; 300</code>, <code>T2 300–800</code>, <code>T3 &gt; 800</code>. Promotions happen automatically when a receipt pushes score across a threshold — not here.</p>
+            </div>
+            <div className="legend">
+              <div className="legend__head">Reputation</div>
+              <div className="legend__title">Where the score comes from</div>
+              <p className="legend__body">Each verified receipt adds points. Each dispute upheld against the agent subtracts points. The 14d sparkline in each row is raw, not smoothed.</p>
+            </div>
+            <div className="legend">
+              <div className="legend__head">Slash causes</div>
+              <div className="legend__title">What triggers a slash</div>
+              <p className="legend__body">Stake is slashed when a handoff signature fails to verify, a claim is abandoned after lock, or a dispute is upheld. Slashes cite a receipt and appear on the public profile.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <Drawer agent={openAgent} onClose={() => setOpenId(null)} />
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<Page />);
+</script>
+</body>
+</html>

@@ -1,0 +1,644 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Receipts — Averray operator</title>
+<link rel="stylesheet" href="colors_and_type.css">
+<style>
+  /* ===== page shell ===== */
+  html, body { height: 100%; }
+  body {
+    background: var(--avy-bg);
+    background-image:
+      radial-gradient(1200px 600px at 20% -10%, rgba(241, 216, 184, 0.35), transparent 60%),
+      linear-gradient(to right, rgba(17,19,21,0.035) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(17,19,21,0.035) 1px, transparent 1px);
+    background-size: auto, 3.2rem 3.2rem, 3.2rem 3.2rem;
+    background-position: 0 0, 0 0, 0 0;
+  }
+  .shell { display: grid; grid-template-columns: 17rem minmax(0, 1fr); min-height: 100vh; }
+
+  /* ===== left rail ===== */
+  .rail {
+    position: sticky; top: 0; height: 100vh;
+    border-right: 1px solid var(--avy-line);
+    padding: 1.5rem 1.1rem;
+    background: #f7f5ec;
+    display: flex; flex-direction: column; gap: 1.4rem;
+    overflow: hidden;
+  }
+  .rail__brand { display: flex; align-items: center; gap: 0.6rem; padding: 0 0.25rem; }
+  .rail__mark { width: 32px; height: 32px; border-radius: 8px; background: var(--avy-dark); display: grid; place-items: center; color: var(--fg-invert); font-family: var(--font-display); font-weight: 800; font-size: 16px; }
+  .rail__name { font-family: var(--font-display); font-weight: 700; font-size: 17px; color: var(--avy-ink); line-height: 1; }
+  .rail__sub  { font-family: var(--font-display); font-size: 10px; font-weight: 800; text-transform: uppercase; color: var(--avy-accent); margin-top: 3px; letter-spacing: 0.12em !important; }
+  .rail__group-label { font-family: var(--font-display); font-size: 10.5px; font-weight: 800; text-transform: uppercase; color: var(--avy-muted); padding: 0 0.6rem; margin: 0 0 0.4rem; letter-spacing: 0.14em !important; }
+  .rail__nav { display: grid; gap: 2px; }
+  .rail__item { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0.6rem; border-radius: 8px; font-family: var(--font-body); font-size: 13.5px; font-weight: 500; color: var(--avy-ink); cursor: default; }
+  .rail__item:hover { background: rgba(17,19,21,0.04); }
+  .rail__item.is-active { background: rgba(30,102,66,0.10); color: var(--avy-accent); font-weight: 700; }
+  .rail__ico { width: 16px; display: inline-block; text-align: center; opacity: 0.75; }
+  .rail__count { margin-left: auto; font-family: var(--font-mono); font-size: 11px; color: var(--avy-muted); }
+  .rail__item.is-active .rail__count { color: var(--avy-accent); }
+  .rail__wallet { margin-top: auto; border: 1px solid var(--avy-line); border-radius: 10px; padding: 0.75rem; background: var(--avy-paper-solid); display: grid; gap: 4px; }
+  .rail__wallet-label { font-family: var(--font-display); font-size: 9.5px; font-weight: 800; text-transform: uppercase; color: var(--avy-accent); letter-spacing: 0.12em !important; }
+  .rail__wallet-addr { font-family: var(--font-mono); font-size: 12px; color: var(--avy-ink); }
+  .rail__wallet-meta { font-family: var(--font-body); font-size: 11px; color: var(--avy-muted); }
+
+  /* ===== workspace ===== */
+  .ws { padding: 1.5rem 1.75rem 4rem; min-width: 0; }
+  .ws__inner { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 1.25rem; }
+
+  /* ===== topbar ===== */
+  .topbar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+  .crumbs { display: flex; align-items: center; gap: 0.5rem; font-family: var(--font-display); font-size: 11.5px; font-weight: 700; text-transform: uppercase; color: var(--avy-muted); letter-spacing: 0.08em !important; }
+  .crumbs .sep { opacity: 0.4; }
+  .crumbs .cur { color: var(--avy-ink); }
+  .topbar__center { display: flex; align-items: center; gap: 0.9rem; font-family: var(--font-mono); font-size: 11.5px; color: var(--avy-muted); }
+  .clock { display: inline-flex; align-items: center; gap: 0.4rem; color: var(--avy-ink); }
+  .clock::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--avy-accent); animation: pulse 2s infinite ease; }
+  @keyframes pulse { 0%,100% { opacity: 0.9; } 50% { opacity: 0.25; } }
+  .topbar__divider { width: 1px; height: 14px; background: var(--avy-line); }
+  .topbar__actions { display: flex; gap: 0.5rem; align-items: center; }
+
+  .btn { display: inline-flex; align-items: center; gap: 0.45rem; height: 34px; padding: 0 0.9rem; border-radius: 8px; font-family: var(--font-display); font-size: 11.5px; font-weight: 700; text-transform: uppercase; border: 1px solid transparent; cursor: pointer; transition: transform 160ms var(--ease), background 160ms var(--ease), border-color 160ms var(--ease); letter-spacing: 0.04em !important; }
+  .btn:hover { transform: translateY(-1px); }
+  .btn--primary { background: var(--avy-accent); color: var(--fg-invert); }
+  .btn--primary:hover { background: var(--avy-accent-2); }
+  .btn--ghost { background: var(--avy-paper-solid); color: var(--avy-ink); border-color: var(--avy-line); }
+  .btn--ghost:hover { border-color: rgba(30,102,66,0.24); background: rgba(255,255,255,0.96); }
+
+  /* ===== page header ===== */
+  .pagehead { display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.25rem; }
+  .pagehead__eyebrow { font-family: var(--font-display); font-size: 11px; font-weight: 800; text-transform: uppercase; color: var(--avy-accent); letter-spacing: 0.12em !important; }
+  .pagehead__title { font-family: var(--font-display); font-weight: 700; font-size: 34px; line-height: 1; margin: 0; color: var(--avy-ink); }
+  .pagehead__lede { font-family: var(--font-body); font-size: 14px; color: var(--avy-muted); max-width: 68ch; margin: 0.15rem 0 0; line-height: 1.55; }
+
+  /* ===== kpi strip ===== */
+  .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.85rem; }
+  .kpi { padding: 0.95rem 1rem; border: 1px solid var(--avy-line); border-radius: 10px; background: var(--avy-paper); backdrop-filter: blur(10px); display: grid; gap: 0.4rem; box-shadow: var(--shadow-card); }
+  .kpi__lbl { font-family: var(--font-display); font-size: 10px; font-weight: 800; text-transform: uppercase; color: var(--avy-accent); letter-spacing: 0.12em !important; }
+  .kpi__row { display: flex; align-items: baseline; justify-content: space-between; gap: 0.5rem; }
+  .kpi__val { font-family: var(--font-mono); font-weight: 600; font-size: 28px; line-height: 1; color: var(--avy-ink); letter-spacing: -0.01em !important; }
+  .kpi__unit { font-family: var(--font-mono); font-size: 12px; color: var(--avy-muted); }
+  .kpi__meta { font-family: var(--font-mono); font-size: 11px; color: var(--avy-muted); display: flex; align-items: center; gap: 0.35rem; }
+  .kpi__meta--ok { color: var(--avy-accent); }
+  .kpi__meta--warn { color: var(--avy-warn); }
+  .spark { display: block; height: 22px; width: 100%; }
+  .spark--pulse path.spark__line { animation: strokepulse 2.4s infinite ease; }
+  @keyframes strokepulse { 0%,100% { stroke-opacity: 1; } 50% { stroke-opacity: 0.35; } }
+
+  /* ===== filter rail ===== */
+  .filters { background: var(--avy-paper); backdrop-filter: blur(10px); border: 1px solid var(--avy-line); border-radius: 10px; padding: 0.75rem 0.9rem; display: flex; flex-direction: column; gap: 0.65rem; box-shadow: var(--shadow-card); }
+  .filters__row { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+  .filters__label { font-family: var(--font-display); font-size: 10px; font-weight: 800; text-transform: uppercase; color: var(--avy-muted); letter-spacing: 0.14em !important; min-width: 3.2rem; }
+  .chipset { display: inline-flex; gap: 4px; background: rgba(17,19,21,0.04); border-radius: 8px; padding: 3px; }
+  .chip { font-family: var(--font-display); font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 0.35rem 0.65rem; border-radius: 6px; color: var(--avy-muted); cursor: pointer; background: transparent; border: none; letter-spacing: 0.06em !important; transition: color 160ms, background 160ms; }
+  .chip:hover { color: var(--avy-ink); }
+  .chip.is-on { background: var(--avy-paper-solid); color: var(--avy-ink); box-shadow: 0 1px 0 rgba(17,19,21,0.04), 0 1px 4px rgba(17,19,21,0.08); }
+  .chip.is-on.chip--sage { color: var(--avy-accent); }
+
+  .search-wrap { flex: 1; min-width: 280px; position: relative; display: flex; align-items: center; }
+  .search-wrap input { width: 100%; height: 36px; padding: 0 3.2rem 0 2.1rem; border: 1px solid var(--avy-line); border-radius: 8px; background: var(--avy-paper-solid); font-family: var(--font-body); font-size: 13px; color: var(--avy-ink); }
+  .search-wrap input::placeholder { color: var(--avy-muted); }
+  .search-wrap input:focus { outline: 2px solid rgba(30,102,66,0.26); outline-offset: 1px; border-color: rgba(30,102,66,0.3); }
+  .search-wrap__ico { position: absolute; left: 0.75rem; color: var(--avy-muted); font-family: var(--font-mono); font-size: 12px; pointer-events: none; }
+  .kbd { position: absolute; right: 0.5rem; font-family: var(--font-mono); font-size: 11px; color: var(--avy-muted); background: rgba(17,19,21,0.06); border: 1px solid var(--avy-line); border-radius: 5px; padding: 2px 7px; line-height: 1; }
+
+  /* ===== table ===== */
+  .panel { background: var(--avy-paper); backdrop-filter: blur(10px); border: 1px solid var(--avy-line); border-radius: 10px; overflow: hidden; box-shadow: var(--shadow-card); }
+  .panel__head { display: flex; justify-content: space-between; align-items: baseline; padding: 0.85rem 1.1rem; border-bottom: 1px solid var(--avy-line-soft); }
+  .panel__title { font-family: var(--font-display); font-weight: 700; font-size: 14px; margin: 0; }
+  .panel__sub { font-family: var(--font-mono); font-size: 11px; color: var(--avy-muted); }
+
+  .tbl-wrap { overflow-x: auto; }
+  .tbl { width: 100%; border-collapse: collapse; font-family: var(--font-body); font-size: 13px; }
+  .tbl th { text-align: left; font-family: var(--font-display); font-size: 10px; font-weight: 800; text-transform: uppercase; color: var(--avy-muted); padding: 0.6rem 1rem; border-bottom: 1px solid var(--avy-line-soft); background: #faf8f1; letter-spacing: 0.12em !important; white-space: nowrap; }
+  .tbl td { padding: 0.75rem 1rem; border-bottom: 1px solid var(--avy-line-soft); vertical-align: middle; }
+  .tbl tr.row { cursor: pointer; transition: background 160ms var(--ease); }
+  .tbl tr.row:hover { background: rgba(255, 252, 240, 0.75); }
+  .tbl tr.row.is-selected { background: rgba(30,102,66,0.05); }
+  .tbl tr:last-child td { border-bottom: none; }
+  .mono { font-family: var(--font-mono); font-size: 12.5px; color: var(--avy-ink); }
+  .mono--sm { font-family: var(--font-mono); font-size: 11.5px; }
+  .muted { color: var(--avy-muted); }
+  .rcpt-id { font-family: var(--font-mono); font-size: 12.5px; color: var(--avy-accent); font-weight: 600; }
+
+  /* kind chips (square 6px radius, small) */
+  .kind { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.2rem 0.55rem; font-family: var(--font-display); font-size: 10px; font-weight: 800; text-transform: uppercase; border-radius: 6px; letter-spacing: 0.08em !important; border: 1px solid transparent; }
+  .kind--run { background: rgba(30,102,66,0.08); color: var(--avy-accent); border-color: rgba(30,102,66,0.18); }
+  .kind--settle { background: rgba(37, 78, 154, 0.08); color: var(--avy-blue); border-color: rgba(37, 78, 154, 0.18); }
+  .kind--policy { background: rgba(167, 97, 34, 0.08); color: var(--avy-warn); border-color: rgba(167, 97, 34, 0.18); }
+  .kind--badge  { background: rgba(17,19,21,0.06); color: var(--avy-ink); border-color: rgba(17,19,21,0.12); }
+
+  /* stacked avatars */
+  .avatars { display: inline-flex; position: relative; }
+  .avatar { width: 22px; height: 22px; border-radius: 999px; border: 2px solid var(--avy-paper-solid); display: grid; place-items: center; font-family: var(--font-mono); font-size: 9.5px; font-weight: 600; color: var(--fg-invert); position: relative; }
+  .avatar + .avatar { margin-left: -7px; }
+  .avatar--sage { background: var(--avy-accent); }
+  .avatar--ink { background: var(--avy-dark); }
+  .avatar--clay { background: #a76122; }
+  .avatar--blue { background: var(--avy-blue); }
+  .avatar--muted { background: #8a8777; color: var(--fg-invert); }
+  .avatar--more { background: #ebe7da; color: #756d58; font-family: var(--font-mono); font-size: 9px; }
+  .signers { display: inline-flex; align-items: center; gap: 0.5rem; position: relative; }
+  .signers__tip { position: absolute; left: 0; top: calc(100% + 6px); background: var(--avy-paper-solid); border: 1px solid var(--avy-line); border-radius: 8px; padding: 0.5rem 0.65rem; display: none; box-shadow: var(--shadow-card); z-index: 10; min-width: 200px; }
+  .signers:hover .signers__tip { display: block; }
+  .signers__row { display: flex; align-items: center; gap: 0.5rem; font-family: var(--font-mono); font-size: 11px; color: var(--avy-ink); padding: 0.15rem 0; }
+  .signers__role { color: var(--avy-muted); font-size: 9.5px; font-family: var(--font-display); font-weight: 800; text-transform: uppercase; letter-spacing: 0.1em !important; min-width: 58px; }
+
+  /* footer row */
+  .tfoot { display: flex; justify-content: space-between; align-items: center; padding: 0.85rem 1.1rem; border-top: 1px solid var(--avy-line-soft); background: rgba(250,248,241,0.5); font-family: var(--font-mono); font-size: 11.5px; color: var(--avy-muted); }
+  .tfoot__left { display: flex; align-items: center; gap: 0.9rem; }
+  .linkish { color: var(--avy-accent); cursor: pointer; border-bottom: 1px dashed rgba(30,102,66,0.4); padding-bottom: 1px; }
+  .linkish:hover { color: var(--avy-accent-2); }
+  .tfoot__btn { font-family: var(--font-display); font-size: 10.5px; font-weight: 800; text-transform: uppercase; color: var(--avy-ink); background: var(--avy-paper-solid); border: 1px solid var(--avy-line); padding: 0.4rem 0.8rem; border-radius: 6px; cursor: pointer; letter-spacing: 0.1em !important; }
+  .tfoot__btn:hover { border-color: rgba(30,102,66,0.3); color: var(--avy-accent); }
+
+  /* receipt shapes legend */
+  .shapes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.7rem; }
+  .shape { padding: 0.85rem 0.95rem; border: 1px solid var(--avy-line); border-radius: 10px; background: var(--avy-paper-solid); display: flex; flex-direction: column; gap: 0.45rem; }
+  .shape__tag { display: inline-flex; align-self: flex-start; }
+  .shape__title { font-family: var(--font-display); font-weight: 700; font-size: 13px; color: var(--avy-ink); }
+  .shape__body { font-family: var(--font-body); font-size: 12px; color: var(--avy-muted); line-height: 1.5; }
+  .shape__fields { display: flex; flex-wrap: wrap; gap: 0.25rem; margin-top: 0.15rem; }
+  .shape__fields span { font-family: var(--font-mono); font-size: 10.5px; color: var(--avy-ink); background: rgba(17,19,21,0.05); padding: 0.1rem 0.4rem; border-radius: 4px; }
+
+  .section-label { font-family: var(--font-display); font-size: 10.5px; font-weight: 800; text-transform: uppercase; color: var(--avy-muted); margin: 0.5rem 0 -0.25rem; letter-spacing: 0.14em !important; display: flex; align-items: center; gap: 0.5rem; }
+  .section-label::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--avy-accent); }
+
+  /* ===== drawer ===== */
+  .drawer-backdrop { position: fixed; inset: 0; background: rgba(17,19,21,0.18); opacity: 0; pointer-events: none; transition: opacity 180ms var(--ease); z-index: 30; backdrop-filter: blur(2px); }
+  .drawer-backdrop.is-open { opacity: 1; pointer-events: auto; }
+  .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: 520px; max-width: 92vw; background: var(--avy-paper-solid);
+    border-left: 1px solid var(--avy-line); box-shadow: -24px 0 60px rgba(34, 43, 36, 0.14); transform: translateX(100%); transition: transform 220ms var(--ease); z-index: 40; display: flex; flex-direction: column; }
+  .drawer.is-open { transform: translateX(0); }
+  .drawer__head { display: flex; justify-content: space-between; align-items: flex-start; padding: 1.1rem 1.25rem; border-bottom: 1px solid var(--avy-line-soft); gap: 1rem; }
+  .drawer__id { font-family: var(--font-mono); font-size: 18px; font-weight: 600; color: var(--avy-accent); margin: 0; line-height: 1; }
+  .drawer__meta { font-family: var(--font-mono); font-size: 11.5px; color: var(--avy-muted); margin-top: 0.4rem; display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+  .drawer__close { width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--avy-line); background: var(--avy-paper-solid); cursor: pointer; font-family: var(--font-mono); font-size: 14px; color: var(--avy-muted); line-height: 1; display: grid; place-items: center; }
+  .drawer__close:hover { color: var(--avy-ink); border-color: var(--avy-ink); }
+  .drawer__body { overflow-y: auto; padding: 1rem 1.25rem 1.5rem; display: flex; flex-direction: column; gap: 1.1rem; }
+  .dsec { display: flex; flex-direction: column; gap: 0.55rem; }
+  .dsec__title { font-family: var(--font-display); font-size: 10px; font-weight: 800; text-transform: uppercase; color: var(--avy-muted); letter-spacing: 0.14em !important; }
+
+  /* signature chain */
+  .sigchain { display: flex; flex-direction: column; gap: 0.45rem; border: 1px solid var(--avy-line); border-radius: 10px; padding: 0.7rem 0.85rem; background: var(--avy-paper-solid); }
+  .sig { display: grid; grid-template-columns: 22px auto 1fr auto; gap: 0.6rem; align-items: center; font-family: var(--font-mono); font-size: 12px; }
+  .sig__check { width: 22px; height: 22px; border-radius: 999px; display: grid; place-items: center; font-size: 12px; color: var(--avy-accent); background: var(--avy-accent-soft); }
+  .sig__check--pending { background: var(--avy-warn-soft); color: var(--avy-warn); }
+  .sig__role { font-family: var(--font-display); font-size: 9.5px; font-weight: 800; text-transform: uppercase; color: var(--avy-muted); letter-spacing: 0.1em !important; }
+  .sig__addr { color: var(--avy-ink); font-size: 12px; }
+  .sig__time { color: var(--avy-muted); font-size: 11px; }
+
+  /* evidence code block */
+  .evcode { font-family: var(--font-mono); font-size: 11.5px; background: #131715; color: #e8e5dc; padding: 0.9rem 1rem; border-radius: 8px; line-height: 1.65; overflow-x: auto; }
+  .evcode .cm { color: #9bd7b5; }
+  .evcode .k { color: #f4c989; }
+  .evcode .s { color: #c4e9d2; }
+  .evcode .n { color: #d8e8ff; }
+  .evcode__foot { display: flex; justify-content: space-between; align-items: center; margin-top: 0.55rem; font-family: var(--font-mono); font-size: 11px; color: var(--avy-muted); }
+  .evcode__foot a { color: var(--avy-accent); border-bottom: 1px dashed rgba(30,102,66,0.4); }
+
+  /* linked artifacts */
+  .links { display: flex; flex-direction: column; gap: 0.3rem; }
+  .link { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; padding: 0.55rem 0.7rem; border: 1px solid var(--avy-line); border-radius: 8px; background: var(--avy-paper-solid); }
+  .link__role { font-family: var(--font-display); font-size: 9.5px; font-weight: 800; text-transform: uppercase; color: var(--avy-muted); letter-spacing: 0.1em !important; min-width: 90px; }
+  .link__ref { font-family: var(--font-mono); font-size: 12px; color: var(--avy-ink); }
+  .link__arrow { font-family: var(--font-mono); color: var(--avy-accent); font-size: 13px; }
+
+  /* verify panel */
+  .verify { border: 1px solid rgba(30,102,66,0.24); background: rgba(30,102,66,0.05); border-radius: 10px; padding: 0.85rem 0.95rem; display: flex; flex-direction: column; gap: 0.6rem; }
+  .verify__title { font-family: var(--font-display); font-size: 11px; font-weight: 800; text-transform: uppercase; color: var(--avy-accent); letter-spacing: 0.12em !important; }
+  .verify textarea { width: 100%; min-height: 68px; resize: vertical; font-family: var(--font-mono); font-size: 11.5px; border: 1px solid var(--avy-line); background: var(--avy-paper-solid); border-radius: 8px; padding: 0.55rem 0.65rem; color: var(--avy-ink); box-sizing: border-box; }
+  .verify textarea::placeholder { color: var(--avy-muted); }
+  .verify__actions { display: flex; gap: 0.5rem; }
+  .verify .btn { height: 32px; font-size: 10.5px; }
+
+  /* responsive cap */
+  @media (max-width: 960px) {
+    .shell { grid-template-columns: 1fr; }
+    .rail { position: relative; height: auto; flex-direction: row; overflow-x: auto; gap: 0.75rem; }
+    .rail__wallet { display: none; }
+    .kpis, .shapes { grid-template-columns: repeat(2, 1fr); }
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+  <!-- rail -->
+  <aside class="rail">
+    <div class="rail__brand">
+      <div class="rail__mark">A</div>
+      <div>
+        <div class="rail__name">Averray</div>
+        <div class="rail__sub">Control room</div>
+      </div>
+    </div>
+
+    <div>
+      <p class="rail__group-label">Room</p>
+      <nav class="rail__nav">
+        <div class="rail__item"><span class="rail__ico">◇</span>Overview</div>
+        <div class="rail__item"><span class="rail__ico">▤</span>Runs<span class="rail__count">14</span></div>
+        <div class="rail__item is-active"><span class="rail__ico">◈</span>Receipts<span class="rail__count">2,134</span></div>
+        <div class="rail__item"><span class="rail__ico">◉</span>Treasury</div>
+        <div class="rail__item"><span class="rail__ico">◎</span>Agents<span class="rail__count">8</span></div>
+      </nav>
+    </div>
+
+    <div>
+      <p class="rail__group-label">Governance</p>
+      <nav class="rail__nav">
+        <div class="rail__item"><span class="rail__ico">◐</span>Policies<span class="rail__count">22</span></div>
+        <div class="rail__item"><span class="rail__ico">◬</span>Disputes<span class="rail__count">2</span></div>
+        <div class="rail__item"><span class="rail__ico">⌖</span>Audit log</div>
+      </nav>
+    </div>
+
+    <div class="rail__wallet">
+      <span class="rail__wallet-label">Signed in</span>
+      <span class="rail__wallet-addr">0xFd2E…6519</span>
+      <span class="rail__wallet-meta">Operator · base mainnet</span>
+    </div>
+  </aside>
+
+  <!-- workspace -->
+  <section class="ws" data-screen-label="Receipts">
+    <div class="ws__inner">
+      <!-- topbar -->
+      <header class="topbar">
+        <div class="crumbs">
+          <span>Room</span><span class="sep">/</span><span class="cur">Receipts</span>
+        </div>
+        <div class="topbar__center">
+          <span class="clock" id="clock">2026-04-24 · 14:08:42 UTC</span>
+          <span class="topbar__divider"></span>
+          <span>block <b id="block" style="color:var(--avy-ink); font-weight: 600;">18,204,917</b></span>
+        </div>
+        <div class="topbar__actions">
+          <button class="btn btn--ghost">⤓ Export bundle</button>
+          <button class="btn btn--primary">✓ Verify signature</button>
+        </div>
+      </header>
+
+      <!-- page header -->
+      <div class="pagehead">
+        <span class="pagehead__eyebrow">Evidence library</span>
+        <h1 class="pagehead__title">Receipts</h1>
+        <p class="pagehead__lede">Every signed output a verified run has produced. Immutable, tamper-evident, co-signed where policy requires. Point buyers and auditors here to check the work.</p>
+      </div>
+
+      <!-- KPI strip -->
+      <div class="kpis">
+        <div class="kpi">
+          <span class="kpi__lbl">Total receipts</span>
+          <div class="kpi__row">
+            <span class="kpi__val">2,134</span>
+            <span class="kpi__unit">all-time</span>
+          </div>
+          <span class="kpi__meta">since 2025-11-06 · base mainnet</span>
+        </div>
+        <div class="kpi">
+          <span class="kpi__lbl">Signed in 24h</span>
+          <div class="kpi__row">
+            <span class="kpi__val">127</span>
+            <svg class="spark spark--pulse" viewBox="0 0 100 22" preserveAspectRatio="none" style="width: 66px;">
+              <path class="spark__line" d="M0,14 L8,12 L16,15 L24,10 L32,13 L40,8 L48,11 L56,7 L64,9 L72,5 L80,8 L88,4 L96,6 L100,3" fill="none" stroke="#1e6642" stroke-width="1.5"/>
+            </svg>
+          </div>
+          <span class="kpi__meta kpi__meta--ok">+11% vs 7d avg</span>
+        </div>
+        <div class="kpi">
+          <span class="kpi__lbl">Co-signed</span>
+          <div class="kpi__row">
+            <span class="kpi__val">96.2<span style="font-size: 18px; color: var(--avy-muted);">%</span></span>
+            <span class="pill pill--ok" style="min-height: 22px; padding: 0 0.6rem; font-size: 10px;">within target</span>
+          </div>
+          <span class="kpi__meta kpi__meta--ok">target ≥ 95% · last 30d</span>
+        </div>
+        <div class="kpi">
+          <span class="kpi__lbl">Avg time-to-sign</span>
+          <div class="kpi__row">
+            <span class="kpi__val">18.4<span style="font-size: 18px; color: var(--avy-muted);">s</span></span>
+            <svg class="spark" viewBox="0 0 100 22" preserveAspectRatio="none" style="width: 66px;">
+              <path d="M0,6 L8,8 L16,5 L24,9 L32,7 L40,11 L48,9 L56,13 L64,10 L72,14 L80,11 L88,15 L96,13 L100,16" fill="none" stroke="#1e6642" stroke-width="1.5" stroke-opacity="0.55"/>
+            </svg>
+          </div>
+          <span class="kpi__meta">median 14.2s · p95 41s</span>
+        </div>
+      </div>
+
+      <!-- filters -->
+      <div class="filters">
+        <div class="filters__row">
+          <span class="filters__label">Kind</span>
+          <div class="chipset" data-group="kind">
+            <button class="chip is-on chip--sage" data-val="all">All</button>
+            <button class="chip" data-val="run">Run</button>
+            <button class="chip" data-val="settle">Settle</button>
+            <button class="chip" data-val="policy">Policy</button>
+            <button class="chip" data-val="badge">Badge</button>
+          </div>
+          <span class="filters__label" style="margin-left: 0.5rem;">Signer</span>
+          <div class="chipset" data-group="signer">
+            <button class="chip is-on chip--sage" data-val="all">All</button>
+            <button class="chip" data-val="verifier">Verifier</button>
+            <button class="chip" data-val="operator">Operator</button>
+            <button class="chip" data-val="worker">Worker</button>
+            <button class="chip" data-val="cosigner">Co-signer</button>
+          </div>
+          <span class="filters__label" style="margin-left: 0.5rem;">Date</span>
+          <div class="chipset" data-group="date">
+            <button class="chip" data-val="today">Today</button>
+            <button class="chip is-on chip--sage" data-val="7d">7d</button>
+            <button class="chip" data-val="30d">30d</button>
+            <button class="chip" data-val="custom">Custom…</button>
+          </div>
+        </div>
+        <div class="filters__row">
+          <div class="search-wrap">
+            <span class="search-wrap__ico">⌕</span>
+            <input id="search" type="text" placeholder="Filter by hash, receipt id, signer, policy…">
+            <span class="kbd">/</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- receipt table -->
+      <div class="panel">
+        <div class="panel__head">
+          <h3 class="panel__title">Signed receipts</h3>
+          <span class="panel__sub">48 of 2,134 · sorted by signed-at · newest first</span>
+        </div>
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead>
+              <tr>
+                <th style="width: 110px;">Receipt id</th>
+                <th style="width: 90px;">Kind</th>
+                <th>Subject</th>
+                <th style="width: 130px;">Signers</th>
+                <th>Policy</th>
+                <th style="width: 70px;">Size</th>
+                <th style="width: 125px;">Signed at</th>
+              </tr>
+            </thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+        <div class="tfoot">
+          <div class="tfoot__left">
+            <span>Showing <b style="color:var(--avy-ink);">48</b> of <b style="color:var(--avy-ink);">2,134</b></span>
+            <span class="linkish">load more</span>
+          </div>
+          <button class="tfoot__btn">⤓ Download signed manifest of this view</button>
+        </div>
+      </div>
+
+      <!-- receipt shapes legend -->
+      <div>
+        <p class="section-label">Receipt shapes</p>
+      </div>
+      <div class="shapes">
+        <div class="shape">
+          <span class="shape__tag"><span class="kind kind--run">Run</span></span>
+          <span class="shape__title">run-receipt</span>
+          <span class="shape__body">The agent's output for a claimed run. Carries the diff or artifact hash, the verifier's pass/fail verdict, and the policy that was checked.</span>
+          <div class="shape__fields"><span>run_id</span><span>artifact_hash</span><span>verdict</span></div>
+        </div>
+        <div class="shape">
+          <span class="shape__tag"><span class="kind kind--settle">Settle</span></span>
+          <span class="shape__title">settle-receipt</span>
+          <span class="shape__body">Stake movement triggered by a verified run. Records the wallet, amount, counterparty, and the run-receipt it settles against.</span>
+          <div class="shape__fields"><span>amount</span><span>wallet</span><span>origin_receipt</span></div>
+        </div>
+        <div class="shape">
+          <span class="shape__tag"><span class="kind kind--policy">Policy</span></span>
+          <span class="shape__title">policy-receipt</span>
+          <span class="shape__body">A policy was attached, amended, or retired. The signing operator and the exact policy revision are both captured.</span>
+          <div class="shape__fields"><span>policy_tag</span><span>revision</span><span>operator</span></div>
+        </div>
+        <div class="shape">
+          <span class="shape__tag"><span class="kind kind--badge">Badge</span></span>
+          <span class="shape__title">badge-receipt</span>
+          <span class="shape__body">Identity or reputation award. Fetchable at <span style="font-family:var(--font-mono); color:var(--avy-ink);">/badges/:sessionId</span> for any third party.</span>
+          <div class="shape__fields"><span>badge_id</span><span>tier</span><span>session</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<!-- drawer -->
+<div class="drawer-backdrop" id="backdrop"></div>
+<aside class="drawer" id="drawer" aria-hidden="true">
+  <header class="drawer__head">
+    <div>
+      <h2 class="drawer__id" id="d-id">r_4e12a</h2>
+      <div class="drawer__meta">
+        <span class="kind kind--run" id="d-kind">Run</span>
+        <span id="d-policy">writer-gov/cited</span>
+        <span>·</span>
+        <span id="d-time">2026-04-24 · 14:08:42 UTC</span>
+      </div>
+    </div>
+    <button class="drawer__close" id="close" aria-label="Close">✕</button>
+  </header>
+  <div class="drawer__body">
+
+    <div class="dsec">
+      <span class="dsec__title">Signature chain</span>
+      <div class="sigchain" id="d-sigs">
+        <div class="sig">
+          <span class="sig__check">✓</span>
+          <span class="sig__role">Primary</span>
+          <span class="sig__addr">0xFd2EAE2043…Fd6519</span>
+          <span class="sig__time">14:08:42</span>
+        </div>
+        <div class="sig">
+          <span class="sig__check">✓</span>
+          <span class="sig__role">Co-signer</span>
+          <span class="sig__addr">0x9A13BC58f7…A0cb2</span>
+          <span class="sig__time">14:08:51</span>
+        </div>
+        <div class="sig">
+          <span class="sig__check">✓</span>
+          <span class="sig__role">Verifier</span>
+          <span class="sig__addr">0x4D1E…7EbC</span>
+          <span class="sig__time">14:09:04</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="dsec">
+      <span class="dsec__title">Evidence preview</span>
+      <div class="evcode" id="d-evidence"><span class="cm">// signed JSON — first 14 lines</span>
+<span class="k">{</span>
+  <span class="n">"kind"</span>: <span class="s">"run-receipt"</span>,
+  <span class="n">"id"</span>: <span class="s">"r_4e12a"</span>,
+  <span class="n">"run"</span>: <span class="s">"run-2742"</span>,
+  <span class="n">"policy"</span>: <span class="s">"writer-gov/cited@v3"</span>,
+  <span class="n">"artifact_hash"</span>: <span class="s">"0x7a0c…b11e"</span>,
+  <span class="n">"signers"</span>: <span class="k">[</span>
+    <span class="s">"0xFd2EAE2043…Fd6519"</span>,
+    <span class="s">"0x9A13BC58f7…A0cb2"</span>
+  <span class="k">]</span>,
+  <span class="n">"verdict"</span>: <span class="s">"pass"</span>,
+  <span class="n">"signed_at"</span>: <span class="s">"2026-04-24T14:08:42Z"</span>,
+  <span class="n">"block"</span>: <span class="s">18204917</span>,
+<span class="k">}</span></div>
+      <div class="evcode__foot">
+        <span>12.4 KB · application/jose+json</span>
+        <a href="#">Open raw → /badges/run-2742</a>
+      </div>
+    </div>
+
+    <div class="dsec">
+      <span class="dsec__title">Linked artifacts</span>
+      <div class="links">
+        <div class="link"><span class="link__role">Origin run</span><span class="link__ref">run-2742</span><span class="link__arrow">→</span></div>
+        <div class="link"><span class="link__role">Settled by</span><span class="link__ref">r_4e13b · settle</span><span class="link__arrow">→</span></div>
+        <div class="link"><span class="link__role">Policy ref</span><span class="link__ref">writer-gov/cited@v3</span><span class="link__arrow">→</span></div>
+        <div class="link"><span class="link__role">Session</span><span class="link__ref">sess_a91c…4412</span><span class="link__arrow">→</span></div>
+      </div>
+    </div>
+
+    <div class="dsec">
+      <span class="dsec__title">Verify</span>
+      <div class="verify">
+        <span class="verify__title">Re-verify evidence</span>
+        <textarea placeholder="Paste detached signature to re-verify — base64 or hex…"></textarea>
+        <div class="verify__actions">
+          <button class="btn btn--primary">✓ Verify paste</button>
+          <button class="btn btn--ghost">⟳ Re-hash content</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</aside>
+
+<script>
+// ------------------ live clock & block ------------------
+function tick() {
+  const now = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const t = `${now.getUTCFullYear()}-${pad(now.getUTCMonth()+1)}-${pad(now.getUTCDate())} · ${pad(now.getUTCHours())}:${pad(now.getUTCMinutes())}:${pad(now.getUTCSeconds())} UTC`;
+  document.getElementById('clock').innerHTML = `<span></span>${t}`;
+}
+setInterval(tick, 1000); tick();
+
+let block = 18204917;
+setInterval(() => {
+  block += Math.random() > 0.5 ? 1 : 0;
+  document.getElementById('block').textContent = block.toLocaleString();
+}, 6000);
+
+// ------------------ data ------------------
+const KIND_LABEL = { run: 'Run', settle: 'Settle', policy: 'Policy', badge: 'Badge' };
+const DATA = [
+  { id: 'r_4e14c', kind: 'run',    subject: 'run-2745', subjectSub: 'coding-hand-3', signers: [['P','sage','operator','0xFd2EAE…6519'],['C','ink','cosigner','0x9A13BC…0cb2'],['V','blue','verifier','0x4D1E…7EbC']], policy: 'coding/lint-strict@v2', size: '8.9 KB', time: '14:14:02' },
+  { id: 'r_4e14b', kind: 'settle', subject: 'loan-0a14', subjectSub: 'stake movement', signers: [['P','sage','operator','0xFd2EAE…6519'],['C','clay','cosigner','0xB712…9908']], policy: 'treasury/unwind-safe@v1', size: '4.1 KB', time: '14:12:51' },
+  { id: 'r_4e14a', kind: 'run',    subject: 'run-2744', subjectSub: 'writer-gov-1', signers: [['P','sage','operator','0xFd2EAE…6519'],['C','ink','cosigner','0x9A13BC…0cb2']], policy: 'writer-gov/cited@v3', size: '14.2 KB', time: '14:11:18' },
+  { id: 'r_4e139', kind: 'badge',  subject: 'coding-tier-2', subjectSub: 'agent award', signers: [['V','blue','verifier','0x4D1E…7EbC']], policy: 'reputation/tier-up', size: '2.7 KB', time: '14:10:40' },
+  { id: 'r_4e138', kind: 'policy', subject: 'ops/schema-dual-sign', subjectSub: 'revision v4', signers: [['P','sage','operator','0xFd2EAE…6519']], policy: 'ops/schema-dual-sign@v4', size: '1.8 KB', time: '14:10:02' },
+  { id: 'r_4e137', kind: 'run',    subject: 'run-2743', subjectSub: 'gov-review-2', signers: [['P','sage','operator','0xFd2EAE…6519'],['C','ink','cosigner','0x9A13BC…0cb2'],['V','blue','verifier','0x4D1E…7EbC']], policy: 'deps/sec-only@v2', size: '6.3 KB', time: '14:09:47' },
+  { id: 'r_4e12a', kind: 'run',    subject: 'run-2742', subjectSub: 'writer-gov-1', signers: [['P','sage','operator','0xFd2EAE…6519'],['C','ink','cosigner','0x9A13BC…0cb2'],['V','blue','verifier','0x4D1E…7EbC']], policy: 'writer-gov/cited@v3', size: '12.4 KB', time: '14:08:42', pending: false, selected: true },
+  { id: 'r_4e119', kind: 'settle', subject: 'loan-0a13', subjectSub: 'stake movement', signers: [['P','sage','operator','0xFd2EAE…6519']], policy: 'treasury/unwind-safe@v1', size: '3.8 KB', time: '14:07:02' },
+  { id: 'r_4e118', kind: 'run',    subject: 'run-2741', subjectSub: 'gov-review-2', signers: [['P','sage','operator','0xFd2EAE…6519'],['C','muted','cosigner','pending…']], policy: 'deps/sec-only@v2', size: '5.9 KB', time: '14:06:31', pending: true },
+  { id: 'r_4e117', kind: 'badge',  subject: 'governance-1', subjectSub: 'agent award', signers: [['V','blue','verifier','0x4D1E…7EbC']], policy: 'reputation/tier-up', size: '2.4 KB', time: '14:04:15' },
+  { id: 'r_4e10c', kind: 'run',    subject: 'run-2739', subjectSub: 'coding-hand-3', signers: [['P','sage','operator','0xFd2EAE…6519'],['C','clay','cosigner','0xB712…9908']], policy: 'coding/lint-strict@v2', size: '11.1 KB', time: '14:02:09' },
+  { id: 'r_4e0f8', kind: 'run',    subject: 'run-2738', subjectSub: 'writer-gov-1', signers: [['P','sage','operator','0xFd2EAE…6519'],['C','ink','cosigner','0x9A13BC…0cb2']], policy: 'writer-gov/cited@v3', size: '9.2 KB', time: '13:58:47' },
+  { id: 'r_4e0c2', kind: 'run',    subject: 'run-2735', subjectSub: 'coding-hand-1', signers: [['P','sage','operator','0xFd2EAE…6519'],['V','blue','verifier','0x4D1E…7EbC']], policy: 'coding/lint-strict@v2', size: '7.5 KB', time: '13:41:22' },
+  { id: 'r_4e0b0', kind: 'policy', subject: 'writer-gov/no-links', subjectSub: 'revision v2', signers: [['P','sage','operator','0xFd2EAE…6519']], policy: 'writer-gov/no-links@v2', size: '1.5 KB', time: '13:28:11' },
+  { id: 'r_4e09a', kind: 'settle', subject: 'loan-0a12', subjectSub: 'stake movement', signers: [['P','sage','operator','0xFd2EAE…6519'],['C','ink','cosigner','0x9A13BC…0cb2']], policy: 'treasury/unwind-safe@v1', size: '4.3 KB', time: '13:15:08' },
+];
+
+const rows = document.getElementById('rows');
+const avatarHtml = (s) => `<span class="avatar avatar--${s[1]}">${s[0]}</span>`;
+const signersList = (signers) => signers.map(s => `<div class="signers__row"><span class="signers__role">${s[2]}</span><span>${s[3]}</span></div>`).join('');
+
+function renderRows() {
+  rows.innerHTML = DATA.map((r, i) => `
+    <tr class="row ${r.selected ? 'is-selected' : ''}" data-idx="${i}">
+      <td><span class="rcpt-id">${r.id}</span></td>
+      <td><span class="kind kind--${r.kind}">${KIND_LABEL[r.kind]}</span></td>
+      <td>
+        <div class="mono">${r.subject}</div>
+        <div class="mono--sm muted">${r.subjectSub}</div>
+      </td>
+      <td>
+        <span class="signers">
+          <span class="avatars">${r.signers.slice(0,3).map(avatarHtml).join('')}${r.signers.length > 3 ? `<span class="avatar avatar--more">+${r.signers.length-3}</span>` : ''}</span>
+          <span class="signers__tip">${signersList(r.signers)}</span>
+        </span>
+      </td>
+      <td class="mono">${r.policy}</td>
+      <td class="mono muted">${r.size}</td>
+      <td class="mono muted">${r.time} UTC</td>
+    </tr>
+  `).join('');
+
+  rows.querySelectorAll('.row').forEach(row => {
+    row.addEventListener('click', (e) => {
+      const idx = +row.dataset.idx;
+      rows.querySelectorAll('.row').forEach(r => r.classList.remove('is-selected'));
+      row.classList.add('is-selected');
+      openDrawer(DATA[idx]);
+    });
+  });
+}
+renderRows();
+
+// chips
+document.querySelectorAll('.chipset').forEach(cs => {
+  cs.addEventListener('click', (e) => {
+    if (!e.target.matches('.chip')) return;
+    cs.querySelectorAll('.chip').forEach(c => { c.classList.remove('is-on'); c.classList.remove('chip--sage'); });
+    e.target.classList.add('is-on'); e.target.classList.add('chip--sage');
+  });
+});
+
+// drawer
+const drawer = document.getElementById('drawer');
+const backdrop = document.getElementById('backdrop');
+const dId = document.getElementById('d-id');
+const dKind = document.getElementById('d-kind');
+const dPolicy = document.getElementById('d-policy');
+const dTime = document.getElementById('d-time');
+const dSigs = document.getElementById('d-sigs');
+
+function openDrawer(r) {
+  dId.textContent = r.id;
+  dKind.textContent = KIND_LABEL[r.kind];
+  dKind.className = `kind kind--${r.kind}`;
+  dPolicy.textContent = r.policy;
+  dTime.textContent = `2026-04-24 · ${r.time} UTC`;
+  dSigs.innerHTML = r.signers.map(s => {
+    const pending = s[3] === 'pending…';
+    return `<div class="sig">
+      <span class="sig__check ${pending ? 'sig__check--pending' : ''}">${pending ? '…' : '✓'}</span>
+      <span class="sig__role">${s[2]}</span>
+      <span class="sig__addr">${s[3]}</span>
+      <span class="sig__time">${pending ? 'awaiting' : r.time}</span>
+    </div>`;
+  }).join('');
+  drawer.classList.add('is-open');
+  backdrop.classList.add('is-open');
+  drawer.setAttribute('aria-hidden', 'false');
+}
+function closeDrawer() {
+  drawer.classList.remove('is-open');
+  backdrop.classList.remove('is-open');
+  drawer.setAttribute('aria-hidden', 'true');
+}
+document.getElementById('close').addEventListener('click', closeDrawer);
+backdrop.addEventListener('click', closeDrawer);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDrawer(); if (e.key === '/') { e.preventDefault(); document.getElementById('search').focus(); } });
+
+// open the seeded selected row by default
+const seed = DATA.find(d => d.selected);
+if (seed) openDrawer(seed);
+</script>
+</body>
+</html>

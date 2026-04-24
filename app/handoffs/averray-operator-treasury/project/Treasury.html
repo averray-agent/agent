@@ -1,0 +1,836 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Treasury — Averray operator</title>
+<link rel="stylesheet" href="colors_and_type.css">
+<style>
+  /* ========== Page + shell ========== */
+  html, body { background: var(--avy-bg); }
+  body {
+    background-image:
+      linear-gradient(var(--avy-line-soft) 1px, transparent 1px),
+      linear-gradient(90deg, var(--avy-line-soft) 1px, transparent 1px);
+    background-size: 3.2rem 3.2rem;
+    background-position: -1px -1px;
+  }
+  .app {
+    display: grid;
+    grid-template-columns: 17rem minmax(0, 1fr);
+    min-height: 100vh;
+  }
+
+  /* ========== Left rail (given) ========== */
+  .rail {
+    position: sticky; top: 0; align-self: start;
+    height: 100vh;
+    border-right: 1px solid var(--avy-line);
+    padding: 22px 18px;
+    background: #f7f5ec;
+    display: flex; flex-direction: column; gap: 22px;
+    overflow-y: auto;
+  }
+  .rail__brand { display: flex; align-items: center; gap: 10px; padding: 0 4px; }
+  .rail__brand-mark { width: 30px; height: 30px; border-radius: 8px; background: var(--avy-dark); display: grid; place-items: center; color: var(--fg-invert); font-family: var(--font-display); font-weight: 800; font-size: 16px; }
+  .rail__brand-name { font-family: var(--font-display); font-weight: 700; font-size: 17px; color: var(--avy-ink); }
+  .rail__brand-sub { font-family: var(--font-display); font-size: 10px; font-weight: 800; letter-spacing: 0.12em !important; text-transform: uppercase; color: var(--avy-accent); margin-top: 2px; }
+  .rail__section-label { font-family: var(--font-display); font-size: 10.5px; font-weight: 800; letter-spacing: 0.14em !important; text-transform: uppercase; color: var(--avy-muted); padding: 0 8px; margin: 0 0 6px; }
+  .rail__nav { display: grid; gap: 2px; }
+  .rail__item { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px; font-family: var(--font-body); font-size: 14px; font-weight: 500; color: var(--avy-ink); cursor: default; }
+  .rail__item:hover { background: rgba(17,19,21,0.04); }
+  .rail__item.is-active { background: rgba(30,102,66,0.10); color: var(--avy-accent); font-weight: 700; }
+  .rail__item-ico { width: 18px; height: 18px; display: grid; place-items: center; opacity: 0.8; font-size: 13px; }
+  .rail__count { margin-left: auto; font-family: var(--font-mono); font-size: 11px; color: var(--avy-muted); }
+  .rail__item.is-active .rail__count { color: var(--avy-accent); }
+  .rail__wallet { margin-top: auto; border: 1px solid var(--avy-line); border-radius: 10px; padding: 12px; background: var(--avy-paper-solid); display: grid; gap: 6px; }
+  .rail__wallet-label { font-family: var(--font-display); font-size: 10px; font-weight: 800; letter-spacing: 0.12em !important; text-transform: uppercase; color: var(--avy-accent); }
+  .rail__wallet-addr { font-family: var(--font-mono); font-size: 12px; color: var(--avy-ink); }
+  .rail__wallet-meta { font-family: var(--font-body); font-size: 11.5px; color: var(--avy-muted); }
+
+  /* ========== Workspace canvas ========== */
+  .ws {
+    max-width: 1100px;
+    width: 100%;
+    margin: 0 auto;
+    padding: 24px 32px 96px;
+    display: flex; flex-direction: column;
+    gap: 20px;
+    min-width: 0;
+  }
+
+  /* ---------- Topbar ---------- */
+  .topbar {
+    display: flex; justify-content: space-between; align-items: center; gap: 16px;
+    padding-bottom: 4px;
+  }
+  .crumbs { display: flex; align-items: center; gap: 8px; font-family: var(--font-display); font-size: 12px; font-weight: 700; letter-spacing: 0.1em !important; text-transform: uppercase; color: var(--avy-muted); }
+  .crumbs .cur { color: var(--avy-ink); }
+  .crumbs .sep { opacity: 0.4; }
+  .topbar__center {
+    display: flex; align-items: center; gap: 14px;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--avy-muted);
+  }
+  .topbar__center .live { display: inline-flex; align-items: center; gap: 6px; }
+  .topbar__center .live::before { content:""; width: 6px; height: 6px; border-radius: 50%; background: var(--avy-accent); box-shadow: 0 0 0 3px rgba(30,102,66,0.12); animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .45 } }
+  .topbar__center .sep-dot { opacity: 0.4; }
+  .topbar__center .blk { color: var(--avy-ink); }
+
+  .topbar__actions { display: flex; gap: 8px; align-items: center; }
+
+  .btn { display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 14px; border-radius: 8px; font-family: var(--font-display); font-size: 12px; font-weight: 700; letter-spacing: 0.04em !important; text-transform: uppercase; border: 1px solid transparent; cursor: pointer; transition: transform var(--dur) var(--ease), background var(--dur) var(--ease), border-color var(--dur) var(--ease); }
+  .btn:hover { transform: translateY(-1px); }
+  .btn--primary { background: var(--avy-accent); color: var(--fg-invert); }
+  .btn--ghost { background: var(--avy-paper-solid); color: var(--avy-ink); border-color: var(--avy-line); }
+  .btn--ghost:hover { border-color: rgba(30,102,66,0.32); }
+
+  /* ---------- Panels ---------- */
+  .panel { background: var(--avy-paper); border: 1px solid var(--avy-line); border-radius: 10px; overflow: hidden; box-shadow: var(--shadow-card); backdrop-filter: blur(10px); }
+  .panel__head { display: flex; justify-content: space-between; align-items: baseline; padding: 14px 18px; border-bottom: 1px solid var(--avy-line-soft); gap: 12px; }
+  .panel__head-left { display: flex; flex-direction: column; gap: 2px; }
+  .panel__eyebrow { font-family: var(--font-display); font-size: 10.5px; font-weight: 800; letter-spacing: 0.12em !important; text-transform: uppercase; color: var(--avy-accent); }
+  .panel__title { font-family: var(--font-display); font-weight: 700; font-size: 15px; margin: 0; color: var(--avy-ink); }
+  .panel__sub { font-family: var(--font-mono); font-size: 11.5px; color: var(--avy-muted); }
+
+  /* ---------- Balance sheet strip (4 big cards) ---------- */
+  .bsheet-eyebrow {
+    display: flex; align-items: center; justify-content: space-between;
+    font-family: var(--font-display); font-size: 10.5px; font-weight: 800;
+    letter-spacing: 0.12em !important; text-transform: uppercase;
+    color: var(--avy-accent);
+    margin: 4px 2px 2px;
+  }
+  .bsheet-eyebrow .scope {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0 !important;
+    text-transform: none;
+    color: var(--avy-muted);
+    font-weight: 500;
+  }
+
+  .bsheet {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    background: var(--avy-paper);
+    border: 1px solid var(--avy-line);
+    border-radius: 10px;
+    box-shadow: var(--shadow-card);
+    overflow: hidden;
+    backdrop-filter: blur(10px);
+  }
+  .bs {
+    padding: 18px 20px 18px;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    gap: 10px;
+    border-right: 1px solid var(--avy-line-soft);
+    min-width: 0;
+  }
+  .bs:last-child { border-right: none; }
+  .bs--warn { background: linear-gradient(180deg, rgba(244,227,207,0.55) 0%, rgba(244,227,207,0) 60%); }
+  .bs__lbl {
+    font-family: var(--font-display); font-size: 10.5px; font-weight: 800;
+    letter-spacing: 0.12em !important; text-transform: uppercase; color: var(--avy-muted);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .bs--warn .bs__lbl { color: var(--avy-warn); }
+  .bs__val {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: 30px;
+    line-height: 1;
+    color: var(--avy-ink);
+    letter-spacing: -0.01em !important;
+  }
+  .bs__unit { font-size: 15px; color: var(--avy-muted); margin-left: 4px; font-weight: 500; }
+  .bs__spark { display: block; height: 34px; width: 100%; }
+  .bs__delta { font-family: var(--font-mono); font-size: 11.5px; color: var(--avy-muted); display: flex; justify-content: space-between; gap: 8px; }
+  .bs__delta .up { color: var(--avy-accent); }
+  .bs__delta .down { color: var(--avy-warn); }
+  .bs--warn .bs__val { color: var(--avy-warn); }
+  .bs__cap {
+    font-family: var(--font-mono); font-size: 10.5px;
+    color: var(--avy-warn);
+  }
+  .bs__capbar {
+    height: 4px; border-radius: 2px; background: rgba(167,97,34,0.14);
+    overflow: hidden; margin-top: 2px;
+  }
+  .bs__capbar > span { display: block; height: 100%; background: var(--avy-warn); }
+
+  /* ---------- Strategy routing table ---------- */
+  .tbl { width: 100%; border-collapse: collapse; font-family: var(--font-body); font-size: 13px; }
+  .tbl th { text-align: left; font-family: var(--font-display); font-size: 10.5px; font-weight: 800; letter-spacing: 0.12em !important; text-transform: uppercase; color: var(--avy-muted); padding: 10px 18px; border-bottom: 1px solid var(--avy-line-soft); background: #faf8f1; }
+  .tbl td { padding: 14px 18px; border-bottom: 1px solid var(--avy-line-soft); vertical-align: middle; }
+  .tbl tr:last-child td { border-bottom: none; }
+  .tbl tr { transition: background var(--dur) var(--ease); }
+  .tbl tbody tr:hover { background: rgba(255,255,255,0.55); cursor: pointer; }
+  .tbl .mono { font-family: var(--font-mono); font-size: 12.5px; color: var(--avy-ink); }
+  .tbl .num { font-family: var(--font-mono); font-size: 13px; color: var(--avy-ink); text-align: right; font-variant-numeric: tabular-nums; }
+  .tbl th.num { text-align: right; }
+  .tbl .muted { color: var(--avy-muted); }
+  .row-title { font-weight: 600; color: var(--avy-ink); font-size: 13.5px; }
+  .row-sub { font-size: 11.5px; color: var(--avy-muted); font-family: var(--font-mono); margin-top: 2px; }
+
+  .pill { display: inline-flex; align-items: center; gap: 6px; min-height: 24px; padding: 0 10px; border-radius: 999px; font-family: var(--font-display); font-size: 11px; font-weight: 800; letter-spacing: 0.08em !important; text-transform: uppercase; white-space: nowrap; }
+  .pill--ok { background: var(--avy-accent-soft); color: var(--avy-accent); }
+  .pill--warn { background: var(--avy-warn-soft); color: var(--avy-warn); }
+  .pill--blocked { background: #f4d5d0; color: #8a2a1f; }
+  .pill--neutral { background: #ebe7da; color: #756d58; }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+  .cov { display: grid; grid-template-columns: 1fr 48px; gap: 10px; align-items: center; min-width: 140px; }
+  .cov__bar { height: 6px; border-radius: 3px; background: rgba(17,19,21,0.07); overflow: hidden; }
+  .cov__bar > span { display: block; height: 100%; background: var(--avy-accent); }
+  .cov__bar.warn > span { background: var(--avy-warn); }
+  .cov__bar.blocked > span { background: #8a2a1f; }
+  .cov__val { font-family: var(--font-mono); font-size: 12px; color: var(--avy-ink); text-align: right; font-variant-numeric: tabular-nums; }
+
+  .rowbtns { display: flex; gap: 6px; justify-content: flex-end; }
+  .tinybtn {
+    font-family: var(--font-display); font-size: 10.5px; font-weight: 700;
+    letter-spacing: 0.08em !important; text-transform: uppercase;
+    padding: 5px 10px; border-radius: 6px; border: 1px solid var(--avy-line);
+    background: var(--avy-paper-solid); color: var(--avy-ink); cursor: pointer;
+    transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+  }
+  .tinybtn:hover { border-color: rgba(30,102,66,0.32); }
+  .tinybtn.is-primary { background: var(--avy-accent); color: var(--fg-invert); border-color: var(--avy-accent); }
+
+  /* ---------- Two-up grid ---------- */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+
+  /* Credit line panel */
+  .credit { padding: 16px 18px 18px; display: grid; gap: 14px; }
+  .credit__cap { display: grid; gap: 8px; }
+  .credit__cap-row { display: flex; justify-content: space-between; align-items: baseline; }
+  .credit__cap-lbl { font-family: var(--font-display); font-size: 10.5px; font-weight: 800; letter-spacing: 0.12em !important; text-transform: uppercase; color: var(--avy-muted); }
+  .credit__cap-val { font-family: var(--font-mono); font-size: 20px; color: var(--avy-ink); font-variant-numeric: tabular-nums; }
+  .credit__cap-val .tot { color: var(--avy-muted); font-size: 14px; }
+  .capbar { height: 8px; border-radius: 4px; background: rgba(17,19,21,0.08); overflow: hidden; display: flex; }
+  .capbar > span { display: block; height: 100%; }
+  .capbar .used { background: var(--avy-accent); }
+  .capbar .head { background: var(--avy-accent-soft); }
+  .credit__meta { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 11px; color: var(--avy-muted); }
+  .credit__loans { border-top: 1px solid var(--avy-line-soft); padding-top: 12px; display: grid; gap: 10px; }
+  .loan { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: center; padding: 10px 12px; border: 1px solid var(--avy-line); border-radius: 8px; background: var(--avy-paper-solid); }
+  .loan__name { font-family: var(--font-display); font-weight: 600; font-size: 13px; color: var(--avy-ink); }
+  .loan__sub { font-family: var(--font-mono); font-size: 11px; color: var(--avy-muted); margin-top: 2px; }
+  .loan__amt { font-family: var(--font-mono); font-size: 13px; color: var(--avy-ink); font-variant-numeric: tabular-nums; }
+
+  /* ---------- XCM observer ---------- */
+  .xcm {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 0;
+    padding: 0;
+  }
+  .xcm__phase {
+    padding: 16px 18px;
+    display: grid;
+    gap: 10px;
+    border-right: 1px solid var(--avy-line-soft);
+    position: relative;
+  }
+  .xcm__phase:last-child { border-right: none; }
+  .xcm__phase::after {
+    content: "→";
+    position: absolute;
+    right: -9px; top: 22px;
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    background: var(--avy-bg);
+    border: 1px solid var(--avy-line);
+    display: grid; place-items: center;
+    font-family: var(--font-mono); font-size: 11px;
+    color: var(--avy-muted);
+    z-index: 1;
+  }
+  .xcm__phase:last-child::after { display: none; }
+  .xcm__step {
+    font-family: var(--font-mono); font-size: 10.5px; color: var(--avy-muted);
+  }
+  .xcm__title {
+    display: flex; align-items: baseline; gap: 8px;
+    font-family: var(--font-display); font-weight: 700; font-size: 14px; color: var(--avy-ink);
+  }
+  .xcm__pending {
+    font-family: var(--font-mono); font-size: 11px;
+    padding: 2px 7px; border-radius: 999px;
+    background: var(--avy-accent-soft); color: var(--avy-accent);
+    font-weight: 600;
+  }
+  .xcm__event { display: grid; gap: 3px; padding: 8px 10px; border-left: 2px solid var(--avy-accent); background: rgba(30,102,66,0.05); border-radius: 0 6px 6px 0; }
+  .xcm__event-lbl { font-family: var(--font-display); font-size: 9.5px; font-weight: 800; letter-spacing: 0.12em !important; text-transform: uppercase; color: var(--avy-muted); }
+  .xcm__event-msg { font-family: var(--font-body); font-size: 12.5px; color: var(--avy-ink); line-height: 1.4; }
+  .xcm__event-meta { font-family: var(--font-mono); font-size: 10.5px; color: var(--avy-muted); }
+  .xcm__tick { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 10.5px; color: var(--avy-muted); padding-top: 4px; border-top: 1px dashed var(--avy-line-soft); }
+  .xcm__tick .next { color: var(--avy-ink); }
+
+  /* ---------- Account positions (5 compact cards) ---------- */
+  .pos { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+  .pos__card {
+    padding: 12px 14px;
+    border: 1px solid var(--avy-line);
+    border-radius: 8px;
+    background: var(--avy-paper);
+    display: grid; gap: 4px;
+    backdrop-filter: blur(8px);
+  }
+  .pos__lbl {
+    font-family: var(--font-display); font-size: 9.5px; font-weight: 800;
+    letter-spacing: 0.12em !important; text-transform: uppercase; color: var(--avy-muted);
+  }
+  .pos__val {
+    font-family: var(--font-mono); font-size: 18px; color: var(--avy-ink);
+    font-variant-numeric: tabular-nums; letter-spacing: -0.01em !important;
+  }
+  .pos__val .u { color: var(--avy-muted); font-size: 11px; margin-left: 3px; }
+  .pos__meta { font-family: var(--font-mono); font-size: 10.5px; color: var(--avy-muted); }
+  .pos__card.is-debt { background: var(--avy-paper-solid); border-color: rgba(167,97,34,0.18); }
+  .pos__card.is-debt .pos__val { color: var(--avy-warn); }
+
+  /* ---------- Policy footer ---------- */
+  .policy { padding: 16px 18px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .policy__item { border: 1px solid var(--avy-line); border-radius: 8px; padding: 12px 14px; display: grid; gap: 6px; background: #faf8f1; }
+  .policy__tag { font-family: var(--font-mono); font-size: 11.5px; color: var(--avy-accent); }
+  .policy__name { font-family: var(--font-display); font-weight: 700; font-size: 13px; color: var(--avy-ink); line-height: 1.3; }
+  .policy__meta { font-family: var(--font-mono); font-size: 11px; color: var(--avy-muted); line-height: 1.45; }
+  .policy__sign { display: flex; align-items: center; gap: 6px; padding-top: 4px; font-family: var(--font-mono); font-size: 10.5px; color: var(--avy-muted); border-top: 1px dashed var(--avy-line-soft); margin-top: 2px; }
+  .policy__sign b { color: var(--avy-ink); font-weight: 600; }
+
+  /* foot legend */
+  .legend { margin-top: 8px; font-family: var(--font-mono); font-size: 11px; color: var(--avy-muted); display: flex; gap: 18px; flex-wrap: wrap; }
+  .legend span b { color: var(--avy-ink); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="app" data-screen-label="Treasury">
+
+  <!-- ============ LEFT RAIL (existing 17rem) ============ -->
+  <aside class="rail" aria-label="Operator rail">
+    <div class="rail__brand">
+      <div class="rail__brand-mark">A</div>
+      <div>
+        <div class="rail__brand-name">Averray</div>
+        <div class="rail__brand-sub">Control room</div>
+      </div>
+    </div>
+
+    <div>
+      <p class="rail__section-label">Work</p>
+      <nav class="rail__nav">
+        <div class="rail__item"><span class="rail__item-ico">◰</span>Overview</div>
+        <div class="rail__item"><span class="rail__item-ico">▤</span>Runs<span class="rail__count">14</span></div>
+        <div class="rail__item"><span class="rail__item-ico">◇</span>Receipts<span class="rail__count">2.1k</span></div>
+        <div class="rail__item"><span class="rail__item-ico">◎</span>Agents<span class="rail__count">8</span></div>
+      </nav>
+    </div>
+
+    <div>
+      <p class="rail__section-label">Capital</p>
+      <nav class="rail__nav">
+        <div class="rail__item is-active"><span class="rail__item-ico">◈</span>Treasury</div>
+        <div class="rail__item"><span class="rail__item-ico">◉</span>Transfers<span class="rail__count">3</span></div>
+        <div class="rail__item"><span class="rail__item-ico">◊</span>XCM lanes</div>
+      </nav>
+    </div>
+
+    <div>
+      <p class="rail__section-label">Governance</p>
+      <nav class="rail__nav">
+        <div class="rail__item"><span class="rail__item-ico">◐</span>Policies<span class="rail__count">22</span></div>
+        <div class="rail__item"><span class="rail__item-ico">◬</span>Disputes<span class="rail__count">2</span></div>
+        <div class="rail__item"><span class="rail__item-ico">⌖</span>Audit log</div>
+      </nav>
+    </div>
+
+    <div class="rail__wallet">
+      <span class="rail__wallet-label">Signed in</span>
+      <span class="rail__wallet-addr">0xFd2E…6519</span>
+      <span class="rail__wallet-meta">Operator · Polkadot asset hub</span>
+    </div>
+  </aside>
+
+  <!-- ============ WORKSPACE CANVAS ============ -->
+  <section class="ws">
+
+    <!-- 1 — Topbar -->
+    <header class="topbar">
+      <div class="crumbs">
+        <span>Capital</span>
+        <span class="sep">/</span>
+        <span class="cur">Treasury</span>
+      </div>
+      <div class="topbar__center">
+        <span class="live" title="Node heartbeat"><span id="clock">14:08:22</span> UTC</span>
+        <span class="sep-dot">·</span>
+        <span>Block <span class="blk" id="block">#24,918,431</span></span>
+        <span class="sep-dot">·</span>
+        <span>Finalized <span class="blk" id="finalized">#24,918,428</span></span>
+      </div>
+      <div class="topbar__actions">
+        <button class="btn btn--ghost">Move capital</button>
+        <button class="btn btn--primary">Propose policy change</button>
+      </div>
+    </header>
+
+    <!-- 2 — Balance sheet strip -->
+    <div>
+      <div class="bsheet-eyebrow">
+        <span>Balance sheet · rolling 24h</span>
+        <span class="scope">AgentAccountCore · asset hub</span>
+      </div>
+      <div class="bsheet">
+        <div class="bs">
+          <span class="bs__lbl">Spendable</span>
+          <span class="bs__val">482,140<span class="bs__unit">DOT</span></span>
+          <svg class="bs__spark" viewBox="0 0 120 34" preserveAspectRatio="none" aria-hidden="true">
+            <polyline fill="none" stroke="#1e6642" stroke-width="1.25"
+              points="0,22 8,21 16,23 24,19 32,20 40,17 48,18 56,15 64,16 72,13 80,15 88,11 96,13 104,10 112,12 120,9"/>
+            <polyline fill="rgba(30,102,66,0.08)" stroke="none"
+              points="0,22 8,21 16,23 24,19 32,20 40,17 48,18 56,15 64,16 72,13 80,15 88,11 96,13 104,10 112,12 120,9 120,34 0,34"/>
+          </svg>
+          <div class="bs__delta">
+            <span class="up">+8,120 ↑ 24h</span>
+            <span>+1.71%</span>
+          </div>
+        </div>
+
+        <div class="bs">
+          <span class="bs__lbl">Capital at work</span>
+          <span class="bs__val">1,064,908<span class="bs__unit">DOT</span></span>
+          <svg class="bs__spark" viewBox="0 0 120 34" preserveAspectRatio="none" aria-hidden="true">
+            <polyline fill="none" stroke="#1e6642" stroke-width="1.25"
+              points="0,18 8,17 16,19 24,16 32,18 40,15 48,16 56,13 64,14 72,11 80,13 88,10 96,11 104,9 112,10 120,8"/>
+            <polyline fill="rgba(30,102,66,0.08)" stroke="none"
+              points="0,18 8,17 16,19 24,16 32,18 40,15 48,16 56,13 64,14 72,11 80,13 88,10 96,11 104,9 112,10 120,8 120,34 0,34"/>
+          </svg>
+          <div class="bs__delta">
+            <span class="up">+2,400 ↑ 24h</span>
+            <span>+0.23%</span>
+          </div>
+        </div>
+
+        <div class="bs">
+          <span class="bs__lbl">Collateral</span>
+          <span class="bs__val">612,500<span class="bs__unit">DOT</span></span>
+          <svg class="bs__spark" viewBox="0 0 120 34" preserveAspectRatio="none" aria-hidden="true">
+            <polyline fill="none" stroke="#1e6642" stroke-width="1.25"
+              points="0,14 8,14 16,13 24,14 32,13 40,13 48,12 56,13 64,12 72,12 80,12 88,11 96,12 104,11 112,11 120,11"/>
+            <polyline fill="rgba(30,102,66,0.08)" stroke="none"
+              points="0,14 8,14 16,13 24,14 32,13 40,13 48,12 56,13 64,12 72,12 80,12 88,11 96,12 104,11 112,11 120,11 120,34 0,34"/>
+          </svg>
+          <div class="bs__delta">
+            <span class="up">+500 ↑ 24h</span>
+            <span>steady</span>
+          </div>
+        </div>
+
+        <div class="bs bs--warn">
+          <span class="bs__lbl">Debt · 82% of cap</span>
+          <span class="bs__val">502,220<span class="bs__unit">DOT</span></span>
+          <svg class="bs__spark" viewBox="0 0 120 34" preserveAspectRatio="none" aria-hidden="true">
+            <polyline fill="none" stroke="#a76122" stroke-width="1.25"
+              points="0,25 8,24 16,22 24,23 32,21 40,20 48,19 56,17 64,18 72,15 80,14 88,13 96,11 104,10 112,9 120,8"/>
+            <polyline fill="rgba(167,97,34,0.10)" stroke="none"
+              points="0,25 8,24 16,22 24,23 32,21 40,20 48,19 56,17 64,18 72,15 80,14 88,13 96,11 104,10 112,9 120,8 120,34 0,34"/>
+          </svg>
+          <div class="bs__delta">
+            <span class="down">+14,700 ↑ 24h</span>
+            <span>+3.02%</span>
+          </div>
+          <div class="bs__cap">
+            <div class="bs__capbar" aria-label="Debt approaching collateral cap"><span style="width:82%"></span></div>
+            Cap 612,500 · headroom 110,280
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3 — Strategy routing -->
+    <div class="panel">
+      <div class="panel__head">
+        <div class="panel__head-left">
+          <span class="panel__eyebrow">Strategy routing</span>
+          <h3 class="panel__title">Allocation lanes</h3>
+        </div>
+        <span class="panel__sub">7 lanes · 1,064,908 DOT routed · policy gov/alloc-dual-sign</span>
+      </div>
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th>Lane</th>
+            <th>Strategy</th>
+            <th class="num">Allocated</th>
+            <th>Coverage</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>
+              <div class="row-title">Hydration passive LP</div>
+              <div class="row-sub">lane-01 · hydra-dx</div>
+            </td>
+            <td class="mono">dex/provide-liq</td>
+            <td class="num">312,000 DOT</td>
+            <td>
+              <div class="cov">
+                <div class="cov__bar"><span style="width:96%"></span></div>
+                <span class="cov__val">96%</span>
+              </div>
+            </td>
+            <td><span class="pill pill--ok"><span class="dot"></span>Covered</span></td>
+            <td>
+              <div class="rowbtns">
+                <button class="tinybtn">Allocate</button>
+                <button class="tinybtn">Deallocate</button>
+              </div>
+            </td>
+          </tr>
+
+          <tr>
+            <td>
+              <div class="row-title">Bifrost vDOT bond</div>
+              <div class="row-sub">lane-02 · bifrost</div>
+            </td>
+            <td class="mono">stake/liquid</td>
+            <td class="num">248,500 DOT</td>
+            <td>
+              <div class="cov">
+                <div class="cov__bar"><span style="width:91%"></span></div>
+                <span class="cov__val">91%</span>
+              </div>
+            </td>
+            <td><span class="pill pill--ok"><span class="dot"></span>Covered</span></td>
+            <td>
+              <div class="rowbtns">
+                <button class="tinybtn">Allocate</button>
+                <button class="tinybtn">Deallocate</button>
+              </div>
+            </td>
+          </tr>
+
+          <tr>
+            <td>
+              <div class="row-title">Asset hub reserve</div>
+              <div class="row-sub">lane-03 · asset-hub</div>
+            </td>
+            <td class="mono">reserve/hold</td>
+            <td class="num">180,000 DOT</td>
+            <td>
+              <div class="cov">
+                <div class="cov__bar"><span style="width:100%"></span></div>
+                <span class="cov__val">100%</span>
+              </div>
+            </td>
+            <td><span class="pill pill--ok"><span class="dot"></span>Covered</span></td>
+            <td>
+              <div class="rowbtns">
+                <button class="tinybtn">Allocate</button>
+                <button class="tinybtn">Deallocate</button>
+              </div>
+            </td>
+          </tr>
+
+          <tr>
+            <td>
+              <div class="row-title">Acala aUSD float</div>
+              <div class="row-sub">lane-04 · acala</div>
+            </td>
+            <td class="mono">cdp/stable-mint</td>
+            <td class="num">142,308 DOT</td>
+            <td>
+              <div class="cov">
+                <div class="cov__bar warn"><span style="width:68%"></span></div>
+                <span class="cov__val">68%</span>
+              </div>
+            </td>
+            <td><span class="pill pill--warn"><span class="dot"></span>Attention</span></td>
+            <td>
+              <div class="rowbtns">
+                <button class="tinybtn is-primary">Allocate</button>
+                <button class="tinybtn">Deallocate</button>
+              </div>
+            </td>
+          </tr>
+
+          <tr>
+            <td>
+              <div class="row-title">Moonbeam xcGLMR bridge</div>
+              <div class="row-sub">lane-05 · moonbeam</div>
+            </td>
+            <td class="mono">bridge/xcm-v3</td>
+            <td class="num">98,400 DOT</td>
+            <td>
+              <div class="cov">
+                <div class="cov__bar warn"><span style="width:54%"></span></div>
+                <span class="cov__val">54%</span>
+              </div>
+            </td>
+            <td><span class="pill pill--warn"><span class="dot"></span>Attention</span></td>
+            <td>
+              <div class="rowbtns">
+                <button class="tinybtn">Allocate</button>
+                <button class="tinybtn">Deallocate</button>
+              </div>
+            </td>
+          </tr>
+
+          <tr>
+            <td>
+              <div class="row-title">Interlay iBTC vault</div>
+              <div class="row-sub">lane-06 · interlay</div>
+            </td>
+            <td class="mono">vault/collateral</td>
+            <td class="num">62,700 DOT</td>
+            <td>
+              <div class="cov">
+                <div class="cov__bar blocked"><span style="width:41%"></span></div>
+                <span class="cov__val">41%</span>
+              </div>
+            </td>
+            <td><span class="pill pill--blocked"><span class="dot"></span>Blocked</span></td>
+            <td>
+              <div class="rowbtns">
+                <button class="tinybtn" disabled style="opacity:.45;cursor:not-allowed">Allocate</button>
+                <button class="tinybtn">Deallocate</button>
+              </div>
+            </td>
+          </tr>
+
+          <tr>
+            <td>
+              <div class="row-title">Phala worker bond</div>
+              <div class="row-sub">lane-07 · phala</div>
+            </td>
+            <td class="mono">compute/bond</td>
+            <td class="num">21,000 DOT</td>
+            <td>
+              <div class="cov">
+                <div class="cov__bar"><span style="width:88%"></span></div>
+                <span class="cov__val">88%</span>
+              </div>
+            </td>
+            <td><span class="pill pill--ok"><span class="dot"></span>Covered</span></td>
+            <td>
+              <div class="rowbtns">
+                <button class="tinybtn">Allocate</button>
+                <button class="tinybtn">Deallocate</button>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 4 + 5 — Credit line + XCM observer (two-up would make rows too dense; stack full-width) -->
+    <div class="grid-2">
+      <!-- Credit line panel -->
+      <div class="panel">
+        <div class="panel__head">
+          <div class="panel__head-left">
+            <span class="panel__eyebrow">Credit line</span>
+            <h3 class="panel__title">Borrowing against collateral</h3>
+          </div>
+          <span class="panel__sub">policy cap · 85%</span>
+        </div>
+        <div class="credit">
+          <div class="credit__cap">
+            <div class="credit__cap-row">
+              <span class="credit__cap-lbl">Capacity used</span>
+              <span class="credit__cap-val">502,220 <span class="tot">/ 612,500 DOT</span></span>
+            </div>
+            <div class="capbar">
+              <span class="used" style="width:82%"></span>
+              <span class="head" style="width:3%"></span>
+            </div>
+            <div class="credit__meta">
+              <span>Headroom <b style="color:var(--avy-ink)">110,280 DOT</b></span>
+              <span>Next mark-to-market · 14:15 UTC</span>
+            </div>
+          </div>
+
+          <div class="credit__loans">
+            <div class="loan">
+              <div>
+                <div class="loan__name">USDC · bridge float</div>
+                <div class="loan__sub">loan-0a14 · opened 2026-04-19 · maturity 2026-05-19</div>
+              </div>
+              <div class="loan__amt">312,000<br><span class="loan__sub">DOT equiv.</span></div>
+              <button class="tinybtn is-primary">Repay</button>
+            </div>
+            <div class="loan">
+              <div>
+                <div class="loan__name">aUSD · working capital</div>
+                <div class="loan__sub">loan-0a18 · opened 2026-04-22 · maturity rolling</div>
+              </div>
+              <div class="loan__amt">190,220<br><span class="loan__sub">DOT equiv.</span></div>
+              <button class="tinybtn is-primary">Repay</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- XCM observer lane -->
+      <div class="panel">
+        <div class="panel__head">
+          <div class="panel__head-left">
+            <span class="panel__eyebrow">XCM observer</span>
+            <h3 class="panel__title">Request → observe → settle</h3>
+          </div>
+          <span class="panel__sub">lane xcm-v3 · 4 in flight</span>
+        </div>
+        <div class="xcm">
+          <div class="xcm__phase">
+            <span class="xcm__step">Phase 01 · request</span>
+            <div class="xcm__title">Request <span class="xcm__pending">2 pending</span></div>
+            <div class="xcm__event">
+              <span class="xcm__event-lbl">Last event</span>
+              <span class="xcm__event-msg">xcm.send → acala · 62,000 DOT dispatched</span>
+              <span class="xcm__event-meta">14:07:41 · block #24,918,425</span>
+            </div>
+            <div class="xcm__tick">
+              <span>Next poll</span>
+              <span class="next">+06s</span>
+            </div>
+          </div>
+          <div class="xcm__phase">
+            <span class="xcm__step">Phase 02 · observe</span>
+            <div class="xcm__title">Observe <span class="xcm__pending">1 pending</span></div>
+            <div class="xcm__event">
+              <span class="xcm__event-lbl">Last event</span>
+              <span class="xcm__event-msg">xcm.received · 80,000 DOT · from hydra-dx</span>
+              <span class="xcm__event-meta">14:06:18 · relay receipt r_8c0a</span>
+            </div>
+            <div class="xcm__tick">
+              <span>Next relay check</span>
+              <span class="next">+12s</span>
+            </div>
+          </div>
+          <div class="xcm__phase">
+            <span class="xcm__step">Phase 03 · settle</span>
+            <div class="xcm__title">Settle <span class="xcm__pending">1 pending</span></div>
+            <div class="xcm__event">
+              <span class="xcm__event-lbl">Last event</span>
+              <span class="xcm__event-msg">Settled · 48,300 DOT credited to spendable</span>
+              <span class="xcm__event-meta">14:04:09 · receipt r_8bfe</span>
+            </div>
+            <div class="xcm__tick">
+              <span>Next finality tick</span>
+              <span class="next">+02s</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 6 — Account positions grid -->
+    <div>
+      <div class="bsheet-eyebrow">
+        <span>Account positions</span>
+        <span class="scope">0xFd2EAE2043…Fd6519 · AgentAccountCore</span>
+      </div>
+      <div class="pos">
+        <div class="pos__card">
+          <span class="pos__lbl">Liquid</span>
+          <span class="pos__val">482,140<span class="u">DOT</span></span>
+          <span class="pos__meta">Spendable now</span>
+        </div>
+        <div class="pos__card">
+          <span class="pos__lbl">Reserved</span>
+          <span class="pos__val">64,000<span class="u">DOT</span></span>
+          <span class="pos__meta">XCM in-flight · 4 msgs</span>
+        </div>
+        <div class="pos__card">
+          <span class="pos__lbl">Allocated</span>
+          <span class="pos__val">1,064,908<span class="u">DOT</span></span>
+          <span class="pos__meta">Across 7 lanes</span>
+        </div>
+        <div class="pos__card">
+          <span class="pos__lbl">Staked</span>
+          <span class="pos__val">248,500<span class="u">DOT</span></span>
+          <span class="pos__meta">Bifrost · 21d unbond</span>
+        </div>
+        <div class="pos__card is-debt">
+          <span class="pos__lbl">Debt</span>
+          <span class="pos__val">502,220<span class="u">DOT</span></span>
+          <span class="pos__meta">2 loans · 82% of cap</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 7 — Policy footer -->
+    <div class="panel">
+      <div class="panel__head">
+        <div class="panel__head-left">
+          <span class="panel__eyebrow">Policy gate</span>
+          <h3 class="panel__title">Policies currently governing this surface</h3>
+        </div>
+        <span class="panel__sub">3 active · last change 2026-04-22 by 0x9A13…0cb2</span>
+      </div>
+      <div class="policy">
+        <div class="policy__item">
+          <span class="policy__tag">treasury/alloc-dual-sign</span>
+          <span class="policy__name">Allocations &gt; 50k DOT require co-signer</span>
+          <span class="policy__meta">Blocks any Allocate/Deallocate action on lanes 01, 02, 04, 05 without a second signer.</span>
+          <span class="policy__sign">Signer <b>0xFd2E…6519</b> · co-signer <b>0x9A13…0cb2</b></span>
+        </div>
+        <div class="policy__item">
+          <span class="policy__tag">treasury/debt-cap-85</span>
+          <span class="policy__name">Debt may not exceed 85% of collateral</span>
+          <span class="policy__meta">Currently at 82%. New borrows auto-blocked at 85%. Debt card tints warn when ≥ 80%.</span>
+          <span class="policy__sign">Governance review · quarterly · next 2026-07-01</span>
+        </div>
+        <div class="policy__item">
+          <span class="policy__tag">xcm/observe-before-settle</span>
+          <span class="policy__name">No settle without an observe-receipt</span>
+          <span class="policy__meta">Phase 03 cannot run until phase 02 has recorded a relay receipt. Enforced per-lane.</span>
+          <span class="policy__sign">Enforced by <b>AgentAccountCore</b> · non-overridable</span>
+        </div>
+      </div>
+    </div>
+
+    <p class="legend">
+      <span>Scope · <b>treasury · operator surface</b></span>
+      <span>Network · <b>Polkadot asset hub</b></span>
+      <span>Signer · <b>0xFd2E…6519</b></span>
+      <span>All actions are operator-initiated · every action emits a signed receipt</span>
+    </p>
+
+  </section>
+</div>
+
+<script>
+  // Live UTC clock + block counter. Only animated element on the page.
+  (function () {
+    const clockEl = document.getElementById('clock');
+    const blockEl = document.getElementById('block');
+    const finalEl = document.getElementById('finalized');
+    let block = 24918431;
+    let finalized = 24918428;
+    const pad = (n) => String(n).padStart(2, '0');
+
+    function tick() {
+      const d = new Date();
+      clockEl.textContent = pad(d.getUTCHours()) + ':' + pad(d.getUTCMinutes()) + ':' + pad(d.getUTCSeconds());
+      // Polkadot ~6s block time. Advance once per tick (1s) with 1/6 probability to feel live.
+      if (Math.random() < 0.18) {
+        block += 1;
+        blockEl.textContent = '#' + block.toLocaleString();
+        // Finalized lags by ~3 blocks.
+        finalized = block - 3;
+        finalEl.textContent = '#' + finalized.toLocaleString();
+      }
+    }
+    tick();
+    setInterval(tick, 1000);
+  })();
+</script>
+</body>
+</html>

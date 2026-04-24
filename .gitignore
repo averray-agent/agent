@@ -13,5 +13,8 @@ broadcast/
 .pglite/
 marketing/.astro/
 marketing/dist/
+app/.next/
+app/out/
+app/tsconfig.tsbuildinfo
 
 *.log
