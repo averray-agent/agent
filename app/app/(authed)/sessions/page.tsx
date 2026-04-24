@@ -12,6 +12,8 @@ import { SessionsTable } from "@/components/sessions/SessionsTable";
 import { SessionDrawerBody } from "@/components/sessions/SessionDrawerBody";
 import { SessionStatePill } from "@/components/sessions/pills";
 import { SESSIONS } from "@/components/sessions/data";
+import { useJobs, useSessions } from "@/lib/api/hooks";
+import { buildSessionDetails } from "@/lib/api/session-adapters";
 
 // TODO(data): wire to useApi("/sessions") once the backend emits
 // the list shape. Drill-in swaps to useApi(`/sessions/${id}`) for
@@ -27,6 +29,8 @@ function valueBucket(amountStr: string): SessionsFilter["value"] {
 }
 
 export default function SessionsPage() {
+  const sessionsQuery = useSessions();
+  const jobsQuery = useJobs();
   const [filter, setFilter] = useState<SessionsFilter>({
     state: "all",
     asset: "all",
@@ -36,10 +40,15 @@ export default function SessionsPage() {
   });
   const [pickedId, setPickedId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const liveSessions = useMemo(
+    () => buildSessionDetails(sessionsQuery.data, jobsQuery.data),
+    [jobsQuery.data, sessionsQuery.data]
+  );
+  const sessions = liveSessions.length ? liveSessions : SESSIONS;
 
   const filtered = useMemo(() => {
     const q = filter.q.trim().toLowerCase();
-    return SESSIONS.filter((s) => {
+    return sessions.filter((s) => {
       if (filter.state !== "all" && s.state !== filter.state) return false;
       if (filter.asset !== "all" && s.escrow.asset !== filter.asset) return false;
       if (filter.verifier !== "all" && s.verifierMode !== filter.verifier) return false;
@@ -61,9 +70,9 @@ export default function SessionsPage() {
       }
       return true;
     });
-  }, [filter]);
+  }, [filter, sessions]);
 
-  const picked = pickedId ? SESSIONS.find((s) => s.id === pickedId) ?? null : null;
+  const picked = pickedId ? sessions.find((s) => s.id === pickedId) ?? null : null;
 
   return (
     <div className="flex w-full max-w-[1100px] flex-col gap-5">
@@ -86,11 +95,11 @@ export default function SessionsPage() {
         </p>
       </header>
 
-      <SessionsAggregateStrip sessions={SESSIONS} />
+      <SessionsAggregateStrip sessions={sessions} />
       <SessionsFilterRail filter={filter} onChange={setFilter} />
       <SessionsTable
         rows={filtered}
-        totalCount={SESSIONS.length}
+        totalCount={sessions.length}
         selectedId={pickedId}
         onSelect={(s) => {
           setPickedId(s.id);

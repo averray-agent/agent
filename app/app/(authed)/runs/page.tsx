@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { RunsTopbar } from "@/components/runs/RunsTopbar";
 import {
   QueueBar,
@@ -18,6 +18,14 @@ import {
   LifecycleRail,
   type LifecycleStage,
 } from "@/components/runs/LifecycleRail";
+import { useJobs, useRecommendations } from "@/lib/api/hooks";
+import {
+  buildRecommendationCards,
+  buildRunFilters,
+  buildRunRows,
+  extractRunJobs,
+  sumReadyStake,
+} from "@/lib/api/run-adapters";
 
 // TODO(data): replace each block's seed data with the matching SWR hook
 //   - Run queue: useSessions() filtered by state
@@ -215,16 +223,42 @@ const LIFECYCLE: LifecycleStage[] = [
 export default function RunsPage() {
   const [activeFilter, setActiveFilter] = useState<QueueFilter>("all");
   const [selectedId, setSelectedId] = useState<string>("run-2742");
+  const jobs = useJobs();
+  const recommendations = useRecommendations();
+
+  const liveRows = useMemo(() => buildRunRows(jobs.data), [jobs.data]);
+  const rows = liveRows.length ? liveRows : ROWS;
+  const filters = useMemo(() => buildRunFilters(rows), [rows]);
+  const recommendationCards = useMemo(() => {
+    const liveCards = buildRecommendationCards(recommendations.data, jobs.data);
+    return liveCards.length ? liveCards : RECOMMENDED;
+  }, [jobs.data, recommendations.data]);
+  const rawJobs = useMemo(() => extractRunJobs(jobs.data), [jobs.data]);
+  const loadedRow = rows.find((row) => row.id === selectedId) ?? rows[0] ?? ROWS[0];
+
+  useEffect(() => {
+    if (rows.length && !rows.some((row) => row.id === selectedId)) {
+      setSelectedId(rows[0].id);
+    }
+  }, [rows, selectedId]);
 
   const visibleRows = useMemo(() => {
-    if (activeFilter === "all") return ROWS;
-    return ROWS.filter((r) => r.state === activeFilter);
-  }, [activeFilter]);
+    if (activeFilter === "all") return rows;
+    return rows.filter((r) => r.state === activeFilter);
+  }, [activeFilter, rows]);
+
+  const assignedToMe = rows.filter((row) => row.worker.isSelf).length;
+  const selectedJob = rawJobs.find((job) => job.id === loadedRow.id);
+  const liveStatus = jobs.error
+    ? "fixture fallback"
+    : jobs.isLoading
+      ? "loading live jobs"
+      : "live API";
 
   return (
     <div className="flex w-full max-w-[1100px] flex-col gap-3.5">
       <RunsTopbar />
-      <QueueBar filters={FILTERS} active={activeFilter} onChange={setActiveFilter} />
+      <QueueBar filters={filters.length ? filters : FILTERS} active={activeFilter} onChange={setActiveFilter} />
 
       <div className="grid grid-cols-1 items-start gap-3.5 xl:grid-cols-[minmax(0,1fr)_320px]">
         <RunQueueTable
@@ -232,29 +266,32 @@ export default function RunsPage() {
           selectedId={selectedId}
           onSelect={setSelectedId}
           shownCount={visibleRows.length}
-          totalCount={14}
-          unclaimedStake="87.0 DOT"
-          assignedToMe={3}
+          totalCount={rows.length}
+          unclaimedStake={sumReadyStake(rows)}
+          assignedToMe={assignedToMe}
+          liveStatus={liveStatus}
         />
         <RecommendationRail
-          workerTier="T2"
-          workerScore={847}
-          jobs={RECOMMENDED}
-          totalMatches={11}
+          workerTier="live"
+          workerScore={recommendations.error ? 0 : recommendationCards.length}
+          jobs={recommendationCards}
+          totalMatches={recommendationCards.length}
         />
       </div>
 
       <LoadedRunPanel
         kicker="Loaded run"
-        title="gov-review: proposal 0x7a0c abstract"
-        meta="run-2742 · job-0418 · writer-gov · T2"
+        title={loadedRow.title}
+        meta={loadedRow.jobMeta}
         stake={{
-          amount: "25.00",
-          aux: "from deposit · 482.40 DOT · lock tx 0x3f…c1",
+          amount: loadedRow.stake,
+          aux: selectedJob
+            ? `${selectedJob.rewardAsset ?? "DOT"} reward · verifier ${selectedJob.verifierMode ?? "unknown"}`
+            : "fixture data · waiting for live selection",
           breakdown: {
-            worker: "12.50 DOT",
-            verifier: "7.50 DOT",
-            treasury: "5.00 DOT",
+            worker: `${loadedRow.stake} DOT`,
+            verifier: "0 DOT",
+            treasury: "0 DOT",
           },
         }}
         evidence={{
