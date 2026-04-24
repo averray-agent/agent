@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { mutate } from "swr";
+import { swrFetcher } from "@/lib/api/client";
 import { cn } from "@/lib/utils/cn";
 import { SIGNERS } from "./signers";
 import { SignerAvatar } from "./SignerAvatar";
@@ -9,20 +11,66 @@ import type { Policy, SignerKey } from "./types";
 export function ProposeForm({
   policy,
   onCancel,
+  live,
+  onSubmitted,
 }: {
   policy: Policy;
   onCancel: () => void;
+  live?: boolean;
+  onSubmitted?: () => void;
 }) {
   const activeRule = policy.rule[`v${policy.revision}`] ?? "";
   const [body, setBody] = useState(activeRule);
   const [summary, setSummary] = useState("");
   const [selectedSigners, setSelectedSigners] = useState<SignerKey[]>([]);
   const [effDate, setEffDate] = useState("2026-05-01");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const toggle = (k: SignerKey) =>
     setSelectedSigners((s) => (s.includes(k) ? s.filter((x) => x !== k) : [...s, k]));
 
   const enough = selectedSigners.length >= policy.signersReq && summary.trim().length > 3;
+  const canSubmit = enough && !submitting;
+
+  async function submitProposal() {
+    if (!canSubmit) return;
+    setSubmitting(true);
+    setSubmitError(null);
+    const nextRevision = policy.revision + 1;
+    const nextTag = policy.tag.replace(/@v\d+$/u, `@v${nextRevision}`);
+    try {
+      await swrFetcher([
+        "/policies",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            tag: nextTag,
+            title: summary.trim(),
+            currentBody: body,
+            revision: nextRevision,
+            scope: policy.scope,
+            scopeLabel: policy.scopeLabel,
+            severity: policy.severity,
+            handler: policy.handler,
+            gates: summary.trim(),
+            rooms: policy.rooms,
+            signers: selectedSigners,
+            effectiveBlock: effDate,
+            source: live ? "live-policy-list" : "fallback-policy-list",
+          }),
+        },
+      ]);
+      await mutate("/policies");
+      await mutate(`/policies/${encodeURIComponent(nextTag)}`);
+      onSubmitted?.();
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : "Could not submit proposal.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -142,15 +190,25 @@ export function ProposeForm({
           </button>
           <button
             type="button"
-            disabled={!enough}
+            disabled={!canSubmit}
+            onClick={submitProposal}
             title={enough ? "" : "Select enough signers and write a summary"}
             className="inline-flex h-9 items-center gap-1.5 rounded-[8px] bg-[var(--avy-accent)] px-3.5 font-[family-name:var(--font-display)] text-[11.5px] font-bold uppercase text-[var(--fg-invert)] transition-transform hover:-translate-y-px hover:bg-[var(--avy-accent-2)] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0"
             style={{ letterSpacing: "0.04em" }}
           >
-            Sign &amp; propose
+            {submitting ? "Submitting..." : "Sign & propose"}
           </button>
         </div>
       </footer>
+
+      {submitError ? (
+        <p
+          className="m-0 rounded-[8px] border border-[color:rgba(167,97,34,0.35)] bg-[color:rgba(244,227,207,0.35)] p-3 font-[family-name:var(--font-body)] text-[12px] leading-[1.55] text-[var(--avy-muted)]"
+          style={{ letterSpacing: 0 }}
+        >
+          {submitError}
+        </p>
+      ) : null}
 
       <p
         className="m-0 rounded-[8px] border border-dashed border-[var(--avy-line)] bg-[rgba(255,253,247,0.5)] p-3 font-[family-name:var(--font-body)] text-[12px] leading-[1.55] text-[var(--avy-muted)]"

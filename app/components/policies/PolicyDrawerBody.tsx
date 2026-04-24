@@ -12,7 +12,7 @@ import { ProposeForm } from "./ProposeForm";
 import { syntaxTint } from "./syntax-tint";
 import type { Policy } from "./types";
 
-export function PolicyDrawerBody({ policy }: { policy: Policy }) {
+export function PolicyDrawerBody({ policy, live }: { policy: Policy; live?: boolean }) {
   const [mode, setMode] = useState<"detail" | "propose">("detail");
   const [selectedRev, setSelectedRev] = useState(policy.revision);
   const [diffOpen, setDiffOpen] = useState(false);
@@ -28,7 +28,14 @@ export function PolicyDrawerBody({ policy }: { policy: Policy }) {
   const signedCount = policy.approvals.filter((a) => a.state === "signed").length;
 
   if (mode === "propose") {
-    return <ProposeForm policy={policy} onCancel={() => setMode("detail")} />;
+    return (
+      <ProposeForm
+        policy={policy}
+        live={live}
+        onCancel={() => setMode("detail")}
+        onSubmitted={() => setMode("detail")}
+      />
+    );
   }
 
   return (

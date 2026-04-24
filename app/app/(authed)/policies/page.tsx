@@ -16,7 +16,8 @@ import {
 } from "@/components/policies/PolicyDrawerBody";
 import { POLICIES } from "@/components/policies/policies-data";
 import { SIGNERS } from "@/components/policies/signers";
-import type { PolicyState } from "@/components/policies/types";
+import type { Policy, PolicyState } from "@/components/policies/types";
+import { usePolicies, usePolicy } from "@/lib/api/hooks";
 
 const STATUS_TO_STATE: Record<Exclude<PoliciesFilter["status"], "all">, PolicyState> = {
   active: "Active",
@@ -30,6 +31,7 @@ const STATUS_TO_STATE: Record<Exclude<PoliciesFilter["status"], "all">, PolicySt
 // Propose-change form posts to POST /admin/policies and queues a proposal.
 
 export default function PoliciesPage() {
+  const policiesRequest = usePolicies();
   const [filter, setFilter] = useState<PoliciesFilter>({
     scope: "all",
     status: "all",
@@ -38,10 +40,17 @@ export default function PoliciesPage() {
   });
   const [pickedId, setPickedId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const livePolicies = useMemo(() => extractPolicies(policiesRequest.data), [policiesRequest.data]);
+  const policies = livePolicies.length ? livePolicies : POLICIES;
+  const pickedFromList = pickedId ? policies.find((p) => p.id === pickedId) ?? null : null;
+  const detailRequest = usePolicy(drawerOpen && pickedFromList ? pickedFromList.tag : null);
+  const pickedDetail = extractPolicy(detailRequest.data);
+  const picked = pickedDetail ?? pickedFromList;
+  const isLive = livePolicies.length > 0;
 
   const filtered = useMemo(() => {
     const q = filter.q.trim().toLowerCase();
-    return POLICIES.filter((p) => {
+    return policies.filter((p) => {
       if (filter.scope !== "all" && p.scope !== filter.scope) return false;
       if (filter.status !== "all" && p.state !== STATUS_TO_STATE[filter.status])
         return false;
@@ -63,9 +72,7 @@ export default function PoliciesPage() {
       }
       return true;
     });
-  }, [filter]);
-
-  const picked = pickedId ? POLICIES.find((p) => p.id === pickedId) ?? null : null;
+  }, [filter, policies]);
 
   return (
     <div className="flex w-full max-w-[1100px] flex-col gap-5">
@@ -86,11 +93,11 @@ export default function PoliciesPage() {
         </p>
       </header>
 
-      <PoliciesAggregateStrip policies={POLICIES} />
+      <PoliciesAggregateStrip policies={policies} />
       <PoliciesFilterRail filter={filter} onChange={setFilter} />
       <PoliciesTable
         rows={filtered}
-        totalCount={POLICIES.length}
+        totalCount={policies.length}
         selectedId={pickedId}
         onSelect={(p) => {
           setPickedId(p.id);
@@ -105,8 +112,19 @@ export default function PoliciesPage() {
         width={620}
         title={picked ? <PolicyDrawerHeader policy={picked} /> : null}
       >
-        {picked ? <PolicyDrawerBody policy={picked} /> : null}
+        {picked ? <PolicyDrawerBody policy={picked} live={isLive} /> : null}
       </DetailDrawer>
     </div>
   );
+}
+
+function extractPolicies(data: unknown): Policy[] {
+  return Array.isArray(data) ? data.map(extractPolicy).filter((policy): policy is Policy => Boolean(policy)) : [];
+}
+
+function extractPolicy(data: unknown): Policy | null {
+  if (!data || typeof data !== "object") return null;
+  const policy = data as Partial<Policy>;
+  if (!policy.id || !policy.tag || !policy.scope || !policy.state) return null;
+  return policy as Policy;
 }

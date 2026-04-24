@@ -16,7 +16,7 @@ import {
   PlatformPulse,
   type PulseEvent,
 } from "@/components/overview/PlatformPulse";
-import { useAccount, useHealth, useJobs, useSessions, useStrategyPositions } from "@/lib/api/hooks";
+import { useAccount, useAlerts, useHealth, useJobs, useSessions, useStrategyPositions } from "@/lib/api/hooks";
 import { extractRunJobs } from "@/lib/api/run-adapters";
 import {
   buildLaneCards,
@@ -348,6 +348,7 @@ export default function OverviewPage() {
   const account = useAccount();
   const strategyPositions = useStrategyPositions();
   const health = useHealth();
+  const apiAlerts = useAlerts();
 
   const liveVitals = useMemo(
     () => buildRoomVitals(jobs.data, sessions.data, account.data, strategyPositions.data),
@@ -357,6 +358,7 @@ export default function OverviewPage() {
     () => buildOverviewAlerts(sessions.data, account.data),
     [account.data, sessions.data]
   );
+  const endpointAlerts = useMemo(() => extractAlerts(apiAlerts.data), [apiAlerts.data]);
   const liveLanes = useMemo(
     () => buildLaneCards(jobs.data, sessions.data, strategyPositions.data),
     [jobs.data, sessions.data, strategyPositions.data]
@@ -364,7 +366,7 @@ export default function OverviewPage() {
   const liveJobs = extractRunJobs(jobs.data);
   const hasLiveOverview = Boolean(jobs.data || sessions.data || account.data || strategyPositions.data);
   const vitals = hasLiveOverview ? liveVitals : ROOM_VITALS;
-  const alerts = liveAlerts.length ? liveAlerts : NEEDS_ACTION;
+  const alerts = endpointAlerts.length ? endpointAlerts : liveAlerts.length ? liveAlerts : NEEDS_ACTION;
   const lanes = hasLiveOverview ? liveLanes : LANES;
   const disputedSessions = Array.isArray(sessions.data)
     ? sessions.data.filter((session) => session?.status === "disputed").length
@@ -390,4 +392,29 @@ export default function OverviewPage() {
       />
     </div>
   );
+}
+
+function extractAlerts(data: unknown): AlertItem[] {
+  if (!Array.isArray(data)) return [];
+  return data.reduce<AlertItem[]>((alerts, item) => {
+      if (!item || typeof item !== "object") return alerts;
+      const record = item as Record<string, unknown>;
+      const alert: AlertItem = {
+        id: text(record.id, `alert-${String(record.title ?? "item")}`),
+        tone: record.tone === "accent" ? "accent" : "warn",
+        title: text(record.title, "Operator action needed"),
+        body: text(record.body, ""),
+        ctaLabel: text(record.ctaLabel, "Open ->"),
+        ctaHref: text(record.ctaHref, "/runs"),
+      };
+      if (typeof record.ref === "string") {
+        alert.ref = record.ref;
+      }
+      alerts.push(alert);
+      return alerts;
+    }, []);
+}
+
+function text(value: unknown, fallback: string): string {
+  return typeof value === "string" && value.trim() ? value : fallback;
 }
