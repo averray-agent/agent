@@ -485,6 +485,54 @@ test("http smoke: /disputes exposes human-review sessions and records verdict/re
   });
 });
 
+test("http smoke: operator policy, alert, and audit endpoints are available", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
+    const authHeader = { authorization: `Bearer ${adminToken}` };
+
+    const policiesResponse = await fetch(`${base}/policies`, { headers: authHeader });
+    assert.equal(policiesResponse.status, 200);
+    const policies = await policiesResponse.json();
+    assert.ok(Array.isArray(policies));
+    assert.ok(policies.length >= 1);
+    assert.ok(policies[0].tag);
+    assert.ok(Array.isArray(policies[0].approvals));
+
+    const policyResponse = await fetch(`${base}/policies/${encodeURIComponent(policies[0].tag)}`, {
+      headers: authHeader
+    });
+    assert.equal(policyResponse.status, 200);
+    const policy = await policyResponse.json();
+    assert.equal(policy.tag, policies[0].tag);
+
+    const proposalResponse = await fetch(`${base}/policies`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...authHeader },
+      body: JSON.stringify({
+        tag: "claim/test-policy@v1",
+        title: "Test policy",
+        currentBody: "{ \"kind\": \"claim.test\" }"
+      })
+    });
+    assert.equal(proposalResponse.status, 201);
+    const proposal = await proposalResponse.json();
+    assert.equal(proposal.tag, "claim/test-policy@v1");
+    assert.equal(proposal.state, "Pending");
+
+    const auditResponse = await fetch(`${base}/audit`, { headers: authHeader });
+    assert.equal(auditResponse.status, 200);
+    const audit = await auditResponse.json();
+    assert.ok(Array.isArray(audit));
+    assert.ok(audit.some((event) => event.category === "policy"));
+
+    const alertsResponse = await fetch(`${base}/alerts`, { headers: authHeader });
+    assert.equal(alertsResponse.status, 200);
+    const alerts = await alertsResponse.json();
+    assert.ok(Array.isArray(alerts));
+    assert.ok(alerts.some((alert) => alert.ctaHref === "/policies"));
+  });
+});
+
 test("http smoke: /agents/:wallet rejects non-address path segments", { skip: !RUN }, async () => {
   await runWithServer(async (base) => {
     const response = await fetch(`${base}/agents/not-a-wallet`);

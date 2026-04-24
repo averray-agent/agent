@@ -72,6 +72,33 @@ export class AgentPlatformClient {
     return this.request(`/badges${params.size ? `?${params.toString()}` : ""}`);
   }
 
+  async listAlerts({ limit = undefined } = {}) {
+    const params = new URLSearchParams();
+    if (limit !== undefined) params.set("limit", String(limit));
+    return this.request(`/alerts${params.size ? `?${params.toString()}` : ""}`);
+  }
+
+  async listAuditEvents({ limit = undefined } = {}) {
+    const params = new URLSearchParams();
+    if (limit !== undefined) params.set("limit", String(limit));
+    return this.request(`/audit${params.size ? `?${params.toString()}` : ""}`);
+  }
+
+  async listPolicies() {
+    return this.request("/policies");
+  }
+
+  async getPolicy(tag) {
+    return this.request(`/policies/${encodeURIComponent(tag)}`);
+  }
+
+  async proposePolicy(payload) {
+    return this.request("/policies", {
+      method: "POST",
+      body: payload
+    });
+  }
+
   async listVerifierHandlers() {
     return this.request("/verifier/handlers");
   }

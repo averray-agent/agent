@@ -56,7 +56,14 @@ export class AgentPlatformClient {
   listJobSchemas(): Promise<unknown>;
   getJobSchema(name: string): Promise<unknown>;
   getAgentProfile(wallet: string): Promise<unknown>;
+  listAgents(options?: { limit?: number }): Promise<unknown>;
   getAgentBadge(sessionId: string): Promise<unknown>;
+  listBadges(options?: { limit?: number }): Promise<unknown>;
+  listAlerts(options?: { limit?: number }): Promise<unknown>;
+  listAuditEvents(options?: { limit?: number }): Promise<unknown>;
+  listPolicies(): Promise<unknown>;
+  getPolicy(tag: string): Promise<unknown>;
+  proposePolicy(payload: unknown): Promise<unknown>;
   listVerifierHandlers(): Promise<unknown>;
 
   issueNonce(wallet: string): Promise<unknown>;

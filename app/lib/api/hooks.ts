@@ -32,6 +32,14 @@ export const useRecommendations = () => useApi("/jobs/recommendations");
 export const useJobDefinition = (id: string | null) =>
   useApi(id ? `/jobs/definition?jobId=${encodeURIComponent(id)}` : null);
 export const useSessions = () => useApi("/sessions");
+export const useAgents = () => useApi("/agents");
+export const useBadges = () => useApi("/badges");
+export const useAlerts = () => useApi("/alerts");
+export const useAudit = () => useApi("/audit");
+export const usePolicies = () => useApi("/policies");
+export const usePolicy = (tag: string | null) =>
+  useApi(tag ? `/policies/${encodeURIComponent(tag)}` : null);
+export const useDisputes = () => useApi("/disputes");
 export const useStrategies = () => useApi("/strategies");
 export const useHealth = () => useApi("/health");
 export const useOnboarding = () => useApi("/onboarding");

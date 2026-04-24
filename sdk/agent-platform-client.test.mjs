@@ -88,6 +88,31 @@ test("listSessions builds optional query string without empty params", async () 
   assert.equal(calls[1].url, "https://api.example.test/sessions?limit=10&jobId=starter+job");
 });
 
+test("operator surface helpers call policy, audit, and alert endpoints", async () => {
+  const calls = [];
+  const client = new AgentPlatformClient({
+    baseUrl: "https://api.example.test",
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      return jsonResponse({ ok: true });
+    }
+  });
+
+  await client.listPolicies();
+  await client.getPolicy("claim/deps-sec-only@v4");
+  await client.proposePolicy({ tag: "claim/new@v1" });
+  await client.listAuditEvents({ limit: 25 });
+  await client.listAlerts({ limit: 5 });
+
+  assert.equal(calls[0].url, "https://api.example.test/policies");
+  assert.equal(calls[1].url, "https://api.example.test/policies/claim%2Fdeps-sec-only%40v4");
+  assert.equal(calls[2].url, "https://api.example.test/policies");
+  assert.equal(calls[2].options.method, "POST");
+  assert.deepEqual(JSON.parse(calls[2].options.body), { tag: "claim/new@v1" });
+  assert.equal(calls[3].url, "https://api.example.test/audit?limit=25");
+  assert.equal(calls[4].url, "https://api.example.test/alerts?limit=5");
+});
+
 test("request throws server-provided error messages", async () => {
   const client = new AgentPlatformClient({
     baseUrl: "https://api.example.test",

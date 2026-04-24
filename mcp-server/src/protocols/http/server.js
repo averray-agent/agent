@@ -293,6 +293,372 @@ function compactObject(value) {
   );
 }
 
+const OPERATOR_SIGNERS = {
+  fd2e: {
+    role: "primary operator",
+    addr: process.env.DEFAULT_POSTER_ADDRESS ?? "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519",
+    initials: "FD",
+    hue: 148
+  },
+  "9a13": {
+    role: "co-signer",
+    addr: process.env.DEFAULT_VERIFIER_ADDRESS ?? "0x9A13C20000000000000000000000000000000CB2",
+    initials: "9A",
+    hue: 214
+  },
+  "3e42": {
+    role: "verifier",
+    addr: process.env.DEFAULT_VERIFIER_ADDRESS ?? "0x3E420000000000000000000000000000000008D1",
+    initials: "V2",
+    hue: 196
+  }
+};
+
+const POLICY_PROPOSALS = new Map();
+
+function signerApproval(key, state = "signed", at = "2026-04-24 14:08 UTC") {
+  const signer = OPERATOR_SIGNERS[key] ?? OPERATOR_SIGNERS.fd2e;
+  return {
+    key,
+    ...signer,
+    state,
+    ...(state === "signed" ? { at, sig: `0x${key}...signed` } : {})
+  };
+}
+
+function makePolicy({
+  id,
+  tag,
+  scope,
+  scopeLabel,
+  severity,
+  state,
+  revision,
+  handler,
+  gates,
+  rooms,
+  activeSince,
+  lastChange,
+  rule,
+  attachedJobs = [],
+  signerKeys = ["fd2e", "9a13", "3e42"],
+  signersReq = 2
+}) {
+  return {
+    id,
+    tag,
+    scope,
+    scopeLabel,
+    severity,
+    signersReq,
+    signersTotal: signerKeys.length,
+    signerKeys,
+    activeSince,
+    lastChange,
+    state,
+    revision,
+    rooms,
+    handler,
+    gates,
+    attachedJobs,
+    rule,
+    approvals: signerKeys.map((key, index) => signerApproval(key, index < signersReq ? "signed" : "pending")),
+    history: [
+      {
+        rev: revision,
+        author: lastChange.author,
+        at: String(lastChange.at ?? "").slice(0, 10),
+        summary: lastChange.text,
+        active: true
+      }
+    ]
+  };
+}
+
+const BUILTIN_POLICIES = [
+  makePolicy({
+    id: "p-claim-deps-sec-only",
+    tag: "claim/deps-sec-only@v4",
+    scope: "claim",
+    scopeLabel: "Claim",
+    severity: "gating",
+    state: "Active",
+    revision: 4,
+    activeSince: "2026-03-11",
+    handler: "verifier/deps_sec_only.ts",
+    gates: "Auto-claim on dependency bumps where only security advisories changed.",
+    rooms: ["runs/coding/*", "runs/deps-bump/*"],
+    attachedJobs: [{ id: "starter-coding-001", title: "Starter coding verification", at: "live" }],
+    lastChange: {
+      text: "Raised max-cvss ceiling to 7.5 for staged dependency work.",
+      author: "fd2e",
+      at: "2026-04-24 14:08 UTC"
+    },
+    rule: {
+      v4: JSON.stringify({
+        kind: "claim.auto",
+        scope: "deps-bump",
+        require: { advisory_type: "security", semver_delta: ["patch", "minor"], max_cvss: 7.5 },
+        deny: { lockfile_drift: true, transitive_majors: true },
+        receipt: { co_sign: ["verifier_handler"], attach_cvss_trail: true }
+      }, null, 2)
+    }
+  }),
+  makePolicy({
+    id: "p-settle-receipt-before-payout",
+    tag: "settle/receipt-before-payout@v1",
+    scope: "settle",
+    scopeLabel: "Settle",
+    severity: "hard-stop",
+    state: "Active",
+    revision: 1,
+    activeSince: "2026-04-17",
+    handler: "settlement/receipt_gate.ts",
+    gates: "Release stake and reward only after verifier receipt exists.",
+    rooms: ["sessions/*", "treasury/settlement/*"],
+    lastChange: {
+      text: "Initial settlement gate for operator launch.",
+      author: "9a13",
+      at: "2026-04-24 14:08 UTC"
+    },
+    rule: {
+      v1: JSON.stringify({
+        kind: "settle.gate",
+        require: { receipt_signed: true, verifier_result: "approved" },
+        deny: { open_dispute: true }
+      }, null, 2)
+    }
+  }),
+  makePolicy({
+    id: "p-dispute-human-review",
+    tag: "dispute/human-review-window@v1",
+    scope: "co-sign",
+    scopeLabel: "Co-sign",
+    severity: "gating",
+    state: "Active",
+    revision: 1,
+    activeSince: "2026-04-17",
+    handler: "disputes/human_review.ts",
+    gates: "Disputed sessions hold stake until a verifier verdict is recorded.",
+    rooms: ["disputes/*"],
+    lastChange: {
+      text: "Set 72 hour review window before stake release.",
+      author: "3e42",
+      at: "2026-04-24 14:08 UTC"
+    },
+    rule: {
+      v1: JSON.stringify({
+        kind: "dispute.review",
+        window_hours: 72,
+        verdicts: ["upheld", "dismissed", "split"],
+        release_requires: ["verdict", "operator"]
+      }, null, 2)
+    }
+  })
+];
+
+function listPolicies() {
+  return [...BUILTIN_POLICIES, ...POLICY_PROPOSALS.values()];
+}
+
+function findPolicy(tag) {
+  return listPolicies().find((policy) => policy.tag === tag || policy.id === tag);
+}
+
+function buildPolicyProposal(payload, auth) {
+  const tag = String(payload?.tag ?? payload?.id ?? "").trim();
+  if (!tag) {
+    throw new ValidationError("policy tag is required.");
+  }
+  const title = String(payload?.title ?? tag).trim();
+  const body = typeof payload?.currentBody === "string"
+    ? payload.currentBody
+    : JSON.stringify(payload?.rule ?? { title }, null, 2);
+  const now = new Date().toISOString();
+  const id = `p-proposed-${keccak256(toUtf8Bytes(tag)).slice(2, 10)}`;
+  return makePolicy({
+    id,
+    tag,
+    scope: payload?.scope ?? "claim",
+    scopeLabel: payload?.scopeLabel ?? "Claim",
+    severity: payload?.severity ?? "gating",
+    state: "Pending",
+    revision: Number(payload?.revision ?? 1),
+    activeSince: null,
+    handler: payload?.handler ?? "operator/proposed_policy.ts",
+    gates: payload?.gates ?? title,
+    rooms: Array.isArray(payload?.rooms) ? payload.rooms : ["policies/proposed/*"],
+    signerKeys: ["fd2e", "9a13", "3e42"],
+    signersReq: 2,
+    lastChange: {
+      text: `Proposed by ${auth.wallet}`,
+      author: "fd2e",
+      at: now.replace("T", " ").slice(0, 19) + " UTC"
+    },
+    rule: {
+      v1: body
+    }
+  });
+}
+
+function compactWallet(wallet) {
+  const value = String(wallet ?? "");
+  if (value.length <= 12) return value || "system";
+  return `${value.slice(0, 6)}...${value.slice(-4)}`;
+}
+
+function auditTime(value) {
+  const date = new Date(value ?? Date.now());
+  if (Number.isNaN(date.getTime())) return "00:00:00";
+  return date.toISOString().slice(11, 19);
+}
+
+function auditDay(value) {
+  const date = new Date(value ?? Date.now());
+  if (Number.isNaN(date.getTime())) return "today";
+  const today = new Date().toISOString().slice(0, 10);
+  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const day = date.toISOString().slice(0, 10);
+  if (day === today) return "today";
+  if (day === yesterday) return "yesterday";
+  return day;
+}
+
+function auditActor(handle, address, tone = "muted") {
+  const label = String(handle ?? "system");
+  return {
+    handle: label,
+    address: address ?? "averray.platform",
+    initials: label.slice(0, 2).toUpperCase(),
+    tone
+  };
+}
+
+function auditEvent({ id, at, source, category, action, actor, summary, target, hash, tone, link }) {
+  return compactObject({
+    id,
+    at: auditTime(at),
+    day: auditDay(at),
+    source,
+    category,
+    action,
+    actor,
+    summary,
+    target,
+    hash,
+    tone,
+    link
+  });
+}
+
+async function listAuditEvents(limit = 100) {
+  const sessions = await service.listRecentSessions(limit);
+  const events = [];
+  for (const session of sessions) {
+    const actor = auditActor(`agent-${compactWallet(session.wallet)}`, compactWallet(session.wallet), "sage");
+    events.push(auditEvent({
+      id: `audit-${session.sessionId}-claimed`,
+      at: session.createdAt ?? session.updatedAt,
+      source: "system",
+      category: "runs",
+      action: "session.claimed",
+      actor,
+      summary: `Claimed ${session.jobId}.`,
+      target: session.sessionId,
+      hash: session.chainJobId,
+      link: { label: "Open run ->", href: "/runs" }
+    }));
+    if (session.submittedAt || session.submission) {
+      events.push(auditEvent({
+        id: `audit-${session.sessionId}-submitted`,
+        at: session.submittedAt ?? session.updatedAt,
+        source: "system",
+        category: "runs",
+        action: "session.submitted",
+        actor,
+        summary: `Submitted evidence for ${session.jobId}.`,
+        target: session.sessionId,
+        link: { label: "Open session ->", href: "/sessions" }
+      }));
+    }
+    if (session.verification || session.verificationSummary) {
+      events.push(auditEvent({
+        id: `audit-${session.sessionId}-verified`,
+        at: session.verifiedAt ?? session.updatedAt,
+        source: "operator",
+        category: "verifier",
+        action: "verification.resolved",
+        actor: auditActor("verifier", compactWallet(process.env.DEFAULT_VERIFIER_ADDRESS), "blue"),
+        summary: `Verifier resolved ${session.jobId} as ${session.status}.`,
+        target: session.sessionId,
+        tone: session.status === "disputed" ? "warn" : "accent",
+        link: { label: "Open receipt ->", href: "/receipts" }
+      }));
+    }
+  }
+  for (const policy of listPolicies()) {
+    events.push(auditEvent({
+      id: `audit-policy-${policy.id}`,
+      at: policy.lastChange?.at,
+      source: "operator",
+      category: "policy",
+      action: policy.state === "Pending" ? "policy.proposed" : "policy.active",
+      actor: auditActor(OPERATOR_SIGNERS[policy.lastChange?.author]?.role ?? "operator", OPERATOR_SIGNERS[policy.lastChange?.author]?.addr, "ink"),
+      summary: `${policy.tag}: ${policy.lastChange?.text}`,
+      target: policy.tag,
+      tone: policy.state === "Pending" ? "warn" : "neutral",
+      link: { label: "Open policy ->", href: "/policies" }
+    }));
+  }
+  return events
+    .sort((left, right) => String(right.day + right.at).localeCompare(String(left.day + left.at)))
+    .slice(0, limit);
+}
+
+async function listAlerts(limit = 20) {
+  const [sessions, disputes] = await Promise.all([
+    service.listRecentSessions(limit),
+    listDisputes(limit)
+  ]);
+  const alerts = [];
+  for (const dispute of disputes) {
+    alerts.push({
+      id: `alert-${dispute.id}`,
+      tone: "warn",
+      title: "Dispute awaiting verdict",
+      ref: dispute.sessionId,
+      body: `Stake of ${dispute.stakedAmount} DOT remains locked until a verifier verdict is recorded.`,
+      ctaLabel: "Open disputes ->",
+      ctaHref: "/disputes"
+    });
+  }
+  const pendingPolicies = listPolicies().filter((policy) => policy.state === "Pending");
+  for (const policy of pendingPolicies) {
+    alerts.push({
+      id: `alert-${policy.id}`,
+      tone: "warn",
+      title: "Policy awaiting second signer",
+      ref: policy.tag,
+      body: `${policy.signersReq} signatures required before this rule can gate live work.`,
+      ctaLabel: "Open policies ->",
+      ctaHref: "/policies"
+    });
+  }
+  const submitted = sessions.filter((session) => ["submitted", "disputed"].includes(session.status));
+  for (const session of submitted.slice(0, Math.max(0, limit - alerts.length))) {
+    alerts.push({
+      id: `alert-session-${session.sessionId}`,
+      tone: session.status === "disputed" ? "warn" : "accent",
+      title: session.status === "disputed" ? "Run needs human review" : "Submitted run ready for verification",
+      ref: session.sessionId,
+      body: `${session.jobId} is currently ${session.status}.`,
+      ctaLabel: "Open runs ->",
+      ctaHref: "/runs"
+    });
+  }
+  return alerts.slice(0, limit);
+}
+
 function addHoursIso(value, hours) {
   const parsed = Date.parse(value ?? "");
   const base = Number.isFinite(parsed) ? parsed : Date.now();
@@ -459,6 +825,9 @@ function metricPathLabel(pathname) {
     "/auth/verify",
     "/agents",
     "/badges",
+    "/alerts",
+    "/audit",
+    "/policies",
     "/disputes",
     "/verifier/handlers",
     "/verifier/result",
@@ -475,6 +844,7 @@ function metricPathLabel(pathname) {
   if (/^\/disputes\/[^/]+\/verdict$/u.test(pathname)) return "/disputes/:id/verdict";
   if (/^\/disputes\/[^/]+\/release$/u.test(pathname)) return "/disputes/:id/release";
   if (pathname.startsWith("/disputes/")) return "/disputes/:id";
+  if (pathname.startsWith("/policies/")) return "/policies/:tag";
   if (pathname.startsWith("/badges/")) return "/badges/:sessionId";
   if (pathname.startsWith("/agents/")) return "/agents/:wallet";
   return "other";
@@ -692,6 +1062,10 @@ const server = createServer(async (request, response) => {
           "/agents/:wallet",
           "/badges",
           "/badges/:sessionId",
+          "/alerts",
+          "/audit",
+          "/policies",
+          "/policies/:tag",
           "/disputes",
           "/disputes/:id",
           "/disputes/:id/verdict",
@@ -974,6 +1348,51 @@ const server = createServer(async (request, response) => {
         }
         throw normalized;
       }
+    }
+
+    if (request.method === "GET" && pathname === "/alerts") {
+      await authMiddleware(request, url);
+      return respond(response, 200, await listAlerts(parseLimit(url, 20, 100)));
+    }
+
+    if (request.method === "GET" && pathname === "/audit") {
+      await authMiddleware(request, url);
+      return respond(response, 200, await listAuditEvents(parseLimit(url, 100, 500)));
+    }
+
+    if (request.method === "GET" && pathname === "/policies") {
+      await authMiddleware(request, url);
+      return respond(response, 200, listPolicies());
+    }
+
+    if (request.method === "POST" && pathname === "/policies") {
+      const auth = await authMiddleware(request, url, { requireRole: "admin" });
+      const payload = await readJsonBody(request);
+      const proposal = buildPolicyProposal(payload, auth);
+      POLICY_PROPOSALS.set(proposal.tag, proposal);
+      await stateStore.upsertMutationReceipt?.("policy_proposal", proposal.tag, proposal);
+      eventBus?.publish({
+        id: `policy-proposal-${proposal.id}-${Date.now()}`,
+        topic: "policy.proposed",
+        wallet: auth.wallet,
+        wallets: [auth.wallet],
+        timestamp: new Date().toISOString(),
+        data: { tag: proposal.tag, status: proposal.state }
+      });
+      return respond(response, 201, proposal);
+    }
+
+    if (request.method === "GET" && pathname.startsWith("/policies/")) {
+      await authMiddleware(request, url);
+      const tag = decodeURIComponent(pathname.slice("/policies/".length));
+      if (!tag) {
+        throw new ValidationError("policy tag path segment is required.");
+      }
+      const policy = findPolicy(tag);
+      if (!policy) {
+        return respond(response, 404, { status: "not_found", tag });
+      }
+      return respond(response, 200, policy);
     }
 
     if (request.method === "GET" && pathname === "/disputes") {
