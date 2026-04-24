@@ -166,39 +166,45 @@ export function LoadedRunPanel(props: LoadedRunPanelProps) {
       // of panel width).
       className="@container overflow-hidden rounded-[12px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] shadow-[var(--shadow-dense)]"
     >
-      <header className="flex items-center justify-between gap-3.5 border-b border-[var(--avy-line-soft)] bg-gradient-to-b from-[#faf8f1] to-[#fffdf7] px-4.5 py-3.5">
-        <div className="flex flex-wrap items-baseline gap-3">
-          <div>
-            <div
-              className="font-[family-name:var(--font-display)] text-[10px] font-extrabold uppercase text-[var(--avy-accent)]"
-              style={{ letterSpacing: "0.14em" }}
-            >
-              {props.kicker}
-            </div>
-            <h2 className="m-0 font-[family-name:var(--font-display)] text-[18px] font-bold leading-[1.1]">
-              {props.title}
-            </h2>
+      <header className="flex items-start justify-between gap-3 border-b border-[var(--avy-line-soft)] bg-gradient-to-b from-[#faf8f1] to-[#fffdf7] px-4.5 py-3.5">
+        {/* min-w-0 on the title column lets the flex parent actually
+            shrink it so long file-path titles don't squash the action
+            buttons into a broken two-row text-wrap. */}
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <div
+            className="font-[family-name:var(--font-display)] text-[10px] font-extrabold uppercase text-[var(--avy-accent)]"
+            style={{ letterSpacing: "0.14em" }}
+          >
+            {props.kicker}
           </div>
+          <h2
+            className="m-0 line-clamp-2 font-[family-name:var(--font-display)] text-[18px] font-bold leading-[1.2] text-[var(--avy-ink)]"
+            title={typeof props.title === "string" ? props.title : undefined}
+          >
+            {props.title}
+          </h2>
           <span
-            className="font-[family-name:var(--font-mono)] text-xs text-[var(--avy-muted)]"
+            className="mt-0.5 truncate font-[family-name:var(--font-mono)] text-xs text-[var(--avy-muted)]"
             style={{ letterSpacing: 0 }}
           >
             {props.meta}
           </span>
         </div>
         {/* Header actions. Each is conditional on its handler/URL so we
-            don't render a button that does nothing — avoids the "why is
-            this disabled" confusion a blanket placeholder causes. */}
+            don't render a button that does nothing. shrink-0 +
+            whitespace-nowrap keep them on one clean line when the title
+            column gets long. */}
         {props.onReceiptPreview || props.standaloneUrl ? (
-          <div className="flex items-center gap-1.5">
+          <div className="flex shrink-0 items-center gap-1.5 pt-0.5">
             {props.onReceiptPreview ? (
               <button
                 type="button"
                 onClick={props.onReceiptPreview}
-                className="inline-flex h-7 items-center gap-1.5 rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3 font-[family-name:var(--font-display)] text-[11px] font-bold uppercase text-[var(--avy-ink)] transition-transform hover:-translate-y-px hover:border-[color:rgba(30,102,66,0.24)] hover:text-[var(--avy-accent)]"
+                title="Preview the signed receipt draft"
+                className="inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3 font-[family-name:var(--font-display)] text-[11px] font-bold uppercase text-[var(--avy-ink)] transition-transform hover:-translate-y-px hover:border-[color:rgba(30,102,66,0.24)] hover:text-[var(--avy-accent)]"
                 style={{ letterSpacing: "0.04em" }}
               >
-                ⌕ Receipt preview
+                ⌕ Receipt
               </button>
             ) : null}
             {props.standaloneUrl ? (
@@ -206,10 +212,11 @@ export function LoadedRunPanel(props: LoadedRunPanelProps) {
                 href={props.standaloneUrl}
                 target="_blank"
                 rel="noreferrer noopener"
-                className="inline-flex h-7 items-center gap-1.5 rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3 font-[family-name:var(--font-display)] text-[11px] font-bold uppercase text-[var(--avy-ink)] transition-transform hover:-translate-y-px hover:border-[color:rgba(30,102,66,0.24)] hover:text-[var(--avy-accent)]"
+                title="Open this run in a dedicated fullscreen view"
+                className="inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3 font-[family-name:var(--font-display)] text-[11px] font-bold uppercase text-[var(--avy-ink)] transition-transform hover:-translate-y-px hover:border-[color:rgba(30,102,66,0.24)] hover:text-[var(--avy-accent)]"
                 style={{ letterSpacing: "0.04em" }}
               >
-                Open in new tab ↗
+                Full view ↗
               </a>
             ) : null}
           </div>
