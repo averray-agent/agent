@@ -167,11 +167,19 @@ export function buildRunRows(payload: unknown): RunRow[] {
     const worker = text(job.claimedBy) || text(job.worker);
 
     const source = buildJobSource(job);
+    // For GitHub-ingested jobs the row already shows `owner/repo #N` via
+    // the SourceBadge, so drop the redundant job-id slug from jobMeta to
+    // keep the meta line scannable. Native jobs keep the full
+    // `id · category · tier` because there's no other provenance signal.
+    const jobMeta =
+      source?.type === "github_issue"
+        ? `${text(job.category, "work")} · ${tierFromRaw(job.tier)}`
+        : `${id} · ${text(job.category, "work")} · ${tierFromRaw(job.tier)}`;
     return {
       id,
       sessionId: text(job.sessionId),
       title,
-      jobMeta: `${id} · ${text(job.category, "work")} · ${tierFromRaw(job.tier)}`,
+      jobMeta,
       ...(source ? { source } : {}),
       worker: {
         variant: worker ? "a" : "unclaimed",

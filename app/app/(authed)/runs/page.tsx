@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { mutate } from "swr";
 import { RunsTopbar } from "@/components/runs/RunsTopbar";
 import {
@@ -19,6 +20,10 @@ import {
   LifecycleRail,
   type LifecycleStage,
 } from "@/components/runs/LifecycleRail";
+import {
+  ReceiptPreviewDrawer,
+  type ReceiptPreviewDraft,
+} from "@/components/runs/ReceiptPreviewDrawer";
 import { useJobDefinition, useJobs, useRecommendations } from "@/lib/api/hooks";
 import { swrFetcher } from "@/lib/api/client";
 import {
@@ -366,13 +371,34 @@ const LIFECYCLE: LifecycleStage[] = [
   { index: 5, label: "Paid", meta: "—", state: "pending" },
 ];
 
+// `useSearchParams` requires a Suspense boundary under the App Router
+// static-export mode used on the VPS. Wrap the inner page component so
+// deep-links like `/runs/?run=run-2742` hydrate correctly without
+// breaking the static build.
 export default function RunsPage() {
+  return (
+    <Suspense fallback={null}>
+      <RunsPageInner />
+    </Suspense>
+  );
+}
+
+function RunsPageInner() {
+  const searchParams = useSearchParams();
+  const runParam = searchParams?.get("run") ?? null;
   const [activeFilter, setActiveFilter] = useState<QueueFilter>("all");
-  const [selectedId, setSelectedId] = useState<string>("run-2742");
+  const [selectedId, setSelectedId] = useState<string>(runParam ?? "run-2742");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [receiptOpen, setReceiptOpen] = useState(false);
   const jobs = useJobs();
   const recommendations = useRecommendations();
+
+  // When someone opens the page with a ?run=<id> deep link, honour it on
+  // first hydration so the corresponding row is pre-selected.
+  useEffect(() => {
+    if (runParam) setSelectedId(runParam);
+  }, [runParam]);
 
   const liveRows = useMemo(() => buildRunRows(jobs.data), [jobs.data]);
   const rows = liveRows.length ? liveRows : ROWS;
@@ -443,11 +469,22 @@ export default function RunsPage() {
   };
 
   return (
-    <div className="flex w-full max-w-[1100px] flex-col gap-3.5">
+    <div className="flex w-full max-w-[1440px] flex-col gap-3.5">
       <RunsTopbar />
       <QueueBar filters={filters.length ? filters : FILTERS} active={activeFilter} onChange={setActiveFilter} />
 
-      <div className="grid grid-cols-1 items-start gap-3.5 xl:grid-cols-[minmax(0,1fr)_320px]">
+      {/*
+       * Email-client layout: queue on the left (compact, scannable) + loaded-
+       * run panel on the right, sticky so the details stay visible as the
+       * queue scrolls. Recommendation rail + lifecycle sit below the split
+       * pane so they don't steal horizontal room from the two primary panes.
+       *
+       * At xl: 45fr / 55fr split — the panel is wider because it hosts the
+       * two inner columns (stake + job context on the left, verifier +
+       * settlement on the right) and needs the headroom.
+       * Below xl: single column, panel stacks under the queue.
+       */}
+      <div className="grid grid-cols-1 items-start gap-3.5 xl:grid-cols-[minmax(480px,0.85fr)_minmax(0,1.15fr)]">
         <RunQueueTable
           rows={visibleRows}
           selectedId={selectedId}
@@ -458,19 +495,87 @@ export default function RunsPage() {
           assignedToMe={assignedToMe}
           liveStatus={liveStatus}
         />
-        <RecommendationRail
-          workerTier="live"
-          workerScore={recommendations.error ? 0 : recommendationCards.length}
-          jobs={recommendationCards}
-          totalMatches={recommendationCards.length}
-        />
+        <div className="xl:sticky xl:top-6 xl:max-h-[calc(100vh-3rem)] xl:overflow-y-auto">
+          <LoadedRunPanelWrapper
+            loadedRow={loadedRow}
+            selectedJob={selectedJob}
+            loadedGitHub={loadedGitHub}
+            handleSubmit={handleSubmit}
+            submitting={submitting}
+            submitError={submitError}
+            onReceiptPreview={() => setReceiptOpen(true)}
+            standaloneUrl={`/runs/?run=${encodeURIComponent(loadedRow.id)}`}
+          />
+        </div>
       </div>
 
-      <LoadedRunPanel
+      <ReceiptPreviewDrawer
+        open={receiptOpen}
+        onClose={() => setReceiptOpen(false)}
+        draft={buildReceiptDraft(loadedRow, loadedGitHub)}
+      />
+
+      <LifecycleRail
+        runId="run-2742"
+        contextNote={
+          <>
+            Window closes in{" "}
+            <b className="font-semibold text-[var(--avy-ink)]">21m 46s</b>
+            {" · "}verification{" "}
+            <b className="font-semibold text-[var(--avy-ink)]">github_pr</b>
+            {" · "}PR{" "}
+            <b className="font-semibold text-[var(--avy-ink)]">#4931</b> opened
+          </>
+        }
+        stages={LIFECYCLE}
+        next={{
+          label: "Next",
+          value: "Maintainer review → Pay",
+          sub: "auto-pays on PR merge + CI green",
+        }}
+      />
+
+      <RecommendationRail
+        layout="horizontal"
+        workerTier="live"
+        workerScore={recommendations.error ? 0 : recommendationCards.length}
+        jobs={recommendationCards}
+        totalMatches={recommendationCards.length}
+      />
+    </div>
+  );
+}
+
+/**
+ * Thin wrapper around LoadedRunPanel so the gnarly fixture-shaped props
+ * (evidence stub, verifier fixture, settle fixture, submission handler)
+ * don't clutter the main page component. All live values continue to come
+ * from live data / the loaded row; the non-GitHub fixture verifier lines
+ * stay in place as a demo fallback while the backend isn't yet streaming
+ * real verifier output.
+ */
+interface LoadedPanelProps {
+  loadedRow: RunRow;
+  selectedJob: Record<string, unknown> | undefined;
+  loadedGitHub: ReturnType<typeof buildGitHubContext>;
+  handleSubmit: (evidence: string) => Promise<void>;
+  submitting: boolean;
+  submitError: string | null;
+  onReceiptPreview?: () => void;
+  standaloneUrl?: string;
+}
+
+function LoadedRunPanelWrapper(props: LoadedPanelProps) {
+  const { loadedRow, selectedJob, loadedGitHub, handleSubmit, submitting, submitError, onReceiptPreview, standaloneUrl } = props;
+  return (
+    <LoadedRunPanel
         kicker="Loaded run"
         title={loadedRow.title}
         meta={loadedRow.jobMeta}
+        state={loadedRow.state}
         github={loadedGitHub}
+        onReceiptPreview={onReceiptPreview}
+        standaloneUrl={standaloneUrl}
         stake={{
           amount: loadedRow.stake,
           aux: selectedJob
@@ -598,27 +703,6 @@ export default function RunsPage() {
           note: "pays worker & verifier once the maintainer approves the PR",
         }}
       />
-
-      <LifecycleRail
-        runId="run-2742"
-        contextNote={
-          <>
-            Window closes in{" "}
-            <b className="font-semibold text-[var(--avy-ink)]">21m 46s</b>
-            {" · "}verification{" "}
-            <b className="font-semibold text-[var(--avy-ink)]">github_pr</b>
-            {" · "}PR{" "}
-            <b className="font-semibold text-[var(--avy-ink)]">#4931</b> opened
-          </>
-        }
-        stages={LIFECYCLE}
-        next={{
-          label: "Next",
-          value: "Maintainer review → Pay",
-          sub: "auto-pays on PR merge + CI green",
-        }}
-      />
-    </div>
   );
 }
 
@@ -626,4 +710,56 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
+}
+
+/**
+ * Assemble the unsigned receipt that the operator would commit if they
+ * clicked "Mark verified & pay" right now. Everything here is derived
+ * from data already on the Loaded-run panel; nothing is fetched. That's
+ * the whole point — the preview is a "before you sign" view, not a new
+ * round trip.
+ */
+function buildReceiptDraft(
+  row: RunRow,
+  github: ReturnType<typeof buildGitHubContext>
+): ReceiptPreviewDraft {
+  const workerSignerLabel = row.worker.isSelf
+    ? `Worker · ${row.worker.label} (you)`
+    : `Worker · ${row.worker.label}`;
+
+  return {
+    receiptRef: "r_4e133",
+    runId: row.id,
+    jobMeta: row.jobMeta,
+    state: row.state,
+    stake: {
+      amount: row.stake,
+      currency: "DOT",
+      breakdown: [
+        { label: "Worker payout", value: `${row.stake} DOT` },
+        { label: "Verifier fee", value: "0 DOT" },
+        { label: "Treasury reserve", value: "0 DOT" },
+      ],
+    },
+    verdict: {
+      status: github
+        ? "Awaiting maintainer review"
+        : "Verified (pending cosign)",
+      score: github ? "2 / 3" : "4 / 5",
+      confidence: github ? "0.86 confidence" : "0.92 confidence",
+    },
+    evidenceHash: github ? "sha256 0x9c…41" : "sha256 0x9c…41",
+    ...(github ? { github } : {}),
+    prUrl: github ? `https://github.com/${github.repo}/pull/4931` : undefined,
+    signers: [
+      { label: workerSignerLabel, status: "pending" },
+      {
+        label: github
+          ? "Maintainer · awaiting review"
+          : "Cosigner · 0x9A13…0cb2",
+        status: "pending",
+      },
+      { label: "Verifier · verifier-2", status: "signed" },
+    ],
+  };
 }

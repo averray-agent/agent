@@ -63,100 +63,34 @@ export function RunQueueTable({
         </span>
       </header>
 
-      <div className="overflow-x-auto">
-        <table className="w-full border-collapse font-[family-name:var(--font-body)] text-[13px]">
-          <thead>
-            <tr>
-              <Th width="34%">Run · Job</Th>
-              <Th>Worker</Th>
-              <Th>State</Th>
-              <Th align="right">Stake</Th>
-              <Th align="right" sortable>
-                Age <span className="ml-0.5 text-[9px] text-[var(--avy-accent)]">▼</span>
-              </Th>
-              <Th>Last event</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => {
-              const isSelected = row.id === selectedId;
-              return (
-                <tr
-                  key={row.id}
-                  onClick={() => onSelect(row.id)}
-                  className={cn(
-                    "cursor-pointer transition-colors hover:bg-[color:rgba(17,19,21,0.025)]",
-                    isSelected &&
-                      "bg-[color:rgba(30,102,66,0.06)] [&>td:first-child]:[box-shadow:inset_2px_0_0_var(--avy-accent)]"
-                  )}
-                >
-                  <Td>
-                    <div className="min-w-0 max-w-[360px]">
-                      <div
-                        className="line-clamp-2 text-[13px] font-semibold leading-[1.3] text-[var(--avy-ink)]"
-                        title={row.title}
-                      >
-                        {row.title}
-                      </div>
-                      <div
-                        className="mt-0.5 flex items-center gap-1.5 font-[family-name:var(--font-mono)] text-[11px] font-normal text-[var(--avy-muted)]"
-                        style={{ letterSpacing: 0 }}
-                      >
-                        {row.source?.type === "github_issue" ? (
-                          <>
-                            <SourceBadge kind="github" />
-                            <span className="truncate">
-                              {row.source.repo}
-                              <span className="text-[var(--avy-accent)]"> #{row.source.issueNumber}</span>
-                            </span>
-                            <span className="opacity-40">·</span>
-                            <span className="truncate">{row.jobMeta}</span>
-                          </>
-                        ) : (
-                          <span className="truncate">{row.jobMeta}</span>
-                        )}
-                      </div>
-                    </div>
-                  </Td>
-                  <Td>
-                    <WorkerChip {...row.worker} />
-                  </Td>
-                  <Td>
-                    <StatePill state={row.state} />
-                  </Td>
-                  <Td align="right">
-                    <span className="font-[family-name:var(--font-mono)] text-[12.5px] text-[var(--avy-ink)]">
-                      {row.stake}
-                      <small className="font-normal text-[var(--avy-muted)]"> DOT</small>
-                    </span>
-                  </Td>
-                  <Td align="right">
-                    <span
-                      className={cn(
-                        "whitespace-nowrap font-[family-name:var(--font-mono)] text-xs",
-                        row.ageStale ? "text-[var(--avy-warn)]" : "text-[var(--avy-ink)]"
-                      )}
-                    >
-                      {row.age}
-                    </span>
-                  </Td>
-                  <Td>
-                    <div className="text-xs leading-[1.35] text-[var(--avy-ink)]">
-                      {row.lastEvent}
-                      <small
-                        className="mt-px block font-[family-name:var(--font-mono)] text-[10.5px] text-[var(--avy-muted)]"
-                        style={{ letterSpacing: 0 }}
-                      >
-                        {row.lastEventMeta}
-                      </small>
-                    </div>
-                  </Td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+      {/*
+       * Card-row list instead of a 6-column table. A <table> forces every
+       * column to share a single horizontal lane, which either overflows
+       * or drops columns when the queue lives in a narrow split-pane.
+       * Structuring each row as a small 2-D card lets us surface all six
+       * pieces of info (title, source, state, stake, age, worker, last
+       * event) on every row at ~90px of height, without horizontal scroll.
+       */}
+      {rows.length === 0 ? (
+        <div
+          className="px-4 py-10 text-center font-[family-name:var(--font-mono)] text-[12px] text-[var(--avy-muted)]"
+          style={{ letterSpacing: 0 }}
+        >
+          No runs match this filter.{" "}
+          <span className="text-[var(--avy-accent)]">Try a different state.</span>
+        </div>
+      ) : (
+        <ul className="divide-y divide-[var(--avy-line-soft)]" role="list">
+          {rows.map((row) => (
+            <RunRowCard
+              key={row.id}
+              row={row}
+              selected={row.id === selectedId}
+              onSelect={() => onSelect(row.id)}
+            />
+          ))}
+        </ul>
+      )}
 
       <footer className="flex items-center justify-between border-t border-[var(--avy-line-soft)] bg-[#faf8f1] px-4 py-2.5 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]">
         <span>
@@ -179,46 +113,103 @@ export function RunQueueTable({
   );
 }
 
-function Th({
-  children,
-  width,
-  align,
-  sortable,
+/**
+ * Compact card row for the run queue. Layout is a 3-line stack with the
+ * high-signal info on the left (title + source) and the terminal-style
+ * numbers on the right (state, stake, age) — plus a low-emphasis footer
+ * row with the worker and the last event so an operator can scan a run's
+ * status without ever leaving the queue.
+ */
+function RunRowCard({
+  row,
+  selected,
+  onSelect,
 }: {
-  children: ReactNode;
-  width?: string;
-  align?: "left" | "right";
-  sortable?: boolean;
+  row: RunRow;
+  selected: boolean;
+  onSelect: () => void;
 }) {
   return (
-    <th
-      className={cn(
-        "sticky top-0 z-[1] border-b border-[var(--avy-line-soft)] bg-[#faf8f1] px-3.5 py-2.5 font-[family-name:var(--font-display)] text-[10px] font-extrabold uppercase text-[var(--avy-muted)] whitespace-nowrap",
-        align === "right" ? "text-right" : "text-left",
-        sortable && "cursor-pointer"
-      )}
-      style={{ letterSpacing: "0.14em", width }}
-    >
-      {children}
-    </th>
-  );
-}
+    <li>
+      <button
+        type="button"
+        onClick={onSelect}
+        className={cn(
+          // Default: soft background-tint hover + a 2px left accent hint
+          // on hover so the row reads as "clickable, will select". The
+          // selected state promotes that hint to a solid accent bar and
+          // a matching tint.
+          "group relative block w-full cursor-pointer px-4 py-3 text-left transition-all",
+          "hover:bg-[color:rgba(17,19,21,0.025)] hover:shadow-[inset_2px_0_0_rgba(30,102,66,0.35)]",
+          selected &&
+            "bg-[color:rgba(30,102,66,0.06)] shadow-[inset_2px_0_0_var(--avy-accent)] hover:bg-[color:rgba(30,102,66,0.08)] hover:shadow-[inset_2px_0_0_var(--avy-accent)]"
+        )}
+      >
+        {/* Row 1: title (left) + state/stake/age stack (right). */}
+        <div className="flex items-start gap-3">
+          <div className="min-w-0 flex-1">
+            <div
+              className="line-clamp-2 font-[family-name:var(--font-body)] text-[13px] font-semibold leading-[1.3] text-[var(--avy-ink)]"
+              title={row.title}
+            >
+              {row.title}
+            </div>
+            <div
+              className="mt-0.5 flex min-w-0 items-center gap-1.5 font-[family-name:var(--font-mono)] text-[11px] font-normal text-[var(--avy-muted)]"
+              style={{ letterSpacing: 0 }}
+            >
+              {row.source?.type === "github_issue" ? (
+                <>
+                  <SourceBadge kind="github" className="shrink-0" />
+                  <span className="truncate">
+                    {row.source.repo}
+                    <span className="text-[var(--avy-accent)]">
+                      {" "}#{row.source.issueNumber}
+                    </span>
+                  </span>
+                  <span className="shrink-0 opacity-40">·</span>
+                  <span className="shrink-0 whitespace-nowrap">
+                    {row.jobMeta}
+                  </span>
+                </>
+              ) : (
+                <span className="truncate">{row.jobMeta}</span>
+              )}
+            </div>
+          </div>
 
-function Td({
-  children,
-  align,
-}: {
-  children: ReactNode;
-  align?: "left" | "right";
-}) {
-  return (
-    <td
-      className={cn(
-        "border-b border-[var(--avy-line-soft)] px-3.5 py-2.5 align-middle last:border-b-0",
-        align === "right" && "text-right"
-      )}
-    >
-      {children}
-    </td>
+          <div className="flex shrink-0 flex-col items-end gap-0.5">
+            <StatePill state={row.state} />
+            <span className="font-[family-name:var(--font-mono)] text-[12.5px] leading-tight text-[var(--avy-ink)]">
+              {row.stake}
+              <small className="font-normal text-[var(--avy-muted)]"> DOT</small>
+            </span>
+            <span
+              className={cn(
+                "whitespace-nowrap font-[family-name:var(--font-mono)] text-[11.5px] leading-tight",
+                row.ageStale ? "text-[var(--avy-warn)]" : "text-[var(--avy-muted)]"
+              )}
+            >
+              {row.age}
+            </span>
+          </div>
+        </div>
+
+        {/* Row 2: worker (if any) + last event. Kept quiet so it doesn't
+            compete with the primary title/state row above. */}
+        <div className="mt-1.5 flex items-center gap-2 overflow-hidden font-[family-name:var(--font-mono)] text-[10.5px] text-[var(--avy-muted)]" style={{ letterSpacing: 0 }}>
+          <span className="shrink-0">
+            <WorkerChip {...row.worker} />
+          </span>
+          <span className="shrink-0 opacity-40">·</span>
+          <span className="min-w-0 flex-1 truncate text-[var(--avy-ink)]/80">
+            {row.lastEvent}
+          </span>
+          <span className="shrink-0 truncate text-[var(--avy-muted)]">
+            {row.lastEventMeta}
+          </span>
+        </div>
+      </button>
+    </li>
   );
 }
