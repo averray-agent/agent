@@ -1,3 +1,6 @@
+"use client";
+
+import { useMemo } from "react";
 import { OverviewTopbar } from "@/components/overview/OverviewTopbar";
 import { MissionHero } from "@/components/overview/MissionHero";
 import { RoomVitals, type KpiData } from "@/components/overview/RoomVitals";
@@ -13,8 +16,13 @@ import {
   PlatformPulse,
   type PulseEvent,
 } from "@/components/overview/PlatformPulse";
-
-export const metadata = { title: "Overview · Averray" };
+import { useAccount, useHealth, useJobs, useSessions, useStrategyPositions } from "@/lib/api/hooks";
+import { extractRunJobs } from "@/lib/api/run-adapters";
+import {
+  buildLaneCards,
+  buildOverviewAlerts,
+  buildRoomVitals,
+} from "@/lib/api/treasury-adapters";
 
 // TODO(data): replace each block's seed data with the matching SWR hook
 //   - Room vitals: useOnboarding() + useSessions() + useAccount()
@@ -335,22 +343,49 @@ const PULSE_EVENTS: PulseEvent[] = [
 ];
 
 export default function OverviewPage() {
+  const jobs = useJobs();
+  const sessions = useSessions();
+  const account = useAccount();
+  const strategyPositions = useStrategyPositions();
+  const health = useHealth();
+
+  const liveVitals = useMemo(
+    () => buildRoomVitals(jobs.data, sessions.data, account.data, strategyPositions.data),
+    [account.data, jobs.data, sessions.data, strategyPositions.data]
+  );
+  const liveAlerts = useMemo(
+    () => buildOverviewAlerts(sessions.data, account.data),
+    [account.data, sessions.data]
+  );
+  const liveLanes = useMemo(
+    () => buildLaneCards(jobs.data, sessions.data, strategyPositions.data),
+    [jobs.data, sessions.data, strategyPositions.data]
+  );
+  const liveJobs = extractRunJobs(jobs.data);
+  const hasLiveOverview = Boolean(jobs.data || sessions.data || account.data || strategyPositions.data);
+  const vitals = hasLiveOverview ? liveVitals : ROOM_VITALS;
+  const alerts = liveAlerts.length ? liveAlerts : NEEDS_ACTION;
+  const lanes = hasLiveOverview ? liveLanes : LANES;
+  const disputedSessions = Array.isArray(sessions.data)
+    ? sessions.data.filter((session) => session?.status === "disputed").length
+    : 0;
+
   return (
     <div className="flex w-full max-w-[1100px] flex-col gap-7">
       <OverviewTopbar />
       <MissionHero
-        openRuns={14}
-        awaitingSignature={2}
-        lastReceiptTime="14:08 UTC"
-        treasuryPosture="Green"
-        policiesAppliedToday={22}
+        openRuns={liveJobs.length || 14}
+        awaitingSignature={disputedSessions || 2}
+        lastReceiptTime={health.data ? "live" : "14:08 UTC"}
+        treasuryPosture={liveVitals[3]?.value === "Amber" ? "Amber" : "Green"}
+        policiesAppliedToday={liveLanes.length || 22}
       />
-      <RoomVitals vitals={ROOM_VITALS} comparedTo="14:08 UTC yesterday" />
-      <NeedsActionList alerts={NEEDS_ACTION} meta="3 open · oldest 12m" />
-      <LaneStatusGrid lanes={LANES} />
+      <RoomVitals vitals={vitals} comparedTo={hasLiveOverview ? "live API" : "14:08 UTC yesterday"} />
+      <NeedsActionList alerts={alerts} meta={`${alerts.length} open`} />
+      <LaneStatusGrid lanes={lanes} meta={hasLiveOverview ? "live API snapshot" : undefined} />
       <PlatformPulse
         events={PULSE_EVENTS}
-        endpoint="wss://events.averray.com/v1/pulse"
+        endpoint={health.data ? "/events" : "wss://events.averray.com/v1/pulse"}
         meta="last 30 min · 48 events"
       />
     </div>

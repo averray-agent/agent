@@ -1,3 +1,6 @@
+"use client";
+
+import { useMemo } from "react";
 import { TreasuryTopbar } from "@/components/treasury/TreasuryTopbar";
 import {
   BalanceSheetStrip,
@@ -20,8 +23,17 @@ import {
   PolicyGateFooter,
   type PolicyItem,
 } from "@/components/treasury/PolicyGateFooter";
-
-export const metadata = { title: "Treasury · Averray" };
+import {
+  useAccount,
+  useBorrowCapacity,
+  useStrategyPositions,
+} from "@/lib/api/hooks";
+import {
+  buildBalanceCards,
+  buildCreditLine,
+  buildPositionCards,
+  buildStrategyLanes,
+} from "@/lib/api/treasury-adapters";
 
 // TODO(data): wire each block to its hook in lib/api/hooks.ts
 //   - Balance sheet: useAccount() + useBorrowCapacity()
@@ -248,49 +260,74 @@ const POLICIES: PolicyItem[] = [
 ];
 
 export default function TreasuryPage() {
+  const account = useAccount();
+  const strategyPositions = useStrategyPositions();
+  const borrowCapacity = useBorrowCapacity("DOT");
+
+  const liveBalanceCards = useMemo(
+    () => buildBalanceCards(account.data, strategyPositions.data),
+    [account.data, strategyPositions.data]
+  );
+  const liveLanes = useMemo(
+    () => buildStrategyLanes(strategyPositions.data),
+    [strategyPositions.data]
+  );
+  const livePositions = useMemo(
+    () => buildPositionCards(account.data, strategyPositions.data),
+    [account.data, strategyPositions.data]
+  );
+  const liveCredit = useMemo(
+    () => buildCreditLine(account.data, borrowCapacity.data),
+    [account.data, borrowCapacity.data]
+  );
+  const balanceCards = account.data || strategyPositions.data ? liveBalanceCards : BALANCE_CARDS;
+  const lanes = liveLanes.length ? liveLanes : LANES;
+  const positions = account.data || strategyPositions.data ? livePositions : POSITIONS;
+  const loans = liveCredit.loans.length ? liveCredit.loans : [
+    {
+      id: "loan-0a14",
+      name: "USDC · bridge float",
+      sub: "loan-0a14 · opened 2026-04-19 · maturity 2026-05-19",
+      amount: "312,000",
+      amountUnit: "DOT equiv.",
+    },
+    {
+      id: "loan-0a18",
+      name: "aUSD · working capital",
+      sub: "loan-0a18 · opened 2026-04-22 · maturity rolling",
+      amount: "190,220",
+      amountUnit: "DOT equiv.",
+    },
+  ];
+
   return (
     <div className="flex w-full max-w-[1100px] flex-col gap-5">
       <TreasuryTopbar />
       <BalanceSheetStrip
-        cards={BALANCE_CARDS}
+        cards={balanceCards}
         scope="AgentAccountCore · asset hub"
       />
       <StrategyRoutingTable
-        lanes={LANES}
-        sub="7 lanes · 1,064,908 DOT routed · policy gov/alloc-dual-sign"
+        lanes={lanes}
+        sub={`${lanes.length} lanes · ${strategyPositions.error ? "fixture fallback" : "live API"} · policy gov/alloc-dual-sign`}
       />
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <CreditLinePanel
-          capacityUsed="502,220"
-          capacityTotal="612,500 DOT"
-          usedPct={82}
-          headerPct={3}
-          headroom="110,280 DOT"
-          nextMark="14:15 UTC"
-          policyCap="85%"
-          loans={[
-            {
-              id: "loan-0a14",
-              name: "USDC · bridge float",
-              sub: "loan-0a14 · opened 2026-04-19 · maturity 2026-05-19",
-              amount: "312,000",
-              amountUnit: "DOT equiv.",
-            },
-            {
-              id: "loan-0a18",
-              name: "aUSD · working capital",
-              sub: "loan-0a18 · opened 2026-04-22 · maturity rolling",
-              amount: "190,220",
-              amountUnit: "DOT equiv.",
-            },
-          ]}
+          capacityUsed={borrowCapacity.data ? liveCredit.capacityUsed : "502,220"}
+          capacityTotal={borrowCapacity.data ? liveCredit.capacityTotal : "612,500 DOT"}
+          usedPct={borrowCapacity.data ? liveCredit.usedPct : 82}
+          headerPct={borrowCapacity.data ? liveCredit.headerPct : 3}
+          headroom={borrowCapacity.data ? liveCredit.headroom : "110,280 DOT"}
+          nextMark={borrowCapacity.data ? liveCredit.nextMark : "14:15 UTC"}
+          policyCap={borrowCapacity.data ? liveCredit.policyCap : "85%"}
+          loans={loans}
         />
         <XcmObserverLane phases={XCM_PHASES} sub="lane xcm-v3 · 4 in flight" />
       </div>
 
       <AccountPositionsGrid
-        cards={POSITIONS}
+        cards={positions}
         scope="0xFd2EAE2043…Fd6519 · AgentAccountCore"
       />
 
