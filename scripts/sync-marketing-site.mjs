@@ -8,7 +8,7 @@ const repoRoot = path.resolve(__dirname, "..");
 const distDir = path.join(repoRoot, "marketing", "dist");
 const siteDir = path.join(repoRoot, "site");
 
-const generatedEntries = ["index.html", "_astro"];
+const generatedEntries = ["index.html", "_astro", "console-stream.js"];
 
 async function ensureDistExists() {
   const entries = await readdir(distDir).catch(() => null);
