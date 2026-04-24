@@ -19,6 +19,14 @@ import { useAuth } from "@/lib/auth/use-auth";
 import { signOut } from "@/lib/auth/siwe";
 import { shortAddress } from "@/lib/format";
 import { Button } from "@/components/ui/button";
+import {
+  useAgents,
+  useBadges,
+  useDisputes,
+  useJobs,
+  usePolicies,
+  useSessions,
+} from "@/lib/api/hooks";
 
 interface NavItem {
   href: string;
@@ -66,6 +74,20 @@ const NAV_GROUPS: NavGroup[] = [
 export function OperatorRail() {
   const pathname = usePathname();
   const auth = useAuth();
+  const jobs = useJobs();
+  const badges = useBadges();
+  const agents = useAgents();
+  const sessions = useSessions();
+  const policies = usePolicies();
+  const disputes = useDisputes();
+  const counts: Record<string, number | string | undefined> = {
+    "/runs": countOf(jobs.data),
+    "/receipts": countOf(badges.data),
+    "/agents": countOf(agents.data),
+    "/sessions": countOf(sessions.data),
+    "/policies": countOf(policies.data),
+    "/disputes": countOf(disputes.data),
+  };
 
   return (
     <aside className="sticky top-6 flex h-[calc(100vh-3rem)] w-[17rem] shrink-0 flex-col gap-5 overflow-hidden rounded-[var(--radius-lg)] border border-[var(--line)] bg-[var(--paper-solid)] p-5 shadow-[var(--shadow-sm)]">
@@ -113,9 +135,9 @@ export function OperatorRail() {
                   <span className="flex-1 font-[family-name:var(--font-display)] font-semibold tracking-tight">
                     {item.label}
                   </span>
-                  {item.count !== undefined ? (
+                  {(counts[item.href] ?? item.count) !== undefined ? (
                     <span className="font-[family-name:var(--font-mono)] text-[11px] text-[var(--muted)]">
-                      {item.count}
+                      {counts[item.href] ?? item.count}
                     </span>
                   ) : null}
                 </Link>
@@ -162,4 +184,14 @@ export function OperatorRail() {
       </footer>
     </aside>
   );
+}
+
+function countOf(value: unknown): number | undefined {
+  if (Array.isArray(value)) return value.length;
+  if (!value || typeof value !== "object") return undefined;
+  const record = value as Record<string, unknown>;
+  for (const key of ["items", "data", "jobs", "sessions", "agents", "badges", "policies", "disputes"]) {
+    if (Array.isArray(record[key])) return record[key].length;
+  }
+  return undefined;
 }

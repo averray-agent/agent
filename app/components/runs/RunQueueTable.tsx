@@ -7,6 +7,7 @@ import { WorkerChip, type WorkerVariant } from "./WorkerChip";
 
 export interface RunRow {
   id: string;
+  sessionId?: string;
   jobMeta: string;
   title: string;
   worker: {

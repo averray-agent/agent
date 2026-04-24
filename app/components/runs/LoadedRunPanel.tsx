@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils/cn";
 
 export interface StakeBreakdown {
@@ -41,6 +41,9 @@ export interface LoadedRunPanelProps {
   submission: {
     note: React.ReactNode;
     cta: string;
+    onSubmit?: (evidence: string) => void | Promise<void>;
+    submitting?: boolean;
+    error?: string | null;
   };
   verifier: {
     runner: string;
@@ -62,6 +65,11 @@ export function LoadedRunPanel(props: LoadedRunPanelProps) {
   const [activeTab, setActiveTab] = useState(
     props.evidence.activeTab ?? props.evidence.tabs[0]?.id
   );
+  const [evidenceValue, setEvidenceValue] = useState(props.evidence.sample);
+
+  useEffect(() => {
+    setEvidenceValue(props.evidence.sample);
+  }, [props.evidence.sample]);
 
   return (
     <section
@@ -185,7 +193,8 @@ export function LoadedRunPanel(props: LoadedRunPanelProps) {
               </div>
               <textarea
                 spellCheck={false}
-                defaultValue={props.evidence.sample}
+                value={evidenceValue}
+                onChange={(event) => setEvidenceValue(event.target.value)}
                 className="min-h-[150px] resize-y border-0 bg-transparent px-3 py-3 font-[family-name:var(--font-mono)] text-xs leading-[1.55] text-[var(--avy-ink)] outline-none"
                 style={{ letterSpacing: 0 }}
               />
@@ -211,10 +220,14 @@ export function LoadedRunPanel(props: LoadedRunPanelProps) {
             </p>
             <button
               type="button"
+              disabled={props.submission.submitting}
+              onClick={() => {
+                props.submission.onSubmit?.(evidenceValue);
+              }}
               className="inline-flex h-9 shrink-0 items-center gap-2 whitespace-nowrap rounded-[8px] bg-[var(--avy-accent)] px-3.5 font-[family-name:var(--font-display)] text-[11.5px] font-bold uppercase text-[var(--fg-invert)] transition-transform hover:-translate-y-px hover:bg-[var(--avy-accent-2)]"
               style={{ letterSpacing: "0.04em" }}
             >
-              {props.submission.cta}
+              {props.submission.submitting ? "Submitting..." : props.submission.cta}
               <span
                 className="rounded-[3px] bg-black/20 px-1.5 py-px font-[family-name:var(--font-mono)] text-[10.5px] font-medium text-white/70"
                 style={{ letterSpacing: 0 }}
@@ -222,6 +235,14 @@ export function LoadedRunPanel(props: LoadedRunPanelProps) {
                 ⏎
               </span>
             </button>
+            {props.submission.error ? (
+              <span
+                className="font-[family-name:var(--font-mono)] text-[11px] text-[#8c2a17]"
+                style={{ letterSpacing: 0 }}
+              >
+                {props.submission.error}
+              </span>
+            ) : null}
           </div>
         </div>
 

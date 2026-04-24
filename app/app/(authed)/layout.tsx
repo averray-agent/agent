@@ -1,5 +1,6 @@
 import { OperatorRail } from "@/components/shell/OperatorRail";
 import { PaperGridBackground } from "@/components/runs/PaperGridBackground";
+import { LiveDataBridge } from "@/components/shell/LiveDataBridge";
 
 export default function AuthedLayout({
   children,
@@ -8,6 +9,7 @@ export default function AuthedLayout({
 }) {
   return (
     <>
+      <LiveDataBridge />
       <PaperGridBackground />
       <div className="relative z-[1] mx-auto w-full max-w-[1440px] px-6 py-6">
         <div className="flex items-start gap-5">

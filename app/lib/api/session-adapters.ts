@@ -225,3 +225,65 @@ export function buildSessionDetails(sessionPayload: unknown, jobsPayload: unknow
     };
   });
 }
+
+export function mergeSessionTimeline(
+  session: SessionDetail,
+  timelinePayload: unknown
+): SessionDetail {
+  const record = asRecord(timelinePayload);
+  const lifecyclePayload = Array.isArray(record.lifecycle) ? record.lifecycle.map(asRecord) : [];
+  const timeline = asArray(record.timeline);
+  const lifecycleStages = lifecyclePayload.length
+    ? lifecyclePayload.map((entry) => ({
+        label: text(entry.label, text(entry.phase, "Step")),
+        meta: timeLabel(entry.at ?? entry.meta),
+        state: lifecycleState(entry.state),
+        tone: lifecycleTone(entry.phase ?? entry.type ?? entry.state),
+      }))
+    : session.lifecycle;
+
+  const movements = timeline.length
+    ? timeline.map((entry) => {
+        const data = asRecord(entry.data);
+        return {
+          at: timeLabel(entry.at),
+          label: text(entry.type, text(entry.phase, "session.event")),
+          from: shortAddress(data.from ?? data.wallet ?? "system"),
+          to: shortAddress(data.to ?? "AgentAccountCore"),
+          amount: text(data.amount, session.escrow.amount ? `${session.escrow.amount} ${session.escrow.asset}` : "-"),
+          tx: text(data.tx, text(data.chainJobId, "-")),
+          tone: movementTone(entry.phase ?? entry.type),
+        };
+      })
+    : session.movements;
+
+  return {
+    ...session,
+    lifecycle: lifecycleStages,
+    movements,
+    verifierHref: `/session/timeline?sessionId=${encodeURIComponent(session.id)}`,
+  };
+}
+
+function lifecycleState(value: unknown): LifecycleStageState {
+  const raw = text(value).toLowerCase();
+  if (raw === "done" || raw === "complete" || raw === "completed") return "done";
+  if (raw === "current" || raw === "active") return "current";
+  return "pending";
+}
+
+function lifecycleTone(value: unknown): "accent" | "warn" | "bad" | undefined {
+  const raw = text(value).toLowerCase();
+  if (raw.includes("dispute") || raw.includes("slash")) return "warn";
+  if (raw.includes("reject") || raw.includes("fail")) return "bad";
+  if (raw.includes("verify") || raw.includes("settle")) return "accent";
+  return undefined;
+}
+
+function movementTone(value: unknown): "neutral" | "accent" | "warn" | "bad" {
+  const raw = text(value).toLowerCase();
+  if (raw.includes("dispute") || raw.includes("lock")) return "warn";
+  if (raw.includes("reject") || raw.includes("slash")) return "bad";
+  if (raw.includes("verify") || raw.includes("closed") || raw.includes("settle")) return "accent";
+  return "neutral";
+}

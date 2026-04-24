@@ -13,6 +13,8 @@ import { AgentDrawerBody } from "@/components/agents/AgentDrawerBody";
 import { TierChip } from "@/components/agents/TierChip";
 import { DetailDrawer } from "@/components/shell/DetailDrawer";
 import { BADGES, type AgentRecord } from "@/components/agents/types";
+import { extractAgent, extractAgents } from "@/lib/api/agent-adapters";
+import { useAgent, useAgents } from "@/lib/api/hooks";
 
 // TODO(data): replace the seeded roster with useApi("/agents") once the
 // backend emits a list endpoint. Per-row drill-in should swap to
@@ -245,6 +247,7 @@ const AGENTS: AgentRecord[] = [
 ];
 
 export default function AgentsPage() {
+  const agentsRequest = useAgents();
   const [filter, setFilter] = useState<AgentsFilterState>({
     tier: "all",
     status: "all",
@@ -253,10 +256,17 @@ export default function AgentsPage() {
   });
   const [openHandle, setOpenHandle] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const liveAgents = useMemo(() => extractAgents(agentsRequest.data), [agentsRequest.data]);
+  const agents = liveAgents.length ? liveAgents : AGENTS;
+  const openAgentFromList = openHandle
+    ? agents.find((a) => a.handle === openHandle) ?? null
+    : null;
+  const agentDetail = useAgent(drawerOpen && openAgentFromList ? openAgentFromList.walletFull : null);
+  const openAgent = extractAgent(agentDetail.data) ?? openAgentFromList;
 
   const filtered = useMemo(() => {
     const q = filter.query.trim().toLowerCase();
-    return AGENTS.filter((a) => {
+    return agents.filter((a) => {
       if (filter.tier !== "all" && a.tier !== filter.tier) return false;
       if (filter.status !== "all" && a.state !== filter.status) return false;
       if (filter.specialty !== "all" && a.specialty !== filter.specialty) return false;
@@ -271,9 +281,7 @@ export default function AgentsPage() {
       }
       return true;
     });
-  }, [filter]);
-
-  const openAgent = openHandle ? AGENTS.find((a) => a.handle === openHandle) ?? null : null;
+  }, [agents, filter]);
 
   return (
     <div className="flex w-full max-w-[1100px] flex-col gap-5">
@@ -295,13 +303,13 @@ export default function AgentsPage() {
         </p>
       </header>
 
-      <AgentsAggregateStrip agents={AGENTS} />
+      <AgentsAggregateStrip agents={agents} />
 
       <AgentsFilterRail filter={filter} onChange={setFilter} />
 
       <AgentDirectoryTable
         rows={filtered}
-        total={AGENTS.length}
+        total={agents.length}
         selectedHandle={openHandle}
         onSelect={(agent) => {
           setOpenHandle(agent.handle);

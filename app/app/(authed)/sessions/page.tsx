@@ -12,8 +12,8 @@ import { SessionsTable } from "@/components/sessions/SessionsTable";
 import { SessionDrawerBody } from "@/components/sessions/SessionDrawerBody";
 import { SessionStatePill } from "@/components/sessions/pills";
 import { SESSIONS } from "@/components/sessions/data";
-import { useJobs, useSessions } from "@/lib/api/hooks";
-import { buildSessionDetails } from "@/lib/api/session-adapters";
+import { useJobs, useSession, useSessions, useSessionTimeline } from "@/lib/api/hooks";
+import { buildSessionDetails, mergeSessionTimeline } from "@/lib/api/session-adapters";
 
 // TODO(data): wire to useApi("/sessions") once the backend emits
 // the list shape. Drill-in swaps to useApi(`/sessions/${id}`) for
@@ -72,7 +72,17 @@ export default function SessionsPage() {
     });
   }, [filter, sessions]);
 
-  const picked = pickedId ? sessions.find((s) => s.id === pickedId) ?? null : null;
+  const pickedFromList = pickedId ? sessions.find((s) => s.id === pickedId) ?? null : null;
+  const sessionDetail = useSession(drawerOpen && pickedFromList ? pickedFromList.id : null);
+  const sessionTimeline = useSessionTimeline(drawerOpen && pickedFromList ? pickedFromList.id : null);
+  const livePickedDetail = useMemo(() => {
+    if (!sessionDetail.data) return null;
+    return buildSessionDetails([sessionDetail.data], jobsQuery.data)[0] ?? null;
+  }, [jobsQuery.data, sessionDetail.data]);
+  const pickedBase = livePickedDetail ?? pickedFromList;
+  const picked = pickedBase && sessionTimeline.data
+    ? mergeSessionTimeline(pickedBase, sessionTimeline.data)
+    : pickedBase;
 
   return (
     <div className="flex w-full max-w-[1100px] flex-col gap-5">

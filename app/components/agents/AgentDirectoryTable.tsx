@@ -62,7 +62,7 @@ export function AgentDirectoryTable({
               </tr>
             ) : (
               rows.map((a) => {
-                const lockPct = a.stake.locked / a.stake.deposited;
+                const lockPct = a.stake.deposited > 0 ? a.stake.locked / a.stake.deposited : 0;
                 const hot = lockPct > 0.8;
                 const pill = STATE_PILL[a.state];
                 const selected = a.handle === selectedHandle;

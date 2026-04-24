@@ -104,6 +104,7 @@ export function buildRunRows(payload: unknown): RunRow[] {
 
     return {
       id,
+      sessionId: text(job.sessionId),
       title,
       jobMeta: `${id} · ${text(job.category, "work")} · ${tierFromRaw(job.tier)}`,
       worker: {

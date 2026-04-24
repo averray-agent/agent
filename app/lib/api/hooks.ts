@@ -33,6 +33,8 @@ export const useJobDefinition = (id: string | null) =>
   useApi(id ? `/jobs/definition?jobId=${encodeURIComponent(id)}` : null);
 export const useSessions = () => useApi("/sessions");
 export const useAgents = () => useApi("/agents");
+export const useAgent = (wallet: string | null) =>
+  useApi(wallet ? `/agents/${encodeURIComponent(wallet)}` : null);
 export const useBadges = () => useApi("/badges");
 export const useBadge = (sessionId: string | null) =>
   useApi(sessionId ? `/badges/${encodeURIComponent(sessionId)}` : null);
@@ -44,6 +46,10 @@ export const usePolicy = (tag: string | null) =>
 export const useDisputes = () => useApi("/disputes");
 export const useDispute = (id: string | null) =>
   useApi(id ? `/disputes/${encodeURIComponent(id)}` : null);
+export const useSession = (sessionId: string | null) =>
+  useApi(sessionId ? `/session?sessionId=${encodeURIComponent(sessionId)}` : null);
+export const useSessionTimeline = (sessionId: string | null) =>
+  useApi(sessionId ? `/session/timeline?sessionId=${encodeURIComponent(sessionId)}` : null);
 export const useStrategies = () => useApi("/strategies");
 export const useHealth = () => useApi("/health");
 export const useOnboarding = () => useApi("/onboarding");

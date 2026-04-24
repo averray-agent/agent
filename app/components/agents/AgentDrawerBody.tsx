@@ -19,7 +19,7 @@ const TIERS: { id: AgentTier; lo: number; hi: number }[] = [
 ];
 
 export function AgentDrawerBody({ agent }: { agent: AgentRecord }) {
-  const lockPct = agent.stake.locked / agent.stake.deposited;
+  const lockPct = agent.stake.deposited > 0 ? agent.stake.locked / agent.stake.deposited : 0;
   const curTier = tierFor(agent.score);
   const next = nextThreshold(agent.score);
   const profileUrl = `averray.com/agents/${agent.walletFull}`;

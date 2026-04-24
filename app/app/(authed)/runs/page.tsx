@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { mutate } from "swr";
 import { RunsTopbar } from "@/components/runs/RunsTopbar";
 import {
   QueueBar,
@@ -18,7 +19,8 @@ import {
   LifecycleRail,
   type LifecycleStage,
 } from "@/components/runs/LifecycleRail";
-import { useJobs, useRecommendations } from "@/lib/api/hooks";
+import { useJobDefinition, useJobs, useRecommendations } from "@/lib/api/hooks";
+import { swrFetcher } from "@/lib/api/client";
 import {
   buildRecommendationCards,
   buildRunFilters,
@@ -223,6 +225,8 @@ const LIFECYCLE: LifecycleStage[] = [
 export default function RunsPage() {
   const [activeFilter, setActiveFilter] = useState<QueueFilter>("all");
   const [selectedId, setSelectedId] = useState<string>("run-2742");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const jobs = useJobs();
   const recommendations = useRecommendations();
 
@@ -248,12 +252,44 @@ export default function RunsPage() {
   }, [activeFilter, rows]);
 
   const assignedToMe = rows.filter((row) => row.worker.isSelf).length;
-  const selectedJob = rawJobs.find((job) => job.id === loadedRow.id);
+  const jobDefinition = useJobDefinition(loadedRow.id);
+  const selectedJob = asRecord(jobDefinition.data) ?? rawJobs.find((job) => job.id === loadedRow.id);
   const liveStatus = jobs.error
     ? "fixture fallback"
-    : jobs.isLoading
-      ? "loading live jobs"
-      : "live API";
+      : jobs.isLoading
+        ? "loading live jobs"
+        : "live API";
+  const handleSubmit = async (evidence: string) => {
+    setSubmitError(null);
+    if (!loadedRow.sessionId) {
+      setSubmitError("Claim this run before submitting evidence.");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await swrFetcher([
+        "/jobs/submit",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            sessionId: loadedRow.sessionId,
+            submission: {
+              evidence,
+              jobId: loadedRow.id,
+              submittedAt: new Date().toISOString(),
+            },
+          }),
+        },
+      ]);
+      mutate("/jobs");
+      mutate("/sessions");
+    } catch {
+      setSubmitError("Could not submit this run. Check session ownership and try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
     <div className="flex w-full max-w-[1100px] flex-col gap-3.5">
@@ -322,6 +358,9 @@ See §3.1 of the runbook for the cosign requirement.`,
             </>
           ),
           cta: "Submit for verification",
+          onSubmit: handleSubmit,
+          submitting,
+          error: submitError,
         }}
         verifier={{
           runner: "verifier-2 · semantic · handler-v0.14",
@@ -420,4 +459,10 @@ See §3.1 of the runbook for the cosign requirement.`,
       />
     </div>
   );
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
