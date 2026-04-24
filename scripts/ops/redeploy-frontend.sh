@@ -17,6 +17,8 @@
 #   APP_BASIC_AUTH_USER       optional browser basic-auth username
 #   APP_BASIC_AUTH_PASSWORD   optional browser basic-auth password
 #   APP_EXPECTED_MARKER       expected HTML marker (default: Opening the operator control room.)
+#   FRONTEND_BUILD_RUNNER     auto, host, or docker (default: auto)
+#   FRONTEND_NODE_IMAGE       Docker image used when runner=docker (default: node:22-bookworm-slim)
 #   RESTART_CADDY=1           restart caddy after sync (not normally needed)
 #   STACK_ROOT                parent dir containing docker-compose.yml (default: repo parent)
 #   COMPOSE_FILE              path to docker-compose.yml
@@ -34,6 +36,8 @@ HEALTH_INTERVAL_SEC=${HEALTH_INTERVAL_SEC:-5}
 APP_EXPECTED_MARKER=${APP_EXPECTED_MARKER:-"Opening the operator control room."}
 APP_BASIC_AUTH_USER=${APP_BASIC_AUTH_USER:-}
 APP_BASIC_AUTH_PASSWORD=${APP_BASIC_AUTH_PASSWORD:-}
+FRONTEND_BUILD_RUNNER=${FRONTEND_BUILD_RUNNER:-auto}
+FRONTEND_NODE_IMAGE=${FRONTEND_NODE_IMAGE:-node:22-bookworm-slim}
 RESTART_CADDY=${RESTART_CADDY:-0}
 
 if [[ ! -d "$APP_ROOT/.git" ]]; then
@@ -41,12 +45,38 @@ if [[ ! -d "$APP_ROOT/.git" ]]; then
   exit 1
 fi
 
-for cmd in git npm curl; do
+for cmd in git curl; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "Missing required command: $cmd" >&2
     exit 1
   fi
 done
+
+case "$FRONTEND_BUILD_RUNNER" in
+  auto)
+    if command -v npm >/dev/null 2>&1; then
+      FRONTEND_BUILD_RUNNER=host
+    else
+      FRONTEND_BUILD_RUNNER=docker
+    fi
+    ;;
+  host|docker)
+    ;;
+  *)
+    echo "FRONTEND_BUILD_RUNNER must be auto, host, or docker" >&2
+    exit 1
+    ;;
+esac
+
+if [[ "$FRONTEND_BUILD_RUNNER" == "host" ]] && ! command -v npm >/dev/null 2>&1; then
+  echo "Missing required command: npm. Set FRONTEND_BUILD_RUNNER=docker to build in a Node container." >&2
+  exit 1
+fi
+
+if [[ "$FRONTEND_BUILD_RUNNER" == "docker" ]] && ! command -v docker >/dev/null 2>&1; then
+  echo "Missing required command: docker. Install npm or set up Docker before deploying the frontend." >&2
+  exit 1
+fi
 
 if [[ "$RESTART_CADDY" == "1" ]]; then
   if [[ ! -f "$COMPOSE_FILE" ]]; then
@@ -63,7 +93,18 @@ PREVIOUS_SHA=$(git -C "$APP_ROOT" rev-parse HEAD)
 echo "Pre-deploy SHA: $PREVIOUS_SHA"
 
 build_frontend() {
-  npm --prefix "$APP_ROOT" run build:frontend
+  if [[ "$FRONTEND_BUILD_RUNNER" == "host" ]]; then
+    npm --prefix "$APP_ROOT" run build:frontend
+    return
+  fi
+
+  docker run --rm \
+    --user "$(id -u):$(id -g)" \
+    -e npm_config_cache=/tmp/.npm \
+    -v "$APP_ROOT:/workspace" \
+    -w /workspace \
+    "$FRONTEND_NODE_IMAGE" \
+    sh -lc "npm ci && npm run build:frontend"
 }
 
 restart_caddy_if_requested() {
