@@ -34,7 +34,7 @@ This runbook captures the production-like setup currently running on the OVH VPS
 The intended production split is:
 
 - `averray.com` / `www.averray.com` → static public site from `app/site`
-- `app.averray.com` → static operator app from `app/frontend`
+- `app.averray.com` → static exported Next operator app from `app/frontend`
 - `api.averray.com` → reverse proxy to backend container
 - `index.averray.com` → reverse proxy to indexer container
 
@@ -67,10 +67,16 @@ Key routing rules:
 - `app.averray.com/index/*` proxies to `indexer:42069`
 - inside the Caddy container, the static mounts are `/srv/site` and `/srv/frontend`
 
-Before pushing landing page changes from your local machine, regenerate the public site shell:
+Before pushing public website changes from your local machine, regenerate the public site shell:
 
 ```bash
 npm run build:site
+```
+
+Before pushing operator app changes for `app.averray.com`, regenerate the static operator export:
+
+```bash
+npm run build:frontend
 ```
 
 ### Applying a new Caddy config

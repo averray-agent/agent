@@ -16,6 +16,7 @@
     "test:contracts": "forge test",
     "dev:app": "npm --workspace averray-app run dev",
     "build:app": "npm --workspace averray-app run build",
+    "build:frontend": "NEXT_OUTPUT=export NEXT_PUBLIC_API_BASE_URL=https://api.averray.com npm --workspace averray-app run build && node scripts/sync-operator-frontend.mjs",
     "typecheck:app": "npm --workspace averray-app run typecheck",
     "dev:marketing": "npm --workspace marketing run dev",
     "build:marketing": "ASTRO_TELEMETRY_DISABLED=1 npm --workspace marketing run build",
