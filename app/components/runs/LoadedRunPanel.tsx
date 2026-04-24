@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils/cn";
+import { SourceBadge } from "./StatePill";
+import type { GitHubJobContext } from "./types";
 
 export interface StakeBreakdown {
   worker: string;
@@ -59,6 +61,13 @@ export interface LoadedRunPanelProps {
     ctaDisabled?: boolean;
     note: string;
   };
+  /**
+   * When the loaded run was ingested from GitHub, the panel renders a
+   * "Job context" block in the left column with labels, score, issue body,
+   * acceptance criteria, agent instructions, verification signals, and an
+   * "Open GitHub Issue" link. Absent = native job, no extra block.
+   */
+  github?: GitHubJobContext;
 }
 
 export function LoadedRunPanel(props: LoadedRunPanelProps) {
@@ -112,6 +121,9 @@ export function LoadedRunPanel(props: LoadedRunPanelProps) {
       <div className="grid grid-cols-1 lg:grid-cols-2">
         {/* LEFT */}
         <div className="flex flex-col gap-3.5 border-r-0 border-b border-[var(--avy-line-soft)] bg-[#fffdf7] p-4 lg:border-b-0 lg:border-r">
+          {/* Job context (GitHub-ingested jobs only) */}
+          {props.github ? <GitHubContextBlock context={props.github} /> : null}
+
           {/* Stake */}
           <div>
             <BlockLabel right={<>▪ locked in AgentAccountCore</>}>Stake</BlockLabel>
@@ -351,6 +363,157 @@ export function LoadedRunPanel(props: LoadedRunPanelProps) {
         </div>
       </div>
     </section>
+  );
+}
+
+function GitHubContextBlock({ context }: { context: GitHubJobContext }) {
+  return (
+    <div>
+      <BlockLabel
+        right={
+          <a
+            href={context.issueUrl}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="inline-flex items-center gap-1 text-[var(--avy-accent)] hover:underline"
+          >
+            Open GitHub issue ↗
+          </a>
+        }
+      >
+        Job context
+      </BlockLabel>
+      <div className="overflow-hidden rounded-[8px] border border-[var(--avy-line)] bg-white">
+        {/* Header: source + repo + issue + score */}
+        <div className="flex flex-wrap items-center gap-2 border-b border-[var(--avy-line-soft)] bg-[#faf8f1] px-3 py-2">
+          <SourceBadge kind="github" />
+          <a
+            href={context.issueUrl}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-ink)] hover:text-[var(--avy-accent)]"
+            style={{ letterSpacing: 0 }}
+          >
+            {context.repo}
+            <span className="ml-0.5 text-[var(--avy-accent)]">
+              #{context.issueNumber}
+            </span>
+          </a>
+          <span className="opacity-40">·</span>
+          <span
+            className="font-[family-name:var(--font-mono)] text-[11px] uppercase text-[var(--avy-muted)]"
+            style={{ letterSpacing: "0.08em" }}
+          >
+            {context.category}
+          </span>
+          {typeof context.score === "number" ? (
+            <span className="ml-auto inline-flex items-center gap-1 font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]">
+              Fit score{" "}
+              <b className="font-semibold text-[var(--avy-ink)]">{context.score}</b>
+              <span className="text-[var(--avy-muted)]">/100</span>
+            </span>
+          ) : null}
+        </div>
+
+        {/* Body */}
+        <div className="px-3.5 py-3">
+          {/* Title */}
+          <h3 className="m-0 font-[family-name:var(--font-display)] text-[14px] font-bold leading-[1.3] text-[var(--avy-ink)]">
+            {context.title}
+          </h3>
+
+          {/* Labels */}
+          {context.labels && context.labels.length > 0 ? (
+            <div className="mt-2 flex flex-wrap gap-1">
+              {context.labels.map((label) => (
+                <span
+                  key={label}
+                  className="inline-flex items-center rounded-full border border-[var(--avy-line)] bg-[color:rgba(17,19,21,0.03)] px-2 py-0.5 font-[family-name:var(--font-mono)] text-[10.5px] text-[var(--avy-ink)]"
+                  style={{ letterSpacing: 0 }}
+                >
+                  {label}
+                </span>
+              ))}
+            </div>
+          ) : null}
+
+          {/* Body / description */}
+          <p
+            className="mt-3 max-h-[140px] overflow-y-auto whitespace-pre-wrap font-[family-name:var(--font-body)] text-[12.5px] leading-[1.5] text-[var(--avy-ink)]"
+            style={{ letterSpacing: 0 }}
+          >
+            {context.body}
+          </p>
+
+          {/* Acceptance criteria */}
+          {context.acceptanceCriteria.length > 0 ? (
+            <div className="mt-3">
+              <div
+                className="mb-1 font-[family-name:var(--font-display)] text-[10px] font-extrabold uppercase text-[var(--avy-muted)]"
+                style={{ letterSpacing: "0.14em" }}
+              >
+                Acceptance criteria
+              </div>
+              <ul className="m-0 flex flex-col gap-1 pl-0">
+                {context.acceptanceCriteria.map((item, i) => (
+                  <li
+                    key={i}
+                    className="flex gap-2 font-[family-name:var(--font-body)] text-[12px] leading-[1.45] text-[var(--avy-ink)]"
+                    style={{ letterSpacing: 0 }}
+                  >
+                    <span className="mt-[7px] h-[4px] w-[4px] shrink-0 rounded-full bg-[var(--avy-accent)]" />
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {/* Agent instructions */}
+          {context.agentInstructions ? (
+            <div className="mt-3">
+              <div
+                className="mb-1 font-[family-name:var(--font-display)] text-[10px] font-extrabold uppercase text-[var(--avy-muted)]"
+                style={{ letterSpacing: "0.14em" }}
+              >
+                Agent instructions
+              </div>
+              <p
+                className="m-0 rounded-[6px] border border-[color:rgba(30,102,66,0.18)] bg-[color:rgba(30,102,66,0.04)] px-2.5 py-2 font-[family-name:var(--font-mono)] text-[11.5px] leading-[1.5] text-[var(--avy-ink)]"
+                style={{ letterSpacing: 0 }}
+              >
+                {context.agentInstructions}
+              </p>
+            </div>
+          ) : null}
+
+          {/* Verification */}
+          <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-[var(--avy-line-soft)] pt-2.5">
+            <span
+              className="font-[family-name:var(--font-display)] text-[10px] font-extrabold uppercase text-[var(--avy-muted)]"
+              style={{ letterSpacing: "0.14em" }}
+            >
+              Verification
+            </span>
+            <span
+              className="inline-flex items-center rounded-full bg-[color:rgba(17,19,21,0.06)] px-2 py-0.5 font-[family-name:var(--font-mono)] text-[10.5px] text-[var(--avy-ink)]"
+              style={{ letterSpacing: 0 }}
+            >
+              {context.verification.method}
+            </span>
+            {context.verification.signals.map((s) => (
+              <span
+                key={s}
+                className="font-[family-name:var(--font-mono)] text-[10.5px] text-[var(--avy-muted)]"
+                style={{ letterSpacing: 0 }}
+              >
+                · {s}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 

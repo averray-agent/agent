@@ -1,10 +1,24 @@
 import { cn } from "@/lib/utils/cn";
-import { TierPill, VerifierModePill, type Tier, type RunState } from "./StatePill";
+import {
+  TierPill,
+  VerifierModePill,
+  SourceBadge,
+  type Tier,
+  type RunState,
+} from "./StatePill";
+import type { JobSource } from "./types";
 
 export interface JobCardData {
   id: string;
   title: string;
   jobMeta: string;
+  /**
+   * Short category label (e.g. "docs", "coding", "testing"). For GitHub
+   * jobs this comes from the ingestion classifier; for native jobs it's
+   * the job's domain tag.
+   */
+  category?: string;
+  source?: JobSource;
   rewardValue: string;
   rewardCurrency: string;
   rewardUsd: string;
@@ -26,18 +40,35 @@ export function JobCard({ job }: { job: JobCardData }) {
       )}
     >
       <header className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <h4 className="m-0 max-w-[180px] font-[family-name:var(--font-display)] text-[13px] font-bold leading-[1.25] text-[var(--avy-ink)]">
+        <div className="min-w-0 flex-1">
+          <h4
+            className="m-0 line-clamp-2 font-[family-name:var(--font-display)] text-[13px] font-bold leading-[1.25] text-[var(--avy-ink)]"
+            title={job.title}
+          >
             {job.title}
           </h4>
-          <p
-            className="mt-1 font-[family-name:var(--font-mono)] text-[10.5px] text-[var(--avy-muted)]"
-            style={{ letterSpacing: 0 }}
-          >
-            {job.id} · {job.jobMeta}
-          </p>
+          {job.source?.type === "github_issue" ? (
+            <p
+              className="mt-1 flex items-center gap-1 font-[family-name:var(--font-mono)] text-[10.5px] text-[var(--avy-muted)]"
+              style={{ letterSpacing: 0 }}
+            >
+              <span className="truncate text-[var(--avy-ink)]">
+                {job.source.repo}
+              </span>
+              <span className="text-[var(--avy-accent)]">
+                #{job.source.issueNumber}
+              </span>
+            </p>
+          ) : (
+            <p
+              className="mt-1 truncate font-[family-name:var(--font-mono)] text-[10.5px] text-[var(--avy-muted)]"
+              style={{ letterSpacing: 0 }}
+            >
+              {job.jobMeta}
+            </p>
+          )}
         </div>
-        <div className="text-right">
+        <div className="shrink-0 text-right">
           <div>
             <span className="font-[family-name:var(--font-display)] text-[15px] font-bold leading-none text-[var(--avy-ink)]">
               {job.rewardValue}
@@ -55,8 +86,17 @@ export function JobCard({ job }: { job: JobCardData }) {
         </div>
       </header>
 
-      <div className="flex flex-wrap gap-1">
+      <div className="flex flex-wrap items-center gap-1">
+        {job.source?.type === "github_issue" ? <SourceBadge kind="github" /> : null}
         <TierPill tier={job.tier} />
+        {job.category ? (
+          <span
+            className="inline-flex items-center gap-1 rounded-full bg-[color:rgba(17,19,21,0.06)] px-2 py-0.5 font-[family-name:var(--font-display)] text-[9.5px] font-extrabold uppercase text-[var(--avy-ink)]"
+            style={{ letterSpacing: "0.1em" }}
+          >
+            {job.category}
+          </span>
+        ) : null}
         <VerifierModePill label={job.modeLabel} tone={job.modeTone ?? "claimed"} />
       </div>
 

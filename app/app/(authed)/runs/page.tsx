@@ -22,6 +22,7 @@ import {
 import { useJobDefinition, useJobs, useRecommendations } from "@/lib/api/hooks";
 import { swrFetcher } from "@/lib/api/client";
 import {
+  buildGitHubContext,
   buildRecommendationCards,
   buildRunFilters,
   buildRunRows,
@@ -39,6 +40,27 @@ import {
 
 const ROWS: RunRow[] = [
   {
+    id: "run-2749",
+    title:
+      "Document TypeScript validation helper API for external package consumers",
+    jobMeta: "job-0428 · docs · T1",
+    source: {
+      type: "github_issue",
+      repo: "oss-devsecblueprint/devsecblueprint",
+      issueNumber: 110,
+      issueUrl:
+        "https://github.com/oss-devsecblueprint/devsecblueprint/issues/110",
+      labels: ["documentation", "good first issue"],
+      score: 82,
+    },
+    worker: { variant: "unclaimed", initials: "—", label: "unclaimed" },
+    state: "ready",
+    stake: "8.0",
+    age: "00:01:04",
+    lastEvent: "Ingested from GitHub",
+    lastEventMeta: "14:29:55 · gh-ingest · score 82",
+  },
+  {
     id: "run-2741",
     title: "repo-sweep: deps/sec-only bump",
     jobMeta: "job-0421 · coding · T1",
@@ -52,8 +74,17 @@ const ROWS: RunRow[] = [
   },
   {
     id: "run-2742",
-    title: "gov-review: proposal 0x7a0c abstract",
-    jobMeta: "job-0418 · writer-gov · T2",
+    title:
+      "Fix flaky integration test: race condition when two workers claim within the same block window",
+    jobMeta: "job-0418 · bugfix · T2",
+    source: {
+      type: "github_issue",
+      repo: "paritytech/polkadot-sdk",
+      issueNumber: 4812,
+      issueUrl: "https://github.com/paritytech/polkadot-sdk/issues/4812",
+      labels: ["bug", "flaky-test", "help wanted"],
+      score: 74,
+    },
     worker: { variant: "self", initials: "FD", label: "0xFd2E…6519", isSelf: true },
     state: "claimed",
     stake: "25.0",
@@ -131,8 +162,8 @@ const ROWS: RunRow[] = [
 ];
 
 const FILTERS: QueueFilterCount[] = [
-  { id: "all", label: "All", count: 14 },
-  { id: "ready", label: "Ready", count: 3 },
+  { id: "all", label: "All", count: 15 },
+  { id: "ready", label: "Ready", count: 4 },
   { id: "claimed", label: "Claimed", count: 5 },
   { id: "submitted", label: "Submitted", count: 3 },
   { id: "disputed", label: "Disputed", count: 2 },
@@ -141,8 +172,39 @@ const FILTERS: QueueFilterCount[] = [
 
 const RECOMMENDED: JobCardData[] = [
   {
+    id: "job-0428",
+    jobMeta: "docs",
+    category: "docs",
+    title:
+      "Document TypeScript validation helper API for external package consumers",
+    source: {
+      type: "github_issue",
+      repo: "oss-devsecblueprint/devsecblueprint",
+      issueNumber: 110,
+      issueUrl:
+        "https://github.com/oss-devsecblueprint/devsecblueprint/issues/110",
+      labels: ["documentation", "good first issue"],
+      score: 82,
+    },
+    rewardValue: "8.0",
+    rewardCurrency: "DOT",
+    rewardUsd: "~ $58",
+    tier: "T1",
+    modeLabel: "PR review",
+    modeTone: "ready",
+    meta: [
+      { label: "Stake", value: "4.0 DOT" },
+      { label: "Verifier", value: "github_pr" },
+      { label: "Window", value: "2 h", accent: true },
+      { label: "Fit score", value: "82/100" },
+    ],
+    fit: 5,
+    hot: true,
+  },
+  {
     id: "job-0406",
     jobMeta: "ops-xcm",
+    category: "ops-xcm",
     title: "xcm-sanity: asset-hub → hydration",
     rewardValue: "75.0",
     rewardCurrency: "DOT",
@@ -156,7 +218,6 @@ const RECOMMENDED: JobCardData[] = [
       { label: "Slippage cap", value: "0.5%" },
     ],
     fit: 4,
-    hot: true,
   },
   {
     id: "job-0421",
@@ -254,6 +315,10 @@ export default function RunsPage() {
   const assignedToMe = rows.filter((row) => row.worker.isSelf).length;
   const jobDefinition = useJobDefinition(loadedRow.id);
   const selectedJob = asRecord(jobDefinition.data) ?? rawJobs.find((job) => job.id === loadedRow.id);
+  // Only set when the loaded run was ingested from GitHub. The panel
+  // switches to a GitHub-native layout when this is defined; otherwise
+  // it keeps the generic governance evidence/verifier layout.
+  const loadedGitHub = buildGitHubContext(loadedRow, selectedJob);
   const liveStatus = jobs.error
     ? "fixture fallback"
       : jobs.isLoading
@@ -319,6 +384,7 @@ export default function RunsPage() {
         kicker="Loaded run"
         title={loadedRow.title}
         meta={loadedRow.jobMeta}
+        github={loadedGitHub}
         stake={{
           amount: loadedRow.stake,
           aux: selectedJob

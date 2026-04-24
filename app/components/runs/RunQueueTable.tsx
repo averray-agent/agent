@@ -2,14 +2,21 @@
 
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils/cn";
-import { StatePill, type RunState } from "./StatePill";
+import { StatePill, SourceBadge, type RunState } from "./StatePill";
 import { WorkerChip, type WorkerVariant } from "./WorkerChip";
+import type { JobSource } from "./types";
 
 export interface RunRow {
   id: string;
   sessionId?: string;
   jobMeta: string;
   title: string;
+  /**
+   * Optional provenance. Present on GitHub-ingested jobs so the row can
+   * show the source badge + `owner/repo #123` inline instead of just the
+   * internal job id.
+   */
+  source?: JobSource;
   worker: {
     variant: WorkerVariant;
     initials: string;
@@ -84,14 +91,31 @@ export function RunQueueTable({
                   )}
                 >
                   <Td>
-                    <div className="text-[13px] font-semibold leading-[1.3] text-[var(--avy-ink)]">
-                      {row.title}
-                      <small
-                        className="mt-0.5 block font-[family-name:var(--font-mono)] text-[11px] font-normal text-[var(--avy-muted)]"
+                    <div className="min-w-0 max-w-[360px]">
+                      <div
+                        className="line-clamp-2 text-[13px] font-semibold leading-[1.3] text-[var(--avy-ink)]"
+                        title={row.title}
+                      >
+                        {row.title}
+                      </div>
+                      <div
+                        className="mt-0.5 flex items-center gap-1.5 font-[family-name:var(--font-mono)] text-[11px] font-normal text-[var(--avy-muted)]"
                         style={{ letterSpacing: 0 }}
                       >
-                        {row.jobMeta}
-                      </small>
+                        {row.source?.type === "github_issue" ? (
+                          <>
+                            <SourceBadge kind="github" />
+                            <span className="truncate">
+                              {row.source.repo}
+                              <span className="text-[var(--avy-accent)]"> #{row.source.issueNumber}</span>
+                            </span>
+                            <span className="opacity-40">·</span>
+                            <span className="truncate">{row.jobMeta}</span>
+                          </>
+                        ) : (
+                          <span className="truncate">{row.jobMeta}</span>
+                        )}
+                      </div>
                     </div>
                   </Td>
                   <Td>

@@ -77,3 +77,57 @@ export function VerifierModePill({
     </span>
   );
 }
+
+/**
+ * Small "where did this job come from" badge. GitHub-ingested jobs get the
+ * GitHub mark + label; the OSS variant is a neutral fallback if we widen
+ * ingestion to non-GitHub OSS trackers later.
+ */
+export type SourceKind = "github" | "oss";
+
+const SOURCE_CLASSES: Record<SourceKind, string> = {
+  github: "bg-[#111418] text-white",
+  oss: "bg-[color:rgba(17,19,21,0.06)] text-[var(--avy-ink)]",
+};
+
+const SOURCE_LABEL: Record<SourceKind, string> = {
+  github: "GitHub",
+  oss: "OSS",
+};
+
+export function SourceBadge({
+  kind,
+  className,
+}: {
+  kind: SourceKind;
+  className?: string;
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 font-[family-name:var(--font-display)] text-[9.5px] font-extrabold uppercase whitespace-nowrap",
+        SOURCE_CLASSES[kind],
+        className
+      )}
+      style={{ letterSpacing: "0.1em" }}
+    >
+      {kind === "github" ? <GitHubGlyph /> : <span className="h-[5px] w-[5px] rounded-full bg-current opacity-80" />}
+      {SOURCE_LABEL[kind]}
+    </span>
+  );
+}
+
+function GitHubGlyph() {
+  // Inline SVG so we don't pull in another icon bundle just for one mark.
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      width="10"
+      height="10"
+      fill="currentColor"
+    >
+      <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.19 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
+    </svg>
+  );
+}

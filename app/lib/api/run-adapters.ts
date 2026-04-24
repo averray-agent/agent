@@ -2,6 +2,7 @@ import type { JobCardData } from "@/components/runs/JobCard";
 import type { QueueFilterCount } from "@/components/runs/QueueBar";
 import type { RunRow } from "@/components/runs/RunQueueTable";
 import type { RunState, Tier } from "@/components/runs/StatePill";
+import type { GitHubJobContext, JobSource } from "@/components/runs/types";
 
 type RawRecord = Record<string, unknown>;
 
@@ -91,6 +92,69 @@ function lookupJob(jobs: RawRecord[], id: unknown): RawRecord {
   return jobs.find((job) => text(job.id) === jobId) ?? {};
 }
 
+/**
+ * Pull a lightweight provenance block off a job record. GitHub-ingested
+ * jobs carry a `source.type === "github_issue"` block with the repo,
+ * issue number, URL, labels, and ingestion score. Native platform jobs
+ * either omit `source` or emit `{ type: "native" }`; those return
+ * undefined so the UI renders the generic layout.
+ */
+export function buildJobSource(job: unknown): JobSource | undefined {
+  const src = asRecord(asRecord(job).source);
+  if (text(src.type) !== "github_issue") return undefined;
+  const repo = text(src.repo);
+  const issueNumber = numberValue(src.issueNumber);
+  const issueUrl = text(src.issueUrl);
+  if (!repo || !issueNumber || !issueUrl) return undefined;
+  const labels = Array.isArray(src.labels)
+    ? src.labels.filter((label): label is string => typeof label === "string")
+    : undefined;
+  const score = typeof src.score === "number" ? src.score : undefined;
+  return {
+    type: "github_issue",
+    repo,
+    issueNumber,
+    issueUrl,
+    ...(labels && labels.length ? { labels } : {}),
+    ...(score !== undefined ? { score } : {}),
+  };
+}
+
+/**
+ * Build the rich GitHubJobContext used by the Loaded-run panel when a
+ * GitHub-ingested job is selected. Returns undefined for native jobs so
+ * the panel falls back to the generic governance layout.
+ */
+export function buildGitHubContext(
+  row: Pick<RunRow, "source" | "title">,
+  job: unknown
+): GitHubJobContext | undefined {
+  if (row.source?.type !== "github_issue") return undefined;
+  const record = asRecord(job);
+  const verification = asRecord(record.verification);
+  const verificationMethod = text(verification.method, "github_pr");
+  const verificationSignals = Array.isArray(verification.signals)
+    ? verification.signals.filter(
+        (signal): signal is string => typeof signal === "string"
+      )
+    : ["PR opened", "CI green", "maintainer review"];
+  const acceptance = Array.isArray(record.acceptanceCriteria)
+    ? record.acceptanceCriteria.filter(
+        (item): item is string => typeof item === "string"
+      )
+    : [];
+
+  return {
+    ...row.source,
+    title: text(record.title, row.title),
+    category: text(record.category, "work"),
+    body: text(record.description, text(record.body, "")),
+    acceptanceCriteria: acceptance,
+    agentInstructions: text(record.agentInstructions),
+    verification: { method: verificationMethod, signals: verificationSignals },
+  };
+}
+
 export function extractRunJobs(payload: unknown): RawRecord[] {
   return asArray(payload);
 }
@@ -102,11 +166,13 @@ export function buildRunRows(payload: unknown): RunRow[] {
     const state = stateFromRaw(job.state);
     const worker = text(job.claimedBy) || text(job.worker);
 
+    const source = buildJobSource(job);
     return {
       id,
       sessionId: text(job.sessionId),
       title,
       jobMeta: `${id} · ${text(job.category, "work")} · ${tierFromRaw(job.tier)}`,
+      ...(source ? { source } : {}),
       worker: {
         variant: worker ? "a" : "unclaimed",
         initials: worker ? "AG" : "-",
@@ -115,8 +181,18 @@ export function buildRunRows(payload: unknown): RunRow[] {
       state,
       stake: formatReward(job.stake ?? job.rewardAmount),
       age: formatWindow(job.claimTtlSeconds),
-      lastEvent: state === "ready" ? "Job listed" : `State: ${state}`,
-      lastEventMeta: `${text(job.rewardAsset, "DOT")} · verifier ${verifierLabel(job.verifierMode)}`,
+      lastEvent:
+        source?.type === "github_issue"
+          ? state === "ready"
+            ? "Ingested from GitHub"
+            : `State: ${state}`
+          : state === "ready"
+            ? "Job listed"
+            : `State: ${state}`,
+      lastEventMeta:
+        source?.type === "github_issue"
+          ? `${source.repo} #${source.issueNumber} · verifier ${verifierLabel(job.verifierMode)}`
+          : `${text(job.rewardAsset, "DOT")} · verifier ${verifierLabel(job.verifierMode)}`,
     };
   });
 }
@@ -143,10 +219,14 @@ export function buildRecommendationCards(
     const fitScore = numberValue(recommendation.fitScore);
     const fit = Math.max(1, Math.min(5, Math.ceil(fitScore / 20)));
 
+    const source = buildJobSource(job);
+    const category = text(job.category, "work");
     return {
       id,
       title: text(job.title, text(job.description, titleFromId(id))),
-      jobMeta: text(job.category, "work"),
+      jobMeta: category,
+      category,
+      ...(source ? { source } : {}),
       rewardValue: formatReward(recommendation.netReward ?? job.rewardAmount),
       rewardCurrency: text(job.rewardAsset, "DOT"),
       rewardUsd: "live",
@@ -157,7 +237,15 @@ export function buildRecommendationCards(
         { label: "Reward", value: `${formatReward(job.rewardAmount)} ${text(job.rewardAsset, "DOT")}` },
         { label: "Verifier", value: verifierLabel(job.verifierMode) },
         { label: "Window", value: formatWindow(job.claimTtlSeconds), accent: true },
-        { label: "Gas", value: job.requiresSponsoredGas ? "sponsored" : "worker" },
+        {
+          label: source?.type === "github_issue" ? "Fit score" : "Gas",
+          value:
+            source?.type === "github_issue"
+              ? `${source.score ?? fitScore}/100`
+              : job.requiresSponsoredGas
+                ? "sponsored"
+                : "worker",
+        },
       ],
       fit,
       hot: index === 0,
