@@ -275,12 +275,95 @@ const RECOMMENDED: JobCardData[] = [
   },
 ];
 
+// Fallback job definitions used when the live API is unavailable. Shape
+// mirrors what the backend emits on /jobs/definition?jobId=, so the
+// adapter (buildGitHubContext) can populate the Loaded-run panel from
+// these records exactly as it does from live data. Only the rich
+// GitHub-ingested rows need definitions — native fixture rows fall
+// through to the generic governance layout.
+const FIXTURE_JOB_DEFINITIONS: Record<string, unknown>[] = [
+  {
+    id: "run-2749",
+    title:
+      "Document TypeScript validation helper API for external package consumers",
+    category: "docs",
+    description:
+      "The internal `validateRequest` helper in `packages/core/src/validate.ts` is referenced by three external consumers but has no public docs. We need a markdown reference that lists the accepted shapes, the thrown error types, and at least one usage example per shape.",
+    source: {
+      type: "github_issue",
+      repo: "oss-devsecblueprint/devsecblueprint",
+      issueNumber: 110,
+      issueUrl:
+        "https://github.com/oss-devsecblueprint/devsecblueprint/issues/110",
+      labels: ["documentation", "good first issue"],
+      score: 82,
+    },
+    acceptanceCriteria: [
+      "Open a PR that adds `docs/reference/validate.md`",
+      "Document every exported signature with one code example",
+      "`npm run build:docs` passes with no warnings",
+      "PR description links to the closed issue",
+    ],
+    agentInstructions:
+      "Read `packages/core/src/validate.ts` top to bottom. For each exported function, write a short prose intro plus a fenced TypeScript example. Keep voice consistent with the existing reference docs under `docs/reference/`.",
+    verification: {
+      method: "github_pr",
+      signals: ["PR opened", "docs build green", "maintainer review"],
+    },
+  },
+  {
+    id: "run-2742",
+    title:
+      "Fix flaky integration test: race condition when two workers claim within the same block window",
+    category: "bugfix",
+    description: `The integration suite in \`node/test/src/claim_race.rs\` fails ~3% of the time on CI when two workers attempt to claim the same job within the same 6-second block window. Expected behavior: the first claim (lowest nonce) wins; the second receives a \`ClaimRejected\` event and the caller's stake is refunded in the same block.
+
+Current behavior: both claims occasionally land, both workers get \`ClaimAccepted\`, and the escrow double-locks stake. The second worker is later slashed during settlement, which is the wrong failure mode — the rejection should be at claim-time, not at settle-time.
+
+Repro: run \`cargo test --test claim_race -- --test-threads=1 --ignored\` in a loop; fails in 2–4 iterations on average.`,
+    source: {
+      type: "github_issue",
+      repo: "paritytech/polkadot-sdk",
+      issueNumber: 4812,
+      issueUrl: "https://github.com/paritytech/polkadot-sdk/issues/4812",
+      labels: ["bug", "flaky-test", "help wanted"],
+      score: 74,
+    },
+    acceptanceCriteria: [
+      "Open a PR that makes the `claim_race` test deterministic on Linux and macOS",
+      "Include a regression test that asserts the second claim receives ClaimRejected",
+      "All existing tests pass; no new warnings from `cargo clippy -- -D warnings`",
+      "PR description references issue #4812 and explains the ordering fix",
+    ],
+    agentInstructions:
+      "Start from the failing test. Trace the claim path in `runtime/src/escrow.rs` and identify where the two claims race. Fix by ordering claims by (block_number, nonce, wallet) before acceptance — see OP-09 §4.2 for the canonical ordering. Keep the diff under 150 lines if possible.",
+    verification: {
+      method: "github_pr",
+      signals: ["PR opened", "CI green", "maintainer review"],
+    },
+  },
+];
+
+// Lifecycle for GitHub-ingested jobs. For MVP we keep the same 5-stage
+// shape but relabel for the OSS flow: Ready → Claimed → PR submitted →
+// Verified → Paid. Future revisions can add an explicit "Working"
+// intermediate stage once the runner reports keep-alive signals.
 const LIFECYCLE: LifecycleStage[] = [
-  { index: 1, label: "Discoverable", meta: "14:20:25", state: "done" },
+  { index: 1, label: "Ready", meta: "14:20:25", state: "done" },
   { index: 2, label: "Claimed", meta: "14:23:53 · by you", state: "done" },
-  { index: 3, label: "Submitted", meta: "14:27:45 · evidence 412B", state: "done" },
-  { index: 4, label: "Verified", meta: "4/5 · awaiting cosign", state: "current" },
-  { index: 5, label: "Settled", meta: "—", state: "pending" },
+  {
+    index: 3,
+    label: "PR submitted",
+    meta: "14:27:45 · #4931 on paritytech/polkadot-sdk",
+    state: "done",
+  },
+  {
+    index: 4,
+    label: "Verified",
+    meta: "2/3 signals · maintainer review pending",
+    state: "current",
+  },
+  { index: 5, label: "Paid", meta: "—", state: "pending" },
 ];
 
 export default function RunsPage() {
@@ -314,7 +397,10 @@ export default function RunsPage() {
 
   const assignedToMe = rows.filter((row) => row.worker.isSelf).length;
   const jobDefinition = useJobDefinition(loadedRow.id);
-  const selectedJob = asRecord(jobDefinition.data) ?? rawJobs.find((job) => job.id === loadedRow.id);
+  const selectedJob =
+    asRecord(jobDefinition.data) ??
+    rawJobs.find((job) => job.id === loadedRow.id) ??
+    FIXTURE_JOB_DEFINITIONS.find((def) => def.id === loadedRow.id);
   // Only set when the loaded run was ingested from GitHub. The panel
   // switches to a GitHub-native layout when this is defined; otherwise
   // it keeps the generic governance evidence/verifier layout.
@@ -396,31 +482,23 @@ export default function RunsPage() {
             treasury: "0 DOT",
           },
         }}
+        // When `github` is set the panel swaps Evidence for the four-tab
+        // Issue/Acceptance/Instructions/Submission block, so `evidence` is
+        // unused at runtime. The prop is still type-required — we stub it
+        // with neutral content that will never render for this job.
         evidence={{
-          tabs: [
-            { id: "abstract", label: "Abstract" },
-            { id: "diff", label: "Diff" },
-            { id: "citations", label: "Citations", sub: "·3" },
-          ],
-          activeTab: "abstract",
-          metaRight: "markdown · max 8kb",
-          metaFoot: "unsaved · 412 chars",
-          sample: `# OP-14 · Treasury re-routing via XCM
-
-Proposal 0x7a0c re-routes 18,000 DOT from the collective bounty
-curator to AssetHub for spending under a time-locked multisig.
-
-Scope: **only the curator address changes** — cadence, caps, and
-dispute windows remain as set in OP-09.
-
-See §3.1 of the runbook for the cosign requirement.`,
+          tabs: [{ id: "issue", label: "Issue" }],
+          activeTab: "issue",
+          metaRight: "",
+          metaFoot: "",
+          sample: "",
         }}
         submission={{
           note: (
             <>
-              Submits <b className="text-[var(--avy-ink)]">evidence + claim hash</b>{" "}
+              Submits <b className="text-[var(--avy-ink)]">PR URL + evidence</b>{" "}
               to the verifier. Window{" "}
-              <b className="text-[var(--avy-ink)]">00:08:14 / 00:30:00</b>.
+              <b className="text-[var(--avy-ink)]">00:08:14 / 02:00:00</b>.
             </>
           ),
           cta: "Submit for verification",
@@ -429,37 +507,51 @@ See §3.1 of the runbook for the cosign requirement.`,
           error: submitError,
         }}
         verifier={{
-          runner: "verifier-2 · semantic · handler-v0.14",
-          elapsed: "stream · 2.1s",
-          modeNote: "semantic · human-in-the-loop",
+          runner: "verifier-2 · github_pr · handler-v0.14",
+          elapsed: "stream · 3.4s",
+          modeNote: "github_pr · maintainer-reviewed",
           lines: [
             {
               time: "14:28:01",
               level: "info",
-              label: "boot",
+              label: "source",
               message: (
                 <>
-                  loaded policy <span className="text-[#f4c989]">writer-gov/cited</span>
+                  loaded issue{" "}
+                  <span className="text-[#f4c989]">
+                    paritytech/polkadot-sdk#4812
+                  </span>{" "}
+                  · score 74/100
                 </>
               ),
             },
             {
               time: "14:28:01",
-              level: "info",
-              label: "check",
-              message: <>claim-hash matches evidence blob · ok</>,
+              level: "ok",
+              label: "pass",
+              message: (
+                <>
+                  PR URL present ·{" "}
+                  <span className="text-[#f4c989]">pull/4931</span>
+                </>
+              ),
             },
             {
               time: "14:28:02",
               level: "ok",
               label: "pass",
-              message: <>scope constraint: only curator address changed</>,
+              message: <>PR body references issue #4812</>,
             },
             {
               time: "14:28:02",
               level: "ok",
               label: "pass",
-              message: <>citation [1] OP-09 §3.1 · resolvable · on-chain</>,
+              message: (
+                <>
+                  CI checks green · <span className="text-[#9bd7b5]">7/7</span>{" "}
+                  on ubuntu-latest · macos-13
+                </>
+              ),
             },
             {
               time: "14:28:03",
@@ -467,8 +559,9 @@ See §3.1 of the runbook for the cosign requirement.`,
               label: "note",
               message: (
                 <>
-                  cosigner <span className="text-[#f4c989]">0x9A13…0cb2</span> has not
-                  yet attested
+                  maintainer review{" "}
+                  <span className="text-[#f4c989]">pending</span> · requested
+                  from @bkchr
                 </>
               ),
             },
@@ -478,30 +571,31 @@ See §3.1 of the runbook for the cosign requirement.`,
               label: "verdict",
               message: (
                 <>
-                  4/5 checks pass · awaiting cosigner · receipt draft{" "}
+                  2/3 signals pass · awaiting maintainer · receipt draft{" "}
                   <span className="text-[#f4c989]">r_4e133</span>
                 </>
               ),
             },
           ],
           verdict: {
-            status: "Verified (pending cosign)",
-            score: "4 / 5",
-            scoreLabel: "0.92 confidence",
+            status: "Awaiting maintainer review",
+            score: "2 / 3",
+            scoreLabel: "0.86 confidence",
           },
         }}
         settle={{
-          title: "Ready to settle on cosign",
+          title: "Awaiting verification",
           detail: (
             <>
-              Pay <b className="text-[var(--avy-ink)]">25.00 DOT</b> · unlock{" "}
-              <b className="text-[var(--avy-ink)]">25.00 DOT</b> stake · sign receipt{" "}
-              <b className="text-[var(--avy-ink)]">r_4e133</b>
+              On verification, pay{" "}
+              <b className="text-[var(--avy-ink)]">25.00 DOT</b> · unlock{" "}
+              <b className="text-[var(--avy-ink)]">25.00 DOT</b> stake · sign
+              receipt <b className="text-[var(--avy-ink)]">r_4e133</b>
             </>
           ),
-          cta: "Settle run",
+          cta: "Mark verified & pay",
           ctaDisabled: true,
-          note: "unlocks stake · pays worker & verifier",
+          note: "pays worker & verifier once the maintainer approves the PR",
         }}
       />
 
@@ -509,18 +603,19 @@ See §3.1 of the runbook for the cosign requirement.`,
         runId="run-2742"
         contextNote={
           <>
-            Window closes in <b className="font-semibold text-[var(--avy-ink)]">21m 46s</b>
-            {" · "}policy{" "}
-            <b className="font-semibold text-[var(--avy-ink)]">writer-gov/cited</b>
-            {" · "}cosign{" "}
-            <b className="font-semibold text-[var(--avy-ink)]">required</b>
+            Window closes in{" "}
+            <b className="font-semibold text-[var(--avy-ink)]">21m 46s</b>
+            {" · "}verification{" "}
+            <b className="font-semibold text-[var(--avy-ink)]">github_pr</b>
+            {" · "}PR{" "}
+            <b className="font-semibold text-[var(--avy-ink)]">#4931</b> opened
           </>
         }
         stages={LIFECYCLE}
         next={{
           label: "Next",
-          value: "Cosign → Settle",
-          sub: "auto-settles on cosign +2s",
+          value: "Maintainer review → Pay",
+          sub: "auto-pays on PR merge + CI green",
         }}
       />
     </div>
