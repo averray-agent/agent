@@ -170,26 +170,36 @@ Expected signals:
 
 ### Frontend-only changes
 
-Public site and app frontend files are mounted directly into Caddy, so a repo
-pull is enough:
+Use the scripted frontend deploy. The operator app is a static Next export
+served by Caddy from `/srv/agent-stack/app/frontend`; a plain `git pull` does
+not rebuild that export.
 
 ```bash
 cd /srv/agent-stack/app
-git pull
+./scripts/ops/redeploy-frontend.sh
 ```
 
-Hard refresh the browser after pulling.
+The script now:
 
-If the Caddy routing shape changed too, also restart Caddy:
+1. Pins the pre-deploy SHA for rollback.
+2. Pulls `origin/main` with `--ff-only`.
+3. Runs `npm run build:frontend`.
+4. Syncs `app/out` into `frontend/` without replacing the mounted directory.
+5. Polls `https://app.averray.com/` for the operator shell.
+6. Rolls back and rebuilds the previous frontend if the check fails.
+
+If the operator app is protected with browser basic auth, pass those
+credentials into the health gate:
 
 ```bash
-cd /srv/agent-stack
-docker compose restart caddy
+cd /srv/agent-stack/app
+APP_BASIC_AUTH_USER=operator \
+APP_BASIC_AUTH_PASSWORD='replace-with-a-strong-password' \
+./scripts/ops/redeploy-frontend.sh
 ```
 
-If the operator app is protected with browser basic auth, re-render
-`/srv/agent-stack/Caddyfile` through `scripts/ops/render-caddyfile.sh`
-after pulling, then restart Caddy.
+If the Caddy routing shape changed too, render/apply the Caddyfile separately
+through the Caddy config flow above.
 
 ### Backend changes
 
@@ -593,7 +603,6 @@ For the human-readable checklist that goes with this command, see
 - Structured logs are JSON on stdout with a per-request `requestId`. Filter with
   `docker compose logs backend | jq 'select(.requestId == "...")'`.
 - For an external uptime runner or cron smoke check, use:
-- For an external uptime runner or cron smoke check, use:
   ```bash
   cd /srv/agent-stack/app
   ./scripts/ops/check-hosted-stack.sh
@@ -612,6 +621,13 @@ For the human-readable checklist that goes with this command, see
   ```
   It runs the same smoke check and POSTs a JSON alert payload to the webhook
   if the check fails.
+- To run the hosted stack check every five minutes with cron:
+  ```cron
+  */5 * * * * cd /srv/agent-stack/app && ALERT_WEBHOOK_URL=https://your-alert-webhook ./scripts/ops/check-hosted-stack-and-alert.sh
+  ```
+  If `app.averray.com` uses browser basic auth, include
+  `APP_BASIC_AUTH_USER` and `APP_BASIC_AUTH_PASSWORD` in the cron environment
+  or in a root-readable env file sourced by the cron entry.
 
 ## Monthly backup-restore drill
 

@@ -27,6 +27,16 @@ averray.com, www.averray.com {
 app.averray.com {
   encode zstd gzip
 
+  handle /api/events* {
+    uri strip_prefix /api
+    reverse_proxy backend:8787 {
+      flush_interval -1
+      transport http {
+        read_timeout 0
+      }
+    }
+  }
+
   handle_path /api/* {
     reverse_proxy backend:8787
   }
@@ -42,6 +52,16 @@ app.averray.com {
 # Backend API
 api.averray.com {
   encode zstd gzip
+
+  handle /events* {
+    reverse_proxy backend:8787 {
+      flush_interval -1
+      transport http {
+        read_timeout 0
+      }
+    }
+  }
+
   reverse_proxy backend:8787
 }
 

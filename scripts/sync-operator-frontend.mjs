@@ -17,9 +17,33 @@ async function ensureOutExists() {
   }
 }
 
-await ensureOutExists();
-await rm(frontendDir, { recursive: true, force: true });
-await mkdir(frontendDir, { recursive: true });
-await cp(outDir, frontendDir, { recursive: true });
+async function syncDirectory(sourceDir, targetDir) {
+  await mkdir(targetDir, { recursive: true });
 
-console.log("Synced app/out operator assets into frontend/.");
+  const [sourceEntries, targetEntries] = await Promise.all([
+    readdir(sourceDir, { withFileTypes: true }),
+    readdir(targetDir, { withFileTypes: true }).catch(() => [])
+  ]);
+  const sourceNames = new Set(sourceEntries.map((entry) => entry.name));
+
+  await Promise.all(
+    targetEntries
+      .filter((entry) => !sourceNames.has(entry.name))
+      .map((entry) => rm(path.join(targetDir, entry.name), { recursive: true, force: true }))
+  );
+
+  for (const entry of sourceEntries) {
+    const sourcePath = path.join(sourceDir, entry.name);
+    const targetPath = path.join(targetDir, entry.name);
+    if (entry.isDirectory()) {
+      await syncDirectory(sourcePath, targetPath);
+      continue;
+    }
+    await cp(sourcePath, targetPath, { force: true });
+  }
+}
+
+await ensureOutExists();
+await syncDirectory(outDir, frontendDir);
+
+console.log("Synced app/out operator assets into frontend/ without replacing the mounted directory.");
