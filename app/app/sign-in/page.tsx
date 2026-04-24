@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { ShieldCheck, Wallet } from "lucide-react";
@@ -12,6 +12,26 @@ import { signIn, WalletUnavailableError } from "@/lib/auth/siwe";
 import { useAuth } from "@/lib/auth/use-auth";
 
 export default function SignInPage() {
+  return (
+    <Suspense fallback={<SignInFallback />}>
+      <SignInContent />
+    </Suspense>
+  );
+}
+
+function SignInFallback() {
+  return (
+    <main className="grid min-h-screen place-items-center bg-[var(--bg)] px-6 py-12">
+      <Card className="w-full max-w-[420px]">
+        <CardContent className="py-8">
+          <p className="text-sm text-[var(--muted)]">Preparing sign-in…</p>
+        </CardContent>
+      </Card>
+    </main>
+  );
+}
+
+function SignInContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const auth = useAuth();
