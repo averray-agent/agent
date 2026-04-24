@@ -17,6 +17,25 @@ const DEFAULT_AGENT_PROFILE = {
 
 const VALID_TIERS = new Set(["starter", "pro", "elite"]);
 const VALID_VERIFIER_MODES = new Set(["benchmark", "deterministic", "human_fallback"]);
+const VALID_JOB_TYPES = new Set(["work", "curation", "review", "publish", "verification"]);
+const VALID_AGENT_ROLES = new Set(["worker", "curator", "reviewer", "publisher", "verifier", "arbitrator"]);
+
+export const ROLE_REQUIREMENTS = {
+  worker: { skill: 0 },
+  curator: { skill: 50 },
+  reviewer: { skill: 100 },
+  publisher: { skill: 200 },
+  verifier: { skill: 300 },
+  arbitrator: { skill: 500 }
+};
+
+const DEFAULT_ROLE_BY_JOB_TYPE = {
+  work: "worker",
+  curation: "curator",
+  review: "reviewer",
+  publish: "publisher",
+  verification: "verifier"
+};
 
 /**
  * Single source of truth for which reputation scores a wallet needs to
@@ -75,6 +94,29 @@ export function nextLockedTier(reputation) {
     }
   }
   return null;
+}
+
+export function roleRequirements(role) {
+  return ROLE_REQUIREMENTS[role] ?? ROLE_REQUIREMENTS.worker;
+}
+
+export function summarizeRoleGate(role, reputation) {
+  const normalised = VALID_AGENT_ROLES.has(role) ? role : "worker";
+  const requires = { ...roleRequirements(normalised) };
+  const has = {
+    skill: Number.isInteger(reputation?.skill) ? reputation.skill : 0,
+    reliability: Number.isInteger(reputation?.reliability) ? reputation.reliability : 0,
+    economic: Number.isInteger(reputation?.economic) ? reputation.economic : 0
+  };
+  const missing = {};
+  for (const [key, required] of Object.entries(requires)) {
+    const current = has[key] ?? 0;
+    if (current < required) {
+      missing[key] = required - current;
+    }
+  }
+  const unlocked = Object.keys(missing).length === 0;
+  return { role: normalised, unlocked, requires, has, missing };
 }
 
 export class JobCatalogService {
@@ -194,6 +236,9 @@ export class JobCatalogService {
     return Promise.all(this.jobs.map(async (job) => {
       const netReward = await this.estimateNetReward(wallet, job.id);
       const tierGate = summarizeTierGate(job.tier, reputation);
+      const jobType = effectiveJobType(job);
+      const requiredRole = effectiveRequiredRole(job);
+      const roleGate = summarizeRoleGate(requiredRole, reputation);
       const eligible = this.isEligible(job, profile, reputation);
       const liquid = account.liquid[job.rewardAsset] ?? 0;
       const claimStake = Math.max((job.rewardAmount * claimStakeBps) / 10_000, 0);
@@ -206,7 +251,10 @@ export class JobCatalogService {
         eligible,
         tier: job.tier,
         tierGate,
-        explanation: buildRecommendationExplanation({ job, eligible, tierGate, profile })
+        jobType,
+        requiredRole,
+        roleGate,
+        explanation: buildRecommendationExplanation({ job, eligible, tierGate, roleGate, profile })
       };
     })).then((recommendations) => recommendations.sort((left, right) => right.fitScore - left.fitScore));
   }
@@ -225,6 +273,9 @@ export class JobCatalogService {
     const claimStake = Math.max((job.rewardAmount * claimStakeBps) / 10_000, 0);
     const eligible = this.isEligible(job, profile, reputation);
     const tierGate = summarizeTierGate(job.tier, reputation);
+    const jobType = effectiveJobType(job);
+    const requiredRole = effectiveRequiredRole(job);
+    const roleGate = summarizeRoleGate(requiredRole, reputation);
 
     return {
       wallet,
@@ -240,6 +291,9 @@ export class JobCatalogService {
       verifierConfig: job.verifierConfig,
       tier: job.tier,
       tierGate,
+      jobType,
+      requiredRole,
+      roleGate,
       failureStates: [
         "verifier_timeout",
         "submission_rejected",
@@ -255,12 +309,18 @@ export class JobCatalogService {
     const profile = this.requireProfile(wallet);
     const reputation = await this.getReputation(wallet);
     const tierGate = summarizeTierGate(job.tier, reputation);
+    const jobType = effectiveJobType(job);
+    const requiredRole = effectiveRequiredRole(job);
+    const roleGate = summarizeRoleGate(requiredRole, reputation);
 
     return {
       jobId,
       wallet,
       tier: job.tier,
       tierGate,
+      jobType,
+      requiredRole,
+      roleGate,
       preferredCategory: profile.preferredCategories.includes(job.category),
       supportsVerifier: profile.verifierCompatibility.includes(job.verifierMode),
       reputationTier: reputation.tier,
@@ -334,7 +394,7 @@ export class JobCatalogService {
 
   isEligible(job, profile, reputation) {
     if (!profile.verifierCompatibility.includes(job.verifierMode)) return false;
-    return summarizeTierGate(job.tier, reputation).unlocked;
+    return summarizeTierGate(job.tier, reputation).unlocked && summarizeRoleGate(effectiveRequiredRole(job), reputation).unlocked;
   }
 
   normalizeJobInput(input) {
@@ -346,6 +406,8 @@ export class JobCatalogService {
     const claimTtlSeconds = Number(input?.claimTtlSeconds ?? 3600);
     const retryLimit = Number(input?.retryLimit ?? 1);
     const rewardAsset = String(input?.rewardAsset ?? "DOT").trim().toUpperCase();
+    const jobType = normalizeJobType(input?.jobType);
+    const requiredRole = normalizeAgentRole(input?.requiredRole ?? DEFAULT_ROLE_BY_JOB_TYPE[jobType]);
 
     if (!id) {
       throw new ValidationError("Job id is required.");
@@ -358,6 +420,12 @@ export class JobCatalogService {
     }
     if (!VALID_VERIFIER_MODES.has(verifierMode)) {
       throw new ValidationError(`Invalid verifier mode: ${verifierMode}`);
+    }
+    if (!jobType) {
+      throw new ValidationError(`Invalid job type: ${input?.jobType}`);
+    }
+    if (!requiredRole) {
+      throw new ValidationError(`Invalid required role: ${input?.requiredRole}`);
     }
     if (!Number.isFinite(rewardAmount) || rewardAmount <= 0) {
       throw new ValidationError("Reward amount must be greater than zero.");
@@ -390,11 +458,20 @@ export class JobCatalogService {
     // expression; each firing mints a derivative job with its own id.
     const recurring = Boolean(input?.recurring);
     const schedule = normaliseSchedule(input?.schedule, recurring);
+    const title = normaliseTextField(input?.title);
+    const description = normaliseTextField(input?.description);
+    const acceptanceCriteria = normaliseStringList(input?.acceptanceCriteria);
+    const agentInstructions = normaliseStringList(input?.agentInstructions);
+    const estimatedDifficulty = normaliseTextField(input?.estimatedDifficulty);
+    const source = normalisePlainObject(input?.source, "source");
+    const verification = normalisePlainObject(input?.verification, "verification");
 
     return {
       id,
       category,
       tier,
+      jobType,
+      requiredRole,
       rewardAsset,
       rewardAmount,
       verifierMode,
@@ -404,6 +481,13 @@ export class JobCatalogService {
       claimTtlSeconds,
       retryLimit,
       requiresSponsoredGas: Boolean(input?.requiresSponsoredGas),
+      ...(title ? { title } : {}),
+      ...(description ? { description } : {}),
+      ...(source ? { source } : {}),
+      ...(acceptanceCriteria.length ? { acceptanceCriteria } : {}),
+      ...(estimatedDifficulty ? { estimatedDifficulty } : {}),
+      ...(agentInstructions.length ? { agentInstructions } : {}),
+      ...(verification ? { verification } : {}),
       ...(parentSessionId ? { parentSessionId } : {}),
       ...(recurring ? { recurring: true } : {}),
       ...(schedule ? { schedule } : {})
@@ -557,7 +641,48 @@ function normaliseSchedule(raw, recurring) {
  * it's the blocker. Pulled out of `recommendJobs` so the string is easy
  * to tweak without touching the rest of the request flow.
  */
-function buildRecommendationExplanation({ job, eligible, tierGate, profile }) {
+function normalizeJobType(value) {
+  const normalised = String(value ?? "work").trim().toLowerCase();
+  return VALID_JOB_TYPES.has(normalised) ? normalised : undefined;
+}
+
+function normalizeAgentRole(value) {
+  const normalised = String(value ?? "worker").trim().toLowerCase();
+  return VALID_AGENT_ROLES.has(normalised) ? normalised : undefined;
+}
+
+function effectiveJobType(job) {
+  return normalizeJobType(job?.jobType) ?? "work";
+}
+
+function effectiveRequiredRole(job) {
+  return normalizeAgentRole(job?.requiredRole) ?? DEFAULT_ROLE_BY_JOB_TYPE[effectiveJobType(job)] ?? "worker";
+}
+
+function normaliseTextField(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function normaliseStringList(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.map((entry) => String(entry).trim()).filter(Boolean);
+}
+
+function normalisePlainObject(value, field) {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new ValidationError(`${field} must be an object if provided.`);
+  }
+  return JSON.parse(JSON.stringify(value));
+}
+
+function buildRecommendationExplanation({ job, eligible, tierGate, roleGate, profile }) {
+  const jobType = effectiveJobType(job);
+  const requiredRole = effectiveRequiredRole(job);
   if (eligible) {
     return `Eligible via ${job.category} preferences and ${job.verifierMode} verifier support.`;
   }
@@ -566,6 +691,12 @@ function buildRecommendationExplanation({ job, eligible, tierGate, profile }) {
       .map(([key, gap]) => `${gap} more ${key}`)
       .join(", ");
     return `${job.tier} tier locked — earn ${gaps} to unlock this job.`;
+  }
+  if (roleGate && !roleGate.unlocked) {
+    const gaps = Object.entries(roleGate.missing)
+      .map(([key, gap]) => `${gap} more ${key}`)
+      .join(", ");
+    return `${requiredRole} role locked — earn ${gaps} to unlock this ${jobType} job.`;
   }
   if (!profile.verifierCompatibility.includes(job.verifierMode)) {
     return `Verifier mode ${job.verifierMode} not in this wallet's capability list.`;

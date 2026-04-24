@@ -40,6 +40,7 @@ const DISCOVERY_AUTHENTICATED_ENDPOINTS = [
   { path: "/reputation", description: "Current reputation scores + tier." },
   { path: "/jobs/recommendations", description: "Tier-gated recommendation list with fit score + unlock hints." },
   { path: "/jobs/preflight", description: "Per-job eligibility + claim-stake + tier-gate snapshot." },
+  { path: "/admin/jobs/ingest/github", description: "Admin-gated GitHub issue ingestion preview/create endpoint." },
   { path: "/disputes", description: "Operator dispute queue derived from sessions requiring human review." },
   { path: "/disputes/:id", description: "Detailed dispute evidence, timeline, verdict, and stake release state." },
   { path: "/session", description: "Fetch a single session by id (owner-scoped)." },

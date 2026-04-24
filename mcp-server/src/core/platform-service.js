@@ -37,6 +37,7 @@ export class PlatformService {
     this.stateStore = stateStore;
     this.eventBus = eventBus;
     this.recurringScheduler = recurringScheduler;
+    this.githubIssueIngestionScheduler = undefined;
     this.xcmSettlementWatcher = undefined;
     this.xcmObservationRelay = undefined;
 
@@ -99,7 +100,7 @@ export class PlatformService {
   }
 
   async getAdminStatus({ auth = undefined } = {}) {
-    const [policy, recurring, scheduler, recentSessions] = await Promise.all([
+    const [policy, recurring, scheduler, githubIngestion, recentSessions] = await Promise.all([
       this.blockchainGateway?.getTreasuryPolicyStatus?.() ?? {
         enabled: false,
         policyAddress: undefined,
@@ -110,6 +111,17 @@ export class PlatformService {
       },
       this.jobCatalogService.getRecurringTemplateStatus(),
       this.recurringScheduler?.getStatus?.() ?? { enabled: false, running: false, templates: [] },
+      this.githubIssueIngestionScheduler?.getStatus?.() ?? {
+        enabled: false,
+        running: false,
+        dryRun: true,
+        intervalMs: 0,
+        queryCount: 0,
+        minScore: 0,
+        maxJobsPerRun: 0,
+        maxOpenJobs: 0,
+        lastRun: undefined
+      },
       this.jobExecutionService.listRecentSessions(14)
     ]);
     const recentEvents = this.eventBus?.replay?.({}, undefined)?.events ?? [];
@@ -199,6 +211,7 @@ export class PlatformService {
       },
       recurring: recurring,
       scheduler,
+      githubIngestion: githubIngestion,
       xcmSettlementWatcher: await this.xcmSettlementWatcher?.getStatus?.() ?? {
         enabled: false,
         running: false,

@@ -22,6 +22,7 @@ import {
   listBuiltinJobSchemas,
   schemaRefToJobSchemaPath
 } from "../../core/job-schema-registry.js";
+import { ingestGithubIssues } from "../../jobs/ingest-github-issues.js";
 
 const {
   platformService: service,
@@ -169,6 +170,14 @@ function safeChecksum(raw) {
 
 function parseLimit(url, fallback = 50, max = 250) {
   const raw = Number(url.searchParams.get("limit") ?? fallback);
+  if (!Number.isFinite(raw) || raw <= 0) {
+    return fallback;
+  }
+  return Math.min(Math.trunc(raw), max);
+}
+
+function parsePositiveInteger(value, fallback, max = Number.MAX_SAFE_INTEGER) {
+  const raw = Number(value ?? fallback);
   if (!Number.isFinite(raw) || raw <= 0) {
     return fallback;
   }
@@ -806,6 +815,7 @@ function metricPathLabel(pathname) {
     "/session/state-machine",
     "/strategies",
     "/admin/jobs",
+    "/admin/jobs/ingest/github",
     "/admin/jobs/pause",
     "/admin/jobs/resume",
     "/admin/xcm/observe",
@@ -2060,6 +2070,70 @@ const server = createServer(async (request, response) => {
         await stateStore.upsertMutationReceipt?.("admin_jobs", mutationKey, created);
       }
       return respond(response, 201, created);
+    }
+
+    if (request.method === "POST" && pathname === "/admin/jobs/ingest/github") {
+      const auth = await authMiddleware(request, url, { requireRole: "admin" });
+      await enforceLimit("admin_jobs", auth.wallet, rateLimitConfig.adminJobs);
+      const payload = await readJsonBody(request);
+      const query = typeof payload?.query === "string" && payload.query.trim()
+        ? payload.query.trim()
+        : undefined;
+      const limit = parsePositiveInteger(payload?.limit, 10, 50);
+      const minScore = parsePositiveInteger(payload?.minScore, 55, 100);
+      const dryRun = payload?.dryRun !== false;
+      const result = await ingestGithubIssues({
+        query,
+        limit,
+        minScore,
+        githubToken: process.env.GITHUB_TOKEN?.trim() || undefined
+      });
+
+      if (dryRun) {
+        return respond(response, 200, {
+          ...result,
+          dryRun: true,
+          created: [],
+          skipped: [
+            ...(Array.isArray(result.skipped) ? result.skipped : []),
+            ...(Number.isFinite(result.skipped) ? [{ reason: "below_min_score_or_over_limit", count: result.skipped }] : [])
+          ]
+        });
+      }
+
+      const created = [];
+      const skipped = [];
+      const errors = [];
+      for (const job of result.jobs) {
+        try {
+          created.push(service.createJob(job));
+        } catch (error) {
+          const normalized = normalizeError(error);
+          if (normalized.code === "job_exists") {
+            skipped.push({ id: job.id, reason: "already_exists" });
+            continue;
+          }
+          errors.push({
+            id: job.id,
+            code: normalized.code,
+            message: normalized.message
+          });
+        }
+      }
+
+      const status = errors.length ? 207 : 201;
+      return respond(response, status, {
+        query: result.query,
+        minScore: result.minScore,
+        dryRun: false,
+        candidateCount: result.count,
+        created,
+        skipped: [
+          ...skipped,
+          ...(Number.isFinite(result.skipped) ? [{ reason: "below_min_score_or_over_limit", count: result.skipped }] : [])
+        ],
+        errors
+      });
     }
 
     if (request.method === "POST" && pathname === "/admin/jobs/fire") {
