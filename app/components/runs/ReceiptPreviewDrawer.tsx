@@ -2,7 +2,7 @@
 
 import { DetailDrawer, DrawerSection } from "@/components/shell/DetailDrawer";
 import { SourceBadge, StatePill, type RunState } from "./StatePill";
-import type { GitHubJobContext } from "./types";
+import type { GitHubJobContext, WikipediaJobContext } from "./types";
 import { cn } from "@/lib/utils/cn";
 
 /**
@@ -33,6 +33,12 @@ export interface ReceiptPreviewDraft {
   };
   evidenceHash?: string;
   github?: GitHubJobContext;
+  /**
+   * Set when the loaded run is a Wikipedia maintenance proposal. The
+   * drawer shows page metadata + the proposal-only attribution line.
+   * Mutually exclusive with `github` at runtime.
+   */
+  wikipedia?: WikipediaJobContext;
   prUrl?: string;
   signers: { label: string; status: "pending" | "signed" }[];
 }
@@ -112,6 +118,77 @@ export function ReceiptPreviewDrawer({
               View PR ↗
             </a>
           ) : null}
+        </DrawerSection>
+      ) : null}
+
+      {draft.wikipedia ? (
+        <DrawerSection title="Source">
+          <div className="flex flex-wrap items-center gap-2 rounded-[8px] border border-[var(--avy-line)] bg-[color:rgba(17,19,21,0.02)] px-3 py-2">
+            <SourceBadge kind="wikipedia" />
+            <a
+              href={draft.wikipedia.pageUrl}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="font-[family-name:var(--font-mono)] text-[12px] text-[var(--avy-ink)] hover:text-[var(--avy-accent)]"
+              style={{ letterSpacing: 0 }}
+            >
+              <span className="text-[var(--avy-muted)]">
+                {draft.wikipedia.language}.wikipedia
+              </span>
+              <span className="ml-0.5 text-[var(--avy-accent)]">
+                / {draft.wikipedia.pageTitle}
+              </span>
+            </a>
+            <span className="opacity-40">·</span>
+            <span
+              className="font-[family-name:var(--font-mono)] text-[11.5px] uppercase text-[var(--avy-muted)]"
+              style={{ letterSpacing: "0.08em" }}
+            >
+              {draft.wikipedia.taskType.replace(/_/g, " ")}
+            </span>
+          </div>
+
+          <dl
+            className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 font-[family-name:var(--font-mono)] text-[11.5px]"
+            style={{ letterSpacing: 0 }}
+          >
+            <dt className="text-[var(--avy-muted)]">Page title</dt>
+            <dd className="m-0 truncate font-medium text-[var(--avy-ink)]">
+              {draft.wikipedia.pageTitle}
+            </dd>
+            <dt className="text-[var(--avy-muted)]">Revision</dt>
+            <dd className="m-0 font-medium text-[var(--avy-ink)]">
+              {draft.wikipedia.revisionId}
+            </dd>
+            <dt className="text-[var(--avy-muted)]">Task type</dt>
+            <dd className="m-0 font-medium text-[var(--avy-ink)]">
+              {draft.wikipedia.taskType.replace(/_/g, " ")}
+            </dd>
+          </dl>
+
+          {/* Attribution + non-edit policy. The receipt is the only
+              place in the audit trail where this proposal-only stance is
+              spelled out for downstream consumers, so we show it here
+              even though the panel already shows it. */}
+          <p
+            className="mt-2 rounded-[6px] border border-[var(--avy-warn)] bg-[color:rgba(211,145,27,0.08)] px-2.5 py-2 font-[family-name:var(--font-mono)] text-[11px] leading-[1.5] text-[var(--avy-ink)]"
+            style={{ letterSpacing: 0 }}
+          >
+            <b className="font-semibold">Attribution:</b> Averray (proposal
+            only). Public Wikipedia edits, if any, are performed downstream
+            by an approved Averray editor or bot — never directly by the
+            agent.
+          </p>
+
+          <a
+            href={draft.wikipedia.pageUrl}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="mt-2 inline-flex h-7 items-center gap-1.5 rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3 font-[family-name:var(--font-display)] text-[11px] font-bold uppercase text-[var(--avy-ink)] transition-transform hover:-translate-y-px hover:border-[color:rgba(30,102,66,0.24)] hover:text-[var(--avy-accent)]"
+            style={{ letterSpacing: "0.04em" }}
+          >
+            Open Wikipedia article ↗
+          </a>
         </DrawerSection>
       ) : null}
 

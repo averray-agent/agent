@@ -2,7 +2,11 @@ import type { JobCardData } from "@/components/runs/JobCard";
 import type { QueueFilterCount } from "@/components/runs/QueueBar";
 import type { RunRow } from "@/components/runs/RunQueueTable";
 import type { RunState, Tier } from "@/components/runs/StatePill";
-import type { GitHubJobContext, JobSource } from "@/components/runs/types";
+import type {
+  GitHubJobContext,
+  JobSource,
+  WikipediaJobContext,
+} from "@/components/runs/types";
 
 type RawRecord = Record<string, unknown>;
 
@@ -93,31 +97,52 @@ function lookupJob(jobs: RawRecord[], id: unknown): RawRecord {
 }
 
 /**
- * Pull a lightweight provenance block off a job record. GitHub-ingested
- * jobs carry a `source.type === "github_issue"` block with the repo,
- * issue number, URL, labels, and ingestion score. Native platform jobs
- * either omit `source` or emit `{ type: "native" }`; those return
- * undefined so the UI renders the generic layout.
+ * Pull a lightweight provenance block off a job record. GitHub- and
+ * Wikipedia-ingested jobs carry a `source.type` discriminator plus the
+ * upstream handle (repo + issue, or page title + revision). Native
+ * platform jobs either omit `source` or emit `{ type: "native" }`;
+ * those return undefined so the UI renders the generic layout.
  */
 export function buildJobSource(job: unknown): JobSource | undefined {
   const src = asRecord(asRecord(job).source);
-  if (text(src.type) !== "github_issue") return undefined;
-  const repo = text(src.repo);
-  const issueNumber = numberValue(src.issueNumber);
-  const issueUrl = text(src.issueUrl);
-  if (!repo || !issueNumber || !issueUrl) return undefined;
-  const labels = Array.isArray(src.labels)
-    ? src.labels.filter((label): label is string => typeof label === "string")
-    : undefined;
-  const score = typeof src.score === "number" ? src.score : undefined;
-  return {
-    type: "github_issue",
-    repo,
-    issueNumber,
-    issueUrl,
-    ...(labels && labels.length ? { labels } : {}),
-    ...(score !== undefined ? { score } : {}),
-  };
+  const sourceType = text(src.type);
+  if (sourceType === "github_issue") {
+    const repo = text(src.repo);
+    const issueNumber = numberValue(src.issueNumber);
+    const issueUrl = text(src.issueUrl);
+    if (!repo || !issueNumber || !issueUrl) return undefined;
+    const labels = Array.isArray(src.labels)
+      ? src.labels.filter((label): label is string => typeof label === "string")
+      : undefined;
+    const score = typeof src.score === "number" ? src.score : undefined;
+    return {
+      type: "github_issue",
+      repo,
+      issueNumber,
+      issueUrl,
+      ...(labels && labels.length ? { labels } : {}),
+      ...(score !== undefined ? { score } : {}),
+    };
+  }
+  if (sourceType === "wikipedia_article") {
+    const pageTitle = text(src.pageTitle);
+    const language = text(src.language, "en");
+    const pageUrl = text(src.pageUrl);
+    const revisionId = numberValue(src.revisionId);
+    const taskType = text(src.taskType);
+    if (!pageTitle || !pageUrl || !revisionId || !taskType) return undefined;
+    const score = typeof src.score === "number" ? src.score : undefined;
+    return {
+      type: "wikipedia_article",
+      pageTitle,
+      language,
+      pageUrl,
+      revisionId,
+      taskType,
+      ...(score !== undefined ? { score } : {}),
+    };
+  }
+  return undefined;
 }
 
 /**
@@ -155,6 +180,49 @@ export function buildGitHubContext(
   };
 }
 
+/**
+ * Mirror of `buildGitHubContext` for Wikipedia maintenance runs. Returns
+ * undefined for any non-Wikipedia row so the panel falls back to the
+ * generic layout. Defaults bake in the proposal-only verification path
+ * since the platform never edits Wikipedia directly.
+ */
+export function buildWikipediaContext(
+  row: Pick<RunRow, "source" | "title">,
+  job: unknown
+): WikipediaJobContext | undefined {
+  if (row.source?.type !== "wikipedia_article") return undefined;
+  const record = asRecord(job);
+  const verification = asRecord(record.verification);
+  const verificationMethod = text(
+    verification.method,
+    "wikipedia_proposal_review"
+  );
+  const verificationSignals = Array.isArray(verification.signals)
+    ? verification.signals.filter(
+        (signal): signal is string => typeof signal === "string"
+      )
+    : [
+        "Proposal submitted to Averray",
+        "Evidence verified",
+        "Editor review · Averray-approved",
+      ];
+  const acceptance = Array.isArray(record.acceptanceCriteria)
+    ? record.acceptanceCriteria.filter(
+        (item): item is string => typeof item === "string"
+      )
+    : [];
+
+  return {
+    ...row.source,
+    title: text(record.title, row.title),
+    category: text(record.category, "wikipedia"),
+    body: text(record.description, text(record.body, "")),
+    acceptanceCriteria: acceptance,
+    agentInstructions: text(record.agentInstructions),
+    verification: { method: verificationMethod, signals: verificationSignals },
+  };
+}
+
 export function extractRunJobs(payload: unknown): RawRecord[] {
   return asArray(payload);
 }
@@ -167,14 +235,17 @@ export function buildRunRows(payload: unknown): RunRow[] {
     const worker = text(job.claimedBy) || text(job.worker);
 
     const source = buildJobSource(job);
-    // For GitHub-ingested jobs the row already shows `owner/repo #N` via
-    // the SourceBadge, so drop the redundant job-id slug from jobMeta to
-    // keep the meta line scannable. Native jobs keep the full
-    // `id · category · tier` because there's no other provenance signal.
-    const jobMeta =
-      source?.type === "github_issue"
-        ? `${text(job.category, "work")} · ${tierFromRaw(job.tier)}`
-        : `${id} · ${text(job.category, "work")} · ${tierFromRaw(job.tier)}`;
+    // For ingested-source jobs the row already shows the upstream
+    // identity (owner/repo #N for GitHub, lang.wikipedia/page for
+    // Wikipedia) via the SourceBadge, so drop the redundant job-id
+    // slug from jobMeta to keep the meta line scannable. Native jobs
+    // keep the full `id · category · tier` because there's no other
+    // provenance signal.
+    const isIngested =
+      source?.type === "github_issue" || source?.type === "wikipedia_article";
+    const jobMeta = isIngested
+      ? `${text(job.category, "work")} · ${tierFromRaw(job.tier)}`
+      : `${id} · ${text(job.category, "work")} · ${tierFromRaw(job.tier)}`;
     return {
       id,
       sessionId: text(job.sessionId),
@@ -194,13 +265,19 @@ export function buildRunRows(payload: unknown): RunRow[] {
           ? state === "ready"
             ? "Ingested from GitHub"
             : `State: ${state}`
-          : state === "ready"
-            ? "Job listed"
-            : `State: ${state}`,
+          : source?.type === "wikipedia_article"
+            ? state === "ready"
+              ? "Ingested from Wikipedia · proposal-only"
+              : `State: ${state}`
+            : state === "ready"
+              ? "Job listed"
+              : `State: ${state}`,
       lastEventMeta:
         source?.type === "github_issue"
           ? `${source.repo} #${source.issueNumber} · verifier ${verifierLabel(job.verifierMode)}`
-          : `${text(job.rewardAsset, "DOT")} · verifier ${verifierLabel(job.verifierMode)}`,
+          : source?.type === "wikipedia_article"
+            ? `${source.language}.wikipedia · rev ${source.revisionId} · ${source.taskType.replace(/_/g, " ")}`
+            : `${text(job.rewardAsset, "DOT")} · verifier ${verifierLabel(job.verifierMode)}`,
     };
   });
 }
@@ -246,9 +323,14 @@ export function buildRecommendationCards(
         { label: "Verifier", value: verifierLabel(job.verifierMode) },
         { label: "Window", value: formatWindow(job.claimTtlSeconds), accent: true },
         {
-          label: source?.type === "github_issue" ? "Fit score" : "Gas",
+          label:
+            source?.type === "github_issue" ||
+            source?.type === "wikipedia_article"
+              ? "Fit score"
+              : "Gas",
           value:
-            source?.type === "github_issue"
+            source?.type === "github_issue" ||
+            source?.type === "wikipedia_article"
               ? `${source.score ?? fitScore}/100`
               : job.requiresSponsoredGas
                 ? "sponsored"

@@ -172,6 +172,20 @@ function RunRowCard({
                     {row.jobMeta}
                   </span>
                 </>
+              ) : row.source?.type === "wikipedia_article" ? (
+                <>
+                  <SourceBadge kind="wikipedia" className="shrink-0" />
+                  <span className="truncate">
+                    <span>{row.source.language}.wikipedia</span>
+                    <span className="text-[var(--avy-accent)]">
+                      {" "}/ {row.source.pageTitle}
+                    </span>
+                  </span>
+                  <span className="shrink-0 opacity-40">·</span>
+                  <span className="shrink-0 whitespace-nowrap">
+                    {row.jobMeta}
+                  </span>
+                </>
               ) : (
                 <span className="truncate">{row.jobMeta}</span>
               )}

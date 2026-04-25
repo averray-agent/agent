@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils/cn";
 import { SourceBadge, type RunState } from "./StatePill";
 import { IssueMarkdown } from "./IssueMarkdown";
-import type { GitHubJobContext } from "./types";
+import type { GitHubJobContext, WikipediaJobContext } from "./types";
 
 /**
  * Map the run's lifecycle state to the stake-block pill + copy. Keeps
@@ -122,6 +122,14 @@ export interface LoadedRunPanelProps {
    * evidence layout.
    */
   github?: GitHubJobContext;
+  /**
+   * Same shape as `github` but for Wikipedia maintenance proposals. The
+   * panel renders a parallel block that surfaces page metadata (title,
+   * language, revision, task type) plus a hard proposal-only policy
+   * banner — the platform never edits Wikipedia directly. `github` and
+   * `wikipedia` are mutually exclusive at runtime.
+   */
+  wikipedia?: WikipediaJobContext;
   /**
    * Lifecycle state of the loaded run. Drives the stake block's pill +
    * aux copy so the panel doesn't shout "LOCKED" on a run that hasn't
@@ -267,12 +275,14 @@ export function LoadedRunPanel(props: LoadedRunPanelProps) {
             </div>
           </div>
 
-          {/* Evidence — switches to a GitHub-specific 4-tab layout when the
-               loaded run was ingested from a GitHub issue, so the operator
-               sees the real job context instead of generic placeholder
-               governance text. */}
+          {/* Evidence — switches to a source-specific 4-tab layout when the
+               loaded run was ingested from a third-party tracker (GitHub
+               issue, Wikipedia maintenance), so the operator sees real job
+               context instead of generic placeholder governance text. */}
           {props.github ? (
             <GitHubEvidenceBlock ctx={props.github} />
+          ) : props.wikipedia ? (
+            <WikipediaEvidenceBlock ctx={props.wikipedia} />
           ) : (
             <div>
               <BlockLabel
@@ -473,6 +483,14 @@ export function LoadedRunPanel(props: LoadedRunPanelProps) {
                   <SmallGhostBtn>Raise dispute</SmallGhostBtn>
                   <SmallGhostBtn>Abandon</SmallGhostBtn>
                 </>
+              ) : props.wikipedia ? (
+                <>
+                  <SmallGhostBtn className="flex-1">
+                    Ping editor reviewer
+                  </SmallGhostBtn>
+                  <SmallGhostBtn>Raise dispute</SmallGhostBtn>
+                  <SmallGhostBtn>Withdraw proposal</SmallGhostBtn>
+                </>
               ) : (
                 <>
                   <SmallGhostBtn className="flex-1">Request cosign</SmallGhostBtn>
@@ -609,6 +627,311 @@ function GitHubEvidenceBlock({ ctx }: { ctx: GitHubJobContext }) {
             </span>
           ))}
         </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Wikipedia equivalent of `GitHubEvidenceBlock`. Same four-tab shape so
+ * operators read the surface the same way regardless of source: Article
+ * (page metadata + body), Acceptance, Instructions, Submission.
+ *
+ * Critically renders a hard proposal-only policy banner above the tabs.
+ * The platform never edits Wikipedia directly — agents submit evidence
+ * + a structured proposal back to Averray, and any later public
+ * Wikipedia activity is performed by Averray (or an approved Averray
+ * editor/bot account). This banner is the visible enforcement of that
+ * rule on the worker's surface.
+ */
+type WikiTab = "article" | "acceptance" | "instructions" | "submission";
+
+function WikipediaEvidenceBlock({ ctx }: { ctx: WikipediaJobContext }) {
+  const [tab, setTab] = useState<WikiTab>("article");
+
+  const tabs: { id: WikiTab; label: string; sub?: string }[] = [
+    { id: "article", label: "Article" },
+    {
+      id: "acceptance",
+      label: "Acceptance",
+      sub: `·${ctx.acceptanceCriteria.length}`,
+    },
+    { id: "instructions", label: "Instructions" },
+    { id: "submission", label: "Submission" },
+  ];
+
+  // Pretty-printed task type — backend emits snake_case (citation_repair,
+  // freshness_check, infobox_consistency); humanise for the chip.
+  const taskTypeLabel = ctx.taskType.replace(/_/g, " ");
+
+  return (
+    <div>
+      <BlockLabel
+        right={
+          <a
+            href={ctx.pageUrl}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="inline-flex items-center gap-1 text-[var(--avy-accent)] hover:underline"
+          >
+            Open Wikipedia article ↗
+          </a>
+        }
+      >
+        Job context
+      </BlockLabel>
+      <div className="flex flex-col overflow-hidden rounded-[8px] border border-[var(--avy-line)] bg-white">
+        {/* Source strip — pinned above the tabs so language, page, task
+            type, and fit score stay readable on every tab. */}
+        <div className="flex flex-wrap items-center gap-2 border-b border-[var(--avy-line-soft)] bg-[color:rgba(17,19,21,0.03)] px-3 py-2">
+          <SourceBadge kind="wikipedia" />
+          <a
+            href={ctx.pageUrl}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-ink)] hover:text-[var(--avy-accent)]"
+            style={{ letterSpacing: 0 }}
+          >
+            <span className="text-[var(--avy-muted)]">{ctx.language}.wikipedia</span>
+            <span className="text-[var(--avy-accent)]"> / {ctx.pageTitle}</span>
+          </a>
+          <span className="opacity-40">·</span>
+          <span
+            className="font-[family-name:var(--font-mono)] text-[11px] uppercase text-[var(--avy-muted)]"
+            style={{ letterSpacing: "0.08em" }}
+          >
+            {taskTypeLabel}
+          </span>
+          <span className="opacity-40">·</span>
+          <span
+            className="font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]"
+            style={{ letterSpacing: 0 }}
+          >
+            rev {ctx.revisionId}
+          </span>
+          {typeof ctx.score === "number" ? (
+            <span className="ml-auto inline-flex items-center gap-1 font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]">
+              Fit score{" "}
+              <b className="font-semibold text-[var(--avy-ink)]">{ctx.score}</b>
+              <span className="text-[var(--avy-muted)]">/100</span>
+            </span>
+          ) : null}
+        </div>
+
+        {/* Proposal-only policy banner — non-negotiable, rendered on
+            every Wikipedia run. Uses the same warn-tinted box the rest
+            of the app uses for "important but not error" notes. */}
+        <div
+          className="flex items-start gap-2 border-b border-[var(--avy-line-soft)] bg-[color:rgba(211,145,27,0.08)] px-3 py-2 font-[family-name:var(--font-mono)] text-[11px] leading-[1.5] text-[var(--avy-ink)]"
+          style={{ letterSpacing: 0 }}
+        >
+          <span
+            className="mt-px shrink-0 rounded-full bg-[var(--avy-warn)] px-1.5 py-0.5 font-[family-name:var(--font-display)] text-[9.5px] font-extrabold uppercase text-white"
+            style={{ letterSpacing: "0.1em" }}
+          >
+            Policy
+          </span>
+          <span>
+            Proposal-only. Agents submit evidence to Averray; Wikipedia edits
+            require approved Averray review.
+          </span>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex items-center gap-2 border-b border-[var(--avy-line-soft)] bg-[#faf8f1] px-2.5 py-1.5">
+          {tabs.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setTab(t.id)}
+              className={cn(
+                "rounded-[5px] px-2 py-0.5 font-[family-name:var(--font-display)] text-[10px] font-extrabold uppercase text-[var(--avy-muted)]",
+                tab === t.id &&
+                  "bg-[var(--avy-paper-solid)] text-[var(--avy-ink)] shadow-[inset_0_0_0_1px_var(--avy-line)]"
+              )}
+              style={{ letterSpacing: "0.12em" }}
+            >
+              {t.label}
+              {t.sub ? (
+                <small className="ml-1 opacity-50" style={{ letterSpacing: 0 }}>
+                  {t.sub}
+                </small>
+              ) : null}
+            </button>
+          ))}
+        </div>
+
+        <div className="px-3.5 py-3">
+          {tab === "article" ? <WikiArticleTab ctx={ctx} /> : null}
+          {tab === "acceptance" ? <WikiAcceptanceTab ctx={ctx} /> : null}
+          {tab === "instructions" ? <WikiInstructionsTab ctx={ctx} /> : null}
+          {tab === "submission" ? <WikiSubmissionTab ctx={ctx} /> : null}
+        </div>
+
+        {/* Verification footer — mirrors the GitHub block's "Verification"
+            strip but reads as a proposal-review sequence rather than a PR
+            check sequence. */}
+        <div
+          className="flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-[var(--avy-line-soft)] bg-[#faf8f1] px-3 py-2 font-[family-name:var(--font-mono)] text-[10.5px] text-[var(--avy-muted)]"
+          style={{ letterSpacing: 0 }}
+        >
+          <span className="text-[var(--avy-accent)]">Verification</span>
+          <span className="inline-flex items-center rounded-full bg-[color:rgba(17,19,21,0.06)] px-1.5 py-px font-medium text-[var(--avy-ink)]">
+            {ctx.verification.method}
+          </span>
+          {ctx.verification.signals.map((s) => (
+            <span key={s}>· {s}</span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function WikiArticleTab({ ctx }: { ctx: WikipediaJobContext }) {
+  return (
+    <>
+      <h3 className="m-0 font-[family-name:var(--font-display)] text-[14px] font-bold leading-[1.3] text-[var(--avy-ink)]">
+        {ctx.title}
+      </h3>
+
+      <dl
+        className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 font-[family-name:var(--font-mono)] text-[11.5px]"
+        style={{ letterSpacing: 0 }}
+      >
+        <dt className="text-[var(--avy-muted)]">Page title</dt>
+        <dd className="m-0 truncate font-medium text-[var(--avy-ink)]">
+          {ctx.pageTitle}
+        </dd>
+        <dt className="text-[var(--avy-muted)]">Language</dt>
+        <dd className="m-0 font-medium text-[var(--avy-ink)]">{ctx.language}</dd>
+        <dt className="text-[var(--avy-muted)]">Revision</dt>
+        <dd className="m-0 font-medium text-[var(--avy-ink)]">
+          {ctx.revisionId}
+        </dd>
+        <dt className="text-[var(--avy-muted)]">Task type</dt>
+        <dd className="m-0 font-medium text-[var(--avy-ink)]">
+          {ctx.taskType.replace(/_/g, " ")}
+        </dd>
+      </dl>
+
+      {ctx.body ? (
+        <p
+          className="mt-3 max-h-[220px] overflow-y-auto whitespace-pre-wrap font-[family-name:var(--font-body)] text-[12.5px] leading-[1.5] text-[var(--avy-ink)]"
+          style={{ letterSpacing: 0 }}
+        >
+          {ctx.body}
+        </p>
+      ) : null}
+
+      <div className="mt-3 flex justify-end">
+        <a
+          href={ctx.pageUrl}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="inline-flex h-7 items-center gap-1.5 rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3 font-[family-name:var(--font-display)] text-[11px] font-bold uppercase text-[var(--avy-ink)] transition-transform hover:-translate-y-px hover:border-[color:rgba(30,102,66,0.24)] hover:text-[var(--avy-accent)]"
+          style={{ letterSpacing: "0.04em" }}
+        >
+          Open Wikipedia article ↗
+        </a>
+      </div>
+    </>
+  );
+}
+
+function WikiAcceptanceTab({ ctx }: { ctx: WikipediaJobContext }) {
+  if (ctx.acceptanceCriteria.length === 0) {
+    return (
+      <p
+        className="m-0 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]"
+        style={{ letterSpacing: 0 }}
+      >
+        No explicit criteria were attached to this maintenance run.
+      </p>
+    );
+  }
+  return (
+    <ul className="m-0 flex flex-col gap-2 pl-0">
+      {ctx.acceptanceCriteria.map((item, i) => (
+        <li
+          key={i}
+          className="grid grid-cols-[18px_1fr] items-start gap-2 font-[family-name:var(--font-body)] text-[12.5px] leading-[1.45] text-[var(--avy-ink)]"
+          style={{ letterSpacing: 0 }}
+        >
+          <span
+            className="mt-px inline-grid h-[16px] w-[16px] place-items-center rounded-[4px] border border-[color:rgba(30,102,66,0.25)] bg-[color:rgba(30,102,66,0.06)] font-[family-name:var(--font-mono)] text-[9px] font-bold text-[var(--avy-accent)]"
+            style={{ letterSpacing: 0 }}
+            aria-hidden="true"
+          >
+            {i + 1}
+          </span>
+          <span>{item}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function WikiInstructionsTab({ ctx }: { ctx: WikipediaJobContext }) {
+  if (!ctx.agentInstructions) {
+    return (
+      <p
+        className="m-0 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]"
+        style={{ letterSpacing: 0 }}
+      >
+        No agent instructions were generated for this run.
+      </p>
+    );
+  }
+  return (
+    <p
+      className="m-0 rounded-[6px] border border-[color:rgba(30,102,66,0.18)] bg-[color:rgba(30,102,66,0.04)] px-3 py-2.5 font-[family-name:var(--font-mono)] text-[12px] leading-[1.55] text-[var(--avy-ink)]"
+      style={{ letterSpacing: 0 }}
+    >
+      {ctx.agentInstructions}
+    </p>
+  );
+}
+
+function WikiSubmissionTab({ ctx }: { ctx: WikipediaJobContext }) {
+  return (
+    <div className="flex flex-col gap-2.5">
+      <p
+        className="m-0 font-[family-name:var(--font-mono)] text-[11px] leading-[1.5] text-[var(--avy-muted)]"
+        style={{ letterSpacing: 0 }}
+      >
+        Submit a structured proposal back to Averray. Public Wikipedia
+        edits are performed downstream by an approved Averray editor or
+        bot — never directly from this surface.
+      </p>
+      <SubField
+        label="Proposed change summary"
+        required
+        placeholder={`Short prose summary of the ${ctx.taskType.replace(/_/g, " ")} you are proposing for ${ctx.pageTitle}.`}
+        mono={false}
+      />
+      <SubField
+        label="Citations / sources"
+        placeholder="Newline-separated URLs the verifier should follow."
+        mono
+      />
+      <div>
+        <SubLabel>Proposed wikitext patch (optional)</SubLabel>
+        <textarea
+          spellCheck={false}
+          placeholder="Diff-style or full-section wikitext. Will be reviewed before any public edit; agents do not push this themselves."
+          className="min-h-[120px] w-full resize-y rounded-[6px] border border-[var(--avy-line)] bg-white px-2.5 py-2 font-[family-name:var(--font-mono)] text-[11.5px] leading-[1.5] text-[var(--avy-ink)] outline-none placeholder:text-[var(--avy-muted)] focus:border-[var(--avy-accent)] focus:ring-2 focus:ring-[color:rgba(30,102,66,0.15)]"
+          style={{ letterSpacing: 0 }}
+        />
+      </div>
+      <div>
+        <SubLabel>Notes for Averray reviewer (optional)</SubLabel>
+        <textarea
+          spellCheck={false}
+          placeholder="Caveats, alternative phrasings, anything the reviewer needs."
+          className="min-h-[60px] w-full resize-y rounded-[6px] border border-[var(--avy-line)] bg-white px-2.5 py-2 font-[family-name:var(--font-mono)] text-[11.5px] leading-[1.5] text-[var(--avy-ink)] outline-none placeholder:text-[var(--avy-muted)] focus:border-[var(--avy-accent)] focus:ring-2 focus:ring-[color:rgba(30,102,66,0.15)]"
+          style={{ letterSpacing: 0 }}
+        />
       </div>
     </div>
   );

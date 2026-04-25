@@ -59,6 +59,16 @@ export function JobCard({ job }: { job: JobCardData }) {
                 #{job.source.issueNumber}
               </span>
             </p>
+          ) : job.source?.type === "wikipedia_article" ? (
+            <p
+              className="mt-1 flex items-center gap-1 font-[family-name:var(--font-mono)] text-[10.5px] text-[var(--avy-muted)]"
+              style={{ letterSpacing: 0 }}
+            >
+              <span className="shrink-0">{job.source.language}.wikipedia</span>
+              <span className="truncate text-[var(--avy-ink)]">
+                / {job.source.pageTitle}
+              </span>
+            </p>
           ) : (
             <p
               className="mt-1 truncate font-[family-name:var(--font-mono)] text-[10.5px] text-[var(--avy-muted)]"

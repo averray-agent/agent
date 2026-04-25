@@ -79,19 +79,25 @@ export function VerifierModePill({
 }
 
 /**
- * Small "where did this job come from" badge. GitHub-ingested jobs get the
- * GitHub mark + label; the OSS variant is a neutral fallback if we widen
- * ingestion to non-GitHub OSS trackers later.
+ * Small "where did this job come from" badge. Each ingested-source kind
+ * gets its own dark mark so an operator can tell a GitHub run from a
+ * Wikipedia maintenance run at a glance, without leaving the run queue.
+ *
+ * Stays inside the existing token palette — every variant uses one of
+ * the established neutral fills the rest of the app already uses for
+ * inverted chips.
  */
-export type SourceKind = "github" | "oss";
+export type SourceKind = "github" | "wikipedia" | "oss";
 
 const SOURCE_CLASSES: Record<SourceKind, string> = {
   github: "bg-[#111418] text-white",
+  wikipedia: "bg-[var(--avy-ink)] text-white",
   oss: "bg-[color:rgba(17,19,21,0.06)] text-[var(--avy-ink)]",
 };
 
 const SOURCE_LABEL: Record<SourceKind, string> = {
   github: "GitHub",
+  wikipedia: "Wikipedia",
   oss: "OSS",
 };
 
@@ -111,7 +117,13 @@ export function SourceBadge({
       )}
       style={{ letterSpacing: "0.1em" }}
     >
-      {kind === "github" ? <GitHubGlyph /> : <span className="h-[5px] w-[5px] rounded-full bg-current opacity-80" />}
+      {kind === "github" ? (
+        <GitHubGlyph />
+      ) : kind === "wikipedia" ? (
+        <WikipediaGlyph />
+      ) : (
+        <span className="h-[5px] w-[5px] rounded-full bg-current opacity-80" />
+      )}
       {SOURCE_LABEL[kind]}
     </span>
   );
@@ -128,6 +140,34 @@ function GitHubGlyph() {
       fill="currentColor"
     >
       <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.19 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
+    </svg>
+  );
+}
+
+function WikipediaGlyph() {
+  // Stylised "W" in a circle. Avoids using Wikipedia's own brand mark
+  // (which has trademark constraints) and keeps the badge readable at
+  // 10px alongside the GitHub octocat.
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      width="10"
+      height="10"
+      fill="none"
+    >
+      <circle cx="8" cy="8" r="7.25" stroke="currentColor" strokeWidth="1.5" />
+      <text
+        x="8"
+        y="11.4"
+        textAnchor="middle"
+        fontFamily="serif"
+        fontSize="9"
+        fontWeight="700"
+        fill="currentColor"
+      >
+        W
+      </text>
     </svg>
   );
 }

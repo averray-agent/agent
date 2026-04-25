@@ -19,6 +19,7 @@ import { useJobDefinition, useJobs } from "@/lib/api/hooks";
 import {
   buildGitHubContext,
   buildRunRows,
+  buildWikipediaContext,
   extractRunJobs,
 } from "@/lib/api/run-adapters";
 
@@ -68,6 +69,7 @@ export function LoadedRunView({
     rawJobs.find((job) => job.id === loadedRow.id) ??
     FIXTURE_JOB_DEFINITIONS.find((def) => def.id === loadedRow.id);
   const loadedGitHub = buildGitHubContext(loadedRow, selectedJob);
+  const loadedWikipedia = buildWikipediaContext(loadedRow, selectedJob);
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -115,6 +117,7 @@ export function LoadedRunView({
         meta={loadedRow.jobMeta}
         state={loadedRow.state}
         github={loadedGitHub}
+        wikipedia={loadedWikipedia}
         onReceiptPreview={() => setReceiptOpen(true)}
         standaloneUrl={standaloneUrl}
         stake={{
@@ -139,95 +142,181 @@ export function LoadedRunView({
           sample: "",
         }}
         submission={{
-          note: (
+          note: loadedWikipedia ? (
+            <>
+              Submits{" "}
+              <b className="text-[var(--avy-ink)]">proposal + evidence</b> to
+              Averray. Window{" "}
+              <b className="text-[var(--avy-ink)]">00:08:14 / 02:00:00</b>.
+            </>
+          ) : (
             <>
               Submits <b className="text-[var(--avy-ink)]">PR URL + evidence</b>{" "}
               to the verifier. Window{" "}
               <b className="text-[var(--avy-ink)]">00:08:14 / 02:00:00</b>.
             </>
           ),
-          cta: "Submit for verification",
+          cta: loadedWikipedia
+            ? "Submit proposal for review"
+            : "Submit for verification",
           onSubmit: handleSubmit,
           submitting,
           error: submitError,
         }}
-        verifier={{
-          runner: "verifier-2 · github_pr · handler-v0.14",
-          elapsed: "stream · 3.4s",
-          modeNote: "github_pr · maintainer-reviewed",
-          lines: [
-            {
-              time: "14:28:01",
-              level: "info",
-              label: "source",
-              message: (
-                <>
-                  loaded issue{" "}
-                  <span className="text-[#f4c989]">
-                    paritytech/polkadot-sdk#4812
-                  </span>{" "}
-                  · score 74/100
-                </>
-              ),
-            },
-            {
-              time: "14:28:01",
-              level: "ok",
-              label: "pass",
-              message: (
-                <>
-                  PR URL present ·{" "}
-                  <span className="text-[#f4c989]">pull/4931</span>
-                </>
-              ),
-            },
-            {
-              time: "14:28:02",
-              level: "ok",
-              label: "pass",
-              message: <>PR body references issue #4812</>,
-            },
-            {
-              time: "14:28:02",
-              level: "ok",
-              label: "pass",
-              message: (
-                <>
-                  CI checks green · <span className="text-[#9bd7b5]">7/7</span>{" "}
-                  on ubuntu-latest · macos-13
-                </>
-              ),
-            },
-            {
-              time: "14:28:03",
-              level: "warn",
-              label: "note",
-              message: (
-                <>
-                  maintainer review{" "}
-                  <span className="text-[#f4c989]">pending</span> · requested
-                  from @bkchr
-                </>
-              ),
-            },
-            {
-              time: "14:28:03",
-              level: "ok",
-              label: "verdict",
-              message: (
-                <>
-                  2/3 signals pass · awaiting maintainer · receipt draft{" "}
-                  <span className="text-[#f4c989]">r_4e133</span>
-                </>
-              ),
-            },
-          ],
-          verdict: {
-            status: "Awaiting maintainer review",
-            score: "2 / 3",
-            scoreLabel: "0.86 confidence",
-          },
-        }}
+        verifier={
+          loadedWikipedia
+            ? {
+                runner: "verifier-2 · wikipedia_proposal_review · handler-v0.14",
+                elapsed: "stream · 3.4s",
+                modeNote:
+                  "wikipedia_proposal_review · Averray-approved editor only",
+                lines: [
+                  {
+                    time: "14:28:01",
+                    level: "info",
+                    label: "source",
+                    message: (
+                      <>
+                        loaded article{" "}
+                        <span className="text-[#f4c989]">
+                          {loadedWikipedia.language}.wikipedia /{" "}
+                          {loadedWikipedia.pageTitle}
+                        </span>{" "}
+                        · rev {loadedWikipedia.revisionId}
+                      </>
+                    ),
+                  },
+                  {
+                    time: "14:28:01",
+                    level: "ok",
+                    label: "pass",
+                    message: <>proposal payload present · structured ok</>,
+                  },
+                  {
+                    time: "14:28:02",
+                    level: "ok",
+                    label: "pass",
+                    message: <>citations resolve · 4/4 sources reachable</>,
+                  },
+                  {
+                    time: "14:28:02",
+                    level: "info",
+                    label: "policy",
+                    message: (
+                      <>
+                        proposal-only path enforced ·{" "}
+                        <span className="text-[#f4c989]">no direct edit</span>
+                      </>
+                    ),
+                  },
+                  {
+                    time: "14:28:03",
+                    level: "warn",
+                    label: "note",
+                    message: (
+                      <>
+                        Averray editor reviewer{" "}
+                        <span className="text-[#f4c989]">pending</span>
+                      </>
+                    ),
+                  },
+                  {
+                    time: "14:28:03",
+                    level: "ok",
+                    label: "verdict",
+                    message: (
+                      <>
+                        1/2 signals pass · awaiting reviewer · receipt draft{" "}
+                        <span className="text-[#f4c989]">r_4e133</span>
+                      </>
+                    ),
+                  },
+                ],
+                verdict: {
+                  status: "Awaiting Averray editor review",
+                  score: "1 / 2",
+                  scoreLabel: "0.74 confidence",
+                },
+              }
+            : {
+                runner: "verifier-2 · github_pr · handler-v0.14",
+                elapsed: "stream · 3.4s",
+                modeNote: "github_pr · maintainer-reviewed",
+                lines: [
+                  {
+                    time: "14:28:01",
+                    level: "info",
+                    label: "source",
+                    message: (
+                      <>
+                        loaded issue{" "}
+                        <span className="text-[#f4c989]">
+                          paritytech/polkadot-sdk#4812
+                        </span>{" "}
+                        · score 74/100
+                      </>
+                    ),
+                  },
+                  {
+                    time: "14:28:01",
+                    level: "ok",
+                    label: "pass",
+                    message: (
+                      <>
+                        PR URL present ·{" "}
+                        <span className="text-[#f4c989]">pull/4931</span>
+                      </>
+                    ),
+                  },
+                  {
+                    time: "14:28:02",
+                    level: "ok",
+                    label: "pass",
+                    message: <>PR body references issue #4812</>,
+                  },
+                  {
+                    time: "14:28:02",
+                    level: "ok",
+                    label: "pass",
+                    message: (
+                      <>
+                        CI checks green ·{" "}
+                        <span className="text-[#9bd7b5]">7/7</span> on
+                        ubuntu-latest · macos-13
+                      </>
+                    ),
+                  },
+                  {
+                    time: "14:28:03",
+                    level: "warn",
+                    label: "note",
+                    message: (
+                      <>
+                        maintainer review{" "}
+                        <span className="text-[#f4c989]">pending</span> ·
+                        requested from @bkchr
+                      </>
+                    ),
+                  },
+                  {
+                    time: "14:28:03",
+                    level: "ok",
+                    label: "verdict",
+                    message: (
+                      <>
+                        2/3 signals pass · awaiting maintainer · receipt draft{" "}
+                        <span className="text-[#f4c989]">r_4e133</span>
+                      </>
+                    ),
+                  },
+                ],
+                verdict: {
+                  status: "Awaiting maintainer review",
+                  score: "2 / 3",
+                  scoreLabel: "0.86 confidence",
+                },
+              }
+        }
         settle={{
           title: "Awaiting verification",
           detail: (
@@ -240,7 +329,9 @@ export function LoadedRunView({
           ),
           cta: "Mark verified & pay",
           ctaDisabled: true,
-          note: "pays worker & verifier once the maintainer approves the PR",
+          note: loadedWikipedia
+            ? "pays worker & verifier once an Averray editor approves the proposal"
+            : "pays worker & verifier once the maintainer approves the PR",
         }}
       />
 
@@ -248,20 +339,38 @@ export function LoadedRunView({
         <LifecycleRail
           runId={loadedRow.id}
           contextNote={
-            <>
-              Window closes in{" "}
-              <b className="font-semibold text-[var(--avy-ink)]">21m 46s</b>
-              {" · "}verification{" "}
-              <b className="font-semibold text-[var(--avy-ink)]">github_pr</b>
-              {" · "}PR{" "}
-              <b className="font-semibold text-[var(--avy-ink)]">#4931</b> opened
-            </>
+            loadedWikipedia ? (
+              <>
+                Window closes in{" "}
+                <b className="font-semibold text-[var(--avy-ink)]">21m 46s</b>
+                {" · "}verification{" "}
+                <b className="font-semibold text-[var(--avy-ink)]">
+                  {loadedWikipedia.verification.method}
+                </b>
+                {" · "}proposal{" "}
+                <b className="font-semibold text-[var(--avy-ink)]">submitted</b>{" "}
+                · pending Averray review
+              </>
+            ) : (
+              <>
+                Window closes in{" "}
+                <b className="font-semibold text-[var(--avy-ink)]">21m 46s</b>
+                {" · "}verification{" "}
+                <b className="font-semibold text-[var(--avy-ink)]">github_pr</b>
+                {" · "}PR{" "}
+                <b className="font-semibold text-[var(--avy-ink)]">#4931</b> opened
+              </>
+            )
           }
           stages={FIXTURE_LIFECYCLE}
           next={{
             label: "Next",
-            value: "Maintainer review → Pay",
-            sub: "auto-pays on PR merge + CI green",
+            value: loadedWikipedia
+              ? "Averray review → Pay"
+              : "Maintainer review → Pay",
+            sub: loadedWikipedia
+              ? "auto-pays on Averray-approved review"
+              : "auto-pays on PR merge + CI green",
           }}
         />
       ) : null}
@@ -269,7 +378,7 @@ export function LoadedRunView({
       <ReceiptPreviewDrawer
         open={receiptOpen}
         onClose={() => setReceiptOpen(false)}
-        draft={buildReceiptDraft(loadedRow, loadedGitHub)}
+        draft={buildReceiptDraft(loadedRow, loadedGitHub, loadedWikipedia)}
       />
     </div>
   );
@@ -284,16 +393,43 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 /**
  * Assemble the unsigned receipt that would be signed on "Mark verified
  * & pay". Derived entirely from what the panel already shows — no
- * extra fetch. For native (non-GitHub) runs the signer list flips from
- * maintainer to cosigner and the source block is skipped.
+ * extra fetch. Source-aware: GitHub flows reference a PR + maintainer,
+ * Wikipedia flows reference the article + an Averray editor reviewer
+ * (since the platform never edits Wikipedia directly), native flows
+ * fall back to a generic cosign signer list.
  */
 function buildReceiptDraft(
   row: RunRow,
-  github: ReturnType<typeof buildGitHubContext>
+  github: ReturnType<typeof buildGitHubContext>,
+  wikipedia: ReturnType<typeof buildWikipediaContext>
 ): ReceiptPreviewDraft {
   const workerSignerLabel = row.worker.isSelf
     ? `Worker · ${row.worker.label} (you)`
     : `Worker · ${row.worker.label}`;
+
+  const verdict = github
+    ? {
+        status: "Awaiting maintainer review",
+        score: "2 / 3",
+        confidence: "0.86 confidence",
+      }
+    : wikipedia
+      ? {
+          status: "Awaiting Averray editor review",
+          score: "1 / 2",
+          confidence: "0.74 confidence",
+        }
+      : {
+          status: "Verified (pending cosign)",
+          score: "4 / 5",
+          confidence: "0.92 confidence",
+        };
+
+  const reviewerSigner = github
+    ? "Maintainer · awaiting review"
+    : wikipedia
+      ? "Averray editor reviewer · awaiting review"
+      : "Cosigner · 0x9A13…0cb2";
 
   return {
     receiptRef: "r_4e133",
@@ -309,24 +445,14 @@ function buildReceiptDraft(
         { label: "Treasury reserve", value: "0 DOT" },
       ],
     },
-    verdict: {
-      status: github
-        ? "Awaiting maintainer review"
-        : "Verified (pending cosign)",
-      score: github ? "2 / 3" : "4 / 5",
-      confidence: github ? "0.86 confidence" : "0.92 confidence",
-    },
+    verdict,
     evidenceHash: "sha256 0x9c…41",
     ...(github ? { github } : {}),
+    ...(wikipedia ? { wikipedia } : {}),
     prUrl: github ? `https://github.com/${github.repo}/pull/4931` : undefined,
     signers: [
       { label: workerSignerLabel, status: "pending" },
-      {
-        label: github
-          ? "Maintainer · awaiting review"
-          : "Cosigner · 0x9A13…0cb2",
-        status: "pending",
-      },
+      { label: reviewerSigner, status: "pending" },
       { label: "Verifier · verifier-2", status: "signed" },
     ],
   };

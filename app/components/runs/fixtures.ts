@@ -140,6 +140,29 @@ export const FIXTURE_RUN_ROWS: RunRow[] = [
     lastEvent: "Receipt signed & co-signed",
     lastEventMeta: "14:29:54 · r_4e12a",
   },
+  {
+    id: "run-2750",
+    title:
+      "Refresh outdated funding round figures and add 2025 audit citation",
+    jobMeta: "wikipedia · T1",
+    source: {
+      type: "wikipedia_article",
+      pageTitle: "Polkadot (cryptocurrency)",
+      language: "en",
+      pageUrl:
+        "https://en.wikipedia.org/wiki/Polkadot_(cryptocurrency)",
+      revisionId: 1233054871,
+      taskType: "freshness_check",
+      score: 76,
+    },
+    worker: { variant: "unclaimed", initials: "—", label: "unclaimed" },
+    state: "ready",
+    stake: "5.0",
+    age: "00:03:48",
+    lastEvent: "Ingested from Wikipedia · proposal-only",
+    lastEventMeta:
+      "en.wikipedia · rev 1233054871 · freshness check",
+  },
 ];
 
 // Counts are seeded higher than the row list because the fixture is a
@@ -147,8 +170,8 @@ export const FIXTURE_RUN_ROWS: RunRow[] = [
 // view). Real counts come from `buildRunFilters(rows)` once live data
 // lands.
 export const FIXTURE_FILTERS: QueueFilterCount[] = [
-  { id: "all", label: "All", count: 15 },
-  { id: "ready", label: "Ready", count: 4 },
+  { id: "all", label: "All", count: 16 },
+  { id: "ready", label: "Ready", count: 5 },
   { id: "claimed", label: "Claimed", count: 5 },
   { id: "submitted", label: "Submitted", count: 3 },
   { id: "disputed", label: "Disputed", count: 2 },
@@ -201,6 +224,36 @@ export const FIXTURE_RECOMMENDATIONS: JobCardData[] = [
       { label: "Verifier", value: "paired-hash" },
       { label: "Window", value: "12 min", accent: true },
       { label: "Slippage cap", value: "0.5%" },
+    ],
+    fit: 4,
+  },
+  {
+    id: "job-0430",
+    jobMeta: "wikipedia",
+    category: "wikipedia",
+    title:
+      "Refresh outdated funding round figures and add 2025 audit citation",
+    source: {
+      type: "wikipedia_article",
+      pageTitle: "Polkadot (cryptocurrency)",
+      language: "en",
+      pageUrl:
+        "https://en.wikipedia.org/wiki/Polkadot_(cryptocurrency)",
+      revisionId: 1233054871,
+      taskType: "freshness_check",
+      score: 76,
+    },
+    rewardValue: "5.0",
+    rewardCurrency: "DOT",
+    rewardUsd: "~ $36",
+    tier: "T1",
+    modeLabel: "Proposal review",
+    modeTone: "ready",
+    meta: [
+      { label: "Stake", value: "2.5 DOT" },
+      { label: "Verifier", value: "wikipedia_proposal_review" },
+      { label: "Window", value: "2 h", accent: true },
+      { label: "Fit score", value: "76/100" },
     ],
     fit: 4,
   },
@@ -324,6 +377,40 @@ Repro: run \`cargo test --test claim_race -- --test-threads=1 --ignored\` in a l
     verification: {
       method: "github_pr",
       signals: ["PR opened", "CI green", "maintainer review"],
+    },
+  },
+  {
+    id: "run-2750",
+    title:
+      "Refresh outdated funding round figures and add 2025 audit citation",
+    category: "wikipedia",
+    description:
+      "The Polkadot (cryptocurrency) article on en.wikipedia is rendering 2021-era treasury figures as if they were current. The 2025 audit report (https://example.org/audits/polkadot-2025.pdf) updates several of those numbers and adds a paragraph on staking participation. Goal: prepare a structured proposal that an Averray editor reviewer can apply downstream — never edit Wikipedia directly.",
+    source: {
+      type: "wikipedia_article",
+      pageTitle: "Polkadot (cryptocurrency)",
+      language: "en",
+      pageUrl:
+        "https://en.wikipedia.org/wiki/Polkadot_(cryptocurrency)",
+      revisionId: 1233054871,
+      taskType: "freshness_check",
+      score: 76,
+    },
+    acceptanceCriteria: [
+      "Identify every claim in the article that is contradicted or superseded by the 2025 audit report",
+      "Cite each replacement figure with a direct URL plus a short quote that supports it",
+      "Submit a structured proposal back to Averray; do not attempt a Wikipedia edit yourself",
+      "Note any claim where sources disagree so the Averray reviewer can decide",
+    ],
+    agentInstructions:
+      "Diff revision 1233054871 against the 2025 audit report. Group changes by section header. Submit each as a separate proposal item with a citation and a one-sentence rationale. Public Wikipedia activity, if any, will be performed by an approved Averray editor or bot — your job ends at the proposal submission.",
+    verification: {
+      method: "wikipedia_proposal_review",
+      signals: [
+        "Proposal submitted to Averray",
+        "Citations verified",
+        "Editor review · Averray-approved",
+      ],
     },
   },
 ];
