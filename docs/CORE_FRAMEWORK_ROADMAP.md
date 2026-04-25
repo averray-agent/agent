@@ -3,6 +3,10 @@
 This roadmap turns the current platform framework into a more durable
 production core.
 
+The rc1 product and architecture source document lives in
+[RC1_WORKING_SPEC.md](RC1_WORKING_SPEC.md). Use that spec as the roadmap
+boundary when prioritizing contract, backend, indexer, and operations work.
+
 It is intentionally grounded in the code that exists today:
 
 - [mcp-server/src/core/platform-service.js](/Users/pascalkuriger/repo/Polkadot/mcp-server/src/core/platform-service.js)
