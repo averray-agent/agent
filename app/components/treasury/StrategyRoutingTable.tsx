@@ -75,10 +75,18 @@ export function StrategyRoutingTable({ lanes, sub }: StrategyRoutingTableProps) 
                 </Td>
                 <Td>
                   <div className="flex justify-end gap-1.5">
-                    <TinyBtn primary={lane.allocatePrimary} disabled={lane.allocateDisabled}>
+                    <TinyBtn
+                      disabled
+                      title="Strategy allocation is not yet wired to a live backend."
+                    >
                       Allocate
                     </TinyBtn>
-                    <TinyBtn>Deallocate</TinyBtn>
+                    <TinyBtn
+                      disabled
+                      title="Strategy allocation is not yet wired to a live backend."
+                    >
+                      Deallocate
+                    </TinyBtn>
                   </div>
                 </Td>
               </tr>
@@ -175,15 +183,18 @@ function TinyBtn({
   children,
   primary,
   disabled,
+  title,
 }: {
   children: React.ReactNode;
   primary?: boolean;
   disabled?: boolean;
+  title?: string;
 }) {
   return (
     <button
       type="button"
       disabled={disabled}
+      title={title}
       className={cn(
         "rounded-[6px] border px-2.5 py-1 font-[family-name:var(--font-display)] text-[10.5px] font-bold uppercase transition-colors",
         primary

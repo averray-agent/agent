@@ -36,7 +36,7 @@ export function SessionsTable({
         <table className="w-full border-collapse font-[family-name:var(--font-body)] text-[13px]">
           <thead>
             <tr>
-              <Th width={140}>Session · run</Th>
+              <Th width={140}>Session id · run</Th>
               <Th>Job</Th>
               <Th>Worker</Th>
               <Th align="right" width={110}>Escrow</Th>

@@ -131,12 +131,6 @@ export function DisputesTable({
           <b className="font-semibold text-[var(--avy-ink)]">{totalCount}</b> · queue empty
           when resolved
         </span>
-        <button
-          type="button"
-          className="cursor-pointer border-b border-dashed border-[color:rgba(30,102,66,0.4)] pb-px text-[var(--avy-accent)] hover:text-[var(--avy-accent-2)]"
-        >
-          What happens at window expiry? →
-        </button>
       </footer>
     </div>
   );

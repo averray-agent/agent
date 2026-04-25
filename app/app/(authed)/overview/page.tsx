@@ -376,11 +376,15 @@ export default function OverviewPage() {
     <div className="flex w-full max-w-[1100px] flex-col gap-7">
       <OverviewTopbar />
       <MissionHero
-        openRuns={liveJobs.length || 14}
-        awaitingSignature={disputedSessions || 2}
+        // Use the explicit `hasLiveOverview` gate rather than `||`
+        // fallbacks — the previous form (`liveJobs.length || 14`) silently
+        // showed the fixture's `14` whenever live data legitimately
+        // returned zero rows, masking real "queue is empty" signals.
+        openRuns={hasLiveOverview ? liveJobs.length : 14}
+        awaitingSignature={hasLiveOverview ? disputedSessions : 2}
         lastReceiptTime={health.data ? "live" : "14:08 UTC"}
         treasuryPosture={liveVitals[3]?.value === "Amber" ? "Amber" : "Green"}
-        policiesAppliedToday={liveLanes.length || 22}
+        policiesAppliedToday={hasLiveOverview ? liveLanes.length : 22}
       />
       <RoomVitals vitals={vitals} comparedTo={hasLiveOverview ? "live API" : "14:08 UTC yesterday"} />
       <NeedsActionList alerts={alerts} meta={`${alerts.length} open`} />

@@ -55,7 +55,18 @@ export function ReceiptsTable({
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => {
+            {rows.length === 0 ? (
+              <tr>
+                <td
+                  colSpan={7}
+                  className="p-8 text-center font-[family-name:var(--font-mono)] text-[13px] text-[var(--avy-muted)]"
+                  style={{ letterSpacing: 0 }}
+                >
+                  No receipts match these filters.
+                </td>
+              </tr>
+            ) : (
+              rows.map((row) => {
               const selected = row.id === selectedId;
               return (
                 <tr
@@ -120,27 +131,22 @@ export function ReceiptsTable({
                   </Td>
                 </tr>
               );
-            })}
+            })
+            )}
           </tbody>
         </table>
       </div>
 
       <footer className="flex items-center justify-between gap-3 border-t border-[var(--avy-line-soft)] bg-[rgba(250,248,241,0.5)] px-4 py-3 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]">
-        <div className="flex items-center gap-3.5">
-          <span>
-            Showing <b className="font-semibold text-[var(--avy-ink)]">{shownCount}</b> of{" "}
-            <b className="font-semibold text-[var(--avy-ink)]">{totalCount.toLocaleString()}</b>
-          </span>
-          <button
-            type="button"
-            className="cursor-pointer border-b border-dashed border-[color:rgba(30,102,66,0.4)] pb-px text-[var(--avy-accent)] hover:text-[var(--avy-accent-2)]"
-          >
-            load more
-          </button>
-        </div>
+        <span>
+          Showing <b className="font-semibold text-[var(--avy-ink)]">{shownCount}</b> of{" "}
+          <b className="font-semibold text-[var(--avy-ink)]">{totalCount.toLocaleString()}</b>
+        </span>
         <button
           type="button"
-          className="cursor-pointer rounded-[6px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3 py-1.5 font-[family-name:var(--font-display)] text-[10.5px] font-extrabold uppercase text-[var(--avy-ink)] hover:border-[color:rgba(30,102,66,0.3)] hover:text-[var(--avy-accent)]"
+          disabled
+          title="Manifest export is not yet wired to a live backend."
+          className="cursor-not-allowed rounded-[6px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3 py-1.5 font-[family-name:var(--font-display)] text-[10.5px] font-extrabold uppercase text-[var(--avy-muted)] opacity-60"
           style={{ letterSpacing: "0.1em" }}
         >
           ⤓ Download signed manifest of this view

@@ -70,9 +70,16 @@ export function CreditLinePanel({
         </div>
 
         <div className="grid gap-2.5 border-t border-[var(--avy-line-soft)] pt-3">
-          {loans.map((loan) => (
-            <LoanRow key={loan.id} loan={loan} />
-          ))}
+          {loans.length === 0 ? (
+            <p
+              className="m-0 rounded-[8px] border border-dashed border-[var(--avy-line)] bg-[rgba(255,253,247,0.5)] px-3 py-3 text-center font-[family-name:var(--font-mono)] text-[12px] text-[var(--avy-muted)]"
+              style={{ letterSpacing: 0 }}
+            >
+              No active loans against this credit line.
+            </p>
+          ) : (
+            loans.map((loan) => <LoanRow key={loan.id} loan={loan} />)
+          )}
         </div>
       </div>
     </TreasuryPanel>
@@ -106,7 +113,9 @@ function LoanRow({ loan }: { loan: ActiveLoan }) {
       </div>
       <button
         type="button"
-        className="rounded-[6px] border border-[var(--avy-accent)] bg-[var(--avy-accent)] px-2.5 py-1 font-[family-name:var(--font-display)] text-[10.5px] font-bold uppercase text-[var(--fg-invert)] transition-transform hover:-translate-y-px"
+        disabled
+        title="Loan repayment is not yet wired to a live backend."
+        className="cursor-not-allowed rounded-[6px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-2.5 py-1 font-[family-name:var(--font-display)] text-[10.5px] font-bold uppercase text-[var(--avy-muted)] opacity-60"
         style={{ letterSpacing: "0.08em" }}
       >
         Repay

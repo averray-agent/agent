@@ -173,7 +173,9 @@ export function AgentDirectoryTable({
         </span>
         <button
           type="button"
-          className="inline-flex h-7 items-center gap-1.5 rounded-[8px] bg-[var(--avy-accent)] px-3 font-[family-name:var(--font-display)] text-[11px] font-bold uppercase text-[var(--fg-invert)] transition-transform hover:-translate-y-px hover:bg-[var(--avy-accent-2)]"
+          disabled
+          title="Agent invites are not yet wired to a live backend."
+          className="inline-flex h-7 cursor-not-allowed items-center gap-1.5 rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3 font-[family-name:var(--font-display)] text-[11px] font-bold uppercase text-[var(--avy-muted)] opacity-60"
           style={{ letterSpacing: "0.04em" }}
         >
           ＋ Invite new agent
