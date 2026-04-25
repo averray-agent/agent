@@ -233,6 +233,10 @@ The script now:
 6. Polls `https://app.averray.com/` for the operator shell.
 7. Rolls back and rebuilds the previous frontend if the check fails.
 
+Normal PRs should commit operator source changes in `app/`, not regenerated
+`frontend/` artifacts. CI verifies the static export can be built, and the
+production deploy script builds the served files on the VPS.
+
 If the operator app is protected with browser basic auth, pass those
 credentials into the health gate:
 

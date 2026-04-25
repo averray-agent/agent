@@ -16,12 +16,12 @@ reviewable changes and keep production deploys serialized.
 
 - Source changes live in `app/`, `mcp-server/`, `indexer/`, `contracts/`,
   `marketing/`, `sdk/`, `docs/`, and `scripts/`.
-- For now, generated static outputs in `frontend/` and `site/` are still
-  committed. If you change the operator app, run `npm run build:frontend`. If
-  you change the public site, run `npm run build:site`.
+- Do not commit regenerated `frontend/` or `site/` output for normal app or
+  marketing changes. CI builds those exports from source, and production deploy
+  rebuilds them on the VPS before serving.
 - Do not manually edit generated `_next/static` or `_astro` files.
-- If CI says generated output is dirty, rebuild from source and commit the
-  generated diff.
+- Only touch generated static output when a task explicitly changes the static
+  deploy surface itself.
 
 ## Required Checks
 
