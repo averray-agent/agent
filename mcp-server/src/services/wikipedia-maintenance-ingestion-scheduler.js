@@ -172,9 +172,14 @@ export class WikipediaMaintenanceIngestionScheduler {
 }
 
 export function loadWikipediaMaintenanceIngestionConfig(env = process.env) {
+  const productionDefault = env.NODE_ENV === "production";
   return {
-    enabled: parseBooleanEnv(env.WIKIPEDIA_INGEST_ENABLED),
-    dryRun: env.WIKIPEDIA_INGEST_DRY_RUN === undefined ? true : parseBooleanEnv(env.WIKIPEDIA_INGEST_DRY_RUN),
+    enabled: env.WIKIPEDIA_INGEST_ENABLED === undefined
+      ? productionDefault
+      : parseBooleanEnv(env.WIKIPEDIA_INGEST_ENABLED),
+    dryRun: env.WIKIPEDIA_INGEST_DRY_RUN === undefined
+      ? !productionDefault
+      : parseBooleanEnv(env.WIKIPEDIA_INGEST_DRY_RUN),
     intervalMs: parsePositiveInt(env.WIKIPEDIA_INGEST_INTERVAL_MS, 30 * 60 * 1000),
     language: env.WIKIPEDIA_INGEST_LANGUAGE?.trim() || "en",
     categories: parseCategories(env.WIKIPEDIA_INGEST_CATEGORIES_JSON ?? env.WIKIPEDIA_INGEST_CATEGORIES),

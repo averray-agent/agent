@@ -134,6 +134,28 @@ test("loadWikipediaMaintenanceIngestionConfig parses env knobs safely", () => {
   ]);
 });
 
+test("loadWikipediaMaintenanceIngestionConfig enables production ingestion by default", () => {
+  const config = loadWikipediaMaintenanceIngestionConfig({
+    NODE_ENV: "production"
+  });
+
+  assert.equal(config.enabled, true);
+  assert.equal(config.dryRun, false);
+  assert.equal(config.intervalMs, 30 * 60 * 1000);
+  assert.equal(config.language, "en");
+  assert.equal(config.maxJobsPerRun, 2);
+  assert.equal(config.maxOpenJobs, 20);
+});
+
+test("loadWikipediaMaintenanceIngestionConfig stays opt-in outside production", () => {
+  const config = loadWikipediaMaintenanceIngestionConfig({
+    NODE_ENV: "development"
+  });
+
+  assert.equal(config.enabled, false);
+  assert.equal(config.dryRun, true);
+});
+
 function jsonResponse(payload) {
   return {
     ok: true,
