@@ -27,6 +27,18 @@ npm run typecheck:indexer
 CI runs the same four jobs on every push to `main` and every PR via
 [.github/workflows/ci.yml](/.github/workflows/ci.yml).
 
+## Multi-agent branch start
+
+Before any agent starts new work, create its branch through the guarded helper:
+
+```bash
+./scripts/ops/start-agent-branch.sh codex/your-task-name
+```
+
+The helper fetches `origin`, switches local `main` to the latest
+`origin/main`, fast-forwards only, then creates the new branch. This keeps each
+agent from starting work on a stale local `main`.
+
 ## Local deployment flow
 
 1. Start a local Anvil chain:
