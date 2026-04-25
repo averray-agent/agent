@@ -41,20 +41,21 @@ const reputationSbtAddress = requireAddress(
   process.env.PONDER_REPUTATION_SBT_ADDRESS ?? process.env.REPUTATION_SBT_ADDRESS,
   "REPUTATION_SBT_ADDRESS"
 );
-const verifierRegistryAddress = requireAddress(
+const verifierRegistryAddress = optionalAddress(
   process.env.PONDER_VERIFIER_REGISTRY_ADDRESS ?? process.env.VERIFIER_REGISTRY_ADDRESS,
   "VERIFIER_REGISTRY_ADDRESS"
 );
-const discoveryRegistryAddress = requireAddress(
+const discoveryRegistryAddress = optionalAddress(
   process.env.PONDER_DISCOVERY_REGISTRY_ADDRESS ?? process.env.DISCOVERY_REGISTRY_ADDRESS,
   "DISCOVERY_REGISTRY_ADDRESS"
 );
-const disclosureLogAddress = requireAddress(
+const disclosureLogAddress = optionalAddress(
   process.env.PONDER_DISCLOSURE_LOG_ADDRESS ?? process.env.DISCLOSURE_LOG_ADDRESS,
   "DISCLOSURE_LOG_ADDRESS"
 );
 const xcmWrapperAddress = optionalAddress(
-  process.env.PONDER_XCM_WRAPPER_ADDRESS ?? process.env.XCM_WRAPPER_ADDRESS
+  process.env.PONDER_XCM_WRAPPER_ADDRESS ?? process.env.XCM_WRAPPER_ADDRESS,
+  "XCM_WRAPPER_ADDRESS"
 );
 
 const treasuryStartBlock = parseStartBlock(
@@ -103,24 +104,36 @@ const contracts = {
     address: reputationSbtAddress,
     startBlock: reputationStartBlock
   },
-  VerifierRegistry: {
-    chain: chainName,
-    abi: VerifierRegistryAbi,
-    address: verifierRegistryAddress,
-    startBlock: registryStartBlock
-  },
-  DiscoveryRegistry: {
-    chain: chainName,
-    abi: DiscoveryRegistryAbi,
-    address: discoveryRegistryAddress,
-    startBlock: registryStartBlock
-  },
-  DisclosureLog: {
-    chain: chainName,
-    abi: DisclosureLogAbi,
-    address: disclosureLogAddress,
-    startBlock: registryStartBlock
-  },
+  ...(verifierRegistryAddress
+    ? {
+        VerifierRegistry: {
+          chain: chainName,
+          abi: VerifierRegistryAbi,
+          address: verifierRegistryAddress,
+          startBlock: registryStartBlock
+        }
+      }
+    : {}),
+  ...(discoveryRegistryAddress
+    ? {
+        DiscoveryRegistry: {
+          chain: chainName,
+          abi: DiscoveryRegistryAbi,
+          address: discoveryRegistryAddress,
+          startBlock: registryStartBlock
+        }
+      }
+    : {}),
+  ...(disclosureLogAddress
+    ? {
+        DisclosureLog: {
+          chain: chainName,
+          abi: DisclosureLogAbi,
+          address: disclosureLogAddress,
+          startBlock: registryStartBlock
+        }
+      }
+    : {}),
   ...(xcmWrapperAddress
     ? {
         XcmWrapper: {
@@ -192,11 +205,11 @@ function requireAddress(raw: string | undefined, name: string): Address {
   return value as Address;
 }
 
-function optionalAddress(raw: string | undefined): Address | undefined {
+function optionalAddress(raw: string | undefined, name: string): Address | undefined {
   const value = raw?.trim();
   if (!value) return undefined;
   if (!/^0x[0-9a-fA-F]{40}$/u.test(value)) {
-    throw new Error(`Ponder: optional address ${value} is not a valid 20-byte EVM address.`);
+    throw new Error(`Ponder: ${name}=${value} is not a valid 20-byte EVM address.`);
   }
   return value as Address;
 }
