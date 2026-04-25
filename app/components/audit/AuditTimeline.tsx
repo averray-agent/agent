@@ -77,8 +77,13 @@ export function AuditTimeline({ events }: { events: AuditEvent[] }) {
 function EventCard({ event }: { event: AuditEvent }) {
   return (
     <li
+      // Stack vertically at narrow widths so timestamp/source/body/actor/
+      // link don't get crushed into a fragile 5-column grid below ~900px.
+      // At md+ (≥768px) the original 5-column layout takes over via
+      // arbitrary-value grid-cols.
       className={cn(
-        "grid items-start gap-3 rounded-[10px] border border-[var(--avy-line)] bg-[var(--avy-paper)] px-4 py-3 shadow-[var(--shadow-card)] backdrop-blur-[8px] transition-colors hover:border-[color:rgba(30,102,66,0.28)]",
+        "flex flex-col gap-2 rounded-[10px] border border-[var(--avy-line)] bg-[var(--avy-paper)] px-4 py-3 shadow-[var(--shadow-card)] backdrop-blur-[8px] transition-colors hover:border-[color:rgba(30,102,66,0.28)]",
+        "md:grid md:grid-cols-[76px_110px_1fr_200px_auto] md:items-start md:gap-3",
         event.tone === "warn" &&
           "border-l-[3px] border-l-[var(--avy-warn)]",
         event.tone === "bad" &&
@@ -86,7 +91,6 @@ function EventCard({ event }: { event: AuditEvent }) {
         event.tone === "accent" &&
           "border-l-[3px] border-l-[var(--avy-accent)]"
       )}
-      style={{ gridTemplateColumns: "76px 110px 1fr 200px auto" }}
     >
       <div className="flex flex-col">
         <span
