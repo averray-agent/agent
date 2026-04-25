@@ -15,6 +15,7 @@ jobs:
   deploy:
     name: Deploy VPS production
     runs-on: ubuntu-latest
+    environment: production
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     env:
       VPS_HOST: ${{ secrets.VPS_HOST }}

@@ -6,11 +6,17 @@ reviewable changes and keep production deploys serialized.
 ## Branching
 
 - Do not push directly to `main`.
-- Create one branch per task, for example `agent/github-pr-verifier` or
-  `agent/runs-ui-polish`.
+- Start each task from an up-to-date local `main` by running
+  `./scripts/ops/start-agent-branch.sh codex/<task-name>` from the repository
+  root. The helper fetches `origin/main`, fast-forwards local `main`, and then
+  creates the task branch.
+- Create one branch per task, for example `codex/github-pr-verifier` or
+  `codex/runs-ui-polish`.
 - Keep PRs narrow. Split unrelated backend, frontend, contract, and docs work.
 - Rebase or merge `origin/main` before marking a PR ready if other agents landed
   nearby changes.
+- After your PR merges, switch back to `main` and run
+  `git pull --ff-only origin main` before starting anything else.
 
 ## Generated Files
 
