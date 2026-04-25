@@ -262,14 +262,20 @@ export function buildRunRows(payload: unknown): RunRow[] {
     // For ingested-source jobs the row already shows the upstream
     // identity (owner/repo #N for GitHub, lang.wikipedia/page for
     // Wikipedia) via the SourceBadge, so drop the redundant job-id
-    // slug from jobMeta to keep the meta line scannable. Native jobs
+    // slug from jobMeta to keep the meta line scannable. Wikipedia
+    // rows additionally swap the job's own `category` (always
+    // "wikipedia", duplicating the SourceBadge) for the more specific
+    // task type so the meta line carries new signal. Native jobs
     // keep the full `id · category · tier` because there's no other
     // provenance signal.
-    const isIngested =
-      source?.type === "github_issue" || source?.type === "wikipedia_article";
-    const jobMeta = isIngested
-      ? `${text(job.category, "work")} · ${tierFromRaw(job.tier)}`
-      : `${id} · ${text(job.category, "work")} · ${tierFromRaw(job.tier)}`;
+    const tier = tierFromRaw(job.tier);
+    const category = text(job.category, "work");
+    const jobMeta =
+      source?.type === "wikipedia_article"
+        ? `${source.taskType.replace(/_/g, " ")} · ${tier}`
+        : source?.type === "github_issue"
+          ? `${category} · ${tier}`
+          : `${id} · ${category} · ${tier}`;
     return {
       id,
       sessionId: text(job.sessionId),

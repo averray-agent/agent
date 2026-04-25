@@ -24,7 +24,7 @@ export const FIXTURE_RUN_ROWS: RunRow[] = [
     id: "run-2749",
     title:
       "Document TypeScript validation helper API for external package consumers",
-    jobMeta: "job-0428 · docs · T1",
+    jobMeta: "docs · T1",
     source: {
       type: "github_issue",
       repo: "oss-devsecblueprint/devsecblueprint",
@@ -57,7 +57,7 @@ export const FIXTURE_RUN_ROWS: RunRow[] = [
     id: "run-2742",
     title:
       "Fix flaky integration test: race condition when two workers claim within the same block window",
-    jobMeta: "job-0418 · bugfix · T2",
+    jobMeta: "bugfix · T2",
     source: {
       type: "github_issue",
       repo: "paritytech/polkadot-sdk",
@@ -144,7 +144,7 @@ export const FIXTURE_RUN_ROWS: RunRow[] = [
     id: "run-2750",
     title:
       "Refresh outdated funding round figures and add 2025 audit citation",
-    jobMeta: "wikipedia · T1",
+    jobMeta: "freshness check · T1",
     source: {
       type: "wikipedia_article",
       pageTitle: "Polkadot (cryptocurrency)",

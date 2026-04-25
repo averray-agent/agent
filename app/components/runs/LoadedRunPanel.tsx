@@ -549,14 +549,15 @@ function GitHubEvidenceBlock({ ctx }: { ctx: GitHubJobContext }) {
         {/* Source strip — always visible so the worker can always see the
             repo, issue, category, and fit score regardless of which tab is
             active. */}
-        <div className="flex flex-wrap items-center gap-2 border-b border-[var(--avy-line-soft)] bg-[color:rgba(17,19,21,0.03)] px-3 py-2">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-[var(--avy-line-soft)] bg-[color:rgba(17,19,21,0.03)] px-3 py-2">
           <SourceBadge kind="github" />
           <a
             href={ctx.issueUrl}
             target="_blank"
             rel="noreferrer noopener"
-            className="font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-ink)] hover:text-[var(--avy-accent)]"
+            className="truncate whitespace-nowrap font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-ink)] hover:text-[var(--avy-accent)]"
             style={{ letterSpacing: 0 }}
+            title={`${ctx.repo} #${ctx.issueNumber}`}
           >
             {ctx.repo}
             <span className="ml-0.5 text-[var(--avy-accent)]">
@@ -565,13 +566,13 @@ function GitHubEvidenceBlock({ ctx }: { ctx: GitHubJobContext }) {
           </a>
           <span className="opacity-40">·</span>
           <span
-            className="font-[family-name:var(--font-mono)] text-[11px] uppercase text-[var(--avy-muted)]"
+            className="whitespace-nowrap font-[family-name:var(--font-mono)] text-[11px] uppercase text-[var(--avy-muted)]"
             style={{ letterSpacing: "0.08em" }}
           >
             {ctx.category}
           </span>
           {typeof ctx.score === "number" ? (
-            <span className="ml-auto inline-flex items-center gap-1 font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]">
+            <span className="ml-auto inline-flex items-center gap-1 whitespace-nowrap font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]">
               Fit score{" "}
               <b className="font-semibold text-[var(--avy-ink)]">{ctx.score}</b>
               <span className="text-[var(--avy-muted)]">/100</span>
@@ -618,7 +619,7 @@ function GitHubEvidenceBlock({ ctx }: { ctx: GitHubJobContext }) {
           style={{ letterSpacing: 0 }}
         >
           <span className="text-[var(--avy-accent)]">Verification</span>
-          <span className="inline-flex items-center rounded-full bg-[color:rgba(17,19,21,0.06)] px-1.5 py-px font-medium text-[var(--avy-ink)]">
+          <span className="inline-flex items-center whitespace-nowrap rounded-full bg-[color:rgba(17,19,21,0.06)] px-1.5 py-px font-medium text-[var(--avy-ink)]">
             {ctx.verification.method}
           </span>
           {ctx.verification.signals.map((s, i) => (
@@ -683,34 +684,35 @@ function WikipediaEvidenceBlock({ ctx }: { ctx: WikipediaJobContext }) {
       <div className="flex flex-col overflow-hidden rounded-[8px] border border-[var(--avy-line)] bg-white">
         {/* Source strip — pinned above the tabs so language, page, task
             type, and fit score stay readable on every tab. */}
-        <div className="flex flex-wrap items-center gap-2 border-b border-[var(--avy-line-soft)] bg-[color:rgba(17,19,21,0.03)] px-3 py-2">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-[var(--avy-line-soft)] bg-[color:rgba(17,19,21,0.03)] px-3 py-2">
           <SourceBadge kind="wikipedia" />
           <a
             href={ctx.pageUrl}
             target="_blank"
             rel="noreferrer noopener"
-            className="font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-ink)] hover:text-[var(--avy-accent)]"
+            className="truncate whitespace-nowrap font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-ink)] hover:text-[var(--avy-accent)]"
             style={{ letterSpacing: 0 }}
+            title={`${ctx.language}.wikipedia / ${ctx.pageTitle}`}
           >
             <span className="text-[var(--avy-muted)]">{ctx.language}.wikipedia</span>
             <span className="text-[var(--avy-accent)]"> / {ctx.pageTitle}</span>
           </a>
           <span className="opacity-40">·</span>
           <span
-            className="font-[family-name:var(--font-mono)] text-[11px] uppercase text-[var(--avy-muted)]"
+            className="whitespace-nowrap font-[family-name:var(--font-mono)] text-[11px] uppercase text-[var(--avy-muted)]"
             style={{ letterSpacing: "0.08em" }}
           >
             {taskTypeLabel}
           </span>
           <span className="opacity-40">·</span>
           <span
-            className="font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]"
+            className="whitespace-nowrap font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]"
             style={{ letterSpacing: 0 }}
           >
             rev {ctx.revisionId}
           </span>
           {typeof ctx.score === "number" ? (
-            <span className="ml-auto inline-flex items-center gap-1 font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]">
+            <span className="ml-auto inline-flex items-center gap-1 whitespace-nowrap font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]">
               Fit score{" "}
               <b className="font-semibold text-[var(--avy-ink)]">{ctx.score}</b>
               <span className="text-[var(--avy-muted)]">/100</span>
@@ -732,8 +734,9 @@ function WikipediaEvidenceBlock({ ctx }: { ctx: WikipediaJobContext }) {
             Policy
           </span>
           <span>
-            Proposal-only. Agents submit evidence to Averray; Wikipedia edits
-            require approved Averray review.
+            Proposal-only · the agent never edits Wikipedia. Evidence + a
+            structured proposal go to Averray; any public edit is performed
+            downstream by an approved Averray editor.
           </span>
         </div>
 
@@ -776,7 +779,7 @@ function WikipediaEvidenceBlock({ ctx }: { ctx: WikipediaJobContext }) {
           style={{ letterSpacing: 0 }}
         >
           <span className="text-[var(--avy-accent)]">Verification</span>
-          <span className="inline-flex items-center rounded-full bg-[color:rgba(17,19,21,0.06)] px-1.5 py-px font-medium text-[var(--avy-ink)]">
+          <span className="inline-flex items-center whitespace-nowrap rounded-full bg-[color:rgba(17,19,21,0.06)] px-1.5 py-px font-medium text-[var(--avy-ink)]">
             {ctx.verification.method}
           </span>
           {ctx.verification.signals.map((s) => (

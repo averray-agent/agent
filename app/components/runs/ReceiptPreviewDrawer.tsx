@@ -123,14 +123,26 @@ export function ReceiptPreviewDrawer({
 
       {draft.wikipedia ? (
         <DrawerSection title="Source">
-          <div className="flex flex-wrap items-center gap-2 rounded-[8px] border border-[var(--avy-line)] bg-[color:rgba(17,19,21,0.02)] px-3 py-2">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-[8px] border border-[var(--avy-line)] bg-[color:rgba(17,19,21,0.02)] px-3 py-2">
             <SourceBadge kind="wikipedia" />
+            {/* Glanceable attribution pill so the reviewer sees the
+                proposal-only stance without having to read the warning
+                paragraph below. Uses the same warn token as the policy
+                banner on the loaded-run panel. */}
+            <span
+              className="inline-flex items-center whitespace-nowrap rounded-full bg-[var(--avy-warn)] px-1.5 py-0.5 font-[family-name:var(--font-display)] text-[9.5px] font-extrabold uppercase text-white"
+              style={{ letterSpacing: "0.1em" }}
+              title="Averray proposal only — no direct Wikipedia edit"
+            >
+              Proposal only
+            </span>
             <a
               href={draft.wikipedia.pageUrl}
               target="_blank"
               rel="noreferrer noopener"
-              className="font-[family-name:var(--font-mono)] text-[12px] text-[var(--avy-ink)] hover:text-[var(--avy-accent)]"
+              className="truncate whitespace-nowrap font-[family-name:var(--font-mono)] text-[12px] text-[var(--avy-ink)] hover:text-[var(--avy-accent)]"
               style={{ letterSpacing: 0 }}
+              title={`${draft.wikipedia.language}.wikipedia / ${draft.wikipedia.pageTitle}`}
             >
               <span className="text-[var(--avy-muted)]">
                 {draft.wikipedia.language}.wikipedia
@@ -141,7 +153,7 @@ export function ReceiptPreviewDrawer({
             </a>
             <span className="opacity-40">·</span>
             <span
-              className="font-[family-name:var(--font-mono)] text-[11.5px] uppercase text-[var(--avy-muted)]"
+              className="whitespace-nowrap font-[family-name:var(--font-mono)] text-[11.5px] uppercase text-[var(--avy-muted)]"
               style={{ letterSpacing: "0.08em" }}
             >
               {draft.wikipedia.taskType.replace(/_/g, " ")}

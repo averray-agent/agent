@@ -80,6 +80,50 @@ function RunsPageInner() {
     return rows.filter((r) => r.state === activeFilter);
   }, [activeFilter, rows]);
 
+  // Lifecycle rail at the page level mirrors the loaded run, so its
+  // copy has to follow the selected row's source — otherwise selecting
+  // a Wikipedia maintenance run still shows "verification github_pr ·
+  // PR #4931 opened" and "Maintainer review → Pay", which is the wrong
+  // verification path and implies a direct GitHub flow that doesn't
+  // exist for that run.
+  const selectedRow = rows.find((row) => row.id === selectedId) ?? rows[0];
+  const selectedSourceType = selectedRow?.source?.type;
+  const lifecycleContextNote =
+    selectedSourceType === "wikipedia_article" ? (
+      <>
+        Window closes in{" "}
+        <b className="font-semibold text-[var(--avy-ink)]">21m 46s</b>
+        {" · "}verification{" "}
+        <b className="font-semibold text-[var(--avy-ink)]">
+          wikipedia_proposal_review
+        </b>
+        {" · "}proposal{" "}
+        <b className="font-semibold text-[var(--avy-ink)]">submitted</b> ·
+        pending Averray review
+      </>
+    ) : (
+      <>
+        Window closes in{" "}
+        <b className="font-semibold text-[var(--avy-ink)]">21m 46s</b>
+        {" · "}verification{" "}
+        <b className="font-semibold text-[var(--avy-ink)]">github_pr</b>
+        {" · "}PR{" "}
+        <b className="font-semibold text-[var(--avy-ink)]">#4931</b> opened
+      </>
+    );
+  const lifecycleNext =
+    selectedSourceType === "wikipedia_article"
+      ? {
+          label: "Next",
+          value: "Averray review → Pay",
+          sub: "auto-pays on Averray-approved review",
+        }
+      : {
+          label: "Next",
+          value: "Maintainer review → Pay",
+          sub: "auto-pays on PR merge + CI green",
+        };
+
   const assignedToMe = rows.filter((row) => row.worker.isSelf).length;
   const liveStatus = jobs.error
     ? "fixture fallback"
@@ -128,22 +172,9 @@ function RunsPageInner() {
 
       <LifecycleRail
         runId={selectedId}
-        contextNote={
-          <>
-            Window closes in{" "}
-            <b className="font-semibold text-[var(--avy-ink)]">21m 46s</b>
-            {" · "}verification{" "}
-            <b className="font-semibold text-[var(--avy-ink)]">github_pr</b>
-            {" · "}PR{" "}
-            <b className="font-semibold text-[var(--avy-ink)]">#4931</b> opened
-          </>
-        }
+        contextNote={lifecycleContextNote}
         stages={FIXTURE_LIFECYCLE}
-        next={{
-          label: "Next",
-          value: "Maintainer review → Pay",
-          sub: "auto-pays on PR merge + CI green",
-        }}
+        next={lifecycleNext}
       />
 
       <RecommendationRail

@@ -109,10 +109,22 @@ export function LoadedRunView({
     }
   };
 
+  // Source-aware kicker so the very top of the panel reads as
+  // "what kind of work is this" before the worker scans the title.
+  // Avoids the marketing-flat "Loaded run" label on every run regardless
+  // of provenance, which previously left an operator to read the source
+  // strip lower down to figure out whether the page applied to a GitHub
+  // PR review or a Wikipedia proposal review.
+  const kicker = loadedWikipedia
+    ? "Loaded run · Wikipedia article"
+    : loadedGitHub
+      ? "Loaded run · GitHub issue"
+      : "Loaded run";
+
   return (
     <div className="flex flex-col gap-3.5">
       <LoadedRunPanel
-        kicker="Loaded run"
+        kicker={kicker}
         title={loadedRow.title}
         meta={loadedRow.jobMeta}
         state={loadedRow.state}
@@ -131,12 +143,14 @@ export function LoadedRunView({
             treasury: "0 DOT",
           },
         }}
-        // When `github` is set the panel swaps Evidence for the four-tab
-        // Issue/Acceptance/Instructions/Submission block. `evidence` is
-        // then unused at runtime but stays type-required.
+        // When `github` or `wikipedia` is set the panel swaps Evidence
+        // for the source-specific four-tab block. `evidence` is then
+        // unused at runtime but stays type-required, so we hand it a
+        // single neutral "Brief" tab — the previous "Issue" label
+        // leaked GitHub-domain language onto native runs.
         evidence={{
-          tabs: [{ id: "issue", label: "Issue" }],
-          activeTab: "issue",
+          tabs: [{ id: "brief", label: "Brief" }],
+          activeTab: "brief",
           metaRight: "",
           metaFoot: "",
           sample: "",
@@ -145,8 +159,8 @@ export function LoadedRunView({
           note: loadedWikipedia ? (
             <>
               Submits{" "}
-              <b className="text-[var(--avy-ink)]">proposal + evidence</b> to
-              Averray. Window{" "}
+              <b className="text-[var(--avy-ink)]">proposed change summary + citations</b>{" "}
+              to Averray. No direct Wikipedia edits. Window{" "}
               <b className="text-[var(--avy-ink)]">00:08:14 / 02:00:00</b>.
             </>
           ) : (
