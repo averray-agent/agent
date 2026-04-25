@@ -20,6 +20,7 @@ import {
   ZERO_BYTES32
 } from "./abis.js";
 import { loadBlockchainConfig } from "./config.js";
+import { hashCanonicalContent } from "../core/canonical-content.js";
 import {
   BlockchainRevertError,
   ConfigError,
@@ -528,6 +529,7 @@ export class BlockchainGateway {
         await depositTx.wait();
       }
 
+      const specHash = hashCanonicalContent(job);
       const createTx = await this.escrowContract.createSinglePayoutJob(
         this.toJobId(instanceJobId),
         asset.address,
@@ -536,7 +538,8 @@ export class BlockchainGateway {
         0,
         job.claimTtlSeconds,
         id(job.verifierMode),
-        id(job.category)
+        id(job.category),
+        specHash
       );
       await createTx.wait();
       return this.getJob(instanceJobId);
@@ -546,19 +549,23 @@ export class BlockchainGateway {
   async submitWork(jobId, evidence) {
     return this.withGatewayError("submitWork", async () => {
       this.requireSigner("submitWork");
-      const tx = await this.escrowContract.submitWork(this.toJobId(jobId), keccak256(toUtf8Bytes(evidence)));
+      const evidenceHash = typeof evidence === "string" && /^0x[a-fA-F0-9]{64}$/u.test(evidence)
+        ? evidence
+        : hashCanonicalContent(evidence);
+      const tx = await this.escrowContract.submitWork(this.toJobId(jobId), evidenceHash);
       await tx.wait();
     });
   }
 
-  async resolveSinglePayout(jobId, approved, reasonCode, metadataURI) {
+  async resolveSinglePayout(jobId, approved, reasonCode, metadataURI, reasoningHash = ZERO_BYTES32) {
     return this.withGatewayError("resolveSinglePayout", async () => {
       this.requireSigner("resolveSinglePayout");
       const tx = await this.escrowContract.resolveSinglePayout(
         this.toJobId(jobId),
         approved,
         this.toReasonCode(reasonCode),
-        metadataURI
+        metadataURI,
+        reasoningHash
       );
       await tx.wait();
     });
@@ -571,6 +578,7 @@ export class BlockchainGateway {
         poster: job.poster,
         worker: job.worker,
         asset: job.asset,
+        specHash: job.specHash,
         reward: Number(job.reward),
         claimStake: Number(job.claimStake),
         claimStakeBps: Number(job.claimStakeBps),

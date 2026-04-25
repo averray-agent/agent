@@ -102,7 +102,7 @@
         },
         "evidenceHash": {
           "$ref": "#/definitions/bytes32",
-          "description": "keccak256 of the evidence payload submitted for verification."
+          "description": "sha256 of the canonical evidence payload submitted for verification."
         },
         "completedAt": {
           "type": "string",
@@ -115,7 +115,7 @@
         },
         "poster": {
           "$ref": "#/definitions/address",
-          "description": "EVM address of the job poster. The sentinel 0x0000000000000000000000000000000000000000 means the issuing platform did not have authoritative attribution — consumers MUST treat this as 'unknown' and cross-reference the on-chain JobFunded event, not infer that the worker posted the job."
+          "description": "EVM address of the job poster. The sentinel 0x0000000000000000000000000000000000000000 means the issuing platform did not have authoritative attribution — consumers MUST treat this as 'unknown' and cross-reference the on-chain JobCreated event, not infer that the worker posted the job."
         },
         "verifier": {
           "$ref": "#/definitions/address",

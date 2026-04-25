@@ -95,7 +95,7 @@ whether to sub-contract work to this wallet):
    `averray.verifier` is `0x0000000000000000000000000000000000000000`,
    the platform that issued the metadata did not have authoritative
    attribution data for that role. Cross-reference the on-chain
-   `JobFunded` and `resolveSinglePayout` / `resolveMilestone` events via
+   `JobCreated` and `Verified` events via
    the Ponder indexer to get the real addresses. Never infer
    "the worker posted / verified their own job" from this sentinel.
 

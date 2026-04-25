@@ -1,6 +1,7 @@
 import { keccak256, toUtf8Bytes } from "ethers";
 
 import { NotFoundError, ValidationError } from "./errors.js";
+import { hashCanonicalContent } from "./canonical-content.js";
 import { extractSubmissionText } from "./submission.js";
 
 /**
@@ -8,8 +9,8 @@ import { extractSubmissionText } from "./submission.js";
  * platform does not have authoritative attribution data for the badge
  * (typical for dev/testnet deploys without `DEFAULT_POSTER_ADDRESS` /
  * `DEFAULT_VERIFIER_ADDRESS` set). Consumers MUST treat this value as
- * "unknown" — cross-reference the on-chain `JobFunded` and
- * `resolveSinglePayout` events from the Ponder indexer to get the real
+ * "unknown" — cross-reference the on-chain `JobCreated` and
+ * `Verified` events from the Ponder indexer to get the real
  * addresses. See docs/schemas/agent-badge-v1.md for the full rule.
  *
  * Emitting the zero address is deliberately better than defaulting to
@@ -59,7 +60,7 @@ const DESCRIPTION_MAX = 1024;
  * @param {string} input.verifierMode         "benchmark" | "deterministic" | "human_fallback" | "github_pr"
  * @param {object} input.reward               { asset, amount, decimals }
  * @param {object} input.claimStake           { asset, amount, decimals }
- * @param {string} input.evidenceHash         bytes32 keccak256 of evidence
+ * @param {string} input.evidenceHash         bytes32 sha256 of canonical evidence
  * @param {string} input.completedAt          ISO-8601 UTC
  * @param {string} input.worker               0x EVM address
  * @param {string} input.poster               0x EVM address
@@ -316,7 +317,7 @@ function stripTrailingSlash(value) {
  * session level today (real on-chain evidenceHash, authoritative poster +
  * verifier addresses); we synthesise deterministic placeholders for them
  * and document the limitation. Consumers that need the authoritative
- * values should read the BadgeMinted / JobFunded / Resolve* events from
+ * values should read the BadgeMinted / JobCreated / Verified events from
  * the chain or the Ponder indexer — per the schema doc, the metadata
  * body is descriptive, not authoritative.
  *
@@ -384,7 +385,7 @@ export function buildBadgeFromSession({ session, job, verification, context = {}
 function deriveEvidenceHash(session) {
   const submitted = extractSubmissionText(session.submission);
   const input = submitted || `averray:badge:${session.sessionId}|${session.wallet}|${session.updatedAt ?? ""}`;
-  return keccak256(toUtf8Bytes(input));
+  return hashCanonicalContent(input);
 }
 
 function normaliseChainJobId(session) {

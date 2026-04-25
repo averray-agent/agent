@@ -2,9 +2,12 @@ import { createConfig } from "ponder";
 
 import {
   AgentAccountCoreAbi,
+  DiscoveryRegistryAbi,
+  DisclosureLogAbi,
   EscrowCoreAbi,
   ReputationSbtAbi,
   TreasuryPolicyAbi,
+  VerifierRegistryAbi,
   XcmWrapperAbi
 } from "./abis/contractsAbi";
 
@@ -38,6 +41,18 @@ const reputationSbtAddress = requireAddress(
   process.env.PONDER_REPUTATION_SBT_ADDRESS ?? process.env.REPUTATION_SBT_ADDRESS,
   "REPUTATION_SBT_ADDRESS"
 );
+const verifierRegistryAddress = requireAddress(
+  process.env.PONDER_VERIFIER_REGISTRY_ADDRESS ?? process.env.VERIFIER_REGISTRY_ADDRESS,
+  "VERIFIER_REGISTRY_ADDRESS"
+);
+const discoveryRegistryAddress = requireAddress(
+  process.env.PONDER_DISCOVERY_REGISTRY_ADDRESS ?? process.env.DISCOVERY_REGISTRY_ADDRESS,
+  "DISCOVERY_REGISTRY_ADDRESS"
+);
+const disclosureLogAddress = requireAddress(
+  process.env.PONDER_DISCLOSURE_LOG_ADDRESS ?? process.env.DISCLOSURE_LOG_ADDRESS,
+  "DISCLOSURE_LOG_ADDRESS"
+);
 const xcmWrapperAddress = optionalAddress(
   process.env.PONDER_XCM_WRAPPER_ADDRESS ?? process.env.XCM_WRAPPER_ADDRESS
 );
@@ -52,6 +67,10 @@ const escrowStartBlock = parseStartBlock(
 );
 const reputationStartBlock = parseStartBlock(
   process.env.PONDER_START_BLOCK_REPUTATION,
+  lowMemoryMode ? "latest" : 0
+);
+const registryStartBlock = parseStartBlock(
+  process.env.PONDER_START_BLOCK_REGISTRIES,
   lowMemoryMode ? "latest" : 0
 );
 const xcmStartBlock = parseStartBlock(
@@ -83,6 +102,24 @@ const contracts = {
     abi: ReputationSbtAbi,
     address: reputationSbtAddress,
     startBlock: reputationStartBlock
+  },
+  VerifierRegistry: {
+    chain: chainName,
+    abi: VerifierRegistryAbi,
+    address: verifierRegistryAddress,
+    startBlock: registryStartBlock
+  },
+  DiscoveryRegistry: {
+    chain: chainName,
+    abi: DiscoveryRegistryAbi,
+    address: discoveryRegistryAddress,
+    startBlock: registryStartBlock
+  },
+  DisclosureLog: {
+    chain: chainName,
+    abi: DisclosureLogAbi,
+    address: disclosureLogAddress,
+    startBlock: registryStartBlock
   },
   ...(xcmWrapperAddress
     ? {

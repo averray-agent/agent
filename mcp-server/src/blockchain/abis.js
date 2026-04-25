@@ -28,17 +28,20 @@ export const AGENT_ACCOUNT_ABI = [
 ];
 
 export const ESCROW_CORE_ABI = [
-  "function createSinglePayoutJob(bytes32 jobId, address asset, uint256 reward, uint256 opsReserve, uint256 contingencyReserve, uint256 claimTtl, bytes32 verifierMode, bytes32 category)",
+  "function createSinglePayoutJob(bytes32 jobId, address asset, uint256 reward, uint256 opsReserve, uint256 contingencyReserve, uint256 claimTtl, bytes32 verifierMode, bytes32 category, bytes32 specHash)",
   "function claimJob(bytes32 jobId)",
   "function submitWork(bytes32 jobId, bytes32 evidenceHash)",
-  "function resolveSinglePayout(bytes32 jobId, bool approved, bytes32 reasonCode, string metadataURI)",
+  "function resolveSinglePayout(bytes32 jobId, bool approved, bytes32 reasonCode, string metadataURI, bytes32 reasoningHash)",
   "function finalizeRejectedJob(bytes32 jobId)",
   "function resolveDispute(bytes32 jobId, uint256 workerPayout, bytes32 reasonCode, string metadataURI)",
-  "function jobs(bytes32 jobId) view returns ((address poster, address worker, address asset, bytes32 verifierMode, bytes32 category, uint256 reward, uint256 opsReserve, uint256 contingencyReserve, uint256 released, uint256 claimExpiry, uint256 claimStake, uint16 claimStakeBps, uint8 payoutMode, uint8 state))",
+  "function jobs(bytes32 jobId) view returns ((address poster, address worker, address asset, bytes32 verifierMode, bytes32 category, bytes32 specHash, uint256 reward, uint256 opsReserve, uint256 contingencyReserve, uint256 released, uint256 claimExpiry, uint256 claimStake, uint16 claimStakeBps, uint8 payoutMode, uint8 state))",
   "event JobFunded(bytes32 indexed jobId, address indexed poster, address indexed asset, uint256 totalReserved, uint8 payoutMode)",
+  "event JobCreated(bytes32 indexed jobId, address indexed poster, bytes32 indexed specHash, address asset, uint256 totalReserved, uint8 payoutMode)",
   "event JobClaimed(bytes32 indexed jobId, address indexed worker, uint256 claimExpiry, uint256 claimStake)",
   "event WorkSubmitted(bytes32 indexed jobId, address indexed worker, bytes32 evidenceHash)",
+  "event Submitted(bytes32 indexed jobId, address indexed worker, bytes32 indexed payloadHash)",
   "event JobRejected(bytes32 indexed jobId, bytes32 reasonCode)",
+  "event Verified(bytes32 indexed jobId, address indexed verifier, bool approved, bytes32 reasonCode, bytes32 reasoningHash)",
   "event JobClosed(bytes32 indexed jobId, address indexed worker, uint256 releasedAmount)",
   "event JobReopened(bytes32 indexed jobId)",
   "event DisputeOpened(bytes32 indexed jobId, address indexed opener)"
@@ -86,4 +89,23 @@ export const XCM_WRAPPER_ABI = [
   "event RequestQueued(bytes32 indexed requestId, bytes32 indexed strategyId, uint8 indexed kind, address account, address asset, address recipient, uint256 assets, uint256 shares, uint64 nonce)",
   "event RequestPayloadStored(bytes32 indexed requestId, bytes32 destinationHash, bytes32 messageHash, uint64 refTime, uint64 proofSize)",
   "event RequestStatusUpdated(bytes32 indexed requestId, uint8 indexed status, uint256 settledAssets, uint256 settledShares, bytes32 remoteRef, bytes32 failureCode)"
+];
+
+export const VERIFIER_REGISTRY_ABI = [
+  "function isAuthorized(address verifier) view returns (bool)",
+  "function wasAuthorizedAt(address verifier, uint64 timestamp) view returns (bool)",
+  "event VerifierAdded(address indexed verifier, uint64 timestamp)",
+  "event VerifierRemoved(address indexed verifier, uint64 timestamp)",
+  "event AdminTransferred(address indexed from, address indexed to)"
+];
+
+export const DISCOVERY_REGISTRY_ABI = [
+  "function currentManifestHash() view returns (bytes32)",
+  "function currentVersion() view returns (uint64)",
+  "event ManifestPublished(uint64 indexed version, bytes32 indexed hash, uint64 timestamp, address publisher)"
+];
+
+export const DISCLOSURE_LOG_ABI = [
+  "event Disclosed(bytes32 indexed hash, address indexed byWallet, uint64 timestamp)",
+  "event AutoDisclosed(bytes32 indexed hash, uint64 timestamp)"
 ];

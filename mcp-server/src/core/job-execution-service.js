@@ -4,7 +4,7 @@ import {
   NotFoundError
 } from "./errors.js";
 import { buildSessionLifecycle, describeSessionStatus, transitionSession } from "./session-state-machine.js";
-import { normalizeSubmission } from "./submission.js";
+import { hashSubmission, normalizeSubmission } from "./submission.js";
 import { getBuiltinJobSchema, validateStructuredSubmission } from "./job-schema-registry.js";
 
 export class JobExecutionService {
@@ -120,7 +120,7 @@ export class JobExecutionService {
       validateStructuredSubmission(job.outputSchemaRef, submission.structured, { path: "submission" });
     }
     if (this.blockchainGateway?.isEnabled()) {
-      await this.blockchainGateway.submitWork(session.chainJobId ?? session.jobId, submission.evidenceText);
+      await this.blockchainGateway.submitWork(session.chainJobId ?? session.jobId, hashSubmission(submission));
     }
     const protocolHistory = [...new Set([...session.protocolHistory, protocol])];
     const transitioned = transitionSession({

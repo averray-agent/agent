@@ -111,7 +111,15 @@ contract ReputationSBT {
         revert Soulbound();
     }
 
+    function transfer(address, uint256) external pure {
+        revert Soulbound();
+    }
+
     function safeTransferFrom(address, address, uint256) external pure {
+        revert Soulbound();
+    }
+
+    function safeTransferFrom(address, address, uint256, bytes calldata) external pure {
         revert Soulbound();
     }
 

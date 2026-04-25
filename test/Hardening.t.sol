@@ -9,6 +9,7 @@ import {StrategyAdapterRegistry} from "../contracts/StrategyAdapterRegistry.sol"
 import {AgentAccountCore} from "../contracts/AgentAccountCore.sol";
 import {EscrowCore} from "../contracts/EscrowCore.sol";
 import {ReputationSBT} from "../contracts/ReputationSBT.sol";
+import {VerifierRegistry} from "../contracts/VerifierRegistry.sol";
 
 /// @notice Pins the Phase 1 hardening guarantees: pausability kills new writes,
 ///         milestone arrays are bounded, and SafeERC20 rejects tokens that
@@ -18,25 +19,29 @@ contract HardeningTest is Test {
     StrategyAdapterRegistry internal registry;
     AgentAccountCore internal accounts;
     ReputationSBT internal reputation;
+    VerifierRegistry internal verifierRegistry;
     EscrowCore internal escrow;
     MockERC20 internal dot;
 
     address internal poster = address(0xA11CE);
     address internal worker = address(0xB0B);
     address internal verifier = address(0xCAFE);
+    bytes32 internal constant SPEC_HASH = bytes32("SPEC_HASH");
 
     function setUp() public {
         policy = new TreasuryPolicy();
         registry = new StrategyAdapterRegistry(policy);
         accounts = new AgentAccountCore(policy, registry);
         reputation = new ReputationSBT(policy);
-        escrow = new EscrowCore(policy, accounts, reputation);
+        verifierRegistry = new VerifierRegistry(address(this));
+        escrow = new EscrowCore(policy, accounts, reputation, verifierRegistry);
         dot = new MockERC20("Mock DOT", "mDOT");
 
         policy.setApprovedAsset(address(dot), true);
         policy.setServiceOperator(address(escrow), true);
         policy.setServiceOperator(address(accounts), true);
         policy.setVerifier(verifier, true);
+        verifierRegistry.addVerifier(verifier);
 
         dot.mint(poster, 1_000 ether);
         dot.mint(worker, 1_000 ether);
@@ -67,7 +72,8 @@ contract HardeningTest is Test {
                     1 ether,
                     1 days,
                     bytes32("AUTO"),
-                    bytes32("CODING")
+                    bytes32("CODING"),
+                    SPEC_HASH
                 )
             )
         );
@@ -85,7 +91,8 @@ contract HardeningTest is Test {
             1 ether,
             1 days,
             bytes32("AUTO"),
-            bytes32("CODING")
+            bytes32("CODING"),
+            SPEC_HASH
         );
 
         policy.setPaused(true);
@@ -122,7 +129,8 @@ contract HardeningTest is Test {
                     0,
                     1 days,
                     bytes32("AUTO"),
-                    bytes32("CODING")
+                    bytes32("CODING"),
+                    SPEC_HASH
                 )
             )
         );
@@ -143,7 +151,8 @@ contract HardeningTest is Test {
                     0,
                     1 days,
                     bytes32("AUTO"),
-                    bytes32("CODING")
+                    bytes32("CODING"),
+                    SPEC_HASH
                 )
             )
         );
@@ -164,7 +173,8 @@ contract HardeningTest is Test {
             0,
             1 days,
             bytes32("AUTO"),
-            bytes32("CODING")
+            bytes32("CODING"),
+            SPEC_HASH
         );
     }
 
@@ -195,7 +205,8 @@ contract HardeningTest is Test {
             1 ether,
             1 days,
             bytes32("AUTO"),
-            bytes32("CODING")
+            bytes32("CODING"),
+            SPEC_HASH
         );
     }
 

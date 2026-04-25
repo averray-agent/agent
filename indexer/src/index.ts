@@ -54,6 +54,7 @@ const syncJob = async ({
     asset,
     verifierMode,
     category,
+    specHash,
     reward,
     opsReserve,
     contingencyReserve,
@@ -76,6 +77,7 @@ const syncJob = async ({
       categoryLabel: decodeBytes32(category),
       verifierMode,
       verifierModeLabel: decodeBytes32(verifierMode),
+      specHash: nullIfZeroHash(specHash),
       reward,
       opsReserve,
       contingencyReserve,
@@ -95,6 +97,7 @@ const syncJob = async ({
     })
     .onConflictDoUpdate((row: any) => ({
       worker: row.worker,
+      specHash: row.specHash,
       released: row.released,
       claimExpiry: row.claimExpiry,
       claimStake: row.claimStake,
@@ -118,6 +121,23 @@ ponder.on("EscrowCore:JobFunded", async ({ event, context }) => {
     actor: event.args.poster,
     amount: event.args.totalReserved,
     evidenceHash: null,
+    reasonCode: null,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp
+  });
+});
+
+ponder.on("EscrowCore:JobCreated", async ({ event, context }) => {
+  await syncJob({ context, event, jobId: event.args.jobId });
+  await context.db.insert(schema.jobEvent).values({
+    id: toEventId(event.transaction.hash, event.log.logIndex),
+    jobId: event.args.jobId,
+    kind: "JobCreated",
+    actor: event.args.poster,
+    amount: event.args.totalReserved,
+    evidenceHash: null,
+    specHash: event.args.specHash,
     reasonCode: null,
     txHash: event.transaction.hash,
     blockNumber: event.block.number,
@@ -157,6 +177,23 @@ ponder.on("EscrowCore:WorkSubmitted", async ({ event, context }) => {
   });
 });
 
+ponder.on("EscrowCore:Submitted", async ({ event, context }) => {
+  await syncJob({ context, event, jobId: event.args.jobId });
+  await context.db.insert(schema.jobEvent).values({
+    id: toEventId(event.transaction.hash, event.log.logIndex),
+    jobId: event.args.jobId,
+    kind: "Submitted",
+    actor: event.args.worker,
+    amount: null,
+    evidenceHash: event.args.payloadHash,
+    payloadHash: event.args.payloadHash,
+    reasonCode: null,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp
+  });
+});
+
 ponder.on("EscrowCore:JobReopened", async ({ event, context }) => {
   await syncJob({ context, event, jobId: event.args.jobId });
   await context.db.insert(schema.jobEvent).values({
@@ -182,6 +219,24 @@ ponder.on("EscrowCore:JobRejected", async ({ event, context }) => {
     actor: null,
     amount: null,
     evidenceHash: null,
+    reasonCode: event.args.reasonCode,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp
+  });
+});
+
+ponder.on("EscrowCore:Verified", async ({ event, context }) => {
+  await syncJob({ context, event, jobId: event.args.jobId });
+  await context.db.insert(schema.jobEvent).values({
+    id: toEventId(event.transaction.hash, event.log.logIndex),
+    jobId: event.args.jobId,
+    kind: "Verified",
+    actor: event.args.verifier,
+    amount: null,
+    evidenceHash: null,
+    reasoningHash: event.args.reasoningHash,
+    approved: event.args.approved,
     reasonCode: event.args.reasonCode,
     txHash: event.transaction.hash,
     blockNumber: event.block.number,
@@ -300,6 +355,81 @@ ponder.on("TreasuryPolicy:OutflowRecorded", async ({ event, context }) => {
     day: event.args.day,
     amount: event.args.amount,
     newTotal: event.args.newTotal,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp
+  });
+});
+
+ponder.on("DiscoveryRegistry:ManifestPublished", async ({ event, context }) => {
+  await context.db.insert(schema.manifestPublication).values({
+    id: toEventId(event.transaction.hash, event.log.logIndex),
+    version: event.args.version,
+    hash: event.args.hash,
+    publisher: event.args.publisher,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp
+  });
+});
+
+ponder.on("VerifierRegistry:VerifierAdded", async ({ event, context }) => {
+  await context.db.insert(schema.verifierRegistryEvent).values({
+    id: toEventId(event.transaction.hash, event.log.logIndex),
+    kind: "VerifierAdded",
+    verifier: event.args.verifier,
+    adminFrom: null,
+    adminTo: null,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp
+  });
+});
+
+ponder.on("VerifierRegistry:VerifierRemoved", async ({ event, context }) => {
+  await context.db.insert(schema.verifierRegistryEvent).values({
+    id: toEventId(event.transaction.hash, event.log.logIndex),
+    kind: "VerifierRemoved",
+    verifier: event.args.verifier,
+    adminFrom: null,
+    adminTo: null,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp
+  });
+});
+
+ponder.on("VerifierRegistry:AdminTransferred", async ({ event, context }) => {
+  await context.db.insert(schema.verifierRegistryEvent).values({
+    id: toEventId(event.transaction.hash, event.log.logIndex),
+    kind: "AdminTransferred",
+    verifier: null,
+    adminFrom: event.args.from,
+    adminTo: event.args.to,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp
+  });
+});
+
+ponder.on("DisclosureLog:Disclosed", async ({ event, context }) => {
+  await context.db.insert(schema.disclosureEvent).values({
+    id: toEventId(event.transaction.hash, event.log.logIndex),
+    kind: "Disclosed",
+    hash: event.args.hash,
+    byWallet: event.args.byWallet,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp
+  });
+});
+
+ponder.on("DisclosureLog:AutoDisclosed", async ({ event, context }) => {
+  await context.db.insert(schema.disclosureEvent).values({
+    id: toEventId(event.transaction.hash, event.log.logIndex),
+    kind: "AutoDisclosed",
+    hash: event.args.hash,
+    byWallet: null,
     txHash: event.transaction.hash,
     blockNumber: event.block.number,
     timestamp: event.block.timestamp

@@ -24,7 +24,7 @@
 #   TOKEN_ADDRESS           DOT precompile / real ERC20 (required for testnet/mainnet)
 #   OWNER                   multisig mapped EVM address (defaults to deployer on dev)
 #   PAUSER                  hot-key pauser EOA          (defaults to deployer)
-#   VERIFIER                verifier EOA                (defaults to deployer on dev)
+#   VERIFIER                backend verifier signer EOA (defaults to deployer on dev)
 #   ARBITRATOR              arbitrator EOA              (defaults to deployer on dev)
 #   DOT_NAME / DOT_SYMBOL   mock token name (dev only)
 #   *_BPS / *_CAP / *_PENALTY  policy params (defaults retained from v1;
@@ -167,7 +167,16 @@ echo "AgentAccountCore:        $AGENT_ACCOUNT"
 REPUTATION_SBT="$(extract_address "$(forge_deploy contracts/ReputationSBT.sol:ReputationSBT --constructor-args "$TREASURY_POLICY")")"
 echo "ReputationSBT:           $REPUTATION_SBT"
 
-ESCROW_CORE="$(extract_address "$(forge_deploy contracts/EscrowCore.sol:EscrowCore --constructor-args "$TREASURY_POLICY" "$AGENT_ACCOUNT" "$REPUTATION_SBT")")"
+VERIFIER_REGISTRY="$(extract_address "$(forge_deploy contracts/VerifierRegistry.sol:VerifierRegistry --constructor-args "$DEPLOYER_ADDRESS")")"
+echo "VerifierRegistry:        $VERIFIER_REGISTRY"
+
+DISCOVERY_REGISTRY="$(extract_address "$(forge_deploy contracts/DiscoveryRegistry.sol:DiscoveryRegistry --constructor-args "$DEPLOYER_ADDRESS")")"
+echo "DiscoveryRegistry:       $DISCOVERY_REGISTRY"
+
+DISCLOSURE_LOG="$(extract_address "$(forge_deploy contracts/DisclosureLog.sol:DisclosureLog --constructor-args "$DEPLOYER_ADDRESS")")"
+echo "DisclosureLog:           $DISCLOSURE_LOG"
+
+ESCROW_CORE="$(extract_address "$(forge_deploy contracts/EscrowCore.sol:EscrowCore --constructor-args "$TREASURY_POLICY" "$AGENT_ACCOUNT" "$REPUTATION_SBT" "$VERIFIER_REGISTRY")")"
 echo "EscrowCore:              $ESCROW_CORE"
 
 XCM_WRAPPER=""
@@ -192,6 +201,7 @@ if [[ -n "$XCM_WRAPPER" ]]; then
 fi
 send_tx "$TREASURY_POLICY" "setVerifier(address,bool)" "$VERIFIER_ADDRESS" true
 send_tx "$TREASURY_POLICY" "setArbitrator(address,bool)" "$ARBITRATOR_ADDRESS" true
+send_tx "$VERIFIER_REGISTRY" "addVerifier(address)" "$VERIFIER_ADDRESS"
 send_tx "$TREASURY_POLICY" "setDailyOutflowCap(uint256)" "$DAILY_OUTFLOW_CAP"
 send_tx "$TREASURY_POLICY" "setPerAccountBorrowCap(uint256)" "$BORROW_CAP"
 send_tx "$TREASURY_POLICY" "setMinimumCollateralRatioBps(uint256)" "$MIN_COLLATERAL_RATIO_BPS"
@@ -234,6 +244,9 @@ fi
 # can.
 if [[ "$OWNER_ADDRESS" != "$DEPLOYER_ADDRESS" ]]; then
   echo "Transferring ownership to: $OWNER_ADDRESS"
+  send_tx "$VERIFIER_REGISTRY" "transferAdmin(address)" "$OWNER_ADDRESS"
+  send_tx "$DISCOVERY_REGISTRY" "setPublisher(address)" "$OWNER_ADDRESS"
+  send_tx "$DISCLOSURE_LOG" "setPublisher(address)" "$OWNER_ADDRESS"
   send_tx "$TREASURY_POLICY" "transferOwnership(address)" "$OWNER_ADDRESS"
 fi
 
@@ -268,6 +281,9 @@ cat > "$manifest_path" <<JSON
     "strategyAdapterRegistry": "$STRATEGY_REGISTRY",
     "agentAccountCore": "$AGENT_ACCOUNT",
     "reputationSbt": "$REPUTATION_SBT",
+    "verifierRegistry": "$VERIFIER_REGISTRY",
+    "discoveryRegistry": "$DISCOVERY_REGISTRY",
+    "disclosureLog": "$DISCLOSURE_LOG",
     "escrowCore": "$ESCROW_CORE",
     "xcmWrapper": $XCM_WRAPPER_JSON,
     "token": "$TOKEN_ADDRESS"
@@ -284,6 +300,9 @@ TREASURY_POLICY=$TREASURY_POLICY
 STRATEGY_ADAPTER_REGISTRY=$STRATEGY_REGISTRY
 AGENT_ACCOUNT_ADDRESS=$AGENT_ACCOUNT
 REPUTATION_SBT_ADDRESS=$REPUTATION_SBT
+VERIFIER_REGISTRY_ADDRESS=$VERIFIER_REGISTRY
+DISCOVERY_REGISTRY_ADDRESS=$DISCOVERY_REGISTRY
+DISCLOSURE_LOG_ADDRESS=$DISCLOSURE_LOG
 ESCROW_CORE_ADDRESS=$ESCROW_CORE
 TOKEN_ADDRESS=$TOKEN_ADDRESS
 EOF

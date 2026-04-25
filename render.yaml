@@ -26,6 +26,12 @@ services:
         sync: false
       - key: REPUTATION_SBT_ADDRESS
         sync: false
+      - key: VERIFIER_REGISTRY_ADDRESS
+        sync: false
+      - key: DISCOVERY_REGISTRY_ADDRESS
+        sync: false
+      - key: DISCLOSURE_LOG_ADDRESS
+        sync: false
       - key: SUPPORTED_ASSETS
         sync: false
       - key: REDIS_URL
@@ -48,6 +54,12 @@ services:
       - key: PONDER_RPC_URL_420420417
         value: https://eth-rpc-testnet.polkadot.io/
       - key: DATABASE_URL
+        sync: false
+      - key: PONDER_VERIFIER_REGISTRY_ADDRESS
+        sync: false
+      - key: PONDER_DISCOVERY_REGISTRY_ADDRESS
+        sync: false
+      - key: PONDER_DISCLOSURE_LOG_ADDRESS
         sync: false
       - key: XCM_EXTERNAL_SOURCE_TYPE
         sync: false

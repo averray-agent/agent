@@ -531,6 +531,9 @@ Required contract env vars for the current live-chain backend:
 - `AGENT_ACCOUNT_ADDRESS`
 - `ESCROW_CORE_ADDRESS`
 - `REPUTATION_SBT_ADDRESS`
+- `VERIFIER_REGISTRY_ADDRESS`
+- `DISCOVERY_REGISTRY_ADDRESS`
+- `DISCLOSURE_LOG_ADDRESS`
 
 Required authentication env vars (backend, strict mode):
 
@@ -574,6 +577,9 @@ Matching contract env vars for the indexer:
 - `PONDER_ESCROW_CORE_ADDRESS`
 - `PONDER_AGENT_ACCOUNT_ADDRESS`
 - `PONDER_REPUTATION_SBT_ADDRESS`
+- `PONDER_VERIFIER_REGISTRY_ADDRESS`
+- `PONDER_DISCOVERY_REGISTRY_ADDRESS`
+- `PONDER_DISCLOSURE_LOG_ADDRESS`
 
 Do not commit server secrets back into the repository.
 

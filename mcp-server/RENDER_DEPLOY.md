@@ -15,12 +15,15 @@
 - `AGENT_ACCOUNT_ADDRESS`
 - `ESCROW_CORE_ADDRESS`
 - `REPUTATION_SBT_ADDRESS`
+- `VERIFIER_REGISTRY_ADDRESS`
 - `SUPPORTED_ASSETS`
 - `REDIS_URL`
 
 ## Recommended environment variables
 
 - `REDIS_NAMESPACE=agent-platform`
+- `DISCOVERY_REGISTRY_ADDRESS`
+- `DISCLOSURE_LOG_ADDRESS`
 - `PORT`
   Render sets this automatically for web services.
 

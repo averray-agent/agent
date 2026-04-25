@@ -1,4 +1,5 @@
 import { VerifierRegistry } from "./verifier-handlers.js";
+import { hashCanonicalContent } from "../core/canonical-content.js";
 
 export class VerifierService {
   constructor(platformService, stateStore, blockchainGateway = undefined, registry = new VerifierRegistry()) {
@@ -14,13 +15,21 @@ export class VerifierService {
     const chainJobId = session.chainJobId ?? session.jobId;
     const verificationInput = this.resolveVerificationInput(session, evidence);
     const verdict = await this.registry.evaluate(job, verificationInput);
+    const reasoningHash = hashCanonicalContent({
+      handler: verdict.handler,
+      handlerVersion: verdict.handlerVersion,
+      outcome: verdict.outcome,
+      reasonCode: verdict.reasonCode,
+      details: verdict.details ?? null
+    });
 
     if (this.blockchainGateway?.isEnabled() && this.blockchainGateway.resolveSinglePayout) {
       await this.blockchainGateway.resolveSinglePayout(
         chainJobId,
         verdict.outcome === "approved",
         verdict.reasonCode,
-        metadataURI
+        metadataURI,
+        reasoningHash
       );
     }
 

@@ -9,6 +9,7 @@ import {StrategyAdapterRegistry} from "../contracts/StrategyAdapterRegistry.sol"
 import {AgentAccountCore} from "../contracts/AgentAccountCore.sol";
 import {EscrowCore} from "../contracts/EscrowCore.sol";
 import {ReputationSBT} from "../contracts/ReputationSBT.sol";
+import {VerifierRegistry} from "../contracts/VerifierRegistry.sol";
 import {MockVDotAdapter} from "../contracts/strategies/MockVDotAdapter.sol";
 
 contract AgentPlatformTest is Test {
@@ -16,6 +17,7 @@ contract AgentPlatformTest is Test {
     StrategyAdapterRegistry internal registry;
     AgentAccountCore internal accounts;
     ReputationSBT internal reputation;
+    VerifierRegistry internal verifierRegistry;
     EscrowCore internal escrow;
     MockERC20 internal dot;
 
@@ -26,13 +28,16 @@ contract AgentPlatformTest is Test {
 
     uint256 internal constant POSTER_DEPOSIT = 5_000 ether;
     uint256 internal constant WORKER_DEPOSIT = 200 ether;
+    bytes32 internal constant SPEC_HASH = bytes32("SPEC_HASH");
+    bytes32 internal constant REASONING_HASH = bytes32("REASONING_HASH");
 
     function setUp() public {
         policy = new TreasuryPolicy();
         registry = new StrategyAdapterRegistry(policy);
         accounts = new AgentAccountCore(policy, registry);
         reputation = new ReputationSBT(policy);
-        escrow = new EscrowCore(policy, accounts, reputation);
+        verifierRegistry = new VerifierRegistry(address(this));
+        escrow = new EscrowCore(policy, accounts, reputation, verifierRegistry);
         dot = new MockERC20("Mock DOT", "mDOT");
 
         policy.setApprovedAsset(address(dot), true);
@@ -40,6 +45,7 @@ contract AgentPlatformTest is Test {
         policy.setServiceOperator(address(accounts), true);
         policy.setServiceOperator(address(this), true);
         policy.setVerifier(verifier, true);
+        verifierRegistry.addVerifier(verifier);
         policy.setArbitrator(arbitrator, true);
         policy.setDailyOutflowCap(type(uint256).max);
         policy.setPerAccountBorrowCap(1_000 ether);
@@ -62,7 +68,7 @@ contract AgentPlatformTest is Test {
         bytes32 jobId = keccak256("job/single/1");
 
         vm.prank(poster);
-        escrow.createSinglePayoutJob(jobId, address(dot), 100 ether, 10 ether, 5 ether, 1 days, bytes32("AUTO"), bytes32("CODING"));
+        escrow.createSinglePayoutJob(jobId, address(dot), 100 ether, 10 ether, 5 ether, 1 days, bytes32("AUTO"), bytes32("CODING"), SPEC_HASH);
 
         uint256 startingWorkerBalance = dot.balanceOf(worker);
 
@@ -77,7 +83,7 @@ contract AgentPlatformTest is Test {
         escrow.submitWork(jobId, keccak256("work"));
 
         vm.prank(verifier);
-        escrow.resolveSinglePayout(jobId, true, bytes32("OK"), "ipfs://badge/coding");
+        escrow.resolveSinglePayout(jobId, true, bytes32("OK"), "ipfs://badge/coding", REASONING_HASH);
 
         (uint256 posterLiquid, uint256 posterReserved,,,,) = accounts.positions(poster, address(dot));
         (uint256 workerLiquid,,,, uint256 workerJobStake,) = accounts.positions(worker, address(dot));
@@ -144,7 +150,7 @@ contract AgentPlatformTest is Test {
         bytes32 jobId = keccak256("job/timeout/1");
 
         vm.prank(poster);
-        escrow.createSinglePayoutJob(jobId, address(dot), 50 ether, 5 ether, 5 ether, 1 days, bytes32("AUTO"), bytes32("DATA"));
+        escrow.createSinglePayoutJob(jobId, address(dot), 50 ether, 5 ether, 5 ether, 1 days, bytes32("AUTO"), bytes32("DATA"), SPEC_HASH);
 
         uint256 posterBalanceBefore = dot.balanceOf(poster);
 
@@ -171,7 +177,7 @@ contract AgentPlatformTest is Test {
         bytes32 jobId = keccak256("job/timeout/2");
 
         vm.prank(poster);
-        escrow.createSinglePayoutJob(jobId, address(dot), 50 ether, 5 ether, 5 ether, 1 days, bytes32("AUTO"), bytes32("DATA"));
+        escrow.createSinglePayoutJob(jobId, address(dot), 50 ether, 5 ether, 5 ether, 1 days, bytes32("AUTO"), bytes32("DATA"), SPEC_HASH);
 
         vm.prank(worker);
         escrow.claimJob(jobId);
@@ -203,7 +209,7 @@ contract AgentPlatformTest is Test {
         milestones[1] = 25 ether;
 
         vm.prank(poster);
-        escrow.createMilestoneJob(jobId, address(dot), milestones, 5 ether, 5 ether, 1 days, bytes32("AUTO"), bytes32("DATA"));
+        escrow.createMilestoneJob(jobId, address(dot), milestones, 5 ether, 5 ether, 1 days, bytes32("AUTO"), bytes32("DATA"), SPEC_HASH);
 
         vm.prank(worker);
         escrow.claimJob(jobId);
@@ -214,7 +220,7 @@ contract AgentPlatformTest is Test {
         escrow.submitWork(jobId, keccak256("milestone-work"));
 
         vm.prank(verifier);
-        escrow.resolveMilestone(jobId, 0, true, bytes32("OK"), "ipfs://badge/milestone");
+        escrow.resolveMilestone(jobId, 0, true, bytes32("OK"), "ipfs://badge/milestone", REASONING_HASH);
 
         EscrowCore.JobEscrow memory job = escrow.jobs(jobId);
 
@@ -233,7 +239,7 @@ contract AgentPlatformTest is Test {
         reputation.updateReputation(worker, 100, 100, 0);
 
         vm.prank(poster);
-        escrow.createSinglePayoutJob(jobId, address(dot), 50 ether, 5 ether, 5 ether, 1 days, bytes32("AUTO"), bytes32("DATA"));
+        escrow.createSinglePayoutJob(jobId, address(dot), 50 ether, 5 ether, 5 ether, 1 days, bytes32("AUTO"), bytes32("DATA"), SPEC_HASH);
 
         uint256 posterBalanceBefore = dot.balanceOf(poster);
 
@@ -244,7 +250,7 @@ contract AgentPlatformTest is Test {
         escrow.submitWork(jobId, keccak256("rejected-work"));
 
         vm.prank(verifier);
-        escrow.resolveSinglePayout(jobId, false, bytes32("REJECTED"), "ipfs://badge/rejected");
+        escrow.resolveSinglePayout(jobId, false, bytes32("REJECTED"), "ipfs://badge/rejected", REASONING_HASH);
 
         (, , , , uint256 workerJobStakeBeforeFinalize,) = accounts.positions(worker, address(dot));
         (uint256 skillBefore, uint256 reliabilityBefore,) = reputation.reputations(worker);
@@ -273,7 +279,7 @@ contract AgentPlatformTest is Test {
         reputation.updateReputation(worker, 100, 100, 0);
 
         vm.prank(poster);
-        escrow.createSinglePayoutJob(jobId, address(dot), 50 ether, 5 ether, 5 ether, 1 days, bytes32("AUTO"), bytes32("DATA"));
+        escrow.createSinglePayoutJob(jobId, address(dot), 50 ether, 5 ether, 5 ether, 1 days, bytes32("AUTO"), bytes32("DATA"), SPEC_HASH);
 
         vm.prank(worker);
         escrow.claimJob(jobId);
@@ -282,7 +288,7 @@ contract AgentPlatformTest is Test {
         escrow.submitWork(jobId, keccak256("rejected-work"));
 
         vm.prank(verifier);
-        escrow.resolveSinglePayout(jobId, false, bytes32("REJECTED"), "ipfs://badge/rejected");
+        escrow.resolveSinglePayout(jobId, false, bytes32("REJECTED"), "ipfs://badge/rejected", REASONING_HASH);
 
         vm.prank(worker);
         escrow.openDispute(jobId);
@@ -305,7 +311,7 @@ contract AgentPlatformTest is Test {
         reputation.updateReputation(worker, 100, 100, 0);
 
         vm.prank(poster);
-        escrow.createSinglePayoutJob(jobId, address(dot), 50 ether, 5 ether, 5 ether, 1 days, bytes32("AUTO"), bytes32("DATA"));
+        escrow.createSinglePayoutJob(jobId, address(dot), 50 ether, 5 ether, 5 ether, 1 days, bytes32("AUTO"), bytes32("DATA"), SPEC_HASH);
 
         uint256 posterBalanceBefore = dot.balanceOf(poster);
 
@@ -316,7 +322,7 @@ contract AgentPlatformTest is Test {
         escrow.submitWork(jobId, keccak256("contested-work"));
 
         vm.prank(verifier);
-        escrow.resolveSinglePayout(jobId, false, bytes32("REJECTED"), "ipfs://badge/rejected");
+        escrow.resolveSinglePayout(jobId, false, bytes32("REJECTED"), "ipfs://badge/rejected", REASONING_HASH);
 
         vm.prank(worker);
         escrow.openDispute(jobId);
