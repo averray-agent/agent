@@ -13,6 +13,15 @@ const zeroHash = `0x${"0".repeat(64)}` as `0x${string}`;
 const hasXcmWrapper = Boolean(
   process.env.PONDER_XCM_WRAPPER_ADDRESS?.trim() || process.env.XCM_WRAPPER_ADDRESS?.trim()
 );
+const hasVerifierRegistry = Boolean(
+  process.env.PONDER_VERIFIER_REGISTRY_ADDRESS?.trim() || process.env.VERIFIER_REGISTRY_ADDRESS?.trim()
+);
+const hasDiscoveryRegistry = Boolean(
+  process.env.PONDER_DISCOVERY_REGISTRY_ADDRESS?.trim() || process.env.DISCOVERY_REGISTRY_ADDRESS?.trim()
+);
+const hasDisclosureLog = Boolean(
+  process.env.PONDER_DISCLOSURE_LOG_ADDRESS?.trim() || process.env.DISCLOSURE_LOG_ADDRESS?.trim()
+);
 
 const decodeBytes32 = (value: string) => {
   try {
@@ -361,7 +370,8 @@ ponder.on("TreasuryPolicy:OutflowRecorded", async ({ event, context }) => {
   });
 });
 
-ponder.on("DiscoveryRegistry:ManifestPublished", async ({ event, context }) => {
+if (hasDiscoveryRegistry) {
+ponder.on("DiscoveryRegistry:ManifestPublished" as any, async ({ event, context }: any) => {
   await context.db.insert(schema.manifestPublication).values({
     id: toEventId(event.transaction.hash, event.log.logIndex),
     version: event.args.version,
@@ -372,8 +382,10 @@ ponder.on("DiscoveryRegistry:ManifestPublished", async ({ event, context }) => {
     timestamp: event.block.timestamp
   });
 });
+}
 
-ponder.on("VerifierRegistry:VerifierAdded", async ({ event, context }) => {
+if (hasVerifierRegistry) {
+ponder.on("VerifierRegistry:VerifierAdded" as any, async ({ event, context }: any) => {
   await context.db.insert(schema.verifierRegistryEvent).values({
     id: toEventId(event.transaction.hash, event.log.logIndex),
     kind: "VerifierAdded",
@@ -386,7 +398,7 @@ ponder.on("VerifierRegistry:VerifierAdded", async ({ event, context }) => {
   });
 });
 
-ponder.on("VerifierRegistry:VerifierRemoved", async ({ event, context }) => {
+ponder.on("VerifierRegistry:VerifierRemoved" as any, async ({ event, context }: any) => {
   await context.db.insert(schema.verifierRegistryEvent).values({
     id: toEventId(event.transaction.hash, event.log.logIndex),
     kind: "VerifierRemoved",
@@ -399,7 +411,7 @@ ponder.on("VerifierRegistry:VerifierRemoved", async ({ event, context }) => {
   });
 });
 
-ponder.on("VerifierRegistry:AdminTransferred", async ({ event, context }) => {
+ponder.on("VerifierRegistry:AdminTransferred" as any, async ({ event, context }: any) => {
   await context.db.insert(schema.verifierRegistryEvent).values({
     id: toEventId(event.transaction.hash, event.log.logIndex),
     kind: "AdminTransferred",
@@ -411,8 +423,10 @@ ponder.on("VerifierRegistry:AdminTransferred", async ({ event, context }) => {
     timestamp: event.block.timestamp
   });
 });
+}
 
-ponder.on("DisclosureLog:Disclosed", async ({ event, context }) => {
+if (hasDisclosureLog) {
+ponder.on("DisclosureLog:Disclosed" as any, async ({ event, context }: any) => {
   await context.db.insert(schema.disclosureEvent).values({
     id: toEventId(event.transaction.hash, event.log.logIndex),
     kind: "Disclosed",
@@ -424,7 +438,7 @@ ponder.on("DisclosureLog:Disclosed", async ({ event, context }) => {
   });
 });
 
-ponder.on("DisclosureLog:AutoDisclosed", async ({ event, context }) => {
+ponder.on("DisclosureLog:AutoDisclosed" as any, async ({ event, context }: any) => {
   await context.db.insert(schema.disclosureEvent).values({
     id: toEventId(event.transaction.hash, event.log.logIndex),
     kind: "AutoDisclosed",
@@ -435,6 +449,7 @@ ponder.on("DisclosureLog:AutoDisclosed", async ({ event, context }) => {
     timestamp: event.block.timestamp
   });
 });
+}
 
 ponder.on("AgentAccountCore:JobStakeLocked", async ({ event, context }) => {
   await context.db.insert(schema.jobStakeEvent).values({
