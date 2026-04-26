@@ -41,6 +41,7 @@ const DISCOVERY_AUTHENTICATED_ENDPOINTS = [
   { path: "/jobs/recommendations", description: "Tier-gated recommendation list with fit score + unlock hints." },
   { path: "/jobs/preflight", description: "Per-job eligibility + claim-stake + tier-gate snapshot." },
   { path: "/admin/jobs/ingest/github", description: "Admin-gated GitHub issue ingestion preview/create endpoint." },
+  { path: "/admin/jobs/ingest/osv", description: "Admin-gated OSV npm advisory ingestion preview/create endpoint." },
   { path: "/admin/jobs/ingest/wikipedia", description: "Admin-gated Wikipedia maintenance ingestion preview/create endpoint." },
   { path: "/disputes", description: "Operator dispute queue derived from sessions requiring human review." },
   { path: "/disputes/:id", description: "Detailed dispute evidence, timeline, verdict, and stake release state." },

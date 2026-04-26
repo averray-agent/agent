@@ -11,7 +11,8 @@
     "demo:e2e:remote": "node src/demo/e2e-remote.js",
     "check:redis": "node src/demo/redis-persistence-check.js",
     "ingest:github-issues": "node src/jobs/ingest-github-issues.js",
-    "ingest:wikipedia": "node src/jobs/ingest-wikipedia-maintenance.js"
+    "ingest:wikipedia": "node src/jobs/ingest-wikipedia-maintenance.js",
+    "ingest:osv-advisories": "node src/jobs/ingest-osv-advisories.js"
   },
   "dependencies": {
     "ethers": "^6.16.0",

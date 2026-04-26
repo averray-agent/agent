@@ -105,6 +105,10 @@ After Wikipedia, use the same pattern for:
 3. **OSV/NVD advisories**
    - package-to-CVE mapping, remediation summaries
    - structured impact notes
+   - v1 ingestion is allowlist-driven and npm-only:
+     `POST /admin/jobs/ingest/osv` accepts package/version/repo targets,
+     queries OSV, and emits dependency remediation PR jobs when a fixed version
+     exists. CVE aliases link to NVD for operator review.
 
 4. **Stack Exchange / Discourse**
    - unanswered-question triage, duplicate detection, answer summaries

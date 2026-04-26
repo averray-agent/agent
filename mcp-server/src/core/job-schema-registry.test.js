@@ -81,6 +81,26 @@ test("validateStructuredSubmission accepts Wikipedia citation repair payload", (
   });
 });
 
+test("validateStructuredSubmission accepts dependency remediation evidence", () => {
+  const payload = {
+    prUrl: "https://github.com/example/app/pull/12",
+    packageName: "minimist",
+    vulnerableVersion: "0.0.8",
+    fixedVersion: "1.2.3",
+    advisoryIds: ["GHSA-vh95-rmgr-6w4m", "CVE-2020-7598"],
+    summary: "Updated minimist and regenerated the npm lockfile.",
+    tests: "npm test passed",
+    manifestPath: "package.json",
+    lockfilesUpdated: ["package-lock.json"],
+    checksPassing: true,
+    ciStatus: "passing"
+  };
+
+  assert.doesNotThrow(() => {
+    validateStructuredSubmission("schema://jobs/dependency-remediation-output", payload);
+  });
+});
+
 test("validateStructuredSubmission rejects missing required fields", () => {
   assert.throws(
     () => validateStructuredSubmission("schema://jobs/pr-review-findings-output", {

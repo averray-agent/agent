@@ -176,6 +176,43 @@ const BUILTIN_JOB_SCHEMAS = new Map([
       fix_recommendation: stringSchema({ minLength: 1 })
     }
   })],
+  ["schema://jobs/dependency-remediation-input", objectSchema({
+    $id: "schema://jobs/dependency-remediation-input",
+    description: "Dependency vulnerability remediation input from public advisory sources such as OSV/NVD.",
+    required: ["ecosystem", "packageName", "vulnerableVersion", "fixedVersion", "advisoryIds", "instructions"],
+    properties: {
+      ecosystem: enumString(["npm"]),
+      packageName: stringSchema({ minLength: 1 }),
+      vulnerableVersion: stringSchema({ minLength: 1 }),
+      fixedVersion: stringSchema({ minLength: 1 }),
+      repo: stringSchema(),
+      manifestPath: stringSchema(),
+      advisoryIds: arrayOfStrings({ minItems: 1 }),
+      advisoryUrls: arrayOfStrings(),
+      instructions: arrayOfStrings({ minItems: 1 })
+    }
+  })],
+  ["schema://jobs/dependency-remediation-output", objectSchema({
+    $id: "schema://jobs/dependency-remediation-output",
+    description: "Structured pull request evidence for a dependency vulnerability remediation.",
+    required: ["prUrl", "packageName", "vulnerableVersion", "fixedVersion", "advisoryIds", "summary", "tests"],
+    properties: {
+      prUrl: stringSchema({ minLength: 1 }),
+      packageName: stringSchema({ minLength: 1 }),
+      vulnerableVersion: stringSchema({ minLength: 1 }),
+      fixedVersion: stringSchema({ minLength: 1 }),
+      advisoryIds: arrayOfStrings({ minItems: 1 }),
+      summary: stringSchema({ minLength: 1 }),
+      tests: stringSchema({ minLength: 1 }),
+      repo: stringSchema(),
+      manifestPath: stringSchema(),
+      lockfilesUpdated: arrayOfStrings(),
+      filesChanged: arrayOfStrings(),
+      ciStatus: enumString(["unknown", "pending", "passing", "failing"]),
+      checksPassing: booleanSchema(),
+      notes: stringSchema()
+    }
+  })],
   ["schema://jobs/wikipedia-maintenance-input", objectSchema({
     $id: "schema://jobs/wikipedia-maintenance-input",
     description: "Wikipedia public article maintenance job input.",

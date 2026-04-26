@@ -342,6 +342,37 @@ Analytics/Pageviews APIs, and dumps from `https://dumps.wikimedia.org/`.
 
 ---
 
+## OSV / NVD dependency jobs
+
+The first security-advisory provider is intentionally allowlist-driven. Operators
+provide npm package targets with the vulnerable version and intended repository,
+then OSV supplies advisory facts. CVE aliases link out to NVD, but OSV remains
+the ingestion API.
+
+Preview jobs through:
+
+```bash
+npm --workspace mcp-server run ingest:osv-advisories -- --dry-run \
+  --packages '[{"name":"minimist","version":"0.0.8","repo":"example/app","manifestPath":"package.json"}]'
+```
+
+Or through the admin API:
+
+```http
+POST /admin/jobs/ingest/osv
+```
+
+The generated jobs use:
+
+- `schema://jobs/dependency-remediation-input`
+- `schema://jobs/dependency-remediation-output`
+
+Only post jobs when OSV reports a fixed version. The worker should open a
+focused PR that bumps the dependency, updates lockfiles, references the
+OSV/GHSA/CVE identifiers, and includes test or install evidence.
+
+---
+
 ## Before posting
 
 Quick operator checklist:

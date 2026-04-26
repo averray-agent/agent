@@ -23,6 +23,7 @@ import {
   schemaRefToJobSchemaPath
 } from "../../core/job-schema-registry.js";
 import { ingestGithubIssues } from "../../jobs/ingest-github-issues.js";
+import { ingestOsvAdvisories, parsePackages as parseOsvPackages } from "../../jobs/ingest-osv-advisories.js";
 import { ingestWikipediaMaintenance, parseCategories } from "../../jobs/ingest-wikipedia-maintenance.js";
 
 const {
@@ -817,6 +818,8 @@ function metricPathLabel(pathname) {
     "/strategies",
     "/admin/jobs",
     "/admin/jobs/ingest/github",
+    "/admin/jobs/ingest/osv",
+    "/admin/jobs/ingest/wikipedia",
     "/admin/jobs/pause",
     "/admin/jobs/resume",
     "/admin/xcm/observe",
@@ -1094,6 +1097,7 @@ const server = createServer(async (request, response) => {
           "/verifier/replay",
           "/admin/jobs",
           "/admin/jobs/ingest/github",
+          "/admin/jobs/ingest/osv",
           "/admin/jobs/ingest/wikipedia",
           "/admin/jobs/fire",
           "/admin/jobs/pause",
@@ -2203,6 +2207,58 @@ const server = createServer(async (request, response) => {
           ...skipped,
           ...(Number.isFinite(result.skipped) ? [{ reason: "below_min_score_or_over_limit", count: result.skipped }] : [])
         ],
+        errors
+      });
+    }
+
+    if (request.method === "POST" && pathname === "/admin/jobs/ingest/osv") {
+      const auth = await authMiddleware(request, url, { requireRole: "admin" });
+      await enforceLimit("admin_jobs", auth.wallet, rateLimitConfig.adminJobs);
+      const payload = await readJsonBody(request);
+      const packages = Array.isArray(payload?.packages) || typeof payload?.packages === "string"
+        ? parseOsvPackages(payload.packages)
+        : parseOsvPackages(process.env.OSV_INGEST_PACKAGES_JSON ?? process.env.OSV_INGEST_PACKAGES);
+      const limit = parsePositiveInteger(payload?.limit, 10, 50);
+      const minScore = parsePositiveInteger(payload?.minScore, 55, 100);
+      const dryRun = payload?.dryRun !== false;
+      const result = await ingestOsvAdvisories({ packages, limit, minScore });
+
+      if (dryRun) {
+        return respond(response, 200, {
+          ...result,
+          dryRun: true,
+          created: []
+        });
+      }
+
+      const created = [];
+      const skipped = [];
+      const errors = [];
+      for (const job of result.jobs) {
+        try {
+          created.push(service.createJob(job));
+        } catch (error) {
+          const normalized = normalizeError(error);
+          if (normalized.code === "job_exists") {
+            skipped.push({ id: job.id, reason: "already_exists" });
+            continue;
+          }
+          errors.push({
+            id: job.id,
+            code: normalized.code,
+            message: normalized.message
+          });
+        }
+      }
+
+      const status = errors.length ? 207 : 201;
+      return respond(response, status, {
+        ecosystem: result.ecosystem,
+        minScore: result.minScore,
+        dryRun: false,
+        candidateCount: result.count,
+        created,
+        skipped: [...skipped, ...(Array.isArray(result.skipped) ? result.skipped : [])],
         errors
       });
     }
