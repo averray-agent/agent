@@ -399,7 +399,9 @@ CI must hash the canonical JSON (JCS) and call `publish()` automatically on dire
 
 ### Reason-code registry
 
-`EscrowCore.resolveDispute` accepts freeform `bytes32 reasonCode`. The platform conventions are documented and indexer-recognized:
+`EscrowCore.resolveDispute` accepts freeform `bytes32 reasonCode`. The
+canonical registry lives in [DISPUTE_CODES.md](DISPUTE_CODES.md). The platform
+conventions are documented and indexer-recognized:
 
 | Code (`bytes32`) | Meaning | Typical `workerPayout` |
 |---|---|---|
@@ -525,7 +527,7 @@ To live in `THREAT_MODEL.md`:
 - [ ] `THREAT_MODEL.md` published.
 - [ ] No-token statement linked in README and docs root.
 - [ ] Week-12 gate thresholds and diagnostic order documented internally.
-- [ ] Reason-code registry published in `docs/DISPUTE_CODES.md` or equivalent.
+- [x] Reason-code registry published in `docs/DISPUTE_CODES.md` or equivalent.
 - [ ] Phase 0 -> Phase 1 -> Phase 2 arbitration migration triggers documented publicly.
 
 ### Dispute flow

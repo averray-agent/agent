@@ -6,6 +6,8 @@ production core.
 The rc1 product and architecture source document lives in
 [RC1_WORKING_SPEC.md](RC1_WORKING_SPEC.md). Use that spec as the roadmap
 boundary when prioritizing contract, backend, indexer, and operations work.
+The PR-sized execution sequence lives in
+[RC1_IMPLEMENTATION_PLAN.md](RC1_IMPLEMENTATION_PLAN.md).
 
 It is intentionally grounded in the code that exists today:
 
