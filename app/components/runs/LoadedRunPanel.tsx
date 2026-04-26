@@ -4,7 +4,11 @@ import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils/cn";
 import { SourceBadge, type RunState } from "./StatePill";
 import { IssueMarkdown } from "./IssueMarkdown";
-import type { GitHubJobContext, WikipediaJobContext } from "./types";
+import type {
+  GitHubJobContext,
+  OsvJobContext,
+  WikipediaJobContext,
+} from "./types";
 
 /**
  * Map the run's lifecycle state to the stake-block pill + copy. Keeps
@@ -130,6 +134,14 @@ export interface LoadedRunPanelProps {
    * `wikipedia` are mutually exclusive at runtime.
    */
   wikipedia?: WikipediaJobContext;
+  /**
+   * Same shape as `github` / `wikipedia` but for OSV dependency-
+   * remediation runs. The panel renders an OSV-specific evidence block
+   * that highlights the vulnerable package, the fix, the manifest
+   * path, and CVE/NVD cross-references. Mutually exclusive with the
+   * other two source contexts at runtime.
+   */
+  osv?: OsvJobContext;
   /**
    * Lifecycle state of the loaded run. Drives the stake block's pill +
    * aux copy so the panel doesn't shout "LOCKED" on a run that hasn't
@@ -277,12 +289,15 @@ export function LoadedRunPanel(props: LoadedRunPanelProps) {
 
           {/* Evidence — switches to a source-specific 4-tab layout when the
                loaded run was ingested from a third-party tracker (GitHub
-               issue, Wikipedia maintenance), so the operator sees real job
-               context instead of generic placeholder governance text. */}
+               issue, Wikipedia maintenance, OSV advisory), so the operator
+               sees real job context instead of generic placeholder
+               governance text. */}
           {props.github ? (
             <GitHubEvidenceBlock ctx={props.github} />
           ) : props.wikipedia ? (
             <WikipediaEvidenceBlock ctx={props.wikipedia} />
+          ) : props.osv ? (
+            <OsvEvidenceBlock ctx={props.osv} />
           ) : (
             <div>
               <BlockLabel
@@ -490,6 +505,12 @@ export function LoadedRunPanel(props: LoadedRunPanelProps) {
                   </SmallGhostBtn>
                   <SmallGhostBtn>Raise dispute</SmallGhostBtn>
                   <SmallGhostBtn>Withdraw proposal</SmallGhostBtn>
+                </>
+              ) : props.osv ? (
+                <>
+                  <SmallGhostBtn className="flex-1">Ping maintainer</SmallGhostBtn>
+                  <SmallGhostBtn>Raise dispute</SmallGhostBtn>
+                  <SmallGhostBtn>Skip advisory</SmallGhostBtn>
                 </>
               ) : (
                 <>
@@ -932,6 +953,401 @@ function WikiSubmissionTab({ ctx }: { ctx: WikipediaJobContext }) {
         <textarea
           spellCheck={false}
           placeholder="Caveats, alternative phrasings, anything the reviewer needs."
+          className="min-h-[60px] w-full resize-y rounded-[6px] border border-[var(--avy-line)] bg-white px-2.5 py-2 font-[family-name:var(--font-mono)] text-[11.5px] leading-[1.5] text-[var(--avy-ink)] outline-none placeholder:text-[var(--avy-muted)] focus:border-[var(--avy-accent)] focus:ring-2 focus:ring-[color:rgba(30,102,66,0.15)]"
+          style={{ letterSpacing: 0 }}
+        />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * OSV equivalent of `GitHubEvidenceBlock` / `WikipediaEvidenceBlock`.
+ * Same four-tab shape so an operator reads the surface the same way
+ * regardless of source: Advisory (vulnerability metadata + summary),
+ * Acceptance, Instructions, Submission. The block always renders the
+ * vulnerable package, the fixed version, the manifest path, and any
+ * CVE/NVD cross-references — these are the four facts a worker needs
+ * to write the focused PR without leaving the panel.
+ */
+type OsvTab = "advisory" | "acceptance" | "instructions" | "submission";
+
+function OsvEvidenceBlock({ ctx }: { ctx: OsvJobContext }) {
+  const [tab, setTab] = useState<OsvTab>("advisory");
+
+  const tabs: { id: OsvTab; label: string; sub?: string }[] = [
+    { id: "advisory", label: "Advisory" },
+    {
+      id: "acceptance",
+      label: "Acceptance",
+      sub: `·${ctx.acceptanceCriteria.length}`,
+    },
+    { id: "instructions", label: "Instructions" },
+    { id: "submission", label: "Submission" },
+  ];
+
+  const hasCves = (ctx.cves?.length ?? 0) > 0;
+  const advisoryUrl = `https://osv.dev/vulnerability/${encodeURIComponent(ctx.advisoryId)}`;
+
+  return (
+    <div>
+      <BlockLabel
+        right={
+          <a
+            href={advisoryUrl}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="inline-flex items-center gap-1 text-[var(--avy-accent)] hover:underline"
+          >
+            Open OSV advisory ↗
+          </a>
+        }
+      >
+        Job context
+      </BlockLabel>
+      <div className="flex flex-col overflow-hidden rounded-[8px] border border-[var(--avy-line)] bg-white">
+        {/* Source strip — pinned above the tabs so package, advisory id,
+            severity, and CVE chip stay readable on every tab. */}
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-[var(--avy-line-soft)] bg-[color:rgba(17,19,21,0.03)] px-3 py-2">
+          <SourceBadge kind="osv" secondary={hasCves ? "NVD" : undefined} />
+          <a
+            href={advisoryUrl}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="truncate whitespace-nowrap font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-ink)] hover:text-[var(--avy-accent)]"
+            style={{ letterSpacing: 0 }}
+            title={`${ctx.ecosystem} / ${ctx.packageName} · ${ctx.advisoryId}`}
+          >
+            <span className="text-[var(--avy-muted)]">{ctx.ecosystem}</span>
+            <span className="text-[var(--avy-ink)]"> / {ctx.packageName}</span>
+            <span className="ml-0.5 text-[var(--avy-accent)]">
+              {" "}
+              · {ctx.advisoryId}
+            </span>
+          </a>
+          {ctx.severity ? (
+            <>
+              <span className="opacity-40">·</span>
+              <span
+                className="whitespace-nowrap font-[family-name:var(--font-mono)] text-[11px] uppercase text-[var(--avy-muted)]"
+                style={{ letterSpacing: "0.08em" }}
+              >
+                {ctx.severity}
+              </span>
+            </>
+          ) : null}
+          <span className="opacity-40">·</span>
+          <span
+            className="whitespace-nowrap font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]"
+            style={{ letterSpacing: 0 }}
+          >
+            {ctx.vulnerableVersion} → {ctx.fixedVersion}
+          </span>
+          {typeof ctx.score === "number" ? (
+            <span className="ml-auto inline-flex items-center gap-1 whitespace-nowrap font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]">
+              Fit score{" "}
+              <b className="font-semibold text-[var(--avy-ink)]">{ctx.score}</b>
+              <span className="text-[var(--avy-muted)]">/100</span>
+            </span>
+          ) : null}
+        </div>
+
+        {/* Scope banner — non-negotiable, rendered on every OSV run.
+            Re-uses the warn-tinted box the Wikipedia block uses for its
+            policy banner so the visual rhythm of "important, but not
+            error" notes stays consistent across source kinds. */}
+        <div
+          className="flex items-start gap-2 border-b border-[var(--avy-line-soft)] bg-[color:rgba(211,145,27,0.08)] px-3 py-2 font-[family-name:var(--font-mono)] text-[11px] leading-[1.5] text-[var(--avy-ink)]"
+          style={{ letterSpacing: 0 }}
+        >
+          <span
+            className="mt-px shrink-0 rounded-full bg-[var(--avy-warn)] px-1.5 py-0.5 font-[family-name:var(--font-display)] text-[9.5px] font-extrabold uppercase text-white"
+            style={{ letterSpacing: "0.1em" }}
+          >
+            Scope
+          </span>
+          <span>
+            Open <b className="font-semibold">one focused PR</b> that bumps{" "}
+            <b className="font-semibold">{ctx.packageName}</b> to{" "}
+            <b className="font-semibold">{ctx.fixedVersion}</b> in{" "}
+            <b className="font-semibold">{ctx.manifestPath}</b>, refreshes the
+            lockfile, and attaches install + test evidence. No unrelated
+            refactors.
+          </span>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex items-center gap-2 border-b border-[var(--avy-line-soft)] bg-[#faf8f1] px-2.5 py-1.5">
+          {tabs.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setTab(t.id)}
+              className={cn(
+                "rounded-[5px] px-2 py-0.5 font-[family-name:var(--font-display)] text-[10px] font-extrabold uppercase text-[var(--avy-muted)]",
+                tab === t.id &&
+                  "bg-[var(--avy-paper-solid)] text-[var(--avy-ink)] shadow-[inset_0_0_0_1px_var(--avy-line)]"
+              )}
+              style={{ letterSpacing: "0.12em" }}
+            >
+              {t.label}
+              {t.sub ? (
+                <small className="ml-1 opacity-50" style={{ letterSpacing: 0 }}>
+                  {t.sub}
+                </small>
+              ) : null}
+            </button>
+          ))}
+        </div>
+
+        <div className="px-3.5 py-3">
+          {tab === "advisory" ? <OsvAdvisoryTab ctx={ctx} /> : null}
+          {tab === "acceptance" ? <OsvAcceptanceTab ctx={ctx} /> : null}
+          {tab === "instructions" ? <OsvInstructionsTab ctx={ctx} /> : null}
+          {tab === "submission" ? <OsvSubmissionTab ctx={ctx} /> : null}
+        </div>
+
+        {/* Verification footer — same shape as the GitHub/Wikipedia
+            blocks; reads as a focused-PR check sequence. */}
+        <div
+          className="flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-[var(--avy-line-soft)] bg-[#faf8f1] px-3 py-2 font-[family-name:var(--font-mono)] text-[10.5px] text-[var(--avy-muted)]"
+          style={{ letterSpacing: 0 }}
+        >
+          <span className="text-[var(--avy-accent)]">Verification</span>
+          <span className="inline-flex items-center whitespace-nowrap rounded-full bg-[color:rgba(17,19,21,0.06)] px-1.5 py-px font-medium text-[var(--avy-ink)]">
+            {ctx.verification.method}
+          </span>
+          {ctx.verification.signals.map((s) => (
+            <span key={s}>· {s}</span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function OsvAdvisoryTab({ ctx }: { ctx: OsvJobContext }) {
+  // Pair CVEs with their NVD URLs in input order; either side may be
+  // shorter, so use whichever has the entry. The repo currently emits
+  // both arrays in lockstep but we don't want to assume.
+  const cveLinks = (ctx.cves ?? []).map((cve, i) => ({
+    cve,
+    href: ctx.nvdUrls?.[i],
+  }));
+
+  return (
+    <>
+      <h3 className="m-0 font-[family-name:var(--font-display)] text-[14px] font-bold leading-[1.3] text-[var(--avy-ink)]">
+        {ctx.title}
+      </h3>
+
+      <dl
+        className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 font-[family-name:var(--font-mono)] text-[11.5px]"
+        style={{ letterSpacing: 0 }}
+      >
+        <dt className="text-[var(--avy-muted)]">Package</dt>
+        <dd className="m-0 font-medium text-[var(--avy-ink)]">
+          {ctx.ecosystem} / {ctx.packageName}
+        </dd>
+        <dt className="text-[var(--avy-muted)]">Vulnerable</dt>
+        <dd className="m-0 font-medium text-[#a03a1a]">
+          {ctx.vulnerableVersion}
+        </dd>
+        <dt className="text-[var(--avy-muted)]">Fixed in</dt>
+        <dd className="m-0 font-medium text-[var(--avy-accent)]">
+          {ctx.fixedVersion}
+        </dd>
+        <dt className="text-[var(--avy-muted)]">Repo</dt>
+        <dd className="m-0 truncate font-medium text-[var(--avy-ink)]">
+          {ctx.repo}
+        </dd>
+        <dt className="text-[var(--avy-muted)]">Manifest</dt>
+        <dd className="m-0 truncate font-medium text-[var(--avy-ink)]">
+          {ctx.manifestPath}
+        </dd>
+        <dt className="text-[var(--avy-muted)]">Advisory</dt>
+        <dd className="m-0 font-medium text-[var(--avy-ink)]">
+          {ctx.advisoryId}
+        </dd>
+        {ctx.severity ? (
+          <>
+            <dt className="text-[var(--avy-muted)]">Severity</dt>
+            <dd className="m-0 font-medium text-[var(--avy-ink)]">
+              {ctx.severity}
+            </dd>
+          </>
+        ) : null}
+        {ctx.published ? (
+          <>
+            <dt className="text-[var(--avy-muted)]">Published</dt>
+            <dd className="m-0 font-medium text-[var(--avy-ink)]">
+              {ctx.published}
+            </dd>
+          </>
+        ) : null}
+      </dl>
+
+      {cveLinks.length > 0 ? (
+        <div className="mt-3">
+          <div
+            className="mb-1 font-[family-name:var(--font-display)] text-[10px] font-extrabold uppercase text-[var(--avy-muted)]"
+            style={{ letterSpacing: "0.14em" }}
+          >
+            CVE / NVD references
+          </div>
+          <ul
+            className="m-0 flex flex-wrap gap-1.5 p-0"
+            style={{ letterSpacing: 0 }}
+          >
+            {cveLinks.map(({ cve, href }) => (
+              <li key={cve} className="list-none">
+                {href ? (
+                  <a
+                    href={href}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    className="inline-flex items-center gap-1 rounded-[6px] border border-[var(--avy-line)] bg-[color:rgba(17,19,21,0.03)] px-2 py-0.5 font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-ink)] hover:border-[color:rgba(30,102,66,0.32)] hover:text-[var(--avy-accent)]"
+                  >
+                    {cve}
+                    <span className="text-[var(--avy-muted)]">↗</span>
+                  </a>
+                ) : (
+                  <span className="inline-flex items-center rounded-[6px] border border-[var(--avy-line)] bg-[color:rgba(17,19,21,0.03)] px-2 py-0.5 font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-ink)]">
+                    {cve}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {ctx.body ? (
+        <p
+          className="mt-3 max-h-[220px] overflow-y-auto whitespace-pre-wrap font-[family-name:var(--font-body)] text-[12.5px] leading-[1.5] text-[var(--avy-ink)]"
+          style={{ letterSpacing: 0 }}
+        >
+          {ctx.body}
+        </p>
+      ) : null}
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        <a
+          href={`https://osv.dev/vulnerability/${encodeURIComponent(ctx.advisoryId)}`}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="inline-flex h-7 items-center gap-1.5 rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3 font-[family-name:var(--font-display)] text-[11px] font-bold uppercase text-[var(--avy-ink)] transition-transform hover:-translate-y-px hover:border-[color:rgba(30,102,66,0.24)] hover:text-[var(--avy-accent)]"
+          style={{ letterSpacing: "0.04em" }}
+        >
+          Open OSV advisory ↗
+        </a>
+        <a
+          href={`https://github.com/${ctx.repo}/blob/HEAD/${ctx.manifestPath}`}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="inline-flex h-7 items-center gap-1.5 rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3 font-[family-name:var(--font-display)] text-[11px] font-bold uppercase text-[var(--avy-ink)] transition-transform hover:-translate-y-px hover:border-[color:rgba(30,102,66,0.24)] hover:text-[var(--avy-accent)]"
+          style={{ letterSpacing: "0.04em" }}
+        >
+          Open manifest ↗
+        </a>
+      </div>
+    </>
+  );
+}
+
+function OsvAcceptanceTab({ ctx }: { ctx: OsvJobContext }) {
+  if (ctx.acceptanceCriteria.length === 0) {
+    return (
+      <p
+        className="m-0 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]"
+        style={{ letterSpacing: 0 }}
+      >
+        No explicit criteria were attached to this advisory.
+      </p>
+    );
+  }
+  return (
+    <ul className="m-0 flex flex-col gap-2 pl-0">
+      {ctx.acceptanceCriteria.map((item, i) => (
+        <li
+          key={i}
+          className="grid grid-cols-[18px_1fr] items-start gap-2 font-[family-name:var(--font-body)] text-[12.5px] leading-[1.45] text-[var(--avy-ink)]"
+          style={{ letterSpacing: 0 }}
+        >
+          <span
+            className="mt-px inline-grid h-[16px] w-[16px] place-items-center rounded-[4px] border border-[color:rgba(30,102,66,0.25)] bg-[color:rgba(30,102,66,0.06)] font-[family-name:var(--font-mono)] text-[9px] font-bold text-[var(--avy-accent)]"
+            style={{ letterSpacing: 0 }}
+            aria-hidden="true"
+          >
+            {i + 1}
+          </span>
+          <span>{item}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function OsvInstructionsTab({ ctx }: { ctx: OsvJobContext }) {
+  if (!ctx.agentInstructions) {
+    return (
+      <p
+        className="m-0 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]"
+        style={{ letterSpacing: 0 }}
+      >
+        No agent instructions were generated for this advisory.
+      </p>
+    );
+  }
+  return (
+    <p
+      className="m-0 rounded-[6px] border border-[color:rgba(30,102,66,0.18)] bg-[color:rgba(30,102,66,0.04)] px-3 py-2.5 font-[family-name:var(--font-mono)] text-[12px] leading-[1.55] text-[var(--avy-ink)]"
+      style={{ letterSpacing: 0 }}
+    >
+      {ctx.agentInstructions}
+    </p>
+  );
+}
+
+function OsvSubmissionTab({ ctx }: { ctx: OsvJobContext }) {
+  return (
+    <div className="flex flex-col gap-2.5">
+      <p
+        className="m-0 font-[family-name:var(--font-mono)] text-[11px] leading-[1.5] text-[var(--avy-muted)]"
+        style={{ letterSpacing: 0 }}
+      >
+        Open one focused PR against{" "}
+        <b className="text-[var(--avy-ink)]">{ctx.repo}</b> that bumps{" "}
+        <b className="text-[var(--avy-ink)]">{ctx.packageName}</b> to{" "}
+        <b className="text-[var(--avy-ink)]">{ctx.fixedVersion}</b> in{" "}
+        <b className="text-[var(--avy-ink)]">{ctx.manifestPath}</b>, refreshes
+        the lockfile, and includes install + test evidence.
+      </p>
+      <SubField
+        label="PR URL"
+        required
+        placeholder={`https://github.com/${ctx.repo}/pull/…`}
+        mono
+      />
+      <SubField
+        label="Lockfile / commit URL"
+        placeholder={`https://github.com/${ctx.repo}/commit/…`}
+        mono
+      />
+      <div>
+        <SubLabel>Install + test evidence</SubLabel>
+        <textarea
+          spellCheck={false}
+          placeholder="Paste npm install / npm test output, or a CI run URL. Verifier walks this to confirm the lockfile resolves and tests pass on the fixed version."
+          className="min-h-[120px] w-full resize-y rounded-[6px] border border-[var(--avy-line)] bg-white px-2.5 py-2 font-[family-name:var(--font-mono)] text-[11.5px] leading-[1.5] text-[var(--avy-ink)] outline-none placeholder:text-[var(--avy-muted)] focus:border-[var(--avy-accent)] focus:ring-2 focus:ring-[color:rgba(30,102,66,0.15)]"
+          style={{ letterSpacing: 0 }}
+        />
+      </div>
+      <div>
+        <SubLabel>Notes for verifier (optional)</SubLabel>
+        <textarea
+          spellCheck={false}
+          placeholder="Caveats, breaking-change notes, anything the verifier should know about the bump."
           className="min-h-[60px] w-full resize-y rounded-[6px] border border-[var(--avy-line)] bg-white px-2.5 py-2 font-[family-name:var(--font-mono)] text-[11.5px] leading-[1.5] text-[var(--avy-ink)] outline-none placeholder:text-[var(--avy-muted)] focus:border-[var(--avy-accent)] focus:ring-2 focus:ring-[color:rgba(30,102,66,0.15)]"
           style={{ letterSpacing: 0 }}
         />

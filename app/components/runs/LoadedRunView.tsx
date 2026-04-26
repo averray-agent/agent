@@ -18,6 +18,7 @@ import { swrFetcher } from "@/lib/api/client";
 import { useJobDefinition, useJobs } from "@/lib/api/hooks";
 import {
   buildGitHubContext,
+  buildOsvContext,
   buildRunRows,
   buildWikipediaContext,
   extractRunJobs,
@@ -70,6 +71,7 @@ export function LoadedRunView({
     FIXTURE_JOB_DEFINITIONS.find((def) => def.id === loadedRow.id);
   const loadedGitHub = buildGitHubContext(loadedRow, selectedJob);
   const loadedWikipedia = buildWikipediaContext(loadedRow, selectedJob);
+  const loadedOsv = buildOsvContext(loadedRow, selectedJob);
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -119,7 +121,9 @@ export function LoadedRunView({
     ? "Loaded run · Wikipedia article"
     : loadedGitHub
       ? "Loaded run · GitHub issue"
-      : "Loaded run";
+      : loadedOsv
+        ? "Loaded run · OSV advisory"
+        : "Loaded run";
 
   return (
     <div className="flex flex-col gap-3.5">
@@ -130,6 +134,7 @@ export function LoadedRunView({
         state={loadedRow.state}
         github={loadedGitHub}
         wikipedia={loadedWikipedia}
+        osv={loadedOsv}
         onReceiptPreview={() => setReceiptOpen(true)}
         standaloneUrl={standaloneUrl}
         stake={{
@@ -163,6 +168,13 @@ export function LoadedRunView({
               to Averray. No direct Wikipedia edits. Window{" "}
               <b className="text-[var(--avy-ink)]">00:08:14 / 02:00:00</b>.
             </>
+          ) : loadedOsv ? (
+            <>
+              Submits{" "}
+              <b className="text-[var(--avy-ink)]">PR URL + lockfile + install/test evidence</b>{" "}
+              to the verifier. Window{" "}
+              <b className="text-[var(--avy-ink)]">00:08:14 / 02:00:00</b>.
+            </>
           ) : (
             <>
               Submits <b className="text-[var(--avy-ink)]">PR URL + evidence</b>{" "}
@@ -172,13 +184,96 @@ export function LoadedRunView({
           ),
           cta: loadedWikipedia
             ? "Submit proposal for review"
-            : "Submit for verification",
+            : loadedOsv
+              ? "Submit remediation PR"
+              : "Submit for verification",
           onSubmit: handleSubmit,
           submitting,
           error: submitError,
         }}
         verifier={
-          loadedWikipedia
+          loadedOsv
+            ? {
+                runner: "verifier-2 · osv_dependency_pr · handler-v0.14",
+                elapsed: "stream · 3.4s",
+                modeNote: "osv_dependency_pr · maintainer-reviewed",
+                lines: [
+                  {
+                    time: "14:28:01",
+                    level: "info",
+                    label: "advisory",
+                    message: (
+                      <>
+                        loaded{" "}
+                        <span className="text-[#f4c989]">
+                          {loadedOsv.advisoryId}
+                        </span>{" "}
+                        · {loadedOsv.ecosystem}/{loadedOsv.packageName}{" "}
+                        {loadedOsv.vulnerableVersion} → {loadedOsv.fixedVersion}
+                      </>
+                    ),
+                  },
+                  {
+                    time: "14:28:01",
+                    level: "ok",
+                    label: "pass",
+                    message: (
+                      <>
+                        manifest scope ok · only{" "}
+                        <span className="text-[#f4c989]">
+                          {loadedOsv.manifestPath}
+                        </span>{" "}
+                        + lockfile touched
+                      </>
+                    ),
+                  },
+                  {
+                    time: "14:28:02",
+                    level: "ok",
+                    label: "pass",
+                    message: <>lockfile resolves to {loadedOsv.fixedVersion}</>,
+                  },
+                  {
+                    time: "14:28:02",
+                    level: "ok",
+                    label: "pass",
+                    message: (
+                      <>
+                        install + test green ·{" "}
+                        <span className="text-[#9bd7b5]">npm ci · npm test</span>
+                      </>
+                    ),
+                  },
+                  {
+                    time: "14:28:03",
+                    level: "warn",
+                    label: "note",
+                    message: (
+                      <>
+                        maintainer review{" "}
+                        <span className="text-[#f4c989]">pending</span>
+                      </>
+                    ),
+                  },
+                  {
+                    time: "14:28:03",
+                    level: "ok",
+                    label: "verdict",
+                    message: (
+                      <>
+                        3/4 signals pass · awaiting maintainer · receipt draft{" "}
+                        <span className="text-[#f4c989]">r_4e133</span>
+                      </>
+                    ),
+                  },
+                ],
+                verdict: {
+                  status: "Awaiting maintainer review",
+                  score: "3 / 4",
+                  scoreLabel: "0.91 confidence",
+                },
+              }
+            : loadedWikipedia
             ? {
                 runner: "verifier-2 · wikipedia_proposal_review · handler-v0.14",
                 elapsed: "stream · 3.4s",
@@ -345,7 +440,9 @@ export function LoadedRunView({
           ctaDisabled: true,
           note: loadedWikipedia
             ? "pays worker & verifier once an Averray editor approves the proposal"
-            : "pays worker & verifier once the maintainer approves the PR",
+            : loadedOsv
+              ? "pays worker & verifier once the maintainer merges the remediation PR"
+              : "pays worker & verifier once the maintainer approves the PR",
         }}
       />
 
@@ -365,6 +462,20 @@ export function LoadedRunView({
                 <b className="font-semibold text-[var(--avy-ink)]">submitted</b>{" "}
                 · pending Averray review
               </>
+            ) : loadedOsv ? (
+              <>
+                Window closes in{" "}
+                <b className="font-semibold text-[var(--avy-ink)]">21m 46s</b>
+                {" · "}verification{" "}
+                <b className="font-semibold text-[var(--avy-ink)]">
+                  {loadedOsv.verification.method}
+                </b>
+                {" · "}advisory{" "}
+                <b className="font-semibold text-[var(--avy-ink)]">
+                  {loadedOsv.advisoryId}
+                </b>{" "}
+                · PR pending merge
+              </>
             ) : (
               <>
                 Window closes in{" "}
@@ -381,10 +492,14 @@ export function LoadedRunView({
             label: "Next",
             value: loadedWikipedia
               ? "Averray review → Pay"
-              : "Maintainer review → Pay",
+              : loadedOsv
+                ? "Maintainer merge → Pay"
+                : "Maintainer review → Pay",
             sub: loadedWikipedia
               ? "auto-pays on Averray-approved review"
-              : "auto-pays on PR merge + CI green",
+              : loadedOsv
+                ? "auto-pays on PR merge + CI green + lockfile resolves"
+                : "auto-pays on PR merge + CI green",
           }}
         />
       ) : null}
@@ -392,7 +507,12 @@ export function LoadedRunView({
       <ReceiptPreviewDrawer
         open={receiptOpen}
         onClose={() => setReceiptOpen(false)}
-        draft={buildReceiptDraft(loadedRow, loadedGitHub, loadedWikipedia)}
+        draft={buildReceiptDraft(
+          loadedRow,
+          loadedGitHub,
+          loadedWikipedia,
+          loadedOsv
+        )}
       />
     </div>
   );
@@ -409,13 +529,16 @@ function asRecord(value: unknown): Record<string, unknown> | null {
  * & pay". Derived entirely from what the panel already shows — no
  * extra fetch. Source-aware: GitHub flows reference a PR + maintainer,
  * Wikipedia flows reference the article + an Averray editor reviewer
- * (since the platform never edits Wikipedia directly), native flows
+ * (since the platform never edits Wikipedia directly), OSV flows
+ * reference the advisory + the consumer's maintainer (the focused PR
+ * lands in the consumer repo, not the upstream package), native flows
  * fall back to a generic cosign signer list.
  */
 function buildReceiptDraft(
   row: RunRow,
   github: ReturnType<typeof buildGitHubContext>,
-  wikipedia: ReturnType<typeof buildWikipediaContext>
+  wikipedia: ReturnType<typeof buildWikipediaContext>,
+  osv: ReturnType<typeof buildOsvContext>
 ): ReceiptPreviewDraft {
   const workerSignerLabel = row.worker.isSelf
     ? `Worker · ${row.worker.label} (you)`
@@ -433,17 +556,25 @@ function buildReceiptDraft(
           score: "1 / 2",
           confidence: "0.74 confidence",
         }
-      : {
-          status: "Verified (pending cosign)",
-          score: "4 / 5",
-          confidence: "0.92 confidence",
-        };
+      : osv
+        ? {
+            status: "Awaiting maintainer merge",
+            score: "3 / 4",
+            confidence: "0.91 confidence",
+          }
+        : {
+            status: "Verified (pending cosign)",
+            score: "4 / 5",
+            confidence: "0.92 confidence",
+          };
 
   const reviewerSigner = github
     ? "Maintainer · awaiting review"
     : wikipedia
       ? "Averray editor reviewer · awaiting review"
-      : "Cosigner · 0x9A13…0cb2";
+      : osv
+        ? "Maintainer · awaiting merge"
+        : "Cosigner · 0x9A13…0cb2";
 
   return {
     receiptRef: "r_4e133",
@@ -463,7 +594,12 @@ function buildReceiptDraft(
     evidenceHash: "sha256 0x9c…41",
     ...(github ? { github } : {}),
     ...(wikipedia ? { wikipedia } : {}),
-    prUrl: github ? `https://github.com/${github.repo}/pull/4931` : undefined,
+    ...(osv ? { osv } : {}),
+    prUrl: github
+      ? `https://github.com/${github.repo}/pull/4931`
+      : osv
+        ? `https://github.com/${osv.repo}/pull/8421`
+        : undefined,
     signers: [
       { label: workerSignerLabel, status: "pending" },
       { label: reviewerSigner, status: "pending" },

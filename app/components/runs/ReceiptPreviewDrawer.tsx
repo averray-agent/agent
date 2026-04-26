@@ -2,7 +2,11 @@
 
 import { DetailDrawer, DrawerSection } from "@/components/shell/DetailDrawer";
 import { SourceBadge, StatePill, type RunState } from "./StatePill";
-import type { GitHubJobContext, WikipediaJobContext } from "./types";
+import type {
+  GitHubJobContext,
+  OsvJobContext,
+  WikipediaJobContext,
+} from "./types";
 import { cn } from "@/lib/utils/cn";
 
 /**
@@ -39,6 +43,13 @@ export interface ReceiptPreviewDraft {
    * Mutually exclusive with `github` at runtime.
    */
   wikipedia?: WikipediaJobContext;
+  /**
+   * Set when the loaded run is an OSV dependency-remediation job. The
+   * drawer surfaces the advisory id, package + versions, manifest path,
+   * and CVE/NVD references, plus the "Averray dependency remediation"
+   * attribution line. Mutually exclusive with `github`/`wikipedia`.
+   */
+  osv?: OsvJobContext;
   prUrl?: string;
   signers: { label: string; status: "pending" | "signed" }[];
 }
@@ -201,6 +212,124 @@ export function ReceiptPreviewDrawer({
           >
             Open Wikipedia article ↗
           </a>
+        </DrawerSection>
+      ) : null}
+
+      {draft.osv ? (
+        <DrawerSection title="Source">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-[8px] border border-[var(--avy-line)] bg-[color:rgba(17,19,21,0.02)] px-3 py-2">
+            <SourceBadge
+              kind="osv"
+              secondary={(draft.osv.cves?.length ?? 0) > 0 ? "NVD" : undefined}
+            />
+            <a
+              href={`https://osv.dev/vulnerability/${encodeURIComponent(draft.osv.advisoryId)}`}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="truncate whitespace-nowrap font-[family-name:var(--font-mono)] text-[12px] text-[var(--avy-ink)] hover:text-[var(--avy-accent)]"
+              style={{ letterSpacing: 0 }}
+              title={`${draft.osv.ecosystem} / ${draft.osv.packageName} · ${draft.osv.advisoryId}`}
+            >
+              <span className="text-[var(--avy-muted)]">
+                {draft.osv.ecosystem}
+              </span>
+              <span className="text-[var(--avy-ink)]">
+                {" "}
+                / {draft.osv.packageName}
+              </span>
+              <span className="ml-0.5 text-[var(--avy-accent)]">
+                {" "}
+                · {draft.osv.advisoryId}
+              </span>
+            </a>
+            {draft.osv.severity ? (
+              <>
+                <span className="opacity-40">·</span>
+                <span
+                  className="whitespace-nowrap font-[family-name:var(--font-mono)] text-[11.5px] uppercase text-[var(--avy-muted)]"
+                  style={{ letterSpacing: "0.08em" }}
+                >
+                  {draft.osv.severity}
+                </span>
+              </>
+            ) : null}
+          </div>
+
+          <dl
+            className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 font-[family-name:var(--font-mono)] text-[11.5px]"
+            style={{ letterSpacing: 0 }}
+          >
+            <dt className="text-[var(--avy-muted)]">Package</dt>
+            <dd className="m-0 font-medium text-[var(--avy-ink)]">
+              {draft.osv.ecosystem} / {draft.osv.packageName}
+            </dd>
+            <dt className="text-[var(--avy-muted)]">Vulnerable</dt>
+            <dd className="m-0 font-medium text-[#a03a1a]">
+              {draft.osv.vulnerableVersion}
+            </dd>
+            <dt className="text-[var(--avy-muted)]">Fixed in</dt>
+            <dd className="m-0 font-medium text-[var(--avy-accent)]">
+              {draft.osv.fixedVersion}
+            </dd>
+            <dt className="text-[var(--avy-muted)]">Repo · manifest</dt>
+            <dd className="m-0 truncate font-medium text-[var(--avy-ink)]">
+              {draft.osv.repo} · {draft.osv.manifestPath}
+            </dd>
+            <dt className="text-[var(--avy-muted)]">Advisory</dt>
+            <dd className="m-0 font-medium text-[var(--avy-ink)]">
+              {draft.osv.advisoryId}
+            </dd>
+            {draft.osv.cves && draft.osv.cves.length > 0 ? (
+              <>
+                <dt className="text-[var(--avy-muted)]">CVE / NVD</dt>
+                <dd className="m-0 flex flex-wrap gap-1.5">
+                  {draft.osv.cves.map((cve, i) => {
+                    const href = draft.osv?.nvdUrls?.[i];
+                    return href ? (
+                      <a
+                        key={cve}
+                        href={href}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        className="font-medium text-[var(--avy-accent)] hover:underline"
+                      >
+                        {cve} ↗
+                      </a>
+                    ) : (
+                      <span key={cve} className="font-medium text-[var(--avy-ink)]">
+                        {cve}
+                      </span>
+                    );
+                  })}
+                </dd>
+              </>
+            ) : null}
+          </dl>
+
+          {/* Attribution. Mirrors the Wikipedia block — receipt is the
+              only place in the audit log where the OSV remediation
+              stance is spelled out for downstream consumers. */}
+          <p
+            className="mt-2 rounded-[6px] border border-[var(--avy-warn)] bg-[color:rgba(211,145,27,0.08)] px-2.5 py-2 font-[family-name:var(--font-mono)] text-[11px] leading-[1.5] text-[var(--avy-ink)]"
+            style={{ letterSpacing: 0 }}
+          >
+            <b className="font-semibold">Attribution:</b> Averray (dependency
+            remediation). The PR bumps the vulnerable package to the fixed
+            version in the consumer manifest only — no upstream-package
+            changes are made by the agent.
+          </p>
+
+          {draft.prUrl ? (
+            <a
+              href={draft.prUrl}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="mt-2 inline-flex h-7 items-center gap-1.5 rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3 font-[family-name:var(--font-display)] text-[11px] font-bold uppercase text-[var(--avy-ink)] transition-transform hover:-translate-y-px hover:border-[color:rgba(30,102,66,0.24)] hover:text-[var(--avy-accent)]"
+              style={{ letterSpacing: "0.04em" }}
+            >
+              View remediation PR ↗
+            </a>
+          ) : null}
         </DrawerSection>
       ) : null}
 

@@ -89,6 +89,8 @@ function RunsPageInner() {
   // exist for that run.
   const selectedRow = rows.find((row) => row.id === selectedId) ?? rows[0];
   const selectedSourceType = selectedRow?.source?.type;
+  const selectedOsvSource =
+    selectedRow?.source?.type === "osv_advisory" ? selectedRow.source : null;
   const lifecycleContextNote =
     selectedSourceType === "wikipedia_article" ? (
       <>
@@ -101,6 +103,18 @@ function RunsPageInner() {
         {" · "}proposal{" "}
         <b className="font-semibold text-[var(--avy-ink)]">submitted</b> ·
         pending Averray review
+      </>
+    ) : selectedOsvSource ? (
+      <>
+        Window closes in{" "}
+        <b className="font-semibold text-[var(--avy-ink)]">21m 46s</b>
+        {" · "}verification{" "}
+        <b className="font-semibold text-[var(--avy-ink)]">osv_dependency_pr</b>
+        {" · "}advisory{" "}
+        <b className="font-semibold text-[var(--avy-ink)]">
+          {selectedOsvSource.advisoryId}
+        </b>{" "}
+        · PR pending merge
       </>
     ) : (
       <>
@@ -119,11 +133,17 @@ function RunsPageInner() {
           value: "Averray review → Pay",
           sub: "auto-pays on Averray-approved review",
         }
-      : {
-          label: "Next",
-          value: "Maintainer review → Pay",
-          sub: "auto-pays on PR merge + CI green",
-        };
+      : selectedSourceType === "osv_advisory"
+        ? {
+            label: "Next",
+            value: "Maintainer merge → Pay",
+            sub: "auto-pays on PR merge + CI green + lockfile resolves",
+          }
+        : {
+            label: "Next",
+            value: "Maintainer review → Pay",
+            sub: "auto-pays on PR merge + CI green",
+          };
 
   const assignedToMe = rows.filter((row) => row.worker.isSelf).length;
   const liveStatus = jobs.error

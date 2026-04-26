@@ -42,9 +42,47 @@ export interface WikipediaJobSource {
   score?: number;
 }
 
+/**
+ * Provenance for runs ingested from the OSV (Open Source Vulnerabilities)
+ * advisory database — currently the npm ecosystem subset, with NVD/CVE
+ * cross-references when present. These are dependency-remediation jobs:
+ * the worker opens a focused PR that bumps a vulnerable package to its
+ * fixed version and updates lockfiles + tests. The platform itself
+ * publishes nothing back to OSV/NVD; this is purely an ingest channel.
+ */
+export interface OsvJobSource {
+  type: "osv_advisory";
+  /** Always "osv" today; field reserved for future advisory feeds. */
+  provider: string;
+  ecosystem: string; // "npm" today; future: "PyPI", "RubyGems", "crates.io"
+  packageName: string;
+  vulnerableVersion: string;
+  fixedVersion: string;
+  repo: string; // "owner/repo" of the consumer that depends on the vuln package
+  manifestPath: string; // e.g. "package.json" or "frontend/package.json"
+  advisoryId: string; // "GHSA-vh95-rmgr-6w4m"
+  /** Cross-DB IDs (e.g. CVE-2021-44906). May be empty. */
+  aliases?: string[];
+  /** Subset of aliases that look like CVEs. Primary input for the NVD chip. */
+  cves?: string[];
+  /** Direct nvd.nist.gov links per CVE, in the same order as `cves`. */
+  nvdUrls?: string[];
+  summary?: string;
+  details?: string;
+  references?: string[];
+  /** Free string from OSV — "LOW" | "MODERATE" | "HIGH" | "CRITICAL" or numeric. */
+  severity?: string;
+  published?: string;
+  modified?: string;
+  score?: number;
+  /** OSV API endpoint the ingestor used; surfaced in the receipt for audit. */
+  discoveryApi?: string;
+}
+
 export type JobSource =
   | GitHubJobSource
   | WikipediaJobSource
+  | OsvJobSource
   | { type: "native" };
 
 /**
@@ -78,6 +116,23 @@ export interface WikipediaJobContext extends WikipediaJobSource {
   agentInstructions: string;
   verification: {
     method: string; // e.g. "wikipedia_proposal_review"
+    signals: string[];
+  };
+}
+
+/**
+ * Rich context for OSV dependency-remediation runs. Mirrors the shape of
+ * GitHub/Wikipedia contexts so the Loaded-run panel can render a third
+ * source-specific evidence block without growing a new code path.
+ */
+export interface OsvJobContext extends OsvJobSource {
+  title: string;
+  body: string; // human-readable advisory summary, used as the panel intro
+  category: string; // always "security" today; kept free for future sub-types
+  acceptanceCriteria: string[];
+  agentInstructions: string;
+  verification: {
+    method: string; // e.g. "osv_dependency_pr"
     signals: string[];
   };
 }

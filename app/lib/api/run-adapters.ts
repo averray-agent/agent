@@ -5,6 +5,7 @@ import type { RunState, Tier } from "@/components/runs/StatePill";
 import type {
   GitHubJobContext,
   JobSource,
+  OsvJobContext,
   WikipediaJobContext,
 } from "@/components/runs/types";
 
@@ -166,6 +167,57 @@ export function buildJobSource(job: unknown): JobSource | undefined {
       ...(score !== undefined ? { score } : {}),
     };
   }
+  if (sourceType === "osv_advisory") {
+    const provider = text(src.provider, "osv");
+    const ecosystem = text(src.ecosystem, "npm");
+    const packageName = text(src.packageName);
+    const vulnerableVersion = text(src.vulnerableVersion);
+    const fixedVersion = text(src.fixedVersion);
+    const repo = text(src.repo);
+    const manifestPath = text(src.manifestPath);
+    const advisoryId = text(src.advisoryId);
+    if (
+      !packageName ||
+      !vulnerableVersion ||
+      !fixedVersion ||
+      !repo ||
+      !manifestPath ||
+      !advisoryId
+    ) {
+      return undefined;
+    }
+    const stringList = (value: unknown): string[] | undefined => {
+      if (!Array.isArray(value)) return undefined;
+      const arr = value.filter(
+        (item): item is string => typeof item === "string" && item.trim() !== ""
+      );
+      return arr.length ? arr : undefined;
+    };
+    return {
+      type: "osv_advisory",
+      provider,
+      ecosystem,
+      packageName,
+      vulnerableVersion,
+      fixedVersion,
+      repo,
+      manifestPath,
+      advisoryId,
+      ...(stringList(src.aliases) ? { aliases: stringList(src.aliases)! } : {}),
+      ...(stringList(src.cves) ? { cves: stringList(src.cves)! } : {}),
+      ...(stringList(src.nvdUrls) ? { nvdUrls: stringList(src.nvdUrls)! } : {}),
+      ...(text(src.summary) ? { summary: text(src.summary) } : {}),
+      ...(text(src.details) ? { details: text(src.details) } : {}),
+      ...(stringList(src.references)
+        ? { references: stringList(src.references)! }
+        : {}),
+      ...(text(src.severity) ? { severity: text(src.severity) } : {}),
+      ...(text(src.published) ? { published: text(src.published) } : {}),
+      ...(text(src.modified) ? { modified: text(src.modified) } : {}),
+      ...(typeof src.score === "number" ? { score: src.score } : {}),
+      ...(text(src.discoveryApi) ? { discoveryApi: text(src.discoveryApi) } : {}),
+    };
+  }
   return undefined;
 }
 
@@ -247,6 +299,50 @@ export function buildWikipediaContext(
   };
 }
 
+/**
+ * Mirror of `buildGitHubContext` for OSV dependency-remediation runs.
+ * Returns undefined for any non-OSV row so the panel falls back to the
+ * generic layout. Defaults bake in the focused-PR verification path
+ * since OSV jobs are always "open one PR that bumps the vulnerable
+ * package and updates lockfiles + tests".
+ */
+export function buildOsvContext(
+  row: Pick<RunRow, "source" | "title">,
+  job: unknown
+): OsvJobContext | undefined {
+  if (row.source?.type !== "osv_advisory") return undefined;
+  const record = asRecord(job);
+  const verification = asRecord(record.verification);
+  const verificationMethod = text(verification.method, "osv_dependency_pr");
+  const verificationSignals = Array.isArray(verification.signals)
+    ? verification.signals.filter(
+        (signal): signal is string => typeof signal === "string"
+      )
+    : [
+        "PR opened against the vulnerable manifest",
+        "Lockfile updated to fixed version",
+        "Install + test evidence attached",
+      ];
+  const acceptance = Array.isArray(record.acceptanceCriteria)
+    ? record.acceptanceCriteria.filter(
+        (item): item is string => typeof item === "string"
+      )
+    : [];
+
+  return {
+    ...row.source,
+    title: text(record.title, row.title),
+    category: text(record.category, "security"),
+    body: text(
+      record.description,
+      text(record.body, row.source.summary ?? "")
+    ),
+    acceptanceCriteria: acceptance,
+    agentInstructions: textOrLines(record.agentInstructions),
+    verification: { method: verificationMethod, signals: verificationSignals },
+  };
+}
+
 export function extractRunJobs(payload: unknown): RawRecord[] {
   return asArray(payload);
 }
@@ -270,12 +366,20 @@ export function buildRunRows(payload: unknown): RunRow[] {
     // provenance signal.
     const tier = tierFromRaw(job.tier);
     const category = text(job.category, "work");
+    // Source-aware meta: surface the most specific identity the row
+    // already shows visually (lang.wikipedia / page, owner/repo,
+    // ecosystem / package · advisory) and avoid re-printing the
+    // SourceBadge label as text. OSV in particular avoids the generic
+    // "security" category — operators want to scan
+    // `npm / minimist · GHSA-...` instead.
     const jobMeta =
       source?.type === "wikipedia_article"
         ? `${source.taskType.replace(/_/g, " ")} · ${tier}`
         : source?.type === "github_issue"
           ? `${category} · ${tier}`
-          : `${id} · ${category} · ${tier}`;
+          : source?.type === "osv_advisory"
+            ? `${source.ecosystem} / ${source.packageName} · ${source.advisoryId} · ${tier}`
+            : `${id} · ${category} · ${tier}`;
     return {
       id,
       sessionId: text(job.sessionId),
@@ -299,15 +403,21 @@ export function buildRunRows(payload: unknown): RunRow[] {
             ? state === "ready"
               ? "Ingested from Wikipedia · proposal-only"
               : `State: ${state}`
-            : state === "ready"
-              ? "Job listed"
-              : `State: ${state}`,
+            : source?.type === "osv_advisory"
+              ? state === "ready"
+                ? "Ingested from OSV · dependency remediation"
+                : `State: ${state}`
+              : state === "ready"
+                ? "Job listed"
+                : `State: ${state}`,
       lastEventMeta:
         source?.type === "github_issue"
           ? `${source.repo} #${source.issueNumber} · verifier ${verifierLabel(job.verifierMode)}`
           : source?.type === "wikipedia_article"
             ? `${source.language}.wikipedia · rev ${source.revisionId} · ${source.taskType.replace(/_/g, " ")}`
-            : `${text(job.rewardAsset, "DOT")} · verifier ${verifierLabel(job.verifierMode)}`,
+            : source?.type === "osv_advisory"
+              ? `${source.repo} · ${source.manifestPath} · ${source.vulnerableVersion} → ${source.fixedVersion}`
+              : `${text(job.rewardAsset, "DOT")} · verifier ${verifierLabel(job.verifierMode)}`,
     };
   });
 }
@@ -336,10 +446,24 @@ export function buildRecommendationCards(
 
     const source = buildJobSource(job);
     const category = text(job.category, "work");
+    // Recommendation card subtitle. OSV runs are most identifiable by
+    // ecosystem/package + advisory id — `npm / minimist · GHSA-...` —
+    // so the card shows that instead of the generic "security"
+    // category. GitHub/Wikipedia keep their existing single-token
+    // category subtitle (the SourceBadge already supplies the
+    // platform identity).
+    const jobMeta =
+      source?.type === "osv_advisory"
+        ? `${source.ecosystem} / ${source.packageName} · ${source.advisoryId}`
+        : category;
+    const isIngested =
+      source?.type === "github_issue" ||
+      source?.type === "wikipedia_article" ||
+      source?.type === "osv_advisory";
     return {
       id,
       title: text(job.title, text(job.description, titleFromId(id))),
-      jobMeta: category,
+      jobMeta,
       category,
       ...(source ? { source } : {}),
       rewardValue: formatReward(recommendation.netReward ?? job.rewardAmount),
@@ -353,18 +477,16 @@ export function buildRecommendationCards(
         { label: "Verifier", value: verifierLabel(job.verifierMode) },
         { label: "Window", value: formatWindow(job.claimTtlSeconds), accent: true },
         {
-          label:
-            source?.type === "github_issue" ||
-            source?.type === "wikipedia_article"
-              ? "Fit score"
-              : "Gas",
-          value:
-            source?.type === "github_issue" ||
-            source?.type === "wikipedia_article"
-              ? `${source.score ?? fitScore}/100`
-              : job.requiresSponsoredGas
-                ? "sponsored"
-                : "worker",
+          label: isIngested ? "Fit score" : "Gas",
+          value: isIngested
+            ? `${
+                (source && "score" in source && typeof source.score === "number"
+                  ? source.score
+                  : fitScore)
+              }/100`
+            : job.requiresSponsoredGas
+              ? "sponsored"
+              : "worker",
         },
       ],
       fit,
