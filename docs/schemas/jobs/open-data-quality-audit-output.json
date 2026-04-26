@@ -1,0 +1,100 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "schema://jobs/open-data-quality-audit-output",
+  "type": "object",
+  "description": "Structured evidence for a public open-data dataset/resource quality audit.",
+  "required": [
+    "dataset_title",
+    "dataset_url",
+    "resource_url",
+    "checks",
+    "findings",
+    "no_issue_found",
+    "summary",
+    "recommended_actions"
+  ],
+  "properties": {
+    "dataset_title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "dataset_url": {
+      "type": "string",
+      "minLength": 1
+    },
+    "resource_url": {
+      "type": "string",
+      "minLength": 1
+    },
+    "resource_format": {
+      "type": "string"
+    },
+    "checks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "status", "evidence"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pass", "warn", "fail", "unknown"]
+          },
+          "evidence": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["severity", "issue", "evidence", "recommendation"],
+        "properties": {
+          "severity": {
+            "type": "string",
+            "enum": ["low", "medium", "high"]
+          },
+          "issue": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidence": {
+            "type": "string",
+            "minLength": 1
+          },
+          "recommendation": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "no_issue_found": {
+      "type": "boolean"
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "recommended_actions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      }
+    },
+    "notes": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true
+}

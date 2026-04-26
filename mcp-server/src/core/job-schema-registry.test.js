@@ -101,6 +101,37 @@ test("validateStructuredSubmission accepts dependency remediation evidence", () 
   });
 });
 
+test("validateStructuredSubmission accepts open-data audit evidence", () => {
+  const payload = {
+    dataset_title: "Federal sample spending data",
+    dataset_url: "https://catalog.data.gov/dataset/federal-sample-spending-data",
+    resource_url: "https://example.gov/spending.csv",
+    resource_format: "CSV",
+    checks: [
+      {
+        name: "resource_reachability",
+        status: "pass",
+        evidence: "HTTP 200 with text/csv content type."
+      }
+    ],
+    findings: [
+      {
+        severity: "low",
+        issue: "Metadata modified date is present but resource last_modified is five years old.",
+        evidence: "resource last_modified=2021-01-01",
+        recommendation: "Ask the publisher to confirm whether the resource is still refreshed."
+      }
+    ],
+    no_issue_found: false,
+    summary: "Resource is reachable; metadata freshness needs review.",
+    recommended_actions: ["Confirm refresh cadence", "Document column names in resource metadata"]
+  };
+
+  assert.doesNotThrow(() => {
+    validateStructuredSubmission("schema://jobs/open-data-quality-audit-output", payload);
+  });
+});
+
 test("validateStructuredSubmission rejects missing required fields", () => {
   assert.throws(
     () => validateStructuredSubmission("schema://jobs/pr-review-findings-output", {
