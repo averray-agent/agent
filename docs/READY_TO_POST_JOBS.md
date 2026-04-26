@@ -389,7 +389,9 @@ OSV/GHSA/CVE identifiers, and includes test or install evidence.
 
 ## Data.gov open-data quality jobs
 
-The first government open-data provider targets the US Data.gov CKAN catalog.
+The first government open-data provider targets the US Data.gov catalog. It
+tries the legacy CKAN `package_search` endpoint first, then falls back to the
+current Catalog API `/search` endpoint when CKAN is unavailable.
 Data.gov exposes dataset metadata and resource URLs, not the actual data
 contents, so Averray jobs should stay audit/report shaped. Workers inspect the
 catalog landing page and referenced resource, then submit structured quality

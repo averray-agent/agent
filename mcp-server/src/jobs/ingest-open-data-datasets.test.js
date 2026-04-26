@@ -2,7 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  DATA_GOV_CATALOG_SEARCH_URL,
   extractPackageTargets,
+  extractCatalogResultTargets,
   ingestOpenDataDatasets,
   parseDatasets,
   scoreDatasetTarget,
@@ -43,6 +45,27 @@ const CKAN_PACKAGE = {
   ]
 };
 
+const CATALOG_RESULT = {
+  identifier: "catalog-dataset-123",
+  slug: "federal-sample-spending-data",
+  title: "Federal sample spending data",
+  publisher: "General Services Administration",
+  last_harvested_date: "2026-02-01T00:00:00Z",
+  dcat: {
+    title: "Federal sample spending data",
+    modified: "2026-01-01T00:00:00Z",
+    license: "https://creativecommons.org/publicdomain/zero/1.0/",
+    distribution: [
+      {
+        title: "Spending CSV",
+        downloadURL: "https://example.gov/spending.csv",
+        format: "CSV",
+        modified: "2021-01-01T00:00:00Z"
+      }
+    ]
+  }
+};
+
 test("parseDatasets accepts JSON and compact line syntax", () => {
   assert.deepEqual(parseDatasets(JSON.stringify([TARGET])), [TARGET]);
   assert.deepEqual(
@@ -73,6 +96,51 @@ test("extractPackageTargets maps CKAN package resources", () => {
   assert.equal(targets[0].datasetUrl, "https://catalog.data.gov/dataset/federal-sample-spending-data");
   assert.equal(targets[0].resourceUrl, "https://example.gov/spending.csv");
   assert.equal(targets[0].agency, "General Services Administration");
+});
+
+test("extractCatalogResultTargets maps current Data.gov catalog search results", () => {
+  const targets = extractCatalogResultTargets(CATALOG_RESULT);
+
+  assert.equal(targets.length, 1);
+  assert.equal(targets[0].datasetId, "catalog-dataset-123");
+  assert.equal(targets[0].datasetUrl, "https://catalog.data.gov/dataset/federal-sample-spending-data");
+  assert.equal(targets[0].resourceUrl, "https://example.gov/spending.csv");
+  assert.equal(targets[0].resourceFormat, "CSV");
+  assert.equal(targets[0].discoveryApi, DATA_GOV_CATALOG_SEARCH_URL);
+});
+
+test("searchDataGovDatasets falls back to current catalog search when CKAN is unavailable", async () => {
+  const calls = [];
+  const targets = await searchDataGovDatasets({
+    query: "res_format:CSV",
+    limit: 5,
+    fetchImpl: async (url, request) => {
+      calls.push(url.toString());
+      assert.equal(request.headers.accept, "application/json");
+      if (url.pathname === "/api/3/action/package_search") {
+        return {
+          ok: false,
+          status: 404,
+          async text() {
+            return '{"message":"Not Found"}';
+          }
+        };
+      }
+      assert.equal(url.pathname, "/search");
+      assert.equal(url.searchParams.get("q"), "res_format:CSV");
+      assert.equal(url.searchParams.get("per_page"), "5");
+      return {
+        ok: true,
+        async json() {
+          return { results: [CATALOG_RESULT] };
+        }
+      };
+    }
+  });
+
+  assert.equal(calls.length, 2);
+  assert.equal(targets.length, 1);
+  assert.equal(targets[0].resourceUrl, "https://example.gov/spending.csv");
 });
 
 test("scoreDatasetTarget prefers concrete resource audit targets", () => {

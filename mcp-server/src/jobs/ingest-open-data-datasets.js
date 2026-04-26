@@ -20,6 +20,7 @@ export const DEFAULT_BASE_URL = "http://localhost:8787";
 export const DEFAULT_PROVIDER = "data.gov";
 export const DEFAULT_QUERY = "res_format:CSV";
 export const DATA_GOV_PACKAGE_SEARCH_URL = "https://catalog.data.gov/api/3/action/package_search";
+export const DATA_GOV_CATALOG_SEARCH_URL = "https://catalog.data.gov/search";
 
 const PREFERRED_RESOURCE_FORMATS = new Set(["CSV", "JSON", "GEOJSON", "API", "XLS", "XLSX", "XML"]);
 
@@ -92,25 +93,52 @@ export async function ingestOpenDataDatasets({
 }
 
 export async function searchDataGovDatasets({ query = DEFAULT_QUERY, limit = 30, fetchImpl = fetch } = {}) {
-  const url = new URL(DATA_GOV_PACKAGE_SEARCH_URL);
+  const ckanUrl = new URL(process.env.DATA_GOV_PACKAGE_SEARCH_URL?.trim() || DATA_GOV_PACKAGE_SEARCH_URL);
+  ckanUrl.searchParams.set("q", query);
+  ckanUrl.searchParams.set("rows", String(Math.min(limit, 100)));
+  ckanUrl.searchParams.set("sort", "metadata_modified desc");
+
+  const ckanResponse = await fetchImpl(ckanUrl, {
+    headers: dataGovHeaders()
+  });
+  if (ckanResponse.ok) {
+    const payload = await ckanResponse.json();
+    const packages = payload.result?.results ?? [];
+    return packages.flatMap(extractPackageTargets);
+  }
+
+  const ckanBody = await ckanResponse.text();
+  if (![404, 410].includes(ckanResponse.status)) {
+    throw new Error(`Data.gov package_search failed (${ckanResponse.status}): ${ckanBody}`);
+  }
+
+  return searchDataGovCatalog({ query, limit, fetchImpl, previousStatus: ckanResponse.status, previousBody: ckanBody });
+}
+
+export async function searchDataGovCatalog({
+  query = DEFAULT_QUERY,
+  limit = 30,
+  fetchImpl = fetch,
+  previousStatus = undefined,
+  previousBody = undefined
+} = {}) {
+  const url = new URL(process.env.DATA_GOV_CATALOG_SEARCH_URL?.trim() || DATA_GOV_CATALOG_SEARCH_URL);
   url.searchParams.set("q", query);
-  url.searchParams.set("rows", String(Math.min(limit, 100)));
-  url.searchParams.set("sort", "metadata_modified desc");
+  url.searchParams.set("per_page", String(Math.min(limit, 100)));
+  url.searchParams.set("sort", "last_harvested_date");
 
   const response = await fetchImpl(url, {
-    headers: {
-      accept: "application/json",
-      "user-agent": "AverrayOpenDataIngest/0.1 (https://averray.com; operator@averray.com)"
-    }
+    headers: dataGovHeaders()
   });
   if (!response.ok) {
     const body = await response.text();
-    throw new Error(`Data.gov package_search failed (${response.status}): ${body}`);
+    const previous = previousStatus ? `; package_search failed first (${previousStatus}): ${previousBody}` : "";
+    throw new Error(`Data.gov catalog search failed (${response.status}): ${body}${previous}`);
   }
 
   const payload = await response.json();
-  const packages = payload.result?.results ?? [];
-  return packages.flatMap(extractPackageTargets);
+  const results = payload.results ?? [];
+  return results.flatMap(extractCatalogResultTargets);
 }
 
 export function parseDatasets(raw) {
@@ -142,6 +170,37 @@ export function extractPackageTargets(pkg) {
       license,
       modified: resource.last_modified ?? resource.revision_timestamp ?? metadataModified,
       metadataModified
+    }))
+    .filter(Boolean);
+}
+
+export function extractCatalogResultTargets(result) {
+  const dcat = result.dcat && typeof result.dcat === "object" ? result.dcat : {};
+  const datasetId = text(result.identifier ?? dcat.identifier ?? result.slug);
+  const datasetTitle = text(result.title ?? dcat.title ?? result.slug);
+  const slug = text(result.slug);
+  const datasetUrl = text(dcat.landingPage ?? result.landingPage)
+    || (slug ? `https://catalog.data.gov/dataset/${slug}` : "");
+  const agency = text(result.publisher ?? dcat.publisher?.name ?? result.organization?.name);
+  const license = text(dcat.license);
+  const metadataModified = text(dcat.modified ?? result.last_harvested_date);
+  const distributions = Array.isArray(dcat.distribution) ? dcat.distribution : [];
+
+  return distributions
+    .map((distribution, index) => normalizeDatasetTarget({
+      portal: DEFAULT_PROVIDER,
+      datasetId,
+      datasetTitle,
+      datasetUrl,
+      resourceId: text(distribution.identifier ?? distribution["@id"] ?? distribution.title) || `${datasetId || slug}-distribution-${index + 1}`,
+      resourceTitle: distribution.title ?? distribution.name ?? distribution.description,
+      resourceUrl: firstText(distribution.downloadURL, distribution.accessURL, distribution.url),
+      resourceFormat: distribution.format ?? distribution.mediaType ?? distribution["dcat:mediaType"],
+      agency,
+      license,
+      modified: distribution.modified ?? metadataModified,
+      metadataModified,
+      discoveryApi: DATA_GOV_CATALOG_SEARCH_URL
     }))
     .filter(Boolean);
 }
@@ -200,7 +259,7 @@ export function toPlatformJob(target, score = scoreDatasetTarget(target)) {
       modified: target.modified,
       metadataModified: target.metadataModified,
       score,
-      discoveryApi: DATA_GOV_PACKAGE_SEARCH_URL
+      discoveryApi: target.discoveryApi || DATA_GOV_PACKAGE_SEARCH_URL
     },
     acceptanceCriteria: [
       "Fetch the dataset landing page and resource URL and record their status, content type, and final URL if redirected.",
@@ -289,7 +348,8 @@ function normalizeDatasetTarget(raw) {
     agency: text(raw?.agency ?? raw?.publisher),
     license: text(raw?.license),
     modified: text(raw?.modified ?? raw?.lastModified),
-    metadataModified: text(raw?.metadataModified ?? raw?.metadata_modified)
+    metadataModified: text(raw?.metadataModified ?? raw?.metadata_modified),
+    ...(text(raw?.discoveryApi) ? { discoveryApi: text(raw.discoveryApi) } : {})
   };
 }
 
@@ -323,6 +383,17 @@ function estimateDifficulty(score) {
 
 function text(value) {
   return String(value ?? "").trim();
+}
+
+function firstText(...values) {
+  return values.map(text).find(Boolean) ?? "";
+}
+
+function dataGovHeaders() {
+  return {
+    accept: "application/json",
+    "user-agent": "AverrayOpenDataIngest/0.1 (https://averray.com; operator@averray.com)"
+  };
 }
 
 function slugify(value) {
