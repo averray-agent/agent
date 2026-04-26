@@ -101,6 +101,9 @@ After Wikipedia, use the same pattern for:
 2. **Government open data portals**
    - CSV/schema checks, metadata cleanup, broken links
    - before/after dataset reports
+   - v1 ingestion targets the US Data.gov CKAN catalog:
+     `POST /admin/jobs/ingest/open-data` searches catalog metadata or accepts
+     explicit dataset/resource targets, then emits proposal-only audit jobs.
 
 3. **OSV/NVD advisories**
    - package-to-CVE mapping, remediation summaries

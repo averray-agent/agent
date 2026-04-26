@@ -23,6 +23,7 @@ import {
   schemaRefToJobSchemaPath
 } from "../../core/job-schema-registry.js";
 import { ingestGithubIssues } from "../../jobs/ingest-github-issues.js";
+import { ingestOpenDataDatasets, parseDatasets as parseOpenDataDatasets } from "../../jobs/ingest-open-data-datasets.js";
 import { ingestOsvAdvisories, parsePackages as parseOsvPackages } from "../../jobs/ingest-osv-advisories.js";
 import { ingestWikipediaMaintenance, parseCategories } from "../../jobs/ingest-wikipedia-maintenance.js";
 
@@ -818,6 +819,7 @@ function metricPathLabel(pathname) {
     "/strategies",
     "/admin/jobs",
     "/admin/jobs/ingest/github",
+    "/admin/jobs/ingest/open-data",
     "/admin/jobs/ingest/osv",
     "/admin/jobs/ingest/wikipedia",
     "/admin/jobs/pause",
@@ -1097,6 +1099,7 @@ const server = createServer(async (request, response) => {
           "/verifier/replay",
           "/admin/jobs",
           "/admin/jobs/ingest/github",
+          "/admin/jobs/ingest/open-data",
           "/admin/jobs/ingest/osv",
           "/admin/jobs/ingest/wikipedia",
           "/admin/jobs/fire",
@@ -2254,6 +2257,62 @@ const server = createServer(async (request, response) => {
       const status = errors.length ? 207 : 201;
       return respond(response, status, {
         ecosystem: result.ecosystem,
+        minScore: result.minScore,
+        dryRun: false,
+        candidateCount: result.count,
+        created,
+        skipped: [...skipped, ...(Array.isArray(result.skipped) ? result.skipped : [])],
+        errors
+      });
+    }
+
+    if (request.method === "POST" && pathname === "/admin/jobs/ingest/open-data") {
+      const auth = await authMiddleware(request, url, { requireRole: "admin" });
+      await enforceLimit("admin_jobs", auth.wallet, rateLimitConfig.adminJobs);
+      const payload = await readJsonBody(request);
+      const datasets = Array.isArray(payload?.datasets) || typeof payload?.datasets === "string"
+        ? parseOpenDataDatasets(payload.datasets)
+        : parseOpenDataDatasets(process.env.OPEN_DATA_INGEST_DATASETS_JSON ?? process.env.OPEN_DATA_INGEST_DATASETS);
+      const query = typeof payload?.query === "string" && payload.query.trim()
+        ? payload.query.trim()
+        : process.env.OPEN_DATA_INGEST_QUERY;
+      const limit = parsePositiveInteger(payload?.limit, 10, 50);
+      const minScore = parsePositiveInteger(payload?.minScore, 55, 100);
+      const dryRun = payload?.dryRun !== false;
+      const result = await ingestOpenDataDatasets({ datasets, query, limit, minScore });
+
+      if (dryRun) {
+        return respond(response, 200, {
+          ...result,
+          dryRun: true,
+          created: []
+        });
+      }
+
+      const created = [];
+      const skipped = [];
+      const errors = [];
+      for (const job of result.jobs) {
+        try {
+          created.push(service.createJob(job));
+        } catch (error) {
+          const normalized = normalizeError(error);
+          if (normalized.code === "job_exists") {
+            skipped.push({ id: job.id, reason: "already_exists" });
+            continue;
+          }
+          errors.push({
+            id: job.id,
+            code: normalized.code,
+            message: normalized.message
+          });
+        }
+      }
+
+      const status = errors.length ? 207 : 201;
+      return respond(response, status, {
+        provider: result.provider,
+        query: result.query,
         minScore: result.minScore,
         dryRun: false,
         candidateCount: result.count,

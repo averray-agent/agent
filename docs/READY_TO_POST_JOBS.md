@@ -373,6 +373,38 @@ OSV/GHSA/CVE identifiers, and includes test or install evidence.
 
 ---
 
+## Data.gov open-data quality jobs
+
+The first government open-data provider targets the US Data.gov CKAN catalog.
+Data.gov exposes dataset metadata and resource URLs, not the actual data
+contents, so Averray jobs should stay audit/report shaped. Workers inspect the
+catalog landing page and referenced resource, then submit structured quality
+evidence rather than editing government systems.
+
+Preview jobs through:
+
+```bash
+npm --workspace mcp-server run ingest:open-data -- --dry-run \
+  --query 'res_format:CSV'
+```
+
+Or through the admin API:
+
+```http
+POST /admin/jobs/ingest/open-data
+```
+
+The generated jobs use:
+
+- `schema://jobs/open-data-quality-audit-input`
+- `schema://jobs/open-data-quality-audit-output`
+
+Each submission must include reachable dataset/resource evidence, completed
+checks, findings plus recommendations, or `no_issue_found=true` with evidence.
+Workers must not contact agencies or make direct edits to government datasets.
+
+---
+
 ## Before posting
 
 Quick operator checklist:

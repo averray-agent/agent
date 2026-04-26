@@ -213,6 +213,65 @@ const BUILTIN_JOB_SCHEMAS = new Map([
       notes: stringSchema()
     }
   })],
+  ["schema://jobs/open-data-quality-audit-input", objectSchema({
+    $id: "schema://jobs/open-data-quality-audit-input",
+    description: "Public open-data dataset/resource quality audit input.",
+    required: ["portal", "datasetTitle", "datasetUrl", "resourceUrl", "instructions"],
+    properties: {
+      portal: enumString(["data.gov"]),
+      datasetId: stringSchema(),
+      datasetTitle: stringSchema({ minLength: 1 }),
+      datasetUrl: stringSchema({ minLength: 1 }),
+      resourceId: stringSchema(),
+      resourceTitle: stringSchema(),
+      resourceUrl: stringSchema({ minLength: 1 }),
+      resourceFormat: stringSchema(),
+      agency: stringSchema(),
+      license: stringSchema(),
+      modified: stringSchema(),
+      metadataModified: stringSchema(),
+      instructions: arrayOfStrings({ minItems: 1 })
+    }
+  })],
+  ["schema://jobs/open-data-quality-audit-output", objectSchema({
+    $id: "schema://jobs/open-data-quality-audit-output",
+    description: "Structured evidence for a public open-data dataset/resource quality audit.",
+    required: ["dataset_title", "dataset_url", "resource_url", "checks", "findings", "no_issue_found", "summary", "recommended_actions"],
+    properties: {
+      dataset_title: stringSchema({ minLength: 1 }),
+      dataset_url: stringSchema({ minLength: 1 }),
+      resource_url: stringSchema({ minLength: 1 }),
+      resource_format: stringSchema(),
+      checks: {
+        type: "array",
+        minItems: 1,
+        items: objectSchema({
+          required: ["name", "status", "evidence"],
+          properties: {
+            name: stringSchema({ minLength: 1 }),
+            status: enumString(["pass", "warn", "fail", "unknown"]),
+            evidence: stringSchema({ minLength: 1 })
+          }
+        })
+      },
+      findings: {
+        type: "array",
+        items: objectSchema({
+          required: ["severity", "issue", "evidence", "recommendation"],
+          properties: {
+            severity: enumString(["low", "medium", "high"]),
+            issue: stringSchema({ minLength: 1 }),
+            evidence: stringSchema({ minLength: 1 }),
+            recommendation: stringSchema({ minLength: 1 })
+          }
+        })
+      },
+      no_issue_found: booleanSchema(),
+      summary: stringSchema({ minLength: 1 }),
+      recommended_actions: arrayOfStrings({ minItems: 1 }),
+      notes: stringSchema()
+    }
+  })],
   ["schema://jobs/wikipedia-maintenance-input", objectSchema({
     $id: "schema://jobs/wikipedia-maintenance-input",
     description: "Wikipedia public article maintenance job input.",
