@@ -22,6 +22,14 @@ import {
   WikipediaMaintenanceIngestionScheduler,
   loadWikipediaMaintenanceIngestionConfig
 } from "./wikipedia-maintenance-ingestion-scheduler.js";
+import {
+  OsvAdvisoryIngestionScheduler,
+  loadOsvAdvisoryIngestionConfig
+} from "./osv-advisory-ingestion-scheduler.js";
+import {
+  OpenDataIngestionScheduler,
+  loadOpenDataIngestionConfig
+} from "./open-data-ingestion-scheduler.js";
 import { XcmSettlementWatcherService } from "./xcm-settlement-watcher.js";
 import { XcmObservationRelayService } from "./xcm-observation-relay.js";
 import { normaliseStrategyAssetConfig } from "./strategy-asset-config.js";
@@ -159,6 +167,18 @@ export async function createPlatformRuntime() {
       logger
     })
   );
+  const osvAdvisoryIngestionScheduler = initStep("init-osv-advisory-ingestion-scheduler", logger, () =>
+    new OsvAdvisoryIngestionScheduler(platformService, eventBus, {
+      ...loadOsvAdvisoryIngestionConfig(process.env),
+      logger
+    })
+  );
+  const openDataIngestionScheduler = initStep("init-open-data-ingestion-scheduler", logger, () =>
+    new OpenDataIngestionScheduler(platformService, eventBus, {
+      ...loadOpenDataIngestionConfig(process.env),
+      logger
+    })
+  );
   const xcmSettlementWatcher = initStep("init-xcm-settlement-watcher", logger, () =>
     new XcmSettlementWatcherService(platformService, stateStore, eventBus, {
       enabled: process.env.XCM_SETTLEMENT_WATCHER_ENABLED === undefined
@@ -183,11 +203,15 @@ export async function createPlatformRuntime() {
   platformService.recurringScheduler = recurringScheduler;
   platformService.githubIssueIngestionScheduler = githubIssueIngestionScheduler;
   platformService.wikipediaMaintenanceIngestionScheduler = wikipediaMaintenanceIngestionScheduler;
+  platformService.osvAdvisoryIngestionScheduler = osvAdvisoryIngestionScheduler;
+  platformService.openDataIngestionScheduler = openDataIngestionScheduler;
   platformService.xcmSettlementWatcher = xcmSettlementWatcher;
   platformService.xcmObservationRelay = xcmObservationRelay;
   recurringScheduler.start();
   githubIssueIngestionScheduler.start();
   wikipediaMaintenanceIngestionScheduler.start();
+  osvAdvisoryIngestionScheduler.start();
+  openDataIngestionScheduler.start();
   xcmSettlementWatcher.start();
   xcmObservationRelay.start();
 
@@ -214,6 +238,8 @@ export async function createPlatformRuntime() {
     recurringScheduler,
     githubIssueIngestionScheduler,
     wikipediaMaintenanceIngestionScheduler,
+    osvAdvisoryIngestionScheduler,
+    openDataIngestionScheduler,
     xcmSettlementWatcher,
     xcmObservationRelay,
     authConfig,

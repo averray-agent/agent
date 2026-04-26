@@ -38,6 +38,9 @@ export class PlatformService {
     this.eventBus = eventBus;
     this.recurringScheduler = recurringScheduler;
     this.githubIssueIngestionScheduler = undefined;
+    this.wikipediaMaintenanceIngestionScheduler = undefined;
+    this.osvAdvisoryIngestionScheduler = undefined;
+    this.openDataIngestionScheduler = undefined;
     this.xcmSettlementWatcher = undefined;
     this.xcmObservationRelay = undefined;
 
@@ -100,7 +103,16 @@ export class PlatformService {
   }
 
   async getAdminStatus({ auth = undefined } = {}) {
-    const [policy, recurring, scheduler, githubIngestion, wikipediaIngestion, recentSessions] = await Promise.all([
+    const [
+      policy,
+      recurring,
+      scheduler,
+      githubIngestion,
+      wikipediaIngestion,
+      osvIngestion,
+      openDataIngestion,
+      recentSessions
+    ] = await Promise.all([
       this.blockchainGateway?.getTreasuryPolicyStatus?.() ?? {
         enabled: false,
         policyAddress: undefined,
@@ -129,6 +141,29 @@ export class PlatformService {
         intervalMs: 0,
         language: "en",
         categoryCount: 0,
+        minScore: 0,
+        maxJobsPerRun: 0,
+        maxOpenJobs: 0,
+        lastRun: undefined
+      },
+      this.osvAdvisoryIngestionScheduler?.getStatus?.() ?? {
+        enabled: false,
+        running: false,
+        dryRun: true,
+        intervalMs: 0,
+        packageCount: 0,
+        minScore: 0,
+        maxJobsPerRun: 0,
+        maxOpenJobs: 0,
+        lastRun: undefined
+      },
+      this.openDataIngestionScheduler?.getStatus?.() ?? {
+        enabled: false,
+        running: false,
+        dryRun: true,
+        intervalMs: 0,
+        query: undefined,
+        datasetCount: 0,
         minScore: 0,
         maxJobsPerRun: 0,
         maxOpenJobs: 0,
@@ -225,6 +260,8 @@ export class PlatformService {
       scheduler,
       githubIngestion: githubIngestion,
       wikipediaIngestion: wikipediaIngestion,
+      osvIngestion: osvIngestion,
+      openDataIngestion: openDataIngestion,
       xcmSettlementWatcher: await this.xcmSettlementWatcher?.getStatus?.() ?? {
         enabled: false,
         running: false,

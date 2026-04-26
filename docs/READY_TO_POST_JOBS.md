@@ -362,6 +362,20 @@ Or through the admin API:
 POST /admin/jobs/ingest/osv
 ```
 
+To let the backend pull these periodically, configure:
+
+```bash
+OSV_INGEST_ENABLED=true
+OSV_INGEST_DRY_RUN=true
+OSV_INGEST_INTERVAL_MS=3600000
+OSV_INGEST_MAX_JOBS_PER_RUN=2
+OSV_INGEST_MAX_OPEN_JOBS=20
+OSV_INGEST_PACKAGES_JSON='[{"name":"minimist","version":"0.0.8","repo":"example/app","manifestPath":"package.json"}]'
+```
+
+Review `osvIngestion.lastRun` in `/admin/status`, then switch
+`OSV_INGEST_DRY_RUN=false` when the candidates are ready to create jobs.
+
 The generated jobs use:
 
 - `schema://jobs/dependency-remediation-input`
@@ -393,6 +407,20 @@ Or through the admin API:
 ```http
 POST /admin/jobs/ingest/open-data
 ```
+
+To let the backend pull these periodically, configure:
+
+```bash
+OPEN_DATA_INGEST_ENABLED=true
+OPEN_DATA_INGEST_DRY_RUN=true
+OPEN_DATA_INGEST_INTERVAL_MS=3600000
+OPEN_DATA_INGEST_MAX_JOBS_PER_RUN=2
+OPEN_DATA_INGEST_MAX_OPEN_JOBS=20
+OPEN_DATA_INGEST_QUERY='res_format:CSV'
+```
+
+Review `openDataIngestion.lastRun` in `/admin/status`, then switch
+`OPEN_DATA_INGEST_DRY_RUN=false` when the candidates are ready to create jobs.
 
 The generated jobs use:
 

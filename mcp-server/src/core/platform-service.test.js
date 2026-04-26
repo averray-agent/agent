@@ -136,6 +136,40 @@ test("getAdminStatus surfaces recurring scheduler anomalies", async () => {
   assert.ok(status.anomalies.some((entry) => entry.code === "recurring_attention"));
 });
 
+test("getAdminStatus surfaces public source ingestion scheduler status", async () => {
+  const service = makePlatformService();
+  service.osvAdvisoryIngestionScheduler = {
+    getStatus() {
+      return {
+        enabled: true,
+        running: true,
+        dryRun: true,
+        intervalMs: 3600000,
+        packageCount: 1,
+        lastRun: { createdCount: 0 }
+      };
+    }
+  };
+  service.openDataIngestionScheduler = {
+    getStatus() {
+      return {
+        enabled: true,
+        running: true,
+        dryRun: false,
+        intervalMs: 3600000,
+        query: "res_format:CSV",
+        datasetCount: 0,
+        lastRun: { createdCount: 2 }
+      };
+    }
+  };
+
+  const status = await service.getAdminStatus();
+  assert.equal(status.osvIngestion.packageCount, 1);
+  assert.equal(status.openDataIngestion.query, "res_format:CSV");
+  assert.equal(status.openDataIngestion.lastRun.createdCount, 2);
+});
+
 test("finalizeXcmRequest records async treasury settlement when the request is strategy-backed", async () => {
   const gateway = {
     isEnabled: () => true,

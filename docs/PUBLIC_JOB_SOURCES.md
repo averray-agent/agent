@@ -104,6 +104,9 @@ After Wikipedia, use the same pattern for:
    - v1 ingestion targets the US Data.gov CKAN catalog:
      `POST /admin/jobs/ingest/open-data` searches catalog metadata or accepts
      explicit dataset/resource targets, then emits proposal-only audit jobs.
+   - Scheduled ingestion is available behind `OPEN_DATA_INGEST_ENABLED`; keep
+     `OPEN_DATA_INGEST_DRY_RUN=true` until `/admin/status` shows good
+     candidates.
 
 3. **OSV/NVD advisories**
    - package-to-CVE mapping, remediation summaries
@@ -112,6 +115,9 @@ After Wikipedia, use the same pattern for:
      `POST /admin/jobs/ingest/osv` accepts package/version/repo targets,
      queries OSV, and emits dependency remediation PR jobs when a fixed version
      exists. CVE aliases link to NVD for operator review.
+   - Scheduled ingestion is available behind `OSV_INGEST_ENABLED`; configure
+     package targets explicitly and keep `OSV_INGEST_DRY_RUN=true` until
+     candidate quality is reviewed.
 
 4. **Stack Exchange / Discourse**
    - unanswered-question triage, duplicate detection, answer summaries
