@@ -9,7 +9,6 @@ import {StrategyAdapterRegistry} from "../contracts/StrategyAdapterRegistry.sol"
 import {AgentAccountCore} from "../contracts/AgentAccountCore.sol";
 import {EscrowCore} from "../contracts/EscrowCore.sol";
 import {ReputationSBT} from "../contracts/ReputationSBT.sol";
-import {VerifierRegistry} from "../contracts/VerifierRegistry.sol";
 import {MockVDotAdapter} from "../contracts/strategies/MockVDotAdapter.sol";
 
 contract AgentPlatformTest is Test {
@@ -17,7 +16,6 @@ contract AgentPlatformTest is Test {
     StrategyAdapterRegistry internal registry;
     AgentAccountCore internal accounts;
     ReputationSBT internal reputation;
-    VerifierRegistry internal verifierRegistry;
     EscrowCore internal escrow;
     MockERC20 internal dot;
 
@@ -36,8 +34,7 @@ contract AgentPlatformTest is Test {
         registry = new StrategyAdapterRegistry(policy);
         accounts = new AgentAccountCore(policy, registry);
         reputation = new ReputationSBT(policy);
-        verifierRegistry = new VerifierRegistry(address(this));
-        escrow = new EscrowCore(policy, accounts, reputation, verifierRegistry);
+        escrow = new EscrowCore(policy, accounts, reputation);
         dot = new MockERC20("Mock DOT", "mDOT");
 
         policy.setApprovedAsset(address(dot), true);
@@ -45,7 +42,6 @@ contract AgentPlatformTest is Test {
         policy.setServiceOperator(address(accounts), true);
         policy.setServiceOperator(address(this), true);
         policy.setVerifier(verifier, true);
-        verifierRegistry.addVerifier(verifier);
         policy.setArbitrator(arbitrator, true);
         policy.setDailyOutflowCap(type(uint256).max);
         policy.setPerAccountBorrowCap(1_000 ether);

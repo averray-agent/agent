@@ -4,7 +4,6 @@ pragma solidity ^0.8.24;
 import {TreasuryPolicy} from "./TreasuryPolicy.sol";
 import {AgentAccountCore} from "./AgentAccountCore.sol";
 import {ReputationSBT} from "./ReputationSBT.sol";
-import {VerifierRegistry} from "./VerifierRegistry.sol";
 import {ReentrancyGuard} from "./lib/ReentrancyGuard.sol";
 
 contract EscrowCore is ReentrancyGuard {
@@ -20,7 +19,6 @@ contract EscrowCore is ReentrancyGuard {
     TreasuryPolicy public immutable policy;
     AgentAccountCore public immutable accounts;
     ReputationSBT public immutable reputation;
-    VerifierRegistry public immutable verifierRegistry;
 
     enum PayoutMode {
         Single,
@@ -62,6 +60,7 @@ contract EscrowCore is ReentrancyGuard {
     mapping(bytes32 => bytes32) public latestEvidence;
     mapping(bytes32 => uint256) public claimTtls;
     mapping(bytes32 => uint256) public rejectionTimestamps;
+    mapping(bytes32 => bool) public autoDisclosed;
 
     event JobFunded(bytes32 indexed jobId, address indexed poster, address indexed asset, uint256 totalReserved, PayoutMode payoutMode);
     event JobCreated(bytes32 indexed jobId, address indexed poster, bytes32 indexed specHash, address asset, uint256 totalReserved, PayoutMode payoutMode);
@@ -73,22 +72,29 @@ contract EscrowCore is ReentrancyGuard {
     event Verified(bytes32 indexed jobId, address indexed verifier, bool approved, bytes32 reasonCode, bytes32 reasoningHash);
     event DisputeOpened(bytes32 indexed jobId, address indexed opener);
     event JobClosed(bytes32 indexed jobId, address indexed worker, uint256 releasedAmount);
+    event Disclosed(bytes32 indexed hash, address indexed byWallet, uint64 timestamp);
+    event AutoDisclosed(bytes32 indexed hash, uint64 timestamp);
 
     error Unauthorized();
     error InvalidState();
     error UnknownJob();
     error ProtocolPaused();
     error MilestoneLimitExceeded();
+    error AlreadyAutoDisclosed();
 
-    constructor(TreasuryPolicy policy_, AgentAccountCore accounts_, ReputationSBT reputation_, VerifierRegistry verifierRegistry_) {
+    constructor(TreasuryPolicy policy_, AgentAccountCore accounts_, ReputationSBT reputation_) {
         policy = policy_;
         accounts = accounts_;
         reputation = reputation_;
-        verifierRegistry = verifierRegistry_;
     }
 
     modifier onlyVerifier() {
-        if (!verifierRegistry.isAuthorized(msg.sender)) revert Unauthorized();
+        if (!policy.verifiers(msg.sender)) revert Unauthorized();
+        _;
+    }
+
+    modifier onlyDisclosurePublisher() {
+        if (msg.sender != policy.owner() && !policy.serviceOperators(msg.sender)) revert Unauthorized();
         _;
     }
 
@@ -224,6 +230,16 @@ contract EscrowCore is ReentrancyGuard {
         job.state = JobState.Submitted;
         emit WorkSubmitted(jobId, msg.sender, evidenceHash);
         emit Submitted(jobId, msg.sender, evidenceHash);
+    }
+
+    function disclose(bytes32 hash) external whenNotPaused {
+        emit Disclosed(hash, msg.sender, uint64(block.timestamp));
+    }
+
+    function autoDisclose(bytes32 hash) external whenNotPaused onlyDisclosurePublisher {
+        if (autoDisclosed[hash]) revert AlreadyAutoDisclosed();
+        autoDisclosed[hash] = true;
+        emit AutoDisclosed(hash, uint64(block.timestamp));
     }
 
     /// @dev Permissionless by design so any party can finalize an expired claim and reopen the job.

@@ -3,11 +3,9 @@ import { createConfig } from "ponder";
 import {
   AgentAccountCoreAbi,
   DiscoveryRegistryAbi,
-  DisclosureLogAbi,
   EscrowCoreAbi,
   ReputationSbtAbi,
   TreasuryPolicyAbi,
-  VerifierRegistryAbi,
   XcmWrapperAbi
 } from "./abis/contractsAbi";
 
@@ -41,17 +39,9 @@ const reputationSbtAddress = requireAddress(
   process.env.PONDER_REPUTATION_SBT_ADDRESS ?? process.env.REPUTATION_SBT_ADDRESS,
   "REPUTATION_SBT_ADDRESS"
 );
-const verifierRegistryAddress = optionalAddress(
-  process.env.PONDER_VERIFIER_REGISTRY_ADDRESS ?? process.env.VERIFIER_REGISTRY_ADDRESS,
-  "VERIFIER_REGISTRY_ADDRESS"
-);
 const discoveryRegistryAddress = optionalAddress(
   process.env.PONDER_DISCOVERY_REGISTRY_ADDRESS ?? process.env.DISCOVERY_REGISTRY_ADDRESS,
   "DISCOVERY_REGISTRY_ADDRESS"
-);
-const disclosureLogAddress = optionalAddress(
-  process.env.PONDER_DISCLOSURE_LOG_ADDRESS ?? process.env.DISCLOSURE_LOG_ADDRESS,
-  "DISCLOSURE_LOG_ADDRESS"
 );
 const xcmWrapperAddress = optionalAddress(
   process.env.PONDER_XCM_WRAPPER_ADDRESS ?? process.env.XCM_WRAPPER_ADDRESS,
@@ -104,32 +94,12 @@ const contracts = {
     address: reputationSbtAddress,
     startBlock: reputationStartBlock
   },
-  ...(verifierRegistryAddress
-    ? {
-        VerifierRegistry: {
-          chain: chainName,
-          abi: VerifierRegistryAbi,
-          address: verifierRegistryAddress,
-          startBlock: registryStartBlock
-        }
-      }
-    : {}),
   ...(discoveryRegistryAddress
     ? {
         DiscoveryRegistry: {
           chain: chainName,
           abi: DiscoveryRegistryAbi,
           address: discoveryRegistryAddress,
-          startBlock: registryStartBlock
-        }
-      }
-    : {}),
-  ...(disclosureLogAddress
-    ? {
-        DisclosureLog: {
-          chain: chainName,
-          abi: DisclosureLogAbi,
-          address: disclosureLogAddress,
           startBlock: registryStartBlock
         }
       }

@@ -9,9 +9,7 @@ import {StrategyAdapterRegistry} from "../contracts/StrategyAdapterRegistry.sol"
 import {AgentAccountCore} from "../contracts/AgentAccountCore.sol";
 import {EscrowCore} from "../contracts/EscrowCore.sol";
 import {ReputationSBT} from "../contracts/ReputationSBT.sol";
-import {VerifierRegistry} from "../contracts/VerifierRegistry.sol";
 import {DiscoveryRegistry} from "../contracts/DiscoveryRegistry.sol";
-import {DisclosureLog} from "../contracts/DisclosureLog.sol";
 
 interface VmEvent {
     function expectEmit(bool checkTopic1, bool checkTopic2, bool checkTopic3, bool checkData, address emitter) external;
@@ -24,7 +22,6 @@ contract Rc1BackboneTest is Test {
     StrategyAdapterRegistry internal registry;
     AgentAccountCore internal accounts;
     ReputationSBT internal reputation;
-    VerifierRegistry internal verifierRegistry;
     EscrowCore internal escrow;
     MockERC20 internal dot;
 
@@ -40,19 +37,20 @@ contract Rc1BackboneTest is Test {
     event JobCreated(bytes32 indexed jobId, address indexed poster, bytes32 indexed specHash, address asset, uint256 totalReserved, EscrowCore.PayoutMode payoutMode);
     event Submitted(bytes32 indexed jobId, address indexed worker, bytes32 indexed payloadHash);
     event Verified(bytes32 indexed jobId, address indexed verifier, bool approved, bytes32 reasonCode, bytes32 reasoningHash);
+    event AutoDisclosed(bytes32 indexed hash, uint64 timestamp);
 
     function setUp() public {
         policy = new TreasuryPolicy();
         registry = new StrategyAdapterRegistry(policy);
         accounts = new AgentAccountCore(policy, registry);
         reputation = new ReputationSBT(policy);
-        verifierRegistry = new VerifierRegistry(address(this));
-        escrow = new EscrowCore(policy, accounts, reputation, verifierRegistry);
+        escrow = new EscrowCore(policy, accounts, reputation);
         dot = new MockERC20("Mock DOT", "mDOT");
 
         policy.setApprovedAsset(address(dot), true);
         policy.setServiceOperator(address(escrow), true);
         policy.setServiceOperator(address(accounts), true);
+        policy.setServiceOperator(address(this), true);
         policy.setDailyOutflowCap(type(uint256).max);
 
         dot.mint(poster, 1_000 ether);
@@ -85,7 +83,7 @@ contract Rc1BackboneTest is Test {
 
     function testAuthorizedVerifierCanResolveEscrow() public {
         bytes32 jobId = prepareSubmittedJob("job/authorized");
-        verifierRegistry.addVerifier(verifier);
+        policy.setVerifier(verifier, true);
 
         vm.prank(verifier);
         escrow.resolveSinglePayout(jobId, true, bytes32("OK"), "ipfs://badge/authorized", REASONING_HASH);
@@ -96,8 +94,8 @@ contract Rc1BackboneTest is Test {
 
     function testRemovedVerifierCannotResolveEscrow() public {
         bytes32 jobId = prepareSubmittedJob("job/removed");
-        verifierRegistry.addVerifier(verifier);
-        verifierRegistry.removeVerifier(verifier);
+        policy.setVerifier(verifier, true);
+        policy.setVerifier(verifier, false);
 
         vm.prank(verifier);
         (bool ok,) = address(escrow).call(
@@ -112,20 +110,20 @@ contract Rc1BackboneTest is Test {
 
     function testVerifierAuthorizationHistoryIsAuditable() public {
         vm.warp(100);
-        verifierRegistry.addVerifier(verifier);
-        require(!verifierRegistry.wasAuthorizedAt(verifier, 99), "EXPECTED_NOT_AUTHORIZED_BEFORE");
-        require(verifierRegistry.wasAuthorizedAt(verifier, 100), "EXPECTED_AUTHORIZED_AT_START");
+        policy.setVerifier(verifier, true);
+        require(!policy.wasAuthorizedAt(verifier, 99), "EXPECTED_NOT_AUTHORIZED_BEFORE");
+        require(policy.wasAuthorizedAt(verifier, 100), "EXPECTED_AUTHORIZED_AT_START");
 
         vm.warp(150);
-        verifierRegistry.removeVerifier(verifier);
-        require(verifierRegistry.wasAuthorizedAt(verifier, 149), "EXPECTED_AUTHORIZED_BEFORE_REMOVAL");
-        require(!verifierRegistry.wasAuthorizedAt(verifier, 150), "EXPECTED_NOT_AUTHORIZED_AT_REMOVAL");
+        policy.setVerifier(verifier, false);
+        require(policy.wasAuthorizedAt(verifier, 149), "EXPECTED_AUTHORIZED_BEFORE_REMOVAL");
+        require(!policy.wasAuthorizedAt(verifier, 150), "EXPECTED_NOT_AUTHORIZED_AT_REMOVAL");
 
         vm.warp(200);
-        verifierRegistry.addVerifier(verifier);
-        require(verifierRegistry.wasAuthorizedAt(verifier, 100), "EXPECTED_FIRST_WINDOW_RETAINED");
-        require(!verifierRegistry.wasAuthorizedAt(verifier, 175), "EXPECTED_GAP_RETAINED");
-        require(verifierRegistry.wasAuthorizedAt(verifier, 200), "EXPECTED_SECOND_WINDOW");
+        policy.setVerifier(verifier, true);
+        require(policy.wasAuthorizedAt(verifier, 100), "EXPECTED_FIRST_WINDOW_RETAINED");
+        require(!policy.wasAuthorizedAt(verifier, 175), "EXPECTED_GAP_RETAINED");
+        require(policy.wasAuthorizedAt(verifier, 200), "EXPECTED_SECOND_WINDOW");
     }
 
     function testDiscoveryManifestPublishIncrementsVersionAndRejectsNonPublisher() public {
@@ -147,13 +145,14 @@ contract Rc1BackboneTest is Test {
     }
 
     function testDisclosureAutoDiscloseEmitsOnce() public {
-        DisclosureLog disclosure = new DisclosureLog(address(this));
         bytes32 hash = keccak256("content");
 
-        disclosure.autoDisclose(hash);
-        require(disclosure.autoDisclosed(hash), "EXPECTED_AUTO_DISCLOSED");
+        vmEvent.expectEmit(true, false, false, true, address(escrow));
+        emit AutoDisclosed(hash, uint64(block.timestamp));
+        escrow.autoDisclose(hash);
+        require(escrow.autoDisclosed(hash), "EXPECTED_AUTO_DISCLOSED");
 
-        (bool ok,) = address(disclosure).call(abi.encodeCall(disclosure.autoDisclose, (hash)));
+        (bool ok,) = address(escrow).call(abi.encodeCall(escrow.autoDisclose, (hash)));
         require(!ok, "EXPECTED_ALREADY_AUTO_DISCLOSED_REVERT");
     }
 
@@ -184,7 +183,7 @@ contract Rc1BackboneTest is Test {
 
     function testCanonicalHashEventsAreEmitted() public {
         bytes32 jobId = keccak256("job/events");
-        verifierRegistry.addVerifier(verifier);
+        policy.setVerifier(verifier, true);
 
         vmEvent.expectEmit(true, true, true, true, address(escrow));
         emit JobCreated(jobId, poster, SPEC_HASH, address(dot), 10 ether, EscrowCore.PayoutMode.Single);

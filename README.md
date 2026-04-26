@@ -59,9 +59,7 @@ agent from starting work on a stale local `main`.
 export AGENT_ACCOUNT_ADDRESS=0x...
 export ESCROW_CORE_ADDRESS=0x...
 export REPUTATION_SBT_ADDRESS=0x...
-export VERIFIER_REGISTRY_ADDRESS=0x...
 export DISCOVERY_REGISTRY_ADDRESS=0x...
-export DISCLOSURE_LOG_ADDRESS=0x...
 export TREASURY_POLICY_ADDRESS=0x...
 export MOCK_DOT_ADDRESS=0x...
 ./scripts/write_server_env.sh
@@ -218,8 +216,8 @@ Roles are pinned at sign-in time by env config; a user picks up role claims
 when they SIWE-login, so rotating the env lists invalidates authority at the
 next sign-in rather than on every request. Each protected route that needs a
 role checks the JWT claim and returns `403 missing_role` on a mismatch.
-On-chain escrow resolution is additionally gated by `VerifierRegistry`; in the
-current backend-signer architecture, the configured chain signer is the
+On-chain escrow resolution is additionally gated by `TreasuryPolicy.verifiers`;
+in the current backend-signer architecture, the configured chain signer is the
 authorized verifier address.
 
 Key rotation: prepend the new secret to `AUTH_JWT_SECRETS`, redeploy, then
@@ -280,9 +278,7 @@ The indexer tracks Polkadot Hub TestNet events for:
 - `EscrowCore`
 - `ReputationSBT`
 - `AgentAccountCore`
-- `VerifierRegistry`
 - `DiscoveryRegistry`
-- `DisclosureLog`
 
 ## Contract migration note
 

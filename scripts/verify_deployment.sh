@@ -6,7 +6,7 @@
 #   - each contract address responds to a known function selector
 #   - TreasuryPolicy.owner() matches the expected owner (multisig on prod)
 #   - TreasuryPolicy.pauser() matches the expected pauser hot-key
-#   - VerifierRegistry.isAuthorized(VERIFIER) and TreasuryPolicy.arbitrators(ARBITRATOR) are true
+#   - TreasuryPolicy.verifiers(VERIFIER) and TreasuryPolicy.arbitrators(ARBITRATOR) are true
 #   - TreasuryPolicy.serviceOperators({escrow,account}) are true
 #   - TreasuryPolicy.approvedAssets(TOKEN) is true
 #   - TreasuryPolicy is NOT paused (unless --allow-paused is set)
@@ -59,9 +59,7 @@ TREASURY_POLICY="$(echo "$manifest" | jq -r '.contracts.treasuryPolicy')"
 STRATEGY_REGISTRY="$(echo "$manifest" | jq -r '.contracts.strategyAdapterRegistry')"
 AGENT_ACCOUNT="$(echo "$manifest" | jq -r '.contracts.agentAccountCore')"
 REPUTATION_SBT="$(echo "$manifest" | jq -r '.contracts.reputationSbt')"
-VERIFIER_REGISTRY="$(echo "$manifest" | jq -r '.contracts.verifierRegistry')"
 DISCOVERY_REGISTRY="$(echo "$manifest" | jq -r '.contracts.discoveryRegistry')"
-DISCLOSURE_LOG="$(echo "$manifest" | jq -r '.contracts.disclosureLog')"
 ESCROW_CORE="$(echo "$manifest" | jq -r '.contracts.escrowCore')"
 XCM_WRAPPER="$(echo "$manifest" | jq -r '.contracts.xcmWrapper // empty')"
 TOKEN_ADDRESS="$(echo "$manifest" | jq -r '.contracts.token')"
@@ -122,9 +120,7 @@ for pair in \
   "StrategyAdapterRegistry=$STRATEGY_REGISTRY" \
   "AgentAccountCore=$AGENT_ACCOUNT" \
   "ReputationSBT=$REPUTATION_SBT" \
-  "VerifierRegistry=$VERIFIER_REGISTRY" \
   "DiscoveryRegistry=$DISCOVERY_REGISTRY" \
-  "DisclosureLog=$DISCLOSURE_LOG" \
   "EscrowCore=$ESCROW_CORE" \
   "Token=$TOKEN_ADDRESS"; do
   name="${pair%%=*}"
@@ -169,11 +165,8 @@ check_bool "serviceOperator(AgentAccount)" "true" "$(call "$TREASURY_POLICY" "se
 if [[ -n "$XCM_WRAPPER" ]]; then
   check_bool "serviceOperator(XcmWrapper)" "true" "$(call "$TREASURY_POLICY" "serviceOperators(address)(bool)" "$XCM_WRAPPER")"
 fi
-check_bool "legacy policy verifier"        "true" "$(call "$TREASURY_POLICY" "verifiers(address)(bool)" "$EXPECTED_VERIFIER")"
-check_bool "registry verifier"             "true" "$(call "$VERIFIER_REGISTRY" "isAuthorized(address)(bool)" "$EXPECTED_VERIFIER")"
-check "verifier registry admin"            "$EXPECTED_OWNER" "$(call "$VERIFIER_REGISTRY" "admin()(address)")"
+check_bool "verifier"                      "true" "$(call "$TREASURY_POLICY" "verifiers(address)(bool)" "$EXPECTED_VERIFIER")"
 check "discovery publisher"                "$EXPECTED_OWNER" "$(call "$DISCOVERY_REGISTRY" "publisher()(address)")"
-check "disclosure publisher"               "$EXPECTED_OWNER" "$(call "$DISCLOSURE_LOG" "publisher()(address)")"
 check_bool "arbitrator"                    "true" "$(call "$TREASURY_POLICY" "arbitrators(address)(bool)" "$EXPECTED_ARBITRATOR")"
 check_bool "approvedAsset(token)"          "true" "$(call "$TREASURY_POLICY" "approvedAssets(address)(bool)" "$TOKEN_ADDRESS")"
 

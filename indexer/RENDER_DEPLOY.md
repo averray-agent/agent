@@ -18,9 +18,7 @@ silent fallback to pre-existing testnet addresses.
 - `ESCROW_CORE_ADDRESS`
 - `AGENT_ACCOUNT_ADDRESS`
 - `REPUTATION_SBT_ADDRESS`
-- `VERIFIER_REGISTRY_ADDRESS`
 - `DISCOVERY_REGISTRY_ADDRESS`
-- `DISCLOSURE_LOG_ADDRESS`
 - `DWELLER_RPC_URL` (preferred) — or `POLKADOT_RPC_URL` — or the legacy `PONDER_RPC_URL_<chainId>` form
 
 Optional:

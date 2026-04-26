@@ -202,9 +202,7 @@ export function loadBlockchainConfig(env = process.env) {
     agentAccountAddress: env.AGENT_ACCOUNT_ADDRESS ?? "",
     escrowCoreAddress: env.ESCROW_CORE_ADDRESS ?? "",
     reputationSbtAddress: env.REPUTATION_SBT_ADDRESS ?? "",
-    verifierRegistryAddress: normalizeOptionalAddress(env.VERIFIER_REGISTRY_ADDRESS, "VERIFIER_REGISTRY_ADDRESS"),
     discoveryRegistryAddress: normalizeOptionalAddress(env.DISCOVERY_REGISTRY_ADDRESS, "DISCOVERY_REGISTRY_ADDRESS"),
-    disclosureLogAddress: normalizeOptionalAddress(env.DISCLOSURE_LOG_ADDRESS, "DISCLOSURE_LOG_ADDRESS"),
     xcmWrapperAddress: normalizeOptionalAddress(env.XCM_WRAPPER_ADDRESS, "XCM_WRAPPER_ADDRESS"),
     supportedAssets
   };

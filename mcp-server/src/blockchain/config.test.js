@@ -9,7 +9,6 @@ const baseEnv = {
   AGENT_ACCOUNT_ADDRESS: "0x2222222222222222222222222222222222222222",
   ESCROW_CORE_ADDRESS: "0x3333333333333333333333333333333333333333",
   REPUTATION_SBT_ADDRESS: "0x4444444444444444444444444444444444444444",
-  VERIFIER_REGISTRY_ADDRESS: "0x6666666666666666666666666666666666666666",
   SUPPORTED_ASSETS: "DOT:0x5555555555555555555555555555555555555555"
 };
 
@@ -142,29 +141,6 @@ test("loadBlockchainConfig accepts optional XCM_WRAPPER_ADDRESS", () => {
   });
 
   assert.equal(config.xcmWrapperAddress, "0x7777777777777777777777777777777777777777");
-});
-
-test("loadBlockchainConfig treats registry addresses as optional during staged rollout", () => {
-  const { VERIFIER_REGISTRY_ADDRESS, ...envWithoutRegistry } = baseEnv;
-  const config = loadBlockchainConfig({
-    ...envWithoutRegistry,
-    RPC_URL: "https://legacy.example"
-  });
-
-  assert.equal(config.enabled, true);
-  assert.equal(config.verifierRegistryAddress, "");
-});
-
-test("loadBlockchainConfig rejects malformed optional VERIFIER_REGISTRY_ADDRESS", () => {
-  assert.throws(
-    () =>
-      loadBlockchainConfig({
-        ...baseEnv,
-        RPC_URL: "https://legacy.example",
-        VERIFIER_REGISTRY_ADDRESS: "not-an-address"
-      }),
-    /VERIFIER_REGISTRY_ADDRESS must be a 0x \+ 20-byte EVM address/
-  );
 });
 
 test("loadBlockchainConfig rejects malformed optional XCM_WRAPPER_ADDRESS", () => {

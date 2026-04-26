@@ -11,6 +11,8 @@ export const EscrowCoreAbi = parseAbi([
   "event Verified(bytes32 indexed jobId, address indexed verifier, bool approved, bytes32 reasonCode, bytes32 reasoningHash)",
   "event DisputeOpened(bytes32 indexed jobId, address indexed opener)",
   "event JobClosed(bytes32 indexed jobId, address indexed worker, uint256 releasedAmount)",
+  "event Disclosed(bytes32 indexed hash, address indexed byWallet, uint64 timestamp)",
+  "event AutoDisclosed(bytes32 indexed hash, uint64 timestamp)",
   "function jobs(bytes32 jobId) view returns ((address poster, address worker, address asset, bytes32 verifierMode, bytes32 category, bytes32 specHash, uint256 reward, uint256 opsReserve, uint256 contingencyReserve, uint256 released, uint256 claimExpiry, uint256 claimStake, uint16 claimStakeBps, uint8 payoutMode, uint8 state))"
 ]);
 
@@ -21,7 +23,12 @@ export const ReputationSbtAbi = parseAbi([
 ]);
 
 export const TreasuryPolicyAbi = parseAbi([
-  "event OutflowRecorded(uint256 day, uint256 amount, uint256 newTotal)"
+  "event VerifierUpdated(address indexed verifier, bool approved)",
+  "event OutflowRecorded(uint256 day, uint256 amount, uint256 newTotal)",
+  "function verifiers(address verifier) view returns (bool)",
+  "function authorizedSince(address verifier) view returns (uint64)",
+  "function authorizedUntil(address verifier) view returns (uint64)",
+  "function wasAuthorizedAt(address verifier, uint64 timestamp) view returns (bool)"
 ]);
 
 export const AgentAccountCoreAbi = parseAbi([
@@ -36,17 +43,6 @@ export const XcmWrapperAbi = parseAbi([
   "event RequestStatusUpdated(bytes32 indexed requestId, uint8 indexed status, uint256 settledAssets, uint256 settledShares, bytes32 remoteRef, bytes32 failureCode)"
 ]);
 
-export const VerifierRegistryAbi = parseAbi([
-  "event VerifierAdded(address indexed verifier, uint64 timestamp)",
-  "event VerifierRemoved(address indexed verifier, uint64 timestamp)",
-  "event AdminTransferred(address indexed from, address indexed to)"
-]);
-
 export const DiscoveryRegistryAbi = parseAbi([
   "event ManifestPublished(uint64 indexed version, bytes32 indexed hash, uint64 timestamp, address publisher)"
-]);
-
-export const DisclosureLogAbi = parseAbi([
-  "event Disclosed(bytes32 indexed hash, address indexed byWallet, uint64 timestamp)",
-  "event AutoDisclosed(bytes32 indexed hash, uint64 timestamp)"
 ]);

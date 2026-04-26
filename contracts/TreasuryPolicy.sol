@@ -19,11 +19,19 @@ contract TreasuryPolicy {
     uint256 public disputeLossSkillPenalty;
     uint256 public disputeLossReliabilityPenalty;
 
+    struct AuthorizationWindow {
+        uint64 since;
+        uint64 until;
+    }
+
     mapping(address => bool) public approvedAssets;
     mapping(address => bool) public approvedStrategies;
     mapping(address => bool) public serviceOperators;
     mapping(address => bool) public verifiers;
+    mapping(address => uint64) public authorizedSince;
+    mapping(address => uint64) public authorizedUntil;
     mapping(address => bool) public arbitrators;
+    mapping(address => AuthorizationWindow[]) internal verifierAuthorizationWindows;
 
     uint256 public currentDay;
     uint256 public outflowToday;
@@ -112,8 +120,48 @@ contract TreasuryPolicy {
     }
 
     function setVerifier(address verifier, bool approved) external onlyOwner {
+        uint64 timestamp = uint64(block.timestamp);
+        if (approved == verifiers[verifier]) {
+            emit VerifierUpdated(verifier, approved);
+            return;
+        }
+
         verifiers[verifier] = approved;
+        if (approved) {
+            authorizedSince[verifier] = timestamp;
+            authorizedUntil[verifier] = 0;
+            verifierAuthorizationWindows[verifier].push(AuthorizationWindow({since: timestamp, until: 0}));
+        } else {
+            authorizedUntil[verifier] = timestamp;
+            uint256 windowCount = verifierAuthorizationWindows[verifier].length;
+            if (windowCount > 0 && verifierAuthorizationWindows[verifier][windowCount - 1].until == 0) {
+                verifierAuthorizationWindows[verifier][windowCount - 1].until = timestamp;
+            }
+        }
         emit VerifierUpdated(verifier, approved);
+    }
+
+    function verifierAuthorizationWindowCount(address verifier) external view returns (uint256) {
+        return verifierAuthorizationWindows[verifier].length;
+    }
+
+    function verifierAuthorizationWindow(address verifier, uint256 index)
+        external
+        view
+        returns (uint64 since, uint64 until)
+    {
+        AuthorizationWindow memory window = verifierAuthorizationWindows[verifier][index];
+        return (window.since, window.until);
+    }
+
+    function wasAuthorizedAt(address verifier, uint64 timestamp) external view returns (bool) {
+        AuthorizationWindow[] storage windows = verifierAuthorizationWindows[verifier];
+        for (uint256 i = 0; i < windows.length; i++) {
+            if (timestamp >= windows[i].since && (windows[i].until == 0 || timestamp < windows[i].until)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     function setArbitrator(address arbitrator, bool approved) external onlyOwner {

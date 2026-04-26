@@ -44,7 +44,9 @@ export const ESCROW_CORE_ABI = [
   "event Verified(bytes32 indexed jobId, address indexed verifier, bool approved, bytes32 reasonCode, bytes32 reasoningHash)",
   "event JobClosed(bytes32 indexed jobId, address indexed worker, uint256 releasedAmount)",
   "event JobReopened(bytes32 indexed jobId)",
-  "event DisputeOpened(bytes32 indexed jobId, address indexed opener)"
+  "event DisputeOpened(bytes32 indexed jobId, address indexed opener)",
+  "event Disclosed(bytes32 indexed hash, address indexed byWallet, uint64 timestamp)",
+  "event AutoDisclosed(bytes32 indexed hash, uint64 timestamp)"
 ];
 
 export const REPUTATION_SBT_ABI = [
@@ -68,7 +70,12 @@ export const TREASURY_POLICY_ABI = [
   "function rejectionSkillPenalty() view returns (uint256)",
   "function rejectionReliabilityPenalty() view returns (uint256)",
   "function disputeLossSkillPenalty() view returns (uint256)",
-  "function disputeLossReliabilityPenalty() view returns (uint256)"
+  "function disputeLossReliabilityPenalty() view returns (uint256)",
+  "function verifiers(address verifier) view returns (bool)",
+  "function authorizedSince(address verifier) view returns (uint64)",
+  "function authorizedUntil(address verifier) view returns (uint64)",
+  "function wasAuthorizedAt(address verifier, uint64 timestamp) view returns (bool)",
+  "event VerifierUpdated(address indexed verifier, bool approved)"
 ];
 
 export const ERC20_MOCK_ABI = [
@@ -91,21 +98,8 @@ export const XCM_WRAPPER_ABI = [
   "event RequestStatusUpdated(bytes32 indexed requestId, uint8 indexed status, uint256 settledAssets, uint256 settledShares, bytes32 remoteRef, bytes32 failureCode)"
 ];
 
-export const VERIFIER_REGISTRY_ABI = [
-  "function isAuthorized(address verifier) view returns (bool)",
-  "function wasAuthorizedAt(address verifier, uint64 timestamp) view returns (bool)",
-  "event VerifierAdded(address indexed verifier, uint64 timestamp)",
-  "event VerifierRemoved(address indexed verifier, uint64 timestamp)",
-  "event AdminTransferred(address indexed from, address indexed to)"
-];
-
 export const DISCOVERY_REGISTRY_ABI = [
   "function currentManifestHash() view returns (bytes32)",
   "function currentVersion() view returns (uint64)",
   "event ManifestPublished(uint64 indexed version, bytes32 indexed hash, uint64 timestamp, address publisher)"
-];
-
-export const DISCLOSURE_LOG_ABI = [
-  "event Disclosed(bytes32 indexed hash, address indexed byWallet, uint64 timestamp)",
-  "event AutoDisclosed(bytes32 indexed hash, uint64 timestamp)"
 ];

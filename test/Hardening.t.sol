@@ -9,7 +9,6 @@ import {StrategyAdapterRegistry} from "../contracts/StrategyAdapterRegistry.sol"
 import {AgentAccountCore} from "../contracts/AgentAccountCore.sol";
 import {EscrowCore} from "../contracts/EscrowCore.sol";
 import {ReputationSBT} from "../contracts/ReputationSBT.sol";
-import {VerifierRegistry} from "../contracts/VerifierRegistry.sol";
 
 /// @notice Pins the Phase 1 hardening guarantees: pausability kills new writes,
 ///         milestone arrays are bounded, and SafeERC20 rejects tokens that
@@ -19,7 +18,6 @@ contract HardeningTest is Test {
     StrategyAdapterRegistry internal registry;
     AgentAccountCore internal accounts;
     ReputationSBT internal reputation;
-    VerifierRegistry internal verifierRegistry;
     EscrowCore internal escrow;
     MockERC20 internal dot;
 
@@ -33,15 +31,13 @@ contract HardeningTest is Test {
         registry = new StrategyAdapterRegistry(policy);
         accounts = new AgentAccountCore(policy, registry);
         reputation = new ReputationSBT(policy);
-        verifierRegistry = new VerifierRegistry(address(this));
-        escrow = new EscrowCore(policy, accounts, reputation, verifierRegistry);
+        escrow = new EscrowCore(policy, accounts, reputation);
         dot = new MockERC20("Mock DOT", "mDOT");
 
         policy.setApprovedAsset(address(dot), true);
         policy.setServiceOperator(address(escrow), true);
         policy.setServiceOperator(address(accounts), true);
         policy.setVerifier(verifier, true);
-        verifierRegistry.addVerifier(verifier);
 
         dot.mint(poster, 1_000 ether);
         dot.mint(worker, 1_000 ether);
