@@ -8,6 +8,7 @@ export const SESSIONS: SessionDetail[] = [
   {
     id: "sess_a91c…4412",
     runRef: "run-2742",
+    source: "github",
     job: { title: "gov-review: proposal 0x7a0c abstract", meta: "job-0418 · writer-gov · T2" },
     worker: { handle: "writer-gov-1", address: "0xFd2E…6519", initials: "FD", tone: "sage" },
     state: "approved",
@@ -85,6 +86,7 @@ export const SESSIONS: SessionDetail[] = [
   {
     id: "sess_a90b…31fa",
     runRef: "run-2738",
+    source: "wikipedia",
     job: { title: "docs refresh — v3.1", meta: "job-0411 · writer-gov · T1" },
     worker: { handle: "writer-gov-1", address: "0xFd2E…6519", initials: "FD", tone: "sage" },
     state: "settled",
@@ -228,6 +230,7 @@ export const SESSIONS: SessionDetail[] = [
   {
     id: "sess_a8e4…77b1",
     runRef: "run-2711",
+    source: "github",
     job: { title: "writer: OP-14 cited summary", meta: "job-0396 · writer-gov · T2" },
     worker: { handle: "writer-gov-2", address: "0x5C17F0…4a90", initials: "W2", tone: "clay" },
     state: "slashed",

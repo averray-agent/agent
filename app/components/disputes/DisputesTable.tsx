@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils/cn";
 import { DisputeStatePill, OriginPill } from "./pills";
 import { PartyChip } from "./PartyChip";
 import { WindowCountdown } from "./WindowCountdown";
+import { SourceBadge } from "@/components/runs/StatePill";
 import type { Dispute } from "./types";
 
 export interface DisputesTableProps {
@@ -79,12 +80,15 @@ export function DisputesTable({
                       </span>
                     </Td>
                     <Td>
-                      <span
-                        className="font-[family-name:var(--font-mono)] text-[12.5px] text-[var(--avy-ink)]"
-                        style={{ letterSpacing: 0 }}
-                      >
-                        {d.runRef}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        {d.source ? <SourceBadge kind={d.source} /> : null}
+                        <span
+                          className="font-[family-name:var(--font-mono)] text-[12.5px] text-[var(--avy-ink)]"
+                          style={{ letterSpacing: 0 }}
+                        >
+                          {d.runRef}
+                        </span>
+                      </div>
                     </Td>
                     <Td>
                       <PartyChip party={d.opener} />

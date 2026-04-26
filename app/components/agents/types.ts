@@ -1,3 +1,5 @@
+import type { SourceKind } from "@/components/runs/StatePill";
+
 export type AgentTier = "T1" | "T2" | "T3";
 export type AgentState = "active" | "idle" | "slashed";
 export type AgentSpecialty = "coding" | "writer-gov" | "ops" | "gov-review";
@@ -41,7 +43,13 @@ export interface AgentRecord {
   badgeDates: Record<string, string>;
   specialty: AgentSpecialty;
   stake: AgentStake;
-  activity: { msg: string; ref: string; when: string };
+  /**
+   * Last meaningful action by this agent. `source` is set when the
+   * activity is on an ingested-source run (GitHub PR / Wikipedia
+   * proposal) so the directory row can render a SourceBadge — receipts
+   * and policy refs leave it undefined.
+   */
+  activity: { msg: string; ref: string; when: string; source?: SourceKind };
   state: AgentState;
   recentRuns: AgentRecentRun[];
   slashes: AgentSlash[];

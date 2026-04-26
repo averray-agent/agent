@@ -6,6 +6,8 @@
  * the reasons a verifier or co-signer would contest a claim.
  */
 
+import type { SourceKind } from "@/components/runs/StatePill";
+
 export type DisputeState =
   | "open"
   | "awaiting-evidence"
@@ -63,6 +65,14 @@ export interface DisputeTimelineEvent {
 export interface Dispute {
   id: string;
   runRef: string;
+  /**
+   * Provenance of the disputed run — orthogonal to `origin`, which is
+   * the *reason* a dispute was raised (signature, schema, …). When
+   * present, the table renders a SourceBadge alongside the run ref so
+   * the operator can see whether they're triaging a GitHub-PR vs.
+   * Wikipedia-proposal-review dispute without opening the drawer.
+   */
+  source?: SourceKind;
   openingReceipt: string;
   summary: string;
   origin: DisputeOrigin;

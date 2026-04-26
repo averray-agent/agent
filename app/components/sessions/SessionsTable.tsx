@@ -3,6 +3,7 @@
 import { cn } from "@/lib/utils/cn";
 import { SessionStatePill, VerifierModeChip } from "./pills";
 import { WorkerChip } from "./WorkerChip";
+import { SourceBadge } from "@/components/runs/StatePill";
 import type { SessionDetail } from "./types";
 
 export interface SessionsTableProps {
@@ -84,8 +85,11 @@ export function SessionsTable({
                       </div>
                     </Td>
                     <Td>
-                      <div className="text-[13px] leading-tight text-[var(--avy-ink)]">
-                        {s.job.title}
+                      <div className="flex items-center gap-2">
+                        {s.source ? <SourceBadge kind={s.source} /> : null}
+                        <span className="text-[13px] leading-tight text-[var(--avy-ink)]">
+                          {s.job.title}
+                        </span>
                       </div>
                       <div
                         className="mt-0.5 font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]"

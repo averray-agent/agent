@@ -9,6 +9,7 @@ export const DISPUTES: Dispute[] = [
   {
     id: "d_4e10c",
     runRef: "run-2739",
+    source: "github",
     openingReceipt: "r_4e10c",
     summary:
       "Signature on handoff payload did not verify against the claim-hash; stake frozen pending review.",
@@ -129,6 +130,7 @@ export const DISPUTES: Dispute[] = [
   {
     id: "d_4e04e",
     runRef: "run-2736",
+    source: "wikipedia",
     openingReceipt: "r_4e04e",
     summary:
       "Co-signer has not attested within the policy window; settlement blocked until second signature.",

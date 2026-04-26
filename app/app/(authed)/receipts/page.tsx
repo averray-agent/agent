@@ -115,6 +115,7 @@ const ROWS: ReceiptRow[] = [
     kind: "run",
     subject: "run-2745",
     subjectSub: "coding-hand-3",
+    source: "github",
     signers: [
       { initials: "P", tone: "sage", role: "operator", address: "0xFd2EAE…6519" },
       { initials: "C", tone: "ink", role: "cosigner", address: "0x9A13BC…0cb2" },
@@ -142,6 +143,7 @@ const ROWS: ReceiptRow[] = [
     kind: "run",
     subject: "run-2744",
     subjectSub: "writer-gov-1",
+    source: "wikipedia",
     signers: [
       { initials: "P", tone: "sage", role: "operator", address: "0xFd2EAE…6519" },
       { initials: "C", tone: "ink", role: "cosigner", address: "0x9A13BC…0cb2" },

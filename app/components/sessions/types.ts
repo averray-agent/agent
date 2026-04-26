@@ -6,6 +6,8 @@
  * This page is the auditor's read-only log of every session across all runs.
  */
 
+import type { SourceKind } from "@/components/runs/StatePill";
+
 export type SessionState =
   | "active"
   | "submitted"
@@ -53,6 +55,13 @@ export interface PayoutEntry {
 export interface SessionRow {
   id: string;
   runRef: string;
+  /**
+   * Provenance of the run this session is keyed to. Optional because
+   * legacy/native runs predate ingested sources. When set, the row renders
+   * a small SourceBadge so an auditor can scan GitHub-PR vs. Wikipedia-
+   * proposal-review sessions without opening the drawer.
+   */
+  source?: SourceKind;
   job: { title: string; meta: string };
   worker: {
     handle: string;

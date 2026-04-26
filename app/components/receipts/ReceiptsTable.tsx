@@ -3,12 +3,21 @@
 import { cn } from "@/lib/utils/cn";
 import { KindChip, type ReceiptKind } from "./KindChip";
 import { SignerAvatars, type Signer } from "./SignerAvatars";
+import { SourceBadge, type SourceKind } from "@/components/runs/StatePill";
 
 export interface ReceiptRow {
   id: string;
   kind: ReceiptKind;
   subject: string;
   subjectSub: string;
+  /**
+   * Provenance of the underlying run/job. Optional because non-run
+   * receipts (badge, policy, settle on a loan) usually don't carry a
+   * platform source. When present, the table renders a SourceBadge so
+   * an auditor can scan GitHub-PR vs. Wikipedia-proposal receipts at
+   * a glance instead of opening the drawer.
+   */
+  source?: SourceKind;
   signers: Signer[];
   policy: string;
   size: string;
@@ -89,11 +98,14 @@ export function ReceiptsTable({
                     <KindChip kind={row.kind} />
                   </Td>
                   <Td>
-                    <div
-                      className="font-[family-name:var(--font-mono)] text-[12.5px] text-[var(--avy-ink)]"
-                      style={{ letterSpacing: 0 }}
-                    >
-                      {row.subject}
+                    <div className="flex items-center gap-2">
+                      {row.source ? <SourceBadge kind={row.source} /> : null}
+                      <span
+                        className="font-[family-name:var(--font-mono)] text-[12.5px] text-[var(--avy-ink)]"
+                        style={{ letterSpacing: 0 }}
+                      >
+                        {row.subject}
+                      </span>
                     </div>
                     <div
                       className="font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]"
