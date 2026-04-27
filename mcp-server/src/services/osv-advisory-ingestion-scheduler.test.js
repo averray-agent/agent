@@ -30,12 +30,22 @@ const ADVISORY = {
 };
 
 function makeFetch() {
-  return async () => ({
-    ok: true,
-    async json() {
-      return { results: [{ vulns: [ADVISORY] }] };
+  return async (url, request = {}) => {
+    if (String(url).includes("raw.githubusercontent.com")) {
+      return {
+        ok: true,
+        async json() {
+          return { packages: { "node_modules/minimist": { version: "0.0.8" } } };
+        }
+      };
     }
-  });
+    return {
+      ok: true,
+      async json() {
+        return { results: [{ vulns: [ADVISORY] }] };
+      }
+    };
+  };
 }
 
 function makePlatformService(initialJobs = []) {
@@ -87,6 +97,40 @@ test("OsvAdvisoryIngestionScheduler creates jobs when dryRun is false", async ()
   assert.equal(platform.listJobs().length, 1);
   assert.equal(platform.listJobs()[0].source.type, "osv_advisory");
   assert.equal(platform.listJobs()[0].source.advisoryId, "GHSA-vh95-rmgr-6w4m");
+});
+
+test("OsvAdvisoryIngestionScheduler can source targets from manifests", async () => {
+  const platform = makePlatformService();
+  const scheduler = new OsvAdvisoryIngestionScheduler(platform, undefined, {
+    enabled: true,
+    dryRun: false,
+    manifests: [{ repo: "example/app", manifestPath: "package-lock.json", ref: "main" }],
+    fetchImpl: makeFetch()
+  });
+
+  const summary = await scheduler.runOnce(new Date("2026-04-26T10:00:00.000Z"));
+  assert.equal(summary.createdCount, 1);
+  assert.equal(platform.listJobs()[0].source.packageName, "minimist");
+  assert.equal((await scheduler.getStatus()).manifestCount, 1);
+});
+
+test("OsvAdvisoryIngestionScheduler prefers explicit packages over manifests", async () => {
+  const platform = makePlatformService();
+  const scheduler = new OsvAdvisoryIngestionScheduler(platform, undefined, {
+    enabled: true,
+    dryRun: false,
+    packages: [TARGET],
+    manifests: [{ repo: "example/app", manifestPath: "package-lock.json", ref: "main" }],
+    fetchImpl: async (url, request = {}) => {
+      assert.equal(String(url), "https://api.osv.dev/v1/querybatch");
+      const body = JSON.parse(request.body);
+      assert.equal(body.queries[0].package.name, "minimist");
+      return makeFetch()(url, request);
+    }
+  });
+
+  const summary = await scheduler.runOnce(new Date("2026-04-26T10:00:00.000Z"));
+  assert.equal(summary.createdCount, 1);
 });
 
 test("OsvAdvisoryIngestionScheduler dedupes by advisory package target", async () => {
@@ -142,8 +186,10 @@ test("loadOsvAdvisoryIngestionConfig parses env knobs safely", () => {
     OSV_INGEST_INTERVAL_MS: "3600000",
     OSV_INGEST_MIN_SCORE: "70",
     OSV_INGEST_MAX_JOBS_PER_RUN: "4",
+    OSV_INGEST_MAX_PACKAGE_TARGETS: "25",
     OSV_INGEST_MAX_OPEN_JOBS: "11",
-    OSV_INGEST_PACKAGES_JSON: JSON.stringify([TARGET])
+    OSV_INGEST_PACKAGES_JSON: JSON.stringify([TARGET]),
+    OSV_INGEST_MANIFESTS_JSON: JSON.stringify([{ repo: "example/app", manifestPath: "package-lock.json", ref: "main" }])
   });
 
   assert.equal(config.enabled, true);
@@ -151,6 +197,8 @@ test("loadOsvAdvisoryIngestionConfig parses env knobs safely", () => {
   assert.equal(config.intervalMs, 3600000);
   assert.equal(config.minScore, 70);
   assert.equal(config.maxJobsPerRun, 4);
+  assert.equal(config.maxPackageTargets, 25);
   assert.equal(config.maxOpenJobs, 11);
   assert.deepEqual(config.packages, [TARGET]);
+  assert.deepEqual(config.manifests, [{ repo: "example/app", manifestPath: "package-lock.json", ref: "main" }]);
 });

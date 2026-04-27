@@ -23,6 +23,15 @@ export const DATA_GOV_PACKAGE_SEARCH_URL = "https://catalog.data.gov/api/3/actio
 export const DATA_GOV_CATALOG_SEARCH_URL = "https://catalog.data.gov/search";
 
 const PREFERRED_RESOURCE_FORMATS = new Set(["CSV", "JSON", "GEOJSON", "API", "XLS", "XLSX", "XML"]);
+const RESOURCE_FORMAT_PRIORITY = new Map([
+  ["CSV", 70],
+  ["JSON", 60],
+  ["GEOJSON", 55],
+  ["XLSX", 50],
+  ["XLS", 45],
+  ["API", 40],
+  ["XML", 35]
+]);
 
 export function parseArgs(argv) {
   const parsed = {};
@@ -73,13 +82,14 @@ export async function ingestOpenDataDatasets({
     candidates.push({ target, score });
   }
 
-  const jobs = candidates
+  const selectedCandidates = selectBestResourcePerDataset(candidates, skipped);
+  const jobs = selectedCandidates
     .sort((left, right) => right.score - left.score)
     .slice(0, limit)
     .map(({ target, score }) => toPlatformJob(target, score));
 
-  if (candidates.length > jobs.length) {
-    skipped.push({ reason: "over_limit", count: candidates.length - jobs.length });
+  if (selectedCandidates.length > jobs.length) {
+    skipped.push({ reason: "over_limit", count: selectedCandidates.length - jobs.length });
   }
 
   return {
@@ -217,6 +227,31 @@ export function scoreDatasetTarget(target) {
   if (looksOld(target.modified ?? target.metadataModified)) score += 8;
   if (!target.resourceUrl) score -= 40;
   return Math.max(0, Math.min(100, score));
+}
+
+export function selectBestResourcePerDataset(candidates, skipped = []) {
+  const byDataset = new Map();
+  for (const candidate of candidates) {
+    const key = datasetKey(candidate.target);
+    const current = byDataset.get(key);
+    if (!current || compareDatasetCandidates(candidate, current) < 0) {
+      byDataset.set(key, candidate);
+    }
+  }
+
+  const selected = new Set(byDataset.values());
+  for (const candidate of candidates) {
+    if (selected.has(candidate)) continue;
+    const winner = byDataset.get(datasetKey(candidate.target));
+    skipped.push({
+      datasetId: candidate.target.datasetId,
+      resourceId: candidate.target.resourceId,
+      reason: "duplicate_dataset_resource",
+      selectedResourceId: winner?.target?.resourceId
+    });
+  }
+
+  return [...byDataset.values()];
 }
 
 export function toPlatformJob(target, score = scoreDatasetTarget(target)) {
@@ -379,6 +414,27 @@ function looksOld(value) {
 function estimateDifficulty(score) {
   if (score >= 80) return "starter";
   return "review-needed";
+}
+
+function datasetKey(target) {
+  return [
+    DEFAULT_PROVIDER,
+    target.datasetId || target.datasetUrl || target.datasetTitle
+  ].map((part) => String(part ?? "").trim().toLowerCase()).join("|");
+}
+
+function compareDatasetCandidates(left, right) {
+  const scoreDiff = right.score - left.score;
+  if (scoreDiff !== 0) return scoreDiff;
+
+  const formatDiff = resourceFormatPriority(right.target) - resourceFormatPriority(left.target);
+  if (formatDiff !== 0) return formatDiff;
+
+  return String(left.target.resourceUrl).localeCompare(String(right.target.resourceUrl));
+}
+
+function resourceFormatPriority(target) {
+  return RESOURCE_FORMAT_PRIORITY.get(normalizeFormat(target.resourceFormat)) ?? 0;
 }
 
 function text(value) {

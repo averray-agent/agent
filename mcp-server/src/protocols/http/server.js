@@ -24,7 +24,11 @@ import {
 } from "../../core/job-schema-registry.js";
 import { ingestGithubIssues } from "../../jobs/ingest-github-issues.js";
 import { ingestOpenDataDatasets, parseDatasets as parseOpenDataDatasets } from "../../jobs/ingest-open-data-datasets.js";
-import { ingestOsvAdvisories, parsePackages as parseOsvPackages } from "../../jobs/ingest-osv-advisories.js";
+import {
+  ingestOsvAdvisories,
+  parseManifests as parseOsvManifests,
+  parsePackages as parseOsvPackages
+} from "../../jobs/ingest-osv-advisories.js";
 import { ingestWikipediaMaintenance, parseCategories } from "../../jobs/ingest-wikipedia-maintenance.js";
 
 const {
@@ -2221,10 +2225,14 @@ const server = createServer(async (request, response) => {
       const packages = Array.isArray(payload?.packages) || typeof payload?.packages === "string"
         ? parseOsvPackages(payload.packages)
         : parseOsvPackages(process.env.OSV_INGEST_PACKAGES_JSON ?? process.env.OSV_INGEST_PACKAGES);
+      const manifests = Array.isArray(payload?.manifests) || typeof payload?.manifests === "string"
+        ? parseOsvManifests(payload.manifests)
+        : parseOsvManifests(process.env.OSV_INGEST_MANIFESTS_JSON ?? process.env.OSV_INGEST_MANIFESTS);
       const limit = parsePositiveInteger(payload?.limit, 10, 50);
       const minScore = parsePositiveInteger(payload?.minScore, 55, 100);
+      const maxPackageTargets = parsePositiveInteger(payload?.maxPackageTargets, 100, 500);
       const dryRun = payload?.dryRun !== false;
-      const result = await ingestOsvAdvisories({ packages, limit, minScore });
+      const result = await ingestOsvAdvisories({ packages, manifests, limit, minScore, maxPackageTargets });
 
       if (dryRun) {
         return respond(response, 200, {

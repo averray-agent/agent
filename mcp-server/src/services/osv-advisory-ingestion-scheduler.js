@@ -1,4 +1,4 @@
-import { ingestOsvAdvisories, parsePackages } from "../jobs/ingest-osv-advisories.js";
+import { ingestOsvAdvisories, parseManifests, parsePackages } from "../jobs/ingest-osv-advisories.js";
 
 export class OsvAdvisoryIngestionScheduler {
   constructor(platformService, eventBus = undefined, {
@@ -6,8 +6,10 @@ export class OsvAdvisoryIngestionScheduler {
     dryRun = true,
     intervalMs = 60 * 60 * 1000,
     packages = [],
+    manifests = [],
     minScore = 55,
     maxJobsPerRun = 2,
+    maxPackageTargets = 100,
     maxOpenJobs = 20,
     fetchImpl = fetch,
     logger = console
@@ -18,8 +20,10 @@ export class OsvAdvisoryIngestionScheduler {
     this.dryRun = dryRun;
     this.intervalMs = intervalMs;
     this.packages = parsePackagesConfig(packages);
+    this.manifests = parseManifestsConfig(manifests);
     this.minScore = minScore;
     this.maxJobsPerRun = maxJobsPerRun;
+    this.maxPackageTargets = maxPackageTargets;
     this.maxOpenJobs = maxOpenJobs;
     this.fetchImpl = fetchImpl;
     this.logger = logger;
@@ -51,8 +55,10 @@ export class OsvAdvisoryIngestionScheduler {
       dryRun: this.dryRun,
       intervalMs: this.intervalMs,
       packageCount: this.packages.length,
+      manifestCount: this.manifests.length,
       minScore: this.minScore,
       maxJobsPerRun: this.maxJobsPerRun,
+      maxPackageTargets: this.maxPackageTargets,
       maxOpenJobs: this.maxOpenJobs,
       lastRun: this.lastRun
     };
@@ -76,8 +82,8 @@ export class OsvAdvisoryIngestionScheduler {
       summary.skipped.push({ reason: "disabled" });
       return this.finishRun(summary);
     }
-    if (!this.packages.length) {
-      summary.skipped.push({ reason: "no_packages_configured" });
+    if (!this.packages.length && !this.manifests.length) {
+      summary.skipped.push({ reason: "no_packages_or_manifests_configured" });
       return this.finishRun(summary);
     }
     if (openOsvJobs >= this.maxOpenJobs) {
@@ -90,8 +96,10 @@ export class OsvAdvisoryIngestionScheduler {
     try {
       const result = await ingestOsvAdvisories({
         packages: this.packages,
+        manifests: this.manifests,
         limit: remaining,
         minScore: this.minScore,
+        maxPackageTargets: this.maxPackageTargets,
         fetchImpl: this.fetchImpl
       });
       summary.candidateCount = result.count;
@@ -178,8 +186,10 @@ export function loadOsvAdvisoryIngestionConfig(env = process.env) {
     dryRun: env.OSV_INGEST_DRY_RUN === undefined ? true : parseBooleanEnv(env.OSV_INGEST_DRY_RUN),
     intervalMs: parsePositiveInt(env.OSV_INGEST_INTERVAL_MS, 60 * 60 * 1000),
     packages: parsePackagesConfig(env.OSV_INGEST_PACKAGES_JSON ?? env.OSV_INGEST_PACKAGES),
+    manifests: parseManifestsConfig(env.OSV_INGEST_MANIFESTS_JSON ?? env.OSV_INGEST_MANIFESTS),
     minScore: parsePositiveInt(env.OSV_INGEST_MIN_SCORE, 55),
     maxJobsPerRun: parsePositiveInt(env.OSV_INGEST_MAX_JOBS_PER_RUN, 2),
+    maxPackageTargets: parsePositiveInt(env.OSV_INGEST_MAX_PACKAGE_TARGETS, 100),
     maxOpenJobs: parsePositiveInt(env.OSV_INGEST_MAX_OPEN_JOBS, 20)
   };
 }
@@ -201,6 +211,10 @@ function osvJobKey(job) {
 
 function parsePackagesConfig(raw) {
   return parsePackages(raw);
+}
+
+function parseManifestsConfig(raw) {
+  return parseManifests(raw);
 }
 
 function parsePositiveInt(raw, fallback) {
