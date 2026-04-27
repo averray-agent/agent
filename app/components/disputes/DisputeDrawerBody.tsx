@@ -308,7 +308,18 @@ function PartyBlock({
 
 function ResolvedCard({ dispute }: { dispute: Dispute }) {
   if (!dispute.resolution) return null;
-  const { decision, destination, rationale, at, signer } = dispute.resolution;
+  const {
+    decision,
+    destination,
+    rationale,
+    at,
+    signer,
+    reasonCode,
+    workerPayout,
+    txHash,
+    chainStatus,
+    metadataURI,
+  } = dispute.resolution;
   const decisionLabel =
     decision === "uphold"
       ? "Upheld"
@@ -346,6 +357,36 @@ function ResolvedCard({ dispute }: { dispute: Dispute }) {
         style={{ letterSpacing: 0 }}
       >
         Stake → {destinationLabel}
+      </div>
+      <div
+        className="grid gap-1 rounded-[8px] border border-[var(--avy-line-soft)] bg-[var(--avy-paper-solid)] px-3 py-2 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]"
+        style={{ letterSpacing: 0 }}
+      >
+        {reasonCode ? (
+          <span>
+            Reason · <b className="font-semibold text-[var(--avy-ink)]">{reasonCode}</b>
+          </span>
+        ) : null}
+        {typeof workerPayout === "number" ? (
+          <span>
+            Worker payout · <b className="font-semibold text-[var(--avy-ink)]">{workerPayout} DOT</b>
+          </span>
+        ) : null}
+        {chainStatus ? (
+          <span>
+            Chain · <b className="font-semibold text-[var(--avy-ink)]">{chainStatus}</b>
+          </span>
+        ) : null}
+        {txHash ? (
+          <span className="break-all">
+            Tx · <b className="font-semibold text-[var(--avy-accent)]">{txHash}</b>
+          </span>
+        ) : null}
+        {metadataURI ? (
+          <span className="break-all">
+            Reasoning · <b className="font-semibold text-[var(--avy-ink)]">{metadataURI}</b>
+          </span>
+        ) : null}
       </div>
       <p
         className="m-0 text-[13px] leading-snug text-[var(--avy-ink)]"

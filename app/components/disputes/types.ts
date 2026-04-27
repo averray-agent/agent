@@ -83,6 +83,15 @@ export interface Dispute {
   reviewer: DisputeParty;
   /** DOT. Sum of worker + verifier + treasury portions. */
   stakeFrozen: number;
+  /** Remaining worker payout available to the arbitrator settlement. */
+  remainingPayout?: number;
+  /** Worker payout selected in the final settlement. */
+  workerPayout?: number;
+  reasonCode?: string;
+  reasoningHash?: string;
+  metadataURI?: string;
+  txHash?: string;
+  chainStatus?: "confirmed" | "submitted" | "local_only" | "settled_by_verdict" | string;
   stakeBreakdown: StakeBreakdown;
   /** ISO-ish string opened-at used only for the window countdown seed. */
   openedAt: string;
@@ -105,5 +114,10 @@ export interface Dispute {
     rationale: string;
     at: string;
     signer: DisputeParty;
+    reasonCode?: string;
+    workerPayout?: number;
+    txHash?: string;
+    chainStatus?: string;
+    metadataURI?: string;
   };
 }

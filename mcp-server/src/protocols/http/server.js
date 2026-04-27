@@ -16,6 +16,9 @@ import { getAddress, keccak256, toUtf8Bytes } from "ethers";
 import { buildBadgeFromSession } from "../../core/badge-metadata.js";
 import { buildAgentProfile } from "../../core/agent-profile.js";
 import { buildDiscoveryManifest } from "../../core/discovery-manifest.js";
+import { hashCanonicalContent } from "../../core/canonical-content.js";
+import { buildDisputeResolution, ARBITRATOR_SLA_SECONDS } from "../../core/dispute-resolution.js";
+import { transitionSession } from "../../core/session-state-machine.js";
 import { TIER_REQUIREMENTS } from "../../core/job-catalog-service.js";
 import {
   getPublicBuiltinJobSchemaByName,
@@ -671,10 +674,53 @@ async function listAlerts(limit = 20) {
   return alerts.slice(0, limit);
 }
 
-function addHoursIso(value, hours) {
+function addSecondsIso(value, seconds) {
   const parsed = Date.parse(value ?? "");
   const base = Number.isFinite(parsed) ? parsed : Date.now();
-  return new Date(base + hours * 60 * 60 * 1000).toISOString();
+  return new Date(base + seconds * 1000).toISOString();
+}
+
+function publicContentUri(hash) {
+  const normalized = typeof hash === "string" && /^0x[a-fA-F0-9]{64}$/u.test(hash)
+    ? hash
+    : undefined;
+  if (!normalized) {
+    return "";
+  }
+  const base = process.env.PUBLIC_BASE_URL?.trim()?.replace(/\/+$/u, "");
+  return base ? `${base}/content/${normalized}` : `urn:averray:content:${normalized}`;
+}
+
+function buildDisputeReasoningReceipt({ id, dispute, payload, auth, verdict, decidedAt }) {
+  const rationale = typeof payload?.rationale === "string" ? payload.rationale.trim() : "";
+  const explicitHash = typeof payload?.reasoningHash === "string" && /^0x[a-fA-F0-9]{64}$/u.test(payload.reasoningHash)
+    ? payload.reasoningHash
+    : undefined;
+  const reasoningHash = explicitHash ?? hashCanonicalContent({
+    disputeId: id,
+    sessionId: dispute.sessionId,
+    verdict,
+    rationale,
+    decidedBy: auth.wallet,
+    decidedAt
+  });
+  const metadataURI = typeof payload?.metadataURI === "string" && payload.metadataURI.trim()
+    ? payload.metadataURI.trim()
+    : publicContentUri(reasoningHash);
+  return { rationale, reasoningHash, metadataURI };
+}
+
+async function resolveRemainingPayout(session) {
+  if (gateway?.isEnabled?.() && typeof gateway.getJob === "function") {
+    const live = await gateway.getJob(session.chainJobId ?? session.jobId);
+    return Math.max(Number(live.reward ?? 0) - Number(live.released ?? 0), 0);
+  }
+  try {
+    const job = service.getJobDefinition(session.jobId);
+    return Math.max(Number(job.rewardAmount ?? 0), 0);
+  } catch {
+    return 0;
+  }
 }
 
 async function buildDisputeFromSession(session) {
@@ -684,7 +730,7 @@ async function buildDisputeFromSession(session) {
     stateStore.getMutationReceipt?.("dispute_release", id)
   ]);
   const openedAt = session.disputedAt ?? session.updatedAt ?? new Date().toISOString();
-  const windowEndsAt = addHoursIso(openedAt, 72);
+  const windowEndsAt = addSecondsIso(openedAt, ARBITRATOR_SLA_SECONDS);
   const timeline = (session.statusHistory ?? []).map((entry, index) => ({
     id: `${id}:session:${index}`,
     at: entry.at,
@@ -722,10 +768,12 @@ async function buildDisputeFromSession(session) {
     id,
     status: releaseReceipt || verdictReceipt ? "resolved" : "open",
     sessionId: session.sessionId,
+    chainJobId: session.chainJobId,
     claimant: session.wallet,
     respondent: process.env.DEFAULT_VERIFIER_ADDRESS ?? "0x0000000000000000000000000000000000000000",
     openedAt,
     windowEndsAt,
+    slaSeconds: ARBITRATOR_SLA_SECONDS,
     evidence: {
       before: compactObject({
         jobId: session.jobId,
@@ -739,6 +787,13 @@ async function buildDisputeFromSession(session) {
       })
     },
     verdict: verdictReceipt?.verdict ?? null,
+    reasonCode: verdictReceipt?.reasonCode,
+    reasoningHash: verdictReceipt?.reasoningHash,
+    metadataURI: verdictReceipt?.metadataURI,
+    txHash: verdictReceipt?.txHash,
+    chainStatus: verdictReceipt?.chainStatus,
+    workerPayout: verdictReceipt?.workerPayout,
+    remainingPayout: verdictReceipt?.remainingPayout,
     stakedAmount: Number(session.claimStake ?? 0),
     release: releaseReceipt ?? null,
     timeline: timeline.sort((left, right) => String(left.at ?? "").localeCompare(String(right.at ?? "")))
@@ -747,8 +802,20 @@ async function buildDisputeFromSession(session) {
 
 async function listDisputes(limit = 100) {
   const sessions = await service.listRecentSessions(limit);
-  const disputed = sessions.filter((session) => session.status === "disputed");
-  return Promise.all(disputed.map((session) => buildDisputeFromSession(session)));
+  const candidates = await Promise.all(
+    sessions.map(async (session) => {
+      if (session.status === "disputed") {
+        return session;
+      }
+      const id = disputeIdForSession(session.sessionId);
+      const [verdictReceipt, releaseReceipt] = await Promise.all([
+        stateStore.getMutationReceipt?.("dispute_verdict", id),
+        stateStore.getMutationReceipt?.("dispute_release", id)
+      ]);
+      return verdictReceipt || releaseReceipt ? session : undefined;
+    })
+  );
+  return Promise.all(candidates.filter(Boolean).map((session) => buildDisputeFromSession(session)));
 }
 
 async function findDispute(id, limit = 250) {
@@ -1434,27 +1501,84 @@ const server = createServer(async (request, response) => {
     }
 
     if (request.method === "POST" && /^\/disputes\/[^/]+\/verdict$/u.test(pathname)) {
-      const auth = await authMiddleware(request, url, { requireRole: "verifier" });
+      const auth = await authMiddleware(request, url);
+      if (!hasRole(auth.claims, "admin") && !hasRole(auth.claims, "verifier")) {
+        throw new AuthorizationError("Requires admin or verifier role.", "missing_role");
+      }
       const id = decodeURIComponent(pathname.slice("/disputes/".length, -"/verdict".length));
       const dispute = await findDispute(id);
       if (!dispute) {
         return respond(response, 404, { status: "not_found", id });
       }
-      const payload = await readJsonBody(request);
-      const verdict = String(payload?.verdict ?? payload?.outcome ?? "").trim();
-      if (!["upheld", "dismissed", "split"].includes(verdict)) {
-        throw new ValidationError("verdict must be one of upheld, dismissed, split.");
+      if (dispute.verdict || dispute.reasonCode) {
+        return respond(response, 200, dispute);
       }
+      const payload = await readJsonBody(request);
+      const session = await service.resumeSession(dispute.sessionId);
+      const decidedAt = new Date().toISOString();
+      const remainingPayout = await resolveRemainingPayout(session);
+      const resolution = buildDisputeResolution({
+        verdict: payload?.verdict ?? payload?.outcome,
+        remainingPayout,
+        workerPayout: payload?.workerPayout ?? payload?.payoutAmount
+      });
+      const reasoning = buildDisputeReasoningReceipt({
+        id,
+        dispute,
+        payload,
+        auth,
+        verdict: resolution.verdict,
+        decidedAt
+      });
+      const chainReceipt = gateway?.isEnabled?.() && typeof gateway.resolveDispute === "function"
+        ? await gateway.resolveDispute(
+            session.chainJobId ?? session.jobId,
+            resolution.workerPayout,
+            resolution.reasonCode,
+            reasoning.metadataURI
+          )
+        : {
+            txHash: undefined,
+            blockNumber: undefined,
+            status: undefined
+          };
       const receipt = {
         id,
         disputeId: id,
         sessionId: dispute.sessionId,
-        verdict,
-        rationale: typeof payload?.rationale === "string" ? payload.rationale.trim() : undefined,
+        chainJobId: session.chainJobId,
+        verdict: resolution.verdict,
+        workerPayout: resolution.workerPayout,
+        remainingPayout,
+        reasonCode: resolution.reasonCode,
+        reasoningHash: reasoning.reasoningHash,
+        metadataURI: reasoning.metadataURI,
+        rationale: reasoning.rationale || undefined,
+        releaseAction: resolution.releaseAction,
+        payoutSource: resolution.payoutSource,
+        txHash: chainReceipt.txHash,
+        blockNumber: chainReceipt.blockNumber,
+        chainStatus: gateway?.isEnabled?.()
+          ? (chainReceipt.status === 1 ? "confirmed" : "submitted")
+          : "local_only",
         decidedBy: auth.wallet,
-        decidedAt: new Date().toISOString()
+        decidedAt
       };
       await stateStore.upsertMutationReceipt?.("dispute_verdict", id, receipt);
+      if (session.status === "disputed") {
+        const transitioned = transitionSession(session, resolution.nextSessionStatus, {
+          reason: resolution.reasonCode,
+          timestamp: decidedAt,
+          metadata: {
+            disputeId: id,
+            verdict: resolution.verdict,
+            workerPayout: resolution.workerPayout,
+            reasonCode: resolution.reasonCode,
+            txHash: receipt.txHash
+          }
+        });
+        await stateStore.upsertSession?.(transitioned);
+      }
       eventBus?.publish({
         id: `dispute-verdict-${id}-${Date.now()}`,
         topic: "escrow.dispute_resolved",
@@ -1462,12 +1586,25 @@ const server = createServer(async (request, response) => {
         wallets: [dispute.claimant, auth.wallet],
         sessionId: dispute.sessionId,
         timestamp: receipt.decidedAt,
-        data: { disputeId: id, verdict }
+        data: {
+          disputeId: id,
+          verdict: resolution.verdict,
+          workerPayout: resolution.workerPayout,
+          reasonCode: resolution.reasonCode,
+          txHash: receipt.txHash
+        }
       });
       return respond(response, 200, {
         ...dispute,
         status: "resolved",
-        verdict,
+        verdict: resolution.verdict,
+        reasonCode: resolution.reasonCode,
+        reasoningHash: reasoning.reasoningHash,
+        metadataURI: reasoning.metadataURI,
+        txHash: receipt.txHash,
+        chainStatus: receipt.chainStatus,
+        workerPayout: resolution.workerPayout,
+        remainingPayout,
         timeline: [
           ...dispute.timeline,
           {
@@ -1495,6 +1632,8 @@ const server = createServer(async (request, response) => {
         sessionId: dispute.sessionId,
         action: typeof payload?.action === "string" && payload.action.trim() ? payload.action.trim() : "release",
         amount: Number(payload?.amount ?? dispute.stakedAmount ?? 0),
+        chainStatus: dispute.txHash ? "settled_by_verdict" : "local_only",
+        txHash: dispute.txHash,
         releasedBy: auth.wallet,
         releasedAt: new Date().toISOString()
       };
