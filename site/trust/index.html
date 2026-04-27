@@ -220,6 +220,25 @@
           </div>
         </section>
 
+        <section class="site-section" aria-labelledby="provider-operations-heading">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Provider operations</p>
+              <h2 id="provider-operations-heading">What we are reading from, and how it ran most recently.</h2>
+              <p class="section-note">
+                Averray pulls candidate work from a fixed set of public sources. This card lists each one, the mode it is running in, how it last looked, and whether it currently has capacity. Errors and skipped items are summarised here; the operator app shows the full per-row detail.
+              </p>
+            </div>
+            <p class="section-note" id="provider-operations-meta">Loading live status…</p>
+          </div>
+          <div id="provider-operations-list" class="provider-operations-list" aria-live="polite">
+            <article class="site-card">
+              <p class="label">Live status</p>
+              <p class="section-copy">Fetching the latest provider snapshot from <code>api.averray.com/status/providers</code>…</p>
+            </article>
+          </div>
+        </section>
+
         <section class="site-section">
           <article class="site-card">
             <p class="label">Operational checklist</p>
@@ -251,5 +270,6 @@
       </footer>
     </div>
     <script src="../site.js"></script>
+    <script src="../trust-providers.js"></script>
   </body>
 </html>

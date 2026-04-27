@@ -875,3 +875,152 @@ code {
     width: fit-content;
   }
 }
+
+.provider-operations-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0.9rem;
+}
+
+.provider-row {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.provider-row-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.provider-row-head h3 {
+  margin: 0;
+  font-size: 1.02rem;
+  line-height: 1.3;
+}
+
+.provider-row-meta {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.provider-row-meta strong {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.provider-row-summary {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.5;
+  color: var(--ink);
+}
+
+.provider-row-foot {
+  margin: 0;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.provider-error {
+  color: #a0322a;
+  font-weight: 700;
+}
+
+.provider-running {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.provider-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-family: var(--display);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.provider-pill--healthy {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.provider-pill--dry_run {
+  background: #dde8f1;
+  color: #254e9a;
+}
+
+.provider-pill--at_capacity {
+  background: var(--warm-soft);
+  color: #a76122;
+}
+
+.provider-pill--error {
+  background: #f3d7d4;
+  color: #a0322a;
+}
+
+.provider-pill--disabled {
+  background: rgba(17, 19, 21, 0.06);
+  color: var(--muted);
+}
+
+.provider-mode {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.05rem 0.4rem;
+  border-radius: 4px;
+  font-family: var(--display);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.provider-mode--live {
+  background: rgba(29, 106, 70, 0.10);
+  color: var(--accent);
+}
+
+.provider-mode--dry_run {
+  background: rgba(17, 19, 21, 0.05);
+  color: var(--ink);
+}
+
+.provider-mode--disabled {
+  background: rgba(17, 19, 21, 0.05);
+  color: var(--muted);
+}
+
+.provider-bar {
+  height: 4px;
+  border-radius: 4px;
+  background: rgba(17, 19, 21, 0.06);
+  overflow: hidden;
+}
+
+.provider-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: inherit;
+  transition: width 220ms ease;
+}
+
+.provider-row--at_capacity .provider-bar > span {
+  background: #a76122;
+}
+
+.provider-row--error .provider-bar > span {
+  background: #a0322a;
+}

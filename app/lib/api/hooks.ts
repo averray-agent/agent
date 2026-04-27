@@ -52,6 +52,18 @@ export const useSessionTimeline = (sessionId: string | null) =>
   useApi(sessionId ? `/session/timeline?sessionId=${encodeURIComponent(sessionId)}` : null);
 export const useStrategies = () => useApi("/strategies");
 export const useHealth = () => useApi("/health");
+/**
+ * Operator-app provider operations status. Authed via `/admin/status`,
+ * which carries the full `lastRun.errors[]` / `lastRun.skipped[]` arrays.
+ * Polls every 30s — the upstream schedulers tick on minute-ish cadences,
+ * so 30s gives an "alive" feel without thrashing the SWR cache.
+ *
+ * The public /trust page uses the sanitized `/status/providers` route
+ * (no auth, empty errors/skipped) — that surface is rendered by a
+ * vanilla JS hydrator, not this hook.
+ */
+export const useProviderOperations = () =>
+  useApi("/admin/status", { refreshInterval: 30_000 });
 export const useOnboarding = () => useApi("/onboarding");
 export const useVerifierHandlers = () => useApi("/verifier/handlers");
 export const useSessionStateMachine = () => useApi("/session/state-machine");
