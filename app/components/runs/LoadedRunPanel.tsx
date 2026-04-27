@@ -612,7 +612,7 @@ function GitHubEvidenceBlock({ ctx }: { ctx: GitHubJobContext }) {
             {ctx.category}
           </span>
           {typeof ctx.score === "number" ? (
-            <span className="ml-auto inline-flex items-center gap-1 whitespace-nowrap font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]">
+            <span className="ml-auto whitespace-nowrap font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]">
               Fit score{" "}
               <b className="font-semibold text-[var(--avy-ink)]">{ctx.score}</b>
               <span className="text-[var(--avy-muted)]">/100</span>
@@ -752,7 +752,7 @@ function WikipediaEvidenceBlock({ ctx }: { ctx: WikipediaJobContext }) {
             rev {ctx.revisionId}
           </span>
           {typeof ctx.score === "number" ? (
-            <span className="ml-auto inline-flex items-center gap-1 whitespace-nowrap font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]">
+            <span className="ml-auto whitespace-nowrap font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]">
               Fit score{" "}
               <b className="font-semibold text-[var(--avy-ink)]">{ctx.score}</b>
               <span className="text-[var(--avy-muted)]">/100</span>
@@ -1063,7 +1063,7 @@ function OsvEvidenceBlock({ ctx }: { ctx: OsvJobContext }) {
             {ctx.vulnerableVersion} → {ctx.fixedVersion}
           </span>
           {typeof ctx.score === "number" ? (
-            <span className="ml-auto inline-flex items-center gap-1 whitespace-nowrap font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]">
+            <span className="ml-auto whitespace-nowrap font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]">
               Fit score{" "}
               <b className="font-semibold text-[var(--avy-ink)]">{ctx.score}</b>
               <span className="text-[var(--avy-muted)]">/100</span>
@@ -1460,7 +1460,7 @@ function OpenDataEvidenceBlock({ ctx }: { ctx: OpenDataJobContext }) {
             </>
           ) : null}
           {typeof ctx.score === "number" ? (
-            <span className="ml-auto inline-flex items-center gap-1 whitespace-nowrap font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]">
+            <span className="ml-auto whitespace-nowrap font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]">
               Fit score{" "}
               <b className="font-semibold text-[var(--avy-ink)]">{ctx.score}</b>
               <span className="text-[var(--avy-muted)]">/100</span>

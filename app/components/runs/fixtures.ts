@@ -650,10 +650,9 @@ Repro: run \`cargo test --test claim_race -- --test-threads=1 --ignored\` in a l
   },
 ];
 
-// Lifecycle for GitHub-ingested jobs. For MVP we keep the same 5-stage
-// shape but relabel for the OSS flow: Ready → Claimed → PR submitted →
-// Verified → Paid. Future revisions can add an explicit "Working"
-// intermediate stage once the runner reports keep-alive signals.
+// Lifecycle for GitHub-ingested jobs (the platform's original flow):
+// Ready → Claimed → PR submitted → Verified → Paid. Default fixture
+// when no source-specific override applies.
 export const FIXTURE_LIFECYCLE: LifecycleStage[] = [
   { index: 1, label: "Ready", meta: "14:20:25", state: "done" },
   { index: 2, label: "Claimed", meta: "14:23:53 · by you", state: "done" },
@@ -667,6 +666,70 @@ export const FIXTURE_LIFECYCLE: LifecycleStage[] = [
     index: 4,
     label: "Verified",
     meta: "2/3 signals · maintainer review pending",
+    state: "current",
+  },
+  { index: 5, label: "Paid", meta: "—", state: "pending" },
+];
+
+// Wikipedia flow: the platform never edits Wikipedia directly, so the
+// stage between "claimed" and "verified" is "Proposal submitted" to
+// Averray (not a public PR), and review is by an Averray-approved
+// editor.
+export const FIXTURE_LIFECYCLE_WIKIPEDIA: LifecycleStage[] = [
+  { index: 1, label: "Ready", meta: "14:20:25", state: "done" },
+  { index: 2, label: "Claimed", meta: "14:23:53 · by you", state: "done" },
+  {
+    index: 3,
+    label: "Proposal submitted",
+    meta: "14:27:45 · structured proposal + citations",
+    state: "done",
+  },
+  {
+    index: 4,
+    label: "Verified",
+    meta: "1/2 signals · Averray editor review pending",
+    state: "current",
+  },
+  { index: 5, label: "Paid", meta: "—", state: "pending" },
+];
+
+// OSV flow: the worker opens a focused dependency-bump PR in the
+// consumer repo, not the upstream package. The PR submission stage is
+// real but the maintainer who reviews it is the consumer's, not the
+// package author.
+export const FIXTURE_LIFECYCLE_OSV: LifecycleStage[] = [
+  { index: 1, label: "Ready", meta: "14:20:25", state: "done" },
+  { index: 2, label: "Claimed", meta: "14:23:53 · by you", state: "done" },
+  {
+    index: 3,
+    label: "PR submitted",
+    meta: "14:27:45 · dependency bump + lockfile",
+    state: "done",
+  },
+  {
+    index: 4,
+    label: "Verified",
+    meta: "3/4 signals · maintainer merge pending",
+    state: "current",
+  },
+  { index: 5, label: "Paid", meta: "—", state: "pending" },
+];
+
+// Open data flow: the worker submits an audit report (no edits to the
+// source dataset). Verification is automated against the catalog.
+export const FIXTURE_LIFECYCLE_OPEN_DATA: LifecycleStage[] = [
+  { index: 1, label: "Ready", meta: "14:20:25", state: "done" },
+  { index: 2, label: "Claimed", meta: "14:23:53 · by you", state: "done" },
+  {
+    index: 3,
+    label: "Audit submitted",
+    meta: "14:27:45 · checks + findings + recommendations",
+    state: "done",
+  },
+  {
+    index: 4,
+    label: "Verified",
+    meta: "4/5 signals · audit verifier check pending",
     state: "current",
   },
   { index: 5, label: "Paid", meta: "—", state: "pending" },

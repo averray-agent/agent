@@ -495,22 +495,27 @@ export function buildRunRows(payload: unknown): RunRow[] {
       state,
       stake: formatReward(job.stake ?? job.rewardAmount),
       age: formatWindow(job.claimTtlSeconds),
+      // The SourceBadge already shows where the row came from, so the
+      // lastEvent line carries the work *kind* instead of restating the
+      // source. The previous "Ingested from Wikipedia · proposal-only"
+      // truncated to "Inge…" in narrow queue columns and lost all
+      // signal.
       lastEvent:
         source?.type === "github_issue"
           ? state === "ready"
-            ? "Ingested from GitHub"
+            ? "Issue triage"
             : `State: ${state}`
           : source?.type === "wikipedia_article"
             ? state === "ready"
-              ? "Ingested from Wikipedia · proposal-only"
+              ? "Proposal-only"
               : `State: ${state}`
             : source?.type === "osv_advisory"
               ? state === "ready"
-                ? "Ingested from OSV · dependency remediation"
+                ? "Dependency remediation"
                 : `State: ${state}`
               : source?.type === "open_data_dataset"
                 ? state === "ready"
-                  ? "Ingested from Data.gov · audit only"
+                  ? "Audit only"
                   : `State: ${state}`
                 : state === "ready"
                   ? "Job listed"

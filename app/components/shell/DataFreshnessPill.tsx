@@ -88,19 +88,33 @@ export function DataFreshnessPill({
 /**
  * Derive a single freshness state from one or more SWR-style requests.
  *
- *   - if any request errored → `fallback`
+ *   - if any request errored with a non-auth status → `fallback`
  *   - else if all requests are still loading and have no data → `loading`
  *   - else → `live`
  *
- * The "error" branch comes first because once any request has failed,
- * the page is definitely rendering against the fallback path — even if
- * other requests are still in flight or have already resolved live.
+ * 401/403 errors are treated as "this surface is unauthenticated" rather
+ * than a fallback signal — when the operator app calls a public route
+ * and an admin route in parallel, the admin route 401s for signed-out
+ * viewers but the public route still returns live data, so the pill
+ * should not falsely advertise "FIXTURE DATA".
  */
 export function freshnessFromRequests(
   ...requests: { data?: unknown; error?: unknown; isLoading?: boolean }[]
 ): FreshnessState {
   if (requests.length === 0) return "fallback";
-  if (requests.some((r) => Boolean(r.error))) return "fallback";
+  const realError = requests.some((r) => isRealError(r.error));
+  if (realError) return "fallback";
   if (requests.every((r) => !r.data && r.isLoading)) return "loading";
   return "live";
+}
+
+function isRealError(err: unknown): boolean {
+  if (!err) return false;
+  // ApiError surfaces an HTTP status; treat 401/403 as expected
+  // unauth-mode behavior rather than a freshness fault.
+  const status = (err as { status?: unknown }).status;
+  if (typeof status === "number" && (status === 401 || status === 403)) {
+    return false;
+  }
+  return true;
 }

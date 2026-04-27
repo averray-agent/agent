@@ -12,6 +12,9 @@ import {
 import {
   FIXTURE_JOB_DEFINITIONS,
   FIXTURE_LIFECYCLE,
+  FIXTURE_LIFECYCLE_OPEN_DATA,
+  FIXTURE_LIFECYCLE_OSV,
+  FIXTURE_LIFECYCLE_WIKIPEDIA,
   FIXTURE_RUN_ROWS,
 } from "./fixtures";
 import type { RunRow } from "./RunQueueTable";
@@ -614,7 +617,15 @@ export function LoadedRunView({
               </>
             )
           }
-          stages={FIXTURE_LIFECYCLE}
+          stages={
+            loadedWikipedia
+              ? FIXTURE_LIFECYCLE_WIKIPEDIA
+              : loadedOsv
+                ? FIXTURE_LIFECYCLE_OSV
+                : loadedOpenData
+                  ? FIXTURE_LIFECYCLE_OPEN_DATA
+                  : FIXTURE_LIFECYCLE
+          }
           next={{
             label: "Next",
             value: loadedWikipedia

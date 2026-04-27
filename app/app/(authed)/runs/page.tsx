@@ -14,6 +14,9 @@ import { LifecycleRail } from "@/components/runs/LifecycleRail";
 import {
   FIXTURE_FILTERS,
   FIXTURE_LIFECYCLE,
+  FIXTURE_LIFECYCLE_OPEN_DATA,
+  FIXTURE_LIFECYCLE_OSV,
+  FIXTURE_LIFECYCLE_WIKIPEDIA,
   FIXTURE_RECOMMENDATIONS,
   FIXTURE_RUN_ROWS,
 } from "@/components/runs/fixtures";
@@ -255,7 +258,15 @@ function RunsPageInner() {
       <LifecycleRail
         runId={selectedId}
         contextNote={lifecycleContextNote}
-        stages={FIXTURE_LIFECYCLE}
+        stages={
+          selectedSource?.type === "wikipedia_article"
+            ? FIXTURE_LIFECYCLE_WIKIPEDIA
+            : selectedSource?.type === "osv_advisory"
+              ? FIXTURE_LIFECYCLE_OSV
+              : selectedSource?.type === "open_data_dataset"
+                ? FIXTURE_LIFECYCLE_OPEN_DATA
+                : FIXTURE_LIFECYCLE
+        }
         next={lifecycleNext}
       />
 
