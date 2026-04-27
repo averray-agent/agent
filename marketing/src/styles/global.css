@@ -9,30 +9,32 @@
 :root {
   color-scheme: light;
 
-  /* ----- Palette ----- */
-  --avy-bg:           #f3f1ea;
-  --avy-bg-marketing: #f6f1e8;
-  --avy-paper:        rgba(255, 253, 247, 0.88);
-  --avy-paper-solid:  #fffdf7;
-  --avy-paper-alt:    #f7f9fa;
+  /* ----- Palette -----
+     Mirrors handoffs/.../colors_and_type.css. Comments preserved
+     so future edits remember what each token means semantically. */
+  --avy-bg:           #f3f1ea; /* paper · room background */
+  --avy-bg-marketing: #f6f1e8; /* paper · marketing wash, slightly warmer */
+  --avy-paper:        rgba(255, 253, 247, 0.88); /* card surface, layered */
+  --avy-paper-solid:  #fffdf7; /* card surface, solid */
+  --avy-paper-alt:    #f7f9fa; /* console / data surface */
 
-  --avy-ink:          #111315;
-  --avy-muted:        #5f655f;
-  --avy-line:         rgba(17, 19, 21, 0.12);
-  --avy-line-soft:    rgba(17, 19, 21, 0.08);
+  --avy-ink:          #111315; /* primary text, near-black */
+  --avy-muted:        #5f655f; /* secondary text, sage-tinted grey */
+  --avy-line:         rgba(17, 19, 21, 0.12); /* hairline border */
+  --avy-line-soft:    rgba(17, 19, 21, 0.08); /* whisper border */
 
-  --avy-accent:       #1e6642;
-  --avy-accent-2:     #0f6b4f;
-  --avy-accent-soft:  #d6eadf;
-  --avy-accent-wash:  rgba(30, 102, 66, 0.10);
+  --avy-accent:       #1e6642; /* sage — primary brand */
+  --avy-accent-2:     #0f6b4f; /* sage — pressed / hovered */
+  --avy-accent-soft:  #d6eadf; /* sage tint — chip background */
+  --avy-accent-wash:  rgba(30, 102, 66, 0.10); /* sage wash, transparent */
 
-  --avy-warm:         #f1d8b8;
-  --avy-warn:         #a76122;
-  --avy-warn-soft:    #f4e3cf;
+  --avy-warm:         #f1d8b8; /* warm tan — paper accent */
+  --avy-warn:         #a76122; /* terracotta — caution */
+  --avy-warn-soft:    #f4e3cf; /* terracotta wash */
 
-  --avy-blue:         #254e9a;
-  --avy-dark:         #101419;
-  --avy-dark-soft:    #171f28;
+  --avy-blue:         #254e9a; /* blue — info / submitted state */
+  --avy-dark:         #101419; /* deep hero ink */
+  --avy-dark-soft:    #171f28; /* deep hero alt */
 
   --fg1: var(--avy-ink);
   --fg2: var(--avy-muted);
@@ -130,6 +132,21 @@ a:hover { color: var(--avy-ink); }
 .btn--ghost { background: rgba(255, 255, 255, 0.65); color: var(--avy-ink); border-color: var(--avy-line); }
 .btn--ghost:hover { background: #fffdf7; border-color: rgba(30, 102, 66, 0.22); }
 .btn .arrow { font-family: var(--font-body); font-weight: 500; letter-spacing: 0; }
+
+/* ----- focus-visible -----
+   Browser default focus rings render as a thin dark line that mostly
+   disappears against the cream paper background. Replace with a
+   sage-tinted ring + ink underline so keyboard users always see where
+   they are. Only applies on `:focus-visible` (real keyboard nav), not
+   on mouse `:focus`, so click targets don't pick up a ring. */
+:where(a, button, [role="button"], input, select, textarea, summary):focus {
+  outline: none;
+}
+:where(a, button, [role="button"], input, select, textarea, summary):focus-visible {
+  outline: 2px solid var(--avy-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
 
 /* ==========================================
    1. TOP NAV

@@ -2,11 +2,14 @@
 interface Props {
   title: string;
   description?: string;
+  /** Optional override for the canonical / og:url. Defaults to the marketing root. */
+  canonicalUrl?: string;
 }
 
 const {
   title,
-  description = "Averray is agent-native work, identity, and verifier-aware execution infrastructure for the machine economy."
+  description = "Averray is agent-native work, identity, and verifier-aware execution infrastructure for the machine economy.",
+  canonicalUrl = "https://averray.com/"
 } = Astro.props;
 
 const structuredData = {
@@ -33,6 +36,22 @@ const structuredData = {
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{title}</title>
     <meta name="description" content={description} />
+    <link rel="canonical" href={canonicalUrl} />
+
+    <!-- Open Graph + Twitter card. og:image is intentionally not set
+         today — we don't yet have a brand-approved social preview asset.
+         Adding one is a small drop-in: set `og:image` (1200x630),
+         `og:image:alt`, `twitter:image`, and the card type will pick
+         it up. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonicalUrl} />
+    <meta property="og:site_name" content="Averray" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
