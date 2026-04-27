@@ -133,11 +133,21 @@ After Wikipedia, use the same pattern for:
      `STANDARDS_INGEST_DRY_RUN=true` until `/admin/status` shows useful
      candidates.
 
-5. **Stack Exchange / Discourse**
+5. **API schema / OpenAPI cleanup**
+   - broken examples, missing operation descriptions, stale endpoint docs
+   - schema drift checks between public specs and local API/docs surfaces
+   - v1 ingestion is allowlist-driven:
+     `POST /admin/jobs/ingest/openapi` accepts configured public OpenAPI
+     documents and emits review-only API quality audit jobs.
+   - Scheduled ingestion is available behind `OPENAPI_INGEST_ENABLED`; keep
+     `OPENAPI_INGEST_DRY_RUN=true` until `/admin/status` shows useful
+     candidates.
+
+6. **Stack Exchange / Discourse**
    - unanswered-question triage, duplicate detection, answer summaries
    - community-reviewable outputs
 
-6. **Common Crawl / public docs sites**
+7. **Common Crawl / public docs sites**
    - broken-link checks, metadata extraction, stale-doc detection
    - batch outputs with crawl evidence
 

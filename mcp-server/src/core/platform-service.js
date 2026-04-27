@@ -42,6 +42,7 @@ export class PlatformService {
     this.osvAdvisoryIngestionScheduler = undefined;
     this.openDataIngestionScheduler = undefined;
     this.standardsSpecIngestionScheduler = undefined;
+    this.openApiSpecIngestionScheduler = undefined;
     this.xcmSettlementWatcher = undefined;
     this.xcmObservationRelay = undefined;
 
@@ -113,6 +114,7 @@ export class PlatformService {
       osvIngestion,
       openDataIngestion,
       standardsIngestion,
+      openApiIngestion,
       recentSessions
     ] = await Promise.all([
       this.blockchainGateway?.getTreasuryPolicyStatus?.() ?? {
@@ -172,6 +174,17 @@ export class PlatformService {
         lastRun: undefined
       },
       this.standardsSpecIngestionScheduler?.getStatus?.() ?? {
+        enabled: false,
+        running: false,
+        dryRun: true,
+        intervalMs: 0,
+        specCount: 0,
+        minScore: 0,
+        maxJobsPerRun: 0,
+        maxOpenJobs: 0,
+        lastRun: undefined
+      },
+      this.openApiSpecIngestionScheduler?.getStatus?.() ?? {
         enabled: false,
         running: false,
         dryRun: true,
@@ -276,6 +289,7 @@ export class PlatformService {
       osvIngestion: osvIngestion,
       openDataIngestion: openDataIngestion,
       standardsIngestion: standardsIngestion,
+      openApiIngestion: openApiIngestion,
       xcmSettlementWatcher: await this.xcmSettlementWatcher?.getStatus?.() ?? {
         enabled: false,
         running: false,

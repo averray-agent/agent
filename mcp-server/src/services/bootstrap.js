@@ -34,6 +34,10 @@ import {
   StandardsSpecIngestionScheduler,
   loadStandardsSpecIngestionConfig
 } from "./standards-spec-ingestion-scheduler.js";
+import {
+  OpenApiSpecIngestionScheduler,
+  loadOpenApiSpecIngestionConfig
+} from "./openapi-spec-ingestion-scheduler.js";
 import { XcmSettlementWatcherService } from "./xcm-settlement-watcher.js";
 import { XcmObservationRelayService } from "./xcm-observation-relay.js";
 import { normaliseStrategyAssetConfig } from "./strategy-asset-config.js";
@@ -189,6 +193,12 @@ export async function createPlatformRuntime() {
       logger
     })
   );
+  const openApiSpecIngestionScheduler = initStep("init-openapi-spec-ingestion-scheduler", logger, () =>
+    new OpenApiSpecIngestionScheduler(platformService, eventBus, {
+      ...loadOpenApiSpecIngestionConfig(process.env),
+      logger
+    })
+  );
   const xcmSettlementWatcher = initStep("init-xcm-settlement-watcher", logger, () =>
     new XcmSettlementWatcherService(platformService, stateStore, eventBus, {
       enabled: process.env.XCM_SETTLEMENT_WATCHER_ENABLED === undefined
@@ -216,6 +226,7 @@ export async function createPlatformRuntime() {
   platformService.osvAdvisoryIngestionScheduler = osvAdvisoryIngestionScheduler;
   platformService.openDataIngestionScheduler = openDataIngestionScheduler;
   platformService.standardsSpecIngestionScheduler = standardsSpecIngestionScheduler;
+  platformService.openApiSpecIngestionScheduler = openApiSpecIngestionScheduler;
   platformService.xcmSettlementWatcher = xcmSettlementWatcher;
   platformService.xcmObservationRelay = xcmObservationRelay;
   recurringScheduler.start();
@@ -224,6 +235,7 @@ export async function createPlatformRuntime() {
   osvAdvisoryIngestionScheduler.start();
   openDataIngestionScheduler.start();
   standardsSpecIngestionScheduler.start();
+  openApiSpecIngestionScheduler.start();
   xcmSettlementWatcher.start();
   xcmObservationRelay.start();
 
@@ -253,6 +265,7 @@ export async function createPlatformRuntime() {
     osvAdvisoryIngestionScheduler,
     openDataIngestionScheduler,
     standardsSpecIngestionScheduler,
+    openApiSpecIngestionScheduler,
     xcmSettlementWatcher,
     xcmObservationRelay,
     authConfig,

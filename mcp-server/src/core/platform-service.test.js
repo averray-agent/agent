@@ -175,12 +175,25 @@ test("getAdminStatus surfaces public source ingestion scheduler status", async (
       };
     }
   };
+  service.openApiSpecIngestionScheduler = {
+    getStatus() {
+      return {
+        enabled: true,
+        running: true,
+        dryRun: true,
+        intervalMs: 3600000,
+        specCount: 1,
+        lastRun: { createdCount: 1 }
+      };
+    }
+  };
 
   const status = await service.getAdminStatus();
   assert.equal(status.osvIngestion.packageCount, 1);
   assert.equal(status.openDataIngestion.query, "res_format:CSV");
   assert.equal(status.openDataIngestion.lastRun.createdCount, 2);
   assert.equal(status.standardsIngestion.specCount, 2);
+  assert.equal(status.openApiIngestion.specCount, 1);
 });
 
 test("finalizeXcmRequest records async treasury settlement when the request is strategy-backed", async () => {

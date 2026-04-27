@@ -497,6 +497,52 @@ They must not edit external standards pages.
 
 ---
 
+## OpenAPI quality audit jobs
+
+The first API-schema provider is allowlist-driven. Operators point it at public
+OpenAPI JSON or YAML documents plus the local implementation/docs surface that
+should stay aligned. The generated jobs ask workers to validate endpoint
+coverage, descriptions, operation ids, examples, schema references, and drift
+against local docs or code.
+
+Preview jobs through:
+
+```bash
+npm --workspace mcp-server run ingest:openapi-specs -- --dry-run \
+  --specs '[{"provider":"stripe","specId":"stripe-openapi","apiTitle":"Stripe OpenAPI","specUrl":"https://raw.githubusercontent.com/stripe/openapi/master/openapi/spec3.json","localSurface":"mcp-server/src/protocols/http/server.js","repo":"averray-agent/agent"}]'
+```
+
+Or through the admin API:
+
+```http
+POST /admin/jobs/ingest/openapi
+```
+
+To let the backend pull these periodically, configure:
+
+```bash
+OPENAPI_INGEST_ENABLED=true
+OPENAPI_INGEST_DRY_RUN=true
+OPENAPI_INGEST_INTERVAL_MS=3600000
+OPENAPI_INGEST_MAX_JOBS_PER_RUN=2
+OPENAPI_INGEST_MAX_OPEN_JOBS=20
+OPENAPI_INGEST_SPECS_JSON='[{"provider":"stripe","specId":"stripe-openapi","apiTitle":"Stripe OpenAPI","specUrl":"https://raw.githubusercontent.com/stripe/openapi/master/openapi/spec3.json","localSurface":"mcp-server/src/protocols/http/server.js","repo":"averray-agent/agent"}]'
+```
+
+Review `openApiIngestion.lastRun` in `/admin/status`, then switch
+`OPENAPI_INGEST_DRY_RUN=false` when the candidates are ready to create jobs.
+
+The generated jobs use:
+
+- `schema://jobs/openapi-quality-audit-input`
+- `schema://jobs/openapi-quality-audit-output`
+
+Each submission must include `api_title`, `spec_url`, completed `checks`,
+findings plus recommendations, or `no_issue_found=true` with evidence. Workers
+must not mutate the public API spec directly.
+
+---
+
 ## Before posting
 
 Quick operator checklist:

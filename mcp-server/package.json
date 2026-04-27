@@ -14,7 +14,8 @@
     "ingest:wikipedia": "node src/jobs/ingest-wikipedia-maintenance.js",
     "ingest:osv-advisories": "node src/jobs/ingest-osv-advisories.js",
     "ingest:open-data": "node src/jobs/ingest-open-data-datasets.js",
-    "ingest:standards-specs": "node src/jobs/ingest-standards-specs.js"
+    "ingest:standards-specs": "node src/jobs/ingest-standards-specs.js",
+    "ingest:openapi-specs": "node src/jobs/ingest-openapi-specs.js"
   },
   "dependencies": {
     "ethers": "^6.16.0",

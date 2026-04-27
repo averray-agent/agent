@@ -272,6 +272,62 @@ const BUILTIN_JOB_SCHEMAS = new Map([
       notes: stringSchema()
     }
   })],
+  ["schema://jobs/openapi-quality-audit-input", objectSchema({
+    $id: "schema://jobs/openapi-quality-audit-input",
+    description: "Public OpenAPI quality audit input.",
+    required: ["apiTitle", "specUrl", "instructions"],
+    properties: {
+      apiTitle: stringSchema({ minLength: 1 }),
+      specUrl: stringSchema({ minLength: 1 }),
+      localSurface: stringSchema(),
+      repo: stringSchema(),
+      openapiVersion: stringSchema(),
+      pathCount: integerSchema({ minimum: 0 }),
+      operationCount: integerSchema({ minimum: 0 }),
+      schemaCount: integerSchema({ minimum: 0 }),
+      instructions: arrayOfStrings({ minItems: 1 })
+    }
+  })],
+  ["schema://jobs/openapi-quality-audit-output", objectSchema({
+    $id: "schema://jobs/openapi-quality-audit-output",
+    description: "Structured evidence for an OpenAPI spec quality audit.",
+    required: ["api_title", "spec_url", "checks", "findings", "no_issue_found", "summary", "recommended_actions"],
+    properties: {
+      api_title: stringSchema({ minLength: 1 }),
+      spec_url: stringSchema({ minLength: 1 }),
+      local_surface: stringSchema(),
+      openapi_version: stringSchema(),
+      checks: {
+        type: "array",
+        minItems: 1,
+        items: objectSchema({
+          required: ["name", "status", "evidence"],
+          properties: {
+            name: stringSchema({ minLength: 1 }),
+            status: enumString(["pass", "warn", "fail", "unknown"]),
+            evidence: stringSchema({ minLength: 1 })
+          }
+        })
+      },
+      findings: {
+        type: "array",
+        items: objectSchema({
+          required: ["severity", "location", "issue", "evidence", "recommendation"],
+          properties: {
+            severity: enumString(["low", "medium", "high"]),
+            location: stringSchema({ minLength: 1 }),
+            issue: stringSchema({ minLength: 1 }),
+            evidence: stringSchema({ minLength: 1 }),
+            recommendation: stringSchema({ minLength: 1 })
+          }
+        })
+      },
+      no_issue_found: booleanSchema(),
+      summary: stringSchema({ minLength: 1 }),
+      recommended_actions: arrayOfStrings({ minItems: 1 }),
+      notes: stringSchema()
+    }
+  })],
   ["schema://jobs/wikipedia-maintenance-input", objectSchema({
     $id: "schema://jobs/wikipedia-maintenance-input",
     description: "Wikipedia public article maintenance job input.",
