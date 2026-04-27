@@ -1,0 +1,22 @@
+{
+  "$id": "schema://jobs/openapi-quality-audit-input",
+  "title": "OpenAPI Quality Audit Input",
+  "type": "object",
+  "required": ["apiTitle", "specUrl", "instructions"],
+  "properties": {
+    "apiTitle": { "type": "string", "minLength": 1 },
+    "specUrl": { "type": "string", "minLength": 1 },
+    "localSurface": { "type": "string" },
+    "repo": { "type": "string" },
+    "openapiVersion": { "type": "string" },
+    "pathCount": { "type": "integer", "minimum": 0 },
+    "operationCount": { "type": "integer", "minimum": 0 },
+    "schemaCount": { "type": "integer", "minimum": 0 },
+    "instructions": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    }
+  },
+  "additionalProperties": false
+}

@@ -27,6 +27,7 @@ import {
 } from "../../core/job-schema-registry.js";
 import { ingestGithubIssues } from "../../jobs/ingest-github-issues.js";
 import { ingestOpenDataDatasets, parseDatasets as parseOpenDataDatasets } from "../../jobs/ingest-open-data-datasets.js";
+import { ingestOpenApiSpecs, parseOpenApiSpecs } from "../../jobs/ingest-openapi-specs.js";
 import {
   ingestOsvAdvisories,
   parseManifests as parseOsvManifests,
@@ -891,6 +892,7 @@ function metricPathLabel(pathname) {
     "/strategies",
     "/admin/jobs",
     "/admin/jobs/ingest/github",
+    "/admin/jobs/ingest/openapi",
     "/admin/jobs/ingest/open-data",
     "/admin/jobs/ingest/osv",
     "/admin/jobs/ingest/standards",
@@ -1172,6 +1174,7 @@ const server = createServer(async (request, response) => {
           "/verifier/replay",
           "/admin/jobs",
           "/admin/jobs/ingest/github",
+          "/admin/jobs/ingest/openapi",
           "/admin/jobs/ingest/open-data",
           "/admin/jobs/ingest/osv",
           "/admin/jobs/ingest/standards",
@@ -2463,6 +2466,59 @@ const server = createServer(async (request, response) => {
       return respond(response, status, {
         provider: result.provider,
         query: result.query,
+        minScore: result.minScore,
+        dryRun: false,
+        candidateCount: result.count,
+        created,
+        skipped: [...skipped, ...(Array.isArray(result.skipped) ? result.skipped : [])],
+        errors
+      });
+    }
+
+    if (request.method === "POST" && pathname === "/admin/jobs/ingest/openapi") {
+      const auth = await authMiddleware(request, url, { requireRole: "admin" });
+      await enforceLimit("admin_jobs", auth.wallet, rateLimitConfig.adminJobs);
+      const payload = await readJsonBody(request);
+      const specs = Array.isArray(payload?.specs) || typeof payload?.specs === "string"
+        ? parseOpenApiSpecs(payload.specs)
+        : parseOpenApiSpecs(process.env.OPENAPI_INGEST_SPECS_JSON ?? process.env.OPENAPI_INGEST_SPECS);
+      const limit = parsePositiveInteger(payload?.limit, 10, 50);
+      const minScore = parsePositiveInteger(payload?.minScore, 55, 100);
+      const dryRun = payload?.dryRun !== false;
+      const result = await ingestOpenApiSpecs({ specs, limit, minScore });
+
+      if (dryRun) {
+        return respond(response, 200, {
+          ...result,
+          dryRun: true,
+          created: []
+        });
+      }
+
+      const created = [];
+      const skipped = [];
+      const errors = [];
+      for (const job of result.jobs) {
+        try {
+          created.push(service.createJob(job));
+        } catch (error) {
+          const normalized = normalizeError(error);
+          if (normalized.code === "job_exists") {
+            skipped.push({ id: job.id, reason: "already_exists" });
+            continue;
+          }
+          errors.push({
+            id: job.id,
+            code: normalized.code,
+            message: normalized.message
+          });
+        }
+      }
+
+      const status = errors.length ? 207 : 201;
+      return respond(response, status, {
+        provider: result.provider,
+        specCount: result.specCount,
         minScore: result.minScore,
         dryRun: false,
         candidateCount: result.count,

@@ -132,6 +132,38 @@ test("validateStructuredSubmission accepts open-data audit evidence", () => {
   });
 });
 
+test("validateStructuredSubmission accepts OpenAPI audit evidence", () => {
+  const payload = {
+    api_title: "Stripe OpenAPI",
+    spec_url: "https://raw.githubusercontent.com/stripe/openapi/master/openapi/spec3.json",
+    local_surface: "mcp-server/src/protocols/http/server.js",
+    openapi_version: "3.1.0",
+    checks: [
+      {
+        name: "operation_descriptions",
+        status: "warn",
+        evidence: "One sampled operation has no summary or description."
+      }
+    ],
+    findings: [
+      {
+        severity: "low",
+        location: "GET /v1/customers",
+        issue: "Operation lacks a human-readable description.",
+        evidence: "summary and description are absent in the OpenAPI operation object.",
+        recommendation: "Add a concise description or link local docs to the canonical operation docs."
+      }
+    ],
+    no_issue_found: false,
+    summary: "Spec is reachable but one sampled operation needs documentation polish.",
+    recommended_actions: ["Add operation description", "Confirm local docs mention the endpoint"]
+  };
+
+  assert.doesNotThrow(() => {
+    validateStructuredSubmission("schema://jobs/openapi-quality-audit-output", payload);
+  });
+});
+
 test("validateStructuredSubmission rejects missing required fields", () => {
   assert.throws(
     () => validateStructuredSubmission("schema://jobs/pr-review-findings-output", {
