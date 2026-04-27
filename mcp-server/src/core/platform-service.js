@@ -759,6 +759,7 @@ function buildProviderOperationStatus({ label, status, targetCountField }) {
     mode: !status.enabled ? "disabled" : (status.dryRun === false ? "live" : "dry_run"),
     intervalMs: toNonNegativeInteger(status.intervalMs),
     maxJobsPerRun: toNonNegativeInteger(status.maxJobsPerRun),
+    ...(status.maxJobsPerQuery !== undefined ? { maxJobsPerQuery: toNonNegativeInteger(status.maxJobsPerQuery) } : {}),
     maxOpenJobs: toNonNegativeInteger(status.maxOpenJobs),
     currentOpenJobs,
     targetCount: toNonNegativeInteger(status[targetCountField]),

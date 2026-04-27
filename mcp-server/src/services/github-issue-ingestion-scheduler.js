@@ -8,6 +8,7 @@ export class GithubIssueIngestionScheduler {
     queries = [],
     minScore = 75,
     maxJobsPerRun = 2,
+    maxJobsPerQuery = 2,
     maxOpenJobs = 20,
     githubToken = undefined,
     fetchImpl = fetch,
@@ -21,6 +22,7 @@ export class GithubIssueIngestionScheduler {
     this.queries = queries;
     this.minScore = minScore;
     this.maxJobsPerRun = maxJobsPerRun;
+    this.maxJobsPerQuery = maxJobsPerQuery;
     this.maxOpenJobs = maxOpenJobs;
     this.githubToken = githubToken;
     this.fetchImpl = fetchImpl;
@@ -55,6 +57,7 @@ export class GithubIssueIngestionScheduler {
       queryCount: this.queries.length,
       minScore: this.minScore,
       maxJobsPerRun: this.maxJobsPerRun,
+      maxJobsPerQuery: this.maxJobsPerQuery,
       maxOpenJobs: this.maxOpenJobs,
       currentOpenJobs: this.countOpenGithubJobs(),
       lastRun: this.lastRun
@@ -93,10 +96,11 @@ export class GithubIssueIngestionScheduler {
     const seenSources = this.existingGithubIssueKeys();
     for (const query of this.queries) {
       if (remaining <= 0) break;
+      const queryLimit = Math.min(remaining, this.maxJobsPerQuery);
       try {
         const result = await ingestGithubIssues({
           query,
-          limit: remaining,
+          limit: queryLimit,
           minScore: this.minScore,
           githubToken: this.githubToken,
           fetchImpl: this.fetchImpl
@@ -106,6 +110,7 @@ export class GithubIssueIngestionScheduler {
           query,
           candidates: result.count,
           created: 0,
+          maxJobsPerQuery: queryLimit,
           skipped: []
         };
         for (const job of result.jobs) {
@@ -198,6 +203,7 @@ export function loadGithubIssueIngestionConfig(env = process.env) {
     queries,
     minScore: parsePositiveInt(env.GITHUB_INGEST_MIN_SCORE, 75),
     maxJobsPerRun: parsePositiveInt(env.GITHUB_INGEST_MAX_JOBS_PER_RUN, 2),
+    maxJobsPerQuery: parsePositiveInt(env.GITHUB_INGEST_MAX_JOBS_PER_QUERY, 2),
     maxOpenJobs: parsePositiveInt(env.GITHUB_INGEST_MAX_OPEN_JOBS, 20),
     githubToken: env.GITHUB_TOKEN?.trim() || undefined
   };

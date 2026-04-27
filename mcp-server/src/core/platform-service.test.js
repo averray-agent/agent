@@ -147,6 +147,7 @@ test("getAdminStatus surfaces public source ingestion scheduler status", async (
         intervalMs: 900000,
         queryCount: 2,
         maxJobsPerRun: 2,
+        maxJobsPerQuery: 2,
         maxOpenJobs: 12,
         currentOpenJobs: 3,
         lastRun: {
@@ -266,6 +267,7 @@ test("getAdminStatus surfaces public source ingestion scheduler status", async (
   assert.equal(status.providerOperations.github.label, "GitHub issues");
   assert.equal(status.providerOperations.github.mode, "dry_run");
   assert.equal(status.providerOperations.github.currentOpenJobs, 3);
+  assert.equal(status.providerOperations.github.maxJobsPerQuery, 2);
   assert.equal(status.providerOperations.github.lastRun.createdCount, 1);
   assert.equal(status.providerOperations.github.lastRun.skippedCount, 1);
   assert.equal(status.providerOperations.github.lastRun.skipped[0].reason, "source_already_ingested");

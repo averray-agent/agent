@@ -123,6 +123,40 @@ test("GithubIssueIngestionScheduler stops when max open GitHub jobs is reached",
   assert.equal(summary.skipped[0].reason, "max_open_jobs_reached");
 });
 
+test("GithubIssueIngestionScheduler caps noisy queries within a run", async () => {
+  const platform = makePlatformService();
+  const scheduler = new GithubIssueIngestionScheduler(platform, undefined, {
+    enabled: true,
+    dryRun: false,
+    queries: ["q1", "q2"],
+    minScore: 55,
+    maxJobsPerRun: 8,
+    maxJobsPerQuery: 2,
+    fetchImpl: async (url) => {
+      const query = new URL(url).searchParams.get("q") ?? "";
+      const offset = query.includes("q2") ? 100 : 0;
+      return {
+        ok: true,
+        async json() {
+          return {
+            items: Array.from({ length: 5 }, (_, index) => ({
+              ...ISSUE,
+              number: offset + index + 1,
+              html_url: `https://github.com/example/project/issues/${offset + index + 1}`
+            }))
+          };
+        }
+      };
+    }
+  });
+
+  const summary = await scheduler.runOnce(new Date("2026-04-24T10:00:00.000Z"));
+  assert.equal(summary.createdCount, 4);
+  assert.equal(platform.listJobs().length, 4);
+  assert.deepEqual(summary.queries.map((query) => query.created), [2, 2]);
+  assert.deepEqual(summary.queries.map((query) => query.maxJobsPerQuery), [2, 2]);
+});
+
 test("loadGithubIssueIngestionConfig parses env knobs safely", () => {
   const config = loadGithubIssueIngestionConfig({
     GITHUB_INGEST_ENABLED: "true",
@@ -130,6 +164,7 @@ test("loadGithubIssueIngestionConfig parses env knobs safely", () => {
     GITHUB_INGEST_INTERVAL_MS: "900000",
     GITHUB_INGEST_MIN_SCORE: "80",
     GITHUB_INGEST_MAX_JOBS_PER_RUN: "3",
+    GITHUB_INGEST_MAX_JOBS_PER_QUERY: "2",
     GITHUB_INGEST_MAX_OPEN_JOBS: "12",
     GITHUB_INGEST_QUERIES_JSON: '["q1","q2"]',
     GITHUB_TOKEN: "ghp_test"
@@ -140,6 +175,7 @@ test("loadGithubIssueIngestionConfig parses env knobs safely", () => {
   assert.equal(config.intervalMs, 900000);
   assert.equal(config.minScore, 80);
   assert.equal(config.maxJobsPerRun, 3);
+  assert.equal(config.maxJobsPerQuery, 2);
   assert.equal(config.maxOpenJobs, 12);
   assert.deepEqual(config.queries, ["q1", "q2"]);
   assert.equal(config.githubToken, "ghp_test");

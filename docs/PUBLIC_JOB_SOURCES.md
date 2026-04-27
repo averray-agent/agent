@@ -178,11 +178,11 @@ operator dashboard. It is keyed by source:
 - `openApi`
 
 Each provider entry reports `label`, `enabled`, `running`, `dryRun`, `mode`,
-`health`, `intervalMs`, `maxJobsPerRun`, `maxOpenJobs`, `currentOpenJobs`,
-`targetCount`, `lastRunAt`, and a compact `lastRun` summary. The older
-provider-specific fields such as `osvIngestion` and `openDataIngestion` remain
-available for compatibility, but new admin UI should render from
-`providerOperations`.
+`health`, `intervalMs`, `maxJobsPerRun`, optional provider-specific caps such as
+`maxJobsPerQuery`, `maxOpenJobs`, `currentOpenJobs`, `targetCount`, `lastRunAt`,
+and a compact `lastRun` summary. The older provider-specific fields such as
+`osvIngestion` and `openDataIngestion` remain available for compatibility, but
+new admin UI should render from `providerOperations`.
 
 ### Public status endpoint
 
