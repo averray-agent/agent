@@ -16,9 +16,14 @@ import {
   PlatformPulse,
   type PulseEvent,
 } from "@/components/overview/PlatformPulse";
-import { useAccount, useAlerts, useHealth, useJobs, useSessions, useStrategyPositions } from "@/lib/api/hooks";
+import {
+  ProviderOperationsCard,
+  PROVIDER_OPERATIONS_FIXTURE,
+} from "@/components/overview/ProviderOperationsCard";
+import { useAccount, useAlerts, useHealth, useJobs, useProviderOperations, useSessions, useStrategyPositions } from "@/lib/api/hooks";
 import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
 import { extractRunJobs } from "@/lib/api/run-adapters";
+import { buildProviderOperations } from "@/lib/api/provider-operations";
 import {
   buildLaneCards,
   buildOverviewAlerts,
@@ -350,6 +355,7 @@ export default function OverviewPage() {
   const strategyPositions = useStrategyPositions();
   const health = useHealth();
   const apiAlerts = useAlerts();
+  const providerOps = useProviderOperations();
 
   const liveVitals = useMemo(
     () => buildRoomVitals(jobs.data, sessions.data, account.data, strategyPositions.data),
@@ -365,6 +371,13 @@ export default function OverviewPage() {
     [jobs.data, sessions.data, strategyPositions.data]
   );
   const liveJobs = extractRunJobs(jobs.data);
+  const liveProviderOps = useMemo(
+    () => buildProviderOperations(providerOps.data),
+    [providerOps.data]
+  );
+  const providerRows = liveProviderOps.length
+    ? liveProviderOps
+    : PROVIDER_OPERATIONS_FIXTURE;
   const hasLiveOverview = Boolean(jobs.data || sessions.data || account.data || strategyPositions.data);
   const vitals = hasLiveOverview ? liveVitals : ROOM_VITALS;
   const alerts = endpointAlerts.length ? endpointAlerts : liveAlerts.length ? liveAlerts : NEEDS_ACTION;
@@ -379,7 +392,8 @@ export default function OverviewPage() {
     account,
     strategyPositions,
     health,
-    apiAlerts
+    apiAlerts,
+    providerOps
   );
 
   return (
@@ -399,6 +413,14 @@ export default function OverviewPage() {
       <RoomVitals vitals={vitals} comparedTo={hasLiveOverview ? "live API" : "14:08 UTC yesterday"} />
       <NeedsActionList alerts={alerts} meta={`${alerts.length} open`} />
       <LaneStatusGrid lanes={lanes} meta={hasLiveOverview ? "live API snapshot" : undefined} />
+      <ProviderOperationsCard
+        providers={providerRows}
+        meta={
+          liveProviderOps.length
+            ? `${liveProviderOps.length} sources · live API`
+            : `${PROVIDER_OPERATIONS_FIXTURE.length} sources`
+        }
+      />
       <PlatformPulse
         events={PULSE_EVENTS}
         endpoint={health.data ? "/events" : "wss://events.averray.com/v1/pulse"}
