@@ -45,6 +45,7 @@ export class MemoryStateStore {
     this.xcmObservations = new Map();
     this.serviceStates = new Map();
     this.content = new Map();
+    this.fundedJobs = new Map();
   }
 
   async getSession(sessionId) {
@@ -212,6 +213,22 @@ export class MemoryStateStore {
     const key = String(record?.hash ?? "").toLowerCase();
     this.content.set(key, record);
     return record;
+  }
+
+  async getFundedJob(jobId) {
+    return this.fundedJobs.get(String(jobId ?? ""));
+  }
+
+  async upsertFundedJob(record) {
+    this.fundedJobs.set(String(record?.jobId ?? ""), record);
+    return record;
+  }
+
+  async listFundedJobs({ limit = 100, offset = 0, finalOnly = false } = {}) {
+    return [...this.fundedJobs.values()]
+      .filter((record) => !finalOnly || ["merged", "closed_unmerged", "open_stale", "reverted"].includes(record?.finalStatus))
+      .sort((left, right) => String(right.fundedAt ?? right.updatedAt ?? "").localeCompare(String(left.fundedAt ?? left.updatedAt ?? "")))
+      .slice(Math.max(offset, 0), Math.max(offset, 0) + Math.max(limit, 0));
   }
 
   async getXcmObservation(requestId) {
@@ -497,6 +514,34 @@ export class RedisStateStore {
     const key = String(record?.hash ?? "").toLowerCase();
     await this.client.set(this.key("content", key), JSON.stringify(record));
     return record;
+  }
+
+  async getFundedJob(jobId) {
+    await this.connect();
+    const raw = await this.client.get(this.key("funded-job", String(jobId ?? "")));
+    return raw ? JSON.parse(raw) : undefined;
+  }
+
+  async upsertFundedJob(record) {
+    await this.connect();
+    const jobId = String(record?.jobId ?? "");
+    await this.client.set(this.key("funded-job", jobId), JSON.stringify(record));
+    await this.client.zAdd(this.key("funded-jobs", "all"), {
+      score: Date.parse(record?.fundedAt ?? record?.updatedAt ?? "") || Date.now(),
+      value: jobId
+    });
+    return record;
+  }
+
+  async listFundedJobs({ limit = 100, offset = 0, finalOnly = false } = {}) {
+    await this.connect();
+    const start = Math.max(offset, 0);
+    const stop = start + Math.max(limit - 1, 0);
+    const jobIds = await this.client.zRange(this.key("funded-jobs", "all"), start, stop, { REV: true });
+    const records = await Promise.all(jobIds.map((jobId) => this.getFundedJob(jobId)));
+    return records
+      .filter(Boolean)
+      .filter((record) => !finalOnly || ["merged", "closed_unmerged", "open_stale", "reverted"].includes(record.finalStatus));
   }
 
   async getXcmObservation(requestId) {

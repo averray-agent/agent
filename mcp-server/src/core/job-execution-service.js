@@ -6,6 +6,10 @@ import {
 import { buildSessionLifecycle, describeSessionStatus, transitionSession } from "./session-state-machine.js";
 import { hashSubmission, normalizeSubmission } from "./submission.js";
 import { getBuiltinJobSchema, validateStructuredSubmission } from "./job-schema-registry.js";
+import {
+  buildFundedJobFromClaim,
+  updateFundedJobFromSession
+} from "./funded-jobs.js";
 
 export class JobExecutionService {
   constructor(
@@ -105,6 +109,7 @@ export class JobExecutionService {
       });
 
       const persisted = await this.stateStore.upsertSession(session);
+      await this.stateStore.upsertFundedJob?.(buildFundedJobFromClaim({ job, session: persisted }));
       this.publishSessionEvent("session.claimed", persisted);
       return persisted;
     } finally {
@@ -137,6 +142,8 @@ export class JobExecutionService {
       }
     });
     const persisted = await this.stateStore.upsertSession(transitioned);
+    const fundedJob = await this.stateStore.getFundedJob?.(persisted.jobId);
+    await this.stateStore.upsertFundedJob?.(updateFundedJobFromSession(fundedJob, { job, session: persisted }));
     this.publishSessionEvent("session.submitted", persisted, {
       submissionKind: submission.kind,
       schemaRef: job.outputSchemaRef

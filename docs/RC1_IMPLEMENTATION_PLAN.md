@@ -34,8 +34,8 @@ The shortest path to a coherent rc1 launch is:
 
 ## Current Position
 
-As of the disclosure event coupling work, **slice 4: Content Addressing And
-Disclosure Reads** is implemented.
+As of the bootstrap instrumentation work, **slice 5: Bootstrap
+Instrumentation** is in progress.
 
 Completed and deployed in this lane:
 
@@ -51,10 +51,13 @@ Completed and deployed in this lane:
 - `discloseFor(hash, byWallet)` requires the rc1 contract redeploy; until then
   the backend reports `chain_write_failed` for that event while still serving
   content normally
+- `funded_jobs` records are now written on claim, enriched on submission and
+  verification, and polled against upstream GitHub/MediaWiki status
+- weekly bootstrap self-report generation exists as a backend service/CLI
 
 Still open in the broader rc1 path:
 
-- full bootstrap instrumentation and upstream status polling, which is slice 5
+- scheduler/email hardening for weekly reports after enough real jobs exist
 - claim economics, maintainer controls, and XCM work in later slices
 
 ## PR Slices
@@ -159,16 +162,21 @@ land here.
 
 ### 5. Bootstrap Instrumentation
 
+**Status:** in progress; funded-job storage, upstream polling, and report
+generation are implemented as backend foundations.
+
 **Goal:** make the week-12 gate measurable before funded jobs begin.
 
 **Changes:**
 
-- Add `funded_jobs` storage/model.
-- Add daily GitHub and MediaWiki upstream status pollers.
-- Track final statuses: `merged`, `closed_unmerged`, `open_stale`,
+- [x] Add `funded_jobs` storage/model.
+- [x] Add daily-capable GitHub and MediaWiki upstream status pollers.
+- [x] Track final statuses: `merged`, `closed_unmerged`, `open_stale`,
   `reverted`.
-- Add weekly self-report generation with merge rate, spend, receipts, and top
+- [x] Add weekly self-report generation with merge rate, spend, receipts, and top
   close reasons.
+- [ ] Wire scheduled email delivery once report recipients and cadence are
+  finalized.
 
 **Checks:** `npm --workspace mcp-server test`.
 

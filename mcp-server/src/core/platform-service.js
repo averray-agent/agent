@@ -54,6 +54,7 @@ export class PlatformService {
     this.openApiSpecIngestionScheduler = undefined;
     this.xcmSettlementWatcher = undefined;
     this.xcmObservationRelay = undefined;
+    this.upstreamStatusPoller = undefined;
 
     this.accountMutationService = new AccountMutationService(
       this.accounts,
@@ -124,6 +125,7 @@ export class PlatformService {
       openDataIngestion,
       standardsIngestion,
       openApiIngestion,
+      upstreamStatus,
       recentSessions
     ] = await Promise.all([
       this.blockchainGateway?.getTreasuryPolicyStatus?.() ?? {
@@ -208,6 +210,13 @@ export class PlatformService {
         maxJobsPerRun: 0,
         maxOpenJobs: 0,
         currentOpenJobs: 0,
+        lastRun: undefined
+      },
+      this.upstreamStatusPoller?.getStatus?.() ?? {
+        enabled: false,
+        running: false,
+        intervalMs: 0,
+        batchSize: 0,
         lastRun: undefined
       },
       this.jobExecutionService.listRecentSessions(14)
@@ -314,6 +323,7 @@ export class PlatformService {
       openDataIngestion: openDataIngestion,
       standardsIngestion: standardsIngestion,
       openApiIngestion: openApiIngestion,
+      upstreamStatus,
       xcmSettlementWatcher: await this.xcmSettlementWatcher?.getStatus?.() ?? {
         enabled: false,
         running: false,

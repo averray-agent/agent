@@ -41,6 +41,10 @@ import {
 } from "./openapi-spec-ingestion-scheduler.js";
 import { XcmSettlementWatcherService } from "./xcm-settlement-watcher.js";
 import { XcmObservationRelayService } from "./xcm-observation-relay.js";
+import {
+  UpstreamStatusPollerService,
+  loadUpstreamStatusPollerConfig
+} from "./upstream-status-poller.js";
 import { normaliseStrategyAssetConfig } from "./strategy-asset-config.js";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -224,6 +228,12 @@ export async function createPlatformRuntime() {
       logger
     })
   );
+  const upstreamStatusPoller = initStep("init-upstream-status-poller", logger, () =>
+    new UpstreamStatusPollerService(stateStore, eventBus, {
+      ...loadUpstreamStatusPollerConfig(process.env),
+      logger
+    })
+  );
   platformService.recurringScheduler = recurringScheduler;
   platformService.githubIssueIngestionScheduler = githubIssueIngestionScheduler;
   platformService.wikipediaMaintenanceIngestionScheduler = wikipediaMaintenanceIngestionScheduler;
@@ -233,6 +243,7 @@ export async function createPlatformRuntime() {
   platformService.openApiSpecIngestionScheduler = openApiSpecIngestionScheduler;
   platformService.xcmSettlementWatcher = xcmSettlementWatcher;
   platformService.xcmObservationRelay = xcmObservationRelay;
+  platformService.upstreamStatusPoller = upstreamStatusPoller;
   recurringScheduler.start();
   githubIssueIngestionScheduler.start();
   wikipediaMaintenanceIngestionScheduler.start();
@@ -242,6 +253,7 @@ export async function createPlatformRuntime() {
   openApiSpecIngestionScheduler.start();
   xcmSettlementWatcher.start();
   xcmObservationRelay.start();
+  upstreamStatusPoller.start();
 
   const authMiddleware = createAuthMiddleware({ authConfig, stateStore, logger });
   const rateLimiter = createRateLimiter({ stateStore, logger });
@@ -273,6 +285,7 @@ export async function createPlatformRuntime() {
     openApiSpecIngestionScheduler,
     xcmSettlementWatcher,
     xcmObservationRelay,
+    upstreamStatusPoller,
     authConfig,
     authMiddleware,
     authCapabilities: {

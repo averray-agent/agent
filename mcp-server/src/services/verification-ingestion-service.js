@@ -1,4 +1,5 @@
 import { transitionSession } from "../core/session-state-machine.js";
+import { updateFundedJobFromSession } from "../core/funded-jobs.js";
 
 export class VerificationIngestionService {
   constructor(stateStore, eventBus = undefined) {
@@ -37,6 +38,11 @@ export class VerificationIngestionService {
       }
     });
     const updatedSession = await this.stateStore.upsertSession(transitioned);
+    const fundedJob = await this.stateStore.getFundedJob?.(updatedSession.jobId);
+    await this.stateStore.upsertFundedJob?.(updateFundedJobFromSession(fundedJob, {
+      session: updatedSession,
+      verification: verdict
+    }));
     await this.stateStore.upsertVerificationResult(updatedSession.sessionId, {
       ...verdict,
       session: {

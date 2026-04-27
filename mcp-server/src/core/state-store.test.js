@@ -82,6 +82,24 @@ test("MemoryStateStore content blobs round-trip by lowercase hash", async () => 
   );
 });
 
+test("MemoryStateStore funded jobs round-trip and list latest first", async () => {
+  const store = new MemoryStateStore();
+  await store.upsertFundedJob({
+    jobId: "job-1",
+    fundedAt: "2026-01-01T00:00:00.000Z",
+    finalStatus: "open"
+  });
+  await store.upsertFundedJob({
+    jobId: "job-2",
+    fundedAt: "2026-01-02T00:00:00.000Z",
+    finalStatus: "merged"
+  });
+
+  assert.equal((await store.getFundedJob("job-1")).finalStatus, "open");
+  assert.deepEqual((await store.listFundedJobs({ limit: 2 })).map((entry) => entry.jobId), ["job-2", "job-1"]);
+  assert.deepEqual((await store.listFundedJobs({ finalOnly: true })).map((entry) => entry.jobId), ["job-2"]);
+});
+
 test("MemoryStateStore xcm observations round-trip and clear from pending when processed", async () => {
   const store = new MemoryStateStore();
   await store.upsertXcmObservation({
