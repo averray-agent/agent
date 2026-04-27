@@ -11,6 +11,7 @@ out/
 broadcast/
 .ponder/
 .pglite/
+.content-recovery-log/
 marketing/.astro/
 marketing/dist/
 app/.next/

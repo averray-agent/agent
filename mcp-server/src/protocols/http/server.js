@@ -48,6 +48,7 @@ const {
   platformService: service,
   verifierService,
   stateStore,
+  contentRecoveryLog,
   gateway,
   pimlicoClient,
   eventBus,
@@ -747,6 +748,12 @@ async function optionalAuth(request, url) {
     }
     throw error;
   }
+}
+
+async function persistContentRecord(record) {
+  await contentRecoveryLog?.append?.(record);
+  await stateStore.upsertContent?.(record);
+  return record;
 }
 
 async function resolveRemainingPayout(session) {
@@ -1547,7 +1554,7 @@ const server = createServer(async (request, response) => {
       if (payload?.hash !== undefined) {
         assertContentHashMatches({ hash: payload.hash, payload: payload.payload });
       }
-      await stateStore.upsertContent?.(record);
+      await persistContentRecord(record);
       const access = resolveContentAccess(record, auth);
       return respond(response, 201, {
         ...contentResponse(record, access),
@@ -1614,7 +1621,7 @@ const server = createServer(async (request, response) => {
         verdict: resolution.verdict,
         decidedAt
       });
-      await stateStore.upsertContent?.(reasoning.contentRecord);
+      await persistContentRecord(reasoning.contentRecord);
       const chainReceipt = gateway?.isEnabled?.() && typeof gateway.resolveDispute === "function"
         ? await gateway.resolveDispute(
             session.chainJobId ?? session.jobId,

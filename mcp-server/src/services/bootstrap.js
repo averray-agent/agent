@@ -13,6 +13,7 @@ import { resolveCapabilities, capabilityMatrix } from "../auth/capabilities.js";
 import { createLogger } from "../core/logger.js";
 import { MetricRegistry } from "../core/metrics.js";
 import { createObservability } from "../core/observability.js";
+import { createContentRecoveryLog } from "../core/content-recovery-log.js";
 import { RecurringSchedulerService } from "./recurring-scheduler.js";
 import {
   GithubIssueIngestionScheduler,
@@ -142,6 +143,9 @@ export async function createPlatformRuntime() {
   const gateway = initStep("init-blockchain-gateway", logger, () => new BlockchainGateway());
   const pimlicoClient = initStep("init-pimlico-client", logger, () => new PimlicoClient());
   const stateStore = initStep("init-state-store", logger, () => createStateStore(process.env, { logger }));
+  const contentRecoveryLog = initStep("init-content-recovery-log", logger, () =>
+    createContentRecoveryLog(process.env, { logger })
+  );
   const eventBus = initStep("init-event-bus", logger, () => new EventBus());
   const platformService = initStep(
     "init-platform-service",
@@ -257,6 +261,7 @@ export async function createPlatformRuntime() {
     gateway,
     pimlicoClient,
     stateStore,
+    contentRecoveryLog,
     eventBus,
     eventListener,
     recurringScheduler,
