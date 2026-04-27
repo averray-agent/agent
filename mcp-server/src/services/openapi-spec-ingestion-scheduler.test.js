@@ -7,10 +7,10 @@ import {
 } from "./openapi-spec-ingestion-scheduler.js";
 
 const SPEC = {
-  provider: "stripe",
-  specId: "stripe-openapi",
-  apiTitle: "Stripe OpenAPI",
-  specUrl: "https://raw.githubusercontent.com/stripe/openapi/master/openapi/spec3.json",
+  provider: "averray",
+  specId: "averray-http-api",
+  apiTitle: "Averray HTTP API",
+  specUrl: "https://raw.githubusercontent.com/averray-agent/agent/main/docs/api/openapi.json",
   localSurface: "mcp-server/src/protocols/http/server.js",
   repo: "averray-agent/agent"
 };
@@ -27,7 +27,7 @@ function makeFetch() {
     async text() {
       return JSON.stringify({
         openapi: "3.1.0",
-        info: { title: SPEC.apiTitle, version: "2026-01-01" },
+        info: { title: SPEC.apiTitle, version: "0.1.0" },
         paths: { "/health": { get: { operationId: "health", responses: { "200": { description: "ok" } } } } }
       });
     }
@@ -90,7 +90,7 @@ test("OpenApiSpecIngestionScheduler dedupes by OpenAPI source", async () => {
       id: "existing",
       source: {
         type: "openapi_spec",
-        provider: "stripe",
+        provider: "averray",
         specUrl: SPEC.specUrl,
         localSurface: SPEC.localSurface
       }

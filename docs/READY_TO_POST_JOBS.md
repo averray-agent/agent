@@ -505,11 +505,14 @@ should stay aligned. The generated jobs ask workers to validate endpoint
 coverage, descriptions, operation ids, examples, schema references, and drift
 against local docs or code.
 
+The production-ready seed points at Averray's committed HTTP API spec and the
+backend route implementation that workers can update through pull requests.
+
 Preview jobs through:
 
 ```bash
 npm --workspace mcp-server run ingest:openapi-specs -- --dry-run \
-  --specs '[{"provider":"stripe","specId":"stripe-openapi","apiTitle":"Stripe OpenAPI","specUrl":"https://raw.githubusercontent.com/stripe/openapi/master/openapi/spec3.json","localSurface":"mcp-server/src/protocols/http/server.js","repo":"averray-agent/agent"}]'
+  --specs '[{"provider":"averray","specId":"averray-http-api","apiTitle":"Averray HTTP API","specUrl":"https://raw.githubusercontent.com/averray-agent/agent/main/docs/api/openapi.json","localSurface":"mcp-server/src/protocols/http/server.js","repo":"averray-agent/agent"}]'
 ```
 
 Or through the admin API:
@@ -526,7 +529,7 @@ OPENAPI_INGEST_DRY_RUN=true
 OPENAPI_INGEST_INTERVAL_MS=3600000
 OPENAPI_INGEST_MAX_JOBS_PER_RUN=2
 OPENAPI_INGEST_MAX_OPEN_JOBS=20
-OPENAPI_INGEST_SPECS_JSON='[{"provider":"stripe","specId":"stripe-openapi","apiTitle":"Stripe OpenAPI","specUrl":"https://raw.githubusercontent.com/stripe/openapi/master/openapi/spec3.json","localSurface":"mcp-server/src/protocols/http/server.js","repo":"averray-agent/agent"}]'
+OPENAPI_INGEST_SPECS_JSON='[{"provider":"averray","specId":"averray-http-api","apiTitle":"Averray HTTP API","specUrl":"https://raw.githubusercontent.com/averray-agent/agent/main/docs/api/openapi.json","localSurface":"mcp-server/src/protocols/http/server.js","repo":"averray-agent/agent"}]'
 ```
 
 Review `openApiIngestion.lastRun` in `/admin/status`, then switch

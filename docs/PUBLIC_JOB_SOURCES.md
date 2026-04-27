@@ -136,6 +136,9 @@ After Wikipedia, use the same pattern for:
 5. **API schema / OpenAPI cleanup**
    - broken examples, missing operation descriptions, stale endpoint docs
    - schema drift checks between public specs and local API/docs surfaces
+   - the first production target is Averray's own committed HTTP API spec at
+     `docs/api/openapi.json` compared with
+     `mcp-server/src/protocols/http/server.js`
    - v1 ingestion is allowlist-driven:
      `POST /admin/jobs/ingest/openapi` accepts configured public OpenAPI
      documents and emits review-only API quality audit jobs.

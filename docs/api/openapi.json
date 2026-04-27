@@ -1,0 +1,943 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Averray HTTP API",
+    "version": "0.1.0",
+    "description": "Public and operator-facing HTTP endpoints served by the Averray backend."
+  },
+  "servers": [
+    {
+      "url": "https://api.averray.com",
+      "description": "Production"
+    },
+    {
+      "url": "http://localhost:8787",
+      "description": "Local development"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Health",
+      "description": "Runtime health and deployment readiness."
+    },
+    {
+      "name": "Jobs",
+      "description": "Job discovery, claiming, and personalized job views."
+    },
+    {
+      "name": "Schemas",
+      "description": "Built-in job submission schemas."
+    },
+    {
+      "name": "Admin",
+      "description": "Admin-only platform operations."
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "Health"
+        ],
+        "operationId": "getHealth",
+        "summary": "Return backend health",
+        "description": "Reports state-store, blockchain, and gas-sponsor health for the current deployment.",
+        "responses": {
+          "200": {
+            "description": "All core components are healthy.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                },
+                "examples": {
+                  "ok": {
+                    "value": {
+                      "status": "ok",
+                      "auth": {
+                        "mode": "strict",
+                        "domain": "api.averray.com",
+                        "chainId": 420420417
+                      },
+                      "components": {
+                        "stateStore": {
+                          "ok": true,
+                          "backend": "redis",
+                          "mode": "durable"
+                        },
+                        "blockchain": {
+                          "ok": true,
+                          "backend": "blockchain",
+                          "enabled": true,
+                          "blockNumber": 8131345,
+                          "signerConfigured": true,
+                          "xcmWrapperConfigured": false
+                        },
+                        "gasSponsor": {
+                          "ok": true,
+                          "backend": "pimlico",
+                          "enabled": false,
+                          "mode": "disabled"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "One or more core components are degraded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs": {
+      "get": {
+        "tags": [
+          "Jobs"
+        ],
+        "operationId": "listJobs",
+        "summary": "List available jobs",
+        "description": "Returns all currently available platform jobs.",
+        "responses": {
+          "200": {
+            "description": "A list of job definitions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Job"
+                  }
+                },
+                "examples": {
+                  "jobs": {
+                    "value": [
+                      {
+                        "id": "openapi-averray-averray-http-api",
+                        "title": "Audit OpenAPI quality: Averray HTTP API",
+                        "jobType": "review",
+                        "requiredRole": "worker",
+                        "category": "api",
+                        "tier": "starter",
+                        "rewardAsset": "DOT",
+                        "rewardAmount": 3
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/definition": {
+      "get": {
+        "tags": [
+          "Jobs"
+        ],
+        "operationId": "getJobDefinition",
+        "summary": "Get one job definition",
+        "description": "Returns a single job definition by job id.",
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "query",
+            "required": true,
+            "description": "Job identifier to look up.",
+            "schema": {
+              "type": "string"
+            },
+            "example": "openapi-averray-averray-http-api"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The requested job definition.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/recommendations": {
+      "get": {
+        "tags": [
+          "Jobs"
+        ],
+        "operationId": "recommendJobs",
+        "summary": "Recommend jobs for a wallet",
+        "description": "Returns personalized job recommendations for the authenticated wallet.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Personalized job recommendations.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/JobRecommendation"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/jobs/claim": {
+      "post": {
+        "tags": [
+          "Jobs"
+        ],
+        "operationId": "claimJob",
+        "summary": "Claim a job",
+        "description": "Claims a job for the authenticated wallet. The job id and idempotency key may be supplied in the JSON body or query string.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "query",
+            "required": false,
+            "description": "Job identifier to claim when no JSON body field is supplied.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "idempotencyKey",
+            "in": "query",
+            "required": false,
+            "description": "Client-provided idempotency key used to avoid duplicate claims.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "jobId": {
+                    "type": "string"
+                  },
+                  "idempotencyKey": {
+                    "type": "string"
+                  }
+                }
+              },
+              "examples": {
+                "claim": {
+                  "value": {
+                    "jobId": "openapi-averray-averray-http-api",
+                    "idempotencyKey": "claim-openapi-audit-001"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Claimed session details.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/schemas/jobs": {
+      "get": {
+        "tags": [
+          "Schemas"
+        ],
+        "operationId": "listJobSchemas",
+        "summary": "List built-in job schemas",
+        "description": "Returns metadata for every built-in job submission schema.",
+        "responses": {
+          "200": {
+            "description": "Built-in job schema listing.",
+            "headers": {
+              "cache-control": {
+                "description": "Public cache hint for schema discovery.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "schemas",
+                    "count"
+                  ],
+                  "properties": {
+                    "schemas": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/JobSchemaSummary"
+                      }
+                    },
+                    "count": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "docs": {
+                      "type": "string",
+                      "format": "uri"
+                    }
+                  }
+                },
+                "examples": {
+                  "schemas": {
+                    "value": {
+                      "schemas": [
+                        {
+                          "$id": "schema://jobs/openapi-quality-audit-output",
+                          "description": "Structured output for OpenAPI quality audit jobs.",
+                          "path": "/schemas/jobs/openapi-quality-audit-output.json"
+                        }
+                      ],
+                      "count": 1,
+                      "docs": "https://github.com/averray-agent/agent/tree/main/docs/schemas/jobs"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/schemas/jobs/{name}": {
+      "get": {
+        "tags": [
+          "Schemas"
+        ],
+        "operationId": "getJobSchema",
+        "summary": "Get a built-in job schema",
+        "description": "Returns a public JSON Schema document for one built-in job schema name.",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "description": "Schema file name or schema slug.",
+            "schema": {
+              "type": "string"
+            },
+            "example": "openapi-quality-audit-output.json"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The requested JSON Schema document.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown built-in job schema.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "missing": {
+                    "value": {
+                      "status": "not_found",
+                      "message": "Unknown built-in job schema."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/status": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "operationId": "getAdminStatus",
+        "summary": "Return admin platform status",
+        "description": "Returns operational status, scheduler state, and admin-only platform counters.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Admin platform status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/admin/jobs/ingest/openapi": {
+      "post": {
+        "tags": [
+          "Admin"
+        ],
+        "operationId": "ingestOpenApiSpecs",
+        "summary": "Ingest OpenAPI quality-audit jobs",
+        "description": "Fetches configured OpenAPI specifications, converts suitable candidates into API quality-audit jobs, and optionally creates them.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenApiIngestRequest"
+              },
+              "examples": {
+                "dryRun": {
+                  "value": {
+                    "dryRun": true,
+                    "limit": 2,
+                    "specs": [
+                      {
+                        "provider": "averray",
+                        "specId": "averray-http-api",
+                        "apiTitle": "Averray HTTP API",
+                        "specUrl": "https://raw.githubusercontent.com/averray-agent/agent/main/docs/api/openapi.json",
+                        "localSurface": "mcp-server/src/protocols/http/server.js",
+                        "repo": "averray-agent/agent"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Dry-run candidate result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenApiIngestResult"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "OpenAPI quality-audit jobs were created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenApiIngestResult"
+                }
+              }
+            }
+          },
+          "207": {
+            "description": "Some jobs were created and some candidates failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenApiIngestResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "responses": {
+      "Unauthorized": {
+        "description": "Authentication is required.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "examples": {
+              "missingToken": {
+                "value": {
+                  "error": "missing_token",
+                  "message": "Authentication required.",
+                  "requestId": "f865d489-2400-469a-945a-3c54e74e5b9e"
+                }
+              }
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "The authenticated wallet does not have the required role.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "HealthResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "auth",
+          "components"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "degraded"
+            ]
+          },
+          "auth": {
+            "type": "object",
+            "required": [
+              "mode",
+              "domain",
+              "chainId"
+            ],
+            "properties": {
+              "mode": {
+                "type": "string"
+              },
+              "domain": {
+                "type": "string"
+              },
+              "chainId": {
+                "type": "integer"
+              }
+            }
+          },
+          "components": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ComponentHealth"
+            }
+          }
+        }
+      },
+      "ComponentHealth": {
+        "type": "object",
+        "required": [
+          "ok"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "backend": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "blockNumber": {
+            "type": "integer"
+          },
+          "signerConfigured": {
+            "type": "boolean"
+          },
+          "xcmWrapperConfigured": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": true
+      },
+      "Job": {
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "jobType",
+          "requiredRole",
+          "category",
+          "tier"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "jobType": {
+            "type": "string"
+          },
+          "requiredRole": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "tier": {
+            "type": "string"
+          },
+          "rewardAsset": {
+            "type": "string"
+          },
+          "rewardAmount": {
+            "type": "number"
+          },
+          "source": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": true
+      },
+      "JobRecommendation": {
+        "type": "object",
+        "required": [
+          "job"
+        ],
+        "properties": {
+          "job": {
+            "$ref": "#/components/schemas/Job"
+          },
+          "eligible": {
+            "type": "boolean"
+          },
+          "tierGate": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "Session": {
+        "type": "object",
+        "required": [
+          "sessionId",
+          "jobId",
+          "wallet",
+          "status"
+        ],
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "wallet": {
+            "type": "string",
+            "pattern": "^0x[a-fA-F0-9]{40}$"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "JobSchemaSummary": {
+        "type": "object",
+        "required": [
+          "$id",
+          "description",
+          "path"
+        ],
+        "properties": {
+          "$id": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "AdminStatus": {
+        "type": "object",
+        "description": "Admin-only platform status. The shape includes provider scheduler state and may grow as new operational views are added.",
+        "properties": {
+          "jobs": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "githubIngestion": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true
+          },
+          "openApiIngestion": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true
+          },
+          "openDataIngestion": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true
+          },
+          "osvIngestion": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true
+          },
+          "standardsIngestion": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true
+          },
+          "wikipediaIngestion": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": true
+      },
+      "OpenApiSpecTarget": {
+        "type": "object",
+        "required": [
+          "apiTitle",
+          "specUrl"
+        ],
+        "properties": {
+          "provider": {
+            "type": "string",
+            "default": "openapi"
+          },
+          "specId": {
+            "type": "string"
+          },
+          "apiTitle": {
+            "type": "string"
+          },
+          "specUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "localSurface": {
+            "type": "string"
+          },
+          "repo": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "OpenApiIngestRequest": {
+        "type": "object",
+        "properties": {
+          "specs": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/OpenApiSpecTarget"
+                }
+              },
+              {
+                "type": "string",
+                "description": "JSON array or compact line syntax accepted by the ingestion CLI."
+              }
+            ]
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 10
+          },
+          "minScore": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 55
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "OpenApiIngestResult": {
+        "type": "object",
+        "required": [
+          "provider",
+          "specCount",
+          "minScore",
+          "dryRun"
+        ],
+        "properties": {
+          "provider": {
+            "type": "string",
+            "example": "openapi"
+          },
+          "specCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "minScore": {
+            "type": "integer"
+          },
+          "dryRun": {
+            "type": "boolean"
+          },
+          "candidateCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "jobs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Job"
+            }
+          },
+          "created": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Job"
+            }
+          },
+          "skipped": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        },
+        "additionalProperties": true
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "requestId": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  }
+}

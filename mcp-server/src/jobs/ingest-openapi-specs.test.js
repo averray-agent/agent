@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
 
 import {
   fetchOpenApiDetails,
@@ -12,17 +15,17 @@ import {
 } from "./ingest-openapi-specs.js";
 
 const SPEC = {
-  provider: "stripe",
-  specId: "stripe-openapi",
-  apiTitle: "Stripe OpenAPI",
-  specUrl: "https://raw.githubusercontent.com/stripe/openapi/master/openapi/spec3.json",
+  provider: "averray",
+  specId: "averray-http-api",
+  apiTitle: "Averray HTTP API",
+  specUrl: "https://raw.githubusercontent.com/averray-agent/agent/main/docs/api/openapi.json",
   localSurface: "mcp-server/src/protocols/http/server.js",
   repo: "averray-agent/agent"
 };
 
 const OPENAPI_DOC = {
   openapi: "3.1.0",
-  info: { title: "Stripe OpenAPI", version: "2026-01-01" },
+  info: { title: "Averray HTTP API", version: "0.1.0" },
   paths: {
     "/v1/customers": {
       get: {
@@ -65,13 +68,13 @@ function makeFetch({ status = 200, ok = true } = {}) {
 test("parseOpenApiSpecs accepts JSON and compact line syntax", () => {
   assert.deepEqual(parseOpenApiSpecs(JSON.stringify([SPEC])), [SPEC]);
   assert.deepEqual(
-    parseOpenApiSpecs("Stripe OpenAPI|https://raw.githubusercontent.com/stripe/openapi/master/openapi/spec3.json|stripe|mcp-server/src/protocols/http/server.js|averray-agent/agent"),
+    parseOpenApiSpecs("Averray HTTP API|https://raw.githubusercontent.com/averray-agent/agent/main/docs/api/openapi.json|averray|mcp-server/src/protocols/http/server.js|averray-agent/agent"),
     [
       {
-        provider: "stripe",
+        provider: "averray",
         specId: "",
-        apiTitle: "Stripe OpenAPI",
-        specUrl: "https://raw.githubusercontent.com/stripe/openapi/master/openapi/spec3.json",
+        apiTitle: "Averray HTTP API",
+        specUrl: "https://raw.githubusercontent.com/averray-agent/agent/main/docs/api/openapi.json",
         localSurface: "mcp-server/src/protocols/http/server.js",
         repo: "averray-agent/agent"
       }
@@ -84,8 +87,8 @@ test("parseOpenApiDocument inspects JSON OpenAPI documents", () => {
 
   assert.equal(details.parseMode, "json");
   assert.equal(details.openapiVersion, "3.1.0");
-  assert.equal(details.title, "Stripe OpenAPI");
-  assert.equal(details.documentVersion, "2026-01-01");
+  assert.equal(details.title, "Averray HTTP API");
+  assert.equal(details.documentVersion, "0.1.0");
   assert.equal(details.pathCount, 1);
   assert.equal(details.operationCount, 2);
   assert.equal(details.schemaCount, 1);
@@ -125,7 +128,7 @@ test("toPlatformJob creates OpenAPI quality audit job", async () => {
   const details = await fetchOpenApiDetails({ target: SPEC, fetchImpl: makeFetch() });
   const job = toPlatformJob(details, 95);
 
-  assert.equal(job.id, "openapi-stripe-stripe-openapi");
+  assert.equal(job.id, "openapi-averray-averray-http-api");
   assert.equal(job.category, "api");
   assert.equal(job.tier, "starter");
   assert.equal(job.verifierMode, "benchmark");
@@ -138,8 +141,8 @@ test("toPlatformJob creates OpenAPI quality audit job", async () => {
 
 test("openApiSpecKey dedupes by provider, URL, and local surface", () => {
   assert.equal(
-    openApiSpecKey({ provider: "Stripe", specUrl: SPEC.specUrl, localSurface: SPEC.localSurface }),
-    "stripe|https://raw.githubusercontent.com/stripe/openapi/master/openapi/spec3.json|mcp-server/src/protocols/http/server.js"
+    openApiSpecKey({ provider: "Averray", specUrl: SPEC.specUrl, localSurface: SPEC.localSurface }),
+    "averray|https://raw.githubusercontent.com/averray-agent/agent/main/docs/api/openapi.json|mcp-server/src/protocols/http/server.js"
   );
 });
 
@@ -156,6 +159,21 @@ test("ingestOpenApiSpecs fetches configured specs and returns jobs", async () =>
   assert.equal(payload.count, 1);
   assert.equal(payload.jobs[0].source.apiTitle, SPEC.apiTitle);
   assert.deepEqual(payload.skipped, []);
+});
+
+test("committed Averray OpenAPI spec stays parseable and useful", async () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const specPath = resolve(here, "../../../docs/api/openapi.json");
+  const raw = await readFile(specPath, "utf8");
+  const details = parseOpenApiDocument(raw, "application/json");
+
+  assert.equal(details.openapiVersion, "3.1.0");
+  assert.equal(details.title, "Averray HTTP API");
+  assert.ok(details.pathCount >= 8);
+  assert.ok(details.operationCount >= 8);
+  assert.equal(details.missingOperationDescriptions, 0);
+  assert.equal(details.missingOperationIds, 0);
+  assert.ok(details.exampleCount >= 3);
 });
 
 test("ingestOpenApiSpecs reports fetch failures as skipped targets", async () => {
