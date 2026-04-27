@@ -144,6 +144,36 @@ test("getAdminStatus surfaces recurring scheduler anomalies", async () => {
   assert.equal(status.jobStaleSweeper.enabled, false);
 });
 
+test("getAdminStatus reports treasury policy failures without failing the status response", async () => {
+  const service = makePlatformService({
+    config: {
+      treasuryPolicyAddress: "0x1111111111111111111111111111111111111111"
+    },
+    isEnabled() {
+      return true;
+    },
+    async getTreasuryPolicyStatus() {
+      const error = new Error("getTreasuryPolicyStatus failed: require(false)");
+      error.code = "blockchain_revert";
+      error.details = {
+        operation: "getTreasuryPolicyStatus",
+        rawCode: "CALL_EXCEPTION",
+        rawReason: "require(false)"
+      };
+      throw error;
+    }
+  });
+
+  const status = await service.getAdminStatus();
+
+  assert.equal(status.maintenance.policy.enabled, true);
+  assert.equal(status.maintenance.policy.policyAddress, "0x1111111111111111111111111111111111111111");
+  assert.equal(status.maintenance.policy.error.code, "blockchain_revert");
+  assert.equal(status.maintenance.policy.error.details.rawReason, "require(false)");
+  assert.ok(status.anomalies.some((entry) => entry.code === "policy_status_unavailable"));
+  assert.equal(status.jobStaleSweeper.enabled, false);
+});
+
 test("getAdminStatus surfaces public source ingestion scheduler status", async () => {
   const service = makePlatformService();
   service.githubIssueIngestionScheduler = {

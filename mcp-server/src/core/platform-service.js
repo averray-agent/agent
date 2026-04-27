@@ -28,6 +28,15 @@ const INGESTION_PROVIDER_DEFINITIONS = [
   ["openApi", "openApiIngestion", "OpenAPI quality", "specCount"]
 ];
 
+const DEFAULT_TREASURY_POLICY_STATUS = {
+  enabled: false,
+  policyAddress: undefined,
+  paused: undefined,
+  owner: undefined,
+  pauser: undefined,
+  risk: {}
+};
+
 export class PlatformService {
   constructor(
     jobs,
@@ -142,14 +151,7 @@ export class PlatformService {
       jobStaleSweeper,
       recentSessions
     ] = await Promise.all([
-      this.blockchainGateway?.getTreasuryPolicyStatus?.() ?? {
-        enabled: false,
-        policyAddress: undefined,
-        paused: undefined,
-        owner: undefined,
-        pauser: undefined,
-        risk: {}
-      },
+      getTreasuryPolicyStatusSafely(this.blockchainGateway),
       this.jobCatalogService.getRecurringTemplateStatus(),
       this.recurringScheduler?.getStatus?.() ?? { enabled: false, running: false, templates: [] },
       this.githubIssueIngestionScheduler?.getStatus?.() ?? {
@@ -280,6 +282,14 @@ export class PlatformService {
         severity: "high",
         code: "policy_paused",
         message: "Treasury policy is paused."
+      });
+    }
+    if (policy?.error) {
+      anomalies.push({
+        severity: "medium",
+        code: "policy_status_unavailable",
+        message: "Treasury policy status is unavailable.",
+        details: policy.error
       });
     }
     for (const template of scheduler.templates ?? []) {
@@ -787,6 +797,27 @@ function sanitizeProviderOperationStatus(status) {
       errors: []
     }
   };
+}
+
+async function getTreasuryPolicyStatusSafely(blockchainGateway) {
+  if (!blockchainGateway?.getTreasuryPolicyStatus) {
+    return { ...DEFAULT_TREASURY_POLICY_STATUS };
+  }
+
+  try {
+    return await blockchainGateway.getTreasuryPolicyStatus();
+  } catch (error) {
+    return {
+      ...DEFAULT_TREASURY_POLICY_STATUS,
+      enabled: Boolean(blockchainGateway.isEnabled?.()),
+      policyAddress: blockchainGateway.config?.treasuryPolicyAddress || undefined,
+      error: {
+        code: error?.code ?? "policy_status_error",
+        message: error?.message ?? "Treasury policy status failed.",
+        details: error?.details
+      }
+    };
+  }
 }
 
 function buildProviderOperations(statuses) {
