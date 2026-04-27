@@ -4,7 +4,6 @@ import { cn } from "@/lib/utils/cn";
 import { Sparkline } from "@/components/overview/Sparkline";
 import { BadgeStrip } from "./BadgeStrip";
 import { TierChip } from "./TierChip";
-import { SourceBadge } from "@/components/runs/StatePill";
 import type { AgentRecord } from "./types";
 
 export interface AgentDirectoryTableProps {
@@ -125,26 +124,21 @@ export function AgentDirectoryTable({
                       </div>
                     </Td>
                     <Td>
-                      <div className="flex items-center gap-2">
-                        {a.activity.source ? (
-                          <SourceBadge kind={a.activity.source} />
-                        ) : null}
-                        <span
-                          className="text-[13px] leading-[1.3] text-[var(--avy-ink)]"
-                          style={{ letterSpacing: 0 }}
-                        >
-                          {activityParts.map((chunk, i, arr) => (
-                            <span key={i}>
-                              {chunk}
-                              {i < arr.length - 1 ? (
-                                <span className="font-[family-name:var(--font-mono)] text-[var(--avy-accent)]">
-                                  {a.activity.ref}
-                                </span>
-                              ) : null}
-                            </span>
-                          ))}
-                        </span>
-                      </div>
+                      <span
+                        className="text-[13px] leading-[1.3] text-[var(--avy-ink)]"
+                        style={{ letterSpacing: 0 }}
+                      >
+                        {activityParts.map((chunk, i, arr) => (
+                          <span key={i}>
+                            {chunk}
+                            {i < arr.length - 1 ? (
+                              <span className="font-[family-name:var(--font-mono)] text-[var(--avy-accent)]">
+                                {a.activity.ref}
+                              </span>
+                            ) : null}
+                          </span>
+                        ))}
+                      </span>
                       <div
                         className="mt-0.5 font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]"
                         style={{ letterSpacing: 0 }}

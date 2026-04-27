@@ -1,5 +1,3 @@
-import type { SourceKind } from "@/components/runs/StatePill";
-
 export type AgentTier = "T1" | "T2" | "T3";
 export type AgentState = "active" | "idle" | "slashed";
 export type AgentSpecialty = "coding" | "writer-gov" | "ops" | "gov-review";
@@ -44,12 +42,13 @@ export interface AgentRecord {
   specialty: AgentSpecialty;
   stake: AgentStake;
   /**
-   * Last meaningful action by this agent. `source` is set when the
-   * activity is on an ingested-source run (GitHub PR / Wikipedia
-   * proposal) so the directory row can render a SourceBadge — receipts
-   * and policy refs leave it undefined.
+   * Last meaningful action by this agent. The `ref` here is heterogeneous
+   * — it can be a run id, a receipt id, or a policy tag — so we don't
+   * carry a SourceBadge here; an inconsistently-rendering badge would
+   * confuse more than it clarifies. Sessions are 1:1 with runs and do
+   * carry a source badge.
    */
-  activity: { msg: string; ref: string; when: string; source?: SourceKind };
+  activity: { msg: string; ref: string; when: string };
   state: AgentState;
   recentRuns: AgentRecentRun[];
   slashes: AgentSlash[];

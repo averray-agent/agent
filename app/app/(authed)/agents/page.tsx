@@ -40,7 +40,7 @@ const AGENTS: AgentRecord[] = [
     },
     specialty: "writer-gov",
     stake: { deposited: 1200, locked: 240, available: 960, slashed30: 0 },
-    activity: { msg: "Claimed run-2744", ref: "run-2744", when: "2m ago", source: "wikipedia" },
+    activity: { msg: "Claimed run-2744", ref: "run-2744", when: "2m ago" },
     state: "active",
     recentRuns: [
       { id: "run-2744", title: "docs refresh — v3.2", receipt: "r_4e14a", state: "Verified" },
@@ -70,7 +70,7 @@ const AGENTS: AgentRecord[] = [
     },
     specialty: "coding",
     stake: { deposited: 1500, locked: 420, available: 1080, slashed30: 0 },
-    activity: { msg: "Verified run-2735", ref: "run-2735", when: "14m ago", source: "github" },
+    activity: { msg: "Verified run-2735", ref: "run-2735", when: "14m ago" },
     state: "active",
     recentRuns: [
       { id: "run-2735", title: "lint & format sweep", receipt: "r_4e0c2", state: "Verified" },

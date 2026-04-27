@@ -1,3 +1,4 @@
+import type { SourceKind } from "@/components/runs/StatePill";
 import type {
   LifecycleStageState,
   SessionAsset,
@@ -138,6 +139,33 @@ function jobFor(jobs: RawRecord[], jobId: string): RawRecord {
   return jobs.find((job) => text(job.id) === jobId) ?? {};
 }
 
+/**
+ * Map a job's source.type onto the operator-app SourceKind enum so the
+ * sessions table can render the same SourceBadge already shown on the
+ * runs surface. Returns undefined for native or unknown sources so the
+ * row simply omits the badge — there's no fallback "OSS" treatment.
+ *
+ * Sessions are 1:1 with runs, so we read straight off the linked job
+ * record. If the backend later adds new source kinds to JobSource, the
+ * SourceKind union will need a corresponding extension; until then,
+ * unknown source.type values fall through to undefined.
+ */
+function sourceKindFromJob(job: RawRecord): SourceKind | undefined {
+  const sourceType = text(asRecord(job.source).type);
+  switch (sourceType) {
+    case "github_issue":
+      return "github";
+    case "wikipedia_article":
+      return "wikipedia";
+    case "osv_advisory":
+      return "osv";
+    case "open_data_dataset":
+      return "data_gov";
+    default:
+      return undefined;
+  }
+}
+
 function lifecycle(session: RawRecord) {
   const status = text(session.status, "claimed");
   const entries = asArray(session.statusHistory);
@@ -169,9 +197,12 @@ export function buildSessionDetails(sessionPayload: unknown, jobsPayload: unknow
     const updatedAt = session.updatedAt ?? session.resolvedAt ?? session.submittedAt ?? session.claimedAt;
     const verification = asRecord(session.verification);
 
+    const sourceKind = sourceKindFromJob(job);
+
     return {
       id,
       runRef: jobId,
+      ...(sourceKind ? { source: sourceKind } : {}),
       job: {
         title: text(job.title, text(job.description, titleFromId(jobId))),
         meta: `${jobId} · ${text(job.category, "work")} · ${tierLabel(job.tier)}`,
