@@ -62,6 +62,26 @@ test("MemoryStateStore mutation receipts round-trip", async () => {
   assert.deepEqual(loaded, receipt);
 });
 
+test("MemoryStateStore content blobs round-trip by lowercase hash", async () => {
+  const store = new MemoryStateStore();
+  const record = {
+    hash: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    payload: { rationale: "upheld" },
+    contentType: "arbitrator_reasoning",
+    ownerWallet: "0x1111111111111111111111111111111111111111",
+    verdict: "fail",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    autoPublicAt: "2026-06-30T00:00:00.000Z"
+  };
+
+  await store.upsertContent(record);
+
+  assert.deepEqual(
+    await store.getContent("0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"),
+    record
+  );
+});
+
 test("MemoryStateStore xcm observations round-trip and clear from pending when processed", async () => {
   const store = new MemoryStateStore();
   await store.upsertXcmObservation({

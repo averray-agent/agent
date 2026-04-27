@@ -472,6 +472,21 @@ test("http smoke: /disputes exposes human-review sessions and records verdict/re
     const verdictBody = await verdict.json();
     assert.equal(verdictBody.status, "resolved");
     assert.equal(verdictBody.verdict, "upheld");
+    assert.match(verdictBody.reasoningHash, /^0x[a-f0-9]{64}$/u);
+    assert.equal(verdictBody.metadataURI, `urn:averray:content:${verdictBody.reasoningHash}`);
+
+    const privateContent = await fetch(`${base}/content/${encodeURIComponent(verdictBody.reasoningHash)}`);
+    assert.equal(privateContent.status, 403);
+
+    const ownedContent = await fetch(`${base}/content/${encodeURIComponent(verdictBody.reasoningHash)}`, {
+      headers: { authorization: `Bearer ${adminToken}` }
+    });
+    assert.equal(ownedContent.status, 200);
+    const contentBody = await ownedContent.json();
+    assert.equal(contentBody.hash, verdictBody.reasoningHash);
+    assert.equal(contentBody.contentType, "arbitrator_reasoning");
+    assert.equal(contentBody.visibility, "owner_only");
+    assert.equal(contentBody.payload.rationale, "Submission needs correction.");
 
     const release = await fetch(`${base}/disputes/${encodeURIComponent(dispute.id)}/release`, {
       method: "POST",

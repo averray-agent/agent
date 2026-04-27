@@ -44,6 +44,7 @@ const DISCOVERY_AUTHENTICATED_ENDPOINTS = [
   { path: "/admin/jobs/ingest/open-data", description: "Admin-gated Data.gov open-data quality audit ingestion preview/create endpoint." },
   { path: "/admin/jobs/ingest/osv", description: "Admin-gated OSV npm advisory ingestion preview/create endpoint." },
   { path: "/admin/jobs/ingest/wikipedia", description: "Admin-gated Wikipedia maintenance ingestion preview/create endpoint." },
+  { path: "/content/:hash", description: "Hash-addressed content blob with read-time disclosure visibility." },
   { path: "/disputes", description: "Operator dispute queue derived from sessions requiring human review." },
   { path: "/disputes/:id", description: "Detailed dispute evidence, timeline, verdict, and stake release state." },
   { path: "/session", description: "Fetch a single session by id (owner-scoped)." },

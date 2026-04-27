@@ -44,6 +44,7 @@ export class MemoryStateStore {
     this.mutationReceipts = new Map();
     this.xcmObservations = new Map();
     this.serviceStates = new Map();
+    this.content = new Map();
   }
 
   async getSession(sessionId) {
@@ -201,6 +202,16 @@ export class MemoryStateStore {
   async upsertMutationReceipt(bucket, key, receipt) {
     this.mutationReceipts.set(`${bucket}:${key}`, receipt);
     return receipt;
+  }
+
+  async getContent(hash) {
+    return this.content.get(String(hash ?? "").toLowerCase());
+  }
+
+  async upsertContent(record) {
+    const key = String(record?.hash ?? "").toLowerCase();
+    this.content.set(key, record);
+    return record;
   }
 
   async getXcmObservation(requestId) {
@@ -473,6 +484,19 @@ export class RedisStateStore {
     await this.connect();
     await this.client.set(this.key("mutation-receipt", `${bucket}:${key}`), JSON.stringify(receipt));
     return receipt;
+  }
+
+  async getContent(hash) {
+    await this.connect();
+    const raw = await this.client.get(this.key("content", String(hash ?? "").toLowerCase()));
+    return raw ? JSON.parse(raw) : undefined;
+  }
+
+  async upsertContent(record) {
+    await this.connect();
+    const key = String(record?.hash ?? "").toLowerCase();
+    await this.client.set(this.key("content", key), JSON.stringify(record));
+    return record;
   }
 
   async getXcmObservation(requestId) {

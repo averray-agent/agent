@@ -16,8 +16,16 @@ import { getAddress, keccak256, toUtf8Bytes } from "ethers";
 import { buildBadgeFromSession } from "../../core/badge-metadata.js";
 import { buildAgentProfile } from "../../core/agent-profile.js";
 import { buildDiscoveryManifest } from "../../core/discovery-manifest.js";
-import { hashCanonicalContent } from "../../core/canonical-content.js";
 import { buildDisputeResolution, ARBITRATOR_SLA_SECONDS } from "../../core/dispute-resolution.js";
+import {
+  assertContentHashMatches,
+  buildContentRecord,
+  contentResponse,
+  normalizeContentHash,
+  publicContentHeaders,
+  requireContentAccess,
+  resolveContentAccess
+} from "../../core/content-addressed-store.js";
 import { transitionSession } from "../../core/session-state-machine.js";
 import { TIER_REQUIREMENTS } from "../../core/job-catalog-service.js";
 import {
@@ -700,20 +708,45 @@ function publicContentUri(hash) {
 function buildDisputeReasoningReceipt({ id, dispute, payload, auth, verdict, decidedAt }) {
   const rationale = typeof payload?.rationale === "string" ? payload.rationale.trim() : "";
   const explicitHash = typeof payload?.reasoningHash === "string" && /^0x[a-fA-F0-9]{64}$/u.test(payload.reasoningHash)
-    ? payload.reasoningHash
+    ? payload.reasoningHash.toLowerCase()
     : undefined;
-  const reasoningHash = explicitHash ?? hashCanonicalContent({
+  const reasoningPayload = {
     disputeId: id,
     sessionId: dispute.sessionId,
     verdict,
     rationale,
     decidedBy: auth.wallet,
     decidedAt
+  };
+  const contentRecord = buildContentRecord({
+    payload: reasoningPayload,
+    contentType: "arbitrator_reasoning",
+    ownerWallet: dispute.claimant,
+    verdict: verdict === "upheld" ? "fail" : "pass",
+    createdAt: decidedAt
   });
+  if (explicitHash && explicitHash !== contentRecord.hash) {
+    throw new ValidationError("reasoningHash does not match canonical dispute reasoning payload.", {
+      expected: contentRecord.hash,
+      actual: explicitHash
+    });
+  }
+  const reasoningHash = contentRecord.hash;
   const metadataURI = typeof payload?.metadataURI === "string" && payload.metadataURI.trim()
     ? payload.metadataURI.trim()
     : publicContentUri(reasoningHash);
-  return { rationale, reasoningHash, metadataURI };
+  return { rationale, reasoningHash, metadataURI, contentRecord };
+}
+
+async function optionalAuth(request, url) {
+  try {
+    return await authMiddleware(request, url, { allowQueryToken: true });
+  } catch (error) {
+    if (error instanceof AuthenticationError) {
+      return undefined;
+    }
+    throw error;
+  }
 }
 
 async function resolveRemainingPayout(session) {
@@ -919,6 +952,7 @@ function metricPathLabel(pathname) {
     "/alerts",
     "/audit",
     "/policies",
+    "/content",
     "/disputes",
     "/verifier/handlers",
     "/verifier/result",
@@ -935,6 +969,7 @@ function metricPathLabel(pathname) {
   if (/^\/disputes\/[^/]+\/verdict$/u.test(pathname)) return "/disputes/:id/verdict";
   if (/^\/disputes\/[^/]+\/release$/u.test(pathname)) return "/disputes/:id/release";
   if (pathname.startsWith("/disputes/")) return "/disputes/:id";
+  if (pathname.startsWith("/content/")) return "/content/:hash";
   if (pathname.startsWith("/policies/")) return "/policies/:tag";
   if (pathname.startsWith("/badges/")) return "/badges/:sessionId";
   if (pathname.startsWith("/agents/")) return "/agents/:wallet";
@@ -1492,6 +1527,45 @@ const server = createServer(async (request, response) => {
       return respond(response, 200, policy);
     }
 
+    if (request.method === "POST" && pathname === "/content") {
+      const auth = await authMiddleware(request, url);
+      const payload = await readJsonBody(request);
+      const ownerWallet = typeof payload?.ownerWallet === "string" && payload.ownerWallet.trim()
+        ? payload.ownerWallet.trim()
+        : auth.wallet;
+      if (!walletsMatch(ownerWallet, auth.wallet) && !hasRole(auth.claims, "admin")) {
+        throw new AuthorizationError("Only admins can store content for another owner wallet.", "content_owner_forbidden");
+      }
+      const record = buildContentRecord({
+        payload: payload?.payload,
+        contentType: payload?.contentType,
+        ownerWallet,
+        verdict: payload?.verdict,
+        publishedAt: payload?.published === true ? new Date().toISOString() : payload?.publishedAt,
+        autoPublicAt: payload?.autoPublicAt
+      });
+      if (payload?.hash !== undefined) {
+        assertContentHashMatches({ hash: payload.hash, payload: payload.payload });
+      }
+      await stateStore.upsertContent?.(record);
+      const access = resolveContentAccess(record, auth);
+      return respond(response, 201, {
+        ...contentResponse(record, access),
+        contentURI: publicContentUri(record.hash)
+      });
+    }
+
+    if (request.method === "GET" && pathname.startsWith("/content/")) {
+      const hash = normalizeContentHash(decodeURIComponent(pathname.slice("/content/".length)));
+      const record = await stateStore.getContent?.(hash);
+      if (!record) {
+        return respond(response, 404, { status: "not_found", hash });
+      }
+      const auth = await optionalAuth(request, url);
+      const access = requireContentAccess(record, auth);
+      return respond(response, 200, contentResponse(record, access), publicContentHeaders(record, access));
+    }
+
     if (request.method === "GET" && pathname === "/disputes") {
       await authMiddleware(request, url);
       return respond(response, 200, await listDisputes(parseLimit(url, 100, 500)));
@@ -1540,6 +1614,7 @@ const server = createServer(async (request, response) => {
         verdict: resolution.verdict,
         decidedAt
       });
+      await stateStore.upsertContent?.(reasoning.contentRecord);
       const chainReceipt = gateway?.isEnabled?.() && typeof gateway.resolveDispute === "function"
         ? await gateway.resolveDispute(
             session.chainJobId ?? session.jobId,
