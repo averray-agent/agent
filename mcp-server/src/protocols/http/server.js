@@ -858,7 +858,9 @@ async function buildDisputeFromSession(session) {
         jobId: session.jobId,
         jobTitle: job?.title,
         requirements: job?.verifierTerms,
-        claimStake: session.claimStake
+        claimStake: session.claimStake,
+        claimFee: session.claimFee,
+        totalClaimLock: session.totalClaimLock
       }),
       after: compactObject({
         submission: session.submission,
@@ -874,6 +876,8 @@ async function buildDisputeFromSession(session) {
     workerPayout: verdictReceipt?.workerPayout,
     remainingPayout: verdictReceipt?.remainingPayout,
     stakedAmount: Number(session.claimStake ?? 0),
+    claimFee: Number(session.claimFee ?? 0),
+    totalClaimLock: Number(session.totalClaimLock ?? session.claimStake ?? 0),
     release: releaseReceipt ?? null,
     timeline: timeline.sort((left, right) => String(left.at ?? "").localeCompare(String(right.at ?? "")))
   };

@@ -234,7 +234,7 @@ export function buildSessionDetails(sessionPayload: unknown, jobsPayload: unknow
           label: "session.claimed",
           from: shortAddress(session.wallet),
           to: "AgentAccountCore",
-          amount: `${amount(session.claimStake)} ${rewardAsset}`,
+          amount: `${amount(session.totalClaimLock ?? session.claimStake)} ${rewardAsset}`,
           tx: text(session.chainJobId, "-"),
           tone: "accent",
         },

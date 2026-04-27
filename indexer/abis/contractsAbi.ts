@@ -4,6 +4,7 @@ export const EscrowCoreAbi = parseAbi([
   "event JobFunded(bytes32 indexed jobId, address indexed poster, address indexed asset, uint256 totalReserved, uint8 payoutMode)",
   "event JobCreated(bytes32 indexed jobId, address indexed poster, bytes32 indexed specHash, address asset, uint256 totalReserved, uint8 payoutMode)",
   "event JobClaimed(bytes32 indexed jobId, address indexed worker, uint256 claimExpiry, uint256 claimStake)",
+  "event ClaimEconomicsLocked(bytes32 indexed jobId, address indexed worker, uint256 claimStake, uint256 claimFee, bool waived, uint256 claimNumber)",
   "event WorkSubmitted(bytes32 indexed jobId, address indexed worker, bytes32 evidenceHash)",
   "event Submitted(bytes32 indexed jobId, address indexed worker, bytes32 indexed payloadHash)",
   "event JobReopened(bytes32 indexed jobId)",
@@ -15,7 +16,7 @@ export const EscrowCoreAbi = parseAbi([
   "event JobClosed(bytes32 indexed jobId, address indexed worker, uint256 releasedAmount)",
   "event Disclosed(bytes32 indexed hash, address indexed byWallet, uint64 timestamp)",
   "event AutoDisclosed(bytes32 indexed hash, uint64 timestamp)",
-  "function jobs(bytes32 jobId) view returns ((address poster, address worker, address asset, bytes32 verifierMode, bytes32 category, bytes32 specHash, uint256 reward, uint256 opsReserve, uint256 contingencyReserve, uint256 released, uint256 claimExpiry, uint256 claimStake, uint16 claimStakeBps, uint256 rejectedAt, uint256 disputedAt, uint8 payoutMode, uint8 state))"
+  "function jobs(bytes32 jobId) view returns ((address poster, address worker, address asset, bytes32 verifierMode, bytes32 category, bytes32 specHash, uint256 reward, uint256 opsReserve, uint256 contingencyReserve, uint256 released, uint256 claimExpiry, uint256 claimStake, uint16 claimStakeBps, uint256 claimFee, uint16 claimFeeBps, bool claimEconomicsWaived, address rejectingVerifier, uint256 rejectedAt, uint256 disputedAt, uint8 payoutMode, uint8 state))"
 ]);
 
 export const ReputationSbtAbi = parseAbi([
@@ -36,7 +37,8 @@ export const TreasuryPolicyAbi = parseAbi([
 export const AgentAccountCoreAbi = parseAbi([
   "event JobStakeLocked(address indexed account, address indexed asset, uint256 amount)",
   "event JobStakeReleased(address indexed account, address indexed asset, uint256 amount)",
-  "event JobStakeSlashed(address indexed account, address indexed asset, uint256 amount, uint256 posterAmount, uint256 treasuryAmount)"
+  "event JobStakeSlashed(address indexed account, address indexed asset, uint256 amount, uint256 posterAmount, uint256 treasuryAmount)",
+  "event ClaimFeeSlashed(address indexed account, address indexed asset, uint256 amount, address indexed verifierRecipient, uint256 verifierAmount, uint256 treasuryAmount)"
 ]);
 
 export const XcmWrapperAbi = parseAbi([

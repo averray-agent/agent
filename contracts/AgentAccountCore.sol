@@ -100,6 +100,14 @@ contract AgentAccountCore is ReentrancyGuard {
         uint256 posterAmount,
         uint256 treasuryAmount
     );
+    event ClaimFeeSlashed(
+        address indexed account,
+        address indexed asset,
+        uint256 amount,
+        address indexed verifierRecipient,
+        uint256 verifierAmount,
+        uint256 treasuryAmount
+    );
     event Borrowed(address indexed account, address indexed asset, uint256 amount);
     event Repaid(address indexed account, address indexed asset, uint256 amount);
     event AgentTransfer(address indexed from, address indexed to, address indexed asset, uint256 amount);
@@ -468,6 +476,34 @@ contract AgentAccountCore is ReentrancyGuard {
         }
 
         emit JobStakeSlashed(account, asset, amount, posterAmount, treasuryAmount);
+    }
+
+    function slashClaimFee(address account, address asset, uint256 amount, address verifierRecipient)
+        external
+        nonReentrant
+        onlyOperator
+        whenNotPaused
+        onlySupportedAsset(asset)
+    {
+        if (amount == 0) {
+            return;
+        }
+
+        AssetPosition storage position = positions[account][asset];
+        require(position.jobStakeLocked >= amount, "INSUFFICIENT_STAKE");
+        position.jobStakeLocked -= amount;
+
+        uint256 verifierAmount = verifierRecipient == address(0) ? 0 : (amount * policy.claimFeeVerifierBps()) / 10_000;
+        uint256 treasuryAmount = amount - verifierAmount;
+
+        if (verifierAmount > 0) {
+            SafeTransfer.safeTransfer(asset, verifierRecipient, verifierAmount);
+        }
+        if (treasuryAmount > 0) {
+            policy.recordOutflow(treasuryAmount);
+        }
+
+        emit ClaimFeeSlashed(account, asset, amount, verifierRecipient, verifierAmount, treasuryAmount);
     }
 
     /**

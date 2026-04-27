@@ -170,6 +170,21 @@ check "discovery publisher"                "$EXPECTED_OWNER" "$(call "$DISCOVERY
 check_bool "arbitrator"                    "true" "$(call "$TREASURY_POLICY" "arbitrators(address)(bool)" "$EXPECTED_ARBITRATOR")"
 check_bool "approvedAsset(token)"          "true" "$(call "$TREASURY_POLICY" "approvedAssets(address)(bool)" "$TOKEN_ADDRESS")"
 
+if [[ "$(echo "$manifest" | jq -r '.parameters // empty')" != "" ]]; then
+  echo ""
+  echo "Launch parameters:"
+  check "defaultClaimStakeBps" "$(echo "$manifest" | jq -r '.parameters.defaultClaimStakeBps')" \
+    "$(call "$TREASURY_POLICY" "defaultClaimStakeBps()(uint16)")"
+  check "onboardingWaiverClaimCount" "$(echo "$manifest" | jq -r '.parameters.onboardingWaiverClaimCount')" \
+    "$(call "$TREASURY_POLICY" "onboardingWaiverClaimCount()(uint256)")"
+  check "claimFeeBps" "$(echo "$manifest" | jq -r '.parameters.claimFeeBps')" \
+    "$(call "$TREASURY_POLICY" "claimFeeBps()(uint16)")"
+  check "minClaimFee(token)" "$(echo "$manifest" | jq -r '.parameters.minClaimFee')" \
+    "$(call "$TREASURY_POLICY" "minClaimFeeByAsset(address)(uint256)" "$TOKEN_ADDRESS")"
+  check "claimFeeVerifierBps" "$(echo "$manifest" | jq -r '.parameters.claimFeeVerifierBps')" \
+    "$(call "$TREASURY_POLICY" "claimFeeVerifierBps()(uint16)")"
+fi
+
 echo ""
 if [[ "$fail" == "0" ]]; then
   echo "All checks passed."

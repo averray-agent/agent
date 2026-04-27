@@ -10,6 +10,7 @@ import {
   buildFundedJobFromClaim,
   updateFundedJobFromSession
 } from "./funded-jobs.js";
+import { computeClaimEconomics, countClaimedSessions } from "./claim-economics.js";
 
 export class JobExecutionService {
   constructor(
@@ -19,7 +20,8 @@ export class JobExecutionService {
     eventBus = undefined,
     accountMutationService = undefined,
     getDefaultClaimStakeBps = async () => 500,
-    getClaimableJobDefinition = getJobDefinition
+    getClaimableJobDefinition = getJobDefinition,
+    getClaimEconomicsConfig = async () => ({})
   ) {
     this.stateStore = stateStore;
     this.blockchainGateway = blockchainGateway;
@@ -28,6 +30,7 @@ export class JobExecutionService {
     this.eventBus = eventBus;
     this.accountMutationService = accountMutationService;
     this.getDefaultClaimStakeBps = getDefaultClaimStakeBps;
+    this.getClaimEconomicsConfig = getClaimEconomicsConfig;
   }
 
   async claimJob(wallet, jobId, protocol, idempotencyKey) {
@@ -79,20 +82,30 @@ export class JobExecutionService {
       const chainJobId = this.blockchainGateway?.isEnabled()
         ? this.blockchainGateway.toJobId(jobId)
         : jobId;
-      const claimStakeBps = await this.getDefaultClaimStakeBps();
-      const claimStake = Math.max((Number(job.rewardAmount ?? 0) * claimStakeBps) / 10_000, 0);
+      const priorClaimCount = countClaimedSessions(await this.collectSessionHistory(wallet));
+      const claimEconomicsConfig = await this.getClaimEconomicsConfig();
+      let claimEconomics = computeClaimEconomics({
+        rewardAmount: job.rewardAmount,
+        rewardAsset: job.rewardAsset,
+        priorClaimCount,
+        claimStakeBps: await this.getDefaultClaimStakeBps(),
+        ...claimEconomicsConfig
+      });
       if (this.blockchainGateway?.isEnabled()) {
         const live = await this.blockchainGateway.getJob(jobId);
         if (live.state !== 0 && live.state !== 1) {
           throw new ConflictError(`Job ${jobId} is not claimable in its current on-chain state.`, "job_not_claimable");
         }
         if (this.blockchainGateway.ensureJob) {
-          await this.blockchainGateway.ensureJob(job, jobId, claimStake);
+          await this.blockchainGateway.ensureJob(job, jobId, claimEconomics.totalClaimLock);
         }
-        await this.blockchainGateway.ensureClaimStakeLiquidity?.(job.rewardAsset, claimStake);
+        if (typeof this.blockchainGateway.previewClaimEconomics === "function") {
+          claimEconomics = await this.blockchainGateway.previewClaimEconomics(wallet, jobId).catch(() => claimEconomics);
+        }
+        await this.blockchainGateway.ensureClaimStakeLiquidity?.(job.rewardAsset, claimEconomics.totalClaimLock);
         await this.blockchainGateway.claimJob(jobId);
-      } else if (claimStake > 0) {
-        await this.accountMutationService?.lockJobStake?.(wallet, job.rewardAsset, claimStake, undefined);
+      } else if (claimEconomics.totalClaimLock > 0) {
+        await this.accountMutationService?.lockJobStake?.(wallet, job.rewardAsset, claimEconomics.totalClaimLock, undefined);
       }
 
       const baseSession = {
@@ -100,8 +113,13 @@ export class JobExecutionService {
         wallet,
         jobId,
         chainJobId,
-        claimStake,
-        claimStakeBps,
+        claimStake: claimEconomics.claimStake,
+        claimStakeBps: claimEconomics.claimStakeBps,
+        claimFee: claimEconomics.claimFee,
+        claimFeeBps: claimEconomics.claimFeeBps,
+        claimEconomicsWaived: claimEconomics.claimEconomicsWaived,
+        claimNumber: claimEconomics.claimNumber,
+        totalClaimLock: claimEconomics.totalClaimLock,
         idempotencyKey,
         protocolHistory: [protocol]
       };

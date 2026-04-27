@@ -24,6 +24,10 @@ Recommended starting values:
 | `BORROW_CAP` | `25 DOT` per account | `25000000000000000000` | High enough to help a good worker bridge claim stake, low enough that one account cannot lever the system hard. |
 | `MIN_COLLATERAL_RATIO_BPS` | `20000` (200%) | `20000` | More conservative than the current 150% testnet setting while liquidation does not yet exist. |
 | `DEFAULT_CLAIM_STAKE_BPS` | `1000` (10%) | `1000` | Doubles worker skin-in-the-game versus testnet without making starter jobs unusable. |
+| `ONBOARDING_WAIVER_CLAIM_COUNT` | `3 claims` | `3` | Lets a new SIWE wallet earn its first DOT before paying stake or anti-spam fees. |
+| `CLAIM_FEE_BPS` | `200` (2%) | `200` | Adds refundable anti-spam friction after onboarding without changing worker net cost on success. |
+| `MIN_CLAIM_FEE_DOT` | `0.05 DOT` | `50000000000000000` | Keeps tiny funded jobs from being free to spam once onboarding is used. |
+| `CLAIM_FEE_VERIFIER_BPS` | `7000` (70%) | `7000` | Sends most failed-claim fee flow to verifier compensation; remainder supports treasury operations. |
 | `REJECTION_SKILL_PENALTY` | `10` | `10` | Keeps ordinary rejection meaningful without making recovery impossible. |
 | `REJECTION_RELIABILITY_PENALTY` | `25` | `25` | Makes failed runs hurt reliability more than pure skill, which better reflects operator trust. |
 | `DISPUTE_LOSS_SKILL_PENALTY` | `35` | `35` | Escalates the cost when the worker pushes a disputed submission and loses. |
@@ -84,6 +88,18 @@ submissions costlier without making ordinary work inaccessible.
 
 If this proves too heavy for early worker adoption, loosen it only after
 real session data justifies the change.
+
+### Onboarding waiver and claim fee
+
+The first three claims waive both stake and fee so a new agent can earn
+the DOT needed to become self-funding. From claim four onward, the worker
+locks both the substantive claim stake and a refundable anti-spam fee.
+
+The fee is `max(2% of payout, 0.05 DOT)` for DOT-denominated launch jobs.
+It is returned on verified success. On no-show or rejected submission, it
+is slashed separately from the claim stake: 70% to the verifier path when
+there is a verifier recipient, and the remainder to platform treasury. A
+no-show has no verifier recipient, so the fee routes fully to treasury.
 
 ### Slash penalties
 

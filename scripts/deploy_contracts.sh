@@ -44,6 +44,10 @@ RAW_DAILY_OUTFLOW_CAP="${DAILY_OUTFLOW_CAP:-}"
 RAW_BORROW_CAP="${BORROW_CAP:-}"
 RAW_MIN_COLLATERAL_RATIO_BPS="${MIN_COLLATERAL_RATIO_BPS:-}"
 RAW_DEFAULT_CLAIM_STAKE_BPS="${DEFAULT_CLAIM_STAKE_BPS:-}"
+RAW_ONBOARDING_WAIVER_CLAIM_COUNT="${ONBOARDING_WAIVER_CLAIM_COUNT:-}"
+RAW_CLAIM_FEE_BPS="${CLAIM_FEE_BPS:-}"
+RAW_MIN_CLAIM_FEE="${MIN_CLAIM_FEE:-}"
+RAW_CLAIM_FEE_VERIFIER_BPS="${CLAIM_FEE_VERIFIER_BPS:-}"
 RAW_REJECTION_SKILL_PENALTY="${REJECTION_SKILL_PENALTY:-}"
 RAW_REJECTION_RELIABILITY_PENALTY="${REJECTION_RELIABILITY_PENALTY:-}"
 RAW_DISPUTE_LOSS_SKILL_PENALTY="${DISPUTE_LOSS_SKILL_PENALTY:-}"
@@ -52,6 +56,10 @@ DAILY_OUTFLOW_CAP="${DAILY_OUTFLOW_CAP:-1000000000000000000000000}"
 BORROW_CAP="${BORROW_CAP:-1000000000000000000000}"
 MIN_COLLATERAL_RATIO_BPS="${MIN_COLLATERAL_RATIO_BPS:-15000}"
 DEFAULT_CLAIM_STAKE_BPS="${DEFAULT_CLAIM_STAKE_BPS:-500}"
+ONBOARDING_WAIVER_CLAIM_COUNT="${ONBOARDING_WAIVER_CLAIM_COUNT:-3}"
+CLAIM_FEE_BPS="${CLAIM_FEE_BPS:-200}"
+MIN_CLAIM_FEE="${MIN_CLAIM_FEE:-0}"
+CLAIM_FEE_VERIFIER_BPS="${CLAIM_FEE_VERIFIER_BPS:-7000}"
 REJECTION_SKILL_PENALTY="${REJECTION_SKILL_PENALTY:-10}"
 REJECTION_RELIABILITY_PENALTY="${REJECTION_RELIABILITY_PENALTY:-20}"
 DISPUTE_LOSS_SKILL_PENALTY="${DISPUTE_LOSS_SKILL_PENALTY:-30}"
@@ -104,6 +112,10 @@ if [[ "$PROFILE" == "mainnet" ]]; then
   [[ -n "$RAW_BORROW_CAP" ]] || fail "BORROW_CAP must be set explicitly for mainnet"
   [[ -n "$RAW_MIN_COLLATERAL_RATIO_BPS" ]] || fail "MIN_COLLATERAL_RATIO_BPS must be set explicitly for mainnet"
   [[ -n "$RAW_DEFAULT_CLAIM_STAKE_BPS" ]] || fail "DEFAULT_CLAIM_STAKE_BPS must be set explicitly for mainnet"
+  [[ -n "$RAW_ONBOARDING_WAIVER_CLAIM_COUNT" ]] || fail "ONBOARDING_WAIVER_CLAIM_COUNT must be set explicitly for mainnet"
+  [[ -n "$RAW_CLAIM_FEE_BPS" ]] || fail "CLAIM_FEE_BPS must be set explicitly for mainnet"
+  [[ -n "$RAW_MIN_CLAIM_FEE" ]] || fail "MIN_CLAIM_FEE must be set explicitly for mainnet"
+  [[ -n "$RAW_CLAIM_FEE_VERIFIER_BPS" ]] || fail "CLAIM_FEE_VERIFIER_BPS must be set explicitly for mainnet"
   [[ -n "$RAW_REJECTION_SKILL_PENALTY" ]] || fail "REJECTION_SKILL_PENALTY must be set explicitly for mainnet"
   [[ -n "$RAW_REJECTION_RELIABILITY_PENALTY" ]] || fail "REJECTION_RELIABILITY_PENALTY must be set explicitly for mainnet"
   [[ -n "$RAW_DISPUTE_LOSS_SKILL_PENALTY" ]] || fail "DISPUTE_LOSS_SKILL_PENALTY must be set explicitly for mainnet"
@@ -199,6 +211,10 @@ send_tx "$TREASURY_POLICY" "setDailyOutflowCap(uint256)" "$DAILY_OUTFLOW_CAP"
 send_tx "$TREASURY_POLICY" "setPerAccountBorrowCap(uint256)" "$BORROW_CAP"
 send_tx "$TREASURY_POLICY" "setMinimumCollateralRatioBps(uint256)" "$MIN_COLLATERAL_RATIO_BPS"
 send_tx "$TREASURY_POLICY" "setDefaultClaimStakeBps(uint16)" "$DEFAULT_CLAIM_STAKE_BPS"
+send_tx "$TREASURY_POLICY" "setOnboardingWaiverClaimCount(uint256)" "$ONBOARDING_WAIVER_CLAIM_COUNT"
+send_tx "$TREASURY_POLICY" "setClaimFeeBps(uint16)" "$CLAIM_FEE_BPS"
+send_tx "$TREASURY_POLICY" "setMinClaimFee(address,uint256)" "$TOKEN_ADDRESS" "$MIN_CLAIM_FEE"
+send_tx "$TREASURY_POLICY" "setClaimFeeVerifierBps(uint16)" "$CLAIM_FEE_VERIFIER_BPS"
 send_tx "$TREASURY_POLICY" "setRejectionSkillPenalty(uint256)" "$REJECTION_SKILL_PENALTY"
 send_tx "$TREASURY_POLICY" "setRejectionReliabilityPenalty(uint256)" "$REJECTION_RELIABILITY_PENALTY"
 send_tx "$TREASURY_POLICY" "setDisputeLossSkillPenalty(uint256)" "$DISPUTE_LOSS_SKILL_PENALTY"
@@ -276,6 +292,20 @@ cat > "$manifest_path" <<JSON
     "escrowCore": "$ESCROW_CORE",
     "xcmWrapper": $XCM_WRAPPER_JSON,
     "token": "$TOKEN_ADDRESS"
+  },
+  "parameters": {
+    "dailyOutflowCap": "$DAILY_OUTFLOW_CAP",
+    "borrowCap": "$BORROW_CAP",
+    "minimumCollateralRatioBps": "$MIN_COLLATERAL_RATIO_BPS",
+    "defaultClaimStakeBps": "$DEFAULT_CLAIM_STAKE_BPS",
+    "onboardingWaiverClaimCount": "$ONBOARDING_WAIVER_CLAIM_COUNT",
+    "claimFeeBps": "$CLAIM_FEE_BPS",
+    "minClaimFee": "$MIN_CLAIM_FEE",
+    "claimFeeVerifierBps": "$CLAIM_FEE_VERIFIER_BPS",
+    "rejectionSkillPenalty": "$REJECTION_SKILL_PENALTY",
+    "rejectionReliabilityPenalty": "$REJECTION_RELIABILITY_PENALTY",
+    "disputeLossSkillPenalty": "$DISPUTE_LOSS_SKILL_PENALTY",
+    "disputeLossReliabilityPenalty": "$DISPUTE_LOSS_RELIABILITY_PENALTY"
   },
   "strategies": $STRATEGIES_JSON
 }

@@ -14,6 +14,9 @@ contract TreasuryPolicy {
     uint256 public perAccountBorrowCap;
     uint256 public minimumCollateralRatioBps;
     uint16 public defaultClaimStakeBps;
+    uint16 public claimFeeBps;
+    uint16 public claimFeeVerifierBps;
+    uint256 public onboardingWaiverClaimCount;
     uint256 public rejectionSkillPenalty;
     uint256 public rejectionReliabilityPenalty;
     uint256 public disputeLossSkillPenalty;
@@ -31,6 +34,7 @@ contract TreasuryPolicy {
     mapping(address => uint64) public authorizedSince;
     mapping(address => uint64) public authorizedUntil;
     mapping(address => bool) public arbitrators;
+    mapping(address => uint256) public minClaimFeeByAsset;
     mapping(address => AuthorizationWindow[]) internal verifierAuthorizationWindows;
 
     uint256 public currentDay;
@@ -48,6 +52,10 @@ contract TreasuryPolicy {
     event PerAccountBorrowCapUpdated(uint256 newCap);
     event MinimumCollateralRatioUpdated(uint256 newRatioBps);
     event DefaultClaimStakeBpsUpdated(uint16 newClaimStakeBps);
+    event ClaimFeeBpsUpdated(uint16 newClaimFeeBps);
+    event ClaimFeeVerifierBpsUpdated(uint16 newClaimFeeVerifierBps);
+    event OnboardingWaiverClaimCountUpdated(uint256 newClaimCount);
+    event MinClaimFeeUpdated(address indexed asset, uint256 amount);
     event RejectionSkillPenaltyUpdated(uint256 newPenalty);
     event RejectionReliabilityPenaltyUpdated(uint256 newPenalty);
     event DisputeLossSkillPenaltyUpdated(uint256 newPenalty);
@@ -64,6 +72,9 @@ contract TreasuryPolicy {
         perAccountBorrowCap = type(uint256).max;
         minimumCollateralRatioBps = 15_000;
         defaultClaimStakeBps = 500;
+        claimFeeBps = 200;
+        claimFeeVerifierBps = 7_000;
+        onboardingWaiverClaimCount = 3;
         rejectionSkillPenalty = 10;
         rejectionReliabilityPenalty = 20;
         disputeLossSkillPenalty = 30;
@@ -189,6 +200,28 @@ contract TreasuryPolicy {
         require(claimStakeBps <= 10_000, "INVALID_BPS");
         defaultClaimStakeBps = claimStakeBps;
         emit DefaultClaimStakeBpsUpdated(claimStakeBps);
+    }
+
+    function setClaimFeeBps(uint16 feeBps) external onlyOwner {
+        require(feeBps <= 10_000, "INVALID_BPS");
+        claimFeeBps = feeBps;
+        emit ClaimFeeBpsUpdated(feeBps);
+    }
+
+    function setClaimFeeVerifierBps(uint16 verifierBps) external onlyOwner {
+        require(verifierBps <= 10_000, "INVALID_BPS");
+        claimFeeVerifierBps = verifierBps;
+        emit ClaimFeeVerifierBpsUpdated(verifierBps);
+    }
+
+    function setOnboardingWaiverClaimCount(uint256 claimCount) external onlyOwner {
+        onboardingWaiverClaimCount = claimCount;
+        emit OnboardingWaiverClaimCountUpdated(claimCount);
+    }
+
+    function setMinClaimFee(address asset, uint256 amount) external onlyOwner {
+        minClaimFeeByAsset[asset] = amount;
+        emit MinClaimFeeUpdated(asset, amount);
     }
 
     function setRejectionSkillPenalty(uint256 penalty) external onlyOwner {

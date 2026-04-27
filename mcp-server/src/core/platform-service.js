@@ -10,6 +10,7 @@ import {
   describeSessionStatus,
   getSessionStateMachineDefinition
 } from "./session-state-machine.js";
+import { computeClaimEconomics, countClaimedSessions } from "./claim-economics.js";
 
 const STARTER_REPUTATION = {
   skill: 0,
@@ -67,7 +68,8 @@ export class PlatformService {
       this.profiles,
       this.getAccountSummary.bind(this),
       this.getReputation.bind(this),
-      this.getDefaultClaimStakeBps.bind(this)
+      this.getDefaultClaimStakeBps.bind(this),
+      this.getClaimEconomicsPreview.bind(this)
     );
     this.jobExecutionService = new JobExecutionService(
       this.stateStore,
@@ -76,7 +78,8 @@ export class PlatformService {
       this.eventBus,
       this.accountMutationService,
       this.getDefaultClaimStakeBps.bind(this),
-      this.getClaimableJobDefinition.bind(this)
+      this.getClaimableJobDefinition.bind(this),
+      this.getClaimEconomicsConfig.bind(this)
     );
     this.verificationIngestionService = new VerificationIngestionService(this.stateStore, this.eventBus);
   }
@@ -315,13 +318,15 @@ export class PlatformService {
           status: session.status,
           outcome: session.verification?.outcome,
           claimStake: session.claimStake ?? 0,
+          claimFee: session.claimFee ?? 0,
+          totalClaimLock: session.totalClaimLock ?? session.claimStake ?? 0,
           updatedAt: session.updatedAt
         })),
         recentEvents: recentEvents.slice(-10).reverse(),
         activeSessions: activeSessions.length,
         activeWallets: wallets.size,
         totalCapitalAtWork: activeSessions.reduce(
-          (sum, session) => sum + (Number(session.claimStake) || 0),
+          (sum, session) => sum + (Number(session.totalClaimLock ?? session.claimStake) || 0),
           0
         ),
         resolvedRecently: recentSessions.filter((session) => session.status === "resolved").length,
@@ -602,6 +607,24 @@ export class PlatformService {
       return this.blockchainGateway.getDefaultClaimStakeBps();
     }
     return 500;
+  }
+
+  async getClaimEconomicsConfig() {
+    if (this.blockchainGateway?.isEnabled() && typeof this.blockchainGateway.getClaimEconomicsConfig === "function") {
+      return this.blockchainGateway.getClaimEconomicsConfig();
+    }
+    return {};
+  }
+
+  async getClaimEconomicsPreview(wallet, job) {
+    const priorClaimCount = countClaimedSessions(await this.jobExecutionService.collectSessionHistory(wallet));
+    return computeClaimEconomics({
+      rewardAmount: job.rewardAmount,
+      rewardAsset: job.rewardAsset,
+      priorClaimCount,
+      claimStakeBps: await this.getDefaultClaimStakeBps(),
+      ...(await this.getClaimEconomicsConfig())
+    });
   }
 
   async getReputation(wallet) {

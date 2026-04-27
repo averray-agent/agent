@@ -122,12 +122,20 @@ export function summarizeRoleGate(role, reputation) {
 }
 
 export class JobCatalogService {
-  constructor(jobs, profiles, getAccountSummary, getReputation, getDefaultClaimStakeBps) {
+  constructor(
+    jobs,
+    profiles,
+    getAccountSummary,
+    getReputation,
+    getDefaultClaimStakeBps,
+    getClaimEconomics = undefined
+  ) {
     this.jobs = jobs;
     this.profiles = profiles;
     this.getAccountSummary = getAccountSummary;
     this.getReputation = getReputation;
     this.getDefaultClaimStakeBps = getDefaultClaimStakeBps;
+    this.getClaimEconomics = getClaimEconomics;
   }
 
   listJobs({ includePaused = false, includeArchived = false, includeStale = false, now = new Date() } = {}) {
@@ -309,8 +317,8 @@ export class JobCatalogService {
       const roleGate = summarizeRoleGate(requiredRole, reputation);
       const eligible = this.isClaimableJob(job) && this.isEligible(job, profile, reputation);
       const liquid = account.liquid[job.rewardAsset] ?? 0;
-      const claimStake = Math.max((job.rewardAmount * claimStakeBps) / 10_000, 0);
-      const fitScore = this.computeFitScore(job, profile, reputation, liquid, claimStake);
+      const claimEconomics = await this.resolveClaimEconomics(wallet, job, claimStakeBps);
+      const fitScore = this.computeFitScore(job, profile, reputation, liquid, claimEconomics.totalClaimLock);
 
       return {
         jobId: job.id,
@@ -359,7 +367,7 @@ export class JobCatalogService {
     const account = await this.getAccountSummary(wallet);
     const liquid = account.liquid[job.rewardAsset] ?? 0;
     const claimStakeBps = await this.getDefaultClaimStakeBps();
-    const claimStake = Math.max((job.rewardAmount * claimStakeBps) / 10_000, 0);
+    const claimEconomics = await this.resolveClaimEconomics(wallet, job, claimStakeBps);
     const lifecycle = this.buildLifecycle(job);
     const eligible = this.isClaimableJob(job) && this.isEligible(job, profile, reputation);
     const tierGate = summarizeTierGate(job.tier, reputation);
@@ -373,9 +381,14 @@ export class JobCatalogService {
       eligible,
       netReward: await this.estimateNetReward(wallet, jobId),
       availableLiquidity: liquid,
-      claimStake,
-      claimStakeBps,
-      strategyUnwindNeeded: liquid < claimStake,
+      claimStake: claimEconomics.claimStake,
+      claimStakeBps: claimEconomics.claimStakeBps,
+      claimFee: claimEconomics.claimFee,
+      claimFeeBps: claimEconomics.claimFeeBps,
+      claimEconomicsWaived: claimEconomics.claimEconomicsWaived,
+      claimNumber: claimEconomics.claimNumber,
+      totalClaimLock: claimEconomics.totalClaimLock,
+      strategyUnwindNeeded: liquid < claimEconomics.totalClaimLock,
       requiredOutputSchema: job.outputSchemaRef,
       verifierMode: job.verifierMode,
       verifierConfig: job.verifierConfig,
@@ -540,6 +553,22 @@ export class JobCatalogService {
     if ((job.tier === "starter" && reputation.tier === "starter") || reputation.tier === "elite") score += 20;
     if (liquid >= claimStake || claimStake === 0) score += 20;
     return score;
+  }
+
+  async resolveClaimEconomics(wallet, job, claimStakeBps) {
+    if (typeof this.getClaimEconomics === "function") {
+      return this.getClaimEconomics(wallet, job);
+    }
+    const claimStake = Math.max((job.rewardAmount * claimStakeBps) / 10_000, 0);
+    return {
+      claimStake,
+      claimStakeBps,
+      claimFee: 0,
+      claimFeeBps: 0,
+      claimEconomicsWaived: false,
+      claimNumber: undefined,
+      totalClaimLock: claimStake
+    };
   }
 
   isEligible(job, profile, reputation) {

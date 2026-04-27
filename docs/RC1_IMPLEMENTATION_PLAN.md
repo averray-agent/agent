@@ -34,8 +34,8 @@ The shortest path to a coherent rc1 launch is:
 
 ## Current Position
 
-As of the bootstrap instrumentation work, **slice 5: Bootstrap
-Instrumentation** is in progress.
+As of the claim economics work, **slice 6: Claim Economics And Onboarding
+Waivers** is in progress.
 
 Completed and deployed in this lane:
 
@@ -58,7 +58,7 @@ Completed and deployed in this lane:
 Still open in the broader rc1 path:
 
 - scheduler/email hardening for weekly reports after enough real jobs exist
-- claim economics, maintainer controls, and XCM work in later slices
+- maintainer controls and XCM work in later slices
 
 ## PR Slices
 
@@ -182,17 +182,21 @@ generation are implemented as backend foundations.
 
 ### 6. Claim Economics And Onboarding Waivers
 
+**Status:** in progress; contract, backend, indexer, and session-surface
+foundations are implemented in this slice.
+
 **Goal:** implement the two claim-time primitives from the spec without
 confusing stake and fee.
 
 **Changes:**
 
-- Add first-3-jobs stake/fee waiver per wallet.
-- Add claim fee `max(2% of payout, $0.05)` after waiver.
-- Refund claim fee on verified success.
-- Slash fee on no-show or rejected submission and split 70% verifier / 30%
+- [x] Add first-3-jobs stake/fee waiver per wallet.
+- [x] Add claim fee `max(2% of payout, $0.05)` after waiver.
+- [x] Refund claim fee on verified success.
+- [x] Slash fee on no-show or rejected submission and split 70% verifier / 30%
   platform treasury.
-- Keep existing claim stake semantics as the substantive bond.
+- [x] Keep existing claim stake semantics as the substantive bond.
+- [x] Index claim fee state and claim-fee slashing events.
 
 **Checks:** `forge test`, `npm --workspace mcp-server test`, indexer typecheck
 if new events are indexed.
