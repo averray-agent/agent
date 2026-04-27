@@ -99,7 +99,9 @@ contract EscrowCore is ReentrancyGuard {
     }
 
     modifier onlyDisclosurePublisher() {
-        if (msg.sender != policy.owner() && !policy.serviceOperators(msg.sender)) revert Unauthorized();
+        if (msg.sender != policy.owner() && !policy.serviceOperators(msg.sender) && !policy.verifiers(msg.sender)) {
+            revert Unauthorized();
+        }
         _;
     }
 
@@ -243,6 +245,10 @@ contract EscrowCore is ReentrancyGuard {
 
     function disclose(bytes32 hash) external whenNotPaused {
         emit Disclosed(hash, msg.sender, uint64(block.timestamp));
+    }
+
+    function discloseFor(bytes32 hash, address byWallet) external whenNotPaused onlyDisclosurePublisher {
+        emit Disclosed(hash, byWallet, uint64(block.timestamp));
     }
 
     function autoDisclose(bytes32 hash) external whenNotPaused onlyDisclosurePublisher {

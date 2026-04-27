@@ -25,7 +25,8 @@ import {
   publishContentRecord,
   publicContentHeaders,
   requireContentAccess,
-  resolveContentAccess
+  resolveContentAccess,
+  shouldAutoDiscloseContent
 } from "../../core/content-addressed-store.js";
 import { transitionSession } from "../../core/session-state-machine.js";
 import { TIER_REQUIREMENTS } from "../../core/job-catalog-service.js";
@@ -755,6 +756,37 @@ async function persistContentRecord(record) {
   await contentRecoveryLog?.append?.(record);
   await stateStore.upsertContent?.(record);
   return record;
+}
+
+async function emitDisclosureEvent(hash, byWallet) {
+  if (!gateway?.isEnabled?.() || typeof gateway.discloseContent !== "function") {
+    return { emitted: false, reason: "blockchain_disabled" };
+  }
+  try {
+    return { emitted: true, ...(await gateway.discloseContent(hash, byWallet)) };
+  } catch (error) {
+    logger.warn?.({ err: error, hash, byWallet }, "content.disclosure_event_failed");
+    return { emitted: false, reason: "chain_write_failed", error: error?.message ?? "unknown_error" };
+  }
+}
+
+async function maybeEmitAutoDisclosureEvent(record, { now = new Date() } = {}) {
+  if (!shouldAutoDiscloseContent(record, { now })) {
+    return { emitted: false, reason: "not_auto_public" };
+  }
+  if (!gateway?.isEnabled?.() || typeof gateway.autoDiscloseContent !== "function") {
+    return { emitted: false, reason: "blockchain_disabled" };
+  }
+  try {
+    const result = await gateway.autoDiscloseContent(record.hash);
+    return {
+      emitted: !result?.skipped,
+      ...result
+    };
+  } catch (error) {
+    logger.warn?.({ err: error, hash: record.hash }, "content.auto_disclosure_event_failed");
+    return { emitted: false, reason: "chain_write_failed", error: error?.message ?? "unknown_error" };
+  }
 }
 
 async function resolveRemainingPayout(session) {
@@ -1583,11 +1615,16 @@ const server = createServer(async (request, response) => {
       if (!walletsMatch(record.ownerWallet, auth.wallet) && !hasRole(auth.claims, "admin")) {
         throw new AuthorizationError("Only the owner wallet or an admin can publish this content.", "content_publish_forbidden");
       }
+      const wasPublished = Boolean(record.publishedAt);
       const published = publishContentRecord(record);
       await persistContentRecord(published);
+      const disclosureEvent = wasPublished
+        ? { emitted: false, reason: "already_published" }
+        : await emitDisclosureEvent(published.hash, auth.wallet);
       const access = resolveContentAccess(published, auth);
       return respond(response, 200, {
         ...contentResponse(published, access),
+        disclosureEvent,
         contentURI: publicContentUri(published.hash)
       }, publicContentHeaders(published, access));
     }
@@ -1600,7 +1637,13 @@ const server = createServer(async (request, response) => {
       }
       const auth = await optionalAuth(request, url);
       const access = requireContentAccess(record, auth);
-      return respond(response, 200, contentResponse(record, access), publicContentHeaders(record, access));
+      const autoDisclosureEvent = access.public
+        ? await maybeEmitAutoDisclosureEvent(record)
+        : { emitted: false, reason: "private" };
+      return respond(response, 200, {
+        ...contentResponse(record, access),
+        autoDisclosureEvent
+      }, publicContentHeaders(record, access));
     }
 
     if (request.method === "GET" && pathname === "/disputes") {

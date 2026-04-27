@@ -34,8 +34,8 @@ The shortest path to a coherent rc1 launch is:
 
 ## Current Position
 
-As of the content recovery replay work, we are inside **slice 4: Content
-Addressing And Disclosure Reads**.
+As of the disclosure event coupling work, **slice 4: Content Addressing And
+Disclosure Reads** is implemented.
 
 Completed and deployed in this lane:
 
@@ -45,10 +45,15 @@ Completed and deployed in this lane:
 - recovery-log replay CLI
 - operator recovery runbook in
   [CONTENT_RECOVERY_RUNBOOK.md](./CONTENT_RECOVERY_RUNBOOK.md)
+- on-chain `Disclosed` / `AutoDisclosed` events from `EscrowCore`
+- backend calls that emit `Disclosed` on early publish and lazily emit
+  `AutoDisclosed` on first auto-public read
+- `discloseFor(hash, byWallet)` requires the rc1 contract redeploy; until then
+  the backend reports `chain_write_failed` for that event while still serving
+  content normally
 
 Still open in the broader rc1 path:
 
-- any on-chain `Disclosed` / `AutoDisclosed` event coupling
 - full bootstrap instrumentation and upstream status polling, which is slice 5
 - claim economics, maintainer controls, and XCM work in later slices
 
@@ -133,9 +138,9 @@ instead of only recording receipts.
 
 ### 4. Content Addressing And Disclosure Reads
 
-**Status:** active; backend storage, recovery, early publish, and operator
-replay runbook are shipped. On-chain disclosure-event coupling remains a
-separate follow-up.
+**Status:** implemented; future PRs may refine decentralized mirrors, but the
+rc1 API, recovery, visibility, cache-control, and disclosure event path are
+shipped.
 
 **Goal:** make `/content/:hash` real before receipts depend on it.
 
@@ -145,7 +150,7 @@ separate follow-up.
 - [x] Add append-only recovery log writer.
 - [x] Add recovery-log replay CLI and operator runbook.
 - [x] Add disclosure records and read-time visibility logic.
-- [ ] Emit lazy `AutoDisclosed` once when private content crosses
+- [x] Emit lazy `AutoDisclosed` once when private content crosses
   `auto_public_at`.
 - [x] Add cache-control behavior for private-window and public content.
 

@@ -589,6 +589,40 @@ export class BlockchainGateway {
     });
   }
 
+  async discloseContent(hash, byWallet = undefined) {
+    return this.withGatewayError("discloseContent", async () => {
+      this.requireSigner("discloseContent");
+      const normalizedHash = this.toContentHash(hash);
+      const tx = byWallet
+        ? await this.escrowContract.discloseFor(normalizedHash, byWallet)
+        : await this.escrowContract.disclose(normalizedHash);
+      const receipt = await tx.wait();
+      return {
+        txHash: tx.hash,
+        blockNumber: receipt?.blockNumber,
+        status: Number(receipt?.status ?? 0)
+      };
+    });
+  }
+
+  async autoDiscloseContent(hash) {
+    return this.withGatewayError("autoDiscloseContent", async () => {
+      this.requireSigner("autoDiscloseContent");
+      const normalizedHash = this.toContentHash(hash);
+      if (await this.escrowContract.autoDisclosed(normalizedHash)) {
+        return { skipped: true, reason: "already_auto_disclosed" };
+      }
+      const tx = await this.escrowContract.autoDisclose(normalizedHash);
+      const receipt = await tx.wait();
+      return {
+        skipped: false,
+        txHash: tx.hash,
+        blockNumber: receipt?.blockNumber,
+        status: Number(receipt?.status ?? 0)
+      };
+    });
+  }
+
   async getJob(jobId) {
     return this.withGatewayError("getJob", async () => {
       const job = await this.escrowContract.jobs(this.toJobId(jobId));
@@ -791,6 +825,13 @@ export class BlockchainGateway {
       throw new ValidationError("requestId must be a 0x-prefixed 32-byte hex string.");
     }
     return requestId;
+  }
+
+  toContentHash(hash) {
+    if (typeof hash !== "string" || !/^0x[a-fA-F0-9]{64}$/.test(hash)) {
+      throw new ValidationError("content hash must be a 0x-prefixed 32-byte hex string.");
+    }
+    return hash.toLowerCase();
   }
 
   toXcmStatus(status) {

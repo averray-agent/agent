@@ -7,7 +7,8 @@ import {
   defaultAutoPublicAt,
   publishContentRecord,
   requireContentAccess,
-  resolveContentAccess
+  resolveContentAccess,
+  shouldAutoDiscloseContent
 } from "./content-addressed-store.js";
 
 const OWNER = "0x1111111111111111111111111111111111111111";
@@ -81,6 +82,38 @@ test("publishContentRecord sets publishedAt once and makes failed content public
   assert.equal(published.publishedAt, "2026-02-01T00:00:00.000Z");
   assert.equal(republished.publishedAt, "2026-02-01T00:00:00.000Z");
   assert.equal(resolveContentAccess(published, undefined, { now: new Date("2026-02-01T00:00:01.000Z") }).public, true);
+});
+
+test("shouldAutoDiscloseContent only flags failed private content after window", () => {
+  const failed = buildContentRecord({
+    ownerWallet: OWNER,
+    payload: { rationale: "late public" },
+    contentType: "arbitrator_reasoning",
+    verdict: "fail",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    autoPublicAt: "2026-02-01T00:00:00.000Z"
+  });
+  const passing = buildContentRecord({
+    ownerWallet: OWNER,
+    payload: { rationale: "already public" },
+    contentType: "arbitrator_reasoning",
+    verdict: "pass",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    autoPublicAt: "2026-02-01T00:00:00.000Z"
+  });
+  const jobSpec = buildContentRecord({
+    ownerWallet: OWNER,
+    payload: { title: "public spec" },
+    contentType: "job_spec",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    autoPublicAt: "2026-02-01T00:00:00.000Z"
+  });
+
+  assert.equal(shouldAutoDiscloseContent(failed, { now: new Date("2026-01-31T23:59:59.000Z") }), false);
+  assert.equal(shouldAutoDiscloseContent(failed, { now: new Date("2026-02-01T00:00:00.000Z") }), true);
+  assert.equal(shouldAutoDiscloseContent(passing, { now: new Date("2026-02-01T00:00:00.000Z") }), false);
+  assert.equal(shouldAutoDiscloseContent({ ...failed, publishedAt: "2026-01-15T00:00:00.000Z" }, { now: new Date("2026-02-01T00:00:00.000Z") }), false);
+  assert.equal(shouldAutoDiscloseContent(jobSpec, { now: new Date("2026-02-01T00:00:00.000Z") }), false);
 });
 
 test("contentResponse includes the stored payload and visibility", () => {

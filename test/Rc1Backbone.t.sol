@@ -37,6 +37,7 @@ contract Rc1BackboneTest is Test {
     event JobCreated(bytes32 indexed jobId, address indexed poster, bytes32 indexed specHash, address asset, uint256 totalReserved, EscrowCore.PayoutMode payoutMode);
     event Submitted(bytes32 indexed jobId, address indexed worker, bytes32 indexed payloadHash);
     event Verified(bytes32 indexed jobId, address indexed verifier, bool approved, bytes32 reasonCode, bytes32 reasoningHash);
+    event Disclosed(bytes32 indexed hash, address indexed byWallet, uint64 timestamp);
     event AutoDisclosed(bytes32 indexed hash, uint64 timestamp);
 
     function setUp() public {
@@ -154,6 +155,20 @@ contract Rc1BackboneTest is Test {
 
         (bool ok,) = address(escrow).call(abi.encodeCall(escrow.autoDisclose, (hash)));
         require(!ok, "EXPECTED_ALREADY_AUTO_DISCLOSED_REVERT");
+    }
+
+    function testDisclosurePublisherCanEmitForSiweWallet() public {
+        bytes32 hash = keccak256("content/owner-published");
+        policy.setVerifier(verifier, true);
+
+        vmEvent.expectEmit(true, true, false, true, address(escrow));
+        emit Disclosed(hash, worker, uint64(block.timestamp));
+        vm.prank(verifier);
+        escrow.discloseFor(hash, worker);
+
+        vm.prank(stranger);
+        (bool ok,) = address(escrow).call(abi.encodeCall(escrow.discloseFor, (hash, worker)));
+        require(!ok, "EXPECTED_DISCLOSURE_PUBLISHER_REVERT");
     }
 
     function testReputationSbtTransferMethodsAreSoulbound() public {

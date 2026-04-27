@@ -74,6 +74,15 @@ export function resolveContentAccess(record, auth = undefined, { now = new Date(
   };
 }
 
+export function shouldAutoDiscloseContent(record, { now = new Date() } = {}) {
+  if (!record) return false;
+  if (record.contentType === "job_spec") return false;
+  if (record.publishedAt) return false;
+  if (record.verdict === "pass") return false;
+  const autoPublicAt = Date.parse(record.autoPublicAt ?? "");
+  return Number.isFinite(autoPublicAt) && autoPublicAt <= now.getTime();
+}
+
 export function requireContentAccess(record, auth = undefined, options = {}) {
   const access = resolveContentAccess(record, auth, options);
   if (!access.allowed) {

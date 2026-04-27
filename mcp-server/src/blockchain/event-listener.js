@@ -161,6 +161,31 @@ export class EventListener {
       });
     });
 
+    this.registerEscrow("Disclosed", "content.disclosed", async ({ args, payload }) =>
+      this.buildChainEvent({
+        topic: "content.disclosed",
+        args,
+        payload,
+        wallet: normalizeAddress(args.byWallet),
+        wallets: [args.byWallet],
+        data: {
+          hash: args.hash,
+          byWallet: args.byWallet,
+          timestamp: args.timestamp.toString()
+        }
+      }));
+
+    this.registerEscrow("AutoDisclosed", "content.auto_disclosed", async ({ args, payload }) =>
+      this.buildChainEvent({
+        topic: "content.auto_disclosed",
+        args,
+        payload,
+        data: {
+          hash: args.hash,
+          timestamp: args.timestamp.toString()
+        }
+      }));
+
     this.registerAccount("JobStakeLocked", "account.job_stake_locked", async ({ args, payload }) =>
       this.buildChainEvent({
         topic: "account.job_stake_locked",
