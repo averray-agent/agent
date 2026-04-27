@@ -95,14 +95,14 @@
     "jobSchemaRefPrefix": "schema://jobs/"
   },
   "docs": {
-    "vision": "https://github.com/depre-dev/agent/blob/main/docs/AGENT_BANKING.md",
-    "multisig": "https://github.com/depre-dev/agent/blob/main/docs/MULTISIG_SETUP.md",
-    "audit": "https://github.com/depre-dev/agent/blob/main/docs/AUDIT_PACKAGE.md",
-    "discovery": "https://github.com/depre-dev/agent/blob/main/docs/DISCOVERY.md",
-    "launchPlan": "https://github.com/depre-dev/agent/blob/main/docs/PHASE1_LAUNCH_PLAN.md",
-    "vdotStrategy": "https://github.com/depre-dev/agent/blob/main/docs/strategies/vdot.md",
-    "subJobEscrow": "https://github.com/depre-dev/agent/blob/main/docs/patterns/sub-job-escrow.md",
-    "sendToAgent": "https://github.com/depre-dev/agent/blob/main/docs/payments/send-to-agent.md"
+    "vision": "https://github.com/averray-agent/agent/blob/main/docs/AGENT_BANKING.md",
+    "multisig": "https://github.com/averray-agent/agent/blob/main/docs/MULTISIG_SETUP.md",
+    "audit": "https://github.com/averray-agent/agent/blob/main/docs/AUDIT_PACKAGE.md",
+    "discovery": "https://github.com/averray-agent/agent/blob/main/docs/DISCOVERY.md",
+    "launchPlan": "https://github.com/averray-agent/agent/blob/main/docs/PHASE1_LAUNCH_PLAN.md",
+    "vdotStrategy": "https://github.com/averray-agent/agent/blob/main/docs/strategies/vdot.md",
+    "subJobEscrow": "https://github.com/averray-agent/agent/blob/main/docs/patterns/sub-job-escrow.md",
+    "sendToAgent": "https://github.com/averray-agent/agent/blob/main/docs/payments/send-to-agent.md"
   },
   "executionSurfaces": {
     "operatorApp": "https://app.averray.com",
