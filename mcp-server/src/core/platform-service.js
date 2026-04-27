@@ -742,6 +742,15 @@ function buildProviderOperationStatus({ label, status, targetCountField }) {
   const currentOpenJobs = status.currentOpenJobs !== undefined
     ? toNonNegativeInteger(status.currentOpenJobs)
     : inferCurrentOpenJobs(status.lastRun);
+  // queryCount/nextQuery describe the rotation pool — only meaningful
+  // when the provider rotates a query list distinct from its
+  // targetCount. github's queryCount IS its targetCount, so don't
+  // duplicate it; openData rotates queries against a dataset list, so
+  // queryCount and targetCount are genuinely different signals.
+  const queryCount = status.queryCount !== undefined && targetCountField !== "queryCount"
+    ? toNonNegativeInteger(status.queryCount)
+    : undefined;
+  const nextQuery = stringOrUndefined(status.nextQuery);
   return {
     label,
     enabled: Boolean(status.enabled),
@@ -753,6 +762,8 @@ function buildProviderOperationStatus({ label, status, targetCountField }) {
     maxOpenJobs: toNonNegativeInteger(status.maxOpenJobs),
     currentOpenJobs,
     targetCount: toNonNegativeInteger(status[targetCountField]),
+    ...(queryCount !== undefined ? { queryCount } : {}),
+    ...(nextQuery ? { nextQuery } : {}),
     lastRunAt: lastRun?.finishedAt ?? lastRun?.startedAt,
     lastRun,
     health: summarizeProviderHealth({

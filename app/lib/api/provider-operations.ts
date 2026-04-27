@@ -28,6 +28,13 @@ export type ProviderHealth =
 
 export type ProviderMode = "live" | "dry_run" | "disabled";
 
+export interface ProviderLastRunSkipped {
+  /** Free-form reason code such as "source_already_ingested" or
+   *  "dataset_already_ingested". `formatSkipReason` maps the known ones
+   *  to human-readable labels for the operator UI. */
+  reason: string;
+}
+
 export interface ProviderLastRun {
   startedAt?: string;
   finishedAt?: string;
@@ -38,6 +45,9 @@ export interface ProviderLastRun {
   errorCount: number;
   /** Pre-formatted "X candidate(s), Y created, Z skipped, W error(s)". */
   summary: string;
+  /** Up to 5 detailed skip records on `/admin/status`. Always empty on
+   *  the public `/status/providers` mirror. */
+  skipped: ProviderLastRunSkipped[];
 }
 
 export interface ProviderOperation {
@@ -53,6 +63,11 @@ export interface ProviderOperation {
   currentOpenJobs: number;
   /** Upstream queries / categories / packages / datasets / specs scanned. */
   targetCount: number;
+  /** Rotation pool size, only emitted when distinct from targetCount
+   *  (open data is the only provider where the two differ today). */
+  queryCount?: number;
+  /** The next rotation query, when the provider rotates a query list. */
+  nextQuery?: string;
   lastRunAt?: string;
   lastRun?: ProviderLastRun;
 }
@@ -115,6 +130,10 @@ function buildProvider(
     maxOpenJobs: nonNegInt(raw.maxOpenJobs),
     currentOpenJobs: nonNegInt(raw.currentOpenJobs),
     targetCount: nonNegInt(raw.targetCount),
+    ...(typeof raw.queryCount === "number" && Number.isFinite(raw.queryCount) && raw.queryCount >= 0
+      ? { queryCount: Math.floor(raw.queryCount) }
+      : {}),
+    ...(text(raw.nextQuery) ? { nextQuery: text(raw.nextQuery) } : {}),
     ...(text(raw.lastRunAt) ? { lastRunAt: text(raw.lastRunAt) } : {}),
     ...(buildLastRun(raw.lastRun)
       ? { lastRun: buildLastRun(raw.lastRun)! }
@@ -134,7 +153,60 @@ function buildLastRun(raw: unknown): ProviderLastRun | undefined {
     skippedCount: nonNegInt(record.skippedCount),
     errorCount: nonNegInt(record.errorCount),
     summary: text(record.summary, ""),
+    skipped: buildSkippedList(record.skipped),
   };
+}
+
+function buildSkippedList(value: unknown): ProviderLastRunSkipped[] {
+  if (!Array.isArray(value)) return [];
+  const out: ProviderLastRunSkipped[] = [];
+  for (const entry of value) {
+    const record = asRecord(entry);
+    if (!record) continue;
+    const reason = text(record.reason);
+    if (!reason) continue;
+    out.push({ reason });
+  }
+  return out;
+}
+
+/**
+ * Map machine reason codes from `lastRun.skipped[].reason` to a label
+ * the operator can read at a glance. Unknown reasons fall back to the
+ * raw code so we don't silently swallow new reason kinds the backend
+ * starts emitting.
+ *
+ * `dataset_already_ingested` is intentionally NOT framed as an error —
+ * it's the "the candidate would just duplicate something we already
+ * have" outcome from the open-data dedupe path, and operators want to
+ * see it as part of normal scheduler housekeeping.
+ */
+export function formatSkipReason(reason: string): string {
+  switch (reason) {
+    case "source_already_ingested":
+      return "source already ingested";
+    case "dataset_already_ingested":
+      return "dataset already represented";
+    default:
+      return reason;
+  }
+}
+
+/** Group skip details into "{count} {friendly label}" tokens. */
+export function summarizeSkipReasons(
+  skipped: ProviderLastRunSkipped[]
+): { reason: string; label: string; count: number }[] {
+  const counts = new Map<string, number>();
+  for (const entry of skipped) {
+    counts.set(entry.reason, (counts.get(entry.reason) ?? 0) + 1);
+  }
+  return Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map(([reason, count]) => ({
+      reason,
+      label: formatSkipReason(reason),
+      count,
+    }));
 }
 
 function byOperatorPriority(

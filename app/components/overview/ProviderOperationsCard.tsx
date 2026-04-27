@@ -7,6 +7,7 @@ import {
   PROVIDER_HEALTH_LABEL,
   PROVIDER_MODE_LABEL,
   PROVIDER_TARGET_UNIT,
+  summarizeSkipReasons,
 } from "@/lib/api/provider-operations";
 
 export interface ProviderOperationsCardProps {
@@ -63,6 +64,23 @@ function ProviderRow({ provider }: { provider: ProviderOperation }) {
             <span className="text-[var(--avy-ink)]">{provider.targetCount}</span>{" "}
             {targetUnit}
           </span>
+          {provider.queryCount !== undefined ? (
+            <>
+              <span>·</span>
+              <span>
+                <span className="text-[var(--avy-ink)]">{provider.queryCount}</span>{" "}
+                queries
+              </span>
+            </>
+          ) : null}
+          {provider.nextQuery ? (
+            <>
+              <span>·</span>
+              <span>
+                next <span className="text-[var(--avy-ink)]">&ldquo;{provider.nextQuery}&rdquo;</span>
+              </span>
+            </>
+          ) : null}
         </div>
       </div>
 
@@ -93,6 +111,14 @@ function ProviderRow({ provider }: { provider: ProviderOperation }) {
         ) : (
           <span className="text-[var(--avy-muted)]">No runs recorded yet.</span>
         )}
+        {lastRun && lastRun.skipped.length > 0 ? (
+          <span className="font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]">
+            skipped:{" "}
+            {summarizeSkipReasons(lastRun.skipped)
+              .map((entry) => `${entry.count} ${entry.label}`)
+              .join(" · ")}
+          </span>
+        ) : null}
         <div className="flex flex-wrap items-center gap-1.5 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]">
           <span>{provider.lastRunAt ? `last run ${formatRelative(provider.lastRunAt)}` : "never"}</span>
           {errored ? (
@@ -191,6 +217,11 @@ export const PROVIDER_OPERATIONS_FIXTURE: ProviderOperation[] = [
       skippedCount: 22,
       errorCount: 0,
       summary: "26 candidates, 4 created, 22 skipped, 0 errors",
+      skipped: [
+        { reason: "source_already_ingested" },
+        { reason: "source_already_ingested" },
+        { reason: "source_already_ingested" },
+      ],
     },
   },
   {
@@ -215,6 +246,7 @@ export const PROVIDER_OPERATIONS_FIXTURE: ProviderOperation[] = [
       skippedCount: 16,
       errorCount: 0,
       summary: "18 candidates, 2 created, 16 skipped, 0 errors",
+      skipped: [],
     },
   },
   {
@@ -239,6 +271,7 @@ export const PROVIDER_OPERATIONS_FIXTURE: ProviderOperation[] = [
       skippedCount: 9,
       errorCount: 0,
       summary: "9 candidates, 0 created, 9 skipped (cap reached), 0 errors",
+      skipped: [],
     },
   },
   {
@@ -253,6 +286,8 @@ export const PROVIDER_OPERATIONS_FIXTURE: ProviderOperation[] = [
     maxOpenJobs: 10,
     currentOpenJobs: 2,
     targetCount: 7,
+    queryCount: 12,
+    nextQuery: "transport",
     lastRunAt: new Date(Date.now() - 1_500_000).toISOString(),
     lastRun: {
       startedAt: new Date(Date.now() - 1_540_000).toISOString(),
@@ -263,6 +298,11 @@ export const PROVIDER_OPERATIONS_FIXTURE: ProviderOperation[] = [
       skippedCount: 12,
       errorCount: 0,
       summary: "12 candidates, 0 created (dry run), 12 skipped, 0 errors",
+      skipped: [
+        { reason: "dataset_already_ingested" },
+        { reason: "dataset_already_ingested" },
+        { reason: "source_already_ingested" },
+      ],
     },
   },
   {
@@ -287,6 +327,7 @@ export const PROVIDER_OPERATIONS_FIXTURE: ProviderOperation[] = [
       skippedCount: 3,
       errorCount: 2,
       summary: "5 candidates, 0 created, 3 skipped, 2 errors",
+      skipped: [],
     },
   },
   {

@@ -204,12 +204,21 @@ test("getAdminStatus surfaces public source ingestion scheduler status", async (
         dryRun: false,
         intervalMs: 3600000,
         query: "res_format:CSV",
+        queryCount: 7,
+        nextQuery: "transport",
         datasetCount: 0,
         targetCount: 3,
         maxJobsPerRun: 2,
         maxOpenJobs: 20,
         currentOpenJobs: 4,
-        lastRun: { candidateCount: 2, createdCount: 2, skipped: [], errors: [] }
+        lastRun: {
+          candidateCount: 2,
+          createdCount: 1,
+          skipped: [
+            { datasetId: "abc", resourceId: "abc-1", reason: "dataset_already_ingested" }
+          ],
+          errors: []
+        }
       };
     }
   };
@@ -247,7 +256,7 @@ test("getAdminStatus surfaces public source ingestion scheduler status", async (
   const status = await service.getAdminStatus();
   assert.equal(status.osvIngestion.packageCount, 1);
   assert.equal(status.openDataIngestion.query, "res_format:CSV");
-  assert.equal(status.openDataIngestion.lastRun.createdCount, 2);
+  assert.equal(status.openDataIngestion.lastRun.createdCount, 1);
   assert.equal(status.standardsIngestion.specCount, 2);
   assert.equal(status.openApiIngestion.specCount, 1);
   assert.equal(status.providerOperations.github.label, "GitHub issues");
@@ -259,7 +268,16 @@ test("getAdminStatus surfaces public source ingestion scheduler status", async (
   assert.equal(status.providerOperations.openData.mode, "live");
   assert.equal(status.providerOperations.openData.health, "healthy");
   assert.equal(status.providerOperations.openData.targetCount, 3);
-  assert.equal(status.providerOperations.openData.lastRun.summary, "2 candidate(s), 2 created, 0 skipped, 0 error(s)");
+  // Open data rotates a query pool that's distinct from the dataset
+  // target list — both signals reach the operator UI.
+  assert.equal(status.providerOperations.openData.queryCount, 7);
+  assert.equal(status.providerOperations.openData.nextQuery, "transport");
+  assert.equal(status.providerOperations.openData.lastRun.summary, "2 candidate(s), 1 created, 1 skipped, 0 error(s)");
+  assert.equal(status.providerOperations.openData.lastRun.skipped[0].reason, "dataset_already_ingested");
+  // github's queryCount IS its targetCount — don't duplicate the
+  // field at the top level.
+  assert.equal(status.providerOperations.github.queryCount, undefined);
+  assert.equal(status.providerOperations.github.nextQuery, undefined);
   assert.equal(status.providerOperations.openApi.health, "error");
   assert.equal(status.providerOperations.openApi.lastRun.errorCount, 1);
 

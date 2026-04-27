@@ -97,6 +97,10 @@
           errorCount: nonNegInt(lastRunRaw.errorCount),
         }
       : null;
+    const queryCountRaw = raw && raw.queryCount;
+    const queryCount = typeof queryCountRaw === "number" && Number.isFinite(queryCountRaw) && queryCountRaw >= 0
+      ? Math.floor(queryCountRaw)
+      : null;
     return {
       key: key,
       label: asString(raw && raw.label, PROVIDER_LABEL[key] || key),
@@ -106,6 +110,8 @@
       maxOpenJobs: nonNegInt(raw && raw.maxOpenJobs),
       currentOpenJobs: nonNegInt(raw && raw.currentOpenJobs),
       targetCount: nonNegInt(raw && raw.targetCount),
+      queryCount: queryCount,
+      nextQuery: asString(raw && raw.nextQuery, ""),
       lastRunAt: asString(raw && raw.lastRunAt, ""),
       lastRun: lastRun,
     };
@@ -148,6 +154,12 @@
         '<p class="provider-row-meta">' +
           '<span class="provider-mode provider-mode--' + escapeHtml(provider.mode) + '">' + escapeHtml(MODE_LABEL[provider.mode]) + '</span>' +
           ' · <strong>' + escapeHtml(String(provider.targetCount)) + '</strong> ' + escapeHtml(unit) +
+          (provider.queryCount !== null
+            ? ' · <strong>' + escapeHtml(String(provider.queryCount)) + '</strong> queries'
+            : "") +
+          (provider.nextQuery
+            ? ' · next <strong>&ldquo;' + escapeHtml(provider.nextQuery) + '&rdquo;</strong>'
+            : "") +
           ' · open jobs <strong>' + escapeHtml(String(open)) + '</strong> / ' + escapeHtml(String(cap)) +
         '</p>' +
         '<div class="provider-bar"><span style="width:' + fillPct + '%"></span></div>' +
