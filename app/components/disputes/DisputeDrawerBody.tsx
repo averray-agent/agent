@@ -306,6 +306,51 @@ function PartyBlock({
   );
 }
 
+// Polkadot Asset Hub block-explorer (Subscan). Hardcoded as the
+// platform's settlement chain today; if/when settlement moves to
+// another chain, swap this constant or thread the explorer URL
+// through the dispute payload.
+const SUBSCAN_EXTRINSIC_BASE =
+  "https://assethub-polkadot.subscan.io/extrinsic/";
+
+const CHAIN_STATUS_LABEL: Record<string, string> = {
+  confirmed: "Confirmed",
+  submitted: "Submitted",
+  local_only: "Local only",
+  settled_by_verdict: "Settled by verdict",
+};
+
+const CHAIN_STATUS_DOT_CLASS: Record<string, string> = {
+  confirmed: "bg-[var(--avy-accent)]",
+  settled_by_verdict: "bg-[var(--avy-accent)]",
+  submitted: "bg-[#254e9a]",
+  local_only: "bg-[var(--avy-warn)]",
+};
+
+function humaniseChainStatus(status: string): string {
+  return CHAIN_STATUS_LABEL[status] ?? status.replace(/_/g, " ");
+}
+
+function chainStatusDotClass(status: string): string {
+  return CHAIN_STATUS_DOT_CLASS[status] ?? "bg-[var(--avy-muted)]";
+}
+
+function shortHash(hash: string): string {
+  if (hash.length <= 14) return hash;
+  return `${hash.slice(0, 8)}…${hash.slice(-4)}`;
+}
+
+function isLinkableUri(value: string): boolean {
+  return /^(?:https?|ipfs):\/\//u.test(value);
+}
+
+function formatPayoutAmount(value: number): string {
+  return value.toLocaleString("en-US", {
+    minimumFractionDigits: Number.isInteger(value) ? 0 : 2,
+    maximumFractionDigits: 4,
+  });
+}
+
 function ResolvedCard({ dispute }: { dispute: Dispute }) {
   if (!dispute.resolution) return null;
   const {
@@ -319,7 +364,15 @@ function ResolvedCard({ dispute }: { dispute: Dispute }) {
     txHash,
     chainStatus,
     metadataURI,
+    reasoningHash,
   } = dispute.resolution;
+  const hasOnchainMeta =
+    Boolean(reasonCode) ||
+    typeof workerPayout === "number" ||
+    Boolean(chainStatus) ||
+    Boolean(txHash) ||
+    Boolean(metadataURI) ||
+    Boolean(reasoningHash);
   const decisionLabel =
     decision === "uphold"
       ? "Upheld"
@@ -358,36 +411,83 @@ function ResolvedCard({ dispute }: { dispute: Dispute }) {
       >
         Stake → {destinationLabel}
       </div>
-      <div
-        className="grid gap-1 rounded-[8px] border border-[var(--avy-line-soft)] bg-[var(--avy-paper-solid)] px-3 py-2 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]"
-        style={{ letterSpacing: 0 }}
-      >
-        {reasonCode ? (
-          <span>
-            Reason · <b className="font-semibold text-[var(--avy-ink)]">{reasonCode}</b>
-          </span>
-        ) : null}
-        {typeof workerPayout === "number" ? (
-          <span>
-            Worker payout · <b className="font-semibold text-[var(--avy-ink)]">{workerPayout} DOT</b>
-          </span>
-        ) : null}
-        {chainStatus ? (
-          <span>
-            Chain · <b className="font-semibold text-[var(--avy-ink)]">{chainStatus}</b>
-          </span>
-        ) : null}
-        {txHash ? (
-          <span className="break-all">
-            Tx · <b className="font-semibold text-[var(--avy-accent)]">{txHash}</b>
-          </span>
-        ) : null}
-        {metadataURI ? (
-          <span className="break-all">
-            Reasoning · <b className="font-semibold text-[var(--avy-ink)]">{metadataURI}</b>
-          </span>
-        ) : null}
-      </div>
+      {hasOnchainMeta ? (
+        <div
+          className="grid gap-1 rounded-[8px] border border-[var(--avy-line-soft)] bg-[var(--avy-paper-solid)] px-3 py-2 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]"
+          style={{ letterSpacing: 0 }}
+        >
+          {reasonCode ? (
+            <span>
+              Reason ·{" "}
+              <b className="font-semibold text-[var(--avy-ink)]">{reasonCode}</b>
+            </span>
+          ) : null}
+          {typeof workerPayout === "number" ? (
+            <span>
+              Worker payout ·{" "}
+              <b className="font-semibold text-[var(--avy-ink)]">
+                {formatPayoutAmount(workerPayout)} DOT
+              </b>
+            </span>
+          ) : null}
+          {chainStatus ? (
+            <span className="inline-flex items-center gap-1.5">
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${chainStatusDotClass(chainStatus)}`}
+                aria-hidden="true"
+              />
+              <span>
+                Chain ·{" "}
+                <b className="font-semibold text-[var(--avy-ink)]">
+                  {humaniseChainStatus(chainStatus)}
+                </b>
+              </span>
+            </span>
+          ) : null}
+          {txHash ? (
+            <span>
+              Tx ·{" "}
+              <a
+                href={`${SUBSCAN_EXTRINSIC_BASE}${txHash}`}
+                target="_blank"
+                rel="noreferrer noopener"
+                title={txHash}
+                className="font-semibold text-[var(--avy-accent)] hover:underline"
+              >
+                {shortHash(txHash)} ↗
+              </a>
+            </span>
+          ) : null}
+          {metadataURI ? (
+            <span className="break-all">
+              Reasoning URI ·{" "}
+              {isLinkableUri(metadataURI) ? (
+                <a
+                  href={metadataURI}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="font-semibold text-[var(--avy-ink)] hover:text-[var(--avy-accent)] hover:underline"
+                >
+                  {metadataURI} ↗
+                </a>
+              ) : (
+                <b className="font-semibold text-[var(--avy-ink)]">{metadataURI}</b>
+              )}
+            </span>
+          ) : null}
+          {reasoningHash ? (
+            <span>
+              Reasoning hash ·{" "}
+              <b
+                className="font-semibold text-[var(--avy-ink)]"
+                title={reasoningHash}
+              >
+                {shortHash(reasoningHash)}
+              </b>
+            </span>
+          ) : null}
+        </div>
+      ) : null}
       <p
         className="m-0 text-[13px] leading-snug text-[var(--avy-ink)]"
         style={{ letterSpacing: 0 }}

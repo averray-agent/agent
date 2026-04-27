@@ -45,6 +45,7 @@ export function extractDispute(data: unknown): Dispute | null {
   const chainStatus = text(record.chainStatus, "");
   const reasonCode = text(record.reasonCode, "");
   const metadataURI = text(record.metadataURI, "");
+  const reasoningHash = text(record.reasoningHash, "");
 
   return {
     id,
@@ -61,7 +62,7 @@ export function extractDispute(data: unknown): Dispute | null {
     workerPayout,
     remainingPayout,
     reasonCode: reasonCode || undefined,
-    reasoningHash: text(record.reasoningHash, "") || undefined,
+    reasoningHash: reasoningHash || undefined,
     metadataURI: metadataURI || undefined,
     txHash: txHash || undefined,
     chainStatus: chainStatus || undefined,
@@ -85,6 +86,7 @@ export function extractDispute(data: unknown): Dispute | null {
           txHash: txHash || undefined,
           chainStatus: chainStatus || undefined,
           metadataURI: metadataURI || undefined,
+          reasoningHash: reasoningHash || undefined,
         }
       : undefined,
   };

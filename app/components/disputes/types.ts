@@ -119,5 +119,11 @@ export interface Dispute {
     txHash?: string;
     chainStatus?: string;
     metadataURI?: string;
+    /**
+     * Mirrors the top-level `reasoningHash` so the resolved-verdict
+     * card can render the verifier-attested content hash alongside
+     * the metadataURI it points to.
+     */
+    reasoningHash?: string;
   };
 }
