@@ -65,6 +65,10 @@ const syncJob = async ({
     claimExpiry,
     claimStake,
     claimStakeBps,
+    claimFee,
+    claimFeeBps,
+    claimEconomicsWaived,
+    rejectingVerifier,
     rejectedAt,
     disputedAt,
     payoutMode,
@@ -90,6 +94,10 @@ const syncJob = async ({
       claimExpiry,
       claimStake,
       claimStakeBps,
+      claimFee,
+      claimFeeBps,
+      claimEconomicsWaived,
+      rejectingVerifier: rejectingVerifier === "0x0000000000000000000000000000000000000000" ? null : rejectingVerifier,
       rejectedAt: rejectedAt === 0n ? null : rejectedAt,
       disputedAt: disputedAt === 0n ? null : disputedAt,
       payoutMode,
@@ -109,6 +117,10 @@ const syncJob = async ({
       claimExpiry: row.claimExpiry,
       claimStake: row.claimStake,
       claimStakeBps: row.claimStakeBps,
+      claimFee: row.claimFee,
+      claimFeeBps: row.claimFeeBps,
+      claimEconomicsWaived: row.claimEconomicsWaived,
+      rejectingVerifier: row.rejectingVerifier,
       rejectedAt: row.rejectedAt,
       disputedAt: row.disputedAt,
       payoutMode: row.payoutMode,
@@ -162,6 +174,22 @@ ponder.on("EscrowCore:JobClaimed", async ({ event, context }) => {
     kind: "JobClaimed",
     actor: event.args.worker,
     amount: event.args.claimStake,
+    evidenceHash: null,
+    reasonCode: null,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp
+  });
+});
+
+ponder.on("EscrowCore:ClaimEconomicsLocked", async ({ event, context }) => {
+  await syncJob({ context, event, jobId: event.args.jobId });
+  await context.db.insert(schema.jobEvent).values({
+    id: toEventId(event.transaction.hash, event.log.logIndex),
+    jobId: event.args.jobId,
+    kind: event.args.waived ? "ClaimEconomicsWaived" : "ClaimEconomicsLocked",
+    actor: event.args.worker,
+    amount: event.args.claimStake + event.args.claimFee,
     evidenceHash: null,
     reasonCode: null,
     txHash: event.transaction.hash,
@@ -465,6 +493,8 @@ ponder.on("AgentAccountCore:JobStakeLocked", async ({ event, context }) => {
     kind: "locked",
     amount: event.args.amount,
     posterAmount: null,
+    verifierRecipient: null,
+    verifierAmount: null,
     treasuryAmount: null,
     txHash: event.transaction.hash,
     blockNumber: event.block.number,
@@ -480,6 +510,8 @@ ponder.on("AgentAccountCore:JobStakeReleased", async ({ event, context }) => {
     kind: "released",
     amount: event.args.amount,
     posterAmount: null,
+    verifierRecipient: null,
+    verifierAmount: null,
     treasuryAmount: null,
     txHash: event.transaction.hash,
     blockNumber: event.block.number,
@@ -495,6 +527,27 @@ ponder.on("AgentAccountCore:JobStakeSlashed", async ({ event, context }) => {
     kind: "slashed",
     amount: event.args.amount,
     posterAmount: event.args.posterAmount,
+    verifierRecipient: null,
+    verifierAmount: null,
+    treasuryAmount: event.args.treasuryAmount,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp
+  });
+});
+
+ponder.on("AgentAccountCore:ClaimFeeSlashed", async ({ event, context }) => {
+  await context.db.insert(schema.jobStakeEvent).values({
+    id: toEventId(event.transaction.hash, event.log.logIndex),
+    account: event.args.account,
+    asset: event.args.asset,
+    kind: "claim_fee_slashed",
+    amount: event.args.amount,
+    posterAmount: null,
+    verifierRecipient: event.args.verifierRecipient === "0x0000000000000000000000000000000000000000"
+      ? null
+      : event.args.verifierRecipient,
+    verifierAmount: event.args.verifierAmount,
     treasuryAmount: event.args.treasuryAmount,
     txHash: event.transaction.hash,
     blockNumber: event.block.number,

@@ -61,6 +61,19 @@ export class EventListener {
       });
     });
 
+    this.registerEscrow("ClaimEconomicsLocked", "escrow.claim_economics_locked", async ({ args, payload }) => {
+      const job = await this.readJob(args.jobId);
+      return this.buildChainEvent({
+        topic: "escrow.claim_economics_locked",
+        args,
+        payload,
+        wallet: args.worker,
+        wallets: [job.poster, args.worker],
+        sessionId: buildSessionId(args.jobId, args.worker),
+        job
+      });
+    });
+
     this.registerEscrow("WorkSubmitted", "escrow.work_submitted", async ({ args, payload }) => {
       const job = await this.readJob(args.jobId);
       return this.buildChainEvent({
@@ -223,6 +236,22 @@ export class EventListener {
           asset: args.asset,
           amount: args.amount.toString(),
           posterAmount: args.posterAmount.toString(),
+          treasuryAmount: args.treasuryAmount.toString()
+        }
+      }));
+
+    this.registerAccount("ClaimFeeSlashed", "account.claim_fee_slashed", async ({ args, payload }) =>
+      this.buildChainEvent({
+        topic: "account.claim_fee_slashed",
+        args,
+        payload,
+        wallet: args.account,
+        wallets: [args.account, args.verifierRecipient],
+        data: {
+          asset: args.asset,
+          amount: args.amount.toString(),
+          verifierRecipient: args.verifierRecipient,
+          verifierAmount: args.verifierAmount.toString(),
           treasuryAmount: args.treasuryAmount.toString()
         }
       }));
@@ -400,6 +429,10 @@ export class EventListener {
       claimExpiry: Number(job.claimExpiry),
       claimStake: job.claimStake?.toString?.() ?? `${job.claimStake}`,
       claimStakeBps: Number(job.claimStakeBps),
+      claimFee: job.claimFee?.toString?.() ?? `${job.claimFee}`,
+      claimFeeBps: Number(job.claimFeeBps),
+      claimEconomicsWaived: Boolean(job.claimEconomicsWaived),
+      rejectingVerifier: normalizeAddress(job.rejectingVerifier),
       rejectedAt: Number(job.rejectedAt),
       disputedAt: Number(job.disputedAt),
       state: Number(job.state)

@@ -45,6 +45,8 @@ contract AgentPlatformTest is Test {
         policy.setArbitrator(arbitrator, true);
         policy.setDailyOutflowCap(type(uint256).max);
         policy.setPerAccountBorrowCap(1_000 ether);
+        policy.setOnboardingWaiverClaimCount(0);
+        policy.setClaimFeeBps(0);
 
         dot.mint(poster, 10_000 ether);
         dot.mint(worker, 1_000 ether);
@@ -90,6 +92,108 @@ contract AgentPlatformTest is Test {
         assertEq(workerJobStake, 0);
         assertEq(dot.balanceOf(worker), startingWorkerBalance + 100 ether);
         assertEq(reputation.balanceOf(worker), 1);
+    }
+
+    function testOnboardingWaivesFirstThreeClaimsThenLocksStakeAndFee() public {
+        policy.setOnboardingWaiverClaimCount(3);
+        policy.setClaimFeeBps(200);
+        policy.setMinClaimFee(address(dot), 0.05 ether);
+
+        for (uint256 i = 0; i < 3; i++) {
+            bytes32 jobId = keccak256(abi.encodePacked("job/onboarding/free", i));
+            vm.prank(poster);
+            escrow.createSinglePayoutJob(jobId, address(dot), 50 ether, 0, 0, 1 days, bytes32("AUTO"), bytes32("DATA"), SPEC_HASH);
+
+            vm.prank(worker);
+            escrow.claimJob(jobId);
+
+            EscrowCore.JobEscrow memory claimedJob = escrow.jobs(jobId);
+            assertEq(claimedJob.claimStake, 0);
+            assertEq(claimedJob.claimFee, 0);
+            require(claimedJob.claimEconomicsWaived, "EXPECTED_WAIVER");
+
+            vm.prank(worker);
+            escrow.submitWork(jobId, keccak256(abi.encodePacked("work", i)));
+            vm.prank(verifier);
+            escrow.resolveSinglePayout(jobId, true, bytes32("OK"), "ipfs://badge/free", REASONING_HASH);
+        }
+
+        bytes32 paidJobId = keccak256("job/onboarding/paid");
+        vm.prank(poster);
+        escrow.createSinglePayoutJob(paidJobId, address(dot), 50 ether, 0, 0, 1 days, bytes32("AUTO"), bytes32("DATA"), SPEC_HASH);
+
+        vm.prank(worker);
+        escrow.claimJob(paidJobId);
+
+        EscrowCore.JobEscrow memory paidJob = escrow.jobs(paidJobId);
+        (, , , , uint256 workerJobStake,) = accounts.positions(worker, address(dot));
+
+        assertEq(escrow.workerClaimCount(worker), 4);
+        assertEq(paidJob.claimStake, 2.5 ether);
+        assertEq(paidJob.claimFee, 1 ether);
+        require(!paidJob.claimEconomicsWaived, "EXPECTED_NO_WAIVER");
+        assertEq(workerJobStake, 3.5 ether);
+    }
+
+    function testSuccessfulVerificationRefundsClaimStakeAndFee() public {
+        policy.setClaimFeeBps(200);
+        policy.setMinClaimFee(address(dot), 0.05 ether);
+
+        bytes32 jobId = keccak256("job/fee/success");
+        vm.prank(poster);
+        escrow.createSinglePayoutJob(jobId, address(dot), 50 ether, 0, 0, 1 days, bytes32("AUTO"), bytes32("DATA"), SPEC_HASH);
+
+        vm.prank(worker);
+        escrow.claimJob(jobId);
+
+        (, , , , uint256 lockedAfterClaim,) = accounts.positions(worker, address(dot));
+        assertEq(lockedAfterClaim, 3.5 ether);
+
+        vm.prank(worker);
+        escrow.submitWork(jobId, keccak256("fee-success"));
+
+        vm.prank(verifier);
+        escrow.resolveSinglePayout(jobId, true, bytes32("OK"), "ipfs://badge/fee-success", REASONING_HASH);
+
+        EscrowCore.JobEscrow memory job = escrow.jobs(jobId);
+        (uint256 workerLiquid,,,, uint256 workerJobStake,) = accounts.positions(worker, address(dot));
+        assertEq(job.claimStake, 0);
+        assertEq(job.claimFee, 0);
+        assertEq(workerLiquid, WORKER_DEPOSIT);
+        assertEq(workerJobStake, 0);
+    }
+
+    function testRejectedJobSlashesClaimFeeToVerifierAndTreasurySplit() public {
+        policy.setClaimFeeBps(200);
+        policy.setMinClaimFee(address(dot), 0.05 ether);
+
+        bytes32 jobId = keccak256("job/fee/rejected");
+        vm.prank(poster);
+        escrow.createSinglePayoutJob(jobId, address(dot), 50 ether, 0, 0, 1 days, bytes32("AUTO"), bytes32("DATA"), SPEC_HASH);
+
+        uint256 posterBalanceBefore = dot.balanceOf(poster);
+        uint256 verifierBalanceBefore = dot.balanceOf(verifier);
+
+        vm.prank(worker);
+        escrow.claimJob(jobId);
+
+        vm.prank(worker);
+        escrow.submitWork(jobId, keccak256("fee-rejected"));
+
+        vm.prank(verifier);
+        escrow.resolveSinglePayout(jobId, false, bytes32("REJECTED"), "ipfs://badge/rejected", REASONING_HASH);
+
+        vm.warp(block.timestamp + escrow.DISPUTE_WINDOW() + 1);
+        escrow.finalizeRejectedJob(jobId);
+
+        EscrowCore.JobEscrow memory job = escrow.jobs(jobId);
+        (, , , , uint256 workerJobStake,) = accounts.positions(worker, address(dot));
+
+        assertEq(job.claimStake, 0);
+        assertEq(job.claimFee, 0);
+        assertEq(workerJobStake, 0);
+        assertEq(dot.balanceOf(poster), posterBalanceBefore + 1.25 ether);
+        assertEq(dot.balanceOf(verifier), verifierBalanceBefore + 0.7 ether);
     }
 
     function testBorrowCapacityAndRepayment() public {

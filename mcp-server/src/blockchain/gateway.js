@@ -224,6 +224,28 @@ export class BlockchainGateway {
     return this.withGatewayError("getDefaultClaimStakeBps", async () => Number(await this.policyContract.defaultClaimStakeBps()));
   }
 
+  async getClaimEconomicsConfig() {
+    return this.withGatewayError("getClaimEconomicsConfig", async () => {
+      const optional = async (promise, fallback) => promise.catch(() => fallback);
+      const [claimFeeBps, claimFeeVerifierBps, onboardingWaiverClaimCount] = await Promise.all([
+        optional(this.policyContract.claimFeeBps(), 0),
+        optional(this.policyContract.claimFeeVerifierBps(), 7000),
+        optional(this.policyContract.onboardingWaiverClaimCount(), 0)
+      ]);
+      const minClaimFeeByAsset = {};
+      await Promise.all(this.config.supportedAssets.map(async (asset) => {
+        const symbol = asset.symbol ?? this.resolveAssetSymbol(asset.address);
+        minClaimFeeByAsset[symbol] = Number(await optional(this.policyContract.minClaimFeeByAsset(asset.address), 0));
+      }));
+      return {
+        claimFeeBps: Number(claimFeeBps),
+        claimFeeVerifierBps: Number(claimFeeVerifierBps),
+        onboardingWaiverClaimCount: Number(onboardingWaiverClaimCount),
+        minClaimFeeByAsset
+      };
+    });
+  }
+
   async getTreasuryPolicyStatus() {
     return this.withGatewayError("getTreasuryPolicyStatus", async () => {
       if (!this.isEnabled()) {
@@ -245,6 +267,9 @@ export class BlockchainGateway {
         perAccountBorrowCap,
         minimumCollateralRatioBps,
         defaultClaimStakeBps,
+        claimFeeBps,
+        claimFeeVerifierBps,
+        onboardingWaiverClaimCount,
         rejectionSkillPenalty,
         rejectionReliabilityPenalty,
         disputeLossSkillPenalty,
@@ -257,6 +282,9 @@ export class BlockchainGateway {
         this.policyContract.perAccountBorrowCap(),
         this.policyContract.minimumCollateralRatioBps(),
         this.policyContract.defaultClaimStakeBps(),
+        this.policyContract.claimFeeBps().catch(() => 0),
+        this.policyContract.claimFeeVerifierBps().catch(() => 7000),
+        this.policyContract.onboardingWaiverClaimCount().catch(() => 0),
         this.policyContract.rejectionSkillPenalty(),
         this.policyContract.rejectionReliabilityPenalty(),
         this.policyContract.disputeLossSkillPenalty(),
@@ -274,6 +302,9 @@ export class BlockchainGateway {
           perAccountBorrowCap: Number(perAccountBorrowCap),
           minimumCollateralRatioBps: Number(minimumCollateralRatioBps),
           defaultClaimStakeBps: Number(defaultClaimStakeBps),
+          claimFeeBps: Number(claimFeeBps),
+          claimFeeVerifierBps: Number(claimFeeVerifierBps),
+          onboardingWaiverClaimCount: Number(onboardingWaiverClaimCount),
           rejectionSkillPenalty: Number(rejectionSkillPenalty),
           rejectionReliabilityPenalty: Number(rejectionReliabilityPenalty),
           disputeLossSkillPenalty: Number(disputeLossSkillPenalty),
@@ -500,6 +531,23 @@ export class BlockchainGateway {
     });
   }
 
+  async previewClaimEconomics(wallet, jobId) {
+    return this.withGatewayError("previewClaimEconomics", async () => {
+      const economics = await this.escrowContract.previewClaimEconomics(wallet, this.toJobId(jobId));
+      return {
+        claimStake: Number(economics.claimStake),
+        claimStakeRaw: economics.claimStake?.toString?.() ?? String(economics.claimStake),
+        claimStakeBps: Number(economics.claimStakeBps),
+        claimFee: Number(economics.claimFee),
+        claimFeeRaw: economics.claimFee?.toString?.() ?? String(economics.claimFee),
+        claimFeeBps: Number(economics.claimFeeBps),
+        claimEconomicsWaived: Boolean(economics.waived),
+        claimNumber: Number(economics.claimNumber),
+        totalClaimLock: Number(economics.claimStake) + Number(economics.claimFee)
+      };
+    });
+  }
+
   async ensureJob(job, instanceJobId = job.id, claimStakeAmount = 0) {
     return this.withGatewayError("ensureJob", async () => {
       this.requireSigner("ensureJob");
@@ -636,6 +684,11 @@ export class BlockchainGateway {
         claimStake: Number(job.claimStake),
         claimStakeRaw: job.claimStake?.toString?.() ?? String(job.claimStake),
         claimStakeBps: Number(job.claimStakeBps),
+        claimFee: Number(job.claimFee),
+        claimFeeRaw: job.claimFee?.toString?.() ?? String(job.claimFee),
+        claimFeeBps: Number(job.claimFeeBps),
+        claimEconomicsWaived: Boolean(job.claimEconomicsWaived),
+        rejectingVerifier: job.rejectingVerifier,
         released: Number(job.released),
         releasedRaw: job.released?.toString?.() ?? String(job.released),
         state: Number(job.state),

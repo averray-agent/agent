@@ -28,6 +28,8 @@ export function buildFundedJobFromClaim({ job, session, now = new Date() }) {
     rewardAsset: job?.rewardAsset ?? "DOT",
     rewardAmount: finiteNumber(job?.rewardAmount, 0),
     claimStake: finiteNumber(session?.claimStake, 0),
+    claimFee: finiteNumber(session?.claimFee, 0),
+    totalClaimLock: finiteNumber(session?.totalClaimLock, 0),
     fundedAt,
     claimedAt: session?.claimedAt ?? fundedAt,
     submittedAt: session?.submittedAt,
@@ -52,6 +54,8 @@ export function updateFundedJobFromSession(existing, { job, session, verificatio
     rewardAsset: job?.rewardAsset ?? existing?.rewardAsset,
     rewardAmount: job ? finiteNumber(job.rewardAmount, 0) : existing?.rewardAmount,
     claimStake: session ? finiteNumber(session.claimStake, 0) : existing?.claimStake,
+    claimFee: session ? finiteNumber(session.claimFee, 0) : existing?.claimFee,
+    totalClaimLock: session ? finiteNumber(session.totalClaimLock, 0) : existing?.totalClaimLock,
     claimedAt: session?.claimedAt ?? existing?.claimedAt,
     submittedAt: session?.submittedAt ?? existing?.submittedAt,
     deadlineAt: computeDeadlineAt({ job, session }) ?? existing?.deadlineAt,
@@ -128,6 +132,8 @@ export function normalizeFundedJobRecord(record) {
     ...record,
     rewardAmount: finiteNumber(record?.rewardAmount, 0),
     claimStake: finiteNumber(record?.claimStake, 0),
+    claimFee: finiteNumber(record?.claimFee, 0),
+    totalClaimLock: finiteNumber(record?.totalClaimLock, 0),
     finalStatus: FINAL_FUNDED_JOB_STATUSES.has(record?.finalStatus)
       ? record.finalStatus
       : record?.finalStatus === FUNDED_JOB_STATUSES.OPEN
