@@ -56,7 +56,7 @@ github_repo_from_remote() {
 }
 
 branch_has_merged_pr() {
-  local repo state
+  local repo merged_count
   repo="$(github_repo_from_remote)"
   if [[ -z "$repo" ]]; then
     return 1
@@ -65,15 +65,26 @@ branch_has_merged_pr() {
     return 1
   fi
 
-  state="$(
-    GH_PAGER= gh pr view "$branch" \
+  # `gh pr view <branch>` requires the branch to still exist locally OR
+  # remotely to resolve a PR. The merge queue auto-deletes the remote
+  # branch on merge (GitHub default), so by the time this script runs
+  # the branch usually no longer exists on the remote and `gh pr view`
+  # fails to find the PR even though it WAS merged. `gh pr list
+  # --search "head:<branch> is:merged"` searches GitHub by the
+  # historical head-ref name, regardless of whether the branch still
+  # exists, which is what we actually want.
+  merged_count="$(
+    GH_PAGER= gh pr list \
       --repo "$repo" \
-      --json state,mergedAt \
-      --jq 'if (.state == "MERGED" or .mergedAt != null) then "merged" else "not_merged" end' \
+      --state merged \
+      --search "head:$branch" \
+      --limit 5 \
+      --json number \
+      --jq 'length' \
       2>/dev/null || true
   )"
 
-  [[ "$state" == "merged" ]]
+  [[ -n "$merged_count" && "$merged_count" =~ ^[0-9]+$ && "$merged_count" -gt 0 ]]
 }
 
 if [[ $# -ne 1 ]]; then
