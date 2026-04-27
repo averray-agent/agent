@@ -39,6 +39,12 @@ export function extractDispute(data: unknown): Dispute | null {
   const release = objectField(record, "release");
   const releaseDestination = releaseToDestination(release, verdict);
   const stakeFrozen = number(record.stakedAmount, number(record.stakeFrozen, 0));
+  const workerPayout = optionalNumber(record.workerPayout);
+  const remainingPayout = optionalNumber(record.remainingPayout);
+  const txHash = text(record.txHash, "");
+  const chainStatus = text(record.chainStatus, "");
+  const reasonCode = text(record.reasonCode, "");
+  const metadataURI = text(record.metadataURI, "");
 
   return {
     id,
@@ -52,6 +58,13 @@ export function extractDispute(data: unknown): Dispute | null {
     respondent: party(record.respondent, "respondent", "clay"),
     reviewer: party(record.reviewer ?? DEFAULT_REVIEWER, "operator-primary", "sage"),
     stakeFrozen,
+    workerPayout,
+    remainingPayout,
+    reasonCode: reasonCode || undefined,
+    reasoningHash: text(record.reasoningHash, "") || undefined,
+    metadataURI: metadataURI || undefined,
+    txHash: txHash || undefined,
+    chainStatus: chainStatus || undefined,
     stakeBreakdown: stakeBreakdown(stakeFrozen),
     openedAt: displayDate(openedAt),
     windowSeconds,
@@ -67,6 +80,11 @@ export function extractDispute(data: unknown): Dispute | null {
           rationale: text(record.rationale, text(record.reason, "Resolved by operator verdict.")),
           at: displayDate(text(release?.releasedAt, text(record.decidedAt, new Date().toISOString()))),
           signer: party(record.decidedBy ?? release?.releasedBy ?? record.reviewer ?? DEFAULT_REVIEWER, "operator-primary", "sage"),
+          reasonCode: reasonCode || undefined,
+          workerPayout,
+          txHash: txHash || undefined,
+          chainStatus: chainStatus || undefined,
+          metadataURI: metadataURI || undefined,
         }
       : undefined,
   };
@@ -194,6 +212,11 @@ function timelineBody(record: Record<string, unknown>, action: string): string {
   const data = objectField(record, "data");
   const reason = text(data?.reason, "");
   if (reason) return `${actor} recorded ${reason}.`;
+  const reasonCode = text(data?.reasonCode, "");
+  const txHash = text(data?.txHash, "");
+  if (action.includes("verdict") && reasonCode) {
+    return `${actor} recorded ${reasonCode}${txHash ? ` · ${shortAddress(txHash)}` : ""}.`;
+  }
   return `${actor} recorded ${action.replace(/_/gu, " ")}.`;
 }
 
@@ -280,6 +303,10 @@ function text(value: unknown, fallback: string): string {
 
 function number(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function optionalNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function objectField(value: unknown, key: string): Record<string, unknown> | null {

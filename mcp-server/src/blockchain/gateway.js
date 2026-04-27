@@ -571,6 +571,24 @@ export class BlockchainGateway {
     });
   }
 
+  async resolveDispute(jobId, workerPayout, reasonCode, metadataURI = "") {
+    return this.withGatewayError("resolveDispute", async () => {
+      this.requireSigner("resolveDispute");
+      const tx = await this.escrowContract.resolveDispute(
+        this.toJobId(jobId),
+        workerPayout,
+        this.toDisputeReasonCode(reasonCode),
+        metadataURI
+      );
+      const receipt = await tx.wait();
+      return {
+        txHash: tx.hash,
+        blockNumber: receipt?.blockNumber,
+        status: Number(receipt?.status ?? 0)
+      };
+    });
+  }
+
   async getJob(jobId) {
     return this.withGatewayError("getJob", async () => {
       const job = await this.escrowContract.jobs(this.toJobId(jobId));
@@ -580,8 +598,12 @@ export class BlockchainGateway {
         asset: job.asset,
         specHash: job.specHash,
         reward: Number(job.reward),
+        rewardRaw: job.reward?.toString?.() ?? String(job.reward),
         claimStake: Number(job.claimStake),
+        claimStakeRaw: job.claimStake?.toString?.() ?? String(job.claimStake),
         claimStakeBps: Number(job.claimStakeBps),
+        released: Number(job.released),
+        releasedRaw: job.released?.toString?.() ?? String(job.released),
         state: Number(job.state),
         claimExpiry: Number(job.claimExpiry),
         rejectedAt: Number(job.rejectedAt),
@@ -758,6 +780,10 @@ export class BlockchainGateway {
 
   toReasonCode(reasonCode) {
     return id(reasonCode);
+  }
+
+  toDisputeReasonCode(reasonCode) {
+    return this.toBytes32Value(reasonCode, "reasonCode");
   }
 
   toRequestId(requestId) {

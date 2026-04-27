@@ -23,6 +23,8 @@ export const EVENT_TOPICS = [
   "escrow.job_closed",
   "escrow.job_reopened",
   "escrow.dispute_opened",
+  "escrow.dispute_resolved",
+  "escrow.auto_resolved_on_timeout",
   "account.job_stake_locked",
   "account.job_stake_released",
   "account.job_stake_slashed",

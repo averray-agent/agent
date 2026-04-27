@@ -16,6 +16,8 @@ const INVALIDATE_BY_TOPIC: Partial<Record<EventTopic, string[]>> = {
   "escrow.job_closed": ["/jobs", "/sessions", "/badges", "/agents", "/audit"],
   "escrow.job_reopened": ["/jobs", "/sessions"],
   "escrow.dispute_opened": ["/disputes", "/alerts", "/jobs", "/sessions"],
+  "escrow.dispute_resolved": ["/disputes", "/alerts", "/jobs", "/sessions", "/badges", "/agents", "/audit"],
+  "escrow.auto_resolved_on_timeout": ["/disputes", "/alerts", "/jobs", "/sessions", "/badges", "/agents", "/audit"],
   "account.job_stake_locked": ["/account", "/sessions"],
   "account.job_stake_released": ["/account", "/sessions", "/disputes"],
   "account.job_stake_slashed": ["/account", "/agents", "/disputes"],
