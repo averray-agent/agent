@@ -356,6 +356,15 @@ npm --workspace mcp-server run ingest:osv-advisories -- --dry-run \
   --packages '[{"name":"minimist","version":"0.0.8","repo":"example/app","manifestPath":"package.json"}]'
 ```
 
+For repo-shaped ingestion, point the provider at one or more GitHub npm
+lockfiles. Explicit packages still win when both knobs are set.
+
+```bash
+npm --workspace mcp-server run ingest:osv-advisories -- --dry-run \
+  --manifests '[{"repo":"averray-agent/agent","manifestPath":"package-lock.json","ref":"main"}]' \
+  --max-package-targets 100
+```
+
 Or through the admin API:
 
 ```http
@@ -371,6 +380,9 @@ OSV_INGEST_INTERVAL_MS=3600000
 OSV_INGEST_MAX_JOBS_PER_RUN=2
 OSV_INGEST_MAX_OPEN_JOBS=20
 OSV_INGEST_PACKAGES_JSON='[{"name":"minimist","version":"0.0.8","repo":"example/app","manifestPath":"package.json"}]'
+# Or, for repo lockfile discovery when explicit packages are not set:
+OSV_INGEST_MANIFESTS_JSON='[{"repo":"averray-agent/agent","manifestPath":"package-lock.json","ref":"main"}]'
+OSV_INGEST_MAX_PACKAGE_TARGETS=100
 ```
 
 Review `osvIngestion.lastRun` in `/admin/status`, then switch
@@ -403,6 +415,10 @@ Preview jobs through:
 npm --workspace mcp-server run ingest:open-data -- --dry-run \
   --query 'res_format:CSV'
 ```
+
+The ingester keeps one resource per dataset per run, preferring simple,
+agent-auditable formats such as CSV over sibling GeoJSON/JSON resources. That
+avoids filling the queue with duplicate audits for the same dataset.
 
 Or through the admin API:
 

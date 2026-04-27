@@ -19,6 +19,7 @@ export const DEFAULT_BASE_URL = "http://localhost:8787";
 export const DEFAULT_ECOSYSTEM = "npm";
 export const OSV_QUERY_BATCH_URL = "https://api.osv.dev/v1/querybatch";
 export const OSV_VULN_URL = "https://api.osv.dev/v1/vulns";
+export const GITHUB_RAW_BASE_URL = "https://raw.githubusercontent.com";
 
 const ECOSYSTEMS = new Set(["npm"]);
 
@@ -46,11 +47,16 @@ export function parseArgs(argv) {
 
 export async function ingestOsvAdvisories({
   packages = [],
+  manifests = [],
   limit = 10,
   minScore = 55,
+  maxPackageTargets = 100,
   fetchImpl = fetch
 } = {}) {
-  const targets = parsePackages(packages);
+  const explicitTargets = parsePackages(packages);
+  const targets = explicitTargets.length
+    ? explicitTargets
+    : await collectPackageTargetsFromManifests({ manifests, maxPackageTargets, fetchImpl });
   if (!targets.length) {
     return { ecosystem: DEFAULT_ECOSYSTEM, minScore, count: 0, jobs: [], skipped: [] };
   }
@@ -154,6 +160,35 @@ export function parsePackages(raw) {
   const parsed = typeof raw === "string" ? parsePackageString(raw) : raw;
   if (!Array.isArray(parsed)) return [];
   return parsed.map(normalizePackageTarget).filter(Boolean);
+}
+
+export function parseManifests(raw) {
+  const parsed = typeof raw === "string" ? parseManifestString(raw) : raw;
+  if (!Array.isArray(parsed)) return [];
+  return parsed.map(normalizeManifestSource).filter(Boolean);
+}
+
+export async function collectPackageTargetsFromManifests({
+  manifests = [],
+  maxPackageTargets = 100,
+  fetchImpl = fetch
+} = {}) {
+  const sources = parseManifests(manifests);
+  const targets = [];
+  const seen = new Set();
+  for (const source of sources) {
+    const lockfile = await fetchNpmLockfile(source, fetchImpl);
+    for (const target of extractNpmLockfileTargets({ lockfile, source })) {
+      const key = `${target.ecosystem}|${target.repo}|${target.manifestPath}|${target.name}|${target.version}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      targets.push(target);
+      if (targets.length >= maxPackageTargets) {
+        return targets;
+      }
+    }
+  }
+  return targets;
 }
 
 export function scoreAdvisory(advisory, { fixedVersion } = {}) {
@@ -293,6 +328,84 @@ function parsePackageString(raw) {
       };
     })
     .filter(Boolean);
+}
+
+function parseManifestString(raw) {
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed;
+  } catch {
+    // Fall through to compact line parser.
+  }
+  return String(raw)
+    .split(/\n|,/u)
+    .map((entry) => {
+      const [repo, manifestPath = "package-lock.json", ref = "main"] = entry.split("|").map((part) => part?.trim());
+      if (!repo) return undefined;
+      return { repo, manifestPath, ref };
+    })
+    .filter(Boolean);
+}
+
+function normalizeManifestSource(raw) {
+  const repo = normalizeRepo(raw?.repo);
+  const manifestPath = String(raw?.manifestPath ?? raw?.path ?? "package-lock.json").trim().replace(/^\/+/u, "");
+  const ref = String(raw?.ref ?? raw?.branch ?? "main").trim();
+  if (!repo || !manifestPath || !ref) return undefined;
+  return { repo, manifestPath, ref };
+}
+
+async function fetchNpmLockfile(source, fetchImpl) {
+  const url = rawGithubUrl(source);
+  const response = await fetchImpl(url, {
+    headers: {
+      accept: "application/json",
+      "user-agent": "AverrayOsvIngest/0.1 (https://averray.com; operator@averray.com)"
+    }
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`GitHub lockfile fetch failed (${response.status}) for ${source.repo}/${source.manifestPath}@${source.ref}: ${body}`);
+  }
+  return response.json();
+}
+
+function rawGithubUrl(source) {
+  const repoPath = source.repo.split("/").map(encodeURIComponent).join("/");
+  const manifestPath = source.manifestPath.split("/").map(encodeURIComponent).join("/");
+  return `${GITHUB_RAW_BASE_URL}/${repoPath}/${encodeURIComponent(source.ref)}/${manifestPath}`;
+}
+
+export function extractNpmLockfileTargets({ lockfile, source }) {
+  const targets = [];
+  const packages = lockfile?.packages && typeof lockfile.packages === "object" ? lockfile.packages : undefined;
+  if (packages) {
+    for (const [path, entry] of Object.entries(packages)) {
+      if (!path.startsWith("node_modules/") || !entry || typeof entry !== "object") continue;
+      const name = entry.name || packageNameFromNodeModulesPath(path);
+      const version = String(entry.version ?? "").trim();
+      if (!name || !version || entry.dev === true) continue;
+      targets.push({ name, version, ecosystem: DEFAULT_ECOSYSTEM, repo: source.repo, manifestPath: source.manifestPath });
+    }
+    return targets;
+  }
+
+  const dependencies = lockfile?.dependencies && typeof lockfile.dependencies === "object" ? lockfile.dependencies : {};
+  for (const [name, entry] of Object.entries(dependencies)) {
+    const version = String(entry?.version ?? "").trim();
+    if (!name || !version || entry?.dev === true) continue;
+    targets.push({ name, version, ecosystem: DEFAULT_ECOSYSTEM, repo: source.repo, manifestPath: source.manifestPath });
+  }
+  return targets;
+}
+
+function packageNameFromNodeModulesPath(path) {
+  const relative = path.replace(/^node_modules\//u, "");
+  if (relative.startsWith("@")) {
+    const [scope, name] = relative.split("/");
+    return scope && name ? `${scope}/${name}` : "";
+  }
+  return relative.split("/")[0] ?? "";
 }
 
 function normalizePackageTarget(raw) {
@@ -449,8 +562,10 @@ async function runCli() {
   const args = parseArgs(process.argv.slice(2));
   const dryRun = Boolean(args["dry-run"]);
   const packages = args.packages ?? process.env.OSV_INGEST_PACKAGES_JSON ?? process.env.OSV_INGEST_PACKAGES;
+  const manifests = args.manifests ?? process.env.OSV_INGEST_MANIFESTS_JSON ?? process.env.OSV_INGEST_MANIFESTS;
   const limit = parsePositiveInt(args.limit, 10);
   const minScore = parsePositiveInt(args["min-score"], 55);
+  const maxPackageTargets = parsePositiveInt(args["max-package-targets"] ?? process.env.OSV_INGEST_MAX_PACKAGE_TARGETS, 100);
   const baseUrl = trimTrailingSlash(String(args.baseUrl ?? process.env.AGENT_API_BASE_URL ?? DEFAULT_BASE_URL));
   const adminToken = process.env.AGENT_ADMIN_TOKEN?.trim();
 
@@ -458,7 +573,7 @@ async function runCli() {
     fail("AGENT_ADMIN_TOKEN is required unless --dry-run is set.");
   }
 
-  const dryRunPayload = await ingestOsvAdvisories({ packages, limit, minScore });
+  const dryRunPayload = await ingestOsvAdvisories({ packages, manifests, limit, minScore, maxPackageTargets });
   if (dryRun) {
     console.log(JSON.stringify(dryRunPayload, null, 2));
     return;

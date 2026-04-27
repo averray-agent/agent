@@ -9,6 +9,7 @@ import {
   parseDatasets,
   scoreDatasetTarget,
   searchDataGovDatasets,
+  selectBestResourcePerDataset,
   toPlatformJob
 } from "./ingest-open-data-datasets.js";
 
@@ -148,6 +149,29 @@ test("scoreDatasetTarget prefers concrete resource audit targets", () => {
   assert.equal(scoreDatasetTarget({ ...TARGET, resourceUrl: "" }), 46);
 });
 
+test("selectBestResourcePerDataset keeps one high-signal resource per dataset", () => {
+  const skipped = [];
+  const csv = { target: TARGET, score: 100 };
+  const geojson = {
+    target: {
+      ...TARGET,
+      resourceId: "resource-geojson",
+      resourceTitle: "Spending GeoJSON",
+      resourceUrl: "https://example.gov/spending.geojson",
+      resourceFormat: "GEOJSON"
+    },
+    score: 100
+  };
+
+  const selected = selectBestResourcePerDataset([geojson, csv], skipped);
+
+  assert.equal(selected.length, 1);
+  assert.equal(selected[0].target.resourceFormat, "CSV");
+  assert.equal(skipped.length, 1);
+  assert.equal(skipped[0].reason, "duplicate_dataset_resource");
+  assert.equal(skipped[0].selectedResourceId, "resource-456");
+});
+
 test("toPlatformJob creates a benchmark open-data audit job", () => {
   const job = toPlatformJob(TARGET, 92);
 
@@ -228,4 +252,40 @@ test("ingestOpenDataDatasets searches Data.gov and filters low-score resources",
 
   assert.equal(payload.count, 1);
   assert.equal(payload.skipped[0].reason, "below_min_score");
+});
+
+test("ingestOpenDataDatasets avoids duplicate resource jobs for one dataset", async () => {
+  const payload = await ingestOpenDataDatasets({
+    query: "traffic crashes",
+    limit: 5,
+    minScore: 55,
+    fetchImpl: async () => ({
+      ok: true,
+      async json() {
+        return {
+          result: {
+            results: [
+              {
+                ...CKAN_PACKAGE,
+                resources: [
+                  CKAN_PACKAGE.resources[0],
+                  {
+                    id: "resource-geojson",
+                    name: "Spending GeoJSON",
+                    url: "https://example.gov/spending.geojson",
+                    format: "GEOJSON",
+                    last_modified: "2021-01-01T00:00:00Z"
+                  }
+                ]
+              }
+            ]
+          }
+        };
+      }
+    })
+  });
+
+  assert.equal(payload.count, 1);
+  assert.equal(payload.jobs[0].source.resourceFormat, "CSV");
+  assert.equal(payload.skipped[0].reason, "duplicate_dataset_resource");
 });
