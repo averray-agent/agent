@@ -19,6 +19,10 @@ export const EscrowCoreAbi = parseAbi([
   "function jobs(bytes32 jobId) view returns ((address poster, address worker, address asset, bytes32 verifierMode, bytes32 category, bytes32 specHash, uint256 reward, uint256 opsReserve, uint256 contingencyReserve, uint256 released, uint256 claimExpiry, uint256 claimStake, uint16 claimStakeBps, uint256 claimFee, uint16 claimFeeBps, bool claimEconomicsWaived, address rejectingVerifier, uint256 rejectedAt, uint256 disputedAt, uint8 payoutMode, uint8 state))"
 ]);
 
+export const EscrowCoreLegacyJobsAbi = parseAbi([
+  "function jobs(bytes32 jobId) view returns ((address poster, address worker, address asset, bytes32 verifierMode, bytes32 category, bytes32 specHash, uint256 reward, uint256 opsReserve, uint256 contingencyReserve, uint256 released, uint256 claimExpiry, uint256 claimStake, uint16 claimStakeBps, uint256 rejectedAt, uint256 disputedAt, uint8 payoutMode, uint8 state))"
+]);
+
 export const ReputationSbtAbi = parseAbi([
   "event BadgeMinted(uint256 indexed tokenId, address indexed account, bytes32 indexed category, uint256 level, string metadataURI)",
   "event ReputationUpdated(address indexed account, uint256 skill, uint256 reliability, uint256 economic)",

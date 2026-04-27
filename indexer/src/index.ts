@@ -3,7 +3,7 @@ import { hexToString } from "viem";
 import { ponder } from "ponder:registry";
 import schema from "ponder:schema";
 
-import { EscrowCoreAbi } from "../abis/contractsAbi";
+import { EscrowCoreAbi, EscrowCoreLegacyJobsAbi } from "../abis/contractsAbi";
 
 const payoutModeLabels = ["single", "milestone"] as const;
 const jobStateLabels = ["none", "open", "claimed", "submitted", "rejected", "disputed", "closed"] as const;
@@ -44,12 +44,7 @@ const syncJob = async ({
   event: any;
   jobId: `0x${string}`;
 }) => {
-  const live = await context.client.readContract({
-    abi: EscrowCoreAbi,
-    address: event.log.address,
-    functionName: "jobs",
-    args: [jobId]
-  });
+  const live = await readLiveJob({ context, event, jobId });
 
   const [
     poster,
@@ -131,6 +126,74 @@ const syncJob = async ({
       updatedAtTimestamp: row.updatedAtTimestamp,
       lastTxHash: row.lastTxHash
     }));
+};
+
+const readLiveJob = async ({
+  context,
+  event,
+  jobId
+}: {
+  context: any;
+  event: any;
+  jobId: `0x${string}`;
+}) => {
+  try {
+    return await context.client.readContract({
+      abi: EscrowCoreAbi,
+      address: event.log.address,
+      functionName: "jobs",
+      args: [jobId]
+    });
+  } catch (error) {
+    const legacy = await context.client.readContract({
+      abi: EscrowCoreLegacyJobsAbi,
+      address: event.log.address,
+      functionName: "jobs",
+      args: [jobId]
+    });
+    const [
+      poster,
+      worker,
+      asset,
+      verifierMode,
+      category,
+      specHash,
+      reward,
+      opsReserve,
+      contingencyReserve,
+      released,
+      claimExpiry,
+      claimStake,
+      claimStakeBps,
+      rejectedAt,
+      disputedAt,
+      payoutMode,
+      state
+    ] = legacy;
+    return [
+      poster,
+      worker,
+      asset,
+      verifierMode,
+      category,
+      specHash,
+      reward,
+      opsReserve,
+      contingencyReserve,
+      released,
+      claimExpiry,
+      claimStake,
+      claimStakeBps,
+      0n,
+      0,
+      false,
+      "0x0000000000000000000000000000000000000000",
+      rejectedAt,
+      disputedAt,
+      payoutMode,
+      state
+    ] as const;
+  }
 };
 
 ponder.on("EscrowCore:JobFunded", async ({ event, context }) => {
