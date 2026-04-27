@@ -73,7 +73,8 @@ export class PlatformService {
       this.getJobDefinition.bind(this),
       this.eventBus,
       this.accountMutationService,
-      this.getDefaultClaimStakeBps.bind(this)
+      this.getDefaultClaimStakeBps.bind(this),
+      this.getClaimableJobDefinition.bind(this)
     );
     this.verificationIngestionService = new VerificationIngestionService(this.stateStore, this.eventBus);
   }
@@ -95,6 +96,14 @@ export class PlatformService {
 
   createJob(input) {
     return this.jobCatalogService.createJob(input);
+  }
+
+  updateJobLifecycle(jobId, patch = {}) {
+    return this.jobCatalogService.updateJobLifecycle(jobId, patch);
+  }
+
+  getJobLifecycleSummary() {
+    return this.jobCatalogService.getJobLifecycleSummary();
   }
 
   getRecurringTemplateStatus() {
@@ -306,6 +315,7 @@ export class PlatformService {
         }
       },
       recurring: recurring,
+      jobLifecycle: this.jobCatalogService.getJobLifecycleSummary(),
       scheduler,
       providerOperations,
       githubIngestion: githubIngestion,
@@ -338,6 +348,14 @@ export class PlatformService {
 
   getJobDefinition(jobId) {
     return this.jobCatalogService.getJobDefinition(jobId);
+  }
+
+  getPublicJobDefinition(jobId) {
+    return this.jobCatalogService.getPublicJobDefinition(jobId);
+  }
+
+  getClaimableJobDefinition(jobId) {
+    return this.jobCatalogService.getClaimableJobDefinition(jobId);
   }
 
   async recommendJobs(wallet) {

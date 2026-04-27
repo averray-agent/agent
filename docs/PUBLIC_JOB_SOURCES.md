@@ -184,6 +184,21 @@ and a compact `lastRun` summary. The older provider-specific fields such as
 `osvIngestion` and `openDataIngestion` remain available for compatibility, but
 new admin UI should render from `providerOperations`.
 
+### Job lifecycle cleanup
+
+Provider-created jobs are now lifecycle-managed so live sources can be tuned
+without leaving stale work on the public board forever.
+
+- New jobs default to `lifecycle.status=open` and receive a `staleAt` timestamp
+  14 days after creation.
+- Public `/jobs`, `/jobs/definition`, `/jobs/recommendations`, preflight, and
+  claim flows treat `paused`, `archived`, and computed `stale` jobs as not
+  claimable.
+- Operators can use `POST /admin/jobs/lifecycle` with `action=pause`,
+  `archive`, `reopen`, or `mark_stale` plus an optional `reason`.
+- `/admin/status.jobLifecycle` reports total, open, claimable, stale, paused,
+  and archived counts for the provider operations UI.
+
 ### Public status endpoint
 
 `GET /status/providers` is the **public, sanitized** counterpart to

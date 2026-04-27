@@ -970,6 +970,7 @@ function metricPathLabel(pathname) {
     "/admin/jobs/ingest/osv",
     "/admin/jobs/ingest/standards",
     "/admin/jobs/ingest/wikipedia",
+    "/admin/jobs/lifecycle",
     "/admin/jobs/pause",
     "/admin/jobs/resume",
     "/admin/xcm/observe",
@@ -1256,6 +1257,7 @@ const server = createServer(async (request, response) => {
           "/admin/jobs/ingest/standards",
           "/admin/jobs/ingest/wikipedia",
           "/admin/jobs/fire",
+          "/admin/jobs/lifecycle",
           "/admin/jobs/pause",
           "/admin/jobs/resume",
           "/admin/xcm/observe",
@@ -1405,7 +1407,7 @@ const server = createServer(async (request, response) => {
     }
 
     if (request.method === "GET" && pathname === "/jobs/definition") {
-      return respond(response, 200, service.getJobDefinition(url.searchParams.get("jobId") ?? ""));
+      return respond(response, 200, service.getPublicJobDefinition(url.searchParams.get("jobId") ?? ""));
     }
 
     if (request.method === "GET" && pathname === "/gas/health") {
@@ -2765,6 +2767,26 @@ const server = createServer(async (request, response) => {
         await stateStore.upsertMutationReceipt?.("admin_jobs_fire", mutationKey, derivative);
       }
       return respond(response, 201, derivative);
+    }
+
+    if (request.method === "POST" && pathname === "/admin/jobs/lifecycle") {
+      const auth = await authMiddleware(request, url, { requireRole: "admin" });
+      await enforceLimit("admin_jobs", auth.wallet, rateLimitConfig.adminJobs);
+      const payload = await readJsonBody(request);
+      const jobId = typeof payload?.jobId === "string" ? payload.jobId.trim() : "";
+      if (!jobId) {
+        throw new ValidationError("jobId is required.");
+      }
+      const updated = service.updateJobLifecycle(jobId, {
+        action: payload?.action,
+        status: payload?.status,
+        staleAt: payload?.staleAt,
+        reason: payload?.reason
+      });
+      return respond(response, 200, {
+        job: updated,
+        jobLifecycle: service.getJobLifecycleSummary()
+      });
     }
 
     if (request.method === "POST" && pathname === "/admin/jobs/pause") {

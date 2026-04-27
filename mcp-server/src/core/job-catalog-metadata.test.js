@@ -71,6 +71,82 @@ test("jobs default to worker work when role fields are omitted", () => {
   assert.equal(job.requiredRole, "worker");
 });
 
+test("job lifecycle hides paused, archived, and stale jobs from public discovery", async () => {
+  const service = makeService();
+  const now = new Date("2026-04-27T10:00:00.000Z");
+  const open = service.createJob({
+    ...BASE_JOB,
+    id: "open-lifecycle-001",
+    lifecycle: {
+      createdAt: "2026-04-27T09:00:00.000Z",
+      updatedAt: "2026-04-27T09:00:00.000Z",
+      staleAt: "2026-05-11T09:00:00.000Z"
+    }
+  });
+  service.createJob({
+    ...BASE_JOB,
+    id: "stale-lifecycle-001",
+    lifecycle: {
+      createdAt: "2026-04-01T00:00:00.000Z",
+      updatedAt: "2026-04-01T00:00:00.000Z",
+      staleAt: "2026-04-15T00:00:00.000Z"
+    }
+  });
+
+  assert.equal(open.lifecycle.status, "open");
+  assert.equal(open.lifecycle.staleAt, "2026-05-11T09:00:00.000Z");
+  service.updateJobLifecycle("open-lifecycle-001", { action: "pause", reason: "waiting for provider fix" }, now);
+
+  assert.deepEqual(service.listJobs({ now }).map((job) => job.id), []);
+  assert.deepEqual(
+    service.listJobs({ includePaused: true, includeStale: true, now }).map((job) => [job.id, job.lifecycle.state]),
+    [
+      ["stale-lifecycle-001", "stale"],
+      ["open-lifecycle-001", "paused"]
+    ]
+  );
+
+  const preflight = await service.preflightJob("0xagent", "open-lifecycle-001");
+  assert.equal(preflight.eligible, false);
+  assert.equal(preflight.lifecycle.state, "paused");
+});
+
+test("job lifecycle supports archival and claimability guardrails", () => {
+  const service = makeService();
+  service.createJob({
+    ...BASE_JOB,
+    id: "archive-lifecycle-001",
+    lifecycle: {
+      createdAt: "2026-04-27T09:00:00.000Z",
+      updatedAt: "2026-04-27T09:00:00.000Z",
+      staleAt: "2026-05-11T09:00:00.000Z"
+    }
+  });
+
+  const archived = service.updateJobLifecycle("archive-lifecycle-001", {
+    action: "archive",
+    reason: "superseded"
+  }, new Date("2026-04-27T10:00:00.000Z"));
+
+  assert.equal(archived.lifecycle.state, "archived");
+  assert.throws(
+    () => service.getPublicJobDefinition("archive-lifecycle-001"),
+    /Unknown job: archive-lifecycle-001/
+  );
+  assert.throws(
+    () => service.getClaimableJobDefinition("archive-lifecycle-001"),
+    /not claimable/
+  );
+  assert.deepEqual(service.getJobLifecycleSummary(), {
+    total: 1,
+    open: 0,
+    claimable: 0,
+    stale: 0,
+    paused: 0,
+    archived: 1
+  });
+});
+
 test("createJob accepts github_pr verifier configuration", () => {
   const service = makeService();
   const job = service.createJob({

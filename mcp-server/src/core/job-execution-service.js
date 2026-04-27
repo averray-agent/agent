@@ -14,11 +14,13 @@ export class JobExecutionService {
     getJobDefinition,
     eventBus = undefined,
     accountMutationService = undefined,
-    getDefaultClaimStakeBps = async () => 500
+    getDefaultClaimStakeBps = async () => 500,
+    getClaimableJobDefinition = getJobDefinition
   ) {
     this.stateStore = stateStore;
     this.blockchainGateway = blockchainGateway;
     this.getJobDefinition = getJobDefinition;
+    this.getClaimableJobDefinition = getClaimableJobDefinition;
     this.eventBus = eventBus;
     this.accountMutationService = accountMutationService;
     this.getDefaultClaimStakeBps = getDefaultClaimStakeBps;
@@ -30,7 +32,7 @@ export class JobExecutionService {
       return existing;
     }
 
-    const job = this.getJobDefinition(jobId);
+    const job = this.getClaimableJobDefinition(jobId);
     const sessionId = `${jobId}:${wallet}`;
     const sessionLockId = sessionId;
     const lockOwner = randomUUID();

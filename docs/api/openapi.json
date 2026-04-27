@@ -435,6 +435,65 @@
         }
       }
     },
+    "/admin/jobs/lifecycle": {
+      "post": {
+        "tags": [
+          "Admin"
+        ],
+        "operationId": "updateJobLifecycle",
+        "summary": "Update job lifecycle state",
+        "description": "Pauses, archives, reopens, or marks a job stale so operators can age out provider-created work without deleting the underlying definition.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobLifecycleUpdateRequest"
+              },
+              "examples": {
+                "pause": {
+                  "value": {
+                    "jobId": "openapi-averray-averray-http-api",
+                    "action": "pause",
+                    "reason": "Waiting for upstream provider fix"
+                  }
+                },
+                "archive": {
+                  "value": {
+                    "jobId": "github-averray-agent-123",
+                    "action": "archive",
+                    "reason": "Superseded by newer provider run"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Lifecycle state updated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobLifecycleUpdateResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
     "/admin/jobs/ingest/openapi": {
       "post": {
         "tags": [
@@ -670,6 +729,104 @@
           "source": {
             "type": "object",
             "additionalProperties": true
+          },
+          "lifecycle": {
+            "$ref": "#/components/schemas/JobLifecycle"
+          }
+        },
+        "additionalProperties": true
+      },
+      "JobLifecycle": {
+        "type": "object",
+        "required": [
+          "status",
+          "state"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "paused",
+              "archived"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "open",
+              "stale",
+              "paused",
+              "archived"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "staleAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "JobLifecycleUpdateRequest": {
+        "type": "object",
+        "required": [
+          "jobId"
+        ],
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "pause",
+              "archive",
+              "reopen",
+              "mark_stale"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "paused",
+              "archived"
+            ]
+          },
+          "staleAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "JobLifecycleUpdateResponse": {
+        "type": "object",
+        "required": [
+          "job",
+          "jobLifecycle"
+        ],
+        "properties": {
+          "job": {
+            "$ref": "#/components/schemas/Job"
+          },
+          "jobLifecycle": {
+            "type": "object",
+            "additionalProperties": true
           }
         },
         "additionalProperties": true
@@ -747,6 +904,11 @@
         "properties": {
           "jobs": {
             "type": "object",
+            "additionalProperties": true
+          },
+          "jobLifecycle": {
+            "type": "object",
+            "description": "Counts for open, stale, paused, archived, and claimable jobs.",
             "additionalProperties": true
           },
           "githubIngestion": {

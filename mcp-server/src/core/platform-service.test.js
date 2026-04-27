@@ -107,6 +107,10 @@ test("getSessionTimeline includes transitions and verification state", async () 
 
 test("getAdminStatus surfaces recurring scheduler anomalies", async () => {
   const service = makePlatformService();
+  service.updateJobLifecycle("parent-job-001", {
+    action: "pause",
+    reason: "operator hold"
+  });
   service.recurringScheduler = {
     getStatus() {
       return {
@@ -134,6 +138,9 @@ test("getAdminStatus surfaces recurring scheduler anomalies", async () => {
 
   assert.equal(status.auth.wallet, WALLET);
   assert.ok(status.anomalies.some((entry) => entry.code === "recurring_attention"));
+  assert.equal(status.jobLifecycle.total, 1);
+  assert.equal(status.jobLifecycle.paused, 1);
+  assert.equal(status.jobLifecycle.claimable, 0);
 });
 
 test("getAdminStatus surfaces public source ingestion scheduler status", async () => {

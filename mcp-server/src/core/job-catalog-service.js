@@ -19,6 +19,8 @@ const VALID_TIERS = new Set(["starter", "pro", "elite"]);
 const VALID_VERIFIER_MODES = new Set(["benchmark", "deterministic", "human_fallback", "github_pr"]);
 const VALID_JOB_TYPES = new Set(["work", "curation", "review", "publish", "verification"]);
 const VALID_AGENT_ROLES = new Set(["worker", "curator", "reviewer", "publisher", "verifier", "arbitrator"]);
+const VALID_JOB_LIFECYCLE_STATUSES = new Set(["open", "paused", "archived"]);
+const DEFAULT_STALE_AFTER_MS = 14 * 24 * 60 * 60 * 1000;
 
 export const ROLE_REQUIREMENTS = {
   worker: { skill: 0 },
@@ -128,14 +130,16 @@ export class JobCatalogService {
     this.getDefaultClaimStakeBps = getDefaultClaimStakeBps;
   }
 
-  listJobs() {
-    return [...this.jobs];
+  listJobs({ includePaused = false, includeArchived = false, includeStale = false, now = new Date() } = {}) {
+    return this.jobs
+      .filter((job) => this.isVisibleJob(job, { includePaused, includeArchived, includeStale, now }))
+      .map((job) => this.withLifecycle(job, now));
   }
 
   listJobsByParentSession(parentSessionId) {
     return this.jobs
       .filter((job) => job.parentSessionId === parentSessionId)
-      .map((job) => ({ ...job }));
+      .map((job) => this.withLifecycle(job));
   }
 
   getRecurringTemplate(templateId) {
@@ -154,6 +158,70 @@ export class JobCatalogService {
 
     this.jobs.unshift(job);
     return job;
+  }
+
+  getJobLifecycleSummary(now = new Date()) {
+    const summary = {
+      total: this.jobs.length,
+      open: 0,
+      claimable: 0,
+      stale: 0,
+      paused: 0,
+      archived: 0
+    };
+    for (const job of this.jobs) {
+      const lifecycle = this.buildLifecycle(job, now);
+      if (lifecycle.status === "open") summary.open += 1;
+      if (lifecycle.status === "paused") summary.paused += 1;
+      if (lifecycle.status === "archived") summary.archived += 1;
+      if (lifecycle.state === "stale") summary.stale += 1;
+      if (this.isClaimableJob(job, now)) summary.claimable += 1;
+    }
+    return summary;
+  }
+
+  updateJobLifecycle(jobId, patch = {}, updatedAt = new Date()) {
+    const job = this.requireJob(jobId);
+    const current = this.buildLifecycle(job, updatedAt);
+    const action = typeof patch?.action === "string" ? patch.action.trim().toLowerCase() : "";
+    const requestedStatus = typeof patch?.status === "string"
+      ? patch.status.trim().toLowerCase()
+      : undefined;
+    const status = this.resolveLifecycleStatus({ action, requestedStatus, currentStatus: current.status });
+    const timestamp = updatedAt.toISOString();
+    const lifecycle = {
+      ...current,
+      status,
+      updatedAt: timestamp
+    };
+
+    if (typeof patch?.reason === "string" && patch.reason.trim()) {
+      lifecycle.reason = patch.reason.trim().slice(0, 500);
+    }
+    if (typeof patch?.staleAt === "string" && patch.staleAt.trim()) {
+      lifecycle.staleAt = normalizeIsoTimestamp(patch.staleAt, "staleAt");
+    }
+    if (action === "mark_stale") {
+      lifecycle.staleAt = timestamp;
+      lifecycle.staleReason = lifecycle.reason;
+    }
+    if (status === "paused" && current.status !== "paused") {
+      lifecycle.pausedAt = timestamp;
+    }
+    if (status === "archived" && current.status !== "archived") {
+      lifecycle.archivedAt = timestamp;
+    }
+    if (status === "open" && current.status !== "open") {
+      lifecycle.reopenedAt = timestamp;
+      lifecycle.staleAt = new Date(updatedAt.getTime() + DEFAULT_STALE_AFTER_MS).toISOString();
+      delete lifecycle.pausedAt;
+      delete lifecycle.archivedAt;
+      delete lifecycle.staleReason;
+    }
+
+    delete lifecycle.state;
+    job.lifecycle = lifecycle;
+    return this.withLifecycle(job, updatedAt);
   }
 
   getRecurringTemplateStatus() {
@@ -233,13 +301,13 @@ export class JobCatalogService {
     const reputation = await this.getReputation(wallet);
     const claimStakeBps = await this.getDefaultClaimStakeBps();
 
-    return Promise.all(this.jobs.map(async (job) => {
+    return Promise.all(this.listJobs().map(async (job) => {
       const netReward = await this.estimateNetReward(wallet, job.id);
       const tierGate = summarizeTierGate(job.tier, reputation);
       const jobType = effectiveJobType(job);
       const requiredRole = effectiveRequiredRole(job);
       const roleGate = summarizeRoleGate(requiredRole, reputation);
-      const eligible = this.isEligible(job, profile, reputation);
+      const eligible = this.isClaimableJob(job) && this.isEligible(job, profile, reputation);
       const liquid = account.liquid[job.rewardAsset] ?? 0;
       const claimStake = Math.max((job.rewardAmount * claimStakeBps) / 10_000, 0);
       const fitScore = this.computeFitScore(job, profile, reputation, liquid, claimStake);
@@ -260,7 +328,28 @@ export class JobCatalogService {
   }
 
   getJobDefinition(jobId) {
-    return this.requireJob(jobId);
+    return this.withLifecycle(this.requireJob(jobId));
+  }
+
+  getPublicJobDefinition(jobId) {
+    const job = this.requireJob(jobId);
+    if (!this.isVisibleJob(job)) {
+      throw new NotFoundError(`Unknown job: ${jobId}`, "job_not_found");
+    }
+    return this.withLifecycle(job);
+  }
+
+  getClaimableJobDefinition(jobId) {
+    const job = this.requireJob(jobId);
+    if (!this.isClaimableJob(job)) {
+      const lifecycle = this.buildLifecycle(job);
+      throw new ConflictError(
+        `Job ${jobId} is not claimable (${lifecycle.state}).`,
+        "job_not_claimable",
+        { lifecycle }
+      );
+    }
+    return this.withLifecycle(job);
   }
 
   async preflightJob(wallet, jobId) {
@@ -271,7 +360,8 @@ export class JobCatalogService {
     const liquid = account.liquid[job.rewardAsset] ?? 0;
     const claimStakeBps = await this.getDefaultClaimStakeBps();
     const claimStake = Math.max((job.rewardAmount * claimStakeBps) / 10_000, 0);
-    const eligible = this.isEligible(job, profile, reputation);
+    const lifecycle = this.buildLifecycle(job);
+    const eligible = this.isClaimableJob(job) && this.isEligible(job, profile, reputation);
     const tierGate = summarizeTierGate(job.tier, reputation);
     const jobType = effectiveJobType(job);
     const requiredRole = effectiveRequiredRole(job);
@@ -290,6 +380,7 @@ export class JobCatalogService {
       verifierMode: job.verifierMode,
       verifierConfig: job.verifierConfig,
       tier: job.tier,
+      lifecycle,
       tierGate,
       jobType,
       requiredRole,
@@ -312,11 +403,13 @@ export class JobCatalogService {
     const jobType = effectiveJobType(job);
     const requiredRole = effectiveRequiredRole(job);
     const roleGate = summarizeRoleGate(requiredRole, reputation);
+    const lifecycle = this.buildLifecycle(job);
 
     return {
       jobId,
       wallet,
       tier: job.tier,
+      lifecycle,
       tierGate,
       jobType,
       requiredRole,
@@ -325,7 +418,7 @@ export class JobCatalogService {
       supportsVerifier: profile.verifierCompatibility.includes(job.verifierMode),
       reputationTier: reputation.tier,
       verifierHandler: job.verifierConfig.handler,
-      eligible: this.isEligible(job, profile, reputation)
+      eligible: this.isClaimableJob(job) && this.isEligible(job, profile, reputation)
     };
   }
 
@@ -368,6 +461,63 @@ export class JobCatalogService {
       throw new NotFoundError(`Unknown job: ${jobId}`, "job_not_found");
     }
     return job;
+  }
+
+  isVisibleJob(job, { includePaused = false, includeArchived = false, includeStale = false, now = new Date() } = {}) {
+    const lifecycle = this.buildLifecycle(job, now);
+    if (lifecycle.status === "paused") return includePaused;
+    if (lifecycle.status === "archived") return includeArchived;
+    if (lifecycle.state === "stale") return includeStale;
+    return true;
+  }
+
+  isClaimableJob(job, now = new Date()) {
+    const lifecycle = this.buildLifecycle(job, now);
+    return lifecycle.status === "open" && lifecycle.state === "open";
+  }
+
+  withLifecycle(job, now = new Date()) {
+    return {
+      ...job,
+      lifecycle: this.buildLifecycle(job, now)
+    };
+  }
+
+  buildLifecycle(job, now = new Date()) {
+    const raw = normalisePlainObject(job?.lifecycle, "lifecycle") ?? {};
+    const status = VALID_JOB_LIFECYCLE_STATUSES.has(raw.status) ? raw.status : "open";
+    const staleAt = typeof raw.staleAt === "string" && raw.staleAt.trim()
+      ? raw.staleAt.trim()
+      : undefined;
+    const stale = status === "open" && staleAt && Date.parse(staleAt) <= now.getTime();
+    return {
+      status,
+      state: stale ? "stale" : status,
+      ...(typeof raw.createdAt === "string" ? { createdAt: raw.createdAt } : {}),
+      ...(typeof raw.updatedAt === "string" ? { updatedAt: raw.updatedAt } : {}),
+      ...(staleAt ? { staleAt } : {}),
+      ...(typeof raw.pausedAt === "string" ? { pausedAt: raw.pausedAt } : {}),
+      ...(typeof raw.archivedAt === "string" ? { archivedAt: raw.archivedAt } : {}),
+      ...(typeof raw.reopenedAt === "string" ? { reopenedAt: raw.reopenedAt } : {}),
+      ...(typeof raw.reason === "string" && raw.reason.trim() ? { reason: raw.reason.trim() } : {}),
+      ...(typeof raw.staleReason === "string" && raw.staleReason.trim() ? { staleReason: raw.staleReason.trim() } : {})
+    };
+  }
+
+  resolveLifecycleStatus({ action, requestedStatus, currentStatus }) {
+    if (requestedStatus !== undefined) {
+      if (!VALID_JOB_LIFECYCLE_STATUSES.has(requestedStatus)) {
+        throw new ValidationError(`Invalid job lifecycle status: ${requestedStatus}`);
+      }
+      return requestedStatus;
+    }
+    if (!action) {
+      return currentStatus;
+    }
+    if (action === "pause") return "paused";
+    if (action === "archive") return "archived";
+    if (action === "reopen" || action === "mark_stale") return "open";
+    throw new ValidationError(`Invalid job lifecycle action: ${action}`);
   }
 
   requireProfile(wallet) {
@@ -465,6 +615,7 @@ export class JobCatalogService {
     const estimatedDifficulty = normaliseTextField(input?.estimatedDifficulty);
     const source = normalisePlainObject(input?.source, "source");
     const verification = normalisePlainObject(input?.verification, "verification");
+    const lifecycle = normaliseLifecycle(input?.lifecycle, { disableStale: recurring });
 
     return {
       id,
@@ -481,6 +632,7 @@ export class JobCatalogService {
       claimTtlSeconds,
       retryLimit,
       requiresSponsoredGas: Boolean(input?.requiresSponsoredGas),
+      lifecycle,
       ...(title ? { title } : {}),
       ...(description ? { description } : {}),
       ...(source ? { source } : {}),
@@ -515,7 +667,14 @@ export class JobCatalogService {
       id: derivativeId,
       recurring: false,
       templateId,
-      firedAt: firedAt.toISOString()
+      firedAt: firedAt.toISOString(),
+      lifecycle: normaliseLifecycle({
+        ...(template.lifecycle ?? {}),
+        status: "open",
+        createdAt: firedAt.toISOString(),
+        updatedAt: firedAt.toISOString(),
+        staleAt: new Date(firedAt.getTime() + DEFAULT_STALE_AFTER_MS).toISOString()
+      })
     };
     delete derivative.schedule;
     this.jobs.unshift(derivative);
@@ -693,6 +852,54 @@ function normalisePlainObject(value, field) {
     throw new ValidationError(`${field} must be an object if provided.`);
   }
   return JSON.parse(JSON.stringify(value));
+}
+
+function normaliseLifecycle(value, { disableStale = false, now = new Date() } = {}) {
+  const raw = normalisePlainObject(value, "lifecycle") ?? {};
+  const createdAt = typeof raw.createdAt === "string" && raw.createdAt.trim()
+    ? normalizeIsoTimestamp(raw.createdAt, "lifecycle.createdAt")
+    : now.toISOString();
+  const updatedAt = typeof raw.updatedAt === "string" && raw.updatedAt.trim()
+    ? normalizeIsoTimestamp(raw.updatedAt, "lifecycle.updatedAt")
+    : createdAt;
+  const status = typeof raw.status === "string" && raw.status.trim()
+    ? raw.status.trim().toLowerCase()
+    : "open";
+  if (!VALID_JOB_LIFECYCLE_STATUSES.has(status)) {
+    throw new ValidationError(`Invalid job lifecycle status: ${status}`);
+  }
+  const lifecycle = {
+    status,
+    createdAt,
+    updatedAt
+  };
+  const defaultStaleAt = disableStale
+    ? undefined
+    : new Date(Date.parse(createdAt) + DEFAULT_STALE_AFTER_MS).toISOString();
+  const staleAt = typeof raw.staleAt === "string" && raw.staleAt.trim()
+    ? normalizeIsoTimestamp(raw.staleAt, "lifecycle.staleAt")
+    : defaultStaleAt;
+  if (staleAt) lifecycle.staleAt = staleAt;
+
+  for (const key of ["pausedAt", "archivedAt", "reopenedAt"]) {
+    if (typeof raw[key] === "string" && raw[key].trim()) {
+      lifecycle[key] = normalizeIsoTimestamp(raw[key], `lifecycle.${key}`);
+    }
+  }
+  for (const key of ["reason", "staleReason"]) {
+    if (typeof raw[key] === "string" && raw[key].trim()) {
+      lifecycle[key] = raw[key].trim().slice(0, 500);
+    }
+  }
+  return lifecycle;
+}
+
+function normalizeIsoTimestamp(value, field) {
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) {
+    throw new ValidationError(`${field} must be ISO-8601 if provided.`);
+  }
+  return new Date(parsed).toISOString();
 }
 
 function buildRecommendationExplanation({ job, eligible, tierGate, roleGate, profile }) {
