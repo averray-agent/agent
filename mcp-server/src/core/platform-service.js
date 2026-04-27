@@ -22,7 +22,7 @@ const INGESTION_PROVIDER_DEFINITIONS = [
   ["github", "githubIngestion", "GitHub issues", "queryCount"],
   ["wikipedia", "wikipediaIngestion", "Wikipedia maintenance", "categoryCount"],
   ["osv", "osvIngestion", "OSV advisories", "packageCount"],
-  ["openData", "openDataIngestion", "Open data", "datasetCount"],
+  ["openData", "openDataIngestion", "Open data", "targetCount"],
   ["standards", "standardsIngestion", "Standards freshness", "specCount"],
   ["openApi", "openApiIngestion", "OpenAPI quality", "specCount"]
 ];

@@ -121,7 +121,84 @@ test("OpenDataIngestionScheduler dedupes by dataset resource", async () => {
   const summary = await scheduler.runOnce(new Date("2026-04-26T10:00:00.000Z"));
   assert.equal(summary.createdCount, 0);
   assert.equal(platform.listJobs().length, 1);
-  assert.equal(summary.skipped.at(-1).reason, "source_already_ingested");
+  assert.equal(summary.queries[0].skipped.at(-1).reason, "source_already_ingested");
+});
+
+test("OpenDataIngestionScheduler dedupes sibling resources from existing datasets", async () => {
+  const platform = makePlatformService([
+    {
+      id: "existing",
+      source: {
+        type: "open_data_dataset",
+        provider: "data.gov",
+        datasetId: "dataset-123",
+        resourceId: "resource-456"
+      }
+    }
+  ]);
+  const scheduler = new OpenDataIngestionScheduler(platform, undefined, {
+    enabled: true,
+    dryRun: false,
+    datasets: [{
+      ...TARGET,
+      resourceId: "resource-geojson",
+      resourceTitle: "Spending GeoJSON",
+      resourceUrl: "https://example.gov/spending.geojson",
+      resourceFormat: "GEOJSON"
+    }],
+    fetchImpl: makeFetch()
+  });
+
+  const summary = await scheduler.runOnce(new Date("2026-04-26T10:00:00.000Z"));
+  assert.equal(summary.createdCount, 0);
+  assert.equal(platform.listJobs().length, 1);
+  assert.equal(summary.queries[0].skipped.at(-1).reason, "dataset_already_ingested");
+});
+
+test("OpenDataIngestionScheduler rotates configured queries across runs", async () => {
+  const platform = makePlatformService();
+  const calls = [];
+  const scheduler = new OpenDataIngestionScheduler(platform, undefined, {
+    enabled: true,
+    dryRun: false,
+    queries: ["traffic crashes", "food safety"],
+    maxJobsPerRun: 1,
+    fetchImpl: async (url) => {
+      const query = url.searchParams.get("q");
+      calls.push(query);
+      const dataset = query === "food safety"
+        ? {
+            ...CKAN_PACKAGE,
+            id: "dataset-food",
+            name: "food-inspections",
+            title: "Food inspections",
+            resources: [{ ...CKAN_PACKAGE.resources[0], id: "food-csv", url: "https://example.gov/food.csv" }]
+          }
+        : {
+            ...CKAN_PACKAGE,
+            id: "dataset-crashes",
+            name: "crashes-in-dc",
+            title: "Crashes in DC",
+            resources: [{ ...CKAN_PACKAGE.resources[0], id: "crashes-csv", url: "https://example.gov/crashes.csv" }]
+          };
+      return {
+        ok: true,
+        async json() {
+          return { result: { results: [dataset] } };
+        }
+      };
+    }
+  });
+
+  const first = await scheduler.runOnce(new Date("2026-04-26T10:00:00.000Z"));
+  const second = await scheduler.runOnce(new Date("2026-04-26T11:00:00.000Z"));
+  const status = await scheduler.getStatus();
+
+  assert.equal(first.createdCount, 1);
+  assert.equal(second.createdCount, 1);
+  assert.deepEqual(calls, ["traffic crashes", "food safety"]);
+  assert.equal(platform.listJobs().length, 2);
+  assert.equal(status.nextQuery, "traffic crashes");
 });
 
 test("OpenDataIngestionScheduler stops when max open open-data jobs is reached", async () => {
@@ -150,6 +227,7 @@ test("loadOpenDataIngestionConfig parses env knobs safely", () => {
     OPEN_DATA_INGEST_MIN_SCORE: "70",
     OPEN_DATA_INGEST_MAX_JOBS_PER_RUN: "4",
     OPEN_DATA_INGEST_MAX_OPEN_JOBS: "11",
+    OPEN_DATA_INGEST_QUERIES_JSON: JSON.stringify(["traffic crashes", "food safety"]),
     OPEN_DATA_INGEST_DATASETS_JSON: JSON.stringify([TARGET])
   });
 
@@ -157,6 +235,7 @@ test("loadOpenDataIngestionConfig parses env knobs safely", () => {
   assert.equal(config.dryRun, false);
   assert.equal(config.intervalMs, 3600000);
   assert.equal(config.query, "res_format:JSON");
+  assert.deepEqual(config.queries, ["traffic crashes", "food safety"]);
   assert.equal(config.minScore, 70);
   assert.equal(config.maxJobsPerRun, 4);
   assert.equal(config.maxOpenJobs, 11);

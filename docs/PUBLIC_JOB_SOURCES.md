@@ -109,6 +109,10 @@ After Wikipedia, use the same pattern for:
    - Scheduled ingestion is available behind `OPEN_DATA_INGEST_ENABLED`; keep
      `OPEN_DATA_INGEST_DRY_RUN=true` until `/admin/status` shows good
      candidates.
+   - Production rotation can use `OPEN_DATA_INGEST_QUERIES_JSON` to cycle
+     through multiple Data.gov searches. The scheduler dedupes whole datasets
+     already represented in the job catalog, so sibling CSV/GeoJSON/API
+     resources do not crowd out new datasets in later runs.
 
 3. **OSV/NVD advisories**
    - package-to-CVE mapping, remediation summaries

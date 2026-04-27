@@ -1,4 +1,10 @@
-import { DEFAULT_QUERY, ingestOpenDataDatasets, parseDatasets } from "../jobs/ingest-open-data-datasets.js";
+import {
+  DEFAULT_QUERY,
+  ingestOpenDataDatasets,
+  openDataDatasetKey,
+  openDataResourceKey,
+  parseDatasets
+} from "../jobs/ingest-open-data-datasets.js";
 
 export class OpenDataIngestionScheduler {
   constructor(platformService, eventBus = undefined, {
@@ -6,6 +12,7 @@ export class OpenDataIngestionScheduler {
     dryRun = true,
     intervalMs = 60 * 60 * 1000,
     query = DEFAULT_QUERY,
+    queries = undefined,
     datasets = [],
     minScore = 55,
     maxJobsPerRun = 2,
@@ -18,7 +25,8 @@ export class OpenDataIngestionScheduler {
     this.enabled = enabled;
     this.dryRun = dryRun;
     this.intervalMs = intervalMs;
-    this.query = String(query || DEFAULT_QUERY).trim();
+    this.queries = normalizeQueries(queries, query);
+    this.query = this.queries[0] ?? DEFAULT_QUERY;
     this.datasets = parseDatasets(datasets);
     this.minScore = minScore;
     this.maxJobsPerRun = maxJobsPerRun;
@@ -28,6 +36,7 @@ export class OpenDataIngestionScheduler {
     this.timer = undefined;
     this.running = false;
     this.lastRun = undefined;
+    this.nextQueryIndex = 0;
   }
 
   start() {
@@ -53,7 +62,11 @@ export class OpenDataIngestionScheduler {
       dryRun: this.dryRun,
       intervalMs: this.intervalMs,
       query: this.query,
+      queries: this.queries,
+      queryCount: this.queries.length,
+      nextQuery: this.datasets.length ? undefined : this.queries[this.nextQueryIndex % Math.max(1, this.queries.length)],
       datasetCount: this.datasets.length,
+      targetCount: this.datasets.length || this.queries.length,
       minScore: this.minScore,
       maxJobsPerRun: this.maxJobsPerRun,
       maxOpenJobs: this.maxOpenJobs,
@@ -73,7 +86,8 @@ export class OpenDataIngestionScheduler {
       candidateCount: 0,
       createdCount: 0,
       skipped: [],
-      errors: []
+      errors: [],
+      queries: []
     };
 
     if (!this.enabled) {
@@ -84,56 +98,82 @@ export class OpenDataIngestionScheduler {
       summary.skipped.push({ reason: "max_open_jobs_reached", openDataJobs, maxOpenJobs: this.maxOpenJobs });
       return this.finishRun(summary);
     }
+    if (!this.datasets.length && !this.queries.length) {
+      summary.skipped.push({ reason: "no_queries_configured" });
+      return this.finishRun(summary);
+    }
 
-    const remaining = Math.max(0, Math.min(this.maxJobsPerRun, this.maxOpenJobs - openDataJobs));
-    const seenSources = this.existingOpenDataKeys();
-    try {
-      const result = await ingestOpenDataDatasets({
-        datasets: this.datasets,
-        query: this.query,
-        limit: remaining,
-        minScore: this.minScore,
-        fetchImpl: this.fetchImpl
-      });
-      summary.candidateCount = result.count;
-      summary.query = result.query;
-      summary.skipped.push(...(Array.isArray(result.skipped) ? result.skipped : []));
-      for (const job of result.jobs) {
-        const sourceKey = openDataJobKey(job);
-        if (sourceKey && seenSources.has(sourceKey)) {
-          summary.skipped.push({ id: job.id, reason: "source_already_ingested" });
-          continue;
-        }
-        if (this.platformService.getJobDefinition) {
-          try {
-            this.platformService.getJobDefinition(job.id);
-            summary.skipped.push({ id: job.id, reason: "job_already_exists" });
-            continue;
-          } catch {
-            // Missing jobs are expected and created below.
-          }
-        }
-        if (!this.dryRun) {
-          this.platformService.createJob(job);
-        }
-        seenSources.add(sourceKey);
-        summary.createdCount += 1;
-        this.eventBus?.publish?.({
-          id: `platform-open-data-ingest-${job.id}-${Date.now()}`,
-          topic: "jobs.ingest.open_data",
-          jobId: job.id,
-          timestamp: new Date().toISOString(),
-          data: {
-            dryRun: this.dryRun,
-            jobId: job.id,
-            source: job.source
-          }
+    let remaining = Math.max(0, Math.min(this.maxJobsPerRun, this.maxOpenJobs - openDataJobs));
+    const seenResources = this.existingOpenDataResourceKeys();
+    const seenDatasets = this.existingOpenDataDatasetKeys();
+    const runQueries = this.datasets.length ? [undefined] : this.rotateQueriesForRun();
+    for (const query of runQueries) {
+      if (remaining <= 0) break;
+      try {
+        const result = await ingestOpenDataDatasets({
+          datasets: this.datasets,
+          query: query ?? this.query,
+          limit: remaining,
+          minScore: this.minScore,
+          excludeDatasetKeys: [...seenDatasets],
+          excludeResourceKeys: [...seenResources],
+          fetchImpl: this.fetchImpl
         });
+        summary.candidateCount += result.count;
+        summary.query ??= result.query;
+        const querySummary = {
+          query: result.query,
+          candidates: result.count,
+          created: 0,
+          skipped: Array.isArray(result.skipped) ? result.skipped : []
+        };
+        for (const job of result.jobs) {
+          if (remaining <= 0) break;
+          const datasetKey = openDataDatasetKey(job);
+          if (datasetKey && seenDatasets.has(datasetKey)) {
+            querySummary.skipped.push({ id: job.id, reason: "dataset_already_ingested" });
+            continue;
+          }
+          const resourceKey = openDataResourceKey(job);
+          if (resourceKey && seenResources.has(resourceKey)) {
+            querySummary.skipped.push({ id: job.id, reason: "source_already_ingested" });
+            continue;
+          }
+          if (this.platformService.getJobDefinition) {
+            try {
+              this.platformService.getJobDefinition(job.id);
+              querySummary.skipped.push({ id: job.id, reason: "job_already_exists" });
+              continue;
+            } catch {
+              // Missing jobs are expected and created below.
+            }
+          }
+          if (!this.dryRun) {
+            this.platformService.createJob(job);
+          }
+          if (resourceKey) seenResources.add(resourceKey);
+          if (datasetKey) seenDatasets.add(datasetKey);
+          querySummary.created += 1;
+          summary.createdCount += 1;
+          remaining -= 1;
+          this.eventBus?.publish?.({
+            id: `platform-open-data-ingest-${job.id}-${Date.now()}`,
+            topic: "jobs.ingest.open_data",
+            jobId: job.id,
+            timestamp: new Date().toISOString(),
+            data: {
+              dryRun: this.dryRun,
+              jobId: job.id,
+              source: job.source
+            }
+          });
+        }
+        summary.queries.push(querySummary);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        summary.errors.push({ query, message });
+        this.logger.warn?.({ query, err: error }, "open_data_ingest.run_failed");
       }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      summary.errors.push({ message });
-      this.logger.warn?.({ err: error }, "open_data_ingest.run_failed");
     }
 
     return this.finishRun(summary);
@@ -165,43 +205,50 @@ export class OpenDataIngestionScheduler {
       .length;
   }
 
-  existingOpenDataKeys() {
+  existingOpenDataDatasetKeys() {
     return new Set(
       this.platformService.listJobs()
-        .map((job) => openDataJobKey(job))
+        .map((job) => openDataDatasetKey(job))
         .filter(Boolean)
     );
+  }
+
+  existingOpenDataResourceKeys() {
+    return new Set(
+      this.platformService.listJobs()
+        .map((job) => openDataResourceKey(job))
+        .filter(Boolean)
+    );
+  }
+
+  rotateQueriesForRun() {
+    if (!this.queries.length) {
+      return [];
+    }
+    const start = this.nextQueryIndex % this.queries.length;
+    const rotated = [
+      ...this.queries.slice(start),
+      ...this.queries.slice(0, start)
+    ];
+    this.nextQueryIndex = (start + 1) % this.queries.length;
+    return rotated;
   }
 }
 
 export function loadOpenDataIngestionConfig(env = process.env) {
+  const query = env.OPEN_DATA_INGEST_QUERY?.trim() || DEFAULT_QUERY;
+  const queries = parseQueries(env.OPEN_DATA_INGEST_QUERIES_JSON ?? env.OPEN_DATA_INGEST_QUERIES);
   return {
     enabled: parseBooleanEnv(env.OPEN_DATA_INGEST_ENABLED),
     dryRun: env.OPEN_DATA_INGEST_DRY_RUN === undefined ? true : parseBooleanEnv(env.OPEN_DATA_INGEST_DRY_RUN),
     intervalMs: parsePositiveInt(env.OPEN_DATA_INGEST_INTERVAL_MS, 60 * 60 * 1000),
-    query: env.OPEN_DATA_INGEST_QUERY?.trim() || DEFAULT_QUERY,
+    query,
+    queries: queries.length ? queries : [query],
     datasets: parseDatasets(env.OPEN_DATA_INGEST_DATASETS_JSON ?? env.OPEN_DATA_INGEST_DATASETS),
     minScore: parsePositiveInt(env.OPEN_DATA_INGEST_MIN_SCORE, 55),
     maxJobsPerRun: parsePositiveInt(env.OPEN_DATA_INGEST_MAX_JOBS_PER_RUN, 2),
     maxOpenJobs: parsePositiveInt(env.OPEN_DATA_INGEST_MAX_OPEN_JOBS, 20)
   };
-}
-
-function openDataJobKey(job) {
-  const source = job?.source;
-  if (source?.type !== "open_data_dataset") {
-    return undefined;
-  }
-  const resourceIdentity = source.resourceId || source.resourceUrl;
-  const datasetIdentity = source.datasetId || source.datasetUrl || source.datasetTitle;
-  if (!resourceIdentity || !datasetIdentity) {
-    return undefined;
-  }
-  return [
-    String(source.provider ?? source.portal ?? "data.gov").toLowerCase(),
-    String(datasetIdentity).toLowerCase(),
-    String(resourceIdentity).toLowerCase()
-  ].join("|");
 }
 
 function parsePositiveInt(raw, fallback) {
@@ -220,4 +267,33 @@ function parseBooleanEnv(raw) {
     return false;
   }
   return ["1", "true", "yes", "on"].includes(String(raw).trim().toLowerCase());
+}
+
+function parseQueries(raw) {
+  if (!raw || typeof raw !== "string") {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.map((query) => String(query).trim()).filter(Boolean);
+    }
+  } catch {
+    // Fall through to newline/comma parsing.
+  }
+  return raw
+    .split(/\n|,/u)
+    .map((query) => query.trim())
+    .filter(Boolean);
+}
+
+function normalizeQueries(queries, fallbackQuery) {
+  const parsed = Array.isArray(queries)
+    ? queries.map((query) => String(query).trim()).filter(Boolean)
+    : parseQueries(queries);
+  if (parsed.length) {
+    return parsed;
+  }
+  const fallback = String(fallbackQuery || DEFAULT_QUERY).trim();
+  return fallback ? [fallback] : [];
 }

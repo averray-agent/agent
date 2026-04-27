@@ -6,6 +6,8 @@ import {
   extractPackageTargets,
   extractCatalogResultTargets,
   ingestOpenDataDatasets,
+  openDataDatasetKey,
+  openDataResourceKey,
   parseDatasets,
   scoreDatasetTarget,
   searchDataGovDatasets,
@@ -172,6 +174,15 @@ test("selectBestResourcePerDataset keeps one high-signal resource per dataset", 
   assert.equal(skipped[0].selectedResourceId, "resource-456");
 });
 
+test("open-data source keys dedupe resources and whole datasets", () => {
+  const job = toPlatformJob(TARGET, 92);
+
+  assert.equal(openDataDatasetKey(TARGET), "data.gov|dataset-123");
+  assert.equal(openDataDatasetKey(job), "data.gov|dataset-123");
+  assert.equal(openDataResourceKey(TARGET), "data.gov|dataset-123|resource-456");
+  assert.equal(openDataResourceKey(job), "data.gov|dataset-123|resource-456");
+});
+
 test("toPlatformJob creates a benchmark open-data audit job", () => {
   const job = toPlatformJob(TARGET, 92);
 
@@ -252,6 +263,36 @@ test("ingestOpenDataDatasets searches Data.gov and filters low-score resources",
 
   assert.equal(payload.count, 1);
   assert.equal(payload.skipped[0].reason, "below_min_score");
+});
+
+test("ingestOpenDataDatasets skips excluded resources and datasets before selecting jobs", async () => {
+  const siblingResource = {
+    ...TARGET,
+    resourceId: "resource-geojson",
+    resourceTitle: "Spending GeoJSON",
+    resourceUrl: "https://example.gov/spending.geojson",
+    resourceFormat: "GEOJSON"
+  };
+
+  const resourceExcluded = await ingestOpenDataDatasets({
+    datasets: [TARGET],
+    excludeResourceKeys: [openDataResourceKey(TARGET)],
+    limit: 5,
+    minScore: 55
+  });
+
+  assert.equal(resourceExcluded.count, 0);
+  assert.equal(resourceExcluded.skipped[0].reason, "source_already_ingested");
+
+  const datasetExcluded = await ingestOpenDataDatasets({
+    datasets: [siblingResource],
+    excludeDatasetKeys: [openDataDatasetKey(TARGET)],
+    limit: 5,
+    minScore: 55
+  });
+
+  assert.equal(datasetExcluded.count, 0);
+  assert.equal(datasetExcluded.skipped[0].reason, "dataset_already_ingested");
 });
 
 test("ingestOpenDataDatasets avoids duplicate resource jobs for one dataset", async () => {

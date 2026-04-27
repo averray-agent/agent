@@ -435,10 +435,18 @@ OPEN_DATA_INGEST_INTERVAL_MS=3600000
 OPEN_DATA_INGEST_MAX_JOBS_PER_RUN=2
 OPEN_DATA_INGEST_MAX_OPEN_JOBS=20
 OPEN_DATA_INGEST_QUERY='res_format:CSV'
+# Optional v2 rotation. When set, this wins over the single query knob.
+OPEN_DATA_INGEST_QUERIES_JSON='["traffic crashes","food safety","water quality","building permits"]'
 ```
 
 Review `openDataIngestion.lastRun` in `/admin/status`, then switch
 `OPEN_DATA_INGEST_DRY_RUN=false` when the candidates are ready to create jobs.
+
+The scheduler rotates through `OPEN_DATA_INGEST_QUERIES_JSON` across runs and
+keeps Data.gov audits diverse by refusing sibling resources from datasets that
+already have an open-data job in the catalog. For example, if `Crashes in DC`
+already produced a CSV audit job, a later GeoJSON resource from the same
+dataset is skipped as `dataset_already_ingested`.
 
 The generated jobs use:
 

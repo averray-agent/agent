@@ -60,9 +60,13 @@ export async function ingestOpenDataDatasets({
   query = DEFAULT_QUERY,
   limit = 10,
   minScore = 55,
+  excludeDatasetKeys = [],
+  excludeResourceKeys = [],
   fetchImpl = fetch
 } = {}) {
   const explicitTargets = parseDatasets(datasets);
+  const excludedDatasets = normalizeKeySet(excludeDatasetKeys);
+  const excludedResources = normalizeKeySet(excludeResourceKeys);
   const targets = explicitTargets.length
     ? explicitTargets
     : await searchDataGovDatasets({ query, limit: Math.max(limit * 3, 30), fetchImpl });
@@ -73,6 +77,16 @@ export async function ingestOpenDataDatasets({
     const score = scoreDatasetTarget(target);
     if (!target.resourceUrl) {
       skipped.push({ datasetId: target.datasetId, resourceId: target.resourceId, reason: "missing_resource_url" });
+      continue;
+    }
+    const resourceKey = openDataResourceKey(target);
+    if (resourceKey && excludedResources.has(resourceKey)) {
+      skipped.push({ datasetId: target.datasetId, resourceId: target.resourceId, reason: "source_already_ingested" });
+      continue;
+    }
+    const datasetKey = openDataDatasetKey(target);
+    if (datasetKey && excludedDatasets.has(datasetKey)) {
+      skipped.push({ datasetId: target.datasetId, resourceId: target.resourceId, reason: "dataset_already_ingested" });
       continue;
     }
     if (score < minScore) {
@@ -232,7 +246,7 @@ export function scoreDatasetTarget(target) {
 export function selectBestResourcePerDataset(candidates, skipped = []) {
   const byDataset = new Map();
   for (const candidate of candidates) {
-    const key = datasetKey(candidate.target);
+    const key = openDataDatasetKey(candidate.target);
     const current = byDataset.get(key);
     if (!current || compareDatasetCandidates(candidate, current) < 0) {
       byDataset.set(key, candidate);
@@ -242,7 +256,7 @@ export function selectBestResourcePerDataset(candidates, skipped = []) {
   const selected = new Set(byDataset.values());
   for (const candidate of candidates) {
     if (selected.has(candidate)) continue;
-    const winner = byDataset.get(datasetKey(candidate.target));
+    const winner = byDataset.get(openDataDatasetKey(candidate.target));
     skipped.push({
       datasetId: candidate.target.datasetId,
       resourceId: candidate.target.resourceId,
@@ -252,6 +266,34 @@ export function selectBestResourcePerDataset(candidates, skipped = []) {
   }
 
   return [...byDataset.values()];
+}
+
+export function openDataDatasetKey(value) {
+  const source = value?.source ?? value;
+  if (!source || (source.type && source.type !== "open_data_dataset")) {
+    return undefined;
+  }
+  const datasetIdentity = source.datasetId || source.datasetUrl || source.datasetTitle;
+  if (!datasetIdentity) {
+    return undefined;
+  }
+  return [
+    String(source.provider ?? source.portal ?? DEFAULT_PROVIDER).trim().toLowerCase(),
+    String(datasetIdentity).trim().toLowerCase()
+  ].join("|");
+}
+
+export function openDataResourceKey(value) {
+  const source = value?.source ?? value;
+  const datasetIdentity = openDataDatasetKey(source);
+  const resourceIdentity = source?.resourceId || source?.resourceUrl;
+  if (!datasetIdentity || !resourceIdentity) {
+    return undefined;
+  }
+  return [
+    datasetIdentity,
+    String(resourceIdentity).trim().toLowerCase()
+  ].join("|");
 }
 
 export function toPlatformJob(target, score = scoreDatasetTarget(target)) {
@@ -416,13 +458,6 @@ function estimateDifficulty(score) {
   return "review-needed";
 }
 
-function datasetKey(target) {
-  return [
-    DEFAULT_PROVIDER,
-    target.datasetId || target.datasetUrl || target.datasetTitle
-  ].map((part) => String(part ?? "").trim().toLowerCase()).join("|");
-}
-
 function compareDatasetCandidates(left, right) {
   const scoreDiff = right.score - left.score;
   if (scoreDiff !== 0) return scoreDiff;
@@ -463,6 +498,13 @@ function slugify(value) {
 function parsePositiveInt(raw, fallback) {
   const value = Number(raw);
   return Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
+function normalizeKeySet(values) {
+  if (!Array.isArray(values)) {
+    return new Set();
+  }
+  return new Set(values.map((value) => String(value ?? "").trim().toLowerCase()).filter(Boolean));
 }
 
 function trimTrailingSlash(value) {
