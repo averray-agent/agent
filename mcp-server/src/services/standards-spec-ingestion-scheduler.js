@@ -54,6 +54,7 @@ export class StandardsSpecIngestionScheduler {
       minScore: this.minScore,
       maxJobsPerRun: this.maxJobsPerRun,
       maxOpenJobs: this.maxOpenJobs,
+      currentOpenJobs: this.countOpenStandardsJobs(),
       lastRun: this.lastRun
     };
   }

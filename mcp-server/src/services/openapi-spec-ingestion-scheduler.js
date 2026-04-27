@@ -54,6 +54,7 @@ export class OpenApiSpecIngestionScheduler {
       minScore: this.minScore,
       maxJobsPerRun: this.maxJobsPerRun,
       maxOpenJobs: this.maxOpenJobs,
+      currentOpenJobs: this.countOpenApiJobs(),
       lastRun: this.lastRun
     };
   }

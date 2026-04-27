@@ -138,6 +138,49 @@ test("getAdminStatus surfaces recurring scheduler anomalies", async () => {
 
 test("getAdminStatus surfaces public source ingestion scheduler status", async () => {
   const service = makePlatformService();
+  service.githubIssueIngestionScheduler = {
+    getStatus() {
+      return {
+        enabled: true,
+        running: true,
+        dryRun: true,
+        intervalMs: 900000,
+        queryCount: 2,
+        maxJobsPerRun: 2,
+        maxOpenJobs: 12,
+        currentOpenJobs: 3,
+        lastRun: {
+          startedAt: "2026-04-27T08:00:00.000Z",
+          finishedAt: "2026-04-27T08:00:02.000Z",
+          candidateCount: 4,
+          createdCount: 1,
+          errors: [],
+          queries: [
+            {
+              query: "repo:averray-agent/agent label:good-first-issue",
+              skipped: [{ id: "github-1", reason: "source_already_ingested" }]
+            }
+          ]
+        }
+      };
+    }
+  };
+  service.wikipediaMaintenanceIngestionScheduler = {
+    getStatus() {
+      return {
+        enabled: true,
+        running: true,
+        dryRun: true,
+        intervalMs: 1800000,
+        language: "en",
+        categoryCount: 1,
+        maxJobsPerRun: 2,
+        maxOpenJobs: 10,
+        currentOpenJobs: 0,
+        lastRun: { candidateCount: 0, createdCount: 0, skipped: [{ reason: "no_candidates" }], errors: [] }
+      };
+    }
+  };
   service.osvAdvisoryIngestionScheduler = {
     getStatus() {
       return {
@@ -146,7 +189,10 @@ test("getAdminStatus surfaces public source ingestion scheduler status", async (
         dryRun: true,
         intervalMs: 3600000,
         packageCount: 1,
-        lastRun: { createdCount: 0 }
+        maxJobsPerRun: 2,
+        maxOpenJobs: 20,
+        currentOpenJobs: 2,
+        lastRun: { candidateCount: 2, createdCount: 0, skipped: [], errors: [] }
       };
     }
   };
@@ -159,7 +205,10 @@ test("getAdminStatus surfaces public source ingestion scheduler status", async (
         intervalMs: 3600000,
         query: "res_format:CSV",
         datasetCount: 0,
-        lastRun: { createdCount: 2 }
+        maxJobsPerRun: 2,
+        maxOpenJobs: 20,
+        currentOpenJobs: 4,
+        lastRun: { candidateCount: 2, createdCount: 2, skipped: [], errors: [] }
       };
     }
   };
@@ -171,7 +220,10 @@ test("getAdminStatus surfaces public source ingestion scheduler status", async (
         dryRun: true,
         intervalMs: 3600000,
         specCount: 2,
-        lastRun: { createdCount: 1 }
+        maxJobsPerRun: 2,
+        maxOpenJobs: 20,
+        currentOpenJobs: 1,
+        lastRun: { candidateCount: 1, createdCount: 1, skipped: [], errors: [] }
       };
     }
   };
@@ -183,7 +235,10 @@ test("getAdminStatus surfaces public source ingestion scheduler status", async (
         dryRun: true,
         intervalMs: 3600000,
         specCount: 1,
-        lastRun: { createdCount: 1 }
+        maxJobsPerRun: 2,
+        maxOpenJobs: 20,
+        currentOpenJobs: 1,
+        lastRun: { candidateCount: 1, createdCount: 1, skipped: [], errors: [{ message: "temporary upstream failure" }] }
       };
     }
   };
@@ -194,6 +249,17 @@ test("getAdminStatus surfaces public source ingestion scheduler status", async (
   assert.equal(status.openDataIngestion.lastRun.createdCount, 2);
   assert.equal(status.standardsIngestion.specCount, 2);
   assert.equal(status.openApiIngestion.specCount, 1);
+  assert.equal(status.providerOperations.github.label, "GitHub issues");
+  assert.equal(status.providerOperations.github.mode, "dry_run");
+  assert.equal(status.providerOperations.github.currentOpenJobs, 3);
+  assert.equal(status.providerOperations.github.lastRun.createdCount, 1);
+  assert.equal(status.providerOperations.github.lastRun.skippedCount, 1);
+  assert.equal(status.providerOperations.github.lastRun.skipped[0].reason, "source_already_ingested");
+  assert.equal(status.providerOperations.openData.mode, "live");
+  assert.equal(status.providerOperations.openData.health, "healthy");
+  assert.equal(status.providerOperations.openData.lastRun.summary, "2 candidate(s), 2 created, 0 skipped, 0 error(s)");
+  assert.equal(status.providerOperations.openApi.health, "error");
+  assert.equal(status.providerOperations.openApi.lastRun.errorCount, 1);
 });
 
 test("finalizeXcmRequest records async treasury settlement when the request is strategy-backed", async () => {

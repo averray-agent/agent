@@ -18,6 +18,15 @@ const STARTER_REPUTATION = {
   tier: "starter"
 };
 
+const INGESTION_PROVIDER_DEFINITIONS = [
+  ["github", "githubIngestion", "GitHub issues", "queryCount"],
+  ["wikipedia", "wikipediaIngestion", "Wikipedia maintenance", "categoryCount"],
+  ["osv", "osvIngestion", "OSV advisories", "packageCount"],
+  ["openData", "openDataIngestion", "Open data", "datasetCount"],
+  ["standards", "standardsIngestion", "Standards freshness", "specCount"],
+  ["openApi", "openApiIngestion", "OpenAPI quality", "specCount"]
+];
+
 export class PlatformService {
   constructor(
     jobs,
@@ -136,6 +145,7 @@ export class PlatformService {
         minScore: 0,
         maxJobsPerRun: 0,
         maxOpenJobs: 0,
+        currentOpenJobs: 0,
         lastRun: undefined
       },
       this.wikipediaMaintenanceIngestionScheduler?.getStatus?.() ?? {
@@ -148,6 +158,7 @@ export class PlatformService {
         minScore: 0,
         maxJobsPerRun: 0,
         maxOpenJobs: 0,
+        currentOpenJobs: 0,
         lastRun: undefined
       },
       this.osvAdvisoryIngestionScheduler?.getStatus?.() ?? {
@@ -159,6 +170,7 @@ export class PlatformService {
         minScore: 0,
         maxJobsPerRun: 0,
         maxOpenJobs: 0,
+        currentOpenJobs: 0,
         lastRun: undefined
       },
       this.openDataIngestionScheduler?.getStatus?.() ?? {
@@ -171,6 +183,7 @@ export class PlatformService {
         minScore: 0,
         maxJobsPerRun: 0,
         maxOpenJobs: 0,
+        currentOpenJobs: 0,
         lastRun: undefined
       },
       this.standardsSpecIngestionScheduler?.getStatus?.() ?? {
@@ -182,6 +195,7 @@ export class PlatformService {
         minScore: 0,
         maxJobsPerRun: 0,
         maxOpenJobs: 0,
+        currentOpenJobs: 0,
         lastRun: undefined
       },
       this.openApiSpecIngestionScheduler?.getStatus?.() ?? {
@@ -193,6 +207,7 @@ export class PlatformService {
         minScore: 0,
         maxJobsPerRun: 0,
         maxOpenJobs: 0,
+        currentOpenJobs: 0,
         lastRun: undefined
       },
       this.jobExecutionService.listRecentSessions(14)
@@ -244,6 +259,14 @@ export class PlatformService {
         });
       }
     }
+    const providerOperations = buildProviderOperations({
+      githubIngestion,
+      wikipediaIngestion,
+      osvIngestion,
+      openDataIngestion,
+      standardsIngestion,
+      openApiIngestion
+    });
 
     return {
       auth: auth
@@ -284,6 +307,7 @@ export class PlatformService {
       },
       recurring: recurring,
       scheduler,
+      providerOperations,
       githubIngestion: githubIngestion,
       wikipediaIngestion: wikipediaIngestion,
       osvIngestion: osvIngestion,
@@ -617,4 +641,123 @@ export class PlatformService {
   async ingestVerification(sessionId, verdict) {
     return this.verificationIngestionService.ingest(sessionId, verdict);
   }
+}
+
+function buildProviderOperations(statuses) {
+  const entries = INGESTION_PROVIDER_DEFINITIONS.map(([key, statusKey, label, targetCountField]) => {
+    const status = statuses[statusKey] ?? {};
+    return [key, buildProviderOperationStatus({
+      label,
+      status,
+      targetCountField
+    })];
+  });
+  return Object.fromEntries(entries);
+}
+
+function buildProviderOperationStatus({ label, status, targetCountField }) {
+  const lastRun = summarizeProviderLastRun(status.lastRun);
+  const currentOpenJobs = status.currentOpenJobs !== undefined
+    ? toNonNegativeInteger(status.currentOpenJobs)
+    : inferCurrentOpenJobs(status.lastRun);
+  return {
+    label,
+    enabled: Boolean(status.enabled),
+    running: Boolean(status.running),
+    dryRun: status.dryRun !== false,
+    mode: !status.enabled ? "disabled" : (status.dryRun === false ? "live" : "dry_run"),
+    intervalMs: toNonNegativeInteger(status.intervalMs),
+    maxJobsPerRun: toNonNegativeInteger(status.maxJobsPerRun),
+    maxOpenJobs: toNonNegativeInteger(status.maxOpenJobs),
+    currentOpenJobs,
+    targetCount: toNonNegativeInteger(status[targetCountField]),
+    lastRunAt: lastRun?.finishedAt ?? lastRun?.startedAt,
+    lastRun,
+    health: summarizeProviderHealth({
+      enabled: Boolean(status.enabled),
+      dryRun: status.dryRun !== false,
+      currentOpenJobs,
+      maxOpenJobs: toNonNegativeInteger(status.maxOpenJobs),
+      lastRun
+    })
+  };
+}
+
+function summarizeProviderLastRun(lastRun) {
+  if (!lastRun || typeof lastRun !== "object") {
+    return undefined;
+  }
+  const skippedCount = countSkipped(lastRun);
+  const errorCount = Array.isArray(lastRun.errors) ? lastRun.errors.length : 0;
+  const createdCount = toNonNegativeInteger(lastRun.createdCount);
+  const candidateCount = toNonNegativeInteger(lastRun.candidateCount);
+  const skipped = collectSkipped(lastRun);
+  return {
+    startedAt: stringOrUndefined(lastRun.startedAt),
+    finishedAt: stringOrUndefined(lastRun.finishedAt),
+    dryRun: lastRun.dryRun !== false,
+    candidateCount,
+    createdCount,
+    skippedCount,
+    errorCount,
+    summary: summarizeLastRunText({ candidateCount, createdCount, skippedCount, errorCount }),
+    skipped: skipped.slice(0, 5),
+    errors: Array.isArray(lastRun.errors) ? lastRun.errors.slice(0, 5) : []
+  };
+}
+
+function summarizeLastRunText({ candidateCount, createdCount, skippedCount, errorCount }) {
+  return `${candidateCount} candidate(s), ${createdCount} created, ${skippedCount} skipped, ${errorCount} error(s)`;
+}
+
+function summarizeProviderHealth({ enabled, dryRun, currentOpenJobs, maxOpenJobs, lastRun }) {
+  if (!enabled) {
+    return "disabled";
+  }
+  if (lastRun?.errorCount > 0) {
+    return "error";
+  }
+  if (maxOpenJobs > 0 && currentOpenJobs >= maxOpenJobs) {
+    return "at_capacity";
+  }
+  if (dryRun) {
+    return "dry_run";
+  }
+  return "healthy";
+}
+
+function countSkipped(lastRun) {
+  return collectSkipped(lastRun).length;
+}
+
+function collectSkipped(lastRun) {
+  const topLevel = Array.isArray(lastRun.skipped) ? lastRun.skipped : [];
+  const queryLevel = Array.isArray(lastRun.queries)
+    ? lastRun.queries.flatMap((query) => Array.isArray(query.skipped) ? query.skipped : [])
+    : [];
+  return [...topLevel, ...queryLevel];
+}
+
+function inferCurrentOpenJobs(lastRun) {
+  if (!lastRun || typeof lastRun !== "object") {
+    return 0;
+  }
+  for (const key of ["openGithubJobs", "openWikipediaJobs", "openOsvJobs", "openDataJobs", "openStandardsJobs", "openApiJobs"]) {
+    if (lastRun[key] !== undefined) {
+      return toNonNegativeInteger(lastRun[key]);
+    }
+  }
+  return 0;
+}
+
+function toNonNegativeInteger(value) {
+  const number = Number(value ?? 0);
+  if (!Number.isFinite(number) || number < 0) {
+    return 0;
+  }
+  return Math.trunc(number);
+}
+
+function stringOrUndefined(value) {
+  return typeof value === "string" && value.trim() ? value : undefined;
 }

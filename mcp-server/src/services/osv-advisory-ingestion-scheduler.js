@@ -60,6 +60,7 @@ export class OsvAdvisoryIngestionScheduler {
       maxJobsPerRun: this.maxJobsPerRun,
       maxPackageTargets: this.maxPackageTargets,
       maxOpenJobs: this.maxOpenJobs,
+      currentOpenJobs: this.countOpenOsvJobs(),
       lastRun: this.lastRun
     };
   }

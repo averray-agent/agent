@@ -56,6 +56,7 @@ export class GithubIssueIngestionScheduler {
       minScore: this.minScore,
       maxJobsPerRun: this.maxJobsPerRun,
       maxOpenJobs: this.maxOpenJobs,
+      currentOpenJobs: this.countOpenGithubJobs(),
       lastRun: this.lastRun
     };
   }

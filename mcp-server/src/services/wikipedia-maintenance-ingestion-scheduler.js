@@ -57,6 +57,7 @@ export class WikipediaMaintenanceIngestionScheduler {
       minScore: this.minScore,
       maxJobsPerRun: this.maxJobsPerRun,
       maxOpenJobs: this.maxOpenJobs,
+      currentOpenJobs: this.countOpenWikipediaJobs(),
       lastRun: this.lastRun
     };
   }

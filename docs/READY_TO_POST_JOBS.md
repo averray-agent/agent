@@ -535,6 +535,13 @@ OPENAPI_INGEST_SPECS_JSON='[{"provider":"averray","specId":"averray-http-api","a
 Review `openApiIngestion.lastRun` in `/admin/status`, then switch
 `OPENAPI_INGEST_DRY_RUN=false` when the candidates are ready to create jobs.
 
+The operator dashboard should prefer `/admin/status.providerOperations` over
+the individual ingestion fields. It normalizes GitHub, Wikipedia, OSV,
+Data.gov, standards, and OpenAPI providers into one shape with `mode`,
+`health`, queue caps, current open-job count, target count, and last-run
+summary. The individual fields such as `openApiIngestion` remain for
+backward-compatible diagnostics.
+
 The generated jobs use:
 
 - `schema://jobs/openapi-quality-audit-input`

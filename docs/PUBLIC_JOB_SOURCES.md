@@ -160,3 +160,22 @@ Each source should get:
 - one or more output schemas
 - a small ready-to-post job bundle
 - a later ingestion script only after the job shape is proven useful
+
+## Provider Operations Status
+
+`GET /admin/status` includes a normalized `providerOperations` object for the
+operator dashboard. It is keyed by source:
+
+- `github`
+- `wikipedia`
+- `osv`
+- `openData`
+- `standards`
+- `openApi`
+
+Each provider entry reports `label`, `enabled`, `running`, `dryRun`, `mode`,
+`health`, `intervalMs`, `maxJobsPerRun`, `maxOpenJobs`, `currentOpenJobs`,
+`targetCount`, `lastRunAt`, and a compact `lastRun` summary. The older
+provider-specific fields such as `osvIngestion` and `openDataIngestion` remain
+available for compatibility, but new admin UI should render from
+`providerOperations`.

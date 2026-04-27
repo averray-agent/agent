@@ -57,6 +57,7 @@ export class OpenDataIngestionScheduler {
       minScore: this.minScore,
       maxJobsPerRun: this.maxJobsPerRun,
       maxOpenJobs: this.maxOpenJobs,
+      currentOpenJobs: this.countOpenDataJobs(),
       lastRun: this.lastRun
     };
   }
