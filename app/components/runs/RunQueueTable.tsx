@@ -186,6 +186,37 @@ function RunRowCard({
                     {row.jobMeta}
                   </span>
                 </>
+              ) : row.source?.type === "osv_advisory" ? (
+                <>
+                  <SourceBadge
+                    kind="osv"
+                    secondary={
+                      (row.source.cves?.length ?? 0) > 0 ? "NVD" : undefined
+                    }
+                    className="shrink-0"
+                  />
+                  <span className="truncate">
+                    {row.source.ecosystem} / {row.source.packageName}
+                    <span className="text-[var(--avy-accent)]">
+                      {" "}· {row.source.advisoryId}
+                    </span>
+                  </span>
+                  <span className="shrink-0 opacity-40">·</span>
+                  <span className="shrink-0 whitespace-nowrap">
+                    {row.jobMeta}
+                  </span>
+                </>
+              ) : row.source?.type === "open_data_dataset" ? (
+                <>
+                  <SourceBadge kind="data_gov" className="shrink-0" />
+                  <span className="truncate text-[var(--avy-ink)]">
+                    {row.source.datasetTitle}
+                  </span>
+                  <span className="shrink-0 opacity-40">·</span>
+                  <span className="shrink-0 truncate whitespace-nowrap">
+                    {row.jobMeta}
+                  </span>
+                </>
               ) : (
                 <span className="truncate">{row.jobMeta}</span>
               )}

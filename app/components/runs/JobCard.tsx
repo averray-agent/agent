@@ -69,6 +69,33 @@ export function JobCard({ job }: { job: JobCardData }) {
                 / {job.source.pageTitle}
               </span>
             </p>
+          ) : job.source?.type === "osv_advisory" ? (
+            <p
+              className="mt-1 flex items-center gap-1 font-[family-name:var(--font-mono)] text-[10.5px] text-[var(--avy-muted)]"
+              style={{ letterSpacing: 0 }}
+            >
+              <span className="shrink-0">
+                {job.source.ecosystem} / {job.source.packageName}
+              </span>
+              <span className="truncate text-[var(--avy-accent)]">
+                · {job.source.advisoryId}
+              </span>
+            </p>
+          ) : job.source?.type === "open_data_dataset" ? (
+            <p
+              className="mt-1 flex items-center gap-1 font-[family-name:var(--font-mono)] text-[10.5px] text-[var(--avy-muted)]"
+              style={{ letterSpacing: 0 }}
+            >
+              <span className="truncate text-[var(--avy-ink)]">
+                {job.source.datasetTitle}
+              </span>
+              {job.source.agency ? (
+                <>
+                  <span className="shrink-0 opacity-40">·</span>
+                  <span className="shrink-0 truncate">{job.source.agency}</span>
+                </>
+              ) : null}
+            </p>
           ) : (
             <p
               className="mt-1 truncate font-[family-name:var(--font-mono)] text-[10.5px] text-[var(--avy-muted)]"
@@ -97,7 +124,18 @@ export function JobCard({ job }: { job: JobCardData }) {
       </header>
 
       <div className="flex flex-wrap items-center gap-1">
-        {job.source?.type === "github_issue" ? <SourceBadge kind="github" /> : null}
+        {job.source?.type === "github_issue" ? (
+          <SourceBadge kind="github" />
+        ) : job.source?.type === "wikipedia_article" ? (
+          <SourceBadge kind="wikipedia" />
+        ) : job.source?.type === "osv_advisory" ? (
+          <SourceBadge
+            kind="osv"
+            secondary={(job.source.cves?.length ?? 0) > 0 ? "NVD" : undefined}
+          />
+        ) : job.source?.type === "open_data_dataset" ? (
+          <SourceBadge kind="data_gov" />
+        ) : null}
         <TierPill tier={job.tier} />
         {job.category ? (
           <span
