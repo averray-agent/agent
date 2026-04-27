@@ -8,6 +8,8 @@ Use it together with:
 - [VPS_RUNBOOK.md](../VPS_RUNBOOK.md) for host-level commands
 - [MULTISIG_SETUP.md](./MULTISIG_SETUP.md) for owner/pauser actions
 - [PRODUCTION_CHECKLIST.md](./PRODUCTION_CHECKLIST.md) for promotion gates
+- [CONTENT_RECOVERY_RUNBOOK.md](./CONTENT_RECOVERY_RUNBOOK.md) for
+  `/content/:hash` recovery from the append-only JSONL log
 
 ---
 
@@ -130,6 +132,7 @@ relay that accepts JSON POSTs.
 | `index.averray.com/ready` failing | P2 | Check indexer logs/status, roll back or widen readiness window | Primary on-call |
 | Public site/app shell failing | P2 | Check Caddy + static mounts | Primary on-call |
 | Async XCM requests stuck in `pending` | P2 | Check watcher status, inspect `/xcm/request`, and rehearse manual finalize if needed | Primary on-call |
+| `/content/:hash` unexpectedly 404s after Redis loss/restore | P2 | Dry-run the content recovery replay log, then apply if clean | Primary on-call |
 | Redis restore drill fails | P1 | Treat as backup failure; stop risky deploys | Primary on-call |
 | Smoke check drift only | P3 | Fix docs/config/runtime mismatch | Repo owner |
 
