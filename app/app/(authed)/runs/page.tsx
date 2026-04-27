@@ -17,7 +17,7 @@ import {
   FIXTURE_RECOMMENDATIONS,
   FIXTURE_RUN_ROWS,
 } from "@/components/runs/fixtures";
-import { useJobs, useRecommendations } from "@/lib/api/hooks";
+import { useAdminJobs, useJobs, useRecommendations } from "@/lib/api/hooks";
 import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
 import {
   buildRecommendationCards,
@@ -25,6 +25,7 @@ import {
   buildRunRows,
   sumReadyStake,
 } from "@/lib/api/run-adapters";
+import { extractAdminJobs } from "@/lib/api/job-lifecycle";
 
 /**
  * Runs — the operator's primary work surface.
@@ -49,12 +50,20 @@ function RunsPageInner() {
   const searchParams = useSearchParams();
   const runParam = searchParams?.get("run") ?? null;
   const [activeFilter, setActiveFilter] = useState<QueueFilter>("all");
+  const [showClosed, setShowClosed] = useState(false);
   const [selectedId, setSelectedId] = useState<string>(runParam ?? "run-2742");
 
   const jobs = useJobs();
+  const adminJobs = useAdminJobs();
   const recommendations = useRecommendations();
 
-  const liveRows = useMemo(() => buildRunRows(jobs.data), [jobs.data]);
+  // Operator app uses /admin/jobs (which carries lifecycle metadata and
+  // includes paused/archived/stale rows). Falls back to public /jobs
+  // until the admin payload arrives so the queue isn't empty on first
+  // hydration.
+  const adminPayload = adminJobs.data ? extractAdminJobs(adminJobs.data) : [];
+  const sourceForRows = adminPayload.length ? adminPayload : jobs.data;
+  const liveRows = useMemo(() => buildRunRows(sourceForRows), [sourceForRows]);
   const rows = liveRows.length ? liveRows : FIXTURE_RUN_ROWS;
   const filters = useMemo(() => buildRunFilters(rows), [rows]);
   const recommendationCards = useMemo(() => {
@@ -77,9 +86,24 @@ function RunsPageInner() {
   }, [rows, selectedId]);
 
   const visibleRows = useMemo(() => {
-    if (activeFilter === "all") return rows;
-    return rows.filter((r) => r.state === activeFilter);
-  }, [activeFilter, rows]);
+    let next = rows;
+    // Default-hide stale, paused, and archived rows so the queue stays
+    // focused on actionable runs. Operators can flip the toggle to see
+    // the full lifecycle picture (or to reopen something they paused).
+    if (!showClosed) {
+      next = next.filter(
+        (r) => !r.lifecycle || r.lifecycle.state === "open"
+      );
+    }
+    if (activeFilter !== "all") {
+      next = next.filter((r) => r.state === activeFilter);
+    }
+    return next;
+  }, [activeFilter, rows, showClosed]);
+
+  const closedRowCount = rows.filter(
+    (r) => r.lifecycle && r.lifecycle.state !== "open"
+  ).length;
 
   // Lifecycle rail at the page level mirrors the loaded run, so its
   // copy has to follow the selected row's source — otherwise selecting
@@ -170,7 +194,7 @@ function RunsPageInner() {
     : jobs.isLoading
       ? "loading live jobs"
       : "live API";
-  const freshness = freshnessFromRequests(jobs, recommendations);
+  const freshness = freshnessFromRequests(jobs, adminJobs, recommendations);
 
   return (
     <div className="flex w-full max-w-[1440px] flex-col gap-3.5">
@@ -180,6 +204,23 @@ function RunsPageInner() {
         active={activeFilter}
         onChange={setActiveFilter}
       />
+      {closedRowCount > 0 || showClosed ? (
+        <div className="flex items-center justify-between rounded-[10px] border border-[var(--avy-line-soft)] bg-[var(--avy-paper)] px-3.5 py-2 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]">
+          <span>
+            {showClosed
+              ? `Showing all jobs including ${closedRowCount} paused/archived/stale.`
+              : `${closedRowCount} paused/archived/stale ${closedRowCount === 1 ? "job is" : "jobs are"} hidden.`}
+          </span>
+          <button
+            type="button"
+            onClick={() => setShowClosed((v) => !v)}
+            className="rounded-full border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-2.5 py-1 font-[family-name:var(--font-display)] text-[10.5px] font-extrabold uppercase text-[var(--avy-ink)] transition-colors hover:border-[color:rgba(30,102,66,0.35)] hover:text-[var(--avy-accent)]"
+            style={{ letterSpacing: "0.08em" }}
+          >
+            {showClosed ? "Hide closed" : "Show closed"}
+          </button>
+        </div>
+      ) : null}
 
       {/*
        * Email-client layout: queue left, loaded-run detail right. The

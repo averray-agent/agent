@@ -20,10 +20,15 @@ import {
   ProviderOperationsCard,
   PROVIDER_OPERATIONS_FIXTURE,
 } from "@/components/overview/ProviderOperationsCard";
+import { JobLifecycleStrip } from "@/components/overview/JobLifecycleStrip";
 import { useAccount, useAlerts, useHealth, useJobs, useProviderOperations, useSessions, useStrategyPositions } from "@/lib/api/hooks";
 import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
 import { extractRunJobs } from "@/lib/api/run-adapters";
 import { buildProviderOperations } from "@/lib/api/provider-operations";
+import {
+  buildJobLifecycleSummary,
+  EMPTY_JOB_LIFECYCLE_SUMMARY,
+} from "@/lib/api/job-lifecycle";
 import {
   buildLaneCards,
   buildOverviewAlerts,
@@ -371,6 +376,11 @@ export default function OverviewPage() {
     [jobs.data, sessions.data, strategyPositions.data]
   );
   const liveJobs = extractRunJobs(jobs.data);
+  const lifecycleSummary = useMemo(
+    () => buildJobLifecycleSummary(providerOps.data),
+    [providerOps.data]
+  );
+  const hasLifecycleData = lifecycleSummary.total > 0;
   const liveProviderOps = useMemo(
     () => buildProviderOperations(providerOps.data),
     [providerOps.data]
@@ -411,6 +421,10 @@ export default function OverviewPage() {
         policiesAppliedToday={hasLiveOverview ? liveLanes.length : 22}
       />
       <RoomVitals vitals={vitals} comparedTo={hasLiveOverview ? "live API" : "14:08 UTC yesterday"} />
+      <JobLifecycleStrip
+        summary={hasLifecycleData ? lifecycleSummary : EMPTY_JOB_LIFECYCLE_SUMMARY}
+        meta={hasLifecycleData ? "live API · /admin/status" : "no jobs yet"}
+      />
       <NeedsActionList alerts={alerts} meta={`${alerts.length} open`} />
       <LaneStatusGrid lanes={lanes} meta={hasLiveOverview ? "live API snapshot" : undefined} />
       <ProviderOperationsCard

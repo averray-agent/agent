@@ -64,6 +64,13 @@ export const useHealth = () => useApi("/health");
  */
 export const useProviderOperations = () =>
   useApi("/admin/status", { refreshInterval: 30_000 });
+/**
+ * Operator-side full job listing including paused, archived, and stale
+ * rows so the operator app can show lifecycle controls. The public
+ * `/jobs` feed filters those out by default.
+ */
+export const useAdminJobs = () =>
+  useApi("/admin/jobs", { refreshInterval: 15_000 });
 export const useOnboarding = () => useApi("/onboarding");
 export const useVerifierHandlers = () => useApi("/verifier/handlers");
 export const useSessionStateMachine = () => useApi("/session/state-machine");

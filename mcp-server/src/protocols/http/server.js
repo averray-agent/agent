@@ -1337,6 +1337,22 @@ const server = createServer(async (request, response) => {
       return respond(response, 200, service.listJobs());
     }
 
+    if (request.method === "GET" && pathname === "/admin/jobs") {
+      const auth = await authMiddleware(request, url, { requireRole: "admin" });
+      await enforceLimit("admin_jobs", auth.wallet, rateLimitConfig.adminJobs);
+      // Operator-side full job listing including paused, archived, and
+      // stale rows so the operator app can show lifecycle controls.
+      // The public `/jobs` route filters those out by default.
+      return respond(response, 200, {
+        jobs: service.listJobs({
+          includePaused: true,
+          includeArchived: true,
+          includeStale: true
+        }),
+        jobLifecycle: service.getJobLifecycleSummary()
+      });
+    }
+
     if (request.method === "GET" && pathname === "/strategies") {
       // Public read: which yield/strategy adapters are registered for
       // this deployment. Populated from STRATEGIES_JSON env (copied from

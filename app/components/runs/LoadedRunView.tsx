@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { mutate } from "swr";
 import { LoadedRunPanel } from "./LoadedRunPanel";
 import { LifecycleRail } from "./LifecycleRail";
+import { LifecycleActionBar } from "./LifecycleActionBar";
 import {
   ReceiptPreviewDrawer,
   type ReceiptPreviewDraft,
@@ -15,7 +16,7 @@ import {
 } from "./fixtures";
 import type { RunRow } from "./RunQueueTable";
 import { swrFetcher } from "@/lib/api/client";
-import { useJobDefinition, useJobs } from "@/lib/api/hooks";
+import { useAdminJobs, useJobDefinition, useJobs } from "@/lib/api/hooks";
 import {
   buildGitHubContext,
   buildOpenDataContext,
@@ -24,6 +25,7 @@ import {
   buildWikipediaContext,
   extractRunJobs,
 } from "@/lib/api/run-adapters";
+import { extractAdminJobs } from "@/lib/api/job-lifecycle";
 
 /**
  * Self-contained detail view for a single run.
@@ -59,9 +61,15 @@ export function LoadedRunView({
   showLifecycle = true,
 }: LoadedRunViewProps) {
   const jobs = useJobs();
-  const liveRows = useMemo(() => buildRunRows(jobs.data), [jobs.data]);
+  const adminJobs = useAdminJobs();
+  // Prefer the admin job feed (carries lifecycle metadata + paused/
+  // archived/stale rows). Fall back to the public feed until the admin
+  // payload arrives so we don't render an empty panel on first paint.
+  const adminPayload = adminJobs.data ? extractAdminJobs(adminJobs.data) : [];
+  const sourceForRows = adminPayload.length ? adminPayload : jobs.data;
+  const liveRows = useMemo(() => buildRunRows(sourceForRows), [sourceForRows]);
   const rows = liveRows.length ? liveRows : FIXTURE_RUN_ROWS;
-  const rawJobs = useMemo(() => extractRunJobs(jobs.data), [jobs.data]);
+  const rawJobs = useMemo(() => extractRunJobs(sourceForRows), [sourceForRows]);
   const loadedRow =
     rows.find((row) => row.id === runId) ?? rows[0] ?? FIXTURE_RUN_ROWS[0];
 
@@ -131,6 +139,10 @@ export function LoadedRunView({
 
   return (
     <div className="flex flex-col gap-3.5">
+      <LifecycleActionBar
+        jobId={loadedRow.id}
+        lifecycle={loadedRow.lifecycle}
+      />
       <LoadedRunPanel
         kicker={kicker}
         title={loadedRow.title}

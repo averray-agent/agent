@@ -5,6 +5,11 @@ import { cn } from "@/lib/utils/cn";
 import { StatePill, SourceBadge, type RunState } from "./StatePill";
 import { WorkerChip, type WorkerVariant } from "./WorkerChip";
 import type { JobSource } from "./types";
+import {
+  formatLifecycleLabel,
+  type JobLifecycle,
+  type JobLifecycleState,
+} from "@/lib/api/job-lifecycle";
 
 export interface RunRow {
   id: string;
@@ -17,6 +22,12 @@ export interface RunRow {
    * internal job id.
    */
   source?: JobSource;
+  /**
+   * Lifecycle metadata from PR #64. Present when the row was loaded
+   * from `/admin/jobs` (operator). Drives the lifecycle pill and the
+   * action bar in the loaded-run panel.
+   */
+  lifecycle?: JobLifecycle;
   worker: {
     variant: WorkerVariant;
     initials: string;
@@ -224,7 +235,12 @@ function RunRowCard({
           </div>
 
           <div className="flex shrink-0 flex-col items-end gap-0.5">
-            <StatePill state={row.state} />
+            <div className="flex items-center gap-1.5">
+              {row.lifecycle && row.lifecycle.state !== "open" ? (
+                <LifecyclePill state={row.lifecycle.state} />
+              ) : null}
+              <StatePill state={row.state} />
+            </div>
             <span className="font-[family-name:var(--font-mono)] text-[12.5px] leading-tight text-[var(--avy-ink)]">
               {row.stake}
               <small className="font-normal text-[var(--avy-muted)]"> DOT</small>
@@ -256,5 +272,26 @@ function RunRowCard({
         </div>
       </button>
     </li>
+  );
+}
+
+function LifecyclePill({ state }: { state: JobLifecycleState }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 font-[family-name:var(--font-display)] text-[9.5px] font-extrabold uppercase",
+        state === "stale" &&
+          "bg-[var(--avy-warn-soft)] text-[var(--avy-warn)]",
+        state === "paused" &&
+          "bg-[color:rgba(17,19,21,0.06)] text-[var(--avy-muted)]",
+        state === "archived" &&
+          "bg-[color:rgba(17,19,21,0.06)] text-[var(--avy-muted)]",
+        state === "open" && "bg-[var(--avy-accent-soft)] text-[var(--avy-accent)]"
+      )}
+      style={{ letterSpacing: "0.1em" }}
+      title={`Lifecycle: ${state}`}
+    >
+      {formatLifecycleLabel(state)}
+    </span>
   );
 }

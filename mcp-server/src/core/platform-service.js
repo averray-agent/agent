@@ -91,8 +91,8 @@ export class PlatformService {
     };
   }
 
-  listJobs() {
-    return this.jobCatalogService.listJobs();
+  listJobs(options) {
+    return this.jobCatalogService.listJobs(options);
   }
 
   createJob(input) {

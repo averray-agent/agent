@@ -9,6 +9,7 @@ import type {
   OsvJobContext,
   WikipediaJobContext,
 } from "@/components/runs/types";
+import { buildJobLifecycle } from "@/lib/api/job-lifecycle";
 
 type RawRecord = Record<string, unknown>;
 
@@ -478,12 +479,14 @@ export function buildRunRows(payload: unknown): RunRow[] {
                   )
                   .join(" · ")
               : `${id} · ${category} · ${tier}`;
+    const lifecycle = buildJobLifecycle(job.lifecycle);
     return {
       id,
       sessionId: text(job.sessionId),
       title,
       jobMeta,
       ...(source ? { source } : {}),
+      ...(lifecycle ? { lifecycle } : {}),
       worker: {
         variant: worker ? "a" : "unclaimed",
         initials: worker ? "AG" : "-",
