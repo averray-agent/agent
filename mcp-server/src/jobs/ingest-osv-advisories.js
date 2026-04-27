@@ -187,7 +187,7 @@ export function toPlatformJob({ target, advisory, fixedVersion, score = scoreAdv
     jobType: "work",
     requiredRole: "worker",
     category: "security",
-    tier: "starter-plus",
+    tier: "starter",
     rewardAsset: "DOT",
     rewardAmount: 3,
     verifierMode: "github_pr",

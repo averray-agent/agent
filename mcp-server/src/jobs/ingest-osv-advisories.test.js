@@ -95,6 +95,7 @@ test("toPlatformJob creates a PR-shaped dependency remediation job", () => {
 
   assert.equal(job.id, "osv-npm-example-app-minimist-0-0-8-ghsa-vh95-rmgr-6w4m");
   assert.equal(job.category, "security");
+  assert.equal(job.tier, "starter");
   assert.equal(job.verifierMode, "github_pr");
   assert.equal(job.inputSchemaRef, "schema://jobs/dependency-remediation-input");
   assert.equal(job.outputSchemaRef, "schema://jobs/dependency-remediation-output");
