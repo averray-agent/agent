@@ -237,6 +237,7 @@ export const DISPUTES: Dispute[] = [
   {
     id: "d_4df10",
     runRef: "run-2711",
+    source: "wikipedia",
     openingReceipt: "r_4df10",
     summary:
       "Writer output cited external link in violation of writer-gov/cited@v3; upheld after review.",
@@ -343,5 +344,164 @@ export const DISPUTES: Dispute[] = [
         tone: "sage",
       },
     },
+  },
+  {
+    id: "d_4e0a2",
+    runRef: "run-2751",
+    source: "osv",
+    openingReceipt: "r_4e145",
+    summary:
+      "Lockfile resolves to a downstream package version that no longer satisfies the OSV-fixed range; verifier flagged the bump as ineffective.",
+    origin: "schema",
+    severity: "gating",
+    state: "under-review",
+    opener: {
+      handle: "verifier-2",
+      address: "0x9A13…0cb2",
+      initials: "V2",
+      tone: "blue",
+    },
+    respondent: {
+      handle: "coding-hand-3",
+      address: "0x4F88AD…19c0",
+      initials: "CH",
+      tone: "clay",
+    },
+    reviewer: {
+      handle: "you · operator-primary",
+      address: "0xFd2E…6519",
+      initials: "FD",
+      tone: "sage",
+    },
+    stakeFrozen: 18,
+    stakeBreakdown: { worker: 12, verifier: 4, treasury: 2 },
+    openedAt: "14:32:11 UTC",
+    windowSeconds: 30 * 60,
+    windowElapsed: 8 * 60 + 22,
+    evidence: [
+      {
+        label: "advisory_id",
+        worker: "GHSA-vh95-rmgr-6w4m",
+        expected: "GHSA-vh95-rmgr-6w4m",
+        match: "ok",
+      },
+      {
+        label: "manifest.minimist",
+        worker: "1.2.6",
+        expected: "1.2.6",
+        match: "ok",
+      },
+      {
+        label: "lockfile.minimist",
+        worker: "1.2.5",
+        expected: "1.2.6",
+        match: "fail",
+        note: "transitive dep still resolves to 1.2.5; advisory range not actually closed",
+      },
+    ],
+    workerPayload: `{
+  "advisoryId": "GHSA-vh95-rmgr-6w4m",
+  "manifestPath": "frontend/package.json",
+  "from": "1.2.5",
+  "to": "1.2.6",
+  "lockfileResolved": "1.2.5"
+}`,
+    expectedPayload: `{
+  "advisoryId": "GHSA-vh95-rmgr-6w4m",
+  "manifestPath": "frontend/package.json",
+  "from": "1.2.5",
+  "to": "1.2.6",
+  "lockfileResolved": "1.2.6"
+}`,
+    timeline: [
+      {
+        at: "14:32:11 UTC",
+        label: "opened",
+        body: "verifier-2 flagged a lockfile mismatch — bump landed in package.json but transitive resolution still pins the vulnerable version.",
+      },
+      {
+        at: "14:32:14 UTC",
+        label: "stake.locked",
+        body: "18 DOT frozen pending verdict.",
+        tone: "warn",
+      },
+    ],
+  },
+  {
+    id: "d_4e09b",
+    runRef: "run-2752",
+    source: "data_gov",
+    openingReceipt: "r_4e144",
+    summary:
+      "Audit report omitted resource-format check on a CSV resource; verifier flagged missing checks signal.",
+    origin: "schema",
+    severity: "advisory",
+    state: "awaiting-evidence",
+    opener: {
+      handle: "verifier-2",
+      address: "0x9A13…0cb2",
+      initials: "V2",
+      tone: "blue",
+    },
+    respondent: {
+      handle: "writer-gov-1",
+      address: "0xFd2E…6519",
+      initials: "FD",
+      tone: "sage",
+    },
+    reviewer: {
+      handle: "you · operator-primary",
+      address: "0xFd2E…6519",
+      initials: "FD",
+      tone: "sage",
+    },
+    stakeFrozen: 4,
+    stakeBreakdown: { worker: 2, verifier: 1, treasury: 1 },
+    openedAt: "14:14:48 UTC",
+    windowSeconds: 30 * 60,
+    windowElapsed: 4 * 60 + 9,
+    evidence: [
+      {
+        label: "dataset_url_present",
+        worker: "true",
+        expected: "true",
+        match: "ok",
+      },
+      {
+        label: "resource_url_present",
+        worker: "true",
+        expected: "true",
+        match: "ok",
+      },
+      {
+        label: "checks.format_summary",
+        worker: "absent",
+        expected: "present",
+        match: "fail",
+        note: "CSV resources require a header/columns summary — missing in the audit report",
+      },
+    ],
+    workerPayload: `{
+  "datasetTitle": "Federal sample spending data",
+  "resourceFormat": "CSV",
+  "checks": ["dataset_url_reachable", "resource_url_reachable"]
+}`,
+    expectedPayload: `{
+  "datasetTitle": "Federal sample spending data",
+  "resourceFormat": "CSV",
+  "checks": ["dataset_url_reachable", "resource_url_reachable", "format_summary"]
+}`,
+    timeline: [
+      {
+        at: "14:14:48 UTC",
+        label: "opened",
+        body: "verifier-2 requested an additional checks signal for tabular resources.",
+      },
+      {
+        at: "14:14:52 UTC",
+        label: "stake.locked",
+        body: "4 DOT frozen — advisory severity, no slash by default.",
+      },
+    ],
   },
 ];

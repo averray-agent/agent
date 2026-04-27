@@ -5,6 +5,7 @@ import type {
 } from "@/components/receipts/ReceiptDrawerBody";
 import type { ReceiptRow } from "@/components/receipts/ReceiptsTable";
 import type { Signer, SignerTone } from "@/components/receipts/SignerAvatars";
+import type { SourceKind } from "@/components/runs/StatePill";
 
 export type ReceiptRowWithMeta = ReceiptRow & {
   sessionId: string;
@@ -20,7 +21,33 @@ export interface ReceiptDrawerModel {
   evidenceMeta: string;
   evidenceRawHref: string;
   links: LinkedArtifact[];
+  /**
+   * Provenance + attribution for the underlying run, when known. Used to
+   * render a SourceBadge + a short attribution line in the drawer so an
+   * auditor opening a receipt sees the same source context the table row
+   * shows. Optional because non-run receipts (badge, settle on a loan,
+   * policy revision) don't carry a platform source.
+   */
+  source?: {
+    kind: SourceKind;
+    /** Optional secondary chip — e.g. "NVD" on OSV advisories with CVEs. */
+    secondary?: string;
+    /** Short single-line attribution. */
+    attribution: string;
+    /** Optional inline identity, e.g. "owner/repo #123" or dataset title. */
+    identity?: string;
+    /** Optional URL the identity links out to. */
+    href?: string;
+  };
 }
+
+const SOURCE_ATTRIBUTION: Record<SourceKind, string> = {
+  github: "Averray-attributed PR review",
+  wikipedia: "Averray proposal — agent never edits Wikipedia",
+  osv: "Averray dependency remediation",
+  data_gov: "Averray open-data quality audit",
+  oss: "Open-source contribution",
+};
 
 export function extractReceiptRows(data: unknown): ReceiptRowWithMeta[] {
   const rows = Array.isArray(data)
@@ -100,6 +127,25 @@ export function buildReceiptDrawer(
       { role: "Session", ref: row.sessionId },
       { role: "Block ref", ref: text(averray?.chainJobId, row.blockRef ?? "pending") },
     ],
+    ...(row.source ? { source: receiptSource(row.source) } : {}),
+  };
+}
+
+/**
+ * Build the optional source-attribution block surfaced in the receipt
+ * drawer. Today we only know the source `kind` from the row itself —
+ * the rich source object (repo + issue, dataset + agency) lives on the
+ * underlying run, not on the receipt payload. So we render a badge +
+ * a short attribution line, and let the existing "Linked artifacts"
+ * section continue to carry the run id / evidence hash. Once receipts
+ * carry a richer source field this can hydrate identity/href too.
+ */
+function receiptSource(
+  kind: SourceKind
+): NonNullable<ReceiptDrawerModel["source"]> {
+  return {
+    kind,
+    attribution: SOURCE_ATTRIBUTION[kind] ?? "Averray-attributed run",
   };
 }
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { DrawerSection } from "@/components/shell/DetailDrawer";
+import { SourceBadge, type SourceKind } from "@/components/runs/StatePill";
 import { cn } from "@/lib/utils/cn";
 
 export interface SignatureEntry {
@@ -16,12 +17,29 @@ export interface LinkedArtifact {
   href?: string;
 }
 
+export interface ReceiptDrawerSource {
+  kind: SourceKind;
+  /** Optional secondary tag inside the badge — e.g. "NVD" on OSV with CVEs. */
+  secondary?: string;
+  /** One-line attribution. */
+  attribution: string;
+  /** Optional inline identity, e.g. "owner/repo #123" or dataset title. */
+  identity?: string;
+  href?: string;
+}
+
 export interface ReceiptDrawerBodyProps {
   signatures: SignatureEntry[];
   evidenceJson: string;
   evidenceMeta: string;
   evidenceRawHref: string;
   links: LinkedArtifact[];
+  /**
+   * Source provenance + attribution for run-kind receipts. Unset for
+   * non-run receipts (badge, settle on a loan, policy revision) where
+   * the platform-source concept doesn't apply.
+   */
+  source?: ReceiptDrawerSource;
 }
 
 export function ReceiptDrawerBody({
@@ -30,9 +48,47 @@ export function ReceiptDrawerBody({
   evidenceMeta,
   evidenceRawHref,
   links,
+  source,
 }: ReceiptDrawerBodyProps) {
   return (
     <>
+      {source ? (
+        <DrawerSection title="Source">
+          <div
+            className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-[8px] border border-[var(--avy-line)] bg-[color:rgba(17,19,21,0.02)] px-3 py-2"
+            style={{ letterSpacing: 0 }}
+          >
+            <SourceBadge kind={source.kind} secondary={source.secondary} />
+            {source.identity ? (
+              source.href ? (
+                <a
+                  href={source.href}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="truncate whitespace-nowrap font-[family-name:var(--font-mono)] text-[12px] text-[var(--avy-ink)] hover:text-[var(--avy-accent)]"
+                  title={source.identity}
+                >
+                  {source.identity}
+                </a>
+              ) : (
+                <span
+                  className="truncate whitespace-nowrap font-[family-name:var(--font-mono)] text-[12px] text-[var(--avy-ink)]"
+                  title={source.identity}
+                >
+                  {source.identity}
+                </span>
+              )
+            ) : null}
+          </div>
+          <p
+            className="mt-2 m-0 rounded-[6px] border border-[var(--avy-warn)] bg-[color:rgba(211,145,27,0.08)] px-2.5 py-2 font-[family-name:var(--font-mono)] text-[11px] leading-[1.5] text-[var(--avy-ink)]"
+            style={{ letterSpacing: 0 }}
+          >
+            <b className="font-semibold">Attribution:</b> {source.attribution}.
+          </p>
+        </DrawerSection>
+      ) : null}
+
       <DrawerSection title="Signature chain">
         <div className="flex flex-col gap-1.5 rounded-[10px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3.5 py-3">
           {signatures.map((sig, i) => (

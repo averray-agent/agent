@@ -49,6 +49,44 @@ const CHAIN = {
 
 export const AUDIT_EVENTS: AuditEvent[] = [
   {
+    id: "ev-osv-01",
+    at: "14:09:52",
+    day: "today",
+    source: "operator",
+    category: "verifier",
+    action: "receipt.signed",
+    actor: FD,
+    summary: (
+      <>
+        Signed receipt <b>r_4e145</b> for OSV remediation run-2751 ·
+        npm/minimist <b>1.2.5 → 1.2.6</b> (GHSA-vh95-rmgr-6w4m).
+      </>
+    ),
+    target: "r_4e145",
+    hash: "0x4f12…aa83",
+    tone: "accent",
+    link: { label: "Open receipt →", href: "/receipts" },
+  },
+  {
+    id: "ev-datagov-01",
+    at: "14:09:21",
+    day: "today",
+    source: "operator",
+    category: "verifier",
+    action: "receipt.signed",
+    actor: FD,
+    summary: (
+      <>
+        Signed receipt <b>r_4e144</b> for Data.gov audit run-2752 · GSA{" "}
+        <b>Federal sample spending data</b> (CSV).
+      </>
+    ),
+    target: "r_4e144",
+    hash: "0x9b04…42c1",
+    tone: "accent",
+    link: { label: "Open receipt →", href: "/receipts" },
+  },
+  {
     id: "ev-01",
     at: "14:08:42",
     day: "today",

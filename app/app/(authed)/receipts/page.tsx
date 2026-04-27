@@ -21,6 +21,7 @@ import {
 import { KindChip } from "@/components/receipts/KindChip";
 import { DetailDrawer } from "@/components/shell/DetailDrawer";
 import { ReceiptDrawerBody } from "@/components/receipts/ReceiptDrawerBody";
+import { SourceBadge } from "@/components/runs/StatePill";
 import {
   buildReceiptDrawer,
   extractReceiptRows,
@@ -152,6 +153,35 @@ const ROWS: ReceiptRow[] = [
     policy: "writer-gov/cited@v3",
     size: "14.2 KB",
     signedAt: "14:11:18 UTC",
+  },
+  {
+    id: "r_4e145",
+    kind: "run",
+    subject: "run-2751",
+    subjectSub: "coding-hand-3",
+    source: "osv",
+    signers: [
+      { initials: "P", tone: "sage", role: "operator", address: "0xFd2EAE…6519" },
+      { initials: "C", tone: "ink", role: "cosigner", address: "0x9A13BC…0cb2" },
+      { initials: "V", tone: "blue", role: "verifier", address: "0x4D1E…7EbC" },
+    ],
+    policy: "security/osv-deps@v1",
+    size: "11.8 KB",
+    signedAt: "14:09:52 UTC",
+  },
+  {
+    id: "r_4e144",
+    kind: "run",
+    subject: "run-2752",
+    subjectSub: "writer-gov-1",
+    source: "data_gov",
+    signers: [
+      { initials: "P", tone: "sage", role: "operator", address: "0xFd2EAE…6519" },
+      { initials: "V", tone: "blue", role: "verifier", address: "0x4D1E…7EbC" },
+    ],
+    policy: "data/open-data-audit@v1",
+    size: "9.1 KB",
+    signedAt: "14:09:21 UTC",
   },
   {
     id: "r_4e139",
@@ -347,6 +377,7 @@ export default function ReceiptsPage() {
               style={{ letterSpacing: 0 }}
             >
               <KindChip kind={selected.kind} />
+              {selected.source ? <SourceBadge kind={selected.source} /> : null}
               <span className="text-[var(--avy-ink)]">{selected.policy}</span>
               <span>·</span>
               <span>{selected.issuedAtIso ? receiptDate(selected.issuedAtIso) : "2026-04-24"} · {selected.signedAt}</span>
@@ -361,6 +392,7 @@ export default function ReceiptsPage() {
             evidenceMeta={drawerModel.evidenceMeta}
             evidenceRawHref={drawerModel.evidenceRawHref}
             links={drawerModel.links}
+            source={drawerModel.source}
           />
         ) : null}
       </DetailDrawer>
