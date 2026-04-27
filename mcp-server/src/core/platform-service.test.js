@@ -188,7 +188,9 @@ test("getAdminStatus surfaces public source ingestion scheduler status", async (
         running: true,
         dryRun: true,
         intervalMs: 3600000,
-        packageCount: 1,
+        packageCount: 0,
+        manifestCount: 1,
+        targetCount: 1,
         maxJobsPerRun: 2,
         maxOpenJobs: 20,
         currentOpenJobs: 2,
@@ -245,7 +247,9 @@ test("getAdminStatus surfaces public source ingestion scheduler status", async (
   };
 
   const status = await service.getAdminStatus();
-  assert.equal(status.osvIngestion.packageCount, 1);
+  assert.equal(status.osvIngestion.packageCount, 0);
+  assert.equal(status.osvIngestion.manifestCount, 1);
+  assert.equal(status.osvIngestion.targetCount, 1);
   assert.equal(status.openDataIngestion.query, "res_format:CSV");
   assert.equal(status.openDataIngestion.lastRun.createdCount, 2);
   assert.equal(status.standardsIngestion.specCount, 2);
@@ -256,6 +260,7 @@ test("getAdminStatus surfaces public source ingestion scheduler status", async (
   assert.equal(status.providerOperations.github.lastRun.createdCount, 1);
   assert.equal(status.providerOperations.github.lastRun.skippedCount, 1);
   assert.equal(status.providerOperations.github.lastRun.skipped[0].reason, "source_already_ingested");
+  assert.equal(status.providerOperations.osv.targetCount, 1);
   assert.equal(status.providerOperations.openData.mode, "live");
   assert.equal(status.providerOperations.openData.health, "healthy");
   assert.equal(status.providerOperations.openData.targetCount, 3);

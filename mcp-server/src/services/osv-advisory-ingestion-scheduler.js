@@ -56,6 +56,7 @@ export class OsvAdvisoryIngestionScheduler {
       intervalMs: this.intervalMs,
       packageCount: this.packages.length,
       manifestCount: this.manifests.length,
+      targetCount: this.packages.length || this.manifests.length,
       minScore: this.minScore,
       maxJobsPerRun: this.maxJobsPerRun,
       maxPackageTargets: this.maxPackageTargets,

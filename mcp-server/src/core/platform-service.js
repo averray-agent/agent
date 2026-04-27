@@ -21,7 +21,7 @@ const STARTER_REPUTATION = {
 const INGESTION_PROVIDER_DEFINITIONS = [
   ["github", "githubIngestion", "GitHub issues", "queryCount"],
   ["wikipedia", "wikipediaIngestion", "Wikipedia maintenance", "categoryCount"],
-  ["osv", "osvIngestion", "OSV advisories", "packageCount"],
+  ["osv", "osvIngestion", "OSV advisories", "targetCount"],
   ["openData", "openDataIngestion", "Open data", "targetCount"],
   ["standards", "standardsIngestion", "Standards freshness", "specCount"],
   ["openApi", "openApiIngestion", "OpenAPI quality", "specCount"]

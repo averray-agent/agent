@@ -111,7 +111,9 @@ test("OsvAdvisoryIngestionScheduler can source targets from manifests", async ()
   const summary = await scheduler.runOnce(new Date("2026-04-26T10:00:00.000Z"));
   assert.equal(summary.createdCount, 1);
   assert.equal(platform.listJobs()[0].source.packageName, "minimist");
-  assert.equal((await scheduler.getStatus()).manifestCount, 1);
+  const status = await scheduler.getStatus();
+  assert.equal(status.manifestCount, 1);
+  assert.equal(status.targetCount, 1);
 });
 
 test("OsvAdvisoryIngestionScheduler prefers explicit packages over manifests", async () => {
@@ -131,6 +133,10 @@ test("OsvAdvisoryIngestionScheduler prefers explicit packages over manifests", a
 
   const summary = await scheduler.runOnce(new Date("2026-04-26T10:00:00.000Z"));
   assert.equal(summary.createdCount, 1);
+  const status = await scheduler.getStatus();
+  assert.equal(status.packageCount, 1);
+  assert.equal(status.manifestCount, 1);
+  assert.equal(status.targetCount, 1);
 });
 
 test("OsvAdvisoryIngestionScheduler dedupes by advisory package target", async () => {
