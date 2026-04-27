@@ -18,6 +18,7 @@ import { pathToFileURL } from "node:url";
 export const DEFAULT_BASE_URL = "http://localhost:8787";
 export const DEFAULT_ECOSYSTEM = "npm";
 export const OSV_QUERY_BATCH_URL = "https://api.osv.dev/v1/querybatch";
+export const OSV_VULN_URL = "https://api.osv.dev/v1/vulns";
 
 const ECOSYSTEMS = new Set(["npm"]);
 
@@ -58,15 +59,16 @@ export async function ingestOsvAdvisories({
   const skipped = [];
   const candidates = [];
 
-  targets.forEach((target, index) => {
+  for (const [index, target] of targets.entries()) {
     const vulns = results[index]?.vulns ?? [];
     if (!vulns.length) {
       skipped.push({ package: target.name, version: target.version, reason: "no_vulnerabilities" });
-      return;
+      continue;
     }
     for (const advisory of vulns) {
-      const fixedVersion = findFixedVersion(advisory, target);
-      const score = scoreAdvisory(advisory, { fixedVersion });
+      const hydratedAdvisory = await hydrateAdvisoryIfNeeded({ advisory, target, fetchImpl });
+      const fixedVersion = findFixedVersion(hydratedAdvisory, target);
+      const score = scoreAdvisory(hydratedAdvisory, { fixedVersion });
       if (!fixedVersion) {
         skipped.push({ package: target.name, version: target.version, advisoryId: advisory.id, reason: "no_fixed_version" });
         continue;
@@ -75,9 +77,9 @@ export async function ingestOsvAdvisories({
         skipped.push({ package: target.name, version: target.version, advisoryId: advisory.id, reason: "below_min_score", score });
         continue;
       }
-      candidates.push({ target, advisory, fixedVersion, score });
+      candidates.push({ target, advisory: hydratedAdvisory, fixedVersion, score });
     }
-  });
+  }
 
   const jobs = candidates
     .sort((left, right) => right.score - left.score)
@@ -121,6 +123,31 @@ export async function queryOsvBatch({ packages, fetchImpl = fetch }) {
   }
   const payload = await response.json();
   return payload.results ?? [];
+}
+
+export async function queryOsvVulnerability({ advisoryId, fetchImpl = fetch }) {
+  const response = await fetchImpl(`${OSV_VULN_URL}/${encodeURIComponent(advisoryId)}`, {
+    headers: {
+      accept: "application/json",
+      "user-agent": "AverrayOsvIngest/0.1 (https://averray.com; operator@averray.com)"
+    }
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`OSV vulnerability lookup failed (${response.status}): ${body}`);
+  }
+  return response.json();
+}
+
+async function hydrateAdvisoryIfNeeded({ advisory, target, fetchImpl }) {
+  if (findFixedVersion(advisory, target) || !advisory?.id) {
+    return advisory;
+  }
+  try {
+    return await queryOsvVulnerability({ advisoryId: advisory.id, fetchImpl });
+  } catch {
+    return advisory;
+  }
 }
 
 export function parsePackages(raw) {
@@ -305,11 +332,49 @@ export function findFixedVersion(advisory, target) {
     if (String(pkg.name ?? "") !== target.name) continue;
     for (const range of entry.ranges ?? []) {
       for (const event of range.events ?? []) {
-        if (event.fixed) fixed.push(String(event.fixed));
+        fixed.push(...extractVersionStrings(event.fixed));
       }
     }
+    fixed.push(...extractFixedVersionsFromMetadata(entry.database_specific));
+    fixed.push(...extractFixedVersionsFromMetadata(entry.ecosystem_specific));
   }
+  fixed.push(...extractFixedVersionsFromMetadata(advisory.database_specific));
   return fixed.sort(compareSemverish)[0];
+}
+
+function extractFixedVersionsFromMetadata(metadata) {
+  if (!metadata || typeof metadata !== "object") {
+    return [];
+  }
+  return [
+    ...extractVersionStrings(metadata.fixed_version),
+    ...extractVersionStrings(metadata.fixedVersion),
+    ...extractVersionStrings(metadata.fixed_versions),
+    ...extractVersionStrings(metadata.fixedVersions),
+    ...extractVersionStrings(metadata.all_fixed_versions),
+    ...extractVersionStrings(metadata.allFixedVersions),
+    ...extractVersionStrings(metadata.upstream_version),
+    ...extractVersionStrings(metadata.upstreamVersion),
+    ...extractVersionStrings(metadata.root_patch_version),
+    ...extractVersionStrings(metadata.rootPatchVersion)
+  ];
+}
+
+function extractVersionStrings(value) {
+  if (Array.isArray(value)) {
+    return value.flatMap(extractVersionStrings);
+  }
+  if (value === undefined || value === null) {
+    return [];
+  }
+  return String(value)
+    .split(/[,;\s]+/u)
+    .map((version) => version.trim())
+    .filter(isSemverish);
+}
+
+function isSemverish(value) {
+  return /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/u.test(value);
 }
 
 function compareSemverish(left, right) {

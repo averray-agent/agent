@@ -5,6 +5,7 @@ import {
   findFixedVersion,
   ingestOsvAdvisories,
   parsePackages,
+  queryOsvVulnerability,
   scoreAdvisory,
   toPlatformJob
 } from "./ingest-osv-advisories.js";
@@ -49,6 +50,40 @@ test("parsePackages accepts JSON and compact line syntax", () => {
 
 test("findFixedVersion extracts the first npm fixed release", () => {
   assert.equal(findFixedVersion(ADVISORY, TARGET), "1.2.3");
+});
+
+test("findFixedVersion falls back to advisory metadata fixed versions", () => {
+  const advisory = {
+    ...ADVISORY,
+    affected: [
+      {
+        package: { ecosystem: "npm", name: "minimist" },
+        ranges: [{ type: "SEMVER", events: [{ introduced: "0" }] }],
+        database_specific: {
+          all_fixed_versions: ["1.2.6", "1.2.5"]
+        }
+      }
+    ]
+  };
+
+  assert.equal(findFixedVersion(advisory, TARGET), "1.2.5");
+});
+
+test("findFixedVersion reads Snyk/root-style advisory fixed metadata", () => {
+  const advisory = {
+    ...ADVISORY,
+    affected: [
+      {
+        package: { ecosystem: "npm", name: "minimist" },
+        ranges: [{ type: "SEMVER", events: [{ introduced: "0" }] }],
+        database_specific: {
+          upstream_version: "1.2.8-root.io.1"
+        }
+      }
+    ]
+  };
+
+  assert.equal(findFixedVersion(advisory, TARGET), "1.2.8-root.io.1");
 });
 
 test("scoreAdvisory prefers fixed CVE-backed advisories", () => {
@@ -98,28 +133,73 @@ test("ingestOsvAdvisories queries OSV and filters jobs", async () => {
   assert.equal(payload.skipped.length, 0);
 });
 
+test("ingestOsvAdvisories hydrates sparse querybatch advisories before filtering", async () => {
+  const urls = [];
+  const payload = await ingestOsvAdvisories({
+    packages: [TARGET],
+    limit: 5,
+    minScore: 55,
+    fetchImpl: async (url, request = {}) => {
+      urls.push(String(url));
+      if (request.method === "POST") {
+        return {
+          ok: true,
+          async json() {
+            return { results: [{ vulns: [{ id: ADVISORY.id, summary: ADVISORY.summary }] }] };
+          }
+        };
+      }
+      return {
+        ok: true,
+        async json() {
+          return ADVISORY;
+        }
+      };
+    }
+  });
+
+  assert.equal(payload.count, 1);
+  assert.equal(payload.jobs[0].source.fixedVersion, "1.2.3");
+  assert.ok(urls.some((url) => url.endsWith(`/vulns/${ADVISORY.id}`)));
+});
+
 test("ingestOsvAdvisories skips advisories without a fixed version", async () => {
   const payload = await ingestOsvAdvisories({
     packages: [TARGET],
-    fetchImpl: async () => ({
-      ok: true,
-      async json() {
-        return {
-          results: [
-            {
-              vulns: [
-                {
-                  ...ADVISORY,
-                  affected: [{ package: { ecosystem: "npm", name: "minimist" }, ranges: [{ events: [{ introduced: "0" }] }] }]
-                }
-              ]
-            }
-          ]
-        };
-      }
-    })
+    fetchImpl: async (_url, request = {}) => {
+      const advisory = {
+        ...ADVISORY,
+        affected: [{ package: { ecosystem: "npm", name: "minimist" }, ranges: [{ events: [{ introduced: "0" }] }] }]
+      };
+      return {
+        ok: true,
+        async json() {
+          return request.method === "POST"
+            ? { results: [{ vulns: [advisory] }] }
+            : advisory;
+        }
+      };
+    }
   });
 
   assert.equal(payload.count, 0);
   assert.equal(payload.skipped[0].reason, "no_fixed_version");
+});
+
+test("queryOsvVulnerability fetches the full advisory document", async () => {
+  const advisory = await queryOsvVulnerability({
+    advisoryId: ADVISORY.id,
+    fetchImpl: async (url, request = {}) => {
+      assert.equal(String(url), `https://api.osv.dev/v1/vulns/${ADVISORY.id}`);
+      assert.equal(request.headers.accept, "application/json");
+      return {
+        ok: true,
+        async json() {
+          return ADVISORY;
+        }
+      }
+    }
+  });
+
+  assert.equal(advisory.id, ADVISORY.id);
 });
