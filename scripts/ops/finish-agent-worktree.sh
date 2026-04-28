@@ -116,10 +116,12 @@ if ! git show-ref --verify --quiet "refs/heads/$branch"; then
   exit 1
 fi
 
+delete_branch_flag="-d"
 if git merge-base --is-ancestor "$branch" "$REMOTE/$BASE_BRANCH"; then
   echo "$branch is merged into $REMOTE/$BASE_BRANCH"
 elif branch_has_merged_pr; then
   echo "$branch has a merged GitHub pull request"
+  delete_branch_flag="-D"
 else
   echo "Refusing to delete $branch because it is not merged into $REMOTE/$BASE_BRANCH and no merged GitHub PR was found" >&2
   exit 1
@@ -144,7 +146,7 @@ if [[ -n "$worktree_path" ]]; then
 fi
 
 echo "Deleting local branch $branch"
-git branch -d "$branch"
+git branch "$delete_branch_flag" "$branch"
 
 if [[ "$DELETE_REMOTE" == "1" ]] && git show-ref --verify --quiet "refs/remotes/$REMOTE/$branch"; then
   echo "Deleting remote branch $REMOTE/$branch"
