@@ -12,6 +12,8 @@ INDEXER_URL=${INDEXER_URL:-https://index.averray.com/}
 INDEXER_READY_URL=${INDEXER_READY_URL:-https://index.averray.com/ready}
 INDEXER_STATUS_URL=${INDEXER_STATUS_URL:-https://index.averray.com/status}
 INDEXER_MAX_STALENESS_SEC=${INDEXER_MAX_STALENESS_SEC:-1800}
+INDEXER_RETRY_ATTEMPTS=${INDEXER_RETRY_ATTEMPTS:-12}
+INDEXER_RETRY_SLEEP_SEC=${INDEXER_RETRY_SLEEP_SEC:-5}
 TIMEOUT_SEC=${TIMEOUT_SEC:-20}
 APP_BASIC_AUTH_USER=${APP_BASIC_AUTH_USER:-}
 APP_BASIC_AUTH_PASSWORD=${APP_BASIC_AUTH_PASSWORD:-}
@@ -45,6 +47,29 @@ fetch_admin_json() {
     "$url"
 }
 
+fetch_indexer_with_retries() {
+  local label="$1"
+  local url="$2"
+  local attempt=1
+  local output=""
+
+  while (( attempt <= INDEXER_RETRY_ATTEMPTS )); do
+    if output="$(fetch "$url")"; then
+      printf '%s' "$output"
+      return 0
+    fi
+    if (( attempt == INDEXER_RETRY_ATTEMPTS )); then
+      break
+    fi
+    echo "$label check failed on attempt $attempt/$INDEXER_RETRY_ATTEMPTS; retrying in ${INDEXER_RETRY_SLEEP_SEC}s." >&2
+    sleep "$INDEXER_RETRY_SLEEP_SEC"
+    attempt=$((attempt + 1))
+  done
+
+  echo "$label check failed after $INDEXER_RETRY_ATTEMPTS attempt(s)." >&2
+  return 1
+}
+
 echo "Checking public site"
 public_html="$(fetch "$PUBLIC_SITE_URL")"
 grep -q "<title>Averray" <<<"$public_html" || {
@@ -75,14 +100,14 @@ jq -e '.name | length > 0' >/dev/null <<<"$onboarding_json"
 jq -e '.protocols | index("http") != null' >/dev/null <<<"$onboarding_json"
 
 echo "Checking indexer root"
-indexer_json="$(fetch "$INDEXER_URL")"
+indexer_json="$(fetch_indexer_with_retries "Indexer root" "$INDEXER_URL")"
 jq -e '.status == "ok"' >/dev/null <<<"$indexer_json"
 
 echo "Checking indexer readiness"
-fetch "$INDEXER_READY_URL" >/dev/null
+fetch_indexer_with_retries "Indexer readiness" "$INDEXER_READY_URL" >/dev/null
 
 echo "Checking indexer status freshness"
-indexer_status_json="$(fetch "$INDEXER_STATUS_URL")"
+indexer_status_json="$(fetch_indexer_with_retries "Indexer status" "$INDEXER_STATUS_URL")"
 jq -e 'type == "object" and (keys | length) > 0' >/dev/null <<<"$indexer_status_json"
 jq -e 'to_entries[0].value.block.number > 0' >/dev/null <<<"$indexer_status_json"
 jq -e --argjson maxAge "$INDEXER_MAX_STALENESS_SEC" '
