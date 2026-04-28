@@ -135,7 +135,7 @@ cd /path/to/agent
 PROFILE=testnet \
 RPC_URL=https://eth-rpc-testnet.polkadot.io/ \
 PRIVATE_KEY=0x<deployer-testnet-key> \
-TOKEN_ADDRESS=0x<hub-dot-precompile-or-testdot> \
+TOKEN_ADDRESS=0x<approved-asset-precompile-or-test-token> \
 OWNER=0x<multisig-mapped-evm>    \
 PAUSER=0x<hot-key-evm>           \
 VERIFIER=0x<verifier-evm>        \
@@ -145,6 +145,12 @@ ARBITRATOR=0x<arbitrator-evm>    \
 
 The deploy script transfers ownership to `OWNER` as the last step. After
 ownership transfer the deployer key can no longer touch admin ops.
+
+`TOKEN_ADDRESS` is a launch gate. There is no native DOT ERC20 precompile on
+Polkadot Hub. For local `dev`, the deploy script mints MockDOT automatically
+when this value is omitted. For `testnet` and `mainnet`, use an explicitly
+verified ERC20 asset precompile or a deliberate test token; do not use a
+placeholder native-DOT precompile address.
 
 ### 5b. Verify the wiring
 

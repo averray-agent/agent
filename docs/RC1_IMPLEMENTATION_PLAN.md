@@ -22,7 +22,7 @@ indexer, frontend, and docs work.
 
 The shortest path to a coherent rc1 launch is:
 
-1. Reconcile the contract architecture with the v1.4 spec.
+1. Reconcile the contract architecture with the v1.10 spec.
 2. Make dispute deadlines and arbitration SLA enforceable on-chain.
 3. Wire backend/indexer/operator dispute handling to the on-chain dispute path.
 4. Ship content-addressed storage and disclosure reads.
@@ -34,8 +34,9 @@ The shortest path to a coherent rc1 launch is:
 
 ## Current Position
 
-As of this branch, **slice 9: Backend SCALE Assembler** is implemented and
-ready for review.
+As of this branch, **slice 9: Backend SCALE Assembler** is merged and deployed.
+The next implementation slice is **slice 10: Native XCM Observer Correlation
+Gate**.
 
 Completed and deployed in this lane:
 
@@ -58,7 +59,7 @@ Completed and deployed in this lane:
 Still open in the broader rc1 path:
 
 - scheduler/email hardening for weekly reports after enough real jobs exist
-- backend SCALE assembler and native XCM observer correlation in later slices
+- native XCM observer correlation and staging evidence
 
 ## PR Slices
 
@@ -79,7 +80,7 @@ Still open in the broader rc1 path:
 
 ### 1. Contract Architecture Reconciliation
 
-**Goal:** align the deployed rc1 backbone code with v1.4's target architecture:
+**Goal:** align the deployed rc1 backbone code with the target architecture:
 one new `DiscoveryRegistry`, verifier history inside the existing policy role
 surface, and disclosure events on the existing session lifecycle surface.
 
@@ -287,8 +288,8 @@ logic.
 
 1. Land slice 0 immediately.
 2. Do slice 1 before adding more contract features, because it removes the
-   architecture mismatch between the current rc1 backbone and the v1.4 spec.
+   architecture mismatch between the initial rc1 backbone and the target spec.
 3. Do slice 2 next; dispute windows and SLA prevent locked-value edge cases.
 4. Do slice 3 so the operator flow uses the actual on-chain state machine.
-5. Defer XCM implementation slices until the contract/dispute backbone is
-   coherent and content receipts are stable.
+5. Do slice 10 before any vDOT mainnet allocation: the assembler is shipped,
+   but Bifrost reply-leg correlation still needs staging proof.

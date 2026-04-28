@@ -15,8 +15,8 @@ Pillar 2 of [docs/AGENT_BANKING.md](../AGENT_BANKING.md).
 
 The vDOT adapter is the canonical first strategy: take DOT, stake it via
 Bifrost's liquid-staking primitive, earn Polkadot staking yield (roughly
-11–14% APY at time of writing), redeem DOT at the accrued rate when the
-agent withdraws.
+5–6% base APY at time of writing; verify current Bifrost docs before launch),
+redeem DOT at the accrued rate when the agent withdraws.
 
 Key properties for the platform:
 

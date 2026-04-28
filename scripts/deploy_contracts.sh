@@ -21,7 +21,9 @@
 #   PROFILE                 dev | testnet | mainnet   (default: dev)
 #   RPC_URL                 RPC endpoint               (default: http://127.0.0.1:8545)
 #   PRIVATE_KEY             deployer key               (required for testnet/mainnet)
-#   TOKEN_ADDRESS           DOT precompile / real ERC20 (required for testnet/mainnet)
+#   TOKEN_ADDRESS           approved ERC20 asset precompile / test token
+#                           (required for testnet/mainnet; native DOT is not
+#                           exposed via an ERC20 precompile)
 #   OWNER                   multisig mapped EVM address (defaults to deployer on dev)
 #   PAUSER                  hot-key pauser EOA          (defaults to deployer)
 #   VERIFIER                backend verifier signer EOA (defaults to deployer on dev)
@@ -94,7 +96,7 @@ case "$PROFILE" in
   testnet|mainnet)
     [[ -n "${PRIVATE_KEY:-}" ]] || fail "PRIVATE_KEY is required for PROFILE=$PROFILE"
     [[ "$PRIVATE_KEY" != "$ANVIL_TEST_KEY" ]] || fail "refusing to use Anvil test key for PROFILE=$PROFILE"
-    [[ -n "${TOKEN_ADDRESS:-}" ]] || fail "TOKEN_ADDRESS is required for PROFILE=$PROFILE (set it to the DOT precompile / real ERC20)"
+    [[ -n "${TOKEN_ADDRESS:-}" ]] || fail "TOKEN_ADDRESS is required for PROFILE=$PROFILE (set it to an approved ERC20 asset precompile or deliberate test token; native DOT is not exposed via an ERC20 precompile)"
     ;;
   *)
     fail "unknown PROFILE: $PROFILE (expected dev|testnet|mainnet)"
