@@ -166,6 +166,9 @@ test("loadGithubIssueIngestionConfig parses env knobs safely", () => {
     GITHUB_INGEST_MAX_JOBS_PER_RUN: "3",
     GITHUB_INGEST_MAX_JOBS_PER_QUERY: "2",
     GITHUB_INGEST_MAX_OPEN_JOBS: "12",
+    GITHUB_INGEST_OPEN_PR_CAP: "4",
+    GITHUB_INGEST_POLICY_SCAN_ENABLED: "true",
+    GITHUB_INGEST_DENYLIST_REPOS: "example/project",
     GITHUB_INGEST_QUERIES_JSON: '["q1","q2"]',
     GITHUB_TOKEN: "ghp_test"
   });
@@ -177,6 +180,9 @@ test("loadGithubIssueIngestionConfig parses env knobs safely", () => {
   assert.equal(config.maxJobsPerRun, 3);
   assert.equal(config.maxJobsPerQuery, 2);
   assert.equal(config.maxOpenJobs, 12);
+  assert.equal(config.openPrCap, 4);
+  assert.equal(config.scanRepoPolicies, true);
+  assert.ok(config.denylistRepos.includes("example/project"));
   assert.deepEqual(config.queries, ["q1", "q2"]);
   assert.equal(config.githubToken, "ghp_test");
 });

@@ -57,6 +57,9 @@ test("toPlatformJob preserves GitHub issue context as job metadata", () => {
   assert.ok(job.agentInstructions.some((entry) => entry.includes(GOOD_ISSUE.html_url)));
   assert.equal(job.verifierMode, "github_pr");
   assert.equal(job.outputSchemaRef, "schema://jobs/github-pr-evidence-output");
+  assert.ok(job.agentInstructions.some((entry) => entry.includes("Averray disclosure footer")));
+  assert.ok(job.disclosureFooterTemplate.includes("Averray platform"));
+  assert.equal(job.source.maintainerPolicy.openPrCap, 3);
   assert.deepEqual(job.verification.signals, [
     "attempted",
     "pr_opened",
@@ -66,6 +69,59 @@ test("toPlatformJob preserves GitHub issue context as job metadata", () => {
     "maintainer_approved",
     "merged"
   ]);
+});
+
+test("ingestGithubIssues skips denylisted repos", async () => {
+  const payload = await ingestGithubIssues({
+    query: "is:issue is:open label:good-first-issue",
+    limit: 5,
+    minScore: 55,
+    maintainerPolicy: {
+      denylistRepos: ["example/project"]
+    },
+    fetchImpl: async () => ({
+      ok: true,
+      async json() {
+        return { items: [GOOD_ISSUE] };
+      }
+    })
+  });
+
+  assert.equal(payload.count, 0);
+  assert.equal(payload.jobs.length, 0);
+  assert.equal(payload.skippedDetails[0].reason, "repo_denylisted");
+});
+
+test("ingestGithubIssues scans repository policy files when enabled", async () => {
+  const payload = await ingestGithubIssues({
+    query: "is:issue is:open label:good-first-issue",
+    limit: 5,
+    minScore: 55,
+    maintainerPolicy: {
+      denylistRepos: [],
+      scanRepoPolicies: true
+    },
+    fetchImpl: async (url) => {
+      if (String(url).includes("/search/issues")) {
+        return {
+          ok: true,
+          async json() {
+            return { items: [GOOD_ISSUE] };
+          }
+        };
+      }
+      return {
+        status: String(url).includes("CONTRIBUTING.md") ? 200 : 404,
+        ok: String(url).includes("CONTRIBUTING.md"),
+        async text() {
+          return "Please do not submit AI generated pull requests.";
+        }
+      };
+    }
+  });
+
+  assert.equal(payload.count, 0);
+  assert.equal(payload.skippedDetails[0].reason, "repo_ai_policy_denies_agent_contributions");
 });
 
 test("ingestGithubIssues returns dry-run shaped jobs and filters pull requests", async () => {

@@ -32,6 +32,7 @@ const BUILTIN_JOB_SCHEMAS = new Map([
       summary: stringSchema({ minLength: 1 }),
       tests: stringSchema({ minLength: 1 }),
       notes: stringSchema(),
+      prBody: stringSchema(),
       issueNumber: integerSchema({ minimum: 1 }),
       issueUrl: stringSchema(),
       commitUrl: stringSchema(),

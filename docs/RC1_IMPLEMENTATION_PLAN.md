@@ -203,15 +203,18 @@ if new events are indexed.
 
 ### 7. Maintainer-Surface Controls
 
+**Status:** in progress; backend intake/submission/verifier foundations are
+implemented in this slice.
+
 **Goal:** reduce external ecosystem risk before public job sourcing scales.
 
 **Changes:**
 
-- Add denylist with security/standards seeds.
-- Add CONTRIBUTING/AI-policy scanner for repo intake.
-- Enforce per-repo open PR cap of 3.
-- Inject non-removable disclosure footer into PR/edit bodies.
-- Implement "respect the no" denylist workflow.
+- [x] Add denylist with security/standards seeds.
+- [x] Add CONTRIBUTING/AI-policy scanner for repo intake.
+- [x] Enforce per-repo open PR cap of 3.
+- [x] Inject non-removable disclosure footer into PR/edit bodies.
+- [x] Implement "respect the no" denylist workflow.
 
 **Checks:** `npm --workspace mcp-server test`, frontend checks if operator UI
 surfaces controls.

@@ -1,6 +1,12 @@
 #!/usr/bin/env node
 
 import { pathToFileURL } from "node:url";
+import {
+  DEFAULT_OPEN_PR_CAP_PER_REPO,
+  buildAverrayDisclosureFooter,
+  evaluateMaintainerSurfaceForIssue,
+  repoFromIssue
+} from "../core/maintainer-surface-policy.js";
 
 /**
  * Ingest agent-suitable GitHub issues into the Agent Platform job catalog.
@@ -63,7 +69,8 @@ export async function ingestGithubIssues({
   limit = 10,
   minScore = 55,
   githubToken = undefined,
-  fetchImpl = fetch
+  fetchImpl = fetch,
+  maintainerPolicy = {}
 } = {}) {
   const issues = await searchIssues({
     query,
@@ -71,19 +78,38 @@ export async function ingestGithubIssues({
     githubToken,
     fetchImpl
   });
-  const candidates = issues
-    .map((issue) => ({ issue, score: scoreIssue(issue) }))
-    .filter(({ score }) => score >= minScore)
+  const scored = await Promise.all(issues.map(async (issue) => {
+    const policy = await evaluateMaintainerSurfaceForIssue(issue, {
+      githubToken,
+      fetchImpl,
+      ...maintainerPolicy
+    });
+    return { issue, score: scoreIssue(issue), policy };
+  }));
+  const skippedDetails = scored
+    .filter(({ score, policy }) => score < minScore || !policy.allowed)
+    .map(({ issue, score, policy }) => ({
+      repo: policy.repo ?? repoFromIssue(issue),
+      issueNumber: Number(issue.number),
+      reason: policy.allowed ? "score_below_minimum" : policy.reason,
+      score
+    }));
+  const candidates = scored
+    .filter(({ score, policy }) => score >= minScore && policy.allowed)
     .sort((left, right) => right.score - left.score)
     .slice(0, limit);
-  const jobs = candidates.map(({ issue, score }) => toPlatformJob(issue, score));
+  const jobs = candidates.map(({ issue, score, policy }) => toPlatformJob(issue, score, {
+    maintainerPolicy: policy,
+    openPrCap: maintainerPolicy.openPrCap ?? DEFAULT_OPEN_PR_CAP_PER_REPO
+  }));
 
   return {
     query,
     minScore,
     count: jobs.length,
     jobs,
-    skipped: issues.length - candidates.length
+    skipped: issues.length - candidates.length,
+    skippedDetails
   };
 }
 
@@ -134,7 +160,10 @@ export function scoreIssue(issue) {
   return Math.max(0, score);
 }
 
-export function toPlatformJob(issue, score = scoreIssue(issue)) {
+export function toPlatformJob(issue, score = scoreIssue(issue), {
+  maintainerPolicy = undefined,
+  openPrCap = DEFAULT_OPEN_PR_CAP_PER_REPO
+} = {}) {
   const repo = repoFullName(issue);
   const issueNumber = Number(issue.number);
   const issueUrl = String(issue.html_url ?? `https://github.com/${repo}/issues/${issueNumber}`);
@@ -174,7 +203,13 @@ export function toPlatformJob(issue, score = scoreIssue(issue)) {
       score,
       comments: Number(issue.comments ?? 0),
       locked: Boolean(issue.locked),
-      body: summariseIssueBody(body)
+      body: summariseIssueBody(body),
+      maintainerPolicy: {
+        repoDenied: false,
+        disclosureRequired: true,
+        openPrCap,
+        scannedPaths: maintainerPolicy?.policyScan?.scannedPaths ?? []
+      }
     },
     acceptanceCriteria,
     estimatedDifficulty: estimateDifficulty(score),
@@ -182,8 +217,10 @@ export function toPlatformJob(issue, score = scoreIssue(issue)) {
       `Read ${issueUrl} before changing code.`,
       "Keep the patch minimal and focused on the issue.",
       "Run the relevant tests or docs build before submitting.",
+      "Append the Averray disclosure footer to the PR body before opening it.",
       "Submit structured evidence with prUrl, summary, tests, and notes when work is ready."
     ],
+    disclosureFooterTemplate: buildAverrayDisclosureFooter(),
     verification: {
       method: "github_pr",
       suggestedCheck: verificationMethod,

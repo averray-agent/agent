@@ -245,7 +245,7 @@ function findGithubPullRequestUrl(text) {
   return String(text ?? "").match(/https:\/\/github\.com\/[a-z0-9_.-]+\/[a-z0-9_.-]+\/pull\/\d+/iu)?.[0] ?? "";
 }
 
-function parseGithubPullRequestUrl(url) {
+export function parseGithubPullRequestUrl(url) {
   const match = String(url ?? "").trim().match(/^https:\/\/github\.com\/([a-z0-9_.-]+)\/([a-z0-9_.-]+)\/pull\/(\d+)(?:[/?#].*)?$/iu);
   if (!match) return undefined;
   return {

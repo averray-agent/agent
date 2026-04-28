@@ -134,3 +134,38 @@ test("claimJob records onboarding waiver and claim fee economics on sessions", a
   assert.equal(paid.claimFee, 0.1);
   assert.equal(paid.totalClaimLock, 0.6);
 });
+
+test("submitWork enforces per-repo open PR cap for GitHub issue jobs", async () => {
+  const stateStore = new MemoryStateStore();
+  for (let index = 0; index < 3; index++) {
+    await stateStore.upsertFundedJob({
+      jobId: `existing-${index}`,
+      finalStatus: "open",
+      upstream: {
+        kind: "github_pull_request",
+        repo: "example/project",
+        pullNumber: index + 1
+      }
+    });
+  }
+  const job = makeJob({
+    id: "github-issue-job-001",
+    outputSchemaRef: "schema://jobs/github-pr-evidence-output",
+    source: {
+      type: "github_issue",
+      repo: "example/project",
+      issueNumber: 42
+    }
+  });
+  const service = new JobExecutionService(stateStore, undefined, () => job);
+  const claimed = await service.claimJob(WALLET, job.id, "http", "idemp-cap");
+
+  await assert.rejects(
+    () => service.submitWork(claimed.sessionId, "http", {
+      prUrl: "https://github.com/example/project/pull/4",
+      summary: "Adds the requested parser regression test.",
+      tests: "npm test"
+    }),
+    (error) => error.code === "maintainer_open_pr_cap_reached"
+  );
+});

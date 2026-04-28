@@ -1,4 +1,5 @@
 import { extractSubmissionText } from "../core/submission.js";
+import { hasAverrayDisclosureFooter } from "../core/maintainer-surface-policy.js";
 
 const HANDLER_VERSION = 1;
 
@@ -95,6 +96,7 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
       const issueReferenceRequired = job.verifierConfig?.requireIssueReference !== false;
       const testEvidenceRequired = job.verifierConfig?.requireTestEvidence !== false;
       const acceptMergedAsApproved = job.verifierConfig?.acceptMergedAsApproved !== false;
+      const disclosureRequired = job.source?.maintainerPolicy?.disclosureRequired === true;
       const submittedIssueReferenced = referencesIssue({
         structured,
         normalized,
@@ -105,6 +107,8 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
       const submittedChecksPassing = structured.checksPassing === true || structured.ciStatus === "passing";
       const submittedReviewApproved = structured.reviewApproved === true;
       const submittedMerged = structured.merged === true;
+      const submittedPrBody = firstNonEmptyString(structured.prBody, structured.pullRequestBody);
+      const submittedDisclosureFooterPresent = hasAverrayDisclosureFooter(submittedPrBody);
       const githubLookup = parsedPr && hasUsableGithubToken(githubToken) && typeof fetchImpl === "function"
         ? await fetchGithubPullRequestSnapshot({
             parsedPr,
@@ -125,6 +129,10 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
       const checksPassing = githubVerified ? githubLookup.checksPassing : submittedChecksPassing;
       const reviewApproved = githubVerified ? githubLookup.reviewApproved : submittedReviewApproved;
       const merged = githubVerified ? githubLookup.merged : submittedMerged;
+      const disclosureFooterObservable = githubVerified || Boolean(submittedPrBody);
+      const disclosureFooterPresent = githubVerified
+        ? githubLookup.disclosureFooterPresent
+        : submittedDisclosureFooterPresent;
       const testEvidenceSubmitted = submittedTestEvidence || checksPassing || merged;
       const summarySubmitted = hasText(structured.summary) || hasText(structured.output) || Boolean(githubLookup.title);
 
@@ -137,7 +145,8 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
         testEvidenceSubmitted,
         checksPassing,
         reviewApproved,
-        merged
+        merged,
+        disclosureFooterPresent: !disclosureRequired || !disclosureFooterObservable || disclosureFooterPresent
       };
       const signals = {
         attempted: true,
@@ -157,6 +166,9 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
       if (!repoMatches) blockers.push(`PR repo must match ${job.source?.repo ?? "the source repo"}`);
       if (issueReferenceRequired && !issueReferenced) blockers.push(`submission must reference issue #${expectedIssueNumber}`);
       if (testEvidenceRequired && !testEvidenceSubmitted && !mergedAccepted) blockers.push("test or docs-build evidence");
+      if (disclosureRequired && disclosureFooterObservable && !disclosureFooterPresent) {
+        blockers.push("Averray disclosure footer");
+      }
 
       const approved = score >= minimumScore && blockers.length === 0;
       return {
@@ -174,7 +186,8 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
           repo: parsedPr?.repo ?? null,
           pullNumber: parsedPr?.pullNumber ?? null,
           expectedRepo: expectedRepo || null,
-          expectedIssueNumber: Number.isFinite(expectedIssueNumber) ? expectedIssueNumber : null
+          expectedIssueNumber: Number.isFinite(expectedIssueNumber) ? expectedIssueNumber : null,
+          disclosureRequired
         },
         githubLookup,
         checks,
@@ -295,6 +308,7 @@ async function fetchGithubPullRequestSnapshot({
       ciStatus: checkSummary.ciStatus,
       reviewApproved: reviewSummary.reviewApproved,
       reviewState: reviewSummary.reviewState,
+      disclosureFooterPresent: hasAverrayDisclosureFooter(body),
       partial: {
         status: statusResult?.status === "rejected" ? "unavailable" : "available",
         checkRuns: checkRunsResult?.status === "rejected" ? "unavailable" : "available",

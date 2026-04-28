@@ -8,9 +8,14 @@ import { hashSubmission, normalizeSubmission } from "./submission.js";
 import { getBuiltinJobSchema, validateStructuredSubmission } from "./job-schema-registry.js";
 import {
   buildFundedJobFromClaim,
+  parseGithubPullRequestUrl,
   updateFundedJobFromSession
 } from "./funded-jobs.js";
 import { computeClaimEconomics, countClaimedSessions } from "./claim-economics.js";
+import {
+  DEFAULT_OPEN_PR_CAP_PER_REPO,
+  countOpenGithubPullRequestsForRepo
+} from "./maintainer-surface-policy.js";
 
 export class JobExecutionService {
   constructor(
@@ -21,7 +26,8 @@ export class JobExecutionService {
     accountMutationService = undefined,
     getDefaultClaimStakeBps = async () => 500,
     getClaimableJobDefinition = getJobDefinition,
-    getClaimEconomicsConfig = async () => ({})
+    getClaimEconomicsConfig = async () => ({}),
+    maintainerSurfaceConfig = {}
   ) {
     this.stateStore = stateStore;
     this.blockchainGateway = blockchainGateway;
@@ -31,6 +37,9 @@ export class JobExecutionService {
     this.accountMutationService = accountMutationService;
     this.getDefaultClaimStakeBps = getDefaultClaimStakeBps;
     this.getClaimEconomicsConfig = getClaimEconomicsConfig;
+    this.openPrCap = Number.isInteger(maintainerSurfaceConfig.openPrCap) && maintainerSurfaceConfig.openPrCap > 0
+      ? maintainerSurfaceConfig.openPrCap
+      : DEFAULT_OPEN_PR_CAP_PER_REPO;
   }
 
   async claimJob(wallet, jobId, protocol, idempotencyKey) {
@@ -144,6 +153,7 @@ export class JobExecutionService {
     if (submission.kind === "structured") {
       validateStructuredSubmission(job.outputSchemaRef, submission.structured, { path: "submission" });
     }
+    await this.enforceMaintainerOpenPrCap(job, submission);
     if (this.blockchainGateway?.isEnabled()) {
       await this.blockchainGateway.submitWork(session.chainJobId ?? session.jobId, hashSubmission(submission));
     }
@@ -257,6 +267,21 @@ export class JobExecutionService {
 
   getClaimLockTtlSeconds(job) {
     return Math.max(60, Math.min(Number(job?.claimTtlSeconds ?? 300), 900));
+  }
+
+  async enforceMaintainerOpenPrCap(job, submission) {
+    if (job?.source?.type !== "github_issue" || submission.kind !== "structured") return;
+    const parsed = parseGithubPullRequestUrl(submission.structured?.prUrl ?? submission.structured?.pullRequestUrl);
+    if (!parsed) return;
+    const repo = job.source.repo ?? parsed.repo;
+    const openCount = await countOpenGithubPullRequestsForRepo(this.stateStore, repo);
+    if (openCount >= this.openPrCap) {
+      throw new ConflictError(
+        `Repository ${repo} already has ${openCount} open Averray pull request submissions.`,
+        "maintainer_open_pr_cap_reached",
+        { repo, openCount, openPrCap: this.openPrCap }
+      );
+    }
   }
 
   isTerminalSession(session) {
