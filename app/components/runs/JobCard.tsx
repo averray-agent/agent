@@ -96,6 +96,26 @@ export function JobCard({ job }: { job: JobCardData }) {
                 </>
               ) : null}
             </p>
+          ) : job.source?.type === "openapi_spec" ? (
+            <p
+              className="mt-1 flex items-center gap-1 font-[family-name:var(--font-mono)] text-[10.5px] text-[var(--avy-muted)]"
+              style={{ letterSpacing: 0 }}
+            >
+              <span className="shrink-0">{job.source.provider}</span>
+              <span className="truncate text-[var(--avy-ink)]">
+                / {job.source.apiTitle}
+              </span>
+            </p>
+          ) : job.source?.type === "standards_spec" ? (
+            <p
+              className="mt-1 flex items-center gap-1 font-[family-name:var(--font-mono)] text-[10.5px] text-[var(--avy-muted)]"
+              style={{ letterSpacing: 0 }}
+            >
+              <span className="shrink-0">{job.source.provider.toUpperCase()}</span>
+              <span className="truncate text-[var(--avy-ink)]">
+                / {job.source.specTitle}
+              </span>
+            </p>
           ) : (
             <p
               className="mt-1 truncate font-[family-name:var(--font-mono)] text-[10.5px] text-[var(--avy-muted)]"
@@ -135,6 +155,10 @@ export function JobCard({ job }: { job: JobCardData }) {
           />
         ) : job.source?.type === "open_data_dataset" ? (
           <SourceBadge kind="data_gov" />
+        ) : job.source?.type === "openapi_spec" ? (
+          <SourceBadge kind="openapi" />
+        ) : job.source?.type === "standards_spec" ? (
+          <SourceBadge kind="standards" />
         ) : null}
         <TierPill tier={job.tier} />
         {job.category ? (

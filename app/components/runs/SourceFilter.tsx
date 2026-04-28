@@ -19,6 +19,8 @@ export type SourceFilter =
   | "wikipedia"
   | "osv"
   | "openData"
+  | "openApi"
+  | "standards"
   | "other";
 
 export interface SourceFilterCount {
@@ -39,6 +41,8 @@ const ALL_KINDS: SourceFilter[] = [
   "wikipedia",
   "osv",
   "openData",
+  "openApi",
+  "standards",
   "other",
 ];
 
@@ -48,6 +52,8 @@ const LABEL: Record<SourceFilter, string> = {
   wikipedia: "Wikipedia",
   osv: "OSV",
   openData: "Data.gov",
+  openApi: "OpenAPI",
+  standards: "Standards",
   other: "Other",
 };
 
@@ -61,6 +67,10 @@ export function rowSourceKind(row: RunRow): SourceFilter {
       return "osv";
     case "open_data_dataset":
       return "openData";
+    case "openapi_spec":
+      return "openApi";
+    case "standards_spec":
+      return "standards";
     default:
       return "other";
   }

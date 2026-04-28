@@ -115,11 +115,70 @@ export interface OpenDataJobSource {
   discoveryApi?: string;
 }
 
+/**
+ * Provenance for runs ingested from a published OpenAPI spec — used by
+ * the platform to audit the OpenAPI quality of its own and partner
+ * APIs. The audit doesn't edit the spec; the worker submits a structured
+ * findings + recommendations report.
+ */
+export interface OpenApiJobSource {
+  type: "openapi_spec";
+  /** Stable identifier for the spec, e.g. "averray-http-api". */
+  specId: string;
+  /** Human title from the OpenAPI document (`info.title`). */
+  apiTitle: string;
+  /** Provider/owner of the API (e.g. "averray", "stripe"). */
+  provider: string;
+  /** Canonical URL of the OpenAPI document. */
+  specUrl: string;
+  /** Final URL after any redirects (the resolved spec). */
+  finalUrl?: string;
+  /** Version reported in `info.version` of the spec. */
+  documentVersion?: string;
+  /** "3.0.0", "3.1.0", … */
+  openapiVersion?: string;
+  /** GitHub-style "owner/repo" hosting the spec, when known. */
+  repo?: string;
+  pathCount?: number;
+  operationCount?: number;
+  schemaCount?: number;
+  score?: number;
+}
+
+/**
+ * Provenance for runs ingested from a published technical standard — W3C
+ * Recommendations, IETF RFCs, etc. The audit checks freshness and
+ * correctness of how Averray references the standard; no edits to the
+ * standard itself.
+ */
+export interface StandardsJobSource {
+  type: "standards_spec";
+  /** Stable identifier for the standard (e.g. "vc-data-model-2.0"). */
+  specId: string;
+  /** Human title (e.g. "Verifiable Credentials Data Model v2.0"). */
+  specTitle: string;
+  /** Standards body / publisher — "w3c", "ietf", "iso", … */
+  provider: string;
+  /** Canonical URL where the spec lives. */
+  specUrl: string;
+  /** Final URL after any redirects. */
+  finalUrl?: string;
+  /** "W3C Recommendation", "Proposed Standard", … */
+  expectedStatus?: string;
+  /** Version reported on the published spec page. */
+  currentVersion?: string;
+  /** GitHub-style "owner/repo" hosting Averray's reference, when known. */
+  repo?: string;
+  score?: number;
+}
+
 export type JobSource =
   | GitHubJobSource
   | WikipediaJobSource
   | OsvJobSource
   | OpenDataJobSource
+  | OpenApiJobSource
+  | StandardsJobSource
   | { type: "native" };
 
 /**

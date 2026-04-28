@@ -99,6 +99,25 @@ function describeSource(row: RunRow): string {
       ].filter((p): p is string => typeof p === "string" && p.length > 0);
       return parts.join(" · ");
     }
+    case "openapi_spec": {
+      const parts = [
+        "OpenAPI",
+        row.source.provider,
+        row.source.apiTitle,
+        row.source.openapiVersion ? `OpenAPI ${row.source.openapiVersion}` : undefined,
+        row.source.documentVersion ? `v${row.source.documentVersion}` : undefined,
+      ].filter((p): p is string => typeof p === "string" && p.length > 0);
+      return parts.join(" · ");
+    }
+    case "standards_spec": {
+      const parts = [
+        "Standards",
+        row.source.provider.toUpperCase(),
+        row.source.specTitle,
+        row.source.expectedStatus,
+      ].filter((p): p is string => typeof p === "string" && p.length > 0);
+      return parts.join(" · ");
+    }
     default:
       return "Native";
   }

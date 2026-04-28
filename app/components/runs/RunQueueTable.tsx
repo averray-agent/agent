@@ -228,6 +228,34 @@ function RunRowCard({
                     {row.jobMeta}
                   </span>
                 </>
+              ) : row.source?.type === "openapi_spec" ? (
+                <>
+                  <SourceBadge kind="openapi" className="shrink-0" />
+                  <span className="truncate">
+                    <span>{row.source.provider}</span>
+                    <span className="text-[var(--avy-accent)]">
+                      {" "}/ {row.source.apiTitle}
+                    </span>
+                  </span>
+                  <span className="shrink-0 opacity-40">·</span>
+                  <span className="shrink-0 truncate whitespace-nowrap">
+                    {row.jobMeta}
+                  </span>
+                </>
+              ) : row.source?.type === "standards_spec" ? (
+                <>
+                  <SourceBadge kind="standards" className="shrink-0" />
+                  <span className="truncate">
+                    <span>{row.source.provider.toUpperCase()}</span>
+                    <span className="text-[var(--avy-accent)]">
+                      {" "}/ {row.source.specTitle}
+                    </span>
+                  </span>
+                  <span className="shrink-0 opacity-40">·</span>
+                  <span className="shrink-0 truncate whitespace-nowrap">
+                    {row.jobMeta}
+                  </span>
+                </>
               ) : (
                 <span className="truncate">{row.jobMeta}</span>
               )}

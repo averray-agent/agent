@@ -46,6 +46,8 @@ const SOURCE_ATTRIBUTION: Record<SourceKind, string> = {
   wikipedia: "Averray proposal — agent never edits Wikipedia",
   osv: "Averray dependency remediation",
   data_gov: "Averray open-data quality audit",
+  openapi: "Averray OpenAPI quality audit",
+  standards: "Averray standards-freshness audit",
   oss: "Open-source contribution",
 };
 

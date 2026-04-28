@@ -253,6 +253,59 @@ export function buildJobSource(job: unknown): JobSource | undefined {
         : {}),
     };
   }
+  if (sourceType === "openapi_spec") {
+    const specId = text(src.specId);
+    const apiTitle = text(src.apiTitle);
+    const provider = text(src.provider);
+    const specUrl = text(src.specUrl);
+    if (!specId || !apiTitle || !provider || !specUrl) return undefined;
+    return {
+      type: "openapi_spec",
+      specId,
+      apiTitle,
+      provider,
+      specUrl,
+      ...(text(src.finalUrl) ? { finalUrl: text(src.finalUrl) } : {}),
+      ...(text(src.documentVersion)
+        ? { documentVersion: text(src.documentVersion) }
+        : {}),
+      ...(text(src.openapiVersion)
+        ? { openapiVersion: text(src.openapiVersion) }
+        : {}),
+      ...(text(src.repo) ? { repo: text(src.repo) } : {}),
+      ...(typeof src.pathCount === "number" ? { pathCount: src.pathCount } : {}),
+      ...(typeof src.operationCount === "number"
+        ? { operationCount: src.operationCount }
+        : {}),
+      ...(typeof src.schemaCount === "number"
+        ? { schemaCount: src.schemaCount }
+        : {}),
+      ...(typeof src.score === "number" ? { score: src.score } : {}),
+    };
+  }
+  if (sourceType === "standards_spec") {
+    const specId = text(src.specId);
+    const specTitle = text(src.specTitle);
+    const provider = text(src.provider);
+    const specUrl = text(src.specUrl);
+    if (!specId || !specTitle || !provider || !specUrl) return undefined;
+    return {
+      type: "standards_spec",
+      specId,
+      specTitle,
+      provider,
+      specUrl,
+      ...(text(src.finalUrl) ? { finalUrl: text(src.finalUrl) } : {}),
+      ...(text(src.expectedStatus)
+        ? { expectedStatus: text(src.expectedStatus) }
+        : {}),
+      ...(text(src.currentVersion)
+        ? { currentVersion: text(src.currentVersion) }
+        : {}),
+      ...(text(src.repo) ? { repo: text(src.repo) } : {}),
+      ...(typeof src.score === "number" ? { score: src.score } : {}),
+    };
+  }
   return undefined;
 }
 
@@ -478,7 +531,41 @@ export function buildRunRows(payload: unknown): RunRow[] {
                       typeof part === "string" && part.length > 0
                   )
                   .join(" · ")
-              : `${id} · ${category} · ${tier}`;
+              : source?.type === "openapi_spec"
+                ? // OpenAPI audit row meta: `<provider> / <openapi
+                  // version> · <op count> ops · quality audit · T*`.
+                  // Drop missing pieces gracefully.
+                  [
+                    source.provider,
+                    source.openapiVersion
+                      ? `OpenAPI ${source.openapiVersion}`
+                      : undefined,
+                    typeof source.operationCount === "number"
+                      ? `${source.operationCount} ops`
+                      : undefined,
+                    "quality audit",
+                    tier,
+                  ]
+                    .filter(
+                      (part): part is string =>
+                        typeof part === "string" && part.length > 0
+                    )
+                    .join(" · ")
+                : source?.type === "standards_spec"
+                  ? // Standards-freshness row meta: `<provider> · <expected
+                    // status> · freshness audit · T*`.
+                    [
+                      source.provider.toUpperCase(),
+                      source.expectedStatus,
+                      "freshness audit",
+                      tier,
+                    ]
+                      .filter(
+                        (part): part is string =>
+                          typeof part === "string" && part.length > 0
+                      )
+                      .join(" · ")
+                  : `${id} · ${category} · ${tier}`;
     const lifecycle = buildJobLifecycle(job.lifecycle);
     return {
       id,
@@ -517,9 +604,17 @@ export function buildRunRows(payload: unknown): RunRow[] {
                 ? state === "ready"
                   ? "Audit only"
                   : `State: ${state}`
-                : state === "ready"
-                  ? "Job listed"
-                  : `State: ${state}`,
+                : source?.type === "openapi_spec"
+                  ? state === "ready"
+                    ? "Quality audit"
+                    : `State: ${state}`
+                  : source?.type === "standards_spec"
+                    ? state === "ready"
+                      ? "Freshness audit"
+                      : `State: ${state}`
+                    : state === "ready"
+                      ? "Job listed"
+                      : `State: ${state}`,
       lastEventMeta:
         source?.type === "github_issue"
           ? `${source.repo} #${source.issueNumber} · verifier ${verifierLabel(job.verifierMode)}`
@@ -537,7 +632,34 @@ export function buildRunRows(payload: unknown): RunRow[] {
                     )
                     .join(" · ") ||
                   `verifier ${verifierLabel(job.verifierMode)}`
-                : `${text(job.rewardAsset, "DOT")} · verifier ${verifierLabel(job.verifierMode)}`,
+                : source?.type === "openapi_spec"
+                  ? [
+                      source.apiTitle,
+                      source.documentVersion
+                        ? `v${source.documentVersion}`
+                        : undefined,
+                      typeof source.pathCount === "number"
+                        ? `${source.pathCount} paths`
+                        : undefined,
+                    ]
+                      .filter(
+                        (part): part is string =>
+                          typeof part === "string" && part.length > 0
+                      )
+                      .join(" · ") ||
+                    `verifier ${verifierLabel(job.verifierMode)}`
+                  : source?.type === "standards_spec"
+                    ? [
+                        source.specTitle,
+                        source.expectedStatus,
+                      ]
+                        .filter(
+                          (part): part is string =>
+                            typeof part === "string" && part.length > 0
+                        )
+                        .join(" · ") ||
+                      `verifier ${verifierLabel(job.verifierMode)}`
+                    : `${text(job.rewardAsset, "DOT")} · verifier ${verifierLabel(job.verifierMode)}`,
     };
   });
 }

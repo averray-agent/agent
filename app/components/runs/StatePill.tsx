@@ -92,6 +92,8 @@ export type SourceKind =
   | "wikipedia"
   | "osv"
   | "data_gov"
+  | "openapi"
+  | "standards"
   | "oss";
 
 const SOURCE_CLASSES: Record<SourceKind, string> = {
@@ -101,6 +103,10 @@ const SOURCE_CLASSES: Record<SourceKind, string> = {
   // Open-data family — slate-tinted dark to keep visual weight in line
   // with the other dark badges while staying distinct from osv's red ink.
   data_gov: "bg-[#1f2a3a] text-white",
+  // OpenAPI spec audits — teal-tinted dark, same neutral weight family.
+  openapi: "bg-[#1f3a3a] text-white",
+  // Standards bodies (W3C, IETF, …) — purple-tinted dark.
+  standards: "bg-[#2a1f3a] text-white",
   oss: "bg-[color:rgba(17,19,21,0.06)] text-[var(--avy-ink)]",
 };
 
@@ -109,6 +115,8 @@ const SOURCE_LABEL: Record<SourceKind, string> = {
   wikipedia: "Wikipedia",
   osv: "OSV",
   data_gov: "Data.gov",
+  openapi: "OpenAPI",
+  standards: "Standards",
   oss: "OSS",
 };
 
