@@ -185,7 +185,7 @@ test("requestStrategyDeposit delegates async lanes to the blockchain gateway and
     6,
     "0xstrategy",
     { strategyId: "0xstrategy", executionMode: "async_xcm", asset: "0xdot" },
-    { destination: "0x01", message: "0x02", nonce: 7 }
+    { nonce: 7 }
   );
 
   assert.equal(calls.length, 1);
@@ -284,7 +284,7 @@ test("requestStrategyWithdraw delegates async lanes to the blockchain gateway an
     3,
     "0xstrategy",
     { strategyId: "0xstrategy", executionMode: "async_xcm", asset: "0xdot" },
-    { destination: "0x01", message: "0x02", nonce: 8, recipient: "0xReceiver" }
+    { nonce: 8, recipient: "0xReceiver" }
   );
 
   assert.equal(updated.requestId, "0xwithdraw");

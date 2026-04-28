@@ -248,6 +248,35 @@ test("http smoke: async XCM deallocation requires admin role until assembler shi
   );
 });
 
+test("http smoke: async XCM routes reject caller-supplied raw message bytes", { skip: !RUN }, async () => {
+  const asyncStrategyId = "0x56444f545f56315f4d4f434b0000000000000000000000000000000000000000";
+  await runWithServerEnv(
+    {
+      STRATEGIES_JSON: JSON.stringify([
+        {
+          strategyId: asyncStrategyId,
+          adapter: "0x1234567890123456789012345678901234567890",
+          kind: "polkadot_vdot",
+          executionMode: "async_xcm",
+          asset: "0xABCDEFABCDEFABCDEFABCDEFABCDEFABCDEFABCD"
+        }
+      ])
+    },
+    async (base) => {
+      const token = issueToken(ADMIN_WALLET, { roles: ["admin"] });
+      const response = await fetch(`${base}/account/allocate`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify({ strategyId: asyncStrategyId, amount: 1, message: "0xdeadbeef" })
+      });
+      assert.equal(response.status, 400);
+      const payload = await response.json();
+      assert.equal(payload.error, "invalid_request");
+      assert.match(payload.message, /message is assembled by the server/u);
+    }
+  );
+});
+
 test("http smoke: /auth/nonce returns 429 once the window limit is crossed", { skip: !RUN }, async () => {
   await runWithServer(async (base) => {
     const body = JSON.stringify({ wallet: Wallet.createRandom().address });

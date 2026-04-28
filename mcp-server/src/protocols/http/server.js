@@ -1075,7 +1075,20 @@ function deriveAsyncNonce(seed) {
   return Number.parseInt(hash.slice(2, 14), 16);
 }
 
+function rejectCallerSuppliedAsyncXcmField(payload, url, field) {
+  if (payload && Object.prototype.hasOwnProperty.call(payload, field)) {
+    throw new ValidationError(`Async XCM ${field} is assembled by the server and cannot be supplied by the caller.`);
+  }
+  if (url.searchParams.has(field)) {
+    throw new ValidationError(`Async XCM ${field} is assembled by the server and cannot be supplied by the caller.`);
+  }
+}
+
 function parseAsyncTreasuryOptions(payload = {}, url, { defaultRecipient = undefined } = {}) {
+  rejectCallerSuppliedAsyncXcmField(payload, url, "destination");
+  rejectCallerSuppliedAsyncXcmField(payload, url, "message");
+  rejectCallerSuppliedAsyncXcmField(payload, url, "nonce");
+
   const queryWeight = {
     refTime: url.searchParams.get("maxWeightRefTime"),
     proofSize: url.searchParams.get("maxWeightProofSize")
@@ -1088,10 +1101,6 @@ function parseAsyncTreasuryOptions(payload = {}, url, { defaultRecipient = undef
   const idempotencyKey = typeof payload?.idempotencyKey === "string" && payload.idempotencyKey.trim()
     ? payload.idempotencyKey.trim()
     : undefined;
-  const nonceRaw = payload?.nonce ?? url.searchParams.get("nonce");
-  const nonce = Number.isFinite(Number(nonceRaw)) && Number(nonceRaw) >= 0
-    ? Math.trunc(Number(nonceRaw))
-    : undefined;
   const recipient = typeof payload?.recipient === "string" && payload.recipient.trim()
     ? payload.recipient.trim()
     : (url.searchParams.get("recipient")?.trim() || defaultRecipient);
@@ -1100,11 +1109,8 @@ function parseAsyncTreasuryOptions(payload = {}, url, { defaultRecipient = undef
     ? Number(requestedSharesRaw)
     : undefined;
   return {
-    destination: payload?.destination ?? url.searchParams.get("destination") ?? "0x",
-    message: payload?.message ?? url.searchParams.get("message") ?? "0x",
     maxWeight,
     idempotencyKey,
-    nonce,
     recipient,
     requestedShares
   };

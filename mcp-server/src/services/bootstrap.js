@@ -421,7 +421,7 @@ function normaliseStrategyEntry(entry, idx) {
   if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
     throw new Error(`strategies[${idx}] must be an object`);
   }
-  const { strategyId, adapter, kind, riskLabel, asset, executionMode } = entry;
+  const { strategyId, adapter, kind, riskLabel, asset, executionMode, xcm } = entry;
   const assetConfig = normaliseStrategyAssetConfig(asset, idx);
   if (typeof strategyId !== "string" || !/^0x[a-fA-F0-9]{64}$/u.test(strategyId)) {
     throw new Error(`strategies[${idx}].strategyId must be 0x + 32-byte hex`);
@@ -436,8 +436,27 @@ function normaliseStrategyEntry(entry, idx) {
     executionMode: normaliseStrategyExecutionMode(executionMode, typeof kind === "string" ? kind : "unknown", idx),
     riskLabel: typeof riskLabel === "string" ? riskLabel : "",
     asset: assetConfig?.address,
-    assetConfig
+    assetConfig,
+    xcm: normaliseStrategyXcmConfig(xcm, idx)
   };
+}
+
+function normaliseStrategyXcmConfig(xcm, idx) {
+  if (xcm === undefined || xcm === null) {
+    return undefined;
+  }
+  if (typeof xcm !== "object" || Array.isArray(xcm)) {
+    throw new Error(`strategies[${idx}].xcm must be an object`);
+  }
+  const destinationParachain = xcm.destinationParachain ?? xcm.destinationParaId;
+  if (destinationParachain === undefined || destinationParachain === null || destinationParachain === "") {
+    return {};
+  }
+  const parsed = Number(destinationParachain);
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 0xffffffff) {
+    throw new Error(`strategies[${idx}].xcm.destinationParachain must be a uint32`);
+  }
+  return { destinationParachain: parsed };
 }
 
 function normaliseStrategyExecutionMode(rawExecutionMode, kind, idx) {

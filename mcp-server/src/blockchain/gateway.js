@@ -20,6 +20,7 @@ import {
   ZERO_BYTES32
 } from "./abis.js";
 import { loadBlockchainConfig } from "./config.js";
+import { buildXcmRequestPayload } from "./xcm-message-builder.js";
 import { hashCanonicalContent } from "../core/canonical-content.js";
 import {
   BlockchainRevertError,
@@ -407,12 +408,7 @@ export class BlockchainGateway {
     });
   }
 
-  async requestStrategyDeposit(wallet, strategy, amount, {
-    destination = "0x",
-    message = "0x",
-    maxWeight = undefined,
-    nonce = Date.now()
-  } = {}) {
+  async requestStrategyDeposit(wallet, strategy, amount, { maxWeight = undefined, nonce = Date.now() } = {}) {
     return this.withGatewayError("requestStrategyDeposit", async () => {
       this.requireSigner("requestStrategyDeposit");
       this.requireAsyncStrategyConfig(strategy, "requestStrategyDeposit");
@@ -426,12 +422,17 @@ export class BlockchainGateway {
         shares: 0,
         nonce
       });
+      const payload = buildXcmRequestPayload({
+        strategy,
+        direction: "deposit",
+        requestId
+      });
       const tx = await this.accountContract.requestStrategyDeposit(wallet, {
         strategyId: this.normalizeStrategyId(strategy.strategyId),
         amount,
-        destination: this.toBytesPayload(destination, "destination"),
-        message: this.toBytesPayload(message, "message"),
-        maxWeight: this.normalizeWeight(maxWeight),
+        destination: payload.destination,
+        message: payload.message,
+        maxWeight: this.normalizeWeight(maxWeight ?? payload.maxWeight),
         nonce
       });
       await tx.wait();
@@ -446,8 +447,6 @@ export class BlockchainGateway {
 
   async requestStrategyWithdraw(wallet, strategy, amount, {
     recipient = this.config.agentAccountAddress,
-    destination = "0x",
-    message = "0x",
     maxWeight = undefined,
     nonce = Date.now(),
     requestedShares = undefined
@@ -468,13 +467,18 @@ export class BlockchainGateway {
         shares,
         nonce
       });
+      const payload = buildXcmRequestPayload({
+        strategy,
+        direction: "withdraw",
+        requestId
+      });
       const tx = await this.accountContract.requestStrategyWithdraw(wallet, {
         strategyId: this.normalizeStrategyId(strategy.strategyId),
         shares,
         recipient,
-        destination: this.toBytesPayload(destination, "destination"),
-        message: this.toBytesPayload(message, "message"),
-        maxWeight: this.normalizeWeight(maxWeight),
+        destination: payload.destination,
+        message: payload.message,
+        maxWeight: this.normalizeWeight(maxWeight ?? payload.maxWeight),
         nonce
       });
       await tx.wait();

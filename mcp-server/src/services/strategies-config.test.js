@@ -84,6 +84,22 @@ test("loadStrategiesConfig honours explicit executionMode overrides", () => {
   assert.equal(result[0].executionMode, "async_xcm");
 });
 
+test("loadStrategiesConfig preserves server-controlled XCM destination policy", () => {
+  const env = {
+    STRATEGIES_JSON: JSON.stringify([
+      {
+        strategyId: "0x56444f545f56315f4d4f434b0000000000000000000000000000000000000000",
+        adapter: "0x1234567890123456789012345678901234567890",
+        kind: "polkadot_vdot",
+        executionMode: "async_xcm",
+        xcm: { destinationParachain: "2030" }
+      }
+    ])
+  };
+  const result = loadStrategiesConfig(env, { logger: silentLogger() });
+  assert.deepEqual(result[0].xcm, { destinationParachain: 2030 });
+});
+
 test("loadStrategiesConfig parses foreign asset metadata when the runtime index is known", () => {
   const env = {
     STRATEGIES_JSON: JSON.stringify([
