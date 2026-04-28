@@ -23,6 +23,8 @@ import {ReentrancyGuard} from "./lib/ReentrancyGuard.sol";
  */
 contract XcmWrapper is IXcmWrapper, ReentrancyGuard {
     address public constant DEFAULT_XCM_PRECOMPILE = 0x00000000000000000000000000000000000a0000;
+    bytes1 internal constant XCM_SET_TOPIC_INSTRUCTION = 0x2c;
+    uint256 internal constant XCM_SET_TOPIC_SUFFIX_LENGTH = 33;
 
     TreasuryPolicy public immutable policy;
     address public immutable override xcmPrecompile;
@@ -32,11 +34,7 @@ contract XcmWrapper is IXcmWrapper, ReentrancyGuard {
     mapping(bytes32 => bytes32) public requestMessageHash;
 
     event RequestPayloadStored(
-        bytes32 indexed requestId,
-        bytes32 destinationHash,
-        bytes32 messageHash,
-        uint64 refTime,
-        uint64 proofSize
+        bytes32 indexed requestId, bytes32 destinationHash, bytes32 messageHash, uint64 refTime, uint64 proofSize
     );
 
     error Unauthorized();
@@ -45,6 +43,7 @@ contract XcmWrapper is IXcmWrapper, ReentrancyGuard {
     error InvalidRequest();
     error InvalidStatus();
     error InvalidTransition();
+    error InvalidSetTopic();
     error PayloadMismatch();
 
     constructor(TreasuryPolicy policy_, address xcmPrecompile_) {
@@ -82,9 +81,7 @@ contract XcmWrapper is IXcmWrapper, ReentrancyGuard {
             return Weight({refTime: 0, proofSize: 0});
         }
 
-        (bool ok, bytes memory data) = xcmPrecompile.staticcall(
-            abi.encodeWithSignature("weighMessage(bytes)", message)
-        );
+        (bool ok, bytes memory data) = xcmPrecompile.staticcall(abi.encodeWithSignature("weighMessage(bytes)", message));
         if (!ok || data.length == 0) {
             return Weight({refTime: 0, proofSize: 0});
         }
@@ -101,6 +98,8 @@ contract XcmWrapper is IXcmWrapper, ReentrancyGuard {
         _validateRequestContext(context);
 
         requestId = previewRequestId(context);
+        _validateSetTopic(message, requestId);
+
         bytes32 destinationHash = keccak256(destination);
         bytes32 messageHash = keccak256(message);
 
@@ -145,10 +144,9 @@ contract XcmWrapper is IXcmWrapper, ReentrancyGuard {
         bytes32 remoteRef,
         bytes32 failureCode
     ) external override nonReentrant whenNotPaused onlyOwnerOrOperator {
-        if (
-            status == RequestStatus.Unknown ||
-            status == RequestStatus.Pending
-        ) revert InvalidStatus();
+        if (status == RequestStatus.Unknown || status == RequestStatus.Pending) {
+            revert InvalidStatus();
+        }
 
         RequestRecord storage record = requests[requestId];
         if (record.context.account == address(0)) revert UnknownRequest();
@@ -165,11 +163,8 @@ contract XcmWrapper is IXcmWrapper, ReentrancyGuard {
         }
 
         if (
-            record.status == status &&
-            record.settledAssets == settledAssets &&
-            record.settledShares == settledShares &&
-            record.remoteRef == remoteRef &&
-            record.failureCode == failureCode
+            record.status == status && record.settledAssets == settledAssets && record.settledShares == settledShares
+                && record.remoteRef == remoteRef && record.failureCode == failureCode
         ) {
             return;
         }
@@ -199,22 +194,27 @@ contract XcmWrapper is IXcmWrapper, ReentrancyGuard {
             context.shares,
             context.nonce
         );
-        emit RequestPayloadStored(
-            requestId,
-            destinationHash,
-            messageHash,
-            maxWeight.refTime,
-            maxWeight.proofSize
-        );
+        emit RequestPayloadStored(requestId, destinationHash, messageHash, maxWeight.refTime, maxWeight.proofSize);
     }
 
     function _validateRequestContext(RequestContext calldata context) internal pure {
         if (
-            context.strategyId == bytes32(0) ||
-            context.account == address(0) ||
-            context.asset == address(0) ||
-            context.recipient == address(0)
+            context.strategyId == bytes32(0) || context.account == address(0) || context.asset == address(0)
+                || context.recipient == address(0)
         ) revert InvalidRequest();
         if (context.assets == 0 && context.shares == 0) revert InvalidRequest();
+    }
+
+    function _validateSetTopic(bytes calldata message, bytes32 requestId) internal pure {
+        if (message.length < XCM_SET_TOPIC_SUFFIX_LENGTH) revert InvalidSetTopic();
+        if (message[message.length - XCM_SET_TOPIC_SUFFIX_LENGTH] != XCM_SET_TOPIC_INSTRUCTION) {
+            revert InvalidSetTopic();
+        }
+
+        bytes32 topic;
+        assembly {
+            topic := calldataload(add(message.offset, sub(message.length, 32)))
+        }
+        if (topic != requestId) revert InvalidSetTopic();
     }
 }

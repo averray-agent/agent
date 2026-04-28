@@ -48,6 +48,7 @@ contract AgentAccountAsyncStrategyTest is Test {
 
     function testRequestStrategyDepositMovesFundsIntoPendingAsyncLane() public {
         IXcmWrapper.Weight memory maxWeight = IXcmWrapper.Weight({refTime: 10, proofSize: 5});
+        bytes32 requestId = _previewDepositRequestId(worker, 20 ether, 1);
 
         vm.prank(worker);
         accounts.requestStrategyDeposit(
@@ -56,7 +57,7 @@ contract AgentAccountAsyncStrategyTest is Test {
                 strategyId: STRATEGY_ID,
                 amount: 20 ether,
                 destination: hex"0102",
-                message: hex"0304",
+                message: _depositMessage(requestId),
                 maxWeight: maxWeight,
                 nonce: 1
             })
@@ -76,12 +77,7 @@ contract AgentAccountAsyncStrategyTest is Test {
         bytes32 requestId = _requestDeposit(20 ether, 1);
 
         accounts.settleStrategyRequest(
-            requestId,
-            IXcmWrapper.RequestStatus.Succeeded,
-            20 ether,
-            20 ether,
-            bytes32("REMOTE"),
-            bytes32(0)
+            requestId, IXcmWrapper.RequestStatus.Succeeded, 20 ether, 20 ether, bytes32("REMOTE"), bytes32(0)
         );
 
         (uint256 liquid,, uint256 strategyAllocated,,,) = accounts.positions(worker, address(dot));
@@ -96,14 +92,7 @@ contract AgentAccountAsyncStrategyTest is Test {
     function testStrategyDepositFailureRefundsLiquidBalance() public {
         bytes32 requestId = _requestDeposit(20 ether, 2);
 
-        accounts.settleStrategyRequest(
-            requestId,
-            IXcmWrapper.RequestStatus.Failed,
-            0,
-            0,
-            bytes32(0),
-            bytes32("FAILED")
-        );
+        accounts.settleStrategyRequest(requestId, IXcmWrapper.RequestStatus.Failed, 0, 0, bytes32(0), bytes32("FAILED"));
 
         (uint256 liquid,, uint256 strategyAllocated,,,) = accounts.positions(worker, address(dot));
         assertEq(liquid, WORKER_DEPOSIT);
@@ -118,6 +107,7 @@ contract AgentAccountAsyncStrategyTest is Test {
         _seedSettledDeposit(40 ether, 3);
 
         IXcmWrapper.Weight memory maxWeight = IXcmWrapper.Weight({refTime: 10, proofSize: 5});
+        bytes32 previewId = _previewWithdrawRequestId(worker, 15 ether, address(accounts), 4);
         vm.prank(worker);
         bytes32 requestId = accounts.requestStrategyWithdraw(
             worker,
@@ -126,22 +116,18 @@ contract AgentAccountAsyncStrategyTest is Test {
                 shares: 15 ether,
                 recipient: address(accounts),
                 destination: hex"0a",
-                message: hex"0b",
+                message: _withdrawMessage(previewId),
                 maxWeight: maxWeight,
                 nonce: 4
             })
         );
 
+        require(requestId == previewId, "WRONG_REQUEST_ID");
         assertEq(accounts.pendingStrategyWithdrawalShares(worker, STRATEGY_ID), 15 ether);
         assertEq(accounts.strategyShares(worker, STRATEGY_ID), 40 ether);
 
         accounts.settleStrategyRequest(
-            requestId,
-            IXcmWrapper.RequestStatus.Succeeded,
-            15 ether,
-            0,
-            bytes32("WITHDRAW"),
-            bytes32(0)
+            requestId, IXcmWrapper.RequestStatus.Succeeded, 15 ether, 0, bytes32("WITHDRAW"), bytes32(0)
         );
 
         (uint256 liquid,, uint256 strategyAllocated,,,) = accounts.positions(worker, address(dot));
@@ -157,6 +143,7 @@ contract AgentAccountAsyncStrategyTest is Test {
         _seedSettledDeposit(40 ether, 5);
 
         IXcmWrapper.Weight memory maxWeight = IXcmWrapper.Weight({refTime: 10, proofSize: 5});
+        bytes32 previewId = _previewWithdrawRequestId(worker, 10 ether, address(accounts), 6);
         vm.prank(worker);
         bytes32 requestId = accounts.requestStrategyWithdraw(
             worker,
@@ -165,19 +152,14 @@ contract AgentAccountAsyncStrategyTest is Test {
                 shares: 10 ether,
                 recipient: address(accounts),
                 destination: hex"0c",
-                message: hex"0d",
+                message: _withdrawMessage(previewId),
                 maxWeight: maxWeight,
                 nonce: 6
             })
         );
 
         accounts.settleStrategyRequest(
-            requestId,
-            IXcmWrapper.RequestStatus.Failed,
-            0,
-            0,
-            bytes32(0),
-            bytes32("WITHDRAW_FAILED")
+            requestId, IXcmWrapper.RequestStatus.Failed, 0, 0, bytes32(0), bytes32("WITHDRAW_FAILED")
         );
 
         (uint256 liquid,, uint256 strategyAllocated,,,) = accounts.positions(worker, address(dot));
@@ -192,17 +174,13 @@ contract AgentAccountAsyncStrategyTest is Test {
     function _seedSettledDeposit(uint256 amount, uint64 nonce) internal returns (bytes32 requestId) {
         requestId = _requestDeposit(amount, nonce);
         accounts.settleStrategyRequest(
-            requestId,
-            IXcmWrapper.RequestStatus.Succeeded,
-            amount,
-            amount,
-            bytes32("REMOTE"),
-            bytes32(0)
+            requestId, IXcmWrapper.RequestStatus.Succeeded, amount, amount, bytes32("REMOTE"), bytes32(0)
         );
     }
 
     function _requestDeposit(uint256 amount, uint64 nonce) internal returns (bytes32 requestId) {
         IXcmWrapper.Weight memory maxWeight = IXcmWrapper.Weight({refTime: 10, proofSize: 5});
+        bytes32 previewId = _previewDepositRequestId(worker, amount, nonce);
         vm.prank(worker);
         requestId = accounts.requestStrategyDeposit(
             worker,
@@ -210,10 +188,57 @@ contract AgentAccountAsyncStrategyTest is Test {
                 strategyId: STRATEGY_ID,
                 amount: amount,
                 destination: hex"0102",
-                message: hex"0304",
+                message: _depositMessage(previewId),
                 maxWeight: maxWeight,
                 nonce: nonce
             })
         );
+        require(requestId == previewId, "WRONG_REQUEST_ID");
+    }
+
+    function _previewDepositRequestId(address account, uint256 amount, uint64 nonce) internal view returns (bytes32) {
+        return wrapper.previewRequestId(
+            IXcmWrapper.RequestContext({
+                strategyId: STRATEGY_ID,
+                kind: IXcmWrapper.RequestKind.Deposit,
+                account: account,
+                asset: address(dot),
+                recipient: account,
+                assets: amount,
+                shares: 0,
+                nonce: nonce
+            })
+        );
+    }
+
+    function _previewWithdrawRequestId(address account, uint256 shares, address recipient, uint64 nonce)
+        internal
+        view
+        returns (bytes32)
+    {
+        return wrapper.previewRequestId(
+            IXcmWrapper.RequestContext({
+                strategyId: STRATEGY_ID,
+                kind: IXcmWrapper.RequestKind.Withdraw,
+                account: account,
+                asset: address(dot),
+                recipient: recipient,
+                assets: 0,
+                shares: shares,
+                nonce: nonce
+            })
+        );
+    }
+
+    function _depositMessage(bytes32 requestId) internal pure returns (bytes memory) {
+        return abi.encodePacked(
+            hex"0510000401000003008c86471301000003008c8647000d010101000000010100368e8759910dab756d344995f1d3c79374ca8f70066d3a709e48029f6bf0ee7e",
+            bytes1(0x2c),
+            requestId
+        );
+    }
+
+    function _withdrawMessage(bytes32 requestId) internal pure returns (bytes memory) {
+        return abi.encodePacked(hex"050800010203040506070809", bytes1(0x2c), requestId);
     }
 }

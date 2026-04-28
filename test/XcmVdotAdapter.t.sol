@@ -37,16 +37,15 @@ contract XcmVdotAdapterTest is Test {
     }
 
     function testRequestDepositQueuesWrapperAndEscrowsAssets() public {
+        bytes32 previewId = _previewDepositRequestId(worker, 25 ether, 1);
+        bytes memory message = _depositMessage(previewId);
+
         vm.prank(operator);
         bytes32 requestId = adapter.requestDeposit(
-            worker,
-            25 ether,
-            hex"0102",
-            hex"aabbccdd",
-            IXcmWrapper.Weight({refTime: 11, proofSize: 22}),
-            1
+            worker, 25 ether, hex"0102", message, IXcmWrapper.Weight({refTime: 11, proofSize: 22}), 1
         );
 
+        require(requestId == previewId, "WRONG_REQUEST_ID");
         IXcmStrategyAdapter.AdapterRequest memory request = adapter.getAdapterRequest(requestId);
         IXcmWrapper.RequestRecord memory wrapperRequest = wrapper.getRequest(requestId);
 
@@ -63,22 +62,14 @@ contract XcmVdotAdapterTest is Test {
     }
 
     function testRequestDepositIsIdempotentForSamePayload() public {
+        bytes memory message = _depositMessage(_previewDepositRequestId(worker, 25 ether, 1));
+
         vm.startPrank(operator);
         bytes32 first = adapter.requestDeposit(
-            worker,
-            25 ether,
-            hex"0102",
-            hex"aabbccdd",
-            IXcmWrapper.Weight({refTime: 11, proofSize: 22}),
-            1
+            worker, 25 ether, hex"0102", message, IXcmWrapper.Weight({refTime: 11, proofSize: 22}), 1
         );
         bytes32 second = adapter.requestDeposit(
-            worker,
-            25 ether,
-            hex"0102",
-            hex"aabbccdd",
-            IXcmWrapper.Weight({refTime: 11, proofSize: 22}),
-            1
+            worker, 25 ether, hex"0102", message, IXcmWrapper.Weight({refTime: 11, proofSize: 22}), 1
         );
         vm.stopPrank();
 
@@ -88,24 +79,16 @@ contract XcmVdotAdapterTest is Test {
     }
 
     function testSettleDepositBooksSharesAndAssets() public {
+        bytes memory message = _depositMessage(_previewDepositRequestId(worker, 25 ether, 1));
+
         vm.prank(operator);
         bytes32 requestId = adapter.requestDeposit(
-            worker,
-            25 ether,
-            hex"0102",
-            hex"aabbccdd",
-            IXcmWrapper.Weight({refTime: 11, proofSize: 22}),
-            1
+            worker, 25 ether, hex"0102", message, IXcmWrapper.Weight({refTime: 11, proofSize: 22}), 1
         );
 
         vm.prank(operator);
         adapter.settleRequest(
-            requestId,
-            IXcmWrapper.RequestStatus.Succeeded,
-            25 ether,
-            23 ether,
-            keccak256("remote-deposit"),
-            bytes32(0)
+            requestId, IXcmWrapper.RequestStatus.Succeeded, 25 ether, 23 ether, keccak256("remote-deposit"), bytes32(0)
         );
 
         IXcmStrategyAdapter.AdapterRequest memory request = adapter.getAdapterRequest(requestId);
@@ -124,6 +107,7 @@ contract XcmVdotAdapterTest is Test {
 
     function testRequestWithdrawQueuesAndReservesShares() public {
         bytes32 depositRequestId = _seedSettledDeposit();
+        bytes32 previewId = _previewWithdrawRequestId(worker, 10 ether, recipient, 2);
 
         vm.prank(operator);
         bytes32 withdrawRequestId = adapter.requestWithdraw(
@@ -131,11 +115,12 @@ contract XcmVdotAdapterTest is Test {
             10 ether,
             recipient,
             hex"0304",
-            hex"deadbeef",
+            _withdrawMessage(previewId),
             IXcmWrapper.Weight({refTime: 5, proofSize: 6}),
             2
         );
 
+        require(withdrawRequestId == previewId, "WRONG_REQUEST_ID");
         IXcmStrategyAdapter.AdapterRequest memory request = adapter.getAdapterRequest(withdrawRequestId);
         IXcmWrapper.RequestRecord memory wrapperRequest = wrapper.getRequest(withdrawRequestId);
 
@@ -150,6 +135,7 @@ contract XcmVdotAdapterTest is Test {
 
     function testSettleWithdrawBurnsSharesAndPaysRecipient() public {
         _seedSettledDeposit();
+        bytes32 previewId = _previewWithdrawRequestId(worker, 10 ether, recipient, 2);
 
         vm.prank(operator);
         bytes32 withdrawRequestId = adapter.requestWithdraw(
@@ -157,7 +143,7 @@ contract XcmVdotAdapterTest is Test {
             10 ether,
             recipient,
             hex"0304",
-            hex"deadbeef",
+            _withdrawMessage(previewId),
             IXcmWrapper.Weight({refTime: 5, proofSize: 6}),
             2
         );
@@ -183,24 +169,62 @@ contract XcmVdotAdapterTest is Test {
     }
 
     function _seedSettledDeposit() internal returns (bytes32 requestId) {
+        bytes32 previewId = _previewDepositRequestId(worker, 25 ether, 1);
+
         vm.prank(operator);
         requestId = adapter.requestDeposit(
-            worker,
-            25 ether,
-            hex"0102",
-            hex"aabbccdd",
-            IXcmWrapper.Weight({refTime: 11, proofSize: 22}),
-            1
+            worker, 25 ether, hex"0102", _depositMessage(previewId), IXcmWrapper.Weight({refTime: 11, proofSize: 22}), 1
         );
 
         vm.prank(operator);
         adapter.settleRequest(
-            requestId,
-            IXcmWrapper.RequestStatus.Succeeded,
-            25 ether,
-            23 ether,
-            keccak256("remote-deposit"),
-            bytes32(0)
+            requestId, IXcmWrapper.RequestStatus.Succeeded, 25 ether, 23 ether, keccak256("remote-deposit"), bytes32(0)
         );
+    }
+
+    function _previewDepositRequestId(address account, uint256 assets, uint64 nonce) internal view returns (bytes32) {
+        return wrapper.previewRequestId(
+            IXcmWrapper.RequestContext({
+                strategyId: STRATEGY_ID,
+                kind: IXcmWrapper.RequestKind.Deposit,
+                account: account,
+                asset: address(asset),
+                recipient: account,
+                assets: assets,
+                shares: 0,
+                nonce: nonce
+            })
+        );
+    }
+
+    function _previewWithdrawRequestId(address account, uint256 shares, address withdrawRecipient, uint64 nonce)
+        internal
+        view
+        returns (bytes32)
+    {
+        return wrapper.previewRequestId(
+            IXcmWrapper.RequestContext({
+                strategyId: STRATEGY_ID,
+                kind: IXcmWrapper.RequestKind.Withdraw,
+                account: account,
+                asset: address(asset),
+                recipient: withdrawRecipient,
+                assets: 0,
+                shares: shares,
+                nonce: nonce
+            })
+        );
+    }
+
+    function _depositMessage(bytes32 requestId) internal pure returns (bytes memory) {
+        return abi.encodePacked(
+            hex"0510000401000003008c86471301000003008c8647000d010101000000010100368e8759910dab756d344995f1d3c79374ca8f70066d3a709e48029f6bf0ee7e",
+            bytes1(0x2c),
+            requestId
+        );
+    }
+
+    function _withdrawMessage(bytes32 requestId) internal pure returns (bytes memory) {
+        return abi.encodePacked(hex"050800010203040506070809", bytes1(0x2c), requestId);
     }
 }

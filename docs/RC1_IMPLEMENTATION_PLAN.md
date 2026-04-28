@@ -34,8 +34,8 @@ The shortest path to a coherent rc1 launch is:
 
 ## Current Position
 
-As of the claim economics work, **slice 6: Claim Economics And Onboarding
-Waivers** is in progress.
+As of this branch, **slice 8: XCM SetTopic Validation** is implemented and
+ready for review.
 
 Completed and deployed in this lane:
 
@@ -58,7 +58,7 @@ Completed and deployed in this lane:
 Still open in the broader rc1 path:
 
 - scheduler/email hardening for weekly reports after enough real jobs exist
-- maintainer controls and XCM work in later slices
+- backend SCALE assembler and native XCM observer correlation in later slices
 
 ## PR Slices
 
@@ -182,7 +182,7 @@ generation are implemented as backend foundations.
 
 ### 6. Claim Economics And Onboarding Waivers
 
-**Status:** in progress; contract, backend, indexer, and session-surface
+**Status:** implemented; contract, backend, indexer, and session-surface
 foundations are implemented in this slice.
 
 **Goal:** implement the two claim-time primitives from the spec without
@@ -203,7 +203,7 @@ if new events are indexed.
 
 ### 7. Maintainer-Surface Controls
 
-**Status:** in progress; backend intake/submission/verifier foundations are
+**Status:** implemented; backend intake/submission/verifier foundations are
 implemented in this slice.
 
 **Goal:** reduce external ecosystem risk before public job sourcing scales.
@@ -221,17 +221,19 @@ surfaces controls.
 
 ### 8. XCM SetTopic Validation
 
+**Status:** implemented in this branch.
+
 **Goal:** prevent queuing XCM payloads that cannot be correlated to the local
 request.
 
 **Changes:**
 
-- Define the exact canonical SCALE message suffix produced by the backend
+- [x] Define the exact canonical SCALE message suffix produced by the backend
   assembler.
-- Add `XcmWrapper.queueRequest` validation that the message commits to
+- [x] Add `XcmWrapper.queueRequest` validation that the message commits to
   `SetTopic(requestId)`.
-- Add fixed test vectors for deposit and withdraw messages.
-- Keep async treasury endpoints admin-gated until the backend assembler exists.
+- [x] Add fixed test vectors for deposit and withdraw messages.
+- [x] Keep async treasury endpoints admin-gated until the backend assembler exists.
 
 **Checks:** `forge test`.
 

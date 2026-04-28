@@ -112,8 +112,9 @@ interface IXcmWrapper {
      *
      * `destination` and `message` are kept as raw bytes because the
      * transport wrapper may evolve independently from strategy-specific
-     * message builders. Strategy adapters should still construct these at
-     * a higher abstraction layer than vault accounting.
+     * message builders. The message must still end with the canonical
+     * SCALE-encoded `SetTopic(requestId)` instruction so async outcomes can
+     * be correlated back to this request.
      */
     function queueRequest(
         RequestContext calldata context,

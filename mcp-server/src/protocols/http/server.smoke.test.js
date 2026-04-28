@@ -24,7 +24,7 @@ const ADMIN_WALLET = "0x1111111111111111111111111111111111111111";
 const VERIFIER_WALLET = "0x2222222222222222222222222222222222222222";
 const STRANGER_WALLET = "0x3333333333333333333333333333333333333333";
 
-async function startServer(port) {
+async function startServer(port, envOverrides = {}) {
   const child = spawn(process.execPath, [serverPath], {
     env: {
       ...process.env,
@@ -39,7 +39,8 @@ async function startServer(port) {
       STATE_STORE_ALLOW_MEMORY: "1",
       LOG_LEVEL: "silent",
       RATE_LIMIT_AUTH_NONCE_LIMIT: "3",
-      RATE_LIMIT_AUTH_NONCE_WINDOW_SECONDS: "60"
+      RATE_LIMIT_AUTH_NONCE_WINDOW_SECONDS: "60",
+      ...envOverrides
     },
     stdio: "ignore",
     detached: false
@@ -97,6 +98,16 @@ function issueToken(wallet, { roles = [] } = {}) {
 async function runWithServer(fn) {
   const port = 19_000 + Math.floor(Math.random() * 1_000);
   const child = await startServer(port);
+  try {
+    await fn(`http://127.0.0.1:${port}`);
+  } finally {
+    await stop(child);
+  }
+}
+
+async function runWithServerEnv(envOverrides, fn) {
+  const port = 19_000 + Math.floor(Math.random() * 1_000);
+  const child = await startServer(port, envOverrides);
   try {
     await fn(`http://127.0.0.1:${port}`);
   } finally {
@@ -179,6 +190,62 @@ test("http smoke: /admin/status returns recurring + maintenance data for admin t
     assert.equal(payload.recurring.templates[0].templateId, "weekly-digest");
     assert.equal(typeof payload.maintenance.release.checklistDoc, "string");
   });
+});
+
+test("http smoke: async XCM allocation requires admin role until assembler ships", { skip: !RUN }, async () => {
+  const asyncStrategyId = "0x56444f545f56315f4d4f434b0000000000000000000000000000000000000000";
+  await runWithServerEnv(
+    {
+      STRATEGIES_JSON: JSON.stringify([
+        {
+          strategyId: asyncStrategyId,
+          adapter: "0x1234567890123456789012345678901234567890",
+          kind: "polkadot_vdot",
+          executionMode: "async_xcm",
+          asset: "0xABCDEFABCDEFABCDEFABCDEFABCDEFABCDEFABCD"
+        }
+      ])
+    },
+    async (base) => {
+      const token = issueToken(STRANGER_WALLET, { roles: [] });
+      const response = await fetch(`${base}/account/allocate`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify({ strategyId: asyncStrategyId, amount: 1 })
+      });
+      assert.equal(response.status, 403);
+      const payload = await response.json();
+      assert.equal(payload.error, "async_xcm_admin_required");
+    }
+  );
+});
+
+test("http smoke: async XCM deallocation requires admin role until assembler ships", { skip: !RUN }, async () => {
+  const asyncStrategyId = "0x56444f545f56315f4d4f434b0000000000000000000000000000000000000000";
+  await runWithServerEnv(
+    {
+      STRATEGIES_JSON: JSON.stringify([
+        {
+          strategyId: asyncStrategyId,
+          adapter: "0x1234567890123456789012345678901234567890",
+          kind: "polkadot_vdot",
+          executionMode: "async_xcm",
+          asset: "0xABCDEFABCDEFABCDEFABCDEFABCDEFABCDEFABCD"
+        }
+      ])
+    },
+    async (base) => {
+      const token = issueToken(STRANGER_WALLET, { roles: [] });
+      const response = await fetch(`${base}/account/deallocate`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify({ strategyId: asyncStrategyId, amount: 1 })
+      });
+      assert.equal(response.status, 403);
+      const payload = await response.json();
+      assert.equal(payload.error, "async_xcm_admin_required");
+    }
+  );
 });
 
 test("http smoke: /auth/nonce returns 429 once the window limit is crossed", { skip: !RUN }, async () => {
