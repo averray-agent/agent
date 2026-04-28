@@ -34,7 +34,7 @@ The shortest path to a coherent rc1 launch is:
 
 ## Current Position
 
-As of this branch, **slice 8: XCM SetTopic Validation** is implemented and
+As of this branch, **slice 9: Backend SCALE Assembler** is implemented and
 ready for review.
 
 Completed and deployed in this lane:
@@ -239,17 +239,19 @@ request.
 
 ### 9. Backend SCALE Assembler
 
+**Status:** implemented in this branch.
+
 **Goal:** replace caller-supplied raw XCM bytes with server-controlled intent
 routing.
 
 **Changes:**
 
-- Add `mcp-server/src/blockchain/xcm-message-builder.js` or equivalent.
-- Replace HTTP `destination` / `message` inputs with intent:
+- [x] Add `mcp-server/src/blockchain/xcm-message-builder.js` or equivalent.
+- [x] Replace HTTP `destination` / `message` inputs with intent:
   `{ strategyId, direction, amount }`.
-- Backend assigns nonce, mirrors `previewRequestId(context)`, appends
+- [x] Backend assigns nonce, mirrors `previewRequestId(context)`, appends
   `SetTopic(requestId)`, and submits assembled bytes.
-- Add builder test vectors and staging smoke scripts.
+- [x] Add builder test vectors and HTTP smoke coverage for rejecting raw XCM bytes.
 
 **Checks:** `npm --workspace mcp-server test`, `forge test` if vectors touch
 contract validation.
