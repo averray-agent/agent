@@ -34,9 +34,10 @@ The shortest path to a coherent rc1 launch is:
 
 ## Current Position
 
-As of this branch, **slice 9: Backend SCALE Assembler** is merged and deployed.
-The next implementation slice is **slice 10: Native XCM Observer Correlation
-Gate**.
+As of this branch, **slice 10: Native XCM Observer Correlation Gate** is
+implemented as a machine-checkable staging gate. The next operational step is
+capturing real Chopsticks/PAPI evidence for deposit, withdraw, and one failure
+case before any vDOT mainnet allocation.
 
 Completed and deployed in this lane:
 
@@ -55,11 +56,14 @@ Completed and deployed in this lane:
 - `funded_jobs` records are now written on claim, enriched on submission and
   verification, and polled against upstream GitHub/MediaWiki status
 - weekly bootstrap self-report generation exists as a backend service/CLI
+- native XCM evidence now distinguishes SetTopic/request-id correlation,
+  remote-ref correlation, and staging-only ledger joins
 
 Still open in the broader rc1 path:
 
 - scheduler/email hardening for weekly reports after enough real jobs exist
-- native XCM observer correlation and staging evidence
+- real Chopsticks/PAPI native XCM evidence capture and selected fallback
+  documentation if Bifrost does not preserve SetTopic
 
 ## PR Slices
 
@@ -259,15 +263,23 @@ contract validation.
 
 ### 10. Native XCM Observer Correlation Gate
 
+**Status:** implemented as a machine-checkable staging gate; real
+Chopsticks/PAPI evidence still needs to be captured before vDOT mainnet
+allocation.
+
 **Goal:** prove the vDOT lane can settle without manual operator guesswork.
 
 **Changes:**
 
-- Run Chopsticks experiment for Bifrost reply-leg topic preservation.
-- If preserved, match return leg by topic.
-- If not preserved but Hub credit events are unambiguous, use serialized
+- [x] Make captured evidence distinguish SetTopic/request-id correlation,
+  remote-ref correlation, and staging-only ledger joins.
+- [x] Reject promoted `ledger_join` evidence and require
+  `messageTopic == requestId` for production-candidate SetTopic evidence.
+- [ ] Run Chopsticks experiment for Bifrost reply-leg topic preservation.
+- [ ] If preserved, match return leg by topic.
+- [ ] If not preserved but Hub credit events are unambiguous, use serialized
   per-strategy dispatch.
-- Document the selected fallback before production volume.
+- [ ] Document the selected fallback before production volume.
 
 **Checks:** staging proof per `ASYNC_XCM_STAGING.md`; backend tests for watcher
 logic.

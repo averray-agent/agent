@@ -195,3 +195,14 @@ For the next native-observer lane, see
 existing `/xcm/outcomes` producer contract and focuses first on proving a
 deterministic correlation path from an Averray `requestId` to native
 Hub/Bifrost settlement evidence.
+
+The native evidence validator now enforces the correlation gate:
+
+- `request_id_in_message` requires Hub evidence with `messageTopic == requestId`.
+- `request_id_in_message` promoted to `production_candidate` additionally
+  requires Bifrost reply-leg evidence with `messageTopic == requestId`.
+- `remote_ref` requires a durable `remoteRef`.
+- `ledger_join` is staging-only and cannot be promoted.
+
+Until a real Chopsticks/PAPI capture passes those rules, use the internal
+observe/finalize path above for staging settlement.

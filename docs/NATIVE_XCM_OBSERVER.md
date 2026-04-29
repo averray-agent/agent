@@ -1,6 +1,6 @@
 # Native XCM Observer Design
 
-Status: **design next**. This is the implementation plan for replacing
+Status: **correlation gate scaffold shipped; empirical replay pending**. This is the implementation plan for replacing
 paid/third-party XCM shortcuts with an Averray-operated observer that
 publishes terminal outcomes into the existing `/xcm/outcomes` feed.
 
@@ -117,8 +117,10 @@ stable correlation handle.
 Before implementation, choose and validate one correlation contract:
 
 1. **Request-id-in-message path**
-   Include `requestId` or a derivation of it in the XCM payload or the
-   downstream Bifrost operation metadata if the target flow supports it.
+   Include `requestId` as the trailing XCM `SetTopic(requestId)` instruction.
+   The Hub-side message topic must equal the Averray request id. To promote this
+   path beyond staging, Bifrost reply-leg evidence must also preserve the same
+   topic.
 
 2. **Remote-ref path**
    Derive a deterministic `remoteRef` from the outbound Hub transaction,
@@ -137,6 +139,10 @@ Ship gate:
   chain evidence without operator judgement
 - the match survives retry/idempotency behavior
 - duplicate observations collapse to one terminal outcome
+- `request_id_in_message` evidence marked `production_candidate` or
+  `production` includes matching Hub and Bifrost `messageTopic == requestId`
+- `ledger_join` evidence remains `staging` only and is rejected for
+  production-candidate use
 
 ---
 
@@ -164,6 +170,8 @@ Current implementation status:
 - env validation and status reporting exist
 - cursor encode/decode helpers exist
 - evidence-to-`PublishedOutcome` normalization exists
+- captured evidence is now correlation-gated: SetTopic/request-id evidence,
+  remote-ref evidence, and staging-only ledger joins are validated differently
 - live PAPI reads intentionally fail until the correlation gate is proven
 
 Adapter responsibilities:
@@ -276,8 +284,10 @@ npm run capture:native-xcm-evidence -- \
   --status succeeded \
   --settled-assets 5000000000000 \
   --settled-shares 4900000000000 \
-  --method remote_ref \
-  --confidence staging \
+  --method request_id_in_message \
+  --confidence production_candidate \
+  --hub-topic 0x1111111111111111111111111111111111111111111111111111111111111111 \
+  --bifrost-topic 0x1111111111111111111111111111111111111111111111111111111111111111 \
   --hub-json docs/fixtures/xcm/native-hub-event.sample.json \
   --bifrost-json docs/fixtures/xcm/native-bifrost-event.sample.json \
   --output artifacts/xcm/native-observer-evidence.json
@@ -298,6 +308,11 @@ The validator checks:
 - settled asset/share amounts
 - Hub and Bifrost evidence blocks
 - correlation method and confidence level
+- for `request_id_in_message`, Hub `messageTopic` must equal `requestId`; for
+  `production_candidate`/`production`, Bifrost `messageTopic` must also equal
+  `requestId`
+- for `remote_ref`, a `remoteRef` is required
+- for `ledger_join`, confidence must remain `staging`
 - consistency between top-level outcome and decision payload
 
 This is intentionally stricter than the public `/xcm/outcomes` item. The
@@ -324,14 +339,13 @@ debugging, audit, and proving the native observer is not guessing.
 
 ## Recommended next implementation slice
 
-1. Add a disabled `native_papi` source-type skeleton that fails clearly
-   unless required env vars are present.
-2. Capture one real staging evidence envelope with Chopsticks/PAPI using
-   `npm run capture:native-xcm-evidence`, then make it pass
-   `npm run validate:native-xcm-evidence`.
-3. Add tests for cursor encoding and evidence-to-`PublishedOutcome`
-   normalization.
-4. Only then wire live PAPI reads.
+1. Capture one real staging evidence envelope with Chopsticks/PAPI using
+  `npm run capture:native-xcm-evidence`, then make it pass
+  `npm run validate:native-xcm-evidence`.
+2. If Bifrost does not preserve SetTopic on the reply leg, document the chosen
+   fallback (`remote_ref`, serialized dispatch, or amount perturbation) before
+   implementing live reads.
+3. Only then wire live PAPI reads.
 
 This keeps the next change reviewable and avoids turning the observer into
 an untestable network script.

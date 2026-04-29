@@ -50,6 +50,7 @@ export type NativeXcmEvidence = {
   source?: unknown;
   hub?: Record<string, unknown>;
   bifrost?: Record<string, unknown>;
+  correlation?: Record<string, unknown>;
   decision?: Record<string, unknown>;
 };
 
@@ -163,6 +164,7 @@ export function normalizeNativeXcmEvidence(evidence: NativeXcmEvidence): Publish
   if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) {
     throw new Error("Native XCM evidence must be an object.");
   }
+  validateNativeCorrelationGate(evidence);
   return normalizeFeedItem({
     requestId: evidence.requestId,
     status: evidence.status,
@@ -175,6 +177,70 @@ export function normalizeNativeXcmEvidence(evidence: NativeXcmEvidence): Publish
       ? evidence.source.trim()
       : "native_papi_observer"
   }, "native_papi_observer");
+}
+
+export function validateNativeCorrelationGate(evidence: NativeXcmEvidence) {
+  const requestId = String(evidence.requestId ?? "");
+  if (!/^0x[a-fA-F0-9]{64}$/u.test(requestId)) {
+    throw new Error("Native XCM evidence requestId must be a 0x-prefixed 32-byte hex string.");
+  }
+
+  const correlation = evidence.correlation ?? {};
+  const method = String(correlation.method ?? "").trim().toLowerCase();
+  const confidence = String(correlation.confidence ?? "staging").trim().toLowerCase();
+  if (!["request_id_in_message", "remote_ref", "ledger_join"].includes(method)) {
+    throw new Error("Native XCM evidence correlation.method must be request_id_in_message, remote_ref, or ledger_join.");
+  }
+  if (!["staging", "production_candidate", "production"].includes(confidence)) {
+    throw new Error("Native XCM evidence correlation.confidence must be staging, production_candidate, or production.");
+  }
+
+  if (method === "request_id_in_message") {
+    assertTopicMatchesRequest(evidence.hub, requestId, "hub");
+    if (confidence !== "staging") {
+      assertTopicMatchesRequest(evidence.bifrost, requestId, "bifrost");
+    }
+    return;
+  }
+
+  if (method === "remote_ref") {
+    normalizeOptionalHex32(evidence.remoteRef ?? evidence.decision?.remoteRef);
+    if (!normalizeOptionalHex32(evidence.remoteRef ?? evidence.decision?.remoteRef)) {
+      throw new Error("Native XCM remote_ref correlation requires remoteRef.");
+    }
+    return;
+  }
+
+  if (confidence !== "staging") {
+    throw new Error("Native XCM ledger_join correlation is staging-only and cannot be production_candidate or production.");
+  }
+}
+
+function assertTopicMatchesRequest(evidence: Record<string, unknown> | undefined, requestId: string, label: string) {
+  if (!evidence || typeof evidence !== "object") {
+    throw new Error(`Native XCM ${label} evidence is required for request_id_in_message correlation.`);
+  }
+  const topic = pickEvidenceTopic(evidence);
+  if (!topic) {
+    throw new Error(`Native XCM ${label} evidence must include messageTopic/topic for request_id_in_message correlation.`);
+  }
+  if (topic.toLowerCase() !== requestId.toLowerCase()) {
+    throw new Error(`Native XCM ${label} message topic must equal requestId.`);
+  }
+}
+
+function pickEvidenceTopic(evidence: Record<string, unknown>) {
+  for (const key of ["messageTopic", "message_topic", "topic", "setTopic", "set_topic"]) {
+    const value = evidence[key];
+    if (typeof value === "string" && value.trim()) {
+      const normalized = value.trim();
+      if (!/^0x[a-fA-F0-9]{64}$/u.test(normalized)) {
+        throw new Error("Native XCM evidence topic must be a 0x-prefixed 32-byte hex string.");
+      }
+      return normalized;
+    }
+  }
+  return undefined;
 }
 
 export class HttpFeedSourceAdapter implements XcmUpstreamSourceAdapter {

@@ -105,6 +105,8 @@ Common options:
   --remote-ref <0x...>
   --failure-code <0x...>
   --observed-at <iso-date>
+  --hub-topic <0x...>           Hub-side SetTopic/message id, if decoded.
+  --bifrost-topic <0x...>       Bifrost reply-leg topic, if preserved.
   --method <request_id_in_message|remote_ref|ledger_join>
   --confidence <staging|production_candidate|production>
   --notes <text>
@@ -119,25 +121,31 @@ async function readJson(filePath) {
 }
 
 function normalizeHubEvidence(value) {
-  return {
+  const evidence = {
     chain: pickString(value.chain, "polkadot-hub"),
     blockNumber: requireString(pickString(value.blockNumber, value.block_number), "hub.blockNumber"),
     blockHash: requireString(pickString(value.blockHash, value.block_hash), "hub.blockHash"),
     extrinsicHash: pickString(value.extrinsicHash, value.extrinsic_hash, value.txHash, value.transactionHash),
     messageHash: pickString(value.messageHash, value.message_hash),
+    messageTopic: pickString(options.hubTopic, value.messageTopic, value.message_topic, value.topic, value.setTopic, value.set_topic),
     eventIndex: requireString(pickString(value.eventIndex, value.event_index, value.index), "hub.eventIndex")
   };
+  if (!evidence.messageTopic) delete evidence.messageTopic;
+  return evidence;
 }
 
 function normalizeBifrostEvidence(value) {
-  return {
+  const evidence = {
     chain: pickString(value.chain, "bifrost-polkadot"),
     blockNumber: requireString(pickString(value.blockNumber, value.block_number), "bifrost.blockNumber"),
     blockHash: requireString(pickString(value.blockHash, value.block_hash), "bifrost.blockHash"),
     eventIndex: requireString(pickString(value.eventIndex, value.event_index, value.index), "bifrost.eventIndex"),
+    messageTopic: pickString(options.bifrostTopic, value.messageTopic, value.message_topic, value.topic, value.setTopic, value.set_topic),
     assetLocation: value.assetLocation ?? value.asset_location ?? null,
     amount: pickString(value.amount, value.settledAssets, "0")
   };
+  if (!evidence.messageTopic) delete evidence.messageTopic;
+  return evidence;
 }
 
 function pickString(...values) {

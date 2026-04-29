@@ -39,6 +39,10 @@ test("native PAPI evidence normalizes into the published outcome contract", () =
     status: "Succeeded",
     remoteRef,
     observedAt: "2026-04-23T12:00:00.000Z",
+    correlation: {
+      method: "remote_ref",
+      confidence: "staging"
+    },
     decision: {
       settledAssets: "5000000000000",
       settledShares: "4900000000000"
@@ -71,12 +75,74 @@ test("native PAPI evidence preserves explicit failure metadata", () => {
     settledShares: 0,
     failureCode,
     observedAt: "2026-04-23T12:30:00.000Z",
-    source: "native_papi_staging"
+    source: "native_papi_staging",
+    correlation: {
+      method: "ledger_join",
+      confidence: "staging"
+    }
   });
 
   assert.equal(outcome.status, "failed");
   assert.equal(outcome.failureCode, failureCode);
   assert.equal(outcome.source, "native_papi_staging");
+});
+
+test("native PAPI evidence accepts SetTopic request-id correlation after Bifrost echo is proven", () => {
+  const outcome = normalizeNativeXcmEvidence({
+    requestId,
+    status: "succeeded",
+    settledAssets: "5000000000000",
+    settledShares: "4900000000000",
+    remoteRef,
+    observedAt: "2026-04-23T12:00:00.000Z",
+    correlation: {
+      method: "request_id_in_message",
+      confidence: "production_candidate"
+    },
+    hub: {
+      messageTopic: requestId
+    },
+    bifrost: {
+      messageTopic: requestId
+    }
+  });
+
+  assert.equal(outcome.requestId, requestId);
+  assert.equal(outcome.source, "native_papi_observer");
+});
+
+test("native PAPI evidence rejects promoted ledger joins and mismatched topics", () => {
+  assert.throws(
+    () => normalizeNativeXcmEvidence({
+      requestId,
+      status: "succeeded",
+      remoteRef,
+      correlation: {
+        method: "ledger_join",
+        confidence: "production_candidate"
+      }
+    }),
+    /staging-only/u
+  );
+
+  assert.throws(
+    () => normalizeNativeXcmEvidence({
+      requestId,
+      status: "succeeded",
+      remoteRef,
+      correlation: {
+        method: "request_id_in_message",
+        confidence: "production_candidate"
+      },
+      hub: {
+        messageTopic: requestId
+      },
+      bifrost: {
+        messageTopic: failureCode
+      }
+    }),
+    /bifrost message topic must equal requestId/u
+  );
 });
 
 test("native PAPI source validates required endpoints and describes configuration", () => {
