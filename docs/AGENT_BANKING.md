@@ -186,6 +186,12 @@ and settlement rules.
    audit item. Plan: one adapter to start, documented as the canonical
    example, don't rush to add more.
 
+5. **Yield portfolio v2 planning.** GDOT is the first higher-yield candidate,
+   but it stays opt-in and post-vDOT. The planning artifact is
+   [`docs/strategies/hydration-gdot.md`](strategies/hydration-gdot.md). It
+   treats GDOT as a multi-hop, multi-vendor strategy behind the same
+   `XcmWrapper` boundary, not as a simple vDOT replacement.
+
 ### Non-goals for v1
 
 - Multi-asset deposits (DOT only until mainnet + one other asset maybe).
@@ -284,6 +290,13 @@ liquidation threshold is conservative.
    that drops below the collateral ratio just fails health checks on new
    actions. Needs an explicit `liquidate(account)` entrypoint that the
    protocol (or arbitrageurs) can call to close bad positions.
+
+4. **Hydration money-market migration.** The long-term credit direction is to
+   route collateralized borrowing through Hydration rather than make Averray
+   the lender of last resort. See
+   [`docs/HYDRATION_BORROW_MIGRATION.md`](HYDRATION_BORROW_MIGRATION.md).
+   Reputation should remain a platform cap and access signal; it should not
+   replace over-collateralized market borrowing.
 
 ### Non-goals for v1
 
@@ -492,9 +505,9 @@ Things we haven't decided yet:
 1. **Mainnet launch profile.** Polkadot Hub is the primary target. The
    open question is not "which chain first?" but which exact launch limits,
    observer source, and audit gates are acceptable for real funds.
-2. **Second strategy adapter?** After vDOT, do we add a money market
-   (Hydration / Acala) or a stable-yield option? Decision: wait until
-   vDOT has real deposits to inform the call.
+2. **Second strategy adapter?** Decision: Hydration GDOT is the first planned
+   opt-in candidate, but only after vDOT has real deposits and the native
+   observer evidence gate is closed.
 3. **Do we issue a platform token?** Not for v1. Maybe never. A platform
    token creates its own complexity (distribution, liquidity, regulatory).
 4. **Reputation decay?** Should reputation scores decay over time if an

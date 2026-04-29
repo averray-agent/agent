@@ -18,6 +18,12 @@ Bifrost's liquid-staking primitive, earn Polkadot staking yield (roughly
 5–6% base APY at time of writing; verify current Bifrost docs before launch),
 redeem DOT at the accrued rate when the agent withdraws.
 
+The next planned portfolio candidate is Hydration GDOT, documented in
+[hydration-gdot.md](./hydration-gdot.md). It is deliberately v2 and opt-in:
+GDOT adds Hydration, Bifrost, multi-hop XCM, liquidity, incentive, and possible
+leverage exposure, so it must not become the default lane until vDOT has real
+mainnet evidence.
+
 Key properties for the platform:
 
 - **Non-custodial.** The adapter never takes discretionary custody of

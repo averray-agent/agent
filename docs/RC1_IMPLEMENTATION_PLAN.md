@@ -291,13 +291,18 @@ logic.
 
 ### 11. Yield Portfolio V2 Planning
 
+**Status:** implemented as planning artifacts. No runtime strategy or credit
+rail changes are included.
+
 **Goal:** prepare but not launch higher-risk yield and borrow surfaces.
 
 **Changes:**
 
-- Draft `HydrationGdotAdapter` design doc.
-- Draft Hydration money-market borrow migration design.
-- Define opt-in UX and risk disclosure before any implementation.
+- [x] Draft `HydrationGdotAdapter` design doc.
+- [x] Draft Hydration money-market borrow migration design.
+- [x] Define opt-in UX and risk disclosure before any implementation.
+- [ ] Implement only after vDOT native observer evidence is captured and the
+  GDOT/Hydration evidence gates are specified.
 
 **Checks:** docs only until implementation begins.
 
