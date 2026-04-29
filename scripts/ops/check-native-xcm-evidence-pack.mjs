@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { validateEvidence } from "./validate-native-xcm-evidence.mjs";
@@ -68,6 +68,13 @@ if (method === "request_id_in_message") {
   fail(`unsupported production correlation method: ${method}.`);
 }
 
+if (options.decisionOutput) {
+  const outputPath = path.resolve(options.decisionOutput);
+  await mkdir(path.dirname(outputPath), { recursive: true });
+  await writeFile(outputPath, renderDecisionRecord({ method, captures }), "utf8");
+  console.log(`Decision record written to ${outputPath}`);
+}
+
 function parseArgs(argv) {
   const parsed = {};
   for (let index = 0; index < argv.length; index += 1) {
@@ -97,6 +104,8 @@ Required:
   --deposit <path>    Successful deposit evidence JSON.
   --withdraw <path>   Successful withdraw evidence JSON.
   --failure <path>    Failed request evidence JSON.
+  --decision-output <path>
+                      Write a Markdown decision record for the validated pack.
 
 Rules:
   - each file must pass validate-native-xcm-evidence
@@ -123,6 +132,54 @@ function assertExpectedCapture({ evidence, outcome }, { label, direction, status
   if (outcome.status !== status) {
     fail(`${label} evidence must have status=${status}; got ${outcome.status}.`);
   }
+}
+
+function renderDecisionRecord({ method, captures }) {
+  const now = new Date().toISOString();
+  const decision = method === "request_id_in_message"
+    ? "SetTopic/request-id correlation is supported."
+    : "remote_ref fallback correlation is supported.";
+  const productionPath = method === "request_id_in_message"
+    ? "Match native Hub and Bifrost evidence by `messageTopic == requestId`."
+    : "Match native Hub and Bifrost evidence by durable `remoteRef`; document why SetTopic was not preserved before enabling live reads.";
+
+  const rows = captures.map(({ label, filePath, evidence, outcome }) =>
+    `| ${label} | ${evidence.direction} | ${outcome.status} | ${outcome.requestId} | ${evidence.correlation.confidence} | ${outcome.remoteRef ?? "n/a"} | ${formatPath(filePath)} |`
+  ).join("\n");
+
+  return `# Native XCM Evidence Pack Decision
+
+Generated: ${now}
+
+## Decision
+
+${decision}
+
+Production observer path:
+
+${productionPath}
+
+## Evidence Pack
+
+Correlation method: \`${method}\`
+
+| Capture | Direction | Status | Request ID | Confidence | Remote Ref | Source File |
+|---|---|---|---|---|---|---|
+${rows}
+
+## Gate Result
+
+This pack passed \`scripts/ops/check-native-xcm-evidence-pack.mjs\`.
+
+The gate proves only the captured strategy path and request shape. Re-run it
+after changing the XCM assembler, \`XcmWrapper\`, \`XcmVdotAdapter\`, Bifrost
+destination semantics, observer extraction logic, or finality assumptions.
+`;
+}
+
+function formatPath(filePath) {
+  const relativePath = path.relative(process.cwd(), filePath);
+  return relativePath && !relativePath.startsWith("..") ? relativePath : filePath;
 }
 
 function fail(message) {

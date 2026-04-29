@@ -191,10 +191,11 @@ This is the current-lane proof we can run before paying for Subscan or
 before building the native Polkadot/Bifrost observer.
 
 For the next native-observer lane, see
-[NATIVE_XCM_OBSERVER.md](./NATIVE_XCM_OBSERVER.md). That design keeps the
-existing `/xcm/outcomes` producer contract and focuses first on proving a
-deterministic correlation path from an Averray `requestId` to native
-Hub/Bifrost settlement evidence.
+[NATIVE_XCM_OBSERVER.md](./NATIVE_XCM_OBSERVER.md) and the operator
+[NATIVE_XCM_EVIDENCE_CAPTURE_RUNBOOK.md](./NATIVE_XCM_EVIDENCE_CAPTURE_RUNBOOK.md).
+That design keeps the existing `/xcm/outcomes` producer contract and focuses
+first on proving a deterministic correlation path from an Averray `requestId`
+to native Hub/Bifrost settlement evidence.
 
 The native evidence validator now enforces the correlation gate:
 
@@ -214,8 +215,11 @@ gate before promoting the native observer:
 npm run check:native-xcm-evidence-pack -- \
   --deposit artifacts/xcm/native-deposit-evidence.json \
   --withdraw artifacts/xcm/native-withdraw-evidence.json \
-  --failure artifacts/xcm/native-failure-evidence.json
+  --failure artifacts/xcm/native-failure-evidence.json \
+  --decision-output artifacts/xcm/native-evidence-decision.md
 ```
 
 The pack gate rejects staging-only `ledger_join` evidence and requires a single
-production-candidate correlation method across all three captures.
+production-candidate correlation method across all three captures. The
+decision output records whether the pack supports SetTopic/request-id
+correlation or the `remote_ref` fallback.

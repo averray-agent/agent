@@ -36,9 +36,9 @@ The shortest path to a coherent rc1 launch is:
 
 As of this branch, **slice 10: Native XCM Observer Correlation Gate** is
 implemented as a machine-checkable staging gate. The three-artifact
-deposit/withdraw/failure evidence-pack checker is in place; the next
-operational step is running the real Chopsticks/PAPI capture and saving the
-artifacts before any vDOT mainnet allocation.
+deposit/withdraw/failure evidence-pack checker and operator capture runbook are
+in place; the next operational step is running the real Chopsticks/PAPI capture
+and saving the artifacts before any vDOT mainnet allocation.
 
 Completed and deployed in this lane:
 
@@ -61,6 +61,8 @@ Completed and deployed in this lane:
   remote-ref correlation, and staging-only ledger joins
 - deposit, withdraw, and failure evidence packs can be checked together before
   promoting the native observer
+- native XCM evidence capture now has an operator runbook and can emit a
+  decision record from the evidence-pack checker
 
 Still open in the broader rc1 path:
 
@@ -280,6 +282,8 @@ allocation.
   `messageTopic == requestId` for production-candidate SetTopic evidence.
 - [x] Add a three-artifact pack gate for deposit, withdraw, and failure
   evidence.
+- [x] Add an operator runbook for capturing Hub/Bifrost evidence and producing
+  the promotion decision record.
 - [ ] Run Chopsticks experiment for Bifrost reply-leg topic preservation.
 - [ ] If preserved, match return leg by topic.
 - [ ] If not preserved but Hub credit events are unambiguous, use serialized

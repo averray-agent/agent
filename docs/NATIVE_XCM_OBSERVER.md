@@ -7,6 +7,7 @@ publishes terminal outcomes into the existing `/xcm/outcomes` feed.
 This doc sits after:
 
 - [ASYNC_XCM_STAGING.md](./ASYNC_XCM_STAGING.md)
+- [NATIVE_XCM_EVIDENCE_CAPTURE_RUNBOOK.md](./NATIVE_XCM_EVIDENCE_CAPTURE_RUNBOOK.md)
 - [POLKADOT_EXECUTION_PLAN.md](./POLKADOT_EXECUTION_PLAN.md)
 - [strategies/vdot.md](./strategies/vdot.md)
 
@@ -336,7 +337,8 @@ Validate the whole pack:
 npm run check:native-xcm-evidence-pack -- \
   --deposit artifacts/xcm/native-deposit-evidence.json \
   --withdraw artifacts/xcm/native-withdraw-evidence.json \
-  --failure artifacts/xcm/native-failure-evidence.json
+  --failure artifacts/xcm/native-failure-evidence.json \
+  --decision-output artifacts/xcm/native-evidence-decision.md
 ```
 
 The pack checker runs the single-envelope validator for each file, then applies
@@ -352,6 +354,7 @@ the launch gate across all three captures:
 If all three use `request_id_in_message`, the pack supports the SetTopic
 preservation path. If they all use `remote_ref`, the pack supports the fallback
 path and the fallback must be documented here before live reads are enabled.
+The optional `--decision-output` file is the review artifact for that decision.
 
 ---
 
@@ -373,9 +376,9 @@ path and the fallback must be documented here before live reads are enabled.
 
 ## Recommended next implementation slice
 
-1. Capture one real staging evidence envelope with Chopsticks/PAPI using
-  `npm run capture:native-xcm-evidence`, then make it pass
-  `npm run validate:native-xcm-evidence`.
+1. Follow
+   [NATIVE_XCM_EVIDENCE_CAPTURE_RUNBOOK.md](./NATIVE_XCM_EVIDENCE_CAPTURE_RUNBOOK.md)
+   to capture one real staging evidence pack with Chopsticks/PAPI.
 2. If Bifrost does not preserve SetTopic on the reply leg, document the chosen
    fallback (`remote_ref`, serialized dispatch, or amount perturbation) before
    implementing live reads.
