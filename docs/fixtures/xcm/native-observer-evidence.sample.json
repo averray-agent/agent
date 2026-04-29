@@ -9,9 +9,9 @@
   "failureCode": null,
   "observedAt": "2026-04-23T12:00:00.000Z",
   "correlation": {
-    "method": "remote_ref",
-    "confidence": "staging",
-    "notes": "Sample only. Replace with evidence captured from a Chopsticks/PAPI replay."
+    "method": "request_id_in_message",
+    "confidence": "production_candidate",
+    "notes": "Sample only. Replace with evidence captured from a Chopsticks/PAPI replay proving Bifrost preserves SetTopic on the reply leg."
   },
   "hub": {
     "chain": "polkadot-hub",
@@ -19,6 +19,7 @@
     "blockHash": "0x3333333333333333333333333333333333333333333333333333333333333333",
     "extrinsicHash": "0x4444444444444444444444444444444444444444444444444444444444444444",
     "messageHash": "0x5555555555555555555555555555555555555555555555555555555555555555",
+    "messageTopic": "0x1111111111111111111111111111111111111111111111111111111111111111",
     "eventIndex": "123-7"
   },
   "bifrost": {
@@ -26,6 +27,7 @@
     "blockNumber": "456",
     "blockHash": "0x6666666666666666666666666666666666666666666666666666666666666666",
     "eventIndex": "456-12",
+    "messageTopic": "0x1111111111111111111111111111111111111111111111111111111111111111",
     "assetLocation": {
       "parents": 1,
       "interior": "Here"
