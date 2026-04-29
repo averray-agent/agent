@@ -29,6 +29,22 @@ It complements:
   - one wallet JWT for the user request path
   - one admin JWT for the operator path
 
+For a fresh Polkadot Hub TestNet/staging contract suite, the deploy script can
+produce the right manifest shape with:
+
+```bash
+WITH_XCM_WRAPPER=1 WITH_XCM_VDOT_ADAPTER=1 ./scripts/deploy_contracts.sh
+```
+
+Use `PROFILE=testnet` plus the normal private deploy env. The manifest then
+provides:
+
+- `contracts.xcmWrapper` -> backend `XCM_WRAPPER_ADDRESS`
+- `strategies` -> backend `STRATEGIES_JSON`
+
+The async vDOT deploy path is blocked for `PROFILE=mainnet` until the native
+XCM evidence pack passes.
+
 Useful health check:
 
 ```bash

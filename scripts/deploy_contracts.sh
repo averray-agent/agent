@@ -33,6 +33,9 @@
 #                              see docs/MAINNET_PARAMETERS.md for the
 #                              intended mainnet launch profile)
 #   MAINNET_CONFIRM         must equal "I-understand" for PROFILE=mainnet
+#   WITH_XCM_WRAPPER        deploy XcmWrapper when set to 1
+#   WITH_XCM_VDOT_ADAPTER   deploy/register XcmVdotAdapter when set to 1
+#                           (testnet/dev only; requires WITH_XCM_WRAPPER=1)
 #
 # Output: deployments/<profile>.json with all deployed addresses.
 # Also prints shell-compatible KEY=VALUE lines (same format as before) to stdout.
@@ -232,11 +235,16 @@ send_tx "$TREASURY_POLICY" "setPauser(address)" "$PAUSER_ADDRESS"
 # enable the simulateYield governance knob.
 VDOT_ADAPTER=""
 VDOT_STRATEGY_ID=""
+VDOT_ADAPTER_KIND=""
 if [[ "${WITH_VDOT_MOCK:-}" == "1" ]]; then
   if [[ "$PROFILE" == "mainnet" ]]; then
     fail "WITH_VDOT_MOCK=1 is not allowed on PROFILE=mainnet (see docs/strategies/vdot.md for the real mainnet path)"
   fi
+  if [[ "${WITH_XCM_VDOT_ADAPTER:-}" == "1" ]]; then
+    fail "WITH_VDOT_MOCK=1 and WITH_XCM_VDOT_ADAPTER=1 are mutually exclusive"
+  fi
   VDOT_STRATEGY_ID="${VDOT_STRATEGY_ID_HEX:-0x56444f545f56315f4d4f434b0000000000000000000000000000000000000000}"  # bytes32("VDOT_V1_MOCK")
+  VDOT_ADAPTER_KIND="mock_vdot"
   echo "Deploying MockVDotAdapter"
   VDOT_ADAPTER="$(extract_address "$(forge_deploy contracts/strategies/MockVDotAdapter.sol:MockVDotAdapter --constructor-args "$TREASURY_POLICY" "$TOKEN_ADDRESS" "$VDOT_STRATEGY_ID")")"
   echo "MockVDotAdapter:         $VDOT_ADAPTER"
@@ -244,6 +252,23 @@ if [[ "${WITH_VDOT_MOCK:-}" == "1" ]]; then
   # wiring PR) can route allocateIdleFunds → adapter.deposit calls through
   # policy-gated paths. Also mark it as an approved strategy so the
   # registry accepts it.
+  send_tx "$TREASURY_POLICY" "setApprovedStrategy(address,bool)" "$VDOT_ADAPTER" true
+  send_tx "$TREASURY_POLICY" "setServiceOperator(address,bool)" "$VDOT_ADAPTER" true
+  send_tx "$STRATEGY_REGISTRY" "registerStrategy(address)" "$VDOT_ADAPTER"
+fi
+
+if [[ "${WITH_XCM_VDOT_ADAPTER:-}" == "1" ]]; then
+  if [[ "$PROFILE" == "mainnet" ]]; then
+    fail "WITH_XCM_VDOT_ADAPTER=1 is not allowed on PROFILE=mainnet until native observer evidence has passed"
+  fi
+  if [[ -z "$XCM_WRAPPER" ]]; then
+    fail "WITH_XCM_VDOT_ADAPTER=1 requires WITH_XCM_WRAPPER=1"
+  fi
+  VDOT_STRATEGY_ID="${VDOT_STRATEGY_ID_HEX:-0x56444f545f56315f58434d0000000000000000000000000000000000000000}"  # bytes32("VDOT_V1_XCM")
+  VDOT_ADAPTER_KIND="polkadot_vdot"
+  echo "Deploying XcmVdotAdapter"
+  VDOT_ADAPTER="$(extract_address "$(forge_deploy contracts/strategies/XcmVdotAdapter.sol:XcmVdotAdapter --constructor-args "$TREASURY_POLICY" "$TOKEN_ADDRESS" "$VDOT_STRATEGY_ID" "$XCM_WRAPPER")")"
+  echo "XcmVdotAdapter:          $VDOT_ADAPTER"
   send_tx "$TREASURY_POLICY" "setApprovedStrategy(address,bool)" "$VDOT_ADAPTER" true
   send_tx "$TREASURY_POLICY" "setServiceOperator(address,bool)" "$VDOT_ADAPTER" true
   send_tx "$STRATEGY_REGISTRY" "registerStrategy(address)" "$VDOT_ADAPTER"
@@ -265,14 +290,38 @@ if [[ -n "$XCM_WRAPPER" ]]; then
   XCM_WRAPPER_JSON="\"$XCM_WRAPPER\""
 fi
 if [[ -n "$VDOT_ADAPTER" ]]; then
-  STRATEGIES_JSON="[
-    {
-      \"strategyId\": \"$VDOT_STRATEGY_ID\",
-      \"adapter\": \"$VDOT_ADAPTER\",
-      \"kind\": \"mock_vdot\",
-      \"riskLabel\": \"Mock vDOT liquid staking (testnet). Not a real yield source.\"
-    }
-  ]"
+  if [[ "$VDOT_ADAPTER_KIND" == "polkadot_vdot" ]]; then
+    XCM_VDOT_DESTINATION_PARACHAIN="${XCM_VDOT_DESTINATION_PARACHAIN:-2030}"
+    XCM_VDOT_ASSET_SYMBOL="${XCM_VDOT_ASSET_SYMBOL:-DOT}"
+    XCM_VDOT_ASSET_DECIMALS="${XCM_VDOT_ASSET_DECIMALS:-18}"
+    STRATEGIES_JSON="[
+      {
+        \"strategyId\": \"$VDOT_STRATEGY_ID\",
+        \"adapter\": \"$VDOT_ADAPTER\",
+        \"kind\": \"polkadot_vdot\",
+        \"executionMode\": \"async_xcm\",
+        \"riskLabel\": \"Async XCM-backed vDOT lane. Requests queue through XcmWrapper and settle later; not instant liquidity.\",
+        \"asset\": {
+          \"assetClass\": \"custom\",
+          \"address\": \"$TOKEN_ADDRESS\",
+          \"symbol\": \"$XCM_VDOT_ASSET_SYMBOL\",
+          \"decimals\": $XCM_VDOT_ASSET_DECIMALS
+        },
+        \"xcm\": {
+          \"destinationParachain\": $XCM_VDOT_DESTINATION_PARACHAIN
+        }
+      }
+    ]"
+  else
+    STRATEGIES_JSON="[
+      {
+        \"strategyId\": \"$VDOT_STRATEGY_ID\",
+        \"adapter\": \"$VDOT_ADAPTER\",
+        \"kind\": \"mock_vdot\",
+        \"riskLabel\": \"Mock vDOT liquid staking (testnet). Not a real yield source.\"
+      }
+    ]"
+  fi
 fi
 
 cat > "$manifest_path" <<JSON

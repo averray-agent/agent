@@ -163,7 +163,7 @@ expectations for mainnet.
 
 ---
 
-## How to register the adapter (testnet)
+## How to register the adapters (testnet)
 
 The deploy script has a `--with-vdot-mock` path that deploys the
 adapter and registers it with the strategy registry. Rough shape:
@@ -186,6 +186,35 @@ section with the adapter address and its `strategyId`. The backend reads
 that manifest so `/strategies` surfaces the registered adapter in its
 list.
 
+For the real async XCM-shaped staging lane, use `XcmWrapper` plus
+`XcmVdotAdapter` instead of the mock adapter:
+
+```bash
+PROFILE=testnet \
+RPC_URL=https://eth-rpc-testnet.polkadot.io/ \
+PRIVATE_KEY=0x... \
+TOKEN_ADDRESS=0x<hub-dot-or-staging-token-erc20> \
+OWNER=0x<multisig-mapped-evm> \
+PAUSER=0x<hot-key-evm> \
+VERIFIER=0x<verifier-evm> \
+ARBITRATOR=0x<arbitrator-evm> \
+WITH_XCM_WRAPPER=1 \
+WITH_XCM_VDOT_ADAPTER=1 \
+./scripts/deploy_contracts.sh
+```
+
+This writes `contracts.xcmWrapper` and a `strategies[]` entry shaped for the
+backend:
+
+- `kind: "polkadot_vdot"`
+- `executionMode: "async_xcm"`
+- local accounting asset: `TOKEN_ADDRESS`
+- XCM destination parachain: `2030` (Bifrost by default)
+
+`WITH_XCM_VDOT_ADAPTER=1` is intentionally blocked for `PROFILE=mainnet` until
+the native XCM evidence pack passes. The mock and XCM adapter paths are
+mutually exclusive for a single deployment manifest.
+
 For backend config, the preferred `STRATEGIES_JSON` shape is now the
 explicit asset-metadata form rather than a bare asset address. That lets
 the backend carry:
@@ -199,6 +228,11 @@ the backend carry:
 This is especially important for mainnet vDOT, where the asset identity
 is not just "one token address" but part of the real Polkadot Hub asset
 model.
+
+After deployment, copy the manifest strategy list into backend env as
+`STRATEGIES_JSON`, and copy `contracts.xcmWrapper` into `XCM_WRAPPER_ADDRESS`.
+The helper `scripts/write_server_env.sh` preserves `STRATEGIES_JSON` when it is
+already exported.
 
 ---
 

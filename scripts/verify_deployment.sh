@@ -185,6 +185,23 @@ if [[ "$(echo "$manifest" | jq -r '.parameters // empty')" != "" ]]; then
     "$(call "$TREASURY_POLICY" "claimFeeVerifierBps()(uint16)")"
 fi
 
+strategy_count="$(echo "$manifest" | jq -r '.strategies | length')"
+if [[ "$strategy_count" != "0" ]]; then
+  echo ""
+  echo "Strategy adapters:"
+  while IFS=$'\t' read -r strategy_id adapter kind; do
+    code=$(cast code --rpc-url "$RPC_URL" "$adapter" 2>/dev/null || echo "0x")
+    if [[ "$code" == "0x" ]]; then
+      printf "  [FAIL] strategy %s (%s) at %s has no bytecode\n" "$strategy_id" "$kind" "$adapter"
+      fail=1
+    else
+      printf "  [ok] strategy %s (%s) at %s\n" "$strategy_id" "$kind" "$adapter"
+    fi
+    check_bool "approvedStrategy($kind)" "true" "$(call "$TREASURY_POLICY" "approvedStrategies(address)(bool)" "$adapter")"
+    check_bool "serviceOperator($kind)" "true" "$(call "$TREASURY_POLICY" "serviceOperators(address)(bool)" "$adapter")"
+  done < <(echo "$manifest" | jq -r '.strategies[] | [.strategyId, .adapter, .kind] | @tsv')
+fi
+
 echo ""
 if [[ "$fail" == "0" ]]; then
   echo "All checks passed."
