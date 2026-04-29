@@ -65,6 +65,8 @@ Completed and deployed in this lane:
   decision record from the evidence-pack checker
 - decoded PAPI/Chopsticks/block-explorer events can be normalized into the raw
   `hub.json` / `bifrost.json` inputs required by the evidence assembler
+- testnet deploy wiring can now emit `XCM_WRAPPER_ADDRESS` plus an async
+  `polkadot_vdot` strategy manifest for capture rehearsals
 
 Still open in the broader rc1 path:
 
@@ -288,6 +290,8 @@ allocation.
   the promotion decision record.
 - [x] Add a decoded-event extractor for producing `hub.json` / `bifrost.json`
   capture inputs from PAPI, Chopsticks, or block-explorer event JSON.
+- [x] Add testnet/staging deploy wiring for `XcmWrapper` plus
+  `XcmVdotAdapter`; keep it blocked on mainnet until evidence passes.
 - [ ] Run Chopsticks experiment for Bifrost reply-leg topic preservation.
 - [ ] If preserved, match return leg by topic.
 - [ ] If not preserved but Hub credit events are unambiguous, use serialized
