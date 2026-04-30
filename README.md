@@ -220,6 +220,12 @@ On-chain escrow resolution is additionally gated by `TreasuryPolicy.verifiers`;
 in the current backend-signer architecture, the configured chain signer is the
 authorized verifier address.
 
+External agents should start with
+[docs/EXTERNAL_AGENT_WALLET_ONBOARDING.md](docs/EXTERNAL_AGENT_WALLET_ONBOARDING.md).
+That guide explains what can be inspected without a wallet, what requires a
+wallet, and how a browser-supervised or self-hosted agent should obtain and use
+a dedicated testnet wallet without exposing private keys to the model.
+
 Key rotation: prepend the new secret to `AUTH_JWT_SECRETS`, redeploy, then
 drop the old secret after `AUTH_TOKEN_TTL_SECONDS` has elapsed so that every
 token issued under the old key has expired.
