@@ -61,6 +61,11 @@ export const ESCROW_CORE_ABI = [
   "event AutoDisclosed(bytes32 indexed hash, uint64 timestamp)"
 ];
 
+export const ESCROW_CORE_LEGACY_ABI = [
+  "function createSinglePayoutJob(bytes32 jobId, address asset, uint256 reward, uint256 opsReserve, uint256 contingencyReserve, uint256 claimTtl, bytes32 verifierMode, bytes32 category)",
+  "function jobs(bytes32 jobId) view returns ((address poster, address worker, address asset, bytes32 verifierMode, bytes32 category, uint256 reward, uint256 opsReserve, uint256 contingencyReserve, uint256 released, uint256 claimExpiry, uint256 claimStake, uint16 claimStakeBps, uint8 payoutMode, uint8 state))"
+];
+
 export const REPUTATION_SBT_ABI = [
   "function balanceOf(address account) view returns (uint256)",
   "function reputations(address account) view returns (uint256 skill, uint256 reliability, uint256 economic)",

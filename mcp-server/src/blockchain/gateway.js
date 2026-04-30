@@ -13,6 +13,7 @@ import {
   AGENT_ACCOUNT_ABI,
   ERC20_MOCK_ABI,
   ESCROW_CORE_ABI,
+  ESCROW_CORE_LEGACY_ABI,
   REPUTATION_SBT_ABI,
   STRATEGY_ADAPTER_ABI,
   TREASURY_POLICY_ABI,
@@ -34,6 +35,7 @@ import {
 const REQUEST_KIND_LABELS = ["deposit", "withdraw", "claim"];
 const REQUEST_STATUS_LABELS = ["unknown", "pending", "succeeded", "failed", "cancelled"];
 const abiCoder = AbiCoder.defaultAbiCoder();
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 export class BlockchainGateway {
   constructor(config = loadBlockchainConfig()) {
@@ -44,6 +46,7 @@ export class BlockchainGateway {
       this.policyContract = undefined;
       this.accountContract = undefined;
       this.escrowContract = undefined;
+      this.legacyEscrowContract = undefined;
       this.reputationContract = undefined;
       this.xcmWrapperContract = undefined;
       return;
@@ -66,6 +69,11 @@ export class BlockchainGateway {
     this.escrowContract = new Contract(
       config.escrowCoreAddress,
       ESCROW_CORE_ABI,
+      this.signer ?? this.provider
+    );
+    this.legacyEscrowContract = new Contract(
+      config.escrowCoreAddress,
+      ESCROW_CORE_LEGACY_ABI,
       this.signer ?? this.provider
     );
     this.reputationContract = new Contract(
@@ -563,9 +571,9 @@ export class BlockchainGateway {
     return this.withGatewayError("ensureJob", async () => {
       this.requireSigner("ensureJob");
       const asset = this.requireAsset(job.rewardAsset);
-      const live = await this.getJob(instanceJobId);
+      const live = await this.readEscrowJob(instanceJobId);
       if (live.state !== 0) {
-        return live;
+        return this.publicEscrowJob(live);
       }
 
       const totalRequired = Number(job.rewardAmount ?? 0) + Number(claimStakeAmount ?? 0);
@@ -589,7 +597,8 @@ export class BlockchainGateway {
       }
 
       const specHash = hashCanonicalContent(job);
-      const createTx = await this.escrowContract.createSinglePayoutJob(
+      const createTx = await this.createSinglePayoutJobForLayout(
+        live.contractLayout,
         this.toJobId(instanceJobId),
         asset.address,
         job.rewardAmount,
@@ -682,31 +691,95 @@ export class BlockchainGateway {
     });
   }
 
+  async readEscrowJob(jobId) {
+    const normalizedJobId = this.toJobId(jobId);
+    try {
+      return this.normalizeEscrowJob(await this.escrowContract.jobs(normalizedJobId), "rc1");
+    } catch (error) {
+      if (!this.isEscrowJobDecodeError(error) || !this.legacyEscrowContract) {
+        throw error;
+      }
+      return this.normalizeEscrowJob(await this.legacyEscrowContract.jobs(normalizedJobId), "legacy");
+    }
+  }
+
+  normalizeEscrowJob(job, contractLayout) {
+    return {
+      contractLayout,
+      poster: job.poster,
+      worker: job.worker,
+      asset: job.asset,
+      specHash: job.specHash ?? ZERO_BYTES32,
+      reward: Number(job.reward),
+      rewardRaw: job.reward?.toString?.() ?? String(job.reward),
+      claimStake: Number(job.claimStake),
+      claimStakeRaw: job.claimStake?.toString?.() ?? String(job.claimStake),
+      claimStakeBps: Number(job.claimStakeBps),
+      claimFee: Number(job.claimFee ?? 0),
+      claimFeeRaw: job.claimFee?.toString?.() ?? "0",
+      claimFeeBps: Number(job.claimFeeBps ?? 0),
+      claimEconomicsWaived: Boolean(job.claimEconomicsWaived ?? false),
+      rejectingVerifier: job.rejectingVerifier ?? ZERO_ADDRESS,
+      released: Number(job.released),
+      releasedRaw: job.released?.toString?.() ?? String(job.released),
+      state: Number(job.state),
+      claimExpiry: Number(job.claimExpiry),
+      rejectedAt: Number(job.rejectedAt ?? 0),
+      disputedAt: Number(job.disputedAt ?? 0)
+    };
+  }
+
+  publicEscrowJob(job) {
+    const { contractLayout: _contractLayout, ...publicJob } = job;
+    return publicJob;
+  }
+
+  async createSinglePayoutJobForLayout(
+    contractLayout,
+    jobId,
+    assetAddress,
+    reward,
+    opsReserve,
+    contingencyReserve,
+    claimTtl,
+    verifierMode,
+    category,
+    specHash
+  ) {
+    if (contractLayout === "legacy") {
+      return this.legacyEscrowContract.createSinglePayoutJob(
+        jobId,
+        assetAddress,
+        reward,
+        opsReserve,
+        contingencyReserve,
+        claimTtl,
+        verifierMode,
+        category
+      );
+    }
+    return this.escrowContract.createSinglePayoutJob(
+      jobId,
+      assetAddress,
+      reward,
+      opsReserve,
+      contingencyReserve,
+      claimTtl,
+      verifierMode,
+      category,
+      specHash
+    );
+  }
+
+  isEscrowJobDecodeError(error) {
+    const code = String(error?.code ?? "");
+    const message = `${error?.shortMessage ?? ""} ${error?.message ?? ""}`;
+    return code === "BAD_DATA" || /could not decode result data|decode result data|invalid length/u.test(message);
+  }
+
   async getJob(jobId) {
     return this.withGatewayError("getJob", async () => {
-      const job = await this.escrowContract.jobs(this.toJobId(jobId));
-      return {
-        poster: job.poster,
-        worker: job.worker,
-        asset: job.asset,
-        specHash: job.specHash,
-        reward: Number(job.reward),
-        rewardRaw: job.reward?.toString?.() ?? String(job.reward),
-        claimStake: Number(job.claimStake),
-        claimStakeRaw: job.claimStake?.toString?.() ?? String(job.claimStake),
-        claimStakeBps: Number(job.claimStakeBps),
-        claimFee: Number(job.claimFee),
-        claimFeeRaw: job.claimFee?.toString?.() ?? String(job.claimFee),
-        claimFeeBps: Number(job.claimFeeBps),
-        claimEconomicsWaived: Boolean(job.claimEconomicsWaived),
-        rejectingVerifier: job.rejectingVerifier,
-        released: Number(job.released),
-        releasedRaw: job.released?.toString?.() ?? String(job.released),
-        state: Number(job.state),
-        claimExpiry: Number(job.claimExpiry),
-        rejectedAt: Number(job.rejectedAt),
-        disputedAt: Number(job.disputedAt)
-      };
+      return this.publicEscrowJob(await this.readEscrowJob(jobId));
     });
   }
 
