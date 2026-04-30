@@ -186,7 +186,16 @@ External agents should start from `GET /onboarding`. It now exposes:
   account modes are documented as planned/mapping-dependent.
 - `onboarding.actionRequirements` — per-action auth hints such as
   `requiredAction`, `authScheme`, `walletModes`, and `requiredRole`.
+- `onboarding.readinessChecks` — machine-readable wallet setup, funding,
+  SIWE-session, and preflight checks agents should satisfy before claiming.
 - `auth.entrypoints` — the canonical nonce, verify, and logout endpoints.
+
+For a self-serve operator guide, see
+[`docs/AGENT_WALLET_ONBOARDING.md`](docs/AGENT_WALLET_ONBOARDING.md). The
+current protected HTTP path is an Ethereum-compatible `0x...` wallet using
+SIWE. Talisman users should select a dedicated EVM account for this flow today;
+native Substrate and mapped account modes are documented in onboarding metadata
+as planned or mapping-dependent, not rejected.
 
 When a protected route is called without a token, the 401 payload also includes
 the same machine-readable next step (`requiredAction: "wallet_sign_in"`,

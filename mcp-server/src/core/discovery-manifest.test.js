@@ -39,7 +39,23 @@ test("buildDiscoveryManifest returns the full public discovery shape", () => {
   assert.ok(manifest.tools.some((tool) => tool.name === "getSessionStateMachine"));
   assert.equal(manifest.auth.schemeId, "SIWE_JWT");
   assert.deepEqual(manifest.auth.supportedWalletModes, ["evm-siwe"]);
-  assert.ok(manifest.onboarding.walletModes.some((mode) => mode.id === "substrate-mapped"));
+  assert.equal(manifest.docs.walletOnboarding, "https://github.com/depre-dev/agent/blob/main/docs/AGENT_WALLET_ONBOARDING.md");
+  assert.ok(manifest.onboarding.walletModes.some((mode) => (
+    mode.id === "evm-siwe"
+    && mode.status === "supported"
+    && mode.chain.faucetUrl === "https://faucet.polkadot.io/"
+    && mode.setup.secretHandling.includes("never paste raw keys")
+  )));
+  assert.ok(manifest.onboarding.walletModes.some((mode) => (
+    mode.id === "substrate-mapped"
+    && mode.status === "documented_not_yet_supported_for_http_auth"
+    && mode.mappingRequirement.includes("pallet_revive.map_account")
+    && mode.currentBlocker.includes("do not yet accept native Substrate signatures")
+  )));
+  assert.ok(manifest.onboarding.readinessChecks.some((check) => (
+    check.id === "wallet-funded" && check.faucetUrl === "https://faucet.polkadot.io/"
+  )));
+  assert.ok(manifest.onboarding.selfServeChecklist.some((entry) => entry.includes("do not paste")));
   assert.ok(manifest.onboarding.actionRequirements.some((entry) => (
     entry.method === "POST" && entry.path === "/jobs/claim" && entry.requiredAction === "wallet_sign_in"
   )));
@@ -57,6 +73,7 @@ test("buildPlatformCapabilities stays aligned with the discovery tool list", () 
     starterFlow: manifest.onboarding.starterFlow,
     walletModes: manifest.onboarding.walletModes,
     actionRequirements: manifest.onboarding.actionRequirements,
+    readinessChecks: manifest.onboarding.readinessChecks,
     selfServeChecklist: manifest.onboarding.selfServeChecklist
   });
   assert.deepEqual(capabilities.auth, {

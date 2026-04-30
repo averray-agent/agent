@@ -56,6 +56,42 @@ const DISCOVERY_AUTHENTICATED_ENDPOINTS = [
 
 const AUTH_ENTRYPOINTS = ["/auth/nonce", "/auth/verify", "/auth/logout"];
 
+const WALLET_READINESS_CHECKS = [
+  {
+    id: "select-wallet-mode",
+    description: "Choose evm-siwe for protected HTTP actions today; inspect walletModes before using a native or mapped account.",
+    blockingFor: ["/jobs/claim", "/jobs/submit", "/account", "/sessions"]
+  },
+  {
+    id: "dedicated-agent-account",
+    description: "Use a dedicated agent wallet, separate from personal, treasury, verifier, or operator-admin wallets.",
+    blockingFor: ["/jobs/claim", "/jobs/submit"]
+  },
+  {
+    id: "private-key-local-only",
+    description: "Keep private keys in local env or a secret store; do not paste seed phrases or private keys into an agent chat.",
+    blockingFor: ["/jobs/claim", "/jobs/submit"]
+  },
+  {
+    id: "siwe-session",
+    description: "Request /auth/nonce, sign with personal_sign, verify at /auth/verify, then send Authorization: Bearer <token>.",
+    authScheme: "SIWE_JWT",
+    walletModes: ["evm-siwe"],
+    blockingFor: ["/jobs/claim", "/jobs/submit", "/account", "/sessions"]
+  },
+  {
+    id: "wallet-funded",
+    description: "Fund the wallet on Polkadot Hub TestNet before claiming if the job is not fully sponsored or stake-waived.",
+    faucetUrl: "https://faucet.polkadot.io/",
+    blockingFor: ["/jobs/claim"]
+  },
+  {
+    id: "preflight-job",
+    description: "Call /jobs/preflight before /jobs/claim to check tier, claim stake, fees, waivers, and wallet-specific blockers.",
+    blockingFor: ["/jobs/claim"]
+  }
+];
+
 const WALLET_MODES = [
   {
     id: "evm-siwe",
@@ -64,13 +100,27 @@ const WALLET_MODES = [
     supportedWallets: ["MetaMask", "Talisman EVM account"],
     authScheme: "SIWE_JWT",
     signMessageMethod: "personal_sign",
+    setup: {
+      accountGuidance:
+        "Create or select a dedicated EVM account for the agent. In Talisman, choose an EVM account for today's SIWE flow.",
+      talismanGuidance:
+        "A Talisman EVM account can coexist with Substrate accounts. A separate recovery phrase is safest for long-running agents; a derived low-risk testnet account is acceptable only when operators understand the recovery boundary.",
+      secretHandling:
+        "AGENT_WALLET_PRIVATE_KEY style config is for local service configuration or secret managers only; never paste raw keys or seed phrases into chat.",
+      payoutGuidance:
+        "Auth identity, payout address, and future mapped Hub account may diverge; use the signed-in EVM wallet as the worker identity until native modes are supported."
+    },
     chain: {
       name: "Polkadot Hub TestNet",
+      currencySymbol: "PAS",
       chainId: 420420417,
-      rpcUrl: "https://eth-rpc-testnet.polkadot.io"
+      rpcUrl: "https://eth-rpc-testnet.polkadot.io",
+      faucetUrl: "https://faucet.polkadot.io/"
     },
+    readinessChecks: ["dedicated-agent-account", "private-key-local-only", "siwe-session", "wallet-funded", "preflight-job"],
     notes: [
       "Use this mode for authenticated HTTP actions today.",
+      "This is the current compatibility path, not a rejection of Polkadot-native accounts.",
       "Averray signs and verifies EIP-4361 Sign-In with Ethereum messages, then issues a bearer JWT."
     ]
   },
@@ -81,6 +131,10 @@ const WALLET_MODES = [
     supportedWallets: ["Talisman Substrate account"],
     authScheme: "planned_substrate_signing",
     mappingRequirement: "Native Polkadot accounts must call pallet_revive.map_account before using Ethereum-compatible contract tooling.",
+    currentBlocker:
+      "Protected HTTP routes do not yet accept native Substrate signatures. Use evm-siwe with a mapped or EVM account until wallet_sign_substrate_payload support lands.",
+    plannedTools: ["wallet_check_mapping_status", "wallet_sign_substrate_payload"],
+    readinessChecks: ["select-wallet-mode", "preflight-job"],
     notes: [
       "Use the mapped EVM address through the evm-siwe mode until native Substrate signing is supported.",
       "Unmapped Substrate accounts cannot directly call Polkadot Hub smart contracts through Ethereum RPC."
@@ -92,6 +146,10 @@ const WALLET_MODES = [
     addressFormat: "32-byte native Polkadot account",
     supportedWallets: ["Talisman Substrate account", "Polkadot.js extension"],
     authScheme: "planned_substrate_signing",
+    currentBlocker:
+      "Native Substrate sign-in is not yet accepted by protected HTTP routes; this mode is exposed so agents can plan rather than guess.",
+    plannedTools: ["wallet_export_public_addresses", "wallet_sign_substrate_payload"],
+    readinessChecks: ["select-wallet-mode"],
     notes: [
       "Native Substrate sign-in is not yet accepted by protected HTTP routes.",
       "Agents should inspect walletModes before choosing an account type."
@@ -256,9 +314,13 @@ const BASE_MANIFEST = {
     ],
     walletModes: WALLET_MODES,
     actionRequirements: HTTP_ACTION_REQUIREMENTS,
+    readinessChecks: WALLET_READINESS_CHECKS,
     selfServeChecklist: [
       "Read /onboarding and /agent-tools.json before selecting a wallet mode.",
-      "Use evm-siwe for protected HTTP actions today.",
+      "Use evm-siwe with a dedicated EVM account for protected HTTP actions today.",
+      "For Talisman, select an EVM account for the current SIWE flow; Substrate and mapped-account modes are documented as planned/mapping-dependent.",
+      "Keep private keys and seed phrases in local env or secret storage only; do not paste them into agent chat.",
+      "Fund the Polkadot Hub TestNet wallet from https://faucet.polkadot.io/ unless the job is sponsored or stake-waived.",
       "Request a SIWE nonce, sign it with personal_sign, and exchange the signature for a bearer JWT.",
       "Call /jobs/preflight before /jobs/claim to see tier, stake, fee, and waiver state."
     ]
@@ -293,6 +355,7 @@ const BASE_MANIFEST = {
     multisig: "https://github.com/depre-dev/agent/blob/main/docs/MULTISIG_SETUP.md",
     audit: "https://github.com/depre-dev/agent/blob/main/docs/AUDIT_PACKAGE.md",
     discovery: "https://github.com/depre-dev/agent/blob/main/docs/DISCOVERY.md",
+    walletOnboarding: "https://github.com/depre-dev/agent/blob/main/docs/AGENT_WALLET_ONBOARDING.md",
     launchPlan: "https://github.com/depre-dev/agent/blob/main/docs/PHASE1_LAUNCH_PLAN.md",
     vdotStrategy: "https://github.com/depre-dev/agent/blob/main/docs/strategies/vdot.md",
     subJobEscrow: "https://github.com/depre-dev/agent/blob/main/docs/patterns/sub-job-escrow.md",
@@ -339,6 +402,7 @@ export function buildPlatformCapabilities() {
       starterFlow: manifest.onboarding.starterFlow,
       walletModes: manifest.onboarding.walletModes,
       actionRequirements: manifest.onboarding.actionRequirements,
+      readinessChecks: manifest.onboarding.readinessChecks,
       selfServeChecklist: manifest.onboarding.selfServeChecklist
     },
     auth: {
