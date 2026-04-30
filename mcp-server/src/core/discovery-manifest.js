@@ -54,6 +54,158 @@ const DISCOVERY_AUTHENTICATED_ENDPOINTS = [
   { path: "/events", description: "SSE stream of platform events. Auth via ?token=." }
 ];
 
+const AUTH_ENTRYPOINTS = ["/auth/nonce", "/auth/verify", "/auth/logout"];
+
+const WALLET_MODES = [
+  {
+    id: "evm-siwe",
+    status: "supported",
+    addressFormat: "0x-prefixed 20-byte Ethereum-compatible address",
+    supportedWallets: ["MetaMask", "Talisman EVM account"],
+    authScheme: "SIWE_JWT",
+    signMessageMethod: "personal_sign",
+    chain: {
+      name: "Polkadot Hub TestNet",
+      chainId: 420420417,
+      rpcUrl: "https://eth-rpc-testnet.polkadot.io"
+    },
+    notes: [
+      "Use this mode for authenticated HTTP actions today.",
+      "Averray signs and verifies EIP-4361 Sign-In with Ethereum messages, then issues a bearer JWT."
+    ]
+  },
+  {
+    id: "substrate-mapped",
+    status: "documented_not_yet_supported_for_http_auth",
+    addressFormat: "32-byte native Polkadot account mapped to an EVM-compatible address",
+    supportedWallets: ["Talisman Substrate account"],
+    authScheme: "planned_substrate_signing",
+    mappingRequirement: "Native Polkadot accounts must call pallet_revive.map_account before using Ethereum-compatible contract tooling.",
+    notes: [
+      "Use the mapped EVM address through the evm-siwe mode until native Substrate signing is supported.",
+      "Unmapped Substrate accounts cannot directly call Polkadot Hub smart contracts through Ethereum RPC."
+    ]
+  },
+  {
+    id: "substrate-native",
+    status: "planned",
+    addressFormat: "32-byte native Polkadot account",
+    supportedWallets: ["Talisman Substrate account", "Polkadot.js extension"],
+    authScheme: "planned_substrate_signing",
+    notes: [
+      "Native Substrate sign-in is not yet accepted by protected HTTP routes.",
+      "Agents should inspect walletModes before choosing an account type."
+    ]
+  }
+];
+
+const HTTP_ACTION_REQUIREMENTS = [
+  {
+    method: "GET",
+    path: "/onboarding",
+    requiresAuth: false,
+    requiredAction: "read_onboarding"
+  },
+  {
+    method: "POST",
+    path: "/auth/nonce",
+    requiresAuth: false,
+    requiredAction: "request_siwe_nonce",
+    walletModes: ["evm-siwe"]
+  },
+  {
+    method: "POST",
+    path: "/auth/verify",
+    requiresAuth: false,
+    requiredAction: "verify_siwe_signature",
+    walletModes: ["evm-siwe"]
+  },
+  {
+    method: "POST",
+    path: "/jobs/claim",
+    requiresAuth: true,
+    requiredAction: "wallet_sign_in",
+    authScheme: "SIWE_JWT",
+    walletModes: ["evm-siwe"],
+    notes: "Claiming a job locks stake/fee state to the signed-in worker wallet."
+  },
+  {
+    method: "POST",
+    path: "/jobs/submit",
+    requiresAuth: true,
+    requiredAction: "wallet_sign_in",
+    authScheme: "SIWE_JWT",
+    walletModes: ["evm-siwe"],
+    notes: "Submitting work is owner-scoped to the wallet that claimed the session."
+  },
+  {
+    method: "*",
+    path: "/account",
+    requiresAuth: true,
+    requiredAction: "wallet_sign_in",
+    authScheme: "SIWE_JWT",
+    walletModes: ["evm-siwe"]
+  },
+  {
+    method: "*",
+    path: "/account/:path",
+    requiresAuth: true,
+    requiredAction: "wallet_sign_in",
+    authScheme: "SIWE_JWT",
+    walletModes: ["evm-siwe"]
+  },
+  {
+    method: "*",
+    path: "/jobs/preflight",
+    requiresAuth: true,
+    requiredAction: "wallet_sign_in",
+    authScheme: "SIWE_JWT",
+    walletModes: ["evm-siwe"]
+  },
+  {
+    method: "*",
+    path: "/jobs/recommendations",
+    requiresAuth: true,
+    requiredAction: "wallet_sign_in",
+    authScheme: "SIWE_JWT",
+    walletModes: ["evm-siwe"]
+  },
+  {
+    method: "*",
+    path: "/sessions",
+    requiresAuth: true,
+    requiredAction: "wallet_sign_in",
+    authScheme: "SIWE_JWT",
+    walletModes: ["evm-siwe"]
+  },
+  {
+    method: "*",
+    path: "/session",
+    requiresAuth: true,
+    requiredAction: "wallet_sign_in",
+    authScheme: "SIWE_JWT",
+    walletModes: ["evm-siwe"]
+  },
+  {
+    method: "*",
+    path: "/admin/:path",
+    requiresAuth: true,
+    requiredRole: "admin",
+    requiredAction: "admin_wallet_sign_in",
+    authScheme: "SIWE_JWT",
+    walletModes: ["evm-siwe"]
+  },
+  {
+    method: "*",
+    path: "/verifier/:path",
+    requiresAuth: true,
+    requiredRole: "verifier",
+    requiredAction: "verifier_wallet_sign_in",
+    authScheme: "SIWE_JWT",
+    walletModes: ["evm-siwe"]
+  }
+];
+
 const DISCOVERY_TOOLS = [
   { name: "getPlatformCapabilities", description: "Capability + endpoint manifest for this deployment." },
   { name: "listJobs", description: "All active jobs." },
@@ -86,7 +238,7 @@ const DISCOVERY_TOOLS = [
 
 const BASE_MANIFEST = {
   name: "Averray — trusted agent work + identity runtime",
-  version: "0.3.0",
+  version: "0.3.1",
   description:
     "Agent-native work and identity infrastructure on Polkadot: public job discovery, verifier-checked execution, non-transferable reputation badges, and machine-readable trust surfaces. Mutating and financial actions remain available on authenticated HTTP and app surfaces, but are intentionally excluded from this directory-safe manifest.",
   protocols: ["mcp", "http"],
@@ -101,16 +253,28 @@ const BASE_MANIFEST = {
       "submit-structured-work",
       "poll-verification-status",
       "inspect-earned-badge"
+    ],
+    walletModes: WALLET_MODES,
+    actionRequirements: HTTP_ACTION_REQUIREMENTS,
+    selfServeChecklist: [
+      "Read /onboarding and /agent-tools.json before selecting a wallet mode.",
+      "Use evm-siwe for protected HTTP actions today.",
+      "Request a SIWE nonce, sign it with personal_sign, and exchange the signature for a bearer JWT.",
+      "Call /jobs/preflight before /jobs/claim to see tier, stake, fee, and waiver state."
     ]
   },
   auth: {
     scheme: "SIWE + JWT (HS256)",
+    schemeId: "SIWE_JWT",
     flow: [
       "POST /auth/nonce { wallet } -> { nonce, message }",
       "personal_sign(message) via wallet provider -> signature",
       "POST /auth/verify { message, signature } -> { token, wallet, expiresAt }",
       "Authorization: Bearer <token> on every subsequent call"
     ],
+    entrypoints: AUTH_ENTRYPOINTS,
+    supportedWalletModes: ["evm-siwe"],
+    plannedWalletModes: ["substrate-mapped", "substrate-native"],
     logout: "POST /auth/logout with Bearer token revokes the jti",
     modes: ["strict", "permissive"]
   },
@@ -172,9 +336,61 @@ export function buildPlatformCapabilities() {
     discoveryMode: manifest.discoveryMode,
     protocols: manifest.protocols,
     onboarding: {
-      starterFlow: manifest.onboarding.starterFlow
+      starterFlow: manifest.onboarding.starterFlow,
+      walletModes: manifest.onboarding.walletModes,
+      actionRequirements: manifest.onboarding.actionRequirements,
+      selfServeChecklist: manifest.onboarding.selfServeChecklist
+    },
+    auth: {
+      scheme: manifest.auth.scheme,
+      schemeId: manifest.auth.schemeId,
+      entrypoints: manifest.auth.entrypoints,
+      supportedWalletModes: manifest.auth.supportedWalletModes,
+      plannedWalletModes: manifest.auth.plannedWalletModes
     },
     executionSurfaces: manifest.executionSurfaces,
     tools: manifest.tools.map((tool) => tool.name)
   };
+}
+
+export function getHttpActionRequirement(method = "*", pathname = "") {
+  const normalizedMethod = String(method || "*").toUpperCase();
+  const normalizedPath = normalizePath(pathname);
+  return HTTP_ACTION_REQUIREMENTS.find((entry) => {
+    const methodMatches = entry.method === "*" || entry.method === normalizedMethod;
+    return methodMatches && pathMatches(entry.path, normalizedPath);
+  });
+}
+
+export function buildAuthRequirementDetails(method = "*", pathname = "", { requireRole = undefined } = {}) {
+  const requirement = getHttpActionRequirement(method, pathname) ?? {};
+  const requiredRole = requireRole ?? requirement.requiredRole;
+  return {
+    requiresAuth: true,
+    requiredAction:
+      requirement.requiredAction
+      ?? (requiredRole ? `${requiredRole}_wallet_sign_in` : "wallet_sign_in"),
+    requiredRole,
+    authScheme: requirement.authScheme ?? "SIWE_JWT",
+    walletModes: requirement.walletModes ?? ["evm-siwe"],
+    authEntrypoints: AUTH_ENTRYPOINTS,
+    onboarding: "/onboarding",
+    notes: requirement.notes
+  };
+}
+
+function normalizePath(pathname) {
+  const value = String(pathname || "/").trim() || "/";
+  return value.endsWith("/") && value.length > 1 ? value.slice(0, -1) : value;
+}
+
+function pathMatches(template, pathname) {
+  if (template === pathname) {
+    return true;
+  }
+  if (template.endsWith("/:path")) {
+    const prefix = template.slice(0, -"/:path".length);
+    return pathname === prefix || pathname.startsWith(`${prefix}/`);
+  }
+  return false;
 }

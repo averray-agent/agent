@@ -224,7 +224,15 @@ test("requireAuth rejects missing token in strict mode", async () => {
   const url = new URL("http://localhost/api/account?wallet=0xabc");
   await assert.rejects(
     () => middleware(request, url),
-    (error) => error instanceof AuthenticationError && error.code === "missing_token"
+    (error) => {
+      assert.ok(error instanceof AuthenticationError);
+      assert.equal(error.code, "missing_token");
+      assert.equal(error.details.requiresAuth, true);
+      assert.equal(error.details.requiredAction, "wallet_sign_in");
+      assert.equal(error.details.authScheme, "SIWE_JWT");
+      assert.deepEqual(error.details.authEntrypoints, ["/auth/nonce", "/auth/verify", "/auth/logout"]);
+      return true;
+    }
   );
 });
 
@@ -343,7 +351,14 @@ test("requireAuth rejects token missing required role", async () => {
   const url = new URL("http://localhost/api/admin/jobs");
   await assert.rejects(
     () => middleware(request, url, { requireRole: "admin" }),
-    (error) => error instanceof AuthorizationError && error.code === "missing_role"
+    (error) => {
+      assert.ok(error instanceof AuthorizationError);
+      assert.equal(error.code, "missing_role");
+      assert.equal(error.details.requiresAuth, true);
+      assert.equal(error.details.requiredRole, "admin");
+      assert.equal(error.details.requiredAction, "admin_wallet_sign_in");
+      return true;
+    }
   );
 });
 

@@ -3,6 +3,7 @@ import { AuthenticationError, AuthorizationError } from "../core/errors.js";
 import { verifyToken } from "./jwt.js";
 import { hasRole, resolveRoles } from "./config.js";
 import { resolveCapabilities } from "./capabilities.js";
+import { buildAuthRequirementDetails } from "../core/discovery-manifest.js";
 
 /**
  * Create an auth middleware bound to a specific auth configuration.
@@ -26,6 +27,7 @@ import { resolveCapabilities } from "./capabilities.js";
  */
 export function createAuthMiddleware({ authConfig, stateStore, logger = console }) {
   return async function requireAuth(request, url, { allowQueryToken = false, requireRole = undefined } = {}) {
+    const authDetails = buildAuthRequirementDetails(request.method, url.pathname, { requireRole });
     const headerToken = extractBearer(request);
     const queryToken = allowQueryToken ? (url.searchParams.get("token") ?? "").trim() || undefined : undefined;
     const token = headerToken ?? queryToken;
@@ -45,7 +47,7 @@ export function createAuthMiddleware({ authConfig, stateStore, logger = console 
               verifierWallets: authConfig.verifierWallets ?? new Set()
             })
           };
-          enforceRole(permissiveClaims, requireRole);
+          enforceRole(permissiveClaims, requireRole, authDetails);
           return {
             wallet: normalizeWallet(fallbackWallet),
             claims: permissiveClaims,
@@ -54,7 +56,7 @@ export function createAuthMiddleware({ authConfig, stateStore, logger = console 
           };
         }
       }
-      throw new AuthenticationError("Authentication required.", "missing_token");
+      throw new AuthenticationError("Authentication required.", "missing_token", authDetails);
     }
 
     if (!allowQueryToken && queryToken && !headerToken) {
@@ -76,7 +78,7 @@ export function createAuthMiddleware({ authConfig, stateStore, logger = console 
       }
     }
 
-    enforceRole(claims, requireRole);
+    enforceRole(claims, requireRole, authDetails);
 
     return {
       wallet: normalizeWallet(claims.sub),
@@ -87,12 +89,16 @@ export function createAuthMiddleware({ authConfig, stateStore, logger = console 
   };
 }
 
-function enforceRole(claims, requireRole) {
+function enforceRole(claims, requireRole, authDetails = undefined) {
   if (!requireRole) {
     return;
   }
   if (!hasRole(claims, requireRole)) {
-    throw new AuthorizationError(`Requires "${requireRole}" role.`, "missing_role");
+    throw new AuthorizationError(`Requires "${requireRole}" role.`, "missing_role", {
+      ...(authDetails ?? {}),
+      requiresAuth: true,
+      requiredRole: requireRole
+    });
   }
 }
 

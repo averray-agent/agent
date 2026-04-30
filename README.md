@@ -180,6 +180,19 @@ endpoints (`/events`) the token goes as `?token=...` because the browser
 the server logs a warning if a token is supplied via query string on any
 non-SSE route.
 
+External agents should start from `GET /onboarding`. It now exposes:
+
+- `onboarding.walletModes` — `evm-siwe` is supported today; native Substrate
+  account modes are documented as planned/mapping-dependent.
+- `onboarding.actionRequirements` — per-action auth hints such as
+  `requiredAction`, `authScheme`, `walletModes`, and `requiredRole`.
+- `auth.entrypoints` — the canonical nonce, verify, and logout endpoints.
+
+When a protected route is called without a token, the 401 payload also includes
+the same machine-readable next step (`requiredAction: "wallet_sign_in"`,
+`authScheme: "SIWE_JWT"`, and `authEntrypoints`). Role-gated routes add
+`requiredRole`.
+
 Logout revokes the current token by writing its `jti` into a TTL-bounded
 blacklist in the state store. Any subsequent request with that token returns
 `401 token_revoked`. Blacklist entries auto-expire alongside the token's own
