@@ -6,10 +6,7 @@ export const XCM_SET_TOPIC_INSTRUCTION = 0x2c;
 const HEX_RE = /^0x[a-fA-F0-9]*$/u;
 const BYTES32_RE = /^0x[a-fA-F0-9]{64}$/u;
 const PARACHAIN_RE = /Parachain\((\d+)\)/iu;
-
-const BIFROST_VDOT_DEPOSIT_XCM_V5_PREFIX =
-  "0x0510000401000003008c86471301000003008c8647000d010101000000010100368e8759910dab756d344995f1d3c79374ca8f70066d3a709e48029f6bf0ee7e";
-const BIFROST_VDOT_WITHDRAW_XCM_V5_PREFIX = "0x050c00010203040506070809";
+const KNOWN_SCAFFOLD_MESSAGE_BYTES = "010203040506070809";
 
 export function buildXcmRequestPayload({ strategy, direction, requestId }) {
   const normalizedDirection = normalizeDirection(direction);
@@ -19,9 +16,7 @@ export function buildXcmRequestPayload({ strategy, direction, requestId }) {
   }
 
   const destinationParaId = resolveDestinationParachainId(strategy);
-  const messagePrefix = normalizedDirection === "deposit"
-    ? BIFROST_VDOT_DEPOSIT_XCM_V5_PREFIX
-    : BIFROST_VDOT_WITHDRAW_XCM_V5_PREFIX;
+  const messagePrefix = resolveDirectionMessagePrefix(strategy, normalizedDirection);
 
   return {
     destination: encodeVersionedParachainLocation(destinationParaId),
@@ -55,6 +50,27 @@ export function resolveDestinationParachainId(strategy) {
   }
 
   throw new ValidationError("Async XCM strategy requires a destination parachain in xcmLocation or strategy.xcm.");
+}
+
+export function resolveDirectionMessagePrefix(strategy, direction) {
+  const normalizedDirection = normalizeDirection(direction);
+  const xcm = strategy?.xcm;
+  const rawPrefix =
+    xcm?.messagePrefixes?.[normalizedDirection] ??
+    xcm?.messages?.[normalizedDirection] ??
+    xcm?.[`${normalizedDirection}MessagePrefix`];
+  const prefix = normalizeHex(rawPrefix, `strategy.xcm.messagePrefixes.${normalizedDirection}`);
+  if (prefix.length <= 4 || Number.parseInt(prefix.slice(2, 4), 16) !== XCM_VERSION_V5) {
+    throw new ValidationError(
+      `strategy.xcm.messagePrefixes.${normalizedDirection} must be a SCALE-encoded XCM v5 message prefix.`
+    );
+  }
+  if (prefix.toLowerCase().includes(KNOWN_SCAFFOLD_MESSAGE_BYTES)) {
+    throw new ValidationError(
+      `strategy.xcm.messagePrefixes.${normalizedDirection} still contains scaffold bytes; replace it with PAPI/ParaSpell-generated SCALE.`
+    );
+  }
+  return prefix;
 }
 
 function normalizeDirection(direction) {

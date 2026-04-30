@@ -449,14 +449,39 @@ function normaliseStrategyXcmConfig(xcm, idx) {
     throw new Error(`strategies[${idx}].xcm must be an object`);
   }
   const destinationParachain = xcm.destinationParachain ?? xcm.destinationParaId;
+  const normalized = {};
   if (destinationParachain === undefined || destinationParachain === null || destinationParachain === "") {
-    return {};
+    return normaliseStrategyXcmMessagePrefixes(xcm, normalized, idx);
   }
   const parsed = Number(destinationParachain);
   if (!Number.isInteger(parsed) || parsed < 0 || parsed > 0xffffffff) {
     throw new Error(`strategies[${idx}].xcm.destinationParachain must be a uint32`);
   }
-  return { destinationParachain: parsed };
+  normalized.destinationParachain = parsed;
+  return normaliseStrategyXcmMessagePrefixes(xcm, normalized, idx);
+}
+
+function normaliseStrategyXcmMessagePrefixes(xcm, normalized, idx) {
+  const rawPrefixes = xcm.messagePrefixes ?? xcm.messages;
+  const deposit = xcm.depositMessagePrefix ?? rawPrefixes?.deposit;
+  const withdraw = xcm.withdrawMessagePrefix ?? rawPrefixes?.withdraw;
+  if (deposit === undefined && withdraw === undefined) {
+    return normalized;
+  }
+  return {
+    ...normalized,
+    messagePrefixes: {
+      deposit: normaliseHexMessagePrefix(deposit, `strategies[${idx}].xcm.messagePrefixes.deposit`),
+      withdraw: normaliseHexMessagePrefix(withdraw, `strategies[${idx}].xcm.messagePrefixes.withdraw`)
+    }
+  };
+}
+
+function normaliseHexMessagePrefix(value, label) {
+  if (typeof value !== "string" || !/^0x[a-fA-F0-9]*$/u.test(value) || value.length % 2 !== 0) {
+    throw new Error(`${label} must be an even-length 0x-prefixed SCALE hex string`);
+  }
+  return value.toLowerCase();
 }
 
 function normaliseStrategyExecutionMode(rawExecutionMode, kind, idx) {

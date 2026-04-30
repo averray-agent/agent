@@ -10,8 +10,6 @@ import {
 } from "../../mcp-server/src/blockchain/xcm-message-builder.js";
 
 const REQUEST_ID = `0x${"11".repeat(32)}`;
-const STRATEGY_ID = `0x${"22".repeat(32)}`;
-const ACCOUNTING_ASSET = `0x${"33".repeat(20)}`;
 const PLACEHOLDER_WITHDRAW_BYTES = "010203040506070809";
 
 if (isMain()) {
@@ -27,7 +25,7 @@ async function main() {
 
   const checks = [
     await checkDeclaredTooling(),
-    checkBuilderOutputs()
+    await checkBuilderOutputs(options)
   ];
   if (options.strictEnv) checks.push(checkRuntimeEnv());
 
@@ -56,11 +54,14 @@ function isMain() {
 
 function parseArgs(argv) {
   const parsed = {};
-  for (const arg of argv) {
+  for (let idx = 0; idx < argv.length; idx += 1) {
+    const arg = argv[idx];
     if (arg === "--help" || arg === "-h") {
       parsed.help = true;
     } else if (arg === "--strict-env") {
       parsed.strictEnv = true;
+    } else if (arg === "--strategy-file") {
+      parsed.strategyFile = nextArg(argv, ++idx, "--strategy-file");
     } else {
       throw new Error(`Unknown argument: ${arg}`);
     }
@@ -76,6 +77,9 @@ This is intentionally stricter than validating already-captured JSON fixtures.
 
 Options:
   --strict-env   Also require the live staging API/JWT and native endpoint env.
+  --strategy-file <path>
+                 Read a deployment-style strategies JSON file. Defaults to
+                 STRATEGIES_JSON from the environment.
   --help         Show this help.
 
 Environment checked with --strict-env:
@@ -85,6 +89,14 @@ Environment checked with --strict-env:
   XCM_NATIVE_HUB_WS
   XCM_NATIVE_BIFROST_WS
 `);
+}
+
+function nextArg(argv, idx, flag) {
+  const value = argv[idx];
+  if (!value || value.startsWith("--")) {
+    throw new Error(`${flag} requires a value.`);
+  }
+  return value;
 }
 
 async function checkDeclaredTooling() {
@@ -103,15 +115,15 @@ async function checkDeclaredTooling() {
   }
 
   const missing = [];
-  for (const required of ["polkadot-api", "@acala-network/chopsticks"]) {
+  for (const required of ["polkadot-api", "@paraspell/sdk", "@acala-network/chopsticks"]) {
     if (!dependencyNames.has(required)) missing.push(required);
   }
 
   return {
-    name: "PAPI/Chopsticks tooling is declared in package manifests",
+    name: "PAPI/ParaSpell/Chopsticks tooling is declared in package manifests",
     ok: missing.length === 0,
     details: missing.length === 0
-      ? ["polkadot-api and @acala-network/chopsticks are declared."]
+      ? ["polkadot-api, @paraspell/sdk, and @acala-network/chopsticks are declared."]
       : [
           `missing: ${missing.join(", ")}`,
           "real capture needs reproducible PAPI/Chopsticks tooling, not ad hoc global installs"
@@ -123,29 +135,38 @@ async function readPackageJson(relativePath) {
   return JSON.parse(await readFile(path.resolve(relativePath), "utf8"));
 }
 
-function checkBuilderOutputs() {
-  const strategy = {
-    strategyId: STRATEGY_ID,
-    kind: "polkadot_vdot",
-    asset: ACCOUNTING_ASSET,
-    assetConfig: {
-      assetClass: "custom",
-      address: ACCOUNTING_ASSET,
-      symbol: "DOT",
-      decimals: 18
-    },
-    xcm: {
-      destinationParachain: 2030
-    }
-  };
-
+async function checkBuilderOutputs(options) {
   const details = [];
   let ok = true;
-  const destinationParaId = resolveDestinationParachainId(strategy);
-  details.push(`destination parachain resolves to ${destinationParaId}`);
+  const strategy = await loadPreflightStrategy(options);
+  if (!strategy) {
+    return {
+      name: "backend vDOT XCM builder is capture-ready",
+      ok: false,
+      details: [
+        "no polkadot_vdot strategy was found in --strategy-file or STRATEGIES_JSON",
+        "capture preflight requires operator-supplied PAPI/ParaSpell-generated SCALE message prefixes"
+      ]
+    };
+  }
 
-  const deposit = buildXcmRequestPayload({ strategy, direction: "deposit", requestId: REQUEST_ID });
-  const withdraw = buildXcmRequestPayload({ strategy, direction: "withdraw", requestId: REQUEST_ID });
+  let deposit;
+  let withdraw;
+  try {
+    const destinationParaId = resolveDestinationParachainId(strategy);
+    details.push(`destination parachain resolves to ${destinationParaId}`);
+    deposit = buildXcmRequestPayload({ strategy, direction: "deposit", requestId: REQUEST_ID });
+    withdraw = buildXcmRequestPayload({ strategy, direction: "withdraw", requestId: REQUEST_ID });
+  } catch (error) {
+    return {
+      name: "backend vDOT XCM builder is capture-ready",
+      ok: false,
+      details: [
+        error instanceof Error ? error.message : String(error),
+        "replace scaffold/default XCM config with real SCALE message prefixes before capture"
+      ]
+    };
+  }
 
   for (const [label, payload] of [["deposit", deposit], ["withdraw", withdraw]]) {
     const expectedSuffix = `2c${REQUEST_ID.slice(2)}`;
@@ -176,6 +197,19 @@ function checkBuilderOutputs() {
     ok,
     details
   };
+}
+
+async function loadPreflightStrategy(options) {
+  const raw = options.strategyFile
+    ? await readFile(path.resolve(options.strategyFile), "utf8")
+    : process.env.STRATEGIES_JSON;
+  if (!String(raw ?? "").trim()) return undefined;
+  const parsed = JSON.parse(raw);
+  const strategies = Array.isArray(parsed) ? parsed : parsed?.strategies;
+  if (!Array.isArray(strategies)) {
+    throw new Error("strategy input must be a JSON array or an object with a strategies array.");
+  }
+  return strategies.find((entry) => String(entry?.kind ?? "").trim().toLowerCase() === "polkadot_vdot");
 }
 
 function checkRuntimeEnv() {

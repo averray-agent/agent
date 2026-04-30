@@ -92,12 +92,24 @@ test("loadStrategiesConfig preserves server-controlled XCM destination policy", 
         adapter: "0x1234567890123456789012345678901234567890",
         kind: "polkadot_vdot",
         executionMode: "async_xcm",
-        xcm: { destinationParachain: "2030" }
+        xcm: {
+          destinationParachain: "2030",
+          messagePrefixes: {
+            deposit: "0x050c00",
+            withdraw: "0x050800"
+          }
+        }
       }
     ])
   };
   const result = loadStrategiesConfig(env, { logger: silentLogger() });
-  assert.deepEqual(result[0].xcm, { destinationParachain: 2030 });
+  assert.deepEqual(result[0].xcm, {
+    destinationParachain: 2030,
+    messagePrefixes: {
+      deposit: "0x050c00",
+      withdraw: "0x050800"
+    }
+  });
 });
 
 test("loadStrategiesConfig parses foreign asset metadata when the runtime index is known", () => {

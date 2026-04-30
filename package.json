@@ -32,5 +32,10 @@
     "validate:native-xcm-evidence": "node scripts/ops/validate-native-xcm-evidence.mjs",
     "exercise:async-xcm": "node scripts/ops/exercise-async-xcm-request.mjs",
     "example:profile-lookup": "node examples/profile-lookup/index.mjs"
+  },
+  "devDependencies": {
+    "@acala-network/chopsticks": "^1.3.1",
+    "@paraspell/sdk": "^13.4.0",
+    "polkadot-api": "^2.1.1"
   }
 }

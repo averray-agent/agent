@@ -55,7 +55,15 @@ has produced a passing evidence pack.
 Before queueing a live request, run the local capture preflight:
 
 ```bash
-npm run preflight:native-xcm-capture
+STRATEGIES_JSON="$STRATEGIES_JSON" npm run preflight:native-xcm-capture
+```
+
+You can also pass a deployment-style strategy file instead of an environment
+variable:
+
+```bash
+npm run preflight:native-xcm-capture -- \
+  --strategy-file deployments/testnet-strategies.json
 ```
 
 For an actual live staging capture, include the runtime environment check:
@@ -64,14 +72,16 @@ For an actual live staging capture, include the runtime environment check:
 API_URL=https://api.averray.com \
 ADMIN_JWT="$ADMIN_JWT" \
 WALLET_JWT="$WALLET_JWT" \
+STRATEGIES_JSON="$STRATEGIES_JSON" \
 XCM_NATIVE_HUB_WS=wss://... \
 XCM_NATIVE_BIFROST_WS=wss://... \
 npm run preflight:native-xcm-capture -- --strict-env
 ```
 
 The preflight must pass before treating captured files as real evidence. It
-checks that reproducible PAPI/Chopsticks tooling is declared and that the
-backend vDOT XCM builder is no longer on scaffold bytes.
+checks that reproducible PAPI/ParaSpell/Chopsticks tooling is declared and that
+the backend vDOT XCM builder is using operator-supplied PAPI/ParaSpell-generated
+SCALE message prefixes, not scaffold bytes.
 
 ## Artifact Layout
 
