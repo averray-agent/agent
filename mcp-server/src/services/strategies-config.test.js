@@ -84,7 +84,35 @@ test("loadStrategiesConfig honours explicit executionMode overrides", () => {
   assert.equal(result[0].executionMode, "async_xcm");
 });
 
-test("loadStrategiesConfig preserves server-controlled XCM destination policy", () => {
+test("loadStrategiesConfig preserves server-controlled XCM builder policy", () => {
+  const env = {
+    STRATEGIES_JSON: JSON.stringify([
+      {
+        strategyId: "0x56444f545f56315f4d4f434b0000000000000000000000000000000000000000",
+        adapter: "0x1234567890123456789012345678901234567890",
+        kind: "polkadot_vdot",
+        executionMode: "async_xcm",
+        xcm: {
+          destinationParachain: "2030",
+          originChain: "AssetHubPolkadot",
+          destinationChain: "BifrostPolkadot",
+          feeAmount: "1000000000",
+          beneficiary: "0x1234567890123456789012345678901234567890"
+        }
+      }
+    ])
+  };
+  const result = loadStrategiesConfig(env, { logger: silentLogger() });
+  assert.deepEqual(result[0].xcm, {
+    destinationParachain: 2030,
+    originChain: "AssetHubPolkadot",
+    destinationChain: "BifrostPolkadot",
+    feeAmount: "1000000000",
+    beneficiary: "0x1234567890123456789012345678901234567890"
+  });
+});
+
+test("loadStrategiesConfig rejects stale raw XCM message prefixes", () => {
   const env = {
     STRATEGIES_JSON: JSON.stringify([
       {
@@ -103,13 +131,7 @@ test("loadStrategiesConfig preserves server-controlled XCM destination policy", 
     ])
   };
   const result = loadStrategiesConfig(env, { logger: silentLogger() });
-  assert.deepEqual(result[0].xcm, {
-    destinationParachain: 2030,
-    messagePrefixes: {
-      deposit: "0x050c00",
-      withdraw: "0x050800"
-    }
-  });
+  assert.deepEqual(result, []);
 });
 
 test("loadStrategiesConfig parses foreign asset metadata when the runtime index is known", () => {

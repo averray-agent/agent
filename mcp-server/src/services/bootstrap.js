@@ -448,40 +448,49 @@ function normaliseStrategyXcmConfig(xcm, idx) {
   if (typeof xcm !== "object" || Array.isArray(xcm)) {
     throw new Error(`strategies[${idx}].xcm must be an object`);
   }
+  if (
+    xcm.messagePrefixes !== undefined ||
+    xcm.messages !== undefined ||
+    xcm.depositMessagePrefix !== undefined ||
+    xcm.withdrawMessagePrefix !== undefined
+  ) {
+    throw new Error(
+      `strategies[${idx}].xcm must not include raw message prefixes; the backend assembles XCM from intent`
+    );
+  }
   const destinationParachain = xcm.destinationParachain ?? xcm.destinationParaId;
   const normalized = {};
-  if (destinationParachain === undefined || destinationParachain === null || destinationParachain === "") {
-    return normaliseStrategyXcmMessagePrefixes(xcm, normalized, idx);
-  }
-  const parsed = Number(destinationParachain);
-  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 0xffffffff) {
-    throw new Error(`strategies[${idx}].xcm.destinationParachain must be a uint32`);
-  }
-  normalized.destinationParachain = parsed;
-  return normaliseStrategyXcmMessagePrefixes(xcm, normalized, idx);
-}
-
-function normaliseStrategyXcmMessagePrefixes(xcm, normalized, idx) {
-  const rawPrefixes = xcm.messagePrefixes ?? xcm.messages;
-  const deposit = xcm.depositMessagePrefix ?? rawPrefixes?.deposit;
-  const withdraw = xcm.withdrawMessagePrefix ?? rawPrefixes?.withdraw;
-  if (deposit === undefined && withdraw === undefined) {
-    return normalized;
-  }
-  return {
-    ...normalized,
-    messagePrefixes: {
-      deposit: normaliseHexMessagePrefix(deposit, `strategies[${idx}].xcm.messagePrefixes.deposit`),
-      withdraw: normaliseHexMessagePrefix(withdraw, `strategies[${idx}].xcm.messagePrefixes.withdraw`)
+  if (!(destinationParachain === undefined || destinationParachain === null || destinationParachain === "")) {
+    const parsed = Number(destinationParachain);
+    if (!Number.isInteger(parsed) || parsed < 0 || parsed > 0xffffffff) {
+      throw new Error(`strategies[${idx}].xcm.destinationParachain must be a uint32`);
     }
-  };
-}
-
-function normaliseHexMessagePrefix(value, label) {
-  if (typeof value !== "string" || !/^0x[a-fA-F0-9]*$/u.test(value) || value.length % 2 !== 0) {
-    throw new Error(`${label} must be an even-length 0x-prefixed SCALE hex string`);
+    normalized.destinationParachain = parsed;
   }
-  return value.toLowerCase();
+  for (const key of [
+    "originChain",
+    "destinationChain",
+    "feeAmount",
+    "executionFeeAmount",
+    "depositFeeAmount",
+    "withdrawFeeAmount",
+    "amount",
+    "depositAmount",
+    "withdrawAmount",
+    "beneficiary",
+    "beneficiaryLocation",
+    "depositBeneficiary",
+    "depositBeneficiaryLocation",
+    "withdrawBeneficiary",
+    "withdrawBeneficiaryLocation",
+    "assetLocation",
+    "feeAssetLocation"
+  ]) {
+    if (xcm[key] !== undefined) {
+      normalized[key] = xcm[key];
+    }
+  }
+  return Object.keys(normalized).length ? normalized : undefined;
 }
 
 function normaliseStrategyExecutionMode(rawExecutionMode, kind, idx) {

@@ -75,8 +75,8 @@ Still open in the broader rc1 path:
 - scheduler/email hardening for weekly reports after enough real jobs exist
 - real Chopsticks/PAPI native XCM evidence capture and selected fallback
   documentation if Bifrost does not preserve SetTopic
-- replacing the scaffolded vDOT XCM message prefixes with a real PAPI/ParaSpell
-  builder before sending staging capture transactions
+- running the real staged deposit, withdraw, and failure captures with the
+  server-owned PAPI/ParaSpell-shaped builder output
 
 ## PR Slices
 
@@ -298,11 +298,10 @@ allocation.
   `XcmVdotAdapter`; keep it blocked on mainnet until evidence passes.
 - [x] Add native capture preflight so scaffolded builder output cannot be
   mistaken for real evidence.
-- [x] Remove scaffolded vDOT XCM message prefixes from backend defaults and
-  require operator-supplied PAPI/ParaSpell-generated SCALE prefixes in strategy
-  config before any capture can pass preflight.
+- [x] Replace raw vDOT message-prefix config with server-owned
+  PAPI/ParaSpell-shaped XCM v5 assembly and SetTopic injection.
 - [ ] Produce the final Bifrost deposit, withdraw, and failure rehearsal
-  message prefixes with the PAPI/ParaSpell capture tooling.
+  captures with the backend builder output.
 - [ ] Run Chopsticks experiment for Bifrost reply-leg topic preservation.
 - [ ] If preserved, match return leg by topic.
 - [ ] If not preserved but Hub credit events are unambiguous, use serialized

@@ -80,8 +80,9 @@ npm run preflight:native-xcm-capture -- --strict-env
 
 The preflight must pass before treating captured files as real evidence. It
 checks that reproducible PAPI/ParaSpell/Chopsticks tooling is declared and that
-the backend vDOT XCM builder is using operator-supplied PAPI/ParaSpell-generated
-SCALE message prefixes, not scaffold bytes.
+the backend vDOT XCM builder assembles server-owned XCM v5 bytes from strategy
+intent and appends `SetTopic(requestId)`, rather than accepting scaffold or
+caller-supplied raw message bytes.
 
 ## Artifact Layout
 

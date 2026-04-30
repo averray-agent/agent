@@ -425,7 +425,10 @@ export class BlockchainGateway {
       const payload = buildXcmRequestPayload({
         strategy,
         direction: "deposit",
-        requestId
+        requestId,
+        account: wallet,
+        recipient: wallet,
+        amount
       });
       const tx = await this.accountContract.requestStrategyDeposit(wallet, {
         strategyId: this.normalizeStrategyId(strategy.strategyId),
@@ -470,7 +473,11 @@ export class BlockchainGateway {
       const payload = buildXcmRequestPayload({
         strategy,
         direction: "withdraw",
-        requestId
+        requestId,
+        account: wallet,
+        recipient,
+        amount,
+        shares
       });
       const tx = await this.accountContract.requestStrategyWithdraw(wallet, {
         strategyId: this.normalizeStrategyId(strategy.strategyId),

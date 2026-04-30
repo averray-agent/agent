@@ -145,7 +145,7 @@ async function checkBuilderOutputs(options) {
       ok: false,
       details: [
         "no polkadot_vdot strategy was found in --strategy-file or STRATEGIES_JSON",
-        "capture preflight requires operator-supplied PAPI/ParaSpell-generated SCALE message prefixes"
+        "capture preflight requires a server-controlled vDOT XCM strategy config"
       ]
     };
   }
@@ -155,15 +155,30 @@ async function checkBuilderOutputs(options) {
   try {
     const destinationParaId = resolveDestinationParachainId(strategy);
     details.push(`destination parachain resolves to ${destinationParaId}`);
-    deposit = buildXcmRequestPayload({ strategy, direction: "deposit", requestId: REQUEST_ID });
-    withdraw = buildXcmRequestPayload({ strategy, direction: "withdraw", requestId: REQUEST_ID });
+    deposit = buildXcmRequestPayload({
+      strategy,
+      direction: "deposit",
+      requestId: REQUEST_ID,
+      account: "0x1111111111111111111111111111111111111111",
+      recipient: "0x1111111111111111111111111111111111111111",
+      amount: 1_000_000_000
+    });
+    withdraw = buildXcmRequestPayload({
+      strategy,
+      direction: "withdraw",
+      requestId: REQUEST_ID,
+      account: "0x1111111111111111111111111111111111111111",
+      recipient: "0x2222222222222222222222222222222222222222",
+      amount: 2_000_000_000,
+      shares: 2_000_000_000
+    });
   } catch (error) {
     return {
       name: "backend vDOT XCM builder is capture-ready",
       ok: false,
       details: [
         error instanceof Error ? error.message : String(error),
-        "replace scaffold/default XCM config with real SCALE message prefixes before capture"
+        "fix the server-owned vDOT XCM builder config before capture"
       ]
     };
   }
