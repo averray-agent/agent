@@ -336,10 +336,16 @@ const BUILTIN_JOB_SCHEMAS = new Map([
     properties: {
       project: enumString(["wikipedia"]),
       language: stringSchema(),
+      lang: stringSchema(),
       pageTitle: stringSchema({ minLength: 1 }),
       pageUrl: stringSchema({ minLength: 1 }),
+      articleUrl: stringSchema({ minLength: 1 }),
       revisionId: stringSchema({ minLength: 1 }),
+      pinnedRevisionUrl: stringSchema({ minLength: 1 }),
       taskType: enumString(["citation_repair", "freshness_check", "infobox_consistency"]),
+      proposalOnly: booleanSchema(),
+      attributionPolicy: stringSchema({ minLength: 1 }),
+      outputSchemaUrl: stringSchema({ minLength: 1 }),
       sourceUrls: arrayOfStrings(),
       instructions: arrayOfStrings({ minItems: 1 })
     }

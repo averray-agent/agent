@@ -50,6 +50,15 @@ Wikipedia. If a proposal is later sent to Wikipedia, it must be attributed to
 Averray or an approved Averray editor/bot account and follow Wikipedia
 disclosure and bot rules.
 
+Public Wikipedia job definitions expose a small agent-ready detail block at
+`publicDetails` so generic agents do not need to infer the task from UI state or
+schema conventions. The block repeats the stable fields a worker needs before
+claiming: `jobId`, `source: "wikipedia"`, `taskType`, `pageTitle`, `lang`,
+`revisionId`, `articleUrl`, `pinnedRevisionUrl`, `acceptanceCriteria`,
+`outputSchemaUrl`, `proposalOnly: true`, and the attribution policy. Compact
+`GET /jobs?source=wikipedia...` rows include the same source affordances under
+`sourceDetails`, plus `definitionUrl` for the full canonical payload.
+
 In production, this crawler is enabled by default and creates jobs
 autonomously with conservative caps: two jobs per run, twenty open Wikipedia
 jobs maximum, and a thirty-minute interval. Set

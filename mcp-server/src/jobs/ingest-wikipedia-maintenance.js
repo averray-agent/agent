@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { pathToFileURL } from "node:url";
+import { schemaRefToJobSchemaPath } from "../core/job-schema-registry.js";
 
 export const DEFAULT_LANGUAGE = "en";
 export const DEFAULT_BASE_URL = "http://localhost:8787";
@@ -191,6 +192,9 @@ export function toPlatformJob(article, score = scoreArticle(article)) {
   const task = TASK_CONFIG[article.taskType] ?? TASK_CONFIG.citation_repair;
   const slug = slugify(article.title).slice(0, 48);
   const id = `wiki-${article.language}-${article.pageId}-${article.taskType}-${slug}`.slice(0, 120);
+  const articleUrl = article.articleUrl ?? article.pageUrl;
+  const pinnedRevisionUrl = article.pinnedRevisionUrl ?? wikipediaPinnedRevisionUrl(article);
+  const outputSchemaUrl = schemaRefToJobSchemaPath(task.outputSchemaRef);
 
   return {
     id,
@@ -215,17 +219,24 @@ export function toPlatformJob(article, score = scoreArticle(article)) {
       type: "wikipedia_article",
       project: "wikipedia",
       language: article.language,
+      lang: article.language,
       pageId: article.pageId,
       pageTitle: article.title,
       pageUrl: article.pageUrl,
+      articleUrl,
       revisionId: article.revisionId,
+      pinnedRevisionUrl,
+      proposalOnly: true,
       revisionTimestamp: article.revisionTimestamp,
       categoryTitle: article.categoryTitle,
       taskType: article.taskType,
       templates: article.templates,
       score,
+      outputSchemaRef: task.outputSchemaRef,
+      outputSchemaUrl,
       discoveryApi: `https://${article.language}.wikipedia.org/w/api.php`,
       writePolicy: "averray_company_reviewed_proposal_only",
+      attributionPolicy: "Averray proposal only / no direct Wikipedia edit",
       attribution: {
         proposer: "Averray",
         directEdit: false,
@@ -242,7 +253,7 @@ export function toPlatformJob(article, score = scoreArticle(article)) {
     ],
     estimatedDifficulty: estimateDifficulty(score),
     agentInstructions: [
-      `Review the fixed revision at ${article.pageUrl}.`,
+      `Review the fixed revision at ${pinnedRevisionUrl}.`,
       "Do not edit Wikipedia directly from the agent account.",
       "Submit the correction or review notes back to Averray as structured evidence.",
       "Any later public Wikipedia communication must come from Averray or an approved Averray editor/bot account, with required disclosures.",
@@ -254,6 +265,20 @@ export function toPlatformJob(article, score = scoreArticle(article)) {
       signals: ["page_revision_cited", "source_urls_present", "proposal_only", "averray_attribution", "human_review_ready"]
     }
   };
+}
+
+export function wikipediaPinnedRevisionUrl(article) {
+  const language = normalizeLanguage(article?.language ?? DEFAULT_LANGUAGE);
+  const revisionId = String(article?.revisionId ?? "").trim();
+  const title = String(article?.title ?? article?.pageTitle ?? "").trim();
+  const url = new URL(`https://${language}.wikipedia.org/w/index.php`);
+  if (title) {
+    url.searchParams.set("title", title.replace(/\s+/gu, "_"));
+  }
+  if (revisionId) {
+    url.searchParams.set("oldid", revisionId);
+  }
+  return String(url);
 }
 
 export async function postJobs({ baseUrl, adminToken, jobs, fetchImpl = fetch }) {

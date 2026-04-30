@@ -21,7 +21,16 @@ const JOBS = [
     source: {
       type: "wikipedia_article",
       project: "wikipedia",
-      taskType: "citation_repair"
+      taskType: "citation_repair",
+      language: "en",
+      pageTitle: "Example",
+      pageUrl: "https://en.wikipedia.org/wiki/Example",
+      articleUrl: "https://en.wikipedia.org/wiki/Example",
+      revisionId: "123456789",
+      pinnedRevisionUrl: "https://en.wikipedia.org/w/index.php?title=Example&oldid=123456789",
+      proposalOnly: true,
+      attributionPolicy: "Averray proposal only / no direct Wikipedia edit",
+      outputSchemaUrl: "/schemas/jobs/wikipedia-citation-repair-output.json"
     }
   },
   {
@@ -80,12 +89,24 @@ test("public jobs response filters and compacts agent-friendly queries", () => {
     "reward",
     "createdAt",
     "summary",
-    "definitionUrl"
+    "definitionUrl",
+    "sourceDetails"
   ]);
   assert.equal(response.jobs[0].id, "wiki-en-123-citation-repair-example");
   assert.equal(response.jobs[0].source, "wikipedia");
   assert.equal(response.jobs[0].sourceType, "wikipedia_article");
   assert.equal(response.jobs[0].definitionUrl, "/jobs/definition?jobId=wiki-en-123-citation-repair-example");
+  assert.deepEqual(response.jobs[0].sourceDetails, {
+    taskType: "citation_repair",
+    pageTitle: "Example",
+    lang: "en",
+    revisionId: "123456789",
+    articleUrl: "https://en.wikipedia.org/wiki/Example",
+    pinnedRevisionUrl: "https://en.wikipedia.org/w/index.php?title=Example&oldid=123456789",
+    proposalOnly: true,
+    attributionPolicy: "Averray proposal only / no direct Wikipedia edit",
+    outputSchemaUrl: "/schemas/jobs/wikipedia-citation-repair-output.json"
+  });
 });
 
 test("public jobs response supports category filters and pagination", () => {

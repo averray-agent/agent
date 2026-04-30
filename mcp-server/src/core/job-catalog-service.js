@@ -3,7 +3,7 @@ import {
   NotFoundError,
   ValidationError
 } from "./errors.js";
-import { isBuiltinJobSchemaRef } from "./job-schema-registry.js";
+import { isBuiltinJobSchemaRef, schemaRefToJobSchemaPath } from "./job-schema-registry.js";
 
 const DEFAULT_AGENT_PROFILE = {
   capabilities: ["claim_job", "submit_work", "allocate_idle_funds"],
@@ -490,8 +490,10 @@ export class JobCatalogService {
   }
 
   withLifecycle(job, now = new Date()) {
+    const publicDetails = buildPublicJobDetails(job);
     return {
       ...job,
+      ...(publicDetails ? { publicDetails } : {}),
       lifecycle: this.buildLifecycle(job, now)
     };
   }
@@ -929,6 +931,44 @@ function normalizeIsoTimestamp(value, field) {
     throw new ValidationError(`${field} must be ISO-8601 if provided.`);
   }
   return new Date(parsed).toISOString();
+}
+
+function buildPublicJobDetails(job) {
+  if (job?.source?.type !== "wikipedia_article") {
+    return undefined;
+  }
+  const source = job.source;
+  const articleUrl = source.articleUrl ?? source.pageUrl;
+  const pinnedRevisionUrl = source.pinnedRevisionUrl ?? buildWikipediaPinnedRevisionUrl(source);
+  return {
+    jobId: job.id,
+    source: "wikipedia",
+    taskType: source.taskType,
+    pageTitle: source.pageTitle,
+    lang: source.lang ?? source.language,
+    revisionId: source.revisionId,
+    articleUrl,
+    pinnedRevisionUrl,
+    acceptanceCriteria: Array.isArray(job.acceptanceCriteria) ? job.acceptanceCriteria : [],
+    outputSchemaRef: job.outputSchemaRef,
+    outputSchemaUrl: source.outputSchemaUrl ?? schemaRefToJobSchemaPath(job.outputSchemaRef),
+    proposalOnly: source.proposalOnly ?? source.attribution?.directEdit === false,
+    attributionPolicy: source.attributionPolicy ?? "Averray proposal only / no direct Wikipedia edit"
+  };
+}
+
+function buildWikipediaPinnedRevisionUrl(source) {
+  const lang = String(source?.lang ?? source?.language ?? "en").trim() || "en";
+  const title = String(source?.pageTitle ?? "").trim();
+  const revisionId = String(source?.revisionId ?? "").trim();
+  const url = new URL(`https://${lang}.wikipedia.org/w/index.php`);
+  if (title) {
+    url.searchParams.set("title", title.replace(/\s+/gu, "_"));
+  }
+  if (revisionId) {
+    url.searchParams.set("oldid", revisionId);
+  }
+  return String(url);
 }
 
 function buildRecommendationExplanation({ job, eligible, tierGate, roleGate, profile }) {

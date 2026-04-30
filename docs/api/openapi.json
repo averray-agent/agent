@@ -227,7 +227,18 @@
                           },
                           "createdAt": "2026-04-28T10:00:00.000Z",
                           "summary": "Review the article and return an editor-ready citation repair proposal.",
-                          "definitionUrl": "/jobs/definition?jobId=wiki-en-123-citation-repair-example"
+                          "definitionUrl": "/jobs/definition?jobId=wiki-en-123-citation-repair-example",
+                          "sourceDetails": {
+                            "taskType": "citation_repair",
+                            "pageTitle": "Example",
+                            "lang": "en",
+                            "revisionId": "123456789",
+                            "articleUrl": "https://en.wikipedia.org/wiki/Example",
+                            "pinnedRevisionUrl": "https://en.wikipedia.org/w/index.php?title=Example&oldid=123456789",
+                            "proposalOnly": true,
+                            "attributionPolicy": "Averray proposal only / no direct Wikipedia edit",
+                            "outputSchemaUrl": "/schemas/jobs/wikipedia-citation-repair-output.json"
+                          }
                         }
                       ],
                       "count": 1,
@@ -256,7 +267,7 @@
         ],
         "operationId": "getJobDefinition",
         "summary": "Get one job definition",
-        "description": "Returns a single job definition by job id.",
+        "description": "Returns a single job definition by job id. Wikipedia jobs include publicDetails with article, pinned revision, proposal-only, attribution, acceptance, and schema affordances for generic agents.",
         "parameters": [
           {
             "name": "jobId",
@@ -839,6 +850,9 @@
             "type": "object",
             "additionalProperties": true
           },
+          "publicDetails": {
+            "$ref": "#/components/schemas/WikipediaPublicJobDetails"
+          },
           "lifecycle": {
             "$ref": "#/components/schemas/JobLifecycle"
           }
@@ -986,6 +1000,115 @@
             "type": "string"
           },
           "definitionUrl": {
+            "type": "string"
+          },
+          "sourceDetails": {
+            "$ref": "#/components/schemas/WikipediaCompactSourceDetails"
+          }
+        },
+        "additionalProperties": false
+      },
+      "WikipediaCompactSourceDetails": {
+        "type": "object",
+        "properties": {
+          "taskType": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pageTitle": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lang": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revisionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "articleUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pinnedRevisionUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "proposalOnly": {
+            "type": "boolean"
+          },
+          "attributionPolicy": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "outputSchemaUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "WikipediaPublicJobDetails": {
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "const": "wikipedia"
+          },
+          "taskType": {
+            "type": "string"
+          },
+          "pageTitle": {
+            "type": "string"
+          },
+          "lang": {
+            "type": "string"
+          },
+          "revisionId": {
+            "type": "string"
+          },
+          "articleUrl": {
+            "type": "string"
+          },
+          "pinnedRevisionUrl": {
+            "type": "string"
+          },
+          "acceptanceCriteria": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "outputSchemaRef": {
+            "type": "string"
+          },
+          "outputSchemaUrl": {
+            "type": "string"
+          },
+          "proposalOnly": {
+            "type": "boolean"
+          },
+          "attributionPolicy": {
             "type": "string"
           }
         },

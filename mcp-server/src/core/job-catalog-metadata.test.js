@@ -163,6 +163,50 @@ test("createJob accepts github_pr verifier configuration", () => {
   assert.equal(job.verifierConfig.minimumScore, 70);
 });
 
+test("public Wikipedia definitions include direct agent affordances", () => {
+  const service = makeService();
+  service.createJob({
+    ...BASE_JOB,
+    id: "wiki-en-123-citation-repair-example",
+    title: "Wikipedia citation repair: Example article",
+    category: "wikipedia",
+    jobType: "review",
+    outputSchemaRef: "schema://jobs/wikipedia-citation-repair-output",
+    acceptanceCriteria: ["Names the page and revision.", "Does not edit Wikipedia directly."],
+    source: {
+      type: "wikipedia_article",
+      project: "wikipedia",
+      language: "en",
+      pageId: 123,
+      pageTitle: "Example article",
+      pageUrl: "https://en.wikipedia.org/wiki/Example_article",
+      revisionId: "987654321",
+      taskType: "citation_repair",
+      attribution: {
+        directEdit: false
+      }
+    }
+  });
+
+  const job = service.getPublicJobDefinition("wiki-en-123-citation-repair-example");
+
+  assert.deepEqual(job.publicDetails, {
+    jobId: "wiki-en-123-citation-repair-example",
+    source: "wikipedia",
+    taskType: "citation_repair",
+    pageTitle: "Example article",
+    lang: "en",
+    revisionId: "987654321",
+    articleUrl: "https://en.wikipedia.org/wiki/Example_article",
+    pinnedRevisionUrl: "https://en.wikipedia.org/w/index.php?title=Example_article&oldid=987654321",
+    acceptanceCriteria: ["Names the page and revision.", "Does not edit Wikipedia directly."],
+    outputSchemaRef: "schema://jobs/wikipedia-citation-repair-output",
+    outputSchemaUrl: "/schemas/jobs/wikipedia-citation-repair-output.json",
+    proposalOnly: true,
+    attributionPolicy: "Averray proposal only / no direct Wikipedia edit"
+  });
+});
+
 test("reviewer role gate blocks low-score agents", async () => {
   const service = makeService({ skill: 60, reliability: 0, economic: 0, tier: "starter" });
   service.createJob({

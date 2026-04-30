@@ -1,3 +1,5 @@
+import { schemaRefToJobSchemaPath } from "../../core/job-schema-registry.js";
+
 const DEFAULT_AGENT_LIMIT = 25;
 const MAX_AGENT_LIMIT = 100;
 
@@ -87,6 +89,7 @@ function matchesFilters(job, filters) {
 function toCompactJobRow(job) {
   const lifecycle = job.lifecycle ?? {};
   const state = lifecycle.state ?? lifecycle.status ?? "open";
+  const sourceDetails = compactSourceDetails(job);
   return {
     id: job.id,
     title: job.title,
@@ -103,8 +106,41 @@ function toCompactJobRow(job) {
     },
     createdAt: lifecycle.createdAt ?? null,
     summary: summarizeJob(job),
-    definitionUrl: `/jobs/definition?jobId=${encodeURIComponent(job.id)}`
+    definitionUrl: `/jobs/definition?jobId=${encodeURIComponent(job.id)}`,
+    ...(sourceDetails ? { sourceDetails } : {})
   };
+}
+
+function compactSourceDetails(job) {
+  if (job?.source?.type !== "wikipedia_article") {
+    return undefined;
+  }
+  const source = job.source;
+  return {
+    taskType: source.taskType ?? null,
+    pageTitle: source.pageTitle ?? null,
+    lang: source.lang ?? source.language ?? null,
+    revisionId: source.revisionId ?? null,
+    articleUrl: source.articleUrl ?? source.pageUrl ?? null,
+    pinnedRevisionUrl: source.pinnedRevisionUrl ?? buildWikipediaPinnedRevisionUrl(source),
+    proposalOnly: source.proposalOnly ?? source.attribution?.directEdit === false,
+    attributionPolicy: source.attributionPolicy ?? null,
+    outputSchemaUrl: source.outputSchemaUrl ?? schemaRefToJobSchemaPath(job.outputSchemaRef) ?? null
+  };
+}
+
+function buildWikipediaPinnedRevisionUrl(source) {
+  const lang = String(source?.lang ?? source?.language ?? "en").trim() || "en";
+  const title = String(source?.pageTitle ?? "").trim();
+  const revisionId = String(source?.revisionId ?? "").trim();
+  const url = new URL(`https://${lang}.wikipedia.org/w/index.php`);
+  if (title) {
+    url.searchParams.set("title", title.replace(/\s+/gu, "_"));
+  }
+  if (revisionId) {
+    url.searchParams.set("oldid", revisionId);
+  }
+  return String(url);
 }
 
 function summarizeJob(job) {
