@@ -5,8 +5,10 @@ import {
   Wallet,
   decodeBytes32String,
   encodeBytes32String,
+  formatUnits,
   id,
   keccak256,
+  parseUnits,
   toUtf8Bytes
 } from "ethers";
 import {
@@ -242,9 +244,12 @@ export class BlockchainGateway {
         optional(this.policyContract.onboardingWaiverClaimCount(), 0)
       ]);
       const minClaimFeeByAsset = {};
-      await Promise.all(this.config.supportedAssets.map(async (asset) => {
+      await Promise.all((this.config.supportedAssets ?? []).map(async (asset) => {
         const symbol = asset.symbol ?? this.resolveAssetSymbol(asset.address);
-        minClaimFeeByAsset[symbol] = Number(await optional(this.policyContract.minClaimFeeByAsset(asset.address), 0));
+        minClaimFeeByAsset[symbol] = this.toDisplayUnits(
+          await optional(this.policyContract.minClaimFeeByAsset(asset.address), 0),
+          asset
+        );
       }));
       return {
         claimFeeBps: Number(claimFeeBps),
@@ -327,8 +332,8 @@ export class BlockchainGateway {
     return this.withGatewayError("fundAccount", async () => {
       this.requireSigner("fundAccount");
       const asset = this.requireAsset(assetSymbol);
-      const parsedAmount = Number(amount);
-      if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+      const parsedAmount = this.toBaseUnits(amount, asset, "funding amount");
+      if (parsedAmount <= 0n) {
         throw new ValidationError("Funding amount must be greater than zero.");
       }
 
@@ -357,13 +362,14 @@ export class BlockchainGateway {
       }
       this.requireSigner("ensureClaimStakeLiquidity");
       const asset = this.requireAsset(assetSymbol);
+      const required = this.toBaseUnits(amount, asset, "claim lock amount");
       const signerAddress = await this.signer.getAddress();
       const position = await this.accountContract.positions(signerAddress, asset.address);
-      const available = Number(position.liquid);
-      if (available < amount) {
+      const available = BigInt(position.liquid);
+      if (available < required) {
         throw new InsufficientLiquidityError(assetSymbol, {
           required: amount,
-          available,
+          available: this.toDisplayUnits(available, asset),
           account: signerAddress
         });
       }
@@ -553,16 +559,20 @@ export class BlockchainGateway {
   async previewClaimEconomics(wallet, jobId) {
     return this.withGatewayError("previewClaimEconomics", async () => {
       const economics = await this.escrowContract.previewClaimEconomics(wallet, this.toJobId(jobId));
+      const live = await this.readEscrowJob(jobId);
+      const asset = this.assetForAddress(live.asset);
+      const claimStake = this.toDisplayUnits(economics.claimStake, asset);
+      const claimFee = this.toDisplayUnits(economics.claimFee, asset);
       return {
-        claimStake: Number(economics.claimStake),
+        claimStake,
         claimStakeRaw: economics.claimStake?.toString?.() ?? String(economics.claimStake),
         claimStakeBps: Number(economics.claimStakeBps),
-        claimFee: Number(economics.claimFee),
+        claimFee,
         claimFeeRaw: economics.claimFee?.toString?.() ?? String(economics.claimFee),
         claimFeeBps: Number(economics.claimFeeBps),
         claimEconomicsWaived: Boolean(economics.waived),
         claimNumber: Number(economics.claimNumber),
-        totalClaimLock: Number(economics.claimStake) + Number(economics.claimFee)
+        totalClaimLock: this.toDisplayUnits(BigInt(economics.claimStake) + BigInt(economics.claimFee), asset)
       };
     });
   }
@@ -576,18 +586,20 @@ export class BlockchainGateway {
         return this.publicEscrowJob(live);
       }
 
-      const totalRequired = Number(job.rewardAmount ?? 0) + Number(claimStakeAmount ?? 0);
-      if (totalRequired <= 0) {
+      const rewardAmount = this.toBaseUnits(job.rewardAmount ?? 0, asset, "job reward");
+      const claimStake = this.toBaseUnits(claimStakeAmount ?? 0, asset, "claim lock amount");
+      const totalRequired = rewardAmount + claimStake;
+      if (totalRequired <= 0n) {
         throw new ValidationError(`Job ${job.id} has no fundable reward`);
       }
 
       const token = new Contract(asset.address, ERC20_MOCK_ABI, this.signer);
       const signerAddress = await this.signer.getAddress();
       const signerPosition = await this.accountContract.positions(signerAddress, asset.address);
-      const liquid = Number(signerPosition.liquid);
-      const shortfall = Math.max(totalRequired - liquid, 0);
+      const liquid = BigInt(signerPosition.liquid);
+      const shortfall = totalRequired > liquid ? totalRequired - liquid : 0n;
 
-      if (shortfall > 0) {
+      if (shortfall > 0n) {
         const mintTx = await token.mint(signerAddress, shortfall);
         await mintTx.wait();
         const approveTx = await token.approve(this.config.agentAccountAddress, shortfall);
@@ -601,7 +613,7 @@ export class BlockchainGateway {
         live.contractLayout,
         this.toJobId(instanceJobId),
         asset.address,
-        job.rewardAmount,
+        rewardAmount,
         0,
         0,
         job.claimTtlSeconds,
@@ -704,23 +716,24 @@ export class BlockchainGateway {
   }
 
   normalizeEscrowJob(job, contractLayout) {
+    const asset = this.assetForAddress(job.asset);
     return {
       contractLayout,
       poster: job.poster,
       worker: job.worker,
       asset: job.asset,
       specHash: job.specHash ?? ZERO_BYTES32,
-      reward: Number(job.reward),
+      reward: this.toDisplayUnits(job.reward, asset),
       rewardRaw: job.reward?.toString?.() ?? String(job.reward),
-      claimStake: Number(job.claimStake),
+      claimStake: this.toDisplayUnits(job.claimStake, asset),
       claimStakeRaw: job.claimStake?.toString?.() ?? String(job.claimStake),
       claimStakeBps: Number(job.claimStakeBps),
-      claimFee: Number(job.claimFee ?? 0),
+      claimFee: this.toDisplayUnits(job.claimFee ?? 0, asset),
       claimFeeRaw: job.claimFee?.toString?.() ?? "0",
       claimFeeBps: Number(job.claimFeeBps ?? 0),
       claimEconomicsWaived: Boolean(job.claimEconomicsWaived ?? false),
       rejectingVerifier: job.rejectingVerifier ?? ZERO_ADDRESS,
-      released: Number(job.released),
+      released: this.toDisplayUnits(job.released, asset),
       releasedRaw: job.released?.toString?.() ?? String(job.released),
       state: Number(job.state),
       claimExpiry: Number(job.claimExpiry),
@@ -915,11 +928,63 @@ export class BlockchainGateway {
   }
 
   requireAsset(symbol) {
-    const asset = this.config.supportedAssets.find((candidate) => candidate.symbol === symbol);
+    const asset = (this.config.supportedAssets ?? []).find((candidate) => candidate.symbol === symbol);
     if (!asset) {
       throw new ValidationError(`Unsupported asset symbol: ${symbol}`);
     }
     return asset;
+  }
+
+  assetForAddress(assetAddress) {
+    const match = (this.config.supportedAssets ?? []).find(
+      (asset) => asset.address?.toLowerCase() === assetAddress?.toLowerCase?.()
+    );
+    return match ?? { symbol: this.resolveAssetSymbol(assetAddress), address: assetAddress, decimals: 18 };
+  }
+
+  assetDecimals(asset) {
+    const decimals = Number(asset?.decimals ?? 18);
+    if (!Number.isInteger(decimals) || decimals < 0 || decimals > 30) {
+      throw new ValidationError(`Asset ${asset?.symbol ?? asset?.address ?? "unknown"} decimals must be an integer in [0, 30].`);
+    }
+    return decimals;
+  }
+
+  toBaseUnits(amount, asset, label = "amount") {
+    if (typeof amount === "bigint") {
+      if (amount < 0n) throw new ValidationError(`${label} must be non-negative.`);
+      return amount;
+    }
+    const decimals = this.assetDecimals(asset);
+    const normalized = this.normalizeDecimalAmount(amount, decimals, label);
+    try {
+      return parseUnits(normalized, decimals);
+    } catch {
+      throw new ValidationError(`${label} must fit ${decimals} decimal places for ${asset?.symbol ?? "asset"}.`);
+    }
+  }
+
+  toDisplayUnits(amount, asset) {
+    return Number(formatUnits(amount ?? 0, this.assetDecimals(asset)));
+  }
+
+  normalizeDecimalAmount(amount, decimals, label) {
+    const value = typeof amount === "string" ? amount.trim() : String(amount ?? "");
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric < 0) {
+      throw new ValidationError(`${label} must be a non-negative finite number.`);
+    }
+    if (!value || /e/i.test(value)) {
+      return numeric.toFixed(decimals).replace(/\.?0+$/u, "") || "0";
+    }
+    const [whole, fraction = ""] = value.split(".");
+    if (!/^\d+$/u.test(whole || "0") || !/^\d*$/u.test(fraction)) {
+      throw new ValidationError(`${label} must be a decimal number.`);
+    }
+    if (fraction.length <= decimals) {
+      return value;
+    }
+    return numeric.toFixed(decimals).replace(/\.?0+$/u, "") || "0";
   }
 
   requireAsyncStrategyConfig(strategy, operation) {
@@ -932,7 +997,7 @@ export class BlockchainGateway {
     if (!assetAddress) {
       return "DOT";
     }
-    const match = this.config.supportedAssets.find((asset) => asset.address?.toLowerCase() === assetAddress.toLowerCase());
+    const match = (this.config.supportedAssets ?? []).find((asset) => asset.address?.toLowerCase() === assetAddress.toLowerCase());
     return match?.symbol ?? "DOT";
   }
 
