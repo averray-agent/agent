@@ -502,6 +502,64 @@ test("http smoke: /agents/:wallet aggregates approved sessions into badges", { s
   });
 });
 
+test("http smoke: /agents exposes a claimed session as current activity", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
+
+    const createJob = await fetch(`${base}/admin/jobs`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({
+        id: "profile-active-smoke-job-001",
+        category: "coding",
+        tier: "starter",
+        rewardAmount: 4,
+        claimTtlSeconds: 3600,
+        verifierMode: "benchmark",
+        verifierTerms: ["complete", "verified", "output"],
+        verifierMinimumMatches: 2,
+        outputSchemaRef: "schema://jobs/profile-active-smoke"
+      })
+    });
+    assert.equal(createJob.status, 201);
+
+    await fetch(`${base}/account/fund?asset=DOT&amount=10`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${adminToken}` }
+    });
+
+    const claim = await fetch(
+      `${base}/jobs/claim?jobId=profile-active-smoke-job-001&idempotencyKey=profile-active-smoke-claim`,
+      { method: "POST", headers: { authorization: `Bearer ${adminToken}` } }
+    );
+    assert.equal(claim.status, 200);
+    const { sessionId } = await claim.json();
+
+    const response = await fetch(`${base}/agents/${ADMIN_WALLET}`);
+    assert.equal(response.status, 200);
+    const profile = await response.json();
+    assert.equal(profile.stats.totalBadges, 0);
+    assert.equal(profile.stats.completionRate, null);
+    assert.deepEqual(profile.badges, []);
+    assert.equal(profile.currentActivity.sessionId, sessionId);
+    assert.equal(profile.currentActivity.jobId, "profile-active-smoke-job-001");
+    assert.equal(profile.currentActivity.status, "claimed");
+    assert.equal(profile.currentActivity.phase, "work");
+    assert.equal(profile.currentActivity.canSubmit, true);
+    assert.equal(profile.currentActivity.awaitingVerification, false);
+    assert.match(profile.currentActivity.deadlineAt, /^\d{4}-\d{2}-\d{2}T/u);
+
+    const listResponse = await fetch(`${base}/agents`);
+    assert.equal(listResponse.status, 200);
+    const agents = await listResponse.json();
+    const row = agents.find((agent) => agent.wallet === ADMIN_WALLET.toLowerCase());
+    assert.ok(row);
+    assert.equal(row.totalJobs, 0);
+    assert.equal(row.currentActivity.sessionId, sessionId);
+    assert.equal(row.currentActivity.status, "claimed");
+  });
+});
+
 test("http smoke: /disputes exposes human-review sessions and records verdict/release receipts", { skip: !RUN }, async () => {
   await runWithServer(async (base) => {
     const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });

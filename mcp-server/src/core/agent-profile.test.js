@@ -8,7 +8,7 @@ const WALLET = "0x1234567890123456789012345678901234567890";
 
 function jobCatalog() {
   return new Map([
-    ["starter-coding-001", { id: "starter-coding-001", category: "coding", rewardAsset: "DOT", rewardAmount: 5 }],
+    ["starter-coding-001", { id: "starter-coding-001", category: "coding", rewardAsset: "DOT", rewardAmount: 5, claimTtlSeconds: 3600 }],
     ["governance-pro-001", { id: "governance-pro-001", category: "governance", rewardAsset: "DOT", rewardAmount: 25, payoutMode: "milestone" }]
   ]);
 }
@@ -139,6 +139,7 @@ test("buildAgentProfile ignores sessions that are pending verification", () => {
       wallet: WALLET,
       jobId: "starter-coding-001",
       status: "submitted",
+      submittedAt: "2026-04-15T10:00:00Z",
       updatedAt: "2026-04-15T10:00:00Z",
       verification: undefined
     }
@@ -157,6 +158,54 @@ test("buildAgentProfile ignores sessions that are pending verification", () => {
   // latest session update including pending ones.
   assert.equal(profile.stats.activeSince, "2026-04-10T10:00:00.000Z");
   assert.equal(profile.stats.lastActive, "2026-04-15T10:00:00.000Z");
+  assert.deepEqual(profile.currentActivity, {
+    sessionId: "s-pending",
+    jobId: "starter-coding-001",
+    status: "submitted",
+    label: "Submitted",
+    phase: "verification",
+    outcome: "awaiting_verification",
+    submittedAt: "2026-04-15T10:00:00.000Z",
+    updatedAt: "2026-04-15T10:00:00.000Z",
+    canSubmit: false,
+    awaitingVerification: true
+  });
+});
+
+test("buildAgentProfile exposes the latest claimed session as current activity", () => {
+  const profile = buildAgentProfile({
+    wallet: WALLET,
+    reputation: { skill: 0, reliability: 0, economic: 0, tier: "starter" },
+    sessions: [
+      {
+        sessionId: "wiki-en-62871101-citation-repair-hash:0x1234567890123456789012345678901234567890",
+        wallet: WALLET,
+        jobId: "starter-coding-001",
+        status: "claimed",
+        claimedAt: "2026-05-01T12:18:03.973Z",
+        updatedAt: "2026-05-01T12:18:03.973Z",
+        verification: undefined
+      }
+    ],
+    getJobDefinition: makeGetJob()
+  });
+
+  assert.equal(profile.stats.totalBadges, 0);
+  assert.equal(profile.stats.completionRate, null);
+  assert.deepEqual(profile.badges, []);
+  assert.deepEqual(profile.currentActivity, {
+    sessionId: "wiki-en-62871101-citation-repair-hash:0x1234567890123456789012345678901234567890",
+    jobId: "starter-coding-001",
+    status: "claimed",
+    label: "Claimed",
+    phase: "work",
+    outcome: "in_progress",
+    claimedAt: "2026-05-01T12:18:03.973Z",
+    updatedAt: "2026-05-01T12:18:03.973Z",
+    deadlineAt: "2026-05-01T13:18:03.973Z",
+    canSubmit: true,
+    awaitingVerification: false
+  });
 });
 
 test("buildAgentProfile aggregates GitHub reputation signals", () => {

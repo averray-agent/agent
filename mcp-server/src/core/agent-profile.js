@@ -1,4 +1,5 @@
 import { ValidationError } from "./errors.js";
+import { describeSessionStatus } from "./session-state-machine.js";
 
 /**
  * Build a v1 agent profile document from in-memory platform state.
@@ -97,6 +98,7 @@ export function buildAgentProfile({ wallet, reputation, sessions, getJobDefiniti
   }
 
   const githubSignals = aggregateGithubSignals(safeSessions);
+  const currentActivity = buildCurrentActivity(safeSessions, definitionOf);
 
   const preferredCategories = Array.from(categoryCounts.entries())
     .sort((a, b) => b[1] - a[1])
@@ -127,9 +129,38 @@ export function buildAgentProfile({ wallet, reputation, sessions, getJobDefiniti
       lastActive: lastActiveMs ? new Date(lastActiveMs).toISOString() : null,
       preferredCategories
     },
+    ...(currentActivity ? { currentActivity } : {}),
     categoryLevels,
     badges
   };
+}
+
+function buildCurrentActivity(sessions, definitionOf) {
+  const active = sessions
+    .filter((session) => {
+      const status = describeSessionStatus(session?.status);
+      return !status.terminal && status.status !== "__new__";
+    })
+    .sort((a, b) => timestampOf(b) - timestampOf(a))[0];
+  if (!active) return null;
+
+  const status = describeSessionStatus(active.status);
+  const job = definitionOf(active.jobId);
+  const deadlineAt = computeDeadlineAt(active, job);
+  return compact({
+    sessionId: active.sessionId,
+    jobId: active.jobId,
+    status: status.status,
+    label: status.label,
+    phase: status.phase,
+    outcome: status.outcome,
+    claimedAt: isoOrUndefined(active.claimedAt),
+    submittedAt: isoOrUndefined(active.submittedAt),
+    updatedAt: isoOrUndefined(active.updatedAt),
+    deadlineAt,
+    canSubmit: status.status === "claimed",
+    awaitingVerification: status.status === "submitted" || status.status === "disputed"
+  });
 }
 
 function aggregateGithubSignals(sessions) {
@@ -190,6 +221,19 @@ function maxTimestamp(sessions) {
   return max;
 }
 
+function computeDeadlineAt(session, job) {
+  const claimed = Date.parse(session?.claimedAt ?? "");
+  if (!Number.isFinite(claimed)) return undefined;
+  const ttl = Number(job?.claimTtlSeconds);
+  if (!Number.isFinite(ttl) || ttl <= 0) return undefined;
+  return new Date(claimed + ttl * 1000).toISOString();
+}
+
+function isoOrUndefined(value) {
+  const parsed = Date.parse(value ?? "");
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : undefined;
+}
+
 function toBaseUnits(amount, decimals) {
   if (amount === undefined || amount === null || amount === "") {
     return 0n;
@@ -212,4 +256,10 @@ function requireAddress(raw, label) {
   if (typeof raw !== "string" || !/^0x[a-fA-F0-9]{40}$/u.test(raw)) {
     throw new ValidationError(`${label} must be a 0x-prefixed 20-byte EVM address`);
   }
+}
+
+function compact(value) {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, entry]) => entry !== undefined)
+  );
 }

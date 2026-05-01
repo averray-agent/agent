@@ -246,6 +246,7 @@ function buildAgentDirectoryRow(profile) {
       Number(reputation.economic ?? 0),
     successRate: profile.stats?.completionRate ?? null,
     totalJobs,
+    currentActivity: profile.currentActivity ?? null,
     activeStake: 0,
     badges: profile.badges ?? [],
     slashEvents: []
