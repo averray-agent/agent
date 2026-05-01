@@ -29,6 +29,29 @@ const toEventId = (txHash: string, logIndex: number | bigint) => `${txHash}-${lo
 const nullIfZeroHash = (value: `0x${string}`): `0x${string}` | null =>
   value.toLowerCase() === zeroHash ? null : value;
 const hexByteLength = (value: `0x${string}`) => (value.length - 2) / 2;
+const currentJobFields = [
+  "poster",
+  "worker",
+  "asset",
+  "verifierMode",
+  "category",
+  "specHash",
+  "reward",
+  "opsReserve",
+  "contingencyReserve",
+  "released",
+  "claimExpiry",
+  "claimStake",
+  "claimStakeBps",
+  "claimFee",
+  "claimFeeBps",
+  "claimEconomicsWaived",
+  "rejectingVerifier",
+  "rejectedAt",
+  "disputedAt",
+  "payoutMode",
+  "state"
+] as const;
 const legacyJobFields = [
   "poster",
   "worker",
@@ -194,11 +217,14 @@ const decodeLiveJob = (data: `0x${string}`) => {
   const byteLength = hexByteLength(data);
 
   if (byteLength >= 672) {
-    return decodeFunctionResult({
-      abi: EscrowCoreAbi,
-      functionName: "jobs",
-      data
-    }) as any;
+    return tupleValues(
+      decodeFunctionResult({
+        abi: EscrowCoreAbi,
+        functionName: "jobs",
+        data
+      }) as any,
+      currentJobFields
+    );
   }
 
   if (byteLength >= 544) {
@@ -221,7 +247,14 @@ const decodeLiveJob = (data: `0x${string}`) => {
 };
 
 const tupleValues = (value: any, fields: readonly string[]) => {
-  if (Array.isArray(value)) return value;
+  if (Array.isArray(value)) {
+    if (value.length === 1 && value[0] && typeof value[0] === "object" && !Array.isArray(value[0])) {
+      return tupleValues(value[0], fields);
+    }
+
+    return value;
+  }
+
   if (!value || typeof value !== "object") {
     throw new Error("EscrowCore.jobs returned an unsupported tuple shape");
   }
