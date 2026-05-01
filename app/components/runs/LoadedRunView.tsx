@@ -19,7 +19,7 @@ import {
   FIXTURE_RUN_ROWS,
 } from "./fixtures";
 import type { RunRow } from "./RunQueueTable";
-import { swrFetcher } from "@/lib/api/client";
+import { ApiError, swrFetcher } from "@/lib/api/client";
 import { useAdminJobs, useJobDefinition, useJobs } from "@/lib/api/hooks";
 import {
   buildGitHubContext,
@@ -91,6 +91,25 @@ export function LoadedRunView({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [receiptOpen, setReceiptOpen] = useState(false);
 
+  // PR #123 added a per-job `submissionContract` block on /jobs that
+  // tells callers exactly what shape `payload.submission` should take
+  // (including a `submitPayloadExample.submission` skeleton).
+  // Surfacing it on the operator panel turns the previously-stubbed
+  // textarea into a useful template editor: the operator sees the
+  // schema-shaped example pre-filled, edits the placeholder values,
+  // and submits something the verifier can actually validate.
+  const submissionContract = asRecord(selectedJob?.submissionContract);
+  const submissionExample = asRecord(
+    asRecord(submissionContract?.submitPayloadExample)?.submission
+  );
+  const submissionSample = submissionExample
+    ? JSON.stringify(submissionExample, null, 2)
+    : "";
+  const outputSchemaUrl =
+    typeof submissionContract?.outputSchemaUrl === "string"
+      ? submissionContract.outputSchemaUrl
+      : undefined;
+
   const handleSubmit = async (evidence: string) => {
     setSubmitError(null);
     if (!loadedRow.sessionId) {
@@ -99,6 +118,13 @@ export function LoadedRunView({
     }
     setSubmitting(true);
     try {
+      // The backend validates `payload.submission` directly against the
+      // job's output schema (PR #123). If the operator typed a JSON
+      // object that matches the schema, send it as-is. Otherwise fall
+      // back to the legacy text-evidence wrapping so older fixtures
+      // and free-text smoke tests still get a 4xx that says what's
+      // wrong instead of failing silently here.
+      const submission = parseSubmissionInput(evidence, loadedRow.id);
       await swrFetcher([
         "/jobs/submit",
         {
@@ -106,19 +132,21 @@ export function LoadedRunView({
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             sessionId: loadedRow.sessionId,
-            submission: {
-              evidence,
-              jobId: loadedRow.id,
-              submittedAt: new Date().toISOString(),
-            },
+            submission,
           }),
         },
       ]);
       mutate("/jobs");
       mutate("/sessions");
-    } catch {
+    } catch (err) {
+      // Surface the verifier's own message when it's an
+      // `invalid_submission_shape` 422 — that's the new error code
+      // PR #123 introduced and it carries an `expectedPath` hint that
+      // tells the operator exactly which field is missing.
+      const apiMessage = extractApiErrorMessage(err);
       setSubmitError(
-        "Could not submit this run. Check session ownership and try again."
+        apiMessage ??
+          "Could not submit this run. Check session ownership and the submission shape."
       );
     } finally {
       setSubmitting(false);
@@ -187,9 +215,12 @@ export function LoadedRunView({
         evidence={{
           tabs: [{ id: "brief", label: "Brief" }],
           activeTab: "brief",
-          metaRight: "",
-          metaFoot: "",
-          sample: "",
+          // Hint the operator that the textarea expects schema-shaped
+          // JSON; the per-source SubmissionTabs override these labels
+          // when a richer source-aware UI takes over.
+          metaRight: outputSchemaUrl ? "schema-shaped JSON" : "",
+          metaFoot: outputSchemaUrl ? `output schema · ${outputSchemaUrl}` : "",
+          sample: submissionSample,
         }}
         submission={{
           note: loadedWikipedia ? (
@@ -670,6 +701,67 @@ export function LoadedRunView({
       />
     </div>
   );
+}
+
+/**
+ * Read an operator's textarea content as a submission body. Two paths:
+ *   - JSON-object input → forward verbatim as `payload.submission`. This
+ *     is the supported shape after PR #123: the verifier validates this
+ *     object directly against the job's output schema.
+ *   - Anything else → wrap in the legacy `{ evidence, jobId, submittedAt }`
+ *     shape so older smoke tests and free-text scratch input get a
+ *     useful 4xx from the verifier (with `expectedPath`) rather than
+ *     failing silently in the client.
+ */
+function parseSubmissionInput(evidence: string, jobId: string): unknown {
+  const trimmed = evidence.trim();
+  if (trimmed.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(trimmed) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return parsed;
+      }
+    } catch {
+      // Fall through to the wrapped form below.
+    }
+  }
+  return {
+    evidence,
+    jobId,
+    submittedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Lift the human-friendly verifier message off an ApiError 4xx body so
+ * the operator sees `invalid_submission_shape · expectedPath ...`
+ * instead of a generic "could not submit" string. Returns undefined for
+ * non-API errors so the caller can substitute its own copy.
+ */
+function extractApiErrorMessage(err: unknown): string | undefined {
+  if (!(err instanceof ApiError)) return undefined;
+  const body = err.body;
+  if (body && typeof body === "object" && !Array.isArray(body)) {
+    const record = body as Record<string, unknown>;
+    const code = typeof record.code === "string" ? record.code : undefined;
+    const message =
+      typeof record.message === "string" ? record.message : undefined;
+    const expected =
+      typeof record.expectedPath === "string"
+        ? record.expectedPath
+        : typeof (record.details as Record<string, unknown> | undefined)?.expectedPath ===
+            "string"
+          ? ((record.details as Record<string, unknown>).expectedPath as string)
+          : undefined;
+    if (message || code) {
+      const parts = [code, message].filter(
+        (p): p is string => typeof p === "string" && p.length > 0
+      );
+      const combined = parts.join(" · ");
+      return expected ? `${combined} · expected ${expected}` : combined;
+    }
+  }
+  return err.message;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

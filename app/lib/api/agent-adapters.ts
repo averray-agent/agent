@@ -189,21 +189,38 @@ function stateFor(
 }
 
 function activeSessionFor(record: RawRecord): AgentActiveSession | undefined {
-  // The backend may attach an `activeSession` block directly on the agent
-  // payload, or split it across `currentSession` / `currentJob`. Tolerate
-  // either shape — if neither is present we just leave the agent in
-  // `idle`/`active` and the directory + drawer fall back to history.
+  // The backend has shipped this block under three names across the
+  // recent indexer/deploy churns:
+  //   - `currentActivity` (live shape, see GET /agents/<wallet>):
+  //       { sessionId, jobId, status, label, phase, outcome,
+  //         claimedAt, updatedAt, deadlineAt, canSubmit,
+  //         awaitingVerification }
+  //     The session id doubles as the run id in this scheme — there's
+  //     no separate `runId` field today.
+  //   - `activeSession` / `currentSession` (older / fallback names that
+  //     PR #108 originally targeted)
+  // Tolerate any of the three so the drawer keeps rendering through
+  // schema rotations.
   const block =
+    objectField(record, "currentActivity") ??
     objectField(record, "activeSession") ??
     objectField(record, "currentSession") ??
     null;
   if (!block) return undefined;
-  const runId = text(block.runId, "");
   const jobId = text(block.jobId, "");
   const sessionId = text(block.sessionId, "");
+  // `runId` is optional on the backend; fall back to sessionId so the
+  // drawer always has a value to display.
+  const runId = text(block.runId, "") || sessionId;
   if (!runId || !jobId || !sessionId) return undefined;
   const status = activeStatus(block.status);
   if (!status) return undefined;
+  // `currentActivity` uses `updatedAt` and `label`; older `activeSession`
+  // shapes used `lastEventAt` / `lastEvent`. Fall through both so the
+  // drawer's "Last event" line is populated regardless of which key
+  // the backend emits today.
+  const lastEventAt = text(block.lastEventAt, "") || text(block.updatedAt, "");
+  const lastEvent = text(block.lastEvent, "") || text(block.label, "");
   return {
     runId,
     jobId,
@@ -211,8 +228,8 @@ function activeSessionFor(record: RawRecord): AgentActiveSession | undefined {
     status,
     ...(text(block.title) ? { title: text(block.title) } : {}),
     ...(text(block.deadlineAt) ? { deadlineAt: text(block.deadlineAt) } : {}),
-    ...(text(block.lastEventAt) ? { lastEventAt: text(block.lastEventAt) } : {}),
-    ...(text(block.lastEvent) ? { lastEvent: text(block.lastEvent) } : {}),
+    ...(lastEventAt ? { lastEventAt } : {}),
+    ...(lastEvent ? { lastEvent } : {}),
   };
 }
 
