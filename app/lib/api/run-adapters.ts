@@ -10,6 +10,7 @@ import type {
   WikipediaJobContext,
 } from "@/components/runs/types";
 import { buildJobLifecycle } from "@/lib/api/job-lifecycle";
+import { buildClaimSummary } from "@/lib/api/claim-status";
 
 type RawRecord = Record<string, unknown>;
 
@@ -567,6 +568,11 @@ export function buildRunRows(payload: unknown): RunRow[] {
                       .join(" · ")
                   : `${id} · ${category} · ${tier}`;
     const lifecycle = buildJobLifecycle(job.lifecycle);
+    // Compact claim block read straight off the row. The backend
+    // documents `claimabilitySource: "claimStatus"` — claimable rows
+    // and pills must derive from this, never from `lifecycle.status`
+    // alone (a row can be lifecycle.open + claim.exhausted).
+    const claim = buildClaimSummary(job);
     return {
       id,
       sessionId: text(job.sessionId),
@@ -574,6 +580,7 @@ export function buildRunRows(payload: unknown): RunRow[] {
       jobMeta,
       ...(source ? { source } : {}),
       ...(lifecycle ? { lifecycle } : {}),
+      ...(claim ? { claim } : {}),
       worker: {
         variant: worker ? "a" : "unclaimed",
         initials: worker ? "AG" : "-",
@@ -746,6 +753,11 @@ export function buildRecommendationCards(
       ],
       fit,
       hot: index === 0,
+      // Pass the live claim contract through so the JobCard's Claim
+      // button gates correctly on the rail. Recommendation rows are
+      // joined to the job feed by id above (`lookupJob`), so the
+      // contract is already present when the backend emits it.
+      ...(buildClaimSummary(job) ? { claim: buildClaimSummary(job)! } : {}),
     };
   });
 }

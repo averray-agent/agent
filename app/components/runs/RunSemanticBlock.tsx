@@ -64,11 +64,39 @@ function describeRow(row: RunRow): Field[] {
     { id: "title", label: "Title", value: row.title },
     { id: "source", label: "Source", value: describeSource(row) },
     { id: "category", label: "Category", value: row.jobMeta },
-    { id: "state", label: "State", value: row.state },
-    { id: "reward", label: "Reward", value: `${row.stake} DOT` },
-    { id: "worker", label: "Worker", value: row.worker.label },
-    { id: "window", label: "Claim window", value: row.age },
   ];
+  // Claim block is the source of truth for "is this row currently
+  // grabbable" — render it before the legacy state/lifecycle pair so
+  // a browser agent reading top-down sees the operational answer
+  // first.
+  if (row.claim) {
+    fields.push({
+      id: "claim-state",
+      label: "Claim state",
+      value: row.claim.state,
+    });
+    fields.push({
+      id: "claimable",
+      label: "Claimable",
+      value: row.claim.claimable ? "yes" : "no",
+    });
+    fields.push({
+      id: "claim-reason",
+      label: "Reason",
+      value: row.claim.reason,
+    });
+    if (row.claim.retryLimit > 0) {
+      fields.push({
+        id: "claim-attempts",
+        label: "Attempts",
+        value: `${row.claim.claimAttemptCount}/${row.claim.retryLimit} used · ${row.claim.remainingClaimAttempts} left`,
+      });
+    }
+  }
+  fields.push({ id: "state", label: "State", value: row.state });
+  fields.push({ id: "reward", label: "Reward", value: `${row.stake} DOT` });
+  fields.push({ id: "worker", label: "Worker", value: row.worker.label });
+  fields.push({ id: "window", label: "Claim window", value: row.age });
   if (row.lifecycle) {
     fields.push({
       id: "lifecycle",
