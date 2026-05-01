@@ -24,6 +24,16 @@ on:
         options:
           - "1"
           - "0"
+      health_stability_sec:
+        description: Seconds to re-check indexer health after first passing /health.
+        required: false
+        default: "0"
+        type: string
+      indexer_log_tail:
+        description: Indexer and Caddy log lines to print on deploy failure.
+        required: false
+        default: "120"
+        type: string
       smoke_check_indexer:
         description: Include indexer in hosted smoke checks.
         required: false
@@ -59,6 +69,8 @@ jobs:
       ADMIN_JWT: ${{ secrets.ADMIN_JWT }}
       DEPLOY_RUN_INDEXER: ${{ github.event_name == 'workflow_dispatch' && inputs.run_indexer || 'auto' }}
       DEPLOY_WAIT_FOR_READY: ${{ github.event_name == 'workflow_dispatch' && inputs.wait_for_ready || '1' }}
+      DEPLOY_HEALTH_STABILITY_SEC: ${{ github.event_name == 'workflow_dispatch' && inputs.health_stability_sec || '0' }}
+      DEPLOY_INDEXER_LOG_TAIL: ${{ github.event_name == 'workflow_dispatch' && inputs.indexer_log_tail || '120' }}
       DEPLOY_SMOKE_CHECK_INDEXER: ${{ github.event_name == 'workflow_dispatch' && inputs.smoke_check_indexer || 'auto' }}
       DEPLOY_INDEXER_DATABASE_SCHEMA: ${{ github.event_name == 'workflow_dispatch' && inputs.indexer_database_schema || '' }}
     steps:
@@ -82,13 +94,15 @@ jobs:
       - name: Deploy production
         run: |
           remote_env=$(
-            printf 'APP_BASIC_AUTH_USER=%q APP_BASIC_AUTH_PASSWORD=%q APP_BASIC_AUTH_PASSWORD_HASH=%q ADMIN_JWT=%q RUN_INDEXER=%q WAIT_FOR_READY=%q SMOKE_CHECK_INDEXER=%q INDEXER_DATABASE_SCHEMA=%q ' \
+            printf 'APP_BASIC_AUTH_USER=%q APP_BASIC_AUTH_PASSWORD=%q APP_BASIC_AUTH_PASSWORD_HASH=%q ADMIN_JWT=%q RUN_INDEXER=%q WAIT_FOR_READY=%q HEALTH_STABILITY_SEC=%q INDEXER_LOG_TAIL=%q SMOKE_CHECK_INDEXER=%q INDEXER_DATABASE_SCHEMA=%q ' \
               "$APP_BASIC_AUTH_USER" \
               "$APP_BASIC_AUTH_PASSWORD" \
               "$APP_BASIC_AUTH_PASSWORD_HASH" \
               "$ADMIN_JWT" \
               "$DEPLOY_RUN_INDEXER" \
               "$DEPLOY_WAIT_FOR_READY" \
+              "$DEPLOY_HEALTH_STABILITY_SEC" \
+              "$DEPLOY_INDEXER_LOG_TAIL" \
               "$DEPLOY_SMOKE_CHECK_INDEXER" \
               "$DEPLOY_INDEXER_DATABASE_SCHEMA"
           )
