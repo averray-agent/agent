@@ -18,6 +18,7 @@
 #   HEALTH_URL            URL to poll for liveness (default: https://index.averray.com/health)
 #   READY_URL             URL to poll for readiness (default: https://index.averray.com/ready)
 #   HEALTH_TIMEOUT_SEC    max seconds to wait for /health (default: 120)
+#   HEALTH_STABILITY_SEC  seconds to re-check /health after first pass (default: 0)
 #   READY_TIMEOUT_SEC     max seconds to wait for /ready (default: 900)
 #   POLL_INTERVAL_SEC     seconds between polls (default: 5)
 #   INDEXER_LOG_TAIL      lines of indexer/Caddy logs to print on failure (default: 120)
@@ -34,6 +35,7 @@ BRANCH=${BRANCH:-main}
 HEALTH_URL=${HEALTH_URL:-https://index.averray.com/health}
 READY_URL=${READY_URL:-https://index.averray.com/ready}
 HEALTH_TIMEOUT_SEC=${HEALTH_TIMEOUT_SEC:-120}
+HEALTH_STABILITY_SEC=${HEALTH_STABILITY_SEC:-0}
 READY_TIMEOUT_SEC=${READY_TIMEOUT_SEC:-900}
 POLL_INTERVAL_SEC=${POLL_INTERVAL_SEC:-5}
 INDEXER_LOG_TAIL=${INDEXER_LOG_TAIL:-120}
@@ -49,6 +51,13 @@ if [[ ! -f "$COMPOSE_FILE" ]]; then
   echo "Missing docker-compose file at $COMPOSE_FILE" >&2
   exit 1
 fi
+
+for numeric_var in HEALTH_TIMEOUT_SEC HEALTH_STABILITY_SEC READY_TIMEOUT_SEC POLL_INTERVAL_SEC INDEXER_LOG_TAIL; do
+  if [[ ! "${!numeric_var}" =~ ^[0-9]+$ ]]; then
+    echo "$numeric_var must be a non-negative integer." >&2
+    exit 1
+  fi
+done
 
 for cmd in git docker curl; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
@@ -106,6 +115,11 @@ wait_for_ok() {
   return 1
 }
 
+check_once() {
+  local url="$1"
+  curl -fsS --max-time 5 "$url" >/dev/null 2>&1
+}
+
 rollback() {
   if [[ "${SKIP_ROLLBACK:-}" == "1" ]]; then
     echo "SKIP_ROLLBACK=1 set; leaving the unhealthy indexer deploy in place for inspection." >&2
@@ -144,6 +158,17 @@ echo "Waiting for indexer health at $HEALTH_URL (timeout ${HEALTH_TIMEOUT_SEC}s)
 if ! wait_for_ok "$HEALTH_URL" "$HEALTH_TIMEOUT_SEC" "Health check"; then
   dump_indexer_diagnostics
   rollback
+fi
+
+if [[ "$HEALTH_STABILITY_SEC" != "0" ]]; then
+  echo "Waiting ${HEALTH_STABILITY_SEC}s to confirm indexer health stays stable."
+  sleep "$HEALTH_STABILITY_SEC"
+  if ! check_once "$HEALTH_URL"; then
+    echo "Health check failed after stability window." >&2
+    dump_indexer_diagnostics
+    rollback
+  fi
+  echo "Health remained stable after ${HEALTH_STABILITY_SEC}s."
 fi
 
 if [[ "$WAIT_FOR_READY" == "1" ]]; then
