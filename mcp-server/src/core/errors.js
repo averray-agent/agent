@@ -14,6 +14,12 @@ export class ValidationError extends AppError {
   }
 }
 
+export class InvalidSubmissionShapeError extends AppError {
+  constructor(message, details = undefined) {
+    super(message, { name: "InvalidSubmissionShapeError", code: "invalid_submission_shape", statusCode: 400, details });
+  }
+}
+
 export class NotFoundError extends AppError {
   constructor(message, code = "not_found", details = undefined) {
     super(message, { name: "NotFoundError", code, statusCode: 404, details });

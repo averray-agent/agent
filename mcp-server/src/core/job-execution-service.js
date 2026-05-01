@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
 import {
   ConflictError,
+  InvalidSubmissionShapeError,
   NotFoundError
 } from "./errors.js";
 import { buildSessionLifecycle, describeSessionStatus, transitionSession } from "./session-state-machine.js";
-import { hashSubmission, normalizeSubmission } from "./submission.js";
-import { getBuiltinJobSchema, validateStructuredSubmission } from "./job-schema-registry.js";
+import { hashSubmission, isStructuredSubmission, normalizeSubmission } from "./submission.js";
+import { getBuiltinJobSchema, validateAgainstSchema, validateStructuredSubmission } from "./job-schema-registry.js";
 import {
   buildFundedJobFromClaim,
   parseGithubPullRequestUrl,
@@ -149,7 +150,7 @@ export class JobExecutionService {
   async submitWork(sessionId, protocol, submissionInput = "submitted-via-service") {
     const session = await this.requireSession(sessionId);
     const job = this.getJobDefinition(session.jobId);
-    const submission = normalizeSubmission(submissionInput);
+    const submission = normalizeSubmission(normalizeSubmitPayloadShape(job.outputSchemaRef, submissionInput));
     if (submission.kind === "structured") {
       validateStructuredSubmission(job.outputSchemaRef, submission.structured, { path: "submission" });
     }
@@ -314,4 +315,55 @@ export class JobExecutionService {
       }
     });
   }
+}
+
+function normalizeSubmitPayloadShape(schemaRef, submissionInput) {
+  if (!isPlainObject(submissionInput) || !isStructuredSubmission(submissionInput.output)) {
+    return submissionInput;
+  }
+
+  const schema = getBuiltinJobSchema(schemaRef);
+  if (!schema) {
+    return submissionInput;
+  }
+
+  const directValidation = tryValidateAgainstSchema(submissionInput, schema, "submission");
+  if (directValidation.ok) {
+    return submissionInput;
+  }
+
+  const outputValidation = tryValidateAgainstSchema(submissionInput.output, schema, "submission.output");
+  if (outputValidation.ok) {
+    return submissionInput.output;
+  }
+
+  throw new InvalidSubmissionShapeError(
+    "Send the structured proposal object directly as submission, not under submission.output.",
+    {
+      expected: firstRequiredSubmissionPath(schema),
+      schemaValidates: "payload.submission",
+      received: "payload.submission.output",
+      hint: "Move the object currently under submission.output up to submission. Do not wrap the job output under an output key.",
+      directError: directValidation.message,
+      outputError: outputValidation.message
+    }
+  );
+}
+
+function tryValidateAgainstSchema(value, schema, path) {
+  try {
+    validateAgainstSchema(value, schema, path);
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, message: error?.message ?? "invalid submission" };
+  }
+}
+
+function firstRequiredSubmissionPath(schema) {
+  const [firstRequired] = schema?.required ?? [];
+  return firstRequired ? `payload.submission.${firstRequired}` : "payload.submission";
+}
+
+function isPlainObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }

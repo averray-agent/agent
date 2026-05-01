@@ -3,7 +3,7 @@ import {
   NotFoundError,
   ValidationError
 } from "./errors.js";
-import { isBuiltinJobSchemaRef, schemaRefToJobSchemaPath } from "./job-schema-registry.js";
+import { getBuiltinJobSchema, isBuiltinJobSchemaRef, schemaRefToJobSchemaPath } from "./job-schema-registry.js";
 
 const DEFAULT_AGENT_PROFILE = {
   capabilities: ["claim_job", "submit_work", "allocate_idle_funds"],
@@ -491,9 +491,11 @@ export class JobCatalogService {
 
   withLifecycle(job, now = new Date()) {
     const publicDetails = buildPublicJobDetails(job);
+    const submissionContract = buildSubmissionContract(job);
     return {
       ...job,
       ...(publicDetails ? { publicDetails } : {}),
+      ...(submissionContract ? { submissionContract } : {}),
       lifecycle: this.buildLifecycle(job, now)
     };
   }
@@ -955,6 +957,73 @@ function buildPublicJobDetails(job) {
     proposalOnly: source.proposalOnly ?? source.attribution?.directEdit === false,
     attributionPolicy: source.attributionPolicy ?? "Averray proposal only / no direct Wikipedia edit"
   };
+}
+
+function buildSubmissionContract(job) {
+  const schema = getBuiltinJobSchema(job?.outputSchemaRef);
+  if (!schema) {
+    return undefined;
+  }
+
+  return {
+    endpoint: "POST /jobs/submit",
+    submissionShape: "direct_schema_object",
+    schemaValidates: "payload.submission",
+    doNotWrapInOutput: true,
+    compatibilityAliases: ["payload.submission.output"],
+    outputSchemaRef: job.outputSchemaRef,
+    outputSchemaUrl: schemaRefToJobSchemaPath(job.outputSchemaRef),
+    submitPayloadExample: {
+      sessionId: "<session-id>",
+      submission: buildSchemaExample(schema)
+    },
+    invalidWrappedOutputHint: "Send the schema object directly as payload.submission. Do not wrap it under payload.submission.output."
+  };
+}
+
+function buildSchemaExample(schema, fieldName = "value") {
+  if (!schema || typeof schema !== "object") {
+    return "...";
+  }
+  if (Array.isArray(schema.enum) && schema.enum.length) {
+    return schema.enum[0];
+  }
+  if (schema.type === "object") {
+    const properties = schema.properties ?? {};
+    const keys = schema.required?.length ? schema.required : Object.keys(properties).slice(0, 3);
+    return Object.fromEntries(keys.map((key) => [key, buildSchemaExample(properties[key], key)]));
+  }
+  if (schema.type === "array") {
+    const item = buildSchemaExample(schema.items, singularizeFieldName(fieldName));
+    return Number.isInteger(schema.minItems) && schema.minItems > 0 ? [item] : [];
+  }
+  if (schema.type === "integer") {
+    return 1;
+  }
+  if (schema.type === "number") {
+    return 1;
+  }
+  if (schema.type === "boolean") {
+    return true;
+  }
+  if (schema.type === "string") {
+    return sampleStringForField(fieldName);
+  }
+  return "...";
+}
+
+function sampleStringForField(fieldName) {
+  const normalized = String(fieldName ?? "").toLowerCase();
+  if (normalized.includes("url")) return "https://example.com/source";
+  if (normalized.includes("revision")) return "123456789";
+  if (normalized.includes("page_title") || normalized.includes("pagetitle")) return "Example article";
+  if (normalized.includes("risk")) return "low";
+  if (normalized.includes("status")) return "complete";
+  return "...";
+}
+
+function singularizeFieldName(fieldName) {
+  return String(fieldName ?? "item").replace(/s$/u, "");
 }
 
 function buildWikipediaPinnedRevisionUrl(source) {

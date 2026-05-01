@@ -55,6 +55,80 @@ test("submitWork accepts structured output for built-in schemas", async () => {
   assert.equal(submitted.statusHistory[1].metadata.schemaRef, "schema://jobs/pr-review-findings-output");
 });
 
+test("submitWork unwraps submission.output compatibility alias before storing structured output", async () => {
+  const stateStore = new MemoryStateStore();
+  const job = makeJob();
+  const service = new JobExecutionService(stateStore, undefined, () => job);
+
+  const output = {
+    summary: "Auth flow has one blocker.",
+    findings: [
+      {
+        severity: "high",
+        file: "frontend/auth.js",
+        issue: "Session refresh is hidden behind retry logic.",
+        recommendation: "Show a visible sign-in refresh path."
+      }
+    ],
+    risk_level: "high",
+    files_touched: ["frontend/auth.js"],
+    recommended_next_step: "request_changes"
+  };
+
+  const claimed = await service.claimJob(WALLET, job.id, "http", "idemp-output-alias");
+  const submitted = await service.submitWork(claimed.sessionId, "http", {
+    jobId: job.id,
+    output
+  });
+
+  assert.equal(submitted.status, "submitted");
+  assert.equal(submitted.submission.kind, "structured");
+  assert.deepEqual(submitted.submission.structured, output);
+});
+
+test("submitWork keeps direct structured submissions that legitimately include an output field", async () => {
+  const stateStore = new MemoryStateStore();
+  const job = makeJob({ outputSchemaRef: "schema://jobs/coding-output" });
+  const service = new JobExecutionService(stateStore, undefined, () => job);
+
+  const output = {
+    summary: "Parser fixed.",
+    output: "Added regression coverage.",
+    status: "complete",
+    filesChanged: ["src/parser.js"]
+  };
+
+  const claimed = await service.claimJob(WALLET, job.id, "http", "idemp-direct-output");
+  const submitted = await service.submitWork(claimed.sessionId, "http", output);
+
+  assert.equal(submitted.submission.kind, "structured");
+  assert.deepEqual(submitted.submission.structured, output);
+});
+
+test("submitWork explains wrapped output shape when the alias payload is still invalid", async () => {
+  const stateStore = new MemoryStateStore();
+  const job = makeJob({ outputSchemaRef: "schema://jobs/wikipedia-citation-repair-output" });
+  const service = new JobExecutionService(stateStore, undefined, () => job);
+
+  const claimed = await service.claimJob(WALLET, job.id, "http", "idemp-bad-output-alias");
+
+  await assert.rejects(
+    () => service.submitWork(claimed.sessionId, "http", {
+      jobId: job.id,
+      output: {
+        page_title: "Example article",
+        revision_id: "123456789"
+      }
+    }),
+    (error) => {
+      assert.equal(error.code, "invalid_submission_shape");
+      assert.equal(error.details.expected, "payload.submission.page_title");
+      assert.match(error.details.hint, /Do not wrap/u);
+      return true;
+    }
+  );
+});
+
 test("submitWork rejects structured output when the schema ref is unknown", async () => {
   const stateStore = new MemoryStateStore();
   const job = makeJob({ outputSchemaRef: "schema://jobs/custom-output" });
