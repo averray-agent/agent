@@ -81,6 +81,31 @@ test("createSubJob links the child job to the active parent session", async () =
   assert.equal(subJobs[0].id, "child-job-001");
 });
 
+test("listJobsWithSessions joins active session state onto job rows", async () => {
+  const service = makePlatformService();
+
+  // Before any claim — listJobs and listJobsWithSessions agree.
+  const before = await service.listJobsWithSessions();
+  assert.equal(before.length, 1);
+  assert.equal(before[0].id, "parent-job-001");
+  assert.equal(before[0].claimedBy ?? null, null);
+  assert.equal(before[0].sessionId ?? null, null);
+  assert.equal(before[0].state ?? null, null);
+
+  // After a claim — the row carries claim state read live from the
+  // session store so the public /jobs feed and the operator queue
+  // stop showing the row as "ready / unclaimed" the moment a worker
+  // locks it in.
+  const session = await service.claimJob(WALLET, "parent-job-001", "http", "claim-state-test");
+  const after = await service.listJobsWithSessions();
+  assert.equal(after.length, 1);
+  assert.equal(after[0].id, "parent-job-001");
+  assert.equal(after[0].claimedBy, WALLET);
+  assert.equal(after[0].sessionId, session.sessionId);
+  assert.equal(typeof after[0].state, "string");
+  assert.equal(after[0].state, session.status);
+});
+
 test("getSessionTimeline includes transitions and verification state", async () => {
   const service = makePlatformService();
   const session = await service.claimJob(WALLET, "parent-job-001", "http", "timeline-claim");

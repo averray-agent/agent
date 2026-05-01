@@ -108,6 +108,41 @@ export class PlatformService {
     return this.jobCatalogService.listJobs(options);
   }
 
+  /**
+   * Same as `listJobs`, but joins active-session state onto each row.
+   *
+   * Today the catalog stores immutable job documents — claiming a job
+   * only writes a Session into the state store, never mutates the job
+   * itself. That left the public `/jobs` feed with `state`,
+   * `claimedBy`, and `sessionId` permanently null even after a worker
+   * had locked a job in. The operator queue + ready-to-claim cards
+   * also rendered claimed jobs as still claimable.
+   *
+   * Joining sessions on read keeps the catalog clean and fixes the
+   * surface in one place: any list endpoint that wants run-state
+   * visibility calls this method instead of `listJobs`.
+   */
+  async listJobsWithSessions(options = {}) {
+    const jobs = this.jobCatalogService.listJobs(options);
+    return Promise.all(
+      jobs.map(async (job) => {
+        const session = await this.stateStore.findSessionByJobId?.(job.id);
+        if (!session) return job;
+        return {
+          ...job,
+          state: typeof session.status === "string" ? session.status : job.state ?? null,
+          claimedBy: typeof session.wallet === "string" ? session.wallet : job.claimedBy ?? null,
+          sessionId: typeof session.sessionId === "string"
+            ? session.sessionId
+            : job.sessionId ?? null,
+          claimedAt: typeof session.claimedAt === "string"
+            ? session.claimedAt
+            : job.claimedAt ?? undefined
+        };
+      })
+    );
+  }
+
   createJob(input) {
     return this.jobCatalogService.createJob(input);
   }

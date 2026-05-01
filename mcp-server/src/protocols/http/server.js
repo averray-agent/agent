@@ -1356,7 +1356,13 @@ const server = createServer(async (request, response) => {
     }
 
     if (request.method === "GET" && pathname === "/jobs") {
-      return respond(response, 200, buildPublicJobsResponse(service.listJobs(), url.searchParams));
+      // Use the session-joined variant so claimed jobs surface their
+      // state / claimedBy / sessionId. The public catalog stays
+      // immutable; this endpoint reads the live join. Without it
+      // browser agents would re-attempt already-claimed jobs and
+      // operator UIs would show "Ready" forever.
+      const jobs = await service.listJobsWithSessions();
+      return respond(response, 200, buildPublicJobsResponse(jobs, url.searchParams));
     }
 
     if (request.method === "GET" && pathname === "/admin/jobs") {
@@ -1366,7 +1372,7 @@ const server = createServer(async (request, response) => {
       // stale rows so the operator app can show lifecycle controls.
       // The public `/jobs` route filters those out by default.
       return respond(response, 200, {
-        jobs: service.listJobs({
+        jobs: await service.listJobsWithSessions({
           includePaused: true,
           includeArchived: true,
           includeStale: true
