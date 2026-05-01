@@ -1,6 +1,7 @@
 import {
   BADGES,
   tierFor,
+  type AgentActiveSession,
   type AgentRecord,
   type AgentSpecialty,
   type AgentState,
@@ -36,6 +37,8 @@ export function extractAgent(data: unknown): AgentRecord | null {
     ? number(stats?.completionRate, 0)
     : number(record.successRate, 0);
 
+  const activeSession = activeSessionFor(record);
+  const verifiedBadgeCount = badgesRaw.length;
   return {
     handle: text(record.handle, handleForWallet(walletFull)),
     wallet: shortAddress(walletFull),
@@ -47,8 +50,10 @@ export function extractAgent(data: unknown): AgentRecord | null {
     badgeDates: badgeDatesFor(badgesRaw, badgeIds),
     specialty,
     stake: stakeFor(record),
-    activity: activityFor(record, badgesRaw, totalJobs),
-    state: stateFor(record, totalJobs),
+    activity: activityFor(record, badgesRaw, totalJobs, activeSession),
+    state: stateFor(record, totalJobs, activeSession),
+    ...(activeSession ? { activeSession } : {}),
+    hasVerifiedBadges: verifiedBadgeCount > 0,
     recentRuns: recentRunsFor(badgesRaw),
     slashes: slashEvents(record.slashEvents),
   };
@@ -134,7 +139,29 @@ function stakeFor(record: RawRecord): AgentRecord["stake"] {
   };
 }
 
-function activityFor(record: RawRecord, badges: unknown[], totalJobs: number): AgentRecord["activity"] {
+function activityFor(
+  record: RawRecord,
+  badges: unknown[],
+  totalJobs: number,
+  activeSession: AgentActiveSession | undefined
+): AgentRecord["activity"] {
+  // Priority: live claim > most recent badge > fallback to the
+  // "no runs yet" empty-state copy.
+  if (activeSession) {
+    const verb =
+      activeSession.status === "claimed"
+        ? "Claimed"
+        : activeSession.status === "working"
+          ? "Working on"
+          : activeSession.status === "submitted"
+            ? "Submitted"
+            : "Disputed";
+    return {
+      msg: `${verb} ${activeSession.jobId}`,
+      ref: activeSession.jobId,
+      when: relativeTime(activeSession.lastEventAt ?? record.fetchedAt),
+    };
+  }
   const latest = badges[0] && typeof badges[0] === "object" ? (badges[0] as RawRecord) : null;
   const jobId = text(latest?.jobId, "");
   if (jobId) {
@@ -151,9 +178,51 @@ function activityFor(record: RawRecord, badges: unknown[], totalJobs: number): A
   };
 }
 
-function stateFor(record: RawRecord, totalJobs: number): AgentState {
+function stateFor(
+  record: RawRecord,
+  totalJobs: number,
+  activeSession: AgentActiveSession | undefined
+): AgentState {
   if (Array.isArray(record.slashEvents) && record.slashEvents.length) return "slashed";
+  if (activeSession) return activeSession.status;
   return totalJobs > 0 ? "active" : "idle";
+}
+
+function activeSessionFor(record: RawRecord): AgentActiveSession | undefined {
+  // The backend may attach an `activeSession` block directly on the agent
+  // payload, or split it across `currentSession` / `currentJob`. Tolerate
+  // either shape — if neither is present we just leave the agent in
+  // `idle`/`active` and the directory + drawer fall back to history.
+  const block =
+    objectField(record, "activeSession") ??
+    objectField(record, "currentSession") ??
+    null;
+  if (!block) return undefined;
+  const runId = text(block.runId, "");
+  const jobId = text(block.jobId, "");
+  const sessionId = text(block.sessionId, "");
+  if (!runId || !jobId || !sessionId) return undefined;
+  const status = activeStatus(block.status);
+  if (!status) return undefined;
+  return {
+    runId,
+    jobId,
+    sessionId,
+    status,
+    ...(text(block.title) ? { title: text(block.title) } : {}),
+    ...(text(block.deadlineAt) ? { deadlineAt: text(block.deadlineAt) } : {}),
+    ...(text(block.lastEventAt) ? { lastEventAt: text(block.lastEventAt) } : {}),
+    ...(text(block.lastEvent) ? { lastEvent: text(block.lastEvent) } : {}),
+  };
+}
+
+function activeStatus(value: unknown): AgentActiveSession["status"] | null {
+  const raw = text(value, "").toLowerCase();
+  if (raw === "claimed") return "claimed";
+  if (raw === "working" || raw === "in_progress") return "working";
+  if (raw === "submitted" || raw === "pending" || raw === "pending_verification") return "submitted";
+  if (raw === "disputed" || raw === "rejected") return "disputed";
+  return null;
 }
 
 function recentRunsFor(badges: unknown[]): AgentRecord["recentRuns"] {

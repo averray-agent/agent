@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { cn } from "@/lib/utils/cn";
 import { Sparkline } from "@/components/overview/Sparkline";
 import { BadgeChip } from "./BadgeStrip";
@@ -8,6 +9,7 @@ import {
   BADGES,
   tierFor,
   nextThreshold,
+  type AgentActiveSession,
   type AgentRecord,
   type AgentTier,
 } from "./types";
@@ -22,36 +24,31 @@ export function AgentDrawerBody({ agent }: { agent: AgentRecord }) {
   const lockPct = agent.stake.deposited > 0 ? agent.stake.locked / agent.stake.deposited : 0;
   const curTier = tierFor(agent.score);
   const next = nextThreshold(agent.score);
-  const profileUrl = `averray.com/agents/${agent.walletFull}`;
+  const profileUrl = `https://averray.com/agents/${agent.walletFull}`;
+  const showSparkline = agent.sparkline.some((v) => v > 0);
+  // Badge section copy depends on whether any badge represents a
+  // verified-receipt outcome. Capability markers granted on registration
+  // (e.g. "Coding L1" assigned to every fresh wallet) shouldn't be
+  // labelled "earned" — that conflates "the agent did something" with
+  // "the agent has the right to do something".
+  const badgeSectionTitle = agent.hasVerifiedBadges
+    ? `Badges earned · ${agent.badges.length}`
+    : `Capabilities · ${agent.badges.length}`;
+  const badgeNote = agent.hasVerifiedBadges
+    ? null
+    : "starter capability — not from a verified receipt";
 
   return (
     <>
-      <Section title="Signature header">
-        <div className="flex flex-col gap-1.5 rounded-[10px] border border-[color:rgba(30,102,66,0.24)] bg-[color:rgba(30,102,66,0.06)] px-4 py-3">
-          <span
-            className="font-[family-name:var(--font-display)] text-[10.5px] font-extrabold uppercase text-[var(--avy-accent)]"
-            style={{ letterSpacing: "0.12em" }}
-          >
-            Public identity
-          </span>
-          <span
-            className="break-all font-[family-name:var(--font-mono)] text-[13px] text-[var(--avy-accent)]"
-            style={{ letterSpacing: 0 }}
-          >
-            {agent.walletFull}
-          </span>
-          <a
-            href={`https://${profileUrl}`}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1.5 self-start rounded-[6px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-2.5 py-1.5 font-[family-name:var(--font-mono)] text-[12px] text-[var(--avy-ink)] hover:border-[color:rgba(30,102,66,0.35)] hover:text-[var(--avy-accent)]"
-            style={{ letterSpacing: 0 }}
-          >
-            <span>↗</span>
-            <span>{profileUrl}</span>
-          </a>
-        </div>
+      <Section title="Public identity">
+        <PublicIdentityCard wallet={agent.walletFull} profileUrl={profileUrl} />
       </Section>
+
+      {agent.activeSession ? (
+        <Section title="Active session">
+          <ActiveSessionCard session={agent.activeSession} />
+        </Section>
+      ) : null}
 
       <Section title="Reputation · 30d">
         <div className="grid gap-3 rounded-[10px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-4 py-3.5">
@@ -69,7 +66,14 @@ export function AgentDrawerBody({ agent }: { agent: AgentRecord }) {
                   : "top tier — no further ladder"}
               </div>
             </div>
-            <Sparkline points={agent.sparkline} width={160} height={34} />
+            {showSparkline ? (
+              <Sparkline points={agent.sparkline} width={160} height={34} />
+            ) : (
+              <span
+                aria-hidden="true"
+                className="block h-[2px] w-[160px] rounded-full bg-[color:rgba(17,19,21,0.08)]"
+              />
+            )}
           </div>
           <div className="grid gap-1.5">
             {TIERS.map((t) => {
@@ -110,80 +114,58 @@ export function AgentDrawerBody({ agent }: { agent: AgentRecord }) {
         </div>
       </Section>
 
-      <Section title={`Badges earned · ${agent.badges.length}`}>
-        <div className="grid grid-cols-2 gap-2">
-          {agent.badges.map((b) => {
-            const def = BADGES[b];
-            return (
-              <div
-                key={b}
-                className="grid items-center gap-2.5 rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3 py-2.5"
-                style={{ gridTemplateColumns: "28px 1fr" }}
-              >
-                <BadgeChip badgeId={b} size="md" />
-                <div>
-                  <div className="font-[family-name:var(--font-display)] text-[12.5px] font-bold text-[var(--avy-ink)]">
-                    {def?.name}
-                  </div>
-                  <div
-                    className="mt-px font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]"
-                    style={{ letterSpacing: 0 }}
-                  >
-                    issued {agent.badgeDates[b] ?? "—"}
+      <Section title={badgeSectionTitle}>
+        {badgeNote ? (
+          <p
+            className="font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]"
+            style={{ letterSpacing: 0 }}
+          >
+            {badgeNote}
+          </p>
+        ) : null}
+        {agent.badges.length === 0 ? (
+          <div
+            className="rounded-[8px] border border-dashed border-[var(--avy-line)] bg-[rgba(255,253,247,0.5)] px-3.5 py-2.5 font-[family-name:var(--font-mono)] text-[12px] text-[var(--avy-muted)]"
+            style={{ letterSpacing: 0 }}
+          >
+            No capabilities recorded yet.
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-2">
+            {agent.badges.map((b) => {
+              const def = BADGES[b];
+              const issued = agent.badgeDates[b];
+              return (
+                <div
+                  key={b}
+                  className="grid items-center gap-2.5 rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3 py-2.5"
+                  style={{ gridTemplateColumns: "28px 1fr" }}
+                >
+                  <BadgeChip badgeId={b} size="md" />
+                  <div>
+                    <div className="font-[family-name:var(--font-display)] text-[12.5px] font-bold text-[var(--avy-ink)]">
+                      {def?.name}
+                    </div>
+                    <div
+                      className="mt-px font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]"
+                      style={{ letterSpacing: 0 }}
+                    >
+                      {agent.hasVerifiedBadges
+                        ? issued
+                          ? `issued ${issued}`
+                          : "issued —"
+                        : "starter capability"}
+                    </div>
                   </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )}
       </Section>
 
       <Section title="Recent runs · last 8">
-        <div className="grid gap-1.5">
-          {agent.recentRuns.map((r) => {
-            const pillCls =
-              r.state === "Verified"
-                ? "bg-[var(--avy-accent-soft)] text-[var(--avy-accent)]"
-                : r.state === "Disputed"
-                  ? "bg-[var(--avy-warn-soft)] text-[var(--avy-warn)]"
-                  : "bg-[#ebe7da] text-[#756d58]";
-            return (
-              <div
-                key={r.id}
-                className="grid items-center gap-3 rounded-[8px] border border-[var(--avy-line-soft)] bg-[var(--avy-paper-solid)] px-3 py-2"
-                style={{ gridTemplateColumns: "1fr auto auto" }}
-              >
-                <div>
-                  <div className="text-[13px] leading-tight text-[var(--avy-ink)]">
-                    {r.title}
-                  </div>
-                  <span
-                    className="mt-0.5 block font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]"
-                    style={{ letterSpacing: 0 }}
-                  >
-                    {r.id}
-                  </span>
-                </div>
-                <span
-                  className="font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-accent)]"
-                  style={{ letterSpacing: 0 }}
-                >
-                  {r.receipt}
-                </span>
-                <span
-                  className={cn(
-                    "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 font-[family-name:var(--font-display)] text-[10px] font-extrabold uppercase",
-                    pillCls
-                  )}
-                  style={{ letterSpacing: "0.08em" }}
-                >
-                  <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />
-                  {r.state}
-                </span>
-              </div>
-            );
-          })}
-        </div>
+        <RecentRunsBlock agent={agent} />
       </Section>
 
       <Section title="Stake">
@@ -209,7 +191,7 @@ export function AgentDrawerBody({ agent }: { agent: AgentRecord }) {
             className="rounded-[8px] border border-dashed border-[var(--avy-line)] bg-[rgba(255,253,247,0.5)] px-3.5 py-2.5 font-[family-name:var(--font-mono)] text-[12px] text-[var(--avy-muted)]"
             style={{ letterSpacing: 0 }}
           >
-            No slashes on record — clean history since claim-open.
+            No slashes on record — clean history since first seen.
           </div>
         ) : (
           <div className="grid gap-2">
@@ -242,21 +224,252 @@ export function AgentDrawerBody({ agent }: { agent: AgentRecord }) {
           </div>
         )}
       </Section>
+    </>
+  );
+}
 
-      <Section title="Public profile">
+/**
+ * Public-identity header. Wallet + profile URL never overflow horizontally —
+ * we render the long string in a wrapping container, then offer
+ * middle-truncated buttons for `Open` and `Copy` so the full address is
+ * always one click away without ever creating a horizontal scrollbar.
+ */
+function PublicIdentityCard({
+  wallet,
+  profileUrl,
+}: {
+  wallet: string;
+  profileUrl: string;
+}) {
+  const [copied, setCopied] = useState<"wallet" | "url" | null>(null);
+
+  const copy = async (which: "wallet" | "url", value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(which);
+      setTimeout(() => setCopied(null), 1500);
+    } catch {
+      // Fall through silently — the wallet text is already on screen.
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-2 overflow-hidden rounded-[10px] border border-[color:rgba(30,102,66,0.24)] bg-[color:rgba(30,102,66,0.06)] px-4 py-3">
+      <span
+        className="font-[family-name:var(--font-display)] text-[10.5px] font-extrabold uppercase text-[var(--avy-accent)]"
+        style={{ letterSpacing: "0.12em" }}
+      >
+        Public identity
+      </span>
+      <span
+        className="break-all font-[family-name:var(--font-mono)] text-[13px] text-[var(--avy-accent)]"
+        style={{ letterSpacing: 0 }}
+      >
+        {wallet}
+      </span>
+      <div className="flex flex-wrap items-center gap-1.5">
         <a
-          href={`https://${profileUrl}`}
+          href={profileUrl}
           target="_blank"
           rel="noreferrer"
-          className="inline-flex items-center gap-2 rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3 py-2 font-[family-name:var(--font-mono)] text-[12px] text-[var(--avy-ink)] hover:border-[color:rgba(30,102,66,0.35)] hover:text-[var(--avy-accent)]"
+          title={profileUrl}
+          className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-[6px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-2.5 py-1.5 font-[family-name:var(--font-mono)] text-[12px] text-[var(--avy-ink)] hover:border-[color:rgba(30,102,66,0.35)] hover:text-[var(--avy-accent)]"
           style={{ letterSpacing: 0 }}
         >
-          <span>↗</span>
-          <span>https://{profileUrl}</span>
-          <span className="opacity-60">open</span>
+          <span className="shrink-0">↗</span>
+          <span className="min-w-0 truncate">
+            averray.com/agents/{middleTruncate(wallet, 14)}
+          </span>
         </a>
-      </Section>
-    </>
+        <button
+          type="button"
+          onClick={() => copy("url", profileUrl)}
+          className="inline-flex shrink-0 items-center rounded-[6px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-2 py-1.5 font-[family-name:var(--font-display)] text-[10.5px] font-bold uppercase text-[var(--avy-ink)] transition-colors hover:border-[color:rgba(30,102,66,0.35)] hover:text-[var(--avy-accent)]"
+          style={{ letterSpacing: "0.06em" }}
+        >
+          {copied === "url" ? "Copied" : "Copy URL"}
+        </button>
+        <button
+          type="button"
+          onClick={() => copy("wallet", wallet)}
+          className="inline-flex shrink-0 items-center rounded-[6px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-2 py-1.5 font-[family-name:var(--font-display)] text-[10.5px] font-bold uppercase text-[var(--avy-ink)] transition-colors hover:border-[color:rgba(30,102,66,0.35)] hover:text-[var(--avy-accent)]"
+          style={{ letterSpacing: "0.06em" }}
+        >
+          {copied === "wallet" ? "Copied" : "Copy wallet"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const STATUS_PILL: Record<
+  AgentActiveSession["status"],
+  { label: string; cls: string }
+> = {
+  claimed: {
+    label: "Claimed",
+    cls: "bg-[var(--avy-accent-soft)] text-[var(--avy-accent)]",
+  },
+  working: {
+    label: "Working",
+    cls: "bg-[var(--avy-accent-soft)] text-[var(--avy-accent)]",
+  },
+  submitted: {
+    label: "Submitted · pending verification",
+    cls: "bg-[var(--avy-warn-soft)] text-[var(--avy-warn)]",
+  },
+  disputed: {
+    label: "Disputed",
+    cls: "bg-[#f3d9d9] text-[#8a2a2a]",
+  },
+};
+
+function ActiveSessionCard({ session }: { session: AgentActiveSession }) {
+  const pill = STATUS_PILL[session.status];
+  return (
+    <div className="grid gap-2 rounded-[10px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-4 py-3.5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-[family-name:var(--font-display)] text-[10.5px] font-extrabold uppercase",
+            pill.cls
+          )}
+          style={{ letterSpacing: "0.08em" }}
+        >
+          <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />
+          {pill.label}
+        </span>
+        {session.deadlineAt ? (
+          <span
+            className="font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]"
+            style={{ letterSpacing: 0 }}
+          >
+            deadline {formatDeadline(session.deadlineAt)}
+          </span>
+        ) : null}
+      </div>
+      {session.title ? (
+        <p className="m-0 text-[14px] font-semibold leading-tight text-[var(--avy-ink)]">
+          {session.title}
+        </p>
+      ) : null}
+      <dl
+        className="grid grid-cols-1 gap-x-3 gap-y-1 font-[family-name:var(--font-mono)] text-[12px] text-[var(--avy-ink)] sm:grid-cols-[auto_minmax(0,1fr)]"
+        style={{ letterSpacing: 0 }}
+      >
+        <SessionField label="Job" value={session.jobId} />
+        <SessionField label="Run" value={session.runId} />
+        <SessionField label="Session" value={session.sessionId} />
+        {session.lastEvent ? (
+          <SessionField
+            label="Last event"
+            value={
+              session.lastEventAt
+                ? `${session.lastEvent} · ${formatRelative(session.lastEventAt)}`
+                : session.lastEvent
+            }
+          />
+        ) : null}
+      </dl>
+    </div>
+  );
+}
+
+function SessionField({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="contents">
+      <dt
+        className="font-[family-name:var(--font-display)] text-[10px] font-extrabold uppercase text-[var(--avy-muted)]"
+        style={{ letterSpacing: "0.12em" }}
+      >
+        {label}
+      </dt>
+      <dd className="m-0 min-w-0 break-words">{value}</dd>
+    </div>
+  );
+}
+
+/**
+ * Recent runs section. The previous version always listed the static
+ * fixture; with first-agent state we need an explicit empty/active
+ * vocabulary so an operator immediately knows what they're looking at.
+ */
+function RecentRunsBlock({ agent }: { agent: AgentRecord }) {
+  const verified = agent.recentRuns;
+  const session = agent.activeSession;
+
+  if (verified.length === 0) {
+    const copy = !session
+      ? "No verified runs yet."
+      : session.status === "submitted"
+        ? "1 active run · submitted, awaiting verification."
+        : session.status === "disputed"
+          ? "1 active run · in dispute."
+          : `1 active run · ${session.status}.`;
+    return (
+      <div
+        className="rounded-[8px] border border-dashed border-[var(--avy-line)] bg-[rgba(255,253,247,0.5)] px-3.5 py-2.5 font-[family-name:var(--font-mono)] text-[12px] text-[var(--avy-muted)]"
+        style={{ letterSpacing: 0 }}
+      >
+        {copy}
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid gap-1.5">
+      {session ? (
+        <div
+          className="rounded-[8px] border border-dashed border-[color:rgba(30,102,66,0.35)] bg-[color:rgba(30,102,66,0.04)] px-3.5 py-2 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-accent)]"
+          style={{ letterSpacing: 0 }}
+        >
+          1 active run · {session.status} · {session.jobId}
+        </div>
+      ) : null}
+      {verified.map((r) => {
+        const pillCls =
+          r.state === "Verified"
+            ? "bg-[var(--avy-accent-soft)] text-[var(--avy-accent)]"
+            : r.state === "Disputed"
+              ? "bg-[var(--avy-warn-soft)] text-[var(--avy-warn)]"
+              : "bg-[#ebe7da] text-[#756d58]";
+        return (
+          <div
+            key={r.id}
+            className="grid items-center gap-3 rounded-[8px] border border-[var(--avy-line-soft)] bg-[var(--avy-paper-solid)] px-3 py-2"
+            style={{ gridTemplateColumns: "1fr auto auto" }}
+          >
+            <div>
+              <div className="text-[13px] leading-tight text-[var(--avy-ink)]">
+                {r.title}
+              </div>
+              <span
+                className="mt-0.5 block font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]"
+                style={{ letterSpacing: 0 }}
+              >
+                {r.id}
+              </span>
+            </div>
+            <span
+              className="font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-accent)]"
+              style={{ letterSpacing: 0 }}
+            >
+              {r.receipt}
+            </span>
+            <span
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 font-[family-name:var(--font-display)] text-[10px] font-extrabold uppercase",
+                pillCls
+              )}
+              style={{ letterSpacing: "0.08em" }}
+            >
+              <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />
+              {r.state}
+            </span>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -310,4 +523,36 @@ function StakeCell({
       </span>
     </div>
   );
+}
+
+function middleTruncate(value: string, keep: number): string {
+  if (value.length <= keep + 3) return value;
+  const head = Math.ceil(keep / 2);
+  const tail = keep - head;
+  return `${value.slice(0, head)}…${value.slice(-tail)}`;
+}
+
+function formatRelative(iso: string): string {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return iso;
+  const deltaSec = Math.max(0, Math.round((Date.now() - t) / 1000));
+  if (deltaSec < 60) return `${deltaSec}s ago`;
+  const deltaMin = Math.round(deltaSec / 60);
+  if (deltaMin < 60) return `${deltaMin}m ago`;
+  const deltaHr = Math.round(deltaMin / 60);
+  if (deltaHr < 24) return `${deltaHr}h ago`;
+  return `${Math.round(deltaHr / 24)}d ago`;
+}
+
+function formatDeadline(iso: string): string {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return iso;
+  const deltaSec = Math.round((t - Date.now()) / 1000);
+  if (deltaSec <= 0) return "expired";
+  if (deltaSec < 60) return `in ${deltaSec}s`;
+  const deltaMin = Math.round(deltaSec / 60);
+  if (deltaMin < 60) return `in ${deltaMin}m`;
+  const deltaHr = Math.round(deltaMin / 60);
+  if (deltaHr < 24) return `in ${deltaHr}h`;
+  return `in ${Math.round(deltaHr / 24)}d`;
 }

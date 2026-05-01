@@ -13,9 +13,34 @@ export interface AgentDirectoryTableProps {
   onSelect: (agent: AgentRecord) => void;
 }
 
-const STATE_PILL: Record<AgentRecord["state"], { cls: string; label: string }> = {
-  active: { cls: "bg-[var(--avy-accent-soft)] text-[var(--avy-accent)]", label: "Active" },
+// State pill palette. Lifecycle-position tones:
+//   - idle: neutral parchment, "no claim, no work in flight"
+//   - claimed/working/active: green family — currently producing or has
+//     a verified history
+//   - submitted: amber — produced something, awaiting verification
+//   - disputed/slashed: red family — operator action wanted
+const STATE_PILL: Record<
+  AgentRecord["state"],
+  { cls: string; label: string }
+> = {
   idle: { cls: "bg-[#ebe7da] text-[#756d58]", label: "Idle" },
+  claimed: {
+    cls: "bg-[var(--avy-accent-soft)] text-[var(--avy-accent)]",
+    label: "Claimed",
+  },
+  working: {
+    cls: "bg-[var(--avy-accent-soft)] text-[var(--avy-accent)]",
+    label: "Working",
+  },
+  submitted: {
+    cls: "bg-[var(--avy-warn-soft)] text-[var(--avy-warn)]",
+    label: "Submitted",
+  },
+  disputed: { cls: "bg-[#f3d9d9] text-[#8a2a2a]", label: "Disputed" },
+  active: {
+    cls: "bg-[var(--avy-accent-soft)] text-[var(--avy-accent)]",
+    label: "Active",
+  },
   slashed: { cls: "bg-[#f3d9d9] text-[#8a2a2a]", label: "Slashed" },
 };
 
@@ -98,7 +123,16 @@ export function AgentDirectoryTable({
                         >
                           {a.score}
                         </span>
-                        <Sparkline points={a.sparkline} width={72} height={20} />
+                        {/* Suppress a flat-zero spark on first-agent rows;
+                            it read as fake against a 0 score. */}
+                        {a.sparkline.some((v) => v > 0) ? (
+                          <Sparkline points={a.sparkline} width={72} height={20} />
+                        ) : (
+                          <span
+                            aria-hidden="true"
+                            className="block h-[2px] w-[72px] rounded-full bg-[color:rgba(17,19,21,0.08)]"
+                          />
+                        )}
                       </div>
                     </Td>
                     <Td>
