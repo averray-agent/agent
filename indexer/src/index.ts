@@ -29,6 +29,41 @@ const toEventId = (txHash: string, logIndex: number | bigint) => `${txHash}-${lo
 const nullIfZeroHash = (value: `0x${string}`): `0x${string}` | null =>
   value.toLowerCase() === zeroHash ? null : value;
 const hexByteLength = (value: `0x${string}`) => (value.length - 2) / 2;
+const legacyJobFields = [
+  "poster",
+  "worker",
+  "asset",
+  "verifierMode",
+  "category",
+  "specHash",
+  "reward",
+  "opsReserve",
+  "contingencyReserve",
+  "released",
+  "claimExpiry",
+  "claimStake",
+  "claimStakeBps",
+  "rejectedAt",
+  "disputedAt",
+  "payoutMode",
+  "state"
+] as const;
+const oldLegacyJobFields = [
+  "poster",
+  "worker",
+  "asset",
+  "verifierMode",
+  "category",
+  "reward",
+  "opsReserve",
+  "contingencyReserve",
+  "released",
+  "claimExpiry",
+  "claimStake",
+  "claimStakeBps",
+  "payoutMode",
+  "state"
+] as const;
 
 const toTier = (skill: bigint) => {
   if (skill >= 200n) return "elite";
@@ -185,6 +220,21 @@ const decodeLiveJob = (data: `0x${string}`) => {
   );
 };
 
+const tupleValues = (value: any, fields: readonly string[]) => {
+  if (Array.isArray(value)) return value;
+  if (!value || typeof value !== "object") {
+    throw new Error("EscrowCore.jobs returned an unsupported tuple shape");
+  }
+
+  return fields.map((field, index) => {
+    const item = value[field] ?? value[index];
+    if (item === undefined) {
+      throw new Error(`EscrowCore.jobs decoded tuple is missing ${field}`);
+    }
+    return item;
+  });
+};
+
 const normalizeLegacyJob = (legacy: any) => {
   const [
     poster,
@@ -204,7 +254,7 @@ const normalizeLegacyJob = (legacy: any) => {
     disputedAt,
     payoutMode,
     state
-  ] = legacy;
+  ] = tupleValues(legacy, legacyJobFields);
   return [
     poster,
     worker,
@@ -246,7 +296,7 @@ const normalizeOldLegacyJob = (oldLegacy: any) => {
     claimStakeBps,
     payoutMode,
     state
-  ] = oldLegacy;
+  ] = tupleValues(oldLegacy, oldLegacyJobFields);
   return [
     poster,
     worker,
