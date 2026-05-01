@@ -6,6 +6,37 @@ on:
     branches: [main]
     types: [completed]
   workflow_dispatch:
+    inputs:
+      run_indexer:
+        description: Force indexer deploy for operational recovery.
+        required: false
+        default: auto
+        type: choice
+        options:
+          - auto
+          - "1"
+          - "0"
+      wait_for_ready:
+        description: Wait for indexer historical readiness after health passes.
+        required: false
+        default: "1"
+        type: choice
+        options:
+          - "1"
+          - "0"
+      smoke_check_indexer:
+        description: Include indexer in hosted smoke checks.
+        required: false
+        default: auto
+        type: choice
+        options:
+          - auto
+          - "1"
+          - "0"
+      indexer_database_schema:
+        description: Optional fresh Ponder DATABASE_SCHEMA for indexer recovery.
+        required: false
+        type: string
 
 concurrency:
   group: production
@@ -26,6 +57,10 @@ jobs:
       APP_BASIC_AUTH_PASSWORD: ${{ secrets.APP_BASIC_AUTH_PASSWORD }}
       APP_BASIC_AUTH_PASSWORD_HASH: ${{ secrets.APP_BASIC_AUTH_PASSWORD_HASH }}
       ADMIN_JWT: ${{ secrets.ADMIN_JWT }}
+      DEPLOY_RUN_INDEXER: ${{ github.event_name == 'workflow_dispatch' && inputs.run_indexer || 'auto' }}
+      DEPLOY_WAIT_FOR_READY: ${{ github.event_name == 'workflow_dispatch' && inputs.wait_for_ready || '1' }}
+      DEPLOY_SMOKE_CHECK_INDEXER: ${{ github.event_name == 'workflow_dispatch' && inputs.smoke_check_indexer || 'auto' }}
+      DEPLOY_INDEXER_DATABASE_SCHEMA: ${{ github.event_name == 'workflow_dispatch' && inputs.indexer_database_schema || '' }}
     steps:
       - name: Validate required secrets
         run: |
@@ -47,11 +82,15 @@ jobs:
       - name: Deploy production
         run: |
           remote_env=$(
-            printf 'APP_BASIC_AUTH_USER=%q APP_BASIC_AUTH_PASSWORD=%q APP_BASIC_AUTH_PASSWORD_HASH=%q ADMIN_JWT=%q ' \
+            printf 'APP_BASIC_AUTH_USER=%q APP_BASIC_AUTH_PASSWORD=%q APP_BASIC_AUTH_PASSWORD_HASH=%q ADMIN_JWT=%q RUN_INDEXER=%q WAIT_FOR_READY=%q SMOKE_CHECK_INDEXER=%q INDEXER_DATABASE_SCHEMA=%q ' \
               "$APP_BASIC_AUTH_USER" \
               "$APP_BASIC_AUTH_PASSWORD" \
               "$APP_BASIC_AUTH_PASSWORD_HASH" \
-              "$ADMIN_JWT"
+              "$ADMIN_JWT" \
+              "$DEPLOY_RUN_INDEXER" \
+              "$DEPLOY_WAIT_FOR_READY" \
+              "$DEPLOY_SMOKE_CHECK_INDEXER" \
+              "$DEPLOY_INDEXER_DATABASE_SCHEMA"
           )
 
           ssh -p "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST" \

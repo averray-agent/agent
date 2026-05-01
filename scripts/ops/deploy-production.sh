@@ -27,6 +27,8 @@ RUN_SITE=${RUN_SITE:-auto}
 RUN_CADDY=${RUN_CADDY:-auto}
 RUN_SMOKE=${RUN_SMOKE:-1}
 SMOKE_CHECK_INDEXER=${SMOKE_CHECK_INDEXER:-auto}
+INDEXER_DATABASE_SCHEMA=${INDEXER_DATABASE_SCHEMA:-}
+INDEXER_ENV_FILE=${INDEXER_ENV_FILE:-"$STACK_ROOT/indexer.env"}
 
 SITE_BUILD_RUNNER=${SITE_BUILD_RUNNER:-auto}
 SITE_NODE_IMAGE=${SITE_NODE_IMAGE:-node:22-bookworm-slim}
@@ -158,6 +160,33 @@ apply_caddy() {
     restart caddy
 }
 
+apply_indexer_database_schema() {
+  local schema="$INDEXER_DATABASE_SCHEMA"
+  if [[ -z "$schema" ]]; then
+    return 0
+  fi
+
+  if [[ ${#schema} -gt 63 || ! "$schema" =~ ^[a-z_][a-z0-9_]*$ ]]; then
+    echo "INDEXER_DATABASE_SCHEMA must be a lowercase PostgreSQL identifier up to 63 characters." >&2
+    exit 1
+  fi
+
+  if [[ ! -f "$INDEXER_ENV_FILE" ]]; then
+    echo "Missing indexer env file at $INDEXER_ENV_FILE; cannot set DATABASE_SCHEMA." >&2
+    exit 1
+  fi
+
+  local tmp
+  tmp=$(mktemp)
+  awk '!/^DATABASE_SCHEMA=/' "$INDEXER_ENV_FILE" > "$tmp"
+  printf 'DATABASE_SCHEMA=%s\n' "$schema" >> "$tmp"
+  chmod 600 "$tmp"
+  mv "$tmp" "$INDEXER_ENV_FILE"
+
+  echo "Updated indexer DATABASE_SCHEMA in $INDEXER_ENV_FILE."
+  RUN_INDEXER=1
+}
+
 deploy() {
   echo "Production deploy lock acquired: $DEPLOY_LOCK_FILE"
   echo "Updating repo in $APP_ROOT"
@@ -185,6 +214,8 @@ deploy() {
   if [[ "$OLD_SHA" == "$NEW_SHA" ]]; then
     echo "No new commits. Running smoke check only."
   fi
+
+  apply_indexer_database_schema
 
   local run_backend=0
   local run_indexer=0

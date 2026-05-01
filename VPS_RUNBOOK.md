@@ -613,6 +613,19 @@ Do not commit server secrets back into the repository.
    - RPC reachable (`DWELLER_RPC_URL`, `POLKADOT_RPC_URL`, or `PONDER_RPC_URL_<chainId>`)
    - `DATABASE_URL` and `DATABASE_SCHEMA` correct
 
+If logs contain `Schema "..." was previously used by a different Ponder app`,
+rotate to a fresh Ponder schema instead of dropping the old one:
+
+1. Use a lowercase PostgreSQL-safe schema name, for example
+   `agent_indexer_20260501153000`.
+2. Dispatch the `Deploy Production` workflow with:
+   - `indexer_database_schema=<new schema>`
+   - `run_indexer=1`
+   - `wait_for_ready=0` if a long historical backfill is expected
+   - `smoke_check_indexer=0` only while the fresh schema is backfilling
+3. After `/ready` is healthy, re-run the hosted smoke check with indexer checks
+   enabled.
+
 ### TLS / domain issues
 
 1. Check DNS records in Cloudflare
