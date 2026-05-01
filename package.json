@@ -8,11 +8,12 @@
     "app"
   ],
   "scripts": {
-    "test": "npm run test:backend && npm run test:sdk && npm run test:examples && npm run test:indexer:api && npm run test:contracts",
+    "test": "npm run test:backend && npm run test:sdk && npm run test:examples && npm run test:indexer:api && npm run test:scripts && npm run test:contracts",
     "test:backend": "npm --workspace mcp-server test",
     "test:sdk": "node --test sdk/agent-platform-client.test.mjs",
     "test:examples": "node --test examples/**/*.test.mjs",
     "test:indexer:api": "npm --workspace indexer run test:api",
+    "test:scripts": "node --test scripts/ops/*.test.mjs",
     "test:contracts": "forge test",
     "dev:app": "npm --workspace averray-app run dev",
     "build:app": "npm --workspace averray-app run build",

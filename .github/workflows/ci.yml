@@ -60,6 +60,13 @@ jobs:
         working-directory: mcp-server
         run: node --test --test-timeout=30000 src/protocols/http/server.smoke.test.js
 
+      - name: Deploy script tests
+        # Regression tests for scripts/ops/deploy-production.sh helpers.
+        # Closes the acceptance criteria of issue #124 (per-component
+        # last-good SHA routing). The tests source the bash helpers into
+        # an ephemeral fixture repo — git is the only system dependency.
+        run: npm run test:scripts
+
   frontend:
     name: Operator app — static export
     runs-on: ubuntu-latest
