@@ -61,9 +61,15 @@ claiming: `jobId`, `source: "wikipedia"`, `taskType`, `pageTitle`, `lang`,
 
 In production, this crawler is enabled by default and creates jobs
 autonomously with conservative caps: two jobs per run, twenty open Wikipedia
-jobs maximum, and a thirty-minute interval. Set
+jobs maximum, a minimum of two claimable Wikipedia jobs, and a thirty-minute
+interval. The scheduler counts effective claimability from `claimStatus`, so
+exhausted jobs stay auditable without blocking fresh inventory. Replenished
+jobs receive distinct reissue ids when they come from a source item whose
+previous job is exhausted. Set
 `WIKIPEDIA_INGEST_ENABLED=false` to disable it, or
 `WIKIPEDIA_INGEST_DRY_RUN=true` to observe candidates without creating jobs.
+Use `WIKIPEDIA_INGEST_MIN_CLAIMABLE_JOBS` to tune the minimum claimable
+Wikipedia inventory.
 
 ### Initial job types
 
@@ -188,8 +194,9 @@ operator dashboard. It is keyed by source:
 
 Each provider entry reports `label`, `enabled`, `running`, `dryRun`, `mode`,
 `health`, `intervalMs`, `maxJobsPerRun`, optional provider-specific caps such as
-`maxJobsPerQuery`, `maxOpenJobs`, `currentOpenJobs`, `targetCount`, `lastRunAt`,
-and a compact `lastRun` summary. The older provider-specific fields such as
+`maxJobsPerQuery`, `maxOpenJobs`, `currentOpenJobs`, optional
+`minClaimableJobs` / `currentClaimableJobs`, `targetCount`, `lastRunAt`, and a
+compact `lastRun` summary. The older provider-specific fields such as
 `osvIngestion` and `openDataIngestion` remain available for compatibility, but
 new admin UI should render from `providerOperations`.
 

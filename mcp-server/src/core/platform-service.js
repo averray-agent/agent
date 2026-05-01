@@ -923,6 +923,10 @@ function buildProviderOperationStatus({ label, status, targetCountField }) {
     ...(status.maxJobsPerQuery !== undefined ? { maxJobsPerQuery: toNonNegativeInteger(status.maxJobsPerQuery) } : {}),
     maxOpenJobs: toNonNegativeInteger(status.maxOpenJobs),
     currentOpenJobs,
+    ...(status.minClaimableJobs !== undefined ? { minClaimableJobs: toNonNegativeInteger(status.minClaimableJobs) } : {}),
+    ...(status.currentClaimableJobs !== undefined
+      ? { currentClaimableJobs: toNonNegativeInteger(status.currentClaimableJobs) }
+      : {}),
     targetCount: toNonNegativeInteger(status[targetCountField]),
     ...(queryCount !== undefined ? { queryCount } : {}),
     ...(nextQuery ? { nextQuery } : {}),

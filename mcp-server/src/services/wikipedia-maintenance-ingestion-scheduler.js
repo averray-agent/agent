@@ -1,4 +1,10 @@
 import { ingestWikipediaMaintenance, parseCategories, wikipediaArticleKey } from "../jobs/ingest-wikipedia-maintenance.js";
+import {
+  buildInventorySnapshot,
+  desiredInventoryCreates,
+  parseNonNegativeInt,
+  withReissueJobId
+} from "./inventory-replenishment.js";
 
 export class WikipediaMaintenanceIngestionScheduler {
   constructor(platformService, eventBus = undefined, {
@@ -10,6 +16,7 @@ export class WikipediaMaintenanceIngestionScheduler {
     minScore = 75,
     maxJobsPerRun = 2,
     maxOpenJobs = 20,
+    minClaimableJobs = 0,
     fetchImpl = fetch,
     logger = console
   } = {}) {
@@ -23,6 +30,7 @@ export class WikipediaMaintenanceIngestionScheduler {
     this.minScore = minScore;
     this.maxJobsPerRun = maxJobsPerRun;
     this.maxOpenJobs = maxOpenJobs;
+    this.minClaimableJobs = minClaimableJobs;
     this.fetchImpl = fetchImpl;
     this.logger = logger;
     this.timer = undefined;
@@ -47,6 +55,7 @@ export class WikipediaMaintenanceIngestionScheduler {
   }
 
   async getStatus() {
+    const inventory = await this.inventorySnapshot();
     return {
       enabled: this.enabled,
       running: this.running,
@@ -57,19 +66,24 @@ export class WikipediaMaintenanceIngestionScheduler {
       minScore: this.minScore,
       maxJobsPerRun: this.maxJobsPerRun,
       maxOpenJobs: this.maxOpenJobs,
-      currentOpenJobs: this.countOpenWikipediaJobs(),
+      minClaimableJobs: this.minClaimableJobs,
+      currentOpenJobs: inventory.claimableCount,
+      currentClaimableJobs: inventory.claimableCount,
       lastRun: this.lastRun
     };
   }
 
   async runOnce(now = new Date()) {
     const startedAt = now.toISOString();
-    const openWikipediaJobs = this.countOpenWikipediaJobs();
+    const inventory = await this.inventorySnapshot(now);
+    const claimableWikipediaJobs = inventory.claimableCount;
     const summary = {
       startedAt,
       finishedAt: undefined,
       dryRun: this.dryRun,
-      openWikipediaJobs,
+      claimableWikipediaJobs,
+      minClaimableJobs: this.minClaimableJobs,
+      activeSourceCount: inventory.activeSourceKeys.size,
       candidateCount: 0,
       createdCount: 0,
       skipped: [],
@@ -80,51 +94,69 @@ export class WikipediaMaintenanceIngestionScheduler {
       summary.skipped.push({ reason: "disabled" });
       return this.finishRun(summary);
     }
-    if (openWikipediaJobs >= this.maxOpenJobs) {
-      summary.skipped.push({ reason: "max_open_jobs_reached", openWikipediaJobs, maxOpenJobs: this.maxOpenJobs });
+    const remaining = desiredInventoryCreates({
+      claimableCount: claimableWikipediaJobs,
+      minClaimableJobs: this.minClaimableJobs,
+      maxJobsPerRun: this.maxJobsPerRun,
+      maxOpenJobs: this.maxOpenJobs,
+      activeCount: inventory.activeSourceKeys.size
+    });
+    if (remaining <= 0) {
+      summary.skipped.push({
+        reason: inventory.activeSourceKeys.size >= this.maxOpenJobs
+          ? "max_open_jobs_reached"
+          : "minimum_claimable_satisfied",
+        claimableWikipediaJobs,
+        minClaimableJobs: this.minClaimableJobs,
+        maxOpenJobs: this.maxOpenJobs
+      });
       return this.finishRun(summary);
     }
 
-    const remaining = Math.max(0, Math.min(this.maxJobsPerRun, this.maxOpenJobs - openWikipediaJobs));
-    const seenSources = this.existingWikipediaArticleKeys();
+    this.logger.info?.({
+      source: "wikipedia",
+      category: "wikipedia",
+      tier: "starter",
+      claimableWikipediaJobs,
+      minClaimableJobs: this.minClaimableJobs,
+      desiredCreateCount: remaining
+    }, "inventory.replenish.wikipedia");
+    const seenSources = new Set(inventory.activeSourceKeys);
+    const candidateLimit = Math.max(remaining * 3, remaining + seenSources.size);
     try {
       const result = await ingestWikipediaMaintenance({
         language: this.language,
         categories: this.categories,
-        limit: remaining,
+        limit: candidateLimit,
         minScore: this.minScore,
         fetchImpl: this.fetchImpl
       });
       summary.candidateCount = result.count;
       for (const job of result.jobs) {
+        if (summary.createdCount >= remaining) break;
         const sourceKey = wikipediaJobKey(job);
         if (sourceKey && seenSources.has(sourceKey)) {
           summary.skipped.push({ id: job.id, reason: "source_already_ingested" });
           continue;
         }
-        if (this.platformService.getJobDefinition) {
-          try {
-            this.platformService.getJobDefinition(job.id);
-            summary.skipped.push({ id: job.id, reason: "job_already_exists" });
-            continue;
-          } catch {
-            // Missing jobs are expected and created below.
-          }
-        }
+        const replenishedJob = withReissueJobId(job, inventory.allJobIds, { now });
         if (!this.dryRun) {
-          this.platformService.createJob(job);
+          this.platformService.createJob(replenishedJob);
         }
         seenSources.add(sourceKey);
         summary.createdCount += 1;
         this.eventBus?.publish?.({
-          id: `platform-wikipedia-ingest-${job.id}-${Date.now()}`,
+          id: `platform-wikipedia-ingest-${replenishedJob.id}-${Date.now()}`,
           topic: "jobs.ingest.wikipedia",
-          jobId: job.id,
+          jobId: replenishedJob.id,
           timestamp: new Date().toISOString(),
           data: {
             dryRun: this.dryRun,
-            jobId: job.id,
-            source: job.source
+            jobId: replenishedJob.id,
+            source: replenishedJob.source,
+            reason: "inventory_replenishment",
+            claimableBefore: claimableWikipediaJobs,
+            minClaimableJobs: this.minClaimableJobs
           }
         });
       }
@@ -156,11 +188,14 @@ export class WikipediaMaintenanceIngestionScheduler {
     return summary;
   }
 
-  countOpenWikipediaJobs() {
-    return this.platformService.listJobs()
-      .filter((job) => job.source?.type === "wikipedia_article")
-      .filter((job) => !job.recurring)
-      .length;
+  async inventorySnapshot(now = new Date()) {
+    return buildInventorySnapshot(this.platformService, {
+      sourceType: "wikipedia_article",
+      category: "wikipedia",
+      tier: "starter",
+      sourceKeyForJob: wikipediaJobKey,
+      now
+    });
   }
 
   existingWikipediaArticleKeys() {
@@ -186,7 +221,11 @@ export function loadWikipediaMaintenanceIngestionConfig(env = process.env) {
     categories: parseCategories(env.WIKIPEDIA_INGEST_CATEGORIES_JSON ?? env.WIKIPEDIA_INGEST_CATEGORIES),
     minScore: parsePositiveInt(env.WIKIPEDIA_INGEST_MIN_SCORE, 75),
     maxJobsPerRun: parsePositiveInt(env.WIKIPEDIA_INGEST_MAX_JOBS_PER_RUN, 2),
-    maxOpenJobs: parsePositiveInt(env.WIKIPEDIA_INGEST_MAX_OPEN_JOBS, 20)
+    maxOpenJobs: parsePositiveInt(env.WIKIPEDIA_INGEST_MAX_OPEN_JOBS, 20),
+    minClaimableJobs: parseNonNegativeInt(
+      env.WIKIPEDIA_INGEST_MIN_CLAIMABLE_JOBS,
+      productionDefault ? 2 : 0
+    )
   };
 }
 

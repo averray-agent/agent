@@ -296,6 +296,8 @@ test("getAdminStatus surfaces public source ingestion scheduler status", async (
         maxJobsPerRun: 2,
         maxOpenJobs: 10,
         currentOpenJobs: 0,
+        minClaimableJobs: 2,
+        currentClaimableJobs: 0,
         lastRun: { candidateCount: 0, createdCount: 0, skipped: [{ reason: "no_candidates" }], errors: [] }
       };
     }
@@ -408,6 +410,8 @@ test("getAdminStatus surfaces public source ingestion scheduler status", async (
   assert.equal(status.providerOperations.github.lastRun.createdCount, 1);
   assert.equal(status.providerOperations.github.lastRun.skippedCount, 1);
   assert.equal(status.providerOperations.github.lastRun.skipped[0].reason, "source_already_ingested");
+  assert.equal(status.providerOperations.wikipedia.minClaimableJobs, 2);
+  assert.equal(status.providerOperations.wikipedia.currentClaimableJobs, 0);
   assert.equal(status.providerOperations.osv.targetCount, 1);
   assert.equal(status.providerOperations.openData.mode, "live");
   assert.equal(status.providerOperations.openData.health, "healthy");
@@ -440,6 +444,8 @@ test("getAdminStatus surfaces public source ingestion scheduler status", async (
   // Health, mode, counts, and human-readable summary survive…
   assert.equal(publicStatus.providerOperations.github.mode, "dry_run");
   assert.equal(publicStatus.providerOperations.github.currentOpenJobs, 3);
+  assert.equal(publicStatus.providerOperations.wikipedia.minClaimableJobs, 2);
+  assert.equal(publicStatus.providerOperations.wikipedia.currentClaimableJobs, 0);
   assert.equal(publicStatus.providerOperations.github.lastRun.skippedCount, 1);
   assert.equal(publicStatus.providerOperations.openApi.health, "error");
   assert.equal(publicStatus.providerOperations.openApi.lastRun.errorCount, 1);
