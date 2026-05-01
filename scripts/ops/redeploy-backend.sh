@@ -19,6 +19,10 @@
 #   HEALTH_TIMEOUT_SEC max seconds to wait for health (default: 120)
 #   HEALTH_INTERVAL_SEC seconds between health polls (default: 5)
 #   SKIP_GIT_UPDATE=1  skip fetch/checkout/pull because caller already pinned the repo
+#   PRE_DEPLOY_SHA     rollback target SHA when SKIP_GIT_UPDATE=1 — supplied by
+#                      deploy-production.sh from the wrapper's pre-pull HEAD so
+#                      rollback() doesn't checkout the SAME commit that just
+#                      failed. Falls back to current HEAD if unset.
 #   SKIP_ROLLBACK=1    disable auto-rollback (useful for staged canary tests)
 set -euo pipefail
 
@@ -50,9 +54,15 @@ for cmd in git docker curl; do
 done
 
 # Pin the pre-deploy SHA before changing anything so rollback has a concrete
-# target. `rev-parse HEAD` works even in detached-HEAD setups.
-PREVIOUS_SHA=$(git -C "$APP_ROOT" rev-parse HEAD)
+# target. When the wrapper has already pulled origin/main, `rev-parse HEAD`
+# is the NEW SHA — making rollback a no-op. Honour PRE_DEPLOY_SHA from the
+# wrapper, fall back to HEAD when invoked directly.
+CURRENT_HEAD=$(git -C "$APP_ROOT" rev-parse HEAD)
+PREVIOUS_SHA=${PRE_DEPLOY_SHA:-$CURRENT_HEAD}
 echo "Pre-deploy SHA: $PREVIOUS_SHA"
+if [[ "$PREVIOUS_SHA" == "$CURRENT_HEAD" && "${SKIP_GIT_UPDATE:-0}" == "1" ]]; then
+  echo "Note: PRE_DEPLOY_SHA matches current HEAD; rollback would re-deploy the same SHA." >&2
+fi
 
 compose_up() {
   docker compose \
@@ -82,6 +92,15 @@ rollback() {
     echo "SKIP_ROLLBACK=1 set; leaving the unhealthy deploy in place for inspection." >&2
     exit 1
   fi
+
+  local now_head
+  now_head=$(git -C "$APP_ROOT" rev-parse HEAD)
+  if [[ "$PREVIOUS_SHA" == "$now_head" ]]; then
+    echo "No usable rollback target: PREVIOUS_SHA ($PREVIOUS_SHA) matches current HEAD." >&2
+    echo "Leaving the unhealthy backend in place for inspection. Manual intervention required." >&2
+    exit 1
+  fi
+
   echo "Health check failed; rolling back to $PREVIOUS_SHA" >&2
   git -C "$APP_ROOT" checkout --quiet "$PREVIOUS_SHA"
   compose_up

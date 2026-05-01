@@ -26,6 +26,10 @@
 #   ROLLBACK_WAIT_FOR_READY=1
 #                         also wait for /ready after rollback (default: 0)
 #   SKIP_GIT_UPDATE=1     skip fetch/checkout/pull because caller already pinned the repo
+#   PRE_DEPLOY_SHA        rollback target SHA when SKIP_GIT_UPDATE=1 — provided by
+#                         deploy-production.sh from the wrapper's pre-pull HEAD so
+#                         that rollback() doesn't checkout the SAME commit that just
+#                         failed. Falls back to current HEAD if unset.
 #   SKIP_ROLLBACK=1       disable auto-rollback
 set -euo pipefail
 
@@ -69,8 +73,16 @@ for cmd in git docker curl; do
   fi
 done
 
-PREVIOUS_SHA=$(git -C "$APP_ROOT" rev-parse HEAD)
+# When the wrapper has already pulled origin/main, `git rev-parse HEAD` is the
+# NEW SHA, not the pre-deploy one — making rollback a structural no-op. The
+# wrapper passes the real pre-deploy SHA via PRE_DEPLOY_SHA. Fall back to HEAD
+# only when this script is invoked directly without the wrapper.
+CURRENT_HEAD=$(git -C "$APP_ROOT" rev-parse HEAD)
+PREVIOUS_SHA=${PRE_DEPLOY_SHA:-$CURRENT_HEAD}
 echo "Pre-deploy SHA: $PREVIOUS_SHA"
+if [[ "$PREVIOUS_SHA" == "$CURRENT_HEAD" && "${SKIP_GIT_UPDATE:-0}" == "1" ]]; then
+  echo "Note: PRE_DEPLOY_SHA matches current HEAD; rollback would re-deploy the same SHA." >&2
+fi
 
 compose_up() {
   docker compose \
@@ -87,16 +99,47 @@ dump_indexer_diagnostics() {
     ps indexer || true
 
   echo "Indexer diagnostics: last ${INDEXER_LOG_TAIL} indexer log lines"
-  docker compose \
-    --project-directory "$STACK_ROOT" \
-    -f "$COMPOSE_FILE" \
-    logs --tail="$INDEXER_LOG_TAIL" indexer || true
+  local indexer_log
+  indexer_log=$(
+    docker compose \
+      --project-directory "$STACK_ROOT" \
+      -f "$COMPOSE_FILE" \
+      logs --tail="$INDEXER_LOG_TAIL" indexer 2>&1 || true
+  )
+  printf '%s\n' "$indexer_log"
 
   echo "Indexer diagnostics: last ${INDEXER_LOG_TAIL} Caddy log lines"
   docker compose \
     --project-directory "$STACK_ROOT" \
     -f "$COMPOSE_FILE" \
     logs --tail="$INDEXER_LOG_TAIL" caddy || true
+
+  # Skim the indexer log for known fatal-startup patterns and surface a one-line
+  # summary. This is the user-visible answer to "why didn't /health bind?" so it
+  # belongs ahead of the raw log dump in scrollback. Patterns are derived from
+  # incidents that have actually wedged this stack:
+  #   MigrationError       — Ponder schema build_id mismatch (issue #120)
+  #   TypeError            — indexing-function bug (e.g. oldLegacy iterable family)
+  #   uncaughtException    — generic Node fatal that exits the process
+  #   unhandledRejection   — async fatal Ponder treats as unrecoverable
+  #   ECONNREFUSED.*postgres / postgres.*ECONNREFUSED — Postgres unreachable
+  #   Cannot find module   — image built without expected dep
+  #   start_block.*greater than head — config/RPC drift
+  echo "::group::Indexer fatal-pattern summary"
+  local matches
+  matches=$(
+    printf '%s\n' "$indexer_log" \
+      | grep -E 'MigrationError|TypeError|uncaughtException|unhandledRejection|FATAL|Cannot find module|ECONNREFUSED.*postgres|postgres.*ECONNREFUSED|start_block.*greater than head' \
+      | head -20 \
+      || true
+  )
+  if [[ -n "$matches" ]]; then
+    printf '%s\n' "$matches"
+    echo "(scroll up for full context)"
+  else
+    echo "(no known fatal-startup patterns matched in the last ${INDEXER_LOG_TAIL} indexer log lines)"
+  fi
+  echo "::endgroup::"
 }
 
 wait_for_ok() {
@@ -129,6 +172,18 @@ rollback() {
     echo "SKIP_ROLLBACK=1 set; leaving the unhealthy indexer deploy in place for inspection." >&2
     exit 1
   fi
+
+  local now_head
+  now_head=$(git -C "$APP_ROOT" rev-parse HEAD)
+  if [[ "$PREVIOUS_SHA" == "$now_head" ]]; then
+    # Nothing earlier to roll back to — checking out the same SHA and rebuilding
+    # would just waste another 120s health-wait on the same broken code. Bail
+    # explicitly so the operator sees the right next step.
+    echo "No usable rollback target: PREVIOUS_SHA ($PREVIOUS_SHA) matches current HEAD." >&2
+    echo "Leaving the unhealthy indexer in place for inspection. Manual intervention required." >&2
+    exit 1
+  fi
+
   echo "Indexer gate failed; rolling back to $PREVIOUS_SHA" >&2
   git -C "$APP_ROOT" checkout --quiet "$PREVIOUS_SHA"
   compose_up

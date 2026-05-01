@@ -24,6 +24,10 @@
 #   STACK_ROOT                parent dir containing docker-compose.yml (default: repo parent)
 #   COMPOSE_FILE              path to docker-compose.yml
 #   SKIP_GIT_UPDATE=1         skip fetch/checkout/pull because caller already pinned the repo
+#   PRE_DEPLOY_SHA            rollback target SHA when SKIP_GIT_UPDATE=1 — supplied by
+#                             deploy-production.sh from the wrapper's pre-pull HEAD so
+#                             rollback() doesn't checkout the SAME commit that just
+#                             failed. Falls back to current HEAD if unset.
 #   SKIP_ROLLBACK=1           disable auto-rollback
 set -euo pipefail
 
@@ -93,8 +97,15 @@ if [[ "$RESTART_CADDY" == "1" ]]; then
   fi
 fi
 
-PREVIOUS_SHA=$(git -C "$APP_ROOT" rev-parse HEAD)
+# Pin the pre-deploy SHA. When the wrapper has already pulled origin/main,
+# `rev-parse HEAD` is the NEW SHA, so rollback would re-deploy the same code
+# that just failed. Honour PRE_DEPLOY_SHA from the wrapper.
+CURRENT_HEAD=$(git -C "$APP_ROOT" rev-parse HEAD)
+PREVIOUS_SHA=${PRE_DEPLOY_SHA:-$CURRENT_HEAD}
 echo "Pre-deploy SHA: $PREVIOUS_SHA"
+if [[ "$PREVIOUS_SHA" == "$CURRENT_HEAD" && "${SKIP_GIT_UPDATE:-0}" == "1" ]]; then
+  echo "Note: PRE_DEPLOY_SHA matches current HEAD; rollback would re-deploy the same SHA." >&2
+fi
 
 autostash_if_needed() {
   if [[ "$DEPLOY_AUTOSTASH" != "1" ]]; then
@@ -163,6 +174,15 @@ rollback() {
     echo "SKIP_ROLLBACK=1 set; leaving the failed frontend deploy in place for inspection." >&2
     exit 1
   fi
+
+  local now_head
+  now_head=$(git -C "$APP_ROOT" rev-parse HEAD)
+  if [[ "$PREVIOUS_SHA" == "$now_head" ]]; then
+    echo "No usable rollback target: PREVIOUS_SHA ($PREVIOUS_SHA) matches current HEAD." >&2
+    echo "Leaving the failed frontend in place for inspection. Manual intervention required." >&2
+    exit 1
+  fi
+
   echo "Operator app check failed; rolling back to $PREVIOUS_SHA" >&2
   git -C "$APP_ROOT" checkout --quiet "$PREVIOUS_SHA"
   build_frontend

@@ -44,9 +44,17 @@ on:
           - "1"
           - "0"
       indexer_database_schema:
-        description: Optional fresh Ponder DATABASE_SCHEMA for indexer recovery.
+        description: Optional explicit Ponder DATABASE_SCHEMA. Mutually exclusive with indexer_fresh_schema.
         required: false
         type: string
+      indexer_fresh_schema:
+        description: Auto-mint a timestamped DATABASE_SCHEMA for one-shot recovery (convenience over indexer_database_schema).
+        required: false
+        default: "0"
+        type: choice
+        options:
+          - "0"
+          - "1"
 
 concurrency:
   group: production
@@ -73,6 +81,7 @@ jobs:
       DEPLOY_INDEXER_LOG_TAIL: ${{ github.event_name == 'workflow_dispatch' && inputs.indexer_log_tail || '120' }}
       DEPLOY_SMOKE_CHECK_INDEXER: ${{ github.event_name == 'workflow_dispatch' && inputs.smoke_check_indexer || 'auto' }}
       DEPLOY_INDEXER_DATABASE_SCHEMA: ${{ github.event_name == 'workflow_dispatch' && inputs.indexer_database_schema || '' }}
+      DEPLOY_INDEXER_FRESH_SCHEMA: ${{ github.event_name == 'workflow_dispatch' && inputs.indexer_fresh_schema || '0' }}
     steps:
       - name: Validate required secrets
         run: |
@@ -94,7 +103,7 @@ jobs:
       - name: Deploy production
         run: |
           remote_env=$(
-            printf 'APP_BASIC_AUTH_USER=%q APP_BASIC_AUTH_PASSWORD=%q APP_BASIC_AUTH_PASSWORD_HASH=%q ADMIN_JWT=%q RUN_INDEXER=%q WAIT_FOR_READY=%q HEALTH_STABILITY_SEC=%q INDEXER_LOG_TAIL=%q SMOKE_CHECK_INDEXER=%q INDEXER_DATABASE_SCHEMA=%q ' \
+            printf 'APP_BASIC_AUTH_USER=%q APP_BASIC_AUTH_PASSWORD=%q APP_BASIC_AUTH_PASSWORD_HASH=%q ADMIN_JWT=%q RUN_INDEXER=%q WAIT_FOR_READY=%q HEALTH_STABILITY_SEC=%q INDEXER_LOG_TAIL=%q SMOKE_CHECK_INDEXER=%q INDEXER_DATABASE_SCHEMA=%q INDEXER_FRESH_SCHEMA=%q ' \
               "$APP_BASIC_AUTH_USER" \
               "$APP_BASIC_AUTH_PASSWORD" \
               "$APP_BASIC_AUTH_PASSWORD_HASH" \
@@ -104,7 +113,8 @@ jobs:
               "$DEPLOY_HEALTH_STABILITY_SEC" \
               "$DEPLOY_INDEXER_LOG_TAIL" \
               "$DEPLOY_SMOKE_CHECK_INDEXER" \
-              "$DEPLOY_INDEXER_DATABASE_SCHEMA"
+              "$DEPLOY_INDEXER_DATABASE_SCHEMA" \
+              "$DEPLOY_INDEXER_FRESH_SCHEMA"
           )
 
           ssh -p "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST" \

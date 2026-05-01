@@ -28,6 +28,7 @@ RUN_CADDY=${RUN_CADDY:-auto}
 RUN_SMOKE=${RUN_SMOKE:-1}
 SMOKE_CHECK_INDEXER=${SMOKE_CHECK_INDEXER:-auto}
 INDEXER_DATABASE_SCHEMA=${INDEXER_DATABASE_SCHEMA:-}
+INDEXER_FRESH_SCHEMA=${INDEXER_FRESH_SCHEMA:-0}
 INDEXER_ENV_FILE=${INDEXER_ENV_FILE:-"$STACK_ROOT/indexer.env"}
 
 SITE_BUILD_RUNNER=${SITE_BUILD_RUNNER:-auto}
@@ -160,16 +161,22 @@ apply_caddy() {
     restart caddy
 }
 
-apply_indexer_database_schema() {
-  local schema="$INDEXER_DATABASE_SCHEMA"
-  if [[ -z "$schema" ]]; then
-    return 0
+read_current_indexer_schema() {
+  if [[ -f "$INDEXER_ENV_FILE" ]]; then
+    awk -F= '/^DATABASE_SCHEMA=/{ sub(/^DATABASE_SCHEMA=/, ""); print; exit }' "$INDEXER_ENV_FILE" | tr -d '"'
   fi
+}
 
+validate_indexer_schema() {
+  local schema="$1"
   if [[ ${#schema} -gt 63 || ! "$schema" =~ ^[a-z_][a-z0-9_]*$ ]]; then
-    echo "INDEXER_DATABASE_SCHEMA must be a lowercase PostgreSQL identifier up to 63 characters." >&2
+    echo "Indexer DATABASE_SCHEMA must be a lowercase PostgreSQL identifier up to 63 characters: $schema" >&2
     exit 1
   fi
+}
+
+write_indexer_schema() {
+  local schema="$1"
 
   if [[ ! -f "$INDEXER_ENV_FILE" ]]; then
     echo "Missing indexer env file at $INDEXER_ENV_FILE; cannot set DATABASE_SCHEMA." >&2
@@ -183,8 +190,52 @@ apply_indexer_database_schema() {
   chmod 600 "$tmp"
   mv "$tmp" "$INDEXER_ENV_FILE"
 
-  echo "Updated indexer DATABASE_SCHEMA in $INDEXER_ENV_FILE."
+  echo "Updated indexer DATABASE_SCHEMA in $INDEXER_ENV_FILE: $schema"
   RUN_INDEXER=1
+}
+
+apply_indexer_database_schema() {
+  local current_schema=""
+  current_schema=$(read_current_indexer_schema)
+  if [[ -n "$current_schema" ]]; then
+    echo "Current indexer DATABASE_SCHEMA in $INDEXER_ENV_FILE: $current_schema"
+  else
+    echo "No DATABASE_SCHEMA set in $INDEXER_ENV_FILE; indexer will use Ponder's default."
+  fi
+
+  case "$INDEXER_FRESH_SCHEMA" in
+    1|true|yes) ;;
+    0|false|no|"") INDEXER_FRESH_SCHEMA=0 ;;
+    *)
+      echo "Invalid INDEXER_FRESH_SCHEMA toggle: $INDEXER_FRESH_SCHEMA (expected 0 or 1)" >&2
+      exit 1
+      ;;
+  esac
+
+  if [[ -n "$INDEXER_DATABASE_SCHEMA" && "$INDEXER_FRESH_SCHEMA" == "1" ]]; then
+    echo "INDEXER_DATABASE_SCHEMA and INDEXER_FRESH_SCHEMA=1 are mutually exclusive." >&2
+    echo "Pass either an explicit schema name OR set INDEXER_FRESH_SCHEMA=1, not both." >&2
+    exit 1
+  fi
+
+  local target_schema=""
+  if [[ -n "$INDEXER_DATABASE_SCHEMA" ]]; then
+    validate_indexer_schema "$INDEXER_DATABASE_SCHEMA"
+    target_schema="$INDEXER_DATABASE_SCHEMA"
+    echo "Operator pinned indexer DATABASE_SCHEMA: $target_schema"
+  elif [[ "$INDEXER_FRESH_SCHEMA" == "1" ]]; then
+    target_schema="agent_indexer_$(date -u +%Y%m%d%H%M%S)"
+    validate_indexer_schema "$target_schema"
+    echo "INDEXER_FRESH_SCHEMA=1 — minting fresh DATABASE_SCHEMA: $target_schema"
+  else
+    return 0
+  fi
+
+  if [[ -n "$current_schema" && "$current_schema" != "$target_schema" ]]; then
+    echo "Replacing existing DATABASE_SCHEMA ($current_schema) with $target_schema."
+  fi
+
+  write_indexer_schema "$target_schema"
 }
 
 deploy() {
@@ -226,7 +277,7 @@ deploy() {
   if should_run "$RUN_BACKEND" '^(mcp-server/|sdk/|examples/|docs/schemas/|package(-lock)?\.json|scripts/ops/redeploy-backend\.sh)'; then
     run_backend=1
     echo "Deploying backend"
-    SKIP_GIT_UPDATE=1 "$APP_ROOT/scripts/ops/redeploy-backend.sh"
+    SKIP_GIT_UPDATE=1 PRE_DEPLOY_SHA="$OLD_SHA" "$APP_ROOT/scripts/ops/redeploy-backend.sh"
   else
     echo "Skipping backend deploy"
   fi
@@ -234,7 +285,7 @@ deploy() {
   if should_run "$RUN_INDEXER" '^(indexer/|package(-lock)?\.json|scripts/ops/redeploy-indexer\.sh)'; then
     run_indexer=1
     echo "Deploying indexer"
-    SKIP_GIT_UPDATE=1 "$APP_ROOT/scripts/ops/redeploy-indexer.sh"
+    SKIP_GIT_UPDATE=1 PRE_DEPLOY_SHA="$OLD_SHA" "$APP_ROOT/scripts/ops/redeploy-indexer.sh"
   else
     echo "Skipping indexer deploy"
   fi
@@ -242,7 +293,7 @@ deploy() {
   if should_run "$RUN_FRONTEND" '^(app/|frontend/|scripts/sync-operator-frontend\.mjs|scripts/ops/redeploy-frontend\.sh|scripts/ops/deploy-production\.sh|package(-lock)?\.json)'; then
     run_frontend=1
     echo "Deploying operator frontend"
-    SKIP_GIT_UPDATE=1 "$APP_ROOT/scripts/ops/redeploy-frontend.sh"
+    SKIP_GIT_UPDATE=1 PRE_DEPLOY_SHA="$OLD_SHA" "$APP_ROOT/scripts/ops/redeploy-frontend.sh"
   else
     echo "Skipping operator frontend deploy"
   fi
