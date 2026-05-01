@@ -3,7 +3,7 @@ import { hexToString } from "viem";
 import { ponder } from "ponder:registry";
 import schema from "ponder:schema";
 
-import { EscrowCoreAbi, EscrowCoreLegacyJobsAbi } from "../abis/contractsAbi";
+import { EscrowCoreAbi, EscrowCoreLegacyJobsAbi, EscrowCoreOldLegacyJobsAbi } from "../abis/contractsAbi";
 
 const payoutModeLabels = ["single", "milestone"] as const;
 const jobStateLabels = ["none", "open", "claimed", "submitted", "rejected", "disputed", "closed"] as const;
@@ -144,7 +144,21 @@ const readLiveJob = async ({
       functionName: "jobs",
       args: [jobId]
     });
-  } catch (error) {
+  } catch {
+    return readLegacyJob({ context, event, jobId });
+  }
+};
+
+const readLegacyJob = async ({
+  context,
+  event,
+  jobId
+}: {
+  context: any;
+  event: any;
+  jobId: `0x${string}`;
+}) => {
+  try {
     const legacy = await context.client.readContract({
       abi: EscrowCoreLegacyJobsAbi,
       address: event.log.address,
@@ -190,6 +204,52 @@ const readLiveJob = async ({
       "0x0000000000000000000000000000000000000000",
       rejectedAt,
       disputedAt,
+      payoutMode,
+      state
+    ] as const;
+  } catch {
+    const oldLegacy = await context.client.readContract({
+      abi: EscrowCoreOldLegacyJobsAbi,
+      address: event.log.address,
+      functionName: "jobs",
+      args: [jobId]
+    });
+    const [
+      poster,
+      worker,
+      asset,
+      verifierMode,
+      category,
+      reward,
+      opsReserve,
+      contingencyReserve,
+      released,
+      claimExpiry,
+      claimStake,
+      claimStakeBps,
+      payoutMode,
+      state
+    ] = oldLegacy;
+    return [
+      poster,
+      worker,
+      asset,
+      verifierMode,
+      category,
+      zeroHash,
+      reward,
+      opsReserve,
+      contingencyReserve,
+      released,
+      claimExpiry,
+      claimStake,
+      claimStakeBps,
+      0n,
+      0,
+      false,
+      "0x0000000000000000000000000000000000000000",
+      0n,
+      0n,
       payoutMode,
       state
     ] as const;
