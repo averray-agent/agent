@@ -23,6 +23,8 @@
 #   POLL_INTERVAL_SEC     seconds between polls (default: 5)
 #   INDEXER_LOG_TAIL      lines of indexer/Caddy logs to print on failure (default: 120)
 #   WAIT_FOR_READY=0      skip the /ready gate (useful during long backfills)
+#   ROLLBACK_WAIT_FOR_READY=1
+#                         also wait for /ready after rollback (default: 0)
 #   SKIP_GIT_UPDATE=1     skip fetch/checkout/pull because caller already pinned the repo
 #   SKIP_ROLLBACK=1       disable auto-rollback
 set -euo pipefail
@@ -40,6 +42,7 @@ READY_TIMEOUT_SEC=${READY_TIMEOUT_SEC:-900}
 POLL_INTERVAL_SEC=${POLL_INTERVAL_SEC:-5}
 INDEXER_LOG_TAIL=${INDEXER_LOG_TAIL:-120}
 WAIT_FOR_READY=${WAIT_FOR_READY:-1}
+ROLLBACK_WAIT_FOR_READY=${ROLLBACK_WAIT_FOR_READY:-0}
 SKIP_GIT_UPDATE=${SKIP_GIT_UPDATE:-0}
 
 if [[ ! -d "$APP_ROOT/.git" ]]; then
@@ -110,6 +113,7 @@ wait_for_ok() {
       echo
       return 0
     fi
+    echo "$label still waiting after ${attempts} attempt(s)."
     sleep "$POLL_INTERVAL_SEC"
   done
   return 1
@@ -129,8 +133,10 @@ rollback() {
   git -C "$APP_ROOT" checkout --quiet "$PREVIOUS_SHA"
   compose_up
   if wait_for_ok "$HEALTH_URL" "$HEALTH_TIMEOUT_SEC" "Health check"; then
-    if [[ "$WAIT_FOR_READY" == "1" ]]; then
+    if [[ "$ROLLBACK_WAIT_FOR_READY" == "1" ]]; then
       wait_for_ok "$READY_URL" "$READY_TIMEOUT_SEC" "Readiness check" || true
+    else
+      echo "ROLLBACK_WAIT_FOR_READY=0 set; rollback verified /health only."
     fi
     echo "Rollback succeeded; indexer is serving the previous build."
   else
