@@ -117,7 +117,17 @@ jobs:
               "$DEPLOY_INDEXER_FRESH_SCHEMA"
           )
 
-          ssh -p "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST" \
+          # ServerAliveInterval=30 + ServerAliveCountMax=120 keeps the session
+          # alive for up to 60 minutes of remote silence. Long-running steps —
+          # in particular `npm ci` for the operator frontend — produce no SSH
+          # traffic for several minutes at a stretch, and a default-keepalive
+          # session times out partway through the build with `client_loop: send
+          # disconnect: Broken pipe` (exit 255). The build itself is not slow
+          # enough to be a problem; the *idle* session is.
+          ssh -p "${VPS_PORT:-22}" \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=120 \
+            "$VPS_USER@$VPS_HOST" \
             "${remote_env} bash -s" <<'REMOTE'
           set -e
           cd /srv/agent-stack/app
