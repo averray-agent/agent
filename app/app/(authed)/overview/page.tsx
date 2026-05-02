@@ -18,6 +18,7 @@ import {
   useAccount,
   useAdminSessions,
   useAlerts,
+  useBadges,
   useHealth,
   useJobs,
   usePolicies,
@@ -46,6 +47,7 @@ export default function OverviewPage() {
   const strategyPositions = useStrategyPositions();
   const health = useHealth();
   const apiAlerts = useAlerts();
+  const badges = useBadges();
   const policies = usePolicies();
   const providerOps = useProviderOperations();
   const publicProviderOps = usePublicProviderOperations();
@@ -81,6 +83,10 @@ export default function OverviewPage() {
   const policiesAppliedToday = useMemo(
     () => countPoliciesAppliedToday(policies.data),
     [policies.data]
+  );
+  const lastReceiptTime = useMemo(
+    () => latestReceiptLabel(badges.data, badges.isLoading),
+    [badges.data, badges.isLoading]
   );
   const liveJobs = extractRunJobs(jobs.data);
   const adminLifecycleSummary = useMemo(
@@ -126,6 +132,7 @@ export default function OverviewPage() {
     strategyPositions,
     health,
     apiAlerts,
+    badges,
     policies,
     providerOps,
     publicProviderOps
@@ -141,7 +148,7 @@ export default function OverviewPage() {
         // returned zero rows, masking real "queue is empty" signals.
         openRuns={hasLiveOverview ? liveJobs.length : 0}
         awaitingSignature={hasLiveOverview ? disputedSessions : 0}
-        lastReceiptTime={health.data ? "live" : "unavailable"}
+        lastReceiptTime={lastReceiptTime}
         treasuryPosture={liveVitals[3]?.value === "Amber" ? "Amber" : "Green"}
         policiesAppliedToday={policiesAppliedToday}
       />
@@ -213,6 +220,45 @@ function isSameUtcDate(value: unknown, today: string): boolean {
   if (match) return match[0] === today;
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) && new Date(parsed).toISOString().slice(0, 10) === today;
+}
+
+function latestReceiptLabel(data: unknown, isLoading: boolean): string {
+  const rows = extractRows(data, ["badges", "receipts", "items", "data"]);
+  const latest = rows
+    .map((row) => {
+      const averray = asRecord(asRecord(row.badge)?.averray) ?? asRecord(row.averray);
+      return text(row.issuedAt, "") || text(averray?.completedAt, "");
+    })
+    .map((date) => Date.parse(date))
+    .filter(Number.isFinite)
+    .sort((a, b) => b - a)[0];
+  if (latest) {
+    return new Date(latest).toISOString().slice(11, 16) + " UTC";
+  }
+  return isLoading ? "loading" : "none";
+}
+
+function extractRows(data: unknown, keys: string[]): Record<string, unknown>[] {
+  if (Array.isArray(data)) {
+    return data.filter(isRecord);
+  }
+  const root = asRecord(data);
+  if (!root) return [];
+  for (const key of keys) {
+    const value = root[key];
+    if (Array.isArray(value)) return value.filter(isRecord);
+  }
+  return [];
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(asRecord(value));
 }
 
 function text(value: unknown, fallback: string): string {

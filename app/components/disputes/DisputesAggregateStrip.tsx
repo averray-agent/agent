@@ -1,5 +1,4 @@
 import { cn } from "@/lib/utils/cn";
-import { Sparkline } from "@/components/overview/Sparkline";
 import type { Dispute } from "./types";
 
 export function DisputesAggregateStrip({ disputes }: { disputes: Dispute[] }) {
@@ -40,7 +39,6 @@ export function DisputesAggregateStrip({ disputes }: { disputes: Dispute[] }) {
         unit="DOT"
         meta={`across ${openCount} open · refundable on reject`}
         tone="muted"
-        right={<Sparkline points={[20, 25, 30, 35, 45, 55, 60, 70]} width={72} height={20} />}
       />
       <Card
         label="Oldest open"

@@ -7,22 +7,16 @@ export interface AgentsAggregateStripProps {
   agents: AgentRecord[];
 }
 
-const PLATFORM_CLAIMED_24H = 23;
-const PLATFORM_CLAIM_SPARK = [1, 2, 0, 3, 2, 4, 3, 2, 5, 1, 0, 0];
-
 /**
  * Top-of-page summary cards on /agents. Each card is explicitly scoped —
- * "Working now / Roster" against the visible roster, "Platform 24h"
- * against the platform-wide ledger — so the operator never reads two
- * numbers as if they referred to the same population. (The previous
- * version mixed `Active 0/1` with `Avg reputation 0 across 8 agents` and
- * `Claimed 24h 23 runs` without a scope label, which read as broken at
- * first-agent state.)
+ * every number is derived from the visible roster so the operator never
+ * reads seeded platform-wide counters as live state.
  */
 export function AgentsAggregateStrip({ agents }: AgentsAggregateStripProps) {
   const rosterCount = agents.length;
   const workingNow = agents.filter((a) => isWorking(a.state)).length;
   const slashed = agents.filter((a) => a.state === "slashed").length;
+  const verifiedBadges = agents.reduce((count, agent) => count + agent.badges.length, 0);
 
   const repPoints = agents.map((a) => a.score);
   const avgRep =
@@ -54,15 +48,12 @@ export function AgentsAggregateStrip({ agents }: AgentsAggregateStripProps) {
         metaTone={workingNow > 0 ? "ok" : "muted"}
       />
       <AggCard
-        scope="platform · 24h"
-        label="Claimed runs"
-        value={`${PLATFORM_CLAIMED_24H}`}
-        unit="runs"
-        meta="+4 vs prior 24h"
-        metaTone="ok"
-        rightSlot={
-          <Sparkline points={PLATFORM_CLAIM_SPARK} width={72} height={20} />
-        }
+        scope="visible roster"
+        label="Verified badges"
+        value={`${verifiedBadges}`}
+        unit="badges"
+        meta={rosterCount === 0 ? "no agents visible" : "from indexed agent profiles"}
+        metaTone={verifiedBadges > 0 ? "ok" : "muted"}
       />
       <AggCard
         scope="visible roster"

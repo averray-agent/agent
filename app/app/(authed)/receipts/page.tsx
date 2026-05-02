@@ -204,7 +204,7 @@ export default function ReceiptsPage() {
               {selected.source ? <SourceBadge kind={selected.source} /> : null}
               <span className="text-[var(--avy-ink)]">{selected.policy}</span>
               <span>·</span>
-              <span>{selected.issuedAtIso ? receiptDate(selected.issuedAtIso) : "2026-04-24"} · {selected.signedAt}</span>
+              <span>{selected.issuedAtIso ? receiptDate(selected.issuedAtIso) : "date unavailable"} · {selected.signedAt}</span>
             </div>
           ) : null
         }

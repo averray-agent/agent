@@ -19,9 +19,6 @@ import { RecommendationRail } from "@/components/runs/RecommendationRail";
 import { LoadedRunView } from "@/components/runs/LoadedRunView";
 import { LifecycleRail } from "@/components/runs/LifecycleRail";
 import {
-  FIXTURE_RECOMMENDATIONS,
-} from "@/components/runs/fixtures";
-import {
   buildLifecycleStages,
   describeClaimer,
   formatDeadline,
@@ -139,7 +136,7 @@ function RunsPageInner() {
   const sourceFilters = useMemo(() => buildSourceFilters(rows), [rows]);
   const recommendationCards = useMemo(() => {
     const liveCards = buildRecommendationCards(recommendations.data, jobs.data);
-    return liveCards.length ? liveCards : FIXTURE_RECOMMENDATIONS;
+    return liveCards;
   }, [jobs.data, recommendations.data]);
 
   // Honour ?run=<id> deep links on first hydration so a linked run is

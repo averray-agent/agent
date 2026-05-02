@@ -12,11 +12,11 @@ import type { AuditActor, AuditCategory, AuditEvent, AuditSource } from "@/compo
 import { useAudit } from "@/lib/api/hooks";
 import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
 
-const DAY_BUCKETS: Record<AuditFilter["day"], (d: string) => boolean> = {
+const DAY_BUCKETS: Record<AuditFilter["day"], (d: string, now?: Date) => boolean> = {
   all: () => true,
   today: (d) => d === "today",
   yesterday: (d) => d === "yesterday",
-  "7d": (d) => d === "today" || d === "yesterday" || d.startsWith("2026-04"),
+  "7d": (d, now = new Date()) => isWithinLastDays(d, now, 7),
 };
 
 export default function AuditLogPage() {
@@ -204,4 +204,21 @@ function linkTarget(value: unknown): AuditEvent["link"] | undefined {
 
 function text(value: unknown, fallback: string): string {
   return typeof value === "string" && value.trim() ? value : fallback;
+}
+
+function isWithinLastDays(day: string, now: Date, days: number): boolean {
+  if (day === "today" || day === "yesterday") return true;
+  const parsed = Date.parse(day);
+  if (!Number.isFinite(parsed)) return false;
+  const start = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate() - (days - 1)
+  );
+  const eventDay = Date.UTC(
+    new Date(parsed).getUTCFullYear(),
+    new Date(parsed).getUTCMonth(),
+    new Date(parsed).getUTCDate()
+  );
+  return eventDay >= start && eventDay <= now.getTime();
 }

@@ -42,7 +42,11 @@ export function RecommendationRail({
         </p>
       </header>
 
-      {isHorizontal ? (
+      {!jobs.length ? (
+        <div className="p-3.5 font-[family-name:var(--font-body)] text-[13px] leading-[1.5] text-[var(--avy-muted)]">
+          No live recommendations available.
+        </div>
+      ) : isHorizontal ? (
         // Flex-wrap grid: cards keep a ~300px target width and reflow into
         // additional rows at narrow viewports instead of overflowing the
         // container. Avoids the previous behaviour where the rail's
@@ -73,7 +77,11 @@ export function RecommendationRail({
         <span>
           {jobs.length} of {totalMatches} matches
         </span>
-        <a className="cursor-pointer text-[var(--avy-accent)]">See all ready →</a>
+        {jobs.length ? (
+          <a className="cursor-pointer text-[var(--avy-accent)]">See all ready →</a>
+        ) : (
+          <span>waiting for /jobs/recommendations</span>
+        )}
       </footer>
     </aside>
   );
