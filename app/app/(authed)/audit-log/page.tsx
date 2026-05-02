@@ -10,6 +10,7 @@ import {
 import { AuditTimeline } from "@/components/audit/AuditTimeline";
 import type { AuditActor, AuditCategory, AuditEvent, AuditSource } from "@/components/audit/types";
 import { useAudit } from "@/lib/api/hooks";
+import { ApiError } from "@/lib/api/client";
 import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
 
 const DAY_BUCKETS: Record<AuditFilter["day"], (d: string, now?: Date) => boolean> = {
@@ -56,6 +57,18 @@ export default function AuditLogPage() {
   }, [events, filter]);
 
   const freshness = freshnessFromRequests(auditRequest);
+  // The /audit endpoint requires SIWE auth. When the viewer is signed
+  // out the request 401s and we render zero events — but the generic
+  // "no events match" copy reads as if the platform itself is quiet.
+  // Distinguish the two so the empty state can prompt sign-in.
+  const unauthenticated =
+    auditRequest.error instanceof ApiError &&
+    (auditRequest.error.status === 401 || auditRequest.error.status === 403);
+  const filtersApplied =
+    filter.source !== "all" ||
+    filter.category !== "all" ||
+    filter.day !== "all" ||
+    filter.q.trim().length > 0;
 
   return (
     <div className="flex w-full max-w-[1100px] flex-col gap-5">
@@ -80,7 +93,11 @@ export default function AuditLogPage() {
 
       <AuditAggregateStrip events={events} />
       <AuditFilterRail filter={filter} onChange={setFilter} />
-      <AuditTimeline events={filtered} />
+      <AuditTimeline
+        events={filtered}
+        unauthenticated={unauthenticated}
+        filtersApplied={filtersApplied}
+      />
 
       <p
         className="font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]"
