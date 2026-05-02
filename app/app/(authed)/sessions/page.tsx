@@ -91,37 +91,40 @@ export default function SessionsPage() {
     <div className="flex w-full max-w-[1100px] flex-col gap-5">
       <SessionsTopbar freshness={freshness} />
 
-      <header className="flex flex-col gap-1.5">
+      {/*
+       * Tighter header layout — eyebrow above, h1 + scope pill on one
+       * row so the operator-wide hint reads as a label on the page
+       * title (not a dangling pill below the description). One-line
+       * description trades the long marketing-flavour copy for a
+       * single sentence the auditor can scan.
+       */}
+      <header className="flex flex-col gap-1">
         <span
           className="font-[family-name:var(--font-display)] text-[11.5px] font-extrabold uppercase text-[var(--avy-accent)]"
           style={{ letterSpacing: "0.12em" }}
         >
           Capital movement
         </span>
-        <h1 className="m-0 font-[family-name:var(--font-display)] text-[2.4rem] font-bold leading-none text-[var(--avy-ink)]">
-          Sessions
-        </h1>
-        <p className="m-0 mt-0.5 max-w-[62ch] font-[family-name:var(--font-body)] text-[16px] leading-[1.55] text-[var(--avy-muted)]">
-          Every capital-movement lifecycle keyed to a run — across every worker
-          wallet, not just yours. Funded, claimed, submitted, verified, settled —
-          or disputed and slashed. Auditors read this page; nobody edits it.
+        <div className="flex flex-wrap items-baseline gap-3">
+          <h1 className="m-0 font-[family-name:var(--font-display)] text-[2.4rem] font-bold leading-none text-[var(--avy-ink)]">
+            Sessions
+          </h1>
+          <span
+            className="inline-flex items-center gap-1.5 rounded-full border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-2.5 py-1 font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]"
+            style={{ letterSpacing: 0 }}
+            title="Operator-wide session activity sourced from /admin/sessions (every worker wallet, capped at the most recent 100). The wallet-scoped /sessions endpoint is reserved for 'my history' views."
+          >
+            <span className="h-1.5 w-1.5 rounded-full bg-[var(--avy-accent)]" />
+            operator-wide
+            <span className="opacity-40">·</span>
+            <code className="text-[var(--avy-ink)]">/admin/sessions</code>
+          </span>
+        </div>
+        <p className="m-0 mt-1 max-w-[64ch] font-[family-name:var(--font-body)] text-[14.5px] leading-[1.5] text-[var(--avy-muted)]">
+          Read-only ledger of every capital-movement lifecycle —
+          claimed, submitted, verified, settled, or disputed — across
+          every worker wallet. Auditors read this page; nobody edits it.
         </p>
-        {/*
-         * Scope hint — the page reads /admin/sessions (operator-wide),
-         * not /sessions (your wallet only). Surface that explicitly so
-         * the operator doesn't mistake an external-agent claim for
-         * activity from their own signed-in wallet.
-         */}
-        <span
-          className="mt-1 inline-flex w-fit items-center gap-1.5 rounded-full border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-2.5 py-1 font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]"
-          style={{ letterSpacing: 0 }}
-          title="Operator-wide session activity sourced from /admin/sessions (every worker wallet, capped at the most recent 100). The wallet-scoped /sessions endpoint is reserved for 'my history' views."
-        >
-          <span className="h-1.5 w-1.5 rounded-full bg-[var(--avy-accent)]" />
-          operator-wide
-          <span className="opacity-40">·</span>
-          <code className="text-[var(--avy-ink)]">/admin/sessions</code>
-        </span>
       </header>
 
       <SessionsAggregateStrip sessions={sessions} />
