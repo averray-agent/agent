@@ -230,6 +230,43 @@ test("WikipediaMaintenanceIngestionScheduler avoids hidden stale job id collisio
   assert.equal(jobs[0].source.reissueOf, CANONICAL_WIKI_JOB_ID);
 });
 
+test("WikipediaMaintenanceIngestionScheduler avoids historical session id collisions", async () => {
+  const platform = {
+    jobs: [],
+    listJobs() {
+      return [...this.jobs];
+    },
+    createJob(job) {
+      this.jobs.unshift(job);
+      return job;
+    },
+    async listRecentSessions() {
+      return [{
+        sessionId: `${CANONICAL_WIKI_JOB_ID}:0x30BC468dA4E95a8FA4b3f2043c86687a57CdeE05`,
+        jobId: CANONICAL_WIKI_JOB_ID,
+        wallet: "0x30BC468dA4E95a8FA4b3f2043c86687a57CdeE05",
+        status: "expired"
+      }];
+    }
+  };
+  const scheduler = new WikipediaMaintenanceIngestionScheduler(platform, undefined, {
+    enabled: true,
+    dryRun: false,
+    minClaimableJobs: 1,
+    categories: [{ title: "Category:All articles with dead external links", taskType: "citation_repair" }],
+    minScore: 55,
+    fetchImpl: makeFetch(),
+    logger: SILENT_LOGGER
+  });
+
+  const summary = await scheduler.runOnce(new Date("2026-04-25T10:00:00.000Z"));
+
+  assert.equal(summary.createdCount, 1);
+  assert.deepEqual(summary.errors, []);
+  assert.equal(platform.jobs[0].id, `${CANONICAL_WIKI_JOB_ID}-r2`);
+  assert.equal(platform.jobs[0].source.reissueOf, CANONICAL_WIKI_JOB_ID);
+});
+
 test("loadWikipediaMaintenanceIngestionConfig parses env knobs safely", () => {
   const config = loadWikipediaMaintenanceIngestionConfig({
     WIKIPEDIA_INGEST_ENABLED: "true",

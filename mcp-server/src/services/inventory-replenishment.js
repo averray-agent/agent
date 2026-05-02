@@ -18,6 +18,7 @@ export async function buildInventorySnapshot(platformService, {
       now
     })
     : jobs;
+  const historicalSessionJobIds = await listHistoricalSessionJobIds(platformService);
   const sourceJobs = jobs
     .filter((job) => job?.source?.type === sourceType)
     .filter((job) => !job.recurring);
@@ -36,7 +37,10 @@ export async function buildInventorySnapshot(platformService, {
   );
   const allSourceKeys = new Set(allSourceJobs.map(sourceKeyForJob).filter(Boolean));
   const allJobIds = new Set(
-    allJobs.flatMap((job) => normalizedJobIdEntries(job?.id)).filter(Boolean)
+    [
+      ...allJobs.map((job) => job?.id),
+      ...historicalSessionJobIds
+    ].flatMap(normalizedJobIdEntries).filter(Boolean)
   );
 
   return {
@@ -145,4 +149,14 @@ function normalizeJobId(value) {
     .toLowerCase()
     .replace(/[^a-z0-9-]+/g, "-")
     .replace(/^-+|-+$/g, "");
+}
+
+async function listHistoricalSessionJobIds(platformService) {
+  const stateStore = platformService?.stateStore;
+  const sessions = typeof stateStore?.listRecentSessions === "function"
+    ? await stateStore.listRecentSessions(10_000)
+    : typeof platformService?.listRecentSessions === "function"
+      ? await platformService.listRecentSessions(10_000)
+      : [];
+  return sessions.map((session) => session?.jobId).filter(Boolean);
 }
