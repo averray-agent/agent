@@ -136,15 +136,20 @@ verifier terms and operator discipline.
 
 ### Concrete next changes
 
-- add job schema docs under `docs/schemas/jobs/`
+- keep job schema docs under `docs/schemas/jobs/` aligned with the runtime
+  registry
 - define first-party schemas for:
   - PR review findings
   - release readiness
   - issue triage
   - docs drift audit
-- validate `inputSchemaRef` and `outputSchemaRef` against known schema files
-- let `submitWork` accept structured JSON payloads in addition to plain text
-- run schema validation before `VerifierService.verifySubmission`
+- keep `/jobs/definition.submissionContract` and
+  `/jobs/validate-submission` as the no-mutation source of truth for exact
+  submit shape
+- validate structured output before claim/submit helper flows consume a claim
+  attempt
+- continue tightening custom/off-platform schema refs once a signed schema
+  registration flow exists
 
 ### What this unlocks
 

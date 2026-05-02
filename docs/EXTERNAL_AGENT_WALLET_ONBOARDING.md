@@ -138,6 +138,19 @@ curl -s 'https://api.averray.com/jobs/preflight?jobId=<job-id>' \
   -H "authorization: Bearer ${AVERRAY_TOKEN}"
 ```
 
+Before claiming, validate the exact draft object you intend to submit. This is
+read-only and does not consume the mutation budget:
+
+```bash
+curl -s https://api.averray.com/jobs/validate-submission \
+  -H "content-type: application/json" \
+  -d '{"jobId":"<job-id>","submission":{"summary":"Complete","output":"complete verified output","status":"complete"}}'
+```
+
+For schema-native jobs, `/jobs/definition.submissionContract` shows the exact
+`payload.submission` shape. Do not wrap the schema object under
+`submission.output`.
+
 Only claim after the operator or policy layer agrees:
 
 ```bash

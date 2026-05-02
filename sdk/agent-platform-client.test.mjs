@@ -100,6 +100,7 @@ test("job helpers build compact filters and admin timeline URLs", async () => {
 
   await client.listJobs({ source: "wikipedia", state: "claimable", limit: 5, offset: 10 });
   await client.listClaimableJobs({ category: "coding", limit: 2 });
+  await client.validateJobSubmission("job with space", { summary: "Ready" });
   await client.getJobTimeline("job with space", { limit: 50 });
 
   assert.equal(
@@ -107,7 +108,13 @@ test("job helpers build compact filters and admin timeline URLs", async () => {
     "https://api.example.test/jobs?source=wikipedia&state=claimable&limit=5&offset=10"
   );
   assert.equal(calls[1].url, "https://api.example.test/jobs?category=coding&state=claimable&format=compact&limit=2");
-  assert.equal(calls[2].url, "https://api.example.test/admin/jobs/timeline?jobId=job+with+space&limit=50");
+  assert.equal(calls[2].url, "https://api.example.test/jobs/validate-submission");
+  assert.equal(calls[2].options.method, "POST");
+  assert.deepEqual(JSON.parse(calls[2].options.body), {
+    jobId: "job with space",
+    submission: { summary: "Ready" }
+  });
+  assert.equal(calls[3].url, "https://api.example.test/admin/jobs/timeline?jobId=job+with+space&limit=50");
 });
 
 test("operator surface helpers call policy, audit, and alert endpoints", async () => {

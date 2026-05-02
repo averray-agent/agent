@@ -97,6 +97,7 @@ export class AgentPlatformClient {
   getJobDefinition(jobId: string): Promise<unknown>;
   getRecommendations(): Promise<unknown>;
   preflightJob(jobId: string): Promise<unknown>;
+  validateJobSubmission(jobId: string, submission: unknown): Promise<unknown>;
   claimJob(jobId: string, idempotencyKey?: string): Promise<unknown>;
   submitWork(sessionId: string, submission: string | unknown): Promise<unknown>;
   getSession(sessionId: string): Promise<unknown>;

@@ -206,7 +206,9 @@ test("public Wikipedia definitions include direct agent affordances", () => {
     attributionPolicy: "Averray proposal only / no direct Wikipedia edit"
   });
   assert.equal(job.submissionContract.endpoint, "POST /jobs/submit");
+  assert.equal(job.submissionContract.validationEndpoint, "POST /jobs/validate-submission");
   assert.equal(job.submissionContract.submissionShape, "direct_schema_object");
+  assert.equal(job.submissionContract.structuredSubmissionRequired, true);
   assert.equal(job.submissionContract.schemaValidates, "payload.submission");
   assert.equal(job.submissionContract.doNotWrapInOutput, true);
   assert.deepEqual(job.submissionContract.compatibilityAliases, ["payload.submission.output"]);
@@ -219,6 +221,8 @@ test("public Wikipedia definitions include direct agent affordances", () => {
     "review_notes"
   ]);
   assert.equal(job.submissionContract.submitPayloadExample.submission.page_title, "Example article");
+  assert.equal(job.schemaContract.output.validationEndpoint, "POST /jobs/validate-submission");
+  assert.equal(job.schemaContract.output.validates, "payload.submission");
 });
 
 test("reviewer role gate blocks low-score agents", async () => {

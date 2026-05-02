@@ -162,10 +162,34 @@ test("listJobsWithSessions and definition expose expired claim affordances", asy
   assert.match(definition.claimStatus.lifecycleStatusMeaning, /check claimStatus/u);
 });
 
+test("validateJobSubmission gives a non-mutating schema-native verdict", () => {
+  const service = makePlatformService();
+
+  const valid = service.validateJobSubmission("parent-job-001", {
+    summary: "Parser fixed.",
+    output: "Added regression coverage.",
+    status: "complete"
+  });
+  assert.equal(valid.valid, true);
+  assert.equal(valid.schemaRef, "schema://jobs/coding-output");
+  assert.equal(valid.schemaValidates, "payload.submission");
+  assert.equal(valid.submissionKind, "structured");
+
+  const invalid = service.validateJobSubmission("parent-job-001", "complete");
+  assert.equal(invalid.valid, false);
+  assert.equal(invalid.schemaRef, "schema://jobs/coding-output");
+  assert.match(invalid.message, /Schema-native jobs require/u);
+  assert.equal(invalid.details.schemaValidates, "payload.submission");
+});
+
 test("getSessionTimeline includes transitions and verification state", async () => {
   const service = makePlatformService();
   const session = await service.claimJob(WALLET, "parent-job-001", "http", "timeline-claim");
-  const submitted = await service.submitWork(session.sessionId, "http", "complete");
+  const submitted = await service.submitWork(session.sessionId, "http", {
+    summary: "Timeline run complete.",
+    output: "complete verified output",
+    status: "complete"
+  });
   await service.ingestVerification(submitted.sessionId, {
     jobId: submitted.jobId,
     handler: "benchmark",
@@ -204,7 +228,11 @@ test("getJobTimeline stitches sessions, verification, events, and child lineage"
     retryLimit: 1,
     requiresSponsoredGas: true
   });
-  const submitted = await service.submitWork(session.sessionId, "http", "complete");
+  const submitted = await service.submitWork(session.sessionId, "http", {
+    summary: "Timeline run complete.",
+    output: "complete verified output",
+    status: "complete"
+  });
   await service.ingestVerification(submitted.sessionId, {
     jobId: submitted.jobId,
     handler: "benchmark",

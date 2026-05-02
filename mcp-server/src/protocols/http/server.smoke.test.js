@@ -161,6 +161,53 @@ test("http smoke: /admin/jobs accepts admin-scoped token", { skip: !RUN }, async
   });
 });
 
+test("http smoke: /jobs/validate-submission validates draft output before claim", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const token = issueToken(ADMIN_WALLET, { roles: ["admin"] });
+    const jobId = "smoke-schema-validation-001";
+    const create = await fetch(`${base}/admin/jobs`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        id: jobId,
+        category: "coding",
+        tier: "starter",
+        rewardAmount: 1,
+        verifierMode: "benchmark",
+        verifierTerms: ["complete"],
+        verifierMinimumMatches: 1,
+        outputSchemaRef: "schema://jobs/coding-output"
+      })
+    });
+    assert.equal(create.status, 201);
+
+    const valid = await fetch(`${base}/jobs/validate-submission`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        jobId,
+        submission: {
+          summary: "Complete.",
+          output: "complete verified output",
+          status: "complete"
+        }
+      })
+    });
+    assert.equal(valid.status, 200);
+    assert.equal((await valid.json()).valid, true);
+
+    const invalid = await fetch(`${base}/jobs/validate-submission`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jobId, submission: "complete" })
+    });
+    assert.equal(invalid.status, 200);
+    const payload = await invalid.json();
+    assert.equal(payload.valid, false);
+    assert.equal(payload.schemaValidates, "payload.submission");
+  });
+});
+
 test("http smoke: /admin/jobs/timeline exposes job lineage", { skip: !RUN }, async () => {
   await runWithServer(async (base) => {
     const token = issueToken(ADMIN_WALLET, { roles: ["admin"] });

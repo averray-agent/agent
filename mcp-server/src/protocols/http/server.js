@@ -3053,6 +3053,25 @@ const server = createServer(async (request, response) => {
       return respond(response, 200, await service.claimJob(auth.wallet, jobId, "http", idempotencyKey));
     }
 
+    if (request.method === "POST" && pathname === "/jobs/validate-submission") {
+      const payload = await readJsonBody(request);
+      const jobId = typeof payload?.jobId === "string" && payload.jobId.trim()
+        ? payload.jobId.trim()
+        : (url.searchParams.get("jobId") ?? "");
+      if (!jobId) {
+        throw new ValidationError("jobId is required.");
+      }
+      const submission = payload && typeof payload === "object" && "submission" in payload
+        ? payload.submission
+        : (typeof payload?.evidence === "string"
+            ? payload.evidence
+            : undefined);
+      if (submission === undefined) {
+        throw new ValidationError("submission is required.");
+      }
+      return respond(response, 200, service.validateJobSubmission(jobId, submission));
+    }
+
     if (request.method === "POST" && pathname === "/jobs/submit") {
       const auth = await authMiddleware(request, url);
       const payload = await readJsonBody(request);

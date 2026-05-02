@@ -73,22 +73,44 @@ test("runClaimAndSubmit dry-run avoids claim and submit mutations", async () => 
 
 test("runClaimAndSubmit executes claim, submit, and timeline reads when requested", async () => {
   const calls = [];
+  const submission = { result: "complete" };
   const summary = await runClaimAndSubmit({
     apiUrl: "https://api.example",
     token: "token",
     jobId: "job-1",
     idempotencyKey: "idem-1",
-    evidence: "complete",
+    submission,
     execute: true,
     fetchImpl: fakeFetch(calls)
   });
 
   assert.equal(summary.mode, "executed");
   assert.equal(summary.claim.sessionId, "session-1");
+  assert.equal(summary.validation.valid, true);
   assert.equal(summary.submit.status, "submitted");
+  assert.ok(calls.includes("https://api.example/jobs/validate-submission"));
   assert.ok(calls.includes("https://api.example/jobs/claim"));
   assert.ok(calls.includes("https://api.example/jobs/submit"));
   assert.ok(calls.includes("https://api.example/session/timeline?sessionId=session-1"));
+});
+
+test("runClaimAndSubmit blocks before claim when local draft validation fails", async () => {
+  const calls = [];
+  const summary = await runClaimAndSubmit({
+    apiUrl: "https://api.example",
+    token: "token",
+    jobId: "job-1",
+    evidence: "bad",
+    execute: true,
+    fetchImpl: fakeFetch(calls, { validationValid: false })
+  });
+
+  assert.equal(summary.mode, "blocked");
+  assert.equal(summary.validation.valid, false);
+  assert.equal(summary.claim, null);
+  assert.equal(summary.submit, null);
+  assert.ok(calls.includes("https://api.example/jobs/validate-submission"));
+  assert.ok(!calls.includes("https://api.example/jobs/claim"));
 });
 
 test("summarizeTimeline returns compact timeline metadata", () => {
@@ -104,7 +126,7 @@ test("summarizeTimeline returns compact timeline metadata", () => {
   });
 });
 
-function fakeFetch(calls) {
+function fakeFetch(calls, { validationValid = true } = {}) {
   return async (url, options = {}) => {
     calls.push(String(url));
     if (String(url).endsWith("/onboarding")) {
@@ -119,6 +141,14 @@ function fakeFetch(calls) {
     if (String(url).includes("/jobs/preflight")) {
       return jsonResponse({ claimable: true, reason: "claimable" });
     }
+    if (String(url).endsWith("/jobs/validate-submission")) {
+      assert.equal(options.method, "POST");
+      const payload = JSON.parse(options.body);
+      assert.equal(payload.jobId, "job-1");
+      return jsonResponse(validationValid
+        ? { valid: true, schemaRef: "schema://jobs/example-output" }
+        : { valid: false, schemaRef: "schema://jobs/example-output", message: "submission.result is required" });
+    }
     if (String(url).endsWith("/jobs/claim")) {
       assert.equal(options.method, "POST");
       assert.deepEqual(JSON.parse(options.body), { jobId: "job-1", idempotencyKey: "idem-1" });
@@ -126,7 +156,7 @@ function fakeFetch(calls) {
     }
     if (String(url).endsWith("/jobs/submit")) {
       assert.equal(options.method, "POST");
-      assert.deepEqual(JSON.parse(options.body), { sessionId: "session-1", evidence: "complete" });
+      assert.deepEqual(JSON.parse(options.body), { sessionId: "session-1", submission: { result: "complete" } });
       return jsonResponse({ sessionId: "session-1", status: "submitted" });
     }
     if (String(url).includes("/session/timeline")) {

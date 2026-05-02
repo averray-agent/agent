@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import {
   ConflictError,
   InvalidSubmissionShapeError,
-  NotFoundError
+  NotFoundError,
+  ValidationError
 } from "./errors.js";
 import { buildSessionLifecycle, describeSessionStatus, transitionSession } from "./session-state-machine.js";
 import { hashSubmission, isStructuredSubmission, normalizeSubmission } from "./submission.js";
@@ -226,9 +227,7 @@ export class JobExecutionService {
       );
     }
     const submission = normalizeSubmission(normalizeSubmitPayloadShape(job.outputSchemaRef, submissionInput));
-    if (submission.kind === "structured") {
-      validateStructuredSubmission(job.outputSchemaRef, submission.structured, { path: "submission" });
-    }
+    validateSubmissionContract(job.outputSchemaRef, submission);
     await this.enforceMaintainerOpenPrCap(job, submission);
     if (this.blockchainGateway?.isEnabled()) {
       await this.blockchainGateway.submitWork(session.chainJobId ?? session.jobId, hashSubmission(submission));
@@ -456,7 +455,7 @@ export class JobExecutionService {
   }
 }
 
-function normalizeSubmitPayloadShape(schemaRef, submissionInput) {
+export function normalizeSubmitPayloadShape(schemaRef, submissionInput) {
   if (!isPlainObject(submissionInput) || !isStructuredSubmission(submissionInput.output)) {
     return submissionInput;
   }
@@ -487,6 +486,32 @@ function normalizeSubmitPayloadShape(schemaRef, submissionInput) {
       outputError: outputValidation.message
     }
   );
+}
+
+export function validateSubmissionContract(schemaRef, submission, { path = "submission" } = {}) {
+  const schema = getBuiltinJobSchema(schemaRef);
+  if (!schema) {
+    if (submission.kind === "structured") {
+      validateStructuredSubmission(schemaRef, submission.structured, { path });
+    }
+    return submission;
+  }
+
+  if (submission.kind !== "structured") {
+    throw new ValidationError(
+      `Schema-native jobs require payload.submission to be an object matching ${schemaRef}; plain evidence strings are not valid for this job.`,
+      {
+        schemaRef,
+        schemaValidates: "payload.submission",
+        received: "payload.evidence",
+        expected: firstRequiredSubmissionPath(schema),
+        hint: "Submit the direct JSON object shown in /jobs/definition.submissionContract.submitPayloadExample.submission."
+      }
+    );
+  }
+
+  validateStructuredSubmission(schemaRef, submission.structured, { path });
+  return submission;
 }
 
 function tryValidateAgainstSchema(value, schema, path) {

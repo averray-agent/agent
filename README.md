@@ -277,6 +277,9 @@ client.setToken(token);
 
 const account = await client.getAccountSummary();
 const recommendations = await client.getRecommendations();
+const draft = { summary: "Complete", output: "complete verified output", status: "complete" };
+const validation = await client.validateJobSubmission("starter-coding-001", draft);
+if (!validation.valid) throw new Error(validation.message);
 const claim = await client.claimJob("starter-coding-001", "claim-001");
 ```
 
@@ -308,7 +311,7 @@ Claim and submit once after SIWE sign-in:
 AVERRAY_TOKEN="$TOKEN" npm run example:claim-and-submit-job -- \
   --job-id starter-coding-001 \
   --idempotency-key starter-coding-001-first-try \
-  --evidence "complete" \
+  --submission-json '{"summary":"Complete","output":"complete verified output","status":"complete"}' \
   --execute
 ```
 

@@ -70,6 +70,21 @@ export async function runClaimAndSubmit({
       jobId,
       mode: "blocked",
       readiness,
+      validation: null,
+      claim: null,
+      submit: null
+    };
+  }
+
+  const draftSubmission = submission ?? evidence;
+  const validation = await client.validateJobSubmission(jobId, draftSubmission);
+  if (!validation?.valid) {
+    return {
+      apiUrl: client.baseUrl,
+      jobId,
+      mode: "blocked",
+      readiness,
+      validation,
       claim: null,
       submit: null
     };
@@ -81,7 +96,7 @@ export async function runClaimAndSubmit({
     throw new Error("claim response did not include sessionId.");
   }
 
-  const submit = await client.submitWork(sessionId, submission ?? evidence);
+  const submit = await client.submitWork(sessionId, draftSubmission);
   const timeline = await client.getSessionTimeline(sessionId);
 
   return {
@@ -94,6 +109,7 @@ export async function runClaimAndSubmit({
       status: claim.status,
       claimExpiresAt: claim.claimExpiresAt ?? claim.deadline ?? null
     },
+    validation,
     submit: {
       sessionId: submit?.sessionId ?? sessionId,
       status: submit?.status ?? null,

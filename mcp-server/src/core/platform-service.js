@@ -1,9 +1,14 @@
 import { createStateStore } from "./state-store.js";
 import { AccountMutationService } from "./account-mutation-service.js";
 import { JobCatalogService } from "./job-catalog-service.js";
-import { JobExecutionService } from "./job-execution-service.js";
+import {
+  JobExecutionService,
+  normalizeSubmitPayloadShape,
+  validateSubmissionContract
+} from "./job-execution-service.js";
 import { VerificationIngestionService } from "../services/verification-ingestion-service.js";
 import { ValidationError } from "./errors.js";
+import { normalizeSubmission } from "./submission.js";
 import { buildPlatformCapabilities } from "./discovery-manifest.js";
 import {
   buildSessionLifecycle,
@@ -417,6 +422,32 @@ export class PlatformService {
       this.jobCatalogService.getPublicJobDefinition(jobId),
       { wallet: currentWallet ?? wallet, now }
     );
+  }
+
+  validateJobSubmission(jobId, submissionInput) {
+    const job = this.getJobDefinition(jobId);
+    try {
+      const normalized = normalizeSubmission(normalizeSubmitPayloadShape(job.outputSchemaRef, submissionInput));
+      validateSubmissionContract(job.outputSchemaRef, normalized);
+      return {
+        jobId,
+        valid: true,
+        schemaRef: job.outputSchemaRef,
+        schemaValidates: "payload.submission",
+        submissionKind: normalized.kind,
+        normalizedSubmission: normalized.kind === "structured" ? normalized.structured : normalized.rawText
+      };
+    } catch (error) {
+      return {
+        jobId,
+        valid: false,
+        schemaRef: job.outputSchemaRef,
+        schemaValidates: "payload.submission",
+        code: error?.code ?? "invalid_submission",
+        message: error?.message ?? "Invalid submission.",
+        details: error?.details
+      };
+    }
   }
 
   getClaimableJobDefinition(jobId) {

@@ -201,6 +201,16 @@ export class AgentPlatformClient {
     return this.request(`/jobs/preflight?jobId=${encodeURIComponent(jobId)}`);
   }
 
+  async validateJobSubmission(jobId, submission) {
+    return this.request("/jobs/validate-submission", {
+      method: "POST",
+      body: {
+        jobId,
+        submission
+      }
+    });
+  }
+
   async claimJob(jobId, idempotencyKey = undefined) {
     return this.request("/jobs/claim", {
       method: "POST",

@@ -390,6 +390,7 @@ export class JobCatalogService {
       totalClaimLock: claimEconomics.totalClaimLock,
       strategyUnwindNeeded: liquid < claimEconomics.totalClaimLock,
       requiredOutputSchema: job.outputSchemaRef,
+      submissionContract: buildSubmissionContract(job),
       verifierMode: job.verifierMode,
       verifierConfig: job.verifierConfig,
       tier: job.tier,
@@ -492,10 +493,12 @@ export class JobCatalogService {
   withLifecycle(job, now = new Date()) {
     const publicDetails = buildPublicJobDetails(job);
     const submissionContract = buildSubmissionContract(job);
+    const schemaContract = buildSchemaContract(job);
     return {
       ...job,
       ...(publicDetails ? { publicDetails } : {}),
       ...(submissionContract ? { submissionContract } : {}),
+      ...(schemaContract ? { schemaContract } : {}),
       lifecycle: this.buildLifecycle(job, now)
     };
   }
@@ -967,7 +970,9 @@ function buildSubmissionContract(job) {
 
   return {
     endpoint: "POST /jobs/submit",
+    validationEndpoint: "POST /jobs/validate-submission",
     submissionShape: "direct_schema_object",
+    structuredSubmissionRequired: true,
     schemaValidates: "payload.submission",
     doNotWrapInOutput: true,
     compatibilityAliases: ["payload.submission.output"],
@@ -978,6 +983,29 @@ function buildSubmissionContract(job) {
       submission: buildSchemaExample(schema)
     },
     invalidWrappedOutputHint: "Send the schema object directly as payload.submission. Do not wrap it under payload.submission.output."
+  };
+}
+
+function buildSchemaContract(job) {
+  const inputSchemaKnown = isBuiltinJobSchemaRef(job?.inputSchemaRef);
+  const outputSchemaKnown = isBuiltinJobSchemaRef(job?.outputSchemaRef);
+  if (!inputSchemaKnown && !outputSchemaKnown) {
+    return undefined;
+  }
+
+  return {
+    input: {
+      schemaRef: job.inputSchemaRef,
+      schemaUrl: schemaRefToJobSchemaPath(job.inputSchemaRef),
+      knownBuiltin: inputSchemaKnown
+    },
+    output: {
+      schemaRef: job.outputSchemaRef,
+      schemaUrl: schemaRefToJobSchemaPath(job.outputSchemaRef),
+      knownBuiltin: outputSchemaKnown,
+      validates: "payload.submission",
+      validationEndpoint: "POST /jobs/validate-submission"
+    }
   };
 }
 

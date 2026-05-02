@@ -56,6 +56,24 @@ test("submitWork accepts structured output for built-in schemas", async () => {
   assert.equal(submitted.statusHistory[1].metadata.schemaRef, "schema://jobs/pr-review-findings-output");
 });
 
+test("submitWork rejects plain evidence for schema-native built-in jobs", async () => {
+  const stateStore = new MemoryStateStore();
+  const job = makeJob();
+  const service = new JobExecutionService(stateStore, undefined, () => job);
+
+  const claimed = await service.claimJob(WALLET, job.id, "http", "idemp-plain-evidence");
+
+  await assert.rejects(
+    () => service.submitWork(claimed.sessionId, "http", "complete"),
+    (error) => {
+      assert.equal(error.code, "invalid_request");
+      assert.match(error.message, /Schema-native jobs require/u);
+      assert.equal(error.details.schemaValidates, "payload.submission");
+      return true;
+    }
+  );
+});
+
 test("submitWork unwraps submission.output compatibility alias before storing structured output", async () => {
   const stateStore = new MemoryStateStore();
   const job = makeJob();
