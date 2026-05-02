@@ -10,7 +10,18 @@ export async function buildInventorySnapshot(platformService, {
   const jobs = typeof platformService.listJobsWithSessions === "function"
     ? await platformService.listJobsWithSessions({ now })
     : platformService.listJobs();
+  const allJobs = typeof platformService.listJobs === "function"
+    ? platformService.listJobs({
+      includeArchived: true,
+      includePaused: true,
+      includeStale: true,
+      now
+    })
+    : jobs;
   const sourceJobs = jobs
+    .filter((job) => job?.source?.type === sourceType)
+    .filter((job) => !job.recurring);
+  const allSourceJobs = allJobs
     .filter((job) => job?.source?.type === sourceType)
     .filter((job) => !job.recurring);
   const scopedJobs = sourceJobs
@@ -23,8 +34,10 @@ export async function buildInventorySnapshot(platformService, {
       .map(sourceKeyForJob)
       .filter(Boolean)
   );
-  const allSourceKeys = new Set(sourceJobs.map(sourceKeyForJob).filter(Boolean));
-  const allJobIds = new Set(jobs.map((job) => job?.id).filter(Boolean));
+  const allSourceKeys = new Set(allSourceJobs.map(sourceKeyForJob).filter(Boolean));
+  const allJobIds = new Set(
+    allJobs.flatMap((job) => normalizedJobIdEntries(job?.id)).filter(Boolean)
+  );
 
   return {
     jobs,
@@ -56,10 +69,13 @@ export function withReissueJobId(job, existingJobIds, {
   now = new Date(),
   reason = "inventory_replenishment"
 } = {}) {
-  if (!existingJobIds.has(job.id)) {
-    return job;
+  const normalizedId = normalizeJobId(job.id);
+  const normalizedJob = normalizedId === job.id ? job : { ...job, id: normalizedId };
+  if (!existingJobIds.has(normalizedId)) {
+    existingJobIds.add(normalizedId);
+    return normalizedJob;
   }
-  const base = truncateJobId(job.id, 108);
+  const base = truncateJobId(normalizedId, 108);
   let index = 2;
   let id = `${base}-r${index}`;
   while (existingJobIds.has(id)) {
@@ -68,11 +84,11 @@ export function withReissueJobId(job, existingJobIds, {
   }
   existingJobIds.add(id);
   return {
-    ...job,
+    ...normalizedJob,
     id,
     source: {
       ...job.source,
-      reissueOf: job.id,
+      reissueOf: normalizedId,
       reissueReason: reason,
       reissuedAt: now.toISOString(),
       reissueNumber: index
@@ -115,4 +131,18 @@ function isActiveSourceJob(job) {
 
 function truncateJobId(jobId, maxLength) {
   return String(jobId ?? "").slice(0, maxLength).replace(/-+$/u, "");
+}
+
+function normalizedJobIdEntries(jobId) {
+  const raw = String(jobId ?? "").trim();
+  const normalized = normalizeJobId(raw);
+  return raw && raw !== normalized ? [raw, normalized] : [normalized];
+}
+
+function normalizeJobId(value) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }

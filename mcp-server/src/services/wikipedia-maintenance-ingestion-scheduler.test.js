@@ -5,8 +5,10 @@ import {
   WikipediaMaintenanceIngestionScheduler,
   loadWikipediaMaintenanceIngestionConfig
 } from "./wikipedia-maintenance-ingestion-scheduler.js";
+import { JobCatalogService } from "../core/job-catalog-service.js";
 
 const GENERATED_WIKI_JOB_ID = "wiki-en-123-citation_repair-example-article";
+const CANONICAL_WIKI_JOB_ID = "wiki-en-123-citation-repair-example-article";
 const SILENT_LOGGER = {
   info() {},
   warn() {}
@@ -169,10 +171,63 @@ test("WikipediaMaintenanceIngestionScheduler reissues exhausted source jobs with
 
   assert.equal(summary.createdCount, 1);
   assert.equal(jobs.length, 2);
-  assert.equal(jobs[0].id, `${GENERATED_WIKI_JOB_ID}-r2`);
-  assert.equal(jobs[0].source.reissueOf, GENERATED_WIKI_JOB_ID);
+  assert.equal(jobs[0].id, `${CANONICAL_WIKI_JOB_ID}-r2`);
+  assert.equal(jobs[0].source.reissueOf, CANONICAL_WIKI_JOB_ID);
   assert.equal(jobs[0].source.reissueReason, "inventory_replenishment");
   assert.equal(jobs[1].effectiveState, "exhausted");
+});
+
+test("WikipediaMaintenanceIngestionScheduler avoids hidden stale job id collisions", async () => {
+  const catalog = new JobCatalogService(
+    [{
+      id: GENERATED_WIKI_JOB_ID,
+      category: "wikipedia",
+      tier: "starter",
+      lifecycle: {
+        status: "open",
+        createdAt: "2026-04-01T00:00:00.000Z",
+        updatedAt: "2026-04-01T00:00:00.000Z",
+        staleAt: "2026-04-15T00:00:00.000Z"
+      },
+      source: {
+        type: "wikipedia_article",
+        language: "en",
+        pageId: 123,
+        revisionId: "987654321",
+        taskType: "citation_repair"
+      }
+    }],
+    [],
+    () => ({}),
+    () => ({}),
+    () => 0
+  );
+  const platform = {
+    listJobs(options = {}) {
+      return catalog.listJobs(options);
+    },
+    createJob(job) {
+      return catalog.createJob(job);
+    }
+  };
+  const scheduler = new WikipediaMaintenanceIngestionScheduler(platform, undefined, {
+    enabled: true,
+    dryRun: false,
+    minClaimableJobs: 1,
+    categories: [{ title: "Category:All articles with dead external links", taskType: "citation_repair" }],
+    minScore: 55,
+    fetchImpl: makeFetch(),
+    logger: SILENT_LOGGER
+  });
+
+  const summary = await scheduler.runOnce(new Date("2026-04-25T10:00:00.000Z"));
+  const jobs = catalog.listJobs({ includeStale: true });
+
+  assert.equal(summary.createdCount, 1);
+  assert.deepEqual(summary.errors, []);
+  assert.equal(jobs.length, 2);
+  assert.equal(jobs[0].id, `${CANONICAL_WIKI_JOB_ID}-r2`);
+  assert.equal(jobs[0].source.reissueOf, CANONICAL_WIKI_JOB_ID);
 });
 
 test("loadWikipediaMaintenanceIngestionConfig parses env knobs safely", () => {
