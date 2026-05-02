@@ -49,6 +49,41 @@ function spark(seed: number): number[] {
   return Array.from({ length: 16 }, (_, i) => Math.max(3, seed + Math.sin(i / 2) * 5 + i / 4));
 }
 
+function isActiveClaim(job: RawRecord): boolean {
+  const state = text(job.effectiveState, text(job.claimState, text(job.state))).toLowerCase();
+  if (state !== "claimed") return false;
+  const expiresAt = text(job.claimExpiresAt);
+  return !expiresAt || Number.isNaN(Date.parse(expiresAt)) || Date.parse(expiresAt) > Date.now();
+}
+
+function activeClaimJobs(jobsPayload: unknown): RawRecord[] {
+  return asArray(jobsPayload).filter((job) => isActiveClaim(job) && text(job.claimedBy));
+}
+
+function sessionKey(session: RawRecord): string {
+  return text(session.sessionId, `${text(session.jobId)}:${text(session.wallet)}`);
+}
+
+function activeWorkSessions(jobsPayload: unknown, sessionsPayload: unknown): RawRecord[] {
+  const sessions = asArray(sessionsPayload);
+  const seen = new Set(sessions.map(sessionKey).filter(Boolean));
+  const claimSessions = activeClaimJobs(jobsPayload)
+    .map((job) => ({
+      sessionId: text(job.sessionId, `${text(job.id)}:${text(job.claimedBy)}`),
+      jobId: text(job.id),
+      wallet: text(job.claimedBy),
+      status: "claimed",
+      claimedAt: text(job.claimedAt),
+    }))
+    .filter((session) => {
+      const key = sessionKey(session);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  return [...sessions, ...claimSessions];
+}
+
 export function buildBalanceCards(accountPayload: unknown, strategyPayload: unknown): BalanceCard[] {
   const account = asRecord(accountPayload);
   const summary = asRecord(asRecord(strategyPayload).summary);
@@ -165,15 +200,16 @@ export function buildCreditLine(accountPayload: unknown, borrowPayload: unknown)
 
 export function buildRoomVitals(jobsPayload: unknown, sessionsPayload: unknown, accountPayload: unknown, strategyPayload: unknown): KpiData[] {
   const jobs = asArray(jobsPayload);
-  const sessions = asArray(sessionsPayload);
+  const sessions = activeWorkSessions(jobsPayload, sessionsPayload);
   const account = asRecord(accountPayload);
   const summary = asRecord(asRecord(strategyPayload).summary);
   const capital = numberValue(summary.allocated, mapTotal(account.strategyAllocated) + mapTotal(account.jobStakeLocked));
   const attentionCount = numberValue(summary.attentionCount);
+  const activeAgents = new Set(sessions.map((s) => text(s.wallet)).filter(Boolean)).size;
 
   return [
     { label: "Runs in motion", value: jobs.length || sessions.length, spark: spark(12), delta: "live jobs + sessions", deltaTone: "good" },
-    { label: "Agents active", value: new Set(sessions.map((s) => text(s.wallet))).size || "-", spark: spark(8), sparkColor: "#8a8f88", delta: "from session history", deltaTone: "neutral" },
+    { label: "Agents active", value: activeAgents || "-", spark: spark(8), sparkColor: "#8a8f88", delta: activeAgents ? "from active claims" : "from session history", deltaTone: "neutral" },
     { label: "Capital at work", value: fmt(capital), unit: "DOT", spark: spark(20), delta: "strategy + stake", deltaTone: "good" },
     { label: "Treasury posture", value: attentionCount ? "Amber" : "Green", valueAccent: !attentionCount, spark: spark(1), delta: attentionCount ? `${attentionCount} lane attention` : "No lane attention", deltaTone: attentionCount ? "warn" : "good" },
   ];
@@ -208,10 +244,11 @@ export function buildOverviewAlerts(sessionsPayload: unknown, accountPayload: un
 
 export function buildLaneCards(jobsPayload: unknown, sessionsPayload: unknown, strategyPayload: unknown): LaneCardData[] {
   const jobs = asArray(jobsPayload);
-  const sessions = asArray(sessionsPayload);
+  const sessions = activeWorkSessions(jobsPayload, sessionsPayload);
   const summary = asRecord(asRecord(strategyPayload).summary);
   const disputed = sessions.filter((session) => text(session.status) === "disputed").length;
   const attention = numberValue(summary.attentionCount);
+  const latestSessionStatus = text(sessions[0]?.status, "claimed");
 
   return [
     {
@@ -224,7 +261,7 @@ export function buildLaneCards(jobsPayload: unknown, sessionsPayload: unknown, s
         { label: "sessions", value: `${sessions.length}` },
         { label: "disputed", value: `${disputed}` },
       ],
-      recentEvent: sessions[0] ? `Latest session ${text(sessions[0].status, "claimed")}` : "No live sessions yet",
+      recentEvent: sessions[0] ? `Latest session ${latestSessionStatus}` : "No live sessions yet",
     },
     {
       name: "Treasury",
