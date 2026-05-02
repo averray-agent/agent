@@ -208,8 +208,28 @@ export function buildRoomVitals(jobsPayload: unknown, sessionsPayload: unknown, 
   const activeAgents = new Set(sessions.map((s) => text(s.wallet)).filter(Boolean)).size;
 
   return [
-    { label: "Runs in motion", value: jobs.length || sessions.length, spark: spark(12), delta: "live jobs + sessions", deltaTone: "good" },
-    { label: "Agents active", value: activeAgents || "-", spark: spark(8), sparkColor: "#8a8f88", delta: activeAgents ? "from active claims" : "from session history", deltaTone: "neutral" },
+    {
+      label: "Runs in motion",
+      value: jobs.length || sessions.length,
+      spark: spark(12),
+      // Both surfaces feed this card: every open job in the catalog
+      // plus every active session pulled from /admin/sessions
+      // (operator-wide, includes external-agent claims). The hint
+      // makes that obvious so a reader doesn't think the number is
+      // wallet-scoped.
+      delta: "open jobs + operator-wide sessions",
+      deltaTone: "good",
+    },
+    {
+      label: "Agents active",
+      value: activeAgents || "-",
+      spark: spark(8),
+      sparkColor: "#8a8f88",
+      delta: activeAgents
+        ? "distinct wallets · operator-wide"
+        : "no claims observed yet · operator-wide",
+      deltaTone: "neutral",
+    },
     { label: "Capital at work", value: fmt(capital), unit: "DOT", spark: spark(20), delta: "strategy + stake", deltaTone: "good" },
     { label: "Treasury posture", value: attentionCount ? "Amber" : "Green", valueAccent: !attentionCount, spark: spark(1), delta: attentionCount ? `${attentionCount} lane attention` : "No lane attention", deltaTone: attentionCount ? "warn" : "good" },
   ];

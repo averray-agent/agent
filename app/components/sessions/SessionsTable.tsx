@@ -55,7 +55,9 @@ export function SessionsTable({
                   className="p-8 text-center font-[family-name:var(--font-mono)] text-[13px] text-[var(--avy-muted)]"
                   style={{ letterSpacing: 0 }}
                 >
-                  No sessions match these filters.
+                  {totalCount === 0
+                    ? "No worker sessions have been observed yet."
+                    : "No sessions match these filters."}
                 </td>
               </tr>
             ) : (

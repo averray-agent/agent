@@ -2,9 +2,10 @@
 
 import { cn } from "@/lib/utils/cn";
 import { Sparkline } from "@/components/overview/Sparkline";
+import { formatDeadline } from "@/components/runs/buildLifecycleStages";
 import { BadgeStrip } from "./BadgeStrip";
 import { TierChip } from "./TierChip";
-import type { AgentRecord } from "./types";
+import type { AgentRecord, AgentActiveSession } from "./types";
 
 export interface AgentDirectoryTableProps {
   rows: AgentRecord[];
@@ -179,6 +180,9 @@ export function AgentDirectoryTable({
                       >
                         {a.activity.when}
                       </div>
+                      {a.activeSession ? (
+                        <ActiveSessionLine session={a.activeSession} />
+                      ) : null}
                     </Td>
                     <Td>
                       <span
@@ -215,6 +219,43 @@ export function AgentDirectoryTable({
           ＋ Invite new agent
         </button>
       </footer>
+    </div>
+  );
+}
+
+/**
+ * Compact one-liner that surfaces the agent's currently-claimed run on
+ * the row itself. Previously this lived only in the drawer body, so an
+ * operator scanning the directory couldn't tell which agents had a
+ * job in flight without clicking into each row. Reads jobId + the live
+ * deadline countdown from the agent's `currentActivity` block (mapped
+ * onto AgentActiveSession by the adapter).
+ */
+function ActiveSessionLine({ session }: { session: AgentActiveSession }) {
+  const deadlineLabel = session.deadlineAt ? formatDeadline(session.deadlineAt) : "";
+  const verb =
+    session.status === "submitted"
+      ? "Submitted"
+      : session.status === "disputed"
+        ? "Disputed"
+        : "On";
+  return (
+    <div
+      className="mt-1 inline-flex flex-wrap items-center gap-1 rounded-[6px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-1.5 py-0.5 font-[family-name:var(--font-mono)] text-[10.5px] text-[var(--avy-muted)]"
+      style={{ letterSpacing: 0 }}
+      title={`Active session ${session.sessionId}`}
+    >
+      <span className="h-1.5 w-1.5 rounded-full bg-[var(--avy-accent)]" />
+      <span>
+        {verb}{" "}
+        <span className="text-[var(--avy-accent)]">{session.jobId}</span>
+      </span>
+      {deadlineLabel ? (
+        <>
+          <span className="opacity-40">·</span>
+          <span>{deadlineLabel}</span>
+        </>
+      ) : null}
     </div>
   );
 }

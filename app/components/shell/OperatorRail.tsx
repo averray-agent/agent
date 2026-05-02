@@ -20,12 +20,12 @@ import { signOut } from "@/lib/auth/siwe";
 import { shortAddress } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import {
+  useAdminSessions,
   useAgents,
   useBadges,
   useDisputes,
   useJobs,
   usePolicies,
-  useSessions,
 } from "@/lib/api/hooks";
 
 interface NavItem {
@@ -73,7 +73,10 @@ export function OperatorRail() {
   const jobs = useJobs();
   const badges = useBadges();
   const agents = useAgents();
-  const sessions = useSessions();
+  // Operator-wide count for the left-rail "Sessions" badge — should
+  // include external-agent activity, not just the signed-in wallet's
+  // own sessions. Matches what the /sessions page itself reads.
+  const sessions = useAdminSessions();
   const policies = usePolicies();
   const disputes = useDisputes();
   const counts: Record<string, number | string | undefined> = {

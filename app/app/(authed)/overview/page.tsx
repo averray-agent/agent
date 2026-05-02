@@ -51,6 +51,21 @@ export default function OverviewPage() {
     () => buildRoomVitals(jobs.data, sessions.data, account.data, strategyPositions.data),
     [account.data, jobs.data, sessions.data, strategyPositions.data]
   );
+  // The Runs-in-motion + Agents-active cards both pull from
+  // /admin/sessions. While that request is still in flight on first
+  // paint, we don't want the cards to claim "0" or "no claims
+  // observed yet" — we just don't know yet. Replace the deltas with
+  // a loading hint until the request resolves; once it's resolved
+  // (data or error), buildRoomVitals' real copy takes over.
+  const sessionsLoading = sessions.isLoading && !sessions.data && !sessions.error;
+  const vitalsWithLoadingHints = useMemo(() => {
+    if (!sessionsLoading) return liveVitals;
+    return liveVitals.map((v) =>
+      v.label === "Runs in motion" || v.label === "Agents active"
+        ? { ...v, delta: "waiting for /admin/sessions…" }
+        : v
+    );
+  }, [liveVitals, sessionsLoading]);
   const liveAlerts = useMemo(
     () => buildOverviewAlerts(sessions.data, account.data),
     [account.data, sessions.data]
@@ -72,7 +87,7 @@ export default function OverviewPage() {
   );
   const providerRows = liveProviderOps;
   const hasLiveOverview = Boolean(jobs.data || sessions.data || account.data || strategyPositions.data);
-  const vitals = liveVitals;
+  const vitals = vitalsWithLoadingHints;
   const alerts = endpointAlerts.length ? endpointAlerts : liveAlerts;
   const lanes = liveLanes;
   const disputedSessions = Array.isArray(sessions.data)
