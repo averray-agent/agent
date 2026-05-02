@@ -18,7 +18,20 @@ const DAY_LABEL: Record<string, string> = {
  * Entries are link-through only — clicking an event opens the relevant
  * surface (receipts, runs, policies, disputes) in the same tab.
  */
-export function AuditTimeline({ events }: { events: AuditEvent[] }) {
+export function AuditTimeline({
+  events,
+  unauthenticated,
+  filtersApplied,
+}: {
+  events: AuditEvent[];
+  /** True when the data fetch failed with 401/403 — the page renders
+   *  a sign-in hint instead of the generic "no events match" copy. */
+  unauthenticated?: boolean;
+  /** True when at least one filter (source/category/day/q) is set
+   *  beyond defaults. Distinguishes "your filters didn't match
+   *  anything" from "the log itself is quiet for everyone". */
+  filtersApplied?: boolean;
+}) {
   if (events.length === 0) {
     return (
       <div className="rounded-[10px] border border-dashed border-[var(--avy-line)] bg-[rgba(255,253,247,0.5)] p-8 text-center">
@@ -26,8 +39,11 @@ export function AuditTimeline({ events }: { events: AuditEvent[] }) {
           className="m-0 font-[family-name:var(--font-mono)] text-[13px] text-[var(--avy-muted)]"
           style={{ letterSpacing: 0 }}
         >
-          No events match these filters. The log is append-only, so a quiet
-          window means the platform is quiet — not stalled.
+          {unauthenticated
+            ? "Sign in with your operator wallet to load the audit log. Every claim, submission, and verification on this platform shows up here once you're authenticated."
+            : filtersApplied
+              ? "No events match these filters. Clear them to see the full log."
+              : "No events recorded yet. The log is append-only, so a quiet window means the platform is quiet — not stalled."}
         </p>
       </div>
     );
