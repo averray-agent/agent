@@ -76,6 +76,23 @@ export interface SessionRow {
   ageStale?: boolean;
   lastEvent: { text: string; meta: string; tone?: "neutral" | "accent" | "warn" | "bad" };
   openedAt: string;
+  /**
+   * Raw ISO timestamps from the backend session record. The `openedAt`
+   * field above is a display string (e.g. "14:48 UTC"); these are the
+   * unformatted source-of-truth values aggregate views need to compute
+   * real durations like avg / p50 / p95 settle time.
+   * Optional because older sessions may not have all four fields.
+   */
+  timestamps?: {
+    claimedAt?: string;
+    submittedAt?: string;
+    /** When the session reached its terminal state (verified, settled,
+     *  rejected, slashed). Maps to `resolvedAt` on the backend, falling
+     *  back to `closedAt`. */
+    settledAt?: string;
+    /** Most-recent backend mutation; useful for "age" recomputation. */
+    updatedAt?: string;
+  };
 }
 
 export interface SessionDetail extends SessionRow {

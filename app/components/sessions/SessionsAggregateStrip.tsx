@@ -56,16 +56,7 @@ export function SessionsAggregateStrip({ sessions }: { sessions: SessionDetail[]
         }
         tone={settled.length > 0 ? "ok" : "muted"}
       />
-      <Card
-        label="Avg settle time"
-        // Median/avg requires raw claimedAt → settledAt timestamps,
-        // which the SessionRow adapter doesn't surface yet. Show an
-        // honest placeholder rather than the previous fixture
-        // "3m 12s · p50 2m40s · p95 8m02s".
-        value="—"
-        meta="raw timestamps not exposed yet"
-        tone="muted"
-      />
+      <SettleTimeCard sessions={settled} />
       <Card
         label="Open anomalies"
         value={`${anomalies.length}`}
@@ -117,6 +108,153 @@ function Card({ label, value, unit, meta, tone = "muted" }: CardProps) {
       </span>
     </article>
   );
+}
+
+/**
+ * "Avg settle time" card — derived from real claimedAt → settledAt
+ * deltas across the settled rows in scope. Falls back to an honest
+ * `—` when:
+ *   - no rows are in the `settled` state, or
+ *   - settled rows exist but the row adapter didn't surface the raw
+ *     claimedAt / settledAt pair (older sessions before the
+ *     timestamps field was plumbed; renders as "n timestamp(s) missing"
+ *     so the gap is visible to the operator).
+ *
+ * Median is the headline value (resilient to one outlier dominating
+ * the average). p50 / p95 are also surfaced when ≥ 2 / ≥ 5 settled
+ * rows are available, so an auditor can see tail latency at a glance.
+ */
+function SettleTimeCard({ sessions }: { sessions: SessionDetail[] }) {
+  if (sessions.length === 0) {
+    return (
+      <Card
+        label="Median settle time"
+        value="—"
+        meta="no settlements in scope"
+        tone="muted"
+      />
+    );
+  }
+
+  const durations: number[] = [];
+  let missing = 0;
+  for (const session of sessions) {
+    const claimed = session.timestamps?.claimedAt;
+    const settled = session.timestamps?.settledAt;
+    if (!claimed || !settled) {
+      missing += 1;
+      continue;
+    }
+    const claimedTs = Date.parse(claimed);
+    const settledTs = Date.parse(settled);
+    if (!Number.isFinite(claimedTs) || !Number.isFinite(settledTs) || settledTs < claimedTs) {
+      missing += 1;
+      continue;
+    }
+    durations.push(settledTs - claimedTs);
+  }
+
+  if (durations.length === 0) {
+    return (
+      <Card
+        label="Median settle time"
+        value="—"
+        meta={
+          missing > 0
+            ? `${missing} timestamp${missing === 1 ? "" : "s"} missing`
+            : "no settlements in scope"
+        }
+        tone="muted"
+      />
+    );
+  }
+
+  const sorted = [...durations].sort((a, b) => a - b);
+  const median = percentile(sorted, 0.5);
+  const p95 = sorted.length >= 5 ? percentile(sorted, 0.95) : undefined;
+  const headline = formatDurationCompact(median);
+  // Compose meta: "p50 14m · p95 18m" when we have enough rows,
+  // "n=1" when there's only one, plus a "k missing timestamps" tail
+  // when the adapter dropped some rows.
+  const metaParts: string[] = [];
+  if (sorted.length >= 2) metaParts.push(`p50 ${formatDurationLong(median)}`);
+  else metaParts.push(`n=${sorted.length}`);
+  if (p95 !== undefined) metaParts.push(`p95 ${formatDurationLong(p95)}`);
+  if (missing > 0) {
+    metaParts.push(
+      `${missing} missing timestamp${missing === 1 ? "" : "s"}`
+    );
+  }
+  return (
+    <Card
+      label="Median settle time"
+      value={headline.value}
+      unit={headline.unit}
+      meta={metaParts.join(" · ")}
+      tone="muted"
+    />
+  );
+}
+
+/**
+ * Linear-interpolated percentile over a sorted ascending array of
+ * durations (ms). Stable for small samples — a typical operator view
+ * has fewer than a dozen settled rows visible.
+ */
+function percentile(sortedAsc: number[], p: number): number {
+  if (sortedAsc.length === 0) return 0;
+  if (sortedAsc.length === 1) return sortedAsc[0];
+  const rank = (sortedAsc.length - 1) * p;
+  const lo = Math.floor(rank);
+  const hi = Math.ceil(rank);
+  if (lo === hi) return sortedAsc[lo];
+  return sortedAsc[lo] + (sortedAsc[hi] - sortedAsc[lo]) * (rank - lo);
+}
+
+interface FormattedDuration {
+  value: string;
+  unit: string;
+}
+
+/**
+ * Compact display ("3m 12s", "14m", "2h 4m"). Drops the smaller unit
+ * once the duration crosses an hour so the headline number stays
+ * readable at the card's 2rem display weight.
+ */
+function formatDurationCompact(ms: number): FormattedDuration {
+  if (!Number.isFinite(ms) || ms < 0) return { value: "—", unit: "" };
+  const totalSeconds = Math.round(ms / 1000);
+  if (totalSeconds < 60) {
+    return { value: `${totalSeconds}`, unit: "s" };
+  }
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes < 60) {
+    return seconds === 0
+      ? { value: `${minutes}`, unit: "m" }
+      : { value: `${minutes}m`, unit: `${seconds}s` };
+  }
+  const hours = Math.floor(minutes / 60);
+  const remMinutes = minutes % 60;
+  return remMinutes === 0
+    ? { value: `${hours}`, unit: "h" }
+    : { value: `${hours}h`, unit: `${remMinutes}m` };
+}
+
+/** Single-string variant for meta text — same buckets as the
+ *  compact formatter but as one string ("3m 12s", "14m", "2h 4m"). */
+function formatDurationLong(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return "—";
+  const totalSeconds = Math.round(ms / 1000);
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes < 60) {
+    return seconds === 0 ? `${minutes}m` : `${minutes}m ${seconds}s`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const remMinutes = minutes % 60;
+  return remMinutes === 0 ? `${hours}h` : `${hours}h ${remMinutes}m`;
 }
 
 interface EscrowTotal {

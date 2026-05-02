@@ -125,6 +125,24 @@ function timeLabel(value: unknown): string {
   }).format(parsed);
 }
 
+/**
+ * Validate that a value is a parseable ISO-8601 string and return it
+ * verbatim. Returns undefined for missing / non-string / unparseable
+ * inputs so the caller can decide whether to drop the field entirely.
+ *
+ * Aggregate views (e.g. SessionsAggregateStrip's avg settle time)
+ * read the raw ISO so they can compute durations; without this the
+ * adapter would only ship pre-formatted display strings like
+ * "May 2, 14:48".
+ */
+function stringIso(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  if (!Number.isFinite(Date.parse(trimmed))) return undefined;
+  return trimmed;
+}
+
 function ageLabel(value: unknown): string {
   const raw = text(value);
   const parsed = Date.parse(raw);
@@ -237,6 +255,23 @@ export function buildSessionDetails(sessionPayload: unknown, jobsPayload: unknow
     const currentState = state(session.status);
     const updatedAt = session.updatedAt ?? session.resolvedAt ?? session.submittedAt ?? session.claimedAt;
     const verification = asRecord(session.verification);
+    // Settled timestamp = resolvedAt (verifier produced a final
+    // outcome) and falls back to closedAt for sessions whose terminal
+    // state predates the resolvedAt rollout. Both are ISO strings on
+    // the backend payload.
+    const rawClaimedAt = stringIso(session.claimedAt);
+    const rawSubmittedAt = stringIso(session.submittedAt);
+    const rawSettledAt = stringIso(session.resolvedAt) ?? stringIso(session.closedAt);
+    const rawUpdatedAt = stringIso(session.updatedAt) ?? stringIso(updatedAt);
+    const timestamps =
+      rawClaimedAt || rawSubmittedAt || rawSettledAt || rawUpdatedAt
+        ? {
+            ...(rawClaimedAt ? { claimedAt: rawClaimedAt } : {}),
+            ...(rawSubmittedAt ? { submittedAt: rawSubmittedAt } : {}),
+            ...(rawSettledAt ? { settledAt: rawSettledAt } : {}),
+            ...(rawUpdatedAt ? { updatedAt: rawUpdatedAt } : {}),
+          }
+        : undefined;
 
     const sourceKind = sourceKindFromJob(job);
 
@@ -266,6 +301,7 @@ export function buildSessionDetails(sessionPayload: unknown, jobsPayload: unknow
         tone: currentState === "approved" || currentState === "settled" ? "accent" : currentState === "disputed" ? "warn" : "neutral",
       },
       openedAt: timeLabel(session.claimedAt),
+      ...(timestamps ? { timestamps } : {}),
       policy: text(job.outputSchemaRef, "schema pending"),
       receipt: currentState === "approved" || currentState === "settled" ? text(session.sessionId) : undefined,
       lifecycle: lifecycle(session),
