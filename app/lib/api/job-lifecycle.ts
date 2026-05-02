@@ -74,6 +74,52 @@ export function buildJobLifecycleSummary(payload: unknown): JobLifecycleSummary 
   };
 }
 
+/**
+ * Derive a public lifecycle summary from `/jobs` rows. This is intentionally
+ * a fallback for signed-out overview pages: `/admin/status` remains the richer
+ * operator source, but public jobs are enough to avoid showing an all-zero
+ * lifecycle strip while the queue visibly contains open work.
+ */
+export function buildPublicJobLifecycleSummary(payload: unknown): JobLifecycleSummary {
+  const jobs = extractJobRows(payload);
+  if (!jobs.length) return EMPTY_JOB_LIFECYCLE_SUMMARY;
+
+  return jobs.reduce<JobLifecycleSummary>((summary, job) => {
+    const lifecycle = asRecord(job.lifecycle);
+    const status = text(lifecycle?.status) || text(job.status);
+    const state = text(lifecycle?.state) || text(job.state) || status || "open";
+    const effectiveState = text(job.effectiveState);
+    const claimable =
+      job.claimable === true ||
+      effectiveState === "claimable" ||
+      (!effectiveState && state === "open");
+
+    summary.total += 1;
+    if (
+      status === "open" ||
+      state === "open" ||
+      state === "ready" ||
+      state === "claimable" ||
+      effectiveState === "claimable"
+    ) {
+      summary.open += 1;
+    }
+    if (claimable) {
+      summary.claimable += 1;
+    }
+    if (state === "stale") {
+      summary.stale += 1;
+    }
+    if (status === "paused" || state === "paused") {
+      summary.paused += 1;
+    }
+    if (status === "archived" || state === "archived") {
+      summary.archived += 1;
+    }
+    return summary;
+  }, { ...EMPTY_JOB_LIFECYCLE_SUMMARY });
+}
+
 /** Pull a single job's lifecycle block off a raw job object. */
 export function buildJobLifecycle(raw: unknown): JobLifecycle | undefined {
   const record = asRecord(raw);
@@ -169,6 +215,15 @@ export function extractAdminJobs(payload: unknown): unknown[] {
   if (!root) return [];
   if (Array.isArray(root.jobs)) return root.jobs;
   return [];
+}
+
+function extractJobRows(payload: unknown): Record<string, unknown>[] {
+  if (Array.isArray(payload)) {
+    return payload.map(asRecord).filter(Boolean) as Record<string, unknown>[];
+  }
+  const root = asRecord(payload);
+  if (!root || !Array.isArray(root.jobs)) return [];
+  return root.jobs.map(asRecord).filter(Boolean) as Record<string, unknown>[];
 }
 
 /**
