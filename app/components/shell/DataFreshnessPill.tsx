@@ -5,21 +5,19 @@ import { cn } from "@/lib/utils/cn";
 /**
  * "Where is this page reading from?" indicator.
  *
- * Every operator page mixes live SWR responses with fixture fallbacks,
- * which means a stale fixture can silently render after a backend
- * outage with no visual signal. This pill makes that distinction
- * explicit in the topbar, so an operator scanning the dashboard knows
- * whether to trust the numbers in front of them.
+ * Every operator page mixes several SWR responses, and some endpoints
+ * can be locked behind wallet auth or unavailable while the public
+ * surfaces still render. This pill makes that distinction explicit in
+ * the topbar, so an operator scanning the dashboard knows whether to
+ * trust the numbers in front of them.
  *
  * Three states only — keep it tight:
  *   - `live`     · everything resolved, no errors      → green
  *   - `loading`  · still waiting on the first response → blue, pulsing
  *   - `fallback` · request errored or returned nothing → amber
  *
- * "Error" is not a separate state because the UI behaviour is the
- * same in both cases (we render fixtures), and showing two different
- * pills for "the API is down" vs. "the API is intentionally not wired
- * yet" would just confuse operators who can't act on the difference.
+ * "Error" is not a separate state because operators mainly need to
+ * know that the current panel is not backed by a successful response.
  */
 export type FreshnessState = "live" | "loading" | "fallback";
 
@@ -47,14 +45,14 @@ const STATE_CLS: Record<
 const STATE_LABEL: Record<FreshnessState, string> = {
   live: "Live API",
   loading: "Loading",
-  fallback: "Fixture data",
+  fallback: "Unavailable",
 };
 
 const STATE_TITLE: Record<FreshnessState, string> = {
   live: "Live data from the operator API.",
   loading: "Still waiting on the first API response.",
   fallback:
-    "API errored or has not been wired yet — page is rendering fixture data.",
+    "API errored, is locked behind auth, or has not emitted this surface yet.",
 };
 
 export function DataFreshnessPill({

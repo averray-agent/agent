@@ -18,15 +18,21 @@ export interface XcmObserverLaneProps {
 export function XcmObserverLane({ phases, sub }: XcmObserverLaneProps) {
   return (
     <TreasuryPanel eyebrow="XCM observer" title="Request → observe → settle" sub={sub}>
-      <div className="grid grid-cols-1 md:grid-cols-3">
-        {phases.map((phase, i) => (
-          <PhaseColumn
-            key={phase.step}
-            phase={phase}
-            isLast={i === phases.length - 1}
-          />
-        ))}
-      </div>
+      {phases.length ? (
+        <div className="grid grid-cols-1 md:grid-cols-3">
+          {phases.map((phase, i) => (
+            <PhaseColumn
+              key={phase.step}
+              phase={phase}
+              isLast={i === phases.length - 1}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="p-4 font-[family-name:var(--font-body)] text-[13px] text-[var(--avy-muted)]">
+          No live XCM observer events available.
+        </div>
+      )}
     </TreasuryPanel>
   );
 }

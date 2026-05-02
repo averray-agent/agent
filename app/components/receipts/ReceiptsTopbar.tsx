@@ -7,7 +7,6 @@ import {
 } from "@/components/shell/DataFreshnessPill";
 
 const pad = (n: number) => String(n).padStart(2, "0");
-const SEED_BLOCK = 18_204_917;
 
 function formatClock(d: Date): string {
   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} · ${pad(
@@ -17,20 +16,11 @@ function formatClock(d: Date): string {
 
 export function ReceiptsTopbar({ freshness }: { freshness?: FreshnessState }) {
   const [clock, setClock] = useState("");
-  const [block, setBlock] = useState(SEED_BLOCK);
 
   useEffect(() => {
     const tick = () => setClock(formatClock(new Date()));
     tick();
     const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-  }, []);
-
-  useEffect(() => {
-    // Block counter ~6s base-mainnet cadence; jitter for liveness.
-    const id = setInterval(() => {
-      setBlock((b) => (Math.random() > 0.5 ? b + 1 : b));
-    }, 6000);
     return () => clearInterval(id);
   }, []);
 
@@ -52,10 +42,6 @@ export function ReceiptsTopbar({ freshness }: { freshness?: FreshnessState }) {
         <span className="inline-flex items-center gap-1.5 text-[var(--avy-ink)]">
           <span className="h-1.5 w-1.5 rounded-full bg-[var(--avy-accent)] [animation:pulse_2s_infinite]" />
           {clock || "—"}
-        </span>
-        <span className="h-3.5 w-px bg-[var(--avy-line)]" />
-        <span>
-          block <b className="font-semibold text-[var(--avy-ink)]">{block.toLocaleString()}</b>
         </span>
       </div>
 

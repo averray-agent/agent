@@ -8,14 +8,9 @@ import {
   type AuditFilter,
 } from "@/components/audit/AuditFilterRail";
 import { AuditTimeline } from "@/components/audit/AuditTimeline";
-import { AUDIT_EVENTS } from "@/components/audit/data";
 import type { AuditActor, AuditCategory, AuditEvent, AuditSource } from "@/components/audit/types";
 import { useAudit } from "@/lib/api/hooks";
 import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
-
-// TODO(data): wire to useApi("/audit") once backend emits an event
-// stream. The SSE channel in lib/events/stream.ts already carries most
-// of these topic names — the audit log is just the persisted version.
 
 const DAY_BUCKETS: Record<AuditFilter["day"], (d: string) => boolean> = {
   all: () => true,
@@ -33,7 +28,7 @@ export default function AuditLogPage() {
     q: "",
   });
   const liveEvents = useMemo(() => extractAuditEvents(auditRequest.data), [auditRequest.data]);
-  const events = liveEvents.length ? liveEvents : AUDIT_EVENTS;
+  const events = liveEvents;
 
   const filtered = useMemo(() => {
     const q = filter.q.trim().toLowerCase();

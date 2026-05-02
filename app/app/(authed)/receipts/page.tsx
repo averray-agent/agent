@@ -12,7 +12,6 @@ import {
 } from "@/components/receipts/ReceiptsFilters";
 import {
   ReceiptsTable,
-  type ReceiptRow,
 } from "@/components/receipts/ReceiptsTable";
 import {
   ReceiptShapesLegend,
@@ -30,28 +29,21 @@ import {
 import { useBadge, useBadges } from "@/lib/api/hooks";
 import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
 
-// TODO(data): wire to useApi("/badges") and useApi(`/badges/${sessionId}`).
-// Fixture matches the handoff exactly so the page reads correctly until
-// the backend emits a stable list endpoint for receipts.
-
 const KPIS: ReceiptsKpi[] = [
   {
     label: "Total receipts",
-    value: "2,134",
-    unit: "all-time",
-    meta: "since 2025-11-06 · base mainnet",
+    value: "0",
+    unit: "indexed",
+    meta: "from /badges",
   },
   {
     label: "Signed in 24h",
-    value: "127",
-    spark: [14, 12, 15, 10, 13, 8, 11, 7, 9, 5, 8, 4, 6, 3],
-    sparkPulse: true,
-    meta: "+11% vs 7d avg",
-    metaTone: "ok",
+    value: "0",
+    meta: "signed in the last 24h",
   },
   {
     label: "Co-signed",
-    value: "96.2",
+    value: "0.0",
     unit: "%",
     pillRight: (
       <span
@@ -61,15 +53,13 @@ const KPIS: ReceiptsKpi[] = [
         within target
       </span>
     ),
-    meta: "target ≥ 95% · last 30d",
-    metaTone: "ok",
+    meta: "0 of 0 receipts · signer chain present",
+    metaTone: "warn",
   },
   {
     label: "Avg time-to-sign",
-    value: "18.4",
-    unit: "s",
-    spark: [6, 8, 5, 9, 7, 11, 9, 13, 10, 14, 11, 15, 13, 16],
-    meta: "median 14.2s · p95 41s",
+    value: "—",
+    meta: "timing not emitted by /badges yet",
   },
 ];
 
@@ -111,169 +101,6 @@ const FILTERS: FilterGroup[] = [
   },
 ];
 
-const ROWS: ReceiptRow[] = [
-  {
-    id: "r_4e14c",
-    kind: "run",
-    subject: "run-2745",
-    subjectSub: "coding-hand-3",
-    source: "github",
-    signers: [
-      { initials: "P", tone: "sage", role: "operator", address: "0xFd2EAE…6519" },
-      { initials: "C", tone: "ink", role: "cosigner", address: "0x9A13BC…0cb2" },
-      { initials: "V", tone: "blue", role: "verifier", address: "0x4D1E…7EbC" },
-    ],
-    policy: "coding/lint-strict@v2",
-    size: "8.9 KB",
-    signedAt: "14:14:02 UTC",
-  },
-  {
-    id: "r_4e14b",
-    kind: "settle",
-    subject: "loan-0a14",
-    subjectSub: "stake movement",
-    signers: [
-      { initials: "P", tone: "sage", role: "operator", address: "0xFd2EAE…6519" },
-      { initials: "C", tone: "clay", role: "cosigner", address: "0xB712…9908" },
-    ],
-    policy: "treasury/unwind-safe@v1",
-    size: "4.1 KB",
-    signedAt: "14:12:51 UTC",
-  },
-  {
-    id: "r_4e14a",
-    kind: "run",
-    subject: "run-2744",
-    subjectSub: "writer-gov-1",
-    source: "wikipedia",
-    signers: [
-      { initials: "P", tone: "sage", role: "operator", address: "0xFd2EAE…6519" },
-      { initials: "C", tone: "ink", role: "cosigner", address: "0x9A13BC…0cb2" },
-    ],
-    policy: "writer-gov/cited@v3",
-    size: "14.2 KB",
-    signedAt: "14:11:18 UTC",
-  },
-  {
-    id: "r_4e145",
-    kind: "run",
-    subject: "run-2751",
-    subjectSub: "coding-hand-3",
-    source: "osv",
-    signers: [
-      { initials: "P", tone: "sage", role: "operator", address: "0xFd2EAE…6519" },
-      { initials: "C", tone: "ink", role: "cosigner", address: "0x9A13BC…0cb2" },
-      { initials: "V", tone: "blue", role: "verifier", address: "0x4D1E…7EbC" },
-    ],
-    policy: "security/osv-deps@v1",
-    size: "11.8 KB",
-    signedAt: "14:09:52 UTC",
-  },
-  {
-    id: "r_4e144",
-    kind: "run",
-    subject: "run-2752",
-    subjectSub: "writer-gov-1",
-    source: "data_gov",
-    signers: [
-      { initials: "P", tone: "sage", role: "operator", address: "0xFd2EAE…6519" },
-      { initials: "V", tone: "blue", role: "verifier", address: "0x4D1E…7EbC" },
-    ],
-    policy: "data/open-data-audit@v1",
-    size: "9.1 KB",
-    signedAt: "14:09:21 UTC",
-  },
-  {
-    id: "r_4e139",
-    kind: "badge",
-    subject: "coding-tier-2",
-    subjectSub: "agent award",
-    signers: [
-      { initials: "V", tone: "blue", role: "verifier", address: "0x4D1E…7EbC" },
-    ],
-    policy: "reputation/tier-up",
-    size: "2.7 KB",
-    signedAt: "14:10:40 UTC",
-  },
-  {
-    id: "r_4e138",
-    kind: "policy",
-    subject: "ops/schema-dual-sign",
-    subjectSub: "revision v4",
-    signers: [
-      { initials: "P", tone: "sage", role: "operator", address: "0xFd2EAE…6519" },
-    ],
-    policy: "ops/schema-dual-sign@v4",
-    size: "1.8 KB",
-    signedAt: "14:10:02 UTC",
-  },
-  {
-    id: "r_4e137",
-    kind: "run",
-    subject: "run-2743",
-    subjectSub: "gov-review-2",
-    signers: [
-      { initials: "P", tone: "sage", role: "operator", address: "0xFd2EAE…6519" },
-      { initials: "C", tone: "ink", role: "cosigner", address: "0x9A13BC…0cb2" },
-      { initials: "V", tone: "blue", role: "verifier", address: "0x4D1E…7EbC" },
-    ],
-    policy: "deps/sec-only@v2",
-    size: "6.3 KB",
-    signedAt: "14:09:47 UTC",
-  },
-  {
-    id: "r_4e12a",
-    kind: "run",
-    subject: "run-2742",
-    subjectSub: "writer-gov-1",
-    signers: [
-      { initials: "P", tone: "sage", role: "operator", address: "0xFd2EAE…6519" },
-      { initials: "C", tone: "ink", role: "cosigner", address: "0x9A13BC…0cb2" },
-      { initials: "V", tone: "blue", role: "verifier", address: "0x4D1E…7EbC" },
-    ],
-    policy: "writer-gov/cited@v3",
-    size: "12.4 KB",
-    signedAt: "14:08:42 UTC",
-  },
-  {
-    id: "r_4e119",
-    kind: "settle",
-    subject: "loan-0a13",
-    subjectSub: "stake movement",
-    signers: [
-      { initials: "P", tone: "sage", role: "operator", address: "0xFd2EAE…6519" },
-    ],
-    policy: "treasury/unwind-safe@v1",
-    size: "3.8 KB",
-    signedAt: "14:07:02 UTC",
-  },
-  {
-    id: "r_4e118",
-    kind: "run",
-    subject: "run-2741",
-    subjectSub: "gov-review-2",
-    signers: [
-      { initials: "P", tone: "sage", role: "operator", address: "0xFd2EAE…6519" },
-      { initials: "C", tone: "muted", role: "cosigner", address: "pending…" },
-    ],
-    policy: "deps/sec-only@v2",
-    size: "5.9 KB",
-    signedAt: "14:06:31 UTC",
-  },
-  {
-    id: "r_4e117",
-    kind: "badge",
-    subject: "governance-1",
-    subjectSub: "agent award",
-    signers: [
-      { initials: "V", tone: "blue", role: "verifier", address: "0x4D1E…7EbC" },
-    ],
-    policy: "reputation/tier-up",
-    size: "2.4 KB",
-    signedAt: "14:04:15 UTC",
-  },
-];
-
 const SHAPES: ShapeEntry[] = [
   {
     kind: "run",
@@ -311,14 +138,11 @@ const SHAPES: ShapeEntry[] = [
 
 export default function ReceiptsPage() {
   const badgesRequest = useBadges();
-  const [selectedId, setSelectedId] = useState<string | null>("r_4e12a");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const liveRows = useMemo(() => extractReceiptRows(badgesRequest.data), [badgesRequest.data]);
-  const rows = useMemo(
-    () => (liveRows.length ? liveRows : ROWS.map(fixtureReceiptRow)),
-    [liveRows]
-  );
-  const kpis = useMemo(() => receiptKpis(rows, liveRows.length > 0), [liveRows.length, rows]);
+  const rows = liveRows;
+  const kpis = useMemo(() => receiptKpis(rows), [rows]);
   const selected = selectedId ? rows.find((r) => r.id === selectedId) ?? null : null;
   const detailRequest = useBadge(drawerOpen && selected ? selected.sessionId : null);
   const drawerModel = selected ? buildReceiptDrawer(selected, detailRequest.data) : null;
@@ -355,7 +179,7 @@ export default function ReceiptsPage() {
           setDrawerOpen(true);
         }}
         shownCount={rows.length}
-        totalCount={liveRows.length ? rows.length : 2134}
+        totalCount={rows.length}
       />
       <ReceiptShapesLegend shapes={SHAPES} />
 
@@ -400,16 +224,7 @@ export default function ReceiptsPage() {
   );
 }
 
-function fixtureReceiptRow(row: ReceiptRow): ReceiptRowWithMeta {
-  return {
-    ...row,
-    sessionId: row.subject,
-    issuedAtIso: "",
-  };
-}
-
-function receiptKpis(rows: ReceiptRowWithMeta[], live: boolean): ReceiptsKpi[] {
-  if (!live) return KPIS;
+function receiptKpis(rows: ReceiptRowWithMeta[]): ReceiptsKpi[] {
   const now = Date.now();
   const signed24h = rows.filter((row) => {
     const parsed = Date.parse(row.issuedAtIso);
@@ -436,7 +251,12 @@ function receiptKpis(rows: ReceiptRowWithMeta[], live: boolean): ReceiptsKpi[] {
       meta: `${coSigned} of ${rows.length} receipts · signer chain present`,
       metaTone: coSignedPct >= 95 ? "ok" : "warn",
     },
-    KPIS[3],
+    {
+      ...KPIS[3],
+      value: "—",
+      unit: undefined,
+      meta: "timing not emitted by /badges yet",
+    },
   ];
 }
 

@@ -16,7 +16,7 @@ function asRecord(value: unknown): RawRecord {
 function asArray(value: unknown): RawRecord[] {
   if (Array.isArray(value)) return value.map(asRecord);
   const record = asRecord(value);
-  for (const key of ["items", "sessions", "history"]) {
+  for (const key of ["items", "sessions", "history", "jobs"]) {
     if (Array.isArray(record[key])) return record[key].map(asRecord);
   }
   return [];
@@ -139,6 +139,46 @@ function jobFor(jobs: RawRecord[], jobId: string): RawRecord {
   return jobs.find((job) => text(job.id) === jobId) ?? {};
 }
 
+function sessionKey(session: RawRecord): string {
+  return text(session.sessionId, text(session.id, `${text(session.jobId)}:${text(session.wallet)}`));
+}
+
+function isActiveClaim(job: RawRecord): boolean {
+  const effectiveState = text(job.effectiveState, text(job.claimState, text(job.state))).toLowerCase();
+  if (effectiveState !== "claimed") return false;
+  if (!text(job.claimedBy)) return false;
+  const expiresAt = text(job.claimExpiresAt);
+  return !expiresAt || Number.isNaN(Date.parse(expiresAt)) || Date.parse(expiresAt) > Date.now();
+}
+
+function claimedJobSession(job: RawRecord): RawRecord {
+  const wallet = text(job.claimedBy);
+  const jobId = text(job.id);
+  const reward = asRecord(job.reward);
+  return {
+    sessionId: text(job.sessionId, `${jobId}:${wallet}`),
+    jobId,
+    wallet,
+    status: "claimed",
+    claimedAt: text(job.claimedAt),
+    updatedAt: text(job.claimedAt),
+    claimStake: job.claimStake ?? reward.amount,
+    totalClaimLock: job.totalClaimLock ?? reward.amount,
+  };
+}
+
+function liveSessionRows(sessionPayload: unknown, jobs: RawRecord[]): RawRecord[] {
+  const sessions = asArray(sessionPayload);
+  const seen = new Set(sessions.map(sessionKey).filter(Boolean));
+  const claimed = jobs.filter(isActiveClaim).map(claimedJobSession).filter((session) => {
+    const key = sessionKey(session);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return [...sessions, ...claimed];
+}
+
 /**
  * Map a job's source.type onto the operator-app SourceKind enum so the
  * sessions table can render the same SourceBadge already shown on the
@@ -151,7 +191,7 @@ function jobFor(jobs: RawRecord[], jobId: string): RawRecord {
  * unknown source.type values fall through to undefined.
  */
 function sourceKindFromJob(job: RawRecord): SourceKind | undefined {
-  const sourceType = text(asRecord(job.source).type);
+  const sourceType = text(asRecord(job.source).type, text(job.sourceType));
   switch (sourceType) {
     case "github_issue":
       return "github";
@@ -187,12 +227,13 @@ function lifecycle(session: RawRecord) {
 
 export function buildSessionDetails(sessionPayload: unknown, jobsPayload: unknown): SessionDetail[] {
   const jobs = asArray(jobsPayload);
-  return asArray(sessionPayload).map((session) => {
+  return liveSessionRows(sessionPayload, jobs).map((session) => {
     const id = text(session.sessionId, text(session.id, "unknown-session"));
     const jobId = text(session.jobId, "unknown-job");
     const job = jobFor(jobs, jobId);
-    const rewardAsset = asset(job.rewardAsset);
-    const rewardAmount = amount(job.rewardAmount ?? session.claimStake);
+    const reward = asRecord(job.reward);
+    const rewardAsset = asset(job.rewardAsset ?? reward.asset);
+    const rewardAmount = amount(job.rewardAmount ?? reward.amount ?? session.claimStake);
     const currentState = state(session.status);
     const updatedAt = session.updatedAt ?? session.resolvedAt ?? session.submittedAt ?? session.claimedAt;
     const verification = asRecord(session.verification);

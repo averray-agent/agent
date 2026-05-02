@@ -12,15 +12,9 @@ import { DisputesTable } from "@/components/disputes/DisputesTable";
 import { DisputesLegend } from "@/components/disputes/DisputesLegend";
 import { DisputeDrawerBody } from "@/components/disputes/DisputeDrawerBody";
 import { DisputeStatePill, OriginPill } from "@/components/disputes/pills";
-import { DISPUTES } from "@/components/disputes/data";
 import { extractDispute, extractDisputeList } from "@/lib/api/dispute-adapters";
 import { useDispute, useDisputes } from "@/lib/api/hooks";
 import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
-
-// TODO(data): wire to useApi("/disputes") once the backend emits the list.
-// Drill-in swaps to useApi(`/disputes/${id}`) for the drawer. Fixture for
-// now so the decision panel, evidence diff, and stake-hold radios can be
-// exercised against realistic shapes.
 
 export default function DisputesPage() {
   const disputesRequest = useDisputes();
@@ -36,7 +30,7 @@ export default function DisputesPage() {
     () => extractDisputeList(disputesRequest.data),
     [disputesRequest.data]
   );
-  const disputes = liveDisputes.length ? liveDisputes : DISPUTES;
+  const disputes = liveDisputes;
   const isLive = liveDisputes.length > 0;
   const pickedFromList = pickedId
     ? disputes.find((d) => d.id === pickedId) ?? null

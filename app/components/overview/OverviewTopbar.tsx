@@ -8,11 +8,9 @@ import {
 } from "@/components/shell/DataFreshnessPill";
 
 const pad = (n: number) => String(n).padStart(2, "0");
-const SEED_BLOCK = 28_419_821;
 
 export function OverviewTopbar({ freshness }: { freshness?: FreshnessState }) {
   const [time, setTime] = useState("");
-  const [block, setBlock] = useState(SEED_BLOCK);
 
   useEffect(() => {
     const tick = () => {
@@ -21,10 +19,8 @@ export function OverviewTopbar({ freshness }: { freshness?: FreshnessState }) {
     };
     tick();
     const tId = setInterval(tick, 1000);
-    const bId = setInterval(() => setBlock((b) => b + 1), 6000);
     return () => {
       clearInterval(tId);
-      clearInterval(bId);
     };
   }, []);
 
@@ -45,8 +41,6 @@ export function OverviewTopbar({ freshness }: { freshness?: FreshnessState }) {
         >
           <span className="h-1.5 w-1.5 rounded-full bg-[var(--avy-accent)] [animation:pulse_2s_infinite]" />
           <span className="text-[var(--avy-ink)]">{time || "—"} UTC</span>
-          <span className="opacity-40">·</span>
-          <span className="text-[var(--avy-accent)]">#{block.toLocaleString()}</span>
         </span>
       </div>
       <div className="flex items-center gap-2">

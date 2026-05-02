@@ -7,17 +7,14 @@ import {
 } from "@/components/shell/DataFreshnessPill";
 
 const pad = (n: number) => String(n).padStart(2, "0");
-const SEED_BLOCK = 20_414_788;
 
 export function AgentsTopbar({ freshness }: { freshness?: FreshnessState }) {
   const [time, setTime] = useState("");
-  const [block, setBlock] = useState(SEED_BLOCK);
 
   useEffect(() => {
     const tick = () => {
       const d = new Date();
       setTime(`${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`);
-      setBlock((b) => b + 1);
     };
     tick();
     const id = setInterval(tick, 1000);
@@ -38,12 +35,10 @@ export function AgentsTopbar({ freshness }: { freshness?: FreshnessState }) {
         <div
           className="inline-flex items-center gap-2 rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper)] px-2.5 py-1.5 font-[family-name:var(--font-mono)] text-[12px] text-[var(--avy-muted)]"
           suppressHydrationWarning
-          title="Live UTC clock + Polkadot block height"
+          title="Live UTC clock"
         >
           <span className="h-1.5 w-1.5 rounded-full bg-[var(--avy-accent)] [animation:pulse_1.6s_ease-in-out_infinite]" />
           <span>{time || "—"} UTC</span>
-          <span className="opacity-40">·</span>
-          <span className="text-[var(--avy-accent)]">#{block.toLocaleString()}</span>
         </div>
         {freshness ? <DataFreshnessPill state={freshness} /> : null}
         <button

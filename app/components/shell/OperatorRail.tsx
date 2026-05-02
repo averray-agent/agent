@@ -40,18 +40,14 @@ interface NavGroup {
   items: NavItem[];
 }
 
-// Mirrors the IA from the Claude Design Overview: three groups, count chips.
-// Counts are seeded with the handoff fixture values so the rail reads
-// correctly out of the box; replace with live state when each surface
-// gets its data hook (e.g. counts.runs = useSessions().filter(s => s.open).length).
 const NAV_GROUPS: NavGroup[] = [
   {
     label: "Room",
     items: [
       { href: "/overview", label: "Overview", icon: LayoutDashboard },
-      { href: "/runs", label: "Runs", icon: Gauge, count: 14 },
-      { href: "/receipts", label: "Receipts", icon: ScrollText, count: "2,134" },
-      { href: "/agents", label: "Agents", icon: Users, count: 8 },
+      { href: "/runs", label: "Runs", icon: Gauge },
+      { href: "/receipts", label: "Receipts", icon: ScrollText },
+      { href: "/agents", label: "Agents", icon: Users },
     ],
   },
   {
@@ -64,8 +60,8 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: "Governance",
     items: [
-      { href: "/policies", label: "Policies", icon: ShieldCheck, count: 22 },
-      { href: "/disputes", label: "Disputes", icon: AlertTriangle, count: 2 },
+      { href: "/policies", label: "Policies", icon: ShieldCheck },
+      { href: "/disputes", label: "Disputes", icon: AlertTriangle },
       { href: "/audit-log", label: "Audit log", icon: FileCheck2 },
     ],
   },
@@ -84,7 +80,7 @@ export function OperatorRail() {
     "/runs": countOf(jobs.data),
     "/receipts": countOf(badges.data),
     "/agents": countOf(agents.data),
-    "/sessions": countOf(sessions.data),
+    "/sessions": countOf(sessions.data) ?? activeClaimCount(jobs.data),
     "/policies": countOf(policies.data),
     "/disputes": countOf(disputes.data),
   };
@@ -194,4 +190,44 @@ function countOf(value: unknown): number | undefined {
     if (Array.isArray(record[key])) return record[key].length;
   }
   return undefined;
+}
+
+function activeClaimCount(value: unknown): number | undefined {
+  const jobs = recordsFrom(value, ["jobs", "items", "data"]);
+  if (!jobs) return undefined;
+  const now = Date.now();
+  return jobs.filter((job) => {
+    const state = String(
+      job.effectiveState ?? job.claimState ?? job.state ?? job.lifecycle ?? ""
+    ).toLowerCase();
+    const claimedBy =
+      typeof job.claimedBy === "string" ||
+      typeof job.worker === "string" ||
+      typeof job.claimedByWallet === "string";
+    const expiresAt =
+      typeof job.claimExpiresAt === "string"
+        ? Date.parse(job.claimExpiresAt)
+        : undefined;
+    const unexpired = !expiresAt || Number.isNaN(expiresAt) || expiresAt > now;
+    return claimedBy && state.includes("claim") && unexpired;
+  }).length;
+}
+
+function recordsFrom(
+  value: unknown,
+  keys: string[]
+): Array<Record<string, unknown>> | undefined {
+  if (Array.isArray(value)) {
+    return value.filter(isRecord);
+  }
+  if (!isRecord(value)) return undefined;
+  for (const key of keys) {
+    const nested = value[key];
+    if (Array.isArray(nested)) return nested.filter(isRecord);
+  }
+  return undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object";
 }

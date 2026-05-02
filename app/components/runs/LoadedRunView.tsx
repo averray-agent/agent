@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { mutate } from "swr";
 import { LoadedRunPanel } from "./LoadedRunPanel";
 import { LifecycleRail } from "./LifecycleRail";
@@ -10,10 +10,6 @@ import {
   ReceiptPreviewDrawer,
   type ReceiptPreviewDraft,
 } from "./ReceiptPreviewDrawer";
-import {
-  FIXTURE_JOB_DEFINITIONS,
-  FIXTURE_RUN_ROWS,
-} from "./fixtures";
 import {
   buildLifecycleStages,
   describeClaimer,
@@ -35,7 +31,7 @@ import { extractAdminJobs } from "@/lib/api/job-lifecycle";
 /**
  * Self-contained detail view for a single run.
  *
- * Looks up the row (live or fixture), resolves the job definition,
+ * Looks up the live row, resolves the job definition,
  * builds the GitHub job context, wires the submit handler, owns the
  * receipt-preview drawer state, and renders LoadedRunPanel + LifecycleRail.
  *
@@ -44,7 +40,7 @@ import { extractAdminJobs } from "@/lib/api/job-lifecycle";
  *     (selectedRunId tracks the clicked row)
  *   - `/runs/detail/?id=<id>` — the standalone fullscreen view
  *
- * Keeps the fixture-driven verifier / settlement / lifecycle copy inline
+ * Keeps the static verifier / settlement / lifecycle copy inline
  * because the backend doesn't yet stream real verifier output; swap
  * these for live data once those endpoints land.
  */
@@ -73,24 +69,30 @@ export function LoadedRunView({
   const adminPayload = adminJobs.data ? extractAdminJobs(adminJobs.data) : [];
   const sourceForRows = adminPayload.length ? adminPayload : jobs.data;
   const liveRows = useMemo(() => buildRunRows(sourceForRows), [sourceForRows]);
-  const rows = liveRows.length ? liveRows : FIXTURE_RUN_ROWS;
+  const rows = liveRows;
   const rawJobs = useMemo(() => extractRunJobs(sourceForRows), [sourceForRows]);
-  const loadedRow =
-    rows.find((row) => row.id === runId) ?? rows[0] ?? FIXTURE_RUN_ROWS[0];
+  const loadedRow = rows.find((row) => row.id === runId) ?? rows[0];
 
-  const jobDefinition = useJobDefinition(loadedRow.id);
-  const selectedJob =
-    asRecord(jobDefinition.data) ??
-    rawJobs.find((job) => job.id === loadedRow.id) ??
-    FIXTURE_JOB_DEFINITIONS.find((def) => def.id === loadedRow.id);
-  const loadedGitHub = buildGitHubContext(loadedRow, selectedJob);
-  const loadedWikipedia = buildWikipediaContext(loadedRow, selectedJob);
-  const loadedOsv = buildOsvContext(loadedRow, selectedJob);
-  const loadedOpenData = buildOpenDataContext(loadedRow, selectedJob);
+  const jobDefinition = useJobDefinition(loadedRow?.id ?? null);
+  const selectedJob = loadedRow
+    ? asRecord(jobDefinition.data) ?? rawJobs.find((job) => job.id === loadedRow.id)
+    : undefined;
+  const loadedGitHub = loadedRow ? buildGitHubContext(loadedRow, selectedJob) : undefined;
+  const loadedWikipedia = loadedRow ? buildWikipediaContext(loadedRow, selectedJob) : undefined;
+  const loadedOsv = loadedRow ? buildOsvContext(loadedRow, selectedJob) : undefined;
+  const loadedOpenData = loadedRow ? buildOpenDataContext(loadedRow, selectedJob) : undefined;
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [receiptOpen, setReceiptOpen] = useState(false);
+
+  if (!loadedRow) {
+    return (
+      <div className="rounded-[10px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] p-5 font-[family-name:var(--font-body)] text-sm text-[var(--avy-muted)] shadow-[var(--shadow-card)]">
+        No live run details available.
+      </div>
+    );
+  }
 
   // PR #123 added a per-job `submissionContract` block on /jobs that
   // tells callers exactly what shape `payload.submission` should take
@@ -201,7 +203,7 @@ export function LoadedRunView({
           amount: loadedRow.stake,
           aux: selectedJob
             ? `${selectedJob.rewardAsset ?? "DOT"} reward · verifier ${selectedJob.verifierMode ?? "unknown"}`
-            : "fixture data · waiting for live selection",
+            : "waiting for live job definition",
           breakdown: {
             worker: `${loadedRow.stake} DOT`,
             verifier: "0 DOT",

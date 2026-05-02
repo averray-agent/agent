@@ -19,9 +19,7 @@ import { RecommendationRail } from "@/components/runs/RecommendationRail";
 import { LoadedRunView } from "@/components/runs/LoadedRunView";
 import { LifecycleRail } from "@/components/runs/LifecycleRail";
 import {
-  FIXTURE_FILTERS,
   FIXTURE_RECOMMENDATIONS,
-  FIXTURE_RUN_ROWS,
 } from "@/components/runs/fixtures";
 import {
   buildLifecycleStages,
@@ -44,7 +42,7 @@ import { extractAdminJobs } from "@/lib/api/job-lifecycle";
  * Layout: email-client split pane. Queue on the left (card-row list of
  * all open runs), sticky detail pane on the right driven by LoadedRunView.
  * Clicking a queue row just updates `selectedId`; LoadedRunView owns all
- * the hooks, fixture fallback, and submit/drawer state for that run.
+ * the hooks plus submit/drawer state for that run.
  *
  * Lifecycle rail + recommendation rail sit below the split pane so they
  * don't steal horizontal room from the two primary panes.
@@ -86,7 +84,7 @@ function RunsPageInner() {
   const [activeFilter, setActiveFilter] = useState<QueueFilter>(initialState);
   const [activeSource, setActiveSource] = useState<SourceFilter>(initialSource);
   const [showClosed, setShowClosed] = useState(false);
-  const [selectedId, setSelectedId] = useState<string>(runParam ?? "run-2742");
+  const [selectedId, setSelectedId] = useState<string>(runParam ?? "");
 
   // Sync filter state into the URL query string so links are
   // shareable and a browser agent can deep-link to a narrowed
@@ -136,7 +134,7 @@ function RunsPageInner() {
   const adminPayload = adminJobs.data ? extractAdminJobs(adminJobs.data) : [];
   const sourceForRows = adminPayload.length ? adminPayload : jobs.data;
   const liveRows = useMemo(() => buildRunRows(sourceForRows), [sourceForRows]);
-  const rows = liveRows.length ? liveRows : FIXTURE_RUN_ROWS;
+  const rows = liveRows;
   const filters = useMemo(() => buildRunFilters(rows), [rows]);
   const sourceFilters = useMemo(() => buildSourceFilters(rows), [rows]);
   const recommendationCards = useMemo(() => {
@@ -153,7 +151,7 @@ function RunsPageInner() {
   // Keep selectedId valid when the rows list changes (e.g. live data
   // arrives and the previously-selected fixture id isn't in it).
   useEffect(() => {
-    if (rows.length && !rows.some((row) => row.id === selectedId)) {
+    if (rows.length && (!selectedId || !rows.some((row) => row.id === selectedId))) {
       setSelectedId(rows[0].id);
     }
   }, [rows, selectedId]);
@@ -257,7 +255,7 @@ function RunsPageInner() {
 
   const assignedToMe = rows.filter((row) => row.worker.isSelf).length;
   const liveStatus = jobs.error
-    ? "fixture fallback"
+    ? "live API unavailable"
     : jobs.isLoading
       ? "loading live jobs"
       : "live API";
@@ -267,7 +265,7 @@ function RunsPageInner() {
     <div className="flex w-full max-w-[1440px] flex-col gap-3.5">
       <RunsTopbar freshness={freshness} />
       <QueueBar
-        filters={filters.length ? filters : FIXTURE_FILTERS}
+        filters={filters}
         active={activeFilter}
         onChange={onStateChange}
       />
@@ -312,15 +310,21 @@ function RunsPageInner() {
           liveStatus={liveStatus}
         />
         <div className="xl:sticky xl:top-6 xl:max-h-[calc(100vh-3rem)] xl:overflow-y-auto">
-          <LoadedRunView
-            runId={selectedId}
-            standaloneUrl={`/runs/detail/?id=${encodeURIComponent(selectedId)}`}
-            // The queue page renders the lifecycle rail below the split
-            // pane (full width) so it doesn't steal vertical room from
-            // the sticky panel column. The standalone detail page will
-            // render it inline instead.
-            showLifecycle={false}
-          />
+          {selectedRow ? (
+            <LoadedRunView
+              runId={selectedId}
+              standaloneUrl={`/runs/detail/?id=${encodeURIComponent(selectedId)}`}
+              // The queue page renders the lifecycle rail below the split
+              // pane (full width) so it doesn't steal vertical room from
+              // the sticky panel column. The standalone detail page will
+              // render it inline instead.
+              showLifecycle={false}
+            />
+          ) : (
+            <div className="rounded-[10px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] p-5 font-[family-name:var(--font-body)] text-sm text-[var(--avy-muted)] shadow-[var(--shadow-card)]">
+              No live run selected.
+            </div>
+          )}
         </div>
       </div>
 

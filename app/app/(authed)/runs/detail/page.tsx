@@ -30,7 +30,7 @@ export default function RunDetailPage() {
 
 function RunDetailInner() {
   const searchParams = useSearchParams();
-  const runId = searchParams?.get("id") ?? "run-2742";
+  const runId = searchParams?.get("id") ?? "";
 
   return (
     <div className="flex w-full max-w-[1100px] flex-col gap-4">
@@ -46,7 +46,7 @@ function RunDetailInner() {
           className="font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]"
           style={{ letterSpacing: 0 }}
         >
-          run <b className="text-[var(--avy-ink)]">{runId}</b> · fullscreen view
+          run <b className="text-[var(--avy-ink)]">{runId || "none selected"}</b> · fullscreen view
         </span>
       </div>
 

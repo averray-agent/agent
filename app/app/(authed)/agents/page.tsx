@@ -258,7 +258,7 @@ export default function AgentsPage() {
   const [openHandle, setOpenHandle] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const liveAgents = useMemo(() => extractAgents(agentsRequest.data), [agentsRequest.data]);
-  const agents = liveAgents.length ? liveAgents : AGENTS;
+  const agents = liveAgents;
   const openAgentFromList = openHandle
     ? agents.find((a) => a.handle === openHandle) ?? null
     : null;

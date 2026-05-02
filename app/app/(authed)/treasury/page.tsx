@@ -36,17 +36,6 @@ import {
   buildStrategyLanes,
 } from "@/lib/api/treasury-adapters";
 
-// TODO(data): wire each block to its hook in lib/api/hooks.ts
-//   - Balance sheet: useAccount() + useBorrowCapacity()
-//   - Strategy routing: useStrategyPositions() + useStrategies()
-//   - Credit line: useBorrowCapacity(asset)
-//   - XCM observer: dedicated hook (not in SDK yet — backend exposes
-//     staged /account/xcm/* endpoints once async observer lands)
-//   - Account positions: derived from useAccount()
-//   - Policy gate: useStrategies() + onboarding manifest
-// Until the hook response shapes are stable, the page renders the same
-// fixture data Claude Design used so the layout reads correctly.
-
 const BALANCE_CARDS: BalanceCard[] = [
   {
     label: "Spendable",
@@ -288,25 +277,10 @@ export default function TreasuryPage() {
     () => buildCreditLine(account.data, borrowCapacity.data),
     [account.data, borrowCapacity.data]
   );
-  const balanceCards = account.data || strategyPositions.data ? liveBalanceCards : BALANCE_CARDS;
-  const lanes = liveLanes.length ? liveLanes : LANES;
-  const positions = account.data || strategyPositions.data ? livePositions : POSITIONS;
-  const loans = liveCredit.loans.length ? liveCredit.loans : [
-    {
-      id: "loan-0a14",
-      name: "USDC · bridge float",
-      sub: "loan-0a14 · opened 2026-04-19 · maturity 2026-05-19",
-      amount: "312,000",
-      amountUnit: "DOT equiv.",
-    },
-    {
-      id: "loan-0a18",
-      name: "aUSD · working capital",
-      sub: "loan-0a18 · opened 2026-04-22 · maturity rolling",
-      amount: "190,220",
-      amountUnit: "DOT equiv.",
-    },
-  ];
+  const balanceCards = liveBalanceCards;
+  const lanes = liveLanes;
+  const positions = livePositions;
+  const loans = liveCredit.loans;
 
   const freshness = freshnessFromRequests(account, strategyPositions);
 
@@ -319,21 +293,21 @@ export default function TreasuryPage() {
       />
       <StrategyRoutingTable
         lanes={lanes}
-        sub={`${lanes.length} lanes · ${strategyPositions.error ? "fixture fallback" : "live API"} · policy gov/alloc-dual-sign`}
+        sub={`${lanes.length} lanes · ${strategyPositions.error ? "unavailable" : "live API"} · strategy positions`}
       />
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <CreditLinePanel
-          capacityUsed={borrowCapacity.data ? liveCredit.capacityUsed : "502,220"}
-          capacityTotal={borrowCapacity.data ? liveCredit.capacityTotal : "612,500 DOT"}
-          usedPct={borrowCapacity.data ? liveCredit.usedPct : 82}
-          headerPct={borrowCapacity.data ? liveCredit.headerPct : 3}
-          headroom={borrowCapacity.data ? liveCredit.headroom : "110,280 DOT"}
-          nextMark={borrowCapacity.data ? liveCredit.nextMark : "14:15 UTC"}
-          policyCap={borrowCapacity.data ? liveCredit.policyCap : "85%"}
+          capacityUsed={liveCredit.capacityUsed}
+          capacityTotal={liveCredit.capacityTotal}
+          usedPct={liveCredit.usedPct}
+          headerPct={liveCredit.headerPct}
+          headroom={liveCredit.headroom}
+          nextMark={liveCredit.nextMark}
+          policyCap={liveCredit.policyCap}
           loans={loans}
         />
-        <XcmObserverLane phases={XCM_PHASES} sub="lane xcm-v3 · 4 in flight" />
+        <XcmObserverLane phases={[]} sub="XCM observer not emitted by API yet" />
       </div>
 
       <AccountPositionsGrid
@@ -342,8 +316,8 @@ export default function TreasuryPage() {
       />
 
       <PolicyGateFooter
-        items={POLICIES}
-        sub="3 active · last change 2026-04-22 by 0x9A13…0cb2"
+        items={[]}
+        sub="policy gate feed not emitted by API yet"
       />
 
       <p className="flex flex-wrap gap-x-5 gap-y-1 font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]">

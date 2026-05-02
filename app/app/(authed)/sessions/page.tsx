@@ -11,14 +11,9 @@ import {
 import { SessionsTable } from "@/components/sessions/SessionsTable";
 import { SessionDrawerBody } from "@/components/sessions/SessionDrawerBody";
 import { SessionStatePill } from "@/components/sessions/pills";
-import { SESSIONS } from "@/components/sessions/data";
 import { useJobs, useSession, useSessions, useSessionTimeline } from "@/lib/api/hooks";
 import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
 import { buildSessionDetails, mergeSessionTimeline } from "@/lib/api/session-adapters";
-
-// TODO(data): wire to useApi("/sessions") once the backend emits
-// the list shape. Drill-in swaps to useApi(`/sessions/${id}`) for
-// the drawer.
 
 function valueBucket(amountStr: string): SessionsFilter["value"] {
   const n = Number(amountStr);
@@ -45,7 +40,7 @@ export default function SessionsPage() {
     () => buildSessionDetails(sessionsQuery.data, jobsQuery.data),
     [jobsQuery.data, sessionsQuery.data]
   );
-  const sessions = liveSessions.length ? liveSessions : SESSIONS;
+  const sessions = liveSessions;
 
   const filtered = useMemo(() => {
     const q = filter.q.trim().toLowerCase();

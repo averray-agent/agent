@@ -169,11 +169,12 @@ export function SessionsTable({
       >
         <span>
           Showing <b className="font-semibold text-[var(--avy-ink)]">{rows.length}</b> of{" "}
-          <b className="font-semibold text-[var(--avy-ink)]">1,284</b>
+          <b className="font-semibold text-[var(--avy-ink)]">{totalCount.toLocaleString()}</b>
         </span>
         <button
           type="button"
-          className="cursor-pointer border-b border-dashed border-[color:rgba(30,102,66,0.4)] pb-px text-[var(--avy-accent)] hover:text-[var(--avy-accent-2)]"
+          disabled
+          className="cursor-not-allowed border-b border-dashed border-[color:rgba(30,102,66,0.25)] pb-px text-[var(--avy-muted)] opacity-70"
         >
           load more
         </button>

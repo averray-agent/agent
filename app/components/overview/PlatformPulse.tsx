@@ -36,6 +36,7 @@ export function PlatformPulse({ events, endpoint, meta }: PlatformPulseProps) {
   const [active, setActive] = useState<EventKind>("all");
 
   const visible = active === "all" ? events : events.filter((e) => e.kind === active);
+  const hasEvents = events.length > 0;
 
   return (
     <section>
@@ -53,8 +54,13 @@ export function PlatformPulse({ events, endpoint, meta }: PlatformPulseProps) {
               className="inline-flex items-center gap-1.5 font-[family-name:var(--font-display)] text-[10px] font-extrabold uppercase text-[var(--avy-accent)]"
               style={{ letterSpacing: "0.12em" }}
             >
-              <span className="h-1.5 w-1.5 rounded-full bg-[var(--avy-accent)] [animation:pulse_2.2s_ease-in-out_infinite]" />
-              Streaming
+              <span
+                className={cn(
+                  "h-1.5 w-1.5 rounded-full bg-[var(--avy-accent)]",
+                  hasEvents && "[animation:pulse_2.2s_ease-in-out_infinite]"
+                )}
+              />
+              {hasEvents ? "Streaming" : "No live events"}
             </span>
           </div>
           <div
@@ -80,9 +86,13 @@ export function PlatformPulse({ events, endpoint, meta }: PlatformPulseProps) {
         </div>
 
         <div>
-          {visible.map((event) => (
-            <EventRow key={event.id} event={event} />
-          ))}
+          {visible.length ? (
+            visible.map((event) => <EventRow key={event.id} event={event} />)
+          ) : (
+            <div className="p-[1rem_1.15rem] font-[family-name:var(--font-body)] text-[13.5px] leading-[1.45] text-[var(--avy-muted)]">
+              No live pulse events available for this view.
+            </div>
+          )}
         </div>
 
         <div className="flex items-center justify-between border-t border-[var(--avy-line-soft)] bg-[rgba(250,248,241,0.6)] p-[0.85rem_1.15rem] font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]">
@@ -90,12 +100,12 @@ export function PlatformPulse({ events, endpoint, meta }: PlatformPulseProps) {
             Stream endpoint ·{" "}
             <span className="text-[var(--avy-ink)]">{endpoint}</span>
           </span>
-          <a
-            className="cursor-pointer font-[family-name:var(--font-display)] text-[11px] font-extrabold uppercase text-[var(--avy-accent)]"
+          <span
+            className="font-[family-name:var(--font-display)] text-[11px] font-extrabold uppercase text-[var(--avy-muted)]"
             style={{ letterSpacing: "0.08em" }}
           >
-            Open full log →
-          </a>
+            Full log locked
+          </span>
         </div>
       </div>
     </section>

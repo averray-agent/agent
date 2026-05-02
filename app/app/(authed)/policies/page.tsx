@@ -14,7 +14,6 @@ import {
   PolicyDrawerBody,
   PolicyDrawerHeader,
 } from "@/components/policies/PolicyDrawerBody";
-import { POLICIES } from "@/components/policies/policies-data";
 import { SIGNERS } from "@/components/policies/signers";
 import type { Policy, PolicyState } from "@/components/policies/types";
 import { usePolicies, usePolicy } from "@/lib/api/hooks";
@@ -27,10 +26,6 @@ const STATUS_TO_STATE: Record<Exclude<PoliciesFilter["status"], "all">, PolicySt
   retired: "Retired",
 };
 
-// TODO(data): replace the seed roster with useApi("/policies") once the
-// backend emits a list endpoint. Drill-in swaps to useApi(`/policies/${tag}`).
-// Propose-change form posts to POST /admin/policies and queues a proposal.
-
 export default function PoliciesPage() {
   const policiesRequest = usePolicies();
   const [filter, setFilter] = useState<PoliciesFilter>({
@@ -42,7 +37,7 @@ export default function PoliciesPage() {
   const [pickedId, setPickedId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const livePolicies = useMemo(() => extractPolicies(policiesRequest.data), [policiesRequest.data]);
-  const policies = livePolicies.length ? livePolicies : POLICIES;
+  const policies = livePolicies;
   const pickedFromList = pickedId ? policies.find((p) => p.id === pickedId) ?? null : null;
   const detailRequest = usePolicy(drawerOpen && pickedFromList ? pickedFromList.tag : null);
   const pickedDetail = extractPolicy(detailRequest.data);
