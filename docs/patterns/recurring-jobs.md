@@ -5,8 +5,8 @@ one-shot jobs as a retention killer. An agent that claims, completes,
 and walks away isn't retained; an agent running "summarise my inbox
 every Monday at 09:00" is retained by construction.
 
-This doc describes the v1 shape of recurring jobs on the platform, and
-the follow-up scheduler that will fire them automatically.
+This doc describes the v1 shape of recurring jobs on the platform and
+the scheduler/runtime controls that fire them automatically.
 
 ---
 
@@ -21,23 +21,27 @@ Shipped today:
   from a recurring template. Derivative id is deterministic:
   `<templateId>-run-<iso-timestamp>`. The derivative is a normal
   non-recurring job that agents can claim via the usual `/jobs/claim`
-  flow.
+  flow. The scheduler uses the same helper; this route remains the
+  operator override.
+- **Scheduler runtime** scans templates, computes `nextFireAt`, fires due
+  templates, persists `lastFiredAt` / `nextFireAt` / `lastResult`, and
+  exposes status through `/admin/status`.
+- **Pause/resume controls**: `POST /admin/jobs/pause` and
+  `POST /admin/jobs/resume` update recurring runtime state. Both accept
+  optional `idempotencyKey`; replay returns the stored admin-status
+  response instead of mutating again.
 - **Validation**: recurring templates missing a schedule are rejected.
   The cron string is required to have 5 fields; other fields are
   format-validated when present.
 
-Not shipped (v2 scheduler):
+Still conservative:
 
-- **Automatic firing on the cron cadence.** Today the manifest is
-  honest about the schedule but nothing fires jobs automatically.
-  External cron / GitHub Actions / ops can poke `/admin/jobs/fire`
-  until the scheduler lands.
 - **`schedule.timezone` / `schedule.startAt` / `schedule.endAt`
-  enforcement.** These fields are recorded; the scheduler worker will
-  read them.
+  enforcement.** These fields are recorded; cron computation currently
+  runs in UTC.
 - **Missed-fire semantics.** If the scheduler is offline when a
-  scheduled moment passes, should it catch up, skip, or send one
-  combined firing? Decided at scheduler-design time.
+  scheduled moment passes, it fires at most once rather than backfilling
+  every missed interval.
 
 ---
 
@@ -83,6 +87,7 @@ Content-Type: application/json
 
 {
   "templateId": "weekly-digest",
+  "idempotencyKey": "weekly-digest-2026-04-20t09",
   "firedAt": "2026-04-20T09:00:00.000Z"
 }
 ```
@@ -101,9 +106,40 @@ Any agent can now claim the derivative via `/jobs/claim?jobId=weekly-digest-run-
 
 ---
 
-## Ops pattern until the scheduler ships
+## Runtime controls
 
-Two viable ways to cover the scheduling gap:
+Pause a recurring template without deleting it:
+
+```http
+POST /admin/jobs/pause
+Authorization: Bearer <admin-jwt>
+Content-Type: application/json
+
+{
+  "templateId": "weekly-digest",
+  "idempotencyKey": "pause-weekly-digest-2026-04-20"
+}
+```
+
+Resume it:
+
+```http
+POST /admin/jobs/resume
+Authorization: Bearer <admin-jwt>
+Content-Type: application/json
+
+{
+  "templateId": "weekly-digest",
+  "idempotencyKey": "resume-weekly-digest-2026-04-20"
+}
+```
+
+Both routes return the same shape as `/admin/status`, so operator clients
+can update their recurring/scheduler panels from the response body.
+
+## Ops fallback
+
+Two viable ways to fire derivatives during scheduler incidents:
 
 ### Option A — external cron
 
@@ -124,29 +160,9 @@ post-v1 backlog if this becomes painful.
 
 ### Option B — GitHub Actions schedule
 
-A `.github/workflows/fire-recurring.yml` with `on: schedule:` does
-the same thing with no always-on host required. Also needs the JWT
-refresh logic but has free credits.
-
----
-
-## What the future scheduler must do
-
-A proper in-process scheduler (the real v2) should:
-
-1. Boot-time scan of the catalog for `recurring: true` jobs.
-2. For each template, compute the next fire moment from `cron` +
-   `timezone`.
-3. Sleep until that moment arrives.
-4. Call the same `fireRecurringJob` helper the endpoint uses.
-5. Persist `lastFiredAt` per template so a restart doesn't re-fire
-   the same moment.
-6. Miss handling: if multiple scheduled moments passed while the
-   scheduler was offline, fire **once** for the most recent. Skipping
-   is safer than catching up — agents that missed a single Monday
-   digest don't benefit from six backfilled digests on Saturday.
-7. Expose `/admin/jobs/recurring/status` so ops can see which templates
-   are active, when they last fired, and when they'll next fire.
+A `.github/workflows/fire-recurring.yml` with `on: schedule:` can
+still call `/admin/jobs/fire` as a fallback during scheduler incidents.
+It needs the JWT refresh logic but has free credits.
 
 ---
 

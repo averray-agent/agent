@@ -934,6 +934,65 @@ test("http smoke: /admin/jobs/fire produces a derivative from a recurring templa
   });
 });
 
+test("http smoke: recurring pause/resume accept idempotency keys", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
+    const headers = { "content-type": "application/json", authorization: `Bearer ${adminToken}` };
+
+    const template = await fetch(`${base}/admin/jobs`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        id: "recurring-idempotency-smoke",
+        category: "coding",
+        tier: "starter",
+        rewardAmount: 2,
+        verifierMode: "benchmark",
+        verifierTerms: ["complete"],
+        verifierMinimumMatches: 1,
+        recurring: true,
+        schedule: { cron: "0 9 * * 1", timezone: "Europe/Zurich" }
+      })
+    });
+    assert.equal(template.status, 201);
+
+    const pause = await fetch(`${base}/admin/jobs/pause`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        templateId: "recurring-idempotency-smoke",
+        idempotencyKey: "same-client-key"
+      })
+    });
+    assert.equal(pause.status, 200);
+    const paused = await pause.json();
+    assert.equal(findRecurringTemplate(paused, "recurring-idempotency-smoke").paused, true);
+
+    const pauseReplay = await fetch(`${base}/admin/jobs/pause`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        templateId: "recurring-idempotency-smoke",
+        idempotencyKey: "same-client-key"
+      })
+    });
+    assert.equal(pauseReplay.status, 200);
+    assert.deepEqual(await pauseReplay.json(), paused);
+
+    const resume = await fetch(`${base}/admin/jobs/resume`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        templateId: "recurring-idempotency-smoke",
+        idempotencyKey: "same-client-key"
+      })
+    });
+    assert.equal(resume.status, 200);
+    const resumed = await resume.json();
+    assert.equal(findRecurringTemplate(resumed, "recurring-idempotency-smoke").paused, false);
+  });
+});
+
 test("http smoke: /admin/jobs rejects recurring template with missing schedule", { skip: !RUN }, async () => {
   await runWithServer(async (base) => {
     const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
@@ -957,6 +1016,12 @@ test("http smoke: /admin/jobs rejects recurring template with missing schedule",
     assert.match(body.message, /schedule/);
   });
 });
+
+function findRecurringTemplate(status, templateId) {
+  const template = status.recurring.templates.find((entry) => entry.templateId === templateId);
+  assert.ok(template, `expected recurring template ${templateId}`);
+  return template;
+}
 
 test("http smoke: /metrics emits Prometheus text format with baseline series", { skip: !RUN }, async () => {
   await runWithServer(async (base) => {

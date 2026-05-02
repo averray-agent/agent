@@ -2808,10 +2808,8 @@ const server = createServer(async (request, response) => {
     }
 
     if (request.method === "POST" && pathname === "/admin/jobs/fire") {
-      // Manually fire one instance off a recurring template. This is the
-      // v1 stopgap for the real scheduler worker (docs/patterns/recurring-
-      // jobs.md) — ops or an external cron can poke this endpoint at the
-      // schedule's cadence until a proper scheduler lands.
+      // Manually fire one instance off a recurring template. The scheduler
+      // uses the same service helper; this route remains the admin override.
       const auth = await authMiddleware(request, url, { requireRole: "admin" });
       await enforceLimit("admin_jobs", auth.wallet, rateLimitConfig.adminJobs);
       const payload = await readJsonBody(request);
@@ -2866,8 +2864,20 @@ const server = createServer(async (request, response) => {
       if (!templateId) {
         throw new ValidationError("templateId is required.");
       }
+      const idempotencyKey = typeof payload?.idempotencyKey === "string" && payload.idempotencyKey.trim()
+        ? payload.idempotencyKey.trim()
+        : undefined;
+      const mutationKey = idempotencyKey ? `${auth.wallet}:${templateId}:${idempotencyKey}` : undefined;
+      const existing = mutationKey ? await stateStore.getMutationReceipt?.("admin_jobs_pause", mutationKey) : undefined;
+      if (existing) {
+        return respond(response, 200, existing);
+      }
       await service.pauseRecurringTemplate(templateId);
-      return respond(response, 200, await service.getAdminStatus({ auth }));
+      const status = await service.getAdminStatus({ auth });
+      if (mutationKey) {
+        await stateStore.upsertMutationReceipt?.("admin_jobs_pause", mutationKey, status);
+      }
+      return respond(response, 200, status);
     }
 
     if (request.method === "POST" && pathname === "/admin/jobs/resume") {
@@ -2878,8 +2888,20 @@ const server = createServer(async (request, response) => {
       if (!templateId) {
         throw new ValidationError("templateId is required.");
       }
+      const idempotencyKey = typeof payload?.idempotencyKey === "string" && payload.idempotencyKey.trim()
+        ? payload.idempotencyKey.trim()
+        : undefined;
+      const mutationKey = idempotencyKey ? `${auth.wallet}:${templateId}:${idempotencyKey}` : undefined;
+      const existing = mutationKey ? await stateStore.getMutationReceipt?.("admin_jobs_resume", mutationKey) : undefined;
+      if (existing) {
+        return respond(response, 200, existing);
+      }
       await service.resumeRecurringTemplate(templateId);
-      return respond(response, 200, await service.getAdminStatus({ auth }));
+      const status = await service.getAdminStatus({ auth });
+      if (mutationKey) {
+        await stateStore.upsertMutationReceipt?.("admin_jobs_resume", mutationKey, status);
+      }
+      return respond(response, 200, status);
     }
 
     if (request.method === "GET" && pathname === "/admin/status") {
