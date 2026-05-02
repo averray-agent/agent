@@ -32,6 +32,8 @@ export const useRecommendations = () => useApi("/jobs/recommendations");
 export const useJobDefinition = (id: string | null) =>
   useApi(id ? `/jobs/definition?jobId=${encodeURIComponent(id)}` : null);
 export const useSessions = () => useApi("/sessions");
+export const useAdminSessions = () =>
+  useApi("/admin/sessions?limit=100", { refreshInterval: 15_000 });
 export const useAgents = () => useApi("/agents");
 export const useAgent = (wallet: string | null) =>
   useApi(wallet ? `/agents/${encodeURIComponent(wallet)}` : null);

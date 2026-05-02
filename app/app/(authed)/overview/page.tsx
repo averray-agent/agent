@@ -14,7 +14,16 @@ import {
 import { PlatformPulse } from "@/components/overview/PlatformPulse";
 import { ProviderOperationsCard } from "@/components/overview/ProviderOperationsCard";
 import { JobLifecycleStrip } from "@/components/overview/JobLifecycleStrip";
-import { useAccount, useAlerts, useHealth, useJobs, useProviderOperations, usePublicProviderOperations, useSessions, useStrategyPositions } from "@/lib/api/hooks";
+import {
+  useAccount,
+  useAdminSessions,
+  useAlerts,
+  useHealth,
+  useJobs,
+  useProviderOperations,
+  usePublicProviderOperations,
+  useStrategyPositions,
+} from "@/lib/api/hooks";
 import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
 import { extractRunJobs } from "@/lib/api/run-adapters";
 import { buildProviderOperations } from "@/lib/api/provider-operations";
@@ -30,7 +39,7 @@ import {
 
 export default function OverviewPage() {
   const jobs = useJobs();
-  const sessions = useSessions();
+  const sessions = useAdminSessions();
   const account = useAccount();
   const strategyPositions = useStrategyPositions();
   const health = useHealth();

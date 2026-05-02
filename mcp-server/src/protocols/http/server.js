@@ -980,6 +980,7 @@ function metricPathLabel(pathname) {
     "/session/state-machine",
     "/strategies",
     "/admin/jobs",
+    "/admin/sessions",
     "/admin/jobs/ingest/github",
     "/admin/jobs/ingest/openapi",
     "/admin/jobs/ingest/open-data",
@@ -1272,6 +1273,7 @@ const server = createServer(async (request, response) => {
           "/verifier/handlers",
           "/verifier/replay",
           "/admin/jobs",
+          "/admin/sessions",
           "/admin/jobs/ingest/github",
           "/admin/jobs/ingest/openapi",
           "/admin/jobs/ingest/open-data",
@@ -1381,6 +1383,22 @@ const server = createServer(async (request, response) => {
           includeStale: true
         }),
         jobLifecycle: service.getJobLifecycleSummary()
+      });
+    }
+
+    if (request.method === "GET" && pathname === "/admin/sessions") {
+      await authMiddleware(request, url, { requireRole: "admin" });
+      const limit = parseLimit(url, 50, 250);
+      const jobId = url.searchParams.get("jobId") ?? undefined;
+      const sessions = jobId
+        ? await service.listSessionHistory({ jobId, limit })
+        : await service.listRecentSessions(limit);
+      return respond(response, 200, {
+        sessions,
+        count: sessions.length,
+        limit,
+        ...(jobId ? { jobId } : {}),
+        scope: "operator"
       });
     }
 

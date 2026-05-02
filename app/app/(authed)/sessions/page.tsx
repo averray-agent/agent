@@ -11,7 +11,12 @@ import {
 import { SessionsTable } from "@/components/sessions/SessionsTable";
 import { SessionDrawerBody } from "@/components/sessions/SessionDrawerBody";
 import { SessionStatePill } from "@/components/sessions/pills";
-import { useJobs, useSession, useSessions, useSessionTimeline } from "@/lib/api/hooks";
+import {
+  useAdminSessions,
+  useJobs,
+  useSession,
+  useSessionTimeline,
+} from "@/lib/api/hooks";
 import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
 import { buildSessionDetails, mergeSessionTimeline } from "@/lib/api/session-adapters";
 
@@ -25,7 +30,7 @@ function valueBucket(amountStr: string): SessionsFilter["value"] {
 }
 
 export default function SessionsPage() {
-  const sessionsQuery = useSessions();
+  const sessionsQuery = useAdminSessions();
   const jobsQuery = useJobs();
   const [filter, setFilter] = useState<SessionsFilter>({
     state: "all",

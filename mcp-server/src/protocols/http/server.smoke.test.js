@@ -161,6 +161,63 @@ test("http smoke: /admin/jobs accepts admin-scoped token", { skip: !RUN }, async
   });
 });
 
+test("http smoke: /admin/sessions exposes operator-wide session activity", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
+    const workerToken = issueToken(STRANGER_WALLET);
+
+    await fetch(`${base}/admin/jobs`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({
+        id: "operator-session-smoke-001",
+        category: "coding",
+        tier: "starter",
+        rewardAmount: 1,
+        claimTtlSeconds: 3600,
+        verifierMode: "benchmark",
+        verifierTerms: ["complete"],
+        verifierMinimumMatches: 1,
+        outputSchemaRef: "schema://jobs/operator-session-smoke-output"
+      })
+    });
+
+    await fetch(`${base}/account/fund?asset=DOT&amount=10`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${workerToken}` }
+    });
+
+    const claim = await fetch(
+      `${base}/jobs/claim?jobId=operator-session-smoke-001&idempotencyKey=operator-session-smoke-claim`,
+      { method: "POST", headers: { authorization: `Bearer ${workerToken}` } }
+    );
+    assert.equal(claim.status, 200);
+    const claimed = await claim.json();
+
+    const walletScoped = await fetch(`${base}/sessions`, {
+      headers: { authorization: `Bearer ${adminToken}` }
+    });
+    assert.equal(walletScoped.status, 200);
+    assert.deepEqual(await walletScoped.json(), []);
+
+    const forbidden = await fetch(`${base}/admin/sessions`, {
+      headers: { authorization: `Bearer ${workerToken}` }
+    });
+    assert.equal(forbidden.status, 403);
+
+    const response = await fetch(`${base}/admin/sessions?limit=20`, {
+      headers: { authorization: `Bearer ${adminToken}` }
+    });
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.scope, "operator");
+    assert.equal(payload.count, 1);
+    assert.equal(payload.sessions[0].sessionId, claimed.sessionId);
+    assert.equal(payload.sessions[0].wallet, STRANGER_WALLET);
+    assert.equal(payload.sessions[0].jobId, "operator-session-smoke-001");
+  });
+});
+
 test("http smoke: /admin/status returns recurring + maintenance data for admin tokens", { skip: !RUN }, async () => {
   await runWithServer(async (base) => {
     const token = issueToken(ADMIN_WALLET, { roles: ["admin"] });

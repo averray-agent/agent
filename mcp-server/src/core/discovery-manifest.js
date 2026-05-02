@@ -48,6 +48,7 @@ const DISCOVERY_AUTHENTICATED_ENDPOINTS = [
   { path: "/content/:hash/publish", description: "Owner/admin one-way early publish for private hash-addressed content." },
   { path: "/disputes", description: "Operator dispute queue derived from sessions requiring human review." },
   { path: "/disputes/:id", description: "Detailed dispute evidence, timeline, verdict, and stake release state." },
+  { path: "/admin/sessions", description: "Admin/operator-wide recent sessions across worker wallets." },
   { path: "/session", description: "Fetch a single session by id (owner-scoped)." },
   { path: "/sessions", description: "Historical sessions for the signed-in wallet." },
   { path: "/xcm/request?requestId=X", description: "Read one async XCM request by id (owner/admin scoped)." },
