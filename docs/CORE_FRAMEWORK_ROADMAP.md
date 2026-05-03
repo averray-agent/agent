@@ -219,27 +219,32 @@ The claim path already has a good start with idempotency keys and claim locks.
 Admin mutations and some operator flows should reach the same standard before
 load and automation grow.
 
-### Gaps today
+### Current implementation
 
-- claim idempotency is stronger than job creation idempotency
-- posting bundles, recurring fires, and future schedulers need duplicate-safe
-  semantics
-- some mutation routes still depend on callers simply not repeating requests
+- claim idempotency is enforced through session lookup and claim locks
+- `POST /admin/jobs`, `POST /admin/jobs/fire`, recurring pause/resume, and
+  async XCM admin actions can persist mutation receipts in the state store
+- admin job creation, manual recurring fires, and recurring pause/resume store
+  canonical request hashes with their idempotency receipts, so same-key replays
+  return the original result while same-key payload drift fails with a clear
+  conflict
 
-### Improve to
+### Remaining gaps
 
-- idempotency support across all meaningful write routes
-- duplicate-safe admin posting
-- clearer conflict codes for retries and replays
+- provider ingestion endpoints still rely mostly on deterministic job ids and
+  duplicate-skip behavior rather than explicit idempotency receipts
+- async XCM actions replay receipts but still need the same canonical
+  payload-drift guard as create/fire/pause/resume
+- future dispute and settlement routes should adopt the same receipt wrapper
 
 ### Concrete next changes
 
-- add optional idempotency keys to:
-  - `POST /admin/jobs`
-  - `POST /admin/jobs/fire`
-  - future dispute and settlement routes
-- persist mutation receipts in the state store
-- expose conflict reasons cleanly for operators and scripts
+- extend canonical request-hash receipts to async XCM admin routes
+- add optional idempotency keys to provider ingestion routes where callers need
+  whole-run replay semantics
+- reuse the same receipt wrapper for future dispute and settlement routes
+- expose idempotency replay/conflict metadata in operator-facing docs and SDK
+  helpers
 
 ### What this unlocks
 

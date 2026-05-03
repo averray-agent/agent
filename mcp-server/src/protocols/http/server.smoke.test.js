@@ -1013,6 +1013,112 @@ test("http smoke: /admin/jobs/fire produces a derivative from a recurring templa
   });
 });
 
+test("http smoke: admin job creation idempotency replays and rejects payload drift", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
+    const headers = { "content-type": "application/json", authorization: `Bearer ${adminToken}` };
+    const payload = {
+      id: "admin-idempotency-create-smoke",
+      category: "coding",
+      tier: "starter",
+      rewardAmount: 2,
+      verifierMode: "benchmark",
+      verifierTerms: ["complete"],
+      verifierMinimumMatches: 1,
+      idempotencyKey: "admin-create-same-key"
+    };
+
+    const create = await fetch(`${base}/admin/jobs`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload)
+    });
+    assert.equal(create.status, 201);
+    const created = await create.json();
+
+    const replay = await fetch(`${base}/admin/jobs`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ verifierTerms: ["complete"], ...payload })
+    });
+    assert.equal(replay.status, 200);
+    assert.deepEqual(await replay.json(), created);
+
+    const drift = await fetch(`${base}/admin/jobs`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        ...payload,
+        id: "admin-idempotency-create-smoke-other"
+      })
+    });
+    assert.equal(drift.status, 409);
+    const body = await drift.json();
+    assert.equal(body.error, "idempotency_key_payload_mismatch");
+    assert.equal(body.details.bucket, "admin_jobs");
+    assert.ok(body.details.originalRequestHash);
+    assert.ok(body.details.requestHash);
+  });
+});
+
+test("http smoke: admin recurring fire idempotency replays and rejects firedAt drift", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
+    const headers = { "content-type": "application/json", authorization: `Bearer ${adminToken}` };
+
+    const template = await fetch(`${base}/admin/jobs`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        id: "recurring-fire-idempotency-smoke",
+        category: "coding",
+        tier: "starter",
+        rewardAmount: 2,
+        verifierMode: "benchmark",
+        verifierTerms: ["complete"],
+        verifierMinimumMatches: 1,
+        recurring: true,
+        schedule: { cron: "0 9 * * 1", timezone: "Europe/Zurich" }
+      })
+    });
+    assert.equal(template.status, 201);
+
+    const firePayload = {
+      templateId: "recurring-fire-idempotency-smoke",
+      firedAt: "2026-04-20T09:00:00.000Z",
+      idempotencyKey: "fire-same-key"
+    };
+    const fire = await fetch(`${base}/admin/jobs/fire`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(firePayload)
+    });
+    assert.equal(fire.status, 201);
+    const derivative = await fire.json();
+
+    const replay = await fetch(`${base}/admin/jobs/fire`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(firePayload)
+    });
+    assert.equal(replay.status, 200);
+    assert.deepEqual(await replay.json(), derivative);
+
+    const drift = await fetch(`${base}/admin/jobs/fire`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        ...firePayload,
+        firedAt: "2026-04-27T09:00:00.000Z"
+      })
+    });
+    assert.equal(drift.status, 409);
+    const body = await drift.json();
+    assert.equal(body.error, "idempotency_key_payload_mismatch");
+    assert.equal(body.details.bucket, "admin_jobs_fire");
+  });
+});
+
 test("http smoke: recurring pause/resume accept idempotency keys", { skip: !RUN }, async () => {
   await runWithServer(async (base) => {
     const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
@@ -1057,6 +1163,20 @@ test("http smoke: recurring pause/resume accept idempotency keys", { skip: !RUN 
     });
     assert.equal(pauseReplay.status, 200);
     assert.deepEqual(await pauseReplay.json(), paused);
+
+    const pauseDrift = await fetch(`${base}/admin/jobs/pause`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        templateId: "recurring-idempotency-smoke",
+        idempotencyKey: "same-client-key",
+        reason: "different operator annotation"
+      })
+    });
+    assert.equal(pauseDrift.status, 409);
+    const pauseDriftBody = await pauseDrift.json();
+    assert.equal(pauseDriftBody.error, "idempotency_key_payload_mismatch");
+    assert.equal(pauseDriftBody.details.bucket, "admin_jobs_pause");
 
     const resume = await fetch(`${base}/admin/jobs/resume`, {
       method: "POST",

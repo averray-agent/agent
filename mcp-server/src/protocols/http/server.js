@@ -4,9 +4,11 @@ import { createPlatformRuntime } from "../../services/bootstrap.js";
 import {
   AuthenticationError,
   AuthorizationError,
+  ConflictError,
   normalizeError,
   ValidationError
 } from "../../core/errors.js";
+import { hashCanonicalContent } from "../../core/canonical-content.js";
 import { buildSiweMessage, verifySiweMessage } from "../../auth/siwe.js";
 import { signToken } from "../../auth/jwt.js";
 import { extractClientKey } from "../../auth/rate-limit.js";
@@ -1117,6 +1119,75 @@ function parseAsyncTreasuryOptions(payload = {}, url, { defaultRecipient = undef
     recipient,
     requestedShares
   };
+}
+
+function parseIdempotencyKey(payload = {}) {
+  return typeof payload?.idempotencyKey === "string" && payload.idempotencyKey.trim()
+    ? payload.idempotencyKey.trim()
+    : undefined;
+}
+
+function stripIdempotencyKey(payload = {}) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return payload;
+  }
+  const { idempotencyKey, ...rest } = payload;
+  return rest;
+}
+
+function buildMutationRequestHash({ route, wallet, payload }) {
+  return hashCanonicalContent({
+    route,
+    wallet,
+    payload: stripIdempotencyKey(payload)
+  });
+}
+
+function isMutationReceiptEnvelope(receipt) {
+  return Boolean(
+    receipt
+    && typeof receipt === "object"
+    && typeof receipt.requestHash === "string"
+    && Object.prototype.hasOwnProperty.call(receipt, "response")
+  );
+}
+
+async function getIdempotentMutationReplay({ bucket, key, requestHash }) {
+  if (!key) {
+    return undefined;
+  }
+  const existing = await stateStore.getMutationReceipt?.(bucket, key);
+  if (!existing) {
+    return undefined;
+  }
+  if (!isMutationReceiptEnvelope(existing)) {
+    return { statusCode: 200, body: existing };
+  }
+  if (existing.requestHash !== requestHash) {
+    throw new ConflictError(
+      "Idempotency key was already used with a different request payload.",
+      "idempotency_key_payload_mismatch",
+      {
+        bucket,
+        originalRequestHash: existing.requestHash,
+        requestHash
+      }
+    );
+  }
+  return { statusCode: 200, body: existing.response };
+}
+
+async function storeIdempotentMutationReceipt({ bucket, key, requestHash, response, statusCode }) {
+  if (!key) {
+    return response;
+  }
+  await stateStore.upsertMutationReceipt?.(bucket, key, {
+    requestHash,
+    statusCode,
+    response,
+    createdAt: new Date().toISOString()
+  });
+  return response;
 }
 
 function buildLaneAttention({ shares, isMock, debtTotal, borrowCapacity, deploymentShareBps }) {
@@ -2461,18 +2532,25 @@ const server = createServer(async (request, response) => {
       const auth = await authMiddleware(request, url, { requireRole: "admin" });
       await enforceLimit("admin_jobs", auth.wallet, rateLimitConfig.adminJobs);
       const payload = await readJsonBody(request);
-      const idempotencyKey = typeof payload?.idempotencyKey === "string" && payload.idempotencyKey.trim()
-        ? payload.idempotencyKey.trim()
-        : undefined;
+      const idempotencyKey = parseIdempotencyKey(payload);
       const mutationKey = idempotencyKey ? `${auth.wallet}:${idempotencyKey}` : undefined;
-      const existing = mutationKey ? await stateStore.getMutationReceipt?.("admin_jobs", mutationKey) : undefined;
-      if (existing) {
-        return respond(response, 200, existing);
+      const requestHash = buildMutationRequestHash({ route: "/admin/jobs", wallet: auth.wallet, payload });
+      const replay = await getIdempotentMutationReplay({
+        bucket: "admin_jobs",
+        key: mutationKey,
+        requestHash
+      });
+      if (replay) {
+        return respond(response, replay.statusCode, replay.body);
       }
       const created = service.createJob(payload);
-      if (mutationKey) {
-        await stateStore.upsertMutationReceipt?.("admin_jobs", mutationKey, created);
-      }
+      await storeIdempotentMutationReceipt({
+        bucket: "admin_jobs",
+        key: mutationKey,
+        requestHash,
+        response: created,
+        statusCode: 201
+      });
       return respond(response, 201, created);
     }
 
@@ -2836,22 +2914,34 @@ const server = createServer(async (request, response) => {
       if (!templateId) {
         throw new ValidationError("templateId is required.");
       }
-      const idempotencyKey = typeof payload?.idempotencyKey === "string" && payload.idempotencyKey.trim()
-        ? payload.idempotencyKey.trim()
-        : undefined;
+      const idempotencyKey = parseIdempotencyKey(payload);
       const mutationKey = idempotencyKey ? `${auth.wallet}:${idempotencyKey}` : undefined;
-      const existing = mutationKey ? await stateStore.getMutationReceipt?.("admin_jobs_fire", mutationKey) : undefined;
-      if (existing) {
-        return respond(response, 200, existing);
-      }
       const firedAt = payload?.firedAt ? new Date(payload.firedAt) : new Date();
       if (Number.isNaN(firedAt.getTime())) {
         throw new ValidationError("firedAt must be ISO-8601 if provided.");
       }
-      const derivative = service.fireRecurringJob(templateId, { firedAt });
-      if (mutationKey) {
-        await stateStore.upsertMutationReceipt?.("admin_jobs_fire", mutationKey, derivative);
+      const normalizedPayload = {
+        ...payload,
+        templateId,
+        firedAt: payload?.firedAt ? firedAt.toISOString() : "__server_now__"
+      };
+      const requestHash = buildMutationRequestHash({ route: "/admin/jobs/fire", wallet: auth.wallet, payload: normalizedPayload });
+      const replay = await getIdempotentMutationReplay({
+        bucket: "admin_jobs_fire",
+        key: mutationKey,
+        requestHash
+      });
+      if (replay) {
+        return respond(response, replay.statusCode, replay.body);
       }
+      const derivative = service.fireRecurringJob(templateId, { firedAt });
+      await storeIdempotentMutationReceipt({
+        bucket: "admin_jobs_fire",
+        key: mutationKey,
+        requestHash,
+        response: derivative,
+        statusCode: 201
+      });
       return respond(response, 201, derivative);
     }
 
@@ -2883,19 +2973,30 @@ const server = createServer(async (request, response) => {
       if (!templateId) {
         throw new ValidationError("templateId is required.");
       }
-      const idempotencyKey = typeof payload?.idempotencyKey === "string" && payload.idempotencyKey.trim()
-        ? payload.idempotencyKey.trim()
-        : undefined;
+      const idempotencyKey = parseIdempotencyKey(payload);
       const mutationKey = idempotencyKey ? `${auth.wallet}:${templateId}:${idempotencyKey}` : undefined;
-      const existing = mutationKey ? await stateStore.getMutationReceipt?.("admin_jobs_pause", mutationKey) : undefined;
-      if (existing) {
-        return respond(response, 200, existing);
+      const requestHash = buildMutationRequestHash({
+        route: "/admin/jobs/pause",
+        wallet: auth.wallet,
+        payload: { ...payload, templateId }
+      });
+      const replay = await getIdempotentMutationReplay({
+        bucket: "admin_jobs_pause",
+        key: mutationKey,
+        requestHash
+      });
+      if (replay) {
+        return respond(response, replay.statusCode, replay.body);
       }
       await service.pauseRecurringTemplate(templateId);
       const status = await service.getAdminStatus({ auth });
-      if (mutationKey) {
-        await stateStore.upsertMutationReceipt?.("admin_jobs_pause", mutationKey, status);
-      }
+      await storeIdempotentMutationReceipt({
+        bucket: "admin_jobs_pause",
+        key: mutationKey,
+        requestHash,
+        response: status,
+        statusCode: 200
+      });
       return respond(response, 200, status);
     }
 
@@ -2907,19 +3008,30 @@ const server = createServer(async (request, response) => {
       if (!templateId) {
         throw new ValidationError("templateId is required.");
       }
-      const idempotencyKey = typeof payload?.idempotencyKey === "string" && payload.idempotencyKey.trim()
-        ? payload.idempotencyKey.trim()
-        : undefined;
+      const idempotencyKey = parseIdempotencyKey(payload);
       const mutationKey = idempotencyKey ? `${auth.wallet}:${templateId}:${idempotencyKey}` : undefined;
-      const existing = mutationKey ? await stateStore.getMutationReceipt?.("admin_jobs_resume", mutationKey) : undefined;
-      if (existing) {
-        return respond(response, 200, existing);
+      const requestHash = buildMutationRequestHash({
+        route: "/admin/jobs/resume",
+        wallet: auth.wallet,
+        payload: { ...payload, templateId }
+      });
+      const replay = await getIdempotentMutationReplay({
+        bucket: "admin_jobs_resume",
+        key: mutationKey,
+        requestHash
+      });
+      if (replay) {
+        return respond(response, replay.statusCode, replay.body);
       }
       await service.resumeRecurringTemplate(templateId);
       const status = await service.getAdminStatus({ auth });
-      if (mutationKey) {
-        await stateStore.upsertMutationReceipt?.("admin_jobs_resume", mutationKey, status);
-      }
+      await storeIdempotentMutationReceipt({
+        bucket: "admin_jobs_resume",
+        key: mutationKey,
+        requestHash,
+        response: status,
+        statusCode: 200
+      });
       return respond(response, 200, status);
     }
 
