@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  assertSessionCanTransition,
   buildSessionLifecycle,
   describeSessionStatus,
   getSessionStateMachineDefinition,
@@ -37,4 +38,32 @@ test("getSessionStateMachineDefinition returns stable public statuses", () => {
   assert.ok(statuses.some((entry) => entry.status === "claimed"));
   assert.ok(statuses.some((entry) => entry.status === "resolved" && entry.terminal === true));
   assert.ok(!statuses.some((entry) => entry.status === "__new__"));
+});
+
+test("transitionSession rejects duplicate and illegal transitions with operator context", () => {
+  const claimed = transitionSession({ sessionId: "s1" }, "claimed", {
+    reason: "job_claimed",
+    timestamp: "2026-04-23T10:00:00.000Z"
+  });
+
+  assert.throws(
+    () => transitionSession(claimed, "claimed", { reason: "duplicate_claim" }),
+    (error) => {
+      assert.equal(error.code, "invalid_session_transition");
+      assert.equal(error.details.currentStatus, "claimed");
+      assert.equal(error.details.nextStatus, "claimed");
+      assert.deepEqual(error.details.allowedTransitions.sort(), ["closed", "expired", "submitted", "timed_out"]);
+      return true;
+    }
+  );
+
+  assert.throws(
+    () => assertSessionCanTransition(claimed, "resolved", { reason: "skip_submit" }),
+    (error) => {
+      assert.equal(error.code, "invalid_session_transition");
+      assert.equal(error.details.currentPhase, "work");
+      assert.equal(error.details.terminal, false);
+      return true;
+    }
+  );
 });

@@ -161,6 +161,38 @@ test("submitWork rejects structured output when the schema ref is unknown", asyn
   );
 });
 
+test("submitWork rejects duplicate submissions before replacing stored output", async () => {
+  const stateStore = new MemoryStateStore();
+  const job = makeJob({ outputSchemaRef: "schema://jobs/coding-output" });
+  const service = new JobExecutionService(stateStore, undefined, () => job);
+
+  const claimed = await service.claimJob(WALLET, job.id, "http", "idemp-duplicate-submit");
+  const original = {
+    summary: "Parser fixed.",
+    output: "Added regression coverage.",
+    status: "complete"
+  };
+  await service.submitWork(claimed.sessionId, "http", original);
+
+  await assert.rejects(
+    () => service.submitWork(claimed.sessionId, "http", {
+      summary: "Overwrite attempt.",
+      output: "This should never replace the stored submission.",
+      status: "complete"
+    }),
+    (error) => {
+      assert.equal(error.code, "invalid_session_transition");
+      assert.equal(error.details.currentStatus, "submitted");
+      assert.equal(error.details.nextStatus, "submitted");
+      return true;
+    }
+  );
+
+  const stored = await stateStore.getSession(claimed.sessionId);
+  assert.deepEqual(stored.submission.structured, original);
+  assert.equal(stored.statusHistory.length, 2);
+});
+
 test("submitWork rejects and materializes expired claims before mutation", async () => {
   const stateStore = new MemoryStateStore();
   const job = makeJob({

@@ -174,29 +174,33 @@ and
 That works, but it still behaves more like a set of updates than a strict state
 machine.
 
-### Gaps today
+### Current implementation
 
-- legal transitions are implicit
-- `claimed`, `submitted`, `resolved`, `rejected`, `closed`, `expired`,
-  `timed_out` exist, but transition rules are not centralized
-- evidence submission, verification, settlement, and dispute posture are not
-  modeled as first-class states
-- retries and re-open semantics are thin
+- `session-state-machine.js` defines the canonical transition table and public
+  status metadata
+- claim, submit, verification ingestion, expiry, and dispute resolution now
+  route through shared transition guards
+- duplicate submit attempts and verifier callbacks on non-verifiable sessions
+  fail closed before submission replacement, handler execution, chain
+  settlement, or verification result ingestion
+- sessions persist compact `statusHistory` entries with reason, timestamp, and
+  metadata
 
-### Improve to
+### Remaining gaps
 
-- one explicit session transition table
-- precondition checks per transition
-- consistent event emission per transition
-- terminal-state semantics enforced in one place
+- settlement and dispute posture are still mostly transition outcomes and
+  metadata, not separately typed workflow phases
+- retries and re-open semantics still live primarily in claim handling
+- transition coverage is focused on high-risk guards rather than full property
+  coverage across every legal and illegal edge
 
 ### Concrete next changes
 
-- create a `session-state-machine.js` module
-- define allowed transitions and side effects
-- route `claimJob`, `submitWork`, verification ingestion, timeout handling,
-  and future dispute actions through it
-- persist a compact state transition history for each session
+- route future settlement, timeout, and dispute actions through dedicated
+  state-machine helpers
+- add fixture or property tests for every legal and illegal transition
+- expose richer transition reason taxonomy for operator UI timelines and agent
+  diagnostics
 
 ### What this unlocks
 

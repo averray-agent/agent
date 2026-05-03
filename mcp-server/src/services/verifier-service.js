@@ -4,6 +4,7 @@ import {
   buildVerificationAuditFields,
   jobWithVerifierConfigSnapshot
 } from "../core/verifier-contract.js";
+import { assertSessionCanReceiveVerification } from "../core/session-state-machine.js";
 
 export class VerifierService {
   constructor(platformService, stateStore, blockchainGateway = undefined, registry = new VerifierRegistry()) {
@@ -15,6 +16,7 @@ export class VerifierService {
 
   async verifySubmission({ sessionId, evidence = undefined, metadataURI = "ipfs://pending-badge" }) {
     const session = await this.platformService.resumeSession(sessionId);
+    assertSessionCanReceiveVerification(session);
     const job = this.platformService.getJobDefinition(session.jobId);
     const chainJobId = session.chainJobId ?? session.jobId;
     const verificationInput = this.resolveVerificationInput(session, evidence);

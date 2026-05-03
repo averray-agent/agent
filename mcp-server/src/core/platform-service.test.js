@@ -198,6 +198,23 @@ test("getSessionTimeline includes transitions and verification state", async () 
     reasonCode: "BENCHMARK_THRESHOLD_MET"
   });
   const result = await service.stateStore.getVerificationResult(submitted.sessionId);
+  await assert.rejects(
+    () => service.ingestVerification(submitted.sessionId, {
+      jobId: submitted.jobId,
+      handler: "benchmark",
+      handlerVersion: 1,
+      outcome: "rejected",
+      reasonCode: "LATE_REJECT"
+    }),
+    (error) => {
+      assert.equal(error.code, "invalid_session_transition");
+      assert.equal(error.details.currentStatus, "resolved");
+      assert.equal(error.details.terminal, true);
+      return true;
+    }
+  );
+  const stillResolved = await service.stateStore.getSession(submitted.sessionId);
+  assert.equal(stillResolved.verificationSummary.reasonCode, "BENCHMARK_THRESHOLD_MET");
 
   const timeline = await service.getSessionTimeline(submitted.sessionId);
   assert.equal(timeline.timelineVersion, "v2");

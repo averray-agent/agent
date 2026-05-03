@@ -1,4 +1,7 @@
-import { transitionSession } from "../core/session-state-machine.js";
+import {
+  assertSessionCanReceiveVerification,
+  transitionSession
+} from "../core/session-state-machine.js";
 import { updateFundedJobFromSession } from "../core/funded-jobs.js";
 import { buildVerificationAuditFields } from "../core/verifier-contract.js";
 
@@ -16,6 +19,7 @@ export class VerificationIngestionService {
     if (!session) {
       return undefined;
     }
+    assertSessionCanReceiveVerification(session);
     const job = this.resolveJob(session, verdict);
     const verificationInput = verdict.verificationInput ?? session.submission ?? "";
     const auditFields = job

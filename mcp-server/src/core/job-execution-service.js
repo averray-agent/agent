@@ -5,7 +5,12 @@ import {
   NotFoundError,
   ValidationError
 } from "./errors.js";
-import { buildSessionLifecycle, describeSessionStatus, transitionSession } from "./session-state-machine.js";
+import {
+  assertSessionCanTransition,
+  buildSessionLifecycle,
+  describeSessionStatus,
+  transitionSession
+} from "./session-state-machine.js";
 import { hashSubmission, isStructuredSubmission, normalizeSubmission } from "./submission.js";
 import { getBuiltinJobSchema, validateAgainstSchema, validateStructuredSubmission } from "./job-schema-registry.js";
 import {
@@ -226,6 +231,7 @@ export class JobExecutionService {
         this.buildClaimExpiryDetails(refreshed, job)
       );
     }
+    assertSessionCanTransition(refreshed, "submitted", { reason: "work_submitted" });
     const submission = normalizeSubmission(normalizeSubmitPayloadShape(job.outputSchemaRef, submissionInput));
     validateSubmissionContract(job.outputSchemaRef, submission);
     await this.enforceMaintainerOpenPrCap(job, submission);

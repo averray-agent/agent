@@ -79,6 +79,56 @@ test("verifySubmission persists verification input and supports replay", async (
   assert.deepEqual(replay.verifierConfigSnapshot.expectedOutputs, ["release_id", "checks_passed", "go_no_go"]);
 });
 
+test("verifySubmission rejects non-verifiable sessions before handler or chain side effects", async () => {
+  const stateStore = new MemoryStateStore();
+  const claimed = transitionSession({
+    sessionId: SESSION_ID,
+    wallet: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    jobId: "release-readiness-check-001"
+  }, "claimed", { reason: "job_claimed" });
+  await stateStore.upsertSession(claimed);
+
+  let evaluated = false;
+  let resolvedOnChain = false;
+  const service = new VerifierService(
+    {
+      resumeSession: (sessionId) => stateStore.getSession(sessionId),
+      getJobDefinition: () => {
+        throw new Error("job definition should not be needed before transition guard");
+      },
+      ingestVerification: () => {
+        throw new Error("verification should not ingest before transition guard");
+      }
+    },
+    stateStore,
+    {
+      isEnabled: () => true,
+      resolveSinglePayout: async () => {
+        resolvedOnChain = true;
+      }
+    },
+    {
+      evaluate: async () => {
+        evaluated = true;
+        return { outcome: "approved" };
+      },
+      listHandlers: () => []
+    }
+  );
+
+  await assert.rejects(
+    () => service.verifySubmission({ sessionId: SESSION_ID }),
+    (error) => {
+      assert.equal(error.code, "invalid_session_transition");
+      assert.equal(error.details.currentStatus, "claimed");
+      assert.equal(error.details.nextStatus, "resolved|rejected|disputed");
+      return true;
+    }
+  );
+  assert.equal(evaluated, false);
+  assert.equal(resolvedOnChain, false);
+});
+
 test("github_pr verifier scores structured PR evidence and exposes reputation signals", async () => {
   const registry = new VerifierRegistry();
   const job = {
