@@ -81,6 +81,29 @@ export interface VerifierVerdict {
   scoreLabel: string;
 }
 
+export interface SubmissionValidationState {
+  status: "not_checked" | "valid" | "invalid";
+  message?: string;
+  path?: string;
+  details?: unknown;
+}
+
+export interface SubmissionContractView {
+  endpoint?: string;
+  validationEndpoint?: string;
+  structuredSubmissionRequired?: boolean;
+  schemaValidates?: string;
+  doNotWrapInOutput?: boolean;
+  outputSchemaRef?: string;
+  outputSchemaUrl?: string;
+  submitPayloadExample?: unknown;
+  invalidWrappedOutputHint?: string;
+  schemaContract?: unknown;
+  validation: SubmissionValidationState;
+  validating?: boolean;
+  onValidate?: (draft: string) => void | Promise<void>;
+}
+
 export interface LoadedRunPanelProps {
   kicker: string;
   title: string;
@@ -97,6 +120,7 @@ export interface LoadedRunPanelProps {
     metaRight: string;
     metaFoot: string;
   };
+  submissionContract?: SubmissionContractView;
   submission: {
     note: React.ReactNode;
     cta: string;
@@ -376,6 +400,14 @@ export function LoadedRunPanel(props: LoadedRunPanelProps) {
               </div>
             </div>
           )}
+
+          {props.submissionContract ? (
+            <SubmissionContractPanel
+              contract={props.submissionContract}
+              draft={evidenceValue}
+              onDraftChange={setEvidenceValue}
+            />
+          ) : null}
 
           {/* Submit
               ─────────────────────────────────────────────────
@@ -1899,6 +1931,232 @@ function InstructionsTab({ ctx }: { ctx: GitHubJobContext }) {
       {ctx.agentInstructions}
     </p>
   );
+}
+
+function SubmissionContractPanel({
+  contract,
+  draft,
+  onDraftChange,
+}: {
+  contract: SubmissionContractView;
+  draft: string;
+  onDraftChange: (value: string) => void;
+}) {
+  const output = schemaOutput(contract.schemaContract);
+  const input = schemaInput(contract.schemaContract);
+  const validation = contract.validation;
+  const validationTone =
+    validation.status === "valid"
+      ? "text-[var(--avy-accent)]"
+      : validation.status === "invalid"
+        ? "text-[#8c2a17]"
+        : "text-[var(--avy-muted)]";
+
+  return (
+    <div>
+      <BlockLabel
+        right={
+          <span className="font-[family-name:var(--font-mono)] text-[var(--avy-muted)]">
+            {contract.validationEndpoint ?? "POST /jobs/validate-submission"}
+          </span>
+        }
+      >
+        Submission contract
+      </BlockLabel>
+      <div className="flex flex-col gap-3 rounded-[8px] border border-[var(--avy-line)] bg-white p-3">
+        <div className="grid grid-cols-1 gap-2 font-[family-name:var(--font-mono)] text-[11px] sm:grid-cols-2">
+          <ContractFact
+            label="Submit endpoint"
+            value={contract.endpoint ?? "POST /jobs/submit"}
+          />
+          <ContractFact
+            label="Validates"
+            value={contract.schemaValidates ?? output.validates ?? "payload.submission"}
+          />
+          <ContractFact
+            label="Structured required"
+            value={contract.structuredSubmissionRequired ? "true" : "false"}
+          />
+          <ContractFact
+            label="Do not wrap"
+            value={contract.doNotWrapInOutput ? "submission.output" : "not specified"}
+          />
+          <ContractFact
+            label="Input schema"
+            value={input.schemaRef ?? "not emitted"}
+            href={input.schemaUrl}
+          />
+          <ContractFact
+            label="Output schema"
+            value={contract.outputSchemaRef ?? output.schemaRef ?? "not emitted"}
+            href={contract.outputSchemaUrl ?? output.schemaUrl}
+          />
+        </div>
+
+        <div className="rounded-[7px] border border-[color:rgba(140,42,23,0.22)] bg-[color:rgba(140,42,23,0.045)] px-3 py-2 font-[family-name:var(--font-mono)] text-[11px] leading-[1.5] text-[#8c2a17]">
+          {contract.invalidWrappedOutputHint ??
+            "Do not wrap under submission.output. Send the schema object directly as payload.submission."}
+        </div>
+
+        <div>
+          <SubLabel>Exact JSON submit example</SubLabel>
+          <pre
+            className="max-h-[220px] overflow-auto rounded-[7px] border border-[var(--avy-line)] bg-[#131715] px-3 py-2.5 font-[family-name:var(--font-mono)] text-[11px] leading-[1.55] text-[#f5f3ee]"
+            style={{ letterSpacing: 0 }}
+          >
+            {formatJson(contract.submitPayloadExample)}
+          </pre>
+        </div>
+
+        <div>
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <SubLabel>Draft payload.submission</SubLabel>
+            <span
+              className={`font-[family-name:var(--font-mono)] text-[10.5px] ${validationTone}`}
+              style={{ letterSpacing: 0 }}
+            >
+              {validationLabel(validation)}
+            </span>
+          </div>
+          <textarea
+            spellCheck={false}
+            value={draft}
+            onChange={(event) => onDraftChange(event.target.value)}
+            className="min-h-[190px] w-full resize-y rounded-[7px] border border-[var(--avy-line)] bg-[#fffdf7] px-3 py-2.5 font-[family-name:var(--font-mono)] text-[11.5px] leading-[1.55] text-[var(--avy-ink)] outline-none focus:border-[var(--avy-accent)] focus:ring-2 focus:ring-[color:rgba(30,102,66,0.15)]"
+            style={{ letterSpacing: 0 }}
+          />
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--avy-line-soft)] pt-2">
+          <p
+            className="m-0 min-w-0 flex-1 font-[family-name:var(--font-mono)] text-[10.5px] leading-[1.45] text-[var(--avy-muted)]"
+            style={{ letterSpacing: 0 }}
+          >
+            Read-only check. Sends{" "}
+            <b className="font-semibold text-[var(--avy-ink)]">
+              {"{ jobId, submission }"}
+            </b>{" "}
+            to the validation endpoint; it does not claim or submit the job.
+          </p>
+          <button
+            type="button"
+            onClick={() => contract.onValidate?.(draft)}
+            disabled={contract.validating || !contract.onValidate}
+            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-[8px] border border-[color:rgba(30,102,66,0.26)] bg-[var(--avy-paper-solid)] px-3 font-[family-name:var(--font-display)] text-[11px] font-bold uppercase text-[var(--avy-accent)] transition-transform hover:-translate-y-px disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
+            style={{ letterSpacing: "0.06em" }}
+          >
+            {contract.validating ? "Checking..." : "Validate draft"}
+          </button>
+        </div>
+
+        {validation.status === "invalid" ? (
+          <div
+            className="rounded-[7px] border border-[color:rgba(140,42,23,0.18)] bg-[color:rgba(140,42,23,0.035)] px-3 py-2 font-[family-name:var(--font-mono)] text-[11px] leading-[1.5] text-[#8c2a17]"
+            style={{ letterSpacing: 0 }}
+          >
+            <b className="font-semibold">Invalid</b>
+            {validation.message ? <> · {validation.message}</> : null}
+            {validation.path ? <> · path {validation.path}</> : null}
+            {validation.details ? (
+              <pre className="mt-1 max-h-[140px] overflow-auto whitespace-pre-wrap">
+                {formatJson(validation.details)}
+              </pre>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function ContractFact({
+  label,
+  value,
+  href,
+}: {
+  label: string;
+  value: string;
+  href?: string;
+}) {
+  return (
+    <div className="min-w-0 rounded-[6px] border border-[var(--avy-line-soft)] bg-[#faf8f1] px-2.5 py-2">
+      <dt
+        className="font-[family-name:var(--font-display)] text-[9.5px] font-extrabold uppercase text-[var(--avy-muted)]"
+        style={{ letterSpacing: "0.12em" }}
+      >
+        {label}
+      </dt>
+      <dd
+        className="m-0 mt-0.5 min-w-0 break-words text-[var(--avy-ink)]"
+        style={{ letterSpacing: 0 }}
+      >
+        {href ? (
+          <a
+            href={href}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="text-[var(--avy-accent)] hover:underline"
+          >
+            {value}
+          </a>
+        ) : (
+          value
+        )}
+      </dd>
+    </div>
+  );
+}
+
+function validationLabel(validation: SubmissionValidationState): string {
+  if (validation.status === "valid") return "Valid";
+  if (validation.status === "invalid") {
+    return validation.path ? `Invalid · ${validation.path}` : "Invalid";
+  }
+  return "Not checked";
+}
+
+function formatJson(value: unknown): string {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value ?? null, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function schemaInput(value: unknown): { schemaRef?: string; schemaUrl?: string } {
+  const record = asRecordLocal(value);
+  return schemaRecord(record?.input);
+}
+
+function schemaOutput(
+  value: unknown
+): { schemaRef?: string; schemaUrl?: string; validates?: string } {
+  const record = asRecordLocal(value);
+  return schemaRecord(record?.output);
+}
+
+function schemaRecord(value: unknown): {
+  schemaRef?: string;
+  schemaUrl?: string;
+  validates?: string;
+} {
+  const record = asRecordLocal(value);
+  return {
+    schemaRef: textLocal(record?.schemaRef),
+    schemaUrl: textLocal(record?.schemaUrl),
+    validates: textLocal(record?.validates),
+  };
+}
+
+function asRecordLocal(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function textLocal(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function SubmissionTab({ ctx }: { ctx: GitHubJobContext }) {

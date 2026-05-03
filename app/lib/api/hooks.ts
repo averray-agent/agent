@@ -31,6 +31,8 @@ export const useJobs = () => useApi("/jobs");
 export const useRecommendations = () => useApi("/jobs/recommendations");
 export const useJobDefinition = (id: string | null) =>
   useApi(id ? `/jobs/definition?jobId=${encodeURIComponent(id)}` : null);
+export const useJobPreflight = (id: string | null) =>
+  useApi(id ? `/jobs/preflight?jobId=${encodeURIComponent(id)}` : null);
 export const useSessions = () => useApi("/sessions");
 export const useAdminSessions = () =>
   useApi("/admin/sessions?limit=100", { refreshInterval: 15_000 });

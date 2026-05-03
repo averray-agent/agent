@@ -1,8 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { mutate } from "swr";
-import { LoadedRunPanel } from "./LoadedRunPanel";
+import {
+  LoadedRunPanel,
+  type SubmissionValidationState,
+} from "./LoadedRunPanel";
 import { LifecycleRail } from "./LifecycleRail";
 import { LifecycleActionBar } from "./LifecycleActionBar";
 import { RunSemanticBlock } from "./RunSemanticBlock";
@@ -17,7 +20,12 @@ import {
 } from "./buildLifecycleStages";
 import type { RunRow } from "./RunQueueTable";
 import { ApiError, swrFetcher } from "@/lib/api/client";
-import { useAdminJobs, useJobDefinition, useJobs } from "@/lib/api/hooks";
+import {
+  useAdminJobs,
+  useJobDefinition,
+  useJobPreflight,
+  useJobs,
+} from "@/lib/api/hooks";
 import {
   buildGitHubContext,
   buildOpenDataContext,
@@ -74,6 +82,7 @@ export function LoadedRunView({
   const loadedRow = rows.find((row) => row.id === runId) ?? rows[0];
 
   const jobDefinition = useJobDefinition(loadedRow?.id ?? null);
+  const jobPreflight = useJobPreflight(loadedRow?.id ?? null);
   const selectedJob = loadedRow
     ? asRecord(jobDefinition.data) ?? rawJobs.find((job) => job.id === loadedRow.id)
     : undefined;
@@ -84,7 +93,16 @@ export function LoadedRunView({
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [validatingDraft, setValidatingDraft] = useState(false);
+  const [validationState, setValidationState] = useState<SubmissionValidationState>({
+    status: "not_checked",
+  });
   const [receiptOpen, setReceiptOpen] = useState(false);
+
+  useEffect(() => {
+    setValidationState({ status: "not_checked" });
+    setSubmitError(null);
+  }, [loadedRow?.id]);
 
   if (!loadedRow) {
     return (
@@ -101,7 +119,12 @@ export function LoadedRunView({
   // textarea into a useful template editor: the operator sees the
   // schema-shaped example pre-filled, edits the placeholder values,
   // and submits something the verifier can actually validate.
-  const submissionContract = asRecord(selectedJob?.submissionContract);
+  const preflightRecord = asRecord(jobPreflight.data);
+  const submissionContract =
+    asRecord(selectedJob?.submissionContract) ??
+    asRecord(preflightRecord?.submissionContract);
+  const schemaContract =
+    asRecord(selectedJob?.schemaContract) ?? asRecord(preflightRecord?.schemaContract);
   const submissionExample = asRecord(
     asRecord(submissionContract?.submitPayloadExample)?.submission
   );
@@ -112,6 +135,32 @@ export function LoadedRunView({
     typeof submissionContract?.outputSchemaUrl === "string"
       ? submissionContract.outputSchemaUrl
       : undefined;
+  const structuredSubmissionRequired =
+    submissionContract?.structuredSubmissionRequired === true;
+
+  const handleValidateDraft = async (draft: string) => {
+    setValidatingDraft(true);
+    setSubmitError(null);
+    try {
+      const submission = parseDirectSubmissionDraft(draft);
+      const result = await swrFetcher([
+        "/jobs/validate-submission",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            jobId: loadedRow.id,
+            submission,
+          }),
+        },
+      ]);
+      setValidationState(validationStateFromResponse(result));
+    } catch (err) {
+      setValidationState(validationStateFromError(err));
+    } finally {
+      setValidatingDraft(false);
+    }
+  };
 
   const handleSubmit = async (evidence: string) => {
     setSubmitError(null);
@@ -121,13 +170,9 @@ export function LoadedRunView({
     }
     setSubmitting(true);
     try {
-      // The backend validates `payload.submission` directly against the
-      // job's output schema (PR #123). If the operator typed a JSON
-      // object that matches the schema, send it as-is. Otherwise fall
-      // back to the legacy text-evidence wrapping so older fixtures
-      // and free-text smoke tests still get a 4xx that says what's
-      // wrong instead of failing silently here.
-      const submission = parseSubmissionInput(evidence, loadedRow.id);
+      const submission = structuredSubmissionRequired
+        ? parseDirectSubmissionDraft(evidence)
+        : parseSubmissionInput(evidence, loadedRow.id);
       await swrFetcher([
         "/jobs/submit",
         {
@@ -149,6 +194,7 @@ export function LoadedRunView({
       const apiMessage = extractApiErrorMessage(err);
       setSubmitError(
         apiMessage ??
+          (err instanceof Error ? err.message : undefined) ??
           "Could not submit this run. Check session ownership and the submission shape."
       );
     } finally {
@@ -188,6 +234,13 @@ export function LoadedRunView({
         jobId={loadedRow.id}
         lifecycle={loadedRow.lifecycle}
       />
+      {submissionContract ? (
+        <SubmissionReadinessStrip
+          contract={submissionContract}
+          schemaContract={schemaContract}
+          preflight={preflightRecord}
+        />
+      ) : null}
       <LoadedRunPanel
         kicker={kicker}
         title={loadedRow.title}
@@ -225,6 +278,28 @@ export function LoadedRunView({
           metaFoot: outputSchemaUrl ? `output schema · ${outputSchemaUrl}` : "",
           sample: submissionSample,
         }}
+        submissionContract={
+          submissionContract
+            ? {
+                endpoint: text(submissionContract.endpoint),
+                validationEndpoint: text(submissionContract.validationEndpoint),
+                structuredSubmissionRequired:
+                  submissionContract.structuredSubmissionRequired === true,
+                schemaValidates: text(submissionContract.schemaValidates),
+                doNotWrapInOutput: submissionContract.doNotWrapInOutput === true,
+                outputSchemaRef: text(submissionContract.outputSchemaRef),
+                outputSchemaUrl: text(submissionContract.outputSchemaUrl),
+                submitPayloadExample: submissionContract.submitPayloadExample,
+                invalidWrappedOutputHint: text(
+                  submissionContract.invalidWrappedOutputHint
+                ),
+                schemaContract,
+                validation: validationState,
+                validating: validatingDraft,
+                onValidate: handleValidateDraft,
+              }
+            : undefined
+        }
         submission={{
           note: loadedWikipedia ? (
             <>
@@ -707,6 +782,89 @@ export function LoadedRunView({
   );
 }
 
+function SubmissionReadinessStrip({
+  contract,
+  schemaContract,
+  preflight,
+}: {
+  contract: Record<string, unknown>;
+  schemaContract: Record<string, unknown> | null;
+  preflight: Record<string, unknown> | null;
+}) {
+  const output = asRecord(schemaContract?.output);
+  const endpoint = text(
+    contract.validationEndpoint,
+    text(output?.validationEndpoint, "POST /jobs/validate-submission")
+  );
+  const schemaRef = text(
+    contract.outputSchemaRef,
+    text(output?.schemaRef, text(preflight?.requiredOutputSchema, "not emitted"))
+  );
+  const schemaUrl = text(contract.outputSchemaUrl, text(output?.schemaUrl, ""));
+  const validates = text(
+    contract.schemaValidates,
+    text(output?.validates, "payload.submission")
+  );
+  const structured = contract.structuredSubmissionRequired === true;
+
+  return (
+    <section className="rounded-[10px] border border-[var(--avy-line)] bg-[var(--avy-paper)] p-[0.75rem_0.95rem] shadow-[var(--shadow-card)]">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]">
+        <span
+          className="font-[family-name:var(--font-display)] text-[10.5px] font-extrabold uppercase text-[var(--avy-muted)]"
+          style={{ letterSpacing: "0.14em" }}
+        >
+          Preflight submission readiness
+        </span>
+        <ReadinessFact
+          label="structuredSubmissionRequired"
+          value={structured ? "true" : "false"}
+          accent={structured}
+        />
+        <ReadinessFact label="outputSchemaRef" value={schemaRef} href={schemaUrl} />
+        <ReadinessFact label="validationEndpoint" value={endpoint} />
+        <ReadinessFact label="validates" value={validates} />
+      </div>
+    </section>
+  );
+}
+
+function ReadinessFact({
+  label,
+  value,
+  href,
+  accent = false,
+}: {
+  label: string;
+  value: string;
+  href?: string;
+  accent?: boolean;
+}) {
+  return (
+    <span className="inline-flex min-w-0 items-center gap-1">
+      <span className="text-[var(--avy-muted)]">{label}</span>
+      <b
+        className={`min-w-0 break-words font-semibold ${
+          accent ? "text-[var(--avy-accent)]" : "text-[var(--avy-ink)]"
+        }`}
+      >
+        {href ? (
+          <a
+            href={href}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="text-[var(--avy-accent)] hover:underline"
+          >
+            {value}
+          </a>
+        ) : (
+          value
+        )}
+      </b>
+    </span>
+  );
+}
+
 /**
  * Read an operator's textarea content as a submission body. Two paths:
  *   - JSON-object input → forward verbatim as `payload.submission`. This
@@ -734,6 +892,75 @@ function parseSubmissionInput(evidence: string, jobId: string): unknown {
     jobId,
     submittedAt: new Date().toISOString(),
   };
+}
+
+function parseDirectSubmissionDraft(draft: string): unknown {
+  const trimmed = draft.trim();
+  if (!trimmed) {
+    throw new Error("Draft is empty. Paste the schema object for payload.submission.");
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch (error) {
+    throw new Error(
+      error instanceof Error
+        ? `Invalid JSON draft: ${error.message}`
+        : "Invalid JSON draft."
+    );
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("payload.submission must be a JSON object.");
+  }
+  return parsed;
+}
+
+function validationStateFromResponse(payload: unknown): SubmissionValidationState {
+  const record = asRecord(payload);
+  if (!record) {
+    return {
+      status: "invalid",
+      message: "Validation endpoint returned an unexpected response.",
+      details: payload,
+    };
+  }
+  if (record.valid === true) return { status: "valid" };
+  return {
+    status: "invalid",
+    message: text(record.message, "Draft does not match the output schema."),
+    path: validationPath(record),
+    details: record.details ?? record,
+  };
+}
+
+function validationStateFromError(err: unknown): SubmissionValidationState {
+  if (err instanceof ApiError) {
+    const record = asRecord(err.body);
+    return {
+      status: "invalid",
+      message: record ? text(record.message, err.message) : err.message,
+      path: record ? validationPath(record) : undefined,
+      details: record?.details ?? err.body,
+    };
+  }
+  return {
+    status: "invalid",
+    message: err instanceof Error ? err.message : "Could not validate draft.",
+  };
+}
+
+function validationPath(record: Record<string, unknown>): string | undefined {
+  const details = asRecord(record.details);
+  return (
+    text(record.path) ||
+    text(record.expectedPath) ||
+    text(record.expected) ||
+    text(details?.path) ||
+    text(details?.expectedPath) ||
+    text(details?.expected) ||
+    text(details?.received) ||
+    undefined
+  );
 }
 
 /**
@@ -772,6 +999,10 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
+}
+
+function text(value: unknown, fallback = ""): string {
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
 }
 
 /**
