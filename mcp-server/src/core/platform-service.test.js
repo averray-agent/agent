@@ -197,10 +197,17 @@ test("getSessionTimeline includes transitions and verification state", async () 
     outcome: "approved",
     reasonCode: "BENCHMARK_THRESHOLD_MET"
   });
+  const result = await service.stateStore.getVerificationResult(submitted.sessionId);
 
   const timeline = await service.getSessionTimeline(submitted.sessionId);
   assert.equal(timeline.timelineVersion, "v2");
   assert.equal(timeline.session.status, "resolved");
+  assert.equal(result.verifierConfigVersion, 1);
+  assert.equal(result.verificationContract.version, "verification-contract-v1");
+  assert.equal(result.verificationContract.handler, "benchmark");
+  assert.equal(result.verificationInput.kind, "structured");
+  assert.equal(typeof result.verifierConfigHash, "string");
+  assert.equal(typeof result.verificationInputHash, "string");
   assert.equal(timeline.lifecycle.currentPhase, "terminal");
   assert.equal(timeline.stateMachine.timelineVersion, "v2");
   assert.ok(Array.isArray(timeline.stateMachine.statuses));

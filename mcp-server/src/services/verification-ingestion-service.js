@@ -1,10 +1,12 @@
 import { transitionSession } from "../core/session-state-machine.js";
 import { updateFundedJobFromSession } from "../core/funded-jobs.js";
+import { buildVerificationAuditFields } from "../core/verifier-contract.js";
 
 export class VerificationIngestionService {
-  constructor(stateStore, eventBus = undefined) {
+  constructor(stateStore, eventBus = undefined, getJobDefinition = undefined) {
     this.stateStore = stateStore;
     this.eventBus = eventBus;
+    this.getJobDefinition = getJobDefinition;
   }
 
   async ingest(sessionId, verdict) {
@@ -14,6 +16,11 @@ export class VerificationIngestionService {
     if (!session) {
       return undefined;
     }
+    const job = this.resolveJob(session, verdict);
+    const verificationInput = verdict.verificationInput ?? session.submission ?? "";
+    const auditFields = job
+      ? buildVerificationAuditFields(job, { verdict, verificationInput })
+      : {};
 
     const status = verdict.outcome === "approved"
       ? "resolved"
@@ -27,14 +34,17 @@ export class VerificationIngestionService {
         outcome: verdict.outcome,
         reasonCode: verdict.reasonCode,
         handler: verdict.handler,
-        handlerVersion: verdict.handlerVersion
+        handlerVersion: auditFields.handlerVersion ?? verdict.handlerVersion,
+        verifierConfigVersion: auditFields.verifierConfigVersion
       }
     }, status, {
       reason: "verification_resolved",
       metadata: {
         outcome: verdict.outcome,
         reasonCode: verdict.reasonCode,
-        handler: verdict.handler
+        handler: verdict.handler,
+        handlerVersion: auditFields.handlerVersion ?? verdict.handlerVersion,
+        verifierConfigVersion: auditFields.verifierConfigVersion
       }
     });
     const updatedSession = await this.stateStore.upsertSession(transitioned);
@@ -45,6 +55,7 @@ export class VerificationIngestionService {
     }));
     await this.stateStore.upsertVerificationResult(updatedSession.sessionId, {
       ...verdict,
+      ...auditFields,
       session: {
         sessionId: updatedSession.sessionId,
         jobId: updatedSession.jobId,
@@ -65,9 +76,24 @@ export class VerificationIngestionService {
       data: {
         outcome: verdict.outcome,
         reasonCode: verdict.reasonCode,
-        status
+        status,
+        handler: verdict.handler,
+        handlerVersion: auditFields.handlerVersion ?? verdict.handlerVersion,
+        verifierConfigVersion: auditFields.verifierConfigVersion
       }
     });
     return updatedSession;
+  }
+
+  resolveJob(session, verdict) {
+    const jobId = session?.jobId ?? verdict?.jobId;
+    if (!jobId || typeof this.getJobDefinition !== "function") {
+      return undefined;
+    }
+    try {
+      return this.getJobDefinition(jobId);
+    } catch {
+      return undefined;
+    }
   }
 }

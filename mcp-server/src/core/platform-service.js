@@ -96,7 +96,11 @@ export class PlatformService {
       this.getClaimableJobDefinition.bind(this),
       this.getClaimEconomicsConfig.bind(this)
     );
-    this.verificationIngestionService = new VerificationIngestionService(this.stateStore, this.eventBus);
+    this.verificationIngestionService = new VerificationIngestionService(
+      this.stateStore,
+      this.eventBus,
+      this.getJobDefinition.bind(this)
+    );
   }
 
   getPlatformCapabilities() {

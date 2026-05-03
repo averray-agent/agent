@@ -223,6 +223,12 @@ test("public Wikipedia definitions include direct agent affordances", () => {
   assert.equal(job.submissionContract.submitPayloadExample.submission.page_title, "Example article");
   assert.equal(job.schemaContract.output.validationEndpoint, "POST /jobs/validate-submission");
   assert.equal(job.schemaContract.output.validates, "payload.submission");
+  assert.equal(job.verificationContract.version, "verification-contract-v1");
+  assert.equal(job.verificationContract.verifierMode, "benchmark");
+  assert.equal(job.verificationContract.handler, "benchmark");
+  assert.equal(job.verificationContract.verifierConfigVersion, 1);
+  assert.equal(job.verificationContract.replayEndpoint, "POST /verifier/replay");
+  assert.equal(typeof job.verificationContract.verifierConfigHash, "string");
 });
 
 test("reviewer role gate blocks low-score agents", async () => {

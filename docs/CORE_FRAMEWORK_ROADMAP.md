@@ -77,30 +77,33 @@ and works for v1, but the contract between:
 
 is still too loose for high-trust operation.
 
-### Gaps today
+### Current implementation
 
-- `benchmark` and `deterministic` handlers operate on plain text evidence
-- there is no versioned verifier config envelope
-- verification results are stored, but the framework does not treat them as
-  a replayable artifact with a clear input snapshot
-- there is no notion of verifier policy version or handler version in the
-  stored result
+- job definitions and preflight responses expose a `verificationContract`
+  envelope with handler, verifier config version, config hash, and replay/result
+  endpoints
+- verification results persist `verificationInput`,
+  `verificationInputHash`, `verifierConfigSnapshot`, `verifierConfigHash`,
+  `verifierConfigVersion`, and `handlerVersion`
+- direct verification ingestion and `/verifier/run` both enrich stored verdicts
+  with the same audit fields
+- `/verifier/replay` evaluates against the stored verifier config snapshot when
+  one exists, so audits are not silently affected by later config edits
 
-### Improve to
+### Remaining gaps
 
-- versioned verifier configs
-- explicit evidence shape per verifier mode
-- persisted verification input snapshot
-- persisted handler version and policy version
-- deterministic replay command for disputes and audits
+- `benchmark` and `deterministic` handlers can still operate on plain text
+  evidence for legacy jobs
+- verifier policy version is not yet separate from verifier config version
+- replay still uses the current handler implementation; `handlerVersion`
+  records the version that ran, but the code itself is not version-pinned
 
 ### Concrete next changes
 
-- add `verifierConfig.version`
 - add `evidenceSchemaRef` or `submissionSchemaRef` to jobs
-- persist `verificationInput`, `verifierConfigVersion`, and `handlerVersion`
-  alongside the verdict
-- add a `replayVerification(sessionId)` internal path for audit and dispute use
+- split `policyVersion` from `verifierConfig.version` when verifier rules move
+  beyond simple config data
+- add handler-versioned replay fixtures before introducing v2 verifier handlers
 
 ### What this unlocks
 

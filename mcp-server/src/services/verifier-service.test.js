@@ -58,12 +58,25 @@ test("verifySubmission persists verification input and supports replay", async (
   assert.equal(result.outcome, "approved");
   assert.equal(result.handlerVersion, 1);
   assert.equal(result.verifierConfigVersion, 1);
+  assert.deepEqual(result.verifierConfigSnapshot, job.verifierConfig);
+  assert.equal(result.verificationContract.version, "verification-contract-v1");
+  assert.equal(result.verificationContract.handler, "deterministic");
+  assert.equal(result.verificationContract.handlerVersion, 1);
+  assert.equal(typeof result.verifierConfigHash, "string");
+  assert.equal(typeof result.verificationInputHash, "string");
   assert.equal(result.verificationInput.kind, "structured");
+
+  job.verifierConfig = {
+    ...job.verifierConfig,
+    expectedOutputs: ["this live config would fail the original submission"]
+  };
 
   const replay = await service.replayVerification(SESSION_ID);
   assert.equal(replay.replay, true);
   assert.equal(replay.outcome, "approved");
   assert.equal(replay.originalOutcome, "approved");
+  assert.equal(replay.verifierConfigHash, result.verifierConfigHash);
+  assert.deepEqual(replay.verifierConfigSnapshot.expectedOutputs, ["release_id", "checks_passed", "go_no_go"]);
 });
 
 test("github_pr verifier scores structured PR evidence and exposes reputation signals", async () => {

@@ -4,6 +4,7 @@ import {
   ValidationError
 } from "./errors.js";
 import { getBuiltinJobSchema, isBuiltinJobSchemaRef, schemaRefToJobSchemaPath } from "./job-schema-registry.js";
+import { buildVerificationContract } from "./verifier-contract.js";
 
 const DEFAULT_AGENT_PROFILE = {
   capabilities: ["claim_job", "submit_work", "allocate_idle_funds"],
@@ -391,6 +392,7 @@ export class JobCatalogService {
       strategyUnwindNeeded: liquid < claimEconomics.totalClaimLock,
       requiredOutputSchema: job.outputSchemaRef,
       submissionContract: buildSubmissionContract(job),
+      verificationContract: buildVerificationContract(job),
       verifierMode: job.verifierMode,
       verifierConfig: job.verifierConfig,
       tier: job.tier,
@@ -494,11 +496,13 @@ export class JobCatalogService {
     const publicDetails = buildPublicJobDetails(job);
     const submissionContract = buildSubmissionContract(job);
     const schemaContract = buildSchemaContract(job);
+    const verificationContract = buildVerificationContract(job);
     return {
       ...job,
       ...(publicDetails ? { publicDetails } : {}),
       ...(submissionContract ? { submissionContract } : {}),
       ...(schemaContract ? { schemaContract } : {}),
+      verificationContract,
       lifecycle: this.buildLifecycle(job, now)
     };
   }

@@ -1,5 +1,9 @@
 import { VerifierRegistry } from "./verifier-handlers.js";
 import { hashCanonicalContent } from "../core/canonical-content.js";
+import {
+  buildVerificationAuditFields,
+  jobWithVerifierConfigSnapshot
+} from "../core/verifier-contract.js";
 
 export class VerifierService {
   constructor(platformService, stateStore, blockchainGateway = undefined, registry = new VerifierRegistry()) {
@@ -38,8 +42,7 @@ export class VerifierService {
       ...verdict,
       sessionId,
       metadataURI,
-      verifierConfigVersion: job.verifierConfig?.version ?? 1,
-      verificationInput,
+      ...buildVerificationAuditFields(job, { verdict, verificationInput }),
       session: updatedSession ?? session
     };
 
@@ -51,14 +54,14 @@ export class VerifierService {
     const job = this.platformService.getJobDefinition(session.jobId);
     const existing = await this.stateStore.getVerificationResult(sessionId);
     const verificationInput = existing?.verificationInput ?? this.resolveVerificationInput(session);
-    const verdict = await this.registry.evaluate(job, verificationInput);
+    const replayJob = jobWithVerifierConfigSnapshot(job, existing?.verifierConfigSnapshot);
+    const verdict = await this.registry.evaluate(replayJob, verificationInput);
     return {
       ...verdict,
       sessionId,
       replay: true,
       originalOutcome: existing?.outcome,
-      verifierConfigVersion: job.verifierConfig?.version ?? 1,
-      verificationInput
+      ...buildVerificationAuditFields(replayJob, { verdict, verificationInput })
     };
   }
 
