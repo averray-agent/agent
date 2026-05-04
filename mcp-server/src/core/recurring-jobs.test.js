@@ -32,6 +32,26 @@ test("createJob preserves recurring + schedule fields", () => {
   assert.deepEqual(record.schedule, { cron: "0 9 * * 1", timezone: "Europe/Zurich" });
 });
 
+test("createJob preserves finite recurring reserve policy", () => {
+  const service = makeService();
+  const record = service.createJob({
+    ...TEMPLATE,
+    recurringPolicy: { reserveAmount: 15, reserveAsset: "DOT" }
+  });
+  assert.deepEqual(record.recurringPolicy, { reserveAmount: 15, reserveAsset: "DOT" });
+});
+
+test("createJob rejects recurring reserve that cannot cover one run", () => {
+  const service = makeService();
+  assert.throws(
+    () => service.createJob({
+      ...TEMPLATE,
+      recurringPolicy: { reserveAmount: 4 }
+    }),
+    (err) => err instanceof ValidationError && /cover at least one run/.test(err.message)
+  );
+});
+
 test("createJob rejects recurring: true without a schedule", () => {
   const service = makeService();
   assert.throws(
@@ -69,7 +89,7 @@ test("non-recurring jobs work without a schedule", () => {
 
 test("fireRecurringJob produces a derivative with deterministic id", () => {
   const service = makeService();
-  service.createJob(TEMPLATE);
+  service.createJob({ ...TEMPLATE, recurringPolicy: { reserveAmount: 10 } });
   const derivative = service.fireRecurringJob("weekly-digest", {
     firedAt: new Date("2026-04-20T09:00:00.000Z")
   });
@@ -83,6 +103,11 @@ test("fireRecurringJob produces a derivative with deterministic id", () => {
   assert.equal(derivative.rewardAmount, 5);
   // Schedule is stripped from the derivative (it's a one-shot run)
   assert.equal(derivative.schedule, undefined);
+  assert.equal(derivative.recurringPolicy, undefined);
+
+  const status = service.getRecurringTemplateStatus();
+  assert.equal(status.templates[0].reserve.remainingAmount, 5);
+  assert.equal(status.templates[0].reserve.remainingRuns, 1);
 });
 
 test("fireRecurringJob rejects non-recurring templates", () => {
@@ -103,6 +128,30 @@ test("fireRecurringJob rejects collisions (same template + same second)", () => 
     () => service.fireRecurringJob("weekly-digest", { firedAt: when }),
     (err) => err.code === "recurring_job_collision"
   );
+});
+
+test("fireRecurringJob stops when a finite recurring reserve is exhausted", () => {
+  const service = makeService();
+  service.createJob({ ...TEMPLATE, recurringPolicy: { reserveAmount: 10 } });
+  service.fireRecurringJob("weekly-digest", { firedAt: new Date("2026-04-20T09:00:00.000Z") });
+  service.updateRecurringTemplateRuntime("weekly-digest", { nextFireAt: "2026-04-27T09:00:00.000Z" });
+  service.fireRecurringJob("weekly-digest", { firedAt: new Date("2026-04-27T09:00:00.000Z") });
+
+  const depleted = service.getRecurringTemplateStatus();
+  assert.equal(depleted.templates[0].exhausted, true);
+  assert.equal(depleted.templates[0].nextFireAt, undefined);
+  assert.equal(depleted.templates[0].lastResult.status, "fired");
+
+  assert.throws(
+    () => service.fireRecurringJob("weekly-digest", { firedAt: new Date("2026-05-04T09:00:00.000Z") }),
+    (err) => err.code === "recurring_reserve_exhausted"
+      && err.details.reserve.remainingAmount === 0
+  );
+
+  const status = service.getRecurringTemplateStatus();
+  assert.equal(status.templates[0].exhausted, true);
+  assert.equal(status.templates[0].reserve.exhausted, true);
+  assert.equal(status.templates[0].lastResult.status, "reserve_exhausted");
 });
 
 test("getRecurringTemplateStatus summarizes templates and latest derivatives", () => {

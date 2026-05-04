@@ -249,8 +249,11 @@ export class JobCatalogService {
           rewardAsset: template.rewardAsset,
           verifierMode: template.verifierMode,
           schedule: template.schedule,
+          recurringPolicy: template.recurringPolicy,
+          reserve: this.buildRecurringReserveStatus(template, derivatives),
           derivativeCount: derivatives.length,
           paused: Boolean(template.runtime?.paused),
+          exhausted: Boolean(template.runtime?.exhausted),
           lastFiredAt: template.runtime?.lastFiredAt ?? latest?.firedAt,
           nextFireAt: template.runtime?.nextFireAt,
           lastResult: template.runtime?.lastResult,
@@ -287,6 +290,36 @@ export class JobCatalogService {
     }
     template.runtime = nextRuntime;
     return { ...template.runtime };
+  }
+
+  buildRecurringReserveStatus(template, derivatives = undefined) {
+    const reserveAmount = Number(template?.recurringPolicy?.reserveAmount);
+    if (!Number.isFinite(reserveAmount)) {
+      return {
+        mode: "unbounded",
+        rewardAsset: template.rewardAsset,
+        rewardAmount: template.rewardAmount
+      };
+    }
+
+    const runCount = Array.isArray(derivatives)
+      ? derivatives.length
+      : this.jobs.filter((job) => job.templateId === template.id).length;
+    const rewardAmount = Math.max(Number(template.rewardAmount ?? 0), 0);
+    const consumedAmount = Math.max(runCount * rewardAmount, 0);
+    const remainingAmount = Math.max(reserveAmount - consumedAmount, 0);
+    const remainingRuns = rewardAmount > 0 ? Math.floor(remainingAmount / rewardAmount) : 0;
+
+    return {
+      mode: "finite",
+      rewardAsset: template.rewardAsset,
+      rewardAmount,
+      reserveAmount,
+      consumedAmount,
+      remainingAmount,
+      remainingRuns,
+      exhausted: remainingAmount < rewardAmount
+    };
   }
 
   pauseRecurringTemplate(templateId, pausedAt = new Date()) {
@@ -656,6 +689,11 @@ export class JobCatalogService {
     const source = normalisePlainObject(input?.source, "source");
     const verification = normalisePlainObject(input?.verification, "verification");
     const lifecycle = normaliseLifecycle(input?.lifecycle, { disableStale: recurring });
+    const recurringPolicy = normaliseRecurringPolicy(input?.recurringPolicy, {
+      recurring,
+      rewardAmount,
+      rewardAsset
+    });
 
     return {
       id,
@@ -682,7 +720,8 @@ export class JobCatalogService {
       ...(verification ? { verification } : {}),
       ...(parentSessionId ? { parentSessionId } : {}),
       ...(recurring ? { recurring: true } : {}),
-      ...(schedule ? { schedule } : {})
+      ...(schedule ? { schedule } : {}),
+      ...(recurringPolicy ? { recurringPolicy } : {})
     };
   }
 
@@ -697,6 +736,24 @@ export class JobCatalogService {
    */
   fireRecurringJob(templateId, { firedAt = new Date() } = {}) {
     const template = this.getRecurringTemplate(templateId);
+    const reserve = this.buildRecurringReserveStatus(template);
+    if (reserve.exhausted) {
+      this.updateRecurringTemplateRuntime(templateId, {
+        exhausted: true,
+        nextFireAt: undefined,
+        lastResult: {
+          status: "reserve_exhausted",
+          at: firedAt.toISOString(),
+          message: `Recurring reserve exhausted for ${templateId}`,
+          reserve
+        }
+      });
+      throw new ConflictError(
+        `Recurring reserve exhausted for ${templateId}`,
+        "recurring_reserve_exhausted",
+        { templateId, reserve }
+      );
+    }
     const stamp = firedAt.toISOString().replace(/[:.]/g, "-").replace("Z", "").slice(0, 19);
     const derivativeId = this.normalizeId(`${templateId}-run-${stamp}`);
     if (this.jobs.some((candidate) => candidate.id === derivativeId)) {
@@ -717,13 +774,19 @@ export class JobCatalogService {
       })
     };
     delete derivative.schedule;
+    delete derivative.recurringPolicy;
     this.jobs.unshift(derivative);
+    const nextReserve = this.buildRecurringReserveStatus(template);
     this.updateRecurringTemplateRuntime(templateId, {
       lastFiredAt: firedAt.toISOString(),
+      nextFireAt: nextReserve.exhausted ? undefined : template.runtime?.nextFireAt,
+      reserve: nextReserve,
+      exhausted: Boolean(nextReserve.exhausted),
       lastResult: {
         status: "fired",
         at: firedAt.toISOString(),
-        derivativeId
+        derivativeId,
+        reserve: nextReserve
       }
     });
     return derivative;
@@ -848,6 +911,53 @@ function normaliseSchedule(raw, recurring) {
     }
   }
   return normalised;
+}
+
+function normaliseRecurringPolicy(raw, { recurring, rewardAmount, rewardAsset }) {
+  if (!raw) {
+    return undefined;
+  }
+  if (!recurring) {
+    throw new ValidationError("recurringPolicy is only valid for recurring jobs");
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new ValidationError("recurringPolicy must be an object if provided.");
+  }
+
+  const policy = {};
+  if (raw.reserveAmount !== undefined && raw.reserveAmount !== null && raw.reserveAmount !== "") {
+    const reserveAmount = Number(raw.reserveAmount);
+    if (!Number.isFinite(reserveAmount) || reserveAmount <= 0) {
+      throw new ValidationError("recurringPolicy.reserveAmount must be greater than zero.");
+    }
+    if (reserveAmount < rewardAmount) {
+      throw new ValidationError("recurringPolicy.reserveAmount must cover at least one run.");
+    }
+    policy.reserveAmount = reserveAmount;
+    policy.reserveAsset = typeof raw.reserveAsset === "string" && raw.reserveAsset.trim()
+      ? raw.reserveAsset.trim().toUpperCase()
+      : rewardAsset;
+    if (policy.reserveAsset !== rewardAsset) {
+      throw new ValidationError("recurringPolicy.reserveAsset must match rewardAsset.");
+    }
+  }
+
+  if (raw.maxRuns !== undefined && raw.maxRuns !== null && raw.maxRuns !== "") {
+    const maxRuns = Number(raw.maxRuns);
+    if (!Number.isInteger(maxRuns) || maxRuns < 1) {
+      throw new ValidationError("recurringPolicy.maxRuns must be a positive integer.");
+    }
+    policy.maxRuns = maxRuns;
+    const impliedReserve = maxRuns * rewardAmount;
+    if (policy.reserveAmount === undefined) {
+      policy.reserveAmount = impliedReserve;
+      policy.reserveAsset = rewardAsset;
+    } else if (policy.reserveAmount < impliedReserve) {
+      throw new ValidationError("recurringPolicy.reserveAmount must cover maxRuns * rewardAmount.");
+    }
+  }
+
+  return Object.keys(policy).length ? policy : undefined;
 }
 
 /**

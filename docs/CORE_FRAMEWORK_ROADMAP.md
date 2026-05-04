@@ -377,28 +377,32 @@ product, but today they are still a pattern plus manual fire endpoint.
 
 ### Gaps today
 
-- no built-in scheduler worker
-- no durable `lastFiredAt` / `nextFireAt` runtime record
-- no failure policy beyond external retries
-- no reserve-aware fire control
+- on-chain poster reserve funding is still represented as backend policy
+  metadata rather than an escrow-native subscription pool
+- missed-fire behavior is conservative and does not backfill every skipped
+  interval
+- operator UI still needs richer controls for reserve exhaustion and next
+  firing
 
 ### Improve to
 
-- a proper scheduler runtime
-- status visibility for templates
+- scheduler runtime as a product primitive
+- status visibility for templates and reserve exhaustion
 - pause/resume controls
 - conservative missed-fire behavior
 
 ### Concrete next changes
 
-- add a scheduler worker that scans recurring templates on boot
-- persist template runtime metadata:
+- [x] add a scheduler worker that scans recurring templates on boot
+- [x] persist template runtime metadata:
   - `lastFiredAt`
   - `nextFireAt`
   - `lastResult`
   - `paused`
-- gate firing on available reserve and policy checks
-- expose status in admin endpoints and operator UI
+- [x] gate firing on finite template reserve policy
+- [x] expose status in admin endpoints
+- [ ] wire operator UI controls for reserve exhaustion and next firing
+- [ ] back recurring reserve with escrow-native/on-chain poster funding
 
 ### What this unlocks
 
