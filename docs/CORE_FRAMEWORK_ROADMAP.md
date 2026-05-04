@@ -323,12 +323,24 @@ emit into it with the same topic taxonomy.
 Auth is currently solid enough for launch, but capabilities are still spread
 across environment config, JWT roles, and route-level decisions.
 
-### Gaps today
+### Current implementation
 
-- roles are only `admin` and `verifier`
-- route protection is clear, but capability composition is still coarse
-- environment policy and runtime capability policy are not expressed in one
-  source of truth
+- `auth-policy-v1` defines the shared base capability set, role expansions,
+  method-aware route requirements, UI-control requirements, and automation
+  action requirements
+- auth middleware resolves capabilities from roles plus optional signed scopes,
+  and rejects route access when the required capabilities are missing
+- `/auth/session` and `/admin/status` expose the active capability matrix so
+  the operator app and automation clients can render controls from backend
+  policy instead of duplicating route rules
+
+### Remaining gaps
+
+- signed tokens are still issued from coarse environment role lists
+- future fine-grained delegated scopes are supported by the resolver, but do
+  not yet have an operator grant/revoke workflow
+- some public discovery docs still describe auth action requirements separately
+  from the runtime capability matrix
 
 ### Improve to
 
@@ -341,14 +353,12 @@ across environment config, JWT roles, and route-level decisions.
 
 ### Concrete next changes
 
-- document and codify route-to-capability mapping
-- add a capability resolver layer on top of roles
-- let admin status expose the active capability model to the operator app
-- prepare for future scopes such as:
-  - `jobs:create`
-  - `jobs:fire-recurring`
-  - `verifier:run`
-  - `ops:view`
+- add an operator-facing grant/revoke flow for scoped service tokens or
+  delegated wallets
+- align public onboarding action requirements with the versioned auth policy
+  payload
+- extend frontend controls to hide/disable actions from `authPolicy.uiControls`
+- add audit events when capability grants change
 
 ### What this unlocks
 

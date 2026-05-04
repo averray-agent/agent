@@ -1,3 +1,5 @@
+import { getRouteCapabilityRequirements } from "../auth/capabilities.js";
+
 const DEFAULT_BASE_URL = "https://api.averray.com";
 const DEFAULT_DISCOVERY_URL = "https://averray.com/.well-known/agent-tools.json";
 const DEFAULT_PROFILE_URL = "https://app.averray.com/agents/<wallet>";
@@ -257,7 +259,7 @@ const HTTP_ACTION_REQUIREMENTS = [
     walletModes: ["evm-siwe"]
   },
   {
-    method: "*",
+    method: "POST",
     path: "/verifier/:path",
     requiresAuth: true,
     requiredRole: "verifier",
@@ -431,15 +433,23 @@ export function getHttpActionRequirement(method = "*", pathname = "") {
   });
 }
 
-export function buildAuthRequirementDetails(method = "*", pathname = "", { requireRole = undefined } = {}) {
+export function buildAuthRequirementDetails(
+  method = "*",
+  pathname = "",
+  { requireRole = undefined, requiredCapabilities = undefined } = {}
+) {
   const requirement = getHttpActionRequirement(method, pathname) ?? {};
   const requiredRole = requireRole ?? requirement.requiredRole;
+  const capabilities = Array.isArray(requiredCapabilities)
+    ? requiredCapabilities
+    : getRouteCapabilityRequirements(method, pathname);
   return {
     requiresAuth: true,
     requiredAction:
       requirement.requiredAction
       ?? (requiredRole ? `${requiredRole}_wallet_sign_in` : "wallet_sign_in"),
     requiredRole,
+    requiredCapabilities: capabilities,
     authScheme: requirement.authScheme ?? "SIWE_JWT",
     walletModes: requirement.walletModes ?? ["evm-siwe"],
     authEntrypoints: AUTH_ENTRYPOINTS,

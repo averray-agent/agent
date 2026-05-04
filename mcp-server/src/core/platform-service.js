@@ -17,6 +17,7 @@ import {
 } from "./session-state-machine.js";
 import { computeClaimEconomics, countClaimedSessions } from "./claim-economics.js";
 import { claimStatusFields, isTerminalSession, summarizeJobClaimState } from "./claim-state.js";
+import { capabilityMatrix } from "../auth/capabilities.js";
 
 const TIMELINE_VERSION = "v2";
 
@@ -353,6 +354,7 @@ export class PlatformService {
             capabilities: auth.capabilities ?? []
           }
         : undefined,
+      authPolicy: capabilityMatrix(),
       anomalies,
       ops: {
         recentSessions: recentSessions.map((session) => ({
