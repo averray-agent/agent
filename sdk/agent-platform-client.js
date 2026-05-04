@@ -161,6 +161,20 @@ export class AgentPlatformClient {
     });
   }
 
+  async borrowFunds({ asset = "DOT", amount, idempotencyKey = undefined } = {}) {
+    return this.request("/account/borrow", {
+      method: "POST",
+      body: compact({ asset, amount, idempotencyKey })
+    });
+  }
+
+  async repayFunds({ asset = "DOT", amount, idempotencyKey = undefined } = {}) {
+    return this.request("/account/repay", {
+      method: "POST",
+      body: compact({ asset, amount, idempotencyKey })
+    });
+  }
+
   async listJobs({
     wallet = undefined,
     source = undefined,
@@ -250,6 +264,14 @@ export class AgentPlatformClient {
     if (limit !== undefined) params.set("limit", String(limit));
     if (jobId) params.set("jobId", jobId);
     return this.request(`/sessions${params.size ? `?${params.toString()}` : ""}`);
+  }
+
+  async listAdminSessions({ limit = undefined, jobId = undefined, wallet = undefined } = {}) {
+    const params = new URLSearchParams();
+    if (limit !== undefined) params.set("limit", String(limit));
+    if (jobId) params.set("jobId", jobId);
+    if (wallet) params.set("wallet", wallet);
+    return this.request(`/admin/sessions${params.size ? `?${params.toString()}` : ""}`);
   }
 
   async listDisputes({ limit = undefined } = {}) {
@@ -358,9 +380,28 @@ export class AgentPlatformClient {
     const text = await response.text();
     const payload = text ? safeJsonParse(text) : undefined;
     if (!response.ok) {
-      throw new Error(payload?.message ?? payload?.error ?? `${method} ${path} failed with ${response.status}`);
+      throw new AgentPlatformApiError({
+        message: payload?.message ?? payload?.error ?? `${method} ${path} failed with ${response.status}`,
+        status: response.status,
+        method,
+        path,
+        payload
+      });
     }
     return payload;
+  }
+}
+
+export class AgentPlatformApiError extends Error {
+  constructor({ message, status, method, path, payload }) {
+    super(message);
+    this.name = "AgentPlatformApiError";
+    this.status = status;
+    this.method = method;
+    this.path = path;
+    this.payload = payload;
+    this.code = payload?.code ?? payload?.error ?? undefined;
+    this.details = payload?.details ?? undefined;
   }
 }
 

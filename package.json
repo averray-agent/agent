@@ -10,7 +10,8 @@
   "scripts": {
     "test": "npm run test:backend && npm run test:sdk && npm run test:examples && npm run test:indexer:api && npm run test:contracts",
     "test:backend": "npm --workspace mcp-server test",
-    "test:sdk": "node --test sdk/agent-platform-client.test.mjs",
+    "test:sdk": "node --test sdk/agent-platform-client.test.mjs && npm run typecheck:sdk",
+    "typecheck:sdk": "tsc --noEmit --allowJs false --target es2022 --module nodenext --moduleResolution nodenext --skipLibCheck --lib es2022,dom sdk/agent-platform-client.d.ts sdk/agent-platform-client.types.test.ts",
     "test:examples": "node --test examples/**/*.test.mjs",
     "test:indexer:api": "npm --workspace indexer run test:api",
     "test:ops": "node --test scripts/ops/*.test.mjs",

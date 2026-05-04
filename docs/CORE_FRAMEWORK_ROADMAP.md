@@ -460,8 +460,8 @@ proves the need, but it is UI-focused rather than an external integration SDK.
 
 ### Gaps today
 
-- first-pass shared JS client exists, but the type surface is still broad
-  `unknown` responses rather than generated endpoint-specific models
+- typed JS client exists, but generated types from the API source are still a
+  later step
 - some request shapes are still duplicated across scripts, demos, and frontend
   code
 - canonical integration examples are young and should grow with real external
@@ -475,14 +475,18 @@ proves the need, but it is UI-focused rather than an external integration SDK.
 
 ### Concrete next changes
 
-- keep hardening `sdk/agent-platform-client.js`
-- ensure it wraps:
+- [x] keep hardening `sdk/agent-platform-client.js`
+- [x] ensure it wraps:
   - auth nonce + verify
   - list/recommend/preflight jobs
   - claim / submit / resume
   - session and job timeline inspection
   - admin job create / recurring fire / status
-- share validation types with docs and scripts where possible
+- [x] add hand-maintained endpoint response declarations for the current API
+- [x] expose structured API errors for automation
+- [ ] generate SDK types from the API/schema source instead of maintaining them
+  by hand
+- [ ] share validation types with frontend scripts where possible
 
 ### What this unlocks
 
