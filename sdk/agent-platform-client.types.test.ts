@@ -2,6 +2,7 @@ import {
   AgentPlatformApiError,
   AgentPlatformClient,
   type AccountSummary,
+  type BuiltinJobSchemaValue,
   type ClaimResponse,
   type JobDefinition,
   type JobsListResponse,
@@ -20,9 +21,26 @@ if (firstJobId) {
   const definition: JobDefinition = await client.getJobDefinition(firstJobId);
   const claim: ClaimResponse = await client.claimJob(definition.id, "example-run-id");
   const timeline: SessionTimelineResponse = await client.getSessionTimeline(claim.sessionId);
+  const wikipediaSubmission = {
+    page_title: "Example",
+    revision_id: "123",
+    citation_findings: [{
+      section: "History",
+      problem: "dead_link",
+      current_claim: "Example claim",
+      evidence_url: "https://example.test/source"
+    }],
+    proposed_changes: [{
+      change_type: "replace_citation",
+      target_text: "old citation",
+      replacement_text: "new citation",
+      source_url: "https://example.test/source"
+    }],
+    review_notes: "Proposal only."
+  } satisfies BuiltinJobSchemaValue<"schema://jobs/wikipedia-citation-repair-output">;
 
-  await client.validateJobSubmission(definition.id, { summary: "ready" });
-  await client.submitWork(claim.sessionId, { summary: "ready" });
+  await client.validateJobSubmission(definition.id, wikipediaSubmission);
+  await client.submitWork(claim.sessionId, wikipediaSubmission);
   await client.createSubJob({
     parentSessionId: claim.sessionId,
     id: `${claim.sessionId}-child`,
