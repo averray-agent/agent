@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { AgentPlatformClient } from "./agent-platform-client.js";
+import { AgentPlatformApiError, AgentPlatformClient } from "./agent-platform-client.js";
 
 test("builder read helpers call the expected public endpoints", async () => {
   const calls = [];
@@ -51,6 +51,14 @@ test("authenticated helpers send bearer token and compact JSON bodies", async ()
     recipient: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
     amount: "1.5"
   });
+  await client.borrowFunds({
+    amount: 2,
+    idempotencyKey: "borrow-1"
+  });
+  await client.repayFunds({
+    amount: 1,
+    idempotencyKey: undefined
+  });
 
   assert.equal(calls[0].url, "https://api.example.test/account/allocate");
   assert.equal(calls[0].options.method, "POST");
@@ -69,6 +77,17 @@ test("authenticated helpers send bearer token and compact JSON bodies", async ()
     asset: "DOT",
     amount: "1.5"
   });
+  assert.equal(calls[2].url, "https://api.example.test/account/borrow");
+  assert.deepEqual(JSON.parse(calls[2].options.body), {
+    asset: "DOT",
+    amount: 2,
+    idempotencyKey: "borrow-1"
+  });
+  assert.equal(calls[3].url, "https://api.example.test/account/repay");
+  assert.deepEqual(JSON.parse(calls[3].options.body), {
+    asset: "DOT",
+    amount: 1
+  });
 });
 
 test("listSessions builds optional query string without empty params", async () => {
@@ -83,12 +102,17 @@ test("listSessions builds optional query string without empty params", async () 
 
   await client.listSessions();
   await client.listSessions({ limit: 10, jobId: "starter job" });
+  await client.listAdminSessions({ limit: 5, wallet: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd" });
 
   assert.equal(calls[0].url, "https://api.example.test/sessions");
   assert.equal(calls[1].url, "https://api.example.test/sessions?limit=10&jobId=starter+job");
+  assert.equal(
+    calls[2].url,
+    "https://api.example.test/admin/sessions?limit=5&wallet=0xabcdefabcdefabcdefabcdefabcdefabcdefabcd"
+  );
 });
 
-test("job helpers build compact filters and admin timeline URLs", async () => {
+test("job helpers build compact filters, mutation bodies, and admin timeline URLs", async () => {
   const calls = [];
   const client = new AgentPlatformClient({
     baseUrl: "https://api.example.test",
@@ -101,7 +125,16 @@ test("job helpers build compact filters and admin timeline URLs", async () => {
   await client.listJobs({ source: "wikipedia", state: "claimable", limit: 5, offset: 10 });
   await client.listClaimableJobs({ category: "coding", limit: 2 });
   await client.validateJobSubmission("job with space", { summary: "Ready" });
+  await client.claimJob("job with space", "claim-key-1");
+  await client.submitWork("session with space", { summary: "Submitted" });
+  await client.submitWork("legacy session", "plain evidence");
   await client.getJobTimeline("job with space", { limit: 50 });
+  await client.createSubJob({
+    parentSessionId: "parent session",
+    id: "sub-job-1",
+    rewardAmount: 2
+  });
+  await client.listSubJobs("parent session");
 
   assert.equal(
     calls[0].url,
@@ -114,7 +147,28 @@ test("job helpers build compact filters and admin timeline URLs", async () => {
     jobId: "job with space",
     submission: { summary: "Ready" }
   });
-  assert.equal(calls[3].url, "https://api.example.test/admin/jobs/timeline?jobId=job+with+space&limit=50");
+  assert.equal(calls[3].url, "https://api.example.test/jobs/claim");
+  assert.deepEqual(JSON.parse(calls[3].options.body), {
+    jobId: "job with space",
+    idempotencyKey: "claim-key-1"
+  });
+  assert.equal(calls[4].url, "https://api.example.test/jobs/submit");
+  assert.deepEqual(JSON.parse(calls[4].options.body), {
+    sessionId: "session with space",
+    submission: { summary: "Submitted" }
+  });
+  assert.deepEqual(JSON.parse(calls[5].options.body), {
+    sessionId: "legacy session",
+    evidence: "plain evidence"
+  });
+  assert.equal(calls[6].url, "https://api.example.test/admin/jobs/timeline?jobId=job+with+space&limit=50");
+  assert.equal(calls[7].url, "https://api.example.test/jobs/sub");
+  assert.deepEqual(JSON.parse(calls[7].options.body), {
+    parentSessionId: "parent session",
+    id: "sub-job-1",
+    rewardAmount: 2
+  });
+  assert.equal(calls[8].url, "https://api.example.test/jobs/sub?parentSessionId=parent%20session");
 });
 
 test("operator surface helpers call policy, audit, and alert endpoints", async () => {
@@ -154,13 +208,29 @@ test("operator surface helpers call policy, audit, and alert endpoints", async (
   });
 });
 
-test("request throws server-provided error messages", async () => {
+test("request throws server-provided error messages with structured metadata", async () => {
   const client = new AgentPlatformClient({
     baseUrl: "https://api.example.test",
-    fetchImpl: async () => jsonResponse({ message: "nope" }, { status: 400 })
+    fetchImpl: async () => jsonResponse({
+      message: "nope",
+      code: "bad_shape",
+      details: { path: ["submission"] }
+    }, { status: 400 })
   });
 
-  await assert.rejects(() => client.getHealth(), /nope/u);
+  await assert.rejects(
+    () => client.getHealth(),
+    (error) => {
+      assert.ok(error instanceof AgentPlatformApiError);
+      assert.equal(error.message, "nope");
+      assert.equal(error.status, 400);
+      assert.equal(error.method, "GET");
+      assert.equal(error.path, "/health");
+      assert.equal(error.code, "bad_shape");
+      assert.deepEqual(error.details, { path: ["submission"] });
+      return true;
+    }
+  );
 });
 
 function jsonResponse(payload, { status = 200 } = {}) {
