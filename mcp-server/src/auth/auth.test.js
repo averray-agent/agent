@@ -362,6 +362,59 @@ test("requireAuth rejects token missing required role", async () => {
   );
 });
 
+test("requireAuth rejects token missing route capability", async () => {
+  const authConfig = {
+    secrets: [LONG_SECRET],
+    signingSecret: LONG_SECRET,
+    permissive: false,
+    strict: true,
+    adminWallets: new Set(),
+    verifierWallets: new Set()
+  };
+  const middleware = createAuthMiddleware({ authConfig, logger: silentLogger() });
+  const { token } = signToken(
+    { sub: "0xcccccccccccccccccccccccccccccccccccccccc", roles: [] },
+    { secret: LONG_SECRET, expiresInSeconds: 60 }
+  );
+  const request = { method: "GET", headers: { authorization: `Bearer ${token}` } };
+  const url = new URL("http://localhost/admin/status");
+  await assert.rejects(
+    () => middleware(request, url),
+    (error) => {
+      assert.ok(error instanceof AuthorizationError);
+      assert.equal(error.code, "missing_capability");
+      assert.deepEqual(error.details.requiredCapabilities, ["admin:status", "ops:view"]);
+      assert.deepEqual(error.details.missingCapabilities, ["admin:status", "ops:view"]);
+      return true;
+    }
+  );
+});
+
+test("requireAuth accepts explicit capability scopes without a role", async () => {
+  const authConfig = {
+    secrets: [LONG_SECRET],
+    signingSecret: LONG_SECRET,
+    permissive: false,
+    strict: true,
+    adminWallets: new Set(),
+    verifierWallets: new Set()
+  };
+  const middleware = createAuthMiddleware({ authConfig, logger: silentLogger() });
+  const { token } = signToken(
+    {
+      sub: "0xcccccccccccccccccccccccccccccccccccccccc",
+      roles: [],
+      capabilities: ["ops:view"]
+    },
+    { secret: LONG_SECRET, expiresInSeconds: 60 }
+  );
+  const request = { method: "GET", headers: { authorization: `Bearer ${token}` } };
+  const url = new URL("http://localhost/admin/jobs");
+  const result = await middleware(request, url);
+  assert.deepEqual(result.capabilityRequirements, ["ops:view"]);
+  assert.ok(result.capabilities.includes("ops:view"));
+});
+
 test("requireAuth in permissive mode resolves roles from env wallet lists", async () => {
   const adminWallet = "0xdddddddddddddddddddddddddddddddddddddddd";
   const authConfig = {

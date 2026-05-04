@@ -339,6 +339,10 @@ test("getAdminStatus surfaces recurring scheduler anomalies", async () => {
   });
 
   assert.equal(status.auth.wallet, WALLET);
+  assert.equal(status.authPolicy.version, "auth-policy-v1");
+  assert.ok(status.authPolicy.roles.admin.includes("admin:status"));
+  assert.deepEqual(status.authPolicy.routes["/admin/status"], ["admin:status", "ops:view"]);
+  assert.deepEqual(status.authPolicy.uiControls["admin.status.view"], ["admin:status", "ops:view"]);
   assert.ok(status.anomalies.some((entry) => entry.code === "recurring_attention"));
   assert.equal(status.jobLifecycle.total, 1);
   assert.equal(status.jobLifecycle.paused, 1);

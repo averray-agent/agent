@@ -2,7 +2,11 @@ import { getAddress } from "ethers";
 import { AuthenticationError, AuthorizationError } from "../core/errors.js";
 import { verifyToken } from "./jwt.js";
 import { hasRole, resolveRoles } from "./config.js";
-import { resolveCapabilities } from "./capabilities.js";
+import {
+  getRouteCapabilityRequirements,
+  missingCapabilities,
+  resolveCapabilities
+} from "./capabilities.js";
 import { buildAuthRequirementDetails } from "../core/discovery-manifest.js";
 
 /**
@@ -14,6 +18,7 @@ import { buildAuthRequirementDetails } from "../core/discovery-manifest.js";
  * Options:
  *   - allowQueryToken: accept ?token= in the URL (used for SSE where headers are unavailable).
  *   - requireRole: throw AuthorizationError unless the verified claims include this role.
+ *   - requireCapability / requireCapabilities: require one or more resolved capabilities.
  *
  * In permissive mode, if no token is supplied, the middleware falls back to the
  * `wallet` query parameter with a warning. In strict mode, missing or invalid
@@ -26,8 +31,29 @@ import { buildAuthRequirementDetails } from "../core/discovery-manifest.js";
  * middleware rejects tokens whose `jti` is in the revocation list.
  */
 export function createAuthMiddleware({ authConfig, stateStore, logger = console }) {
-  return async function requireAuth(request, url, { allowQueryToken = false, requireRole = undefined } = {}) {
-    const authDetails = buildAuthRequirementDetails(request.method, url.pathname, { requireRole });
+  return async function requireAuth(
+    request,
+    url,
+    {
+      allowQueryToken = false,
+      requireRole = undefined,
+      requireCapability = undefined,
+      requireCapabilities = undefined,
+      enforceRouteCapabilities = true
+    } = {}
+  ) {
+    const routeCapabilities = enforceRouteCapabilities
+      ? getRouteCapabilityRequirements(request.method, url.pathname)
+      : [];
+    const requiredCapabilities = normalizeRequiredCapabilities([
+      ...routeCapabilities,
+      requireCapability,
+      ...(Array.isArray(requireCapabilities) ? requireCapabilities : [requireCapabilities])
+    ]);
+    const authDetails = buildAuthRequirementDetails(request.method, url.pathname, {
+      requireRole,
+      requiredCapabilities
+    });
     const headerToken = extractBearer(request);
     const queryToken = allowQueryToken ? (url.searchParams.get("token") ?? "").trim() || undefined : undefined;
     const token = headerToken ?? queryToken;
@@ -47,11 +73,14 @@ export function createAuthMiddleware({ authConfig, stateStore, logger = console 
               verifierWallets: authConfig.verifierWallets ?? new Set()
             })
           };
+          const capabilities = resolveCapabilities(permissiveClaims);
           enforceRole(permissiveClaims, requireRole, authDetails);
+          enforceCapabilities(capabilities, requiredCapabilities, authDetails);
           return {
             wallet: normalizeWallet(fallbackWallet),
             claims: permissiveClaims,
-            capabilities: resolveCapabilities(permissiveClaims),
+            capabilities,
+            capabilityRequirements: requiredCapabilities,
             via: "permissive_query"
           };
         }
@@ -78,12 +107,15 @@ export function createAuthMiddleware({ authConfig, stateStore, logger = console 
       }
     }
 
+    const capabilities = resolveCapabilities(claims);
     enforceRole(claims, requireRole, authDetails);
+    enforceCapabilities(capabilities, requiredCapabilities, authDetails);
 
     return {
       wallet: normalizeWallet(claims.sub),
       claims,
-      capabilities: resolveCapabilities(claims),
+      capabilities,
+      capabilityRequirements: requiredCapabilities,
       via: headerToken ? "header" : "query_token"
     };
   };
@@ -100,6 +132,30 @@ function enforceRole(claims, requireRole, authDetails = undefined) {
       requiredRole: requireRole
     });
   }
+}
+
+function enforceCapabilities(capabilities, requiredCapabilities, authDetails = undefined) {
+  if (!requiredCapabilities.length) {
+    return;
+  }
+  const missing = missingCapabilities(capabilities, requiredCapabilities);
+  if (missing.length) {
+    throw new AuthorizationError("Missing required capability.", "missing_capability", {
+      ...(authDetails ?? {}),
+      requiresAuth: true,
+      requiredCapabilities,
+      missingCapabilities: missing
+    });
+  }
+}
+
+function normalizeRequiredCapabilities(values = []) {
+  return [...new Set(
+    values
+      .flat()
+      .map((value) => String(value ?? "").trim())
+      .filter(Boolean)
+  )].sort();
 }
 
 function extractBearer(request) {
