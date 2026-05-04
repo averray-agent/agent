@@ -18,6 +18,8 @@ import {
 import { computeClaimEconomics, countClaimedSessions } from "./claim-economics.js";
 import { claimStatusFields, isTerminalSession, summarizeJobClaimState } from "./claim-state.js";
 
+const TIMELINE_VERSION = "v2";
+
 const STARTER_REPUTATION = {
   skill: 0,
   reliability: 0,
@@ -109,7 +111,7 @@ export class PlatformService {
 
   getSessionStateMachine() {
     return {
-      timelineVersion: "v2",
+      timelineVersion: TIMELINE_VERSION,
       statuses: getSessionStateMachineDefinition()
     };
   }
@@ -562,63 +564,19 @@ export class PlatformService {
     );
     const lifecycle = buildSessionLifecycle(session, verification);
 
-    const transitions = (session.statusHistory ?? []).map((entry, index) => ({
-      id: `${sessionId}:transition:${index}`,
-      type: "session_transition",
-      at: entry.at,
-      correlationId: sessionId,
-      phase: describeSessionStatus(entry.to).phase,
-      data: entry
-    }));
-    const verificationEvents = verification
-      ? [{
-          id: `${sessionId}:verification`,
-          type: "verification",
-          at: verification.session?.updatedAt ?? verification.session?.resolvedAt ?? new Date().toISOString(),
-          correlationId: sessionId,
-          phase: "verification",
-          data: {
-            outcome: verification.outcome,
-            reasonCode: verification.reasonCode,
-            handler: verification.handler,
-            handlerVersion: verification.handlerVersion,
-            verifierConfigVersion: verification.verifierConfigVersion
-          }
-        }]
-      : [];
+    const transitions = buildSessionTimelineEntries(session, { correlationId: sessionId });
+    const verificationEvents = [buildVerificationTimelineEntry(session, verification, { correlationId: sessionId })]
+      .filter(Boolean);
     const childEvents = childRuns.flatMap(({ job, sessions }) => ([
-      {
-        id: `${job.id}:child-job`,
-        type: "child_job",
-        at: job.firedAt ?? sessions[0]?.updatedAt ?? session.updatedAt,
-        correlationId: sessionId,
-        phase: "child_job",
-        data: {
-          jobId: job.id,
-          templateId: job.templateId,
-          parentSessionId: job.parentSessionId
-        }
-      },
-      ...sessions.map((childSession) => ({
-        id: `${childSession.sessionId}:child-session`,
-        type: "child_session",
-        at: childSession.updatedAt,
-        correlationId: sessionId,
-        phase: describeSessionStatus(childSession.status).phase,
-        data: {
-          sessionId: childSession.sessionId,
-          jobId: childSession.jobId,
-          wallet: childSession.wallet,
-          status: childSession.status
-        }
-      }))
+      buildChildJobTimelineEntry(job, { correlationId: sessionId }),
+      ...sessions.map((childSession) => buildChildSessionTimelineEntry(childSession, { correlationId: sessionId }))
     ]));
 
     const timeline = [...transitions, ...verificationEvents, ...childEvents]
-      .sort((left, right) => String(left.at ?? "").localeCompare(String(right.at ?? "")));
+      .sort(compareTimelineEntries);
 
     return {
-      timelineVersion: "v2",
+      timelineVersion: TIMELINE_VERSION,
       session,
       lifecycle,
       verification,
@@ -688,7 +646,7 @@ export class PlatformService {
       .sort(compareTimelineEntries);
 
     return {
-      timelineVersion: "v2",
+      timelineVersion: TIMELINE_VERSION,
       job,
       lineage: {
         templateId: job.templateId ?? null,
@@ -951,14 +909,18 @@ export class PlatformService {
 }
 
 function buildJobStateTimelineEntry(job, sessions) {
-  return {
+  return buildTimelineEntry({
     id: `${job.id}:job-state`,
     type: "job_state",
     at: firstDefined(job.lifecycle?.updatedAt, job.createdAt, job.firedAt, sessions[0]?.updatedAt),
     correlationId: job.id,
     phase: "job",
+    source: "state",
+    topic: "job.state",
+    jobId: job.id,
+    sessionId: job.sessionId,
+    wallet: job.claimedBy,
     data: compactTimelineData({
-      jobId: job.id,
       category: job.category,
       tier: job.tier,
       verifierMode: job.verifierMode,
@@ -971,47 +933,54 @@ function buildJobStateTimelineEntry(job, sessions) {
       claimedBy: job.claimedBy,
       claimExpiresAt: job.claimExpiresAt
     })
-  };
+  });
 }
 
-function buildSessionTimelineEntries(session) {
+function buildSessionTimelineEntries(session, options = {}) {
+  const correlationId = options.correlationId ?? session.sessionId;
   const history = Array.isArray(session.statusHistory) ? session.statusHistory : [];
   if (!history.length) {
-    return [{
+    return [buildTimelineEntry({
       id: `${session.sessionId}:session-snapshot`,
       type: "session_snapshot",
       at: firstDefined(session.updatedAt, session.claimedAt),
-      correlationId: session.sessionId,
+      correlationId,
       phase: describeSessionStatus(session.status).phase,
+      source: "state",
+      topic: "session.snapshot",
+      severity: timelineSeverityForSessionStatus(session.status),
+      jobId: session.jobId,
+      sessionId: session.sessionId,
+      wallet: session.wallet,
       data: compactTimelineData({
-        sessionId: session.sessionId,
-        jobId: session.jobId,
-        wallet: session.wallet,
         status: session.status
       })
-    }];
+    })];
   }
-  return history.map((entry, index) => ({
+  return history.map((entry, index) => buildTimelineEntry({
     id: `${session.sessionId}:transition:${index}`,
     type: "session_transition",
     at: entry.at,
-    correlationId: session.sessionId,
+    correlationId,
     phase: describeSessionStatus(entry.to).phase,
+    source: "state",
+    topic: "session.transition",
+    severity: timelineSeverityForSessionStatus(entry.to),
+    jobId: session.jobId,
+    sessionId: session.sessionId,
+    wallet: session.wallet,
     data: {
-      sessionId: session.sessionId,
-      jobId: session.jobId,
-      wallet: session.wallet,
       ...entry
     }
   }));
 }
 
-function buildVerificationTimelineEntry(session) {
-  const verification = session.verification ?? session.verificationSummary;
+function buildVerificationTimelineEntry(session, verificationOverride = undefined, options = {}) {
+  const verification = verificationOverride ?? session.verification ?? session.verificationSummary;
   if (!verification) {
     return undefined;
   }
-  return {
+  return buildTimelineEntry({
     id: `${session.sessionId}:verification`,
     type: "verification",
     at: firstDefined(
@@ -1020,89 +989,150 @@ function buildVerificationTimelineEntry(session) {
       session.resolvedAt,
       session.updatedAt
     ),
-    correlationId: session.sessionId,
+    correlationId: options.correlationId ?? session.sessionId,
     phase: "verification",
+    source: "verification",
+    topic: "session.verification",
+    severity: verification.outcome === "rejected" ? "error" : "info",
+    jobId: session.jobId,
+    sessionId: session.sessionId,
+    wallet: session.wallet,
     data: compactTimelineData({
-      sessionId: session.sessionId,
-      jobId: session.jobId,
       outcome: verification.outcome,
       reasonCode: verification.reasonCode,
       handler: verification.handler,
       handlerVersion: verification.handlerVersion,
       verifierConfigVersion: verification.verifierConfigVersion
     })
-  };
+  });
 }
 
-function buildChildJobTimelineEntry(job) {
-  return {
+function buildChildJobTimelineEntry(job, options = {}) {
+  return buildTimelineEntry({
     id: `${job.id}:child-job`,
     type: "child_job",
     at: firstDefined(job.createdAt, job.firedAt, job.lifecycle?.updatedAt),
-    correlationId: job.parentSessionId ?? job.id,
+    correlationId: options.correlationId ?? job.parentSessionId ?? job.id,
     phase: "child_job",
+    source: "lineage",
+    topic: "job.child_created",
+    jobId: job.id,
+    sessionId: job.parentSessionId,
     data: compactTimelineData({
-      jobId: job.id,
       parentSessionId: job.parentSessionId,
       category: job.category,
       tier: job.tier,
       verifierMode: job.verifierMode,
       lifecycle: job.lifecycle
     })
-  };
+  });
 }
 
-function buildChildSessionTimelineEntry(session) {
-  return {
+function buildChildSessionTimelineEntry(session, options = {}) {
+  return buildTimelineEntry({
     id: `${session.sessionId}:child-session`,
     type: "child_session",
     at: firstDefined(session.updatedAt, session.claimedAt),
-    correlationId: session.sessionId,
+    correlationId: options.correlationId ?? session.sessionId,
     phase: describeSessionStatus(session.status).phase,
+    source: "lineage",
+    topic: "session.child_snapshot",
+    severity: timelineSeverityForSessionStatus(session.status),
+    jobId: session.jobId,
+    sessionId: session.sessionId,
+    wallet: session.wallet,
     data: compactTimelineData({
-      sessionId: session.sessionId,
-      jobId: session.jobId,
-      wallet: session.wallet,
       status: session.status
     })
-  };
+  });
 }
 
 function buildDerivativeJobTimelineEntry(job) {
-  return {
+  return buildTimelineEntry({
     id: `${job.id}:derivative-job`,
     type: "derivative_job",
     at: firstDefined(job.firedAt, job.createdAt, job.lifecycle?.updatedAt),
     correlationId: job.templateId ?? job.id,
     phase: "recurring",
+    source: "lineage",
+    topic: "job.recurring_fired",
+    jobId: job.id,
     data: compactTimelineData({
-      jobId: job.id,
       templateId: job.templateId,
       firedAt: job.firedAt,
       category: job.category,
       tier: job.tier,
       lifecycle: job.lifecycle
     })
-  };
+  });
 }
 
 function buildEventBusTimelineEntry(event, index) {
-  return {
+  return buildTimelineEntry({
     id: event.id ?? `event-bus:${index}`,
     type: "event_bus",
     at: event.timestamp,
     correlationId: event.sessionId ?? event.jobId,
     phase: event.topic,
+    source: "event_bus",
+    topic: event.topic,
+    jobId: event.jobId,
+    sessionId: event.sessionId,
+    wallet: event.wallet,
     data: compactTimelineData({
-      topic: event.topic,
-      jobId: event.jobId,
-      sessionId: event.sessionId,
-      wallet: event.wallet,
       blockNumber: event.blockNumber,
       txHash: event.txHash,
       ...event.data
     })
+  });
+}
+
+function buildTimelineEntry({
+  id,
+  type,
+  at,
+  correlationId,
+  phase,
+  source = "state",
+  topic,
+  severity = "info",
+  jobId,
+  sessionId,
+  wallet,
+  data = {}
+}) {
+  const timestamp = firstDefined(at);
+  return {
+    id,
+    type,
+    at: timestamp,
+    timestamp,
+    correlationId,
+    phase,
+    source,
+    topic,
+    severity,
+    jobId,
+    sessionId,
+    wallet,
+    data: compactTimelineData({
+      topic,
+      jobId,
+      sessionId,
+      wallet,
+      ...data
+    })
   };
+}
+
+function timelineSeverityForSessionStatus(status) {
+  if (["failed", "rejected", "slashed"].includes(status)) {
+    return "error";
+  }
+  if (status === "disputed") {
+    return "warn";
+  }
+  return "info";
 }
 
 function compareTimelineEntries(left, right) {

@@ -267,14 +267,30 @@ The platform needs to answer operator questions like:
 - did stake move?
 - did a recurring template fire?
 
-Today, some of this exists in logs, some in sessions, some in verification
-results, and some only in the operator app.
+Some of this exists in logs, some in sessions, some in verification results,
+and some only in the operator app. The backend now exposes the shared
+job/session timeline spine, but the remaining work is to make every producer
+emit into it with the same topic taxonomy.
 
-### Gaps today
+### Current implementation
 
-- no unified job/session timeline view in the backend model
-- recurring and sub-job lineage are visible only indirectly
-- verification and funding state are not yet merged into one operational trace
+- `/session/timeline` exposes v2 session lifecycle, verification, child-job,
+  and child-session events
+- `/admin/jobs/timeline` exposes v2 job state, sessions, verification,
+  child/derivative lineage, and replayed event-bus entries
+- timeline entries use one canonical envelope with `id`, `type`, `at`,
+  `timestamp`, `correlationId`, `phase`, `source`, `topic`, `severity`,
+  direct `jobId` / `sessionId` / `wallet` fields, and compact `data`
+- recurring template fire history is reconstructed through derivative jobs,
+  and sub-job lineage is reconstructed through `parentSessionId`
+
+### Remaining gaps
+
+- not every producer emits a canonical topic and payload shape yet
+- event-bus replay is still in-memory, so long-term history is reconstructed
+  mostly from state snapshots
+- funding and settlement state are not fully folded into the same timeline
+- operator UI still needs richer timeline filtering and source labels
 
 ### Improve to
 
@@ -285,10 +301,11 @@ results, and some only in the operator app.
 
 ### Concrete next changes
 
-- standardize platform event topics and payload shapes
-- store or reconstruct timelines from events plus state snapshots
-- add admin/session endpoints for timeline inspection
-- include recurring template fire history and parent/child links in those views
+- standardize the remaining platform event topics and payload shapes
+- persist the event log or extend state snapshots where replay windows are too
+  short for audits
+- merge funding, settlement, and dispute state into the same job/session trace
+- expose UI/SDK filters for source, topic, wallet, and correlation id
 
 ### What this unlocks
 

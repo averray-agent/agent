@@ -232,6 +232,19 @@ test("getSessionTimeline includes transitions and verification state", async () 
   assert.ok(timeline.timeline.some((entry) => entry.type === "session_transition"));
   assert.ok(timeline.timeline.some((entry) => entry.type === "verification"));
   assert.ok(timeline.timeline.every((entry) => entry.correlationId === submitted.sessionId));
+  assert.ok(timeline.timeline.every((entry) => entry.timestamp === entry.at));
+  assert.ok(timeline.timeline.every((entry) => entry.source && entry.topic && entry.severity));
+  assert.ok(timeline.timeline.every((entry) => entry.sessionId === submitted.sessionId || entry.type === "child_job"));
+  const submittedTransition = timeline.timeline.find((entry) => entry.type === "session_transition" && entry.data.to === "submitted");
+  assert.equal(submittedTransition.topic, "session.transition");
+  assert.equal(submittedTransition.source, "state");
+  assert.equal(submittedTransition.jobId, submitted.jobId);
+  assert.equal(submittedTransition.sessionId, submitted.sessionId);
+  const verificationEvent = timeline.timeline.find((entry) => entry.type === "verification");
+  assert.equal(verificationEvent.topic, "session.verification");
+  assert.equal(verificationEvent.source, "verification");
+  assert.equal(verificationEvent.data.handlerVersion, 1);
+  assert.equal(verificationEvent.data.verifierConfigVersion, 1);
 });
 
 test("getJobTimeline stitches sessions, verification, events, and child lineage", async () => {
@@ -278,6 +291,20 @@ test("getJobTimeline stitches sessions, verification, events, and child lineage"
   assert.ok(timeline.timeline.some((entry) => entry.type === "verification"));
   assert.ok(timeline.timeline.some((entry) => entry.type === "child_job"));
   assert.ok(timeline.timeline.some((entry) => entry.type === "event_bus" && entry.data.topic === "session.claimed"));
+  assert.ok(timeline.timeline.every((entry) => entry.timestamp === entry.at));
+  assert.ok(timeline.timeline.every((entry) => entry.source && entry.topic && entry.severity));
+  const jobState = timeline.timeline.find((entry) => entry.type === "job_state");
+  assert.equal(jobState.topic, "job.state");
+  assert.equal(jobState.source, "state");
+  assert.equal(jobState.jobId, "parent-job-001");
+  const childJob = timeline.timeline.find((entry) => entry.type === "child_job");
+  assert.equal(childJob.topic, "job.child_created");
+  assert.equal(childJob.source, "lineage");
+  assert.equal(childJob.jobId, subJob.id);
+  const claimedEvent = timeline.timeline.find((entry) => entry.type === "event_bus" && entry.topic === "session.claimed");
+  assert.equal(claimedEvent.source, "event_bus");
+  assert.equal(claimedEvent.jobId, "parent-job-001");
+  assert.equal(claimedEvent.sessionId, submitted.sessionId);
 });
 
 test("getAdminStatus surfaces recurring scheduler anomalies", async () => {
