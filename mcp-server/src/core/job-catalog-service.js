@@ -137,6 +137,10 @@ export class JobCatalogService {
     this.getReputation = getReputation;
     this.getDefaultClaimStakeBps = getDefaultClaimStakeBps;
     this.getClaimEconomics = getClaimEconomics;
+    this.parentSessionIndex = new Map();
+    for (const job of this.jobs) {
+      this.indexJob(job);
+    }
   }
 
   listJobs({ includePaused = false, includeArchived = false, includeStale = false, now = new Date() } = {}) {
@@ -146,8 +150,10 @@ export class JobCatalogService {
   }
 
   listJobsByParentSession(parentSessionId) {
-    return this.jobs
-      .filter((job) => job.parentSessionId === parentSessionId)
+    const indexedIds = this.parentSessionIndex.get(String(parentSessionId ?? "")) ?? new Set();
+    return [...indexedIds]
+      .map((jobId) => this.jobs.find((job) => job.id === jobId))
+      .filter(Boolean)
       .map((job) => this.withLifecycle(job));
   }
 
@@ -166,7 +172,18 @@ export class JobCatalogService {
     }
 
     this.jobs.unshift(job);
+    this.indexJob(job);
     return job;
+  }
+
+  indexJob(job) {
+    if (!job?.parentSessionId) {
+      return;
+    }
+    const parentSessionId = String(job.parentSessionId);
+    const indexed = this.parentSessionIndex.get(parentSessionId) ?? new Set();
+    indexed.add(job.id);
+    this.parentSessionIndex.set(parentSessionId, indexed);
   }
 
   getJobLifecycleSummary(now = new Date()) {
@@ -688,6 +705,8 @@ export class JobCatalogService {
     const estimatedDifficulty = normaliseTextField(input?.estimatedDifficulty);
     const source = normalisePlainObject(input?.source, "source");
     const verification = normalisePlainObject(input?.verification, "verification");
+    const delegationPolicy = normaliseDelegationPolicy(input?.delegationPolicy, { rewardAmount, rewardAsset });
+    const lineage = normalisePlainObject(input?.lineage, "lineage");
     const lifecycle = normaliseLifecycle(input?.lifecycle, { disableStale: recurring });
     const recurringPolicy = normaliseRecurringPolicy(input?.recurringPolicy, {
       recurring,
@@ -718,6 +737,8 @@ export class JobCatalogService {
       ...(estimatedDifficulty ? { estimatedDifficulty } : {}),
       ...(agentInstructions.length ? { agentInstructions } : {}),
       ...(verification ? { verification } : {}),
+      ...(delegationPolicy ? { delegationPolicy } : {}),
+      ...(lineage ? { lineage } : {}),
       ...(parentSessionId ? { parentSessionId } : {}),
       ...(recurring ? { recurring: true } : {}),
       ...(schedule ? { schedule } : {}),
@@ -954,6 +975,49 @@ function normaliseRecurringPolicy(raw, { recurring, rewardAmount, rewardAsset })
       policy.reserveAsset = rewardAsset;
     } else if (policy.reserveAmount < impliedReserve) {
       throw new ValidationError("recurringPolicy.reserveAmount must cover maxRuns * rewardAmount.");
+    }
+  }
+
+  return Object.keys(policy).length ? policy : undefined;
+}
+
+function normaliseDelegationPolicy(raw, { rewardAmount, rewardAsset }) {
+  if (!raw) {
+    return undefined;
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new ValidationError("delegationPolicy must be an object if provided.");
+  }
+
+  const policy = {};
+  if (raw.maxDepth !== undefined && raw.maxDepth !== null && raw.maxDepth !== "") {
+    const maxDepth = Number(raw.maxDepth);
+    if (!Number.isInteger(maxDepth) || maxDepth < 0) {
+      throw new ValidationError("delegationPolicy.maxDepth must be a non-negative integer.");
+    }
+    policy.maxDepth = maxDepth;
+  }
+  if (raw.maxSubJobs !== undefined && raw.maxSubJobs !== null && raw.maxSubJobs !== "") {
+    const maxSubJobs = Number(raw.maxSubJobs);
+    if (!Number.isInteger(maxSubJobs) || maxSubJobs < 1) {
+      throw new ValidationError("delegationPolicy.maxSubJobs must be a positive integer.");
+    }
+    policy.maxSubJobs = maxSubJobs;
+  }
+  if (raw.budgetAmount !== undefined && raw.budgetAmount !== null && raw.budgetAmount !== "") {
+    const budgetAmount = Number(raw.budgetAmount);
+    if (!Number.isFinite(budgetAmount) || budgetAmount < 0) {
+      throw new ValidationError("delegationPolicy.budgetAmount must be zero or higher.");
+    }
+    if (budgetAmount > rewardAmount) {
+      throw new ValidationError("delegationPolicy.budgetAmount cannot exceed rewardAmount.");
+    }
+    policy.budgetAmount = budgetAmount;
+    policy.budgetAsset = typeof raw.budgetAsset === "string" && raw.budgetAsset.trim()
+      ? raw.budgetAsset.trim().toUpperCase()
+      : rewardAsset;
+    if (policy.budgetAsset !== rewardAsset) {
+      throw new ValidationError("delegationPolicy.budgetAsset must match rewardAsset.");
     }
   }
 

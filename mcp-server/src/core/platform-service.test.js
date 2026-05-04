@@ -77,9 +77,112 @@ test("createSubJob links the child job to the active parent session", async () =
   });
 
   assert.equal(subJob.parentSessionId, session.sessionId);
+  assert.equal(subJob.lineage.kind, "sub_job");
+  assert.equal(subJob.lineage.parentJobId, "parent-job-001");
+  assert.equal(subJob.lineage.depth, 1);
+  assert.equal(subJob.lineage.budget.usedAfterAmount, 2);
+  assert.equal(subJob.lineage.funding.asset, "DOT");
+  const account = await service.getAccountSummary(WALLET);
+  assert.equal(account.liquid.DOT, 8);
+  assert.equal(account.reserved.DOT, 2);
   const subJobs = await service.listSubJobs(session.sessionId);
   assert.equal(subJobs.length, 1);
   assert.equal(subJobs[0].id, "child-job-001");
+});
+
+test("createSubJob enforces parent delegation budget and count policy", async () => {
+  const service = makePlatformService();
+  service.jobs[0].delegationPolicy = { budgetAmount: 2, budgetAsset: "DOT", maxSubJobs: 1, maxDepth: 1 };
+  const session = await service.claimJob(WALLET, "parent-job-001", "http", "parent-budget-claim");
+
+  await assert.rejects(
+    () => service.createSubJob(session.sessionId, WALLET, {
+      id: "child-too-expensive",
+      category: "review",
+      tier: "starter",
+      rewardAmount: 3,
+      verifierMode: "benchmark",
+      verifierTerms: ["summary"],
+      verifierMinimumMatches: 1,
+      inputSchemaRef: "schema://jobs/review-input",
+      outputSchemaRef: "schema://jobs/pr-review-findings-output",
+      claimTtlSeconds: 1800,
+      retryLimit: 1,
+      requiresSponsoredGas: true
+    }),
+    (err) => err.code === "subjob_budget_exceeded"
+  );
+
+  await service.createSubJob(session.sessionId, WALLET, {
+    id: "child-budget-ok",
+    category: "review",
+    tier: "starter",
+    rewardAmount: 2,
+    verifierMode: "benchmark",
+    verifierTerms: ["summary"],
+    verifierMinimumMatches: 1,
+    inputSchemaRef: "schema://jobs/review-input",
+    outputSchemaRef: "schema://jobs/pr-review-findings-output",
+    claimTtlSeconds: 1800,
+    retryLimit: 1,
+    requiresSponsoredGas: true
+  });
+
+  await assert.rejects(
+    () => service.createSubJob(session.sessionId, WALLET, {
+      id: "child-too-many",
+      category: "review",
+      tier: "starter",
+      rewardAmount: 1,
+      verifierMode: "benchmark",
+      verifierTerms: ["summary"],
+      verifierMinimumMatches: 1,
+      inputSchemaRef: "schema://jobs/review-input",
+      outputSchemaRef: "schema://jobs/pr-review-findings-output",
+      claimTtlSeconds: 1800,
+      retryLimit: 1,
+      requiresSponsoredGas: true
+    }),
+    (err) => err.code === "subjob_count_exceeded"
+  );
+});
+
+test("createSubJob rejects grandchild delegation by default depth policy", async () => {
+  const service = makePlatformService();
+  const session = await service.claimJob(WALLET, "parent-job-001", "http", "parent-depth-claim");
+  const subJob = await service.createSubJob(session.sessionId, WALLET, {
+    id: "depth-child-job",
+    category: "coding",
+    tier: "starter",
+    rewardAmount: 2,
+    verifierMode: "benchmark",
+    verifierTerms: ["summary"],
+    verifierMinimumMatches: 1,
+    inputSchemaRef: "schema://jobs/coding-input",
+    outputSchemaRef: "schema://jobs/coding-output",
+    claimTtlSeconds: 1800,
+    retryLimit: 1,
+    requiresSponsoredGas: true
+  });
+  const childSession = await service.claimJob(WALLET, subJob.id, "http", "child-depth-claim");
+
+  await assert.rejects(
+    () => service.createSubJob(childSession.sessionId, WALLET, {
+      id: "grandchild-blocked",
+      category: "coding",
+      tier: "starter",
+      rewardAmount: 1,
+      verifierMode: "benchmark",
+      verifierTerms: ["summary"],
+      verifierMinimumMatches: 1,
+      inputSchemaRef: "schema://jobs/coding-input",
+      outputSchemaRef: "schema://jobs/coding-output",
+      claimTtlSeconds: 1800,
+      retryLimit: 1,
+      requiresSponsoredGas: true
+    }),
+    (err) => err.code === "subjob_depth_exceeded"
+  );
 });
 
 test("listJobsWithSessions joins active session state onto job rows", async () => {
@@ -229,6 +332,8 @@ test("getSessionTimeline includes transitions and verification state", async () 
   assert.equal(timeline.stateMachine.timelineVersion, "v2");
   assert.ok(Array.isArray(timeline.stateMachine.statuses));
   assert.ok(Array.isArray(timeline.lineage.childJobIds));
+  assert.equal(timeline.lineage.subJobBudget.asset, "DOT");
+  assert.equal(timeline.lineage.subJobPolicy.maxDepth, 1);
   assert.ok(timeline.timeline.some((entry) => entry.type === "session_transition"));
   assert.ok(timeline.timeline.some((entry) => entry.type === "verification"));
   assert.ok(timeline.timeline.every((entry) => entry.correlationId === submitted.sessionId));

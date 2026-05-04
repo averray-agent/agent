@@ -2517,6 +2517,7 @@ const server = createServer(async (request, response) => {
 
     if (request.method === "POST" && pathname === "/jobs/sub") {
       const auth = await authMiddleware(request, url);
+      await enforceLimit("admin_jobs", auth.wallet, rateLimitConfig.adminJobs);
       const payload = await readJsonBody(request);
       const parentSessionId = typeof payload?.parentSessionId === "string" && payload.parentSessionId.trim()
         ? payload.parentSessionId.trim()
