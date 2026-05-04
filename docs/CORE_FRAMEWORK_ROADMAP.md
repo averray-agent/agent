@@ -484,7 +484,7 @@ proves the need, but it is UI-focused rather than an external integration SDK.
   - admin job create / recurring fire / status
 - [x] add hand-maintained endpoint response declarations for the current API
 - [x] expose structured API errors for automation
-- [ ] generate SDK types from the API/schema source instead of maintaining them
+- [x] generate SDK types from the API/schema source instead of maintaining them
   by hand
 - [ ] share validation types with frontend scripts where possible
 

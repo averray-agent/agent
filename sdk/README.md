@@ -32,12 +32,22 @@ seeing where claim and submit happen.
 
 ## Typed Surface
 
-`agent-platform-client.d.ts` exports endpoint-oriented types such as:
+`agent-platform-client.d.ts` is generated. Do not edit it by hand; update
+`sdk/api-surface-model.mjs` or the built-in schemas in
+`mcp-server/src/core/job-schema-registry.js`, then run:
+
+```bash
+npm run generate:sdk-types
+```
+
+The generated declaration exports endpoint-oriented types such as:
 
 - `JobsListResponse`, `JobDefinition`, `ClaimStatus`
 - `SessionRecord`, `SessionTimelineResponse`, `JobTimelineResponse`
 - `DelegationPolicy`, `SubJobLineageMetadata`, `AdminStatusResponse`
 - `AccountSummary`, `BorrowCapacityResponse`
+- `BuiltinJobSchemaValue`, `WikipediaCitationRepairOutput`, and other
+  schema-native submission payloads generated from the job schema registry
 
 Objects include index signatures where the platform intentionally returns
 extensible metadata, so integrations can keep compiling as new fields land.
