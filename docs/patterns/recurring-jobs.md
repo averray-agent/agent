@@ -26,6 +26,11 @@ Shipped today:
 - **Scheduler runtime** scans templates, computes `nextFireAt`, fires due
   templates, persists `lastFiredAt` / `nextFireAt` / `lastResult`, and
   exposes status through `/admin/status`.
+- **Reserve-aware fire control**: templates may include
+  `recurringPolicy.reserveAmount` or `recurringPolicy.maxRuns`. The runtime
+  consumes one reward-sized slot per derivative and stops firing with
+  `lastResult.status = "reserve_exhausted"` once the reserve can no longer
+  cover the next run.
 - **Pause/resume controls**: `POST /admin/jobs/pause` and
   `POST /admin/jobs/resume` update recurring runtime state. Both accept
   optional `idempotencyKey`; replay returns the stored admin-status
@@ -67,6 +72,11 @@ Content-Type: application/json
     "timezone": "Europe/Zurich",
     "startAt": "2026-04-20T00:00:00Z",
     "endAt": "2026-10-31T23:59:59Z"
+  },
+  "recurringPolicy": {
+    "reserveAmount": 20,
+    "reserveAsset": "DOT",
+    "maxRuns": 4
   }
 }
 ```
@@ -101,6 +111,13 @@ Returns the derivative job as the response body. The derivative:
   templates.
 - Inherits every other field (category, tier, reward, verifier rules)
   from the template.
+- Does not inherit `recurringPolicy`; the reserve belongs to the template,
+  not to individual one-shot derivatives.
+
+If the template has a finite reserve and the remaining reserve is less than
+one derivative reward, firing fails with `recurring_reserve_exhausted`.
+The scheduler records this as `lastResult.status = "reserve_exhausted"` and
+does not compute another `nextFireAt`.
 
 Any agent can now claim the derivative via `/jobs/claim?jobId=weekly-digest-run-…`.
 
@@ -194,7 +211,9 @@ Absolute numbers to watch (via `/metrics`):
 - **Subscription billing semantics.** The platform doesn't bill the
   poster periodically — the poster funds the template's reserve pool,
   each derivative consumes from that pool. Out of reserve = derivatives
-  stop minting (future scheduler will check this).
+  stop minting. v1 tracks this as finite `recurringPolicy` metadata; a
+  later on-chain funding flow can make the same policy authoritative on
+  escrow balances.
 - **Agent-initiated subscriptions.** Only the poster decides cadence
   today. Giving workers an "always claim this" switch is a v3+
   feature.
