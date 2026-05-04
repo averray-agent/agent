@@ -297,6 +297,81 @@ test("http smoke: /admin/sessions exposes operator-wide session activity", { ski
   });
 });
 
+test("http smoke: /jobs/sub lets active workers create funded child jobs", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
+    const workerToken = issueToken(STRANGER_WALLET);
+
+    await fetch(`${base}/admin/jobs`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({
+        id: "subjob-parent-smoke-001",
+        category: "coding",
+        tier: "starter",
+        rewardAmount: 5,
+        claimTtlSeconds: 3600,
+        verifierMode: "benchmark",
+        verifierTerms: ["complete"],
+        verifierMinimumMatches: 1,
+        outputSchemaRef: "schema://jobs/subjob-parent-smoke-output",
+        delegationPolicy: { budgetAmount: 3, budgetAsset: "DOT", maxSubJobs: 2, maxDepth: 1 }
+      })
+    });
+
+    await fetch(`${base}/account/fund?asset=DOT&amount=10`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${workerToken}` }
+    });
+
+    const claim = await fetch(
+      `${base}/jobs/claim?jobId=subjob-parent-smoke-001&idempotencyKey=subjob-parent-smoke-claim`,
+      { method: "POST", headers: { authorization: `Bearer ${workerToken}` } }
+    );
+    assert.equal(claim.status, 200);
+    const parentSession = await claim.json();
+
+    const create = await fetch(`${base}/jobs/sub`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${workerToken}` },
+      body: JSON.stringify({
+        parentSessionId: parentSession.sessionId,
+        id: "subjob-child-smoke-001",
+        category: "review",
+        tier: "starter",
+        rewardAmount: 2,
+        verifierMode: "benchmark",
+        verifierTerms: ["summary"],
+        verifierMinimumMatches: 1,
+        inputSchemaRef: "schema://jobs/review-input",
+        outputSchemaRef: "schema://jobs/pr-review-findings-output",
+        claimTtlSeconds: 1800,
+        retryLimit: 1,
+        requiresSponsoredGas: true
+      })
+    });
+    assert.equal(create.status, 201);
+    const child = await create.json();
+    assert.equal(child.parentSessionId, parentSession.sessionId);
+    assert.equal(child.lineage.kind, "sub_job");
+    assert.equal(child.lineage.budget.remainingAfterAmount, 1);
+
+    const listing = await fetch(`${base}/jobs/sub?parentSessionId=${encodeURIComponent(parentSession.sessionId)}`, {
+      headers: { authorization: `Bearer ${workerToken}` }
+    });
+    assert.equal(listing.status, 200);
+    const subJobs = await listing.json();
+    assert.equal(subJobs.length, 1);
+    assert.equal(subJobs[0].id, "subjob-child-smoke-001");
+
+    const account = await fetch(`${base}/account`, {
+      headers: { authorization: `Bearer ${workerToken}` }
+    });
+    const balances = await account.json();
+    assert.equal(balances.reserved.DOT, 2);
+  });
+});
+
 test("http smoke: /admin/status returns recurring + maintenance data for admin tokens", { skip: !RUN }, async () => {
   await runWithServer(async (base) => {
     const token = issueToken(ADMIN_WALLET, { roles: ["admin"] });

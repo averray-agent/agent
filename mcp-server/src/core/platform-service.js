@@ -7,7 +7,7 @@ import {
   validateSubmissionContract
 } from "./job-execution-service.js";
 import { VerificationIngestionService } from "../services/verification-ingestion-service.js";
-import { ValidationError } from "./errors.js";
+import { ConflictError, InsufficientLiquidityError, ValidationError } from "./errors.js";
 import { normalizeSubmission } from "./submission.js";
 import { buildPlatformCapabilities } from "./discovery-manifest.js";
 import {
@@ -557,7 +557,8 @@ export class PlatformService {
             }
           }
         : undefined);
-    const childJobs = this.jobCatalogService.listJobsByParentSession(sessionId);
+    const subJobLineage = await this.getSubJobLineage(sessionId);
+    const childJobs = subJobLineage.childJobs;
     const childRuns = await Promise.all(
       childJobs.map(async (job) => ({
         job,
@@ -586,7 +587,9 @@ export class PlatformService {
       lineage: {
         parentSessionId: session.parentSessionId,
         childJobIds: childJobs.map((job) => job.id),
-        childSessionIds: childRuns.flatMap(({ sessions }) => sessions.map((childSession) => childSession.sessionId))
+        childSessionIds: childRuns.flatMap(({ sessions }) => sessions.map((childSession) => childSession.sessionId)),
+        subJobBudget: subJobLineage.budget,
+        subJobPolicy: subJobLineage.policy
       },
       stateMachine: this.getSessionStateMachine(),
       timeline
@@ -691,7 +694,8 @@ export class PlatformService {
   }
 
   async listSubJobs(parentSessionId) {
-    const jobs = this.jobCatalogService.listJobsByParentSession(parentSessionId);
+    const lineage = await this.getSubJobLineage(parentSessionId);
+    const jobs = lineage.childJobs;
     return Promise.all(
       jobs.map(async (job) => ({
         ...job,
@@ -708,10 +712,150 @@ export class PlatformService {
     if (parentSession.status !== "claimed" && parentSession.status !== "submitted") {
       throw new ValidationError("parent session must be active before creating sub-jobs.");
     }
-    return this.jobCatalogService.createJob({
+    const parentJob = this.jobCatalogService.getJobDefinition(parentSession.jobId);
+    const parentDepth = await this.resolveDelegationDepth(parentJob);
+    const policy = this.resolveDelegationPolicy(parentJob);
+    const childDepth = parentDepth + 1;
+    if (childDepth > policy.maxDepth) {
+      throw new ConflictError("Sub-job delegation depth exceeded.", "subjob_depth_exceeded", {
+        parentSessionId,
+        parentJobId: parentJob.id,
+        parentDepth,
+        childDepth,
+        maxDepth: policy.maxDepth
+      });
+    }
+
+    const existingSubJobs = this.jobCatalogService.listJobsByParentSession(parentSessionId);
+    if (existingSubJobs.length >= policy.maxSubJobs) {
+      throw new ConflictError("Sub-job count limit exceeded.", "subjob_count_exceeded", {
+        parentSessionId,
+        maxSubJobs: policy.maxSubJobs,
+        existingSubJobCount: existingSubJobs.length
+      });
+    }
+
+    const rewardAmount = Number(input?.rewardAmount ?? 0);
+    const rewardAsset = String(input?.rewardAsset ?? parentJob.rewardAsset ?? "DOT").trim().toUpperCase();
+    if (!Number.isFinite(rewardAmount) || rewardAmount <= 0) {
+      throw new ValidationError("Sub-job rewardAmount must be greater than zero.");
+    }
+    if (rewardAsset !== policy.budgetAsset) {
+      throw new ValidationError("Sub-job rewardAsset must match the parent delegation budget asset.");
+    }
+    const usedBudgetAmount = sumSubJobRewards(existingSubJobs, policy.budgetAsset);
+    const nextUsedBudgetAmount = usedBudgetAmount + rewardAmount;
+    if (nextUsedBudgetAmount > policy.budgetAmount) {
+      throw new ConflictError("Sub-job delegation budget exceeded.", "subjob_budget_exceeded", {
+        parentSessionId,
+        parentJobId: parentJob.id,
+        budgetAsset: policy.budgetAsset,
+        budgetAmount: policy.budgetAmount,
+        usedBudgetAmount,
+        requestedRewardAmount: rewardAmount,
+        remainingBudgetAmount: Math.max(policy.budgetAmount - usedBudgetAmount, 0)
+      });
+    }
+
+    const account = await this.getAccountSummary(wallet);
+    const liquid = Number(account?.liquid?.[rewardAsset] ?? 0);
+    if (liquid < rewardAmount) {
+      throw new InsufficientLiquidityError(rewardAsset, {
+        wallet,
+        requiredAmount: rewardAmount,
+        availableAmount: liquid,
+        parentSessionId
+      });
+    }
+
+    const createdAt = new Date().toISOString();
+    const child = this.jobCatalogService.createJob({
       ...input,
-      parentSessionId
+      rewardAsset,
+      parentSessionId,
+      lineage: {
+        ...(typeof input?.lineage === "object" && input.lineage && !Array.isArray(input.lineage) ? input.lineage : {}),
+        kind: "sub_job",
+        parentSessionId,
+        parentJobId: parentJob.id,
+        parentWallet: wallet,
+        depth: childDepth,
+        createdBy: wallet,
+        createdAt,
+        budget: {
+          asset: policy.budgetAsset,
+          parentBudgetAmount: policy.budgetAmount,
+          usedBeforeAmount: usedBudgetAmount,
+          usedAfterAmount: nextUsedBudgetAmount,
+          remainingAfterAmount: Math.max(policy.budgetAmount - nextUsedBudgetAmount, 0)
+        }
+      }
     });
+    await this.reserveForJob(wallet, rewardAsset, rewardAmount);
+    child.lineage = {
+      ...(child.lineage ?? {}),
+      funding: {
+        reservedAt: new Date().toISOString(),
+        wallet,
+        asset: rewardAsset,
+        amount: rewardAmount,
+        source: "parent_wallet"
+      }
+    };
+    return child;
+  }
+
+  async getSubJobLineage(parentSessionId) {
+    const parentSession = await this.jobExecutionService.resumeSession(parentSessionId);
+    const parentJob = this.jobCatalogService.getJobDefinition(parentSession.jobId);
+    const childJobs = this.jobCatalogService.listJobsByParentSession(parentSessionId);
+    const policy = this.resolveDelegationPolicy(parentJob);
+    const usedBudgetAmount = sumSubJobRewards(childJobs, policy.budgetAsset);
+    const childRuns = await Promise.all(
+      childJobs.map(async (job) => ({
+        job,
+        sessions: await this.jobExecutionService.listSessionHistory({ jobId: job.id, limit: 10 })
+      }))
+    );
+    return {
+      parentSession,
+      parentJob,
+      policy,
+      budget: {
+        asset: policy.budgetAsset,
+        budgetAmount: policy.budgetAmount,
+        usedAmount: usedBudgetAmount,
+        remainingAmount: Math.max(policy.budgetAmount - usedBudgetAmount, 0)
+      },
+      childJobs,
+      childSessionIds: childRuns.flatMap(({ sessions }) => sessions.map((session) => session.sessionId))
+    };
+  }
+
+  resolveDelegationPolicy(parentJob) {
+    const raw = parentJob?.delegationPolicy ?? {};
+    return {
+      maxDepth: Number.isInteger(raw.maxDepth) ? raw.maxDepth : 1,
+      maxSubJobs: Number.isInteger(raw.maxSubJobs) ? raw.maxSubJobs : 5,
+      budgetAmount: Number.isFinite(Number(raw.budgetAmount)) ? Number(raw.budgetAmount) : Number(parentJob?.rewardAmount ?? 0),
+      budgetAsset: String(raw.budgetAsset ?? parentJob?.rewardAsset ?? "DOT").trim().toUpperCase()
+    };
+  }
+
+  async resolveDelegationDepth(job, seen = new Set()) {
+    if (!job?.parentSessionId) {
+      return 0;
+    }
+    if (seen.has(job.id)) {
+      throw new ConflictError("Sub-job lineage cycle detected.", "subjob_lineage_cycle", { jobId: job.id });
+    }
+    seen.add(job.id);
+    const parentSession = await this.stateStore.getSession?.(job.parentSessionId);
+    if (!parentSession?.jobId) {
+      return 1;
+    }
+    const parentJob = this.jobCatalogService.getJobDefinition(parentSession.jobId);
+    return 1 + await this.resolveDelegationDepth(parentJob, seen);
   }
 
   async getAccountSummary(wallet) {
@@ -1067,6 +1211,12 @@ function buildDerivativeJobTimelineEntry(job) {
       lifecycle: job.lifecycle
     })
   });
+}
+
+function sumSubJobRewards(jobs, asset) {
+  return jobs
+    .filter((job) => String(job.rewardAsset ?? "DOT").trim().toUpperCase() === asset)
+    .reduce((total, job) => total + Math.max(Number(job.rewardAmount ?? 0), 0), 0);
 }
 
 function buildEventBusTimelineEntry(event, index) {

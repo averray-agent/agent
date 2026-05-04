@@ -421,10 +421,9 @@ delegation feel like a framework feature instead of just a metadata convention.
 
 ### Gaps today
 
-- `parentSessionId` is preserved but not strongly orchestrated
-- no parent budget policy or depth policy
-- no parent-centric child session view in the backend model
-- no narrower route for authenticated worker-created sub-jobs
+- profile and dashboard surfaces still need richer sub-contracting views
+- no on-chain parent/child linkage
+- no automatic parent-to-child payout streaming
 
 ### Improve to
 
@@ -434,11 +433,13 @@ delegation feel like a framework feature instead of just a metadata convention.
 
 ### Concrete next changes
 
-- add a dedicated sub-job creation route that only works for the active worker
+- [x] add a dedicated sub-job creation route that only works for the active worker
   on an in-flight parent session
-- persist parent/child indexes for fast lookup
-- expose child runs on session detail endpoints
-- optionally add delegation budget fields later
+- [x] persist parent/child indexes for fast lookup
+- [x] expose child runs on session detail endpoints
+- [x] add delegation budget and depth policy fields
+- [x] reserve the child reward from the parent wallet at sub-job creation
+- [ ] extend profile and operator UI surfaces around sub-contracting history
 
 ### What this unlocks
 
