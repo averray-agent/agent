@@ -13,6 +13,7 @@ import {
 } from "@/components/overview/LaneStatusGrid";
 import { PlatformPulse } from "@/components/overview/PlatformPulse";
 import { ProviderOperationsCard } from "@/components/overview/ProviderOperationsCard";
+import { RecurringRuntimeCard } from "@/components/overview/RecurringRuntimeCard";
 import { JobLifecycleStrip } from "@/components/overview/JobLifecycleStrip";
 import {
   useAccount,
@@ -29,6 +30,7 @@ import {
 import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
 import { extractRunJobs } from "@/lib/api/run-adapters";
 import { buildProviderOperations } from "@/lib/api/provider-operations";
+import { buildRecurringRuntimeSummary } from "@/lib/api/recurring-jobs";
 import {
   buildJobLifecycleSummary,
   buildPublicJobLifecycleSummary,
@@ -116,6 +118,10 @@ export default function OverviewPage() {
     () => buildProviderOperations(providerOps.data ?? publicProviderOps.data),
     [providerOps.data, publicProviderOps.data]
   );
+  const recurringRuntime = useMemo(
+    () => buildRecurringRuntimeSummary(providerOps.data),
+    [providerOps.data]
+  );
   const providerRows = liveProviderOps;
   const hasLiveOverview = Boolean(jobs.data || sessions.data || account.data || strategyPositions.data);
   const vitals = vitalsWithLoadingHints;
@@ -167,6 +173,7 @@ export default function OverviewPage() {
             : "no provider operations reported"
         }
       />
+      <RecurringRuntimeCard runtime={recurringRuntime} />
       <PlatformPulse
         events={[]}
         endpoint="/events"
