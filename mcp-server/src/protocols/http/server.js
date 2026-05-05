@@ -2544,7 +2544,7 @@ const server = createServer(async (request, response) => {
       if (replay) {
         return respond(response, replay.statusCode, replay.body);
       }
-      const created = service.createJob(payload);
+      const created = await service.createAdminJob(payload, { posterWallet: auth.wallet });
       await storeIdempotentMutationReceipt({
         bucket: "admin_jobs",
         key: mutationKey,

@@ -252,6 +252,83 @@ test("ensureClaimStakeLiquidity checks fractional display locks against base-uni
   assert.equal(await gateway.ensureClaimStakeLiquidity("DOT", 0.48), true);
 });
 
+test("reserveRecurringTemplateFunding converts display amounts and records the template key", async () => {
+  const gateway = gatewayWithDot();
+  const calls = [];
+  gateway.signer = {};
+  gateway.accountContract = {
+    async reserveForRecurringTemplate(...args) {
+      calls.push(args);
+      return { async wait() {} };
+    }
+  };
+
+  const receipt = await gateway.reserveRecurringTemplateFunding(
+    "0x3333333333333333333333333333333333333333",
+    "DOT",
+    10,
+    "weekly-digest"
+  );
+
+  assert.deepEqual(calls, [[
+    "0x3333333333333333333333333333333333333333",
+    DOT_ASSET.address,
+    gateway.toJobId("weekly-digest"),
+    10_000_000_000_000_000_000n
+  ]]);
+  assert.equal(receipt.source, "agent_account_recurring_template_reserve");
+  assert.equal(receipt.amountRaw, "10000000000000000000");
+});
+
+test("createSinglePayoutJobForJob consumes recurring template reserve when funding metadata is present", async () => {
+  const gateway = gatewayWithDot();
+  const calls = [];
+  gateway.escrowContract = {
+    async createSinglePayoutJobFromRecurringReserve(...args) {
+      calls.push(args);
+      return { async wait() {} };
+    },
+    async createSinglePayoutJob() {
+      throw new Error("fresh reservation path should not be used");
+    }
+  };
+
+  await gateway.createSinglePayoutJobForJob(
+    {
+      funding: {
+        source: "recurring_template_reserve",
+        wallet: "0x3333333333333333333333333333333333333333",
+        templateId: "weekly-digest"
+      }
+    },
+    "rc1",
+    gateway.toJobId("weekly-digest-run-1"),
+    DOT_ASSET.address,
+    5_000_000_000_000_000_000n,
+    0,
+    0,
+    3600,
+    encodeBytes32String("BENCH"),
+    encodeBytes32String("WIKI"),
+    `0x${"1".repeat(64)}`
+  );
+
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0], [{
+    jobId: gateway.toJobId("weekly-digest-run-1"),
+    templateId: gateway.toJobId("weekly-digest"),
+    poster: "0x3333333333333333333333333333333333333333",
+    asset: DOT_ASSET.address,
+    reward: 5_000_000_000_000_000_000n,
+    opsReserve: 0,
+    contingencyReserve: 0,
+    claimTtl: 3600,
+    verifierMode: encodeBytes32String("BENCH"),
+    category: encodeBytes32String("WIKI"),
+    specHash: `0x${"1".repeat(64)}`
+  }]);
+});
+
 test("createSinglePayoutJobForLayout uses the legacy signature for legacy escrow deployments", async () => {
   const gateway = gatewayWithDot();
   const calls = [];

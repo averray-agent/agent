@@ -147,6 +147,7 @@ export interface AccountSummary extends ApiEnvelope {
   wallet: WalletAddress;
   liquid?: AssetBalances;
   reserved?: AssetBalances;
+  recurringTemplateReserves?: Record<JobId, { asset?: AssetSymbol; amount?: number }>;
   strategyAllocated?: AssetBalances;
   debtOutstanding?: AssetBalances;
 }
@@ -215,6 +216,27 @@ export interface RecurringPolicy extends ApiEnvelope {
   reserveAmount?: number;
   reserveAsset?: AssetSymbol;
   maxRuns?: number;
+  funding?: RecurringTemplateFunding;
+}
+
+export interface RecurringTemplateFunding extends ApiEnvelope {
+  source?: "recurring_template_reserve" | string;
+  wallet?: WalletAddress;
+  asset?: AssetSymbol;
+  amount?: number;
+  amountRaw?: string;
+  reservedAt?: ISODateTime;
+  templateKey?: string;
+}
+
+export interface JobFunding extends ApiEnvelope {
+  source?: "recurring_template_reserve" | string;
+  templateId?: JobId;
+  wallet?: WalletAddress;
+  asset?: AssetSymbol;
+  amount?: number;
+  reservedAt?: ISODateTime;
+  templateKey?: string;
 }
 
 /** Generic coding job input. */
@@ -604,6 +626,7 @@ export interface JobDefinition extends ApiEnvelope {
   source?: ApiEnvelope;
   verification?: ApiEnvelope;
   lineage?: SubJobLineageMetadata;
+  funding?: JobFunding;
 }
 
 export interface JobSummary extends ApiEnvelope {
@@ -626,6 +649,7 @@ export interface JobSummary extends ApiEnvelope {
   delegationPolicy?: DelegationPolicy;
   recurringPolicy?: RecurringPolicy;
   lineage?: SubJobLineageMetadata;
+  funding?: JobFunding;
   submissionContract?: SubmissionContract;
   schemaContract?: JobSchemaContract;
 }

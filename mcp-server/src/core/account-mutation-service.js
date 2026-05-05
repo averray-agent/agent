@@ -220,6 +220,39 @@ export class AccountMutationService {
     return account;
   }
 
+  async reserveRecurringTemplateFunding(wallet, asset, amount, templateId) {
+    if (this.blockchainGateway?.isEnabled() && typeof this.blockchainGateway.reserveRecurringTemplateFunding === "function") {
+      return this.blockchainGateway.reserveRecurringTemplateFunding(wallet, asset, amount, templateId);
+    }
+
+    const account = await this.getAccountSummary(wallet);
+    const liquid = account.liquid[asset] ?? 0;
+    if (liquid < amount) {
+      throw new InsufficientLiquidityError(asset, {
+        wallet,
+        requiredAmount: amount,
+        availableAmount: liquid,
+        templateId
+      });
+    }
+
+    account.liquid[asset] = liquid - amount;
+    account.reserved[asset] = (account.reserved[asset] ?? 0) + amount;
+    account.recurringTemplateReserves = account.recurringTemplateReserves ?? {};
+    account.recurringTemplateReserves[templateId] = {
+      asset,
+      amount: (account.recurringTemplateReserves[templateId]?.amount ?? 0) + amount
+    };
+    this.accounts.set(wallet, account);
+    return {
+      wallet,
+      asset,
+      amount,
+      templateId,
+      source: "local_recurring_template_reserve"
+    };
+  }
+
   async lockJobStake(wallet, asset, amount, posterWallet = undefined) {
     if (this.blockchainGateway?.isEnabled()) {
       return this.getAccountSummary(wallet);

@@ -5,6 +5,9 @@ export const AGENT_ACCOUNT_ABI = [
   "function getBorrowCapacity(address account, address asset) view returns (uint256)",
   "function deposit(address asset, uint256 amount)",
   "function reserveForJob(address account, address asset, uint256 amount)",
+  "function reserveForRecurringTemplate(address account, address asset, bytes32 templateId, uint256 amount)",
+  "function consumeRecurringTemplateReserve(address account, address asset, bytes32 templateId, uint256 amount)",
+  "function recurringTemplateReserves(address account, address asset, bytes32 templateId) view returns (uint256)",
   "function lockJobStake(address account, address asset, uint256 amount)",
   "function releaseJobStake(address account, address asset, uint256 amount)",
   "function slashJobStake(address account, address asset, uint256 amount, address posterRecipient)",
@@ -31,6 +34,7 @@ export const AGENT_ACCOUNT_ABI = [
 
 export const ESCROW_CORE_ABI = [
   "function createSinglePayoutJob(bytes32 jobId, address asset, uint256 reward, uint256 opsReserve, uint256 contingencyReserve, uint256 claimTtl, bytes32 verifierMode, bytes32 category, bytes32 specHash)",
+  "function createSinglePayoutJobFromRecurringReserve((bytes32 jobId, bytes32 templateId, address poster, address asset, uint256 reward, uint256 opsReserve, uint256 contingencyReserve, uint256 claimTtl, bytes32 verifierMode, bytes32 category, bytes32 specHash) params)",
   "function claimJob(bytes32 jobId)",
   "function handleClaimTimeout(bytes32 jobId)",
   "function submitWork(bytes32 jobId, bytes32 evidenceHash)",
@@ -47,6 +51,7 @@ export const ESCROW_CORE_ABI = [
   "function jobs(bytes32 jobId) view returns ((address poster, address worker, address asset, bytes32 verifierMode, bytes32 category, bytes32 specHash, uint256 reward, uint256 opsReserve, uint256 contingencyReserve, uint256 released, uint256 claimExpiry, uint256 claimStake, uint16 claimStakeBps, uint256 claimFee, uint16 claimFeeBps, bool claimEconomicsWaived, address rejectingVerifier, uint256 rejectedAt, uint256 disputedAt, uint8 payoutMode, uint8 state))",
   "event JobFunded(bytes32 indexed jobId, address indexed poster, address indexed asset, uint256 totalReserved, uint8 payoutMode)",
   "event JobCreated(bytes32 indexed jobId, address indexed poster, bytes32 indexed specHash, address asset, uint256 totalReserved, uint8 payoutMode)",
+  "event RecurringJobFundedFromTemplate(bytes32 indexed jobId, bytes32 indexed templateId, address indexed poster, address asset, uint256 totalReserved)",
   "event JobClaimed(bytes32 indexed jobId, address indexed worker, uint256 claimExpiry, uint256 claimStake)",
   "event ClaimEconomicsLocked(bytes32 indexed jobId, address indexed worker, uint256 claimStake, uint256 claimFee, bool waived, uint256 claimNumber)",
   "event WorkSubmitted(bytes32 indexed jobId, address indexed worker, bytes32 evidenceHash)",

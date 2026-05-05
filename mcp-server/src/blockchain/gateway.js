@@ -395,6 +395,26 @@ export class BlockchainGateway {
     });
   }
 
+  async reserveRecurringTemplateFunding(wallet, assetSymbol, amount, templateId) {
+    return this.withGatewayError("reserveRecurringTemplateFunding", async () => {
+      this.requireSigner("reserveRecurringTemplateFunding");
+      const asset = this.requireAsset(assetSymbol);
+      const templateKey = this.toJobId(templateId);
+      const baseAmount = this.toBaseUnits(amount, asset, "recurring reserve amount");
+      const tx = await this.accountContract.reserveForRecurringTemplate(wallet, asset.address, templateKey, baseAmount);
+      await tx.wait();
+      return {
+        wallet,
+        asset: asset.symbol,
+        amount: this.toDisplayUnits(baseAmount, asset),
+        amountRaw: baseAmount.toString(),
+        templateId,
+        templateKey,
+        source: "agent_account_recurring_template_reserve"
+      };
+    });
+  }
+
   async allocateIdleFunds(wallet, strategyId, amount) {
     return this.withGatewayError("allocateIdleFunds", async () => {
       this.requireSigner("allocateIdleFunds");
@@ -596,18 +616,21 @@ export class BlockchainGateway {
 
       const rewardAmount = this.toBaseUnits(job.rewardAmount ?? 0, asset, "job reward");
       const claimStake = this.toBaseUnits(claimStakeAmount ?? 0, asset, "claim lock amount");
-      const totalRequired = rewardAmount + claimStake;
+      const usesRecurringTemplateReserve = this.usesRecurringTemplateReserve(job);
+      const totalRequired = usesRecurringTemplateReserve ? rewardAmount : rewardAmount + claimStake;
       if (totalRequired <= 0n) {
         throw new ValidationError(`Job ${job.id} has no fundable reward`);
       }
 
       const token = new Contract(asset.address, ERC20_MOCK_ABI, this.signer);
       const signerAddress = await this.signer.getAddress();
-      const signerPosition = await this.accountContract.positions(signerAddress, asset.address);
+      const signerPosition = usesRecurringTemplateReserve
+        ? { liquid: 0n }
+        : await this.accountContract.positions(signerAddress, asset.address);
       const liquid = BigInt(signerPosition.liquid);
-      const shortfall = totalRequired > liquid ? totalRequired - liquid : 0n;
+      const shortfall = !usesRecurringTemplateReserve && totalRequired > liquid ? totalRequired - liquid : 0n;
 
-      if (shortfall > 0n) {
+      if (!usesRecurringTemplateReserve && shortfall > 0n) {
         const mintTx = await token.mint(signerAddress, shortfall);
         await mintTx.wait();
         const approveTx = await token.approve(this.config.agentAccountAddress, shortfall);
@@ -617,7 +640,8 @@ export class BlockchainGateway {
       }
 
       const specHash = hashCanonicalContent(job);
-      const createTx = await this.createSinglePayoutJobForLayout(
+      const createTx = await this.createSinglePayoutJobForJob(
+        job,
         live.contractLayout,
         this.toJobId(instanceJobId),
         asset.address,
@@ -632,6 +656,12 @@ export class BlockchainGateway {
       await createTx.wait();
       return this.getJob(instanceJobId);
     });
+  }
+
+  usesRecurringTemplateReserve(job) {
+    return job?.funding?.source === "recurring_template_reserve"
+      && Boolean(job?.funding?.wallet)
+      && Boolean(job?.funding?.templateId);
   }
 
   async submitWork(jobId, evidence) {
@@ -780,6 +810,54 @@ export class BlockchainGateway {
       );
     }
     return this.escrowContract.createSinglePayoutJob(
+      jobId,
+      assetAddress,
+      reward,
+      opsReserve,
+      contingencyReserve,
+      claimTtl,
+      verifierMode,
+      category,
+      specHash
+    );
+  }
+
+  async createSinglePayoutJobForJob(
+    job,
+    contractLayout,
+    jobId,
+    assetAddress,
+    reward,
+    opsReserve,
+    contingencyReserve,
+    claimTtl,
+    verifierMode,
+    category,
+    specHash
+  ) {
+    const funding = job?.funding;
+    if (
+      contractLayout !== "legacy"
+      && funding?.source === "recurring_template_reserve"
+      && funding?.wallet
+      && funding?.templateId
+    ) {
+      return this.escrowContract.createSinglePayoutJobFromRecurringReserve({
+        jobId,
+        templateId: this.toJobId(funding.templateId),
+        poster: funding.wallet,
+        asset: assetAddress,
+        reward,
+        opsReserve,
+        contingencyReserve,
+        claimTtl,
+        verifierMode,
+        category,
+        specHash
+      });
+    }
+    return this.createSinglePayoutJobForLayout(
+      contractLayout,
       jobId,
       assetAddress,
       reward,

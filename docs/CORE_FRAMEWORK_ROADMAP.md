@@ -402,7 +402,7 @@ product, but today they are still a pattern plus manual fire endpoint.
 - [x] gate firing on finite template reserve policy
 - [x] expose status in admin endpoints
 - [x] wire operator UI controls for reserve exhaustion and next firing
-- [ ] back recurring reserve with escrow-native/on-chain poster funding
+- [x] back recurring reserve with escrow-native/on-chain poster funding
 
 ### What this unlocks
 
