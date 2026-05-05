@@ -90,6 +90,37 @@ test("createSubJob links the child job to the active parent session", async () =
   assert.equal(subJobs[0].id, "child-job-001");
 });
 
+test("createAdminJob reserves finite recurring template funding from the poster wallet", async () => {
+  const service = makePlatformService();
+
+  const template = await service.createAdminJob({
+    id: "weekly-recurring-001",
+    category: "coding",
+    tier: "starter",
+    rewardAmount: 5,
+    rewardAsset: "DOT",
+    verifierMode: "benchmark",
+    verifierTerms: ["complete"],
+    verifierMinimumMatches: 1,
+    recurring: true,
+    schedule: { cron: "0 9 * * 1" },
+    recurringPolicy: { reserveAmount: 10, reserveAsset: "DOT" }
+  }, { posterWallet: WALLET });
+
+  assert.equal(template.recurringPolicy.funding.source, "recurring_template_reserve");
+  assert.equal(template.recurringPolicy.funding.wallet, WALLET);
+  const account = await service.getAccountSummary(WALLET);
+  assert.equal(account.liquid.DOT, 0);
+  assert.equal(account.reserved.DOT, 10);
+
+  const derivative = service.fireRecurringJob("weekly-recurring-001", {
+    firedAt: new Date("2026-05-04T09:00:00.000Z")
+  });
+  assert.equal(derivative.funding.source, "recurring_template_reserve");
+  assert.equal(derivative.funding.wallet, WALLET);
+  assert.equal(derivative.funding.amount, 5);
+});
+
 test("createSubJob enforces parent delegation budget and count policy", async () => {
   const service = makePlatformService();
   service.jobs[0].delegationPolicy = { budgetAmount: 2, budgetAsset: "DOT", maxSubJobs: 1, maxDepth: 1 };

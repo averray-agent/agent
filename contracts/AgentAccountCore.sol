@@ -63,6 +63,7 @@ contract AgentAccountCore is ReentrancyGuard {
     mapping(bytes32 => StrategyRequest) public strategyRequests;
     mapping(address => mapping(address => uint256)) public pendingStrategyAssets;
     mapping(address => mapping(bytes32 => uint256)) public pendingStrategyWithdrawalShares;
+    mapping(address => mapping(address => mapping(bytes32 => uint256))) public recurringTemplateReserves;
 
     event Deposited(address indexed account, address indexed asset, uint256 amount);
     event Withdrawn(address indexed account, address indexed asset, uint256 amount);
@@ -70,7 +71,9 @@ contract AgentAccountCore is ReentrancyGuard {
     event ReservationReleased(address indexed account, address indexed asset, uint256 amount);
     event ReservationSettled(address indexed account, address indexed recipient, address indexed asset, uint256 amount);
     event StrategyAllocated(address indexed account, bytes32 indexed strategyId, address indexed asset, uint256 amount);
-    event StrategyDeallocated(address indexed account, bytes32 indexed strategyId, address indexed asset, uint256 amount);
+    event StrategyDeallocated(
+        address indexed account, bytes32 indexed strategyId, address indexed asset, uint256 amount
+    );
     event StrategyRequestQueued(
         address indexed account,
         bytes32 indexed strategyId,
@@ -94,11 +97,7 @@ contract AgentAccountCore is ReentrancyGuard {
     event JobStakeLocked(address indexed account, address indexed asset, uint256 amount);
     event JobStakeReleased(address indexed account, address indexed asset, uint256 amount);
     event JobStakeSlashed(
-        address indexed account,
-        address indexed asset,
-        uint256 amount,
-        uint256 posterAmount,
-        uint256 treasuryAmount
+        address indexed account, address indexed asset, uint256 amount, uint256 posterAmount, uint256 treasuryAmount
     );
     event ClaimFeeSlashed(
         address indexed account,
@@ -164,12 +163,44 @@ contract AgentAccountCore is ReentrancyGuard {
         emit Withdrawn(msg.sender, asset, amount);
     }
 
-    function reserveForJob(address account, address asset, uint256 amount) external whenNotPaused onlyOwnerOrOperator(account) onlySupportedAsset(asset) {
+    function reserveForJob(address account, address asset, uint256 amount)
+        external
+        whenNotPaused
+        onlyOwnerOrOperator(account)
+        onlySupportedAsset(asset)
+    {
         AssetPosition storage position = positions[account][asset];
         if (position.liquid < amount) revert InsufficientLiquidity();
         position.liquid -= amount;
         position.reserved += amount;
         emit Reserved(account, asset, amount);
+    }
+
+    function reserveForRecurringTemplate(address account, address asset, bytes32 templateId, uint256 amount)
+        external
+        whenNotPaused
+        onlyOwnerOrOperator(account)
+        onlySupportedAsset(asset)
+    {
+        if (templateId == bytes32(0)) revert ZeroAmount();
+        if (amount == 0) revert ZeroAmount();
+        AssetPosition storage position = positions[account][asset];
+        if (position.liquid < amount) revert InsufficientLiquidity();
+        position.liquid -= amount;
+        position.reserved += amount;
+        recurringTemplateReserves[account][asset][templateId] += amount;
+        emit Reserved(account, asset, amount);
+    }
+
+    function consumeRecurringTemplateReserve(
+        address account,
+        address asset,
+        bytes32 templateId,
+        uint256 amount
+    ) external whenNotPaused onlyOperator onlySupportedAsset(asset) {
+        uint256 templateReserve = recurringTemplateReserves[account][asset][templateId];
+        if (templateReserve < amount) revert InsufficientReserved();
+        recurringTemplateReserves[account][asset][templateId] = templateReserve - amount;
     }
 
     function refundReserved(address account, address asset, uint256 amount) external onlyOperator {
@@ -193,7 +224,11 @@ contract AgentAccountCore is ReentrancyGuard {
         emit ReservationSettled(account, recipient, asset, amount);
     }
 
-    function allocateIdleFunds(address account, bytes32 strategyId, uint256 amount) external whenNotPaused onlyOwnerOrOperator(account) {
+    function allocateIdleFunds(address account, bytes32 strategyId, uint256 amount)
+        external
+        whenNotPaused
+        onlyOwnerOrOperator(account)
+    {
         if (amount == 0) revert ZeroAmount();
         StrategyAdapterRegistry.StrategyMetadata memory strategy = registry.getStrategy(strategyId);
         if (strategy.adapter == address(0) || !strategy.active) revert InvalidStrategy();
@@ -211,7 +246,11 @@ contract AgentAccountCore is ReentrancyGuard {
         emit StrategyAllocated(account, strategyId, strategy.asset, amount);
     }
 
-    function deallocateIdleFunds(address account, bytes32 strategyId, uint256 amount) external whenNotPaused onlyOwnerOrOperator(account) {
+    function deallocateIdleFunds(address account, bytes32 strategyId, uint256 amount)
+        external
+        whenNotPaused
+        onlyOwnerOrOperator(account)
+    {
         if (amount == 0) revert ZeroAmount();
         StrategyAdapterRegistry.StrategyMetadata memory strategy = registry.getStrategy(strategyId);
         if (strategy.adapter == address(0) || !strategy.active) revert InvalidStrategy();
@@ -251,14 +290,10 @@ contract AgentAccountCore is ReentrancyGuard {
         }
 
         require(
-            _requireAsyncStrategyAdapter(adapterAddress).requestDeposit(
-                account,
-                params.amount,
-                params.destination,
-                params.message,
-                params.maxWeight,
-                params.nonce
-            ) == requestId,
+            _requireAsyncStrategyAdapter(adapterAddress)
+                .requestDeposit(
+                    account, params.amount, params.destination, params.message, params.maxWeight, params.nonce
+                ) == requestId,
             "REQUEST_ID_MISMATCH"
         );
     }
@@ -272,36 +307,35 @@ contract AgentAccountCore is ReentrancyGuard {
         if (params.shares == 0) revert ZeroAmount();
         if (params.recipient == address(0)) revert InvalidRecipient();
 
-        if (strategyShares[account][params.strategyId] < pendingStrategyWithdrawalShares[account][params.strategyId] + params.shares) {
+        if (
+            strategyShares[account][params.strategyId]
+                < pendingStrategyWithdrawalShares[account][params.strategyId] + params.shares
+        ) {
             revert InsufficientLiquidity();
         }
 
         (address adapterAddress, address asset) = _requireActiveStrategy(params.strategyId);
 
-        requestId = _previewWithdrawRequestId(params.strategyId, account, asset, params.recipient, params.shares, params.nonce);
+        requestId =
+            _previewWithdrawRequestId(params.strategyId, account, asset, params.recipient, params.shares, params.nonce);
 
         if (strategyRequests[requestId].account == address(0)) {
             _createPendingWithdrawRequest(
-                params.strategyId,
-                adapterAddress,
-                asset,
-                account,
-                requestId,
-                params.shares,
-                params.recipient
+                params.strategyId, adapterAddress, asset, account, requestId, params.shares, params.recipient
             );
         }
 
         require(
-            _requireAsyncStrategyAdapter(adapterAddress).requestWithdraw(
-                account,
-                params.shares,
-                params.recipient,
-                params.destination,
-                params.message,
-                params.maxWeight,
-                params.nonce
-            ) == requestId,
+            _requireAsyncStrategyAdapter(adapterAddress)
+                .requestWithdraw(
+                    account,
+                    params.shares,
+                    params.recipient,
+                    params.destination,
+                    params.message,
+                    params.maxWeight,
+                    params.nonce
+                ) == requestId,
             "REQUEST_ID_MISMATCH"
         );
     }
@@ -322,25 +356,17 @@ contract AgentAccountCore is ReentrancyGuard {
         if (request.account == address(0)) revert InvalidStrategyRequest();
         if (request.settled) {
             if (
-                request.status == status &&
-                request.settledAssets == settledAssets &&
-                request.settledShares == settledShares &&
-                request.remoteRef == remoteRef &&
-                request.failureCode == failureCode
+                request.status == status && request.settledAssets == settledAssets
+                    && request.settledShares == settledShares && request.remoteRef == remoteRef
+                    && request.failureCode == failureCode
             ) {
                 return;
             }
             revert InvalidStrategyRequest();
         }
 
-        IXcmStrategyAdapter(request.adapter).settleRequest(
-            requestId,
-            status,
-            settledAssets,
-            settledShares,
-            remoteRef,
-            failureCode
-        );
+        IXcmStrategyAdapter(request.adapter)
+            .settleRequest(requestId, status, settledAssets, settledShares, remoteRef, failureCode);
 
         if (request.kind == IXcmWrapper.RequestKind.Deposit) {
             pendingStrategyAssets[request.account][request.asset] -= request.requestedAssets;
@@ -372,13 +398,7 @@ contract AgentAccountCore is ReentrancyGuard {
 
         _refreshStrategyAllocated(request.account, request.asset);
         emit StrategyRequestSettled(
-            request.account,
-            request.strategyId,
-            requestId,
-            status,
-            settledAssets,
-            settledShares,
-            request.recipient
+            request.account, request.strategyId, requestId, status, settledAssets, settledShares, request.recipient
         );
     }
 
@@ -574,14 +594,22 @@ contract AgentAccountCore is ReentrancyGuard {
         return collateralLocked * 10_000 >= debtOutstanding * policy.minimumCollateralRatioBps();
     }
 
-    function _assetValueForShares(uint256 shares, uint256 totalAssets_, uint256 totalShares_) internal pure returns (uint256) {
+    function _assetValueForShares(uint256 shares, uint256 totalAssets_, uint256 totalShares_)
+        internal
+        pure
+        returns (uint256)
+    {
         if (shares == 0 || totalAssets_ == 0 || totalShares_ == 0) {
             return 0;
         }
         return (shares * totalAssets_) / totalShares_;
     }
 
-    function _sharesForAssetsRoundedUp(uint256 assets, uint256 totalAssets_, uint256 totalShares_) internal pure returns (uint256) {
+    function _sharesForAssetsRoundedUp(uint256 assets, uint256 totalAssets_, uint256 totalShares_)
+        internal
+        pure
+        returns (uint256)
+    {
         if (assets == 0 || totalAssets_ == 0 || totalShares_ == 0) {
             return 0;
         }
@@ -638,15 +666,7 @@ contract AgentAccountCore is ReentrancyGuard {
 
         SafeTransfer.safeApprove(asset, adapter, 0);
         SafeTransfer.safeApprove(asset, adapter, amount);
-        emit StrategyRequestQueued(
-            account,
-            strategyId,
-            requestId,
-            IXcmWrapper.RequestKind.Deposit,
-            amount,
-            0,
-            account
-        );
+        emit StrategyRequestQueued(account, strategyId, requestId, IXcmWrapper.RequestKind.Deposit, amount, 0, account);
     }
 
     function _createPendingWithdrawRequest(
@@ -677,13 +697,7 @@ contract AgentAccountCore is ReentrancyGuard {
         });
 
         emit StrategyRequestQueued(
-            account,
-            strategyId,
-            requestId,
-            IXcmWrapper.RequestKind.Withdraw,
-            0,
-            shares,
-            recipient
+            account, strategyId, requestId, IXcmWrapper.RequestKind.Withdraw, 0, shares, recipient
         );
     }
 
@@ -716,22 +730,13 @@ contract AgentAccountCore is ReentrancyGuard {
         return keccak256(abi.encode(strategyId, kind, account, asset, recipient, assets, shares, nonce));
     }
 
-    function _previewDepositRequestId(
-        bytes32 strategyId,
-        address account,
-        address asset,
-        uint256 amount,
-        uint64 nonce
-    ) internal pure returns (bytes32 requestId) {
+    function _previewDepositRequestId(bytes32 strategyId, address account, address asset, uint256 amount, uint64 nonce)
+        internal
+        pure
+        returns (bytes32 requestId)
+    {
         return _previewStrategyRequestId(
-            strategyId,
-            IXcmWrapper.RequestKind.Deposit,
-            account,
-            asset,
-            account,
-            amount,
-            0,
-            nonce
+            strategyId, IXcmWrapper.RequestKind.Deposit, account, asset, account, amount, 0, nonce
         );
     }
 
@@ -744,14 +749,7 @@ contract AgentAccountCore is ReentrancyGuard {
         uint64 nonce
     ) internal pure returns (bytes32 requestId) {
         return _previewStrategyRequestId(
-            strategyId,
-            IXcmWrapper.RequestKind.Withdraw,
-            account,
-            asset,
-            recipient,
-            0,
-            shares,
-            nonce
+            strategyId, IXcmWrapper.RequestKind.Withdraw, account, asset, recipient, 0, shares, nonce
         );
     }
 }

@@ -176,6 +176,19 @@ export class JobCatalogService {
     return job;
   }
 
+  removeJob(jobId) {
+    const idx = this.jobs.findIndex((job) => job.id === jobId);
+    if (idx === -1) {
+      return false;
+    }
+    const [removed] = this.jobs.splice(idx, 1);
+    if (removed?.parentSessionId) {
+      const indexed = this.parentSessionIndex.get(String(removed.parentSessionId));
+      indexed?.delete(removed.id);
+    }
+    return true;
+  }
+
   indexJob(job) {
     if (!job?.parentSessionId) {
       return;
@@ -786,6 +799,19 @@ export class JobCatalogService {
       recurring: false,
       templateId,
       firedAt: firedAt.toISOString(),
+      ...(template.recurringPolicy?.funding
+        ? {
+            funding: {
+              source: "recurring_template_reserve",
+              templateId,
+              wallet: template.recurringPolicy.funding.wallet,
+              asset: template.recurringPolicy.funding.asset ?? template.rewardAsset,
+              amount: template.rewardAmount,
+              reservedAt: template.recurringPolicy.funding.reservedAt,
+              templateKey: template.recurringPolicy.funding.templateKey
+            }
+          }
+        : {}),
       lifecycle: normaliseLifecycle({
         ...(template.lifecycle ?? {}),
         status: "open",

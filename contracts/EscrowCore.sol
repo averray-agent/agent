@@ -61,6 +61,20 @@ contract EscrowCore is ReentrancyGuard {
         JobState state;
     }
 
+    struct RecurringSinglePayoutJob {
+        bytes32 jobId;
+        bytes32 templateId;
+        address poster;
+        address asset;
+        uint256 reward;
+        uint256 opsReserve;
+        uint256 contingencyReserve;
+        uint256 claimTtl;
+        bytes32 verifierMode;
+        bytes32 category;
+        bytes32 specHash;
+    }
+
     mapping(bytes32 => JobEscrow) internal _jobs;
     mapping(address => uint256) public workerClaimCount;
     mapping(bytes32 => uint256[]) public milestoneAmounts;
@@ -70,8 +84,24 @@ contract EscrowCore is ReentrancyGuard {
     mapping(bytes32 => uint256) public claimTtls;
     mapping(bytes32 => bool) public autoDisclosed;
 
-    event JobFunded(bytes32 indexed jobId, address indexed poster, address indexed asset, uint256 totalReserved, PayoutMode payoutMode);
-    event JobCreated(bytes32 indexed jobId, address indexed poster, bytes32 indexed specHash, address asset, uint256 totalReserved, PayoutMode payoutMode);
+    event JobFunded(
+        bytes32 indexed jobId,
+        address indexed poster,
+        address indexed asset,
+        uint256 totalReserved,
+        PayoutMode payoutMode
+    );
+    event JobCreated(
+        bytes32 indexed jobId,
+        address indexed poster,
+        bytes32 indexed specHash,
+        address asset,
+        uint256 totalReserved,
+        PayoutMode payoutMode
+    );
+    event RecurringJobFundedFromTemplate(
+        bytes32 indexed jobId, bytes32 indexed templateId, address indexed poster, address asset, uint256 totalReserved
+    );
     event JobClaimed(bytes32 indexed jobId, address indexed worker, uint256 claimExpiry, uint256 claimStake);
     event ClaimEconomicsLocked(
         bytes32 indexed jobId,
@@ -85,10 +115,16 @@ contract EscrowCore is ReentrancyGuard {
     event Submitted(bytes32 indexed jobId, address indexed worker, bytes32 indexed payloadHash);
     event JobReopened(bytes32 indexed jobId);
     event JobRejected(bytes32 indexed jobId, bytes32 reasonCode);
-    event Verified(bytes32 indexed jobId, address indexed verifier, bool approved, bytes32 reasonCode, bytes32 reasoningHash);
+    event Verified(
+        bytes32 indexed jobId, address indexed verifier, bool approved, bytes32 reasonCode, bytes32 reasoningHash
+    );
     event DisputeOpened(bytes32 indexed jobId, address indexed opener, uint256 disputedAt);
-    event DisputeResolved(bytes32 indexed jobId, address indexed arbitrator, uint256 workerPayout, bytes32 reasonCode, string metadataURI);
-    event AutoResolvedOnTimeout(bytes32 indexed jobId, address indexed caller, uint256 workerPayout, bytes32 reasonCode);
+    event DisputeResolved(
+        bytes32 indexed jobId, address indexed arbitrator, uint256 workerPayout, bytes32 reasonCode, string metadataURI
+    );
+    event AutoResolvedOnTimeout(
+        bytes32 indexed jobId, address indexed caller, uint256 workerPayout, bytes32 reasonCode
+    );
     event JobClosed(bytes32 indexed jobId, address indexed worker, uint256 releasedAmount);
     event Disclosed(bytes32 indexed hash, address indexed byWallet, uint64 timestamp);
     event AutoDisclosed(bytes32 indexed hash, uint64 timestamp);
@@ -120,6 +156,11 @@ contract EscrowCore is ReentrancyGuard {
 
     modifier onlyArbitrator() {
         if (!policy.arbitrators(msg.sender)) revert Unauthorized();
+        _;
+    }
+
+    modifier onlyOperator() {
+        if (!policy.serviceOperators(msg.sender)) revert Unauthorized();
         _;
     }
 
@@ -202,6 +243,35 @@ contract EscrowCore is ReentrancyGuard {
         accounts.reserveForJob(msg.sender, asset, total);
         emit JobFunded(jobId, msg.sender, asset, total, PayoutMode.Single);
         emit JobCreated(jobId, msg.sender, specHash, asset, total, PayoutMode.Single);
+    }
+
+    function createSinglePayoutJobFromRecurringReserve(RecurringSinglePayoutJob calldata params)
+        external
+        whenNotPaused
+        nonReentrant
+        onlyOperator
+    {
+        if (_jobs[params.jobId].state != JobState.None) revert InvalidState();
+        if (params.poster == address(0)) revert Unauthorized();
+        JobEscrow storage job = _jobs[params.jobId];
+        job.poster = params.poster;
+        job.worker = address(0);
+        job.asset = params.asset;
+        job.verifierMode = params.verifierMode;
+        job.category = params.category;
+        job.specHash = params.specHash;
+        job.reward = params.reward;
+        job.opsReserve = params.opsReserve;
+        job.contingencyReserve = params.contingencyReserve;
+        job.payoutMode = PayoutMode.Single;
+        job.state = JobState.Open;
+        claimTtls[params.jobId] = params.claimTtl;
+
+        uint256 total = params.reward + params.opsReserve + params.contingencyReserve;
+        accounts.consumeRecurringTemplateReserve(params.poster, params.asset, params.templateId, total);
+        emit RecurringJobFundedFromTemplate(params.jobId, params.templateId, params.poster, params.asset, total);
+        emit JobFunded(params.jobId, params.poster, params.asset, total, PayoutMode.Single);
+        emit JobCreated(params.jobId, params.poster, params.specHash, params.asset, total, PayoutMode.Single);
     }
 
     function createMilestoneJob(
@@ -334,12 +404,13 @@ contract EscrowCore is ReentrancyGuard {
         emit JobReopened(jobId);
     }
 
-    function resolveSinglePayout(bytes32 jobId, bool approved, bytes32 reasonCode, string calldata metadataURI, bytes32 reasoningHash)
-        external
-        whenNotPaused
-        nonReentrant
-        onlyVerifier
-    {
+    function resolveSinglePayout(
+        bytes32 jobId,
+        bool approved,
+        bytes32 reasonCode,
+        string calldata metadataURI,
+        bytes32 reasoningHash
+    ) external whenNotPaused nonReentrant onlyVerifier {
         JobEscrow storage job = _jobs[jobId];
         if (job.state != JobState.Submitted || job.payoutMode != PayoutMode.Single) revert InvalidState();
         emit Verified(jobId, msg.sender, approved, reasonCode, reasoningHash);
@@ -375,12 +446,14 @@ contract EscrowCore is ReentrancyGuard {
         emit JobClosed(jobId, job.worker, job.reward);
     }
 
-    function resolveMilestone(bytes32 jobId, uint256 milestoneIndex, bool approved, bytes32 reasonCode, string calldata metadataURI, bytes32 reasoningHash)
-        external
-        whenNotPaused
-        nonReentrant
-        onlyVerifier
-    {
+    function resolveMilestone(
+        bytes32 jobId,
+        uint256 milestoneIndex,
+        bool approved,
+        bytes32 reasonCode,
+        string calldata metadataURI,
+        bytes32 reasoningHash
+    ) external whenNotPaused nonReentrant onlyVerifier {
         JobEscrow storage job = _jobs[jobId];
         if (job.state != JobState.Submitted || job.payoutMode != PayoutMode.Milestone) revert InvalidState();
         if (milestoneReleased[jobId][milestoneIndex]) revert InvalidState();
@@ -486,9 +559,7 @@ contract EscrowCore is ReentrancyGuard {
         uint256 workerPayout,
         bytes32 reasonCode,
         string memory metadataURI
-    )
-        internal
-    {
+    ) internal {
         if (workerPayout > 0) {
             accounts.settleReservedTo(job.poster, job.asset, job.worker, workerPayout);
             job.released += workerPayout;
@@ -580,11 +651,7 @@ contract EscrowCore is ReentrancyGuard {
         job.claimEconomicsWaived = false;
         job.rejectingVerifier = address(0);
         reputation.slashReputation(
-            job.worker,
-            policy.rejectionSkillPenalty(),
-            policy.rejectionReliabilityPenalty(),
-            0,
-            REASON_REJECTED
+            job.worker, policy.rejectionSkillPenalty(), policy.rejectionReliabilityPenalty(), 0, REASON_REJECTED
         );
     }
 
@@ -606,11 +673,7 @@ contract EscrowCore is ReentrancyGuard {
         job.claimEconomicsWaived = false;
         job.rejectingVerifier = address(0);
         reputation.slashReputation(
-            job.worker,
-            policy.disputeLossSkillPenalty(),
-            policy.disputeLossReliabilityPenalty(),
-            0,
-            REASON_DISPUTE_LOST
+            job.worker, policy.disputeLossSkillPenalty(), policy.disputeLossReliabilityPenalty(), 0, REASON_DISPUTE_LOST
         );
     }
 }

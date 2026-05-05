@@ -31,6 +31,12 @@ Shipped today:
   consumes one reward-sized slot per derivative and stops firing with
   `lastResult.status = "reserve_exhausted"` once the reserve can no longer
   cover the next run.
+- **Escrow-native reserve funding**: admin-created recurring templates with a
+  finite reserve lock that reserve in `AgentAccountCore` under the poster
+  wallet. When a derivative is claimed on a chain-aware deployment,
+  `EscrowCore.createSinglePayoutJobFromRecurringReserve` consumes one
+  reward-sized slice of that template reserve instead of reserving fresh
+  poster liquid.
 - **Pause/resume controls**: `POST /admin/jobs/pause` and
   `POST /admin/jobs/resume` update recurring runtime state. Both accept
   optional `idempotencyKey`; replay returns the stored admin-status
@@ -118,6 +124,29 @@ If the template has a finite reserve and the remaining reserve is less than
 one derivative reward, firing fails with `recurring_reserve_exhausted`.
 The scheduler records this as `lastResult.status = "reserve_exhausted"` and
 does not compute another `nextFireAt`.
+
+On chain-enabled deployments, a derivative that came from a funded recurring
+template carries:
+
+```json
+{
+  "funding": {
+    "source": "recurring_template_reserve",
+    "templateId": "weekly-digest",
+    "wallet": "0x...",
+    "asset": "DOT",
+    "amount": 5
+  }
+}
+```
+
+That marker tells the backend to create the escrow job from the template
+reserve already held in `AgentAccountCore`. The worker still claims and
+submits the derivative through the ordinary `/jobs/claim` and `/jobs/submit`
+flow; settlement continues to use the normal poster reserved balance.
+The backend signer must be an approved `serviceOperator` for this path: it
+reserves the poster's template pool through `AgentAccountCore` and later
+creates the derivative through `EscrowCore`.
 
 Any agent can now claim the derivative via `/jobs/claim?jobId=weekly-digest-run-…`.
 
@@ -211,9 +240,9 @@ Absolute numbers to watch (via `/metrics`):
 - **Subscription billing semantics.** The platform doesn't bill the
   poster periodically — the poster funds the template's reserve pool,
   each derivative consumes from that pool. Out of reserve = derivatives
-  stop minting. v1 tracks this as finite `recurringPolicy` metadata; a
-  later on-chain funding flow can make the same policy authoritative on
-  escrow balances.
+  stop minting. The backend still projects the remaining reserve from
+  derivative count for UI/status purposes, and chain-enabled deployments
+  now make the finite pool authoritative in `AgentAccountCore`.
 - **Agent-initiated subscriptions.** Only the poster decides cadence
   today. Giving workers an "always claim this" switch is a v3+
   feature.

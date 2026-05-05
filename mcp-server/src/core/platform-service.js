@@ -147,6 +147,17 @@ export class PlatformService {
     return this.jobCatalogService.createJob(input);
   }
 
+  async createAdminJob(input, { posterWallet = undefined } = {}) {
+    const created = this.jobCatalogService.createJob(input);
+    try {
+      await this.reserveRecurringTemplateFunding(created, posterWallet);
+      return created;
+    } catch (error) {
+      this.jobCatalogService.removeJob(created.id);
+      throw error;
+    }
+  }
+
   updateJobLifecycle(jobId, patch = {}) {
     return this.jobCatalogService.updateJobLifecycle(jobId, patch);
   }
@@ -949,6 +960,42 @@ export class PlatformService {
 
   async reserveForJob(wallet, asset, amount) {
     return this.accountMutationService.reserveForJob(wallet, asset, amount);
+  }
+
+  async reserveRecurringTemplateFunding(job, posterWallet) {
+    const reserveAmount = Number(job?.recurringPolicy?.reserveAmount);
+    if (!job?.recurring || !Number.isFinite(reserveAmount) || reserveAmount <= 0) {
+      return undefined;
+    }
+    const wallet = String(posterWallet ?? "").trim();
+    if (!wallet) {
+      throw new ValidationError("Recurring templates with finite reserves require a poster wallet.");
+    }
+    const asset = job.recurringPolicy.reserveAsset ?? job.rewardAsset ?? "DOT";
+    const receipt = await this.accountMutationService.reserveRecurringTemplateFunding(
+      wallet,
+      asset,
+      reserveAmount,
+      job.id
+    );
+    const reservedAt = new Date().toISOString();
+    job.recurringPolicy = {
+      ...job.recurringPolicy,
+      funding: {
+        source: "recurring_template_reserve",
+        wallet,
+        asset,
+        amount: reserveAmount,
+        reservedAt,
+        ...(receipt?.amountRaw ? { amountRaw: receipt.amountRaw } : {}),
+        ...(receipt?.templateKey ? { templateKey: receipt.templateKey } : {})
+      }
+    };
+    this.jobCatalogService.updateRecurringTemplateRuntime(job.id, {
+      reserve: this.jobCatalogService.buildRecurringReserveStatus(job),
+      funding: job.recurringPolicy.funding
+    });
+    return receipt;
   }
 
   async sendToAgent(from, recipient, asset, amount) {

@@ -110,6 +110,33 @@ test("fireRecurringJob produces a derivative with deterministic id", () => {
   assert.equal(status.templates[0].reserve.remainingRuns, 1);
 });
 
+test("fireRecurringJob carries escrow-native recurring funding onto derivatives", () => {
+  const service = makeService();
+  const template = service.createJob({ ...TEMPLATE, recurringPolicy: { reserveAmount: 10 } });
+  template.recurringPolicy.funding = {
+    source: "recurring_template_reserve",
+    wallet: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    asset: "DOT",
+    amount: 10,
+    reservedAt: "2026-05-04T08:00:00.000Z",
+    templateKey: `0x${"1".repeat(64)}`
+  };
+
+  const derivative = service.fireRecurringJob("weekly-digest", {
+    firedAt: new Date("2026-05-04T09:00:00.000Z")
+  });
+
+  assert.deepEqual(derivative.funding, {
+    source: "recurring_template_reserve",
+    templateId: "weekly-digest",
+    wallet: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    asset: "DOT",
+    amount: 5,
+    reservedAt: "2026-05-04T08:00:00.000Z",
+    templateKey: `0x${"1".repeat(64)}`
+  });
+});
+
 test("fireRecurringJob rejects non-recurring templates", () => {
   const service = makeService();
   service.createJob({ ...TEMPLATE, recurring: false, schedule: undefined });
