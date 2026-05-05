@@ -2,10 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { mutate } from "swr";
-import {
-  LoadedRunPanel,
-  type SubmissionValidationState,
-} from "./LoadedRunPanel";
+import { LoadedRunPanel } from "./LoadedRunPanel";
 import { LifecycleRail } from "./LifecycleRail";
 import { LifecycleActionBar } from "./LifecycleActionBar";
 import { RunSemanticBlock } from "./RunSemanticBlock";
@@ -35,6 +32,16 @@ import {
   extractRunJobs,
 } from "@/lib/api/run-adapters";
 import { extractAdminJobs } from "@/lib/api/job-lifecycle";
+import {
+  extractJobSchemaContract,
+  extractSubmissionContract,
+  extractSubmissionExample,
+  validationPath,
+  validationStateFromPayload,
+  type JobSchemaContract,
+  type SubmissionContract,
+  type SubmissionValidationState,
+} from "@/lib/api/submission-contract";
 
 /**
  * Self-contained detail view for a single run.
@@ -120,14 +127,9 @@ export function LoadedRunView({
   // schema-shaped example pre-filled, edits the placeholder values,
   // and submits something the verifier can actually validate.
   const preflightRecord = asRecord(jobPreflight.data);
-  const submissionContract =
-    asRecord(selectedJob?.submissionContract) ??
-    asRecord(preflightRecord?.submissionContract);
-  const schemaContract =
-    asRecord(selectedJob?.schemaContract) ?? asRecord(preflightRecord?.schemaContract);
-  const submissionExample = asRecord(
-    asRecord(submissionContract?.submitPayloadExample)?.submission
-  );
+  const submissionContract = extractSubmissionContract(selectedJob, preflightRecord);
+  const schemaContract = extractJobSchemaContract(selectedJob, preflightRecord);
+  const submissionExample = extractSubmissionExample(submissionContract);
   const submissionSample = submissionExample
     ? JSON.stringify(submissionExample, null, 2)
     : "";
@@ -154,7 +156,7 @@ export function LoadedRunView({
           }),
         },
       ]);
-      setValidationState(validationStateFromResponse(result));
+      setValidationState(validationStateFromPayload(result));
     } catch (err) {
       setValidationState(validationStateFromError(err));
     } finally {
@@ -787,8 +789,8 @@ function SubmissionReadinessStrip({
   schemaContract,
   preflight,
 }: {
-  contract: Record<string, unknown>;
-  schemaContract: Record<string, unknown> | null;
+  contract: SubmissionContract;
+  schemaContract: JobSchemaContract | null;
   preflight: Record<string, unknown> | null;
 }) {
   const output = asRecord(schemaContract?.output);
@@ -915,24 +917,6 @@ function parseDirectSubmissionDraft(draft: string): unknown {
   return parsed;
 }
 
-function validationStateFromResponse(payload: unknown): SubmissionValidationState {
-  const record = asRecord(payload);
-  if (!record) {
-    return {
-      status: "invalid",
-      message: "Validation endpoint returned an unexpected response.",
-      details: payload,
-    };
-  }
-  if (record.valid === true) return { status: "valid" };
-  return {
-    status: "invalid",
-    message: text(record.message, "Draft does not match the output schema."),
-    path: validationPath(record),
-    details: record.details ?? record,
-  };
-}
-
 function validationStateFromError(err: unknown): SubmissionValidationState {
   if (err instanceof ApiError) {
     const record = asRecord(err.body);
@@ -947,20 +931,6 @@ function validationStateFromError(err: unknown): SubmissionValidationState {
     status: "invalid",
     message: err instanceof Error ? err.message : "Could not validate draft.",
   };
-}
-
-function validationPath(record: Record<string, unknown>): string | undefined {
-  const details = asRecord(record.details);
-  return (
-    text(record.path) ||
-    text(record.expectedPath) ||
-    text(record.expected) ||
-    text(details?.path) ||
-    text(details?.expectedPath) ||
-    text(details?.expected) ||
-    text(details?.received) ||
-    undefined
-  );
 }
 
 /**

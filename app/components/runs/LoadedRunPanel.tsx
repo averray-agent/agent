@@ -2,6 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils/cn";
+import type {
+  JobSchemaContract,
+  SubmissionContract,
+  SubmissionValidationState,
+} from "@/lib/api/submission-contract";
 import { SourceBadge, type RunState } from "./StatePill";
 import { IssueMarkdown } from "./IssueMarkdown";
 import type {
@@ -81,24 +86,8 @@ export interface VerifierVerdict {
   scoreLabel: string;
 }
 
-export interface SubmissionValidationState {
-  status: "not_checked" | "valid" | "invalid";
-  message?: string;
-  path?: string;
-  details?: unknown;
-}
-
-export interface SubmissionContractView {
-  endpoint?: string;
-  validationEndpoint?: string;
-  structuredSubmissionRequired?: boolean;
-  schemaValidates?: string;
-  doNotWrapInOutput?: boolean;
-  outputSchemaRef?: string;
-  outputSchemaUrl?: string;
-  submitPayloadExample?: unknown;
-  invalidWrappedOutputHint?: string;
-  schemaContract?: unknown;
+export interface SubmissionContractView extends SubmissionContract {
+  schemaContract?: JobSchemaContract | null;
   validation: SubmissionValidationState;
   validating?: boolean;
   onValidate?: (draft: string) => void | Promise<void>;
