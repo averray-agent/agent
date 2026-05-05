@@ -210,6 +210,38 @@ export interface RecurringPolicy extends ApiEnvelope {
 
 {{BUILTIN_JOB_SCHEMA_TYPES}}
 
+export interface SubmissionPayloadExample<TSubmission = StructuredSubmission> extends ApiEnvelope {
+  sessionId?: SessionId | "<session-id>";
+  submission: TSubmission;
+}
+
+export interface SubmissionContract<TSubmission = StructuredSubmission> extends ApiEnvelope {
+  endpoint?: "POST /jobs/submit" | string;
+  validationEndpoint?: "POST /jobs/validate-submission" | string;
+  submissionShape?: "direct_schema_object" | string;
+  structuredSubmissionRequired?: boolean;
+  schemaValidates?: "payload.submission" | string;
+  doNotWrapInOutput?: boolean;
+  compatibilityAliases?: string[];
+  outputSchemaRef?: BuiltinJobSchemaRef | string;
+  outputSchemaUrl?: string;
+  submitPayloadExample?: SubmissionPayloadExample<TSubmission>;
+  invalidWrappedOutputHint?: string;
+}
+
+export interface SchemaContractSide extends ApiEnvelope {
+  schemaRef?: BuiltinJobSchemaRef | string;
+  schemaUrl?: string;
+  knownBuiltin?: boolean;
+  validates?: "payload.submission" | string;
+  validationEndpoint?: "POST /jobs/validate-submission" | string;
+}
+
+export interface JobSchemaContract extends ApiEnvelope {
+  input?: SchemaContractSide;
+  output?: SchemaContractSide;
+}
+
 export interface JobDefinition extends ApiEnvelope {
   id: JobId;
   title?: string;
@@ -228,7 +260,8 @@ export interface JobDefinition extends ApiEnvelope {
   effectiveState?: string;
   currentWalletCanClaim?: boolean | null;
   reason?: string | null;
-  submissionContract?: ApiEnvelope;
+  submissionContract?: SubmissionContract;
+  schemaContract?: JobSchemaContract;
   source?: ApiEnvelope;
   verification?: ApiEnvelope;
   lineage?: SubJobLineageMetadata;
@@ -254,6 +287,8 @@ export interface JobSummary extends ApiEnvelope {
   delegationPolicy?: DelegationPolicy;
   recurringPolicy?: RecurringPolicy;
   lineage?: SubJobLineageMetadata;
+  submissionContract?: SubmissionContract;
+  schemaContract?: JobSchemaContract;
 }
 
 export interface JobsListResponse extends ApiEnvelope {
@@ -289,12 +324,22 @@ export interface PreflightResponse extends ApiEnvelope {
   reason?: string | null;
   retryLimit?: number | null;
   claimExpiresAt?: ISODateTime | null;
+  submissionContract?: SubmissionContract;
+  schemaContract?: JobSchemaContract;
 }
 
 export interface ValidationResponse<TSubmission = unknown> extends ApiEnvelope {
   valid: boolean;
   errors?: ApiEnvelope[];
   submission?: TSubmission;
+  schemaRef?: BuiltinJobSchemaRef | string;
+  schemaValidates?: "payload.submission" | string;
+  submissionKind?: "structured" | string;
+  message?: string;
+  details?: ApiEnvelope;
+  path?: string;
+  expected?: string;
+  expectedPath?: string;
 }
 
 export interface ClaimResponse extends SessionRecord {
