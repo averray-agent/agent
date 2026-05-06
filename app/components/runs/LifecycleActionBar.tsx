@@ -1,8 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { mutate } from "swr";
 import { swrFetcher } from "@/lib/api/client";
+import { useAuthSession } from "@/lib/api/hooks";
+import {
+  buildAuthSession,
+  canUseControl,
+} from "@/lib/auth/capabilities";
 import {
   availableActions,
   formatLifecycleLabel,
@@ -30,6 +35,15 @@ export interface LifecycleActionBarProps {
 export function LifecycleActionBar({ jobId, lifecycle }: LifecycleActionBarProps) {
   const [pending, setPending] = useState<JobLifecycleAction | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const sessionRequest = useAuthSession();
+  const session = useMemo(
+    () => buildAuthSession(sessionRequest.data),
+    [sessionRequest.data]
+  );
+  // All four lifecycle actions go through the same `admin.jobs.lifecycle`
+  // UI control on the backend's capability matrix — one gate covers
+  // Pause / Archive / Reopen / Mark stale.
+  const gate = canUseControl(session, "admin.jobs.lifecycle");
 
   if (!lifecycle) return null;
 
@@ -79,11 +93,12 @@ export function LifecycleActionBar({ jobId, lifecycle }: LifecycleActionBarProps
             key={action}
             type="button"
             onClick={() => onClick(action)}
-            disabled={pending !== null}
+            disabled={pending !== null || !gate.allowed}
+            title={gate.reason}
             className={cn(
               "rounded-full border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-2.5 py-1 font-[family-name:var(--font-display)] text-[10.5px] font-extrabold uppercase transition-colors",
               "hover:border-[color:rgba(30,102,66,0.35)] hover:text-[var(--avy-accent)]",
-              "disabled:opacity-50 disabled:cursor-not-allowed",
+              "disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-[var(--avy-line)] disabled:hover:text-current",
               pending === action && "text-[var(--avy-accent)]"
             )}
             style={{ letterSpacing: "0.08em" }}
@@ -93,6 +108,14 @@ export function LifecycleActionBar({ jobId, lifecycle }: LifecycleActionBarProps
         ))}
       </div>
 
+      {!gate.allowed && gate.reason ? (
+        <span
+          className="basis-full font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]"
+          style={{ letterSpacing: 0 }}
+        >
+          {gate.reason}
+        </span>
+      ) : null}
       {error ? (
         <span className="basis-full font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-warn)]">
           {error}

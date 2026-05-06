@@ -24,6 +24,19 @@ export function useApi<T = unknown>(
 // backend doesn't yet emit full schemas. Claude Design's handoff and later
 // passes can narrow these as the UI settles.
 export const useAccount = () => useApi("/account");
+
+/**
+ * Resolved auth session — the signed-in wallet's effective roles +
+ * capabilities + the platform's capability matrix from PR #159. Used
+ * by the operator app to gate buttons before the user clicks (so a
+ * viewer without `jobs:lifecycle` sees disabled Pause/Archive/Reopen
+ * with a hint instead of clicking and getting a 403).
+ *
+ * 401s don't auto-retry (the `useApi` guard already handles that);
+ * consumers treat undefined data as "unauthenticated" and render
+ * gates as disabled.
+ */
+export const useAuthSession = () => useApi("/auth/session");
 export const useBorrowCapacity = (asset?: string) =>
   useApi(asset ? `/account/borrow-capacity?asset=${encodeURIComponent(asset)}` : "/account/borrow-capacity");
 export const useStrategyPositions = () => useApi("/account/strategies");
