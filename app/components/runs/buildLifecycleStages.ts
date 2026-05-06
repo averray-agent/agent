@@ -12,9 +12,10 @@
  * provenance — same split as the FIXTURE_LIFECYCLE_* variants.
  */
 
-import type { LifecycleStage } from "./LifecycleRail";
+import type { LifecycleStage, StageTone } from "./LifecycleRail";
 import type { JobSource } from "./types";
 import type { ClaimEffectiveState, ClaimSummary } from "@/lib/api/claim-status";
+import type { TimelineEntry } from "@/lib/api/job-timeline";
 
 interface BuildArgs {
   /** Live claim state from the loaded row. Optional so we can still
@@ -25,6 +26,11 @@ interface BuildArgs {
    *  rail; callers in client components can pass a memoised "now" when
    *  they want to drive the deadline countdown. */
   now?: Date;
+  /** Optional v2 timeline entries (PR #158). When supplied the
+   *  builder maps `severity: "warn" | "error"` events back to the
+   *  rail stage they reference and tints that stage to flag the
+   *  issue without changing whether it's "done". */
+  timeline?: TimelineEntry[];
 }
 
 const SUBMITTED_LABEL: Record<string, string> = {
@@ -41,9 +47,11 @@ export function buildLifecycleStages({
   claim,
   source,
   now = new Date(),
+  timeline,
 }: BuildArgs): LifecycleStage[] {
   const submittedLabel = SUBMITTED_LABEL[source?.type ?? "native"] ?? "Submitted";
   const state: ClaimEffectiveState = claim?.state ?? "claimable";
+  const tones = toneOverlayFromTimeline(timeline);
 
   // The first stage is always "Ready" (the catalog row exists). We
   // only mark the rest based on what the live state tells us.
@@ -52,6 +60,7 @@ export function buildLifecycleStages({
       label: "Ready",
       meta: "—",
       state: "done",
+      ...(tones.ready ? { tone: tones.ready } : {}),
     },
     {
       label: "Claimed",
@@ -61,6 +70,7 @@ export function buildLifecycleStages({
           }`
         : "—",
       state: stageStateFor(state, "claimed"),
+      ...(tones.claimed ? { tone: tones.claimed } : {}),
     },
     {
       label: submittedLabel,
@@ -70,19 +80,79 @@ export function buildLifecycleStages({
           ? deadlineCountdown(claim.claimExpiresAt, now)
           : "—",
       state: stageStateFor(state, "submitted"),
+      ...(tones.submitted ? { tone: tones.submitted } : {}),
     },
     {
       label: "Verified",
       meta: state === "submitted" ? "awaiting verifier" : "—",
       state: stageStateFor(state, "verified"),
+      ...(tones.verified ? { tone: tones.verified } : {}),
     },
     {
       label: "Paid",
       meta: "—",
       state: stageStateFor(state, "paid"),
+      ...(tones.paid ? { tone: tones.paid } : {}),
     },
   ];
   return stages.map((stage, idx) => ({ ...stage, index: idx + 1 }));
+}
+
+/**
+ * Map the v2 timeline entries to per-stage tone overlays. Returns the
+ * highest severity any event with a stage-relevant `phase` carries, so
+ * a single warn event tints the stage even when surrounded by info
+ * rows.
+ *
+ * The mapping is deliberately conservative — we only color a stage
+ * when the backend's `severity` field plus the entry `phase`/`type`
+ * pair clearly identifies which stage the issue belongs to. Anything
+ * else stays untinted.
+ */
+function toneOverlayFromTimeline(
+  timeline: TimelineEntry[] | undefined
+): Partial<Record<RailStage, StageTone>> {
+  if (!timeline || timeline.length === 0) return {};
+  const out: Partial<Record<RailStage, StageTone>> = {};
+  for (const entry of timeline) {
+    if (entry.severity !== "warn" && entry.severity !== "error") continue;
+    const stage = stageForEntry(entry);
+    if (!stage) continue;
+    out[stage] = mergeTone(out[stage], entry.severity);
+  }
+  return out;
+}
+
+type RailStage = "ready" | "claimed" | "submitted" | "verified" | "paid";
+
+function stageForEntry(entry: TimelineEntry): RailStage | undefined {
+  const phase = String(entry.phase ?? "").toLowerCase();
+  const type = String(entry.type ?? "").toLowerCase();
+  if (type === "verification" || phase === "verification") return "verified";
+  if (type === "session_transition" || type === "session_snapshot") {
+    // Map session phase to the rail stage. The backend phases are
+    // "claim", "work" (post-claim, pre-submit), "submit", "verify",
+    // "settle"; treat anything past submit as the verified stage.
+    if (phase === "settle") return "paid";
+    if (phase === "verify") return "verified";
+    if (phase === "submit") return "submitted";
+    if (phase === "work" || phase === "claim") return "claimed";
+  }
+  if (type === "child_job" || type === "derivative_job") {
+    // Lineage events live "after the claim" — surface as a flag on
+    // the Claimed stage rather than tinting the whole rail.
+    return "claimed";
+  }
+  return undefined;
+}
+
+function mergeTone(
+  current: StageTone | undefined,
+  incoming: "warn" | "error"
+): StageTone {
+  if (current === "error") return "error";
+  if (incoming === "error") return "error";
+  return "warn";
 }
 
 /**

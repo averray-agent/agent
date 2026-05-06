@@ -23,8 +23,9 @@ import {
   describeClaimer,
   formatDeadline,
 } from "@/components/runs/buildLifecycleStages";
-import { useAdminJobs, useJobs, useRecommendations } from "@/lib/api/hooks";
+import { useAdminJobs, useJobs, useJobTimeline, useRecommendations } from "@/lib/api/hooks";
 import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
+import { buildJobTimeline } from "@/lib/api/job-timeline";
 import {
   buildRecommendationCards,
   buildRunFilters,
@@ -183,6 +184,14 @@ function RunsPageInner() {
   // verification path and implies a direct GitHub flow that doesn't
   // exist for that run.
   const selectedRow = rows.find((row) => row.id === selectedId) ?? rows[0];
+  // Pull the v2 timeline for the selected row so the rail below can
+  // tint stages with severity overlays. SWR shares the fetch with the
+  // sticky LoadedRunView pane (same key) so this is free.
+  const timelineRequest = useJobTimeline(selectedRow?.id ?? null);
+  const selectedTimeline = useMemo(
+    () => buildJobTimeline(timelineRequest.data),
+    [timelineRequest.data]
+  );
   // One source-of-truth narrow on `selectedRow.source`. The lifecycle
   // copy below switches on `selectedSource?.type` and TS narrows to the
   // right per-source field set inside each branch — no per-source
@@ -331,6 +340,7 @@ function RunsPageInner() {
         stages={buildLifecycleStages({
           claim: selectedRow?.claim,
           source: selectedSource,
+          timeline: selectedTimeline.timeline,
         })}
         next={lifecycleNext}
       />

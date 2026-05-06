@@ -23,7 +23,9 @@ import {
   useJobDefinition,
   useJobPreflight,
   useJobs,
+  useJobTimeline,
 } from "@/lib/api/hooks";
+import { buildJobTimeline } from "@/lib/api/job-timeline";
 import {
   buildGitHubContext,
   buildOpenDataContext,
@@ -79,6 +81,15 @@ export function LoadedRunView({
 }: LoadedRunViewProps) {
   const jobs = useJobs();
   const adminJobs = useAdminJobs();
+  // The timeline panel below the rail already fetches this; SWR
+  // dedupes by URL key so calling the hook here is free and lets
+  // the rail tint stages from the same v2-envelope severity events
+  // the panel renders.
+  const timelineRequest = useJobTimeline(runId);
+  const timelineData = useMemo(
+    () => buildJobTimeline(timelineRequest.data),
+    [timelineRequest.data]
+  );
   // Prefer the admin job feed (carries lifecycle metadata + paused/
   // archived/stale rows). Fall back to the public feed until the admin
   // payload arrives so we don't render an empty panel on first paint.
@@ -749,6 +760,7 @@ export function LoadedRunView({
           stages={buildLifecycleStages({
             claim: loadedRow.claim,
             source: loadedRow.source,
+            timeline: timelineData.timeline,
           })}
           next={{
             label: "Next",
