@@ -77,6 +77,21 @@ export const usePublicProviderOperations = () =>
  */
 export const useAdminJobs = () =>
   useApi("/admin/jobs", { refreshInterval: 15_000 });
+
+/**
+ * Stitched job timeline (PR #149) — claim state + sessions +
+ * verification + child-run lineage + recurring derivatives +
+ * event-bus events for one job. Powers the JobTimelinePanel under
+ * /runs/detail. Skips the fetch when no jobId is selected so the
+ * panel doesn't 400 on first paint.
+ */
+export const useJobTimeline = (jobId: string | null) =>
+  useApi(
+    jobId
+      ? `/admin/jobs/timeline?jobId=${encodeURIComponent(jobId)}&limit=100`
+      : null,
+    { refreshInterval: 15_000 }
+  );
 export const useOnboarding = () => useApi("/onboarding");
 export const useVerifierHandlers = () => useApi("/verifier/handlers");
 export const useSessionStateMachine = () => useApi("/session/state-machine");
