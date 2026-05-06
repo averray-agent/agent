@@ -1,11 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Flame, Pause, Play, RotateCw } from "lucide-react";
 import { mutate } from "swr";
 import { SectionHead } from "./SectionHead";
 import { swrFetcher } from "@/lib/api/client";
+import { useAuthSession } from "@/lib/api/hooks";
+import {
+  buildAuthSession,
+  canUseControl,
+  type ControlGate,
+} from "@/lib/auth/capabilities";
 import {
   postRecurringTemplateAction,
   refreshRecurringTemplateSurfaces,
@@ -15,6 +21,17 @@ import {
   type RecurringTemplateStatus,
 } from "@/lib/api/recurring-jobs";
 import { cn } from "@/lib/utils/cn";
+
+/**
+ * Per-action capability mapping. Matches the keys the backend
+ * declares in `capabilityMatrix.uiControls` so each button gates on
+ * exactly the capability the matching admin endpoint requires.
+ */
+const ACTION_CONTROL: Record<RecurringTemplateAction, string> = {
+  pause: "admin.jobs.pauseRecurring",
+  resume: "admin.jobs.resumeRecurring",
+  fire: "admin.jobs.fireRecurring",
+};
 
 export interface RecurringRuntimeCardProps {
   runtime: RecurringRuntimeSummary;
@@ -51,6 +68,16 @@ export function RecurringRuntimeCard({ runtime }: RecurringRuntimeCardProps) {
 function RecurringTemplateRow({ template }: { template: RecurringTemplateStatus }) {
   const [pending, setPending] = useState<RecurringTemplateAction | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const sessionRequest = useAuthSession();
+  const session = useMemo(
+    () => buildAuthSession(sessionRequest.data),
+    [sessionRequest.data]
+  );
+  const gates: Record<RecurringTemplateAction, ControlGate> = {
+    pause: canUseControl(session, ACTION_CONTROL.pause),
+    resume: canUseControl(session, ACTION_CONTROL.resume),
+    fire: canUseControl(session, ACTION_CONTROL.fire),
+  };
   const reserve = template.reserve;
   const finiteReserve = reserve.mode === "finite" && reserve.reserveAmount !== undefined;
   const fillPct =
@@ -144,6 +171,8 @@ function RecurringTemplateRow({ template }: { template: RecurringTemplateStatus 
             action="resume"
             label="Resume"
             pending={pending}
+            disabled={!gates.resume.allowed}
+            disabledReason={gates.resume.reason}
             icon={<Play size={13} />}
             onClick={() => onAction("resume")}
           />
@@ -152,6 +181,8 @@ function RecurringTemplateRow({ template }: { template: RecurringTemplateStatus 
             action="pause"
             label="Pause"
             pending={pending}
+            disabled={!gates.pause.allowed}
+            disabledReason={gates.pause.reason}
             icon={<Pause size={13} />}
             onClick={() => onAction("pause")}
           />
@@ -160,7 +191,14 @@ function RecurringTemplateRow({ template }: { template: RecurringTemplateStatus 
           action="fire"
           label="Fire"
           pending={pending}
-          disabled={template.paused || template.exhausted}
+          disabled={template.paused || template.exhausted || !gates.fire.allowed}
+          disabledReason={
+            template.paused
+              ? "Resume the template first"
+              : template.exhausted
+                ? "Reserve exhausted"
+                : gates.fire.reason
+          }
           icon={<Flame size={13} />}
           onClick={() => onAction("fire")}
         />
@@ -212,6 +250,7 @@ function ActionButton({
   label,
   pending,
   disabled = false,
+  disabledReason,
   icon,
   onClick,
 }: {
@@ -219,6 +258,10 @@ function ActionButton({
   label: string;
   pending: RecurringTemplateAction | null;
   disabled?: boolean;
+  /** Human-readable hint shown on hover when the button is disabled.
+   *  Capability-gate reasons surface here so the operator knows why
+   *  the action isn't available. */
+  disabledReason?: string;
   icon: ReactNode;
   onClick: () => void;
 }) {
@@ -228,10 +271,11 @@ function ActionButton({
       type="button"
       onClick={onClick}
       disabled={pending !== null || disabled}
+      title={disabled ? disabledReason : undefined}
       className={cn(
         "inline-flex h-8 items-center gap-1.5 rounded-full border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-2.5 font-[family-name:var(--font-display)] text-[10.5px] font-extrabold uppercase text-[var(--avy-ink)] transition-colors",
         "hover:border-[color:rgba(30,102,66,0.35)] hover:text-[var(--avy-accent)]",
-        "disabled:cursor-not-allowed disabled:opacity-50",
+        "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-[var(--avy-line)] disabled:hover:text-[var(--avy-ink)]",
         active && "text-[var(--avy-accent)]"
       )}
       style={{ letterSpacing: "0.08em" }}
