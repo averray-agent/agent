@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { mutate } from "swr";
 import { LoadedRunPanel } from "./LoadedRunPanel";
 import { LifecycleRail } from "./LifecycleRail";
+import { JobTimelinePanel } from "./JobTimelinePanel";
 import { LifecycleActionBar } from "./LifecycleActionBar";
 import { RunSemanticBlock } from "./RunSemanticBlock";
 import {
@@ -768,6 +769,14 @@ export function LoadedRunView({
           }}
         />
       ) : null}
+
+      {/* Job timeline (PR #149) — full chronological log of every
+       *  event the backend has stitched for this job: state
+       *  transitions, verifier outcomes, child-run lineage, recurring
+       *  derivatives, raw event-bus rows. Only on the standalone
+       *  detail page (showLifecycle === true); the queue page already
+       *  has the rail above the sticky pane. */}
+      {showLifecycle ? <JobTimelinePanel jobId={loadedRow.id} /> : null}
 
       <ReceiptPreviewDrawer
         open={receiptOpen}
