@@ -53,12 +53,12 @@ The ledger flags this as 🔬 in the "Account and identity claims" section. Capt
 
 Before any v1.0.0-rc1 deploy, these must be addressed (see spec §8 Pre-deploy items for full list):
 
-- `scripts/write_server_env.sh` defaults updated from DOT/18-decimals to USDC/6-decimals
-- `deployments/mainnet.env.example` defaults updated from DOT/18-decimals to USDC/6-decimals
-- `MULTISIG_SETUP.md §5` `TOKEN_ADDRESS` field set to USDC precompile
-- `SUPPORTED_ASSETS_JSON` env var set with USDC entry
-- `BORROW_CAP` re-denominated from "25 DOT" to USDC equivalent
-- All hardcoded `1e18` constants reviewed for the 18→6 decimals change
+- Done: `scripts/write_server_env.sh` defaults updated from DOT/18-decimals to USDC/6-decimals
+- Done: `deployments/mainnet.env.example` defaults updated from DOT/18-decimals to USDC/6-decimals
+- Done: `MULTISIG_SETUP.md §5` `TOKEN_ADDRESS` field set to USDC precompile
+- Done: `SUPPORTED_ASSETS_JSON` env var set with USDC entry
+- Done: `BORROW_CAP` re-denominated from "25 DOT" to `25 USDC`
+- Still open: all decimals-aware runtime helpers and job-sourcing defaults reviewed for the 18→6 change
 
 These prevent silent 10^12 scaling bugs at deploy time.
 

@@ -20,13 +20,13 @@ Recommended starting values:
 
 | Env var | Human value | Raw value | Why this starts conservative |
 |---|---:|---:|---|
-| `DAILY_OUTFLOW_CAP` | `250 DOT` | `250000000000000000000` | Limits aggregate damage from a bad verifier, bad operator flow, or mistaken config in the first launch phase. |
-| `BORROW_CAP` | `25 DOT` per account | `25000000000000000000` | High enough to help a good worker bridge claim stake, low enough that one account cannot lever the system hard. |
+| `DAILY_OUTFLOW_CAP` | `250 USDC` | `250000000` | Limits aggregate damage from a bad verifier, bad operator flow, or mistaken config in the first launch phase. |
+| `BORROW_CAP` | `25 USDC` per account | `25000000` | High enough to help a good worker bridge claim stake, low enough that one account cannot lever the system hard. |
 | `MIN_COLLATERAL_RATIO_BPS` | `20000` (200%) | `20000` | More conservative than the current 150% testnet setting while liquidation does not yet exist. |
 | `DEFAULT_CLAIM_STAKE_BPS` | `1000` (10%) | `1000` | Doubles worker skin-in-the-game versus testnet without making starter jobs unusable. |
-| `ONBOARDING_WAIVER_CLAIM_COUNT` | `3 claims` | `3` | Lets a new SIWE wallet earn its first DOT before paying stake or anti-spam fees. |
+| `ONBOARDING_WAIVER_CLAIM_COUNT` | `3 claims` | `3` | Lets a new SIWE wallet earn its first USDC before paying stake or anti-spam fees. |
 | `CLAIM_FEE_BPS` | `200` (2%) | `200` | Adds refundable anti-spam friction after onboarding without changing worker net cost on success. |
-| `MIN_CLAIM_FEE_DOT` | `0.05 DOT` | `50000000000000000` | Keeps tiny funded jobs from being free to spam once onboarding is used. |
+| `MIN_CLAIM_FEE` | `0.05 USDC` | `50000` | Keeps tiny funded jobs from being free to spam once onboarding is used. |
 | `CLAIM_FEE_VERIFIER_BPS` | `7000` (70%) | `7000` | Sends most failed-claim fee flow to verifier compensation; remainder supports treasury operations. |
 | `REJECTION_SKILL_PENALTY` | `10` | `10` | Keeps ordinary rejection meaningful without making recovery impossible. |
 | `REJECTION_RELIABILITY_PENALTY` | `25` | `25` | Makes failed runs hurt reliability more than pure skill, which better reflects operator trust. |
@@ -44,26 +44,26 @@ These values should be treated as the **baseline launch policy** until:
 
 ## 2. Why these numbers
 
-### Daily outflow cap — `250 DOT`
+### Daily outflow cap — `250 USDC`
 
 The cap should be small enough that a policy or verifier mistake is
 painful but not existential. At the current product maturity, the right
 question is not "what is the most volume we can support?" but "what is
 the largest single-day mistake we are willing to absorb?".
 
-`250 DOT` is a launch-phase circuit breaker, not a forever ceiling.
+`250 USDC` is a launch-phase circuit breaker, not a forever ceiling.
 Raise it only after:
 
 - several successful production settlement cycles
 - alerting and incident ownership are live
 - operator rehearsals have been repeated on the exact deploy profile
 
-### Borrow cap — `25 DOT` per account
+### Borrow cap — `25 USDC` per account
 
 The current borrow model is flat, not reputation-weighted. That means the
 cap itself is doing most of the risk control.
 
-`25 DOT` is enough for the intended v1 use case:
+`25 USDC` is enough for the intended v1 use case:
 
 - bridging claim stake for a higher-tier job
 
@@ -92,10 +92,10 @@ real session data justifies the change.
 ### Onboarding waiver and claim fee
 
 The first three claims waive both stake and fee so a new agent can earn
-the DOT needed to become self-funding. From claim four onward, the worker
+the USDC needed to become self-funding. From claim four onward, the worker
 locks both the substantive claim stake and a refundable anti-spam fee.
 
-The fee is `max(2% of payout, 0.05 DOT)` for DOT-denominated launch jobs.
+The fee is `max(2% of payout, 0.05 USDC)` for USDC-denominated launch jobs.
 It is returned on verified success. On no-show or rejected submission, it
 is slashed separately from the claim stake: 70% to the verifier path when
 there is a verifier recipient, and the remainder to platform treasury. A

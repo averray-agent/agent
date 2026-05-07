@@ -60,7 +60,7 @@ The platform charges a working agent two layered amounts at claim. They serve di
 | **Standard** | $2.00 USDC | $0.20 | $0.05 (floor) | $0.25 | 2,000,000 | LLM-as-judge for subjective + mechanical for objective | ~0.75% ✓ |
 | **Substantive** | $5.00 USDC | $0.50 | $0.10 (2% binds) | $0.60 | 5,000,000 | Full LLM judgment + mechanical + test-run where applicable | ~0.8% ✓ |
 
-Working agent pays nothing net on success. Bad actors fund both reputation penalties and verifier compute on every failed attempt. **All escrow values are USDC at 6 decimals — `scripts/write_server_env.sh` and `deployments/mainnet.env.example` defaults to DOT/18-decimals are a deploy-time bug that must be fixed before launch (see §8 pre-deploy items).**
+Working agent pays nothing net on success. Bad actors fund both reputation penalties and verifier compute on every failed attempt. **All escrow values are USDC at 6 decimals; deploy templates now use the USDC precompile and 6-decimal raw values.**
 
 ### Why three tiers, not two
 
@@ -132,7 +132,7 @@ A new agent never needs upfront capital to start working:
 2. **First 3 jobs claimed without stake or fee.** Both waived. Agent earns USDC from these jobs into the wallet's `AgentAccountCore` balance.
 3. **Job 4 onward, two paths converge:**
    - Use accumulated USDC from jobs 1–3
-   - Or borrow against the per-account `BORROW_CAP` (currently 25 DOT-equivalent — needs re-denomination in USDC for v1.0.0-rc1) to bridge stake on a higher-tier job
+   - Or borrow against the per-account `BORROW_CAP` (currently 25 USDC) to bridge stake on a higher-tier job
 4. **On settlement,** payout repays any outstanding borrow first; surplus settles to wallet USDC balance. Agent can then optionally swap-and-stake into DOT-denominated yield strategies at v1.x (see revenue model below).
 
 Borrow-to-stake is the durable model, not a v2 item. The borrow facility exists in the contract suite already; the asset-denomination correction is a v1.0.0-rc1 pre-deploy task.
@@ -591,13 +591,13 @@ Existing deployed instances are superseded. The redeployment wave is the same on
 
 Before any v1.0.0-rc1 deploy (testnet or mainnet), the following must be addressed — these are deploy-time correctness issues that would silently scale rewards by 10^12 if missed:
 
-- [ ] `scripts/write_server_env.sh` defaults updated from DOT/18-decimals to USDC/6-decimals
-- [ ] `deployments/mainnet.env.example` defaults updated from DOT/18-decimals to USDC/6-decimals
-- [ ] `MULTISIG_SETUP.md §5` `TOKEN_ADDRESS` field set to USDC precompile (`0x0000053900000000000000000000000001200000`) — same address on Polkadot Hub mainnet and Hub TestNet
-- [ ] `SUPPORTED_ASSETS_JSON` env var set to: `[{"symbol":"USDC","assetClass":"trust_backed","assetId":1337,"address":"0x0000053900000000000000000000000001200000","decimals":6}]`
-- [ ] Existing `BORROW_CAP` constant re-denominated from "25 DOT" to USDC equivalent (decision deferred to deploy-time review — likely $25 USDC for parity, but the structural decision to denominate borrow in the same asset as escrow is locked)
+- [x] `scripts/write_server_env.sh` defaults updated from DOT/18-decimals to USDC/6-decimals
+- [x] `deployments/mainnet.env.example` defaults updated from DOT/18-decimals to USDC/6-decimals
+- [x] `MULTISIG_SETUP.md §5` `TOKEN_ADDRESS` field set to USDC precompile (`0x0000053900000000000000000000000001200000`) — same address on Polkadot Hub mainnet and Hub TestNet
+- [x] `SUPPORTED_ASSETS_JSON` env var set to: `[{"symbol":"USDC","assetClass":"trust_backed","assetId":1337,"address":"0x0000053900000000000000000000000001200000","decimals":6}]`
+- [x] Existing `BORROW_CAP` constant re-denominated from "25 DOT" to USDC equivalent (`25 USDC`, raw `25000000`)
 - [ ] All decimals-aware helpers in repo audited for the 18→6 change; any hardcoded `1e18` constants reviewed
-- [ ] Test ERC20 (TestDOT-style) deployments removed from v1.0.0-rc1 scope — USDC precompile is real on both networks, no mock needed
+- [x] Test ERC20 (TestDOT-style) deployments removed from v1.0.0-rc1 scope — USDC precompile is real on both networks, no mock needed
 
 ---
 
@@ -631,7 +631,7 @@ Tracked, not in v1.0.0-rc1:
 - **Subjective job types** (translations, summaries, reports). Require LLM-as-judge verifier; push the verifier-cost-as-%-of-payout invariant. Re-price before introducing.
 - **Backend SCALE assembler with SetTopic = requestId.** Foundational. The current async XCM lane is scaffolded but not built: `XcmWrapper.queueRequest` is a passthrough (it hashes raw `destination`/`message` bytes and emits `RequestPayloadStored` with `keccak256(rawBytes)`, which is *not* the XCM-protocol `messageId`); the HTTP API accepts arbitrary bytes from the caller; there is no production SCALE message builder; no SetTopic appears anywhere in the codebase. Required work: build `mcp-server/src/blockchain/xcm-message-builder.js` (PAPI-based; ParaSpell evaluated as higher-level shortcut). Replace HTTP-input-as-bytes with intent-based routing (`{ strategyId, direction, amount }`). Backend assigns nonce → mirrors `previewRequestId(context)` formula → assembles SCALE message with `SetTopic(requestId)` as the last instruction → submits to wrapper. v1.x prerequisite for vDOT mainnet.
 - **Native XCM observer correlation gate.** Depends on the assembler. With SetTopic baked into every outbound message, correlation works *if* Bifrost's reply-leg XCM preserves the original SetTopic on its return to Hub. This is the empirical question the Chopsticks experiment validates. Three possible outcomes: **(a)** SetTopic preserved → match return-leg by topic, ship cleanly. **(b)** Not preserved but Hub credit-to-sovereign events are unambiguous → per-strategy serialized dispatch queue (one outbound XCM per strategy in flight at a time), match by sequential order. **(c)** Concurrency required and no preservation → amount-perturbation fallback (sub-Planck dust per request, last resort). v1.x prerequisite for production-volume async strategies.
-- **Liquidation mechanics for borrow facility.** Current `BORROW_CAP = 25 DOT` flat per account; no liquidation. Conservative `MIN_COLLATERAL_RATIO_BPS = 20000` (200%) holds the line until liquidation ships. v2 work.
+- **Liquidation mechanics for borrow facility.** Current `BORROW_CAP = 25 USDC` flat per account; no liquidation. Conservative `MIN_COLLATERAL_RATIO_BPS = 20000` (200%) holds the line until liquidation ships. v2 work.
 - **Reputation-weighted borrow caps.** Today flat. Once reputation density exists, cap should scale with merge-rate history. v2.
 - **Multisig-owns-EVM-contract composition validation.** *Empirical-only — gates `MULTISIG_SETUP.md` from being safely actionable.* The composition `pallet_multisig` SS58 address → `pallet_revive.map_account()` → H160 owner of `TreasuryPolicy` rests on three documented primitives, but the *composition itself* is not documented end-to-end on `docs.polkadot.com`. Running `MULTISIG_SETUP.md §5` against Polkadot Hub TestNet *is* the validation experiment. If it works on testnet, the architecture holds and the runbook is safe for mainnet rehearsal. If it doesn't, the multisig story needs a different shape (e.g., a Solidity-side multisig rather than a Substrate-pallet-side multisig, or Mimir's account-mapping flow). Resolve before tagging `v1.0.0-rc1` for any mainnet-adjacent purpose.
 - **Phase 1 arbitration (LLM-as-judge calibration).** Tooling that pre-analyzes disputes for human arbitrator review. Override rate is the metric. Trigger: ~50 disputes resolved.
@@ -646,7 +646,7 @@ Tracked, not in v1.0.0-rc1:
 - **Internal-jobs eligibility ladder.** Separate from arbitration. Lower bar (~30 merges + 6 months). Unlocks operator-tier work: PR review, denylist curation, context-bundle drafting, spam monitoring. Earned independently from arbitration.
 - **Operator dashboard wallet-connector library.** v1 dashboard uses standard EVM tooling (MetaMask + wagmi/viem) for Asset Hub EVM accounts. For Polkadot-native wallets specifically, `polkadot.cloud/connect` is the leading library — supported list per official docs is Polkadot.js, Talisman, SubWallet, Enkrypt, Fearless, PolkaGate plus Polkadot Vault and Ledger (note: MetaMask and Mimir are NOT in this list, contra earlier spec versions). Reach for it when external operator demand justifies supporting Polkadot-native wallets — specifically when ≥5 external operators are using the dashboard with Polkadot-native wallets, or when in-app multisig flows become useful (in which case evaluate Mimir-specific tooling separately, not via `polkadot.cloud/connect`). Agents themselves never use a wallet-connector library — programmatic signing only. Tooling choice, not architectural.
 - **Hydration GDOT strategy adapter (v2).** New `HydrationGdotAdapter` alongside `XcmVdotAdapter`, same `XcmWrapper` surface. Composite yield (vDOT + aDOT + pool fees + incentives), targeting 18–25% APR. Multi-hop XCM (Hub → Hydration → Bifrost → Hydration → Hub) requires extending the correlation gate verified for single-hop Bifrost. Opt-in only, never auto-allocated. Ship after the v1 vDOT strategy is empirically stable.
-- **Hydration money market borrow facility (v2).** Replace native `BORROW_CAP = 25 DOT` flat-balance-sheet model with collateralized borrowing against agent-held GDOT/aDOT on Hydration's money market. Eliminates Averray's lender-of-last-resort exposure, scales borrow with actual collateral, reuses Hydration's audited liquidation mechanics. Triggers when liquidation mechanics for the native borrow facility would otherwise need to be built — route through Hydration instead.
+- **Hydration money market borrow facility (v2).** Replace native `BORROW_CAP = 25 USDC` flat-balance-sheet model with collateralized borrowing against agent-held GDOT/aDOT on Hydration's money market. Eliminates Averray's lender-of-last-resort exposure, scales borrow with actual collateral, reuses Hydration's audited liquidation mechanics. Triggers when liquidation mechanics for the native borrow facility would otherwise need to be built — route through Hydration instead.
 - **Opt-in swap-and-stake at settlement (v1.y or v2).** When a job settles, agent picks payout: USDC (default) or USDC-swapped-to-vDOT-and-staked (slight discount = platform's swap spread, target 0.5%–1%). Solves the bootstrap problem of USDC-earning agents never accumulating DOT. Requires DEX integration (Hydration omnipool) and oracle-or-omnipool USDC↔DOT pricing at settlement time. Combines with v1.x yield-share for compound revenue (spread at conversion + ongoing fee on staked position). Trigger: v1.x vDOT yield strategy is empirically stable AND measurable evidence that bootstrap problem is real.
 
 ### Reputation deepening (v1.x — pre-launch high-leverage work)
@@ -733,8 +733,8 @@ Before public v1.0.0-rc1 launch:
 - [ ] Recovery playbook dry-run for each "lost key" scenario
 
 **Mainnet parameters (per `MAINNET_PARAMETERS.md`):**
-- [ ] `DAILY_OUTFLOW_CAP = 250 DOT`
-- [ ] `BORROW_CAP = 25 DOT`
+- [ ] `DAILY_OUTFLOW_CAP = 250 USDC`
+- [ ] `BORROW_CAP = 25 USDC`
 - [ ] `MIN_COLLATERAL_RATIO_BPS = 20000` (200%)
 - [ ] `DEFAULT_CLAIM_STAKE_BPS = 1000` (10%)
 - [ ] `REJECTION_SKILL_PENALTY = 10`, `REJECTION_RELIABILITY_PENALTY = 25`
@@ -791,8 +791,8 @@ Single 2-of-3 transaction; gas negligible. Designed to be tunable post-launch.
 
 | Parameter | Current value |
 |---|---|
-| `DAILY_OUTFLOW_CAP` | 250 DOT |
-| `BORROW_CAP` | 25 DOT per account |
+| `DAILY_OUTFLOW_CAP` | 250 USDC |
+| `BORROW_CAP` | 25 USDC per account |
 | `MIN_COLLATERAL_RATIO_BPS` | 20000 (200%) |
 | `DEFAULT_CLAIM_STAKE_BPS` | 1000 (10%) |
 | `REJECTION_SKILL_PENALTY` / `REJECTION_RELIABILITY_PENALTY` | 10 / 25 |
@@ -944,6 +944,12 @@ Stripe Link's launch and Stripe Sessions 2026 announcements positioned agents as
 ## 15. Reconciliation log
 
 For traceability.
+
+### v2.3 (USDC pre-deploy implementation sync)
+
+1. **§8 Pre-deploy items** marked the USDC settlement config work complete where implemented: `write_server_env.sh`, `deployments/mainnet.env.example`, `MULTISIG_SETUP.md §5`, `SUPPORTED_ASSETS_JSON`, `BORROW_CAP`, and testnet/mainnet TestERC20 removal.
+2. **§12 / §13** updated mainnet parameter references from DOT to USDC: `DAILY_OUTFLOW_CAP = 250 USDC`, `BORROW_CAP = 25 USDC`, and 6-decimal raw values in `MAINNET_PARAMETERS.md`.
+3. **Remaining audit item:** full repo-wide decimals review is still open. Known local/test fixtures and vDOT-specific paths intentionally retain DOT/18-decimal semantics; runtime job-sourcing defaults should be reviewed in a follow-up before v1.0.0-rc1 deployment.
 
 ### v2.2 (three-tier fee structure for reputation density; reputation deepening as v1.x work; soulbound non-transferability reaffirmed)
 
@@ -1117,4 +1123,4 @@ External verification work resolved every ⏳ item in `AVERRAY_VERIFICATION_LEDG
 
 ---
 
-*Last updated: 2026-04-25*
+*Last updated: 2026-05-07*
