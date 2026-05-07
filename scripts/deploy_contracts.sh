@@ -4,13 +4,14 @@
 #
 # Profiles:
 #   dev     — local Anvil; mints MockDOT, wires deployer as verifier/arbitrator.
-#   testnet — Polkadot Hub TestNet; requires external TOKEN_ADDRESS. OWNER,
+#   testnet — Polkadot Hub TestNet; defaults TOKEN_ADDRESS to USDC. OWNER,
 #             PAUSER, VERIFIER, ARBITRATOR default to the deployer but SHOULD
 #             be overridden to production-like addresses for realism.
 #   mainnet — Polkadot Hub mainnet. Requires ALL of:
-#             TOKEN_ADDRESS, OWNER (multisig mapped EVM), PAUSER, VERIFIER,
-#             ARBITRATOR. Also requires MAINNET_CONFIRM=I-understand as a
-#             belt-and-suspenders acknowledgement.
+#             OWNER (multisig mapped EVM), PAUSER, VERIFIER, ARBITRATOR.
+#             TOKEN_ADDRESS must be the v1 USDC precompile. Also requires
+#             MAINNET_CONFIRM=I-understand as a belt-and-suspenders
+#             acknowledgement.
 #
 # Idempotency:
 #   The script refuses to overwrite an existing deployment manifest for the
@@ -21,9 +22,9 @@
 #   PROFILE                 dev | testnet | mainnet   (default: dev)
 #   RPC_URL                 RPC endpoint               (default: http://127.0.0.1:8545)
 #   PRIVATE_KEY             deployer key               (required for testnet/mainnet)
-#   TOKEN_ADDRESS           approved ERC20 asset precompile / test token
-#                           (required for testnet/mainnet; native DOT is not
-#                           exposed via an ERC20 precompile)
+#   TOKEN_ADDRESS           ERC20 asset precompile / test token. Defaults to
+#                           USDC for testnet/mainnet; native DOT is not
+#                           exposed via an ERC20 precompile.
 #   OWNER                   multisig mapped EVM address (defaults to deployer on dev)
 #   PAUSER                  hot-key pauser EOA          (defaults to deployer)
 #   VERIFIER                backend verifier signer EOA (defaults to deployer on dev)
@@ -45,6 +46,7 @@ PROFILE="${PROFILE:-dev}"
 RPC_URL="${RPC_URL:-http://127.0.0.1:8545}"
 DOT_NAME="${DOT_NAME:-Mock DOT}"
 DOT_SYMBOL="${DOT_SYMBOL:-mDOT}"
+USDC_PRECOMPILE_ADDRESS="0x0000053900000000000000000000000001200000"
 RAW_DAILY_OUTFLOW_CAP="${DAILY_OUTFLOW_CAP:-}"
 RAW_BORROW_CAP="${BORROW_CAP:-}"
 RAW_MIN_COLLATERAL_RATIO_BPS="${MIN_COLLATERAL_RATIO_BPS:-}"
@@ -57,18 +59,31 @@ RAW_REJECTION_SKILL_PENALTY="${REJECTION_SKILL_PENALTY:-}"
 RAW_REJECTION_RELIABILITY_PENALTY="${REJECTION_RELIABILITY_PENALTY:-}"
 RAW_DISPUTE_LOSS_SKILL_PENALTY="${DISPUTE_LOSS_SKILL_PENALTY:-}"
 RAW_DISPUTE_LOSS_RELIABILITY_PENALTY="${DISPUTE_LOSS_RELIABILITY_PENALTY:-}"
-DAILY_OUTFLOW_CAP="${DAILY_OUTFLOW_CAP:-1000000000000000000000000}"
-BORROW_CAP="${BORROW_CAP:-1000000000000000000000}"
-MIN_COLLATERAL_RATIO_BPS="${MIN_COLLATERAL_RATIO_BPS:-15000}"
-DEFAULT_CLAIM_STAKE_BPS="${DEFAULT_CLAIM_STAKE_BPS:-500}"
+if [[ "$PROFILE" == "dev" ]]; then
+  DAILY_OUTFLOW_CAP="${DAILY_OUTFLOW_CAP:-1000000000000000000000000}"
+  BORROW_CAP="${BORROW_CAP:-1000000000000000000000}"
+  MIN_COLLATERAL_RATIO_BPS="${MIN_COLLATERAL_RATIO_BPS:-15000}"
+  DEFAULT_CLAIM_STAKE_BPS="${DEFAULT_CLAIM_STAKE_BPS:-500}"
+  MIN_CLAIM_FEE="${MIN_CLAIM_FEE:-0}"
+  REJECTION_RELIABILITY_PENALTY="${REJECTION_RELIABILITY_PENALTY:-20}"
+  DISPUTE_LOSS_SKILL_PENALTY="${DISPUTE_LOSS_SKILL_PENALTY:-30}"
+  DISPUTE_LOSS_RELIABILITY_PENALTY="${DISPUTE_LOSS_RELIABILITY_PENALTY:-50}"
+else
+  # USDC has 6 decimals. These defaults mirror docs/MAINNET_PARAMETERS.md
+  # for testnet rehearsal; mainnet still requires explicit env values below.
+  DAILY_OUTFLOW_CAP="${DAILY_OUTFLOW_CAP:-250000000}"
+  BORROW_CAP="${BORROW_CAP:-25000000}"
+  MIN_COLLATERAL_RATIO_BPS="${MIN_COLLATERAL_RATIO_BPS:-20000}"
+  DEFAULT_CLAIM_STAKE_BPS="${DEFAULT_CLAIM_STAKE_BPS:-1000}"
+  MIN_CLAIM_FEE="${MIN_CLAIM_FEE:-50000}"
+  REJECTION_RELIABILITY_PENALTY="${REJECTION_RELIABILITY_PENALTY:-25}"
+  DISPUTE_LOSS_SKILL_PENALTY="${DISPUTE_LOSS_SKILL_PENALTY:-35}"
+  DISPUTE_LOSS_RELIABILITY_PENALTY="${DISPUTE_LOSS_RELIABILITY_PENALTY:-60}"
+fi
 ONBOARDING_WAIVER_CLAIM_COUNT="${ONBOARDING_WAIVER_CLAIM_COUNT:-3}"
 CLAIM_FEE_BPS="${CLAIM_FEE_BPS:-200}"
-MIN_CLAIM_FEE="${MIN_CLAIM_FEE:-0}"
 CLAIM_FEE_VERIFIER_BPS="${CLAIM_FEE_VERIFIER_BPS:-7000}"
 REJECTION_SKILL_PENALTY="${REJECTION_SKILL_PENALTY:-10}"
-REJECTION_RELIABILITY_PENALTY="${REJECTION_RELIABILITY_PENALTY:-20}"
-DISPUTE_LOSS_SKILL_PENALTY="${DISPUTE_LOSS_SKILL_PENALTY:-30}"
-DISPUTE_LOSS_RELIABILITY_PENALTY="${DISPUTE_LOSS_RELIABILITY_PENALTY:-50}"
 
 ANVIL_TEST_KEY="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 
@@ -97,9 +112,9 @@ case "$PROFILE" in
     PRIVATE_KEY="${PRIVATE_KEY:-$ANVIL_TEST_KEY}"
     ;;
   testnet|mainnet)
+    TOKEN_ADDRESS="${TOKEN_ADDRESS:-$USDC_PRECOMPILE_ADDRESS}"
     [[ -n "${PRIVATE_KEY:-}" ]] || fail "PRIVATE_KEY is required for PROFILE=$PROFILE"
     [[ "$PRIVATE_KEY" != "$ANVIL_TEST_KEY" ]] || fail "refusing to use Anvil test key for PROFILE=$PROFILE"
-    [[ -n "${TOKEN_ADDRESS:-}" ]] || fail "TOKEN_ADDRESS is required for PROFILE=$PROFILE (set it to an approved ERC20 asset precompile or deliberate test token; native DOT is not exposed via an ERC20 precompile)"
     ;;
   *)
     fail "unknown PROFILE: $PROFILE (expected dev|testnet|mainnet)"
@@ -113,6 +128,8 @@ if [[ "$PROFILE" == "mainnet" ]]; then
   [[ -n "${PAUSER:-}" ]] || fail "PAUSER is required for mainnet"
   [[ -n "${VERIFIER:-}" ]] || fail "VERIFIER is required for mainnet"
   [[ -n "${ARBITRATOR:-}" ]] || fail "ARBITRATOR is required for mainnet"
+  [[ "${TOKEN_ADDRESS,,}" == "${USDC_PRECOMPILE_ADDRESS,,}" ]] || \
+    fail "mainnet TOKEN_ADDRESS must be the v1 USDC precompile $USDC_PRECOMPILE_ADDRESS"
   [[ -n "$RAW_DAILY_OUTFLOW_CAP" ]] || fail "DAILY_OUTFLOW_CAP must be set explicitly for mainnet"
   [[ -n "$RAW_BORROW_CAP" ]] || fail "BORROW_CAP must be set explicitly for mainnet"
   [[ -n "$RAW_MIN_COLLATERAL_RATIO_BPS" ]] || fail "MIN_COLLATERAL_RATIO_BPS must be set explicitly for mainnet"
