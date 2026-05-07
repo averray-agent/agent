@@ -1,6 +1,6 @@
 # Averray — Verification Ledger
 
-**Purpose:** Track every empirical claim in `RC1_WORKING_SPEC.md` against authoritative documentation.
+**Purpose:** Track every empirical claim in `AVERRAY_WORKING_SPEC.md` against authoritative documentation.
 **Status:** Verification pass complete. All previously-⏳ items have been resolved against the authoritative Polkadot docs MCP (`https://docs-mcp.polkadot.com`) or the explicit upstream sources cited in each row.
 **Owner:** Pascal
 **Last updated:** 2026-04-28
@@ -22,7 +22,7 @@ After this pass:
 - All "operational" Phase 1 questions (override rate of LLM-as-judge, PR merge rate, dispute rate at production volume) remain 🔬 — these can never be answered by docs.
 - One new 🔬 surfaced: end-to-end "EVM-mapped Substrate multisig owns an EVM contract on Asset Hub" — the primitives are documented but the composition is not, so it must be confirmed on Hub TestNet before `MULTISIG_SETUP.md §4` can be treated as actionable.
 
-**Corrections that flowed into `RC1_WORKING_SPEC.md` through the v1.9/v1.10 sync** (see the per-section "⚠️ Spec correction" paragraphs below):
+**Corrections that need to flow into `AVERRAY_WORKING_SPEC.md`** (do not modify the spec in this pass — see the per-section "⚠️ Spec correction" paragraphs below):
 
 1. **No "native DOT precompile address" exists.** The ERC20 precompile is for Assets-pallet-managed assets only (Trust-Backed, Foreign, Pool). Native DOT is the chain's intrinsic value/balance, not addressable as an ERC20 precompile. `MULTISIG_SETUP.md §5` must be reworded.
 2. **"10x storage cost reduction in v2.2.1" is unsupported as written.** The official docs only state Asset Management is "approximately one-tenth the cost of relay chain transactions" — a comparison vs the relay chain, not a v2.2.1-introduced reduction. The v1.6 reconciliation log overstated this.
@@ -317,7 +317,7 @@ These items can never be answered by reading documentation. They require running
 
 ### Recommended cadence
 
-- **Before v1.0.0-rc1 deploy:** verify all ⚠️ items above have flowed into `RC1_WORKING_SPEC.md` corrections, paying particular attention to the native-DOT-precompile correction in `MULTISIG_SETUP.md §5` and the EVM-mapped-multisig empirical test (🔬). Without these, multisig setup is not safely actionable.
+- **Before v1.0.0-rc1 deploy:** verify all ⚠️ items above have flowed into `AVERRAY_WORKING_SPEC.md` corrections, paying particular attention to the native-DOT-precompile correction in `MULTISIG_SETUP.md §5` (the spec's current TOKEN_ADDRESS framing is wrong) and the EVM-mapped-multisig empirical test (🔬). Without these, multisig setup is not safely actionable.
 - **Before any external announcement of Bulletin Chain integration:** complete the Bulletin Chain corrections to the spec; fix the retention-period assumption everywhere.
 - **Before relying on PoP for v2 design:** verify Asset Hub integration scope of the PoP rollout. Marketing language is not implementation status — and per this verification pass, even the basic DIM1/DIM2 tier model is not yet on `docs.polkadot.com`.
 - **Quarterly:** re-verify ✅ items. Polkadot is moving fast; runtime upgrades change semantics.

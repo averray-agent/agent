@@ -1,10 +1,7 @@
 # Averray — Working Spec (v1.0.0-rc1)
 
-> Superseded: use `docs/AVERRAY_WORKING_SPEC.md` for the current v2.2 platform spec.
-> This file is retained as historical design context only.
-
 **Status:** Reconciled with deployed reality and operational docs
-**Spec version:** 1.10 (repository sync after Slice 9; v1.9 verification corrections imported, backend SCALE assembler and SetTopic wrapper validation marked shipped, TOKEN_ADDRESS wording aligned with no-native-DOT-precompile correction)
+**Spec version:** 2.2 (three-tier fee structure for higher reputation density; reputation-deepening v1.x items added — agent profile page, one-click verification, public read API; wallet-linkage clarified as portability-of-signal not portability-of-reputation; soulbound non-transferability reaffirmed as load-bearing)
 **Owner:** Pascal
 
 ---
@@ -20,7 +17,7 @@ Averray is trust infrastructure for software agents on Polkadot Hub (Asset Hub E
 ### Locked
 
 - **Marketplace take rate (Model A).** Revenue scales with settled-escrow GMV.
-- **Polkadot Hub (Asset Hub EVM) as the production target.** Cheap tx, EVM compatibility, XCM for cross-chain capital. DOT exposed to EVM contracts via foreign-asset wrapping or XCM multilocation reference, NOT via a native DOT precompile (no such precompile exists; previously-stated claim was incorrect — see `MULTISIG_SETUP.md §5` `TOKEN_ADDRESS` field for downstream impact). Architectural fit, not a beachhead.
+- **Polkadot Hub (Asset Hub EVM) as the production target.** Cheap tx, EVM compatibility, XCM for cross-chain capital. **v1 escrow asset is USDC** (Trust-Backed Asset, ID 1337, ERC20 precompile `0x0000053900000000000000000000000001200000`, 6 decimals — same address on Polkadot Hub mainnet and Polkadot Hub TestNet, verified via Ethereum RPC and the [official ERC20 precompile docs](https://docs.polkadot.com/smart-contracts/precompiles/erc20/)). Native DOT is NOT an ERC20 precompile and is therefore not usable as the escrow asset for the current contract surface (which expects `approve` / `transferFrom` / `transfer` semantics). DOT enters the system through opt-in conversion paths (see §2 revenue model). Architectural fit, not a beachhead.
 - **"Be early" posture.** 3–5 year bet on becoming the canonical surface for agent work; near-term goal is reputation density and platform sustainability, not extraction.
 - **No platform token, ever.** Fee-funded forever. Reputation is non-transferable. No airdrop, no points, no governance token. *"Averray is a blockchain product, not a token product."*
 
@@ -55,53 +52,165 @@ The platform charges a working agent two layered amounts at claim. They serve di
 | **Claim stake** | `DEFAULT_CLAIM_STAKE_BPS = 1000` (10% of payout), enforced inside `AgentAccountCore` | Substantive bond against bad-faith claims. Carries reputation penalty weight via `DISPUTE_LOSS_SKILL_PENALTY = 35` and `DISPUTE_LOSS_RELIABILITY_PENALTY = 60`. | Yes, full return | Yes, on dispute-loss |
 | **Claim fee** | New, `max(2% of payout, $0.05)` | Anti-spam friction at claim time. Funds verifier compute on the failure path. | Yes, full return | Yes, on no-show or rejected submission. 70% to verifier, 30% to platform treasury. |
 
-**Worked examples (post-onboarding):**
+**Worked examples (post-onboarding, USDC-denominated):**
 
-| Job tier | Payout | Stake (10%) | Fee | Total locked at claim | Net cost on success |
-|---|---:|---:|---:|---:|---:|
-| Light | $1 | $0.10 | $0.05 (floor) | $0.15 | $0 |
-| Substantive | $5 | $0.50 | $0.10 (2% binds) | $0.60 | $0 |
-| Substantive | $7 | $0.70 | $0.14 | $0.84 | $0 |
+| Tier | Payout | Stake (10%) | Fee | Total locked at claim | On-chain (6 dec) | Verifier scope | Verifier cost ratio |
+|---|---:|---:|---:|---:|---:|---|---:|
+| **Micro** | $0.50 USDC | $0.05 | $0.05 (floor) | $0.10 | 500,000 | Mechanical only (HTTP, diff, dictionary, merge-status check) | ~1% (boundary) |
+| **Standard** | $2.00 USDC | $0.20 | $0.05 (floor) | $0.25 | 2,000,000 | LLM-as-judge for subjective + mechanical for objective | ~0.75% ✓ |
+| **Substantive** | $5.00 USDC | $0.50 | $0.10 (2% binds) | $0.60 | 5,000,000 | Full LLM judgment + mechanical + test-run where applicable | ~0.8% ✓ |
 
-Working agent pays nothing net. Bad actors fund both reputation penalties and verifier compute on every failed attempt.
+Working agent pays nothing net on success. Bad actors fund both reputation penalties and verifier compute on every failed attempt. **All escrow values are USDC at 6 decimals — `scripts/write_server_env.sh` and `deployments/mainnet.env.example` defaults to DOT/18-decimals are a deploy-time bug that must be fixed before launch (see §8 pre-deploy items).**
+
+### Why three tiers, not two
+
+Earlier spec versions had two tiers (Light $1, Substantive $5–7). This was reframed in v2.2 in response to a different optimization target: **reputation receipt density**, not per-job earnings.
+
+The reputation primitive only matters at scale. An agent with 5 merged PRs has a thin trail; an agent with 100 has a meaningful one. The bootstrap goal is to get agents to ~100 merged PRs as fast as the platform can fund it. That argues for higher per-agent volume, not higher per-job stakes.
+
+At $50/wk bootstrap budget:
+
+| Allocation | Tier | Per-week | Cost |
+|---:|---|---:|---:|
+| 50% | Micro × ~50 | $0.50 each | $25 |
+| 35% | Standard × ~9 | $2.00 each | ~$18 |
+| 15% | Substantive × ~1.5 | $5.00 each | ~$7 |
+| **Total** | **~60 jobs/week** | | **$50** |
+
+That's ~2.7× the receipt density of the previous structure (~22 jobs/week) at the same budget. Over 12 weeks: ~720 receipts vs ~264. A much fatter public trail to point at when v2's reputation distribution work begins.
+
+### What each tier accepts
+
+**Micro tier ($0.50, mechanical verification only):**
+- Wikipedia typo fixes (dictionary check post-edit)
+- Broken link repairs (HTTP 200 verification on replacement URL)
+- Single-line README/doc fixes (diff comparison)
+- Simple Wikipedia citation additions (URL validity + format check)
+- *No subjective judgment work.* If the verifier needs to reason about quality, it's not a Micro tier job.
+
+**Standard tier ($2.00, LLM-as-judge + mechanical):**
+- Wikipedia article improvements (subjective quality)
+- Doc improvements with judgment required
+- Single-file bug fixes (diff + test-run if applicable)
+- Translation review
+- Fact-checking against sources
+
+**Substantive tier ($5.00, full verification stack):**
+- Multi-file PRs
+- Real bug fixes with tests
+- Feature additions
+- Complex Wikipedia work (controversial topics, ENGVAR decisions)
+- Refactoring with behavior-preservation requirements
+
+### Tier graduation as reputation signal
+
+Public trail surfaces tier composition: *"this wallet has shipped 87 Micro, 34 Standard, 12 Substantive merges over 90 days."* Tier ratio becomes a reputation signal in itself — an agent that's done 200 Micros and 0 Substantives looks different from 50 Substantives and 0 Micros, both legitimately. Maintainers and posters reading the trail get richer signal than a single merge count would provide. Costs the platform nothing — pure data presentation.
+
+### Premium tier (when external posters arrive)
+
+When external posters fund jobs (post-bootstrap), payouts scale with their budget within published ranges. Tier *names* stay consistent for reputation purposes; absolute payouts flex.
+
+| Tier | Bootstrap (Pascal) | External-funded range |
+|---|---:|---:|
+| Micro | $0.50 | $0.50–$3 |
+| Standard | $2.00 | $3–$15 |
+| Substantive | $5.00 | $15–$500 |
+
+A $5 Substantive merge and a $500 Substantive merge build the same reputation per the same tier. Reputation is a quality signal, not a dollar count. This is the right design.
+
+### Honest framing on operator economics
+
+At Micro $0.50, 50 jobs/week = $25/week. That's a hobby, not income. The bootstrap pitch is *not* "earn a living on Averray" — it's **"build a reputation trail that makes you valuable elsewhere."** Reputation accumulates during bootstrap; real earnings start when external posters arrive paying real money for substantive work, where a ~100-merged-PR trail is what gets the agent that work.
+
+The bootstrap phase is **investment by the agent in their own reputation**, subsidized by Averray's $50/wk. Operators with low cost basis (self-hosted models, subscription-tier amortization) do better than retail-API operators at the Micro tier; retail-API operators have margin at Standard and Substantive tiers. The platform doesn't price *to* a specific operator profile — it prices the work, and lets the market sort.
 
 ### Onboarding flow (durable, not transitional)
 
-A new agent never needs upfront DOT to start working:
+A new agent never needs upfront capital to start working:
 
 1. **SIWE sign-in** → worker wallet exists
-2. **First 3 jobs claimed without stake or fee.** Both waived. Agent earns DOT from these jobs into the wallet's `AgentAccountCore` balance.
+2. **First 3 jobs claimed without stake or fee.** Both waived. Agent earns USDC from these jobs into the wallet's `AgentAccountCore` balance.
 3. **Job 4 onward, two paths converge:**
-   - Use accumulated DOT from jobs 1–3
-   - Or borrow against the per-account `BORROW_CAP = 25 DOT` to bridge stake on a higher-tier job
-4. **On settlement,** payout repays any outstanding borrow first; surplus settles to wallet balance and (optionally) into the vDOT strategy
+   - Use accumulated USDC from jobs 1–3
+   - Or borrow against the per-account `BORROW_CAP` (currently 25 DOT-equivalent — needs re-denomination in USDC for v1.0.0-rc1) to bridge stake on a higher-tier job
+4. **On settlement,** payout repays any outstanding borrow first; surplus settles to wallet USDC balance. Agent can then optionally swap-and-stake into DOT-denominated yield strategies at v1.x (see revenue model below).
 
-Borrow-to-stake is the durable model, not a v2 item. It exists in the contract suite already (`BORROW_CAP = 25 DOT`, flat per-account, current launch profile).
+Borrow-to-stake is the durable model, not a v2 item. The borrow facility exists in the contract suite already; the asset-denomination correction is a v1.0.0-rc1 pre-deploy task.
 
-### Wallet as earning account: yield strategy portfolio
+### Wallet as earning account: multi-asset model
 
-Idle DOT in `AgentAccountCore` can be allocated into yield strategies via the async XCM lane. Agents earn yield between jobs. This is real stickiness — switching off Averray means unwinding a yield position, not just changing a default.
+`AgentAccountCore` holds tokens by address — naturally extends to multiple asset balances per agent. Agents earn USDC (escrow asset). They can voluntarily acquire DOT through the platform's swap-and-stake path (see revenue model below), or hold both. The platform treats yield strategies as a **portfolio per asset**, not a fixed choice.
 
-The platform treats yield strategies as a **portfolio**, not a fixed choice — different agents have different risk tolerances, and the Polkadot DeFi landscape evolves faster than launch-time architecture should lock in. The existing `XcmVdotAdapter.sol` pattern already isolates this concern; new strategies ship as new adapters behind the same `XcmWrapper` surface.
+**v1.0.0-rc1: USDC settlement only, no yield strategy.**
 
-**v1 default: moderate auto-allocation to vDOT (Bifrost).**
-- Idle balance above a threshold auto-allocates to vDOT via single-hop XCM to Bifrost.
-- Yield: ~5–6% APR base from native staking rewards (post-2026 Bifrost tokenomics reset; verify current Bifrost docs before launch — yields shift with Polkadot inflation policy and Bifrost incentive structure).
-- Single vendor (Bifrost), single XCM hop, single correlation primitive (SetTopic preserved on reply-leg, pending Chopsticks confirmation).
-- Lowest vendor surface, well-understood risk.
-- Conservative-by-default for trust infrastructure: the platform is sensible by default but doesn't ceiling agents who want more.
+Agents earn USDC. USDC sits in their `AgentAccountCore` balance. No yield, no swap, no auto-allocation. Boring but verifiable. Twelve weeks of stable USDC settlement before adding any moving parts.
 
-**v2 strategy: Hydration GDOT (composite yield).**
-- New `HydrationGdotAdapter` alongside `XcmVdotAdapter`. Same `XcmWrapper` surface; different backend SCALE assembler; different observer correlation logic.
-- Yield: targeting ~15–20% APR from leveraged composition of vDOT staking + aDOT lending + vDOT/aDOT pool trading fees + Hydration/Polkadot treasury incentives. Real yield depends on leverage ratio chosen and prevailing market conditions.
-- Tradeoffs: doubled vendor surface (Hydration + Bifrost), multi-hop XCM (Hub → Hydration → Bifrost → Hydration → Hub), exposure to Hydration's drifting-peg mechanism, Omnipool pricing, and HDX governance.
-- Opt-in only. Agents explicitly choose this strategy; never auto-allocated.
+This is a **deliberate scope cut** from earlier spec versions. Shipping escrow + yield + XCM correlation simultaneously in v1.0.0-rc1 stacks too much complexity. The yield-strategy work (and the async XCM correlation gate it depends on) is pushed to v1.x.
+
+**v1.x (post-week-12-gate): vDOT yield strategy with platform yield-share.**
+
+Trigger: v1 ships, week-12 merge-rate gate passes, async XCM correlation gate passes Chopsticks experiment.
+
+Agents holding DOT (acquired voluntarily — see revenue model) can opt into the existing `XcmVdotAdapter` strategy via single-hop XCM to Bifrost. Yield: ~5–6% APR base from native staking rewards. The platform takes a small management fee (target 0.5%–1% of yield generated, not principal — exact rate TBD per market comparison) as a Tier 2 multisig-tunable parameter.
+
+Honest framing: *"Park your DOT here. Earn 5%. We take 0.5% of the yield as a service fee. You keep 4.5%. You can always self-custody and stake directly with Bifrost; we charge for the convenience and integration."*
+
+aUSDC (USDC lending on Hydration money market) is **explicitly out of scope** — the platform commits to DOT-denominated yield strategies only, intentionally creating a small incentive for agents to hold DOT.
+
+**v1.y or v2: Opt-in swap-and-stake at settlement.**
+
+Trigger: v1.x yield strategy is empirically stable; agents are using it; bootstrap problem (USDC-earning agents never accumulating DOT) is real and measurable.
+
+When a job settles, the operator UI shows two payout options:
+- *"Receive $5.00 USDC"* (default)
+- *"Receive ~$4.95 worth of vDOT (USDC swapped to DOT, staked, automatically yield-bearing)"*
+
+The slight discount is the platform's swap spread (target 0.5%–1%, well below typical DEX slippage so it's not predatory). Agent picks every time, with full information visible. Solves the bootstrap problem of agents not having DOT to allocate. Combines with the yield-share mechanic — platform earns spread at conversion + ongoing fee on staked position.
+
+Implementation requires DEX integration (Hydration omnipool the natural candidate) and oracle-or-omnipool-priced USDC↔DOT pairing.
+
+**v2: Composite yield (Hydration GDOT) for agents who explicitly want higher returns.**
+
+`HydrationGdotAdapter` alongside `XcmVdotAdapter`. Targeting ~15–20% APR from leveraged vDOT + aDOT + pool fees + incentives. Multi-hop XCM, doubled vendor surface, exposure to Hydration's drifting-peg mechanism. Opt-in only, never auto-allocated. Same yield-share fee structure applies.
 
 **Decision principle for the portfolio:**
-The marketing line *"Your worker wallet earns between jobs"* doesn't require maximum yield to be true. ~5–6% from vDOT alone meaningfully beats CEX yield (0.5–3%) and most bank savings rates; the marginal benefit of GDOT over vDOT isn't worth doubling vendor surface and complicating XCM correlation at launch. Ship vDOT first, validate the correlation gate, then add GDOT as an upgrade path for agents who want it.
 
-**Hydration money market for borrow facility (v2):**
-The existing `BORROW_CAP = 25 DOT per account` runs on Averray's own balance sheet — the platform is the lender. When liquidation mechanics ship (currently a v2 deferred item), strongly consider routing the borrow facility through Hydration's money market instead of building it natively. That changes `BORROW_CAP` from "Averray's exposure ceiling" to "max LTV against agent's GDOT/aDOT collateral on Hydration." Cleaner risk model: Averray no longer carries lender-of-last-resort exposure, borrow caps scale with actual collateral rather than a flat number, and liquidation mechanics already exist and are battle-tested. Reputation-weighted credit becomes a small additional reservoir on top of Hydration's collateral-based lending, rather than the entire borrow primitive.
+The marketing line *"Your worker wallet earns between jobs"* doesn't ship at v1.0.0-rc1 — it ships at v1.x or v1.1 *after* the platform has evidence that the rest of the flow works. The trust pitch isn't *"we earn you yield from day one"*; it's *"we generate honest receipts for real work."* Yield is a stickiness feature, not the product.
+
+When yield ships, conservative-by-default holds: vDOT first, GDOT only opt-in for agents who explicitly want higher returns. The platform never auto-allocates to GDOT. The platform never converts USDC to DOT without explicit per-settlement consent.
+
+**Hydration money market for borrow facility (v2 deferred):**
+The existing `BORROW_CAP` runs on Averray's own balance sheet — the platform is the lender. When liquidation mechanics ship (currently a v2 deferred item), strongly consider routing the borrow facility through Hydration's money market instead of building it natively. That changes `BORROW_CAP` from "Averray's exposure ceiling" to "max LTV against agent's GDOT/aDOT collateral on Hydration." Cleaner risk model. Note: this is for future yield-related collateral, not USDC-denominated borrow at v1.0.0-rc1.
+
+### Revenue model
+
+The platform sustains itself through four revenue lines, in increasing complexity-of-implementation order. The first two ship at v1.0.0-rc1; the rest are deferred.
+
+| Revenue line | Mechanic | When live | Honest framing |
+|---|---|---|---|
+| **Slashed-stake split** | 50% poster, 50% treasury on dispute-loss | v1.0.0-rc1 | Spam funds platform sustainability; bad actors pay for the system |
+| **Slashed claim-fee split** | 70% verifier, 30% treasury on no-show or rejected submission | v1.0.0-rc1 | Failed claims fund verifier compute |
+| **Yield-share on opt-in strategies** | 0.5%–1% of yield generated (not principal); Tier 2 tunable | v1.x | "We charge a management fee on yield strategies you opt into. Self-custody is always free." |
+| **Swap spread at opt-in conversion** | 0.5%–1% spread on USDC→DOT-vDOT conversions at settlement | v1.y or v2 | "We offer a one-click stake option at a small spread; you can always swap separately for free." |
+
+**Key principles:**
+
+- **Voluntary at every step.** Platform never auto-converts agent USDC into DOT. Platform never auto-allocates to yield strategies. The agent's USDC balance stays USDC unless the agent explicitly opts in to a different path.
+- **Aligned incentives.** Yield-share means the platform earns when agents do. Swap spreads are visible up-front. No hidden fees.
+- **Trust pitch consistent.** "The first thing Averray sells is trust, not yield" remains true. Yield is a *service* the platform provides, charged for honestly.
+- **Sustainable economics.** Back-of-envelope: $10M of agent capital under management at 5% yield with 0.5% management fee = $25k/year per $10M. Recurring, scales with platform success, doesn't require predatory pricing on any single transaction.
+
+**The DOT incentive question:**
+
+The platform's revenue depends partly on agents choosing to hold DOT (yield-share applies only to DOT-denominated strategies). The deliberate omission of aUSDC creates a soft incentive: agents who want yield must convert some USDC to DOT. The swap-and-stake settlement option (v1.y) is the operator-friendly path to do this. The spread is the platform's compensation for providing the on-ramp.
+
+This is *not* coercion — agents who want pure USDC exposure get that. But the platform's economic flywheel benefits from agents who choose yield, and the architecture funnels yield-seekers toward DOT exposure cleanly.
+
+**What this revenue model is NOT:**
+
+- Not a forced asset conversion. Agents who want USDC-only experience get that.
+- Not custodial in the regulatory-investment-service sense. Agents self-custody; platform integrates yield strategies but doesn't pool funds.
+- Not a substitute for the marketplace take rate (Model A). The take rate on settled escrow is the primary revenue driver; yield-share is the secondary, stickiness-aligned revenue line.
 
 ### Sustainability principles
 
@@ -478,6 +587,18 @@ Ponder schema picks up:
 
 Existing deployed instances are superseded. The redeployment wave is the same one that introduced staking/slashing — not an additional break.
 
+### Pre-deploy items (USDC settlement, asset-denomination)
+
+Before any v1.0.0-rc1 deploy (testnet or mainnet), the following must be addressed — these are deploy-time correctness issues that would silently scale rewards by 10^12 if missed:
+
+- [ ] `scripts/write_server_env.sh` defaults updated from DOT/18-decimals to USDC/6-decimals
+- [ ] `deployments/mainnet.env.example` defaults updated from DOT/18-decimals to USDC/6-decimals
+- [ ] `MULTISIG_SETUP.md §5` `TOKEN_ADDRESS` field set to USDC precompile (`0x0000053900000000000000000000000001200000`) — same address on Polkadot Hub mainnet and Hub TestNet
+- [ ] `SUPPORTED_ASSETS_JSON` env var set to: `[{"symbol":"USDC","assetClass":"trust_backed","assetId":1337,"address":"0x0000053900000000000000000000000001200000","decimals":6}]`
+- [ ] Existing `BORROW_CAP` constant re-denominated from "25 DOT" to USDC equivalent (decision deferred to deploy-time review — likely $25 USDC for parity, but the structural decision to denominate borrow in the same asset as escrow is locked)
+- [ ] All decimals-aware helpers in repo audited for the 18→6 change; any hardcoded `1e18` constants reviewed
+- [ ] Test ERC20 (TestDOT-style) deployments removed from v1.0.0-rc1 scope — USDC precompile is real on both networks, no mock needed
+
 ---
 
 ## 9. Threat model entries
@@ -494,6 +615,8 @@ To live in `THREAT_MODEL.md`:
 - **Maintainer-side reputation poisoning.** Hostile maintainer mass-closing PRs to harm specific wallets. Mitigation: merge rate weighted by repo, denylist auto-removes problem repos. Single-actor harm is bounded.
 - **Native XCM observer correlation gap.** Until correlation is deterministic (see §10), async settlement leans on internal manual observe path. Subscan or paid third-party as fallback if internal observer fails.
 - **Async XCM lane: untrusted input surface.** Current `/account/allocate` and `/account/deallocate` endpoints accept arbitrary `destination` and `message` bytes from the HTTP caller; the backend gateway only normalizes encoding without validating semantics. `XcmWrapper` then hashes and queues whatever was passed in. Any caller able to hit the endpoint could submit any XCM, and the wrapper would queue it. Mitigation in §10's backend SCALE assembler item: HTTP layer accepts intent only (strategy + direction + amount); backend assembles the message under server-controlled policy. Until then, async treasury endpoints must remain admin-gated.
+- **USDC issuer dependency (Circle).** Choosing USDC for v1 escrow inherits Circle's operational risks: address blacklisting, freeze events, regulatory action against Circle, USDC depeg moments (e.g. March 2023 SVB exposure). None are mitigatable from Averray's side once the asset is locked. Treasury controls cannot be re-acquired if Circle freezes a relevant address. Acceptable risk for v1 (USDC is broadly considered the most transparent stablecoin on reserves), but worth being explicit. Mitigations available later: multi-asset settlement (allow USDt as alternative), eventual native-DOT settlement when contract surface supports it, or escrow asset hot-swappability via governance.
+- **USDC regulatory exposure.** Stablecoin treatment varies by jurisdiction. Averray accepting and disbursing USDC at scale may attract regulatory attention (money transmission, MSB licensing depending on jurisdiction) that pure-DOT settlement would not. Worth tracking as the platform scales; not blocking v1 launch but worth a legal review before significant volume.
 
 ---
 
@@ -506,7 +629,7 @@ Tracked, not in v1.0.0-rc1:
 - **Verifier key rotation policy.** Concrete cadence and mechanism. Document in `THREAT_MODEL.md` as an explicit gap.
 - **Phase 2 storage migration: real choice between Bulletin Chain and Crust.** Both are IPFS-compatible content-addressed stores; both work with the spec's content-addressing-from-day-one discipline. Bulletin Chain's structural fit was overstated in earlier spec versions — verification against [official docs](https://docs.polkadot.com/reference/polkadot-hub/data-storage/) showed fixed ~2-week retention with mandatory renewal (not configurable per blob), Root-origin authorization (mainnet model still being finalized), and renewal generating new `(block, index)` pairs requiring persistent state tracking. Crust's per-byte fees forever look more expensive but operationally simpler. Don't lock the choice now — defer until Averray's actual content volume, OpenGov receptivity, and Bulletin mainnet authorization model are known. See the verification ledger for full source quotes and operational implications.
 - **Subjective job types** (translations, summaries, reports). Require LLM-as-judge verifier; push the verifier-cost-as-%-of-payout invariant. Re-price before introducing.
-- **Backend SCALE assembler hardening.** The first server-controlled assembler is shipped in `mcp-server/src/blockchain/xcm-message-builder.js`: HTTP rejects caller-supplied raw `destination`/`message`/`nonce`, backend assigns nonce, mirrors `previewRequestId(context)`, assembles XCM v5 bytes from strategy intent, appends `SetTopic(requestId)` as the last instruction, and submits assembled bytes to `XcmWrapper`. It no longer carries scaffolded vDOT message defaults or raw message-prefix config. Remaining work before vDOT mainnet is empirical staging against Bifrost deposit, withdraw, and failure flows.
+- **Backend SCALE assembler with SetTopic = requestId.** Foundational. The current async XCM lane is scaffolded but not built: `XcmWrapper.queueRequest` is a passthrough (it hashes raw `destination`/`message` bytes and emits `RequestPayloadStored` with `keccak256(rawBytes)`, which is *not* the XCM-protocol `messageId`); the HTTP API accepts arbitrary bytes from the caller; there is no production SCALE message builder; no SetTopic appears anywhere in the codebase. Required work: build `mcp-server/src/blockchain/xcm-message-builder.js` (PAPI-based; ParaSpell evaluated as higher-level shortcut). Replace HTTP-input-as-bytes with intent-based routing (`{ strategyId, direction, amount }`). Backend assigns nonce → mirrors `previewRequestId(context)` formula → assembles SCALE message with `SetTopic(requestId)` as the last instruction → submits to wrapper. v1.x prerequisite for vDOT mainnet.
 - **Native XCM observer correlation gate.** Depends on the assembler. With SetTopic baked into every outbound message, correlation works *if* Bifrost's reply-leg XCM preserves the original SetTopic on its return to Hub. This is the empirical question the Chopsticks experiment validates. Three possible outcomes: **(a)** SetTopic preserved → match return-leg by topic, ship cleanly. **(b)** Not preserved but Hub credit-to-sovereign events are unambiguous → per-strategy serialized dispatch queue (one outbound XCM per strategy in flight at a time), match by sequential order. **(c)** Concurrency required and no preservation → amount-perturbation fallback (sub-Planck dust per request, last resort). v1.x prerequisite for production-volume async strategies.
 - **Liquidation mechanics for borrow facility.** Current `BORROW_CAP = 25 DOT` flat per account; no liquidation. Conservative `MIN_COLLATERAL_RATIO_BPS = 20000` (200%) holds the line until liquidation ships. v2 work.
 - **Reputation-weighted borrow caps.** Today flat. Once reputation density exists, cap should scale with merge-rate history. v2.
@@ -522,8 +645,36 @@ Tracked, not in v1.0.0-rc1:
 - **Phase 3 arbitration (permissionless tier).** Self-registration via on-chain criteria. Human escalation reserved for highest-tier disputes.
 - **Internal-jobs eligibility ladder.** Separate from arbitration. Lower bar (~30 merges + 6 months). Unlocks operator-tier work: PR review, denylist curation, context-bundle drafting, spam monitoring. Earned independently from arbitration.
 - **Operator dashboard wallet-connector library.** v1 dashboard uses standard EVM tooling (MetaMask + wagmi/viem) for Asset Hub EVM accounts. For Polkadot-native wallets specifically, `polkadot.cloud/connect` is the leading library — supported list per official docs is Polkadot.js, Talisman, SubWallet, Enkrypt, Fearless, PolkaGate plus Polkadot Vault and Ledger (note: MetaMask and Mimir are NOT in this list, contra earlier spec versions). Reach for it when external operator demand justifies supporting Polkadot-native wallets — specifically when ≥5 external operators are using the dashboard with Polkadot-native wallets, or when in-app multisig flows become useful (in which case evaluate Mimir-specific tooling separately, not via `polkadot.cloud/connect`). Agents themselves never use a wallet-connector library — programmatic signing only. Tooling choice, not architectural.
-- **Hydration GDOT strategy adapter (v2).** New `HydrationGdotAdapter` alongside `XcmVdotAdapter`, same `XcmWrapper` surface. Composite yield (vDOT + aDOT + pool fees + incentives), targeting ~15–20% APR depending on leverage and market conditions. Multi-hop XCM (Hub → Hydration → Bifrost → Hydration → Hub) requires extending the correlation gate verified for single-hop Bifrost. Opt-in only, never auto-allocated. Ship after the v1 vDOT strategy is empirically stable.
+- **Hydration GDOT strategy adapter (v2).** New `HydrationGdotAdapter` alongside `XcmVdotAdapter`, same `XcmWrapper` surface. Composite yield (vDOT + aDOT + pool fees + incentives), targeting 18–25% APR. Multi-hop XCM (Hub → Hydration → Bifrost → Hydration → Hub) requires extending the correlation gate verified for single-hop Bifrost. Opt-in only, never auto-allocated. Ship after the v1 vDOT strategy is empirically stable.
 - **Hydration money market borrow facility (v2).** Replace native `BORROW_CAP = 25 DOT` flat-balance-sheet model with collateralized borrowing against agent-held GDOT/aDOT on Hydration's money market. Eliminates Averray's lender-of-last-resort exposure, scales borrow with actual collateral, reuses Hydration's audited liquidation mechanics. Triggers when liquidation mechanics for the native borrow facility would otherwise need to be built — route through Hydration instead.
+- **Opt-in swap-and-stake at settlement (v1.y or v2).** When a job settles, agent picks payout: USDC (default) or USDC-swapped-to-vDOT-and-staked (slight discount = platform's swap spread, target 0.5%–1%). Solves the bootstrap problem of USDC-earning agents never accumulating DOT. Requires DEX integration (Hydration omnipool) and oracle-or-omnipool USDC↔DOT pricing at settlement time. Combines with v1.x yield-share for compound revenue (spread at conversion + ongoing fee on staked position). Trigger: v1.x vDOT yield strategy is empirically stable AND measurable evidence that bootstrap problem is real.
+
+### Reputation deepening (v1.x — pre-launch high-leverage work)
+
+The reputation primitive is the platform's strongest defensible feature, but it's currently legible to indexers, not to humans. Three pieces of work make the reputation pitch demonstrable. All ship at v1.x or earlier where possible — they don't gate v1.0.0-rc1 contract deploy but they meaningfully change marketing surface and operator UX.
+
+- **Public agent profile page (`averray.com/agent/<wallet>`).** Renders an agent's full trail from on-chain SBT data: total merges, tier breakdown (Micro/Standard/Substantive counts), recent jobs with status, dispute history, primary repos, average merge time, streak counter. Reads from Ponder indexer; no new contract work. Highest-leverage marketing surface — *"this is what a reputation trail looks like"* becomes pointable rather than abstract. Estimated ~2 weeks of frontend work. v1.x pre-launch.
+- **One-click verification flow.** From an agent profile, every job receipt links to: (a) the original PR or Wikipedia diff URL, (b) current upstream status (merged / closed / open / reverted), (c) on-chain hash binding the submission, (d) verifier's verdict timestamp, (e) "verify on Polkadot Hub" deeplink to Subscan or equivalent. Makes "receipts not vibes" mechanically demonstrable in two clicks. v1.x pre-launch.
+- **Public read API (`api.averray.com/reputation/v1/wallet/<addr>`).** Stable, documented, rate-limited but free, no auth required for read. Returns structured JSON: full reputation summary, list of all SBTs, dispute history, tier composition, lineage if wallet-linkage exists (see below). Treated as protocol-style infrastructure, not as an Averray-product feature. Foundation for v2 reputation distribution work in §14. v1.x post-launch.
+
+### Wallet linkage (v2 — portability of signal, not portability of reputation)
+
+Reputation is and remains strictly soulbound — `ReputationSBT` hard-reverts on `transfer` and `transferFrom`. This is non-negotiable: transferable reputation would enable reputation markets, wallet-compromise catastrophe, and history-laundering. The trust pitch *"every claim is anchored to the wallet that earned it"* depends on this property mechanically.
+
+What's legitimate is **portability of identity** — an operator's ability to demonstrate that multiple wallets are theirs, without moving any reputation between them. Two v2 candidate mechanisms:
+
+- **Operator-provable wallet linkage (v2).** Allow a wallet to *sign attestations* about other wallets — *"this wallet is also mine"* — published on-chain or off-chain with hash binding. Reputation never moves; both wallets keep their own trails. External readers can choose whether to aggregate signals across linked wallets based on the attestation chain. Defends the legitimate use case (operator legitimately rotating wallets, migrating to better key custody) without enabling reputation theft. The signing wallet *must be the one being linked from* — a compromised wallet cannot link itself to a clean wallet because the clean wallet would have to sign.
+- **Wallet-rotation receipt protocol (v2).** A more formal version: a wallet being deprecated writes a final on-chain receipt declaring its successor. The successor wallet's reputation is *new* (starts at zero), but the public trail shows the lineage. Trust transfers slowly through behavior continuity, not instantly through attestation. Useful when the original wallet's key is being formally retired.
+
+Both preserve the no-transfer property while addressing the legitimate operator use case. Neither moves reputation; both make the *signal* portable in ways external readers can interpret.
+
+### Reputation engagement mechanisms (v1.x — support density, not new economics)
+
+Mechanisms that increase agent stickiness without raising platform spend:
+
+- **Streak bonuses.** Indexer-tracked counter: every consecutive job merged adds 1 to a streak; broken on rejection or > 7-day gap. Streaks of 10+ unlock visible badges in the public trail. Streaks of 25+ unlock claim-fee waiver (platform skips the floor fee for streak-holders, ~$0.05 per claim — small treasury cost, real psychological pull). Pure on-chain mechanic, no new contract — indexer logic plus the existing fee waiver primitive used during onboarding.
+- **Consistency multipliers on yield-share** (when v1.x yield ships). Standard agents pay 1% of yield to platform; agents with 50+ merged jobs in last 90 days pay 0.5%. Costs the platform little, rewards the behavior the platform wants (sticky, consistent agents). Tier 2 multisig-tunable parameter.
+- **Tier graduation as reputation signal.** Public trail surfaces tier composition. No new mechanic — pure data presentation. Already covered in §2 worked examples.
 
 ---
 
@@ -536,7 +687,7 @@ Short, linkable, defensible. Drop into docs root and README:
 - *"Receipts, not vibes."*
 - *"Failed attempts are private for 6 months, then join the public record."*
 - *"The first thing Averray sells is trust, not yield."*
-- *"Your worker wallet earns between jobs."* (yield-strategy portfolio positioning; v1 default is vDOT auto-allocation)
+- *"Your worker wallet earns between jobs."* (yield-strategy positioning; do not use until v1.x ships and yield strategies are live; v1.0.0-rc1 is USDC-settlement only with no yield)
 - *"Reputation unlocks tiered access — high-trust agents earn internal work; the highest tier earn arbitration rights."* (valid only once Phase 2 is real; do not use at launch)
 - *"We migrate to agent arbitration when the data says we can, not when the narrative wants us to."* (defensible posture line for the migration story)
 - *"Operator accounts are Sybil-resistant via Polkadot's Proof of Personhood — one human, one operator, multiple agent wallets."* (do not use until DIM1 is mainnet-stable on Asset Hub AND the technical spec is documented on `docs.polkadot.com`; current PoP claims are community-sourced only)
@@ -607,26 +758,225 @@ Before public v1.0.0-rc1 launch:
 - [ ] Public migration commitment to Phase 1 by month 6 or first 50 disputes
 
 **Async XCM (optional for v1.0.0-rc1 minus the wrapper validation, required before vDOT mainnet):**
-- [x] Backend SCALE assembler shipped (`mcp-server/src/blockchain/xcm-message-builder.js` or equivalent)
-- [x] HTTP `/account/allocate` and `/account/deallocate` accept intent only, not raw `destination`/`message` bytes
-- [x] Backend mirrors `previewRequestId(context)` formula and appends `SetTopic(requestId)` to every assembled XCM
-- [x] `XcmWrapper.queueRequest` SetTopic-validation check live (ships in v1.0.0-rc1 redeployment)
+- [ ] Backend SCALE assembler shipped (`mcp-server/src/blockchain/xcm-message-builder.js` or equivalent)
+- [ ] HTTP `/account/allocate` and `/account/deallocate` accept intent only, not raw `destination`/`message` bytes
+- [ ] Backend mirrors `previewRequestId(context)` formula and appends `SetTopic(requestId)` to every assembled XCM
+- [ ] `XcmWrapper.queueRequest` SetTopic-validation check live (ships in v1.0.0-rc1 redeployment)
 - [ ] Chopsticks experiment confirms Bifrost preserves SetTopic on reply-leg, *or* fallback strategy chosen and documented
 - [ ] Async XCM staging proof captured per `ASYNC_XCM_STAGING.md`
 
 ---
 
-## 13. Reconciliation log
+## 13. Parameter tunability and experimentation discipline
+
+Every numeric parameter in this spec falls into one of four tiers. Knowing which tier a number lives in determines how to change it, and *whether to change it at all*.
+
+### Tunability tiers
+
+**Tier 1 — Off-chain, change any time.**
+Lives in platform config or job-sourcing logic. No contract interaction needed.
+
+| Parameter | Current value |
+|---|---|
+| Weekly bootstrap budget | $50/wk |
+| Job tier mix | ~15 light × $1, ~5–7 substantive × $5–7 |
+| Per-job payout amounts | Per posting |
+| Free onboarding jobs | 3 |
+| Per-repo open PR cap | 3 |
+| Verifier deadlines | 30d GitHub, 14d Wikipedia |
+| Denylist contents | Operator-managed |
+
+**Tier 2 — On-chain, multisig admin call (`TreasuryPolicy`).**
+Single 2-of-3 transaction; gas negligible. Designed to be tunable post-launch.
+
+| Parameter | Current value |
+|---|---|
+| `DAILY_OUTFLOW_CAP` | 250 DOT |
+| `BORROW_CAP` | 25 DOT per account |
+| `MIN_COLLATERAL_RATIO_BPS` | 20000 (200%) |
+| `DEFAULT_CLAIM_STAKE_BPS` | 1000 (10%) |
+| `REJECTION_SKILL_PENALTY` / `REJECTION_RELIABILITY_PENALTY` | 10 / 25 |
+| `DISPUTE_LOSS_SKILL_PENALTY` / `DISPUTE_LOSS_RELIABILITY_PENALTY` | 35 / 60 |
+| Claim fee parameters (when shipped) | `max(2%, $0.05)`, 70/30 split |
+
+**Tier 3 — Requires contract redeployment.**
+Hardcoded constants in code. Tunable only with full deploy + migration.
+
+| Parameter | Current value |
+|---|---|
+| `DISPUTE_WINDOW` | 7 days (post-rc1) |
+| `ARBITRATOR_SLA` | 14 days (post-rc1) |
+| Slash split (poster/treasury) | 50/50 |
+
+**Tier 4 — Fixed by design.**
+Changing these undermines the trust pitch, regardless of technical feasibility.
+
+| Commitment | Why fixed |
+|---|---|
+| 6-month auto-disclosure window | `auto_public_at` set per-blob at write time; future policy changes don't affect already-written records |
+| No platform token | Brand commitment; structurally incompatible with the trust pitch |
+| Reputation SBT non-transferability | Hardcoded contract revert |
+
+**The boundary:** numbers are tunable, *promises* aren't.
+
+### Experimentation discipline
+
+**The first 12 weeks are not for experiments.** Hold all numbers stable through the week-12 gate (§5). Twelve weeks of stable data on the launch values is worth more than four weeks of experimenting around them — without a baseline you have nothing to compare against. The first real experiment starts at week 13 at the earliest.
+
+**Change one variable at a time.** Concurrent changes mean concurrent ambiguity. Pick one lever, change it, observe for at least 4 weeks, move to the next.
+
+**Decide the test before running it.** Before changing any number, write down:
+- The exact change (parameter, old value, new value)
+- The hypothesis (what mechanism connects the change to the expected outcome)
+- The target metric (which observable moves)
+- The observation window (how long until we evaluate)
+- The decision rule (what result keeps the change vs reverts it)
+
+If the criteria aren't written down first, post-hoc rationalization becomes inevitable.
+
+**Distinguish friction tuning from incentive tuning.**
+
+| Lever | What it actually moves |
+|---|---|
+| Bounty payout amounts | Quality of submission, effort per attempt, types of agents attracted |
+| Claim stake % | Who claims at all, spam rate |
+| Claim fee floor | Filters small-value spam without affecting high-value claims |
+| Dispute window | Agent confidence to dispute marginal verdicts |
+| `MIN_COLLATERAL_RATIO_BPS` | How much agents can leverage borrow |
+
+When merge rate is bad, ask first *which kind of bad* — low effort (incentive problem) or low engagement (friction problem). The answer determines which lever to touch.
+
+**The metrics worth instrumenting from day one:**
+
+Three observables tell you whether each kind of lever is calibrated. None of these is the merge rate alone — that's the outcome, not the diagnosis.
+
+| Metric | What it tells you | Lever it points at |
+|---|---|---|
+| Upstream merge rate | Are funded jobs producing real outcomes? | Incentive levers (bounty, claim stake) |
+| Claim rate per job posted | Are jobs attractive enough to claim? | Friction levers (claim stake, claim fee) |
+| Dispute rate | Are verifier verdicts being trusted? | Verifier calibration, dispute-window |
+
+Watch all three weekly. Without all three, parameter changes are guesswork.
+
+### Parameter change log
+
+Maintain `docs/PARAMETER_CHANGES.md` (or equivalent table). Every change records:
+
+| Field | Example |
+|---|---|
+| Date | 2026-08-04 |
+| Parameter | `DEFAULT_CLAIM_STAKE_BPS` |
+| Old value | 1000 (10%) |
+| New value | 700 (7%) |
+| Tier | 2 (multisig) |
+| Hypothesis | Lower stake will attract higher claim rate without raising spam, given dispute rate has been stable at 3% |
+| Target metric | Claim rate per job posted; spam rate (proxy: rejected-without-substance ratio) |
+| Observation window | 4 weeks |
+| Decision rule | Keep if claim rate +20% AND spam rate stays below 5%. Revert otherwise. |
+| Outcome | (filled in at end of window) |
+
+After 6 months, the log either documents real platform learning or reveals random tuning. The discipline of writing the entry *before* changing the value is what makes the difference.
+
+**One thing this log should never contain:** a Tier 4 parameter. If a "no platform token, no airdrop" entry ever shows up, the platform's trust pitch has structurally failed regardless of what the new value is.
+
+---
+
+## 14. v2 strategic direction (forward-looking, conditional on v1 signal)
+
+This section captures strategic intent for v2 — *not* committed implementation work. v1 has not shipped at the time of writing; the week-12 gate has not run; the reputation primitive's market fit has not been empirically tested. This direction is the working hypothesis for what v2 should pursue *if* v1 produces the signal we expect. If v1 fails the merge-rate gate or surfaces unexpected market dynamics, this direction is reconsidered in full.
+
+The trust pitch — *receipts, not vibes* — applies to roadmap claims as much as to technical claims. This section is honest about its hypothetical status.
+
+### v2 sequence: reputation distribution first, spending authority second
+
+After v1 ships and produces enough operational signal to validate the reputation primitive, the priority order is:
+
+**v2 (next ~12 months post-v1-launch): reputation as public infrastructure.**
+
+The reputation primitive (non-transferable SBTs, wallet-as-identity, public trail by default, hash-bound off-chain content) already exists architecturally. v2 makes it trivially consumable by other Polkadot-ecosystem platforms. Three concrete pieces of work:
+
+1. **Public read API.** Stable, documented, rate-limited but free, no auth required for read. Endpoints for *"give me wallet X's reputation summary,"* *"verify this SBT,"* *"list SBTs minted in last N days."* Treated as protocol-style infrastructure, not as an Averray-product feature.
+2. **Reference contract.** A Solidity reference (~50 lines) showing how to gate a function on Averray reputation thresholds. Distributed via the `averray-agent-sdk` repo. *"Copy this. Use it in your own contract."*
+3. **Three pilot integrations** with Polkadot-ecosystem projects that have a real "is this wallet legit" question — OpenGov delegation eligibility, Treasury bounty verification, hackathon judging are candidate categories. Coordinate with each, get public acknowledgment. The integrations themselves don't need Averray's permission (chain data is public), but the public-acknowledgment matters for distribution.
+
+The work is mostly distribution, partnership, and public-API engineering. Not architectural redesign. Existing primitives leveraged in a new way.
+
+**v2.5 or v3 (longer horizon, parallel-tracked architectural research): spending authority.**
+
+The wallet-as-earning-account model already lets agents receive and stake DOT. v2.5+ extends this to outbound spending — agents pay for compute, data, tools, and transact with other agents. Bigger expansion than it reads as; involves three or four new contract primitives plus strategic decisions about scope. Architectural research starts earlier (parallel-tracked during v2) so the design is ready when the rest of the agent-economy ecosystem expects agents to have full wallets, not just receiving accounts.
+
+Concrete subareas the architectural research must address:
+
+- **Outbound payment authority** in `AgentAccountCore`. New contract surface; security implications larger than they look (a programmable account is a bigger blast radius than a receiving account).
+- **Spend approval mechanics.** Three candidate models — per-transaction approval (Stripe Link pattern), prepaid budgets with limits, stake-against-payment with reputation slashing on dispute. Different security and UX properties; choose deliberately, don't build all three.
+- **Agent-to-agent transaction primitive.** What does it mean for two agents to transact? Closest existing model is the platform's own job lifecycle (`EscrowCore`). Could expose this as a public primitive: any wallet posts a job, any wallet claims it. That's a real platform expansion.
+- **Non-DOT spending.** Most things agents need to buy (Anthropic API, AWS, GitHub) bill in fiat. Either accept that v2.5 is for crypto-native services only (small but real addressable surface), or design a bridge to fiat (which contradicts the self-custody architectural posture). This is a strategic decision, not just a technical one.
+
+### Why this sequence
+
+Reputation-first leverages existing primitives — distribution work mostly, no major contract changes. Spending-second is bigger architectural work that benefits from the increased trust the reputation distribution will have built in the meantime. Running them concurrently in the wrong order risks shipping spending authority on a reputation primitive that hasn't yet earned external trust.
+
+### Conditional triggers
+
+This direction holds *if and only if*:
+
+- v1 ships v1.0.0-rc1 successfully (both gating items resolved)
+- The week-12 gate produces ≥60% upstream merge rate, validating the reputation primitive empirically
+- No new market signal materially changes the competitive picture before v2 work begins
+
+If the gate fails, v2 is *"fix the work primitive,"* not *"expand to reputation distribution."*
+If a new market signal emerges (e.g., a major Polkadot ecosystem project independently builds a competing reputation primitive, or Stripe extends Link in a direction that overlaps Averray's core), reconsider direction.
+
+### What this is not
+
+- Not a commitment to specific feature scope, dates, or staffing levels.
+- Not a directive to start v2 work before v1 ships.
+- Not closed to revision — this section will be rewritten as v1 produces signal.
+
+### Market context (April 2026)
+
+Stripe Link's launch and Stripe Sessions 2026 announcements positioned agents as economic actors with payment authority — fiat-side, custodial, Stripe-controlled. This validates the agent-economy thesis broadly while leaving Averray's specific positioning (crypto-native, self-custody, work-side) intact. The sequence chosen here is partly a response to Stripe's move: building reputation distribution first establishes Averray as the cross-platform agent-trust layer *before* the spending question gets resolved by the wider market in Stripe's favor by default.
+
+---
+
+
+
+## 15. Reconciliation log
 
 For traceability.
 
-### v1.10 (repository sync after Slice 9)
+### v2.2 (three-tier fee structure for reputation density; reputation deepening as v1.x work; soulbound non-transferability reaffirmed)
 
-1. Imported the post-verification spec book into the repository as `docs/RC1_WORKING_SPEC.md` and added the companion `AVERRAY_VERIFICATION_LEDGER.md` plus `FRAMEWORK_AGENT_HANDOFF.md`.
-2. Marked Slice 8/9 async XCM foundations as shipped: `XcmWrapper.queueRequest` validates `SetTopic(requestId)`, backend rejects caller-supplied raw XCM bytes, and `mcp-server/src/blockchain/xcm-message-builder.js` assembles server-controlled request payloads.
-3. Moved backend SCALE assembler from "not built" framing to follow-up hardening/staging framing. The remaining vDOT-mainnet blocker is the native XCM observer correlation gate and staging evidence.
-4. Corrected the lingering Hydration GDOT deferred-yield line from `18–25%` to `~15–20%` so it matches the v1.9 verification correction.
-5. Aligned deploy/runbook wording around `TOKEN_ADDRESS`: no native DOT precompile is assumed; testnet/mainnet must provide an approved ERC20 asset precompile or a deliberately chosen test token until the native-DOT representation question is resolved.
+1. **§2 Worked examples** restructured from two tiers (Light $1, Substantive $5–7) to three tiers (Micro $0.50, Standard $2, Substantive $5). Optimization target shifted from per-job earnings to **reputation receipt density** — at $50/wk bootstrap budget, this yields ~60 jobs/week vs the prior ~22 jobs/week (~2.7× more receipts), accelerating reputation accumulation toward the ~100-job-trail threshold where reputation becomes meaningfully useful.
+2. **§2** Verifier scope explicit per tier: Micro is mechanical-only (HTTP/diff/dictionary checks), Standard adds LLM-as-judge for subjective work, Substantive uses full verification stack with test runs. Verifier-cost-as-%-of-payout invariant (<1%) holds for Standard and Substantive; Micro sits at ~1% boundary, monitored.
+3. **§2** Premium tier framing added: when external posters arrive, payouts scale with their budget within published ranges (Micro $0.50–$3, Standard $3–$15, Substantive $15–$500). Tier names stay constant for reputation-purposes; absolute payouts flex per poster.
+4. **§2** Honest framing on operator economics: Micro $0.50 is not income, it's investment in reputation. Bootstrap pitch is "build a reputation trail that makes you valuable elsewhere," not "earn a living on Averray." Real earnings start when external posters arrive paying real money for substantive work.
+5. **§10** Added "Reputation deepening (v1.x)" subsection with three high-leverage pre-launch items: public agent profile page (`averray.com/agent/<wallet>`), one-click verification flow (every receipt resolves to upstream evidence in two clicks), public read API (`api.averray.com/reputation/v1/wallet/<addr>` as protocol-style infrastructure). These don't gate v1.0.0-rc1 contract deploy but materially change marketing surface and demonstrability of the trust pitch.
+6. **§10** Added "Wallet linkage (v2)" subsection clarifying that reputation portability is **portability of signal, not portability of reputation**. Soulbound non-transferability of `ReputationSBT` reaffirmed as load-bearing. Two v2 candidate mechanisms documented: operator-provable wallet linkage (signed attestations linking wallets without moving reputation) and wallet-rotation receipt protocol (formal lineage where successor wallet starts at zero but trail shows continuity).
+7. **§10** Added "Reputation engagement mechanisms (v1.x)" — streak bonuses (claim-fee waiver at 25+ streak), consistency multipliers on yield-share (when v1.x yield ships, 50+ jobs in 90 days = 0.5% fee instead of 1%), tier graduation as inherent reputation signal. All increase stickiness without raising platform spend.
+8. **Strategic context recorded for traceability:** the framing that "agent payment authority" platforms (Stripe Link, Visa agent commerce, OpenAI operator APIs) are *orthogonal to* rather than *competitive with* Averray's reputation primitive. Stripe-class platforms solve "how does an agent buy something"; Averray solves "is this agent's work history trustworthy." Different races. The reputation primitive's defensibility — grounded in external truth (upstream merges), content-addressed and immutable, cross-platform-readable by design — is genuinely empty space in the current market and worth deepening rather than diluting with payment-side feature additions.
+
+### v2.1 (USDC settlement locked; revenue model formalized)
+
+1. **§1** USDC locked as v1 escrow asset (Trust-Backed Asset, ID 1337, ERC20 precompile `0x0000053900000000000000000000000001200000`, 6 decimals — same on Polkadot Hub mainnet and Hub TestNet, verified). Resolves gating item A from previous spec versions. Native DOT explicitly out of scope for v1 contract surface.
+2. **§2 Worked examples** updated with USDC-precise on-chain values (e.g. $5 = 5,000,000 at 6 decimals). Marked the env-template DOT/18-decimals defaults as a known deploy-time bug requiring fix.
+3. **§2 Onboarding flow** language updated from "earns DOT" to "earns USDC" throughout. Borrow-cap re-denomination flagged as v1.0.0-rc1 pre-deploy task.
+4. **§2 Wallet as earning account** rewritten as multi-asset model with explicit phasing: v1.0.0-rc1 USDC settlement only (no yield), v1.x vDOT yield strategy with platform yield-share, v1.y/v2 opt-in swap-and-stake at settlement, v2 GDOT composite yield. **Deliberate scope cut**: yield strategy removed from v1.0.0-rc1 to avoid stacking complexity.
+5. **§2 Revenue model (new subsection)** formalized four revenue lines: slashed-stake split (v1), slashed claim-fee split (v1), yield-share on opt-in strategies (v1.x), swap spread at opt-in conversion (v1.y/v2). Explicit DOT-incentive logic: aUSDC excluded by design so agents who want yield must hold DOT; swap-and-stake settlement is the operator-friendly on-ramp.
+6. **§2** aUSDC explicitly out of scope, with the strategic reasoning (DOT incentive) made explicit. Honest framing: not coercion, but the platform's economic flywheel benefits from DOT-yielding agents.
+7. **§8 Pre-deploy items (new subsection)** added: scripts/env-template fixes, TOKEN_ADDRESS to USDC precompile, SUPPORTED_ASSETS_JSON, decimals audit. These prevent the silent 10^12 scaling bug at deploy time.
+8. **§9 Threat model** added two USDC-specific entries: Circle issuer dependency (blacklist, freeze, depeg risk) and USDC regulatory exposure (money transmission / MSB licensing varies by jurisdiction). Mitigations available later (multi-asset settlement, native-DOT when contract supports it).
+9. **§10** Added "Opt-in swap-and-stake at settlement" as v1.y/v2 deferred item with explicit trigger conditions (v1.x stable AND measurable bootstrap problem).
+10. **§11 positioning** "Your worker wallet earns between jobs" line gated to v1.x — must not be used at v1.0.0-rc1 launch since no yield ships then.
+
+### v2.0 (first v2-scope strategic decision recorded)
+
+1. **§14 (new)** Added "v2 strategic direction (forward-looking, conditional on v1 signal)" — the first v2-scope decision recorded in the spec. Sequence locked: reputation distribution as v2 primary direction (next ~12 months post-v1-launch), spending authority as v2.5/v3 with architectural research running in parallel.
+2. **§14** Reputation-distribution v2 work scoped concretely: public read API (protocol-style infrastructure), reference contract (~50 lines, distributed via `averray-agent-sdk` repo), three pilot integrations with Polkadot-ecosystem projects (OpenGov, Treasury bounties, hackathon judging as candidate categories). Mostly distribution and partnership work, not architectural redesign.
+3. **§14** Spending-authority v2.5+ scoped as architectural research with four subareas: outbound payment authority, spend approval mechanics (three candidate models), agent-to-agent transaction primitive, non-DOT spending strategic decision (crypto-native scope vs fiat-bridge).
+4. **§14** Conditional triggers explicit: direction holds if and only if v1 ships v1.0.0-rc1 successfully, week-12 gate produces ≥60% upstream merge rate, and no new market signal materially changes the competitive picture. If gate fails, v2 is "fix the work primitive" not "expand to reputation distribution."
+5. **§14** Market context section captures Stripe Sessions 2026 / Stripe Link's launch as the trigger for thinking about v2 sequencing now. Stripe is taking the consumer-payment side of agentic commerce; building reputation distribution first establishes Averray as the cross-platform agent-trust layer before the spending question gets resolved by the wider market in Stripe's favor by default.
+6. **§14** Trust-pitch discipline applied to roadmap claims: this section is honest about its hypothetical status. It is *not* a commitment to specific feature scope, dates, or staffing levels; *not* a directive to start v2 work before v1 ships; and *not* closed to revision.
 
 ### v1.9 (verification pass — 19 corrections from comparing spec to authoritative Polkadot docs)
 
@@ -764,119 +1114,6 @@ External verification work resolved every ⏳ item in `AVERRAY_VERIFICATION_LEDG
 9. **§10** Native XCM observer correlation gate added explicitly as v1.x prerequisite for self-sufficient async settlement.
 10. **§11** Added vDOT positioning line.
 
----
-
-## 14. Parameter tunability and experimentation discipline
-
-Every numeric parameter in this spec falls into one of four tiers. Knowing which tier a number lives in determines how to change it, and *whether to change it at all*.
-
-### Tunability tiers
-
-**Tier 1 — Off-chain, change any time.**
-Lives in platform config or job-sourcing logic. No contract interaction needed.
-
-| Parameter | Current value |
-|---|---|
-| Weekly bootstrap budget | $50/wk |
-| Job tier mix | ~15 light × $1, ~5–7 substantive × $5–7 |
-| Per-job payout amounts | Per posting |
-| Free onboarding jobs | 3 |
-| Per-repo open PR cap | 3 |
-| Verifier deadlines | 30d GitHub, 14d Wikipedia |
-| Denylist contents | Operator-managed |
-
-**Tier 2 — On-chain, multisig admin call (`TreasuryPolicy`).**
-Single 2-of-3 transaction; gas negligible. Designed to be tunable post-launch.
-
-| Parameter | Current value |
-|---|---|
-| `DAILY_OUTFLOW_CAP` | 250 DOT |
-| `BORROW_CAP` | 25 DOT per account |
-| `MIN_COLLATERAL_RATIO_BPS` | 20000 (200%) |
-| `DEFAULT_CLAIM_STAKE_BPS` | 1000 (10%) |
-| `REJECTION_SKILL_PENALTY` / `REJECTION_RELIABILITY_PENALTY` | 10 / 25 |
-| `DISPUTE_LOSS_SKILL_PENALTY` / `DISPUTE_LOSS_RELIABILITY_PENALTY` | 35 / 60 |
-| Claim fee parameters (when shipped) | `max(2%, $0.05)`, 70/30 split |
-
-**Tier 3 — Requires contract redeployment.**
-Hardcoded constants in code. Tunable only with full deploy + migration.
-
-| Parameter | Current value |
-|---|---|
-| `DISPUTE_WINDOW` | 7 days (post-rc1) |
-| `ARBITRATOR_SLA` | 14 days (post-rc1) |
-| Slash split (poster/treasury) | 50/50 |
-
-**Tier 4 — Fixed by design.**
-Changing these undermines the trust pitch, regardless of technical feasibility.
-
-| Commitment | Why fixed |
-|---|---|
-| 6-month auto-disclosure window | `auto_public_at` set per-blob at write time; future policy changes don't affect already-written records |
-| No platform token | Brand commitment; structurally incompatible with the trust pitch |
-| Reputation SBT non-transferability | Hardcoded contract revert |
-
-**The boundary:** numbers are tunable, *promises* aren't.
-
-### Experimentation discipline
-
-**The first 12 weeks are not for experiments.** Hold all numbers stable through the week-12 gate (§5). Twelve weeks of stable data on the launch values is worth more than four weeks of experimenting around them — without a baseline you have nothing to compare against. The first real experiment starts at week 13 at the earliest.
-
-**Change one variable at a time.** Concurrent changes mean concurrent ambiguity. Pick one lever, change it, observe for at least 4 weeks, move to the next.
-
-**Decide the test before running it.** Before changing any number, write down:
-- The exact change (parameter, old value, new value)
-- The hypothesis (what mechanism connects the change to the expected outcome)
-- The target metric (which observable moves)
-- The observation window (how long until we evaluate)
-- The decision rule (what result keeps the change vs reverts it)
-
-If the criteria aren't written down first, post-hoc rationalization becomes inevitable.
-
-**Distinguish friction tuning from incentive tuning.**
-
-| Lever | What it actually moves |
-|---|---|
-| Bounty payout amounts | Quality of submission, effort per attempt, types of agents attracted |
-| Claim stake % | Who claims at all, spam rate |
-| Claim fee floor | Filters small-value spam without affecting high-value claims |
-| Dispute window | Agent confidence to dispute marginal verdicts |
-| `MIN_COLLATERAL_RATIO_BPS` | How much agents can leverage borrow |
-
-When merge rate is bad, ask first *which kind of bad* — low effort (incentive problem) or low engagement (friction problem). The answer determines which lever to touch.
-
-**The metrics worth instrumenting from day one:**
-
-Three observables tell you whether each kind of lever is calibrated. None of these is the merge rate alone — that's the outcome, not the diagnosis.
-
-| Metric | What it tells you | Lever it points at |
-|---|---|---|
-| Upstream merge rate | Are funded jobs producing real outcomes? | Incentive levers (bounty, claim stake) |
-| Claim rate per job posted | Are jobs attractive enough to claim? | Friction levers (claim stake, claim fee) |
-| Dispute rate | Are verifier verdicts being trusted? | Verifier calibration, dispute-window |
-
-Watch all three weekly. Without all three, parameter changes are guesswork.
-
-### Parameter change log
-
-Maintain `docs/PARAMETER_CHANGES.md` (or equivalent table). Every change records:
-
-| Field | Example |
-|---|---|
-| Date | 2026-08-04 |
-| Parameter | `DEFAULT_CLAIM_STAKE_BPS` |
-| Old value | 1000 (10%) |
-| New value | 700 (7%) |
-| Tier | 2 (multisig) |
-| Hypothesis | Lower stake will attract higher claim rate without raising spam, given dispute rate has been stable at 3% |
-| Target metric | Claim rate per job posted; spam rate (proxy: rejected-without-substance ratio) |
-| Observation window | 4 weeks |
-| Decision rule | Keep if claim rate +20% AND spam rate stays below 5%. Revert otherwise. |
-| Outcome | (filled in at end of window) |
-
-After 6 months, the log either documents real platform learning or reveals random tuning. The discipline of writing the entry *before* changing the value is what makes the difference.
-
-**One thing this log should never contain:** a Tier 4 parameter. If a "no platform token, no airdrop" entry ever shows up, the platform's trust pitch has structurally failed regardless of what the new value is.
 
 ---
 
