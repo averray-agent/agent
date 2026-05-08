@@ -76,6 +76,18 @@ APP_ALLOW_PROTECTED_SHELL=1 ./scripts/ops/check-hosted-stack.sh
 # Optional: include the async XCM operator lane in the smoke check
 ADMIN_JWT='<admin-jwt>' ./scripts/ops/check-hosted-stack.sh
 
+# Optional: include bootstrap instrumentation once backend.env has the poller,
+# self-report recipient list, and email provider configured.
+ADMIN_JWT='<admin-jwt>' \
+CHECK_BOOTSTRAP_INSTRUMENTATION=1 \
+./scripts/ops/check-hosted-stack.sh
+
+# First-delivery verification: require that the weekly report has actually sent.
+ADMIN_JWT='<admin-jwt>' \
+CHECK_BOOTSTRAP_INSTRUMENTATION=1 \
+CHECK_BOOTSTRAP_SELF_REPORT_SENT=1 \
+./scripts/ops/check-hosted-stack.sh
+
 # Component-scoped deploys can skip indexer checks when the indexer was not
 # touched, while scheduled/full-stack smoke should keep the default.
 CHECK_INDEXER=0 ./scripts/ops/check-hosted-stack.sh

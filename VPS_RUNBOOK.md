@@ -547,6 +547,36 @@ Required authentication env vars (backend, strict mode):
 - `AUTH_DOMAIN=api.averray.com`
 - `AUTH_CHAIN_ID=420420417`
 
+Required bootstrap instrumentation env vars before marking the week-1
+instrumentation checklist complete:
+
+- `UPSTREAM_STATUS_POLLER_ENABLED=true`
+- `UPSTREAM_STATUS_POLLER_INTERVAL_MS=86400000`
+- `UPSTREAM_STATUS_POLLER_BATCH_SIZE=50`
+- `BOOTSTRAP_SELF_REPORT_ENABLED=true`
+- `BOOTSTRAP_SELF_REPORT_INTERVAL_MS=604800000`
+- `BOOTSTRAP_SELF_REPORT_SEND_ON_START=false`
+- `BOOTSTRAP_SELF_REPORT_FROM="Averray <ops@averray.com>"`
+- `BOOTSTRAP_SELF_REPORT_TO=<comma-separated report recipients>`
+- `BOOTSTRAP_SELF_REPORT_SUBJECT_PREFIX=Averray bootstrap self-report`
+- `RESEND_API_KEY=<resend-api-key>`
+- `RESEND_API_BASE_URL=https://api.resend.com`
+
+For the first production verification only, set
+`BOOTSTRAP_SELF_REPORT_SEND_ON_START=true`, redeploy the backend, then run:
+
+```bash
+cd /srv/agent-stack/app
+ADMIN_JWT='<admin-jwt>' \
+CHECK_BOOTSTRAP_INSTRUMENTATION=1 \
+CHECK_BOOTSTRAP_SELF_REPORT_SENT=1 \
+./scripts/ops/check-hosted-stack.sh
+```
+
+After a successful first-delivery check, set
+`BOOTSTRAP_SELF_REPORT_SEND_ON_START=false` and redeploy so later sends follow
+the weekly cadence.
+
 ### JWT secret rotation
 
 Zero-downtime rotation uses the multi-secret list — the **first** entry signs

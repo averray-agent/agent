@@ -193,6 +193,8 @@ generation are implemented as backend foundations.
   `reverted`.
 - [x] Add weekly self-report generation with merge rate, spend, receipts, and top
   close reasons.
+- [x] Add an opt-in hosted smoke gate that proves the daily poller and weekly
+  self-report scheduler are enabled, running, and provider-configured.
 - [ ] Wire scheduled email delivery once report recipients and cadence are
   finalized.
 

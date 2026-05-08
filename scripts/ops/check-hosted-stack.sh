@@ -15,6 +15,8 @@ INDEXER_MAX_STALENESS_SEC=${INDEXER_MAX_STALENESS_SEC:-1800}
 INDEXER_RETRY_ATTEMPTS=${INDEXER_RETRY_ATTEMPTS:-12}
 INDEXER_RETRY_SLEEP_SEC=${INDEXER_RETRY_SLEEP_SEC:-5}
 CHECK_INDEXER=${CHECK_INDEXER:-1}
+CHECK_BOOTSTRAP_INSTRUMENTATION=${CHECK_BOOTSTRAP_INSTRUMENTATION:-0}
+CHECK_BOOTSTRAP_SELF_REPORT_SENT=${CHECK_BOOTSTRAP_SELF_REPORT_SENT:-0}
 TIMEOUT_SEC=${TIMEOUT_SEC:-20}
 APP_BASIC_AUTH_USER=${APP_BASIC_AUTH_USER:-}
 APP_BASIC_AUTH_PASSWORD=${APP_BASIC_AUTH_PASSWORD:-}
@@ -22,6 +24,7 @@ APP_EXPECTED_MARKER=${APP_EXPECTED_MARKER:-Opening the operator control room.}
 APP_ALLOW_PROTECTED_SHELL=${APP_ALLOW_PROTECTED_SHELL:-0}
 APP_PROTECTED_STATUS_CODES=${APP_PROTECTED_STATUS_CODES:-401}
 ADMIN_JWT=${ADMIN_JWT:-}
+admin_status_json=""
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -48,6 +51,13 @@ fetch_admin_json() {
     -H "accept: application/json" \
     -H "authorization: Bearer $ADMIN_JWT" \
     "$url"
+}
+
+fetch_admin_status_once() {
+  if [[ -z "$admin_status_json" ]]; then
+    admin_status_json="$(fetch_admin_json "$API_ADMIN_STATUS_URL")"
+  fi
+  printf '%s' "$admin_status_json"
 }
 
 fetch_indexer_with_retries() {
@@ -166,7 +176,7 @@ fi
 
 if [[ -n "$ADMIN_JWT" ]]; then
   echo "Checking admin async XCM status"
-  admin_status_json="$(fetch_admin_json "$API_ADMIN_STATUS_URL")"
+  admin_status_json="$(fetch_admin_status_once)"
   jq -e '.maintenance.policy.enabled == true' >/dev/null <<<"$admin_status_json"
   jq -e '.xcmSettlementWatcher.enabled == true' >/dev/null <<<"$admin_status_json"
   jq -e '.xcmSettlementWatcher.pendingCount >= 0' >/dev/null <<<"$admin_status_json"
@@ -174,6 +184,41 @@ if [[ -n "$ADMIN_JWT" ]]; then
     (.xcmObservationRelay | type) == "object" and
     (.xcmObservationRelay.enabled | type) == "boolean"
   ' >/dev/null <<<"$admin_status_json"
+fi
+
+if enabled "$CHECK_BOOTSTRAP_INSTRUMENTATION"; then
+  if [[ -z "$ADMIN_JWT" ]]; then
+    echo "CHECK_BOOTSTRAP_INSTRUMENTATION=1 requires ADMIN_JWT for /admin/status." >&2
+    exit 1
+  fi
+
+  echo "Checking bootstrap instrumentation"
+  admin_status_json="$(fetch_admin_status_once)"
+  jq -e '
+    .upstreamStatus.enabled == true and
+    .upstreamStatus.running == true and
+    (.upstreamStatus.intervalMs | type) == "number" and
+    .upstreamStatus.intervalMs <= 86400000 and
+    (.upstreamStatus.batchSize | type) == "number" and
+    .upstreamStatus.batchSize > 0
+  ' >/dev/null <<<"$admin_status_json"
+  jq -e '
+    .bootstrapSelfReport.enabled == true and
+    .bootstrapSelfReport.running == true and
+    .bootstrapSelfReport.providerConfigured == true and
+    (.bootstrapSelfReport.recipientCount | type) == "number" and
+    .bootstrapSelfReport.recipientCount > 0 and
+    (.bootstrapSelfReport.intervalMs | type) == "number" and
+    .bootstrapSelfReport.intervalMs <= 604800000
+  ' >/dev/null <<<"$admin_status_json"
+
+  if enabled "$CHECK_BOOTSTRAP_SELF_REPORT_SENT"; then
+    jq -e '
+      .bootstrapSelfReport.lastRun.status == "sent" and
+      (.bootstrapSelfReport.lastRun.email.providerId | type) == "string" and
+      (.bootstrapSelfReport.lastRun.email.providerId | length) > 0
+    ' >/dev/null <<<"$admin_status_json"
+  fi
 fi
 
 echo "Hosted stack smoke check passed."
