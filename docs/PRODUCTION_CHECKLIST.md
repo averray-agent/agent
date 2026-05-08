@@ -9,6 +9,8 @@ service. It complements:
 - [VPS_RUNBOOK.md](../VPS_RUNBOOK.md) for day-to-day hosting operations
 - [MULTISIG_SETUP.md](./MULTISIG_SETUP.md) for owner/pauser control-plane setup
 - [AUDIT_PACKAGE.md](./AUDIT_PACKAGE.md) for external review scope and sign-off
+- [THREAT_MODEL.md](./THREAT_MODEL.md) for the current launch threat model
+- [NO_TOKEN.md](./NO_TOKEN.md) for the public no-token statement
 
 If this checklist is not green, the answer is "not ready yet".
 
@@ -150,7 +152,17 @@ RUN_SUBSCAN_XCM_VALIDATION=1 ./scripts/ops/check-release-readiness.sh testnet
 
 ---
 
-## 6. Product proof before production claims
+## 6. Launch Documentation
+
+- [x] [THREAT_MODEL.md](./THREAT_MODEL.md) is published.
+- [x] [NO_TOKEN.md](./NO_TOKEN.md) is linked from the repo root.
+- [x] [WEEK12_GATE.md](./WEEK12_GATE.md) documents the week-12 gate thresholds and diagnostic order.
+- [x] [DISPUTE_CODES.md](./DISPUTE_CODES.md) publishes the reason-code registry.
+- [x] [ARBITRATION_MIGRATION.md](./ARBITRATION_MIGRATION.md) documents Phase 0 -> Phase 1 -> Phase 2 triggers.
+
+---
+
+## 7. Product proof before production claims
 
 - [ ] One complete worker loop has been run on the hosted stack:
   discover -> sign in -> preflight -> claim -> submit -> verify -> badge/profile
@@ -161,7 +173,7 @@ If any of these drift, external agents will learn the wrong contract.
 
 ---
 
-## 7. Mainnet parameter package
+## 8. Mainnet parameter package
 
 - [ ] [MAINNET_PARAMETERS.md](./MAINNET_PARAMETERS.md) is still the intended launch profile.
 - [ ] The private mainnet deploy env matches [deployments/mainnet.env.example](../deployments/mainnet.env.example) except for secrets and final addresses.
@@ -170,7 +182,7 @@ If any of these drift, external agents will learn the wrong contract.
 
 ---
 
-## 8. Mainnet blockers that still remain
+## 9. Mainnet blockers that still remain
 
 This checklist improves release discipline, but it does not replace:
 
@@ -184,7 +196,7 @@ irreversible real-funds infrastructure.
 
 ---
 
-## 9. Internal async XCM staging proof
+## 10. Internal async XCM staging proof
 
 - [ ] One async deposit request has been queued and settled on the hosted stack.
 - [ ] One async withdraw request has been queued and settled on the hosted stack.
@@ -207,7 +219,7 @@ The manual flow for creating the request itself lives in
 
 ---
 
-## 10. Optional external observer validation
+## 11. Optional external observer validation
 
 - [ ] A staging Subscan key has been exercised against the current
   `subscan_xcm` source adapter.
@@ -232,7 +244,7 @@ npm run validate:subscan-xcm -- --require-published
 
 ---
 
-## 11. Native observer gate
+## 12. Native observer gate
 
 - [ ] [NATIVE_XCM_OBSERVER.md](./NATIVE_XCM_OBSERVER.md) has a completed
   correlation decision for deposit and withdrawal requests.

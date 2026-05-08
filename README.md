@@ -6,6 +6,15 @@ This repository contains a greenfield implementation of an agent-first treasury 
 - A shared service layer exposed through HTTP and directory-safe MCP discovery
 - Discovery and indexing scaffolds for later hosted deployment
 
+Launch posture and trust documents:
+
+- [Production readiness checklist](docs/PRODUCTION_CHECKLIST.md)
+- [Threat model](docs/THREAT_MODEL.md)
+- [No token statement](docs/NO_TOKEN.md)
+- [Week-12 bootstrap gate](docs/WEEK12_GATE.md)
+- [Arbitration migration](docs/ARBITRATION_MIGRATION.md)
+- [Dispute reason-code registry](docs/DISPUTE_CODES.md)
+
 The `mcp-server` workspace currently uses a JavaScript runtime source tree. There is no parallel TypeScript build step to maintain.
 
 ## Development setup
@@ -351,7 +360,7 @@ contract instances should be treated as superseded and redeployed with the
 updated deploy script before expecting hosted behavior to match this repository.
 
 Threat-model anchors for these trust surfaces live in
-[THREAT_MODEL.md](/Users/pascalkuriger/repo/Polkadot/THREAT_MODEL.md).
+[docs/THREAT_MODEL.md](docs/THREAT_MODEL.md).
 
 ## VPS operations
 
