@@ -5,6 +5,7 @@
 # that:
 #   - each contract address responds to a known function selector
 #   - TreasuryPolicy.owner() matches the expected owner (multisig on prod)
+#   - optional deployments/<profile>-multisig-owner.json matches owner and is verified
 #   - TreasuryPolicy.pauser() matches the expected pauser hot-key
 #   - TreasuryPolicy.verifiers(VERIFIER) and TreasuryPolicy.arbitrators(ARBITRATOR) are true
 #   - TreasuryPolicy.serviceOperators({escrow,account}) are true
@@ -26,6 +27,7 @@ PROFILE="${1:-${PROFILE:-dev}}"
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "${script_dir}/.." && pwd)"
 manifest_path="${repo_root}/deployments/${PROFILE}.json"
+owner_record_path="${repo_root}/deployments/${PROFILE}-multisig-owner.json"
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -156,6 +158,17 @@ if [[ "$ALLOW_PAUSED" == "1" ]]; then
   printf "  [skip] paused check (--allow-paused)\n"
 else
   check_bool "not paused" "false" "$paused_raw"
+fi
+
+if [[ -f "$owner_record_path" ]]; then
+  echo ""
+  echo "Multisig owner record:"
+  record_owner="$(jq -r '.multisig.ownerEnvValue // empty' "$owner_record_path")"
+  record_status="$(jq -r '.status // empty' "$owner_record_path")"
+  record_ready="$(jq -r '.launchGate.readyForOwnerUse // false' "$owner_record_path")"
+  check "record owner" "$EXPECTED_OWNER" "$record_owner"
+  check "record status" "verified" "$record_status"
+  check_bool "record readyForOwnerUse" "true" "$record_ready"
 fi
 
 echo ""

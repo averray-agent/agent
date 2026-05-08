@@ -17,6 +17,7 @@ If this checklist is not green, the answer is "not ready yet".
 ## 1. Control plane
 
 - [ ] `TreasuryPolicy.owner` is the intended multisig address.
+- [ ] `deployments/testnet-multisig-owner.json` is `status: "verified"` and matches the deployment manifest owner.
 - [ ] `TreasuryPolicy.pauser` is a hot key that only holds pause power.
 - [ ] `./scripts/verify_deployment.sh testnet` passes cleanly.
 - [ ] Pause and unpause were rehearsed from the pauser key.

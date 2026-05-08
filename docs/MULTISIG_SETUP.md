@@ -76,16 +76,25 @@ to "create" the multisig — it exists as soon as you commit to the signer set.
 4. Apps shows the derived address. **Copy this address** — it's your
    multisig's Substrate-native SS58 form.
 
-### Option B: CLI
+### Option B: repo helper
 
 ```bash
-npx @polkadot/api-cli --ws <HUB_WSS> \
-  derive.multisig \
+node scripts/ops/prepare-multisig-owner-record.mjs \
+  --profile testnet \
+  --threshold 2 \
   --signatories <HOT_SS58>,<WARM_SS58>,<COLD_SS58> \
-  --threshold 2
+  --out deployments/testnet-multisig-owner.json
 ```
 
-(Order matters — sort the addresses lexicographically before calling.)
+The helper sorts the signers, derives the deterministic pallet-multisig
+SS58/accountId, computes the H160 owner candidate used as `OWNER`, and writes
+a public operator record. It does **not** prove the account is safe to use as a
+contract owner yet — the initial record is `status: "draft"` until the
+`map_account` and testnet rehearsal evidence below are filled in.
+
+Do not put seeds or private labels in the record. Signer addresses, transaction
+hashes, workflow run ids, and the mapped owner address are public launch
+metadata.
 
 ---
 
@@ -119,6 +128,22 @@ testnet rehearsal succeeds.
 > **Important**: if the owner address is wrong, the contract is not
 > "partially degraded" — it is effectively frozen out of admin control.
 > Treat owner-address verification as a launch gate, not a clerical step.
+
+After the multisig account has called `pallet_revive.map_account()` on Hub
+TestNet, update the record with the mapping transaction:
+
+```bash
+node scripts/ops/prepare-multisig-owner-record.mjs \
+  --profile testnet \
+  --threshold 2 \
+  --signatories <HOT_SS58>,<WARM_SS58>,<COLD_SS58> \
+  --map-account-tx 0x<tx-hash> \
+  --out deployments/testnet-multisig-owner.json
+```
+
+The record should stay `draft` at this point. It becomes `verified` only after
+ownership transfer, `verify_deployment.sh testnet`, and one owner-only admin
+rehearsal are all recorded.
 
 ---
 
@@ -199,6 +224,25 @@ On Polkadot.js Apps:
 
 If this flow completes cleanly on testnet, your signer set + EVM mapping
 are correct. Revert the pauser back to the original hot key afterwards.
+
+Now finalize the owner record:
+
+```bash
+node scripts/ops/prepare-multisig-owner-record.mjs \
+  --profile testnet \
+  --threshold 2 \
+  --signatories <HOT_SS58>,<WARM_SS58>,<COLD_SS58> \
+  --map-account-tx 0x<map-account-tx> \
+  --ownership-transfer-tx 0x<deploy-or-transfer-tx> \
+  --admin-rehearsal-tx 0x<set-pauser-rehearsal-tx> \
+  --verify-deployment-run <workflow-run-or-terminal-log-id> \
+  --final \
+  --out deployments/testnet-multisig-owner.json
+```
+
+`./scripts/verify_deployment.sh testnet` automatically reads
+`deployments/testnet-multisig-owner.json` when present and fails if the manifest
+owner differs from the record owner or the record is still draft.
 
 ---
 
