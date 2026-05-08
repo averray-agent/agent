@@ -19,6 +19,7 @@ import { computeClaimEconomics, countClaimedSessions } from "./claim-economics.j
 import { claimStatusFields, isTerminalSession, summarizeJobClaimState } from "./claim-state.js";
 import { capabilityMatrix } from "../auth/capabilities.js";
 import { normalizeAssetSymbol } from "./assets.js";
+import { collectGithubOperatorStatus } from "./github-operator-helper.js";
 
 const TIMELINE_VERSION = "v2";
 
@@ -443,6 +444,10 @@ export class PlatformService {
         updatedAt: undefined
       }
     };
+  }
+
+  async getGithubOperatorStatus(options = {}) {
+    return collectGithubOperatorStatus(options);
   }
 
   getJobDefinition(jobId) {
