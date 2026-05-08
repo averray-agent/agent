@@ -28,9 +28,12 @@ RUN_SITE=${RUN_SITE:-auto}
 RUN_CADDY=${RUN_CADDY:-auto}
 RUN_SMOKE=${RUN_SMOKE:-1}
 SMOKE_CHECK_INDEXER=${SMOKE_CHECK_INDEXER:-auto}
+SMOKE_CHECK_BOOTSTRAP_INSTRUMENTATION=${SMOKE_CHECK_BOOTSTRAP_INSTRUMENTATION:-0}
+SMOKE_CHECK_BOOTSTRAP_SELF_REPORT_SENT=${SMOKE_CHECK_BOOTSTRAP_SELF_REPORT_SENT:-0}
 INDEXER_DATABASE_SCHEMA=${INDEXER_DATABASE_SCHEMA:-}
 INDEXER_FRESH_SCHEMA=${INDEXER_FRESH_SCHEMA:-0}
 INDEXER_ENV_FILE=${INDEXER_ENV_FILE:-"$STACK_ROOT/indexer.env"}
+BACKEND_ENV_FILE=${BACKEND_ENV_FILE:-"$STACK_ROOT/backend.env"}
 
 SITE_BUILD_RUNNER=${SITE_BUILD_RUNNER:-auto}
 SITE_NODE_IMAGE=${SITE_NODE_IMAGE:-node:22-bookworm-slim}
@@ -119,6 +122,71 @@ initialize_component_state() {
       echo "Initialized $component deploy pointer at $OLD_SHA"
     fi
   done
+}
+
+quote_env_value() {
+  local value="$1"
+  value=${value//$'\n'/}
+  value=${value//\\/\\\\}
+  value=${value//\"/\\\"}
+  printf '"%s"' "$value"
+}
+
+upsert_env_values() {
+  local env_file="$1"
+  shift
+  mkdir -p "$(dirname "$env_file")"
+  touch "$env_file"
+
+  local key_pattern=""
+  local pair key
+  for pair in "$@"; do
+    key="${pair%%=*}"
+    if [[ -z "$key_pattern" ]]; then
+      key_pattern="$key"
+    else
+      key_pattern="$key_pattern|$key"
+    fi
+  done
+
+  local tmp="${env_file}.tmp.$$"
+  grep -Ev "^(${key_pattern})=" "$env_file" > "$tmp" || true
+  for pair in "$@"; do
+    key="${pair%%=*}"
+    printf '%s=%s\n' "$key" "$(quote_env_value "${pair#*=}")" >> "$tmp"
+  done
+  mv "$tmp" "$env_file"
+}
+
+configure_bootstrap_instrumentation_env() {
+  if [[ -z "${RESEND_API_KEY:-}" || -z "${BOOTSTRAP_SELF_REPORT_TO:-}" ]]; then
+    echo "Bootstrap self-report secrets are incomplete; leaving backend.env instrumentation settings unchanged."
+    return
+  fi
+
+  local send_on_start="false"
+  case "${BOOTSTRAP_SELF_REPORT_SEND_ON_START:-0}" in
+    1|true|yes) send_on_start="true" ;;
+    0|false|no|"") send_on_start="false" ;;
+    *)
+      echo "Invalid BOOTSTRAP_SELF_REPORT_SEND_ON_START toggle: $BOOTSTRAP_SELF_REPORT_SEND_ON_START" >&2
+      exit 1
+      ;;
+  esac
+
+  echo "Writing bootstrap instrumentation settings to $BACKEND_ENV_FILE"
+  upsert_env_values "$BACKEND_ENV_FILE" \
+    "UPSTREAM_STATUS_POLLER_ENABLED=true" \
+    "UPSTREAM_STATUS_POLLER_INTERVAL_MS=86400000" \
+    "UPSTREAM_STATUS_POLLER_BATCH_SIZE=50" \
+    "BOOTSTRAP_SELF_REPORT_ENABLED=true" \
+    "BOOTSTRAP_SELF_REPORT_INTERVAL_MS=604800000" \
+    "BOOTSTRAP_SELF_REPORT_SEND_ON_START=$send_on_start" \
+    "BOOTSTRAP_SELF_REPORT_FROM=${BOOTSTRAP_SELF_REPORT_FROM:-ops@averray.com}" \
+    "BOOTSTRAP_SELF_REPORT_TO=$BOOTSTRAP_SELF_REPORT_TO" \
+    "BOOTSTRAP_SELF_REPORT_SUBJECT_PREFIX=Averray bootstrap self-report" \
+    "RESEND_API_KEY=$RESEND_API_KEY" \
+    "RESEND_API_BASE_URL=https://api.resend.com"
 }
 
 component_changed_matches() {
@@ -335,6 +403,7 @@ deploy() {
 
   initialize_component_state
   apply_indexer_database_schema
+  configure_bootstrap_instrumentation_env
 
   local run_backend=0
   local run_indexer=0
@@ -413,7 +482,10 @@ deploy() {
     if [[ "$check_indexer" != "1" ]]; then
       echo "Skipping indexer smoke checks because this deploy did not change indexer or Caddy."
     fi
-    CHECK_INDEXER="$check_indexer" "$APP_ROOT/scripts/ops/check-hosted-stack.sh"
+    CHECK_INDEXER="$check_indexer" \
+      CHECK_BOOTSTRAP_INSTRUMENTATION="$SMOKE_CHECK_BOOTSTRAP_INSTRUMENTATION" \
+      CHECK_BOOTSTRAP_SELF_REPORT_SENT="$SMOKE_CHECK_BOOTSTRAP_SELF_REPORT_SENT" \
+      "$APP_ROOT/scripts/ops/check-hosted-stack.sh"
   else
     echo "RUN_SMOKE=0 set; skipping hosted smoke check."
   fi
