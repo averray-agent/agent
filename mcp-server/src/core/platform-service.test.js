@@ -480,6 +480,9 @@ test("getAdminStatus surfaces recurring scheduler anomalies", async () => {
   assert.deepEqual(status.authPolicy.routes["/admin/status"], ["admin:status", "ops:view"]);
   assert.deepEqual(status.authPolicy.uiControls["admin.status.view"], ["admin:status", "ops:view"]);
   assert.ok(status.anomalies.some((entry) => entry.code === "recurring_attention"));
+  assert.equal(status.hostDiagnostics.mutates, false);
+  assert.ok(["ok", "ok_with_notes", "attention", "critical"].includes(status.hostDiagnostics.health));
+  assert.equal(status.hostDiagnostics.process.pid, process.pid);
   assert.equal(status.jobLifecycle.total, 1);
   assert.equal(status.jobLifecycle.paused, 1);
   assert.equal(status.jobLifecycle.claimable, 0);

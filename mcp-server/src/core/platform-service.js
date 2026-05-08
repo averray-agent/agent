@@ -20,6 +20,7 @@ import { claimStatusFields, isTerminalSession, summarizeJobClaimState } from "./
 import { capabilityMatrix } from "../auth/capabilities.js";
 import { normalizeAssetSymbol } from "./assets.js";
 import { collectGithubOperatorStatus } from "./github-operator-helper.js";
+import { collectHostDiagnostics } from "./host-diagnostics.js";
 
 const TIMELINE_VERSION = "v2";
 
@@ -199,7 +200,8 @@ export class PlatformService {
       upstreamStatus,
       bootstrapSelfReport,
       jobStaleSweeper,
-      recentSessions
+      recentSessions,
+      hostDiagnostics
     ] = await Promise.all([
       getTreasuryPolicyStatusSafely(this.blockchainGateway),
       this.jobCatalogService.getRecurringTemplateStatus(),
@@ -305,7 +307,8 @@ export class PlatformService {
         maxJobsPerRun: 0,
         lastRun: undefined
       },
-      this.jobExecutionService.listRecentSessions(14)
+      this.jobExecutionService.listRecentSessions(14),
+      Promise.resolve().then(() => collectHostDiagnostics())
     ]);
     const recentEvents = this.eventBus?.replay?.({}, undefined)?.events ?? [];
     const activeStatuses = new Set(["claimed", "submitted", "disputed", "rejected"]);
@@ -415,6 +418,7 @@ export class PlatformService {
       jobLifecycle: this.jobCatalogService.getJobLifecycleSummary(),
       jobStaleSweeper,
       scheduler,
+      hostDiagnostics,
       providerOperations,
       githubIngestion: githubIngestion,
       wikipediaIngestion: wikipediaIngestion,

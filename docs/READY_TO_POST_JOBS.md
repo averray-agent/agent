@@ -550,6 +550,12 @@ Data.gov, standards, and OpenAPI providers into one shape with `mode`,
 summary. The individual fields such as `openApiIngestion` remain for
 backward-compatible diagnostics.
 
+`/admin/status.hostDiagnostics` is read-only host telemetry for operator
+readiness. It reports process memory, disk headroom for configured diagnostic
+paths, and SQLite WAL files that may need checkpointing. It never shells out or
+mutates the host; use it as an early warning surface before enabling any
+approval-gated admin actions.
+
 The generated jobs use:
 
 - `schema://jobs/openapi-quality-audit-input`
