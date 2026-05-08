@@ -696,8 +696,8 @@ test("http smoke: /agents/:wallet aggregates approved sessions into badges", { s
     assert.equal(profile.stats.approvedCount, 1);
     assert.equal(profile.stats.rejectedCount, 0);
     assert.equal(profile.stats.completionRate, 1);
-    // 4 DOT at 18 decimals = 4 * 10^18 base units
-    assert.equal(profile.stats.totalEarned.amount, "4000000000000000000");
+    // Job rewards default to USDC: 4 USDC at 6 decimals = 4 * 10^6 base units.
+    assert.equal(profile.stats.totalEarned.amount, "4000000");
     assert.equal(profile.badges[0].sessionId, sessionId);
     assert.equal(profile.badges[0].category, "coding");
     assert.equal(profile.badges[0].level, 1);
