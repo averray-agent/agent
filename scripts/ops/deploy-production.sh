@@ -37,6 +37,7 @@ BACKEND_ENV_FILE=${BACKEND_ENV_FILE:-"$STACK_ROOT/backend.env"}
 
 SITE_BUILD_RUNNER=${SITE_BUILD_RUNNER:-auto}
 SITE_NODE_IMAGE=${SITE_NODE_IMAGE:-node:22-bookworm-slim}
+BOOTSTRAP_INSTRUMENTATION_ENV_UPDATED=0
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -187,6 +188,17 @@ configure_bootstrap_instrumentation_env() {
     "BOOTSTRAP_SELF_REPORT_SUBJECT_PREFIX=Averray bootstrap self-report" \
     "RESEND_API_KEY=$RESEND_API_KEY" \
     "RESEND_API_BASE_URL=https://api.resend.com"
+  BOOTSTRAP_INSTRUMENTATION_ENV_UPDATED=1
+}
+
+backend_env_requires_deploy() {
+  if [[ "$BOOTSTRAP_INSTRUMENTATION_ENV_UPDATED" != "1" ]]; then
+    return 1
+  fi
+  case "$RUN_BACKEND" in
+    0|false|no) return 1 ;;
+    *) return 0 ;;
+  esac
 }
 
 component_changed_matches() {
@@ -411,7 +423,7 @@ deploy() {
   local run_site=0
   local run_caddy=0
 
-  if should_run backend "$RUN_BACKEND" '^(mcp-server/|sdk/|examples/|docs/schemas/|package(-lock)?\.json|scripts/ops/redeploy-backend\.sh)'; then
+  if backend_env_requires_deploy || should_run backend "$RUN_BACKEND" '^(mcp-server/|sdk/|examples/|docs/schemas/|package(-lock)?\.json|scripts/ops/redeploy-backend\.sh)'; then
     run_backend=1
     echo "Deploying backend"
     SKIP_GIT_UPDATE=1 PRE_DEPLOY_SHA="$OLD_SHA" "$APP_ROOT/scripts/ops/redeploy-backend.sh"

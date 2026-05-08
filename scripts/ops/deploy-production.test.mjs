@@ -124,6 +124,7 @@ test("deploy wrapper writes bootstrap instrumentation backend env when secrets a
   const stackRoot = join(root, "stack");
   const fakeBin = join(root, "bin");
   const stateDir = join(root, "state");
+  const deployLog = join(root, "deploy.log");
   const backendEnv = join(stackRoot, "backend.env");
 
   await mkdir(join(appRoot, "scripts/ops"), { recursive: true });
@@ -133,6 +134,11 @@ test("deploy wrapper writes bootstrap instrumentation backend env when secrets a
   await writeFile(backendEnv, "KEEP_ME=1\nBOOTSTRAP_SELF_REPORT_ENABLED=false\nRESEND_API_KEY=\"old\"\n");
   await copyFile(DEPLOY_SCRIPT, join(appRoot, "scripts/ops/deploy-production.sh"));
   await chmod(join(appRoot, "scripts/ops/deploy-production.sh"), 0o755);
+  await writeExecutable(join(appRoot, "scripts/ops/redeploy-backend.sh"), [
+    "#!/usr/bin/env bash",
+    "set -euo pipefail",
+    "echo backend >> \"$DEPLOY_LOG\""
+  ].join("\n"));
 
   for (const command of ["docker", "curl", "npm", "flock"]) {
     await writeExecutable(join(fakeBin, command), "#!/usr/bin/env bash\nexit 0\n");
@@ -155,11 +161,11 @@ test("deploy wrapper writes bootstrap instrumentation backend env when secrets a
     DEPLOY_STATE_DIR: stateDir,
     DEPLOY_OLD_SHA: baseSha,
     DEPLOY_NEW_SHA: baseSha,
+    DEPLOY_LOG: deployLog,
     RESEND_API_KEY: "secret",
     BOOTSTRAP_SELF_REPORT_TO: "ops@example.com",
     BOOTSTRAP_SELF_REPORT_FROM: "ops@averray.com",
     BOOTSTRAP_SELF_REPORT_SEND_ON_START: "1",
-    RUN_BACKEND: "0",
     RUN_FRONTEND: "0",
     RUN_INDEXER: "0",
     RUN_SITE: "0",
@@ -177,6 +183,7 @@ test("deploy wrapper writes bootstrap instrumentation backend env when secrets a
   assert.match(contents, /^BOOTSTRAP_SELF_REPORT_FROM="ops@averray\.com"$/m);
   assert.match(contents, /^RESEND_API_KEY="secret"$/m);
   assert.equal((contents.match(/^RESEND_API_KEY=/gm) ?? []).length, 1);
+  assert.match(await readFile(deployLog, "utf8"), /^backend$/m);
 });
 
 async function writeExecutable(path, content) {
