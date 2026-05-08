@@ -1024,3 +1024,167 @@ code {
 .provider-row--error .provider-bar > span {
   background: #a0322a;
 }
+
+/* Trail summary — agent profile §10 (reputation deepening) ---------- */
+
+.profile-summary-source {
+  font-family: var(--display);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.trail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 0.9rem;
+  margin-top: 0.6rem;
+}
+
+.trail-block {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.95rem 1rem;
+  border-radius: 0.85rem;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.trail-block-label {
+  margin: 0;
+  font-family: var(--display);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.trail-block-meta {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.trail-headline {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+}
+
+.trail-headline strong {
+  font-family: var(--display);
+  font-size: 1.85rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.trail-headline-suffix {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.trail-tier-bars {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.trail-tier-row {
+  display: grid;
+  grid-template-columns: minmax(5rem, max-content) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.55rem;
+  font-family: var(--display);
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+}
+
+.trail-tier-row span:first-child {
+  font-weight: 700;
+}
+
+.trail-tier-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(17, 19, 21, 0.06);
+  overflow: hidden;
+}
+
+.trail-tier-bar > i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: inherit;
+  transition: width 220ms ease;
+}
+
+.trail-tier-bar.tier-substantive > i { background: #1d6a46; }
+.trail-tier-bar.tier-standard    > i { background: #3a8c5e; }
+.trail-tier-bar.tier-micro       > i { background: #94b89d; }
+.trail-tier-bar.tier-premium     > i { background: #254e9a; }
+
+.trail-tier-row span:last-child {
+  font-family: "JetBrains Mono", "Space Grotesk", monospace;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: 0;
+}
+
+.trail-repo-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.trail-repo-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 0.6rem;
+  font-family: "JetBrains Mono", "Space Grotesk", monospace;
+  font-size: 0.78rem;
+  color: var(--ink);
+  letter-spacing: 0;
+}
+
+.trail-repo-list li:not(.profile-empty) span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trail-repo-list li:not(.profile-empty) span:last-child {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.trail-streak-tier {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.2rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  font-family: var(--display);
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.trail-streak-tier.tier-active   { background: var(--accent-soft); color: var(--accent); }
+.trail-streak-tier.tier-badge    { background: #f1e4d4; color: #a0691f; }
+.trail-streak-tier.tier-waiver   { background: #d8e4f1; color: #254e9a; }
+
