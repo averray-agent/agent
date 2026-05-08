@@ -9,7 +9,8 @@ import {
   ContentRecoveryLog,
   createContentRecoveryLog,
   recordFromRecoveryLine,
-  replayContentRecoveryLog
+  replayContentRecoveryLog,
+  S3ContentRecoveryObjectStore
 } from "./content-recovery-log.js";
 import { ConfigError } from "./errors.js";
 import { MemoryStateStore } from "./state-store.js";
@@ -70,6 +71,82 @@ test("createContentRecoveryLog parses boolean env", () => {
   assert.throws(
     () => createContentRecoveryLog({ CONTENT_RECOVERY_LOG_ENABLED: "sometimes" }),
     ConfigError
+  );
+});
+
+test("createContentRecoveryLog configures optional object recovery sink", () => {
+  const recoveryLog = createContentRecoveryLog({
+    CONTENT_RECOVERY_OBJECT_ENABLED: "1",
+    CONTENT_RECOVERY_OBJECT_ENDPOINT: "https://objects.example.test",
+    CONTENT_RECOVERY_OBJECT_BUCKET: "averray-private",
+    CONTENT_RECOVERY_OBJECT_REGION: "eu-west-1",
+    CONTENT_RECOVERY_OBJECT_ACCESS_KEY_ID: "key-id",
+    CONTENT_RECOVERY_OBJECT_SECRET_ACCESS_KEY: "secret",
+    CONTENT_RECOVERY_OBJECT_PREFIX: "recovery"
+  });
+
+  assert.ok(recoveryLog.objectStore instanceof S3ContentRecoveryObjectStore);
+  assert.equal(recoveryLog.objectStore.bucket, "averray-private");
+  assert.equal(recoveryLog.objectStore.prefix, "recovery");
+});
+
+test("S3ContentRecoveryObjectStore writes immutable per-entry JSONL objects", async () => {
+  const calls = [];
+  const objectStore = new S3ContentRecoveryObjectStore({
+    endpoint: "https://objects.example.test",
+    bucket: "averray-private",
+    region: "eu-west-1",
+    accessKeyId: "key-id",
+    secretAccessKey: "secret",
+    prefix: "recovery",
+    fetchImpl: async (url, init) => {
+      calls.push({ url: String(url), init });
+      return { ok: true, status: 200 };
+    }
+  });
+  const recoveryLog = new ContentRecoveryLog({
+    dir: await mkdtemp(join(tmpdir(), "averray-content-log-")),
+    objectStore
+  });
+  const record = buildContentRecord({
+    ownerWallet: OWNER,
+    payload: { ok: true },
+    createdAt: "2026-04-27T12:00:00.000Z"
+  });
+
+  const result = await recoveryLog.append(record, { loggedAt: "2026-04-27T12:01:02.000Z" });
+
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].url, /^https:\/\/objects\.example\.test\/averray-private\/recovery\/2026-04-27\/2026-04-27T12-01-02\.000Z-/u);
+  assert.equal(calls[0].init.method, "PUT");
+  assert.equal(calls[0].init.headers["if-none-match"], "*");
+  assert.equal(calls[0].init.headers["x-amz-content-sha256"].length, 64);
+  assert.match(calls[0].init.headers.authorization, /^AWS4-HMAC-SHA256 Credential=key-id\/20260427\/eu-west-1\/s3\/aws4_request/u);
+  assert.match(calls[0].init.body, /"kind":"content.upserted"/u);
+  assert.match(result.objectKey, /^recovery\/2026-04-27\/2026-04-27T12-01-02\.000Z-/u);
+});
+
+test("S3ContentRecoveryObjectStore failures fail the recovery append", async () => {
+  const objectStore = new S3ContentRecoveryObjectStore({
+    endpoint: "https://objects.example.test",
+    bucket: "averray-private",
+    region: "eu-west-1",
+    accessKeyId: "key-id",
+    secretAccessKey: "secret",
+    fetchImpl: async () => ({ ok: false, status: 503, text: async () => "slow down" })
+  });
+  const recoveryLog = new ContentRecoveryLog({
+    dir: await mkdtemp(join(tmpdir(), "averray-content-log-")),
+    objectStore
+  });
+  const record = buildContentRecord({
+    ownerWallet: OWNER,
+    payload: { ok: true }
+  });
+
+  await assert.rejects(
+    () => recoveryLog.append(record, { loggedAt: "2026-04-27T12:01:02.000Z" }),
+    /Object recovery write failed with status 503/u
   );
 });
 
