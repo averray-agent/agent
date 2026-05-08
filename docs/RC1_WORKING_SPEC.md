@@ -564,8 +564,8 @@ Before public v1.0.0-rc1 launch:
 - [x] `disputedAt` timestamp present on job state and emitted in `DisputeOpened` event
 
 **Content storage:**
-- [ ] `/content/:hash` serving with visibility-resolved-at-read-time
-- [ ] Append-only recovery log writing to object storage
+- [x] `/content/:hash` serving with visibility-resolved-at-read-time
+- [x] Append-only recovery log writing to object storage
 
 **Agent/maintainer surface:**
 - [ ] Disclosure footer auto-injected into every PR/edit

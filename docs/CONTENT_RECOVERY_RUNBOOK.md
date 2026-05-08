@@ -4,9 +4,10 @@ This runbook covers recovery of Averray content-addressed blobs served by
 `/content/:hash`.
 
 The current production path stores content records in the configured state
-store and appends every write to a private JSONL recovery log. If Redis loses
-or corrupts content records, operators can replay that log back into the state
-store.
+store and appends every write to a private JSONL recovery log. Production can
+also mirror each append to S3-compatible object storage. If Redis loses or
+corrupts content records, operators can replay the local log or reconstruct it
+from the object mirror back into the state store.
 
 ## Scope Boundary
 
@@ -32,13 +33,32 @@ CONTENT_RECOVERY_LOG_ENABLED=1
 CONTENT_RECOVERY_LOG_DIR=/srv/agent-stack/content-recovery-log
 ```
 
+The optional object-store mirror is controlled by:
+
+```bash
+CONTENT_RECOVERY_OBJECT_ENABLED=1
+CONTENT_RECOVERY_OBJECT_ENDPOINT=https://s3.example.com
+CONTENT_RECOVERY_OBJECT_BUCKET=averray-content-recovery
+CONTENT_RECOVERY_OBJECT_REGION=eu-west-1
+CONTENT_RECOVERY_OBJECT_ACCESS_KEY_ID=...
+CONTENT_RECOVERY_OBJECT_SECRET_ACCESS_KEY=...
+CONTENT_RECOVERY_OBJECT_PREFIX=content-recovery-log
+```
+
 If `CONTENT_RECOVERY_LOG_DIR` is unset, the backend defaults to
 `.content-recovery-log` under its working directory. Production should keep the
 directory on durable private storage and include it in host backups.
 
-Each log file is named `YYYY-MM-DD.jsonl`. Each line is a canonical
-`content.upserted` record. Replay validates the payload hash before it writes
-anything back to the state store.
+Each local log file is named `YYYY-MM-DD.jsonl`. Each line is a canonical
+`content.upserted` record. Object-store mirror keys are immutable per-entry
+objects under:
+
+```text
+$CONTENT_RECOVERY_OBJECT_PREFIX/YYYY-MM-DD/<loggedAt>-<hash>.jsonl
+```
+
+Replay validates the payload hash before it writes anything back to the state
+store.
 
 ## When To Use
 
@@ -148,6 +168,11 @@ If apply succeeds but `/content/:hash` still returns 404:
 If Redis is unstable, stop risky deploys and treat the incident as a storage
 integrity problem before continuing normal operations.
 
+If the host-local log is missing but the object mirror is intact, download the
+objects for the affected day or prefix, concatenate them in key order into a
+temporary `YYYY-MM-DD.jsonl`, then run the same dry-run/apply replay command
+against that directory.
+
 ## Current Roadmap Position
 
 This runbook completes the operator drill portion of the rc1 content-addressing
@@ -155,6 +180,7 @@ slice:
 
 - `/content/:hash` content store: shipped
 - append-only recovery log: shipped
+- optional S3-compatible object-store mirror: shipped
 - early owner/admin publish: shipped
 - replay command: shipped
 - operator replay runbook: this document
