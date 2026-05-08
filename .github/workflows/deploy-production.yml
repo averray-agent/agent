@@ -55,6 +55,30 @@ on:
         options:
           - "0"
           - "1"
+      bootstrap_self_report_send_on_start:
+        description: One-shot bootstrap self-report send on backend start.
+        required: false
+        default: "0"
+        type: choice
+        options:
+          - "0"
+          - "1"
+      smoke_check_bootstrap_instrumentation:
+        description: Require bootstrap poller + self-report status in hosted smoke.
+        required: false
+        default: "0"
+        type: choice
+        options:
+          - "0"
+          - "1"
+      smoke_check_bootstrap_self_report_sent:
+        description: Require the bootstrap self-report last run to be sent.
+        required: false
+        default: "0"
+        type: choice
+        options:
+          - "0"
+          - "1"
 
 concurrency:
   group: production
@@ -76,6 +100,9 @@ jobs:
       APP_BASIC_AUTH_PASSWORD_HASH: ${{ secrets.APP_BASIC_AUTH_PASSWORD_HASH }}
       APP_ALLOW_PROTECTED_SHELL: ${{ secrets.APP_ALLOW_PROTECTED_SHELL }}
       ADMIN_JWT: ${{ secrets.ADMIN_JWT }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      BOOTSTRAP_SELF_REPORT_TO: ${{ secrets.BOOTSTRAP_SELF_REPORT_TO }}
+      BOOTSTRAP_SELF_REPORT_FROM: ${{ secrets.BOOTSTRAP_SELF_REPORT_FROM }}
       DEPLOY_RUN_INDEXER: ${{ github.event_name == 'workflow_dispatch' && inputs.run_indexer || 'auto' }}
       DEPLOY_WAIT_FOR_READY: ${{ github.event_name == 'workflow_dispatch' && inputs.wait_for_ready || '1' }}
       DEPLOY_HEALTH_STABILITY_SEC: ${{ github.event_name == 'workflow_dispatch' && inputs.health_stability_sec || '0' }}
@@ -83,6 +110,9 @@ jobs:
       DEPLOY_SMOKE_CHECK_INDEXER: ${{ github.event_name == 'workflow_dispatch' && inputs.smoke_check_indexer || 'auto' }}
       DEPLOY_INDEXER_DATABASE_SCHEMA: ${{ github.event_name == 'workflow_dispatch' && inputs.indexer_database_schema || '' }}
       DEPLOY_INDEXER_FRESH_SCHEMA: ${{ github.event_name == 'workflow_dispatch' && inputs.indexer_fresh_schema || '0' }}
+      DEPLOY_BOOTSTRAP_SELF_REPORT_SEND_ON_START: ${{ github.event_name == 'workflow_dispatch' && inputs.bootstrap_self_report_send_on_start || '0' }}
+      DEPLOY_SMOKE_CHECK_BOOTSTRAP_INSTRUMENTATION: ${{ github.event_name == 'workflow_dispatch' && inputs.smoke_check_bootstrap_instrumentation || '0' }}
+      DEPLOY_SMOKE_CHECK_BOOTSTRAP_SELF_REPORT_SENT: ${{ github.event_name == 'workflow_dispatch' && inputs.smoke_check_bootstrap_self_report_sent || '0' }}
     steps:
       - name: Validate required secrets
         run: |
@@ -104,17 +134,23 @@ jobs:
       - name: Deploy production
         run: |
           remote_env=$(
-            printf 'APP_BASIC_AUTH_USER=%q APP_BASIC_AUTH_PASSWORD=%q APP_BASIC_AUTH_PASSWORD_HASH=%q APP_ALLOW_PROTECTED_SHELL=%q ADMIN_JWT=%q RUN_INDEXER=%q WAIT_FOR_READY=%q HEALTH_STABILITY_SEC=%q INDEXER_LOG_TAIL=%q SMOKE_CHECK_INDEXER=%q INDEXER_DATABASE_SCHEMA=%q INDEXER_FRESH_SCHEMA=%q ' \
+            printf 'APP_BASIC_AUTH_USER=%q APP_BASIC_AUTH_PASSWORD=%q APP_BASIC_AUTH_PASSWORD_HASH=%q APP_ALLOW_PROTECTED_SHELL=%q ADMIN_JWT=%q RESEND_API_KEY=%q BOOTSTRAP_SELF_REPORT_TO=%q BOOTSTRAP_SELF_REPORT_FROM=%q BOOTSTRAP_SELF_REPORT_SEND_ON_START=%q RUN_INDEXER=%q WAIT_FOR_READY=%q HEALTH_STABILITY_SEC=%q INDEXER_LOG_TAIL=%q SMOKE_CHECK_INDEXER=%q SMOKE_CHECK_BOOTSTRAP_INSTRUMENTATION=%q SMOKE_CHECK_BOOTSTRAP_SELF_REPORT_SENT=%q INDEXER_DATABASE_SCHEMA=%q INDEXER_FRESH_SCHEMA=%q ' \
               "$APP_BASIC_AUTH_USER" \
               "$APP_BASIC_AUTH_PASSWORD" \
               "$APP_BASIC_AUTH_PASSWORD_HASH" \
               "$APP_ALLOW_PROTECTED_SHELL" \
               "$ADMIN_JWT" \
+              "$RESEND_API_KEY" \
+              "$BOOTSTRAP_SELF_REPORT_TO" \
+              "$BOOTSTRAP_SELF_REPORT_FROM" \
+              "$DEPLOY_BOOTSTRAP_SELF_REPORT_SEND_ON_START" \
               "$DEPLOY_RUN_INDEXER" \
               "$DEPLOY_WAIT_FOR_READY" \
               "$DEPLOY_HEALTH_STABILITY_SEC" \
               "$DEPLOY_INDEXER_LOG_TAIL" \
               "$DEPLOY_SMOKE_CHECK_INDEXER" \
+              "$DEPLOY_SMOKE_CHECK_BOOTSTRAP_INSTRUMENTATION" \
+              "$DEPLOY_SMOKE_CHECK_BOOTSTRAP_SELF_REPORT_SENT" \
               "$DEPLOY_INDEXER_DATABASE_SCHEMA" \
               "$DEPLOY_INDEXER_FRESH_SCHEMA"
           )
