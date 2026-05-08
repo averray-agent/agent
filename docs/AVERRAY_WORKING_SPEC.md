@@ -742,11 +742,11 @@ Before public v1.0.0-rc1 launch:
 - [ ] Owner, pauser, verifier, arbitrator addresses final and copied to private deploy env
 
 **Documentation:**
-- [ ] `THREAT_MODEL.md` published
-- [ ] No-token statement linked in README and docs root
-- [ ] Week-12 gate thresholds and diagnostic order documented internally
-- [ ] Reason-code registry published (in `docs/DISPUTE_CODES.md` or equivalent)
-- [ ] Phase-0 → Phase-1 → Phase-2 arbitration migration triggers documented publicly
+- [x] `THREAT_MODEL.md` published
+- [x] No-token statement linked in README and docs root
+- [x] Week-12 gate thresholds and diagnostic order documented internally
+- [x] Reason-code registry published (in `docs/DISPUTE_CODES.md` or equivalent)
+- [x] Phase-0 → Phase-1 → Phase-2 arbitration migration triggers documented publicly
 
 **Dispute flow (Phase 0 launch):**
 - [ ] `setArbitrator(pascalAddr, true)` called from multisig — single approved arbitrator at launch
