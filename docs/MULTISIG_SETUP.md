@@ -301,11 +301,11 @@ value movement regardless of owner compromise.
 ## 8. Checklist before tagging v1.0.0-rc2
 
 - [ ] All three keys generated, backups stored in distinct locations.
-- [ ] Multisig address computed + EVM-mapped form recorded.
-- [ ] Testnet deploy transferred ownership to the multisig.
-- [ ] `verify_deployment.sh testnet` passes cleanly.
+- [x] Multisig address computed + EVM-mapped form recorded.
+- [x] Testnet deploy transferred ownership to the multisig.
+- [x] `verify_deployment.sh testnet` passes cleanly.
 - [ ] Pause + unpause from pauser EOA rehearsed.
-- [ ] Admin rotation (e.g., `setPauser`) from multisig rehearsed end-to-end.
+- [x] Admin rotation (e.g., `setPauser`) from multisig rehearsed end-to-end.
 - [ ] Recovery playbook dry-run: simulate each of the three "lost key"
       scenarios on paper.
 - [ ] Incident-response tabletop: walk through "hot key compromised" with

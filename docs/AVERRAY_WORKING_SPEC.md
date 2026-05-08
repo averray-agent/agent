@@ -725,11 +725,11 @@ Before public v1.0.0-rc1 launch:
 
 **Multisig and ops (per `MULTISIG_SETUP.md`):**
 - [ ] All three signer keys generated, backups in distinct locations per `SIGNER_POLICY.md`
-- [ ] Multisig address computed + EVM-mapped form recorded via `pallet_revive.map_account()`
-- [ ] Testnet deploy transferred ownership to the multisig
-- [ ] `verify_deployment.sh testnet` passes cleanly
+- [x] Multisig address computed + EVM-mapped form recorded via `pallet_revive.map_account()`
+- [x] Testnet deploy transferred ownership to the multisig
+- [x] `verify_deployment.sh testnet` passes cleanly
 - [ ] Pause + unpause from pauser EOA rehearsed
-- [ ] Admin rotation (e.g., `setPauser`) from multisig rehearsed end-to-end
+- [x] Admin rotation (e.g., `setPauser`) from multisig rehearsed end-to-end
 - [ ] Recovery playbook dry-run for each "lost key" scenario
 
 **Mainnet parameters (per `MAINNET_PARAMETERS.md`):**

@@ -16,12 +16,12 @@ If this checklist is not green, the answer is "not ready yet".
 
 ## 1. Control plane
 
-- [ ] `TreasuryPolicy.owner` is the intended multisig address.
-- [ ] `deployments/testnet-multisig-owner.json` is `status: "verified"` and matches the deployment manifest owner.
+- [x] `TreasuryPolicy.owner` is the intended multisig address.
+- [x] `deployments/testnet-multisig-owner.json` is `status: "verified"` and matches the deployment manifest owner.
 - [ ] `TreasuryPolicy.pauser` is a hot key that only holds pause power.
-- [ ] `./scripts/verify_deployment.sh testnet` passes cleanly.
+- [x] `./scripts/verify_deployment.sh testnet` passes cleanly.
 - [ ] Pause and unpause were rehearsed from the pauser key.
-- [ ] At least one owner-only admin operation was rehearsed from the multisig.
+- [x] At least one owner-only admin operation was rehearsed from the multisig.
 
 See [MULTISIG_SETUP.md](./MULTISIG_SETUP.md) for the exact rehearsal flow.
 
@@ -46,8 +46,8 @@ Restore drills are documented in [VPS_RUNBOOK.md](../VPS_RUNBOOK.md).
 
 ## 3. Hosted service health
 
-- [ ] Public site loads at `https://averray.com/`.
-- [ ] Discovery manifest loads at `https://averray.com/.well-known/agent-tools.json`.
+- [x] Public site loads at `https://averray.com/`.
+- [x] Discovery manifest loads at `https://averray.com/.well-known/agent-tools.json`.
 - [x] Discovery manifest publish workflow reports `published` or
   `already_current` for the deployed `DiscoveryRegistry` hash. Required
   production secrets: `DISCOVERY_REGISTRY_ADDRESS`,
@@ -56,10 +56,10 @@ Restore drills are documented in [VPS_RUNBOOK.md](../VPS_RUNBOOK.md).
   workflow run `25546750360`, tx
   `0xe1f242d4b1aece3e18811367bd5d381f4cdc4133d0537597a81b7ece7a371b33`,
   registry version `1`.
-- [ ] Operator app loads at `https://app.averray.com/`.
-- [ ] API health is green at `https://api.averray.com/health`.
-- [ ] Indexer readiness is green at `https://index.averray.com/ready`.
-- [ ] Indexer freshness is within the accepted lag budget.
+- [x] Operator app protected shell responds at `https://app.averray.com/`.
+- [x] API health is green at `https://api.averray.com/health`.
+- [x] Indexer readiness is green at `https://index.averray.com/ready`.
+- [x] Indexer freshness is within the accepted lag budget.
 - [ ] When an admin JWT is available, `/admin/status` reports the async XCM
   watcher lane cleanly.
 
