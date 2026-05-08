@@ -52,6 +52,22 @@ Do not add a tool here just because it exists internally. If it moves
 funds, posts jobs, triggers verification, or mutates account state,
 document it separately and make an explicit distribution decision first.
 
+After production deploy, `.github/workflows/publish-discovery-manifest.yml`
+hashes the served `/.well-known/agent-tools.json` with canonical JSON key
+ordering and publishes that hash to `DiscoveryRegistry` when these production
+secrets are configured: `DISCOVERY_REGISTRY_ADDRESS`,
+`DISCOVERY_PUBLISHER_PRIVATE_KEY`, and either `DISCOVERY_PUBLISH_RPC_URL`,
+`POLKADOT_RPC_URL`, or `RPC_URL`. Missing secrets produce a no-op skip so
+deployment is not blocked before the registry is deployed.
+
+To rehearse locally without a transaction:
+
+```bash
+npm run publish:discovery-manifest -- \
+  --manifest-path discovery/.well-known/agent-tools.json \
+  --dry-run
+```
+
 ### 2. MCP registries
 
 Three registries matter as of April 2026:

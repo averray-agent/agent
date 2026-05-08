@@ -945,6 +945,12 @@ Stripe Link's launch and Stripe Sessions 2026 announcements positioned agents as
 
 For traceability.
 
+### v2.6 (DiscoveryRegistry publish automation)
+
+1. **Canonical manifest publisher added:** `scripts/ops/publish-discovery-manifest.mjs` loads the served or local discovery manifest, canonicalizes JSON with sorted keys, computes the keccak256 hash, checks `DiscoveryRegistry.currentManifestHash()`, and only calls `publish(bytes32)` when the chain hash is stale.
+2. **Production workflow added:** `.github/workflows/publish-discovery-manifest.yml` runs after successful production deploys and can also be dispatched manually. It is safe before registry rollout: missing registry/RPC/publisher secrets produce an explicit skip, not a failed deploy.
+3. **Launch checklist remains deployment-gated:** the workflow exists, but `DiscoveryRegistry deployed, CI publishing on directory updates` should only be marked complete after the registry address and publisher key are configured in production and a real publish or already-current check is observed.
+
 ### v2.5 (bootstrap self-report scheduler)
 
 1. **Weekly bootstrap self-report email path added:** backend now has a disabled-by-default scheduler that generates the existing funded-jobs weekly report and sends it through a Resend-compatible HTTP email provider.

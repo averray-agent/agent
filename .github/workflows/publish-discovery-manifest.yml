@@ -1,0 +1,49 @@
+name: Publish Discovery Manifest
+
+on:
+  workflow_run:
+    workflows: ["Deploy Production"]
+    branches: [main]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      manifest_url:
+        description: Manifest URL to hash and publish.
+        required: false
+        default: https://averray.com/.well-known/agent-tools.json
+        type: string
+
+concurrency:
+  group: discovery-registry-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish discovery hash
+    runs-on: ubuntu-latest
+    environment: production
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    env:
+      DISCOVERY_MANIFEST_URL: ${{ github.event_name == 'workflow_dispatch' && inputs.manifest_url || 'https://averray.com/.well-known/agent-tools.json' }}
+      DISCOVERY_REGISTRY_ADDRESS: ${{ secrets.DISCOVERY_REGISTRY_ADDRESS }}
+      DISCOVERY_PUBLISH_RPC_URL: ${{ secrets.DISCOVERY_PUBLISH_RPC_URL }}
+      POLKADOT_RPC_URL: ${{ secrets.POLKADOT_RPC_URL }}
+      RPC_URL: ${{ secrets.RPC_URL }}
+      DISCOVERY_PUBLISHER_PRIVATE_KEY: ${{ secrets.DISCOVERY_PUBLISHER_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Publish manifest hash
+        run: |
+          node scripts/ops/publish-discovery-manifest.mjs \
+            --manifest-url "$DISCOVERY_MANIFEST_URL" \
+            --skip-missing-config

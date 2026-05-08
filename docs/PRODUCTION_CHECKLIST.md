@@ -47,6 +47,11 @@ Restore drills are documented in [VPS_RUNBOOK.md](../VPS_RUNBOOK.md).
 
 - [ ] Public site loads at `https://averray.com/`.
 - [ ] Discovery manifest loads at `https://averray.com/.well-known/agent-tools.json`.
+- [ ] Discovery manifest publish workflow reports `published` or
+  `already_current` for the deployed `DiscoveryRegistry` hash. Required
+  production secrets: `DISCOVERY_REGISTRY_ADDRESS`,
+  `DISCOVERY_PUBLISHER_PRIVATE_KEY`, and `DISCOVERY_PUBLISH_RPC_URL`
+  (or `POLKADOT_RPC_URL` / `RPC_URL`).
 - [ ] Operator app loads at `https://app.averray.com/`.
 - [ ] API health is green at `https://api.averray.com/health`.
 - [ ] Indexer readiness is green at `https://index.averray.com/ready`.

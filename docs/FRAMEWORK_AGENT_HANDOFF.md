@@ -70,7 +70,7 @@ These prevent silent 10^12 scaling bugs at deploy time.
 The following can proceed in parallel (gated only by item B above for anything mainnet-adjacent):
 
 **Contract changes:**
-- `DiscoveryRegistry` — new contract for manifest hash anchoring
+- `DiscoveryRegistry` — contract exists for manifest hash anchoring; publish automation now runs after production deploy when `DISCOVERY_REGISTRY_ADDRESS`, `DISCOVERY_PUBLISHER_PRIVATE_KEY`, and RPC secrets are configured. Treat the launch checklist item as open until the deployed registry is configured and the workflow records a real publish/already-current result.
 - Verifier mapping extension — `authorizedSince`/`authorizedUntil`/`wasAuthorizedAt`
 - `ReputationSBT` non-transferable hardening — `revert(Soulbound)` on transfer/transferFrom (load-bearing per spec §10 wallet-linkage subsection — non-negotiable)
 - Hash fields on session events — `JobCreated(..., specHash)`, `Submitted(..., payloadHash)`, `Verified(..., reasoningHash)`
