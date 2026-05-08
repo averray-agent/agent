@@ -2,6 +2,7 @@
 
 import { pathToFileURL } from "node:url";
 import { schemaRefToJobSchemaPath } from "../core/job-schema-registry.js";
+import { DEFAULT_ESCROW_ASSET_SYMBOL } from "../core/assets.js";
 
 export const DEFAULT_LANGUAGE = "en";
 export const DEFAULT_BASE_URL = "http://localhost:8787";
@@ -205,7 +206,7 @@ export function toPlatformJob(article, score = scoreArticle(article)) {
     requiredRole: "worker",
     category: "wikipedia",
     tier: "starter",
-    rewardAsset: "DOT",
+    rewardAsset: DEFAULT_ESCROW_ASSET_SYMBOL,
     rewardAmount: task.rewardAmount,
     verifierMode: "benchmark",
     verifierTerms: task.verifierTerms,

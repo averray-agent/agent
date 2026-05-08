@@ -1,7 +1,10 @@
+import { DEFAULT_ESCROW_ASSET_SYMBOL, normalizeAssetSymbol } from "./assets.js";
+
 export const DEFAULT_ONBOARDING_WAIVER_CLAIM_COUNT = 3;
 export const DEFAULT_CLAIM_FEE_BPS = 200;
 export const DEFAULT_CLAIM_FEE_VERIFIER_BPS = 7000;
 export const DEFAULT_MIN_CLAIM_FEE_BY_ASSET = {
+  USDC: 0.05,
   DOT: 0.05
 };
 
@@ -11,7 +14,7 @@ export function countClaimedSessions(sessions = []) {
 
 export function computeClaimEconomics({
   rewardAmount,
-  rewardAsset = "DOT",
+  rewardAsset = DEFAULT_ESCROW_ASSET_SYMBOL,
   priorClaimCount = 0,
   claimStakeBps = 500,
   claimFeeBps = DEFAULT_CLAIM_FEE_BPS,
@@ -20,6 +23,7 @@ export function computeClaimEconomics({
   minClaimFeeByAsset = DEFAULT_MIN_CLAIM_FEE_BY_ASSET
 } = {}) {
   const reward = finiteNumber(rewardAmount, 0);
+  const asset = normalizeAssetSymbol(rewardAsset);
   const claimNumber = Math.max(0, Math.floor(finiteNumber(priorClaimCount, 0))) + 1;
   const waived = claimNumber <= Math.max(0, Math.floor(finiteNumber(onboardingWaiverClaimCount, 0)));
 
@@ -40,7 +44,7 @@ export function computeClaimEconomics({
   const feeBps = Math.max(0, finiteNumber(claimFeeBps, 0));
   const claimStake = Math.max((reward * stakeBps) / 10_000, 0);
   const percentageFee = Math.max((reward * feeBps) / 10_000, 0);
-  const minimumFee = Math.max(finiteNumber(minClaimFeeByAsset?.[rewardAsset], 0), 0);
+  const minimumFee = Math.max(finiteNumber(minClaimFeeByAsset?.[asset], 0), 0);
   const claimFee = Math.max(percentageFee, minimumFee);
 
   return {

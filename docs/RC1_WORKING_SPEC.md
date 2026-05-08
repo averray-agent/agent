@@ -67,16 +67,16 @@ Working agent pays nothing net. Bad actors fund both reputation penalties and ve
 
 ### Onboarding flow (durable, not transitional)
 
-A new agent never needs upfront DOT to start working:
+A new agent never needs upfront USDC to start working:
 
 1. **SIWE sign-in** → worker wallet exists
-2. **First 3 jobs claimed without stake or fee.** Both waived. Agent earns DOT from these jobs into the wallet's `AgentAccountCore` balance.
+2. **First 3 jobs claimed without stake or fee.** Both waived. Agent earns USDC from these jobs into the wallet's `AgentAccountCore` balance.
 3. **Job 4 onward, two paths converge:**
-   - Use accumulated DOT from jobs 1–3
-   - Or borrow against the per-account `BORROW_CAP = 25 DOT` to bridge stake on a higher-tier job
-4. **On settlement,** payout repays any outstanding borrow first; surplus settles to wallet balance and (optionally) into the vDOT strategy
+   - Use accumulated USDC from jobs 1–3
+   - Or borrow against the per-account `BORROW_CAP = 25 USDC` to bridge stake on a higher-tier job
+4. **On settlement,** payout repays any outstanding borrow first; surplus settles to wallet balance and can later opt into DOT/vDOT strategy paths after v1 settlement is stable.
 
-Borrow-to-stake is the durable model, not a v2 item. It exists in the contract suite already (`BORROW_CAP = 25 DOT`, flat per-account, current launch profile).
+Borrow-to-stake is the durable model, not a v2 item. It exists in the contract suite already (`BORROW_CAP = 25 USDC`, flat per-account, current launch profile).
 
 ### Wallet as earning account: yield strategy portfolio
 
@@ -101,7 +101,7 @@ The platform treats yield strategies as a **portfolio**, not a fixed choice — 
 The marketing line *"Your worker wallet earns between jobs"* doesn't require maximum yield to be true. ~5–6% from vDOT alone meaningfully beats CEX yield (0.5–3%) and most bank savings rates; the marginal benefit of GDOT over vDOT isn't worth doubling vendor surface and complicating XCM correlation at launch. Ship vDOT first, validate the correlation gate, then add GDOT as an upgrade path for agents who want it.
 
 **Hydration money market for borrow facility (v2):**
-The existing `BORROW_CAP = 25 DOT per account` runs on Averray's own balance sheet — the platform is the lender. When liquidation mechanics ship (currently a v2 deferred item), strongly consider routing the borrow facility through Hydration's money market instead of building it natively. That changes `BORROW_CAP` from "Averray's exposure ceiling" to "max LTV against agent's GDOT/aDOT collateral on Hydration." Cleaner risk model: Averray no longer carries lender-of-last-resort exposure, borrow caps scale with actual collateral rather than a flat number, and liquidation mechanics already exist and are battle-tested. Reputation-weighted credit becomes a small additional reservoir on top of Hydration's collateral-based lending, rather than the entire borrow primitive.
+The existing `BORROW_CAP = 25 USDC per account` runs on Averray's own balance sheet — the platform is the lender. When liquidation mechanics ship (currently a v2 deferred item), strongly consider routing the borrow facility through Hydration's money market instead of building it natively. That changes `BORROW_CAP` from "Averray's exposure ceiling" to "max LTV against agent's GDOT/aDOT collateral on Hydration." Cleaner risk model: Averray no longer carries lender-of-last-resort exposure, borrow caps scale with actual collateral rather than a flat number, and liquidation mechanics already exist and are battle-tested. Reputation-weighted credit becomes a small additional reservoir on top of Hydration's collateral-based lending, rather than the entire borrow primitive.
 
 ### Sustainability principles
 
@@ -508,7 +508,7 @@ Tracked, not in v1.0.0-rc1:
 - **Subjective job types** (translations, summaries, reports). Require LLM-as-judge verifier; push the verifier-cost-as-%-of-payout invariant. Re-price before introducing.
 - **Backend SCALE assembler hardening.** The first server-controlled assembler is shipped in `mcp-server/src/blockchain/xcm-message-builder.js`: HTTP rejects caller-supplied raw `destination`/`message`/`nonce`, backend assigns nonce, mirrors `previewRequestId(context)`, assembles XCM v5 bytes from strategy intent, appends `SetTopic(requestId)` as the last instruction, and submits assembled bytes to `XcmWrapper`. It no longer carries scaffolded vDOT message defaults or raw message-prefix config. Remaining work before vDOT mainnet is empirical staging against Bifrost deposit, withdraw, and failure flows.
 - **Native XCM observer correlation gate.** Depends on the assembler. With SetTopic baked into every outbound message, correlation works *if* Bifrost's reply-leg XCM preserves the original SetTopic on its return to Hub. This is the empirical question the Chopsticks experiment validates. Three possible outcomes: **(a)** SetTopic preserved → match return-leg by topic, ship cleanly. **(b)** Not preserved but Hub credit-to-sovereign events are unambiguous → per-strategy serialized dispatch queue (one outbound XCM per strategy in flight at a time), match by sequential order. **(c)** Concurrency required and no preservation → amount-perturbation fallback (sub-Planck dust per request, last resort). v1.x prerequisite for production-volume async strategies.
-- **Liquidation mechanics for borrow facility.** Current `BORROW_CAP = 25 DOT` flat per account; no liquidation. Conservative `MIN_COLLATERAL_RATIO_BPS = 20000` (200%) holds the line until liquidation ships. v2 work.
+- **Liquidation mechanics for borrow facility.** Current `BORROW_CAP = 25 USDC` flat per account; no liquidation. Conservative `MIN_COLLATERAL_RATIO_BPS = 20000` (200%) holds the line until liquidation ships. v2 work.
 - **Reputation-weighted borrow caps.** Today flat. Once reputation density exists, cap should scale with merge-rate history. v2.
 - **Multisig-owns-EVM-contract composition validation.** *Empirical-only — gates `MULTISIG_SETUP.md` from being safely actionable.* The composition `pallet_multisig` SS58 address → `pallet_revive.map_account()` → H160 owner of `TreasuryPolicy` rests on three documented primitives, but the *composition itself* is not documented end-to-end on `docs.polkadot.com`. Running `MULTISIG_SETUP.md §5` against Polkadot Hub TestNet *is* the validation experiment. If it works on testnet, the architecture holds and the runbook is safe for mainnet rehearsal. If it doesn't, the multisig story needs a different shape (e.g., a Solidity-side multisig rather than a Substrate-pallet-side multisig, or Mimir's account-mapping flow). Resolve before tagging `v1.0.0-rc1` for any mainnet-adjacent purpose.
 - **Phase 1 arbitration (LLM-as-judge calibration).** Tooling that pre-analyzes disputes for human arbitrator review. Override rate is the metric. Trigger: ~50 disputes resolved.
@@ -523,7 +523,7 @@ Tracked, not in v1.0.0-rc1:
 - **Internal-jobs eligibility ladder.** Separate from arbitration. Lower bar (~30 merges + 6 months). Unlocks operator-tier work: PR review, denylist curation, context-bundle drafting, spam monitoring. Earned independently from arbitration.
 - **Operator dashboard wallet-connector library.** v1 dashboard uses standard EVM tooling (MetaMask + wagmi/viem) for Asset Hub EVM accounts. For Polkadot-native wallets specifically, `polkadot.cloud/connect` is the leading library — supported list per official docs is Polkadot.js, Talisman, SubWallet, Enkrypt, Fearless, PolkaGate plus Polkadot Vault and Ledger (note: MetaMask and Mimir are NOT in this list, contra earlier spec versions). Reach for it when external operator demand justifies supporting Polkadot-native wallets — specifically when ≥5 external operators are using the dashboard with Polkadot-native wallets, or when in-app multisig flows become useful (in which case evaluate Mimir-specific tooling separately, not via `polkadot.cloud/connect`). Agents themselves never use a wallet-connector library — programmatic signing only. Tooling choice, not architectural.
 - **Hydration GDOT strategy adapter (v2).** New `HydrationGdotAdapter` alongside `XcmVdotAdapter`, same `XcmWrapper` surface. Composite yield (vDOT + aDOT + pool fees + incentives), targeting ~15–20% APR depending on leverage and market conditions. Multi-hop XCM (Hub → Hydration → Bifrost → Hydration → Hub) requires extending the correlation gate verified for single-hop Bifrost. Opt-in only, never auto-allocated. Ship after the v1 vDOT strategy is empirically stable.
-- **Hydration money market borrow facility (v2).** Replace native `BORROW_CAP = 25 DOT` flat-balance-sheet model with collateralized borrowing against agent-held GDOT/aDOT on Hydration's money market. Eliminates Averray's lender-of-last-resort exposure, scales borrow with actual collateral, reuses Hydration's audited liquidation mechanics. Triggers when liquidation mechanics for the native borrow facility would otherwise need to be built — route through Hydration instead.
+- **Hydration money market borrow facility (v2).** Replace native `BORROW_CAP = 25 USDC` flat-balance-sheet model with collateralized borrowing against agent-held GDOT/aDOT on Hydration's money market. Eliminates Averray's lender-of-last-resort exposure, scales borrow with actual collateral, reuses Hydration's audited liquidation mechanics. Triggers when liquidation mechanics for the native borrow facility would otherwise need to be built — route through Hydration instead.
 
 ---
 
@@ -582,8 +582,8 @@ Before public v1.0.0-rc1 launch:
 - [ ] Recovery playbook dry-run for each "lost key" scenario
 
 **Mainnet parameters (per `MAINNET_PARAMETERS.md`):**
-- [ ] `DAILY_OUTFLOW_CAP = 250 DOT`
-- [ ] `BORROW_CAP = 25 DOT`
+- [ ] `DAILY_OUTFLOW_CAP = 250 USDC`
+- [ ] `BORROW_CAP = 25 USDC`
 - [ ] `MIN_COLLATERAL_RATIO_BPS = 20000` (200%)
 - [ ] `DEFAULT_CLAIM_STAKE_BPS = 1000` (10%)
 - [ ] `REJECTION_SKILL_PENALTY = 10`, `REJECTION_RELIABILITY_PENALTY = 25`
@@ -790,8 +790,8 @@ Single 2-of-3 transaction; gas negligible. Designed to be tunable post-launch.
 
 | Parameter | Current value |
 |---|---|
-| `DAILY_OUTFLOW_CAP` | 250 DOT |
-| `BORROW_CAP` | 25 DOT per account |
+| `DAILY_OUTFLOW_CAP` | 250 USDC |
+| `BORROW_CAP` | 25 USDC per account |
 | `MIN_COLLATERAL_RATIO_BPS` | 20000 (200%) |
 | `DEFAULT_CLAIM_STAKE_BPS` | 1000 (10%) |
 | `REJECTION_SKILL_PENALTY` / `REJECTION_RELIABILITY_PENALTY` | 10 / 25 |

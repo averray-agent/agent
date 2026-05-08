@@ -596,7 +596,7 @@ Before any v1.0.0-rc1 deploy (testnet or mainnet), the following must be address
 - [x] `MULTISIG_SETUP.md §5` `TOKEN_ADDRESS` field set to USDC precompile (`0x0000053900000000000000000000000001200000`) — same address on Polkadot Hub mainnet and Hub TestNet
 - [x] `SUPPORTED_ASSETS_JSON` env var set to: `[{"symbol":"USDC","assetClass":"trust_backed","assetId":1337,"address":"0x0000053900000000000000000000000001200000","decimals":6}]`
 - [x] Existing `BORROW_CAP` constant re-denominated from "25 DOT" to USDC equivalent (`25 USDC`, raw `25000000`)
-- [ ] All decimals-aware helpers in repo audited for the 18→6 change; any hardcoded `1e18` constants reviewed
+- [x] All decimals-aware helpers in repo audited for the 18→6 change; launch-facing job sourcing, SDK defaults, profile/badge metadata, and recurring-job fallbacks now default to USDC/6. Remaining DOT/18 constants are intentionally local mock/test or DOT/vDOT strategy-path specific.
 - [x] Test ERC20 (TestDOT-style) deployments removed from v1.0.0-rc1 scope — USDC precompile is real on both networks, no mock needed
 
 ---
@@ -944,6 +944,12 @@ Stripe Link's launch and Stripe Sessions 2026 announcements positioned agents as
 ## 15. Reconciliation log
 
 For traceability.
+
+### v2.4 (runtime USDC defaults and decimals audit)
+
+1. **Runtime job-sourcing defaults** now emit `rewardAsset: "USDC"` instead of `"DOT"` for GitHub issue, Wikipedia maintenance, OSV advisory, open-data, OpenAPI, standards-spec, ready-to-post, and bootstrap seed jobs.
+2. **Shared asset defaults** added for the backend and SDK: USDC is the default escrow asset, with symbol/decimal helpers used by claim economics, job normalization, badge/profile metadata, recurring-job fallbacks, and client account mutations.
+3. **Decimals audit item closed:** launch-facing 18-decimal assumptions were removed from escrow/reward paths. Remaining DOT/18 references are deliberate: local mock ERC20 demos/tests, explicit DOT/vDOT strategy accounting, and historical verification notes.
 
 ### v2.3 (USDC pre-deploy implementation sync)
 

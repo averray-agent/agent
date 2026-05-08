@@ -58,7 +58,8 @@ Before any v1.0.0-rc1 deploy, these must be addressed (see spec §8 Pre-deploy i
 - Done: `MULTISIG_SETUP.md §5` `TOKEN_ADDRESS` field set to USDC precompile
 - Done: `SUPPORTED_ASSETS_JSON` env var set with USDC entry
 - Done: `BORROW_CAP` re-denominated from "25 DOT" to `25 USDC`
-- Still open: all decimals-aware runtime helpers and job-sourcing defaults reviewed for the 18→6 change
+- Done: launch-facing runtime helpers and job-sourcing defaults reviewed for the 18→6 change; GitHub/Wikipedia/OSV/open-data/OpenAPI/standards/bootstrap jobs, SDK account defaults, badge/profile metadata, recurring fallbacks, and ready-to-post payloads now default to USDC/6
+- Still intentional: local mock ERC20 demos/tests and DOT/vDOT strategy-path docs/code keep DOT-specific 18-decimal assumptions
 
 These prevent silent 10^12 scaling bugs at deploy time.
 

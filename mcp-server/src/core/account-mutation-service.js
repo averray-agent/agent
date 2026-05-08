@@ -4,6 +4,7 @@ import {
   InsufficientLiquidityError,
   ValidationError
 } from "./errors.js";
+import { DEFAULT_ESCROW_ASSET_SYMBOL } from "./assets.js";
 
 export class AccountMutationService {
   constructor(accounts, blockchainGateway = undefined, getAccountSummary) {
@@ -70,7 +71,7 @@ export class AccountMutationService {
     });
   }
 
-  getStrategyAccounting(account, strategyId, asset = "DOT") {
+  getStrategyAccounting(account, strategyId, asset = DEFAULT_ESCROW_ASSET_SYMBOL) {
     this.ensureTreasuryMetadata(account);
     account.strategyAccounting[strategyId] = account.strategyAccounting[strategyId] ?? {
       asset,
@@ -86,7 +87,7 @@ export class AccountMutationService {
     return account.strategyAccounting[strategyId];
   }
 
-  getStrategyPending(account, strategyId, asset = "DOT") {
+  getStrategyPending(account, strategyId, asset = DEFAULT_ESCROW_ASSET_SYMBOL) {
     this.ensureTreasuryMetadata(account);
     account.strategyPending[strategyId] = account.strategyPending[strategyId] ?? {
       asset,

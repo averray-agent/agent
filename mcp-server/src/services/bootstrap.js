@@ -52,6 +52,7 @@ import {
 import { normaliseStrategyAssetConfig } from "./strategy-asset-config.js";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { DEFAULT_ESCROW_ASSET_SYMBOL } from "../core/assets.js";
 
 const moduleDir = dirname(fileURLToPath(import.meta.url));
 loadLocalEnv(process.cwd(), resolve(moduleDir, "../../"));
@@ -61,7 +62,7 @@ const jobs = [
     id: "starter-coding-001",
     category: "coding",
     tier: "starter",
-    rewardAsset: "DOT",
+    rewardAsset: DEFAULT_ESCROW_ASSET_SYMBOL,
     rewardAmount: 5,
     verifierMode: "benchmark",
     verifierConfig: {
@@ -79,7 +80,7 @@ const jobs = [
     id: "governance-pro-001",
     category: "governance",
     tier: "pro",
-    rewardAsset: "DOT",
+    rewardAsset: DEFAULT_ESCROW_ASSET_SYMBOL,
     rewardAmount: 25,
     verifierMode: "deterministic",
     verifierConfig: {
@@ -111,12 +112,12 @@ const profiles = new Map([
 const accounts = new Map([
   ["0xagent", {
     wallet: "0xagent",
-    liquid: { DOT: 25 },
-    reserved: { DOT: 0 },
-    strategyAllocated: { DOT: 5 },
-    collateralLocked: { DOT: 10 },
-    jobStakeLocked: { DOT: 0 },
-    debtOutstanding: { DOT: 0 }
+    liquid: { USDC: 25 },
+    reserved: { USDC: 0 },
+    strategyAllocated: {},
+    collateralLocked: { USDC: 10 },
+    jobStakeLocked: { USDC: 0 },
+    debtOutstanding: { USDC: 0 }
   }]
 ]);
 

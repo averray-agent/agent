@@ -6,6 +6,8 @@
  * one typed-ish place to call auth, jobs, sessions, verifier, and admin
  * routes without repeating raw fetch glue.
  */
+export const DEFAULT_ESCROW_ASSET_SYMBOL = "USDC";
+
 export class AgentPlatformClient {
   constructor({ baseUrl, token = undefined, fetchImpl = fetch } = {}) {
     if (!baseUrl) {
@@ -125,7 +127,7 @@ export class AgentPlatformClient {
     return this.request("/account");
   }
 
-  async getBorrowCapacity(asset = "DOT") {
+  async getBorrowCapacity(asset = DEFAULT_ESCROW_ASSET_SYMBOL) {
     return this.request(`/account/borrow-capacity?asset=${encodeURIComponent(asset)}`);
   }
 
@@ -133,42 +135,42 @@ export class AgentPlatformClient {
     return this.request("/account/strategies");
   }
 
-  async fundAccount({ asset = "DOT", amount } = {}) {
+  async fundAccount({ asset = DEFAULT_ESCROW_ASSET_SYMBOL, amount } = {}) {
     return this.request("/account/fund", {
       method: "POST",
       body: { asset, amount }
     });
   }
 
-  async allocateIdleFunds({ asset = "DOT", amount, strategyId = "default-low-risk", ...options } = {}) {
+  async allocateIdleFunds({ asset = DEFAULT_ESCROW_ASSET_SYMBOL, amount, strategyId = "default-low-risk", ...options } = {}) {
     return this.request("/account/allocate", {
       method: "POST",
       body: compact({ asset, amount, strategyId, ...options })
     });
   }
 
-  async deallocateIdleFunds({ asset = "DOT", amount, strategyId = "default-low-risk", ...options } = {}) {
+  async deallocateIdleFunds({ asset = DEFAULT_ESCROW_ASSET_SYMBOL, amount, strategyId = "default-low-risk", ...options } = {}) {
     return this.request("/account/deallocate", {
       method: "POST",
       body: compact({ asset, amount, strategyId, ...options })
     });
   }
 
-  async sendToAgent({ recipient, asset = "DOT", amount } = {}) {
+  async sendToAgent({ recipient, asset = DEFAULT_ESCROW_ASSET_SYMBOL, amount } = {}) {
     return this.request("/payments/send", {
       method: "POST",
       body: { recipient, asset, amount }
     });
   }
 
-  async borrowFunds({ asset = "DOT", amount, idempotencyKey = undefined } = {}) {
+  async borrowFunds({ asset = DEFAULT_ESCROW_ASSET_SYMBOL, amount, idempotencyKey = undefined } = {}) {
     return this.request("/account/borrow", {
       method: "POST",
       body: compact({ asset, amount, idempotencyKey })
     });
   }
 
-  async repayFunds({ asset = "DOT", amount, idempotencyKey = undefined } = {}) {
+  async repayFunds({ asset = DEFAULT_ESCROW_ASSET_SYMBOL, amount, idempotencyKey = undefined } = {}) {
     return this.request("/account/repay", {
       method: "POST",
       body: compact({ asset, amount, idempotencyKey })

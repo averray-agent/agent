@@ -7,7 +7,7 @@ import { ValidationError } from "./errors.js";
 function makeService() {
   const jobs = [];
   const profiles = new Map();
-  const account = async () => ({ liquid: { DOT: 100 } });
+  const account = async () => ({ liquid: { USDC: 100 } });
   const reputation = async () => ({ skill: 0, reliability: 0, economic: 0, tier: "starter" });
   const bps = async () => 500;
   return new JobCatalogService(jobs, profiles, account, reputation, bps);
@@ -36,9 +36,9 @@ test("createJob preserves finite recurring reserve policy", () => {
   const service = makeService();
   const record = service.createJob({
     ...TEMPLATE,
-    recurringPolicy: { reserveAmount: 15, reserveAsset: "DOT" }
+    recurringPolicy: { reserveAmount: 15, reserveAsset: "USDC" }
   });
-  assert.deepEqual(record.recurringPolicy, { reserveAmount: 15, reserveAsset: "DOT" });
+  assert.deepEqual(record.recurringPolicy, { reserveAmount: 15, reserveAsset: "USDC" });
 });
 
 test("createJob rejects recurring reserve that cannot cover one run", () => {
@@ -116,7 +116,7 @@ test("fireRecurringJob carries escrow-native recurring funding onto derivatives"
   template.recurringPolicy.funding = {
     source: "recurring_template_reserve",
     wallet: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    asset: "DOT",
+    asset: "USDC",
     amount: 10,
     reservedAt: "2026-05-04T08:00:00.000Z",
     templateKey: `0x${"1".repeat(64)}`
@@ -130,7 +130,7 @@ test("fireRecurringJob carries escrow-native recurring funding onto derivatives"
     source: "recurring_template_reserve",
     templateId: "weekly-digest",
     wallet: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    asset: "DOT",
+    asset: "USDC",
     amount: 5,
     reservedAt: "2026-05-04T08:00:00.000Z",
     templateKey: `0x${"1".repeat(64)}`

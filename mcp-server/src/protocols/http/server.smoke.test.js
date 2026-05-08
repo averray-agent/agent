@@ -315,11 +315,11 @@ test("http smoke: /jobs/sub lets active workers create funded child jobs", { ski
         verifierTerms: ["complete"],
         verifierMinimumMatches: 1,
         outputSchemaRef: "schema://jobs/subjob-parent-smoke-output",
-        delegationPolicy: { budgetAmount: 3, budgetAsset: "DOT", maxSubJobs: 2, maxDepth: 1 }
+        delegationPolicy: { budgetAmount: 3, budgetAsset: "USDC", maxSubJobs: 2, maxDepth: 1 }
       })
     });
 
-    await fetch(`${base}/account/fund?asset=DOT&amount=10`, {
+    await fetch(`${base}/account/fund?asset=USDC&amount=10`, {
       method: "POST",
       headers: { authorization: `Bearer ${workerToken}` }
     });
@@ -368,7 +368,7 @@ test("http smoke: /jobs/sub lets active workers create funded child jobs", { ski
       headers: { authorization: `Bearer ${workerToken}` }
     });
     const balances = await account.json();
-    assert.equal(balances.reserved.DOT, 2);
+    assert.equal(balances.reserved.USDC, 2);
   });
 });
 
@@ -696,8 +696,8 @@ test("http smoke: /agents/:wallet aggregates approved sessions into badges", { s
     assert.equal(profile.stats.approvedCount, 1);
     assert.equal(profile.stats.rejectedCount, 0);
     assert.equal(profile.stats.completionRate, 1);
-    // 4 DOT at 18 decimals = 4 * 10^18 base units
-    assert.equal(profile.stats.totalEarned.amount, "4000000000000000000");
+    // Job rewards default to USDC: 4 USDC at 6 decimals = 4 * 10^6 base units.
+    assert.equal(profile.stats.totalEarned.amount, "4000000");
     assert.equal(profile.badges[0].sessionId, sessionId);
     assert.equal(profile.badges[0].category, "coding");
     assert.equal(profile.badges[0].level, 1);

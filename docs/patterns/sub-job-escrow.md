@@ -120,7 +120,7 @@ Parent jobs may include:
 {
   "delegationPolicy": {
     "budgetAmount": 3,
-    "budgetAsset": "DOT",
+    "budgetAsset": "USDC",
     "maxSubJobs": 2,
     "maxDepth": 1
   }

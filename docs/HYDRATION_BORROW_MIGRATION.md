@@ -12,7 +12,7 @@ and liquidation assumptions are proven.
 Today `AgentAccountCore.borrow(asset, amount)` uses Averray's balance sheet as
 the lender. The launch parameters intentionally cap that risk:
 
-- `BORROW_CAP = 25 DOT` per account
+- `BORROW_CAP = 25 USDC` per account
 - `MIN_COLLATERAL_RATIO_BPS = 20000` (200%)
 - no liquidation entrypoint yet
 
@@ -42,8 +42,8 @@ Checked 2026-04-29.
 ## Target model
 
 ```text
-agent earns DOT
-  -> deposits idle DOT into vDOT or opt-in GDOT
+agent earns USDC
+  -> optionally swaps some USDC into DOT/vDOT/GDOT after v1 settlement is stable
   -> marks strategy position as collateral-eligible
   -> borrow request routes through Hydration Borrow
   -> borrowed asset returns to AgentAccountCore liquid balance
@@ -140,7 +140,7 @@ Required disclosure:
 ### Stage 0: current launch profile
 
 - Native Averray borrow only.
-- `BORROW_CAP = 25 DOT`.
+- `BORROW_CAP = 25 USDC`.
 - 200% collateral ratio.
 - No liquidation.
 - Borrow use case: bridge claim stake.

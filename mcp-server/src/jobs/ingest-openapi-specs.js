@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { pathToFileURL } from "node:url";
+import { DEFAULT_ESCROW_ASSET_SYMBOL } from "../core/assets.js";
 
 /**
  * Ingest OpenAPI quality audit jobs.
@@ -169,7 +170,7 @@ export function toPlatformJob(target, score = scoreOpenApiTarget(target)) {
     requiredRole: "worker",
     category: "api",
     tier: "starter",
-    rewardAsset: "DOT",
+    rewardAsset: DEFAULT_ESCROW_ASSET_SYMBOL,
     rewardAmount: 3,
     verifierMode: "benchmark",
     verifierTerms: ["spec_url", "checks", "findings", "recommended_actions"],

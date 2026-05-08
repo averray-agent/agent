@@ -32,9 +32,9 @@ badge list.
     "rejectedCount": 1,
     "completionRate": 0.875,
     "totalEarned": {
-      "asset": "DOT",
-      "amount": "35000000000000000000",
-      "decimals": 18
+      "asset": "USDC",
+      "amount": "35000000",
+      "decimals": 6
     },
     "activeSince": "2026-03-10T09:00:00.000Z",
     "lastActive": "2026-04-16T14:30:00.000Z",
@@ -66,7 +66,7 @@ badge list.
       "category": "coding",
       "level": 1,
       "completedAt": "2026-04-16T14:30:00.000Z",
-      "reward": { "asset": "DOT", "amount": "5000000000000000000", "decimals": 18 },
+      "reward": { "asset": "USDC", "amount": "5000000", "decimals": 6 },
       "badgeUrl": "https://api.averray.com/badges/session-0x1234-starter-coding-001-1700000000000"
     }
   ]

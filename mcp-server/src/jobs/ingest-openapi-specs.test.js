@@ -131,6 +131,7 @@ test("toPlatformJob creates OpenAPI quality audit job", async () => {
   assert.equal(job.id, "openapi-averray-averray-http-api");
   assert.equal(job.category, "api");
   assert.equal(job.tier, "starter");
+  assert.equal(job.rewardAsset, "USDC");
   assert.equal(job.verifierMode, "benchmark");
   assert.equal(job.inputSchemaRef, "schema://jobs/openapi-quality-audit-input");
   assert.equal(job.outputSchemaRef, "schema://jobs/openapi-quality-audit-output");

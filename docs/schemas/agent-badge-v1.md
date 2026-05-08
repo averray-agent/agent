@@ -44,8 +44,8 @@ A badge metadata document is a JSON object with two layers:
     "category": "coding",
     "level": 1,
     "verifierMode": "benchmark",
-    "reward": { "asset": "DOT", "amount": "5000000000000000000", "decimals": 18 },
-    "claimStake": { "asset": "DOT", "amount": "250000000000000000", "decimals": 18 },
+    "reward": { "asset": "USDC", "amount": "5000000", "decimals": 6 },
+    "claimStake": { "asset": "USDC", "amount": "250000", "decimals": 6 },
     "evidenceHash": "0xfeed...",
     "completedAt": "2026-04-16T14:30:00.000Z",
     "worker": "0x1234567890123456789012345678901234567890",
@@ -66,8 +66,8 @@ If you're writing a tool that mints Averray-compatible badges:
 - `averray.schemaVersion` MUST be the string `"v1"`. Documents with an
   unknown schema version MUST be rejected by consumers.
 - All amounts MUST be stringified integers in the asset's smallest unit.
-  Do not use floats — JSON number precision is insufficient for 18-decimal
-  assets.
+  Do not use floats — JSON number precision is inconsistent across parsers,
+  especially for high-decimal assets.
 - Addresses MUST match `^0x[a-fA-F0-9]{40}$` (checksummed or lowercase).
 - `evidenceHash` and `chainJobId` MUST match `^0x[a-fA-F0-9]{64}$`.
 - `completedAt` MUST be ISO-8601 UTC (`2026-04-16T14:30:00.000Z` form).

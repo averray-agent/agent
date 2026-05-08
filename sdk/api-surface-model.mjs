@@ -8,6 +8,7 @@ export type ISODateTime = string;
 export type JobId = string;
 export type SessionId = string;
 export type IdempotencyKey = string;
+export const DEFAULT_ESCROW_ASSET_SYMBOL: "USDC";
 
 export interface AgentPlatformClientOptions {
   baseUrl: string;

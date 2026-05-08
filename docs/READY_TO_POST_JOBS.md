@@ -57,7 +57,7 @@ What the helper does:
 Use these definitions as written unless you have a specific reason to change
 them:
 
-- reward asset: `DOT`
+- reward asset: `USDC`
 - sponsored gas: `true`
 - retry limit: `1`
 - one-shot jobs first; add recurring templates later
@@ -103,7 +103,7 @@ Ready-to-post payload:
   "id": "pr-review-findings-001",
   "category": "review",
   "tier": "starter",
-  "rewardAsset": "DOT",
+  "rewardAsset": "USDC",
   "rewardAmount": 6,
   "verifierMode": "benchmark",
   "verifierTerms": [
@@ -156,7 +156,7 @@ Ready-to-post payload:
   "id": "release-readiness-check-001",
   "category": "release",
   "tier": "starter",
-  "rewardAsset": "DOT",
+  "rewardAsset": "USDC",
   "rewardAmount": 7,
   "verifierMode": "deterministic",
   "verifierTerms": [
@@ -211,7 +211,7 @@ Ready-to-post payload:
   "id": "issue-defect-triage-001",
   "category": "triage",
   "tier": "starter",
-  "rewardAsset": "DOT",
+  "rewardAsset": "USDC",
   "rewardAmount": 5,
   "verifierMode": "deterministic",
   "verifierTerms": [
@@ -272,7 +272,7 @@ Ready-to-post payload:
   "id": "docs-drift-audit-001",
   "category": "docs",
   "tier": "starter",
-  "rewardAsset": "DOT",
+  "rewardAsset": "USDC",
   "rewardAmount": 5,
   "verifierMode": "benchmark",
   "verifierTerms": [

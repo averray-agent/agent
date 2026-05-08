@@ -65,7 +65,7 @@ test("authenticated helpers send bearer token and compact JSON bodies", async ()
   assert.equal(calls[0].options.headers.get("authorization"), "Bearer test-token");
   assert.equal(calls[0].options.headers.get("content-type"), "application/json");
   assert.deepEqual(JSON.parse(calls[0].options.body), {
-    asset: "DOT",
+    asset: "USDC",
     amount: 5,
     strategyId: "polkadot-vdot",
     idempotencyKey: "alloc-1"
@@ -74,18 +74,18 @@ test("authenticated helpers send bearer token and compact JSON bodies", async ()
   assert.equal(calls[1].url, "https://api.example.test/payments/send");
   assert.deepEqual(JSON.parse(calls[1].options.body), {
     recipient: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
-    asset: "DOT",
+    asset: "USDC",
     amount: "1.5"
   });
   assert.equal(calls[2].url, "https://api.example.test/account/borrow");
   assert.deepEqual(JSON.parse(calls[2].options.body), {
-    asset: "DOT",
+    asset: "USDC",
     amount: 2,
     idempotencyKey: "borrow-1"
   });
   assert.equal(calls[3].url, "https://api.example.test/account/repay");
   assert.deepEqual(JSON.parse(calls[3].options.body), {
-    asset: "DOT",
+    asset: "USDC",
     amount: 1
   });
 });
