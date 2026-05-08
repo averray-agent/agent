@@ -945,6 +945,12 @@ Stripe Link's launch and Stripe Sessions 2026 announcements positioned agents as
 
 For traceability.
 
+### v2.5 (bootstrap self-report scheduler)
+
+1. **Weekly bootstrap self-report email path added:** backend now has a disabled-by-default scheduler that generates the existing funded-jobs weekly report and sends it through a Resend-compatible HTTP email provider.
+2. **Operational status exposed:** `/admin/status` includes `bootstrapSelfReport` with enabled/running/provider/recipient/last-run state so the operator can verify whether the weekly report is actually armed.
+3. **Launch checklist remains live-gated:** the code path exists, but the pre-launch checkbox should only be marked complete after production env sets recipients/API key and the first scheduled report is delivered.
+
 ### v2.4 (runtime USDC defaults and decimals audit)
 
 1. **Runtime job-sourcing defaults** now emit `rewardAsset: "USDC"` instead of `"DOT"` for GitHub issue, Wikipedia maintenance, OSV advisory, open-data, OpenAPI, standards-spec, ready-to-post, and bootstrap seed jobs.

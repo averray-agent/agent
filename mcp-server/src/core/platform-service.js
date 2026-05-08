@@ -76,6 +76,7 @@ export class PlatformService {
     this.xcmSettlementWatcher = undefined;
     this.xcmObservationRelay = undefined;
     this.upstreamStatusPoller = undefined;
+    this.bootstrapSelfReportScheduler = undefined;
 
     this.accountMutationService = new AccountMutationService(
       this.accounts,
@@ -195,6 +196,7 @@ export class PlatformService {
       standardsIngestion,
       openApiIngestion,
       upstreamStatus,
+      bootstrapSelfReport,
       jobStaleSweeper,
       recentSessions
     ] = await Promise.all([
@@ -280,6 +282,16 @@ export class PlatformService {
         running: false,
         intervalMs: 0,
         batchSize: 0,
+        lastRun: undefined
+      },
+      this.bootstrapSelfReportScheduler?.getStatus?.() ?? {
+        enabled: false,
+        running: false,
+        intervalMs: 0,
+        sendOnStart: false,
+        recipientCount: 0,
+        providerConfigured: false,
+        nextRunAt: undefined,
         lastRun: undefined
       },
       this.jobStaleSweeper?.getStatus?.() ?? {
@@ -410,6 +422,7 @@ export class PlatformService {
       standardsIngestion: standardsIngestion,
       openApiIngestion: openApiIngestion,
       upstreamStatus,
+      bootstrapSelfReport,
       xcmSettlementWatcher: await this.xcmSettlementWatcher?.getStatus?.() ?? {
         enabled: false,
         running: false,

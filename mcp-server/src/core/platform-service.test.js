@@ -656,6 +656,19 @@ test("getAdminStatus surfaces public source ingestion scheduler status", async (
       };
     }
   };
+  service.bootstrapSelfReportScheduler = {
+    getStatus() {
+      return {
+        enabled: true,
+        running: true,
+        intervalMs: 604800000,
+        recipientCount: 1,
+        providerConfigured: true,
+        nextRunAt: "2026-05-08T00:00:00.000Z",
+        lastRun: { status: "sent", email: { providerId: "email_123" } }
+      };
+    }
+  };
 
   const status = await service.getAdminStatus();
   assert.equal(status.osvIngestion.packageCount, 0);
@@ -692,6 +705,8 @@ test("getAdminStatus surfaces public source ingestion scheduler status", async (
   assert.equal(status.providerOperations.openApi.lastRun.errorCount, 1);
   assert.equal(status.jobStaleSweeper.mode, "live");
   assert.equal(status.jobStaleSweeper.lastRun.updatedCount, 2);
+  assert.equal(status.bootstrapSelfReport.providerConfigured, true);
+  assert.equal(status.bootstrapSelfReport.lastRun.email.providerId, "email_123");
 
   // Public sanitized counterpart preserves health / mode / counts but
   // strips lastRun.skipped[] and lastRun.errors[] (which can carry

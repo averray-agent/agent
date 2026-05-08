@@ -46,6 +46,10 @@ import {
   loadUpstreamStatusPollerConfig
 } from "./upstream-status-poller.js";
 import {
+  BootstrapSelfReportSchedulerService,
+  loadBootstrapSelfReportSchedulerConfig
+} from "./bootstrap-self-report-scheduler.js";
+import {
   JobStaleSweeperService,
   loadJobStaleSweeperConfig
 } from "./job-stale-sweeper.js";
@@ -239,6 +243,12 @@ export async function createPlatformRuntime() {
       logger
     })
   );
+  const bootstrapSelfReportScheduler = initStep("init-bootstrap-self-report-scheduler", logger, () =>
+    new BootstrapSelfReportSchedulerService(upstreamStatusPoller, eventBus, {
+      ...loadBootstrapSelfReportSchedulerConfig(process.env),
+      logger
+    })
+  );
   const jobStaleSweeper = initStep("init-job-stale-sweeper", logger, () =>
     new JobStaleSweeperService(platformService, stateStore, eventBus, {
       ...loadJobStaleSweeperConfig(process.env),
@@ -255,6 +265,7 @@ export async function createPlatformRuntime() {
   platformService.xcmSettlementWatcher = xcmSettlementWatcher;
   platformService.xcmObservationRelay = xcmObservationRelay;
   platformService.upstreamStatusPoller = upstreamStatusPoller;
+  platformService.bootstrapSelfReportScheduler = bootstrapSelfReportScheduler;
   platformService.jobStaleSweeper = jobStaleSweeper;
   recurringScheduler.start();
   githubIssueIngestionScheduler.start();
@@ -266,6 +277,7 @@ export async function createPlatformRuntime() {
   xcmSettlementWatcher.start();
   xcmObservationRelay.start();
   upstreamStatusPoller.start();
+  bootstrapSelfReportScheduler.start();
   jobStaleSweeper.start();
 
   const authMiddleware = createAuthMiddleware({ authConfig, stateStore, logger });

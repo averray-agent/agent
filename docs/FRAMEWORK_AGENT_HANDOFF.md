@@ -81,7 +81,7 @@ The following can proceed in parallel (gated only by item B above for anything m
 **Backend:**
 - SCALE assembler (`mcp-server/src/blockchain/xcm-message-builder/`) — *only needed for v1.x yield strategy, not v1.0.0-rc1 launch*
 - Dispute-flow wiring — `POST /disputes/:id/verdict` and `/release` to actually call `EscrowCore.resolveDispute`
-- Pre-launch instrumentation — `funded_jobs` table, daily upstream-status poller, weekly self-report
+- Pre-launch instrumentation — `funded_jobs` table, daily upstream-status poller, weekly self-report scheduler code exists; production still needs email recipients/provider secrets and first-delivery verification before the launch checklist item is closed.
 
 **v1.x reputation deepening (don't gate v1.0.0-rc1 contract deploy but ship before public launch):**
 - Public agent profile page at `averray.com/agent/<wallet>` (~2 weeks frontend; reads from indexer)
