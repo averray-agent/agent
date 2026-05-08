@@ -7,6 +7,7 @@ import {
   evaluateMaintainerSurfaceForIssue,
   repoFromIssue
 } from "../core/maintainer-surface-policy.js";
+import { DEFAULT_ESCROW_ASSET_SYMBOL } from "../core/assets.js";
 
 /**
  * Ingest agent-suitable GitHub issues into the Agent Platform job catalog.
@@ -183,7 +184,7 @@ export function toPlatformJob(issue, score = scoreIssue(issue), {
     requiredRole: "worker",
     category,
     tier: "starter",
-    rewardAsset: "DOT",
+    rewardAsset: DEFAULT_ESCROW_ASSET_SYMBOL,
     rewardAmount: 1,
     verifierMode: "github_pr",
     verifierMinimumScore: 60,

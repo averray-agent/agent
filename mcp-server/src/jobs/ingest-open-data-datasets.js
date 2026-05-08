@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { pathToFileURL } from "node:url";
+import { DEFAULT_ESCROW_ASSET_SYMBOL } from "../core/assets.js";
 
 /**
  * Ingest public open-data dataset/resource quality-audit jobs.
@@ -310,7 +311,7 @@ export function toPlatformJob(target, score = scoreDatasetTarget(target)) {
     requiredRole: "worker",
     category: "data",
     tier: "starter",
-    rewardAsset: "DOT",
+    rewardAsset: DEFAULT_ESCROW_ASSET_SYMBOL,
     rewardAmount: 2,
     verifierMode: "benchmark",
     verifierTerms: ["dataset_url", "resource_url", "checks", "recommended_actions"],

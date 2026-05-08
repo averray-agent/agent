@@ -18,6 +18,7 @@ import {
 import { computeClaimEconomics, countClaimedSessions } from "./claim-economics.js";
 import { claimStatusFields, isTerminalSession, summarizeJobClaimState } from "./claim-state.js";
 import { capabilityMatrix } from "../auth/capabilities.js";
+import { normalizeAssetSymbol } from "./assets.js";
 
 const TIMELINE_VERSION = "v2";
 
@@ -747,7 +748,7 @@ export class PlatformService {
     }
 
     const rewardAmount = Number(input?.rewardAmount ?? 0);
-    const rewardAsset = String(input?.rewardAsset ?? parentJob.rewardAsset ?? "DOT").trim().toUpperCase();
+    const rewardAsset = normalizeAssetSymbol(input?.rewardAsset ?? parentJob.rewardAsset);
     if (!Number.isFinite(rewardAmount) || rewardAmount <= 0) {
       throw new ValidationError("Sub-job rewardAmount must be greater than zero.");
     }
@@ -849,7 +850,7 @@ export class PlatformService {
       maxDepth: Number.isInteger(raw.maxDepth) ? raw.maxDepth : 1,
       maxSubJobs: Number.isInteger(raw.maxSubJobs) ? raw.maxSubJobs : 5,
       budgetAmount: Number.isFinite(Number(raw.budgetAmount)) ? Number(raw.budgetAmount) : Number(parentJob?.rewardAmount ?? 0),
-      budgetAsset: String(raw.budgetAsset ?? parentJob?.rewardAsset ?? "DOT").trim().toUpperCase()
+      budgetAsset: normalizeAssetSymbol(raw.budgetAsset ?? parentJob?.rewardAsset)
     };
   }
 
@@ -971,7 +972,7 @@ export class PlatformService {
     if (!wallet) {
       throw new ValidationError("Recurring templates with finite reserves require a poster wallet.");
     }
-    const asset = job.recurringPolicy.reserveAsset ?? job.rewardAsset ?? "DOT";
+    const asset = normalizeAssetSymbol(job.recurringPolicy.reserveAsset ?? job.rewardAsset);
     const receipt = await this.accountMutationService.reserveRecurringTemplateFunding(
       wallet,
       asset,
@@ -1261,8 +1262,9 @@ function buildDerivativeJobTimelineEntry(job) {
 }
 
 function sumSubJobRewards(jobs, asset) {
+  const normalizedAsset = normalizeAssetSymbol(asset);
   return jobs
-    .filter((job) => String(job.rewardAsset ?? "DOT").trim().toUpperCase() === asset)
+    .filter((job) => normalizeAssetSymbol(job.rewardAsset) === normalizedAsset)
     .reduce((total, job) => total + Math.max(Number(job.rewardAmount ?? 0), 0), 0);
 }
 

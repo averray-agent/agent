@@ -87,6 +87,7 @@ test("toPlatformJob creates standards freshness audit job", async () => {
   assert.equal(job.id, "standards-w3c-vc-data-model-2-0");
   assert.equal(job.category, "docs");
   assert.equal(job.tier, "starter");
+  assert.equal(job.rewardAsset, "USDC");
   assert.equal(job.verifierMode, "benchmark");
   assert.equal(job.inputSchemaRef, "schema://jobs/docs-input");
   assert.equal(job.outputSchemaRef, "schema://jobs/docs-drift-audit-output");

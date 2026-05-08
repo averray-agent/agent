@@ -1,5 +1,9 @@
 import { ValidationError } from "./errors.js";
 import { describeSessionStatus } from "./session-state-machine.js";
+import {
+  DEFAULT_ESCROW_ASSET_SYMBOL,
+  decimalsForAssetSymbol
+} from "./assets.js";
 
 /**
  * Build a v1 agent profile document from in-memory platform state.
@@ -51,8 +55,10 @@ export function buildAgentProfile({ wallet, reputation, sessions, getJobDefiniti
   const firstApprovedJob = approved
     .map((s) => definitionOf(s.jobId))
     .find((j) => j);
-  const rewardAsset = firstApprovedJob?.rewardAsset ?? "DOT";
-  const decimals = Number.isInteger(firstApprovedJob?.rewardDecimals) ? firstApprovedJob.rewardDecimals : 18;
+  const rewardAsset = firstApprovedJob?.rewardAsset ?? DEFAULT_ESCROW_ASSET_SYMBOL;
+  const decimals = Number.isInteger(firstApprovedJob?.rewardDecimals)
+    ? firstApprovedJob.rewardDecimals
+    : decimalsForAssetSymbol(rewardAsset);
 
   let totalRewardBase = 0n;
   const categoryCounts = new Map();

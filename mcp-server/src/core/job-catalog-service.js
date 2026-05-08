@@ -5,6 +5,7 @@ import {
 } from "./errors.js";
 import { getBuiltinJobSchema, isBuiltinJobSchemaRef, schemaRefToJobSchemaPath } from "./job-schema-registry.js";
 import { buildVerificationContract } from "./verifier-contract.js";
+import { normalizeAssetSymbol } from "./assets.js";
 
 const DEFAULT_AGENT_PROFILE = {
   capabilities: ["claim_job", "submit_work", "allocate_idle_funds"],
@@ -658,7 +659,7 @@ export class JobCatalogService {
     const rewardAmount = Number(input?.rewardAmount ?? 0);
     const claimTtlSeconds = Number(input?.claimTtlSeconds ?? 3600);
     const retryLimit = Number(input?.retryLimit ?? 1);
-    const rewardAsset = String(input?.rewardAsset ?? "DOT").trim().toUpperCase();
+    const rewardAsset = normalizeAssetSymbol(input?.rewardAsset);
     const jobType = normalizeJobType(input?.jobType);
     const requiredRole = normalizeAgentRole(input?.requiredRole ?? DEFAULT_ROLE_BY_JOB_TYPE[jobType]);
 
@@ -982,7 +983,7 @@ function normaliseRecurringPolicy(raw, { recurring, rewardAmount, rewardAsset })
     }
     policy.reserveAmount = reserveAmount;
     policy.reserveAsset = typeof raw.reserveAsset === "string" && raw.reserveAsset.trim()
-      ? raw.reserveAsset.trim().toUpperCase()
+      ? normalizeAssetSymbol(raw.reserveAsset)
       : rewardAsset;
     if (policy.reserveAsset !== rewardAsset) {
       throw new ValidationError("recurringPolicy.reserveAsset must match rewardAsset.");
@@ -1040,7 +1041,7 @@ function normaliseDelegationPolicy(raw, { rewardAmount, rewardAsset }) {
     }
     policy.budgetAmount = budgetAmount;
     policy.budgetAsset = typeof raw.budgetAsset === "string" && raw.budgetAsset.trim()
-      ? raw.budgetAsset.trim().toUpperCase()
+      ? normalizeAssetSymbol(raw.budgetAsset)
       : rewardAsset;
     if (policy.budgetAsset !== rewardAsset) {
       throw new ValidationError("delegationPolicy.budgetAsset must match rewardAsset.");

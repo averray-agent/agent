@@ -2,6 +2,10 @@ import { keccak256, toUtf8Bytes } from "ethers";
 
 import { NotFoundError, ValidationError } from "./errors.js";
 import { hashCanonicalContent } from "./canonical-content.js";
+import {
+  DEFAULT_ESCROW_ASSET_SYMBOL,
+  decimalsForAssetSymbol
+} from "./assets.js";
 import { extractSubmissionText } from "./submission.js";
 
 /**
@@ -346,7 +350,10 @@ export function buildBadgeFromSession({ session, job, verification, context = {}
     );
   }
 
-  const decimals = Number.isInteger(job.rewardDecimals) ? job.rewardDecimals : 18;
+  const rewardAsset = job.rewardAsset ?? DEFAULT_ESCROW_ASSET_SYMBOL;
+  const decimals = Number.isInteger(job.rewardDecimals)
+    ? job.rewardDecimals
+    : decimalsForAssetSymbol(rewardAsset);
   const rewardBase = toBaseUnits(job.rewardAmount, decimals);
   const stakeBase = toBaseUnits(session.claimStake, decimals);
   const publicBaseUrl = context.publicBaseUrl ?? undefined;
@@ -363,8 +370,8 @@ export function buildBadgeFromSession({ session, job, verification, context = {}
     category: job.category,
     level: inferLevel(job),
     verifierMode: job.verifierMode,
-    reward: { asset: job.rewardAsset ?? "DOT", amount: rewardBase, decimals },
-    claimStake: { asset: job.rewardAsset ?? "DOT", amount: stakeBase, decimals },
+    reward: { asset: rewardAsset, amount: rewardBase, decimals },
+    claimStake: { asset: rewardAsset, amount: stakeBase, decimals },
     evidenceHash,
     completedAt: new Date(session.updatedAt ?? Date.now()).toISOString(),
     worker: requireLowerAddress(session.wallet, "session.wallet"),

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { pathToFileURL } from "node:url";
+import { DEFAULT_ESCROW_ASSET_SYMBOL } from "../core/assets.js";
 
 /**
  * Ingest OSV package advisories into dependency remediation jobs.
@@ -273,7 +274,7 @@ export function toPlatformJob({ target, advisory, advisories, fixedVersion, scor
     requiredRole: "worker",
     category: "security",
     tier: "starter",
-    rewardAsset: "DOT",
+    rewardAsset: DEFAULT_ESCROW_ASSET_SYMBOL,
     rewardAmount: 3,
     verifierMode: "github_pr",
     verifierMinimumScore: 70,

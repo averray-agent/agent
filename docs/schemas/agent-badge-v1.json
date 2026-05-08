@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://averray.com/schemas/agent-badge-v1.json",
   "title": "Averray Agent Badge v1",
-  "description": "Metadata for a non-transferable reputation badge minted on job completion. Extends the OpenSea-style NFT metadata convention with an Averray-specific namespace for on-chain job context. All monetary amounts are stringified integers in the asset's smallest unit (e.g., planck for DOT) to avoid precision loss in JSON parsers.",
+  "description": "Metadata for a non-transferable reputation badge minted on job completion. Extends the OpenSea-style NFT metadata convention with an Averray-specific namespace for on-chain job context. All monetary amounts are stringified integers in the asset's smallest unit (e.g., USDC micro-units) to avoid precision loss in JSON parsers.",
   "type": "object",
   "required": ["name", "description", "external_url", "attributes", "averray"],
   "additionalProperties": true,
@@ -147,18 +147,18 @@
       "properties": {
         "asset": {
           "type": "string",
-          "description": "Asset symbol, e.g., 'DOT'."
+          "description": "Asset symbol, e.g., 'USDC'."
         },
         "amount": {
           "type": "string",
           "pattern": "^[0-9]+$",
-          "description": "Integer amount in the asset's smallest unit (planck for DOT), stringified to preserve precision."
+          "description": "Integer amount in the asset's smallest unit, stringified to preserve precision."
         },
         "decimals": {
           "type": "integer",
           "minimum": 0,
           "maximum": 30,
-          "description": "Decimal places for the asset. DOT uses 10 on native Polkadot; 18 if wrapped via the Hub ERC20 precompile."
+          "description": "Decimal places for the asset. Averray v1 escrow uses Polkadot Hub USDC with 6 decimals; DOT/vDOT strategy assets may use different decimals."
         }
       }
     }

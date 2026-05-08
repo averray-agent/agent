@@ -3,7 +3,7 @@
     "id": "pr-review-findings-001",
     "category": "review",
     "tier": "starter",
-    "rewardAsset": "DOT",
+    "rewardAsset": "USDC",
     "rewardAmount": 6,
     "verifierMode": "benchmark",
     "verifierTerms": [
@@ -24,7 +24,7 @@
     "id": "release-readiness-check-001",
     "category": "release",
     "tier": "starter",
-    "rewardAsset": "DOT",
+    "rewardAsset": "USDC",
     "rewardAmount": 7,
     "verifierMode": "deterministic",
     "verifierTerms": [
@@ -45,7 +45,7 @@
     "id": "issue-defect-triage-001",
     "category": "triage",
     "tier": "starter",
-    "rewardAsset": "DOT",
+    "rewardAsset": "USDC",
     "rewardAmount": 5,
     "verifierMode": "deterministic",
     "verifierTerms": [
@@ -67,7 +67,7 @@
     "id": "docs-drift-audit-001",
     "category": "docs",
     "tier": "starter",
-    "rewardAsset": "DOT",
+    "rewardAsset": "USDC",
     "rewardAmount": 5,
     "verifierMode": "benchmark",
     "verifierTerms": [
@@ -90,7 +90,7 @@
     "description": "Review a public Wikipedia article revision and propose citation repairs without editing the live page directly.",
     "category": "wikipedia",
     "tier": "starter",
-    "rewardAsset": "DOT",
+    "rewardAsset": "USDC",
     "rewardAmount": 4,
     "verifierMode": "benchmark",
     "verifierTerms": [
@@ -137,7 +137,7 @@
     "description": "Check a public page revision for stale or uncertain claims and return editor-ready review notes with evidence URLs.",
     "category": "wikipedia",
     "tier": "starter",
-    "rewardAsset": "DOT",
+    "rewardAsset": "USDC",
     "rewardAmount": 4,
     "verifierMode": "benchmark",
     "verifierTerms": [
@@ -184,7 +184,7 @@
     "description": "Review a Wikipedia article infobox against the fixed article revision and cited sources, then propose editor-ready fixes.",
     "category": "wikipedia",
     "tier": "starter",
-    "rewardAsset": "DOT",
+    "rewardAsset": "USDC",
     "rewardAmount": 5,
     "verifierMode": "benchmark",
     "verifierTerms": [

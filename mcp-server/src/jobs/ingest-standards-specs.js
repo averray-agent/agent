@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { pathToFileURL } from "node:url";
+import { DEFAULT_ESCROW_ASSET_SYMBOL } from "../core/assets.js";
 
 /**
  * Ingest standards/spec freshness audit jobs.
@@ -154,7 +155,7 @@ export function toPlatformJob(target, score = scoreSpecTarget(target)) {
     requiredRole: "worker",
     category: "docs",
     tier: "starter",
-    rewardAsset: "DOT",
+    rewardAsset: DEFAULT_ESCROW_ASSET_SYMBOL,
     rewardAmount: 3,
     verifierMode: "benchmark",
     verifierTerms: ["source_surface", "drift_findings", "missing_updates", "fix_recommendation"],

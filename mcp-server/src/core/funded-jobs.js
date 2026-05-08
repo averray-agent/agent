@@ -1,3 +1,5 @@
+import { DEFAULT_ESCROW_ASSET_SYMBOL } from "./assets.js";
+
 export const FUNDED_JOB_STATUSES = Object.freeze({
   OPEN: "open",
   MERGED: "merged",
@@ -25,7 +27,7 @@ export function buildFundedJobFromClaim({ job, session, now = new Date() }) {
     wallet: session?.wallet,
     sourceType: job?.source?.type ?? "manual",
     source: job?.source ? { ...job.source } : undefined,
-    rewardAsset: job?.rewardAsset ?? "DOT",
+    rewardAsset: job?.rewardAsset ?? DEFAULT_ESCROW_ASSET_SYMBOL,
     rewardAmount: finiteNumber(job?.rewardAmount, 0),
     claimStake: finiteNumber(session?.claimStake, 0),
     claimFee: finiteNumber(session?.claimFee, 0),
@@ -51,7 +53,7 @@ export function updateFundedJobFromSession(existing, { job, session, verificatio
     wallet: session?.wallet ?? existing?.wallet,
     sourceType: job?.source?.type ?? existing?.sourceType,
     source: job?.source ? { ...job.source } : existing?.source,
-    rewardAsset: job?.rewardAsset ?? existing?.rewardAsset,
+    rewardAsset: job?.rewardAsset ?? existing?.rewardAsset ?? DEFAULT_ESCROW_ASSET_SYMBOL,
     rewardAmount: job ? finiteNumber(job.rewardAmount, 0) : existing?.rewardAmount,
     claimStake: session ? finiteNumber(session.claimStake, 0) : existing?.claimStake,
     claimFee: session ? finiteNumber(session.claimFee, 0) : existing?.claimFee,

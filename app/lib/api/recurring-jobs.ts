@@ -128,7 +128,7 @@ function buildTemplate(
     tier: text(raw.tier),
     verifierMode: text(raw.verifierMode),
     rewardAmount: nonNegNumber(raw.rewardAmount),
-    rewardAsset: text(raw.rewardAsset, reserve.rewardAsset || "DOT"),
+    rewardAsset: text(raw.rewardAsset, reserve.rewardAsset || "USDC"),
     scheduleLabel: scheduleLabel(raw.schedule),
     paused,
     exhausted,
@@ -158,13 +158,13 @@ function stateFor(input: {
 function reserveStatus(value: unknown): RecurringReserveStatus {
   const record = asRecord(value);
   if (!record) {
-    return { mode: "unknown", rewardAsset: "DOT", rewardAmount: 0 };
+    return { mode: "unknown", rewardAsset: "USDC", rewardAmount: 0 };
   }
   const mode =
     record.mode === "finite" || record.mode === "unbounded" ? record.mode : "unknown";
   return {
     mode,
-    rewardAsset: text(record.rewardAsset, "DOT"),
+    rewardAsset: text(record.rewardAsset, "USDC"),
     rewardAmount: nonNegNumber(record.rewardAmount),
     reserveAmount: optionalNumber(record.reserveAmount),
     consumedAmount: optionalNumber(record.consumedAmount),
