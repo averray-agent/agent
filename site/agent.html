@@ -142,6 +142,63 @@
             </section>
           </div>
 
+          <!--
+            Trail summary — derived client-side from the live badges
+            list. Surfaces the four reputation-deepening signals
+            AVERRAY_WORKING_SPEC §10 calls out: tier breakdown,
+            streak counter, primary sources, average merge time.
+            Each renders an honest "—" when nothing is computable so
+            the panel never invents numbers.
+          -->
+          <section class="profile-panel">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Trail summary</p>
+                <h2>Reputation at a glance</h2>
+              </div>
+              <span class="profile-summary-source">derived from public badges</span>
+            </div>
+
+            <div class="trail-grid">
+              <article class="trail-block">
+                <p class="trail-block-label">Tier breakdown</p>
+                <div id="profile-tier-breakdown" class="trail-tier-bars">
+                  <p class="profile-empty">No completions yet.</p>
+                </div>
+              </article>
+
+              <article class="trail-block">
+                <p class="trail-block-label">Current streak</p>
+                <div class="trail-headline">
+                  <strong id="profile-streak-value">—</strong>
+                  <span id="profile-streak-suffix" class="trail-headline-suffix">consecutive jobs</span>
+                </div>
+                <p id="profile-streak-meta" class="trail-block-meta">
+                  Streak grows on each merged job; broken on a rejection or
+                  a 7-day gap.
+                </p>
+              </article>
+
+              <article class="trail-block">
+                <p class="trail-block-label">Primary sources</p>
+                <ul id="profile-primary-repos" class="trail-repo-list">
+                  <li class="profile-empty">No source attribution yet.</li>
+                </ul>
+              </article>
+
+              <article class="trail-block">
+                <p class="trail-block-label">Avg merge time</p>
+                <div class="trail-headline">
+                  <strong id="profile-merge-value">—</strong>
+                  <span id="profile-merge-suffix" class="trail-headline-suffix"></span>
+                </div>
+                <p id="profile-merge-meta" class="trail-block-meta">
+                  Median time from claim to verifier-approved badge.
+                </p>
+              </article>
+            </div>
+          </section>
+
           <section class="profile-panel">
             <div class="section-heading">
               <div>

@@ -45,6 +45,281 @@ function formatIso(value) {
   return date.toLocaleString("en-CH", { dateStyle: "medium", timeStyle: "short" });
 }
 
+/* ---------------------------------------------------------------- */
+/* Trail summary helpers — see AVERRAY_WORKING_SPEC §10 reputation   */
+/* deepening. Pure functions over the live badges list with honest   */
+/* "—" fallbacks when nothing is computable.                          */
+/* ---------------------------------------------------------------- */
+
+const TIER_BUCKETS = [
+  { id: "substantive", label: "Substantive", min: 5 },
+  { id: "standard", label: "Standard", min: 2 },
+  { id: "micro", label: "Micro", min: 0 },
+];
+
+function rewardToFloat(reward) {
+  if (!reward) return 0;
+  try {
+    const raw = BigInt(reward.amount ?? "0");
+    const decimals = BigInt(reward.decimals ?? 6);
+    const base = 10n ** decimals;
+    const whole = Number(raw / base);
+    const fraction = Number(raw % base) / Number(base);
+    return whole + fraction;
+  } catch {
+    return 0;
+  }
+}
+
+function bucketBadgeByReward(badge) {
+  const value = rewardToFloat(badge.reward);
+  // Premium tier covers post-launch external posters paying within
+  // published ranges; >$500 lands in Premium rather than overflowing
+  // Substantive.
+  if (value > 500) return "premium";
+  if (value >= 5) return "substantive";
+  if (value >= 2) return "standard";
+  return "micro";
+}
+
+function computeTierBreakdown(badges) {
+  const counts = { micro: 0, standard: 0, substantive: 0, premium: 0 };
+  for (const badge of badges) {
+    const id = bucketBadgeByReward(badge);
+    counts[id] = (counts[id] ?? 0) + 1;
+  }
+  return counts;
+}
+
+function renderTierBreakdown(badges) {
+  const root = byId("profile-tier-breakdown");
+  if (!root) return;
+  if (!badges.length) {
+    root.innerHTML = '<p class="profile-empty">No completions yet.</p>';
+    return;
+  }
+  const counts = computeTierBreakdown(badges);
+  const total = badges.length;
+  const rows = [
+    { id: "substantive", label: "Substantive", count: counts.substantive },
+    { id: "standard", label: "Standard", count: counts.standard },
+    { id: "micro", label: "Micro", count: counts.micro },
+  ];
+  if (counts.premium > 0) {
+    rows.unshift({ id: "premium", label: "Premium", count: counts.premium });
+  }
+  root.innerHTML = rows
+    .map((row) => {
+      const pct = total > 0 ? Math.round((row.count / total) * 100) : 0;
+      return `
+        <div class="trail-tier-row" title="${row.label}: ${row.count} of ${total} badges">
+          <span>${row.label}</span>
+          <span class="trail-tier-bar tier-${row.id}"><i style="width:${pct}%"></i></span>
+          <span>${row.count}</span>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+const STREAK_BREAK_MS = 7 * 24 * 60 * 60 * 1000;
+
+function computeStreak(badges) {
+  if (!badges.length) return { count: 0 };
+  const ordered = badges
+    .map((badge) => Date.parse(badge.completedAt ?? ""))
+    .filter((ts) => Number.isFinite(ts))
+    .sort((a, b) => b - a); // newest-first
+  if (!ordered.length) return { count: 0 };
+  let count = 1;
+  for (let i = 1; i < ordered.length; i += 1) {
+    if (ordered[i - 1] - ordered[i] > STREAK_BREAK_MS) break;
+    count += 1;
+  }
+  return { count };
+}
+
+function streakTierFor(count) {
+  if (count >= 25) return { id: "waiver", label: "fee waiver" };
+  if (count >= 10) return { id: "badge", label: "streak badge" };
+  if (count >= 1) return { id: "active", label: "active" };
+  return null;
+}
+
+function renderStreak(badges, stats = {}) {
+  const valueEl = byId("profile-streak-value");
+  const suffixEl = byId("profile-streak-suffix");
+  const metaEl = byId("profile-streak-meta");
+  if (!valueEl || !suffixEl) return;
+  const { count } = computeStreak(badges);
+  const rejected = Number(stats.rejectedCount ?? 0);
+  if (count === 0) {
+    valueEl.textContent = "—";
+    suffixEl.textContent = "no streak yet";
+    if (metaEl) {
+      metaEl.textContent = "Streak grows on each merged job; broken on a rejection or a 7-day gap.";
+    }
+    return;
+  }
+  valueEl.textContent = String(count);
+  suffixEl.textContent = count === 1 ? "consecutive job" : "consecutive jobs";
+  if (metaEl) {
+    const tier = streakTierFor(count);
+    const rejNote = rejected > 0
+      ? ` ${rejected} rejection${rejected === 1 ? "" : "s"} on this wallet.`
+      : "";
+    const tierBadge = tier
+      ? ` <span class="trail-streak-tier tier-${tier.id}">${tier.label}</span>`
+      : "";
+    metaEl.innerHTML = `Approximate from public badges (≤7-day gap).${rejNote}${tierBadge}`.trim();
+  }
+}
+
+function badgeSourceKey(badge) {
+  const source = badge.source && typeof badge.source === "object" ? badge.source : null;
+  if (source) {
+    if (typeof source.repo === "string" && source.repo) return { kind: "github", key: source.repo };
+    if (typeof source.pageTitle === "string" && source.pageTitle) {
+      return {
+        kind: "wikipedia",
+        key: `${source.language ?? "en"}.wikipedia / ${source.pageTitle}`,
+      };
+    }
+    if (typeof source.datasetTitle === "string" && source.datasetTitle) {
+      return { kind: "dataset", key: source.datasetTitle };
+    }
+  }
+  const jobId = String(badge.jobId ?? "");
+  if (jobId.startsWith("oss-")) {
+    const parts = jobId.split("-");
+    if (parts.length >= 4) return { kind: "github", key: `${parts[1]}/${parts[2]}` };
+  }
+  if (jobId.startsWith("wiki-")) {
+    const parts = jobId.split("-");
+    if (parts.length >= 3) return { kind: "wikipedia", key: `${parts[1]}.wikipedia / ${parts[2]}` };
+  }
+  if (jobId.startsWith("open-data-") || jobId.startsWith("openapi-") || jobId.startsWith("standards-")) {
+    return { kind: "dataset", key: jobId.split("-").slice(1, 4).join("-") };
+  }
+  return { kind: "native", key: jobId || "unknown" };
+}
+
+function computePrimaryRepos(badges, limit = 3) {
+  const counts = new Map();
+  for (const badge of badges) {
+    const { key, kind } = badgeSourceKey(badge);
+    if (!key) continue;
+    const existing = counts.get(key) ?? { key, kind, count: 0 };
+    existing.count += 1;
+    counts.set(key, existing);
+  }
+  return Array.from(counts.values())
+    .sort((a, b) => b.count - a.count)
+    .slice(0, limit);
+}
+
+function renderPrimaryRepos(badges) {
+  const root = byId("profile-primary-repos");
+  if (!root) return;
+  const repos = computePrimaryRepos(badges);
+  if (!repos.length) {
+    root.innerHTML = '<li class="profile-empty">No source attribution yet.</li>';
+    return;
+  }
+  root.innerHTML = repos
+    .map((entry) => `
+      <li>
+        <span title="${entry.kind}">${entry.key}</span>
+        <span>${entry.count} ${entry.count === 1 ? "job" : "jobs"}</span>
+      </li>
+    `)
+    .join("");
+}
+
+function computeMergeTime(badges) {
+  const durations = [];
+  for (const badge of badges) {
+    const completed = Date.parse(badge.completedAt ?? "");
+    const claimed = Date.parse(badge.claimedAt ?? badge.startedAt ?? "");
+    if (!Number.isFinite(completed) || !Number.isFinite(claimed)) continue;
+    if (completed < claimed) continue;
+    durations.push(completed - claimed);
+  }
+  if (!durations.length) {
+    return { median: null, sampleCount: 0, missing: badges.length };
+  }
+  durations.sort((a, b) => a - b);
+  const mid = Math.floor(durations.length / 2);
+  const median = durations.length % 2 === 0
+    ? (durations[mid - 1] + durations[mid]) / 2
+    : durations[mid];
+  return {
+    median,
+    sampleCount: durations.length,
+    missing: badges.length - durations.length,
+  };
+}
+
+function formatDurationCompact(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return { value: "—", unit: "" };
+  const totalSeconds = Math.round(ms / 1000);
+  if (totalSeconds < 60) return { value: String(totalSeconds), unit: "s" };
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes < 60) {
+    return seconds === 0
+      ? { value: String(minutes), unit: "m" }
+      : { value: `${minutes}m`, unit: `${seconds}s` };
+  }
+  const hours = Math.floor(minutes / 60);
+  const remMinutes = minutes % 60;
+  if (hours < 24) {
+    return remMinutes === 0
+      ? { value: String(hours), unit: "h" }
+      : { value: `${hours}h`, unit: `${remMinutes}m` };
+  }
+  const days = Math.floor(hours / 24);
+  const remHours = hours % 24;
+  return remHours === 0
+    ? { value: String(days), unit: "d" }
+    : { value: `${days}d`, unit: `${remHours}h` };
+}
+
+function renderMergeTime(badges) {
+  const valueEl = byId("profile-merge-value");
+  const suffixEl = byId("profile-merge-suffix");
+  const metaEl = byId("profile-merge-meta");
+  if (!valueEl || !suffixEl) return;
+  const stats = computeMergeTime(badges);
+  if (stats.median == null) {
+    valueEl.textContent = "—";
+    suffixEl.textContent = "";
+    if (metaEl) {
+      metaEl.textContent = badges.length
+        ? `Badges don't carry claim timestamps yet (${badges.length} missing).`
+        : "Will populate once approved badges land.";
+    }
+    return;
+  }
+  const formatted = formatDurationCompact(stats.median);
+  valueEl.textContent = formatted.value;
+  suffixEl.textContent = formatted.unit;
+  if (metaEl) {
+    const missingNote = stats.missing > 0
+      ? ` ${stats.missing} badge${stats.missing === 1 ? "" : "s"} missing claimedAt.`
+      : "";
+    metaEl.textContent = `Median across ${stats.sampleCount} approved badge${stats.sampleCount === 1 ? "" : "s"}.${missingNote}`;
+  }
+}
+
+function renderTrailSummary(profile) {
+  const badges = Array.isArray(profile.badges) ? profile.badges : [];
+  renderTierBreakdown(badges);
+  renderStreak(badges, profile.stats ?? {});
+  renderPrimaryRepos(badges);
+  renderMergeTime(badges);
+}
+
 function renderBadges(badges = []) {
   const root = byId("profile-badges");
   if (!root) return;
@@ -116,6 +391,7 @@ async function bootProfile() {
         ? Object.entries(profile.categoryLevels).map(([category, level]) => `${category} · lvl ${level}`).join(" · ")
         : "No category levels yet."
     );
+    renderTrailSummary(profile);
     renderBadges(profile.badges);
   } catch (error) {
     if (loading) loading.textContent = error?.message ?? "Failed to load profile.";
