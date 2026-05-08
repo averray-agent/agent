@@ -784,3 +784,17 @@ test("getAdminStatus surfaces XCM observation relay status", async () => {
   assert.equal(status.xcmObservationRelay.enabled, true);
   assert.equal(status.xcmObservationRelay.cursor, "cursor-1");
 });
+
+test("getGithubOperatorStatus exposes the read-only GitHub helper", async () => {
+  const service = makePlatformService();
+  const status = await service.getGithubOperatorStatus({
+    repos: "",
+    fetchImpl: async () => {
+      throw new Error("fetch should not be called when no repos are configured");
+    }
+  });
+
+  assert.equal(status.mutates, false);
+  assert.equal(status.configured, false);
+  assert.equal(status.digest.pullRequestsNeedingAttention.length, 0);
+});

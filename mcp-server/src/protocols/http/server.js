@@ -1359,7 +1359,8 @@ const server = createServer(async (request, response) => {
           "/admin/jobs/resume",
           "/admin/xcm/observe",
           "/admin/xcm/finalize",
-          "/admin/status"
+          "/admin/status",
+          "/admin/github/status"
         ]
       });
     }
@@ -3039,6 +3040,14 @@ const server = createServer(async (request, response) => {
     if (request.method === "GET" && pathname === "/admin/status") {
       const auth = await authMiddleware(request, url, { requireRole: "admin" });
       return respond(response, 200, await service.getAdminStatus({ auth }));
+    }
+
+    if (request.method === "GET" && pathname === "/admin/github/status") {
+      await authMiddleware(request, url, { requireRole: "admin" });
+      return respond(response, 200, await service.getGithubOperatorStatus({
+        repos: url.searchParams.has("repos") ? url.searchParams.get("repos") : undefined,
+        limit: parseLimit(url, 5, 20)
+      }));
     }
 
     if (request.method === "POST" && pathname === "/admin/xcm/observe") {

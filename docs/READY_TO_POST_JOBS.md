@@ -561,6 +561,27 @@ must not mutate the public API spec directly.
 
 ---
 
+## GitHub operator helper
+
+`GET /admin/github/status` gives operators and assistant surfaces a read-only
+GitHub digest across configured repositories. It reports open PRs, open issues,
+recent workflow failures, active workflow runs, and a short set of
+recommendations. It does not comment, merge, close, rerun workflows, or mutate
+GitHub state.
+
+Configure it with:
+
+```bash
+GITHUB_HELPER_REPOS=averray-agent/agent,depre-dev/averray-reference-agent
+GITHUB_HELPER_LIMIT=5
+```
+
+It reuses `GITHUB_TOKEN` when present for private repositories or higher rate
+limits. Keep this token read-only unless a separate write-capable workflow is
+explicitly introduced.
+
+---
+
 ## Before posting
 
 Quick operator checklist:
