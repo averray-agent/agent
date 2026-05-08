@@ -70,6 +70,9 @@ if [[ "$RUN_CONTRACT_VERIFY" == "1" ]]; then
   if [[ "${ALLOW_PAUSED:-0}" == "1" ]]; then
     verify_args+=("--allow-paused")
   fi
+  if [[ "${REQUIRE_OWNER_RECORD_FINAL:-1}" == "1" ]]; then
+    verify_args+=("--require-owner-record-final")
+  fi
   run_step "Contract deployment verification" "$APP_ROOT/scripts/verify_deployment.sh" "${verify_args[@]}"
 fi
 
