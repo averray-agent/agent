@@ -807,6 +807,7 @@ test("getGithubOperatorStatus exposes the read-only GitHub helper", async () => 
   const service = makePlatformService();
   const status = await service.getGithubOperatorStatus({
     repos: "",
+    view: "prs",
     fetchImpl: async () => {
       throw new Error("fetch should not be called when no repos are configured");
     }
@@ -814,5 +815,6 @@ test("getGithubOperatorStatus exposes the read-only GitHub helper", async () => 
 
   assert.equal(status.mutates, false);
   assert.equal(status.configured, false);
+  assert.equal(status.selectedView.name, "prs");
   assert.equal(status.digest.pullRequestsNeedingAttention.length, 0);
 });

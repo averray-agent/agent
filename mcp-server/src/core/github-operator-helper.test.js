@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   collectGithubOperatorStatus,
   normalizeGithubHelperLimit,
+  normalizeGithubHelperView,
   parseGithubHelperRepos
 } from "./github-operator-helper.js";
 
@@ -14,15 +15,39 @@ test("parseGithubHelperRepos accepts repo names and GitHub URLs", () => {
   );
 });
 
+test("parseGithubHelperRepos falls back to GITHUB_DEFAULT_REPO", () => {
+  const previousRepos = process.env.GITHUB_HELPER_REPOS;
+  const previousDefaultRepo = process.env.GITHUB_DEFAULT_REPO;
+  const previousRepository = process.env.GITHUB_REPOSITORY;
+  delete process.env.GITHUB_HELPER_REPOS;
+  process.env.GITHUB_DEFAULT_REPO = "averray-agent/agent";
+  process.env.GITHUB_REPOSITORY = "other/repo";
+  try {
+    assert.deepEqual(parseGithubHelperRepos(), ["averray-agent/agent"]);
+  } finally {
+    restoreEnv("GITHUB_HELPER_REPOS", previousRepos);
+    restoreEnv("GITHUB_DEFAULT_REPO", previousDefaultRepo);
+    restoreEnv("GITHUB_REPOSITORY", previousRepository);
+  }
+});
+
 test("normalizeGithubHelperLimit clamps unsafe values", () => {
   assert.equal(normalizeGithubHelperLimit("0"), 5);
   assert.equal(normalizeGithubHelperLimit("3"), 3);
   assert.equal(normalizeGithubHelperLimit("999"), 20);
 });
 
+test("normalizeGithubHelperView accepts the operator command views", () => {
+  assert.equal(normalizeGithubHelperView("prs"), "prs");
+  assert.equal(normalizeGithubHelperView("ci"), "ci");
+  assert.equal(normalizeGithubHelperView("issues"), "issues");
+  assert.equal(normalizeGithubHelperView("wat"), "status");
+});
+
 test("collectGithubOperatorStatus reports unconfigured helper without mutating", async () => {
   const status = await collectGithubOperatorStatus({
     repos: "",
+    view: "ci",
     githubToken: undefined,
     now: new Date("2026-05-08T10:00:00.000Z"),
     fetchImpl: async () => {
@@ -33,6 +58,9 @@ test("collectGithubOperatorStatus reports unconfigured helper without mutating",
   assert.equal(status.configured, false);
   assert.equal(status.mutates, false);
   assert.equal(status.health, "ok");
+  assert.equal(status.view, "ci");
+  assert.equal(status.selectedView.name, "ci");
+  assert.deepEqual(status.selectedView.items, []);
   assert.equal(status.repoCount, 0);
   assert.equal(status.warnings[0].code, "github_helper_not_configured");
 });
@@ -45,7 +73,7 @@ test("collectGithubOperatorStatus summarizes PRs, issues, and failing workflows"
       archived: false,
       html_url: "https://github.com/acme/widgets"
     },
-    "https://api.github.com/repos/acme/widgets/pulls?state=open&sort=updated&direction=desc&per_page=2": [
+    "https://api.github.com/repos/acme/widgets/pulls?state=open&sort=updated&direction=desc&per_page=3": [
       {
         number: 7,
         title: "Fix flaky widget test",
@@ -58,7 +86,7 @@ test("collectGithubOperatorStatus summarizes PRs, issues, and failing workflows"
         updated_at: "2026-05-07T00:00:00.000Z"
       }
     ],
-    "https://api.github.com/repos/acme/widgets/issues?state=open&sort=updated&direction=desc&per_page=4": [
+    "https://api.github.com/repos/acme/widgets/issues?state=open&sort=updated&direction=desc&per_page=6": [
       {
         number: 9,
         title: "Document widget retries",
@@ -76,7 +104,7 @@ test("collectGithubOperatorStatus summarizes PRs, issues, and failing workflows"
         html_url: "https://github.com/acme/widgets/pull/7"
       }
     ],
-    "https://api.github.com/repos/acme/widgets/actions/runs?per_page=2": {
+    "https://api.github.com/repos/acme/widgets/actions/runs?per_page=3": {
       workflow_runs: [
         {
           name: "CI",
@@ -107,7 +135,8 @@ test("collectGithubOperatorStatus summarizes PRs, issues, and failing workflows"
   const status = await collectGithubOperatorStatus({
     repos: "acme/widgets",
     githubToken: "github-token",
-    limit: 2,
+    limit: 3,
+    view: "digest",
     now: new Date("2026-05-08T10:00:00.000Z"),
     fetchImpl
   });
@@ -127,6 +156,14 @@ test("collectGithubOperatorStatus summarizes PRs, issues, and failing workflows"
   assert.equal(status.digest.pullRequestsNeedingAttention[0].reason, "draft");
   assert.equal(status.digest.issuesNeedingTriage[0].reason, "no_comments");
   assert.match(status.digest.ciFailures[0].explanation, /failing jobs/u);
+  assert.equal(status.view, "digest");
+  assert.equal(status.views.prs[0].number, 7);
+  assert.equal(status.views.issues[0].number, 9);
+  assert.equal(status.views.ci.length, 2);
+  assert.deepEqual(
+    status.selectedView.items.map((item) => item.kind),
+    ["pull_request", "issue", "workflow_failure"]
+  );
 });
 
 test("collectGithubOperatorStatus keeps partial results when a repo fetch fails", async () => {
@@ -161,4 +198,12 @@ function fakeResponse(payload, { ok = true, status = 200 } = {}) {
       return payload;
     }
   };
+}
+
+function restoreEnv(name, value) {
+  if (value === undefined) {
+    delete process.env[name];
+  } else {
+    process.env[name] = value;
+  }
 }

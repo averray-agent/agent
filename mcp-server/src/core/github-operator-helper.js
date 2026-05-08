@@ -1,8 +1,15 @@
 const DEFAULT_GITHUB_API_BASE_URL = "https://api.github.com";
 const DEFAULT_LIMIT = 5;
 const MAX_LIMIT = 20;
+const DEFAULT_VIEW = "status";
+const VALID_VIEWS = new Set(["status", "prs", "ci", "issues", "digest"]);
 
-export function parseGithubHelperRepos(value = process.env.GITHUB_HELPER_REPOS ?? process.env.GITHUB_REPOSITORY ?? "") {
+export function parseGithubHelperRepos(
+  value = process.env.GITHUB_HELPER_REPOS
+    ?? process.env.GITHUB_DEFAULT_REPO
+    ?? process.env.GITHUB_REPOSITORY
+    ?? ""
+) {
   return String(value)
     .split(",")
     .map((entry) => entry.trim())
@@ -19,16 +26,23 @@ export function normalizeGithubHelperLimit(value = process.env.GITHUB_HELPER_LIM
   return Math.min(Math.trunc(parsed), MAX_LIMIT);
 }
 
+export function normalizeGithubHelperView(value = DEFAULT_VIEW) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return VALID_VIEWS.has(normalized) ? normalized : DEFAULT_VIEW;
+}
+
 export async function collectGithubOperatorStatus({
   repos = undefined,
   githubToken = process.env.GITHUB_TOKEN,
   apiBaseUrl = process.env.GITHUB_API_BASE_URL ?? DEFAULT_GITHUB_API_BASE_URL,
   limit = undefined,
+  view = DEFAULT_VIEW,
   fetchImpl = fetch,
   now = new Date()
 } = {}) {
   const normalizedRepos = parseGithubHelperRepos(Array.isArray(repos) ? repos.join(",") : repos);
   const normalizedLimit = normalizeGithubHelperLimit(limit);
+  const normalizedView = normalizeGithubHelperView(view);
   const warnings = [];
 
   if (normalizedRepos.length === 0) {
@@ -39,6 +53,7 @@ export async function collectGithubOperatorStatus({
       configured: false,
       authConfigured: Boolean(githubToken),
       health: "ok",
+      view: normalizedView,
       repoCount: 0,
       totals: emptyTotals(),
       repositories: [],
@@ -47,6 +62,11 @@ export async function collectGithubOperatorStatus({
         pullRequestsNeedingAttention: [],
         issuesNeedingTriage: [],
         ciFailures: []
+      },
+      views: emptyViews(),
+      selectedView: {
+        name: normalizedView,
+        items: []
       },
       warnings: [{
         severity: "low",
@@ -85,6 +105,21 @@ export async function collectGithubOperatorStatus({
         updatedAt: pr.updatedAt
       }))
   ).slice(0, normalizedLimit);
+  const openPullRequests = repositories.flatMap((repo) =>
+    repo.openPullRequests.map((pr) => ({
+      repo: repo.repo,
+      number: pr.number,
+      title: pr.title,
+      url: pr.url,
+      author: pr.author,
+      branch: pr.branch,
+      base: pr.base,
+      isDraft: pr.isDraft,
+      reviewState: pr.reviewState,
+      ageDays: pr.ageDays,
+      updatedAt: pr.updatedAt
+    }))
+  ).slice(0, normalizedLimit);
   const issuesNeedingTriage = repositories.flatMap((repo) =>
     repo.openIssues
       .filter((issue) => issue.commentCount === 0 || issue.ageDays >= 14)
@@ -96,6 +131,19 @@ export async function collectGithubOperatorStatus({
         reason: issue.commentCount === 0 ? "no_comments" : "stale",
         updatedAt: issue.updatedAt
       }))
+  ).slice(0, normalizedLimit);
+  const issueDigest = repositories.flatMap((repo) =>
+    repo.openIssues.map((issue) => ({
+      repo: repo.repo,
+      number: issue.number,
+      title: issue.title,
+      url: issue.url,
+      author: issue.author,
+      labels: issue.labels,
+      commentCount: issue.commentCount,
+      ageDays: issue.ageDays,
+      updatedAt: issue.updatedAt
+    }))
   ).slice(0, normalizedLimit);
   const ciFailures = repositories.flatMap((repo) =>
     repo.workflowRuns.failed.map((run) => ({
@@ -109,9 +157,38 @@ export async function collectGithubOperatorStatus({
       updatedAt: run.updatedAt
     }))
   ).slice(0, normalizedLimit);
+  const activeWorkflowRuns = repositories.flatMap((repo) =>
+    repo.workflowRuns.active.map((run) => ({
+      repo: repo.repo,
+      workflowName: run.workflowName,
+      runNumber: run.runNumber,
+      branch: run.branch,
+      status: run.status,
+      url: run.url,
+      updatedAt: run.updatedAt
+    }))
+  ).slice(0, normalizedLimit);
   const health = warnings.some((warning) => warning.severity === "high")
     ? "degraded"
     : (totals.failingWorkflowRuns > 0 || warnings.length > 0 ? "attention" : "ok");
+  const recommendations = buildRecommendations({ totals, warnings, pullRequestsNeedingAttention, issuesNeedingTriage });
+  const summary = buildSummary({ totals, repoCount: normalizedRepos.length, health });
+  const views = {
+    status: [{
+      health,
+      summary,
+      totals,
+      recommendations
+    }],
+    prs: openPullRequests,
+    ci: [...ciFailures, ...activeWorkflowRuns],
+    issues: issueDigest,
+    digest: [
+      ...pullRequestsNeedingAttention.map((item) => ({ ...item, kind: "pull_request" })),
+      ...issuesNeedingTriage.map((item) => ({ ...item, kind: "issue" })),
+      ...ciFailures.map((item) => ({ ...item, kind: "workflow_failure" }))
+    ].slice(0, normalizedLimit)
+  };
 
   return {
     schemaVersion: 1,
@@ -120,17 +197,23 @@ export async function collectGithubOperatorStatus({
     configured: true,
     authConfigured: Boolean(githubToken),
     health,
+    view: normalizedView,
     repoCount: normalizedRepos.length,
     totals,
     repositories,
     digest: {
-      summary: buildSummary({ totals, repoCount: normalizedRepos.length, health }),
+      summary,
       pullRequestsNeedingAttention,
       issuesNeedingTriage,
       ciFailures
     },
+    views,
+    selectedView: {
+      name: normalizedView,
+      items: views[normalizedView]
+    },
     warnings,
-    recommendations: buildRecommendations({ totals, warnings, pullRequestsNeedingAttention, issuesNeedingTriage })
+    recommendations
   };
 }
 
@@ -321,6 +404,16 @@ function emptyTotals() {
     openIssues: 0,
     failingWorkflowRuns: 0,
     activeWorkflowRuns: 0
+  };
+}
+
+function emptyViews() {
+  return {
+    status: [],
+    prs: [],
+    ci: [],
+    issues: [],
+    digest: []
   };
 }
 

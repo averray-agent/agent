@@ -579,12 +579,34 @@ Configure it with:
 
 ```bash
 GITHUB_HELPER_REPOS=averray-agent/agent,depre-dev/averray-reference-agent
+# Single-repo installs may use this friendlier alias instead:
+GITHUB_DEFAULT_REPO=averray-agent/agent
 GITHUB_HELPER_LIMIT=5
 ```
 
 It reuses `GITHUB_TOKEN` when present for private repositories or higher rate
 limits. Keep this token read-only unless a separate write-capable workflow is
 explicitly introduced.
+
+Assistant/operator surfaces can request focused read-only views with the
+`view` query parameter:
+
+- `GET /admin/github/status?view=status` for the overall summary.
+- `GET /admin/github/status?view=prs` for open pull requests.
+- `GET /admin/github/status?view=ci` for failing or active workflow runs.
+- `GET /admin/github/status?view=issues` for open issues.
+- `GET /admin/github/status?view=digest` for the combined "needs attention"
+  queue.
+
+Suggested natural-language command routing:
+
+- `github status` -> `view=status`
+- `github open prs` -> `view=prs`
+- `github ci failures` -> `view=ci`
+- `github issue digest` -> `view=issues`
+
+All views are read-only. They never merge, rerun CI, comment, close issues, or
+push commits.
 
 ---
 

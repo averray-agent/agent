@@ -3046,7 +3046,8 @@ const server = createServer(async (request, response) => {
       await authMiddleware(request, url, { requireRole: "admin" });
       return respond(response, 200, await service.getGithubOperatorStatus({
         repos: url.searchParams.has("repos") ? url.searchParams.get("repos") : undefined,
-        limit: parseLimit(url, 5, 20)
+        limit: parseLimit(url, 5, 20),
+        view: url.searchParams.get("view") ?? undefined
       }));
     }
 
