@@ -270,3 +270,125 @@ test("buildAgentProfile omits badgeUrl when publicBaseUrl is not provided", () =
   assert.equal(profile.badges[0].sessionId, "s1");
   assert.ok(!("badgeUrl" in profile.badges[0]));
 });
+
+test("buildAgentProfile attaches verification block per source kind", () => {
+  // GitHub session: chainJobId, evidenceHash, verifier, verifierMode,
+  // sourceUrl from job.source.issueUrl.
+  const githubJob = {
+    id: "oss-acme-repo-1",
+    category: "coding",
+    rewardAsset: "USDC",
+    rewardAmount: 5,
+    verifierMode: "github_pr",
+    source: { type: "github_issue", issueUrl: "https://github.com/acme/repo/issues/1" },
+  };
+  // Wikipedia session: pinnedRevisionUrl is preferred over articleUrl
+  // because the revision URL is reproducible.
+  const wikiJob = {
+    id: "wiki-en-12345-citation-repair",
+    category: "wikipedia",
+    rewardAsset: "USDC",
+    rewardAmount: 2,
+    verifierMode: "wikipedia_proposal_review",
+    source: {
+      type: "wikipedia_article",
+      pinnedRevisionUrl: "https://en.wikipedia.org/w/index.php?title=Foo&oldid=42",
+      articleUrl: "https://en.wikipedia.org/wiki/Foo",
+    },
+  };
+  // OSV session with no source URL fields — verification block still
+  // populates with chainJobId/evidenceHash/verifier so the badge isn't
+  // unverifiable end-to-end.
+  const osvJob = {
+    id: "osv-npm-foo-1",
+    category: "security",
+    rewardAsset: "USDC",
+    rewardAmount: 7,
+    verifierMode: "osv_dependency_pr",
+    source: { type: "osv_advisory" },
+  };
+
+  const baseSession = (overrides) => ({
+    wallet: WALLET,
+    status: "resolved",
+    verification: {
+      outcome: "approved",
+      reasonCode: "OK",
+      verifier: "0xVerifier000000000000000000000000000000F0",
+    },
+    chainJobId: "0xchainjob000000000000000000000000000000000000000000000000000000aa",
+    evidenceHash: "0xevidence0000000000000000000000000000000000000000000000000000000bb",
+    ...overrides,
+  });
+
+  const sessions = [
+    baseSession({ sessionId: "g1", jobId: "oss-acme-repo-1", updatedAt: "2026-05-08T10:00:00Z" }),
+    baseSession({ sessionId: "w1", jobId: "wiki-en-12345-citation-repair", updatedAt: "2026-05-09T10:00:00Z" }),
+    baseSession({ sessionId: "o1", jobId: "osv-npm-foo-1", updatedAt: "2026-05-10T10:00:00Z" }),
+  ];
+  const catalog = new Map([
+    [githubJob.id, githubJob],
+    [wikiJob.id, wikiJob],
+    [osvJob.id, osvJob],
+  ]);
+
+  const profile = buildAgentProfile({
+    wallet: WALLET,
+    reputation: { skill: 200, reliability: 200, economic: 200, tier: "pro" },
+    sessions,
+    getJobDefinition: makeGetJob(catalog),
+    publicBaseUrl: "https://api.averray.com",
+    fetchedAt: "2026-05-11T00:00:00Z",
+  });
+
+  // Badges sorted newest-first: o1, w1, g1.
+  const [osvBadge, wikiBadge, githubBadge] = profile.badges;
+  assert.deepEqual(githubBadge.verification, {
+    chainJobId: "0xchainjob000000000000000000000000000000000000000000000000000000aa",
+    evidenceHash: "0xevidence0000000000000000000000000000000000000000000000000000000bb",
+    verifier: "0xVerifier000000000000000000000000000000F0",
+    verifierMode: "github_pr",
+    sourceUrl: "https://github.com/acme/repo/issues/1",
+    sourceKind: "github_issue",
+  });
+  assert.equal(
+    wikiBadge.verification.sourceUrl,
+    "https://en.wikipedia.org/w/index.php?title=Foo&oldid=42",
+    "wikipedia source url prefers pinned revision over article"
+  );
+  // OSV with no source URL: the field is dropped entirely so the
+  // frontend can render a "no source link" state without parsing a
+  // null.
+  assert.ok(!("sourceUrl" in osvBadge.verification));
+  assert.equal(osvBadge.verification.verifierMode, "osv_dependency_pr");
+});
+
+test("buildAgentProfile omits the verification block when nothing is computable", () => {
+  // Session without chainJobId / evidenceHash / verifier and a job
+  // without source.* — no verification fields can be derived. The
+  // block is dropped entirely so the frontend renders an honest "no
+  // verification details" state instead of an empty object.
+  const job = {
+    id: "starter-coding-001",
+    category: "coding",
+    rewardAsset: "USDC",
+    rewardAmount: 5,
+    // verifierMode intentionally absent
+  };
+  const session = {
+    sessionId: "n1",
+    wallet: WALLET,
+    jobId: job.id,
+    status: "resolved",
+    updatedAt: "2026-05-08T10:00:00Z",
+    verification: { outcome: "approved", reasonCode: "OK" },
+  };
+  const profile = buildAgentProfile({
+    wallet: WALLET,
+    reputation: { skill: 50, reliability: 50, economic: 50, tier: "starter" },
+    sessions: [session],
+    getJobDefinition: makeGetJob(new Map([[job.id, job]])),
+  });
+  assert.equal(profile.badges.length, 1);
+  assert.ok(!("verification" in profile.badges[0]));
+});

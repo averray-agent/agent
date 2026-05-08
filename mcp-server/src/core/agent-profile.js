@@ -86,6 +86,12 @@ export function buildAgentProfile({ wallet, reputation, sessions, getJobDefiniti
       activeSinceMs = ts;
     }
 
+    // Verification block — supports the public profile's
+    // "one-click verification" affordance from spec §10. Each
+    // field is optional, and the whole block is dropped when
+    // nothing is computable so older sessions don't ship an
+    // empty stub.
+    const verification = buildBadgeVerification(session, job);
     badges.push({
       sessionId: session.sessionId,
       jobId: session.jobId,
@@ -97,6 +103,7 @@ export function buildAgentProfile({ wallet, reputation, sessions, getJobDefiniti
         amount: toBaseUnits(rewardAmount, decimals).toString(),
         decimals
       },
+      ...(verification ? { verification } : {}),
       ...(publicBaseUrl
         ? { badgeUrl: `${stripTrailingSlash(publicBaseUrl)}/badges/${encodeURIComponent(session.sessionId)}` }
         : {})
@@ -268,4 +275,73 @@ function compact(value) {
   return Object.fromEntries(
     Object.entries(value).filter(([, entry]) => entry !== undefined)
   );
+}
+
+/**
+ * Verification block attached to each approved-session badge entry.
+ * Mirrors the structured fields the canonical badge JSON already
+ * exposes (`agent-badge-v1` / `averray.*` namespace), plus a source
+ * URL pulled off the job definition so the public profile page can
+ * render a "one-click verification" affordance without a per-badge
+ * fetch.
+ *
+ * Every field is optional. Older sessions that predate the chain
+ * hash or evidence binding simply omit the missing keys so the
+ * profile schema stays additive.
+ */
+function buildBadgeVerification(session, job) {
+  const verification = session?.verification ?? session?.verificationSummary;
+  const verifierAddress = stringOrUndefined(verification?.verifier ?? verification?.signer ?? session?.verifierAddress);
+  const evidenceHash = stringOrUndefined(
+    session?.evidenceHash ?? session?.submission?.evidenceHash ?? verification?.evidenceHash
+  );
+  const chainJobId = stringOrUndefined(session?.chainJobId ?? job?.chainJobId);
+  const verifierMode = stringOrUndefined(job?.verifierMode ?? session?.verifierMode);
+  const sourceUrl = pickSourceUrl(job);
+  const sourceKind = stringOrUndefined(job?.source?.type);
+  const result = compact({
+    chainJobId,
+    evidenceHash,
+    verifier: verifierAddress,
+    verifierMode,
+    sourceUrl,
+    sourceKind,
+  });
+  return Object.keys(result).length === 0 ? undefined : result;
+}
+
+/**
+ * Pick the most useful upstream URL for a job's source — the one a
+ * human or browser agent should follow to inspect the original work.
+ * GitHub issues link to the issue, Wikipedia jobs link to the
+ * pinned revision so the diff is always reproducible, OSV jobs link
+ * to the consumer repo's PR (recorded on the session if present)
+ * with a fallback to the OSV advisory page, and open-data jobs link
+ * to the dataset landing page.
+ */
+function pickSourceUrl(job) {
+  const source = job?.source;
+  if (!source || typeof source !== "object") return undefined;
+  switch (source.type) {
+    case "github_issue":
+      return stringOrUndefined(source.issueUrl ?? source.pageUrl);
+    case "wikipedia_article":
+      return stringOrUndefined(source.pinnedRevisionUrl ?? source.articleUrl ?? source.pageUrl);
+    case "osv_advisory":
+      return stringOrUndefined(source.advisoryUrl ?? source.referenceUrl);
+    case "open_data_dataset":
+      return stringOrUndefined(source.resourceUrl ?? source.datasetUrl);
+    case "openapi_spec":
+      return stringOrUndefined(source.specUrl ?? source.finalUrl);
+    case "standards_spec":
+      return stringOrUndefined(source.canonicalUrl ?? source.specUrl);
+    default:
+      return undefined;
+  }
+}
+
+function stringOrUndefined(value) {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }

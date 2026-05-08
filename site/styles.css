@@ -1188,3 +1188,94 @@ code {
 .trail-streak-tier.tier-badge    { background: #f1e4d4; color: #a0691f; }
 .trail-streak-tier.tier-waiver   { background: #d8e4f1; color: #254e9a; }
 
+/* Verify receipt disclosure on each badge card (spec §10 PR B) ----- */
+
+.verify-disclosure {
+  margin-top: 0.65rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 0.6rem;
+  background: rgba(255, 253, 247, 0.6);
+}
+
+.verify-disclosure summary {
+  cursor: pointer;
+  font-family: var(--display);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  list-style: none;
+}
+
+.verify-disclosure summary::-webkit-details-marker {
+  display: none;
+}
+
+.verify-disclosure summary::after {
+  content: "▾";
+  display: inline-block;
+  margin-left: 0.4rem;
+  transition: transform 180ms ease;
+  color: var(--muted);
+}
+
+.verify-disclosure[open] summary::after {
+  transform: rotate(180deg);
+}
+
+.verify-rows {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 0.55rem;
+}
+
+.verify-row {
+  display: grid;
+  grid-template-columns: minmax(7rem, max-content) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 0.65rem;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.verify-label {
+  font-family: var(--display);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.verify-value {
+  font-family: "JetBrains Mono", "Space Grotesk", monospace;
+  font-size: 0.78rem;
+  color: var(--ink);
+  letter-spacing: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.verify-link {
+  font-family: "JetBrains Mono", "Space Grotesk", monospace;
+  font-size: 0.78rem;
+  color: var(--accent);
+  text-decoration: none;
+  letter-spacing: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.verify-link:hover {
+  text-decoration: underline;
+}
+
+.verify-empty {
+  margin-top: 0.55rem;
+  font-size: 0.78rem;
+}
+

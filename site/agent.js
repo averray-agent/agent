@@ -320,6 +320,124 @@ function renderTrailSummary(profile) {
   renderMergeTime(badges);
 }
 
+/* ---------------------------------------------------------------- */
+/* One-click verification — spec §10 PR B. Each badge card carries  */
+/* a "Verify receipt" disclosure exposing the source URL, on-chain  */
+/* hash, verifier verdict timestamp, verifier address, and Subscan  */
+/* deeplinks so the receipt is auditable in two clicks.             */
+/* Subscan URLs from Polkadot docs MCP:                              */
+/*   - mainnet: https://assethub-polkadot.subscan.io                 */
+/*   - testnet: https://assethub-paseo.subscan.io                    */
+/* ---------------------------------------------------------------- */
+
+const SUBSCAN_BASE_URL = "https://assethub-polkadot.subscan.io";
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function shortHash(value, head = 8, tail = 6) {
+  if (!value) return "—";
+  const s = String(value);
+  if (s.length <= head + tail + 3) return s;
+  return `${s.slice(0, head)}…${s.slice(-tail)}`;
+}
+
+function subscanAddressUrl(address) {
+  return `${SUBSCAN_BASE_URL}/account/${encodeURIComponent(address)}`;
+}
+
+function subscanExtrinsicSearchUrl(hash) {
+  // For arbitrary bytes32 hashes (chainJobId / evidenceHash) the
+  // canonical search endpoint accepts the value as a query and
+  // resolves to the matching block / extrinsic / event when it
+  // exists on-chain.
+  return `${SUBSCAN_BASE_URL}/search?q=${encodeURIComponent(hash)}`;
+}
+
+function verifySourceLabel(kind) {
+  switch (kind) {
+    case "wikipedia_article": return "Wikipedia revision";
+    case "github_issue": return "GitHub issue";
+    case "osv_advisory": return "OSV advisory";
+    case "open_data_dataset": return "Data.gov resource";
+    case "openapi_spec": return "OpenAPI spec";
+    case "standards_spec": return "Standards spec";
+    default: return "Source";
+  }
+}
+
+function renderVerifyPanel(badge) {
+  const v = badge.verification;
+  if (!v) {
+    return '<p class="profile-empty verify-empty">No verification details yet for this badge.</p>';
+  }
+  const rows = [];
+  if (v.sourceUrl) {
+    rows.push(`
+      <div class="verify-row">
+        <span class="verify-label">${escapeHtml(verifySourceLabel(v.sourceKind))}</span>
+        <a class="verify-link" href="${escapeHtml(v.sourceUrl)}" target="_blank" rel="noreferrer">Open upstream ↗</a>
+      </div>
+    `);
+  }
+  if (badge.completedAt) {
+    rows.push(`
+      <div class="verify-row">
+        <span class="verify-label">Verifier verdict</span>
+        <span class="verify-value" title="${escapeHtml(badge.completedAt)}">${escapeHtml(formatIso(badge.completedAt))}</span>
+      </div>
+    `);
+  }
+  if (v.verifierMode) {
+    rows.push(`
+      <div class="verify-row">
+        <span class="verify-label">Mode</span>
+        <code class="verify-value">${escapeHtml(v.verifierMode)}</code>
+      </div>
+    `);
+  }
+  if (v.verifier) {
+    rows.push(`
+      <div class="verify-row">
+        <span class="verify-label">Verifier wallet</span>
+        <a class="verify-link" href="${escapeHtml(subscanAddressUrl(v.verifier))}" target="_blank" rel="noreferrer">
+          <code>${escapeHtml(shortHash(v.verifier, 6, 4))}</code> ↗
+        </a>
+      </div>
+    `);
+  }
+  if (v.chainJobId) {
+    rows.push(`
+      <div class="verify-row">
+        <span class="verify-label">On-chain job</span>
+        <a class="verify-link" href="${escapeHtml(subscanExtrinsicSearchUrl(v.chainJobId))}" target="_blank" rel="noreferrer">
+          <code>${escapeHtml(shortHash(v.chainJobId))}</code> ↗
+        </a>
+      </div>
+    `);
+  }
+  if (v.evidenceHash) {
+    rows.push(`
+      <div class="verify-row">
+        <span class="verify-label">Evidence hash</span>
+        <a class="verify-link" href="${escapeHtml(subscanExtrinsicSearchUrl(v.evidenceHash))}" target="_blank" rel="noreferrer">
+          <code>${escapeHtml(shortHash(v.evidenceHash))}</code> ↗
+        </a>
+      </div>
+    `);
+  }
+  if (rows.length === 0) {
+    return '<p class="profile-empty verify-empty">No verification details yet for this badge.</p>';
+  }
+  return `<div class="verify-rows">${rows.join("")}</div>`;
+}
+
 function renderBadges(badges = []) {
   const root = byId("profile-badges");
   if (!root) return;
@@ -328,20 +446,26 @@ function renderBadges(badges = []) {
     return;
   }
 
-  root.innerHTML = badges.map((badge) => `
+  root.innerHTML = badges
+    .map((badge) => `
     <article class="badge-card">
       <p class="eyebrow">Badge</p>
-      <h3>${badge.jobId}</h3>
+      <h3>${escapeHtml(badge.jobId)}</h3>
       <div class="badge-meta">
-        <span>${badge.category} · level ${badge.level}</span>
-        <span>${formatAmountFromBase(badge.reward)}</span>
-        <span>${formatIso(badge.completedAt)}</span>
+        <span>${escapeHtml(badge.category)} · level ${escapeHtml(badge.level)}</span>
+        <span>${escapeHtml(formatAmountFromBase(badge.reward))}</span>
+        <span>${escapeHtml(formatIso(badge.completedAt))}</span>
       </div>
+      <details class="verify-disclosure">
+        <summary>Verify receipt</summary>
+        ${renderVerifyPanel(badge)}
+      </details>
       <div class="link-row">
-        <a class="button-ghost" href="${badge.badgeUrl ?? "#"}" target="_blank" rel="noreferrer">Open badge JSON</a>
+        <a class="button-ghost" href="${escapeHtml(badge.badgeUrl ?? "#")}" target="_blank" rel="noreferrer">Open badge JSON</a>
       </div>
     </article>
-  `).join("");
+  `)
+    .join("");
 }
 
 async function bootProfile() {
