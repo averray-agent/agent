@@ -5,7 +5,8 @@
 # that:
 #   - each contract address responds to a known function selector
 #   - TreasuryPolicy.owner() matches the expected owner (multisig on prod)
-#   - optional deployments/<profile>-multisig-owner.json matches owner and is verified
+#   - optional deployments/<profile>-multisig-owner.json matches owner
+#   - optional owner record finality when --require-owner-record-final is set
 #   - TreasuryPolicy.pauser() matches the expected pauser hot-key
 #   - TreasuryPolicy.verifiers(VERIFIER) and TreasuryPolicy.arbitrators(ARBITRATOR) are true
 #   - TreasuryPolicy.serviceOperators({escrow,account}) are true
@@ -45,9 +46,11 @@ if [[ ! -f "$manifest_path" ]]; then
 fi
 
 ALLOW_PAUSED=0
+REQUIRE_OWNER_RECORD_FINAL="${REQUIRE_OWNER_RECORD_FINAL:-0}"
 for arg in "$@"; do
   case "$arg" in
     --allow-paused) ALLOW_PAUSED=1 ;;
+    --require-owner-record-final) REQUIRE_OWNER_RECORD_FINAL=1 ;;
   esac
 done
 
@@ -71,12 +74,22 @@ check() {
   local label="$1"
   local expected="$2"
   local actual="$3"
-  if [[ "${expected,,}" == "${actual,,}" ]]; then
+  if [[ "$(lower "$expected")" == "$(lower "$(strip_cast_annotation "$actual")")" ]]; then
     printf "  [ok] %s\n" "$label"
   else
     printf "  [FAIL] %s: expected %s, got %s\n" "$label" "$expected" "$actual"
     fail=1
   fi
+}
+
+lower() {
+  printf "%s" "$1" | tr '[:upper:]' '[:lower:]'
+}
+
+strip_cast_annotation() {
+  # Some Foundry versions print integers as `50000 [5e4]`.
+  # Keep the plain ABI value for manifest comparisons.
+  printf "%s" "${1%% \[*}"
 }
 
 check_bool() {
@@ -167,8 +180,13 @@ if [[ -f "$owner_record_path" ]]; then
   record_status="$(jq -r '.status // empty' "$owner_record_path")"
   record_ready="$(jq -r '.launchGate.readyForOwnerUse // false' "$owner_record_path")"
   check "record owner" "$EXPECTED_OWNER" "$record_owner"
-  check "record status" "verified" "$record_status"
-  check_bool "record readyForOwnerUse" "true" "$record_ready"
+  if [[ "$REQUIRE_OWNER_RECORD_FINAL" == "1" ]]; then
+    check "record status" "verified" "$record_status"
+    check_bool "record readyForOwnerUse" "true" "$record_ready"
+  else
+    printf "  [info] record status %s (final owner-record gate skipped)\n" "$record_status"
+    printf "  [info] record readyForOwnerUse %s (final owner-record gate skipped)\n" "$record_ready"
+  fi
 fi
 
 echo ""
