@@ -63,7 +63,13 @@ test("runHostedWorkerLoop creates, claims, submits, verifies, and writes evidenc
     env: {
       API_BASE_URL: "https://api.example.test/",
       ADMIN_JWT: "token",
-      PRODUCT_PROOF_EVIDENCE_FILE: evidenceFile
+      PRODUCT_PROOF_EVIDENCE_FILE: evidenceFile,
+      // Pin the reward to the original test value so this test's assertions
+      // (rewardAmount === 0.000001, requiredRaw === "1") remain independent
+      // of DEFAULT_REWARD_AMOUNT. The default was bumped to clear USDC's
+      // existential deposit; this test still exercises the small-reward
+      // configuration path explicitly.
+      PRODUCT_PROOF_REWARD_AMOUNT: "0.000001"
     }
   });
 
@@ -179,7 +185,9 @@ test("runHostedWorkerLoop fails closed before mutation when AgentAccountCore USD
       },
       now: () => 1700000000000,
       log: () => {},
-      env: { ADMIN_JWT: "token" }
+      // Pinning the reward keeps the assertion regex stable across changes
+      // to DEFAULT_REWARD_AMOUNT.
+      env: { ADMIN_JWT: "token", PRODUCT_PROOF_REWARD_AMOUNT: "0.000001" }
     }),
     /requires funded USDC liquidity before mutation; wallet=0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519; account=0x3333333333333333333333333333333333333333; required=0\.000001 USDC \(raw 1\); available=0 USDC \(raw 0\)/u
   );
