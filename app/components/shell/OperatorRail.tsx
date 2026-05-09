@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  Activity,
   AlertTriangle,
   Coins,
   FileCheck2,
@@ -46,7 +45,6 @@ const NAV_GROUPS: NavGroup[] = [
     label: "Room",
     items: [
       { href: "/overview", label: "Overview", icon: LayoutDashboard },
-      { href: "/monitor", label: "Live monitor", icon: Activity },
       { href: "/runs", label: "Runs", icon: Gauge },
       { href: "/receipts", label: "Receipts", icon: ScrollText },
       { href: "/agents", label: "Agents", icon: Users },
