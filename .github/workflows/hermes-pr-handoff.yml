@@ -75,7 +75,27 @@ jobs:
         run: |
           prompt=$(
             cat <<PROMPT
-          Use Averray MCP tools only. Call averray_invoke_agent_task with requester='github-actions', intent='pr_handoff', repo='${HANDOFF_REPO}', pullRequestNumber=${HANDOFF_PR_NUMBER}, testCaseIds=['TBE2E-004'], correlationId='${HANDOFF_CORRELATION_ID}', reason='post-CI PR handoff'. Report finalVerdict, mergeRecommendation, requested tests, GitHub risk findings, and safety briefly. Do not merge or mutate GitHub; this handoff is recommendation-only.
+          Use Averray MCP tools only. Call averray_invoke_agent_task with requester='github-actions', intent='pr_handoff', repo='${HANDOFF_REPO}', pullRequestNumber=${HANDOFF_PR_NUMBER}, testCaseIds=['TBE2E-004'], correlationId='${HANDOFF_CORRELATION_ID}', reason='post-CI PR handoff'.
+
+          Before giving the merge recommendation, perform a PR code and logic review:
+          - Inspect PR metadata, changed files, diff/risk summary, CI status, and requested testbed results.
+          - Look for logic bugs, unsafe defaults, missing guards, missing tests, race/idempotency problems, timeout/retry problems, secret exposure, and deployment risk.
+          - Pay extra attention to deploy workflows, auth, secrets, payments/settlement, indexer, contracts, Caddy, database migrations, and external agent hooks.
+          - Verify that CI coverage matches the touched areas. If it does not, list the missing checks.
+          - If you cannot inspect the diff or changed files, say so clearly and mark the code review verdict as needs_human_review.
+
+          Report these sections briefly:
+          - finalVerdict
+          - codeReviewVerdict: approve, conditional_approve, needs_human_review, or block
+          - blockingFindings
+          - nonBlockingFindings
+          - missingTests
+          - requestedTests
+          - GitHub risk findings
+          - mergeRecommendation
+          - safety
+
+          Do not merge or mutate GitHub; this handoff is recommendation-only.
           PROMPT
           )
 
@@ -126,7 +146,7 @@ jobs:
             echo "- Outcome: \`${outcome}\`"
             echo
             echo '```text'
-            sed -n '1,220p' hermes-handoff.log
+            tail -n 260 hermes-handoff.log
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -143,7 +163,7 @@ jobs:
         run: |
           {
             echo "<!-- hermes-pr-handoff:${HANDOFF_CORRELATION_ID} -->"
-            echo "### Hermes PR Handoff"
+            echo "### Hermes PR Handoff and Code Review"
             echo
             echo "- Outcome: \`${HERMES_OUTCOME}\`"
             echo "- Correlation: \`${HANDOFF_CORRELATION_ID}\`"
@@ -153,26 +173,55 @@ jobs:
             echo "<summary>Hermes output</summary>"
             echo
             echo '```text'
-            sed -n '1,120p' hermes-handoff.log
+            tail -n 180 hermes-handoff.log
             echo '```'
             echo
             echo "</details>"
           } > hermes-comment.md
 
+          set +e
           comment_id=$(
             gh api "repos/${HANDOFF_REPO}/issues/${HANDOFF_PR_NUMBER}/comments" \
-              --jq ".[] | select(.body | contains(\"hermes-pr-handoff:${HANDOFF_CORRELATION_ID}\")) | .id" \
-              | tail -n 1
+              --jq "map(select(.body | contains(\"hermes-pr-handoff:${HANDOFF_CORRELATION_ID}\")) | .id) | last // \"\"" \
+              2>hermes-comment-api.err
           )
+          lookup_status=$?
 
+          if [ "$lookup_status" -ne 0 ]; then
+            {
+              echo "### Hermes PR comment skipped"
+              echo
+              echo "Hermes completed, but GitHub did not allow this workflow to read PR comments."
+              echo
+              echo '```text'
+              cat hermes-comment-api.err
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          body=$(cat hermes-comment.md)
           if [ -n "$comment_id" ]; then
-            body=$(cat hermes-comment.md)
             gh api -X PATCH "repos/${HANDOFF_REPO}/issues/comments/${comment_id}" \
-              -f body="$body" >/dev/null
+              -f body="$body" >/dev/null 2>hermes-comment-api.err
+            comment_status=$?
           else
-            gh pr comment "$HANDOFF_PR_NUMBER" \
-              --repo "$HANDOFF_REPO" \
-              --body-file hermes-comment.md
+            gh api -X POST "repos/${HANDOFF_REPO}/issues/${HANDOFF_PR_NUMBER}/comments" \
+              -f body="$body" >/dev/null 2>hermes-comment-api.err
+            comment_status=$?
+          fi
+
+          if [ "$comment_status" -ne 0 ]; then
+            {
+              echo "### Hermes PR comment skipped"
+              echo
+              echo "Hermes completed, but GitHub did not allow this workflow to write a PR comment."
+              echo
+              echo '```text'
+              cat hermes-comment-api.err
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
           fi
 
       - name: Fail if Hermes handoff failed
