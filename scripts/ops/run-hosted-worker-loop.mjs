@@ -6,7 +6,17 @@ import { AgentPlatformClient } from "../../sdk/agent-platform-client.js";
 import { DEFAULT_ESCROW_ASSET } from "../../mcp-server/src/core/assets.js";
 
 const DEFAULT_API_BASE_URL = "https://api.averray.com";
-const DEFAULT_REWARD_AMOUNT = 0.000001;
+// Reward must yield at least the asset's `minBalance` (existential
+// deposit on the Polkadot Hub Assets pallet) once converted to base
+// units, otherwise EscrowCore.resolveSinglePayout will revert with
+// SafeTransfer.TransferFailed when settling to a worker whose asset
+// account has been destroyed (balance dropped to 0). Trust-Backed
+// assets on Asset Hub Paseo carry non-trivial minBalance values — for
+// USDC asset id 1337 the value is 70_000 base units (0.07 USDC). Pick
+// a default well above any common minBalance: 0.1 USDC = 100_000 base
+// units. Operators running with cheaper assets (DOT-decimals) can set
+// PRODUCT_PROOF_REWARD_AMOUNT explicitly to a smaller number.
+const DEFAULT_REWARD_AMOUNT = 0.1;
 const REQUIRED_ESCROW_ASSET = {
   symbol: DEFAULT_ESCROW_ASSET.symbol,
   address: DEFAULT_ESCROW_ASSET.address.toLowerCase(),
