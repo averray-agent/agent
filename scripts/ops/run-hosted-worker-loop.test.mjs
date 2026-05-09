@@ -75,6 +75,7 @@ test("runHostedWorkerLoop creates, claims, submits, verifies, and writes evidenc
     "getAgentProfile"
   ]);
   assert.equal(calls[1][1].verifierMode, "benchmark");
+  assert.equal(calls[1][1].rewardAsset, "DOT");
   assert.equal(calls[2][2], `product-proof:${jobId}`);
 
   const written = JSON.parse(await readFile(evidenceFile, "utf8"));

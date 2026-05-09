@@ -35,6 +35,7 @@ export async function runHostedWorkerLoop({
     id: jobId,
     category: "coding",
     tier: "starter",
+    rewardAsset: env.PRODUCT_PROOF_REWARD_ASSET || "DOT",
     rewardAmount: 1,
     verifierMode: "benchmark",
     verifierTerms: ["complete", "verified", "output"],
