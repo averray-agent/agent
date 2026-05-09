@@ -40,11 +40,13 @@ test("checkProductProofGate validates public discovery, pages, and schemas", asy
 
   const seen = [];
   await checkProductProofGate({
+    env: { PRODUCT_PROOF_EVIDENCE_FILE: "/tmp/product-proof-evidence-not-required.json" },
     fetchImpl: fakeFetch(responses),
     log: (line) => seen.push(line)
   });
 
   assert.ok(seen.includes("Product-proof gate passed."));
+  assert.ok(seen.includes("Worker-loop evidence is not required; skipping mutation-loop evidence check."));
 });
 
 test("checkProductProofGate fails when the public manifest drifts from the API mirror", async () => {

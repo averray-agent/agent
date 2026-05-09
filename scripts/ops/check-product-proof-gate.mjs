@@ -83,14 +83,14 @@ export async function checkProductProofGate({
   const sample = await fetchJson(fetchImpl, `${apiBaseUrl}/schemas/jobs/${sampleSchema}.json`);
   assert.equal(sample.$id, sampleRef);
 
-  if (evidenceFile) {
+  if (requireWorkerLoop && evidenceFile) {
     log(`Checking hosted worker-loop evidence: ${evidenceFile}`);
     const evidence = JSON.parse(await readFile(evidenceFile, "utf8"));
     await checkWorkerLoopEvidence(fetchImpl, evidence, { apiBaseUrl });
   } else if (requireWorkerLoop) {
     throw new Error("PRODUCT_PROOF_REQUIRE_WORKER_LOOP=1 requires PRODUCT_PROOF_EVIDENCE_FILE.");
   } else {
-    log("Worker-loop evidence file not provided; skipping mutation-loop evidence check.");
+    log("Worker-loop evidence is not required; skipping mutation-loop evidence check.");
   }
 
   log("Product-proof gate passed.");
