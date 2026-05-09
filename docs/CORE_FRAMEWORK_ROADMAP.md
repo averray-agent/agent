@@ -439,7 +439,10 @@ delegation feel like a framework feature instead of just a metadata convention.
 - [x] expose child runs on session detail endpoints
 - [x] add delegation budget and depth policy fields
 - [x] reserve the child reward from the parent wallet at sub-job creation
-- [ ] extend profile and operator UI surfaces around sub-contracting history
+- [x] extend profile and operator UI surfaces around sub-contracting history
+  (PR #192 added the operator-side `JobLineagePanel` on `/runs/detail`;
+  PR #203 added the public agent profile's `lineage` block + delegation
+  history section)
 
 ### What this unlocks
 
