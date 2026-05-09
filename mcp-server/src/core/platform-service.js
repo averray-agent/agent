@@ -470,6 +470,16 @@ export class PlatformService {
     return this.jobCatalogService.getJobDefinition(jobId);
   }
 
+  /**
+   * Synchronous lookup of every child job posted from a given parent
+   * session. Used by HTTP routes that need a slim sub-contracting
+   * view (public agent profile, badge lineage block) without paying
+   * for `getSubJobLineage`'s session-history fetches. Roadmap §8.
+   */
+  listChildJobsByParentSession(parentSessionId) {
+    return this.jobCatalogService.listJobsByParentSession(parentSessionId);
+  }
+
   async getPublicJobDefinition(jobId, options = {}) {
     const { wallet, currentWallet, now = new Date() } = options;
     return this.attachClaimState(

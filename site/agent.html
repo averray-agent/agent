@@ -223,6 +223,41 @@
             </div>
           </section>
 
+          <!--
+            Sub-contracting history — derived from the live `lineage`
+            block on the profile JSON. Two columns: jobs this wallet
+            posted as a parent (delegated) and jobs this wallet
+            worked as a child of someone else's session
+            (subcontracted). Empty until at least one sub-job lands.
+            Roadmap §8: "extend profile and operator UI surfaces
+            around sub-contracting history".
+          -->
+          <section class="profile-panel">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Sub-contracting</p>
+                <h2>Delegation history</h2>
+              </div>
+              <span id="profile-lineage-summary" class="profile-summary-source">no sub-contracting yet</span>
+            </div>
+
+            <div class="lineage-grid">
+              <article class="lineage-block">
+                <p class="trail-block-label">Delegated <span id="profile-lineage-delegated-count">(0)</span></p>
+                <div id="profile-lineage-delegated" class="lineage-list">
+                  <p class="profile-empty">No sub-jobs posted from this wallet yet.</p>
+                </div>
+              </article>
+
+              <article class="lineage-block">
+                <p class="trail-block-label">Worked as sub-contractor <span id="profile-lineage-subcontracted-count">(0)</span></p>
+                <div id="profile-lineage-subcontracted" class="lineage-list">
+                  <p class="profile-empty">No sub-jobs claimed by this wallet yet.</p>
+                </div>
+              </article>
+            </div>
+          </section>
+
           <section class="profile-panel">
             <div class="section-heading">
               <div>

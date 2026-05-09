@@ -495,3 +495,101 @@ test("buildAgentProfile leaves disputes empty when no contested sessions exist",
     resolved: 0,
   });
 });
+
+test("buildAgentProfile surfaces sub-contracting lineage when getLineage returns a parent or children", () => {
+  const PARENT_WALLET = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const sessions = [
+    approvedSession({
+      jobId: "starter-coding-001",
+      sessionId: "session-parent",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    }),
+    approvedSession({
+      jobId: "governance-pro-001",
+      sessionId: "session-child",
+      updatedAt: "2026-01-02T00:00:00.000Z",
+    }),
+  ];
+  // session-parent posted one sub-job; session-child worked on a
+  // sub-job whose parent belonged to PARENT_WALLET.
+  const lineageBySession = {
+    "session-parent": {
+      children: [{ jobId: "child-job-1", parentWallet: WALLET.toLowerCase() }],
+    },
+    "session-child": {
+      parent: {
+        sessionId: "remote-session",
+        jobId: "remote-job",
+        wallet: PARENT_WALLET,
+      },
+    },
+  };
+  const profile = buildAgentProfile({
+    wallet: WALLET,
+    reputation: { skill: 70, reliability: 60, economic: 40 },
+    sessions,
+    getJobDefinition: makeGetJob(),
+    getLineage: (sessionId) => lineageBySession[sessionId],
+  });
+
+  assert.equal(profile.stats.lineage.delegated, 1);
+  assert.equal(profile.stats.lineage.subcontracted, 1);
+  assert.equal(profile.lineage.delegated.length, 1);
+  assert.equal(profile.lineage.subcontracted.length, 1);
+
+  const delegated = profile.lineage.delegated[0];
+  assert.equal(delegated.role, "parent");
+  assert.equal(delegated.sessionId, "session-parent");
+  assert.equal(delegated.children.count, 1);
+  assert.deepEqual(delegated.children.jobIds, ["child-job-1"]);
+
+  const subcontracted = profile.lineage.subcontracted[0];
+  assert.equal(subcontracted.role, "child");
+  assert.equal(subcontracted.sessionId, "session-child");
+  assert.equal(subcontracted.parent.sessionId, "remote-session");
+  assert.equal(subcontracted.parent.jobId, "remote-job");
+  assert.equal(subcontracted.parent.wallet, PARENT_WALLET.toLowerCase());
+  assert.equal(subcontracted.parent.isSelf, false);
+});
+
+test("buildAgentProfile flags a session whose parent wallet equals its own wallet as self-delegated", () => {
+  const sessions = [
+    approvedSession({
+      jobId: "governance-pro-001",
+      sessionId: "session-self",
+      updatedAt: "2026-01-03T00:00:00.000Z",
+    }),
+  ];
+  const profile = buildAgentProfile({
+    wallet: WALLET,
+    reputation: { skill: 50, reliability: 50, economic: 50 },
+    sessions,
+    getJobDefinition: makeGetJob(),
+    getLineage: () => ({
+      parent: { sessionId: "self-parent", jobId: "self-job", wallet: WALLET },
+    }),
+  });
+  assert.equal(profile.lineage.subcontracted[0].parent.isSelf, true);
+});
+
+test("buildAgentProfile leaves lineage empty when no sessions carry sub-contracting markers", () => {
+  const sessions = [
+    approvedSession({
+      jobId: "starter-coding-001",
+      sessionId: "session-plain",
+      updatedAt: "2026-01-04T00:00:00.000Z",
+    }),
+  ];
+  const profile = buildAgentProfile({
+    wallet: WALLET,
+    reputation: { skill: 50, reliability: 50, economic: 50 },
+    sessions,
+    getJobDefinition: makeGetJob(),
+    // Lookup returns nothing — same as the common case where the
+    // HTTP layer's preloadLineage short-circuits because no session
+    // has a parent or children.
+    getLineage: () => undefined,
+  });
+  assert.deepEqual(profile.lineage, { delegated: [], subcontracted: [] });
+  assert.deepEqual(profile.stats.lineage, { delegated: 0, subcontracted: 0 });
+});

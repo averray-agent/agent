@@ -73,6 +73,11 @@ const DESCRIPTION_MAX = 1024;
  * @param {string} [input.image]              Badge image URL (optional)
  * @param {string} [input.externalUrl]        Profile page URL override
  * @param {string} [input.publicBaseUrl]      Falls back to external_url = <base>/agents/<worker>
+ * @param {object} [input.lineage]            Optional sub-contracting lineage:
+ *                                            { parent?: { sessionId, jobId, wallet },
+ *                                              children?: { count, jobIds?, sessionIds? } }
+ *                                            See docs/schemas/agent-badge-v1.md and
+ *                                            CORE_FRAMEWORK_ROADMAP §8 for the rule.
  * @returns {object} metadata document
  */
 export function buildBadgeMetadata(input) {
@@ -93,7 +98,8 @@ export function buildBadgeMetadata(input) {
     metadataURI,
     image,
     externalUrl,
-    publicBaseUrl
+    publicBaseUrl,
+    lineage
   } = input;
 
   const canonicalCategory = String(category ?? "").trim().toLowerCase() || "unknown";
@@ -135,11 +141,65 @@ export function buildBadgeMetadata(input) {
   if (metadataURI) {
     doc.averray.metadataURI = metadataURI;
   }
+  const normalizedLineage = normalizeBadgeLineage(lineage);
+  if (normalizedLineage) {
+    doc.averray.lineage = normalizedLineage;
+  }
 
   // Re-validate before handing back to the caller so we fail fast at the
   // construction site, not when the endpoint serves it.
   validateBadgeMetadata(doc);
   return doc;
+}
+
+/**
+ * Strip noise / canonicalise the lineage block so only the keys we
+ * accept survive. Returns `undefined` when nothing meaningful is
+ * left, so the badge omits the lineage field entirely (the schema
+ * treats lineage as optional rather than empty).
+ */
+function normalizeBadgeLineage(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const lineage = {};
+  if (raw.parent && typeof raw.parent === "object" && !Array.isArray(raw.parent)) {
+    const parent = {};
+    if (typeof raw.parent.sessionId === "string" && raw.parent.sessionId) {
+      parent.sessionId = raw.parent.sessionId;
+    }
+    if (typeof raw.parent.jobId === "string" && raw.parent.jobId) {
+      parent.jobId = raw.parent.jobId;
+    }
+    if (typeof raw.parent.wallet === "string" && ADDRESS_RE.test(raw.parent.wallet)) {
+      parent.wallet = raw.parent.wallet.toLowerCase();
+    }
+    if (Object.keys(parent).length > 0) {
+      lineage.parent = parent;
+    }
+  }
+  if (raw.children && typeof raw.children === "object" && !Array.isArray(raw.children)) {
+    const children = {};
+    const count = Number(raw.children.count);
+    if (Number.isFinite(count) && count >= 0) {
+      children.count = Math.floor(count);
+    }
+    if (Array.isArray(raw.children.jobIds)) {
+      const jobIds = raw.children.jobIds.filter((id) => typeof id === "string" && id);
+      if (jobIds.length > 0) children.jobIds = jobIds;
+    }
+    if (Array.isArray(raw.children.sessionIds)) {
+      const sessionIds = raw.children.sessionIds.filter((id) => typeof id === "string" && id);
+      if (sessionIds.length > 0) children.sessionIds = sessionIds;
+    }
+    if (Object.keys(children).length > 0) {
+      // If a count wasn't supplied, derive it from the lists so the
+      // surface always carries an explicit "how many" value.
+      if (children.count === undefined && Array.isArray(children.jobIds)) {
+        children.count = children.jobIds.length;
+      }
+      lineage.children = children;
+    }
+  }
+  return Object.keys(lineage).length > 0 ? lineage : undefined;
 }
 
 /**
@@ -220,8 +280,14 @@ function requireAverray(averray) {
     requireString(averray, "metadataURI", { parent: "averray", urlLike: true });
   }
 
+  if ("lineage" in averray) {
+    validateLineage(averray.lineage);
+  }
+
   // Disallow unknown keys in `averray` so producers don't drift the schema
-  // without bumping schemaVersion.
+  // without bumping schemaVersion. `lineage` was added under v1 as a
+  // purely-additive field — see docs/schemas/agent-badge-v1.md and
+  // CORE_FRAMEWORK_ROADMAP §8.
   const allowed = new Set([
     "schemaVersion",
     "jobId",
@@ -237,11 +303,80 @@ function requireAverray(averray) {
     "worker",
     "poster",
     "verifier",
-    "metadataURI"
+    "metadataURI",
+    "lineage"
   ]);
   for (const key of Object.keys(averray)) {
     if (!allowed.has(key)) {
       throw new ValidationError(`averray.${key} is not a recognised field for schemaVersion ${BADGE_SCHEMA_VERSION}`);
+    }
+  }
+}
+
+function validateLineage(lineage) {
+  if (!lineage || typeof lineage !== "object" || Array.isArray(lineage)) {
+    throw new ValidationError("averray.lineage must be an object");
+  }
+  const allowed = new Set(["parent", "children"]);
+  for (const key of Object.keys(lineage)) {
+    if (!allowed.has(key)) {
+      throw new ValidationError(`averray.lineage.${key} is not a recognised lineage field`);
+    }
+  }
+  if ("parent" in lineage) {
+    const parent = lineage.parent;
+    if (!parent || typeof parent !== "object" || Array.isArray(parent)) {
+      throw new ValidationError("averray.lineage.parent must be an object");
+    }
+    const parentAllowed = new Set(["sessionId", "jobId", "wallet"]);
+    for (const key of Object.keys(parent)) {
+      if (!parentAllowed.has(key)) {
+        throw new ValidationError(`averray.lineage.parent.${key} is not a recognised parent field`);
+      }
+    }
+    if ("sessionId" in parent) {
+      requireString(parent, "sessionId", { parent: "averray.lineage.parent" });
+    }
+    if ("jobId" in parent) {
+      requireString(parent, "jobId", { parent: "averray.lineage.parent" });
+    }
+    if ("wallet" in parent && !ADDRESS_RE.test(parent.wallet ?? "")) {
+      throw new ValidationError("averray.lineage.parent.wallet must be a 0x-prefixed 20-byte EVM address");
+    }
+  }
+  if ("children" in lineage) {
+    const children = lineage.children;
+    if (!children || typeof children !== "object" || Array.isArray(children)) {
+      throw new ValidationError("averray.lineage.children must be an object");
+    }
+    const childrenAllowed = new Set(["count", "jobIds", "sessionIds"]);
+    for (const key of Object.keys(children)) {
+      if (!childrenAllowed.has(key)) {
+        throw new ValidationError(`averray.lineage.children.${key} is not a recognised children field`);
+      }
+    }
+    if (!Number.isInteger(children.count) || children.count < 0) {
+      throw new ValidationError("averray.lineage.children.count must be a non-negative integer");
+    }
+    if ("jobIds" in children) {
+      if (!Array.isArray(children.jobIds)) {
+        throw new ValidationError("averray.lineage.children.jobIds must be an array of strings");
+      }
+      for (const id of children.jobIds) {
+        if (typeof id !== "string" || id.length === 0) {
+          throw new ValidationError("averray.lineage.children.jobIds entries must be non-empty strings");
+        }
+      }
+    }
+    if ("sessionIds" in children) {
+      if (!Array.isArray(children.sessionIds)) {
+        throw new ValidationError("averray.lineage.children.sessionIds must be an array of strings");
+      }
+      for (const id of children.sessionIds) {
+        if (typeof id !== "string" || id.length === 0) {
+          throw new ValidationError("averray.lineage.children.sessionIds entries must be non-empty strings");
+        }
+      }
     }
   }
 }
@@ -334,7 +469,14 @@ function stripTrailingSlash(value) {
  * @param {object} params.session                 Session object from the state store
  * @param {object} params.job                     Canonical job definition
  * @param {object} [params.verification]          Verification result, if any
- * @param {object} [params.context]               { publicBaseUrl, posterAddress, verifierAddress, image }
+ * @param {object} [params.context]               { publicBaseUrl, posterAddress, verifierAddress, image, lineage }
+ *                                                 `context.lineage` (optional) is the slim
+ *                                                 sub-contracting block: `{ parent?, children? }`.
+ *                                                 The HTTP layer assembles it by walking
+ *                                                 `job.parentSessionId` (parent) and
+ *                                                 `listJobsByParentSession(session.sessionId)`
+ *                                                 (children) so this builder doesn't need
+ *                                                 to reach into the catalog. Roadmap §8.
  */
 export function buildBadgeFromSession({ session, job, verification, context = {} }) {
   if (!session) {
@@ -385,7 +527,8 @@ export function buildBadgeFromSession({ session, job, verification, context = {}
     verifier: requireLowerAddress(context.verifierAddress ?? UNKNOWN_ADDRESS, "context.verifierAddress"),
     metadataURI: selfUrl,
     image: context.image,
-    publicBaseUrl
+    publicBaseUrl,
+    lineage: context.lineage
   });
 }
 

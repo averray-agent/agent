@@ -259,3 +259,52 @@ test("buildBadgeFromSession never attributes poster/verifier back to the worker"
   assert.notEqual(doc.averray.poster, doc.averray.worker);
   assert.notEqual(doc.averray.verifier, doc.averray.worker);
 });
+
+test("buildBadgeMetadata accepts an optional lineage block (parent only)", () => {
+  const doc = buildBadgeMetadata({
+    ...validInput(),
+    lineage: {
+      parent: {
+        sessionId: "remote-session",
+        jobId: "remote-job",
+        wallet: "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      }
+    }
+  });
+  assert.deepEqual(doc.averray.lineage, {
+    parent: {
+      sessionId: "remote-session",
+      jobId: "remote-job",
+      wallet: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  });
+});
+
+test("buildBadgeMetadata accepts a children-only lineage block and derives count from jobIds", () => {
+  const doc = buildBadgeMetadata({
+    ...validInput(),
+    lineage: {
+      children: { jobIds: ["child-1", "child-2"] }
+    }
+  });
+  assert.deepEqual(doc.averray.lineage, {
+    children: { count: 2, jobIds: ["child-1", "child-2"] }
+  });
+});
+
+test("buildBadgeMetadata omits the lineage block when nothing meaningful was supplied", () => {
+  const doc = buildBadgeMetadata({ ...validInput(), lineage: { parent: {} } });
+  assert.equal("lineage" in doc.averray, false);
+});
+
+test("validateBadgeMetadata rejects an unknown lineage subfield", () => {
+  const doc = buildBadgeMetadata(validInput());
+  doc.averray.lineage = { parent: { sessionId: "s1", rogue: "x" } };
+  assert.throws(() => validateBadgeMetadata(doc), ValidationError);
+});
+
+test("validateBadgeMetadata rejects a malformed parent wallet", () => {
+  const doc = buildBadgeMetadata(validInput());
+  doc.averray.lineage = { parent: { wallet: "not-a-wallet" } };
+  assert.throws(() => validateBadgeMetadata(doc), ValidationError);
+});

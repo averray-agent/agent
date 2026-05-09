@@ -616,6 +616,136 @@ function renderVerifyPanel(badge) {
   return `<div class="verify-rows">${rows.join("")}</div>`;
 }
 
+/* ---------------------------------------------------------------- */
+/* Sub-contracting history — see CORE_FRAMEWORK_ROADMAP §8. Reads    */
+/* the live `profile.lineage` block emitted by the agent profile    */
+/* builder (delegated[] + subcontracted[]) and renders two columns: */
+/* parent jobs this wallet posted, and child jobs this wallet       */
+/* worked on someone else's behalf. Each row stays compact: jobId,  */
+/* counterparty wallet, status, updatedAt. Empty state speaks       */
+/* honestly ("no sub-contracting yet") rather than inventing rows.  */
+/* ---------------------------------------------------------------- */
+
+const LINEAGE_STATUS_TONE = {
+  resolved: "won",
+  rejected: "lost",
+  disputed: "open",
+  open: "open",
+  paused: "open",
+  archived: "split",
+  stale: "split"
+};
+
+function renderLineageStatusPill(status) {
+  const key = String(status ?? "").toLowerCase();
+  const variant = LINEAGE_STATUS_TONE[key] ?? "resolved";
+  return `<span class="dispute-pill dispute-pill-${escapeHtml(variant)}">${escapeHtml(key || "unknown")}</span>`;
+}
+
+function renderDelegatedRow(entry) {
+  const childCount = entry?.children?.count ?? 0;
+  const jobIds = Array.isArray(entry?.children?.jobIds) ? entry.children.jobIds : [];
+  return `
+    <article class="lineage-row lineage-row-parent">
+      <header class="lineage-row-header">
+        <div class="lineage-row-title">
+          <p class="eyebrow">Parent</p>
+          <h3>${escapeHtml(entry.jobTitle ?? entry.jobId)}</h3>
+          <p class="lineage-row-meta">
+            <code>${escapeHtml(entry.jobId)}</code> · session
+            <code>${escapeHtml(entry.sessionId)}</code>
+          </p>
+        </div>
+        ${renderLineageStatusPill(entry.status)}
+      </header>
+      <p class="lineage-row-summary">
+        Delegated <strong>${childCount}</strong>
+        sub-job${childCount === 1 ? "" : "s"} on
+        <span title="${escapeHtml(entry.updatedAt ?? "")}">${escapeHtml(formatIso(entry.updatedAt))}</span>.
+      </p>
+      ${jobIds.length
+        ? `<ul class="lineage-row-jobs">${jobIds
+            .slice(0, 5)
+            .map((id) => `<li><code>${escapeHtml(id)}</code></li>`)
+            .join("")}${jobIds.length > 5 ? `<li class="lineage-row-jobs-more">+${jobIds.length - 5} more</li>` : ""}</ul>`
+        : ""}
+    </article>
+  `;
+}
+
+function renderSubcontractedRow(entry) {
+  const parent = entry?.parent ?? {};
+  const counterparty = parent.wallet
+    ? `<a class="verify-link" href="/agents/${escapeHtml(parent.wallet)}"><code>${escapeHtml(shortHash(parent.wallet, 6, 4))}</code> ↗</a>`
+    : '<span class="verify-value">—</span>';
+  return `
+    <article class="lineage-row lineage-row-child">
+      <header class="lineage-row-header">
+        <div class="lineage-row-title">
+          <p class="eyebrow">Sub-contractor</p>
+          <h3>${escapeHtml(entry.jobTitle ?? entry.jobId)}</h3>
+          <p class="lineage-row-meta">
+            <code>${escapeHtml(entry.jobId)}</code> · session
+            <code>${escapeHtml(entry.sessionId)}</code>
+          </p>
+        </div>
+        ${renderLineageStatusPill(entry.status)}
+      </header>
+      <p class="lineage-row-summary">
+        ${parent.isSelf ? "Self-delegated from" : "Posted by"}
+        ${counterparty}
+        ${parent.jobId ? `· parent job <code>${escapeHtml(parent.jobId)}</code>` : ""}
+        on <span title="${escapeHtml(entry.updatedAt ?? "")}">${escapeHtml(formatIso(entry.updatedAt))}</span>.
+      </p>
+    </article>
+  `;
+}
+
+function renderLineageHistory(profile) {
+  const summary = byId("profile-lineage-summary");
+  const delegatedRoot = byId("profile-lineage-delegated");
+  const subcontractedRoot = byId("profile-lineage-subcontracted");
+  const delegatedCount = byId("profile-lineage-delegated-count");
+  const subcontractedCount = byId("profile-lineage-subcontracted-count");
+
+  const lineage = profile.lineage ?? {};
+  const delegated = Array.isArray(lineage.delegated) ? lineage.delegated : [];
+  const subcontracted = Array.isArray(lineage.subcontracted) ? lineage.subcontracted : [];
+  const stats = profile.stats?.lineage ?? {};
+  const totalDelegated = Number(stats.delegated ?? delegated.length ?? 0);
+  const totalSubcontracted = Number(stats.subcontracted ?? subcontracted.length ?? 0);
+
+  if (delegatedCount) delegatedCount.textContent = `(${totalDelegated})`;
+  if (subcontractedCount) subcontractedCount.textContent = `(${totalSubcontracted})`;
+
+  if (summary) {
+    if (totalDelegated <= 0 && totalSubcontracted <= 0) {
+      summary.textContent = "no sub-contracting yet";
+    } else {
+      const parts = [];
+      if (totalDelegated > 0) parts.push(`${totalDelegated} delegated`);
+      if (totalSubcontracted > 0) parts.push(`${totalSubcontracted} subcontracted`);
+      summary.textContent = parts.join(" · ");
+    }
+  }
+
+  if (delegatedRoot) {
+    if (delegated.length === 0) {
+      delegatedRoot.innerHTML = '<p class="profile-empty">No sub-jobs posted from this wallet yet.</p>';
+    } else {
+      delegatedRoot.innerHTML = delegated.map(renderDelegatedRow).join("");
+    }
+  }
+
+  if (subcontractedRoot) {
+    if (subcontracted.length === 0) {
+      subcontractedRoot.innerHTML = '<p class="profile-empty">No sub-jobs claimed by this wallet yet.</p>';
+    } else {
+      subcontractedRoot.innerHTML = subcontracted.map(renderSubcontractedRow).join("");
+    }
+  }
+}
+
 function renderBadges(badges = []) {
   const root = byId("profile-badges");
   if (!root) return;
@@ -695,6 +825,7 @@ async function bootProfile() {
     );
     renderTrailSummary(profile);
     renderDisputeHistory(profile);
+    renderLineageHistory(profile);
     renderBadges(profile.badges);
   } catch (error) {
     if (loading) loading.textContent = error?.message ?? "Failed to load profile.";
