@@ -87,6 +87,14 @@ on:
         options:
           - "0"
           - "1"
+      product_proof_require_worker_loop:
+        description: Run one real hosted worker loop, write evidence, and require it in the product-proof gate.
+        required: false
+        default: "0"
+        type: choice
+        options:
+          - "0"
+          - "1"
 
 concurrency:
   group: production
@@ -122,6 +130,7 @@ jobs:
       DEPLOY_SMOKE_CHECK_BOOTSTRAP_INSTRUMENTATION: ${{ github.event_name == 'workflow_dispatch' && inputs.smoke_check_bootstrap_instrumentation || '0' }}
       DEPLOY_SMOKE_CHECK_BOOTSTRAP_SELF_REPORT_SENT: ${{ github.event_name == 'workflow_dispatch' && inputs.smoke_check_bootstrap_self_report_sent || '0' }}
       DEPLOY_SMOKE_CHECK_PRODUCT_PROOF_GATE: ${{ github.event_name == 'workflow_dispatch' && inputs.smoke_check_product_proof_gate || '0' }}
+      DEPLOY_PRODUCT_PROOF_REQUIRE_WORKER_LOOP: ${{ github.event_name == 'workflow_dispatch' && inputs.product_proof_require_worker_loop || '0' }}
     steps:
       - name: Validate required secrets
         run: |
@@ -143,7 +152,7 @@ jobs:
       - name: Deploy production
         run: |
           remote_env=$(
-            printf 'APP_BASIC_AUTH_USER=%q APP_BASIC_AUTH_PASSWORD=%q APP_BASIC_AUTH_PASSWORD_HASH=%q APP_ALLOW_PROTECTED_SHELL=%q ADMIN_JWT=%q RESEND_API_KEY=%q BOOTSTRAP_SELF_REPORT_TO=%q BOOTSTRAP_SELF_REPORT_FROM=%q BOOTSTRAP_SELF_REPORT_SEND_ON_START=%q RUN_INDEXER=%q WAIT_FOR_READY=%q HEALTH_STABILITY_SEC=%q INDEXER_LOG_TAIL=%q SMOKE_CHECK_INDEXER=%q SMOKE_CHECK_BOOTSTRAP_INSTRUMENTATION=%q SMOKE_CHECK_BOOTSTRAP_SELF_REPORT_SENT=%q SMOKE_CHECK_PRODUCT_PROOF_GATE=%q INDEXER_DATABASE_SCHEMA=%q INDEXER_FRESH_SCHEMA=%q ' \
+            printf 'APP_BASIC_AUTH_USER=%q APP_BASIC_AUTH_PASSWORD=%q APP_BASIC_AUTH_PASSWORD_HASH=%q APP_ALLOW_PROTECTED_SHELL=%q ADMIN_JWT=%q RESEND_API_KEY=%q BOOTSTRAP_SELF_REPORT_TO=%q BOOTSTRAP_SELF_REPORT_FROM=%q BOOTSTRAP_SELF_REPORT_SEND_ON_START=%q RUN_INDEXER=%q WAIT_FOR_READY=%q HEALTH_STABILITY_SEC=%q INDEXER_LOG_TAIL=%q SMOKE_CHECK_INDEXER=%q SMOKE_CHECK_BOOTSTRAP_INSTRUMENTATION=%q SMOKE_CHECK_BOOTSTRAP_SELF_REPORT_SENT=%q SMOKE_CHECK_PRODUCT_PROOF_GATE=%q PRODUCT_PROOF_REQUIRE_WORKER_LOOP=%q INDEXER_DATABASE_SCHEMA=%q INDEXER_FRESH_SCHEMA=%q ' \
               "$APP_BASIC_AUTH_USER" \
               "$APP_BASIC_AUTH_PASSWORD" \
               "$APP_BASIC_AUTH_PASSWORD_HASH" \
@@ -161,6 +170,7 @@ jobs:
               "$DEPLOY_SMOKE_CHECK_BOOTSTRAP_INSTRUMENTATION" \
               "$DEPLOY_SMOKE_CHECK_BOOTSTRAP_SELF_REPORT_SENT" \
               "$DEPLOY_SMOKE_CHECK_PRODUCT_PROOF_GATE" \
+              "$DEPLOY_PRODUCT_PROOF_REQUIRE_WORKER_LOOP" \
               "$DEPLOY_INDEXER_DATABASE_SCHEMA" \
               "$DEPLOY_INDEXER_FRESH_SCHEMA"
           )

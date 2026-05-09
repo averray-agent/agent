@@ -36,6 +36,24 @@ learning one contract from the public site and another from the API host.
 
 ## Worker-Loop Evidence
 
+The deploy workflow can generate this evidence itself when run manually with:
+
+- `smoke_check_product_proof_gate=1`
+- `product_proof_require_worker_loop=1`
+
+That path uses the production `ADMIN_JWT` secret, creates a tiny benchmark job,
+claims it as the token wallet, submits matching evidence, runs the verifier, and
+writes the evidence file before running the required gate. It does not print the
+token.
+
+For a local/manual run, first complete one hosted loop and write evidence:
+
+```bash
+PRODUCT_PROOF_EVIDENCE_FILE=/tmp/product-proof-evidence.json \
+ADMIN_JWT="$ADMIN_TOKEN" \
+npm run product-proof:worker-loop
+```
+
 After a real hosted worker loop completes, write a local evidence file:
 
 ```json

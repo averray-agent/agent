@@ -31,6 +31,9 @@ SMOKE_CHECK_INDEXER=${SMOKE_CHECK_INDEXER:-auto}
 SMOKE_CHECK_BOOTSTRAP_INSTRUMENTATION=${SMOKE_CHECK_BOOTSTRAP_INSTRUMENTATION:-0}
 SMOKE_CHECK_BOOTSTRAP_SELF_REPORT_SENT=${SMOKE_CHECK_BOOTSTRAP_SELF_REPORT_SENT:-0}
 SMOKE_CHECK_PRODUCT_PROOF_GATE=${SMOKE_CHECK_PRODUCT_PROOF_GATE:-0}
+PRODUCT_PROOF_REQUIRE_WORKER_LOOP=${PRODUCT_PROOF_REQUIRE_WORKER_LOOP:-0}
+PRODUCT_PROOF_EVIDENCE_FILE=${PRODUCT_PROOF_EVIDENCE_FILE:-"$STACK_ROOT/product-proof-worker-loop-evidence.json"}
+PRODUCT_PROOF_NODE_IMAGE=${PRODUCT_PROOF_NODE_IMAGE:-node:22-bookworm-slim}
 INDEXER_DATABASE_SCHEMA=${INDEXER_DATABASE_SCHEMA:-}
 INDEXER_FRESH_SCHEMA=${INDEXER_FRESH_SCHEMA:-0}
 INDEXER_ENV_FILE=${INDEXER_ENV_FILE:-"$STACK_ROOT/indexer.env"}
@@ -290,6 +293,51 @@ build_site() {
     sh -lc "npm ci && npm run build:site"
 }
 
+run_node_script() {
+  local script="$1"
+  shift
+
+  if command -v node >/dev/null 2>&1; then
+    node "$script" "$@"
+    return
+  fi
+
+  local relative_script="${script#$APP_ROOT/}"
+  docker run --rm \
+    -v "$APP_ROOT:/workspace" \
+    -w /workspace \
+    -e API_BASE_URL="${API_BASE_URL:-https://api.averray.com}" \
+    -e ADMIN_JWT="${ADMIN_JWT:-}" \
+    -e AVERRAY_TOKEN="${AVERRAY_TOKEN:-}" \
+    -e PRODUCT_PROOF_WORKER_TOKEN="${PRODUCT_PROOF_WORKER_TOKEN:-}" \
+    -e PRODUCT_PROOF_EVIDENCE_FILE="$PRODUCT_PROOF_EVIDENCE_FILE" \
+    -e PRODUCT_PROOF_JOB_ID="${PRODUCT_PROOF_JOB_ID:-}" \
+    -e PRODUCT_PROOF_IDEMPOTENCY_KEY="${PRODUCT_PROOF_IDEMPOTENCY_KEY:-}" \
+    -e PRODUCT_PROOF_SUBMISSION="${PRODUCT_PROOF_SUBMISSION:-}" \
+    "$PRODUCT_PROOF_NODE_IMAGE" \
+    node "$relative_script" "$@"
+}
+
+run_product_proof_worker_loop() {
+  case "$PRODUCT_PROOF_REQUIRE_WORKER_LOOP" in
+    1|true|yes) ;;
+    0|false|no|"") return 0 ;;
+    *)
+      echo "Invalid PRODUCT_PROOF_REQUIRE_WORKER_LOOP toggle: $PRODUCT_PROOF_REQUIRE_WORKER_LOOP" >&2
+      exit 1
+      ;;
+  esac
+
+  if [[ -z "${PRODUCT_PROOF_WORKER_TOKEN:-}" && -z "${AVERRAY_TOKEN:-}" && -z "${ADMIN_JWT:-}" ]]; then
+    echo "PRODUCT_PROOF_REQUIRE_WORKER_LOOP=1 requires PRODUCT_PROOF_WORKER_TOKEN, AVERRAY_TOKEN, or ADMIN_JWT." >&2
+    exit 1
+  fi
+
+  echo "Running hosted product-proof worker loop"
+  API_BASE_URL="${API_BASE_URL:-https://api.averray.com}" \
+    run_node_script "$APP_ROOT/scripts/ops/run-hosted-worker-loop.mjs"
+}
+
 apply_caddy() {
   if [[ -z "${APP_BASIC_AUTH_USER:-}" ]]; then
     echo "Skipping Caddy render: APP_BASIC_AUTH_USER is not set." >&2
@@ -489,6 +537,10 @@ deploy() {
   fi
 
   if [[ "$RUN_SMOKE" == "1" ]]; then
+    if [[ "$SMOKE_CHECK_PRODUCT_PROOF_GATE" == "1" || "$SMOKE_CHECK_PRODUCT_PROOF_GATE" == "true" || "$SMOKE_CHECK_PRODUCT_PROOF_GATE" == "yes" ]]; then
+      run_product_proof_worker_loop
+    fi
+
     echo "Running hosted stack smoke check"
     local check_indexer
     check_indexer=$(resolve_smoke_check_indexer "$run_indexer" "$run_caddy")
@@ -499,6 +551,9 @@ deploy() {
       CHECK_BOOTSTRAP_INSTRUMENTATION="$SMOKE_CHECK_BOOTSTRAP_INSTRUMENTATION" \
       CHECK_BOOTSTRAP_SELF_REPORT_SENT="$SMOKE_CHECK_BOOTSTRAP_SELF_REPORT_SENT" \
       CHECK_PRODUCT_PROOF_GATE="$SMOKE_CHECK_PRODUCT_PROOF_GATE" \
+      PRODUCT_PROOF_REQUIRE_WORKER_LOOP="$PRODUCT_PROOF_REQUIRE_WORKER_LOOP" \
+      PRODUCT_PROOF_EVIDENCE_FILE="$PRODUCT_PROOF_EVIDENCE_FILE" \
+      PRODUCT_PROOF_NODE_IMAGE="$PRODUCT_PROOF_NODE_IMAGE" \
       "$APP_ROOT/scripts/ops/check-hosted-stack.sh"
   else
     echo "RUN_SMOKE=0 set; skipping hosted smoke check."

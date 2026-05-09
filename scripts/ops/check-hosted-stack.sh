@@ -18,6 +18,9 @@ CHECK_INDEXER=${CHECK_INDEXER:-1}
 CHECK_BOOTSTRAP_INSTRUMENTATION=${CHECK_BOOTSTRAP_INSTRUMENTATION:-0}
 CHECK_BOOTSTRAP_SELF_REPORT_SENT=${CHECK_BOOTSTRAP_SELF_REPORT_SENT:-0}
 CHECK_PRODUCT_PROOF_GATE=${CHECK_PRODUCT_PROOF_GATE:-0}
+PRODUCT_PROOF_NODE_IMAGE=${PRODUCT_PROOF_NODE_IMAGE:-node:22-bookworm-slim}
+PRODUCT_PROOF_EVIDENCE_FILE=${PRODUCT_PROOF_EVIDENCE_FILE:-}
+PRODUCT_PROOF_REQUIRE_WORKER_LOOP=${PRODUCT_PROOF_REQUIRE_WORKER_LOOP:-0}
 TIMEOUT_SEC=${TIMEOUT_SEC:-20}
 APP_BASIC_AUTH_USER=${APP_BASIC_AUTH_USER:-}
 APP_BASIC_AUTH_PASSWORD=${APP_BASIC_AUTH_PASSWORD:-}
@@ -36,9 +39,6 @@ require_command() {
 
 require_command curl
 require_command jq
-case "$CHECK_PRODUCT_PROOF_GATE" in
-  1|true|yes) require_command node ;;
-esac
 
 fetch() {
   local url="$1"
@@ -93,6 +93,10 @@ enabled() {
     *) return 1 ;;
   esac
 }
+
+if enabled "$CHECK_PRODUCT_PROOF_GATE" && ! command -v node >/dev/null 2>&1; then
+  require_command docker
+fi
 
 status_allowed() {
   local status="$1"
@@ -228,10 +232,26 @@ fi
 if enabled "$CHECK_PRODUCT_PROOF_GATE"; then
   echo "Checking product-proof gate"
   script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-  PUBLIC_SITE_URL="$PUBLIC_SITE_URL" \
-    PUBLIC_DISCOVERY_URL="$DISCOVERY_URL" \
-    API_BASE_URL="${API_HEALTH_URL%/health}" \
-    node "$script_dir/check-product-proof-gate.mjs"
+  repo_root="$(cd "$script_dir/../.." && pwd)"
+  if command -v node >/dev/null 2>&1; then
+    PUBLIC_SITE_URL="$PUBLIC_SITE_URL" \
+      PUBLIC_DISCOVERY_URL="$DISCOVERY_URL" \
+      API_BASE_URL="${API_HEALTH_URL%/health}" \
+      PRODUCT_PROOF_EVIDENCE_FILE="$PRODUCT_PROOF_EVIDENCE_FILE" \
+      PRODUCT_PROOF_REQUIRE_WORKER_LOOP="$PRODUCT_PROOF_REQUIRE_WORKER_LOOP" \
+      node "$script_dir/check-product-proof-gate.mjs"
+  else
+    docker run --rm \
+      -v "$repo_root:/workspace" \
+      -w /workspace \
+      -e PUBLIC_SITE_URL="$PUBLIC_SITE_URL" \
+      -e PUBLIC_DISCOVERY_URL="$DISCOVERY_URL" \
+      -e API_BASE_URL="${API_HEALTH_URL%/health}" \
+      -e PRODUCT_PROOF_EVIDENCE_FILE="$PRODUCT_PROOF_EVIDENCE_FILE" \
+      -e PRODUCT_PROOF_REQUIRE_WORKER_LOOP="$PRODUCT_PROOF_REQUIRE_WORKER_LOOP" \
+      "$PRODUCT_PROOF_NODE_IMAGE" \
+      node scripts/ops/check-product-proof-gate.mjs
+  fi
 fi
 
 echo "Hosted stack smoke check passed."
