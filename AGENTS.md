@@ -62,14 +62,22 @@ CI is the merge gate. Do not bypass failing checks.
 - The handoff currently invokes Hermes with `averray_invoke_agent_task`,
   `intent='pr_handoff'`, the PR repository/number, and `TBE2E-004` as the
   default safe dry-run testbed case. Hermes checks PR metadata, GitHub checks,
-  changed-file risk signals, and requested testbed cases, then reports its
+  changed-file risk signals, changed files/diff context, CI coverage against
+  touched areas, and requested testbed cases, then reports its code-review
   verdict and merge recommendation in the GitHub Actions summary.
+- Hermes should flag blocking findings, non-blocking findings, missing tests,
+  and higher-risk areas such as deploy workflows, auth, secrets,
+  payments/settlement, indexer, contracts, Caddy, database migrations, and
+  external agent hooks. If it cannot inspect the diff, treat the handoff as
+  needing human review.
 - If a PR needs a specific Hermes test, mention the desired testbed case in the
   PR notes so the next agent/operator can route it explicitly through
   `averray_invoke_agent_task`.
-- Hermes PR handoff is recommendation-only. It does not merge, approve, comment,
-  or otherwise mutate GitHub. CI remains the merge gate, and a human or
-  explicitly authorized merge workflow still owns the final merge.
+- Hermes PR handoff is recommendation-only. It does not merge, approve, or
+  otherwise mutate GitHub. The workflow may best-effort post a summary comment,
+  but comment permission failures must not hide the Hermes verdict in the
+  GitHub Actions summary. CI remains the merge gate, and a human or explicitly
+  authorized merge workflow still owns the final merge.
 
 ## Deployment
 
