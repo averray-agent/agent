@@ -55,6 +55,36 @@ const WRITE_ABI = [
 
 const EXPECTED_CHAIN_ID = 420420417; // Polkadot Hub TestNet
 
+// Polkadot Hub ERC20-precompile address-suffix conventions.
+//
+// Per https://docs.polkadot.com/smart-contracts/precompiles/erc20/, the
+// last 4 bytes of an ERC20-precompile address encode the asset category:
+//
+//   01200000  Trust-Backed Assets (Assets pallet, u32 asset ID)
+//   02200000  Foreign Assets       (XCM-derived index)
+//   03200000  Pool Assets          (liquidity-pool derived)
+//
+// v1 escrow targets a Trust-Backed Asset (USDC / USDt). The suffix is
+// the only on-chain-introspectable signal we have — the precompile does
+// NOT implement the optional ERC20 metadata functions (name(), symbol(),
+// decimals()), so we cannot verify the token by calling those at all.
+// Validation has to compare against the static `assets.js` record
+// (symbol + address + assetClass + assetId + decimals) plus this
+// suffix gate.
+const TRUST_BACKED_ASSET_SUFFIX = "01200000";
+const FOREIGN_ASSET_SUFFIX = "02200000";
+const POOL_ASSET_SUFFIX = "03200000";
+
+function classifyAssetSuffix(address) {
+  const lower = String(address ?? "").toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/u.test(lower)) return "invalid";
+  const suffix = lower.slice(-8);
+  if (suffix === TRUST_BACKED_ASSET_SUFFIX) return "trust_backed";
+  if (suffix === FOREIGN_ASSET_SUFFIX) return "foreign";
+  if (suffix === POOL_ASSET_SUFFIX) return "pool";
+  return "unknown";
+}
+
 async function main() {
   const deployments = JSON.parse(
     await readFile(resolve(repoRoot, "deployments/testnet.json"), "utf8")
@@ -155,6 +185,13 @@ async function main() {
   console.log(`arbitrators(${short(expectedArbitrator)})  ${arbitratorIsApproved ? "✅" : "❌"}  ${arbitratorIsApproved}  (required for resolveDispute)`);
   console.log(`approvedAssets(USDC)             ${usdcIsApproved ? "✅" : "❌"}  ${usdcIsApproved}`);
 
+  // Suffix classification — only thing we can introspect about the
+  // ERC20-precompile address itself, since name/symbol/decimals are
+  // not implemented on the precompile (per Polkadot docs).
+  const usdcAssetClass = classifyAssetSuffix(usdcAddress);
+  const usdcSuffixOk = usdcAssetClass === "trust_backed";
+  console.log(`USDC asset class (suffix)        ${usdcSuffixOk ? "✅" : "❌"}  ${usdcAssetClass}  (expected trust_backed)`);
+
   console.log("");
   console.log(`## Parameter drift vs deployments/testnet.json`);
   for (const check of paramChecks) {
@@ -193,6 +230,15 @@ async function main() {
   }
   if (!usdcIsApproved) {
     fixes.push(buildCall("setApprovedAsset", [usdcAddress, true], policyAddress));
+  }
+  if (!usdcSuffixOk) {
+    fixes.push({
+      label: `USDC address suffix mismatch — got asset class "${usdcAssetClass}", expected "trust_backed"`,
+      reasonCode: "asset_class_mismatch"
+      // No setter — this means deployments/testnet.json#contracts.token
+      // points at the wrong precompile. Fix the deployment file, not
+      // the chain.
+    });
   }
   // Parameter drift fixes — only emit calldata for the cases where the
   // contract has a setter we know about. dailyOutflowCap and
