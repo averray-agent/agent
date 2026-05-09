@@ -171,6 +171,17 @@ RUN_SUBSCAN_XCM_VALIDATION=1 ./scripts/ops/check-release-readiness.sh testnet
 
 If any of these drift, external agents will learn the wrong contract.
 
+Run the read-only gate with:
+
+```bash
+npm run check:product-proof
+```
+
+After the hosted worker loop is complete, rerun it with
+`PRODUCT_PROOF_REQUIRE_WORKER_LOOP=1` and a
+`PRODUCT_PROOF_EVIDENCE_FILE`. See [PRODUCT_PROOF_GATE.md](./PRODUCT_PROOF_GATE.md)
+for the evidence file shape.
+
 ---
 
 ## 8. Mainnet parameter package

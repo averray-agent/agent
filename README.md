@@ -12,6 +12,7 @@ Launch posture and trust documents:
 - [Threat model](docs/THREAT_MODEL.md)
 - [No token statement](docs/NO_TOKEN.md)
 - [Week-12 bootstrap gate](docs/WEEK12_GATE.md)
+- [Product-proof gate](docs/PRODUCT_PROOF_GATE.md)
 - [Arbitration migration](docs/ARBITRATION_MIGRATION.md)
 - [Dispute reason-code registry](docs/DISPUTE_CODES.md)
 

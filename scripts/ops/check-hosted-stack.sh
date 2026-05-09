@@ -17,6 +17,7 @@ INDEXER_RETRY_SLEEP_SEC=${INDEXER_RETRY_SLEEP_SEC:-5}
 CHECK_INDEXER=${CHECK_INDEXER:-1}
 CHECK_BOOTSTRAP_INSTRUMENTATION=${CHECK_BOOTSTRAP_INSTRUMENTATION:-0}
 CHECK_BOOTSTRAP_SELF_REPORT_SENT=${CHECK_BOOTSTRAP_SELF_REPORT_SENT:-0}
+CHECK_PRODUCT_PROOF_GATE=${CHECK_PRODUCT_PROOF_GATE:-0}
 TIMEOUT_SEC=${TIMEOUT_SEC:-20}
 APP_BASIC_AUTH_USER=${APP_BASIC_AUTH_USER:-}
 APP_BASIC_AUTH_PASSWORD=${APP_BASIC_AUTH_PASSWORD:-}
@@ -35,6 +36,9 @@ require_command() {
 
 require_command curl
 require_command jq
+case "$CHECK_PRODUCT_PROOF_GATE" in
+  1|true|yes) require_command node ;;
+esac
 
 fetch() {
   local url="$1"
@@ -219,6 +223,15 @@ if enabled "$CHECK_BOOTSTRAP_INSTRUMENTATION"; then
       (.bootstrapSelfReport.lastRun.email.providerId | length) > 0
     ' >/dev/null <<<"$admin_status_json"
   fi
+fi
+
+if enabled "$CHECK_PRODUCT_PROOF_GATE"; then
+  echo "Checking product-proof gate"
+  script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+  PUBLIC_SITE_URL="$PUBLIC_SITE_URL" \
+    PUBLIC_DISCOVERY_URL="$DISCOVERY_URL" \
+    API_BASE_URL="${API_HEALTH_URL%/health}" \
+    node "$script_dir/check-product-proof-gate.mjs"
 fi
 
 echo "Hosted stack smoke check passed."

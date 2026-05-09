@@ -63,6 +63,9 @@ jobs:
       - name: Ops script regression tests
         run: npm run test:ops
 
+      - name: Discovery manifest sync check
+        run: npm run check:discovery-manifest
+
   frontend:
     name: Operator app — static export
     runs-on: ubuntu-latest

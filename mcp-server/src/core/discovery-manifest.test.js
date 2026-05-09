@@ -40,6 +40,13 @@ test("buildDiscoveryManifest returns the full public discovery shape", () => {
   assert.equal(manifest.auth.schemeId, "SIWE_JWT");
   assert.deepEqual(manifest.auth.supportedWalletModes, ["evm-siwe"]);
   assert.equal(manifest.docs.walletOnboarding, "https://github.com/depre-dev/agent/blob/main/docs/AGENT_WALLET_ONBOARDING.md");
+  assert.equal(manifest.docs.productionChecklist, "https://github.com/depre-dev/agent/blob/main/docs/PRODUCTION_CHECKLIST.md");
+  assert.equal(manifest.docs.threatModel, "https://github.com/depre-dev/agent/blob/main/docs/THREAT_MODEL.md");
+  assert.equal(manifest.docs.noToken, "https://github.com/depre-dev/agent/blob/main/docs/NO_TOKEN.md");
+  assert.equal(manifest.docs.week12Gate, "https://github.com/depre-dev/agent/blob/main/docs/WEEK12_GATE.md");
+  assert.equal(manifest.docs.productProofGate, "https://github.com/depre-dev/agent/blob/main/docs/PRODUCT_PROOF_GATE.md");
+  assert.equal(manifest.docs.disputeCodes, "https://github.com/depre-dev/agent/blob/main/docs/DISPUTE_CODES.md");
+  assert.equal(manifest.docs.arbitrationMigration, "https://github.com/depre-dev/agent/blob/main/docs/ARBITRATION_MIGRATION.md");
   assert.ok(manifest.onboarding.walletModes.some((mode) => (
     mode.id === "evm-siwe"
     && mode.status === "supported"
