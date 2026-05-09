@@ -54,6 +54,10 @@ function summarizeSupportedAsset(asset) {
   };
 }
 
+function canAutoMintAsset(asset) {
+  return (asset?.assetClass ?? "custom") === "custom";
+}
+
 export class BlockchainGateway {
   constructor(config = loadBlockchainConfig()) {
     this.config = config;
@@ -427,6 +431,8 @@ export class BlockchainGateway {
         );
       }
 
+      this.requireAutoMintableAsset(asset, "fundAccount");
+
       const token = new Contract(asset.address, ERC20_MOCK_ABI, this.signer);
       const mintTx = await token.mint(signerAddress, parsedAmount);
       await mintTx.wait();
@@ -705,7 +711,6 @@ export class BlockchainGateway {
         throw new ValidationError(`Job ${job.id} has no fundable reward`);
       }
 
-      const token = new Contract(asset.address, ERC20_MOCK_ABI, this.signer);
       const signerAddress = await this.signer.getAddress();
       const signerPosition = usesRecurringTemplateReserve
         ? { liquid: 0n }
@@ -714,6 +719,14 @@ export class BlockchainGateway {
       const shortfall = !usesRecurringTemplateReserve && totalRequired > liquid ? totalRequired - liquid : 0n;
 
       if (!usesRecurringTemplateReserve && shortfall > 0n) {
+        this.requireAutoMintableAsset(asset, "ensureJob", {
+          jobId: job.id,
+          required: this.toDisplayUnits(totalRequired, asset),
+          available: this.toDisplayUnits(liquid, asset),
+          shortfall: this.toDisplayUnits(shortfall, asset),
+          account: signerAddress
+        });
+        const token = new Contract(asset.address, ERC20_MOCK_ABI, this.signer);
         const mintTx = await token.mint(signerAddress, shortfall);
         await mintTx.wait();
         const approveTx = await token.approve(this.config.agentAccountAddress, shortfall);
@@ -1093,6 +1106,20 @@ export class BlockchainGateway {
         strategyRequest: await this.getStrategyRequest(normalizedRequestId).catch(() => undefined),
         settledVia: strategyRequest ? "agent_account" : "xcm_wrapper"
       };
+    });
+  }
+
+  requireAutoMintableAsset(asset, operation, details = {}) {
+    if (canAutoMintAsset(asset)) {
+      return true;
+    }
+    throw new InsufficientLiquidityError(asset.symbol, {
+      ...details,
+      operation,
+      asset: asset.symbol,
+      assetClass: asset.assetClass,
+      assetAddress: asset.address,
+      reason: `${asset.symbol} is a ${asset.assetClass} settlement asset and cannot be auto-minted. Deposit funded liquidity into AgentAccountCore or use a recurring template reserve before creating or claiming jobs.`
     });
   }
 

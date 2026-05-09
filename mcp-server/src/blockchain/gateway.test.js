@@ -3,11 +3,19 @@ import assert from "node:assert/strict";
 import { encodeBytes32String } from "ethers";
 
 import { BlockchainGateway } from "./gateway.js";
+import { InsufficientLiquidityError } from "../core/errors.js";
 
 const DOT_ASSET = {
   symbol: "DOT",
   address: "0x2222222222222222222222222222222222222222",
   decimals: 18
+};
+const USDC_TRUST_ASSET = {
+  symbol: "USDC",
+  address: "0x0000053900000000000000000000000001200000",
+  assetClass: "trust_backed",
+  assetId: 1337,
+  decimals: 6
 };
 
 function gatewayWithDot() {
@@ -426,6 +434,64 @@ test("ensureClaimStakeLiquidity checks fractional display locks against base-uni
   };
 
   assert.equal(await gateway.ensureClaimStakeLiquidity("DOT", 0.48), true);
+});
+
+test("fundAccount rejects non-mock settlement assets before minting", async () => {
+  const gateway = new BlockchainGateway({ enabled: false, supportedAssets: [USDC_TRUST_ASSET] });
+  gateway.signer = {
+    async getAddress() {
+      return "0x3333333333333333333333333333333333333333";
+    }
+  };
+
+  await assert.rejects(
+    () => gateway.fundAccount("0x3333333333333333333333333333333333333333", "USDC", 1),
+    (error) => {
+      assert.ok(error instanceof InsufficientLiquidityError);
+      assert.equal(error.details.assetClass, "trust_backed");
+      assert.match(error.details.reason, /cannot be auto-minted/u);
+      return true;
+    }
+  );
+});
+
+test("ensureJob rejects real settlement asset shortfalls before mock minting", async () => {
+  const gateway = new BlockchainGateway({ enabled: false, supportedAssets: [USDC_TRUST_ASSET] });
+  gateway.signer = {
+    async getAddress() {
+      return "0x3333333333333333333333333333333333333333";
+    }
+  };
+  gateway.readEscrowJob = async () => ({ state: 0, contractLayout: "rc1" });
+  gateway.accountContract = {
+    async positions(account, asset) {
+      assert.equal(account, "0x3333333333333333333333333333333333333333");
+      assert.equal(asset, USDC_TRUST_ASSET.address);
+      return { liquid: 0n };
+    }
+  };
+  gateway.createSinglePayoutJobForJob = async () => {
+    throw new Error("job creation should not be attempted without funded liquidity");
+  };
+
+  await assert.rejects(
+    () => gateway.ensureJob({
+      id: "product-proof-worker-loop",
+      rewardAsset: "USDC",
+      rewardAmount: 0.000001,
+      claimTtlSeconds: 3600,
+      verifierMode: "benchmark",
+      category: "product_proof"
+    }),
+    (error) => {
+      assert.ok(error instanceof InsufficientLiquidityError);
+      assert.equal(error.details.operation, "ensureJob");
+      assert.equal(error.details.assetClass, "trust_backed");
+      assert.equal(error.details.shortfall, 0.000001);
+      assert.match(error.details.reason, /recurring template reserve/u);
+      return true;
+    }
+  );
 });
 
 test("reserveRecurringTemplateFunding converts display amounts and records the template key", async () => {
