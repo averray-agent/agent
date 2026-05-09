@@ -32,6 +32,11 @@ SMOKE_CHECK_BOOTSTRAP_INSTRUMENTATION=${SMOKE_CHECK_BOOTSTRAP_INSTRUMENTATION:-0
 SMOKE_CHECK_BOOTSTRAP_SELF_REPORT_SENT=${SMOKE_CHECK_BOOTSTRAP_SELF_REPORT_SENT:-0}
 SMOKE_CHECK_PRODUCT_PROOF_GATE=${SMOKE_CHECK_PRODUCT_PROOF_GATE:-0}
 PRODUCT_PROOF_REQUIRE_WORKER_LOOP=${PRODUCT_PROOF_REQUIRE_WORKER_LOOP:-0}
+# Optional override for the hosted worker-loop's reward asset symbol.
+# Empty string keeps the run-hosted-worker-loop.mjs default (DOT today).
+# Set to "USDC" via the workflow_dispatch input to exercise the v1 USDC
+# settlement path against the on-chain TreasuryPolicy approved-asset list.
+PRODUCT_PROOF_REWARD_ASSET=${PRODUCT_PROOF_REWARD_ASSET:-}
 PRODUCT_PROOF_EVIDENCE_FILE=${PRODUCT_PROOF_EVIDENCE_FILE:-"$STACK_ROOT/product-proof-worker-loop-evidence.json"}
 PRODUCT_PROOF_NODE_IMAGE=${PRODUCT_PROOF_NODE_IMAGE:-node:22-bookworm-slim}
 INDEXER_DATABASE_SCHEMA=${INDEXER_DATABASE_SCHEMA:-}
