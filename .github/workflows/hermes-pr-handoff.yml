@@ -8,6 +8,7 @@ on:
 permissions:
   contents: read
   actions: read
+  issues: write
   pull-requests: read
 
 concurrency:
@@ -18,12 +19,14 @@ jobs:
   handoff:
     name: Ask Hermes to review PR and run testbed checks
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     if: github.event.workflow_run.conclusion == 'success'
     env:
       VPS_HOST: ${{ secrets.VPS_HOST }}
       VPS_PORT: ${{ secrets.VPS_PORT }}
       VPS_USER: ${{ secrets.VPS_USER }}
       VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+      HERMES_HANDOFF_TIMEOUT: 12m
     steps:
       - name: Extract PR context
         id: pr
@@ -62,7 +65,9 @@ jobs:
           ssh-keyscan -p "${VPS_PORT:-22}" -H "$VPS_HOST" >> ~/.ssh/known_hosts
 
       - name: Ask Hermes for PR handoff verdict
+        id: hermes
         if: steps.pr.outputs.skip != 'true'
+        continue-on-error: true
         env:
           HANDOFF_REPO: ${{ steps.pr.outputs.repo }}
           HANDOFF_PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
@@ -76,8 +81,9 @@ jobs:
 
           remote_env=$(printf 'HERMES_HANDOFF_PROMPT=%q ' "$prompt")
 
+          : > hermes-handoff.log
           set +e
-          ssh -p "${VPS_PORT:-22}" \
+          timeout "$HERMES_HANDOFF_TIMEOUT" ssh -p "${VPS_PORT:-22}" \
             -o ServerAliveInterval=30 \
             -o ServerAliveCountMax=120 \
             "$VPS_USER@$VPS_HOST" \
@@ -95,6 +101,21 @@ jobs:
           REMOTE
           status=${PIPESTATUS[0]}
           set -e
+          outcome=failed
+
+          if [ "$status" -eq 0 ]; then
+            outcome=success
+          elif [ "$status" -eq 124 ]; then
+            outcome=timeout
+            {
+              echo
+              echo "Hermes handoff timed out after ${HERMES_HANDOFF_TIMEOUT}."
+              echo "This usually means the model provider or remote agent call stalled."
+            } | tee -a hermes-handoff.log
+          fi
+
+          echo "exit_status=$status" >> "$GITHUB_OUTPUT"
+          echo "outcome=$outcome" >> "$GITHUB_OUTPUT"
 
           {
             echo "## Hermes PR Handoff"
@@ -102,6 +123,7 @@ jobs:
             echo "- Repo: \`${HANDOFF_REPO}\`"
             echo "- PR: \`#${HANDOFF_PR_NUMBER}\`"
             echo "- Correlation: \`${HANDOFF_CORRELATION_ID}\`"
+            echo "- Outcome: \`${outcome}\`"
             echo
             echo '```text'
             sed -n '1,220p' hermes-handoff.log
@@ -109,3 +131,54 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
           exit "$status"
+
+      - name: Comment PR with Hermes handoff summary
+        if: always() && steps.pr.outputs.skip != 'true' && steps.hermes.outcome != 'skipped'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HANDOFF_REPO: ${{ steps.pr.outputs.repo }}
+          HANDOFF_PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
+          HANDOFF_CORRELATION_ID: ${{ steps.pr.outputs.correlation_id }}
+          HERMES_OUTCOME: ${{ steps.hermes.outputs.outcome || 'failed' }}
+        run: |
+          {
+            echo "<!-- hermes-pr-handoff:${HANDOFF_CORRELATION_ID} -->"
+            echo "### Hermes PR Handoff"
+            echo
+            echo "- Outcome: \`${HERMES_OUTCOME}\`"
+            echo "- Correlation: \`${HANDOFF_CORRELATION_ID}\`"
+            echo "- Safety: recommendation-only; no GitHub mutations were requested from Hermes."
+            echo
+            echo "<details>"
+            echo "<summary>Hermes output</summary>"
+            echo
+            echo '```text'
+            sed -n '1,120p' hermes-handoff.log
+            echo '```'
+            echo
+            echo "</details>"
+          } > hermes-comment.md
+
+          comment_id=$(
+            gh api "repos/${HANDOFF_REPO}/issues/${HANDOFF_PR_NUMBER}/comments" \
+              --jq ".[] | select(.body | contains(\"hermes-pr-handoff:${HANDOFF_CORRELATION_ID}\")) | .id" \
+              | tail -n 1
+          )
+
+          if [ -n "$comment_id" ]; then
+            body=$(cat hermes-comment.md)
+            gh api -X PATCH "repos/${HANDOFF_REPO}/issues/comments/${comment_id}" \
+              -f body="$body" >/dev/null
+          else
+            gh pr comment "$HANDOFF_PR_NUMBER" \
+              --repo "$HANDOFF_REPO" \
+              --body-file hermes-comment.md
+          fi
+
+      - name: Fail if Hermes handoff failed
+        if: always() && steps.pr.outputs.skip != 'true' && steps.hermes.outputs.exit_status != '0'
+        run: |
+          echo "Hermes PR handoff failed with status ${HERMES_STATUS:-unknown}."
+          exit 1
+        env:
+          HERMES_STATUS: ${{ steps.hermes.outputs.exit_status }}
