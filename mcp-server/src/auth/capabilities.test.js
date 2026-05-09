@@ -72,3 +72,37 @@ test("missingCapabilities reports the exact capability gap", () => {
     ["ops:view"]
   );
 });
+
+test("capabilityMatrix surfaces the capability-grant routes and UI controls (roadmap §6)", () => {
+  const matrix = capabilityMatrix();
+  assert.ok(matrix.roles.admin.includes("admin:capabilities:read"));
+  assert.ok(matrix.roles.admin.includes("admin:capabilities:grant"));
+  assert.ok(matrix.roles.admin.includes("admin:capabilities:revoke"));
+  assert.deepEqual(matrix.routes["/admin/capability-grants"], [
+    "admin:capabilities:grant",
+    "admin:capabilities:read"
+  ]);
+  assert.deepEqual(matrix.routes["/admin/capability-grants/:id/revoke"], [
+    "admin:capabilities:revoke"
+  ]);
+  assert.deepEqual(matrix.uiControls["admin.capabilities.view"], ["admin:capabilities:read"]);
+  assert.deepEqual(matrix.uiControls["admin.capabilities.grant"], ["admin:capabilities:grant"]);
+  assert.deepEqual(matrix.uiControls["admin.capabilities.revoke"], ["admin:capabilities:revoke"]);
+  assert.deepEqual(matrix.automationActions["capability.grant"], ["admin:capabilities:grant"]);
+  assert.deepEqual(matrix.automationActions["capability.revoke"], ["admin:capabilities:revoke"]);
+});
+
+test("getRouteCapabilityRequirements resolves capability-grant routes by method", () => {
+  assert.deepEqual(
+    getRouteCapabilityRequirements("GET", "/admin/capability-grants"),
+    ["admin:capabilities:read"]
+  );
+  assert.deepEqual(
+    getRouteCapabilityRequirements("POST", "/admin/capability-grants"),
+    ["admin:capabilities:grant"]
+  );
+  assert.deepEqual(
+    getRouteCapabilityRequirements("POST", "/admin/capability-grants/grant-abc/revoke"),
+    ["admin:capabilities:revoke"]
+  );
+});

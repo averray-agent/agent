@@ -7,7 +7,10 @@ import {
   missingCapabilities,
   resolveCapabilities
 } from "./capabilities.js";
+import { mergeGrantCapabilities } from "../core/capability-grants.js";
 import { buildAuthRequirementDetails } from "../core/discovery-manifest.js";
+
+const GRANT_CACHE_TTL_MS = 15_000;
 
 /**
  * Create an auth middleware bound to a specific auth configuration.
@@ -30,7 +33,49 @@ import { buildAuthRequirementDetails } from "../core/discovery-manifest.js";
  * A `stateStore` with `isTokenRevoked(jti)` is optional. When supplied the
  * middleware rejects tokens whose `jti` is in the revocation list.
  */
-export function createAuthMiddleware({ authConfig, stateStore, logger = console }) {
+export function createAuthMiddleware({ authConfig, stateStore, logger = console, now = () => new Date() }) {
+  // Per-subject grant cache. The grant list is stable for the
+  // lifetime of a JWT and lookups happen on every authed request,
+  // so a 15s in-process cache keeps the steady-state cost of
+  // capability merging at zero. Revokes invalidate via TTL — admins
+  // should expect up to 15s lag from revoke-call to enforcement.
+  const grantCache = new Map();
+
+  async function loadActiveGrantsFor(wallet) {
+    if (!wallet) return [];
+    if (typeof stateStore?.listCapabilityGrants !== "function") return [];
+    const cacheKey = String(wallet).toLowerCase();
+    const cached = grantCache.get(cacheKey);
+    const nowMs = now().getTime();
+    if (cached && cached.expiresAt > nowMs) {
+      return cached.grants;
+    }
+    let grants = [];
+    try {
+      grants = await stateStore.listCapabilityGrants({
+        subject: cacheKey,
+        status: "active",
+        limit: 50
+      });
+    } catch (error) {
+      logger.warn?.({ wallet: cacheKey, error: error?.message }, "auth.grant_lookup_failed");
+      grants = [];
+    }
+    grantCache.set(cacheKey, {
+      grants: Array.isArray(grants) ? grants : [],
+      expiresAt: nowMs + GRANT_CACHE_TTL_MS
+    });
+    return grantCache.get(cacheKey).grants;
+  }
+
+  async function expandCapabilities(claims, baseCapabilities) {
+    const subject = String(claims?.sub ?? "").trim();
+    if (!subject) return baseCapabilities;
+    const grants = await loadActiveGrantsFor(subject);
+    if (!grants.length) return baseCapabilities;
+    return mergeGrantCapabilities(baseCapabilities, grants, { now });
+  }
+
   return async function requireAuth(
     request,
     url,
@@ -73,7 +118,8 @@ export function createAuthMiddleware({ authConfig, stateStore, logger = console 
               verifierWallets: authConfig.verifierWallets ?? new Set()
             })
           };
-          const capabilities = resolveCapabilities(permissiveClaims);
+          const baseCapabilities = resolveCapabilities(permissiveClaims);
+          const capabilities = await expandCapabilities(permissiveClaims, baseCapabilities);
           enforceRole(permissiveClaims, requireRole, authDetails);
           enforceCapabilities(capabilities, requiredCapabilities, authDetails);
           return {
@@ -107,7 +153,8 @@ export function createAuthMiddleware({ authConfig, stateStore, logger = console 
       }
     }
 
-    const capabilities = resolveCapabilities(claims);
+    const baseCapabilities = resolveCapabilities(claims);
+    const capabilities = await expandCapabilities(claims, baseCapabilities);
     enforceRole(claims, requireRole, authDetails);
     enforceCapabilities(capabilities, requiredCapabilities, authDetails);
 

@@ -487,3 +487,88 @@ test("MemoryStateStore isTokenRevoked is false for unknown jti", async () => {
   const store = new MemoryStateStore();
   assert.equal(await store.isTokenRevoked("never-seen"), false);
 });
+
+test("MemoryStateStore capability grants round-trip + filter by subject and status", async () => {
+  const store = new MemoryStateStore();
+  const subjectA = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const subjectB = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+  await store.upsertCapabilityGrant({ id: "g-a1", subject: subjectA, status: "active", capabilities: ["jobs:lifecycle"], issuedAt: "2026-01-01T00:00:00.000Z" });
+  await store.upsertCapabilityGrant({ id: "g-a2", subject: subjectA, status: "revoked", capabilities: ["jobs:lifecycle"], issuedAt: "2026-01-02T00:00:00.000Z" });
+  await store.upsertCapabilityGrant({ id: "g-b1", subject: subjectB, status: "active", capabilities: ["policies:propose"], issuedAt: "2026-01-03T00:00:00.000Z" });
+
+  const all = await store.listCapabilityGrants({});
+  assert.equal(all.length, 3);
+  // Newest-first ordering.
+  assert.deepEqual(all.map((g) => g.id), ["g-b1", "g-a2", "g-a1"]);
+
+  const onlyA = await store.listCapabilityGrants({ subject: subjectA });
+  assert.deepEqual(onlyA.map((g) => g.id).sort(), ["g-a1", "g-a2"]);
+
+  const onlyActive = await store.listCapabilityGrants({ status: "active" });
+  assert.deepEqual(onlyActive.map((g) => g.id).sort(), ["g-a1", "g-b1"]);
+
+  const aActive = await store.listCapabilityGrants({ subject: subjectA, status: "active" });
+  assert.deepEqual(aActive.map((g) => g.id), ["g-a1"]);
+});
+
+test("requireAuth merges active capability grants for the subject", async () => {
+  const subject = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const stateStore = new MemoryStateStore();
+  await stateStore.upsertCapabilityGrant({
+    id: "grant-x",
+    subject,
+    status: "active",
+    capabilities: ["jobs:lifecycle"],
+    issuedAt: new Date().toISOString(),
+    issuedBy: "0x1111111111111111111111111111111111111111"
+  });
+  const authConfig = {
+    secrets: [LONG_SECRET],
+    signingSecret: LONG_SECRET,
+    permissive: false,
+    strict: true
+  };
+  const middleware = createAuthMiddleware({ authConfig, stateStore, logger: silentLogger() });
+  const { token } = signToken({ sub: subject, roles: [] }, {
+    secret: LONG_SECRET,
+    expiresInSeconds: 60
+  });
+  const request = { method: "POST", headers: { authorization: `Bearer ${token}` } };
+  const url = new URL("http://localhost/admin/jobs/lifecycle");
+  // Without the grant the request would fail capability enforcement
+  // because base capabilities do not include jobs:lifecycle. The
+  // grant promotes the subject above the route requirement.
+  const result = await middleware(request, url);
+  assert.ok(result.capabilities.includes("jobs:lifecycle"));
+});
+
+test("requireAuth ignores revoked grants when expanding capabilities", async () => {
+  const subject = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+  const stateStore = new MemoryStateStore();
+  await stateStore.upsertCapabilityGrant({
+    id: "grant-y",
+    subject,
+    status: "revoked",
+    capabilities: ["jobs:lifecycle"],
+    issuedAt: new Date().toISOString(),
+    revokedAt: new Date().toISOString(),
+    issuedBy: "0x1111111111111111111111111111111111111111"
+  });
+  const authConfig = {
+    secrets: [LONG_SECRET],
+    signingSecret: LONG_SECRET,
+    permissive: false,
+    strict: true
+  };
+  const middleware = createAuthMiddleware({ authConfig, stateStore, logger: silentLogger() });
+  const { token } = signToken({ sub: subject, roles: [] }, {
+    secret: LONG_SECRET,
+    expiresInSeconds: 60
+  });
+  const request = { method: "POST", headers: { authorization: `Bearer ${token}` } };
+  const url = new URL("http://localhost/admin/jobs/lifecycle");
+  await assert.rejects(
+    () => middleware(request, url),
+    (error) => error instanceof AuthorizationError && error.code === "missing_capability"
+  );
+});

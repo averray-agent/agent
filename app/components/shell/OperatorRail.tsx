@@ -9,6 +9,7 @@ import {
   FileCheck2,
   Gauge,
   History,
+  KeyRound,
   LayoutDashboard,
   ScrollText,
   ShieldCheck,
@@ -61,6 +62,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: "Governance",
     items: [
       { href: "/policies", label: "Policies", icon: ShieldCheck },
+      { href: "/capabilities", label: "Capabilities", icon: KeyRound },
       { href: "/disputes", label: "Disputes", icon: AlertTriangle },
       { href: "/audit-log", label: "Audit log", icon: FileCheck2 },
     ],

@@ -31,6 +31,9 @@ const BASE_CAPABILITIES = [
 
 const ROLE_CAPABILITIES = {
   admin: [
+    "admin:capabilities:read",
+    "admin:capabilities:grant",
+    "admin:capabilities:revoke",
     "admin:status",
     "disputes:release",
     "jobs:ingest",
@@ -94,6 +97,9 @@ const ROUTE_CAPABILITY_RULES = [
   { method: "GET", path: "/admin/jobs/timeline", capabilities: ["jobs:timeline"] },
   { method: "GET", path: "/admin/sessions", capabilities: ["ops:view"] },
   { method: "GET", path: "/admin/status", capabilities: ["admin:status", "ops:view"] },
+  { method: "GET", path: "/admin/capability-grants", capabilities: ["admin:capabilities:read"] },
+  { method: "POST", path: "/admin/capability-grants", capabilities: ["admin:capabilities:grant"] },
+  { method: "POST", path: "/admin/capability-grants/:id/revoke", capabilities: ["admin:capabilities:revoke"] },
   { method: "POST", path: "/admin/xcm/observe", capabilities: ["xcm:observe"] },
   { method: "POST", path: "/admin/xcm/finalize", capabilities: ["xcm:finalize"] },
   { method: "POST", path: "/verifier/replay", capabilities: ["verifier:replay"] },
@@ -110,6 +116,9 @@ const UI_CONTROLS = {
   "admin.jobs.timeline": ["jobs:timeline"],
   "admin.sessions.view": ["ops:view"],
   "admin.status.view": ["admin:status", "ops:view"],
+  "admin.capabilities.view": ["admin:capabilities:read"],
+  "admin.capabilities.grant": ["admin:capabilities:grant"],
+  "admin.capabilities.revoke": ["admin:capabilities:revoke"],
   "policies.propose": ["policies:propose"],
   "verifier.run": ["verifier:run"],
   "xcm.observe": ["xcm:observe"],
@@ -127,8 +136,27 @@ const AUTOMATION_ACTIONS = {
   "policy.propose": ["policies:propose"],
   "verifier.run": ["verifier:run"],
   "xcm.observe": ["xcm:observe"],
-  "xcm.finalize": ["xcm:finalize"]
+  "xcm.finalize": ["xcm:finalize"],
+  "capability.grant": ["admin:capabilities:grant"],
+  "capability.revoke": ["admin:capabilities:revoke"]
 };
+
+/**
+ * Set of every capability the platform recognises — the union of
+ * BASE_CAPABILITIES and every role's expansion. Used by the
+ * capability-grant validator (`buildCapabilityGrant`) so an admin
+ * cannot delegate a capability the platform itself has never heard
+ * of (typo prevention).
+ */
+export function listAllKnownCapabilities() {
+  const all = new Set(BASE_CAPABILITIES);
+  for (const capabilities of Object.values(ROLE_CAPABILITIES)) {
+    for (const capability of capabilities) {
+      all.add(capability);
+    }
+  }
+  return new Set([...all].sort());
+}
 
 export function resolveCapabilities(claims = {}) {
   const capabilities = new Set(BASE_CAPABILITIES);

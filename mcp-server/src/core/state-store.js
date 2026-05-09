@@ -46,6 +46,7 @@ export class MemoryStateStore {
     this.serviceStates = new Map();
     this.content = new Map();
     this.fundedJobs = new Map();
+    this.capabilityGrants = new Map();
   }
 
   async getSession(sessionId) {
@@ -296,6 +297,30 @@ export class MemoryStateStore {
     };
     this.serviceStates.set(scope, merged);
     return merged;
+  }
+
+  async getCapabilityGrant(id) {
+    return this.capabilityGrants.get(String(id ?? ""));
+  }
+
+  async upsertCapabilityGrant(record) {
+    const id = String(record?.id ?? "");
+    if (!id) return record;
+    this.capabilityGrants.set(id, record);
+    return record;
+  }
+
+  async listCapabilityGrants({ subject, status, limit = 100, offset = 0 } = {}) {
+    const subjectKey = subject ? String(subject).toLowerCase() : undefined;
+    const statusKey = status ? String(status).toLowerCase() : undefined;
+    return [...this.capabilityGrants.values()]
+      .filter((grant) => {
+        if (subjectKey && String(grant.subject ?? "").toLowerCase() !== subjectKey) return false;
+        if (statusKey && grant.status !== statusKey) return false;
+        return true;
+      })
+      .sort((left, right) => String(right.issuedAt ?? "").localeCompare(String(left.issuedAt ?? "")))
+      .slice(Math.max(offset, 0), Math.max(offset, 0) + Math.max(limit, 0));
   }
 
   async revokeToken(jti, ttlSeconds) {
@@ -634,6 +659,49 @@ export class RedisStateStore {
     };
     await this.client.set(this.key("service-state", scope), JSON.stringify(merged));
     return merged;
+  }
+
+  async getCapabilityGrant(id) {
+    await this.connect();
+    const raw = await this.client.get(this.key("capability-grant", String(id ?? "")));
+    return raw ? JSON.parse(raw) : undefined;
+  }
+
+  async upsertCapabilityGrant(record) {
+    await this.connect();
+    const id = String(record?.id ?? "");
+    if (!id) return record;
+    await this.client.set(this.key("capability-grant", id), JSON.stringify(record));
+    // Sorted set indices so list queries by subject and by status are
+    // O(log n + k) instead of scanning every grant key.
+    await this.client.zAdd(this.key("capability-grants", "all"), {
+      score: Date.parse(record?.issuedAt ?? "") || Date.now(),
+      value: id
+    });
+    if (record?.subject) {
+      await this.client.zAdd(
+        this.key("capability-grants-by-subject", String(record.subject).toLowerCase()),
+        { score: Date.parse(record?.issuedAt ?? "") || Date.now(), value: id }
+      );
+    }
+    return record;
+  }
+
+  async listCapabilityGrants({ subject, status, limit = 100, offset = 0 } = {}) {
+    await this.connect();
+    const start = Math.max(offset, 0);
+    const stop = start + Math.max(limit - 1, 0);
+    const indexKey = subject
+      ? this.key("capability-grants-by-subject", String(subject).toLowerCase())
+      : this.key("capability-grants", "all");
+    const ids = await this.client.zRange(indexKey, start, stop, { REV: true });
+    const records = await Promise.all(ids.map((id) => this.getCapabilityGrant(id)));
+    const statusKey = status ? String(status).toLowerCase() : undefined;
+    return records.filter((record) => {
+      if (!record) return false;
+      if (statusKey && record.status !== statusKey) return false;
+      return true;
+    });
   }
 
   async revokeToken(jti, ttlSeconds) {

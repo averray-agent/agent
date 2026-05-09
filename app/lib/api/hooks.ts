@@ -108,3 +108,11 @@ export const useJobTimeline = (jobId: string | null) =>
 export const useOnboarding = () => useApi("/onboarding");
 export const useVerifierHandlers = () => useApi("/verifier/handlers");
 export const useSessionStateMachine = () => useApi("/session/state-machine");
+
+/**
+ * Operator-issued capability grants (roadmap §6). Lists every grant
+ * — active and revoked — newest-first. Polls every 15s so a
+ * just-issued grant lands in the panel without a manual refresh.
+ */
+export const useCapabilityGrants = () =>
+  useApi("/admin/capability-grants?limit=200", { refreshInterval: 15_000 });
