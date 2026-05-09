@@ -49,6 +49,14 @@ export function buildAgentProfile({
   // reaching into the store itself. Callers that don't need
   // dispute history can omit it.
   getDisputeReceipts,
+  // Optional sub-contracting lineage lookup. The HTTP layer
+  // pre-walks each session's parent (via `job.parentSessionId`) and
+  // children (via `listJobsByParentSession(session.sessionId)`),
+  // then passes a sync `(sessionId) → { parent?, children? } |
+  // undefined` so this builder can emit the `lineage` block +
+  // `stats.lineage` counters without reaching into the catalog
+  // itself. Callers that don't need lineage can omit it. Roadmap §8.
+  getLineage,
 } = {}) {
   requireAddress(wallet, "wallet");
   const normalizedWallet = wallet.toLowerCase();
@@ -171,6 +179,21 @@ export function buildAgentProfile({
     { total: 0, open: 0, lost: 0, won: 0, split: 0, timeout: 0, resolved: 0 }
   );
 
+  // Sub-contracting history. Each session can be a parent (this
+  // wallet posted a sub-job from it), a child (this wallet worked
+  // on a sub-job posted by another session), or both for a middle
+  // node in a chain. Roadmap §8.
+  const lineage = buildLineageHistory(
+    safeSessions,
+    normalizedWallet,
+    definitionOf,
+    typeof getLineage === "function" ? getLineage : () => undefined
+  );
+  const lineageOutcomes = {
+    delegated: lineage.delegated.length,
+    subcontracted: lineage.subcontracted.length
+  };
+
   return {
     schemaVersion: AGENT_PROFILE_SCHEMA_VERSION,
     wallet: normalizedWallet,
@@ -191,11 +214,13 @@ export function buildAgentProfile({
       lastActive: lastActiveMs ? new Date(lastActiveMs).toISOString() : null,
       preferredCategories,
       disputes: disputeOutcomes,
+      lineage: lineageOutcomes,
     },
     ...(currentActivity ? { currentActivity } : {}),
     categoryLevels,
     badges,
     disputes,
+    lineage,
   };
 }
 
@@ -433,6 +458,121 @@ function buildDisputeHistory(sessions, definitionOf, getDisputeReceipts) {
  * fields (full evidence blob, signed receipt body) live behind
  * `/disputes/<id>` and require auth.
  */
+/**
+ * Walk session history and split each entry into the wallet's two
+ * sub-contracting roles:
+ *
+ *   - delegated:   sessions where THIS wallet posted at least one
+ *                  child job (parent role).
+ *   - subcontracted: sessions where THIS wallet worked on a job
+ *                  that was itself a child of another session
+ *                  (child role).
+ *
+ * Both lists are newest-first and capped at 25 entries to keep the
+ * public profile bounded. The frontend can deep-link to /runs for
+ * the unbounded view. Each entry stays slim: id, jobId, jobTitle?,
+ * status, completedAt, plus a compact counterparty + lineage
+ * summary. Heavy lineage payloads (full child timelines, budget
+ * accounting) live behind /admin/jobs/timeline.
+ *
+ * Skips any session whose lineage lookup returns nothing — the
+ * common case for a wallet that hasn't done any sub-contracting.
+ */
+function buildLineageHistory(sessions, normalizedWallet, definitionOf, getLineage) {
+  const delegated = [];
+  const subcontracted = [];
+  if (!Array.isArray(sessions) || sessions.length === 0) {
+    return { delegated, subcontracted };
+  }
+
+  for (const session of sessions) {
+    if (!session || typeof session !== "object") continue;
+    const lineage = getLineage(session.sessionId);
+    if (!lineage || typeof lineage !== "object") continue;
+
+    const job = (() => {
+      try {
+        return definitionOf(session.jobId);
+      } catch {
+        return undefined;
+      }
+    })();
+
+    if (Array.isArray(lineage.children) && lineage.children.length > 0) {
+      delegated.push(buildDelegatedEntry(session, job, lineage.children));
+    }
+    if (lineage.parent && typeof lineage.parent === "object") {
+      subcontracted.push(buildSubcontractedEntry(session, job, lineage.parent, normalizedWallet));
+    }
+  }
+
+  delegated.sort((a, b) => Date.parse(b.updatedAt ?? "") - Date.parse(a.updatedAt ?? ""));
+  subcontracted.sort((a, b) => Date.parse(b.updatedAt ?? "") - Date.parse(a.updatedAt ?? ""));
+  return {
+    delegated: delegated.slice(0, 25),
+    subcontracted: subcontracted.slice(0, 25)
+  };
+}
+
+function buildDelegatedEntry(session, job, children) {
+  const childJobIds = [];
+  const childSessionIds = [];
+  const childWallets = new Set();
+  for (const child of children) {
+    if (!child || typeof child !== "object") continue;
+    const jobId = stringOrUndefined(child.jobId);
+    if (jobId) childJobIds.push(jobId);
+    if (Array.isArray(child.sessionIds)) {
+      for (const sid of child.sessionIds) {
+        if (typeof sid === "string" && sid) childSessionIds.push(sid);
+      }
+    }
+    const childWallet = stringOrUndefined(child.wallet);
+    if (childWallet) childWallets.add(childWallet.toLowerCase());
+  }
+  return {
+    sessionId: String(session.sessionId ?? ""),
+    jobId: stringOrUndefined(session.jobId) ?? "unknown-job",
+    ...(stringOrUndefined(job?.title) ? { jobTitle: job.title } : {}),
+    status: stringOrUndefined(session.status) ?? "unknown",
+    role: "parent",
+    updatedAt: stringOrUndefined(session.updatedAt) ?? new Date().toISOString(),
+    children: {
+      count: childJobIds.length,
+      ...(childJobIds.length ? { jobIds: childJobIds } : {}),
+      ...(childSessionIds.length ? { sessionIds: childSessionIds } : {}),
+      ...(childWallets.size ? { wallets: [...childWallets] } : {})
+    }
+  };
+}
+
+function buildSubcontractedEntry(session, job, parent, normalizedWallet) {
+  const parentWallet = stringOrUndefined(parent.wallet);
+  const parentSessionId = stringOrUndefined(parent.sessionId);
+  const parentJobId = stringOrUndefined(parent.jobId);
+  return {
+    sessionId: String(session.sessionId ?? ""),
+    jobId: stringOrUndefined(session.jobId) ?? "unknown-job",
+    ...(stringOrUndefined(job?.title) ? { jobTitle: job.title } : {}),
+    status: stringOrUndefined(session.status) ?? "unknown",
+    role: "child",
+    updatedAt: stringOrUndefined(session.updatedAt) ?? new Date().toISOString(),
+    parent: {
+      ...(parentSessionId ? { sessionId: parentSessionId } : {}),
+      ...(parentJobId ? { jobId: parentJobId } : {}),
+      ...(parentWallet
+        ? {
+            wallet: parentWallet.toLowerCase(),
+            // Convenience flag so the renderer can mark "self-
+            // delegation" (a wallet posting a sub-job to itself)
+            // distinctly from a true cross-wallet subcontract.
+            isSelf: parentWallet.toLowerCase() === normalizedWallet
+          }
+        : {})
+    }
+  };
+}
+
 function buildProfileDispute(session, definitionOf, verdictReceipt, releaseReceipt) {
   const sessionId = String(session.sessionId ?? "");
   const id = sessionId ? disputeIdForSession(sessionId) : undefined;

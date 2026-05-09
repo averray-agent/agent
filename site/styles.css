@@ -1416,3 +1416,114 @@ code {
 .dispute-row-timeout  { border-left: 3px solid #8c857a; }
 .dispute-row-resolved { border-left: 3px solid var(--accent); }
 
+/* Sub-contracting history (roadmap §8) ----------------------------- */
+
+.lineage-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
+  gap: 0.9rem;
+  margin-top: 0.6rem;
+}
+
+.lineage-block {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.95rem 1rem;
+  border-radius: 0.85rem;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.lineage-block .trail-block-label span {
+  margin-left: 0.35rem;
+  font-family: "JetBrains Mono", "Space Grotesk", monospace;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: 0;
+}
+
+.lineage-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.lineage-row {
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.7rem 0.85rem;
+  border-radius: 0.65rem;
+  border: 1px solid var(--line);
+  background: rgba(255, 253, 247, 0.6);
+}
+
+.lineage-row-parent { border-left: 3px solid #3a8c5e; }
+.lineage-row-child  { border-left: 3px solid #4a73c2; }
+
+.lineage-row-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.55rem;
+}
+
+.lineage-row-title {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.lineage-row-title .eyebrow {
+  margin: 0;
+}
+
+.lineage-row-title h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  letter-spacing: -0.005em;
+}
+
+.lineage-row-meta {
+  margin: 0;
+  font-size: 0.7rem;
+  color: var(--muted);
+  letter-spacing: 0;
+  word-break: break-all;
+}
+
+.lineage-row-meta code {
+  font-size: 0.7rem;
+  padding: 0.05rem 0.25rem;
+}
+
+.lineage-row-summary {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--ink);
+  line-height: 1.5;
+}
+
+.lineage-row-summary code {
+  font-size: 0.72rem;
+  padding: 0.05rem 0.3rem;
+}
+
+.lineage-row-jobs {
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  list-style: none;
+}
+
+.lineage-row-jobs li {
+  font-family: "JetBrains Mono", "Space Grotesk", monospace;
+  font-size: 0.7rem;
+  color: var(--ink);
+}
+
+.lineage-row-jobs-more {
+  color: var(--muted);
+}
+

@@ -323,6 +323,68 @@ async function preloadDisputeReceipts(sessions) {
   return (sessionId) => receiptsBySession.get(sessionId);
 }
 
+/**
+ * Walk the wallet's session history and pre-build the slim
+ * sub-contracting lookup `buildAgentProfile` consumes via its
+ * `getLineage` arg. For each session we record:
+ *   - `parent`  if the job this session is on was itself a child of
+ *               another session (`job.parentSessionId` set; the
+ *               parent wallet lives on `job.lineage.parentWallet`).
+ *   - `children` if any sub-jobs were posted from this session
+ *               (`listChildJobsByParentSession`).
+ * Sessions with neither role are skipped so a wallet that's never
+ * sub-contracted pays no extra cost. Roadmap §8.
+ */
+function preloadLineage(sessions) {
+  if (!Array.isArray(sessions) || sessions.length === 0) {
+    return () => undefined;
+  }
+  const lookup = new Map();
+  for (const session of sessions) {
+    if (!session || typeof session !== "object") continue;
+    const sessionId = String(session.sessionId ?? "");
+    if (!sessionId) continue;
+
+    const entry = {};
+    let job;
+    try {
+      job = service.getJobDefinition(session.jobId);
+    } catch {
+      job = undefined;
+    }
+    if (job?.parentSessionId) {
+      const parent = {
+        sessionId: String(job.parentSessionId),
+        ...(job.lineage?.parentJobId ? { jobId: String(job.lineage.parentJobId) } : {}),
+        ...(typeof job.lineage?.parentWallet === "string"
+          ? { wallet: job.lineage.parentWallet }
+          : {})
+      };
+      if (Object.keys(parent).length > 0) entry.parent = parent;
+    }
+    let childJobs;
+    try {
+      childJobs = service.listChildJobsByParentSession?.(sessionId) ?? [];
+    } catch {
+      childJobs = [];
+    }
+    if (childJobs.length > 0) {
+      entry.children = childJobs.map((childJob) => ({
+        jobId: String(childJob.id ?? ""),
+        ...(typeof childJob.lineage?.parentWallet === "string"
+          ? { parentWallet: childJob.lineage.parentWallet }
+          : {})
+      })).filter((child) => child.jobId);
+    }
+
+    if (entry.parent || (entry.children && entry.children.length > 0)) {
+      lookup.set(sessionId, entry);
+    }
+  }
+  if (lookup.size === 0) return () => undefined;
+  return (sessionId) => lookup.get(sessionId);
+}
+
 async function buildAgentDirectory(limit = 50) {
   const sessions = await service.listRecentSessions(limit);
   const wallets = [...new Set(sessions.map((session) => session.wallet).filter(Boolean))];
@@ -336,6 +398,10 @@ async function buildAgentDirectory(limit = 50) {
     // slashed (upheld-verdict) wallets. Skips wallets with no
     // disputed sessions, so this is free in the common case.
     const getDisputeReceipts = await preloadDisputeReceipts(history);
+    // Walk job lineage so directory rows can surface a "delegated"
+    // / "subcontracted" counter alongside the rest. Free for wallets
+    // that haven't sub-contracted.
+    const getLineage = preloadLineage(history);
     const profile = buildAgentProfile({
       wallet: wallet.toLowerCase(),
       reputation,
@@ -349,6 +415,7 @@ async function buildAgentDirectory(limit = 50) {
       },
       publicBaseUrl: process.env.PUBLIC_BASE_URL,
       getDisputeReceipts,
+      getLineage,
     });
     return buildAgentDirectoryRow(profile);
   }));
@@ -376,6 +443,40 @@ function buildBadgeReceipt(badge) {
     blockRef: averray.chainJobId,
     badge
   };
+}
+
+/**
+ * Derive the badge `lineage` block at fetch time from the session +
+ * job pair. Mirrors what `preloadLineage` does for the agent
+ * profile but for a single badge: parent (if the job was a sub-job)
+ * and children (if the session itself spawned sub-jobs). Returns
+ * `undefined` when there's nothing to surface so the badge stays
+ * clean. Roadmap §8.
+ */
+function deriveBadgeLineage(session, job) {
+  if (!session || !job) return undefined;
+  const lineage = {};
+  if (job.parentSessionId) {
+    const parent = {
+      sessionId: String(job.parentSessionId),
+      ...(job.lineage?.parentJobId ? { jobId: String(job.lineage.parentJobId) } : {}),
+      ...(typeof job.lineage?.parentWallet === "string" ? { wallet: job.lineage.parentWallet } : {})
+    };
+    if (Object.keys(parent).length > 0) lineage.parent = parent;
+  }
+  let childJobs = [];
+  try {
+    childJobs = service.listChildJobsByParentSession?.(session.sessionId) ?? [];
+  } catch {
+    childJobs = [];
+  }
+  if (childJobs.length > 0) {
+    lineage.children = {
+      count: childJobs.length,
+      jobIds: childJobs.map((childJob) => String(childJob.id ?? "")).filter(Boolean)
+    };
+  }
+  return Object.keys(lineage).length > 0 ? lineage : undefined;
 }
 
 async function listBadgeReceipts(limit = 100) {
@@ -1736,6 +1837,11 @@ const server = createServer(async (request, response) => {
       // with no contested sessions — `preloadDisputeReceipts` short-
       // circuits when there's nothing to fetch.
       const getDisputeReceipts = await preloadDisputeReceipts(sessions);
+      // Pre-walk sub-contracting lineage so the profile carries a
+      // delegated / subcontracted history block + counters without
+      // a separate /jobs/sub or /admin/jobs/timeline call. Free for
+      // wallets that haven't sub-contracted. Roadmap §8.
+      const getLineage = preloadLineage(sessions);
       const profile = buildAgentProfile({
         wallet: rawWallet.toLowerCase(),
         reputation,
@@ -1749,6 +1855,7 @@ const server = createServer(async (request, response) => {
         },
         publicBaseUrl: process.env.PUBLIC_BASE_URL,
         getDisputeReceipts,
+        getLineage,
       });
       return respond(response, 200, profile, { "cache-control": "public, max-age=30" });
     }
@@ -1789,7 +1896,8 @@ const server = createServer(async (request, response) => {
           context: {
             publicBaseUrl: process.env.PUBLIC_BASE_URL,
             posterAddress: process.env.DEFAULT_POSTER_ADDRESS,
-            verifierAddress: process.env.DEFAULT_VERIFIER_ADDRESS
+            verifierAddress: process.env.DEFAULT_VERIFIER_ADDRESS,
+            lineage: deriveBadgeLineage(session, job)
           }
         });
         // Keep badge JSON browser-cacheable for a minute — it's deterministic
