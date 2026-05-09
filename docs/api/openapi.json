@@ -1442,6 +1442,117 @@
         },
         "additionalProperties": true
       },
+      "AdminSettlementAssetStatus": {
+        "type": "object",
+        "description": "Configured settlement asset and live TreasuryPolicy approval state.",
+        "properties": {
+          "symbol": {
+            "type": "string"
+          },
+          "address": {
+            "type": "string"
+          },
+          "assetClass": {
+            "type": "string"
+          },
+          "assetId": {
+            "type": "integer"
+          },
+          "foreignAssetIndex": {
+            "type": "integer"
+          },
+          "decimals": {
+            "type": "integer"
+          },
+          "approved": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": true
+      },
+      "AdminPolicyStatus": {
+        "type": "object",
+        "description": "Live TreasuryPolicy contract readiness for settlement mutations.",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "policyAddress": {
+            "type": "string"
+          },
+          "paused": {
+            "type": "boolean"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "pauser": {
+            "type": "string"
+          },
+          "settlementReady": {
+            "type": "boolean"
+          },
+          "contracts": {
+            "type": "object",
+            "properties": {
+              "escrowCoreAddress": {
+                "type": "string"
+              },
+              "agentAccountAddress": {
+                "type": "string"
+              },
+              "reputationSbtAddress": {
+                "type": "string"
+              },
+              "supportedAssets": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/AdminSettlementAssetStatus"
+                }
+              }
+            },
+            "additionalProperties": true
+          },
+          "roles": {
+            "type": "object",
+            "properties": {
+              "signerAddress": {
+                "type": "string"
+              },
+              "signerIsVerifier": {
+                "type": "boolean"
+              },
+              "escrowIsServiceOperator": {
+                "type": "boolean"
+              },
+              "agentAccountIsServiceOperator": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": true
+          },
+          "readErrors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "field": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "risk": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": true
+      },
       "AdminStatus": {
         "type": "object",
         "description": "Admin-only platform status. The shape includes provider scheduler state and may grow as new operational views are added.",
@@ -1458,6 +1569,15 @@
           "jobStaleSweeper": {
             "type": "object",
             "description": "Automatic stale-job sweeper status, including dry-run/live mode, action, limits, and lastRun summary.",
+            "additionalProperties": true
+          },
+          "maintenance": {
+            "type": "object",
+            "properties": {
+              "policy": {
+                "$ref": "#/components/schemas/AdminPolicyStatus"
+              }
+            },
             "additionalProperties": true
           },
           "githubIngestion": {

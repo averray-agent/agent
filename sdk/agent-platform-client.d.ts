@@ -858,6 +858,45 @@ export interface AdminJobCreateInput extends ApiEnvelope {
   recurringPolicy?: RecurringPolicy;
 }
 
+export interface AdminSettlementAssetStatus extends ApiEnvelope {
+  symbol?: AssetSymbol;
+  address?: string;
+  assetClass?: string;
+  assetId?: number;
+  foreignAssetIndex?: number;
+  decimals?: number;
+  approved?: boolean;
+}
+
+export interface AdminPolicyStatus extends ApiEnvelope {
+  enabled?: boolean;
+  policyAddress?: string;
+  paused?: boolean;
+  owner?: string;
+  pauser?: string;
+  settlementReady?: boolean;
+  contracts?: {
+    escrowCoreAddress?: string;
+    agentAccountAddress?: string;
+    reputationSbtAddress?: string;
+    supportedAssets?: AdminSettlementAssetStatus[];
+    [key: string]: unknown;
+  };
+  roles?: {
+    signerAddress?: string;
+    signerIsVerifier?: boolean;
+    escrowIsServiceOperator?: boolean;
+    agentAccountIsServiceOperator?: boolean;
+    [key: string]: unknown;
+  };
+  readErrors?: Array<{
+    field?: string;
+    message?: string;
+    [key: string]: unknown;
+  }>;
+  risk?: ApiEnvelope;
+}
+
 export interface AdminStatusResponse extends ApiEnvelope {
   jobLifecycle?: {
     total?: number;
@@ -870,6 +909,10 @@ export interface AdminStatusResponse extends ApiEnvelope {
   };
   recurringJobs?: ApiEnvelope;
   providerOperations?: ApiEnvelope;
+  maintenance?: {
+    policy?: AdminPolicyStatus;
+    [key: string]: unknown;
+  };
 }
 
 export class AgentPlatformApiError extends Error {

@@ -40,12 +40,18 @@ const abiCoder = AbiCoder.defaultAbiCoder();
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 function summarizeSupportedAssets(assets = []) {
-  return assets.map((asset) => ({
+  return assets.map(summarizeSupportedAsset);
+}
+
+function summarizeSupportedAsset(asset) {
+  return {
     symbol: asset.symbol,
     address: asset.address,
     assetClass: asset.assetClass ?? "custom",
+    assetId: asset.assetId,
+    foreignAssetIndex: asset.foreignAssetIndex,
     decimals: asset.decimals
-  }));
+  };
 }
 
 export class BlockchainGateway {
@@ -288,7 +294,8 @@ export class BlockchainGateway {
           roles: {
             signerAddress: undefined,
             signerIsVerifier: false,
-            escrowIsServiceOperator: false
+            escrowIsServiceOperator: false,
+            agentAccountIsServiceOperator: false
           },
           readErrors: [],
           risk: {}
@@ -317,6 +324,7 @@ export class BlockchainGateway {
         paused,
         signerIsVerifier,
         escrowIsServiceOperator,
+        agentAccountIsServiceOperator,
         dailyOutflowCap,
         perAccountBorrowCap,
         minimumCollateralRatioBps,
@@ -336,6 +344,9 @@ export class BlockchainGateway {
         this.config.escrowCoreAddress
           ? optionalBool("serviceOperators(escrowCore)", this.policyContract.serviceOperators(this.config.escrowCoreAddress))
           : false,
+        this.config.agentAccountAddress
+          ? optionalBool("serviceOperators(agentAccount)", this.policyContract.serviceOperators(this.config.agentAccountAddress))
+          : false,
         optionalRead("dailyOutflowCap", this.policyContract.dailyOutflowCap(), 0),
         optionalRead("perAccountBorrowCap", this.policyContract.perAccountBorrowCap(), 0),
         optionalRead("minimumCollateralRatioBps", this.policyContract.minimumCollateralRatioBps(), 0),
@@ -348,6 +359,14 @@ export class BlockchainGateway {
         optionalRead("disputeLossSkillPenalty", this.policyContract.disputeLossSkillPenalty(), 0),
         optionalRead("disputeLossReliabilityPenalty", this.policyContract.disputeLossReliabilityPenalty(), 0)
       ]);
+      const supportedAssets = await Promise.all((this.config.supportedAssets ?? []).map(async (asset) => ({
+        ...summarizeSupportedAsset(asset),
+        approved: asset.address
+          ? await optionalBool(`approvedAssets(${asset.symbol ?? asset.address})`, this.policyContract.approvedAssets(asset.address))
+          : false
+      })));
+      const supportedAssetsReady = supportedAssets.length > 0
+        && supportedAssets.every((asset) => asset.approved === true);
 
       return {
         enabled: true,
@@ -355,17 +374,24 @@ export class BlockchainGateway {
         paused: paused === undefined ? undefined : Boolean(paused),
         owner,
         pauser,
-        settlementReady: Boolean(signerIsVerifier && escrowIsServiceOperator && paused === false),
+        settlementReady: Boolean(
+          signerIsVerifier
+            && escrowIsServiceOperator
+            && agentAccountIsServiceOperator
+            && supportedAssetsReady
+            && paused === false
+        ),
         contracts: {
           escrowCoreAddress: this.config.escrowCoreAddress,
           agentAccountAddress: this.config.agentAccountAddress,
           reputationSbtAddress: this.config.reputationSbtAddress,
-          supportedAssets: summarizeSupportedAssets(this.config.supportedAssets)
+          supportedAssets
         },
         roles: {
           signerAddress,
           signerIsVerifier,
-          escrowIsServiceOperator
+          escrowIsServiceOperator,
+          agentAccountIsServiceOperator
         },
         readErrors,
         risk: {

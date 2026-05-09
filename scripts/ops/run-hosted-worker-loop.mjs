@@ -3,9 +3,17 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 import { AgentPlatformClient } from "../../sdk/agent-platform-client.js";
+import { DEFAULT_ESCROW_ASSET } from "../../mcp-server/src/core/assets.js";
 
 const DEFAULT_API_BASE_URL = "https://api.averray.com";
 const DEFAULT_REWARD_AMOUNT = 0.000001;
+const REQUIRED_ESCROW_ASSET = {
+  symbol: DEFAULT_ESCROW_ASSET.symbol,
+  address: DEFAULT_ESCROW_ASSET.address.toLowerCase(),
+  assetClass: DEFAULT_ESCROW_ASSET.assetClass,
+  assetId: DEFAULT_ESCROW_ASSET.assetId,
+  decimals: DEFAULT_ESCROW_ASSET.decimals
+};
 
 export async function runHostedWorkerLoop({
   env = process.env,
@@ -25,6 +33,12 @@ export async function runHostedWorkerLoop({
   const idempotencyKey = env.PRODUCT_PROOF_IDEMPOTENCY_KEY || `product-proof:${jobId}`;
   const evidence = env.PRODUCT_PROOF_SUBMISSION || `complete verified output for ${jobId}`;
   const rewardAmount = parsePositiveNumber(env.PRODUCT_PROOF_REWARD_AMOUNT, DEFAULT_REWARD_AMOUNT);
+  const rewardAsset = normalizeAssetSymbol(env.PRODUCT_PROOF_REWARD_ASSET || REQUIRED_ESCROW_ASSET.symbol);
+  if (rewardAsset !== REQUIRED_ESCROW_ASSET.symbol) {
+    throw new Error(
+      `Hosted product-proof worker loop requires ${REQUIRED_ESCROW_ASSET.symbol} settlement; got PRODUCT_PROOF_REWARD_ASSET=${rewardAsset}.`
+    );
+  }
 
   const authSession = await platform.getAuthSession();
   const wallet = authSession?.wallet;
@@ -32,14 +46,14 @@ export async function runHostedWorkerLoop({
     throw new Error("/auth/session did not return a wallet for the worker token.");
   }
 
-  const settlementReadiness = await assertSettlementReadiness(platform);
+  const settlementReadiness = await assertSettlementReadiness(platform, rewardAsset);
 
   log(`Creating hosted product-proof job ${jobId}`);
   const created = await platform.createJob({
     id: jobId,
     category: "coding",
     tier: "starter",
-    rewardAsset: env.PRODUCT_PROOF_REWARD_ASSET || "DOT",
+    rewardAsset,
     rewardAmount,
     verifierMode: "benchmark",
     verifierTerms: ["complete", "verified", "output"],
@@ -114,6 +128,10 @@ export async function runHostedWorkerLoop({
   return evidenceDoc;
 }
 
+function normalizeAssetSymbol(value) {
+  return String(value ?? "").trim().toUpperCase();
+}
+
 function stripTrailingSlash(value) {
   return String(value).replace(/\/+$/u, "");
 }
@@ -129,7 +147,7 @@ function parsePositiveNumber(value, fallback) {
   return parsed;
 }
 
-async function assertSettlementReadiness(platform) {
+async function assertSettlementReadiness(platform, rewardAsset) {
   if (typeof platform.getAdminStatus !== "function") {
     throw new Error("Hosted product-proof worker loop requires /admin/status settlement readiness.");
   }
@@ -141,17 +159,58 @@ async function assertSettlementReadiness(platform) {
   if (policy.settlementReady !== true) {
     throw new Error(`Hosted product-proof worker loop requires on-chain settlement readiness; ${formatSettlementReadiness(policy)}`);
   }
+  const settlementAsset = (policy.contracts?.supportedAssets ?? []).find(
+    (asset) => normalizeAssetSymbol(asset.symbol) === rewardAsset
+  );
+  if (!settlementAsset) {
+    throw new Error(
+      `Hosted product-proof worker loop requires ${rewardAsset} as the configured settlement asset; ${formatSettlementReadiness(policy)}`
+    );
+  }
+  const assetMismatch = describeRequiredAssetMismatch(settlementAsset);
+  if (assetMismatch) {
+    throw new Error(
+      `Hosted product-proof worker loop requires canonical v1 ${REQUIRED_ESCROW_ASSET.symbol} settlement asset; ${assetMismatch}; ${formatSettlementReadiness(policy)}`
+    );
+  }
+  if (settlementAsset.approved !== true) {
+    throw new Error(
+      `Hosted product-proof worker loop requires approved ${rewardAsset} settlement asset; ${formatSettlementReadiness(policy)}`
+    );
+  }
   return {
     policyAddress: policy.policyAddress,
     paused: Boolean(policy.paused),
     settlementReady: true,
+    asset: settlementAsset,
     roles: {
       signerAddress: policy.roles?.signerAddress,
       signerIsVerifier: Boolean(policy.roles?.signerIsVerifier),
-      escrowIsServiceOperator: Boolean(policy.roles?.escrowIsServiceOperator)
+      escrowIsServiceOperator: Boolean(policy.roles?.escrowIsServiceOperator),
+      agentAccountIsServiceOperator: Boolean(policy.roles?.agentAccountIsServiceOperator)
     },
     contracts: policy.contracts
   };
+}
+
+function describeRequiredAssetMismatch(asset) {
+  const mismatches = [];
+  if (normalizeAssetSymbol(asset.symbol) !== REQUIRED_ESCROW_ASSET.symbol) {
+    mismatches.push(`symbol=${asset.symbol ?? "missing"}`);
+  }
+  if (String(asset.address ?? "").toLowerCase() !== REQUIRED_ESCROW_ASSET.address) {
+    mismatches.push(`address=${asset.address ?? "missing"}`);
+  }
+  if (String(asset.assetClass ?? "") !== REQUIRED_ESCROW_ASSET.assetClass) {
+    mismatches.push(`assetClass=${asset.assetClass ?? "missing"}`);
+  }
+  if (Number(asset.assetId) !== REQUIRED_ESCROW_ASSET.assetId) {
+    mismatches.push(`assetId=${asset.assetId ?? "missing"}`);
+  }
+  if (Number(asset.decimals) !== REQUIRED_ESCROW_ASSET.decimals) {
+    mismatches.push(`decimals=${asset.decimals ?? "missing"}`);
+  }
+  return mismatches.join(", ");
 }
 
 function formatSettlementReadiness(policy) {
@@ -159,6 +218,11 @@ function formatSettlementReadiness(policy) {
   if (policy?.paused) reasons.push("policyPaused=true");
   if (!policy?.roles?.signerIsVerifier) reasons.push("signerIsVerifier=false");
   if (!policy?.roles?.escrowIsServiceOperator) reasons.push("escrowIsServiceOperator=false");
+  if (!policy?.roles?.agentAccountIsServiceOperator) reasons.push("agentAccountIsServiceOperator=false");
+  const unapprovedAssets = (policy?.contracts?.supportedAssets ?? [])
+    .filter((asset) => asset.approved !== true)
+    .map((asset) => asset.symbol ?? asset.address ?? "unknown");
+  if (unapprovedAssets.length > 0) reasons.push(`unapprovedAssets=${unapprovedAssets.join("|")}`);
   if (Array.isArray(policy?.readErrors) && policy.readErrors.length > 0) {
     reasons.push(`policyReadErrors=${policy.readErrors.map((entry) => entry.field).join("|")}`);
   }

@@ -94,6 +94,7 @@ export const TREASURY_POLICY_ABI = [
   "function claimFeeVerifierBps() view returns (uint16)",
   "function onboardingWaiverClaimCount() view returns (uint256)",
   "function minClaimFeeByAsset(address asset) view returns (uint256)",
+  "function approvedAssets(address asset) view returns (bool)",
   "function rejectionSkillPenalty() view returns (uint256)",
   "function rejectionReliabilityPenalty() view returns (uint256)",
   "function disputeLossSkillPenalty() view returns (uint256)",

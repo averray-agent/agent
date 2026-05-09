@@ -205,7 +205,14 @@ test("getTreasuryPolicyStatus surfaces settlement readiness roles", async () => 
       return true;
     },
     async serviceOperators(address) {
-      assert.equal(address, "0x2222222222222222222222222222222222222222");
+      assert.ok([
+        "0x2222222222222222222222222222222222222222",
+        "0x3333333333333333333333333333333333333333"
+      ].includes(address));
+      return true;
+    },
+    async approvedAssets(address) {
+      assert.equal(address, DOT_ASSET.address);
       return true;
     },
     async dailyOutflowCap() {
@@ -249,12 +256,16 @@ test("getTreasuryPolicyStatus surfaces settlement readiness roles", async () => 
   assert.equal(status.roles.signerAddress, signerAddress);
   assert.equal(status.roles.signerIsVerifier, true);
   assert.equal(status.roles.escrowIsServiceOperator, true);
+  assert.equal(status.roles.agentAccountIsServiceOperator, true);
   assert.deepEqual(status.readErrors, []);
   assert.deepEqual(status.contracts.supportedAssets, [{
     symbol: "DOT",
     address: DOT_ASSET.address,
     assetClass: "custom",
-    decimals: 18
+    assetId: undefined,
+    foreignAssetIndex: undefined,
+    decimals: 18,
+    approved: true
   }]);
 });
 
@@ -286,6 +297,9 @@ test("getTreasuryPolicyStatus records individual read errors without hiding role
       const error = new Error("require(false)");
       error.shortMessage = "execution reverted";
       throw error;
+    },
+    async approvedAssets() {
+      return false;
     },
     async dailyOutflowCap() {
       return 100n;
@@ -326,11 +340,18 @@ test("getTreasuryPolicyStatus records individual read errors without hiding role
 
   assert.equal(status.roles.signerIsVerifier, true);
   assert.equal(status.roles.escrowIsServiceOperator, false);
+  assert.equal(status.roles.agentAccountIsServiceOperator, false);
   assert.equal(status.settlementReady, false);
-  assert.deepEqual(status.readErrors, [{
-    field: "serviceOperators(escrowCore)",
-    message: "execution reverted"
-  }]);
+  assert.deepEqual(status.readErrors, [
+    {
+      field: "serviceOperators(escrowCore)",
+      message: "execution reverted"
+    },
+    {
+      field: "serviceOperators(agentAccount)",
+      message: "execution reverted"
+    }
+  ]);
 });
 
 test("previewClaimEconomics returns display values while preserving raw chain amounts", async () => {
