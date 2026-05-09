@@ -32,7 +32,8 @@ export async function runHostedWorkerLoop({
   const jobId = env.PRODUCT_PROOF_JOB_ID || `product-proof-worker-loop-${timestamp}`;
   const idempotencyKey = env.PRODUCT_PROOF_IDEMPOTENCY_KEY || `product-proof:${jobId}`;
   const evidence = env.PRODUCT_PROOF_SUBMISSION || `complete verified output for ${jobId}`;
-  const rewardAmount = parsePositiveNumber(env.PRODUCT_PROOF_REWARD_AMOUNT, DEFAULT_REWARD_AMOUNT);
+  const rewardAmountInput = parsePositiveDecimalString(env.PRODUCT_PROOF_REWARD_AMOUNT, DEFAULT_REWARD_AMOUNT);
+  const rewardAmount = Number(rewardAmountInput);
   const rewardAsset = normalizeAssetSymbol(env.PRODUCT_PROOF_REWARD_ASSET || REQUIRED_ESCROW_ASSET.symbol);
   if (rewardAsset !== REQUIRED_ESCROW_ASSET.symbol) {
     throw new Error(
@@ -47,6 +48,13 @@ export async function runHostedWorkerLoop({
   }
 
   const settlementReadiness = await assertSettlementReadiness(platform, rewardAsset);
+  const liquidityReadiness = await assertProductProofLiquidity({
+    platform,
+    wallet,
+    rewardAsset,
+    rewardAmount: rewardAmountInput,
+    settlementReadiness
+  });
 
   log(`Creating hosted product-proof job ${jobId}`);
   const created = await platform.createJob({
@@ -115,6 +123,7 @@ export async function runHostedWorkerLoop({
     verificationOutcome: verification.outcome,
     verificationReasonCode: verification.reasonCode ?? null,
     settlementReadiness,
+    liquidityReadiness,
     sessionStatus: session.status,
     completedAt: new Date(timestamp).toISOString()
   };
@@ -128,6 +137,41 @@ export async function runHostedWorkerLoop({
   return evidenceDoc;
 }
 
+async function assertProductProofLiquidity({ platform, wallet, rewardAsset, rewardAmount, settlementReadiness }) {
+  if (typeof platform.getAccountSummary !== "function") {
+    throw new Error("Hosted product-proof worker loop requires /account liquidity readiness.");
+  }
+
+  const account = await platform.getAccountSummary();
+  if (!sameWallet(account?.wallet, wallet)) {
+    throw new Error(
+      `Hosted product-proof worker loop requires /account to match /auth/session; ` +
+      `authWallet=${wallet}; accountWallet=${account?.wallet ?? "missing"}.`
+    );
+  }
+  const asset = settlementReadiness.asset;
+  const decimals = Number(asset.decimals);
+  const requiredRaw = toBaseUnits(rewardAmount, decimals);
+  const availableRaw = toBigIntAmount(account?.liquid?.[rewardAsset], `${rewardAsset} liquid balance`);
+  if (availableRaw < requiredRaw) {
+    const agentAccountAddress = settlementReadiness.contracts?.agentAccountAddress ?? "AgentAccountCore";
+    throw new Error(
+      `Hosted product-proof worker loop requires funded ${rewardAsset} liquidity before mutation; ` +
+      `wallet=${wallet}; account=${agentAccountAddress}; required=${formatBaseUnits(requiredRaw, decimals)} ${rewardAsset} ` +
+      `(raw ${requiredRaw}); available=${formatBaseUnits(availableRaw, decimals)} ${rewardAsset} (raw ${availableRaw}). ` +
+      `Fund by approving ${agentAccountAddress} on the canonical ${rewardAsset} ERC20 precompile and depositing into AgentAccountCore.`
+    );
+  }
+  return {
+    wallet,
+    asset: rewardAsset,
+    requiredRaw: requiredRaw.toString(),
+    availableRaw: availableRaw.toString(),
+    required: formatBaseUnits(requiredRaw, decimals),
+    available: formatBaseUnits(availableRaw, decimals)
+  };
+}
+
 function normalizeAssetSymbol(value) {
   return String(value ?? "").trim().toUpperCase();
 }
@@ -136,15 +180,69 @@ function stripTrailingSlash(value) {
   return String(value).replace(/\/+$/u, "");
 }
 
-function parsePositiveNumber(value, fallback) {
+function parsePositiveDecimalString(value, fallback) {
   if (value === undefined || value === null || value === "") {
-    return fallback;
+    return normalizeDecimalString(fallback);
   }
-  const parsed = Number(value);
+  const normalized = normalizeDecimalString(value);
+  const parsed = Number(normalized);
   if (!Number.isFinite(parsed) || parsed <= 0) {
     throw new Error(`PRODUCT_PROOF_REWARD_AMOUNT must be greater than zero; got ${JSON.stringify(value)}.`);
   }
-  return parsed;
+  return normalized;
+}
+
+function toBaseUnits(amount, decimals) {
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 30) {
+    throw new Error(`Settlement asset decimals must be an integer in [0, 30]; got ${JSON.stringify(decimals)}.`);
+  }
+  const normalized = normalizeDecimalString(amount);
+  const [whole, fractional = ""] = normalized.split(".");
+  if (fractional.length > decimals) {
+    throw new Error(`PRODUCT_PROOF_REWARD_AMOUNT must fit ${decimals} decimal places; got ${normalized}.`);
+  }
+  return BigInt(whole) * (10n ** BigInt(decimals))
+    + BigInt(fractional.padEnd(decimals, "0") || "0");
+}
+
+function normalizeDecimalString(value) {
+  if (typeof value === "bigint") return value.toString();
+  const raw = typeof value === "number"
+    ? value.toLocaleString("en-US", { useGrouping: false, maximumFractionDigits: 30 })
+    : String(value ?? "").trim();
+  if (!/^(?:0|[1-9]\d*)(?:\.\d+)?$/u.test(raw)) {
+    throw new Error(`PRODUCT_PROOF_REWARD_AMOUNT must be a positive decimal amount; got ${JSON.stringify(value)}.`);
+  }
+  return raw;
+}
+
+function sameWallet(a, b) {
+  return typeof a === "string"
+    && typeof b === "string"
+    && a.toLowerCase() === b.toLowerCase();
+}
+
+function toBigIntAmount(value, label) {
+  if (typeof value === "bigint") return value;
+  if (typeof value === "number") {
+    if (!Number.isSafeInteger(value) || value < 0) {
+      throw new Error(`${label} must be a non-negative safe integer raw amount; got ${value}.`);
+    }
+    return BigInt(value);
+  }
+  if (typeof value === "string" && /^\d+$/u.test(value.trim())) {
+    return BigInt(value.trim());
+  }
+  throw new Error(`${label} must be present as a raw integer amount.`);
+}
+
+function formatBaseUnits(raw, decimals) {
+  const scale = 10n ** BigInt(decimals);
+  const whole = raw / scale;
+  const fractional = raw % scale;
+  if (fractional === 0n || decimals === 0) return whole.toString();
+  const padded = fractional.toString().padStart(decimals, "0").replace(/0+$/u, "");
+  return `${whole}.${padded}`;
 }
 
 async function assertSettlementReadiness(platform, rewardAsset) {
@@ -167,6 +265,8 @@ async function assertSettlementReadiness(platform, rewardAsset) {
       `Hosted product-proof worker loop requires ${rewardAsset} as the configured settlement asset; ${formatSettlementReadiness(policy)}`
     );
   }
+  // Polkadot Hub's ERC20 precompile does not implement name/symbol/decimals.
+  // Keep v1 USDC validation on the static record plus policy.approvedAssets.
   const assetMismatch = describeRequiredAssetMismatch(settlementAsset);
   if (assetMismatch) {
     throw new Error(
