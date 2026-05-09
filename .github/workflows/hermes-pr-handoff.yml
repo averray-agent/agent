@@ -70,7 +70,7 @@ jobs:
         run: |
           prompt=$(
             cat <<PROMPT
-          Use Averray MCP tools only. Call averray_invoke_agent_task with requester='github-actions', intent='pr_handoff', repo='${HANDOFF_REPO}', pullRequestNumber=${HANDOFF_PR_NUMBER}, testCaseIds=['TBE2E-004'], correlationId='${HANDOFF_CORRELATION_ID}', reason='post-CI PR handoff'. Report finalVerdict, mergeRecommendation, requested tests, and safety briefly.
+          Use Averray MCP tools only. Call averray_invoke_agent_task with requester='github-actions', intent='testbed_case', testCaseId='TBE2E-004', correlationId='${HANDOFF_CORRELATION_ID}', reason='post-CI PR handoff for ${HANDOFF_REPO}#${HANDOFF_PR_NUMBER}'. Report finalVerdict, mergeRecommendation, requested tests, and safety briefly.
           PROMPT
           )
 

@@ -53,6 +53,25 @@ Run the smallest relevant set locally before opening a PR:
 
 CI is the merge gate. Do not bypass failing checks.
 
+## Hermes PR Handoff
+
+- After PR CI passes, `.github/workflows/hermes-pr-handoff.yml` asks the
+  Averray/Hermes operator to run the configured testbed check set. Treat that
+  workflow as the automated test runner handoff between code agents and the
+  operator agent.
+- The handoff currently invokes Hermes with `averray_invoke_agent_task`,
+  `intent='testbed_case'`, and `testCaseId='TBE2E-004'` as the default safe
+  dry-run testbed case. It is read-only from GitHub's side and reports its
+  verdict in the GitHub Actions summary.
+- Full PR-review semantics, such as code/logic review, changed-file analysis,
+  and merge recommendations, should be added as a first-class Averray/Hermes
+  `pr_handoff` intent before this workflow switches to that broader mode.
+- If a PR needs a specific Hermes test, mention the desired testbed case in the
+  PR notes so the next agent/operator can route it explicitly through
+  `averray_invoke_agent_task`.
+- Do not merge only because Hermes reports ok. CI remains the merge gate, and a
+  human or explicitly authorized merge workflow still owns the final merge.
+
 ## Deployment
 
 - Agents do not SSH into production unless explicitly asked.
