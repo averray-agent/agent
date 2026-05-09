@@ -47,6 +47,7 @@ BACKEND_ENV_FILE=${BACKEND_ENV_FILE:-"$STACK_ROOT/backend.env"}
 SITE_BUILD_RUNNER=${SITE_BUILD_RUNNER:-auto}
 SITE_NODE_IMAGE=${SITE_NODE_IMAGE:-node:22-bookworm-slim}
 BOOTSTRAP_INSTRUMENTATION_ENV_UPDATED=0
+SETTLEMENT_ENV_UPDATED=0
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -168,6 +169,141 @@ upsert_env_values() {
   mv "$tmp" "$env_file"
 }
 
+upsert_env_values_if_changed() {
+  local env_file="$1"
+  shift
+  mkdir -p "$(dirname "$env_file")"
+  touch "$env_file"
+
+  local key_pattern=""
+  local pair key
+  for pair in "$@"; do
+    key="${pair%%=*}"
+    if [[ -z "$key_pattern" ]]; then
+      key_pattern="$key"
+    else
+      key_pattern="$key_pattern|$key"
+    fi
+  done
+
+  local tmp="${env_file}.tmp.$$"
+  grep -Ev "^(${key_pattern})=" "$env_file" > "$tmp" || true
+  for pair in "$@"; do
+    key="${pair%%=*}"
+    printf '%s=%s\n' "$key" "$(quote_env_value "${pair#*=}")" >> "$tmp"
+  done
+
+  if cmp -s "$tmp" "$env_file"; then
+    rm -f "$tmp"
+    return 1
+  fi
+
+  mv "$tmp" "$env_file"
+  return 0
+}
+
+configure_settlement_env() {
+  local manifest="$APP_ROOT/deployments/testnet.json"
+  if [[ ! -f "$manifest" ]]; then
+    echo "No testnet deployment manifest found; leaving backend.env settlement settings unchanged."
+    return
+  fi
+
+  if ! command -v node >/dev/null 2>&1; then
+    echo "node is required to derive settlement env from $manifest." >&2
+    exit 1
+  fi
+
+  local generated
+  if ! generated=$(node - "$manifest" <<'NODE'
+const { readFileSync } = require("node:fs");
+
+const manifestPath = process.argv[2];
+const deployment = JSON.parse(readFileSync(manifestPath, "utf8"));
+
+function requireAddress(value, label) {
+  if (typeof value !== "string" || !/^0x[a-fA-F0-9]{40}$/.test(value)) {
+    throw new Error(`${label} must be a 0x + 20-byte EVM address.`);
+  }
+  return value;
+}
+
+function requireString(value, label) {
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new Error(`${label} must be present.`);
+  }
+  return value.trim();
+}
+
+const rpcUrl = requireString(deployment.rpcUrl, "rpcUrl");
+const contracts = deployment.contracts ?? {};
+const treasuryPolicy = requireAddress(contracts.treasuryPolicy, "contracts.treasuryPolicy");
+const agentAccountCore = requireAddress(contracts.agentAccountCore, "contracts.agentAccountCore");
+const escrowCore = requireAddress(contracts.escrowCore, "contracts.escrowCore");
+const reputationSbt = requireAddress(contracts.reputationSbt, "contracts.reputationSbt");
+const discoveryRegistry = contracts.discoveryRegistry
+  ? requireAddress(contracts.discoveryRegistry, "contracts.discoveryRegistry")
+  : "";
+const xcmWrapper = contracts.xcmWrapper
+  ? requireAddress(contracts.xcmWrapper, "contracts.xcmWrapper")
+  : "";
+const usdc = requireAddress(contracts.token, "contracts.token");
+const usdcLower = usdc.toLowerCase();
+const canonicalUsdc = "0x0000053900000000000000000000000001200000";
+
+if (usdcLower !== canonicalUsdc) {
+  throw new Error(`contracts.token must be canonical Hub USDC (${canonicalUsdc}), got ${usdc}.`);
+}
+
+const supportedAssets = JSON.stringify([{
+  symbol: "USDC",
+  assetClass: "trust_backed",
+  assetId: 1337,
+  address: usdc,
+  decimals: 6
+}]);
+
+const entries = {
+  DWELLER_RPC_URL: rpcUrl,
+  POLKADOT_RPC_URL: rpcUrl,
+  RPC_URL: rpcUrl,
+  TREASURY_POLICY_ADDRESS: treasuryPolicy,
+  AGENT_ACCOUNT_ADDRESS: agentAccountCore,
+  ESCROW_CORE_ADDRESS: escrowCore,
+  REPUTATION_SBT_ADDRESS: reputationSbt,
+  DISCOVERY_REGISTRY_ADDRESS: discoveryRegistry,
+  XCM_WRAPPER_ADDRESS: xcmWrapper,
+  SUPPORTED_ASSETS_JSON: supportedAssets,
+  SUPPORTED_ASSETS: ""
+};
+
+for (const [key, value] of Object.entries(entries)) {
+  console.log(`${key}=${value}`);
+}
+NODE
+  ); then
+    echo "Failed to derive settlement env from $manifest." >&2
+    exit 1
+  fi
+
+  local pairs=()
+  local line
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    pairs+=("$line")
+  done <<< "$generated"
+
+  if [[ "${#pairs[@]}" -eq 0 ]]; then
+    echo "Settlement env derivation returned no values." >&2
+    exit 1
+  fi
+
+  echo "Ensuring backend settlement settings in $BACKEND_ENV_FILE match $manifest"
+  if upsert_env_values_if_changed "$BACKEND_ENV_FILE" "${pairs[@]}"; then
+    SETTLEMENT_ENV_UPDATED=1
+  fi
+}
+
 configure_bootstrap_instrumentation_env() {
   if [[ -z "${RESEND_API_KEY:-}" || -z "${BOOTSTRAP_SELF_REPORT_TO:-}" ]]; then
     echo "Bootstrap self-report secrets are incomplete; leaving backend.env instrumentation settings unchanged."
@@ -201,7 +337,7 @@ configure_bootstrap_instrumentation_env() {
 }
 
 backend_env_requires_deploy() {
-  if [[ "$BOOTSTRAP_INSTRUMENTATION_ENV_UPDATED" != "1" ]]; then
+  if [[ "$BOOTSTRAP_INSTRUMENTATION_ENV_UPDATED" != "1" && "$SETTLEMENT_ENV_UPDATED" != "1" ]]; then
     return 1
   fi
   case "$RUN_BACKEND" in
@@ -471,6 +607,7 @@ deploy() {
 
   initialize_component_state
   apply_indexer_database_schema
+  configure_settlement_env
   configure_bootstrap_instrumentation_env
 
   local run_backend=0
