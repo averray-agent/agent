@@ -157,6 +157,7 @@ test("runHostedWorkerLoop fails closed before mutation when settlement is not re
           calls.push(["getAdminStatus"]);
           return settlementReadyStatus({
             settlementReady: false,
+            readErrors: [{ field: "serviceOperators(escrowCore)", message: "execution reverted" }],
             roles: {
               signerAddress: "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519",
               signerIsVerifier: false,
@@ -173,7 +174,7 @@ test("runHostedWorkerLoop fails closed before mutation when settlement is not re
       log: () => {},
       env: { ADMIN_JWT: "token" }
     }),
-    /signerIsVerifier=false/u
+    /signerIsVerifier=false, policyReadErrors=serviceOperators\(escrowCore\)/u
   );
 
   assert.deepEqual(calls.map(([name]) => name), ["getAuthSession", "getAdminStatus"]);

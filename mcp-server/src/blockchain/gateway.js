@@ -290,18 +290,27 @@ export class BlockchainGateway {
             signerIsVerifier: false,
             escrowIsServiceOperator: false
           },
+          readErrors: [],
           risk: {}
         };
       }
 
       const signerAddress = await this.signer?.getAddress?.();
-      const optionalBool = async (promise, fallback = false) => {
+      const readErrors = [];
+      const optionalRead = async (field, promise, fallback) => {
         try {
-          return Boolean(await promise);
-        } catch {
+          return await promise;
+        } catch (error) {
+          readErrors.push({
+            field,
+            message: error?.shortMessage ?? error?.message ?? "read failed"
+          });
           return fallback;
         }
       };
+      const optionalBool = async (field, promise, fallback = false) => Boolean(
+        await optionalRead(field, promise, fallback)
+      );
       const [
         owner,
         pauser,
@@ -320,33 +329,33 @@ export class BlockchainGateway {
         disputeLossSkillPenalty,
         disputeLossReliabilityPenalty
       ] = await Promise.all([
-        this.policyContract.owner(),
-        this.policyContract.pauser(),
-        this.policyContract.paused(),
-        signerAddress ? optionalBool(this.policyContract.verifiers(signerAddress)) : false,
+        optionalRead("owner", this.policyContract.owner(), undefined),
+        optionalRead("pauser", this.policyContract.pauser(), undefined),
+        optionalRead("paused", this.policyContract.paused(), undefined),
+        signerAddress ? optionalBool("verifiers(signer)", this.policyContract.verifiers(signerAddress)) : false,
         this.config.escrowCoreAddress
-          ? optionalBool(this.policyContract.serviceOperators(this.config.escrowCoreAddress))
+          ? optionalBool("serviceOperators(escrowCore)", this.policyContract.serviceOperators(this.config.escrowCoreAddress))
           : false,
-        this.policyContract.dailyOutflowCap(),
-        this.policyContract.perAccountBorrowCap(),
-        this.policyContract.minimumCollateralRatioBps(),
-        this.policyContract.defaultClaimStakeBps(),
-        this.policyContract.claimFeeBps().catch(() => 0),
-        this.policyContract.claimFeeVerifierBps().catch(() => 7000),
-        this.policyContract.onboardingWaiverClaimCount().catch(() => 0),
-        this.policyContract.rejectionSkillPenalty(),
-        this.policyContract.rejectionReliabilityPenalty(),
-        this.policyContract.disputeLossSkillPenalty(),
-        this.policyContract.disputeLossReliabilityPenalty()
+        optionalRead("dailyOutflowCap", this.policyContract.dailyOutflowCap(), 0),
+        optionalRead("perAccountBorrowCap", this.policyContract.perAccountBorrowCap(), 0),
+        optionalRead("minimumCollateralRatioBps", this.policyContract.minimumCollateralRatioBps(), 0),
+        optionalRead("defaultClaimStakeBps", this.policyContract.defaultClaimStakeBps(), 0),
+        optionalRead("claimFeeBps", this.policyContract.claimFeeBps(), 0),
+        optionalRead("claimFeeVerifierBps", this.policyContract.claimFeeVerifierBps(), 7000),
+        optionalRead("onboardingWaiverClaimCount", this.policyContract.onboardingWaiverClaimCount(), 0),
+        optionalRead("rejectionSkillPenalty", this.policyContract.rejectionSkillPenalty(), 0),
+        optionalRead("rejectionReliabilityPenalty", this.policyContract.rejectionReliabilityPenalty(), 0),
+        optionalRead("disputeLossSkillPenalty", this.policyContract.disputeLossSkillPenalty(), 0),
+        optionalRead("disputeLossReliabilityPenalty", this.policyContract.disputeLossReliabilityPenalty(), 0)
       ]);
 
       return {
         enabled: true,
         policyAddress: this.config.treasuryPolicyAddress,
-        paused: Boolean(paused),
+        paused: paused === undefined ? undefined : Boolean(paused),
         owner,
         pauser,
-        settlementReady: Boolean(signerIsVerifier && escrowIsServiceOperator && !paused),
+        settlementReady: Boolean(signerIsVerifier && escrowIsServiceOperator && paused === false),
         contracts: {
           escrowCoreAddress: this.config.escrowCoreAddress,
           agentAccountAddress: this.config.agentAccountAddress,
@@ -358,6 +367,7 @@ export class BlockchainGateway {
           signerIsVerifier,
           escrowIsServiceOperator
         },
+        readErrors,
         risk: {
           dailyOutflowCap: Number(dailyOutflowCap),
           perAccountBorrowCap: Number(perAccountBorrowCap),

@@ -249,11 +249,87 @@ test("getTreasuryPolicyStatus surfaces settlement readiness roles", async () => 
   assert.equal(status.roles.signerAddress, signerAddress);
   assert.equal(status.roles.signerIsVerifier, true);
   assert.equal(status.roles.escrowIsServiceOperator, true);
+  assert.deepEqual(status.readErrors, []);
   assert.deepEqual(status.contracts.supportedAssets, [{
     symbol: "DOT",
     address: DOT_ASSET.address,
     assetClass: "custom",
     decimals: 18
+  }]);
+});
+
+test("getTreasuryPolicyStatus records individual read errors without hiding roles", async () => {
+  const gateway = new BlockchainGateway({
+    enabled: true,
+    rpcUrl: "http://127.0.0.1:8545",
+    signerPrivateKey: `0x${"11".repeat(32)}`,
+    treasuryPolicyAddress: "0x1111111111111111111111111111111111111111",
+    agentAccountAddress: "0x3333333333333333333333333333333333333333",
+    escrowCoreAddress: "0x2222222222222222222222222222222222222222",
+    reputationSbtAddress: "0x4444444444444444444444444444444444444444",
+    supportedAssets: [DOT_ASSET]
+  });
+  gateway.policyContract = {
+    async owner() {
+      return "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    },
+    async pauser() {
+      return "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    },
+    async paused() {
+      return false;
+    },
+    async verifiers() {
+      return true;
+    },
+    async serviceOperators() {
+      const error = new Error("require(false)");
+      error.shortMessage = "execution reverted";
+      throw error;
+    },
+    async dailyOutflowCap() {
+      return 100n;
+    },
+    async perAccountBorrowCap() {
+      return 200n;
+    },
+    async minimumCollateralRatioBps() {
+      return 300n;
+    },
+    async defaultClaimStakeBps() {
+      return 400n;
+    },
+    async claimFeeBps() {
+      return 5n;
+    },
+    async claimFeeVerifierBps() {
+      return 6000n;
+    },
+    async onboardingWaiverClaimCount() {
+      return 7n;
+    },
+    async rejectionSkillPenalty() {
+      return 8n;
+    },
+    async rejectionReliabilityPenalty() {
+      return 9n;
+    },
+    async disputeLossSkillPenalty() {
+      return 10n;
+    },
+    async disputeLossReliabilityPenalty() {
+      return 11n;
+    }
+  };
+
+  const status = await gateway.getTreasuryPolicyStatus();
+
+  assert.equal(status.roles.signerIsVerifier, true);
+  assert.equal(status.roles.escrowIsServiceOperator, false);
+  assert.equal(status.settlementReady, false);
+  assert.deepEqual(status.readErrors, [{
+    field: "serviceOperators(escrowCore)",
+    message: "execution reverted"
   }]);
 });
 

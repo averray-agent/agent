@@ -58,6 +58,7 @@ const DEFAULT_TREASURY_POLICY_STATUS = {
     signerIsVerifier: false,
     escrowIsServiceOperator: false
   },
+  readErrors: [],
   risk: {}
 };
 

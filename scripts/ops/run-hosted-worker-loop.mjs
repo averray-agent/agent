@@ -159,6 +159,9 @@ function formatSettlementReadiness(policy) {
   if (policy?.paused) reasons.push("policyPaused=true");
   if (!policy?.roles?.signerIsVerifier) reasons.push("signerIsVerifier=false");
   if (!policy?.roles?.escrowIsServiceOperator) reasons.push("escrowIsServiceOperator=false");
+  if (Array.isArray(policy?.readErrors) && policy.readErrors.length > 0) {
+    reasons.push(`policyReadErrors=${policy.readErrors.map((entry) => entry.field).join("|")}`);
+  }
   if (policy?.error?.message) reasons.push(`policyError=${policy.error.message}`);
   return reasons.length ? reasons.join(", ") : "settlementReady=false";
 }
