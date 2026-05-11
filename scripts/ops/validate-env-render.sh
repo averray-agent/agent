@@ -115,7 +115,12 @@ fi
 # Render. `op inject` reads op:// references from the template and produces
 # a fully-resolved env file. --cache=false ensures we always hit 1Password,
 # never a stale local cache (CRITICAL for deploy paths).
-if ! op inject --in-file "$template" --out-file "$rendered" --cache=false 2>"$tmpdir/op-inject.err"; then
+#
+# Both stdout (the resolved output path) and stderr (errors) are captured
+# to a tmpfile. We never echo stdout to the terminal — even the path
+# leaks unnecessary info. On failure, we print stderr only.
+if ! op inject --in-file "$template" --out-file "$rendered" --cache=false \
+    >"$tmpdir/op-inject.out" 2>"$tmpdir/op-inject.err"; then
   echo "validate-env-render.sh: op inject failed:" >&2
   sed 's/^/    /' < "$tmpdir/op-inject.err" >&2
   exit 1
