@@ -157,21 +157,30 @@ critical_vars=$(awk '
   }
 ' "$inventory")
 
+# Per-runtime semantic: critical-nonempty means "IF this var is in the
+# rendered file, it MUST render to non-empty." A critical var that's
+# absent from this template is fine — it belongs to a different runtime
+# (e.g., DATABASE_URL is critical for indexer but not present in the
+# backend rendered file). The structural check enforces that every
+# inventory row maps to a template OR is loaded via load-secrets-action,
+# so "absent" here = "intentionally not in this runtime."
+checked_critical=0
 missing_critical=""
 while IFS= read -r var; do
   [ -z "$var" ] && continue
-  # extract value without printing it: grep for `^VAR=` and check non-empty
+  # Extract value without printing it: grep for `^VAR=` and check non-empty.
   value_line=$(grep -E "^${var}=" "$rendered" || true)
   if [ -z "$value_line" ]; then
-    missing_critical+="  - ${var} (declared critical-nonempty but not present in rendered output)
-"
+    # Var not in this rendered file → different runtime, skip.
     continue
   fi
-  # strip 'VAR=' prefix to get value length without revealing the value
+  # Strip 'VAR=' prefix to get value length without revealing the value.
   value_len=$(printf '%s' "${value_line#*=}" | wc -c | tr -d ' ')
   if [ "$value_len" -eq 0 ]; then
     missing_critical+="  - ${var} (declared critical-nonempty but rendered to empty)
 "
+  else
+    checked_critical=$((checked_critical + 1))
   fi
 done <<< "$critical_vars"
 
@@ -193,5 +202,5 @@ echo "    template:           $template"
 echo "    rendered (deleted): ${rendered##*/}"
 echo "    total lines:        $total_lines"
 echo "    KEY=value lines:    $secret_lines"
-echo "    critical-nonempty:  ${critical_count:-0} vars validated (inventory-wide)"
+echo "    critical-nonempty:  ${checked_critical} of ${critical_count:-0} inventory-wide critical vars present and non-empty"
 [ "${STRICT:-}" = "1" ] && echo "    mode:               STRICT (TODO markers banned)" || echo "    mode:               permissive (TODO markers allowed)"
