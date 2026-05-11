@@ -539,14 +539,27 @@ automatically.
    or sign a raw message instead of a digest.
 
 3. **VPS access**: configure IAM Roles Anywhere
-   - Provision a private CA. AWS Private CA offers two modes:
-     - **General-purpose mode**: ~$400/month (cert lifetimes up to
-       any duration the CA supports). Easiest to operate.
-     - **Short-lived certificate mode**: ~$50/month (cert validity
-       ≤7 days). Requires automated cert renewal but cuts cost ~8x.
-     - Or self-managed CA with the private key in an HSM
-       (CloudHSM, YubiHSM, hardware-backed TPM). Lower vendor cost,
-       more ops burden.
+   - Provision a private CA. **Recommended default for our scale: a
+     self-managed CA with the CA private key stored in
+     `Averray/Production/Critical` (1Password, human-only).** $0
+     AWS recurring fees; the operator burden is one weekly cert-
+     issuance script. Documented residual risk: a Critical-vault
+     compromise = full CA compromise. Acceptable while there is one
+     operator and pre-mainnet stakes; revisit at mainnet maturity
+     or when adding a second operator.
+   - **Cheap upgrade ($25 one-time, $0 recurring)**: hold the CA
+     private key on a YubiKey instead of in 1Password. CA key never
+     touches disk; cert issuance requires the YubiKey + PIN. Single
+     operator availability constraint (only the YubiKey holder can
+     issue certs) is fine pre-mainnet.
+   - **Managed upgrade ($50/mo)**: AWS Private CA in **short-lived
+     certificate mode** (cert validity ≤7 days). Trade $600/year
+     for "any on-call operator can issue certs at 3am via the AWS
+     console with CloudTrail evidence." Right call once we have 2+
+     operators or audit pressure.
+   - **General-purpose AWS Private CA (~$400/mo)**: don't bother.
+     We never need certs valid longer than 7 days for this use
+     case, so paying for that capability is pure overhead.
    - Create a Trust Anchor in IAM referencing the CA
    - Create a Profile referencing `averray-signer-prod-role`
    - **Issue the client cert + key directly on the VPS** (revised in
@@ -1185,32 +1198,46 @@ The day before:
 | AWS KMS testnet key (single region) | ~$1.05 (1 key + ~$0.15 per 10k sigs) |
 | AWS KMS mainnet key (multi-region: 1 primary + 1 replica = 2 keys total) | ~$2.05 (2 keys × ~$1/mo + signing fees) |
 | AWS Roles Anywhere | $0 (no per-request fee) |
-| AWS ACM-PCA — **general-purpose mode** (long-lived certs) | ~$400/mo while the CA is active |
-| AWS ACM-PCA — **short-lived certificate mode** (≤7 day certs) | **~$50/mo** while the CA is active — recommended if Roles Anywhere is the only use case |
-| AWS ACM-PCA — **self-managed CA alternative** (CA private key in HSM) | $0 AWS recurring + operator time + HSM cost |
+| Roles Anywhere CA — **self-managed, key in `Critical` 1Password vault** (recommended) | **$0 recurring** |
+| Roles Anywhere CA — **self-managed, key on YubiKey** ($25 one-time per operator) | $0 recurring + one-time $25/op |
+| Roles Anywhere CA — AWS Private CA, short-lived certificate mode (≤7d certs) | ~$50/mo — upgrade option once we have 2+ operators or audit pressure |
+| Roles Anywhere CA — AWS Private CA, general-purpose mode | ~$400/mo — not needed for our use case |
 | AWS CloudTrail (for KMS audit) | $0 (first management trail free) |
 | AWS CloudWatch (for KMS alarms) | < $5 |
-| **Total at 1 user, testnet, ACM-PCA short-lived mode** | **~$59/mo** |
-| **Total at 3 users, mainnet, ACM-PCA short-lived mode** | **~$76/mo** |
-| **Total at 1 user, testnet, ACM-PCA general-purpose mode** | **~$409/mo** |
-| **Total at 3 users, mainnet, ACM-PCA general-purpose mode** | **~$426/mo** |
-| **YubiKey hardware keys** (one-time) | ~$50 × number of operators |
+| **Total at 1 user, testnet, self-managed CA** | **~$9/mo** |
+| **Total at 3 users, mainnet, self-managed CA** | **~$26/mo** |
+| **Total at 1 user, testnet, AWS Private CA short-lived mode** | ~$59/mo |
+| **Total at 3 users, mainnet, AWS Private CA short-lived mode** | ~$76/mo |
+| **YubiKey hardware keys** (one-time, for operator MFA — separate from CA-key YubiKey) | ~$50 × number of operators |
 
-The recurring cost is rounding error vs. the security improvement
-**unless** you pick general-purpose ACM-PCA. The **ACM-PCA mode
-decision is the one to think about**:
+The **Roles Anywhere CA decision is the one to think about**, but
+v3 (revised) lands on a different default than v2:
 
-- **Short-lived certificate mode** ($50/mo) issues certs with a
-  maximum 7-day validity. That fits Roles Anywhere perfectly — we
-  refresh the VPS client cert weekly via an automated job, so we
-  never need long-lived certs anyway. **This is the recommended
-  default.**
-- **General-purpose mode** ($400/mo) is needed only if you'd
-  issue certs valid longer than 7 days. We don't.
-- **Self-managed CA + HSM** is the cheapest steady-state option
-  but adds operator complexity (HSM lifecycle, CA-key rotation,
-  CRL hosting). Only worth it if the operator team can own that
-  weight.
+- **Self-managed CA, key in `Averray/Production/Critical`** ($0).
+  **This is the recommended default at our current scale.** The
+  CA's only job is signing a fresh client cert for the VPS once a
+  week — a 30-second scripted operation. The CA key sits in
+  1Password Critical (human-only, no service account can read it).
+  Documented residual risk: a Critical-vault compromise = full CA
+  compromise. That's the same trust-chain assumption we already
+  make for the 1Password recovery kit and AWS root credentials.
+- **Self-managed CA, key on YubiKey** ($25 one-time). One step
+  better. The CA key never touches disk; cert issuance requires the
+  physical YubiKey + PIN. Only the YubiKey holder can issue certs
+  (fine pre-mainnet with one operator).
+- **AWS Private CA, short-lived mode** ($50/mo). Worth the $600/year
+  when we have 2+ operators who need to issue certs without
+  coordinating, or when an external audit wants AWS-managed
+  CloudTrail evidence of every CA operation. Not worth it today.
+- **AWS Private CA, general-purpose mode** ($400/mo). Skip. We
+  never need certs valid longer than 7 days.
+
+**Revised in v3 (this PR)**: the previous wording recommended AWS
+Private CA short-lived mode as the default. For a pre-launch
+product with one operator, $600/year buys "AWS handles the CA"
+convenience that we don't yet need. Self-managed is the honest
+default; AWS Private CA short-lived mode stays in the menu as the
+upgrade path when scale or audit requirements justify it.
 
 KMS mainnet pricing — to be explicit: a multi-region KMS key with
 one replica in a second region is **two billable KMS keys**, not
