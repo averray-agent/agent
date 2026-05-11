@@ -482,11 +482,14 @@ approval process, and CloudTrail monitoring. See `SECRETS_MIGRATION.md`
 §3a for the full JSON policy.
 
 **Temporary credentials, not long-lived IAM keys** (corrected from v1):
-- **VPS**: IAM Roles Anywhere. Provision a private CA (AWS ACM-PCA or
-  self-managed), create a Trust Anchor in IAM with that CA, create a
-  Profile referencing the signer role, issue an X.509 client cert to
-  the VPS. Backend uses the cert to call STS and obtain temporary
-  credentials (≤1h lifetime). Rotates automatically.
+- **VPS**: IAM Roles Anywhere. Provision a private CA (default:
+  self-managed CA with the CA private key in
+  `Averray/Production/Critical`; see `SECRETS_MIGRATION.md` §3a for
+  alternatives and the cost-vs-operator-burden trade-off). Create a
+  Trust Anchor in IAM with that CA, create a Profile referencing
+  the signer role, issue an X.509 client cert to the VPS. Backend
+  uses the cert to call STS and obtain temporary credentials (≤1h
+  lifetime). Rotates weekly.
 - **GitHub Actions** (if any workflow needs AWS access): configure
   GitHub as an OIDC provider in IAM; AssumeRoleWithWebIdentity from
   the workflow; ≤1h credentials per job.
@@ -501,8 +504,14 @@ setup), make that an explicit residual risk with a removal date.
    (YubiKey) on root; recovery info printed offline.
 2. **Roles Anywhere trust anchor compromise** → if the CA private key
    leaks, attacker can mint client certs and impersonate the VPS.
-   Store CA private key in AWS ACM-PCA (best) or, if self-managed,
-   in an HSM. Never on disk.
+   **Self-managed CA (default at our scale)**: CA private key in
+   `Averray/Production/Critical` (human-only, no service account
+   readable). Residual risk: a Critical-vault compromise = full CA
+   compromise — same blast radius as a 1Password recovery-kit
+   leak, accepted. **Upgrade options** when scale or audit
+   pressure warrants: CA key on a YubiKey ($25 one-time), or AWS
+   Private CA short-lived mode ($50/mo). See
+   `SECRETS_MIGRATION.md` §3a cost summary.
 3. **CloudTrail KMS event exclusion** → CloudTrail can be configured
    to exclude KMS events from a trail. Verify your trail explicitly
    includes them. Verify in CloudTrail Insights as well.
@@ -762,18 +771,39 @@ By moving away from long-lived IAM access keys, we introduce a new
 single point of compromise: the trust anchor's CA private key. If
 that leaks, attacker can mint client certs and impersonate the VPS.
 
-**Why I think it's net positive**: Static IAM keys leak via OS-level
-compromise, environment dumps, backups, etc. CA private keys, if
-stored in AWS ACM-PCA, never leave AWS HSMs. If self-managing the
-CA, the private key MUST live in an HSM (CloudHSM, YubiHSM, or a
-hardware-backed TPM) — never on disk.
+**Why it's net positive even at our pre-launch scale**: Static IAM
+access keys are bearer credentials — anyone who sees the string can
+use it indefinitely. A Roles Anywhere CA private key is one step
+removed: an attacker who steals the CA key still has to (a) mint a
+client cert from it, (b) present that cert to AWS STS to get temp
+creds, (c) use the temp creds within their 1h lifetime. Each step
+leaves CloudTrail evidence on a separate timeline.
+
+**v3-revised default (this PR)**: self-managed CA with the CA
+private key in `Averray/Production/Critical` (1Password, human-only).
+$0 AWS recurring fees. Documented residual risk: a Critical-vault
+compromise = full CA compromise, which is the same risk we already
+accept for the 1Password recovery kit and AWS root credentials. The
+CA does one thing — sign a fresh weekly client cert — so the
+operator burden is a 30-second scripted operation per week.
+
+**Upgrade options when scale or audit pressure warrants**:
+- CA private key on a YubiKey ($25 one-time per operator). CA key
+  never touches disk; signing requires the physical key + PIN.
+- AWS Private CA short-lived certificate mode ($50/mo). AWS-managed
+  CA with CloudTrail evidence of every issuance. Right call once
+  there are 2+ operators or audit pressure.
+- AWS Private CA general-purpose mode ($400/mo). Skip — we never
+  need certs valid longer than 7 days.
 
 **What to verify**:
-- Decide whether AWS ACM-PCA or self-managed CA. ACM-PCA is more
-  expensive (~$400/month) but easier to operate. For our scale,
-  worth checking the actual cost calculator.
-- If self-managed: explicitly document where the CA private key lives
-  and who has access
+- The CA private key in `Critical` is accessible only via a human
+  1Password unlock (no service account has read on Critical)
+- The weekly client-cert reissuance script runs successfully
+  (calendar entry `aws-roles-anywhere-client-cert` warns 3 days
+  before the 7-day cert expires)
+- Plan to revisit the choice at: (a) second operator onboarded,
+  (b) revenue justifies external audit, or (c) mainnet maturity
 
 ### 6c. Multi-region KMS doubles ops complexity
 
@@ -834,8 +864,13 @@ Areas where I'd defer to a human security expert before mainnet:
 1. **Exact cipher choices for the JWT refresh-token flow**. Concept
    is clear; implementation needs review by someone who's done it
    before.
-2. **IAM Roles Anywhere CA model choice** (ACM-PCA vs self-managed
-   with HSM). Strong opinions exist; I don't have one.
+2. **IAM Roles Anywhere CA model choice**. v3 (revised, this PR)
+   lands on **self-managed CA with the CA key in
+   `Averray/Production/Critical`** as the pre-launch default;
+   AWS Private CA short-lived mode ($50/mo) and YubiKey-backed CA
+   key ($25 one-time) are documented upgrade paths. Worth a fresh
+   review when (a) a second operator joins, (b) revenue justifies
+   audit pressure, or (c) at mainnet maturity.
 3. **Domain separation for backend-signed messages** — what exactly
    to include (chain ID, contract, environment, purpose, job ID,
    nonce, expiry). Get a contract auditor's input.
@@ -896,8 +931,12 @@ These need explicit decisions before phase execution:
 1. **Multi-region KMS for mainnet**: yes (recommended) or no?
    Decision must be made before mainnet key creation — cannot
    convert later.
-2. **Roles Anywhere CA**: AWS ACM-PCA (~$400/mo) or self-managed
-   with HSM?
+2. **Roles Anywhere CA**: v3-revised default is self-managed CA
+   with the CA key in `Averray/Production/Critical` ($0 recurring,
+   ~30 sec/week of operator time). Confirm this is acceptable for
+   our current risk posture, OR pick an upgrade: YubiKey ($25
+   one-time) or AWS Private CA short-lived mode ($50/mo). See
+   `SECRETS_MIGRATION.md` §3a cost summary.
 3. **Asymmetric JWT migration**: full migration in Phase 4 or
    accept HMAC + hardening as residual risk?
 4. **Second operator**: who, when?
@@ -945,12 +984,20 @@ true. Each is a checkbox the security reviewer signs:
 | 1Password Business (1 user) | $7.99 |
 | 1Password Business (3 users, post-second-operator) | $23.97 |
 | AWS KMS testnet key (single region) | $1 + ~$0.15 per 10k sigs (~$1.05/mo) |
-| AWS KMS mainnet key (multi-region, 2 replicas) | $2 + ~$0.15 per 10k sigs (~$2.05/mo) |
-| AWS ACM-PCA (if used for Roles Anywhere) | ~$400 (consider self-managed CA + HSM for lower cost) |
+| AWS KMS mainnet key (multi-region: primary + 1 replica = 2 keys) | $2 + ~$0.15 per 10k sigs (~$2.05/mo) |
+| Roles Anywhere CA — **self-managed, CA key in `Critical` 1Password vault** (recommended default) | **$0 recurring** |
 | AWS Roles Anywhere itself | $0 |
-| **Total at 1 user, testnet** | ~$9/mo (or $409/mo if ACM-PCA used) |
-| **Total at 3 users, mainnet** | ~$26/mo (or $426/mo if ACM-PCA used) |
-| **YubiKey hardware keys** | ~$50 × number of operators (one-time) |
+| **Total at 1 user, testnet (recommended config)** | **~$9/mo** |
+| **Total at 3 users, mainnet (recommended config)** | **~$26/mo** |
+| Upgrade option: CA key on YubiKey ($25 one-time per operator) | $0 recurring |
+| Upgrade option: AWS Private CA short-lived mode | ~$50/mo |
+| **YubiKey hardware keys for operator MFA** (separate from CA-key YubiKey) | ~$50 × number of operators (one-time) |
+
+**Revised in v3 (this PR)**: the default Roles Anywhere CA model is
+now self-managed with the CA private key in
+`Averray/Production/Critical` ($0 recurring), not AWS Private CA
+($50–$400/mo). AWS Private CA stays in the table as an upgrade
+path when scale or audit pressure justifies it.
 
 The real cost is engineering time for the migration (~5–7 working
 days spread over a few weeks).
@@ -1021,6 +1068,17 @@ Substantive changes from v2 (all driven by external review):
     replica = 2 keys total" (not "2 replicas of one key").
     Added ACM-PCA short-lived certificate mode at ~$50/mo as the
     recommended Roles Anywhere CA option.
+11. **Roles Anywhere CA default flipped to self-managed** (post-
+    review operator decision, this PR). The CA private key lives
+    in `Averray/Production/Critical` (1Password, human-only).
+    $0 AWS recurring fees instead of $50/mo for AWS Private CA
+    short-lived mode. AWS Private CA short-lived mode and
+    YubiKey-backed CA key remain documented as upgrade paths for
+    when a second operator joins, when revenue justifies audit
+    pressure, or at mainnet maturity. Documented residual risk: a
+    `Critical`-vault compromise = full CA compromise, same
+    blast-radius assumption we already accept for the 1Password
+    recovery kit and AWS root credentials.
 
 Smaller v3 edits:
 - KMS public-key derivation uses a real DER/ASN.1 SPKI parser
