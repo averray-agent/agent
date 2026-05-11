@@ -104,6 +104,18 @@ for (const { runtime, path: relPath } of TEMPLATES) {
     const lineNo = i + 1;
     const line = lines[i];
 
+    // Hard rule, learned the hard way: `op inject` scans the WHOLE FILE
+    // for `op://` substrings (not just KEY=value lines) and tries to
+    // resolve every one. A literal `op://` in a comment will fail
+    // render with "invalid secret reference". Catch it here so the lint
+    // fails on the PR instead of on the operator's terminal.
+    if (line.includes('op://')) {
+      const isValidAssignment = /^[A-Z][A-Z0-9_]*\s*=\s*op:\/\//.test(line);
+      if (!isValidAssignment) {
+        err(relPath, lineNo, `comment or non-assignment line contains literal op:// — this trips op inject at runtime; rephrase as "1Password reference" or similar`);
+      }
+    }
+
     // Skip blank lines and pure comments (including commented-out
     // TODO placeholders — those are intentionally commented).
     if (/^\s*$/.test(line) || /^\s*#[^=]*$/.test(line) || /^\s*#\s*[A-Z][A-Z0-9_]*=.*TODO\(operator\)/.test(line)) {

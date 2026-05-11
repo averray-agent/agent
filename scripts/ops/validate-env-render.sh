@@ -115,7 +115,12 @@ fi
 # Render. `op inject` reads op:// references from the template and produces
 # a fully-resolved env file. --cache=false ensures we always hit 1Password,
 # never a stale local cache (CRITICAL for deploy paths).
-if ! op inject --in-file "$template" --out-file "$rendered" --cache=false 2>"$tmpdir/op-inject.err"; then
+#
+# Both stdout (the resolved output path) and stderr (errors) are captured
+# to a tmpfile. We never echo stdout to the terminal — even the path
+# leaks unnecessary info. On failure, we print stderr only.
+if ! op inject --in-file "$template" --out-file "$rendered" --cache=false \
+    >"$tmpdir/op-inject.out" 2>"$tmpdir/op-inject.err"; then
   echo "validate-env-render.sh: op inject failed:" >&2
   sed 's/^/    /' < "$tmpdir/op-inject.err" >&2
   exit 1
@@ -135,32 +140,47 @@ fi
 # rows that have "✅ yes" in the critical-nonempty column. The inventory
 # is the source of truth; this script parses it instead of duplicating
 # the list inline.
+#
+# Implementation note: earlier versions used `match()` + `substr()` to
+# pull VAR_NAME out, but the literal-space match was fragile against
+# column-alignment whitespace. Now we split on `|` and trim cols[2].
 critical_vars=$(awk '
   /^\| `[A-Z][A-Z0-9_]*`[[:space:]]+\|/ {
-    # row format: | `VAR_NAME` | op://... | <crit emoji> | owner | notes |
-    match($0, /\| `[A-Z][A-Z0-9_]*` \|/)
-    var = substr($0, RSTART+3, RLENGTH-5)  # strip "| `" prefix and "` |" suffix
-    # split row on `|` and look at the critical-nonempty column (4th)
     n = split($0, cols, "|")
-    if (n >= 4 && cols[4] ~ /yes/) print var
+    if (n < 4) next
+    if (cols[4] !~ /yes/) next
+    # cols[2] is "  `VAR_NAME`  " — strip spaces and backticks
+    var = cols[2]
+    gsub(/[[:space:]]/, "", var)
+    gsub(/`/, "", var)
+    if (var ~ /^[A-Z][A-Z0-9_]+$/) print var
   }
 ' "$inventory")
 
+# Per-runtime semantic: critical-nonempty means "IF this var is in the
+# rendered file, it MUST render to non-empty." A critical var that's
+# absent from this template is fine — it belongs to a different runtime
+# (e.g., DATABASE_URL is critical for indexer but not present in the
+# backend rendered file). The structural check enforces that every
+# inventory row maps to a template OR is loaded via load-secrets-action,
+# so "absent" here = "intentionally not in this runtime."
+checked_critical=0
 missing_critical=""
 while IFS= read -r var; do
   [ -z "$var" ] && continue
-  # extract value without printing it: grep for `^VAR=` and check non-empty
+  # Extract value without printing it: grep for `^VAR=` and check non-empty.
   value_line=$(grep -E "^${var}=" "$rendered" || true)
   if [ -z "$value_line" ]; then
-    missing_critical+="  - ${var} (declared critical-nonempty but not present in rendered output)
-"
+    # Var not in this rendered file → different runtime, skip.
     continue
   fi
-  # strip 'VAR=' prefix to get value length without revealing the value
+  # Strip 'VAR=' prefix to get value length without revealing the value.
   value_len=$(printf '%s' "${value_line#*=}" | wc -c | tr -d ' ')
   if [ "$value_len" -eq 0 ]; then
     missing_critical+="  - ${var} (declared critical-nonempty but rendered to empty)
 "
+  else
+    checked_critical=$((checked_critical + 1))
   fi
 done <<< "$critical_vars"
 
@@ -173,11 +193,14 @@ fi
 # Final tally — counts only, never values.
 total_lines=$(wc -l < "$rendered" | tr -d ' ')
 secret_lines=$(grep -cE '^[A-Z][A-Z0-9_]*=' "$rendered" || true)
+# Count *only non-empty* lines in the critical-vars list so we don't
+# report "1 vars validated" when the awk parse produced an empty result.
+critical_count=$(printf '%s\n' "$critical_vars" | grep -c . || true)
 
 echo "validate-env-render.sh: $runtime template rendered cleanly"
 echo "    template:           $template"
 echo "    rendered (deleted): ${rendered##*/}"
 echo "    total lines:        $total_lines"
 echo "    KEY=value lines:    $secret_lines"
-echo "    critical-nonempty:  $(printf '%s\n' "$critical_vars" | wc -l | tr -d ' ') vars validated"
+echo "    critical-nonempty:  ${checked_critical} of ${critical_count:-0} inventory-wide critical vars present and non-empty"
 [ "${STRICT:-}" = "1" ] && echo "    mode:               STRICT (TODO markers banned)" || echo "    mode:               permissive (TODO markers allowed)"
