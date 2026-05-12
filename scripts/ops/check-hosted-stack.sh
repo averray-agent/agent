@@ -115,7 +115,13 @@ check_operator_app_shell() {
     return 0
   fi
 
-  if ! enabled "$APP_ALLOW_PROTECTED_SHELL"; then
+  # Fall through to the protected-status check when EITHER:
+  #   (a) APP_ALLOW_PROTECTED_SHELL is explicitly enabled, OR
+  #   (b) APP_BASIC_AUTH_PASSWORD is not present in this environment
+  #       (Phase 2 PR 2.2 removed the raw from CI; without a password
+  #       we cannot expect a successful auth-200 response, only a 401
+  #       proving Caddy is up and serving the protected app).
+  if ! enabled "$APP_ALLOW_PROTECTED_SHELL" && [[ -n "${APP_BASIC_AUTH_PASSWORD:-}" ]]; then
     echo "Operator app did not return the expected shell" >&2
     exit 1
   fi
@@ -127,7 +133,11 @@ check_operator_app_shell() {
   local status
   status="$(curl "${curl_args[@]}" "$APP_URL")"
   if status_allowed "$status"; then
-    echo "Operator app returned protected status $status as expected."
+    if [[ -z "${APP_BASIC_AUTH_PASSWORD:-}" ]]; then
+      echo "Operator app returned protected status $status as expected (no auth in CI; auth-200 verification deferred to Phase 2 PR 2.5)."
+    else
+      echo "Operator app returned protected status $status as expected."
+    fi
     return 0
   fi
 
