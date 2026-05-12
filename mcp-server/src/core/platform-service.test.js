@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import { PlatformService } from "./platform-service.js";
 import { EventBus } from "./event-bus.js";
+import { MemoryStateStore } from "./state-store.js";
 
 const WALLET = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const CANONICAL_USDC_ASSET = {
@@ -14,7 +15,7 @@ const CANONICAL_USDC_ASSET = {
   minBalanceRaw: "70000"
 };
 
-function makePlatformService(blockchainGateway = undefined, eventBus = undefined) {
+function makePlatformService(blockchainGateway = undefined, eventBus = undefined, stateStore = undefined) {
   const jobs = [
     {
       id: "parent-job-001",
@@ -62,7 +63,7 @@ function makePlatformService(blockchainGateway = undefined, eventBus = undefined
   const reputations = new Map([
     [WALLET, { skill: 50, reliability: 50, economic: 50, tier: "starter" }]
   ]);
-  return new PlatformService(jobs, profiles, accounts, reputations, blockchainGateway, undefined, eventBus);
+  return new PlatformService(jobs, profiles, accounts, reputations, blockchainGateway, stateStore, eventBus);
 }
 
 test("createSubJob links the child job to the active parent session", async () => {
@@ -537,6 +538,64 @@ test("getJobTimeline stitches sessions, verification, events, and child lineage"
   assert.equal(fundedEvent.severity, "info");
   assert.equal(fundedEvent.correlationId, "parent-job-001");
   assert.equal(fundedEvent.data.txHash, "0xabc");
+});
+
+test("getJobTimeline reads durable event log and applies event filters", async () => {
+  const stateStore = new MemoryStateStore();
+  const writerBus = new EventBus({ bufferSize: 1, eventStore: stateStore });
+  writerBus.publish({
+    id: "durable-chain-funded",
+    topic: "escrow.job_funded",
+    jobId: "parent-job-001",
+    wallet: WALLET,
+    timestamp: "2026-01-01T00:00:00.000Z"
+  });
+  writerBus.publish({
+    id: "durable-settlement",
+    topic: "xcm.settlement_succeeded",
+    jobId: "parent-job-001",
+    wallet: WALLET,
+    correlationId: "settlement-correlation-1",
+    timestamp: "2026-01-01T00:00:01.000Z"
+  });
+  writerBus.publish({
+    id: "durable-other-wallet",
+    topic: "escrow.job_funded",
+    jobId: "parent-job-001",
+    wallet: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    timestamp: "2026-01-01T00:00:02.000Z"
+  });
+  await writerBus.flush();
+
+  const readerBus = new EventBus({ bufferSize: 1, eventStore: stateStore });
+  const service = makePlatformService(undefined, readerBus, stateStore);
+
+  const chainTimeline = await service.getJobTimeline("parent-job-001", {
+    wallet: WALLET,
+    sources: ["chain"],
+    limit: 10
+  });
+  assert.ok(chainTimeline.timeline.some((entry) => entry.id === "durable-chain-funded"));
+  assert.ok(!chainTimeline.timeline.some((entry) => entry.id === "durable-settlement"));
+  assert.deepEqual(chainTimeline.summary.eventFilters.sources, ["chain"]);
+
+  const correlationTimeline = await service.getJobTimeline("parent-job-001", {
+    wallet: WALLET,
+    correlationId: "settlement-correlation-1",
+    limit: 10
+  });
+  assert.ok(correlationTimeline.timeline.some((entry) => entry.id === "durable-settlement"));
+  assert.ok(!correlationTimeline.timeline.some((entry) => entry.id === "durable-chain-funded"));
+  assert.equal(correlationTimeline.summary.eventFilters.correlationId, "settlement-correlation-1");
+
+  const walletTimeline = await service.getJobTimeline("parent-job-001", {
+    wallet: WALLET,
+    eventWallet: WALLET,
+    limit: 10
+  });
+  assert.ok(walletTimeline.timeline.some((entry) => entry.id === "durable-chain-funded"));
+  assert.ok(!walletTimeline.timeline.some((entry) => entry.id === "durable-other-wallet"));
+  assert.equal(walletTimeline.summary.eventFilters.wallet, WALLET);
 });
 
 test("getAdminStatus surfaces recurring scheduler anomalies", async () => {

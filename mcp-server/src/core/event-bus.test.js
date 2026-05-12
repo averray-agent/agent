@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { EventBus } from "./event-bus.js";
+import { MemoryStateStore } from "./state-store.js";
 
 test("EventBus replays filtered events after a cursor", () => {
   const bus = new EventBus({ bufferSize: 3 });
@@ -80,4 +81,45 @@ test("EventBus preserves canonical timeline fields and classifies chain topics",
   assert.equal(rejected.phase, "settlement");
   assert.equal(rejected.severity, "error");
   assert.equal(rejected.correlationId, "session-3");
+});
+
+test("EventBus persists events and replays durable filters beyond the ring buffer", async () => {
+  const store = new MemoryStateStore();
+  const bus = new EventBus({ bufferSize: 1, eventStore: store });
+  bus.publish({
+    id: "funded-1",
+    topic: "escrow.job_funded",
+    wallet: "0xabc",
+    jobId: "job-1",
+    timestamp: "2026-01-01T00:00:00.000Z"
+  });
+  bus.publish({
+    id: "submitted-1",
+    topic: "session.submitted",
+    wallet: "0xabc",
+    jobId: "job-1",
+    sessionId: "session-1",
+    correlationId: "session-1",
+    timestamp: "2026-01-01T00:00:01.000Z"
+  });
+  bus.publish({
+    id: "settled-1",
+    topic: "xcm.settlement_succeeded",
+    wallet: "0xabc",
+    jobId: "job-1",
+    correlationId: "settlement-1",
+    timestamp: "2026-01-01T00:00:02.000Z"
+  });
+  await bus.flush();
+
+  const chainReplay = await bus.replayDurable({ jobId: "job-1", sources: ["chain"] }, undefined, { limit: 10 });
+  assert.equal(chainReplay.gap, false);
+  assert.deepEqual(chainReplay.events.map((event) => event.id), ["funded-1"]);
+
+  const correlationReplay = await bus.replayDurable(
+    { wallet: "0xabc", correlationId: "settlement-1" },
+    undefined,
+    { limit: 10 }
+  );
+  assert.deepEqual(correlationReplay.events.map((event) => event.id), ["settled-1"]);
 });

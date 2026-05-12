@@ -98,13 +98,47 @@ export const useAdminJobs = () =>
  * /runs/detail. Skips the fetch when no jobId is selected so the
  * panel doesn't 400 on first paint.
  */
-export const useJobTimeline = (jobId: string | null) =>
+export type JobTimelineFilters = {
+  topics?: string[];
+  sources?: string[];
+  phases?: string[];
+  severities?: string[];
+  correlationId?: string | null;
+  wallet?: string | null;
+};
+
+export const useJobTimeline = (jobId: string | null, filters: JobTimelineFilters = {}) =>
   useApi(
     jobId
-      ? `/admin/jobs/timeline?jobId=${encodeURIComponent(jobId)}&limit=100`
+      ? `/admin/jobs/timeline?${jobTimelineParams(jobId, filters)}`
       : null,
     { refreshInterval: 15_000 }
   );
+
+function jobTimelineParams(jobId: string, filters: JobTimelineFilters): string {
+  const params = new URLSearchParams({
+    jobId,
+    limit: "100",
+  });
+  appendCsvParam(params, "topics", filters.topics);
+  appendCsvParam(params, "sources", filters.sources);
+  appendCsvParam(params, "phases", filters.phases);
+  appendCsvParam(params, "severities", filters.severities);
+  if (filters.correlationId) {
+    params.set("correlationId", filters.correlationId);
+  }
+  if (filters.wallet) {
+    params.set("eventWallet", filters.wallet);
+  }
+  return params.toString();
+}
+
+function appendCsvParam(params: URLSearchParams, key: string, values: string[] | undefined) {
+  const clean = (values ?? []).map((value) => value.trim()).filter(Boolean);
+  if (clean.length > 0) {
+    params.set(key, clean.join(","));
+  }
+}
 export const useOnboarding = () => useApi("/onboarding");
 export const useVerifierHandlers = () => useApi("/verifier/handlers");
 export const useSessionStateMachine = () => useApi("/session/state-machine");

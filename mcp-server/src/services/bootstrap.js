@@ -137,7 +137,7 @@ const reputations = new Map([
 export function createPlatformService() {
   const gateway = new BlockchainGateway();
   const stateStore = createStateStore();
-  const eventBus = new EventBus();
+  const eventBus = new EventBus({ eventStore: stateStore });
   return new PlatformService(jobs, profiles, accounts, reputations, gateway, stateStore, eventBus);
 }
 
@@ -159,7 +159,7 @@ export async function createPlatformRuntime() {
   const contentRecoveryLog = initStep("init-content-recovery-log", logger, () =>
     createContentRecoveryLog(process.env, { logger })
   );
-  const eventBus = initStep("init-event-bus", logger, () => new EventBus());
+  const eventBus = initStep("init-event-bus", logger, () => new EventBus({ eventStore: stateStore, logger }));
   const platformService = initStep(
     "init-platform-service",
     logger,

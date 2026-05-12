@@ -152,11 +152,29 @@ function writeSseEvent(response, { id, topic, data }) {
 }
 
 function parseTopics(url) {
+  return parseCsvParam(url, "topics");
+}
+
+function parseCsvParam(url, name) {
   return url.searchParams
-    .get("topics")
+    .get(name)
     ?.split(",")
     .map((topic) => topic.trim())
     .filter(Boolean) ?? [];
+}
+
+function parseEventFilters(url, { includeWallet = false } = {}) {
+  const filters = {
+    topics: parseTopics(url),
+    sources: parseCsvParam(url, "sources").concat(parseCsvParam(url, "source")),
+    phases: parseCsvParam(url, "phases").concat(parseCsvParam(url, "phase")),
+    severities: parseCsvParam(url, "severities").concat(parseCsvParam(url, "severity")),
+    correlationId: url.searchParams.get("correlationId")?.trim() || undefined
+  };
+  if (includeWallet) {
+    filters.eventWallet = url.searchParams.get("eventWallet")?.trim() || url.searchParams.get("wallet")?.trim() || undefined;
+  }
+  return filters;
 }
 
 function generateNonce() {
@@ -1678,7 +1696,8 @@ const server = createServer(async (request, response) => {
         200,
         await service.getJobTimeline(jobId.trim(), {
           wallet: auth.wallet,
-          limit: parseLimit(url, 100, 250)
+          limit: parseLimit(url, 100, 250),
+          ...parseEventFilters(url, { includeWallet: true })
         })
       );
     }
@@ -2336,10 +2355,12 @@ const server = createServer(async (request, response) => {
         wallet: auth.wallet,
         jobId: url.searchParams.get("jobId") ?? undefined,
         sessionId: url.searchParams.get("sessionId") ?? undefined,
-        topics: parseTopics(url)
+        ...parseEventFilters(url)
       };
       const lastEventId = request.headers["last-event-id"] ?? url.searchParams.get("lastEventId") ?? undefined;
-      const replay = eventBus?.replay?.(filter, lastEventId);
+      const replay = eventBus?.replayDurable
+        ? await eventBus.replayDurable(filter, lastEventId, { limit: parseLimit(url, 100, 500) })
+        : eventBus?.replay?.(filter, lastEventId);
 
       if (replay?.gap) {
         writeSseEvent(response, {

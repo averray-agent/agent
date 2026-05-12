@@ -122,6 +122,50 @@ test("MemoryStateStore xcm observations round-trip and clear from pending when p
   assert.equal(after.length, 0);
 });
 
+test("MemoryStateStore event log survives buffer-sized reads and filters by source/correlation", async () => {
+  const store = new MemoryStateStore();
+  await store.appendEventLog({
+    id: "event-1",
+    topic: "escrow.job_funded",
+    source: "chain",
+    phase: "funding",
+    severity: "info",
+    wallet: "0xaaa",
+    wallets: ["0xaaa"],
+    jobId: "job-1",
+    correlationId: "job-1",
+    timestamp: "2026-01-01T00:00:00.000Z",
+    data: {}
+  });
+  await store.appendEventLog({
+    id: "event-2",
+    topic: "xcm.settlement_failed",
+    source: "settlement",
+    phase: "settlement",
+    severity: "error",
+    wallet: "0xaaa",
+    wallets: ["0xaaa"],
+    jobId: "job-1",
+    correlationId: "settlement-1",
+    timestamp: "2026-01-01T00:00:01.000Z",
+    data: {}
+  });
+
+  const sourceFiltered = await store.listEventLog({ jobId: "job-1", sources: ["chain"], limit: 10 });
+  assert.deepEqual(sourceFiltered.events.map((event) => event.id), ["event-1"]);
+  assert.equal(sourceFiltered.gap, false);
+
+  const correlationFiltered = await store.listEventLog({
+    wallet: "0xaaa",
+    correlationId: "settlement-1",
+    limit: 10
+  });
+  assert.deepEqual(correlationFiltered.events.map((event) => event.id), ["event-2"]);
+
+  const afterCursor = await store.listEventLog({ jobId: "job-1", lastEventId: "event-1", limit: 10 });
+  assert.deepEqual(afterCursor.events.map((event) => event.id), ["event-2"]);
+});
+
 test("MemoryStateStore service state round-trips and merges", async () => {
   const store = new MemoryStateStore();
   await store.upsertServiceState("xcm-observer", {
