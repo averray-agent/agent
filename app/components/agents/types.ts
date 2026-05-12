@@ -72,6 +72,48 @@ export interface AgentSlash {
   ref: string;
 }
 
+export interface AgentLineageChildSummary {
+  count: number;
+  jobIds: string[];
+  sessionIds: string[];
+  wallets: string[];
+}
+
+export interface AgentDelegatedLineage {
+  role: "parent";
+  sessionId: string;
+  jobId: string;
+  jobTitle?: string;
+  status: string;
+  updatedAt: string;
+  children: AgentLineageChildSummary;
+}
+
+export interface AgentSubcontractedLineage {
+  role: "child";
+  sessionId: string;
+  jobId: string;
+  jobTitle?: string;
+  status: string;
+  updatedAt: string;
+  parent: {
+    sessionId?: string;
+    jobId?: string;
+    wallet?: string;
+    isSelf?: boolean;
+  };
+}
+
+export interface AgentLineage {
+  delegated: AgentDelegatedLineage[];
+  subcontracted: AgentSubcontractedLineage[];
+}
+
+export interface AgentLineageStats {
+  delegated: number;
+  subcontracted: number;
+}
+
 export interface AgentStake {
   deposited: number;
   locked: number;
@@ -115,6 +157,13 @@ export interface AgentRecord {
   hasVerifiedBadges?: boolean;
   recentRuns: AgentRecentRun[];
   slashes: AgentSlash[];
+  /**
+   * Sub-contracting history from the public agent profile. `delegated`
+   * means this wallet spawned child jobs from one of its sessions;
+   * `subcontracted` means this wallet completed work as a child run.
+   */
+  lineage: AgentLineage;
+  lineageStats: AgentLineageStats;
 }
 
 export const BADGES: Record<string, BadgeDef> = {

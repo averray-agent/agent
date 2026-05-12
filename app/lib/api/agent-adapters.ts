@@ -39,6 +39,8 @@ export function extractAgent(data: unknown): AgentRecord | null {
 
   const activeSession = activeSessionFor(record);
   const verifiedBadgeCount = badgesRaw.length;
+  const lineage = lineageFor(record);
+  const lineageStats = lineageStatsFor(record, lineage);
   return {
     handle: text(record.handle, handleForWallet(walletFull)),
     wallet: shortAddress(walletFull),
@@ -56,6 +58,8 @@ export function extractAgent(data: unknown): AgentRecord | null {
     hasVerifiedBadges: verifiedBadgeCount > 0,
     recentRuns: recentRunsFor(badgesRaw),
     slashes: slashEvents(record.slashEvents),
+    lineage,
+    lineageStats,
   };
 }
 
@@ -268,6 +272,78 @@ function slashEvents(value: unknown): AgentRecord["slashes"] {
   });
 }
 
+function lineageFor(record: RawRecord): AgentRecord["lineage"] {
+  const lineage = objectField(record, "lineage");
+  return {
+    delegated: arrayField(lineage, "delegated")
+      ?.map(delegatedLineageEntry)
+      .filter((entry): entry is AgentRecord["lineage"]["delegated"][number] => Boolean(entry))
+      ?? [],
+    subcontracted: arrayField(lineage, "subcontracted")
+      ?.map(subcontractedLineageEntry)
+      .filter((entry): entry is AgentRecord["lineage"]["subcontracted"][number] => Boolean(entry))
+      ?? [],
+  };
+}
+
+function lineageStatsFor(
+  record: RawRecord,
+  lineage: AgentRecord["lineage"]
+): AgentRecord["lineageStats"] {
+  const stats = objectField(record, "stats");
+  const raw = objectField(stats, "lineage");
+  return {
+    delegated: number(raw?.delegated, lineage.delegated.length),
+    subcontracted: number(raw?.subcontracted, lineage.subcontracted.length),
+  };
+}
+
+function delegatedLineageEntry(value: unknown): AgentRecord["lineage"]["delegated"][number] | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as RawRecord;
+  const sessionId = text(record.sessionId, "");
+  const jobId = text(record.jobId, "");
+  if (!sessionId || !jobId) return null;
+  const children = objectField(record, "children");
+  return {
+    role: "parent",
+    sessionId,
+    jobId,
+    ...(text(record.jobTitle, "") ? { jobTitle: text(record.jobTitle) } : {}),
+    status: text(record.status, "unknown"),
+    updatedAt: text(record.updatedAt, ""),
+    children: {
+      count: number(children?.count, arrayField(children, "jobIds")?.length ?? 0),
+      jobIds: stringArray(children, "jobIds"),
+      sessionIds: stringArray(children, "sessionIds"),
+      wallets: stringArray(children, "wallets"),
+    },
+  };
+}
+
+function subcontractedLineageEntry(value: unknown): AgentRecord["lineage"]["subcontracted"][number] | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as RawRecord;
+  const sessionId = text(record.sessionId, "");
+  const jobId = text(record.jobId, "");
+  if (!sessionId || !jobId) return null;
+  const parent = objectField(record, "parent");
+  return {
+    role: "child",
+    sessionId,
+    jobId,
+    ...(text(record.jobTitle, "") ? { jobTitle: text(record.jobTitle) } : {}),
+    status: text(record.status, "unknown"),
+    updatedAt: text(record.updatedAt, ""),
+    parent: {
+      ...(text(parent?.sessionId, "") ? { sessionId: text(parent?.sessionId) } : {}),
+      ...(text(parent?.jobId, "") ? { jobId: text(parent?.jobId) } : {}),
+      ...(text(parent?.wallet, "") ? { wallet: text(parent?.wallet).toLowerCase() } : {}),
+      ...(typeof parent?.isSelf === "boolean" ? { isSelf: parent.isSelf } : {}),
+    },
+  };
+}
+
 function sparkline(score: number): number[] {
   const base = Math.max(0, score - 32);
   return Array.from({ length: 14 }, (_, index) => Math.max(0, base + Math.round(index * 2.4)));
@@ -326,4 +402,10 @@ function arrayField(value: unknown, key: string): unknown[] | null {
   if (!value || typeof value !== "object") return null;
   const field = (value as RawRecord)[key];
   return Array.isArray(field) ? field : null;
+}
+
+function stringArray(value: unknown, key: string): string[] {
+  return (arrayField(value, key) ?? [])
+    .map((entry) => text(entry, ""))
+    .filter(Boolean);
 }

@@ -10,7 +10,9 @@ import {
   tierFor,
   nextThreshold,
   type AgentActiveSession,
+  type AgentDelegatedLineage,
   type AgentRecord,
+  type AgentSubcontractedLineage,
   type AgentTier,
 } from "./types";
 
@@ -166,6 +168,10 @@ export function AgentDrawerBody({ agent }: { agent: AgentRecord }) {
 
       <Section title="Recent runs · last 8">
         <RecentRunsBlock agent={agent} />
+      </Section>
+
+      <Section title="Sub-contracting">
+        <SubcontractingBlock agent={agent} />
       </Section>
 
       <Section title="Stake">
@@ -473,6 +479,192 @@ function RecentRunsBlock({ agent }: { agent: AgentRecord }) {
   );
 }
 
+function SubcontractingBlock({ agent }: { agent: AgentRecord }) {
+  const lineage = agent.lineage ?? { delegated: [], subcontracted: [] };
+  const stats = agent.lineageStats ?? {
+    delegated: lineage.delegated.length,
+    subcontracted: lineage.subcontracted.length,
+  };
+  const hasLineage =
+    stats.delegated > 0 ||
+    stats.subcontracted > 0 ||
+    lineage.delegated.length > 0 ||
+    lineage.subcontracted.length > 0;
+
+  if (!hasLineage) {
+    return (
+      <div
+        className="rounded-[8px] border border-dashed border-[var(--avy-line)] bg-[rgba(255,253,247,0.5)] px-3.5 py-2.5 font-[family-name:var(--font-mono)] text-[12px] text-[var(--avy-muted)]"
+        style={{ letterSpacing: 0 }}
+      >
+        No sub-contracting history yet.
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid gap-3">
+      <div className="grid grid-cols-2 gap-2">
+        <LineageStat label="Delegated out" value={stats.delegated} />
+        <LineageStat label="Worked as sub-job" value={stats.subcontracted} />
+      </div>
+
+      {lineage.delegated.length > 0 ? (
+        <div className="grid gap-1.5">
+          <LineageGroupLabel label="Delegated sessions" />
+          {lineage.delegated.slice(0, 3).map((entry) => (
+            <DelegatedLineageCard key={entry.sessionId} entry={entry} />
+          ))}
+          {lineage.delegated.length > 3 ? (
+            <LineageMore count={lineage.delegated.length - 3} label="delegated session" />
+          ) : null}
+        </div>
+      ) : null}
+
+      {lineage.subcontracted.length > 0 ? (
+        <div className="grid gap-1.5">
+          <LineageGroupLabel label="Sub-job work" />
+          {lineage.subcontracted.slice(0, 3).map((entry) => (
+            <SubcontractedLineageCard key={entry.sessionId} entry={entry} />
+          ))}
+          {lineage.subcontracted.length > 3 ? (
+            <LineageMore count={lineage.subcontracted.length - 3} label="sub-job session" />
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function LineageStat({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3 py-2">
+      <span
+        className="block font-[family-name:var(--font-display)] text-[9.5px] font-extrabold uppercase text-[var(--avy-muted)]"
+        style={{ letterSpacing: "0.1em" }}
+      >
+        {label}
+      </span>
+      <span
+        className="mt-1 block font-[family-name:var(--font-mono)] text-[18px] font-semibold tabular-nums text-[var(--avy-ink)]"
+        style={{ letterSpacing: 0 }}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function LineageGroupLabel({ label }: { label: string }) {
+  return (
+    <span
+      className="font-[family-name:var(--font-display)] text-[10px] font-extrabold uppercase text-[var(--avy-muted)]"
+      style={{ letterSpacing: "0.1em" }}
+    >
+      {label}
+    </span>
+  );
+}
+
+function DelegatedLineageCard({ entry }: { entry: AgentDelegatedLineage }) {
+  const childJobs = entry.children.jobIds.slice(0, 2);
+  return (
+    <div className="rounded-[8px] border border-[var(--avy-line-soft)] bg-[var(--avy-paper-solid)] px-3 py-2.5">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="m-0 text-[13px] font-semibold leading-tight text-[var(--avy-ink)]">
+            {entry.jobTitle || titleFromJobId(entry.jobId)}
+          </p>
+          <p
+            className="m-0 mt-0.5 font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]"
+            style={{ letterSpacing: 0 }}
+          >
+            {middleTruncate(entry.sessionId, 18)} · {relativeOrFallback(entry.updatedAt)}
+          </p>
+        </div>
+        <LineageStatus label={entry.status} />
+      </div>
+      <div
+        className="mt-2 flex flex-wrap items-center gap-1.5 font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]"
+        style={{ letterSpacing: 0 }}
+      >
+        <span>{entry.children.count} child job{entry.children.count === 1 ? "" : "s"}</span>
+        {childJobs.map((jobId) => (
+          <span
+            key={jobId}
+            className="rounded-[5px] bg-[color:rgba(30,102,66,0.08)] px-1.5 py-0.5 text-[var(--avy-accent)]"
+            title={jobId}
+          >
+            {middleTruncate(jobId, 18)}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SubcontractedLineageCard({ entry }: { entry: AgentSubcontractedLineage }) {
+  return (
+    <div className="rounded-[8px] border border-[var(--avy-line-soft)] bg-[var(--avy-paper-solid)] px-3 py-2.5">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="m-0 text-[13px] font-semibold leading-tight text-[var(--avy-ink)]">
+            {entry.jobTitle || titleFromJobId(entry.jobId)}
+          </p>
+          <p
+            className="m-0 mt-0.5 font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]"
+            style={{ letterSpacing: 0 }}
+          >
+            {middleTruncate(entry.sessionId, 18)} · {relativeOrFallback(entry.updatedAt)}
+          </p>
+        </div>
+        <LineageStatus label={entry.status} />
+      </div>
+      <div
+        className="mt-2 flex flex-wrap items-center gap-1.5 font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]"
+        style={{ letterSpacing: 0 }}
+      >
+        {entry.parent.wallet ? (
+          <span>parent wallet {middleTruncate(entry.parent.wallet, 18)}</span>
+        ) : (
+          <span>parent session {middleTruncate(entry.parent.sessionId ?? "unknown", 18)}</span>
+        )}
+        {entry.parent.jobId ? (
+          <span
+            className="rounded-[5px] bg-[color:rgba(30,102,66,0.08)] px-1.5 py-0.5 text-[var(--avy-accent)]"
+            title={entry.parent.jobId}
+          >
+            {middleTruncate(entry.parent.jobId, 18)}
+          </span>
+        ) : null}
+        {entry.parent.isSelf ? <span>self-delegated</span> : null}
+      </div>
+    </div>
+  );
+}
+
+function LineageStatus({ label }: { label: string }) {
+  return (
+    <span
+      className="shrink-0 rounded-full bg-[var(--avy-accent-soft)] px-2 py-0.5 font-[family-name:var(--font-display)] text-[9.5px] font-extrabold uppercase text-[var(--avy-accent)]"
+      style={{ letterSpacing: "0.08em" }}
+    >
+      {label || "unknown"}
+    </span>
+  );
+}
+
+function LineageMore({ count, label }: { count: number; label: string }) {
+  return (
+    <div
+      className="rounded-[8px] border border-dashed border-[var(--avy-line)] bg-[rgba(255,253,247,0.5)] px-3 py-2 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]"
+      style={{ letterSpacing: 0 }}
+    >
+      +{count} more {label}{count === 1 ? "" : "s"}
+    </div>
+  );
+}
+
 function Section({
   title,
   children,
@@ -544,6 +736,10 @@ function formatRelative(iso: string): string {
   return `${Math.round(deltaHr / 24)}d ago`;
 }
 
+function relativeOrFallback(iso: string): string {
+  return iso ? formatRelative(iso) : "time unknown";
+}
+
 function formatDeadline(iso: string): string {
   const t = Date.parse(iso);
   if (!Number.isFinite(t)) return iso;
@@ -555,4 +751,13 @@ function formatDeadline(iso: string): string {
   const deltaHr = Math.round(deltaMin / 60);
   if (deltaHr < 24) return `in ${deltaHr}h`;
   return `in ${Math.round(deltaHr / 24)}d`;
+}
+
+function titleFromJobId(jobId: string): string {
+  return jobId
+    .split("-")
+    .filter(Boolean)
+    .slice(0, 5)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ") || jobId;
 }

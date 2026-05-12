@@ -183,6 +183,7 @@ export function AgentDirectoryTable({
                       {a.activeSession ? (
                         <ActiveSessionLine session={a.activeSession} />
                       ) : null}
+                      <LineageLine agent={a} />
                     </Td>
                     <Td>
                       <span
@@ -255,6 +256,36 @@ function ActiveSessionLine({ session }: { session: AgentActiveSession }) {
           <span className="opacity-40">·</span>
           <span>{deadlineLabel}</span>
         </>
+      ) : null}
+    </div>
+  );
+}
+
+function LineageLine({ agent }: { agent: AgentRecord }) {
+  const stats = agent.lineageStats ?? {
+    delegated: agent.lineage?.delegated.length ?? 0,
+    subcontracted: agent.lineage?.subcontracted.length ?? 0,
+  };
+  if (stats.delegated + stats.subcontracted === 0) return null;
+  return (
+    <div
+      className="mt-1 inline-flex flex-wrap items-center gap-1 rounded-[6px] border border-[color:rgba(30,102,66,0.18)] bg-[color:rgba(30,102,66,0.04)] px-1.5 py-0.5 font-[family-name:var(--font-mono)] text-[10.5px] text-[var(--avy-muted)]"
+      style={{ letterSpacing: 0 }}
+      title="Sub-contracting history"
+    >
+      <span className="h-1.5 w-1.5 rounded-full bg-[var(--avy-accent)] opacity-70" />
+      {stats.delegated > 0 ? (
+        <span>
+          delegated <span className="text-[var(--avy-accent)]">{stats.delegated}</span>
+        </span>
+      ) : null}
+      {stats.delegated > 0 && stats.subcontracted > 0 ? (
+        <span className="opacity-40">·</span>
+      ) : null}
+      {stats.subcontracted > 0 ? (
+        <span>
+          sub-job <span className="text-[var(--avy-accent)]">{stats.subcontracted}</span>
+        </span>
       ) : null}
     </div>
   );
