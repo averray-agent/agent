@@ -504,106 +504,220 @@ future PRs don't repeat them:
 The `ssh -o BatchMode=yes ...` pre-flight should be added to PR 2.4's
 runbook before any "swap legacy GH secret to OP-loaded value" step.
 
-### PR 2.3 — VPS: atomic, fail-closed render flow (the cutover)
+### PR 2.3 — VPS bootstrap + atomic render script (foundation, no cutover)
 
-**Touches**: new `scripts/ops/render-vps-env.sh`,
-`/etc/tmpfiles.d/agent-stack.conf` (delivered via repo + an apt-managed
-install step), `scripts/ops/deploy-production.sh`, `docker-compose.yml`
-on the VPS.
+**Honest scope adjustment from the original plan**: the original PR 2.3
+section bundled "install op + tokens + tmpfiles + render script +
+templates + compose env_file swap" into a single PR. After PR 2.1 and
+PR 2.2 each surfaced 1-3 unexpected acceptance bugs ("we removed X
+from CI; some other path silently relied on X"), we're splitting the
+work:
 
-VPS bootstrap (one-time, documented in §2c of this file):
+- **PR 2.3 (this PR)** — lands the bootstrap toolchain + render
+  script + helper to fill templates, **WITHOUT changing the deploy
+  workflow or docker-compose**. Operator runs the bootstrap on the
+  VPS and verifies render parity manually. Zero production risk.
+- **PR 2.4 (next)** — wires `render-vps-env.sh` into
+  `deploy-production.sh`, flips the compose `env_file:` paths to
+  `/run/agent-stack/*.env`, and removes the heredoc transport for
+  the secrets `op://prod-ci/*` now covers. This is the actual
+  cutover.
 
-- Install `op` CLI via 1Password's apt repo with a SHA-pinned signing
-  key.
-- Drop **two separate token files**, each containing ONLY
-  `OP_SERVICE_ACCOUNT_TOKEN=ops_...`:
-  - `/etc/agent-stack/op-backend.env` (token: `op-token-prod-vps-backend`,
-    reads `prod-backend` + `prod-backend-external`)
-  - `/etc/agent-stack/op-indexer.env` (token: `op-token-prod-vps-indexer`,
-    reads `prod-indexer`)
-  - Mode `0400`, owner `root`. **No** `OP_CONNECT_HOST` or
-    `OP_CONNECT_TOKEN` — 1Password's docs note those env vars take
-    precedence over `OP_SERVICE_ACCOUNT_TOKEN` and would create confusing
-    behaviour if present.
-- `/etc/tmpfiles.d/agent-stack.conf`:
-  `d /run/agent-stack 0700 root root -` (or `RuntimeDirectory=agent-stack`
-  on the systemd unit). Apply with `systemd-tmpfiles --create`. This
-  gives a predictable, strict, automatically-cleaned-at-boot directory
-  — more robust than ad-hoc tmpfs mounts.
+**Touches** (this PR):
 
-Render script (`scripts/ops/render-vps-env.sh`):
+- new `scripts/ops/render-vps-env.sh` — atomic, fail-closed renderer
+  (see §2c below for the design)
+- new `scripts/ops/install-op-vps.sh` — idempotent 1Password CLI
+  installer for Debian/Ubuntu via the official apt repo + debsig policy
+- new `scripts/ops/fill-env-template.mjs` — operator helper that
+  takes a SCP'd snapshot of `/srv/agent-stack/*.env` and uses it to
+  populate the `# TODO(operator)` lines in
+  `deploy/backend.env.template` / `deploy/indexer.env.template`,
+  refusing to write any value that looks like a secret (hex private
+  key, JWT, API-key prefix, long base64-ish)
+- new `deploy/agent-stack.tmpfiles.conf` — `systemd-tmpfiles.d`
+  snippet that declares `/run/agent-stack` as `drwx------ root root`
+- updates to this doc reflecting the split
 
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-set +x
-umask 077
+**No changes to** `deploy-production.yml`, `deploy-production.sh`,
+docker-compose, or any GH Actions secret. Production runtime is
+unchanged after this PR merges.
 
-runtime_dir="/run/agent-stack"
-template="$1"   # /srv/agent-stack/app/deploy/backend.env.template
-target="$2"     # /run/agent-stack/backend.env
-token_file="$3" # /etc/agent-stack/op-backend.env
+**Operator runbook** (steps in order, on your laptop unless noted):
 
-# Load OP token from root-only file. `set -a` exports without echoing.
-set -a
-. "$token_file"
-set +a
+1. **Install `op` CLI on the VPS** (one-time):
+   ```bash
+   scp scripts/ops/install-op-vps.sh ubuntu@141.94.121.188:/tmp/
+   ssh ubuntu@141.94.121.188 "sudo bash /tmp/install-op-vps.sh && rm /tmp/install-op-vps.sh"
+   ```
+   Expected: `op --version` prints, no errors.
 
-tmp="$(mktemp "$runtime_dir/$(basename "$target").XXXXXX")"
-trap 'rm -f "$tmp"' EXIT
+2. **Drop per-runtime service-account tokens** at
+   `/etc/agent-stack/op-{backend,indexer}.env`:
+   ```bash
+   eval $(op signin)
+   BACKEND_TOKEN=$(op read 'op://prod-critical/op-token-prod-vps-backend/credential')
+   INDEXER_TOKEN=$(op read 'op://prod-critical/op-token-prod-vps-indexer/credential')
 
-op inject --in-file "$template" --out-file "$tmp" --cache=false
+   ssh ubuntu@141.94.121.188 "sudo install -d -m 0755 /etc/agent-stack"
+   ssh ubuntu@141.94.121.188 "sudo tee /etc/agent-stack/op-backend.env >/dev/null" <<< "OP_SERVICE_ACCOUNT_TOKEN=$BACKEND_TOKEN"
+   ssh ubuntu@141.94.121.188 "sudo tee /etc/agent-stack/op-indexer.env >/dev/null" <<< "OP_SERVICE_ACCOUNT_TOKEN=$INDEXER_TOKEN"
+   ssh ubuntu@141.94.121.188 "sudo chmod 0400 /etc/agent-stack/op-*.env && sudo chown root:root /etc/agent-stack/op-*.env"
+   unset BACKEND_TOKEN INDEXER_TOKEN
+   ```
 
-# Fail-closed: any unresolved op:// reference aborts the deploy.
-if grep -q 'op://' "$tmp"; then
-  echo "render-vps-env.sh: unresolved 1Password references remain" >&2
-  exit 1
-fi
+3. **Install the systemd-tmpfiles snippet**:
+   ```bash
+   ssh ubuntu@141.94.121.188 "sudo cp /srv/agent-stack/app/deploy/agent-stack.tmpfiles.conf /etc/tmpfiles.d/agent-stack.conf && sudo systemd-tmpfiles --create"
+   ssh ubuntu@141.94.121.188 "ls -ld /run/agent-stack"   # expect: drwx------ root root
+   ```
+   (`/srv/agent-stack/app` is the repo checkout on the VPS; adjust if
+   different.)
 
-chmod 0400 "$tmp"
-chown root:root "$tmp"   # adjust if compose runs as non-root agent-stack user
-mv "$tmp" "$target"
-trap - EXIT
-```
+4. **Verify both tokens can read their scoped vaults** (and ONLY those):
+   ```bash
+   ssh ubuntu@141.94.121.188 "sudo -E env OP_SERVICE_ACCOUNT_TOKEN=\$(sudo grep -h '^OP_SERVICE_ACCOUNT_TOKEN=' /etc/agent-stack/op-backend.env | cut -d= -f2) op vault list"
+   # expect: prod-backend, prod-backend-external (NOT prod-critical, NOT prod-indexer)
 
-Docker Compose changes:
+   ssh ubuntu@141.94.121.188 "sudo -E env OP_SERVICE_ACCOUNT_TOKEN=\$(sudo grep -h '^OP_SERVICE_ACCOUNT_TOKEN=' /etc/agent-stack/op-indexer.env | cut -d= -f2) op vault list"
+   # expect: prod-indexer ONLY
+   ```
 
-- Switch `env_file:` from `/srv/agent-stack/*.env` to `/run/agent-stack/*.env`.
-- **Audit `docker-compose.yml` for any `environment:` keys that duplicate
-  `env_file:` variables.** Compose's `environment:` block wins over
-  `env_file:`, and a duplicate there would silently defeat the migration
-  on that variable. The acceptance criterion below catches this.
+5. **Fill the `TODO(operator)` lines in the env templates** (on your
+   laptop, in this PR's worktree):
+   ```bash
+   # Pull a copy of each live env file to a local tmpdir
+   mkdir -p ~/secrets-tmp && chmod 0700 ~/secrets-tmp
+   scp ubuntu@141.94.121.188:/srv/agent-stack/backend.env ~/secrets-tmp/backend.env
+   scp ubuntu@141.94.121.188:/srv/agent-stack/indexer.env ~/secrets-tmp/indexer.env
 
-Failure semantics (documented explicitly to prevent a class of bugs where
-"we think production is using 1Password but it quietly fell back"):
+   # Use the helper to fill TODO(operator) lines without touching
+   # secret-shaped values:
+   node scripts/ops/fill-env-template.mjs \
+     --snapshot ~/secrets-tmp/backend.env \
+     --template deploy/backend.env.template \
+     --out      deploy/backend.env.template.filled
 
-> The fallback to `/srv/agent-stack/*.env` is **manual only**. If render
-> fails, deployment fails; it does **not** silently start with stale env.
-> The old env files remain on disk for 24h as a rollback option, but
-> switching back requires an operator to edit `docker-compose.yml`'s
-> `env_file:` directive — making the regression visible.
+   diff deploy/backend.env.template deploy/backend.env.template.filled
+   # If the diff looks right (config values filled, secrets untouched):
+   mv deploy/backend.env.template.filled deploy/backend.env.template
 
-**Acceptance criteria**:
+   # Repeat for indexer:
+   node scripts/ops/fill-env-template.mjs \
+     --snapshot ~/secrets-tmp/indexer.env \
+     --template deploy/indexer.env.template \
+     --out      deploy/indexer.env.template.filled
+   diff deploy/indexer.env.template deploy/indexer.env.template.filled
+   mv deploy/indexer.env.template.filled deploy/indexer.env.template
 
-- [ ] `/run/agent-stack/*.env` exists with mode `0400`, owner appropriate
-      to the compose run-as user
-- [ ] `systemd-tmpfiles --create` creates `/run/agent-stack` with mode
-      `0700` at boot (verified with `ls -ld /run/agent-stack` after a
-      reboot)
-- [ ] `docker compose config` (audited manually, **not piped to CI
-      logs** to avoid interpolating secrets) shows no `environment:` keys
-      that shadow `env_file:` variables
-- [ ] Render script fails closed when any required variable is unresolved
-      (test by removing one entry from `prod-backend` temporarily,
-      redeploy, confirm exit 1)
-- [ ] Backend and indexer containers restart and read from
-      `/run/agent-stack/*.env`
-- [ ] No rendered secret values appear in `journalctl -u agent-stack` or
-      CI deploy logs (grep first 8 chars of one known secret → zero hits)
-- [ ] No production secret transits an SSH heredoc body anywhere in
-      `deploy-production.sh` or the workflow
-- [ ] Token files at `/etc/agent-stack/op-*.env` contain only
-      `OP_SERVICE_ACCOUNT_TOKEN=...`, mode `0400` root, no `OP_CONNECT_*`
+   # Validate STRICT (no TODO markers, all op:// refs resolve):
+   bash scripts/ops/validate-env-render.sh backend
+   bash scripts/ops/validate-env-render.sh indexer
+   STRICT=1 bash scripts/ops/validate-env-render.sh backend
+   STRICT=1 bash scripts/ops/validate-env-render.sh indexer
+
+   # Shred the local snapshot copies:
+   for f in ~/secrets-tmp/*.env; do dd if=/dev/urandom of="$f" bs=4096 count=1 conv=notrunc 2>/dev/null || true; rm -f "$f"; done
+   rmdir ~/secrets-tmp
+
+   # Commit the filled templates as part of this PR.
+   ```
+
+6. **Run `render-vps-env.sh` manually on the VPS** and verify parity
+   against the existing `/srv/agent-stack/*.env`:
+   ```bash
+   ssh ubuntu@141.94.121.188 "
+     cd /srv/agent-stack/app
+     sudo bash scripts/ops/render-vps-env.sh \
+       deploy/backend.env.template \
+       /run/agent-stack/backend.env \
+       /etc/agent-stack/op-backend.env
+
+     sudo bash scripts/ops/render-vps-env.sh \
+       deploy/indexer.env.template \
+       /run/agent-stack/indexer.env \
+       /etc/agent-stack/op-indexer.env
+
+     # Parity diff — should be empty (or only sort-order differences):
+     echo '── backend diff ──'
+     sudo diff <(sort /run/agent-stack/backend.env) <(sort /srv/agent-stack/backend.env) | head -30
+     echo '── indexer diff ──'
+     sudo diff <(sort /run/agent-stack/indexer.env) <(sort /srv/agent-stack/indexer.env) | head -30
+   "
+   ```
+   Any non-empty diff means the template doesn't match what's live —
+   investigate before PR 2.4 flips the cutover.
+
+#### §2c — Render script design
+
+`scripts/ops/render-vps-env.sh` is **atomic** and **fail-closed**:
+
+1. Refuses to write outside `/run/agent-stack` (defense against
+   misuse).
+2. Verifies the token file is mode `0400`; rejects wider perms.
+3. Verifies `op` CLI is installed.
+4. Renders to a `mktemp` file in the same directory as the target
+   (so the final `mv` is atomic via `rename(2)` on the same fs).
+5. `op inject --cache=false` — always hit 1Password, never a stale
+   local cache.
+6. Greps the rendered file for any unresolved `op://` substring;
+   any hit aborts the deploy without touching the live target.
+7. Asserts ≥1 `KEY=value` line in the rendered file (sanity check
+   against empty templates).
+8. `chmod 0400 + chown root:root`, then `mv` into place.
+9. Unsets `OP_SERVICE_ACCOUNT_TOKEN` immediately after `op inject`
+   to minimize lifetime in the script's process env.
+10. Refuses to run if `OP_CONNECT_HOST` or `OP_CONNECT_TOKEN` is
+    set — those override `OP_SERVICE_ACCOUNT_TOKEN` per 1Password's
+    docs and would create confusing behaviour.
+
+**Failure semantics**:
+
+> The fallback to `/srv/agent-stack/*.env` is **manual only**. If
+> render fails, the script exits non-zero and the previous runtime
+> env file (if any) is untouched. PR 2.4 will make `deploy-production.sh`
+> abort the deploy when render fails — there is NO silent fallback
+> to stale env.
+
+**Acceptance criteria for PR 2.3**:
+
+- [ ] `scripts/ops/install-op-vps.sh` runs cleanly on the VPS and
+      `op --version` succeeds afterwards
+- [ ] `/etc/agent-stack/op-{backend,indexer}.env` exist with mode
+      `0400`, owner `root`, content `OP_SERVICE_ACCOUNT_TOKEN=ops_…`
+      and nothing else (verified with
+      `sudo stat -c '%a %U:%G' /etc/agent-stack/op-*.env` and
+      `sudo wc -l /etc/agent-stack/op-*.env`)
+- [ ] `/run/agent-stack` exists with mode `0700`, owner root, after
+      `systemd-tmpfiles --create`
+- [ ] Backend token reads ONLY `prod-backend` + `prod-backend-external`
+      (verified with `op vault list`)
+- [ ] Indexer token reads ONLY `prod-indexer`
+- [ ] Neither token can read `prod-critical` (firebreak verified —
+      try `op vault get prod-critical --token <…>`; expect permission
+      denied)
+- [ ] `STRICT=1 bash scripts/ops/validate-env-render.sh backend`
+      passes (templates have no `TODO(operator)` markers remaining)
+- [ ] `STRICT=1 bash scripts/ops/validate-env-render.sh indexer`
+      passes
+- [ ] Manual `render-vps-env.sh` invocation on the VPS produces
+      `/run/agent-stack/*.env` that matches `/srv/agent-stack/*.env`
+      via sorted diff (zero differences)
+- [ ] No production runtime change — backend and indexer still read
+      from `/srv/agent-stack/*.env` (compose unchanged)
+
+**Deferred to PR 2.4** (the actual cutover):
+
+- Wire `render-vps-env.sh` into `deploy-production.sh` so each
+  deploy renders fresh `/run/agent-stack/*.env` files
+- Audit `docker-compose.yml` for `environment:` keys that shadow
+  `env_file:` variables
+- Flip compose `env_file:` from `/srv/agent-stack/*.env` to
+  `/run/agent-stack/*.env`
+- Remove the SSH heredoc transport for the secrets that
+  `render-vps-env.sh` now provides via `op inject`
+- Delete the legacy `/srv/agent-stack/*.env` files after 24h of
+  green deploys
 
 ### PR 2.4 — Cleanup AND rotation
 
