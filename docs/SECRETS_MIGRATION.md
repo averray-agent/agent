@@ -816,38 +816,118 @@ After 2-3 green parity-check deploys, the next PR (2.5) flips compose.
 
 ### PR 2.5 — Compose `env_file:` cutover (the actual switch)
 
-**Touches**: `docker-compose.yml` on the VPS (NOT in repo).
-`scripts/ops/deploy-production.sh` (make render fail-closed).
+**Touches**: `scripts/ops/deploy-production.sh` (rename function +
+fail-closed semantics). Operator edits `docker-compose.yml` on the
+VPS (not in repo).
 
 The cutover. After PR 2.4's parity-check has been green for several
-deploys, this PR:
+deploys (proven: backend and indexer both log "parity OK" with
+last-wins dedup + quote-normalize), this PR:
 
-1. Audits `docker-compose.yml` on the VPS for any `environment:` keys
-   that duplicate `env_file:` variables — Compose's `environment:`
-   wins, and a duplicate there would silently defeat the migration.
-2. Flips `env_file:` from `/srv/agent-stack/{backend,indexer}.env` to
+1. Renames `render_runtime_envs_parity_check()` →
+   `render_runtime_envs()` and changes the semantics from
+   non-blocking-warn to **fail-closed**. Render failure now exits the
+   function non-zero, which aborts the deploy before any container
+   restart.
+2. Operator edits `docker-compose.yml` on the VPS to flip the
+   `env_file:` paths from `/srv/agent-stack/{backend,indexer}.env` to
    `/run/agent-stack/{backend,indexer}.env`.
-3. Updates `render_runtime_envs_parity_check()` to make render failure
-   **fail-closed** (abort deploy) — keeps the function name and call
-   site, just changes the semantics.
-4. Backend + indexer containers restart and consume `/run/*.env` from
-   here on.
+3. Operator triggers a deploy. Backend + indexer containers restart
+   and consume `/run/*.env` from here on.
 
 The legacy `/srv/agent-stack/*.env` files stay on disk for 24h as a
 manual rollback option (operator edits `env_file:` back to `/srv/`).
-PR 2.6 (the original PR-2.4 cleanup) deletes them after that window.
+PR 2.6 deletes them after that window.
+
+#### Operator runbook (AFTER PR 2.5 lands on main)
+
+Step 1 — back up the live compose file:
+
+```bash
+ssh ubuntu@141.94.121.188 'sudo cp /srv/agent-stack/docker-compose.yml /srv/agent-stack/docker-compose.yml.pre-pr2.5'
+```
+
+Step 2 — audit the compose file for `environment:` keys that would
+shadow `env_file:` values (Compose's `environment:` block wins; a
+duplicate there would silently defeat the migration on that variable):
+
+```bash
+ssh ubuntu@141.94.121.188 'sudo docker compose -f /srv/agent-stack/docker-compose.yml config 2>/dev/null | head -80'
+```
+
+Look for `environment:` blocks under `agent-backend` or `agent-indexer`
+that mention any of the keys in our env templates. If found,
+investigate before proceeding — those values would not get migrated.
+
+Step 3 — view the current `env_file:` lines so we know exactly what
+to change:
+
+```bash
+ssh ubuntu@141.94.121.188 'sudo grep -n -B1 -A2 "env_file" /srv/agent-stack/docker-compose.yml'
+```
+
+Step 4 — flip the paths. Use `sudo sed -i` with explicit before/after
+strings (NOT a regex match) to minimize blast radius:
+
+```bash
+ssh ubuntu@141.94.121.188 '
+  set -e
+  sudo sed -i.bak \
+    -e "s|/srv/agent-stack/backend.env|/run/agent-stack/backend.env|g" \
+    -e "s|/srv/agent-stack/indexer.env|/run/agent-stack/indexer.env|g" \
+    -e "s|- ./backend.env|- /run/agent-stack/backend.env|g" \
+    -e "s|- ./indexer.env|- /run/agent-stack/indexer.env|g" \
+    /srv/agent-stack/docker-compose.yml
+  echo "--- diff against pre-PR-2.5 backup ---"
+  sudo diff /srv/agent-stack/docker-compose.yml.pre-pr2.5 /srv/agent-stack/docker-compose.yml
+'
+```
+
+The diff should show exactly the 2 (or 4, if both relative and
+absolute forms exist) `env_file:` lines flipping from `/srv/`-prefixed
+to `/run/agent-stack/`-prefixed. If the diff shows anything else,
+ROLL BACK with `sudo cp /srv/agent-stack/docker-compose.yml.bak /srv/agent-stack/docker-compose.yml`
+and investigate.
+
+Step 5 — trigger a deploy:
+
+```bash
+gh workflow run deploy-production.yml -R averray-agent/agent && sleep 5 && gh run watch $(gh run list --workflow=deploy-production.yml --limit 1 --json databaseId -q '.[0].databaseId')
+```
+
+Step 6 — verify the backend container is consuming `/run/*.env`:
+
+```bash
+ssh ubuntu@141.94.121.188 'sudo docker inspect agent-backend --format "{{range .Config.Env}}{{println .}}{{end}}" | grep -E "^(SIGNER_PRIVATE_KEY|AUTH_JWT_SECRETS|DATABASE_URL|GITHUB_TOKEN)=" | head -5'
+```
+
+Verify each line has the value from `/run/agent-stack/backend.env`
+(which equals the values the backend has been consuming, just sourced
+differently now).
+
+Step 7 — if anything looks wrong, roll back:
+
+```bash
+ssh ubuntu@141.94.121.188 'sudo cp /srv/agent-stack/docker-compose.yml.pre-pr2.5 /srv/agent-stack/docker-compose.yml'
+gh workflow run deploy-production.yml -R averray-agent/agent
+```
+
+The rollback is fast (one cp + one redeploy) because we kept the
+legacy `/srv` files on disk untouched. PR 2.6 deletes them after 24h.
 
 **Acceptance criteria**:
 
 - [ ] `docker compose config` on VPS shows no `environment:` overrides
       of `env_file:` keys
-- [ ] After cutover deploy, `docker inspect agent-backend | grep -A20
-      Env` contains the values from `/run/agent-stack/backend.env`
-- [ ] A test deploy with an intentionally-broken template (e.g. remove
-      one entry from `prod-backend` in 1Password) causes the deploy to
-      abort BEFORE backend container restart — fail-closed confirmed
-- [ ] Operator-side runbook for the manual rollback (edit `env_file:`
-      back to `/srv/`) is documented
+- [ ] After cutover deploy, `docker inspect agent-backend` shows env
+      values matching `/run/agent-stack/backend.env`
+- [ ] Same for `agent-indexer` matching `/run/agent-stack/indexer.env`
+- [ ] Backend `/health` returns 200 after the deploy
+- [ ] Indexer `/health` returns 200 after the deploy
+- [ ] Deploy log shows `Phase 2 PR 2.5: backend parity OK …` (the
+      parity check still runs, informational only)
+- [ ] Pre-PR-2.5 backup of compose file exists at
+      `/srv/agent-stack/docker-compose.yml.pre-pr2.5` for 24h rollback
 
 ### PR 2.6 — Cleanup AND rotation
 
