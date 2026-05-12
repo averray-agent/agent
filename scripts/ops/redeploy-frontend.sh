@@ -148,7 +148,10 @@ restart_caddy_if_requested() {
 }
 
 curl_app() {
-  local curl_args=(-fsS --max-time 5)
+  # Drop -f so 401 doesn't make curl exit non-zero; we want to inspect
+  # the status code and distinguish "Caddy returned 401 (protected app
+  # is up)" from "Caddy is down / 5xx / network error".
+  local curl_args=(-sS --max-time 5 -o /tmp/app-response.html -w '%{http_code}')
   if [[ -n "$APP_BASIC_AUTH_USER" && -n "$APP_BASIC_AUTH_PASSWORD" ]]; then
     curl_args+=(-u "$APP_BASIC_AUTH_USER:$APP_BASIC_AUTH_PASSWORD")
   fi
@@ -158,14 +161,32 @@ curl_app() {
 wait_for_app() {
   local deadline=$(( $(date +%s) + HEALTH_TIMEOUT_SEC ))
   local attempts=0
+  local http_status=""
   while [[ $(date +%s) -lt $deadline ]]; do
     attempts=$(( attempts + 1 ))
-    if html="$(curl_app 2>/dev/null)" && grep -Fq "$APP_EXPECTED_MARKER" <<<"$html"; then
-      echo "Operator app check passed after ${attempts} attempt(s)."
-      return 0
+    if http_status="$(curl_app 2>/dev/null)"; then
+      # Success path A: HTML marker found (auth worked OR app is public).
+      if [[ -f /tmp/app-response.html ]] && grep -Fq "$APP_EXPECTED_MARKER" /tmp/app-response.html; then
+        echo "Operator app check passed (marker found) after ${attempts} attempt(s)."
+        rm -f /tmp/app-response.html
+        return 0
+      fi
+      # Success path B: 401 returned and we deliberately didn't auth.
+      # Phase 2 PR 2.2 removed the raw basic-auth password from CI, so
+      # this script can't authenticate from the deploy runner. A 401
+      # response proves Caddy is up and serving the protected app —
+      # that's the verification depth we have here. The end-to-end
+      # auth-200 smoke is deferred to Phase 2 PR 2.5, which uses a
+      # smoke-side OP service-account token that can read the raw.
+      if [[ "$http_status" == "401" && -z "${APP_BASIC_AUTH_PASSWORD:-}" ]]; then
+        echo "Operator app check passed (HTTP 401, protected; raw not in CI) after ${attempts} attempt(s)."
+        rm -f /tmp/app-response.html
+        return 0
+      fi
     fi
     sleep "$HEALTH_INTERVAL_SEC"
   done
+  rm -f /tmp/app-response.html
   return 1
 }
 
