@@ -493,18 +493,50 @@ render_runtime_envs_parity_check() {
     # entries (operators appended sections without dedup); Docker Compose
     # uses last-wins for duplicates, so that's the semantic to compare.
     #
+    # Quote-strip normalization: the live /srv file uses `KEY="value"`,
+    # the rendered template uses `KEY=value`. Docker Compose's env_file:
+    # parser strips surrounding quotes from values — both forms produce
+    # the same runtime value. Without normalizing here, every quoted
+    # legacy line shows as drift even when the underlying value is
+    # identical (this is what PR 2.4's first deploy logged as
+    # "58 lines differ" — pure cosmetic noise).
+    #
+    # The normalizer:
+    #   1. Filters to KEY=value lines (skips blanks, comments)
+    #   2. Strips a single pair of surrounding double or single quotes
+    #   3. Stores last-wins per key in awk map
+    #   4. Emits KEY=value lines (no quotes)
+    #
     # Run as one `sudo bash -c` so the process-substitutions and the read
     # of the 0400 /run/*.env file all happen as root.
     if sudo bash -c "
+      normalize() {
+        awk -F= '/^[A-Z][A-Z0-9_]*=/ {
+          key = \$1
+          # Everything after the first \"=\"
+          val = substr(\$0, length(key) + 2)
+          # Strip a single pair of surrounding quotes (\" or single-quote)
+          if (length(val) >= 2) {
+            first = substr(val, 1, 1)
+            last  = substr(val, length(val), 1)
+            if ((first == \"\\\"\" && last == \"\\\"\") || (first == \"'\\''\" && last == \"'\\''\")) {
+              val = substr(val, 2, length(val) - 2)
+            }
+          }
+          out[key] = key \"=\" val
+        } END {
+          for (k in out) print out[k]
+        }' \"\$1\"
+      }
       diff_output=\$(diff \
-        <(awk -F= '/^[A-Z][A-Z0-9_]*=/ { val[\$1] = \$0 } END { for (k in val) print val[k] }' '$legacy' | sort) \
-        <(grep -E '^[A-Z][A-Z0-9_]*=' '$target' | sort))
+        <(normalize '$legacy' | sort) \
+        <(normalize '$target' | sort))
       if [[ -z \"\$diff_output\" ]]; then
-        echo 'Phase 2 PR 2.4: $runtime parity OK — /run matches /srv (last-wins dedup)'
+        echo 'Phase 2 PR 2.4: $runtime parity OK — /run matches /srv (last-wins dedup, quote-normalized)'
         exit 0
       else
         line_count=\$(printf '%s\n' \"\$diff_output\" | wc -l | tr -d ' ')
-        echo \"::warning:: Phase 2 PR 2.4: $runtime parity diff — \$line_count line(s) differ between /run/agent-stack/${runtime}.env and /srv/agent-stack/${runtime}.env (last-wins dedup)\"
+        echo \"::warning:: Phase 2 PR 2.4: $runtime parity diff — \$line_count line(s) differ between /run/agent-stack/${runtime}.env and /srv/agent-stack/${runtime}.env (last-wins dedup, quote-normalized)\"
         echo \"  This is informational only — compose still reads /srv. Investigate before PR 2.5 flips env_file.\"
         # Print only KEY names, not values, so secrets never enter the log.
         printf '%s\n' \"\$diff_output\" | awk -F= '/^[<>] [A-Z]/ { print \"    \" \$1 \"=\" }' | sort -u | head -20
