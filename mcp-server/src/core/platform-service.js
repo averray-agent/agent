@@ -1355,12 +1355,13 @@ function sumSubJobRewards(jobs, asset) {
 function buildEventBusTimelineEntry(event, index) {
   return buildTimelineEntry({
     id: event.id ?? `event-bus:${index}`,
-    type: "event_bus",
+    type: event.type ?? "event_bus",
     at: event.timestamp,
-    correlationId: event.sessionId ?? event.jobId,
-    phase: event.topic,
-    source: "event_bus",
+    correlationId: event.correlationId ?? event.sessionId ?? event.jobId,
+    phase: event.phase ?? event.topic,
+    source: event.source ?? "event_bus",
     topic: event.topic,
+    severity: event.severity ?? "info",
     jobId: event.jobId,
     sessionId: event.sessionId,
     wallet: event.wallet,

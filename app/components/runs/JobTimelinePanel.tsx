@@ -247,6 +247,10 @@ function SourceChip({ source }: { source: TimelineSource }) {
         source === "state" && "bg-[color:rgba(17,19,21,0.06)] text-[var(--avy-ink)]",
         source === "lineage" && "bg-[#2a1f3a] text-white",
         source === "schedule" && "bg-[#3a2a1f] text-white",
+        source === "chain" && "bg-[#173247] text-white",
+        source === "settlement" && "bg-[#17473b] text-white",
+        source === "ingestion" && "bg-[#46381a] text-white",
+        source === "system" && "bg-[#5b2a2a] text-white",
         // Unknown source kinds — neutral fill so the row still
         // renders and the operator can read the topic.
         ![
@@ -255,6 +259,10 @@ function SourceChip({ source }: { source: TimelineSource }) {
           "state",
           "lineage",
           "schedule",
+          "chain",
+          "settlement",
+          "ingestion",
+          "system",
         ].includes(source as string) && "bg-[color:rgba(17,19,21,0.06)] text-[var(--avy-ink)]"
       )}
       style={{ letterSpacing: "0.08em" }}

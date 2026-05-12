@@ -68,24 +68,168 @@ function normalizeFilter(filter = {}) {
 }
 
 function normalizeEvent(event) {
+  const topic = normalizeText(event.topic);
+  const taxonomy = classifyEventTopic(topic, event.data);
   const wallets = new Set(
     [event.wallet, ...(Array.isArray(event.wallets) ? event.wallets : [])]
-      .map((value) => value?.trim())
+      .map((value) => normalizeText(value))
       .filter(Boolean)
   );
+  const jobId = normalizeText(event.jobId);
+  const sessionId = normalizeText(event.sessionId);
 
   return {
-    id: event.id,
-    topic: event.topic,
-    wallet: event.wallet?.trim() || undefined,
+    id: normalizeText(event.id) || undefined,
+    topic,
+    type: normalizeText(event.type) || "event_bus",
+    source: normalizeText(event.source) || taxonomy.source,
+    phase: normalizeText(event.phase) || taxonomy.phase,
+    severity: normalizeSeverity(event.severity) || taxonomy.severity,
+    correlationId: normalizeText(event.correlationId) || sessionId || jobId || undefined,
+    wallet: normalizeText(event.wallet) || undefined,
     wallets: [...wallets],
-    jobId: event.jobId?.trim() || undefined,
-    sessionId: event.sessionId?.trim() || undefined,
+    jobId: jobId || undefined,
+    sessionId: sessionId || undefined,
     blockNumber: event.blockNumber ?? null,
     txHash: event.txHash ?? null,
     timestamp: event.timestamp ?? new Date().toISOString(),
     data: event.data ?? {}
   };
+}
+
+function classifyEventTopic(topic, data = {}) {
+  if (topic.startsWith("escrow.")) {
+    return {
+      source: "chain",
+      phase: escrowPhase(topic),
+      severity: escrowSeverity(topic)
+    };
+  }
+  if (topic.startsWith("account.")) {
+    return {
+      source: "chain",
+      phase: accountPhase(topic),
+      severity: topic.includes("slashed") ? "warn" : "info"
+    };
+  }
+  if (topic.startsWith("reputation.")) {
+    return {
+      source: "chain",
+      phase: "reputation",
+      severity: topic.includes("slashed") ? "warn" : "info"
+    };
+  }
+  if (topic.startsWith("content.")) {
+    return {
+      source: "chain",
+      phase: "content",
+      severity: "info"
+    };
+  }
+  if (topic.startsWith("xcm.")) {
+    return {
+      source: "settlement",
+      phase: "settlement",
+      severity: xcmSeverity(topic, data)
+    };
+  }
+  if (topic.startsWith("verification.")) {
+    return {
+      source: "verification",
+      phase: "verification",
+      severity: verificationSeverity(data)
+    };
+  }
+  if (topic.startsWith("recurring.")) {
+    return {
+      source: "schedule",
+      phase: "recurring",
+      severity: topic.includes("failed") ? "error" : "info"
+    };
+  }
+  if (topic.startsWith("jobs.ingest.")) {
+    return {
+      source: "ingestion",
+      phase: "ingestion",
+      severity: "info"
+    };
+  }
+  if (topic.startsWith("system.")) {
+    return {
+      source: "system",
+      phase: "system",
+      severity: topic.includes("error") || topic.includes("failed") ? "error" : "warn"
+    };
+  }
+  if (topic.startsWith("session.")) {
+    return {
+      source: "state",
+      phase: "session",
+      severity: sessionSeverity(data)
+    };
+  }
+  return {
+    source: "event_bus",
+    phase: topic || "event",
+    severity: "info"
+  };
+}
+
+function escrowPhase(topic) {
+  if (topic === "escrow.job_funded") return "funding";
+  if (topic === "escrow.dispute_opened" || topic === "escrow.dispute_resolved") return "dispute";
+  if (
+    topic === "escrow.job_closed" ||
+    topic === "escrow.job_rejected" ||
+    topic === "escrow.auto_resolved_on_timeout"
+  ) {
+    return "settlement";
+  }
+  return "execution";
+}
+
+function escrowSeverity(topic) {
+  if (topic === "escrow.job_rejected") return "error";
+  if (topic === "escrow.dispute_opened") return "warn";
+  return "info";
+}
+
+function accountPhase(topic) {
+  if (topic === "account.job_stake_locked") return "funding";
+  if (topic === "account.job_stake_slashed" || topic === "account.claim_fee_slashed") return "dispute";
+  return "settlement";
+}
+
+function xcmSeverity(topic, data) {
+  const status = normalizeText(data?.statusLabel) || normalizeText(data?.status);
+  if (topic.includes("failed") || status.toLowerCase().includes("failed")) return "error";
+  return "info";
+}
+
+function verificationSeverity(data) {
+  const outcome = normalizeText(data?.outcome);
+  const status = normalizeText(data?.status);
+  if (outcome === "rejected" || status === "rejected") return "error";
+  if (outcome === "disputed" || status === "disputed") return "warn";
+  return "info";
+}
+
+function sessionSeverity(data) {
+  const status = normalizeText(data?.status);
+  if (["failed", "rejected", "slashed"].includes(status)) return "error";
+  if (status === "disputed") return "warn";
+  return "info";
+}
+
+function normalizeSeverity(value) {
+  const normalized = normalizeText(value);
+  return normalized === "info" || normalized === "warn" || normalized === "error"
+    ? normalized
+    : undefined;
+}
+
+function normalizeText(value) {
+  return typeof value === "string" ? value.trim() : "";
 }
 
 function normalizeTopics(topics) {
