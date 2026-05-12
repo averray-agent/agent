@@ -301,22 +301,32 @@ which this entry retires.
 
 **Mint with the script** (current procedure):
 ```bash
-AUTH_JWT_SECRETS=$(op read "op://Averray/Production/Backend/auth-jwt-secrets/credential") \
-  node scripts/ops/mint-admin-jwt.mjs --profile production --expires-in-days 30 --quiet \
-  | op item edit "op://Averray/Production/Smoke/admin-jwt" credential[password]=-
+NEW_JWT=$(AUTH_JWT_SECRETS=$(op read "op://prod-backend/auth-jwt-secrets/password") \
+  node scripts/ops/mint-admin-jwt.mjs --profile testnet --expires-in-days 30 --quiet)
+
+# Store in 1Password (canonical home, used by Phase 2 PR 2.5 onward):
+op item create --vault=prod-smoke --category=password --title=admin-jwt \
+  "password=$NEW_JWT" \
+  "notes=Long-lived (30d) admin JWT. TRANSITIONAL until Phase 4b."
+# OR, during the transition window, also update the GH Actions secret:
+printf '%s' "$NEW_JWT" | gh secret set ADMIN_JWT -R averray-agent/agent
+
+unset NEW_JWT
 ```
 
 Notes:
-- `--profile production` (not `testnet`) for the production smoke target.
-  Earlier instructions referenced `testnet` — that was wrong for
-  the prod smoke loop.
-- Output goes back into **1Password** at
-  `op://Averray/Production/Smoke/admin-jwt`, not directly to a
-  GitHub Actions secret. The smoke workflow reads from that
-  op:// path via the `prod-smoke-tests` service-account token.
-- The op:// path is lowercase. 1Password is case-sensitive for
-  item/section/field names; the earlier `AUTH_JWT_SECRETS`
-  uppercase reference would have failed.
+- `--profile testnet` — the current production system runs against
+  Polkadot Hub TestNet, so the mint script reads the verifier wallet
+  from `deployments/testnet.json`. After Phase 5 cutover provisions
+  `deployments/mainnet.json`, this becomes `--profile mainnet`.
+  (Earlier v3 doc drafts said `--profile production`, which doesn't
+  match a real profile file — corrected in Phase 2 PR 2.1.)
+- The op:// paths use the **flat** vault names (`prod-backend`,
+  `prod-smoke`) committed in Phase 1, not the aspirational hierarchical
+  `op://Averray/Production/...` scheme from the original plan docs.
+- Both the GH Actions secret (`ADMIN_JWT`) and the 1Password item
+  (`prod-smoke/admin-jwt`) must agree until PR 2.5 wires the smoke
+  workflow to read from 1Password exclusively.
 
 **Rotate**: Mint a new one with the script before the old expires.
 Add a [`SECRETS_CALENDAR.yml`](SECRETS_CALENDAR.yml) entry so CI warns

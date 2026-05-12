@@ -113,11 +113,18 @@ concurrency:
   group: production
   cancel-in-progress: false
 
+# Default to least privilege. Steps that need more (e.g. id-token: write
+# for OIDC in Phase 3) must elevate explicitly.
+permissions:
+  contents: read
+
 jobs:
   deploy:
     name: Deploy VPS production
     runs-on: ubuntu-latest
     environment: production
+    permissions:
+      contents: read
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     env:
       VPS_HOST: ${{ secrets.VPS_HOST }}
@@ -156,6 +163,71 @@ jobs:
           if [ -n "$APP_BASIC_AUTH_USER" ]; then
             test -n "$APP_BASIC_AUTH_PASSWORD"
           fi
+
+      # ─── Phase 2 PR 2.1: parity check between OP-loaded and legacy SSH key ──
+      #
+      # Load VPS_SSH_KEY_OP from 1Password via the prod-ci-deploy
+      # service-account token. The OP token is set ONLY on this step
+      # (step-level `env:`, NOT job-level) so subsequent steps in this
+      # job cannot read it — per 1Password's docs, putting the token at
+      # job level would expose it to every step that follows.
+      #
+      # continue-on-error: a 1Password outage MUST NOT break the deploy
+      # during the validation window. The downstream "Configure SSH"
+      # step still uses the legacy ${{ secrets.VPS_SSH_KEY }} value.
+      # PR 2.4 will flip the SSH write to use $VPS_SSH_KEY_OP and delete
+      # the legacy secret 24h after the OP path has been proven stable.
+      - name: Load VPS SSH key from 1Password (parity check, non-blocking)
+        id: load_op_ssh
+        continue-on-error: true
+        # Pinned to 1password/load-secrets-action v2.0.0 commit SHA
+        # (verified via the v2.0.0 annotated tag's commit object).
+        # Refresh by re-running:
+        #   curl -s https://api.github.com/repos/1Password/load-secrets-action/git/tags/<tag-sha> | jq .object.sha
+        uses: 1password/load-secrets-action@581a835fb51b8e7ec56b71cf2ffddd7e68bb25e0
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN_PROD_CI }}
+          VPS_SSH_KEY_OP: op://prod-ci/vps-ssh-key/private key
+
+      # Compare without ever printing key material. Writes both to
+      # umask-077 mktemp files, runs `cmp -s`, and logs only the
+      # yes/no result plus byte lengths on mismatch. The byte length
+      # is intentionally NOT a fingerprint — it only helps diagnose
+      # newline-handling regressions.
+      - name: Compare OP-loaded VPS SSH key against legacy GH secret
+        if: steps.load_op_ssh.outcome == 'success'
+        env:
+          LEGACY_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+
+          legacy_file=$(mktemp)
+          op_file=$(mktemp)
+          trap 'rm -f "$legacy_file" "$op_file"' EXIT
+
+          printf '%s' "$LEGACY_KEY" > "$legacy_file"
+          printf '%s' "$VPS_SSH_KEY_OP" > "$op_file"
+          chmod 0400 "$legacy_file" "$op_file"
+
+          if cmp -s "$legacy_file" "$op_file"; then
+            echo "VPS_SSH_KEY_OP matches legacy secret: yes"
+          else
+            legacy_len=$(wc -c < "$legacy_file" | tr -d ' ')
+            op_len=$(wc -c < "$op_file" | tr -d ' ')
+            echo "VPS_SSH_KEY_OP matches legacy secret: no"
+            echo "    legacy length: $legacy_len bytes"
+            echo "    OP length:     $op_len bytes"
+            echo "::warning::OP-loaded VPS SSH key does NOT match legacy GH Actions secret. Investigate before PR 2.4 swaps to the OP value."
+          fi
+
+      - name: Note when 1Password load step failed (deploy proceeds with legacy key)
+        if: steps.load_op_ssh.outcome == 'failure'
+        run: |
+          echo "::warning::1Password load-secrets-action failed; falling back to legacy VPS_SSH_KEY from GH Actions. Investigate before assuming Phase 2 is healthy."
 
       - name: Configure SSH
         run: |
