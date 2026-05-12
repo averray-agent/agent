@@ -18,7 +18,7 @@ import {
 import { computeClaimEconomics, countClaimedSessions } from "./claim-economics.js";
 import { claimStatusFields, isTerminalSession, summarizeJobClaimState } from "./claim-state.js";
 import { capabilityMatrix } from "../auth/capabilities.js";
-import { normalizeAssetSymbol } from "./assets.js";
+import { knownAssetMinBalanceRaw, normalizeAssetSymbol } from "./assets.js";
 import { collectGithubOperatorStatus } from "./github-operator-helper.js";
 import { collectHostDiagnostics } from "./host-diagnostics.js";
 
@@ -161,11 +161,18 @@ export class PlatformService {
   }
 
   createJob(input) {
-    return this.jobCatalogService.createJob(input);
+    const created = this.jobCatalogService.createJob(input);
+    try {
+      this.validateJobRewardMinBalance(created);
+      return created;
+    } catch (error) {
+      this.jobCatalogService.removeJob(created.id);
+      throw error;
+    }
   }
 
   async createAdminJob(input, { posterWallet = undefined } = {}) {
-    const created = this.jobCatalogService.createJob(input);
+    const created = this.createJob(input);
     try {
       await this.reserveRecurringTemplateFunding(created, posterWallet);
       return created;
@@ -826,7 +833,7 @@ export class PlatformService {
     }
 
     const createdAt = new Date().toISOString();
-    const child = this.jobCatalogService.createJob({
+    const child = this.createJob({
       ...input,
       rewardAsset,
       parentSessionId,
@@ -1042,6 +1049,38 @@ export class PlatformService {
       funding: job.recurringPolicy.funding
     });
     return receipt;
+  }
+
+  validateJobRewardMinBalance(job) {
+    const asset = this.resolveSupportedSettlementAsset(job?.rewardAsset);
+    const minBalanceRaw = minBalanceRawForAsset(asset);
+    if (minBalanceRaw === undefined) {
+      return;
+    }
+    const decimals = Number(asset.decimals);
+    const rewardRaw = decimalToBaseUnits(job.rewardAmount, decimals, "rewardAmount");
+    if (rewardRaw >= minBalanceRaw) {
+      return;
+    }
+    throw new ValidationError(
+      `Job reward below asset minBalance: asset=${asset.symbol} minBalance=${minBalanceRaw} base units ` +
+      `(${formatBaseUnits(minBalanceRaw, decimals)} ${asset.symbol}); reward=${job.rewardAmount} ${asset.symbol} ` +
+      `= ${rewardRaw} base units.`,
+      {
+        asset: asset.symbol,
+        assetClass: asset.assetClass,
+        assetId: asset.assetId,
+        rewardAmount: job.rewardAmount,
+        rewardRaw: rewardRaw.toString(),
+        minBalanceRaw: minBalanceRaw.toString()
+      }
+    );
+  }
+
+  resolveSupportedSettlementAsset(rewardAsset) {
+    const symbol = normalizeAssetSymbol(rewardAsset);
+    const assets = this.blockchainGateway?.config?.supportedAssets ?? [];
+    return assets.find((asset) => normalizeAssetSymbol(asset.symbol) === symbol);
   }
 
   async sendToAgent(from, recipient, asset, amount) {
@@ -1400,6 +1439,53 @@ function timelineTime(value) {
 
 function firstDefined(...values) {
   return values.find((value) => value !== undefined && value !== null) ?? null;
+}
+
+function minBalanceRawForAsset(asset) {
+  if (!asset) {
+    return undefined;
+  }
+  const raw = asset.minBalanceRaw ?? knownAssetMinBalanceRaw(asset);
+  if (raw === undefined || raw === null || raw === "") {
+    return undefined;
+  }
+  if (typeof raw === "bigint") {
+    return raw >= 0n ? raw : undefined;
+  }
+  const value = String(raw).trim();
+  return /^\d+$/u.test(value) ? BigInt(value) : undefined;
+}
+
+function decimalToBaseUnits(amount, decimals, label) {
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 30) {
+    throw new ValidationError(`${label} asset decimals must be an integer in [0, 30].`);
+  }
+  const normalized = normalizeDecimalString(amount, label);
+  const [whole, fractional = ""] = normalized.split(".");
+  if (fractional.length > decimals) {
+    throw new ValidationError(`${label} must fit ${decimals} decimal places.`);
+  }
+  return BigInt(whole) * (10n ** BigInt(decimals))
+    + BigInt(fractional.padEnd(decimals, "0") || "0");
+}
+
+function normalizeDecimalString(value, label) {
+  const raw = typeof value === "number"
+    ? value.toLocaleString("en-US", { useGrouping: false, maximumFractionDigits: 30 })
+    : String(value ?? "").trim();
+  if (!/^(?:0|[1-9]\d*)(?:\.\d+)?$/u.test(raw)) {
+    throw new ValidationError(`${label} must be a positive decimal amount.`);
+  }
+  return raw;
+}
+
+function formatBaseUnits(raw, decimals) {
+  const scale = 10n ** BigInt(decimals);
+  const whole = raw / scale;
+  const fractional = raw % scale;
+  if (fractional === 0n || decimals === 0) return whole.toString();
+  const padded = fractional.toString().padStart(decimals, "0").replace(/0+$/u, "");
+  return `${whole}.${padded}`;
 }
 
 function compactTimelineData(value) {

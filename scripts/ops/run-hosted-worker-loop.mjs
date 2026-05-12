@@ -6,23 +6,17 @@ import { AgentPlatformClient } from "../../sdk/agent-platform-client.js";
 import { DEFAULT_ESCROW_ASSET } from "../../mcp-server/src/core/assets.js";
 
 const DEFAULT_API_BASE_URL = "https://api.averray.com";
-// Reward must yield at least the asset's `minBalance` (existential
-// deposit on the Polkadot Hub Assets pallet) once converted to base
-// units, otherwise EscrowCore.resolveSinglePayout will revert with
-// SafeTransfer.TransferFailed when settling to a worker whose asset
-// account has been destroyed (balance dropped to 0). Trust-Backed
-// assets on Asset Hub Paseo carry non-trivial minBalance values — for
-// USDC asset id 1337 the value is 70_000 base units (0.07 USDC). Pick
-// a default well above any common minBalance: 0.1 USDC = 100_000 base
-// units. Operators running with cheaper assets (DOT-decimals) can set
-// PRODUCT_PROOF_REWARD_AMOUNT explicitly to a smaller number.
+// Above USDC's current Asset Hub minBalance of 70_000 base units. The
+// explicit minBalance preflight below remains the launch gate; this is
+// just a humane default for manual workflow dispatches.
 const DEFAULT_REWARD_AMOUNT = 0.1;
 const REQUIRED_ESCROW_ASSET = {
   symbol: DEFAULT_ESCROW_ASSET.symbol,
   address: DEFAULT_ESCROW_ASSET.address.toLowerCase(),
   assetClass: DEFAULT_ESCROW_ASSET.assetClass,
   assetId: DEFAULT_ESCROW_ASSET.assetId,
-  decimals: DEFAULT_ESCROW_ASSET.decimals
+  decimals: DEFAULT_ESCROW_ASSET.decimals,
+  minBalanceRaw: DEFAULT_ESCROW_ASSET.minBalanceRaw
 };
 
 export async function runHostedWorkerLoop({
@@ -58,6 +52,11 @@ export async function runHostedWorkerLoop({
   }
 
   const settlementReadiness = await assertSettlementReadiness(platform, rewardAsset);
+  const rewardReadiness = assertRewardClearsAssetMinBalance({
+    rewardAsset,
+    rewardAmount: rewardAmountInput,
+    asset: settlementReadiness.asset
+  });
   const liquidityReadiness = await assertProductProofLiquidity({
     platform,
     wallet,
@@ -133,6 +132,7 @@ export async function runHostedWorkerLoop({
     verificationOutcome: verification.outcome,
     verificationReasonCode: verification.reasonCode ?? null,
     settlementReadiness,
+    rewardReadiness,
     liquidityReadiness,
     sessionStatus: session.status,
     completedAt: new Date(timestamp).toISOString()
@@ -179,6 +179,33 @@ async function assertProductProofLiquidity({ platform, wallet, rewardAsset, rewa
     availableRaw: availableRaw.toString(),
     required: formatBaseUnits(requiredRaw, decimals),
     available: formatBaseUnits(availableRaw, decimals)
+  };
+}
+
+function assertRewardClearsAssetMinBalance({ rewardAsset, rewardAmount, asset }) {
+  const decimals = Number(asset?.decimals);
+  const rewardRaw = toBaseUnits(rewardAmount, decimals);
+  const minBalanceRaw = minBalanceRawForAsset(asset);
+  if (minBalanceRaw === undefined) {
+    throw new Error(
+      `Hosted product-proof worker loop requires ${rewardAsset} minBalance metadata before mutation. ` +
+      `Expose minBalanceRaw for the settlement asset in /admin/status.`
+    );
+  }
+  if (rewardRaw < minBalanceRaw) {
+    throw new Error(
+      `Hosted product-proof worker loop reward below asset minBalance: asset=${rewardAsset} ` +
+      `(id=${asset.assetId ?? "unknown"}) minBalance=${minBalanceRaw} base units ` +
+      `(${formatBaseUnits(minBalanceRaw, decimals)} ${rewardAsset}); reward=${rewardAmount} ${rewardAsset} ` +
+      `= ${rewardRaw} base units. Increase PRODUCT_PROOF_REWARD_AMOUNT, or pre-fund the worker's asset account so it stays alive.`
+    );
+  }
+  return {
+    asset: rewardAsset,
+    rewardRaw: rewardRaw.toString(),
+    reward: formatBaseUnits(rewardRaw, decimals),
+    minBalanceRaw: minBalanceRaw.toString(),
+    minBalance: formatBaseUnits(minBalanceRaw, decimals)
   };
 }
 
@@ -244,6 +271,23 @@ function toBigIntAmount(value, label) {
     return BigInt(value.trim());
   }
   throw new Error(`${label} must be present as a raw integer amount.`);
+}
+
+function minBalanceRawForAsset(asset) {
+  if (!asset) {
+    return undefined;
+  }
+  const raw = asset?.minBalanceRaw ?? (
+    describeRequiredAssetMismatch(asset) ? undefined : REQUIRED_ESCROW_ASSET.minBalanceRaw
+  );
+  if (raw === undefined || raw === null || raw === "") {
+    return undefined;
+  }
+  if (typeof raw === "bigint") {
+    return raw >= 0n ? raw : undefined;
+  }
+  const value = String(raw).trim();
+  return /^\d+$/u.test(value) ? BigInt(value) : undefined;
 }
 
 function formatBaseUnits(raw, decimals) {

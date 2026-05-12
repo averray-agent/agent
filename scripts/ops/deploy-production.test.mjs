@@ -274,7 +274,7 @@ test("deploy wrapper refreshes settlement backend env from testnet deployment ma
   assert.match(contents, /^DISCOVERY_REGISTRY_ADDRESS="0x0a1b78F8A2A3C28dB47f35Cb3E6b3b83412dad57"$/m);
   assert.match(contents, /^XCM_WRAPPER_ADDRESS=""$/m);
   assert.match(contents, /^SUPPORTED_ASSETS=""$/m);
-  assert.match(contents, /^SUPPORTED_ASSETS_JSON="\[{\\"symbol\\":\\"USDC\\",\\"assetClass\\":\\"trust_backed\\",\\"assetId\\":1337,\\"address\\":\\"0x0000053900000000000000000000000001200000\\",\\"decimals\\":6}\]"$/m);
+  assert.match(contents, /^SUPPORTED_ASSETS_JSON="\[{\\"symbol\\":\\"USDC\\",\\"assetClass\\":\\"trust_backed\\",\\"assetId\\":1337,\\"address\\":\\"0x0000053900000000000000000000000001200000\\",\\"decimals\\":6,\\"minBalanceRaw\\":\\"70000\\"}\]"$/m);
   assert.match(await readFile(deployLog, "utf8"), /^backend$/m);
 });
 

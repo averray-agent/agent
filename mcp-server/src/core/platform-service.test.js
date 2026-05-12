@@ -5,6 +5,14 @@ import { PlatformService } from "./platform-service.js";
 import { EventBus } from "./event-bus.js";
 
 const WALLET = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const CANONICAL_USDC_ASSET = {
+  symbol: "USDC",
+  assetClass: "trust_backed",
+  assetId: 1337,
+  decimals: 6,
+  address: "0x0000053900000000000000000000000001200000",
+  minBalanceRaw: "70000"
+};
 
 function makePlatformService(blockchainGateway = undefined, eventBus = undefined) {
   const jobs = [
@@ -119,6 +127,75 @@ test("createAdminJob reserves finite recurring template funding from the poster 
   assert.equal(derivative.funding.source, "recurring_template_reserve");
   assert.equal(derivative.funding.wallet, WALLET);
   assert.equal(derivative.funding.amount, 5);
+});
+
+test("createJob allows USDC rewards at or above asset minBalance", () => {
+  const service = makePlatformService({
+    config: { supportedAssets: [CANONICAL_USDC_ASSET] }
+  });
+
+  const exact = service.createJob({
+    id: "usdc-minbalance-exact",
+    category: "product_proof",
+    tier: "starter",
+    rewardAmount: 0.07,
+    rewardAsset: "USDC",
+    verifierMode: "benchmark",
+    verifierTerms: ["complete"],
+    verifierMinimumMatches: 1,
+    inputSchemaRef: "schema://jobs/coding-input",
+    outputSchemaRef: "schema://jobs/coding-output",
+    claimTtlSeconds: 1800,
+    retryLimit: 1
+  });
+  const double = service.createJob({
+    id: "usdc-minbalance-double",
+    category: "product_proof",
+    tier: "starter",
+    rewardAmount: 0.14,
+    rewardAsset: "USDC",
+    verifierMode: "benchmark",
+    verifierTerms: ["complete"],
+    verifierMinimumMatches: 1,
+    inputSchemaRef: "schema://jobs/coding-input",
+    outputSchemaRef: "schema://jobs/coding-output",
+    claimTtlSeconds: 1800,
+    retryLimit: 1
+  });
+
+  assert.equal(exact.rewardAmount, 0.07);
+  assert.equal(double.rewardAmount, 0.14);
+});
+
+test("createJob rejects USDC rewards below asset minBalance and rolls back catalog insertion", () => {
+  const service = makePlatformService({
+    config: { supportedAssets: [CANONICAL_USDC_ASSET] }
+  });
+
+  assert.throws(
+    () => service.createJob({
+      id: "usdc-minbalance-low",
+      category: "product_proof",
+      tier: "starter",
+      rewardAmount: 0.069999,
+      rewardAsset: "USDC",
+      verifierMode: "benchmark",
+      verifierTerms: ["complete"],
+      verifierMinimumMatches: 1,
+      inputSchemaRef: "schema://jobs/coding-input",
+      outputSchemaRef: "schema://jobs/coding-output",
+      claimTtlSeconds: 1800,
+      retryLimit: 1
+    }),
+    (error) => {
+      assert.equal(error.code, "invalid_request");
+      assert.match(error.message, /Job reward below asset minBalance/u);
+      assert.equal(error.details.rewardRaw, "69999");
+      assert.equal(error.details.minBalanceRaw, "70000");
+      return true;
+    }
+  );
+  assert.equal(service.listJobs().some((job) => job.id === "usdc-minbalance-low"), false);
 });
 
 test("createSubJob enforces parent delegation budget and count policy", async () => {

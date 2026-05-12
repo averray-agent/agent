@@ -46,7 +46,8 @@ const supportedAssets = JSON.stringify([{
   assetClass: "trust_backed",
   assetId: 1337,
   address: usdc,
-  decimals: 6
+  decimals: 6,
+  minBalanceRaw: "70000"
 }]);
 
 const entries = {
