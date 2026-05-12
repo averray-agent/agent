@@ -297,37 +297,56 @@ for 24h after each, and is reversible.
 
 **Touches**: `.github/workflows/deploy-production.yml`
 
-- Add `OP_SERVICE_ACCOUNT_TOKEN_PROD_CI` as a GitHub **Environment** secret
-  on the existing `production` environment (already gated by required
-  reviewers).
-- Add top-level `permissions: contents: read`; elevate per-step only when
-  the step needs more (e.g. `id-token: write` for OIDC in Phase 3).
-- Add `1password/load-secrets-action@<commit-sha>` step **scoped to that
-  step only** (do NOT set the OP token via a job-level `env:` block — per
-  1Password's docs, that makes the token available to subsequent steps).
-  Load `VPS_SSH_KEY_OP` from `op://prod-ci/vps-ssh-key/private key`.
-- Keep `${{ secrets.VPS_SSH_KEY }}` as the deploy fallback for one run.
-  Validate parity by writing both to `mktemp` files (`umask 077`) and
-  comparing with `cmp -s`. **Log only `VPS_SSH_KEY_OP matches legacy
-  secret: yes/no`** — never a checksum or fingerprint of the private key.
-- Once a successful deploy proves the OP-loaded key works, swap the SSH
-  key write to use `VPS_SSH_KEY_OP` and delete the legacy GH Actions
-  secret 24h later (in PR 2.4).
-- Pin every third-party action (`actions/checkout`, `1password/load-secrets-action`,
-  `aws-actions/configure-aws-credentials` if added later) to a commit SHA.
+**Operator setup BEFORE merge** (one-time, in GitHub repo settings):
+1. **Settings → Environments → production → Add environment secret**
+2. Name: `OP_SERVICE_ACCOUNT_TOKEN_PROD_CI`
+3. Value: the `ops_…` token stored in
+   `op://prod-critical/op-token-prod-ci-deploy/password` (read it with
+   `op read 'op://prod-critical/op-token-prod-ci-deploy/password'`
+   and paste — do NOT echo to terminal first).
+4. Save. The token is now visible only to workflow jobs that reference
+   `environment: production`, behind the existing required-reviewer
+   gate.
+
+**Workflow changes in this PR**:
+
+- Add top-level `permissions: contents: read`; elevate per-step only
+  when the step needs more (e.g. `id-token: write` for OIDC in Phase 3).
+- Add `1password/load-secrets-action@581a835fb51b8e7ec56b71cf2ffddd7e68bb25e0`
+  (pinned to v2.0.0's commit SHA) step **scoped to that step only**
+  (the OP token is set via step-level `env:`, NOT job-level — per
+  1Password's docs, putting the token at job level would expose it to
+  every step that follows). Loads `VPS_SSH_KEY_OP` from
+  `op://prod-ci/vps-ssh-key/private key`. `continue-on-error: true`
+  so a 1Password outage during the validation window does not break
+  deploys.
+- New parity-check step compares `VPS_SSH_KEY_OP` against the legacy
+  `${{ secrets.VPS_SSH_KEY }}` value by writing both to `umask 077`
+  `mktemp` files and running `cmp -s`. **Logs only `matches: yes/no`**
+  plus byte lengths on mismatch — never a checksum, never a fingerprint,
+  never the value itself. On mismatch, posts a workflow `::warning::`
+  annotation so it's visible in the PR check summary.
+- The existing "Configure SSH" step keeps using `${{ secrets.VPS_SSH_KEY }}`
+  (legacy) for the actual SSH write. The OP-loaded value is only used
+  for parity comparison.
+- PR 2.4 will flip the SSH write to use `$VPS_SSH_KEY_OP` and delete
+  the legacy GH Actions secret 24h after the OP path has been proven
+  stable.
 
 **Acceptance criteria**:
 
-- [ ] OP-loaded SSH key successfully connects to the VPS
-- [ ] `cmp -s` between OP and legacy keys logs `yes` — no checksum,
-      no fingerprint of the private key in logs
-- [ ] Production environment approval still required for deploys (manual
-      verification: open a PR with the workflow change, confirm review
-      gate appears)
-- [ ] OP token is available to the load step ONLY; subsequent steps see
-      it as unset
-- [ ] `permissions: contents: read` enforced at the workflow's top level
-- [ ] Every third-party action pinned to a commit SHA
+- [ ] Operator setup step complete: `OP_SERVICE_ACCOUNT_TOKEN_PROD_CI`
+      is set as a `production` Environment secret (visible in
+      Settings → Environments → production)
+- [ ] After merge, a manual `workflow_dispatch` deploy succeeds end-to-end
+- [ ] The parity-check step logs `VPS_SSH_KEY_OP matches legacy secret: yes`
+- [ ] No checksum, fingerprint, or value of the SSH private key
+      appears in the deploy log
+- [ ] Production environment approval gate still fires for deploys
+- [ ] `permissions: contents: read` is the workflow's default; no
+      step elevates without a stated reason
+- [ ] `1password/load-secrets-action` is pinned to commit SHA
+      `581a835fb51b8e7ec56b71cf2ffddd7e68bb25e0`, not a tag
 
 ### PR 2.2 — Caddy basic-auth: hash-only, validated, no plaintext in transit
 
@@ -517,7 +536,9 @@ to those surfaces and rotated.
 `.github/workflows/deploy-production.yml`, `SECRETS_CALENDAR.yml`.
 
 - Mint a fresh `ADMIN_JWT` using `mint-admin-jwt.mjs` with
-  `--profile production`. Store at `op://prod-smoke/admin-jwt/credential`.
+  `--profile testnet` (current production chain — switch to `mainnet`
+  once Phase 5 cutover provisions `deployments/mainnet.json`). Store at
+  `op://prod-smoke/admin-jwt/credential`.
 - Add `OP_SERVICE_ACCOUNT_TOKEN_PROD_SMOKE` as a **separate** GitHub
   Environment secret (uses the `prod-smoke-tests` service-account token).
 - Smoke step in the workflow loads `ADMIN_JWT` from 1Password via

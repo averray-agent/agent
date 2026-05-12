@@ -1039,12 +1039,18 @@ Substantive changes from v2 (all driven by external review):
    deploy-log scrubbing only. The aggressive
    `SIGNER_PRIVATE_KEY`-must-be-absent-everywhere check is Phase 3's
    exit criterion (where it correctly applies).
-5. **ADMIN_JWT runbook** updated: mint with `--profile production`
-   (not testnet); store back into 1Password via `op item edit`
-   (not `gh secret set`); reference
-   `op://Averray/Production/Smoke/admin-jwt` (correct vault, correct
-   casing); flagged as transitional until Phase 4b makes it
-   obsolete.
+5. **ADMIN_JWT runbook** updated: mint with `--profile testnet`
+   (the v3 doc draft used `--profile production`, but no
+   `deployments/production.json` file exists — production today
+   runs against `deployments/testnet.json`; switch to `mainnet`
+   only after Phase 5 cutover provisions `deployments/mainnet.json`);
+   store the new JWT in 1Password at `op://prod-smoke/admin-jwt`
+   AND update the legacy `ADMIN_JWT` GH Actions secret until Phase 2
+   PR 2.5 wires the smoke workflow to read from 1Password exclusively;
+   uses the **flat** vault naming (`prod-smoke`) committed in Phase 1,
+   not the aspirational hierarchical `op://Averray/Production/...`
+   scheme. Flagged as transitional until Phase 4b makes the long-lived
+   JWT obsolete.
 6. **Mainnet KMS wording** corrected — there is no "generate fresh
    SIGNER_PRIVATE_KEY" step on mainnet. KMS key material is created
    inside the HSM (`Origin=AWS_KMS`) and never exists as raw bytes
