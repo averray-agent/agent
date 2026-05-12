@@ -144,13 +144,20 @@ fi
 # `--cache=false` ensures we always hit 1Password, never a stale local
 # cache. Critical for deploy paths.
 #
+# `--force` is REQUIRED because mktemp already created `$tmp` (a 0-byte
+# file with random suffix). Without --force, op inject would prompt for
+# confirmation before overwriting it, and the prompt fails in a
+# non-interactive shell (no TTY). The mktemp filename is unique and
+# owned by us, so the overwrite is safe — we're knowingly populating
+# the tmpfile we just created.
+#
 # Both stdout and stderr are captured to tmpfiles so they never leak
 # rendered content or path information to the deploy log.
 op_stdout=$(mktemp)
 op_stderr=$(mktemp)
 trap 'rm -f "$tmp" "$op_stdout" "$op_stderr"; unset OP_SERVICE_ACCOUNT_TOKEN' EXIT
 
-if ! op inject --in-file "$template" --out-file "$tmp" --cache=false \
+if ! op inject --in-file "$template" --out-file "$tmp" --force --cache=false \
     >"$op_stdout" 2>"$op_stderr"; then
   echo "render-vps-env.sh: op inject failed:" >&2
   sed 's/^/    /' < "$op_stderr" >&2
