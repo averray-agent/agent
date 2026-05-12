@@ -166,7 +166,9 @@ jobs:
           test -n "$VPS_USER"
           test -n "$VPS_SSH_KEY"
           if [ -n "$APP_BASIC_AUTH_USER" ]; then
-            test -n "$APP_BASIC_AUTH_PASSWORD"
+            # Phase 2 PR 2.2: raw APP_BASIC_AUTH_PASSWORD no longer flows
+            # through CI. Caddy auth is verified via the bcrypt HASH only.
+            test -n "$APP_BASIC_AUTH_PASSWORD_HASH"
           fi
 
       # ─── Phase 2 PR 2.1: parity check between OP-loaded and legacy SSH key ──
