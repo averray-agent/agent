@@ -490,6 +490,18 @@ test("getJobTimeline stitches sessions, verification, events, and child lineage"
     outcome: "approved",
     reasonCode: "BENCHMARK_THRESHOLD_MET"
   });
+  eventBus.publish({
+    id: "chain-funded-parent-job-001",
+    topic: "escrow.job_funded",
+    jobId: "parent-job-001",
+    blockNumber: 123,
+    txHash: "0xabc",
+    timestamp: "2026-01-01T00:00:00.000Z",
+    data: {
+      amount: "2",
+      asset: "DOT"
+    }
+  });
 
   const timeline = await service.getJobTimeline("parent-job-001", { wallet: WALLET });
   assert.equal(timeline.timelineVersion, "v2");
@@ -515,9 +527,16 @@ test("getJobTimeline stitches sessions, verification, events, and child lineage"
   assert.equal(childJob.source, "lineage");
   assert.equal(childJob.jobId, subJob.id);
   const claimedEvent = timeline.timeline.find((entry) => entry.type === "event_bus" && entry.topic === "session.claimed");
-  assert.equal(claimedEvent.source, "event_bus");
+  assert.equal(claimedEvent.source, "state");
   assert.equal(claimedEvent.jobId, "parent-job-001");
   assert.equal(claimedEvent.sessionId, submitted.sessionId);
+  const fundedEvent = timeline.timeline.find((entry) => entry.topic === "escrow.job_funded");
+  assert.equal(fundedEvent.type, "event_bus");
+  assert.equal(fundedEvent.source, "chain");
+  assert.equal(fundedEvent.phase, "funding");
+  assert.equal(fundedEvent.severity, "info");
+  assert.equal(fundedEvent.correlationId, "parent-job-001");
+  assert.equal(fundedEvent.data.txHash, "0xabc");
 });
 
 test("getAdminStatus surfaces recurring scheduler anomalies", async () => {

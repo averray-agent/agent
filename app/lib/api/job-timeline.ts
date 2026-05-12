@@ -25,6 +25,10 @@ export type TimelineSource =
   | "event_bus"
   | "lineage"
   | "schedule"
+  | "chain"
+  | "settlement"
+  | "ingestion"
+  | "system"
   // Anything else the backend adds later — we still render the row
   // with a generic chip rather than dropping the entry.
   | (string & {});
