@@ -113,8 +113,13 @@ fi
 
 # mktemp alongside the target, so the atomic mv is on the same filesystem.
 # `XXXXXX` is the tmpname suffix; trap cleans up on any exit path.
+#
+# NB: do NOT chmod 0400 the file here — op inject needs to write to it.
+# The umask 077 at the top of the script ensures mktemp's default mode
+# is 0600 (read+write only by the owning user) during the brief window
+# between create and op inject's write. Final chmod 0400 happens AFTER
+# op inject succeeds, just before the atomic mv into place.
 tmp=$(mktemp "$runtime_dir/$(basename "$target").XXXXXX")
-chmod 0400 "$tmp"
 trap 'rm -f "$tmp"' EXIT
 
 # Load the OP service-account token into this script's env. `set -a`
