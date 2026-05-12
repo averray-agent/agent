@@ -188,16 +188,26 @@ fi
 
 # ── Install ────────────────────────────────────────────────────────────────
 
-# Final permissions match the v3 plan: 0400, root-owned. The compose
-# service that consumes this file MUST be readable by root at startup
-# (Docker daemon runs as root). If compose runs as non-root, the chown
-# needs adjustment — make that an explicit operator decision rather
-# than a silent permission drift.
+# Final permissions: 0400 readable by the deploy user (default: ubuntu).
+#
+# Docker Compose's CLI runs as the deploy user (not root) on this VPS,
+# and the CLI reads `env_file:` at *client* time to construct the
+# container env. So the file must be readable by the user that runs
+# `docker compose`. The original v3 plan called for 0400 root:root,
+# but that breaks compose CLI's read step (it has no sudo path); the
+# realistic threat model on this VPS is that the ubuntu user has
+# passwordless sudo anyway, so "root-only readable" was never a
+# meaningful firebreak in practice.
+#
+# Configurable via RENDER_OUTPUT_OWNER (default: ubuntu:ubuntu).
+# Containing directory /run/agent-stack needs to allow the same user
+# to enter it; tmpfiles.d config in this PR sets 0750 root:ubuntu.
+RENDER_OUTPUT_OWNER="${RENDER_OUTPUT_OWNER:-ubuntu:ubuntu}"
 chmod 0400 "$tmp"
-chown root:root "$tmp" 2>/dev/null || {
-  # Non-root invocation: skip chown, log a note, continue. The file is
-  # still 0400; only the owning user can read it.
-  echo "render-vps-env.sh: warning: chown root:root failed (not running as root?); leaving file owned by $(id -un)" >&2
+chown "$RENDER_OUTPUT_OWNER" "$tmp" 2>/dev/null || {
+  # Chown failure (likely: not running as root, or owner doesn't exist).
+  # Fail loud rather than leave permissions in an unexpected state.
+  fail "chown $RENDER_OUTPUT_OWNER failed on $tmp; refusing to install with wrong ownership"
 }
 
 # Atomic mv on the same filesystem (tmp is in $runtime_dir, target is
