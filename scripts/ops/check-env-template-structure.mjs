@@ -165,6 +165,26 @@ for (const { runtime, path: relPath } of TEMPLATES) {
     } else if (value.length > 0) {
       // Literal non-empty value — that's fine for config, but be loud
       // about anything that looks like a secret slipped in.
+
+      // *_JSON= keys MUST parse as valid JSON. This catches the class
+      // of bug where someone copy-pastes the shell-escaped form
+      // `[{\"symbol\":\"USDC\"}]` into the template — that round-trips
+      // fine through `set -a; . file` but breaks docker-compose's
+      // env_file: parser, which takes the value literally. We saw
+      // exactly this outage on 2026-05-12 when SUPPORTED_ASSETS_JSON
+      // had backslash-escaped quotes from `quote_env_value`'s shell
+      // format leaking into the template via a copy-paste from
+      // /srv/agent-stack/backend.env. The backend fails to start at
+      // `parseAssetsJson` in src/blockchain/config.js with no
+      // hard-to-diagnose 502s downstream. CI catching it on the PR
+      // would have saved a production outage.
+      if (varName.endsWith('_JSON')) {
+        try {
+          JSON.parse(value);
+        } catch (e) {
+          err(relPath, lineNo, `${varName}: value is not valid JSON (docker-compose env_file: takes the value literally — backslash-escaped \\" form will crash the backend at bootstrap): ${e.message}`);
+        }
+      }
     }
   }
 }
