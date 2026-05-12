@@ -423,6 +423,99 @@ run_product_proof_worker_loop() {
     run_node_script "$APP_ROOT/scripts/ops/run-hosted-worker-loop.mjs"
 }
 
+# Phase 2 PR 2.4: render runtime env files via 1Password and check parity.
+#
+# At every deploy this function uses scripts/ops/render-vps-env.sh to write
+# /run/agent-stack/{backend,indexer}.env from the in-repo templates, then
+# compares against the legacy /srv/agent-stack/*.env. The compose env_file
+# directive is NOT yet flipped — that's PR 2.5. This step exists to:
+#
+#   1. Prove the render works end-to-end on every deploy (not just the
+#      manual smoke we did in PR 2.3 acceptance).
+#   2. Surface drift between the in-repo template and the live env file
+#      as a workflow `::warning::` annotation before the cutover, so we
+#      catch operator-side edits that diverged from the template.
+#
+# Failure semantics are NON-BLOCKING for this PR. If render fails, log a
+# warning and continue — the existing /srv path is still authoritative.
+# PR 2.5's cutover will flip this to fail-closed once compose uses /run.
+#
+# Uses sudo because:
+#   • /etc/agent-stack/op-*.env is mode 0400 root
+#   • /run/agent-stack/ is mode 0700 root
+#   • the deploy runs as the `ubuntu` user (passwordless sudo expected)
+render_runtime_envs_parity_check() {
+  local render_script="$APP_ROOT/scripts/ops/render-vps-env.sh"
+
+  if [[ ! -x "$render_script" ]]; then
+    echo "Phase 2 PR 2.4: render-vps-env.sh not present, skipping parity render"
+    return 0
+  fi
+
+  if [[ ! -f /etc/agent-stack/op-backend.env ]] || [[ ! -f /etc/agent-stack/op-indexer.env ]]; then
+    echo "Phase 2 PR 2.4: /etc/agent-stack/op-*.env not present, skipping parity render"
+    echo "  (run scripts/ops/install-op-vps.sh and drop the service-account tokens to enable)"
+    return 0
+  fi
+
+  if [[ ! -d /run/agent-stack ]]; then
+    echo "Phase 2 PR 2.4: /run/agent-stack not present, skipping parity render"
+    echo "  (install /etc/tmpfiles.d/agent-stack.conf and run systemd-tmpfiles --create)"
+    return 0
+  fi
+
+  echo "Phase 2 PR 2.4: rendering runtime env files via op inject (parity check, non-blocking)"
+
+  local runtime
+  for runtime in backend indexer; do
+    local template="$APP_ROOT/deploy/${runtime}.env.template"
+    local target="/run/agent-stack/${runtime}.env"
+    local token="/etc/agent-stack/op-${runtime}.env"
+    local legacy="$STACK_ROOT/${runtime}.env"
+
+    if [[ ! -f "$template" ]]; then
+      echo "::warning:: Phase 2 PR 2.4: $template missing, skipping $runtime render"
+      continue
+    fi
+
+    if ! sudo bash "$render_script" "$template" "$target" "$token"; then
+      echo "::warning:: Phase 2 PR 2.4: render of $runtime failed (non-blocking; compose still uses $legacy)"
+      continue
+    fi
+
+    if [[ ! -f "$legacy" ]]; then
+      echo "Phase 2 PR 2.4: $legacy missing — nothing to compare against for $runtime"
+      continue
+    fi
+
+    # Parity check: compare the rendered output to a deduplicated last-wins
+    # view of the legacy file. The legacy file has known duplicate-key
+    # entries (operators appended sections without dedup); Docker Compose
+    # uses last-wins for duplicates, so that's the semantic to compare.
+    #
+    # Run as one `sudo bash -c` so the process-substitutions and the read
+    # of the 0400 /run/*.env file all happen as root.
+    if sudo bash -c "
+      diff_output=\$(diff \
+        <(awk -F= '/^[A-Z][A-Z0-9_]*=/ { val[\$1] = \$0 } END { for (k in val) print val[k] }' '$legacy' | sort) \
+        <(grep -E '^[A-Z][A-Z0-9_]*=' '$target' | sort))
+      if [[ -z \"\$diff_output\" ]]; then
+        echo 'Phase 2 PR 2.4: $runtime parity OK — /run matches /srv (last-wins dedup)'
+        exit 0
+      else
+        line_count=\$(printf '%s\n' \"\$diff_output\" | wc -l | tr -d ' ')
+        echo \"::warning:: Phase 2 PR 2.4: $runtime parity diff — \$line_count line(s) differ between /run/agent-stack/${runtime}.env and /srv/agent-stack/${runtime}.env (last-wins dedup)\"
+        echo \"  This is informational only — compose still reads /srv. Investigate before PR 2.5 flips env_file.\"
+        # Print only KEY names, not values, so secrets never enter the log.
+        printf '%s\n' \"\$diff_output\" | awk -F= '/^[<>] [A-Z]/ { print \"    \" \$1 \"=\" }' | sort -u | head -20
+        exit 0
+      fi
+    "; then
+      :
+    fi
+  done
+}
+
 apply_caddy() {
   if [[ -z "${APP_BASIC_AUTH_USER:-}" ]]; then
     echo "Skipping Caddy render: APP_BASIC_AUTH_USER is not set." >&2
@@ -585,6 +678,11 @@ deploy() {
   apply_indexer_database_schema
   configure_settlement_env
   configure_bootstrap_instrumentation_env
+
+  # Phase 2 PR 2.4: render /run/agent-stack/*.env from 1Password, compare
+  # against the legacy /srv path (last-wins dedup). Non-blocking — compose
+  # still reads /srv. PR 2.5 will flip env_file and make this fail-closed.
+  render_runtime_envs_parity_check
 
   local run_backend=0
   local run_indexer=0
