@@ -719,6 +719,47 @@ unchanged after this PR merges.
 - Delete the legacy `/srv/agent-stack/*.env` files after 24h of
   green deploys
 
+### PR 2.3 acceptance result: zero functional drift (the duplicate-keys
+finding)
+
+The PR 2.3 operator runbook's step 6 (`render-vps-env.sh` on VPS, diff
+`/run/agent-stack/*.env` against `/srv/agent-stack/*.env`) initially
+looked alarming — `sort | diff` reported drift on ~17 KEYs including
+`GITHUB_INGEST_DRY_RUN`, `GITHUB_INGEST_MIN_SCORE`, several `OSV_INGEST_*`
+and `OPEN_DATA_INGEST_*` keys, and notably a `GITHUB_TOKEN` placeholder.
+
+**Root cause**: the live `/srv/agent-stack/backend.env` had **duplicate
+`KEY=value` entries**. `sort | diff` listed each occurrence
+independently, so a key like `GITHUB_INGEST_DRY_RUN=true` followed later
+by `GITHUB_INGEST_DRY_RUN=false` looked like two unrelated differences.
+Docker Compose's `env_file:` (and bash `source`) use **last-wins**
+semantics for duplicate keys, so the backend has actually been running
+with the second occurrence's value all along — which matches the
+template's value byte-for-byte.
+
+Verified with `scripts/ops/refresh-env-template.mjs --snapshot
+~/secrets-tmp/backend.env --template deploy/backend.env.template`:
+"refreshed: 0, in sync: 71" for backend; "refreshed: 0, in sync: 11"
+for indexer. The template is already functionally correct.
+
+The duplicates also include a `GITHUB_TOKEN` placeholder line
+(`GITHUB_TOKEN=your_real_github_token`) followed by a real PAT
+(`GITHUB_TOKEN=github_pat_...`). The real PAT wins (last-defined),
+and byte-matches the value stored at
+`op://prod-backend-external/github-pat-issue-ingestion/password`.
+
+**Implication for PR 2.4 cutover**: switching from
+`/srv/agent-stack/*.env` to `/run/agent-stack/*.env` produces the same
+runtime values the backend was already consuming. As a bonus side
+effect, the cutover eliminates the duplicate-key spaghetti — the
+rendered template has no duplicates by construction.
+
+`scripts/ops/refresh-env-template.mjs` (new in this PR) is the tool
+for future template ↔ live drift reconciliation. It updates literal
+KEY=value lines from a snapshot, preserves `op://` references, and
+refuses to overwrite an op-reference with a secret-shaped literal
+from the snapshot.
+
 ### PR 2.4 — Cleanup AND rotation
 
 **Touches**: `.github/workflows/deploy-production.yml`, VPS env files,
