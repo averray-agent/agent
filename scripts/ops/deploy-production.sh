@@ -426,16 +426,50 @@ run_product_proof_worker_loop() {
 apply_caddy() {
   if [[ -z "${APP_BASIC_AUTH_USER:-}" ]]; then
     echo "Skipping Caddy render: APP_BASIC_AUTH_USER is not set." >&2
-    echo "Set APP_BASIC_AUTH_USER plus APP_BASIC_AUTH_PASSWORD or APP_BASIC_AUTH_PASSWORD_HASH to deploy Caddy changes." >&2
+    echo "Set APP_BASIC_AUTH_USER plus APP_BASIC_AUTH_PASSWORD_HASH to deploy Caddy changes." >&2
     return 0
   fi
 
-  if [[ -z "${APP_BASIC_AUTH_PASSWORD:-}" && -z "${APP_BASIC_AUTH_PASSWORD_HASH:-}" ]]; then
-    echo "Skipping Caddy render: no app basic-auth password/hash set." >&2
+  if [[ -z "${APP_BASIC_AUTH_PASSWORD_HASH:-}" ]]; then
+    echo "Skipping Caddy render: APP_BASIC_AUTH_PASSWORD_HASH is not set." >&2
+    echo "PR 2.2 removed the raw-password code path; pass the bcrypt hash only." >&2
     return 0
   fi
 
-  "$APP_ROOT/scripts/ops/render-caddyfile.sh" "$STACK_ROOT/Caddyfile"
+  # Render the new Caddyfile atomically: write to a tmp file alongside
+  # the target, validate via `caddy validate` inside the running caddy
+  # container, then move into place. If validate fails, the live
+  # Caddyfile is untouched and the deploy aborts.
+  local rendered_tmp
+  rendered_tmp=$(mktemp "$STACK_ROOT/Caddyfile.XXXXXX")
+  trap 'rm -f "$rendered_tmp"' RETURN
+
+  "$APP_ROOT/scripts/ops/render-caddyfile.sh" "$rendered_tmp"
+
+  # caddy validate inside the running caddy container. The container's
+  # Caddyfile path is /etc/caddy/Caddyfile; we mount the rendered tmp
+  # over that path with `-v` for the validate call only. If the
+  # validate fails, caddy returns non-zero and `set -e` aborts the
+  # deploy before we touch the live config.
+  echo "Validating rendered Caddyfile via caddy validate (PR 2.2)..."
+  if ! docker compose \
+        --project-directory "$STACK_ROOT" \
+        -f "$COMPOSE_FILE" \
+        run --rm \
+          -v "$rendered_tmp:/etc/caddy/Caddyfile:ro" \
+          --no-deps \
+          --entrypoint caddy \
+          caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile; then
+    echo "ERROR: caddy validate rejected the rendered Caddyfile; aborting before reload." >&2
+    rm -f "$rendered_tmp"
+    return 1
+  fi
+
+  # Atomic install of the validated Caddyfile.
+  chmod 0644 "$rendered_tmp"
+  mv "$rendered_tmp" "$STACK_ROOT/Caddyfile"
+  trap - RETURN
+
   docker compose \
     --project-directory "$STACK_ROOT" \
     -f "$COMPOSE_FILE" \

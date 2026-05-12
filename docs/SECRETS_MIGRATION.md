@@ -348,40 +348,161 @@ for 24h after each, and is reversible.
 - [ ] `1password/load-secrets-action` is pinned to commit SHA
       `581a835fb51b8e7ec56b71cf2ffddd7e68bb25e0`, not a tag
 
-### PR 2.2 — Caddy basic-auth: hash-only, validated, no plaintext in transit
+### PR 2.2 — Caddy basic-auth: hash-only, validated, no plaintext in CI
 
-**Touches**: `scripts/ops/render-caddyfile.sh`, `deploy/Caddyfile.averray`,
+**Touches**: `scripts/ops/render-caddyfile.sh`,
+`scripts/ops/deploy-production.sh`,
 `.github/workflows/deploy-production.yml`.
 
-- Generate the bcrypt hash with `caddy hash-password` reading the password
-  from **stdin** (no `--plaintext` flag — that places the raw password in
-  shell history and `ps` output). Run in a shell with `set +o history` or
-  in an explicit subshell that doesn't write history.
-- Store the hash at `op://prod-ci/app-basic-auth-password-hash/credential`.
-- **Render the Caddyfile on the VPS via `op inject`** (templated
-  Caddyfile committed to repo; secrets resolved at deploy time). The
-  hash never traverses an SSH heredoc body.
-- Modify `render-caddyfile.sh` to require `APP_BASIC_AUTH_PASSWORD_HASH`
-  and fail loudly if `APP_BASIC_AUTH_PASSWORD` is present — catches
-  accidental fallback to the old plaintext flow.
-- Add `caddy validate --config /etc/caddy/Caddyfile` as a deploy gate
-  before reload.
-- Add smoke verification: `curl -I https://app.averray.com` expects 401;
-  `curl -u user:pass https://app.averray.com/<known-path>` expects 200.
-- Treat the bcrypt hash as a credential verifier (leaked hash enables
-  offline guessing). The underlying raw password MUST be high-entropy
-  random, not human-memorable. If today's password is memorable, **rotate
-  it to a random value during this PR.**
+**Honest scope adjustment from the original plan**: the plan said "render
+Caddyfile on the VPS via `op inject` — hash never traverses an SSH
+heredoc." That requires `op` CLI on the VPS, which is PR 2.3's bootstrap
+work. PR 2.2 lands the things that don't depend on the VPS bootstrap:
+hardening, hash-only flow in CI, deploy-time validation, removal of raw
+password from CI. PR 2.4 will move the render to op-inject-on-VPS after
+PR 2.3 provisions the toolchain.
+
+**Operator setup BEFORE merge** (one-time, on your laptop with
+`op signin` active):
+
+1. Install `caddy` locally so we can generate the bcrypt hash without
+   spinning up a docker container:
+   ```bash
+   brew install caddy
+   ```
+2. Generate the bcrypt hash from the raw password in `prod-critical`
+   and store the new hash + username together as a single
+   `prod-ci/app-basic-auth-hash` item. The raw password never appears
+   on a command line or in shell history.
+   ```bash
+   eval $(op signin)
+
+   set +o history
+   RAW=$(op read 'op://prod-critical/app-basic-auth/password')
+   USER=$(op read 'op://prod-critical/app-basic-auth/username')
+
+   # caddy hash-password reads stdin when --plaintext is omitted.
+   HASH=$(printf '%s' "$RAW" | caddy hash-password --algorithm bcrypt)
+
+   # Sanity-check the hash shape before storing.
+   case "$HASH" in
+     \$2a\$*|\$2b\$*|\$2y\$*) echo "✓ hash shape ok ($(printf '%s' "$HASH" | wc -c | tr -d ' ') chars)" ;;
+     *) echo "✗ hash does not look like bcrypt; abort"; unset RAW USER HASH; return 1 2>/dev/null || exit 1 ;;
+   esac
+
+   op item create --vault=prod-ci --category=password --title=app-basic-auth-hash \
+     "username=$USER" \
+     "credential[concealed]=$HASH" \
+     "notes=Bcrypt hash of raw password from prod-critical/app-basic-auth. Used by Caddy basic-auth on app.averray.com. Different bcrypt salt → different hash each generation; do NOT expect this to byte-match any other hash. Regenerate when raw rotates."
+
+   unset RAW USER HASH
+   set -o history
+   ```
+3. **Verify the new hash actually authenticates against the live Caddy**
+   before merging. This catches drift between `prod-critical/app-basic-auth`
+   and whatever password the legacy GH-secret hash was generated from.
+   ```bash
+   RAW=$(op read 'op://prod-critical/app-basic-auth/password')
+   USER=$(op read 'op://prod-critical/app-basic-auth/username')
+   status=$(curl -sS -o /dev/null -w '%{http_code}' -u "$USER:$RAW" https://app.averray.com/)
+   echo "auth status: $status (expect 200/3xx, NOT 401)"
+   unset RAW USER
+   ```
+   If this returns 401, the password in `prod-critical/app-basic-auth`
+   doesn't match what Caddy currently expects. **DO NOT MERGE** — resolve
+   the drift first (likely by updating `prod-critical/app-basic-auth` to
+   the password your browser autofill remembers).
+
+**Changes in this PR**:
+
+- `scripts/ops/render-caddyfile.sh`: drops the in-script `render_hash()`
+  helper that called `caddy hash-password --plaintext` (the unsafe form
+  that put the raw password in `ps` output). Now **requires** the
+  precomputed bcrypt hash and **rejects** the deploy outright if
+  `APP_BASIC_AUTH_PASSWORD` (raw) is set in the env. Adds a bcrypt
+  shape check (`^\$2[aby]\$`) so a typoed hash is caught before render.
+- `scripts/ops/deploy-production.sh` `apply_caddy()`: renders to a
+  `mktemp` file alongside the target, runs `caddy validate` inside the
+  running caddy container against the rendered file (mounted read-only
+  via `-v`), and only `mv`s into place after validation passes. A
+  failed validate aborts the deploy before touching the live config.
+- `.github/workflows/deploy-production.yml`:
+  - Removes `APP_BASIC_AUTH_PASSWORD` (raw) from the job-level `env:`
+    block and from the SSH heredoc env string. Raw password no longer
+    flows through CI at all.
+  - Extends the PR 2.1 `load-secrets-action` step to also load
+    `APP_BASIC_AUTH_USER_OP` and `APP_BASIC_AUTH_PASSWORD_HASH_OP` from
+    `op://prod-ci/app-basic-auth-hash/...` (parity-style, non-blocking).
+  - Adds a "Verify OP-loaded Caddy basic-auth values" step that asserts:
+    - both OP-loaded values are non-empty
+    - the OP-loaded hash starts with `$2a$` / `$2b$` / `$2y$`
+    - the legacy GH-secret hash also starts with one of those
+    - the OP-loaded username matches the legacy username byte-for-byte
+    Mismatches surface as `::warning::` annotations; the deploy still
+    uses the legacy GH secret values until PR 2.4 swaps the heredoc.
 
 **Acceptance criteria**:
 
-- [ ] Caddyfile contains the bcrypt hash, never a raw password
-- [ ] `caddy validate` passes before reload
-- [ ] Unauthenticated request → 401
-- [ ] Authenticated request → expected 200/redirect
-- [ ] Raw `APP_BASIC_AUTH_PASSWORD` GH Actions secret deleted
-- [ ] No raw or hashed value transits an SSH heredoc body
-- [ ] Underlying raw password is high-entropy random (rotated if it wasn't)
+- [ ] Operator setup complete: `op://prod-ci/app-basic-auth-hash` item
+      exists with `username` and `credential` fields
+- [ ] Manual auth-check curl with `prod-critical/app-basic-auth` raw
+      returns 200/3xx against the live Caddy (proves no drift)
+- [ ] After merge, a manual `workflow_dispatch` deploy succeeds end-to-end
+- [ ] The parity-check step logs `APP_BASIC_AUTH_USER_OP matches legacy
+      secret: yes` (or surfaces a warning if not)
+- [ ] `caddy validate` step in `apply_caddy()` passes before reload
+- [ ] Unauthenticated request to `https://app.averray.com/` returns 401
+      (smoke check at end of deploy)
+- [ ] No raw or hashed value appears in deploy logs
+- [ ] `APP_BASIC_AUTH_PASSWORD` is no longer referenced anywhere in the
+      workflow YAML (verified with `grep`)
+- [ ] (Deferred to PR 2.4 / 2.5) authenticated request → 200 — needs a
+      smoke-side OP token that can read `prod-critical/app-basic-auth`
+      OR a separate `prod-smoke/app-basic-auth` mirror; out of scope for
+      this PR.
+- [ ] (Deferred to PR 2.4) legacy `APP_BASIC_AUTH_PASSWORD` GH Actions
+      secret deleted (24h after this PR ships green deploys)
+- [ ] (Deferred to PR 2.4) `op inject` render of Caddyfile on the VPS,
+      eliminating the SSH-heredoc transport of the hash entirely
+
+### Lessons from PR 2.1 (folded into future PR procedures)
+
+The PR 2.1 acceptance walked into three pitfalls. Documented here so
+future PRs don't repeat them:
+
+1. **`scp` / `ssh` falling back to password auth is a SILENT signal that
+   the key isn't authorized.** When loading SSH keys into 1Password,
+   always verify with
+   `ssh -o BatchMode=yes -o PreferredAuthentications=publickey ...`
+   BEFORE treating the local file as canonical. The PR 2.1 loader
+   trusted `~/.ssh/averray_deploy` based on filename and pushed an
+   unauthorized key into the vault.
+
+2. **`op read | gh secret set` pipes silently overwrite with empty
+   stdin if `op read` errors.** `op` writes the error to stderr, exits
+   non-zero, and produces no stdout. `gh secret set` then dutifully
+   stores an empty value. Always capture into a shell variable first,
+   verify non-empty + minimum length, then `printf '%s' "$VAR" | gh
+   secret set`. Pattern:
+   ```bash
+   KEY=$(op read 'op://...')
+   key_len=$(printf '%s' "$KEY" | wc -c | tr -d ' ')
+   if [ -n "$KEY" ] && [ "$key_len" -gt 100 ]; then
+     printf '%s' "$KEY" | gh secret set NAME -R repo
+   else
+     echo "✗ OP value short/empty — do NOT overwrite GH"
+   fi
+   unset KEY key_len
+   ```
+
+3. **GitHub Actions secrets are write-only.** Once overwritten there's
+   no way to read the previous value. Treat them as fire-and-forget
+   sinks; the canonical value must live in 1Password. PR 2.1 lost the
+   legacy VPS_SSH_KEY because we overwrote it without backup, then
+   discovered the local-file source wasn't authorized.
+
+The `ssh -o BatchMode=yes ...` pre-flight should be added to PR 2.4's
+runbook before any "swap legacy GH secret to OP-loaded value" step.
 
 ### PR 2.3 — VPS: atomic, fail-closed render flow (the cutover)
 

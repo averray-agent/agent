@@ -66,8 +66,9 @@ needed inside GitHub Actions runners.
 
 | Env var                          | `op://` path                                                              | Used in PR | Notes                                                                                                                                  |
 | -------------------------------- | ------------------------------------------------------------------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `VPS_SSH_KEY`                    | `op://prod-ci/vps-ssh-key/private key`                                    | 2.1        | ED25519 private key. The op item also stores host/user/port as fields.                                                                 |
-| `APP_BASIC_AUTH_PASSWORD_HASH`   | `op://prod-ci/app-basic-auth-password-hash/credential`                    | 2.2        | bcrypt hash injected into Caddyfile. Item created in PR 2.2; raw password lives separately in prod-critical (human-only).              |
+| `VPS_SSH_KEY`                    | `op://prod-ci/vps-ssh-key/private key`                                    | 2.1        | ED25519 private key. The op item also stores host/user/port as fields. **Rotated 2026-05-12 during PR 2.1 acceptance** (legacy GH-secret value was lost when an intermediate step overwrote it; recovered by minting a fresh key and installing via password SSH). |
+| `APP_BASIC_AUTH_USER`            | `op://prod-ci/app-basic-auth-hash/username`                               | 2.2        | Basic-auth username for Caddy on app.averray.com. Not strictly a secret but lives with the hash for atomic rotation.                  |
+| `APP_BASIC_AUTH_PASSWORD_HASH`   | `op://prod-ci/app-basic-auth-hash/credential`                             | 2.2        | bcrypt hash injected into Caddyfile. **Raw password lives only in `op://prod-critical/app-basic-auth/password`** (human-only). Different bcrypt salt each generation, so this hash will NOT byte-match any other hash of the same password. Item created during PR 2.2 operator setup. |
 
 ## Smoke-test secrets
 
