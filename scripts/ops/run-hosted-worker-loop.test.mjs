@@ -24,7 +24,7 @@ test("runHostedWorkerLoop creates, claims, submits, verifies, and writes evidenc
     },
     async getAccountSummary() {
       calls.push(["getAccountSummary"]);
-      return accountSummary({ liquidUsdcRaw: 1 });
+      return accountSummary({ liquidUsdcRaw: 100_000 });
     },
     async createJob(payload) {
       calls.push(["createJob", payload]);
@@ -63,13 +63,7 @@ test("runHostedWorkerLoop creates, claims, submits, verifies, and writes evidenc
     env: {
       API_BASE_URL: "https://api.example.test/",
       ADMIN_JWT: "token",
-      PRODUCT_PROOF_EVIDENCE_FILE: evidenceFile,
-      // Pin the reward to the original test value so this test's assertions
-      // (rewardAmount === 0.000001, requiredRaw === "1") remain independent
-      // of DEFAULT_REWARD_AMOUNT. The default was bumped to clear USDC's
-      // existential deposit; this test still exercises the small-reward
-      // configuration path explicitly.
-      PRODUCT_PROOF_REWARD_AMOUNT: "0.000001"
+      PRODUCT_PROOF_EVIDENCE_FILE: evidenceFile
     }
   });
 
@@ -92,7 +86,7 @@ test("runHostedWorkerLoop creates, claims, submits, verifies, and writes evidenc
   ]);
   assert.equal(calls[3][1].verifierMode, "benchmark");
   assert.equal(calls[3][1].rewardAsset, "USDC");
-  assert.equal(calls[3][1].rewardAmount, 0.000001);
+  assert.equal(calls[3][1].rewardAmount, 0.1);
   assert.equal(calls[4][2], `product-proof:${jobId}`);
 
   const written = JSON.parse(await readFile(evidenceFile, "utf8"));
@@ -100,8 +94,10 @@ test("runHostedWorkerLoop creates, claims, submits, verifies, and writes evidenc
   assert.equal(written.sessionId, sessionId);
   assert.equal(written.verificationOutcome, "approved");
   assert.equal(written.settlementReadiness.settlementReady, true);
-  assert.equal(written.liquidityReadiness.requiredRaw, "1");
-  assert.equal(written.liquidityReadiness.availableRaw, "1");
+  assert.equal(written.rewardReadiness.minBalanceRaw, "70000");
+  assert.equal(written.rewardReadiness.rewardRaw, "100000");
+  assert.equal(written.liquidityReadiness.requiredRaw, "100000");
+  assert.equal(written.liquidityReadiness.availableRaw, "100000");
 });
 
 test("runHostedWorkerLoop fails closed without a token", async () => {
@@ -121,7 +117,7 @@ test("runHostedWorkerLoop accepts an explicit positive reward amount", async () 
       return settlementReadyStatus();
     },
     async getAccountSummary() {
-      return accountSummary({ liquidUsdcRaw: 10_000 });
+      return accountSummary({ liquidUsdcRaw: 70_000 });
     },
     async createJob(payload) {
       calls.push(["createJob", payload]);
@@ -153,11 +149,11 @@ test("runHostedWorkerLoop accepts an explicit positive reward amount", async () 
     log: () => {},
     env: {
       ADMIN_JWT: "token",
-      PRODUCT_PROOF_REWARD_AMOUNT: "0.01"
+      PRODUCT_PROOF_REWARD_AMOUNT: "0.07"
     }
   });
 
-  assert.equal(calls[0][1].rewardAmount, 0.01);
+  assert.equal(calls[0][1].rewardAmount, 0.07);
 });
 
 test("runHostedWorkerLoop fails closed before mutation when AgentAccountCore USDC liquidity is missing", async () => {
@@ -185,11 +181,9 @@ test("runHostedWorkerLoop fails closed before mutation when AgentAccountCore USD
       },
       now: () => 1700000000000,
       log: () => {},
-      // Pinning the reward keeps the assertion regex stable across changes
-      // to DEFAULT_REWARD_AMOUNT.
-      env: { ADMIN_JWT: "token", PRODUCT_PROOF_REWARD_AMOUNT: "0.000001" }
+      env: { ADMIN_JWT: "token" }
     }),
-    /requires funded USDC liquidity before mutation; wallet=0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519; account=0x3333333333333333333333333333333333333333; required=0\.000001 USDC \(raw 1\); available=0 USDC \(raw 0\)/u
+    /requires funded USDC liquidity before mutation; wallet=0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519; account=0x3333333333333333333333333333333333333333; required=0\.1 USDC \(raw 100000\); available=0 USDC \(raw 0\)/u
   );
 
   assert.deepEqual(calls.map(([name]) => name), ["getAuthSession", "getAdminStatus", "getAccountSummary"]);
@@ -387,6 +381,7 @@ test("runHostedWorkerLoop rejects unapproved canonical USDC settlement asset", a
                 assetClass: "trust_backed",
                 assetId: 1337,
                 decimals: 6,
+                minBalanceRaw: "70000",
                 approved: false
               }]
             }
@@ -420,6 +415,37 @@ test("runHostedWorkerLoop rejects invalid reward amounts", async () => {
     }),
     /PRODUCT_PROOF_REWARD_AMOUNT must be greater than zero/u
   );
+});
+
+test("runHostedWorkerLoop rejects rewards below the USDC minBalance before mutation", async () => {
+  const calls = [];
+  await assert.rejects(
+    runHostedWorkerLoop({
+      client: {
+        async getAuthSession() {
+          calls.push(["getAuthSession"]);
+          return { wallet: "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519" };
+        },
+        async getAdminStatus() {
+          calls.push(["getAdminStatus"]);
+          return settlementReadyStatus();
+        },
+        async getAccountSummary() {
+          calls.push(["getAccountSummary"]);
+          throw new Error("should not read liquidity after minBalance preflight fails");
+        },
+        async createJob() {
+          calls.push(["createJob"]);
+          throw new Error("should not mutate below asset minBalance");
+        }
+      },
+      env: { ADMIN_JWT: "token", PRODUCT_PROOF_REWARD_AMOUNT: "0.069999" },
+      log: () => {}
+    }),
+    /reward below asset minBalance: asset=USDC \(id=1337\) minBalance=70000 base units \(0\.07 USDC\); reward=0\.069999 USDC = 69999 base units/u
+  );
+
+  assert.deepEqual(calls.map(([name]) => name), ["getAuthSession", "getAdminStatus"]);
 });
 
 function accountSummary({
@@ -461,6 +487,7 @@ function settlementReadyStatus(overrides = {}) {
             assetClass: "trust_backed",
             assetId: 1337,
             decimals: 6,
+            minBalanceRaw: "70000",
             approved: true
           }]
         }

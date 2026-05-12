@@ -15,7 +15,8 @@ const USDC_TRUST_ASSET = {
   address: "0x0000053900000000000000000000000001200000",
   assetClass: "trust_backed",
   assetId: 1337,
-  decimals: 6
+  decimals: 6,
+  minBalanceRaw: "70000"
 };
 
 function gatewayWithDot() {

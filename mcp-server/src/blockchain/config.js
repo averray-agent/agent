@@ -1,4 +1,5 @@
 import { ConfigError } from "../core/errors.js";
+import { knownAssetMinBalanceRaw } from "../core/assets.js";
 import { derivePolkadotHubAssetAddress } from "../services/strategy-asset-config.js";
 
 function parseLegacyAssets(rawAssets) {
@@ -50,6 +51,10 @@ function normalizeAssetEntry(entry, idx) {
     entry.foreignAssetIndex,
     `SUPPORTED_ASSETS_JSON[${idx}].foreignAssetIndex`
   );
+  const configuredMinBalanceRaw = normalizeOptionalRawAmount(
+    entry.minBalanceRaw,
+    `SUPPORTED_ASSETS_JSON[${idx}].minBalanceRaw`
+  );
   const address = entry.address === undefined
     ? undefined
     : normalizeAddress(entry.address, `SUPPORTED_ASSETS_JSON[${idx}].address`);
@@ -87,6 +92,8 @@ function normalizeAssetEntry(entry, idx) {
   if (assetId !== undefined) normalized.assetId = assetId;
   if (foreignAssetIndex !== undefined) normalized.foreignAssetIndex = foreignAssetIndex;
   if (xcmLocation !== undefined) normalized.xcmLocation = xcmLocation;
+  const minBalanceRaw = configuredMinBalanceRaw ?? knownAssetMinBalanceRaw(normalized);
+  if (minBalanceRaw !== undefined) normalized.minBalanceRaw = minBalanceRaw;
   return normalized;
 }
 
@@ -138,6 +145,17 @@ function normalizeAddress(raw, label) {
     throw new ConfigError(`${label} must be a 0x + 20-byte EVM address.`);
   }
   return raw.toLowerCase();
+}
+
+function normalizeOptionalRawAmount(raw, label) {
+  if (raw === undefined || raw === null || raw === "") {
+    return undefined;
+  }
+  const value = typeof raw === "bigint" ? raw.toString() : String(raw).trim();
+  if (!/^\d+$/u.test(value)) {
+    throw new ConfigError(`${label} must be a non-negative integer string in base units.`);
+  }
+  return value;
 }
 
 function normalizeOptionalXcmLocation(raw, idx) {

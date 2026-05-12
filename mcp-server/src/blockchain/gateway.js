@@ -44,7 +44,7 @@ function summarizeSupportedAssets(assets = []) {
 }
 
 function summarizeSupportedAsset(asset) {
-  return {
+  const summary = {
     symbol: asset.symbol,
     address: asset.address,
     assetClass: asset.assetClass ?? "custom",
@@ -52,6 +52,10 @@ function summarizeSupportedAsset(asset) {
     foreignAssetIndex: asset.foreignAssetIndex,
     decimals: asset.decimals
   };
+  if (asset.minBalanceRaw !== undefined) {
+    summary.minBalanceRaw = asset.minBalanceRaw;
+  }
+  return summary;
 }
 
 function canAutoMintAsset(asset) {

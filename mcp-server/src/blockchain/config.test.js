@@ -55,7 +55,8 @@ test("loadBlockchainConfig accepts explicit SUPPORTED_ASSETS_JSON metadata", () 
         symbol: "USDt",
         assetClass: "trust_backed",
         assetId: 1984,
-        decimals: 6
+        decimals: 6,
+        minBalanceRaw: "123"
       },
       {
         symbol: "vDOT",
@@ -74,6 +75,7 @@ test("loadBlockchainConfig accepts explicit SUPPORTED_ASSETS_JSON metadata", () 
       assetClass: "trust_backed",
       assetId: 1984,
       decimals: 6,
+      minBalanceRaw: "123",
       address: "0x000007c000000000000000000000000001200000"
     },
     {
@@ -108,9 +110,31 @@ test("loadBlockchainConfig prefers SUPPORTED_ASSETS_JSON when both config format
       assetClass: "trust_backed",
       assetId: 1337,
       decimals: 6,
+      minBalanceRaw: "70000",
       address: "0x0000053900000000000000000000000001200000"
     }
   ]);
+});
+
+test("loadBlockchainConfig rejects invalid minBalanceRaw metadata", () => {
+  assert.throws(
+    () =>
+      loadBlockchainConfig({
+        ...baseEnv,
+        RPC_URL: "https://legacy.example",
+        SUPPORTED_ASSETS: "",
+        SUPPORTED_ASSETS_JSON: JSON.stringify([
+          {
+            symbol: "USDC",
+            assetClass: "trust_backed",
+            assetId: 1337,
+            decimals: 6,
+            minBalanceRaw: "0.07"
+          }
+        ])
+      }),
+    /SUPPORTED_ASSETS_JSON\[0\]\.minBalanceRaw must be a non-negative integer string in base units/u
+  );
 });
 
 test("loadBlockchainConfig rejects mismatched derived addresses in SUPPORTED_ASSETS_JSON", () => {
