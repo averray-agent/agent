@@ -754,13 +754,102 @@ runtime values the backend was already consuming. As a bonus side
 effect, the cutover eliminates the duplicate-key spaghetti — the
 rendered template has no duplicates by construction.
 
-`scripts/ops/refresh-env-template.mjs` (new in this PR) is the tool
-for future template ↔ live drift reconciliation. It updates literal
-KEY=value lines from a snapshot, preserves `op://` references, and
-refuses to overwrite an op-reference with a secret-shaped literal
-from the snapshot.
+`scripts/ops/refresh-env-template.mjs` is the tool for future template
+↔ live drift reconciliation. It updates literal KEY=value lines from
+a snapshot, preserves `op://` references, and refuses to overwrite an
+op-reference with a secret-shaped literal from the snapshot.
 
-### PR 2.4 — Cleanup AND rotation
+### PR 2.4 — Wire `render-vps-env.sh` into the deploy (parity check, non-blocking)
+
+**Touches**: `scripts/ops/deploy-production.sh`.
+
+After PR 2.3 surfaced that the live `/srv/agent-stack/*.env` had
+duplicate `KEY=value` entries (last-wins semantics quietly producing
+the template's values), the cutover is safe. This PR plumbs
+`render-vps-env.sh` into `deploy-production.sh` so the render runs at
+every deploy as a parity check, BEFORE we flip compose to actually
+consume the rendered files (PR 2.5).
+
+**New function in deploy-production.sh**: `render_runtime_envs_parity_check()`
+
+For each runtime (`backend`, `indexer`):
+
+1. Skip cleanly if `render-vps-env.sh`, the `/etc/agent-stack/op-*.env`
+   token file, or `/run/agent-stack/` is missing — the deploy continues
+   on the legacy path.
+2. Invoke `sudo bash render-vps-env.sh <template> /run/agent-stack/X.env
+   /etc/agent-stack/op-X.env`. On failure, log a `::warning::` and
+   move on (non-blocking).
+3. Compare the rendered output to a **last-wins-deduplicated** view of
+   the legacy `/srv/agent-stack/X.env`. The dedup is critical: the
+   legacy file's known duplicates would otherwise produce noise. An awk
+   one-liner stores the LAST value per key, then `diff` against the
+   rendered file (which has no duplicates by construction).
+4. On mismatch, log the differing KEY NAMES only (never values) as a
+   `::warning::` annotation visible in the deploy log.
+
+**Failure semantics**: this entire step is **non-blocking** for the
+duration of PR 2.4 / 2.5. The compose `env_file:` still points at
+`/srv/agent-stack/*.env`, so a render failure or a parity mismatch is
+informational, not breaking. PR 2.5 (compose flip) will make render
+failure fail-closed once the runtime depends on it.
+
+**Operator prerequisite**: passwordless sudo for the `ubuntu` user (the
+SSH user that runs `deploy-production.sh`). This is already the case on
+our VPS — confirmed during PR 2.3 acceptance when manual `sudo bash`
+invocations of `render-vps-env.sh` ran without prompting.
+
+**Acceptance criteria**:
+
+- [ ] Manual deploy after merge logs:
+      `Phase 2 PR 2.4: rendering runtime env files via op inject (parity check, non-blocking)`
+- [ ] For both runtimes, log line:
+      `Phase 2 PR 2.4: <runtime> parity OK — /run matches /srv (last-wins dedup)`
+- [ ] `/run/agent-stack/backend.env` and `/run/agent-stack/indexer.env`
+      exist after the deploy with mode `0400 root:root`
+- [ ] No rendered secret values appear in the deploy log (only KEY
+      names on mismatch)
+- [ ] Backend and indexer containers remain healthy (they continue
+      reading from `/srv/agent-stack/*.env` — runtime unchanged)
+
+After 2-3 green parity-check deploys, the next PR (2.5) flips compose.
+
+### PR 2.5 — Compose `env_file:` cutover (the actual switch)
+
+**Touches**: `docker-compose.yml` on the VPS (NOT in repo).
+`scripts/ops/deploy-production.sh` (make render fail-closed).
+
+The cutover. After PR 2.4's parity-check has been green for several
+deploys, this PR:
+
+1. Audits `docker-compose.yml` on the VPS for any `environment:` keys
+   that duplicate `env_file:` variables — Compose's `environment:`
+   wins, and a duplicate there would silently defeat the migration.
+2. Flips `env_file:` from `/srv/agent-stack/{backend,indexer}.env` to
+   `/run/agent-stack/{backend,indexer}.env`.
+3. Updates `render_runtime_envs_parity_check()` to make render failure
+   **fail-closed** (abort deploy) — keeps the function name and call
+   site, just changes the semantics.
+4. Backend + indexer containers restart and consume `/run/*.env` from
+   here on.
+
+The legacy `/srv/agent-stack/*.env` files stay on disk for 24h as a
+manual rollback option (operator edits `env_file:` back to `/srv/`).
+PR 2.6 (the original PR-2.4 cleanup) deletes them after that window.
+
+**Acceptance criteria**:
+
+- [ ] `docker compose config` on VPS shows no `environment:` overrides
+      of `env_file:` keys
+- [ ] After cutover deploy, `docker inspect agent-backend | grep -A20
+      Env` contains the values from `/run/agent-stack/backend.env`
+- [ ] A test deploy with an intentionally-broken template (e.g. remove
+      one entry from `prod-backend` in 1Password) causes the deploy to
+      abort BEFORE backend container restart — fail-closed confirmed
+- [ ] Operator-side runbook for the manual rollback (edit `env_file:`
+      back to `/srv/`) is documented
+
+### PR 2.6 — Cleanup AND rotation
 
 **Touches**: `.github/workflows/deploy-production.yml`, VPS env files,
 `SECRETS_CALENDAR.yml`.
