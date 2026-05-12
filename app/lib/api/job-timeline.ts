@@ -80,6 +80,14 @@ export interface TimelineSummary {
   derivativeJobCount: number;
   eventCount: number;
   eventBusGap: boolean;
+  eventFilters: {
+    topics: string[];
+    sources: string[];
+    phases: string[];
+    severities: string[];
+    correlationId: string | null;
+    wallet: string | null;
+  };
   latestSessionStatus: string | null;
 }
 
@@ -115,6 +123,14 @@ export const EMPTY_JOB_TIMELINE: JobTimeline = {
     derivativeJobCount: 0,
     eventCount: 0,
     eventBusGap: false,
+    eventFilters: {
+      topics: [],
+      sources: [],
+      phases: [],
+      severities: [],
+      correlationId: null,
+      wallet: null,
+    },
     latestSessionStatus: null,
   },
   timeline: [],
@@ -149,11 +165,24 @@ export function buildJobTimeline(payload: unknown): JobTimeline {
       derivativeJobCount: nonNegInt(summary.derivativeJobCount),
       eventCount: nonNegInt(summary.eventCount),
       eventBusGap: Boolean(summary.eventBusGap),
+      eventFilters: buildEventFilters(summary.eventFilters),
       latestSessionStatus: text(summary.latestSessionStatus) || null,
     },
     timeline: timelineRaw
       .map(buildTimelineEntry)
       .filter((entry): entry is TimelineEntry => entry !== null),
+  };
+}
+
+function buildEventFilters(value: unknown): TimelineSummary["eventFilters"] {
+  const record = asRecord(value) ?? {};
+  return {
+    topics: stringArray(record.topics),
+    sources: stringArray(record.sources),
+    phases: stringArray(record.phases),
+    severities: stringArray(record.severities),
+    correlationId: text(record.correlationId) || null,
+    wallet: text(record.wallet) || null,
   };
 }
 

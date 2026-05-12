@@ -1,10 +1,13 @@
 const DEFAULT_EVENT_BUFFER_SIZE = 500;
 
 export class EventBus {
-  constructor({ bufferSize = DEFAULT_EVENT_BUFFER_SIZE } = {}) {
+  constructor({ bufferSize = DEFAULT_EVENT_BUFFER_SIZE, eventStore = undefined, logger = console } = {}) {
     this.bufferSize = bufferSize;
+    this.eventStore = eventStore;
+    this.logger = logger;
     this.buffer = [];
     this.subscribers = new Set();
+    this.persistQueue = Promise.resolve();
   }
 
   subscribe(filter, handler) {
@@ -24,6 +27,7 @@ export class EventBus {
     if (this.buffer.length > this.bufferSize) {
       this.buffer.shift();
     }
+    this.queuePersist(normalized);
 
     for (const subscription of this.subscribers) {
       if (matchesFilter(normalized, subscription.filter)) {
@@ -32,6 +36,26 @@ export class EventBus {
     }
 
     return normalized;
+  }
+
+  queuePersist(event) {
+    if (!this.eventStore?.appendEventLog) {
+      return;
+    }
+
+    this.persistQueue = this.persistQueue
+      .catch(() => undefined)
+      .then(() => this.eventStore.appendEventLog(event))
+      .catch((error) => {
+        this.logger?.warn?.(
+          { eventId: event.id, topic: event.topic, error: error?.message ?? String(error) },
+          "event_bus.persist_failed"
+        );
+      });
+  }
+
+  async flush() {
+    await this.persistQueue;
   }
 
   replay(filter = {}, lastEventId = undefined) {
@@ -56,6 +80,32 @@ export class EventBus {
       gap: false
     };
   }
+
+  async replayDurable(filter = {}, lastEventId = undefined, { limit = this.bufferSize } = {}) {
+    const normalizedFilter = normalizeFilter(filter);
+    if (!this.eventStore?.listEventLog) {
+      return this.replay(normalizedFilter, lastEventId);
+    }
+
+    const stored = await this.eventStore.listEventLog({
+      ...normalizedFilter,
+      lastEventId,
+      limit
+    });
+    const live = this.replay(normalizedFilter, lastEventId);
+    const byId = new Map();
+    for (const event of [...(stored.events ?? []), ...live.events]) {
+      byId.set(event.id, event);
+    }
+    const events = [...byId.values()]
+      .sort((left, right) => String(left.timestamp ?? "").localeCompare(String(right.timestamp ?? "")))
+      .slice(-Math.max(limit, 0));
+
+    return {
+      events,
+      gap: Boolean(stored.gap)
+    };
+  }
 }
 
 function normalizeFilter(filter = {}) {
@@ -63,7 +113,11 @@ function normalizeFilter(filter = {}) {
     wallet: filter.wallet?.trim() || undefined,
     jobId: filter.jobId?.trim() || undefined,
     sessionId: filter.sessionId?.trim() || undefined,
-    topics: normalizeTopics(filter.topics)
+    correlationId: filter.correlationId?.trim() || undefined,
+    topics: normalizeTopics(filter.topics ?? filter.topic),
+    sources: normalizeTopics(filter.sources ?? filter.source),
+    phases: normalizeTopics(filter.phases ?? filter.phase),
+    severities: normalizeTopics(filter.severities ?? filter.severity)
   };
 }
 
@@ -77,9 +131,10 @@ function normalizeEvent(event) {
   );
   const jobId = normalizeText(event.jobId);
   const sessionId = normalizeText(event.sessionId);
+  const timestamp = normalizeText(event.timestamp) || new Date().toISOString();
 
   return {
-    id: normalizeText(event.id) || undefined,
+    id: normalizeText(event.id) || `event-${Date.parse(timestamp) || Date.now()}-${nextEventSequence()}`,
     topic,
     type: normalizeText(event.type) || "event_bus",
     source: normalizeText(event.source) || taxonomy.source,
@@ -92,7 +147,7 @@ function normalizeEvent(event) {
     sessionId: sessionId || undefined,
     blockNumber: event.blockNumber ?? null,
     txHash: event.txHash ?? null,
-    timestamp: event.timestamp ?? new Date().toISOString(),
+    timestamp,
     data: event.data ?? {}
   };
 }
@@ -249,11 +304,30 @@ export function matchesFilter(event, filter = {}) {
     return false;
   }
 
+  const sources = normalizeTopics(filter.sources);
+  if (sources.length && !sources.includes(event.source)) {
+    return false;
+  }
+
+  const phases = normalizeTopics(filter.phases);
+  if (phases.length && !phases.includes(event.phase)) {
+    return false;
+  }
+
+  const severities = normalizeTopics(filter.severities);
+  if (severities.length && !severities.includes(event.severity)) {
+    return false;
+  }
+
   if (filter.jobId && event.jobId !== filter.jobId) {
     return false;
   }
 
   if (filter.sessionId && event.sessionId !== filter.sessionId) {
+    return false;
+  }
+
+  if (filter.correlationId && event.correlationId !== filter.correlationId) {
     return false;
   }
 
@@ -265,4 +339,11 @@ export function matchesFilter(event, filter = {}) {
   }
 
   return true;
+}
+
+let eventSequence = 0;
+
+function nextEventSequence() {
+  eventSequence = (eventSequence + 1) % Number.MAX_SAFE_INTEGER;
+  return eventSequence;
 }

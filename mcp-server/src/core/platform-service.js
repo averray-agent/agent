@@ -660,7 +660,17 @@ export class PlatformService {
     };
   }
 
-  async getJobTimeline(jobId, { wallet = undefined, now = new Date(), limit = 100 } = {}) {
+  async getJobTimeline(jobId, {
+    wallet = undefined,
+    now = new Date(),
+    limit = 100,
+    topics = undefined,
+    sources = undefined,
+    phases = undefined,
+    severities = undefined,
+    correlationId = undefined,
+    eventWallet = undefined
+  } = {}) {
     const baseJob = this.jobCatalogService.getJobDefinition(jobId);
     const [job, sessions] = await Promise.all([
       this.attachClaimState(baseJob, { wallet, now }),
@@ -690,7 +700,10 @@ export class PlatformService {
     const parentSession = job.parentSessionId
       ? await this.stateStore.getSession?.(job.parentSessionId)
       : undefined;
-    const eventBusReplay = this.eventBus?.replay?.({ jobId }, undefined) ?? { events: [], gap: false };
+    const eventFilter = { jobId, wallet: eventWallet, topics, sources, phases, severities, correlationId };
+    const eventBusReplay = this.eventBus?.replayDurable
+      ? await this.eventBus.replayDurable(eventFilter, undefined, { limit })
+      : (this.eventBus?.replay?.(eventFilter, undefined) ?? { events: [], gap: false });
 
     const sessionEvents = sessions.flatMap((session) => buildSessionTimelineEntries(session));
     const verificationEvents = sessions
@@ -747,6 +760,14 @@ export class PlatformService {
         derivativeJobCount: derivativeJobs.length,
         eventCount: timeline.length,
         eventBusGap: Boolean(eventBusReplay.gap),
+        eventFilters: {
+          topics: topics ?? [],
+          sources: sources ?? [],
+          phases: phases ?? [],
+          severities: severities ?? [],
+          correlationId: correlationId ?? null,
+          wallet: eventWallet ?? null
+        },
         latestSessionStatus: sessions[0]?.status ?? null
       },
       timeline

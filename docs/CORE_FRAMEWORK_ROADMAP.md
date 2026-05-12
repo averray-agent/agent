@@ -281,16 +281,21 @@ emit into it with the same topic taxonomy.
 - timeline entries use one canonical envelope with `id`, `type`, `at`,
   `timestamp`, `correlationId`, `phase`, `source`, `topic`, `severity`,
   direct `jobId` / `sessionId` / `wallet` fields, and compact `data`
+- event-bus entries are persisted through the state store in both memory and
+  Redis modes, so `/events` replay and `/admin/jobs/timeline` can recover
+  recent event traces after a process restart
+- `/events` and `/admin/jobs/timeline` accept source, topic, phase, severity,
+  and correlation-id filters; the frontend client hook can pass the same filter
+  shape through to the backend
 - recurring template fire history is reconstructed through derivative jobs,
   and sub-job lineage is reconstructed through `parentSessionId`
 
 ### Remaining gaps
 
 - not every producer emits a canonical topic and payload shape yet
-- event-bus replay is still in-memory, so long-term history is reconstructed
-  mostly from state snapshots
 - funding and settlement state are not fully folded into the same timeline
-- operator UI still needs richer timeline filtering and source labels
+- operator UI still needs visible timeline filter controls for source, topic,
+  wallet, and correlation id
 
 ### Improve to
 
@@ -302,10 +307,9 @@ emit into it with the same topic taxonomy.
 ### Concrete next changes
 
 - standardize the remaining platform event topics and payload shapes
-- persist the event log or extend state snapshots where replay windows are too
-  short for audits
 - merge funding, settlement, and dispute state into the same job/session trace
-- expose UI/SDK filters for source, topic, wallet, and correlation id
+- expose visible operator controls for source, topic, wallet, and correlation-id
+  filters
 
 ### What this unlocks
 

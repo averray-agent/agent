@@ -1,5 +1,8 @@
 import { createClient } from "redis";
 import { ExternalServiceError } from "./errors.js";
+import { matchesFilter } from "./event-bus.js";
+
+const DEFAULT_EVENT_LOG_RETENTION = 5_000;
 
 const RELEASE_CLAIM_LOCK_SCRIPT = `
 if redis.call("get", KEYS[1]) == ARGV[1] then
@@ -47,6 +50,7 @@ export class MemoryStateStore {
     this.content = new Map();
     this.fundedJobs = new Map();
     this.capabilityGrants = new Map();
+    this.eventLog = [];
   }
 
   async getSession(sessionId) {
@@ -254,6 +258,22 @@ export class MemoryStateStore {
       .filter((entry) => !entry.processed)
       .sort((left, right) => String(left.observedAt ?? "").localeCompare(String(right.observedAt ?? "")))
       .slice(0, Math.max(limit, 0));
+  }
+
+  async appendEventLog(event) {
+    const existingIndex = this.eventLog.findIndex((entry) => entry.id === event.id);
+    if (existingIndex >= 0) {
+      this.eventLog.splice(existingIndex, 1);
+    }
+    this.eventLog.push(event);
+    if (this.eventLog.length > DEFAULT_EVENT_LOG_RETENTION) {
+      this.eventLog.splice(0, this.eventLog.length - DEFAULT_EVENT_LOG_RETENTION);
+    }
+    return event;
+  }
+
+  async listEventLog(filter = {}) {
+    return listEventLogFromRecords(this.eventLog, filter);
   }
 
   async markXcmObservationProcessed(requestId, result = undefined) {
@@ -608,6 +628,33 @@ export class RedisStateStore {
     return entries.filter((entry) => entry && !entry.processed);
   }
 
+  async appendEventLog(event) {
+    await this.connect();
+    const id = String(event?.id ?? "");
+    if (!id) return event;
+    const score = Date.parse(event?.timestamp ?? "") || Date.now();
+    const recordKey = this.key("event-log", id);
+    const indexKey = this.key("event-log", "all");
+    await this.client.set(recordKey, JSON.stringify(event));
+    await this.client.zAdd(indexKey, { score, value: id });
+    const staleIds = await this.client.zRange(indexKey, 0, -(DEFAULT_EVENT_LOG_RETENTION + 1));
+    if (staleIds.length > 0) {
+      await this.client.zRem(indexKey, staleIds);
+      await this.client.del(staleIds.map((staleId) => this.key("event-log", staleId)));
+    }
+    return event;
+  }
+
+  async listEventLog(filter = {}) {
+    await this.connect();
+    const ids = await this.client.zRange(this.key("event-log", "all"), 0, -1);
+    const records = await Promise.all(ids.map(async (id) => {
+      const raw = await this.client.get(this.key("event-log", id));
+      return raw ? JSON.parse(raw) : undefined;
+    }));
+    return listEventLogFromRecords(records.filter(Boolean), filter);
+  }
+
   async markXcmObservationProcessed(requestId, result = undefined) {
     await this.connect();
     const current = await this.getXcmObservation(requestId);
@@ -748,6 +795,28 @@ export class RedisStateStore {
   key(kind, id) {
     return `${this.namespace}:${kind}:${id}`;
   }
+}
+
+function listEventLogFromRecords(records, filter = {}) {
+  const limit = normalizeListLimit(filter.limit, 100, 500);
+  const lastEventId = String(filter.lastEventId ?? "").trim();
+  const cursorIndex = lastEventId
+    ? records.findIndex((event) => event.id === lastEventId)
+    : -1;
+  const scoped = cursorIndex >= 0
+    ? records.slice(cursorIndex + 1)
+    : records;
+  const filtered = scoped.filter((event) => matchesFilter(event, filter));
+  return {
+    events: lastEventId ? filtered.slice(0, limit) : filtered.slice(-limit),
+    gap: Boolean(lastEventId && cursorIndex === -1 && records.length > 0)
+  };
+}
+
+function normalizeListLimit(value, fallback, max) {
+  const parsed = Number(value ?? fallback);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.min(Math.trunc(parsed), max);
 }
 
 export function createStateStore(env = process.env, { logger = console } = {}) {
