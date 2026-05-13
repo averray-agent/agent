@@ -526,6 +526,37 @@ apply_caddy() {
     return 1
   fi
 
+  # Phase 2 PR 2.7d.2: content-aware install + restart. Without this
+  # check, the basic-auth-hash rotation that landed in PR 2.7d only
+  # propagated to /run via the OP-injected template render — but
+  # apply_caddy was gated by path-based should_run on Caddyfile.averray
+  # / render-caddyfile.sh and was SKIPPED. The new hash sat in the
+  # workflow env but Caddy kept serving the old hash from disk until
+  # the operator manually re-rendered the Caddyfile on the VPS.
+  #
+  # Now: compare hash of live Caddyfile against hash of the newly
+  # rendered (and validated) tmp file. If they match, the render was
+  # a noop — skip the mv + restart (cheap restart at ~2s, but
+  # skipping is cleaner and surfaces "no change" in logs).
+  # If they differ, install + restart as before.
+  local before_hash=""
+  if [[ -f "$STACK_ROOT/Caddyfile" ]]; then
+    before_hash=$(sha256sum "$STACK_ROOT/Caddyfile" | awk '{print $1}')
+  fi
+  local after_hash
+  after_hash=$(sha256sum "$rendered_tmp" | awk '{print $1}')
+
+  if [[ "$before_hash" == "$after_hash" ]]; then
+    echo "Phase 2 PR 2.7d.2: Caddyfile content unchanged (hash=${before_hash:0:8}) — skipping install + restart"
+    rm -f "$rendered_tmp"
+    trap - RETURN
+    return 0
+  fi
+
+  local before_label="${before_hash:0:8}"
+  [[ -z "$before_hash" ]] && before_label="(none)"
+  echo "Phase 2 PR 2.7d.2: Caddyfile content changed (before=$before_label, after=${after_hash:0:8}) — installing + restarting caddy"
+
   # Atomic install of the validated Caddyfile.
   chmod 0644 "$rendered_tmp"
   mv "$rendered_tmp" "$STACK_ROOT/Caddyfile"
@@ -747,17 +778,28 @@ deploy() {
     fi
   fi
 
-  if should_run caddy "$RUN_CADDY" '^(deploy/Caddyfile\.averray|scripts/ops/render-caddyfile\.sh)'; then
-    run_caddy=1
-    echo "Applying Caddy config"
-    apply_caddy
-    mark_component_deployed caddy
-  else
-    echo "Skipping Caddy config"
-    if [[ "$RUN_CADDY" == "auto" ]]; then
+  # Phase 2 PR 2.7d.2: always run apply_caddy unless explicitly
+  # disabled (RUN_CADDY=0). The old path-based `should_run caddy`
+  # gate missed pure 1Password value changes (basic-auth hash
+  # rotation) because no code file in the repo changed — only the
+  # OP item — and the gate skipped the render entirely. apply_caddy
+  # is now responsible for its own change detection: it always
+  # renders to a tmp file, hash-compares against the live Caddyfile,
+  # and only does mv + restart if the content actually differs.
+  # Cost: an extra render + caddy-validate (~3s) on every deploy,
+  # even when nothing changed. Benefit: rotations don't need a
+  # code-path trigger; the OP value change auto-propagates.
+  case "$RUN_CADDY" in
+    0|false|no)
+      echo "Skipping Caddy (RUN_CADDY=$RUN_CADDY)"
+      ;;
+    *)
+      echo "Applying Caddy config (render → validate → hash-compare → install if changed)"
+      apply_caddy
+      run_caddy=1
       mark_component_deployed caddy
-    fi
-  fi
+      ;;
+  esac
 
   if changed_matches '^(contracts/|script/|foundry\.toml|remappings\.txt)'; then
     echo "Contract-related files changed. Smart contracts still require an explicit contract deployment flow." >&2
