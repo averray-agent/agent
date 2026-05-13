@@ -2623,6 +2623,93 @@ few weeks.
 
 ---
 
+## npm install-script policy
+
+Lifecycle scripts (`preinstall` / `postinstall` / `install`) are the
+primary supply-chain attack vector for npm. Mini Shai-Hulud (Sep
+2026, TanStack chain) and its predecessors (eslint-scope 2018,
+ua-parser-js 2021, color/faker 2022, etc.) all followed the same
+shape: compromise a popular package or one of its transitive deps →
+publish a new version with a malicious preinstall/postinstall →
+wait for downstream `npm ci` to execute the payload with the
+runner's full permissions.
+
+This repo's defense:
+
+1. **Zero lifecycle scripts in our own `package.json`s.** Verified by
+   inspection: root, `app`, `mcp-server`, `sdk`, `marketing`, and
+   `indexer` all have no `preinstall`/`postinstall`/`prepare`/`install`
+   entries. No first-party attack surface.
+
+2. **Explicit allowlist for transitive install-script deps**, at
+   `deploy/npm-install-scripts-allowlist.json`. Every transitive dep
+   that ships `hasInstallScript: true` must appear in this file with
+   a justification. As of PR 2.9 the list is: `esbuild` (x2 — top-level
+   + Astro's bundled), `fsevents`, `sharp`, `sqlite3`, `unrs-resolver`
+   — all legitimate native bindings or platform binary downloads.
+
+3. **CI guard at `scripts/ops/check-npm-install-scripts.mjs`** scans
+   `package-lock.json` on every PR. Fails if:
+   - A new install-script dep appears that's not allowlisted (most
+     common: a transitive bump pulled in a new dep with lifecycle
+     scripts), OR
+   - An allowlisted dep's version differs from the allowlist's pinned
+     version (forces a fresh review on bumps).
+
+4. **`.npmrc` defaults** (`audit=true`, `engine-strict=true`,
+   `package-lock=true`) surface CVEs at install time and reject
+   lockfile drift.
+
+### Adding a new install-script dep
+
+When CI fails with "NEW install-script dep not in allowlist", the
+review procedure is:
+
+1. **Identify the dep**. Read the error — it shows the lockfile path
+   (e.g., `node_modules/some-new-dep`) and version. Find it on npm.
+2. **Verify maintainer + history**. Is this a well-established package
+   from a known organization? Check the publish history for sudden
+   maintainer changes or just-published versions (red flag pattern:
+   stale-looking package suddenly publishes after years of silence).
+3. **Read the install script.** Look at the package source:
+   ```bash
+   npm view <package>@<version> dist.tarball | xargs curl -fsSL | tar -tz | grep -E '(install|preinstall|postinstall)'
+   ```
+   The script content should be legible: native binding compilation,
+   platform-specific binary download to `node_modules/.bin`, etc. Red
+   flags: obfuscated code, network calls to non-package-registry hosts,
+   reads of `process.env.*`, writes outside `node_modules`.
+4. **Why does this dep need its install script?** Native bindings
+   (`sharp`, `sqlite3`, `*-darwin-arm64`, etc.) genuinely need it.
+   "Telemetry" / "analytics" / "telemetry opt-out" install scripts
+   are at best lazy and at worst a vector — strongly prefer
+   alternatives without install scripts.
+5. **If the dep is acceptable**, add an entry to
+   `deploy/npm-install-scripts-allowlist.json` with:
+   - `path`: lockfile package path (copy from the CI error)
+   - `name`: the package name
+   - `reason`: 1-2 sentences explaining why it needs install scripts
+   - `added_at`: today's date (UTC)
+   - `version` (optional): pin to a specific version — recommended
+     for borderline deps; omit for deps you trust unconditionally
+6. **Open a PR** with the lockfile change + allowlist entry in the
+   SAME commit. Reviewer reads the justification.
+
+### Suspecting a supply-chain compromise
+
+If you suspect a dep you currently allowlist has been compromised:
+
+1. Pin the allowlist entry to the **last known-good version**.
+2. Revert `package-lock.json` to that version
+   (`git checkout <good-sha> -- package-lock.json && npm ci`).
+3. Open an issue tracking the affected dep + the disclosure source.
+4. Audit deploy logs for any anomalous network activity from the
+   affected time window.
+5. Rotate every secret that was loaded into CI during the suspect
+   window (Phase 2's rotation runbook applies).
+
+---
+
 ## When something goes wrong
 
 Each phase has its own rollback noted above. For incidents:
