@@ -1136,6 +1136,128 @@ test("http smoke: admin job creation idempotency replays and rejects payload dri
   });
 });
 
+test("http smoke: capability grants reject capabilities the issuer token lacks", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
+    const response = await fetch(`${base}/admin/capability-grants`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({
+        subject: STRANGER_WALLET,
+        capabilities: ["verifier:run"],
+        issuedAt: "2026-05-01T00:00:00.000Z",
+        nonce: "issuer-subset-smoke",
+        idempotencyKey: "issuer-subset-smoke"
+      })
+    });
+    assert.equal(response.status, 403);
+    const body = await response.json();
+    assert.equal(body.error, "grant_capability_not_owned");
+    assert.deepEqual(body.details.missingCapabilities, ["verifier:run"]);
+  });
+});
+
+test("http smoke: capability grant idempotency replays and rejects payload drift", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
+    const headers = { "content-type": "application/json", authorization: `Bearer ${adminToken}` };
+    const payload = {
+      subject: STRANGER_WALLET,
+      capabilities: ["jobs:lifecycle"],
+      scope: "worker-loop-smoke",
+      issuedAt: "2026-05-01T00:00:00.000Z",
+      nonce: "grant-idempotency-smoke",
+      idempotencyKey: "capability-grant-same-key"
+    };
+
+    const create = await fetch(`${base}/admin/capability-grants`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload)
+    });
+    assert.equal(create.status, 201);
+    const grant = await create.json();
+    assert.equal(grant.subject, STRANGER_WALLET.toLowerCase());
+    assert.deepEqual(grant.capabilities, ["jobs:lifecycle"]);
+
+    const replay = await fetch(`${base}/admin/capability-grants`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ capabilities: ["jobs:lifecycle"], ...payload })
+    });
+    assert.equal(replay.status, 200);
+    assert.deepEqual(await replay.json(), grant);
+
+    const drift = await fetch(`${base}/admin/capability-grants`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        ...payload,
+        capabilities: ["policies:propose"]
+      })
+    });
+    assert.equal(drift.status, 409);
+    const body = await drift.json();
+    assert.equal(body.error, "idempotency_key_payload_mismatch");
+    assert.equal(body.details.bucket, "capability_grant");
+  });
+});
+
+test("http smoke: capability revoke idempotency replays and rejects payload drift", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
+    const headers = { "content-type": "application/json", authorization: `Bearer ${adminToken}` };
+    const create = await fetch(`${base}/admin/capability-grants`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        subject: STRANGER_WALLET,
+        capabilities: ["jobs:lifecycle"],
+        scope: "revoke-smoke",
+        issuedAt: "2026-05-01T00:00:00.000Z",
+        nonce: "revoke-idempotency-smoke"
+      })
+    });
+    assert.equal(create.status, 201);
+    const grant = await create.json();
+
+    const revokePayload = {
+      note: "rotated service token",
+      idempotencyKey: "capability-revoke-same-key"
+    };
+    const revoke = await fetch(`${base}/admin/capability-grants/${grant.id}/revoke`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(revokePayload)
+    });
+    assert.equal(revoke.status, 200);
+    const revoked = await revoke.json();
+    assert.equal(revoked.status, "revoked");
+    assert.equal(revoked.revokeNote, "rotated service token");
+
+    const replay = await fetch(`${base}/admin/capability-grants/${grant.id}/revoke`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(revokePayload)
+    });
+    assert.equal(replay.status, 200);
+    assert.deepEqual(await replay.json(), revoked);
+
+    const drift = await fetch(`${base}/admin/capability-grants/${grant.id}/revoke`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        ...revokePayload,
+        note: "different operator note"
+      })
+    });
+    assert.equal(drift.status, 409);
+    const body = await drift.json();
+    assert.equal(body.error, "idempotency_key_payload_mismatch");
+    assert.equal(body.details.bucket, "capability_revoke");
+  });
+});
+
 test("http smoke: admin recurring fire idempotency replays and rejects firedAt drift", { skip: !RUN }, async () => {
   await runWithServer(async (base) => {
     const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });

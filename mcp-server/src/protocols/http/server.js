@@ -1414,6 +1414,25 @@ async function storeIdempotentMutationReceipt({ bucket, key, requestHash, respon
   return response;
 }
 
+function assertIssuerCanGrantCapabilities(grant, auth) {
+  const issuerCapabilities = new Set(Array.isArray(auth?.capabilities) ? auth.capabilities : []);
+  const missingCapabilities = (Array.isArray(grant?.capabilities) ? grant.capabilities : [])
+    .filter((capability) => !issuerCapabilities.has(capability))
+    .sort();
+
+  if (missingCapabilities.length) {
+    throw new AuthorizationError(
+      "Cannot grant capabilities the issuer token does not have.",
+      "grant_capability_not_owned",
+      {
+        grantId: grant?.id,
+        issuerWallet: auth?.wallet,
+        missingCapabilities
+      }
+    );
+  }
+}
+
 function buildLaneAttention({ shares, isMock, debtTotal, borrowCapacity, deploymentShareBps }) {
   if (!(shares > 0)) {
     return undefined;
@@ -3309,26 +3328,36 @@ const server = createServer(async (request, response) => {
       const auth = await authMiddleware(request, url, { requireRole: "admin" });
       await enforceLimit("admin_jobs", auth.wallet, rateLimitConfig.adminJobs);
       const payload = await readJsonBody(request);
-      const idempotencyKey = typeof payload?.idempotencyKey === "string" && payload.idempotencyKey.trim()
-        ? payload.idempotencyKey.trim()
-        : undefined;
+      const idempotencyKey = parseIdempotencyKey(payload);
       const mutationKey = idempotencyKey ? `${auth.wallet}:${idempotencyKey}` : undefined;
-      const existing = mutationKey
-        ? await stateStore.getMutationReceipt?.("capability_grant", mutationKey)
-        : undefined;
-      if (existing) {
-        return respond(response, 200, existing);
+      const requestHash = buildMutationRequestHash({
+        route: "/admin/capability-grants",
+        wallet: auth.wallet,
+        payload
+      });
+      const replay = await getIdempotentMutationReplay({
+        bucket: "capability_grant",
+        key: mutationKey,
+        requestHash
+      });
+      if (replay) {
+        return respond(response, replay.statusCode, replay.body);
       }
       const knownCapabilities = listAllKnownCapabilities();
       const grant = buildCapabilityGrant(payload ?? {}, {
         knownCapabilities,
         issuerWallet: auth.wallet
       });
+      assertIssuerCanGrantCapabilities(grant, auth);
       await stateStore.upsertCapabilityGrant?.(grant);
       const projection = projectGrant(grant);
-      if (mutationKey) {
-        await stateStore.upsertMutationReceipt?.("capability_grant", mutationKey, projection);
-      }
+      await storeIdempotentMutationReceipt({
+        bucket: "capability_grant",
+        key: mutationKey,
+        requestHash,
+        response: projection,
+        statusCode: 201
+      });
       eventBus?.publish({
         id: `capability-grant-${grant.id}-${Date.now()}`,
         topic: "capability.grant",
@@ -3353,15 +3382,20 @@ const server = createServer(async (request, response) => {
         throw new ValidationError("grantId is required.");
       }
       const payload = (await readJsonBody(request).catch(() => undefined)) ?? {};
-      const idempotencyKey = typeof payload?.idempotencyKey === "string" && payload.idempotencyKey.trim()
-        ? payload.idempotencyKey.trim()
-        : undefined;
+      const idempotencyKey = parseIdempotencyKey(payload);
       const mutationKey = idempotencyKey ? `${auth.wallet}:${grantId}:${idempotencyKey}` : undefined;
-      const existing = mutationKey
-        ? await stateStore.getMutationReceipt?.("capability_revoke", mutationKey)
-        : undefined;
-      if (existing) {
-        return respond(response, 200, existing);
+      const requestHash = buildMutationRequestHash({
+        route: "/admin/capability-grants/:id/revoke",
+        wallet: auth.wallet,
+        payload: { grantId, ...payload }
+      });
+      const replay = await getIdempotentMutationReplay({
+        bucket: "capability_revoke",
+        key: mutationKey,
+        requestHash
+      });
+      if (replay) {
+        return respond(response, replay.statusCode, replay.body);
       }
       const current = await stateStore.getCapabilityGrant?.(grantId);
       if (!current) {
@@ -3375,9 +3409,13 @@ const server = createServer(async (request, response) => {
         await stateStore.upsertCapabilityGrant?.(record);
       }
       const projection = projectGrant(record);
-      if (mutationKey) {
-        await stateStore.upsertMutationReceipt?.("capability_revoke", mutationKey, projection);
-      }
+      await storeIdempotentMutationReceipt({
+        bucket: "capability_revoke",
+        key: mutationKey,
+        requestHash,
+        response: projection,
+        statusCode: 200
+      });
       if (!alreadyRevoked) {
         eventBus?.publish({
           id: `capability-revoke-${record.id}-${Date.now()}`,
