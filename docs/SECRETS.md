@@ -279,12 +279,34 @@ openssl rand -hex 32     # 64-char hex string, ≥32 bytes
 Add to 1Password as a new field; do **not** delete the old one yet.
 
 **HMAC rotation**:
-1. Update the 1Password entry: prepend the new secret, keep the
-   old one.
-2. Trigger a redeploy. Backend now signs with new, accepts both.
-3. After 24–48h grace period (allows in-flight tokens to expire
-   naturally), delete the old secret from the 1Password entry.
-4. Trigger a second redeploy. Old tokens now reject.
+
+*Phase A (Day 0)* — add new signer, retain old as tolerated:
+1. `NEW_HEX=$(openssl rand -hex 32)`
+2. `OLD_HEX=$(op read 'op://prod-backend/auth-jwt-secrets/password' | tr -cd '[:xdigit:]' | head -c 64)`
+3. `op item edit auth-jwt-secrets --vault=prod-backend "password=$NEW_HEX,$OLD_HEX"`
+4. `gh workflow run deploy-production.yml` — backend now signs with
+   `$NEW_HEX`, validates both. Phase 2 PR 2.7d.1's env-content-aware
+   force-recreate picks up the new keyring without an SSH touch.
+5. Re-mint `ADMIN_JWT` (it's signed with the FIRST entry, so an
+   un-minted admin token would be rejected after Phase B):
+   ```bash
+   NEW_JWT=$(AUTH_JWT_SECRETS="$NEW_HEX,$OLD_HEX" \
+     node scripts/ops/mint-admin-jwt.mjs --profile testnet \
+     --roles admin,verifier --expires-in-days 30 --quiet)
+   op item edit admin-jwt --vault=prod-smoke "password=$NEW_JWT"
+   ```
+
+*Phase B (Day 1–2, ≥24h after Phase A)* — drop old signer:
+
+```bash
+./scripts/ops/rotate-auth-jwt-secrets-phase-b.sh
+```
+
+The script verifies the 2-entry shape, verifies `ADMIN_JWT` is signed
+by the NEW entry (refuses to run otherwise — would lock out smoke),
+prompts for confirmation, trims the keyring, triggers a deploy, and
+verifies `/health` + `ADMIN_JWT` post-flip. See the script header for
+the full safety analysis.
 
 **Revoke an issued token**:
 - The auth middleware checks `stateStore.isTokenRevoked(jti)`.
