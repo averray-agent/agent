@@ -182,6 +182,44 @@ mark_component_deployed() {
   echo "Recorded $component deploy pointer: $NEW_SHA"
 }
 
+# Phase 2 PR 2.7d.1 follow-up: wait for backend /health to return 200
+# after a force-recreate (the PR 2.7d.1 fast-path that only re-renders
+# /run/agent-stack/backend.env without going through redeploy-backend.sh).
+#
+# Why this exists: when the trigger for backend redeploy is JUST an env
+# content change (no code path changed), deploy-production.sh skips
+# redeploy-backend.sh and does `docker compose up -d --force-recreate
+# backend` inline. That gets the container restarted quickly, but the
+# script then continues straight to `check-hosted-stack.sh`, which
+# probes https://api.averray.com/health. The 14:30Z deploy on 2026-05-13
+# was the canary: smoke check hit /health 1 second after `Container
+# agent-backend Started`, got 502 (backend was still bootstrapping),
+# and the deploy was marked failure even though the recreate succeeded.
+# redeploy-backend.sh has its own wait_for_health for the full-deploy
+# path; this helper mirrors that for the force-recreate fast-path.
+#
+# Returns 0 on health, non-zero (and emits an error) on timeout.
+wait_for_backend_health() {
+  local health_url="${HEALTH_URL:-https://api.averray.com/health}"
+  local timeout="${HEALTH_TIMEOUT_SEC:-60}"
+  local interval="${HEALTH_INTERVAL_SEC:-3}"
+  local deadline=$(( $(date +%s) + timeout ))
+  local attempts=0
+  echo "Phase 2 PR 2.7d.1: waiting for backend health at $health_url (timeout ${timeout}s)"
+  while [[ $(date +%s) -lt $deadline ]]; do
+    attempts=$(( attempts + 1 ))
+    if curl -fsS --max-time 5 "$health_url" >/dev/null 2>&1; then
+      echo "Backend health check passed after ${attempts} attempt(s)."
+      return 0
+    fi
+    sleep "$interval"
+  done
+  echo "ERROR: backend /health did not return 200 within ${timeout}s after force-recreate." >&2
+  echo "       Container recreate likely succeeded but bootstrap is failing." >&2
+  echo "       Check 'sudo docker logs agent-backend --tail 100' on the VPS." >&2
+  return 1
+}
+
 should_run() {
   local component="$1"
   local setting="$2"
@@ -730,6 +768,12 @@ deploy() {
     else
       echo "Deploying backend (reason: /run/agent-stack/backend.env content changed; image unchanged — force-recreating container only)"
       sudo docker compose --project-directory "$STACK_ROOT" -f "$COMPOSE_FILE" up -d --force-recreate backend
+      # Don't continue to downstream smoke checks until /health is 200
+      # — see wait_for_backend_health() comment for the 2026-05-13 14:30Z
+      # incident that motivated this.
+      if ! wait_for_backend_health; then
+        exit 1
+      fi
     fi
     mark_component_deployed backend
   else
