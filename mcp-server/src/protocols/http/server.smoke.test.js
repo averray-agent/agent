@@ -488,6 +488,63 @@ test("http smoke: async XCM routes reject caller-supplied raw message bytes", { 
   );
 });
 
+test("http smoke: admin XCM observation idempotency guards payload drift", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const token = issueToken(ADMIN_WALLET, { roles: ["admin"] });
+    const headers = { "content-type": "application/json", authorization: `Bearer ${token}` };
+    const requestId = `0x${"ab".repeat(32)}`;
+    const payload = {
+      requestId,
+      status: "succeeded",
+      settledAssets: 5,
+      settledShares: 5,
+      remoteRef: `0x${"12".repeat(32)}`,
+      observedAt: "2026-05-14T12:00:00.000Z",
+      idempotencyKey: "observe-same-key"
+    };
+
+    const observe = await fetch(`${base}/admin/xcm/observe`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload)
+    });
+    assert.equal(observe.status, 200);
+    const observed = await observe.json();
+    assert.equal(observed.requestId, requestId);
+
+    const replay = await fetch(`${base}/admin/xcm/observe`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        status: "succeeded",
+        settledAssets: 5,
+        settledShares: 5,
+        remoteRef: `0x${"12".repeat(32)}`,
+        observedAt: "2026-05-14T12:00:00.000Z",
+        requestId,
+        idempotencyKey: "observe-same-key"
+      })
+    });
+    assert.equal(replay.status, 200);
+    assert.deepEqual(await replay.json(), observed);
+
+    const drift = await fetch(`${base}/admin/xcm/observe`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        ...payload,
+        settledAssets: 6
+      })
+    });
+    assert.equal(drift.status, 409);
+    const body = await drift.json();
+    assert.equal(body.error, "idempotency_key_payload_mismatch");
+    assert.equal(body.details.bucket, "admin_xcm_observe");
+    assert.ok(body.details.originalRequestHash);
+    assert.ok(body.details.requestHash);
+  });
+});
+
 test("http smoke: /auth/nonce returns 429 once the window limit is crossed", { skip: !RUN }, async () => {
   await runWithServer(async (base) => {
     const body = JSON.stringify({ wallet: Wallet.createRandom().address });

@@ -156,6 +156,8 @@ What the helper script does:
 
 - reads `/xcm/request` before mutation
 - posts to `/admin/xcm/observe` or `/admin/xcm/finalize`
+- uses an idempotency key; exact same request bodies replay the stored receipt,
+  while same-key payload drift returns `idempotency_key_payload_mismatch`
 - polls `/xcm/request` until terminal when using `observe`
 - optionally writes a JSON report to disk
 

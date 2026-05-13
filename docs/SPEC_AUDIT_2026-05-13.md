@@ -184,7 +184,6 @@ SSH/basic-auth/admin-JWT cutovers, and the basic hosted smoke is green.
 
 ### Idempotency And Mutation Hardening
 
-- Extend canonical request-hash receipts to async XCM admin routes.
 - Add optional ingestion-run idempotency where callers need whole-run replay
   semantics.
 - Reuse the receipt wrapper for future dispute and settlement routes.

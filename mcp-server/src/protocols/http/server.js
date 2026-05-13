@@ -2577,9 +2577,25 @@ const server = createServer(async (request, response) => {
         const mutationKey = options.idempotencyKey
           ? `${auth.wallet}:${strategyId}:${options.idempotencyKey}`
           : undefined;
-        const existing = mutationKey ? await stateStore.getMutationReceipt?.("account_allocate_async", mutationKey) : undefined;
-        if (existing) {
-          return respond(response, 200, existing);
+        const requestHash = buildMutationRequestHash({
+          route: "/account/allocate",
+          wallet: auth.wallet,
+          payload: {
+            ...payload,
+            asset,
+            amount,
+            strategyId,
+            strategyAsset,
+            asyncXcm: stripIdempotencyKey(options)
+          }
+        });
+        const replay = await getIdempotentMutationReplay({
+          bucket: "account_allocate_async",
+          key: mutationKey,
+          requestHash
+        });
+        if (replay) {
+          return respond(response, replay.statusCode, replay.body);
         }
         const nonce = options.nonce ?? (mutationKey ? deriveAsyncNonce(mutationKey) : Date.now());
         const result = await service.allocateIdleFunds(
@@ -2590,9 +2606,13 @@ const server = createServer(async (request, response) => {
           strategy,
           { ...options, nonce }
         );
-        if (mutationKey) {
-          await stateStore.upsertMutationReceipt?.("account_allocate_async", mutationKey, result);
-        }
+        await storeIdempotentMutationReceipt({
+          bucket: "account_allocate_async",
+          key: mutationKey,
+          requestHash,
+          response: result,
+          statusCode: 200
+        });
         return respond(response, 200, result);
       }
       return respond(response, 200, await service.allocateIdleFunds(auth.wallet, asset, amount, strategyId, strategy));
@@ -2618,9 +2638,25 @@ const server = createServer(async (request, response) => {
         const mutationKey = options.idempotencyKey
           ? `${auth.wallet}:${strategyId}:${options.idempotencyKey}`
           : undefined;
-        const existing = mutationKey ? await stateStore.getMutationReceipt?.("account_deallocate_async", mutationKey) : undefined;
-        if (existing) {
-          return respond(response, 200, existing);
+        const requestHash = buildMutationRequestHash({
+          route: "/account/deallocate",
+          wallet: auth.wallet,
+          payload: {
+            ...payload,
+            asset,
+            amount,
+            strategyId,
+            strategyAsset,
+            asyncXcm: stripIdempotencyKey(options)
+          }
+        });
+        const replay = await getIdempotentMutationReplay({
+          bucket: "account_deallocate_async",
+          key: mutationKey,
+          requestHash
+        });
+        if (replay) {
+          return respond(response, replay.statusCode, replay.body);
         }
         const nonce = options.nonce ?? (mutationKey ? deriveAsyncNonce(mutationKey) : Date.now());
         const result = await service.deallocateIdleFunds(
@@ -2631,9 +2667,13 @@ const server = createServer(async (request, response) => {
           strategy,
           { ...options, nonce }
         );
-        if (mutationKey) {
-          await stateStore.upsertMutationReceipt?.("account_deallocate_async", mutationKey, result);
-        }
+        await storeIdempotentMutationReceipt({
+          bucket: "account_deallocate_async",
+          key: mutationKey,
+          requestHash,
+          response: result,
+          statusCode: 200
+        });
         return respond(response, 200, result);
       }
       return respond(response, 200, await service.deallocateIdleFunds(auth.wallet, asset, amount, strategyId, strategy));
@@ -3753,9 +3793,21 @@ const server = createServer(async (request, response) => {
         ? payload.idempotencyKey.trim()
         : undefined;
       const mutationKey = idempotencyKey ? `${auth.wallet}:${requestId}:${idempotencyKey}` : undefined;
-      const existing = mutationKey ? await stateStore.getMutationReceipt?.("admin_xcm_observe", mutationKey) : undefined;
-      if (existing) {
-        return respond(response, 200, existing);
+      const requestHash = buildMutationRequestHash({
+        route: "/admin/xcm/observe",
+        wallet: auth.wallet,
+        payload: {
+          ...payload,
+          requestId
+        }
+      });
+      const replay = await getIdempotentMutationReplay({
+        bucket: "admin_xcm_observe",
+        key: mutationKey,
+        requestHash
+      });
+      if (replay) {
+        return respond(response, replay.statusCode, replay.body);
       }
       const observed = await service.observeXcmOutcome(requestId, {
         status: payload?.status,
@@ -3766,9 +3818,13 @@ const server = createServer(async (request, response) => {
         source: payload?.source ?? "admin_observer",
         observedAt: payload?.observedAt
       });
-      if (mutationKey) {
-        await stateStore.upsertMutationReceipt?.("admin_xcm_observe", mutationKey, observed);
-      }
+      await storeIdempotentMutationReceipt({
+        bucket: "admin_xcm_observe",
+        key: mutationKey,
+        requestHash,
+        response: observed,
+        statusCode: 200
+      });
       return respond(response, 200, observed);
     }
 
@@ -3786,9 +3842,21 @@ const server = createServer(async (request, response) => {
         ? payload.idempotencyKey.trim()
         : undefined;
       const mutationKey = idempotencyKey ? `${auth.wallet}:${requestId}:${idempotencyKey}` : undefined;
-      const existing = mutationKey ? await stateStore.getMutationReceipt?.("admin_xcm_finalize", mutationKey) : undefined;
-      if (existing) {
-        return respond(response, 200, existing);
+      const requestHash = buildMutationRequestHash({
+        route: "/admin/xcm/finalize",
+        wallet: auth.wallet,
+        payload: {
+          ...payload,
+          requestId
+        }
+      });
+      const replay = await getIdempotentMutationReplay({
+        bucket: "admin_xcm_finalize",
+        key: mutationKey,
+        requestHash
+      });
+      if (replay) {
+        return respond(response, replay.statusCode, replay.body);
       }
       const finalized = await service.finalizeXcmRequest(requestId, {
         status: payload?.status,
@@ -3797,9 +3865,13 @@ const server = createServer(async (request, response) => {
         remoteRef: payload?.remoteRef,
         failureCode: payload?.failureCode
       });
-      if (mutationKey) {
-        await stateStore.upsertMutationReceipt?.("admin_xcm_finalize", mutationKey, finalized);
-      }
+      await storeIdempotentMutationReceipt({
+        bucket: "admin_xcm_finalize",
+        key: mutationKey,
+        requestHash,
+        response: finalized,
+        statusCode: 200
+      });
       return respond(response, 200, finalized);
     }
 

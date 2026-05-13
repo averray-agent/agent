@@ -237,23 +237,20 @@ load and automation grow.
 
 - claim idempotency is enforced through session lookup and claim locks
 - `POST /admin/jobs`, `POST /admin/jobs/fire`, recurring pause/resume, and
-  async XCM admin actions can persist mutation receipts in the state store
-- admin job creation, manual recurring fires, and recurring pause/resume store
-  canonical request hashes with their idempotency receipts, so same-key replays
-  return the original result while same-key payload drift fails with a clear
-  conflict
+  async XCM actions persist mutation receipts in the state store
+- admin job creation, manual recurring fires, recurring pause/resume, and
+  async XCM allocate/deallocate plus observe/finalize store canonical request
+  hashes with their idempotency receipts, so same-key replays return the
+  original result while same-key payload drift fails with a clear conflict
 
 ### Remaining gaps
 
 - provider ingestion endpoints still rely mostly on deterministic job ids and
   duplicate-skip behavior rather than explicit idempotency receipts
-- async XCM actions replay receipts but still need the same canonical
-  payload-drift guard as create/fire/pause/resume
 - future dispute and settlement routes should adopt the same receipt wrapper
 
 ### Concrete next changes
 
-- extend canonical request-hash receipts to async XCM admin routes
 - add optional idempotency keys to provider ingestion routes where callers need
   whole-run replay semantics
 - reuse the same receipt wrapper for future dispute and settlement routes
