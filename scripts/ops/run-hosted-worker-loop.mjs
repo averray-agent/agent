@@ -84,6 +84,10 @@ export async function runHostedWorkerLoop({
     throw new Error(`created job id mismatch: expected ${jobId}, got ${created?.id ?? "missing"}`);
   }
 
+  log(`Preflighting hosted product-proof job ${jobId}`);
+  const preflight = await platform.preflightJob(jobId);
+  const preflightReadiness = assertClaimPreflightReady({ preflight, jobId, wallet });
+
   log(`Claiming hosted product-proof job ${jobId}`);
   const claim = await platform.claimJob(jobId, idempotencyKey);
   const sessionId = claim?.sessionId;
@@ -134,6 +138,13 @@ export async function runHostedWorkerLoop({
     settlementReadiness,
     rewardReadiness,
     liquidityReadiness,
+    preflightReadiness,
+    claimReadiness: {
+      status: claim.status ?? null,
+      sessionId,
+      claimExpiresAt: claim.claimExpiresAt ?? claim.deadline ?? null
+    },
+    submitStatus: submit.status,
     sessionStatus: session.status,
     completedAt: new Date(timestamp).toISOString()
   };
@@ -206,6 +217,39 @@ function assertRewardClearsAssetMinBalance({ rewardAsset, rewardAmount, asset })
     reward: formatBaseUnits(rewardRaw, decimals),
     minBalanceRaw: minBalanceRaw.toString(),
     minBalance: formatBaseUnits(minBalanceRaw, decimals)
+  };
+}
+
+function assertClaimPreflightReady({ preflight, jobId, wallet }) {
+  if (!preflight || typeof preflight !== "object") {
+    throw new Error("Hosted product-proof worker loop requires /jobs/preflight before claim.");
+  }
+  if (preflight.jobId !== jobId) {
+    throw new Error(`preflight job id mismatch: expected ${jobId}, got ${preflight.jobId ?? "missing"}`);
+  }
+  if (preflight.wallet && !sameWallet(preflight.wallet, wallet)) {
+    throw new Error(
+      `Hosted product-proof worker loop preflight wallet mismatch: authWallet=${wallet}; preflightWallet=${preflight.wallet}.`
+    );
+  }
+  if (preflight.eligible !== true || preflight.claimable !== true || preflight.currentWalletCanClaim === false) {
+    throw new Error(
+      `Hosted product-proof worker loop preflight failed: ` +
+      `eligible=${String(preflight.eligible)}; claimable=${String(preflight.claimable)}; ` +
+      `currentWalletCanClaim=${String(preflight.currentWalletCanClaim)}; reason=${preflight.reason ?? "missing"}.`
+    );
+  }
+  return {
+    jobId,
+    wallet: preflight.wallet ?? wallet,
+    eligible: true,
+    claimable: true,
+    currentWalletCanClaim: preflight.currentWalletCanClaim,
+    reason: preflight.reason ?? null,
+    requiredOutputSchema: preflight.requiredOutputSchema ?? null,
+    verifierMode: preflight.verifierMode ?? null,
+    totalClaimLock: preflight.totalClaimLock ?? null,
+    claimEconomicsWaived: preflight.claimEconomicsWaived ?? null
   };
 }
 

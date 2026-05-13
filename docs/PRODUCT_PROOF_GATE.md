@@ -42,9 +42,11 @@ The deploy workflow can generate this evidence itself when run manually with:
 - `product_proof_require_worker_loop=1`
 
 That path uses the production `ADMIN_JWT` secret, creates a tiny benchmark job,
-claims it as the token wallet, submits matching evidence, runs the verifier, and
-writes the evidence file before running the required gate. It does not print the
-token.
+preflights it as the token wallet, claims it, submits matching evidence, runs
+the verifier, and writes the evidence file before running the required gate. It
+does not print the token. The worker loop fails closed before mutation unless
+the hosted stack reports canonical v1 USDC settlement readiness and the worker
+wallet has enough AgentAccountCore USDC liquidity for the reward.
 
 For a local/manual run, first complete one hosted loop and write evidence:
 
@@ -54,15 +56,52 @@ ADMIN_JWT="$ADMIN_TOKEN" \
 npm run product-proof:worker-loop
 ```
 
-After a real hosted worker loop completes, write a local evidence file:
+The worker-loop command writes a local evidence file like:
 
 ```json
 {
-  "sessionId": "sess_...",
-  "jobId": "starter-coding-001",
+  "apiBaseUrl": "https://api.averray.com",
   "wallet": "0x...",
-  "badgeUrl": "https://api.averray.com/badges/sess_...",
-  "profileUrl": "https://api.averray.com/agents/0x..."
+  "jobId": "product-proof-worker-loop-...",
+  "sessionId": "sess_...",
+  "verificationOutcome": "approved",
+  "settlementReadiness": {
+    "settlementReady": true,
+    "asset": {
+      "symbol": "USDC",
+      "address": "0x0000053900000000000000000000000001200000",
+      "assetClass": "trust_backed",
+      "assetId": 1337,
+      "decimals": 6,
+      "minBalanceRaw": "70000",
+      "approved": true
+    }
+  },
+  "rewardReadiness": {
+    "asset": "USDC",
+    "rewardRaw": "100000",
+    "minBalanceRaw": "70000"
+  },
+  "liquidityReadiness": {
+    "wallet": "0x...",
+    "asset": "USDC",
+    "requiredRaw": "100000",
+    "availableRaw": "100000"
+  },
+  "preflightReadiness": {
+    "jobId": "product-proof-worker-loop-...",
+    "wallet": "0x...",
+    "eligible": true,
+    "claimable": true,
+    "requiredOutputSchema": "schema://jobs/product-proof-worker-loop"
+  },
+  "claimReadiness": {
+    "status": "claimed",
+    "sessionId": "sess_..."
+  },
+  "submitStatus": "submitted",
+  "sessionStatus": "resolved",
+  "completedAt": "2026-05-13T11:11:31.000Z"
 }
 ```
 
@@ -76,6 +115,12 @@ npm run check:product-proof
 
 The script fetches the badge and profile documents and verifies that:
 
+- the evidence host matches the checked API host
+- the evidence proves canonical v1 USDC settlement readiness
+- the reward clears the USDC minBalance and the worker has enough USDC liquidity
+- the job preflight was eligible and claimable before claim
+- the submit, verification, and session statuses reached submitted, approved,
+  and resolved
 - the badge uses `averray.schemaVersion = "v1"`
 - the badge session, job, and worker match the evidence file
 - the profile uses `schemaVersion = "v1"`

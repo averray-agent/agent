@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 import { buildDiscoveryManifest } from "../../mcp-server/src/core/discovery-manifest.js";
 import { checkProductProofGate } from "./check-product-proof-gate.mjs";
@@ -110,6 +113,64 @@ test("checkProductProofGate requires an evidence file when the worker loop is ma
   );
 });
 
+test("checkProductProofGate validates required hosted worker-loop evidence", async () => {
+  const manifest = buildDiscoveryManifest();
+  const wallet = "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519";
+  const sessionId = "session-product-proof";
+  const jobId = "product-proof-worker-loop-1700000000000";
+  const evidence = workerLoopEvidence({ wallet, sessionId, jobId });
+  const tmp = await mkdtemp(join(tmpdir(), "product-proof-gate-"));
+  const evidenceFile = join(tmp, "evidence.json");
+  await writeFile(evidenceFile, `${JSON.stringify(evidence, null, 2)}\n`);
+
+  const responses = productProofResponses(manifest);
+  responses.set(`https://api.averray.com/badges/${sessionId}`, {
+    averray: {
+      schemaVersion: "v1",
+      sessionId,
+      jobId,
+      worker: wallet
+    }
+  });
+  responses.set(`https://api.averray.com/agents/${wallet}`, {
+    schemaVersion: "v1",
+    wallet,
+    badges: [{ sessionId, jobId }]
+  });
+
+  await checkProductProofGate({
+    env: {
+      PRODUCT_PROOF_REQUIRE_WORKER_LOOP: "1",
+      PRODUCT_PROOF_EVIDENCE_FILE: evidenceFile
+    },
+    fetchImpl: fakeFetch(responses),
+    log: () => {}
+  });
+});
+
+test("checkProductProofGate rejects minimal evidence when worker-loop proof is required", async () => {
+  const manifest = buildDiscoveryManifest();
+  const tmp = await mkdtemp(join(tmpdir(), "product-proof-gate-"));
+  const evidenceFile = join(tmp, "evidence.json");
+  await writeFile(evidenceFile, JSON.stringify({
+    sessionId: "session-product-proof",
+    jobId: "product-proof-worker-loop-1700000000000",
+    wallet: "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519"
+  }));
+
+  await assert.rejects(
+    () => checkProductProofGate({
+      env: {
+        PRODUCT_PROOF_REQUIRE_WORKER_LOOP: "1",
+        PRODUCT_PROOF_EVIDENCE_FILE: evidenceFile
+      },
+      fetchImpl: fakeFetch(productProofResponses(manifest)),
+      log: () => {}
+    }),
+    /worker-loop evidence requires approved verificationOutcome/u
+  );
+});
+
 function fakeFetch(responses) {
   return async (url) => {
     const value = responses.get(String(url));
@@ -125,5 +186,93 @@ function fakeFetch(responses) {
       status: 200,
       text: async () => typeof value === "string" ? value : JSON.stringify(value)
     };
+  };
+}
+
+function productProofResponses(manifest) {
+  return new Map([
+    ["https://averray.com/.well-known/agent-tools.json", manifest],
+    ["https://api.averray.com/agent-tools.json", manifest],
+    ["https://api.averray.com/onboarding", {
+      name: manifest.name,
+      discoveryUrl: manifest.discoveryUrl,
+      discoveryMode: manifest.discoveryMode,
+      protocols: manifest.protocols,
+      onboarding: { starterFlow: manifest.onboarding.starterFlow },
+      auth: { schemeId: manifest.auth.schemeId },
+      tools: manifest.tools.map((tool) => tool.name)
+    }],
+    ["https://averray.com/trust/", "Averray — Trust Open discovery manifest https://api.averray.com/onboarding"],
+    ["https://averray.com/schemas/", "Averray — Schemas agent-badge-v1.json agent-profile-v1.json"],
+    ["https://averray.com/agents/", "Averray — For agents Read /.well-known/agent-tools.json https://api.averray.com/onboarding"],
+    ["https://averray.com/builders/", "Averray — Builders https://api.averray.com/schemas/jobs"],
+    ["https://averray.com/llms.txt", "Discovery manifest: https://averray.com/.well-known/agent-tools.json\nOnboarding: https://api.averray.com/onboarding"],
+    ["https://averray.com/schemas/agent-badge-v1.json", {
+      $id: "https://averray.com/schemas/agent-badge-v1.json"
+    }],
+    ["https://averray.com/schemas/agent-profile-v1.json", {
+      $id: "https://averray.com/schemas/agent-profile-v1.json"
+    }],
+    ["https://api.averray.com/schemas/jobs", {
+      count: 1,
+      schemas: [{ $id: "schema://jobs/wikipedia-citation-repair-output" }]
+    }],
+    ["https://api.averray.com/schemas/jobs/wikipedia-citation-repair-output.json", {
+      $id: "schema://jobs/wikipedia-citation-repair-output"
+    }]
+  ]);
+}
+
+function workerLoopEvidence({ wallet, sessionId, jobId }) {
+  return {
+    apiBaseUrl: "https://api.averray.com",
+    wallet,
+    jobId,
+    sessionId,
+    verificationOutcome: "approved",
+    verificationReasonCode: "BENCHMARK_THRESHOLD_MET",
+    settlementReadiness: {
+      settlementReady: true,
+      asset: {
+        symbol: "USDC",
+        address: "0x0000053900000000000000000000000001200000",
+        assetClass: "trust_backed",
+        assetId: 1337,
+        decimals: 6,
+        minBalanceRaw: "70000",
+        approved: true
+      },
+      roles: {
+        signerIsVerifier: true,
+        escrowIsServiceOperator: true,
+        agentAccountIsServiceOperator: true
+      }
+    },
+    rewardReadiness: {
+      asset: "USDC",
+      rewardRaw: "100000",
+      minBalanceRaw: "70000"
+    },
+    liquidityReadiness: {
+      wallet,
+      asset: "USDC",
+      requiredRaw: "100000",
+      availableRaw: "100000"
+    },
+    preflightReadiness: {
+      wallet,
+      jobId,
+      eligible: true,
+      claimable: true,
+      currentWalletCanClaim: true,
+      requiredOutputSchema: "schema://jobs/product-proof-worker-loop"
+    },
+    claimReadiness: {
+      status: "claimed",
+      sessionId
+    },
+    submitStatus: "submitted",
+    sessionStatus: "resolved",
+    completedAt: "2026-05-13T11:11:31.000Z"
   };
 }

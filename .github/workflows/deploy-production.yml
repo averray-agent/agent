@@ -98,7 +98,7 @@ on:
           - "0"
           - "1"
       product_proof_reward_asset:
-        description: Reward asset symbol for the hosted product-proof worker loop. Leave blank to keep the deploy-script default (DOT). Set to "USDC" to exercise the v1 USDC settlement path against the on-chain TreasuryPolicy approved-asset list.
+        description: Reward asset symbol for the hosted product-proof worker loop. Leave blank for the canonical v1 USDC settlement path; non-USDC values fail closed before mutation.
         required: false
         default: ""
         type: string
