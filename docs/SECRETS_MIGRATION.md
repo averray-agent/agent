@@ -1080,19 +1080,46 @@ fires. Deploy still succeeds via legacy.
 - [ ] Next deploy: `load_op_smoke.outcome == success` and parity check
       logs `ADMIN_JWT_OP matches legacy secret: yes`
 
-#### PR 2.8b — flip the active source
+#### PR 2.8b — flip the active source (this PR)
 
-**Touches**: `.github/workflows/deploy-production.yml`,
-`SECRETS_CALENDAR.yml`.
+**Touches**: `.github/workflows/deploy-production.yml`.
 
-- Once 2.8a's parity check has been green for a few deploys, swap
-  the `printf 'ADMIN_JWT=%q ...' "$ADMIN_JWT"` to `"$ADMIN_JWT_OP"`
-  (the variable exported by the smoke-load step).
-- Remove `ADMIN_JWT: ${{ secrets.ADMIN_JWT }}` from the job env block.
-- Delete the `ADMIN_JWT` repository secret via `gh secret delete`.
-- Update `SECRETS_CALENDAR.yml`'s `expires_at` for `ADMIN_JWT` to
-  reflect the new mint's 30-day expiry (since we're now reading
-  from 1Password, the calendar entry tracks the OP item).
+After PR #252's hotfix landed and the next deploy logged
+`ADMIN_JWT_OP matches legacy secret: yes` (the parity check confirmed
+the OP value matches the legacy byte-for-byte), this PR makes the
+flip:
+
+- **Source swap**: `printf 'ADMIN_JWT=%q ...' "$ADMIN_JWT"` →
+  `"$ADMIN_JWT_OP"` in the Deploy production heredoc. The VPS smoke
+  check now consumes the 1Password-loaded value.
+- **Job-env binding removed**: `ADMIN_JWT: ${{ secrets.ADMIN_JWT }}`
+  deleted from the job-level `env:` block.
+- **Load step now fail-closed**: `continue-on-error: true` removed
+  from the smoke-vault load step. With the OP path as the only
+  source, a 1Password outage / wrong token / missing item now fails
+  the deploy at the load step — *before* any container restart —
+  rather than silently falling through to a legacy that no longer
+  exists.
+- **Compare step replaced with a shape check**: there's no legacy
+  to byte-compare against anymore, so the old `Compare OP-loaded
+  ADMIN_JWT against legacy GH secret` step is removed and replaced
+  with `Verify ADMIN_JWT_OP loaded and shape-valid` — non-empty +
+  `ey<...>.<...>.<...>` shape, both fatal on failure.
+- **"Note when smoke load failed" step removed**: unreachable now
+  that the load step is fail-closed.
+- **Validate-required-secrets**: dropped `test -n "$ADMIN_JWT"`
+  (legacy no longer in env at that point in the job; the load step
+  + Verify step downstream catches an empty/missing OP value).
+
+**Operator action after this PR merges + one green deploy:**
+
+```sh
+gh secret delete ADMIN_JWT -R averray-agent/agent
+```
+
+Also update `SECRETS_CALENDAR.yml`'s `expires_at` for `ADMIN_JWT`
+to track the OP item's 30-day expiry instead of the GH secret's
+last-rotation date.
 
 **Token-scope verification** (firebreak proof, do once after operator
 adds the token): from a one-shot workflow_dispatch step that uses
