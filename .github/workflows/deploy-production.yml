@@ -170,6 +170,12 @@ jobs:
             # through CI. Caddy auth is verified via the bcrypt HASH only.
             test -n "$APP_BASIC_AUTH_PASSWORD_HASH"
           fi
+          # Phase 2 PR 2.8a: fail fast if the legacy ADMIN_JWT is empty.
+          # The hosted product-proof smoke check on the VPS needs this to
+          # authenticate; without it, it would silently 401 late in the
+          # deploy. PR 2.8b sources this from 1Password and removes the
+          # legacy GH-secret dependency once parity has been green.
+          test -n "$ADMIN_JWT"
 
       # ─── Phase 2 PR 2.1: parity check between OP-loaded and legacy SSH key ──
       #
@@ -324,6 +330,111 @@ jobs:
           if [ "$fail_warn" = "true" ]; then
             echo "::warning::Caddy basic-auth parity check raised warnings (deploy proceeds with legacy values)"
           fi
+
+      # ─── Phase 2 PR 2.8a: ADMIN_JWT from 1Password (parity check, non-blocking) ──
+      #
+      # Mirrors the PR 2.1 / PR 2.2 staging pattern: load the OP value
+      # in a separate step that uses the prod-smoke service-account
+      # token, compare byte-for-byte against the legacy
+      # ${{ secrets.ADMIN_JWT }} GH secret, surface drift as a workflow
+      # warning, but DON'T switch the active source yet. PR 2.8b flips
+      # to $ADMIN_JWT_OP once we've seen a few green parity checks.
+      #
+      # Why a separate load step (not just adding ADMIN_JWT_OP to the
+      # existing prod-ci load step): 1Password service-account tokens
+      # are vault-scoped at creation and immutable. The prod-ci token
+      # cannot read from prod-smoke; we need a second token specifically
+      # for the smoke vault. Operator action required BEFORE this
+      # path produces a value:
+      #
+      #   1. In 1Password, create a service account with read access
+      #      to the prod-smoke vault (only that vault).
+      #   2. Save the token (859 chars, `ops_…` prefix) to the
+      #      production GH environment as
+      #      OP_SERVICE_ACCOUNT_TOKEN_PROD_SMOKE.
+      #
+      # Until that's done, the load step below fails (continue-on-error)
+      # and the deploy proceeds with the legacy GH secret. Look for
+      # "Note when 1Password smoke load step failed" in the workflow
+      # output to confirm whether the token is wired.
+      - name: Load smoke-vault secret from 1Password (parity check, non-blocking)
+        id: load_op_smoke
+        continue-on-error: true
+        # Pinned to the same load-secrets-action SHA as the prod-ci step
+        # above; refresh the two in lockstep.
+        uses: 1password/load-secrets-action@581a835fb51b8e7ec56b71cf2ffddd7e68bb25e0
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN_PROD_SMOKE }}
+          ADMIN_JWT_OP: op://prod-smoke/admin-jwt/credential
+
+      # Same compare-via-tempfiles pattern as the SSH key check above:
+      # value never printed; mtime-077 mktemp; cmp -s; warn on
+      # mismatch. JWTs have a 3-part dot-separated shape we sanity
+      # check separately so a malformed value surfaces a clear error.
+      - name: Compare OP-loaded ADMIN_JWT against legacy GH secret
+        if: steps.load_op_smoke.outcome == 'success'
+        env:
+          LEGACY_JWT: ${{ secrets.ADMIN_JWT }}
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+
+          fail_warn=false
+
+          if [ -z "${ADMIN_JWT_OP:-}" ]; then
+            echo "::warning::OP-loaded ADMIN_JWT_OP is empty — check op://prod-smoke/admin-jwt/credential exists"
+            fail_warn=true
+          fi
+          if [ -z "${LEGACY_JWT:-}" ]; then
+            echo "::warning::legacy ADMIN_JWT GH secret is empty — smoke check that uses it will fail downstream"
+            fail_warn=true
+          fi
+
+          # JWT shape sanity: <base64url>.<base64url>.<base64url>
+          if [ -n "${ADMIN_JWT_OP:-}" ]; then
+            case "$ADMIN_JWT_OP" in
+              ey*.*.*)
+                echo "ADMIN_JWT_OP: JWT shape valid"
+                ;;
+              *)
+                echo "::warning::OP-loaded ADMIN_JWT_OP does not look like a JWT (expected ey<...>.<...>.<...>)"
+                fail_warn=true
+                ;;
+            esac
+          fi
+
+          if [ -n "${ADMIN_JWT_OP:-}" ] && [ -n "${LEGACY_JWT:-}" ]; then
+            legacy_file=$(mktemp)
+            op_file=$(mktemp)
+            trap 'rm -f "$legacy_file" "$op_file"' EXIT
+            printf '%s' "$LEGACY_JWT" > "$legacy_file"
+            printf '%s' "$ADMIN_JWT_OP" > "$op_file"
+            chmod 0400 "$legacy_file" "$op_file"
+
+            if cmp -s "$legacy_file" "$op_file"; then
+              echo "ADMIN_JWT_OP matches legacy secret: yes"
+            else
+              legacy_len=$(wc -c < "$legacy_file" | tr -d ' ')
+              op_len=$(wc -c < "$op_file" | tr -d ' ')
+              echo "ADMIN_JWT_OP matches legacy secret: no"
+              echo "    legacy length: $legacy_len bytes"
+              echo "    OP length:     $op_len bytes"
+              echo "::warning::OP-loaded ADMIN_JWT does NOT match legacy GH Actions secret. Investigate before PR 2.8b swaps to the OP value."
+              fail_warn=true
+            fi
+          fi
+
+          if [ "$fail_warn" = "true" ]; then
+            echo "::warning::ADMIN_JWT parity check raised warnings (deploy proceeds with legacy value)"
+          fi
+
+      - name: Note when 1Password smoke load step failed (deploy proceeds with legacy ADMIN_JWT)
+        if: steps.load_op_smoke.outcome == 'failure'
+        run: |
+          echo "::warning::1Password smoke-vault load failed; falling back to legacy ADMIN_JWT from GH Actions. If you haven't yet, add OP_SERVICE_ACCOUNT_TOKEN_PROD_SMOKE to the production environment to activate the OP path."
 
       - name: Configure SSH
         run: |

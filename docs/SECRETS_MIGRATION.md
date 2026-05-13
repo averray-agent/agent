@@ -1036,33 +1036,81 @@ to those surfaces and rotated.
 
 ### PR 2.8 — Smoke auth secret to 1Password
 
-**Touches**: `scripts/ops/check-hosted-stack.sh`,
-`.github/workflows/deploy-production.yml`, `SECRETS_CALENDAR.yml`.
+Split into two sub-PRs, mirroring the PR 2.1 → PR 2.4 staging pattern
+that worked for the VPS SSH key migration:
 
-- Mint a fresh `ADMIN_JWT` using `mint-admin-jwt.mjs` with
-  `--profile testnet` (current production chain — switch to `mainnet`
-  once Phase 5 cutover provisions `deployments/mainnet.json`). Store at
-  `op://prod-smoke/admin-jwt/credential`.
-- Add `OP_SERVICE_ACCOUNT_TOKEN_PROD_SMOKE` as a **separate** GitHub
-  Environment secret (uses the `prod-smoke-tests` service-account token).
-- Smoke step in the workflow loads `ADMIN_JWT` from 1Password via
-  `load-secrets-action` scoped to the smoke step only.
-- After a clean smoke run: delete `ADMIN_JWT` from GitHub Actions secrets.
+#### PR 2.8a — parity-check load (non-blocking)
 
-**Token-scope verification** (firebreak proof): from a CI step using
+**Touches**: `.github/workflows/deploy-production.yml`,
+`deploy/secrets-inventory.md`.
+
+- Add a new `Load smoke-vault secret from 1Password (parity check, non-blocking)`
+  step in `deploy-production.yml`, using the
+  `OP_SERVICE_ACCOUNT_TOKEN_PROD_SMOKE` environment secret. Loads
+  `ADMIN_JWT_OP` from `op://prod-smoke/admin-jwt/credential`.
+- `continue-on-error: true` so a missing/invalid token doesn't break
+  the deploy — the legacy `${{ secrets.ADMIN_JWT }}` is still the
+  active source.
+- Add a parity-check step: byte-for-byte `cmp -s` against the legacy
+  GH secret, JWT-shape sanity check, length-only diagnostics on
+  mismatch (the value itself never enters the log).
+- Add `test -n "$ADMIN_JWT"` to the existing Validate-required-secrets
+  step so an empty legacy secret fails the deploy fast instead of
+  401'ing later in the smoke check.
+
+**Operator action required to actually populate the OP path:**
+
+  1. In 1Password, create a service account with read access to the
+     `prod-smoke` vault (and ONLY that vault). The token-scope
+     firebreak claim is that this token can't read `prod-backend`,
+     `prod-indexer`, `prod-ci`, or any other vault.
+  2. Save the token to the **production GitHub environment** (not the
+     repository secrets) as `OP_SERVICE_ACCOUNT_TOKEN_PROD_SMOKE`.
+
+Until step 2 is done, the new load step's `outcome` is `failure` and
+the workflow's "Note when 1Password smoke load step failed" annotation
+fires. Deploy still succeeds via legacy.
+
+**Acceptance criteria for PR 2.8a:**
+
+- [ ] PR merged; CI green
+- [ ] One deploy with the token absent → "Note when…" warning visible
+      in workflow output; deploy still succeeds
+- [ ] Operator mints token + adds to prod env
+- [ ] Next deploy: `load_op_smoke.outcome == success` and parity check
+      logs `ADMIN_JWT_OP matches legacy secret: yes`
+
+#### PR 2.8b — flip the active source
+
+**Touches**: `.github/workflows/deploy-production.yml`,
+`SECRETS_CALENDAR.yml`.
+
+- Once 2.8a's parity check has been green for a few deploys, swap
+  the `printf 'ADMIN_JWT=%q ...' "$ADMIN_JWT"` to `"$ADMIN_JWT_OP"`
+  (the variable exported by the smoke-load step).
+- Remove `ADMIN_JWT: ${{ secrets.ADMIN_JWT }}` from the job env block.
+- Delete the `ADMIN_JWT` repository secret via `gh secret delete`.
+- Update `SECRETS_CALENDAR.yml`'s `expires_at` for `ADMIN_JWT` to
+  reflect the new mint's 30-day expiry (since we're now reading
+  from 1Password, the calendar entry tracks the OP item).
+
+**Token-scope verification** (firebreak proof, do once after operator
+adds the token): from a one-shot workflow_dispatch step that uses
 `OP_SERVICE_ACCOUNT_TOKEN_PROD_SMOKE`, attempt
-`op item get auth-jwt-secrets --vault=prod-backend` and assert it FAILS
-with permission denied. The smoke token must not be able to read backend
-or CI vaults.
+`op item get auth-jwt-secrets --vault=prod-backend` and assert it
+fails with permission denied. The smoke token must not be able to
+read backend, indexer, or CI vaults.
 
-**Acceptance criteria**:
+**Acceptance criteria for PR 2.8b:**
 
-- [ ] Smoke run passes with `ADMIN_JWT` loaded from 1Password
+- [ ] Smoke run passes with `ADMIN_JWT_OP` (loaded from 1Password) as
+      the source
 - [ ] `OP_SERVICE_ACCOUNT_TOKEN_PROD_SMOKE` is a distinct token, not
       reused from any other purpose
 - [ ] Negative test: smoke token receives permission denied when
       attempting to read `prod-backend` or `prod-ci`
-- [ ] `ADMIN_JWT` GitHub Actions secret deleted
+- [ ] `ADMIN_JWT` repository secret deleted (verified with
+      `gh secret list -R averray-agent/agent`)
 - [ ] Calendar entry's `expires_at` updated to the new mint's 30-day
       expiry
 
