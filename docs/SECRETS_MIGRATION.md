@@ -31,6 +31,238 @@ can pause between any of them.
 | 4 | Hardening (CI secret scanning, short-lived JWTs, expiry alarms) | ~1 day | Yes — purely additive |
 | 5 | Mainnet cutover | ~1 day | No — new addresses are fresh; testnet stays as testnet |
 
+**Blockchain keys follow stricter custody rules than ordinary application
+secrets.** Mainnet multisig seeds stay on hardware wallets only. The
+backend signer moves to AWS KMS. Testnet and temporary keys may live
+in scoped 1Password vaults. Raw mainnet private keys are avoided; if
+unavoidable, they are human-only, time-boxed, and removed after use.
+The full policy is in [Blockchain key custody
+policy](#blockchain-key-custody-policy) below.
+
+---
+
+## Blockchain key custody policy
+
+Blockchain-related keys are split into three custody classes. They
+must not all be stored in the same place.
+
+### Custody class A — Mainnet multisig signer seeds
+
+These are the highest-risk keys. They control contract ownership,
+treasury policy, pause/unpause powers, signer rotation, and other
+high-impact governance actions.
+
+**Storage policy:**
+
+> Mainnet multisig signer seeds live only on signer-controlled hardware
+> wallets and offline backups.
+
+**They must NEVER be stored in:**
+
+- 1Password Business ❌
+- GitHub Actions secrets ❌
+- VPS env files ❌
+- CI logs ❌
+- Slack / Notion / email ❌
+- Repo files ❌
+- Operator shell history ❌
+
+**Allowed storage locations:**
+
+- Signer hardware wallet
+- Offline paper or metal backup
+- Signer-controlled secure physical storage
+
+**1Password may store metadata only**, for example:
+
+- Multisig address
+- Signer public address
+- Signer owner name
+- Device type
+- Backup location label
+- Emergency contact
+
+**1Password MUST NOT store** any of:
+
+- Seed phrase
+- Raw private key
+- Recovery phrase
+- Mnemonic backup photo
+- Hardware-wallet PIN
+
+Mainnet multisig seeds are **out of scope for the 1Password migration**
+and must remain segregated from the centralized secrets vault.
+
+### Custody class B — Backend blockchain signer
+
+This is the key currently represented by `SIGNER_PRIVATE_KEY`. It
+signs backend-controlled blockchain messages such as product proofs,
+verification outcomes, arbitration outcomes, dispute resolutions, and
+other protocol messages.
+
+**During Phase 2**, before KMS is live, this key may temporarily
+remain as a raw runtime secret:
+
+```
+1Password prod-backend vault
+  → op inject
+  → /run/agent-stack/backend.env
+  → backend process environment
+```
+
+This is an **interim risk**, not the final architecture. Phase 2
+improves distribution, drift control, and cleanup, but it does not
+solve backend signer custody. During Phase 2, compromise of the VPS
+or the scoped backend vault can still expose or use the raw signer
+key.
+
+**The final target in Phase 3 is:**
+
+```
+AWS KMS
+  secp256k1 asymmetric signing key
+  non-exportable private key
+  kms:Sign only
+
+Backend runtime
+  KMS_KEY_ID
+  temporary AWS credentials or narrowly scoped signer credentials
+```
+
+After Phase 3, the backend must no longer receive
+`SIGNER_PRIVATE_KEY=0x...` for mainnet. The backend should only be
+able to request signatures from KMS. It should never be able to
+export the private key bytes.
+
+### Custody class C — Deployer, owner, and migration keys
+
+Deployment and migration keys sit between ordinary secrets and
+multisig seeds. They may temporarily have high privilege during
+setup, but they should not retain long-term authority.
+
+**For testnet**, it is acceptable to store temporary deployer or
+signer keys in a scoped 1Password vault:
+
+```
+Averray / Testnet / Blockchain
+  TESTNET_DEPLOYER_PRIVATE_KEY
+  TESTNET_SIGNER_PRIVATE_KEY
+  TESTNET_OWNER_KEY
+```
+
+**For mainnet**, raw deployer keys should be avoided where possible.
+
+**Preferred mainnet pattern:**
+
+```
+Deploy contracts
+  ↓
+immediately transfer ownership/control to multisig
+  ↓
+deployer key has no continuing privileged role
+```
+
+If a raw mainnet deployer private key is unavoidable, it MUST be:
+
+- Freshly generated for mainnet
+- Single-purpose
+- Short-lived
+- Not stored in GitHub
+- Not stored on the VPS
+- Not used for testnet
+- Not reused after launch
+- Removed or archived after ownership is transferred to multisig
+
+If temporarily stored in 1Password, it must live only in a human-only
+critical vault (`Averray / Production / Critical`). It must not be
+readable by CI service accounts, VPS service accounts, backend
+service accounts, indexer service accounts, or smoke-test service
+accounts.
+
+### Recommended vault layout for blockchain-related material
+
+Use this as the target storage model:
+
+```
+1Password
+├── Averray / Production / Backend
+│   ├── AUTH_JWT_SECRETS
+│   ├── RPC_URL
+│   ├── KMS_KEY_ID
+│   └── non-blockchain runtime secrets
+│
+├── Averray / Production / CI
+│   ├── VPS_SSH_KEY
+│   └── deploy-only secrets
+│
+├── Averray / Production / Critical
+│   ├── AWS root account recovery info
+│   ├── emergency runbooks
+│   ├── app basic-auth raw password
+│   └── temporary mainnet deployer key, only if unavoidable
+│
+├── Averray / Production / Blockchain-Metadata
+│   ├── multisig address
+│   ├── signer public addresses
+│   ├── KMS key ARN
+│   ├── KMS-derived EVM address
+│   ├── contract owner address
+│   ├── TreasuryPolicy address
+│   └── NO PRIVATE KEYS
+│
+└── Averray / Testnet / Blockchain
+    ├── testnet deployer key
+    ├── testnet signer key until KMS migration
+    └── testnet-only temporary keys
+```
+
+The production Blockchain-Metadata vault is allowed to contain public
+addresses, key IDs, contract addresses, and runbook references. It
+must NOT contain private keys, seed phrases, raw mnemonics, or
+hardware-wallet recovery material.
+
+### Rule of thumb
+
+Use this decision rule for every blockchain-related key:
+
+```
+Can this key move funds or change contract control?
+  → hardware wallet / multisig only
+
+Can this key sign backend verification or arbitration messages?
+  → AWS KMS for mainnet
+
+Is this a temporary testnet or dev key?
+  → scoped 1Password vault is acceptable
+
+Is this a raw mainnet private key?
+  → avoid; if unavoidable, store human-only, time-boxed, and remove after use
+```
+
+### Break-glass exception policy
+
+Any exception to the rules above must be documented before use. A
+valid exception record must include:
+
+- Which key is affected
+- Why the exception is needed
+- Where the key will be stored
+- Who can access it
+- When it will be removed or rotated
+- How removal will be verified
+
+**Example acceptable exception:**
+
+> Temporary mainnet deployer key stored in `Averray / Production / Critical`
+> for launch day only. CI and VPS service accounts cannot read it.
+> After ownership is transferred to the multisig, confirm the deployer
+> address has no privileged role, then delete the private key from
+> 1Password.
+
+**Example unacceptable exception:**
+
+> Store mainnet multisig seed phrase in 1Password for convenience.
+
 ---
 
 ## Phase 1 — 1Password Business setup
@@ -255,6 +487,15 @@ for 24h after each, and is reversible.
   containerised apps consume env. The render flow is the layer that makes
   Phase 3 (KMS migration) possible by giving us a controlled swap point, but
   Phase 2 alone is a source-of-truth fix, not a runtime-exposure fix.
+
+During Phase 2, `SIGNER_PRIVATE_KEY` may still be rendered into
+`/run/agent-stack/backend.env`. **This is an interim state.** Phase 2
+removes hand-managed env files and centralizes runtime rendering, but
+it does not eliminate raw backend signer-key exposure. The signer
+private key remains the highest-risk runtime secret until Phase 3
+moves signing to AWS KMS. See [Blockchain key custody
+policy → Custody class B](#custody-class-b--backend-blockchain-signer)
+for the full custody framing.
 
 ### PR 2.0 — Preflight: templates, inventory, dry-run validator
 
@@ -1051,6 +1292,13 @@ secrets, SSH heredoc command strings, hand-managed VPS env files, shell
 history, and possibly deploy logs / VPS backups must be assumed leaked
 to those surfaces and rotated.
 
+⚠️ **Do not delete or rotate `SIGNER_PRIVATE_KEY` as part of Phase 2
+unless the on-chain verifier is also updated.** Cleanup of the backend
+signer key is handled in Phase 3. Phase 2 cleanup should remove
+legacy copies and distribution paths, not accidentally invalidate the
+active signer. See [Blockchain key custody policy → Custody class
+B](#custody-class-b--backend-blockchain-signer).
+
 | Secret                         | Action in this PR                                                                                                       | Why                                                                                                                                                                                                                       |
 | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `VPS_SSH_KEY`                  | **Rotate**: mint new ed25519, add pub to VPS `authorized_keys`, swap the OP item, redeploy once, remove old pub after 24h | Lived in GitHub Actions secrets + SSH heredoc + shell history + possibly VPS backups                                                                                                                                      |
@@ -1428,6 +1676,15 @@ This is the big security win. After this phase, the private key for
 the backend signer is never on disk, in any vault, or in any backup.
 Compromise of the VPS or 1Password vault no longer implies
 compromise of the signer.
+
+**Phase 3 is the custody migration for the backend blockchain signer.**
+After this phase, the backend no longer receives a raw
+`SIGNER_PRIVATE_KEY`. The private key material lives only inside AWS
+KMS and is non-exportable. The backend receives only the KMS key
+identifier and credentials capable of calling `kms:Sign`. See
+[Blockchain key custody policy → Custody class
+B](#custody-class-b--backend-blockchain-signer) for the full custody
+framing.
 
 **Revised in v2** to use temporary credentials (IAM Roles Anywhere
 on the VPS, GitHub OIDC for Actions) instead of long-lived IAM
@@ -1929,6 +2186,21 @@ multisig-controlled migration.
 - [ ] Hosted product-proof smoke passes end-to-end on testnet via KMS
 - [ ] Process listing on VPS shows no plaintext signer key
 
+**Custody post-flight checks** (from [Blockchain key custody policy →
+Custody class B](#custody-class-b--backend-blockchain-signer)):
+
+- [ ] No valid raw `SIGNER_PRIVATE_KEY` remains in production backend
+      env files
+- [ ] No production service account can read a raw backend signer
+      private key from 1Password
+- [ ] Backend signing still works through KMS
+- [ ] Temporarily disabling/revoking the KMS signer credentials
+      breaks backend signing as expected (negative test)
+- [ ] On-chain verifier address matches the KMS-derived signer
+      address
+- [ ] Old raw signer key has no remaining privileged role, or the
+      on-chain verifier has been updated away from it
+
 ### Rollback
 
 **Testnet only**: revert to `SIGNER_PRIVATE_KEY` env path with
@@ -2082,6 +2354,30 @@ TOTP is phishable; FIDO2 is not.
 - [ ] Calendar check runs on every CI build
 - [ ] Hardware MFA on every admin account in the trust chain
 
+### Blockchain key custody verification
+
+Cross-phase audit, run before mainnet launch. See [Blockchain key
+custody policy](#blockchain-key-custody-policy) above for the
+underlying rules.
+
+- [ ] Confirm where each blockchain key lives:
+  - Multisig signer seeds
+  - Backend signer
+  - Deployer key
+  - Owner/migration keys
+  - Testnet-only keys
+- [ ] Confirm mainnet multisig seeds are **not** stored in 1Password
+- [ ] Confirm production service accounts cannot read human-only
+      critical blockchain material (negative test: attempt
+      `op item get` from a service-account-scoped session and assert
+      permission denied)
+- [ ] Confirm the backend signer private key is either:
+  - Still raw and explicitly marked as **interim Phase 2 risk**, or
+  - **Fully migrated to AWS KMS** in Phase 3
+- [ ] Confirm any mainnet deployer key has **no continuing
+      privileged role** after launch (no contract ownership, no
+      verifier authority, no treasury access)
+
 ---
 
 ## Phase 5 — Mainnet cutover
@@ -2089,11 +2385,29 @@ TOTP is phishable; FIDO2 is not.
 This is the night-of deploy. Treat it as a one-shot ceremony with all
 four prior phases already in production for ≥1 week each.
 
+⚠️ **Mainnet must not launch with a raw backend `SIGNER_PRIVATE_KEY`
+stored in GitHub, VPS files, CI, or a service-account-readable
+1Password vault.** The mainnet backend signer should be KMS-backed
+before production traffic begins. See [Blockchain key custody policy
+→ Custody class B](#custody-class-b--backend-blockchain-signer).
+
 ### Pre-flight checklist
 
 The day before:
 
 - [ ] All four prior phases live and stable on testnet for ≥7 days
+- [ ] **Mainnet multisig seeds generated fresh and stored only on
+      signer-controlled hardware wallets**
+- [ ] **No mainnet multisig seed phrase is stored** in 1Password,
+      GitHub, VPS files, Slack, Notion, email, or the repo
+- [ ] **Mainnet backend signer is KMS-backed**, OR a written
+      [break-glass exception](#break-glass-exception-policy) exists
+      with an explicit removal date
+- [ ] **Production Blockchain-Metadata vault contains addresses and
+      key IDs only**, no private keys
+- [ ] Any temporary mainnet deployer key has been confirmed to have
+      no remaining privileged role after ownership transfer to
+      multisig
 - [ ] Audit script (`scripts/ops/audit-launch-readiness.mjs`) shows
   zero drift between testnet config and the planned mainnet config
 - [ ] All production OP service account tokens rotated within the
