@@ -16,7 +16,7 @@ test("runHostedWorkerLoop creates, claims, submits, verifies, and writes evidenc
   const client = {
     async getAuthSession() {
       calls.push(["getAuthSession"]);
-      return { wallet };
+      return authSession({ wallet });
     },
     async getAdminStatus() {
       calls.push(["getAdminStatus"]);
@@ -103,6 +103,8 @@ test("runHostedWorkerLoop creates, claims, submits, verifies, and writes evidenc
   assert.equal(written.rewardReadiness.rewardRaw, "100000");
   assert.equal(written.liquidityReadiness.requiredRaw, "100000");
   assert.equal(written.liquidityReadiness.availableRaw, "100000");
+  assert.deepEqual(written.authReadiness.roles, ["admin", "verifier"]);
+  assert.ok(written.authReadiness.capabilitiesPresent.includes("verifier:run"));
   assert.equal(written.preflightReadiness.eligible, true);
   assert.equal(written.preflightReadiness.requiredOutputSchema, "schema://jobs/product-proof-worker-loop");
   assert.equal(written.claimReadiness.status, "claimed");
@@ -117,11 +119,50 @@ test("runHostedWorkerLoop fails closed without a token", async () => {
   );
 });
 
+test("runHostedWorkerLoop fails closed before mutation when token lacks verifier capability", async () => {
+  const calls = [];
+  await assert.rejects(
+    runHostedWorkerLoop({
+      client: {
+        async getAuthSession() {
+          calls.push(["getAuthSession"]);
+          return authSession({
+            roles: ["admin"],
+            capabilities: [
+              "account:read",
+              "admin:status",
+              "jobs:create",
+              "jobs:preflight",
+              "jobs:claim",
+              "jobs:submit",
+              "session:read"
+            ]
+          });
+        },
+        async getAdminStatus() {
+          calls.push(["getAdminStatus"]);
+          throw new Error("should not inspect settlement after token capability preflight fails");
+        },
+        async createJob() {
+          calls.push(["createJob"]);
+          throw new Error("should not mutate without verifier capability");
+        }
+      },
+      now: () => 1700000000000,
+      log: () => {},
+      env: { ADMIN_JWT: "token" }
+    }),
+    /requires a token with all mutation-loop capabilities before mutation; missing=verifier:run; roles=admin/u
+  );
+
+  assert.deepEqual(calls.map(([name]) => name), ["getAuthSession"]);
+});
+
 test("runHostedWorkerLoop accepts an explicit positive reward amount", async () => {
   const calls = [];
   const client = {
     async getAuthSession() {
-      return { wallet: "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519" };
+      return authSession();
     },
     async getAdminStatus() {
       return settlementReadyStatus();
@@ -178,7 +219,7 @@ test("runHostedWorkerLoop fails closed before mutation when AgentAccountCore USD
       client: {
         async getAuthSession() {
           calls.push(["getAuthSession"]);
-          return { wallet };
+          return authSession({ wallet });
         },
         async getAdminStatus() {
           calls.push(["getAdminStatus"]);
@@ -210,7 +251,7 @@ test("runHostedWorkerLoop fails closed before mutation when account summary wall
       client: {
         async getAuthSession() {
           calls.push(["getAuthSession"]);
-          return { wallet: "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519" };
+          return authSession();
         },
         async getAdminStatus() {
           calls.push(["getAdminStatus"]);
@@ -246,7 +287,7 @@ test("runHostedWorkerLoop fails closed after job creation when preflight blocks 
       client: {
         async getAuthSession() {
           calls.push(["getAuthSession"]);
-          return { wallet: "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519" };
+          return authSession();
         },
         async getAdminStatus() {
           calls.push(["getAdminStatus"]);
@@ -299,7 +340,7 @@ test("runHostedWorkerLoop fails closed before mutation when settlement is not re
       client: {
         async getAuthSession() {
           calls.push(["getAuthSession"]);
-          return { wallet: "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519" };
+          return authSession();
         },
         async getAdminStatus() {
           calls.push(["getAdminStatus"]);
@@ -336,7 +377,7 @@ test("runHostedWorkerLoop rejects non-USDC product-proof reward assets before mu
       client: {
         async getAuthSession() {
           calls.push(["getAuthSession"]);
-          return { wallet: "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519" };
+          return authSession();
         },
         async createJob() {
           calls.push(["createJob"]);
@@ -360,7 +401,7 @@ test("runHostedWorkerLoop rejects USDC symbol with non-canonical asset metadata"
       client: {
         async getAuthSession() {
           calls.push(["getAuthSession"]);
-          return { wallet: "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519" };
+          return authSession();
         },
         async getAdminStatus() {
           calls.push(["getAdminStatus"]);
@@ -399,7 +440,7 @@ test("runHostedWorkerLoop rejects missing matching USDC settlement asset", async
       client: {
         async getAuthSession() {
           calls.push(["getAuthSession"]);
-          return { wallet: "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519" };
+          return authSession();
         },
         async getAdminStatus() {
           calls.push(["getAdminStatus"]);
@@ -437,7 +478,7 @@ test("runHostedWorkerLoop rejects unapproved canonical USDC settlement asset", a
       client: {
         async getAuthSession() {
           calls.push(["getAuthSession"]);
-          return { wallet: "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519" };
+          return authSession();
         },
         async getAdminStatus() {
           calls.push(["getAdminStatus"]);
@@ -492,7 +533,7 @@ test("runHostedWorkerLoop rejects rewards below the USDC minBalance before mutat
       client: {
         async getAuthSession() {
           calls.push(["getAuthSession"]);
-          return { wallet: "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519" };
+          return authSession();
         },
         async getAdminStatus() {
           calls.push(["getAdminStatus"]);
@@ -600,4 +641,21 @@ function settlementReadyStatus(overrides = {}) {
       }
     }
   };
+}
+
+function authSession({
+  wallet = "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519",
+  roles = ["admin", "verifier"],
+  capabilities = [
+    "account:read",
+    "admin:status",
+    "jobs:create",
+    "jobs:preflight",
+    "jobs:claim",
+    "jobs:submit",
+    "verifier:run",
+    "session:read"
+  ]
+} = {}) {
+  return { wallet, roles, capabilities };
 }
