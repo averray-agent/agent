@@ -990,21 +990,61 @@ manifest with its own parity guard.
 
 ### PR 2.7 — Cleanup of legacy artifacts AND rotation
 
-**Touches**: `.github/workflows/deploy-production.yml`, VPS env files,
-`SECRETS_CALENDAR.yml`.
+Split into four sub-PRs to keep blast-radius small and let operator
+coordination interleave with code changes:
 
-Cleanup (the easy part):
+| Sub-PR | Scope | Risk |
+|---|---|---|
+| **2.7a** | Flip `VPS_SSH_KEY` + `APP_BASIC_AUTH_USER` + `APP_BASIC_AUTH_PASSWORD_HASH` to 1Password, fail-closed | Low — parity green since PR 2.1 / 2.2 |
+| 2.7b | Move `RESEND_API_KEY` + `BOOTSTRAP_SELF_REPORT_*` through OP (new parity → flip) | Medium |
+| 2.7c | SSH to VPS: delete `/srv/agent-stack/{backend,indexer}.env` + `.pre-pr2.5` rollback backup | Trivial |
+| 2.7d | Rotate `VPS_SSH_KEY`, `APP_BASIC_AUTH_PASSWORD`, `RESEND_API_KEY`, `AUTH_JWT_SECRETS` (each its own coordinated window) | High |
 
-- Delete legacy GitHub Actions secrets: `VPS_SSH_KEY`,
-  `APP_BASIC_AUTH_USER`, `APP_BASIC_AUTH_PASSWORD`,
-  `APP_BASIC_AUTH_PASSWORD_HASH`, `RESEND_API_KEY`,
-  `BOOTSTRAP_SELF_REPORT_*`.
-- Delete `/srv/agent-stack/backend.env` and `/srv/agent-stack/indexer.env`
-  from the VPS.
-- Reboot test: confirm `/run/agent-stack` is recreated by
-  `systemd-tmpfiles` and the next deploy renders fresh env files.
+#### PR 2.7a — flip prod-ci secrets to 1Password (this PR)
 
-Rotation (the part that actually closes the exposure window):
+**Touches**: `.github/workflows/deploy-production.yml`.
+
+Mirrors PR 2.8b for the three prod-ci-vault secrets:
+
+- **Source swaps** in the workflow:
+  - `Configure SSH` step: `"$VPS_SSH_KEY"` → `"$VPS_SSH_KEY_OP"` (the ed25519 key written to `~/.ssh/id_ed25519`).
+  - `Deploy production` heredoc: `"$APP_BASIC_AUTH_USER"` → `"$APP_BASIC_AUTH_USER_OP"`, `"$APP_BASIC_AUTH_PASSWORD_HASH"` → `"$APP_BASIC_AUTH_PASSWORD_HASH_OP"`.
+- **Legacy job-env bindings removed**: the three `${{ secrets.* }}` lines for these are gone.
+- **Load step now fail-closed**: the prod-ci load step's `continue-on-error: true` is removed. A 1Password outage / wrong token / missing item now fails the deploy at this step rather than silently falling through to a legacy that no longer exists.
+- **Compare + Note steps replaced with a single Verify step**: non-empty + shape checks on all three values (SSH private-key PEM marker, basic-auth user non-empty, bcrypt-hash shape). Failures emit `::error::` and `exit 1`. The 401/200 smoke check on `app.averray.com` later in the deploy remains the load-bearing semantic verification for basic-auth.
+- **Validate-required-secrets**: legacy `test -n` lines dropped (those values aren't in env at that point anymore; the load+verify pair below catches missing/empty OP values).
+
+**Operator action after this PR merges + one green deploy:**
+
+```sh
+gh secret delete VPS_SSH_KEY APP_BASIC_AUTH_USER APP_BASIC_AUTH_PASSWORD_HASH -R averray-agent/agent
+```
+
+(Also still pending from PR 2.8b: `gh secret delete ADMIN_JWT`.)
+
+#### PR 2.7b — move smoke-channel secrets through 1Password (TODO)
+
+`RESEND_API_KEY` and `BOOTSTRAP_SELF_REPORT_*` still flow through the
+job env block as legacy GH secrets. They're parity-loadable from
+`op://prod-backend-external/resend-api-key/password` and (for the
+report addresses) the inventory but not yet wired into a load step.
+Follow the PR 2.8a → 2.8b → 2.7a pattern: add a parity-check load,
+let it run a few deploys, then flip + remove legacy.
+
+#### PR 2.7c — delete legacy `/srv` files from the VPS
+
+After at least 24h of stable deploys on PR 2.5 + PR 2.6 + PR 2.7a
+(the cutover stack):
+
+```sh
+ssh ubuntu@141.94.121.188 'sudo rm /srv/agent-stack/backend.env /srv/agent-stack/indexer.env /srv/agent-stack/docker-compose.yml.pre-pr2.5'
+```
+
+Then **reboot test**: confirm `/run/agent-stack` is recreated by
+`systemd-tmpfiles` and the next deploy renders fresh env files
+successfully end-to-end.
+
+#### PR 2.7d — rotation (the part that actually closes the exposure window)
 
 Deletion alone is not enough. The values that lived in GitHub Actions
 secrets, SSH heredoc command strings, hand-managed VPS env files, shell
@@ -1020,19 +1060,20 @@ to those surfaces and rotated.
 | `AUTH_JWT_SECRETS`             | **Rotate** in a controlled key-ring window (prepend new, redeploy, wait 24–48h for in-flight tokens, remove old, redeploy) | Lived in the hand-managed VPS env file; HMAC compromise = ability to mint any admin JWT                                                                                                                                   |
 | `SIGNER_PRIVATE_KEY`           | **NOT rotated here.** Honest framing: the key remains exposed by historical VPS env files until Phase 3. Phase 2 reduces distribution drift but does NOT solve backend signer private-key exposure. | Phase 3's job. Calling it out so the security claim stays honest.                                                                                                                                                          |
 
-**Acceptance criteria**:
+**Acceptance criteria across PR 2.7a/b/c/d**:
 
-- [ ] Legacy GitHub Actions secrets deleted (verified with
-      `gh secret list -R averray-agent/agent`)
-- [ ] Legacy `/srv/agent-stack/*.env` files deleted (verified with
-      `ssh ... ls /srv/agent-stack/*.env`)
-- [ ] Rotation completed (or rotation tickets filed with explicit
+- [ ] (2.7a) Legacy `VPS_SSH_KEY` + `APP_BASIC_AUTH_USER` + `APP_BASIC_AUTH_PASSWORD_HASH`
+      GitHub Actions secrets deleted (`gh secret list -R averray-agent/agent`)
+- [ ] (2.7b) `RESEND_API_KEY` + `BOOTSTRAP_SELF_REPORT_*` moved through 1Password
+- [ ] (2.7c) Legacy `/srv/agent-stack/*.env` + `.pre-pr2.5` backup deleted
+      (`ssh ... ls /srv/agent-stack/`)
+- [ ] (2.7c) Reboot test green: `/run/agent-stack` recreated; deploy renders
+      fresh env files successfully
+- [ ] (2.7d) Rotation completed (or rotation tickets filed with explicit
       deadlines) for every secret in the table above except
       `SIGNER_PRIVATE_KEY`
-- [ ] `SECRETS_CALENDAR.yml` updated with the new `expires_at` values
+- [ ] (2.7d) `SECRETS_CALENDAR.yml` updated with the new `expires_at` values
       for any rotated calendar-tracked entry
-- [ ] Reboot test green: `/run/agent-stack` recreated; deploy renders
-      fresh env files successfully
 
 ### PR 2.8 — Smoke auth secret to 1Password
 
