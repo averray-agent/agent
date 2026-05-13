@@ -45,8 +45,15 @@ That path uses the production `ADMIN_JWT` secret, creates a tiny benchmark job,
 preflights it as the token wallet, claims it, submits matching evidence, runs
 the verifier, and writes the evidence file before running the required gate. It
 does not print the token. The worker loop fails closed before mutation unless
-the hosted stack reports canonical v1 USDC settlement readiness and the worker
-wallet has enough AgentAccountCore USDC liquidity for the reward.
+the token exposes the full loop capability set, the hosted stack reports
+canonical v1 USDC settlement readiness, and the worker wallet has enough
+AgentAccountCore USDC liquidity for the reward.
+
+The hosted smoke token must resolve from `/auth/session` with capabilities for:
+`account:read`, `admin:status`, `jobs:create`, `jobs:preflight`, `jobs:claim`,
+`jobs:submit`, `verifier:run`, and `session:read`. In practice this means the
+1Password `prod-smoke/admin-jwt` item should be minted with both `admin` and
+`verifier` roles before the manual production workflow is run.
 
 For a local/manual run, first complete one hosted loop and write evidence:
 
@@ -65,6 +72,19 @@ The worker-loop command writes a local evidence file like:
   "jobId": "product-proof-worker-loop-...",
   "sessionId": "sess_...",
   "verificationOutcome": "approved",
+  "authReadiness": {
+    "roles": ["admin", "verifier"],
+    "capabilitiesPresent": [
+      "account:read",
+      "admin:status",
+      "jobs:create",
+      "jobs:preflight",
+      "jobs:claim",
+      "jobs:submit",
+      "verifier:run",
+      "session:read"
+    ]
+  },
   "settlementReadiness": {
     "settlementReady": true,
     "asset": {

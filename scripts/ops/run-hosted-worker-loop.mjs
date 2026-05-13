@@ -50,6 +50,7 @@ export async function runHostedWorkerLoop({
   if (!wallet) {
     throw new Error("/auth/session did not return a wallet for the worker token.");
   }
+  const authReadiness = assertWorkerTokenReadiness(authSession);
 
   const settlementReadiness = await assertSettlementReadiness(platform, rewardAsset);
   const rewardReadiness = assertRewardClearsAssetMinBalance({
@@ -135,6 +136,7 @@ export async function runHostedWorkerLoop({
     profileUrl,
     verificationOutcome: verification.outcome,
     verificationReasonCode: verification.reasonCode ?? null,
+    authReadiness,
     settlementReadiness,
     rewardReadiness,
     liquidityReadiness,
@@ -217,6 +219,33 @@ function assertRewardClearsAssetMinBalance({ rewardAsset, rewardAmount, asset })
     reward: formatBaseUnits(rewardRaw, decimals),
     minBalanceRaw: minBalanceRaw.toString(),
     minBalance: formatBaseUnits(minBalanceRaw, decimals)
+  };
+}
+
+function assertWorkerTokenReadiness(authSession) {
+  const requiredCapabilities = [
+    "account:read",
+    "admin:status",
+    "jobs:create",
+    "jobs:preflight",
+    "jobs:claim",
+    "jobs:submit",
+    "verifier:run",
+    "session:read"
+  ];
+  const capabilities = Array.isArray(authSession?.capabilities) ? authSession.capabilities : [];
+  const roles = Array.isArray(authSession?.roles) ? authSession.roles : [];
+  const missing = requiredCapabilities.filter((capability) => !capabilities.includes(capability));
+  if (missing.length > 0) {
+    throw new Error(
+      "Hosted product-proof worker loop requires a token with all mutation-loop capabilities before mutation; " +
+      `missing=${missing.join(",")}; roles=${roles.join(",") || "none"}.`
+    );
+  }
+  return {
+    roles: [...roles],
+    requiredCapabilities,
+    capabilitiesPresent: requiredCapabilities
   };
 }
 
