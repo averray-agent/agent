@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Suspense, useCallback, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { DetailDrawer } from "@/components/shell/DetailDrawer";
 import { SessionsTopbar } from "@/components/sessions/SessionsTopbar";
 import { SessionsAggregateStrip } from "@/components/sessions/SessionsAggregateStrip";
@@ -19,6 +20,11 @@ import {
 } from "@/lib/api/hooks";
 import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
 import { buildSessionDetails, mergeSessionTimeline } from "@/lib/api/session-adapters";
+import {
+  applyTimelineEventFiltersToParams,
+  parseTimelineEventFilters,
+  type TimelineEventFilterValue,
+} from "@/components/runs/TimelineEventFilters";
 
 function valueBucket(amountStr: string): SessionsFilter["value"] {
   const n = Number(amountStr);
@@ -30,6 +36,32 @@ function valueBucket(amountStr: string): SessionsFilter["value"] {
 }
 
 export default function SessionsPage() {
+  return (
+    <Suspense fallback={null}>
+      <SessionsPageInner />
+    </Suspense>
+  );
+}
+
+function SessionsPageInner() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+  const eventFilters = useMemo(
+    () => parseTimelineEventFilters(searchParams ?? null),
+    [searchParams]
+  );
+  const onEventFiltersChange = useCallback(
+    (next: TimelineEventFilterValue) => {
+      if (!pathname) return;
+      const params = new URLSearchParams(searchParams?.toString() ?? "");
+      applyTimelineEventFiltersToParams(params, next);
+      const qs = params.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    },
+    [pathname, router, searchParams]
+  );
+
   const sessionsQuery = useAdminSessions();
   const jobsQuery = useJobs();
   const [filter, setFilter] = useState<SessionsFilter>({
@@ -179,7 +211,13 @@ export default function SessionsPage() {
           ) : null
         }
       >
-        {picked ? <SessionDrawerBody session={picked} /> : null}
+        {picked ? (
+          <SessionDrawerBody
+            session={picked}
+            eventFilters={eventFilters}
+            onEventFiltersChange={onEventFiltersChange}
+          />
+        ) : null}
       </DetailDrawer>
     </div>
   );

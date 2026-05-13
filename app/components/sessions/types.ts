@@ -42,6 +42,15 @@ export interface EscrowMovement {
   amount: string;
   tx: string;
   tone?: "neutral" | "accent" | "warn" | "bad";
+  /** Raw timeline metadata used by the session-drawer event filter. The
+   *  /session/timeline endpoint does not (yet) accept query-string
+   *  filters, so the drawer filters the rendered movements
+   *  client-side against these fields. Optional because legacy seed
+   *  movements predate the timeline-event filter rail. */
+  source?: string;
+  topic?: string;
+  wallet?: string;
+  correlationId?: string;
 }
 
 export interface PayoutEntry {

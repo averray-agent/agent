@@ -353,6 +353,10 @@ export function mergeSessionTimeline(
   const movements = timeline.length
     ? timeline.map((entry) => {
         const data = asRecord(entry.data);
+        const source = text(entry.source);
+        const topic = text(entry.topic);
+        const wallet = text(entry.wallet ?? data.wallet);
+        const correlationId = text(entry.correlationId);
         return {
           at: timeLabel(entry.at),
           label: text(entry.type, text(entry.phase, "session.event")),
@@ -361,6 +365,10 @@ export function mergeSessionTimeline(
           amount: text(data.amount, session.escrow.amount ? `${session.escrow.amount} ${session.escrow.asset}` : "-"),
           tx: text(data.tx, text(data.chainJobId, "-")),
           tone: movementTone(entry.phase ?? entry.type),
+          ...(source ? { source } : {}),
+          ...(topic ? { topic } : {}),
+          ...(wallet ? { wallet } : {}),
+          ...(correlationId ? { correlationId } : {}),
         };
       })
     : session.movements;

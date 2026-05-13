@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils/cn";
 import {
   buildJobTimeline,
@@ -11,8 +12,16 @@ import {
   type TimelineSeverity,
   type TimelineSource,
 } from "@/lib/api/job-timeline";
-import { useJobTimeline } from "@/lib/api/hooks";
+import { useJobTimeline, type JobTimelineFilters } from "@/lib/api/hooks";
 import { ApiError } from "@/lib/api/client";
+import {
+  applyTimelineEventFiltersToParams,
+  EMPTY_TIMELINE_EVENT_FILTERS,
+  isTimelineEventFilterActive,
+  parseTimelineEventFilters,
+  TimelineEventFilters,
+  type TimelineEventFilterValue,
+} from "./TimelineEventFilters";
 
 /**
  * "Everything that happened to this job" panel for /runs/detail.
@@ -25,11 +34,42 @@ import { ApiError } from "@/lib/api/client";
  * transitions in one read.
  */
 export function JobTimelinePanel({ jobId }: { jobId: string }) {
-  const request = useJobTimeline(jobId);
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+  const filters = useMemo(
+    () => parseTimelineEventFilters(searchParams ?? null),
+    [searchParams]
+  );
+  const filtersActive = isTimelineEventFilterActive(filters);
+  const apiFilters = useMemo<JobTimelineFilters>(
+    () => ({
+      sources: filters.source ? [filters.source] : undefined,
+      topics: filters.topic ? [filters.topic] : undefined,
+      wallet: filters.wallet || undefined,
+      correlationId: filters.correlationId || undefined,
+    }),
+    [filters]
+  );
+  const request = useJobTimeline(jobId, apiFilters);
   const data = useMemo(() => buildJobTimeline(request.data), [request.data]);
   const unauthenticated =
     request.error instanceof ApiError &&
     (request.error.status === 401 || request.error.status === 403);
+
+  // URL is the source of truth for filter state so a refresh / shared
+  // link reproduces the filtered view. `replace` rather than `push` so
+  // toggling filters doesn't pollute the back stack.
+  const handleFilterChange = useCallback(
+    (next: TimelineEventFilterValue) => {
+      if (!pathname) return;
+      const params = new URLSearchParams(searchParams?.toString() ?? "");
+      applyTimelineEventFiltersToParams(params, next);
+      const qs = params.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    },
+    [pathname, router, searchParams]
+  );
 
   return (
     <section
@@ -58,11 +98,21 @@ export function JobTimelinePanel({ jobId }: { jobId: string }) {
         />
       </header>
 
+      <TimelineEventFilters
+        value={filters}
+        onChange={handleFilterChange}
+        idPrefix="job-timeline-filter"
+      />
+
       <ul className="flex flex-col">
         {data.timeline.length === 0 ? (
           <EmptyRow
             unauthenticated={unauthenticated}
             loading={Boolean(request.isLoading)}
+            filtersActive={filtersActive}
+            onClearFilters={() =>
+              handleFilterChange(EMPTY_TIMELINE_EVENT_FILTERS)
+            }
           />
         ) : (
           data.timeline.map((entry, idx) => (
@@ -147,9 +197,13 @@ function TimelineSummary({
 function EmptyRow({
   unauthenticated,
   loading,
+  filtersActive,
+  onClearFilters,
 }: {
   unauthenticated: boolean;
   loading: boolean;
+  filtersActive: boolean;
+  onClearFilters: () => void;
 }) {
   return (
     <li className="rounded-[8px] border border-dashed border-[var(--avy-line)] bg-[rgba(255,253,247,0.5)] p-4 text-center">
@@ -161,8 +215,20 @@ function EmptyRow({
           ? "Sign in with your operator wallet to load the timeline. /admin/jobs/timeline is admin-gated."
           : loading
             ? "Loading timeline…"
-            : "No events recorded for this job yet."}
+            : filtersActive
+              ? "No events match these filters."
+              : "No events recorded for this job yet."}
       </p>
+      {!unauthenticated && !loading && filtersActive ? (
+        <button
+          type="button"
+          onClick={onClearFilters}
+          className="mt-2 rounded-[6px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-2.5 py-1 font-[family-name:var(--font-display)] text-[10.5px] font-extrabold uppercase text-[var(--avy-ink)] transition-colors hover:border-[color:rgba(30,102,66,0.35)] hover:text-[var(--avy-accent)]"
+          style={{ letterSpacing: "0.08em" }}
+        >
+          Clear filters
+        </button>
+      ) : null}
     </li>
   );
 }
