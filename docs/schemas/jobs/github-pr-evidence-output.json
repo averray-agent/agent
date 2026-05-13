@@ -1,0 +1,74 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "schema://jobs/github-pr-evidence-output",
+  "title": "GitHub PR Evidence Output",
+  "description": "GitHub pull request evidence for open-source issue jobs.",
+  "type": "object",
+  "properties": {
+    "prUrl": {
+      "type": "string",
+      "minLength": 1
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tests": {
+      "type": "string",
+      "minLength": 1
+    },
+    "notes": {
+      "type": "string"
+    },
+    "prBody": {
+      "type": "string"
+    },
+    "issueNumber": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "issueUrl": {
+      "type": "string"
+    },
+    "commitUrl": {
+      "type": "string"
+    },
+    "branchUrl": {
+      "type": "string"
+    },
+    "filesChanged": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "referencesIssue": {
+      "type": "boolean"
+    },
+    "checksPassing": {
+      "type": "boolean"
+    },
+    "ciStatus": {
+      "type": "string",
+      "enum": [
+        "unknown",
+        "pending",
+        "passing",
+        "failing"
+      ]
+    },
+    "reviewApproved": {
+      "type": "boolean"
+    },
+    "merged": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "prUrl",
+    "summary",
+    "tests"
+  ],
+  "additionalProperties": false
+}

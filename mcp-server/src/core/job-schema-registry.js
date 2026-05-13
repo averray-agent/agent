@@ -519,9 +519,13 @@ function cloneSchema(schema) {
 }
 
 function toPublicSchemaDocument(schema) {
+  const { $id, description, ...rest } = cloneSchema(schema);
   return {
     $schema: "http://json-schema.org/draft-07/schema#",
-    ...cloneSchema(schema)
+    $id,
+    title: titleFromSchemaRef($id),
+    ...(description ? { description } : {}),
+    ...rest
   };
 }
 
@@ -531,6 +535,26 @@ export function schemaRefToJobSchemaPath(schemaRef) {
     return undefined;
   }
   return `/schemas/jobs/${normalized.slice("schema://jobs/".length)}.json`;
+}
+
+function titleFromSchemaRef(schemaRef) {
+  const normalized = normalizeBuiltinJobSchemaRef(schemaRef) ?? "";
+  const name = normalized.slice("schema://jobs/".length);
+  return name
+    .split("-")
+    .filter(Boolean)
+    .map((part) => {
+      const lower = part.toLowerCase();
+      const acronym = {
+        api: "API",
+        docs: "Docs",
+        github: "GitHub",
+        openapi: "OpenAPI",
+        pr: "PR"
+      }[lower];
+      return acronym ?? `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`;
+    })
+    .join(" ");
 }
 
 export function jobSchemaPathToRef(pathname) {

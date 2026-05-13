@@ -1,19 +1,33 @@
 {
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "schema://jobs/docs-input",
   "title": "Docs Input",
+  "description": "Documentation audit input.",
   "type": "object",
-  "required": ["surfaces", "goal"],
   "properties": {
     "surfaces": {
       "type": "array",
-      "minItems": 1,
-      "items": { "type": "string", "minLength": 1 }
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1
     },
-    "goal": { "type": "string", "minLength": 1 },
+    "goal": {
+      "type": "string",
+      "minLength": 1
+    },
     "context": {
       "type": "array",
-      "items": { "type": "string", "minLength": 1 }
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
     }
   },
+  "required": [
+    "surfaces",
+    "goal"
+  ],
   "additionalProperties": false
 }

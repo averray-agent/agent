@@ -1,15 +1,33 @@
 {
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "schema://jobs/governance-output",
   "title": "Governance Output",
+  "description": "Generic governance job output.",
   "type": "object",
-  "required": ["summary", "decisionSignal"],
   "properties": {
-    "summary": { "type": "string", "minLength": 1 },
-    "decisionSignal": { "type": "string", "enum": ["approve", "reject", "revise"] },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "decisionSignal": {
+      "type": "string",
+      "enum": [
+        "approve",
+        "reject",
+        "revise"
+      ]
+    },
     "recommendations": {
       "type": "array",
-      "items": { "type": "string", "minLength": 1 }
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
     }
   },
+  "required": [
+    "summary",
+    "decisionSignal"
+  ],
   "additionalProperties": false
 }

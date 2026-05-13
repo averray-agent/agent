@@ -1,23 +1,49 @@
 {
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "schema://jobs/release-readiness-output",
   "title": "Release Readiness Output",
+  "description": "Structured release go/no-go output.",
   "type": "object",
-  "required": ["release_id", "checks_passed", "checks_failed", "blockers", "go_no_go"],
   "properties": {
-    "release_id": { "type": "string", "minLength": 1 },
+    "release_id": {
+      "type": "string",
+      "minLength": 1
+    },
     "checks_passed": {
       "type": "array",
-      "items": { "type": "string", "minLength": 1 }
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
     },
     "checks_failed": {
       "type": "array",
-      "items": { "type": "string", "minLength": 1 }
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
     },
     "blockers": {
       "type": "array",
-      "items": { "type": "string", "minLength": 1 }
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
     },
-    "go_no_go": { "type": "string", "enum": ["go", "no_go"] }
+    "go_no_go": {
+      "type": "string",
+      "enum": [
+        "go",
+        "no_go"
+      ]
+    }
   },
+  "required": [
+    "release_id",
+    "checks_passed",
+    "checks_failed",
+    "blockers",
+    "go_no_go"
+  ],
   "additionalProperties": false
 }

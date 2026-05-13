@@ -11,9 +11,29 @@ import {
   validateStructuredSubmission
 } from "./job-schema-registry.js";
 
+const FIRST_WAVE_SCHEMA_REFS = [
+  "schema://jobs/review-input",
+  "schema://jobs/pr-review-findings-output",
+  "schema://jobs/release-input",
+  "schema://jobs/release-readiness-output",
+  "schema://jobs/triage-input",
+  "schema://jobs/issue-defect-triage-output",
+  "schema://jobs/docs-input",
+  "schema://jobs/docs-drift-audit-output"
+];
+
 test("getBuiltinJobSchema resolves built-in first-wave schemas", () => {
   const schema = getBuiltinJobSchema("schema://jobs/pr-review-findings-output");
   assert.equal(schema?.$id, "schema://jobs/pr-review-findings-output");
+});
+
+test("first-wave schema-native job refs are public built-ins", () => {
+  for (const ref of FIRST_WAVE_SCHEMA_REFS) {
+    const schema = getBuiltinJobSchema(ref);
+    assert.equal(schema?.$id, ref);
+    assert.equal(schemaRefToJobSchemaPath(ref), `/schemas/jobs/${ref.slice("schema://jobs/".length)}.json`);
+    assert.equal(getPublicBuiltinJobSchemaByName(ref.slice("schema://jobs/".length))?.$id, ref);
+  }
 });
 
 test("validateStructuredSubmission accepts a schema-compliant PR review payload", () => {
@@ -34,6 +54,55 @@ test("validateStructuredSubmission accepts a schema-compliant PR review payload"
 
   assert.doesNotThrow(() => {
     validateStructuredSubmission("schema://jobs/pr-review-findings-output", payload);
+  });
+});
+
+test("validateStructuredSubmission accepts first-wave release readiness payloads", () => {
+  const payload = {
+    release_id: "release-2026-05-13",
+    checks_passed: ["api-health", "frontend-build"],
+    checks_failed: [],
+    blockers: [],
+    go_no_go: "go"
+  };
+
+  assert.doesNotThrow(() => {
+    validateStructuredSubmission("schema://jobs/release-readiness-output", payload);
+  });
+});
+
+test("validateStructuredSubmission accepts first-wave defect triage payloads", () => {
+  const payload = {
+    category: "bug",
+    severity: "high",
+    component: "api",
+    repro_clarity: "clear",
+    next_owner: "backend",
+    duplication_risk: "low"
+  };
+
+  assert.doesNotThrow(() => {
+    validateStructuredSubmission("schema://jobs/issue-defect-triage-output", payload);
+  });
+});
+
+test("validateStructuredSubmission accepts first-wave docs drift payloads", () => {
+  const payload = {
+    source_surface: "docs/CORE_FRAMEWORK_ROADMAP.md",
+    drift_findings: [
+      {
+        surface_a: "docs/CORE_FRAMEWORK_ROADMAP.md",
+        surface_b: "docs/SPEC_AUDIT_2026-05-13.md",
+        mismatch: "Roadmap still described convention-only schemas after runtime validation landed."
+      }
+    ],
+    missing_updates: ["docs/SPEC_AUDIT_2026-05-13.md"],
+    severity: "medium",
+    fix_recommendation: "Update the audit once the schema sync gate lands."
+  };
+
+  assert.doesNotThrow(() => {
+    validateStructuredSubmission("schema://jobs/docs-drift-audit-output", payload);
   });
 });
 

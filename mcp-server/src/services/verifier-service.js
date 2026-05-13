@@ -5,6 +5,9 @@ import {
   jobWithVerifierConfigSnapshot
 } from "../core/verifier-contract.js";
 import { assertSessionCanReceiveVerification } from "../core/session-state-machine.js";
+import { normalizeSubmission } from "../core/submission.js";
+import { getBuiltinJobSchema } from "../core/job-schema-registry.js";
+import { normalizeSubmitPayloadShape, validateSubmissionContract } from "../core/job-execution-service.js";
 
 export class VerifierService {
   constructor(platformService, stateStore, blockchainGateway = undefined, registry = new VerifierRegistry()) {
@@ -20,7 +23,8 @@ export class VerifierService {
     const job = this.platformService.getJobDefinition(session.jobId);
     const chainJobId = session.chainJobId ?? session.jobId;
     const verificationInput = this.resolveVerificationInput(session, evidence);
-    const verdict = await this.registry.evaluate(job, verificationInput);
+    const validatedVerificationInput = this.validateVerificationInput(job, verificationInput);
+    const verdict = await this.registry.evaluate(job, validatedVerificationInput);
     const reasoningHash = hashCanonicalContent({
       handler: verdict.handler,
       handlerVersion: verdict.handlerVersion,
@@ -44,7 +48,7 @@ export class VerifierService {
       ...verdict,
       sessionId,
       metadataURI,
-      ...buildVerificationAuditFields(job, { verdict, verificationInput }),
+      ...buildVerificationAuditFields(job, { verdict, verificationInput: validatedVerificationInput }),
       session: updatedSession ?? session
     };
 
@@ -57,13 +61,14 @@ export class VerifierService {
     const existing = await this.stateStore.getVerificationResult(sessionId);
     const verificationInput = existing?.verificationInput ?? this.resolveVerificationInput(session);
     const replayJob = jobWithVerifierConfigSnapshot(job, existing?.verifierConfigSnapshot);
-    const verdict = await this.registry.evaluate(replayJob, verificationInput);
+    const validatedVerificationInput = this.validateVerificationInput(replayJob, verificationInput);
+    const verdict = await this.registry.evaluate(replayJob, validatedVerificationInput);
     return {
       ...verdict,
       sessionId,
       replay: true,
       originalOutcome: existing?.outcome,
-      ...buildVerificationAuditFields(replayJob, { verdict, verificationInput })
+      ...buildVerificationAuditFields(replayJob, { verdict, verificationInput: validatedVerificationInput })
     };
   }
 
@@ -86,4 +91,26 @@ export class VerifierService {
     }
     return "";
   }
+
+  validateVerificationInput(job, verificationInput) {
+    if (!getBuiltinJobSchema(job?.outputSchemaRef)) {
+      return verificationInput;
+    }
+
+    const normalized = isNormalizedSubmission(verificationInput)
+      ? verificationInput
+      : normalizeSubmission(normalizeSubmitPayloadShape(job.outputSchemaRef, verificationInput));
+    validateSubmissionContract(job.outputSchemaRef, normalized, { path: "verificationInput" });
+    return normalized;
+  }
+}
+
+function isNormalizedSubmission(input) {
+  if (!input || typeof input !== "object") {
+    return false;
+  }
+  if (input.kind === "structured" && "structured" in input) {
+    return true;
+  }
+  return input.kind === "text" && typeof input.evidenceText === "string";
 }

@@ -21,6 +21,8 @@
     "publish:discovery-manifest": "node scripts/ops/publish-discovery-manifest.mjs",
     "sync:discovery-manifest": "node scripts/ops/sync-discovery-manifest.mjs",
     "check:discovery-manifest": "node scripts/ops/sync-discovery-manifest.mjs --check",
+    "sync:job-schemas": "node scripts/ops/sync-job-schemas.mjs",
+    "check:job-schemas": "node scripts/ops/sync-job-schemas.mjs --check",
     "check:product-proof": "node scripts/ops/check-product-proof-gate.mjs",
     "product-proof:worker-loop": "node scripts/ops/run-hosted-worker-loop.mjs",
     "dev:app": "npm --workspace averray-app run dev",

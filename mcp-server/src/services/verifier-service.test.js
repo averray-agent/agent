@@ -30,6 +30,7 @@ test("verifySubmission persists verification input and supports replay", async (
 
   const job = {
     id: "release-readiness-check-001",
+    outputSchemaRef: "schema://jobs/release-readiness-output",
     verifierMode: "deterministic",
     verifierConfig: {
       version: 1,
@@ -122,6 +123,64 @@ test("verifySubmission rejects non-verifiable sessions before handler or chain s
       assert.equal(error.code, "invalid_session_transition");
       assert.equal(error.details.currentStatus, "claimed");
       assert.equal(error.details.nextStatus, "resolved|rejected|disputed");
+      return true;
+    }
+  );
+  assert.equal(evaluated, false);
+  assert.equal(resolvedOnChain, false);
+});
+
+test("verifySubmission validates built-in schema-native input before handler or chain side effects", async () => {
+  const stateStore = new MemoryStateStore();
+  const session = transitionSession({
+    sessionId: SESSION_ID,
+    wallet: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    jobId: "release-readiness-check-001",
+    submission: normalizeSubmission("complete")
+  }, "claimed", { reason: "job_claimed" });
+  await stateStore.upsertSession(transitionSession(session, "submitted", { reason: "work_submitted" }));
+
+  let evaluated = false;
+  let resolvedOnChain = false;
+  const service = new VerifierService(
+    {
+      resumeSession: (sessionId) => stateStore.getSession(sessionId),
+      getJobDefinition: () => ({
+        id: "release-readiness-check-001",
+        outputSchemaRef: "schema://jobs/release-readiness-output",
+        verifierConfig: {
+          version: 1,
+          handler: "deterministic",
+          expectedOutputs: ["release_id"],
+          matchMode: "contains_all"
+        }
+      }),
+      ingestVerification: () => {
+        throw new Error("verification should not ingest before schema validation passes");
+      }
+    },
+    stateStore,
+    {
+      isEnabled: () => true,
+      resolveSinglePayout: async () => {
+        resolvedOnChain = true;
+      }
+    },
+    {
+      evaluate: async () => {
+        evaluated = true;
+        return { outcome: "approved" };
+      },
+      listHandlers: () => []
+    }
+  );
+
+  await assert.rejects(
+    () => service.verifySubmission({ sessionId: SESSION_ID }),
+    (error) => {
+      assert.equal(error.code, "invalid_request");
+      assert.match(error.message, /Schema-native jobs require/u);
+      assert.equal(error.details.schemaValidates, "payload.submission");
       return true;
     }
   );

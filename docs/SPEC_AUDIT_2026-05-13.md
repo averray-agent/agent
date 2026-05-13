@@ -158,11 +158,11 @@ SSH/basic-auth/admin-JWT cutovers, and the basic hosted smoke is green.
 
 ### Schema-Native Jobs
 
-- Align `docs/schemas/jobs/` with the runtime registry.
-- Define first-party schemas for PR review findings, release readiness, issue
-  triage, and docs drift audit.
-- Enforce structured output validation before verifier execution and before
-  helper workflows consume a claim/submit attempt.
+- Status: first-wave runtime schemas, public docs sync, submit-time validation,
+  and pre-verifier validation are implemented.
+- Remaining: make external/helper workflows call `/jobs/validate-submission`
+  before consuming a claim/submit attempt, and add signed registration before
+  tightening custom/off-platform schema refs.
 
 ### Verifier Replay Hardening
 

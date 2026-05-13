@@ -132,36 +132,37 @@ is still too loose for high-trust operation.
 ### Why this matters
 
 The platform already points at schema-first jobs through
-`inputSchemaRef` and `outputSchemaRef`, but those fields are still
-mostly metadata. Real quality control still depends heavily on
-verifier terms and operator discipline.
+`inputSchemaRef` and `outputSchemaRef`, and the first built-in schema-native
+paths now validate against the runtime registry before submit and verifier
+execution. Real quality control still depends on verifier terms and operator
+discipline for custom/off-platform schemas.
+
+### Current state
+
+- `docs/schemas/jobs/` is generated from the runtime registry and checked in CI
+- first-party schemas exist for PR review findings, release readiness, issue
+  triage, and docs drift audit
+- built-in schema-native outputs are validated at submit time and again before
+  verifier execution
+- `/jobs/definition.submissionContract` and `/jobs/validate-submission` remain
+  the no-mutation source of truth for exact submit shape
 
 ### Gaps today
 
-- schema refs are not strongly validated at job creation time
-- submit flows do not validate structured output against a concrete schema
-- the first-wave jobs are structured by convention, not enforced runtime
-- schema libraries are still sparse outside the public profile and badge docs
+- custom/off-platform schema refs are still allowed without signed schema
+  registration
+- helper workflows outside the platform still need to call
+  `/jobs/validate-submission` before consuming a claim/submit attempt
+- richer verifier replay fixtures should land before introducing v2 handlers
 
 ### Improve to
 
-- a small reusable schema registry
 - job creation that verifies referenced schemas exist
-- submit-time validation before verifier execution
 - richer operator errors for invalid structured submissions
+- signed schema registration for custom/off-platform work
 
 ### Concrete next changes
 
-- keep job schema docs under `docs/schemas/jobs/` aligned with the runtime
-  registry
-- define first-party schemas for:
-  - PR review findings
-  - release readiness
-  - issue triage
-  - docs drift audit
-- keep `/jobs/definition.submissionContract` and
-  `/jobs/validate-submission` as the no-mutation source of truth for exact
-  submit shape
 - validate structured output before claim/submit helper flows consume a claim
   attempt
 - continue tightening custom/off-platform schema refs once a signed schema

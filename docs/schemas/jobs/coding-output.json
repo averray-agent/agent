@@ -1,16 +1,38 @@
 {
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "schema://jobs/coding-output",
   "title": "Coding Output",
+  "description": "Generic coding job output.",
   "type": "object",
-  "required": ["summary", "output", "status"],
   "properties": {
-    "summary": { "type": "string", "minLength": 1 },
-    "output": { "type": "string", "minLength": 1 },
-    "status": { "type": "string", "enum": ["complete", "partial", "blocked"] },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "output": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "complete",
+        "partial",
+        "blocked"
+      ]
+    },
     "filesChanged": {
       "type": "array",
-      "items": { "type": "string", "minLength": 1 }
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
     }
   },
+  "required": [
+    "summary",
+    "output",
+    "status"
+  ],
   "additionalProperties": false
 }

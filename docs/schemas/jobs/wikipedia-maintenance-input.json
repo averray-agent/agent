@@ -1,17 +1,42 @@
 {
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "schema://jobs/wikipedia-maintenance-input",
   "title": "Wikipedia Maintenance Input",
+  "description": "Wikipedia public article maintenance job input.",
   "type": "object",
-  "required": ["project", "pageTitle", "pageUrl", "revisionId", "taskType", "instructions"],
   "properties": {
     "project": {
       "type": "string",
-      "enum": ["wikipedia"]
+      "enum": [
+        "wikipedia"
+      ]
     },
-    "language": { "type": "string" },
-    "pageTitle": { "type": "string", "minLength": 1 },
-    "pageUrl": { "type": "string", "minLength": 1 },
-    "revisionId": { "type": "string", "minLength": 1 },
+    "language": {
+      "type": "string"
+    },
+    "lang": {
+      "type": "string"
+    },
+    "pageTitle": {
+      "type": "string",
+      "minLength": 1
+    },
+    "pageUrl": {
+      "type": "string",
+      "minLength": 1
+    },
+    "articleUrl": {
+      "type": "string",
+      "minLength": 1
+    },
+    "revisionId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "pinnedRevisionUrl": {
+      "type": "string",
+      "minLength": 1
+    },
     "taskType": {
       "type": "string",
       "enum": [
@@ -20,15 +45,40 @@
         "infobox_consistency"
       ]
     },
+    "proposalOnly": {
+      "type": "boolean"
+    },
+    "attributionPolicy": {
+      "type": "string",
+      "minLength": 1
+    },
+    "outputSchemaUrl": {
+      "type": "string",
+      "minLength": 1
+    },
     "sourceUrls": {
       "type": "array",
-      "items": { "type": "string", "minLength": 1 }
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
     },
     "instructions": {
       "type": "array",
-      "minItems": 1,
-      "items": { "type": "string", "minLength": 1 }
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1
     }
   },
+  "required": [
+    "project",
+    "pageTitle",
+    "pageUrl",
+    "revisionId",
+    "taskType",
+    "instructions"
+  ],
   "additionalProperties": false
 }

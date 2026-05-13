@@ -1,35 +1,82 @@
 {
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "schema://jobs/pr-review-findings-output",
   "title": "PR Review Findings Output",
+  "description": "Structured PR review findings.",
   "type": "object",
-  "required": ["summary", "findings", "risk_level", "files_touched", "recommended_next_step"],
   "properties": {
-    "summary": { "type": "string", "minLength": 1 },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
     "findings": {
       "type": "array",
       "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["severity", "file", "issue", "recommendation"],
         "properties": {
-          "severity": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
-          "file": { "type": "string", "minLength": 1 },
-          "issue": { "type": "string", "minLength": 1 },
-          "recommendation": { "type": "string", "minLength": 1 }
+          "severity": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ]
+          },
+          "file": {
+            "type": "string",
+            "minLength": 1
+          },
+          "issue": {
+            "type": "string",
+            "minLength": 1
+          },
+          "recommendation": {
+            "type": "string",
+            "minLength": 1
+          }
         },
+        "required": [
+          "severity",
+          "file",
+          "issue",
+          "recommendation"
+        ],
         "additionalProperties": false
       }
     },
-    "risk_level": { "type": "string", "enum": ["low", "medium", "high"] },
+    "risk_level": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
     "files_touched": {
       "type": "array",
-      "minItems": 1,
-      "items": { "type": "string", "minLength": 1 }
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1
     },
     "recommended_next_step": {
       "type": "string",
-      "enum": ["merge", "fix_and_retest", "request_changes"]
+      "enum": [
+        "merge",
+        "fix_and_retest",
+        "request_changes"
+      ]
     }
   },
+  "required": [
+    "summary",
+    "findings",
+    "risk_level",
+    "files_touched",
+    "recommended_next_step"
+  ],
   "additionalProperties": false
 }

@@ -1,24 +1,53 @@
 {
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "schema://jobs/openapi-quality-audit-output",
   "title": "OpenAPI Quality Audit Output",
+  "description": "Structured evidence for an OpenAPI spec quality audit.",
   "type": "object",
-  "required": ["api_title", "spec_url", "checks", "findings", "no_issue_found", "summary", "recommended_actions"],
   "properties": {
-    "api_title": { "type": "string", "minLength": 1 },
-    "spec_url": { "type": "string", "minLength": 1 },
-    "local_surface": { "type": "string" },
-    "openapi_version": { "type": "string" },
+    "api_title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "spec_url": {
+      "type": "string",
+      "minLength": 1
+    },
+    "local_surface": {
+      "type": "string"
+    },
+    "openapi_version": {
+      "type": "string"
+    },
     "checks": {
       "type": "array",
       "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["name", "status", "evidence"],
         "properties": {
-          "name": { "type": "string", "minLength": 1 },
-          "status": { "type": "string", "enum": ["pass", "warn", "fail", "unknown"] },
-          "evidence": { "type": "string", "minLength": 1 }
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "warn",
+              "fail",
+              "unknown"
+            ]
+          },
+          "evidence": {
+            "type": "string",
+            "minLength": 1
+          }
         },
+        "required": [
+          "name",
+          "status",
+          "evidence"
+        ],
         "additionalProperties": false
       }
     },
@@ -26,25 +55,69 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["severity", "location", "issue", "evidence", "recommendation"],
         "properties": {
-          "severity": { "type": "string", "enum": ["low", "medium", "high"] },
-          "location": { "type": "string", "minLength": 1 },
-          "issue": { "type": "string", "minLength": 1 },
-          "evidence": { "type": "string", "minLength": 1 },
-          "recommendation": { "type": "string", "minLength": 1 }
+          "severity": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ]
+          },
+          "location": {
+            "type": "string",
+            "minLength": 1
+          },
+          "issue": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidence": {
+            "type": "string",
+            "minLength": 1
+          },
+          "recommendation": {
+            "type": "string",
+            "minLength": 1
+          }
         },
+        "required": [
+          "severity",
+          "location",
+          "issue",
+          "evidence",
+          "recommendation"
+        ],
         "additionalProperties": false
       }
     },
-    "no_issue_found": { "type": "boolean" },
-    "summary": { "type": "string", "minLength": 1 },
+    "no_issue_found": {
+      "type": "boolean"
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
     "recommended_actions": {
       "type": "array",
-      "minItems": 1,
-      "items": { "type": "string", "minLength": 1 }
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1
     },
-    "notes": { "type": "string" }
+    "notes": {
+      "type": "string"
+    }
   },
+  "required": [
+    "api_title",
+    "spec_url",
+    "checks",
+    "findings",
+    "no_issue_found",
+    "summary",
+    "recommended_actions"
+  ],
   "additionalProperties": false
 }
