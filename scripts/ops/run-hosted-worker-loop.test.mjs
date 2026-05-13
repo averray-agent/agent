@@ -30,9 +30,13 @@ test("runHostedWorkerLoop creates, claims, submits, verifies, and writes evidenc
       calls.push(["createJob", payload]);
       return { id: payload.id };
     },
+    async preflightJob(id) {
+      calls.push(["preflightJob", id]);
+      return preflightReady({ jobId: id, wallet });
+    },
     async claimJob(id, idempotencyKey) {
       calls.push(["claimJob", id, idempotencyKey]);
-      return { status: "claimed", sessionId };
+      return { status: "claimed", sessionId, claimExpiresAt: "2026-01-01T01:00:00.000Z" };
     },
     async submitWork(id, evidence) {
       calls.push(["submitWork", id, evidence]);
@@ -77,6 +81,7 @@ test("runHostedWorkerLoop creates, claims, submits, verifies, and writes evidenc
     "getAdminStatus",
     "getAccountSummary",
     "createJob",
+    "preflightJob",
     "claimJob",
     "submitWork",
     "runVerifier",
@@ -87,7 +92,7 @@ test("runHostedWorkerLoop creates, claims, submits, verifies, and writes evidenc
   assert.equal(calls[3][1].verifierMode, "benchmark");
   assert.equal(calls[3][1].rewardAsset, "USDC");
   assert.equal(calls[3][1].rewardAmount, 0.1);
-  assert.equal(calls[4][2], `product-proof:${jobId}`);
+  assert.equal(calls[5][2], `product-proof:${jobId}`);
 
   const written = JSON.parse(await readFile(evidenceFile, "utf8"));
   assert.equal(written.jobId, jobId);
@@ -98,6 +103,11 @@ test("runHostedWorkerLoop creates, claims, submits, verifies, and writes evidenc
   assert.equal(written.rewardReadiness.rewardRaw, "100000");
   assert.equal(written.liquidityReadiness.requiredRaw, "100000");
   assert.equal(written.liquidityReadiness.availableRaw, "100000");
+  assert.equal(written.preflightReadiness.eligible, true);
+  assert.equal(written.preflightReadiness.requiredOutputSchema, "schema://jobs/product-proof-worker-loop");
+  assert.equal(written.claimReadiness.status, "claimed");
+  assert.equal(written.claimReadiness.claimExpiresAt, "2026-01-01T01:00:00.000Z");
+  assert.equal(written.submitStatus, "submitted");
 });
 
 test("runHostedWorkerLoop fails closed without a token", async () => {
@@ -122,6 +132,10 @@ test("runHostedWorkerLoop accepts an explicit positive reward amount", async () 
     async createJob(payload) {
       calls.push(["createJob", payload]);
       return { id: payload.id };
+    },
+    async preflightJob(id) {
+      calls.push(["preflightJob", id]);
+      return preflightReady({ jobId: id });
     },
     async claimJob(id) {
       return { status: "claimed", sessionId: `${id}:wallet` };
@@ -222,6 +236,60 @@ test("runHostedWorkerLoop fails closed before mutation when account summary wall
   );
 
   assert.deepEqual(calls.map(([name]) => name), ["getAuthSession", "getAdminStatus", "getAccountSummary"]);
+});
+
+test("runHostedWorkerLoop fails closed after job creation when preflight blocks claim", async () => {
+  const calls = [];
+  const jobId = "product-proof-worker-loop-1700000000000";
+  await assert.rejects(
+    runHostedWorkerLoop({
+      client: {
+        async getAuthSession() {
+          calls.push(["getAuthSession"]);
+          return { wallet: "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519" };
+        },
+        async getAdminStatus() {
+          calls.push(["getAdminStatus"]);
+          return settlementReadyStatus();
+        },
+        async getAccountSummary() {
+          calls.push(["getAccountSummary"]);
+          return accountSummary({ liquidUsdcRaw: 100_000 });
+        },
+        async createJob(payload) {
+          calls.push(["createJob", payload]);
+          return { id: payload.id };
+        },
+        async preflightJob(id) {
+          calls.push(["preflightJob", id]);
+          return {
+            ...preflightReady({ jobId: id }),
+            eligible: false,
+            claimable: false,
+            currentWalletCanClaim: false,
+            reason: "tier_gate"
+          };
+        },
+        async claimJob() {
+          calls.push(["claimJob"]);
+          throw new Error("should not claim when preflight blocks claim");
+        }
+      },
+      now: () => 1700000000000,
+      log: () => {},
+      env: { ADMIN_JWT: "token" }
+    }),
+    /preflight failed: eligible=false; claimable=false; currentWalletCanClaim=false; reason=tier_gate/u
+  );
+
+  assert.deepEqual(calls.map(([name]) => name), [
+    "getAuthSession",
+    "getAdminStatus",
+    "getAccountSummary",
+    "createJob",
+    "preflightJob"
+  ]);
+  assert.equal(calls[4][1], jobId);
 });
 
 test("runHostedWorkerLoop fails closed before mutation when settlement is not ready", async () => {
@@ -460,6 +528,24 @@ function accountSummary({
     collateralLocked: {},
     jobStakeLocked: {},
     debtOutstanding: {}
+  };
+}
+
+function preflightReady({
+  jobId,
+  wallet = "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519"
+}) {
+  return {
+    jobId,
+    wallet,
+    eligible: true,
+    claimable: true,
+    currentWalletCanClaim: true,
+    reason: "claimable",
+    requiredOutputSchema: "schema://jobs/product-proof-worker-loop",
+    verifierMode: "benchmark",
+    totalClaimLock: 0,
+    claimEconomicsWaived: true
   };
 }
 

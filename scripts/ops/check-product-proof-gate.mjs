@@ -2,9 +2,19 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
+import { DEFAULT_ESCROW_ASSET } from "../../mcp-server/src/core/assets.js";
+
 const DEFAULT_PUBLIC_SITE_URL = "https://averray.com";
 const DEFAULT_API_BASE_URL = "https://api.averray.com";
 const DEFAULT_SAMPLE_SCHEMA = "wikipedia-citation-repair-output";
+const REQUIRED_ESCROW_ASSET = {
+  symbol: DEFAULT_ESCROW_ASSET.symbol,
+  address: DEFAULT_ESCROW_ASSET.address.toLowerCase(),
+  assetClass: DEFAULT_ESCROW_ASSET.assetClass,
+  assetId: DEFAULT_ESCROW_ASSET.assetId,
+  decimals: DEFAULT_ESCROW_ASSET.decimals,
+  minBalanceRaw: String(DEFAULT_ESCROW_ASSET.minBalanceRaw)
+};
 
 export async function checkProductProofGate({
   env = process.env,
@@ -118,6 +128,7 @@ async function checkWorkerLoopEvidence(fetchImpl, evidence, { apiBaseUrl }) {
   assert.ok(evidence.sessionId, "worker-loop evidence requires sessionId");
   assert.ok(evidence.jobId, "worker-loop evidence requires jobId");
   assert.ok(evidence.wallet, "worker-loop evidence requires wallet");
+  assertWorkerLoopCompletionEvidence(evidence, { apiBaseUrl });
 
   const badgeUrl = evidence.badgeUrl || `${apiBaseUrl}/badges/${encodeURIComponent(evidence.sessionId)}`;
   const profileUrl = evidence.profileUrl || `${apiBaseUrl}/agents/${encodeURIComponent(evidence.wallet)}`;
@@ -137,6 +148,67 @@ async function checkWorkerLoopEvidence(fetchImpl, evidence, { apiBaseUrl }) {
     )),
     "profile badges must include the verified worker-loop session"
   );
+}
+
+function assertWorkerLoopCompletionEvidence(evidence, { apiBaseUrl }) {
+  if (evidence.apiBaseUrl) {
+    assert.equal(stripTrailingSlash(evidence.apiBaseUrl), apiBaseUrl, "worker-loop evidence apiBaseUrl must match the checked API host");
+  }
+  assert.equal(evidence.verificationOutcome, "approved", "worker-loop evidence requires approved verificationOutcome");
+  assert.equal(evidence.submitStatus, "submitted", "worker-loop evidence requires submitted submitStatus");
+  assert.equal(evidence.sessionStatus, "resolved", "worker-loop evidence requires resolved sessionStatus");
+  assert.ok(Date.parse(evidence.completedAt) > 0, "worker-loop evidence requires completedAt timestamp");
+
+  const settlement = evidence.settlementReadiness;
+  assert.ok(settlement?.settlementReady === true, "worker-loop evidence requires settlementReadiness.settlementReady=true");
+  const asset = settlement.asset;
+  assert.equal(asset?.symbol, REQUIRED_ESCROW_ASSET.symbol, "worker-loop evidence settlement asset must be USDC");
+  assert.equal(String(asset?.address ?? "").toLowerCase(), REQUIRED_ESCROW_ASSET.address, "worker-loop evidence settlement asset address must match canonical USDC precompile");
+  assert.equal(asset?.assetClass, REQUIRED_ESCROW_ASSET.assetClass, "worker-loop evidence settlement asset class must match canonical USDC");
+  assert.equal(Number(asset?.assetId), REQUIRED_ESCROW_ASSET.assetId, "worker-loop evidence settlement asset id must match canonical USDC");
+  assert.equal(Number(asset?.decimals), REQUIRED_ESCROW_ASSET.decimals, "worker-loop evidence settlement asset decimals must match canonical USDC");
+  assert.equal(String(asset?.minBalanceRaw ?? ""), REQUIRED_ESCROW_ASSET.minBalanceRaw, "worker-loop evidence settlement asset minBalanceRaw must match canonical USDC");
+  assert.equal(asset?.approved, true, "worker-loop evidence settlement asset must be approved");
+  assert.equal(settlement.roles?.signerIsVerifier, true, "worker-loop evidence requires signer verifier role");
+  assert.equal(settlement.roles?.escrowIsServiceOperator, true, "worker-loop evidence requires EscrowCore service-operator role");
+  assert.equal(settlement.roles?.agentAccountIsServiceOperator, true, "worker-loop evidence requires AgentAccountCore service-operator role");
+
+  assert.equal(evidence.rewardReadiness?.asset, REQUIRED_ESCROW_ASSET.symbol, "worker-loop evidence reward readiness must be USDC");
+  assertRawAtLeast(
+    evidence.rewardReadiness?.rewardRaw,
+    REQUIRED_ESCROW_ASSET.minBalanceRaw,
+    "worker-loop evidence reward must clear the USDC minBalance"
+  );
+  assert.equal(evidence.rewardReadiness?.minBalanceRaw, REQUIRED_ESCROW_ASSET.minBalanceRaw, "worker-loop evidence reward minBalance must match canonical USDC");
+
+  assert.equal(evidence.liquidityReadiness?.wallet?.toLowerCase(), evidence.wallet.toLowerCase(), "worker-loop evidence liquidity wallet must match worker wallet");
+  assert.equal(evidence.liquidityReadiness?.asset, REQUIRED_ESCROW_ASSET.symbol, "worker-loop evidence liquidity readiness must be USDC");
+  assertRawAtLeast(
+    evidence.liquidityReadiness?.availableRaw,
+    evidence.liquidityReadiness?.requiredRaw,
+    "worker-loop evidence liquidity must cover required reward"
+  );
+
+  assert.equal(evidence.preflightReadiness?.jobId, evidence.jobId, "worker-loop evidence preflight jobId must match evidence jobId");
+  assert.equal(String(evidence.preflightReadiness?.wallet ?? "").toLowerCase(), evidence.wallet.toLowerCase(), "worker-loop evidence preflight wallet must match worker wallet");
+  assert.equal(evidence.preflightReadiness?.eligible, true, "worker-loop evidence requires eligible preflight");
+  assert.equal(evidence.preflightReadiness?.claimable, true, "worker-loop evidence requires claimable preflight");
+  assert.notEqual(evidence.preflightReadiness?.currentWalletCanClaim, false, "worker-loop evidence requires currentWalletCanClaim not false");
+  assert.equal(evidence.preflightReadiness?.requiredOutputSchema, "schema://jobs/product-proof-worker-loop", "worker-loop evidence must use the product-proof output schema");
+
+  assert.equal(evidence.claimReadiness?.sessionId, evidence.sessionId, "worker-loop evidence claim sessionId must match evidence sessionId");
+  assert.ok(evidence.claimReadiness?.status, "worker-loop evidence requires claim status");
+}
+
+function assertRawAtLeast(value, minimum, message) {
+  const actual = parseRawAmount(value, message);
+  const expected = parseRawAmount(minimum, message);
+  assert.ok(actual >= expected, `${message}: ${actual} < ${expected}`);
+}
+
+function parseRawAmount(value, label) {
+  assert.ok(typeof value === "string" && /^\d+$/u.test(value), `${label}: expected raw integer string`);
+  return BigInt(value);
 }
 
 async function fetchPageWithMarkers(fetchImpl, url, markers) {
