@@ -37,6 +37,9 @@ PRODUCT_PROOF_REQUIRE_WORKER_LOOP=${PRODUCT_PROOF_REQUIRE_WORKER_LOOP:-0}
 # path; non-USDC values fail closed before mutation.
 PRODUCT_PROOF_REWARD_ASSET=${PRODUCT_PROOF_REWARD_ASSET:-}
 PRODUCT_PROOF_EVIDENCE_FILE=${PRODUCT_PROOF_EVIDENCE_FILE:-"$STACK_ROOT/product-proof-worker-loop-evidence.json"}
+if [[ "$PRODUCT_PROOF_EVIDENCE_FILE" != /* ]]; then
+  PRODUCT_PROOF_EVIDENCE_FILE="$APP_ROOT/$PRODUCT_PROOF_EVIDENCE_FILE"
+fi
 PRODUCT_PROOF_NODE_IMAGE=${PRODUCT_PROOF_NODE_IMAGE:-node:22-bookworm-slim}
 INDEXER_DATABASE_SCHEMA=${INDEXER_DATABASE_SCHEMA:-}
 INDEXER_FRESH_SCHEMA=${INDEXER_FRESH_SCHEMA:-0}
@@ -260,8 +263,12 @@ run_node_script() {
   fi
 
   local relative_script="${script#$APP_ROOT/}"
+  local product_proof_evidence_dir
+  product_proof_evidence_dir="$(dirname "$PRODUCT_PROOF_EVIDENCE_FILE")"
+  mkdir -p "$product_proof_evidence_dir"
   docker run --rm \
     -v "$APP_ROOT:/workspace" \
+    -v "$product_proof_evidence_dir:$product_proof_evidence_dir" \
     -w /workspace \
     -e API_BASE_URL="${API_BASE_URL:-https://api.averray.com}" \
     -e ADMIN_JWT="${ADMIN_JWT:-}" \

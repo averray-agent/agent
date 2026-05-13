@@ -122,6 +122,31 @@ test("deploy wrapper retries frontend after an earlier failed indexer deploy", a
   assert.equal((await readFile(join(stateDir, "frontend.last-good"), "utf8")).trim(), indexerFixSha);
 });
 
+test("docker node fallback persists product-proof evidence on the host", async () => {
+  const script = await readFile(DEPLOY_SCRIPT, "utf8");
+
+  assert.match(
+    script,
+    /PRODUCT_PROOF_EVIDENCE_FILE="\$APP_ROOT\/\$PRODUCT_PROOF_EVIDENCE_FILE"/u,
+    "relative evidence paths should be normalized before docker env propagation"
+  );
+  assert.match(
+    script,
+    /product_proof_evidence_dir="\$\(dirname "\$PRODUCT_PROOF_EVIDENCE_FILE"\)"/u,
+    "docker fallback should derive the host evidence directory"
+  );
+  assert.match(
+    script,
+    /mkdir -p "\$product_proof_evidence_dir"/u,
+    "docker fallback should create the host evidence directory"
+  );
+  assert.match(
+    script,
+    /-v "\$product_proof_evidence_dir:\$product_proof_evidence_dir"/u,
+    "docker fallback should mount the evidence directory at the same path"
+  );
+});
+
 async function writeExecutable(path, content) {
   await writeFile(path, `${content}\n`);
   await chmod(path, 0o755);
