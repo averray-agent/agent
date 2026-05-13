@@ -3,11 +3,14 @@
 This roadmap turns the current platform framework into a more durable
 production core.
 
-The rc1 product and architecture source document lives in
-[RC1_WORKING_SPEC.md](RC1_WORKING_SPEC.md). Use that spec as the roadmap
-boundary when prioritizing contract, backend, indexer, and operations work.
-The PR-sized execution sequence lives in
-[RC1_IMPLEMENTATION_PLAN.md](RC1_IMPLEMENTATION_PLAN.md).
+The current product and architecture source document lives in
+[AVERRAY_WORKING_SPEC.md](AVERRAY_WORKING_SPEC.md). Use that spec as the
+roadmap boundary when prioritizing contract, backend, indexer, and operations
+work. [RC1_WORKING_SPEC.md](RC1_WORKING_SPEC.md) is retained as historical
+context only. The PR-sized rc1 execution sequence still lives in
+[RC1_IMPLEMENTATION_PLAN.md](RC1_IMPLEMENTATION_PLAN.md), and the latest
+cross-plan reconciliation lives in
+[SPEC_AUDIT_2026-05-13.md](SPEC_AUDIT_2026-05-13.md).
 
 It is intentionally grounded in the code that exists today:
 
@@ -33,18 +36,28 @@ What the framework already does well:
 - jobs are normalized into a consistent catalog shape
 - claim flows have idempotency keys and claim locks
 - verification is pluggable at the handler level
-- recurring templates already exist as metadata plus manual fire support
-- sub-jobs already work as a platform pattern using `parentSessionId`
+- verification results persist replay inputs and verifier config snapshots
+- recurring templates now have a scheduler runtime, reserve policy, admin
+  status, and operator controls
+- sub-jobs now have active-worker creation, parent/child indexes, delegation
+  policy, reward reservation, and profile/operator lineage surfaces
 - the HTTP layer exposes enough surface area to support an operator console
+- the SDK/client surface covers the first external integration path
+- job/session event traces persist through memory and Redis state stores
 
 What is still thin:
 
-- verifier contracts are simple keyword or string matching
-- job schemas are references, not strongly enforced contracts
-- session lifecycle is implicit, not modeled as a strict state machine
-- recurring jobs do not have a first-class scheduler runtime yet
-- sub-jobs are linked by convention, not by stronger orchestration rules
-- integrations still rely on ad hoc request shapes instead of a typed SDK
+- verifier contracts still need stronger schema and handler-version replay
+  discipline
+- first-wave job schemas need stricter runtime enforcement
+- settlement, timeout, and dispute phases need fuller state-machine coverage
+- funding, settlement, and dispute events are not fully folded into one trace
+- visible operator filters lag the backend timeline filter surface
+- native XCM/vDOT remains gated on real evidence capture, not implementation
+  scaffolding alone
+- launch operations still have open proof items: hosted worker loop, backup
+  restore drill, pauser rehearsal, self-report delivery, and secrets cutover
+  stability
 
 ---
 
@@ -377,16 +390,17 @@ across environment config, JWT roles, and route-level decisions.
 ### Why this matters
 
 Recurring jobs are one of the strongest retention mechanics in the whole
-product, but today they are still a pattern plus manual fire endpoint.
+product. The scheduler/runtime foundation is now in place; the remaining work
+is proving the live reserve and firing behavior under hosted operation.
 
-### Gaps today
+### Remaining gaps
 
-- on-chain poster reserve funding is still represented as backend policy
-  metadata rather than an escrow-native subscription pool
+- hosted recurring behavior still needs more live proof across real funded
+  templates
 - missed-fire behavior is conservative and does not backfill every skipped
   interval
-- operator UI still needs richer controls for reserve exhaustion and next
-  firing
+- recurring telemetry should stay folded into job/session timelines as the
+  event taxonomy matures
 
 ### Improve to
 
@@ -423,11 +437,12 @@ product, but today they are still a pattern plus manual fire endpoint.
 Sub-jobs already work as a pattern, which is good. The next jump is to make
 delegation feel like a framework feature instead of just a metadata convention.
 
-### Gaps today
+### Remaining gaps
 
-- profile and dashboard surfaces still need richer sub-contracting views
 - no on-chain parent/child linkage
 - no automatic parent-to-child payout streaming
+- profile and dashboard lineage surfaces should keep improving as real
+  multi-agent workflows create sharper UX requirements
 
 ### Improve to
 
@@ -461,18 +476,16 @@ delegation feel like a framework feature instead of just a metadata convention.
 ### Why this matters
 
 The platform is already programmable, but integrations still rely on raw HTTP
-shapes. The frontend client in
-[frontend/http-client.js](/Users/pascalkuriger/repo/Polkadot/frontend/http-client.js)
-proves the need, but it is UI-focused rather than an external integration SDK.
+shapes unless they use the first SDK surface. The current client is now good
+enough as a first integration path; future work should harden examples and
+replay helpers as external agents exercise it.
 
-### Gaps today
+### Remaining gaps
 
-- typed JS client exists, but generated types from the API source are still a
-  later step
-- some request shapes are still duplicated across scripts, demos, and frontend
-  code
 - canonical integration examples are young and should grow with real external
   agent use
+- verifier replay helpers and richer schema examples should be added when
+  external verifier operators need them
 
 ### Improve to
 
@@ -500,6 +513,22 @@ proves the need, but it is UI-focused rather than an external integration SDK.
 - faster integrations
 - less duplicated request glue
 - easier automation and external builder adoption
+
+---
+
+## Current Audit Queue
+
+As of [SPEC_AUDIT_2026-05-13.md](SPEC_AUDIT_2026-05-13.md), the next work
+should prioritize live-proof and launch-risk items before adding new product
+surface:
+
+1. complete the hosted worker-loop product-proof evidence gate
+2. close bootstrap self-report scheduled email delivery
+3. tighten schema-native jobs for the first-wave job families
+4. finish dispute/arbitration launch wiring
+5. capture the native XCM deposit, withdraw, and failure evidence pack
+6. add visible timeline filters to the operator app
+7. continue Phase 2+ secrets cleanup and signer custody hardening
 
 ---
 

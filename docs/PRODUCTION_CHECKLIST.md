@@ -62,6 +62,8 @@ Restore drills are documented in [VPS_RUNBOOK.md](../VPS_RUNBOOK.md).
 - [x] API health is green at `https://api.averray.com/health`.
 - [x] Indexer readiness is green at `https://index.averray.com/ready`.
 - [x] Indexer freshness is within the accepted lag budget.
+- [x] Latest `Deploy Production` workflow on `main` is green after the
+  1Password SSH/basic-auth/admin-JWT cutovers.
 - [ ] When an admin JWT is available, `/admin/status` reports the async XCM
   watcher lane cleanly.
 
