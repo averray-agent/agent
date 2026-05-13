@@ -353,8 +353,15 @@ jobs:
           chmod 700 ~/.ssh
           # Phase 2 PR 2.7a: $VPS_SSH_KEY_OP was loaded from
           # op://prod-ci/vps-ssh-key/private key by the fail-closed
-          # prod-ci load step above; the legacy ${{ secrets.VPS_SSH_KEY }}
-          # GH-secret env binding is gone.
+          # prod-ci load step above; the legacy VPS_SSH_KEY GH-secret
+          # env binding is gone. (Never reference a `${X secrets.Y X}`
+          # expression — using `X` placeholders here to avoid the same
+          # pitfall in this comment — inside a run-block comment: GA
+          # evaluates it BEFORE bash, and a multi-line secret value
+          # injected into a `#` comment splits across newlines, and
+          # the post-newline lines execute as shell commands. That's
+          # how PR 2.7a's first deploy crashed Configure SSH with
+          # `***: command not found`.)
           printf '%s\n' "$VPS_SSH_KEY_OP" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -p "${VPS_PORT:-22}" -H "$VPS_HOST" >> ~/.ssh/known_hosts
@@ -379,7 +386,9 @@ jobs:
           # Phase 2 PR 2.8b: ADMIN_JWT below reads $ADMIN_JWT_OP
           # (loaded from op://prod-smoke/admin-jwt/password by the
           # fail-closed smoke-load step above), not the legacy
-          # ${{ secrets.ADMIN_JWT }} GH secret.
+          # ADMIN_JWT GH secret. (Same caveat as the Configure SSH
+          # block above: never `${X secrets.NAME X}` inside a
+          # run-block comment.)
           #
           # PR 2.7b will move the SSH-heredoc transport for the
           # remaining values (RESEND_API_KEY, BOOTSTRAP_SELF_REPORT_*)
