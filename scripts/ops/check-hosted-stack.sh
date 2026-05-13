@@ -243,6 +243,13 @@ if enabled "$CHECK_PRODUCT_PROOF_GATE"; then
   echo "Checking product-proof gate"
   script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
   repo_root="$(cd "$script_dir/../.." && pwd)"
+  if [[ -n "$PRODUCT_PROOF_EVIDENCE_FILE" ]]; then
+    if [[ "$PRODUCT_PROOF_EVIDENCE_FILE" != /* ]]; then
+      PRODUCT_PROOF_EVIDENCE_FILE="$repo_root/$PRODUCT_PROOF_EVIDENCE_FILE"
+    fi
+    product_proof_evidence_dir="$(dirname "$PRODUCT_PROOF_EVIDENCE_FILE")"
+    mkdir -p "$product_proof_evidence_dir"
+  fi
   if command -v node >/dev/null 2>&1; then
     PUBLIC_SITE_URL="$PUBLIC_SITE_URL" \
       PUBLIC_DISCOVERY_URL="$DISCOVERY_URL" \
@@ -251,8 +258,12 @@ if enabled "$CHECK_PRODUCT_PROOF_GATE"; then
       PRODUCT_PROOF_REQUIRE_WORKER_LOOP="$PRODUCT_PROOF_REQUIRE_WORKER_LOOP" \
       node "$script_dir/check-product-proof-gate.mjs"
   else
+    product_proof_docker_volume_args=(-v "$repo_root:/workspace")
+    if [[ -n "${product_proof_evidence_dir:-}" ]]; then
+      product_proof_docker_volume_args+=(-v "$product_proof_evidence_dir:$product_proof_evidence_dir")
+    fi
     docker run --rm \
-      -v "$repo_root:/workspace" \
+      "${product_proof_docker_volume_args[@]}" \
       -w /workspace \
       -e PUBLIC_SITE_URL="$PUBLIC_SITE_URL" \
       -e PUBLIC_DISCOVERY_URL="$DISCOVERY_URL" \
