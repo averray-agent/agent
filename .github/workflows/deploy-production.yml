@@ -55,14 +55,16 @@ on:
         options:
           - "0"
           - "1"
-      bootstrap_self_report_send_on_start:
-        description: One-shot bootstrap self-report send on backend start.
-        required: false
-        default: "0"
-        type: choice
-        options:
-          - "0"
-          - "1"
+      # bootstrap_self_report_send_on_start: removed in PR 2.7b. The
+      # one-shot "send self-report on backend start" override has been
+      # broken since PR 2.6 retired configure_bootstrap_instrumentation_env
+      # (no callers on the VPS read the heredoc-passed override anymore;
+      # the backend reads BOOTSTRAP_SELF_REPORT_SEND_ON_START from
+      # /run/agent-stack/backend.env, which is rendered from
+      # deploy/backend.env.template:98 = `false`). If the operator needs
+      # to one-shot a bootstrap self-report, edit
+      # deploy/backend.env.template line 98 to `true` for a single
+      # deploy, then revert.
       smoke_check_bootstrap_instrumentation:
         description: Require bootstrap poller + self-report status in hosted smoke.
         required: false
@@ -150,9 +152,18 @@ jobs:
       # the OP value matched the legacy byte-for-byte before the flip.
       # Operator action after this PR merges + one green deploy:
       #   gh secret delete ADMIN_JWT -R averray-agent/agent
-      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-      BOOTSTRAP_SELF_REPORT_TO: ${{ secrets.BOOTSTRAP_SELF_REPORT_TO }}
-      BOOTSTRAP_SELF_REPORT_FROM: ${{ secrets.BOOTSTRAP_SELF_REPORT_FROM }}
+      # RESEND_API_KEY, BOOTSTRAP_SELF_REPORT_TO, BOOTSTRAP_SELF_REPORT_FROM
+      # removed in PR 2.7b. After PR 2.6 retired
+      # configure_bootstrap_instrumentation_env, the SSH-passed copies
+      # of these became dead code — the backend container now reads
+      # them directly from /run/agent-stack/backend.env, which is
+      # rendered from deploy/backend.env.template:
+      #   line 47:    RESEND_API_KEY=op://prod-backend-external/resend-api-key/password
+      #   lines 96-101: BOOTSTRAP_SELF_REPORT_* (literal hardcoded values
+      #                 — these are config, not secrets — and the
+      #                 RESEND_API_KEY entry is OP-sourced).
+      # Operator action after this PR merges + one green deploy:
+      #   gh secret delete RESEND_API_KEY BOOTSTRAP_SELF_REPORT_TO BOOTSTRAP_SELF_REPORT_FROM -R averray-agent/agent
       DEPLOY_RUN_INDEXER: ${{ github.event_name == 'workflow_dispatch' && inputs.run_indexer || 'auto' }}
       DEPLOY_WAIT_FOR_READY: ${{ github.event_name == 'workflow_dispatch' && inputs.wait_for_ready || '1' }}
       DEPLOY_HEALTH_STABILITY_SEC: ${{ github.event_name == 'workflow_dispatch' && inputs.health_stability_sec || '0' }}
@@ -160,7 +171,8 @@ jobs:
       DEPLOY_SMOKE_CHECK_INDEXER: ${{ github.event_name == 'workflow_dispatch' && inputs.smoke_check_indexer || 'auto' }}
       DEPLOY_INDEXER_DATABASE_SCHEMA: ${{ github.event_name == 'workflow_dispatch' && inputs.indexer_database_schema || '' }}
       DEPLOY_INDEXER_FRESH_SCHEMA: ${{ github.event_name == 'workflow_dispatch' && inputs.indexer_fresh_schema || '0' }}
-      DEPLOY_BOOTSTRAP_SELF_REPORT_SEND_ON_START: ${{ github.event_name == 'workflow_dispatch' && inputs.bootstrap_self_report_send_on_start || '0' }}
+      # DEPLOY_BOOTSTRAP_SELF_REPORT_SEND_ON_START removed in PR 2.7b
+      # alongside the matching workflow_dispatch input above.
       DEPLOY_SMOKE_CHECK_BOOTSTRAP_INSTRUMENTATION: ${{ github.event_name == 'workflow_dispatch' && inputs.smoke_check_bootstrap_instrumentation || '0' }}
       DEPLOY_SMOKE_CHECK_BOOTSTRAP_SELF_REPORT_SENT: ${{ github.event_name == 'workflow_dispatch' && inputs.smoke_check_bootstrap_self_report_sent || '0' }}
       DEPLOY_SMOKE_CHECK_PRODUCT_PROOF_GATE: ${{ github.event_name == 'workflow_dispatch' && inputs.smoke_check_product_proof_gate || '0' }}
@@ -390,19 +402,21 @@ jobs:
           # block above: never `${X secrets.NAME X}` inside a
           # run-block comment.)
           #
-          # PR 2.7b will move the SSH-heredoc transport for the
-          # remaining values (RESEND_API_KEY, BOOTSTRAP_SELF_REPORT_*)
-          # to 1Password as well.
+          # Phase 2 PR 2.7b: RESEND_API_KEY, BOOTSTRAP_SELF_REPORT_TO,
+          # BOOTSTRAP_SELF_REPORT_FROM, and BOOTSTRAP_SELF_REPORT_SEND_ON_START
+          # were removed from this heredoc. Audit confirmed nothing on
+          # the VPS reads them after PR 2.6 retired
+          # configure_bootstrap_instrumentation_env — the backend
+          # container gets these values directly from
+          # /run/agent-stack/backend.env (RESEND_API_KEY is OP-sourced
+          # via deploy/backend.env.template:47; the BOOTSTRAP_SELF_REPORT_*
+          # values are template-hardcoded config, not secrets).
           remote_env=$(
-            printf 'APP_BASIC_AUTH_USER=%q APP_BASIC_AUTH_PASSWORD_HASH=%q APP_ALLOW_PROTECTED_SHELL=%q ADMIN_JWT=%q RESEND_API_KEY=%q BOOTSTRAP_SELF_REPORT_TO=%q BOOTSTRAP_SELF_REPORT_FROM=%q BOOTSTRAP_SELF_REPORT_SEND_ON_START=%q RUN_INDEXER=%q WAIT_FOR_READY=%q HEALTH_STABILITY_SEC=%q INDEXER_LOG_TAIL=%q SMOKE_CHECK_INDEXER=%q SMOKE_CHECK_BOOTSTRAP_INSTRUMENTATION=%q SMOKE_CHECK_BOOTSTRAP_SELF_REPORT_SENT=%q SMOKE_CHECK_PRODUCT_PROOF_GATE=%q PRODUCT_PROOF_REQUIRE_WORKER_LOOP=%q PRODUCT_PROOF_REWARD_ASSET=%q INDEXER_DATABASE_SCHEMA=%q INDEXER_FRESH_SCHEMA=%q ' \
+            printf 'APP_BASIC_AUTH_USER=%q APP_BASIC_AUTH_PASSWORD_HASH=%q APP_ALLOW_PROTECTED_SHELL=%q ADMIN_JWT=%q RUN_INDEXER=%q WAIT_FOR_READY=%q HEALTH_STABILITY_SEC=%q INDEXER_LOG_TAIL=%q SMOKE_CHECK_INDEXER=%q SMOKE_CHECK_BOOTSTRAP_INSTRUMENTATION=%q SMOKE_CHECK_BOOTSTRAP_SELF_REPORT_SENT=%q SMOKE_CHECK_PRODUCT_PROOF_GATE=%q PRODUCT_PROOF_REQUIRE_WORKER_LOOP=%q PRODUCT_PROOF_REWARD_ASSET=%q INDEXER_DATABASE_SCHEMA=%q INDEXER_FRESH_SCHEMA=%q ' \
               "$APP_BASIC_AUTH_USER_OP" \
               "$APP_BASIC_AUTH_PASSWORD_HASH_OP" \
               "$APP_ALLOW_PROTECTED_SHELL" \
               "$ADMIN_JWT_OP" \
-              "$RESEND_API_KEY" \
-              "$BOOTSTRAP_SELF_REPORT_TO" \
-              "$BOOTSTRAP_SELF_REPORT_FROM" \
-              "$DEPLOY_BOOTSTRAP_SELF_REPORT_SEND_ON_START" \
               "$DEPLOY_RUN_INDEXER" \
               "$DEPLOY_WAIT_FOR_READY" \
               "$DEPLOY_HEALTH_STABILITY_SEC" \

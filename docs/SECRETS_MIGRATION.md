@@ -1263,14 +1263,67 @@ gh secret delete VPS_SSH_KEY APP_BASIC_AUTH_USER APP_BASIC_AUTH_PASSWORD_HASH -R
 
 (Also still pending from PR 2.8b: `gh secret delete ADMIN_JWT`.)
 
-#### PR 2.7b — move smoke-channel secrets through 1Password (TODO)
+#### PR 2.7b — remove dead RESEND/BOOTSTRAP_SELF_REPORT_* heredoc args (this PR)
 
-`RESEND_API_KEY` and `BOOTSTRAP_SELF_REPORT_*` still flow through the
-job env block as legacy GH secrets. They're parity-loadable from
-`op://prod-backend-external/resend-api-key/password` and (for the
-report addresses) the inventory but not yet wired into a load step.
-Follow the PR 2.8a → 2.8b → 2.7a pattern: add a parity-check load,
-let it run a few deploys, then flip + remove legacy.
+**Touches**: `.github/workflows/deploy-production.yml`.
+
+Audit while building this PR found that `RESEND_API_KEY`,
+`BOOTSTRAP_SELF_REPORT_TO`, and `BOOTSTRAP_SELF_REPORT_FROM` aren't
+actually migration candidates — they're **dead args in the SSH
+heredoc**.
+
+After PR 2.6 retired `configure_bootstrap_instrumentation_env`, no
+script on the VPS reads these values from the heredoc anymore. The
+backend container gets them directly from
+`/run/agent-stack/backend.env`, which is rendered from
+`deploy/backend.env.template`:
+
+- `RESEND_API_KEY` (template line 47): already `op://prod-backend-external/resend-api-key/password` — runs through OP at render time, not via the SSH heredoc.
+- `BOOTSTRAP_SELF_REPORT_*` (template lines 96-101): template-hardcoded literal values — these are config (email addresses, intervals), not secrets.
+
+So the secrets being deleted from the workflow's job env block
+aren't actually moving anywhere; they were simply unused. The
+deploy will pass exactly the same env to the backend container
+before and after this PR.
+
+**Changes:**
+
+- Remove three `${{ secrets.* }}` bindings from the job-level `env:`
+  block: `RESEND_API_KEY`, `BOOTSTRAP_SELF_REPORT_TO`,
+  `BOOTSTRAP_SELF_REPORT_FROM`.
+- Remove the four matching `%q` slots from the SSH-heredoc printf
+  format and their args:
+  - `RESEND_API_KEY=%q "$RESEND_API_KEY"`
+  - `BOOTSTRAP_SELF_REPORT_TO=%q "$BOOTSTRAP_SELF_REPORT_TO"`
+  - `BOOTSTRAP_SELF_REPORT_FROM=%q "$BOOTSTRAP_SELF_REPORT_FROM"`
+  - `BOOTSTRAP_SELF_REPORT_SEND_ON_START=%q "$DEPLOY_BOOTSTRAP_SELF_REPORT_SEND_ON_START"`
+- Remove the orphaned `bootstrap_self_report_send_on_start` workflow_dispatch
+  input and `DEPLOY_BOOTSTRAP_SELF_REPORT_SEND_ON_START` env mapping.
+  The one-shot "send self-report on backend start" override has been
+  silently broken since PR 2.6; an honest "unknown input" error is
+  better than the silent no-op. If the operator needs to one-shot a
+  bootstrap self-report, the workflow comment now points to
+  `deploy/backend.env.template:98` as the place to flip
+  `BOOTSTRAP_SELF_REPORT_SEND_ON_START=false` → `true` for one deploy.
+
+**Operator action after this PR merges + one green deploy:**
+
+```sh
+gh secret delete RESEND_API_KEY BOOTSTRAP_SELF_REPORT_TO BOOTSTRAP_SELF_REPORT_FROM -R averray-agent/agent
+```
+
+Plus the unused-since-PR-2.2 raw password (also safe to delete now):
+
+```sh
+gh secret delete APP_BASIC_AUTH_PASSWORD -R averray-agent/agent
+```
+
+After PR 2.7b, the only "real secrets" remaining in GH Actions are
+`VPS_HOST`, `VPS_PORT`, `VPS_USER`, and the
+`OP_SERVICE_ACCOUNT_TOKEN_PROD_*` tokens — none of which carry
+application secret material; they're connection coordinates and
+1Password service-account tokens (whose blast radius is bounded
+by the per-vault scope).
 
 #### PR 2.7c — delete legacy `/srv` files from the VPS
 
