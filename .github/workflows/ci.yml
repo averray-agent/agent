@@ -157,3 +157,16 @@ jobs:
       # retired in PR 2.6 — drift now needs to be caught at CI time.
       - name: Template matches manifest (settlement values)
         run: node scripts/ops/check-template-matches-manifest.mjs
+
+      # Phase 2 PR 2.9: npm install-script supply-chain guard.
+      # Scans package-lock.json for transitive deps with
+      # `hasInstallScript: true` and fails if any are not in the
+      # allowlist at deploy/npm-install-scripts-allowlist.json.
+      # Pre-empts the Mini Shai-Hulud (Sep 2026) attack shape:
+      # compromised transitive dep silently pulled into lockfile,
+      # executes attacker-controlled code with the runner's full
+      # secret access at install time. Our own package.json files
+      # have ZERO lifecycle scripts (verified at PR 2.9 build);
+      # this guard covers transitive deps.
+      - name: npm install-script supply-chain allowlist
+        run: node scripts/ops/check-npm-install-scripts.mjs

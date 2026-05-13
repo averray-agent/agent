@@ -1,0 +1,42 @@
+{
+  "_comment": "Allowlist of npm packages that are permitted to run lifecycle scripts (preinstall/postinstall/install) during `npm ci`. The CI guard at scripts/ops/check-npm-install-scripts.mjs scans package-lock.json for `hasInstallScript: true` deps and fails if any are not in this allowlist. Rationale: lifecycle scripts are the primary supply-chain attack vector (e.g., Mini Shai-Hulud Sep 2026). A compromised transitive dep that ships a malicious postinstall is shut out by this guard until a human explicitly accepts the new dep here. See docs/SECRETS_MIGRATION.md#npm-install-script-policy for the review procedure when adding a new entry.",
+  "_format_note": "Each entry is keyed by the lockfile package path (e.g., 'node_modules/sharp'). The `name` field is the package name. `reason` is a short justification for why this dep needs its install scripts (native bindings, binary download, etc). `added_at` is the date the dep was first allowlisted, for audit trail. The optional `version` field pins the entry to a specific version — when present, the guard fails on version drift (forcing a fresh review on each bump). When absent, any future version is accepted (more permissive, only use for deps you trust unconditionally).",
+  "allowed": [
+    {
+      "path": "node_modules/astro/node_modules/esbuild",
+      "name": "esbuild",
+      "reason": "Astro's bundled esbuild — downloads platform-specific Go binary at install. Used by marketing/site Astro build.",
+      "added_at": "2026-05-13"
+    },
+    {
+      "path": "node_modules/esbuild",
+      "name": "esbuild",
+      "reason": "Top-level esbuild — downloads platform-specific Go binary at install. Used by various build tooling and indexer.",
+      "added_at": "2026-05-13"
+    },
+    {
+      "path": "node_modules/fsevents",
+      "name": "fsevents",
+      "reason": "macOS-only file watcher. Optional dep of chokidar/Vite/etc. Install script is a no-op on Linux CI; included for parity. Does NOT execute network/exec code.",
+      "added_at": "2026-05-13"
+    },
+    {
+      "path": "node_modules/sqlite3",
+      "name": "sqlite3",
+      "reason": "Native SQLite bindings via node-gyp. Used by indexer/Ponder for local state. Install compiles the C bindings or downloads precompiled per node-pre-gyp.",
+      "added_at": "2026-05-13"
+    },
+    {
+      "path": "node_modules/unrs-resolver",
+      "name": "unrs-resolver",
+      "reason": "Native Rust-based module resolver used by some bundler tooling. Install downloads platform-specific binary.",
+      "added_at": "2026-05-13"
+    },
+    {
+      "path": "node_modules/sharp",
+      "name": "sharp",
+      "reason": "Native libvips bindings for image processing. Used by marketing/Astro site build for image optimization. Install downloads precompiled libvips for the runner arch.",
+      "added_at": "2026-05-13"
+    }
+  ]
+}
