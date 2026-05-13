@@ -1047,7 +1047,7 @@ that worked for the VPS SSH key migration:
 - Add a new `Load smoke-vault secret from 1Password (parity check, non-blocking)`
   step in `deploy-production.yml`, using the
   `OP_SERVICE_ACCOUNT_TOKEN_PROD_SMOKE` environment secret. Loads
-  `ADMIN_JWT_OP` from `op://prod-smoke/admin-jwt/credential`.
+  `ADMIN_JWT_OP` from `op://prod-smoke/admin-jwt/password`.
 - `continue-on-error: true` so a missing/invalid token doesn't break
   the deploy — the legacy `${{ secrets.ADMIN_JWT }}` is still the
   active source.
