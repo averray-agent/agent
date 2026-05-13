@@ -231,11 +231,16 @@ jobs:
       #      includes prod-ci (1Password Web → Integrations).
       - name: Load prod-ci secrets from 1Password (fail-closed)
         id: load_op_ci
-        # Pinned to 1password/load-secrets-action v2.0.0 commit SHA
-        # (verified via the v2.0.0 annotated tag's commit object).
-        # Refresh by re-running:
-        #   curl -s https://api.github.com/repos/1Password/load-secrets-action/git/tags/<tag-sha> | jq .object.sha
-        uses: 1password/load-secrets-action@581a835fb51b8e7ec56b71cf2ffddd7e68bb25e0
+        # Pinned to 1password/load-secrets-action v4.0.0 commit SHA
+        # (verified via the v4.0.0 annotated tag's commit object).
+        # v4.0.0 is the first release that runs on Node 24, required by
+        # GitHub Actions runners after 2026-06-02 (auto-flip date) and
+        # mandatory after 2026-09-16:
+        #   https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+        # Refresh by re-running (annotated tag → commit):
+        #   tag_sha=$(gh api repos/1Password/load-secrets-action/git/refs/tags/<tag> --jq .object.sha)
+        #   gh api repos/1Password/load-secrets-action/git/tags/$tag_sha --jq .object.sha
+        uses: 1password/load-secrets-action@92467eb28f72e8255933372f1e0707c567ce2259 # v4.0.0
         with:
           export-env: true
         env:
@@ -326,7 +331,7 @@ jobs:
       #      includes prod-smoke (1Password Web → Integrations).
       - name: Load ADMIN_JWT from 1Password (fail-closed)
         id: load_op_smoke
-        uses: 1password/load-secrets-action@581a835fb51b8e7ec56b71cf2ffddd7e68bb25e0
+        uses: 1password/load-secrets-action@92467eb28f72e8255933372f1e0707c567ce2259 # v4.0.0
         with:
           export-env: true
         env:
