@@ -367,7 +367,7 @@ jobs:
           export-env: true
         env:
           OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN_PROD_SMOKE }}
-          ADMIN_JWT_OP: op://prod-smoke/admin-jwt/credential
+          ADMIN_JWT_OP: op://prod-smoke/admin-jwt/password
 
       # Same compare-via-tempfiles pattern as the SSH key check above:
       # value never printed; mtime-077 mktemp; cmp -s; warn on
@@ -385,7 +385,7 @@ jobs:
           fail_warn=false
 
           if [ -z "${ADMIN_JWT_OP:-}" ]; then
-            echo "::warning::OP-loaded ADMIN_JWT_OP is empty — check op://prod-smoke/admin-jwt/credential exists"
+            echo "::warning::OP-loaded ADMIN_JWT_OP is empty — check op://prod-smoke/admin-jwt/password exists"
             fail_warn=true
           fi
           if [ -z "${LEGACY_JWT:-}" ]; then

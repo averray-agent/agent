@@ -78,7 +78,7 @@ CI vaults (the firebreak).
 
 | Env var       | `op://` path                                | Used in PR | Notes                                                                                                                                            |
 | ------------- | ------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `ADMIN_JWT`   | `op://prod-smoke/admin-jwt/credential`      | 2.8        | Long-lived (30d) admin JWT for hosted product-proof smoke. TRANSITIONAL — replaced by short-lived OIDC→KMS-signed JWTs in Phase 4b. PR 2.8a adds parity-check load (non-blocking); PR 2.8b flips active source and deletes legacy `${{ secrets.ADMIN_JWT }}`. |
+| `ADMIN_JWT`   | `op://prod-smoke/admin-jwt/password`      | 2.8        | Long-lived (30d) admin JWT for hosted product-proof smoke. TRANSITIONAL — replaced by short-lived OIDC→KMS-signed JWTs in Phase 4b. PR 2.8a adds parity-check load (non-blocking); PR 2.8b flips active source and deletes legacy `${{ secrets.ADMIN_JWT }}`. |
 
 ## Items in 1Password NOT loaded into any runtime template
 
