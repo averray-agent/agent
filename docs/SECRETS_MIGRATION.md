@@ -2708,6 +2708,84 @@ If you suspect a dep you currently allowlist has been compromised:
 5. Rotate every secret that was loaded into CI during the suspect
    window (Phase 2's rotation runbook applies).
 
+### Threat-model conclusion (May 2026 Mini Shai-Hulud postmortem)
+
+After the May 2026 TanStack incident (Mini Shai-Hulud worm, 172+
+packages across npm/PyPI, CVE-2026-45321, CVSS 9.6), we audited
+this repo's exposure to the specific attack chain TanStack
+documented:
+
+1. `pull_request_target` trigger abuse
+2. GitHub Actions cache poisoning
+3. Runtime memory extraction of OIDC tokens from the GHA runner
+
+**Conclusion: the TanStack attack would not have compromised us
+with the post-Phase-2 setup.** The reasoning, in case it changes
+later and the next operator needs to re-evaluate:
+
+- **No `pull_request_target` usage.** The attacker's highest-leverage
+  entry point doesn't exist in our workflows. We use plain
+  `pull_request`, which doesn't expose secrets to PRs from forks.
+  Grep the workflows on every audit: `grep -r pull_request_target .github/workflows/`
+  should return zero.
+
+- **No npm package publishing.** TanStack's OIDC token was the prize
+  — it lets you publish to their npm namespace. We don't publish npm
+  packages; there's no equivalent token in our runners.
+  If we ever start publishing (operator-app SDK, etc.), revisit this.
+
+- **CI workflow has no secrets loaded.** Our `ci.yml` runs
+  `npm ci` for typecheck/test, but the runner has no
+  `OP_SERVICE_ACCOUNT_TOKEN_*`, no `GITHUB_TOKEN` with write
+  permissions (we declare `permissions: contents: read`), no
+  deploy credentials. A compromised install script in CI can
+  exfil nothing more sensitive than the read-only `GITHUB_TOKEN`.
+
+- **Deploy runner runs no `npm install`.** The deploy step SSHs to
+  the VPS and runs `docker compose up`, which builds in VPS-side
+  Docker (not in the GitHub runner that holds `OP_SERVICE_ACCOUNT_TOKEN_PROD_CI`).
+  Transitive-dep install scripts never execute in a runner that has
+  production secrets in env.
+
+- **OP service-account tokens are step-scoped.** They're set on the
+  `load-secrets-action` step's `env:`, not the job's. After that
+  step, the EXPORTED values (`VPS_SSH_KEY_OP`, `ADMIN_JWT_OP`, etc.)
+  propagate, but the OP token itself does not. A compromised dep
+  in a later step couldn't read it from process env.
+
+- **OP token vault-scoping bounds blast radius.** `OP_SERVICE_ACCOUNT_TOKEN_PROD_CI`
+  can read `op://prod-ci/*` only — not `prod-backend` (signer key,
+  AUTH_JWT_SECRETS), not `prod-smoke` (ADMIN_JWT), not `prod-indexer`,
+  not `prod-critical` (raw basic-auth, AWS root recovery, mainnet
+  deployer key if/when present). Phase 1's vault-per-service-account
+  separation is doing real work here.
+
+- **All third-party GitHub Actions are SHA-pinned.** Refresh by
+  re-running `gh api repos/<org>/<repo>/git/refs/tags/<tag> --jq '.object.sha'`
+  and verifying against release notes before bumping.
+
+**Defenses we considered and deliberately did NOT add:**
+
+- `step-security/harden-runner` (egress firewall for GHA runners):
+  the strongest defense against TanStack's runtime memory
+  extraction. We didn't add it because (a) we don't publish npm
+  packages, removing the primary payoff target; (b) the deploy
+  runner doesn't execute install scripts, so the egress vector
+  for transitive-dep compromise doesn't apply to a secret-holding
+  job. Revisit if we ever start publishing or move install steps
+  into a secret-holding job.
+
+- Sigstore / npm provenance verification at install time: TanStack
+  proved this is **necessary-but-not-sufficient** — their
+  compromised packages carried valid SLSA Build Level 3 attestations.
+  Useful as a layer in defense-in-depth, but doesn't replace the
+  allowlist + vault-scoping above.
+
+- `npm audit --audit-level=high` as a hard CI fail: noisy in
+  practice for an active project. We surface findings via
+  `.npmrc audit=true` at install time; operator can promote to a
+  hard fail later if signal/noise improves.
+
 ---
 
 ## When something goes wrong

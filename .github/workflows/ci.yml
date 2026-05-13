@@ -21,7 +21,13 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
+        # Phase 2 PR 2.9 follow-up: pinned to commit SHA (not moving @v1
+        # tag) so a compromised future foundry-rs release can't silently
+        # retarget our CI. To refresh: re-run
+        #   gh api repos/foundry-rs/foundry-toolchain/git/refs/tags/v1 --jq '.object.sha'
+        # and verify the new SHA against the foundry-rs release notes
+        # before updating.
+        uses: foundry-rs/foundry-toolchain@c7450ba673e133f5ee30098b3b54f444d3a2ca2d # v1
         with:
           version: stable
 
