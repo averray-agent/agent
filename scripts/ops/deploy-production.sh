@@ -354,6 +354,22 @@ render_runtime_envs() {
 
   echo "Phase 2 PR 2.5: rendering runtime env files via op inject (fail-closed)"
 
+  # Phase 2 PR 2.7d.1: track per-runtime env-content changes so the
+  # caller can force-recreate the container even when no code path
+  # changed. Without this, a pure 1Password value rotation updates
+  # /run/agent-stack/<runtime>.env but the container keeps running
+  # with the env it loaded at start — compose's env_file: handling
+  # detects path changes but not content changes. The
+  # RUNTIME_ENV_CHANGED_BACKEND / RUNTIME_ENV_CHANGED_INDEXER flags
+  # below feed into deploy()'s should_run decisions further down.
+  #
+  # We use sha256 (not just timestamp) so a render that produces the
+  # same content as before is a no-op signal — docker compose isn't
+  # asked to recreate when nothing meaningful changed. /run files are
+  # mode 0400 ubuntu:ubuntu, so the hash needs sudo to read them.
+  RUNTIME_ENV_CHANGED_BACKEND=0
+  RUNTIME_ENV_CHANGED_INDEXER=0
+
   local runtime
   for runtime in backend indexer; do
     local template="$APP_ROOT/deploy/${runtime}.env.template"
@@ -366,11 +382,37 @@ render_runtime_envs() {
       return 1
     fi
 
+    # Capture the pre-render content hash (if the file exists). Used
+    # below to detect whether the render produced different content.
+    local before_hash=""
+    if sudo test -f "$target"; then
+      before_hash=$(sudo sha256sum "$target" | awk '{print $1}')
+    fi
+
     if ! sudo bash "$render_script" "$template" "$target" "$token"; then
       echo "ERROR: Phase 2 PR 2.5: render of $runtime failed — aborting deploy before container restart" >&2
       echo "       Containers consume /run/agent-stack/${runtime}.env via compose env_file:; stale or missing env would cause hard-to-diagnose failures downstream." >&2
       echo "       To roll back: edit /srv/agent-stack/docker-compose.yml to set env_file: back to /srv/agent-stack/${runtime}.env, then redeploy." >&2
       return 1
+    fi
+
+    # Compute post-render hash and compare. If different (or if there
+    # was no prior file), flag the runtime for compose-level
+    # force-recreate in deploy(). Hash prefixes are logged for
+    # observability — they're not secrets (sha256 of the rendered
+    # env file leaks the same bit of information as docker compose's
+    # config hash already does in logs, and prefixes don't help an
+    # attacker reverse the contents).
+    local after_hash
+    after_hash=$(sudo sha256sum "$target" | awk '{print $1}')
+    if [[ "$before_hash" != "$after_hash" ]]; then
+      local before_label="${before_hash:0:8}"
+      [[ -z "$before_hash" ]] && before_label="(none)"
+      echo "Phase 2 PR 2.7d.1: $runtime /run env content changed (before=$before_label, after=${after_hash:0:8}) — will force-recreate"
+      case "$runtime" in
+        backend) RUNTIME_ENV_CHANGED_BACKEND=1 ;;
+        indexer) RUNTIME_ENV_CHANGED_INDEXER=1 ;;
+      esac
     fi
 
     if [[ ! -f "$legacy" ]]; then
@@ -629,10 +671,29 @@ deploy() {
   # deployments/testnet.json to the regex because changes there can
   # affect rendered /run/backend.env content even without code changes
   # (the manifest feeds the template via the CI parity guard).
+  #
+  # Phase 2 PR 2.7d.1: ALSO trigger on /run env content change. When
+  # the trigger is JUST the env content (no code path changed),
+  # redeploy-backend.sh would be overkill — it rebuilds the image and
+  # does a full deploy cycle. Instead, fall back to a direct
+  # `docker compose up -d --force-recreate <service>` which is the
+  # minimum needed to make compose re-read env_file: into a fresh
+  # container. This is the path a pure-rotation deploy takes: update
+  # 1Password item → trigger workflow_dispatch → render produces new
+  # /run env → hash differs → force-recreate. No SSH+rm dance needed.
+  local backend_code_changed=0
   if should_run backend "$RUN_BACKEND" '^(mcp-server/|sdk/|examples/|docs/schemas/|package(-lock)?\.json|scripts/ops/redeploy-backend\.sh|deploy/backend\.env\.template|deployments/testnet\.json)'; then
+    backend_code_changed=1
+  fi
+  if [[ "$backend_code_changed" == "1" || "${RUNTIME_ENV_CHANGED_BACKEND:-0}" == "1" ]]; then
     run_backend=1
-    echo "Deploying backend"
-    SKIP_GIT_UPDATE=1 PRE_DEPLOY_SHA="$OLD_SHA" "$APP_ROOT/scripts/ops/redeploy-backend.sh"
+    if [[ "$backend_code_changed" == "1" ]]; then
+      echo "Deploying backend (reason: code path changed)"
+      SKIP_GIT_UPDATE=1 PRE_DEPLOY_SHA="$OLD_SHA" "$APP_ROOT/scripts/ops/redeploy-backend.sh"
+    else
+      echo "Deploying backend (reason: /run/agent-stack/backend.env content changed; image unchanged — force-recreating container only)"
+      sudo docker compose --project-directory "$STACK_ROOT" -f "$COMPOSE_FILE" up -d --force-recreate backend
+    fi
     mark_component_deployed backend
   else
     echo "Skipping backend deploy"
@@ -641,10 +702,19 @@ deploy() {
     fi
   fi
 
+  local indexer_code_changed=0
   if should_run indexer "$RUN_INDEXER" '^(indexer/|package(-lock)?\.json|scripts/ops/redeploy-indexer\.sh)'; then
+    indexer_code_changed=1
+  fi
+  if [[ "$indexer_code_changed" == "1" || "${RUNTIME_ENV_CHANGED_INDEXER:-0}" == "1" ]]; then
     run_indexer=1
-    echo "Deploying indexer"
-    SKIP_GIT_UPDATE=1 PRE_DEPLOY_SHA="$OLD_SHA" "$APP_ROOT/scripts/ops/redeploy-indexer.sh"
+    if [[ "$indexer_code_changed" == "1" ]]; then
+      echo "Deploying indexer (reason: code path changed)"
+      SKIP_GIT_UPDATE=1 PRE_DEPLOY_SHA="$OLD_SHA" "$APP_ROOT/scripts/ops/redeploy-indexer.sh"
+    else
+      echo "Deploying indexer (reason: /run/agent-stack/indexer.env content changed; image unchanged — force-recreating container only)"
+      sudo docker compose --project-directory "$STACK_ROOT" -f "$COMPOSE_FILE" up -d --force-recreate indexer
+    fi
     mark_component_deployed indexer
   else
     echo "Skipping indexer deploy"

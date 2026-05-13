@@ -1338,6 +1338,38 @@ Then **reboot test**: confirm `/run/agent-stack` is recreated by
 `systemd-tmpfiles` and the next deploy renders fresh env files
 successfully end-to-end.
 
+#### PR 2.7d.1 — env-content-aware backend redeploy (prerequisite for clean rotations)
+
+**Touches**: `scripts/ops/deploy-production.sh`.
+
+Found while doing the first `RESEND_API_KEY` rotation: a pure 1Password
+value change updates `/run/agent-stack/<runtime>.env` (via the render
+flow on every deploy) but **the running container keeps its old env**.
+Docker Compose's `env_file:` handling detects *path* changes but not
+*content* changes, and the existing `should_run backend` regex only
+triggers on code paths — so a rotation deploy ships the new value to
+disk but doesn't bounce the container, and the operator has to
+`ssh + docker compose up -d --force-recreate <service>` manually.
+
+PR 2.7d.1 closes that gap:
+
+- In `render_runtime_envs()`: compute `sha256sum` of each
+  `/run/agent-stack/<runtime>.env` before and after the render. If
+  they differ (or the file didn't exist before), set the new flags
+  `RUNTIME_ENV_CHANGED_BACKEND=1` / `RUNTIME_ENV_CHANGED_INDEXER=1`.
+  Hash prefixes are logged for observability.
+- In `deploy()`: the existing `should_run backend` (and indexer) call
+  is now wrapped so that **either** a code-path match **or** the
+  env-changed flag triggers a redeploy. When the trigger is just env
+  content (no code change), skip the full `redeploy-backend.sh` cycle
+  (which would unnecessarily rebuild the image) and do a direct
+  `docker compose up -d --force-recreate <service>` instead — the
+  minimum operation needed for compose to re-read `env_file:` into a
+  fresh container.
+
+**Result**: future rotations are pure
+"update OP item → trigger workflow_dispatch → verify". No SSH dance.
+
 #### PR 2.7d — rotation (the part that actually closes the exposure window)
 
 Deletion alone is not enough. The values that lived in GitHub Actions
