@@ -183,7 +183,13 @@ RUN_SUBSCAN_XCM_VALIDATION=1 ./scripts/ops/check-release-readiness.sh testnet
   discover -> sign in -> preflight -> claim -> submit -> verify -> badge/profile
 - [ ] A schema-native job submission has been validated through
   `/jobs/validate-submission` and submitted as direct `payload.submission`
-  evidence, with no `submission.output` wrapper.
+  evidence, with no `submission.output` wrapper. The operator-app gate is in
+  place: `app/lib/api/guarded-submit.js` short-circuits the submit when the
+  validation response is not `{ valid: true }`. Flip this box after the hosted
+  run-detail surface has been used to validate at least one structured-required
+  job (one valid, one invalid) and the invalid attempt did not consume the
+  session's submit budget. Verify with the regression test:
+  `node --test app/lib/api/guarded-submit.test.mjs`.
 - [ ] The phase-0 dispute verdict path has been exercised on the hosted stack
   with the configured arbitrator/gateway and a recorded on-chain tx state from
   `POST /disputes/:id/verdict`.

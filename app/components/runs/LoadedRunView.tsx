@@ -46,6 +46,7 @@ import {
   type SubmissionContract,
   type SubmissionValidationState,
 } from "@/lib/api/submission-contract";
+import { runGuardedSubmit } from "@/lib/api/guarded-submit";
 
 /**
  * Self-contained detail view for a single run.
@@ -188,17 +189,22 @@ export function LoadedRunView({
       const submission = structuredSubmissionRequired
         ? parseDirectSubmissionDraft(evidence)
         : parseSubmissionInput(evidence, loadedRow.id);
-      await swrFetcher([
-        "/jobs/submit",
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            sessionId: loadedRow.sessionId,
-            submission,
-          }),
-        },
-      ]);
+      // Guarded path for schema-required jobs: validate first against
+      // /jobs/validate-submission and refuse to fire /jobs/submit when
+      // the draft is invalid. Keeps a failed-validation attempt from
+      // consuming the operator's claim/submit budget.
+      const outcome = await runGuardedSubmit({
+        jobId: loadedRow.id,
+        sessionId: loadedRow.sessionId,
+        submission,
+        structuredSubmissionRequired,
+        fetcher: swrFetcher,
+      });
+      if (outcome.status === "validation_failed") {
+        setValidationState(validationStateFromPayload(outcome.validation));
+        setSubmitError("Draft did not match the output schema. Fix the highlighted path and submit again.");
+        return;
+      }
       mutate("/jobs");
       mutate("/sessions");
     } catch (err) {
