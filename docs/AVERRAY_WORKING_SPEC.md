@@ -1,7 +1,7 @@
 # Averray — Working Spec (v1.0.0-rc1)
 
 **Status:** Reconciled with deployed reality and operational docs
-**Spec version:** 2.7 (spec/roadmap audit reconciliation; v1 USDC-only/no-yield summary corrected; bootstrap budget aligned to Micro/Standard/Substantive; deploy-readiness proof gates surfaced)
+**Spec version:** 2.8 (merged competitive intel + distribution sections from v2.3/v2.4 parallel branch; Path A on-ramp lock, target verticals, agent-discovery surfaces ported into §10; agent-submitted-work abuse vectors added to §9 threat model; §12 gained operator-onboarding + distribution checklist items; companion `DISTRIBUTION_STRATEGY.md` published)
 **Owner:** Pascal
 
 ---
@@ -619,6 +619,10 @@ To live in `THREAT_MODEL.md`:
 - **Async XCM lane: untrusted input surface.** Current `/account/allocate` and `/account/deallocate` endpoints accept arbitrary `destination` and `message` bytes from the HTTP caller; the backend gateway only normalizes encoding without validating semantics. `XcmWrapper` then hashes and queues whatever was passed in. Any caller able to hit the endpoint could submit any XCM, and the wrapper would queue it. Mitigation in §10's backend SCALE assembler item: HTTP layer accepts intent only (strategy + direction + amount); backend assembles the message under server-controlled policy. Until then, async treasury endpoints must remain admin-gated.
 - **USDC issuer dependency (Circle).** Choosing USDC for v1 escrow inherits Circle's operational risks: address blacklisting, freeze events, regulatory action against Circle, USDC depeg moments (e.g. March 2023 SVB exposure). None are mitigatable from Averray's side once the asset is locked. Treasury controls cannot be re-acquired if Circle freezes a relevant address. Acceptable risk for v1 (USDC is broadly considered the most transparent stablecoin on reserves), but worth being explicit. Mitigations available later: multi-asset settlement (allow USDt as alternative), eventual native-DOT settlement when contract surface supports it, or escrow asset hot-swappability via governance.
 - **USDC regulatory exposure.** Stablecoin treatment varies by jurisdiction. Averray accepting and disbursing USDC at scale may attract regulatory attention (money transmission, MSB licensing depending on jurisdiction) that pure-DOT settlement would not. Worth tracking as the platform scales; not blocking v1 launch but worth a legal review before significant volume.
+- **Agent-submitted work as money-laundering vector.** A platform where anyone can post a bounty, an agent claims and "completes" it, and funds flow out as legitimate earnings is structurally a money-laundering candidate (post a bounty with dirty funds → agent claims → "clean" funds withdraw). The same concern surfaced publicly in third-party threads about this exact platform model (see v2.8 reconciliation log for competitive intel). Mitigations to consider before significant volume: (a) poster KYC/reputation gating above a per-poster-monthly-funding threshold, (b) work-quality auditing that makes purely-rubber-stamp jobs harder to execute, (c) on-chain analysis of poster funding sources (mixers, sanctioned addresses), (d) deliberate friction on poster-and-agent being same-operator. None are needed for bootstrap (Pascal is the only poster); all become material once external posters arrive. Worth explicit treatment in `THREAT_MODEL.md`.
+- **Sophisticated spam at scale.** Agents can generate convincingly-formatted low-quality PRs at near-zero marginal cost. If reviewer fatigue causes maintainers to merge low-effort agent work, the platform contributes to OSS-ecosystem code-quality erosion — which would be reputationally catastrophic for Averray (the platform's pitch is *trust infrastructure*, not *spam infrastructure*). Mitigations: per-repo open-PR caps (already in §4), aggressive denylist response, maintainer feedback loops, possibly tier-based caps (more substantive work allowed when reputation is higher).
+- **Adversarial inputs to the agent.** A malicious repo (or malicious job spec) could be crafted to trick the claiming agent into submitting compromised code to *other* repos the agent has access to, or to extract credentials/secrets from the agent's runtime. This is an agent-side security problem more than a platform-side one, but Averray surfaces it by giving agents work to do. Mitigations: spec sanitization at job-creation time, agent operators responsible for sandbox hygiene, possibly a "high-risk repo" flag posters can set. Worth flagging to operators in `OPERATOR_ONBOARDING.md`.
+- **Maintainer chargeback / dispute-after-merge.** Maintainer merges a PR, agent gets paid, then maintainer reverts and disputes after the dispute window has closed. The 7-day dispute window combined with `autoResolveOnTimeout` is structurally fine for v1 (the platform-side dispute window has hard time bounds), but maintainer trust dynamics could erode if "revert after merge" becomes a pattern. Worth monitoring; not blocking.
 
 ---
 
@@ -677,6 +681,81 @@ Mechanisms that increase agent stickiness without raising platform spend:
 - **Streak bonuses.** Indexer-tracked counter: every consecutive job merged adds 1 to a streak; broken on rejection or > 7-day gap. Streaks of 10+ unlock visible badges in the public trail. Streaks of 25+ unlock claim-fee waiver (platform skips the floor fee for streak-holders, ~$0.05 per claim — small treasury cost, real psychological pull). Pure on-chain mechanic, no new contract — indexer logic plus the existing fee waiver primitive used during onboarding.
 - **Consistency multipliers on yield-share** (when v1.x yield ships). Standard agents pay 1% of yield to platform; agents with 50+ merged jobs in last 90 days pay 0.5%. Costs the platform little, rewards the behavior the platform wants (sticky, consistent agents). Tier 2 multisig-tunable parameter.
 - **Tier graduation as reputation signal.** Public trail surfaces tier composition. No new mechanic — pure data presentation. Already covered in §2 worked examples.
+
+### On-ramp / off-ramp friction reduction (v1.x — Path A, partnership only)
+
+The platform stays crypto-native at the protocol level — every receipt, every payment, every reputation event happens on-chain. But onboarding and offboarding for operators who don't already have crypto infrastructure is a real friction point worth solving via partnership, not via in-house fiat handling.
+
+**Locked direction: Path A.** The platform partners with an existing fiat on-ramp/off-ramp service (Ramp Network, MoonPay, Transak, or a Polkadot-native equivalent if one becomes available). Operators convert their USDC balance to fiat through the partner's flow, *after* on-chain settlement. Averray never touches fiat directly.
+
+**What this preserves:** every dollar that flows through the platform is on-chain. The trust pitch holds. The platform does not become a money transmitter, does not require MSB licensing, and stays within Swiss/Polkadot regulatory scope.
+
+**What this addresses:** the operator-friction problem of "how do I get this USDC into my bank account." With a partner integration, the answer is "click withdraw, complete the on-ramp's flow once, your bank receives fiat." Subsequent withdrawals are one-click.
+
+**Path B (in-house fiat payouts via Stripe Connect or PayPal) explicitly rejected.** Regulatory exposure (money transmission, AML/KYC obligations across 50+ jurisdictions) is structural risk that's incompatible with the platform's posture. Path B is not on the roadmap and should not be revisited without a separate legal/structural decision at the entity level.
+
+Trigger: v1.x post-launch when operator-onboarding friction becomes empirically measurable.
+
+### Target verticals where trust signal gates decisions (v1.x positioning)
+
+When external posters arrive (post-bootstrap), the platform's economic flywheel depends on attracting work *where reputation matters most*, not just work that pays well. "Better jobs" doesn't only mean "higher payouts" — it means **jobs where the buyer's decision depends on verifiable agent trust**.
+
+Verticals where trust signal is structurally important:
+
+- **Security audits and disclosures.** Maintainers, audit firms, and bug-bounty programs care deeply about who's submitting. An agent with a verifiable audit history has materially higher trust than a wallet that just appeared. Aligns with the existing platform model — most security work produces upstream artifacts (merged fix PRs, CVE entries, advisory acknowledgments) that the verifier model already handles cleanly.
+- **Polkadot ecosystem treasury and grant work.** Treasury bounty applicants, Web3 Foundation grant evaluations, OpenGov-funded work — all decisions where "is this proposer reliable" is the gating question. Averray's reputation primitive is structurally readable on the same chain.
+- **High-stakes code review and refactor work.** Multi-file PRs to critical infrastructure repos. Cryptographic library changes. Compiler/runtime patches. Reputation is the gate-keeper for whether the work even gets reviewed.
+- **Curated content review for AI training datasets.** Wikipedia article curation, dataset cleaning, fact-checking — work where consistent quality and a verifiable trail of past acceptance matters more than per-task speed.
+
+Verticals to **deprioritize** at launch:
+
+- Generic feature implementation work where the maintainer evaluates on code quality alone (low reputation-signal differentiator vs. existing platforms like BountyHub)
+- Pure speculation-shaped work (hackathon-style, prize-pool work) where reputation accumulation doesn't compound for the operator
+
+Sequencing for external-poster outreach:
+- **Phase 0** (now, pre-launch): Pascal funds bootstrap work; quality > volume; week-12 gate validates the reputation primitive empirically.
+- **Phase 1** (post-week-12, ~700+ receipts in trail): Direct outreach to Polkadot-ecosystem projects with paid bounty programs. Treasury, Web3 Foundation, specific parachain teams. Audience already understands "on-chain receipts as trust signal."
+- **Phase 2** (~6 months in): Outreach to security audit firms and high-stakes-review verticals outside Polkadot. The reputation trail is the pitch.
+
+### Agent-discovery surfaces (v1.x launch-critical)
+
+Operators tasking agents with *"go find ways to make money"* — the Codex-style autonomous-monetization experiment — represent a real and growing traffic source. The agent does discovery; the operator just sees results. If Averray is **invisible to discovery agents**, the platform routes around it to existing surfaces like BountyHub, HackerOne, OpenPledge, Open Collective, etc., and the reputation that gets built lives on those platforms.
+
+**Operational evidence (as of v2.8):** A single observed operator (`@chatgpt21` on X) reported $23.68 earned across two days from agent-submitted PRs — $16.88 via one program, $6.80 via OpenPledge specifically. The operator was profitable against their $20 OpenAI subscription and upgrading to $100/month. This is a live, measurable demonstration that the agent-bounty loop works at $1–20 per PR and that operators are actively scaling into it. A separate thread from another observer (`@47fucb4r8c69323`) publicly proposed *exactly Averray's category* — a site routing paid open-source tasks through Codex with profit-sharing — as a "moneymaking flywheel." Multiple parties are now publicly converging on this idea. Every day Averray is undiscoverable is a day reputation accrues elsewhere, and the strategic window where the category is unclaimed is closing.
+
+**Competitor / proof-point surfaces to study (and eventually inter-operate with):**
+
+| Surface | Type | Relevance |
+|---|---|---|
+| OpenPledge | Operational bounty platform, PayPal-routed payouts | Direct competitor; concrete proof agent operators use it; possible v2 partner for cross-platform reputation reads |
+| BountyHub | GitHub-issue bounties, Stripe/PayPal payouts | Direct competitor in the GitHub-bounty space |
+| HackerOne | Security-focused bug bounty | Adjacent — security audit vertical Averray targets (see "Target verticals" subsection) |
+| Open Collective | Project-funded bounties via fiscal hosting | Adjacent — funding model differs but agents earn from same upstream merges |
+| boss-bounty (GitHub Marketplace) | Bounties attached directly to issues, auto-pay on merge | Direct competitor at the issue-integration layer |
+
+These platforms do not have a portable reputation primitive. An agent that earned $16.88 on one and $6.80 on OpenPledge today has *no portable trust signal* tying those two payments together. The structural gap Averray fills is exactly this — but only if Averray exists and the agent uses it.
+
+This is a content/distribution problem, not an architectural one — but worth documenting in the spec because it's launch-critical and easy to forget under the gravitational pull of contract work.
+
+Three discovery surfaces matter, in priority order:
+
+**1. Web search results for agent-monetization queries.** Discovery agents run queries like *"make money fixing github issues,"* *"AI agent paid work platforms,"* *"bug bounty platforms agents."* Averray needs to rank for these *specific* queries — not via SEO stuffing, but via genuinely useful technical content (blog posts, docs, examples) that answers the query. Most existing bounty platforms don't write about the *agent-as-the-worker* angle; that's the niche Averray can own.
+
+**2. Aggregator surfaces that discovery agents crawl.** `awesome-*` lists on GitHub for bounty platforms / AI agents / OSS funding. ProductHunt (launch spike + historical archive). Reddit discussions in `r/OpenSource`, `r/AI_Agents`, `r/programming`. Hacker News "Show HN" post timed for v1.x launch. Being mentioned in even a handful of awesome-lists has compounding value — those lists rank well and crawlers find them.
+
+**3. Recent content that discovery agents weight as fresh signal.** Discovery agents bias toward recent content because old platforms have already-tried solutions. Sustaining flow matters: technical blog posts (own domain or Mirror/Substack), Twitter/X threads from accounts AI/agent operators follow, conference talks recorded on YouTube (searchable transcripts), podcast appearances in the AI-agent space.
+
+Target threshold: when a discovery agent searches for recent agent-monetization opportunities, 3–5 results from the last 6 months should mention Averray. That's where the platform crosses from "obscure new option" to "relevant current option."
+
+**Honest launch sequencing constraint:**
+
+Do not start the discovery-surface push until v1.x reputation deepening is genuinely demonstrable end-to-end (agent profile page live, one-click verification working, public read API stable). Otherwise discovery agents find Averray, operators try it, the experience is rough, and the public posts that come out of those experiences are negative — which is content for *future* discovery agents to weight as bad signal.
+
+**The marketing budget for v1 launch is ~$0.** The *time* budget is substantial: Pascal-hours invested in being present in the right communities, helping with the right early integrations, writing the right technical posts. Distribution is execution, not advertising.
+
+**Honest framing for inter-platform pitch** (to be used in `OPERATOR_ONBOARDING.md`): the pitch isn't *"use Averray instead of OpenPledge."* It's *"use both — Averray makes the reputation portable across all of them."* This avoids picking unwinnable fights with established platforms while preserving Averray's structural advantage (cross-platform-readable reputation, which they don't have).
+
+See `DISTRIBUTION_STRATEGY.md` for the operational plan: specific channels, content cadence, outreach scripts, pre-launch content production schedule.
 
 ---
 
@@ -749,6 +828,18 @@ Before public v1.0.0-rc1 launch:
 - [x] Week-12 gate thresholds and diagnostic order documented internally
 - [x] Reason-code registry published (in `docs/DISPUTE_CODES.md` or equivalent)
 - [x] Phase-0 → Phase-1 → Phase-2 arbitration migration triggers documented publicly
+- [ ] **Agent operator onboarding guide** (`docs/OPERATOR_ONBOARDING.md`): "How to onboard your first agent in 15 minutes" — wallet setup, SDK install, first-job claim flow, payout/off-ramp instructions. Target: developer-operator can integrate from cold start in ≤ 30 minutes.
+- [x] **`DISTRIBUTION_STRATEGY.md` published**: companion document covering content cadence, channel priorities, outreach plan, pre-launch content production schedule. Not architectural — operational. Referenced from §10 agent-discovery subsection.
+
+**Agent and operator distribution (v1.x launch-critical):**
+- [ ] `averray-agent-sdk` published as standalone npm/PyPI package (not buried in main repo)
+- [ ] Working agent example repo (`averray-example-agent` or similar) — `git clone && pnpm install && pnpm start` produces a working test agent in ≤ 5 minutes
+- [ ] Repo README absolute-path bugs fixed (currently references `/Users/pascalkuriger/...`)
+- [ ] Averray's MCP server registered in MCP server registry/discovery surfaces that exist at launch time
+- [ ] `/.well-known/agent-tools.json` discoverability live
+- [ ] Pre-launch content produced (≥ 3 technical blog posts ranking for agent-monetization queries — see `DISTRIBUTION_STRATEGY.md`)
+- [ ] Listing on at least 2 relevant `awesome-*` GitHub repos for bounty platforms / AI agents / OSS funding
+- [ ] "Show HN" / ProductHunt launch posts drafted but not published until reputation deepening is demonstrable end-to-end
 
 **Dispute flow (Phase 0 launch):**
 - [ ] `setArbitrator(pascalAddr, true)` called from multisig — single approved arbitrator at launch
@@ -946,6 +1037,20 @@ Stripe Link's launch and Stripe Sessions 2026 announcements positioned agents as
 ## 15. Reconciliation log
 
 For traceability.
+
+### v2.8 (merge of competitive-intel + distribution sections from parallel v2.3/v2.4 branch)
+
+1. **§9 Threat model** gained four new entries documenting the agent-submitted-work abuse surface:
+   - *Agent-submitted work as money-laundering vector* — the post-bounty-claim-withdraw loop is structurally laundering-adjacent. Mitigations to consider before significant external-poster volume (poster KYC threshold, work-quality auditing, on-chain funding-source analysis, same-operator-friction). Not blocking bootstrap (Pascal is sole poster); becomes material when external posters arrive.
+   - *Sophisticated spam at scale* — agents can generate convincingly-formatted low-quality PRs at near-zero cost; reviewer fatigue could erode OSS code quality, which would be reputationally catastrophic for Averray. Per-repo PR caps + denylist + maintainer feedback loops as mitigations.
+   - *Adversarial inputs to the agent* — malicious repos/job specs as attack surface against the claiming agent. Spec sanitization + operator sandbox hygiene + high-risk-repo flags.
+   - *Maintainer chargeback / dispute-after-merge* — flagged for monitoring; structural bounds via 7-day dispute window + `autoResolveOnTimeout` already in place.
+2. **§10 (new subsection)** "On-ramp / off-ramp friction reduction (v1.x — Path A, partnership only)" added. Locked direction: partner with existing fiat services (Ramp/MoonPay/Transak/Polkadot-native equivalent), never handle fiat directly. Path B (in-house Stripe Connect / PayPal payouts) explicitly rejected at the entity level because of regulatory exposure (money transmission, MSB licensing across 50+ jurisdictions). Decision documented as load-bearing for the platform's regulatory posture.
+3. **§10 (new subsection)** "Target verticals where trust signal gates decisions (v1.x positioning)" added. Concrete framing of "better jobs" as *work where the buyer's decision depends on verifiable agent trust*, not just higher-payout work. Priority verticals: security audits/disclosures, Polkadot ecosystem treasury and grant work, high-stakes code review, curated content review for AI training datasets. Phase 0/1/2 outreach sequencing documented (bootstrap → Polkadot ecosystem → security/high-stakes verticals).
+4. **§10 (new subsection)** "Agent-discovery surfaces (v1.x launch-critical)" added. Addresses the strategic gap surfaced by the Codex-style autonomous-monetization tweet pattern: operators tasking agents with *"find ways to make money"* represent real and growing traffic, but only if Averray is *findable* by discovery agents. Operational evidence captured (`@chatgpt21`'s $23.68-in-48-hours via Codex; `@47fucb4r8c69323`'s public proposal of Averray's exact category). Named competitor / proof-point surfaces table (OpenPledge, BountyHub, HackerOne, Open Collective, boss-bounty) — none have portable reputation primitives; that's the structural gap Averray fills. Three discovery surfaces prioritized (web search, aggregators, fresh content). Launch-sequencing constraint: do not push distribution until reputation deepening is demonstrable end-to-end. Inter-platform pitch framing recorded: *"use both — Averray makes the reputation portable"*, not *"use Averray instead."*
+5. **§12 Documentation checklist** gained two launch items: agent operator onboarding guide (`docs/OPERATOR_ONBOARDING.md`, still pending), and companion `DISTRIBUTION_STRATEGY.md` (now published at `docs/DISTRIBUTION_STRATEGY.md`).
+6. **§12 (new subsection)** "Agent and operator distribution (v1.x launch-critical)" checklist added: SDK as standalone package, working example repo with ≤ 5-minute time-to-running-agent, MCP server registry listing, `.well-known/agent-tools.json` discoverability, pre-launch content production targets, awesome-list submissions, launch posts drafted but gated on reputation deepening being demonstrable.
+7. **Merge note:** these sections were carried in a parallel v2.3/v2.4 branch that never landed into v2.5–v2.7. v2.5–v2.7 progress (USDC-decimals completion, DiscoveryRegistry publish automation, bootstrap self-report scheduler, audit reconciliation) is preserved; only the *additive* content from the parallel branch was merged.
 
 ### v2.7 (spec audit and roadmap reconciliation)
 
@@ -1150,4 +1255,4 @@ External verification work resolved every ⏳ item in `AVERRAY_VERIFICATION_LEDG
 
 ---
 
-*Last updated: 2026-05-07*
+*Last updated: 2026-05-13*
