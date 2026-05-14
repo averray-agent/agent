@@ -52,6 +52,95 @@ The generated declaration exports endpoint-oriented types such as:
 Objects include index signatures where the platform intentionally returns
 extensible metadata, so integrations can keep compiling as new fields land.
 
+## Service Tokens (Scoped Bearer Tokens for Automation)
+
+External agents authenticate to the platform with a **service token** — a bearer
+JWT signed against a *capability grant* the operator issued from an admin
+wallet. The token is a strict subset of the operator's own capabilities;
+adding `account:fund` to a grant only works if the issuing admin already has
+`account:fund` themselves.
+
+Treat service-token bytes like any other secret: the response includes the
+token plaintext exactly once. Idempotent replay (same `idempotencyKey` on the
+same request) returns the grant metadata but redacts the token.
+
+### Issue a least-privilege token
+
+A worker agent that only claims and submits jobs needs nothing more than
+`jobs:claim` + `jobs:submit`:
+
+```js
+import { AgentPlatformClient } from "./agent-platform-client.js";
+
+const admin = new AgentPlatformClient({
+  baseUrl: "https://api.averray.com",
+  token: process.env.AVERRAY_ADMIN_TOKEN
+});
+
+const issued = await admin.issueServiceToken({
+  subject: "0xagent-wallet-address",
+  capabilities: ["jobs:claim", "jobs:submit"],
+  scope: "wikipedia-citation-bot",
+  tokenTtlSeconds: 3600,
+  idempotencyKey: "issue-wikipedia-bot-2026-05"
+});
+
+// `issued.token` is returned exactly once — store it in your secret manager.
+const worker = new AgentPlatformClient({
+  baseUrl: "https://api.averray.com",
+  token: issued.token
+});
+```
+
+Useful capability bundles for common worker shapes:
+
+| Worker shape | Capabilities |
+|---|---|
+| Job claimer + submitter | `jobs:claim`, `jobs:submit` |
+| Recommendation reader | `jobs:list`, `jobs:recommend`, `jobs:preflight` |
+| Session inspector | `session:read`, `session:timeline`, `events:read` |
+| Idle-balance allocator | `account:read`, `account:allocate`, `account:deallocate` |
+
+Do not grant capabilities the worker does not exercise — every extra
+capability widens the blast radius if the token leaks.
+
+### Rotate before the secret ages out
+
+`rotateServiceToken` atomically revokes the old grant and issues a new one
+with the same subject. Pass overrides (`capabilities`, `scope`, `expiresAt`,
+`tokenTtlSeconds`) to tighten or extend in the same call:
+
+```js
+const rotated = await admin.rotateServiceToken(issued.grant.id, {
+  tokenTtlSeconds: 1800,
+  revokeNote: "30-day rotation"
+});
+// rotated.rotatedFrom.id === issued.grant.id, rotated.grant.id is new.
+```
+
+### Revoke on incident or end-of-life
+
+```js
+await admin.revokeServiceToken(issued.grant.id, {
+  note: "agent decommissioned"
+});
+```
+
+Revocation is idempotent — replaying the same call returns
+`alreadyRevoked: true` rather than erroring.
+
+### Listing
+
+```js
+const active = await admin.listServiceTokens({ status: "active", limit: 50 });
+for (const entry of active.items) {
+  console.log(entry.grant.subject, entry.grant.capabilities);
+}
+```
+
+The `token` field is never returned by `listServiceTokens` — it only exists
+in the issue/rotate response and is unrecoverable afterwards.
+
 ## Errors
 
 Failed responses throw `AgentPlatformApiError`.

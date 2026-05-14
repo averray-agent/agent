@@ -6,6 +6,9 @@ import {
   type ClaimResponse,
   type JobDefinition,
   type JobsListResponse,
+  type ServiceTokenIssueResponse,
+  type ServiceTokenListResponse,
+  type ServiceTokenRevokeResponse,
   type SessionTimelineResponse
 } from "./agent-platform-client.js";
 
@@ -56,6 +59,32 @@ if (firstJobId) {
 const account: AccountSummary = await client.borrowFunds({ amount: "1", idempotencyKey: "borrow-1" });
 await client.repayFunds({ amount: "1" });
 void account.wallet;
+
+const serviceTokens: ServiceTokenListResponse = await client.listServiceTokens({
+  status: "active",
+  limit: 25
+});
+void serviceTokens.items.length;
+
+const issued: ServiceTokenIssueResponse = await client.issueServiceToken({
+  subject: "0xagent-wallet-0xagent-wallet-0xagent-wal",
+  capabilities: ["jobs:claim", "jobs:submit"],
+  scope: "wikipedia-bot",
+  tokenTtlSeconds: 3600,
+  idempotencyKey: "issue-1"
+});
+const bearerToken: string = issued.token;
+void bearerToken;
+
+const rotated: ServiceTokenIssueResponse = await client.rotateServiceToken(issued.grant.id, {
+  capabilities: ["jobs:claim"]
+});
+void rotated.grant.id;
+
+const revoked: ServiceTokenRevokeResponse = await client.revokeServiceToken(issued.grant.id, {
+  note: "key rotated"
+});
+void revoked.alreadyRevoked;
 
 try {
   await client.getHealth();

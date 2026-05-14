@@ -374,21 +374,49 @@ export class AgentPlatformClient {
     return this.request(`/admin/service-tokens${params.size ? `?${params.toString()}` : ""}`);
   }
 
-  async issueServiceToken(payload) {
+  async issueServiceToken({
+    subject,
+    capabilities,
+    scope = undefined,
+    note = undefined,
+    expiresAt = undefined,
+    tokenTtlSeconds = undefined,
+    idempotencyKey = undefined
+  } = {}) {
+    if (typeof subject !== "string" || !subject) {
+      throw new TypeError("issueServiceToken requires a non-empty `subject` wallet.");
+    }
+    if (!Array.isArray(capabilities) || capabilities.length === 0) {
+      throw new TypeError("issueServiceToken requires a non-empty `capabilities` array.");
+    }
     return this.request("/admin/service-tokens", {
       method: "POST",
-      body: payload
+      body: compact({ subject, capabilities, scope, note, expiresAt, tokenTtlSeconds, idempotencyKey })
     });
   }
 
-  async rotateServiceToken(grantId, payload = {}) {
+  async rotateServiceToken(grantId, {
+    capabilities = undefined,
+    scope = undefined,
+    note = undefined,
+    expiresAt = undefined,
+    tokenTtlSeconds = undefined,
+    revokeNote = undefined,
+    idempotencyKey = undefined
+  } = {}) {
+    if (typeof grantId !== "string" || !grantId) {
+      throw new TypeError("rotateServiceToken requires a non-empty `grantId`.");
+    }
     return this.request(`/admin/service-tokens/${encodeURIComponent(grantId)}/rotate`, {
       method: "POST",
-      body: payload
+      body: compact({ capabilities, scope, note, expiresAt, tokenTtlSeconds, revokeNote, idempotencyKey })
     });
   }
 
   async revokeServiceToken(grantId, { note = undefined, idempotencyKey = undefined } = {}) {
+    if (typeof grantId !== "string" || !grantId) {
+      throw new TypeError("revokeServiceToken requires a non-empty `grantId`.");
+    }
     return this.request(`/admin/service-tokens/${encodeURIComponent(grantId)}/revoke`, {
       method: "POST",
       body: compact({ note, idempotencyKey })
