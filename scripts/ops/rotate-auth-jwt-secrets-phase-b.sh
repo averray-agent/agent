@@ -278,11 +278,25 @@ green "  deploy succeeded ✓"
 # Sanity-check: confirm PR 2.7d.1 detected the env change and force-recreated
 # backend. If we don't see that marker, /run/agent-stack/backend.env may not
 # have rendered with the new keyring — that's a silent failure mode.
-if gh run view "$RUN_ID" --repo "$GH_REPO" --log 2>/dev/null \
-    | grep -q "backend /run env content changed"; then
+#
+# `gh run watch` returns as soon as the run hits a terminal status, but
+# `gh run view --log` can still serve a partially-flushed log for several
+# seconds afterwards (observed in the 2026-05-14 Phase B run: the marker
+# WAS in the log, the grep just ran too early). Retry with backoff to
+# eliminate the false negative.
+marker_found=0
+for attempt in 1 2 3 4; do
+  if gh run view "$RUN_ID" --repo "$GH_REPO" --log 2>/dev/null \
+      | grep -q "backend /run env content changed"; then
+    marker_found=1
+    break
+  fi
+  sleep "$attempt"   # 1s, 2s, 3s, 4s — total 10s worst case
+done
+if [[ $marker_found -eq 1 ]]; then
   green "  PR 2.7d.1 force-recreate marker present ✓"
 else
-  yellow "  PR 2.7d.1 marker not found in log."
+  yellow "  PR 2.7d.1 marker not found in log after 4 retries."
   yellow "  Two possibilities:"
   yellow "    (a) The render produced an identical file (extremely unlikely"
   yellow "        — the keyring just changed). Manual inspection required."

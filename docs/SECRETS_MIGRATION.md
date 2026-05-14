@@ -1408,6 +1408,34 @@ B](#custody-class-b--backend-blockchain-signer).
 - [ ] (2.7d) `SECRETS_CALENDAR.yml` updated with the new `expires_at` values
       for any rotated calendar-tracked entry
 
+#### PR 2.7d rotation history (forensic note added 2026-05-14)
+
+Captured here so future operators can reconcile what's in the VPS
+`authorized_keys` against the rotation timeline. Discovered during the
+2026-05-14 SSH hygiene step when the soon-to-be-deleted
+`authorized_keys.bak` was inspected and found to contain **three**
+historical ed25519 pubkeys rather than the expected two.
+
+| Pubkey body prefix | `ssh-keygen -l` comment            | Origin                                                                                                                                                                                                                                |
+| ------------------ | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `IM2yPx02DbKB…`    | `github-actions-averray-deploy`    | Original deploy key from initial VPS setup. No date suffix.                                                                                                                                                                            |
+| `IN/8hnF0QH88…`    | `github-actions-averray-deploy-20260512` | Earlier rotation pass on 2026-05-12, performed in-session before this rotation runbook existed. Private key was stored only in the operator's macOS Keychain (via `ssh-add --apple-use-keychain`) — no file in `~/.ssh/`. Retired 2026-05-13 when superseded. |
+| `INp68ki9cepv+…`   | `averray-prod-ci-deploy-20260513`  | **Current** production key after the Phase 2 PR 2.7d rotation. Private key in OP at `op://prod-ci/vps-ssh-key/private key` and local file `~/.ssh/averray_deploy_20260513`. Live in `~ubuntu/.ssh/authorized_keys`.                       |
+
+The 2026-05-12 rotation was a partial dry-run that successfully reached
+the VPS but didn't update the GitHub Actions secret (PR 2.1 had not
+yet landed); CI continued using the original key until PR 2.7d's
+proper rotation on 2026-05-13. None of the retired keys are authorized
+anywhere as of 2026-05-14 — `authorized_keys.bak` was deleted in the
+hygiene step, and the 2026-05-12 private key was removed from the
+operator's ssh-agent the same day.
+
+Lesson folded into the AUTH_JWT_SECRETS / SSH rotation runbooks: every
+key rotation MUST update both the VPS `authorized_keys` AND the OP item
+AND the operator's local file in one atomic gesture, and `.bak` files
+left on the VPS should be inspected before deletion to confirm they
+contain only the keys the operator expects.
+
 ### PR 2.8 — Smoke auth secret to 1Password
 
 Split into two sub-PRs, mirroring the PR 2.1 → PR 2.4 staging pattern
