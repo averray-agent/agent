@@ -897,12 +897,24 @@ test("http smoke: /disputes exposes human-review sessions and records verdict/re
     assert.ok(dispute);
     assert.equal(dispute.status, "open");
     assert.equal(dispute.verdict, null);
+    assert.match(dispute.openedAt, /^\d{4}-\d{2}-\d{2}T/u);
+    assert.match(dispute.windowEndsAt, /^\d{4}-\d{2}-\d{2}T/u);
+    assert.equal(dispute.slaSeconds, 14 * 24 * 60 * 60);
 
     const detail = await fetch(`${base}/disputes/${encodeURIComponent(dispute.id)}`, {
       headers: { authorization: `Bearer ${adminToken}` }
     });
     assert.equal(detail.status, 200);
-    assert.equal((await detail.json()).sessionId, sessionId);
+    const detailBody = await detail.json();
+    assert.equal(detailBody.sessionId, sessionId);
+    assert.equal(detailBody.slaSeconds, dispute.slaSeconds);
+
+    const rejected = await fetch(`${base}/disputes/${encodeURIComponent(dispute.id)}/verdict`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${verifierToken}` },
+      body: JSON.stringify({ verdict: "not-a-real-verdict", rationale: "x" })
+    });
+    assert.equal(rejected.status, 400);
 
     const verdict = await fetch(`${base}/disputes/${encodeURIComponent(dispute.id)}/verdict`, {
       method: "POST",
@@ -917,8 +929,11 @@ test("http smoke: /disputes exposes human-review sessions and records verdict/re
     const verdictBody = await verdict.json();
     assert.equal(verdictBody.status, "resolved");
     assert.equal(verdictBody.verdict, "upheld");
+    assert.equal(verdictBody.reasonCode, "DISPUTE_LOST");
     assert.match(verdictBody.reasoningHash, /^0x[a-f0-9]{64}$/u);
     assert.equal(verdictBody.metadataURI, `urn:averray:content:${verdictBody.reasoningHash}`);
+    assert.equal(verdictBody.chainStatus, "local_only");
+    assert.equal(verdictBody.txHash, undefined);
 
     const verdictReplay = await fetch(`${base}/disputes/${encodeURIComponent(dispute.id)}/verdict`, {
       method: "POST",
@@ -991,6 +1006,7 @@ test("http smoke: /disputes exposes human-review sessions and records verdict/re
     const releaseBody = await release.json();
     assert.equal(releaseBody.release.action, "release");
     assert.equal(releaseBody.release.amount, 0.15);
+    assert.equal(releaseBody.release.chainStatus, "local_only");
 
     const releaseReplay = await fetch(`${base}/disputes/${encodeURIComponent(dispute.id)}/release`, {
       method: "POST",

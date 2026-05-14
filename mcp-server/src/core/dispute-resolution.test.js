@@ -3,8 +3,12 @@ import assert from "node:assert/strict";
 
 import {
   ARBITRATOR_SLA_SECONDS,
+  buildDisputeReasoningReceipt,
   buildDisputeResolution,
-  normalizeDisputeVerdict
+  normalizeDisputeReleaseRequestPayload,
+  normalizeDisputeVerdict,
+  normalizeDisputeVerdictRequestPayload,
+  publicContentUri
 } from "./dispute-resolution.js";
 import { ValidationError } from "./errors.js";
 
@@ -47,4 +51,133 @@ test("normalizeDisputeVerdict rejects unknown values", () => {
     () => normalizeDisputeVerdict("maybe"),
     (error) => error instanceof ValidationError && /verdict must be/u.test(error.message)
   );
+});
+
+test("normalizeDisputeVerdictRequestPayload folds synonyms so equivalent retries replay", () => {
+  const a = normalizeDisputeVerdictRequestPayload("dispute-1", {
+    verdict: "uphold",
+    payoutAmount: "0",
+    rationale: "  spaced  ",
+    metadataURI: " urn:averray:content:0xabc "
+  });
+  const b = normalizeDisputeVerdictRequestPayload("dispute-1", {
+    outcome: "UPHELD",
+    workerPayout: 0,
+    rationale: "spaced",
+    metadataURI: "urn:averray:content:0xabc"
+  });
+
+  assert.deepEqual(a, {
+    disputeId: "dispute-1",
+    verdict: "upheld",
+    workerPayout: 0,
+    rationale: "spaced",
+    reasoningHash: undefined,
+    metadataURI: "urn:averray:content:0xabc"
+  });
+  assert.deepEqual(a, b);
+});
+
+test("normalizeDisputeVerdictRequestPayload preserves unknown verdict tokens for upstream validation", () => {
+  const projected = normalizeDisputeVerdictRequestPayload("dispute-2", { verdict: "not-a-real-verdict" });
+  assert.equal(projected.verdict, "not-a-real-verdict");
+});
+
+test("normalizeDisputeReleaseRequestPayload falls back to the dispute's staked amount", () => {
+  const projected = normalizeDisputeReleaseRequestPayload(
+    "dispute-3",
+    { stakedAmount: 1.5 },
+    { action: "release" }
+  );
+  assert.deepEqual(projected, { disputeId: "dispute-3", action: "release", amount: 1.5 });
+});
+
+test("normalizeDisputeReleaseRequestPayload defaults missing action to 'release'", () => {
+  const projected = normalizeDisputeReleaseRequestPayload(
+    "dispute-4",
+    { stakedAmount: 0.25 },
+    { amount: "0.5" }
+  );
+  assert.deepEqual(projected, { disputeId: "dispute-4", action: "release", amount: 0.5 });
+});
+
+test("publicContentUri prefers PUBLIC_BASE_URL when supplied, falls back to urn form", () => {
+  const hash = "0x".padEnd(66, "a");
+  assert.equal(
+    publicContentUri(hash, { publicBaseUrl: "https://api.averray.com/" }),
+    `https://api.averray.com/content/${hash}`
+  );
+  assert.equal(publicContentUri(hash), `urn:averray:content:${hash}`);
+  assert.equal(publicContentUri("not-a-hash"), "");
+});
+
+test("buildDisputeReasoningReceipt produces a deterministic content-addressed reasoning record", () => {
+  const id = "dispute-5";
+  const dispute = { sessionId: "session-5", claimant: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" };
+  const auth = { wallet: "0x9999999999999999999999999999999999999999" };
+  const decidedAt = "2026-05-14T12:00:00.000Z";
+
+  const first = buildDisputeReasoningReceipt({
+    id,
+    dispute,
+    payload: { rationale: " upstream PR merged " },
+    auth,
+    verdict: "dismissed",
+    decidedAt,
+    publicBaseUrl: "https://api.averray.test"
+  });
+  const second = buildDisputeReasoningReceipt({
+    id,
+    dispute,
+    payload: { rationale: "upstream PR merged" },
+    auth,
+    verdict: "dismissed",
+    decidedAt,
+    publicBaseUrl: "https://api.averray.test"
+  });
+
+  assert.match(first.reasoningHash, /^0x[a-f0-9]{64}$/u);
+  assert.equal(first.reasoningHash, second.reasoningHash);
+  assert.equal(first.metadataURI, `https://api.averray.test/content/${first.reasoningHash}`);
+  assert.equal(first.contentRecord.contentType, "arbitrator_reasoning");
+  assert.equal(first.contentRecord.ownerWallet, dispute.claimant);
+  assert.equal(first.rationale, "upstream PR merged");
+});
+
+test("buildDisputeReasoningReceipt marks an upheld verdict's content record as a failure outcome", () => {
+  const result = buildDisputeReasoningReceipt({
+    id: "dispute-6",
+    dispute: { sessionId: "session-6", claimant: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" },
+    payload: { rationale: "evidence insufficient" },
+    auth: { wallet: "0x9999999999999999999999999999999999999999" },
+    verdict: "upheld",
+    decidedAt: "2026-05-14T12:00:00.000Z"
+  });
+  assert.equal(result.contentRecord.verdict, "fail");
+});
+
+test("buildDisputeReasoningReceipt rejects a caller-supplied reasoningHash that disagrees with the canonical hash", () => {
+  assert.throws(
+    () => buildDisputeReasoningReceipt({
+      id: "dispute-7",
+      dispute: { sessionId: "session-7", claimant: "0xcccccccccccccccccccccccccccccccccccccccc" },
+      payload: { rationale: "x", reasoningHash: "0x".padEnd(66, "f") },
+      auth: { wallet: "0x9999999999999999999999999999999999999999" },
+      verdict: "dismissed",
+      decidedAt: "2026-05-14T12:00:00.000Z"
+    }),
+    (error) => error instanceof ValidationError && /reasoningHash does not match/u.test(error.message)
+  );
+});
+
+test("buildDisputeReasoningReceipt honors an explicit metadataURI override", () => {
+  const result = buildDisputeReasoningReceipt({
+    id: "dispute-8",
+    dispute: { sessionId: "session-8", claimant: "0xdddddddddddddddddddddddddddddddddddddddd" },
+    payload: { rationale: "x", metadataURI: "ipfs://Qm.../reasoning.json" },
+    auth: { wallet: "0x9999999999999999999999999999999999999999" },
+    verdict: "dismissed",
+    decidedAt: "2026-05-14T12:00:00.000Z"
+  });
+  assert.equal(result.metadataURI, "ipfs://Qm.../reasoning.json");
 });

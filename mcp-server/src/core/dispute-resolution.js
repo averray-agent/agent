@@ -1,5 +1,6 @@
 import { keccak256, toUtf8Bytes } from "ethers";
 import { ValidationError } from "./errors.js";
+import { buildContentRecord } from "./content-addressed-store.js";
 
 export const ARBITRATOR_SLA_SECONDS = 14 * 24 * 60 * 60;
 
@@ -104,4 +105,125 @@ function defaultPartialPayout(remaining) {
     return remaining;
   }
   return Math.floor(remaining / 2);
+}
+
+function normalizeOptionalString(value) {
+  return typeof value === "string" ? value.trim() : undefined;
+}
+
+function normalizeNumberLike(value) {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : value;
+}
+
+/**
+ * Normalize a verdict to its canonical token specifically for request
+ * hashing. Lowercases and folds synonyms (uphold/dismiss/partial/...)
+ * to the same canonical value the resolver uses so equivalent replays
+ * hit the idempotency cache instead of returning 409.
+ */
+export function normalizeDisputeVerdictForRequestHash(value) {
+  const verdict = normalizeOptionalString(value)?.toLowerCase();
+  if (verdict === "uphold") return "upheld";
+  if (verdict === "dismiss" || verdict === "rejected" || verdict === "reject") return "dismissed";
+  if (verdict === "partial" || verdict === "request-more") return "split";
+  if (verdict === "arb_timeout") return "timeout";
+  return verdict;
+}
+
+/**
+ * Project a verdict request body into the shape the idempotency hash
+ * builder uses. Same shape, regardless of whether the caller sent
+ * `verdict` or its `outcome` synonym, so an equivalent retry replays.
+ */
+export function normalizeDisputeVerdictRequestPayload(id, payload = {}) {
+  return {
+    disputeId: id,
+    verdict: normalizeDisputeVerdictForRequestHash(payload?.verdict ?? payload?.outcome),
+    workerPayout: normalizeNumberLike(payload?.workerPayout ?? payload?.payoutAmount),
+    rationale: normalizeOptionalString(payload?.rationale),
+    reasoningHash: normalizeOptionalString(payload?.reasoningHash),
+    metadataURI: normalizeOptionalString(payload?.metadataURI)
+  };
+}
+
+/**
+ * Project a release request body into the idempotency-hash shape.
+ * Falls back to the dispute's staked amount when the caller omits
+ * `amount`, so the receipt is deterministic from the dispute alone.
+ */
+export function normalizeDisputeReleaseRequestPayload(id, dispute, payload = {}) {
+  return {
+    disputeId: id,
+    action: normalizeOptionalString(payload?.action) || "release",
+    amount: normalizeNumberLike(payload?.amount ?? dispute?.stakedAmount ?? 0)
+  };
+}
+
+/**
+ * Build the public content-URI for a dispute-reasoning hash. Uses
+ * `PUBLIC_BASE_URL` when configured (`https://api.averray.com/content/0x...`)
+ * and falls back to a `urn:` form so the URI is still stable in
+ * environments without a public base.
+ */
+export function publicContentUri(hash, { publicBaseUrl } = {}) {
+  const normalized = typeof hash === "string" && /^0x[a-fA-F0-9]{64}$/u.test(hash)
+    ? hash
+    : undefined;
+  if (!normalized) {
+    return "";
+  }
+  const base = typeof publicBaseUrl === "string" ? publicBaseUrl.trim().replace(/\/+$/u, "") : "";
+  return base ? `${base}/content/${normalized}` : `urn:averray:content:${normalized}`;
+}
+
+/**
+ * Build the arbitrator-reasoning content record and its `metadataURI`
+ * pointer in one place. The content record is keyed by the keccak hash
+ * of the canonical reasoning payload, so the same inputs always
+ * produce the same `reasoningHash`; replaying a verdict request never
+ * spawns a duplicate content record.
+ */
+export function buildDisputeReasoningReceipt({
+  id,
+  dispute,
+  payload,
+  auth,
+  verdict,
+  decidedAt,
+  publicBaseUrl
+}) {
+  const rationale = typeof payload?.rationale === "string" ? payload.rationale.trim() : "";
+  const explicitHash = typeof payload?.reasoningHash === "string" && /^0x[a-fA-F0-9]{64}$/u.test(payload.reasoningHash)
+    ? payload.reasoningHash.toLowerCase()
+    : undefined;
+  const reasoningPayload = {
+    disputeId: id,
+    sessionId: dispute.sessionId,
+    verdict,
+    rationale,
+    decidedBy: auth.wallet,
+    decidedAt
+  };
+  const contentRecord = buildContentRecord({
+    payload: reasoningPayload,
+    contentType: "arbitrator_reasoning",
+    ownerWallet: dispute.claimant,
+    verdict: verdict === "upheld" ? "fail" : "pass",
+    createdAt: decidedAt
+  });
+  if (explicitHash && explicitHash !== contentRecord.hash) {
+    throw new ValidationError("reasoningHash does not match canonical dispute reasoning payload.", {
+      expected: contentRecord.hash,
+      actual: explicitHash
+    });
+  }
+  const reasoningHash = contentRecord.hash;
+  const metadataURI = typeof payload?.metadataURI === "string" && payload.metadataURI.trim()
+    ? payload.metadataURI.trim()
+    : publicContentUri(reasoningHash, { publicBaseUrl });
+  return { rationale, reasoningHash, metadataURI, contentRecord };
 }

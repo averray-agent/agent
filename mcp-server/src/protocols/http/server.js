@@ -20,8 +20,12 @@ import { buildAgentProfile } from "../../core/agent-profile.js";
 import { buildDiscoveryManifest } from "../../core/discovery-manifest.js";
 import {
   ARBITRATOR_SLA_SECONDS,
+  buildDisputeReasoningReceipt,
   buildDisputeResolution,
   disputeIdForSession,
+  normalizeDisputeReleaseRequestPayload,
+  normalizeDisputeVerdictRequestPayload,
+  publicContentUri as buildPublicContentUri
 } from "../../core/dispute-resolution.js";
 import {
   applyRevocation,
@@ -937,47 +941,7 @@ function addSecondsIso(value, seconds) {
 }
 
 function publicContentUri(hash) {
-  const normalized = typeof hash === "string" && /^0x[a-fA-F0-9]{64}$/u.test(hash)
-    ? hash
-    : undefined;
-  if (!normalized) {
-    return "";
-  }
-  const base = process.env.PUBLIC_BASE_URL?.trim()?.replace(/\/+$/u, "");
-  return base ? `${base}/content/${normalized}` : `urn:averray:content:${normalized}`;
-}
-
-function buildDisputeReasoningReceipt({ id, dispute, payload, auth, verdict, decidedAt }) {
-  const rationale = typeof payload?.rationale === "string" ? payload.rationale.trim() : "";
-  const explicitHash = typeof payload?.reasoningHash === "string" && /^0x[a-fA-F0-9]{64}$/u.test(payload.reasoningHash)
-    ? payload.reasoningHash.toLowerCase()
-    : undefined;
-  const reasoningPayload = {
-    disputeId: id,
-    sessionId: dispute.sessionId,
-    verdict,
-    rationale,
-    decidedBy: auth.wallet,
-    decidedAt
-  };
-  const contentRecord = buildContentRecord({
-    payload: reasoningPayload,
-    contentType: "arbitrator_reasoning",
-    ownerWallet: dispute.claimant,
-    verdict: verdict === "upheld" ? "fail" : "pass",
-    createdAt: decidedAt
-  });
-  if (explicitHash && explicitHash !== contentRecord.hash) {
-    throw new ValidationError("reasoningHash does not match canonical dispute reasoning payload.", {
-      expected: contentRecord.hash,
-      actual: explicitHash
-    });
-  }
-  const reasoningHash = contentRecord.hash;
-  const metadataURI = typeof payload?.metadataURI === "string" && payload.metadataURI.trim()
-    ? payload.metadataURI.trim()
-    : publicContentUri(reasoningHash);
-  return { rationale, reasoningHash, metadataURI, contentRecord };
+  return buildPublicContentUri(hash, { publicBaseUrl: process.env.PUBLIC_BASE_URL });
 }
 
 async function optionalAuth(request, url) {
@@ -1404,34 +1368,6 @@ function normalizeNumberLike(value) {
   }
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : value;
-}
-
-function normalizeDisputeVerdictForRequestHash(value) {
-  const verdict = normalizeOptionalString(value)?.toLowerCase();
-  if (verdict === "uphold") return "upheld";
-  if (verdict === "dismiss" || verdict === "rejected" || verdict === "reject") return "dismissed";
-  if (verdict === "partial" || verdict === "request-more") return "split";
-  if (verdict === "arb_timeout") return "timeout";
-  return verdict;
-}
-
-function normalizeDisputeVerdictRequestPayload(id, payload = {}) {
-  return {
-    disputeId: id,
-    verdict: normalizeDisputeVerdictForRequestHash(payload?.verdict ?? payload?.outcome),
-    workerPayout: normalizeNumberLike(payload?.workerPayout ?? payload?.payoutAmount),
-    rationale: normalizeOptionalString(payload?.rationale),
-    reasoningHash: normalizeOptionalString(payload?.reasoningHash),
-    metadataURI: normalizeOptionalString(payload?.metadataURI)
-  };
-}
-
-function normalizeDisputeReleaseRequestPayload(id, dispute, payload = {}) {
-  return {
-    disputeId: id,
-    action: normalizeOptionalString(payload?.action) || "release",
-    amount: normalizeNumberLike(payload?.amount ?? dispute?.stakedAmount ?? 0)
-  };
 }
 
 function isMutationReceiptEnvelope(receipt) {
@@ -2285,7 +2221,8 @@ const server = createServer(async (request, response) => {
         payload,
         auth,
         verdict: resolution.verdict,
-        decidedAt
+        decidedAt,
+        publicBaseUrl: process.env.PUBLIC_BASE_URL
       });
       await persistContentRecord(reasoning.contentRecord);
       const chainReceipt = gateway?.isEnabled?.() && typeof gateway.resolveDispute === "function"
@@ -2346,10 +2283,17 @@ const server = createServer(async (request, response) => {
         timestamp: receipt.decidedAt,
         data: {
           disputeId: id,
+          openedAt: dispute.openedAt,
+          windowEndsAt: dispute.windowEndsAt,
+          slaSeconds: dispute.slaSeconds,
           verdict: resolution.verdict,
           workerPayout: resolution.workerPayout,
           reasonCode: resolution.reasonCode,
-          txHash: receipt.txHash
+          reasoningHash: receipt.reasoningHash,
+          metadataURI: receipt.metadataURI,
+          txHash: receipt.txHash,
+          blockNumber: receipt.blockNumber,
+          chainStatus: receipt.chainStatus
         }
       });
       const body = {
@@ -2419,7 +2363,15 @@ const server = createServer(async (request, response) => {
         wallets: [dispute.claimant, auth.wallet],
         sessionId: dispute.sessionId,
         timestamp: receipt.releasedAt,
-        data: { disputeId: id, amount: receipt.amount, action: receipt.action }
+        data: {
+          disputeId: id,
+          openedAt: dispute.openedAt,
+          windowEndsAt: dispute.windowEndsAt,
+          amount: receipt.amount,
+          action: receipt.action,
+          chainStatus: receipt.chainStatus,
+          txHash: receipt.txHash
+        }
       });
       const body = {
         ...dispute,

@@ -844,9 +844,9 @@ Before public v1.0.0-rc1 launch:
 **Dispute flow (Phase 0 launch):**
 - [ ] `setArbitrator(pascalAddr, true)` called from multisig — single approved arbitrator at launch
 - [ ] Hardware wallet (Ledger) provisioned for arbitrator key, separate from multisig cold key
-- [ ] `POST /disputes/:id/verdict` and `POST /disputes/:id/release` wired to actually call `EscrowCore.resolveDispute` (currently scaffolded only — emits receipts, doesn't dispatch on-chain)
-- [ ] Dispute reasoning content stored under `/content/:hash` per disclosure model
-- [ ] Operator app dispute queue surfaces `disputedAt` and SLA countdown
+- [x] `POST /disputes/:id/verdict` and `POST /disputes/:id/release` dispatch through `gateway.resolveDispute` to the deployed `EscrowCore` when blockchain env is wired (txHash + blockNumber + chainStatus land on the response and the `escrow.dispute_resolved` event). With blockchain disabled the response carries `chainStatus: "local_only"` and an undefined `txHash`, so the gate to "real on-chain" is purely env (`AVERRAY_RPC_URL`, `ESCROW_CORE_ADDRESS`, arbitrator signer key).
+- [x] Dispute reasoning content stored under `/content/:hash` per disclosure model — `buildDisputeReasoningReceipt` writes the canonical owner-only content record and the verdict response surfaces `reasoningHash` + `metadataURI` (`urn:averray:content:<hash>` when `PUBLIC_BASE_URL` is unset).
+- [x] Dispute queue projection (`GET /disputes`, `GET /disputes/:id`) surfaces `openedAt` (a.k.a. `disputedAt`), `windowEndsAt`, `slaSeconds`, `reasonCode`, `txHash`, `chainStatus`. Operator-app surfacing of these fields is the remaining frontend task.
 - [ ] Dispute notification path live (email or messaging channel)
 - [ ] Public migration commitment to Phase 1 by month 6 or first 50 disputes
 

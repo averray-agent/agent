@@ -1,12 +1,11 @@
 # Spec Audit - 2026-05-13
 
 This audit reconciles the current spec and roadmap after the recent framework,
-USDC, discovery, secrets, product-proof, lineage, event-log, schema-native,
-idempotency, dispute, and async-XCM foundation work.
+USDC, discovery, secrets, product-proof, lineage, and event-log work.
 
 Primary source of truth:
 
-- [AVERRAY_WORKING_SPEC.md](./AVERRAY_WORKING_SPEC.md) - current v2.9 product
+- [AVERRAY_WORKING_SPEC.md](./AVERRAY_WORKING_SPEC.md) - current v2.7 product
   and launch spec.
 - [CORE_FRAMEWORK_ROADMAP.md](./CORE_FRAMEWORK_ROADMAP.md) - framework
   implementation tracker.
@@ -151,12 +150,8 @@ SSH/basic-auth/admin-JWT cutovers, and the basic hosted smoke is green.
 
 ### Native XCM / vDOT Gate
 
-- Treat backend-built XCM messages as the shipped foundation for the current
-  Bifrost/vDOT strategy path: the assembler appends `SetTopic(requestId)`, the
-  gateway routes strategy allocate/deallocate through intent payloads, and the
-  wrapper validates the terminal SetTopic.
-- Produce real Bifrost deposit, withdraw, and failure evidence captures from
-  the hosted stack.
+- Produce real Bifrost deposit, withdraw, and failure evidence captures with
+  backend-built XCM messages.
 - Run the Chopsticks/PAPI experiment for Bifrost reply-leg `SetTopic`
   preservation.
 - If Bifrost preserves `SetTopic(requestId)`, promote topic matching as the
@@ -168,34 +163,30 @@ SSH/basic-auth/admin-JWT cutovers, and the basic hosted smoke is green.
 ### Schema-Native Jobs
 
 - Status: first-wave runtime schemas, public docs sync, submit-time validation,
-  pre-verifier validation, schema-native submission metadata, the read-only
-  `/jobs/validate-submission` route, SDK validation helpers, and the exact
-  submit contract in job definitions/preflight are implemented. The operator
-  run detail UI surfaces the submission contract and validate-draft affordance.
-- Remaining: prove the hosted UI/API path end-to-end, make external agent
-  workflows call `/jobs/validate-submission` before consuming a claim/submit
-  attempt, and add signed registration before tightening custom/off-platform
-  schema refs.
+  and pre-verifier validation are implemented.
+- Remaining: make external/helper workflows call `/jobs/validate-submission`
+  before consuming a claim/submit attempt, and add signed registration before
+  tightening custom/off-platform schema refs.
 
 ### Verifier Replay Hardening
 
-- Status: first-wave schema refs, versioned fixtures, and replay metadata are
-  now present for the current verifier set.
-- Remaining: split verifier policy version from verifier config version before
-  rules move beyond simple config data, and require handler-versioned replay
-  fixtures before adding v2 verifier handlers.
+- Add `evidenceSchemaRef` or `submissionSchemaRef` where missing.
+- Split verifier policy version from verifier config version when rules move
+  beyond simple config data.
+- Add handler-versioned replay fixtures before v2 verifier handlers.
 
 ### Dispute And Arbitration Flow
 
-- Status: dispute verdict/release mutations now use scoped idempotency
-  envelopes, and `POST /disputes/:id/verdict` dispatches
-  `EscrowCore.resolveDispute` when the blockchain gateway is enabled.
-- Remaining: prove the verdict path on the hosted stack with the configured
-  arbitrator/gateway, decide whether `/release` stays a local mutual-release
-  receipt or needs an explicit on-chain release action, store arbitrator
-  reasoning under `/content/:hash`, surface `disputedAt`, SLA countdown, reason
-  code, and on-chain tx state in the operator app, and provision/rehearse the
-  phase-0 arbitrator key plus notification path.
+Code-side wiring is in place; remaining work is operator provisioning + frontend surfacing.
+
+- [x] On-chain dispute path: `POST /disputes/:id/verdict` calls `gateway.resolveDispute` which dispatches `EscrowCore.resolveDispute(jobId, workerPayout, reasonCode, metadataURI)` via the configured arbitrator signer and waits for the receipt. With blockchain disabled the response carries `chainStatus: "local_only"`.
+- [x] Arbitrator reasoning persisted under `/content/:hash` via `buildDisputeReasoningReceipt` (owner-only, 6-month auto-public per disclosure model). `metadataURI` surfaces on the verdict response and in the `escrow.dispute_resolved` event.
+- [x] Dispute projection (`GET /disputes`, `GET /disputes/:id`) exposes `openedAt` (disputedAt), `windowEndsAt`, `slaSeconds`, `reasonCode`, `txHash`, `chainStatus`. Same fields land on the verdict + release events so timeline consumers don't need a separate fetch.
+- [x] Dispute helpers (`buildDisputeReasoningReceipt`, payload normalizers, `publicContentUri`) extracted into `mcp-server/src/core/dispute-resolution.js` with unit-test coverage. Smoke test asserts the new dispute-body / event fields and rejects an invalid verdict with 400.
+- [ ] Operator app dispute queue UI consumes the new projection fields (`openedAt` / `windowEndsAt` / `slaSeconds` / `chainStatus`).
+- [ ] Phase-0 arbitrator key provisioned: hardware wallet (Ledger) holding a single approved address recorded in `TreasuryPolicy.arbitrators` via multisig `setArbitrator(...)`, separate from the multisig cold key.
+- [ ] Backend env wired for production: `AVERRAY_RPC_URL`, `ESCROW_CORE_ADDRESS`, arbitrator signer key (verifies via `gateway.isEnabled() === true` at boot). With these unset the verdict response carries `chainStatus: "local_only"` and no `txHash`.
+- [ ] Dispute notification path live (email or messaging channel — out-of-band, not a backend code gate).
 
 ### Idempotency And Mutation Hardening
 
@@ -207,19 +198,19 @@ SSH/basic-auth/admin-JWT cutovers, and the basic hosted smoke is green.
 
 ### Timeline And Operator UX
 
-- Status: backend and client timeline surfaces support source, topic, phase,
-  severity, correlation-id, wallet filters, and persisted event replay.
-- Remaining: fold funding, settlement, and dispute state into the same
-  canonical trace, standardize remaining producer topics/payloads, and finish
-  exposing the filter controls coherently across the operator app.
+- Fold funding, settlement, and dispute state into the same canonical trace.
+- Standardize remaining producer topics/payloads.
+- Add visible operator controls for source, topic, wallet, and correlation-id
+  timeline filters.
 
 ### Capability Model
 
-- Status: typed SDK surface and docs for scoped service tokens are present.
-- Remaining: add operator grant/revoke runtime flows for scoped service tokens
-  or delegated wallets, align public onboarding action requirements with the
-  runtime auth-policy payload, hide or disable frontend controls from
-  `authPolicy.uiControls`, and emit audit events when capability grants change.
+- Add operator grant/revoke flows for scoped service tokens or delegated
+  wallets.
+- Align public onboarding action requirements with the runtime auth-policy
+  payload.
+- Hide or disable frontend controls from `authPolicy.uiControls`.
+- Emit audit events when capability grants change.
 
 ### Secrets Phase 2+ And Mainnet Custody
 
@@ -251,20 +242,12 @@ SSH/basic-auth/admin-JWT cutovers, and the basic hosted smoke is green.
 
 ## Polkadot Docs Check
 
-Checked with the Polkadot docs MCP on 2026-05-14:
+Checked with the Polkadot docs MCP on 2026-05-13:
 
 - ERC20 precompile docs still support the USDC Trust-Backed Asset path on
-  Polkadot Hub: Trust-Backed Asset ID `1337`, symbol `USDC`, 6 decimals,
-  precompile address `0x0000053900000000000000000000000001200000`.
-- XCM precompile docs still describe the fixed precompile address
-  `0x00000000000000000000000000000000000a0000`, the low-level `execute`,
-  `send`, and `weighMessage` surface, and the requirement that messages are
-  SCALE-encoded. The docs explicitly leave higher-level abstractions to be
-  built on top, which supports the backend assembler design.
-- Data-storage docs still describe Bulletin Chain as retention-limited,
-  authorization-gated storage with renewal by `(block, index)` and a mainnet
-  authorization model still being finalized. That keeps the spec's
-  Bulletin-vs-Crust choice deferred.
+  Polkadot Hub.
+- XCM precompile docs still describe the low-level `execute`, `send`, and
+  `weighMessage` surface.
 - Polkadot docs continue to point to PAPI and Chopsticks for XCM construction,
   replay, and dry-run validation.
 
@@ -279,9 +262,8 @@ correlation and settlement path.
    production stack (the code path and `/admin/status` evidence fields are
    landed; see `PRODUCTION_CHECKLIST.md` section 5 for the `curl | jq`
    sign-off).
-3. Prove the hosted schema-native validation path and external helper adoption.
-4. Prove the dispute verdict path live and decide `/release` semantics.
+3. Tighten schema-native jobs for first-wave job families.
+4. Finish dispute/arbitration launch path.
 5. Run the native XCM evidence pack captures.
-6. Continue folding funding/settlement/dispute events into the canonical
-   timeline and finish visible filter adoption where still missing.
+6. Add visible timeline filters in the operator app.
 7. Continue Phase 2+ secrets cleanup and signer custody hardening.
