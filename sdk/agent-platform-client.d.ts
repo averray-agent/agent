@@ -548,6 +548,20 @@ export interface WikipediaInfoboxConsistencyOutput {
   }>;
   review_notes: string;
 }
+
+/** Structured evidence from the hosted product-proof worker loop. */
+export interface ProductProofWorkerLoop {
+  summary: string;
+  output: string;
+  status: "complete";
+  job_id?: string;
+  completed_at?: string;
+  checks: Array<{
+    name: string;
+    status: "pass" | "warn" | "fail";
+    evidence: string;
+  }>;
+}
 export interface BuiltinJobSchemaMap {
   "schema://jobs/coding-input": CodingInput;
   "schema://jobs/coding-output": CodingOutput;
@@ -572,6 +586,7 @@ export interface BuiltinJobSchemaMap {
   "schema://jobs/wikipedia-citation-repair-output": WikipediaCitationRepairOutput;
   "schema://jobs/wikipedia-freshness-check-output": WikipediaFreshnessCheckOutput;
   "schema://jobs/wikipedia-infobox-consistency-output": WikipediaInfoboxConsistencyOutput;
+  "schema://jobs/product-proof-worker-loop": ProductProofWorkerLoop;
 }
 
 export type BuiltinJobSchemaRef = keyof BuiltinJobSchemaMap;

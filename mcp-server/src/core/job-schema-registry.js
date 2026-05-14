@@ -446,6 +446,30 @@ const BUILTIN_JOB_SCHEMAS = new Map([
       },
       review_notes: stringSchema({ minLength: 1 })
     }
+  })],
+  ["schema://jobs/product-proof-worker-loop", objectSchema({
+    $id: "schema://jobs/product-proof-worker-loop",
+    description: "Structured evidence from the hosted product-proof worker loop.",
+    required: ["summary", "output", "status", "checks"],
+    properties: {
+      summary: stringSchema({ minLength: 1 }),
+      output: stringSchema({ minLength: 1 }),
+      status: enumString(["complete"]),
+      job_id: stringSchema({ minLength: 1 }),
+      completed_at: stringSchema({ minLength: 1 }),
+      checks: {
+        type: "array",
+        minItems: 1,
+        items: objectSchema({
+          required: ["name", "status", "evidence"],
+          properties: {
+            name: stringSchema({ minLength: 1 }),
+            status: enumString(["pass", "warn", "fail"]),
+            evidence: stringSchema({ minLength: 1 })
+          }
+        })
+      }
+    }
   })]
 ]);
 

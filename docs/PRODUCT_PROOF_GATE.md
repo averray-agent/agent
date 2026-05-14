@@ -42,12 +42,14 @@ The deploy workflow can generate this evidence itself when run manually with:
 - `product_proof_require_worker_loop=1`
 
 That path uses the production `ADMIN_JWT` secret, creates a tiny benchmark job,
-preflights it as the token wallet, claims it, submits matching evidence, runs
-the verifier, and writes the evidence file before running the required gate. It
-does not print the token. The worker loop fails closed before mutation unless
-the token exposes the full loop capability set, the hosted stack reports
-canonical v1 USDC settlement readiness, and the worker wallet has enough
-AgentAccountCore USDC liquidity for the reward.
+preflights it as the token wallet, validates the structured product-proof
+submission through `/jobs/validate-submission`, claims it, submits matching
+evidence, runs the verifier, and writes the evidence file before running the
+required gate. It does not print the token. The worker loop fails closed before
+claim unless schema validation succeeds, the token exposes the full loop
+capability set, the hosted stack reports canonical v1 USDC settlement
+readiness, and the worker wallet has enough AgentAccountCore USDC liquidity for
+the reward.
 
 The hosted smoke token must resolve from `/auth/session` with capabilities for:
 `account:read`, `admin:status`, `jobs:create`, `jobs:preflight`, `jobs:claim`,
@@ -115,6 +117,14 @@ The worker-loop command writes a local evidence file like:
     "claimable": true,
     "requiredOutputSchema": "schema://jobs/product-proof-worker-loop"
   },
+  "validationReadiness": {
+    "jobId": "product-proof-worker-loop-...",
+    "valid": true,
+    "schemaRef": "schema://jobs/product-proof-worker-loop",
+    "schemaValidates": "payload.submission",
+    "submissionKind": "structured",
+    "validatedBeforeClaim": true
+  },
   "claimReadiness": {
     "status": "claimed",
     "sessionId": "sess_..."
@@ -139,6 +149,7 @@ The script fetches the badge and profile documents and verifies that:
 - the evidence proves canonical v1 USDC settlement readiness
 - the reward clears the USDC minBalance and the worker has enough USDC liquidity
 - the job preflight was eligible and claimable before claim
+- the product-proof submission passed schema validation before claim
 - the submit, verification, and session statuses reached submitted, approved,
   and resolved
 - the badge uses `averray.schemaVersion = "v1"`

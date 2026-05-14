@@ -196,6 +196,13 @@ function assertWorkerLoopCompletionEvidence(evidence, { apiBaseUrl }) {
   assert.notEqual(evidence.preflightReadiness?.currentWalletCanClaim, false, "worker-loop evidence requires currentWalletCanClaim not false");
   assert.equal(evidence.preflightReadiness?.requiredOutputSchema, "schema://jobs/product-proof-worker-loop", "worker-loop evidence must use the product-proof output schema");
 
+  assert.equal(evidence.validationReadiness?.jobId, evidence.jobId, "worker-loop evidence validation jobId must match evidence jobId");
+  assert.equal(evidence.validationReadiness?.valid, true, "worker-loop evidence requires valid schema validation before claim");
+  assert.equal(evidence.validationReadiness?.schemaRef, "schema://jobs/product-proof-worker-loop", "worker-loop evidence validation schema must match product-proof output schema");
+  assert.equal(evidence.validationReadiness?.schemaValidates, "payload.submission", "worker-loop evidence validation must target payload.submission");
+  assert.equal(evidence.validationReadiness?.submissionKind, "structured", "worker-loop evidence validation must use structured submission");
+  assert.equal(evidence.validationReadiness?.validatedBeforeClaim, true, "worker-loop evidence must prove validation happened before claim");
+
   assert.equal(evidence.claimReadiness?.sessionId, evidence.sessionId, "worker-loop evidence claim sessionId must match evidence sessionId");
   assert.ok(evidence.claimReadiness?.status, "worker-loop evidence requires claim status");
 }

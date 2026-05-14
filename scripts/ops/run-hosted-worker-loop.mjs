@@ -6,6 +6,7 @@ import { AgentPlatformClient } from "../../sdk/agent-platform-client.js";
 import { DEFAULT_ESCROW_ASSET } from "../../mcp-server/src/core/assets.js";
 
 const DEFAULT_API_BASE_URL = "https://api.averray.com";
+const PRODUCT_PROOF_OUTPUT_SCHEMA_REF = "schema://jobs/product-proof-worker-loop";
 // Above USDC's current Asset Hub minBalance of 70_000 base units. The
 // explicit minBalance preflight below remains the launch gate; this is
 // just a humane default for manual workflow dispatches.
@@ -36,6 +37,7 @@ export async function runHostedWorkerLoop({
   const jobId = env.PRODUCT_PROOF_JOB_ID || `product-proof-worker-loop-${timestamp}`;
   const idempotencyKey = env.PRODUCT_PROOF_IDEMPOTENCY_KEY || `product-proof:${jobId}`;
   const evidence = env.PRODUCT_PROOF_SUBMISSION || `complete verified output for ${jobId}`;
+  const submission = buildProductProofSubmission({ jobId, evidence, timestamp });
   const rewardAmountInput = parsePositiveDecimalString(env.PRODUCT_PROOF_REWARD_AMOUNT, DEFAULT_REWARD_AMOUNT);
   const rewardAmount = Number(rewardAmountInput);
   const rewardAsset = normalizeAssetSymbol(env.PRODUCT_PROOF_REWARD_ASSET || REQUIRED_ESCROW_ASSET.symbol);
@@ -79,7 +81,7 @@ export async function runHostedWorkerLoop({
     requiresSponsoredGas: true,
     claimTtlSeconds: 3600,
     retryLimit: 1,
-    outputSchemaRef: "schema://jobs/product-proof-worker-loop"
+    outputSchemaRef: PRODUCT_PROOF_OUTPUT_SCHEMA_REF
   });
   if (created?.id !== jobId) {
     throw new Error(`created job id mismatch: expected ${jobId}, got ${created?.id ?? "missing"}`);
@@ -89,6 +91,14 @@ export async function runHostedWorkerLoop({
   const preflight = await platform.preflightJob(jobId);
   const preflightReadiness = assertClaimPreflightReady({ preflight, jobId, wallet });
 
+  log(`Validating hosted product-proof submission for ${jobId}`);
+  const validationReadiness = await assertSubmissionValidationReady({
+    platform,
+    jobId,
+    preflightReadiness,
+    submission
+  });
+
   log(`Claiming hosted product-proof job ${jobId}`);
   const claim = await platform.claimJob(jobId, idempotencyKey);
   const sessionId = claim?.sessionId;
@@ -97,7 +107,7 @@ export async function runHostedWorkerLoop({
   }
 
   log(`Submitting hosted product-proof session ${sessionId}`);
-  const submit = await platform.submitWork(sessionId, evidence);
+  const submit = await platform.submitWork(sessionId, submission);
   if (submit?.status !== "submitted") {
     throw new Error(`expected submitted status, got ${submit?.status ?? "missing"}`);
   }
@@ -141,6 +151,7 @@ export async function runHostedWorkerLoop({
     rewardReadiness,
     liquidityReadiness,
     preflightReadiness,
+    validationReadiness,
     claimReadiness: {
       status: claim.status ?? null,
       sessionId,
@@ -158,6 +169,61 @@ export async function runHostedWorkerLoop({
   }
 
   return evidenceDoc;
+}
+
+function buildProductProofSubmission({ jobId, evidence, timestamp }) {
+  const completedAt = new Date(timestamp).toISOString();
+  return {
+    summary: evidence,
+    output: evidence,
+    status: "complete",
+    job_id: jobId,
+    completed_at: completedAt,
+    checks: [
+      {
+        name: "worker_output",
+        status: "pass",
+        evidence
+      },
+      {
+        name: "schema_contract",
+        status: "pass",
+        evidence: `Submission targets ${PRODUCT_PROOF_OUTPUT_SCHEMA_REF}.`
+      }
+    ]
+  };
+}
+
+async function assertSubmissionValidationReady({ platform, jobId, preflightReadiness, submission }) {
+  if (typeof platform.validateJobSubmission !== "function") {
+    throw new Error("Hosted product-proof worker loop requires /jobs/validate-submission before claim.");
+  }
+  const validation = await platform.validateJobSubmission(jobId, submission);
+  if (!validation || typeof validation !== "object") {
+    throw new Error("Hosted product-proof worker loop requires a validation response before claim.");
+  }
+  if (validation.jobId && validation.jobId !== jobId) {
+    throw new Error(`submission validation job id mismatch: expected ${jobId}, got ${validation.jobId}`);
+  }
+  if (validation.valid !== true) {
+    const code = validation.code ?? "invalid_submission";
+    const message = validation.message ?? "submission failed schema validation";
+    throw new Error(`submission validation failed before claim: code=${code}; message=${message}`);
+  }
+  const expectedSchemaRef = preflightReadiness.requiredOutputSchema ?? PRODUCT_PROOF_OUTPUT_SCHEMA_REF;
+  if (validation.schemaRef && validation.schemaRef !== expectedSchemaRef) {
+    throw new Error(
+      `submission validation schema mismatch: expected ${expectedSchemaRef}, got ${validation.schemaRef}`
+    );
+  }
+  return {
+    jobId,
+    valid: true,
+    schemaRef: validation.schemaRef ?? expectedSchemaRef,
+    schemaValidates: validation.schemaValidates ?? "payload.submission",
+    submissionKind: validation.submissionKind ?? "structured",
+    validatedBeforeClaim: true
+  };
 }
 
 async function assertProductProofLiquidity({ platform, wallet, rewardAsset, rewardAmount, settlementReadiness }) {

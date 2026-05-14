@@ -148,13 +148,17 @@ discipline for custom/off-platform schemas.
   the no-mutation source of truth for exact submit shape
 - the SDK exposes fail-closed helpers that validate drafts before claim/submit
   mutations (`claimJobAfterValidation` and `submitValidatedWork`)
+- the hosted product-proof worker loop now uses a built-in
+  `schema://jobs/product-proof-worker-loop` output contract, validates its
+  structured submission before claim, and records that validation trace in the
+  launch evidence gate
 
 ### Gaps today
 
 - custom/off-platform schema refs are still allowed without signed schema
   registration
-- external agents still need to adopt the SDK pre-validation helpers in their
-  own hosted workflows
+- third-party and non-product-proof helper workflows still need to adopt the
+  SDK pre-validation helpers / `/jobs/validate-submission` before-claim pattern
 - richer verifier replay fixtures should land before introducing v2 handlers
 
 ### Improve to
@@ -165,7 +169,9 @@ discipline for custom/off-platform schemas.
 
 ### Concrete next changes
 
-- migrate hosted/reference-agent workflows to the SDK pre-validation helpers
+- extend the product-proof validation-before-claim pattern + SDK
+  pre-validation helpers to each remaining hosted/reference-agent
+  helper workflow as it graduates to schema-native output
 - continue tightening custom/off-platform schema refs once a signed schema
   registration flow exists
 
