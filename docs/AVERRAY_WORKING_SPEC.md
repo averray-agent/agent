@@ -1,7 +1,7 @@
 # Averray — Working Spec (v1.0.0-rc1)
 
 **Status:** Reconciled with deployed reality and operational docs
-**Spec version:** 2.8 (merged competitive intel + distribution sections from v2.3/v2.4 parallel branch; Path A on-ramp lock, target verticals, agent-discovery surfaces ported into §10; agent-submitted-work abuse vectors added to §9 threat model; §12 gained operator-onboarding + distribution checklist items; companion `DISTRIBUTION_STRATEGY.md` published)
+**Spec version:** 2.9 (Hyperbridge post-mortem security pass; exact ERC20 balance-delta accounting added to escrow/vault/strategy transfer paths; policy zero-address config guards documented; Polkadot ERC20 precompile assumptions re-checked against official docs)
 **Owner:** Pascal
 
 ---
@@ -600,6 +600,14 @@ Before any v1.0.0-rc1 deploy (testnet or mainnet), the following must be address
 - [x] Existing `BORROW_CAP` constant re-denominated from "25 DOT" to USDC equivalent (`25 USDC`, raw `25000000`)
 - [x] All decimals-aware helpers in repo audited for the 18→6 change; launch-facing job sourcing, SDK defaults, profile/badge metadata, and recurring-job fallbacks now default to USDC/6. Remaining DOT/18 constants are intentionally local mock/test or DOT/vDOT strategy-path specific.
 - [x] Test ERC20 (TestDOT-style) deployments removed from v1.0.0-rc1 scope — USDC precompile is real on both networks, no mock needed
+- [x] Escrow/vault/strategy transfer accounting hardened to measure recipient
+  balance deltas instead of trusting nominal requested ERC20 transfer amounts.
+  This explicitly covers the Hyperbridge post-mortem's fee-on-transfer
+  over-credit class. Fee/burn/rebase-on-transfer assets now fail closed unless
+  a future asset adapter deliberately models those semantics.
+- [x] Policy config writes reject zero-address assets, strategies, service
+  operators, verifiers, arbitrators, and min-claim-fee assets. `setPauser(0)`
+  remains intentionally allowed as the hot-key revocation path.
 
 ---
 
@@ -619,6 +627,21 @@ To live in `THREAT_MODEL.md`:
 - **Async XCM lane: untrusted input surface.** Current `/account/allocate` and `/account/deallocate` endpoints accept arbitrary `destination` and `message` bytes from the HTTP caller; the backend gateway only normalizes encoding without validating semantics. `XcmWrapper` then hashes and queues whatever was passed in. Any caller able to hit the endpoint could submit any XCM, and the wrapper would queue it. Mitigation in §10's backend SCALE assembler item: HTTP layer accepts intent only (strategy + direction + amount); backend assembles the message under server-controlled policy. Until then, async treasury endpoints must remain admin-gated.
 - **USDC issuer dependency (Circle).** Choosing USDC for v1 escrow inherits Circle's operational risks: address blacklisting, freeze events, regulatory action against Circle, USDC depeg moments (e.g. March 2023 SVB exposure). None are mitigatable from Averray's side once the asset is locked. Treasury controls cannot be re-acquired if Circle freezes a relevant address. Acceptable risk for v1 (USDC is broadly considered the most transparent stablecoin on reserves), but worth being explicit. Mitigations available later: multi-asset settlement (allow USDt as alternative), eventual native-DOT settlement when contract surface supports it, or escrow asset hot-swappability via governance.
 - **USDC regulatory exposure.** Stablecoin treatment varies by jurisdiction. Averray accepting and disbursing USDC at scale may attract regulatory attention (money transmission, MSB licensing depending on jurisdiction) that pure-DOT settlement would not. Worth tracking as the platform scales; not blocking v1 launch but worth a legal review before significant volume.
+- **Non-canonical ERC20 transfer semantics.** The April 13 Hyperbridge
+  post-mortem documented an escrow over-credit class where the gateway recorded
+  the requested transfer amount rather than the amount actually received. Averray
+  must never assume that an approved asset's `transfer`/`transferFrom` amount is
+  equal to the recipient balance delta. The v1 USDC precompile is standard
+  enough for our surface - official Polkadot docs confirm `balanceOf`,
+  `transfer`, `approve`, and `transferFrom` are implemented - but the contract
+  invariant is broader: deposits, repayments, payouts, and strategy transfers
+  must measure before/after balances and revert on mismatch.
+- **Governance/config footguns.** The same post-mortem highlighted that invalid
+  config updates can permanently break settlement. Averray policy setters must
+  validate all trust-boundary fields before writing. Current v1 guardrail:
+  zero-address assets, strategies, operators, verifiers, arbitrators, and
+  min-claim-fee assets are rejected; only `pauser = address(0)` is allowed, and
+  only because it intentionally disables delegated pause authority.
 - **Agent-submitted work as money-laundering vector.** A platform where anyone can post a bounty, an agent claims and "completes" it, and funds flow out as legitimate earnings is structurally a money-laundering candidate (post a bounty with dirty funds → agent claims → "clean" funds withdraw). The same concern surfaced publicly in third-party threads about this exact platform model (see v2.8 reconciliation log for competitive intel). Mitigations to consider before significant volume: (a) poster KYC/reputation gating above a per-poster-monthly-funding threshold, (b) work-quality auditing that makes purely-rubber-stamp jobs harder to execute, (c) on-chain analysis of poster funding sources (mixers, sanctioned addresses), (d) deliberate friction on poster-and-agent being same-operator. None are needed for bootstrap (Pascal is the only poster); all become material once external posters arrive. Worth explicit treatment in `THREAT_MODEL.md`.
 - **Sophisticated spam at scale.** Agents can generate convincingly-formatted low-quality PRs at near-zero marginal cost. If reviewer fatigue causes maintainers to merge low-effort agent work, the platform contributes to OSS-ecosystem code-quality erosion — which would be reputationally catastrophic for Averray (the platform's pitch is *trust infrastructure*, not *spam infrastructure*). Mitigations: per-repo open-PR caps (already in §4), aggressive denylist response, maintainer feedback loops, possibly tier-based caps (more substantive work allowed when reputation is higher).
 - **Adversarial inputs to the agent.** A malicious repo (or malicious job spec) could be crafted to trick the claiming agent into submitting compromised code to *other* repos the agent has access to, or to extract credentials/secrets from the agent's runtime. This is an agent-side security problem more than a platform-side one, but Averray surfaces it by giving agents work to do. Mitigations: spec sanitization at job-creation time, agent operators responsible for sandbox hygiene, possibly a "high-risk repo" flag posters can set. Worth flagging to operators in `OPERATOR_ONBOARDING.md`.
@@ -1037,6 +1060,33 @@ Stripe Link's launch and Stripe Sessions 2026 announcements positioned agents as
 ## 15. Reconciliation log
 
 For traceability.
+
+### v2.9 (Hyperbridge post-mortem security pass)
+
+1. **External finding reviewed:** Hyperbridge's April 13 post-mortem was
+   mapped against Averray's current contract surface. The applicable lessons are
+   not bridge-specific: measure actual token receipt, reject malformed or
+   non-canonical inputs, and validate governance/config changes before writing
+   them.
+2. **Polkadot assumption re-checked:** Official Polkadot ERC20 precompile docs
+   confirm the v1 USDC precompile supports `balanceOf`, `transfer`,
+   `approve`, and `transferFrom`; metadata methods remain unavailable and are
+   still not part of the runtime assumption.
+3. **Contract hardening captured:** `SafeTransfer` now has exact balance-delta
+   transfer helpers. `AgentAccountCore`, `MockVDotAdapter`, and
+   `XcmVdotAdapter` use them for vault/escrow/strategy ingress and egress, so
+   fee-on-transfer or burn-on-transfer assets revert instead of drifting
+   internal accounting.
+4. **Config hardening captured:** `TreasuryPolicy` now rejects zero-address
+   assets, strategies, service operators, verifiers, arbitrators, and
+   min-claim-fee assets. `setPauser(address(0))` is preserved as intentional
+   hot-key revocation.
+5. **Regression coverage added:** fee-on-transfer tests cover account
+   deposit/withdraw/repay, sync strategy deposit/withdraw, and async strategy
+   deposit request paths. `forge test` passed with 88 tests.
+6. **Deployment caveat:** this is contract code. Merging/deploying the app does
+   not update live contracts; the change becomes live only through the explicit
+   contract deployment/upgrade plan.
 
 ### v2.8 (merge of competitive-intel + distribution sections from parallel v2.3/v2.4 branch)
 
