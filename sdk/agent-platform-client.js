@@ -8,6 +8,43 @@
  */
 export const DEFAULT_ESCROW_ASSET_SYMBOL = "USDC";
 
+/**
+ * Build a caller-side idempotency key suitable for the standard mutation contract.
+ *
+ * The returned key embeds the operation prefix, an ISO timestamp, and a random
+ * suffix (WebCrypto when available) so it is unique across processes and easy
+ * to recognize in audit logs. Callers that need strict deterministic replay
+ * (e.g. a worker resuming from durable state) should persist their own key
+ * instead of generating a fresh one on each retry; this helper exists for
+ * the common "one-shot run, retry the same call on transient failure" case.
+ *
+ * See docs/IDEMPOTENCY.md for the full contract.
+ *
+ * @param {string} [prefix="run"] - Short operation tag, e.g. "claim", "borrow", "fire".
+ * @returns {string}
+ */
+export function createIdempotencyKey(prefix = "run") {
+  const safePrefix = String(prefix ?? "run").trim().replace(/[^a-zA-Z0-9_-]+/gu, "-") || "run";
+  const timestamp = new Date().toISOString().replace(/[:.]/gu, "-");
+  const suffix = generateRandomSuffix();
+  return `${safePrefix}-${timestamp}-${suffix}`;
+}
+
+function generateRandomSuffix() {
+  const cryptoImpl = globalThis.crypto;
+  if (cryptoImpl?.randomUUID) {
+    return cryptoImpl.randomUUID().split("-")[0];
+  }
+  if (cryptoImpl?.getRandomValues) {
+    const bytes = new Uint8Array(6);
+    cryptoImpl.getRandomValues(bytes);
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  }
+  // Last-resort fallback for environments without WebCrypto. Not collision-proof
+  // across processes, so callers in such environments should supply their own keys.
+  return `${Date.now().toString(16)}-${Math.floor(Math.random() * 1e9).toString(16)}`;
+}
+
 export class AgentPlatformClient {
   constructor({ baseUrl, token = undefined, fetchImpl = fetch } = {}) {
     if (!baseUrl) {
@@ -142,6 +179,7 @@ export class AgentPlatformClient {
     });
   }
 
+  /** `idempotencyKey` is enforced server-side only for async-XCM strategies; sync strategies ignore it. See docs/IDEMPOTENCY.md. */
   async allocateIdleFunds({ asset = DEFAULT_ESCROW_ASSET_SYMBOL, amount, strategyId = "default-low-risk", ...options } = {}) {
     return this.request("/account/allocate", {
       method: "POST",
@@ -149,6 +187,7 @@ export class AgentPlatformClient {
     });
   }
 
+  /** `idempotencyKey` is enforced server-side only for async-XCM strategies; sync strategies ignore it. See docs/IDEMPOTENCY.md. */
   async deallocateIdleFunds({ asset = DEFAULT_ESCROW_ASSET_SYMBOL, amount, strategyId = "default-low-risk", ...options } = {}) {
     return this.request("/account/deallocate", {
       method: "POST",
@@ -163,6 +202,7 @@ export class AgentPlatformClient {
     });
   }
 
+  /** `idempotencyKey` is forwarded but the backend treats every call as new — supply your own retry guard. See docs/IDEMPOTENCY.md. */
   async borrowFunds({ asset = DEFAULT_ESCROW_ASSET_SYMBOL, amount, idempotencyKey = undefined } = {}) {
     return this.request("/account/borrow", {
       method: "POST",
@@ -170,6 +210,7 @@ export class AgentPlatformClient {
     });
   }
 
+  /** `idempotencyKey` is forwarded but the backend treats every call as new — supply your own retry guard. See docs/IDEMPOTENCY.md. */
   async repayFunds({ asset = DEFAULT_ESCROW_ASSET_SYMBOL, amount, idempotencyKey = undefined } = {}) {
     return this.request("/account/repay", {
       method: "POST",
@@ -227,6 +268,7 @@ export class AgentPlatformClient {
     });
   }
 
+  /** Omit `idempotencyKey` to inherit the server default of `<wallet>:<jobId>`; pass one to scope per run. See docs/IDEMPOTENCY.md. */
   async claimJob(jobId, idempotencyKey = undefined) {
     return this.request("/jobs/claim", {
       method: "POST",
@@ -340,6 +382,7 @@ export class AgentPlatformClient {
     });
   }
 
+  /** Pass a unique `idempotencyKey` per intended fire; replays with the same key and payload return the stored receipt. See docs/IDEMPOTENCY.md. */
   async fireRecurringJob(templateId, { firedAt = undefined, idempotencyKey = undefined } = {}) {
     return this.request("/admin/jobs/fire", {
       method: "POST",
@@ -347,6 +390,7 @@ export class AgentPlatformClient {
     });
   }
 
+  /** Use a stable `idempotencyKey` (e.g. `pause-${templateId}-${reasonTag}`) so retries collapse. See docs/IDEMPOTENCY.md. */
   async pauseRecurringJob(templateId, { idempotencyKey = undefined } = {}) {
     return this.request("/admin/jobs/pause", {
       method: "POST",
@@ -354,6 +398,7 @@ export class AgentPlatformClient {
     });
   }
 
+  /** Use a stable `idempotencyKey` (e.g. `resume-${templateId}-${reasonTag}`) so retries collapse. See docs/IDEMPOTENCY.md. */
   async resumeRecurringJob(templateId, { idempotencyKey = undefined } = {}) {
     return this.request("/admin/jobs/resume", {
       method: "POST",
@@ -413,6 +458,7 @@ export class AgentPlatformClient {
     });
   }
 
+  /** Use a stable `idempotencyKey` per revoke decision so duplicate requests collapse to one receipt. See docs/IDEMPOTENCY.md. */
   async revokeServiceToken(grantId, { note = undefined, idempotencyKey = undefined } = {}) {
     if (typeof grantId !== "string" || !grantId) {
       throw new TypeError("revokeServiceToken requires a non-empty `grantId`.");

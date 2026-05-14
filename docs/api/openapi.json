@@ -342,7 +342,7 @@
         ],
         "operationId": "claimJob",
         "summary": "Claim a job",
-        "description": "Claims a job for the authenticated wallet. The job id and idempotency key may be supplied in the JSON body or query string.",
+        "description": "Claims a job for the authenticated wallet. The job id and idempotency key may be supplied in the JSON body or query string. When `idempotencyKey` is omitted the backend uses `<wallet>:<jobId>` as the effective key, so repeated claims of the same job from the same wallet are replays rather than new attempts. See docs/IDEMPOTENCY.md.",
         "security": [
           {
             "bearerAuth": []
@@ -362,7 +362,7 @@
             "name": "idempotencyKey",
             "in": "query",
             "required": false,
-            "description": "Client-provided idempotency key used to avoid duplicate claims.",
+            "description": "Caller-supplied idempotency key. Same key + same payload replays the original receipt; same key + different payload returns 409 with code `idempotency_key_payload_mismatch`. Scoped per (wallet, /jobs/claim).",
             "schema": {
               "type": "string"
             }
@@ -380,7 +380,8 @@
                     "type": "string"
                   },
                   "idempotencyKey": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Caller-supplied idempotency key. Exact retries replay the stored claim; same-key payload drift returns 409. See docs/IDEMPOTENCY.md."
                   }
                 }
               },
@@ -402,6 +403,30 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The idempotency key was already used with a different request payload.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "mismatch": {
+                    "value": {
+                      "status": "conflict",
+                      "code": "idempotency_key_payload_mismatch",
+                      "message": "Idempotency key was already used with a different request payload.",
+                      "details": {
+                        "bucket": "jobs_claim",
+                        "originalRequestHash": "sha256:...",
+                        "requestHash": "sha256:..."
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -629,7 +654,7 @@
         ],
         "operationId": "ingestOpenApiSpecs",
         "summary": "Ingest OpenAPI quality-audit jobs",
-        "description": "Fetches configured OpenAPI specifications, converts suitable candidates into API quality-audit jobs, and optionally creates them.",
+        "description": "Fetches configured OpenAPI specifications, converts suitable candidates into API quality-audit jobs, and optionally creates them. Supports the standard `idempotencyKey` contract: same key + same payload replays the stored receipt, same key + payload drift returns 409 with code `idempotency_key_payload_mismatch`. See docs/IDEMPOTENCY.md.",
         "security": [
           {
             "bearerAuth": []
@@ -701,6 +726,20 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "mismatch": {
+                    "value": {
+                      "status": "conflict",
+                      "code": "idempotency_key_payload_mismatch",
+                      "message": "Idempotency key was already used with a different request payload.",
+                      "details": {
+                        "bucket": "admin_jobs_ingest_openapi",
+                        "originalRequestHash": "sha256:...",
+                        "requestHash": "sha256:..."
+                      }
+                    }
+                  }
                 }
               }
             }

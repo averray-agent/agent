@@ -10,6 +10,12 @@ export type SessionId = string;
 export type IdempotencyKey = string;
 export const DEFAULT_ESCROW_ASSET_SYMBOL: "USDC";
 
+/**
+ * Build a caller-side idempotency key suitable for the standard mutation contract.
+ * Returns "<prefix>-<isoTimestamp>-<randomSuffix>". See docs/IDEMPOTENCY.md.
+ */
+export function createIdempotencyKey(prefix?: string): IdempotencyKey;
+
 export interface AgentPlatformClientOptions {
   baseUrl: string;
   token?: string;
