@@ -34,12 +34,16 @@ test("runHostedWorkerLoop creates, claims, submits, verifies, and writes evidenc
       calls.push(["preflightJob", id]);
       return preflightReady({ jobId: id, wallet });
     },
+    async validateJobSubmission(id, submission) {
+      calls.push(["validateJobSubmission", id, submission]);
+      return validationReady({ jobId: id });
+    },
     async claimJob(id, idempotencyKey) {
       calls.push(["claimJob", id, idempotencyKey]);
       return { status: "claimed", sessionId, claimExpiresAt: "2026-01-01T01:00:00.000Z" };
     },
-    async submitWork(id, evidence) {
-      calls.push(["submitWork", id, evidence]);
+    async submitWork(id, submission) {
+      calls.push(["submitWork", id, submission]);
       return { status: "submitted", sessionId: id };
     },
     async runVerifier(id, evidence) {
@@ -82,6 +86,7 @@ test("runHostedWorkerLoop creates, claims, submits, verifies, and writes evidenc
     "getAccountSummary",
     "createJob",
     "preflightJob",
+    "validateJobSubmission",
     "claimJob",
     "submitWork",
     "runVerifier",
@@ -92,7 +97,9 @@ test("runHostedWorkerLoop creates, claims, submits, verifies, and writes evidenc
   assert.equal(calls[3][1].verifierMode, "benchmark");
   assert.equal(calls[3][1].rewardAsset, "USDC");
   assert.equal(calls[3][1].rewardAmount, 0.1);
-  assert.equal(calls[5][2], `product-proof:${jobId}`);
+  assert.equal(calls[5][2].summary, `complete verified output for ${jobId}`);
+  assert.equal(calls[6][2], `product-proof:${jobId}`);
+  assert.equal(calls[7][2].status, "complete");
 
   const written = JSON.parse(await readFile(evidenceFile, "utf8"));
   assert.equal(written.jobId, jobId);
@@ -107,6 +114,11 @@ test("runHostedWorkerLoop creates, claims, submits, verifies, and writes evidenc
   assert.ok(written.authReadiness.capabilitiesPresent.includes("verifier:run"));
   assert.equal(written.preflightReadiness.eligible, true);
   assert.equal(written.preflightReadiness.requiredOutputSchema, "schema://jobs/product-proof-worker-loop");
+  assert.equal(written.validationReadiness.valid, true);
+  assert.equal(written.validationReadiness.schemaRef, "schema://jobs/product-proof-worker-loop");
+  assert.equal(written.validationReadiness.schemaValidates, "payload.submission");
+  assert.equal(written.validationReadiness.submissionKind, "structured");
+  assert.equal(written.validationReadiness.validatedBeforeClaim, true);
   assert.equal(written.claimReadiness.status, "claimed");
   assert.equal(written.claimReadiness.claimExpiresAt, "2026-01-01T01:00:00.000Z");
   assert.equal(written.submitStatus, "submitted");
@@ -177,6 +189,9 @@ test("runHostedWorkerLoop accepts an explicit positive reward amount", async () 
     async preflightJob(id) {
       calls.push(["preflightJob", id]);
       return preflightReady({ jobId: id });
+    },
+    async validateJobSubmission(id) {
+      return validationReady({ jobId: id });
     },
     async claimJob(id) {
       return { status: "claimed", sessionId: `${id}:wallet` };
@@ -331,6 +346,66 @@ test("runHostedWorkerLoop fails closed after job creation when preflight blocks 
     "preflightJob"
   ]);
   assert.equal(calls[4][1], jobId);
+});
+
+test("runHostedWorkerLoop fails closed after preflight when schema validation blocks submit", async () => {
+  const calls = [];
+  const jobId = "product-proof-worker-loop-1700000000000";
+  await assert.rejects(
+    runHostedWorkerLoop({
+      client: {
+        async getAuthSession() {
+          calls.push(["getAuthSession"]);
+          return authSession();
+        },
+        async getAdminStatus() {
+          calls.push(["getAdminStatus"]);
+          return settlementReadyStatus();
+        },
+        async getAccountSummary() {
+          calls.push(["getAccountSummary"]);
+          return accountSummary({ liquidUsdcRaw: 100_000 });
+        },
+        async createJob(payload) {
+          calls.push(["createJob", payload]);
+          return { id: payload.id };
+        },
+        async preflightJob(id) {
+          calls.push(["preflightJob", id]);
+          return preflightReady({ jobId: id });
+        },
+        async validateJobSubmission(id, submission) {
+          calls.push(["validateJobSubmission", id, submission]);
+          return {
+            jobId: id,
+            valid: false,
+            schemaRef: "schema://jobs/product-proof-worker-loop",
+            code: "invalid_request",
+            message: "submission.output is required"
+          };
+        },
+        async claimJob() {
+          calls.push(["claimJob"]);
+          throw new Error("should not claim after validation fails");
+        }
+      },
+      now: () => 1700000000000,
+      log: () => {},
+      env: { ADMIN_JWT: "token" }
+    }),
+    /submission validation failed before claim: code=invalid_request; message=submission\.output is required/u
+  );
+
+  assert.deepEqual(calls.map(([name]) => name), [
+    "getAuthSession",
+    "getAdminStatus",
+    "getAccountSummary",
+    "createJob",
+    "preflightJob",
+    "validateJobSubmission"
+  ]);
+  assert.equal(calls[5][1], jobId);
+  assert.equal(calls[5][2].status, "complete");
 });
 
 test("runHostedWorkerLoop fails closed before mutation when settlement is not ready", async () => {
@@ -587,6 +662,19 @@ function preflightReady({
     verifierMode: "benchmark",
     totalClaimLock: 0,
     claimEconomicsWaived: true
+  };
+}
+
+function validationReady({
+  jobId,
+  schemaRef = "schema://jobs/product-proof-worker-loop"
+}) {
+  return {
+    jobId,
+    valid: true,
+    schemaRef,
+    schemaValidates: "payload.submission",
+    submissionKind: "structured"
   };
 }
 

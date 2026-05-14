@@ -233,6 +233,27 @@ test("validateStructuredSubmission accepts OpenAPI audit evidence", () => {
   });
 });
 
+test("validateStructuredSubmission accepts product-proof worker-loop evidence", () => {
+  const payload = {
+    summary: "complete verified output for product-proof-worker-loop-1700000000000",
+    output: "complete verified output for product-proof-worker-loop-1700000000000",
+    status: "complete",
+    job_id: "product-proof-worker-loop-1700000000000",
+    completed_at: "2026-05-13T11:11:31.000Z",
+    checks: [
+      {
+        name: "worker_output",
+        status: "pass",
+        evidence: "Benchmark output contains the required terms."
+      }
+    ]
+  };
+
+  assert.doesNotThrow(() => {
+    validateStructuredSubmission("schema://jobs/product-proof-worker-loop", payload);
+  });
+});
+
 test("validateStructuredSubmission rejects missing required fields", () => {
   assert.throws(
     () => validateStructuredSubmission("schema://jobs/pr-review-findings-output", {

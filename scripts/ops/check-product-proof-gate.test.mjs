@@ -267,6 +267,14 @@ function workerLoopEvidence({ wallet, sessionId, jobId }) {
       currentWalletCanClaim: true,
       requiredOutputSchema: "schema://jobs/product-proof-worker-loop"
     },
+    validationReadiness: {
+      jobId,
+      valid: true,
+      schemaRef: "schema://jobs/product-proof-worker-loop",
+      schemaValidates: "payload.submission",
+      submissionKind: "structured",
+      validatedBeforeClaim: true
+    },
     claimReadiness: {
       status: "claimed",
       sessionId
