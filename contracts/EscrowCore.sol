@@ -359,6 +359,7 @@ contract EscrowCore is ReentrancyGuard {
         JobEscrow storage job = _jobs[jobId];
         if (job.state != JobState.Claimed) revert InvalidState();
         if (msg.sender != job.worker) revert Unauthorized();
+        if (block.timestamp > job.claimExpiry) revert InvalidState();
         latestEvidence[jobId] = evidenceHash;
         job.state = JobState.Submitted;
         emit WorkSubmitted(jobId, msg.sender, evidenceHash);

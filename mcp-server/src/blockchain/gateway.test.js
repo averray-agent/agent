@@ -23,6 +23,18 @@ function gatewayWithDot() {
   return new BlockchainGateway({ enabled: false, supportedAssets: [DOT_ASSET] });
 }
 
+function emptyPosition(overrides = {}) {
+  return {
+    liquid: 0n,
+    reserved: 0n,
+    strategyAllocated: 0n,
+    collateralLocked: 0n,
+    jobStakeLocked: 0n,
+    debtOutstanding: 0n,
+    ...overrides
+  };
+}
+
 test("toDisputeReasonCode uses Solidity bytes32 string encoding", () => {
   const gateway = new BlockchainGateway({ enabled: false });
 
@@ -159,6 +171,30 @@ test("toBaseUnits converts display asset amounts before uint256 contract calls",
     gateway.toBaseUnits(0.05, DOT_ASSET, "minimum claim fee"),
     50_000_000_000_000_000n
   );
+});
+
+test("getAccountSummary returns display balances and preserves raw base units", async () => {
+  const gateway = new BlockchainGateway({ enabled: false, supportedAssets: [USDC_TRUST_ASSET] });
+  gateway.accountContract = {
+    async positions(wallet, asset) {
+      assert.equal(wallet, "0x3333333333333333333333333333333333333333");
+      assert.equal(asset, USDC_TRUST_ASSET.address);
+      return emptyPosition({
+        liquid: 1_234_500n,
+        reserved: 70_000n,
+        debtOutstanding: 250_000n
+      });
+    }
+  };
+
+  const summary = await gateway.getAccountSummary("0x3333333333333333333333333333333333333333");
+
+  assert.equal(summary.liquid.USDC, 1.2345);
+  assert.equal(summary.reserved.USDC, 0.07);
+  assert.equal(summary.debtOutstanding.USDC, 0.25);
+  assert.deepEqual(summary.raw.liquid, { USDC: "1234500" });
+  assert.deepEqual(summary.raw.reserved, { USDC: "70000" });
+  assert.deepEqual(summary.raw.debtOutstanding, { USDC: "250000" });
 });
 
 test("getClaimEconomicsConfig converts chain min fees back to display units", async () => {
@@ -521,6 +557,146 @@ test("reserveRecurringTemplateFunding converts display amounts and records the t
   ]]);
   assert.equal(receipt.source, "agent_account_recurring_template_reserve");
   assert.equal(receipt.amountRaw, "10000000000000000000");
+});
+
+test("account mutations convert display amounts before contract calls", async () => {
+  const gateway = new BlockchainGateway({ enabled: false, supportedAssets: [USDC_TRUST_ASSET] });
+  const wallet = "0x3333333333333333333333333333333333333333";
+  const recipient = "0x4444444444444444444444444444444444444444";
+  const calls = [];
+  gateway.signer = {
+    async getAddress() {
+      return wallet;
+    }
+  };
+  gateway.accountContract = {
+    async positions() {
+      return emptyPosition();
+    },
+    async reserveForJob(...args) {
+      calls.push(["reserveForJob", ...args]);
+      return { async wait() {} };
+    },
+    async allocateIdleFunds(...args) {
+      calls.push(["allocateIdleFunds", ...args]);
+      return { async wait() {} };
+    },
+    async deallocateIdleFunds(...args) {
+      calls.push(["deallocateIdleFunds", ...args]);
+      return { async wait() {} };
+    },
+    async borrow(...args) {
+      calls.push(["borrow", ...args]);
+      return { async wait() {} };
+    },
+    async repay(...args) {
+      calls.push(["repay", ...args]);
+      return { async wait() {} };
+    },
+    async sendToAgentFor(...args) {
+      calls.push(["sendToAgentFor", ...args]);
+      return { async wait() {} };
+    }
+  };
+
+  await gateway.reserveForJob(wallet, "USDC", 1.25);
+  await gateway.allocateIdleFunds(wallet, "usdc-yield", "2.5", "USDC");
+  await gateway.deallocateIdleFunds(wallet, "usdc-yield", 0.75, "USDC");
+  await gateway.borrow(wallet, "USDC", 3);
+  await gateway.repay(wallet, "USDC", 1.5);
+  await gateway.sendToAgent(wallet, recipient, "USDC", 0.125);
+
+  assert.deepEqual(calls, [
+    ["reserveForJob", wallet, USDC_TRUST_ASSET.address, 1_250_000n],
+    ["allocateIdleFunds", wallet, gateway.normalizeStrategyId("usdc-yield"), 2_500_000n],
+    ["deallocateIdleFunds", wallet, gateway.normalizeStrategyId("usdc-yield"), 750_000n],
+    ["borrow", USDC_TRUST_ASSET.address, 3_000_000n],
+    ["repay", USDC_TRUST_ASSET.address, 1_500_000n],
+    ["sendToAgentFor", wallet, recipient, USDC_TRUST_ASSET.address, 125_000n]
+  ]);
+});
+
+test("borrow refuses to relay for a wallet that is not the configured signer", async () => {
+  const gateway = new BlockchainGateway({ enabled: false, supportedAssets: [USDC_TRUST_ASSET] });
+  gateway.signer = {
+    async getAddress() {
+      return "0x3333333333333333333333333333333333333333";
+    }
+  };
+  gateway.accountContract = {
+    async borrow() {
+      throw new Error("borrow should not be sent");
+    }
+  };
+
+  await assert.rejects(
+    () => gateway.borrow("0x4444444444444444444444444444444444444444", "USDC", 1),
+    /configured blockchain signer/u
+  );
+});
+
+test("async XCM request readers return display amounts and raw base-unit fields", async () => {
+  const gateway = new BlockchainGateway({ enabled: false, supportedAssets: [USDC_TRUST_ASSET] });
+  const requestId = `0x${"1".repeat(64)}`;
+  const account = "0x3333333333333333333333333333333333333333";
+  const recipient = "0x4444444444444444444444444444444444444444";
+  gateway.xcmWrapperContract = {
+    async getRequest(id) {
+      assert.equal(id, requestId);
+      return {
+        context: {
+          strategyId: encodeBytes32String("USDC"),
+          kind: 0,
+          account,
+          asset: USDC_TRUST_ASSET.address,
+          recipient,
+          assets: 1_250_000n,
+          shares: 500_000n,
+          nonce: 7n
+        },
+        status: 1,
+        settledAssets: 250_000n,
+        settledShares: 100_000n,
+        remoteRef: `0x${"0".repeat(64)}`,
+        failureCode: `0x${"0".repeat(64)}`,
+        createdAt: 10n,
+        updatedAt: 12n
+      };
+    }
+  };
+  gateway.accountContract = {
+    async strategyRequests(id) {
+      assert.equal(id, requestId);
+      return {
+        strategyId: encodeBytes32String("USDC"),
+        adapter: "0x5555555555555555555555555555555555555555",
+        account,
+        asset: USDC_TRUST_ASSET.address,
+        recipient,
+        kind: 0,
+        status: 1,
+        requestedAssets: 1_250_000n,
+        requestedShares: 500_000n,
+        settledAssets: 250_000n,
+        settledShares: 100_000n,
+        remoteRef: `0x${"0".repeat(64)}`,
+        failureCode: `0x${"0".repeat(64)}`,
+        settled: false
+      };
+    }
+  };
+
+  const xcmRequest = await gateway.getXcmRequest(requestId);
+  const strategyRequest = await gateway.getStrategyRequest(requestId);
+
+  assert.equal(xcmRequest.requestedAssets, 1.25);
+  assert.equal(xcmRequest.requestedAssetsRaw, "1250000");
+  assert.equal(xcmRequest.requestedShares, 0.5);
+  assert.equal(xcmRequest.settledAssets, 0.25);
+  assert.equal(strategyRequest.requestedAssets, 1.25);
+  assert.equal(strategyRequest.requestedAssetsRaw, "1250000");
+  assert.equal(strategyRequest.settledShares, 0.1);
+  assert.equal(strategyRequest.settledSharesRaw, "100000");
 });
 
 test("createSinglePayoutJobForJob consumes recurring template reserve when funding metadata is present", async () => {

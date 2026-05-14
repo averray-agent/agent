@@ -4,7 +4,7 @@
 > This file is retained as historical design context only.
 
 **Status:** Reconciled with deployed reality and operational docs
-**Spec version:** 1.10 (repository sync after Slice 9; v1.9 verification corrections imported, backend SCALE assembler and SetTopic wrapper validation marked shipped, TOKEN_ADDRESS wording aligned with no-native-DOT-precompile correction)
+**Spec version:** 1.11 (blockchain audit follow-up: gateway display/base-unit boundary documented and fixed, `submitWork` claim-expiry guard tracked, async XCM remaining gates clarified, relayed borrow/repay gap recorded)
 **Owner:** Pascal
 
 ---
@@ -493,7 +493,8 @@ To live in `THREAT_MODEL.md`:
 - **Disclosure window abuse.** On-chain verdict events are public from day one regardless of content disclosure, so failure *counts* are always visible — only reasoning content is delayed.
 - **Maintainer-side reputation poisoning.** Hostile maintainer mass-closing PRs to harm specific wallets. Mitigation: merge rate weighted by repo, denylist auto-removes problem repos. Single-actor harm is bounded.
 - **Native XCM observer correlation gap.** Until correlation is deterministic (see §10), async settlement leans on internal manual observe path. Subscan or paid third-party as fallback if internal observer fails.
-- **Async XCM lane: untrusted input surface.** Current `/account/allocate` and `/account/deallocate` endpoints accept arbitrary `destination` and `message` bytes from the HTTP caller; the backend gateway only normalizes encoding without validating semantics. `XcmWrapper` then hashes and queues whatever was passed in. Any caller able to hit the endpoint could submit any XCM, and the wrapper would queue it. Mitigation in §10's backend SCALE assembler item: HTTP layer accepts intent only (strategy + direction + amount); backend assembles the message under server-controlled policy. Until then, async treasury endpoints must remain admin-gated.
+- **Async XCM lane: dispatch and observer gap.** The untrusted raw-byte input surface is closed: HTTP accepts intent only and the backend assembler appends `SetTopic(requestId)` before calling `XcmWrapper`. Remaining risk is that `XcmWrapper.queueRequest` is still a durable intent ledger, not a live call to the Hub XCM precompile, and the native observer proof is not yet production truth. Until precompile dispatch and observer evidence are captured, async treasury endpoints stay admin-gated/staging-only.
+- **Relayed borrow/repay signer mismatch.** `AgentAccountCore.borrow` and `repay` mutate `msg.sender`; a backend hot signer cannot safely relay those calls on behalf of an authenticated wallet. The backend must either require signer wallet == authenticated wallet or ship explicit contract primitives such as `borrowFor` / `repayFor` with policy checks.
 
 ---
 
@@ -506,9 +507,10 @@ Tracked, not in v1.0.0-rc1:
 - **Verifier key rotation policy.** Concrete cadence and mechanism. Document in `THREAT_MODEL.md` as an explicit gap.
 - **Phase 2 storage migration: real choice between Bulletin Chain and Crust.** Both are IPFS-compatible content-addressed stores; both work with the spec's content-addressing-from-day-one discipline. Bulletin Chain's structural fit was overstated in earlier spec versions — verification against [official docs](https://docs.polkadot.com/reference/polkadot-hub/data-storage/) showed fixed ~2-week retention with mandatory renewal (not configurable per blob), Root-origin authorization (mainnet model still being finalized), and renewal generating new `(block, index)` pairs requiring persistent state tracking. Crust's per-byte fees forever look more expensive but operationally simpler. Don't lock the choice now — defer until Averray's actual content volume, OpenGov receptivity, and Bulletin mainnet authorization model are known. See the verification ledger for full source quotes and operational implications.
 - **Subjective job types** (translations, summaries, reports). Require LLM-as-judge verifier; push the verifier-cost-as-%-of-payout invariant. Re-price before introducing.
-- **Backend SCALE assembler hardening.** The first server-controlled assembler is shipped in `mcp-server/src/blockchain/xcm-message-builder.js`: HTTP rejects caller-supplied raw `destination`/`message`/`nonce`, backend assigns nonce, mirrors `previewRequestId(context)`, assembles XCM v5 bytes from strategy intent, appends `SetTopic(requestId)` as the last instruction, and submits assembled bytes to `XcmWrapper`. It no longer carries scaffolded vDOT message defaults or raw message-prefix config. Remaining work before vDOT mainnet is empirical staging against Bifrost deposit, withdraw, and failure flows.
+- **XCM precompile dispatch.** The server-controlled assembler is shipped in `mcp-server/src/blockchain/xcm-message-builder.js`: HTTP rejects caller-supplied raw `destination`/`message`/`nonce`, backend assigns nonce, mirrors `previewRequestId(context)`, assembles XCM v5 bytes from strategy intent, appends `SetTopic(requestId)` as the last instruction, and submits assembled bytes to `XcmWrapper`. Remaining work before vDOT mainnet is to turn `XcmWrapper.queueRequest` from intent-ledger storage into real Hub XCM precompile dispatch (`weighMessage` + `execute`/`send` as applicable), with failure semantics and fee/weight proof captured in staging.
 - **Native XCM observer correlation gate.** Depends on the assembler. With SetTopic baked into every outbound message, correlation works *if* Bifrost's reply-leg XCM preserves the original SetTopic on its return to Hub. This is the empirical question the Chopsticks experiment validates. Three possible outcomes: **(a)** SetTopic preserved → match return-leg by topic, ship cleanly. **(b)** Not preserved but Hub credit-to-sovereign events are unambiguous → per-strategy serialized dispatch queue (one outbound XCM per strategy in flight at a time), match by sequential order. **(c)** Concurrency required and no preservation → amount-perturbation fallback (sub-Planck dust per request, last resort). v1.x prerequisite for production-volume async strategies.
 - **Liquidation mechanics for borrow facility.** Current `BORROW_CAP = 25 USDC` flat per account; no liquidation. Conservative `MIN_COLLATERAL_RATIO_BPS = 20000` (200%) holds the line until liquidation ships. v2 work.
+- **Relayed borrow/repay contract primitive.** If borrow-to-stake remains a backend-driven UX, add explicit service-operator-gated primitives that mutate the authenticated wallet rather than `msg.sender`; otherwise require wallet-side signing for borrow/repay.
 - **Reputation-weighted borrow caps.** Today flat. Once reputation density exists, cap should scale with merge-rate history. v2.
 - **Multisig-owns-EVM-contract composition validation.** *Empirical-only — gates `MULTISIG_SETUP.md` from being safely actionable.* The composition `pallet_multisig` SS58 address → `pallet_revive.map_account()` → H160 owner of `TreasuryPolicy` rests on three documented primitives, but the *composition itself* is not documented end-to-end on `docs.polkadot.com`. Running `MULTISIG_SETUP.md §5` against Polkadot Hub TestNet *is* the validation experiment. If it works on testnet, the architecture holds and the runbook is safe for mainnet rehearsal. If it doesn't, the multisig story needs a different shape (e.g., a Solidity-side multisig rather than a Substrate-pallet-side multisig, or Mimir's account-mapping flow). Resolve before tagging `v1.0.0-rc1` for any mainnet-adjacent purpose.
 - **Phase 1 arbitration (LLM-as-judge calibration).** Tooling that pre-analyzes disputes for human arbitrator review. Override rate is the metric. Trigger: ~50 disputes resolved.
@@ -559,6 +561,7 @@ Before public v1.0.0-rc1 launch:
 - [x] Hash fields live on `JobCreated` / `Submitted` / `Verified`
 - [x] `Disclosed` / `AutoDisclosed` events live on session lifecycle contract
 - [x] `EscrowCore.openDispute` enforces deadline window (`block.timestamp <= rejectedAt + DISPUTE_WINDOW`)
+- [x] `EscrowCore.submitWork` rejects expired claims; workers must submit before `claimExpiry` or reopen through the timeout path
 - [x] `DISPUTE_WINDOW` bumped from 1 day to 7 days
 - [x] `EscrowCore.autoResolveOnTimeout(jobId)` shipped with `ARBITRATOR_SLA = 14 days`
 - [x] `disputedAt` timestamp present on job state and emitted in `DisputeOpened` event
@@ -611,6 +614,7 @@ Before public v1.0.0-rc1 launch:
 - [x] HTTP `/account/allocate` and `/account/deallocate` accept intent only, not raw `destination`/`message` bytes
 - [x] Backend mirrors `previewRequestId(context)` formula and appends `SetTopic(requestId)` to every assembled XCM
 - [x] `XcmWrapper.queueRequest` SetTopic-validation check live (ships in v1.0.0-rc1 redeployment)
+- [ ] `XcmWrapper.queueRequest` dispatches through the Hub XCM precompile rather than only recording an intent
 - [ ] Chopsticks experiment confirms Bifrost preserves SetTopic on reply-leg, *or* fallback strategy chosen and documented
 - [ ] Async XCM staging proof captured per `ASYNC_XCM_STAGING.md`
 
@@ -619,6 +623,13 @@ Before public v1.0.0-rc1 launch:
 ## 13. Reconciliation log
 
 For traceability.
+
+### v1.11 (blockchain audit follow-up)
+
+1. Gateway display/base-unit boundary fixed and documented: contract calls now convert display inputs through asset decimals, and account/XCM reads expose display values plus explicit raw fields.
+2. `EscrowCore.submitWork` now rejects submissions after `claimExpiry`; expired claims must go through the timeout/reclaim path.
+3. Async XCM status clarified: assembler and SetTopic validation are shipped, while live XCM precompile dispatch and native observer proof remain production gates.
+4. Relayed borrow/repay gap recorded: current contract methods act on `msg.sender`, so backend relay is unsafe unless signer == wallet or explicit `borrowFor`/`repayFor` primitives are added.
 
 ### v1.10 (repository sync after Slice 9)
 
