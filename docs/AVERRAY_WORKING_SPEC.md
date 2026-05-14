@@ -1,7 +1,7 @@
 # Averray — Working Spec (v1.0.0-rc1)
 
 **Status:** Reconciled with deployed reality and operational docs
-**Spec version:** 2.8 (merged competitive intel + distribution sections from v2.3/v2.4 parallel branch; Path A on-ramp lock, target verticals, agent-discovery surfaces ported into §10; agent-submitted-work abuse vectors added to §9 threat model; §12 gained operator-onboarding + distribution checklist items; companion `DISTRIBUTION_STRATEGY.md` published)
+**Spec version:** 2.9 (blockchain audit follow-up: gateway display/base-unit boundary documented and fixed, `submitWork` claim-expiry guard tracked, async XCM remaining gates clarified, relayed borrow/repay gap recorded)
 **Owner:** Pascal
 
 ---
@@ -599,6 +599,7 @@ Before any v1.0.0-rc1 deploy (testnet or mainnet), the following must be address
 - [x] `SUPPORTED_ASSETS_JSON` env var set to: `[{"symbol":"USDC","assetClass":"trust_backed","assetId":1337,"address":"0x0000053900000000000000000000000001200000","decimals":6}]`
 - [x] Existing `BORROW_CAP` constant re-denominated from "25 DOT" to USDC equivalent (`25 USDC`, raw `25000000`)
 - [x] All decimals-aware helpers in repo audited for the 18→6 change; launch-facing job sourcing, SDK defaults, profile/badge metadata, and recurring-job fallbacks now default to USDC/6. Remaining DOT/18 constants are intentionally local mock/test or DOT/vDOT strategy-path specific.
+- [x] Blockchain gateway display/base-unit boundary audited: API inputs stay display-denominated, contract calls convert to raw base units, and account/XCM reads expose display values plus explicit `*Raw` fields.
 - [x] Test ERC20 (TestDOT-style) deployments removed from v1.0.0-rc1 scope — USDC precompile is real on both networks, no mock needed
 
 ---
@@ -616,7 +617,8 @@ To live in `THREAT_MODEL.md`:
 - **Disclosure window abuse.** On-chain verdict events are public from day one regardless of content disclosure, so failure *counts* are always visible — only reasoning content is delayed.
 - **Maintainer-side reputation poisoning.** Hostile maintainer mass-closing PRs to harm specific wallets. Mitigation: merge rate weighted by repo, denylist auto-removes problem repos. Single-actor harm is bounded.
 - **Native XCM observer correlation gap.** Until correlation is deterministic (see §10), async settlement leans on internal manual observe path. Subscan or paid third-party as fallback if internal observer fails.
-- **Async XCM lane: untrusted input surface.** Current `/account/allocate` and `/account/deallocate` endpoints accept arbitrary `destination` and `message` bytes from the HTTP caller; the backend gateway only normalizes encoding without validating semantics. `XcmWrapper` then hashes and queues whatever was passed in. Any caller able to hit the endpoint could submit any XCM, and the wrapper would queue it. Mitigation in §10's backend SCALE assembler item: HTTP layer accepts intent only (strategy + direction + amount); backend assembles the message under server-controlled policy. Until then, async treasury endpoints must remain admin-gated.
+- **Async XCM lane: dispatch and observer gap.** The untrusted raw-byte input surface is closed: HTTP accepts intent only and the backend assembler appends `SetTopic(requestId)` before calling `XcmWrapper`. Remaining risk is that `XcmWrapper.queueRequest` is still a durable intent ledger, not a live call to the Hub XCM precompile, and the native observer proof is not yet production truth. Until precompile dispatch and observer evidence are captured, async treasury endpoints stay admin-gated/staging-only.
+- **Relayed borrow/repay signer mismatch.** `AgentAccountCore.borrow` and `repay` mutate `msg.sender`; a backend hot signer cannot safely relay those calls on behalf of an authenticated wallet. The backend must either require the signer wallet to equal the authenticated wallet or ship explicit contract primitives such as `borrowFor` / `repayFor` with policy checks. Current branch takes the conservative route and refuses mismatched signer/wallet calls.
 - **USDC issuer dependency (Circle).** Choosing USDC for v1 escrow inherits Circle's operational risks: address blacklisting, freeze events, regulatory action against Circle, USDC depeg moments (e.g. March 2023 SVB exposure). None are mitigatable from Averray's side once the asset is locked. Treasury controls cannot be re-acquired if Circle freezes a relevant address. Acceptable risk for v1 (USDC is broadly considered the most transparent stablecoin on reserves), but worth being explicit. Mitigations available later: multi-asset settlement (allow USDt as alternative), eventual native-DOT settlement when contract surface supports it, or escrow asset hot-swappability via governance.
 - **USDC regulatory exposure.** Stablecoin treatment varies by jurisdiction. Averray accepting and disbursing USDC at scale may attract regulatory attention (money transmission, MSB licensing depending on jurisdiction) that pure-DOT settlement would not. Worth tracking as the platform scales; not blocking v1 launch but worth a legal review before significant volume.
 - **Agent-submitted work as money-laundering vector.** A platform where anyone can post a bounty, an agent claims and "completes" it, and funds flow out as legitimate earnings is structurally a money-laundering candidate (post a bounty with dirty funds → agent claims → "clean" funds withdraw). The same concern surfaced publicly in third-party threads about this exact platform model (see v2.8 reconciliation log for competitive intel). Mitigations to consider before significant volume: (a) poster KYC/reputation gating above a per-poster-monthly-funding threshold, (b) work-quality auditing that makes purely-rubber-stamp jobs harder to execute, (c) on-chain analysis of poster funding sources (mixers, sanctioned addresses), (d) deliberate friction on poster-and-agent being same-operator. None are needed for bootstrap (Pascal is the only poster); all become material once external posters arrive. Worth explicit treatment in `THREAT_MODEL.md`.
@@ -635,8 +637,9 @@ Tracked, not in v1.0.0-rc1:
 - **Verifier key rotation policy.** Concrete cadence and mechanism. Document in `THREAT_MODEL.md` as an explicit gap.
 - **Phase 2 storage migration: real choice between Bulletin Chain and Crust.** Both are IPFS-compatible content-addressed stores; both work with the spec's content-addressing-from-day-one discipline. Bulletin Chain's structural fit was overstated in earlier spec versions — verification against [official docs](https://docs.polkadot.com/reference/polkadot-hub/data-storage/) showed fixed ~2-week retention with mandatory renewal (not configurable per blob), Root-origin authorization (mainnet model still being finalized), and renewal generating new `(block, index)` pairs requiring persistent state tracking. Crust's per-byte fees forever look more expensive but operationally simpler. Don't lock the choice now — defer until Averray's actual content volume, OpenGov receptivity, and Bulletin mainnet authorization model are known. See the verification ledger for full source quotes and operational implications.
 - **Subjective job types** (translations, summaries, reports). Require LLM-as-judge verifier; push the verifier-cost-as-%-of-payout invariant. Re-price before introducing.
-- **Backend SCALE assembler with SetTopic = requestId.** Foundational. The current async XCM lane is scaffolded but not built: `XcmWrapper.queueRequest` is a passthrough (it hashes raw `destination`/`message` bytes and emits `RequestPayloadStored` with `keccak256(rawBytes)`, which is *not* the XCM-protocol `messageId`); the HTTP API accepts arbitrary bytes from the caller; there is no production SCALE message builder; no SetTopic appears anywhere in the codebase. Required work: build `mcp-server/src/blockchain/xcm-message-builder.js` (PAPI-based; ParaSpell evaluated as higher-level shortcut). Replace HTTP-input-as-bytes with intent-based routing (`{ strategyId, direction, amount }`). Backend assigns nonce → mirrors `previewRequestId(context)` formula → assembles SCALE message with `SetTopic(requestId)` as the last instruction → submits to wrapper. v1.x prerequisite for vDOT mainnet.
+- **XCM precompile dispatch.** The server-controlled assembler is shipped in `mcp-server/src/blockchain/xcm-message-builder.js`: HTTP rejects caller-supplied raw `destination`/`message`/`nonce`, backend assigns nonce, mirrors `previewRequestId(context)`, assembles XCM v5 bytes from strategy intent, appends `SetTopic(requestId)` as the last instruction, and submits assembled bytes to `XcmWrapper`. Remaining work before vDOT mainnet is to turn `XcmWrapper.queueRequest` from intent-ledger storage into real Hub XCM precompile dispatch (`weighMessage` + `execute`/`send` as applicable), with failure semantics and fee/weight proof captured in staging.
 - **Native XCM observer correlation gate.** Depends on the assembler. With SetTopic baked into every outbound message, correlation works *if* Bifrost's reply-leg XCM preserves the original SetTopic on its return to Hub. This is the empirical question the Chopsticks experiment validates. Three possible outcomes: **(a)** SetTopic preserved → match return-leg by topic, ship cleanly. **(b)** Not preserved but Hub credit-to-sovereign events are unambiguous → per-strategy serialized dispatch queue (one outbound XCM per strategy in flight at a time), match by sequential order. **(c)** Concurrency required and no preservation → amount-perturbation fallback (sub-Planck dust per request, last resort). v1.x prerequisite for production-volume async strategies.
+- **Relayed borrow/repay contract primitive.** If borrow-to-stake remains a backend-driven UX, add explicit service-operator-gated primitives that mutate the authenticated wallet rather than `msg.sender`; otherwise require wallet-side signing for borrow/repay. Do not let the backend hot signer borrow or repay against its own account while the UI believes it acted for a user.
 - **Liquidation mechanics for borrow facility.** Current `BORROW_CAP = 25 USDC` flat per account; no liquidation. Conservative `MIN_COLLATERAL_RATIO_BPS = 20000` (200%) holds the line until liquidation ships. v2 work.
 - **Reputation-weighted borrow caps.** Today flat. Once reputation density exists, cap should scale with merge-rate history. v2.
 - **Multisig-owns-EVM-contract composition validation.** *Empirical-only — gates `MULTISIG_SETUP.md` from being safely actionable.* The composition `pallet_multisig` SS58 address → `pallet_revive.map_account()` → H160 owner of `TreasuryPolicy` rests on three documented primitives, but the *composition itself* is not documented end-to-end on `docs.polkadot.com`. Running `MULTISIG_SETUP.md §5` against Polkadot Hub TestNet *is* the validation experiment. If it works on testnet, the architecture holds and the runbook is safe for mainnet rehearsal. If it doesn't, the multisig story needs a different shape (e.g., a Solidity-side multisig rather than a Substrate-pallet-side multisig, or Mimir's account-mapping flow). Resolve before tagging `v1.0.0-rc1` for any mainnet-adjacent purpose.
@@ -791,6 +794,7 @@ Before public v1.0.0-rc1 launch:
 - [x] Hash fields live on `JobCreated` / `Submitted` / `Verified`
 - [x] `Disclosed` / `AutoDisclosed` events live on session lifecycle contract
 - [x] `EscrowCore.openDispute` enforces deadline window (`block.timestamp <= rejectedAt + DISPUTE_WINDOW`)
+- [x] `EscrowCore.submitWork` rejects expired claims; workers must submit before `claimExpiry` or reopen through the timeout path
 - [x] `DISPUTE_WINDOW` bumped from 1 day to 7 days
 - [x] `EscrowCore.autoResolveOnTimeout(jobId)` shipped with `ARBITRATOR_SLA = 14 days`
 - [x] `disputedAt` timestamp present on job state and emitted in `DisputeOpened` event
@@ -851,10 +855,11 @@ Before public v1.0.0-rc1 launch:
 - [ ] Public migration commitment to Phase 1 by month 6 or first 50 disputes
 
 **Async XCM (optional for v1.0.0-rc1 minus the wrapper validation, required before vDOT mainnet):**
-- [ ] Backend SCALE assembler shipped (`mcp-server/src/blockchain/xcm-message-builder.js` or equivalent)
-- [ ] HTTP `/account/allocate` and `/account/deallocate` accept intent only, not raw `destination`/`message` bytes
-- [ ] Backend mirrors `previewRequestId(context)` formula and appends `SetTopic(requestId)` to every assembled XCM
-- [ ] `XcmWrapper.queueRequest` SetTopic-validation check live (ships in v1.0.0-rc1 redeployment)
+- [x] Backend SCALE assembler shipped (`mcp-server/src/blockchain/xcm-message-builder.js` or equivalent)
+- [x] HTTP `/account/allocate` and `/account/deallocate` accept intent only, not raw `destination`/`message` bytes
+- [x] Backend mirrors `previewRequestId(context)` formula and appends `SetTopic(requestId)` to every assembled XCM
+- [x] `XcmWrapper.queueRequest` SetTopic-validation check live (ships in v1.0.0-rc1 redeployment)
+- [ ] `XcmWrapper.queueRequest` dispatches through the Hub XCM precompile rather than only recording an intent
 - [ ] Chopsticks experiment confirms Bifrost preserves SetTopic on reply-leg, *or* fallback strategy chosen and documented
 - [ ] Async XCM staging proof captured per `ASYNC_XCM_STAGING.md`
 
@@ -1037,6 +1042,13 @@ Stripe Link's launch and Stripe Sessions 2026 announcements positioned agents as
 ## 15. Reconciliation log
 
 For traceability.
+
+### v2.9 (blockchain audit follow-up)
+
+1. **Gateway unit boundary fixed and documented:** API-facing values remain display-denominated, contract calls convert through asset decimals before `uint256` calls, and chain reads return display values with explicit raw base-unit fields. This closes the USDC 6-decimal corruption risk for account summaries, account mutations, async strategy requests, and XCM request reads.
+2. **`submitWork` deadline guard added:** `EscrowCore.submitWork` now rejects submissions after `claimExpiry`; expired claims must go through `handleClaimTimeout` and be reclaimed. This matches the off-chain lifecycle service and prevents stale workers from bypassing the timeout path on-chain.
+3. **Async XCM status clarified:** the assembler and SetTopic validation are shipped, but live XCM precompile dispatch and native observer proof remain open launch gates for any production vDOT/yield claim.
+4. **Relayed borrow/repay gap recorded:** current contract methods act on `msg.sender`, so backend relay is unsafe for user wallets unless signer == wallet or new `borrowFor`/`repayFor` primitives are added.
 
 ### v2.8 (merge of competitive-intel + distribution sections from parallel v2.3/v2.4 branch)
 

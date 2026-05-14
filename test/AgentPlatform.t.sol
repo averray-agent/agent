@@ -346,6 +346,26 @@ contract AgentPlatformTest is Test {
         assertEq(dot.balanceOf(poster), posterBalanceBefore + 1.25 ether);
     }
 
+    function testExpiredClaimCannotSubmitWork() public {
+        bytes32 jobId = keccak256("job/timeout/submit");
+
+        vm.prank(poster);
+        escrow.createSinglePayoutJob(
+            jobId, address(dot), 50 ether, 5 ether, 5 ether, 1 days, bytes32("AUTO"), bytes32("DATA"), SPEC_HASH
+        );
+
+        vm.prank(worker);
+        escrow.claimJob(jobId);
+
+        vm.warp(block.timestamp + 1 days + 1);
+
+        vm.prank(worker);
+        (bool ok, bytes memory data) =
+            address(escrow).call(abi.encodeCall(escrow.submitWork, (jobId, keccak256("late-work"))));
+        require(!ok, "EXPECTED_EXPIRED_SUBMISSION_REVERT");
+        require(bytes4(data) == EscrowCore.InvalidState.selector, "EXPECTED_INVALID_STATE");
+    }
+
     function testReclaimedJobGetsFreshClaimExpiry() public {
         bytes32 jobId = keccak256("job/timeout/2");
 

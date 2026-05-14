@@ -326,7 +326,7 @@ export class AccountMutationService {
       throw new ValidationError("amount must be a positive number");
     }
     if (this.blockchainGateway?.isEnabled()) {
-      const liveAccount = await this.blockchainGateway.allocateIdleFunds(wallet, strategyId, amount);
+      const liveAccount = await this.blockchainGateway.allocateIdleFunds(wallet, strategyId, amount, asset);
       const account = this.attachStoredTreasuryMetadata(wallet, liveAccount);
       this.markStrategyActivity(account, strategyId, "allocate", amount, asset);
       this.updateStrategyAccountingOnAllocate(account, strategyId, asset, amount);
@@ -548,7 +548,7 @@ export class AccountMutationService {
     }
 
     if (this.blockchainGateway?.isEnabled()) {
-      await this.blockchainGateway.borrow(asset, amount);
+      await this.blockchainGateway.borrow(wallet, asset, amount);
       const account = this.attachStoredTreasuryMetadata(wallet, await this.getAccountSummary(wallet));
       this.recordTreasuryEvent(account, { type: "borrow", asset, amount });
       this.accounts.set(wallet, account);
@@ -612,7 +612,7 @@ export class AccountMutationService {
       throw new ValidationError("amount must be a positive number");
     }
     if (this.blockchainGateway?.isEnabled()) {
-      await this.blockchainGateway.repay(asset, amount);
+      await this.blockchainGateway.repay(wallet, asset, amount);
       const account = this.attachStoredTreasuryMetadata(wallet, await this.getAccountSummary(wallet));
       this.recordTreasuryEvent(account, { type: "repay", asset, amount });
       this.accounts.set(wallet, account);

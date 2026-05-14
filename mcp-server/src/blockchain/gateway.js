@@ -159,15 +159,29 @@ export class BlockchainGateway {
       const collateralLocked = {};
       const jobStakeLocked = {};
       const debtOutstanding = {};
+      const raw = {
+        liquid: {},
+        reserved: {},
+        strategyAllocated: {},
+        collateralLocked: {},
+        jobStakeLocked: {},
+        debtOutstanding: {}
+      };
 
       for (const asset of this.config.supportedAssets) {
         const position = await this.accountContract.positions(wallet, asset.address);
-        liquid[asset.symbol] = Number(position.liquid);
-        reserved[asset.symbol] = Number(position.reserved);
-        strategyAllocated[asset.symbol] = Number(position.strategyAllocated);
-        collateralLocked[asset.symbol] = Number(position.collateralLocked);
-        jobStakeLocked[asset.symbol] = Number(position.jobStakeLocked);
-        debtOutstanding[asset.symbol] = Number(position.debtOutstanding);
+        raw.liquid[asset.symbol] = this.toRawString(position.liquid);
+        raw.reserved[asset.symbol] = this.toRawString(position.reserved);
+        raw.strategyAllocated[asset.symbol] = this.toRawString(position.strategyAllocated);
+        raw.collateralLocked[asset.symbol] = this.toRawString(position.collateralLocked);
+        raw.jobStakeLocked[asset.symbol] = this.toRawString(position.jobStakeLocked);
+        raw.debtOutstanding[asset.symbol] = this.toRawString(position.debtOutstanding);
+        liquid[asset.symbol] = this.toDisplayUnits(position.liquid, asset);
+        reserved[asset.symbol] = this.toDisplayUnits(position.reserved, asset);
+        strategyAllocated[asset.symbol] = this.toDisplayUnits(position.strategyAllocated, asset);
+        collateralLocked[asset.symbol] = this.toDisplayUnits(position.collateralLocked, asset);
+        jobStakeLocked[asset.symbol] = this.toDisplayUnits(position.jobStakeLocked, asset);
+        debtOutstanding[asset.symbol] = this.toDisplayUnits(position.debtOutstanding, asset);
       }
 
       return {
@@ -177,7 +191,8 @@ export class BlockchainGateway {
         strategyAllocated,
         collateralLocked,
         jobStakeLocked,
-        debtOutstanding
+        debtOutstanding,
+        raw
       };
     });
   }
@@ -193,19 +208,23 @@ export class BlockchainGateway {
     return this.withGatewayError("getStrategyPositions", async () => {
       const entries = [];
       for (const strategy of strategies) {
+        const asset = this.assetForStrategy(strategy);
         const normalizedStrategyId = this.normalizeStrategyId(strategy.strategyId);
         const [rawShares, rawPendingWithdrawalShares, rawPendingDepositAssets] = await Promise.all([
           this.accountContract.strategyShares(wallet, normalizedStrategyId),
           this.accountContract.pendingStrategyWithdrawalShares(wallet, normalizedStrategyId),
-          strategy.asset
-            ? this.accountContract.pendingStrategyAssets(wallet, strategy.asset)
+          asset.address
+            ? this.accountContract.pendingStrategyAssets(wallet, asset.address)
             : Promise.resolve(0n)
         ]);
         entries.push({
           strategyId: strategy.strategyId,
-          shares: Number(rawShares),
-          pendingWithdrawalShares: Number(rawPendingWithdrawalShares),
-          pendingDepositAssets: Number(rawPendingDepositAssets)
+          shares: this.toDisplayUnits(rawShares, asset),
+          sharesRaw: this.toRawString(rawShares),
+          pendingWithdrawalShares: this.toDisplayUnits(rawPendingWithdrawalShares, asset),
+          pendingWithdrawalSharesRaw: this.toRawString(rawPendingWithdrawalShares),
+          pendingDepositAssets: this.toDisplayUnits(rawPendingDepositAssets, asset),
+          pendingDepositAssetsRaw: this.toRawString(rawPendingDepositAssets)
         });
       }
       return entries;
@@ -219,6 +238,7 @@ export class BlockchainGateway {
 
     return Promise.all(
       strategies.map(async (strategy) => {
+        const asset = this.assetForStrategy(strategy);
         const adapterContract = new Contract(strategy.adapter, STRATEGY_ADAPTER_ABI, this.provider);
         try {
           const [rawTotalAssets, rawTotalShares, liveRiskLabel] = await Promise.all([
@@ -226,8 +246,8 @@ export class BlockchainGateway {
             adapterContract.totalShares().catch(() => undefined),
             adapterContract.riskLabel().catch(() => strategy.riskLabel ?? "")
           ]);
-          const totalAssets = Number(rawTotalAssets ?? 0);
-          const totalShares = Number(rawTotalShares ?? 0);
+          const totalAssets = this.toDisplayUnits(rawTotalAssets ?? 0, asset);
+          const totalShares = this.toDisplayUnits(rawTotalShares ?? 0, asset);
           const sharePrice = totalShares > 0 ? totalAssets / totalShares : undefined;
           const performanceBps = Number.isFinite(sharePrice)
             ? Math.round((sharePrice - 1) * 10_000)
@@ -236,7 +256,9 @@ export class BlockchainGateway {
             strategyId: strategy.strategyId,
             adapter: strategy.adapter,
             totalAssets,
+            totalAssetsRaw: this.toRawString(rawTotalAssets ?? 0),
             totalShares,
+            totalSharesRaw: this.toRawString(rawTotalShares ?? 0),
             sharePrice,
             performanceBps,
             riskLabel: liveRiskLabel,
@@ -474,7 +496,7 @@ export class BlockchainGateway {
     return this.withGatewayError("getBorrowCapacity", async () => {
       const asset = this.requireAsset(assetSymbol);
       const value = await this.accountContract.getBorrowCapacity(wallet, asset.address);
-      return Number(value);
+      return this.toDisplayUnits(value, asset);
     });
   }
 
@@ -482,7 +504,8 @@ export class BlockchainGateway {
     return this.withGatewayError("reserveForJob", async () => {
       this.requireSigner("reserveForJob");
       const asset = this.requireAsset(assetSymbol);
-      const tx = await this.accountContract.reserveForJob(wallet, asset.address, amount);
+      const baseAmount = this.toBaseUnits(amount, asset, "job reserve amount");
+      const tx = await this.accountContract.reserveForJob(wallet, asset.address, baseAmount);
       await tx.wait();
       return this.getAccountSummary(wallet);
     });
@@ -508,10 +531,12 @@ export class BlockchainGateway {
     });
   }
 
-  async allocateIdleFunds(wallet, strategyId, amount) {
+  async allocateIdleFunds(wallet, strategyId, amount, assetSymbol = "DOT") {
     return this.withGatewayError("allocateIdleFunds", async () => {
       this.requireSigner("allocateIdleFunds");
-      const tx = await this.accountContract.allocateIdleFunds(wallet, this.normalizeStrategyId(strategyId), amount);
+      const asset = this.requireAsset(assetSymbol);
+      const baseAmount = this.toBaseUnits(amount, asset, "strategy allocation amount");
+      const tx = await this.accountContract.allocateIdleFunds(wallet, this.normalizeStrategyId(strategyId), baseAmount);
       await tx.wait();
       return this.getAccountSummary(wallet);
     });
@@ -522,7 +547,8 @@ export class BlockchainGateway {
       this.requireSigner("deallocateIdleFunds");
       const asset = this.requireAsset(assetSymbol);
       const before = await this.getAccountSummary(wallet);
-      const tx = await this.accountContract.deallocateIdleFunds(wallet, this.normalizeStrategyId(strategyId), amount);
+      const baseAmount = this.toBaseUnits(amount, asset, "strategy deallocation amount");
+      const tx = await this.accountContract.deallocateIdleFunds(wallet, this.normalizeStrategyId(strategyId), baseAmount);
       await tx.wait();
       const after = await this.getAccountSummary(wallet);
       return {
@@ -539,13 +565,15 @@ export class BlockchainGateway {
     return this.withGatewayError("requestStrategyDeposit", async () => {
       this.requireSigner("requestStrategyDeposit");
       this.requireAsyncStrategyConfig(strategy, "requestStrategyDeposit");
+      const asset = this.assetForStrategy(strategy);
+      const baseAmount = this.toBaseUnits(amount, asset, "strategy deposit amount");
       const requestId = this.previewStrategyRequestId({
         strategyId: strategy.strategyId,
         kind: 0,
         account: wallet,
-        asset: strategy.asset,
+        asset: asset.address,
         recipient: wallet,
-        assets: amount,
+        assets: baseAmount,
         shares: 0,
         nonce
       });
@@ -555,11 +583,11 @@ export class BlockchainGateway {
         requestId,
         account: wallet,
         recipient: wallet,
-        amount
+        amount: baseAmount
       });
       const tx = await this.accountContract.requestStrategyDeposit(wallet, {
         strategyId: this.normalizeStrategyId(strategy.strategyId),
-        amount,
+        amount: baseAmount,
         destination: payload.destination,
         message: payload.message,
         maxWeight: this.normalizeWeight(maxWeight ?? payload.maxWeight),
@@ -584,14 +612,16 @@ export class BlockchainGateway {
     return this.withGatewayError("requestStrategyWithdraw", async () => {
       this.requireSigner("requestStrategyWithdraw");
       this.requireAsyncStrategyConfig(strategy, "requestStrategyWithdraw");
+      const asset = this.assetForStrategy(strategy);
+      const baseAmount = this.toBaseUnits(amount, asset, "strategy withdraw amount");
       const shares = Number.isFinite(Number(requestedShares)) && Number(requestedShares) > 0
-        ? Number(requestedShares)
-        : await this.quoteStrategySharesForAssets(strategy, amount);
+        ? this.toBaseUnits(requestedShares, asset, "strategy withdraw shares")
+        : await this.quoteStrategySharesForAssets(strategy, baseAmount);
       const requestId = this.previewStrategyRequestId({
         strategyId: strategy.strategyId,
         kind: 1,
         account: wallet,
-        asset: strategy.asset,
+        asset: asset.address,
         recipient,
         assets: 0,
         shares,
@@ -603,7 +633,7 @@ export class BlockchainGateway {
         requestId,
         account: wallet,
         recipient,
-        amount,
+        amount: baseAmount,
         shares
       });
       const tx = await this.accountContract.requestStrategyWithdraw(wallet, {
@@ -619,28 +649,34 @@ export class BlockchainGateway {
       return {
         ...(await this.getAccountSummary(wallet)),
         requestId,
-        requestedShares: shares,
-        requestedAssets: amount,
+        requestedShares: this.toDisplayUnits(shares, asset),
+        requestedSharesRaw: this.toRawString(shares),
+        requestedAssets: this.toDisplayUnits(baseAmount, asset),
+        requestedAssetsRaw: this.toRawString(baseAmount),
         xcmRequest: await this.getXcmRequest(requestId),
         strategyRequest: await this.getStrategyRequest(requestId)
       };
     });
   }
 
-  async borrow(assetSymbol, amount) {
+  async borrow(wallet, assetSymbol, amount) {
     return this.withGatewayError("borrow", async () => {
       this.requireSigner("borrow");
       const asset = this.requireAsset(assetSymbol);
-      const tx = await this.accountContract.borrow(asset.address, amount);
+      await this.requireSignerWallet(wallet, "borrow");
+      const baseAmount = this.toBaseUnits(amount, asset, "borrow amount");
+      const tx = await this.accountContract.borrow(asset.address, baseAmount);
       await tx.wait();
     });
   }
 
-  async repay(assetSymbol, amount) {
+  async repay(wallet, assetSymbol, amount) {
     return this.withGatewayError("repay", async () => {
       this.requireSigner("repay");
       const asset = this.requireAsset(assetSymbol);
-      const tx = await this.accountContract.repay(asset.address, amount);
+      await this.requireSignerWallet(wallet, "repay");
+      const baseAmount = this.toBaseUnits(amount, asset, "repay amount");
+      const tx = await this.accountContract.repay(asset.address, baseAmount);
       await tx.wait();
     });
   }
@@ -656,7 +692,8 @@ export class BlockchainGateway {
     return this.withGatewayError("sendToAgent", async () => {
       this.requireSigner("sendToAgent");
       const asset = this.requireAsset(assetSymbol);
-      const tx = await this.accountContract.sendToAgentFor(from, recipient, asset.address, amount);
+      const baseAmount = this.toBaseUnits(amount, asset, "agent transfer amount");
+      const tx = await this.accountContract.sendToAgentFor(from, recipient, asset.address, baseAmount);
       await tx.wait();
     });
   }
@@ -1015,13 +1052,17 @@ export class BlockchainGateway {
         asset: record.context.asset,
         assetSymbol: this.resolveAssetSymbol(record.context.asset),
         recipient: record.context.recipient,
-        requestedAssets: Number(record.context.assets),
-        requestedShares: Number(record.context.shares),
+        requestedAssets: this.toDisplayUnits(record.context.assets, this.assetForAddress(record.context.asset)),
+        requestedAssetsRaw: this.toRawString(record.context.assets),
+        requestedShares: this.toDisplayUnits(record.context.shares, this.assetForAddress(record.context.asset)),
+        requestedSharesRaw: this.toRawString(record.context.shares),
         nonce: Number(record.context.nonce),
         status: Number(record.status),
         statusLabel: REQUEST_STATUS_LABELS[Number(record.status)] ?? "unknown",
-        settledAssets: Number(record.settledAssets),
-        settledShares: Number(record.settledShares),
+        settledAssets: this.toDisplayUnits(record.settledAssets, this.assetForAddress(record.context.asset)),
+        settledAssetsRaw: this.toRawString(record.settledAssets),
+        settledShares: this.toDisplayUnits(record.settledShares, this.assetForAddress(record.context.asset)),
+        settledSharesRaw: this.toRawString(record.settledShares),
         remoteRef: this.normalizeOptionalBytes32(record.remoteRef),
         remoteRefLabel: this.decodeBytes32Label(record.remoteRef),
         failureCode: this.normalizeOptionalBytes32(record.failureCode),
@@ -1052,10 +1093,14 @@ export class BlockchainGateway {
         kindLabel: REQUEST_KIND_LABELS[Number(record.kind)] ?? "unknown",
         status: Number(record.status),
         statusLabel: REQUEST_STATUS_LABELS[Number(record.status)] ?? "unknown",
-        requestedAssets: Number(record.requestedAssets),
-        requestedShares: Number(record.requestedShares),
-        settledAssets: Number(record.settledAssets),
-        settledShares: Number(record.settledShares),
+        requestedAssets: this.toDisplayUnits(record.requestedAssets, this.assetForAddress(record.asset)),
+        requestedAssetsRaw: this.toRawString(record.requestedAssets),
+        requestedShares: this.toDisplayUnits(record.requestedShares, this.assetForAddress(record.asset)),
+        requestedSharesRaw: this.toRawString(record.requestedShares),
+        settledAssets: this.toDisplayUnits(record.settledAssets, this.assetForAddress(record.asset)),
+        settledAssetsRaw: this.toRawString(record.settledAssets),
+        settledShares: this.toDisplayUnits(record.settledShares, this.assetForAddress(record.asset)),
+        settledSharesRaw: this.toRawString(record.settledShares),
         remoteRef: this.normalizeOptionalBytes32(record.remoteRef),
         remoteRefLabel: this.decodeBytes32Label(record.remoteRef),
         failureCode: this.normalizeOptionalBytes32(record.failureCode),
@@ -1142,6 +1187,18 @@ export class BlockchainGateway {
     return match ?? { symbol: this.resolveAssetSymbol(assetAddress), address: assetAddress, decimals: 18 };
   }
 
+  assetForStrategy(strategy = {}) {
+    const address = strategy.assetConfig?.address ?? strategy.asset;
+    const known = this.assetForAddress(address);
+    return {
+      ...known,
+      ...(strategy.assetConfig ?? {}),
+      address: address ?? known.address,
+      symbol: strategy.assetConfig?.symbol ?? known.symbol,
+      decimals: strategy.assetConfig?.decimals ?? known.decimals ?? 18
+    };
+  }
+
   assetDecimals(asset) {
     const decimals = Number(asset?.decimals ?? 18);
     if (!Number.isInteger(decimals) || decimals < 0 || decimals > 30) {
@@ -1166,6 +1223,13 @@ export class BlockchainGateway {
 
   toDisplayUnits(amount, asset) {
     return Number(formatUnits(amount ?? 0, this.assetDecimals(asset)));
+  }
+
+  toRawString(amount) {
+    if (amount === undefined || amount === null) {
+      return "0";
+    }
+    return BigInt(amount).toString();
   }
 
   normalizeDecimalAmount(amount, decimals, label) {
@@ -1205,6 +1269,16 @@ export class BlockchainGateway {
     if (!this.signer) {
       throw new ConfigError(`${operation} requires SIGNER_PRIVATE_KEY`);
     }
+  }
+
+  async requireSignerWallet(wallet, operation) {
+    const signerAddress = await this.signer.getAddress();
+    if (!wallet || signerAddress.toLowerCase() !== wallet.toLowerCase()) {
+      throw new ValidationError(
+        `${operation} requires the configured blockchain signer to match the authenticated wallet until a relayed contract primitive exists.`
+      );
+    }
+    return signerAddress;
   }
 
   toJobId(jobId) {
@@ -1353,12 +1427,13 @@ export class BlockchainGateway {
       adapterContract.totalAssets(),
       adapterContract.totalShares()
     ]);
-    const totalAssets = Number(rawTotalAssets ?? 0);
-    const totalShares = Number(rawTotalShares ?? 0);
-    if (!(totalAssets > 0) || !(totalShares > 0)) {
-      return Number(assets);
+    const totalAssets = BigInt(rawTotalAssets ?? 0);
+    const totalShares = BigInt(rawTotalShares ?? 0);
+    const requestedAssets = BigInt(assets ?? 0);
+    if (totalAssets <= 0n || totalShares <= 0n) {
+      return requestedAssets;
     }
-    return Math.ceil((Number(assets) * totalShares) / totalAssets);
+    return (requestedAssets * totalShares + totalAssets - 1n) / totalAssets;
   }
 
   async withGatewayError(operation, action) {
