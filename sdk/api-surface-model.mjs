@@ -576,6 +576,88 @@ export interface AdminStatusResponse extends ApiEnvelope {
   };
 }
 
+export type CapabilityGrantStatus = "active" | "revoked";
+
+export interface CapabilityGrantProjection {
+  id: string;
+  subject: WalletAddress;
+  capabilities: string[];
+  scope?: string;
+  note?: string;
+  issuedBy: WalletAddress;
+  issuedAt: ISODateTime;
+  expiresAt?: ISODateTime;
+  status: CapabilityGrantStatus;
+  revokedAt?: ISODateTime;
+  revokedBy?: WalletAddress;
+  revokeNote?: string;
+}
+
+export interface ServiceTokenListOptions {
+  subject?: WalletAddress;
+  status?: CapabilityGrantStatus;
+  limit?: number;
+  offset?: number;
+}
+
+export interface ServiceTokenListItem {
+  tokenKind: "service";
+  tokenAvailable: false;
+  grant: CapabilityGrantProjection;
+}
+
+export interface ServiceTokenListResponse extends ApiEnvelope {
+  items: ServiceTokenListItem[];
+  limit: number;
+  offset: number;
+}
+
+export interface ServiceTokenIssueInput {
+  subject: WalletAddress;
+  capabilities: string[];
+  scope?: string;
+  note?: string;
+  expiresAt?: ISODateTime;
+  tokenTtlSeconds?: number;
+  idempotencyKey?: IdempotencyKey;
+}
+
+export interface ServiceTokenRotateInput {
+  capabilities?: string[];
+  scope?: string;
+  note?: string;
+  expiresAt?: ISODateTime;
+  tokenTtlSeconds?: number;
+  revokeNote?: string;
+  idempotencyKey?: IdempotencyKey;
+}
+
+export interface ServiceTokenRevokeInput {
+  note?: string;
+  idempotencyKey?: IdempotencyKey;
+}
+
+export interface ServiceTokenIssueResponse extends ApiEnvelope {
+  token: string;
+  tokenType: "Bearer";
+  tokenKind: "service";
+  tokenAvailable: true;
+  wallet: WalletAddress;
+  capabilities: string[];
+  expiresAt: ISODateTime;
+  grant: CapabilityGrantProjection;
+  rotatedFrom?: CapabilityGrantProjection;
+  usage: { header: string };
+}
+
+export interface ServiceTokenRevokeResponse extends ApiEnvelope {
+  tokenKind: "service";
+  tokenAvailable: false;
+  status: "revoked";
+  alreadyRevoked: boolean;
+  grant: CapabilityGrantProjection;
+}
+
 export class AgentPlatformApiError extends Error {
   constructor(options: {
     message: string;
@@ -676,6 +758,17 @@ export class AgentPlatformClient {
   pauseRecurringJob(templateId: JobId, options?: { idempotencyKey?: IdempotencyKey }): Promise<ApiEnvelope>;
   resumeRecurringJob(templateId: JobId, options?: { idempotencyKey?: IdempotencyKey }): Promise<ApiEnvelope>;
   getAdminStatus(): Promise<AdminStatusResponse>;
+
+  listServiceTokens(options?: ServiceTokenListOptions): Promise<ServiceTokenListResponse>;
+  issueServiceToken(input: ServiceTokenIssueInput): Promise<ServiceTokenIssueResponse>;
+  rotateServiceToken(
+    grantId: string,
+    input?: ServiceTokenRotateInput
+  ): Promise<ServiceTokenIssueResponse>;
+  revokeServiceToken(
+    grantId: string,
+    input?: ServiceTokenRevokeInput
+  ): Promise<ServiceTokenRevokeResponse>;
 
   request<T = unknown>(path: string, options?: RequestOptions): Promise<T>;
 }

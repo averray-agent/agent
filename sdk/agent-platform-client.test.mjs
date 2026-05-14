@@ -233,6 +233,164 @@ test("request throws server-provided error messages with structured metadata", a
   );
 });
 
+test("listServiceTokens builds optional admin query string", async () => {
+  const calls = [];
+  const client = new AgentPlatformClient({
+    baseUrl: "https://api.example.test",
+    token: "admin-token",
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      return jsonResponse({ items: [], limit: 50, offset: 0 });
+    }
+  });
+
+  await client.listServiceTokens();
+  await client.listServiceTokens({
+    subject: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+    status: "active",
+    limit: 25,
+    offset: 50
+  });
+
+  assert.equal(calls[0].url, "https://api.example.test/admin/service-tokens");
+  assert.equal(calls[0].options.method ?? "GET", "GET");
+  assert.equal(calls[0].options.headers.get("authorization"), "Bearer admin-token");
+  assert.equal(
+    calls[1].url,
+    "https://api.example.test/admin/service-tokens?subject=0xabcdefabcdefabcdefabcdefabcdefabcdefabcd&status=active&limit=25&offset=50"
+  );
+});
+
+test("issueServiceToken posts a least-privilege payload and strips undefined fields", async () => {
+  const calls = [];
+  const client = new AgentPlatformClient({
+    baseUrl: "https://api.example.test",
+    token: "admin-token",
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      return jsonResponse({
+        token: "svc-token-secret",
+        tokenType: "Bearer",
+        tokenKind: "service",
+        tokenAvailable: true,
+        wallet: "0xagent",
+        capabilities: ["jobs:claim", "jobs:submit"],
+        expiresAt: "2026-06-01T00:00:00.000Z",
+        grant: { id: "grant-1", status: "active" },
+        usage: { header: "Authorization: Bearer <token>" }
+      }, { status: 201 });
+    }
+  });
+
+  const response = await client.issueServiceToken({
+    subject: "0xagent",
+    capabilities: ["jobs:claim", "jobs:submit"],
+    scope: "wikipedia-bot",
+    idempotencyKey: "issue-1"
+  });
+
+  assert.equal(calls[0].url, "https://api.example.test/admin/service-tokens");
+  assert.equal(calls[0].options.method, "POST");
+  assert.equal(calls[0].options.headers.get("authorization"), "Bearer admin-token");
+  assert.equal(calls[0].options.headers.get("content-type"), "application/json");
+  assert.deepEqual(JSON.parse(calls[0].options.body), {
+    subject: "0xagent",
+    capabilities: ["jobs:claim", "jobs:submit"],
+    scope: "wikipedia-bot",
+    idempotencyKey: "issue-1"
+  });
+  assert.equal(response.token, "svc-token-secret");
+  assert.equal(response.tokenAvailable, true);
+});
+
+test("issueServiceToken rejects missing subject or empty capabilities before any HTTP call", async () => {
+  const client = new AgentPlatformClient({
+    baseUrl: "https://api.example.test",
+    fetchImpl: async () => {
+      throw new Error("fetch must not be called when input is invalid");
+    }
+  });
+
+  await assert.rejects(() => client.issueServiceToken({}), TypeError);
+  await assert.rejects(
+    () => client.issueServiceToken({ subject: "0xagent", capabilities: [] }),
+    TypeError
+  );
+});
+
+test("rotateServiceToken URL-encodes the grant id and forwards optional overrides", async () => {
+  const calls = [];
+  const client = new AgentPlatformClient({
+    baseUrl: "https://api.example.test",
+    token: "admin-token",
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      return jsonResponse({
+        token: "rotated-token-secret",
+        tokenAvailable: true,
+        grant: { id: "grant-2" }
+      }, { status: 201 });
+    }
+  });
+
+  await client.rotateServiceToken("grant id/with slash", {
+    capabilities: ["jobs:claim"],
+    tokenTtlSeconds: 1800,
+    revokeNote: "tightened scope"
+  });
+
+  assert.equal(
+    calls[0].url,
+    "https://api.example.test/admin/service-tokens/grant%20id%2Fwith%20slash/rotate"
+  );
+  assert.equal(calls[0].options.method, "POST");
+  assert.deepEqual(JSON.parse(calls[0].options.body), {
+    capabilities: ["jobs:claim"],
+    tokenTtlSeconds: 1800,
+    revokeNote: "tightened scope"
+  });
+});
+
+test("revokeServiceToken posts a compact body and survives an empty input", async () => {
+  const calls = [];
+  const client = new AgentPlatformClient({
+    baseUrl: "https://api.example.test",
+    token: "admin-token",
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      return jsonResponse({
+        tokenKind: "service",
+        tokenAvailable: false,
+        status: "revoked",
+        alreadyRevoked: false,
+        grant: { id: "grant-3", status: "revoked" }
+      });
+    }
+  });
+
+  await client.revokeServiceToken("grant-3");
+  await client.revokeServiceToken("grant-3", { note: "key rotated out-of-band", idempotencyKey: "revoke-1" });
+
+  assert.equal(calls[0].url, "https://api.example.test/admin/service-tokens/grant-3/revoke");
+  assert.deepEqual(JSON.parse(calls[0].options.body), {});
+  assert.deepEqual(JSON.parse(calls[1].options.body), {
+    note: "key rotated out-of-band",
+    idempotencyKey: "revoke-1"
+  });
+});
+
+test("rotate/revoke require a non-empty grant id", async () => {
+  const client = new AgentPlatformClient({
+    baseUrl: "https://api.example.test",
+    fetchImpl: async () => {
+      throw new Error("fetch must not be called when input is invalid");
+    }
+  });
+
+  await assert.rejects(() => client.rotateServiceToken(""), TypeError);
+  await assert.rejects(() => client.revokeServiceToken(undefined), TypeError);
+});
+
 function jsonResponse(payload, { status = 200 } = {}) {
   return new Response(JSON.stringify(payload), {
     status,
