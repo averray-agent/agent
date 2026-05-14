@@ -186,7 +186,9 @@ SSH/basic-auth/admin-JWT cutovers, and the basic hosted smoke is green.
 
 - Optional ingestion-run idempotency now covers provider ingestion routes where
   callers need whole-run replay semantics.
-- Reuse the receipt wrapper for future dispute and settlement routes.
+- Dispute verdict and release routes now use scoped idempotency envelopes while
+  preserving their canonical dispute receipts for timeline/profile reads.
+- Reuse the receipt wrapper for future direct settlement override routes.
 
 ### Timeline And Operator UX
 

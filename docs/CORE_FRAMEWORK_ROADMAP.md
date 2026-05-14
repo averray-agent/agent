@@ -244,14 +244,17 @@ load and automation grow.
   observe/finalize store canonical request hashes with their idempotency
   receipts, so same-key replays return the original result while same-key
   payload drift fails with a clear conflict
+- dispute verdict and release routes keep their canonical dispute receipts while
+  also storing scoped idempotency envelopes keyed by wallet, dispute id, and
+  client key
 
 ### Remaining gaps
 
-- future dispute and settlement routes should adopt the same receipt wrapper
+- future direct settlement override routes should adopt the same receipt wrapper
 
 ### Concrete next changes
 
-- reuse the same receipt wrapper for future dispute and settlement routes
+- reuse the same receipt wrapper for future settlement routes
 - expose idempotency replay/conflict metadata in operator-facing docs and SDK
   helpers
 

@@ -902,7 +902,11 @@ test("http smoke: /disputes exposes human-review sessions and records verdict/re
     const verdict = await fetch(`${base}/disputes/${encodeURIComponent(dispute.id)}/verdict`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${verifierToken}` },
-      body: JSON.stringify({ verdict: "upheld", rationale: "Submission needs correction." })
+      body: JSON.stringify({
+        verdict: "upheld",
+        rationale: "Submission needs correction.",
+        idempotencyKey: "dispute-verdict-same-key"
+      })
     });
     assert.equal(verdict.status, 200);
     const verdictBody = await verdict.json();
@@ -910,6 +914,32 @@ test("http smoke: /disputes exposes human-review sessions and records verdict/re
     assert.equal(verdictBody.verdict, "upheld");
     assert.match(verdictBody.reasoningHash, /^0x[a-f0-9]{64}$/u);
     assert.equal(verdictBody.metadataURI, `urn:averray:content:${verdictBody.reasoningHash}`);
+
+    const verdictReplay = await fetch(`${base}/disputes/${encodeURIComponent(dispute.id)}/verdict`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${verifierToken}` },
+      body: JSON.stringify({
+        idempotencyKey: "dispute-verdict-same-key",
+        rationale: "Submission needs correction.",
+        verdict: "upheld"
+      })
+    });
+    assert.equal(verdictReplay.status, 200);
+    assert.deepEqual(await verdictReplay.json(), verdictBody);
+
+    const verdictDrift = await fetch(`${base}/disputes/${encodeURIComponent(dispute.id)}/verdict`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${verifierToken}` },
+      body: JSON.stringify({
+        verdict: "dismissed",
+        rationale: "Submission needs correction.",
+        idempotencyKey: "dispute-verdict-same-key"
+      })
+    });
+    assert.equal(verdictDrift.status, 409);
+    const verdictDriftBody = await verdictDrift.json();
+    assert.equal(verdictDriftBody.error, "idempotency_key_payload_mismatch");
+    assert.equal(verdictDriftBody.details.bucket, "dispute_verdict_idempotency");
 
     const privateContent = await fetch(`${base}/content/${encodeURIComponent(verdictBody.reasoningHash)}`);
     assert.equal(privateContent.status, 403);
@@ -950,12 +980,30 @@ test("http smoke: /disputes exposes human-review sessions and records verdict/re
     const release = await fetch(`${base}/disputes/${encodeURIComponent(dispute.id)}/release`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${adminToken}` },
-      body: JSON.stringify({ action: "release", amount: 0.15 })
+      body: JSON.stringify({ action: "release", amount: 0.15, idempotencyKey: "dispute-release-same-key" })
     });
     assert.equal(release.status, 200);
     const releaseBody = await release.json();
     assert.equal(releaseBody.release.action, "release");
     assert.equal(releaseBody.release.amount, 0.15);
+
+    const releaseReplay = await fetch(`${base}/disputes/${encodeURIComponent(dispute.id)}/release`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({ amount: "0.15", action: "release", idempotencyKey: "dispute-release-same-key" })
+    });
+    assert.equal(releaseReplay.status, 200);
+    assert.deepEqual(await releaseReplay.json(), releaseBody);
+
+    const releaseDrift = await fetch(`${base}/disputes/${encodeURIComponent(dispute.id)}/release`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({ action: "release", amount: 0.2, idempotencyKey: "dispute-release-same-key" })
+    });
+    assert.equal(releaseDrift.status, 409);
+    const releaseDriftBody = await releaseDrift.json();
+    assert.equal(releaseDriftBody.error, "idempotency_key_payload_mismatch");
+    assert.equal(releaseDriftBody.details.bucket, "dispute_release_idempotency");
   });
 });
 

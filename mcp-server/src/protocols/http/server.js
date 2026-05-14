@@ -1381,6 +1381,59 @@ function buildIdempotentMutationContext({ route, auth, payload, normalizedPayloa
   };
 }
 
+function buildScopedIdempotentMutationContext({ route, auth, scope, payload, normalizedPayload, bucket }) {
+  const idempotencyKey = parseIdempotencyKey(payload);
+  return {
+    bucket,
+    key: idempotencyKey ? `${auth.wallet}:${scope}:${idempotencyKey}` : undefined,
+    requestHash: buildMutationRequestHash({
+      route,
+      wallet: auth.wallet,
+      payload: normalizedPayload ?? payload
+    })
+  };
+}
+
+function normalizeOptionalString(value) {
+  return typeof value === "string" ? value.trim() : undefined;
+}
+
+function normalizeNumberLike(value) {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : value;
+}
+
+function normalizeDisputeVerdictForRequestHash(value) {
+  const verdict = normalizeOptionalString(value)?.toLowerCase();
+  if (verdict === "uphold") return "upheld";
+  if (verdict === "dismiss" || verdict === "rejected" || verdict === "reject") return "dismissed";
+  if (verdict === "partial" || verdict === "request-more") return "split";
+  if (verdict === "arb_timeout") return "timeout";
+  return verdict;
+}
+
+function normalizeDisputeVerdictRequestPayload(id, payload = {}) {
+  return {
+    disputeId: id,
+    verdict: normalizeDisputeVerdictForRequestHash(payload?.verdict ?? payload?.outcome),
+    workerPayout: normalizeNumberLike(payload?.workerPayout ?? payload?.payoutAmount),
+    rationale: normalizeOptionalString(payload?.rationale),
+    reasoningHash: normalizeOptionalString(payload?.reasoningHash),
+    metadataURI: normalizeOptionalString(payload?.metadataURI)
+  };
+}
+
+function normalizeDisputeReleaseRequestPayload(id, dispute, payload = {}) {
+  return {
+    disputeId: id,
+    action: normalizeOptionalString(payload?.action) || "release",
+    amount: normalizeNumberLike(payload?.amount ?? dispute?.stakedAmount ?? 0)
+  };
+}
+
 function isMutationReceiptEnvelope(receipt) {
   return Boolean(
     receipt
@@ -2202,10 +2255,22 @@ const server = createServer(async (request, response) => {
       if (!dispute) {
         return respond(response, 404, { status: "not_found", id });
       }
-      if (dispute.verdict || dispute.reasonCode) {
-        return respond(response, 200, dispute);
-      }
       const payload = await readJsonBody(request);
+      const idempotency = buildScopedIdempotentMutationContext({
+        route: "/disputes/:id/verdict",
+        auth,
+        scope: id,
+        payload,
+        normalizedPayload: normalizeDisputeVerdictRequestPayload(id, payload),
+        bucket: "dispute_verdict_idempotency"
+      });
+      const replay = await getIdempotentMutationReplay(idempotency);
+      if (replay) {
+        return respond(response, replay.statusCode, replay.body);
+      }
+      if (dispute.verdict || dispute.reasonCode) {
+        return respondWithMutationReceipt(response, idempotency, 200, dispute);
+      }
       const session = await service.resumeSession(dispute.sessionId);
       const decidedAt = new Date().toISOString();
       const remainingPayout = await resolveRemainingPayout(session);
@@ -2287,7 +2352,7 @@ const server = createServer(async (request, response) => {
           txHash: receipt.txHash
         }
       });
-      return respond(response, 200, {
+      const body = {
         ...dispute,
         status: "resolved",
         verdict: resolution.verdict,
@@ -2308,7 +2373,8 @@ const server = createServer(async (request, response) => {
             data: receipt
           }
         ]
-      });
+      };
+      return respondWithMutationReceipt(response, idempotency, 200, body);
     }
 
     if (request.method === "POST" && /^\/disputes\/[^/]+\/release$/u.test(pathname)) {
@@ -2319,6 +2385,21 @@ const server = createServer(async (request, response) => {
         return respond(response, 404, { status: "not_found", id });
       }
       const payload = await readJsonBody(request);
+      const idempotency = buildScopedIdempotentMutationContext({
+        route: "/disputes/:id/release",
+        auth,
+        scope: id,
+        payload,
+        normalizedPayload: normalizeDisputeReleaseRequestPayload(id, dispute, payload),
+        bucket: "dispute_release_idempotency"
+      });
+      const replay = await getIdempotentMutationReplay(idempotency);
+      if (replay) {
+        return respond(response, replay.statusCode, replay.body);
+      }
+      if (dispute.release) {
+        return respondWithMutationReceipt(response, idempotency, 200, dispute);
+      }
       const receipt = {
         id,
         disputeId: id,
@@ -2340,7 +2421,7 @@ const server = createServer(async (request, response) => {
         timestamp: receipt.releasedAt,
         data: { disputeId: id, amount: receipt.amount, action: receipt.action }
       });
-      return respond(response, 200, {
+      const body = {
         ...dispute,
         status: "resolved",
         release: receipt,
@@ -2354,7 +2435,8 @@ const server = createServer(async (request, response) => {
             data: receipt
           }
         ]
-      });
+      };
+      return respondWithMutationReceipt(response, idempotency, 200, body);
     }
 
     // ---------- auth routes ----------
