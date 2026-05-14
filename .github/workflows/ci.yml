@@ -179,3 +179,22 @@ jobs:
       # this guard covers transitive deps.
       - name: npm install-script supply-chain allowlist
         run: node scripts/ops/check-npm-install-scripts.mjs
+
+      # Phase 4d (per SECRETS_MIGRATION.md §"Phase 4 — Hardening"):
+      # warn early, fail on past-expiry. The script reads
+      # docs/SECRETS_CALENDAR.yml and classifies each tracked secret
+      # against now():
+      #   - exit 0: all healthy or only emitting warnings (within
+      #     warn_days but not yet expired)
+      #   - exit 1: script error (bad YAML, missing file)
+      #   - exit 2: at least one entry past expiry — fails CI
+      # Warnings don't fail CI because a 7-day warning shouldn't block
+      # legitimate work, but they DO print in the run log so operators
+      # see them on every push and can plan rotations. `TBD` entries
+      # are treated as past-due aggressively until set — the unrotated
+      # vendor secrets (Pimlico, Subscan, etc.) are surfaced here so
+      # they don't get forgotten. To temporarily silence one, set
+      # warn_days higher or mark it `expires_at: "never"` with a
+      # justification.
+      - name: Secrets calendar expiry check
+        run: node scripts/ops/check-secrets-calendar.mjs
