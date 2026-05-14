@@ -147,6 +147,11 @@ curl -s https://api.averray.com/jobs/validate-submission \
   -d '{"jobId":"<job-id>","submission":{"summary":"Complete","output":"complete verified output","status":"complete"}}'
 ```
 
+Proceed only when the response contains `"valid": true` and
+`"submitSafe": true`. SDK users can enforce the same guard with
+`claimJobAfterValidation(jobId, draft, idempotencyKey)` before claim and
+`submitValidatedWork(jobId, sessionId, draft)` before submit.
+
 For schema-native jobs, `/jobs/definition.submissionContract` shows the exact
 `payload.submission` shape. Do not wrap the schema object under
 `submission.output`.

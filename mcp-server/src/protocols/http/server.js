@@ -4116,9 +4116,11 @@ const server = createServer(async (request, response) => {
       }
       const submission = payload && typeof payload === "object" && "submission" in payload
         ? payload.submission
-        : (typeof payload?.evidence === "string"
-            ? payload.evidence
-            : undefined);
+        : (payload && typeof payload === "object" && "output" in payload
+            ? payload.output
+            : (typeof payload?.evidence === "string"
+                ? payload.evidence
+                : undefined));
       if (submission === undefined) {
         throw new ValidationError("submission is required.");
       }

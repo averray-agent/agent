@@ -268,6 +268,23 @@ export class AgentPlatformClient {
     });
   }
 
+  async assertValidJobSubmission(jobId, submission) {
+    const validation = await this.validateJobSubmission(jobId, submission);
+    if (!isSubmitSafeValidation(validation)) {
+      throw new AgentPlatformValidationError({
+        message: validation?.message ?? "Submission validation failed; refusing to mutate.",
+        validation
+      });
+    }
+    return validation;
+  }
+
+  /** Validate the exact draft first; only then consume a claim attempt. */
+  async claimJobAfterValidation(jobId, submission, idempotencyKey = undefined) {
+    await this.assertValidJobSubmission(jobId, submission);
+    return this.claimJob(jobId, idempotencyKey);
+  }
+
   /** Omit `idempotencyKey` to inherit the server default of `<wallet>:<jobId>`; pass one to scope per run. See docs/IDEMPOTENCY.md. */
   async claimJob(jobId, idempotencyKey = undefined) {
     return this.request("/jobs/claim", {
@@ -287,6 +304,12 @@ export class AgentPlatformClient {
         ...(typeof submission === "string" ? { evidence: submission } : { submission })
       }
     });
+  }
+
+  /** Validate the exact draft first; only then send the submit mutation. */
+  async submitValidatedWork(jobId, sessionId, submission) {
+    await this.assertValidJobSubmission(jobId, submission);
+    return this.submitWork(sessionId, submission);
   }
 
   async getSession(sessionId) {
@@ -509,6 +532,20 @@ export class AgentPlatformApiError extends Error {
     this.code = payload?.code ?? payload?.error ?? undefined;
     this.details = payload?.details ?? undefined;
   }
+}
+
+export class AgentPlatformValidationError extends Error {
+  constructor({ message, validation }) {
+    super(message);
+    this.name = "AgentPlatformValidationError";
+    this.code = validation?.code ?? "submission_validation_failed";
+    this.validation = validation;
+    this.details = validation?.details ?? undefined;
+  }
+}
+
+function isSubmitSafeValidation(validation) {
+  return validation?.valid === true && validation?.submitSafe !== false;
 }
 
 function safeJsonParse(text) {

@@ -1,6 +1,7 @@
 import {
   AgentPlatformApiError,
   AgentPlatformClient,
+  AgentPlatformValidationError,
   createIdempotencyKey,
   type AccountSummary,
   type BuiltinJobSchemaValue,
@@ -45,6 +46,8 @@ if (firstJobId) {
   } satisfies BuiltinJobSchemaValue<"schema://jobs/wikipedia-citation-repair-output">;
 
   await client.validateJobSubmission(definition.id, wikipediaSubmission);
+  await client.claimJobAfterValidation(definition.id, wikipediaSubmission, "example-run-id-validated");
+  await client.submitValidatedWork(definition.id, claim.sessionId, wikipediaSubmission);
   await client.submitWork(claim.sessionId, wikipediaSubmission);
   await client.createSubJob({
     parentSessionId: claim.sessionId,
@@ -63,6 +66,7 @@ const account: AccountSummary = await client.borrowFunds({ amount: "1", idempote
 await client.repayFunds({ amount: "1" });
 void account.wallet;
 void createIdempotencyKey();
+void AgentPlatformValidationError;
 
 const serviceTokens: ServiceTokenListResponse = await client.listServiceTokens({
   status: "active",

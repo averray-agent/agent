@@ -10,6 +10,7 @@ import { VerificationIngestionService } from "../services/verification-ingestion
 import { ConflictError, InsufficientLiquidityError, ValidationError } from "./errors.js";
 import { normalizeSubmission } from "./submission.js";
 import { buildPlatformCapabilities } from "./discovery-manifest.js";
+import { getBuiltinJobSchema } from "./job-schema-registry.js";
 import {
   buildSessionLifecycle,
   describeSessionStatus,
@@ -504,25 +505,30 @@ export class PlatformService {
 
   validateJobSubmission(jobId, submissionInput) {
     const job = this.getJobDefinition(jobId);
+    const contract = buildSubmissionValidationContract(job.outputSchemaRef);
     try {
       const normalized = normalizeSubmission(normalizeSubmitPayloadShape(job.outputSchemaRef, submissionInput));
       validateSubmissionContract(job.outputSchemaRef, normalized);
       return {
         jobId,
         valid: true,
+        submitSafe: true,
+        ...contract,
         schemaRef: job.outputSchemaRef,
-        schemaValidates: "payload.submission",
         submissionKind: normalized.kind,
         normalizedSubmission: normalized.kind === "structured" ? normalized.structured : normalized.rawText
       };
     } catch (error) {
+      const path = validationPathFromError(error);
       return {
         jobId,
         valid: false,
+        submitSafe: false,
+        ...contract,
         schemaRef: job.outputSchemaRef,
-        schemaValidates: "payload.submission",
         code: error?.code ?? "invalid_submission",
         message: error?.message ?? "Invalid submission.",
+        ...(path ? { path, errorPaths: [path] } : {}),
         details: error?.details
       };
     }
@@ -1719,4 +1725,54 @@ function toNonNegativeInteger(value) {
 
 function stringOrUndefined(value) {
   return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function buildSubmissionValidationContract(schemaRef) {
+  const schema = getBuiltinJobSchema(schemaRef);
+  const requiredTopLevelKeys = Array.isArray(schema?.required) ? schema.required : [];
+  return {
+    validationEndpoint: "POST /jobs/validate-submission",
+    submitEndpoint: "POST /jobs/submit",
+    submissionShape: "direct_schema_object",
+    schemaValidates: "payload.submission",
+    doNotWrapInOutput: true,
+    ...(requiredTopLevelKeys.length ? { requiredTopLevelKeys } : {})
+  };
+}
+
+function validationPathFromError(error) {
+  const details = error?.details && typeof error.details === "object" ? error.details : {};
+  const directPath = [
+    details.path,
+    details.expectedPath,
+    details.expected,
+    details.received
+  ].find((entry) => typeof entry === "string" && entry.trim());
+  if (directPath) {
+    return normalizeValidationPath(directPath);
+  }
+  return normalizeValidationPath(parseValidationPathFromMessage(error?.message));
+}
+
+function parseValidationPathFromMessage(message) {
+  if (typeof message !== "string") {
+    return undefined;
+  }
+  const payloadMatch = message.match(/\bpayload\.submission(?:\.[A-Za-z0-9_-]+|\[[0-9]+\])*/u);
+  if (payloadMatch) {
+    return payloadMatch[0];
+  }
+  const submissionMatch = message.match(/\bsubmission(?:\.[A-Za-z0-9_-]+|\[[0-9]+\])*/u);
+  if (submissionMatch) {
+    return submissionMatch[0];
+  }
+  return undefined;
+}
+
+function normalizeValidationPath(path) {
+  if (typeof path !== "string" || !path.trim()) {
+    return undefined;
+  }
+  const trimmed = path.trim();
+  return trimmed.startsWith("payload.") ? trimmed : `payload.${trimmed}`;
 }

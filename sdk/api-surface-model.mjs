@@ -361,14 +361,22 @@ export interface PreflightResponse extends ApiEnvelope {
 
 export interface ValidationResponse<TSubmission = unknown> extends ApiEnvelope {
   valid: boolean;
+  submitSafe?: boolean;
   errors?: ApiEnvelope[];
   submission?: TSubmission;
   schemaRef?: BuiltinJobSchemaRef | string;
   schemaValidates?: "payload.submission" | string;
+  validationEndpoint?: "POST /jobs/validate-submission" | string;
+  submitEndpoint?: "POST /jobs/submit" | string;
+  submissionShape?: "direct_schema_object" | string;
+  doNotWrapInOutput?: boolean;
+  requiredTopLevelKeys?: string[];
   submissionKind?: "structured" | string;
   message?: string;
+  code?: string;
   details?: ApiEnvelope;
   path?: string;
+  errorPaths?: string[];
   expected?: string;
   expectedPath?: string;
 }
@@ -682,6 +690,16 @@ export class AgentPlatformApiError extends Error {
   details?: unknown;
 }
 
+export class AgentPlatformValidationError<TValidation = ValidationResponse> extends Error {
+  constructor(options: {
+    message: string;
+    validation?: TValidation;
+  });
+  validation?: TValidation;
+  code?: string;
+  details?: unknown;
+}
+
 export class AgentPlatformClient {
   constructor(options?: AgentPlatformClientOptions);
 
@@ -733,10 +751,24 @@ export class AgentPlatformClient {
     jobId: JobId,
     submission: TSubmission
   ): Promise<ValidationResponse<TSubmission>>;
+  assertValidJobSubmission<TSubmission extends StructuredSubmission = StructuredSubmission>(
+    jobId: JobId,
+    submission: TSubmission
+  ): Promise<ValidationResponse<TSubmission>>;
+  claimJobAfterValidation<TSubmission extends StructuredSubmission = StructuredSubmission>(
+    jobId: JobId,
+    submission: TSubmission,
+    idempotencyKey?: IdempotencyKey
+  ): Promise<ClaimResponse>;
   claimJob(jobId: JobId, idempotencyKey?: IdempotencyKey): Promise<ClaimResponse>;
   submitWork<TSubmission extends StructuredSubmission = StructuredSubmission>(
     sessionId: SessionId,
     submission: string | TSubmission
+  ): Promise<SubmitResponse>;
+  submitValidatedWork<TSubmission extends StructuredSubmission = StructuredSubmission>(
+    jobId: JobId,
+    sessionId: SessionId,
+    submission: TSubmission
   ): Promise<SubmitResponse>;
   getSession(sessionId: SessionId): Promise<SessionRecord>;
   getSessionTimeline(sessionId: SessionId): Promise<SessionTimelineResponse>;
