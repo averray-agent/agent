@@ -25,7 +25,15 @@ jobs:
       VPS_HOST: ${{ secrets.VPS_HOST }}
       VPS_PORT: ${{ secrets.VPS_PORT }}
       VPS_USER: ${{ secrets.VPS_USER }}
-      VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+      # Phase 2 PR 2.7a removed the legacy `VPS_SSH_KEY` GH-secret
+      # job-env binding when the canonical source flipped to
+      # 1Password at op://prod-ci/vps-ssh-key/private key. The deploy
+      # workflow was updated; this workflow was missed and started
+      # failing the "Validate required secrets" check below with an
+      # empty $VPS_SSH_KEY (caught in production on 2026-05-14 as
+      # ~2/3 Hermes runs failing). We now load it from OP via the
+      # same SHA-pinned load-secrets-action used in deploy-production
+      # (step below) before the validate step runs.
       HERMES_HANDOFF_TIMEOUT: 12m
     steps:
       - name: Extract PR context
@@ -48,19 +56,53 @@ jobs:
           echo "head_sha=$head_sha" >> "$GITHUB_OUTPUT"
           echo "correlation_id=github-pr-${pr_number}-${head_sha}-${run_id}" >> "$GITHUB_OUTPUT"
 
+      # Phase 2 PR 2.7a (catch-up for this workflow): load VPS_SSH_KEY
+      # from 1Password instead of the legacy GH-secret. Mirrors the
+      # pattern in deploy-production.yml — same SHA-pinned action,
+      # same OP path, same fail-closed shape check below.
+      - name: Load prod-ci secrets from 1Password (fail-closed)
+        if: steps.pr.outputs.skip != 'true'
+        # Pinned to 1password/load-secrets-action v4.0.0 commit SHA.
+        # v4.0.0 is the first Node-24-compatible release; refresh with
+        # the same procedure documented in deploy-production.yml.
+        uses: 1password/load-secrets-action@92467eb28f72e8255933372f1e0707c567ce2259 # v4.0.0
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN_PROD_CI }}
+          VPS_SSH_KEY_OP: op://prod-ci/vps-ssh-key/private key
+
       - name: Validate required secrets
         if: steps.pr.outputs.skip != 'true'
         run: |
+          set -euo pipefail
           test -n "$VPS_HOST"
           test -n "$VPS_USER"
-          test -n "$VPS_SSH_KEY"
+          # VPS_SSH_KEY_OP must be a non-empty PEM/OpenSSH private key.
+          # Identical shape check to deploy-production.yml's
+          # "Verify prod-ci OP values loaded and shape-valid" step,
+          # collapsed to one block here because Hermes only needs the
+          # SSH key from prod-ci, not the basic-auth pair.
+          if [ -z "${VPS_SSH_KEY_OP:-}" ]; then
+            echo "::error::VPS_SSH_KEY_OP is empty after load step — check op://prod-ci/vps-ssh-key/private key and OP_SERVICE_ACCOUNT_TOKEN_PROD_CI"
+            exit 1
+          fi
+          case "$VPS_SSH_KEY_OP" in
+            -----BEGIN*PRIVATE\ KEY-----*)
+              echo "VPS_SSH_KEY_OP: SSH private-key shape valid"
+              ;;
+            *)
+              echo "::error::VPS_SSH_KEY_OP does not look like an OpenSSH/PEM private key"
+              exit 1
+              ;;
+          esac
 
       - name: Configure SSH
         if: steps.pr.outputs.skip != 'true'
         run: |
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
-          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$VPS_SSH_KEY_OP" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -p "${VPS_PORT:-22}" -H "$VPS_HOST" >> ~/.ssh/known_hosts
 
