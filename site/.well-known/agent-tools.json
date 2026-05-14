@@ -468,19 +468,27 @@
     },
     {
       "path": "/admin/jobs/ingest/github",
-      "description": "Admin-gated GitHub issue ingestion preview/create endpoint."
+      "description": "Admin-gated GitHub issue ingestion preview/create endpoint with optional idempotencyKey replay."
+    },
+    {
+      "path": "/admin/jobs/ingest/openapi",
+      "description": "Admin-gated OpenAPI quality audit ingestion preview/create endpoint with optional idempotencyKey replay."
     },
     {
       "path": "/admin/jobs/ingest/open-data",
-      "description": "Admin-gated Data.gov open-data quality audit ingestion preview/create endpoint."
+      "description": "Admin-gated Data.gov open-data quality audit ingestion preview/create endpoint with optional idempotencyKey replay."
     },
     {
       "path": "/admin/jobs/ingest/osv",
-      "description": "Admin-gated OSV npm advisory ingestion preview/create endpoint."
+      "description": "Admin-gated OSV npm advisory ingestion preview/create endpoint with optional idempotencyKey replay."
+    },
+    {
+      "path": "/admin/jobs/ingest/standards",
+      "description": "Admin-gated standards freshness ingestion preview/create endpoint with optional idempotencyKey replay."
     },
     {
       "path": "/admin/jobs/ingest/wikipedia",
-      "description": "Admin-gated Wikipedia maintenance ingestion preview/create endpoint."
+      "description": "Admin-gated Wikipedia maintenance ingestion preview/create endpoint with optional idempotencyKey replay."
     },
     {
       "path": "/admin/service-tokens",

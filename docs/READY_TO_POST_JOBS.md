@@ -50,6 +50,11 @@ What the helper does:
 - skips any job ids that already exist
 - posts only the missing jobs to `/admin/jobs`
 
+Provider ingestion endpoints also accept an optional `idempotencyKey` in the
+POST body. When a retry uses the same key and the same resolved ingestion
+options, the backend replays the original result; if the payload drifts, the
+route returns `409 idempotency_key_payload_mismatch` before running ingestion.
+
 ---
 
 ## Posting defaults

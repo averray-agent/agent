@@ -646,6 +646,7 @@
                 "dryRun": {
                   "value": {
                     "dryRun": true,
+                    "idempotencyKey": "openapi-ingest-2026-05-14",
                     "limit": 2,
                     "specs": [
                       {
@@ -690,6 +691,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/OpenApiIngestResult"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The idempotency key was already used with a different request payload.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -1687,6 +1698,10 @@
           "dryRun": {
             "type": "boolean",
             "default": true
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "description": "Optional run-level idempotency key. Exact retries replay the original result; same-key payload drift returns 409."
           }
         },
         "additionalProperties": false

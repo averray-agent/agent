@@ -1368,6 +1368,19 @@ function buildMutationRequestHash({ route, wallet, payload }) {
   });
 }
 
+function buildIdempotentMutationContext({ route, auth, payload, normalizedPayload, bucket }) {
+  const idempotencyKey = parseIdempotencyKey(payload);
+  return {
+    bucket,
+    key: idempotencyKey ? `${auth.wallet}:${idempotencyKey}` : undefined,
+    requestHash: buildMutationRequestHash({
+      route,
+      wallet: auth.wallet,
+      payload: normalizedPayload ?? payload
+    })
+  };
+}
+
 function isMutationReceiptEnvelope(receipt) {
   return Boolean(
     receipt
@@ -1413,6 +1426,15 @@ async function storeIdempotentMutationReceipt({ bucket, key, requestHash, respon
     createdAt: new Date().toISOString()
   });
   return response;
+}
+
+async function respondWithMutationReceipt(response, context, statusCode, body) {
+  await storeIdempotentMutationReceipt({
+    ...context,
+    response: body,
+    statusCode
+  });
+  return respond(response, statusCode, body);
 }
 
 function assertIssuerCanGrantCapabilities(grant, auth) {
@@ -2957,6 +2979,17 @@ const server = createServer(async (request, response) => {
       const limit = parsePositiveInteger(payload?.limit, 10, 50);
       const minScore = parsePositiveInteger(payload?.minScore, 55, 100);
       const dryRun = payload?.dryRun !== false;
+      const idempotency = buildIdempotentMutationContext({
+        route: "/admin/jobs/ingest/github",
+        auth,
+        payload,
+        normalizedPayload: { query, limit, minScore, dryRun },
+        bucket: "admin_jobs_ingest_github"
+      });
+      const replay = await getIdempotentMutationReplay(idempotency);
+      if (replay) {
+        return respond(response, replay.statusCode, replay.body);
+      }
       const result = await ingestGithubIssues({
         query,
         limit,
@@ -2965,7 +2998,7 @@ const server = createServer(async (request, response) => {
       });
 
       if (dryRun) {
-        return respond(response, 200, {
+        return respondWithMutationReceipt(response, idempotency, 200, {
           ...result,
           dryRun: true,
           created: [],
@@ -2997,7 +3030,7 @@ const server = createServer(async (request, response) => {
       }
 
       const status = errors.length ? 207 : 201;
-      return respond(response, status, {
+      return respondWithMutationReceipt(response, idempotency, status, {
         query: result.query,
         minScore: result.minScore,
         dryRun: false,
@@ -3024,6 +3057,17 @@ const server = createServer(async (request, response) => {
       const limit = parsePositiveInteger(payload?.limit, 10, 50);
       const minScore = parsePositiveInteger(payload?.minScore, 55, 100);
       const dryRun = payload?.dryRun !== false;
+      const idempotency = buildIdempotentMutationContext({
+        route: "/admin/jobs/ingest/wikipedia",
+        auth,
+        payload,
+        normalizedPayload: { language, categories, limit, minScore, dryRun },
+        bucket: "admin_jobs_ingest_wikipedia"
+      });
+      const replay = await getIdempotentMutationReplay(idempotency);
+      if (replay) {
+        return respond(response, replay.statusCode, replay.body);
+      }
       const result = await ingestWikipediaMaintenance({
         language,
         categories,
@@ -3032,7 +3076,7 @@ const server = createServer(async (request, response) => {
       });
 
       if (dryRun) {
-        return respond(response, 200, {
+        return respondWithMutationReceipt(response, idempotency, 200, {
           ...result,
           dryRun: true,
           created: [],
@@ -3064,7 +3108,7 @@ const server = createServer(async (request, response) => {
       }
 
       const status = errors.length ? 207 : 201;
-      return respond(response, status, {
+      return respondWithMutationReceipt(response, idempotency, status, {
         language: result.language,
         categories: result.categories,
         minScore: result.minScore,
@@ -3093,10 +3137,21 @@ const server = createServer(async (request, response) => {
       const minScore = parsePositiveInteger(payload?.minScore, 55, 100);
       const maxPackageTargets = parsePositiveInteger(payload?.maxPackageTargets, 100, 500);
       const dryRun = payload?.dryRun !== false;
+      const idempotency = buildIdempotentMutationContext({
+        route: "/admin/jobs/ingest/osv",
+        auth,
+        payload,
+        normalizedPayload: { packages, manifests, limit, minScore, maxPackageTargets, dryRun },
+        bucket: "admin_jobs_ingest_osv"
+      });
+      const replay = await getIdempotentMutationReplay(idempotency);
+      if (replay) {
+        return respond(response, replay.statusCode, replay.body);
+      }
       const result = await ingestOsvAdvisories({ packages, manifests, limit, minScore, maxPackageTargets });
 
       if (dryRun) {
-        return respond(response, 200, {
+        return respondWithMutationReceipt(response, idempotency, 200, {
           ...result,
           dryRun: true,
           created: []
@@ -3124,7 +3179,7 @@ const server = createServer(async (request, response) => {
       }
 
       const status = errors.length ? 207 : 201;
-      return respond(response, status, {
+      return respondWithMutationReceipt(response, idempotency, status, {
         ecosystem: result.ecosystem,
         minScore: result.minScore,
         dryRun: false,
@@ -3148,10 +3203,21 @@ const server = createServer(async (request, response) => {
       const limit = parsePositiveInteger(payload?.limit, 10, 50);
       const minScore = parsePositiveInteger(payload?.minScore, 55, 100);
       const dryRun = payload?.dryRun !== false;
+      const idempotency = buildIdempotentMutationContext({
+        route: "/admin/jobs/ingest/open-data",
+        auth,
+        payload,
+        normalizedPayload: { datasets, query, limit, minScore, dryRun },
+        bucket: "admin_jobs_ingest_open_data"
+      });
+      const replay = await getIdempotentMutationReplay(idempotency);
+      if (replay) {
+        return respond(response, replay.statusCode, replay.body);
+      }
       const result = await ingestOpenDataDatasets({ datasets, query, limit, minScore });
 
       if (dryRun) {
-        return respond(response, 200, {
+        return respondWithMutationReceipt(response, idempotency, 200, {
           ...result,
           dryRun: true,
           created: []
@@ -3179,7 +3245,7 @@ const server = createServer(async (request, response) => {
       }
 
       const status = errors.length ? 207 : 201;
-      return respond(response, status, {
+      return respondWithMutationReceipt(response, idempotency, status, {
         provider: result.provider,
         query: result.query,
         minScore: result.minScore,
@@ -3201,10 +3267,21 @@ const server = createServer(async (request, response) => {
       const limit = parsePositiveInteger(payload?.limit, 10, 50);
       const minScore = parsePositiveInteger(payload?.minScore, 55, 100);
       const dryRun = payload?.dryRun !== false;
+      const idempotency = buildIdempotentMutationContext({
+        route: "/admin/jobs/ingest/openapi",
+        auth,
+        payload,
+        normalizedPayload: { specs, limit, minScore, dryRun },
+        bucket: "admin_jobs_ingest_openapi"
+      });
+      const replay = await getIdempotentMutationReplay(idempotency);
+      if (replay) {
+        return respond(response, replay.statusCode, replay.body);
+      }
       const result = await ingestOpenApiSpecs({ specs, limit, minScore });
 
       if (dryRun) {
-        return respond(response, 200, {
+        return respondWithMutationReceipt(response, idempotency, 200, {
           ...result,
           dryRun: true,
           created: []
@@ -3232,7 +3309,7 @@ const server = createServer(async (request, response) => {
       }
 
       const status = errors.length ? 207 : 201;
-      return respond(response, status, {
+      return respondWithMutationReceipt(response, idempotency, status, {
         provider: result.provider,
         specCount: result.specCount,
         minScore: result.minScore,
@@ -3254,10 +3331,21 @@ const server = createServer(async (request, response) => {
       const limit = parsePositiveInteger(payload?.limit, 10, 50);
       const minScore = parsePositiveInteger(payload?.minScore, 55, 100);
       const dryRun = payload?.dryRun !== false;
+      const idempotency = buildIdempotentMutationContext({
+        route: "/admin/jobs/ingest/standards",
+        auth,
+        payload,
+        normalizedPayload: { specs, limit, minScore, dryRun },
+        bucket: "admin_jobs_ingest_standards"
+      });
+      const replay = await getIdempotentMutationReplay(idempotency);
+      if (replay) {
+        return respond(response, replay.statusCode, replay.body);
+      }
       const result = await ingestStandardsSpecs({ specs, limit, minScore });
 
       if (dryRun) {
-        return respond(response, 200, {
+        return respondWithMutationReceipt(response, idempotency, 200, {
           ...result,
           dryRun: true,
           created: []
@@ -3285,7 +3373,7 @@ const server = createServer(async (request, response) => {
       }
 
       const status = errors.length ? 207 : 201;
-      return respond(response, status, {
+      return respondWithMutationReceipt(response, idempotency, status, {
         provider: result.provider,
         specCount: result.specCount,
         minScore: result.minScore,

@@ -121,6 +121,8 @@ After Wikipedia, use the same pattern for:
      explicit dataset/resource targets, then emits proposal-only audit jobs.
      Each run selects one high-signal resource per dataset so CSV/GeoJSON/API
      siblings do not flood the queue with duplicate audits.
+   - Admin callers can include `idempotencyKey` for exact retry replay and
+     payload drift rejection.
    - Scheduled ingestion is available behind `OPEN_DATA_INGEST_ENABLED`; keep
      `OPEN_DATA_INGEST_DRY_RUN=true` until `/admin/status` shows good
      candidates.
@@ -138,6 +140,8 @@ After Wikipedia, use the same pattern for:
      exists. CVE aliases link to NVD for operator review.
      It can also discover package targets from configured GitHub npm lockfiles
      when explicit package targets are not set.
+   - Admin callers can include `idempotencyKey` for exact retry replay and
+     payload drift rejection.
    - Scheduled ingestion is available behind `OSV_INGEST_ENABLED`; configure
      package targets or `OSV_INGEST_MANIFESTS_JSON`, and keep
      `OSV_INGEST_DRY_RUN=true` until candidate quality is reviewed.
@@ -148,6 +152,8 @@ After Wikipedia, use the same pattern for:
    - v1 ingestion is allowlist-driven:
      `POST /admin/jobs/ingest/standards` accepts configured spec URLs and
      emits review-only docs drift jobs against a configured local surface.
+   - Admin callers can include `idempotencyKey` for exact retry replay and
+     payload drift rejection.
    - Scheduled ingestion is available behind `STANDARDS_INGEST_ENABLED`; keep
      `STANDARDS_INGEST_DRY_RUN=true` until `/admin/status` shows useful
      candidates.
@@ -161,6 +167,8 @@ After Wikipedia, use the same pattern for:
    - v1 ingestion is allowlist-driven:
      `POST /admin/jobs/ingest/openapi` accepts configured public OpenAPI
      documents and emits review-only API quality audit jobs.
+   - Admin callers can include `idempotencyKey` for exact retry replay and
+     payload drift rejection.
    - Scheduled ingestion is available behind `OPENAPI_INGEST_ENABLED`; keep
      `OPENAPI_INGEST_DRY_RUN=true` until `/admin/status` shows useful
      candidates.

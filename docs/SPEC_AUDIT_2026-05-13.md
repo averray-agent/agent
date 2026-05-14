@@ -184,8 +184,8 @@ SSH/basic-auth/admin-JWT cutovers, and the basic hosted smoke is green.
 
 ### Idempotency And Mutation Hardening
 
-- Add optional ingestion-run idempotency where callers need whole-run replay
-  semantics.
+- Optional ingestion-run idempotency now covers provider ingestion routes where
+  callers need whole-run replay semantics.
 - Reuse the receipt wrapper for future dispute and settlement routes.
 
 ### Timeline And Operator UX

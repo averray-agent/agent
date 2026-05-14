@@ -23,6 +23,20 @@ const LONG_SECRET = "x".repeat(40);
 const ADMIN_WALLET = "0x1111111111111111111111111111111111111111";
 const VERIFIER_WALLET = "0x2222222222222222222222222222222222222222";
 const STRANGER_WALLET = "0x3333333333333333333333333333333333333333";
+const OPEN_DATA_INGEST_TARGET = {
+  portal: "data.gov",
+  datasetId: "provider-idempotency-dataset",
+  datasetTitle: "Provider idempotency smoke dataset",
+  datasetUrl: "https://catalog.data.gov/dataset/provider-idempotency-smoke",
+  resourceId: "provider-idempotency-resource",
+  resourceTitle: "Provider idempotency CSV",
+  resourceUrl: "https://example.gov/provider-idempotency.csv",
+  resourceFormat: "CSV",
+  agency: "General Services Administration",
+  license: "CC0",
+  modified: "2026-01-01T00:00:00Z",
+  metadataModified: "2026-05-01T00:00:00Z"
+};
 
 async function startServer(port, envOverrides = {}) {
   const child = spawn(process.execPath, [serverPath], {
@@ -1188,6 +1202,56 @@ test("http smoke: admin job creation idempotency replays and rejects payload dri
     const body = await drift.json();
     assert.equal(body.error, "idempotency_key_payload_mismatch");
     assert.equal(body.details.bucket, "admin_jobs");
+    assert.ok(body.details.originalRequestHash);
+    assert.ok(body.details.requestHash);
+  });
+});
+
+test("http smoke: provider ingestion idempotency replays and rejects payload drift", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
+    const headers = { "content-type": "application/json", authorization: `Bearer ${adminToken}` };
+    const payload = {
+      datasets: [OPEN_DATA_INGEST_TARGET],
+      dryRun: false,
+      limit: 5,
+      minScore: 55,
+      idempotencyKey: "provider-ingest-open-data-same-key"
+    };
+
+    const create = await fetch(`${base}/admin/jobs/ingest/open-data`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload)
+    });
+    assert.equal(create.status, 201);
+    const created = await create.json();
+    assert.equal(created.provider, "data.gov");
+    assert.equal(created.dryRun, false);
+    assert.equal(created.candidateCount, 1);
+    assert.equal(created.created.length, 1);
+    assert.equal(created.errors.length, 0);
+
+    const replay = await fetch(`${base}/admin/jobs/ingest/open-data`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ minScore: 55, ...payload })
+    });
+    assert.equal(replay.status, 200);
+    assert.deepEqual(await replay.json(), created);
+
+    const drift = await fetch(`${base}/admin/jobs/ingest/open-data`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        ...payload,
+        limit: 4
+      })
+    });
+    assert.equal(drift.status, 409);
+    const body = await drift.json();
+    assert.equal(body.error, "idempotency_key_payload_mismatch");
+    assert.equal(body.details.bucket, "admin_jobs_ingest_open_data");
     assert.ok(body.details.originalRequestHash);
     assert.ok(body.details.requestHash);
   });
