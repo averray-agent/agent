@@ -1,0 +1,22 @@
+{
+  "handler": "benchmark",
+  "handlerVersion": 1,
+  "evidenceSchemaRef": "schema://jobs/benchmark-narrative-output",
+  "job": {
+    "id": "benchmark-narrative-001",
+    "verifierMode": "benchmark",
+    "outputSchemaRef": "schema://jobs/benchmark-narrative-output",
+    "verifierConfig": {
+      "version": 1,
+      "handler": "benchmark",
+      "requiredKeywords": ["alpha", "beta", "gamma"],
+      "minimumMatches": 2
+    }
+  },
+  "verificationInput": "The submission discusses alpha and beta scenarios in detail.",
+  "expected": {
+    "outcome": "approved",
+    "reasonCode": "BENCHMARK_THRESHOLD_MET",
+    "score": 67
+  }
+}

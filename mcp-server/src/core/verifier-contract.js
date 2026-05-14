@@ -7,6 +7,11 @@ export function buildVerificationContract(job, { verdict = undefined, verificati
   const verifierConfigVersion = normalizeVersion(verifierConfig?.version);
   const handler = firstString(verdict?.handler, verifierConfig?.handler, job?.verifierMode, "unknown");
   const handlerVersion = normalizeOptionalVersion(verdict?.handlerVersion);
+  const evidenceSchemaRef = firstString(
+    job?.verification?.evidenceSchemaRef,
+    job?.outputSchemaRef,
+    undefined
+  );
   const hasInput = verificationInput !== undefined;
 
   return compact({
@@ -16,6 +21,7 @@ export function buildVerificationContract(job, { verdict = undefined, verificati
     handlerVersion,
     verifierConfigVersion,
     verifierConfigHash: hashCanonicalContent(verifierConfig ?? null),
+    evidenceSchemaRef,
     verificationInputHash: hasInput ? hashCanonicalContent(verificationInput ?? null) : undefined,
     replayEndpoint: "POST /verifier/replay",
     resultEndpoint: "GET /verifier/result",
@@ -25,7 +31,8 @@ export function buildVerificationContract(job, { verdict = undefined, verificati
       "verifierConfigSnapshot",
       "verifierConfigHash",
       "verifierConfigVersion",
-      "handlerVersion"
+      "handlerVersion",
+      "evidenceSchemaRef"
     ]
   });
 }
@@ -42,6 +49,9 @@ export function buildVerificationAuditFields(job, { verdict = {}, verificationIn
 
   if (contract.handlerVersion !== undefined) {
     fields.handlerVersion = contract.handlerVersion;
+  }
+  if (contract.evidenceSchemaRef !== undefined) {
+    fields.evidenceSchemaRef = contract.evidenceSchemaRef;
   }
   if (verificationInput !== undefined) {
     fields.verificationInput = verificationInput;

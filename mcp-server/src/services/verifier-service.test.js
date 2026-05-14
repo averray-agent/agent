@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync, readdirSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { VerifierService } from "./verifier-service.js";
 import { VerifierRegistry } from "./verifier-handlers.js";
@@ -7,6 +10,27 @@ import { MemoryStateStore } from "../core/state-store.js";
 import { transitionSession } from "../core/session-state-machine.js";
 import { normalizeSubmission } from "../core/submission.js";
 import { buildAverrayDisclosureFooter } from "../core/maintainer-surface-policy.js";
+import { buildVerificationContract } from "../core/verifier-contract.js";
+
+const FIXTURE_ROOT = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "__fixtures__",
+  "verifier-replay"
+);
+
+function loadFixturesForHandler(handlerId) {
+  const handlerDir = path.join(FIXTURE_ROOT, handlerId);
+  const versions = readdirSync(handlerDir).filter((entry) => /^v\d+$/u.test(entry));
+  const fixtures = [];
+  for (const version of versions) {
+    const versionDir = path.join(handlerDir, version);
+    for (const file of readdirSync(versionDir).filter((name) => name.endsWith(".json"))) {
+      const fixture = JSON.parse(readFileSync(path.join(versionDir, file), "utf8"));
+      fixtures.push({ name: `${handlerId}/${version}/${file}`, version, fixture });
+    }
+  }
+  return fixtures;
+}
 
 const SESSION_ID = "release-readiness-check-001:0xabc";
 
@@ -409,3 +433,225 @@ function jsonResponse(payload) {
     }
   };
 }
+
+test("verification contract carries evidenceSchemaRef and lists it in snapshot fields", () => {
+  const job = {
+    id: "release-readiness-check-001",
+    outputSchemaRef: "schema://jobs/release-readiness-output",
+    verifierMode: "deterministic",
+    verifierConfig: {
+      version: 1,
+      handler: "deterministic",
+      expectedOutputs: ["release_id"],
+      matchMode: "contains_all"
+    }
+  };
+
+  const contract = buildVerificationContract(job, { verdict: { handlerVersion: 1 } });
+  assert.equal(contract.evidenceSchemaRef, "schema://jobs/release-readiness-output");
+  assert.ok(contract.snapshotFields.includes("evidenceSchemaRef"));
+});
+
+test("verification contract prefers job.verification.evidenceSchemaRef when both are set", () => {
+  const job = {
+    outputSchemaRef: "schema://jobs/release-readiness-output",
+    verification: { evidenceSchemaRef: "schema://jobs/github-pr-evidence-output" },
+    verifierConfig: { version: 1, handler: "benchmark", requiredKeywords: [], minimumMatches: 0 }
+  };
+  const contract = buildVerificationContract(job, {});
+  assert.equal(contract.evidenceSchemaRef, "schema://jobs/github-pr-evidence-output");
+});
+
+for (const handlerId of ["benchmark", "deterministic", "github_pr"]) {
+  for (const { name, version, fixture } of loadFixturesForHandler(handlerId)) {
+    test(`handler-versioned replay fixture remains stable under current handler: ${name}`, async () => {
+      // Force the github_pr handler down its tokenless path so replay does not depend on a live GitHub fetch.
+      const registry = new VerifierRegistry({ githubToken: "" });
+      const verdict = await registry.evaluate(fixture.job, fixture.verificationInput);
+      assert.equal(verdict.handler, fixture.handler);
+      assert.equal(
+        verdict.handlerVersion,
+        fixture.handlerVersion,
+        `live handler version drifted from fixture ${name} (captured under ${version}); update fixture or surface a drift signal`
+      );
+      assert.equal(verdict.outcome, fixture.expected.outcome);
+      assert.equal(verdict.reasonCode, fixture.expected.reasonCode);
+      if (typeof fixture.expected.score === "number") {
+        assert.equal(verdict.score, fixture.expected.score);
+      }
+      if (typeof fixture.expected.minimumScore === "number") {
+        assert.ok(
+          verdict.score >= fixture.expected.minimumScore,
+          `expected score ${verdict.score} >= ${fixture.expected.minimumScore}`
+        );
+      }
+      if (fixture.expected.checks) {
+        for (const [check, expected] of Object.entries(fixture.expected.checks)) {
+          assert.equal(verdict.checks?.[check], expected, `check ${check}`);
+        }
+      }
+    });
+  }
+}
+
+test("replayVerification reads stored verifier config snapshot when live job config drifts (benchmark)", async () => {
+  const sessionId = "benchmark-narrative-001:0xaaa";
+  const { fixture } = loadFixturesForHandler("benchmark")[0];
+  const stateStore = new MemoryStateStore();
+
+  const claimed = transitionSession(
+    {
+      sessionId,
+      wallet: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      jobId: fixture.job.id,
+      submission: normalizeSubmission(fixture.verificationInput)
+    },
+    "claimed",
+    { reason: "job_claimed" }
+  );
+  await stateStore.upsertSession(transitionSession(claimed, "submitted", { reason: "work_submitted" }));
+
+  const liveJob = {
+    ...fixture.job,
+    verifierConfig: {
+      ...fixture.job.verifierConfig,
+      requiredKeywords: ["zeta", "omega", "delta", "epsilon"],
+      minimumMatches: 4
+    }
+  };
+
+  const platformService = {
+    resumeSession: (id) => stateStore.getSession(id),
+    getJobDefinition: () => liveJob,
+    ingestVerification: async (id, verdict) => {
+      const current = await stateStore.getSession(id);
+      const updated = transitionSession(current, verdict.outcome === "approved" ? "resolved" : "rejected", {
+        reason: "verification_resolved"
+      });
+      return stateStore.upsertSession(updated);
+    }
+  };
+
+  const service = new VerifierService(platformService, stateStore);
+  // Persist the original verification under the fixture's snapshot so replay has a snapshot to read.
+  const original = await service.verifySubmission({ sessionId });
+  assert.equal(original.outcome, "rejected"); // live config rejects; snapshot will approve.
+
+  // Now seed the persisted result with the fixture snapshot, simulating an earlier
+  // verification captured before the live config drift.
+  await stateStore.upsertVerificationResult(sessionId, {
+    ...original,
+    outcome: fixture.expected.outcome,
+    reasonCode: fixture.expected.reasonCode,
+    handler: fixture.handler,
+    handlerVersion: fixture.handlerVersion,
+    verifierConfigSnapshot: fixture.job.verifierConfig,
+    verifierConfigHash: original.verifierConfigHash,
+    verificationInput: original.verificationInput,
+    evidenceSchemaRef: fixture.evidenceSchemaRef
+  });
+  // Force the stored snapshot to be the fixture's snapshot, which differs from live.
+  const stored = await stateStore.getVerificationResult(sessionId);
+  stored.verifierConfigSnapshot = fixture.job.verifierConfig;
+  await stateStore.upsertVerificationResult(sessionId, stored);
+
+  const replay = await service.replayVerification(sessionId);
+  assert.equal(replay.replay, true);
+  assert.equal(replay.outcome, fixture.expected.outcome);
+  assert.deepEqual(replay.verifierConfigSnapshot, fixture.job.verifierConfig);
+  assert.equal(replay.handler, fixture.handler);
+  assert.equal(replay.handlerVersion, fixture.handlerVersion);
+  assert.equal(replay.evidenceSchemaRef, fixture.evidenceSchemaRef);
+});
+
+test("replayVerification surfaces handler version drift instead of silently re-running", async () => {
+  const sessionId = "deterministic-drift-001:0xbbb";
+  const { fixture } = loadFixturesForHandler("deterministic")[0];
+  const stateStore = new MemoryStateStore();
+
+  await stateStore.upsertSession(
+    transitionSession(
+      transitionSession(
+        {
+          sessionId,
+          wallet: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          jobId: fixture.job.id,
+          submission: normalizeSubmission(fixture.verificationInput.structured)
+        },
+        "claimed",
+        { reason: "job_claimed" }
+      ),
+      "submitted",
+      { reason: "work_submitted" }
+    )
+  );
+
+  const platformService = {
+    resumeSession: (id) => stateStore.getSession(id),
+    getJobDefinition: () => fixture.job
+  };
+
+  // Persist a verification result captured at a stale handler version. Replay
+  // re-runs the live handler (v1) and must surface the version mismatch so a
+  // future v2 doesn't silently overwrite the v1 reasoning of record.
+  await stateStore.upsertVerificationResult(sessionId, {
+    sessionId,
+    outcome: fixture.expected.outcome,
+    reasonCode: fixture.expected.reasonCode,
+    handler: fixture.handler,
+    handlerVersion: 99,
+    verifierConfigSnapshot: fixture.job.verifierConfig,
+    verifierConfigHash: "stale-hash-from-prior-snapshot",
+    verificationInput: normalizeSubmission(fixture.verificationInput.structured),
+    evidenceSchemaRef: fixture.evidenceSchemaRef
+  });
+
+  const service = new VerifierService(platformService, stateStore);
+  const replay = await service.replayVerification(sessionId);
+
+  assert.ok(replay.replayDrift, "expected replayDrift to be set when captured handler version differs from live");
+  assert.deepEqual(replay.replayDrift.handlerVersion, { captured: 99, live: 1 });
+  // Snapshot-hash drift exposes snapshot tampering; here it is forced by the stale stored hash.
+  assert.equal(replay.replayDrift.verifierConfigHash.captured, "stale-hash-from-prior-snapshot");
+});
+
+test("replayVerification does not flag drift when captured handler version matches live", async () => {
+  const sessionId = "deterministic-stable-001:0xccc";
+  const { fixture } = loadFixturesForHandler("deterministic")[0];
+  const stateStore = new MemoryStateStore();
+
+  const submitted = transitionSession(
+    transitionSession(
+      {
+        sessionId,
+        wallet: "0xcccccccccccccccccccccccccccccccccccccccc",
+        jobId: fixture.job.id,
+        submission: normalizeSubmission(fixture.verificationInput.structured)
+      },
+      "claimed",
+      { reason: "job_claimed" }
+    ),
+    "submitted",
+    { reason: "work_submitted" }
+  );
+  await stateStore.upsertSession(submitted);
+
+  const platformService = {
+    resumeSession: (id) => stateStore.getSession(id),
+    getJobDefinition: () => fixture.job,
+    ingestVerification: async (id, verdict) => {
+      const current = await stateStore.getSession(id);
+      const updated = transitionSession(current, verdict.outcome === "approved" ? "resolved" : "rejected", {
+        reason: "verification_resolved"
+      });
+      return stateStore.upsertSession(updated);
+    }
+  };
+
+  const service = new VerifierService(platformService, stateStore);
+  await service.verifySubmission({ sessionId });
+  const replay = await service.replayVerification(sessionId);
+
+  assert.equal(replay.replayDrift, undefined);
+  assert.equal(replay.handlerVersion, fixture.handlerVersion);
+});

@@ -1,0 +1,31 @@
+{
+  "handler": "deterministic",
+  "handlerVersion": 1,
+  "evidenceSchemaRef": "schema://jobs/release-readiness-output",
+  "job": {
+    "id": "release-readiness-check-001",
+    "verifierMode": "deterministic",
+    "outputSchemaRef": "schema://jobs/release-readiness-output",
+    "verifierConfig": {
+      "version": 1,
+      "handler": "deterministic",
+      "expectedOutputs": ["release_id", "checks_passed", "go_no_go"],
+      "matchMode": "contains_all"
+    }
+  },
+  "verificationInput": {
+    "kind": "structured",
+    "structured": {
+      "release_id": "release-2026-04-19",
+      "checks_passed": ["api-health", "indexer-health"],
+      "checks_failed": [],
+      "blockers": [],
+      "go_no_go": "go"
+    }
+  },
+  "expected": {
+    "outcome": "approved",
+    "reasonCode": "DETERMINISTIC_MATCH",
+    "score": 100
+  }
+}

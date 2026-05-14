@@ -63,13 +63,21 @@ export class VerifierService {
     const replayJob = jobWithVerifierConfigSnapshot(job, existing?.verifierConfigSnapshot);
     const validatedVerificationInput = this.validateVerificationInput(replayJob, verificationInput);
     const verdict = await this.registry.evaluate(replayJob, validatedVerificationInput);
-    return {
+    const auditFields = buildVerificationAuditFields(replayJob, { verdict, verificationInput: validatedVerificationInput });
+    const replayResult = {
       ...verdict,
       sessionId,
       replay: true,
       originalOutcome: existing?.outcome,
-      ...buildVerificationAuditFields(replayJob, { verdict, verificationInput: validatedVerificationInput })
+      ...auditFields
     };
+
+    const drift = detectReplayDrift({ existing, verdict, auditFields });
+    if (drift) {
+      replayResult.replayDrift = drift;
+    }
+
+    return replayResult;
   }
 
   async getResult(sessionId) {
@@ -103,6 +111,49 @@ export class VerifierService {
     validateSubmissionContract(job.outputSchemaRef, normalized, { path: "verificationInput" });
     return normalized;
   }
+}
+
+function detectReplayDrift({ existing, verdict, auditFields }) {
+  if (!existing) {
+    return undefined;
+  }
+  const drift = {};
+
+  const capturedHandler = existing.handler;
+  const liveHandler = verdict?.handler;
+  if (capturedHandler && liveHandler && capturedHandler !== liveHandler) {
+    drift.handler = { captured: capturedHandler, live: liveHandler };
+  }
+
+  const capturedHandlerVersion = existing.handlerVersion;
+  const liveHandlerVersion = verdict?.handlerVersion;
+  if (
+    capturedHandlerVersion !== undefined
+    && liveHandlerVersion !== undefined
+    && capturedHandlerVersion !== liveHandlerVersion
+  ) {
+    drift.handlerVersion = { captured: capturedHandlerVersion, live: liveHandlerVersion };
+  }
+
+  const capturedEvidenceSchemaRef = existing.evidenceSchemaRef;
+  const liveEvidenceSchemaRef = auditFields?.evidenceSchemaRef;
+  if (
+    capturedEvidenceSchemaRef
+    && liveEvidenceSchemaRef
+    && capturedEvidenceSchemaRef !== liveEvidenceSchemaRef
+  ) {
+    drift.evidenceSchemaRef = { captured: capturedEvidenceSchemaRef, live: liveEvidenceSchemaRef };
+  }
+
+  // verifierConfigHash drift means the stored snapshot disagrees with the
+  // snapshot we just hashed -- snapshot corruption, not config evolution.
+  const capturedConfigHash = existing.verifierConfigHash;
+  const liveConfigHash = auditFields?.verifierConfigHash;
+  if (capturedConfigHash && liveConfigHash && capturedConfigHash !== liveConfigHash) {
+    drift.verifierConfigHash = { captured: capturedConfigHash, live: liveConfigHash };
+  }
+
+  return Object.keys(drift).length > 0 ? drift : undefined;
 }
 
 function isNormalizedSubmission(input) {
