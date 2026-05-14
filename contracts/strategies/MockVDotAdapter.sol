@@ -84,8 +84,16 @@ contract MockVDotAdapter is IStrategyAdapter, ReentrancyGuard {
     }
 
     /// @inheritdoc IStrategyAdapter
-    function deposit(uint256 amount) external override nonReentrant whenNotPaused onlyOperator returns (uint256 sharesMinted) {
+    function deposit(uint256 amount)
+        external
+        override
+        nonReentrant
+        whenNotPaused
+        onlyOperator
+        returns (uint256 sharesMinted)
+    {
         if (amount == 0) revert ZeroAmount();
+        SafeTransfer.safeTransferFromExact(asset, msg.sender, address(this), amount);
         // Classic share-math: share_price = totalAssets / totalShares.
         // First depositor gets 1:1, subsequent depositors mint at the
         // current rate so prior yield accrual isn't diluted.
@@ -97,12 +105,18 @@ contract MockVDotAdapter is IStrategyAdapter, ReentrancyGuard {
         shares[msg.sender] += sharesMinted;
         totalShares += sharesMinted;
         totalAssets += amount;
-        SafeTransfer.safeTransferFrom(asset, msg.sender, address(this), amount);
         emit Deposited(msg.sender, amount, sharesMinted);
     }
 
     /// @inheritdoc IStrategyAdapter
-    function withdraw(uint256 sharesToBurn, address recipient) external override nonReentrant whenNotPaused onlyOperator returns (uint256 assetsReturned) {
+    function withdraw(uint256 sharesToBurn, address recipient)
+        external
+        override
+        nonReentrant
+        whenNotPaused
+        onlyOperator
+        returns (uint256 assetsReturned)
+    {
         if (sharesToBurn == 0) revert ZeroAmount();
         if (shares[msg.sender] < sharesToBurn) revert InsufficientShares();
         // Redeem at the current exchange rate: share_price = totalAssets / totalShares.
@@ -110,7 +124,7 @@ contract MockVDotAdapter is IStrategyAdapter, ReentrancyGuard {
         shares[msg.sender] -= sharesToBurn;
         totalShares -= sharesToBurn;
         totalAssets -= assetsReturned;
-        SafeTransfer.safeTransfer(asset, recipient, assetsReturned);
+        SafeTransfer.safeTransferExact(asset, recipient, assetsReturned);
         emit Withdrawn(msg.sender, recipient, sharesToBurn, assetsReturned);
     }
 

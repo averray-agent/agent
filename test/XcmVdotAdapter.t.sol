@@ -9,6 +9,7 @@ import {IXcmWrapper} from "../contracts/interfaces/IXcmWrapper.sol";
 import {IXcmStrategyAdapter} from "../contracts/interfaces/IXcmStrategyAdapter.sol";
 import {XcmWrapper} from "../contracts/XcmWrapper.sol";
 import {XcmVdotAdapter} from "../contracts/strategies/XcmVdotAdapter.sol";
+import {FeeOnTransferToken} from "./utils/FeeOnTransferToken.sol";
 
 contract XcmVdotAdapterTest is Test {
     TreasuryPolicy internal policy;
@@ -59,6 +60,29 @@ contract XcmVdotAdapterTest is Test {
         assertEq(uint256(wrapperRequest.status), uint256(IXcmWrapper.RequestStatus.Pending));
         assertEq(wrapperRequest.context.account, worker);
         assertEq(wrapperRequest.context.assets, 25 ether);
+    }
+
+    function testRequestDepositRejectsUnderReceivedToken() public {
+        FeeOnTransferToken feeToken = new FeeOnTransferToken();
+        XcmVdotAdapter feeAdapter =
+            new XcmVdotAdapter(policy, address(feeToken), bytes32("FEE_XCM"), IXcmWrapper(address(wrapper)));
+        feeToken.setFeeBps(100);
+        feeToken.mint(operator, 100 ether);
+
+        vm.startPrank(operator);
+        feeToken.approve(address(feeAdapter), type(uint256).max);
+        (bool ok,) = address(feeAdapter)
+            .call(
+                abi.encodeCall(
+                    feeAdapter.requestDeposit,
+                    (worker, 10 ether, hex"0102", hex"0304", IXcmWrapper.Weight({refTime: 11, proofSize: 22}), 1)
+                )
+            );
+        vm.stopPrank();
+
+        require(!ok, "EXPECTED_AMOUNT_MISMATCH_REVERT");
+        assertEq(feeAdapter.pendingDepositAssets(), 0);
+        assertEq(feeToken.balanceOf(address(feeAdapter)), 0);
     }
 
     function testRequestDepositIsIdempotentForSamePayload() public {

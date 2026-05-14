@@ -65,6 +65,7 @@ contract TreasuryPolicy {
     error Unauthorized();
     error Paused();
     error OutflowCapExceeded();
+    error InvalidAddress();
 
     constructor() {
         owner = msg.sender;
@@ -116,21 +117,25 @@ contract TreasuryPolicy {
     }
 
     function setApprovedAsset(address asset, bool approved) external onlyOwner {
+        if (asset == address(0)) revert InvalidAddress();
         approvedAssets[asset] = approved;
         emit AssetApprovalUpdated(asset, approved);
     }
 
     function setApprovedStrategy(address strategy, bool approved) external onlyOwner {
+        if (strategy == address(0)) revert InvalidAddress();
         approvedStrategies[strategy] = approved;
         emit StrategyApprovalUpdated(strategy, approved);
     }
 
     function setServiceOperator(address operator, bool approved) external onlyOwner {
+        if (operator == address(0)) revert InvalidAddress();
         serviceOperators[operator] = approved;
         emit ServiceOperatorUpdated(operator, approved);
     }
 
     function setVerifier(address verifier, bool approved) external onlyOwner {
+        if (verifier == address(0)) revert InvalidAddress();
         uint64 timestamp = uint64(block.timestamp);
         if (approved == verifiers[verifier]) {
             emit VerifierUpdated(verifier, approved);
@@ -176,6 +181,7 @@ contract TreasuryPolicy {
     }
 
     function setArbitrator(address arbitrator, bool approved) external onlyOwner {
+        if (arbitrator == address(0)) revert InvalidAddress();
         arbitrators[arbitrator] = approved;
         emit ArbitratorUpdated(arbitrator, approved);
     }
@@ -220,6 +226,7 @@ contract TreasuryPolicy {
     }
 
     function setMinClaimFee(address asset, uint256 amount) external onlyOwner {
+        if (asset == address(0)) revert InvalidAddress();
         minClaimFeeByAsset[asset] = amount;
         emit MinClaimFeeUpdated(asset, amount);
     }

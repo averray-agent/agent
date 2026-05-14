@@ -150,8 +150,8 @@ contract AgentAccountCore is ReentrancyGuard {
 
     function deposit(address asset, uint256 amount) external nonReentrant whenNotPaused onlySupportedAsset(asset) {
         require(amount > 0, "ZERO_AMOUNT");
+        SafeTransfer.safeTransferFromExact(asset, msg.sender, address(this), amount);
         positions[msg.sender][asset].liquid += amount;
-        SafeTransfer.safeTransferFrom(asset, msg.sender, address(this), amount);
         emit Deposited(msg.sender, asset, amount);
     }
 
@@ -159,7 +159,7 @@ contract AgentAccountCore is ReentrancyGuard {
         AssetPosition storage position = positions[msg.sender][asset];
         if (position.liquid < amount) revert InsufficientLiquidity();
         position.liquid -= amount;
-        SafeTransfer.safeTransfer(asset, msg.sender, amount);
+        SafeTransfer.safeTransferExact(asset, msg.sender, amount);
         emit Withdrawn(msg.sender, asset, amount);
     }
 
@@ -192,12 +192,12 @@ contract AgentAccountCore is ReentrancyGuard {
         emit Reserved(account, asset, amount);
     }
 
-    function consumeRecurringTemplateReserve(
-        address account,
-        address asset,
-        bytes32 templateId,
-        uint256 amount
-    ) external whenNotPaused onlyOperator onlySupportedAsset(asset) {
+    function consumeRecurringTemplateReserve(address account, address asset, bytes32 templateId, uint256 amount)
+        external
+        whenNotPaused
+        onlyOperator
+        onlySupportedAsset(asset)
+    {
         uint256 templateReserve = recurringTemplateReserves[account][asset][templateId];
         if (templateReserve < amount) revert InsufficientReserved();
         recurringTemplateReserves[account][asset][templateId] = templateReserve - amount;
@@ -220,7 +220,7 @@ contract AgentAccountCore is ReentrancyGuard {
         if (position.reserved < amount) revert InsufficientReserved();
         position.reserved -= amount;
         policy.recordOutflow(amount);
-        SafeTransfer.safeTransfer(asset, recipient, amount);
+        SafeTransfer.safeTransferExact(asset, recipient, amount);
         emit ReservationSettled(account, recipient, asset, amount);
     }
 
@@ -431,8 +431,8 @@ contract AgentAccountCore is ReentrancyGuard {
     function repay(address asset, uint256 amount) external nonReentrant whenNotPaused onlySupportedAsset(asset) {
         AssetPosition storage position = positions[msg.sender][asset];
         require(position.debtOutstanding >= amount, "OVERPAY");
+        SafeTransfer.safeTransferFromExact(asset, msg.sender, address(this), amount);
         position.debtOutstanding -= amount;
-        SafeTransfer.safeTransferFrom(asset, msg.sender, address(this), amount);
         emit Repaid(msg.sender, asset, amount);
     }
 
@@ -489,7 +489,7 @@ contract AgentAccountCore is ReentrancyGuard {
         uint256 treasuryAmount = amount - posterAmount;
 
         if (posterAmount > 0) {
-            SafeTransfer.safeTransfer(asset, posterRecipient, posterAmount);
+            SafeTransfer.safeTransferExact(asset, posterRecipient, posterAmount);
         }
         if (treasuryAmount > 0) {
             policy.recordOutflow(treasuryAmount);
@@ -517,7 +517,7 @@ contract AgentAccountCore is ReentrancyGuard {
         uint256 treasuryAmount = amount - verifierAmount;
 
         if (verifierAmount > 0) {
-            SafeTransfer.safeTransfer(asset, verifierRecipient, verifierAmount);
+            SafeTransfer.safeTransferExact(asset, verifierRecipient, verifierAmount);
         }
         if (treasuryAmount > 0) {
             policy.recordOutflow(treasuryAmount);

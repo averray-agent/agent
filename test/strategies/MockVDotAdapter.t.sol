@@ -6,6 +6,7 @@ import "forge-std/Test.sol";
 import {MockERC20} from "../../contracts/mocks/MockERC20.sol";
 import {TreasuryPolicy} from "../../contracts/TreasuryPolicy.sol";
 import {MockVDotAdapter} from "../../contracts/strategies/MockVDotAdapter.sol";
+import {FeeOnTransferToken} from "../utils/FeeOnTransferToken.sol";
 
 /// @notice Pins the accounting invariants of the v1 MockVDotAdapter:
 ///         share-based deposit, proportional withdrawal at the current
@@ -49,6 +50,43 @@ contract MockVDotAdapterTest is Test {
         assertEq(adapter.totalShares(), 100 ether);
         assertEq(adapter.totalAssets(), 100 ether);
         assertEq(adapter.shares(operator), 100 ether);
+    }
+
+    function testDepositRejectsUnderReceivedToken() public {
+        FeeOnTransferToken feeToken = new FeeOnTransferToken();
+        MockVDotAdapter feeAdapter = new MockVDotAdapter(policy, address(feeToken), bytes32("FEE_VDOT"));
+        policy.setServiceOperator(operator, true);
+        feeToken.setFeeBps(100);
+        feeToken.mint(operator, 100 ether);
+
+        vm.startPrank(operator);
+        feeToken.approve(address(feeAdapter), type(uint256).max);
+        (bool ok,) = address(feeAdapter).call(abi.encodeCall(feeAdapter.deposit, (10 ether)));
+        vm.stopPrank();
+
+        require(!ok, "EXPECTED_AMOUNT_MISMATCH_REVERT");
+        assertEq(feeAdapter.totalAssets(), 0);
+        assertEq(feeAdapter.totalShares(), 0);
+        assertEq(feeToken.balanceOf(address(feeAdapter)), 0);
+    }
+
+    function testWithdrawRejectsUnderReceivedToken() public {
+        FeeOnTransferToken feeToken = new FeeOnTransferToken();
+        MockVDotAdapter feeAdapter = new MockVDotAdapter(policy, address(feeToken), bytes32("FEE_VDOT"));
+        policy.setServiceOperator(operator, true);
+        feeToken.mint(operator, 100 ether);
+
+        vm.startPrank(operator);
+        feeToken.approve(address(feeAdapter), type(uint256).max);
+        feeAdapter.deposit(10 ether);
+        feeToken.setFeeBps(100);
+        (bool ok,) = address(feeAdapter).call(abi.encodeCall(feeAdapter.withdraw, (5 ether, stranger)));
+        vm.stopPrank();
+
+        require(!ok, "EXPECTED_AMOUNT_MISMATCH_REVERT");
+        assertEq(feeAdapter.totalAssets(), 10 ether);
+        assertEq(feeAdapter.totalShares(), 10 ether);
+        assertEq(feeAdapter.shares(operator), 10 ether);
     }
 
     function testSecondDepositorGetsSharesAtCurrentRateAfterYieldAccrual() public {
