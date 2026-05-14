@@ -208,7 +208,10 @@ test("http smoke: /jobs/validate-submission validates draft output before claim"
       })
     });
     assert.equal(valid.status, 200);
-    assert.equal((await valid.json()).valid, true);
+    const validPayload = await valid.json();
+    assert.equal(validPayload.valid, true);
+    assert.equal(validPayload.submitSafe, true);
+    assert.equal(validPayload.validationEndpoint, "POST /jobs/validate-submission");
 
     const invalid = await fetch(`${base}/jobs/validate-submission`, {
       method: "POST",
@@ -218,7 +221,9 @@ test("http smoke: /jobs/validate-submission validates draft output before claim"
     assert.equal(invalid.status, 200);
     const payload = await invalid.json();
     assert.equal(payload.valid, false);
+    assert.equal(payload.submitSafe, false);
     assert.equal(payload.schemaValidates, "payload.submission");
+    assert.equal(payload.path, "payload.submission.summary");
   });
 });
 

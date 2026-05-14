@@ -383,14 +383,20 @@ test("validateJobSubmission gives a non-mutating schema-native verdict", () => {
     status: "complete"
   });
   assert.equal(valid.valid, true);
+  assert.equal(valid.submitSafe, true);
   assert.equal(valid.schemaRef, "schema://jobs/coding-output");
   assert.equal(valid.schemaValidates, "payload.submission");
+  assert.equal(valid.validationEndpoint, "POST /jobs/validate-submission");
+  assert.deepEqual(valid.requiredTopLevelKeys, ["summary", "output", "status"]);
   assert.equal(valid.submissionKind, "structured");
 
   const invalid = service.validateJobSubmission("parent-job-001", "complete");
   assert.equal(invalid.valid, false);
+  assert.equal(invalid.submitSafe, false);
   assert.equal(invalid.schemaRef, "schema://jobs/coding-output");
   assert.match(invalid.message, /Schema-native jobs require/u);
+  assert.equal(invalid.path, "payload.submission.summary");
+  assert.deepEqual(invalid.errorPaths, ["payload.submission.summary"]);
   assert.equal(invalid.details.schemaValidates, "payload.submission");
 });
 

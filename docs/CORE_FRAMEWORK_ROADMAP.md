@@ -146,13 +146,15 @@ discipline for custom/off-platform schemas.
   verifier execution
 - `/jobs/definition.submissionContract` and `/jobs/validate-submission` remain
   the no-mutation source of truth for exact submit shape
+- the SDK exposes fail-closed helpers that validate drafts before claim/submit
+  mutations (`claimJobAfterValidation` and `submitValidatedWork`)
 
 ### Gaps today
 
 - custom/off-platform schema refs are still allowed without signed schema
   registration
-- helper workflows outside the platform still need to call
-  `/jobs/validate-submission` before consuming a claim/submit attempt
+- external agents still need to adopt the SDK pre-validation helpers in their
+  own hosted workflows
 - richer verifier replay fixtures should land before introducing v2 handlers
 
 ### Improve to
@@ -163,8 +165,7 @@ discipline for custom/off-platform schemas.
 
 ### Concrete next changes
 
-- validate structured output before claim/submit helper flows consume a claim
-  attempt
+- migrate hosted/reference-agent workflows to the SDK pre-validation helpers
 - continue tightening custom/off-platform schema refs once a signed schema
   registration flow exists
 

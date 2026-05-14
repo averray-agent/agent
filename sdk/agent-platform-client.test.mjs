@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   AgentPlatformApiError,
   AgentPlatformClient,
+  AgentPlatformValidationError,
   createIdempotencyKey
 } from "./agent-platform-client.js";
 
@@ -173,6 +174,62 @@ test("job helpers build compact filters, mutation bodies, and admin timeline URL
     rewardAmount: 2
   });
   assert.equal(calls[8].url, "https://api.example.test/jobs/sub?parentSessionId=parent%20session");
+});
+
+test("validated job helpers fail closed before claim or submit mutations", async () => {
+  const calls = [];
+  const client = new AgentPlatformClient({
+    baseUrl: "https://api.example.test",
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      if (url.endsWith("/jobs/validate-submission")) {
+        const payload = JSON.parse(options.body);
+        return jsonResponse(
+          payload.submission?.status === "complete"
+            ? { valid: true, submitSafe: true, schemaRef: "schema://jobs/coding-output" }
+            : {
+                valid: false,
+                submitSafe: false,
+                code: "invalid_request",
+                message: "submission.status is required",
+                path: "payload.submission.status"
+              }
+        );
+      }
+      if (url.endsWith("/jobs/claim")) {
+        return jsonResponse({ sessionId: "claimed-session", jobId: "job-1", wallet: "0xabc" });
+      }
+      return jsonResponse({ sessionId: "claimed-session", status: "submitted" });
+    }
+  });
+
+  await client.claimJobAfterValidation("job-1", { status: "complete" }, "claim-key-1");
+  await client.submitValidatedWork("job-1", "claimed-session", { status: "complete" });
+
+  assert.equal(calls[0].url, "https://api.example.test/jobs/validate-submission");
+  assert.equal(calls[1].url, "https://api.example.test/jobs/claim");
+  assert.equal(calls[2].url, "https://api.example.test/jobs/validate-submission");
+  assert.equal(calls[3].url, "https://api.example.test/jobs/submit");
+
+  calls.length = 0;
+  await assert.rejects(
+    () => client.claimJobAfterValidation("job-1", { summary: "missing status" }, "claim-key-2"),
+    (error) => {
+      assert.ok(error instanceof AgentPlatformValidationError);
+      assert.equal(error.validation.path, "payload.submission.status");
+      return true;
+    }
+  );
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, "https://api.example.test/jobs/validate-submission");
+
+  calls.length = 0;
+  await assert.rejects(
+    () => client.submitValidatedWork("job-1", "claimed-session", { summary: "missing status" }),
+    AgentPlatformValidationError
+  );
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, "https://api.example.test/jobs/validate-submission");
 });
 
 test("operator surface helpers call policy, audit, and alert endpoints", async () => {
