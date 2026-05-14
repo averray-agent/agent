@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { AgentPlatformApiError, AgentPlatformClient } from "./agent-platform-client.js";
+import {
+  AgentPlatformApiError,
+  AgentPlatformClient,
+  createIdempotencyKey
+} from "./agent-platform-client.js";
 
 test("builder read helpers call the expected public endpoints", async () => {
   const calls = [];
@@ -390,6 +394,47 @@ test("rotate/revoke require a non-empty grant id", async () => {
   await assert.rejects(() => client.rotateServiceToken(""), TypeError);
   await assert.rejects(() => client.revokeServiceToken(undefined), TypeError);
 });
+
+test("createIdempotencyKey produces unique, prefixed, sanitized keys", () => {
+  const a = createIdempotencyKey("claim");
+  const b = createIdempotencyKey("claim");
+  assert.notEqual(a, b);
+  assert.match(a, /^claim-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-[a-z0-9-]+$/u);
+
+  const sanitized = createIdempotencyKey("bad prefix!/with stuff");
+  assert.match(sanitized, /^bad-prefix-with-stuff-/u);
+
+  const fallback = createIdempotencyKey();
+  assert.match(fallback, /^run-/u);
+
+  const emptyPrefix = createIdempotencyKey("");
+  assert.match(emptyPrefix, /^run-/u);
+});
+
+test("fireRecurringJob forwards idempotencyKey into the JSON body unchanged", async () => {
+  const calls = [];
+  const client = new AgentPlatformClient({
+    baseUrl: "https://api.example.test",
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      return jsonResponse({ ok: true });
+    }
+  });
+
+  await client.fireRecurringJob("weekly-digest", {
+    idempotencyKey: "fire-weekly-digest-2026-w19",
+    firedAt: "2026-05-13T00:00:00.000Z"
+  });
+
+  assert.equal(calls[0].url, "https://api.example.test/admin/jobs/fire");
+  assert.equal(calls[0].options.method, "POST");
+  assert.deepEqual(JSON.parse(calls[0].options.body), {
+    templateId: "weekly-digest",
+    firedAt: "2026-05-13T00:00:00.000Z",
+    idempotencyKey: "fire-weekly-digest-2026-w19"
+  });
+});
+
 
 function jsonResponse(payload, { status = 200 } = {}) {
   return new Response(JSON.stringify(payload), {

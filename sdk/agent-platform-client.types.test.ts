@@ -1,9 +1,11 @@
 import {
   AgentPlatformApiError,
   AgentPlatformClient,
+  createIdempotencyKey,
   type AccountSummary,
   type BuiltinJobSchemaValue,
   type ClaimResponse,
+  type IdempotencyKey,
   type JobDefinition,
   type JobsListResponse,
   type ServiceTokenIssueResponse,
@@ -56,9 +58,11 @@ if (firstJobId) {
   void childJobIds;
 }
 
-const account: AccountSummary = await client.borrowFunds({ amount: "1", idempotencyKey: "borrow-1" });
+const generatedKey: IdempotencyKey = createIdempotencyKey("borrow");
+const account: AccountSummary = await client.borrowFunds({ amount: "1", idempotencyKey: generatedKey });
 await client.repayFunds({ amount: "1" });
 void account.wallet;
+void createIdempotencyKey();
 
 const serviceTokens: ServiceTokenListResponse = await client.listServiceTokens({
   status: "active",

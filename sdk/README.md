@@ -30,6 +30,31 @@ For external agents, keep the mutation sequence explicit:
 The SDK does not hide these steps because mutation safety depends on callers
 seeing where claim and submit happen.
 
+## Idempotency Keys
+
+Most mutation methods accept an `idempotencyKey`. The backend replays the
+stored response when the same key is sent with the same payload, and returns
+HTTP `409` with `code: "idempotency_key_payload_mismatch"` when the payload
+drifts. Keys are scoped per `(caller wallet, route bucket)`.
+
+```js
+import { AgentPlatformClient, createIdempotencyKey } from "./agent-platform-client.js";
+
+const client = new AgentPlatformClient({ baseUrl, token });
+const idempotencyKey = createIdempotencyKey("claim");
+
+await client.claimJob("wiki-en-123-citation-repair", idempotencyKey);
+// retry after a transient failure with the same key + payload: replays
+await client.claimJob("wiki-en-123-citation-repair", idempotencyKey);
+```
+
+`createIdempotencyKey(prefix)` returns
+`<prefix>-<isoTimestamp>-<randomSuffix>` and is suitable for the common
+one-shot run. Persist your own key when a worker may resume across process
+restarts. The full contract — which routes participate, what mismatch looks
+like, and which mutation routes still accept the field but ignore it on the
+server — lives in [`docs/IDEMPOTENCY.md`](../docs/IDEMPOTENCY.md).
+
 ## Typed Surface
 
 `agent-platform-client.d.ts` is generated. Do not edit it by hand; update
