@@ -14,9 +14,10 @@ registered strategy adapter to earn yield while they're idle —
 Pillar 2 of [docs/AGENT_BANKING.md](../AGENT_BANKING.md).
 
 The vDOT adapter is the canonical first strategy: take DOT, stake it via
-Bifrost's liquid-staking primitive, earn Polkadot staking yield (roughly
-5–6% base APY at time of writing; verify current Bifrost docs before launch),
-redeem DOT at the accrued rate when the agent withdraws.
+Bifrost's liquid-staking primitive, and account for the live vDOT/DOT rate when
+the agent withdraws. The current planning reference is roughly 5-6% base APR,
+but Averray must not display APY or book yield until the rate is sourced from
+validated Bifrost/runtime/observer data.
 
 The next planned portfolio candidate is Hydration GDOT, documented in
 [hydration-gdot.md](./hydration-gdot.md). It is deliberately v2 and opt-in:
@@ -26,9 +27,10 @@ mainnet evidence.
 
 Key properties for the platform:
 
-- **Non-custodial.** The adapter never takes discretionary custody of
-  agent funds. Every withdraw is deterministically computed from the
-  caller's recorded shares and the contract's current `totalAssets`.
+- **Non-discretionary smart-contract custody.** The adapter never takes
+  discretionary custody of agent funds. Every withdraw is deterministically
+  computed from the caller's recorded shares and the contract's current
+  `totalAssets`.
 - **Share-based.** Accounting is classic vault math: `share_price =
   totalAssets / totalShares`. Deposits mint shares at the current price,
   withdrawals redeem at the current price. Prior yield accrual is not
@@ -95,12 +97,13 @@ shape:
       `0x00000000000000000000000000000000000a0000` to send DOT to the vDOT
    pallet on Bifrost. The official Polkadot docs are explicit that this
    precompile is barebones: messages must be SCALE-encoded and
-   `weighMessage` is part of the execution flow. Returned vDOT shares
-   come back via the same precompile. The adapter therefore needs:
-   - A deposit path that XCM-sends DOT and waits for the callback that
-     credits vDOT shares.
-   - A withdraw path that XCM-sends a redeem request and waits for DOT
-     to settle back into the adapter's asset-hub balance.
+   `weighMessage` is part of the execution flow. XCM is async and does not give
+   Solidity an automatic success callback; the adapter therefore needs:
+   - A deposit path that XCM-sends DOT and waits for native observer evidence
+     that vDOT shares or equivalent strategy credit were created.
+   - A withdraw path that XCM-sends a redeem request and waits for native
+     observer evidence that DOT settled back into the adapter's asset-hub
+     balance.
    - Idempotency + partial-failure handling, because XCM is async.
       In practice this likely means a dedicated XCM-wrapper layer rather
       than embedding raw precompile calls directly into vault accounting.
@@ -121,7 +124,7 @@ shape:
 
 3. **Audit.** The v1 adapter uses `ReentrancyGuard` + `SafeTransfer` +
    `whenNotPaused` — but any XCM-extended adapter adds message-parsing
-   and async-callback surface that must be audited top-to-bottom before
+   and async-settlement surface that must be audited top-to-bottom before
    mainnet. This is scope (3) in
    [docs/AUDIT_PACKAGE.md](../AUDIT_PACKAGE.md) and should be flagged as
    a *separate* audit item from the core contract suite.
@@ -157,9 +160,9 @@ reproduce this disclosure verbatim:
 > your account. Averray does not insure strategy losses.
 
 The v1 mock adapter additionally carries a **testnet-only** risk tag:
-simulated yield is a governance knob; the accrued yield is not real
-staking yield. Do not present v1 APY numbers to real users as
-expectations for mainnet.
+simulated yield is a governance knob; the accrued yield is not real staking
+yield. Do not present APY numbers to real users until they are backed by a
+timestamped Bifrost/runtime/observer source.
 
 ---
 

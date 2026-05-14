@@ -440,9 +440,9 @@ Holding balances on behalf of third parties crosses regulatory lines in
 most jurisdictions. CH (Switzerland) has clearer DLT rules than most but
 "financial intermediary" duties still kick in around custody. Framing:
 
-- The platform is **non-custodial**: agents' funds live in
+- The platform is **non-discretionary by design**: agents' funds live in
   `AgentAccountCore` addressed by the agent's own wallet; withdrawal is
-  always possible.
+  contract-defined rather than operator-discretionary.
 - Strategy adapters route to audited third-party protocols (e.g., Bifrost);
   platform never takes unilateral discretion over agent balances.
 - Rep slashing is deterministic and enforced by the escrow state machine,

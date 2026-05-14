@@ -28,17 +28,101 @@ import { createRequire } from "node:module";
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..", "..");
 
-// js-yaml is hoisted in the repo's node_modules from a transitive dep;
-// require it via createRequire to avoid pulling in a new top-level dep.
+// CI intentionally runs this lint before npm install. Prefer js-yaml when a
+// local node_modules tree exists, but keep a small parser for this repo's
+// calendar shape so the check remains self-contained on clean runners.
 const require = createRequire(import.meta.url);
-let yaml;
-try {
-  yaml = require("js-yaml");
-} catch (error) {
-  console.error("check-secrets-calendar requires js-yaml. Run `npm install` at the repo root and try again.");
-  console.error(`(underlying error: ${error.message})`);
-  process.exitCode = 1;
-  process.exit();
+let parseCalendarYaml;
+if (process.env.SECRETS_CALENDAR_SIMPLE_YAML === "1") {
+  parseCalendarYaml = parseSimpleCalendarYaml;
+} else {
+  try {
+    const yaml = require("js-yaml");
+    parseCalendarYaml = (raw) => yaml.load(raw);
+  } catch (error) {
+    parseCalendarYaml = parseSimpleCalendarYaml;
+  }
+}
+
+function stripInlineComment(value) {
+  let quote = "";
+  let output = "";
+  for (const char of value) {
+    if ((char === "\"" || char === "'") && !quote) {
+      quote = char;
+      output += char;
+      continue;
+    }
+    if (char === quote) {
+      quote = "";
+      output += char;
+      continue;
+    }
+    if (char === "#" && !quote) break;
+    output += char;
+  }
+  return output.trim();
+}
+
+function parseScalar(value) {
+  const clean = stripInlineComment(value);
+  if (!clean) return "";
+  if (
+    (clean.startsWith("\"") && clean.endsWith("\"")) ||
+    (clean.startsWith("'") && clean.endsWith("'"))
+  ) {
+    return clean.slice(1, -1);
+  }
+  if (/^-?\d+(\.\d+)?$/.test(clean)) return Number(clean);
+  if (clean === "true") return true;
+  if (clean === "false") return false;
+  return clean;
+}
+
+function parseSimpleCalendarYaml(raw) {
+  const parsed = { entries: [], config: {} };
+  let section = "";
+  let currentEntry;
+
+  for (const line of raw.split(/\r?\n/)) {
+    if (!line.trim() || line.trimStart().startsWith("#")) continue;
+    if (/^entries:\s*$/.test(line)) {
+      section = "entries";
+      currentEntry = undefined;
+      continue;
+    }
+    if (/^config:\s*$/.test(line)) {
+      section = "config";
+      currentEntry = undefined;
+      continue;
+    }
+
+    if (section === "entries") {
+      const entryMatch = line.match(/^  - name:\s*(.*)$/);
+      if (entryMatch) {
+        currentEntry = { name: parseScalar(entryMatch[1]) };
+        parsed.entries.push(currentEntry);
+        continue;
+      }
+
+      const fieldMatch = line.match(/^    ([A-Za-z0-9_]+):\s*(.*)$/);
+      if (fieldMatch && currentEntry) {
+        const [, key, value] = fieldMatch;
+        currentEntry[key] = value.trim() === "|" ? "" : parseScalar(value);
+      }
+      continue;
+    }
+
+    if (section === "config") {
+      const configMatch = line.match(/^  ([A-Za-z0-9_]+):\s*(.*)$/);
+      if (configMatch) {
+        const [, key, value] = configMatch;
+        parsed.config[key] = parseScalar(value);
+      }
+    }
+  }
+
+  return parsed;
 }
 
 function parseArgs(argv) {
@@ -118,7 +202,7 @@ async function main() {
 
   let parsed;
   try {
-    parsed = yaml.load(raw);
+    parsed = parseCalendarYaml(raw);
   } catch (error) {
     console.error(`could not parse calendar YAML: ${error.message}`);
     process.exitCode = 1;

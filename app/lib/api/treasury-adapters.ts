@@ -35,6 +35,56 @@ function mapTotal(value: unknown): number {
   return Object.values(record).reduce<number>((sum, entry) => sum + numberValue(entry), 0);
 }
 
+function assetEntries(value: unknown): Array<[string, number]> {
+  return Object.entries(asRecord(value))
+    .map(([asset, amount]) => [asset, numberValue(amount)] as [string, number])
+    .filter(([asset, amount]) => Boolean(asset.trim()) && amount > 0);
+}
+
+function firstAssetUnit(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    const asset = Object.keys(asRecord(value)).find((key) => key.trim());
+    if (asset) return asset;
+  }
+  return undefined;
+}
+
+function combinedAssetBucket(...values: unknown[]): RawRecord {
+  return values.reduce<RawRecord>((combined, value) => {
+    for (const [asset, amount] of Object.entries(asRecord(value))) {
+      combined[asset] = numberValue(combined[asset]) + numberValue(amount);
+    }
+    return combined;
+  }, {});
+}
+
+function assetAmount(bucket: unknown, fallbackValue: unknown, fallbackUnit: string) {
+  const entries = assetEntries(bucket);
+  if (entries.length === 1) {
+    return { value: entries[0][1], unit: entries[0][0], mixed: false };
+  }
+  if (entries.length > 1) {
+    return {
+      value: entries.reduce((sum, [, amount]) => sum + amount, 0),
+      unit: "mixed",
+      mixed: true,
+    };
+  }
+  return { value: numberValue(fallbackValue), unit: fallbackUnit, mixed: false };
+}
+
+function strategyAssetUnit(strategyPayload: unknown, fallbackUnit: string): string {
+  const units = new Set(
+    asArray(asRecord(strategyPayload).positions)
+      .filter((position) => numberValue(position.routedAmount ?? position.shares) > 0)
+      .map((position) => text(position.assetSymbol, text(position.asset)))
+      .filter(Boolean)
+  );
+  if (units.size === 1) return [...units][0];
+  if (units.size > 1) return "mixed";
+  return fallbackUnit;
+}
+
 function fmt(value: unknown): string {
   const parsed = numberValue(value);
   return parsed.toLocaleString("en-US", { maximumFractionDigits: parsed >= 100 ? 0 : 2 });
@@ -87,43 +137,65 @@ function activeWorkSessions(jobsPayload: unknown, sessionsPayload: unknown): Raw
 export function buildBalanceCards(accountPayload: unknown, strategyPayload: unknown): BalanceCard[] {
   const account = asRecord(accountPayload);
   const summary = asRecord(asRecord(strategyPayload).summary);
-  const liquid = numberValue(summary.liquid, mapTotal(account.liquid));
-  const allocated = numberValue(summary.allocated, mapTotal(account.strategyAllocated));
-  const collateral = mapTotal(account.collateralLocked);
-  const debt = numberValue(summary.debt, mapTotal(account.debtOutstanding));
-  const capacity = numberValue(summary.borrowCapacity, collateral ? collateral / 1.5 : 0);
-  const debtFill = pct(debt, debt + capacity);
+  const accountUnit =
+    firstAssetUnit(
+      account.liquid,
+      account.reserved,
+      account.strategyAllocated,
+      account.collateralLocked,
+      account.debtOutstanding
+    ) ?? "USDC";
+  const liquid = assetAmount(account.liquid, summary.liquid, accountUnit);
+  const allocated = assetAmount(
+    account.strategyAllocated,
+    summary.allocated,
+    strategyAssetUnit(strategyPayload, accountUnit)
+  );
+  const collateral = assetAmount(account.collateralLocked, undefined, accountUnit);
+  const debt = assetAmount(account.debtOutstanding, summary.debt, accountUnit);
+  const capacity = numberValue(
+    summary.borrowCapacity,
+    collateral.unit === "DOT" && collateral.value ? collateral.value / 1.5 : 0
+  );
+  const debtFill = debt.unit === "DOT" ? pct(debt.value, debt.value + capacity) : 0;
+  const debtCap = debt.unit === "DOT"
+    ? { label: `Capacity ${fmt(debt.value + capacity)} DOT · headroom ${fmt(capacity)}`, fill: debtFill }
+    : { label: `DOT borrow capacity ${fmt(capacity)} · debt shown in ${debt.unit}`, fill: 0 };
 
   return [
     {
       label: "Spendable",
-      value: fmt(liquid),
-      unit: "DOT",
+      value: fmt(liquid.value),
+      unit: liquid.unit,
       spark: spark(18),
       delta: { value: "live balance", tone: "flat", pct: "now" },
     },
     {
       label: "Capital at work",
-      value: fmt(allocated),
-      unit: "DOT",
+      value: fmt(allocated.value),
+      unit: allocated.unit,
       spark: spark(24),
       delta: { value: `${numberValue(summary.deployedLanes)} lanes`, tone: "flat", pct: "routed" },
     },
     {
       label: "Collateral",
-      value: fmt(collateral),
-      unit: "DOT",
+      value: fmt(collateral.value),
+      unit: collateral.unit,
       spark: spark(14),
       delta: { value: "live account", tone: "flat", pct: "locked" },
     },
     {
-      label: `Debt · ${debtFill}% of cap`,
-      value: fmt(debt),
-      unit: "DOT",
+      label: debt.unit === "DOT" ? `Debt · ${debtFill}% of cap` : "Debt",
+      value: fmt(debt.value),
+      unit: debt.unit,
       spark: spark(28),
-      delta: { value: "live debt", tone: debtFill >= 80 ? "up" : "flat", pct: `${debtFill}%` },
+      delta: {
+        value: debt.unit === "DOT" ? "live debt" : "asset-aware debt",
+        tone: debtFill >= 80 ? "up" : "flat",
+        pct: debt.unit === "DOT" ? `${debtFill}%` : debt.unit,
+      },
       warn: debtFill >= 80,
-      cap: { label: `Capacity ${fmt(debt + capacity)} · headroom ${fmt(capacity)}`, fill: debtFill },
+      cap: debtCap,
     },
   ];
 }
@@ -151,19 +223,38 @@ export function buildStrategyLanes(strategyPayload: unknown): StrategyLane[] {
 export function buildPositionCards(accountPayload: unknown, strategyPayload: unknown): PositionCard[] {
   const account = asRecord(accountPayload);
   const summary = asRecord(asRecord(strategyPayload).summary);
-  const liquid = numberValue(summary.liquid, mapTotal(account.liquid));
-  const allocated = numberValue(summary.allocated, mapTotal(account.strategyAllocated));
-  const collateral = mapTotal(account.collateralLocked);
-  const reserved = mapTotal(account.reserved);
-  const staked = mapTotal(account.jobStakeLocked);
-  const debt = numberValue(summary.debt, mapTotal(account.debtOutstanding));
+  const accountUnit =
+    firstAssetUnit(
+      account.liquid,
+      account.reserved,
+      account.strategyAllocated,
+      account.collateralLocked,
+      account.jobStakeLocked,
+      account.debtOutstanding
+    ) ?? "USDC";
+  const liquid = assetAmount(account.liquid, summary.liquid, accountUnit);
+  const allocated = assetAmount(
+    account.strategyAllocated,
+    summary.allocated,
+    strategyAssetUnit(strategyPayload, accountUnit)
+  );
+  const collateral = assetAmount(account.collateralLocked, undefined, accountUnit);
+  const reserved = assetAmount(account.reserved, undefined, accountUnit);
+  const staked = assetAmount(account.jobStakeLocked, undefined, accountUnit);
+  const debt = assetAmount(account.debtOutstanding, summary.debt, accountUnit);
+  const locked = staked.value > 0 ? staked : collateral;
 
   return [
-    { label: "Liquid", value: fmt(liquid), unit: "DOT", meta: "Spendable now" },
-    { label: "Reserved", value: fmt(reserved), unit: "DOT", meta: "Escrow reserved" },
-    { label: "Allocated", value: fmt(allocated), unit: "DOT", meta: "Strategy lanes" },
-    { label: "Staked", value: fmt(staked || collateral), unit: "DOT", meta: staked ? "Claim stake locked" : "Collateral locked" },
-    { label: "Debt", value: fmt(debt), unit: "DOT", meta: "Outstanding", debt: debt > 0 },
+    { label: "Liquid", value: fmt(liquid.value), unit: liquid.unit, meta: "Spendable now" },
+    { label: "Reserved", value: fmt(reserved.value), unit: reserved.unit, meta: "Escrow reserved" },
+    { label: "Allocated", value: fmt(allocated.value), unit: allocated.unit, meta: "Strategy lanes" },
+    {
+      label: "Staked",
+      value: fmt(locked.value),
+      unit: locked.unit,
+      meta: staked.value > 0 ? "Claim stake locked" : "Collateral locked",
+    },
+    { label: "Debt", value: fmt(debt.value), unit: debt.unit, meta: "Outstanding", debt: debt.value > 0 },
   ];
 }
 
@@ -182,16 +273,18 @@ export function buildLoans(accountPayload: unknown): ActiveLoan[] {
 
 export function buildCreditLine(accountPayload: unknown, borrowPayload: unknown) {
   const account = asRecord(accountPayload);
-  const debt = mapTotal(account.debtOutstanding);
+  const borrow = asRecord(borrowPayload);
+  const asset = text(borrow.asset, "DOT");
+  const debt = numberValue(asRecord(account.debtOutstanding)[asset]);
   const borrowCapacity = numberValue(asRecord(borrowPayload).borrowCapacity);
   const total = debt + borrowCapacity;
   const usedPct = pct(debt, total);
   return {
     capacityUsed: fmt(debt),
-    capacityTotal: `${fmt(total)} DOT`,
+    capacityTotal: `${fmt(total)} ${asset}`,
     usedPct,
     headerPct: Math.max(0, 100 - usedPct),
-    headroom: `${fmt(borrowCapacity)} DOT`,
+    headroom: `${fmt(borrowCapacity)} ${asset}`,
     nextMark: "live",
     policyCap: "85%",
     loans: buildLoans(accountPayload),
@@ -203,7 +296,13 @@ export function buildRoomVitals(jobsPayload: unknown, sessionsPayload: unknown, 
   const sessions = activeWorkSessions(jobsPayload, sessionsPayload);
   const account = asRecord(accountPayload);
   const summary = asRecord(asRecord(strategyPayload).summary);
-  const capital = numberValue(summary.allocated, mapTotal(account.strategyAllocated) + mapTotal(account.jobStakeLocked));
+  const accountUnit =
+    firstAssetUnit(account.strategyAllocated, account.jobStakeLocked, account.liquid) ?? "USDC";
+  const capital = assetAmount(
+    combinedAssetBucket(account.strategyAllocated, account.jobStakeLocked),
+    summary.allocated,
+    strategyAssetUnit(strategyPayload, accountUnit)
+  );
   const attentionCount = numberValue(summary.attentionCount);
   const activeAgents = new Set(sessions.map((s) => text(s.wallet)).filter(Boolean)).size;
 
@@ -230,7 +329,7 @@ export function buildRoomVitals(jobsPayload: unknown, sessionsPayload: unknown, 
         : "no claims observed yet · operator-wide",
       deltaTone: "neutral",
     },
-    { label: "Capital at work", value: fmt(capital), unit: "DOT", spark: spark(20), delta: "strategy + stake", deltaTone: "good" },
+    { label: "Capital at work", value: fmt(capital.value), unit: capital.unit, spark: spark(20), delta: "strategy + stake", deltaTone: "good" },
     { label: "Treasury posture", value: attentionCount ? "Amber" : "Green", valueAccent: !attentionCount, spark: spark(1), delta: attentionCount ? `${attentionCount} lane attention` : "No lane attention", deltaTone: attentionCount ? "warn" : "good" },
   ];
 }
@@ -238,7 +337,8 @@ export function buildRoomVitals(jobsPayload: unknown, sessionsPayload: unknown, 
 export function buildOverviewAlerts(sessionsPayload: unknown, accountPayload: unknown): AlertItem[] {
   const sessions = asArray(sessionsPayload);
   const disputed = sessions.filter((session) => text(session.status) === "disputed").slice(0, 2);
-  const liquid = mapTotal(asRecord(accountPayload).liquid);
+  const account = asRecord(accountPayload);
+  const liquid = assetAmount(account.liquid, 0, firstAssetUnit(account.liquid) ?? "USDC");
   const alerts: AlertItem[] = disputed.map((session) => ({
     id: `session-${text(session.sessionId)}`,
     tone: "warn",
@@ -248,13 +348,13 @@ export function buildOverviewAlerts(sessionsPayload: unknown, accountPayload: un
     ctaLabel: "Open in Sessions ->",
     ctaHref: "/sessions",
   }));
-  if (liquid > 0 && liquid < 20) {
+  if (liquid.value > 0 && liquid.value < 20) {
     alerts.push({
       id: "low-liquid",
       tone: "accent",
       title: "Top-up suggested on worker wallet",
-      ref: `${fmt(liquid)} DOT`,
-      body: "Spendable DOT is below the suggested operating buffer.",
+      ref: `${fmt(liquid.value)} ${liquid.unit}`,
+      body: "Spendable balance is below the suggested operating buffer.",
       ctaLabel: "Open in Treasury ->",
       ctaHref: "/treasury",
     });

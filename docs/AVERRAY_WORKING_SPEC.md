@@ -1,7 +1,7 @@
 # Averray — Working Spec (v1.0.0-rc1)
 
 **Status:** Reconciled with deployed reality and operational docs
-**Spec version:** 2.9 (status reconciliation after Phase 2 PRs through 2.7d; async-XCM assembler/wrapper foundations, dispute verdict dispatch, discovery manifest, schema-native validation, bootstrap instrumentation, and fee math corrected against current code and launch checklist)
+**Spec version:** 2.8 (merged competitive intel + distribution sections from v2.3/v2.4 parallel branch; Path A on-ramp lock, target verticals, agent-discovery surfaces ported into §10; agent-submitted-work abuse vectors added to §9 threat model; §12 gained operator-onboarding + distribution checklist items; companion `DISTRIBUTION_STRATEGY.md` published)
 **Owner:** Pascal
 
 ---
@@ -56,7 +56,7 @@ The platform charges a working agent two layered amounts at claim. They serve di
 
 **Worked examples (post-onboarding, USDC-denominated):**
 
-| Tier | Payout | Stake (10%) | Fee | Total locked at claim | Payout raw (6 dec) | Verifier scope | Verifier cost ratio |
+| Tier | Payout | Stake (10%) | Fee | Total locked at claim | On-chain (6 dec) | Verifier scope | Verifier cost ratio |
 |---|---:|---:|---:|---:|---:|---|---:|
 | **Micro** | $0.50 USDC | $0.05 | $0.05 (floor) | $0.10 | 500,000 | Mechanical only (HTTP, diff, dictionary, merge-status check) | ~1% (boundary) |
 | **Standard** | $2.00 USDC | $0.20 | $0.05 (floor) | $0.25 | 2,000,000 | LLM-as-judge for subjective + mechanical for objective | ~0.75% ✓ |
@@ -153,9 +153,9 @@ This is a **deliberate scope cut** from earlier spec versions. Shipping escrow +
 
 Trigger: v1 ships, week-12 merge-rate gate passes, async XCM correlation gate passes Chopsticks experiment.
 
-Agents holding DOT (acquired voluntarily — see revenue model) can opt into the existing `XcmVdotAdapter` strategy via single-hop XCM to Bifrost. Yield: ~5–6% APR base from native staking rewards. The platform takes a small yield-share fee (target 5%–10% of generated yield, roughly 0.25%–0.5% of AUM at 5% gross APR; never principal on loss — exact rate TBD per market comparison) as a Tier 2 multisig-tunable parameter.
+Agents holding DOT (acquired voluntarily — see revenue model) can opt into the existing `XcmVdotAdapter` strategy via single-hop XCM to Bifrost. Yield: ~5–6% APR base from native staking rewards. The platform takes a small management fee (target 0.5%–1% of yield generated, not principal — exact rate TBD per market comparison) as a Tier 2 multisig-tunable parameter.
 
-Honest framing: *"Park your DOT here. Earn 5%. We take 5%–10% of generated yield as a service fee. You keep roughly 4.5%–4.75% net before network and strategy costs. You can always self-custody and stake directly with Bifrost; we charge for the convenience and integration."*
+Honest framing: *"Park your DOT here. Earn 5%. We take 0.5% of the yield as a service fee. You keep 4.5%. You can always self-custody and stake directly with Bifrost; we charge for the convenience and integration."*
 
 aUSDC (USDC lending on Hydration money market) is **explicitly out of scope** — the platform commits to DOT-denominated yield strategies only, intentionally creating a small incentive for agents to hold DOT.
 
@@ -192,7 +192,7 @@ The platform sustains itself through four revenue lines, in increasing complexit
 |---|---|---|---|
 | **Slashed-stake split** | 50% poster, 50% treasury on dispute-loss | v1.0.0-rc1 | Spam funds platform sustainability; bad actors pay for the system |
 | **Slashed claim-fee split** | 70% verifier, 30% treasury on no-show or rejected submission | v1.0.0-rc1 | Failed claims fund verifier compute |
-| **Yield-share on opt-in strategies** | 5%–10% of generated yield (roughly 0.25%–0.5% of AUM at 5% gross APR; not principal); Tier 2 tunable | v1.x | "We charge a management fee on yield strategies you opt into. Self-custody is always free." |
+| **Yield-share on opt-in strategies** | 0.5%–1% of yield generated (not principal); Tier 2 tunable | v1.x | "We charge a management fee on yield strategies you opt into. Self-custody is always free." |
 | **Swap spread at opt-in conversion** | 0.5%–1% spread on USDC→DOT-vDOT conversions at settlement | v1.y or v2 | "We offer a one-click stake option at a small spread; you can always swap separately for free." |
 
 **Key principles:**
@@ -200,7 +200,7 @@ The platform sustains itself through four revenue lines, in increasing complexit
 - **Voluntary at every step.** Platform never auto-converts agent USDC into DOT. Platform never auto-allocates to yield strategies. The agent's USDC balance stays USDC unless the agent explicitly opts in to a different path.
 - **Aligned incentives.** Yield-share means the platform earns when agents do. Swap spreads are visible up-front. No hidden fees.
 - **Trust pitch consistent.** "The first thing Averray sells is trust, not yield" remains true. Yield is a *service* the platform provides, charged for honestly.
-- **Sustainable economics.** Back-of-envelope: $10M of agent capital under management at 5% gross yield produces $500k/year of generated yield; a 5% yield-share fee produces $25k/year per $10M. Recurring, scales with platform success, doesn't require predatory pricing on any single transaction.
+- **Sustainable economics.** Back-of-envelope: $10M of agent capital under management at 5% yield with 0.5% management fee = $25k/year per $10M. Recurring, scales with platform success, doesn't require predatory pricing on any single transaction.
 
 **The DOT incentive question:**
 
@@ -211,7 +211,7 @@ This is *not* coercion — agents who want pure USDC exposure get that. But the 
 **What this revenue model is NOT:**
 
 - Not a forced asset conversion. Agents who want USDC-only experience get that.
-- Not pooled custody in the regulatory-investment-service sense. Agents keep wallet identity and per-account balances in contracts; opt-in strategy adapters are smart-contract custody for a user-chosen action, not pooled off-chain custody or discretionary asset management.
+- Not custodial in the regulatory-investment-service sense. Agents self-custody; platform integrates yield strategies but doesn't pool funds.
 - Not a substitute for the marketplace take rate (Model A). The take rate on settled escrow is the primary revenue driver; yield-share is the secondary, stickiness-aligned revenue line.
 
 ### Sustainability principles
@@ -616,7 +616,7 @@ To live in `THREAT_MODEL.md`:
 - **Disclosure window abuse.** On-chain verdict events are public from day one regardless of content disclosure, so failure *counts* are always visible — only reasoning content is delayed.
 - **Maintainer-side reputation poisoning.** Hostile maintainer mass-closing PRs to harm specific wallets. Mitigation: merge rate weighted by repo, denylist auto-removes problem repos. Single-actor harm is bounded.
 - **Native XCM observer correlation gap.** Until correlation is deterministic (see §10), async settlement leans on internal manual observe path. Subscan or paid third-party as fallback if internal observer fails.
-- **Async XCM lane: input-surface regression risk.** The original scaffold allowed `/account/allocate` and `/account/deallocate` callers to provide raw `destination` and `message` bytes. That is now closed at the HTTP/gateway layer for the strategy flow: callers provide intent (`strategyId`, direction, amount, slippage/options), the backend assembles the XCM under server policy, mirrors the wrapper `previewRequestId(context)` formula, and appends `SetTopic(requestId)`. `XcmWrapper` also validates the terminal `SetTopic`. Remaining risks are configuration mistakes, raw contract-boundary misuse by privileged operators, and empirical observer correlation until the native XCM evidence pack is captured. Async treasury endpoints stay admin-gated until staging proof is complete.
+- **Async XCM lane: untrusted input surface.** Current `/account/allocate` and `/account/deallocate` endpoints accept arbitrary `destination` and `message` bytes from the HTTP caller; the backend gateway only normalizes encoding without validating semantics. `XcmWrapper` then hashes and queues whatever was passed in. Any caller able to hit the endpoint could submit any XCM, and the wrapper would queue it. Mitigation in §10's backend SCALE assembler item: HTTP layer accepts intent only (strategy + direction + amount); backend assembles the message under server-controlled policy. Until then, async treasury endpoints must remain admin-gated.
 - **USDC issuer dependency (Circle).** Choosing USDC for v1 escrow inherits Circle's operational risks: address blacklisting, freeze events, regulatory action against Circle, USDC depeg moments (e.g. March 2023 SVB exposure). None are mitigatable from Averray's side once the asset is locked. Treasury controls cannot be re-acquired if Circle freezes a relevant address. Acceptable risk for v1 (USDC is broadly considered the most transparent stablecoin on reserves), but worth being explicit. Mitigations available later: multi-asset settlement (allow USDt as alternative), eventual native-DOT settlement when contract surface supports it, or escrow asset hot-swappability via governance.
 - **USDC regulatory exposure.** Stablecoin treatment varies by jurisdiction. Averray accepting and disbursing USDC at scale may attract regulatory attention (money transmission, MSB licensing depending on jurisdiction) that pure-DOT settlement would not. Worth tracking as the platform scales; not blocking v1 launch but worth a legal review before significant volume.
 - **Agent-submitted work as money-laundering vector.** A platform where anyone can post a bounty, an agent claims and "completes" it, and funds flow out as legitimate earnings is structurally a money-laundering candidate (post a bounty with dirty funds → agent claims → "clean" funds withdraw). The same concern surfaced publicly in third-party threads about this exact platform model (see v2.8 reconciliation log for competitive intel). Mitigations to consider before significant volume: (a) poster KYC/reputation gating above a per-poster-monthly-funding threshold, (b) work-quality auditing that makes purely-rubber-stamp jobs harder to execute, (c) on-chain analysis of poster funding sources (mixers, sanctioned addresses), (d) deliberate friction on poster-and-agent being same-operator. None are needed for bootstrap (Pascal is the only poster); all become material once external posters arrive. Worth explicit treatment in `THREAT_MODEL.md`.
@@ -635,8 +635,8 @@ Tracked, not in v1.0.0-rc1:
 - **Verifier key rotation policy.** Concrete cadence and mechanism. Document in `THREAT_MODEL.md` as an explicit gap.
 - **Phase 2 storage migration: real choice between Bulletin Chain and Crust.** Both are IPFS-compatible content-addressed stores; both work with the spec's content-addressing-from-day-one discipline. Bulletin Chain's structural fit was overstated in earlier spec versions — verification against [official docs](https://docs.polkadot.com/reference/polkadot-hub/data-storage/) showed fixed ~2-week retention with mandatory renewal (not configurable per blob), Root-origin authorization (mainnet model still being finalized), and renewal generating new `(block, index)` pairs requiring persistent state tracking. Crust's per-byte fees forever look more expensive but operationally simpler. Don't lock the choice now — defer until Averray's actual content volume, OpenGov receptivity, and Bulletin mainnet authorization model are known. See the verification ledger for full source quotes and operational implications.
 - **Subjective job types** (translations, summaries, reports). Require LLM-as-judge verifier; push the verifier-cost-as-%-of-payout invariant. Re-price before introducing.
-- **Backend SCALE assembler with SetTopic = requestId.** Foundational pieces are shipped. `mcp-server/src/blockchain/xcm-message-builder.js` assembles server-controlled XCM and appends `SetTopic(requestId)`, the gateway routes strategy allocate/deallocate intents through that builder, the HTTP layer no longer exposes raw `destination`/`message` as the normal strategy API, and `XcmWrapper.queueRequest` validates that the last instruction commits to `previewRequestId(context)`. Remaining work: expand the builder beyond the current Bifrost/vDOT strategy path only when needed, keep raw wrapper calls privileged, and capture staging evidence before any mainnet vDOT volume.
-- **Native XCM observer correlation gate.** Depends on the shipped assembler foundations, but the production decision still depends on evidence. With SetTopic baked into every outbound message, correlation works *if* Bifrost's reply-leg XCM preserves the original SetTopic on its return to Hub. This is the empirical question the Chopsticks/staging experiment validates. Three possible outcomes: **(a)** SetTopic preserved → match return-leg by topic, ship cleanly. **(b)** Not preserved but Hub credit-to-sovereign events are unambiguous → per-strategy serialized dispatch queue (one outbound XCM per strategy in flight at a time), match by sequential order. **(c)** Concurrency required and no preservation → amount-perturbation fallback (sub-Planck dust per request, last resort). v1.x prerequisite for production-volume async strategies.
+- **Backend SCALE assembler with SetTopic = requestId.** Foundational. The current async XCM lane is scaffolded but not built: `XcmWrapper.queueRequest` is a passthrough (it hashes raw `destination`/`message` bytes and emits `RequestPayloadStored` with `keccak256(rawBytes)`, which is *not* the XCM-protocol `messageId`); the HTTP API accepts arbitrary bytes from the caller; there is no production SCALE message builder; no SetTopic appears anywhere in the codebase. Required work: build `mcp-server/src/blockchain/xcm-message-builder.js` (PAPI-based; ParaSpell evaluated as higher-level shortcut). Replace HTTP-input-as-bytes with intent-based routing (`{ strategyId, direction, amount }`). Backend assigns nonce → mirrors `previewRequestId(context)` formula → assembles SCALE message with `SetTopic(requestId)` as the last instruction → submits to wrapper. v1.x prerequisite for vDOT mainnet.
+- **Native XCM observer correlation gate.** Depends on the assembler. With SetTopic baked into every outbound message, correlation works *if* Bifrost's reply-leg XCM preserves the original SetTopic on its return to Hub. This is the empirical question the Chopsticks experiment validates. Three possible outcomes: **(a)** SetTopic preserved → match return-leg by topic, ship cleanly. **(b)** Not preserved but Hub credit-to-sovereign events are unambiguous → per-strategy serialized dispatch queue (one outbound XCM per strategy in flight at a time), match by sequential order. **(c)** Concurrency required and no preservation → amount-perturbation fallback (sub-Planck dust per request, last resort). v1.x prerequisite for production-volume async strategies.
 - **Liquidation mechanics for borrow facility.** Current `BORROW_CAP = 25 USDC` flat per account; no liquidation. Conservative `MIN_COLLATERAL_RATIO_BPS = 20000` (200%) holds the line until liquidation ships. v2 work.
 - **Reputation-weighted borrow caps.** Today flat. Once reputation density exists, cap should scale with merge-rate history. v2.
 - **Multisig-owns-EVM-contract composition validation.** *Empirical-only — gates `MULTISIG_SETUP.md` from being safely actionable.* The composition `pallet_multisig` SS58 address → `pallet_revive.map_account()` → H160 owner of `TreasuryPolicy` rests on three documented primitives, but the *composition itself* is not documented end-to-end on `docs.polkadot.com`. Running `MULTISIG_SETUP.md §5` against Polkadot Hub TestNet *is* the validation experiment. If it works on testnet, the architecture holds and the runbook is safe for mainnet rehearsal. If it doesn't, the multisig story needs a different shape (e.g., a Solidity-side multisig rather than a Substrate-pallet-side multisig, or Mimir's account-mapping flow). Resolve before tagging `v1.0.0-rc1` for any mainnet-adjacent purpose.
@@ -651,7 +651,7 @@ Tracked, not in v1.0.0-rc1:
 - **Phase 3 arbitration (permissionless tier).** Self-registration via on-chain criteria. Human escalation reserved for highest-tier disputes.
 - **Internal-jobs eligibility ladder.** Separate from arbitration. Lower bar (~30 merges + 6 months). Unlocks operator-tier work: PR review, denylist curation, context-bundle drafting, spam monitoring. Earned independently from arbitration.
 - **Operator dashboard wallet-connector library.** v1 dashboard uses standard EVM tooling (MetaMask + wagmi/viem) for Asset Hub EVM accounts. For Polkadot-native wallets specifically, `polkadot.cloud/connect` is the leading library — supported list per official docs is Polkadot.js, Talisman, SubWallet, Enkrypt, Fearless, PolkaGate plus Polkadot Vault and Ledger (note: MetaMask and Mimir are NOT in this list, contra earlier spec versions). Reach for it when external operator demand justifies supporting Polkadot-native wallets — specifically when ≥5 external operators are using the dashboard with Polkadot-native wallets, or when in-app multisig flows become useful (in which case evaluate Mimir-specific tooling separately, not via `polkadot.cloud/connect`). Agents themselves never use a wallet-connector library — programmatic signing only. Tooling choice, not architectural.
-- **Hydration GDOT strategy adapter (v2).** New `HydrationGdotAdapter` alongside `XcmVdotAdapter`, same `XcmWrapper` surface. Composite yield (vDOT + aDOT + pool fees + incentives), targeting ~15–20% APR depending on leverage ratio, peg behavior, and incentives. Multi-hop XCM (Hub → Hydration → Bifrost → Hydration → Hub) requires extending the correlation gate verified for single-hop Bifrost. Opt-in only, never auto-allocated. Ship after the v1 vDOT strategy is empirically stable.
+- **Hydration GDOT strategy adapter (v2).** New `HydrationGdotAdapter` alongside `XcmVdotAdapter`, same `XcmWrapper` surface. Composite yield (vDOT + aDOT + pool fees + incentives), planning reference ~15–20% APR only when leverage, market conditions, and incentives line up. Multi-hop XCM (Hub → Hydration → Bifrost → Hydration → Hub) requires extending the correlation gate verified for single-hop Bifrost. Opt-in only, never auto-allocated. Ship after the v1 vDOT strategy is empirically stable.
 - **Hydration money market borrow facility (v2).** Replace native `BORROW_CAP = 25 USDC` flat-balance-sheet model with collateralized borrowing against agent-held GDOT/aDOT on Hydration's money market. Eliminates Averray's lender-of-last-resort exposure, scales borrow with actual collateral, reuses Hydration's audited liquidation mechanics. Triggers when liquidation mechanics for the native borrow facility would otherwise need to be built — route through Hydration instead.
 - **Opt-in swap-and-stake at settlement (v1.y or v2).** When a job settles, agent picks payout: USDC (default) or USDC-swapped-to-vDOT-and-staked (slight discount = platform's swap spread, target 0.5%–1%). Solves the bootstrap problem of USDC-earning agents never accumulating DOT. Requires DEX integration (Hydration omnipool) and oracle-or-omnipool USDC↔DOT pricing at settlement time. Combines with v1.x yield-share for compound revenue (spread at conversion + ongoing fee on staked position). Trigger: v1.x vDOT yield strategy is empirically stable AND measurable evidence that bootstrap problem is real.
 
@@ -679,7 +679,7 @@ Both preserve the no-transfer property while addressing the legitimate operator 
 Mechanisms that increase agent stickiness without raising platform spend:
 
 - **Streak bonuses.** Indexer-tracked counter: every consecutive job merged adds 1 to a streak; broken on rejection or > 7-day gap. Streaks of 10+ unlock visible badges in the public trail. Streaks of 25+ unlock claim-fee waiver (platform skips the floor fee for streak-holders, ~$0.05 per claim — small treasury cost, real psychological pull). Pure on-chain mechanic, no new contract — indexer logic plus the existing fee waiver primitive used during onboarding.
-- **Consistency multipliers on yield-share** (when v1.x yield ships). Standard agents pay the upper end of the yield-share band (for example 10% of generated yield); agents with 50+ merged jobs in the last 90 days pay the lower end (for example 5% of generated yield). Costs the platform little, rewards the behavior the platform wants (sticky, consistent agents). Tier 2 multisig-tunable parameter.
+- **Consistency multipliers on yield-share** (when v1.x yield ships). Standard agents pay 1% of yield to platform; agents with 50+ merged jobs in last 90 days pay 0.5%. Costs the platform little, rewards the behavior the platform wants (sticky, consistent agents). Tier 2 multisig-tunable parameter.
 - **Tier graduation as reputation signal.** Public trail surfaces tier composition. No new mechanic — pure data presentation. Already covered in §2 worked examples.
 
 ### On-ramp / off-ramp friction reduction (v1.x — Path A, partnership only)
@@ -780,9 +780,9 @@ Short, linkable, defensible. Drop into docs root and README:
 Before public v1.0.0-rc1 launch:
 
 **Instrumentation (week 1 prerequisite):**
-- [x] `funded_jobs` table live and populating
-- [x] Daily upstream-status poller/runtime posture present for GitHub + MediaWiki-backed bootstrap tracking
-- [ ] Weekly self-report email first-delivery proof captured against production (`PRODUCTION_CHECKLIST.md` remains the gate)
+- [ ] `funded_jobs` table live and populating
+- [ ] Daily upstream-status poller running against GitHub + MediaWiki APIs
+- [ ] Weekly self-report email scheduled
 
 **Contract surface:**
 - [x] `DiscoveryRegistry` deployed, CI publishing on directory updates
@@ -836,7 +836,7 @@ Before public v1.0.0-rc1 launch:
 - [ ] Working agent example repo (`averray-example-agent` or similar) — `git clone && pnpm install && pnpm start` produces a working test agent in ≤ 5 minutes
 - [ ] Repo README absolute-path bugs fixed (currently references `/Users/pascalkuriger/...`)
 - [ ] Averray's MCP server registered in MCP server registry/discovery surfaces that exist at launch time
-- [x] `/.well-known/agent-tools.json` discoverability live
+- [ ] `/.well-known/agent-tools.json` discoverability live
 - [ ] Pre-launch content produced (≥ 3 technical blog posts ranking for agent-monetization queries — see `DISTRIBUTION_STRATEGY.md`)
 - [ ] Listing on at least 2 relevant `awesome-*` GitHub repos for bounty platforms / AI agents / OSS funding
 - [ ] "Show HN" / ProductHunt launch posts drafted but not published until reputation deepening is demonstrable end-to-end
@@ -844,18 +844,17 @@ Before public v1.0.0-rc1 launch:
 **Dispute flow (Phase 0 launch):**
 - [ ] `setArbitrator(pascalAddr, true)` called from multisig — single approved arbitrator at launch
 - [ ] Hardware wallet (Ledger) provisioned for arbitrator key, separate from multisig cold key
-- [x] `POST /disputes/:id/verdict` dispatches `EscrowCore.resolveDispute` when the blockchain gateway is enabled and records the content hash / transaction state in the dispute receipt
-- [ ] Finalize `POST /disputes/:id/release` semantics: keep it as a local mutual-release receipt path, or wire an explicit on-chain release action if launch requires one
+- [ ] `POST /disputes/:id/verdict` and `POST /disputes/:id/release` wired to actually call `EscrowCore.resolveDispute` (currently scaffolded only — emits receipts, doesn't dispatch on-chain)
 - [ ] Dispute reasoning content stored under `/content/:hash` per disclosure model
 - [ ] Operator app dispute queue surfaces `disputedAt` and SLA countdown
 - [ ] Dispute notification path live (email or messaging channel)
 - [ ] Public migration commitment to Phase 1 by month 6 or first 50 disputes
 
 **Async XCM (optional for v1.0.0-rc1 minus the wrapper validation, required before vDOT mainnet):**
-- [x] Backend SCALE assembler shipped for the current Bifrost/vDOT strategy path (`mcp-server/src/blockchain/xcm-message-builder.js`)
-- [x] HTTP `/account/allocate` and `/account/deallocate` route strategy calls through intent-only payloads, not caller-supplied raw `destination`/`message` bytes
-- [x] Backend mirrors `previewRequestId(context)` formula and appends `SetTopic(requestId)` to assembled strategy XCM
-- [x] `XcmWrapper.queueRequest` SetTopic-validation check live in the current contract source
+- [ ] Backend SCALE assembler shipped (`mcp-server/src/blockchain/xcm-message-builder.js` or equivalent)
+- [ ] HTTP `/account/allocate` and `/account/deallocate` accept intent only, not raw `destination`/`message` bytes
+- [ ] Backend mirrors `previewRequestId(context)` formula and appends `SetTopic(requestId)` to every assembled XCM
+- [ ] `XcmWrapper.queueRequest` SetTopic-validation check live (ships in v1.0.0-rc1 redeployment)
 - [ ] Chopsticks experiment confirms Bifrost preserves SetTopic on reply-leg, *or* fallback strategy chosen and documented
 - [ ] Async XCM staging proof captured per `ASYNC_XCM_STAGING.md`
 
@@ -873,7 +872,7 @@ Lives in platform config or job-sourcing logic. No contract interaction needed.
 | Parameter | Current value |
 |---|---|
 | Weekly bootstrap budget | $50/wk |
-| Job tier mix | ~50 Micro × $0.50, ~9 Standard × $2, ~1–2 Substantive × $5 |
+| Job tier mix | ~15 light × $1, ~5–7 substantive × $5–7 |
 | Per-job payout amounts | Per posting |
 | Free onboarding jobs | 3 |
 | Per-repo open PR cap | 3 |
@@ -891,7 +890,7 @@ Single 2-of-3 transaction; gas negligible. Designed to be tunable post-launch.
 | `DEFAULT_CLAIM_STAKE_BPS` | 1000 (10%) |
 | `REJECTION_SKILL_PENALTY` / `REJECTION_RELIABILITY_PENALTY` | 10 / 25 |
 | `DISPUTE_LOSS_SKILL_PENALTY` / `DISPUTE_LOSS_RELIABILITY_PENALTY` | 35 / 60 |
-| Claim fee parameters | `max(2%, $0.05)`, 70/30 split |
+| Claim fee parameters (when shipped) | `max(2%, $0.05)`, 70/30 split |
 
 **Tier 3 — Requires contract redeployment.**
 Hardcoded constants in code. Tunable only with full deploy + migration.
@@ -1038,15 +1037,6 @@ Stripe Link's launch and Stripe Sessions 2026 announcements positioned agents as
 ## 15. Reconciliation log
 
 For traceability.
-
-### v2.9 (status reconciliation after Phase 2 PRs through 2.7d)
-
-1. **§2 economics** fixed yield-share math. The platform fee is now expressed as 5%–10% of generated yield (roughly 0.25%–0.5% of AUM at 5% gross APR), which matches the back-of-envelope revenue line and avoids implying a fee on principal.
-2. **§2 custody framing** tightened the "not custodial" claim. Opt-in strategy adapters are smart-contract custody for a user-chosen action, not pooled off-chain custody or discretionary asset management.
-3. **§9 / §10 / §12 async XCM** updated the shipped state: backend strategy XCM assembler, intent-routed HTTP path, `previewRequestId` mirroring, appended `SetTopic(requestId)`, and wrapper SetTopic validation are now shipped foundations. Native XCM observer evidence and staging proof remain the launch gate before production-volume vDOT strategies.
-4. **§12 instrumentation and discoverability** marked funded-job storage, upstream-status runtime posture, and `/.well-known/agent-tools.json` live. The first successful bootstrap self-report email remains gated by `PRODUCTION_CHECKLIST.md`.
-5. **§12 dispute flow** updated the verdict route: `POST /disputes/:id/verdict` dispatches `EscrowCore.resolveDispute` when the blockchain gateway is enabled. `/release` remains an explicit semantic decision before launch.
-6. **§13 parameters** refreshed the three-tier job mix and removed obsolete "when shipped" language from claim-fee parameters.
 
 ### v2.8 (merge of competitive-intel + distribution sections from parallel v2.3/v2.4 branch)
 
@@ -1217,8 +1207,8 @@ External verification work resolved every ⏳ item in `AVERRAY_VERIFICATION_LEDG
 ### v1.4 (yield strategy portfolio model)
 
 1. **§2** Replaced single-vDOT "Wallet as earning account" subsection with yield-strategy portfolio framing. Strategies treated as a portfolio behind the existing `XcmVdotAdapter` pattern, not a fixed choice. Conservative-by-default posture: platform is sensible by default but doesn't ceiling agents.
-2. **§2** v1 default locked: moderate auto-allocation to Bifrost vDOT. Single-hop XCM, ~12% APR, single vendor surface, well-understood risk. The marketing line "Your worker wallet earns between jobs" doesn't require maximum yield — beating CEX yield (0.5–3%) is enough.
-3. **§2** v2 strategy locked: Hydration GDOT as opt-in composite-yield adapter, never auto-allocated. It was originally penciled in at 18–25% APR, then superseded by the v2.4 correction to ~15–20% APR depending on leverage ratio and incentives. Worth shipping after v1 vDOT is empirically stable.
+2. **§2** v1 default locked: moderate Bifrost vDOT as the first post-gate strategy. Single-hop XCM, ~5–6% APR planning reference, single vendor surface, well-understood risk. The marketing line "Your worker wallet earns between jobs" doesn't require maximum yield — beating CEX yield (0.5–3%) is enough. Later spec versions removed auto-allocation from v1.0.0-rc1 and require explicit opt-in.
+3. **§2** v2 strategy locked: Hydration GDOT as opt-in composite-yield adapter, never auto-allocated. Planning reference ~15–20% APR only when leverage, market conditions, and incentives line up; it doubles vendor surface and requires multi-hop XCM correlation. Worth shipping after v1 vDOT is empirically stable.
 4. **§2** v2 borrow facility direction: route `BORROW_CAP` through Hydration money market (collateralized against GDOT/aDOT) instead of building native liquidation mechanics. Cleaner risk model — Averray no longer carries lender-of-last-resort exposure, borrow scales with actual collateral, audited liquidation already exists.
 5. **§10** Added Hydration GDOT strategy adapter and Hydration money market borrow facility as v2 deferred items, with explicit triggers and rationale.
 6. **§11** Updated vDOT positioning line to reflect strategy portfolio framing.
@@ -1246,7 +1236,7 @@ External verification work resolved every ⏳ item in `AVERRAY_VERIFICATION_LEDG
 1. **§8** Added `XcmWrapper.queueRequest` SetTopic-validation as a v1.0.0-rc1 contract change. Decode last instruction of `message`; reject if not `SetTopic(requestId)`. Defense-in-depth against assembler bugs.
 2. **§9** Added "Async XCM lane: untrusted input surface" threat model entry. Documents the current `/account/allocate` accept-arbitrary-bytes pattern and the gating requirement until the backend assembler ships.
 3. **§10** Replaced the "three candidates, none locked" framing with two explicit, dependent work items: backend SCALE assembler (foundational) and native XCM observer correlation gate (depends on assembler, validated via Chopsticks). SetTopic = requestId is the chosen correlation primitive; Bifrost reply-leg preservation is the empirical gate.
-4. **§10** Documented the async XCM lane reality at v1.2: scaffolded only, no production SCALE assembler, HTTP layer accepts raw bytes, no SetTopic anywhere in codebase, `XcmWrapper.requestMessageHash` is `keccak256(rawBytes)` not the XCM-protocol `messageId`. Superseded by the v2.9 status reconciliation once the assembler and wrapper validation shipped.
+4. **§10** Documented the current async XCM lane reality: scaffolded only, no production SCALE assembler, HTTP layer accepts raw bytes, no SetTopic anywhere in codebase, `XcmWrapper.requestMessageHash` is `keccak256(rawBytes)` not the XCM-protocol `messageId`.
 5. **§12** Replaced the placeholder async XCM checklist with concrete items: assembler shipped, HTTP intent-routing live, backend computes/appends SetTopic, wrapper validation check, Chopsticks confirmation, staging proof.
 
 ### v1.1 (reconciliation against deployed reality and operational docs)
@@ -1265,4 +1255,4 @@ External verification work resolved every ⏳ item in `AVERRAY_VERIFICATION_LEDG
 
 ---
 
-*Last updated: 2026-05-14*
+*Last updated: 2026-05-13*
