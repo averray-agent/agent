@@ -2,6 +2,12 @@ const TERMINAL_SESSION_STATUSES = new Set(["resolved", "rejected", "closed", "ex
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 export function claimExpiresAt(session, job) {
+  if (session?.chainClaimExpiresAt) {
+    const chainExpiresAtMs = Date.parse(session.chainClaimExpiresAt);
+    if (Number.isFinite(chainExpiresAtMs)) {
+      return new Date(chainExpiresAtMs).toISOString();
+    }
+  }
   if (!session?.claimedAt) return undefined;
   const claimedAtMs = Date.parse(session.claimedAt);
   const ttlSeconds = Number(job?.claimTtlSeconds ?? 0);
@@ -14,7 +20,9 @@ export function claimExpiresAt(session, job) {
 export function isExpiredClaim(session, job, now = new Date()) {
   if (session?.status !== "claimed") return false;
   const expiresAt = claimExpiresAt(session, job);
-  return Boolean(expiresAt && Date.parse(expiresAt) <= now.getTime());
+  // EscrowCore allows submitWork at exactly claimExpiry and only reopens via
+  // handleClaimTimeout once block.timestamp is greater than claimExpiry.
+  return Boolean(expiresAt && Date.parse(expiresAt) < now.getTime());
 }
 
 export function isTerminalSession(session) {

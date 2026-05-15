@@ -797,7 +797,7 @@ Before public v1.0.0-rc1 launch:
 - [x] Hash fields live on `JobCreated` / `Submitted` / `Verified`
 - [x] `Disclosed` / `AutoDisclosed` events live on session lifecycle contract
 - [x] `EscrowCore.openDispute` enforces deadline window (`block.timestamp <= rejectedAt + DISPUTE_WINDOW`)
-- [x] `EscrowCore.submitWork` rejects expired claims; workers must submit before `claimExpiry` or reopen through the timeout path
+- [x] `EscrowCore.submitWork` rejects claims after `claimExpiry`; workers may submit at the exact deadline, and timeout/reclaim starts once chain time is greater than `claimExpiry`
 - [x] `DISPUTE_WINDOW` bumped from 1 day to 7 days
 - [x] `EscrowCore.autoResolveOnTimeout(jobId)` shipped with `ARBITRATOR_SLA = 14 days`
 - [x] `disputedAt` timestamp present on job state and emitted in `DisputeOpened` event
