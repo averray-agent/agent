@@ -222,6 +222,10 @@ function assertWorkerLoopCompletionEvidence(evidence, { apiBaseUrl }) {
     "worker-loop evidence invalid validation must include a path or message"
   );
 
+  assert.equal(evidence.verificationReadiness?.schemaRef, "schema://jobs/product-proof-worker-loop", "worker-loop evidence verifier schema must match product-proof output schema");
+  assert.equal(evidence.verificationReadiness?.usesStoredSessionSubmission, true, "worker-loop evidence verifier must use the stored structured session submission");
+  assert.equal(evidence.verificationReadiness?.evidenceOverrideProvided, false, "worker-loop evidence verifier must not override schema-native input with a plain evidence string");
+
   assert.equal(evidence.claimReadiness?.sessionId, evidence.sessionId, "worker-loop evidence claim sessionId must match evidence sessionId");
   assert.ok(evidence.claimReadiness?.status, "worker-loop evidence requires claim status");
 }

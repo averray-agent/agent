@@ -151,8 +151,9 @@ discipline for custom/off-platform schemas.
 - the hosted product-proof worker loop now uses a built-in
   `schema://jobs/product-proof-worker-loop` output contract, validates its
   structured submission before claim, probes an invalid `submission.output`
-  wrapper through the read-only validation route, and records both validation
-  traces in the launch evidence gate
+  wrapper through the read-only validation route, runs verification from the
+  stored structured session submission, and records both validation traces plus
+  the verifier-input mode in the launch evidence gate
 
 ### Gaps today
 

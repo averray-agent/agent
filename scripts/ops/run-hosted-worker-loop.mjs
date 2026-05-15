@@ -118,7 +118,7 @@ export async function runHostedWorkerLoop({
   }
 
   log(`Verifying hosted product-proof session ${sessionId}`);
-  const verification = await platform.runVerifier(sessionId, evidence);
+  const verification = await platform.runVerifier(sessionId);
   if (verification?.outcome !== "approved") {
     throw new Error(`expected approved verifier outcome, got ${verification?.outcome ?? "missing"}`);
   }
@@ -158,6 +158,11 @@ export async function runHostedWorkerLoop({
     preflightReadiness,
     validationReadiness,
     invalidValidationReadiness,
+    verificationReadiness: {
+      schemaRef: PRODUCT_PROOF_OUTPUT_SCHEMA_REF,
+      usesStoredSessionSubmission: true,
+      evidenceOverrideProvided: false
+    },
     claimReadiness: {
       status: claim.status ?? null,
       sessionId,
