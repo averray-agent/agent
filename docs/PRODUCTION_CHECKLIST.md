@@ -206,7 +206,45 @@ RUN_SUBSCAN_XCM_VALIDATION=1 ./scripts/ops/check-release-readiness.sh testnet
   `node --test app/lib/api/guarded-submit.test.mjs`.
 - [ ] The phase-0 dispute verdict path has been exercised on the hosted stack
   with the configured arbitrator/gateway and a recorded on-chain tx state from
-  `POST /disputes/:id/verdict`.
+  `POST /disputes/:id/verdict`. Flip this box only after running the dry-run
+  *and* the live-mode proof harness against a specific open dispute on the
+  hosted stack, and only when both runs print the documented evidence
+  fields:
+
+  ```bash
+  # 1. Dry-run first to confirm the payload the script will submit.
+  ADMIN_JWT=$op_admin_jwt \
+  DISPUTE_PROOF_ID=dispute-xxxxxxxxxx \
+  DISPUTE_PROOF_VERDICT=dismissed \
+  DISPUTE_PROOF_RATIONALE="upstream PR merged after the verifier's rejection" \
+  API_BASE_URL=https://api.averray.com \
+    node scripts/ops/run-dispute-verdict-proof.mjs
+  # Expect: { "mode": "dry_run", "payload": { ... } } and *no* network mutation.
+
+  # 2. Live run - only with Pascal-approved dispute id + LIVE=1.
+  ADMIN_JWT=$op_admin_jwt \
+  DISPUTE_PROOF_ID=dispute-xxxxxxxxxx \
+  DISPUTE_PROOF_VERDICT=dismissed \
+  DISPUTE_PROOF_RATIONALE="upstream PR merged after the verifier's rejection" \
+  DISPUTE_PROOF_LIVE=1 \
+  API_BASE_URL=https://api.averray.com \
+    node scripts/ops/run-dispute-verdict-proof.mjs
+  ```
+
+  Required live-mode evidence in the JSON output:
+  - `mode = "live"`,
+  - `response.verdict`, `response.reasonCode`, `response.reasoningHash`,
+    and `response.metadataURI` all populated,
+  - `response.chainStatus` is one of `confirmed | submitted | local_only`
+    (`confirmed`/`submitted` means the on-chain `EscrowCore.resolveDispute`
+    actually dispatched; `local_only` means blockchain env was not wired),
+  - `persisted.status = "resolved"` and `persisted.reasoningHash` matches
+    `response.reasoningHash` (proves the receipt persisted, not just echoed).
+
+  The script refuses to act without a specific `DISPUTE_PROOF_ID` and a
+  pre-existing open dispute. It never creates disputes and never iterates
+  the queue. Regression covered by
+  `node --test scripts/ops/run-dispute-verdict-proof.test.mjs`.
 - [ ] Public discovery, schema, and trust pages reflect the current deployed behavior.
 - [ ] Canonical public discovery manifest matches the API mirror.
 
