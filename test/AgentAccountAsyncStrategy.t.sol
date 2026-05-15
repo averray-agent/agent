@@ -89,6 +89,30 @@ contract AgentAccountAsyncStrategyTest is Test {
         assertEq(adapter.totalShares(), 20 ether);
     }
 
+    function testSettleStrategyDepositRejectsZeroShareSuccessAndKeepsPending() public {
+        bytes32 requestId = _requestDeposit(20 ether, 1);
+
+        (bool ok, bytes memory data) = address(accounts)
+            .call(
+                abi.encodeCall(
+                    accounts.settleStrategyRequest,
+                    (requestId, IXcmWrapper.RequestStatus.Succeeded, 20 ether, 0, bytes32("REMOTE"), bytes32(0))
+                )
+            );
+        _assertCustomError(ok, data, XcmVdotAdapter.InvalidStatus.selector);
+
+        (uint256 liquid,, uint256 strategyAllocated,,,) = accounts.positions(worker, address(dot));
+        assertEq(liquid, WORKER_DEPOSIT - 20 ether);
+        assertEq(strategyAllocated, 0);
+        assertEq(accounts.pendingStrategyAssets(worker, address(dot)), 20 ether);
+        assertEq(accounts.strategyShares(worker, STRATEGY_ID), 0);
+        assertEq(adapter.pendingDepositAssets(), 20 ether);
+        assertEq(adapter.totalAssets(), 0);
+        assertEq(adapter.totalShares(), 0);
+        assertEq(dot.balanceOf(address(accounts)), WORKER_DEPOSIT - 20 ether);
+        assertEq(dot.balanceOf(address(adapter)), 20 ether);
+    }
+
     function testStrategyDepositFailureRefundsLiquidBalance() public {
         bytes32 requestId = _requestDeposit(20 ether, 2);
 
@@ -240,5 +264,17 @@ contract AgentAccountAsyncStrategyTest is Test {
 
     function _withdrawMessage(bytes32 requestId) internal pure returns (bytes memory) {
         return abi.encodePacked(hex"050800010203040506070809", bytes1(0x2c), requestId);
+    }
+
+    function _assertCustomError(bool ok, bytes memory data, bytes4 selector) internal pure {
+        require(!ok, "expected revert");
+        require(data.length >= 4, "missing selector");
+
+        bytes4 actual;
+        assembly {
+            actual := mload(add(data, 32))
+        }
+
+        require(actual == selector, "unexpected selector");
     }
 }

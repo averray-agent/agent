@@ -105,6 +105,68 @@ contract XcmVdotAdapterTest is Test {
         assertEq(wrapperRequest.settledShares, 23 ether);
     }
 
+    function testSettleDepositRejectsSuccessWithZeroAssets() public {
+        bytes32 requestId = _requestDeposit(worker, 25 ether, 1);
+
+        vm.prank(operator);
+        (bool ok, bytes memory data) = address(adapter)
+            .call(
+                abi.encodeCall(
+                    adapter.settleRequest,
+                    (
+                        requestId,
+                        IXcmWrapper.RequestStatus.Succeeded,
+                        0,
+                        23 ether,
+                        keccak256("remote-deposit"),
+                        bytes32(0)
+                    )
+                )
+            );
+        _assertCustomError(ok, data, XcmVdotAdapter.InvalidStatus.selector);
+
+        IXcmStrategyAdapter.AdapterRequest memory request = adapter.getAdapterRequest(requestId);
+        IXcmWrapper.RequestRecord memory wrapperRequest = wrapper.getRequest(requestId);
+
+        assertEq(adapter.pendingDepositAssets(), 25 ether);
+        assertEq(adapter.totalAssets(), 0);
+        assertEq(adapter.totalShares(), 0);
+        assertEq(asset.balanceOf(address(adapter)), 25 ether);
+        assertEq(uint256(request.status), uint256(IXcmWrapper.RequestStatus.Pending));
+        assertEq(uint256(wrapperRequest.status), uint256(IXcmWrapper.RequestStatus.Pending));
+    }
+
+    function testSettleDepositRejectsSuccessWithZeroShares() public {
+        bytes32 requestId = _requestDeposit(worker, 25 ether, 1);
+
+        vm.prank(operator);
+        (bool ok, bytes memory data) = address(adapter)
+            .call(
+                abi.encodeCall(
+                    adapter.settleRequest,
+                    (
+                        requestId,
+                        IXcmWrapper.RequestStatus.Succeeded,
+                        25 ether,
+                        0,
+                        keccak256("remote-deposit"),
+                        bytes32(0)
+                    )
+                )
+            );
+        _assertCustomError(ok, data, XcmVdotAdapter.InvalidStatus.selector);
+
+        IXcmStrategyAdapter.AdapterRequest memory request = adapter.getAdapterRequest(requestId);
+        IXcmWrapper.RequestRecord memory wrapperRequest = wrapper.getRequest(requestId);
+
+        assertEq(adapter.pendingDepositAssets(), 25 ether);
+        assertEq(adapter.totalAssets(), 0);
+        assertEq(adapter.totalShares(), 0);
+        assertEq(asset.balanceOf(address(adapter)), 25 ether);
+        assertEq(uint256(request.status), uint256(IXcmWrapper.RequestStatus.Pending));
+        assertEq(uint256(wrapperRequest.status), uint256(IXcmWrapper.RequestStatus.Pending));
+    }
+
     function testRequestWithdrawQueuesAndReservesShares() public {
         bytes32 depositRequestId = _seedSettledDeposit();
         bytes32 previewId = _previewWithdrawRequestId(worker, 10 ether, recipient, 2);
@@ -169,17 +231,27 @@ contract XcmVdotAdapterTest is Test {
     }
 
     function _seedSettledDeposit() internal returns (bytes32 requestId) {
-        bytes32 previewId = _previewDepositRequestId(worker, 25 ether, 1);
-
-        vm.prank(operator);
-        requestId = adapter.requestDeposit(
-            worker, 25 ether, hex"0102", _depositMessage(previewId), IXcmWrapper.Weight({refTime: 11, proofSize: 22}), 1
-        );
+        requestId = _requestDeposit(worker, 25 ether, 1);
 
         vm.prank(operator);
         adapter.settleRequest(
             requestId, IXcmWrapper.RequestStatus.Succeeded, 25 ether, 23 ether, keccak256("remote-deposit"), bytes32(0)
         );
+    }
+
+    function _requestDeposit(address account, uint256 assets, uint64 nonce) internal returns (bytes32 requestId) {
+        bytes32 previewId = _previewDepositRequestId(account, assets, nonce);
+
+        vm.prank(operator);
+        requestId = adapter.requestDeposit(
+            account,
+            assets,
+            hex"0102",
+            _depositMessage(previewId),
+            IXcmWrapper.Weight({refTime: 11, proofSize: 22}),
+            nonce
+        );
+        require(requestId == previewId, "WRONG_REQUEST_ID");
     }
 
     function _previewDepositRequestId(address account, uint256 assets, uint64 nonce) internal view returns (bytes32) {
@@ -226,5 +298,17 @@ contract XcmVdotAdapterTest is Test {
 
     function _withdrawMessage(bytes32 requestId) internal pure returns (bytes memory) {
         return abi.encodePacked(hex"050800010203040506070809", bytes1(0x2c), requestId);
+    }
+
+    function _assertCustomError(bool ok, bytes memory data, bytes4 selector) internal pure {
+        require(!ok, "expected revert");
+        require(data.length >= 4, "missing selector");
+
+        bytes4 actual;
+        assembly {
+            actual := mload(add(data, 32))
+        }
+
+        require(actual == selector, "unexpected selector");
     }
 }

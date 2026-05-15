@@ -192,8 +192,8 @@ contract XcmVdotAdapter is IXcmStrategyAdapter, ReentrancyGuard {
         if (request.kind == IXcmWrapper.RequestKind.Deposit) {
             pendingDepositAssets -= request.requestedAssets;
             if (status == IXcmWrapper.RequestStatus.Succeeded) {
-                uint256 assetsToBook = settledAssets == 0 ? request.requestedAssets : settledAssets;
-                totalAssets += assetsToBook;
+                if (settledAssets == 0 || settledShares == 0) revert InvalidStatus();
+                totalAssets += settledAssets;
                 totalShares += settledShares;
             } else {
                 SafeTransfer.safeTransfer(asset, request.requester, request.requestedAssets);
