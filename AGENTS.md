@@ -59,6 +59,10 @@ CI is the merge gate. Do not bypass failing checks.
   Averray/Hermes operator to review the PR and run the configured testbed check
   set. Treat that workflow as the automated review and test handoff between
   code agents and the operator agent.
+- For the full operator-report inventory (which Hermes routines this repo
+  surfaces, where each one's evidence lands, and the correlation-id format
+  to quote during an audit), see
+  [docs/HERMES_OPERATOR_REPORTS.md](./docs/HERMES_OPERATOR_REPORTS.md).
 - The handoff currently invokes Hermes with `averray_invoke_agent_task`,
   `intent='pr_handoff'`, the PR repository/number, and `TBE2E-004` as the
   default safe dry-run testbed case. Hermes checks PR metadata, GitHub checks,
