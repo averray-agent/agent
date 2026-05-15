@@ -23,8 +23,10 @@ import {ReentrancyGuard} from "./lib/ReentrancyGuard.sol";
  */
 contract XcmWrapper is IXcmWrapper, ReentrancyGuard {
     address public constant DEFAULT_XCM_PRECOMPILE = 0x00000000000000000000000000000000000a0000;
+    bytes1 internal constant XCM_VERSION_V5 = 0x05;
     bytes1 internal constant XCM_SET_TOPIC_INSTRUCTION = 0x2c;
     uint256 internal constant XCM_SET_TOPIC_SUFFIX_LENGTH = 33;
+    uint256 internal constant XCM_MIN_VERSIONED_SET_TOPIC_LENGTH = 35;
 
     TreasuryPolicy public immutable policy;
     address public immutable override xcmPrecompile;
@@ -44,6 +46,7 @@ contract XcmWrapper is IXcmWrapper, ReentrancyGuard {
     error InvalidStatus();
     error InvalidTransition();
     error InvalidSetTopic();
+    error InvalidWeight();
     error PayloadMismatch();
 
     constructor(TreasuryPolicy policy_, address xcmPrecompile_) {
@@ -96,6 +99,7 @@ contract XcmWrapper is IXcmWrapper, ReentrancyGuard {
         Weight calldata maxWeight
     ) external override nonReentrant whenNotPaused onlyOwnerOrOperator returns (bytes32 requestId) {
         _validateRequestContext(context);
+        _validateWeight(maxWeight);
 
         requestId = previewRequestId(context);
         _validateSetTopic(message, requestId);
@@ -205,8 +209,18 @@ contract XcmWrapper is IXcmWrapper, ReentrancyGuard {
         if (context.assets == 0 && context.shares == 0) revert InvalidRequest();
     }
 
+    function _validateWeight(Weight calldata maxWeight) internal pure {
+        if (maxWeight.refTime == 0) revert InvalidWeight();
+    }
+
     function _validateSetTopic(bytes calldata message, bytes32 requestId) internal pure {
-        if (message.length < XCM_SET_TOPIC_SUFFIX_LENGTH) revert InvalidSetTopic();
+        if (message.length < XCM_MIN_VERSIONED_SET_TOPIC_LENGTH) revert InvalidSetTopic();
+        if (message[0] != XCM_VERSION_V5) revert InvalidSetTopic();
+
+        (uint256 instructionCount, uint256 instructionOffset) = _decodeCompactU32(message, 1);
+        if (instructionCount == 0 || message.length < instructionOffset + XCM_SET_TOPIC_SUFFIX_LENGTH) {
+            revert InvalidSetTopic();
+        }
         if (message[message.length - XCM_SET_TOPIC_SUFFIX_LENGTH] != XCM_SET_TOPIC_INSTRUCTION) {
             revert InvalidSetTopic();
         }
@@ -216,5 +230,35 @@ contract XcmWrapper is IXcmWrapper, ReentrancyGuard {
             topic := calldataload(add(message.offset, sub(message.length, 32)))
         }
         if (topic != requestId) revert InvalidSetTopic();
+    }
+
+    function _decodeCompactU32(bytes calldata data, uint256 offset)
+        internal
+        pure
+        returns (uint256 value, uint256 nextOffset)
+    {
+        if (offset >= data.length) revert InvalidSetTopic();
+
+        uint8 b0 = uint8(data[offset]);
+        uint8 mode = b0 & 0x03;
+
+        if (mode == 0) {
+            return (uint256(b0 >> 2), offset + 1);
+        }
+
+        if (mode == 1) {
+            if (offset + 2 > data.length) revert InvalidSetTopic();
+            uint16 raw = uint16(uint8(data[offset])) | (uint16(uint8(data[offset + 1])) << 8);
+            return (uint256(raw >> 2), offset + 2);
+        }
+
+        if (mode == 2) {
+            if (offset + 4 > data.length) revert InvalidSetTopic();
+            uint32 raw = uint32(uint8(data[offset])) | (uint32(uint8(data[offset + 1])) << 8)
+                | (uint32(uint8(data[offset + 2])) << 16) | (uint32(uint8(data[offset + 3])) << 24);
+            return (uint256(raw >> 2), offset + 4);
+        }
+
+        revert InvalidSetTopic();
     }
 }

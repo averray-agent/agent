@@ -125,6 +125,60 @@ contract XcmWrapperTest is Test {
         _assertCustomError(ok, data, XcmWrapper.InvalidSetTopic.selector);
     }
 
+    function testQueueRequestRejectsNonV5EnvelopeWithTopicSuffix() public {
+        IXcmWrapper.RequestContext memory context = _context(25 ether, 0, 1);
+        bytes32 requestId = wrapper.previewRequestId(context);
+
+        vm.prank(operator);
+        (bool ok, bytes memory data) = address(wrapper)
+            .call(
+                abi.encodeCall(
+                    wrapper.queueRequest,
+                    (
+                        context,
+                        hex"0102",
+                        abi.encodePacked(hex"9900", bytes1(0x2c), requestId),
+                        IXcmWrapper.Weight({refTime: 1, proofSize: 2})
+                    )
+                )
+            );
+        _assertCustomError(ok, data, XcmWrapper.InvalidSetTopic.selector);
+    }
+
+    function testQueueRequestRejectsEmptyInstructionVectorWithTopicSuffix() public {
+        IXcmWrapper.RequestContext memory context = _context(25 ether, 0, 1);
+        bytes32 requestId = wrapper.previewRequestId(context);
+
+        vm.prank(operator);
+        (bool ok, bytes memory data) = address(wrapper)
+            .call(
+                abi.encodeCall(
+                    wrapper.queueRequest,
+                    (
+                        context,
+                        hex"0102",
+                        abi.encodePacked(hex"0500", bytes1(0x2c), requestId),
+                        IXcmWrapper.Weight({refTime: 1, proofSize: 2})
+                    )
+                )
+            );
+        _assertCustomError(ok, data, XcmWrapper.InvalidSetTopic.selector);
+    }
+
+    function testQueueRequestRejectsZeroRefTimeWeight() public {
+        IXcmWrapper.RequestContext memory context = _context(25 ether, 0, 1);
+        bytes memory message = _depositMessage(wrapper.previewRequestId(context));
+
+        vm.prank(operator);
+        (bool ok, bytes memory data) = address(wrapper)
+            .call(
+                abi.encodeCall(
+                    wrapper.queueRequest, (context, hex"0102", message, IXcmWrapper.Weight({refTime: 0, proofSize: 2}))
+                )
+            );
+        _assertCustomError(ok, data, XcmWrapper.InvalidWeight.selector);
+    }
+
     function testFinalizeRequestStoresTerminalOutcome() public {
         IXcmWrapper.RequestContext memory context = _context(25 ether, 0, 1);
         bytes memory message = _depositMessage(wrapper.previewRequestId(context));

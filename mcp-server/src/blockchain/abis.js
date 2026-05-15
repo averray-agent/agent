@@ -120,6 +120,7 @@ export const STRATEGY_ADAPTER_ABI = [
 ];
 
 export const XCM_WRAPPER_ABI = [
+  "function weighMessage(bytes message) view returns ((uint64 refTime, uint64 proofSize))",
   "function getRequest(bytes32 requestId) view returns (((bytes32 strategyId, uint8 kind, address account, address asset, address recipient, uint256 assets, uint256 shares, uint64 nonce) context, uint8 status, uint256 settledAssets, uint256 settledShares, bytes32 remoteRef, bytes32 failureCode, uint64 createdAt, uint64 updatedAt))",
   "function finalizeRequest(bytes32 requestId, uint8 status, uint256 settledAssets, uint256 settledShares, bytes32 remoteRef, bytes32 failureCode)",
   "event RequestQueued(bytes32 indexed requestId, bytes32 indexed strategyId, uint8 indexed kind, address account, address asset, address recipient, uint256 assets, uint256 shares, uint64 nonce)",

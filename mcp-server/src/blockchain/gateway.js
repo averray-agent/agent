@@ -585,12 +585,17 @@ export class BlockchainGateway {
         recipient: wallet,
         amount: baseAmount
       });
+      const resolvedMaxWeight = await this.resolveXcmMaxWeight(
+        maxWeight ?? payload.maxWeight,
+        payload.message,
+        "requestStrategyDeposit"
+      );
       const tx = await this.accountContract.requestStrategyDeposit(wallet, {
         strategyId: this.normalizeStrategyId(strategy.strategyId),
         amount: baseAmount,
         destination: payload.destination,
         message: payload.message,
-        maxWeight: this.normalizeWeight(maxWeight ?? payload.maxWeight),
+        maxWeight: resolvedMaxWeight,
         nonce
       });
       await tx.wait();
@@ -636,13 +641,18 @@ export class BlockchainGateway {
         amount: baseAmount,
         shares
       });
+      const resolvedMaxWeight = await this.resolveXcmMaxWeight(
+        maxWeight ?? payload.maxWeight,
+        payload.message,
+        "requestStrategyWithdraw"
+      );
       const tx = await this.accountContract.requestStrategyWithdraw(wallet, {
         strategyId: this.normalizeStrategyId(strategy.strategyId),
         shares,
         recipient,
         destination: payload.destination,
         message: payload.message,
-        maxWeight: this.normalizeWeight(maxWeight ?? payload.maxWeight),
+        maxWeight: resolvedMaxWeight,
         nonce
       });
       await tx.wait();
@@ -1376,6 +1386,23 @@ export class BlockchainGateway {
       refTime: Math.trunc(refTime),
       proofSize: Math.trunc(proofSize)
     };
+  }
+
+  async resolveXcmMaxWeight(weight, message, operation) {
+    const normalized = this.normalizeWeight(weight);
+    if (normalized.refTime > 0) {
+      return normalized;
+    }
+
+    if (!this.xcmWrapperContract?.weighMessage) {
+      throw new ValidationError(`${operation} requires non-zero maxWeight.refTime or a configured XCM wrapper.`);
+    }
+
+    const quoted = this.normalizeWeight(await this.xcmWrapperContract.weighMessage(message));
+    if (quoted.refTime <= 0) {
+      throw new ValidationError(`${operation} requires a non-zero XCM weight quote before queuing.`);
+    }
+    return quoted;
   }
 
   toBytesPayload(value, label) {

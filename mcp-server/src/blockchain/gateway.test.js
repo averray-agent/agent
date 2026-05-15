@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { encodeBytes32String } from "ethers";
 
 import { BlockchainGateway } from "./gateway.js";
-import { InsufficientLiquidityError } from "../core/errors.js";
+import { InsufficientLiquidityError, ValidationError } from "../core/errors.js";
 
 const DOT_ASSET = {
   symbol: "DOT",
@@ -697,6 +697,58 @@ test("async XCM request readers return display amounts and raw base-unit fields"
   assert.equal(strategyRequest.requestedAssetsRaw, "1250000");
   assert.equal(strategyRequest.settledShares, 0.1);
   assert.equal(strategyRequest.settledSharesRaw, "100000");
+});
+
+test("resolveXcmMaxWeight uses caller weight when refTime is non-zero", async () => {
+  const gateway = new BlockchainGateway({ enabled: false });
+  gateway.xcmWrapperContract = {
+    async weighMessage() {
+      throw new Error("weighMessage should not be called");
+    }
+  };
+
+  assert.deepEqual(
+    await gateway.resolveXcmMaxWeight({ refTime: 7, proofSize: 0 }, "0x1234", "requestStrategyDeposit"),
+    { refTime: 7, proofSize: 0 }
+  );
+});
+
+test("resolveXcmMaxWeight quotes the wrapper when builder weight is zero", async () => {
+  const gateway = new BlockchainGateway({ enabled: false });
+  gateway.xcmWrapperContract = {
+    async weighMessage(message) {
+      assert.equal(message, "0x1234");
+      return { refTime: 70n, proofSize: 4n };
+    }
+  };
+
+  assert.deepEqual(
+    await gateway.resolveXcmMaxWeight({ refTime: 0, proofSize: 0 }, "0x1234", "requestStrategyDeposit"),
+    { refTime: 70, proofSize: 4 }
+  );
+});
+
+test("resolveXcmMaxWeight rejects zero weight without a wrapper quote", async () => {
+  const gateway = new BlockchainGateway({ enabled: false });
+
+  await assert.rejects(
+    () => gateway.resolveXcmMaxWeight({ refTime: 0, proofSize: 0 }, "0x1234", "requestStrategyDeposit"),
+    ValidationError
+  );
+});
+
+test("resolveXcmMaxWeight rejects zero wrapper quotes", async () => {
+  const gateway = new BlockchainGateway({ enabled: false });
+  gateway.xcmWrapperContract = {
+    async weighMessage() {
+      return { refTime: 0n, proofSize: 0n };
+    }
+  };
+
+  await assert.rejects(
+    () => gateway.resolveXcmMaxWeight({ refTime: 0, proofSize: 0 }, "0x1234", "requestStrategyDeposit"),
+    ValidationError
+  );
 });
 
 test("createSinglePayoutJobForJob consumes recurring template reserve when funding metadata is present", async () => {
