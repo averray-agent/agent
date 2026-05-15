@@ -210,7 +210,7 @@ jobs:
 
       - name: Upload Hermes handoff log
         if: always() && steps.pr.outputs.skip != 'true' && steps.hermes.outcome != 'skipped'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: hermes-handoff-${{ steps.pr.outputs.correlation_id }}
           path: hermes-handoff.log
