@@ -129,23 +129,39 @@ contract AgentAccountCore is ReentrancyGuard {
     }
 
     modifier onlyOwnerOrOperator(address account) {
-        if (msg.sender != account && !policy.serviceOperators(msg.sender)) revert Unauthorized();
+        _onlyOwnerOrOperator(account);
         _;
     }
 
     modifier onlyOperator() {
-        if (!policy.serviceOperators(msg.sender)) revert Unauthorized();
+        _onlyOperator();
         _;
     }
 
     modifier whenNotPaused() {
-        if (policy.paused()) revert ProtocolPaused();
+        _whenNotPaused();
         _;
     }
 
     modifier onlySupportedAsset(address asset) {
-        if (!policy.approvedAssets(asset)) revert UnsupportedAsset();
+        _onlySupportedAsset(asset);
         _;
+    }
+
+    function _onlyOwnerOrOperator(address account) internal view {
+        if (msg.sender != account && !policy.serviceOperators(msg.sender)) revert Unauthorized();
+    }
+
+    function _onlyOperator() internal view {
+        if (!policy.serviceOperators(msg.sender)) revert Unauthorized();
+    }
+
+    function _whenNotPaused() internal view {
+        if (policy.paused()) revert ProtocolPaused();
+    }
+
+    function _onlySupportedAsset(address asset) internal view {
+        if (!policy.approvedAssets(asset)) revert UnsupportedAsset();
     }
 
     function deposit(address asset, uint256 amount) external nonReentrant whenNotPaused onlySupportedAsset(asset) {
