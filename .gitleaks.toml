@@ -126,4 +126,14 @@ paths = [
   # accidentally make the scanner block our own config files.
   '''\.gitleaks\.toml''',
   '''\.githooks/pre-commit''',
+  # GitHub Actions workflow files. These never contain raw secret
+  # values — they reference GitHub Actions secrets via
+  # `${{ secrets.X }}` or 1Password items via `op://...` URIs. They
+  # occasionally include documentation comments that quote the *shape*
+  # of secrets (e.g., PEM begin-markers used as string assertions
+  # in shape-validation steps). Allowlisting here means a real raw
+  # secret in a workflow file would slip past CI gitleaks — but the
+  # pre-commit hook + GitHub push protection are the load-bearing
+  # defenses for that case anyway.
+  '''\.github/workflows/.*\.ya?ml''',
 ]
