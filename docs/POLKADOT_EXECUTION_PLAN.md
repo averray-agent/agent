@@ -367,6 +367,10 @@ Current status:
 - failed async deposits now refund escrowed local DOT back into
   `AgentAccountCore` during settlement instead of stranding funds in the
   adapter
+- successful async settlements now fail closed unless the observed
+  economic effect is non-zero: deposits require non-zero settled assets
+  and shares, while withdrawals require non-zero settled assets before
+  user strategy shares can be burned
 - the contract path is covered by
   [test/XcmVdotAdapter.t.sol](/Users/pascalkuriger/repo/Polkadot/test/XcmVdotAdapter.t.sol)
   and passes with `forge test --match-contract XcmVdotAdapterTest --offline`

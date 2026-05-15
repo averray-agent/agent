@@ -699,6 +699,47 @@ test("async XCM request readers return display amounts and raw base-unit fields"
   assert.equal(strategyRequest.settledSharesRaw, "100000");
 });
 
+test("finalizeXcmRequest rejects successful strategy withdrawals with zero settled assets before tx", async () => {
+  const gateway = new BlockchainGateway({ enabled: false, supportedAssets: [USDC_TRUST_ASSET] });
+  const requestId = `0x${"2".repeat(64)}`;
+  const account = "0x3333333333333333333333333333333333333333";
+  const recipient = "0x4444444444444444444444444444444444444444";
+  let settlementRelayed = false;
+
+  gateway.signer = {};
+  gateway.accountContract = {
+    async strategyRequests(id) {
+      assert.equal(id, requestId);
+      return {
+        strategyId: encodeBytes32String("USDC"),
+        adapter: "0x5555555555555555555555555555555555555555",
+        account,
+        asset: USDC_TRUST_ASSET.address,
+        recipient,
+        kind: 1,
+        status: 1,
+        requestedAssets: 0n,
+        requestedShares: 500_000n,
+        settledAssets: 0n,
+        settledShares: 0n,
+        remoteRef: `0x${"0".repeat(64)}`,
+        failureCode: `0x${"0".repeat(64)}`,
+        settled: false
+      };
+    },
+    async settleStrategyRequest() {
+      settlementRelayed = true;
+      return { async wait() {} };
+    }
+  };
+
+  await assert.rejects(
+    () => gateway.finalizeXcmRequest(requestId, { status: "succeeded", settledAssets: 0, settledShares: 0 }),
+    ValidationError
+  );
+  assert.equal(settlementRelayed, false);
+});
+
 test("resolveXcmMaxWeight uses caller weight when refTime is non-zero", async () => {
   const gateway = new BlockchainGateway({ enabled: false });
   gateway.xcmWrapperContract = {

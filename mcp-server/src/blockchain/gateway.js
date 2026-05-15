@@ -1141,6 +1141,7 @@ export class BlockchainGateway {
           throw error;
         }
       }
+      this.validateStrategySettlementOutcome(strategyRequest, normalizedStatus, settledAssets, settledShares);
 
       const tx = strategyRequest
         ? await this.accountContract.settleStrategyRequest(
@@ -1166,6 +1167,27 @@ export class BlockchainGateway {
         settledVia: strategyRequest ? "agent_account" : "xcm_wrapper"
       };
     });
+  }
+
+  validateStrategySettlementOutcome(strategyRequest, status, settledAssets, settledShares) {
+    if (!strategyRequest || status !== 2) {
+      return;
+    }
+
+    const assets = Number(settledAssets ?? 0);
+    const shares = Number(settledShares ?? 0);
+    if (!Number.isFinite(assets) || assets < 0 || !Number.isFinite(shares) || shares < 0) {
+      throw new ValidationError("settledAssets and settledShares must be non-negative finite numbers.");
+    }
+
+    if (strategyRequest.kind === 0 && (assets === 0 || shares === 0)) {
+      throw new ValidationError(
+        "Successful async strategy deposits require non-zero settledAssets and settledShares."
+      );
+    }
+    if (strategyRequest.kind === 1 && assets === 0) {
+      throw new ValidationError("Successful async strategy withdrawals require non-zero settledAssets.");
+    }
   }
 
   requireAutoMintableAsset(asset, operation, details = {}) {
