@@ -112,8 +112,8 @@ interface IXcmWrapper {
      *
      * `destination` and `message` are kept as raw bytes because the
      * transport wrapper may evolve independently from strategy-specific
-     * message builders. The message must still end with the canonical
-     * SCALE-encoded `SetTopic(requestId)` instruction so async outcomes can
+     * message builders. The message must still include `SetTopic(requestId)`
+     * as the final declared SCALE-encoded instruction so async outcomes can
      * be correlated back to this request.
      */
     function queueRequest(

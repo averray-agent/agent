@@ -24,8 +24,10 @@ import {ReentrancyGuard} from "./lib/ReentrancyGuard.sol";
 contract XcmWrapper is IXcmWrapper, ReentrancyGuard {
     address public constant DEFAULT_XCM_PRECOMPILE = 0x00000000000000000000000000000000000a0000;
     bytes1 internal constant XCM_VERSION_V5 = 0x05;
+    bytes1 internal constant XCM_INSTRUCTION_WITHDRAW_ASSET = 0x00;
+    bytes1 internal constant XCM_INSTRUCTION_DEPOSIT_ASSET = 0x0d;
+    bytes1 internal constant XCM_INSTRUCTION_PAY_FEES = 0x13;
     bytes1 internal constant XCM_SET_TOPIC_INSTRUCTION = 0x2c;
-    uint256 internal constant XCM_SET_TOPIC_SUFFIX_LENGTH = 33;
     uint256 internal constant XCM_MIN_VERSIONED_SET_TOPIC_LENGTH = 35;
 
     TreasuryPolicy public immutable policy;
@@ -217,19 +219,35 @@ contract XcmWrapper is IXcmWrapper, ReentrancyGuard {
         if (message.length < XCM_MIN_VERSIONED_SET_TOPIC_LENGTH) revert InvalidSetTopic();
         if (message[0] != XCM_VERSION_V5) revert InvalidSetTopic();
 
-        (uint256 instructionCount, uint256 instructionOffset) = _decodeCompactU32(message, 1);
-        if (instructionCount == 0 || message.length < instructionOffset + XCM_SET_TOPIC_SUFFIX_LENGTH) {
-            revert InvalidSetTopic();
-        }
-        if (message[message.length - XCM_SET_TOPIC_SUFFIX_LENGTH] != XCM_SET_TOPIC_INSTRUCTION) {
-            revert InvalidSetTopic();
+        (uint256 instructionCount, uint256 cursor) = _decodeCompactU32(message, 1);
+        if (instructionCount == 0) revert InvalidSetTopic();
+
+        bool foundTopic = false;
+        for (uint256 i = 0; i < instructionCount; i++) {
+            if (cursor >= message.length) revert InvalidSetTopic();
+
+            bytes1 instruction = message[cursor];
+            cursor += 1;
+            bool finalInstruction = i == instructionCount - 1;
+
+            if (instruction == XCM_SET_TOPIC_INSTRUCTION) {
+                if (!finalInstruction) revert InvalidSetTopic();
+                _requireAvailable(message, cursor, 32);
+                bytes32 topic;
+                assembly {
+                    topic := calldataload(add(message.offset, cursor))
+                }
+                if (topic != requestId) revert InvalidSetTopic();
+                cursor += 32;
+                foundTopic = true;
+                continue;
+            }
+
+            if (finalInstruction) revert InvalidSetTopic();
+            cursor = _skipSupportedInstruction(message, instruction, cursor);
         }
 
-        bytes32 topic;
-        assembly {
-            topic := calldataload(add(message.offset, sub(message.length, 32)))
-        }
-        if (topic != requestId) revert InvalidSetTopic();
+        if (!foundTopic || cursor != message.length) revert InvalidSetTopic();
     }
 
     function _decodeCompactU32(bytes calldata data, uint256 offset)
@@ -260,5 +278,104 @@ contract XcmWrapper is IXcmWrapper, ReentrancyGuard {
         }
 
         revert InvalidSetTopic();
+    }
+
+    function _skipSupportedInstruction(bytes calldata data, bytes1 instruction, uint256 offset)
+        internal
+        pure
+        returns (uint256 nextOffset)
+    {
+        if (instruction == XCM_INSTRUCTION_WITHDRAW_ASSET) {
+            return _skipAssetVector(data, offset);
+        }
+        if (instruction == XCM_INSTRUCTION_PAY_FEES) {
+            return _skipAsset(data, offset);
+        }
+        if (instruction == XCM_INSTRUCTION_DEPOSIT_ASSET) {
+            return _skipLocation(data, _skipAssetFilter(data, offset));
+        }
+        revert InvalidSetTopic();
+    }
+
+    function _skipAssetVector(bytes calldata data, uint256 offset) internal pure returns (uint256 nextOffset) {
+        (uint256 assetCount, uint256 cursor) = _decodeCompactU32(data, offset);
+        if (assetCount == 0) revert InvalidSetTopic();
+        for (uint256 i = 0; i < assetCount; i++) {
+            cursor = _skipAsset(data, cursor);
+        }
+        return cursor;
+    }
+
+    function _skipAsset(bytes calldata data, uint256 offset) internal pure returns (uint256 nextOffset) {
+        uint256 cursor = _skipLocation(data, offset);
+        _requireAvailable(data, cursor, 1);
+        bytes1 fun = data[cursor];
+        cursor += 1;
+        if (fun != 0x00) revert InvalidSetTopic();
+        return _skipCompact(data, cursor);
+    }
+
+    function _skipAssetFilter(bytes calldata data, uint256 offset) internal pure returns (uint256 nextOffset) {
+        _requireAvailable(data, offset, 6);
+        if (data[offset] != 0x01 || data[offset + 1] != 0x01) revert InvalidSetTopic();
+        return offset + 6;
+    }
+
+    function _skipLocation(bytes calldata data, uint256 offset) internal pure returns (uint256 nextOffset) {
+        _requireAvailable(data, offset, 2);
+        uint256 cursor = offset + 1;
+        bytes1 interior = data[cursor];
+        cursor += 1;
+        if (interior == 0x00) {
+            return cursor;
+        }
+        if (interior == 0x01) {
+            return _skipJunction(data, cursor);
+        }
+        revert InvalidSetTopic();
+    }
+
+    function _skipJunction(bytes calldata data, uint256 offset) internal pure returns (uint256 nextOffset) {
+        _requireAvailable(data, offset, 1);
+        bytes1 junction = data[offset];
+        if (junction == 0x00) {
+            _requireAvailable(data, offset, 5);
+            return offset + 5;
+        }
+        if (junction == 0x01) {
+            _requireAvailable(data, offset, 34);
+            return offset + 34;
+        }
+        if (junction == 0x03) {
+            _requireAvailable(data, offset, 22);
+            return offset + 22;
+        }
+        revert InvalidSetTopic();
+    }
+
+    function _skipCompact(bytes calldata data, uint256 offset) internal pure returns (uint256 nextOffset) {
+        _requireAvailable(data, offset, 1);
+        uint8 b0 = uint8(data[offset]);
+        uint8 mode = b0 & 0x03;
+
+        if (mode == 0) {
+            return offset + 1;
+        }
+        if (mode == 1) {
+            _requireAvailable(data, offset, 2);
+            return offset + 2;
+        }
+        if (mode == 2) {
+            _requireAvailable(data, offset, 4);
+            return offset + 4;
+        }
+
+        uint256 byteLength = uint256(b0 >> 2) + 4;
+        _requireAvailable(data, offset + 1, byteLength);
+        return offset + 1 + byteLength;
+    }
+
+    function _requireAvailable(bytes calldata data, uint256 offset, uint256 length) internal pure {
+        if (offset > data.length || length > data.length - offset) revert InvalidSetTopic();
     }
 }

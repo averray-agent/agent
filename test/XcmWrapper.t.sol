@@ -165,6 +165,26 @@ contract XcmWrapperTest is Test {
         _assertCustomError(ok, data, XcmWrapper.InvalidSetTopic.selector);
     }
 
+    function testQueueRequestRejectsSetTopicOutsideDeclaredInstructionVector() public {
+        IXcmWrapper.RequestContext memory context = _context(25 ether, 0, 1);
+        bytes32 requestId = wrapper.previewRequestId(context);
+
+        vm.prank(operator);
+        (bool ok, bytes memory data) = address(wrapper)
+            .call(
+                abi.encodeCall(
+                    wrapper.queueRequest,
+                    (
+                        context,
+                        hex"0102",
+                        abi.encodePacked(hex"0504", bytes1(0x00), bytes1(0x2c), requestId),
+                        IXcmWrapper.Weight({refTime: 1, proofSize: 2})
+                    )
+                )
+            );
+        _assertCustomError(ok, data, XcmWrapper.InvalidSetTopic.selector);
+    }
+
     function testQueueRequestRejectsZeroRefTimeWeight() public {
         IXcmWrapper.RequestContext memory context = _context(25 ether, 0, 1);
         bytes memory message = _depositMessage(wrapper.previewRequestId(context));
@@ -292,14 +312,18 @@ contract XcmWrapperTest is Test {
 
     function _depositMessage(bytes32 requestId) internal pure returns (bytes memory) {
         return abi.encodePacked(
-            hex"0510000401000003008c86471301000003008c8647000d010101000000010100368e8759910dab756d344995f1d3c79374ca8f70066d3a709e48029f6bf0ee7e",
+            hex"0510000401000002286bee1301000002093d000d01010100000000010300aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             bytes1(0x2c),
             requestId
         );
     }
 
     function _withdrawMessage(bytes32 requestId) internal pure returns (bytes memory) {
-        return abi.encodePacked(hex"050800010203040506070809", bytes1(0x2c), requestId);
+        return abi.encodePacked(
+            hex"0510000401000003009435771301000002093d000d01010100000000010300bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            bytes1(0x2c),
+            requestId
+        );
     }
 
     function _assertCustomError(bool ok, bytes memory data, bytes4 selector) internal pure {
