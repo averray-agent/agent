@@ -46,7 +46,8 @@ That path uses the production `ADMIN_JWT` secret, creates a tiny benchmark job,
 preflights it as the token wallet, validates the structured product-proof
 submission through `/jobs/validate-submission`, probes one invalid
 `submission.output` wrapper through the same read-only validation route, claims
-it, submits matching evidence, runs the verifier, and writes the evidence file
+it, submits the structured object, runs the verifier against the stored session
+submission without a plain evidence-string override, and writes the evidence file
 before running the required gate. It does not print the token. The worker loop
 fails closed before claim unless the valid schema validation succeeds, the
 invalid schema validation is rejected without a submit attempt, the token
@@ -139,6 +140,11 @@ The worker-loop command writes a local evidence file like:
     "checkedBeforeClaim": true,
     "submitAttempted": false
   },
+  "verificationReadiness": {
+    "schemaRef": "schema://jobs/product-proof-worker-loop",
+    "usesStoredSessionSubmission": true,
+    "evidenceOverrideProvided": false
+  },
   "claimReadiness": {
     "status": "claimed",
     "sessionId": "sess_..."
@@ -166,6 +172,8 @@ The script fetches the badge and profile documents and verifies that:
 - the product-proof submission passed schema validation before claim
 - one intentionally invalid `submission.output` wrapper failed validation before
   claim and did not call `/jobs/submit`
+- the verifier used the stored structured session submission rather than a
+  legacy plain evidence-string override
 - the submit, verification, and session statuses reached submitted, approved,
   and resolved
 - the badge uses `averray.schemaVersion = "v1"`

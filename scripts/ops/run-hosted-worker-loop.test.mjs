@@ -102,6 +102,8 @@ test("runHostedWorkerLoop creates, claims, submits, verifies, and writes evidenc
   assert.deepEqual(calls[6][2], { output: { wrapped_under_submission_output: true } });
   assert.equal(calls[7][2], `product-proof:${jobId}`);
   assert.equal(calls[8][2].status, "complete");
+  assert.equal(calls[9][1], sessionId);
+  assert.equal(calls[9][2], undefined);
 
   const written = JSON.parse(await readFile(evidenceFile, "utf8"));
   assert.equal(written.jobId, jobId);
@@ -129,6 +131,9 @@ test("runHostedWorkerLoop creates, claims, submits, verifies, and writes evidenc
   assert.equal(written.invalidValidationReadiness.received, "payload.submission.output");
   assert.equal(written.invalidValidationReadiness.checkedBeforeClaim, true);
   assert.equal(written.invalidValidationReadiness.submitAttempted, false);
+  assert.equal(written.verificationReadiness.schemaRef, "schema://jobs/product-proof-worker-loop");
+  assert.equal(written.verificationReadiness.usesStoredSessionSubmission, true);
+  assert.equal(written.verificationReadiness.evidenceOverrideProvided, false);
   assert.equal(written.claimReadiness.status, "claimed");
   assert.equal(written.claimReadiness.claimExpiresAt, "2026-01-01T01:00:00.000Z");
   assert.equal(written.submitStatus, "submitted");

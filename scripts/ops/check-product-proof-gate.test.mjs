@@ -195,6 +195,35 @@ test("checkProductProofGate rejects worker-loop evidence without invalid schema 
   );
 });
 
+test("checkProductProofGate rejects worker-loop evidence with a plain verifier evidence override", async () => {
+  const manifest = buildDiscoveryManifest();
+  const tmp = await mkdtemp(join(tmpdir(), "product-proof-gate-"));
+  const evidenceFile = join(tmp, "evidence.json");
+  const evidence = workerLoopEvidence({
+    wallet: "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519",
+    sessionId: "session-product-proof",
+    jobId: "product-proof-worker-loop-1700000000000"
+  });
+  evidence.verificationReadiness = {
+    ...evidence.verificationReadiness,
+    usesStoredSessionSubmission: false,
+    evidenceOverrideProvided: true
+  };
+  await writeFile(evidenceFile, `${JSON.stringify(evidence, null, 2)}\n`);
+
+  await assert.rejects(
+    () => checkProductProofGate({
+      env: {
+        PRODUCT_PROOF_REQUIRE_WORKER_LOOP: "1",
+        PRODUCT_PROOF_EVIDENCE_FILE: evidenceFile
+      },
+      fetchImpl: fakeFetch(productProofResponses(manifest)),
+      log: () => {}
+    }),
+    /worker-loop evidence verifier must use the stored structured session submission/u
+  );
+});
+
 function fakeFetch(responses) {
   return async (url) => {
     const value = responses.get(String(url));
@@ -319,6 +348,11 @@ function workerLoopEvidence({ wallet, sessionId, jobId }) {
       hint: "Move the object currently under submission.output up to submission.",
       checkedBeforeClaim: true,
       submitAttempted: false
+    },
+    verificationReadiness: {
+      schemaRef: "schema://jobs/product-proof-worker-loop",
+      usesStoredSessionSubmission: true,
+      evidenceOverrideProvided: false
     },
     claimReadiness: {
       status: "claimed",
