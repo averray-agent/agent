@@ -42,33 +42,38 @@ test("docker product-proof gate can read hosted worker-loop evidence", async () 
   );
 });
 
-test("bootstrap self-report gate requires delivery evidence and guards secrets", async () => {
+test("operator reporting gate keeps email optional and guards secrets", async () => {
   const script = await readFile(CHECK_SCRIPT, "utf8");
 
   assert.match(
     script,
     /BOOTSTRAP_SELF_REPORT_EXPECTED_FROM=/u,
-    "smoke should support an explicit expected sender check"
+    "optional email smoke should support an explicit expected sender check"
   );
   assert.match(
     script,
     /BOOTSTRAP_SELF_REPORT_EXPECTED_TO=/u,
-    "smoke should support an explicit expected recipient check"
+    "optional email smoke should support an explicit expected recipient check"
   );
   assert.match(
     script,
-    /\.bootstrapSelfReport\.from \| type\) == "string"/u,
-    "bootstrap instrumentation should require a concrete sender"
+    /\.bootstrapSelfReport\.providerConfigured \| type\) == "boolean"/u,
+    "operator reporting instrumentation should expose optional email provider state"
   );
   assert.match(
     script,
     /\.bootstrapSelfReport\.to \| type\) == "array"/u,
-    "bootstrap instrumentation should require a concrete recipient list"
+    "operator reporting instrumentation should expose a concrete recipient list"
+  );
+  assert.match(
+    script,
+    /\.bootstrapSelfReport\.providerConfigured == false or/u,
+    "base operator reporting smoke should not require a paid or verified email provider"
   );
   assert.match(
     script,
     /\.bootstrapSelfReport\.recipientCount == \(\.bootstrapSelfReport\.to \| length\)/u,
-    "recipientCount should agree with the visible recipient list"
+    "recipientCount should agree with the visible recipient list when email is configured"
   );
   assert.ok(
     script.includes('test("Bearer\\\\s+[^\\\\s,}\\\\]]+|re_[A-Za-z0-9_-]{12,}"; "i")'),
@@ -87,6 +92,6 @@ test("bootstrap self-report gate requires delivery evidence and guards secrets",
   assert.match(
     script,
     /BOOTSTRAP_SELF_REPORT_MAX_AGE_SEC/u,
-    "sent gate should bound the freshness of lastSuccessfulAt"
+    "optional sent-email gate should bound the freshness of lastSuccessfulAt"
   );
 });

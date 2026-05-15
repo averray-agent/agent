@@ -109,7 +109,7 @@ credential that operators use to authenticate — a real privilege
 escalation against the operator UI. Keep raw passwords out of any
 vault a service-account can read.
 | `ADMIN_JWT` | Long-lived JWT | Hosted product-proof smoke + ops scripts | Deployer | On expiry (was 30d, expired today) | Backend admin role |
-| `RESEND_API_KEY` | Email API key | Bootstrap self-report / alert emails | Deployer | On vendor rotation | Alert email delivery |
+| `RESEND_API_KEY` | Optional email API key | Branded email self-report / alert emails if enabled | Deployer | On vendor rotation | Optional branded email delivery |
 
 ### B. VPS backend env (`/srv/agent-stack/backend.env`)
 
@@ -233,7 +233,7 @@ cannot read backend-runtime vendor tokens, and vice versa.
 | Sentry | Project DSN | `Averray/Production/BackendExternal` | Backend runtime | sentry.io | Rare (per project lifetime) |
 | GitHub | **Fine-grained PAT** for issue ingestion (or GitHub App installation token) — see calendar entry for required scopes | `Averray/Production/CIExternal` | CI / ingestor | github.com/settings/tokens | Per token's `expires_at` (typically 90d) |
 | Subscan | API key | `Averray/Production/BackendExternal` | Backend / indexer | subscan.io | Per their cycle |
-| Resend (backend) | API key for backend self-report mail | `Averray/Production/BackendExternal` | Backend runtime | resend.com | Periodic |
+| Resend (backend) | Optional API key for backend branded self-report mail | `Averray/Production/BackendExternal` | Backend runtime | resend.com | Periodic |
 | Resend (CI) | OPTIONAL: separate API key for CI/deploy notifications | `Averray/Production/CIExternal` | CI | resend.com | Periodic |
 | Webhook (alerts) | Slack/Discord/PagerDuty URL | `Averray/Production/BackendExternal` | Backend alerting | Their respective dashboards | Rare |
 | Dweller / Polkadot RPC | URL (and any auth token) | `Averray/Production/BackendExternal` | Backend / indexer | Provider portal | Rare |

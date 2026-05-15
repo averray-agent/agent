@@ -529,12 +529,13 @@ should prioritize live-proof and launch-risk items before adding new product
 surface:
 
 1. complete the hosted worker-loop product-proof evidence gate
-2. close bootstrap self-report scheduled email delivery with the hosted smoke's
-   explicit `bootstrapSelfReport` evidence gate (`lastAttemptedAt`,
-   `lastSuccessfulAt`, exact `from`/`to`, fresh sent provider id, no API-key
-   token leakage), using the production workflow's
-   `bootstrap_self_report_send_now=1` one-shot trigger when first delivery
-   evidence is missing
+2. close operator self-report proof through Hermes/operator reporting: keep
+   `run_hermes_post_deploy=1`, confirm scheduled ops-health and daily-brief
+   evidence, and run the hosted smoke's bootstrap instrumentation gate to prove
+   upstream-status plus optional email status are well-formed and do not leak
+   provider/API-key-shaped tokens. Branded Resend email delivery remains an
+   optional transport to prove later with `bootstrap_self_report_send_now=1`
+   after a verified sender domain exists.
 3. tighten schema-native jobs for the first-wave job families
 4. finish dispute/arbitration launch wiring
 5. capture the native XCM deposit, withdraw, and failure evidence pack

@@ -193,10 +193,12 @@ generation are implemented as backend foundations.
   `reverted`.
 - [x] Add weekly self-report generation with merge rate, spend, receipts, and top
   close reasons.
-- [x] Add an opt-in hosted smoke gate that proves the daily poller and weekly
-  self-report scheduler are enabled, running, and provider-configured.
-- [ ] Wire scheduled email delivery once report recipients and cadence are
-  finalized.
+- [x] Add an opt-in hosted smoke gate that proves the daily poller and optional
+  self-report status are present and sanitized.
+- [ ] Close the operator-visible self-report proof through Hermes post-deploy
+  verification plus scheduled ops-health / daily-brief evidence.
+- [ ] Optional: wire branded email delivery once a verified sender domain,
+  recipients, and cadence are finalized.
 
 **Checks:** `npm --workspace mcp-server test`.
 

@@ -80,15 +80,13 @@ APP_ALLOW_PROTECTED_SHELL=1 ./scripts/ops/check-hosted-stack.sh
 # Optional: include the async XCM operator lane in the smoke check
 ADMIN_JWT='<admin-jwt>' ./scripts/ops/check-hosted-stack.sh
 
-# Optional: include bootstrap instrumentation once backend.env has the poller,
-# self-report recipient list, and email provider configured.
+# Optional: include operator-reporting instrumentation.
 ADMIN_JWT='<admin-jwt>' \
 CHECK_BOOTSTRAP_INSTRUMENTATION=1 \
-BOOTSTRAP_SELF_REPORT_EXPECTED_FROM='<exact backend.env from>' \
-BOOTSTRAP_SELF_REPORT_EXPECTED_TO='<exact backend.env to>' \
 ./scripts/ops/check-hosted-stack.sh
 
-# First-delivery verification: require that the weekly report has actually sent.
+# Optional branded-email delivery verification: require that the weekly email
+# report has actually sent. Use this only after a sender domain is verified.
 ADMIN_JWT='<admin-jwt>' \
 CHECK_BOOTSTRAP_INSTRUMENTATION=1 \
 CHECK_BOOTSTRAP_SELF_REPORT_SENT=1 \
@@ -96,13 +94,13 @@ BOOTSTRAP_SELF_REPORT_EXPECTED_FROM='<exact backend.env from>' \
 BOOTSTRAP_SELF_REPORT_EXPECTED_TO='<exact backend.env to>' \
 ./scripts/ops/check-hosted-stack.sh
 
-# Hosted first-delivery proof: send one report through the production admin
-# endpoint, then require the delivery evidence in the same smoke run.
+# Optional hosted email proof: send one report through the production admin
+# endpoint, then require the email-delivery evidence in the same smoke run.
 gh workflow run deploy-production.yml \
   -f bootstrap_self_report_send_now=1 \
   -f smoke_check_bootstrap_instrumentation=1 \
   -f smoke_check_bootstrap_self_report_sent=1 \
-  -f run_hermes_post_deploy=0
+  -f run_hermes_post_deploy=1
 
 # Component-scoped deploys can skip indexer checks when the indexer was not
 # touched, while scheduled/full-stack smoke should keep the default.
@@ -163,33 +161,30 @@ RUN_SUBSCAN_XCM_VALIDATION=1 ./scripts/ops/check-release-readiness.sh testnet
 - [ ] Structured logs are visible from the current deploy target.
 - [ ] An alert destination is configured for hosted smoke-check failures.
 - [ ] [INCIDENT_RESPONSE.md](./INCIDENT_RESPONSE.md) has named on-call ownership.
-- [ ] Bootstrap self-report email has actually delivered. Flip this box only
-  when ALL of the following are true against the production stack with a
-  valid `ADMIN_JWT`:
+- [ ] Operator self-report proof is visible after deploy and on schedule. Flip
+  this box only when ALL of the following are true against the production stack:
+  - The production deploy workflow completes with `run_hermes_post_deploy=1`
+    and the GitHub Actions summary contains a Hermes post-deploy verification
+    report with final verdict, hosted health, requested test cases, and safety
+    outcome.
+  - The Hermes/operator surface has scheduled ops-health and daily-brief
+    evidence available for the current deployment window.
   - This command passes:
     ```bash
     ADMIN_JWT='<admin-jwt>' \
     CHECK_BOOTSTRAP_INSTRUMENTATION=1 \
-    CHECK_BOOTSTRAP_SELF_REPORT_SENT=1 \
-    BOOTSTRAP_SELF_REPORT_EXPECTED_FROM='<exact backend.env from>' \
-    BOOTSTRAP_SELF_REPORT_EXPECTED_TO='<exact backend.env to>' \
     ./scripts/ops/check-hosted-stack.sh
     ```
-    Or the hosted production workflow passes with
-    `bootstrap_self_report_send_now=1`,
-    `smoke_check_bootstrap_instrumentation=1`, and
-    `smoke_check_bootstrap_self_report_sent=1`.
-  - The smoke gate verifies `.bootstrapSelfReport.enabled`,
-    `.running`, `.providerConfigured`, `from`, `to`, `recipientCount`,
-    `lastAttemptedAt`, `lastSuccessfulAt`, and the latest sent provider id.
-    `lastSuccessfulAt` must be an ISO timestamp within 8 days by default
-    (`BOOTSTRAP_SELF_REPORT_MAX_AGE_SEC` can tighten or relax this window).
-  - The visible `from`/`to` pair matches production `backend.env` exactly
-    (comma-separate `BOOTSTRAP_SELF_REPORT_EXPECTED_TO` for multiple
-    recipients; no `null`s, no test addresses).
+  - The smoke gate verifies `upstreamStatus` is enabled/running and that the
+    optional `.bootstrapSelfReport` status is well-formed and sanitized.
   - `/admin/status.bootstrapSelfReport` does not contain API-key-shaped
     tokens such as `Bearer ...` or `re_...`; only the boolean
     `providerConfigured` may reveal that the provider is configured.
+  - Branded email via Resend is optional/deferred. If it is later enabled, run
+    the additional `CHECK_BOOTSTRAP_SELF_REPORT_SENT=1` gate with exact
+    `BOOTSTRAP_SELF_REPORT_EXPECTED_FROM` / `BOOTSTRAP_SELF_REPORT_EXPECTED_TO`
+    values and require `lastAttemptedAt`, `lastSuccessfulAt`, and the latest
+    provider id.
 
 ---
 

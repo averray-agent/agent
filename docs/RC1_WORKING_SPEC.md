@@ -552,7 +552,8 @@ Before public v1.0.0-rc1 launch:
 **Instrumentation (week 1 prerequisite):**
 - [ ] `funded_jobs` table live and populating
 - [ ] Daily upstream-status poller running against GitHub + MediaWiki APIs
-- [ ] Weekly self-report email scheduled
+- [ ] Hermes/operator self-report proof scheduled and visible
+- [ ] Optional branded email self-report configured after sender-domain verification
 
 **Contract surface:**
 - [x] `DiscoveryRegistry` deployed, CI publishing on directory updates
