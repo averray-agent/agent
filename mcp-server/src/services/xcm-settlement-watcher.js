@@ -1,5 +1,7 @@
 import { ValidationError } from "../core/errors.js";
 
+const UINT256_MAX = (1n << 256n) - 1n;
+
 export class XcmSettlementWatcherService {
   constructor(
     platformService,
@@ -54,8 +56,8 @@ export class XcmSettlementWatcherService {
     const incoming = {
       requestId: normalizedRequestId,
       status: outcome.status,
-      settledAssets: Number(outcome.settledAssets ?? 0),
-      settledShares: Number(outcome.settledShares ?? 0),
+      settledAssets: normalizeObservationAmount(outcome.settledAssets, "settledAssets"),
+      settledShares: normalizeObservationAmount(outcome.settledShares, "settledShares"),
       remoteRef: outcome.remoteRef,
       failureCode: outcome.failureCode,
       source: typeof outcome.source === "string" && outcome.source.trim() ? outcome.source.trim() : "observer",
@@ -156,9 +158,40 @@ export class XcmSettlementWatcherService {
 
   isEquivalentObservation(existing, incoming) {
     return String(existing.status ?? "") === String(incoming.status ?? "")
-      && Number(existing.settledAssets ?? 0) === Number(incoming.settledAssets ?? 0)
-      && Number(existing.settledShares ?? 0) === Number(incoming.settledShares ?? 0)
+      && normalizeObservationAmount(existing.settledAssets, "settledAssets")
+        === normalizeObservationAmount(incoming.settledAssets, "settledAssets")
+      && normalizeObservationAmount(existing.settledShares, "settledShares")
+        === normalizeObservationAmount(incoming.settledShares, "settledShares")
       && String(existing.remoteRef ?? "") === String(incoming.remoteRef ?? "")
       && String(existing.failureCode ?? "") === String(incoming.failureCode ?? "");
   }
+}
+
+function normalizeObservationAmount(value, label) {
+  if (value === undefined || value === null || value === "") {
+    return "0";
+  }
+
+  let parsed;
+  if (typeof value === "bigint") {
+    parsed = value;
+  } else if (typeof value === "number") {
+    if (!Number.isSafeInteger(value) || value < 0) {
+      throw new ValidationError(`${label} must be an exact non-negative uint256.`);
+    }
+    parsed = BigInt(value);
+  } else if (typeof value === "string") {
+    const normalized = value.trim();
+    if (!/^\d+$/u.test(normalized)) {
+      throw new ValidationError(`${label} must be an exact non-negative uint256.`);
+    }
+    parsed = BigInt(normalized);
+  } else {
+    throw new ValidationError(`${label} must be an exact non-negative uint256.`);
+  }
+
+  if (parsed < 0n || parsed > UINT256_MAX) {
+    throw new ValidationError(`${label} must fit uint256.`);
+  }
+  return parsed.toString();
 }

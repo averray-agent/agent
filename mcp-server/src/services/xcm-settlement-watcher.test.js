@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { MemoryStateStore } from "../core/state-store.js";
 import { EventBus } from "../core/event-bus.js";
 import { XcmSettlementWatcherService } from "./xcm-settlement-watcher.js";
+import { ValidationError } from "../core/errors.js";
 
 const REQUEST_ID = "0x1111111111111111111111111111111111111111111111111111111111111111";
 
@@ -26,6 +27,7 @@ test("observeOutcome stores a pending observation and emits an event", async () 
   });
 
   assert.equal(observation.requestId, REQUEST_ID);
+  assert.equal(observation.settledAssets, "5");
   assert.equal(observation.processed, false);
   assert.equal(events.length, 1);
   assert.equal(events[0].topic, "xcm.outcome_observed");
@@ -65,8 +67,47 @@ test("runPendingSettlements finalizes stored observations and marks them process
 
   assert.equal(results.length, 1);
   assert.equal(finalizedCalls.length, 1);
+  assert.equal(finalizedCalls[0][1].settledAssets, "5");
+  assert.equal(finalizedCalls[0][1].settledShares, "5");
   assert.equal(stored.processed, true);
   assert.equal(stored.result.settledVia, "agent_account");
+});
+
+test("observeOutcome preserves large uint256 settlement amounts exactly", async () => {
+  const stateStore = new MemoryStateStore();
+  const watcher = new XcmSettlementWatcherService(
+    { finalizeXcmRequest: async () => ({}) },
+    stateStore,
+    undefined,
+    { enabled: false }
+  );
+
+  const observation = await watcher.observeOutcome(REQUEST_ID, {
+    status: "succeeded",
+    settledAssets: "9007199254740993",
+    settledShares: 18446744073709551616n
+  });
+
+  assert.equal(observation.settledAssets, "9007199254740993");
+  assert.equal(observation.settledShares, "18446744073709551616");
+});
+
+test("observeOutcome rejects unsafe numeric settlement amounts", async () => {
+  const stateStore = new MemoryStateStore();
+  const watcher = new XcmSettlementWatcherService(
+    { finalizeXcmRequest: async () => ({}) },
+    stateStore,
+    undefined,
+    { enabled: false }
+  );
+
+  await assert.rejects(
+    () => watcher.observeOutcome(REQUEST_ID, {
+      status: "succeeded",
+      settledAssets: Number.MAX_SAFE_INTEGER + 2
+    }),
+    ValidationError
+  );
 });
 
 test("runPendingSettlements keeps failed observations pending for retry", async () => {

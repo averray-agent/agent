@@ -87,6 +87,39 @@ test("native PAPI evidence preserves explicit failure metadata", () => {
   assert.equal(outcome.source, "native_papi_staging");
 });
 
+test("native PAPI evidence preserves large uint256 settlement amounts exactly", () => {
+  const settledAssets = "9007199254740993";
+  const settledShares = "18446744073709551616";
+  const outcome = normalizeNativeXcmEvidence({
+    requestId,
+    status: "succeeded",
+    settledAssets,
+    settledShares,
+    correlation: {
+      method: "ledger_join",
+      confidence: "staging"
+    }
+  });
+
+  assert.equal(outcome.settledAssets, settledAssets);
+  assert.equal(outcome.settledShares, settledShares);
+});
+
+test("native PAPI evidence rejects unsafe numeric settlement amounts", () => {
+  assert.throws(
+    () => normalizeNativeXcmEvidence({
+      requestId,
+      status: "succeeded",
+      settledAssets: Number.MAX_SAFE_INTEGER + 2,
+      correlation: {
+        method: "ledger_join",
+        confidence: "staging"
+      }
+    }),
+    /exact non-negative uint256/u
+  );
+});
+
 test("native PAPI evidence accepts SetTopic request-id correlation after Bifrost echo is proven", () => {
   const outcome = normalizeNativeXcmEvidence({
     requestId,

@@ -41,6 +41,7 @@ const abiCoder = AbiCoder.defaultAbiCoder();
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const MAX_SAFE_INTEGER_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
 const UINT64_MAX = (1n << 64n) - 1n;
+const UINT256_MAX = (1n << 256n) - 1n;
 
 function summarizeSupportedAssets(assets = []) {
   return assets.map(summarizeSupportedAsset);
@@ -1134,6 +1135,8 @@ export class BlockchainGateway {
       const normalizedStatus = this.toXcmStatus(status);
       const normalizedRemoteRef = this.toBytes32Value(remoteRef, "remoteRef");
       const normalizedFailureCode = this.toBytes32Value(failureCode, "failureCode");
+      const normalizedSettledAssets = this.normalizeUint256(settledAssets, "settledAssets");
+      const normalizedSettledShares = this.normalizeUint256(settledShares, "settledShares");
       let strategyRequest;
       try {
         strategyRequest = await this.getStrategyRequest(normalizedRequestId);
@@ -1142,22 +1145,27 @@ export class BlockchainGateway {
           throw error;
         }
       }
-      this.validateStrategySettlementOutcome(strategyRequest, normalizedStatus, settledAssets, settledShares);
+      this.validateStrategySettlementOutcome(
+        strategyRequest,
+        normalizedStatus,
+        normalizedSettledAssets,
+        normalizedSettledShares
+      );
 
       const tx = strategyRequest
         ? await this.accountContract.settleStrategyRequest(
             normalizedRequestId,
             normalizedStatus,
-            settledAssets,
-            settledShares,
+            normalizedSettledAssets,
+            normalizedSettledShares,
             normalizedRemoteRef,
             normalizedFailureCode
           )
         : await this.requireXcmWrapper("finalizeXcmRequest").finalizeRequest(
             normalizedRequestId,
             normalizedStatus,
-            settledAssets,
-            settledShares,
+            normalizedSettledAssets,
+            normalizedSettledShares,
             normalizedRemoteRef,
             normalizedFailureCode
           );
@@ -1175,18 +1183,12 @@ export class BlockchainGateway {
       return;
     }
 
-    const assets = Number(settledAssets ?? 0);
-    const shares = Number(settledShares ?? 0);
-    if (!Number.isFinite(assets) || assets < 0 || !Number.isFinite(shares) || shares < 0) {
-      throw new ValidationError("settledAssets and settledShares must be non-negative finite numbers.");
-    }
-
-    if (strategyRequest.kind === 0 && (assets === 0 || shares === 0)) {
+    if (strategyRequest.kind === 0 && (settledAssets === 0n || settledShares === 0n)) {
       throw new ValidationError(
         "Successful async strategy deposits require non-zero settledAssets and settledShares."
       );
     }
-    if (strategyRequest.kind === 1 && assets === 0) {
+    if (strategyRequest.kind === 1 && settledAssets === 0n) {
       throw new ValidationError("Successful async strategy withdrawals require non-zero settledAssets.");
     }
   }
@@ -1462,6 +1464,35 @@ export class BlockchainGateway {
 
     if (parsed < 0n || parsed > UINT64_MAX) {
       throw new ValidationError(`${label} must fit uint64.`);
+    }
+    return parsed;
+  }
+
+  normalizeUint256(value, label) {
+    if (value === undefined || value === null || value === "") {
+      return 0n;
+    }
+
+    let parsed;
+    if (typeof value === "bigint") {
+      parsed = value;
+    } else if (typeof value === "number") {
+      if (!Number.isSafeInteger(value) || value < 0) {
+        throw new ValidationError(`${label} must be an exact non-negative uint256.`);
+      }
+      parsed = BigInt(value);
+    } else if (typeof value === "string") {
+      const normalized = value.trim();
+      if (!/^\d+$/u.test(normalized)) {
+        throw new ValidationError(`${label} must be an exact non-negative uint256.`);
+      }
+      parsed = BigInt(normalized);
+    } else {
+      throw new ValidationError(`${label} must be an exact non-negative uint256.`);
+    }
+
+    if (parsed < 0n || parsed > UINT256_MAX) {
+      throw new ValidationError(`${label} must fit uint256.`);
     }
     return parsed;
   }
