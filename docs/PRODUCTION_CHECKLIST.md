@@ -206,11 +206,14 @@ RUN_SUBSCAN_XCM_VALIDATION=1 ./scripts/ops/check-release-readiness.sh testnet
   `/jobs/validate-submission` and submitted as direct `payload.submission`
   evidence, with no `submission.output` wrapper. The operator-app gate is in
   place: `app/lib/api/guarded-submit.js` short-circuits the submit when the
-  validation response is not `{ valid: true }`. Flip this box after the hosted
-  run-detail surface has been used to validate at least one structured-required
-  job (one valid, one invalid) and the invalid attempt did not consume the
-  session's submit budget. Verify with the regression test:
-  `node --test app/lib/api/guarded-submit.test.mjs`.
+  validation response is not `{ valid: true }`. The hosted worker-loop evidence
+  must include both `validationReadiness` for the direct schema object and
+  `invalidValidationReadiness` for a rejected `submission.output` wrapper with
+  `submitAttempted=false`. Flip this box after the hosted run-detail surface or
+  product-proof worker loop has been used to validate at least one
+  structured-required job (one valid, one invalid) and the invalid attempt did
+  not consume the session's submit budget. Verify with the regression tests:
+  `node --test app/lib/api/guarded-submit.test.mjs scripts/ops/run-hosted-worker-loop.test.mjs scripts/ops/check-product-proof-gate.test.mjs`.
 - [ ] The phase-0 dispute verdict path has been exercised on the hosted stack
   with the configured arbitrator/gateway and a recorded on-chain tx state from
   `POST /disputes/:id/verdict`. Flip this box only after running the dry-run

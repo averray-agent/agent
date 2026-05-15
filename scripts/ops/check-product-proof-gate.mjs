@@ -3,10 +3,12 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 import { DEFAULT_ESCROW_ASSET } from "../../mcp-server/src/core/assets.js";
+import { listBuiltinJobSchemas } from "../../mcp-server/src/core/job-schema-registry.js";
 
 const DEFAULT_PUBLIC_SITE_URL = "https://averray.com";
 const DEFAULT_API_BASE_URL = "https://api.averray.com";
 const DEFAULT_SAMPLE_SCHEMA = "wikipedia-citation-repair-output";
+const REQUIRED_FIRST_WAVE_SCHEMA_REFS = listBuiltinJobSchemas().map((schema) => schema.$id);
 const REQUIRED_ESCROW_ASSET = {
   symbol: DEFAULT_ESCROW_ASSET.symbol,
   address: DEFAULT_ESCROW_ASSET.address.toLowerCase(),
@@ -88,8 +90,12 @@ export async function checkProductProofGate({
   assert.ok(Number.isInteger(schemaIndex.count) && schemaIndex.count > 0, "schema index count must be positive");
   assert.ok(Array.isArray(schemaIndex.schemas), "schema index must include schemas array");
   assert.equal(schemaIndex.count, schemaIndex.schemas.length);
+  const schemaRefs = new Set(schemaIndex.schemas.map((entry) => entry.$id));
+  for (const schemaRef of REQUIRED_FIRST_WAVE_SCHEMA_REFS) {
+    assert.ok(schemaRefs.has(schemaRef), `schema index must include first-wave schema ${schemaRef}`);
+  }
   const sampleRef = `schema://jobs/${sampleSchema}`;
-  assert.ok(schemaIndex.schemas.some((entry) => entry.$id === sampleRef), `schema index must include ${sampleRef}`);
+  assert.ok(schemaRefs.has(sampleRef), `schema index must include ${sampleRef}`);
   const sample = await fetchJson(fetchImpl, `${apiBaseUrl}/schemas/jobs/${sampleSchema}.json`);
   assert.equal(sample.$id, sampleRef);
 
@@ -202,6 +208,19 @@ function assertWorkerLoopCompletionEvidence(evidence, { apiBaseUrl }) {
   assert.equal(evidence.validationReadiness?.schemaValidates, "payload.submission", "worker-loop evidence validation must target payload.submission");
   assert.equal(evidence.validationReadiness?.submissionKind, "structured", "worker-loop evidence validation must use structured submission");
   assert.equal(evidence.validationReadiness?.validatedBeforeClaim, true, "worker-loop evidence must prove validation happened before claim");
+
+  assert.ok(evidence.invalidValidationReadiness, "worker-loop evidence requires an invalid schema validation proof");
+  assert.equal(evidence.invalidValidationReadiness.jobId, evidence.jobId, "worker-loop evidence invalid validation jobId must match evidence jobId");
+  assert.equal(evidence.invalidValidationReadiness?.valid, false, "worker-loop evidence requires an invalid schema validation proof");
+  assert.equal(evidence.invalidValidationReadiness?.submitSafe, false, "worker-loop evidence invalid validation must not be submit safe");
+  assert.equal(evidence.invalidValidationReadiness?.schemaRef, "schema://jobs/product-proof-worker-loop", "worker-loop evidence invalid validation schema must match product-proof output schema");
+  assert.equal(evidence.invalidValidationReadiness?.schemaValidates, "payload.submission", "worker-loop evidence invalid validation must target payload.submission");
+  assert.equal(evidence.invalidValidationReadiness?.checkedBeforeClaim, true, "worker-loop evidence invalid validation must happen before claim");
+  assert.equal(evidence.invalidValidationReadiness?.submitAttempted, false, "worker-loop evidence invalid validation must not call submit");
+  assert.ok(
+    evidence.invalidValidationReadiness?.path || evidence.invalidValidationReadiness?.message,
+    "worker-loop evidence invalid validation must include a path or message"
+  );
 
   assert.equal(evidence.claimReadiness?.sessionId, evidence.sessionId, "worker-loop evidence claim sessionId must match evidence sessionId");
   assert.ok(evidence.claimReadiness?.status, "worker-loop evidence requires claim status");

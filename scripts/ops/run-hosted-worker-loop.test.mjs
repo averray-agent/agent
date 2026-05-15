@@ -36,7 +36,7 @@ test("runHostedWorkerLoop creates, claims, submits, verifies, and writes evidenc
     },
     async validateJobSubmission(id, submission) {
       calls.push(["validateJobSubmission", id, submission]);
-      return validationReady({ jobId: id });
+      return validationForSubmission({ jobId: id, submission });
     },
     async claimJob(id, idempotencyKey) {
       calls.push(["claimJob", id, idempotencyKey]);
@@ -87,6 +87,7 @@ test("runHostedWorkerLoop creates, claims, submits, verifies, and writes evidenc
     "createJob",
     "preflightJob",
     "validateJobSubmission",
+    "validateJobSubmission",
     "claimJob",
     "submitWork",
     "runVerifier",
@@ -98,8 +99,9 @@ test("runHostedWorkerLoop creates, claims, submits, verifies, and writes evidenc
   assert.equal(calls[3][1].rewardAsset, "USDC");
   assert.equal(calls[3][1].rewardAmount, 0.1);
   assert.equal(calls[5][2].summary, `complete verified output for ${jobId}`);
-  assert.equal(calls[6][2], `product-proof:${jobId}`);
-  assert.equal(calls[7][2].status, "complete");
+  assert.deepEqual(calls[6][2], { output: { wrapped_under_submission_output: true } });
+  assert.equal(calls[7][2], `product-proof:${jobId}`);
+  assert.equal(calls[8][2].status, "complete");
 
   const written = JSON.parse(await readFile(evidenceFile, "utf8"));
   assert.equal(written.jobId, jobId);
@@ -119,6 +121,14 @@ test("runHostedWorkerLoop creates, claims, submits, verifies, and writes evidenc
   assert.equal(written.validationReadiness.schemaValidates, "payload.submission");
   assert.equal(written.validationReadiness.submissionKind, "structured");
   assert.equal(written.validationReadiness.validatedBeforeClaim, true);
+  assert.equal(written.invalidValidationReadiness.valid, false);
+  assert.equal(written.invalidValidationReadiness.submitSafe, false);
+  assert.equal(written.invalidValidationReadiness.schemaRef, "schema://jobs/product-proof-worker-loop");
+  assert.equal(written.invalidValidationReadiness.schemaValidates, "payload.submission");
+  assert.equal(written.invalidValidationReadiness.code, "invalid_submission_shape");
+  assert.equal(written.invalidValidationReadiness.received, "payload.submission.output");
+  assert.equal(written.invalidValidationReadiness.checkedBeforeClaim, true);
+  assert.equal(written.invalidValidationReadiness.submitAttempted, false);
   assert.equal(written.claimReadiness.status, "claimed");
   assert.equal(written.claimReadiness.claimExpiresAt, "2026-01-01T01:00:00.000Z");
   assert.equal(written.submitStatus, "submitted");
@@ -190,8 +200,8 @@ test("runHostedWorkerLoop accepts an explicit positive reward amount", async () 
       calls.push(["preflightJob", id]);
       return preflightReady({ jobId: id });
     },
-    async validateJobSubmission(id) {
-      return validationReady({ jobId: id });
+    async validateJobSubmission(id, submission) {
+      return validationForSubmission({ jobId: id, submission });
     },
     async claimJob(id) {
       return { status: "claimed", sessionId: `${id}:wallet` };
@@ -676,6 +686,33 @@ function validationReady({
     schemaValidates: "payload.submission",
     submissionKind: "structured"
   };
+}
+
+function invalidValidationBlocked({
+  jobId,
+  schemaRef = "schema://jobs/product-proof-worker-loop"
+}) {
+  return {
+    jobId,
+    valid: false,
+    submitSafe: false,
+    schemaRef,
+    schemaValidates: "payload.submission",
+    code: "invalid_submission_shape",
+    message: "Send the structured proposal object directly as submission, not under submission.output.",
+    path: "payload.submission.output",
+    details: {
+      received: "payload.submission.output",
+      hint: "Move the object currently under submission.output up to submission."
+    }
+  };
+}
+
+function validationForSubmission({ jobId, submission }) {
+  if (submission?.output?.wrapped_under_submission_output === true) {
+    return invalidValidationBlocked({ jobId });
+  }
+  return validationReady({ jobId });
 }
 
 function settlementReadyStatus(overrides = {}) {

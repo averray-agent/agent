@@ -150,11 +150,14 @@ discipline for custom/off-platform schemas.
   mutations (`claimJobAfterValidation` and `submitValidatedWork`)
 - the hosted product-proof worker loop now uses a built-in
   `schema://jobs/product-proof-worker-loop` output contract, validates its
-  structured submission before claim, and records that validation trace in the
-  launch evidence gate
+  structured submission before claim, probes an invalid `submission.output`
+  wrapper through the read-only validation route, and records both validation
+  traces in the launch evidence gate
 
 ### Gaps today
 
+- the hosted evidence gate still needs to be run live after deploy with
+  `PRODUCT_PROOF_REQUIRE_WORKER_LOOP=1`
 - custom/off-platform schema refs are still allowed without signed schema
   registration
 - third-party and non-product-proof helper workflows still need to adopt the
@@ -528,7 +531,8 @@ As of [SPEC_AUDIT_2026-05-13.md](SPEC_AUDIT_2026-05-13.md), the next work
 should prioritize live-proof and launch-risk items before adding new product
 surface:
 
-1. complete the hosted worker-loop product-proof evidence gate
+1. complete the hosted worker-loop product-proof evidence gate, including the
+   valid direct-object validation and invalid-wrapper validation proof
 2. close operator self-report proof through Hermes/operator reporting: keep
    `run_hermes_post_deploy=1`, confirm scheduled ops-health and daily-brief
    evidence, and run the hosted smoke's bootstrap instrumentation gate to prove
@@ -536,7 +540,8 @@ surface:
    provider/API-key-shaped tokens. Branded Resend email delivery remains an
    optional transport to prove later with `bootstrap_self_report_send_now=1`
    after a verified sender domain exists.
-3. tighten schema-native jobs for the first-wave job families
+3. tighten schema-native jobs for the first-wave job families and extend helper
+   adoption beyond the product-proof loop
 4. finish dispute/arbitration launch wiring
 5. capture the native XCM deposit, withdraw, and failure evidence pack
 6. add visible timeline filters to the operator app

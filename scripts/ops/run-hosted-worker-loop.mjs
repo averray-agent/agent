@@ -98,6 +98,11 @@ export async function runHostedWorkerLoop({
     preflightReadiness,
     submission
   });
+  const invalidValidationReadiness = await assertInvalidSubmissionBlocked({
+    platform,
+    jobId,
+    preflightReadiness
+  });
 
   log(`Claiming hosted product-proof job ${jobId}`);
   const claim = await platform.claimJob(jobId, idempotencyKey);
@@ -152,6 +157,7 @@ export async function runHostedWorkerLoop({
     liquidityReadiness,
     preflightReadiness,
     validationReadiness,
+    invalidValidationReadiness,
     claimReadiness: {
       status: claim.status ?? null,
       sessionId,
@@ -191,6 +197,50 @@ function buildProductProofSubmission({ jobId, evidence, timestamp }) {
         evidence: `Submission targets ${PRODUCT_PROOF_OUTPUT_SCHEMA_REF}.`
       }
     ]
+  };
+}
+
+async function assertInvalidSubmissionBlocked({ platform, jobId, preflightReadiness }) {
+  if (typeof platform.validateJobSubmission !== "function") {
+    throw new Error("Hosted product-proof worker loop requires /jobs/validate-submission before claim.");
+  }
+  const invalidSubmission = {
+    output: {
+      wrapped_under_submission_output: true
+    }
+  };
+  const validation = await platform.validateJobSubmission(jobId, invalidSubmission);
+  if (!validation || typeof validation !== "object") {
+    throw new Error("Hosted product-proof worker loop requires an invalid validation response before claim.");
+  }
+  if (validation.jobId && validation.jobId !== jobId) {
+    throw new Error(`invalid submission validation job id mismatch: expected ${jobId}, got ${validation.jobId}`);
+  }
+  if (validation.valid !== false || validation.submitSafe !== false) {
+    throw new Error(
+      "invalid product-proof submission unexpectedly passed validation before claim; " +
+      `valid=${String(validation.valid)}; submitSafe=${String(validation.submitSafe)}.`
+    );
+  }
+  const expectedSchemaRef = preflightReadiness.requiredOutputSchema ?? PRODUCT_PROOF_OUTPUT_SCHEMA_REF;
+  if (validation.schemaRef && validation.schemaRef !== expectedSchemaRef) {
+    throw new Error(
+      `invalid submission validation schema mismatch: expected ${expectedSchemaRef}, got ${validation.schemaRef}`
+    );
+  }
+  return {
+    jobId,
+    valid: false,
+    submitSafe: false,
+    schemaRef: validation.schemaRef ?? expectedSchemaRef,
+    schemaValidates: validation.schemaValidates ?? "payload.submission",
+    code: validation.code ?? null,
+    message: validation.message ?? null,
+    path: validation.path ?? validation.errorPaths?.[0] ?? null,
+    received: validation.details?.received ?? null,
+    hint: validation.details?.hint ?? null,
+    checkedBeforeClaim: true,
+    submitAttempted: false
   };
 }
 

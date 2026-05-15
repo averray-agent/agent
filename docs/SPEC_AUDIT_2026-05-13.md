@@ -183,11 +183,16 @@ SSH/basic-auth/admin-JWT cutovers, and the basic hosted smoke is green.
   `app/lib/api/guarded-submit.js` so a structured-required job will not fire
   `POST /jobs/submit` on a draft that fails validation. Regression covered by
   `app/lib/api/guarded-submit.test.mjs` ("structured-required job validates
-  first; invalid response prevents /jobs/submit").
-- Remaining: prove the hosted UI/API path end-to-end against the live stack
-  (one valid + one invalid hosted run), extend the validation-before-claim
-  pattern to remaining third-party/helper workflows, and add signed
-  registration before tightening custom/off-platform schema refs.
+  first; invalid response prevents /jobs/submit"). The product-proof worker
+  loop now records both the valid direct-object validation and a read-only
+  rejected `submission.output` wrapper probe before claim, and the
+  product-proof gate asserts the hosted schema index contains the built-in
+  first-wave registry.
+- Remaining: run the hosted product-proof worker-loop evidence gate against the
+  live stack with the valid + invalid validation traces present, extend the
+  validation-before-claim pattern to remaining third-party/helper workflows,
+  and add signed registration before tightening custom/off-platform schema
+  refs.
 
 ### Verifier Replay Hardening
 
@@ -294,7 +299,8 @@ correlation and settlement path.
    `bootstrap_self_report_send_now=1` plus
    `smoke_check_bootstrap_self_report_sent=1` as an optional branded-email proof
    only after a verified sender domain is configured.
-3. Prove the hosted schema-native validation path and external helper adoption.
+3. Run the hosted schema-native validation proof and extend external helper
+   adoption.
 4. Prove the dispute verdict path live and decide `/release` semantics.
 5. Run the native XCM evidence pack captures.
 6. Continue folding funding/settlement/dispute events into the canonical

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { buildDiscoveryManifest } from "../../mcp-server/src/core/discovery-manifest.js";
+import { listBuiltinJobSchemas } from "../../mcp-server/src/core/job-schema-registry.js";
 import { checkProductProofGate } from "./check-product-proof-gate.mjs";
 
 test("checkProductProofGate validates public discovery, pages, and schemas", async () => {
@@ -33,8 +34,7 @@ test("checkProductProofGate validates public discovery, pages, and schemas", asy
       $id: "https://averray.com/schemas/agent-profile-v1.json"
     }],
     ["https://api.averray.com/schemas/jobs", {
-      count: 1,
-      schemas: [{ $id: "schema://jobs/wikipedia-citation-repair-output" }]
+      ...jobSchemaIndex()
     }],
     ["https://api.averray.com/schemas/jobs/wikipedia-citation-repair-output.json", {
       $id: "schema://jobs/wikipedia-citation-repair-output"
@@ -95,8 +95,7 @@ test("checkProductProofGate requires an evidence file when the worker loop is ma
       $id: "https://averray.com/schemas/agent-profile-v1.json"
     }],
     ["https://api.averray.com/schemas/jobs", {
-      count: 1,
-      schemas: [{ $id: "schema://jobs/wikipedia-citation-repair-output" }]
+      ...jobSchemaIndex()
     }],
     ["https://api.averray.com/schemas/jobs/wikipedia-citation-repair-output.json", {
       $id: "schema://jobs/wikipedia-citation-repair-output"
@@ -171,6 +170,31 @@ test("checkProductProofGate rejects minimal evidence when worker-loop proof is r
   );
 });
 
+test("checkProductProofGate rejects worker-loop evidence without invalid schema proof", async () => {
+  const manifest = buildDiscoveryManifest();
+  const tmp = await mkdtemp(join(tmpdir(), "product-proof-gate-"));
+  const evidenceFile = join(tmp, "evidence.json");
+  const evidence = workerLoopEvidence({
+    wallet: "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519",
+    sessionId: "session-product-proof",
+    jobId: "product-proof-worker-loop-1700000000000"
+  });
+  delete evidence.invalidValidationReadiness;
+  await writeFile(evidenceFile, `${JSON.stringify(evidence, null, 2)}\n`);
+
+  await assert.rejects(
+    () => checkProductProofGate({
+      env: {
+        PRODUCT_PROOF_REQUIRE_WORKER_LOOP: "1",
+        PRODUCT_PROOF_EVIDENCE_FILE: evidenceFile
+      },
+      fetchImpl: fakeFetch(productProofResponses(manifest)),
+      log: () => {}
+    }),
+    /worker-loop evidence requires an invalid schema validation proof/u
+  );
+});
+
 function fakeFetch(responses) {
   return async (url) => {
     const value = responses.get(String(url));
@@ -214,13 +238,20 @@ function productProofResponses(manifest) {
       $id: "https://averray.com/schemas/agent-profile-v1.json"
     }],
     ["https://api.averray.com/schemas/jobs", {
-      count: 1,
-      schemas: [{ $id: "schema://jobs/wikipedia-citation-repair-output" }]
+      ...jobSchemaIndex()
     }],
     ["https://api.averray.com/schemas/jobs/wikipedia-citation-repair-output.json", {
       $id: "schema://jobs/wikipedia-citation-repair-output"
     }]
   ]);
+}
+
+function jobSchemaIndex() {
+  const schemas = listBuiltinJobSchemas().map(({ $id }) => ({ $id }));
+  return {
+    count: schemas.length,
+    schemas
+  };
 }
 
 function workerLoopEvidence({ wallet, sessionId, jobId }) {
@@ -274,6 +305,20 @@ function workerLoopEvidence({ wallet, sessionId, jobId }) {
       schemaValidates: "payload.submission",
       submissionKind: "structured",
       validatedBeforeClaim: true
+    },
+    invalidValidationReadiness: {
+      jobId,
+      valid: false,
+      submitSafe: false,
+      schemaRef: "schema://jobs/product-proof-worker-loop",
+      schemaValidates: "payload.submission",
+      code: "invalid_submission_shape",
+      message: "Send the structured proposal object directly as submission, not under submission.output.",
+      path: "payload.submission.output",
+      received: "payload.submission.output",
+      hint: "Move the object currently under submission.output up to submission.",
+      checkedBeforeClaim: true,
+      submitAttempted: false
     },
     claimReadiness: {
       status: "claimed",

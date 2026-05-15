@@ -28,7 +28,8 @@ The script checks:
 - `https://averray.com/builders/`
 - `https://averray.com/llms.txt`
 - the public badge and profile JSON schemas
-- the job schema index and a sample job schema
+- the job schema index includes the built-in first-wave schemas, plus a sample
+  job schema fetch
 
 The public discovery manifest and API mirror must be byte-for-byte equivalent
 after JSON parsing. This is the check that protects external agents from
@@ -43,13 +44,15 @@ The deploy workflow can generate this evidence itself when run manually with:
 
 That path uses the production `ADMIN_JWT` secret, creates a tiny benchmark job,
 preflights it as the token wallet, validates the structured product-proof
-submission through `/jobs/validate-submission`, claims it, submits matching
-evidence, runs the verifier, and writes the evidence file before running the
-required gate. It does not print the token. The worker loop fails closed before
-claim unless schema validation succeeds, the token exposes the full loop
-capability set, the hosted stack reports canonical v1 USDC settlement
-readiness, and the worker wallet has enough AgentAccountCore USDC liquidity for
-the reward.
+submission through `/jobs/validate-submission`, probes one invalid
+`submission.output` wrapper through the same read-only validation route, claims
+it, submits matching evidence, runs the verifier, and writes the evidence file
+before running the required gate. It does not print the token. The worker loop
+fails closed before claim unless the valid schema validation succeeds, the
+invalid schema validation is rejected without a submit attempt, the token
+exposes the full loop capability set, the hosted stack reports canonical v1
+USDC settlement readiness, and the worker wallet has enough AgentAccountCore
+USDC liquidity for the reward.
 
 The hosted smoke token must resolve from `/auth/session` with capabilities for:
 `account:read`, `admin:status`, `jobs:create`, `jobs:preflight`, `jobs:claim`,
@@ -125,6 +128,17 @@ The worker-loop command writes a local evidence file like:
     "submissionKind": "structured",
     "validatedBeforeClaim": true
   },
+  "invalidValidationReadiness": {
+    "jobId": "product-proof-worker-loop-...",
+    "valid": false,
+    "submitSafe": false,
+    "schemaRef": "schema://jobs/product-proof-worker-loop",
+    "schemaValidates": "payload.submission",
+    "code": "invalid_submission_shape",
+    "path": "payload.submission.output",
+    "checkedBeforeClaim": true,
+    "submitAttempted": false
+  },
   "claimReadiness": {
     "status": "claimed",
     "sessionId": "sess_..."
@@ -150,6 +164,8 @@ The script fetches the badge and profile documents and verifies that:
 - the reward clears the USDC minBalance and the worker has enough USDC liquidity
 - the job preflight was eligible and claimable before claim
 - the product-proof submission passed schema validation before claim
+- one intentionally invalid `submission.output` wrapper failed validation before
+  claim and did not call `/jobs/submit`
 - the submit, verification, and session statuses reached submitted, approved,
   and resolved
 - the badge uses `averray.schemaVersion = "v1"`
