@@ -48,7 +48,7 @@
     "example:read-job-timeline": "node examples/read-job-timeline/index.mjs"
   },
   "devDependencies": {
-    "@acala-network/chopsticks": "^1.3.1",
+    "@acala-network/chopsticks": "^1.4.0",
     "@paraspell/sdk": "^13.4.0",
     "@paraspell/sdk-core": "^13.4.0",
     "@polkadot/util": "^14.0.3",
