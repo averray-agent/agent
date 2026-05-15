@@ -342,6 +342,26 @@ export class EventListener {
       });
     });
 
+    this.registerXcm("RequestDispatched", "xcm.request_dispatched", async ({ args, payload }) => {
+      const request = await this.gateway.getXcmRequest(args.requestId);
+      return this.buildChainEvent({
+        topic: "xcm.request_dispatched",
+        args,
+        payload,
+        wallet: request.account,
+        wallets: [request.account],
+        data: {
+          requestId: args.requestId,
+          strategyId: request.strategyId,
+          kind: request.kind,
+          status: request.status,
+          xcmPrecompile: args.xcmPrecompile,
+          destinationHash: args.destinationHash,
+          messageHash: args.messageHash
+        }
+      });
+    });
+
     this.registerXcm("RequestStatusUpdated", "xcm.request_status_updated", async ({ args, payload }) => {
       const request = await this.gateway.getXcmRequest(args.requestId);
       return this.buildChainEvent({

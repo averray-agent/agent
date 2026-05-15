@@ -8,6 +8,24 @@ import {IXcmWrapper} from "../contracts/interfaces/IXcmWrapper.sol";
 import {XcmWrapper} from "../contracts/XcmWrapper.sol";
 
 contract MockXcmPrecompile {
+    uint256 public sendCount;
+    bytes32 public lastDestinationHash;
+    bytes32 public lastMessageHash;
+    bool public failSend;
+
+    error MockSendFailed();
+
+    function setFailSend(bool value) external {
+        failSend = value;
+    }
+
+    function send(bytes calldata destination, bytes calldata message) external {
+        if (failSend) revert MockSendFailed();
+        sendCount += 1;
+        lastDestinationHash = keccak256(destination);
+        lastMessageHash = keccak256(message);
+    }
+
     function weighMessage(bytes calldata message) external pure returns (IXcmWrapper.Weight memory) {
         return IXcmWrapper.Weight({refTime: uint64(message.length * 10), proofSize: uint64(message.length)});
     }
@@ -54,6 +72,9 @@ contract XcmWrapperTest is Test {
         assertEq(record.context.nonce, 1);
         require(wrapper.requestDestinationHash(requestId) == keccak256(hex"0102"), "WRONG_DEST_HASH");
         require(wrapper.requestMessageHash(requestId) == keccak256(message), "WRONG_MESSAGE_HASH");
+        assertEq(precompile.sendCount(), 1);
+        require(precompile.lastDestinationHash() == keccak256(hex"0102"), "PRECOMPILE_DESTINATION_NOT_SENT");
+        require(precompile.lastMessageHash() == keccak256(message), "PRECOMPILE_MESSAGE_NOT_SENT");
     }
 
     function testQueueRequestIsIdempotentForSamePayload() public {
@@ -70,6 +91,28 @@ contract XcmWrapperTest is Test {
         require(first == second, "request id mismatch");
         IXcmWrapper.RequestRecord memory record = wrapper.getRequest(first);
         assertEq(uint256(record.status), uint256(IXcmWrapper.RequestStatus.Pending));
+        assertEq(precompile.sendCount(), 1);
+    }
+
+    function testQueueRequestRevertsWhenPrecompileSendFails() public {
+        IXcmWrapper.RequestContext memory context = _context(25 ether, 0, 1);
+        bytes32 requestId = wrapper.previewRequestId(context);
+        bytes memory message = _depositMessage(requestId);
+        precompile.setFailSend(true);
+
+        vm.prank(operator);
+        (bool ok, bytes memory data) = address(wrapper)
+            .call(
+                abi.encodeCall(
+                    wrapper.queueRequest, (context, hex"0102", message, IXcmWrapper.Weight({refTime: 1, proofSize: 2}))
+                )
+            );
+        _assertCustomError(ok, data, XcmWrapper.XcmDispatchFailed.selector);
+
+        IXcmWrapper.RequestRecord memory record = wrapper.getRequest(requestId);
+        assertEq(record.context.account, address(0));
+        require(wrapper.requestDestinationHash(requestId) == bytes32(0), "DEST_HASH_SHOULD_ROLL_BACK");
+        require(wrapper.requestMessageHash(requestId) == bytes32(0), "MESSAGE_HASH_SHOULD_ROLL_BACK");
     }
 
     function testQueueRequestRejectsPayloadMismatchForSameContext() public {

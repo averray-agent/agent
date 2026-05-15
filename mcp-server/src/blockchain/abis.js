@@ -125,6 +125,7 @@ export const XCM_WRAPPER_ABI = [
   "function finalizeRequest(bytes32 requestId, uint8 status, uint256 settledAssets, uint256 settledShares, bytes32 remoteRef, bytes32 failureCode)",
   "event RequestQueued(bytes32 indexed requestId, bytes32 indexed strategyId, uint8 indexed kind, address account, address asset, address recipient, uint256 assets, uint256 shares, uint64 nonce)",
   "event RequestPayloadStored(bytes32 indexed requestId, bytes32 destinationHash, bytes32 messageHash, uint64 refTime, uint64 proofSize)",
+  "event RequestDispatched(bytes32 indexed requestId, address indexed xcmPrecompile, bytes32 destinationHash, bytes32 messageHash)",
   "event RequestStatusUpdated(bytes32 indexed requestId, uint8 indexed status, uint256 settledAssets, uint256 settledShares, bytes32 remoteRef, bytes32 failureCode)"
 ];
 

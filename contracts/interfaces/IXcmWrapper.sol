@@ -79,6 +79,14 @@ interface IXcmWrapper {
         uint64 nonce
     );
 
+    event RequestPayloadStored(
+        bytes32 indexed requestId, bytes32 destinationHash, bytes32 messageHash, uint64 refTime, uint64 proofSize
+    );
+
+    event RequestDispatched(
+        bytes32 indexed requestId, address indexed xcmPrecompile, bytes32 destinationHash, bytes32 messageHash
+    );
+
     event RequestStatusUpdated(
         bytes32 indexed requestId,
         RequestStatus indexed status,

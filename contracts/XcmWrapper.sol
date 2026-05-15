@@ -5,6 +5,11 @@ import {TreasuryPolicy} from "./TreasuryPolicy.sol";
 import {IXcmWrapper} from "./interfaces/IXcmWrapper.sol";
 import {ReentrancyGuard} from "./lib/ReentrancyGuard.sol";
 
+interface IXcmPrecompile {
+    function send(bytes calldata destination, bytes calldata message) external;
+    function weighMessage(bytes calldata message) external view returns (IXcmWrapper.Weight memory);
+}
+
 /**
  * @title XcmWrapper
  * @notice Durable async request ledger for Polkadot Hub XCM-backed flows.
@@ -17,9 +22,8 @@ import {ReentrancyGuard} from "./lib/ReentrancyGuard.sol";
  *   - payload-hash tracking so retries cannot silently mutate the queued
  *     destination or message under the same request id
  *
- * Actual XCM dispatch can be layered in later without changing the core
- * request lifecycle contract between adapters, backend services, and
- * indexers.
+ * queueRequest relays the validated payload to the Hub XCM precompile and
+ * records a durable lifecycle entry only when that dispatch path succeeds.
  */
 contract XcmWrapper is IXcmWrapper, ReentrancyGuard {
     address public constant DEFAULT_XCM_PRECOMPILE = 0x00000000000000000000000000000000000a0000;
@@ -37,10 +41,6 @@ contract XcmWrapper is IXcmWrapper, ReentrancyGuard {
     mapping(bytes32 => bytes32) public requestDestinationHash;
     mapping(bytes32 => bytes32) public requestMessageHash;
 
-    event RequestPayloadStored(
-        bytes32 indexed requestId, bytes32 destinationHash, bytes32 messageHash, uint64 refTime, uint64 proofSize
-    );
-
     error Unauthorized();
     error ProtocolPaused();
     error UnknownRequest();
@@ -50,6 +50,7 @@ contract XcmWrapper is IXcmWrapper, ReentrancyGuard {
     error InvalidSetTopic();
     error InvalidWeight();
     error PayloadMismatch();
+    error XcmDispatchFailed(bytes reason);
 
     constructor(TreasuryPolicy policy_, address xcmPrecompile_) {
         policy = policy_;
@@ -82,11 +83,7 @@ contract XcmWrapper is IXcmWrapper, ReentrancyGuard {
     }
 
     function weighMessage(bytes calldata message) external view override returns (Weight memory weight) {
-        if (xcmPrecompile.code.length == 0) {
-            return Weight({refTime: 0, proofSize: 0});
-        }
-
-        (bool ok, bytes memory data) = xcmPrecompile.staticcall(abi.encodeWithSignature("weighMessage(bytes)", message));
+        (bool ok, bytes memory data) = xcmPrecompile.staticcall(abi.encodeCall(IXcmPrecompile.weighMessage, (message)));
         if (!ok || data.length == 0) {
             return Weight({refTime: 0, proofSize: 0});
         }
@@ -139,6 +136,7 @@ contract XcmWrapper is IXcmWrapper, ReentrancyGuard {
         requestDestinationHash[requestId] = destinationHash;
         requestMessageHash[requestId] = messageHash;
 
+        _dispatchXcm(destination, message);
         _emitQueuedEvents(requestId, context, destinationHash, messageHash, maxWeight);
     }
 
@@ -201,6 +199,12 @@ contract XcmWrapper is IXcmWrapper, ReentrancyGuard {
             context.nonce
         );
         emit RequestPayloadStored(requestId, destinationHash, messageHash, maxWeight.refTime, maxWeight.proofSize);
+        emit RequestDispatched(requestId, xcmPrecompile, destinationHash, messageHash);
+    }
+
+    function _dispatchXcm(bytes calldata destination, bytes calldata message) internal {
+        (bool ok, bytes memory data) = xcmPrecompile.call(abi.encodeCall(IXcmPrecompile.send, (destination, message)));
+        if (!ok) revert XcmDispatchFailed(data);
     }
 
     function _validateRequestContext(RequestContext calldata context) internal pure {
