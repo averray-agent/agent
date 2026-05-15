@@ -38,6 +38,7 @@ const REQUEST_KIND_LABELS = ["deposit", "withdraw", "claim"];
 const REQUEST_STATUS_LABELS = ["unknown", "pending", "succeeded", "failed", "cancelled"];
 const abiCoder = AbiCoder.defaultAbiCoder();
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+const MAX_SAFE_INTEGER_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
 
 function summarizeSupportedAssets(assets = []) {
   return assets.map(summarizeSupportedAsset);
@@ -424,19 +425,19 @@ export class BlockchainGateway {
           agentAccountIsServiceOperator
         },
         readErrors,
-        risk: {
-          dailyOutflowCap: Number(dailyOutflowCap),
-          perAccountBorrowCap: Number(perAccountBorrowCap),
-          minimumCollateralRatioBps: Number(minimumCollateralRatioBps),
-          defaultClaimStakeBps: Number(defaultClaimStakeBps),
-          claimFeeBps: Number(claimFeeBps),
-          claimFeeVerifierBps: Number(claimFeeVerifierBps),
-          onboardingWaiverClaimCount: Number(onboardingWaiverClaimCount),
-          rejectionSkillPenalty: Number(rejectionSkillPenalty),
-          rejectionReliabilityPenalty: Number(rejectionReliabilityPenalty),
-          disputeLossSkillPenalty: Number(disputeLossSkillPenalty),
-          disputeLossReliabilityPenalty: Number(disputeLossReliabilityPenalty)
-        }
+        risk: this.policyRiskSnapshot({
+          dailyOutflowCap,
+          perAccountBorrowCap,
+          minimumCollateralRatioBps,
+          defaultClaimStakeBps,
+          claimFeeBps,
+          claimFeeVerifierBps,
+          onboardingWaiverClaimCount,
+          rejectionSkillPenalty,
+          rejectionReliabilityPenalty,
+          disputeLossSkillPenalty,
+          disputeLossReliabilityPenalty
+        })
       };
     });
   }
@@ -1262,6 +1263,20 @@ export class BlockchainGateway {
       return "0";
     }
     return BigInt(amount).toString();
+  }
+
+  policyRiskSnapshot(values) {
+    return Object.fromEntries(
+      Object.entries(values).flatMap(([key, value]) => {
+        const raw = BigInt(value ?? 0);
+        const exactNumber = raw >= 0n && raw <= MAX_SAFE_INTEGER_BIGINT;
+        return [
+          [key, exactNumber ? Number(raw) : null],
+          [`${key}Raw`, raw.toString()],
+          [`${key}Exact`, exactNumber]
+        ];
+      })
+    );
   }
 
   normalizeDecimalAmount(amount, decimals, label) {

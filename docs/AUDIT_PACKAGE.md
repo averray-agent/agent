@@ -194,6 +194,11 @@ only. `PROFILE=mainnet` refuses to proceed unless the outflow cap, borrow cap,
 collateral ratio, claim-stake basis points, and slash penalties are all set
 explicitly at deploy time.
 
+The backend operator status surface preserves these policy parameters as exact
+raw chain strings. Numeric mirrors are only populated when the value fits
+JavaScript safe-integer precision, so sentinel values such as `uint256.max` do
+not appear as precise decimal numbers in `/admin/status`.
+
 The recommended **mainnet launch profile** lives in
 [MAINNET_PARAMETERS.md](./MAINNET_PARAMETERS.md), with the corresponding
 operator env template in

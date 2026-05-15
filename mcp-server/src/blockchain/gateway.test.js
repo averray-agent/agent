@@ -314,6 +314,89 @@ test("getTreasuryPolicyStatus surfaces settlement readiness roles", async () => 
   }]);
 });
 
+test("getTreasuryPolicyStatus preserves raw policy risk values when numbers are unsafe", async () => {
+  const gateway = new BlockchainGateway({
+    enabled: true,
+    rpcUrl: "http://127.0.0.1:8545",
+    signerPrivateKey: `0x${"11".repeat(32)}`,
+    treasuryPolicyAddress: "0x1111111111111111111111111111111111111111",
+    agentAccountAddress: "0x3333333333333333333333333333333333333333",
+    escrowCoreAddress: "0x2222222222222222222222222222222222222222",
+    reputationSbtAddress: "0x4444444444444444444444444444444444444444",
+    supportedAssets: [DOT_ASSET]
+  });
+  const unsafeDailyCap = (1n << 256n) - 1n;
+  const unsafeBorrowCap = BigInt(Number.MAX_SAFE_INTEGER) + 2n;
+  gateway.policyContract = {
+    async owner() {
+      return "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    },
+    async pauser() {
+      return "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    },
+    async paused() {
+      return false;
+    },
+    async verifiers() {
+      return true;
+    },
+    async serviceOperators() {
+      return true;
+    },
+    async approvedAssets() {
+      return true;
+    },
+    async dailyOutflowCap() {
+      return unsafeDailyCap;
+    },
+    async perAccountBorrowCap() {
+      return unsafeBorrowCap;
+    },
+    async minimumCollateralRatioBps() {
+      return 15000n;
+    },
+    async defaultClaimStakeBps() {
+      return 500n;
+    },
+    async claimFeeBps() {
+      return 200n;
+    },
+    async claimFeeVerifierBps() {
+      return 7000n;
+    },
+    async onboardingWaiverClaimCount() {
+      return 3n;
+    },
+    async rejectionSkillPenalty() {
+      return 10n;
+    },
+    async rejectionReliabilityPenalty() {
+      return 20n;
+    },
+    async disputeLossSkillPenalty() {
+      return 30n;
+    },
+    async disputeLossReliabilityPenalty() {
+      return 50n;
+    }
+  };
+
+  const status = await gateway.getTreasuryPolicyStatus();
+
+  assert.equal(status.risk.dailyOutflowCap, null);
+  assert.equal(status.risk.dailyOutflowCapRaw, unsafeDailyCap.toString());
+  assert.equal(status.risk.dailyOutflowCapExact, false);
+  assert.equal(status.risk.perAccountBorrowCap, null);
+  assert.equal(status.risk.perAccountBorrowCapRaw, unsafeBorrowCap.toString());
+  assert.equal(status.risk.perAccountBorrowCapExact, false);
+  assert.equal(status.risk.minimumCollateralRatioBps, 15000);
+  assert.equal(status.risk.minimumCollateralRatioBpsRaw, "15000");
+  assert.equal(status.risk.minimumCollateralRatioBpsExact, true);
+  assert.equal(status.risk.claimFeeVerifierBps, 7000);
+  assert.equal(status.risk.claimFeeVerifierBpsRaw, "7000");
+  assert.equal(status.risk.claimFeeVerifierBpsExact, true);
+});
+
 test("getTreasuryPolicyStatus records individual read errors without hiding roles", async () => {
   const gateway = new BlockchainGateway({
     enabled: true,

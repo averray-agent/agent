@@ -4,7 +4,7 @@
 > This file is retained as historical design context only.
 
 **Status:** Reconciled with deployed reality and operational docs
-**Spec version:** 1.11 (blockchain audit follow-up: gateway display/base-unit boundary documented and fixed, `submitWork` claim-expiry guard tracked, async XCM remaining gates clarified, relayed borrow/repay gap recorded)
+**Spec version:** 1.11 (blockchain audit follow-up: gateway display/base-unit boundary documented and fixed, policy risk caps preserve raw chain values, `submitWork` claim-expiry guard tracked, async XCM remaining gates clarified, relayed borrow/repay gap recorded)
 **Owner:** Pascal
 
 ---
@@ -628,9 +628,10 @@ For traceability.
 ### v1.11 (blockchain audit follow-up)
 
 1. Gateway display/base-unit boundary fixed and documented: contract calls now convert display inputs through asset decimals, and account/XCM reads expose display values plus explicit raw fields.
-2. `EscrowCore.submitWork` now rejects submissions after `claimExpiry`; expired claims must go through the timeout/reclaim path.
-3. Async XCM status clarified: assembler and SetTopic validation are shipped, while live XCM precompile dispatch and native observer proof remain production gates.
-4. Relayed borrow/repay gap recorded: current contract methods act on `msg.sender`, so backend relay is unsafe unless signer == wallet or explicit `borrowFor`/`repayFor` primitives are added.
+2. Treasury policy risk values now follow the same boundary: `/admin/status` preserves raw `uint256` strings for caps/penalties and only exposes numeric mirrors when they fit JS safe-integer precision.
+3. `EscrowCore.submitWork` now rejects submissions after `claimExpiry`; expired claims must go through the timeout/reclaim path.
+4. Async XCM status clarified: assembler and SetTopic validation are shipped, while live XCM precompile dispatch and native observer proof remain production gates.
+5. Relayed borrow/repay gap recorded: current contract methods act on `msg.sender`, so backend relay is unsafe unless signer == wallet or explicit `borrowFor`/`repayFor` primitives are added.
 
 ### v1.10 (repository sync after Slice 9)
 

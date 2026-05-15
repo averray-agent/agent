@@ -250,6 +250,9 @@ Current status:
 - the broader blockchain config now accepts `SUPPORTED_ASSETS_JSON` with
   the same explicit asset metadata model and still preserves the old
   `SUPPORTED_ASSETS=SYMBOL:0x...` shorthand
+- `/admin/status` policy risk values now preserve exact raw chain strings
+  for `uint256` caps/penalties and only expose numeric mirrors when the
+  value fits JS safe-integer precision
 - next step is to thread the same model through deployment manifests and
   strategy registration outputs so operators do not lose metadata at the
   deploy boundary
