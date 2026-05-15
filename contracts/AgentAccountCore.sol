@@ -157,7 +157,7 @@ contract AgentAccountCore is ReentrancyGuard {
 
     function withdraw(address asset, uint256 amount) external nonReentrant whenNotPaused onlySupportedAsset(asset) {
         AssetPosition storage position = positions[msg.sender][asset];
-        if (position.liquid < amount) revert InsufficientLiquidity();
+        if (position.liquid < amount + position.debtOutstanding) revert InsufficientLiquidity();
         position.liquid -= amount;
         SafeTransfer.safeTransfer(asset, msg.sender, amount);
         emit Withdrawn(msg.sender, asset, amount);
@@ -220,7 +220,13 @@ contract AgentAccountCore is ReentrancyGuard {
         if (position.reserved < amount) revert InsufficientReserved();
         position.reserved -= amount;
         policy.recordOutflow(amount);
-        SafeTransfer.safeTransfer(asset, recipient, amount);
+        AssetPosition storage recipientPosition = positions[recipient][asset];
+        uint256 debt = recipientPosition.debtOutstanding;
+        uint256 debtPaid = amount < debt ? amount : debt;
+        recipientPosition.debtOutstanding = debt - debtPaid;
+        unchecked {
+            recipientPosition.liquid += amount - debtPaid;
+        }
         emit ReservationSettled(account, recipient, asset, amount);
     }
 

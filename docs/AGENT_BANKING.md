@@ -255,9 +255,11 @@ Identity**.
 
 ### Vision
 
-Proven agents can borrow the settlement asset against reputation and collateral to fund
-higher-tier opportunities. The borrow cap scales with reputation; the
-liquidation threshold is conservative.
+Proven agents should eventually borrow the settlement asset against reputation
+and collateral to fund higher-tier opportunities. The launch profile is more
+conservative: a flat, low per-account cap, over-collateralized native credit,
+and no liquidation. Reputation-weighted caps and market liquidation belong to
+the next credit milestone.
 
 ### What exists
 
@@ -268,6 +270,9 @@ liquidation threshold is conservative.
 - `perAccountBorrowCap` and `minimumCollateralRatioBps` live in
   `TreasuryPolicy`; the v1 launch profile uses a conservative 25 USDC cap and
   200% minimum collateral ratio.
+- Debt-backed liquid credit is not externally withdrawable. `withdraw` only
+  allows liquid balance above outstanding debt, and successful job payouts
+  repay debt before crediting surplus liquid to the worker account.
 
 ### What's missing
 
@@ -289,8 +294,10 @@ liquidation threshold is conservative.
 
 3. **Liquidation mechanics.** Today there's no liquidation path — a position
    that drops below the collateral ratio just fails health checks on new
-   actions. Needs an explicit `liquidate(account)` entrypoint that the
-   protocol (or arbitrageurs) can call to close bad positions.
+   actions. The launch cap, 200% collateral ratio, debt-gated withdrawal, and
+   debt-first settlement are the interim safety rails. A native
+   `liquidate(account)` entrypoint is optional if the platform migrates the
+   credit rail to Hydration before larger limits ship.
 
 4. **Hydration money-market migration.** The long-term credit direction is to
    route collateralized borrowing through Hydration rather than make Averray
@@ -318,9 +325,9 @@ reputation gates, auto-escrow, and atomic multi-party flows.
 
 ### What exists
 
-- `AgentAccountCore.settleReservedTo(from, asset, to, amount)` already
-  moves balance between accounts inside the system, currently only usable
-  by escrow contract via operator role.
+- `AgentAccountCore.settleReservedTo(from, asset, to, amount)` moves reserved
+  escrow value into the worker's platform account with debt-first crediting,
+  currently only usable by escrow contract via operator role.
 - `AgentAccountCore.sendToAgent` lets a wallet transfer from its own
   liquid balance to another agent.
 - `AgentAccountCore.sendToAgentFor` lets the authenticated backend relay

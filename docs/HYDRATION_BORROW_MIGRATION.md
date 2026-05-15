@@ -15,6 +15,8 @@ the lender. The launch parameters intentionally cap that risk:
 - `BORROW_CAP = 25 USDC` per account
 - `MIN_COLLATERAL_RATIO_BPS = 20000` (200%)
 - no liquidation entrypoint yet
+- debt-backed liquid credit cannot be withdrawn externally
+- successful job payouts repay debt before crediting surplus liquid
 
 That is acceptable for bridge-to-stake at launch. It is not a good long-term
 credit engine. Hydration Borrow is a better v2 direction because the lending
@@ -143,6 +145,8 @@ Required disclosure:
 - `BORROW_CAP = 25 USDC`.
 - 200% collateral ratio.
 - No liquidation.
+- Debt-gated withdrawals.
+- Debt-first job payout settlement.
 - Borrow use case: bridge claim stake.
 
 ### Stage 1: read-only Hydration posture

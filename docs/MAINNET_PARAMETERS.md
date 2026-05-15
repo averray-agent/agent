@@ -71,6 +71,11 @@ It is not large enough to treat the protocol like open-ended leverage.
 That is the right trade-off until liquidations and reputation-weighted
 credit policy exist.
 
+The contract path also treats native borrow as balance-sheet credit, not as
+cash sourced from an external lender reserve: debt-backed liquid balance cannot
+be withdrawn externally, and successful job payouts repay outstanding debt
+before any surplus becomes liquid account balance.
+
 ### Minimum collateral ratio — `200%`
 
 The contracts currently enforce health checks, but they do **not** yet
@@ -79,6 +84,10 @@ stricter at origination.
 
 Moving from `150%` on testnet to `200%` on mainnet gives more room for
 operational mistakes and stale assumptions.
+
+This ratio is paired with debt-gated withdrawals and debt-first settlement.
+Do not loosen it until production settlement data, liquidation policy, and
+reputation-weighted caps are all available.
 
 ### Claim stake — `10%`
 
