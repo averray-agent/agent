@@ -56,7 +56,7 @@ on:
           - "0"
           - "1"
       bootstrap_self_report_send_now:
-        description: Optional branded-email proof: send one bootstrap self-report through the admin API before hosted smoke checks.
+        description: "Optional branded-email proof: send one bootstrap self-report through the admin API before hosted smoke checks."
         required: false
         default: "0"
         type: choice
@@ -72,7 +72,7 @@ on:
           - "0"
           - "1"
       smoke_check_bootstrap_self_report_sent:
-        description: Optional branded-email proof: require the bootstrap self-report last run to be sent.
+        description: "Optional branded-email proof: require the bootstrap self-report last run to be sent."
         required: false
         default: "0"
         type: choice
