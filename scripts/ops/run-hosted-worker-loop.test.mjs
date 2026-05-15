@@ -236,6 +236,59 @@ test("runHostedWorkerLoop accepts an explicit positive reward amount", async () 
   assert.equal(calls[0][1].rewardAmount, 0.07);
 });
 
+test("runHostedWorkerLoop accepts display-unit account liquidity when raw balance is unavailable", async () => {
+  const calls = [];
+  const client = {
+    async getAuthSession() {
+      return authSession();
+    },
+    async getAdminStatus() {
+      return settlementReadyStatus();
+    },
+    async getAccountSummary() {
+      return accountSummary({ liquidUsdc: 0.1, includeRaw: false });
+    },
+    async createJob(payload) {
+      calls.push(["createJob", payload]);
+      return { id: payload.id };
+    },
+    async preflightJob(id) {
+      return preflightReady({ jobId: id });
+    },
+    async validateJobSubmission(id, submission) {
+      return validationForSubmission({ jobId: id, submission });
+    },
+    async claimJob(id) {
+      return { status: "claimed", sessionId: `${id}:wallet` };
+    },
+    async submitWork(id) {
+      return { status: "submitted", sessionId: id };
+    },
+    async runVerifier() {
+      return { outcome: "approved" };
+    },
+    async getSession(id) {
+      return { status: "resolved", sessionId: id };
+    },
+    async getAgentBadge(id) {
+      return { averray: { sessionId: id, jobId: "product-proof-worker-loop-1700000000000" } };
+    },
+    async getAgentProfile() {
+      return { badges: [{ sessionId: "product-proof-worker-loop-1700000000000:wallet", jobId: "product-proof-worker-loop-1700000000000" }] };
+    }
+  };
+
+  const result = await runHostedWorkerLoop({
+    client,
+    now: () => 1700000000000,
+    log: () => {},
+    env: { ADMIN_JWT: "token" }
+  });
+
+  assert.equal(calls[0][1].rewardAmount, 0.1);
+  assert.equal(result.liquidityReadiness.availableRaw, "100000");
+});
+
 test("runHostedWorkerLoop fails closed before mutation when AgentAccountCore USDC liquidity is missing", async () => {
   const calls = [];
   const wallet = "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519";
@@ -644,17 +697,25 @@ test("runHostedWorkerLoop rejects rewards below the USDC minBalance before mutat
 
 function accountSummary({
   wallet = "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519",
-  liquidUsdcRaw
+  liquidUsdcRaw,
+  liquidUsdc = liquidUsdcRaw,
+  includeRaw = true
 }) {
-  return {
+  const summary = {
     wallet,
-    liquid: { USDC: liquidUsdcRaw },
+    liquid: { USDC: liquidUsdc },
     reserved: { USDC: 0 },
     strategyAllocated: {},
     collateralLocked: {},
     jobStakeLocked: {},
     debtOutstanding: {}
   };
+  if (includeRaw) {
+    summary.raw = {
+      liquid: { USDC: String(liquidUsdcRaw) }
+    };
+  }
+  return summary;
 }
 
 function preflightReady({

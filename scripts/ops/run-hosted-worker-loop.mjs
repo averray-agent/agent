@@ -291,7 +291,12 @@ async function assertProductProofLiquidity({ platform, wallet, rewardAsset, rewa
   const asset = settlementReadiness.asset;
   const decimals = Number(asset.decimals);
   const requiredRaw = toBaseUnits(rewardAmount, decimals);
-  const availableRaw = toBigIntAmount(account?.liquid?.[rewardAsset], `${rewardAsset} liquid balance`);
+  const availableRaw = toRawAssetAmount({
+    rawValue: account?.raw?.liquid?.[rewardAsset],
+    displayValue: account?.liquid?.[rewardAsset],
+    decimals,
+    label: `${rewardAsset} liquid balance`
+  });
   if (availableRaw < requiredRaw) {
     const agentAccountAddress = settlementReadiness.contracts?.agentAccountAddress ?? "AgentAccountCore";
     throw new Error(
@@ -309,6 +314,16 @@ async function assertProductProofLiquidity({ platform, wallet, rewardAsset, rewa
     required: formatBaseUnits(requiredRaw, decimals),
     available: formatBaseUnits(availableRaw, decimals)
   };
+}
+
+function toRawAssetAmount({ rawValue, displayValue, decimals, label }) {
+  if (rawValue !== undefined && rawValue !== null && rawValue !== "") {
+    return toBigIntAmount(rawValue, `${label} raw balance`);
+  }
+  if (displayValue === undefined || displayValue === null || displayValue === "") {
+    throw new Error(`${label} must be present as either account.raw.liquid or account.liquid.`);
+  }
+  return toBaseUnits(displayValue, decimals);
 }
 
 function assertRewardClearsAssetMinBalance({ rewardAsset, rewardAmount, asset }) {
