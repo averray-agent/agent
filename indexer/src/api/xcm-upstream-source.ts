@@ -31,6 +31,7 @@ type FeedItem = {
 };
 
 type FetchLike = typeof fetch;
+const UINT256_MAX = (1n << 256n) - 1n;
 
 type NativePapiSourceConfig = {
   hubWs: string;
@@ -61,11 +62,32 @@ export interface XcmUpstreamSourceAdapter {
 }
 
 function normalizeAmount(value: unknown) {
-  const parsed = Number(value ?? 0);
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    throw new Error("XCM upstream amounts must be finite non-negative numbers.");
+  if (value === undefined || value === null || value === "") {
+    return "0";
   }
-  return String(Math.trunc(parsed));
+
+  let parsed: bigint;
+  if (typeof value === "bigint") {
+    parsed = value;
+  } else if (typeof value === "number") {
+    if (!Number.isSafeInteger(value) || value < 0) {
+      throw new Error("XCM upstream amounts must be exact non-negative uint256 integers.");
+    }
+    parsed = BigInt(value);
+  } else if (typeof value === "string") {
+    const normalized = value.trim();
+    if (!/^\d+$/u.test(normalized)) {
+      throw new Error("XCM upstream amounts must be exact non-negative uint256 integers.");
+    }
+    parsed = BigInt(normalized);
+  } else {
+    throw new Error("XCM upstream amounts must be exact non-negative uint256 integers.");
+  }
+
+  if (parsed < 0n || parsed > UINT256_MAX) {
+    throw new Error("XCM upstream amounts must fit uint256.");
+  }
+  return parsed.toString();
 }
 
 function normalizeOptionalHex32(value: unknown) {

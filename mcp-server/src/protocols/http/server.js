@@ -3949,8 +3949,8 @@ const server = createServer(async (request, response) => {
       }
       const observed = await service.observeXcmOutcome(requestId, {
         status: payload?.status,
-        settledAssets: Number(payload?.settledAssets ?? 0),
-        settledShares: Number(payload?.settledShares ?? 0),
+        settledAssets: payload?.settledAssets ?? 0,
+        settledShares: payload?.settledShares ?? 0,
         remoteRef: payload?.remoteRef,
         failureCode: payload?.failureCode,
         source: payload?.source ?? "admin_observer",
@@ -3998,8 +3998,8 @@ const server = createServer(async (request, response) => {
       }
       const finalized = await service.finalizeXcmRequest(requestId, {
         status: payload?.status,
-        settledAssets: Number(payload?.settledAssets ?? 0),
-        settledShares: Number(payload?.settledShares ?? 0),
+        settledAssets: payload?.settledAssets ?? 0,
+        settledShares: payload?.settledShares ?? 0,
         remoteRef: payload?.remoteRef,
         failureCode: payload?.failureCode
       });
