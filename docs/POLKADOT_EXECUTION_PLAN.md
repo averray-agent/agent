@@ -396,6 +396,10 @@ Current status:
   - it auto-finalizes pending requests through
     `PlatformService.finalizeXcmRequest`
   - admin status can now surface watcher runtime + pending queue status
+  - watcher status reads now fail soft: if the durable state store is
+    temporarily unavailable, `/admin/status` keeps returning a degraded
+    watcher block plus an anomaly instead of failing the whole operator
+    status response
 - the hosted stack now also ships the first external observation
   connector:
   - `XcmObservationRelayService` polls an operator-configured observer
@@ -405,6 +409,9 @@ Current status:
     observation unless the payload actually changed
   - admin status now surfaces relay runtime, cursor, last sync time, and
     last relay error
+  - relay status reads now fail soft as well, preserving configured feed
+    URL / runtime flags and surfacing an anomaly when cursor state cannot
+    be read
 - the remaining gap is the network-specific relayer feed itself:
   the repo now includes the connector the API needs, but operators still
   need a real observer feed that watches Bifrost / XCM results and serves

@@ -674,6 +674,7 @@ test("getAdminStatus reports treasury policy failures without failing the status
 
   assert.equal(status.maintenance.policy.enabled, true);
   assert.equal(status.maintenance.policy.policyAddress, "0x1111111111111111111111111111111111111111");
+  assert.equal(status.maintenance.policy.roles.agentAccountIsServiceOperator, false);
   assert.equal(status.maintenance.policy.error.code, "blockchain_revert");
   assert.equal(status.maintenance.policy.error.details.rawReason, "require(false)");
   assert.ok(status.anomalies.some((entry) => entry.code === "policy_status_unavailable"));
@@ -1011,6 +1012,44 @@ test("getAdminStatus surfaces XCM observation relay status", async () => {
   const status = await service.getAdminStatus();
   assert.equal(status.xcmObservationRelay.enabled, true);
   assert.equal(status.xcmObservationRelay.cursor, "cursor-1");
+});
+
+test("getAdminStatus reports XCM status read failures without failing the response", async () => {
+  const service = makePlatformService();
+  service.xcmSettlementWatcher = {
+    enabled: true,
+    running: true,
+    async getStatus() {
+      const error = new Error("redis unavailable");
+      error.code = "state_store_unavailable";
+      throw error;
+    }
+  };
+  service.xcmObservationRelay = {
+    enabled: true,
+    running: true,
+    syncing: true,
+    feedUrl: "https://observer.example/outcomes",
+    batchSize: 25,
+    pollIntervalMs: 30_000,
+    async getStatus() {
+      throw new Error("observer cursor read failed");
+    }
+  };
+
+  const status = await service.getAdminStatus();
+
+  assert.equal(status.xcmSettlementWatcher.enabled, true);
+  assert.equal(status.xcmSettlementWatcher.running, true);
+  assert.equal(status.xcmSettlementWatcher.pendingCount, 0);
+  assert.equal(status.xcmSettlementWatcher.error.code, "state_store_unavailable");
+  assert.equal(status.xcmObservationRelay.enabled, true);
+  assert.equal(status.xcmObservationRelay.running, true);
+  assert.equal(status.xcmObservationRelay.syncing, true);
+  assert.equal(status.xcmObservationRelay.feedUrl, "https://observer.example/outcomes");
+  assert.equal(status.xcmObservationRelay.error.code, "xcm_observation_relay_status_error");
+  assert.ok(status.anomalies.some((entry) => entry.code === "xcm_settlement_watcher_status_unavailable"));
+  assert.ok(status.anomalies.some((entry) => entry.code === "xcm_observation_relay_status_unavailable"));
 });
 
 test("getGithubOperatorStatus exposes the read-only GitHub helper", async () => {

@@ -57,10 +57,32 @@ const DEFAULT_TREASURY_POLICY_STATUS = {
   roles: {
     signerAddress: undefined,
     signerIsVerifier: false,
-    escrowIsServiceOperator: false
+    escrowIsServiceOperator: false,
+    agentAccountIsServiceOperator: false
   },
   readErrors: [],
   risk: {}
+};
+
+const DEFAULT_XCM_SETTLEMENT_WATCHER_STATUS = {
+  enabled: false,
+  running: false,
+  pendingCount: 0,
+  pending: []
+};
+
+const DEFAULT_XCM_OBSERVATION_RELAY_STATUS = {
+  enabled: false,
+  running: false,
+  syncing: false,
+  feedUrl: undefined,
+  batchSize: 0,
+  pollIntervalMs: 0,
+  cursor: undefined,
+  lastObservedCount: 0,
+  lastSyncedAt: undefined,
+  lastError: undefined,
+  updatedAt: undefined
 };
 
 export class PlatformService {
@@ -350,6 +372,10 @@ export class PlatformService {
       this.jobExecutionService.listRecentSessions(14),
       Promise.resolve().then(() => collectHostDiagnostics())
     ]);
+    const [xcmSettlementWatcher, xcmObservationRelay] = await Promise.all([
+      getXcmSettlementWatcherStatusSafely(this.xcmSettlementWatcher),
+      getXcmObservationRelayStatusSafely(this.xcmObservationRelay)
+    ]);
     const recentEvents = this.eventBus?.replay?.({}, undefined)?.events ?? [];
     const activeStatuses = new Set(["claimed", "submitted", "disputed", "rejected"]);
     const activeSessions = recentSessions.filter((session) => activeStatuses.has(session.status));
@@ -393,6 +419,22 @@ export class PlatformService {
         code: "policy_status_unavailable",
         message: "Treasury policy status is unavailable.",
         details: policy.error
+      });
+    }
+    if (xcmSettlementWatcher?.error) {
+      anomalies.push({
+        severity: "medium",
+        code: "xcm_settlement_watcher_status_unavailable",
+        message: "XCM settlement watcher status is unavailable.",
+        details: xcmSettlementWatcher.error
+      });
+    }
+    if (xcmObservationRelay?.error) {
+      anomalies.push({
+        severity: "medium",
+        code: "xcm_observation_relay_status_unavailable",
+        message: "XCM observation relay status is unavailable.",
+        details: xcmObservationRelay.error
       });
     }
     for (const template of scheduler.templates ?? []) {
@@ -468,25 +510,8 @@ export class PlatformService {
       openApiIngestion: openApiIngestion,
       upstreamStatus,
       bootstrapSelfReport,
-      xcmSettlementWatcher: await this.xcmSettlementWatcher?.getStatus?.() ?? {
-        enabled: false,
-        running: false,
-        pendingCount: 0,
-        pending: []
-      },
-      xcmObservationRelay: await this.xcmObservationRelay?.getStatus?.() ?? {
-        enabled: false,
-        running: false,
-        syncing: false,
-        feedUrl: undefined,
-        batchSize: 0,
-        pollIntervalMs: 0,
-        cursor: undefined,
-        lastObservedCount: 0,
-        lastSyncedAt: undefined,
-        lastError: undefined,
-        updatedAt: undefined
-      }
+      xcmSettlementWatcher,
+      xcmObservationRelay
     };
   }
 
@@ -1603,6 +1628,52 @@ async function getTreasuryPolicyStatusSafely(blockchainGateway) {
       }
     };
   }
+}
+
+async function getXcmSettlementWatcherStatusSafely(xcmSettlementWatcher) {
+  if (!xcmSettlementWatcher?.getStatus) {
+    return { ...DEFAULT_XCM_SETTLEMENT_WATCHER_STATUS };
+  }
+
+  try {
+    return await xcmSettlementWatcher.getStatus();
+  } catch (error) {
+    return {
+      ...DEFAULT_XCM_SETTLEMENT_WATCHER_STATUS,
+      enabled: Boolean(xcmSettlementWatcher.enabled),
+      running: Boolean(xcmSettlementWatcher.running),
+      error: normalizeStatusReadError(error, "xcm_settlement_watcher_status_error")
+    };
+  }
+}
+
+async function getXcmObservationRelayStatusSafely(xcmObservationRelay) {
+  if (!xcmObservationRelay?.getStatus) {
+    return { ...DEFAULT_XCM_OBSERVATION_RELAY_STATUS };
+  }
+
+  try {
+    return await xcmObservationRelay.getStatus();
+  } catch (error) {
+    return {
+      ...DEFAULT_XCM_OBSERVATION_RELAY_STATUS,
+      enabled: Boolean(xcmObservationRelay.enabled),
+      running: Boolean(xcmObservationRelay.running),
+      syncing: Boolean(xcmObservationRelay.syncing),
+      feedUrl: xcmObservationRelay.feedUrl,
+      batchSize: xcmObservationRelay.batchSize ?? 0,
+      pollIntervalMs: xcmObservationRelay.pollIntervalMs ?? 0,
+      error: normalizeStatusReadError(error, "xcm_observation_relay_status_error")
+    };
+  }
+}
+
+function normalizeStatusReadError(error, code) {
+  return {
+    code: error?.code ?? code,
+    message: error?.message ?? "Status read failed.",
+    details: error?.details
+  };
 }
 
 function buildProviderOperations(statuses) {
