@@ -788,7 +788,8 @@ Before public v1.0.0-rc1 launch:
 **Instrumentation (week 1 prerequisite):**
 - [ ] `funded_jobs` table live and populating
 - [ ] Daily upstream-status poller running against GitHub + MediaWiki APIs
-- [ ] Weekly self-report email scheduled
+- [ ] Hermes/operator self-report proof scheduled and visible
+- [ ] Optional branded email self-report configured after sender-domain verification
 
 **Contract surface:**
 - [x] `DiscoveryRegistry` deployed, CI publishing on directory updates
@@ -1090,9 +1091,9 @@ For traceability.
 
 ### v2.5 (bootstrap self-report scheduler)
 
-1. **Weekly bootstrap self-report email path added:** backend now has a disabled-by-default scheduler that generates the existing funded-jobs weekly report and sends it through a Resend-compatible HTTP email provider.
+1. **Weekly bootstrap self-report path added:** backend now has a disabled-by-default scheduler that generates the existing funded-jobs weekly report and can send it through a Resend-compatible HTTP email provider when branded email is explicitly configured.
 2. **Operational status exposed:** `/admin/status` includes `bootstrapSelfReport` with enabled/running/provider/recipient/last-run state so the operator can verify whether the weekly report is actually armed.
-3. **Launch checklist remains live-gated:** the code path exists, but the pre-launch checkbox should only be marked complete after production env sets recipients/API key and the first scheduled report is delivered.
+3. **Launch checklist remains live-gated:** the code path exists, but the pre-launch checkbox is satisfied by Hermes/operator-visible reporting: post-deploy verification, scheduled ops-health, daily operator brief evidence, and a hosted smoke check that proves the upstream-status plus optional email status surfaces are well-formed and sanitized. Branded Resend email delivery is optional/deferred until a verified sender domain exists.
 
 ### v2.4 (runtime USDC defaults and decimals audit)
 

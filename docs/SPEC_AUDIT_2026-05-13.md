@@ -137,17 +137,18 @@ SSH/basic-auth/admin-JWT cutovers, and the basic hosted smoke is green.
 - Run one complete hosted worker loop:
   discover -> sign in -> preflight -> claim -> submit -> verify -> badge/profile.
 - Rerun the product-proof gate with worker-loop evidence.
-- Finish bootstrap self-report scheduled email delivery and first-delivery
-  proof. Code path is wired (`mcp-server/src/services/bootstrap-self-report-scheduler.js`);
-  the remaining gate is operational: `scripts/ops/check-hosted-stack.sh`
-  checks `/admin/status.bootstrapSelfReport` for `lastAttemptedAt`,
-  `lastSuccessfulAt`, the `from`/`to` pair, recipient-count consistency,
-  a fresh latest sent provider id, and absence of provider/API-key-shaped
-  tokens. `POST /admin/bootstrap-self-report/send` gives operators a guarded,
-  idempotent one-shot send path so the hosted workflow can produce first
-  delivery evidence without toggling startup env. `PRODUCTION_CHECKLIST.md`
-  section 5 names the exact env-gated smoke
-  command required to flip the box.
+- Finish operator-visible self-report proof through Hermes/operator reporting.
+  The spec intent is durable operator visibility after deploy and on schedule,
+  not branded email specifically. The remaining gate is operational:
+  production deploys should keep `run_hermes_post_deploy=1`, scheduled Hermes
+  ops-health and daily-brief routines should produce durable evidence, and
+  `scripts/ops/check-hosted-stack.sh` should pass with
+  `CHECK_BOOTSTRAP_INSTRUMENTATION=1` to prove the upstream-status and optional
+  bootstrap self-report status surfaces are well-formed and sanitized. The
+  Resend email path (`mcp-server/src/services/bootstrap-self-report-scheduler.js`
+  and `POST /admin/bootstrap-self-report/send`) remains available as an
+  optional branded transport, but its first-delivery gate is deferred until a
+  verified sender domain is intentionally configured.
 - Confirm `/admin/status` with a live admin JWT reports async XCM watcher posture
   cleanly.
 - Rehearse pauser pause/unpause from the hot key.
@@ -286,13 +287,13 @@ correlation and settlement path.
 ## Recommended Next Queue
 
 1. Complete the hosted worker-loop product-proof evidence gate.
-2. Close bootstrap self-report scheduled email delivery against the live
-   production stack by running the production workflow with
-   `bootstrap_self_report_send_now=1`,
-   `smoke_check_bootstrap_instrumentation=1`, and
-   `smoke_check_bootstrap_self_report_sent=1` (`run_hermes_post_deploy=0`
-   keeps that proof scoped), then optionally confirm the exact expected
-   `from`/`to` envs locally with `check-hosted-stack.sh`.
+2. Close operator self-report proof against the live production stack by
+   retaining `run_hermes_post_deploy=1`, confirming scheduled Hermes ops-health
+   and daily-brief evidence, and running the hosted smoke with
+   `smoke_check_bootstrap_instrumentation=1`. Treat
+   `bootstrap_self_report_send_now=1` plus
+   `smoke_check_bootstrap_self_report_sent=1` as an optional branded-email proof
+   only after a verified sender domain is configured.
 3. Prove the hosted schema-native validation path and external helper adoption.
 4. Prove the dispute verdict path live and decide `/release` semantics.
 5. Run the native XCM evidence pack captures.

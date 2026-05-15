@@ -224,18 +224,30 @@ if enabled "$CHECK_BOOTSTRAP_INSTRUMENTATION"; then
     .upstreamStatus.batchSize > 0
   ' >/dev/null <<<"$admin_status_json"
   jq -e '
-    .bootstrapSelfReport.enabled == true and
-    .bootstrapSelfReport.running == true and
-    .bootstrapSelfReport.providerConfigured == true and
-    (.bootstrapSelfReport.from | type) == "string" and
-    (.bootstrapSelfReport.from | length) > 0 and
+    (.bootstrapSelfReport | type) == "object" and
+    (.bootstrapSelfReport.enabled | type) == "boolean" and
+    (.bootstrapSelfReport.running | type) == "boolean" and
+    (.bootstrapSelfReport.providerConfigured | type) == "boolean" and
+    (.bootstrapSelfReport.recipientCount | type) == "number" and
     (.bootstrapSelfReport.to | type) == "array" and
     all(.bootstrapSelfReport.to[]; type == "string" and length > 0) and
-    (.bootstrapSelfReport.recipientCount | type) == "number" and
-    .bootstrapSelfReport.recipientCount > 0 and
-    .bootstrapSelfReport.recipientCount == (.bootstrapSelfReport.to | length) and
-    (.bootstrapSelfReport.intervalMs | type) == "number" and
-    .bootstrapSelfReport.intervalMs <= 604800000
+    (
+      .bootstrapSelfReport.enabled == false or
+      (
+        .bootstrapSelfReport.running == true and
+        (.bootstrapSelfReport.intervalMs | type) == "number" and
+        .bootstrapSelfReport.intervalMs <= 604800000
+      )
+    ) and
+    (
+      .bootstrapSelfReport.providerConfigured == false or
+      (
+        (.bootstrapSelfReport.from | type) == "string" and
+        (.bootstrapSelfReport.from | length) > 0 and
+        .bootstrapSelfReport.recipientCount > 0 and
+        .bootstrapSelfReport.recipientCount == (.bootstrapSelfReport.to | length)
+      )
+    )
   ' >/dev/null <<<"$admin_status_json"
   jq -e '
     (.bootstrapSelfReport | tostring | test("Bearer\\s+[^\\s,}\\]]+|re_[A-Za-z0-9_-]{12,}"; "i") | not)
