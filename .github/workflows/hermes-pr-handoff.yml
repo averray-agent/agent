@@ -121,18 +121,28 @@ jobs:
         run: |
           prompt=$(
             cat <<PROMPT
-          Use Averray MCP tools only. Call averray_invoke_agent_task with requester='github-actions', intent='pr_handoff', repo='${HANDOFF_REPO}', pullRequestNumber=${HANDOFF_PR_NUMBER}, testCaseIds=['TBE2E-004'], correlationId='${HANDOFF_CORRELATION_ID}', reason='post-CI PR handoff'.
+          Use Averray MCP tools only.
 
-          Before giving the merge recommendation, perform a PR code and logic review:
-          - Inspect PR metadata, changed files, diff/risk summary, CI status, and requested testbed results.
-          - Look for logic bugs, unsafe defaults, missing guards, missing tests, race/idempotency problems, timeout/retry problems, secret exposure, and deployment risk.
-          - Pay extra attention to deploy workflows, auth, secrets, payments/settlement, indexer, contracts, Caddy, database migrations, and external agent hooks.
-          - Verify that CI coverage matches the touched areas. If it does not, list the missing checks.
-          - If you cannot inspect the diff or changed files, say so clearly and mark the code review verdict as needs_human_review.
+          First call averray_invoke_agent_task with requester='github-actions', intent='pr_code_review', repo='${HANDOFF_REPO}', pullRequestNumber=${HANDOFF_PR_NUMBER}, correlationId='${HANDOFF_CORRELATION_ID}-code-review', reason='post-CI independent PR verifier'.
+
+          Then call averray_invoke_agent_task with requester='github-actions', intent='pr_handoff', repo='${HANDOFF_REPO}', pullRequestNumber=${HANDOFF_PR_NUMBER}, testCaseIds=['TBE2E-004'], correlationId='${HANDOFF_CORRELATION_ID}', reason='post-CI PR handoff'.
+
+          Treat the pr_code_review result as the independent verifier lane. Use its structured codeReview block when present:
+          - finalVerdict / mergeRecommendation
+          - riskCategory and highestRisk
+          - why
+          - checks.failed and checks.active
+          - tests.matchedTouchedAreas and tests.missingTestSignals
+          - rollout.notesRequired and rollout.notesPresent
+          - reasons / recommendations
+
+          If pr_code_review is unavailable because the deployed Averray MCP version is older, say so clearly and fall back to the codeReview block attached to pr_handoff if present. If neither structured codeReview block is available, mark codeReviewVerdict as needs_human_review.
 
           Report these sections briefly:
           - finalVerdict
           - codeReviewVerdict: approve, conditional_approve, needs_human_review, or block
+          - codeReviewWhy
+          - riskCategory
           - blockingFindings
           - nonBlockingFindings
           - missingTests
