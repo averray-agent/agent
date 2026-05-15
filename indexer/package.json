@@ -12,8 +12,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "eslint": "9.39.4",
     "hono": "^4.12.18",
-    "ponder": "^0.16.6",
+    "ponder": "^0.0.1",
     "viem": "^2.21.3"
   },
   "devDependencies": {
