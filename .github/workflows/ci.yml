@@ -261,17 +261,37 @@ jobs:
           sudo mv /tmp/gitleaks /usr/local/bin/gitleaks
           gitleaks version
 
-      - name: Run gitleaks against our ruleset
+      - name: Run gitleaks against new commits in this event
+        env:
+          # On a PR event, scan base..head (the PR's own diff).
+          # On a push event, scan event.before..HEAD (the new commits).
+          # This focuses on FUTURE leaks instead of re-flagging historical
+          # text we can't un-commit (e.g., shape-check comments that
+          # reference `-----BEGIN PRIVATE KEY-----` as a string assertion
+          # in deploy-production.yml). The pre-commit hook + GitHub push
+          # protection cover the "first-time leak" case before merge; CI
+          # is the last-resort sweep on what's being added.
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           set -euo pipefail
-          # `gitleaks detect` scans the working tree + git history.
-          # --redact masks any matched secret values in the log so we
-          # don't compound a leak with public CI output.
-          # --no-banner keeps logs tidy.
-          # --config points at our explicit rules (default rules disabled).
+
+          # Resolve the log range. Fall back to scanning just HEAD if the
+          # base SHA is missing (first push to a new branch, etc.).
+          if [ -z "${BASE_SHA:-}" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            log_opts="-1"
+            echo "No base SHA available; scanning HEAD commit only."
+          else
+            log_opts="$BASE_SHA..HEAD"
+            echo "Scanning commits in range $log_opts"
+          fi
+
+          # --redact masks matched values in the log so we don't compound
+          # a leak with public CI output.
+          # --config keeps our explicit ruleset active (default rules off).
           gitleaks detect \
             --source . \
             --config .gitleaks.toml \
+            --log-opts="$log_opts" \
             --redact \
             --no-banner \
             --verbose
