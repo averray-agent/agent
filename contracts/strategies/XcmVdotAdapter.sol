@@ -36,11 +36,7 @@ contract XcmVdotAdapter is IXcmStrategyAdapter, ReentrancyGuard {
 
     event DepositRequested(bytes32 indexed requestId, address indexed account, uint256 assets, uint64 nonce);
     event WithdrawRequested(
-        bytes32 indexed requestId,
-        address indexed account,
-        address indexed recipient,
-        uint256 shares,
-        uint64 nonce
+        bytes32 indexed requestId, address indexed account, address indexed recipient, uint256 shares, uint64 nonce
     );
     event RequestSettled(
         bytes32 indexed requestId,
@@ -89,14 +85,8 @@ contract XcmVdotAdapter is IXcmStrategyAdapter, ReentrancyGuard {
     ) external override nonReentrant whenNotPaused onlyOperator returns (bytes32 requestId) {
         if (assets == 0) revert ZeroAmount();
 
-        IXcmWrapper.RequestContext memory context = _buildContext(
-            IXcmWrapper.RequestKind.Deposit,
-            account,
-            account,
-            assets,
-            0,
-            nonce
-        );
+        IXcmWrapper.RequestContext memory context =
+            _buildContext(IXcmWrapper.RequestKind.Deposit, account, account, assets, 0, nonce);
 
         requestId = xcmWrapper.previewRequestId(context);
         AdapterRequest storage existing = requests[requestId];
@@ -137,14 +127,8 @@ contract XcmVdotAdapter is IXcmStrategyAdapter, ReentrancyGuard {
         if (recipient == address(0) || account == address(0)) revert InvalidRequest();
         if (totalShares < pendingWithdrawalShares + shares) revert InsufficientLiquidity();
 
-        IXcmWrapper.RequestContext memory context = _buildContext(
-            IXcmWrapper.RequestKind.Withdraw,
-            account,
-            recipient,
-            0,
-            shares,
-            nonce
-        );
+        IXcmWrapper.RequestContext memory context =
+            _buildContext(IXcmWrapper.RequestKind.Withdraw, account, recipient, 0, shares, nonce);
 
         requestId = xcmWrapper.previewRequestId(context);
         AdapterRequest storage existing = requests[requestId];
@@ -187,12 +171,18 @@ contract XcmVdotAdapter is IXcmStrategyAdapter, ReentrancyGuard {
         if (request.requester == address(0)) revert InvalidRequest();
         if (request.settled) revert AlreadySettled();
 
+        if (status == IXcmWrapper.RequestStatus.Succeeded) {
+            if (request.kind == IXcmWrapper.RequestKind.Deposit && (settledAssets == 0 || settledShares == 0)) {
+                revert InvalidStatus();
+            }
+            if (request.kind == IXcmWrapper.RequestKind.Withdraw && settledAssets == 0) revert InvalidStatus();
+        }
+
         xcmWrapper.finalizeRequest(requestId, status, settledAssets, settledShares, remoteRef, failureCode);
 
         if (request.kind == IXcmWrapper.RequestKind.Deposit) {
             pendingDepositAssets -= request.requestedAssets;
             if (status == IXcmWrapper.RequestStatus.Succeeded) {
-                if (settledAssets == 0 || settledShares == 0) revert InvalidStatus();
                 totalAssets += settledAssets;
                 totalShares += settledShares;
             } else {
@@ -201,7 +191,9 @@ contract XcmVdotAdapter is IXcmStrategyAdapter, ReentrancyGuard {
         } else if (request.kind == IXcmWrapper.RequestKind.Withdraw) {
             pendingWithdrawalShares -= request.requestedShares;
             if (status == IXcmWrapper.RequestStatus.Succeeded) {
-                if (request.requestedShares > totalShares || settledAssets > totalAssets) revert InsufficientLiquidity();
+                if (request.requestedShares > totalShares || settledAssets > totalAssets) {
+                    revert InsufficientLiquidity();
+                }
                 totalShares -= request.requestedShares;
                 totalAssets -= settledAssets;
                 SafeTransfer.safeTransfer(asset, request.recipient, settledAssets);

@@ -163,6 +163,46 @@ contract AgentAccountAsyncStrategyTest is Test {
         assertEq(dot.balanceOf(address(adapter)), 25 ether);
     }
 
+    function testSettleStrategyWithdrawRejectsZeroAssetSuccessAndKeepsPending() public {
+        _seedSettledDeposit(40 ether, 3);
+
+        IXcmWrapper.Weight memory maxWeight = IXcmWrapper.Weight({refTime: 10, proofSize: 5});
+        bytes32 previewId = _previewWithdrawRequestId(worker, 15 ether, address(accounts), 4);
+        vm.prank(worker);
+        bytes32 requestId = accounts.requestStrategyWithdraw(
+            worker,
+            AgentAccountCore.StrategyWithdrawRequestParams({
+                strategyId: STRATEGY_ID,
+                shares: 15 ether,
+                recipient: address(accounts),
+                destination: hex"0a",
+                message: _withdrawMessage(previewId),
+                maxWeight: maxWeight,
+                nonce: 4
+            })
+        );
+
+        (bool ok, bytes memory data) = address(accounts)
+            .call(
+                abi.encodeCall(
+                    accounts.settleStrategyRequest,
+                    (requestId, IXcmWrapper.RequestStatus.Succeeded, 0, 0, bytes32("WITHDRAW"), bytes32(0))
+                )
+            );
+        _assertCustomError(ok, data, XcmVdotAdapter.InvalidStatus.selector);
+
+        (uint256 liquid,, uint256 strategyAllocated,,,) = accounts.positions(worker, address(dot));
+        assertEq(liquid, WORKER_DEPOSIT - 40 ether);
+        assertEq(strategyAllocated, 40 ether);
+        assertEq(accounts.pendingStrategyWithdrawalShares(worker, STRATEGY_ID), 15 ether);
+        assertEq(accounts.strategyShares(worker, STRATEGY_ID), 40 ether);
+        assertEq(adapter.pendingWithdrawalShares(), 15 ether);
+        assertEq(adapter.totalAssets(), 40 ether);
+        assertEq(adapter.totalShares(), 40 ether);
+        assertEq(dot.balanceOf(address(accounts)), WORKER_DEPOSIT - 40 ether);
+        assertEq(dot.balanceOf(address(adapter)), 40 ether);
+    }
+
     function testStrategyWithdrawFailureKeepsSharesAndLeavesLiquidityUntouched() public {
         _seedSettledDeposit(40 ether, 5);
 

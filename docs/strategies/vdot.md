@@ -293,6 +293,11 @@ operator / watcher
     failure: shares remain with the agent
 ```
 
+The async settlement path fails closed on empty success claims: deposits
+must settle with non-zero assets and non-zero shares, and withdrawals
+must settle with non-zero assets before the agent's reserved strategy
+shares are burned.
+
 So the repo now has both lanes:
 - synchronous mock treasury flow through `allocateIdleFunds` /
   `deallocateIdleFunds`

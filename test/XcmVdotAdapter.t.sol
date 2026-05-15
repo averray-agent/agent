@@ -230,6 +230,49 @@ contract XcmVdotAdapterTest is Test {
         assertEq(request.settledAssets, 11 ether);
     }
 
+    function testSettleWithdrawRejectsSuccessWithZeroAssets() public {
+        _seedSettledDeposit();
+        bytes32 previewId = _previewWithdrawRequestId(worker, 10 ether, recipient, 2);
+
+        vm.prank(operator);
+        bytes32 withdrawRequestId = adapter.requestWithdraw(
+            worker,
+            10 ether,
+            recipient,
+            hex"0304",
+            _withdrawMessage(previewId),
+            IXcmWrapper.Weight({refTime: 5, proofSize: 6}),
+            2
+        );
+
+        vm.prank(operator);
+        (bool ok, bytes memory data) = address(adapter)
+            .call(
+                abi.encodeCall(
+                    adapter.settleRequest,
+                    (
+                        withdrawRequestId,
+                        IXcmWrapper.RequestStatus.Succeeded,
+                        0,
+                        0,
+                        keccak256("remote-withdraw"),
+                        bytes32(0)
+                    )
+                )
+            );
+        _assertCustomError(ok, data, XcmVdotAdapter.InvalidStatus.selector);
+
+        IXcmStrategyAdapter.AdapterRequest memory request = adapter.getAdapterRequest(withdrawRequestId);
+        IXcmWrapper.RequestRecord memory wrapperRequest = wrapper.getRequest(withdrawRequestId);
+
+        assertEq(adapter.pendingWithdrawalShares(), 10 ether);
+        assertEq(adapter.totalShares(), 23 ether);
+        assertEq(adapter.totalAssets(), 25 ether);
+        assertEq(asset.balanceOf(recipient), 0);
+        assertEq(uint256(request.status), uint256(IXcmWrapper.RequestStatus.Pending));
+        assertEq(uint256(wrapperRequest.status), uint256(IXcmWrapper.RequestStatus.Pending));
+    }
+
     function _seedSettledDeposit() internal returns (bytes32 requestId) {
         requestId = _requestDeposit(worker, 25 ether, 1);
 
