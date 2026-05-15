@@ -55,6 +55,21 @@ named_patterns=(
   'Slack token:xox[baprs]-[0-9A-Za-z-]{10,}'
   'GitHub PAT:ghp_[A-Za-z0-9]{36}'
   'PEM private key block:-----BEGIN [A-Z ]*PRIVATE KEY-----'
+  # 1Password service-account tokens, added Phase 4a. Real ones are
+  # ~850 chars of base64url after the `ops_` prefix. Match at ≥30
+  # chars so we catch even truncated paste-backs.
+  '1Password service-account token:ops_[A-Za-z0-9_-]{30,}'
+  # Resend API keys, added Phase 4a after a 2026-05-13 paste-back
+  # leak. Pattern: `re_` + 8-12 alnum prefix + `_` + 22+ alnum body.
+  'Resend API key:re_[A-Za-z0-9]{6,}_[A-Za-z0-9]{20,}'
+  # JWTs that explicitly assert an Averray role claim. We deliberately
+  # do NOT match on the generic `eyJh` prefix because there are
+  # legitimate JWT test fixtures in the SDK + auth tests. We only
+  # flag ones whose decoded payload would carry `roles`:["admin"] —
+  # the base64-encoded shape of that is `Imluc3RyaWN0Iiwicm9sZXM6` or
+  # similar; we match on the encoded "roles":[" substring, which only
+  # appears in actual issued ADMIN_JWT.
+  'ADMIN_JWT-shaped role claim:eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]*cm9sZXM[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+'
 )
 
 findings=()
