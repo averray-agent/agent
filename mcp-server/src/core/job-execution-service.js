@@ -159,6 +159,7 @@ export class JobExecutionService {
       const chainJobId = this.blockchainGateway?.isEnabled()
         ? this.blockchainGateway.toJobId(jobId)
         : jobId;
+      let chainClaimTiming = {};
       const priorClaimCount = countClaimedSessions(await this.collectSessionHistory(wallet));
       const claimEconomicsConfig = await this.getClaimEconomicsConfig();
       let claimEconomics = computeClaimEconomics({
@@ -181,6 +182,9 @@ export class JobExecutionService {
         }
         await this.blockchainGateway.ensureClaimStakeLiquidity?.(job.rewardAsset, claimEconomics.totalClaimLock);
         await this.blockchainGateway.claimJob(jobId);
+        chainClaimTiming = this.buildChainClaimTiming(
+          await this.blockchainGateway.getJob(jobId).catch(() => undefined)
+        );
       } else if (claimEconomics.totalClaimLock > 0) {
         await this.accountMutationService?.lockJobStake?.(wallet, job.rewardAsset, claimEconomics.totalClaimLock, undefined);
       }
@@ -197,6 +201,7 @@ export class JobExecutionService {
         claimEconomicsWaived: claimEconomics.claimEconomicsWaived,
         claimNumber: claimEconomics.claimNumber,
         totalClaimLock: claimEconomics.totalClaimLock,
+        ...chainClaimTiming,
         idempotencyKey,
         protocolHistory: [protocol]
       };
@@ -410,6 +415,16 @@ export class JobExecutionService {
       claimedAt: session?.claimedAt,
       claimExpiresAt: claimExpiresAt(session, job) ?? session?.expiredAt,
       claimTtlSeconds: job?.claimTtlSeconds
+    };
+  }
+
+  buildChainClaimTiming(liveJob = undefined) {
+    const claimExpirySeconds = Number(liveJob?.claimExpiry ?? 0);
+    if (!Number.isFinite(claimExpirySeconds) || claimExpirySeconds <= 0) {
+      return {};
+    }
+    return {
+      chainClaimExpiresAt: new Date(claimExpirySeconds * 1000).toISOString()
     };
   }
 

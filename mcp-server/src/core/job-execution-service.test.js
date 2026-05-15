@@ -5,6 +5,7 @@ import { ValidationError } from "./errors.js";
 import { JobExecutionService } from "./job-execution-service.js";
 import { MemoryStateStore } from "./state-store.js";
 import { computeClaimEconomics } from "./claim-economics.js";
+import { claimExpiresAt } from "./claim-state.js";
 import { buildAverrayDisclosureFooter } from "./maintainer-surface-policy.js";
 
 const WALLET = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -263,6 +264,31 @@ test("claimJob reopens an expired claim when retry budget remains", async () => 
   assert.notEqual(second.sessionId, first.sessionId);
   assert.equal((await stateStore.getSession(first.sessionId)).status, "expired");
   assert.equal((await stateStore.findSessionByJobId(job.id)).sessionId, second.sessionId);
+});
+
+test("claimJob stores on-chain claim expiry when blockchain is enabled", async () => {
+  const stateStore = new MemoryStateStore();
+  const job = makeJob({ claimTtlSeconds: 60 });
+  let getJobCalls = 0;
+  const blockchainGateway = {
+    isEnabled: () => true,
+    toJobId: (jobId) => `chain:${jobId}`,
+    async getJob() {
+      getJobCalls += 1;
+      return getJobCalls === 1
+        ? { state: 0 }
+        : { state: 1, claimExpiry: Date.parse("2026-05-01T10:01:00.000Z") / 1000 };
+    },
+    async ensureJob() {},
+    async ensureClaimStakeLiquidity() {},
+    async claimJob() {}
+  };
+  const service = new JobExecutionService(stateStore, blockchainGateway, () => job);
+
+  const claimed = await service.claimJob(WALLET, job.id, "http", "idemp-chain-expiry");
+
+  assert.equal(claimed.chainClaimExpiresAt, "2026-05-01T10:01:00.000Z");
+  assert.equal(claimExpiresAt(claimed, job), "2026-05-01T10:01:00.000Z");
 });
 
 test("claimJob reports exhausted retry budget after an expired single-attempt job", async () => {
