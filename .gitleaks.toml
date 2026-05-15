@@ -104,7 +104,7 @@ keywords = ["ghp_", "gho_", "ghu_", "ghs_", "ghr_"]
 # entire directories — every entry should be a deliberate decision.
 
 [allowlist]
-description = "Test fixtures and on-chain-public material"
+description = "Test fixtures, on-chain-public material, and the secret-pattern config itself"
 paths = [
   '''mcp-server/src/auth/auth\.test\.js''',
   '''mcp-server/src/auth/jwt\.test\.js''',
@@ -118,4 +118,12 @@ paths = [
   # blocking legitimate test work.
   '''test/.*\.t\.sol''',
   '''contracts/.*\.t\.sol''',
+  # These files DESCRIBE secret patterns (regex strings) but don't
+  # contain real secrets. The patterns themselves are written so they
+  # don't self-match (e.g., `ops_[A-Za-z0-9_-]{30,}` doesn't satisfy
+  # `ops_[A-Za-z0-9_-]{30,}` because `[` breaks the alphanumeric run).
+  # Allowlisted explicitly so a future widening of any pattern can't
+  # accidentally make the scanner block our own config files.
+  '''\.gitleaks\.toml''',
+  '''\.githooks/pre-commit''',
 ]

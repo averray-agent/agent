@@ -236,19 +236,42 @@ jobs:
           # except the latest commit.
           fetch-depth: 0
 
-      - name: Run gitleaks against our ruleset
-        # Phase 4a: pinned to gitleaks-action v2.3.9 commit SHA so a
-        # compromised future release can't silently retarget our CI.
-        # To refresh:
-        #   tag=$(gh api repos/gitleaks/gitleaks-action/releases/latest --jq .tag_name)
-        #   gh api repos/gitleaks/gitleaks-action/git/refs/tags/$tag --jq .object.sha
-        # and verify the new SHA against the gitleaks release notes
-        # before updating.
-        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+      # We deliberately install the gitleaks BINARY rather than using
+      # gitleaks/gitleaks-action. As of v2.x the official Action requires
+      # a paid GITLEAKS_LICENSE secret for org-owned repos (the wrapper
+      # was monetized; the binary is still MIT). Pinning the release
+      # version makes a compromised future release no worse than what's
+      # already in our supply chain. To refresh:
+      #   tag=$(gh api repos/gitleaks/gitleaks/releases/latest --jq .tag_name)
+      # and update GITLEAKS_VERSION + the checksum below.
+      - name: Install gitleaks
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Force the action to use our explicit config, not its defaults.
-          GITLEAKS_CONFIG: .gitleaks.toml
-          # Don't gate on a paid license; the action also supports
-          # OSS-only mode without a license for public repos.
-          # GITLEAKS_LICENSE is intentionally unset.
+          GITLEAKS_VERSION: "8.30.1"
+        run: |
+          set -euo pipefail
+          url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSL --max-time 60 "$url" -o /tmp/gitleaks.tar.gz
+          # Verify size sanity (~3-7 MB tarball; anything wildly off is a red flag).
+          size=$(wc -c </tmp/gitleaks.tar.gz)
+          if [ "$size" -lt 1000000 ] || [ "$size" -gt 20000000 ]; then
+            echo "::error::gitleaks tarball size unexpected: $size bytes"
+            exit 1
+          fi
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          sudo mv /tmp/gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+
+      - name: Run gitleaks against our ruleset
+        run: |
+          set -euo pipefail
+          # `gitleaks detect` scans the working tree + git history.
+          # --redact masks any matched secret values in the log so we
+          # don't compound a leak with public CI output.
+          # --no-banner keeps logs tidy.
+          # --config points at our explicit rules (default rules disabled).
+          gitleaks detect \
+            --source . \
+            --config .gitleaks.toml \
+            --redact \
+            --no-banner \
+            --verbose
