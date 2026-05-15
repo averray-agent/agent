@@ -208,6 +208,15 @@ jobs:
 
           exit "$status"
 
+      - name: Upload Hermes handoff log
+        if: always() && steps.pr.outputs.skip != 'true' && steps.hermes.outcome != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: hermes-handoff-${{ steps.pr.outputs.correlation_id }}
+          path: hermes-handoff.log
+          if-no-files-found: error
+          retention-days: 90
+
       - name: Comment PR with Hermes handoff summary
         if: always() && steps.pr.outputs.skip != 'true' && steps.hermes.outcome != 'skipped'
         env:

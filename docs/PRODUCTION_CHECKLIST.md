@@ -167,6 +167,9 @@ RUN_SUBSCAN_XCM_VALIDATION=1 ./scripts/ops/check-release-readiness.sh testnet
     and the GitHub Actions summary contains a Hermes post-deploy verification
     report with final verdict, hosted health, requested test cases, and safety
     outcome.
+  - The same workflow run includes the `hermes-post-deploy-<run-id>`
+    artifact, which preserves the full `hermes-post-deploy.log` beyond the
+    truncated summary.
   - The Hermes/operator surface has scheduled ops-health and daily-brief
     evidence available for the current deployment window.
   - This command passes:

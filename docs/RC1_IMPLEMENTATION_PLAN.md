@@ -195,6 +195,8 @@ generation are implemented as backend foundations.
   close reasons.
 - [x] Add an opt-in hosted smoke gate that proves the daily poller and optional
   self-report status are present and sanitized.
+- [x] Preserve Hermes PR-handoff and post-deploy verification logs as GitHub
+  workflow artifacts so operator proof is not limited to truncated summaries.
 - [ ] Close the operator-visible self-report proof through Hermes post-deploy
   verification plus scheduled ops-health / daily-brief evidence.
 - [ ] Optional: wire branded email delivery once a verified sender domain,

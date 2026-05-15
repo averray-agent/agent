@@ -533,6 +533,15 @@ jobs:
 
           exit "$status"
 
+      - name: Upload Hermes post-deploy log
+        if: always() && env.DEPLOY_RUN_HERMES_POST_DEPLOY == '1' && steps.hermes_post_deploy.outcome != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: hermes-post-deploy-${{ github.run_id }}
+          path: hermes-post-deploy.log
+          if-no-files-found: error
+          retention-days: 90
+
       - name: Fail if Hermes post-deploy verification failed
         if: always() && env.DEPLOY_RUN_HERMES_POST_DEPLOY == '1' && steps.hermes_post_deploy.outcome != 'skipped' && steps.hermes_post_deploy.outputs.exit_status != '0'
         run: |

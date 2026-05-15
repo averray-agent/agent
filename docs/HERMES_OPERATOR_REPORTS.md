@@ -30,9 +30,10 @@ two do not.
 - **Correlation ID format:** `github-pr-${pr_number}-${head_sha}-${run_id}`
 - Evidence destinations (most to least durable):
   1. **PR comment** — best evidence path. Idempotent edit-or-create, anchored to a hidden HTML marker `<!-- hermes-pr-handoff:<correlation-id> -->` so the workflow finds and updates the same comment on retries instead of stacking duplicates. Lives in the PR thread for the life of the repo.
-  2. **`$GITHUB_STEP_SUMMARY`** — last 260 lines of `hermes-handoff.log`. Durable while GitHub retains the workflow run (default ~90 days).
-  3. **`hermes-handoff.log`** — runner-local file, ephemeral; reaped with the runner.
-  4. **Hermes-container audit trail** — whatever Hermes itself records under the correlation id. Outside this repo's evidence model; audit from `averray-reference-agent`.
+  2. **Workflow artifact** — full `hermes-handoff.log`, uploaded as `hermes-handoff-<correlation-id>` with 90-day retention.
+  3. **`$GITHUB_STEP_SUMMARY`** — last 260 lines of `hermes-handoff.log`. Durable while GitHub retains the workflow run (default ~90 days).
+  4. **Runner-local `hermes-handoff.log`** — ephemeral; reaped with the runner after artifact upload.
+  5. **Hermes-container audit trail** — whatever Hermes itself records under the correlation id. Outside this repo's evidence model; audit from `averray-reference-agent`.
 - Comment posting is best-effort. If the workflow lacks the GitHub permission to read/write PR comments, the step summary still carries the full Hermes output and the run is not failed by the comment skip.
 - Outcomes:
   - `success` — Hermes returned a verdict (exit 0).
@@ -46,10 +47,11 @@ two do not.
 - Hermes invocation: `averray_invoke_agent_task` with `intent='testbed_suite'`, `testSuiteId='post_deploy'`, cases `TBE2E-001`/`002`/`003`/`006`/`007`/`008`/`009`/`010`. Fallback path: `averray_handle_operator_command` with `text='testbed e2e suite'`.
 - **Correlation ID format:** `github-deploy-${run_id}-${head_sha}`
 - Evidence destinations:
-  1. **`$GITHUB_STEP_SUMMARY`** — first 220 lines of `hermes-post-deploy.log`, including correlation id, deployed sha, outcome. Durable while GitHub retains the workflow run.
-  2. **`hermes-post-deploy.log`** — runner-local file, ephemeral.
-  3. **Hermes-container audit trail** — outside this repo's evidence model.
-- **Asymmetry vs. PR handoff:** there is **no PR comment / external thread** to anchor evidence to on this side. The step summary is the only GitHub-durable record. If a Hermes-side audit is unavailable and the GitHub run has been reaped, the post-deploy verification result is not recoverable.
+  1. **Workflow artifact** — full `hermes-post-deploy.log`, uploaded as `hermes-post-deploy-<run-id>` with 90-day retention.
+  2. **`$GITHUB_STEP_SUMMARY`** — first 220 lines of `hermes-post-deploy.log`, including correlation id, deployed sha, outcome. Durable while GitHub retains the workflow run.
+  3. **Runner-local `hermes-post-deploy.log`** — ephemeral; reaped with the runner after artifact upload.
+  4. **Hermes-container audit trail** — outside this repo's evidence model.
+- **Asymmetry vs. PR handoff:** there is **no PR comment / external thread** to anchor evidence to on this side. The artifact plus step summary are the GitHub-durable records. If both are reaped and the Hermes-side audit is unavailable, the post-deploy verification result is not recoverable.
 - Outcomes:
   - `success` — exit 0.
   - `timeout` — `HERMES_POST_DEPLOY_TIMEOUT=12m` elapsed (exit 124). The deploy itself already completed at this point; the verification result is what becomes uncertain.
@@ -99,15 +101,13 @@ a single id:
   check the GitHub Actions step summary for that run.
 - For a deploy verification, quote
   `github-deploy-<run-id>-<head-sha>` and locate the workflow run by
-  `run-id`; read the step summary. (There is no comment thread on
-  this side.)
+  `run-id`; download the `hermes-post-deploy-<run-id>` artifact for
+  full output, then read the step summary for the compact verdict.
+  There is no comment thread on this side.
 
-## Follow-up hardening (not in this PR)
+## Remaining follow-up hardening
 
-- **Upload `hermes-post-deploy.log` (and `hermes-handoff.log`) as
-  workflow artifacts** so the full output is durable independently of
-  the step-summary truncation and of Hermes-container persistence.
-  Currently those logs are ephemeral on the runner; only a
-  truncated tail survives. This is a small workflow change but it is
-  intentionally out of scope for this PR — this PR is audit/runbook
-  only.
+- Confirm the scheduled Hermes ops-health and daily operator brief
+  routines in `averray-reference-agent` have their own durable
+  correlation ids and retention policy. This repo can prove deploy and
+  PR Hermes invocations; the scheduled routines live outside this repo.
