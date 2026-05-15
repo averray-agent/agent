@@ -171,14 +171,19 @@ SSH/basic-auth/admin-JWT cutovers, and the basic hosted smoke is green.
 
 - Status: first-wave runtime schemas, public docs sync, submit-time validation,
   pre-verifier validation, schema-native submission metadata, the read-only
-  `/jobs/validate-submission` route, SDK validation helpers, and the exact
-  submit contract in job definitions/preflight are implemented. The operator
-  run detail UI surfaces the submission contract and validate-draft affordance,
-  and the hosted product-proof worker loop now validates its structured
-  submission before claiming.
-- Remaining: prove the hosted UI/API path end-to-end, extend the
-  validation-before-claim pattern to remaining third-party/helper workflows,
-  and add signed registration before tightening custom/off-platform schema refs.
+  `/jobs/validate-submission` route, SDK validation helpers, the exact submit
+  contract in job definitions/preflight, and the hosted product-proof worker
+  loop validating before claim are implemented. The operator run-detail UI
+  surfaces the `submissionContract` and a Validate Draft affordance, and the
+  submit handler is guarded by `runGuardedSubmit` in
+  `app/lib/api/guarded-submit.js` so a structured-required job will not fire
+  `POST /jobs/submit` on a draft that fails validation. Regression covered by
+  `app/lib/api/guarded-submit.test.mjs` ("structured-required job validates
+  first; invalid response prevents /jobs/submit").
+- Remaining: prove the hosted UI/API path end-to-end against the live stack
+  (one valid + one invalid hosted run), extend the validation-before-claim
+  pattern to remaining third-party/helper workflows, and add signed
+  registration before tightening custom/off-platform schema refs.
 
 ### Verifier Replay Hardening
 
