@@ -98,9 +98,9 @@ contract AgentPlatformTest is Test {
 
         assertEq(posterLiquid, POSTER_DEPOSIT - 100 ether);
         assertEq(posterReserved, 0);
-        assertEq(workerLiquid, WORKER_DEPOSIT);
+        assertEq(workerLiquid, WORKER_DEPOSIT + 100 ether);
         assertEq(workerJobStake, 0);
-        assertEq(dot.balanceOf(worker), startingWorkerBalance + 100 ether);
+        assertEq(dot.balanceOf(worker), startingWorkerBalance);
         assertEq(reputation.balanceOf(worker), 1);
     }
 
@@ -153,7 +153,9 @@ contract AgentPlatformTest is Test {
         (uint256 liquidAfterClose, uint256 reservedAfterClose,,,,) = accounts.positions(poster, address(dot));
         assertEq(liquidAfterClose, POSTER_DEPOSIT - 10 ether);
         assertEq(reservedAfterClose, 5 ether);
-        assertEq(dot.balanceOf(worker), 1_000 ether - WORKER_DEPOSIT + 5 ether);
+        (uint256 workerLiquid,,,,,) = accounts.positions(worker, address(dot));
+        assertEq(workerLiquid, WORKER_DEPOSIT + 5 ether);
+        assertEq(dot.balanceOf(worker), 1_000 ether - WORKER_DEPOSIT);
     }
 
     function testOnboardingWaivesFirstThreeClaimsThenLocksStakeAndFee() public {
@@ -227,7 +229,7 @@ contract AgentPlatformTest is Test {
         (uint256 workerLiquid,,,, uint256 workerJobStake,) = accounts.positions(worker, address(dot));
         assertEq(job.claimStake, 0);
         assertEq(job.claimFee, 0);
-        assertEq(workerLiquid, WORKER_DEPOSIT);
+        assertEq(workerLiquid, WORKER_DEPOSIT + 50 ether);
         assertEq(workerJobStake, 0);
     }
 
@@ -285,6 +287,60 @@ contract AgentPlatformTest is Test {
         (,,,,, debtOutstanding) = accounts.positions(worker, address(dot));
         assertEq(debtOutstanding, 0);
         vm.stopPrank();
+    }
+
+    function testBorrowedLiquidityCannotBeWithdrawnBeforeRepayment() public {
+        vm.startPrank(worker);
+        accounts.lockCollateral(address(dot), 150 ether);
+        accounts.borrow(address(dot), 100 ether);
+
+        (bool ok, bytes memory data) =
+            address(accounts).call(abi.encodeCall(accounts.withdraw, (address(dot), 100 ether)));
+        require(!ok, "EXPECTED_DEBT_GATED_WITHDRAWAL_REVERT");
+        require(bytes4(data) == AgentAccountCore.InsufficientLiquidity.selector, "EXPECTED_INSUFFICIENT_LIQUIDITY");
+
+        uint256 workerTokenBalanceBefore = dot.balanceOf(worker);
+        accounts.withdraw(address(dot), 50 ether);
+
+        (uint256 liquid,,,,, uint256 debtOutstanding) = accounts.positions(worker, address(dot));
+        assertEq(liquid, 100 ether);
+        assertEq(debtOutstanding, 100 ether);
+        assertEq(dot.balanceOf(worker), workerTokenBalanceBefore + 50 ether);
+        vm.stopPrank();
+    }
+
+    function testJobPayoutRepaysDebtBeforeCreditingLiquid() public {
+        bytes32 jobId = keccak256("job/borrow/payout-repay");
+        uint256 workerTokenBalanceBefore = dot.balanceOf(worker);
+
+        vm.startPrank(worker);
+        accounts.lockCollateral(address(dot), 150 ether);
+        accounts.borrow(address(dot), 100 ether);
+        vm.stopPrank();
+
+        vm.prank(poster);
+        escrow.createSinglePayoutJob(
+            jobId, address(dot), 120 ether, 0, 0, 1 days, bytes32("AUTO"), bytes32("CODING"), SPEC_HASH
+        );
+
+        vm.prank(worker);
+        escrow.claimJob(jobId);
+        vm.prank(worker);
+        escrow.submitWork(jobId, keccak256("borrow-repay-work"));
+
+        vm.prank(verifier);
+        escrow.resolveSinglePayout(jobId, true, bytes32("OK"), "ipfs://badge/borrow-repay", REASONING_HASH);
+
+        (uint256 workerLiquid,,,, uint256 workerJobStake, uint256 debtOutstanding) =
+            accounts.positions(worker, address(dot));
+        (uint256 posterLiquid, uint256 posterReserved,,,,) = accounts.positions(poster, address(dot));
+
+        assertEq(workerLiquid, 170 ether);
+        assertEq(workerJobStake, 0);
+        assertEq(debtOutstanding, 0);
+        assertEq(posterLiquid, POSTER_DEPOSIT - 120 ether);
+        assertEq(posterReserved, 0);
+        assertEq(dot.balanceOf(worker), workerTokenBalanceBefore);
     }
 
     function testStrategyAllocationSettlesIntoAdapterAndUnwindsWithYield() public {
@@ -589,9 +645,9 @@ contract AgentPlatformTest is Test {
         require(job.disputedAt > 0, "EXPECTED_DISPUTED_AT");
         assertEq(liquidPoster, POSTER_DEPOSIT - 50 ether);
         assertEq(reservedPoster, 0);
-        assertEq(liquidWorker, WORKER_DEPOSIT);
+        assertEq(liquidWorker, WORKER_DEPOSIT + 50 ether);
         assertEq(workerJobStake, 0);
-        assertEq(dot.balanceOf(worker), workerTokenBalanceBefore + 50 ether);
+        assertEq(dot.balanceOf(worker), workerTokenBalanceBefore);
         assertEq(reputation.balanceOf(worker), 1);
     }
 

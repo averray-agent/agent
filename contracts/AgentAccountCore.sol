@@ -129,23 +129,39 @@ contract AgentAccountCore is ReentrancyGuard {
     }
 
     modifier onlyOwnerOrOperator(address account) {
-        if (msg.sender != account && !policy.serviceOperators(msg.sender)) revert Unauthorized();
+        _onlyOwnerOrOperator(account);
         _;
     }
 
     modifier onlyOperator() {
-        if (!policy.serviceOperators(msg.sender)) revert Unauthorized();
+        _onlyOperator();
         _;
     }
 
     modifier whenNotPaused() {
-        if (policy.paused()) revert ProtocolPaused();
+        _whenNotPaused();
         _;
     }
 
     modifier onlySupportedAsset(address asset) {
-        if (!policy.approvedAssets(asset)) revert UnsupportedAsset();
+        _onlySupportedAsset(asset);
         _;
+    }
+
+    function _onlyOwnerOrOperator(address account) internal view {
+        if (msg.sender != account && !policy.serviceOperators(msg.sender)) revert Unauthorized();
+    }
+
+    function _onlyOperator() internal view {
+        if (!policy.serviceOperators(msg.sender)) revert Unauthorized();
+    }
+
+    function _whenNotPaused() internal view {
+        if (policy.paused()) revert ProtocolPaused();
+    }
+
+    function _onlySupportedAsset(address asset) internal view {
+        if (!policy.approvedAssets(asset)) revert UnsupportedAsset();
     }
 
     function deposit(address asset, uint256 amount) external nonReentrant whenNotPaused onlySupportedAsset(asset) {
@@ -157,7 +173,7 @@ contract AgentAccountCore is ReentrancyGuard {
 
     function withdraw(address asset, uint256 amount) external nonReentrant whenNotPaused onlySupportedAsset(asset) {
         AssetPosition storage position = positions[msg.sender][asset];
-        if (position.liquid < amount) revert InsufficientLiquidity();
+        if (position.liquid < amount + position.debtOutstanding) revert InsufficientLiquidity();
         position.liquid -= amount;
         SafeTransfer.safeTransfer(asset, msg.sender, amount);
         emit Withdrawn(msg.sender, asset, amount);
@@ -220,7 +236,13 @@ contract AgentAccountCore is ReentrancyGuard {
         if (position.reserved < amount) revert InsufficientReserved();
         position.reserved -= amount;
         policy.recordOutflow(amount);
-        SafeTransfer.safeTransfer(asset, recipient, amount);
+        AssetPosition storage recipientPosition = positions[recipient][asset];
+        uint256 debt = recipientPosition.debtOutstanding;
+        uint256 debtPaid = amount < debt ? amount : debt;
+        recipientPosition.debtOutstanding = debt - debtPaid;
+        unchecked {
+            recipientPosition.liquid += amount - debtPaid;
+        }
         emit ReservationSettled(account, recipient, asset, amount);
     }
 
