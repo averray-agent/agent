@@ -143,7 +143,10 @@ SSH/basic-auth/admin-JWT cutovers, and the basic hosted smoke is green.
   checks `/admin/status.bootstrapSelfReport` for `lastAttemptedAt`,
   `lastSuccessfulAt`, the `from`/`to` pair, recipient-count consistency,
   a fresh latest sent provider id, and absence of provider/API-key-shaped
-  tokens. `PRODUCTION_CHECKLIST.md` section 5 names the exact env-gated smoke
+  tokens. `POST /admin/bootstrap-self-report/send` gives operators a guarded,
+  idempotent one-shot send path so the hosted workflow can produce first
+  delivery evidence without toggling startup env. `PRODUCTION_CHECKLIST.md`
+  section 5 names the exact env-gated smoke
   command required to flip the box.
 - Confirm `/admin/status` with a live admin JWT reports async XCM watcher posture
   cleanly.
@@ -284,10 +287,12 @@ correlation and settlement path.
 
 1. Complete the hosted worker-loop product-proof evidence gate.
 2. Close bootstrap self-report scheduled email delivery against the live
-   production stack by running `check-hosted-stack.sh` with
-   `CHECK_BOOTSTRAP_INSTRUMENTATION=1`,
-   `CHECK_BOOTSTRAP_SELF_REPORT_SENT=1`, and the exact expected `from`/`to`
-   envs from `backend.env`.
+   production stack by running the production workflow with
+   `bootstrap_self_report_send_now=1`,
+   `smoke_check_bootstrap_instrumentation=1`, and
+   `smoke_check_bootstrap_self_report_sent=1` (`run_hermes_post_deploy=0`
+   keeps that proof scoped), then optionally confirm the exact expected
+   `from`/`to` envs locally with `check-hosted-stack.sh`.
 3. Prove the hosted schema-native validation path and external helper adoption.
 4. Prove the dispute verdict path live and decide `/release` semantics.
 5. Run the native XCM evidence pack captures.

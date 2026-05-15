@@ -532,7 +532,9 @@ surface:
 2. close bootstrap self-report scheduled email delivery with the hosted smoke's
    explicit `bootstrapSelfReport` evidence gate (`lastAttemptedAt`,
    `lastSuccessfulAt`, exact `from`/`to`, fresh sent provider id, no API-key
-   token leakage)
+   token leakage), using the production workflow's
+   `bootstrap_self_report_send_now=1` one-shot trigger when first delivery
+   evidence is missing
 3. tighten schema-native jobs for the first-wave job families
 4. finish dispute/arbitration launch wiring
 5. capture the native XCM deposit, withdraw, and failure evidence pack

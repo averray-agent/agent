@@ -96,6 +96,14 @@ BOOTSTRAP_SELF_REPORT_EXPECTED_FROM='<exact backend.env from>' \
 BOOTSTRAP_SELF_REPORT_EXPECTED_TO='<exact backend.env to>' \
 ./scripts/ops/check-hosted-stack.sh
 
+# Hosted first-delivery proof: send one report through the production admin
+# endpoint, then require the delivery evidence in the same smoke run.
+gh workflow run deploy-production.yml \
+  -f bootstrap_self_report_send_now=1 \
+  -f smoke_check_bootstrap_instrumentation=1 \
+  -f smoke_check_bootstrap_self_report_sent=1 \
+  -f run_hermes_post_deploy=0
+
 # Component-scoped deploys can skip indexer checks when the indexer was not
 # touched, while scheduled/full-stack smoke should keep the default.
 CHECK_INDEXER=0 ./scripts/ops/check-hosted-stack.sh
@@ -167,6 +175,10 @@ RUN_SUBSCAN_XCM_VALIDATION=1 ./scripts/ops/check-release-readiness.sh testnet
     BOOTSTRAP_SELF_REPORT_EXPECTED_TO='<exact backend.env to>' \
     ./scripts/ops/check-hosted-stack.sh
     ```
+    Or the hosted production workflow passes with
+    `bootstrap_self_report_send_now=1`,
+    `smoke_check_bootstrap_instrumentation=1`, and
+    `smoke_check_bootstrap_self_report_sent=1`.
   - The smoke gate verifies `.bootstrapSelfReport.enabled`,
     `.running`, `.providerConfigured`, `from`, `to`, `recipientCount`,
     `lastAttemptedAt`, `lastSuccessfulAt`, and the latest sent provider id.

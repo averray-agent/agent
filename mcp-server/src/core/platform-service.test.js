@@ -911,6 +911,46 @@ test("getAdminStatus surfaces public source ingestion scheduler status", async (
   assert.equal(publicStatus.recurring, undefined);
 });
 
+test("runBootstrapSelfReport delegates to the configured scheduler", async () => {
+  const service = makePlatformService();
+  const attemptedAt = "2026-05-15T06:00:00.000Z";
+  let calledWith;
+  service.bootstrapSelfReportScheduler = {
+    async runOnce(now) {
+      calledWith = now;
+      return {
+        status: "sent",
+        email: { providerId: "email_live_123" }
+      };
+    },
+    async getStatus() {
+      return {
+        enabled: true,
+        running: true,
+        lastAttemptedAt: attemptedAt,
+        lastSuccessfulAt: attemptedAt,
+        lastRun: { status: "sent", email: { providerId: "email_live_123" } }
+      };
+    }
+  };
+
+  const result = await service.runBootstrapSelfReport({ now: new Date(attemptedAt) });
+
+  assert.equal(calledWith.toISOString(), attemptedAt);
+  assert.equal(result.ok, true);
+  assert.equal(result.result.status, "sent");
+  assert.equal(result.bootstrapSelfReport.lastSuccessfulAt, attemptedAt);
+});
+
+test("runBootstrapSelfReport fails closed without a scheduler", async () => {
+  const service = makePlatformService();
+
+  await assert.rejects(
+    () => service.runBootstrapSelfReport(),
+    /Bootstrap self-report scheduler is not initialised/u
+  );
+});
+
 test("finalizeXcmRequest records async treasury settlement when the request is strategy-backed", async () => {
   const gateway = {
     isEnabled: () => true,

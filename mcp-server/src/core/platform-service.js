@@ -207,6 +207,19 @@ export class PlatformService {
     return this.jobCatalogService.resumeRecurringTemplate(templateId);
   }
 
+  async runBootstrapSelfReport({ now = new Date() } = {}) {
+    if (!this.bootstrapSelfReportScheduler?.runOnce) {
+      throw new ValidationError("Bootstrap self-report scheduler is not initialised.");
+    }
+    const result = await this.bootstrapSelfReportScheduler.runOnce(now);
+    const bootstrapSelfReport = await this.bootstrapSelfReportScheduler.getStatus?.();
+    return {
+      ok: result?.status === "sent",
+      result,
+      bootstrapSelfReport
+    };
+  }
+
   async getAdminStatus({ auth = undefined } = {}) {
     const [
       policy,

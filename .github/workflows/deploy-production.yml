@@ -55,16 +55,14 @@ on:
         options:
           - "0"
           - "1"
-      # bootstrap_self_report_send_on_start: removed in PR 2.7b. The
-      # one-shot "send self-report on backend start" override has been
-      # broken since PR 2.6 retired configure_bootstrap_instrumentation_env
-      # (no callers on the VPS read the heredoc-passed override anymore;
-      # the backend reads BOOTSTRAP_SELF_REPORT_SEND_ON_START from
-      # /run/agent-stack/backend.env, which is rendered from
-      # deploy/backend.env.template:98 = `false`). If the operator needs
-      # to one-shot a bootstrap self-report, edit
-      # deploy/backend.env.template line 98 to `true` for a single
-      # deploy, then revert.
+      bootstrap_self_report_send_now:
+        description: Send one bootstrap self-report through the admin API before hosted smoke checks.
+        required: false
+        default: "0"
+        type: choice
+        options:
+          - "0"
+          - "1"
       smoke_check_bootstrap_instrumentation:
         description: Require bootstrap poller + self-report status in hosted smoke.
         required: false
@@ -171,8 +169,7 @@ jobs:
       DEPLOY_SMOKE_CHECK_INDEXER: ${{ github.event_name == 'workflow_dispatch' && inputs.smoke_check_indexer || 'auto' }}
       DEPLOY_INDEXER_DATABASE_SCHEMA: ${{ github.event_name == 'workflow_dispatch' && inputs.indexer_database_schema || '' }}
       DEPLOY_INDEXER_FRESH_SCHEMA: ${{ github.event_name == 'workflow_dispatch' && inputs.indexer_fresh_schema || '0' }}
-      # DEPLOY_BOOTSTRAP_SELF_REPORT_SEND_ON_START removed in PR 2.7b
-      # alongside the matching workflow_dispatch input above.
+      DEPLOY_BOOTSTRAP_SELF_REPORT_SEND_NOW: ${{ github.event_name == 'workflow_dispatch' && inputs.bootstrap_self_report_send_now || '0' }}
       DEPLOY_SMOKE_CHECK_BOOTSTRAP_INSTRUMENTATION: ${{ github.event_name == 'workflow_dispatch' && inputs.smoke_check_bootstrap_instrumentation || '0' }}
       DEPLOY_SMOKE_CHECK_BOOTSTRAP_SELF_REPORT_SENT: ${{ github.event_name == 'workflow_dispatch' && inputs.smoke_check_bootstrap_self_report_sent || '0' }}
       DEPLOY_SMOKE_CHECK_PRODUCT_PROOF_GATE: ${{ github.event_name == 'workflow_dispatch' && inputs.smoke_check_product_proof_gate || '0' }}
@@ -417,7 +414,7 @@ jobs:
           # via deploy/backend.env.template:47; the BOOTSTRAP_SELF_REPORT_*
           # values are template-hardcoded config, not secrets).
           remote_env=$(
-            printf 'APP_BASIC_AUTH_USER=%q APP_BASIC_AUTH_PASSWORD_HASH=%q APP_ALLOW_PROTECTED_SHELL=%q ADMIN_JWT=%q RUN_INDEXER=%q WAIT_FOR_READY=%q HEALTH_STABILITY_SEC=%q INDEXER_LOG_TAIL=%q SMOKE_CHECK_INDEXER=%q SMOKE_CHECK_BOOTSTRAP_INSTRUMENTATION=%q SMOKE_CHECK_BOOTSTRAP_SELF_REPORT_SENT=%q SMOKE_CHECK_PRODUCT_PROOF_GATE=%q PRODUCT_PROOF_REQUIRE_WORKER_LOOP=%q PRODUCT_PROOF_REWARD_ASSET=%q INDEXER_DATABASE_SCHEMA=%q INDEXER_FRESH_SCHEMA=%q ' \
+            printf 'APP_BASIC_AUTH_USER=%q APP_BASIC_AUTH_PASSWORD_HASH=%q APP_ALLOW_PROTECTED_SHELL=%q ADMIN_JWT=%q RUN_INDEXER=%q WAIT_FOR_READY=%q HEALTH_STABILITY_SEC=%q INDEXER_LOG_TAIL=%q SMOKE_CHECK_INDEXER=%q BOOTSTRAP_SELF_REPORT_SEND_NOW=%q SMOKE_CHECK_BOOTSTRAP_INSTRUMENTATION=%q SMOKE_CHECK_BOOTSTRAP_SELF_REPORT_SENT=%q SMOKE_CHECK_PRODUCT_PROOF_GATE=%q PRODUCT_PROOF_REQUIRE_WORKER_LOOP=%q PRODUCT_PROOF_REWARD_ASSET=%q INDEXER_DATABASE_SCHEMA=%q INDEXER_FRESH_SCHEMA=%q ' \
               "$APP_BASIC_AUTH_USER_OP" \
               "$APP_BASIC_AUTH_PASSWORD_HASH_OP" \
               "$APP_ALLOW_PROTECTED_SHELL" \
@@ -427,6 +424,7 @@ jobs:
               "$DEPLOY_HEALTH_STABILITY_SEC" \
               "$DEPLOY_INDEXER_LOG_TAIL" \
               "$DEPLOY_SMOKE_CHECK_INDEXER" \
+              "$DEPLOY_BOOTSTRAP_SELF_REPORT_SEND_NOW" \
               "$DEPLOY_SMOKE_CHECK_BOOTSTRAP_INSTRUMENTATION" \
               "$DEPLOY_SMOKE_CHECK_BOOTSTRAP_SELF_REPORT_SENT" \
               "$DEPLOY_SMOKE_CHECK_PRODUCT_PROOF_GATE" \

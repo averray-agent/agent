@@ -30,6 +30,8 @@ RUN_SMOKE=${RUN_SMOKE:-1}
 SMOKE_CHECK_INDEXER=${SMOKE_CHECK_INDEXER:-auto}
 SMOKE_CHECK_BOOTSTRAP_INSTRUMENTATION=${SMOKE_CHECK_BOOTSTRAP_INSTRUMENTATION:-0}
 SMOKE_CHECK_BOOTSTRAP_SELF_REPORT_SENT=${SMOKE_CHECK_BOOTSTRAP_SELF_REPORT_SENT:-0}
+BOOTSTRAP_SELF_REPORT_SEND_NOW=${BOOTSTRAP_SELF_REPORT_SEND_NOW:-0}
+BOOTSTRAP_SELF_REPORT_IDEMPOTENCY_KEY=${BOOTSTRAP_SELF_REPORT_IDEMPOTENCY_KEY:-}
 SMOKE_CHECK_PRODUCT_PROOF_GATE=${SMOKE_CHECK_PRODUCT_PROOF_GATE:-0}
 PRODUCT_PROOF_REQUIRE_WORKER_LOOP=${PRODUCT_PROOF_REQUIRE_WORKER_LOOP:-0}
 # Optional override for the hosted worker-loop's reward asset symbol. Empty
@@ -62,6 +64,7 @@ require_command git
 require_command docker
 require_command curl
 require_command flock
+require_command jq
 
 if [[ ! -d "$APP_ROOT/.git" ]]; then
   echo "Expected repo checkout at $APP_ROOT" >&2
@@ -340,6 +343,52 @@ run_product_proof_worker_loop() {
   echo "Running hosted product-proof worker loop"
   API_BASE_URL="${API_BASE_URL:-https://api.averray.com}" \
     run_node_script "$APP_ROOT/scripts/ops/run-hosted-worker-loop.mjs"
+}
+
+run_bootstrap_self_report_once() {
+  case "$BOOTSTRAP_SELF_REPORT_SEND_NOW" in
+    1|true|yes) ;;
+    0|false|no|"") return 0 ;;
+    *)
+      echo "Invalid BOOTSTRAP_SELF_REPORT_SEND_NOW toggle: $BOOTSTRAP_SELF_REPORT_SEND_NOW" >&2
+      exit 1
+      ;;
+  esac
+
+  if [[ -z "${ADMIN_JWT:-}" ]]; then
+    echo "BOOTSTRAP_SELF_REPORT_SEND_NOW=1 requires ADMIN_JWT." >&2
+    exit 1
+  fi
+
+  local api_base
+  api_base="${API_BASE_URL:-https://api.averray.com}"
+  local idempotency_key
+  idempotency_key="${BOOTSTRAP_SELF_REPORT_IDEMPOTENCY_KEY:-bootstrap-self-report-${NEW_SHA:-manual}-$(date -u +%Y%m%dT%H%M%SZ)}"
+
+  echo "Sending bootstrap self-report once"
+  local payload
+  payload="$(jq -cn --arg idempotencyKey "$idempotency_key" '{idempotencyKey: $idempotencyKey}')"
+  local result
+  result="$(
+    curl -fsS --max-time 60 \
+      -X POST "$api_base/admin/bootstrap-self-report/send" \
+      -H "accept: application/json" \
+      -H "content-type: application/json" \
+      -H "authorization: Bearer $ADMIN_JWT" \
+      --data "$payload"
+  )"
+  jq -e '
+    .ok == true and
+    .result.status == "sent" and
+    (.result.email.providerId | type) == "string" and
+    (.result.email.providerId | length) > 0 and
+    (.bootstrapSelfReport.lastSuccessfulAt | type) == "string"
+  ' >/dev/null <<<"$result" || {
+    echo "Bootstrap self-report send did not return sent evidence." >&2
+    echo "$result" | jq '{ok, status: .result.status, skipped: .result.skipped, errors: .result.errors, lastFailureReason: .bootstrapSelfReport.lastFailureReason}' >&2
+    exit 1
+  }
+  echo "Bootstrap self-report send confirmed."
 }
 
 # Phase 2 PR 2.4: render runtime env files via 1Password and check parity.
@@ -859,6 +908,7 @@ deploy() {
     if [[ "$SMOKE_CHECK_PRODUCT_PROOF_GATE" == "1" || "$SMOKE_CHECK_PRODUCT_PROOF_GATE" == "true" || "$SMOKE_CHECK_PRODUCT_PROOF_GATE" == "yes" ]]; then
       run_product_proof_worker_loop
     fi
+    run_bootstrap_self_report_once
 
     echo "Running hosted stack smoke check"
     local check_indexer

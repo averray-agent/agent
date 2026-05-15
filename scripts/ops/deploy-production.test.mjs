@@ -147,6 +147,32 @@ test("docker node fallback persists product-proof evidence on the host", async (
   );
 });
 
+test("deploy wrapper can trigger a one-shot bootstrap self-report before smoke", async () => {
+  const script = await readFile(DEPLOY_SCRIPT, "utf8");
+
+  assert.match(
+    script,
+    /BOOTSTRAP_SELF_REPORT_SEND_NOW=\$\{BOOTSTRAP_SELF_REPORT_SEND_NOW:-0\}/u,
+    "deploy wrapper should expose a fail-closed one-shot self-report toggle"
+  );
+  assert.match(
+    script,
+    /POST "\$api_base\/admin\/bootstrap-self-report\/send"/u,
+    "one-shot trigger should use the admin self-report endpoint"
+  );
+  assert.match(
+    script,
+    /\.ok == true and\s+\.result\.status == "sent"/u,
+    "one-shot trigger should require sent evidence before continuing"
+  );
+  const smokeIndex = script.indexOf('echo "Running hosted stack smoke check"');
+  const triggerIndex = script.lastIndexOf("run_bootstrap_self_report_once", smokeIndex);
+  assert.ok(
+    triggerIndex > -1 && triggerIndex < smokeIndex,
+    "one-shot trigger must run before the hosted smoke sent-evidence gate"
+  );
+});
+
 async function writeExecutable(path, content) {
   await writeFile(path, `${content}\n`);
   await chmod(path, 0o755);

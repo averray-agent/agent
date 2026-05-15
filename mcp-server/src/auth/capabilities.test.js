@@ -58,6 +58,7 @@ test("capabilityMatrix exposes base and role capability groups", () => {
   assert.ok(matrix.base.includes("jobs:submit"));
   assert.ok(matrix.roles.admin.includes("jobs:fire-recurring"));
   assert.ok(matrix.roles.admin.includes("jobs:ingest"));
+  assert.ok(matrix.roles.admin.includes("admin:self-report:send"));
   assert.ok(matrix.roles.admin.includes("xcm:observe"));
   assert.ok(matrix.roles.admin.includes("xcm:finalize"));
   assert.ok(matrix.roles.verifier.includes("verifier:replay"));
@@ -66,12 +67,15 @@ test("capabilityMatrix exposes base and role capability groups", () => {
   assert.deepEqual(matrix.routes["/admin/xcm/observe"], ["xcm:observe"]);
   assert.deepEqual(matrix.routes["/admin/xcm/finalize"], ["xcm:finalize"]);
   assert.deepEqual(matrix.uiControls["admin.status.view"], ["admin:status", "ops:view"]);
+  assert.deepEqual(matrix.uiControls["admin.bootstrapSelfReport.send"], ["admin:self-report:send"]);
+  assert.deepEqual(matrix.automationActions["bootstrapSelfReport.send"], ["admin:self-report:send"]);
   assert.deepEqual(matrix.automationActions["job.fireRecurring"], ["jobs:fire-recurring"]);
 });
 
 test("getRouteCapabilityRequirements resolves method-specific route policies", () => {
   assert.deepEqual(getRouteCapabilityRequirements("GET", "/admin/jobs"), ["ops:view"]);
   assert.deepEqual(getRouteCapabilityRequirements("POST", "/admin/jobs"), ["jobs:create"]);
+  assert.deepEqual(getRouteCapabilityRequirements("POST", "/admin/bootstrap-self-report/send"), ["admin:self-report:send"]);
   assert.deepEqual(getRouteCapabilityRequirements("POST", "/admin/jobs/ingest/wikipedia"), ["jobs:ingest"]);
   assert.deepEqual(getRouteCapabilityRequirements("POST", "/disputes/dispute-123/verdict"), ["disputes:verdict"]);
   assert.deepEqual(getRouteCapabilityRequirements("GET", "/unknown"), []);

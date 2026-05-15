@@ -3555,6 +3555,24 @@ const server = createServer(async (request, response) => {
       return respond(response, 200, await service.getAdminStatus({ auth }));
     }
 
+    if (request.method === "POST" && pathname === "/admin/bootstrap-self-report/send") {
+      const auth = await authMiddleware(request, url, { requireRole: "admin" });
+      await enforceLimit("admin_jobs", auth.wallet, rateLimitConfig.adminJobs);
+      const payload = await readJsonBody(request);
+      const idempotency = buildIdempotentMutationContext({
+        route: "/admin/bootstrap-self-report/send",
+        auth,
+        payload,
+        bucket: "bootstrap_self_report_send"
+      });
+      const replay = await getIdempotentMutationReplay(idempotency);
+      if (replay) {
+        return respond(response, replay.statusCode, replay.body);
+      }
+      const result = await service.runBootstrapSelfReport();
+      return respondWithMutationReceipt(response, idempotency, 200, result);
+    }
+
     /*
      * Capability grants — operator-issued, scoped delegations of
      * platform capabilities to a subject wallet (a service token,
