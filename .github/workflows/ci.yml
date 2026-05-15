@@ -208,3 +208,47 @@ jobs:
       # justification.
       - name: Secrets calendar expiry check
         run: node scripts/ops/check-secrets-calendar.mjs
+
+  # Phase 4a (per docs/SECRETS_MIGRATION.md §"Phase 4 — Hardening" §4a):
+  # last-resort secret scan. Three layers of defense:
+  #   1. Local pre-commit hook (.githooks/pre-commit) — catches the
+  #      common case before push. Operator must run scripts/install-hooks.sh
+  #      once after cloning.
+  #   2. GitHub Secret Scanning push protection (enabled at the repo
+  #      level in Settings → Security → Secret scanning) — blocks the
+  #      push at the server side regardless of local hooks.
+  #   3. This job — runs on every PR and every push to main. Uses our
+  #      explicit ruleset at `.gitleaks.toml` (NOT gitleaks's default
+  #      rules; those false-positive on bytes32 test fixtures).
+  # The job is intentionally separate from env-template-structure so
+  # it can use fetch-depth: 0 for full-history scans without slowing
+  # the other lints.
+  secrets-scan:
+    name: Phase 4a — gitleaks scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # gitleaks-action wants the full history to scan new commits
+          # against base; default fetch-depth=1 would miss everything
+          # except the latest commit.
+          fetch-depth: 0
+
+      - name: Run gitleaks against our ruleset
+        # Phase 4a: pinned to gitleaks-action v2.3.9 commit SHA so a
+        # compromised future release can't silently retarget our CI.
+        # To refresh:
+        #   tag=$(gh api repos/gitleaks/gitleaks-action/releases/latest --jq .tag_name)
+        #   gh api repos/gitleaks/gitleaks-action/git/refs/tags/$tag --jq .object.sha
+        # and verify the new SHA against the gitleaks release notes
+        # before updating.
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Force the action to use our explicit config, not its defaults.
+          GITLEAKS_CONFIG: .gitleaks.toml
+          # Don't gate on a paid license; the action also supports
+          # OSS-only mode without a license for public repos.
+          # GITLEAKS_LICENSE is intentionally unset.
