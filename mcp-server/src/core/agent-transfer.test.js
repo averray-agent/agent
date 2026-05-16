@@ -192,9 +192,125 @@ test("requestStrategyDeposit delegates async lanes to the blockchain gateway and
   assert.equal(updated.requestId, "0xreq");
   assert.equal(updated.strategyPending["0xstrategy"].pendingDepositAssets, 6);
   assert.equal(updated.strategyPending["0xstrategy"].pendingDepositAssetsRaw, "6000000");
+  assert.deepEqual(updated.strategyPending["0xstrategy"].pendingDepositRequestIds, ["0xreq"]);
   assert.equal(updated.strategyActivity["0xstrategy"].action, "allocate_requested");
   assert.equal(updated.treasuryTimeline[0].type, "allocate_requested");
   assert.equal(updated.treasuryTimeline[0].amountRaw, "6000000");
+});
+
+test("requestStrategyDeposit does not double-count an idempotent async retry", async () => {
+  const calls = [];
+  const gateway = {
+    isEnabled: () => true,
+    requestStrategyDeposit: async (...args) => {
+      calls.push(args);
+      return {
+        wallet: "0xAlice",
+        liquid: { DOT: 14 },
+        reserved: {},
+        strategyAllocated: { DOT: 0 },
+        collateralLocked: {},
+        jobStakeLocked: {},
+        debtOutstanding: {},
+        requestId: "0xreq",
+        xcmRequest: { statusLabel: "pending", requestedAssets: 6, requestedAssetsRaw: "6000000" },
+        strategyRequest: { strategyId: "0xstrategy", requestedAssets: 6, requestedAssetsRaw: "6000000", requestedShares: 0 }
+      };
+    }
+  };
+  const accounts = new Map();
+  const getAccountSummary = async (wallet) => ({
+    wallet,
+    liquid: { DOT: 14 },
+    reserved: {},
+    strategyAllocated: { DOT: 0 },
+    strategyShares: {},
+    strategyActivity: {},
+    strategyPending: {},
+    strategyAccounting: {},
+    treasuryTimeline: [],
+    collateralLocked: {},
+    jobStakeLocked: {},
+    debtOutstanding: {}
+  });
+  const service = new AccountMutationService(accounts, gateway, getAccountSummary);
+
+  await service.requestStrategyDeposit(
+    "0xAlice",
+    "DOT",
+    6,
+    "0xstrategy",
+    { strategyId: "0xstrategy", executionMode: "async_xcm", asset: "0xdot" },
+    { nonce: 7 }
+  );
+  const retry = await service.requestStrategyDeposit(
+    "0xAlice",
+    "DOT",
+    6,
+    "0xstrategy",
+    { strategyId: "0xstrategy", executionMode: "async_xcm", asset: "0xdot" },
+    { nonce: 7 }
+  );
+
+  assert.equal(calls.length, 2);
+  assert.equal(retry.strategyPending["0xstrategy"].pendingDepositAssets, 6);
+  assert.equal(retry.strategyPending["0xstrategy"].pendingDepositAssetsRaw, "6000000");
+  assert.deepEqual(retry.strategyPending["0xstrategy"].pendingDepositRequestIds, ["0xreq"]);
+  assert.equal(retry.treasuryTimeline.filter((event) => event.type === "allocate_requested").length, 1);
+});
+
+test("requestStrategyDeposit does not reopen pending accounting for a settled retry", async () => {
+  const gateway = {
+    isEnabled: () => true,
+    requestStrategyDeposit: async () => ({
+      wallet: "0xAlice",
+      liquid: { DOT: 14 },
+      reserved: {},
+      strategyAllocated: { DOT: 6 },
+      collateralLocked: {},
+      jobStakeLocked: {},
+      debtOutstanding: {},
+      requestId: "0xreq",
+      xcmRequest: { statusLabel: "succeeded", requestedAssets: 6, requestedAssetsRaw: "6000000" },
+      strategyRequest: {
+        strategyId: "0xstrategy",
+        statusLabel: "succeeded",
+        requestedAssets: 6,
+        requestedAssetsRaw: "6000000",
+        requestedShares: 0
+      }
+    })
+  };
+  const accounts = new Map();
+  const getAccountSummary = async (wallet) => ({
+    wallet,
+    liquid: { DOT: 14 },
+    reserved: {},
+    strategyAllocated: { DOT: 6 },
+    strategyShares: { "0xstrategy": 6 },
+    strategyActivity: {},
+    strategyPending: {},
+    strategyAccounting: {},
+    treasuryTimeline: [],
+    collateralLocked: {},
+    jobStakeLocked: {},
+    debtOutstanding: {}
+  });
+  const service = new AccountMutationService(accounts, gateway, getAccountSummary);
+
+  const retry = await service.requestStrategyDeposit(
+    "0xAlice",
+    "DOT",
+    6,
+    "0xstrategy",
+    { strategyId: "0xstrategy", executionMode: "async_xcm", asset: "0xdot" },
+    { nonce: 7 }
+  );
+
+  assert.equal(retry.strategyPending["0xstrategy"].pendingDepositAssets, 0);
+  assert.deepEqual(retry.strategyPending["0xstrategy"].pendingDepositRequestIds, []);
+  assert.equal(retry.strategyPending["0xstrategy"].lastStatus, "succeeded");
+  assert.equal(retry.treasuryTimeline.length, 0);
 });
 
 test("borrow uses live borrow capacity and updates liquid plus debt", async () => {
@@ -293,9 +409,124 @@ test("requestStrategyWithdraw delegates async lanes to the blockchain gateway an
   assert.equal(updated.requestId, "0xwithdraw");
   assert.equal(updated.strategyPending["0xstrategy"].pendingWithdrawalShares, 4);
   assert.equal(updated.strategyPending["0xstrategy"].pendingWithdrawalSharesRaw, "4000000");
+  assert.deepEqual(updated.strategyPending["0xstrategy"].pendingWithdrawalRequestIds, ["0xwithdraw"]);
   assert.equal(updated.strategyActivity["0xstrategy"].action, "deallocate_requested");
   assert.equal(updated.treasuryTimeline[0].type, "deallocate_requested");
   assert.equal(updated.treasuryTimeline[0].requestedSharesRaw, "4000000");
+});
+
+test("requestStrategyWithdraw does not double-count an idempotent async retry", async () => {
+  const gateway = {
+    isEnabled: () => true,
+    requestStrategyWithdraw: async () => ({
+      wallet: "0xAlice",
+      liquid: { DOT: 5 },
+      reserved: {},
+      strategyAllocated: { DOT: 10 },
+      collateralLocked: {},
+      jobStakeLocked: {},
+      debtOutstanding: {},
+      requestId: "0xwithdraw",
+      requestedShares: 4,
+      requestedSharesRaw: "4000000",
+      xcmRequest: { statusLabel: "pending", requestedShares: 4, requestedSharesRaw: "4000000" },
+      strategyRequest: { strategyId: "0xstrategy", requestedAssets: 3, requestedShares: 4, requestedSharesRaw: "4000000" }
+    })
+  };
+  const accounts = new Map();
+  const getAccountSummary = async (wallet) => ({
+    wallet,
+    liquid: { DOT: 5 },
+    reserved: {},
+    strategyAllocated: { DOT: 10 },
+    strategyShares: { "0xstrategy": 10 },
+    strategyActivity: {},
+    strategyPending: {},
+    strategyAccounting: {},
+    treasuryTimeline: [],
+    collateralLocked: {},
+    jobStakeLocked: {},
+    debtOutstanding: {}
+  });
+  const service = new AccountMutationService(accounts, gateway, getAccountSummary);
+
+  await service.requestStrategyWithdraw(
+    "0xAlice",
+    "DOT",
+    3,
+    "0xstrategy",
+    { strategyId: "0xstrategy", executionMode: "async_xcm", asset: "0xdot" },
+    { nonce: 8, recipient: "0xReceiver" }
+  );
+  const retry = await service.requestStrategyWithdraw(
+    "0xAlice",
+    "DOT",
+    3,
+    "0xstrategy",
+    { strategyId: "0xstrategy", executionMode: "async_xcm", asset: "0xdot" },
+    { nonce: 8, recipient: "0xReceiver" }
+  );
+
+  assert.equal(retry.strategyPending["0xstrategy"].pendingWithdrawalShares, 4);
+  assert.equal(retry.strategyPending["0xstrategy"].pendingWithdrawalSharesRaw, "4000000");
+  assert.deepEqual(retry.strategyPending["0xstrategy"].pendingWithdrawalRequestIds, ["0xwithdraw"]);
+  assert.equal(retry.treasuryTimeline.filter((event) => event.type === "deallocate_requested").length, 1);
+});
+
+test("requestStrategyWithdraw does not reopen pending accounting for a settled retry", async () => {
+  const gateway = {
+    isEnabled: () => true,
+    requestStrategyWithdraw: async () => ({
+      wallet: "0xAlice",
+      liquid: { DOT: 9 },
+      reserved: {},
+      strategyAllocated: { DOT: 6 },
+      collateralLocked: {},
+      jobStakeLocked: {},
+      debtOutstanding: {},
+      requestId: "0xwithdraw",
+      requestedShares: 4,
+      requestedSharesRaw: "4000000",
+      xcmRequest: { statusLabel: "succeeded", requestedShares: 4, requestedSharesRaw: "4000000" },
+      strategyRequest: {
+        strategyId: "0xstrategy",
+        statusLabel: "succeeded",
+        requestedAssets: 3,
+        requestedShares: 4,
+        requestedSharesRaw: "4000000"
+      }
+    })
+  };
+  const accounts = new Map();
+  const getAccountSummary = async (wallet) => ({
+    wallet,
+    liquid: { DOT: 9 },
+    reserved: {},
+    strategyAllocated: { DOT: 6 },
+    strategyShares: { "0xstrategy": 6 },
+    strategyActivity: {},
+    strategyPending: {},
+    strategyAccounting: {},
+    treasuryTimeline: [],
+    collateralLocked: {},
+    jobStakeLocked: {},
+    debtOutstanding: {}
+  });
+  const service = new AccountMutationService(accounts, gateway, getAccountSummary);
+
+  const retry = await service.requestStrategyWithdraw(
+    "0xAlice",
+    "DOT",
+    3,
+    "0xstrategy",
+    { strategyId: "0xstrategy", executionMode: "async_xcm", asset: "0xdot" },
+    { nonce: 8, recipient: "0xReceiver" }
+  );
+
+  assert.equal(retry.strategyPending["0xstrategy"].pendingWithdrawalShares, 0);
+  assert.deepEqual(retry.strategyPending["0xstrategy"].pendingWithdrawalRequestIds, []);
+  assert.equal(retry.strategyPending["0xstrategy"].lastStatus, "succeeded");
+  assert.equal(retry.treasuryTimeline.length, 0);
 });
 
 test("recordStrategySnapshots updates mark-to-market and appends a yield event on change", async () => {
@@ -334,6 +565,7 @@ test("recordAsyncStrategySettlement updates accounting and clears pending state"
     asset: "DOT",
     pendingDepositAssets: 6,
     pendingDepositAssetsRaw: "6000000",
+    pendingDepositRequestIds: ["0xreq"],
     pendingWithdrawalShares: 0
   };
   accounts.set("0xAlice", account);
@@ -355,6 +587,7 @@ test("recordAsyncStrategySettlement updates accounting and clears pending state"
 
   assert.equal(updated.strategyPending["0xstrategy"].pendingDepositAssets, 0);
   assert.equal(updated.strategyPending["0xstrategy"].pendingDepositAssetsRaw, "0");
+  assert.deepEqual(updated.strategyPending["0xstrategy"].pendingDepositRequestIds, []);
   assert.equal(updated.strategyAccounting["0xstrategy"].principal, 6.000001);
   assert.equal(updated.strategyAccounting["0xstrategy"].principalRaw, "6000001");
   assert.equal(updated.strategyAccounting["0xstrategy"].markValueRaw, "6000001");
@@ -370,7 +603,8 @@ test("recordAsyncStrategySettlement preserves raw asset accounting when withdraw
     asset: "DOT",
     pendingDepositAssets: 0,
     pendingWithdrawalShares: 4,
-    pendingWithdrawalSharesRaw: "4000000"
+    pendingWithdrawalSharesRaw: "4000000",
+    pendingWithdrawalRequestIds: ["0xwithdraw"]
   };
   account.strategyAccounting["0xstrategy"] = {
     asset: "DOT",
@@ -400,6 +634,7 @@ test("recordAsyncStrategySettlement preserves raw asset accounting when withdraw
 
   assert.equal(updated.strategyPending["0xstrategy"].pendingWithdrawalShares, 0);
   assert.equal(updated.strategyPending["0xstrategy"].pendingWithdrawalSharesRaw, "0");
+  assert.deepEqual(updated.strategyPending["0xstrategy"].pendingWithdrawalRequestIds, []);
   assert.equal(updated.strategyAccounting["0xstrategy"].principal, 6);
   assert.equal(updated.strategyAccounting["0xstrategy"].principalRaw, "6000000");
   assert.equal(updated.strategyAccounting["0xstrategy"].markValueRaw, "6000000");

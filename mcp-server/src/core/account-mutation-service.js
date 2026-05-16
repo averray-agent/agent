@@ -386,30 +386,40 @@ export class AccountMutationService {
     const liveAccount = await this.blockchainGateway.requestStrategyDeposit(wallet, strategy, amount, options);
     const account = this.attachStoredTreasuryMetadata(wallet, liveAccount);
     const pending = this.getStrategyPending(account, strategyId, asset);
+    const requestId = liveAccount?.requestId;
     const requestedAssetsRaw = normalizeUnsignedRawAmount(
       liveAccount?.xcmRequest?.requestedAssetsRaw ?? liveAccount?.strategyRequest?.requestedAssetsRaw
     );
-    pending.pendingDepositAssets = Number(pending.pendingDepositAssets ?? 0) + Number(liveAccount?.xcmRequest?.requestedAssets ?? amount);
-    if (requestedAssetsRaw !== undefined) {
-      pending.pendingDepositAssetsRaw = addRawAmount(pending.pendingDepositAssetsRaw, requestedAssetsRaw);
+    const statusLabel = liveAccount?.strategyRequest?.statusLabel ?? liveAccount?.xcmRequest?.statusLabel ?? "pending";
+    pending.pendingDepositRequestIds = normalizeRequestIds(pending.pendingDepositRequestIds);
+    const duplicateRequest = hasRequestId(pending.pendingDepositRequestIds, requestId);
+    const shouldCountPending = statusLabel === "pending" && !duplicateRequest;
+    if (shouldCountPending) {
+      pending.pendingDepositAssets = Number(pending.pendingDepositAssets ?? 0) + Number(liveAccount?.xcmRequest?.requestedAssets ?? amount);
+      if (requestedAssetsRaw !== undefined) {
+        pending.pendingDepositAssetsRaw = addRawAmount(pending.pendingDepositAssetsRaw, requestedAssetsRaw);
+      }
+      pending.pendingDepositRequestIds = addRequestId(pending.pendingDepositRequestIds, requestId);
     }
-    pending.lastRequestId = liveAccount?.requestId;
-    pending.lastStatus = liveAccount?.xcmRequest?.statusLabel ?? "pending";
+    pending.lastRequestId = requestId;
+    pending.lastStatus = statusLabel;
     pending.lastKind = "deposit";
     pending.updatedAt = new Date().toISOString();
     this.markStrategyActivity(account, strategyId, "allocate_requested", amount, asset);
-    this.recordTreasuryEvent(account, {
-      type: "allocate_requested",
-      strategyId,
-      asset,
-      amount,
-      ...(requestedAssetsRaw !== undefined ? { amountRaw: requestedAssetsRaw } : {}),
-      requestId: liveAccount?.requestId
-    });
+    if (shouldCountPending) {
+      this.recordTreasuryEvent(account, {
+        type: "allocate_requested",
+        strategyId,
+        asset,
+        amount,
+        ...(requestedAssetsRaw !== undefined ? { amountRaw: requestedAssetsRaw } : {}),
+        requestId
+      });
+    }
     this.accounts.set(wallet, account);
     return {
       ...account,
-      requestId: liveAccount?.requestId,
+      requestId,
       xcmRequest: liveAccount?.xcmRequest,
       strategyRequest: liveAccount?.strategyRequest
     };
@@ -462,38 +472,48 @@ export class AccountMutationService {
     const liveAccount = await this.blockchainGateway.requestStrategyWithdraw(wallet, strategy, amount, options);
     const account = this.attachStoredTreasuryMetadata(wallet, liveAccount);
     const pending = this.getStrategyPending(account, strategyId, asset);
+    const requestId = liveAccount?.requestId;
     const requestedSharesRaw = normalizeUnsignedRawAmount(
       liveAccount?.strategyRequest?.requestedSharesRaw ??
       liveAccount?.xcmRequest?.requestedSharesRaw ??
       liveAccount?.requestedSharesRaw
     );
-    pending.pendingWithdrawalShares = Number(pending.pendingWithdrawalShares ?? 0) + Number(
-      liveAccount?.strategyRequest?.requestedShares ??
-      liveAccount?.xcmRequest?.requestedShares ??
-      liveAccount?.requestedShares ??
-      amount
-    );
-    if (requestedSharesRaw !== undefined) {
-      pending.pendingWithdrawalSharesRaw = addRawAmount(pending.pendingWithdrawalSharesRaw, requestedSharesRaw);
+    const statusLabel = liveAccount?.strategyRequest?.statusLabel ?? liveAccount?.xcmRequest?.statusLabel ?? "pending";
+    pending.pendingWithdrawalRequestIds = normalizeRequestIds(pending.pendingWithdrawalRequestIds);
+    const duplicateRequest = hasRequestId(pending.pendingWithdrawalRequestIds, requestId);
+    const shouldCountPending = statusLabel === "pending" && !duplicateRequest;
+    if (shouldCountPending) {
+      pending.pendingWithdrawalShares = Number(pending.pendingWithdrawalShares ?? 0) + Number(
+        liveAccount?.strategyRequest?.requestedShares ??
+        liveAccount?.xcmRequest?.requestedShares ??
+        liveAccount?.requestedShares ??
+        amount
+      );
+      if (requestedSharesRaw !== undefined) {
+        pending.pendingWithdrawalSharesRaw = addRawAmount(pending.pendingWithdrawalSharesRaw, requestedSharesRaw);
+      }
+      pending.pendingWithdrawalRequestIds = addRequestId(pending.pendingWithdrawalRequestIds, requestId);
     }
-    pending.lastRequestId = liveAccount?.requestId;
-    pending.lastStatus = liveAccount?.xcmRequest?.statusLabel ?? "pending";
+    pending.lastRequestId = requestId;
+    pending.lastStatus = statusLabel;
     pending.lastKind = "withdraw";
     pending.updatedAt = new Date().toISOString();
     this.markStrategyActivity(account, strategyId, "deallocate_requested", amount, asset);
-    this.recordTreasuryEvent(account, {
-      type: "deallocate_requested",
-      strategyId,
-      asset,
-      amount,
-      requestedShares: pending.pendingWithdrawalShares,
-      ...(requestedSharesRaw !== undefined ? { requestedSharesRaw } : {}),
-      requestId: liveAccount?.requestId
-    });
+    if (shouldCountPending) {
+      this.recordTreasuryEvent(account, {
+        type: "deallocate_requested",
+        strategyId,
+        asset,
+        amount,
+        requestedShares: pending.pendingWithdrawalShares,
+        ...(requestedSharesRaw !== undefined ? { requestedSharesRaw } : {}),
+        requestId
+      });
+    }
     this.accounts.set(wallet, account);
     return {
       ...account,
-      requestId: liveAccount?.requestId,
+      requestId,
       requestedShares: liveAccount?.requestedShares,
       xcmRequest: liveAccount?.xcmRequest,
       strategyRequest: liveAccount?.strategyRequest
@@ -544,6 +564,7 @@ export class AccountMutationService {
         pending.pendingDepositAssetsRaw,
         requestedAssetsRaw ?? settledAssetsRaw
       );
+      pending.pendingDepositRequestIds = removeRequestId(pending.pendingDepositRequestIds, result?.requestId);
       if (status === "succeeded") {
         this.updateStrategyAccountingOnAllocate(account, strategyId, asset, settledAssets || requestedAssets, {
           amountRaw: settledAssetsRaw ?? requestedAssetsRaw
@@ -565,6 +586,7 @@ export class AccountMutationService {
         pending.pendingWithdrawalSharesRaw,
         requestedSharesRaw ?? settledSharesRaw
       );
+      pending.pendingWithdrawalRequestIds = removeRequestId(pending.pendingWithdrawalRequestIds, result?.requestId);
       if (status === "succeeded") {
         this.updateStrategyAccountingOnDeallocate(account, strategyId, asset, settledAssets, {
           assetsReturnedRaw: settledAssetsRaw
@@ -776,6 +798,41 @@ function subtractRawAmount(current, delta) {
   }
   const next = BigInt(normalizedCurrent) - BigInt(normalizedDelta);
   return next > 0n ? next.toString() : "0";
+}
+
+function normalizeRequestId(requestId) {
+  if (typeof requestId !== "string" || !requestId.trim()) {
+    return undefined;
+  }
+  return requestId.trim().toLowerCase();
+}
+
+function normalizeRequestIds(requestIds) {
+  if (!Array.isArray(requestIds)) {
+    return [];
+  }
+  return requestIds.map(normalizeRequestId).filter(Boolean);
+}
+
+function hasRequestId(requestIds, requestId) {
+  const normalized = normalizeRequestId(requestId);
+  return Boolean(normalized && normalizeRequestIds(requestIds).includes(normalized));
+}
+
+function addRequestId(requestIds, requestId) {
+  const normalized = normalizeRequestId(requestId);
+  if (!normalized) {
+    return normalizeRequestIds(requestIds);
+  }
+  return [...new Set([...normalizeRequestIds(requestIds), normalized])];
+}
+
+function removeRequestId(requestIds, requestId) {
+  const normalized = normalizeRequestId(requestId);
+  if (!normalized) {
+    return normalizeRequestIds(requestIds);
+  }
+  return normalizeRequestIds(requestIds).filter((existing) => existing !== normalized);
 }
 
 function addSignedRawAmount(current, delta) {
