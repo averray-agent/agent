@@ -238,6 +238,13 @@ What it proves:
 - revocation removes the route capability on the next request;
 - `GET /admin/service-tokens` lists the revoked grant without a `token` field.
 
+Live proof:
+
+- 2026-05-16 production run:
+  [`25969321980`](https://github.com/averray-agent/agent/actions/runs/25969321980)
+  passed and is archived at
+  [`docs/evidence/service-token-proof-hosted-2026-05-16.json`](evidence/service-token-proof-hosted-2026-05-16.json).
+
 Optional knobs:
 
 - `SERVICE_TOKEN_PROOF_SUBJECT` — proof wallet address; defaults to a

@@ -91,9 +91,13 @@ Restore procedures:
   1Password SSH/basic-auth/admin-JWT cutovers.
 - [ ] When an admin JWT is available, `/admin/status` reports the async XCM
   watcher lane cleanly.
-- [ ] Hosted scoped service-token proof passes with sanitized evidence:
+- [x] Hosted scoped service-token proof passes with sanitized evidence:
   issue a least-privilege token, prove allowed and denied routes, revoke it,
   and confirm `listServiceTokens` does not expose raw token material.
+  Evidence: GitHub Actions run
+  [`25969321980`](https://github.com/averray-agent/agent/actions/runs/25969321980),
+  archived at
+  [`docs/evidence/service-token-proof-hosted-2026-05-16.json`](evidence/service-token-proof-hosted-2026-05-16.json).
 
 Run:
 

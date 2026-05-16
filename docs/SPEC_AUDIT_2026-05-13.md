@@ -250,10 +250,12 @@ SSH/basic-auth/admin-JWT cutovers, and the basic hosted smoke is green.
   old token loses access, and writes sanitized evidence without raw token
   material. `hosted-service-token-proof.yml` wraps that gate in a production
   GitHub workflow using `op://prod-smoke/admin-jwt/password` and uploads the
-  sanitized JSON artifact.
-- Remaining: run `hosted-service-token-proof.yml` on `main` and attach its
-  successful artifact to the launch pack, then extend delegated-wallet UX once
-  native Substrate auth lands.
+  sanitized JSON artifact. GitHub Actions run
+  [`25969321980`](https://github.com/averray-agent/agent/actions/runs/25969321980)
+  passed against production on 2026-05-16; the sanitized launch evidence is
+  archived at
+  [`docs/evidence/service-token-proof-hosted-2026-05-16.json`](evidence/service-token-proof-hosted-2026-05-16.json).
+- Remaining: extend delegated-wallet UX once native Substrate auth lands.
 
 ### Secrets Phase 2+ And Mainnet Custody
 
@@ -320,8 +322,6 @@ correlation and settlement path.
    adoption.
 4. Prove the dispute verdict path live and decide `/release` semantics.
 5. Run the native XCM evidence pack captures.
-6. Run `hosted-service-token-proof.yml` and archive the sanitized evidence
-   artifact.
-7. Continue standardizing producer event payloads and finish visible timeline
+6. Continue standardizing producer event payloads and finish visible timeline
    filter adoption where still missing.
-8. Continue Phase 2+ secrets cleanup and signer custody hardening.
+7. Continue Phase 2+ secrets cleanup and signer custody hardening.
