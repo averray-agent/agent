@@ -54,10 +54,83 @@ test("pollOnce relays terminal outcomes into the platform watcher and stores cur
   assert.equal(calls.length, 1);
   assert.equal(calls[0][0], REQUEST_ID);
   assert.equal(calls[0][1].status, "succeeded");
+  assert.equal(calls[0][1].settledAssets, "7");
+  assert.equal(calls[0][1].settledShares, "7");
 
   const stored = await stateStore.getServiceState("xcm-observation-relay");
   assert.equal(stored.cursor, "cursor-2");
   assert.equal(stored.lastObservedCount, 1);
+});
+
+test("pollOnce preserves exact uint256 settlement amounts from observer feed", async () => {
+  const calls = [];
+  const relay = new XcmObservationRelayService(
+    {
+      observeXcmOutcome: async (requestId, outcome) => {
+        calls.push([requestId, outcome]);
+        return outcome;
+      }
+    },
+    new MemoryStateStore(),
+    undefined,
+    {
+      enabled: true,
+      feedUrl: "https://observer.example/outcomes",
+      fetchImpl: async () => ({
+        ok: true,
+        async json() {
+          return {
+            items: [
+              {
+                requestId: REQUEST_ID,
+                status: "succeeded",
+                settledAssets: "9007199254740993",
+                settledShares: "18446744073709551616"
+              }
+            ]
+          };
+        }
+      })
+    }
+  );
+
+  const result = await relay.pollOnce();
+
+  assert.equal(result.observedCount, 1);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][1].settledAssets, "9007199254740993");
+  assert.equal(calls[0][1].settledShares, "18446744073709551616");
+});
+
+test("pollOnce rejects unsafe numeric settlement amounts from observer feed", async () => {
+  const relay = new XcmObservationRelayService(
+    {
+      observeXcmOutcome: async () => undefined
+    },
+    new MemoryStateStore(),
+    undefined,
+    {
+      enabled: true,
+      feedUrl: "https://observer.example/outcomes",
+      fetchImpl: async () => ({
+        ok: true,
+        async json() {
+          return {
+            items: [
+              {
+                requestId: REQUEST_ID,
+                status: "succeeded",
+                settledAssets: Number.MAX_SAFE_INTEGER + 2
+              }
+            ]
+          };
+        }
+      }),
+      logger: { warn() {} }
+    }
+  );
+
+  await assert.rejects(() => relay.pollOnce(), /exact non-negative uint256/u);
 });
 
 test("pollOnce records upstream failures in service state", async () => {
@@ -102,6 +175,36 @@ test("pollOnce rejects non-terminal statuses from the observer feed", async () =
               {
                 requestId: REQUEST_ID,
                 status: "pending"
+              }
+            ]
+          };
+        }
+      }),
+      logger: { warn() {} }
+    }
+  );
+
+  await assert.rejects(() => relay.pollOnce(), /terminal status/u);
+});
+
+test("pollOnce rejects numeric non-terminal statuses from the observer feed", async () => {
+  const relay = new XcmObservationRelayService(
+    {
+      observeXcmOutcome: async () => undefined
+    },
+    new MemoryStateStore(),
+    undefined,
+    {
+      enabled: true,
+      feedUrl: "https://observer.example/outcomes",
+      fetchImpl: async () => ({
+        ok: true,
+        async json() {
+          return {
+            items: [
+              {
+                requestId: REQUEST_ID,
+                status: 1
               }
             ]
           };
