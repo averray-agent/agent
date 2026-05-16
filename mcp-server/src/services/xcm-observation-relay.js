@@ -228,7 +228,7 @@ export class XcmObservationRelayService {
       settledAssets: this.normalizeUint256(item.settledAssets, "settledAssets"),
       settledShares: this.normalizeUint256(item.settledShares, "settledShares"),
       remoteRef: this.normalizeOptionalHex32(item.remoteRef),
-      failureCode: this.normalizeOptionalHex32(item.failureCode),
+      failureCode: this.normalizeFailureCode(item.failureCode, status),
       source: typeof item.source === "string" && item.source.trim() ? item.source.trim() : "xcm_relay_feed",
       observedAt: this.normalizeObservedAt(item.observedAt)
     };
@@ -245,6 +245,14 @@ export class XcmObservationRelayService {
       throw new ValidationError("XCM observer items must use a terminal status.");
     }
     return normalized;
+  }
+
+  normalizeFailureCode(value, status) {
+    const failureCode = this.normalizeOptionalHex32(value);
+    if (status === "failed" && !failureCode) {
+      throw new ValidationError("XCM observer failed items must include failureCode.");
+    }
+    return failureCode;
   }
 
   normalizeUint256(value, label) {
