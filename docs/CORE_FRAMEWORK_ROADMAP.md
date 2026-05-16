@@ -213,20 +213,19 @@ machine.
   settlement, or verification result ingestion
 - sessions persist compact `statusHistory` entries with reason, timestamp, and
   metadata
+- `session-state-machine.test.js` now covers every legal and illegal edge in
+  the current transition table, plus the verifier callback receive guard
 
 ### Remaining gaps
 
 - settlement and dispute posture are still mostly transition outcomes and
   metadata, not separately typed workflow phases
 - retries and re-open semantics still live primarily in claim handling
-- transition coverage is focused on high-risk guards rather than full property
-  coverage across every legal and illegal edge
 
 ### Concrete next changes
 
 - route future settlement, timeout, and dispute actions through dedicated
   state-machine helpers
-- add fixture or property tests for every legal and illegal transition
 - expose richer transition reason taxonomy for operator UI timelines and agent
   diagnostics
 

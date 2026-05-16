@@ -49,7 +49,9 @@ SSH/basic-auth/admin-JWT cutovers, and the basic hosted smoke is green.
 - Verification results are stored with replay inputs, verifier config snapshot,
   config hash, config version, and handler version.
 - Session transitions route through shared state-machine guards for the
-  high-risk claim, submit, verification, expiry, and dispute paths.
+  high-risk claim, submit, verification, expiry, and dispute paths; the current
+  transition table now has exhaustive legal/illegal edge coverage plus
+  verifier callback receive-guard coverage.
 - Duplicate submit and non-verifiable verifier callbacks fail closed before
   replacing submissions or settling.
 
