@@ -4,6 +4,7 @@ import { db } from "ponder:api";
 import schema from "ponder:schema";
 
 import { decodeCursor, listTerminalXcmOutcomes, normalizeLimit } from "./xcm-outcomes";
+import { cursorForSource, type OutcomeCursorMode } from "./xcm-outcome-cursor";
 import { XcmOutcomePublisherService } from "./xcm-outcome-publisher";
 
 const app = new Hono();
@@ -38,9 +39,11 @@ app.get("/xcm/outcomes", async (c) => {
   const limit = normalizeLimit(c.req.query("limit"));
   const cursor = decodeCursor(c.req.query("cursor"));
   const usePublishedFeed = await xcmOutcomePublisher.hasPublishedOutcomes();
+  const sourceMode: OutcomeCursorMode = usePublishedFeed ? "external" : "indexed";
+  const sourceCursor = cursorForSource(cursor, sourceMode);
   const outcomes = usePublishedFeed
-    ? await xcmOutcomePublisher.listPublishedOutcomes({ limit, cursor })
-    : await listTerminalXcmOutcomes({ limit, cursor });
+    ? await xcmOutcomePublisher.listPublishedOutcomes({ limit, cursor: sourceCursor })
+    : await listTerminalXcmOutcomes({ limit, cursor: sourceCursor });
 
   return c.json({
     items: outcomes.items,
@@ -48,7 +51,13 @@ app.get("/xcm/outcomes", async (c) => {
     meta: {
       limit,
       terminalStatuses: ["succeeded", "failed", "cancelled"],
-      source: usePublishedFeed ? "external_xcm_observer_feed" : "indexer_terminal_status_feed"
+      source: usePublishedFeed ? "external_xcm_observer_feed" : "indexer_terminal_status_feed",
+      sourceMode,
+      cursor: {
+        requestedMode: cursor?.mode,
+        accepted: !cursor || Boolean(sourceCursor),
+        reset: Boolean(cursor && !sourceCursor)
+      }
     }
   });
 });
