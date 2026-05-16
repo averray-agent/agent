@@ -160,7 +160,10 @@ export class JobExecutionService {
         ? this.blockchainGateway.toJobId(jobId)
         : jobId;
       let chainClaimTiming = {};
-      const priorClaimCount = countClaimedSessions(await this.collectSessionHistory(wallet));
+      const priorClaimCount = this.blockchainGateway?.isEnabled()
+        && typeof this.blockchainGateway.getWorkerClaimCount === "function"
+        ? await this.blockchainGateway.getWorkerClaimCount(wallet)
+        : countClaimedSessions(await this.collectSessionHistory(wallet));
       const claimEconomicsConfig = await this.getClaimEconomicsConfig();
       let claimEconomics = computeClaimEconomics({
         rewardAmount: job.rewardAmount,

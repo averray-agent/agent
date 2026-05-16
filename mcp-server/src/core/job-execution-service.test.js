@@ -296,6 +296,56 @@ test("claimJob stores on-chain claim expiry when blockchain is enabled", async (
   assert.equal(claimExpiresAt(claimed, job), "2026-05-01T10:01:00.000Z");
 });
 
+test("claimJob uses chain worker claim count before ensuring a chain job", async () => {
+  const stateStore = new MemoryStateStore();
+  const job = makeJob({ rewardAmount: 5 });
+  let ensuredClaimLock;
+  let checkedClaimLock;
+  const blockchainGateway = {
+    isEnabled: () => true,
+    toJobId: (jobId) => `chain:${jobId}`,
+    async getWorkerClaimCount(wallet) {
+      assert.equal(wallet, WALLET);
+      return 3;
+    },
+    async getJob() {
+      return { state: 0 };
+    },
+    async ensureJob(jobInput, instanceJobId, claimLock) {
+      assert.equal(jobInput.id, job.id);
+      assert.equal(instanceJobId, job.id);
+      ensuredClaimLock = claimLock;
+    },
+    async ensureClaimStakeLiquidity(wallet, asset, claimLock) {
+      assert.equal(wallet, WALLET);
+      assert.equal(asset, "DOT");
+      checkedClaimLock = claimLock;
+    },
+    async claimJob(jobId, wallet) {
+      assert.equal(jobId, job.id);
+      assert.equal(wallet, WALLET);
+    }
+  };
+  const service = new JobExecutionService(
+    stateStore,
+    blockchainGateway,
+    () => job,
+    undefined,
+    undefined,
+    async () => 1000,
+    () => job,
+    async () => ({ minClaimFeeByAsset: { DOT: 0.05 } })
+  );
+
+  const claimed = await service.claimJob(WALLET, job.id, "http", "idemp-chain-count");
+
+  assert.equal(ensuredClaimLock, 0.6);
+  assert.equal(checkedClaimLock, 0.6);
+  assert.equal(claimed.claimNumber, 4);
+  assert.equal(claimed.claimEconomicsWaived, false);
+  assert.equal(claimed.totalClaimLock, 0.6);
+});
+
 test("claimJob reports exhausted retry budget after an expired single-attempt job", async () => {
   const stateStore = new MemoryStateStore();
   const job = makeJob({
