@@ -459,7 +459,7 @@ export class SubscanXcmSourceAdapter implements XcmUpstreamSourceAdapter {
       settledAssets: "0",
       settledShares: "0",
       remoteRef: normalizeOptionalHex32(this.pickString(entry, ["remote_ref", "query_id"])),
-      failureCode: rawStatus === "failed"
+      failureCode: status === "failed"
         ? normalizeOptionalHex32(this.pickString(entry, ["error_code", "failure_code"]))
         : null,
       observedAt: normalizeObservedAt(this.pickString(entry, ["block_timestamp", "timestamp", "time"])),
