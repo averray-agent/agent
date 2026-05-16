@@ -1,6 +1,7 @@
 import { ValidationError } from "../core/errors.js";
 
 const UINT256_MAX = (1n << 256n) - 1n;
+const TERMINAL_STATUSES = new Set(["succeeded", "failed", "cancelled"]);
 
 export class XcmSettlementWatcherService {
   constructor(
@@ -55,13 +56,13 @@ export class XcmSettlementWatcherService {
     const normalizedRequestId = this.requireRequestId(requestId);
     const incoming = {
       requestId: normalizedRequestId,
-      status: outcome.status,
+      status: normalizeObservationStatus(outcome.status),
       settledAssets: normalizeObservationAmount(outcome.settledAssets, "settledAssets"),
       settledShares: normalizeObservationAmount(outcome.settledShares, "settledShares"),
       remoteRef: outcome.remoteRef,
       failureCode: outcome.failureCode,
       source: typeof outcome.source === "string" && outcome.source.trim() ? outcome.source.trim() : "observer",
-      observedAt: outcome.observedAt ?? new Date().toISOString(),
+      observedAt: normalizeObservationObservedAt(outcome.observedAt),
       processed: false
     };
     const existing = await this.stateStore.getXcmObservation?.(normalizedRequestId);
@@ -179,6 +180,16 @@ export class XcmSettlementWatcherService {
   }
 }
 
+function normalizeObservationStatus(status) {
+  const normalized = typeof status === "number"
+    ? ["unknown", "pending", "succeeded", "failed", "cancelled"][status] ?? "unknown"
+    : String(status ?? "").trim().toLowerCase();
+  if (!TERMINAL_STATUSES.has(normalized)) {
+    throw new ValidationError("XCM observations must use a terminal status.");
+  }
+  return normalized;
+}
+
 function normalizeObservationAmount(value, label) {
   if (value === undefined || value === null || value === "") {
     return "0";
@@ -206,4 +217,15 @@ function normalizeObservationAmount(value, label) {
     throw new ValidationError(`${label} must fit uint256.`);
   }
   return parsed.toString();
+}
+
+function normalizeObservationObservedAt(value) {
+  if (value === undefined || value === null || value === "") {
+    return new Date().toISOString();
+  }
+  const observedAt = new Date(value);
+  if (Number.isNaN(observedAt.getTime())) {
+    throw new ValidationError("observedAt must be ISO-8601 when provided.");
+  }
+  return observedAt.toISOString();
 }
