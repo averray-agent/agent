@@ -37,6 +37,30 @@
       "name": "sharp",
       "reason": "Native libvips bindings for image processing. Used by marketing/Astro site build for image optimization. Install downloads precompiled libvips for the runner arch.",
       "added_at": "2026-05-13"
+    },
+    {
+      "path": "node_modules/@acala-network/chopsticks-db/node_modules/sqlite3",
+      "name": "sqlite3",
+      "reason": "Nested sqlite3 under @acala-network/chopsticks-db (re-hoist victim of the tier-1 security bumps in #348). Same package family as the top-level node_modules/sqlite3 entry — native SQLite bindings via node-gyp/node-pre-gyp.",
+      "added_at": "2026-05-16"
+    },
+    {
+      "path": "node_modules/ponder/node_modules/esbuild",
+      "name": "esbuild",
+      "reason": "Nested esbuild under ponder (re-hoist victim of the tier-1 security bumps in #348). Same package family as the top-level node_modules/esbuild entry — downloads platform-specific Go binary at install.",
+      "added_at": "2026-05-16"
+    },
+    {
+      "path": "node_modules/vite-node/node_modules/esbuild",
+      "name": "esbuild",
+      "reason": "Nested esbuild under vite-node (re-hoist victim of the tier-1 security bumps in #348). Same package family as the top-level node_modules/esbuild entry — downloads platform-specific Go binary at install.",
+      "added_at": "2026-05-16"
+    },
+    {
+      "path": "node_modules/vite/node_modules/esbuild",
+      "name": "esbuild",
+      "reason": "Nested esbuild under vite (re-hoist victim of the tier-1 security bumps in #348). Same package family as the top-level node_modules/esbuild entry — downloads platform-specific Go binary at install.",
+      "added_at": "2026-05-16"
     }
   ]
 }
