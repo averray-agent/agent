@@ -117,21 +117,29 @@ export class AccountMutationService {
     }
   }
 
-  updateStrategyAccountingOnAllocate(account, strategyId, asset, amount) {
+  updateStrategyAccountingOnAllocate(account, strategyId, asset, amount, { amountRaw = undefined } = {}) {
     const entry = this.getStrategyAccounting(account, strategyId, asset);
     entry.principal = Number(entry.principal ?? 0) + amount;
     entry.markValue = Number(entry.markValue ?? 0) + amount;
+    const normalizedAmountRaw = normalizeUnsignedRawAmount(amountRaw);
+    if (normalizedAmountRaw !== undefined) {
+      entry.principalRaw = addRawAmount(entry.principalRaw, normalizedAmountRaw);
+      entry.markValueRaw = addRawAmount(entry.markValueRaw, normalizedAmountRaw);
+    }
     entry.markedAt = new Date().toISOString();
     this.recordTreasuryEvent(account, {
       type: "allocate",
       strategyId,
       asset,
       amount,
-      principalAfter: entry.principal
+      ...(normalizedAmountRaw !== undefined ? { amountRaw: normalizedAmountRaw } : {}),
+      principalAfter: entry.principal,
+      ...(entry.principalRaw !== undefined ? { principalAfterRaw: entry.principalRaw } : {}),
+      ...(entry.markValueRaw !== undefined ? { markValueAfterRaw: entry.markValueRaw } : {})
     });
   }
 
-  updateStrategyAccountingOnDeallocate(account, strategyId, asset, assetsReturned) {
+  updateStrategyAccountingOnDeallocate(account, strategyId, asset, assetsReturned, { assetsReturnedRaw = undefined } = {}) {
     const entry = this.getStrategyAccounting(account, strategyId, asset);
     const principalBefore = Number(entry.principal ?? 0);
     const markValueBefore = Number(entry.markValue ?? principalBefore ?? 0);
@@ -144,6 +152,10 @@ export class AccountMutationService {
     entry.principal = Math.max(principalBefore - principalReleased, 0);
     entry.realizedYield = Number(entry.realizedYield ?? 0) + realizedYieldDelta;
     entry.markValue = Math.max(markValueBefore - assetsReturned, 0);
+    const normalizedAssetsReturnedRaw = normalizeUnsignedRawAmount(assetsReturnedRaw);
+    const rawSettlement = normalizedAssetsReturnedRaw !== undefined
+      ? applyRawDeallocation(entry, normalizedAssetsReturnedRaw)
+      : {};
     entry.markedAt = new Date().toISOString();
 
     this.recordTreasuryEvent(account, {
@@ -151,8 +163,14 @@ export class AccountMutationService {
       strategyId,
       asset,
       amount: assetsReturned,
+      ...(normalizedAssetsReturnedRaw !== undefined ? { amountRaw: normalizedAssetsReturnedRaw } : {}),
       realizedYieldDelta,
-      principalAfter: entry.principal
+      ...(rawSettlement.realizedYieldDeltaRaw !== undefined
+        ? { realizedYieldDeltaRaw: rawSettlement.realizedYieldDeltaRaw }
+        : {}),
+      principalAfter: entry.principal,
+      ...(entry.principalRaw !== undefined ? { principalAfterRaw: entry.principalRaw } : {}),
+      ...(entry.markValueRaw !== undefined ? { markValueAfterRaw: entry.markValueRaw } : {})
     });
   }
 
@@ -188,6 +206,10 @@ export class AccountMutationService {
       entry.asset = asset;
       entry.markValue = currentValue;
       entry.markedAt = recordedAt;
+      const currentValueRaw = normalizeUnsignedRawAmount(snapshot.currentValueRaw ?? snapshot.routedAmountRaw);
+      if (currentValueRaw !== undefined) {
+        entry.markValueRaw = currentValueRaw;
+      }
       if (Number.isFinite(sharePrice)) {
         entry.sharePrice = sharePrice;
       }
@@ -364,7 +386,13 @@ export class AccountMutationService {
     const liveAccount = await this.blockchainGateway.requestStrategyDeposit(wallet, strategy, amount, options);
     const account = this.attachStoredTreasuryMetadata(wallet, liveAccount);
     const pending = this.getStrategyPending(account, strategyId, asset);
+    const requestedAssetsRaw = normalizeUnsignedRawAmount(
+      liveAccount?.xcmRequest?.requestedAssetsRaw ?? liveAccount?.strategyRequest?.requestedAssetsRaw
+    );
     pending.pendingDepositAssets = Number(pending.pendingDepositAssets ?? 0) + Number(liveAccount?.xcmRequest?.requestedAssets ?? amount);
+    if (requestedAssetsRaw !== undefined) {
+      pending.pendingDepositAssetsRaw = addRawAmount(pending.pendingDepositAssetsRaw, requestedAssetsRaw);
+    }
     pending.lastRequestId = liveAccount?.requestId;
     pending.lastStatus = liveAccount?.xcmRequest?.statusLabel ?? "pending";
     pending.lastKind = "deposit";
@@ -375,6 +403,7 @@ export class AccountMutationService {
       strategyId,
       asset,
       amount,
+      ...(requestedAssetsRaw !== undefined ? { amountRaw: requestedAssetsRaw } : {}),
       requestId: liveAccount?.requestId
     });
     this.accounts.set(wallet, account);
@@ -433,12 +462,20 @@ export class AccountMutationService {
     const liveAccount = await this.blockchainGateway.requestStrategyWithdraw(wallet, strategy, amount, options);
     const account = this.attachStoredTreasuryMetadata(wallet, liveAccount);
     const pending = this.getStrategyPending(account, strategyId, asset);
+    const requestedSharesRaw = normalizeUnsignedRawAmount(
+      liveAccount?.strategyRequest?.requestedSharesRaw ??
+      liveAccount?.xcmRequest?.requestedSharesRaw ??
+      liveAccount?.requestedSharesRaw
+    );
     pending.pendingWithdrawalShares = Number(pending.pendingWithdrawalShares ?? 0) + Number(
       liveAccount?.strategyRequest?.requestedShares ??
       liveAccount?.xcmRequest?.requestedShares ??
       liveAccount?.requestedShares ??
       amount
     );
+    if (requestedSharesRaw !== undefined) {
+      pending.pendingWithdrawalSharesRaw = addRawAmount(pending.pendingWithdrawalSharesRaw, requestedSharesRaw);
+    }
     pending.lastRequestId = liveAccount?.requestId;
     pending.lastStatus = liveAccount?.xcmRequest?.statusLabel ?? "pending";
     pending.lastKind = "withdraw";
@@ -450,6 +487,7 @@ export class AccountMutationService {
       asset,
       amount,
       requestedShares: pending.pendingWithdrawalShares,
+      ...(requestedSharesRaw !== undefined ? { requestedSharesRaw } : {}),
       requestId: liveAccount?.requestId
     });
     this.accounts.set(wallet, account);
@@ -487,32 +525,67 @@ export class AccountMutationService {
     const requestedAssets = Number(result?.strategyRequest?.requestedAssets ?? 0);
     const requestedShares = Number(result?.strategyRequest?.requestedShares ?? 0);
     const settledAssets = Number(result?.strategyRequest?.settledAssets ?? result?.settledAssets ?? 0);
+    const requestedAssetsRaw = normalizeUnsignedRawAmount(
+      result?.strategyRequest?.requestedAssetsRaw ?? result?.requestedAssetsRaw
+    );
+    const requestedSharesRaw = normalizeUnsignedRawAmount(
+      result?.strategyRequest?.requestedSharesRaw ?? result?.requestedSharesRaw
+    );
+    const settledAssetsRaw = normalizeUnsignedRawAmount(
+      result?.strategyRequest?.settledAssetsRaw ?? result?.settledAssetsRaw
+    );
+    const settledSharesRaw = normalizeUnsignedRawAmount(
+      result?.strategyRequest?.settledSharesRaw ?? result?.settledSharesRaw
+    );
 
     if (kind === "deposit") {
       pending.pendingDepositAssets = Math.max(Number(pending.pendingDepositAssets ?? 0) - requestedAssets, 0);
+      pending.pendingDepositAssetsRaw = subtractRawAmount(
+        pending.pendingDepositAssetsRaw,
+        requestedAssetsRaw ?? settledAssetsRaw
+      );
       if (status === "succeeded") {
-        this.updateStrategyAccountingOnAllocate(account, strategyId, asset, settledAssets || requestedAssets);
+        this.updateStrategyAccountingOnAllocate(account, strategyId, asset, settledAssets || requestedAssets, {
+          amountRaw: settledAssetsRaw ?? requestedAssetsRaw
+        });
       } else {
         this.recordTreasuryEvent(account, {
           type: "allocate_failed",
           strategyId,
           asset,
           amount: requestedAssets,
+          ...(requestedAssetsRaw !== undefined ? { amountRaw: requestedAssetsRaw } : {}),
           requestId: result?.requestId,
           failureCode: result?.strategyRequest?.failureCodeLabel ?? result?.failureCodeLabel
         });
       }
     } else if (kind === "withdraw") {
       pending.pendingWithdrawalShares = Math.max(Number(pending.pendingWithdrawalShares ?? 0) - requestedShares, 0);
+      pending.pendingWithdrawalSharesRaw = subtractRawAmount(
+        pending.pendingWithdrawalSharesRaw,
+        requestedSharesRaw ?? settledSharesRaw
+      );
       if (status === "succeeded") {
-        this.updateStrategyAccountingOnDeallocate(account, strategyId, asset, settledAssets);
+        this.updateStrategyAccountingOnDeallocate(account, strategyId, asset, settledAssets, {
+          assetsReturnedRaw: settledAssetsRaw
+        });
       } else {
         this.recordTreasuryEvent(account, {
           type: "deallocate_failed",
           strategyId,
           asset,
           amount: settledAssets || requestedAssets,
+          ...(settledAssetsRaw !== undefined
+            ? { amountRaw: settledAssetsRaw }
+            : requestedAssetsRaw !== undefined
+              ? { amountRaw: requestedAssetsRaw }
+              : {}),
           requestedShares,
+          ...(requestedSharesRaw !== undefined
+            ? { requestedSharesRaw }
+            : settledSharesRaw !== undefined
+              ? { requestedSharesRaw: settledSharesRaw }
+              : {}),
           requestId: result?.requestId,
           failureCode: result?.strategyRequest?.failureCodeLabel ?? result?.failureCodeLabel
         });
@@ -632,4 +705,112 @@ export class AccountMutationService {
     this.accounts.set(wallet, account);
     return account;
   }
+}
+
+function normalizeUnsignedRawAmount(value) {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+  if (typeof value === "bigint") {
+    if (value < 0n) {
+      throw new ValidationError("raw amount must be a non-negative integer.");
+    }
+    return value.toString();
+  }
+  if (typeof value === "number") {
+    if (!Number.isSafeInteger(value) || value < 0) {
+      throw new ValidationError("raw amount must be an exact non-negative integer.");
+    }
+    return String(value);
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim();
+    if (!/^\d+$/u.test(normalized)) {
+      throw new ValidationError("raw amount must be a non-negative integer string.");
+    }
+    return BigInt(normalized).toString();
+  }
+  throw new ValidationError("raw amount must be a non-negative integer.");
+}
+
+function normalizeSignedRawAmount(value) {
+  if (value === undefined || value === null || value === "") {
+    return 0n;
+  }
+  if (typeof value === "bigint") {
+    return value;
+  }
+  if (typeof value === "number") {
+    if (!Number.isSafeInteger(value)) {
+      throw new ValidationError("signed raw amount must be an exact integer.");
+    }
+    return BigInt(value);
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim();
+    if (!/^-?\d+$/u.test(normalized)) {
+      throw new ValidationError("signed raw amount must be an integer string.");
+    }
+    return BigInt(normalized);
+  }
+  throw new ValidationError("signed raw amount must be an integer.");
+}
+
+function addRawAmount(current, delta) {
+  const normalizedDelta = normalizeUnsignedRawAmount(delta);
+  if (normalizedDelta === undefined) {
+    return current;
+  }
+  const normalizedCurrent = normalizeUnsignedRawAmount(current);
+  return ((normalizedCurrent === undefined ? 0n : BigInt(normalizedCurrent)) + BigInt(normalizedDelta)).toString();
+}
+
+function subtractRawAmount(current, delta) {
+  const normalizedCurrent = normalizeUnsignedRawAmount(current);
+  if (normalizedCurrent === undefined) {
+    return current;
+  }
+  const normalizedDelta = normalizeUnsignedRawAmount(delta);
+  if (normalizedDelta === undefined) {
+    return normalizedCurrent;
+  }
+  const next = BigInt(normalizedCurrent) - BigInt(normalizedDelta);
+  return next > 0n ? next.toString() : "0";
+}
+
+function addSignedRawAmount(current, delta) {
+  return (normalizeSignedRawAmount(current) + normalizeSignedRawAmount(delta)).toString();
+}
+
+function maxBigInt(...values) {
+  return values.reduce((max, value) => (value > max ? value : max), values[0] ?? 0n);
+}
+
+function minBigInt(...values) {
+  return values.reduce((min, value) => (value < min ? value : min), values[0] ?? 0n);
+}
+
+function applyRawDeallocation(entry, assetsReturnedRaw) {
+  const normalizedAssetsReturnedRaw = normalizeUnsignedRawAmount(assetsReturnedRaw);
+  const normalizedPrincipalRaw = normalizeUnsignedRawAmount(entry.principalRaw);
+  if (normalizedAssetsReturnedRaw === undefined || normalizedPrincipalRaw === undefined) {
+    return {};
+  }
+
+  const assetsReturned = BigInt(normalizedAssetsReturnedRaw);
+  const principalBefore = BigInt(normalizedPrincipalRaw);
+  const markValueBefore = BigInt(normalizeUnsignedRawAmount(entry.markValueRaw ?? entry.principalRaw) ?? "0");
+  const denominator = maxBigInt(markValueBefore, assetsReturned, 0n);
+  const principalReleased = denominator > 0n
+    ? minBigInt(principalBefore, (principalBefore * assetsReturned) / denominator)
+    : minBigInt(principalBefore, assetsReturned);
+  const realizedYieldDeltaRaw = assetsReturned - principalReleased;
+
+  entry.principalRaw = (principalBefore > principalReleased ? principalBefore - principalReleased : 0n).toString();
+  entry.realizedYieldRaw = addSignedRawAmount(entry.realizedYieldRaw, realizedYieldDeltaRaw);
+  entry.markValueRaw = (markValueBefore > assetsReturned ? markValueBefore - assetsReturned : 0n).toString();
+
+  return {
+    realizedYieldDeltaRaw: realizedYieldDeltaRaw.toString()
+  };
 }

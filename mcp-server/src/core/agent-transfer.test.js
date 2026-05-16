@@ -157,8 +157,8 @@ test("requestStrategyDeposit delegates async lanes to the blockchain gateway and
         jobStakeLocked: {},
         debtOutstanding: {},
         requestId: "0xreq",
-        xcmRequest: { statusLabel: "pending", requestedAssets: 6 },
-        strategyRequest: { strategyId: "0xstrategy", requestedAssets: 6, requestedShares: 0 }
+        xcmRequest: { statusLabel: "pending", requestedAssets: 6, requestedAssetsRaw: "6000000" },
+        strategyRequest: { strategyId: "0xstrategy", requestedAssets: 6, requestedAssetsRaw: "6000000", requestedShares: 0 }
       };
     }
   };
@@ -191,8 +191,10 @@ test("requestStrategyDeposit delegates async lanes to the blockchain gateway and
   assert.equal(calls.length, 1);
   assert.equal(updated.requestId, "0xreq");
   assert.equal(updated.strategyPending["0xstrategy"].pendingDepositAssets, 6);
+  assert.equal(updated.strategyPending["0xstrategy"].pendingDepositAssetsRaw, "6000000");
   assert.equal(updated.strategyActivity["0xstrategy"].action, "allocate_requested");
   assert.equal(updated.treasuryTimeline[0].type, "allocate_requested");
+  assert.equal(updated.treasuryTimeline[0].amountRaw, "6000000");
 });
 
 test("borrow uses live borrow capacity and updates liquid plus debt", async () => {
@@ -257,8 +259,9 @@ test("requestStrategyWithdraw delegates async lanes to the blockchain gateway an
       debtOutstanding: {},
       requestId: "0xwithdraw",
       requestedShares: 4,
-      xcmRequest: { statusLabel: "pending", requestedShares: 4 },
-      strategyRequest: { strategyId: "0xstrategy", requestedAssets: 3, requestedShares: 4 }
+      requestedSharesRaw: "4000000",
+      xcmRequest: { statusLabel: "pending", requestedShares: 4, requestedSharesRaw: "4000000" },
+      strategyRequest: { strategyId: "0xstrategy", requestedAssets: 3, requestedShares: 4, requestedSharesRaw: "4000000" }
     })
   };
   const accounts = new Map();
@@ -289,8 +292,10 @@ test("requestStrategyWithdraw delegates async lanes to the blockchain gateway an
 
   assert.equal(updated.requestId, "0xwithdraw");
   assert.equal(updated.strategyPending["0xstrategy"].pendingWithdrawalShares, 4);
+  assert.equal(updated.strategyPending["0xstrategy"].pendingWithdrawalSharesRaw, "4000000");
   assert.equal(updated.strategyActivity["0xstrategy"].action, "deallocate_requested");
   assert.equal(updated.treasuryTimeline[0].type, "deallocate_requested");
+  assert.equal(updated.treasuryTimeline[0].requestedSharesRaw, "4000000");
 });
 
 test("recordStrategySnapshots updates mark-to-market and appends a yield event on change", async () => {
@@ -328,6 +333,7 @@ test("recordAsyncStrategySettlement updates accounting and clears pending state"
   account.strategyPending["0xstrategy"] = {
     asset: "DOT",
     pendingDepositAssets: 6,
+    pendingDepositAssetsRaw: "6000000",
     pendingWithdrawalShares: 0
   };
   accounts.set("0xAlice", account);
@@ -341,11 +347,64 @@ test("recordAsyncStrategySettlement updates accounting and clears pending state"
       kindLabel: "deposit",
       statusLabel: "succeeded",
       requestedAssets: 6,
-      settledAssets: 6
+      requestedAssetsRaw: "6000000",
+      settledAssets: 6.000001,
+      settledAssetsRaw: "6000001"
     }
   });
 
   assert.equal(updated.strategyPending["0xstrategy"].pendingDepositAssets, 0);
-  assert.equal(updated.strategyAccounting["0xstrategy"].principal, 6);
+  assert.equal(updated.strategyPending["0xstrategy"].pendingDepositAssetsRaw, "0");
+  assert.equal(updated.strategyAccounting["0xstrategy"].principal, 6.000001);
+  assert.equal(updated.strategyAccounting["0xstrategy"].principalRaw, "6000001");
+  assert.equal(updated.strategyAccounting["0xstrategy"].markValueRaw, "6000001");
   assert.equal(updated.treasuryTimeline[0].type, "allocate");
+  assert.equal(updated.treasuryTimeline[0].amountRaw, "6000001");
+  assert.equal(updated.treasuryTimeline[0].principalAfterRaw, "6000001");
+});
+
+test("recordAsyncStrategySettlement preserves raw asset accounting when withdrawals settle", async () => {
+  const { service, accounts } = makeService();
+  const account = await service.getAccountSummary("0xAlice");
+  account.strategyPending["0xstrategy"] = {
+    asset: "DOT",
+    pendingDepositAssets: 0,
+    pendingWithdrawalShares: 4,
+    pendingWithdrawalSharesRaw: "4000000"
+  };
+  account.strategyAccounting["0xstrategy"] = {
+    asset: "DOT",
+    principal: 10,
+    markValue: 10,
+    principalRaw: "10000000",
+    markValueRaw: "10000000",
+    realizedYield: 0,
+    realizedYieldRaw: "0"
+  };
+  accounts.set("0xAlice", account);
+
+  const updated = await service.recordAsyncStrategySettlement({
+    requestId: "0xwithdraw",
+    strategyRequest: {
+      account: "0xAlice",
+      strategyId: "0xstrategy",
+      assetSymbol: "DOT",
+      kindLabel: "withdraw",
+      statusLabel: "succeeded",
+      requestedShares: 4,
+      requestedSharesRaw: "4000000",
+      settledAssets: 4,
+      settledAssetsRaw: "4000000"
+    }
+  });
+
+  assert.equal(updated.strategyPending["0xstrategy"].pendingWithdrawalShares, 0);
+  assert.equal(updated.strategyPending["0xstrategy"].pendingWithdrawalSharesRaw, "0");
+  assert.equal(updated.strategyAccounting["0xstrategy"].principal, 6);
+  assert.equal(updated.strategyAccounting["0xstrategy"].principalRaw, "6000000");
+  assert.equal(updated.strategyAccounting["0xstrategy"].markValueRaw, "6000000");
+  assert.equal(updated.strategyAccounting["0xstrategy"].realizedYieldRaw, "0");
+  assert.equal(updated.treasuryTimeline[0].type, "deallocate");
+  assert.equal(updated.treasuryTimeline[0].amountRaw, "4000000");
+  assert.equal(updated.treasuryTimeline[0].principalAfterRaw, "6000000");
 });

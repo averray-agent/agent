@@ -1238,6 +1238,37 @@ function ratioToBps(numerator, denominator) {
   return Math.round((numerator / denominator) * 10_000);
 }
 
+function normalizeRawIntegerString(value) {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+  if (typeof value === "bigint") {
+    return value >= 0n ? value.toString() : undefined;
+  }
+  if (typeof value === "number") {
+    return Number.isSafeInteger(value) && value >= 0 ? String(value) : undefined;
+  }
+  const normalized = String(value).trim();
+  if (!/^\d+$/u.test(normalized)) {
+    return undefined;
+  }
+  return BigInt(normalized).toString();
+}
+
+function calculateRoutedAmountRaw(sharesRaw, telemetry = {}) {
+  const normalizedSharesRaw = normalizeRawIntegerString(sharesRaw);
+  const totalAssetsRaw = normalizeRawIntegerString(telemetry.totalAssetsRaw);
+  const totalSharesRaw = normalizeRawIntegerString(telemetry.totalSharesRaw);
+  if (normalizedSharesRaw === undefined || totalAssetsRaw === undefined || totalSharesRaw === undefined) {
+    return undefined;
+  }
+  const denominator = BigInt(totalSharesRaw);
+  if (denominator <= 0n) {
+    return undefined;
+  }
+  return ((BigInt(normalizedSharesRaw) * BigInt(totalAssetsRaw)) / denominator).toString();
+}
+
 function resolveAssetSymbol(assetAddress) {
   if (!assetAddress) return "DOT";
   const supportedAssets = gateway?.config?.supportedAssets ?? [];
@@ -1586,7 +1617,13 @@ function normalizeTimelineEntry(entry = {}) {
     strategyId: entry.strategyId,
     asset: entry.asset ?? "DOT",
     amount,
+    ...(entry.amountRaw !== undefined ? { amountRaw: normalizeRawIntegerString(entry.amountRaw) ?? String(entry.amountRaw) } : {}),
     yieldDelta,
+    ...(entry.yieldDeltaRaw !== undefined ? { yieldDeltaRaw: String(entry.yieldDeltaRaw) } : {}),
+    ...(entry.realizedYieldDeltaRaw !== undefined ? { realizedYieldDeltaRaw: String(entry.realizedYieldDeltaRaw) } : {}),
+    ...(entry.principalAfterRaw !== undefined ? { principalAfterRaw: String(entry.principalAfterRaw) } : {}),
+    ...(entry.markValueAfterRaw !== undefined ? { markValueAfterRaw: String(entry.markValueAfterRaw) } : {}),
+    ...(entry.requestedSharesRaw !== undefined ? { requestedSharesRaw: String(entry.requestedSharesRaw) } : {}),
     at: entry.at
   };
 }
@@ -2757,8 +2794,11 @@ const server = createServer(async (request, response) => {
       const positions = strategies.map((strategy) => {
         const shares = Number(sharesByStrategy[strategy.strategyId] ?? 0);
         const pendingPosition = pendingByStrategy[strategy.strategyId] ?? {};
+        const sharesRaw = normalizeRawIntegerString(pendingPosition.sharesRaw);
         const pendingDepositAssets = Number(pendingPosition.pendingDepositAssets ?? 0);
+        const pendingDepositAssetsRaw = normalizeRawIntegerString(pendingPosition.pendingDepositAssetsRaw);
         const pendingWithdrawalShares = Number(pendingPosition.pendingWithdrawalShares ?? 0);
+        const pendingWithdrawalSharesRaw = normalizeRawIntegerString(pendingPosition.pendingWithdrawalSharesRaw);
         const lastMovement = strategyActivity[strategy.strategyId];
         const accounting = strategyAccounting[strategy.strategyId] ?? {};
         const isMock = String(strategy.kind ?? "").includes("mock");
@@ -2766,6 +2806,7 @@ const server = createServer(async (request, response) => {
         const routedAmount = telemetry?.reported && Number.isFinite(Number(telemetry.sharePrice))
           ? shares * Number(telemetry.sharePrice)
           : shares;
+        const routedAmountRaw = calculateRoutedAmountRaw(sharesRaw, telemetry);
         const principalValue = Number(accounting.principal ?? shares);
         const realizedYield = Number(accounting.realizedYield ?? 0);
         const unrealizedYield = routedAmount - principalValue;
@@ -2776,13 +2817,20 @@ const server = createServer(async (request, response) => {
           assetSymbol: resolveStrategyAssetSymbol(strategy),
           executionMode: strategy.executionMode ?? "sync",
           shares,
+          ...(sharesRaw !== undefined ? { sharesRaw } : {}),
           shareCount: shares,
           pendingDepositAssets,
+          ...(pendingDepositAssetsRaw !== undefined ? { pendingDepositAssetsRaw } : {}),
           pendingWithdrawalShares,
+          ...(pendingWithdrawalSharesRaw !== undefined ? { pendingWithdrawalSharesRaw } : {}),
           routedAmount,
+          ...(routedAmountRaw !== undefined ? { routedAmountRaw } : {}),
           principalValue,
+          ...(accounting.principalRaw !== undefined ? { principalValueRaw: String(accounting.principalRaw) } : {}),
+          ...(accounting.markValueRaw !== undefined ? { markValueRaw: String(accounting.markValueRaw) } : {}),
           unrealizedYield,
           realizedYield,
+          ...(accounting.realizedYieldRaw !== undefined ? { realizedYieldRaw: String(accounting.realizedYieldRaw) } : {}),
           totalYield: realizedYield + unrealizedYield,
           statusLabel: pendingDepositAssets > 0
             ? "Pending deposit"
@@ -2797,7 +2845,9 @@ const server = createServer(async (request, response) => {
           sharePrice: telemetry?.sharePrice,
           performanceBps: telemetry?.performanceBps,
           adapterTotalAssets: telemetry?.totalAssets,
+          ...(telemetry?.totalAssetsRaw !== undefined ? { adapterTotalAssetsRaw: String(telemetry.totalAssetsRaw) } : {}),
           adapterTotalShares: telemetry?.totalShares,
+          ...(telemetry?.totalSharesRaw !== undefined ? { adapterTotalSharesRaw: String(telemetry.totalSharesRaw) } : {}),
           adapterLinked: true,
           adapterLinkStatus: shares > 0
             ? "Wallet capital is now settled into the adapter and priced from live adapter reads."
@@ -2839,6 +2889,7 @@ const server = createServer(async (request, response) => {
           assetSymbol: entry.assetSymbol,
           shares: entry.shares,
           currentValue: entry.routedAmount,
+          currentValueRaw: entry.routedAmountRaw,
           sharePrice: entry.sharePrice
         }))
       );
