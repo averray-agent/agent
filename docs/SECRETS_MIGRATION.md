@@ -1791,25 +1791,46 @@ the backend signer is never on disk, in any vault, or in any backup.
 Compromise of the VPS or 1Password vault no longer implies
 compromise of the signer.
 
-### Phase 3 prep status (as of 2026-05-15)
+### Phase 3 progress status (as of 2026-05-16)
 
-The offline pieces that don't require AWS account creation are landed.
-The AWS-side day will pick up from here:
+The infrastructure side is provisioned end-to-end on testnet. The
+on-chain `setVerifier(...)` flip + the `SIGNER_BACKEND=kms` env flip
+are deferred to a coordinated cutover session.
 
-| What                                                                 | Status      | Where                                                              |
-| -------------------------------------------------------------------- | ----------- | ------------------------------------------------------------------ |
-| AWS KMS SDK as `mcp-server` dependency                              | ✅ landed   | `mcp-server/package.json` → `@aws-sdk/client-kms`                  |
-| EVM-address-from-KMS-public-key script                              | ✅ landed   | `scripts/ops/derive-kms-signer-address.mjs`                        |
-| Offline test fixtures (no AWS account needed)                       | ✅ landed   | `scripts/ops/derive-kms-signer-address.test.mjs` (8 unit tests)    |
-| `averray-signer-prod-role` IAM policy ready to paste                | ✅ landed   | `deploy/iam-policies/averray-signer-prod-role.json` + README       |
-| AWS account creation + KMS key + Roles Anywhere CA + CloudWatch     | ⏳ deferred | Operator runs §3a–§3b–§3c when ready to spend AWS dollars          |
-| `KmsSigner` adapter in backend (ethers-compatible)                  | ⏳ deferred | Follow-up PR once KMS key exists for end-to-end testing            |
-| `SIGNER_BACKEND=kms` cutover flag                                   | ⏳ deferred | Same follow-up PR                                                  |
+| What                                                                 | Status     | Where                                                              |
+| -------------------------------------------------------------------- | ---------- | ------------------------------------------------------------------ |
+| AWS KMS SDK as `mcp-server` dependency                              | ✅ landed  | `mcp-server/package.json` → `@aws-sdk/client-kms` (PR #308)        |
+| EVM-address-from-KMS-public-key script                              | ✅ landed  | `scripts/ops/derive-kms-signer-address.mjs` (PR #308)              |
+| Offline test fixtures                                               | ✅ landed  | `scripts/ops/derive-kms-signer-address.test.mjs` (PR #308)         |
+| `averray-signer-prod-role` IAM policy template                      | ✅ landed  | `deploy/iam-policies/averray-signer-prod-role.json` (PR #308)      |
+| `KmsSigner` adapter in backend (ethers-compatible)                  | ✅ landed  | `mcp-server/src/blockchain/kms-signer.js` + tests (PR #313)        |
+| `SIGNER_BACKEND` config + `createSigner` factory                    | ✅ landed  | `mcp-server/src/blockchain/{config,gateway}.js` (PR #313)          |
+| **AWS account `averray-prod` (079209845430)**                       | ✅ created | Root locked down with MFA, IAM admin `pkuriger` for daily use      |
+| **KMS asymmetric key `averray-testnet-backend-signer`**             | ✅ created | `arn:aws:kms:eu-central-2:079209845430:key/ff1927f1-3b5b-4e65-bec5-dfbe9fbff203` |
+| **EVM address derived from KMS public key**                         | ✅ verified | `0x31ad432dFe083B998c69B6dB88A984ec5207ab7F` (script-tested against real KMS DER) |
+| **IAM user `averray-signer-testnet` + KMS-sign-only policy**        | ✅ created | Static access keys, stored in `op://prod-backend/aws-signer-testnet/*` |
+| **AWS env vars wired into `backend.env.template`**                  | ✅ landed  | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `KMS_KEY_ID` / `AWS_REGION` (this PR) |
+| **`SIGNER_BACKEND=kms` flip in production env**                     | ⏳ deferred | Final cutover step. Requires `setVerifier(...)` to happen first or atomically. |
+| **Multisig `setVerifier(0x31ad432dFe083B998c69B6dB88A984ec5207ab7F)` on EscrowCore** | ⏳ deferred | Requires the multisig signer ceremony; coordinated with above flip  |
+| **IAM Roles Anywhere CA + Trust Anchor + VPS cert**                 | ⏳ deferred | Mainnet path. Testnet path is static IAM keys, residual risk documented. |
+| **CloudTrail + CloudWatch alarms on KMS key**                       | ⏳ deferred | Best-practice but not blocking the cutover; do before mainnet      |
 
-The Phase 3 prep PR deliberately stays AWS-free and reviewable. Running
-`node scripts/ops/derive-kms-signer-address.mjs --spki-file <captured.der>`
-parses any captured KMS public-key blob locally, which is enough to
-verify the address-derivation path before any real key is provisioned.
+The cutover is two atomic actions that must happen in close succession to avoid a
+window where the chain rejects the backend's signatures:
+
+1. `setVerifier(0x31ad432dFe083B998c69B6dB88A984ec5207ab7F)` on EscrowCore (multisig tx)
+2. Update `op://prod-backend/...` so `SIGNER_BACKEND=kms` and `SIGNER_PRIVATE_KEY` is unset, then deploy
+
+Until both happen, the backend continues to sign with the local `SIGNER_PRIVATE_KEY`
+and the chain continues to trust the corresponding address — pre-Phase-3 status quo.
+
+The current PR pre-loads the AWS credentials + KMS key id into the rendered env so the
+backend container is one env-var flip away from KMS signing; the `KmsSigner` is wired
+in `gateway.js`'s `createSigner` factory but never instantiated until `SIGNER_BACKEND=kms`.
+
+Running `node scripts/ops/derive-kms-signer-address.mjs --spki-file <captured.der>` against
+a real KMS public-key DER blob is the offline verification path that any operator can use
+to confirm a KMS key's EVM address before flipping anything.
 
 **Phase 3 is the custody migration for the backend blockchain signer.**
 After this phase, the backend no longer receives a raw
