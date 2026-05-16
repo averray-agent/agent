@@ -20,6 +20,7 @@ DEPLOY_AUTOSTASH=${DEPLOY_AUTOSTASH:-1}
 DEPLOY_OLD_SHA=${DEPLOY_OLD_SHA:-}
 DEPLOY_NEW_SHA=${DEPLOY_NEW_SHA:-}
 DEPLOY_STATE_DIR=${DEPLOY_STATE_DIR:-"$STACK_ROOT/.deploy-state"}
+INDEXER_SCHEMA_STATE_FILE=${INDEXER_SCHEMA_STATE_FILE:-"$DEPLOY_STATE_DIR/indexer.database-schema"}
 
 RUN_BACKEND=${RUN_BACKEND:-auto}
 RUN_FRONTEND=${RUN_FRONTEND:-auto}
@@ -667,6 +668,24 @@ read_current_indexer_schema() {
   fi
 }
 
+read_persisted_indexer_schema() {
+  if [[ -f "$INDEXER_SCHEMA_STATE_FILE" ]]; then
+    awk 'NF { print; exit }' "$INDEXER_SCHEMA_STATE_FILE" | tr -d '"'
+  fi
+}
+
+write_persisted_indexer_schema() {
+  local schema="$1"
+  local dir
+  dir=$(dirname "$INDEXER_SCHEMA_STATE_FILE")
+  mkdir -p "$dir"
+
+  local tmp="${INDEXER_SCHEMA_STATE_FILE}.tmp.$$"
+  printf '%s\n' "$schema" > "$tmp"
+  mv "$tmp" "$INDEXER_SCHEMA_STATE_FILE"
+  echo "Persisted indexer DATABASE_SCHEMA override in $INDEXER_SCHEMA_STATE_FILE: $schema"
+}
+
 validate_indexer_schema() {
   local schema="$1"
   if [[ ${#schema} -gt 63 || ! "$schema" =~ ^[a-z_][a-z0-9_]*$ ]]; then
@@ -737,23 +756,41 @@ apply_indexer_database_schema() {
   fi
 
   local target_schema=""
+  local persist_schema=0
   if [[ -n "$INDEXER_DATABASE_SCHEMA" ]]; then
     validate_indexer_schema "$INDEXER_DATABASE_SCHEMA"
     target_schema="$INDEXER_DATABASE_SCHEMA"
+    persist_schema=1
     echo "Operator pinned indexer DATABASE_SCHEMA: $target_schema"
   elif [[ "$INDEXER_FRESH_SCHEMA" == "1" ]]; then
     target_schema="agent_indexer_$(date -u +%Y%m%d%H%M%S)"
     validate_indexer_schema "$target_schema"
+    persist_schema=1
     echo "INDEXER_FRESH_SCHEMA=1 — minting fresh DATABASE_SCHEMA: $target_schema"
   else
-    return 0
+    local persisted_schema=""
+    persisted_schema=$(read_persisted_indexer_schema)
+    if [[ -n "$persisted_schema" ]]; then
+      validate_indexer_schema "$persisted_schema"
+      target_schema="$persisted_schema"
+      echo "Reapplying persisted indexer DATABASE_SCHEMA override: $target_schema"
+    else
+      return 0
+    fi
   fi
 
-  if [[ -n "$current_schema" && "$current_schema" != "$target_schema" ]]; then
+  if [[ -n "$current_schema" && "$current_schema" == "$target_schema" ]]; then
+    echo "Indexer DATABASE_SCHEMA already current: $target_schema"
+  elif [[ -n "$current_schema" ]]; then
     echo "Replacing existing DATABASE_SCHEMA ($current_schema) with $target_schema."
+    write_indexer_schema "$target_schema"
+  else
+    write_indexer_schema "$target_schema"
   fi
 
-  write_indexer_schema "$target_schema"
+  if [[ "$persist_schema" == "1" ]]; then
+    write_persisted_indexer_schema "$target_schema"
+  fi
 }
 
 deploy() {

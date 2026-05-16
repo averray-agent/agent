@@ -1223,10 +1223,12 @@ the writes closes the format-leak vector permanently.
 line to `/srv/agent-stack/indexer.env`, which
 `/run/agent-stack/indexer.env` did not pick up after PR 2.5 made `/run`
 authoritative. The deploy wrapper now renders `/run/agent-stack/indexer.env`
-first, then applies the explicit or fresh schema override to that rendered
-runtime env while preserving file mode/ownership. This keeps the recovery
-path one-shot and avoids committing emergency schema names back into
-`deploy/indexer.env.template`.
+first, then applies the explicit, fresh, or persisted schema override to
+that rendered runtime env while preserving file mode/ownership. Fresh or
+explicit operator overrides are persisted in
+`$DEPLOY_STATE_DIR/indexer.database-schema` so the next normal deploy does
+not silently re-render the stale template value and restart the indexer
+against an incompatible Ponder schema.
 
 ### PR 2.7 — Cleanup of legacy artifacts AND rotation
 

@@ -173,6 +173,42 @@ test("deploy wrapper can trigger a one-shot bootstrap self-report before smoke",
   );
 });
 
+test("indexer schema recovery persists across normal runtime-env renders", async () => {
+  const script = await readFile(DEPLOY_SCRIPT, "utf8");
+  const indexerTemplate = await readFile(join(REPO_ROOT, "deploy/indexer.env.template"), "utf8");
+
+  assert.match(
+    script,
+    /INDEXER_ENV_FILE=\$\{INDEXER_ENV_FILE:-\/run\/agent-stack\/indexer\.env\}/u,
+    "schema recovery should target the rendered /run indexer env"
+  );
+  assert.match(
+    script,
+    /INDEXER_SCHEMA_STATE_FILE=\$\{INDEXER_SCHEMA_STATE_FILE:-"\$DEPLOY_STATE_DIR\/indexer\.database-schema"\}/u,
+    "schema recovery should have a persistent deploy-state file"
+  );
+  assert.match(
+    script,
+    /write_persisted_indexer_schema "\$target_schema"/u,
+    "explicit or fresh schema overrides should persist for the next normal deploy"
+  );
+  assert.match(
+    script,
+    /Reapplying persisted indexer DATABASE_SCHEMA override/u,
+    "normal deploys should reapply a persisted schema override after rendering the template"
+  );
+  assert.match(
+    script,
+    /render_runtime_envs\s+apply_indexer_database_schema/u,
+    "schema override must run after op inject renders /run env files"
+  );
+  assert.match(
+    indexerTemplate,
+    /^DATABASE_SCHEMA=agent_indexer_20260516080108$/m,
+    "the template should match the known-good production Ponder schema"
+  );
+});
+
 async function writeExecutable(path, content) {
   await writeFile(path, `${content}\n`);
   await chmod(path, 0o755);
