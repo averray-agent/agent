@@ -86,6 +86,7 @@ test("runHostedWorkerLoop creates, claims, submits, verifies, and writes evidenc
     "getAccountSummary",
     "createJob",
     "preflightJob",
+    "getAccountSummary",
     "validateJobSubmission",
     "validateJobSubmission",
     "claimJob",
@@ -98,12 +99,12 @@ test("runHostedWorkerLoop creates, claims, submits, verifies, and writes evidenc
   assert.equal(calls[3][1].verifierMode, "benchmark");
   assert.equal(calls[3][1].rewardAsset, "USDC");
   assert.equal(calls[3][1].rewardAmount, 0.1);
-  assert.equal(calls[5][2].summary, `complete verified output for ${jobId}`);
-  assert.deepEqual(calls[6][2], { output: { wrapped_under_submission_output: true } });
-  assert.equal(calls[7][2], `product-proof:${jobId}`);
-  assert.equal(calls[8][2].status, "complete");
-  assert.equal(calls[9][1], sessionId);
-  assert.equal(calls[9][2], undefined);
+  assert.equal(calls[6][2].summary, `complete verified output for ${jobId}`);
+  assert.deepEqual(calls[7][2], { output: { wrapped_under_submission_output: true } });
+  assert.equal(calls[8][2], `product-proof:${jobId}`);
+  assert.equal(calls[9][2].status, "complete");
+  assert.equal(calls[10][1], sessionId);
+  assert.equal(calls[10][2], undefined);
 
   const written = JSON.parse(await readFile(evidenceFile, "utf8"));
   assert.equal(written.jobId, jobId);
@@ -472,6 +473,58 @@ test("runHostedWorkerLoop fails closed after job creation when preflight blocks 
   assert.equal(calls[4][1], jobId);
 });
 
+test("runHostedWorkerLoop refreshes liquidity after job creation before claim", async () => {
+  const calls = [];
+  const balances = [200_000, 100_000];
+  await assert.rejects(
+    runHostedWorkerLoop({
+      client: {
+        async getAuthSession() {
+          calls.push(["getAuthSession"]);
+          return authSession();
+        },
+        async getAdminStatus() {
+          calls.push(["getAdminStatus"]);
+          return settlementReadyStatus();
+        },
+        async getAccountSummary() {
+          calls.push(["getAccountSummary"]);
+          return accountSummary({ liquidUsdcRaw: balances.shift() ?? 100_000 });
+        },
+        async createJob(payload) {
+          calls.push(["createJob", payload]);
+          return { id: payload.id };
+        },
+        async preflightJob(id) {
+          calls.push(["preflightJob", id]);
+          return preflightReady({ jobId: id, totalClaimLock: 0.055 });
+        },
+        async validateJobSubmission() {
+          calls.push(["validateJobSubmission"]);
+          throw new Error("should not validate after refreshed claim-liquidity preflight fails");
+        },
+        async claimJob() {
+          calls.push(["claimJob"]);
+          throw new Error("should not claim with stale liquidity");
+        }
+      },
+      now: () => 1700000000000,
+      log: () => {},
+      env: { ADMIN_JWT: "token" }
+    }),
+    /requires funded USDC liquidity before claim; .* required=0\.155 USDC \(raw 155000\); available=0\.1 USDC \(raw 100000\)/u
+  );
+
+  assert.deepEqual(calls.map(([name]) => name), [
+    "getAuthSession",
+    "getAdminStatus",
+    "getAccountSummary",
+    "createJob",
+    "preflightJob",
+    "getAccountSummary"
+  ]);
+});
+
 test("runHostedWorkerLoop fails closed after preflight when reward plus claim lock is underfunded", async () => {
   const calls = [];
   const jobId = "product-proof-worker-loop-1700000000000";
@@ -519,7 +572,8 @@ test("runHostedWorkerLoop fails closed after preflight when reward plus claim lo
     "getAdminStatus",
     "getAccountSummary",
     "createJob",
-    "preflightJob"
+    "preflightJob",
+    "getAccountSummary"
   ]);
   assert.equal(calls[4][1], jobId);
 });
@@ -578,10 +632,11 @@ test("runHostedWorkerLoop fails closed after preflight when schema validation bl
     "getAccountSummary",
     "createJob",
     "preflightJob",
+    "getAccountSummary",
     "validateJobSubmission"
   ]);
-  assert.equal(calls[5][1], jobId);
-  assert.equal(calls[5][2].status, "complete");
+  assert.equal(calls[6][1], jobId);
+  assert.equal(calls[6][2].status, "complete");
 });
 
 test("runHostedWorkerLoop fails closed before mutation when settlement is not ready", async () => {

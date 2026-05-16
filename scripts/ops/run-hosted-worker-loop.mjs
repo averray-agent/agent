@@ -90,12 +90,21 @@ export async function runHostedWorkerLoop({
   log(`Preflighting hosted product-proof job ${jobId}`);
   const preflight = await platform.preflightJob(jobId);
   const preflightReadiness = assertClaimPreflightReady({ preflight, jobId, wallet });
+  log(`Refreshing hosted product-proof liquidity before claim for ${jobId}`);
+  const preClaimLiquidityReadiness = await assertProductProofLiquidity({
+    platform,
+    wallet,
+    rewardAsset,
+    rewardAmount: rewardAmountInput,
+    settlementReadiness,
+    requireRewardLiquidity: false
+  });
   const claimLiquidityReadiness = assertClaimLiquidityReady({
     wallet,
     rewardAsset,
     rewardAmount: rewardAmountInput,
     preflightReadiness,
-    liquidityReadiness,
+    liquidityReadiness: preClaimLiquidityReadiness,
     settlementReadiness
   });
 
@@ -290,7 +299,14 @@ async function assertSubmissionValidationReady({ platform, jobId, preflightReadi
   };
 }
 
-async function assertProductProofLiquidity({ platform, wallet, rewardAsset, rewardAmount, settlementReadiness }) {
+async function assertProductProofLiquidity({
+  platform,
+  wallet,
+  rewardAsset,
+  rewardAmount,
+  settlementReadiness,
+  requireRewardLiquidity = true
+}) {
   if (typeof platform.getAccountSummary !== "function") {
     throw new Error("Hosted product-proof worker loop requires /account liquidity readiness.");
   }
@@ -311,7 +327,7 @@ async function assertProductProofLiquidity({ platform, wallet, rewardAsset, rewa
     decimals,
     label: `${rewardAsset} liquid balance`
   });
-  if (availableRaw < requiredRaw) {
+  if (requireRewardLiquidity && availableRaw < requiredRaw) {
     const agentAccountAddress = settlementReadiness.contracts?.agentAccountAddress ?? "AgentAccountCore";
     throw new Error(
       `Hosted product-proof worker loop requires funded ${rewardAsset} liquidity before mutation; ` +
