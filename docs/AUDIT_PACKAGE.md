@@ -216,30 +216,53 @@ Auditors should be able to reproduce every test green from a clean clone:
 ```bash
 git clone <repo>
 cd <repo>
+npm install
 
 # Solidity tests
 forge test -vv
 
-# Node integration tests
-cd mcp-server
-npm install
-npm test
+# Node backend (mcp-server) integration tests
+npm --workspace mcp-server test
 
-# Optional subprocess smoke tests (spins up real HTTP server)
-RUN_HTTP_SMOKE=1 npm test
+# Subprocess smoke tests (spin up a real HTTP server; gated by env var).
+# The smoke file lives two directories deep, which the workspace test script
+# does not currently glob into, so invoke it directly:
+RUN_HTTP_SMOKE=1 node --test mcp-server/src/protocols/http/server.smoke.test.js
+
+# Operator-app guard tests (structured-submission gating)
+npm run test:app
 ```
 
-Expected counts at the time this doc was last updated:
+Expected counts at the time this doc was last refreshed (2026-05-16):
 
-- Foundry: **43** tests across the core, hardening, payments, and strategy suites.
-- Node backend: **127** tests (auth, rate-limit, state-store, http-config, logger, metrics, event-bus, discovery, profile, badge, recurring jobs, transfers, pagination).
-- HTTP smoke (opt-in): **19** tests.
-- Frontend (node --test on escape helpers + config): **14** tests.
+- Foundry: **97** tests across 8 suites (`AgentAccountAsyncStrategy`,
+  `AgentPlatform`, `Hardening`, `Rc1Backbone`, `SendToAgent`, `XcmVdotAdapter`,
+  `XcmWrapper`, `strategies/MockVDotAdapter`). Covers core lifecycle, claim
+  stake, milestone/dispute, async strategy accounting, XCM dispatch/wrapper,
+  Rc1 verifier authorization and disclosure, and the mock vDOT adapter path.
+- Node backend (`npm --workspace mcp-server test`): **554** tests across
+  `core`, `services`, `jobs`, `blockchain`, `auth`, and `protocols`. Covers
+  SIWE/JWT auth, rate limits, state store, HTTP config, event bus, discovery,
+  jobs/sessions/recurring, verifier handlers, settlement and XCM observation,
+  service tokens, capability and policy surfaces. The HTTP smoke suite is
+  gated behind `RUN_HTTP_SMOKE=1` and does not contribute to this count.
+- HTTP smoke (opt-in, direct invocation): **40** tests covering admin
+  endpoints, validate-submission, sub-jobs, async XCM allocation guards,
+  CORS preflight, badge/borrow-capacity surfaces, and rate-limit headers.
+  Each test is individually `skip: !RUN_HTTP_SMOKE` so the file no-ops when
+  the env var is unset. Use the explicit `node --test` command above to
+  invoke the file directly; the workspace test script's bash glob does not
+  currently recurse into `src/protocols/http/`, so `RUN_HTTP_SMOKE=1
+  npm --workspace mcp-server test` is a no-op today.
+- Operator-app guards (`npm run test:app`): **5** tests in
+  `app/lib/api/guarded-submit.test.mjs` exercising the structured-submission
+  validation gate (valid + invalid responses, malformed payloads, non-
+  structured passthrough).
 
-These numbers should be refreshed whenever new tests land. At the time of this
-update, the backend and frontend counts were re-checked locally; the Foundry
-count was derived from the current Solidity test files because `forge test
---summary` hit a local Foundry/system-proxy crash on this machine.
+These numbers should be refreshed whenever new tests land. Auditors who want
+the full repo-wide suite (root `npm test`) also pick up SDK (`16`), examples
+(`22`), indexer API (`18`), and ops scripts (`82`) tests on top of the four
+suites above.
 
 ---
 
