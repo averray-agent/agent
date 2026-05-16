@@ -23,9 +23,114 @@ external libraries beyond the two files under `contracts/lib/`.
 
 **In scope** (off-chain, auxiliary — flagged as non-canonical):
 
-- [`mcp-server/src/auth/`](../mcp-server/src/auth) — SIWE + JWT flow
-- [`mcp-server/src/core/state-store.js`](../mcp-server/src/core/state-store.js) — Redis/memory state backing
-- [`mcp-server/src/protocols/http/server.js`](../mcp-server/src/protocols/http/server.js) — HTTP adapter
+- [`mcp-server/src/auth/`](../mcp-server/src/auth) — SIWE + JWT flow,
+  capability matrix, route gating, rate-limit primitive
+- [`mcp-server/src/core/state-store.js`](../mcp-server/src/core/state-store.js) — Redis/memory backing for nonces, token revocations, rate-limit counters, capability grants, idempotency receipts, claim locks
+- [`mcp-server/src/protocols/http/server.js`](../mcp-server/src/protocols/http/server.js) — HTTP adapter, SIWE/JWT endpoints, admin and service-token surfaces, CORS handling
+
+### Off-chain audit attention points
+
+The contracts are the trust anchor; the off-chain layer is a separate
+engagement scope (typical web-app pen-test). The items below are the
+non-obvious places a reviewer should focus rather than a generic checklist.
+
+1. **SIWE replay and nonce binding**
+   ([`siwe.js`](../mcp-server/src/auth/siwe.js),
+   [`server.js`](../mcp-server/src/protocols/http/server.js) lines 2453–2539).
+   `POST /auth/verify` requires that `consumeNonce(nonce)` returns the same
+   wallet that recovered from the signature; the nonce is removed atomically
+   at consume time. Worth probing: concurrent submits of the same nonce on
+   the Redis backend (Lua/GETDEL semantics), nonce TTL exhaustion under load
+   (`AUTH_NONCE_TTL_SECONDS`, default 300s), domain/chain-id pinning
+   downgrades, and clock-skew tolerance (±60s on `Issued At` / `Not Before`
+   / `Expiration Time`).
+
+2. **JWT validation strictness**
+   ([`jwt.js`](../mcp-server/src/auth/jwt.js)). HS256-only, hand-rolled,
+   constant-time signature compare. No `kid` field — rotation works by
+   accepting any secret in `AUTH_JWT_SECRETS`, so old tokens stay valid
+   until natural expiry. No issuer/audience claims enforced. Worth probing:
+   `alg: none` and algorithm-confusion attacks (header is parsed before
+   signature check; verify the alg/typ guard at line 63 cannot be bypassed),
+   token-malformedness handling, and the ±60s `iat`/`exp` skew.
+
+3. **Permissive-mode fallback and admin reach**
+   ([`middleware.js`](../mcp-server/src/auth/middleware.js) lines 135–164,
+   [`config.js`](../mcp-server/src/auth/config.js)). In `AUTH_MODE=permissive`
+   the middleware accepts `?wallet=` with no token; admin/verifier roles are
+   re-resolved from `AUTH_ADMIN_WALLETS` / `AUTH_VERIFIER_WALLETS`. Production
+   defaults to strict, but the gating depends on `NODE_ENV` and `AUTH_MODE`
+   together — verify no production deploy can boot permissive (and that
+   `state-store.js` line 837 cannot be bypassed except by the explicit
+   `STATE_STORE_ALLOW_MEMORY=1` override).
+
+4. **Service-token capability containment**
+   ([`capabilities.js`](../mcp-server/src/auth/capabilities.js) `resolveCapabilities`,
+   [`server.js`](../mcp-server/src/protocols/http/server.js) `/admin/service-tokens`
+   handlers from line 3720). Service-token claims (`tokenKind: "service"`)
+   receive **only** the capabilities from the linked capability grant — no
+   base capabilities, no role expansion, no `claims.capabilities` honored.
+   Issuance is gated by `assertIssuerCanGrantCapabilities`, so an admin can
+   only delegate capabilities they themselves hold. Worth probing: forging
+   `serviceToken: false` in claims to inherit base capabilities, grant-cache
+   staleness during revoke (15s in-process TTL plus cross-process backstop —
+   see `GRANT_CACHE_TTL_MS` in `middleware.js`), and the rotate/revoke flows
+   for receipt replay.
+
+5. **State-store availability fail-open**
+   ([`state-store.js`](../mcp-server/src/core/state-store.js) `createStateStore`).
+   Without `REDIS_URL`, production + strict-auth refuses to boot unless
+   `STATE_STORE_ALLOW_MEMORY=1` is explicitly set; memory mode wipes nonces,
+   token revocations, rate-limit counters, capability grants, and
+   idempotency receipts on every restart. Worth probing: that the env
+   override is never enabled on any production deploy
+   ([`deployments/mainnet.env.example`](../deployments/mainnet.env.example)),
+   and that Redis namespace isolation (`REDIS_NAMESPACE`) prevents
+   key collisions across environments.
+
+6. **Rate-limit client identity and proxy trust**
+   ([`rate-limit.js`](../mcp-server/src/auth/rate-limit.js) `extractClientKey`).
+   When `TRUST_PROXY=true` the rate limiter trusts the first
+   `X-Forwarded-For` entry; otherwise it uses the raw socket address. If
+   `TRUST_PROXY` is set without a real upstream proxy stripping the header,
+   any caller can spoof their identity and exhaust another wallet's quota.
+   Verify production has either Caddy or an explicit allowlist of trusted
+   forwarders.
+
+7. **Idempotent mutation receipts**
+   (`buildMutationRequestHash`, `getIdempotentMutationReplay`,
+   `storeIdempotentMutationReceipt` in
+   [`server.js`](../mcp-server/src/protocols/http/server.js)). Admin
+   write routes use `wallet:idempotencyKey` keys with payload-hash rebinding
+   so a replay with a different body returns a conflict rather than the
+   cached receipt. Worth probing: cross-wallet collisions, key omission
+   (the route accepts missing `idempotencyKey` for non-mutation paths but
+   not for sensitive mutations), and TTL-driven receipt expiry vs. token
+   lifetime.
+
+8. **CORS allowlist scope**
+   ([`server.js`](../mcp-server/src/protocols/http/server.js) lines 1113–1133).
+   Preflight responses only emit `Access-Control-Allow-Origin` when the
+   request origin is in `httpConfig.allowedOrigins`. Verify the production
+   allowlist contains no wildcards and no legacy preview/staging origins
+   that could be hijacked.
+
+9. **SSE query-token surface**
+   ([`middleware.js`](../mcp-server/src/auth/middleware.js) `allowQueryToken`).
+   SSE routes accept `?token=` because EventSource cannot set headers; a
+   warning is logged if a query token shows up on a non-SSE route, but the
+   token is still verified. Confirm this is the intended behavior and that
+   no admin/mutation route is mounted with `allowQueryToken: true`.
+
+10. **Disclosure of secrets via `/admin/status` and event bus**
+    Service-token issuance publishes a `service-token.issue` event
+    ([`server.js`](../mcp-server/src/protocols/http/server.js) line 3773)
+    carrying `subject`, `capabilities`, `scope`, and `tokenExpiresAt` — not
+    the token itself. `/admin/service-tokens` GET (`projectGrant`) returns
+    `tokenAvailable: false` so listing never re-reveals tokens. The hosted
+    service-token proof in
+    [`docs/evidence/`](./evidence/) confirms this on the live stack;
+    auditors should re-run that proof against their own deploy.
 
 **Out of scope**:
 
