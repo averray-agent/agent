@@ -37,8 +37,10 @@ export function createAuthMiddleware({ authConfig, stateStore, logger = console,
   // Per-subject grant cache. The grant list is stable for the
   // lifetime of a JWT and lookups happen on every authed request,
   // so a 15s in-process cache keeps the steady-state cost of
-  // capability merging at zero. Revokes invalidate via TTL — admins
-  // should expect up to 15s lag from revoke-call to enforcement.
+  // capability merging low. Grant/revoke routes explicitly invalidate
+  // touched subjects so operator-initiated revokes take effect on the
+  // next request in this process; the TTL remains a cross-process
+  // backstop.
   const grantCache = new Map();
 
   async function loadActiveGrantsFor(wallet) {
@@ -95,7 +97,15 @@ export function createAuthMiddleware({ authConfig, stateStore, logger = console,
     return mergeGrantCapabilities(baseCapabilities, grants, { now });
   }
 
-  return async function requireAuth(
+  function invalidateCapabilityGrantCache(subject = undefined) {
+    if (subject === undefined || subject === null || String(subject).trim() === "*") {
+      grantCache.clear();
+      return;
+    }
+    grantCache.delete(String(subject).trim().toLowerCase());
+  }
+
+  async function requireAuth(
     request,
     url,
     {
@@ -184,7 +194,10 @@ export function createAuthMiddleware({ authConfig, stateStore, logger = console,
       capabilityRequirements: requiredCapabilities,
       via: headerToken ? "header" : "query_token"
     };
-  };
+  }
+
+  requireAuth.invalidateCapabilityGrantCache = invalidateCapabilityGrantCache;
+  return requireAuth;
 }
 
 function isServiceTokenClaims(claims = {}) {

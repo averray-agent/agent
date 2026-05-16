@@ -366,10 +366,9 @@ across environment config, JWT roles, and route-level decisions.
 ### Remaining gaps
 
 - signed tokens are still issued from coarse environment role lists
-- future fine-grained delegated scopes are supported by the resolver, but do
-  not yet have an operator grant/revoke workflow
-- some public discovery docs still describe auth action requirements separately
-  from the runtime capability matrix
+- hosted evidence still needs one least-privilege service token to run a real
+  external-agent flow end to end without an admin wallet token
+- delegated-wallet UX should expand again once native Substrate auth lands
 
 ### Improve to
 
@@ -382,12 +381,12 @@ across environment config, JWT roles, and route-level decisions.
 
 ### Concrete next changes
 
-- add an operator-facing grant/revoke flow for scoped service tokens or
-  delegated wallets
-- align public onboarding action requirements with the versioned auth policy
-  payload
-- extend frontend controls to hide/disable actions from `authPolicy.uiControls`
-- add audit events when capability grants change
+- run a hosted proof with an operator-issued service token that only carries
+  the worker capabilities it needs
+- keep the service-token grant cache invalidation covered as the revocation
+  path evolves
+- revisit delegated-wallet UX when native Substrate sign-in is accepted by
+  protected HTTP routes
 
 ### What this unlocks
 

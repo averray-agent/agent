@@ -234,11 +234,15 @@ SSH/basic-auth/admin-JWT cutovers, and the basic hosted smoke is green.
 
 ### Capability Model
 
-- Status: typed SDK surface and docs for scoped service tokens are present.
-- Remaining: add operator grant/revoke runtime flows for scoped service tokens
-  or delegated wallets, align public onboarding action requirements with the
-  runtime auth-policy payload, hide or disable frontend controls from
-  `authPolicy.uiControls`, and emit audit events when capability grants change.
+- Status: typed SDK surface, docs, operator grant/revoke runtime flows,
+  grant-backed service-token issue/rotate/revoke APIs, public onboarding
+  guidance, `authPolicy.uiControls` UI gating, and audit events are present.
+  Grant-cache invalidation now makes operator-issued revokes effective on the
+  next request in the serving process, with the middleware TTL only as a
+  cross-process backstop.
+- Remaining: add hosted/live smoke evidence for a scoped external-agent token
+  using only its least-privilege capabilities, and extend delegated-wallet UX
+  once native Substrate auth lands.
 
 ### Secrets Phase 2+ And Mainnet Custody
 

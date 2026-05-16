@@ -1526,6 +1526,7 @@ async function revokeCapabilityGrantRecord({ grantId, auth, note }) {
   });
   if (!alreadyRevoked) {
     await stateStore.upsertCapabilityGrant?.(record);
+    authMiddleware.invalidateCapabilityGrantCache?.(record.subject);
   }
   return { current, record, alreadyRevoked };
 }
@@ -3619,6 +3620,7 @@ const server = createServer(async (request, response) => {
       });
       assertIssuerCanGrantCapabilities(grant, auth);
       await stateStore.upsertCapabilityGrant?.(grant);
+      authMiddleware.invalidateCapabilityGrantCache?.(grant.subject);
       const projection = projectGrant(grant);
       await storeIdempotentMutationReceipt({
         bucket: "capability_grant",
@@ -3686,6 +3688,7 @@ const server = createServer(async (request, response) => {
       });
       assertIssuerCanGrantCapabilities(grant, auth);
       await stateStore.upsertCapabilityGrant?.(grant);
+      authMiddleware.invalidateCapabilityGrantCache?.(grant.subject);
       const { token, claims } = signServiceToken(grant, payload);
       const body = serviceTokenIssueResponse({ grant, token, claims });
       await storeIdempotentMutationReceipt({
@@ -3763,6 +3766,7 @@ const server = createServer(async (request, response) => {
         note: payload?.revokeNote ?? "rotated service token"
       });
       await stateStore.upsertCapabilityGrant?.(nextGrant);
+      authMiddleware.invalidateCapabilityGrantCache?.(nextGrant.subject);
       const { token, claims } = signServiceToken(nextGrant, payload);
       const body = serviceTokenIssueResponse({ grant: nextGrant, token, claims, rotatedFrom: revoked });
       await storeIdempotentMutationReceipt({
@@ -3882,6 +3886,7 @@ const server = createServer(async (request, response) => {
       });
       if (!alreadyRevoked) {
         await stateStore.upsertCapabilityGrant?.(record);
+        authMiddleware.invalidateCapabilityGrantCache?.(record.subject);
       }
       const projection = projectGrant(record);
       await storeIdempotentMutationReceipt({

@@ -573,6 +573,52 @@ test("requireAuth ignores revoked grants when expanding capabilities", async () 
   );
 });
 
+test("requireAuth exposes grant-cache invalidation for immediate operator revokes", async () => {
+  const subject = "0xcccccccccccccccccccccccccccccccccccccccc";
+  const issuedBy = "0x1111111111111111111111111111111111111111";
+  const stateStore = new MemoryStateStore();
+  await stateStore.upsertCapabilityGrant({
+    id: "grant-cache",
+    subject,
+    status: "active",
+    capabilities: ["jobs:lifecycle"],
+    issuedAt: new Date().toISOString(),
+    issuedBy
+  });
+  const authConfig = {
+    secrets: [LONG_SECRET],
+    signingSecret: LONG_SECRET,
+    permissive: false,
+    strict: true
+  };
+  const middleware = createAuthMiddleware({ authConfig, stateStore, logger: silentLogger() });
+  const { token } = signToken({ sub: subject, roles: [] }, {
+    secret: LONG_SECRET,
+    expiresInSeconds: 60
+  });
+  const request = { method: "POST", headers: { authorization: `Bearer ${token}` } };
+  const url = new URL("http://localhost/admin/jobs/lifecycle");
+
+  assert.ok((await middleware(request, url)).capabilities.includes("jobs:lifecycle"));
+
+  await stateStore.upsertCapabilityGrant({
+    id: "grant-cache",
+    subject,
+    status: "revoked",
+    capabilities: ["jobs:lifecycle"],
+    issuedAt: new Date().toISOString(),
+    issuedBy,
+    revokedAt: new Date().toISOString(),
+    revokedBy: issuedBy
+  });
+  middleware.invalidateCapabilityGrantCache(subject);
+
+  await assert.rejects(
+    () => middleware(request, url),
+    (error) => error instanceof AuthorizationError && error.code === "missing_capability"
+  );
+});
+
 test("requireAuth binds service tokens to exactly one active grant without base capabilities", async () => {
   const subject = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
   const stateStore = new MemoryStateStore();
