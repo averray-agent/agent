@@ -492,13 +492,22 @@ function toBaseUnits(amount, decimals) {
   if (!Number.isInteger(decimals) || decimals < 0 || decimals > 30) {
     throw new Error(`Settlement asset decimals must be an integer in [0, 30]; got ${JSON.stringify(decimals)}.`);
   }
-  const normalized = normalizeDecimalString(amount);
+  const normalized = typeof amount === "number"
+    ? normalizeDisplayNumber(amount, decimals)
+    : normalizeDecimalString(amount);
   const [whole, fractional = ""] = normalized.split(".");
   if (fractional.length > decimals) {
     throw new Error(`PRODUCT_PROOF_REWARD_AMOUNT must fit ${decimals} decimal places; got ${normalized}.`);
   }
   return BigInt(whole) * (10n ** BigInt(decimals))
     + BigInt(fractional.padEnd(decimals, "0") || "0");
+}
+
+function normalizeDisplayNumber(value, decimals) {
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(`PRODUCT_PROOF_REWARD_AMOUNT must be a positive decimal amount; got ${JSON.stringify(value)}.`);
+  }
+  return value.toFixed(decimals).replace(/(?:\.0+|(\.\d*?)0+)$/u, "$1");
 }
 
 function normalizeDecimalString(value) {
