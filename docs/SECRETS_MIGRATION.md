@@ -1218,16 +1218,15 @@ the writes closes the format-leak vector permanently.
 - Rotating secrets that were leaked via GitHub-Actions / shell-history /
   VPS-backup surfaces.
 
-**Known gap** (not fixed in this PR): `apply_indexer_database_schema`'s
-`INDEXER_FRESH_SCHEMA=1` flow writes a new `DATABASE_SCHEMA=` line to
-`/srv/agent-stack/indexer.env`, which `/run/agent-stack/indexer.env`
-doesn't pick up (the latter is rendered from
-`deploy/indexer.env.template`). The flow has been broken for
-`/run`-authoritative deploys since PR 2.5 but is rarely exercised
-(operators usually pin schema via the workflow input). Tracked for a
-follow-up: either teach the function to also rewrite the template via
-sed and let CI re-render, or move schema rotation into the deploy
-manifest with its own parity guard.
+**Resolved later**: `apply_indexer_database_schema`'s
+`INDEXER_FRESH_SCHEMA=1` flow originally wrote a new `DATABASE_SCHEMA=`
+line to `/srv/agent-stack/indexer.env`, which
+`/run/agent-stack/indexer.env` did not pick up after PR 2.5 made `/run`
+authoritative. The deploy wrapper now renders `/run/agent-stack/indexer.env`
+first, then applies the explicit or fresh schema override to that rendered
+runtime env while preserving file mode/ownership. This keeps the recovery
+path one-shot and avoids committing emergency schema names back into
+`deploy/indexer.env.template`.
 
 ### PR 2.7 — Cleanup of legacy artifacts AND rotation
 

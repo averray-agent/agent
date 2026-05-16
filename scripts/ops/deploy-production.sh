@@ -45,7 +45,7 @@ fi
 PRODUCT_PROOF_NODE_IMAGE=${PRODUCT_PROOF_NODE_IMAGE:-node:22-bookworm-slim}
 INDEXER_DATABASE_SCHEMA=${INDEXER_DATABASE_SCHEMA:-}
 INDEXER_FRESH_SCHEMA=${INDEXER_FRESH_SCHEMA:-0}
-INDEXER_ENV_FILE=${INDEXER_ENV_FILE:-"$STACK_ROOT/indexer.env"}
+INDEXER_ENV_FILE=${INDEXER_ENV_FILE:-/run/agent-stack/indexer.env}
 # BACKEND_ENV_FILE: removed in PR 2.6 — backend env now rendered to
 # /run/agent-stack/backend.env by render_runtime_envs (1Password →
 # op inject → /run); /srv/agent-stack/backend.env is no longer written.
@@ -680,18 +680,36 @@ write_indexer_schema() {
 
   if [[ ! -f "$INDEXER_ENV_FILE" ]]; then
     echo "Missing indexer env file at $INDEXER_ENV_FILE; cannot set DATABASE_SCHEMA." >&2
+    echo "Runtime env files are rendered before schema overrides; check render_runtime_envs output above." >&2
     exit 1
   fi
 
   local tmp
   tmp=$(mktemp)
+  trap 'rm -f "$tmp"' RETURN
   awk '!/^DATABASE_SCHEMA=/' "$INDEXER_ENV_FILE" > "$tmp"
   printf 'DATABASE_SCHEMA=%s\n' "$schema" >> "$tmp"
-  chmod 600 "$tmp"
-  mv "$tmp" "$INDEXER_ENV_FILE"
+
+  local mode owner_group
+  mode=$(stat -c '%a' "$INDEXER_ENV_FILE")
+  owner_group=$(stat -c '%U:%G' "$INDEXER_ENV_FILE")
+  chmod "$mode" "$tmp"
+
+  case "$INDEXER_ENV_FILE" in
+    /run/agent-stack/*)
+      sudo chown "$owner_group" "$tmp"
+      sudo mv "$tmp" "$INDEXER_ENV_FILE"
+      ;;
+    *)
+      chown "$owner_group" "$tmp" 2>/dev/null || true
+      mv "$tmp" "$INDEXER_ENV_FILE"
+      ;;
+  esac
+  trap - RETURN
 
   echo "Updated indexer DATABASE_SCHEMA in $INDEXER_ENV_FILE: $schema"
   RUN_INDEXER=1
+  RUNTIME_ENV_CHANGED_INDEXER=1
 }
 
 apply_indexer_database_schema() {
@@ -767,7 +785,6 @@ deploy() {
   fi
 
   initialize_component_state
-  apply_indexer_database_schema
 
   # Phase 2 PR 2.5: render /run/agent-stack/*.env from 1Password.
   # FAIL-CLOSED — render failure aborts the deploy before containers
@@ -783,6 +800,7 @@ deploy() {
   # byte-for-byte) and CI enforces drift via
   # check-template-matches-manifest.mjs.
   render_runtime_envs
+  apply_indexer_database_schema
 
   local run_backend=0
   local run_indexer=0
