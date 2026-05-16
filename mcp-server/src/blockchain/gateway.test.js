@@ -775,11 +775,58 @@ test("async XCM request readers return display amounts and raw base-unit fields"
   assert.equal(xcmRequest.requestedAssets, 1.25);
   assert.equal(xcmRequest.requestedAssetsRaw, "1250000");
   assert.equal(xcmRequest.requestedShares, 0.5);
+  assert.equal(xcmRequest.nonce, 7);
+  assert.equal(xcmRequest.nonceRaw, "7");
+  assert.equal(xcmRequest.createdAt, 10);
+  assert.equal(xcmRequest.createdAtRaw, "10");
+  assert.equal(xcmRequest.updatedAt, 12);
+  assert.equal(xcmRequest.updatedAtRaw, "12");
   assert.equal(xcmRequest.settledAssets, 0.25);
   assert.equal(strategyRequest.requestedAssets, 1.25);
   assert.equal(strategyRequest.requestedAssetsRaw, "1250000");
   assert.equal(strategyRequest.settledShares, 0.1);
   assert.equal(strategyRequest.settledSharesRaw, "100000");
+});
+
+test("async XCM request reader preserves unsafe uint64 metadata as raw strings", async () => {
+  const gateway = new BlockchainGateway({ enabled: false, supportedAssets: [USDC_TRUST_ASSET] });
+  const requestId = `0x${"2".repeat(64)}`;
+  const unsafeNonce = BigInt(Number.MAX_SAFE_INTEGER) + 42n;
+  const unsafeCreatedAt = BigInt(Number.MAX_SAFE_INTEGER) + 100n;
+  const unsafeUpdatedAt = BigInt(Number.MAX_SAFE_INTEGER) + 101n;
+  gateway.xcmWrapperContract = {
+    async getRequest(id) {
+      assert.equal(id, requestId);
+      return {
+        context: {
+          strategyId: encodeBytes32String("USDC"),
+          kind: 0,
+          account: "0x3333333333333333333333333333333333333333",
+          asset: USDC_TRUST_ASSET.address,
+          recipient: "0x4444444444444444444444444444444444444444",
+          assets: 1n,
+          shares: 1n,
+          nonce: unsafeNonce
+        },
+        status: 1,
+        settledAssets: 0n,
+        settledShares: 0n,
+        remoteRef: `0x${"0".repeat(64)}`,
+        failureCode: `0x${"0".repeat(64)}`,
+        createdAt: unsafeCreatedAt,
+        updatedAt: unsafeUpdatedAt
+      };
+    }
+  };
+
+  const xcmRequest = await gateway.getXcmRequest(requestId);
+
+  assert.equal(xcmRequest.nonce, unsafeNonce.toString());
+  assert.equal(xcmRequest.nonceRaw, unsafeNonce.toString());
+  assert.equal(xcmRequest.createdAt, unsafeCreatedAt.toString());
+  assert.equal(xcmRequest.createdAtRaw, unsafeCreatedAt.toString());
+  assert.equal(xcmRequest.updatedAt, unsafeUpdatedAt.toString());
+  assert.equal(xcmRequest.updatedAtRaw, unsafeUpdatedAt.toString());
 });
 
 test("finalizeXcmRequest rejects successful strategy withdrawals with zero settled assets before tx", async () => {

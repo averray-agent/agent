@@ -78,7 +78,12 @@ export class XcmSettlementWatcherService {
         requestId: normalizedRequestId,
         status: observation.status,
         settledAssets: observation.settledAssets,
+        settledAssetsRaw: observation.settledAssets,
         settledShares: observation.settledShares,
+        settledSharesRaw: observation.settledShares,
+        remoteRef: observation.remoteRef,
+        failureCode: observation.failureCode,
+        observedAt: observation.observedAt,
         source: observation.source
       }
     });
@@ -111,6 +116,13 @@ export class XcmSettlementWatcherService {
           data: {
             requestId: observation.requestId,
             status: finalized?.strategyRequest?.statusLabel ?? finalized?.statusLabel ?? observation.status,
+            settledAssets: observation.settledAssets,
+            settledAssetsRaw: observation.settledAssets,
+            settledShares: observation.settledShares,
+            settledSharesRaw: observation.settledShares,
+            remoteRef: observation.remoteRef,
+            failureCode: observation.failureCode,
+            source: observation.source,
             settledVia: finalized?.settledVia
           }
         });

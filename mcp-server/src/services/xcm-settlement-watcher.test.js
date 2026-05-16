@@ -31,11 +31,18 @@ test("observeOutcome stores a pending observation and emits an event", async () 
   assert.equal(observation.processed, false);
   assert.equal(events.length, 1);
   assert.equal(events[0].topic, "xcm.outcome_observed");
+  assert.equal(events[0].data.settledAssets, "5");
+  assert.equal(events[0].data.settledAssetsRaw, "5");
+  assert.equal(events[0].data.settledShares, "0");
+  assert.equal(events[0].data.settledSharesRaw, "0");
+  assert.equal(events[0].data.observedAt, observation.observedAt);
 });
 
 test("runPendingSettlements finalizes stored observations and marks them processed", async () => {
   const stateStore = new MemoryStateStore();
   const eventBus = new EventBus();
+  const events = [];
+  eventBus.subscribe({ topics: ["xcm.request_auto_finalized"] }, (event) => events.push(event));
   const finalizedCalls = [];
   const watcher = new XcmSettlementWatcherService(
     {
@@ -71,6 +78,12 @@ test("runPendingSettlements finalizes stored observations and marks them process
   assert.equal(finalizedCalls[0][1].settledShares, "5");
   assert.equal(stored.processed, true);
   assert.equal(stored.result.settledVia, "agent_account");
+  assert.equal(events.length, 1);
+  assert.equal(events[0].data.settledAssets, "5");
+  assert.equal(events[0].data.settledAssetsRaw, "5");
+  assert.equal(events[0].data.settledShares, "5");
+  assert.equal(events[0].data.settledSharesRaw, "5");
+  assert.equal(events[0].data.source, "observer");
 });
 
 test("observeOutcome preserves large uint256 settlement amounts exactly", async () => {
