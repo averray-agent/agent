@@ -280,8 +280,13 @@ test("claimJob stores on-chain claim expiry when blockchain is enabled", async (
         : { state: 1, claimExpiry: Date.parse("2026-05-01T10:01:00.000Z") / 1000 };
     },
     async ensureJob() {},
-    async ensureClaimStakeLiquidity() {},
-    async claimJob() {}
+    async ensureClaimStakeLiquidity(wallet) {
+      assert.equal(wallet, WALLET);
+    },
+    async claimJob(jobId, wallet) {
+      assert.equal(jobId, job.id);
+      assert.equal(wallet, WALLET);
+    }
   };
   const service = new JobExecutionService(stateStore, blockchainGateway, () => job);
 

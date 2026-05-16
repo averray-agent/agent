@@ -323,6 +323,15 @@ contract EscrowCore is ReentrancyGuard {
     }
 
     function claimJob(bytes32 jobId) external whenNotPaused nonReentrant {
+        _claimJob(jobId, msg.sender);
+    }
+
+    function claimJobFor(bytes32 jobId, address worker) external whenNotPaused nonReentrant onlyOperator {
+        _claimJob(jobId, worker);
+    }
+
+    function _claimJob(bytes32 jobId, address worker) internal {
+        if (worker == address(0)) revert Unauthorized();
         JobEscrow storage job = _jobs[jobId];
         if (job.state == JobState.None) revert UnknownJob();
         if (job.state != JobState.Open) revert InvalidState();
@@ -334,14 +343,14 @@ contract EscrowCore is ReentrancyGuard {
             uint16 claimFeeBps,
             bool waived,
             uint256 claimNumber
-        ) = _computeClaimEconomics(msg.sender, job);
+        ) = _computeClaimEconomics(worker, job);
 
         uint256 totalLocked = claimStake + claimFee;
         if (totalLocked > 0) {
-            accounts.lockJobStake(msg.sender, job.asset, totalLocked);
+            accounts.lockJobStake(worker, job.asset, totalLocked);
         }
 
-        job.worker = msg.sender;
+        job.worker = worker;
         job.claimStake = claimStake;
         job.claimStakeBps = claimStakeBps;
         job.claimFee = claimFee;
@@ -350,9 +359,9 @@ contract EscrowCore is ReentrancyGuard {
         job.rejectingVerifier = address(0);
         job.claimExpiry = block.timestamp + claimTtls[jobId];
         job.state = JobState.Claimed;
-        workerClaimCount[msg.sender] = claimNumber;
-        emit JobClaimed(jobId, msg.sender, job.claimExpiry, claimStake);
-        emit ClaimEconomicsLocked(jobId, msg.sender, claimStake, claimFee, waived, claimNumber);
+        workerClaimCount[worker] = claimNumber;
+        emit JobClaimed(jobId, worker, job.claimExpiry, claimStake);
+        emit ClaimEconomicsLocked(jobId, worker, claimStake, claimFee, waived, claimNumber);
     }
 
     function submitWork(bytes32 jobId, bytes32 evidenceHash) external whenNotPaused {
