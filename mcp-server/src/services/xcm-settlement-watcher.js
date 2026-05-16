@@ -66,8 +66,14 @@ export class XcmSettlementWatcherService {
       processed: false
     };
     const existing = await this.stateStore.getXcmObservation?.(normalizedRequestId);
-    if (existing && this.isEquivalentObservation(existing, incoming)) {
-      return existing;
+    if (existing) {
+      if (
+        this.isEquivalentObservation(existing, incoming) ||
+        existing.processed ||
+        this.isStaleObservation(existing, incoming)
+      ) {
+        return existing;
+      }
     }
     const observation = await this.stateStore.upsertXcmObservation(incoming);
 
@@ -180,6 +186,14 @@ export class XcmSettlementWatcherService {
         === normalizeObservationAmount(incoming.settledShares, "settledShares")
       && String(existing.remoteRef ?? "") === String(incoming.remoteRef ?? "")
       && String(existing.failureCode ?? "") === String(incoming.failureCode ?? "");
+  }
+
+  isStaleObservation(existing, incoming) {
+    const existingObservedAt = Date.parse(existing?.observedAt ?? "");
+    const incomingObservedAt = Date.parse(incoming?.observedAt ?? "");
+    return Number.isFinite(existingObservedAt) &&
+      Number.isFinite(incomingObservedAt) &&
+      incomingObservedAt <= existingObservedAt;
   }
 }
 

@@ -278,3 +278,86 @@ test("observeOutcome does not requeue an equivalent processed observation", asyn
   const pending = await stateStore.listPendingXcmObservations(10);
   assert.equal(pending.length, 0);
 });
+
+test("observeOutcome ignores stale conflicting observations for the same request", async () => {
+  const stateStore = new MemoryStateStore();
+  const eventBus = new EventBus();
+  const events = [];
+  eventBus.subscribe({ topics: ["xcm.outcome_observed"] }, (event) => events.push(event));
+  const watcher = new XcmSettlementWatcherService(
+    { finalizeXcmRequest: async () => ({}) },
+    stateStore,
+    eventBus,
+    { enabled: false }
+  );
+
+  await watcher.observeOutcome(REQUEST_ID, {
+    status: "succeeded",
+    settledAssets: 5,
+    observedAt: "2026-05-14T12:00:00Z"
+  });
+
+  const replayed = await watcher.observeOutcome(REQUEST_ID, {
+    status: "failed",
+    settledAssets: 0,
+    failureCode: "STALE_FAILURE",
+    observedAt: "2026-05-14T11:59:59Z"
+  });
+  const stored = await stateStore.getXcmObservation(REQUEST_ID);
+
+  assert.equal(replayed.status, "succeeded");
+  assert.equal(stored.status, "succeeded");
+  assert.equal(stored.settledAssets, "5");
+  assert.equal(stored.observedAt, "2026-05-14T12:00:00.000Z");
+  assert.equal(events.length, 1);
+});
+
+test("observeOutcome does not reopen a processed request with a conflicting replay", async () => {
+  const stateStore = new MemoryStateStore();
+  const eventBus = new EventBus();
+  const observedEvents = [];
+  const finalizedCalls = [];
+  eventBus.subscribe({ topics: ["xcm.outcome_observed"] }, (event) => observedEvents.push(event));
+  const watcher = new XcmSettlementWatcherService(
+    {
+      finalizeXcmRequest: async (requestId, outcome) => {
+        finalizedCalls.push([requestId, outcome]);
+        return {
+          requestId,
+          settledVia: "agent_account",
+          strategyRequest: {
+            account: "0xabc",
+            statusLabel: outcome.status
+          }
+        };
+      }
+    },
+    stateStore,
+    eventBus,
+    { enabled: false }
+  );
+
+  await watcher.observeOutcome(REQUEST_ID, {
+    status: "succeeded",
+    settledAssets: 5,
+    observedAt: "2026-05-14T12:00:00Z"
+  });
+  await watcher.runPendingSettlements();
+
+  const replayed = await watcher.observeOutcome(REQUEST_ID, {
+    status: "failed",
+    settledAssets: 0,
+    failureCode: "CONFLICTING_REPLAY",
+    observedAt: "2026-05-14T12:01:00Z"
+  });
+  const stored = await stateStore.getXcmObservation(REQUEST_ID);
+  const pending = await stateStore.listPendingXcmObservations(10);
+
+  assert.equal(replayed.processed, true);
+  assert.equal(stored.processed, true);
+  assert.equal(stored.status, "succeeded");
+  assert.equal(stored.settledAssets, "5");
+  assert.equal(pending.length, 0);
+  assert.equal(observedEvents.length, 1);
+  assert.equal(finalizedCalls.length, 1);
+});
