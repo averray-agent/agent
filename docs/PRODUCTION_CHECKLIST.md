@@ -414,3 +414,56 @@ npm run validate:subscan-xcm -- --require-published
 
 Until this is green, Subscan or manual observation can help staging, but the
 native observer is not production settlement truth.
+
+---
+
+## 13. Manual deploy: signer USDC liquidity preflight
+
+Auto-triggered deploys (`workflow_run` events fired after CI on `main`) leave
+`PRODUCT_PROOF_REQUIRE_WORKER_LOOP=0` and never claim a job. **Manual
+`workflow_dispatch` deploys that set `product_proof_require_worker_loop=1`
+run a real hosted product-proof worker loop against production**, which
+calls `EscrowCore.claimJob` with the active backend signer. If that signer
+has no liquid USDC inside `AgentAccountCore`, the deploy fails at the
+worker-loop step *after* `Deploy production`'s smoke check has already
+acquired the production lock, with this signature in the log:
+
+```
+Insufficient liquid balance for USDC
+status=409; path=/jobs/claim; code=insufficient_liquidity
+account: <signer wallet>, asset: USDC, assetClass: trust_backed
+```
+
+USDC is trust-backed (not auto-minted), so the loop fails closed rather
+than minting; no chain or contract code is wrong.
+
+**Before manually dispatching a deploy with the worker loop enabled:**
+
+1. Identify the **active** backend signer wallet. After the 2026-05-16 KMS
+   cutover (see
+   [`docs/SECRETS_MIGRATION.md`](./SECRETS_MIGRATION.md)) the active signer
+   is the KMS-derived EVM address, not the `verifier` field still recorded
+   in [`deployments/testnet.json`](../deployments/testnet.json). The
+   authoritative current value is the `account` field printed in a prior
+   failing deploy log, or the address read from the KMS public key via
+   `node scripts/ops/derive-kms-signer-address.mjs`.
+2. Confirm that wallet's USDC position covers the worker-loop reward plus
+   the configured claim-stake basis points. The exact minimum is the
+   `required` value the failure log prints; current default is
+   `0.16 USDC`.
+3. If the position is short, top up the wallet via the playbook in
+   [`docs/TESTNET_FUND_SIGNER.md`](./TESTNET_FUND_SIGNER.md). Note that
+   doc's "read signer from `deployments/testnet.json#verifier`" line is
+   stale post-KMS-cutover and should be cross-referenced against step 1 of
+   this section before depositing — funding the old signer wallet will
+   silently *not* unblock the deploy.
+4. Re-run **Deploy Production** with the same dispatch parameters. The
+   product-proof worker loop will create, claim, submit, and settle a job
+   against the funded signer and write evidence under
+   `PRODUCT_PROOF_EVIDENCE_FILE`.
+
+If the worker loop is not the point of this particular dispatch, set
+`product_proof_require_worker_loop=0` in the **Run workflow** form and
+re-trigger; the deploy will skip the loop entirely. This is the right
+choice for a non-functional dispatch (Caddy-only change, hotfix smoke,
+cache invalidation) where the worker loop is not part of the test plan.
