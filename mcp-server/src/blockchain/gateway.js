@@ -307,6 +307,15 @@ export class BlockchainGateway {
     });
   }
 
+  async getWorkerClaimCount(wallet) {
+    return this.withGatewayError("getWorkerClaimCount", async () => {
+      if (typeof this.escrowContract?.workerClaimCount !== "function") {
+        return 0;
+      }
+      return Number(await this.escrowContract.workerClaimCount(wallet));
+    });
+  }
+
   async getTreasuryPolicyStatus() {
     return this.withGatewayError("getTreasuryPolicyStatus", async () => {
       if (!this.isEnabled()) {
