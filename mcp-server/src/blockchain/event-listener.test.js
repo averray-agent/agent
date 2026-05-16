@@ -9,43 +9,39 @@ const ASSET = "0x3333333333333333333333333333333333333333";
 const REQUEST_ID = `0x${"aa".repeat(32)}`;
 const STRATEGY_ID = `0x${"bb".repeat(32)}`;
 
-function makeContract() {
-  const handlers = new Map();
+function makeContract({ address, eventTopics = {} } = {}) {
   return {
-    on(eventName, handler) {
-      handlers.set(eventName, handler);
-    },
-    off(eventName, handler) {
-      if (handlers.get(eventName) === handler) {
-        handlers.delete(eventName);
+    target: address,
+    interface: {
+      getEvent(name) {
+        const topicHash = eventTopics[name];
+        return topicHash ? { topicHash } : null;
       }
-    },
-    async emitEvent(eventName, args, log = {}) {
-      const handler = handlers.get(eventName);
-      assert.ok(handler, `missing handler for ${eventName}`);
-      await handler({
-        args,
-        log: {
-          transactionHash: `0x${"12".repeat(32)}`,
-          index: 0,
-          blockNumber: 12345n,
-          ...log
-        }
-      });
     }
   };
 }
 
+const XCM_CONTRACT_ADDRESS = `0x${"ab".repeat(20)}`;
+const XCM_EVENT_TOPICS = {
+  RequestQueued: `0x${"01".repeat(32)}`,
+  RequestPayloadStored: `0x${"02".repeat(32)}`,
+  RequestDispatched: `0x${"03".repeat(32)}`,
+  RequestStatusUpdated: `0x${"04".repeat(32)}`
+};
+
 function makeListener({ gateway = {}, xcmRequest = {} } = {}) {
-  const xcmWrapperContract = makeContract();
+  const xcmWrapperContract = makeContract({
+    address: XCM_CONTRACT_ADDRESS,
+    eventTopics: XCM_EVENT_TOPICS
+  });
   const events = [];
   const listener = new EventListener(
     {
       isEnabled: () => true,
       provider: {
-        on() {},
-        off() {},
-        getBlock: async () => ({ timestamp: 1_700_000_000n })
+        getBlock: async () => ({ timestamp: 1_700_000_000n }),
+        getBlockNumber: async () => 12_345n,
+        getLogs: async () => []
       },
       xcmWrapperContract,
       getXcmRequest: async () => ({
@@ -67,9 +63,21 @@ function makeListener({ gateway = {}, xcmRequest = {} } = {}) {
         events.push(event);
         return event;
       }
-    }
+    },
+    undefined,
+    { pollIntervalMs: 60_000 }
   );
   return { listener, xcmWrapperContract, events };
+}
+
+const DEFAULT_LOG = {
+  transactionHash: `0x${"12".repeat(32)}`,
+  index: 0,
+  blockNumber: 12_345n
+};
+
+async function emit(listener, eventName, args, log = {}) {
+  await listener.dispatch(eventName, args, { ...DEFAULT_LOG, ...log });
 }
 
 test("EventListener preserves unsafe XCM queued nonce as raw string", async () => {
@@ -77,7 +85,7 @@ test("EventListener preserves unsafe XCM queued nonce as raw string", async () =
   await listener.start();
   const unsafeNonce = BigInt(Number.MAX_SAFE_INTEGER) + 99n;
 
-  await xcmWrapperContract.emitEvent("RequestQueued", {
+  await emit(listener, "RequestQueued", {
     requestId: REQUEST_ID,
     strategyId: STRATEGY_ID,
     kind: 0,
@@ -105,7 +113,7 @@ test("EventListener preserves unsafe XCM weight fields as raw strings", async ()
   await listener.start();
   const unsafeRefTime = BigInt(Number.MAX_SAFE_INTEGER) + 123n;
 
-  await xcmWrapperContract.emitEvent("RequestPayloadStored", {
+  await emit(listener, "RequestPayloadStored", {
     requestId: REQUEST_ID,
     destinationHash: `0x${"cc".repeat(32)}`,
     messageHash: `0x${"dd".repeat(32)}`,
@@ -129,7 +137,7 @@ test("EventListener exposes raw settled XCM amounts on status updates", async ()
   const settledAssets = 12_500_000_000_000_000_000n;
   const settledShares = 2_500_000_000_000_000_000n;
 
-  await xcmWrapperContract.emitEvent("RequestStatusUpdated", {
+  await emit(listener, "RequestStatusUpdated", {
     requestId: REQUEST_ID,
     status: 2,
     settledAssets,
@@ -182,4 +190,96 @@ test("EventListener readJob preserves unsafe lifecycle timestamps as raw strings
   assert.equal(job.rejectedAtRaw, "777");
   assert.equal(job.disputedAt, unsafeDisputedAt.toString());
   assert.equal(job.disputedAtRaw, unsafeDisputedAt.toString());
+});
+
+test("EventListener pollOnce queries eth_getLogs and advances lastBlock", async () => {
+  const getLogsCalls = [];
+  const { listener } = makeListener({
+    gateway: {
+      provider: {
+        getBlock: async () => ({ timestamp: 1_700_000_000n }),
+        getBlockNumber: async () => 1_010n,
+        async getLogs(filter) {
+          getLogsCalls.push(filter);
+          return [];
+        }
+      }
+    }
+  });
+
+  listener.running = true;
+  listener.attachEventHandlers();
+  listener.lastBlock = 1_000;
+  await listener.pollOnce();
+
+  assert.equal(getLogsCalls.length, 1);
+  assert.equal(getLogsCalls[0].fromBlock, 1_001);
+  assert.equal(getLogsCalls[0].toBlock, 1_010);
+  assert.equal(getLogsCalls[0].address, XCM_CONTRACT_ADDRESS.toLowerCase());
+  assert.equal(listener.lastBlock, 1_010);
+
+  await listener.stop();
+});
+
+test("EventListener pollOnce skips when head has not advanced", async () => {
+  const getLogsCalls = [];
+  const { listener } = makeListener({
+    gateway: {
+      provider: {
+        getBlock: async () => ({ timestamp: 1_700_000_000n }),
+        getBlockNumber: async () => 1_000n,
+        async getLogs(filter) {
+          getLogsCalls.push(filter);
+          return [];
+        }
+      }
+    }
+  });
+
+  listener.running = true;
+  listener.attachEventHandlers();
+  listener.lastBlock = 1_000;
+  await listener.pollOnce();
+
+  assert.equal(getLogsCalls.length, 0);
+  assert.equal(listener.lastBlock, 1_000);
+
+  await listener.stop();
+});
+
+test("EventListener pollOnce surfaces provider errors and schedules reconnect", async () => {
+  const { listener, events } = makeListener({
+    gateway: {
+      provider: {
+        getBlock: async () => ({ timestamp: 1_700_000_000n }),
+        getBlockNumber: async () => {
+          throw new Error("Method not found");
+        },
+        getLogs: async () => []
+      }
+    }
+  });
+
+  listener.running = true;
+  listener.attachEventHandlers();
+  listener.lastBlock = 0;
+  await listener.pollOnce();
+
+  const providerError = events.find((event) => event.topic === "system.provider_error");
+  const reconnect = events.find((event) => event.topic === "system.reconnect");
+  assert.ok(providerError, "expected provider error event");
+  assert.match(providerError.data.message, /Method not found/u);
+  assert.ok(reconnect, "expected reconnect event");
+  assert.ok(reconnect.data.delayMs >= 1_000);
+
+  await listener.stop();
+});
+
+test("EventListener register skips contracts missing interface or target", () => {
+  const { listener } = makeListener();
+  const before = listener.registrations.length;
+  listener.register(undefined, "JobFunded", async () => null);
+  listener.register({ target: "0x123" }, "JobFunded", async () => null);
+  listener.register({ interface: { getEvent: () => null } }, "JobFunded", async () => null);
+  assert.equal(listener.registrations.length, before);
 });

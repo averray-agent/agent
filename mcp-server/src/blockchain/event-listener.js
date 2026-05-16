@@ -1,16 +1,26 @@
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+const DEFAULT_POLL_INTERVAL_MS = 4_000;
+const DEFAULT_MAX_BLOCKS_PER_QUERY = 1_000;
+const MIN_RECONNECT_DELAY_MS = 1_000;
+const MAX_RECONNECT_DELAY_MS = 30_000;
 
 export class EventListener {
-  constructor(gateway, eventBus, stateStore = undefined) {
+  constructor(gateway, eventBus, stateStore = undefined, options = {}) {
     this.gateway = gateway;
     this.eventBus = eventBus;
     this.stateStore = stateStore;
     this.running = false;
     this.registrations = [];
+    this.routingTable = new Map();
+    this.eventNameIndex = new Map();
     this.blockTimestampCache = new Map();
-    this.reconnectDelayMs = 1000;
-    this.reconnectTimer = undefined;
-    this.handleProviderError = this.handleProviderError.bind(this);
+    this.pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+    this.maxBlocksPerQuery = options.maxBlocksPerQuery ?? DEFAULT_MAX_BLOCKS_PER_QUERY;
+    this.confirmations = options.confirmations ?? 0;
+    this.pollTimer = undefined;
+    this.pollInFlight = false;
+    this.reconnectDelayMs = MIN_RECONNECT_DELAY_MS;
+    this.lastBlock = undefined;
   }
 
   async start() {
@@ -20,19 +30,26 @@ export class EventListener {
 
     this.running = true;
     this.attachEventHandlers();
-    this.gateway.provider?.on?.("error", this.handleProviderError);
+
+    try {
+      const head = await this.gateway.provider.getBlockNumber();
+      this.lastBlock = Number(head);
+    } catch (error) {
+      this.publishProviderError(error);
+      this.scheduleReconnect();
+      return;
+    }
+
+    this.scheduleNextPoll(this.pollIntervalMs);
   }
 
   async stop() {
     this.running = false;
-    clearTimeout(this.reconnectTimer);
-    this.reconnectTimer = undefined;
-
-    for (const { contract, eventName, handler } of this.registrations) {
-      contract.off(eventName, handler);
-    }
+    clearTimeout(this.pollTimer);
+    this.pollTimer = undefined;
     this.registrations = [];
-    this.gateway.provider?.off?.("error", this.handleProviderError);
+    this.routingTable.clear();
+    this.eventNameIndex.clear();
   }
 
   attachEventHandlers() {
@@ -411,38 +428,152 @@ export class EventListener {
   }
 
   register(contract, eventName, build) {
-    if (!contract?.on) {
+    if (!contract?.interface || !contract?.target) {
       return;
     }
-    const handler = async (...args) => {
-      if (!this.running) {
+
+    const fragment = contract.interface.getEvent(eventName);
+    if (!fragment?.topicHash) {
+      return;
+    }
+
+    const address = String(contract.target).toLowerCase();
+    const topicHash = String(fragment.topicHash).toLowerCase();
+    const entry = { contract, eventName, build, address, topicHash };
+    this.registrations.push(entry);
+    this.routingTable.set(`${address}:${topicHash}`, entry);
+    this.eventNameIndex.set(eventName, entry);
+  }
+
+  scheduleNextPoll(delayMs = this.pollIntervalMs) {
+    if (!this.running) {
+      return;
+    }
+    clearTimeout(this.pollTimer);
+    this.pollTimer = setTimeout(() => {
+      this.pollOnce().catch((error) => this.publishProviderError(error));
+    }, delayMs);
+    if (typeof this.pollTimer?.unref === "function") {
+      this.pollTimer.unref();
+    }
+  }
+
+  async pollOnce() {
+    if (!this.running || this.pollInFlight) {
+      return;
+    }
+    this.pollInFlight = true;
+    try {
+      const head = Number(await this.gateway.provider.getBlockNumber());
+      const targetBlock = Math.max(0, head - this.confirmations);
+
+      if (this.lastBlock === undefined) {
+        this.lastBlock = targetBlock;
+      }
+
+      let fromBlock = this.lastBlock + 1;
+      const addresses = uniqueAddresses(this.registrations);
+      if (addresses.length === 0 || fromBlock > targetBlock) {
         return;
       }
 
-      try {
-        const payload = args.at(-1);
-        const event = await build({
-          args: payload.args,
-          payload
+      while (fromBlock <= targetBlock) {
+        const chunkTo = Math.min(fromBlock + this.maxBlocksPerQuery - 1, targetBlock);
+        const logs = await this.gateway.provider.getLogs({
+          fromBlock,
+          toBlock: chunkTo,
+          address: addresses.length === 1 ? addresses[0] : addresses
         });
-        if (event) {
-          this.eventBus.publish(event);
-        }
-      } catch (error) {
-        this.eventBus.publish({
-          id: `system-error-${Date.now()}`,
-          topic: "system.listener_error",
-          timestamp: new Date().toISOString(),
-          data: {
-            eventName,
-            message: error?.message ?? "listener_error"
+        sortLogs(logs);
+        for (const log of logs) {
+          if (!this.running) {
+            return;
           }
-        });
+          await this.dispatchLog(log);
+        }
+        this.lastBlock = chunkTo;
+        fromBlock = chunkTo + 1;
       }
-    };
+      this.reconnectDelayMs = MIN_RECONNECT_DELAY_MS;
+    } catch (error) {
+      this.publishProviderError(error);
+      this.scheduleReconnect();
+      return;
+    } finally {
+      this.pollInFlight = false;
+    }
+    this.scheduleNextPoll(this.pollIntervalMs);
+  }
 
-    contract.on(eventName, handler);
-    this.registrations.push({ contract, eventName, handler });
+  async dispatchLog(log) {
+    if (!log) {
+      return;
+    }
+    const address = String(log.address ?? "").toLowerCase();
+    const topic0 = log.topics?.[0] ? String(log.topics[0]).toLowerCase() : undefined;
+    if (!address || !topic0) {
+      return;
+    }
+    const entry = this.routingTable.get(`${address}:${topic0}`);
+    if (!entry) {
+      return;
+    }
+
+    let parsed;
+    try {
+      parsed = entry.contract.interface.parseLog({
+        topics: [...log.topics],
+        data: log.data
+      });
+    } catch (error) {
+      this.publishListenerError(entry.eventName, error);
+      return;
+    }
+    if (!parsed) {
+      return;
+    }
+
+    await this.deliver(entry, parsed.args, log);
+  }
+
+  async dispatch(eventName, args, log = {}) {
+    const entry = this.eventNameIndex.get(eventName);
+    if (!entry) {
+      throw new Error(`no registration for event ${eventName}`);
+    }
+    const fullLog = {
+      transactionHash: log.transactionHash ?? `0x${"00".repeat(32)}`,
+      index: log.index ?? 0,
+      blockNumber: log.blockNumber ?? 0n,
+      address: entry.address,
+      topics: log.topics ?? [entry.topicHash],
+      ...log
+    };
+    await this.deliver(entry, args, fullLog);
+  }
+
+  async deliver(entry, args, log) {
+    try {
+      const payload = { args, log };
+      const event = await entry.build({ args, payload });
+      if (event) {
+        this.eventBus.publish(event);
+      }
+    } catch (error) {
+      this.publishListenerError(entry.eventName, error);
+    }
+  }
+
+  publishListenerError(eventName, error) {
+    this.eventBus.publish({
+      id: `system-error-${Date.now()}`,
+      topic: "system.listener_error",
+      timestamp: new Date().toISOString(),
+      data: {
+        eventName,
+        message: error?.message ?? "listener_error"
+      }
+    });
   }
 
   async readJob(jobId) {
@@ -512,11 +643,7 @@ export class EventListener {
     return timestamp;
   }
 
-  handleProviderError(error) {
-    if (!this.running) {
-      return;
-    }
-
+  publishProviderError(error) {
     this.eventBus.publish({
       id: `system-provider-error-${Date.now()}`,
       topic: "system.provider_error",
@@ -525,22 +652,43 @@ export class EventListener {
         message: error?.message ?? "provider_error"
       }
     });
-
-    clearTimeout(this.reconnectTimer);
-    this.reconnectTimer = setTimeout(async () => {
-      await this.stop();
-      this.reconnectDelayMs = Math.min(this.reconnectDelayMs * 2, 30_000);
-      await this.start();
-      this.eventBus.publish({
-        id: `system-reconnect-${Date.now()}`,
-        topic: "system.reconnect",
-        timestamp: new Date().toISOString(),
-        data: {
-          delayMs: this.reconnectDelayMs
-        }
-      });
-    }, this.reconnectDelayMs);
   }
+
+  scheduleReconnect() {
+    if (!this.running) {
+      return;
+    }
+    this.reconnectDelayMs = Math.min(this.reconnectDelayMs * 2, MAX_RECONNECT_DELAY_MS);
+    this.eventBus.publish({
+      id: `system-reconnect-${Date.now()}`,
+      topic: "system.reconnect",
+      timestamp: new Date().toISOString(),
+      data: {
+        delayMs: this.reconnectDelayMs
+      }
+    });
+    this.scheduleNextPoll(this.reconnectDelayMs);
+  }
+}
+
+function uniqueAddresses(registrations) {
+  const seen = new Set();
+  for (const entry of registrations) {
+    if (entry?.address) {
+      seen.add(entry.address);
+    }
+  }
+  return [...seen];
+}
+
+function sortLogs(logs) {
+  logs.sort((a, b) => {
+    const blockDiff = Number(a.blockNumber ?? 0n) - Number(b.blockNumber ?? 0n);
+    if (blockDiff !== 0) return blockDiff;
+    const ai = Number(a.index ?? a.logIndex ?? 0);
+    const bi = Number(b.index ?? b.logIndex ?? 0);
+    return ai - bi;
+  });
 }
 
 function serializeArgs(args) {
