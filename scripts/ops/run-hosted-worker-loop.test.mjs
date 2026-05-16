@@ -298,6 +298,58 @@ test("runHostedWorkerLoop accepts display-unit account liquidity when raw balanc
   assert.equal(result.liquidityReadiness.availableRaw, "100000");
 });
 
+test("runHostedWorkerLoop normalizes floating preflight claim lock display values", async () => {
+  const client = {
+    async getAuthSession() {
+      return authSession();
+    },
+    async getAdminStatus() {
+      return settlementReadyStatus();
+    },
+    async getAccountSummary() {
+      return accountSummary({ liquidUsdcRaw: 160_000 });
+    },
+    async createJob(payload) {
+      return { id: payload.id };
+    },
+    async preflightJob(id) {
+      return preflightReady({ jobId: id, totalClaimLock: 0.060000000000000005 });
+    },
+    async validateJobSubmission(id, submission) {
+      return validationForSubmission({ jobId: id, submission });
+    },
+    async claimJob(id) {
+      return { status: "claimed", sessionId: `${id}:wallet` };
+    },
+    async submitWork(id) {
+      return { status: "submitted", sessionId: id };
+    },
+    async runVerifier() {
+      return { outcome: "approved" };
+    },
+    async getSession(id) {
+      return { status: "resolved", sessionId: id };
+    },
+    async getAgentBadge(id) {
+      return { averray: { sessionId: id, jobId: "product-proof-worker-loop-1700000000000" } };
+    },
+    async getAgentProfile() {
+      return { badges: [{ sessionId: "product-proof-worker-loop-1700000000000:wallet", jobId: "product-proof-worker-loop-1700000000000" }] };
+    }
+  };
+
+  const result = await runHostedWorkerLoop({
+    client,
+    now: () => 1700000000000,
+    log: () => {},
+    env: { ADMIN_JWT: "token" }
+  });
+
+  assert.equal(result.claimLiquidityReadiness.rewardRaw, "100000");
+  assert.equal(result.claimLiquidityReadiness.totalClaimLockRaw, "60000");
+  assert.equal(result.claimLiquidityReadiness.requiredRaw, "160000");
+});
+
 test("runHostedWorkerLoop fails closed before mutation when AgentAccountCore USDC liquidity is missing", async () => {
   const calls = [];
   const wallet = "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519";
