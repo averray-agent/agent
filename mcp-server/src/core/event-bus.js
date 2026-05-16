@@ -244,6 +244,31 @@ function classifyEventTopic(topic, data = {}) {
       severity: sessionSeverity(data)
     };
   }
+  if (topic.startsWith("policy.")) {
+    return {
+      source: "governance",
+      phase: "governance",
+      severity: "info"
+    };
+  }
+  if (topic.startsWith("capability.")) {
+    return {
+      source: "governance",
+      phase: "capability",
+      // Revoke is the load-bearing trust-removal signal; treat as a
+      // higher-attention event than the routine grant/list flow.
+      severity: topic === "capability.revoke" ? "warn" : "info"
+    };
+  }
+  if (topic.startsWith("service-token.")) {
+    return {
+      source: "governance",
+      phase: "service_token",
+      // Same shape as capability.revoke: revocation is the signal an
+      // operator wants to see in the timeline immediately.
+      severity: topic === "service-token.revoke" ? "warn" : "info"
+    };
+  }
   return {
     source: "event_bus",
     phase: topic || "event",

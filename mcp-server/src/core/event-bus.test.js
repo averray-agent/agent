@@ -117,6 +117,69 @@ test("EventBus preserves canonical timeline fields and classifies chain topics",
   assert.equal(localDispute.severity, "warn");
 });
 
+test("EventBus classifies governance topics (policy, capability, service-token)", () => {
+  const bus = new EventBus();
+
+  const policy = bus.publish({
+    id: "policy-1",
+    topic: "policy.proposed",
+    wallet: "0xadmin",
+    timestamp: "2026-01-01T00:00:00.000Z"
+  });
+  assert.equal(policy.source, "governance");
+  assert.equal(policy.phase, "governance");
+  assert.equal(policy.severity, "info");
+
+  const grant = bus.publish({
+    id: "grant-1",
+    topic: "capability.grant",
+    wallet: "0xadmin",
+    timestamp: "2026-01-01T00:00:01.000Z"
+  });
+  assert.equal(grant.source, "governance");
+  assert.equal(grant.phase, "capability");
+  assert.equal(grant.severity, "info");
+
+  // Revoke is the trust-removal signal; classifier escalates severity.
+  const revoke = bus.publish({
+    id: "revoke-1",
+    topic: "capability.revoke",
+    wallet: "0xadmin",
+    timestamp: "2026-01-01T00:00:02.000Z"
+  });
+  assert.equal(revoke.source, "governance");
+  assert.equal(revoke.phase, "capability");
+  assert.equal(revoke.severity, "warn");
+
+  const tokenIssue = bus.publish({
+    id: "token-issue-1",
+    topic: "service-token.issue",
+    wallet: "0xadmin",
+    timestamp: "2026-01-01T00:00:03.000Z"
+  });
+  assert.equal(tokenIssue.source, "governance");
+  assert.equal(tokenIssue.phase, "service_token");
+  assert.equal(tokenIssue.severity, "info");
+
+  const tokenRotate = bus.publish({
+    id: "token-rotate-1",
+    topic: "service-token.rotate",
+    wallet: "0xadmin",
+    timestamp: "2026-01-01T00:00:04.000Z"
+  });
+  assert.equal(tokenRotate.severity, "info");
+
+  const tokenRevoke = bus.publish({
+    id: "token-revoke-1",
+    topic: "service-token.revoke",
+    wallet: "0xadmin",
+    timestamp: "2026-01-01T00:00:05.000Z"
+  });
+  assert.equal(tokenRevoke.source, "governance");
+  assert.equal(tokenRevoke.phase, "service_token");
+  assert.equal(tokenRevoke.severity, "warn");
+});
+
 test("EventBus persists events and replays durable filters beyond the ring buffer", async () => {
   const store = new MemoryStateStore();
   const bus = new EventBus({ bufferSize: 1, eventStore: store });
