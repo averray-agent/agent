@@ -105,6 +105,25 @@ test("observeOutcome preserves large uint256 settlement amounts exactly", async 
   assert.equal(observation.settledShares, "18446744073709551616");
 });
 
+test("observeOutcome normalizes numeric terminal statuses and observedAt", async () => {
+  const stateStore = new MemoryStateStore();
+  const watcher = new XcmSettlementWatcherService(
+    { finalizeXcmRequest: async () => ({}) },
+    stateStore,
+    undefined,
+    { enabled: false }
+  );
+
+  const observation = await watcher.observeOutcome(REQUEST_ID, {
+    status: 2,
+    settledAssets: 5,
+    observedAt: "2026-05-14T12:00:00Z"
+  });
+
+  assert.equal(observation.status, "succeeded");
+  assert.equal(observation.observedAt, "2026-05-14T12:00:00.000Z");
+});
+
 test("observeOutcome rejects unsafe numeric settlement amounts", async () => {
   const stateStore = new MemoryStateStore();
   const watcher = new XcmSettlementWatcherService(
@@ -121,6 +140,57 @@ test("observeOutcome rejects unsafe numeric settlement amounts", async () => {
     }),
     ValidationError
   );
+});
+
+test("observeOutcome rejects missing or non-terminal statuses before storing", async () => {
+  const stateStore = new MemoryStateStore();
+  const eventBus = new EventBus();
+  const events = [];
+  eventBus.subscribe({ topics: ["xcm.outcome_observed"] }, (event) => events.push(event));
+  const watcher = new XcmSettlementWatcherService(
+    { finalizeXcmRequest: async () => ({}) },
+    stateStore,
+    eventBus,
+    { enabled: false }
+  );
+
+  await assert.rejects(
+    () => watcher.observeOutcome(REQUEST_ID, {
+      settledAssets: 5
+    }),
+    ValidationError
+  );
+  await assert.rejects(
+    () => watcher.observeOutcome(REQUEST_ID, {
+      status: "pending",
+      settledAssets: 5
+    }),
+    ValidationError
+  );
+
+  assert.equal(await stateStore.getXcmObservation(REQUEST_ID), undefined);
+  assert.equal(events.length, 0);
+});
+
+test("observeOutcome rejects invalid observedAt before storing", async () => {
+  const stateStore = new MemoryStateStore();
+  const watcher = new XcmSettlementWatcherService(
+    { finalizeXcmRequest: async () => ({}) },
+    stateStore,
+    undefined,
+    { enabled: false }
+  );
+
+  await assert.rejects(
+    () => watcher.observeOutcome(REQUEST_ID, {
+      status: "succeeded",
+      settledAssets: 5,
+      observedAt: "not-a-date"
+    }),
+    ValidationError
+  );
+
+  assert.equal(await stateStore.getXcmObservation(REQUEST_ID), undefined);
 });
 
 test("runPendingSettlements keeps failed observations pending for retry", async () => {
