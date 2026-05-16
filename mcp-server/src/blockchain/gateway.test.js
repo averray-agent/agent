@@ -361,6 +361,16 @@ test("getTreasuryPolicyStatus surfaces settlement readiness roles", async () => 
       return 11n;
     }
   };
+  gateway.accountContract = {
+    async positions(account, asset) {
+      assert.equal(account, signerAddress);
+      assert.equal(asset, DOT_ASSET.address);
+      return emptyPosition({
+        liquid: 1_000_000_000_000_000_000n,
+        reserved: 250_000_000_000_000_000n
+      });
+    }
+  };
 
   const status = await gateway.getTreasuryPolicyStatus();
 
@@ -379,6 +389,31 @@ test("getTreasuryPolicyStatus surfaces settlement readiness roles", async () => 
     decimals: 18,
     approved: true
   }]);
+  assert.deepEqual(status.signerFunding, {
+    account: signerAddress,
+    agentAccountAddress: "0x3333333333333333333333333333333333333333",
+    assets: [{
+      symbol: "DOT",
+      address: DOT_ASSET.address,
+      assetClass: "custom",
+      assetId: undefined,
+      foreignAssetIndex: undefined,
+      decimals: 18,
+      readable: true,
+      liquid: 1,
+      liquidRaw: "1000000000000000000",
+      reserved: 0.25,
+      reservedRaw: "250000000000000000",
+      strategyAllocated: 0,
+      strategyAllocatedRaw: "0",
+      collateralLocked: 0,
+      collateralLockedRaw: "0",
+      jobStakeLocked: 0,
+      jobStakeLockedRaw: "0",
+      debtOutstanding: 0,
+      debtOutstandingRaw: "0"
+    }]
+  });
 });
 
 test("getTreasuryPolicyStatus preserves raw policy risk values when numbers are unsafe", async () => {
@@ -445,6 +480,11 @@ test("getTreasuryPolicyStatus preserves raw policy risk values when numbers are 
     },
     async disputeLossReliabilityPenalty() {
       return 50n;
+    }
+  };
+  gateway.accountContract = {
+    async positions() {
+      return emptyPosition();
     }
   };
 
@@ -528,6 +568,11 @@ test("getTreasuryPolicyStatus records individual read errors without hiding role
     },
     async disputeLossReliabilityPenalty() {
       return 11n;
+    }
+  };
+  gateway.accountContract = {
+    async positions() {
+      return emptyPosition();
     }
   };
 

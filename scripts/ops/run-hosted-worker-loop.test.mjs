@@ -116,12 +116,19 @@ test("runHostedWorkerLoop creates, claims, submits, verifies, and writes evidenc
   assert.equal(written.settlementReadiness.settlementReady, true);
   assert.equal(written.rewardReadiness.minBalanceRaw, "70000");
   assert.equal(written.rewardReadiness.rewardRaw, "100000");
+  assert.equal(written.signerFundingReadiness.signer, wallet);
+  assert.equal(written.signerFundingReadiness.requiredRaw, "100000");
+  assert.equal(written.signerFundingReadiness.availableRaw, "200000");
   assert.equal(written.liquidityReadiness.requiredRaw, "100000");
   assert.equal(written.liquidityReadiness.availableRaw, "100000");
   assert.equal(written.claimLiquidityReadiness.rewardRaw, "100000");
   assert.equal(written.claimLiquidityReadiness.totalClaimLockRaw, "0");
   assert.equal(written.claimLiquidityReadiness.requiredRaw, "100000");
   assert.equal(written.claimLiquidityReadiness.availableRaw, "100000");
+  assert.equal(written.claimSignerFundingReadiness.rewardRaw, "100000");
+  assert.equal(written.claimSignerFundingReadiness.totalClaimLockRaw, "0");
+  assert.equal(written.claimSignerFundingReadiness.requiredRaw, "100000");
+  assert.equal(written.claimSignerFundingReadiness.availableRaw, "200000");
   assert.deepEqual(written.authReadiness.roles, ["admin", "verifier"]);
   assert.ok(written.authReadiness.capabilitiesPresent.includes("verifier:run"));
   assert.equal(written.preflightReadiness.eligible, true);
@@ -387,6 +394,78 @@ test("runHostedWorkerLoop fails closed before mutation when AgentAccountCore USD
   assert.deepEqual(calls.map(([name]) => name), ["getAuthSession", "getAdminStatus", "getAccountSummary"]);
 });
 
+test("runHostedWorkerLoop fails closed before mutation when signer funding telemetry is missing", async () => {
+  const calls = [];
+  await assert.rejects(
+    runHostedWorkerLoop({
+      client: {
+        async getAuthSession() {
+          calls.push(["getAuthSession"]);
+          return authSession();
+        },
+        async getAdminStatus() {
+          calls.push(["getAdminStatus"]);
+          return settlementReadyStatus({ signerFunding: null });
+        },
+        async getAccountSummary() {
+          calls.push(["getAccountSummary"]);
+          throw new Error("should not inspect worker liquidity without signer funding telemetry");
+        },
+        async createJob() {
+          calls.push(["createJob"]);
+          throw new Error("should not create a catalog job without signer funding telemetry");
+        }
+      },
+      now: () => 1700000000000,
+      log: () => {},
+      env: { ADMIN_JWT: "token" }
+    }),
+    /requires signer AgentAccountCore funding telemetry before mutation; signer=0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519; account=0x3333333333333333333333333333333333333333/u
+  );
+
+  assert.deepEqual(calls.map(([name]) => name), ["getAuthSession", "getAdminStatus"]);
+});
+
+test("runHostedWorkerLoop fails closed before mutation when signer USDC funding is missing", async () => {
+  const calls = [];
+  await assert.rejects(
+    runHostedWorkerLoop({
+      client: {
+        async getAuthSession() {
+          calls.push(["getAuthSession"]);
+          return authSession();
+        },
+        async getAdminStatus() {
+          calls.push(["getAdminStatus"]);
+          return settlementReadyStatus({
+            signerFunding: signerFundingReady({
+              account: "0x31ad432dFe083B998c69B6dB88A984ec5207ab7F",
+              liquidUsdcRaw: "0"
+            }),
+            roles: {
+              signerAddress: "0x31ad432dFe083B998c69B6dB88A984ec5207ab7F"
+            }
+          });
+        },
+        async getAccountSummary() {
+          calls.push(["getAccountSummary"]);
+          throw new Error("should not inspect worker liquidity before signer funding is ready");
+        },
+        async createJob() {
+          calls.push(["createJob"]);
+          throw new Error("should not create a catalog job without signer USDC liquidity");
+        }
+      },
+      now: () => 1700000000000,
+      log: () => {},
+      env: { ADMIN_JWT: "token" }
+    }),
+    /requires funded signer USDC liquidity before mutation; signer=0x31ad432dFe083B998c69B6dB88A984ec5207ab7F; account=0x3333333333333333333333333333333333333333; reward=0\.1 USDC \(raw 100000\); totalClaimLock=0 USDC \(raw 0\); required=0\.1 USDC \(raw 100000\); available=0 USDC \(raw 0\)/u
+  );
+
+  assert.deepEqual(calls.map(([name]) => name), ["getAuthSession", "getAdminStatus"]);
+});
+
 test("runHostedWorkerLoop fails closed before mutation when account summary wallet mismatches auth session", async () => {
   const calls = [];
   await assert.rejects(
@@ -568,6 +647,61 @@ test("runHostedWorkerLoop fails closed after preflight when reward plus claim lo
       env: { ADMIN_JWT: "token" }
     }),
     /requires funded USDC liquidity before claim; wallet=0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519; account=0x3333333333333333333333333333333333333333; reward=0\.1 USDC \(raw 100000\); totalClaimLock=0\.055 USDC \(raw 55000\); required=0\.155 USDC \(raw 155000\); available=0\.1 USDC \(raw 100000\)/u
+  );
+
+  assert.deepEqual(calls.map(([name]) => name), [
+    "getAuthSession",
+    "getAdminStatus",
+    "getAccountSummary",
+    "createJob",
+    "preflightJob",
+    "getAccountSummary"
+  ]);
+  assert.equal(calls[4][1], jobId);
+});
+
+test("runHostedWorkerLoop fails closed after preflight when signer reward plus claim lock is underfunded", async () => {
+  const calls = [];
+  const jobId = "product-proof-worker-loop-1700000000000";
+  await assert.rejects(
+    runHostedWorkerLoop({
+      client: {
+        async getAuthSession() {
+          calls.push(["getAuthSession"]);
+          return authSession();
+        },
+        async getAdminStatus() {
+          calls.push(["getAdminStatus"]);
+          return settlementReadyStatus({
+            signerFunding: signerFundingReady({ liquidUsdcRaw: "100000" })
+          });
+        },
+        async getAccountSummary() {
+          calls.push(["getAccountSummary"]);
+          return accountSummary({ liquidUsdcRaw: 200_000 });
+        },
+        async createJob(payload) {
+          calls.push(["createJob", payload]);
+          return { id: payload.id };
+        },
+        async preflightJob(id) {
+          calls.push(["preflightJob", id]);
+          return preflightReady({ jobId: id, totalClaimLock: 0.055 });
+        },
+        async validateJobSubmission() {
+          calls.push(["validateJobSubmission"]);
+          throw new Error("should not validate after signer claim-funding preflight fails");
+        },
+        async claimJob() {
+          calls.push(["claimJob"]);
+          throw new Error("should not claim without signer reward plus claim-lock liquidity");
+        }
+      },
+      now: () => 1700000000000,
+      log: () => {},
+      env: { ADMIN_JWT: "token" }
+    }),
+    /requires funded signer USDC liquidity before claim; signer=0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519; account=0x3333333333333333333333333333333333333333; reward=0\.1 USDC \(raw 100000\); totalClaimLock=0\.055 USDC \(raw 55000\); required=0\.155 USDC \(raw 155000\); available=0\.1 USDC \(raw 100000\)/u
   );
 
   assert.deepEqual(calls.map(([name]) => name), [
@@ -981,6 +1115,7 @@ function validationForSubmission({ jobId, submission }) {
 }
 
 function settlementReadyStatus(overrides = {}) {
+  const policyOverrides = overrides.maintenance?.policy ?? overrides;
   const base = {
     maintenance: {
       policy: {
@@ -990,10 +1125,11 @@ function settlementReadyStatus(overrides = {}) {
         settlementReady: true,
         roles: {
           signerAddress: "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519",
-            signerIsVerifier: true,
-            escrowIsServiceOperator: true,
-            agentAccountIsServiceOperator: true
-          },
+          signerIsVerifier: true,
+          escrowIsServiceOperator: true,
+          agentAccountIsServiceOperator: true
+        },
+        signerFunding: signerFundingReady(),
         contracts: {
           escrowCoreAddress: "0x2222222222222222222222222222222222222222",
           agentAccountAddress: "0x3333333333333333333333333333333333333333",
@@ -1022,14 +1158,41 @@ function settlementReadyStatus(overrides = {}) {
         ...(overrides.maintenance?.policy ?? overrides),
         roles: {
           ...base.maintenance.policy.roles,
-          ...((overrides.maintenance?.policy ?? overrides).roles ?? {})
+          ...(policyOverrides.roles ?? {})
         },
+        signerFunding: Object.prototype.hasOwnProperty.call(policyOverrides, "signerFunding")
+          ? policyOverrides.signerFunding
+          : base.maintenance.policy.signerFunding,
         contracts: {
           ...base.maintenance.policy.contracts,
-          ...((overrides.maintenance?.policy ?? overrides).contracts ?? {})
+          ...(policyOverrides.contracts ?? {})
         }
       }
     }
+  };
+}
+
+function signerFundingReady({
+  account = "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519",
+  liquidUsdcRaw = "200000",
+  liquidUsdc = Number(liquidUsdcRaw) / 1_000_000
+} = {}) {
+  return {
+    account,
+    agentAccountAddress: "0x3333333333333333333333333333333333333333",
+    assets: [{
+      symbol: "USDC",
+      address: "0x0000053900000000000000000000000001200000",
+      assetClass: "trust_backed",
+      assetId: 1337,
+      decimals: 6,
+      minBalanceRaw: "70000",
+      readable: true,
+      liquid: liquidUsdc,
+      liquidRaw: String(liquidUsdcRaw),
+      reserved: 0,
+      reservedRaw: "0"
+    }]
   };
 }
 

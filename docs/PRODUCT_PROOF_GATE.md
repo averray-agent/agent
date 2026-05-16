@@ -52,11 +52,13 @@ before running the required gate. It does not print the token. The worker loop
 fails closed before claim unless the valid schema validation succeeds, the
 invalid schema validation is rejected without a submit attempt, the token
 exposes the full loop capability set, the hosted stack reports canonical v1
-USDC settlement readiness, and the worker wallet has enough AgentAccountCore
-USDC liquidity for the reward. In blockchain mode, `/jobs/preflight` must use
-the live `EscrowCore.workerClaimCount(worker)` value when previewing claim
-economics, so agents see the same onboarding waiver, claim-stake, and claim-fee
-state the eventual `/jobs/claim` mutation will enforce.
+USDC settlement readiness, the configured backend signer has enough
+AgentAccountCore USDC liquidity to fund the reward and claim-lock reserve, and
+the worker wallet has enough AgentAccountCore USDC liquidity for the same
+claim. In blockchain mode, `/jobs/preflight` must use the live
+`EscrowCore.workerClaimCount(worker)` value when previewing claim economics, so
+agents see the same onboarding waiver, claim-stake, and claim-fee state the
+eventual `/jobs/claim` mutation will enforce.
 
 The hosted smoke token must resolve from `/auth/session` with capabilities for:
 `account:read`, `admin:status`, `jobs:create`, `jobs:preflight`, `jobs:claim`,
@@ -111,6 +113,14 @@ The worker-loop command writes a local evidence file like:
     "rewardRaw": "100000",
     "minBalanceRaw": "70000"
   },
+  "signerFundingReadiness": {
+    "signer": "0x...",
+    "asset": "USDC",
+    "rewardRaw": "100000",
+    "totalClaimLockRaw": "0",
+    "requiredRaw": "100000",
+    "availableRaw": "155000"
+  },
   "liquidityReadiness": {
     "wallet": "0x...",
     "asset": "USDC",
@@ -119,6 +129,14 @@ The worker-loop command writes a local evidence file like:
   },
   "claimLiquidityReadiness": {
     "wallet": "0x...",
+    "asset": "USDC",
+    "rewardRaw": "100000",
+    "totalClaimLockRaw": "55000",
+    "requiredRaw": "155000",
+    "availableRaw": "155000"
+  },
+  "claimSignerFundingReadiness": {
+    "signer": "0x...",
     "asset": "USDC",
     "rewardRaw": "100000",
     "totalClaimLockRaw": "55000",
@@ -178,8 +196,10 @@ The script fetches the badge and profile documents and verifies that:
 
 - the evidence host matches the checked API host
 - the evidence proves canonical v1 USDC settlement readiness
-- the reward clears the USDC minBalance and the worker has enough USDC
-  liquidity for both the reward and the claim lock required by preflight
+- the reward clears the USDC minBalance, the configured backend signer has
+  enough USDC to fund the escrowed reward plus claim-lock reserve, and the
+  worker has enough USDC liquidity for both the reward and the claim lock
+  required by preflight
 - the job preflight was eligible and claimable before claim
 - the product-proof submission passed schema validation before claim
 - one intentionally invalid `submission.output` wrapper failed validation before
