@@ -112,7 +112,15 @@ The worker-loop command writes a local evidence file like:
     "wallet": "0x...",
     "asset": "USDC",
     "requiredRaw": "100000",
-    "availableRaw": "100000"
+    "availableRaw": "155000"
+  },
+  "claimLiquidityReadiness": {
+    "wallet": "0x...",
+    "asset": "USDC",
+    "rewardRaw": "100000",
+    "totalClaimLockRaw": "55000",
+    "requiredRaw": "155000",
+    "availableRaw": "155000"
   },
   "preflightReadiness": {
     "jobId": "product-proof-worker-loop-...",
@@ -167,7 +175,8 @@ The script fetches the badge and profile documents and verifies that:
 
 - the evidence host matches the checked API host
 - the evidence proves canonical v1 USDC settlement readiness
-- the reward clears the USDC minBalance and the worker has enough USDC liquidity
+- the reward clears the USDC minBalance and the worker has enough USDC
+  liquidity for both the reward and the claim lock required by preflight
 - the job preflight was eligible and claimable before claim
 - the product-proof submission passed schema validation before claim
 - one intentionally invalid `submission.output` wrapper failed validation before

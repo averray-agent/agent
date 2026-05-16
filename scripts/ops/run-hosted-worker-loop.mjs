@@ -90,6 +90,14 @@ export async function runHostedWorkerLoop({
   log(`Preflighting hosted product-proof job ${jobId}`);
   const preflight = await platform.preflightJob(jobId);
   const preflightReadiness = assertClaimPreflightReady({ preflight, jobId, wallet });
+  const claimLiquidityReadiness = assertClaimLiquidityReady({
+    wallet,
+    rewardAsset,
+    rewardAmount: rewardAmountInput,
+    preflightReadiness,
+    liquidityReadiness,
+    settlementReadiness
+  });
 
   log(`Validating hosted product-proof submission for ${jobId}`);
   const validationReadiness = await assertSubmissionValidationReady({
@@ -155,6 +163,7 @@ export async function runHostedWorkerLoop({
     settlementReadiness,
     rewardReadiness,
     liquidityReadiness,
+    claimLiquidityReadiness,
     preflightReadiness,
     validationReadiness,
     invalidValidationReadiness,
@@ -316,6 +325,47 @@ async function assertProductProofLiquidity({ platform, wallet, rewardAsset, rewa
     asset: rewardAsset,
     requiredRaw: requiredRaw.toString(),
     availableRaw: availableRaw.toString(),
+    required: formatBaseUnits(requiredRaw, decimals),
+    available: formatBaseUnits(availableRaw, decimals)
+  };
+}
+
+function assertClaimLiquidityReady({
+  wallet,
+  rewardAsset,
+  rewardAmount,
+  preflightReadiness,
+  liquidityReadiness,
+  settlementReadiness
+}) {
+  const asset = settlementReadiness.asset;
+  const decimals = Number(asset.decimals);
+  const rewardRaw = toBaseUnits(rewardAmount, decimals);
+  const totalClaimLockRaw = preflightReadiness.totalClaimLock === null || preflightReadiness.totalClaimLock === undefined
+    ? 0n
+    : toBaseUnits(preflightReadiness.totalClaimLock, decimals);
+  const requiredRaw = rewardRaw + totalClaimLockRaw;
+  const availableRaw = toBigIntAmount(liquidityReadiness.availableRaw, `${rewardAsset} liquid balance raw`);
+  if (availableRaw < requiredRaw) {
+    const agentAccountAddress = settlementReadiness.contracts?.agentAccountAddress ?? "AgentAccountCore";
+    throw new Error(
+      `Hosted product-proof worker loop requires funded ${rewardAsset} liquidity before claim; ` +
+      `wallet=${wallet}; account=${agentAccountAddress}; reward=${formatBaseUnits(rewardRaw, decimals)} ${rewardAsset} ` +
+      `(raw ${rewardRaw}); totalClaimLock=${formatBaseUnits(totalClaimLockRaw, decimals)} ${rewardAsset} ` +
+      `(raw ${totalClaimLockRaw}); required=${formatBaseUnits(requiredRaw, decimals)} ${rewardAsset} ` +
+      `(raw ${requiredRaw}); available=${formatBaseUnits(availableRaw, decimals)} ${rewardAsset} (raw ${availableRaw}). ` +
+      `Fund by approving ${agentAccountAddress} on the canonical ${rewardAsset} ERC20 precompile and depositing into AgentAccountCore.`
+    );
+  }
+  return {
+    wallet,
+    asset: rewardAsset,
+    rewardRaw: rewardRaw.toString(),
+    totalClaimLockRaw: totalClaimLockRaw.toString(),
+    requiredRaw: requiredRaw.toString(),
+    availableRaw: availableRaw.toString(),
+    reward: formatBaseUnits(rewardRaw, decimals),
+    totalClaimLock: formatBaseUnits(totalClaimLockRaw, decimals),
     required: formatBaseUnits(requiredRaw, decimals),
     available: formatBaseUnits(availableRaw, decimals)
   };

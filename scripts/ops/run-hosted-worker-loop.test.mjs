@@ -114,6 +114,10 @@ test("runHostedWorkerLoop creates, claims, submits, verifies, and writes evidenc
   assert.equal(written.rewardReadiness.rewardRaw, "100000");
   assert.equal(written.liquidityReadiness.requiredRaw, "100000");
   assert.equal(written.liquidityReadiness.availableRaw, "100000");
+  assert.equal(written.claimLiquidityReadiness.rewardRaw, "100000");
+  assert.equal(written.claimLiquidityReadiness.totalClaimLockRaw, "0");
+  assert.equal(written.claimLiquidityReadiness.requiredRaw, "100000");
+  assert.equal(written.claimLiquidityReadiness.availableRaw, "100000");
   assert.deepEqual(written.authReadiness.roles, ["admin", "verifier"]);
   assert.ok(written.authReadiness.capabilitiesPresent.includes("verifier:run"));
   assert.equal(written.preflightReadiness.eligible, true);
@@ -404,6 +408,58 @@ test("runHostedWorkerLoop fails closed after job creation when preflight blocks 
       env: { ADMIN_JWT: "token" }
     }),
     /preflight failed: eligible=false; claimable=false; currentWalletCanClaim=false; reason=tier_gate/u
+  );
+
+  assert.deepEqual(calls.map(([name]) => name), [
+    "getAuthSession",
+    "getAdminStatus",
+    "getAccountSummary",
+    "createJob",
+    "preflightJob"
+  ]);
+  assert.equal(calls[4][1], jobId);
+});
+
+test("runHostedWorkerLoop fails closed after preflight when reward plus claim lock is underfunded", async () => {
+  const calls = [];
+  const jobId = "product-proof-worker-loop-1700000000000";
+  await assert.rejects(
+    runHostedWorkerLoop({
+      client: {
+        async getAuthSession() {
+          calls.push(["getAuthSession"]);
+          return authSession();
+        },
+        async getAdminStatus() {
+          calls.push(["getAdminStatus"]);
+          return settlementReadyStatus();
+        },
+        async getAccountSummary() {
+          calls.push(["getAccountSummary"]);
+          return accountSummary({ liquidUsdcRaw: 100_000 });
+        },
+        async createJob(payload) {
+          calls.push(["createJob", payload]);
+          return { id: payload.id };
+        },
+        async preflightJob(id) {
+          calls.push(["preflightJob", id]);
+          return preflightReady({ jobId: id, totalClaimLock: 0.055 });
+        },
+        async validateJobSubmission() {
+          calls.push(["validateJobSubmission"]);
+          throw new Error("should not validate after claim-liquidity preflight fails");
+        },
+        async claimJob() {
+          calls.push(["claimJob"]);
+          throw new Error("should not claim without reward plus claim-lock liquidity");
+        }
+      },
+      now: () => 1700000000000,
+      log: () => {},
+      env: { ADMIN_JWT: "token" }
+    }),
+    /requires funded USDC liquidity before claim; wallet=0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519; account=0x3333333333333333333333333333333333333333; reward=0\.1 USDC \(raw 100000\); totalClaimLock=0\.055 USDC \(raw 55000\); required=0\.155 USDC \(raw 155000\); available=0\.1 USDC \(raw 100000\)/u
   );
 
   assert.deepEqual(calls.map(([name]) => name), [
@@ -725,7 +781,8 @@ function accountSummary({
 
 function preflightReady({
   jobId,
-  wallet = "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519"
+  wallet = "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519",
+  totalClaimLock = 0
 }) {
   return {
     jobId,
@@ -736,7 +793,7 @@ function preflightReady({
     reason: "claimable",
     requiredOutputSchema: "schema://jobs/product-proof-worker-loop",
     verifierMode: "benchmark",
-    totalClaimLock: 0,
+    totalClaimLock,
     claimEconomicsWaived: true
   };
 }
