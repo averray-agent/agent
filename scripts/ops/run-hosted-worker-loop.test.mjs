@@ -4,7 +4,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
 
-import { runHostedWorkerLoop } from "./run-hosted-worker-loop.mjs";
+import {
+  formatHostedWorkerLoopError,
+  runHostedWorkerLoop
+} from "./run-hosted-worker-loop.mjs";
 
 test("runHostedWorkerLoop creates, claims, submits, verifies, and writes evidence", async () => {
   const calls = [];
@@ -861,6 +864,38 @@ test("runHostedWorkerLoop rejects rewards below the USDC minBalance before mutat
   );
 
   assert.deepEqual(calls.map(([name]) => name), ["getAuthSession", "getAdminStatus"]);
+});
+
+test("formatHostedWorkerLoopError includes sanitized API diagnostics", () => {
+  const error = new Error("Insufficient liquid balance for USDC");
+  error.status = 409;
+  error.path = "/jobs/claim";
+  error.code = "insufficient_liquidity";
+  error.payload = { requestId: "req-123" };
+  error.details = {
+    operation: "ensureJob",
+    account: "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519",
+    required: "0.16",
+    available: "0.04",
+    authorization: "Bearer should-not-print",
+    nested: {
+      serviceToken: "also-secret"
+    }
+  };
+
+  const output = formatHostedWorkerLoopError(error);
+
+  assert.match(output, /Insufficient liquid balance for USDC/u);
+  assert.match(output, /status=409/u);
+  assert.match(output, /path=\/jobs\/claim/u);
+  assert.match(output, /code=insufficient_liquidity/u);
+  assert.match(output, /requestId=req-123/u);
+  assert.match(output, /"operation":"ensureJob"/u);
+  assert.match(output, /"required":"0.16"/u);
+  assert.doesNotMatch(output, /should-not-print/u);
+  assert.doesNotMatch(output, /also-secret/u);
+  assert.match(output, /"authorization":"\[redacted\]"/u);
+  assert.match(output, /"serviceToken":"\[redacted\]"/u);
 });
 
 function accountSummary({

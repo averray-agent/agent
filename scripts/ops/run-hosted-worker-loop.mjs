@@ -200,6 +200,40 @@ export async function runHostedWorkerLoop({
   return evidenceDoc;
 }
 
+export function formatHostedWorkerLoopError(error) {
+  const message = error?.message ?? String(error);
+  const parts = [message];
+  const status = error?.status;
+  const path = error?.path;
+  const code = error?.code;
+  const requestId = error?.payload?.requestId;
+  if (status || path || code || requestId) {
+    parts.push(
+      `API error context: status=${status ?? "unknown"}; path=${path ?? "unknown"}; ` +
+      `code=${code ?? "unknown"}; requestId=${requestId ?? "unknown"}`
+    );
+  }
+  if (error?.details !== undefined) {
+    parts.push(`API error details: ${JSON.stringify(redactDiagnosticValue(error.details))}`);
+  }
+  return parts.join("\n");
+}
+
+function redactDiagnosticValue(value) {
+  if (Array.isArray(value)) {
+    return value.map((entry) => redactDiagnosticValue(entry));
+  }
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+  return Object.fromEntries(Object.entries(value).map(([key, entry]) => [
+    key,
+    /(?:authorization|password|secret|token|key)/iu.test(key)
+      ? "[redacted]"
+      : redactDiagnosticValue(entry)
+  ]));
+}
+
 function buildProductProofSubmission({ jobId, evidence, timestamp }) {
   const completedAt = new Date(timestamp).toISOString();
   return {
@@ -674,7 +708,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       console.log(JSON.stringify(result, null, 2));
     })
     .catch((error) => {
-      console.error(error.message);
+      console.error(formatHostedWorkerLoopError(error));
       process.exitCode = 1;
     });
 }
