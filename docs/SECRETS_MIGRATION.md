@@ -1810,8 +1810,8 @@ are deferred to a coordinated cutover session.
 | **EVM address derived from KMS public key**                         | ✅ verified | `0x31ad432dFe083B998c69B6dB88A984ec5207ab7F` (script-tested against real KMS DER) |
 | **IAM user `averray-signer-testnet` + KMS-sign-only policy**        | ✅ created | Static access keys, stored in `op://prod-backend/aws-signer-testnet/*` |
 | **AWS env vars wired into `backend.env.template`**                  | ✅ landed  | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `KMS_KEY_ID` / `AWS_REGION` (this PR) |
-| **`SIGNER_BACKEND=kms` flip in production env**                     | ⏳ deferred | Final cutover step. Requires `setVerifier(...)` to happen first or atomically. |
-| **Multisig `setVerifier(0x31ad432dFe083B998c69B6dB88A984ec5207ab7F)` on EscrowCore** | ⏳ deferred | Requires the multisig signer ceremony; coordinated with above flip  |
+| **Multisig `TreasuryPolicy.setVerifier(0x31ad432dFe083B998c69B6dB88A984ec5207ab7F, true)`** | ✅ executed 2026-05-16 | 2-of-3 multisig (HOT WALLET + LEDGER + VAULT) at block 8,922,707 on Paseo Asset Hub. NB: setter lives on `TreasuryPolicy`, not `EscrowCore`; mapping(address⇒bool) so both old + new verifier can co-exist for graceful cutover. |
+| **`SIGNER_BACKEND=kms` flip in production env**                     | ✅ executed 2026-05-16 | `deploy/backend.env.template`: `SIGNER_BACKEND=local`→`kms` + `SIGNER_PRIVATE_KEY=op://...` line removed. PR 2.7d.1 hash-detect force-recreates the backend container; KmsSigner is instantiated by `gateway.js`'s `createSigner` factory. Old `SIGNER_PRIVATE_KEY` OP item retained ~30 days as rollback target, then retired. |
 | **IAM Roles Anywhere CA + Trust Anchor + VPS cert**                 | ⏳ deferred | Mainnet path. Testnet path is static IAM keys, residual risk documented. |
 | **CloudTrail + CloudWatch alarms on KMS key**                       | ⏳ deferred | Best-practice but not blocking the cutover; do before mainnet      |
 
