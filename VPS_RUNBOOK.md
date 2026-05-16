@@ -411,7 +411,28 @@ The script:
 
 ### Postgres restore outline
 
-Restore should be done deliberately and only after confirming the target file:
+A production restore over the live database is destructive. Run the
+**monthly drill** in [docs/BACKUP_RESTORE_DRILL.md](./docs/BACKUP_RESTORE_DRILL.md)
+against a disposable Postgres container first — that path does not
+need the approval gate below.
+
+**Approval gate for a real production restore** (must hold *before*
+any `psql ... <` runs):
+
+1. Named operator on the keyboard. No CI / workflow / agent invokes
+   this path.
+2. A second human acknowledgment in the incident channel quoting the
+   exact backup file path, the reason (incident reference, ticket,
+   or migration window), the expected data-loss window (gap between
+   backup and now), and the agreed rollback plan if the restore
+   makes things worse.
+3. Maintenance window posted to the operator channel before stopping
+   the backend.
+4. Run the readiness check first so the backup file you're about to
+   restore is the one the system claims is current:
+   `./scripts/ops/check-backup-readiness.sh`.
+
+Only after the gate holds:
 
 ```bash
 gunzip -c /srv/agent-stack/backups/postgres/<dump>.sql.gz | \
@@ -420,11 +441,23 @@ docker compose --project-directory /srv/agent-stack -f /srv/agent-stack/docker-c
 ```
 
 Do not restore over a live database unless you mean to replace it.
+Verify `/health` returns 200 and a basic smoke check passes before
+declaring the restore done.
 
 ### Redis restore outline
 
-Restore should be done deliberately because it rewinds nonce, session, lock,
-and token-revocation state. The safest path is:
+A production Redis restore is destructive — it rewinds nonce,
+session, lock, and token-revocation state. Run the drill in
+[docs/BACKUP_RESTORE_DRILL.md](./docs/BACKUP_RESTORE_DRILL.md)
+against a disposable Redis container first; the drill needs no
+approval gate.
+
+The same **approval gate** as the Postgres path above (named
+operator, second human acknowledgment in the incident channel,
+posted maintenance window, readiness check passes) must hold before
+any of the destructive commands below run.
+
+The safest path is:
 
 1. Confirm the target backup file.
 2. Stop the backend so it cannot mutate Redis during the restore.

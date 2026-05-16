@@ -31,18 +31,43 @@ See [MULTISIG_SETUP.md](./MULTISIG_SETUP.md) for the exact rehearsal flow.
 
 ## 2. Data durability
 
-- [ ] Latest Postgres backup exists and is restorable.
-- [ ] Latest Redis backup exists and is restorable.
-- [ ] The monthly restore drill has been run at least once on the current stack shape.
+- [ ] Latest Postgres backup exists and is recent. Evidence:
+  `./scripts/ops/check-backup-readiness.sh --json` reports
+  `components[postgres].status == "ok"` with `ageSeconds <
+  maxAgeHours * 3600`.
+- [ ] Latest Redis backup exists and is recent. Same readiness check,
+  `components[redis].status == "ok"`.
+- [ ] The monthly restore drill has been run on the current stack
+  shape. Evidence: a dated line in the operator log naming both
+  backup file paths used, the row count from the Postgres spot-check,
+  and the key count from `DBSIZE` on the restored Redis container.
+  Procedure: [BACKUP_RESTORE_DRILL.md](./BACKUP_RESTORE_DRILL.md).
 
-Use:
+Run backups (writes new snapshots):
 
 ```bash
 ./scripts/ops/backup-postgres.sh
 ./scripts/ops/backup-redis.sh
 ```
 
-Restore drills are documented in [VPS_RUNBOOK.md](../VPS_RUNBOOK.md).
+Run the readiness check (read-only, never restores or modifies a
+backup file):
+
+```bash
+./scripts/ops/check-backup-readiness.sh
+# or for machine-readable output:
+./scripts/ops/check-backup-readiness.sh --json
+```
+
+Restore procedures:
+
+- **Monthly drill against a disposable target:**
+  [BACKUP_RESTORE_DRILL.md](./BACKUP_RESTORE_DRILL.md).
+- **Production restore (destructive, requires approval gate):**
+  [VPS_RUNBOOK.md](../VPS_RUNBOOK.md) §Backups. Never run a
+  production restore without a named operator on the keyboard, a
+  second human acknowledgment in the incident channel, and a posted
+  maintenance window. The drill never substitutes for that gate.
 
 ---
 
