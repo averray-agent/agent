@@ -53,7 +53,10 @@ fails closed before claim unless the valid schema validation succeeds, the
 invalid schema validation is rejected without a submit attempt, the token
 exposes the full loop capability set, the hosted stack reports canonical v1
 USDC settlement readiness, and the worker wallet has enough AgentAccountCore
-USDC liquidity for the reward.
+USDC liquidity for the reward. In blockchain mode, `/jobs/preflight` must use
+the live `EscrowCore.workerClaimCount(worker)` value when previewing claim
+economics, so agents see the same onboarding waiver, claim-stake, and claim-fee
+state the eventual `/jobs/claim` mutation will enforce.
 
 The hosted smoke token must resolve from `/auth/session` with capabilities for:
 `account:read`, `admin:status`, `jobs:create`, `jobs:preflight`, `jobs:claim`,

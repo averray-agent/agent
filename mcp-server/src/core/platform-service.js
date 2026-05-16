@@ -1060,7 +1060,10 @@ export class PlatformService {
   }
 
   async getClaimEconomicsPreview(wallet, job) {
-    const priorClaimCount = countClaimedSessions(await this.jobExecutionService.collectSessionHistory(wallet));
+    const priorClaimCount = this.blockchainGateway?.isEnabled()
+      && typeof this.blockchainGateway.getWorkerClaimCount === "function"
+      ? await this.blockchainGateway.getWorkerClaimCount(wallet)
+      : countClaimedSessions(await this.jobExecutionService.collectSessionHistory(wallet));
     return computeClaimEconomics({
       rewardAmount: job.rewardAmount,
       rewardAsset: job.rewardAsset,

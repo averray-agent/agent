@@ -275,6 +275,21 @@ test("getClaimEconomicsConfig converts chain min fees back to display units", as
   });
 });
 
+test("getWorkerClaimCount reads the escrow contract counter", async () => {
+  const gateway = gatewayWithDot();
+  gateway.escrowContract = {
+    async workerClaimCount(wallet) {
+      assert.equal(wallet, "0x3333333333333333333333333333333333333333");
+      return 4n;
+    }
+  };
+
+  assert.equal(
+    await gateway.getWorkerClaimCount("0x3333333333333333333333333333333333333333"),
+    4
+  );
+});
+
 test("getTreasuryPolicyStatus surfaces settlement readiness roles", async () => {
   const gateway = new BlockchainGateway({
     enabled: true,

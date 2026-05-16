@@ -374,6 +374,54 @@ test("listJobsWithSessions and definition expose expired claim affordances", asy
   assert.match(definition.claimStatus.lifecycleStatusMeaning, /check claimStatus/u);
 });
 
+test("preflight uses chain worker claim count for claim economics in blockchain mode", async () => {
+  const blockchainGateway = {
+    isEnabled() {
+      return true;
+    },
+    async getAccountSummary(wallet) {
+      assert.equal(wallet, WALLET);
+      return {
+        wallet,
+        liquid: { DOT: 10 },
+        reserved: {},
+        strategyAllocated: {},
+        collateralLocked: {},
+        jobStakeLocked: {},
+        debtOutstanding: {}
+      };
+    },
+    async getReputation(wallet) {
+      assert.equal(wallet, WALLET);
+      return { skill: 50, reliability: 50, economic: 50 };
+    },
+    async getDefaultClaimStakeBps() {
+      return 500;
+    },
+    async getClaimEconomicsConfig() {
+      return {
+        claimFeeBps: 200,
+        claimFeeVerifierBps: 7000,
+        onboardingWaiverClaimCount: 3,
+        minClaimFeeByAsset: { DOT: 0.05 }
+      };
+    },
+    async getWorkerClaimCount(wallet) {
+      assert.equal(wallet, WALLET);
+      return 3;
+    }
+  };
+  const service = makePlatformService(blockchainGateway);
+
+  const preflight = await service.preflightJob(WALLET, "parent-job-001");
+
+  assert.equal(preflight.claimNumber, 4);
+  assert.equal(preflight.claimEconomicsWaived, false);
+  assert.equal(preflight.claimStake, 0.25);
+  assert.equal(preflight.claimFee, 0.1);
+  assert.equal(preflight.totalClaimLock, 0.35);
+});
+
 test("validateJobSubmission gives a non-mutating schema-native verdict", () => {
   const service = makePlatformService();
 
