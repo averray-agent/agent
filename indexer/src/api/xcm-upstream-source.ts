@@ -102,11 +102,38 @@ function normalizeOptionalHex32(value: unknown) {
 }
 
 function normalizeObservedAt(value: unknown) {
-  const observedAt = value ? new Date(value as string | number | Date) : new Date();
+  const observedAt = parseObservedAt(value);
   if (Number.isNaN(observedAt.getTime())) {
-    throw new Error("XCM upstream observedAt must be ISO-8601 when provided.");
+    throw new Error("XCM upstream observedAt must be ISO-8601 or an epoch timestamp when provided.");
   }
   return observedAt.toISOString();
+}
+
+function parseObservedAt(value: unknown) {
+  if (value === undefined || value === null || value === "") {
+    return new Date();
+  }
+  if (value instanceof Date) {
+    return value;
+  }
+  if (typeof value === "number") {
+    return parseEpochTimestamp(value);
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim();
+    if (/^\d+$/u.test(normalized)) {
+      return parseEpochTimestamp(Number(normalized));
+    }
+    return new Date(normalized);
+  }
+  return new Date(value as string | number | Date);
+}
+
+function parseEpochTimestamp(value: number) {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    return new Date(Number.NaN);
+  }
+  return new Date(value < 1_000_000_000_000 ? value * 1000 : value);
 }
 
 function normalizeStatus(value: unknown) {

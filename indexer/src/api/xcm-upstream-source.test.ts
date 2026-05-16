@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   NativePapiXcmSourceAdapter,
+  SubscanXcmSourceAdapter,
   createXcmUpstreamSourceAdapter,
   decodeNativePapiCursor,
   encodeNativePapiCursor,
@@ -105,6 +106,20 @@ test("native PAPI evidence preserves large uint256 settlement amounts exactly", 
   assert.equal(outcome.settledShares, settledShares);
 });
 
+test("native PAPI evidence normalizes epoch-second observedAt timestamps", () => {
+  const outcome = normalizeNativeXcmEvidence({
+    requestId,
+    status: "succeeded",
+    observedAt: 1712345678,
+    correlation: {
+      method: "ledger_join",
+      confidence: "staging"
+    }
+  });
+
+  assert.equal(outcome.observedAt, "2024-04-05T19:34:38.000Z");
+});
+
 test("native PAPI evidence rejects unsafe numeric settlement amounts", () => {
   assert.throws(
     () => normalizeNativeXcmEvidence({
@@ -142,6 +157,21 @@ test("native PAPI evidence accepts SetTopic request-id correlation after Bifrost
 
   assert.equal(outcome.requestId, requestId);
   assert.equal(outcome.source, "native_papi_observer");
+});
+
+test("Subscan source normalizes numeric-string epoch timestamps", () => {
+  const adapter = new SubscanXcmSourceAdapter({
+    apiHost: "https://subscan.example",
+    apiKey: "test"
+  });
+
+  const outcome = adapter.normalizeSubscanEntry({
+    msg_hash: requestId,
+    status: "success",
+    block_timestamp: "1712345678"
+  });
+
+  assert.equal(outcome?.observedAt, "2024-04-05T19:34:38.000Z");
 });
 
 test("native PAPI evidence rejects promoted ledger joins and mismatched topics", () => {
