@@ -316,8 +316,11 @@ export class EventListener {
           asset: args.asset,
           recipient: args.recipient,
           assets: args.assets.toString(),
+          assetsRaw: args.assets.toString(),
           shares: args.shares.toString(),
-          nonce: Number(args.nonce)
+          sharesRaw: args.shares.toString(),
+          nonce: safeIntegerOrRaw(args.nonce),
+          nonceRaw: rawIntegerString(args.nonce)
         }
       }));
 
@@ -336,8 +339,10 @@ export class EventListener {
           status: request.status,
           destinationHash: args.destinationHash,
           messageHash: args.messageHash,
-          refTime: Number(args.refTime),
-          proofSize: Number(args.proofSize)
+          refTime: safeIntegerOrRaw(args.refTime),
+          refTimeRaw: rawIntegerString(args.refTime),
+          proofSize: safeIntegerOrRaw(args.proofSize),
+          proofSizeRaw: rawIntegerString(args.proofSize)
         }
       });
     });
@@ -377,7 +382,9 @@ export class EventListener {
           status: Number(args.status),
           statusLabel: request.statusLabel,
           settledAssets: args.settledAssets.toString(),
+          settledAssetsRaw: args.settledAssets.toString(),
           settledShares: args.settledShares.toString(),
+          settledSharesRaw: args.settledShares.toString(),
           remoteRef: request.remoteRef,
           remoteRefLabel: request.remoteRefLabel,
           failureCode: request.failureCode,
@@ -446,21 +453,25 @@ export class EventListener {
       asset: job.asset,
       reward: job.reward?.toString?.() ?? `${job.reward}`,
       released: job.released?.toString?.() ?? `${job.released}`,
-      claimExpiry: Number(job.claimExpiry),
+      claimExpiry: safeIntegerOrRaw(job.claimExpiry),
+      claimExpiryRaw: rawIntegerString(job.claimExpiry),
       claimStake: job.claimStake?.toString?.() ?? `${job.claimStake}`,
       claimStakeBps: Number(job.claimStakeBps),
       claimFee: job.claimFee?.toString?.() ?? `${job.claimFee}`,
       claimFeeBps: Number(job.claimFeeBps),
       claimEconomicsWaived: Boolean(job.claimEconomicsWaived),
       rejectingVerifier: normalizeAddress(job.rejectingVerifier),
-      rejectedAt: Number(job.rejectedAt),
-      disputedAt: Number(job.disputedAt),
+      rejectedAt: safeIntegerOrRaw(job.rejectedAt),
+      rejectedAtRaw: rawIntegerString(job.rejectedAt),
+      disputedAt: safeIntegerOrRaw(job.disputedAt),
+      disputedAtRaw: rawIntegerString(job.disputedAt),
       state: Number(job.state)
     };
   }
 
   async buildChainEvent({ topic, args, payload, wallet, wallets = [], sessionId = undefined, job = undefined, data = {} }) {
     const blockNumber = Number(payload.log.blockNumber);
+    const blockNumberRaw = rawIntegerString(payload.log.blockNumber);
     const timestamp = await this.getBlockTimestamp(blockNumber);
     const chainJobId = args.jobId ? normalizeJobId(args.jobId) : undefined;
     const mappedSession = chainJobId ? await this.stateStore?.findSessionByChainJobId?.(chainJobId) : undefined;
@@ -480,6 +491,7 @@ export class EventListener {
       data: {
         ...serializeArgs(args),
         chainJobId,
+        ...(blockNumberRaw !== undefined ? { blockNumberRaw } : {}),
         ...data,
         job
       }
@@ -547,6 +559,37 @@ function serializeValue(value) {
     return value.map(serializeValue);
   }
   return value;
+}
+
+function rawIntegerString(value) {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+  if (typeof value === "bigint") {
+    return value >= 0n ? value.toString() : undefined;
+  }
+  if (typeof value === "number") {
+    return Number.isSafeInteger(value) && value >= 0 ? String(value) : undefined;
+  }
+  const normalized = String(value).trim();
+  return /^\d+$/u.test(normalized) ? BigInt(normalized).toString() : undefined;
+}
+
+function safeIntegerNumber(value) {
+  const raw = rawIntegerString(value);
+  if (raw === undefined) {
+    return undefined;
+  }
+  const parsed = BigInt(raw);
+  if (parsed > BigInt(Number.MAX_SAFE_INTEGER)) {
+    return undefined;
+  }
+  return Number(parsed);
+}
+
+function safeIntegerOrRaw(value) {
+  const safe = safeIntegerNumber(value);
+  return safe ?? rawIntegerString(value);
 }
 
 function normalizeAddress(address) {
