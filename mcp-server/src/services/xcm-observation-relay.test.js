@@ -9,7 +9,10 @@ const REQUEST_ID = "0x2222222222222222222222222222222222222222222222222222222222
 
 test("pollOnce relays terminal outcomes into the platform watcher and stores cursor state", async () => {
   const calls = [];
+  const events = [];
   const stateStore = new MemoryStateStore();
+  const eventBus = new EventBus();
+  eventBus.subscribe({ topics: ["xcm.outcome_relayed"] }, (event) => events.push(event));
   const relay = new XcmObservationRelayService(
     {
       observeXcmOutcome: async (requestId, outcome) => {
@@ -18,7 +21,7 @@ test("pollOnce relays terminal outcomes into the platform watcher and stores cur
       }
     },
     stateStore,
-    new EventBus(),
+    eventBus,
     {
       enabled: true,
       feedUrl: "https://observer.example/outcomes",
@@ -56,6 +59,13 @@ test("pollOnce relays terminal outcomes into the platform watcher and stores cur
   assert.equal(calls[0][1].status, "succeeded");
   assert.equal(calls[0][1].settledAssets, "7");
   assert.equal(calls[0][1].settledShares, "7");
+  assert.equal(events.length, 1);
+  assert.equal(events[0].data.settledAssets, "7");
+  assert.equal(events[0].data.settledAssetsRaw, "7");
+  assert.equal(events[0].data.settledShares, "7");
+  assert.equal(events[0].data.settledSharesRaw, "7");
+  assert.equal(events[0].data.remoteRef, "0x3333333333333333333333333333333333333333333333333333333333333333");
+  assert.equal(events[0].data.observedAt, "2026-04-22T10:00:00.000Z");
 
   const stored = await stateStore.getServiceState("xcm-observation-relay");
   assert.equal(stored.cursor, "cursor-2");

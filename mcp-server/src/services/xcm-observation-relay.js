@@ -94,6 +94,13 @@ export class XcmObservationRelayService {
           data: {
             requestId: normalized.requestId,
             status: normalized.status,
+            settledAssets: normalized.settledAssets,
+            settledAssetsRaw: normalized.settledAssets,
+            settledShares: normalized.settledShares,
+            settledSharesRaw: normalized.settledShares,
+            remoteRef: normalized.remoteRef,
+            failureCode: normalized.failureCode,
+            observedAt: normalized.observedAt,
             source: normalized.source
           }
         });

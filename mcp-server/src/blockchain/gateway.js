@@ -1068,7 +1068,8 @@ export class BlockchainGateway {
         requestedAssetsRaw: this.toRawString(record.context.assets),
         requestedShares: this.toDisplayUnits(record.context.shares, this.assetForAddress(record.context.asset)),
         requestedSharesRaw: this.toRawString(record.context.shares),
-        nonce: Number(record.context.nonce),
+        nonce: this.toSafeIntegerOrRaw(record.context.nonce, "nonce"),
+        nonceRaw: this.toRawString(record.context.nonce),
         status: Number(record.status),
         statusLabel: REQUEST_STATUS_LABELS[Number(record.status)] ?? "unknown",
         settledAssets: this.toDisplayUnits(record.settledAssets, this.assetForAddress(record.context.asset)),
@@ -1079,8 +1080,10 @@ export class BlockchainGateway {
         remoteRefLabel: this.decodeBytes32Label(record.remoteRef),
         failureCode: this.normalizeOptionalBytes32(record.failureCode),
         failureCodeLabel: this.decodeBytes32Label(record.failureCode),
-        createdAt: Number(record.createdAt),
-        updatedAt: Number(record.updatedAt)
+        createdAt: this.toSafeIntegerOrRaw(record.createdAt, "createdAt"),
+        createdAtRaw: this.toRawString(record.createdAt),
+        updatedAt: this.toSafeIntegerOrRaw(record.updatedAt, "updatedAt"),
+        updatedAtRaw: this.toRawString(record.updatedAt)
       };
     });
   }
@@ -1265,6 +1268,15 @@ export class BlockchainGateway {
       return "0";
     }
     return BigInt(amount).toString();
+  }
+
+  toSafeIntegerOrRaw(value, label) {
+    const raw = this.toRawString(value);
+    const parsed = BigInt(raw);
+    if (parsed < 0n) {
+      throw new ValidationError(`${label} must be non-negative.`);
+    }
+    return parsed <= MAX_SAFE_INTEGER_BIGINT ? Number(parsed) : raw;
   }
 
   policyRiskSnapshot(values) {
