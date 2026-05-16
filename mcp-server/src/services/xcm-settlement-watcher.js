@@ -74,6 +74,7 @@ export class XcmSettlementWatcherService {
     this.eventBus?.publish({
       id: `xcm-outcome-observed-${normalizedRequestId}-${Date.now()}`,
       topic: "xcm.outcome_observed",
+      correlationId: normalizedRequestId,
       timestamp: new Date().toISOString(),
       data: {
         requestId: normalizedRequestId,
@@ -113,6 +114,7 @@ export class XcmSettlementWatcherService {
           topic: "xcm.request_auto_finalized",
           wallet: finalized?.strategyRequest?.account ?? finalized?.account,
           wallets: [finalized?.strategyRequest?.account ?? finalized?.account].filter(Boolean),
+          correlationId: observation.requestId,
           timestamp: new Date().toISOString(),
           data: {
             requestId: observation.requestId,
@@ -133,6 +135,7 @@ export class XcmSettlementWatcherService {
         this.eventBus?.publish({
           id: `xcm-auto-finalize-failed-${observation.requestId}-${Date.now()}`,
           topic: "xcm.request_finalize_failed",
+          correlationId: observation.requestId,
           timestamp: new Date().toISOString(),
           data: {
             requestId: observation.requestId,

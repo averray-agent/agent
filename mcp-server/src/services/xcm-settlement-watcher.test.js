@@ -31,6 +31,7 @@ test("observeOutcome stores a pending observation and emits an event", async () 
   assert.equal(observation.processed, false);
   assert.equal(events.length, 1);
   assert.equal(events[0].topic, "xcm.outcome_observed");
+  assert.equal(events[0].correlationId, REQUEST_ID);
   assert.equal(events[0].data.settledAssets, "5");
   assert.equal(events[0].data.settledAssetsRaw, "5");
   assert.equal(events[0].data.settledShares, "0");
@@ -79,11 +80,39 @@ test("runPendingSettlements finalizes stored observations and marks them process
   assert.equal(stored.processed, true);
   assert.equal(stored.result.settledVia, "agent_account");
   assert.equal(events.length, 1);
+  assert.equal(events[0].topic, "xcm.request_auto_finalized");
+  assert.equal(events[0].correlationId, REQUEST_ID);
   assert.equal(events[0].data.settledAssets, "5");
   assert.equal(events[0].data.settledAssetsRaw, "5");
   assert.equal(events[0].data.settledShares, "5");
   assert.equal(events[0].data.settledSharesRaw, "5");
   assert.equal(events[0].data.source, "observer");
+});
+
+test("runPendingSettlements emits a request_finalize_failed event with correlationId on errors", async () => {
+  const stateStore = new MemoryStateStore();
+  const eventBus = new EventBus();
+  const events = [];
+  eventBus.subscribe({ topics: ["xcm.request_finalize_failed"] }, (event) => events.push(event));
+  const watcher = new XcmSettlementWatcherService(
+    {
+      finalizeXcmRequest: async () => {
+        throw new Error("downstream settle failed");
+      }
+    },
+    stateStore,
+    eventBus,
+    { enabled: false, logger: { warn: () => {} } }
+  );
+
+  await watcher.observeOutcome(REQUEST_ID, { status: "succeeded", settledAssets: 5 });
+  await watcher.runPendingSettlements();
+
+  assert.equal(events.length, 1);
+  assert.equal(events[0].topic, "xcm.request_finalize_failed");
+  assert.equal(events[0].correlationId, REQUEST_ID);
+  assert.equal(events[0].data.requestId, REQUEST_ID);
+  assert.match(events[0].data.message, /downstream settle failed/u);
 });
 
 test("observeOutcome preserves large uint256 settlement amounts exactly", async () => {

@@ -60,6 +60,8 @@ test("pollOnce relays terminal outcomes into the platform watcher and stores cur
   assert.equal(calls[0][1].settledAssets, "7");
   assert.equal(calls[0][1].settledShares, "7");
   assert.equal(events.length, 1);
+  assert.equal(events[0].topic, "xcm.outcome_relayed");
+  assert.equal(events[0].correlationId, REQUEST_ID);
   assert.equal(events[0].data.settledAssets, "7");
   assert.equal(events[0].data.settledAssetsRaw, "7");
   assert.equal(events[0].data.settledShares, "7");

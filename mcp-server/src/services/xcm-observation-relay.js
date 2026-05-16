@@ -90,6 +90,7 @@ export class XcmObservationRelayService {
         this.eventBus?.publish({
           id: `xcm-observer-relayed-${normalized.requestId}-${Date.now()}`,
           topic: "xcm.outcome_relayed",
+          correlationId: normalized.requestId,
           timestamp: new Date().toISOString(),
           data: {
             requestId: normalized.requestId,
