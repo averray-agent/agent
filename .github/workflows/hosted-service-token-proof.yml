@@ -1,0 +1,134 @@
+name: Hosted Service Token Proof
+
+on:
+  workflow_dispatch:
+    inputs:
+      subject:
+        description: Proof wallet address. Leave blank for the deterministic non-admin smoke subject.
+        required: false
+        default: ""
+        type: string
+      capabilities:
+        description: Comma-separated capabilities for the least-privilege service token.
+        required: false
+        default: jobs:recommend
+        type: string
+      allowed_path:
+        description: Hosted API path that should succeed with the scoped service token.
+        required: false
+        default: /jobs/recommendations
+        type: string
+      denied_paths:
+        description: Comma-separated hosted API paths that must reject the scoped service token.
+        required: false
+        default: /account,/admin/status
+        type: string
+      token_ttl_seconds:
+        description: Service-token TTL for the proof grant.
+        required: false
+        default: "600"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hosted-service-token-proof
+  cancel-in-progress: false
+
+jobs:
+  proof:
+    name: Run hosted scoped service-token proof
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    env:
+      APP_ALLOW_PROTECTED_SHELL: "1"
+      CHECK_INDEXER: "0"
+      CHECK_SERVICE_TOKEN_PROOF: "1"
+      SERVICE_TOKEN_PROOF_EVIDENCE_FILE: artifacts/service-token-proof-hosted-${{ github.run_id }}.json
+      SERVICE_TOKEN_PROOF_SUBJECT: ${{ inputs.subject }}
+      SERVICE_TOKEN_PROOF_CAPABILITIES: ${{ inputs.capabilities }}
+      SERVICE_TOKEN_PROOF_ALLOWED_PATH: ${{ inputs.allowed_path }}
+      SERVICE_TOKEN_PROOF_DENIED_PATHS: ${{ inputs.denied_paths }}
+      SERVICE_TOKEN_PROOF_TOKEN_TTL_SECONDS: ${{ inputs.token_ttl_seconds }}
+      SERVICE_TOKEN_PROOF_IDEMPOTENCY_KEY: github-hosted-service-token-proof-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Load ADMIN_JWT from 1Password (fail-closed)
+        uses: 1password/load-secrets-action@92467eb28f72e8255933372f1e0707c567ce2259 # v4.0.0
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN_PROD_SMOKE }}
+          ADMIN_JWT_OP: op://prod-smoke/admin-jwt/password
+
+      - name: Verify ADMIN_JWT_OP loaded and shape-valid
+        run: |
+          set -euo pipefail
+          set +x
+
+          if [ -z "${ADMIN_JWT_OP:-}" ]; then
+            echo "::error::ADMIN_JWT_OP is empty after load step — check op://prod-smoke/admin-jwt/password and OP_SERVICE_ACCOUNT_TOKEN_PROD_SMOKE."
+            exit 1
+          fi
+
+          case "$ADMIN_JWT_OP" in
+            ey*.*.*)
+              echo "ADMIN_JWT_OP: JWT shape valid"
+              ;;
+            *)
+              echo "::error::ADMIN_JWT_OP does not look like a JWT (expected ey<...>.<...>.<...>)"
+              exit 1
+              ;;
+          esac
+
+      - name: Run hosted proof
+        run: |
+          set -euo pipefail
+          set +x
+
+          ADMIN_JWT="$ADMIN_JWT_OP" ./scripts/ops/check-hosted-stack.sh
+
+      - name: Summarize proof evidence
+        if: always()
+        run: |
+          set -euo pipefail
+
+          evidence_file="$SERVICE_TOKEN_PROOF_EVIDENCE_FILE"
+          if [ ! -s "$evidence_file" ]; then
+            echo "No service-token evidence file was produced." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          status="$(jq -r '.status' "$evidence_file")"
+          grant_id="$(jq -r '.issue.grantId' "$evidence_file")"
+          subject="$(jq -r '.subject' "$evidence_file")"
+          capabilities="$(jq -r '.capabilities | join(", ")' "$evidence_file")"
+          allowed_path="$(jq -r '.allowedBeforeRevoke.path' "$evidence_file")"
+          allowed_status="$(jq -r '.allowedBeforeRevoke.status' "$evidence_file")"
+          denied_after_revoke="$(jq -r '.deniedAfterRevoke.status' "$evidence_file")"
+          token_present="$(jq -r '.list.tokenPresent' "$evidence_file")"
+
+          {
+            echo "## Hosted Service-Token Proof"
+            echo
+            echo "- Status: \`${status}\`"
+            echo "- Grant: \`${grant_id}\`"
+            echo "- Subject: \`${subject}\`"
+            echo "- Capabilities: \`${capabilities}\`"
+            echo "- Allowed route: \`${allowed_path}\` -> \`${allowed_status}\`"
+            echo "- Revoked-token route status: \`${denied_after_revoke}\`"
+            echo "- List projection exposes raw token: \`${token_present}\`"
+            echo "- Evidence artifact: \`hosted-service-token-proof-${GITHUB_RUN_ID}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sanitized service-token proof evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: hosted-service-token-proof-${{ github.run_id }}
+          path: ${{ env.SERVICE_TOKEN_PROOF_EVIDENCE_FILE }}
+          if-no-files-found: error
+          retention-days: 90

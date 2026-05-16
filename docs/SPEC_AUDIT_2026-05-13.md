@@ -248,10 +248,12 @@ SSH/basic-auth/admin-JWT cutovers, and the basic hosted smoke is green.
   `CHECK_SERVICE_TOKEN_PROOF=1` gate that issues a least-privilege service
   token, proves allowed vs ungranted routes, revokes the grant, confirms the
   old token loses access, and writes sanitized evidence without raw token
-  material.
-- Remaining: run the hosted service-token proof against production and attach
-  its sanitized evidence to the launch pack, then extend delegated-wallet UX
-  once native Substrate auth lands.
+  material. `hosted-service-token-proof.yml` wraps that gate in a production
+  GitHub workflow using `op://prod-smoke/admin-jwt/password` and uploads the
+  sanitized JSON artifact.
+- Remaining: run `hosted-service-token-proof.yml` on `main` and attach its
+  successful artifact to the launch pack, then extend delegated-wallet UX once
+  native Substrate auth lands.
 
 ### Secrets Phase 2+ And Mainnet Custody
 
@@ -318,8 +320,8 @@ correlation and settlement path.
    adoption.
 4. Prove the dispute verdict path live and decide `/release` semantics.
 5. Run the native XCM evidence pack captures.
-6. Run the scoped service-token hosted proof with
-   `CHECK_SERVICE_TOKEN_PROOF=1` and archive the sanitized evidence.
+6. Run `hosted-service-token-proof.yml` and archive the sanitized evidence
+   artifact.
 7. Continue standardizing producer event payloads and finish visible timeline
    filter adoption where still missing.
 8. Continue Phase 2+ secrets cleanup and signer custody hardening.

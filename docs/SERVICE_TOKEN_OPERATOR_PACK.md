@@ -214,6 +214,15 @@ The hosted smoke can exercise the full least-privilege loop without exposing
 the raw service token in logs or evidence:
 
 ```bash
+# Preferred hosted proof: uses the production GitHub environment and
+# op://prod-smoke/admin-jwt/password, then uploads a sanitized evidence
+# artifact named hosted-service-token-proof-<run-id>.
+gh workflow run hosted-service-token-proof.yml -R averray-agent/agent --ref main
+```
+
+For local operator fallback, pass an admin JWT explicitly:
+
+```bash
 CHECK_SERVICE_TOKEN_PROOF=1 \
 ADMIN_JWT="$ADMIN_JWT" \
 SERVICE_TOKEN_PROOF_EVIDENCE_FILE=artifacts/service-token-proof.json \

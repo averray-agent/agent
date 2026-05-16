@@ -108,7 +108,14 @@ APP_ALLOW_PROTECTED_SHELL=1 ./scripts/ops/check-hosted-stack.sh
 # Optional: include the async XCM operator lane in the smoke check
 ADMIN_JWT='<admin-jwt>' ./scripts/ops/check-hosted-stack.sh
 
-# Optional: include the scoped service-token proof and write sanitized evidence
+# Optional: run the hosted scoped service-token proof from GitHub Actions.
+# The workflow loads ADMIN_JWT from op://prod-smoke/admin-jwt/password and
+# uploads a sanitized JSON artifact named hosted-service-token-proof-<run-id>.
+gh workflow run hosted-service-token-proof.yml -R averray-agent/agent --ref main
+
+# Optional local fallback: include the scoped service-token proof and write
+# sanitized evidence. Prefer the GitHub workflow when you do not already have
+# an admin JWT in your local shell.
 ADMIN_JWT='<admin-jwt>' \
 CHECK_SERVICE_TOKEN_PROOF=1 \
 SERVICE_TOKEN_PROOF_EVIDENCE_FILE=artifacts/service-token-proof.json \

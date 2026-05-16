@@ -27,3 +27,20 @@ test("Hermes PR handoff keeps the full log as a correlation-id artifact", async 
   assert.match(workflow, /if-no-files-found: error/u);
   assert.match(workflow, /retention-days: 90/u);
 });
+
+test("hosted service-token proof uploads sanitized evidence as a workflow artifact", async () => {
+  const workflow = await readFile(join(REPO_ROOT, ".github/workflows/hosted-service-token-proof.yml"), "utf8");
+
+  assert.match(workflow, /workflow_dispatch:/u);
+  assert.match(workflow, /environment: production/u);
+  assert.match(workflow, /OP_SERVICE_ACCOUNT_TOKEN_PROD_SMOKE/u);
+  assert.match(workflow, /ADMIN_JWT_OP: op:\/\/prod-smoke\/admin-jwt\/password/u);
+  assert.match(workflow, /CHECK_SERVICE_TOKEN_PROOF: "1"/u);
+  assert.match(workflow, /SERVICE_TOKEN_PROOF_EVIDENCE_FILE: artifacts\/service-token-proof-hosted-\$\{\{ github\.run_id \}\}\.json/u);
+  assert.match(workflow, /ADMIN_JWT="\$ADMIN_JWT_OP" \.\/scripts\/ops\/check-hosted-stack\.sh/u);
+  assert.match(workflow, /uses: actions\/upload-artifact@v7/u);
+  assert.match(workflow, /name: hosted-service-token-proof-\$\{\{ github\.run_id \}\}/u);
+  assert.match(workflow, /path: \$\{\{ env\.SERVICE_TOKEN_PROOF_EVIDENCE_FILE \}\}/u);
+  assert.match(workflow, /if-no-files-found: error/u);
+  assert.match(workflow, /retention-days: 90/u);
+});
