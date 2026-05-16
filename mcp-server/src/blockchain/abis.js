@@ -36,6 +36,7 @@ export const ESCROW_CORE_ABI = [
   "function createSinglePayoutJob(bytes32 jobId, address asset, uint256 reward, uint256 opsReserve, uint256 contingencyReserve, uint256 claimTtl, bytes32 verifierMode, bytes32 category, bytes32 specHash)",
   "function createSinglePayoutJobFromRecurringReserve((bytes32 jobId, bytes32 templateId, address poster, address asset, uint256 reward, uint256 opsReserve, uint256 contingencyReserve, uint256 claimTtl, bytes32 verifierMode, bytes32 category, bytes32 specHash) params)",
   "function claimJob(bytes32 jobId)",
+  "function claimJobFor(bytes32 jobId, address worker)",
   "function handleClaimTimeout(bytes32 jobId)",
   "function submitWork(bytes32 jobId, bytes32 evidenceHash)",
   "function resolveSinglePayout(bytes32 jobId, bool approved, bytes32 reasonCode, string metadataURI, bytes32 reasoningHash)",

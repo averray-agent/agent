@@ -104,6 +104,26 @@ contract AgentPlatformTest is Test {
         assertEq(reputation.balanceOf(worker), 1);
     }
 
+    function testOperatorRelayedClaimUsesWorkerWalletForStakeAndReceipt() public {
+        bytes32 jobId = keccak256("job/relayed-claim/1");
+
+        vm.prank(poster);
+        escrow.createSinglePayoutJob(
+            jobId, address(dot), 100 ether, 10 ether, 5 ether, 1 days, bytes32("AUTO"), bytes32("CODING"), SPEC_HASH
+        );
+
+        escrow.claimJobFor(jobId, worker);
+
+        EscrowCore.JobEscrow memory claimedJob = escrow.jobs(jobId);
+        (uint256 workerLiquid,,,, uint256 workerJobStake,) = accounts.positions(worker, address(dot));
+        (,,,, uint256 operatorJobStake,) = accounts.positions(address(this), address(dot));
+
+        assertEq(claimedJob.worker, worker);
+        assertEq(workerLiquid, WORKER_DEPOSIT - 5 ether);
+        assertEq(workerJobStake, 5 ether);
+        assertEq(operatorJobStake, 0);
+    }
+
     function testDisputeWindowAndArbitratorSlaMatchSpec() public view {
         assertEq(escrow.DISPUTE_WINDOW(), 7 days);
         assertEq(escrow.ARBITRATOR_SLA(), 14 days);

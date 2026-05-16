@@ -180,8 +180,8 @@ export class JobExecutionService {
         if (typeof this.blockchainGateway.previewClaimEconomics === "function") {
           claimEconomics = await this.blockchainGateway.previewClaimEconomics(wallet, jobId).catch(() => claimEconomics);
         }
-        await this.blockchainGateway.ensureClaimStakeLiquidity?.(job.rewardAsset, claimEconomics.totalClaimLock);
-        await this.blockchainGateway.claimJob(jobId);
+        await this.blockchainGateway.ensureClaimStakeLiquidity?.(wallet, job.rewardAsset, claimEconomics.totalClaimLock);
+        await this.blockchainGateway.claimJob(jobId, wallet);
         chainClaimTiming = this.buildChainClaimTiming(
           await this.blockchainGateway.getJob(jobId).catch(() => undefined)
         );

@@ -472,7 +472,7 @@ export class BlockchainGateway {
     });
   }
 
-  async ensureClaimStakeLiquidity(assetSymbol, amount) {
+  async ensureClaimStakeLiquidity(wallet, assetSymbol, amount) {
     return this.withGatewayError("ensureClaimStakeLiquidity", async () => {
       if (amount <= 0) {
         return true;
@@ -480,14 +480,14 @@ export class BlockchainGateway {
       this.requireSigner("ensureClaimStakeLiquidity");
       const asset = this.requireAsset(assetSymbol);
       const required = this.toBaseUnits(amount, asset, "claim lock amount");
-      const signerAddress = await this.signer.getAddress();
-      const position = await this.accountContract.positions(signerAddress, asset.address);
+      const account = wallet || await this.signer.getAddress();
+      const position = await this.accountContract.positions(account, asset.address);
       const available = BigInt(position.liquid);
       if (available < required) {
         throw new InsufficientLiquidityError(assetSymbol, {
           required: amount,
           available: this.toDisplayUnits(available, asset),
-          account: signerAddress
+          account
         });
       }
       return true;
@@ -710,10 +710,14 @@ export class BlockchainGateway {
     });
   }
 
-  async claimJob(jobId) {
+  async claimJob(jobId, wallet) {
     return this.withGatewayError("claimJob", async () => {
       this.requireSigner("claimJob");
-      const tx = await this.escrowContract.claimJob(this.toJobId(jobId));
+      const chainJobId = this.toJobId(jobId);
+      const signerAddress = await this.signer.getAddress();
+      const tx = wallet && wallet.toLowerCase() !== signerAddress.toLowerCase()
+        ? await this.escrowContract.claimJobFor(chainJobId, wallet)
+        : await this.escrowContract.claimJob(chainJobId);
       await tx.wait();
     });
   }

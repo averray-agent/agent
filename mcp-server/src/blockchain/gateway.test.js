@@ -115,6 +115,58 @@ test("handleClaimTimeout reopens the canonical chain job id", async () => {
   assert.deepEqual(calls, [[gateway.toJobId("wiki-job")]]);
 });
 
+test("claimJob relays the authenticated wallet when the signer is an operator", async () => {
+  const gateway = new BlockchainGateway({ enabled: false });
+  const worker = "0x3333333333333333333333333333333333333333";
+  const calls = [];
+  gateway.signer = {
+    async getAddress() {
+      return "0x9999999999999999999999999999999999999999";
+    }
+  };
+  gateway.escrowContract = {
+    async claimJob() {
+      throw new Error("operator signer must not become the worker");
+    },
+    async claimJobFor(...args) {
+      calls.push(args);
+      return {
+        async wait() {}
+      };
+    }
+  };
+
+  await gateway.claimJob("wiki-job", worker);
+
+  assert.deepEqual(calls, [[gateway.toJobId("wiki-job"), worker]]);
+});
+
+test("claimJob uses direct claim when the signer is the authenticated wallet", async () => {
+  const gateway = new BlockchainGateway({ enabled: false });
+  const worker = "0x3333333333333333333333333333333333333333";
+  const calls = [];
+  gateway.signer = {
+    async getAddress() {
+      return worker.toUpperCase();
+    }
+  };
+  gateway.escrowContract = {
+    async claimJob(...args) {
+      calls.push(args);
+      return {
+        async wait() {}
+      };
+    },
+    async claimJobFor() {
+      throw new Error("direct wallet claims should not use claimJobFor");
+    }
+  };
+
+  await gateway.claimJob("wiki-job", worker);
+
+  assert.deepEqual(calls, [[gateway.toJobId("wiki-job")]]);
+});
+
 test("getJob falls back to the legacy escrow struct when rc1 decoding fails", async () => {
   const gateway = gatewayWithDot();
   gateway.escrowContract = {
@@ -542,7 +594,7 @@ test("ensureClaimStakeLiquidity checks fractional display locks against base-uni
   const gateway = gatewayWithDot();
   gateway.signer = {
     async getAddress() {
-      return "0x3333333333333333333333333333333333333333";
+      return "0x9999999999999999999999999999999999999999";
     }
   };
   gateway.accountContract = {
@@ -553,7 +605,10 @@ test("ensureClaimStakeLiquidity checks fractional display locks against base-uni
     }
   };
 
-  assert.equal(await gateway.ensureClaimStakeLiquidity("DOT", 0.48), true);
+  assert.equal(
+    await gateway.ensureClaimStakeLiquidity("0x3333333333333333333333333333333333333333", "DOT", 0.48),
+    true
+  );
 });
 
 test("fundAccount rejects non-mock settlement assets before minting", async () => {
