@@ -4,6 +4,7 @@ import {
 } from "../core/session-state-machine.js";
 import { updateFundedJobFromSession } from "../core/funded-jobs.js";
 import { buildVerificationAuditFields } from "../core/verifier-contract.js";
+import { disputeIdForSession } from "../core/dispute-resolution.js";
 
 export class VerificationIngestionService {
   constructor(stateStore, eventBus = undefined, getJobDefinition = undefined) {
@@ -69,6 +70,7 @@ export class VerificationIngestionService {
         resolvedAt: updatedSession.resolvedAt
       }
     });
+    const eventTimestamp = new Date().toISOString();
     this.eventBus?.publish({
       id: `platform-verification-${updatedSession.sessionId}-${Date.now()}`,
       topic: "verification.resolved",
@@ -76,7 +78,8 @@ export class VerificationIngestionService {
       wallets: [updatedSession.wallet],
       jobId: updatedSession.jobId,
       sessionId: updatedSession.sessionId,
-      timestamp: new Date().toISOString(),
+      timestamp: eventTimestamp,
+      correlationId: updatedSession.sessionId,
       data: {
         outcome: verdict.outcome,
         reasonCode: verdict.reasonCode,
@@ -86,6 +89,7 @@ export class VerificationIngestionService {
         verifierConfigVersion: auditFields.verifierConfigVersion
       }
     });
+    this.publishWorkflowOutcomeEvent(updatedSession, verdict, auditFields, status, eventTimestamp);
     return updatedSession;
   }
 
@@ -99,5 +103,41 @@ export class VerificationIngestionService {
     } catch {
       return undefined;
     }
+  }
+
+  publishWorkflowOutcomeEvent(session, verdict, auditFields, status, timestamp) {
+    if (!this.eventBus) {
+      return;
+    }
+
+    const disputed = status === "disputed";
+    const topic = disputed
+      ? "dispute.opened"
+      : status === "resolved"
+        ? "settlement.session_resolved"
+        : "settlement.session_rejected";
+
+    this.eventBus.publish({
+      id: `platform-${topic}-${session.sessionId}-${Date.now()}`,
+      topic,
+      wallet: session.wallet,
+      wallets: [session.wallet],
+      jobId: session.jobId,
+      sessionId: session.sessionId,
+      timestamp,
+      correlationId: session.sessionId,
+      data: {
+        sessionId: session.sessionId,
+        wallet: session.wallet,
+        jobId: session.jobId,
+        status,
+        outcome: verdict.outcome,
+        reasonCode: verdict.reasonCode,
+        handler: verdict.handler,
+        handlerVersion: auditFields.handlerVersion ?? verdict.handlerVersion,
+        verifierConfigVersion: auditFields.verifierConfigVersion,
+        disputeId: disputed ? disputeIdForSession(session.sessionId) : undefined
+      }
+    });
   }
 }

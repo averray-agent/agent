@@ -227,9 +227,12 @@ SSH/basic-auth/admin-JWT cutovers, and the basic hosted smoke is green.
 ### Timeline And Operator UX
 
 - Status: backend and client timeline surfaces support source, topic, phase,
-  severity, correlation-id, wallet filters, and persisted event replay.
-- Remaining: fold funding, settlement, and dispute state into the same
-  canonical trace, standardize remaining producer topics/payloads, and finish
+  severity, correlation-id, wallet filters, and persisted event replay. Local
+  claim-lock funding, verification settlement/rejection, disputed verification,
+  dispute verdict, and stake-release receipts now emit canonical settlement
+  timeline events with direct job/session/wallet/correlation fields instead of
+  being visible only through state transitions or chain-shaped topics.
+- Remaining: standardize any remaining producer topics/payloads and finish
   exposing the filter controls coherently across the operator app.
 
 ### Capability Model
@@ -315,6 +318,6 @@ correlation and settlement path.
 5. Run the native XCM evidence pack captures.
 6. Run the scoped service-token hosted proof with
    `CHECK_SERVICE_TOKEN_PROOF=1` and archive the sanitized evidence.
-7. Continue folding funding/settlement/dispute events into the canonical
-   timeline and finish visible filter adoption where still missing.
+7. Continue standardizing producer event payloads and finish visible timeline
+   filter adoption where still missing.
 8. Continue Phase 2+ secrets cleanup and signer custody hardening.

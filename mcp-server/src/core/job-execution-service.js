@@ -213,6 +213,7 @@ export class JobExecutionService {
       const persisted = await this.stateStore.upsertSession(session);
       await this.stateStore.upsertFundedJob?.(buildFundedJobFromClaim({ job, session: persisted }));
       this.publishSessionEvent("session.claimed", persisted);
+      this.publishClaimFundingEvent(persisted, job, claimEconomics);
       return persisted;
     } finally {
       await this.stateStore.releaseClaimLock?.(sessionLockId, lockOwner);
@@ -497,6 +498,40 @@ export class JobExecutionService {
         phase: describeSessionStatus(session.status).phase,
         protocolHistory: session.protocolHistory,
         ...data
+      }
+    });
+  }
+
+  publishClaimFundingEvent(session, job, claimEconomics) {
+    if (!this.eventBus || this.blockchainGateway?.isEnabled?.()) {
+      return;
+    }
+
+    const amount = Number(claimEconomics?.totalClaimLock ?? 0);
+    if (!Number.isFinite(amount) || amount < 0) {
+      return;
+    }
+
+    this.eventBus.publish({
+      id: `platform-funding-claim-lock-${session.sessionId}-${Date.now()}`,
+      topic: "funding.claim_lock_recorded",
+      wallet: session.wallet,
+      wallets: [session.wallet],
+      jobId: session.jobId,
+      sessionId: session.sessionId,
+      timestamp: new Date().toISOString(),
+      correlationId: session.sessionId,
+      data: {
+        sessionId: session.sessionId,
+        wallet: session.wallet,
+        jobId: session.jobId,
+        asset: job.rewardAsset,
+        amount,
+        claimStake: claimEconomics.claimStake,
+        claimFee: claimEconomics.claimFee,
+        totalClaimLock: claimEconomics.totalClaimLock,
+        claimEconomicsWaived: claimEconomics.claimEconomicsWaived,
+        source: "local_claim_lock"
       }
     });
   }

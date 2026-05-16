@@ -188,6 +188,27 @@ function classifyEventTopic(topic, data = {}) {
       severity: xcmSeverity(topic, data)
     };
   }
+  if (topic.startsWith("funding.")) {
+    return {
+      source: "settlement",
+      phase: "funding",
+      severity: fundingSeverity(topic, data)
+    };
+  }
+  if (topic.startsWith("settlement.")) {
+    return {
+      source: "settlement",
+      phase: "settlement",
+      severity: settlementSeverity(topic, data)
+    };
+  }
+  if (topic.startsWith("dispute.")) {
+    return {
+      source: "settlement",
+      phase: "dispute",
+      severity: disputeSeverity(topic, data)
+    };
+  }
   if (topic.startsWith("verification.")) {
     return {
       source: "verification",
@@ -258,6 +279,28 @@ function accountPhase(topic) {
 function xcmSeverity(topic, data) {
   const status = normalizeText(data?.statusLabel) || normalizeText(data?.status);
   if (topic.includes("failed") || status.toLowerCase().includes("failed")) return "error";
+  return "info";
+}
+
+function fundingSeverity(topic, data) {
+  const status = normalizeText(data?.status);
+  if (topic.includes("failed") || status === "failed") return "error";
+  return "info";
+}
+
+function settlementSeverity(topic, data) {
+  const status = normalizeText(data?.status);
+  const outcome = normalizeText(data?.outcome);
+  if (topic.includes("failed") || status === "rejected" || outcome === "rejected") return "error";
+  if (status === "disputed" || outcome === "disputed") return "warn";
+  return "info";
+}
+
+function disputeSeverity(topic, data) {
+  const verdict = normalizeText(data?.verdict);
+  const status = normalizeText(data?.status);
+  if (topic.includes("failed") || status === "failed") return "error";
+  if (topic.includes("opened") || verdict === "upheld" || verdict === "split") return "warn";
   return "info";
 }
 

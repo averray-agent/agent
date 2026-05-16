@@ -81,6 +81,40 @@ test("EventBus preserves canonical timeline fields and classifies chain topics",
   assert.equal(rejected.phase, "settlement");
   assert.equal(rejected.severity, "error");
   assert.equal(rejected.correlationId, "session-3");
+
+  const localFunding = bus.publish({
+    id: "funding-1",
+    topic: "funding.claim_lock_recorded",
+    jobId: "job-4",
+    sessionId: "session-4",
+    timestamp: "2026-01-01T00:00:03.000Z"
+  });
+  assert.equal(localFunding.source, "settlement");
+  assert.equal(localFunding.phase, "funding");
+  assert.equal(localFunding.severity, "info");
+
+  const localSettlement = bus.publish({
+    id: "settlement-1",
+    topic: "settlement.session_rejected",
+    jobId: "job-5",
+    sessionId: "session-5",
+    timestamp: "2026-01-01T00:00:04.000Z",
+    data: { status: "rejected" }
+  });
+  assert.equal(localSettlement.source, "settlement");
+  assert.equal(localSettlement.phase, "settlement");
+  assert.equal(localSettlement.severity, "error");
+
+  const localDispute = bus.publish({
+    id: "dispute-1",
+    topic: "dispute.opened",
+    jobId: "job-6",
+    sessionId: "session-6",
+    timestamp: "2026-01-01T00:00:05.000Z"
+  });
+  assert.equal(localDispute.source, "settlement");
+  assert.equal(localDispute.phase, "dispute");
+  assert.equal(localDispute.severity, "warn");
 });
 
 test("EventBus persists events and replays durable filters beyond the ring buffer", async () => {

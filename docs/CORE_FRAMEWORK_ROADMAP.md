@@ -51,7 +51,8 @@ What is still thin:
   discipline
 - first-wave job schemas need stricter runtime enforcement
 - settlement, timeout, and dispute phases need fuller state-machine coverage
-- funding, settlement, and dispute events are not fully folded into one trace
+- remaining producer event payloads still need taxonomy cleanup after funding,
+  settlement, and dispute receipts were folded into the shared trace
 - visible operator filters lag the backend timeline filter surface
 - native XCM/vDOT remains gated on real evidence capture, not implementation
   scaffolding alone
@@ -312,13 +313,16 @@ emit into it with the same topic taxonomy.
 - `/events` and `/admin/jobs/timeline` accept source, topic, phase, severity,
   and correlation-id filters; the frontend client hook can pass the same filter
   shape through to the backend
+- local claim-lock funding, verification settlement/rejection, disputed
+  verification, dispute verdict, and stake-release receipts emit canonical
+  `settlement` source events with funding, settlement, and dispute phases plus
+  direct job/session/wallet/correlation fields
 - recurring template fire history is reconstructed through derivative jobs,
   and sub-job lineage is reconstructed through `parentSessionId`
 
 ### Remaining gaps
 
 - not every producer emits a canonical topic and payload shape yet
-- funding and settlement state are not fully folded into the same timeline
 - operator UI still needs visible timeline filter controls for source, topic,
   wallet, and correlation id
 
@@ -332,7 +336,6 @@ emit into it with the same topic taxonomy.
 ### Concrete next changes
 
 - standardize the remaining platform event topics and payload shapes
-- merge funding, settlement, and dispute state into the same job/session trace
 - expose visible operator controls for source, topic, wallet, and correlation-id
   filters
 
