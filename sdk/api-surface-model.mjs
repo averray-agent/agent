@@ -381,6 +381,40 @@ export interface ValidationResponse<TSubmission = unknown> extends ApiEnvelope {
   expectedPath?: string;
 }
 
+export interface InvalidWrappedOutputReadiness extends ApiEnvelope {
+  jobId: JobId;
+  valid: false;
+  submitSafe: false;
+  schemaRef?: BuiltinJobSchemaRef | string | null;
+  schemaValidates?: "payload.submission" | string;
+  code?: string | null;
+  message?: string | null;
+  path?: string | null;
+  received?: string | null;
+  hint?: string | null;
+  checkedBeforeClaim: true;
+  submitAttempted: false;
+  validation?: ValidationResponse;
+}
+
+export interface SchemaNativeSubmissionReadinessOptions<TProbe extends StructuredSubmission = StructuredSubmission> {
+  expectedSchemaRef?: BuiltinJobSchemaRef | string;
+  requireInvalidWrapperRejection?: boolean;
+  invalidWrappedOutputProbe?: TProbe;
+}
+
+export interface SchemaNativeSubmissionReadiness<TSubmission = StructuredSubmission> extends ApiEnvelope {
+  jobId: JobId;
+  valid: true;
+  submitSafe: true;
+  schemaRef?: BuiltinJobSchemaRef | string | null;
+  schemaValidates?: "payload.submission" | string;
+  submissionKind?: "structured" | "raw" | string;
+  validatedBeforeClaim: true;
+  directValidation: ValidationResponse<TSubmission>;
+  invalidWrappedOutput?: InvalidWrappedOutputReadiness | null;
+}
+
 export interface ClaimResponse extends SessionRecord {
   sessionId: SessionId;
   jobId: JobId;
@@ -755,6 +789,11 @@ export class AgentPlatformClient {
     jobId: JobId,
     submission: TSubmission
   ): Promise<ValidationResponse<TSubmission>>;
+  assertSchemaNativeSubmissionReady<TSubmission extends StructuredSubmission = StructuredSubmission>(
+    jobId: JobId,
+    submission: TSubmission,
+    options?: SchemaNativeSubmissionReadinessOptions
+  ): Promise<SchemaNativeSubmissionReadiness<TSubmission>>;
   claimJobAfterValidation<TSubmission extends StructuredSubmission = StructuredSubmission>(
     jobId: JobId,
     submission: TSubmission,

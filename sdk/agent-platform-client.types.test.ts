@@ -9,6 +9,7 @@ import {
   type IdempotencyKey,
   type JobDefinition,
   type JobsListResponse,
+  type SchemaNativeSubmissionReadiness,
   type ServiceTokenIssueResponse,
   type ServiceTokenListResponse,
   type ServiceTokenRevokeResponse,
@@ -46,6 +47,11 @@ if (firstJobId) {
   } satisfies BuiltinJobSchemaValue<"schema://jobs/wikipedia-citation-repair-output">;
 
   await client.validateJobSubmission(definition.id, wikipediaSubmission);
+  const readiness: SchemaNativeSubmissionReadiness<typeof wikipediaSubmission> =
+    await client.assertSchemaNativeSubmissionReady(definition.id, wikipediaSubmission, {
+      expectedSchemaRef: "schema://jobs/wikipedia-citation-repair-output"
+    });
+  void readiness.invalidWrappedOutput?.path;
   await client.claimJobAfterValidation(definition.id, wikipediaSubmission, "example-run-id-validated");
   await client.submitValidatedWork(definition.id, claim.sessionId, wikipediaSubmission);
   await client.submitWork(claim.sessionId, wikipediaSubmission);

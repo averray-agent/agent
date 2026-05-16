@@ -232,6 +232,66 @@ test("validated job helpers fail closed before claim or submit mutations", async
   assert.equal(calls[0].url, "https://api.example.test/jobs/validate-submission");
 });
 
+test("schema-native readiness validates direct output and rejected wrapper before mutation", async () => {
+  const calls = [];
+  const client = new AgentPlatformClient({
+    baseUrl: "https://api.example.test",
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      const payload = JSON.parse(options.body);
+      if (payload.submission?.output?.wrapped_under_submission_output === true) {
+        return jsonResponse({
+          jobId: payload.jobId,
+          valid: false,
+          submitSafe: false,
+          schemaRef: "schema://jobs/release-readiness-output",
+          schemaValidates: "payload.submission",
+          code: "invalid_submission_shape",
+          message: "Send the structured proposal object directly as submission, not under submission.output.",
+          path: "payload.submission.output",
+          details: {
+            received: "payload.submission.output",
+            hint: "Move the object currently under submission.output up to submission."
+          }
+        });
+      }
+      return jsonResponse({
+        jobId: payload.jobId,
+        valid: true,
+        submitSafe: true,
+        schemaRef: "schema://jobs/release-readiness-output",
+        schemaValidates: "payload.submission",
+        submissionKind: "structured"
+      });
+    }
+  });
+
+  const readiness = await client.assertSchemaNativeSubmissionReady(
+    "release-readiness-check-001",
+    {
+      release_id: "release-2026-05",
+      checks_passed: ["api-health"],
+      checks_failed: [],
+      blockers: [],
+      go_no_go: "go"
+    },
+    { expectedSchemaRef: "schema://jobs/release-readiness-output" }
+  );
+
+  assert.equal(readiness.valid, true);
+  assert.equal(readiness.schemaRef, "schema://jobs/release-readiness-output");
+  assert.equal(readiness.schemaValidates, "payload.submission");
+  assert.equal(readiness.validatedBeforeClaim, true);
+  assert.equal(readiness.invalidWrappedOutput.valid, false);
+  assert.equal(readiness.invalidWrappedOutput.path, "payload.submission.output");
+  assert.equal(readiness.invalidWrappedOutput.received, "payload.submission.output");
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls.map((call) => call.url), [
+    "https://api.example.test/jobs/validate-submission",
+    "https://api.example.test/jobs/validate-submission"
+  ]);
+});
+
 test("operator surface helpers call policy, audit, and alert endpoints", async () => {
   const calls = [];
   const client = new AgentPlatformClient({

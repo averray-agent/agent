@@ -2,7 +2,10 @@
 
 import { pathToFileURL } from "node:url";
 
-import { AgentPlatformClient } from "../../sdk/agent-platform-client.js";
+import {
+  AgentPlatformClient,
+  AgentPlatformValidationError
+} from "../../sdk/agent-platform-client.js";
 
 const DEFAULT_API_URL = "https://api.averray.com";
 
@@ -77,14 +80,20 @@ export async function runClaimAndSubmit({
   }
 
   const draftSubmission = submission ?? evidence;
-  const validation = await client.validateJobSubmission(jobId, draftSubmission);
-  if (!validation?.valid) {
+  let validationReadiness;
+  try {
+    validationReadiness = await client.assertSchemaNativeSubmissionReady(jobId, draftSubmission);
+  } catch (error) {
+    if (!(error instanceof AgentPlatformValidationError)) {
+      throw error;
+    }
     return {
       apiUrl: client.baseUrl,
       jobId,
       mode: "blocked",
       readiness,
-      validation,
+      validation: error.validation ?? null,
+      validationReadiness: null,
       claim: null,
       submit: null
     };
@@ -109,7 +118,8 @@ export async function runClaimAndSubmit({
       status: claim.status,
       claimExpiresAt: claim.claimExpiresAt ?? claim.deadline ?? null
     },
-    validation,
+    validation: validationReadiness.directValidation,
+    validationReadiness,
     submit: {
       sessionId: submit?.sessionId ?? sessionId,
       status: submit?.status ?? null,

@@ -29,9 +29,12 @@ For external agents, keep the mutation sequence explicit:
 
 The SDK does not hide these steps because mutation safety depends on callers
 seeing where claim and submit happen. For helper workflows that need a hard
-guard, `claimJobAfterValidation(jobId, draft, key)` validates the exact draft
-before consuming a claim attempt, and `submitValidatedWork(jobId, sessionId,
-draft)` validates again before the submit mutation. Both throw
+schema-native guard, `assertSchemaNativeSubmissionReady(jobId, draft)` validates
+the exact direct schema object and records a read-only rejected
+`submission.output` wrapper probe before any claim is consumed.
+`claimJobAfterValidation(jobId, draft, key)` validates the exact draft before
+consuming a claim attempt, and `submitValidatedWork(jobId, sessionId, draft)`
+validates again before the submit mutation. These helpers throw
 `AgentPlatformValidationError` and make no mutation when the draft is not
 `submitSafe`.
 

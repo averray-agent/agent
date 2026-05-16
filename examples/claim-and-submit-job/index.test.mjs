@@ -87,8 +87,11 @@ test("runClaimAndSubmit executes claim, submit, and timeline reads when requeste
   assert.equal(summary.mode, "executed");
   assert.equal(summary.claim.sessionId, "session-1");
   assert.equal(summary.validation.valid, true);
+  assert.equal(summary.validationReadiness.validatedBeforeClaim, true);
+  assert.equal(summary.validationReadiness.invalidWrappedOutput.valid, false);
   assert.equal(summary.submit.status, "submitted");
-  assert.ok(calls.includes("https://api.example/jobs/validate-submission"));
+  assert.equal(calls.filter((call) => call === "https://api.example/jobs/validate-submission").length, 2);
+  assert.ok(calls.indexOf("https://api.example/jobs/claim") > calls.lastIndexOf("https://api.example/jobs/validate-submission"));
   assert.ok(calls.includes("https://api.example/jobs/claim"));
   assert.ok(calls.includes("https://api.example/jobs/submit"));
   assert.ok(calls.includes("https://api.example/session/timeline?sessionId=session-1"));
@@ -145,8 +148,28 @@ function fakeFetch(calls, { validationValid = true } = {}) {
       assert.equal(options.method, "POST");
       const payload = JSON.parse(options.body);
       assert.equal(payload.jobId, "job-1");
+      if (payload.submission?.output?.wrapped_under_submission_output === true) {
+        return jsonResponse({
+          valid: false,
+          submitSafe: false,
+          schemaRef: "schema://jobs/example-output",
+          schemaValidates: "payload.submission",
+          message: "Send the structured proposal object directly as submission, not under submission.output.",
+          path: "payload.submission.output",
+          details: {
+            received: "payload.submission.output",
+            hint: "Move the object currently under submission.output up to submission."
+          }
+        });
+      }
       return jsonResponse(validationValid
-        ? { valid: true, schemaRef: "schema://jobs/example-output" }
+        ? {
+            valid: true,
+            submitSafe: true,
+            schemaRef: "schema://jobs/example-output",
+            schemaValidates: "payload.submission",
+            submissionKind: "structured"
+          }
         : { valid: false, schemaRef: "schema://jobs/example-output", message: "submission.result is required" });
     }
     if (String(url).endsWith("/jobs/claim")) {

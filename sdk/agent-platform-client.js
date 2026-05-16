@@ -279,6 +279,87 @@ export class AgentPlatformClient {
     return validation;
   }
 
+  /**
+   * Non-mutating schema-native guard for helper workflows.
+   *
+   * This validates the exact direct submission object and, for structured
+   * drafts, checks that an intentionally bad `submission.output` wrapper is
+   * rejected before any claim/submit mutation is attempted.
+   */
+  async assertSchemaNativeSubmissionReady(jobId, submission, {
+    expectedSchemaRef = undefined,
+    requireInvalidWrapperRejection = isStructuredObject(submission),
+    invalidWrappedOutputProbe = {
+      output: {
+        wrapped_under_submission_output: true
+      }
+    }
+  } = {}) {
+    const validation = await this.assertValidJobSubmission(jobId, submission);
+    const schemaRef = validation?.schemaRef ?? expectedSchemaRef ?? null;
+    if (expectedSchemaRef && schemaRef && schemaRef !== expectedSchemaRef) {
+      throw new AgentPlatformValidationError({
+        message: `Submission validation schema mismatch: expected ${expectedSchemaRef}, got ${schemaRef}.`,
+        validation
+      });
+    }
+
+    const readiness = {
+      jobId,
+      valid: true,
+      submitSafe: true,
+      schemaRef,
+      schemaValidates: validation?.schemaValidates ?? "payload.submission",
+      submissionKind: validation?.submissionKind ?? (isStructuredObject(submission) ? "structured" : "raw"),
+      validatedBeforeClaim: true,
+      directValidation: validation,
+      invalidWrappedOutput: null
+    };
+
+    if (!requireInvalidWrapperRejection) {
+      return readiness;
+    }
+
+    const invalidValidation = await this.validateJobSubmission(jobId, invalidWrappedOutputProbe);
+    if (invalidValidation?.jobId && invalidValidation.jobId !== jobId) {
+      throw new AgentPlatformValidationError({
+        message: `Invalid-wrapper validation job id mismatch: expected ${jobId}, got ${invalidValidation.jobId}.`,
+        validation: invalidValidation
+      });
+    }
+    if (invalidValidation?.valid !== false || invalidValidation?.submitSafe !== false) {
+      throw new AgentPlatformValidationError({
+        message: "Invalid submission.output wrapper unexpectedly passed validation; refusing to mutate.",
+        validation: invalidValidation
+      });
+    }
+    const invalidSchemaRef = invalidValidation?.schemaRef ?? schemaRef ?? expectedSchemaRef ?? null;
+    if (expectedSchemaRef && invalidSchemaRef && invalidSchemaRef !== expectedSchemaRef) {
+      throw new AgentPlatformValidationError({
+        message: `Invalid-wrapper validation schema mismatch: expected ${expectedSchemaRef}, got ${invalidSchemaRef}.`,
+        validation: invalidValidation
+      });
+    }
+
+    readiness.invalidWrappedOutput = {
+      jobId,
+      valid: false,
+      submitSafe: false,
+      schemaRef: invalidSchemaRef,
+      schemaValidates: invalidValidation?.schemaValidates ?? "payload.submission",
+      code: invalidValidation?.code ?? null,
+      message: invalidValidation?.message ?? null,
+      path: invalidValidation?.path ?? invalidValidation?.errorPaths?.[0] ?? null,
+      received: invalidValidation?.details?.received ?? null,
+      hint: invalidValidation?.details?.hint ?? null,
+      checkedBeforeClaim: true,
+      submitAttempted: false,
+      validation: invalidValidation
+    };
+
+    return readiness;
+  }
+
   /** Validate the exact draft first; only then consume a claim attempt. */
   async claimJobAfterValidation(jobId, submission, idempotencyKey = undefined) {
     await this.assertValidJobSubmission(jobId, submission);
@@ -546,6 +627,10 @@ export class AgentPlatformValidationError extends Error {
 
 function isSubmitSafeValidation(validation) {
   return validation?.valid === true && validation?.submitSafe !== false;
+}
+
+function isStructuredObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function safeJsonParse(text) {

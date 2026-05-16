@@ -38,6 +38,8 @@ AVERRAY_TOKEN="$TOKEN" node examples/claim-and-submit-job/index.mjs \
   --execute
 ```
 
-The example calls `/jobs/validate-submission` before claiming. If the draft is
-missing required fields or uses the old `submission.output` wrapper shape, it
-stops before consuming a claim attempt.
+The example calls the SDK's `assertSchemaNativeSubmissionReady` guard before
+claiming. That makes the direct draft pass `/jobs/validate-submission`, records
+the schema ref used, and probes an intentionally invalid `submission.output`
+wrapper through the same read-only route. If the draft is missing required
+fields, it stops before consuming a claim attempt.

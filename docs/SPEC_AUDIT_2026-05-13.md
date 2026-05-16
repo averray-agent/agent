@@ -187,12 +187,14 @@ SSH/basic-auth/admin-JWT cutovers, and the basic hosted smoke is green.
   loop now records both the valid direct-object validation and a read-only
   rejected `submission.output` wrapper probe before claim, and the
   product-proof gate asserts the hosted schema index contains the built-in
-  first-wave registry.
-- Remaining: run the hosted product-proof worker-loop evidence gate against the
-  live stack with the valid + invalid validation traces present, extend the
-  validation-before-claim pattern to remaining third-party/helper workflows,
-  and add signed registration before tightening custom/off-platform schema
-  refs.
+  first-wave registry. Live product-proof worker-loop evidence has passed, and
+  the SDK now exposes `assertSchemaNativeSubmissionReady` for generic helper
+  workflows so the valid direct-object trace plus rejected wrapper probe can be
+  reused outside the product-proof loop.
+- Remaining: extend the schema-native readiness helper to remaining
+  third-party/reference-agent helper workflows as they graduate to structured
+  output, and add signed registration before tightening custom/off-platform
+  schema refs.
 
 ### Verifier Replay Hardening
 

@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { ValidationError } from "./errors.js";
 import {
@@ -22,6 +25,8 @@ const FIRST_WAVE_SCHEMA_REFS = [
   "schema://jobs/docs-drift-audit-output"
 ];
 
+const repoRoot = resolve(fileURLToPath(new URL("../../..", import.meta.url)));
+
 test("getBuiltinJobSchema resolves built-in first-wave schemas", () => {
   const schema = getBuiltinJobSchema("schema://jobs/pr-review-findings-output");
   assert.equal(schema?.$id, "schema://jobs/pr-review-findings-output");
@@ -33,6 +38,22 @@ test("first-wave schema-native job refs are public built-ins", () => {
     assert.equal(schema?.$id, ref);
     assert.equal(schemaRefToJobSchemaPath(ref), `/schemas/jobs/${ref.slice("schema://jobs/".length)}.json`);
     assert.equal(getPublicBuiltinJobSchemaByName(ref.slice("schema://jobs/".length))?.$id, ref);
+  }
+});
+
+test("ready-to-post first-wave jobs reference public built-in output schemas", () => {
+  const jobs = JSON.parse(readFileSync(resolve(repoRoot, "docs/ready-to-post-jobs.json"), "utf8"));
+  assert.ok(Array.isArray(jobs));
+  assert.ok(jobs.length >= 7);
+
+  for (const job of jobs) {
+    assert.ok(job.outputSchemaRef, `${job.id} must declare outputSchemaRef`);
+    const schema = getBuiltinJobSchema(job.outputSchemaRef);
+    assert.equal(schema?.$id, job.outputSchemaRef, `${job.id} output schema must be a built-in schema`);
+    assert.equal(
+      schemaRefToJobSchemaPath(job.outputSchemaRef),
+      `/schemas/jobs/${job.outputSchemaRef.slice("schema://jobs/".length)}.json`
+    );
   }
 });
 
