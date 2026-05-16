@@ -6,6 +6,7 @@ import { MemoryStateStore } from "../core/state-store.js";
 import { XcmObservationRelayService } from "./xcm-observation-relay.js";
 
 const REQUEST_ID = "0x2222222222222222222222222222222222222222222222222222222222222222";
+const FAILURE_CODE = "0x4444444444444444444444444444444444444444444444444444444444444444";
 
 test("pollOnce relays terminal outcomes into the platform watcher and stores cursor state", async () => {
   const calls = [];
@@ -227,4 +228,84 @@ test("pollOnce rejects numeric non-terminal statuses from the observer feed", as
   );
 
   await assert.rejects(() => relay.pollOnce(), /terminal status/u);
+});
+
+test("pollOnce rejects failed observer outcomes without failureCode", async () => {
+  const calls = [];
+  const relay = new XcmObservationRelayService(
+    {
+      observeXcmOutcome: async (requestId, outcome) => {
+        calls.push([requestId, outcome]);
+        return outcome;
+      }
+    },
+    new MemoryStateStore(),
+    undefined,
+    {
+      enabled: true,
+      feedUrl: "https://observer.example/outcomes",
+      fetchImpl: async () => ({
+        ok: true,
+        async json() {
+          return {
+            items: [
+              {
+                requestId: REQUEST_ID,
+                status: "failed"
+              }
+            ]
+          };
+        }
+      }),
+      logger: { warn() {} }
+    }
+  );
+
+  await assert.rejects(() => relay.pollOnce(), /failed items must include failureCode/u);
+  assert.equal(calls.length, 0);
+});
+
+test("pollOnce relays failed observer outcomes with failureCode", async () => {
+  const calls = [];
+  const events = [];
+  const eventBus = new EventBus();
+  eventBus.subscribe({ topics: ["xcm.outcome_relayed"] }, (event) => events.push(event));
+  const relay = new XcmObservationRelayService(
+    {
+      observeXcmOutcome: async (requestId, outcome) => {
+        calls.push([requestId, outcome]);
+        return outcome;
+      }
+    },
+    new MemoryStateStore(),
+    eventBus,
+    {
+      enabled: true,
+      feedUrl: "https://observer.example/outcomes",
+      fetchImpl: async () => ({
+        ok: true,
+        async json() {
+          return {
+            items: [
+              {
+                requestId: REQUEST_ID,
+                status: "failed",
+                failureCode: FAILURE_CODE
+              }
+            ]
+          };
+        }
+      })
+    }
+  );
+
+  const result = await relay.pollOnce();
+
+  assert.equal(result.observedCount, 1);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][1].status, "failed");
+  assert.equal(calls[0][1].failureCode, FAILURE_CODE);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].data.status, "failed");
+  assert.equal(events[0].data.failureCode, FAILURE_CODE);
 });
