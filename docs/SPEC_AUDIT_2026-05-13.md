@@ -231,9 +231,11 @@ SSH/basic-auth/admin-JWT cutovers, and the basic hosted smoke is green.
   claim-lock funding, verification settlement/rejection, disputed verification,
   dispute verdict, and stake-release receipts now emit canonical settlement
   timeline events with direct job/session/wallet/correlation fields instead of
-  being visible only through state transitions or chain-shaped topics.
-- Remaining: standardize any remaining producer topics/payloads and finish
-  exposing the filter controls coherently across the operator app.
+  being visible only through state transitions or chain-shaped topics. The
+  operator app now exposes URL-backed job/session timeline filters for source,
+  topic, phase, severity, wallet, and correlation id.
+- Remaining: standardize any remaining producer topics/payloads and keep filter
+  presets aligned with the canonical event taxonomy.
 
 ### Capability Model
 

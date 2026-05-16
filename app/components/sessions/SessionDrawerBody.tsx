@@ -221,9 +221,13 @@ function filterMovements(
 ): EscrowMovement[] {
   const source = filters.source.trim().toLowerCase();
   const topic = filters.topic.trim().toLowerCase();
+  const phase = filters.phase.trim().toLowerCase();
+  const severity = filters.severity.trim().toLowerCase();
   const wallet = filters.wallet.trim().toLowerCase();
   const correlationId = filters.correlationId.trim().toLowerCase();
-  if (!source && !topic && !wallet && !correlationId) return movements;
+  if (!source && !topic && !phase && !severity && !wallet && !correlationId) {
+    return movements;
+  }
   return movements.filter((movement) => {
     if (source && (movement.source ?? "").toLowerCase() !== source) return false;
     if (topic) {
@@ -233,6 +237,9 @@ function filterMovements(
       const movementTopic = (movement.topic ?? movement.label ?? "").toLowerCase();
       if (!movementTopic.includes(topic)) return false;
     }
+    if (phase && (movement.phase ?? "").toLowerCase() !== phase) return false;
+    if (severity && (movement.severity ?? "").toLowerCase() !== severity)
+      return false;
     if (wallet) {
       const haystack = [movement.wallet, movement.from, movement.to]
         .map((v) => (v ?? "").toLowerCase())

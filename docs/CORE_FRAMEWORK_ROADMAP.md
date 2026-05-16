@@ -313,6 +313,9 @@ emit into it with the same topic taxonomy.
 - `/events` and `/admin/jobs/timeline` accept source, topic, phase, severity,
   and correlation-id filters; the frontend client hook can pass the same filter
   shape through to the backend
+- the operator app exposes visible job/session timeline controls for source,
+  topic, phase, severity, wallet, and correlation-id filters, and keeps the
+  filtered state in the URL for refreshable evidence links
 - local claim-lock funding, verification settlement/rejection, disputed
   verification, dispute verdict, and stake-release receipts emit canonical
   `settlement` source events with funding, settlement, and dispute phases plus
@@ -323,8 +326,6 @@ emit into it with the same topic taxonomy.
 ### Remaining gaps
 
 - not every producer emits a canonical topic and payload shape yet
-- operator UI still needs visible timeline filter controls for source, topic,
-  wallet, and correlation id
 
 ### Improve to
 
@@ -336,8 +337,8 @@ emit into it with the same topic taxonomy.
 ### Concrete next changes
 
 - standardize the remaining platform event topics and payload shapes
-- expose visible operator controls for source, topic, wallet, and correlation-id
-  filters
+- keep operator filter presets in step with new canonical source, phase, and
+  topic names as producer coverage expands
 
 ### What this unlocks
 

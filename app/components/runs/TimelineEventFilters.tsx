@@ -5,16 +5,18 @@ import { useCallback } from "react";
 /**
  * Visible filter controls for the timeline event panels (job and
  * session). The backend `/admin/jobs/timeline` endpoint accepts
- * `sources`, `topics`, `eventWallet`, and `correlationId` query
- * params; this rail surfaces those four knobs so an auditor can slice
- * a long timeline without leaving the page. The same control set is
- * reused on the session drawer (client-side filter — see
+ * `sources`, `topics`, `phases`, `severities`, `eventWallet`, and
+ * `correlationId` query params; this rail surfaces those knobs so an
+ * auditor can slice a long timeline without leaving the page. The same
+ * control set is reused on the session drawer (client-side filter — see
  * SessionDrawerBody for the why).
  */
 
 export interface TimelineEventFilterValue {
   source: string;
   topic: string;
+  phase: string;
+  severity: string;
   wallet: string;
   correlationId: string;
 }
@@ -22,6 +24,8 @@ export interface TimelineEventFilterValue {
 export const EMPTY_TIMELINE_EVENT_FILTERS: TimelineEventFilterValue = {
   source: "",
   topic: "",
+  phase: "",
+  severity: "",
   wallet: "",
   correlationId: "",
 };
@@ -30,6 +34,8 @@ export function isTimelineEventFilterActive(value: TimelineEventFilterValue): bo
   return Boolean(
     value.source.trim() ||
       value.topic.trim() ||
+      value.phase.trim() ||
+      value.severity.trim() ||
       value.wallet.trim() ||
       value.correlationId.trim()
   );
@@ -68,13 +74,30 @@ export function TimelineEventFilters({
         placeholder="state, event_bus…"
         value={value.source}
         onChange={(v) => set("source", v)}
+        options={SOURCE_OPTIONS}
       />
       <Field
         id={`${idPrefix}-topic`}
         label="Topic"
-        placeholder="job.claimed, session…"
+        placeholder="settlement.session_resolved"
         value={value.topic}
         onChange={(v) => set("topic", v)}
+        options={TOPIC_OPTIONS}
+      />
+      <Field
+        id={`${idPrefix}-phase`}
+        label="Phase"
+        placeholder="funding, settlement…"
+        value={value.phase}
+        onChange={(v) => set("phase", v)}
+        options={PHASE_OPTIONS}
+      />
+      <SelectField
+        id={`${idPrefix}-severity`}
+        label="Severity"
+        value={value.severity}
+        onChange={(v) => set("severity", v)}
+        options={SEVERITY_OPTIONS}
       />
       <Field
         id={`${idPrefix}-wallet`}
@@ -109,13 +132,17 @@ function Field({
   placeholder,
   value,
   onChange,
+  options,
 }: {
   id: string;
   label: string;
   placeholder: string;
   value: string;
   onChange: (next: string) => void;
+  options?: string[];
 }) {
+  const optionValues = options ?? [];
+  const listId = optionValues.length ? `${id}-options` : undefined;
   return (
     <label htmlFor={id} className="flex min-w-[150px] flex-1 flex-col gap-1">
       <span
@@ -129,18 +156,64 @@ function Field({
         type="text"
         spellCheck={false}
         autoComplete="off"
+        list={listId}
         placeholder={placeholder}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className="h-8 w-full rounded-[6px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-2 font-[family-name:var(--font-mono)] text-[12px] text-[var(--avy-ink)] placeholder:text-[var(--avy-muted)] focus:border-[color:rgba(30,102,66,0.3)] focus:outline focus:outline-2 focus:outline-offset-1 focus:outline-[color:rgba(30,102,66,0.26)]"
         style={{ letterSpacing: 0 }}
       />
+      {listId ? (
+        <datalist id={listId}>
+          {optionValues.map((option) => (
+            <option key={option} value={option} />
+          ))}
+        </datalist>
+      ) : null}
+    </label>
+  );
+}
+
+function SelectField({
+  id,
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (next: string) => void;
+  options: Array<{ label: string; value: string }>;
+}) {
+  return (
+    <label htmlFor={id} className="flex min-w-[132px] flex-1 flex-col gap-1">
+      <span
+        className="font-[family-name:var(--font-display)] text-[10px] font-extrabold uppercase text-[var(--avy-muted)]"
+        style={{ letterSpacing: "0.14em" }}
+      >
+        {label}
+      </span>
+      <select
+        id={id}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-8 w-full rounded-[6px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-2 font-[family-name:var(--font-mono)] text-[12px] text-[var(--avy-ink)] focus:border-[color:rgba(30,102,66,0.3)] focus:outline focus:outline-2 focus:outline-offset-1 focus:outline-[color:rgba(30,102,66,0.26)]"
+        style={{ letterSpacing: 0 }}
+      >
+        {options.map((option) => (
+          <option key={option.value || "any"} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
     </label>
   );
 }
 
 /**
- * Parse the four params from a URLSearchParams-compatible source. Used
+ * Parse the timeline filter params from a URLSearchParams-compatible source. Used
  * by both the runs/detail page and the sessions page so a refresh /
  * shared link reproduces the filtered view. Accepts Next.js'
  * `ReadonlyURLSearchParams` because that's what `useSearchParams()`
@@ -155,10 +228,12 @@ export function parseTimelineEventFilters(
 ): TimelineEventFilterValue {
   if (!params) return EMPTY_TIMELINE_EVENT_FILTERS;
   return {
-    source: params.get("source")?.trim() ?? "",
-    topic: params.get("topic")?.trim() ?? "",
-    wallet: params.get("wallet")?.trim() ?? "",
-    correlationId: params.get("correlationId")?.trim() ?? "",
+    source: readFirstParam(params, ["source", "sources"]),
+    topic: readFirstParam(params, ["topic", "topics"]),
+    phase: readFirstParam(params, ["phase", "phases"]),
+    severity: readFirstParam(params, ["severity", "severities"]),
+    wallet: readFirstParam(params, ["wallet", "eventWallet"]),
+    correlationId: readFirstParam(params, ["correlationId"]),
   };
 }
 
@@ -172,6 +247,8 @@ export function applyTimelineEventFiltersToParams(
   const fields: Array<keyof TimelineEventFilterValue> = [
     "source",
     "topic",
+    "phase",
+    "severity",
     "wallet",
     "correlationId",
   ];
@@ -182,3 +259,56 @@ export function applyTimelineEventFiltersToParams(
   }
   return params;
 }
+
+function readFirstParam(params: ReadableSearchParams, names: string[]): string {
+  for (const name of names) {
+    const value = params.get(name)?.trim();
+    if (value) return value.split(",")[0]?.trim() ?? "";
+  }
+  return "";
+}
+
+const SOURCE_OPTIONS = [
+  "state",
+  "verification",
+  "event_bus",
+  "lineage",
+  "schedule",
+  "chain",
+  "settlement",
+  "ingestion",
+  "system",
+];
+
+const PHASE_OPTIONS = [
+  "funding",
+  "claim",
+  "session",
+  "verification",
+  "settlement",
+  "dispute",
+  "lineage",
+  "schedule",
+  "ingestion",
+];
+
+const TOPIC_OPTIONS = [
+  "funding.claim_lock_recorded",
+  "escrow.job_funded",
+  "session.claimed",
+  "verification.submitted",
+  "verification.accepted",
+  "verification.rejected",
+  "settlement.session_resolved",
+  "settlement.session_rejected",
+  "dispute.opened",
+  "dispute.verdict_recorded",
+  "dispute.stake_released",
+];
+
+const SEVERITY_OPTIONS = [
+  { label: "Any", value: "" },
+  { label: "Info", value: "info" },
+  { label: "Warn", value: "warn" },
+  { label: "Error", value: "error" },
+];

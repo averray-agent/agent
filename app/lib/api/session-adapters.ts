@@ -355,6 +355,8 @@ export function mergeSessionTimeline(
         const data = asRecord(entry.data);
         const source = text(entry.source);
         const topic = text(entry.topic);
+        const phase = text(entry.phase);
+        const severity = text(entry.severity);
         const wallet = text(entry.wallet ?? data.wallet);
         const correlationId = text(entry.correlationId);
         return {
@@ -367,6 +369,8 @@ export function mergeSessionTimeline(
           tone: movementTone(entry.phase ?? entry.type),
           ...(source ? { source } : {}),
           ...(topic ? { topic } : {}),
+          ...(phase ? { phase } : {}),
+          ...(severity ? { severity } : {}),
           ...(wallet ? { wallet } : {}),
           ...(correlationId ? { correlationId } : {}),
         };

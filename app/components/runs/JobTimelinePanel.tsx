@@ -46,6 +46,8 @@ export function JobTimelinePanel({ jobId }: { jobId: string }) {
     () => ({
       sources: filters.source ? [filters.source] : undefined,
       topics: filters.topic ? [filters.topic] : undefined,
+      phases: filters.phase ? [filters.phase] : undefined,
+      severities: filters.severity ? [filters.severity] : undefined,
       wallet: filters.wallet || undefined,
       correlationId: filters.correlationId || undefined,
     }),
@@ -53,6 +55,11 @@ export function JobTimelinePanel({ jobId }: { jobId: string }) {
   );
   const request = useJobTimeline(jobId, apiFilters);
   const data = useMemo(() => buildJobTimeline(request.data), [request.data]);
+  const visibleTimeline = useMemo(
+    () => filterTimelineEntries(data.timeline, filters),
+    [data.timeline, filters]
+  );
+  const hiddenCount = data.timeline.length - visibleTimeline.length;
   const unauthenticated =
     request.error instanceof ApiError &&
     (request.error.status === 401 || request.error.status === 403);
@@ -93,6 +100,8 @@ export function JobTimelinePanel({ jobId }: { jobId: string }) {
         </div>
         <TimelineSummary
           data={data}
+          visibleCount={visibleTimeline.length}
+          filtersActive={filtersActive}
           loading={Boolean(request.isLoading)}
           unauthenticated={unauthenticated}
         />
@@ -105,7 +114,7 @@ export function JobTimelinePanel({ jobId }: { jobId: string }) {
       />
 
       <ul className="flex flex-col">
-        {data.timeline.length === 0 ? (
+        {visibleTimeline.length === 0 ? (
           <EmptyRow
             unauthenticated={unauthenticated}
             loading={Boolean(request.isLoading)}
@@ -115,15 +124,24 @@ export function JobTimelinePanel({ jobId }: { jobId: string }) {
             }
           />
         ) : (
-          data.timeline.map((entry, idx) => (
+          visibleTimeline.map((entry, idx) => (
             <TimelineRow
               key={entry.id}
               entry={entry}
-              isLast={idx === data.timeline.length - 1}
+              isLast={idx === visibleTimeline.length - 1}
             />
           ))
         )}
       </ul>
+
+      {filtersActive && hiddenCount > 0 ? (
+        <p
+          className="m-0 font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]"
+          style={{ letterSpacing: 0 }}
+        >
+          {hiddenCount} hidden by filter — clear filters to see the full timeline.
+        </p>
+      ) : null}
 
       {data.summary.eventBusGap ? (
         <p
@@ -139,10 +157,14 @@ export function JobTimelinePanel({ jobId }: { jobId: string }) {
 
 function TimelineSummary({
   data,
+  visibleCount,
+  filtersActive,
   loading,
   unauthenticated,
 }: {
   data: ReturnType<typeof buildJobTimeline>;
+  visibleCount: number;
+  filtersActive: boolean;
   loading: boolean;
   unauthenticated: boolean;
 }) {
@@ -168,6 +190,9 @@ function TimelineSummary({
   }
   const { summary, lineage } = data;
   const segments: string[] = [];
+  if (filtersActive) {
+    segments.push(`${visibleCount} shown`);
+  }
   if (summary.sessionCount > 0) {
     segments.push(
       `${summary.sessionCount} session${summary.sessionCount === 1 ? "" : "s"}`
@@ -350,6 +375,41 @@ function formatTimestamp(iso: string | undefined): string {
     second: "2-digit",
     hour12: false,
   }).format(t);
+}
+
+function filterTimelineEntries(
+  entries: TimelineEntry[],
+  filters: TimelineEventFilterValue
+): TimelineEntry[] {
+  const source = normalizeFilterText(filters.source);
+  const topic = normalizeFilterText(filters.topic);
+  const phase = normalizeFilterText(filters.phase);
+  const severity = normalizeFilterText(filters.severity);
+  const wallet = normalizeFilterText(filters.wallet);
+  const correlationId = normalizeFilterText(filters.correlationId);
+  if (!source && !topic && !phase && !severity && !wallet && !correlationId) {
+    return entries;
+  }
+  return entries.filter((entry) => {
+    if (source && normalizeFilterText(entry.source) !== source) return false;
+    if (topic && normalizeFilterText(entry.topic) !== topic) return false;
+    if (phase && normalizeFilterText(entry.phase) !== phase) return false;
+    if (severity && normalizeFilterText(entry.severity) !== severity) return false;
+    if (wallet && normalizeFilterText(entry.wallet).indexOf(wallet) === -1) {
+      return false;
+    }
+    if (
+      correlationId &&
+      normalizeFilterText(entry.correlationId) !== correlationId
+    ) {
+      return false;
+    }
+    return true;
+  });
+}
+
+function normalizeFilterText(value: unknown): string {
+  return String(value ?? "").trim().toLowerCase();
 }
 
 // Re-export the empty constant for callers that want to render a

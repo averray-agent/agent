@@ -49,6 +49,8 @@ export interface EscrowMovement {
    *  movements predate the timeline-event filter rail. */
   source?: string;
   topic?: string;
+  phase?: string;
+  severity?: string;
   wallet?: string;
   correlationId?: string;
 }
