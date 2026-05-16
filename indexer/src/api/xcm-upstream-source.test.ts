@@ -166,12 +166,46 @@ test("Subscan source normalizes numeric-string epoch timestamps", () => {
   });
 
   const outcome = adapter.normalizeSubscanEntry({
-    msg_hash: requestId,
+    message_topic: requestId,
     status: "success",
     block_timestamp: "1712345678"
   });
 
   assert.equal(outcome?.observedAt, "2024-04-05T19:34:38.000Z");
+});
+
+test("Subscan source accepts explicit SetTopic request-id fields", () => {
+  const adapter = new SubscanXcmSourceAdapter({
+    apiHost: "https://subscan.example",
+    apiKey: "test"
+  });
+
+  const outcome = adapter.normalizeSubscanEntry({
+    setTopic: requestId,
+    status: "success",
+    block_timestamp: "1712345678"
+  });
+
+  assert.equal(outcome?.requestId, requestId);
+  assert.equal(outcome?.source, "subscan_xcm_api");
+});
+
+test("Subscan source ignores uncorrelated message and extrinsic hashes", () => {
+  const adapter = new SubscanXcmSourceAdapter({
+    apiHost: "https://subscan.example",
+    apiKey: "test"
+  });
+
+  const outcome = adapter.normalizeSubscanEntry({
+    msg_hash: requestId,
+    message_hash: requestId,
+    extrinsic_hash: remoteRef,
+    hash: failureCode,
+    status: "success",
+    block_timestamp: "1712345678"
+  });
+
+  assert.equal(outcome, undefined);
 });
 
 test("native PAPI evidence rejects promoted ledger joins and mismatched topics", () => {

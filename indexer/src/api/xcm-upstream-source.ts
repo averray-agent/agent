@@ -350,6 +350,9 @@ type SubscanXcmRecord = Record<string, unknown>;
  * - Exact field names inside `data.list` are inferred from Subscan's common
  *   list conventions because the paid-plan payload could not be live-validated
  *   from this environment. Parsing is intentionally defensive.
+ * - Only rows carrying an explicit Averray request id / XCM SetTopic field are
+ *   published. Generic message, extrinsic, or record hashes are not local
+ *   request ids and are intentionally ignored.
  */
 export class SubscanXcmSourceAdapter implements XcmUpstreamSourceAdapter {
   type = "subscan_xcm";
@@ -426,10 +429,13 @@ export class SubscanXcmSourceAdapter implements XcmUpstreamSourceAdapter {
 
   normalizeSubscanEntry(entry: SubscanXcmRecord): PublishedOutcome | undefined {
     const requestId = this.pickString(entry, [
-      "msg_hash",
-      "message_hash",
-      "extrinsic_hash",
-      "hash"
+      "requestId",
+      "request_id",
+      "messageTopic",
+      "message_topic",
+      "setTopic",
+      "set_topic",
+      "topic"
     ]);
     if (!requestId || !/^0x[a-fA-F0-9]{64}$/u.test(requestId)) {
       return undefined;
