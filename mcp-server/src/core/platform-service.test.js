@@ -537,6 +537,22 @@ test("getJobTimeline stitches sessions, verification, events, and child lineage"
   assert.equal(claimedEvent.source, "state");
   assert.equal(claimedEvent.jobId, "parent-job-001");
   assert.equal(claimedEvent.sessionId, submitted.sessionId);
+  const claimFundingEvent = timeline.timeline.find((entry) => entry.topic === "funding.claim_lock_recorded");
+  assert.equal(claimFundingEvent.type, "event_bus");
+  assert.equal(claimFundingEvent.source, "settlement");
+  assert.equal(claimFundingEvent.phase, "funding");
+  assert.equal(claimFundingEvent.correlationId, submitted.sessionId);
+  assert.equal(claimFundingEvent.data.source, "local_claim_lock");
+  assert.equal(claimFundingEvent.data.asset, "DOT");
+  assert.equal(claimFundingEvent.data.totalClaimLock, 0);
+  assert.equal(claimFundingEvent.data.claimEconomicsWaived, true);
+  const settlementEvent = timeline.timeline.find((entry) => entry.topic === "settlement.session_resolved");
+  assert.equal(settlementEvent.type, "event_bus");
+  assert.equal(settlementEvent.source, "settlement");
+  assert.equal(settlementEvent.phase, "settlement");
+  assert.equal(settlementEvent.correlationId, submitted.sessionId);
+  assert.equal(settlementEvent.data.status, "resolved");
+  assert.equal(settlementEvent.data.reasonCode, "BENCHMARK_THRESHOLD_MET");
   const fundedEvent = timeline.timeline.find((entry) => entry.topic === "escrow.job_funded");
   assert.equal(fundedEvent.type, "event_bus");
   assert.equal(fundedEvent.source, "chain");
@@ -544,6 +560,41 @@ test("getJobTimeline stitches sessions, verification, events, and child lineage"
   assert.equal(fundedEvent.severity, "info");
   assert.equal(fundedEvent.correlationId, "parent-job-001");
   assert.equal(fundedEvent.data.txHash, "0xabc");
+});
+
+test("getJobTimeline folds disputed verification into the canonical dispute trace", async () => {
+  const eventBus = new EventBus();
+  const service = makePlatformService(undefined, eventBus);
+  const session = await service.claimJob(WALLET, "parent-job-001", "http", "job-timeline-dispute-claim");
+  const submitted = await service.submitWork(session.sessionId, "http", {
+    summary: "Timeline run needs review.",
+    output: "Human fallback requested.",
+    status: "complete"
+  });
+  await service.ingestVerification(submitted.sessionId, {
+    jobId: submitted.jobId,
+    handler: "benchmark",
+    handlerVersion: 1,
+    outcome: "disputed",
+    reasonCode: "HUMAN_REVIEW_REQUIRED"
+  });
+
+  const timeline = await service.getJobTimeline("parent-job-001", {
+    wallet: WALLET,
+    phases: ["dispute"],
+    limit: 25
+  });
+  const disputeEvent = timeline.timeline.find((entry) => entry.topic === "dispute.opened");
+  assert.equal(disputeEvent.type, "event_bus");
+  assert.equal(disputeEvent.source, "settlement");
+  assert.equal(disputeEvent.phase, "dispute");
+  assert.equal(disputeEvent.severity, "warn");
+  assert.equal(disputeEvent.jobId, submitted.jobId);
+  assert.equal(disputeEvent.sessionId, submitted.sessionId);
+  assert.equal(disputeEvent.correlationId, submitted.sessionId);
+  assert.match(disputeEvent.data.disputeId, /^dispute-[a-f0-9]{12}$/u);
+  assert.equal(disputeEvent.data.reasonCode, "HUMAN_REVIEW_REQUIRED");
+  assert.deepEqual(timeline.summary.eventFilters.phases, ["dispute"]);
 });
 
 test("getJobTimeline reads durable event log and applies event filters", async () => {

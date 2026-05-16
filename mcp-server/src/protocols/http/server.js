@@ -2277,6 +2277,7 @@ const server = createServer(async (request, response) => {
         id,
         disputeId: id,
         sessionId: dispute.sessionId,
+        jobId: session.jobId,
         chainJobId: session.chainJobId,
         verdict: resolution.verdict,
         workerPayout: resolution.workerPayout,
@@ -2312,13 +2313,22 @@ const server = createServer(async (request, response) => {
       }
       eventBus?.publish({
         id: `dispute-verdict-${id}-${Date.now()}`,
-        topic: "escrow.dispute_resolved",
+        topic: "dispute.verdict_recorded",
         wallet: dispute.claimant,
         wallets: [dispute.claimant, auth.wallet],
+        jobId: session.jobId,
         sessionId: dispute.sessionId,
         timestamp: receipt.decidedAt,
+        correlationId: dispute.sessionId,
+        txHash: receipt.txHash,
+        blockNumber: receipt.blockNumber,
+        source: "settlement",
+        phase: "dispute",
+        severity: resolution.verdict === "dismissed" ? "info" : "warn",
         data: {
           disputeId: id,
+          jobId: session.jobId,
+          chainJobId: session.chainJobId,
           openedAt: dispute.openedAt,
           windowEndsAt: dispute.windowEndsAt,
           slaSeconds: dispute.slaSeconds,
@@ -2380,10 +2390,13 @@ const server = createServer(async (request, response) => {
       if (dispute.release) {
         return respondWithMutationReceipt(response, idempotency, 200, dispute);
       }
+      const session = await service.resumeSession(dispute.sessionId).catch(() => undefined);
       const receipt = {
         id,
         disputeId: id,
         sessionId: dispute.sessionId,
+        jobId: session?.jobId,
+        chainJobId: session?.chainJobId,
         action: typeof payload?.action === "string" && payload.action.trim() ? payload.action.trim() : "release",
         amount: Number(payload?.amount ?? dispute.stakedAmount ?? 0),
         chainStatus: dispute.txHash ? "settled_by_verdict" : "local_only",
@@ -2394,13 +2407,21 @@ const server = createServer(async (request, response) => {
       await stateStore.upsertMutationReceipt?.("dispute_release", id, receipt);
       eventBus?.publish({
         id: `dispute-release-${id}-${Date.now()}`,
-        topic: "account.job_stake_released",
+        topic: "settlement.stake_release_recorded",
         wallet: dispute.claimant,
         wallets: [dispute.claimant, auth.wallet],
+        jobId: session?.jobId,
         sessionId: dispute.sessionId,
         timestamp: receipt.releasedAt,
+        correlationId: dispute.sessionId,
+        txHash: receipt.txHash,
+        source: "settlement",
+        phase: "settlement",
+        severity: "info",
         data: {
           disputeId: id,
+          jobId: session?.jobId,
+          chainJobId: session?.chainJobId,
           openedAt: dispute.openedAt,
           windowEndsAt: dispute.windowEndsAt,
           amount: receipt.amount,
