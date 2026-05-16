@@ -190,6 +190,23 @@ test("Subscan source accepts explicit SetTopic request-id fields", () => {
   assert.equal(outcome?.source, "subscan_xcm_api");
 });
 
+test("Subscan source preserves failure code for failed status variants", () => {
+  const adapter = new SubscanXcmSourceAdapter({
+    apiHost: "https://subscan.example",
+    apiKey: "test"
+  });
+
+  const outcome = adapter.normalizeSubscanEntry({
+    message_topic: requestId,
+    execution_status: "xcm_failed",
+    error_code: failureCode,
+    block_timestamp: "1712345678"
+  });
+
+  assert.equal(outcome?.status, "failed");
+  assert.equal(outcome?.failureCode, failureCode);
+});
+
 test("Subscan source ignores uncorrelated message and extrinsic hashes", () => {
   const adapter = new SubscanXcmSourceAdapter({
     apiHost: "https://subscan.example",
