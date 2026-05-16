@@ -317,7 +317,15 @@ function workerLoopEvidence({ wallet, sessionId, jobId }) {
       wallet,
       asset: "USDC",
       requiredRaw: "100000",
-      availableRaw: "100000"
+      availableRaw: "155000"
+    },
+    claimLiquidityReadiness: {
+      wallet,
+      asset: "USDC",
+      rewardRaw: "100000",
+      totalClaimLockRaw: "55000",
+      requiredRaw: "155000",
+      availableRaw: "155000"
     },
     preflightReadiness: {
       wallet,

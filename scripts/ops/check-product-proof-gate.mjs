@@ -195,6 +195,24 @@ function assertWorkerLoopCompletionEvidence(evidence, { apiBaseUrl }) {
     "worker-loop evidence liquidity must cover required reward"
   );
 
+  assert.equal(evidence.claimLiquidityReadiness?.wallet?.toLowerCase(), evidence.wallet.toLowerCase(), "worker-loop evidence claim liquidity wallet must match worker wallet");
+  assert.equal(evidence.claimLiquidityReadiness?.asset, REQUIRED_ESCROW_ASSET.symbol, "worker-loop evidence claim liquidity readiness must be USDC");
+  assert.equal(
+    evidence.claimLiquidityReadiness?.rewardRaw,
+    evidence.rewardReadiness?.rewardRaw,
+    "worker-loop evidence claim liquidity rewardRaw must match reward readiness"
+  );
+  assertRawAtLeast(
+    evidence.claimLiquidityReadiness?.requiredRaw,
+    evidence.rewardReadiness?.rewardRaw,
+    "worker-loop evidence claim liquidity requirement must include at least the reward"
+  );
+  assertRawAtLeast(
+    evidence.claimLiquidityReadiness?.availableRaw,
+    evidence.claimLiquidityReadiness?.requiredRaw,
+    "worker-loop evidence claim liquidity must cover reward plus claim lock"
+  );
+
   assert.equal(evidence.preflightReadiness?.jobId, evidence.jobId, "worker-loop evidence preflight jobId must match evidence jobId");
   assert.equal(String(evidence.preflightReadiness?.wallet ?? "").toLowerCase(), evidence.wallet.toLowerCase(), "worker-loop evidence preflight wallet must match worker wallet");
   assert.equal(evidence.preflightReadiness?.eligible, true, "worker-loop evidence requires eligible preflight");

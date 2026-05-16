@@ -257,7 +257,9 @@ RUN_SUBSCAN_XCM_VALIDATION=1 ./scripts/ops/check-release-readiness.sh testnet
   validation response is not `{ valid: true }`. The hosted worker-loop evidence
   must include both `validationReadiness` for the direct schema object and
   `invalidValidationReadiness` for a rejected `submission.output` wrapper with
-  `submitAttempted=false`. Flip this box after the hosted run-detail surface or
+  `submitAttempted=false`, plus `claimLiquidityReadiness` proving the worker's
+  USDC liquid balance covered reward plus preflight claim lock before claim.
+  Flip this box after the hosted run-detail surface or
   product-proof worker loop has been used to validate at least one
   structured-required job (one valid, one invalid) and the invalid attempt did
   not consume the session's submit budget. Verify with the regression tests:
