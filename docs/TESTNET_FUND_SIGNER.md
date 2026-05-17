@@ -166,13 +166,38 @@ sweep mechanism that retroactively credits a position.
 
 ### 3a. Use the in-repo script
 
+The helper supports two signing backends — pick the one that matches
+your deployment's `SIGNER_BACKEND`:
+
+- **`SIGNER_BACKEND=local`** (pre-Phase 3): raw `PRIVATE_KEY` env
+- **`SIGNER_BACKEND=kms`** (Phase 3 default after 2026-05-16):
+  `--use-kms` with `KMS_KEY_ID` + `AWS_REGION` env
+
+Both modes share the same `--dry-run` default. Dry-run is read-only,
+prints the encoded calldata, and exits without signing.
+
 ```bash
 cd /path/to/your/agent/clone
+```
 
-# Dry-run first (no key needed) — prints planned txs + preconditions
+#### Dry-run — works without a private key or KMS creds
+
+```bash
+# Read state for the canonical verifier address from deployments/<profile>.json:
 node scripts/ops/fund-signer-usdc-deposit.mjs --amount 10000000
 
-# Commit (requires PRIVATE_KEY env). One-line, key never enters shell history if cleared.
+# Read state for the KMS-derived address (one kms:GetPublicKey call, no kms:Sign):
+KMS_KEY_ID=arn:aws:kms:<region>:<account>:key/<id> AWS_REGION=<region> \
+  node scripts/ops/fund-signer-usdc-deposit.mjs --amount 10000000 --use-kms
+
+# Hard-code the signer address (audits without AWS creds):
+SIGNER_ADDRESS_OVERRIDE=0x31ad432dFe083B998c69B6dB88A984ec5207ab7F \
+  node scripts/ops/fund-signer-usdc-deposit.mjs --amount 10000000
+```
+
+#### Commit — raw key path (`SIGNER_BACKEND=local`)
+
+```bash
 PRIVATE_KEY=0x<deployer-key> node scripts/ops/fund-signer-usdc-deposit.mjs \
   --amount 10000000 --commit
 
@@ -180,12 +205,50 @@ PRIVATE_KEY=0x<deployer-key> node scripts/ops/fund-signer-usdc-deposit.mjs \
 fc -p
 ```
 
-The script:
-1. Verifies signer's USDC balance ≥ amount
-2. Calls `usdc.approve(agentAccountCore, amount)`
-3. Calls `agentAccountCore.deposit(usdc, amount)`
-4. Verifies `positions.liquid` increased by `amount`
-5. Exits non-zero on any precondition / postcondition failure
+#### Commit — KMS path (`SIGNER_BACKEND=kms`)
+
+This is the Phase 3 flow (post 2026-05-16 cutover, see
+[`docs/SECRETS_MIGRATION.md`](SECRETS_MIGRATION.md) §"Phase 3 — AWS
+KMS for the backend signer"). The KMS key has no exportable private
+material; the helper calls `kms:Sign` for each tx via the same
+`KmsSigner` ([`mcp-server/src/blockchain/kms-signer.js`](../mcp-server/src/blockchain/kms-signer.js))
+the runtime backend uses.
+
+```bash
+# IAM creds must be visible to the AWS SDK (env, ~/.aws/credentials, or
+# an attached role). The IAM principal needs kms:GetPublicKey + kms:Sign
+# on the key with SigningAlgorithm=ECDSA_SHA_256, MessageType=DIGEST.
+export KMS_KEY_ID=arn:aws:kms:<region>:<account>:key/<id>
+export AWS_REGION=<region>
+# Optional if not already in your environment:
+# export AWS_ACCESS_KEY_ID=...
+# export AWS_SECRET_ACCESS_KEY=...
+
+node scripts/ops/fund-signer-usdc-deposit.mjs \
+  --amount 10000000 --use-kms --commit
+```
+
+What happens under the hood (per
+[`mcp-server/src/blockchain/kms-signer.js`](../mcp-server/src/blockchain/kms-signer.js)):
+
+1. `KmsSigner` calls `kms:GetPublicKey` once and caches the
+   secp256k1 public point → derives the EVM address.
+2. For each of `approve` + `deposit`, ethers populates the unsigned
+   tx (nonce, gas, chainId), `KmsSigner.signTransaction` computes the
+   RLP unsigned hash, then calls `kms:Sign(MessageType=DIGEST,
+   SigningAlgorithm=ECDSA_SHA_256)`.
+3. The DER signature is parsed, `s` is normalised to the low half of
+   the group order (EIP-2), and the recovery byte is brute-forced
+   against the cached address.
+4. The signed RLP tx is broadcast normally; postcondition check runs
+   the same way as the raw-key path.
+
+Both modes:
+1. Verify signer's USDC balance ≥ amount
+2. Call `usdc.approve(agentAccountCore, amount)`
+3. Call `agentAccountCore.deposit(usdc, amount)`
+4. Verify `positions.liquid` increased by `amount`
+5. Exit non-zero on any precondition / postcondition failure
 
 ### 3b. Or use `cast` directly (no Node deps required)
 

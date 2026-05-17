@@ -36,12 +36,34 @@
  *   --dry-run     (default)   Reads everything, prints the planned
  *                             txs, exits without signing.
  *   --commit                  Actually sends the approve + deposit
- *                             transactions. Requires PRIVATE_KEY env.
+ *                             transactions. Requires PRIVATE_KEY env
+ *                             (or --use-kms, see below).
+ *   --use-kms                 Sign approve + deposit via the AWS KMS
+ *                             signer (Phase 3 path). When combined
+ *                             with --commit, signs each tx with one
+ *                             kms:Sign call; without --commit, just
+ *                             resolves the signer address from KMS so
+ *                             the dry-run reports state for the real
+ *                             KMS-derived wallet.
+ *                             Requires KMS_KEY_ID + AWS_REGION env
+ *                             plus IAM creds the AWS SDK can pick up
+ *                             (env, ~/.aws/credentials, or an attached
+ *                             role).
  *
  * Usage
  * -----
+ *   # Raw-key path (pre-Phase-3 / SIGNER_BACKEND=local):
  *   PRIVATE_KEY=0x... node scripts/ops/fund-signer-usdc-deposit.mjs \
  *     --amount 10000000 --commit
+ *
+ *   # KMS path (Phase 3 / SIGNER_BACKEND=kms):
+ *   KMS_KEY_ID=arn:aws:kms:eu-central-2:...:key/... AWS_REGION=eu-central-2 \
+ *     node scripts/ops/fund-signer-usdc-deposit.mjs \
+ *     --amount 10000000 --use-kms --commit
+ *
+ *   # KMS-aware dry-run (reads state for the real KMS address, no signing):
+ *   KMS_KEY_ID=... AWS_REGION=... \
+ *     node scripts/ops/fund-signer-usdc-deposit.mjs --amount 10000000 --use-kms
  *
  * `--amount` is in USDC base units (6 decimals). `10000000` = 10 USDC.
  *
@@ -49,13 +71,17 @@
  * -----
  * The script is read-only by default for safety. The dry-run output
  * includes the calldata so it can be cross-checked against an
- * independent encoder before committing.
+ * independent encoder before committing. With --use-kms, the only AWS
+ * API calls the dry-run path makes are kms:GetPublicKey (to derive the
+ * address) — no kms:Sign.
  */
 
 import { JsonRpcProvider, Wallet, Contract, Interface } from "ethers";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+
+import { KmsSigner } from "../../mcp-server/src/blockchain/kms-signer.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..", "..");
@@ -70,12 +96,13 @@ const AGENT_ACCOUNT_DEPOSIT_ABI = [
   "function positions(address account, address asset) view returns (uint256 liquid, uint256 reserved, uint256 strategyAllocated, uint256 collateralLocked, uint256 jobStakeLocked, uint256 debtOutstanding)"
 ];
 
-function parseArgs(argv) {
-  const args = { dryRun: true, amount: undefined, profile: "testnet" };
+export function parseArgs(argv) {
+  const args = { dryRun: true, amount: undefined, profile: "testnet", useKms: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--commit") args.dryRun = false;
     else if (arg === "--dry-run") args.dryRun = true;
+    else if (arg === "--use-kms") args.useKms = true;
     else if (arg === "--amount") args.amount = argv[++i];
     else if (arg === "--profile") args.profile = argv[++i];
     else if (arg === "--help" || arg === "-h") args.help = true;
@@ -93,10 +120,27 @@ function printUsage() {
       "                         e.g. --amount 10000000 for 10 USDC.",
       "  --profile <name>       deployments/<profile>.json. Default: testnet.",
       "  --dry-run              (default) Read-only; prints planned txs.",
-      "  --commit               Sends approve + deposit txs. Requires PRIVATE_KEY.",
+      "  --commit               Sends approve + deposit txs.",
+      "                         Requires PRIVATE_KEY env (unless --use-kms).",
+      "  --use-kms              Sign via AWS KMS instead of a local private key.",
+      "                         Resolves the signer address from KMS_KEY_ID.",
+      "                         Combine with --commit to actually send the txs;",
+      "                         on its own, runs a KMS-aware dry-run.",
       "",
       "Env:",
-      "  PRIVATE_KEY            0x-prefixed signer key. Required only with --commit."
+      "  PRIVATE_KEY                0x-prefixed signer key. Required for --commit",
+      "                             without --use-kms.",
+      "  KMS_KEY_ID                 AWS KMS key id, ARN, or alias. Required with",
+      "                             --use-kms.",
+      "  AWS_REGION                 AWS region the KMS key lives in. Required with",
+      "                             --use-kms.",
+      "  AWS_ACCESS_KEY_ID,         Standard AWS SDK credential discovery; supply",
+      "  AWS_SECRET_ACCESS_KEY      via env, ~/.aws/credentials, or an attached IAM",
+      "                             role. Needed only when --use-kms is in effect.",
+      "  SIGNER_ADDRESS_OVERRIDE    Force the signer address used by dry-run output",
+      "                             (debugging / KMS audits without AWS creds).",
+      "                             Ignored when --commit or --use-kms supply their",
+      "                             own address from the key/KMS."
     ].join("\n")
   );
 }
@@ -137,28 +181,61 @@ async function main() {
 
   const provider = new JsonRpcProvider(rpcUrl);
 
-  // Resolve the signer address from PRIVATE_KEY when committing.
-  // In dry-run mode, accept --signer override or fall back to the
-  // deployment file's `verifier` field, which is the canonical signer
-  // wallet address on testnet.
-  let signerAddress = String(process.env.SIGNER_ADDRESS_OVERRIDE ?? deployments.verifier ?? "").trim();
-  let wallet;
-  if (!args.dryRun) {
+  // Resolve the signer address. Precedence:
+  //   1. --use-kms  -> kms:GetPublicKey via KmsSigner (Phase 3 path).
+  //   2. --commit (without --use-kms) -> derive from PRIVATE_KEY env.
+  //   3. dry-run    -> SIGNER_ADDRESS_OVERRIDE, then deployments.verifier.
+  let signerAddress = "";
+  let signerBackend = "deployments.verifier";
+  let wallet = null;
+  let kmsSigner = null;
+
+  if (args.useKms) {
+    const keyId = String(process.env.KMS_KEY_ID ?? "").trim();
+    const region = String(process.env.AWS_REGION ?? "").trim();
+    if (!keyId) {
+      console.error("--use-kms requires KMS_KEY_ID env (key id, ARN, or alias).");
+      process.exitCode = 1;
+      return;
+    }
+    if (!region) {
+      console.error("--use-kms requires AWS_REGION env (the region the KMS key lives in).");
+      process.exitCode = 1;
+      return;
+    }
+    kmsSigner = new KmsSigner({ keyId, region, provider });
+    try {
+      signerAddress = await kmsSigner.getAddress();
+    } catch (error) {
+      console.error(`KMS GetPublicKey failed: ${error?.message ?? error}. Confirm IAM creds + KMS_KEY_ID.`);
+      process.exitCode = 1;
+      return;
+    }
+    signerBackend = "kms";
+  } else if (!args.dryRun) {
     const privateKey = String(process.env.PRIVATE_KEY ?? "").trim();
     if (!/^0x[a-fA-F0-9]{64}$/u.test(privateKey)) {
-      console.error("PRIVATE_KEY env (0x-prefixed 32-byte hex) is required with --commit.");
+      console.error("PRIVATE_KEY env (0x-prefixed 32-byte hex) is required with --commit. Use --use-kms for KMS-backed signers.");
       process.exitCode = 1;
       return;
     }
     wallet = new Wallet(privateKey, provider);
     signerAddress = wallet.address;
+    signerBackend = "private-key";
+  } else {
+    signerAddress = String(process.env.SIGNER_ADDRESS_OVERRIDE ?? deployments.verifier ?? "").trim();
+    signerBackend = process.env.SIGNER_ADDRESS_OVERRIDE ? "override" : "deployments.verifier";
   }
 
   if (!/^0x[a-fA-F0-9]{40}$/u.test(signerAddress)) {
-    console.error("Could not resolve signer address. Set SIGNER_ADDRESS_OVERRIDE or use --commit with PRIVATE_KEY.");
+    console.error("Could not resolve signer address. Set SIGNER_ADDRESS_OVERRIDE for dry-run, or pass --commit + PRIVATE_KEY, or --use-kms + KMS_KEY_ID/AWS_REGION.");
     process.exitCode = 1;
     return;
   }
+
+  const modeLabel = args.dryRun
+    ? (args.useKms ? "dry-run (kms-aware)" : "dry-run")
+    : (args.useKms ? "commit (kms)" : "commit");
 
   console.log(`# fund-signer-usdc-deposit`);
   console.log(`profile:           ${args.profile}`);
@@ -166,9 +243,10 @@ async function main() {
   console.log(`usdc:              ${usdcAddress}`);
   console.log(`agentAccountCore:  ${agentAccountAddress}`);
   console.log(`signer:            ${signerAddress}`);
+  console.log(`signer backend:    ${signerBackend}`);
   console.log(`amount (base):     ${amountWei.toString()}`);
   console.log(`amount (USDC):     ${formatUsdc(amountWei)}`);
-  console.log(`mode:              ${args.dryRun ? "dry-run" : "commit"}`);
+  console.log(`mode:              ${modeLabel}`);
   console.log("");
 
   const usdc = new Contract(usdcAddress, ERC20_READ_ABI, provider);
@@ -215,13 +293,17 @@ async function main() {
   console.log("");
 
   if (args.dryRun) {
-    console.log("Dry-run only. Re-run with --commit (and PRIVATE_KEY env) to send.");
+    const resumeHint = args.useKms
+      ? "Re-run with --use-kms --commit to send."
+      : "Re-run with --commit (and PRIVATE_KEY env) to send.";
+    console.log("Dry-run only. " + resumeHint);
     return;
   }
 
-  // Commit path.
-  const usdcWriter = new Contract(usdcAddress, ERC20_APPROVE_ABI, wallet);
-  const agentWriter = new Contract(agentAccountAddress, AGENT_ACCOUNT_DEPOSIT_ABI, wallet);
+  // Commit path. Use whichever signer the caller selected (--use-kms or PRIVATE_KEY).
+  const signer = args.useKms ? kmsSigner : wallet;
+  const usdcWriter = new Contract(usdcAddress, ERC20_APPROVE_ABI, signer);
+  const agentWriter = new Contract(agentAccountAddress, AGENT_ACCOUNT_DEPOSIT_ABI, signer);
 
   console.log(`## Sending`);
   console.log(`approve…`);
@@ -266,7 +348,10 @@ function formatUsdc(baseUnits) {
   return fractionText ? `${whole}.${fractionText}` : whole.toString();
 }
 
-main().catch((error) => {
-  console.error(`fund-signer-usdc-deposit failed: ${error?.stack ?? error?.message ?? error}`);
-  process.exitCode = 1;
-});
+// Only run main() when invoked as a CLI — not when imported (e.g. by tests).
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((error) => {
+    console.error(`fund-signer-usdc-deposit failed: ${error?.stack ?? error?.message ?? error}`);
+    process.exitCode = 1;
+  });
+}
