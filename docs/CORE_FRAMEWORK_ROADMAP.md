@@ -44,6 +44,9 @@ What the framework already does well:
 - the HTTP layer exposes enough surface area to support an operator console
 - the SDK/client surface covers the first external integration path
 - job/session event traces persist through memory and Redis state stores
+- the testnet backend verifier signer has moved to AWS KMS, the legacy raw-key
+  verifier has been revoked on-chain, and the KMS signer funding path has an
+  operator runbook plus `--use-kms` helper
 
 What is still thin:
 
@@ -57,7 +60,8 @@ What is still thin:
 - native XCM/vDOT remains gated on real evidence capture, not implementation
   scaffolding alone
 - launch operations still have open proof items: backup restore drill, pauser
-  rehearsal, self-report delivery, and secrets cutover stability
+  rehearsal, self-report delivery, Phase 4 JWT hardening, KMS signer monitoring,
+  and mainnet custody readiness
 
 ---
 
@@ -559,15 +563,34 @@ surface:
 3. finish dispute/arbitration launch wiring
 4. capture the native XCM deposit, withdraw, and failure evidence pack
 5. add visible timeline filters to the operator app
-6. continue Phase 2+ secrets cleanup and signer custody hardening
+6. continue Phase 4 JWT hardening, KMS signer monitoring, and mainnet custody
+   readiness
 
-Completed live proof: the hosted worker-loop product-proof evidence gate passed
-in Deploy Production run `25988470399` on 2026-05-17 with
-`smoke_check_product_proof_gate=1` and `product_proof_require_worker_loop=1`.
-The evidence covered direct-object validation, rejected `submission.output`
-wrapper validation, configured KMS signer funding, claim, submit, verifier
-approval, resolved session state, badge/profile lookup, and the final gate over
-`/srv/agent-stack/product-proof-worker-loop-evidence.json`.
+Completed or reconciled since the audit:
+
+- The hosted worker-loop product-proof evidence gate passed in Deploy
+  Production run `25988470399` on 2026-05-17 with
+  `smoke_check_product_proof_gate=1` and
+  `product_proof_require_worker_loop=1`. The evidence covered direct-object
+  validation, rejected `submission.output` wrapper validation, configured KMS
+  signer funding, claim, submit, verifier approval, resolved session state,
+  badge/profile lookup, and the final gate over
+  `/srv/agent-stack/product-proof-worker-loop-evidence.json`.
+- The KMS signer funding workflow now has a `--use-kms` path and updated
+  operator runbook (`scripts/ops/fund-signer-usdc-deposit.mjs`,
+  `docs/TESTNET_FUND_SIGNER.md`), so hosted product-proof funding no longer
+  depends on an exportable backend signer key.
+- Phase 3 backend-signer custody is complete for testnet: production runs with
+  `SIGNER_BACKEND=kms`, the KMS-derived address
+  `0x31ad432dFe083B998c69B6dB88A984ec5207ab7F` is authorized, and the retired
+  raw-key verifier `0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519` has been
+  revoked on-chain.
+- The first Phase 4B JWT hardening design pass has landed, covering KMS-signed
+  access tokens, opaque refresh-token replay rules, and key-rotation
+  expectations. Implementation/live proof remains in the queue above.
+- XCM publisher hardening advanced with required upstream failure codes and a
+  stale replay guard. The remaining XCM launch item is still live evidence for
+  native deposit/withdraw/failure paths, not the basic failure-code plumbing.
 
 ---
 
