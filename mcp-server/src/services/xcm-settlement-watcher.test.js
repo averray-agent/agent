@@ -268,6 +268,53 @@ test("observeOutcome rejects missing or non-terminal statuses before storing", a
   assert.equal(events.length, 0);
 });
 
+test("observeOutcome rejects failed observations without failureCode before storing", async () => {
+  const stateStore = new MemoryStateStore();
+  const eventBus = new EventBus();
+  const events = [];
+  eventBus.subscribe({ topics: ["xcm.outcome_observed"] }, (event) => events.push(event));
+  const watcher = new XcmSettlementWatcherService(
+    { finalizeXcmRequest: async () => ({}) },
+    stateStore,
+    eventBus,
+    { enabled: false }
+  );
+
+  await assert.rejects(
+    () => watcher.observeOutcome(REQUEST_ID, {
+      status: "failed"
+    }),
+    /failed observations must include failureCode/u
+  );
+  await assert.rejects(
+    () => watcher.observeOutcome(REQUEST_ID, {
+      status: "failed",
+      failureCode: "   "
+    }),
+    /failed observations must include failureCode/u
+  );
+
+  assert.equal(await stateStore.getXcmObservation(REQUEST_ID), undefined);
+  assert.equal(events.length, 0);
+});
+
+test("observeOutcome trims failed observation failureCode", async () => {
+  const stateStore = new MemoryStateStore();
+  const watcher = new XcmSettlementWatcherService(
+    { finalizeXcmRequest: async () => ({}) },
+    stateStore,
+    undefined,
+    { enabled: false }
+  );
+
+  const observation = await watcher.observeOutcome(REQUEST_ID, {
+    status: "failed",
+    failureCode: " XCM_FAILED "
+  });
+
+  assert.equal(observation.failureCode, "XCM_FAILED");
+});
+
 test("observeOutcome rejects invalid observedAt before storing", async () => {
   const stateStore = new MemoryStateStore();
   const watcher = new XcmSettlementWatcherService(

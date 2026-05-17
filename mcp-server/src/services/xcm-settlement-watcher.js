@@ -57,13 +57,14 @@ export class XcmSettlementWatcherService {
 
   async observeOutcome(requestId, outcome = {}) {
     const normalizedRequestId = this.requireRequestId(requestId);
+    const status = normalizeObservationStatus(outcome.status);
     const incoming = {
       requestId: normalizedRequestId,
-      status: normalizeObservationStatus(outcome.status),
+      status,
       settledAssets: normalizeObservationAmount(outcome.settledAssets, "settledAssets"),
       settledShares: normalizeObservationAmount(outcome.settledShares, "settledShares"),
       remoteRef: outcome.remoteRef,
-      failureCode: outcome.failureCode,
+      failureCode: normalizeObservationFailureCode(outcome.failureCode, status),
       source: typeof outcome.source === "string" && outcome.source.trim() ? outcome.source.trim() : "observer",
       observedAt: normalizeObservationObservedAt(outcome.observedAt),
       processed: false
@@ -261,6 +262,17 @@ function normalizeObservationAmount(value, label) {
     throw new ValidationError(`${label} must fit uint256.`);
   }
   return parsed.toString();
+}
+
+function normalizeObservationFailureCode(value, status) {
+  const failureCode = typeof value === "string" && value.trim() ? value.trim() : undefined;
+  if (status === "failed" && !failureCode) {
+    throw new ValidationError("XCM failed observations must include failureCode.");
+  }
+  if (value !== undefined && value !== null && value !== "" && typeof value !== "string") {
+    throw new ValidationError("failureCode must be a non-empty string when provided.");
+  }
+  return failureCode;
 }
 
 function normalizeObservationObservedAt(value) {
