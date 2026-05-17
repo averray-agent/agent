@@ -5,9 +5,10 @@ Pre-written policy documents ready to paste into the AWS console (or
 file uses `<placeholder>` tokens for the values that depend on
 account/region/key creation order.
 
-| File                                  | Attached to role              | Allows                                                                      | Explicitly denies                                                  |
-| ------------------------------------- | ----------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| `averray-signer-prod-role.json`       | `averray-signer-prod-role`    | `kms:Sign` (ECDSA_SHA_256, DIGEST mode only) + `kms:GetPublicKey`           | `kms:ScheduleKeyDeletion`, `DisableKey`, `PutKeyPolicy`, `CreateGrant`, `ReplicateKey`, `UpdatePrimaryRegion` |
+| File                                       | Attached to role / user                  | Allows                                                                      | Explicitly denies                                                  |
+| ------------------------------------------ | ---------------------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `averray-signer-prod-role.json`            | `averray-signer-prod-role` (blockchain)  | `kms:Sign` (ECDSA_SHA_256, DIGEST mode only) + `kms:GetPublicKey`           | `kms:ScheduleKeyDeletion`, `DisableKey`, `PutKeyPolicy`, `CreateGrant`, `ReplicateKey`, `UpdatePrimaryRegion` |
+| `averray-jwt-signer-prod-role.json`        | `averray-jwt-signer-testnet` (auth JWTs) | `kms:Sign` (ECDSA_SHA_256, DIGEST mode only) + `kms:GetPublicKey` on the **JWT** key | same as above (Resource: `*` — defense-in-depth against credential reuse against any other key) |
 
 ## Substituting placeholders
 
@@ -26,6 +27,12 @@ aws iam create-policy \
   --policy-document file:///tmp/averray-signer-prod-role.rendered.json \
   --description "Phase 3a — KMS sign-only permissions for the backend signer role"
 ```
+
+For the **JWT** signer policy (`averray-jwt-signer-prod-role.json`), the
+placeholder is a single token `<JWT_KEY_ID_PLACEHOLDER>` (the AWS account and
+region are hard-coded — same account/region as the blockchain signer, distinct
+key). See `docs/SECRETS_MIGRATION.md` §"PR 4b.3 operator runbook" for the full
+provisioning sequence (key creation, IAM user, 1Password item, verification).
 
 ## Why the deny statement is constrained to this role
 

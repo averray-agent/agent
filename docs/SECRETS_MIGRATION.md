@@ -2418,6 +2418,10 @@ the secret ever leaves the operator's machine.
 
 ### 4b. Asymmetric JWT signing via KMS
 
+**Design doc**: `docs/PHASE_4B_KMS_JWT_PLAN.md`. Treat that document
+as the source of truth for the 6-PR migration; this section captures
+the operator-facing runbooks that bolt on at each PR boundary.
+
 **The architectural upgrade**: today `AUTH_JWT_SECRETS` is an HMAC
 secret stored in the vault and on every backend instance. A vault
 breach OR a backend env breach means an attacker can mint admin
@@ -2457,6 +2461,143 @@ hardening for the HMAC path is:
 - Documented two-key rotation window with old-key tolerance period
 - Refresh tokens are opaque random values, hashed server-side
 - All flagged as residual risk in the sign-off bar
+
+### PR 4b.3 operator runbook — provision JWT KMS key + IAM + 1Password
+
+**When**: after PR 4b.3 lands on `main` (which ships the IAM policy
+template, the pre-flight script, the env-template entries — commented
+out pending this runbook — and the secrets-inventory rows).
+
+**Why**: PR 4b.3 only ships the *code side* of the provisioning step.
+The actual AWS console work + 1Password item creation happens here, in
+parallel. Once both are done, PR 4b.4 can land the dispatcher and
+PR 4b.6 can flip `JWT_BACKEND=kms`.
+
+**Prerequisites**:
+- AWS CLI authenticated as a principal that can create KMS keys and
+  IAM users in account `079209845430` (the Phase 3 blockchain signer
+  account — we deliberately reuse it; key separation comes from
+  different keys, not different accounts; see design doc §3).
+- 1Password CLI (`op`) signed in as a human operator (NOT the
+  `op-token-prod-vps-backend` service-account token — that token
+  cannot WRITE to `prod-backend`).
+- Local shell. NEVER run these on the VPS — the secret access key
+  must touch only this terminal and 1Password.
+
+**Procedure** (run in order; do not skip steps):
+
+```bash
+# 1. Create the KMS key (single-region testnet — multi-region is a
+#    mainnet-only decision per design doc §3).
+aws kms create-key \
+  --key-spec ECC_NIST_P256 \
+  --key-usage SIGN_VERIFY \
+  --description "Averray JWT signing key — Phase 4b"
+# Note the returned KeyId; export it for the next steps:
+export JWT_KEY_ID=<id-from-above>
+
+# 2. Create alias (for ops convenience; the env var uses the full ARN,
+#    not alias — see design doc §3 "alias retargeting" footgun).
+aws kms create-alias \
+  --alias-name alias/averray-jwt-signer-testnet \
+  --target-key-id "$JWT_KEY_ID"
+
+# 3. Get the full ARN (this is what goes in the AWS_JWT_KEY_ID env var).
+export JWT_KEY_ARN=$(aws kms describe-key --key-id "$JWT_KEY_ID" --query KeyMetadata.Arn --output text)
+echo "$JWT_KEY_ARN"
+# Expect: arn:aws:kms:eu-central-2:079209845430:key/<uuid>
+
+# 4. Substitute the placeholder in the IAM policy file. The placeholder
+#    token is the literal string <JWT_KEY_ID_PLACEHOLDER> (see
+#    deploy/iam-policies/averray-jwt-signer-prod-role.json).
+sed -i.bak "s|<JWT_KEY_ID_PLACEHOLDER>|${JWT_KEY_ID}|g" \
+  deploy/iam-policies/averray-jwt-signer-prod-role.json
+# (Either commit the substituted policy in a follow-up PR or apply
+#  inline via the `aws iam` call in step 6, then restore the placeholder
+#  with `mv deploy/iam-policies/averray-jwt-signer-prod-role.json.bak ...`
+#  so the template in the repo stays parameterized.)
+
+# 5. Create the IAM user + access key for the JWT signer principal.
+#    Distinct from the blockchain signer user — different name, different
+#    AccessKeyId, different rotation cadence (design doc §3).
+aws iam create-user --user-name averray-jwt-signer-testnet
+aws iam create-access-key --user-name averray-jwt-signer-testnet
+# Note the AccessKeyId and SecretAccessKey returned — paste them into
+# the 1Password item in step 8. Do NOT echo them to the terminal a
+# second time; do NOT save to disk; do NOT paste into Slack/email.
+
+# 6. Attach the (substituted) policy as an inline user policy.
+aws iam put-user-policy \
+  --user-name averray-jwt-signer-testnet \
+  --policy-name averray-jwt-signer-prod-role \
+  --policy-document file://deploy/iam-policies/averray-jwt-signer-prod-role.json
+
+# 7. Fetch the public key and compute the PEM + fingerprint.
+aws kms get-public-key --key-id "$JWT_KEY_ARN" --output text --query PublicKey \
+  | base64 -d > /tmp/jwt-pubkey.der
+# Sanity check the DER parses:
+openssl asn1parse -inform der -in /tmp/jwt-pubkey.der > /dev/null
+# PEM-wrap the SPKI:
+openssl pkey -pubin -inform DER -outform PEM -in /tmp/jwt-pubkey.der > /tmp/jwt-pubkey.pem
+cat /tmp/jwt-pubkey.pem
+# Compute the SHA-256 fingerprint of the SPKI DER bytes (this is the
+# audit-trail anchor — see deploy/secrets-inventory.md row
+# JWT_PUBLIC_KEY_FINGERPRINT):
+export JWT_PUBKEY_FINGERPRINT=$(shasum -a 256 /tmp/jwt-pubkey.der | awk '{print "sha256:" $1}')
+echo "$JWT_PUBKEY_FINGERPRINT"
+
+# 8. Create the 1Password item in the prod-backend vault.
+op item create \
+  --vault prod-backend \
+  --category password \
+  --title aws-jwt-signer-testnet \
+  "access-key-id[password]=<paste-AccessKeyId-from-step-5>" \
+  "secret-access-key[password]=<paste-SecretAccessKey-from-step-5>" \
+  "aws-region=eu-central-2" \
+  "kms-key-id=$JWT_KEY_ARN" \
+  "public-key-pem=$(cat /tmp/jwt-pubkey.pem)" \
+  "public-key-fingerprint=$JWT_PUBKEY_FINGERPRINT"
+
+# 9. Verify end-to-end with this PR's pre-flight script. Render the
+#    six env vars from 1Password and run the verifier (4 checks).
+cd <repo-root>
+export AWS_JWT_ACCESS_KEY_ID=$(op read 'op://prod-backend/aws-jwt-signer-testnet/access-key-id')
+export AWS_JWT_SECRET_ACCESS_KEY=$(op read 'op://prod-backend/aws-jwt-signer-testnet/secret-access-key')
+export AWS_JWT_REGION=$(op read 'op://prod-backend/aws-jwt-signer-testnet/aws-region')
+export AWS_JWT_KEY_ID=$(op read 'op://prod-backend/aws-jwt-signer-testnet/kms-key-id')
+export JWT_PUBLIC_KEY_PEM=$(op read 'op://prod-backend/aws-jwt-signer-testnet/public-key-pem')
+export JWT_PUBLIC_KEY_FINGERPRINT=$(op read 'op://prod-backend/aws-jwt-signer-testnet/public-key-fingerprint')
+node scripts/ops/verify-jwt-kms-signer.mjs
+# Expect: ALL FOUR TESTS PASSED, with the SPKI fingerprint matching
+# the value just placed in 1Password.
+unset AWS_JWT_ACCESS_KEY_ID AWS_JWT_SECRET_ACCESS_KEY
+
+# 10. Securely wipe the temporary files from step 7 (never check these
+#     into a backup, dropbox, or chat).
+rm -f /tmp/jwt-pubkey.der /tmp/jwt-pubkey.pem
+```
+
+**After this runbook completes**, the 1Password item exists and
+`verify-jwt-kms-signer.mjs` passes against the live key. The remaining
+step is to uncomment the six env-template entries in
+`deploy/backend.env.template` (currently parked as prose-form `# TODO`
+markers; the comment in that section documents how to substitute the
+canonical 1Password reference URIs). That uncommenting can happen in
+a small follow-up PR alongside PR 4b.4, or as a one-line operator
+commit immediately after this runbook — whichever fits the next
+deploy window.
+
+**Rollback** (if the verifier fails or the AWS quota check rejects key
+creation):
+- `aws kms schedule-key-deletion --key-id "$JWT_KEY_ID" --pending-window-in-days 30`
+- `aws iam delete-user-policy --user-name averray-jwt-signer-testnet --policy-name averray-jwt-signer-prod-role`
+- `aws iam delete-access-key --user-name averray-jwt-signer-testnet --access-key-id <AKID>`
+- `aws iam delete-user --user-name averray-jwt-signer-testnet`
+- `op item delete aws-jwt-signer-testnet --vault prod-backend`
+- Restore the IAM policy placeholder: `git checkout deploy/iam-policies/averray-jwt-signer-prod-role.json`
+
+The repo state goes back to "PR 4b.3 has landed but no AWS resources
+exist yet" — backend keeps signing with HMAC; nothing breaks.
 
 ### 4c. GitHub Actions hardening (beyond Phase 2)
 

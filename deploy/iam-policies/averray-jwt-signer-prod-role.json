@@ -1,0 +1,41 @@
+{
+  "_comment": "IAM permissions policy for averray-jwt-signer-prod-role. Phase 4b per docs/PHASE_4B_KMS_JWT_PLAN.md §3.",
+  "_comment_2": "Replace <JWT_KEY_ID_PLACEHOLDER> with the KeyId returned by `aws kms create-key` for the new ECC_NIST_P256 JWT signing key. The full provisioning runbook (`sed` substitution + `aws iam put-user-policy`) lives in docs/SECRETS_MIGRATION.md §'PR 4b.3 operator runbook'.",
+  "_comment_3": "Single-region testnet by design — the JWT key is single-region; multi-region is deferred to mainnet per design doc §3. Account ID and region are hard-coded to match the Phase 3 blockchain signer key (same AWS account 079209845430, same eu-central-2 region) so ops sees a single set of credentials and a single CloudTrail surface; the keys themselves are SEPARATE so a compromise of one signer cannot sign on the other.",
+  "_comment_4": "Sign + GetPublicKey are intentionally separate statements. kms:SigningAlgorithm and kms:MessageType condition keys apply to Sign/Verify only, NOT GetPublicKey — combining them would implicitly deny GetPublicKey.",
+  "_comment_5": "The DenyKeyMaterialEscape statement defends against signer-principal compromise only. Admin-path protection (root, IAM admins) requires KMS key policy + SCPs + permission boundaries + CloudTrail alarms, NOT this user's permissions policy. The Resource is intentionally `*` for the deny — we want to refuse these actions on every key, not just this one, in case the credential is ever used against a different key.",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowGetPublicKey",
+      "Effect": "Allow",
+      "Action": "kms:GetPublicKey",
+      "Resource": "arn:aws:kms:eu-central-2:079209845430:key/<JWT_KEY_ID_PLACEHOLDER>"
+    },
+    {
+      "Sid": "AllowSignWithEcdsaSha256",
+      "Effect": "Allow",
+      "Action": "kms:Sign",
+      "Resource": "arn:aws:kms:eu-central-2:079209845430:key/<JWT_KEY_ID_PLACEHOLDER>",
+      "Condition": {
+        "StringEquals": {
+          "kms:SigningAlgorithm": "ECDSA_SHA_256",
+          "kms:MessageType":      "DIGEST"
+        }
+      }
+    },
+    {
+      "Sid": "DenyKeyMaterialEscape",
+      "Effect": "Deny",
+      "Action": [
+        "kms:ScheduleKeyDeletion",
+        "kms:DisableKey",
+        "kms:PutKeyPolicy",
+        "kms:CreateGrant",
+        "kms:ReplicateKey",
+        "kms:UpdatePrimaryRegion"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
