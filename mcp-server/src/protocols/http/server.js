@@ -86,7 +86,7 @@ import {
 import { ingestStandardsSpecs, parseSpecs as parseStandardsSpecs } from "../../jobs/ingest-standards-specs.js";
 import { ingestWikipediaMaintenance, parseCategories } from "../../jobs/ingest-wikipedia-maintenance.js";
 import { buildPublicJobsResponse } from "./jobs-response.js";
-import { makePolicy } from "../../core/builtin-policies.js";
+import { OPERATOR_SIGNERS, makePolicy } from "../../core/builtin-policies.js";
 
 const {
   platformService: service,
