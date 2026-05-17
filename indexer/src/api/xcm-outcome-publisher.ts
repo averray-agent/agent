@@ -13,6 +13,7 @@ import {
   normalizeObservedAtIso,
   type OutcomeCursor
 } from "./xcm-outcome-cursor";
+import { normalizeAdvancingNextCursor } from "./xcm-feed-cursor";
 import { buildUpsertExternalOutcomeSql } from "./xcm-outcome-publisher-sql";
 
 const DEFAULT_SCOPE = "xcm-outcome-publisher";
@@ -272,6 +273,11 @@ export class XcmOutcomePublisherService {
         limit: this.batchSize
       });
       const items = Array.isArray(payload?.items) ? payload.items : [];
+      const nextCursor = normalizeAdvancingNextCursor(
+        payload?.nextCursor,
+        items.length,
+        "XCM outcome publisher source"
+      );
       let observedCount = 0;
 
       for (const outcome of items) {
@@ -280,9 +286,7 @@ export class XcmOutcomePublisherService {
       }
 
       await this.setState({
-        cursor: typeof payload?.nextCursor === "string" && payload.nextCursor.trim()
-          ? payload.nextCursor.trim()
-          : state.cursor,
+        cursor: nextCursor ?? state.cursor,
         lastObservedCount: observedCount,
         lastSyncedAt: new Date().toISOString(),
         lastError: undefined
@@ -290,9 +294,7 @@ export class XcmOutcomePublisherService {
 
       return {
         observedCount,
-        cursor: typeof payload?.nextCursor === "string" && payload.nextCursor.trim()
-          ? payload.nextCursor.trim()
-          : state.cursor
+        cursor: nextCursor ?? state.cursor
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : "xcm_outcome_publisher_failed";

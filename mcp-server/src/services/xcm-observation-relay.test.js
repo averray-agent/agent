@@ -100,7 +100,8 @@ test("pollOnce preserves exact uint256 settlement amounts from observer feed", a
                 settledAssets: "9007199254740993",
                 settledShares: "18446744073709551616"
               }
-            ]
+            ],
+            nextCursor: "cursor-1"
           };
         }
       })
@@ -135,7 +136,8 @@ test("pollOnce rejects unsafe numeric settlement amounts from observer feed", as
                 status: "succeeded",
                 settledAssets: Number.MAX_SAFE_INTEGER + 2
               }
-            ]
+            ],
+            nextCursor: "cursor-1"
           };
         }
       }),
@@ -189,7 +191,8 @@ test("pollOnce rejects non-terminal statuses from the observer feed", async () =
                 requestId: REQUEST_ID,
                 status: "pending"
               }
-            ]
+            ],
+            nextCursor: "cursor-1"
           };
         }
       }),
@@ -219,7 +222,8 @@ test("pollOnce rejects numeric non-terminal statuses from the observer feed", as
                 requestId: REQUEST_ID,
                 status: 1
               }
-            ]
+            ],
+            nextCursor: "cursor-1"
           };
         }
       }),
@@ -253,7 +257,8 @@ test("pollOnce rejects failed observer outcomes without failureCode", async () =
                 requestId: REQUEST_ID,
                 status: "failed"
               }
-            ]
+            ],
+            nextCursor: "cursor-1"
           };
         }
       }),
@@ -292,7 +297,8 @@ test("pollOnce relays failed observer outcomes with failureCode", async () => {
                 status: "failed",
                 failureCode: FAILURE_CODE
               }
-            ]
+            ],
+            nextCursor: "cursor-1"
           };
         }
       })
@@ -308,4 +314,76 @@ test("pollOnce relays failed observer outcomes with failureCode", async () => {
   assert.equal(events.length, 1);
   assert.equal(events[0].data.status, "failed");
   assert.equal(events[0].data.failureCode, FAILURE_CODE);
+});
+
+test("pollOnce rejects non-empty observer feed batches without nextCursor before relaying", async () => {
+  const calls = [];
+  const stateStore = new MemoryStateStore();
+  const relay = new XcmObservationRelayService(
+    {
+      observeXcmOutcome: async (requestId, outcome) => {
+        calls.push([requestId, outcome]);
+        return outcome;
+      }
+    },
+    stateStore,
+    undefined,
+    {
+      enabled: true,
+      feedUrl: "https://observer.example/outcomes",
+      fetchImpl: async () => ({
+        ok: true,
+        async json() {
+          return {
+            items: [
+              {
+                requestId: REQUEST_ID,
+                status: "succeeded"
+              }
+            ]
+          };
+        }
+      }),
+      logger: { warn() {} }
+    }
+  );
+
+  await assert.rejects(
+    () => relay.pollOnce(),
+    /non-empty XCM batches must advance the cursor/u
+  );
+  assert.equal(calls.length, 0);
+  const stored = await stateStore.getServiceState("xcm-observation-relay");
+  assert.match(stored.lastError, /non-empty XCM batches must advance the cursor/u);
+});
+
+test("pollOnce accepts empty observer feed end-of-feed pages without nextCursor", async () => {
+  const stateStore = new MemoryStateStore();
+  await stateStore.upsertServiceState("xcm-observation-relay", { cursor: "cursor-2" });
+  const relay = new XcmObservationRelayService(
+    {
+      observeXcmOutcome: async () => {
+        throw new Error("unexpected relay");
+      }
+    },
+    stateStore,
+    undefined,
+    {
+      enabled: true,
+      feedUrl: "https://observer.example/outcomes",
+      fetchImpl: async () => ({
+        ok: true,
+        async json() {
+          return {
+            items: []
+          };
+        }
+      })
+    }
+  );
+
+  const result = await relay.pollOnce();
+
+  assert.equal(result.observedCount, 0);
+  assert.equal(result.cursor, "cursor-2");
 });

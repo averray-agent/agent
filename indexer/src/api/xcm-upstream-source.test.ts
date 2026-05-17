@@ -223,6 +223,54 @@ test("Subscan source preserves failure code for failed status variants", () => {
   assert.equal(outcome?.failureCode, failureCode);
 });
 
+test("Subscan source advances after a non-empty final page", async () => {
+  const adapter = new SubscanXcmSourceAdapter({
+    apiHost: "https://subscan.example",
+    apiKey: "test",
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => ({
+        code: 0,
+        data: {
+          list: [
+            {
+              message_topic: requestId,
+              status: "success",
+              block_timestamp: "1712345678"
+            }
+          ]
+        }
+      })
+    } as Response)
+  });
+
+  const payload = await adapter.fetchBatch({ limit: 25 });
+
+  assert.equal(payload.items.length, 1);
+  assert.equal(adapter.decodePageCursor(payload.nextCursor), 1);
+});
+
+test("Subscan source omits nextCursor for empty end-of-feed pages", async () => {
+  const adapter = new SubscanXcmSourceAdapter({
+    apiHost: "https://subscan.example",
+    apiKey: "test",
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => ({
+        code: 0,
+        data: {
+          list: []
+        }
+      })
+    } as Response)
+  });
+
+  const payload = await adapter.fetchBatch({ limit: 25 });
+
+  assert.deepEqual(payload.items, []);
+  assert.equal(payload.nextCursor, undefined);
+});
+
 test("Subscan source rejects failed status variants without failure code", () => {
   const adapter = new SubscanXcmSourceAdapter({
     apiHost: "https://subscan.example",

@@ -414,7 +414,7 @@ export class SubscanXcmSourceAdapter implements XcmUpstreamSourceAdapter {
     const items = list
       .map((entry) => this.normalizeSubscanEntry(entry as SubscanXcmRecord))
       .filter((entry): entry is PublishedOutcome => Boolean(entry));
-    const nextCursor = list.length >= limit ? this.encodePageCursor(page + 1) : undefined;
+    const nextCursor = list.length > 0 ? this.encodePageCursor(page + 1) : undefined;
     return {
       items,
       nextCursor

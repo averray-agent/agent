@@ -82,6 +82,7 @@ export class XcmObservationRelayService {
       const state = await this.stateStore.getServiceState?.(this.stateScope) ?? {};
       const payload = await this.fetchFeed(state.cursor);
       const items = Array.isArray(payload?.items) ? payload.items : [];
+      const nextCursor = this.normalizeNextCursor(payload?.nextCursor, items.length);
       let observedCount = 0;
 
       for (const item of items) {
@@ -109,9 +110,7 @@ export class XcmObservationRelayService {
       }
 
       const nextState = await this.stateStore.upsertServiceState?.(this.stateScope, {
-        cursor: typeof payload?.nextCursor === "string" && payload.nextCursor.trim()
-          ? payload.nextCursor.trim()
-          : state.cursor,
+        cursor: nextCursor ?? state.cursor,
         lastObservedCount: observedCount,
         lastSyncedAt: new Date().toISOString(),
         lastError: undefined
@@ -245,6 +244,14 @@ export class XcmObservationRelayService {
       throw new ValidationError("XCM observer items must use a terminal status.");
     }
     return normalized;
+  }
+
+  normalizeNextCursor(value, itemCount) {
+    const nextCursor = typeof value === "string" && value.trim() ? value.trim() : undefined;
+    if (itemCount > 0 && !nextCursor) {
+      throw new ValidationError("XCM observer feed returned items without nextCursor; non-empty XCM batches must advance the cursor.");
+    }
+    return nextCursor;
   }
 
   normalizeFailureCode(value, status) {
