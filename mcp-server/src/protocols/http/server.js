@@ -1686,6 +1686,7 @@ const server = createServer(async (request, response) => {
           "/onboarding",
           "/auth/nonce",
           "/auth/verify",
+          "/auth/refresh",
           "/auth/logout",
           "/auth/session",
           "/events",
@@ -2573,6 +2574,67 @@ const server = createServer(async (request, response) => {
         status: "logged_out",
         wallet: auth.wallet,
         jti
+      });
+    }
+
+    if (request.method === "POST" && pathname === "/auth/refresh") {
+      // Rotate the caller's wallet JWT: revoke the old `jti`, mint a new one
+      // with the same `sub` + `roles`, fresh `iat` / `exp`. The operator app
+      // avoids re-SIWE every AUTH_TOKEN_TTL_SECONDS by calling this when it
+      // notices its token is approaching expiry.
+      //
+      // Hard guardrails:
+      //  - Service tokens are NOT refreshable here. They have their own
+      //    lifecycle via /admin/service-tokens/:id/rotate, signed by an
+      //    admin, and their claims (`capabilities`, `capabilityGrantId`,
+      //    `scope`) are not safe to re-mint from a stale token. Service
+      //    tokens that need a longer life rotate via the admin surface.
+      //  - The old token must currently verify (authMiddleware enforces
+      //    signature + exp + revocation), so a leaked-and-revoked token
+      //    cannot be used to bootstrap a fresh one.
+      //  - We revoke the old jti BEFORE issuing the new one, so there is
+      //    no window where two tokens for the same wallet are both valid
+      //    from a single refresh.
+      const auth = await authMiddleware(request, url);
+      if (auth.claims?.serviceToken === true || auth.claims?.tokenKind === "service") {
+        throw new AuthenticationError(
+          "Service tokens cannot be refreshed via /auth/refresh; rotate them via /admin/service-tokens/:id/rotate.",
+          "service_token_refresh_unsupported"
+        );
+      }
+      await enforceLimit("auth_refresh", auth.wallet, rateLimitConfig.authRefresh);
+      if (!authConfig.signingSecret) {
+        throw new AuthenticationError(
+          "Auth not configured — set AUTH_JWT_SECRETS to issue tokens.",
+          "auth_not_configured"
+        );
+      }
+
+      const oldJti = auth.claims?.jti;
+      const oldExp = auth.claims?.exp;
+      if (oldJti && Number.isFinite(oldExp)) {
+        // Revoke the old jti for whatever remains of its TTL so it can't
+        // be replayed if it leaked between sign and revoke.
+        const ttlSeconds = Math.max(1, oldExp - Math.floor(Date.now() / 1000));
+        await stateStore.revokeToken?.(oldJti, ttlSeconds);
+      }
+
+      // Re-resolve roles at refresh time (an operator may have been added
+      // or removed since the original sign-in).
+      const roles = authConfig.resolveRoles?.(auth.wallet) ?? auth.claims?.roles ?? [];
+      const { token, claims } = signToken(
+        { sub: auth.wallet, roles },
+        { secret: authConfig.signingSecret, expiresInSeconds: authConfig.tokenTtlSeconds }
+      );
+
+      return respond(response, 200, {
+        token,
+        wallet: auth.wallet,
+        roles,
+        capabilities: authCapabilities.resolveCapabilities({ roles }),
+        expiresAt: new Date(claims.exp * 1000).toISOString(),
+        tokenType: "Bearer",
+        rotatedFromJti: oldJti
       });
     }
 

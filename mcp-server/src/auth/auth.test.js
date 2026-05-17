@@ -230,7 +230,7 @@ test("requireAuth rejects missing token in strict mode", async () => {
       assert.equal(error.details.requiresAuth, true);
       assert.equal(error.details.requiredAction, "wallet_sign_in");
       assert.equal(error.details.authScheme, "SIWE_JWT");
-      assert.deepEqual(error.details.authEntrypoints, ["/auth/nonce", "/auth/verify", "/auth/logout"]);
+      assert.deepEqual(error.details.authEntrypoints, ["/auth/nonce", "/auth/verify", "/auth/refresh", "/auth/logout"]);
       return true;
     }
   );

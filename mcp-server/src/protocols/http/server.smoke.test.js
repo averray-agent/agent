@@ -613,6 +613,66 @@ test("http smoke: /auth/logout revokes the current token", { skip: !RUN }, async
   });
 });
 
+test("http smoke: /auth/refresh rotates the wallet token and revokes the old jti", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const oldToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
+    const oldHeader = { authorization: `Bearer ${oldToken}` };
+
+    // Old token works before refresh.
+    const preRefresh = await fetch(`${base}/account`, { headers: oldHeader });
+    assert.equal(preRefresh.status, 200);
+
+    const refresh = await fetch(`${base}/auth/refresh`, { method: "POST", headers: oldHeader });
+    assert.equal(refresh.status, 200);
+    const payload = await refresh.json();
+    assert.equal(payload.tokenType, "Bearer");
+    assert.equal(String(payload.wallet).toLowerCase(), ADMIN_WALLET.toLowerCase());
+    assert.deepEqual(payload.roles, ["admin"]);
+    assert.ok(typeof payload.token === "string" && payload.token.length > 0);
+    assert.notEqual(payload.token, oldToken, "refresh must mint a new token, not echo the old one");
+    assert.ok(typeof payload.rotatedFromJti === "string" && payload.rotatedFromJti.length > 0);
+    assert.ok(typeof payload.expiresAt === "string" && !Number.isNaN(Date.parse(payload.expiresAt)));
+
+    // Old token rejected with token_revoked.
+    const postRefreshOld = await fetch(`${base}/account`, { headers: oldHeader });
+    assert.equal(postRefreshOld.status, 401);
+    const oldErr = await postRefreshOld.json();
+    assert.equal(oldErr.error, "token_revoked");
+
+    // New token works on the same protected route.
+    const newHeader = { authorization: `Bearer ${payload.token}` };
+    const postRefreshNew = await fetch(`${base}/account`, { headers: newHeader });
+    assert.equal(postRefreshNew.status, 200);
+  });
+});
+
+test("http smoke: /auth/refresh rejects service tokens with service_token_refresh_unsupported", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    // Mint a service-style token directly (mirrors what /admin/service-tokens issues).
+    const serviceToken = issueToken(ADMIN_WALLET, {
+      roles: ["admin"],
+      tokenKind: "service",
+      serviceToken: true,
+      capabilityGrantId: "test-grant"
+    });
+
+    const refresh = await fetch(`${base}/auth/refresh`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${serviceToken}` }
+    });
+    assert.equal(refresh.status, 401);
+    const err = await refresh.json();
+    assert.equal(err.error, "service_token_refresh_unsupported");
+  });
+});
+
+test("http smoke: /auth/refresh rejects an unauthenticated caller", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const refresh = await fetch(`${base}/auth/refresh`, { method: "POST" });
+    assert.equal(refresh.status, 401);
+  });
+});
+
 test("http smoke: /account/borrow-capacity returns the signed-in wallet headroom", { skip: !RUN }, async () => {
   await runWithServer(async (base) => {
     const token = issueToken(ADMIN_WALLET, { roles: ["admin"] });
