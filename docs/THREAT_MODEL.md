@@ -50,12 +50,20 @@ Current mitigation:
 - the GitHub workflow only publishes when the served manifest hash differs
 - owner authority has moved toward the 2-of-3 multisig flow documented in
   [MULTISIG_SETUP.md](./MULTISIG_SETUP.md)
+- backend signer is **KMS-backed** since the 2026-05-16 Phase 3 cutover
+  (`SIGNER_BACKEND=kms` in `deploy/backend.env.template`); the private key
+  material lives only inside AWS KMS and is non-exportable. The backend
+  only ever calls `kms:Sign`. See [`docs/SECRETS_MIGRATION.md`](./SECRETS_MIGRATION.md).
 
 Follow-up:
 
 - keep signer duties separated from hot operational wallets
 - finish the recovery playbook dry run for lost-key scenarios
 - require multisig review for any mainnet-adjacent owner mutation
+- migrate the `DISCOVERY_PUBLISHER_PRIVATE_KEY` (still a raw private key in
+  GitHub Secrets) to a KMS-backed signer, mirroring the Phase 3 backend
+  pattern. Practical risk is bounded — that key only publishes manifest
+  hashes — but the asymmetry is worth closing once Phase 4c lands.
 
 ### Pauser Compromise
 
@@ -152,6 +160,70 @@ Follow-up:
 - review legal and operational exposure before meaningful mainnet volume
 - keep multi-asset settlement as a later mitigation
 
+### Account Overlay Staleness or Durability Loss
+
+Risk: the per-wallet overlay state the operator UI relies on (treasury timeline,
+last strategy activity, pending XCM breadcrumbs) lives in process memory. A
+restart loses it; a stale cache can also mask a fresher chain read if the
+overlay-vs-live precedence is wrong.
+
+Current mitigation:
+
+- every overlay field is classified as `chain_authoritative`, `derived_cache`,
+  or `display_only` (see `ACCOUNT_OVERLAY_CLASSIFICATION` in
+  [`mcp-server/src/core/account-mutation-service.js`](../mcp-server/src/core/account-mutation-service.js))
+- `attachStoredTreasuryMetadata` resolves merges with live wins per-key for
+  chain-backed fields; stored is gap-fill only
+- the `AccountOverlayStore` writes through to the Redis-backed state-store so
+  overlay state survives process restart; bootstrap hydrates the cache before
+  the HTTP server accepts requests
+- restart simulation is locked by an integration test:
+  `account-overlay-store.test.js — restart simulation`
+
+Follow-up:
+
+- expose `_meta.fieldSources` on account API responses so external integrators
+  see the classification without reading the source
+- migrate `display_only` fields with load-bearing operator value (treasury
+  timeline) to Postgres if Redis-persistence guarantees become insufficient
+- add a multi-process cache-invalidation pub/sub channel once any deploy runs
+  more than one backend replica against the same Redis state-store
+
+### Public Read-Surface Leakage
+
+Risk: data and metadata endpoints exposed without auth on `index.averray.com`
+and `api.averray.com` can leak request-path histograms, schema, operational
+signals, and (in worst case) be used as an SQL-injection vector against
+indexer transitive deps.
+
+Current mitigation:
+
+- `/sql/*` direct SQL relay has been removed from the indexer
+  ([`indexer/src/api/index.ts`](../indexer/src/api/index.ts)); the only
+  remaining public read paths are `/graphql`, `/xcm/outcomes`, `/health`,
+  `/ready`, and `/status`
+- `/graphql` accepts an optional `GRAPHQL_BEARER_TOKEN` Bearer gate; when the
+  env is unset a loud startup warning records that the route is intentionally
+  public
+- `/metrics` on `api.averray.com` accepts an optional `METRICS_BEARER_TOKEN`
+  Bearer gate; the env var is documented in
+  [`deploy/backend.env.template`](../deploy/backend.env.template)
+- Ponder's SQL validator rejects schema-qualified queries
+  (`information_schema.tables`) and function calls (`current_user`,
+  `version()`), bounding the readable surface to the on-chain-derived
+  `onchainTable` set even on `/graphql`
+
+Follow-up:
+
+- set `GRAPHQL_BEARER_TOKEN` and `METRICS_BEARER_TOKEN` in production env and
+  rotate the operator app to send the bearer
+- bump Ponder's transitive `kysely` and `drizzle-orm` to versions without
+  open SQL-injection advisories (npm audit currently reports 3 high
+  severity on these transitive deps)
+- consider migrating `/graphql` behind the same Caddy basic-auth layer the
+  operator app uses for `app.averray.com`, so the gate is enforced at the
+  perimeter rather than inside the indexer
+
 ### Authentication Token Exposure
 
 Risk: browser JWTs or API keys copied into chat, logs, or issue comments can be
@@ -168,9 +240,57 @@ Follow-up:
 - rotate any API key or token pasted into shared chat
 - add operator docs that distinguish signing secrets from bearer JWTs
 
+## Truth-Boundary Discipline
+
+Risk: any UI, API, or status surface that smooths over a degraded backend
+or renders demo data indistinguishable from real data directly contradicts
+the platform's trust pitch. The
+[`docs/AUDIT_REMEDIATION.md`](./AUDIT_REMEDIATION.md) remediation board
+treats this as the load-bearing cross-cutting pattern behind P1.1, P1.1b,
+P1.2, P1.3, P2.4, P2.5, and P2.5b.
+
+Current mitigation:
+
+- public-site homepage console relabeled from "Live" to "Example" (Package F,
+  PR #405); deterministic animation no longer claims to be a real SSE feed
+- operator-app structured-submission guard rejects malformed validation
+  responses rather than silently falling through to a successful-looking
+  submit (`app/lib/api/guarded-submit.js`)
+- account overlay merge precedence inverts so live chain reads always win
+  over stored cache per-key (Package C, PR #408); stale cache can no longer
+  silently override fresh on-chain state
+- AUDIT_PACKAGE §6 deployment parameters reads from
+  `deployments/testnet.json` directly so the auditor-facing values cannot
+  drift from the deployed values
+- INCIDENT_RESPONSE §1 ownership block is filled rather than left as
+  `<placeholder>` (PR #390)
+
+Follow-up:
+
+- finish Package E — operator pages adopt explicit `live` / `empty` /
+  `degraded` / `demo` modes with a persistent banner when
+  `NEXT_PUBLIC_DEMO_MODE=true`
+- gate `/metrics` and `/graphql` in production by setting the bearer tokens
+  documented in `deploy/backend.env.template` and
+  `deploy/indexer.env.template`
+- continue documenting `<TBD>` placeholders as work items, not as silent
+  defaults
+
 ## Launch Posture
 
 Averray is production-like on testnet once the hosted smoke checks, discovery
 publish flow, and bootstrap instrumentation are green. It is not mainnet-ready
 until mainnet parameters, audit sign-off, incident ownership, and async XCM
 staging evidence are complete.
+
+`v1.0.0-rc1` close progress as of 2026-05-17:
+
+- Multisig owner control plane is live on testnet
+  (`deployments/testnet-multisig-owner.json` is `status: "verified"`)
+- KMS-backed backend signer is live (Phase 3 cutover 2026-05-16)
+- Audit remediation board ([`docs/AUDIT_REMEDIATION.md`](./AUDIT_REMEDIATION.md))
+  has closed Packages A, F, H, C, and I; Packages B, D, E, G, and J still open
+- External contract audit has not yet been engaged. See
+  [`AUDIT_PACKAGE.md`](./AUDIT_PACKAGE.md) and
+  [`STRATEGY_ADAPTER_AUDIT_SCOPE.md`](./STRATEGY_ADAPTER_AUDIT_SCOPE.md) for
+  the audit-firm-facing scope documents.
