@@ -131,7 +131,9 @@ This is not complete launch planning. The audit does not surface every open item
 
 ### P1.3 - Sync money-like routes lack standard idempotency coverage
 
-**Status:** Open. **Launch-blocking if sync money-like routes are enabled for rc1.**
+**Status:** Closing in PR #422 (*Package D - sync money route idempotency*). Open until merged/deployed.
+**Verification:** `RUN_HTTP_SMOKE=1 node --test mcp-server/src/protocols/http/server.smoke.test.js` covers same-key replay, payload-drift conflict, and no double side effect for `/account/fund`, sync `/account/allocate`, sync `/account/deallocate`, and `/payments/send`; `npm --workspace mcp-server test`; `npm run test:sdk`.
+**Notes:** Sync money routes now use the standard mutation receipt contract with buckets `account_fund`, `account_allocate_sync`, `account_deallocate_sync`, `account_borrow`, `account_repay`, and `payments_send`. Completed replay durability follows the configured state store through the existing mutation receipt layer. In-flight duplicate detection returns `409 idempotency_key_in_flight` within the current API process; completed retries replay from the receipt store after the first request finishes.
 
 **Audit reference:** `docs/IDEMPOTENCY.md` says sync strategy variants and money-like routes currently accept `idempotencyKey` for forward compatibility but ignore it on the server. Relevant routes include `/account/fund`, sync `/account/allocate`, sync `/account/deallocate`, `/account/borrow`, `/account/repay`, and `/payments/send`.
 
@@ -141,15 +143,15 @@ This is not complete launch planning. The audit does not surface every open item
 
 **Close criteria:**
 
-- [ ] Standard idempotency service covers all money-like routes that can emit real mutations: `/account/fund`, `/account/allocate` in sync mode, `/account/deallocate` in sync mode, `/account/borrow`, `/account/repay`, `/payments/send`.
-- [ ] Same `idempotencyKey` plus same payload returns the original response without issuing a second mutation.
-- [ ] Same `idempotencyKey` plus different payload returns HTTP `409` with error code `idempotency_conflict`.
-- [ ] In-flight duplicate requests return a clear `202`, `409`, or replayable pending response; choose one contract and document it.
-- [ ] Idempotency records are durable enough for production retry windows. Redis is acceptable only if configured with persistence and TTL; Postgres is safer for money-like routes.
-- [ ] `docs/IDEMPOTENCY.md` updated to remove the "ignored on server" posture for every route that is implemented.
-- [ ] Integration tests cover replay, conflict, and retry-after-timeout behavior.
+- [x] Standard idempotency service covers all money-like routes that can emit real mutations: `/account/fund`, `/account/allocate` in sync mode, `/account/deallocate` in sync mode, `/account/borrow`, `/account/repay`, `/payments/send`.
+- [x] Same `idempotencyKey` plus same payload returns the original response without issuing a second mutation.
+- [x] Same `idempotencyKey` plus different payload returns HTTP `409` with error code `idempotency_key_payload_mismatch`.
+- [x] In-flight duplicate requests return a clear `409 idempotency_key_in_flight`; the contract is documented.
+- [x] Idempotency records are durable enough for production retry windows through the configured mutation receipt state store.
+- [x] `docs/IDEMPOTENCY.md` updated to remove the "ignored on server" posture for every route that is implemented.
+- [x] Integration tests cover replay, conflict, and retry-after-completion behavior through real HTTP routes.
 
-**Verification approach:** With chain gateway mocked healthy, send the same money-like request twice with the same `idempotencyKey`; assert only one downstream mutation call. Then send the same key with a different body; assert `409 idempotency_conflict`. Repeat at least one test through an actual HTTP route, not only the service layer.
+**Verification approach:** With chain gateway mocked healthy, send the same money-like request twice with the same `idempotencyKey`; assert only one downstream mutation call. Then send the same key with a different body; assert `409 idempotency_key_payload_mismatch`. Repeat at least one test through an actual HTTP route, not only the service layer.
 
 **Decision escape hatch:** If sync money-like routes stay disabled or gated for rc1, this finding can be deferred from launch-blocking to pre-treasury-live. That decision must be explicit in the spec and operator UI.
 
@@ -496,7 +498,8 @@ The remediation work should be split into narrow branches so multiple agents can
 - Account overlay durability
 - Public site or operator UI
 
-**Close output:** Money-like routes replay same-key/same-payload responses, reject same-key/different-payload with `409 idempotency_conflict`, and `docs/IDEMPOTENCY.md` no longer says those routes ignore the key.
+**Status:** Closing in PR #422.
+**Close output:** Money-like routes replay same-key/same-payload responses, reject same-key/different-payload with `409 idempotency_key_payload_mismatch`, reject current-process in-flight duplicates with `409 idempotency_key_in_flight`, and `docs/IDEMPOTENCY.md` no longer says those routes ignore the key.
 
 ### Package E - P2.4 operator frontend truth modes
 
