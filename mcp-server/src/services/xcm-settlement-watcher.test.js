@@ -7,6 +7,7 @@ import { XcmSettlementWatcherService } from "./xcm-settlement-watcher.js";
 import { ValidationError } from "../core/errors.js";
 
 const REQUEST_ID = "0x1111111111111111111111111111111111111111111111111111111111111111";
+const REQUEST_ID_2 = "0x2222222222222222222222222222222222222222222222222222222222222222";
 
 test("observeOutcome stores a pending observation and emits an event", async () => {
   const stateStore = new MemoryStateStore();
@@ -87,6 +88,72 @@ test("runPendingSettlements finalizes stored observations and marks them process
   assert.equal(events[0].data.settledShares, "5");
   assert.equal(events[0].data.settledSharesRaw, "5");
   assert.equal(events[0].data.source, "observer");
+});
+
+test("runPendingSettlements serializes concurrent triggers and drains queued observations", async () => {
+  const stateStore = new MemoryStateStore();
+  const finalizedCalls = [];
+  let releaseFirstFinalize;
+  const firstFinalizeReleased = new Promise((resolve) => {
+    releaseFirstFinalize = resolve;
+  });
+  let firstFinalizeStarted;
+  const firstFinalizeStartedPromise = new Promise((resolve) => {
+    firstFinalizeStarted = resolve;
+  });
+
+  const watcher = new XcmSettlementWatcherService(
+    {
+      finalizeXcmRequest: async (requestId, outcome) => {
+        finalizedCalls.push([requestId, outcome]);
+        if (requestId === REQUEST_ID) {
+          firstFinalizeStarted();
+          await firstFinalizeReleased;
+        }
+        return {
+          requestId,
+          settledVia: "agent_account",
+          strategyRequest: {
+            account: "0xabc",
+            statusLabel: outcome.status
+          }
+        };
+      }
+    },
+    stateStore,
+    undefined,
+    { enabled: false }
+  );
+
+  await watcher.observeOutcome(REQUEST_ID, {
+    status: "succeeded",
+    settledAssets: 5
+  });
+
+  const firstRun = watcher.runPendingSettlements();
+  await firstFinalizeStartedPromise;
+
+  await watcher.observeOutcome(REQUEST_ID_2, {
+    status: "succeeded",
+    settledAssets: 7
+  });
+  const concurrentRun = watcher.runPendingSettlements();
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(finalizedCalls.length, 1);
+
+  releaseFirstFinalize();
+  const [firstResults, concurrentResults] = await Promise.all([firstRun, concurrentRun]);
+  const storedFirst = await stateStore.getXcmObservation(REQUEST_ID);
+  const storedSecond = await stateStore.getXcmObservation(REQUEST_ID_2);
+
+  assert.equal(finalizedCalls.length, 2);
+  assert.equal(finalizedCalls[0][0], REQUEST_ID);
+  assert.equal(finalizedCalls[1][0], REQUEST_ID_2);
+  assert.equal(firstResults.length, 2);
+  assert.equal(concurrentResults.length, 2);
+  assert.equal(storedFirst.processed, true);
+  assert.equal(storedSecond.processed, true);
 });
 
 test("runPendingSettlements emits a request_finalize_failed event with correlationId on errors", async () => {

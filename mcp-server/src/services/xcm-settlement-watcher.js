@@ -19,6 +19,8 @@ export class XcmSettlementWatcherService {
     this.running = false;
     this.timer = undefined;
     this.unsubscribe = undefined;
+    this.settlementRunPromise = undefined;
+    this.settlementRunQueued = false;
   }
 
   start() {
@@ -47,6 +49,7 @@ export class XcmSettlementWatcherService {
     return {
       enabled: this.enabled,
       running: this.running,
+      settling: Boolean(this.settlementRunPromise),
       pendingCount: pending.length,
       pending: pending.slice(0, 10)
     };
@@ -104,6 +107,30 @@ export class XcmSettlementWatcherService {
   }
 
   async runPendingSettlements(limit = 20) {
+    if (this.settlementRunPromise) {
+      this.settlementRunQueued = true;
+      return this.settlementRunPromise;
+    }
+
+    this.settlementRunPromise = this.drainPendingSettlements(limit);
+    try {
+      return await this.settlementRunPromise;
+    } finally {
+      this.settlementRunPromise = undefined;
+      this.settlementRunQueued = false;
+    }
+  }
+
+  async drainPendingSettlements(limit) {
+    const results = [];
+    do {
+      this.settlementRunQueued = false;
+      results.push(...await this.runPendingSettlementBatch(limit));
+    } while (this.settlementRunQueued);
+    return results;
+  }
+
+  async runPendingSettlementBatch(limit) {
     const pending = await this.stateStore.listPendingXcmObservations?.(limit) ?? [];
     const results = [];
 
