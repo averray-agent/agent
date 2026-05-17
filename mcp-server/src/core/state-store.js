@@ -51,6 +51,31 @@ export class MemoryStateStore {
     this.fundedJobs = new Map();
     this.capabilityGrants = new Map();
     this.eventLog = [];
+    this.accountOverlays = new Map();
+  }
+
+  // ── account overlays (Package C Phase 2) ───────────────────────────
+  //
+  // Backs the AccountOverlayStore write-through cache. Each entry holds
+  // the per-wallet derived_cache + display_only fields documented in
+  // ACCOUNT_OVERLAY_CLASSIFICATION (see account-mutation-service.js).
+  // chain_authoritative fields are still resolved live against the
+  // blockchain gateway on every read; persisting them here is harmless
+  // since attachStoredTreasuryMetadata makes live win per-key.
+
+  async getAccountOverlay(wallet) {
+    if (!wallet) return undefined;
+    const stored = this.accountOverlays.get(String(wallet));
+    return stored ? cloneAccountOverlay(stored) : undefined;
+  }
+
+  async upsertAccountOverlay(wallet, overlay) {
+    if (!wallet) return;
+    this.accountOverlays.set(String(wallet), cloneAccountOverlay(overlay));
+  }
+
+  async listAccountOverlayWallets() {
+    return Array.from(this.accountOverlays.keys());
   }
 
   async getSession(sessionId) {
@@ -380,6 +405,33 @@ export class RedisStateStore {
     this.namespace = namespace;
     this.client = createClient({ url: redisUrl });
     this.connectionPromise = undefined;
+  }
+
+  // ── account overlays (Package C Phase 2) ───────────────────────────
+  // Persisted as a single Redis hash `<namespace>:account-overlay` with
+  // wallet → JSON.stringified overlay. See MemoryStateStore for the
+  // contract and ACCOUNT_OVERLAY_CLASSIFICATION for field semantics.
+
+  async getAccountOverlay(wallet) {
+    if (!wallet) return undefined;
+    await this.connect();
+    const raw = await this.client.hGet(this.key("account-overlay", "all"), String(wallet));
+    return raw ? JSON.parse(raw) : undefined;
+  }
+
+  async upsertAccountOverlay(wallet, overlay) {
+    if (!wallet) return;
+    await this.connect();
+    await this.client.hSet(
+      this.key("account-overlay", "all"),
+      String(wallet),
+      JSON.stringify(overlay ?? {})
+    );
+  }
+
+  async listAccountOverlayWallets() {
+    await this.connect();
+    return await this.client.hKeys(this.key("account-overlay", "all"));
   }
 
   async getSession(sessionId) {
@@ -850,4 +902,12 @@ export function createStateStore(env = process.env, { logger = console } = {}) {
     "state-store.memory_fallback"
   );
   return new MemoryStateStore();
+}
+
+// Deep clone for the in-memory overlay path so callers cannot retain a
+// reference into the store's internal Map and silently mutate it.
+// Overlays are plain JSON (numbers, strings, arrays, nested objects) —
+// JSON round-trip is the simplest correct clone for that shape.
+function cloneAccountOverlay(overlay) {
+  return overlay === undefined ? undefined : JSON.parse(JSON.stringify(overlay));
 }

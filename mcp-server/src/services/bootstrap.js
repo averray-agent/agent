@@ -1,5 +1,6 @@
 import { PlatformService } from "../core/platform-service.js";
 import { createStateStore } from "../core/state-store.js";
+import { AccountOverlayStore } from "../core/account-overlay-store.js";
 import { BlockchainGateway } from "../blockchain/gateway.js";
 import { VerifierService } from "./verifier-service.js";
 import { loadLocalEnv } from "./env-loader.js";
@@ -114,17 +115,20 @@ const profiles = new Map([
   }]
 ]);
 
-const accounts = new Map([
-  ["0xagent", {
-    wallet: "0xagent",
-    liquid: { USDC: 25 },
-    reserved: { USDC: 0 },
-    strategyAllocated: {},
-    collateralLocked: { USDC: 10 },
-    jobStakeLocked: { USDC: 0 },
-    debtOutstanding: { USDC: 0 }
-  }]
-]);
+// Demo seed for the legacy "0xagent" fixture wallet. Not a real wallet,
+// not used in production traffic; production wallets are SIWE-derived
+// `0x…` addresses populated through `getStoredAccount(wallet)` at request
+// time. Both factories below wrap this seed in an `AccountOverlayStore`
+// so writes mirror out to the durable state-store backing.
+const SEED_DEV_OVERLAY = ["0xagent", {
+  wallet: "0xagent",
+  liquid: { USDC: 25 },
+  reserved: { USDC: 0 },
+  strategyAllocated: {},
+  collateralLocked: { USDC: 10 },
+  jobStakeLocked: { USDC: 0 },
+  debtOutstanding: { USDC: 0 }
+}];
 
 const reputations = new Map([
   ["0xagent", {
@@ -139,6 +143,11 @@ export function createPlatformService() {
   const gateway = new BlockchainGateway();
   const stateStore = createStateStore();
   const eventBus = new EventBus({ eventStore: stateStore });
+  const accounts = new AccountOverlayStore({ stateStore });
+  accounts.seed(...SEED_DEV_OVERLAY);
+  // No hydrate here — test factory uses a fresh in-memory state-store
+  // every construction; nothing to hydrate from. createPlatformRuntime
+  // below hydrates against the production durable store.
   return new PlatformService(jobs, profiles, accounts, reputations, gateway, stateStore, eventBus);
 }
 
@@ -168,6 +177,18 @@ export async function createPlatformRuntime() {
     createContentRecoveryLog(process.env, { logger })
   );
   const eventBus = initStep("init-event-bus", logger, () => new EventBus({ eventStore: stateStore, logger }));
+  const accounts = initStep("init-account-overlay-store", logger, () => {
+    const store = new AccountOverlayStore({ stateStore, logger });
+    store.seed(...SEED_DEV_OVERLAY);
+    return store;
+  });
+  // Hydrate the overlay cache from durable state-store before any HTTP
+  // route is wired. Persisted writes from previous process incarnations
+  // will overwrite the dev seed where wallets overlap, which is the
+  // intended semantic — production writes always win over the static
+  // demo fixture.
+  const overlayHydration = await accounts.hydrate();
+  logger.info?.(overlayHydration, "account-overlay.hydrate");
   const platformService = initStep(
     "init-platform-service",
     logger,
