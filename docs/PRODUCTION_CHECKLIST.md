@@ -205,7 +205,7 @@ RUN_SUBSCAN_XCM_VALIDATION=1 ./scripts/ops/check-release-readiness.sh testnet
 - [ ] Frontend Sentry runtime config is set if browser error reporting is required.
 - [ ] Structured logs are visible from the current deploy target.
 - [ ] An alert destination is configured for hosted smoke-check failures.
-- [ ] [INCIDENT_RESPONSE.md](./INCIDENT_RESPONSE.md) has named on-call ownership.
+- [x] [INCIDENT_RESPONSE.md](./INCIDENT_RESPONSE.md) has named on-call ownership.
 - [ ] Operator self-report proof is visible after deploy and on schedule. Flip
   this box only when ALL of the following are true against the production stack:
   - The production deploy workflow completes with `run_hermes_post_deploy=1`
