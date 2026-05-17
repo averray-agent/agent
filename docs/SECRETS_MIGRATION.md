@@ -1791,11 +1791,16 @@ the backend signer is never on disk, in any vault, or in any backup.
 Compromise of the VPS or 1Password vault no longer implies
 compromise of the signer.
 
-### Phase 3 progress status (as of 2026-05-16)
+### Phase 3 progress status (as of 2026-05-17)
 
-The infrastructure side is provisioned end-to-end on testnet. The
-on-chain `setVerifier(...)` flip + the `SIGNER_BACKEND=kms` env flip
-are deferred to a coordinated cutover session.
+The infrastructure side is provisioned end-to-end on testnet, the
+KMS-derived address has been authorized on-chain, the
+`SIGNER_BACKEND=kms` env flip has shipped, and the legacy raw-key
+verifier has now been revoked on-chain — the KMS-derived
+`0x31ad432dFe083B998c69B6dB88A984ec5207ab7F` is the sole address
+`TreasuryPolicy.verify()` will accept. The non-exportability
+invariant of Phase 3 is fully realized: the only key that can sign
+accepted verifier transactions lives non-exportably inside AWS KMS.
 
 | What                                                                 | Status     | Where                                                              |
 | -------------------------------------------------------------------- | ---------- | ------------------------------------------------------------------ |
@@ -1811,7 +1816,8 @@ are deferred to a coordinated cutover session.
 | **IAM user `averray-signer-testnet` + KMS-sign-only policy**        | ✅ created | Static access keys, stored in `op://prod-backend/aws-signer-testnet/*` |
 | **AWS env vars wired into `backend.env.template`**                  | ✅ landed  | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `KMS_KEY_ID` / `AWS_REGION` (this PR) |
 | **Multisig `TreasuryPolicy.setVerifier(0x31ad432dFe083B998c69B6dB88A984ec5207ab7F, true)`** | ✅ executed 2026-05-16 | 2-of-3 multisig (HOT WALLET + LEDGER + VAULT) at block 8,922,707 on Paseo Asset Hub. NB: setter lives on `TreasuryPolicy`, not `EscrowCore`; mapping(address⇒bool) so both old + new verifier can co-exist for graceful cutover. |
-| **`SIGNER_BACKEND=kms` flip in production env**                     | ✅ executed 2026-05-16 | `deploy/backend.env.template`: `SIGNER_BACKEND=local`→`kms` + `SIGNER_PRIVATE_KEY=op://...` line removed. PR 2.7d.1 hash-detect force-recreates the backend container; KmsSigner is instantiated by `gateway.js`'s `createSigner` factory. Old `SIGNER_PRIVATE_KEY` OP item retained ~30 days as rollback target, then retired. |
+| **Multisig `TreasuryPolicy.setVerifier(0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519, false)` — old verifier revoked** | ✅ executed 2026-05-17 | 2-of-3 multisig (HOT WALLET depositor at Stage 1 timepoint 8,956,633/2; LEDGER as Stage 2 approver shortly after) on Paseo Asset Hub. Inner call hash `0xe017b3351acf3bc02a5e8e09402f075cbbe4103159ca0e9ef732f8cd8b8755bb`. Verified on-chain: `TreasuryPolicy.verifiers(0xFd2EAE…6519) == false`. The KMS-derived `0x31ad…7ab7F` is now the sole authorized verifier; even if the retired raw key leaked, signatures from `0xFd2EAE…6519` are now rejected by `TreasuryPolicy.verify()`. |
+| **`SIGNER_BACKEND=kms` flip in production env**                     | ✅ executed 2026-05-16 | `deploy/backend.env.template`: `SIGNER_BACKEND=local`→`kms` + `SIGNER_PRIVATE_KEY=op://...` line removed. PR 2.7d.1 hash-detect force-recreates the backend container; KmsSigner is instantiated by `gateway.js`'s `createSigner` factory. Old `SIGNER_PRIVATE_KEY` OP item retained ~30 days as rollback target, then retired. On-chain authorization of the legacy verifier address revoked 2026-05-17 (row above) — even with the OP item in hand, signatures from the recovered raw-key address are now rejected by `TreasuryPolicy.verify()`. |
 | **IAM Roles Anywhere CA + Trust Anchor + VPS cert**                 | ⏳ deferred | Mainnet path. Testnet path is static IAM keys, residual risk documented. |
 | **CloudTrail + CloudWatch alarms on KMS key**                       | ⏳ deferred | Best-practice but not blocking the cutover; do before mainnet      |
 
