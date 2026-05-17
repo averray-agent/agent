@@ -216,3 +216,24 @@ The script fetches the badge and profile documents and verifies that:
 
 Do not mark the product-proof checklist complete from screenshots alone. The
 evidence file and passing gate output are the durable proof.
+
+## Latest Hosted Proof
+
+The strict hosted gate passed on 2026-05-17 in GitHub Actions run
+`25988470399`, dispatched with `smoke_check_product_proof_gate=1` and
+`product_proof_require_worker_loop=1`.
+
+- Job: `product-proof-worker-loop-1779014145578`
+- Session:
+  `product-proof-worker-loop-1779014145578:0x31ad432dFe083B998c69B6dB88A984ec5207ab7F`
+- KMS signer: `0x31ad432dFe083B998c69B6dB88A984ec5207ab7F`
+- Settlement asset: USDC, Trust-Backed Asset `1337`, precompile
+  `0x0000053900000000000000000000000001200000`
+- Reward/min-balance check: reward `0.1 USDC`, min balance `0.07 USDC`
+- Signer funding check: required `0.1 USDC`, available `0.3 USDC` in
+  `AgentAccountCore`
+- Validation proof: direct `payload.submission` object passed; the intentional
+  `submission.output` wrapper was rejected before claim with
+  `submitAttempted=false`
+- Result: `verificationOutcome=approved`, `submitStatus=submitted`,
+  `sessionStatus=resolved`, and `Product-proof gate passed`

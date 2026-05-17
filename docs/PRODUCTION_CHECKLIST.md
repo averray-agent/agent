@@ -248,9 +248,9 @@ RUN_SUBSCAN_XCM_VALIDATION=1 ./scripts/ops/check-release-readiness.sh testnet
 
 ## 7. Product proof before production claims
 
-- [ ] One complete worker loop has been run on the hosted stack:
+- [x] One complete worker loop has been run on the hosted stack:
   discover -> sign in -> preflight -> claim -> submit -> verify -> badge/profile
-- [ ] A schema-native job submission has been validated through
+- [x] A schema-native job submission has been validated through
   `/jobs/validate-submission` and submitted as direct `payload.submission`
   evidence, with no `submission.output` wrapper. The operator-app gate is in
   place: `app/lib/api/guarded-submit.js` short-circuits the submit when the
@@ -264,6 +264,11 @@ RUN_SUBSCAN_XCM_VALIDATION=1 ./scripts/ops/check-release-readiness.sh testnet
   structured-required job (one valid, one invalid) and the invalid attempt did
   not consume the session's submit budget. Verify with the regression tests:
   `node --test app/lib/api/guarded-submit.test.mjs scripts/ops/run-hosted-worker-loop.test.mjs scripts/ops/check-product-proof-gate.test.mjs`.
+  Completed on 2026-05-17 in Deploy Production run
+  `25988470399`: job `product-proof-worker-loop-1779014145578`, session
+  `product-proof-worker-loop-1779014145578:0x31ad432dFe083B998c69B6dB88A984ec5207ab7F`,
+  `verificationOutcome=approved`, `sessionStatus=resolved`, and the hosted
+  gate accepted `/srv/agent-stack/product-proof-worker-loop-evidence.json`.
 - [ ] The phase-0 dispute verdict path has been exercised on the hosted stack
   with the configured arbitrator/gateway and a recorded on-chain tx state from
   `POST /disputes/:id/verdict`. Flip this box only after running the dry-run
@@ -467,3 +472,10 @@ If the worker loop is not the point of this particular dispatch, set
 re-trigger; the deploy will skip the loop entirely. This is the right
 choice for a non-functional dispatch (Caddy-only change, hotfix smoke,
 cache invalidation) where the worker loop is not part of the test plan.
+
+Last strict hosted proof: Deploy Production run `25988470399` on 2026-05-17
+with `smoke_check_product_proof_gate=1` and
+`product_proof_require_worker_loop=1`. The KMS signer
+`0x31ad432dFe083B998c69B6dB88A984ec5207ab7F` reported `0.3 USDC` liquid in
+`AgentAccountCore`, the worker-loop reward required `0.1 USDC`, the session
+resolved, and `Product-proof gate passed`.
