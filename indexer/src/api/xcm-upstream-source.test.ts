@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  HttpFeedSourceAdapter,
   NativePapiXcmSourceAdapter,
   SubscanXcmSourceAdapter,
   createXcmUpstreamSourceAdapter,
@@ -86,6 +87,21 @@ test("native PAPI evidence preserves explicit failure metadata", () => {
   assert.equal(outcome.status, "failed");
   assert.equal(outcome.failureCode, failureCode);
   assert.equal(outcome.source, "native_papi_staging");
+});
+
+test("native PAPI evidence rejects failed outcomes without failureCode", () => {
+  assert.throws(
+    () => normalizeNativeXcmEvidence({
+      requestId,
+      status: "failed",
+      observedAt: "2026-04-23T12:30:00.000Z",
+      correlation: {
+        method: "ledger_join",
+        confidence: "staging"
+      }
+    }),
+    /failed items must include failureCode/u
+  );
 });
 
 test("native PAPI evidence preserves large uint256 settlement amounts exactly", () => {
@@ -205,6 +221,45 @@ test("Subscan source preserves failure code for failed status variants", () => {
 
   assert.equal(outcome?.status, "failed");
   assert.equal(outcome?.failureCode, failureCode);
+});
+
+test("Subscan source rejects failed status variants without failure code", () => {
+  const adapter = new SubscanXcmSourceAdapter({
+    apiHost: "https://subscan.example",
+    apiKey: "test"
+  });
+
+  assert.throws(
+    () => adapter.normalizeSubscanEntry({
+      message_topic: requestId,
+      execution_status: "xcm_failed",
+      block_timestamp: "1712345678"
+    }),
+    /failed items must include failureCode/u
+  );
+});
+
+test("HTTP feed source rejects failed items without failureCode", async () => {
+  const adapter = new HttpFeedSourceAdapter({
+    url: "https://feed.example/xcm",
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => ({
+        items: [
+          {
+            requestId,
+            status: "failed",
+            observedAt: "2026-04-23T12:30:00.000Z"
+          }
+        ]
+      })
+    } as Response)
+  });
+
+  await assert.rejects(
+    () => adapter.fetchBatch({ limit: 25 }),
+    /failed items must include failureCode/u
+  );
 });
 
 test("Subscan source ignores uncorrelated message and extrinsic hashes", () => {

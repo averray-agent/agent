@@ -144,6 +144,14 @@ function normalizeStatus(value: unknown) {
   return normalized;
 }
 
+function normalizeFailureCode(value: unknown, status: string) {
+  const failureCode = normalizeOptionalHex32(value);
+  if (status === "failed" && !failureCode) {
+    throw new Error("XCM upstream failed items must include failureCode.");
+  }
+  return failureCode;
+}
+
 function normalizeFeedItem(item: unknown, fallbackSource = "external_xcm_source"): PublishedOutcome {
   if (!item || typeof item !== "object" || Array.isArray(item)) {
     throw new Error("XCM upstream items must be objects.");
@@ -153,13 +161,14 @@ function normalizeFeedItem(item: unknown, fallbackSource = "external_xcm_source"
   if (!/^0x[a-fA-F0-9]{64}$/u.test(requestId)) {
     throw new Error("XCM upstream requestId must be a 0x-prefixed 32-byte hex string.");
   }
+  const status = normalizeStatus(sourceItem.status);
   return {
     requestId,
-    status: normalizeStatus(sourceItem.status),
+    status,
     settledAssets: normalizeAmount(sourceItem.settledAssets),
     settledShares: normalizeAmount(sourceItem.settledShares),
     remoteRef: normalizeOptionalHex32(sourceItem.remoteRef),
-    failureCode: normalizeOptionalHex32(sourceItem.failureCode),
+    failureCode: normalizeFailureCode(sourceItem.failureCode, status),
     observedAt: normalizeObservedAt(sourceItem.observedAt),
     source: typeof sourceItem.source === "string" && sourceItem.source.trim()
       ? sourceItem.source.trim()
@@ -460,7 +469,7 @@ export class SubscanXcmSourceAdapter implements XcmUpstreamSourceAdapter {
       settledShares: "0",
       remoteRef: normalizeOptionalHex32(this.pickString(entry, ["remote_ref", "query_id"])),
       failureCode: status === "failed"
-        ? normalizeOptionalHex32(this.pickString(entry, ["error_code", "failure_code"]))
+        ? normalizeFailureCode(this.pickString(entry, ["error_code", "failure_code"]), status)
         : null,
       observedAt: normalizeObservedAt(this.pickString(entry, ["block_timestamp", "timestamp", "time"])),
       source: "subscan_xcm_api"
