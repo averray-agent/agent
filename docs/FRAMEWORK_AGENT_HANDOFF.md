@@ -1,8 +1,12 @@
 # Framework Agent Handoff — Averray Implementation
 
+**Doc version:** v2.4 (2026-05-17)
 **Purpose:** Context document for the framework agent picking up implementation work on Averray.
-**Companion documents:** `AVERRAY_WORKING_SPEC.md` (v2.2) and `AVERRAY_VERIFICATION_LEDGER.md` (post-verification, 2026-04-28).
-**Read this first.** Then read the two companion documents in the order described below.
+**Companion documents:** `AVERRAY_WORKING_SPEC.md` (v2.2 architecture spec),
+`AVERRAY_VERIFICATION_LEDGER.md` (post-verification, 2026-04-28), and
+`AUDIT_REMEDIATION.md` (multi-agent remediation board, the active coordination
+contract for in-flight P1.x and P2.x findings).
+**Read this first.** Then read the three companion documents in the order described below.
 
 ---
 
@@ -31,6 +35,7 @@ Cross-reference the ledger any time the spec asserts something about Polkadot se
 1. **The spec's reconciliation log (§15) bottom-up** — newest entry (v2.2) first, then v2.1, etc. This shows how the design evolved and why specific decisions were made. The log is preserved across versions deliberately; it's the audit trail for the design itself.
 2. **The spec's §12 pre-launch checklist** — the canonical list of what `v1.0.0-rc1` needs.
 3. **The verification ledger top summary** — the count of verified vs. corrections-needed vs. empirical claims, and the seven correction themes that flowed into the spec.
+4. **The audit remediation board (`AUDIT_REMEDIATION.md`) "Multi-agent execution board" section** — packages A–J, file scopes, dependencies. Treat that doc as the coordination contract for any in-flight P1.x or P2.x work; one package = one branch = one PR.
 
 ---
 
@@ -107,6 +112,12 @@ These three are the highest-leverage marketing-surface items per spec §10 Reput
 - Yield strategy portfolio: NO yield in v1.0.0-rc1, vDOT yield-share at v1.x, GDOT v2
 - Revenue model: slashed-stake split + slashed claim-fee split at v1, yield-share + swap spread at v1.x/v2
 - Reputation soulbound non-transferability — non-negotiable, hardcoded contract revert
+- **Trust-core-first remediation posture** — every product surface must declare whether it is real, degraded, empty, demo, or local-simulation, and must enforce that declaration mechanically. The audit board (`AUDIT_REMEDIATION.md`) is the live tracker.
+- **Mutation backend gate (`MUTATION_BACKEND=memory|chain|required`)** — Package A, merged 2026-05-17. Money-like routes refuse to mutate local memory in production when chain backend is unavailable.
+- **Backend signer is KMS-backed** — Phase 3 cutover 2026-05-16. `SIGNER_BACKEND=kms`; raw `SIGNER_PRIVATE_KEY` removed from `deploy/backend.env.template`.
+- **Account overlay precedence and durability** — Package C, merged 2026-05-17. Live chain reads win over stored cache per-key; the `AccountOverlayStore` write-through cache mirrors overlay state to Redis so it survives process restart.
+- **Public-site console is labeled "Example"** — Package F, merged 2026-05-17. No "Live" badge on deterministic animation.
+- **Generated-output guard** — Package H, merged 2026-05-17. Manual edits under `frontend/` and `site/` are rejected without an explicit bypass.
 
 ### Open (genuinely undecided)
 
@@ -165,5 +176,12 @@ The same discipline that makes the platform credible to its agents makes the cod
 ## Final notes
 
 - The reconciliation log entries v1.0 through v2.2 in the spec capture eleven sessions of design work. Read them; don't re-derive decisions that were already made deliberately.
-- Both files were last updated on 2026-04-28. If you're reading this much later, re-verify ✅ items in the ledger before relying on them — Polkadot is moving fast and the runtime semantics shift with each release.
-- The spec is now ~1100 lines and 15 sections. The ledger is 343 lines. They were designed to be read together. Neither alone tells the full story.
+- The spec and ledger were last updated on 2026-04-28. This handoff doc was last updated on 2026-05-17 (v2.4). If you're reading this much later, re-verify ✅ items in the ledger before relying on them — Polkadot is moving fast and the runtime semantics shift with each release.
+- The spec is now ~1100 lines and 15 sections. The ledger is 343 lines. The audit remediation board adds a third document at ~650 lines tracking the trust-core-first remediation packages. The three were designed to be read together; neither alone tells the full story.
+
+### v2.4 doc-update notes (2026-05-17)
+
+- Added `AUDIT_REMEDIATION.md` as a third companion document. Packages A–J cover the trust-core-first remediation work; B, D, E, G, I, J still open at the time of this update.
+- "Locked" list expanded to cover the Phase 3 KMS signer cutover and Packages A, C, F, H that have closed.
+- Reading order grew to four steps to include the remediation board.
+- For ongoing operational duties, see `OPERATOR_ONBOARDING.md` (new in v2.4) and `INCIDENT_RESPONSE.md`.
