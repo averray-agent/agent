@@ -389,7 +389,7 @@ suites above.
 
 ## 9. Contact
 
-- Primary: <TBD — fill in before sending>
-- Escalation: <TBD>
+- Primary: <pkuriger@averray.com>
+- Escalation: <ops@averray.com>
 - Response SLA: within 2 business days for questions during audit; within
   1 business day for findings classified Critical.
