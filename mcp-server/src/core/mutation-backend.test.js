@@ -89,6 +89,31 @@ test("mutation backend rejects chain mode when health check fails", async () => 
   assert.equal(status.gatewayStatus.error, "rpc unavailable");
 });
 
+test("mutation backend can reuse a precomputed gateway health response", async () => {
+  let probed = false;
+  const status = await getMutationBackendStatus({
+    config: loadMutationBackendConfig({ MUTATION_BACKEND: "required" }),
+    gateway: {
+      isEnabled: () => true,
+      healthCheck: async () => {
+        probed = true;
+        return { ok: false, enabled: true, backend: "blockchain", error: "should not be called" };
+      }
+    },
+    route: "/health",
+    gatewayStatus: {
+      ok: true,
+      enabled: true,
+      backend: "blockchain",
+      blockNumber: 123
+    }
+  });
+
+  assert.equal(probed, false);
+  assert.equal(status.ok, true);
+  assert.equal(status.gatewayStatus.blockNumber, 123);
+});
+
 test("mutation backend allows required mode when gateway health is ok", async () => {
   const status = await assertMutationBackendAvailable({
     config: loadMutationBackendConfig({ MUTATION_BACKEND: "required" }),

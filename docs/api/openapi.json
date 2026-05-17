@@ -41,7 +41,7 @@
         ],
         "operationId": "getHealth",
         "summary": "Return backend health",
-        "description": "Reports state-store, blockchain, and gas-sponsor health for the current deployment.",
+        "description": "Reports API service liveness separately from live capability health for the current deployment.",
         "responses": {
           "200": {
             "description": "All core components are healthy.",
@@ -54,6 +54,33 @@
                   "ok": {
                     "value": {
                       "status": "ok",
+                      "serviceHealth": {
+                        "ok": true,
+                        "components": {
+                          "api": {
+                            "ok": true,
+                            "mode": "running"
+                          },
+                          "stateStore": {
+                            "ok": true,
+                            "backend": "redis",
+                            "mode": "durable"
+                          },
+                          "auth": {
+                            "ok": true,
+                            "mode": "strict",
+                            "domain": "api.averray.com",
+                            "chainId": 420420417
+                          }
+                        }
+                      },
+                      "capabilityHealth": {
+                        "blockchain": "enabled",
+                        "treasuryMutations": "available",
+                        "xcmObserver": "staged",
+                        "indexer": "unavailable",
+                        "gasSponsor": "disabled"
+                      },
                       "auth": {
                         "mode": "strict",
                         "domain": "api.averray.com",
@@ -798,6 +825,8 @@
         "type": "object",
         "required": [
           "status",
+          "serviceHealth",
+          "capabilityHealth",
           "auth",
           "components"
         ],
@@ -808,6 +837,73 @@
               "ok",
               "degraded"
             ]
+          },
+          "serviceHealth": {
+            "type": "object",
+            "required": [
+              "ok",
+              "components"
+            ],
+            "properties": {
+              "ok": {
+                "type": "boolean"
+              },
+              "components": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          },
+          "capabilityHealth": {
+            "type": "object",
+            "required": [
+              "blockchain",
+              "treasuryMutations",
+              "xcmObserver",
+              "indexer",
+              "gasSponsor"
+            ],
+            "properties": {
+              "blockchain": {
+                "type": "string",
+                "enum": [
+                  "enabled",
+                  "disabled",
+                  "unhealthy"
+                ]
+              },
+              "treasuryMutations": {
+                "type": "string",
+                "enum": [
+                  "available",
+                  "unavailable",
+                  "degraded"
+                ]
+              },
+              "xcmObserver": {
+                "type": "string",
+                "enum": [
+                  "live",
+                  "staged",
+                  "unavailable"
+                ]
+              },
+              "indexer": {
+                "type": "string",
+                "enum": [
+                  "synced",
+                  "lagging",
+                  "unavailable"
+                ]
+              },
+              "gasSponsor": {
+                "type": "string",
+                "enum": [
+                  "enabled",
+                  "disabled"
+                ]
+              }
+            }
           },
           "auth": {
             "type": "object",

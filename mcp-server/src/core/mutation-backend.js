@@ -28,7 +28,12 @@ export function describeMutationBackendStartup(config, gateway) {
   };
 }
 
-export async function getMutationBackendStatus({ gateway, config = loadMutationBackendConfig(), route = undefined } = {}) {
+export async function getMutationBackendStatus({
+  gateway,
+  config = loadMutationBackendConfig(),
+  route = undefined,
+  gatewayStatus = undefined
+} = {}) {
   if (!config.requiresChain) {
     return {
       ok: true,
@@ -49,16 +54,16 @@ export async function getMutationBackendStatus({ gateway, config = loadMutationB
     });
   }
 
-  let health;
+  let health = gatewayStatus;
   try {
-    health = typeof gateway.healthCheck === "function"
+    health = health ?? (typeof gateway.healthCheck === "function"
       ? await gateway.healthCheck()
       : {
           ok: true,
           backend: "blockchain",
           enabled: true,
           mode: "enabled_without_healthcheck"
-        };
+        });
   } catch (error) {
     return unavailable(config, route, error?.message ?? "blockchain gateway health check failed", {
       ok: false,
