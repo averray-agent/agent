@@ -41,6 +41,7 @@ const DISCOVERY_AUTHENTICATED_ENDPOINTS = [
     description: "Signed-in lane positions plus treasury-share and adapter-backed yield/performance posture for each registered strategy adapter."
   },
   { path: "/reputation", description: "Current reputation scores + tier." },
+  { path: "/auth/refresh", description: "Rotate the caller's wallet JWT — revokes the old jti and mints a new one with the same sub + roles. Lets operators avoid re-SIWE every AUTH_TOKEN_TTL_SECONDS." },
   { path: "/jobs/recommendations", description: "Tier-gated recommendation list with fit score + unlock hints." },
   { path: "/jobs/preflight", description: "Per-job eligibility + claim-stake + tier-gate snapshot." },
   { path: "/admin/jobs/timeline", description: "Admin-gated job/session timeline and lineage endpoint." },
@@ -64,7 +65,7 @@ const DISCOVERY_AUTHENTICATED_ENDPOINTS = [
   { path: "/events", description: "SSE stream of platform events. Auth via ?token=." }
 ];
 
-const AUTH_ENTRYPOINTS = ["/auth/nonce", "/auth/verify", "/auth/logout"];
+const AUTH_ENTRYPOINTS = ["/auth/nonce", "/auth/verify", "/auth/refresh", "/auth/logout"];
 
 const WALLET_READINESS_CHECKS = [
   {
@@ -215,6 +216,15 @@ const HTTP_ACTION_REQUIREMENTS = [
     requiresAuth: false,
     requiredAction: "verify_siwe_signature",
     walletModes: ["evm-siwe"]
+  },
+  {
+    method: "POST",
+    path: "/auth/refresh",
+    requiresAuth: true,
+    requiredAction: "refresh_wallet_token",
+    authScheme: "SIWE_JWT",
+    walletModes: ["evm-siwe"],
+    notes: "Rotates the caller's wallet JWT — revokes the old jti and mints a new one with the same sub + roles. Service tokens cannot be refreshed here."
   },
   {
     method: "POST",
@@ -410,7 +420,7 @@ const BASE_MANIFEST = {
   },
   executionSurfaces: {
     operatorApp: DEFAULT_OPERATOR_APP_URL,
-    authEntrypoints: ["/auth/nonce", "/auth/verify", "/auth/logout"],
+    authEntrypoints: ["/auth/nonce", "/auth/verify", "/auth/refresh", "/auth/logout"],
     note:
       "Mutating and financial actions exist on authenticated HTTP and operator-app surfaces but are intentionally excluded from this directory-safe manifest until the trust, policy, and audit posture are ready for broader distribution."
   }

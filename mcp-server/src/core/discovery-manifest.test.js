@@ -28,6 +28,11 @@ test("buildDiscoveryManifest returns the full public discovery shape", () => {
   assert.ok(manifest.authenticatedEndpoints.some((entry) => entry.path === "/account/borrow-capacity"));
   assert.ok(!manifest.authenticatedEndpoints.some((entry) => entry.path === "/payments/send"));
   assert.ok(!manifest.tools.some((tool) => tool.name === "sendToAgent"));
+  // /auth/refresh rotates the wallet JWT in place — both the entrypoint
+  // list and the authenticated-endpoints list must advertise it so clients
+  // can avoid re-running SIWE every AUTH_TOKEN_TTL_SECONDS.
+  assert.ok(manifest.executionSurfaces.authEntrypoints.includes("/auth/refresh"));
+  assert.ok(manifest.authenticatedEndpoints.some((entry) => entry.path === "/auth/refresh"));
   assert.equal(manifest.tools[0]?.name, "getPlatformCapabilities");
   assert.equal(manifest.executionSurfaces.operatorApp, "https://app.example.com");
   assert.equal(manifest.schemas.agentBadge, "https://averray.com/schemas/agent-badge-v1.json");

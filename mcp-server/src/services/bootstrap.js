@@ -357,6 +357,11 @@ function loadRateLimitConfig(env = process.env) {
   return {
     authNonce: buildLimit(env, "RATE_LIMIT_AUTH_NONCE", { limit: 10, windowSeconds: 60 }),
     authVerify: buildLimit(env, "RATE_LIMIT_AUTH_VERIFY", { limit: 10, windowSeconds: 60 }),
+    // Refresh has a stricter per-wallet limit than verify because a refresh
+    // call needs a valid token in hand — abusive callers would have to keep
+    // spending tokens to retry. 6/min is enough headroom for a tab that
+    // wakes up after sleep and a couple of background re-syncs.
+    authRefresh: buildLimit(env, "RATE_LIMIT_AUTH_REFRESH", { limit: 6, windowSeconds: 60 }),
     adminJobs: buildLimit(env, "RATE_LIMIT_ADMIN_JOBS", { limit: 60, windowSeconds: 60 }),
     verifierRun: buildLimit(env, "RATE_LIMIT_VERIFIER_RUN", { limit: 120, windowSeconds: 60 }),
     events: buildLimit(env, "RATE_LIMIT_EVENTS", { limit: 30, windowSeconds: 60 })

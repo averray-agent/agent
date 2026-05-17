@@ -151,6 +151,17 @@
       },
       {
         "method": "POST",
+        "path": "/auth/refresh",
+        "requiresAuth": true,
+        "requiredAction": "refresh_wallet_token",
+        "authScheme": "SIWE_JWT",
+        "walletModes": [
+          "evm-siwe"
+        ],
+        "notes": "Rotates the caller's wallet JWT — revokes the old jti and mints a new one with the same sub + roles. Service tokens cannot be refreshed here."
+      },
+      {
+        "method": "POST",
         "path": "/jobs/claim",
         "requiresAuth": true,
         "requiredAction": "wallet_sign_in",
@@ -348,6 +359,7 @@
     "entrypoints": [
       "/auth/nonce",
       "/auth/verify",
+      "/auth/refresh",
       "/auth/logout"
     ],
     "supportedWalletModes": [
@@ -453,6 +465,10 @@
     {
       "path": "/reputation",
       "description": "Current reputation scores + tier."
+    },
+    {
+      "path": "/auth/refresh",
+      "description": "Rotate the caller's wallet JWT — revokes the old jti and mints a new one with the same sub + roles. Lets operators avoid re-SIWE every AUTH_TOKEN_TTL_SECONDS."
     },
     {
       "path": "/jobs/recommendations",
@@ -683,6 +699,7 @@
     "authEntrypoints": [
       "/auth/nonce",
       "/auth/verify",
+      "/auth/refresh",
       "/auth/logout"
     ],
     "note": "Mutating and financial actions exist on authenticated HTTP and operator-app surfaces but are intentionally excluded from this directory-safe manifest until the trust, policy, and audit posture are ready for broader distribution."
