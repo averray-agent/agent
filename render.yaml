@@ -1,3 +1,23 @@
+# DEPRECATED 2026-05-17.
+#
+# Production deploys go through .github/workflows/deploy-production.yml to
+# the VPS — Render.com is not a current deployment target. This file is
+# kept for historical reference only and is not maintained.
+#
+# Known drift from the live deploy:
+#   - References SIGNER_PRIVATE_KEY, which was removed at the Phase 3 KMS
+#     cutover (2026-05-16). The active backend uses SIGNER_BACKEND=kms
+#     plus AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / KMS_KEY_ID /
+#     AWS_REGION instead. See docs/SECRETS_MIGRATION.md.
+#   - Does not declare AUTH_JWT_SECRETS, RESEND_API_KEY, the GITHUB_TOKEN
+#     ingestion key, BOOTSTRAP_SELF_REPORT_*, or any of the canonical
+#     contract addresses kept in deploy/backend.env.template.
+#
+# Do not use this file to provision a new Render service without first
+# reconciling against deploy/backend.env.template and
+# docs/SECRETS_MIGRATION.md. If Render is permanently retired, delete
+# this file in a separate PR.
+
 services:
   - type: web
     name: polkadot-agent-platform

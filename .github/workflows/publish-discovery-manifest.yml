@@ -30,6 +30,8 @@ jobs:
     name: Publish discovery hash
     runs-on: ubuntu-latest
     environment: production
+    permissions:
+      contents: read
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     env:
       DISCOVERY_MANIFEST_URL: ${{ github.event_name == 'workflow_dispatch' && inputs.manifest_url || 'https://averray.com/.well-known/agent-tools.json' }}
