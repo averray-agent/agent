@@ -17,11 +17,16 @@ Use it together with:
 
 Fill these in before calling the system production-ready:
 
-- Primary on-call: `<name / handle>`
-- Backup on-call: `<name / handle>`
+- Primary on-call: <ops@averray.com>
+- Backup on-call: <ops@averray.com>
 - Contract owner signers: `<hot / warm / cold mapping>`
 - Pauser operator: `<name / handle>`
 - External escalation path: `<vendor, consultant, or empty>`
+
+`ops@averray.com` is the operator alias that routes to whoever is on
+duty; both primary and backup land in the same inbox. Contract owner
+signers, pauser operator, and external escalation path are still
+unfilled — see §1 closing line.
 
 If these are blank, you do not have incident ownership yet.
 
@@ -220,7 +225,7 @@ If the incident required a pause, include:
 
 Before calling the stack truly production-ready:
 
-- [ ] Primary and backup on-call are named
+- [x] Primary and backup on-call are named
 - [ ] A live alert webhook is configured
 - [ ] `check-hosted-stack-and-alert.sh` is running from an external scheduler
 - [ ] Pause path has been rehearsed recently
