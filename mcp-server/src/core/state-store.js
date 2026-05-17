@@ -52,6 +52,30 @@ export class MemoryStateStore {
     this.capabilityGrants = new Map();
     this.eventLog = [];
     this.accountOverlays = new Map();
+    this.policyProposals = new Map();
+  }
+
+  // ── policy proposals (Package G) ──────────────────────────────────
+  //
+  // Backs the PolicyService write-through cache. Built-in policies are
+  // seed data loaded from builtin-policies.js; only operator-proposed
+  // policies land here. Mirrors the account-overlay storage shape:
+  // async API + deep-clone on the way in and out so callers cannot
+  // mutate the internal Map.
+
+  async getPolicyProposal(tag) {
+    if (!tag) return undefined;
+    const stored = this.policyProposals.get(String(tag));
+    return stored ? JSON.parse(JSON.stringify(stored)) : undefined;
+  }
+
+  async upsertPolicyProposal(tag, proposal) {
+    if (!tag) return;
+    this.policyProposals.set(String(tag), JSON.parse(JSON.stringify(proposal ?? {})));
+  }
+
+  async listPolicyProposalTags() {
+    return Array.from(this.policyProposals.keys());
   }
 
   // ── account overlays (Package C Phase 2) ───────────────────────────
@@ -458,6 +482,32 @@ export class RedisStateStore {
   async listAccountOverlayWallets() {
     await this.connect();
     return await this.client.hKeys(this.key("account-overlay", "all"));
+  }
+
+  // ── policy proposals (Package G) ──────────────────────────────────
+  // Mirrors the account-overlay shape: single hash
+  // `<namespace>:policy-proposal` keyed by tag.
+
+  async getPolicyProposal(tag) {
+    if (!tag) return undefined;
+    await this.connect();
+    const raw = await this.client.hGet(this.key("policy-proposal", "all"), String(tag));
+    return raw ? JSON.parse(raw) : undefined;
+  }
+
+  async upsertPolicyProposal(tag, proposal) {
+    if (!tag) return;
+    await this.connect();
+    await this.client.hSet(
+      this.key("policy-proposal", "all"),
+      String(tag),
+      JSON.stringify(proposal ?? {})
+    );
+  }
+
+  async listPolicyProposalTags() {
+    await this.connect();
+    return await this.client.hKeys(this.key("policy-proposal", "all"));
   }
 
   async getSession(sessionId) {

@@ -1,6 +1,8 @@
 import { PlatformService } from "../core/platform-service.js";
 import { createStateStore } from "../core/state-store.js";
 import { AccountOverlayStore } from "../core/account-overlay-store.js";
+import { PolicyService } from "../core/policy-service.js";
+import { BUILTIN_POLICIES } from "../core/builtin-policies.js";
 import { BlockchainGateway } from "../blockchain/gateway.js";
 import { VerifierService } from "./verifier-service.js";
 import { loadLocalEnv } from "./env-loader.js";
@@ -189,6 +191,13 @@ export async function createPlatformRuntime() {
   // demo fixture.
   const overlayHydration = await accounts.hydrate();
   logger.info?.(overlayHydration, "account-overlay.hydrate");
+  const policyService = initStep("init-policy-service", logger, () =>
+    new PolicyService({ stateStore, seedPolicies: BUILTIN_POLICIES, logger })
+  );
+  // Hydrate operator-proposed policies before any /policies route is
+  // exposed. Built-in policies are seed data and don't need hydration.
+  const policyHydration = await policyService.hydrate();
+  logger.info?.(policyHydration, "policy.hydrate");
   const platformService = initStep(
     "init-platform-service",
     logger,
@@ -324,6 +333,7 @@ export async function createPlatformRuntime() {
   }
   return {
     platformService,
+    policyService,
     verifierService,
     gateway,
     mutationBackendConfig,

@@ -86,9 +86,11 @@ import {
 import { ingestStandardsSpecs, parseSpecs as parseStandardsSpecs } from "../../jobs/ingest-standards-specs.js";
 import { ingestWikipediaMaintenance, parseCategories } from "../../jobs/ingest-wikipedia-maintenance.js";
 import { buildPublicJobsResponse } from "./jobs-response.js";
+import { OPERATOR_SIGNERS, makePolicy } from "../../core/builtin-policies.js";
 
 const {
   platformService: service,
+  policyService,
   verifierService,
   stateStore,
   contentRecoveryLog,
@@ -565,176 +567,21 @@ function compactObject(value) {
   );
 }
 
-const OPERATOR_SIGNERS = {
-  fd2e: {
-    role: "primary operator",
-    addr: process.env.DEFAULT_POSTER_ADDRESS ?? "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519",
-    initials: "FD",
-    hue: 148
-  },
-  "9a13": {
-    role: "co-signer",
-    addr: process.env.DEFAULT_VERIFIER_ADDRESS ?? "0x9A13C20000000000000000000000000000000CB2",
-    initials: "9A",
-    hue: 214
-  },
-  "3e42": {
-    role: "verifier",
-    addr: process.env.DEFAULT_VERIFIER_ADDRESS ?? "0x3E420000000000000000000000000000000008D1",
-    initials: "V2",
-    hue: 196
-  }
-};
-
-const POLICY_PROPOSALS = new Map();
-
-function signerApproval(key, state = "signed", at = "2026-04-24 14:08 UTC") {
-  const signer = OPERATOR_SIGNERS[key] ?? OPERATOR_SIGNERS.fd2e;
-  return {
-    key,
-    ...signer,
-    state,
-    ...(state === "signed" ? { at, sig: `0x${key}...signed` } : {})
-  };
-}
-
-function makePolicy({
-  id,
-  tag,
-  scope,
-  scopeLabel,
-  severity,
-  state,
-  revision,
-  handler,
-  gates,
-  rooms,
-  activeSince,
-  lastChange,
-  rule,
-  attachedJobs = [],
-  signerKeys = ["fd2e", "9a13", "3e42"],
-  signersReq = 2
-}) {
-  return {
-    id,
-    tag,
-    scope,
-    scopeLabel,
-    severity,
-    signersReq,
-    signersTotal: signerKeys.length,
-    signerKeys,
-    activeSince,
-    lastChange,
-    state,
-    revision,
-    rooms,
-    handler,
-    gates,
-    attachedJobs,
-    rule,
-    approvals: signerKeys.map((key, index) => signerApproval(key, index < signersReq ? "signed" : "pending")),
-    history: [
-      {
-        rev: revision,
-        author: lastChange.author,
-        at: String(lastChange.at ?? "").slice(0, 10),
-        summary: lastChange.text,
-        active: true
-      }
-    ]
-  };
-}
-
-const BUILTIN_POLICIES = [
-  makePolicy({
-    id: "p-claim-deps-sec-only",
-    tag: "claim/deps-sec-only@v4",
-    scope: "claim",
-    scopeLabel: "Claim",
-    severity: "gating",
-    state: "Active",
-    revision: 4,
-    activeSince: "2026-03-11",
-    handler: "verifier/deps_sec_only.ts",
-    gates: "Auto-claim on dependency bumps where only security advisories changed.",
-    rooms: ["runs/coding/*", "runs/deps-bump/*"],
-    attachedJobs: [{ id: "starter-coding-001", title: "Starter coding verification", at: "live" }],
-    lastChange: {
-      text: "Raised max-cvss ceiling to 7.5 for staged dependency work.",
-      author: "fd2e",
-      at: "2026-04-24 14:08 UTC"
-    },
-    rule: {
-      v4: JSON.stringify({
-        kind: "claim.auto",
-        scope: "deps-bump",
-        require: { advisory_type: "security", semver_delta: ["patch", "minor"], max_cvss: 7.5 },
-        deny: { lockfile_drift: true, transitive_majors: true },
-        receipt: { co_sign: ["verifier_handler"], attach_cvss_trail: true }
-      }, null, 2)
-    }
-  }),
-  makePolicy({
-    id: "p-settle-receipt-before-payout",
-    tag: "settle/receipt-before-payout@v1",
-    scope: "settle",
-    scopeLabel: "Settle",
-    severity: "hard-stop",
-    state: "Active",
-    revision: 1,
-    activeSince: "2026-04-17",
-    handler: "settlement/receipt_gate.ts",
-    gates: "Release stake and reward only after verifier receipt exists.",
-    rooms: ["sessions/*", "treasury/settlement/*"],
-    lastChange: {
-      text: "Initial settlement gate for operator launch.",
-      author: "9a13",
-      at: "2026-04-24 14:08 UTC"
-    },
-    rule: {
-      v1: JSON.stringify({
-        kind: "settle.gate",
-        require: { receipt_signed: true, verifier_result: "approved" },
-        deny: { open_dispute: true }
-      }, null, 2)
-    }
-  }),
-  makePolicy({
-    id: "p-dispute-human-review",
-    tag: "dispute/human-review-window@v1",
-    scope: "co-sign",
-    scopeLabel: "Co-sign",
-    severity: "gating",
-    state: "Active",
-    revision: 1,
-    activeSince: "2026-04-17",
-    handler: "disputes/human_review.ts",
-    gates: "Disputed sessions hold stake until a verifier verdict is recorded.",
-    rooms: ["disputes/*"],
-    lastChange: {
-      text: "Set 72 hour review window before stake release.",
-      author: "3e42",
-      at: "2026-04-24 14:08 UTC"
-    },
-    rule: {
-      v1: JSON.stringify({
-        kind: "dispute.review",
-        window_hours: 72,
-        verdicts: ["upheld", "dismissed", "split"],
-        release_requires: ["verdict", "operator"]
-      }, null, 2)
-    }
-  })
-];
+// Package G (P2.5b) — policy state is now owned by `policyService`.
+// `OPERATOR_SIGNERS`, `signerApproval`, `makePolicy`, and the
+// `BUILTIN_POLICIES` seed array moved to
+// `mcp-server/src/core/builtin-policies.js`; operator proposals live
+// in the durable `PolicyService` store. Two thin wrappers below
+// preserve the legacy `listPolicies()` / `findPolicy()` call sites in
+// the rest of this file without each call having to know about the
+// service object.
 
 function listPolicies() {
-  return [...BUILTIN_POLICIES, ...POLICY_PROPOSALS.values()];
+  return policyService.listAll();
 }
 
 function findPolicy(tag) {
-  return listPolicies().find((policy) => policy.tag === tag || policy.id === tag);
+  return policyService.findByTagOrId(tag);
 }
 
 function buildPolicyProposal(payload, auth) {
@@ -2215,8 +2062,10 @@ const server = createServer(async (request, response) => {
       const auth = await authMiddleware(request, url, { requireRole: "admin" });
       const payload = await readJsonBody(request);
       const proposal = buildPolicyProposal(payload, auth);
-      POLICY_PROPOSALS.set(proposal.tag, proposal);
-      await stateStore.upsertMutationReceipt?.("policy_proposal", proposal.tag, proposal);
+      // Package G — PolicyService.propose updates the cache
+      // synchronously and enqueues a write-through persist against the
+      // state-store, so a server restart no longer loses the proposal.
+      policyService.propose(proposal);
       eventBus?.publish({
         id: `policy-proposal-${proposal.id}-${Date.now()}`,
         topic: "policy.proposed",
