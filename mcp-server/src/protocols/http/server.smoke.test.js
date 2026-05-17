@@ -164,6 +164,24 @@ test("http smoke: production money-like routes require a chain backend", { skip:
   });
 });
 
+test("http smoke: /health separates service liveness from treasury capability", { skip: !RUN }, async () => {
+  await runWithServerEnv({
+    NODE_ENV: "production",
+    MUTATION_BACKEND: "required"
+  }, async (base) => {
+    const response = await fetch(`${base}/health`);
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.status, "ok");
+    assert.equal(payload.serviceHealth.ok, true);
+    assert.equal(payload.capabilityHealth.blockchain, "disabled");
+    assert.equal(payload.capabilityHealth.treasuryMutations, "unavailable");
+    assert.equal(payload.capabilityHealth.xcmObserver, "unavailable");
+    assert.equal(payload.capabilityHealth.indexer, "unavailable");
+    assert.equal(payload.components.blockchain.enabled, false);
+  });
+});
+
 test("http smoke: /admin/jobs rejects unauthenticated requests", { skip: !RUN }, async () => {
   await runWithServer(async (base) => {
     const response = await fetch(`${base}/admin/jobs`, {

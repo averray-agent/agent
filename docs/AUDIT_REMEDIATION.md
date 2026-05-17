@@ -79,7 +79,9 @@ This is not complete launch planning. The audit does not surface every open item
 
 ### P1.1b - Disabled blockchain reports healthy
 
-**Status:** Open. **Launch-blocking.**
+**Status:** Closed on 2026-05-17 in PR #416 (*Package B - /health truth split*).
+**Verification:** `node --test mcp-server/src/core/health-capability.test.js` covers the service/capability status matrix; `RUN_HTTP_SMOKE=1 node --test mcp-server/src/protocols/http/server.smoke.test.js` exercises `/health` with `NODE_ENV=production`, `MUTATION_BACKEND=required`, and no chain config, asserting HTTP `200`, `serviceHealth.ok: true`, `capabilityHealth.blockchain: "disabled"`, and `capabilityHealth.treasuryMutations: "unavailable"`.
+**Notes:** Implementation lives in `mcp-server/src/core/health-capability.js` and the `/health` handler in `mcp-server/src/protocols/http/server.js`. Operator-dashboard warning presentation remains delegated to Package E; the backend now exposes the machine-readable `capabilityHealth` contract that Package E and external monitoring should consume.
 
 **Audit reference:** `mcp-server/src/blockchain/gateway.js` (`healthCheck` returns `ok: true` when disabled), `mcp-server/src/protocols/http/server.js` `/health`.
 
@@ -89,12 +91,12 @@ This is not complete launch planning. The audit does not surface every open item
 
 **Close criteria:**
 
-- [ ] `/health` response split into `serviceHealth` and `capabilityHealth`.
-- [ ] `serviceHealth` covers whether the API process responds, Redis/state store is reachable, auth dependencies are loaded, and basic runtime dependencies are working.
-- [ ] `capabilityHealth` covers live capabilities: `blockchain` (`enabled|disabled|unhealthy`), `treasuryMutations` (`available|unavailable|degraded`), `xcmObserver` (`live|staged|unavailable`), and `indexer` (`synced|lagging|unavailable`).
-- [ ] `serviceHealth` can be `ok` while `capabilityHealth.blockchain = "disabled"` and `capabilityHealth.treasuryMutations = "unavailable"`. This is valid for a trust-core-only launch.
-- [ ] In production, `capabilityHealth.treasuryMutations = "unavailable"` is reflected as a warning in operator dashboards and external monitoring.
-- [ ] Integration test: with chain disabled in production mode, `/health` returns `serviceHealth: "ok"` but `capabilityHealth.treasuryMutations: "unavailable"`.
+- [x] `/health` response split into `serviceHealth` and `capabilityHealth`.
+- [x] `serviceHealth` covers whether the API process responds, Redis/state store is reachable, auth dependencies are loaded, and basic runtime dependencies are working.
+- [x] `capabilityHealth` covers live capabilities: `blockchain` (`enabled|disabled|unhealthy`), `treasuryMutations` (`available|unavailable|degraded`), `xcmObserver` (`live|staged|unavailable`), and `indexer` (`synced|lagging|unavailable`).
+- [x] `serviceHealth` can be `ok` while `capabilityHealth.blockchain = "disabled"` and `capabilityHealth.treasuryMutations = "unavailable"`. This is valid for a trust-core-only launch.
+- [x] In production, `capabilityHealth.treasuryMutations = "unavailable"` is machine-readable for operator dashboards and external monitoring. UI warning presentation remains tracked in Package E.
+- [x] Integration test: with chain disabled in production mode, `/health` returns `serviceHealth.ok: true` but `capabilityHealth.treasuryMutations: "unavailable"`.
 
 **Verification approach:** Curl `/health` in three configurations: full chain enabled, chain disabled with `MUTATION_BACKEND=memory` for dev, and chain unhealthy with `MUTATION_BACKEND=required` for production-misconfigured. Assert each response tells the truth: service-up but capability-down where applicable.
 
@@ -425,6 +427,7 @@ The remediation work should be split into narrow branches so multiple agents can
 
 ### Package B - P1.1b health truth split
 
+**Status:** Closed on 2026-05-17 in PR #416. Package E operator warnings are now unblocked.
 **Suggested branch:** `codex/p1-health-capability-truth`
 **Can start:** After Package A exposes or confirms the gateway/mutation mode shape. A design/test stub can start earlier, but final route patch should wait for Package A.
 **Blocks:** Operator warnings in Package E.
@@ -445,6 +448,7 @@ The remediation work should be split into narrow branches so multiple agents can
 - Server route refactor
 
 **Close output:** `/health` reports `serviceHealth` separately from `capabilityHealth`, and chain-disabled production reports service-up but treasury capability unavailable.
+**Achieved:** `/health` now returns additive `serviceHealth` + `capabilityHealth` objects while preserving legacy `components`; smoke coverage asserts the production chain-disabled shape.
 
 ### Package C - P1.2 account overlay durability
 
@@ -633,7 +637,7 @@ The remediation work should be split into narrow branches so multiple agents can
 ### Merge order
 
 1. Package A - mutation gate.
-2. Package B - health truth.
+2. Package B - health truth. **Closed by PR #416.**
 3. Package D - idempotency route integration, or explicit decision to keep sync money routes disabled for rc1.
 4. Package C - account overlay durability.
 5. Package E - operator truth modes.
@@ -650,7 +654,7 @@ The remediation work should be split into narrow branches so multiple agents can
 Locked ordering for closing audit findings alongside other launch-blocking work. Revisit only if actual implementation shows the route refactor would materially reduce risk.
 
 1. **P1.1 - Mutation backend gate** (~half day). Surgical edits to existing handlers and config.
-2. **P1.1b - Health endpoint truth split** (~half day). Reshape `/health`.
+2. **P1.1b - Health endpoint truth split** (~half day). Reshape `/health`. **Closed by PR #416.**
 3. **P1.3 - Idempotency for money-like routes** (~1 day if service primitives already exist; otherwise 1-2 days). Or explicitly keep sync money routes disabled for rc1.
 4. **P1.2 - Account overlay durability migration** (~2-3 days). The load-bearing infrastructure change.
 5. **P2.4 - Frontend demo flag with visual indicator** (~1-2 days). Cross-cutting through operator pages.
@@ -685,7 +689,7 @@ Each remediation has explicit close criteria above. The discipline should match 
 - Closing a finding requires explicit verification, not assertion.
 - Status changes from `Open` to `Closed` happen in this document with date and commit hash.
 - If a remediation cannot close cleanly, the finding stays Open with notes explaining why.
-- Schedule a second audit pass once `P1.1`, `P1.1b`, `P1.2`, `P1.3`, `P2.4`, and `P2.5` are closed.
+- Schedule a second audit pass once `P1.2`, `P1.3`, `P2.4`, and `P2.5` are closed. `P1.1` and `P1.1b` are already closed in this tracker.
 
 Suggested closure note format:
 
