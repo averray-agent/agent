@@ -44,6 +44,8 @@ const DISCOVERY_AUTHENTICATED_ENDPOINTS = [
   { path: "/auth/refresh", description: "Rotate the caller's wallet JWT — revokes the old jti and mints a new one with the same sub + roles. Lets operators avoid re-SIWE every AUTH_TOKEN_TTL_SECONDS." },
   { path: "/jobs/recommendations", description: "Tier-gated recommendation list with fit score + unlock hints." },
   { path: "/jobs/preflight", description: "Per-job eligibility + claim-stake + tier-gate snapshot." },
+  { path: "/jobs/explain-eligibility", description: "Per-wallet reason why a job is eligible or blocked (used by the explainEligibility tool)." },
+  { path: "/jobs/estimate-reward", description: "Profile-aware net-reward estimate after fees, waivers, and stake (used by the estimateNetReward tool)." },
   { path: "/admin/jobs/timeline", description: "Admin-gated job/session timeline and lineage endpoint." },
   { path: "/admin/jobs/ingest/github", description: "Admin-gated GitHub issue ingestion preview/create endpoint with optional idempotencyKey replay." },
   { path: "/admin/jobs/ingest/openapi", description: "Admin-gated OpenAPI quality audit ingestion preview/create endpoint with optional idempotencyKey replay." },

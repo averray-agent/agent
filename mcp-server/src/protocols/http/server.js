@@ -3114,6 +3114,38 @@ const server = createServer(async (request, response) => {
       );
     }
 
+    // Discovery-tool surface for the platformService.explainEligibility helper.
+    // The discovery manifest at core/discovery-manifest.js advertises this tool
+    // as standalone, but until now it was only reachable as a sub-field of
+    // preflightJob / recommendJobs. Surfacing it directly closes that drift.
+    if (request.method === "GET" && pathname === "/jobs/explain-eligibility") {
+      const auth = await authMiddleware(request, url);
+      const jobId = url.searchParams.get("jobId") ?? "";
+      if (!jobId) {
+        throw new ValidationError("jobId query parameter is required.");
+      }
+      return respond(
+        response,
+        200,
+        await service.explainEligibility(auth.wallet, jobId)
+      );
+    }
+
+    // Discovery-tool surface for platformService.estimateNetReward — same
+    // motivation as /jobs/explain-eligibility above.
+    if (request.method === "GET" && pathname === "/jobs/estimate-reward") {
+      const auth = await authMiddleware(request, url);
+      const jobId = url.searchParams.get("jobId") ?? "";
+      if (!jobId) {
+        throw new ValidationError("jobId query parameter is required.");
+      }
+      return respond(
+        response,
+        200,
+        await service.estimateNetReward(auth.wallet, jobId)
+      );
+    }
+
     if (request.method === "GET" && pathname === "/jobs/sub") {
       const auth = await authMiddleware(request, url);
       const parentSessionId = url.searchParams.get("parentSessionId") ?? "";

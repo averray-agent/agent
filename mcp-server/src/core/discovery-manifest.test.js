@@ -33,6 +33,14 @@ test("buildDiscoveryManifest returns the full public discovery shape", () => {
   // can avoid re-running SIWE every AUTH_TOKEN_TTL_SECONDS.
   assert.ok(manifest.executionSurfaces.authEntrypoints.includes("/auth/refresh"));
   assert.ok(manifest.authenticatedEndpoints.some((entry) => entry.path === "/auth/refresh"));
+  // Tools advertised in the manifest must also surface as authenticated endpoints
+  // so an MCP client following the manifest can actually call them. The
+  // explainEligibility / estimateNetReward tools were previously reachable only
+  // as sub-fields of preflightJob / recommendJobs — they now have direct routes.
+  assert.ok(manifest.tools.some((tool) => tool.name === "explainEligibility"));
+  assert.ok(manifest.tools.some((tool) => tool.name === "estimateNetReward"));
+  assert.ok(manifest.authenticatedEndpoints.some((entry) => entry.path === "/jobs/explain-eligibility"));
+  assert.ok(manifest.authenticatedEndpoints.some((entry) => entry.path === "/jobs/estimate-reward"));
   assert.equal(manifest.tools[0]?.name, "getPlatformCapabilities");
   assert.equal(manifest.executionSurfaces.operatorApp, "https://app.example.com");
   assert.equal(manifest.schemas.agentBadge, "https://averray.com/schemas/agent-badge-v1.json");

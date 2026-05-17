@@ -1249,6 +1249,78 @@ test("http smoke: /jobs/tiers returns the public tier ladder without auth", { sk
   });
 });
 
+test("http smoke: /jobs/explain-eligibility surfaces the explainEligibility tool", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
+
+    // Post a pro-tier job. A fresh wallet (skill=0) is below the gate.
+    await fetch(`${base}/admin/jobs`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({
+        id: "tier-smoke-explain-001",
+        category: "coding",
+        tier: "pro",
+        rewardAmount: 8,
+        verifierMode: "benchmark",
+        verifierTerms: ["complete", "verified"],
+        verifierMinimumMatches: 1,
+        outputSchemaRef: "schema://jobs/tier-smoke"
+      })
+    });
+
+    // jobId is required.
+    const missingJobId = await fetch(`${base}/jobs/explain-eligibility`, {
+      headers: { authorization: `Bearer ${adminToken}` }
+    });
+    assert.equal(missingJobId.status, 400);
+
+    const response = await fetch(
+      `${base}/jobs/explain-eligibility?jobId=tier-smoke-explain-001`,
+      { headers: { authorization: `Bearer ${adminToken}` } }
+    );
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.jobId, "tier-smoke-explain-001");
+    assert.ok(typeof body.eligible === "boolean");
+  });
+});
+
+test("http smoke: /jobs/estimate-reward surfaces the estimateNetReward tool", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
+
+    await fetch(`${base}/admin/jobs`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({
+        id: "tier-smoke-reward-001",
+        category: "coding",
+        tier: "starter",
+        rewardAmount: 4,
+        verifierMode: "benchmark",
+        verifierTerms: ["complete"],
+        verifierMinimumMatches: 1,
+        outputSchemaRef: "schema://jobs/tier-smoke"
+      })
+    });
+
+    // jobId is required.
+    const missingJobId = await fetch(`${base}/jobs/estimate-reward`, {
+      headers: { authorization: `Bearer ${adminToken}` }
+    });
+    assert.equal(missingJobId.status, 400);
+
+    const response = await fetch(
+      `${base}/jobs/estimate-reward?jobId=tier-smoke-reward-001`,
+      { headers: { authorization: `Bearer ${adminToken}` } }
+    );
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.ok(body.jobId === "tier-smoke-reward-001" || body.id === "tier-smoke-reward-001" || "netReward" in body || "rewardAmount" in body, "expected estimate-reward payload to identify the job or include reward fields");
+  });
+});
+
 test("http smoke: /jobs/recommendations includes per-job tierGate with missing-skill gap", { skip: !RUN }, async () => {
   await runWithServer(async (base) => {
     const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
