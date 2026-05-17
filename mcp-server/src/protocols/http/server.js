@@ -1785,13 +1785,18 @@ const server = createServer(async (request, response) => {
       // unavailable) still returns 200/"ok" at the liveness layer and
       // surfaces the capability state via `capabilityHealth`. Legacy
       // top-level `components` is preserved for existing consumers.
-      const [storeHealth, chainHealth, gasHealth, xcmWatcherStatus, mutationBackendStatus] = await Promise.all([
+      const [storeHealth, chainHealth, gasHealth, xcmWatcherStatus] = await Promise.all([
         stateStore.healthCheck?.() ?? { ok: true, backend: stateStore.constructor.name },
         gateway?.healthCheck?.() ?? { ok: false, backend: "blockchain", enabled: false, mode: "disabled" },
         pimlicoClient?.healthCheck?.() ?? { ok: true, backend: "pimlico", enabled: false, mode: "disabled" },
-        service?.xcmSettlementWatcher?.getStatus?.()?.catch?.(() => undefined) ?? undefined,
-        getMutationBackendStatus({ gateway, config: mutationBackendConfig }).catch(() => ({ ok: false }))
+        service?.xcmSettlementWatcher?.getStatus?.()?.catch?.(() => undefined) ?? undefined
       ]);
+      const mutationBackendStatus = await getMutationBackendStatus({
+        gateway,
+        config: mutationBackendConfig,
+        route: "/health",
+        gatewayStatus: chainHealth
+      }).catch(() => ({ ok: false, route: "/health" }));
 
       const serviceHealth = resolveServiceHealth({ stateStoreHealth: storeHealth, authConfig });
       const capabilityHealth = resolveCapabilityHealth({

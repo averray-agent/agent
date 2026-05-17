@@ -6,7 +6,7 @@ const DEFAULT_PROFILE_URL = "https://app.averray.com/agents/<wallet>";
 const DEFAULT_OPERATOR_APP_URL = "https://app.averray.com";
 
 const DISCOVERY_PUBLIC_ENDPOINTS = [
-  { path: "/health", description: "Liveness + component health (state store, blockchain gateway, gas sponsor)." },
+  { path: "/health", description: "Liveness plus serviceHealth/capabilityHealth for state store, blockchain, treasury mutations, XCM observer, indexer, and gas sponsor." },
   { path: "/metrics", description: "Prometheus text-format metrics. Optionally bearer-gated via METRICS_BEARER_TOKEN." },
   { path: "/onboarding", description: "Canonical platform capabilities + tool list." },
   { path: "/jobs", description: "Public job catalog (no auth)." },

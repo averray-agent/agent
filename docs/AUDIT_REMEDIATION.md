@@ -431,6 +431,7 @@ The remediation work should be split into narrow branches so multiple agents can
 **Suggested branch:** `codex/p1-health-capability-truth`
 **Can start:** After Package A exposes or confirms the gateway/mutation mode shape. A design/test stub can start earlier, but final route patch should wait for Package A.
 **Blocks:** Operator warnings in Package E.
+**Backend status:** Implemented on `origin/main` in Package B; `codex/p1-health-capability-truth` adds the documented `/health` contract and avoids a duplicate gateway probe. The wider `P1.1b` finding remains open until Package E surfaces capability warnings in the operator dashboard and external monitoring.
 
 **Owned finding:** `P1.1b`
 
