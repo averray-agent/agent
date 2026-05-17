@@ -2,6 +2,7 @@ import { OperatorRail } from "@/components/shell/OperatorRail";
 import { PaperGridBackground } from "@/components/runs/PaperGridBackground";
 import { LiveDataBridge } from "@/components/shell/LiveDataBridge";
 import { AuthRefreshBridge } from "@/components/shell/AuthRefreshBridge";
+import { DemoModeBanner } from "@/components/shell/DemoModeBanner";
 
 export default function AuthedLayout({
   children,
@@ -10,6 +11,7 @@ export default function AuthedLayout({
 }) {
   return (
     <>
+      <DemoModeBanner />
       <AuthRefreshBridge />
       <LiveDataBridge />
       <PaperGridBackground />

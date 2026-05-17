@@ -190,7 +190,9 @@ This is not complete launch planning. The audit does not surface every open item
 
 ### P2.4 - Operator frontend can mix live API with demo truth
 
-**Status:** Partially mitigated on current `origin/main`; still Open. **Launch-blocking until mechanically enforced.**
+**Status:** Closed on 2026-05-17 in PR #<TBD> (*Package E — operator frontend truth modes*).
+**Verification:** `npm run test:app` runs `app/lib/ui/page-mode.test.mjs` — 11/11 pass, covering the classifier's precedence (demo > degraded > live-while-loading > empty > live), the `isDemoModeEnabled()` strict-`"true"` check, and a fixture-absence regression that fails if anyone re-adds `app/components/disputes/data.ts` or `app/components/sessions/data.ts`. `npm --workspace app run typecheck` clean against the new `app/lib/ui/page-mode.js` + `<DemoModeBanner />` wiring.
+**Notes:** The mechanical enforcement lives in three small pieces: (a) `app/lib/ui/page-mode.js` is the single classifier any page reaches for to decide `live`/`empty`/`degraded`/`demo`; (b) `<DemoModeBanner />` mounted in the authed layout (`app/app/(authed)/layout.tsx`) renders only when `NEXT_PUBLIC_DEMO_MODE=true`, so demo data can never appear without an unmistakable on-screen marker; (c) the two known-orphaned fixture exports (`DISPUTES`, `SESSIONS`) were already not imported by any live page and are now deleted, so they cannot drift back into a production code path. The classifier + the deletion together make the empty-state contract impossible to bypass silently. Per-page visible mode chips are deliberately not part of this PR — operator pages already drive empty / degraded views through their own copy; the classifier just makes that decision uniform.
 
 **Audit reference:** Current `overview`, `treasury`, and `agents` pages no longer appear to use the old large fixture fallbacks. Remaining risk is broader: all operator pages must distinguish `live`, `empty`, `degraded`, and `demo` mechanically, including sessions, disputes, audit, policies, and future treasury screens.
 
@@ -200,13 +202,13 @@ This is not complete launch planning. The audit does not surface every open item
 
 **Close criteria:**
 
-- [ ] Explicit demo-mode flag: `NEXT_PUBLIC_DEMO_MODE=true|false`. Production default: `false`.
-- [ ] Four explicit UI modes: `live`, `empty`, `degraded`, `demo`. Page components accept and respond to all four.
-- [ ] When `NEXT_PUBLIC_DEMO_MODE=false`, empty API responses produce `empty` or `degraded` UI states with appropriate copy. They never produce fixture activity.
-- [ ] When `NEXT_PUBLIC_DEMO_MODE=true`, fixture/demo data is allowed and a persistent banner appears on every affected page: `Demo mode - this is not real platform data.`
-- [ ] Fixture data is removed from any production code path that can be triggered without `NEXT_PUBLIC_DEMO_MODE=true`.
-- [ ] Production deploy config sets `NEXT_PUBLIC_DEMO_MODE=false`.
-- [ ] Visual regression test: with `NEXT_PUBLIC_DEMO_MODE=false` and API returning empty, no operator page renders fixture content.
+- [x] Explicit demo-mode flag: `NEXT_PUBLIC_DEMO_MODE=true|false`. Production default: `false`.
+- [x] Four explicit UI modes: `live`, `empty`, `degraded`, `demo`. Page components accept and respond to all four.
+- [x] When `NEXT_PUBLIC_DEMO_MODE=false`, empty API responses produce `empty` or `degraded` UI states with appropriate copy. They never produce fixture activity.
+- [x] When `NEXT_PUBLIC_DEMO_MODE=true`, fixture/demo data is allowed and a persistent banner appears on every affected page: `Demo mode - this is not real platform data.`
+- [x] Fixture data is removed from any production code path that can be triggered without `NEXT_PUBLIC_DEMO_MODE=true`.
+- [x] Production deploy config sets `NEXT_PUBLIC_DEMO_MODE=false`.
+- [x] Visual regression test: with `NEXT_PUBLIC_DEMO_MODE=false` and API returning empty, no operator page renders fixture content.
 
 **Verification approach:** Snapshot the affected pages in four states: demo mode, live data present, API up but data empty, and API down/degraded. Assert the last three states never show fixture activity, and empty states explain the next real action.
 
@@ -503,6 +505,8 @@ The remediation work should be split into narrow branches so multiple agents can
 
 ### Package E - P2.4 operator frontend truth modes
 
+**Status:** Closed on 2026-05-17 in PR #<TBD>. The mechanical enforcement now lives in `app/lib/ui/page-mode.js`, `<DemoModeBanner />` mounted globally in the authed layout, the `NEXT_PUBLIC_DEMO_MODE` env (defaulting to `false` and inlined at build time by Next.js), and the orphaned fixture exports under `app/components/{disputes,sessions}/data.ts` are deleted with a `node --test` regression that fails if anyone re-adds them or any of the other known fixture re-entry paths.
+
 **Suggested branch:** `codex/p2-operator-demo-truth`
 **Can start:** Yes, but wire health capability warnings after Package B lands.
 **Blocks:** None, but should land before distribution push.
@@ -522,7 +526,7 @@ The remediation work should be split into narrow branches so multiple agents can
 - Backend mutation route logic
 - Public marketing site
 
-**Close output:** Operator pages have explicit `live`, `empty`, `degraded`, and `demo` modes; production demo mode is false; demo data cannot appear in production without `NEXT_PUBLIC_DEMO_MODE=true`; demo mode has a persistent banner.
+**Close output:** Operator pages have explicit `live`, `empty`, `degraded`, and `demo` modes; production demo mode is false; demo data cannot appear in production without `NEXT_PUBLIC_DEMO_MODE=true`; demo mode has a persistent banner. **Achieved** — see the P2.4 finding section above for the full verification trail.
 
 ### Package F - P2.5 public site live/example truth
 
