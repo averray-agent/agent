@@ -234,6 +234,42 @@ RUN_SUBSCAN_XCM_VALIDATION=1 ./scripts/ops/check-release-readiness.sh testnet
     values and require `lastAttemptedAt`, `lastSuccessfulAt`, and the latest
     provider id.
 
+### How to verify each §5 box
+
+The first five boxes are intentionally not auto-flipped — they need
+deployed-config evidence that lives outside the repo. The wiring exists in
+code; only the production env vars need to be set. Concrete verification
+commands per box:
+
+- **Backend metrics reachable and bearer-protected.** Verify reachable:
+  `curl -sS -o /dev/null -w "%{http_code}\n" https://api.averray.com/metrics`
+  must return `200`. Verify bearer-gated: the same request **without** a
+  bearer must return `401` once `METRICS_BEARER_TOKEN` is set in
+  `deploy/backend.env.template`. Current state (2026-05-17): reachable
+  `200`, **not** bearer-gated. Flip after the env var is set and a
+  no-bearer request returns `401`.
+- **Backend Sentry configured for the active environment.** Set
+  `SENTRY_DSN` (and optionally `SENTRY_ENVIRONMENT`, `SENTRY_RELEASE`,
+  `SENTRY_TRACES_SAMPLE_RATE`) in `deploy/backend.env.template`, then
+  `npm install @sentry/node` in `mcp-server`. The backend log line
+  `observability.sentry_ready` confirms init. Flip when that log line is
+  present in the current deploy.
+- **Frontend Sentry runtime config.** Conditional. v1 has no frontend
+  Sentry scaffolding. Two valid postures: (a) flip with the inline note
+  *"N/A — frontend error reporting not required for v1"* if that is the
+  decision, or (b) leave unchecked until frontend Sentry is scaffolded.
+- **Structured logs visible from the current deploy target.**
+  `LOG_LEVEL=info` is set; the backend writes structured JSON via the
+  default logger. Verify the operator can read backend logs (via
+  `journalctl`, `docker logs`, or the platform's log surface), then flip.
+- **Alert destination for hosted smoke-check failures.** Set
+  `ALERT_WEBHOOK_URL` (and optionally `ALERT_SERVICE_NAME`,
+  `ALERT_ENVIRONMENT`) in the environment that runs
+  [`scripts/ops/check-hosted-stack-and-alert.sh`](../scripts/ops/check-hosted-stack-and-alert.sh).
+  Verify with a deliberate smoke failure (e.g. point `API_BASE_URL` at a
+  non-existent host) and confirm the webhook receives the JSON payload.
+  Flip after one verified delivery.
+
 ---
 
 ## 6. Launch Documentation
