@@ -188,25 +188,54 @@ export class KmsSigner extends AbstractSigner {
    * signed transaction (an `0x`-prefixed hex string) ready to broadcast.
    */
   async signTransaction(tx) {
-    // Convert ethers TransactionRequest → Transaction so we can ask
-    // for the unsigned hash. The `from` field is informational here;
-    // ethers normalizes it but the chain doesn't care because the
-    // sender is recovered from the signature.
-    const txCopy = { ...tx };
-    if (txCopy.from != null) {
-      // Confirm the populated `from` matches our address — if it
-      // doesn't, the caller is using us for a tx that wouldn't recover
-      // back to us. Catch the misuse here rather than letting the
-      // chain reject after a wasted gas estimation.
+    // `tx` may arrive as either:
+    //   (a) a TransactionLike POJO (direct callers, our own tests), or
+    //   (b) a Transaction class instance (the AbstractSigner.sendTransaction
+    //       path used by ethers Contracts — pop is wrapped via
+    //       `Transaction.from(pop)` before being passed here).
+    // CRITICAL: `{ ...tx }` returns `{}` for (b) because Transaction
+    // exposes its fields via getters, not as enumerable own properties.
+    // Use `Transaction.from(tx)` which copies fields correctly in both
+    // cases; this normalizes the input before we read `from` or sign.
+    //
+    // Subtlety: ethers' `Transaction.from()` rejects any input (POJO or
+    // instance) whose `.from` is set, with "unsigned transaction cannot
+    // define '.from'". Read `tx.from` (works for both shapes — POJOs
+    // have it as an own property, instances expose it via the same-named
+    // getter) BEFORE coercing, then pass a sanitized POJO without
+    // `from`. For Transaction instances we can't mutate the input
+    // safely; for POJOs we avoid mutating the caller's object too.
+    const callerFrom = tx?.from ?? null;
+    let coercionInput = tx;
+    if (callerFrom != null) {
       const ourAddress = await this.getAddress();
-      if (String(txCopy.from).toLowerCase() !== ourAddress.toLowerCase()) {
+      if (String(callerFrom).toLowerCase() !== ourAddress.toLowerCase()) {
+        // Confirm the populated `from` matches our address — if it
+        // doesn't, the caller is using us for a tx that wouldn't recover
+        // back to us. Catch the misuse here rather than letting the
+        // chain reject after a wasted gas estimation.
         throw new Error(
-          `KmsSigner.signTransaction: tx.from (${txCopy.from}) does not match this signer's address (${ourAddress})`,
+          `KmsSigner.signTransaction: tx.from (${callerFrom}) does not match this signer's address (${ourAddress})`,
         );
       }
-      delete txCopy.from;
+      // Rebuild a plain TransactionLike POJO without `from` so
+      // Transaction.from() doesn't reject. Use the instance's getters
+      // (or the POJO's own properties) to copy each field explicitly.
+      coercionInput = {
+        type: tx.type,
+        chainId: tx.chainId,
+        nonce: tx.nonce,
+        gasLimit: tx.gasLimit,
+        gasPrice: tx.gasPrice,
+        maxFeePerGas: tx.maxFeePerGas,
+        maxPriorityFeePerGas: tx.maxPriorityFeePerGas,
+        to: tx.to,
+        value: tx.value,
+        data: tx.data,
+        accessList: tx.accessList,
+      };
     }
-    const unsignedTx = Transaction.from(txCopy);
+    const unsignedTx = Transaction.from(coercionInput);
     const digest = unsignedTx.unsignedHash;
     const sig = await this.#signDigest(getBytes(digest));
     unsignedTx.signature = sig;

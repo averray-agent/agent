@@ -215,6 +215,45 @@ test("KmsSigner.signTransaction produces a serialized tx that recovers to our ad
   assert.equal(decoded.chainId, 1n);
 });
 
+test("KmsSigner.signTransaction handles a Transaction class instance (not just POJO) — regression for empty-tx bug", async () => {
+  // Regression: ethers v6 AbstractSigner.sendTransaction (the path used
+  // by every ethers.Contract method call) wraps the populated tx via
+  // `Transaction.from(pop)` before passing it to signTransaction. The
+  // resulting Transaction class instance exposes its fields via
+  // getters, not enumerable own properties, so `{ ...txInstance }`
+  // returns `{}` and `Transaction.from({})` produces an empty tx
+  // (chainId=0, no to, no data, no gas) — which `eth_sendRawTransaction`
+  // rejects as "Invalid transaction". This test exercises the
+  // instance-input path to lock down the fix.
+  const kms = new FakeKMSClient();
+  const signer = new KmsSigner({ kmsClient: kms, keyId: "test-key" });
+
+  const txPojo = {
+    chainId: 1n,
+    nonce: 7,
+    maxFeePerGas: 30_000_000_000n,
+    maxPriorityFeePerGas: 1_000_000_000n,
+    gasLimit: 21_000n,
+    to: "0x0000000000000000000000000000000000000001",
+    value: 0n,
+    data: "0xdeadbeef",
+    type: 2,
+  };
+  const txInstance = Transaction.from(txPojo);
+
+  const signedHex = await signer.signTransaction(txInstance);
+  const decoded = Transaction.from(signedHex);
+  assert.equal(
+    decoded.to,
+    "0x0000000000000000000000000000000000000001",
+    "to must survive the instance → signTransaction → serialized round-trip",
+  );
+  assert.equal(decoded.chainId, 1n, "chainId must survive (bug would give 0)");
+  assert.equal(decoded.nonce, 7, "nonce must survive");
+  assert.equal(decoded.data, "0xdeadbeef", "data must survive (bug would give 0x)");
+  assert.equal(decoded.from, EXPECTED_ADDRESS, "from-recovery matches our address");
+});
+
 test("KmsSigner.signTransaction rejects mismatched from-address", async () => {
   const kms = new FakeKMSClient();
   const signer = new KmsSigner({ kmsClient: kms, keyId: "test-key" });
