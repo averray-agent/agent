@@ -13,6 +13,7 @@ import {
   normalizeObservedAtIso,
   type OutcomeCursor
 } from "./xcm-outcome-cursor";
+import { buildUpsertExternalOutcomeSql } from "./xcm-outcome-publisher-sql";
 
 const DEFAULT_SCOPE = "xcm-outcome-publisher";
 
@@ -401,36 +402,7 @@ export class XcmOutcomePublisherService {
   }
 
   async upsertOutcome(outcome: PublishedOutcome) {
-    await db.execute(sql`
-      INSERT INTO xcm_external_outcomes (
-        request_id,
-        status,
-        settled_assets,
-        settled_shares,
-        remote_ref,
-        failure_code,
-        observed_at,
-        source
-      ) VALUES (
-        ${outcome.requestId},
-        ${outcome.status},
-        ${outcome.settledAssets},
-        ${outcome.settledShares},
-        ${outcome.remoteRef},
-        ${outcome.failureCode},
-        ${outcome.observedAt},
-        ${outcome.source}
-      )
-      ON CONFLICT (request_id) DO UPDATE SET
-        status = EXCLUDED.status,
-        settled_assets = EXCLUDED.settled_assets,
-        settled_shares = EXCLUDED.settled_shares,
-        remote_ref = EXCLUDED.remote_ref,
-        failure_code = EXCLUDED.failure_code,
-        observed_at = EXCLUDED.observed_at,
-        source = EXCLUDED.source,
-        ingested_at = now()
-    `);
+    await db.execute(buildUpsertExternalOutcomeSql(outcome));
   }
 
   async getPublishedOutcomeCount() {
