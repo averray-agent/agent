@@ -85,6 +85,42 @@ is verified by `examples/service-token-worker/index.test.mjs` to contain
 - `xcm:observe`, `xcm:finalize` — async-XCM relayer authority.
 - `disputes:release`, `disputes:verdict` — arbitrator-only paths.
 
+### Deriving a bundle when none of the presets fit
+
+If your worker shape is not one of the rows above, derive the bundle from the
+route rules instead of guessing:
+
+1. **List the routes** the worker will actually hit. Be honest — a route the
+   worker only hits "for debugging in dev" still leaks if the token is logged
+   in production.
+2. **Look up each route's capability requirement.** The authoritative table is
+   `ROUTE_CAPABILITY_RULES` in
+   [`mcp-server/src/auth/capabilities.js`](../mcp-server/src/auth/capabilities.js),
+   and a live copy is returned by `GET /auth/session` under `capabilityMatrix.routes`
+   for any authenticated wallet.
+3. **Take the union** of the per-route capability lists. That is the smallest
+   bundle that lets the worker run.
+4. **Check against the never-grant list above.** If any capability in the
+   union is operator-only, the worker is calling a route it has no business
+   calling — fix the worker, do not widen the grant.
+
+Worked example. A worker that lists jobs, preflights them, claims them,
+submits work, and reads its own session timeline hits these routes:
+
+| Route | Capability |
+|---|---|
+| `GET /jobs` | `jobs:list` |
+| `GET /jobs/preflight` | `jobs:preflight` |
+| `POST /jobs/claim` | `jobs:claim` |
+| `POST /jobs/submit` | `jobs:submit` |
+| `GET /session` | `session:read` |
+| `GET /session/timeline` | `session:timeline` |
+
+Union: `jobs:list`, `jobs:preflight`, `jobs:claim`, `jobs:submit`,
+`session:read`, `session:timeline`. None are on the never-grant list. This
+is the same bundle as the **schema-aware claimer** preset — converging on
+an existing bundle is a good sign.
+
 ## Lifecycle — issue, use, rotate, revoke
 
 ### Issue (admin → grant + token)
@@ -207,6 +243,111 @@ Useful audit queries:
 
 The `token` field is never returned by `listServiceTokens` — it only
 exists in the issue/rotate response and cannot be recovered.
+
+## Self-verifying a token
+
+Before handing a freshly issued token to a worker, confirm it resolves the
+exact capabilities you intended and nothing else. Three curl calls are
+enough; do them from the operator shell, not from the worker host (the
+worker host should never need the token in argv where it would land in
+process listings or shell history).
+
+```bash
+WORKER_TOKEN='eyJ...'   # paste once, do not export to a child process
+API_BASE=https://api.averray.com
+```
+
+1. **Confirm the token resolves as a service token with the expected
+   capabilities.** `GET /auth/session` returns the live projection — if this
+   does not match the grant you just issued, stop and rotate.
+
+   ```bash
+   curl -sS "$API_BASE/auth/session" \
+     -H "Authorization: Bearer $WORKER_TOKEN" \
+   | jq '{tokenKind, serviceToken, capabilityGrantId, capabilities}'
+   # Expect tokenKind: "service", serviceToken: true,
+   # capabilityGrantId matching the issue response, and capabilities ==
+   # exactly the bundle you requested.
+   ```
+
+2. **Hit one allowed route.** Pick a non-mutating route from the worker's
+   bundle. For a `jobs:recommend` worker, that is `/jobs/recommendations`;
+   for a `jobs:list` worker, that is `/jobs`; for a read-only observer, that
+   is `/agents/<wallet>`. Expect `200`.
+
+   ```bash
+   curl -sS -o /dev/null -w "%{http_code}\n" \
+     "$API_BASE/jobs/recommendations" \
+     -H "Authorization: Bearer $WORKER_TOKEN"
+   # Expect: 200
+   ```
+
+3. **Hit one route the bundle should *not* cover.** A `403` with
+   `code: "missing_capability"` is what proves the grant is bounded. Two
+   safe deny-targets that never need to mutate state: `/account` (requires
+   `account:read`, almost never in a non-account-flow bundle) and
+   `/admin/status` (requires `admin:status`, never in a worker bundle).
+
+   ```bash
+   curl -sS -w "\nHTTP %{http_code}\n" \
+     "$API_BASE/admin/status" \
+     -H "Authorization: Bearer $WORKER_TOKEN"
+   # Expect: HTTP 403, body includes "code":"missing_capability".
+   ```
+
+If step 1 returns `tokenKind: "wallet"` rather than `"service"`, the value
+you have is not a service token (likely the admin JWT — stop). If step 2
+returns `403`, the bundle is missing the capability you intended. If step 3
+returns `200`, the bundle is *wider* than you intended — revoke and
+re-issue. Never deploy a worker whose self-verification produced any of
+these three outcomes.
+
+## Token hygiene rules
+
+Service tokens are bearer credentials with the same blast radius as any
+other bearer credential. The rules below are concrete bans, not
+recommendations.
+
+- **Bearer header only.** Send the token as
+  `Authorization: Bearer <token>`. Do not pass it as a URL query parameter
+  (e.g. `?token=...`). Query parameters land in server access logs, reverse
+  proxy logs, browser history, and referrer headers. The SSE `?token=`
+  surface in this codebase is for browser EventSource only (which cannot
+  set headers) and is explicitly out of scope for service tokens — a
+  worker process always has the `Authorization` header.
+- **Never log the token.** Configure your logger to drop `authorization`
+  headers and any field whose name matches `*token*`, `*secret*`, `*jwt*`,
+  or `*bearer*`. Verify with a deliberate test log — if the token shows up
+  in `journalctl` or `kubectl logs`, fix the redaction before going live.
+- **Never write the token to artifacts.** CI build outputs, deploy logs,
+  cached test results, error-report payloads, and shared scratch
+  directories are all artifacts. If a CI job needs the token, load it from
+  a secret store at the step that needs it and unset it at the step's end —
+  do not echo it, do not write it to a file the workflow uploads.
+- **Never put the token in URLs.** This includes one-shot diagnostic links,
+  Slack/Discord debugging messages, and "just for a minute" preview links.
+  URLs are forwarded, cached, indexed, and screenshotted; once a token is in
+  a URL it is effectively public.
+- **Never share via chat, issue tracker, or PR description.** Chat
+  platforms keep history, issue trackers index search, and PR descriptions
+  are public on open-source forks. Treat any token that touched one of
+  these as compromised and rotate immediately.
+- **Hold the raw token in a secret manager**, keyed by `grant.id`. The
+  issue response returns the JWT exactly once; lose the bytes and you must
+  rotate. Never check the raw token into source control even in encrypted
+  form unless your secret manager *is* an encrypted-in-repo store.
+- **Treat any `401` from the API as terminal.** It means the token expired
+  or the grant was revoked. Do not retry-loop — stop, page the operator,
+  and rotate.
+- **Rotate before TTL expiry, not after.** Schedule rotation at half the
+  configured `tokenTtlSeconds`, so a missed rotation window still leaves
+  time to recover before the worker fails closed.
+
+The hosted proof in the next section enforces a stricter rule mechanically:
+the evidence artifact records grant ids, statuses, capabilities, and HTTP
+status codes — it refuses to write token-shaped material. When you build
+your own operator tooling, mirror that posture: if any code path could write
+a token, it should fail closed before doing so.
 
 ## Hosted proof smoke
 

@@ -15,6 +15,7 @@ Launch posture and trust documents:
 - [Product-proof gate](docs/PRODUCT_PROOF_GATE.md)
 - [Arbitration migration](docs/ARBITRATION_MIGRATION.md)
 - [Dispute reason-code registry](docs/DISPUTE_CODES.md)
+- [Service token operator pack](docs/SERVICE_TOKEN_OPERATOR_PACK.md)
 
 The `mcp-server` workspace currently uses a JavaScript runtime source tree. There is no parallel TypeScript build step to maintain.
 
