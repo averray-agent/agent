@@ -284,39 +284,49 @@ In the order we'd like auditors to break:
 
 ## 6. Deployment parameters
 
-Current testnet values (reproducible via [deploy_contracts.sh](../scripts/deploy_contracts.sh)):
+Current testnet on-chain values
+([`deployments/testnet.json#parameters`](../deployments/testnet.json)).
+The live testnet deliberately runs the same conservative parameter stance
+as the intended mainnet deploy, so an auditor reviewing the testnet
+contracts is reviewing the parameter values intended for mainnet:
 
-| Parameter | Default | Notes |
-|---|---|---|
-| `dailyOutflowCap` | `1e24` wei | Very loose. Should tighten on mainnet. |
-| `perAccountBorrowCap` | `1e21` wei | Per-wallet cap. |
-| `minimumCollateralRatioBps` | `15000` (150%) | Liquidation floor. |
-| `defaultClaimStakeBps` | `500` (5%) | Fraction of reward locked as stake. |
-| `rejectionSkillPenalty` | `10` | Applied on terminal rejection. |
-| `rejectionReliabilityPenalty` | `20` | |
-| `disputeLossSkillPenalty` | `30` | Applied when arbitrator sides against worker. |
-| `disputeLossReliabilityPenalty` | `50` | |
-| `MAX_MILESTONES` | `32` | Constant in `EscrowCore`. |
-| `DISPUTE_WINDOW` | `7 days` | Constant in `EscrowCore`. |
-| `ARBITRATOR_SLA` | `14 days` | Constant in `EscrowCore`; gates `autoResolveOnTimeout`. |
+| Parameter | Raw value | Human value | Notes |
+|---|---:|---:|---|
+| `dailyOutflowCap` | `250_000_000` | 250 USDC | Launch-phase circuit breaker on aggregate daily outflow. |
+| `borrowCap` | `25_000_000` | 25 USDC per account | Bridges claim stake; flat (not reputation-weighted). |
+| `minimumCollateralRatioBps` | `20_000` | 200% | More conservative than the original 150% testnet stance; no liquidation yet. |
+| `defaultClaimStakeBps` | `1_000` | 10% | Fraction of reward locked as worker stake. |
+| `onboardingWaiverClaimCount` | `3` | 3 claims | First three claims waive both stake and anti-spam fee. |
+| `claimFeeBps` | `200` | 2% | Refundable anti-spam fee on claims past onboarding. |
+| `minClaimFee` | `50_000` | 0.05 USDC | Floor on the anti-spam fee. |
+| `claimFeeVerifierBps` | `7_000` | 70% | Share of a slashed fee routed to the verifier path. |
+| `rejectionSkillPenalty` | `10` | — | Applied on terminal rejection. |
+| `rejectionReliabilityPenalty` | `25` | — | Reliability hit is harsher than skill. |
+| `disputeLossSkillPenalty` | `35` | — | Applied when the arbitrator sides against the worker. |
+| `disputeLossReliabilityPenalty` | `60` | — | Disputed-loss costs more than ordinary rejection. |
+| `MAX_MILESTONES` | `32` | — | Constant in `EscrowCore` (bounds the resolveMilestone loop). |
+| `DISPUTE_WINDOW` | — | 7 days | Constant in `EscrowCore`. |
+| `ARBITRATOR_SLA` | — | 14 days | Constant in `EscrowCore`; gates `autoResolveOnTimeout`. |
 
-The deploy script now treats those policy values as testnet-friendly defaults
-only. `PROFILE=mainnet` refuses to proceed unless the outflow cap, borrow cap,
-collateral ratio, claim-stake basis points, and slash penalties are all set
-explicitly at deploy time.
+USDC raw values use 6 decimals (Polkadot Hub TestNet USDC asset
+precompile at `0x0000053900000000000000000000000001200000`). Basis points
+are out of 10,000.
 
-The backend operator status surface preserves these policy parameters as exact
-raw chain strings. Numeric mirrors are only populated when the value fits
-JavaScript safe-integer precision, so sentinel values such as `uint256.max` do
-not appear as precise decimal numbers in `/admin/status`.
-
-The recommended **mainnet launch profile** lives in
-[MAINNET_PARAMETERS.md](./MAINNET_PARAMETERS.md), with the corresponding
-operator env template in
+These values mirror the recommended mainnet launch profile in
+[MAINNET_PARAMETERS.md](./MAINNET_PARAMETERS.md) and the operator env
+template in
 [deployments/mainnet.env.example](../deployments/mainnet.env.example).
-Auditors should treat that package as the intended production stance for
-v1, rather than assuming the loose testnet defaults above would ever be
-used with real funds.
+`scripts/deploy_contracts.sh` carries looser fallback constants for
+isolated local development; production deploys (`PROFILE=mainnet`) refuse
+to proceed unless the outflow cap, borrow cap, collateral ratio,
+claim-stake basis points, and slash penalties are all set explicitly at
+deploy time.
+
+The backend operator status surface preserves these policy parameters as
+exact raw chain strings. Numeric mirrors are only populated when the
+value fits JavaScript safe-integer precision, so sentinel values such as
+`uint256.max` do not appear as precise decimal numbers in
+`/admin/status`.
 
 ---
 
@@ -344,14 +354,14 @@ RUN_HTTP_SMOKE=1 node --test mcp-server/src/protocols/http/server.smoke.test.js
 npm run test:app
 ```
 
-Expected counts at the time this doc was last refreshed (2026-05-16):
+Expected counts at the time this doc was last refreshed (2026-05-17):
 
 - Foundry: **97** tests across 8 suites (`AgentAccountAsyncStrategy`,
   `AgentPlatform`, `Hardening`, `Rc1Backbone`, `SendToAgent`, `XcmVdotAdapter`,
   `XcmWrapper`, `strategies/MockVDotAdapter`). Covers core lifecycle, claim
   stake, milestone/dispute, async strategy accounting, XCM dispatch/wrapper,
   Rc1 verifier authorization and disclosure, and the mock vDOT adapter path.
-- Node backend (`npm --workspace mcp-server test`): **554** tests across
+- Node backend (`npm --workspace mcp-server test`): **571** tests across
   `core`, `services`, `jobs`, `blockchain`, `auth`, and `protocols`. Covers
   SIWE/JWT auth, rate limits, state store, HTTP config, event bus, discovery,
   jobs/sessions/recurring, verifier handlers, settlement and XCM observation,
@@ -372,7 +382,7 @@ Expected counts at the time this doc was last refreshed (2026-05-16):
 
 These numbers should be refreshed whenever new tests land. Auditors who want
 the full repo-wide suite (root `npm test`) also pick up SDK (`16`), examples
-(`22`), indexer API (`18`), and ops scripts (`82`) tests on top of the four
+(`22`), indexer API (`19`), and ops scripts (`87`) tests on top of the four
 suites above.
 
 ---
