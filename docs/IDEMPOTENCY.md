@@ -110,8 +110,14 @@ Buckets that implement the standard replay/conflict contract:
 | Route | Bucket |
 | ----- | ------ |
 | `POST /jobs/claim` | implicit per-`(wallet, jobId)`; pass `idempotencyKey` to override |
-| `POST /account/allocate` (async-XCM strategies only) | `account_allocate_async` |
-| `POST /account/deallocate` (async-XCM strategies only) | `account_deallocate_async` |
+| `POST /account/fund` | `account_fund` |
+| `POST /account/allocate` (async-XCM strategies) | `account_allocate_async` |
+| `POST /account/allocate` (sync strategies) | `account_allocate_sync` |
+| `POST /account/deallocate` (async-XCM strategies) | `account_deallocate_async` |
+| `POST /account/deallocate` (sync strategies) | `account_deallocate_sync` |
+| `POST /account/borrow` | `account_borrow` |
+| `POST /account/repay` | `account_repay` |
+| `POST /payments/send` | `payments_send` |
 | `POST /admin/jobs` | `admin_jobs` |
 | `POST /admin/jobs/ingest/github` | `admin_jobs_ingest_github` |
 | `POST /admin/jobs/ingest/wikipedia` | `admin_jobs_ingest_wikipedia` |
@@ -134,12 +140,27 @@ The dispute routes (`POST /disputes/:id/verdict`,
 `POST /disputes/:id/release`) store mutation receipts but follow a separate
 verdict-keyed convention; they do not surface `idempotency_key_payload_mismatch`.
 
-Other mutation routes — `POST /account/fund`, `POST /account/borrow`,
-`POST /account/repay`, `POST /payments/send`, `POST /jobs/submit`,
-`POST /jobs/sub`, sync-strategy variants of `POST /account/allocate` and
-`POST /account/deallocate` — currently accept `idempotencyKey` for forward
-compatibility but ignore it on the server. Treat retries on these routes as
-non-idempotent and gate them on your own client-side state.
+All money-like mutation routes (`POST /account/fund`,
+`POST /account/borrow`, `POST /account/repay`, `POST /payments/send`,
+and both the sync and async-XCM variants of `POST /account/allocate` /
+`POST /account/deallocate`) now implement the standard replay/conflict
+contract — closed by Package D (P1.3) on 2026-05-17.
+
+Sync allocate/deallocate buckets scope the key by `strategyId`
+(`${wallet}:${strategyId}:${idempotencyKey}`) so two different
+strategies can reuse the same `idempotencyKey` string. Async-XCM
+variants use the same scoping. The simpler money routes
+(`/account/fund`, `/account/borrow`, `/account/repay`,
+`/payments/send`) scope by `${wallet}:${idempotencyKey}` only — the
+recipient, asset, and amount all participate in the canonical request
+hash, so a same-key different-payload retry surfaces as a
+`409 idempotency_key_payload_mismatch` rather than a silent
+double-mutation.
+
+The remaining mutation routes that still accept `idempotencyKey` for
+forward compatibility but ignore it on the server are
+`POST /jobs/submit` and `POST /jobs/sub`. Treat retries on those
+routes as non-idempotent and gate them on your own client-side state.
 
 ## Cross-references
 

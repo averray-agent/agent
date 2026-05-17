@@ -1935,3 +1935,96 @@ test("http smoke: discovery manifest is served at both /agent-tools.json and the
     assert.ok(Array.isArray(canonicalBody.protocols));
   });
 });
+
+test("http smoke: /account/fund idempotency — replay returns the stored response", { skip: !RUN }, async () => {
+  await runWithServerEnv({ MUTATION_BACKEND: "memory" }, async (base) => {
+    const token = issueToken(STRANGER_WALLET);
+    const headers = { "content-type": "application/json", authorization: `Bearer ${token}` };
+    const payload = { asset: "USDC", amount: 7, idempotencyKey: "fund-replay-smoke-1" };
+
+    const first = await fetch(`${base}/account/fund`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload)
+    });
+    assert.equal(first.status, 200);
+    const firstBody = await first.json();
+
+    const replay = await fetch(`${base}/account/fund`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload)
+    });
+    assert.equal(replay.status, 200);
+    const replayBody = await replay.json();
+    // Replay returns the byte-identical stored response.
+    assert.deepEqual(replayBody, firstBody);
+  });
+});
+
+test("http smoke: /account/fund idempotency — same key + different payload returns 409 idempotency_key_payload_mismatch", { skip: !RUN }, async () => {
+  await runWithServerEnv({ MUTATION_BACKEND: "memory" }, async (base) => {
+    const token = issueToken(STRANGER_WALLET);
+    const headers = { "content-type": "application/json", authorization: `Bearer ${token}` };
+
+    const first = await fetch(`${base}/account/fund`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ asset: "USDC", amount: 5, idempotencyKey: "fund-conflict-smoke-1" })
+    });
+    assert.equal(first.status, 200);
+
+    const conflict = await fetch(`${base}/account/fund`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ asset: "USDC", amount: 9, idempotencyKey: "fund-conflict-smoke-1" })
+    });
+    assert.equal(conflict.status, 409);
+    const body = await conflict.json();
+    assert.equal(body.error, "idempotency_key_payload_mismatch");
+  });
+});
+
+test("http smoke: /payments/send idempotency — replay returns the stored response, mismatch returns 409", { skip: !RUN }, async () => {
+  await runWithServerEnv({ MUTATION_BACKEND: "memory" }, async (base) => {
+    const senderToken = issueToken(STRANGER_WALLET);
+    const senderHeaders = { "content-type": "application/json", authorization: `Bearer ${senderToken}` };
+    const recipient = "0x4444444444444444444444444444444444444444";
+
+    // Seed sender liquid balance so the transfer can succeed in memory mode.
+    await fetch(`${base}/account/fund`, {
+      method: "POST",
+      headers: senderHeaders,
+      body: JSON.stringify({ asset: "USDC", amount: 100, idempotencyKey: "transfer-seed-smoke-1" })
+    });
+
+    const payload = { recipient, asset: "USDC", amount: 4, idempotencyKey: "send-smoke-1" };
+
+    const first = await fetch(`${base}/payments/send`, {
+      method: "POST",
+      headers: senderHeaders,
+      body: JSON.stringify(payload)
+    });
+    assert.equal(first.status, 200);
+    const firstBody = await first.json();
+    assert.equal(firstBody.status, "sent");
+
+    const replay = await fetch(`${base}/payments/send`, {
+      method: "POST",
+      headers: senderHeaders,
+      body: JSON.stringify(payload)
+    });
+    assert.equal(replay.status, 200);
+    assert.deepEqual(await replay.json(), firstBody);
+
+    // Same key, different amount — must surface as a payload mismatch.
+    const conflict = await fetch(`${base}/payments/send`, {
+      method: "POST",
+      headers: senderHeaders,
+      body: JSON.stringify({ ...payload, amount: 7 })
+    });
+    assert.equal(conflict.status, 409);
+    const conflictBody = await conflict.json();
+    assert.equal(conflictBody.error, "idempotency_key_payload_mismatch");
+  });
+});

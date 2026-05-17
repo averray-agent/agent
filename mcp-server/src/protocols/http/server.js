@@ -2964,7 +2964,35 @@ const server = createServer(async (request, response) => {
         : (url.searchParams.get("asset")?.trim() || "DOT");
       const amount = Number(payload?.amount ?? url.searchParams.get("amount") ?? "0");
       await requireChainBackedMutation("/account/fund");
-      return respond(response, 200, await service.fundAccount(auth.wallet, asset, amount));
+      // Package D (P1.3) — idempotency: same key + same payload returns
+      // the stored response; same key + different payload returns 409
+      // `idempotency_key_payload_mismatch`. Order matches the existing
+      // async-XCM money-route convention (chain gate first, idempotency
+      // second).
+      const idempotencyKey = parseIdempotencyKey(payload);
+      const mutationKey = idempotencyKey ? `${auth.wallet}:${idempotencyKey}` : undefined;
+      const requestHash = buildMutationRequestHash({
+        route: "/account/fund",
+        wallet: auth.wallet,
+        payload: { asset, amount }
+      });
+      const replay = await getIdempotentMutationReplay({
+        bucket: "account_fund",
+        key: mutationKey,
+        requestHash
+      });
+      if (replay) {
+        return respond(response, replay.statusCode, replay.body);
+      }
+      const result = await service.fundAccount(auth.wallet, asset, amount);
+      await storeIdempotentMutationReceipt({
+        bucket: "account_fund",
+        key: mutationKey,
+        requestHash,
+        response: result,
+        statusCode: 200
+      });
+      return respond(response, 200, result);
     }
 
     if (request.method === "POST" && pathname === "/account/allocate") {
@@ -3024,7 +3052,35 @@ const server = createServer(async (request, response) => {
         });
         return respond(response, 200, result);
       }
-      return respond(response, 200, await service.allocateIdleFunds(auth.wallet, asset, amount, strategyId, strategy));
+      // Sync (non-async-XCM) allocate path — Package D (P1.3) idempotency.
+      // Keys are scoped by strategyId so two different strategies can use
+      // the same idempotencyKey string without colliding.
+      const syncIdempotencyKey = parseIdempotencyKey(payload);
+      const syncMutationKey = syncIdempotencyKey
+        ? `${auth.wallet}:${strategyId}:${syncIdempotencyKey}`
+        : undefined;
+      const syncRequestHash = buildMutationRequestHash({
+        route: "/account/allocate",
+        wallet: auth.wallet,
+        payload: { asset, amount, strategyId, executionMode: "sync" }
+      });
+      const syncReplay = await getIdempotentMutationReplay({
+        bucket: "account_allocate_sync",
+        key: syncMutationKey,
+        requestHash: syncRequestHash
+      });
+      if (syncReplay) {
+        return respond(response, syncReplay.statusCode, syncReplay.body);
+      }
+      const syncResult = await service.allocateIdleFunds(auth.wallet, asset, amount, strategyId, strategy);
+      await storeIdempotentMutationReceipt({
+        bucket: "account_allocate_sync",
+        key: syncMutationKey,
+        requestHash: syncRequestHash,
+        response: syncResult,
+        statusCode: 200
+      });
+      return respond(response, 200, syncResult);
     }
 
     if (request.method === "POST" && pathname === "/account/deallocate") {
@@ -3086,7 +3142,35 @@ const server = createServer(async (request, response) => {
         });
         return respond(response, 200, result);
       }
-      return respond(response, 200, await service.deallocateIdleFunds(auth.wallet, asset, amount, strategyId, strategy));
+      // Sync (non-async-XCM) deallocate path — Package D (P1.3)
+      // idempotency. Keys scoped by strategyId, parallel to the sync
+      // allocate handler above.
+      const syncIdempotencyKey = parseIdempotencyKey(payload);
+      const syncMutationKey = syncIdempotencyKey
+        ? `${auth.wallet}:${strategyId}:${syncIdempotencyKey}`
+        : undefined;
+      const syncRequestHash = buildMutationRequestHash({
+        route: "/account/deallocate",
+        wallet: auth.wallet,
+        payload: { asset, amount, strategyId, executionMode: "sync" }
+      });
+      const syncReplay = await getIdempotentMutationReplay({
+        bucket: "account_deallocate_sync",
+        key: syncMutationKey,
+        requestHash: syncRequestHash
+      });
+      if (syncReplay) {
+        return respond(response, syncReplay.statusCode, syncReplay.body);
+      }
+      const syncResult = await service.deallocateIdleFunds(auth.wallet, asset, amount, strategyId, strategy);
+      await storeIdempotentMutationReceipt({
+        bucket: "account_deallocate_sync",
+        key: syncMutationKey,
+        requestHash: syncRequestHash,
+        response: syncResult,
+        statusCode: 200
+      });
+      return respond(response, 200, syncResult);
     }
 
     if (request.method === "GET" && pathname === "/account/strategies") {
@@ -3239,7 +3323,31 @@ const server = createServer(async (request, response) => {
         : (url.searchParams.get("asset")?.trim() || "DOT");
       const amount = Number(payload?.amount ?? url.searchParams.get("amount") ?? "0");
       await requireChainBackedMutation("/account/borrow");
-      return respond(response, 200, await service.borrow(auth.wallet, asset, amount));
+      // Package D (P1.3) — money-route idempotency.
+      const idempotencyKey = parseIdempotencyKey(payload);
+      const mutationKey = idempotencyKey ? `${auth.wallet}:${idempotencyKey}` : undefined;
+      const requestHash = buildMutationRequestHash({
+        route: "/account/borrow",
+        wallet: auth.wallet,
+        payload: { asset, amount }
+      });
+      const replay = await getIdempotentMutationReplay({
+        bucket: "account_borrow",
+        key: mutationKey,
+        requestHash
+      });
+      if (replay) {
+        return respond(response, replay.statusCode, replay.body);
+      }
+      const result = await service.borrow(auth.wallet, asset, amount);
+      await storeIdempotentMutationReceipt({
+        bucket: "account_borrow",
+        key: mutationKey,
+        requestHash,
+        response: result,
+        statusCode: 200
+      });
+      return respond(response, 200, result);
     }
 
     if (request.method === "POST" && pathname === "/account/repay") {
@@ -3250,7 +3358,31 @@ const server = createServer(async (request, response) => {
         : (url.searchParams.get("asset")?.trim() || "DOT");
       const amount = Number(payload?.amount ?? url.searchParams.get("amount") ?? "0");
       await requireChainBackedMutation("/account/repay");
-      return respond(response, 200, await service.repay(auth.wallet, asset, amount));
+      // Package D (P1.3) — money-route idempotency.
+      const idempotencyKey = parseIdempotencyKey(payload);
+      const mutationKey = idempotencyKey ? `${auth.wallet}:${idempotencyKey}` : undefined;
+      const requestHash = buildMutationRequestHash({
+        route: "/account/repay",
+        wallet: auth.wallet,
+        payload: { asset, amount }
+      });
+      const replay = await getIdempotentMutationReplay({
+        bucket: "account_repay",
+        key: mutationKey,
+        requestHash
+      });
+      if (replay) {
+        return respond(response, replay.statusCode, replay.body);
+      }
+      const result = await service.repay(auth.wallet, asset, amount);
+      await storeIdempotentMutationReceipt({
+        bucket: "account_repay",
+        key: mutationKey,
+        requestHash,
+        response: result,
+        statusCode: 200
+      });
+      return respond(response, 200, result);
     }
 
     if (request.method === "GET" && pathname === "/reputation") {
@@ -4460,15 +4592,42 @@ const server = createServer(async (request, response) => {
         throw new ValidationError("amount must be a positive number.");
       }
       await requireChainBackedMutation("/payments/send");
+      // Package D (P1.3) — money-route idempotency. recipient is in
+      // the canonical payload hash, so two transfers to different
+      // recipients sharing the same idempotencyKey resolve as a
+      // payload-mismatch conflict rather than silently double-sending.
+      const idempotencyKey = parseIdempotencyKey(payload);
+      const mutationKey = idempotencyKey ? `${auth.wallet}:${idempotencyKey}` : undefined;
+      const requestHash = buildMutationRequestHash({
+        route: "/payments/send",
+        wallet: auth.wallet,
+        payload: { recipient, asset, amount }
+      });
+      const replay = await getIdempotentMutationReplay({
+        bucket: "payments_send",
+        key: mutationKey,
+        requestHash
+      });
+      if (replay) {
+        return respond(response, replay.statusCode, replay.body);
+      }
       const balances = await service.sendToAgent(auth.wallet, recipient, asset, amount);
-      return respond(response, 200, {
+      const result = {
         status: "sent",
         from: auth.wallet,
         to: recipient,
         asset,
         amount,
         balances
+      };
+      await storeIdempotentMutationReceipt({
+        bucket: "payments_send",
+        key: mutationKey,
+        requestHash,
+        response: result,
+        statusCode: 200
       });
+      return respond(response, 200, result);
     }
 
     if (request.method === "POST" && pathname === "/jobs/claim") {
