@@ -2,6 +2,9 @@ import { createServer } from "node:http";
 import { randomBytes } from "node:crypto";
 import { createPlatformRuntime } from "../../services/bootstrap.js";
 import {
+  assertMutationBackendAvailable
+} from "../../core/mutation-backend.js";
+import {
   AuthenticationError,
   AuthorizationError,
   ConflictError,
@@ -70,6 +73,7 @@ const {
   stateStore,
   contentRecoveryLog,
   gateway,
+  mutationBackendConfig,
   pimlicoClient,
   eventBus,
   authConfig,
@@ -224,6 +228,14 @@ function ensureAsyncXcmTreasuryAdmin(auth) {
     "Async XCM treasury actions require an admin role until the server-side XCM assembler is enabled.",
     "async_xcm_admin_required"
   );
+}
+
+async function requireChainBackedMutation(route) {
+  return assertMutationBackendAvailable({
+    gateway,
+    config: mutationBackendConfig,
+    route
+  });
 }
 
 function clientIp(request) {
@@ -2677,6 +2689,7 @@ const server = createServer(async (request, response) => {
         ? payload.asset.trim()
         : (url.searchParams.get("asset")?.trim() || "DOT");
       const amount = Number(payload?.amount ?? url.searchParams.get("amount") ?? "0");
+      await requireChainBackedMutation("/account/fund");
       return respond(response, 200, await service.fundAccount(auth.wallet, asset, amount));
     }
 
@@ -2691,6 +2704,7 @@ const server = createServer(async (request, response) => {
         : (url.searchParams.get("strategyId")?.trim() || "default-low-risk");
       const amount = Number(payload?.amount ?? url.searchParams.get("amount") ?? "0");
       const strategy = findStrategyConfig(strategyId);
+      await requireChainBackedMutation("/account/allocate");
       if (strategy?.executionMode === "async_xcm") {
         ensureAsyncXcmTreasuryAdmin(auth);
         const strategyAsset = resolveStrategyAssetSymbol(strategy);
@@ -2750,6 +2764,7 @@ const server = createServer(async (request, response) => {
         : (url.searchParams.get("strategyId")?.trim() || "default-low-risk");
       const amount = Number(payload?.amount ?? url.searchParams.get("amount") ?? "0");
       const strategy = findStrategyConfig(strategyId);
+      await requireChainBackedMutation("/account/deallocate");
       if (strategy?.executionMode === "async_xcm") {
         ensureAsyncXcmTreasuryAdmin(auth);
         const strategyAsset = resolveStrategyAssetSymbol(strategy);
@@ -2949,6 +2964,7 @@ const server = createServer(async (request, response) => {
         ? payload.asset.trim()
         : (url.searchParams.get("asset")?.trim() || "DOT");
       const amount = Number(payload?.amount ?? url.searchParams.get("amount") ?? "0");
+      await requireChainBackedMutation("/account/borrow");
       return respond(response, 200, await service.borrow(auth.wallet, asset, amount));
     }
 
@@ -2959,6 +2975,7 @@ const server = createServer(async (request, response) => {
         ? payload.asset.trim()
         : (url.searchParams.get("asset")?.trim() || "DOT");
       const amount = Number(payload?.amount ?? url.searchParams.get("amount") ?? "0");
+      await requireChainBackedMutation("/account/repay");
       return respond(response, 200, await service.repay(auth.wallet, asset, amount));
     }
 
@@ -4136,6 +4153,7 @@ const server = createServer(async (request, response) => {
       if (!Number.isFinite(amount) || amount <= 0) {
         throw new ValidationError("amount must be a positive number.");
       }
+      await requireChainBackedMutation("/payments/send");
       const balances = await service.sendToAgent(auth.wallet, recipient, asset, amount);
       return respond(response, 200, {
         status: "sent",
@@ -4249,15 +4267,19 @@ const server = createServer(async (request, response) => {
         code: normalized.code
       });
     }
+    const errorPayload = {
+      error: normalized.code ?? "internal_error",
+      message: normalized.message ?? "internal_error",
+      details: normalized.details,
+      requestId
+    };
+    if (normalized.code === "chain_backend_required" && normalized.details?.reason) {
+      errorPayload.reason = normalized.details.reason;
+    }
     return respond(
       response,
       normalized.statusCode ?? 500,
-      {
-        error: normalized.code ?? "internal_error",
-        message: normalized.message ?? "internal_error",
-        details: normalized.details,
-        requestId
-      },
+      errorPayload,
       extraHeaders
     );
   }
@@ -4269,6 +4291,7 @@ server.listen(port, () => {
       port,
       authMode: authConfig.mode,
       stateStoreBackend: stateStore.constructor.name,
+      mutationBackend: mutationBackendConfig.mode,
       blockchainEnabled: Boolean(gateway?.isEnabled?.()),
       pimlicoEnabled: Boolean(pimlicoClient?.isEnabled?.())
     },

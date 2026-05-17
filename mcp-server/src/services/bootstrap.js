@@ -14,6 +14,7 @@ import { createLogger } from "../core/logger.js";
 import { MetricRegistry } from "../core/metrics.js";
 import { createObservability } from "../core/observability.js";
 import { createContentRecoveryLog } from "../core/content-recovery-log.js";
+import { describeMutationBackendStartup, loadMutationBackendConfig } from "../core/mutation-backend.js";
 import { RecurringSchedulerService } from "./recurring-scheduler.js";
 import {
   GithubIssueIngestionScheduler,
@@ -153,7 +154,14 @@ export async function createPlatformRuntime() {
   // the step name before the process exits. Without this, a cryptic stack
   // trace is the only signal that a required env var was missing.
   const authConfig = initStep("load-auth-config", logger, () => loadAuthConfig());
+  const mutationBackendConfig = initStep("load-mutation-backend-config", logger, () =>
+    loadMutationBackendConfig(process.env)
+  );
   const gateway = initStep("init-blockchain-gateway", logger, () => new BlockchainGateway());
+  logger.info(
+    describeMutationBackendStartup(mutationBackendConfig, gateway),
+    "mutation_backend.configured"
+  );
   const pimlicoClient = initStep("init-pimlico-client", logger, () => new PimlicoClient());
   const stateStore = initStep("init-state-store", logger, () => createStateStore(process.env, { logger }));
   const contentRecoveryLog = initStep("init-content-recovery-log", logger, () =>
@@ -297,6 +305,7 @@ export async function createPlatformRuntime() {
     platformService,
     verifierService,
     gateway,
+    mutationBackendConfig,
     pimlicoClient,
     stateStore,
     contentRecoveryLog,

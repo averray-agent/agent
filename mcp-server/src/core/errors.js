@@ -44,6 +44,20 @@ export class ExternalServiceError extends AppError {
   }
 }
 
+export class ChainBackendRequiredError extends AppError {
+  constructor(reason, details = undefined) {
+    super("Chain backend is required for this mutation.", {
+      name: "ChainBackendRequiredError",
+      code: "chain_backend_required",
+      statusCode: 503,
+      details: {
+        reason,
+        ...(details ?? {})
+      }
+    });
+  }
+}
+
 export class BlockchainRevertError extends AppError {
   constructor(message, details = undefined) {
     super(message, { name: "BlockchainRevertError", code: "blockchain_revert", statusCode: 409, details });

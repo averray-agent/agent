@@ -129,6 +129,41 @@ async function runWithServerEnv(envOverrides, fn) {
   }
 }
 
+test("http smoke: production money-like routes require a chain backend", { skip: !RUN }, async () => {
+  await runWithServerEnv({
+    NODE_ENV: "production",
+    MUTATION_BACKEND: "required"
+  }, async (base) => {
+    const token = issueToken(ADMIN_WALLET);
+    const headers = {
+      "content-type": "application/json",
+      authorization: `Bearer ${token}`
+    };
+    const routes = [
+      ["/account/fund", { asset: "DOT", amount: 1 }],
+      ["/account/allocate", { asset: "DOT", amount: 1, strategyId: "default-low-risk" }],
+      ["/account/deallocate", { asset: "DOT", amount: 1, strategyId: "default-low-risk" }],
+      ["/account/borrow", { asset: "DOT", amount: 1 }],
+      ["/account/repay", { asset: "DOT", amount: 1 }],
+      ["/payments/send", { recipient: VERIFIER_WALLET, asset: "DOT", amount: 1 }]
+    ];
+
+    for (const [path, body] of routes) {
+      const response = await fetch(`${base}${path}`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body)
+      });
+      assert.equal(response.status, 503, path);
+      const payload = await response.json();
+      assert.equal(payload.error, "chain_backend_required", path);
+      assert.equal(payload.reason, "blockchain gateway is disabled", path);
+      assert.equal(payload.details.mode, "required", path);
+      assert.equal(payload.details.route, path);
+    }
+  });
+});
+
 test("http smoke: /admin/jobs rejects unauthenticated requests", { skip: !RUN }, async () => {
   await runWithServer(async (base) => {
     const response = await fetch(`${base}/admin/jobs`, {
