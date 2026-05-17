@@ -10,7 +10,10 @@ test("Hermes post-deploy verification keeps the full log as a workflow artifact"
   const workflow = await readFile(join(REPO_ROOT, ".github/workflows/deploy-production.yml"), "utf8");
 
   assert.match(workflow, /name: Upload Hermes post-deploy log/u);
-  assert.match(workflow, /uses: actions\/upload-artifact@v7/u);
+  // Accept either tag-pinned (@v7) or SHA-pinned with v7 tag comment
+  // (e.g., `@<40-char-sha> # v7`). Phase 4c moved this repo to SHA pins
+  // for supply-chain hardening; the comment preserves audit traceability.
+  assert.match(workflow, /uses: actions\/upload-artifact@(?:v7\b|[a-f0-9]{40} # v7\b)/u);
   assert.match(workflow, /name: hermes-post-deploy-\$\{\{ github\.run_id \}\}/u);
   assert.match(workflow, /path: hermes-post-deploy\.log/u);
   assert.match(workflow, /if-no-files-found: error/u);
@@ -21,7 +24,10 @@ test("Hermes PR handoff keeps the full log as a correlation-id artifact", async 
   const workflow = await readFile(join(REPO_ROOT, ".github/workflows/hermes-pr-handoff.yml"), "utf8");
 
   assert.match(workflow, /name: Upload Hermes handoff log/u);
-  assert.match(workflow, /uses: actions\/upload-artifact@v7/u);
+  // Accept either tag-pinned (@v7) or SHA-pinned with v7 tag comment
+  // (e.g., `@<40-char-sha> # v7`). Phase 4c moved this repo to SHA pins
+  // for supply-chain hardening; the comment preserves audit traceability.
+  assert.match(workflow, /uses: actions\/upload-artifact@(?:v7\b|[a-f0-9]{40} # v7\b)/u);
   assert.match(workflow, /name: hermes-handoff-\$\{\{ steps\.pr\.outputs\.correlation_id \}\}/u);
   assert.match(workflow, /path: hermes-handoff\.log/u);
   assert.match(workflow, /if-no-files-found: error/u);
@@ -38,7 +44,10 @@ test("hosted service-token proof uploads sanitized evidence as a workflow artifa
   assert.match(workflow, /CHECK_SERVICE_TOKEN_PROOF: "1"/u);
   assert.match(workflow, /SERVICE_TOKEN_PROOF_EVIDENCE_FILE: artifacts\/service-token-proof-hosted-\$\{\{ github\.run_id \}\}\.json/u);
   assert.match(workflow, /ADMIN_JWT="\$ADMIN_JWT_OP" \.\/scripts\/ops\/check-hosted-stack\.sh/u);
-  assert.match(workflow, /uses: actions\/upload-artifact@v7/u);
+  // Accept either tag-pinned (@v7) or SHA-pinned with v7 tag comment
+  // (e.g., `@<40-char-sha> # v7`). Phase 4c moved this repo to SHA pins
+  // for supply-chain hardening; the comment preserves audit traceability.
+  assert.match(workflow, /uses: actions\/upload-artifact@(?:v7\b|[a-f0-9]{40} # v7\b)/u);
   assert.match(workflow, /name: hosted-service-token-proof-\$\{\{ github\.run_id \}\}/u);
   assert.match(workflow, /path: \$\{\{ env\.SERVICE_TOKEN_PROOF_EVIDENCE_FILE \}\}/u);
   assert.match(workflow, /if-no-files-found: error/u);
