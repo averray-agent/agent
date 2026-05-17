@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { client, graphql } from "ponder";
+import { graphql } from "ponder";
 import { db } from "ponder:api";
 import schema from "ponder:schema";
 
@@ -31,7 +31,7 @@ app.get("/", (c) =>
   c.json({
     status: "ok",
     service: "agent-platform-indexer",
-    endpoints: ["/graphql", "/sql", "/xcm/outcomes", "/xcm/outcomes/status"]
+    endpoints: ["/graphql", "/xcm/outcomes", "/xcm/outcomes/status"]
   })
 );
 
@@ -67,7 +67,6 @@ app.get("/xcm/outcomes/status", async (c) =>
 );
 
 app.use("/graphql", graphql({ db, schema }));
-app.use("/sql/*", client({ db, schema }));
 
 export default app;
 
