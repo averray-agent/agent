@@ -1729,3 +1729,20 @@ test("http smoke: /metrics emits Prometheus text format with baseline series", {
     assert.match(body, /state_store_backend\{backend="MemoryStateStore"\} 1/);
   });
 });
+
+test("http smoke: discovery manifest is served at both /agent-tools.json and the RFC 8615 .well-known path", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const [canonical, wellKnown] = await Promise.all([
+      fetch(`${base}/agent-tools.json`),
+      fetch(`${base}/.well-known/agent-tools.json`)
+    ]);
+    assert.equal(canonical.status, 200);
+    assert.equal(wellKnown.status, 200);
+    assert.match(canonical.headers.get("content-type") ?? "", /application\/json/);
+    assert.match(wellKnown.headers.get("content-type") ?? "", /application\/json/);
+    const [canonicalBody, wellKnownBody] = await Promise.all([canonical.json(), wellKnown.json()]);
+    assert.deepEqual(canonicalBody, wellKnownBody, "well-known alias must return the same manifest");
+    assert.equal(typeof canonicalBody.name, "string");
+    assert.ok(Array.isArray(canonicalBody.protocols));
+  });
+});

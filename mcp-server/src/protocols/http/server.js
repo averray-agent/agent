@@ -1160,6 +1160,7 @@ function metricPathLabel(pathname) {
     "/health",
     "/metrics",
     "/agent-tools.json",
+    "/.well-known/agent-tools.json",
     "/onboarding",
     "/jobs",
     "/jobs/definition",
@@ -1793,11 +1794,18 @@ const server = createServer(async (request, response) => {
       return respond(response, 200, service.getPlatformCapabilities());
     }
 
-    if (request.method === "GET" && pathname === "/agent-tools.json") {
+    if (
+      request.method === "GET"
+      && (pathname === "/agent-tools.json" || pathname === "/.well-known/agent-tools.json")
+    ) {
       // Discovery manifest. The canonical copy is served by the static
       // site at https://averray.com/.well-known/agent-tools.json — this
       // API mirror lets MCP clients that only know the api host still
-      // find the capability listing. Bumps refer to
+      // find the capability listing. Both `/agent-tools.json` and the
+      // RFC 8615-conformant `/.well-known/agent-tools.json` are served
+      // from the same handler so a spec-following MCP client can
+      // discover the same manifest at the same path it uses on the
+      // canonical host. Bumps refer to
       // discovery/.well-known/agent-tools.json in the repo.
       return respond(
         response,
