@@ -479,6 +479,14 @@
       "description": "Per-job eligibility + claim-stake + tier-gate snapshot."
     },
     {
+      "path": "/jobs/explain-eligibility",
+      "description": "Per-wallet reason why a job is eligible or blocked (used by the explainEligibility tool)."
+    },
+    {
+      "path": "/jobs/estimate-reward",
+      "description": "Profile-aware net-reward estimate after fees, waivers, and stake (used by the estimateNetReward tool)."
+    },
+    {
       "path": "/admin/jobs/timeline",
       "description": "Admin-gated job/session timeline and lineage endpoint."
     },

@@ -38,7 +38,7 @@ jobs:
 
       - name: Reject accidental generated deploy output edits
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
         run: |
           set -euo pipefail
           if [ -z "${BASE_SHA:-}" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
@@ -306,7 +306,7 @@ jobs:
           # The pre-commit hook + GitHub push protection cover the
           # first-leak case before merge; CI is the last-resort sweep
           # on what's being added.
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
         run: |
           set -euo pipefail
 
