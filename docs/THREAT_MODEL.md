@@ -289,7 +289,7 @@ staging evidence are complete.
   (`deployments/testnet-multisig-owner.json` is `status: "verified"`)
 - KMS-backed backend signer is live (Phase 3 cutover 2026-05-16)
 - Audit remediation board ([`docs/AUDIT_REMEDIATION.md`](./AUDIT_REMEDIATION.md))
-  has closed Packages A, F, H, and C; Packages B, D, E, G, I, J still open
+  has closed Packages A, F, H, C, and I; Packages B, D, E, G, and J still open
 - External contract audit has not yet been engaged. See
   [`AUDIT_PACKAGE.md`](./AUDIT_PACKAGE.md) and
   [`STRATEGY_ADAPTER_AUDIT_SCOPE.md`](./STRATEGY_ADAPTER_AUDIT_SCOPE.md) for

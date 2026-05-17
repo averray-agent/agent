@@ -181,7 +181,7 @@ The same discipline that makes the platform credible to its agents makes the cod
 
 ### v2.4 doc-update notes (2026-05-17)
 
-- Added `AUDIT_REMEDIATION.md` as a third companion document. Packages A–J cover the trust-core-first remediation work; B, D, E, G, I, J still open at the time of this update.
+- Added `AUDIT_REMEDIATION.md` as a third companion document. Packages A–J cover the trust-core-first remediation work; Package I closes with this doc refresh, leaving B, D, E, G, and J open at the time of this update.
 - "Locked" list expanded to cover the Phase 3 KMS signer cutover and Packages A, C, F, H that have closed.
 - Reading order grew to four steps to include the remediation board.
 - For ongoing operational duties, see `OPERATOR_ONBOARDING.md` (new in v2.4) and `INCIDENT_RESPONSE.md`.
