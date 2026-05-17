@@ -1,9 +1,12 @@
 /* ================================================================
-   Averray homepage — live-feel console stream.
-   Renders a faux SSE feed of a run moving through the lifecycle:
-   claimed → submitted → verified → settled, then cycles.
-   Topics mirror the operator app's real SSE channel names.
-   No network, deterministic, respects prefers-reduced-motion.
+   Averray homepage — example console stream.
+   Scripted, deterministic animation that illustrates the platform
+   lifecycle (claimed → submitted → verified → settled, then cycles).
+   Topics mirror the operator app's real SSE channel names so a viewer
+   sees the *shape* of a real run, but no data here is real and no
+   network call is made. The DOM is labeled "Example" so a fresh
+   visitor cannot reasonably conclude the stream is live operations.
+   Respects prefers-reduced-motion.
    ================================================================ */
 (function () {
   const streamEl = document.getElementById("stream");
