@@ -46,6 +46,7 @@ test("AccountOverlayStore — sequential writes to the same wallet persist in or
 
   const backing = await stateStore.getAccountOverlay("0xabc");
   assert.equal(backing.version, 3);
+  assert.equal(store.persistQueues.size, 0);
 });
 
 test("AccountOverlayStore — hydrate loads every persisted overlay into the cache", async () => {
@@ -123,6 +124,7 @@ test("AccountOverlayStore — restart simulation: write through, drop the store,
   before.set("0xworker-1", {
     wallet: "0xworker-1",
     liquid: { USDC: 100 },
+    recurringTemplateReserves: { templateA: { asset: "USDC", amount: 5 } },
     strategyShares: { "default-low-risk": 42 },
     strategyPending: { "default-low-risk": { lastStatus: "pending", pendingDepositAssets: 3 } },
     treasuryTimeline: [
@@ -140,6 +142,7 @@ test("AccountOverlayStore — restart simulation: write through, drop the store,
   // Cache reflects every overlay the previous process wrote.
   const w1 = after.get("0xworker-1");
   assert.equal(w1.liquid.USDC, 100);
+  assert.equal(w1.recurringTemplateReserves.templateA.amount, 5);
   assert.equal(w1.strategyShares["default-low-risk"], 42);
   assert.equal(w1.strategyPending["default-low-risk"].lastStatus, "pending");
   assert.equal(w1.treasuryTimeline.length, 2);

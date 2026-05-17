@@ -144,5 +144,10 @@ export class AccountOverlayStore {
       })
     );
     this.persistQueues.set(wallet, next);
+    next.finally(() => {
+      if (this.persistQueues.get(wallet) === next) {
+        this.persistQueues.delete(wallet);
+      }
+    });
   }
 }

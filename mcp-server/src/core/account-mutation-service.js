@@ -37,6 +37,7 @@ import { DEFAULT_ESCROW_ASSET_SYMBOL } from "./assets.js";
  *   strategyActivity       → display_only   (last op per strategy)
  *   strategyPending        → derived_cache  (XcmWrapper pending state)
  *   strategyAccounting     → derived_cache  (principal+yield+markValue)
+ *   recurringTemplateReserves → derived_cache (template reserve accounting)
  *   treasuryTimeline       → display_only   (recent treasury-ops event log)
  *
  * Precedence rule (enforced by `attachStoredTreasuryMetadata` below):
@@ -64,6 +65,7 @@ export const ACCOUNT_OVERLAY_CLASSIFICATION = Object.freeze({
   strategyActivity: "display_only",
   strategyPending: "derived_cache",
   strategyAccounting: "derived_cache",
+  recurringTemplateReserves: "derived_cache",
   treasuryTimeline: "display_only"
 });
 
@@ -90,6 +92,7 @@ export class AccountMutationService {
       strategyActivity: {},
       strategyPending: {},
       strategyAccounting: {},
+      recurringTemplateReserves: {},
       treasuryTimeline: [],
       collateralLocked: {},
       jobStakeLocked: {},
@@ -104,6 +107,7 @@ export class AccountMutationService {
     account.strategyActivity = account.strategyActivity ?? {};
     account.strategyPending = account.strategyPending ?? {};
     account.strategyAccounting = account.strategyAccounting ?? {};
+    account.recurringTemplateReserves = account.recurringTemplateReserves ?? {};
     account.treasuryTimeline = account.treasuryTimeline ?? [];
     return account;
   }
@@ -113,7 +117,7 @@ export class AccountMutationService {
    *
    * Precedence per `ACCOUNT_OVERLAY_CLASSIFICATION`:
    *   - For `derived_cache` fields (strategyShares, strategyPending,
-   *     strategyAccounting) the live read wins per-key. Stored fills
+   *     strategyAccounting, recurringTemplateReserves) the live read wins per-key. Stored fills
    *     gaps only where the live read does not surface a particular
    *     sub-key. This was inverted in Package C Phase 1 — the previous
    *     order let a stale stored value override a fresh chain read.
@@ -142,6 +146,10 @@ export class AccountMutationService {
       strategyAccounting: {
         ...(stored.strategyAccounting ?? {}),
         ...(liveAccount.strategyAccounting ?? {})
+      },
+      recurringTemplateReserves: {
+        ...(stored.recurringTemplateReserves ?? {}),
+        ...(liveAccount.recurringTemplateReserves ?? {})
       },
       // display_only with defensive live-wins: today liveAccount does
       // not carry strategyActivity, so stored wins; if a future gateway

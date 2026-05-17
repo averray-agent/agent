@@ -33,6 +33,7 @@ test("ACCOUNT_OVERLAY_CLASSIFICATION enumerates every field the service stores",
     "strategyActivity",
     "strategyPending",
     "strategyAccounting",
+    "recurringTemplateReserves",
     "treasuryTimeline"
   ]);
   const actual = new Set(Object.keys(ACCOUNT_OVERLAY_CLASSIFICATION));
@@ -43,6 +44,7 @@ test("ACCOUNT_OVERLAY_CLASSIFICATION enumerates every field the service stores",
   // table in the docstring at the top of account-mutation-service.js.
   assert.equal(ACCOUNT_OVERLAY_CLASSIFICATION.liquid, "chain_authoritative");
   assert.equal(ACCOUNT_OVERLAY_CLASSIFICATION.strategyShares, "derived_cache");
+  assert.equal(ACCOUNT_OVERLAY_CLASSIFICATION.recurringTemplateReserves, "derived_cache");
   assert.equal(ACCOUNT_OVERLAY_CLASSIFICATION.strategyActivity, "display_only");
   assert.equal(ACCOUNT_OVERLAY_CLASSIFICATION.treasuryTimeline, "display_only");
 });
@@ -99,6 +101,29 @@ test("attachStoredTreasuryMetadata — same live-wins rule for strategyPending a
 
   // Stored gap-fills for keys live does not surface.
   assert.equal(merged.strategyPending["stale-strategy"].lastStatus, "succeeded");
+});
+
+test("attachStoredTreasuryMetadata — live wins for recurring template reserve overlays", () => {
+  const wallet = "0xabc";
+  const { service } = makeService({
+    wallet,
+    recurringTemplateReserves: {
+      templateA: { asset: "USDC", amount: 5 },
+      templateStoredOnly: { asset: "USDC", amount: 3 }
+    }
+  });
+
+  const live = {
+    wallet,
+    recurringTemplateReserves: {
+      templateA: { asset: "USDC", amount: 7 }
+    }
+  };
+
+  const merged = service.attachStoredTreasuryMetadata(wallet, live);
+
+  assert.deepEqual(merged.recurringTemplateReserves.templateA, { asset: "USDC", amount: 7 });
+  assert.deepEqual(merged.recurringTemplateReserves.templateStoredOnly, { asset: "USDC", amount: 3 });
 });
 
 test("attachStoredTreasuryMetadata — treasuryTimeline is display_only and comes from stored when live omits it", () => {
