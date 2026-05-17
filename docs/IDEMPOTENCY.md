@@ -35,7 +35,11 @@ payload, then:
 3. If a receipt exists but the canonical request hash differs, the backend
    throws `ConflictError` with code `idempotency_key_payload_mismatch` and
    details `{ bucket, originalRequestHash, requestHash }`.
-4. Otherwise the side effect runs and a fresh receipt is stored.
+4. If the same key and payload is already in flight on the current API
+   process, the backend returns HTTP `409` with
+   `code: "idempotency_key_in_flight"`. Retry the exact same payload after
+   the first request completes.
+5. Otherwise the side effect runs and a fresh receipt is stored.
 
 The canonical request hash deliberately omits the `idempotencyKey` field, so
 re-sending the same payload with the same key is always a replay rather than
@@ -110,8 +114,14 @@ Buckets that implement the standard replay/conflict contract:
 | Route | Bucket |
 | ----- | ------ |
 | `POST /jobs/claim` | implicit per-`(wallet, jobId)`; pass `idempotencyKey` to override |
+| `POST /account/fund` | `account_fund` |
+| `POST /account/allocate` (sync strategies only) | `account_allocate_sync` |
 | `POST /account/allocate` (async-XCM strategies only) | `account_allocate_async` |
+| `POST /account/deallocate` (sync strategies only) | `account_deallocate_sync` |
 | `POST /account/deallocate` (async-XCM strategies only) | `account_deallocate_async` |
+| `POST /account/borrow` | `account_borrow` |
+| `POST /account/repay` | `account_repay` |
+| `POST /payments/send` | `payments_send` |
 | `POST /admin/jobs` | `admin_jobs` |
 | `POST /admin/jobs/ingest/github` | `admin_jobs_ingest_github` |
 | `POST /admin/jobs/ingest/wikipedia` | `admin_jobs_ingest_wikipedia` |
@@ -134,12 +144,10 @@ The dispute routes (`POST /disputes/:id/verdict`,
 `POST /disputes/:id/release`) store mutation receipts but follow a separate
 verdict-keyed convention; they do not surface `idempotency_key_payload_mismatch`.
 
-Other mutation routes — `POST /account/fund`, `POST /account/borrow`,
-`POST /account/repay`, `POST /payments/send`, `POST /jobs/submit`,
-`POST /jobs/sub`, sync-strategy variants of `POST /account/allocate` and
-`POST /account/deallocate` — currently accept `idempotencyKey` for forward
-compatibility but ignore it on the server. Treat retries on these routes as
-non-idempotent and gate them on your own client-side state.
+Other mutation routes — `POST /jobs/submit` and `POST /jobs/sub` — currently
+accept `idempotencyKey` for forward compatibility but ignore it on the server.
+Treat retries on these routes as non-idempotent and gate them on your own
+client-side state.
 
 ## Cross-references
 

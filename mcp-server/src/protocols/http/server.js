@@ -120,6 +120,7 @@ const port = Number(process.env.PORT ?? 8787);
 
 const SIWE_STATEMENT = "Sign in to the Agent Platform.";
 const SERVICE_TOKEN_MAX_TTL_SECONDS = 30 * 24 * 60 * 60;
+const inFlightIdempotentMutations = new Map();
 
 function respond(response, statusCode, payload, extraHeaders = {}) {
   const headers = {
@@ -1486,6 +1487,52 @@ async function respondWithMutationReceipt(response, context, statusCode, body) {
     statusCode
   });
   return respond(response, statusCode, body);
+}
+
+async function runIdempotentMutation(response, context, statusCode, operation) {
+  const replay = await getIdempotentMutationReplay(context);
+  if (replay) {
+    return respond(response, replay.statusCode, replay.body);
+  }
+
+  const inFlightKey = context.key ? `${context.bucket}:${context.key}` : undefined;
+  if (inFlightKey) {
+    const inFlight = inFlightIdempotentMutations.get(inFlightKey);
+    if (inFlight) {
+      if (inFlight.requestHash !== context.requestHash) {
+        throw new ConflictError(
+          "Idempotency key was already used with a different request payload.",
+          "idempotency_key_payload_mismatch",
+          {
+            bucket: context.bucket,
+            originalRequestHash: inFlight.requestHash,
+            requestHash: context.requestHash
+          }
+        );
+      }
+      throw new ConflictError(
+        "Idempotent mutation is already in flight. Retry with the same payload after the first request completes.",
+        "idempotency_key_in_flight",
+        {
+          bucket: context.bucket,
+          requestHash: context.requestHash
+        }
+      );
+    }
+    inFlightIdempotentMutations.set(inFlightKey, {
+      requestHash: context.requestHash,
+      startedAt: new Date().toISOString()
+    });
+  }
+
+  try {
+    const body = await operation();
+    return respondWithMutationReceipt(response, context, statusCode, body);
+  } finally {
+    if (inFlightKey) {
+      inFlightIdempotentMutations.delete(inFlightKey);
+    }
+  }
 }
 
 function assertIssuerCanGrantCapabilities(grant, auth) {
@@ -2963,8 +3010,21 @@ const server = createServer(async (request, response) => {
         ? payload.asset.trim()
         : (url.searchParams.get("asset")?.trim() || "DOT");
       const amount = Number(payload?.amount ?? url.searchParams.get("amount") ?? "0");
-      await requireChainBackedMutation("/account/fund");
-      return respond(response, 200, await service.fundAccount(auth.wallet, asset, amount));
+      const idempotency = buildIdempotentMutationContext({
+        route: "/account/fund",
+        auth,
+        payload,
+        normalizedPayload: {
+          ...stripIdempotencyKey(payload),
+          asset,
+          amount
+        },
+        bucket: "account_fund"
+      });
+      return await runIdempotentMutation(response, idempotency, 200, async () => {
+        await requireChainBackedMutation("/account/fund");
+        return service.fundAccount(auth.wallet, asset, amount);
+      });
     }
 
     if (request.method === "POST" && pathname === "/account/allocate") {
@@ -2978,8 +3038,8 @@ const server = createServer(async (request, response) => {
         : (url.searchParams.get("strategyId")?.trim() || "default-low-risk");
       const amount = Number(payload?.amount ?? url.searchParams.get("amount") ?? "0");
       const strategy = findStrategyConfig(strategyId);
-      await requireChainBackedMutation("/account/allocate");
       if (strategy?.executionMode === "async_xcm") {
+        await requireChainBackedMutation("/account/allocate");
         ensureAsyncXcmTreasuryAdmin(auth);
         const strategyAsset = resolveStrategyAssetSymbol(strategy);
         const options = parseAsyncTreasuryOptions(payload, url);
@@ -3024,7 +3084,22 @@ const server = createServer(async (request, response) => {
         });
         return respond(response, 200, result);
       }
-      return respond(response, 200, await service.allocateIdleFunds(auth.wallet, asset, amount, strategyId, strategy));
+      const idempotency = buildIdempotentMutationContext({
+        route: "/account/allocate",
+        auth,
+        payload,
+        normalizedPayload: {
+          ...stripIdempotencyKey(payload),
+          asset,
+          amount,
+          strategyId
+        },
+        bucket: "account_allocate_sync"
+      });
+      return await runIdempotentMutation(response, idempotency, 200, async () => {
+        await requireChainBackedMutation("/account/allocate");
+        return service.allocateIdleFunds(auth.wallet, asset, amount, strategyId, strategy);
+      });
     }
 
     if (request.method === "POST" && pathname === "/account/deallocate") {
@@ -3038,8 +3113,8 @@ const server = createServer(async (request, response) => {
         : (url.searchParams.get("strategyId")?.trim() || "default-low-risk");
       const amount = Number(payload?.amount ?? url.searchParams.get("amount") ?? "0");
       const strategy = findStrategyConfig(strategyId);
-      await requireChainBackedMutation("/account/deallocate");
       if (strategy?.executionMode === "async_xcm") {
+        await requireChainBackedMutation("/account/deallocate");
         ensureAsyncXcmTreasuryAdmin(auth);
         const strategyAsset = resolveStrategyAssetSymbol(strategy);
         const options = parseAsyncTreasuryOptions(payload, url, {
@@ -3086,7 +3161,22 @@ const server = createServer(async (request, response) => {
         });
         return respond(response, 200, result);
       }
-      return respond(response, 200, await service.deallocateIdleFunds(auth.wallet, asset, amount, strategyId, strategy));
+      const idempotency = buildIdempotentMutationContext({
+        route: "/account/deallocate",
+        auth,
+        payload,
+        normalizedPayload: {
+          ...stripIdempotencyKey(payload),
+          asset,
+          amount,
+          strategyId
+        },
+        bucket: "account_deallocate_sync"
+      });
+      return await runIdempotentMutation(response, idempotency, 200, async () => {
+        await requireChainBackedMutation("/account/deallocate");
+        return service.deallocateIdleFunds(auth.wallet, asset, amount, strategyId, strategy);
+      });
     }
 
     if (request.method === "GET" && pathname === "/account/strategies") {
@@ -3238,8 +3328,21 @@ const server = createServer(async (request, response) => {
         ? payload.asset.trim()
         : (url.searchParams.get("asset")?.trim() || "DOT");
       const amount = Number(payload?.amount ?? url.searchParams.get("amount") ?? "0");
-      await requireChainBackedMutation("/account/borrow");
-      return respond(response, 200, await service.borrow(auth.wallet, asset, amount));
+      const idempotency = buildIdempotentMutationContext({
+        route: "/account/borrow",
+        auth,
+        payload,
+        normalizedPayload: {
+          ...stripIdempotencyKey(payload),
+          asset,
+          amount
+        },
+        bucket: "account_borrow"
+      });
+      return await runIdempotentMutation(response, idempotency, 200, async () => {
+        await requireChainBackedMutation("/account/borrow");
+        return service.borrow(auth.wallet, asset, amount);
+      });
     }
 
     if (request.method === "POST" && pathname === "/account/repay") {
@@ -3249,8 +3352,21 @@ const server = createServer(async (request, response) => {
         ? payload.asset.trim()
         : (url.searchParams.get("asset")?.trim() || "DOT");
       const amount = Number(payload?.amount ?? url.searchParams.get("amount") ?? "0");
-      await requireChainBackedMutation("/account/repay");
-      return respond(response, 200, await service.repay(auth.wallet, asset, amount));
+      const idempotency = buildIdempotentMutationContext({
+        route: "/account/repay",
+        auth,
+        payload,
+        normalizedPayload: {
+          ...stripIdempotencyKey(payload),
+          asset,
+          amount
+        },
+        bucket: "account_repay"
+      });
+      return await runIdempotentMutation(response, idempotency, 200, async () => {
+        await requireChainBackedMutation("/account/repay");
+        return service.repay(auth.wallet, asset, amount);
+      });
     }
 
     if (request.method === "GET" && pathname === "/reputation") {
@@ -4459,15 +4575,29 @@ const server = createServer(async (request, response) => {
       if (!Number.isFinite(amount) || amount <= 0) {
         throw new ValidationError("amount must be a positive number.");
       }
-      await requireChainBackedMutation("/payments/send");
-      const balances = await service.sendToAgent(auth.wallet, recipient, asset, amount);
-      return respond(response, 200, {
-        status: "sent",
-        from: auth.wallet,
-        to: recipient,
-        asset,
-        amount,
-        balances
+      const idempotency = buildIdempotentMutationContext({
+        route: "/payments/send",
+        auth,
+        payload,
+        normalizedPayload: {
+          ...stripIdempotencyKey(payload),
+          recipient,
+          asset,
+          amount
+        },
+        bucket: "payments_send"
+      });
+      return await runIdempotentMutation(response, idempotency, 200, async () => {
+        await requireChainBackedMutation("/payments/send");
+        const balances = await service.sendToAgent(auth.wallet, recipient, asset, amount);
+        return {
+          status: "sent",
+          from: auth.wallet,
+          to: recipient,
+          asset,
+          amount,
+          balances
+        };
       });
     }
 

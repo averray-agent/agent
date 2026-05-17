@@ -172,14 +172,15 @@ export class AgentPlatformClient {
     return this.request("/account/strategies");
   }
 
-  async fundAccount({ asset = DEFAULT_ESCROW_ASSET_SYMBOL, amount } = {}) {
+  /** Use a stable `idempotencyKey` per intended fund operation so retries collapse. See docs/IDEMPOTENCY.md. */
+  async fundAccount({ asset = DEFAULT_ESCROW_ASSET_SYMBOL, amount, idempotencyKey = undefined } = {}) {
     return this.request("/account/fund", {
       method: "POST",
-      body: { asset, amount }
+      body: compact({ asset, amount, idempotencyKey })
     });
   }
 
-  /** `idempotencyKey` is enforced server-side only for async-XCM strategies; sync strategies ignore it. See docs/IDEMPOTENCY.md. */
+  /** Use a stable `idempotencyKey` per intended allocation; sync and async strategy retries replay safely. See docs/IDEMPOTENCY.md. */
   async allocateIdleFunds({ asset = DEFAULT_ESCROW_ASSET_SYMBOL, amount, strategyId = "default-low-risk", ...options } = {}) {
     return this.request("/account/allocate", {
       method: "POST",
@@ -187,7 +188,7 @@ export class AgentPlatformClient {
     });
   }
 
-  /** `idempotencyKey` is enforced server-side only for async-XCM strategies; sync strategies ignore it. See docs/IDEMPOTENCY.md. */
+  /** Use a stable `idempotencyKey` per intended deallocation; sync and async strategy retries replay safely. See docs/IDEMPOTENCY.md. */
   async deallocateIdleFunds({ asset = DEFAULT_ESCROW_ASSET_SYMBOL, amount, strategyId = "default-low-risk", ...options } = {}) {
     return this.request("/account/deallocate", {
       method: "POST",
@@ -195,14 +196,15 @@ export class AgentPlatformClient {
     });
   }
 
-  async sendToAgent({ recipient, asset = DEFAULT_ESCROW_ASSET_SYMBOL, amount } = {}) {
+  /** Use a stable `idempotencyKey` per intended transfer so retries do not double-send. See docs/IDEMPOTENCY.md. */
+  async sendToAgent({ recipient, asset = DEFAULT_ESCROW_ASSET_SYMBOL, amount, idempotencyKey = undefined } = {}) {
     return this.request("/payments/send", {
       method: "POST",
-      body: { recipient, asset, amount }
+      body: compact({ recipient, asset, amount, idempotencyKey })
     });
   }
 
-  /** `idempotencyKey` is forwarded but the backend treats every call as new — supply your own retry guard. See docs/IDEMPOTENCY.md. */
+  /** Use a stable `idempotencyKey` per intended borrow so retries collapse. See docs/IDEMPOTENCY.md. */
   async borrowFunds({ asset = DEFAULT_ESCROW_ASSET_SYMBOL, amount, idempotencyKey = undefined } = {}) {
     return this.request("/account/borrow", {
       method: "POST",
@@ -210,7 +212,7 @@ export class AgentPlatformClient {
     });
   }
 
-  /** `idempotencyKey` is forwarded but the backend treats every call as new — supply your own retry guard. See docs/IDEMPOTENCY.md. */
+  /** Use a stable `idempotencyKey` per intended repay so retries collapse. See docs/IDEMPOTENCY.md. */
   async repayFunds({ asset = DEFAULT_ESCROW_ASSET_SYMBOL, amount, idempotencyKey = undefined } = {}) {
     return this.request("/account/repay", {
       method: "POST",

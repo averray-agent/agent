@@ -68,8 +68,14 @@ if (firstJobId) {
 }
 
 const generatedKey: IdempotencyKey = createIdempotencyKey("borrow");
+await client.fundAccount({ amount: "1", idempotencyKey: createIdempotencyKey("fund") });
 const account: AccountSummary = await client.borrowFunds({ amount: "1", idempotencyKey: generatedKey });
 await client.repayFunds({ amount: "1" });
+await client.sendToAgent({
+  recipient: "0x1111111111111111111111111111111111111111",
+  amount: "1",
+  idempotencyKey: createIdempotencyKey("send")
+});
 void account.wallet;
 void createIdempotencyKey();
 void AgentPlatformValidationError;

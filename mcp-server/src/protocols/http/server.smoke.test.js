@@ -182,6 +182,85 @@ test("http smoke: /health separates service liveness from treasury capability", 
   });
 });
 
+test("http smoke: sync money-like routes replay idempotent receipts", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const token = issueToken(ADMIN_WALLET);
+    const headers = {
+      "content-type": "application/json",
+      authorization: `Bearer ${token}`
+    };
+    const postJson = async (path, body) => {
+      const response = await fetch(`${base}${path}`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body)
+      });
+      const payload = await response.json();
+      return { response, payload };
+    };
+
+    const fundBody = { asset: "DOT", amount: 10, idempotencyKey: "money-fund-1" };
+    const firstFund = await postJson("/account/fund", fundBody);
+    assert.equal(firstFund.response.status, 200);
+    assert.equal(firstFund.payload.liquid.DOT, 10);
+    const replayFund = await postJson("/account/fund", fundBody);
+    assert.equal(replayFund.response.status, 200);
+    assert.deepEqual(replayFund.payload, firstFund.payload);
+    const fundConflict = await postJson("/account/fund", { ...fundBody, amount: 11 });
+    assert.equal(fundConflict.response.status, 409);
+    assert.equal(fundConflict.payload.error, "idempotency_key_payload_mismatch");
+
+    const allocateBody = {
+      asset: "DOT",
+      amount: 4,
+      strategyId: "default-low-risk",
+      idempotencyKey: "money-allocate-1"
+    };
+    const firstAllocate = await postJson("/account/allocate", allocateBody);
+    assert.equal(firstAllocate.response.status, 200);
+    assert.equal(firstAllocate.payload.liquid.DOT, 6);
+    assert.equal(firstAllocate.payload.strategyAllocated.DOT, 4);
+    const replayAllocate = await postJson("/account/allocate", allocateBody);
+    assert.equal(replayAllocate.response.status, 200);
+    assert.deepEqual(replayAllocate.payload, firstAllocate.payload);
+
+    const deallocateBody = {
+      asset: "DOT",
+      amount: 1,
+      strategyId: "default-low-risk",
+      idempotencyKey: "money-deallocate-1"
+    };
+    const firstDeallocate = await postJson("/account/deallocate", deallocateBody);
+    assert.equal(firstDeallocate.response.status, 200);
+    assert.equal(firstDeallocate.payload.liquid.DOT, 7);
+    assert.equal(firstDeallocate.payload.strategyAllocated.DOT, 3);
+    const replayDeallocate = await postJson("/account/deallocate", deallocateBody);
+    assert.equal(replayDeallocate.response.status, 200);
+    assert.deepEqual(replayDeallocate.payload, firstDeallocate.payload);
+
+    const transferBody = {
+      recipient: VERIFIER_WALLET,
+      asset: "DOT",
+      amount: 2,
+      idempotencyKey: "money-transfer-1"
+    };
+    const firstTransfer = await postJson("/payments/send", transferBody);
+    assert.equal(firstTransfer.response.status, 200);
+    assert.equal(firstTransfer.payload.status, "sent");
+    assert.equal(firstTransfer.payload.balances.from.liquid.DOT, 5);
+    assert.equal(firstTransfer.payload.balances.to.liquid.DOT, 2);
+    const replayTransfer = await postJson("/payments/send", transferBody);
+    assert.equal(replayTransfer.response.status, 200);
+    assert.deepEqual(replayTransfer.payload, firstTransfer.payload);
+
+    const account = await fetch(`${base}/account`, { headers });
+    assert.equal(account.status, 200);
+    const finalAccount = await account.json();
+    assert.equal(finalAccount.liquid.DOT, 5);
+    assert.equal(finalAccount.strategyAllocated.DOT, 3);
+  });
+});
+
 test("http smoke: /admin/jobs rejects unauthenticated requests", { skip: !RUN }, async () => {
   await runWithServer(async (base) => {
     const response = await fetch(`${base}/admin/jobs`, {

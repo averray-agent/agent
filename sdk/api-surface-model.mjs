@@ -164,6 +164,7 @@ export interface StrategyPositionsResponse extends ApiEnvelope {
 export interface FundAccountInput {
   asset?: AssetSymbol;
   amount: number | string;
+  idempotencyKey?: IdempotencyKey;
 }
 
 export interface StrategyMutationInput {
@@ -182,6 +183,7 @@ export interface SendToAgentInput {
   recipient: WalletAddress;
   asset?: AssetSymbol;
   amount: number | string;
+  idempotencyKey?: IdempotencyKey;
 }
 
 export interface BalanceMutationInput {

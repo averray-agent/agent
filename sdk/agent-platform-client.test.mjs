@@ -54,7 +54,8 @@ test("authenticated helpers send bearer token and compact JSON bodies", async ()
   });
   await client.sendToAgent({
     recipient: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
-    amount: "1.5"
+    amount: "1.5",
+    idempotencyKey: "send-1"
   });
   await client.borrowFunds({
     amount: 2,
@@ -80,7 +81,8 @@ test("authenticated helpers send bearer token and compact JSON bodies", async ()
   assert.deepEqual(JSON.parse(calls[1].options.body), {
     recipient: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
     asset: "USDC",
-    amount: "1.5"
+    amount: "1.5",
+    idempotencyKey: "send-1"
   });
   assert.equal(calls[2].url, "https://api.example.test/account/borrow");
   assert.deepEqual(JSON.parse(calls[2].options.body), {
