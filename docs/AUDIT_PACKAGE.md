@@ -140,6 +140,12 @@ non-obvious places a reviewer should focus rather than a generic checklist.
 - Deployment scripts (`scripts/`) — operator tooling; no runtime trust.
 - Pimlico gas-sponsor integration (`mcp-server/src/services/pimlico-*`) —
   feature-flagged, disabled on all current deployments.
+- Strategy adapter implementations (`contracts/strategies/`) and the XCM
+  transport wrapper (`contracts/XcmWrapper.sol`, plus
+  `contracts/interfaces/{IXcmStrategyAdapter,IXcmWrapper}.sol`). The v1
+  set ships only the testnet-only `MockVDotAdapter`; the real adapter
+  and the wrapper are reviewed in a separate engagement scoped in
+  [`STRATEGY_ADAPTER_AUDIT_SCOPE.md`](./STRATEGY_ADAPTER_AUDIT_SCOPE.md).
 
 ---
 
