@@ -2599,6 +2599,123 @@ creation):
 The repo state goes back to "PR 4b.3 has landed but no AWS resources
 exist yet" — backend keeps signing with HMAC; nothing breaks.
 
+### PR 4b.6 operator runbook — JWT_BACKEND cutover (hmac → both → kms)
+
+**When**: after PR 4b.6 lands on `main` (env template + inventory
+flipped, `--use-kms` flag in `mint-admin-jwt.mjs`).
+
+**Why**: PR 4b.6 ships the *prep* code, not the live flip. The actual
+backend behavior change happens in the Render dashboard by flipping
+`JWT_BACKEND`. The two-stage cutover (`both` first, then `kms`) gives
+us a 24–48h window where both algorithms verify, so a misconfigured
+KMS path doesn't blast the whole user session pool.
+
+**Pre-flight (before flipping)**:
+
+```bash
+# 1. Re-verify the JWT KMS key is still healthy. 4/4 pass means the
+#    1Password item matches the AWS KMS key matches the cached public
+#    key in the env. This is the same script that ran at PR 4b.3 land.
+(
+  export AWS_JWT_ACCESS_KEY_ID=$(op read 'op://prod-backend/aws-jwt-signer-testnet/access-key-id')
+  export AWS_JWT_SECRET_ACCESS_KEY=$(op read 'op://prod-backend/aws-jwt-signer-testnet/secret-access-key')
+  export AWS_JWT_REGION=$(op read 'op://prod-backend/aws-jwt-signer-testnet/aws-region')
+  export AWS_JWT_KEY_ID=$(op read 'op://prod-backend/aws-jwt-signer-testnet/kms-key-id')
+  export JWT_PUBLIC_KEY_PEM=$(op read 'op://prod-backend/aws-jwt-signer-testnet/public-key-pem')
+  export JWT_PUBLIC_KEY_FINGERPRINT=$(op read 'op://prod-backend/aws-jwt-signer-testnet/public-key-fingerprint')
+  node scripts/ops/verify-jwt-kms-signer.mjs
+)
+
+# 2. Confirm prod backend currently signs HMAC and the latest deploy
+#    rendered the new env vars from PR 4b.6.
+curl -s https://api.averray.com/health | jq .auth
+# Expect: { "mode": "strict", ... } and no errors in backend logs
+#   about missing AWS_JWT_* env vars.
+```
+
+**Stage 1: flip `JWT_BACKEND=both`**
+
+In Render dashboard for the backend service:
+
+1. Edit env var `JWT_BACKEND`: change from `hmac` to `both`.
+2. Save → Render triggers a redeploy.
+3. After deploy turns green: confirm `/health` is 200 and a fresh
+   SIWE sign-in still works against the operator app.
+4. Smoke-test the KMS sign path (proves both algs work end-to-end):
+
+   ```bash
+   # Source the JWT KMS env (this resolves the 6 op:// refs into env
+   # vars for one subshell — never echo $AWS_JWT_SECRET_ACCESS_KEY).
+   export AWS_JWT_ACCESS_KEY_ID=$(op read 'op://prod-backend/aws-jwt-signer-testnet/access-key-id')
+   export AWS_JWT_SECRET_ACCESS_KEY=$(op read 'op://prod-backend/aws-jwt-signer-testnet/secret-access-key')
+   export AWS_JWT_REGION=$(op read 'op://prod-backend/aws-jwt-signer-testnet/aws-region')
+   export AWS_JWT_KEY_ID=$(op read 'op://prod-backend/aws-jwt-signer-testnet/kms-key-id')
+   export JWT_PUBLIC_KEY_PEM=$(op read 'op://prod-backend/aws-jwt-signer-testnet/public-key-pem')
+
+   # Mint a short-lived ES256 admin JWT.
+   ES256_JWT=$(node scripts/ops/mint-admin-jwt.mjs \
+     --profile testnet --expires-in-days 1 --use-kms --quiet)
+
+   # Verify it works against a protected route.
+   curl -sS -H "Authorization: Bearer $ES256_JWT" \
+     https://api.averray.com/auth/session | jq .
+   # Expect: { wallet: 0x..., roles: ["admin"], ... }
+   ```
+
+5. Watch for 24–48h. Specifically: backend logs should show ZERO
+   `jwt_verify_failed` errors above baseline. Sign-volume on the JWT
+   KMS key (CloudWatch metric `KMS.NumberOfSign`) should match
+   expected SIWE traffic.
+
+**Stage 2: flip `JWT_BACKEND=kms`**
+
+Only after Stage 1 has run clean for ≥ 24h:
+
+1. Rotate `op://prod-smoke/admin-jwt` to a freshly-minted 30-day
+   ES256 token (the worker-loop will pick it up on its next run):
+
+   ```bash
+   export AWS_JWT_ACCESS_KEY_ID=$(op read 'op://prod-backend/aws-jwt-signer-testnet/access-key-id')
+   export AWS_JWT_SECRET_ACCESS_KEY=$(op read 'op://prod-backend/aws-jwt-signer-testnet/secret-access-key')
+   export AWS_JWT_REGION=$(op read 'op://prod-backend/aws-jwt-signer-testnet/aws-region')
+   export AWS_JWT_KEY_ID=$(op read 'op://prod-backend/aws-jwt-signer-testnet/kms-key-id')
+   export JWT_PUBLIC_KEY_PEM=$(op read 'op://prod-backend/aws-jwt-signer-testnet/public-key-pem')
+   node scripts/ops/mint-admin-jwt.mjs \
+     --profile testnet --expires-in-days 30 --use-kms --quiet \
+   | op item edit "op://prod-smoke/admin-jwt" --vault prod-smoke \
+       "password=$(cat -)"
+   ```
+
+2. In Render dashboard: edit `JWT_BACKEND` → `kms`. Save → redeploy.
+3. After deploy turns green: the backend now refuses HS256 tokens.
+   Every active operator session needs to re-SIWE (refresh-flow
+   tokens are already ES256 if cookie was issued post-4b.5b).
+
+**Rollback** (if anything breaks during Stage 1 or Stage 2):
+
+1. Flip `JWT_BACKEND` back to the previous value in Render
+   (`both` → `hmac`, or `kms` → `both`).
+2. Render redeploys; previously-issued tokens are accepted again.
+3. If `op://prod-smoke/admin-jwt` was rotated to ES256 in Stage 2,
+   re-mint an HS256 token and overwrite the 1Password field:
+
+   ```bash
+   AUTH_JWT_SECRETS=$(op read "op://prod-backend/auth-jwt-secrets/password") \
+     node scripts/ops/mint-admin-jwt.mjs \
+       --profile testnet --expires-in-days 30 --quiet \
+   | op item edit "op://prod-smoke/admin-jwt" --vault prod-smoke \
+       "password=$(cat -)"
+   ```
+
+**HMAC retirement** (≥ 30 days after Stage 2):
+
+- Delete `op://prod-backend/auth-jwt-secrets` from the prod-backend
+  vault. The HMAC verification code path stays for forensic decoding
+  but no longer accepts tokens.
+- Optionally, remove the `JWT_BACKEND=hmac` code branch in a
+  follow-up PR. Track the retirement date in
+  `docs/SECRETS_CALENDAR.yml` against `auth-jwt-secrets`.
+
 ### 4c. GitHub Actions hardening (beyond Phase 2)
 
 Already partially covered in 2e. Additional steps:

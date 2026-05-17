@@ -11,32 +11,59 @@
  * wants to refresh tokens consumed by automation (e.g.
  * scripts/ops/run-hosted-worker-loop.mjs).
  *
- * This script signs a JWT locally using the platform's HS256
- * secret. It does NOT contact the running backend — the produced
- * token is verifiable by any backend whose `AUTH_JWT_SECRETS`
- * environment variable contains the same secret used to sign it.
+ * Two signing backends:
+ *
+ *   1. HMAC (default) — signs HS256 with `AUTH_JWT_SECRETS[0]`. Works
+ *      against backends running `JWT_BACKEND` ∈ {hmac, both}. This is
+ *      the path used before the Phase 4b cutover.
+ *
+ *   2. KMS (`--use-kms`) — signs ES256 via the JWT KMS key
+ *      (`AWS_JWT_KEY_ID`). Works against backends running `JWT_BACKEND`
+ *      ∈ {kms, both}. Use this path after the Phase 4b.6 cutover; the
+ *      produced token verifies against the public key cached in
+ *      `JWT_PUBLIC_KEY_PEM`. Requires the operator's AWS credentials
+ *      to have `kms:Sign` on the JWT key (the same IAM user the
+ *      backend uses, or a human operator with equivalent grants).
  *
  * Required env (treat as sensitive — source from a vault or
  * password manager, never paste literals into shell history):
- *   AUTH_JWT_SECRETS    — comma-separated list of HS256 secrets.
- *                         The script signs with the first entry,
- *                         matching the rotation pattern in
- *                         mcp-server/src/auth/jwt.js (newest first).
- *   AUTH_JWT_SECRET     — legacy single-secret fallback.
+ *
+ *   HMAC mode (default):
+ *     AUTH_JWT_SECRETS    — comma-separated list of HS256 secrets.
+ *                           Signs with the first (newest) entry.
+ *     AUTH_JWT_SECRET     — legacy single-secret fallback.
+ *
+ *   KMS mode (`--use-kms`):
+ *     AWS_JWT_REGION              — eu-central-2 for testnet.
+ *     AWS_JWT_KEY_ID              — full KMS key ARN (NOT alias).
+ *     AWS_JWT_ACCESS_KEY_ID       — IAM access key (or use the SDK's
+ *     AWS_JWT_SECRET_ACCESS_KEY     default-credential-provider chain).
+ *     JWT_PUBLIC_KEY_PEM          — PEM-wrapped SPKI of the KMS public
+ *                                   key. Embedded as a claim-shape
+ *                                   sanity-check; the backend re-reads
+ *                                   it from env at verify time.
+ *     JWT_KID                     — Optional, default "jwt-1".
+ *     JWT_EXPECTED_ISSUER         — Optional, default
+ *                                   "averray-backend-testnet".
+ *     JWT_EXPECTED_AUDIENCE       — Optional, default "averray-backend".
  *
  * Usage:
- *   node scripts/ops/mint-admin-jwt.mjs \
- *     --wallet 0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519 \
- *     --roles admin,verifier \
- *     --expires-in-days 90
+ *   # HMAC (legacy):
+ *   AUTH_JWT_SECRETS=$(op read 'op://prod-backend/auth-jwt-secrets/password') \
+ *     node scripts/ops/mint-admin-jwt.mjs --profile testnet --expires-in-days 30
  *
- *   # short form: takes the wallet from deployments/<profile>.json
- *   node scripts/ops/mint-admin-jwt.mjs --profile testnet
+ *   # KMS (post-PR-4b.6):
+ *   export AWS_JWT_REGION=$(op read 'op://prod-backend/aws-jwt-signer-testnet/aws-region')
+ *   export AWS_JWT_KEY_ID=$(op read 'op://prod-backend/aws-jwt-signer-testnet/kms-key-id')
+ *   export AWS_JWT_ACCESS_KEY_ID=$(op read 'op://prod-backend/aws-jwt-signer-testnet/access-key-id')
+ *   export AWS_JWT_SECRET_ACCESS_KEY=$(op read 'op://prod-backend/aws-jwt-signer-testnet/secret-access-key')
+ *   export JWT_PUBLIC_KEY_PEM=$(op read 'op://prod-backend/aws-jwt-signer-testnet/public-key-pem')
+ *   node scripts/ops/mint-admin-jwt.mjs --profile testnet \
+ *     --expires-in-days 30 --use-kms
  *
  * Common workflow (hosted product-proof smoke):
- *   AUTH_JWT_SECRETS=$(op read 'op://Averray/Production/jwt-secret/credential') \
- *     node scripts/ops/mint-admin-jwt.mjs --profile testnet --expires-in-days 30 \
- *   | xargs -I {} gh secret set ADMIN_JWT --body '{}'
+ *   ... | xargs -I {} gh secret set ADMIN_JWT --body '{}'
+ *   # or  | op item edit "op://prod-smoke/admin-jwt" "password=$(cat -)"
  */
 
 import { readFile } from "node:fs/promises";
@@ -44,6 +71,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
 import { signToken } from "../../mcp-server/src/auth/jwt.js";
+import { KmsJwtSigner } from "../../mcp-server/src/auth/kms-jwt-signer.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..", "..");
@@ -54,7 +82,8 @@ function parseArgs(argv) {
     profile: undefined,
     roles: ["admin"],
     expiresInDays: 30,
-    quiet: false
+    quiet: false,
+    useKms: false,
   };
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i];
@@ -63,6 +92,7 @@ function parseArgs(argv) {
     else if (flag === "--roles") args.roles = argv[++i].split(",").map((s) => s.trim()).filter(Boolean);
     else if (flag === "--expires-in-days") args.expiresInDays = Number(argv[++i]);
     else if (flag === "--quiet" || flag === "-q") args.quiet = true;
+    else if (flag === "--use-kms") args.useKms = true;
     else if (flag === "--help" || flag === "-h") args.help = true;
   }
   return args;
@@ -77,12 +107,25 @@ function printUsage() {
       "  --wallet <0x…>          Subject wallet to sign for. Defaults to deployments/<profile>.json#verifier when --profile is given.",
       "  --profile <name>        Read default wallet from deployments/<name>.json (e.g. testnet, mainnet).",
       "  --roles <a,b,c>         Comma-separated role list. Default: admin.",
+      "                          With --use-kms only the first role is used (ES256 JWTs carry one `role` claim).",
       "  --expires-in-days <n>   Token lifetime in days. Default: 30.",
+      "  --use-kms               Sign ES256 via the JWT KMS key (post-PR 4b.6).",
+      "                          Without it: HS256 via AUTH_JWT_SECRETS (legacy path).",
       "  --quiet, -q             Print only the JWT (no decoded claims summary).",
       "",
-      "Required env:",
+      "Required env (HMAC mode, default):",
       "  AUTH_JWT_SECRETS        Comma-separated HS256 secrets. First entry is the signing key.",
       "  AUTH_JWT_SECRET         Legacy single-secret fallback (only used if AUTH_JWT_SECRETS unset).",
+      "",
+      "Required env (--use-kms):",
+      "  AWS_JWT_REGION          eu-central-2 for testnet.",
+      "  AWS_JWT_KEY_ID          Full KMS key ARN (NOT alias).",
+      "  AWS_JWT_ACCESS_KEY_ID   IAM access key (or use SDK default-credential chain).",
+      "  AWS_JWT_SECRET_ACCESS_KEY",
+      "  JWT_PUBLIC_KEY_PEM      PEM-wrapped SPKI of the JWT KMS public key.",
+      "  JWT_KID                 Optional, default 'jwt-1'.",
+      "  JWT_EXPECTED_ISSUER     Optional, default 'averray-backend-testnet'.",
+      "  JWT_EXPECTED_AUDIENCE   Optional, default 'averray-backend'.",
       "",
       "Output:",
       "  When --quiet: stdout is just the JWT (suitable for piping to `gh secret set`, etc.).",
@@ -128,11 +171,20 @@ async function main() {
     return;
   }
 
+  const expiresInSeconds = Math.floor(args.expiresInDays * 24 * 60 * 60);
+
+  if (args.useKms) {
+    await mintViaKms({ wallet, roles: args.roles, expiresInSeconds, expiresInDays: args.expiresInDays, quiet: args.quiet });
+    return;
+  }
+
   const secretsRaw = String(process.env.AUTH_JWT_SECRETS ?? process.env.AUTH_JWT_SECRET ?? "").trim();
   if (!secretsRaw) {
-    console.error("AUTH_JWT_SECRETS env (or legacy AUTH_JWT_SECRET) is required.");
+    console.error("AUTH_JWT_SECRETS env (or legacy AUTH_JWT_SECRET) is required for HMAC mode.");
     console.error("Source it from your vault — never paste the secret as a shell literal:");
-    console.error('  AUTH_JWT_SECRETS=$(op read "op://Averray/Production/jwt-secret/credential")');
+    console.error('  AUTH_JWT_SECRETS=$(op read "op://prod-backend/auth-jwt-secrets/password")');
+    console.error("");
+    console.error("Or use --use-kms to sign via the JWT KMS key (post-PR-4b.6).");
     process.exitCode = 1;
     return;
   }
@@ -153,7 +205,6 @@ async function main() {
     return;
   }
 
-  const expiresInSeconds = Math.floor(args.expiresInDays * 24 * 60 * 60);
   const { token, claims } = signToken(
     {
       sub: wallet.toLowerCase(),
@@ -173,13 +224,103 @@ async function main() {
 
   const expiresAt = new Date(claims.exp * 1000).toISOString();
   const issuedAt = new Date(claims.iat * 1000).toISOString();
-  console.error("# admin-jwt mint");
+  console.error("# admin-jwt mint (HMAC / HS256)");
   console.error(`subject:        ${claims.sub}`);
   console.error(`roles:          ${claims.roles?.join(", ") ?? "(none)"}`);
   console.error(`jti:            ${claims.jti}`);
   console.error(`issued:         ${issuedAt}`);
   console.error(`expires:        ${expiresAt}  (${args.expiresInDays} days from now)`);
-  console.error(`signed with:    secret index 0 of ${secrets.length} configured secret${secrets.length === 1 ? "" : "s"}`);
+  console.error(`signed with:    HS256, secret index 0 of ${secrets.length} configured secret${secrets.length === 1 ? "" : "s"}`);
+  console.error("");
+  console.error("# JWT (this line below is the token; paste it into ADMIN_JWT or pipe to `gh secret set`):");
+  console.log(token);
+}
+
+/**
+ * Sign an ES256 admin JWT via the JWT KMS key (PR 4b.6 path).
+ *
+ * The KmsJwtSigner produces a single-role token; if multiple roles
+ * were requested we use the first one and warn. (Multi-role tokens
+ * remain a property of the legacy HS256 path until the backend's
+ * ES256 verify accepts `roles: []`; this is fine for testnet smoke
+ * which only needs `admin`.)
+ */
+async function mintViaKms({ wallet, roles, expiresInSeconds, expiresInDays, quiet }) {
+  const region = (process.env.AWS_JWT_REGION ?? "").trim();
+  const keyId = (process.env.AWS_JWT_KEY_ID ?? "").trim();
+  const publicKeyPem = process.env.JWT_PUBLIC_KEY_PEM ?? "";
+  const missing = [];
+  if (!region) missing.push("AWS_JWT_REGION");
+  if (!keyId) missing.push("AWS_JWT_KEY_ID");
+  if (!publicKeyPem) missing.push("JWT_PUBLIC_KEY_PEM");
+  if (missing.length > 0) {
+    console.error(`--use-kms requires the following env vars: ${missing.join(", ")}`);
+    console.error("Source them from prod-backend/aws-jwt-signer-testnet (run --help for the full op-read snippet).");
+    process.exitCode = 1;
+    return;
+  }
+  if (keyId.startsWith("alias/")) {
+    console.error(`AWS_JWT_KEY_ID must be the full KMS key ARN, not an alias ("${keyId}").`);
+    console.error("Per docs/PHASE_4B_KMS_JWT_PLAN.md §3 — aliases can be retargeted.");
+    process.exitCode = 1;
+    return;
+  }
+
+  const kid = (process.env.JWT_KID ?? "jwt-1").trim() || "jwt-1";
+  const expectedIssuer = (process.env.JWT_EXPECTED_ISSUER ?? "averray-backend-testnet").trim();
+  const expectedAudience = (process.env.JWT_EXPECTED_AUDIENCE ?? "averray-backend").trim();
+
+  if (roles.length > 1) {
+    console.error(`# warning: --use-kms signs a single-role ES256 JWT (got --roles ${roles.join(",")}). Using "${roles[0]}".`);
+  }
+  const role = roles[0];
+
+  const signer = new KmsJwtSigner({
+    region,
+    keyId,
+    kid,
+    publicKeyPem,
+    expectedIssuer,
+    expectedAudience,
+    expectedRoles: [role],
+    // Allow the full admin TTL (up to 30 days for testnet smoke). The
+    // backend's verifier caps via JWT_MAX_TTL_SECONDS — the env template
+    // sets that to 2592000 (30d) to match.
+    maxTtlSeconds: Math.max(expiresInSeconds, 60),
+  });
+
+  const token = await signer.signAsync(
+    { sub: wallet.toLowerCase() },
+    {
+      issuer: expectedIssuer,
+      audience: expectedAudience,
+      subject: wallet.toLowerCase(),
+      role,
+      expiresInSeconds,
+    },
+  );
+
+  if (quiet) {
+    console.log(token);
+    return;
+  }
+
+  // Decode claims for the human-readable summary. No verify call —
+  // we just signed it, and the operator can sanity-check by piping the
+  // output through `scripts/ops/verify-jwt-kms-signer.mjs --token <…>`.
+  const [, claimsB64] = token.split(".");
+  const claims = JSON.parse(Buffer.from(claimsB64.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8"));
+  const expiresAt = new Date(claims.exp * 1000).toISOString();
+  const issuedAt = new Date(claims.iat * 1000).toISOString();
+  console.error("# admin-jwt mint (KMS / ES256)");
+  console.error(`subject:        ${claims.sub}`);
+  console.error(`role:           ${claims.role}`);
+  console.error(`iss / aud:      ${claims.iss} / ${claims.aud}`);
+  console.error(`kid:            ${kid}`);
+  console.error(`jti:            ${claims.jti}`);
+  console.error(`issued:         ${issuedAt}`);
+  console.error(`expires:        ${expiresAt}  (${expiresInDays} days from now)`);
+  console.error(`signed with:    ES256 via KMS ${keyId}`);
   console.error("");
   console.error("# JWT (this line below is the token; paste it into ADMIN_JWT or pipe to `gh secret set`):");
   console.log(token);
