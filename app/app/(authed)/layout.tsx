@@ -1,6 +1,7 @@
 import { OperatorRail } from "@/components/shell/OperatorRail";
 import { PaperGridBackground } from "@/components/runs/PaperGridBackground";
 import { LiveDataBridge } from "@/components/shell/LiveDataBridge";
+import { AuthRefreshBridge } from "@/components/shell/AuthRefreshBridge";
 
 export default function AuthedLayout({
   children,
@@ -9,6 +10,7 @@ export default function AuthedLayout({
 }) {
   return (
     <>
+      <AuthRefreshBridge />
       <LiveDataBridge />
       <PaperGridBackground />
       <div className="relative z-[1] mx-auto w-full max-w-[1440px] px-6 py-6">
