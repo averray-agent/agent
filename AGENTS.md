@@ -40,6 +40,10 @@ reviewable changes and keep production deploys serialized.
 - Do not manually edit generated `_next/static` or `_astro` files.
 - Only touch generated static output when a task explicitly changes the static
   deploy surface itself.
+- The generated-output guard rejects commits or PR ranges that modify
+  `frontend/` or `site/`. If a task intentionally changes those deploy
+  surfaces, use `ALLOW_GENERATED_EDIT=1` locally and include `[allow-generated]`
+  in the commit message so CI has an auditable bypass.
 
 ## Required Checks
 

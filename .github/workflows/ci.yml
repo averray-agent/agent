@@ -21,6 +21,32 @@ permissions:
   contents: read
 
 jobs:
+  generated-output-guard:
+    name: Generated output guard
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "22"
+
+      - name: Reject accidental generated deploy output edits
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ -z "${BASE_SHA:-}" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            node scripts/ops/check-generated-output-clean.mjs --last-commit
+          else
+            node scripts/ops/check-generated-output-clean.mjs --range "$BASE_SHA..HEAD"
+          fi
+
   solidity:
     name: Solidity — forge test
     runs-on: ubuntu-latest

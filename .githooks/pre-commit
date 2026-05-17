@@ -36,7 +36,10 @@ if [[ -n "$blocked_env_files" ]]; then
   exit 1
 fi
 
-# ---- 2. Scan staged diff for known secret shapes --------------------------
+# ---- 2. Block accidental generated deploy output edits -------------------
+node scripts/ops/check-generated-output-clean.mjs --staged
+
+# ---- 3. Scan staged diff for known secret shapes --------------------------
 # Collect just the added lines so we don't false-positive on removed secrets.
 # Strip the leading `+` so the body of the line is what the regex sees.
 added_lines=$(git diff --cached --diff-filter=AM -U0 | awk '/^\+[^+]/ { sub(/^\+/, ""); print }')
