@@ -2599,6 +2599,70 @@ creation):
 The repo state goes back to "PR 4b.3 has landed but no AWS resources
 exist yet" — backend keeps signing with HMAC; nothing breaks.
 
+### PR 4b.6b operator runbook — populate the single-line PEM field
+
+**Why this exists**: docker-compose's `env_file` parser doesn't support
+multi-line values. The raw PEM from `op://prod-backend/aws-jwt-signer-testnet/public-key-pem`
+expands across several lines (BEGIN/END markers + multi-line base64
+body), so docker-compose tries to parse each PEM body line as its own
+`VAR=VALUE` and chokes on `+` mid-base64. PR #420 hit this in
+production (the post-merge deploy failed on `15e9a88`).
+
+The fix uses a single-line base64-of-PEM variant in a new 1Password
+field. The backend's `mcp-server/src/auth/config.js` accepts either
+input (`JWT_PUBLIC_KEY_PEM` or `JWT_PUBLIC_KEY_PEM_BASE64`).
+
+**Pre-flight**:
+
+```bash
+# 1. Read the existing multi-line PEM from 1Password into a file.
+op read 'op://prod-backend/aws-jwt-signer-testnet/public-key-pem' > /tmp/jwt-pubkey.pem
+
+# 2. Confirm the file has BEGIN/END markers + valid SPKI body.
+head -1 /tmp/jwt-pubkey.pem  # → -----BEGIN PUBLIC KEY-----
+tail -1 /tmp/jwt-pubkey.pem  # → -----END PUBLIC KEY-----
+openssl pkey -in /tmp/jwt-pubkey.pem -pubin -text -noout | head -3
+#   → Public-Key: (256 bit), pub: 04: ...
+
+# 3. Base64-encode it (single line, no wrapping).
+base64 -w 0 /tmp/jwt-pubkey.pem > /tmp/jwt-pubkey.pem.b64
+wc -c /tmp/jwt-pubkey.pem.b64  # → ~360 bytes; one line.
+```
+
+**Populate the new 1Password field**:
+
+```bash
+# Add a NEW field "public-key-pem-base64" to the existing
+# aws-jwt-signer-testnet item in the prod-backend vault. The field
+# name MUST be exactly `public-key-pem-base64` (lowercase, hyphens) to
+# match the canonical 1Password reference in deploy/secrets-inventory.md.
+op item edit "aws-jwt-signer-testnet" --vault prod-backend \
+  "public-key-pem-base64=$(cat /tmp/jwt-pubkey.pem.b64)"
+
+# Verify the field round-trips and decodes back to the same PEM.
+diff /tmp/jwt-pubkey.pem \
+  <(op read 'op://prod-backend/aws-jwt-signer-testnet/public-key-pem-base64' | base64 -d)
+# → no output means clean round-trip.
+
+# Cleanup: shred the temp files immediately. Public key isn't secret,
+# but leaving files in /tmp is sloppy.
+shred -u /tmp/jwt-pubkey.pem /tmp/jwt-pubkey.pem.b64
+```
+
+**Enable in the env template**:
+
+After the new field is populated (and only then), open a small
+follow-up PR that uncomments the `JWT_PUBLIC_KEY_PEM_BASE64` line in
+`deploy/backend.env.template`. The next deploy will pick up the new
+env var; `mcp-server/src/auth/config.js` decodes it at boot via
+`resolvePublicKeyPem` and the KMS verify path becomes usable.
+
+**Rollback**:
+
+The new field is additive — leaving it in 1Password while the
+template line is commented out does nothing. To roll back: just don't
+uncomment the template line (or comment it back out).
+
 ### PR 4b.6 operator runbook — JWT_BACKEND cutover (hmac → both → kms)
 
 **When**: after PR 4b.6 lands on `main` (env template + inventory
