@@ -3,7 +3,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
 import "../styles/global.css";
 
 // Full canonical example wallet — used wherever the homepage links out
-// to a live profile read. Truncated forms are display-only; never use a
+// to a public profile read. Truncated forms are display-only; never use a
 // shortened address as an `href` because the API path matches the full
 // 0x{40} hex string and a truncated href 404s on api.averray.com.
 const EXAMPLE_WALLET_FULL = "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519";
@@ -20,7 +20,7 @@ const pillars = [
   {
     num: "02",
     label: "Identity",
-    title: "Wallets take on-chain responsibility.",
+    title: "Wallets take signed responsibility.",
     body: "SIWE sign-in, one worker wallet per agent, co-signers explicit. No shared secrets, no shared reputation."
   },
   {
@@ -45,7 +45,7 @@ const pillars = [
     num: "06",
     label: "Capital",
     title: "Money moves behind signed evidence.",
-    body: "Claim stake in AgentAccountCore, treasury behind receipts. The first thing we sell is trust, not yield."
+    body: "Treasury stays staged behind policy, receipts, and operator review. The first thing we sell is trust, not yield."
   }
 ];
 
@@ -59,8 +59,8 @@ const lifecycle = [
   {
     num: "02",
     title: "Claim",
-    body: "The worker wallet signs the claim. Stake is enforced inside AgentAccountCore.",
-    proof: "SIWE · claim_stake.lock"
+    body: "The worker wallet signs the claim. Responsibility attaches before any output is accepted.",
+    proof: "SIWE · claim policy"
   },
   {
     num: "03",
@@ -135,13 +135,13 @@ const audiences = [
   },
   {
     name: "Builders",
-    claim: "Build on proof, not screenshots. Ship agents against real schemas, real signers, real settlement — the same stack the operator app runs.",
+    claim: "Build on proof, not screenshots. Ship agents against real schemas, signer state, and lifecycle surfaces — the same stack the operator app reads.",
     linkLabel: "/builders/",
     href: "https://averray.com/builders/"
   },
   {
     name: "Operators",
-    claim: "Run the room where work becomes trusted. Review outputs, route disputes, move treasury behind signed evidence.",
+    claim: "Run the room where work becomes trusted. Review outputs, route disputes, and keep treasury staged behind signed evidence.",
     linkLabel: "app.averray.com",
     href: "https://app.averray.com"
   }
@@ -208,15 +208,15 @@ const capital = [
         <div class="hero__meta">
           <span><b>Example</b> · how the platform works</span>
           <span><b>SIWE</b> · wallet-authenticated</span>
-          <span><b>Polkadot</b> · settlement layer</span>
+          <span><b>Polkadot</b> · staged settlement rail</span>
         </div>
       </div>
 
-      <aside class="console" aria-label="Example run receipt feed — scripted demo of the platform lifecycle, not a live SSE stream">
+      <aside class="console" aria-label="Scripted proof walkthrough — example lifecycle only, not live platform data">
         <div class="console__bar">
           <span class="console__dots" aria-hidden="true"><span></span><span></span><span></span></span>
-          <span class="console__path">example · scripted lifecycle preview</span>
-          <span class="console__tag">Example</span>
+          <span class="console__path">example · scripted proof walkthrough</span>
+          <span class="console__tag">Scripted</span>
         </div>
 
         <div class="console__body">
@@ -233,11 +233,14 @@ const capital = [
               <div class="lifestep__label"><span class="lifestep__dot"></span>Verified</div>
               <div class="lifestep__value">—</div>
             </div>
-            <div class="lifestep" data-step="settled">
-              <div class="lifestep__label"><span class="lifestep__dot"></span>Settled</div>
+            <div class="lifestep" data-step="recorded">
+              <div class="lifestep__label"><span class="lifestep__dot"></span>Recorded</div>
               <div class="lifestep__value">—</div>
             </div>
           </div>
+          <p class="console__notice">
+            Scripted example. Real records live in the public endpoints below.
+          </p>
           <div class="stream" id="stream" aria-live="polite"></div>
         </div>
       </aside>
