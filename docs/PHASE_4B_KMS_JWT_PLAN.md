@@ -32,6 +32,19 @@ In Phase 3 we removed `SIGNER_PRIVATE_KEY` and moved on-chain signing to KMS —
 
 A vault leak by itself no longer breaks auth.
 
+**Important nuance — what KMS does and does not solve.** KMS removes offline signing-key extraction, but it does not make the system credential-less. If an attacker steals the AWS JWT signer credentials from 1Password or from the rendered backend environment, they may still be able to mint ES256 JWTs by calling `kms:Sign` until those AWS credentials are revoked. This is still better than the HMAC model because:
+
+- the KMS private key bytes are non-exportable
+- signing activity is visible in AWS logs (CloudTrail + CloudWatch)
+- revoking the signer credentials stops future signing
+- the stolen material is not a permanent offline JWT-signing secret
+
+So the accurate claim is:
+
+> A vault or backend-env leak no longer gives the attacker permanent offline signing capability. It may still give temporary online signing capability if AWS signer credentials are included in the leak.
+
+For mainnet, this is why static AWS access keys should be replaced with IAM Roles Anywhere (or another temporary-credential flow) before launch. Static keys in `backend.env` are documented residual risk for testnet only (see §13 risk #6).
+
 ---
 
 ## 2. Algorithm choice — ES256
@@ -48,6 +61,19 @@ AWS KMS supports both `RSASSA_PKCS1_V1_5_SHA_256` (JWT `RS256`) and `ECDSA_SHA_2
 | Where used in modern stacks | Older, still common | Modern default (Auth0, AWS Cognito, OAuth 2.1 examples) |
 
 The "DER→raw" extra step is trivial and we already own most of the helpers (see §10).
+
+**Implementation footgun: ES256 JWS signatures are not DER in the JWT.** RFC 7518 requires the JWS signature value to be exactly 64 octets: 32-byte big-endian R followed by 32-byte big-endian S. The DER↔raw helper must left-pad R and S to exactly 32 bytes and must strip DER sign-padding bytes where present. Tests in PR 4b.2 must include:
+
+- R requiring left-padding
+- S requiring left-padding
+- R or S with high bit set in DER, causing a leading `0x00` sign byte
+- a normal 64-byte round-trip
+- malformed DER rejected
+- raw signatures with length other than 64 bytes rejected
+- negative ASN.1 INTEGER encodings rejected
+- overlong R/S encodings rejected
+
+The sample `Buffer.concat([Buffer.from(r), Buffer.from(s)])` in §5 is only safe if `parseDerEcdsaSignature()` returns fixed-width 32-byte values. This may require enhancements to the existing helper in `mcp-server/src/blockchain/spki.js` — it currently returns the raw bytes from DER which may be shorter (no leading zeros) or longer (with sign-padding byte). The new `jws-ecdsa.js` helper owns the JWS-spec-compliant fixed-width conversion.
 
 **KMS key spec**: `ECC_NIST_P256` (this is the NIST P-256 curve, distinct from the `ECC_SECG_P256K1` curve we use for the blockchain signer — see §3).
 
@@ -116,17 +142,39 @@ A new, **separate** KMS key, in the same AWS account as the Phase 3 blockchain s
 }
 ```
 
+**Key policy note**: the IAM deny block above is defense-in-depth for the signer principal, but it is **not a substitute** for a tight KMS key policy. The KMS key policy must also ensure the JWT signer principal cannot administer the key, create grants, change key policy, disable the key, schedule deletion, replicate the key, or retarget aliases. The signer principal should only be able to:
+
+- `kms:Sign`
+- `kms:GetPublicKey`
+
+…on the one JWT signing key. It must **not** be able to:
+
+- `kms:Verify` (unless explicitly needed; verify happens locally with the public key)
+- `kms:CreateGrant`
+- `kms:PutKeyPolicy`
+- `kms:ScheduleKeyDeletion`
+- `kms:DisableKey`
+- `kms:ReplicateKey`
+- `kms:UpdatePrimaryRegion`
+- any operation on the blockchain signer key
+
+**Use the full key ARN in `AWS_JWT_KEY_ID`, not the alias.** Aliases can be retargeted (`UpdateAlias`) to point at a different key — using ARN closes that signer-substitution attack vector. The alias is for human ops convenience only.
+
 **1Password layout**: a new item `aws-jwt-signer-testnet` in `prod-backend`, with fields:
 - `access-key-id`
 - `secret-access-key`
 - `aws-region`
-- `kms-key-id` (full ARN)
+- `kms-key-id` (full ARN — not alias)
+- `public-key-pem` (populated once at provisioning, see §4)
+- `public-key-fingerprint` (SHA-256 of the SPKI DER bytes, recorded in `deploy/secrets-inventory.md` for drift detection)
 
 These get rendered into `backend.env` at deploy time as:
 - `AWS_JWT_ACCESS_KEY_ID`
 - `AWS_JWT_SECRET_ACCESS_KEY`
 - `AWS_JWT_REGION`
-- `AWS_JWT_KEY_ID`
+- `AWS_JWT_KEY_ID` (full ARN)
+- `JWT_PUBLIC_KEY_PEM`
+- `JWT_PUBLIC_KEY_FINGERPRINT`
 
 (Distinct env var names from the blockchain signer's `AWS_ACCESS_KEY_ID` / etc. so the backend can use different credentials for each.)
 
@@ -151,6 +199,15 @@ The public key is — by definition — public. We have three options for gettin
 
 **Env var**: `JWT_PUBLIC_KEY_PEM` — PEM-formatted `SubjectPublicKeyInfo`. The render step pulls this from a new 1Password field `op://prod-backend/aws-jwt-signer-testnet/public-key-pem`, populated **once** at provisioning time (PR 4b.3) by running `aws kms get-public-key` and PEM-wrapping the SPKI bytes.
 
+**Public-key consistency requirement (anti-drift).** `JWT_PUBLIC_KEY_PEM` must not be treated as an independent source of truth. At provisioning, on every backend boot, and during every signer verification script run, confirm:
+
+1. `AWS_JWT_KEY_ID` resolves to the intended KMS key ARN (not an alias)
+2. `aws kms get-public-key --key-id "$AWS_JWT_KEY_ID"` returns the same public key as `JWT_PUBLIC_KEY_PEM`
+3. The SHA-256 fingerprint of the SPKI DER bytes matches `JWT_PUBLIC_KEY_FINGERPRINT` (also rendered into env) and matches the expected fingerprint recorded in `deploy/secrets-inventory.md`
+4. The configured `kid` maps to that same fingerprint in the static key-ring allowlist
+
+If the public key in 1Password diverges from KMS `GetPublicKey`, the verify script fails the deploy. If a backend boot detects divergence, it logs `auth.jwt.pubkey_mismatch` and refuses to start (fail-closed).
+
 ---
 
 ## 5. Signing flow
@@ -173,7 +230,7 @@ import { KMSClient, SignCommand } from "@aws-sdk/client-kms";
 import { parseDerEcdsaSignature } from "../blockchain/spki.js"; // already exists
 
 async function signTokenAsymmetric(payload, { kmsClient, keyId, kid, expiresInSeconds }) {
-  const header = base64UrlEncode(JSON.stringify({ alg: "ES256", typ: "JWT", kid }));
+  const header = base64UrlEncode(JSON.stringify({ alg: "ES256", typ: "averray-auth+jwt", kid }));
   const now = Math.floor(Date.now() / 1000);
   const claims = base64UrlEncode(JSON.stringify({
     ...payload,
@@ -198,9 +255,10 @@ async function signTokenAsymmetric(payload, { kmsClient, keyId, kid, expiresInSe
 ```
 
 Notes:
-- We don't normalize low-s for JWT ES256 — RFC 7515 does not require it, and most verifiers accept both forms. (Unlike Ethereum's EIP-2 which we do enforce in `KmsSigner` for blockchain txs.)
-- The `kid` claim allows multiple active keys during rotation. Initial value: `"jwt-1"`.
+- We don't normalize low-s for JWT ES256 — RFC 7515 does not require it, and most verifiers accept both forms. (Unlike Ethereum's EIP-2 which we do enforce in `KmsSigner` for blockchain txs.) See §11 for the malleability note: never derive identity from the raw JWT string; use `jti`.
+- The `kid` claim allows multiple active keys during rotation. Initial value: `"jwt-1"`. **`kid` is only an index into a static in-memory allowlist** loaded from configuration — it must never be used to build a URL, file path, 1Password URI, SQL query, Redis key, or dynamic import path (RFC 8725 §3.4 / §3.5).
 - The `iss`/`aud` claims become non-optional in this PR. Existing code emits them; we'll enforce.
+- **Explicit `typ`** — using `averray-auth+jwt` (RFC 7515 §4.1.9 "Explicit Typing", reinforced by RFC 8725 §3.11) rather than generic `JWT`. Distinct typed signatures prevent token substitution between contexts. If we later mint other JWT-shaped objects (service capability tokens, password-reset tokens, audit tokens) they MUST use a different `typ`, different validation rules, and ideally a different signing key.
 
 ---
 
@@ -232,7 +290,7 @@ function verifyTokenAsymmetric(token) {
   v.update(`${headerB64}.${claimsB64}`);
   if (!v.verify(publicKey, derSig)) throw new Error("signature mismatch");
   const claims = JSON.parse(base64UrlDecode(claimsB64));
-  // existing iss/aud/exp/nbf checks stay
+  // existing iss/aud/exp/nbf checks stay (see "Claims validation requirements" below)
   return claims;
 }
 ```
@@ -240,6 +298,40 @@ function verifyTokenAsymmetric(token) {
 The `jwsRawToDer` helper is new in `mcp-server/src/auth/jws-ecdsa.js` — it's the inverse of the DER→raw conversion in the sign path. ~20 lines.
 
 **Public key caching**: read `JWT_PUBLIC_KEY_PEM` once at module load. No per-request cost.
+
+### JOSE header validation requirements
+
+The verifier MUST reject the token unless ALL of the following are true. RFC 8725 ("JSON Web Token Best Current Practices") is the standard reference for these rules:
+
+- Token has exactly three compact-JWS segments (base64url + "." + base64url + "." + base64url)
+- Protected header JSON parses successfully
+- `alg` is exactly `"ES256"` in KMS mode (`"HS256"` in HMAC mode; both allowed in `both` mode but each verified against the corresponding key)
+- `typ` is exactly `"averray-auth+jwt"` (no acceptance of generic `"JWT"`)
+- `kid` is present, is a string, and exists in the local key-ring allowlist
+- `kid` maps to a key configured for exactly one algorithm: ES256
+- No unrecognized `crit` headers are present
+- `jku`, `jwk`, `x5u`, `x5c` headers — attacker-controlled key-discovery primitives — are rejected unconditionally (RFC 8725 §3.4)
+- `none`, mixed-case variants (`None`, `NONE`), and any algorithm outside the configured mode are rejected **before** any signature operation
+- The signature operation uses ONLY the algorithm declared in the configured key-ring entry, NOT the algorithm declared in the JOSE header (defends against algorithm-confusion attacks)
+
+The verifier MUST NEVER use `kid` to build a URL, file path, 1Password URI, SQL query, Redis key, or dynamic import path. `kid` is only an index into a static in-memory allowlist loaded from configuration.
+
+### Claims validation requirements
+
+Every accepted access token MUST validate:
+
+- `iss` equals the configured issuer (e.g., `"averray-backend-testnet"`)
+- `aud` equals the configured backend audience (see §12 — resolved to a stable logical name like `"averray-backend"`, NOT a domain)
+- `typ` equals `"averray-auth+jwt"`
+- `sub` is present, non-empty, and is the canonical wallet/user identifier (lowercased EVM address; canonicalize before authorization decisions)
+- `role` is one of the allowed roles in `mcp-server/src/auth/config.js` enum
+- `iat`, `nbf`, and `exp` are present and numeric
+- `exp - iat <= ACCESS_TOKEN_MAX_TTL_SECONDS` (defense against an attacker convincing the signer to issue overly-long tokens)
+- Clock skew is bounded: ±60 seconds for `nbf`/`exp` checks
+- `jti` is present, is a UUIDv4-shaped string, and is unique enough for audit/revocation
+- Any wallet/address claim is canonicalized (lowercase H160) before authorization decisions
+
+Do NOT derive authorization solely from stale access-token claims during refresh. The refresh endpoint must look up the refresh-token record server-side and re-check the current wallet/role/account status before minting a new access token (see §8).
 
 ---
 
@@ -271,9 +363,15 @@ Operator-side work, then a small code PR:
    ```
 2. (Operator) Create `averray-jwt-signer-testnet` IAM user, attach the policy from `deploy/iam-policies/averray-jwt-signer-prod-role.json`.
 3. (Operator) Create 1Password item `op://prod-backend/aws-jwt-signer-testnet` with the four credential fields **plus** `public-key-pem` (run `aws kms get-public-key` once, PEM-wrap, paste).
-4. (Code) New file: `scripts/ops/verify-jwt-kms-signer.mjs` — analogous to `scripts/ops/verify-kms-signer.mjs`: GetPublicKey ✓, Sign with ECDSA_SHA_256 ✓, Sign with wrong algo denied by IAM condition ✓.
-5. (Code) New env vars in `deploy/backend.env.template`: `AWS_JWT_ACCESS_KEY_ID`, `AWS_JWT_SECRET_ACCESS_KEY`, `AWS_JWT_REGION`, `AWS_JWT_KEY_ID`, `JWT_PUBLIC_KEY_PEM`, all referencing the new 1Password fields. Initially marked as not-yet-required by `validate-env-render.sh` (will become required in PR 4b.6).
-6. Update `deploy/secrets-inventory.md` with the new rows.
+4. (Code) New file: `scripts/ops/verify-jwt-kms-signer.mjs` — analogous to `scripts/ops/verify-kms-signer.mjs`:
+   - GetPublicKey ✓
+   - Sign with ECDSA_SHA_256 ✓
+   - Sign with wrong algo (e.g., `ECDSA_SHA_384`) denied by IAM condition ✓
+   - **`JWT_PUBLIC_KEY_PEM` (from env) matches `kms:GetPublicKey` for `AWS_JWT_KEY_ID`** ✓ — drift detection
+   - **`JWT_PUBLIC_KEY_FINGERPRINT` (from env) matches SHA-256 of the SPKI DER bytes** ✓
+   - Script prints only the public-key fingerprint, never private key material or AWS credentials
+5. (Code) New env vars in `deploy/backend.env.template`: `AWS_JWT_ACCESS_KEY_ID`, `AWS_JWT_SECRET_ACCESS_KEY`, `AWS_JWT_REGION`, `AWS_JWT_KEY_ID`, `JWT_PUBLIC_KEY_PEM`, `JWT_PUBLIC_KEY_FINGERPRINT`, all referencing the new 1Password fields. Initially marked as not-yet-required by `validate-env-render.sh` (will become required in PR 4b.6).
+6. Update `deploy/secrets-inventory.md` with the new rows (including the public-key fingerprint as the audit-trail anchor for drift detection).
 
 After this PR, prod has KMS infrastructure but the backend code path is unchanged.
 
@@ -326,13 +424,21 @@ The actual flip. Same caution as Phase 3's cutover.
 
 ### Why opaque, not signed
 
-A signed refresh token (JWT-shaped) has the same problem as our current HMAC access token: anyone who can verify it can forge it. By using opaque tokens stored as **hashes** server-side, even a database leak doesn't let an attacker mint new tokens — they'd need to find a hash collision (computationally infeasible for SHA-256).
+A self-contained refresh token (JWT-shaped) is the wrong primitive here because refresh-token security depends on **server-side revocation, rotation, replay detection, and chain invalidation**. A signed asymmetric refresh JWT would not have the HMAC "verifier can forge" problem, but it would still push us toward offline validation and make replay-chain revocation harder than necessary — every node would need to consult the server-side state anyway, so the JWT's offline-verify property is wasted.
+
+So the design uses opaque refresh tokens:
+- The client stores only an unguessable random token
+- The server stores only a SHA-256 hash of that token plus metadata
+- Every refresh rotates the token
+- Replay of an already-rotated token revokes the active chain (RFC 9700 model)
+
+Even a database leak doesn't let an attacker mint new tokens — they'd need to find a hash collision (computationally infeasible for SHA-256).
 
 ### Rotation semantics
 
-Every successful refresh issues a new access token AND a new refresh token. The old refresh token is marked `replacedBy: <new-hash>` in the state store but kept for a short replay-detection window (~5 minutes — long enough to catch a client that retried the refresh due to network failure).
+Every successful refresh issues a new access token AND a new refresh token. The old refresh token is marked `replacedBy: <new-hash>` in the state store and **retained only for replay detection, NOT for another successful refresh**.
 
-### Replay detection
+### Replay behavior — strict, not lenient
 
 If the same refresh-token hash is presented twice (after it has been replaced), the entire chain (this token, its ancestors, its descendants) is **revoked**. The client must re-auth via SIWE.
 
@@ -340,9 +446,63 @@ This catches:
 - Attackers who stole the refresh token and the legitimate client refreshing concurrently — both can't both succeed
 - Bots replaying captured tokens
 
+**We intentionally choose strict replay handling over retry idempotency.** If the client retries a refresh request after the server rotated the token but before the client received the response, the retry will look like replay and will revoke the chain:
+
+- First valid refresh succeeds and rotates the token
+- Any later use of the old token is treated as replay
+- The token family is revoked
+- The user/operator must re-auth via SIWE
+
+This may cause rare forced re-authentication during network failures, but it preserves the strongest theft-detection semantics. RFC 9700 §4.12.2 endorses this model: reuse of an invalidated refresh token is the signal that triggers revocation of the active grant.
+
+### Refresh endpoint trust rule
+
+The refresh token is the credential for refresh. The expired-or-near-expiry access token is **optional context only** and MUST NOT influence the new access token's claims.
+
+`POST /auth/refresh` MUST:
+- Verify the refresh-token cookie against the server-side hash record
+- Derive wallet, role, chain, and expiry from the **refresh-token record**, not from the expired access token
+- Re-check current account/operator status (role still active? wallet not revoked?) before minting a new access token
+- If an access token is provided, verify its signature and use it only as a consistency check (e.g., reject if its `sub` differs from the refresh-token record's `sub`)
+- Reject cross-wallet or cross-role mismatches
+
+This prevents a stale or malicious access token from influencing the new access token.
+
 ### Storage schema
 
 In Redis under the existing `stateStore` namespace, key `auth:refresh:<hash>` with value `{ wallet, role, issuedAt, expiresAt, replacedBy, revokedAt? }`. TTL set on the Redis key matches `expiresAt` plus the replay-detection window.
+
+**Refresh-token hashing**: a plain SHA-256 hash of a 32-byte random refresh token is acceptable because the token has high entropy and is not human-memorable. For defense-in-depth, we MAY use HMAC-SHA-256 with a server-side `REFRESH_TOKEN_PEPPER` (also a KMS-derived value), but this is not required for brute-force resistance if token generation is correct. Requirements regardless:
+
+- Refresh tokens are generated with CSPRNG only (`crypto.randomBytes(32)`)
+- At least 32 random bytes before base64url encoding
+- Compare hashes in constant time (`crypto.timingSafeEqual`)
+- Never log raw refresh tokens
+- Never store raw refresh tokens server-side
+- Never return raw refresh tokens in a response body — `Set-Cookie` only
+
+### Cookie / CORS / CSRF requirements
+
+The refresh-token cookie MUST be a **host-only** cookie for `api.averray.com`. Do NOT set `Domain=.averray.com` unless a later frontend integration proves the broader domain is necessary. (Decided in §12.)
+
+Required cookie attributes:
+
+```
+HttpOnly
+Secure
+SameSite=Strict
+Path=/auth/refresh
+```
+
+Because the refresh endpoint is cookie-authenticated, it MUST also enforce:
+
+- HTTPS only (Caddy terminates TLS; backend rejects non-TLS)
+- Strict `CORS_ALLOWED_ORIGINS` allowlist (no wildcards)
+- `Origin` and `Host` header validation (reject if `Origin` is not in the allowlist; reject if `Host` ≠ `api.averray.com`)
+- No token values in logs
+- No refresh token in query string, response body, or `localStorage`
+
+Note that `SameSite=Strict` already blocks cross-site requests, but `app.averray.com` ↔ `api.averray.com` are same-site but cross-origin. Explicit `Origin` validation is required.
 
 ### TTLs
 
@@ -371,6 +531,13 @@ For Phase 4b, the smoke-test JWT has two options:
 
 Choosing **A for testnet, B for mainnet**. This isolates the smoke-test JWT lifecycle from the human-operator JWT lifecycle and keeps the testnet rotation cadence simple.
 
+**Mainnet guardrail (prohibition).** Long-lived ES256 `ADMIN_JWT` is acceptable for **testnet smoke only**. Mainnet MUST NOT rely on a 30-day admin access token. Mainnet smoke MUST use the refresh flow or a purpose-scoped service-token flow with a shorter access-token TTL.
+
+Acceptance criterion before mainnet:
+- No 30-day mainnet admin access JWT exists in 1Password
+- Smoke/admin automation uses refresh or purpose-scoped capability tokens
+- Any stored automation token is scoped to the smallest required endpoint set
+
 ---
 
 ## 10. Reusable helpers
@@ -388,6 +555,20 @@ The Phase 3 KMS work shipped helpers we can lean on. The new code paths are smal
 
 The 4b implementation will be smaller than 3b's because most of the KMS plumbing is already paved.
 
+**ECDSA helper acceptance tests.** `parseDerEcdsaSignature()` and `jwsRawToDer()` must prove (in `kms-jwt-signer.test.js` and `jws-ecdsa.test.js`):
+
+- DER from KMS converts to exactly 64-byte JWS raw format
+- Raw 64-byte JWS signature converts back to DER accepted by Node `crypto.verify`
+- R/S values with leading zeroes are left-padded to 32 bytes
+- DER sign-padding byte `0x00` (when R/S high bit is set) is stripped correctly
+- Malformed DER is rejected
+- Negative ASN.1 INTEGER encodings are rejected
+- Overlong R/S encodings (>32 bytes after sign-padding stripping) are rejected
+- Round-trip verifies with `jose` (npm package, dev-only test dependency)
+- Round-trip verifies with `jsonwebtoken` (npm package, dev-only test dependency)
+
+The last two tests are the **cross-library validation** — proving any compliant JWS verifier will accept our tokens, not just our own verify path.
+
 ---
 
 ## 11. Failure modes + mitigations
@@ -400,18 +581,28 @@ The 4b implementation will be smaller than 3b's because most of the KMS plumbing
 | KMS Sign API latency spike | Login flow slows | Cache the KMS client; expose a `siwe.signLatencyMs` metric; alarm at p99 > 500ms |
 | Forgotten old HMAC tokens still valid during `JWT_BACKEND=both` | Some clients keep working with HMAC for longer than expected | Set short HMAC token TTL during transition (≤7 days); track issuance dates |
 | Refresh-token cookie stolen via XSS | Attacker can refresh-mint indefinitely | HttpOnly, Secure, SameSite=Strict cookie; cookie scoped to `api.averray.com`; replay-detection invalidates the chain on first concurrent use |
+| KMS signer credentials leak (separate from key material) | Attacker can mint tokens online until credentials are revoked | CloudWatch alarm on sign volume / source IP; revoke credentials; rotate to new credentials; inspect issued-token window via `jti` audit log. Mainnet: replace static keys with IAM Roles Anywhere |
+| `kid` points to wrong key (e.g., attacker-supplied header) | Token signed by unintended key is accepted | Static `kid → public key → alg → issuer` allowlist; reject unknown `kid`; never use `kid` as a dynamic lookup primitive |
+| 1Password public key diverges from KMS public key | ES256 tokens fail, OR (worse) wrong key is trusted if config is tampered with | `verify-jwt-kms-signer.mjs` compares `JWT_PUBLIC_KEY_PEM` to `kms:GetPublicKey` fingerprint; backend refuses to start on mismatch (§4) |
+| Refresh-token replay caused by network retry | Legitimate user forced to re-auth | Documented as accepted UX cost (§8); strict semantics chosen over idempotent retry |
+| Redis data loss | All refresh sessions lost; users/operators must re-auth | Accept as fail-closed; document Redis durability/backups if smoother UX becomes required |
+| Access-token role becomes stale (operator revoked) | Revoked operator keeps role until access-token expiry | 15-minute TTL bounds the staleness; refresh re-checks current role server-side before minting new token |
+| ECDSA signature malleability | Same claims may have more than one valid signature encoding | Do NOT use raw JWT string as identity; use verified `jti` for replay/dedup; optionally reject high-S signatures if compatible with libraries (defer — most clients don't normalize) |
 
 ---
 
 ## 12. Open questions
 
-To decide before PR 4b.3 (key provisioning):
+### Deferred
 
 1. **Multi-region for mainnet** — same decision as Phase 3's signer key. Defer until the broader Phase 5 mainnet-cutover plan settles.
 2. **CloudWatch alarm thresholds for the JWT key** — sign-volume baseline is hard to estimate pre-launch. Plan: enable basic alarms on creation, tune after 30 days of real traffic.
-3. **Refresh-token cookie domain** — `api.averray.com` (backend only) vs `.averray.com` (frontend + backend). Picking the narrower scope unless a frontend integration requires the broader one.
-4. **JWT `aud` value** — current HMAC code emits `aud: "averray-backend"`. Keep, or switch to the backend's `AUTH_DOMAIN`?
-5. **Should ADMIN_JWT for testnet smoke move to refresh flow?** — Plan §9 says no for testnet (keep long-lived ES256). Defer mainnet decision.
+
+### Resolved
+
+3. **Refresh-token cookie domain → host-only `api.averray.com`**. Cookie attributes: `HttpOnly; Secure; SameSite=Strict; Path=/auth/refresh`. Do not set `Domain=.averray.com` unless a later frontend integration proves the broader scope is necessary.
+4. **JWT `aud` → stable logical value `"averray-backend"`**, NOT tied to a mutable domain name. Domains can change; the security boundary is the backend/API service identity, not the DNS label. If future services need their own tokens, give them distinct `aud` values (`"averray-indexer"`, `"averray-smoke"`, etc.).
+5. **ADMIN_JWT testnet posture → long-lived ES256 (no refresh flow)**, per §9. Mainnet must use refresh flow or purpose-scoped capability tokens — long-lived admin JWTs prohibited on mainnet.
 
 ---
 
@@ -424,6 +615,7 @@ Things the design assumes that I'd be happiest to have someone push back on befo
 3. **Refresh-token storage in Redis (`stateStore`)** — we already depend on Redis being durable. If a Redis outage takes auth down, that's a known availability tradeoff. An alternative (Postgres-backed refresh storage) is harder to introduce post-launch.
 4. **`JWT_BACKEND=both` for indefinite period** — once we get past PR 4b.6, the `both` mode is a transitional artifact. Plan §7 retires HMAC after 30 days; we should not let `both` be the permanent default.
 5. **`alg: none` rejection** — explicit test in PR 4b.4. Pin the rejection at the dispatcher, not just at verify.
+6. **Signer credentials still live in runtime env during testnet** — KMS protects the private key material from extraction, but static AWS signer credentials in `backend.env` can still call `kms:Sign` if leaked. This is acceptable as documented residual risk for testnet. For mainnet, replace static keys with IAM Roles Anywhere (or another temporary-credential mechanism), with the migration completed before mainnet cutover (Phase 5 dependency).
 
 ---
 
@@ -441,6 +633,7 @@ Things the design assumes that I'd be happiest to have someone push back on befo
 
 When all six PRs have landed and prod has been on `JWT_BACKEND=kms` for ≥30 days:
 
+**Migration milestones**:
 - [ ] No code path in `mcp-server/src/auth/**` accepts `alg=HS256` tokens
 - [ ] No code path in the repo references `op://prod-backend/auth-jwt-secrets` (the HMAC secret is retired from 1Password)
 - [ ] `scripts/ops/mint-admin-jwt.mjs` only mints ES256 tokens
@@ -449,5 +642,20 @@ When all six PRs have landed and prod has been on `JWT_BACKEND=kms` for ≥30 da
 - [ ] `docs/SECRETS_MIGRATION.md` Phase 4b status table marked ✅ complete
 - [ ] CloudWatch shows sign-volume on the JWT key matching the expected per-user-action baseline (no anomalies)
 - [ ] The refresh-flow client interceptor is live in the operator app (frontend follow-up — tracked separately)
+
+**Security-invariant enforcement** (these check that the design's safety properties are actually live, not just that the code shipped):
+- [ ] `verify-jwt-kms-signer.mjs` confirms `JWT_PUBLIC_KEY_PEM` matches `kms:GetPublicKey` for `AWS_JWT_KEY_ID`
+- [ ] Backend boot refuses to start on public-key/KMS fingerprint mismatch
+- [ ] JWT verifier uses a static `kid → public key → alg` allowlist; unknown `kid` is rejected
+- [ ] JWT verifier rejects `alg=none`, unexpected `alg`, `jku`, `jwk`, `x5u`, `x5c`, and any unrecognized `crit` header
+- [ ] JWT verifier requires explicit `typ: "averray-auth+jwt"`, `iss`, `aud: "averray-backend"`, `sub`, `jti`, `iat`, `nbf`, `exp`
+- [ ] ES256 helper tests cover DER sign-padding stripping and fixed-width 32-byte R/S conversion
+- [ ] Refresh endpoint derives wallet/role from the server-side refresh record, not from an expired access token
+- [ ] Refresh-token replay behavior is explicitly strict: reuse after rotation revokes the token family
+- [ ] Refresh cookie is host-only on `api.averray.com` with `HttpOnly; Secure; SameSite=Strict; Path=/auth/refresh`
+
+**Mainnet prerequisites** (must be true before mainnet cutover, even if not strictly part of Phase 4b):
+- [ ] No mainnet 30-day `ADMIN_JWT` exists in 1Password
+- [ ] Mainnet JWT signer does not use long-lived static AWS access keys (IAM Roles Anywhere or equivalent)
 
 When all the above are true, Phase 4b is closed.
