@@ -2,8 +2,13 @@ import { createServer } from "node:http";
 import { randomBytes } from "node:crypto";
 import { createPlatformRuntime } from "../../services/bootstrap.js";
 import {
-  assertMutationBackendAvailable
+  assertMutationBackendAvailable,
+  getMutationBackendStatus
 } from "../../core/mutation-backend.js";
+import {
+  resolveCapabilityHealth,
+  resolveServiceHealth
+} from "../../core/health-capability.js";
 import {
   AuthenticationError,
   AuthorizationError,
@@ -1773,15 +1778,38 @@ const server = createServer(async (request, response) => {
     }
 
     if (request.method === "GET" && pathname === "/health") {
-      const [storeHealth, chainHealth, gasHealth] = await Promise.all([
+      // Package B (P1.1b) — health truth split. `serviceHealth` is the
+      // API-process liveness contract: state-store reachable + auth
+      // config loaded. HTTP status follows `serviceHealth.ok` alone, so
+      // a trust-core-only launch (chain disabled, treasury capability
+      // unavailable) still returns 200/"ok" at the liveness layer and
+      // surfaces the capability state via `capabilityHealth`. Legacy
+      // top-level `components` is preserved for existing consumers.
+      const [storeHealth, chainHealth, gasHealth, xcmWatcherStatus, mutationBackendStatus] = await Promise.all([
         stateStore.healthCheck?.() ?? { ok: true, backend: stateStore.constructor.name },
-        gateway?.healthCheck?.() ?? { ok: true, backend: "blockchain", enabled: false, mode: "disabled" },
-        pimlicoClient?.healthCheck?.() ?? { ok: true, backend: "pimlico", enabled: false, mode: "disabled" }
+        gateway?.healthCheck?.() ?? { ok: false, backend: "blockchain", enabled: false, mode: "disabled" },
+        pimlicoClient?.healthCheck?.() ?? { ok: true, backend: "pimlico", enabled: false, mode: "disabled" },
+        service?.xcmSettlementWatcher?.getStatus?.()?.catch?.(() => undefined) ?? undefined,
+        getMutationBackendStatus({ gateway, config: mutationBackendConfig }).catch(() => ({ ok: false }))
       ]);
-      const overallOk = Boolean(storeHealth.ok) && Boolean(chainHealth.ok) && Boolean(gasHealth.ok);
-      return respond(response, overallOk ? 200 : 503, {
-        status: overallOk ? "ok" : "degraded",
+
+      const serviceHealth = resolveServiceHealth({ stateStoreHealth: storeHealth, authConfig });
+      const capabilityHealth = resolveCapabilityHealth({
+        blockchainHealth: chainHealth,
+        mutationBackendStatus,
+        xcmWatcherStatus,
+        // Backend has no direct indexer URL dependency today; the field
+        // resolves to "unavailable" via the helper's default branch.
+        // Wiring an explicit probe is a follow-up.
+        indexerProbe: undefined,
+        gasSponsorHealth: gasHealth
+      });
+
+      return respond(response, serviceHealth.ok ? 200 : 503, {
+        status: serviceHealth.ok ? "ok" : "degraded",
         auth: { mode: authConfig.mode, domain: authConfig.domain, chainId: authConfig.chainId },
+        serviceHealth,
+        capabilityHealth,
         components: {
           stateStore: storeHealth,
           blockchain: chainHealth,
