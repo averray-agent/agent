@@ -14,6 +14,21 @@ import {
 import { hashCanonicalContent } from "../../core/canonical-content.js";
 import { buildSiweMessage, verifySiweMessage } from "../../auth/siwe.js";
 import { signToken } from "../../auth/jwt.js";
+import {
+  REFRESH_COOKIE_NAME,
+  RefreshError,
+  consumeRefreshToken,
+  hashRefreshToken,
+  issueRefreshToken,
+  revokeChain,
+  rotateRefreshToken,
+} from "../../auth/refresh.js";
+import {
+  buildClearCookieHeader,
+  buildSetCookieHeader,
+  makeRefreshStoreAdapter,
+  parseCookie,
+} from "../../auth/refresh-cookie.js";
 import { extractClientKey } from "../../auth/rate-limit.js";
 import { hasRole } from "../../auth/config.js";
 import { resolveRequestId } from "../../core/logger.js";
@@ -2549,14 +2564,48 @@ const server = createServer(async (request, response) => {
         { secret: authConfig.signingSecret, expiresInSeconds: authConfig.tokenTtlSeconds }
       );
 
-      return respond(response, 200, {
-        token,
-        wallet: verified.recoveredAddress,
-        roles,
-        capabilities: authCapabilities.resolveCapabilities({ roles }),
-        expiresAt: new Date(claims.exp * 1000).toISOString(),
-        tokenType: "Bearer"
-      });
+      // Phase 4b.5b — also mint an opaque refresh token and return it
+      // as an HttpOnly cookie. The state-store exposes refresh-record
+      // CRUD via `makeRefreshStoreAdapter`. If the store backend doesn't
+      // implement the refresh methods (e.g. an older test harness), we
+      // skip cookie issuance silently and fall back to access-token-only
+      // behavior so the SIWE path itself doesn't fail.
+      let setCookieHeader = null;
+      try {
+        if (typeof stateStore?.getRefreshRecord === "function" &&
+            typeof stateStore?.upsertRefreshRecord === "function") {
+          const refreshAdapter = makeRefreshStoreAdapter(stateStore);
+          const refreshIssue = await issueRefreshToken({
+            wallet: verified.recoveredAddress,
+            role: roles[0] ?? "user",
+            store: refreshAdapter,
+          });
+          setCookieHeader = buildSetCookieHeader(refreshIssue.rawToken);
+        }
+      } catch (err) {
+        // Refresh-cookie issuance is best-effort here — if it fails for
+        // any reason, log and continue. The client just won't get a
+        // refresh cookie and will have to re-SIWE when the access token
+        // expires (the legacy behavior, fully backward compatible).
+        logger?.warn?.(
+          { err, wallet: verified.recoveredAddress },
+          "auth_verify.refresh_issue_failed"
+        );
+      }
+
+      return respond(
+        response,
+        200,
+        {
+          token,
+          wallet: verified.recoveredAddress,
+          roles,
+          capabilities: authCapabilities.resolveCapabilities({ roles }),
+          expiresAt: new Date(claims.exp * 1000).toISOString(),
+          tokenType: "Bearer"
+        },
+        setCookieHeader ? { "Set-Cookie": setCookieHeader } : {}
+      );
     }
 
     if (request.method === "GET" && pathname === "/auth/session") {
@@ -2582,14 +2631,149 @@ const server = createServer(async (request, response) => {
         const ttlSeconds = Math.max(1, exp - Math.floor(Date.now() / 1000));
         await stateStore.revokeToken?.(jti, ttlSeconds);
       }
-      return respond(response, 200, {
-        status: "logged_out",
-        wallet: auth.wallet,
-        jti
-      });
+
+      // Phase 4b.5b — best-effort: if the caller also carries a refresh
+      // cookie, revoke the entire refresh chain and clear the cookie. We
+      // never fail logout because of a refresh-token error; the access-
+      // token revocation above is the source of truth for "logged out".
+      const refreshCookie = parseCookie(request.headers?.cookie ?? null, REFRESH_COOKIE_NAME);
+      if (refreshCookie &&
+          typeof stateStore?.getRefreshRecord === "function" &&
+          typeof stateStore?.upsertRefreshRecord === "function") {
+        try {
+          const refreshAdapter = makeRefreshStoreAdapter(stateStore);
+          // We can't use consumeRefreshToken here because it throws on
+          // already-revoked / expired records. We hash-and-revoke directly.
+          const hash = hashRefreshToken(refreshCookie);
+          await revokeChain({
+            hash,
+            store: refreshAdapter,
+            reason: "logout",
+          });
+        } catch (err) {
+          logger?.warn?.({ err, wallet: auth.wallet }, "auth_logout.refresh_chain_revoke_failed");
+        }
+      }
+
+      return respond(
+        response,
+        200,
+        {
+          status: "logged_out",
+          wallet: auth.wallet,
+          jti
+        },
+        // Always clear the refresh cookie on logout, even if the caller
+        // didn't send one — defense-in-depth for stale browser state.
+        { "Set-Cookie": buildClearCookieHeader() }
+      );
     }
 
     if (request.method === "POST" && pathname === "/auth/refresh") {
+      // Phase 4b.5b — dual-mode dispatcher.
+      //
+      // NEW FLOW (preferred): an HttpOnly `refresh_token` cookie carries
+      // an opaque token. We consume it, re-resolve roles, rotate the
+      // refresh record, mint a fresh short-lived access token, and emit
+      // a new Set-Cookie. Replay of a previously-rotated cookie revokes
+      // the entire chain (see auth/refresh.js strict-replay semantics).
+      //
+      // LEGACY FLOW (fallback): an Authorization Bearer header carries
+      // a still-valid wallet JWT. We revoke its jti and mint a fresh
+      // one with the same sub. Maintained for backward compat with the
+      // operator app prior to the cookie cutover.
+      const refreshCookie = parseCookie(request.headers?.cookie ?? null, REFRESH_COOKIE_NAME);
+
+      if (refreshCookie &&
+          typeof stateStore?.getRefreshRecord === "function" &&
+          typeof stateStore?.upsertRefreshRecord === "function") {
+        // ── NEW FLOW: opaque refresh cookie ─────────────────────────
+        await enforceLimit("auth_refresh", clientIp(request), rateLimitConfig.authRefresh);
+        if (!authConfig.signingSecret) {
+          throw new AuthenticationError(
+            "Auth not configured — set AUTH_JWT_SECRETS to issue tokens.",
+            "auth_not_configured"
+          );
+        }
+
+        const refreshAdapter = makeRefreshStoreAdapter(stateStore);
+
+        let consumed;
+        try {
+          consumed = await consumeRefreshToken({ rawToken: refreshCookie, store: refreshAdapter });
+        } catch (err) {
+          // On any refresh-token failure, clear the cookie so the client
+          // doesn't keep retrying with a known-bad token. Map the refresh
+          // error to an AuthenticationError with a stable error code.
+          response.setHeader?.("Set-Cookie", buildClearCookieHeader());
+          if (err instanceof RefreshError) {
+            const code = err.code === "refresh_replay_detected"
+              ? "refresh_replay_detected"
+              : err.code === "refresh_expired"
+                ? "refresh_expired"
+                : err.code === "refresh_revoked"
+                  ? "refresh_revoked"
+                  : "invalid_refresh_token";
+            logger?.warn?.(
+              { code, hashPrefix: err.details?.hashPrefix },
+              "auth_refresh.cookie_rejected"
+            );
+            throw new AuthenticationError(err.message, code);
+          }
+          throw err;
+        }
+
+        // Role-recheck hook: re-resolve roles at refresh time so a wallet
+        // that lost its admin/verifier role since issue-time cannot keep
+        // refreshing into a privileged session.
+        const roles = authConfig.resolveRoles?.(consumed.record.wallet) ?? [];
+        if (roles.length === 0) {
+          // Wallet lost all roles since issue — revoke the chain and
+          // reject. The client will be forced back to SIWE.
+          await revokeChain({
+            hash: consumed.hash,
+            store: refreshAdapter,
+            reason: "no_roles_at_refresh",
+          });
+          response.setHeader?.("Set-Cookie", buildClearCookieHeader());
+          logger?.warn?.(
+            { wallet: consumed.record.wallet },
+            "auth_refresh.no_roles_chain_revoked"
+          );
+          throw new AuthenticationError(
+            "Wallet has no roles at refresh time.",
+            "no_roles_at_refresh"
+          );
+        }
+
+        const primaryRole = roles[0];
+        const rotated = await rotateRefreshToken({
+          oldRecord: { ...consumed.record, role: primaryRole },
+          oldHash: consumed.hash,
+          store: refreshAdapter,
+        });
+
+        const { token, claims } = signToken(
+          { sub: consumed.record.wallet, roles },
+          { secret: authConfig.signingSecret, expiresInSeconds: authConfig.tokenTtlSeconds }
+        );
+
+        return respond(
+          response,
+          200,
+          {
+            token,
+            wallet: consumed.record.wallet,
+            roles,
+            capabilities: authCapabilities.resolveCapabilities({ roles }),
+            expiresAt: new Date(claims.exp * 1000).toISOString(),
+            tokenType: "Bearer"
+          },
+          { "Set-Cookie": buildSetCookieHeader(rotated.rawToken) }
+        );
+      }
+
+      // ── LEGACY FLOW: access-token rotation via Authorization header ─
       // Rotate the caller's wallet JWT: revoke the old `jti`, mint a new one
       // with the same `sub` + `roles`, fresh `iat` / `exp`. The operator app
       // avoids re-SIWE every AUTH_TOKEN_TTL_SECONDS by calling this when it

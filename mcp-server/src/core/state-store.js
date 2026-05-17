@@ -397,6 +397,32 @@ export class MemoryStateStore {
       mode: "ephemeral"
     };
   }
+
+  // ── Phase 4b.5b: refresh-token persistence ─────────────────────────────
+  // Keyed by SHA-256(rawToken) hex. TTL = refresh-TTL + forensic grace
+  // (see mcp-server/src/auth/refresh.js for the design).
+  _evictExpiredRefreshRecords() {
+    if (!this.refreshRecords) return;
+    const now = Date.now();
+    for (const [hash, entry] of this.refreshRecords) {
+      if (entry.expiresAtMs <= now) this.refreshRecords.delete(hash);
+    }
+  }
+
+  async getRefreshRecord(hash) {
+    if (!this.refreshRecords) return null;
+    this._evictExpiredRefreshRecords();
+    const entry = this.refreshRecords.get(hash);
+    return entry ? entry.value : null;
+  }
+
+  async upsertRefreshRecord(hash, record, ttlSeconds) {
+    if (!this.refreshRecords) this.refreshRecords = new Map();
+    this.refreshRecords.set(hash, {
+      value: record,
+      expiresAtMs: Date.now() + ttlSeconds * 1000,
+    });
+  }
 }
 
 export class RedisStateStore {
@@ -816,6 +842,29 @@ export class RedisStateStore {
     await this.connect();
     const reply = await this.client.get(this.key("revoked", jti));
     return reply !== null && reply !== undefined;
+  }
+
+  // ── Phase 4b.5b: refresh-token persistence ─────────────────────────────
+  // Stores RefreshRecord JSON under `auth:refresh:<hash>` with explicit TTL.
+  // Keyspace + payload shape defined in mcp-server/src/auth/refresh.js.
+  async getRefreshRecord(hash) {
+    await this.connect();
+    const raw = await this.client.get(this.key("auth", "refresh", hash));
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+
+  async upsertRefreshRecord(hash, record, ttlSeconds) {
+    await this.connect();
+    await this.client.set(
+      this.key("auth", "refresh", hash),
+      JSON.stringify(record),
+      { EX: Math.max(1, Math.ceil(ttlSeconds)) },
+    );
   }
 
   async healthCheck() {
