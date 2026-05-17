@@ -1203,7 +1203,7 @@ export class PlatformService {
       throw new ValidationError("XCM request finalization requires the blockchain gateway.");
     }
     const finalized = await this.blockchainGateway.finalizeXcmRequest(requestId, outcome);
-    if (finalized?.strategyRequest?.account && !finalized?.alreadySettled) {
+    if (finalized?.strategyRequest?.account) {
       await this.accountMutationService.recordAsyncStrategySettlement(finalized);
     }
     return finalized;
