@@ -4,6 +4,7 @@ import { createPlatformRuntime } from "../../services/bootstrap.js";
 import {
   assertMutationBackendAvailable
 } from "../../core/mutation-backend.js";
+import { buildHealthReport } from "../../core/health-report.js";
 import {
   AuthenticationError,
   AuthorizationError,
@@ -1773,21 +1774,15 @@ const server = createServer(async (request, response) => {
     }
 
     if (request.method === "GET" && pathname === "/health") {
-      const [storeHealth, chainHealth, gasHealth] = await Promise.all([
-        stateStore.healthCheck?.() ?? { ok: true, backend: stateStore.constructor.name },
-        gateway?.healthCheck?.() ?? { ok: true, backend: "blockchain", enabled: false, mode: "disabled" },
-        pimlicoClient?.healthCheck?.() ?? { ok: true, backend: "pimlico", enabled: false, mode: "disabled" }
-      ]);
-      const overallOk = Boolean(storeHealth.ok) && Boolean(chainHealth.ok) && Boolean(gasHealth.ok);
-      return respond(response, overallOk ? 200 : 503, {
-        status: overallOk ? "ok" : "degraded",
-        auth: { mode: authConfig.mode, domain: authConfig.domain, chainId: authConfig.chainId },
-        components: {
-          stateStore: storeHealth,
-          blockchain: chainHealth,
-          gasSponsor: gasHealth
-        }
+      const healthReport = await buildHealthReport({
+        stateStore,
+        gateway,
+        pimlicoClient,
+        mutationBackendConfig,
+        authConfig,
+        xcmObservationRelay: service.xcmObservationRelay
       });
+      return respond(response, healthReport.serviceHealth === "ok" ? 200 : 503, healthReport);
     }
 
     if (request.method === "GET" && pathname === "/status/providers") {
