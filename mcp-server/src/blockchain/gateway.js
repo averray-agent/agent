@@ -62,6 +62,29 @@ function summarizeSupportedAsset(asset) {
   return summary;
 }
 
+function summarizeAssetPosition(position, asset, toDisplayUnits, toRawString) {
+  const liquid = BigInt(position.liquid ?? 0);
+  const reserved = BigInt(position.reserved ?? 0);
+  const strategyAllocated = BigInt(position.strategyAllocated ?? 0);
+  const collateralLocked = BigInt(position.collateralLocked ?? 0);
+  const jobStakeLocked = BigInt(position.jobStakeLocked ?? 0);
+  const debtOutstanding = BigInt(position.debtOutstanding ?? 0);
+  return {
+    liquid: toDisplayUnits(liquid, asset),
+    liquidRaw: toRawString(liquid),
+    reserved: toDisplayUnits(reserved, asset),
+    reservedRaw: toRawString(reserved),
+    strategyAllocated: toDisplayUnits(strategyAllocated, asset),
+    strategyAllocatedRaw: toRawString(strategyAllocated),
+    collateralLocked: toDisplayUnits(collateralLocked, asset),
+    collateralLockedRaw: toRawString(collateralLocked),
+    jobStakeLocked: toDisplayUnits(jobStakeLocked, asset),
+    jobStakeLockedRaw: toRawString(jobStakeLocked),
+    debtOutstanding: toDisplayUnits(debtOutstanding, asset),
+    debtOutstandingRaw: toRawString(debtOutstanding)
+  };
+}
+
 function canAutoMintAsset(asset) {
   return (asset?.assetClass ?? "custom") === "custom";
 }
@@ -406,6 +429,34 @@ export class BlockchainGateway {
           ? await optionalBool(`approvedAssets(${asset.symbol ?? asset.address})`, this.policyContract.approvedAssets(asset.address))
           : false
       })));
+      const signerFunding = signerAddress ? {
+        account: signerAddress,
+        agentAccountAddress: this.config.agentAccountAddress,
+        assets: await Promise.all((this.config.supportedAssets ?? []).map(async (asset) => {
+          const summary = summarizeSupportedAsset(asset);
+          const position = await optionalRead(
+            `positions(signer,${asset.symbol ?? asset.address})`,
+            this.accountContract.positions(signerAddress, asset.address),
+            undefined
+          );
+          if (!position) {
+            return {
+              ...summary,
+              readable: false
+            };
+          }
+          return {
+            ...summary,
+            readable: true,
+            ...summarizeAssetPosition(
+              position,
+              asset,
+              this.toDisplayUnits.bind(this),
+              this.toRawString.bind(this)
+            )
+          };
+        }))
+      } : undefined;
       const supportedAssetsReady = supportedAssets.length > 0
         && supportedAssets.every((asset) => asset.approved === true);
 
@@ -434,6 +485,7 @@ export class BlockchainGateway {
           escrowIsServiceOperator,
           agentAccountIsServiceOperator
         },
+        signerFunding,
         readErrors,
         risk: this.policyRiskSnapshot({
           dailyOutflowCap,

@@ -178,6 +178,7 @@ function assertWorkerLoopCompletionEvidence(evidence, { apiBaseUrl }) {
   assert.equal(settlement.roles?.signerIsVerifier, true, "worker-loop evidence requires signer verifier role");
   assert.equal(settlement.roles?.escrowIsServiceOperator, true, "worker-loop evidence requires EscrowCore service-operator role");
   assert.equal(settlement.roles?.agentAccountIsServiceOperator, true, "worker-loop evidence requires AgentAccountCore service-operator role");
+  assert.ok(settlement.roles?.signerAddress, "worker-loop evidence requires configured signer address");
 
   assert.equal(evidence.rewardReadiness?.asset, REQUIRED_ESCROW_ASSET.symbol, "worker-loop evidence reward readiness must be USDC");
   assertRawAtLeast(
@@ -186,6 +187,23 @@ function assertWorkerLoopCompletionEvidence(evidence, { apiBaseUrl }) {
     "worker-loop evidence reward must clear the USDC minBalance"
   );
   assert.equal(evidence.rewardReadiness?.minBalanceRaw, REQUIRED_ESCROW_ASSET.minBalanceRaw, "worker-loop evidence reward minBalance must match canonical USDC");
+
+  assert.equal(evidence.signerFundingReadiness?.asset, REQUIRED_ESCROW_ASSET.symbol, "worker-loop evidence signer funding readiness must be USDC");
+  assert.equal(
+    String(evidence.signerFundingReadiness?.signer ?? "").toLowerCase(),
+    String(settlement.roles?.signerAddress ?? "").toLowerCase(),
+    "worker-loop evidence signer funding account must match configured signer"
+  );
+  assert.equal(
+    evidence.signerFundingReadiness?.rewardRaw,
+    evidence.rewardReadiness?.rewardRaw,
+    "worker-loop evidence signer funding rewardRaw must match reward readiness"
+  );
+  assertRawAtLeast(
+    evidence.signerFundingReadiness?.availableRaw,
+    evidence.signerFundingReadiness?.requiredRaw,
+    "worker-loop evidence signer funding must cover required reward"
+  );
 
   assert.equal(evidence.liquidityReadiness?.wallet?.toLowerCase(), evidence.wallet.toLowerCase(), "worker-loop evidence liquidity wallet must match worker wallet");
   assert.equal(evidence.liquidityReadiness?.asset, REQUIRED_ESCROW_ASSET.symbol, "worker-loop evidence liquidity readiness must be USDC");
@@ -211,6 +229,23 @@ function assertWorkerLoopCompletionEvidence(evidence, { apiBaseUrl }) {
     evidence.claimLiquidityReadiness?.availableRaw,
     evidence.claimLiquidityReadiness?.requiredRaw,
     "worker-loop evidence claim liquidity must cover reward plus claim lock"
+  );
+
+  assert.equal(evidence.claimSignerFundingReadiness?.asset, REQUIRED_ESCROW_ASSET.symbol, "worker-loop evidence claim signer funding readiness must be USDC");
+  assert.equal(
+    evidence.claimSignerFundingReadiness?.rewardRaw,
+    evidence.rewardReadiness?.rewardRaw,
+    "worker-loop evidence claim signer funding rewardRaw must match reward readiness"
+  );
+  assertRawAtLeast(
+    evidence.claimSignerFundingReadiness?.requiredRaw,
+    evidence.rewardReadiness?.rewardRaw,
+    "worker-loop evidence claim signer funding requirement must include at least the reward"
+  );
+  assertRawAtLeast(
+    evidence.claimSignerFundingReadiness?.availableRaw,
+    evidence.claimSignerFundingReadiness?.requiredRaw,
+    "worker-loop evidence claim signer funding must cover reward plus claim lock"
   );
 
   assert.equal(evidence.preflightReadiness?.jobId, evidence.jobId, "worker-loop evidence preflight jobId must match evidence jobId");

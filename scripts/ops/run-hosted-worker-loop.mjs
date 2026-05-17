@@ -60,6 +60,11 @@ export async function runHostedWorkerLoop({
     rewardAmount: rewardAmountInput,
     asset: settlementReadiness.asset
   });
+  const signerFundingReadiness = assertSignerFundingReady({
+    settlementReadiness,
+    rewardAsset,
+    rewardAmount: rewardAmountInput
+  });
   const liquidityReadiness = await assertProductProofLiquidity({
     platform,
     wallet,
@@ -106,6 +111,13 @@ export async function runHostedWorkerLoop({
     preflightReadiness,
     liquidityReadiness: preClaimLiquidityReadiness,
     settlementReadiness
+  });
+  const claimSignerFundingReadiness = assertSignerFundingReady({
+    settlementReadiness,
+    rewardAsset,
+    rewardAmount: rewardAmountInput,
+    totalClaimLock: preflightReadiness.totalClaimLock,
+    phase: "claim"
   });
 
   log(`Validating hosted product-proof submission for ${jobId}`);
@@ -171,8 +183,10 @@ export async function runHostedWorkerLoop({
     authReadiness,
     settlementReadiness,
     rewardReadiness,
+    signerFundingReadiness,
     liquidityReadiness,
     claimLiquidityReadiness,
+    claimSignerFundingReadiness,
     preflightReadiness,
     validationReadiness,
     invalidValidationReadiness,
@@ -330,6 +344,83 @@ async function assertSubmissionValidationReady({ platform, jobId, preflightReadi
     schemaValidates: validation.schemaValidates ?? "payload.submission",
     submissionKind: validation.submissionKind ?? "structured",
     validatedBeforeClaim: true
+  };
+}
+
+function assertSignerFundingReady({
+  settlementReadiness,
+  rewardAsset,
+  rewardAmount,
+  totalClaimLock = 0,
+  phase = "mutation"
+}) {
+  const asset = settlementReadiness.asset;
+  const decimals = Number(asset.decimals);
+  const rewardRaw = toBaseUnits(rewardAmount, decimals);
+  const totalClaimLockRaw = totalClaimLock === null || totalClaimLock === undefined
+    ? 0n
+    : toBaseUnits(totalClaimLock, decimals);
+  const requiredRaw = rewardRaw + totalClaimLockRaw;
+  const signerFunding = settlementReadiness.signerFunding;
+  const signerAddress = settlementReadiness.roles?.signerAddress;
+  const agentAccountAddress = settlementReadiness.contracts?.agentAccountAddress ?? "AgentAccountCore";
+  if (!signerFunding || typeof signerFunding !== "object") {
+    throw new Error(
+      `Hosted product-proof worker loop requires signer AgentAccountCore funding telemetry before ${phase}; ` +
+      `signer=${signerAddress ?? "missing"}; account=${agentAccountAddress}. ` +
+      "Expose maintenance.policy.signerFunding from /admin/status."
+    );
+  }
+  if (signerAddress && signerFunding.account && !sameWallet(signerFunding.account, signerAddress)) {
+    throw new Error(
+      `Hosted product-proof worker loop signer funding account mismatch before ${phase}; ` +
+      `roles.signerAddress=${signerAddress}; signerFunding.account=${signerFunding.account}.`
+    );
+  }
+  const fundingAsset = (signerFunding.assets ?? []).find(
+    (candidate) => normalizeAssetSymbol(candidate.symbol) === rewardAsset
+  );
+  if (!fundingAsset) {
+    throw new Error(
+      `Hosted product-proof worker loop requires ${rewardAsset} signer funding telemetry before ${phase}; ` +
+      `signer=${signerFunding.account ?? signerAddress ?? "missing"}; account=${agentAccountAddress}.`
+    );
+  }
+  if (fundingAsset.readable === false) {
+    throw new Error(
+      `Hosted product-proof worker loop could not read ${rewardAsset} signer funding before ${phase}; ` +
+      `signer=${signerFunding.account ?? signerAddress ?? "missing"}; account=${agentAccountAddress}.`
+    );
+  }
+  const availableRaw = toRawAssetAmount({
+    rawValue: fundingAsset.liquidRaw,
+    displayValue: fundingAsset.liquid,
+    decimals,
+    label: `signer ${rewardAsset} liquid balance`
+  });
+  if (availableRaw < requiredRaw) {
+    throw new Error(
+      `Hosted product-proof worker loop requires funded signer ${rewardAsset} liquidity before ${phase}; ` +
+      `signer=${signerFunding.account ?? signerAddress ?? "missing"}; account=${agentAccountAddress}; ` +
+      `reward=${formatBaseUnits(rewardRaw, decimals)} ${rewardAsset} (raw ${rewardRaw}); ` +
+      `totalClaimLock=${formatBaseUnits(totalClaimLockRaw, decimals)} ${rewardAsset} (raw ${totalClaimLockRaw}); ` +
+      `required=${formatBaseUnits(requiredRaw, decimals)} ${rewardAsset} (raw ${requiredRaw}); ` +
+      `available=${formatBaseUnits(availableRaw, decimals)} ${rewardAsset} (raw ${availableRaw}). ` +
+      `Fund the configured backend signer by approving ${agentAccountAddress} on the canonical ${rewardAsset} ERC20 precompile and depositing into AgentAccountCore.`
+    );
+  }
+  return {
+    signer: signerFunding.account ?? signerAddress ?? null,
+    asset: rewardAsset,
+    rewardRaw: rewardRaw.toString(),
+    totalClaimLockRaw: totalClaimLockRaw.toString(),
+    requiredRaw: requiredRaw.toString(),
+    availableRaw: availableRaw.toString(),
+    reward: formatBaseUnits(rewardRaw, decimals),
+    totalClaimLock: formatBaseUnits(totalClaimLockRaw, decimals),
+    required: formatBaseUnits(requiredRaw, decimals),
+    available: formatBaseUnits(availableRaw, decimals),
+    agentAccountAddress
   };
 }
 
@@ -661,6 +752,7 @@ async function assertSettlementReadiness(platform, rewardAsset) {
       escrowIsServiceOperator: Boolean(policy.roles?.escrowIsServiceOperator),
       agentAccountIsServiceOperator: Boolean(policy.roles?.agentAccountIsServiceOperator)
     },
+    signerFunding: policy.signerFunding,
     contracts: policy.contracts
   };
 }

@@ -303,6 +303,7 @@ function workerLoopEvidence({ wallet, sessionId, jobId }) {
         approved: true
       },
       roles: {
+        signerAddress: wallet,
         signerIsVerifier: true,
         escrowIsServiceOperator: true,
         agentAccountIsServiceOperator: true
@@ -313,6 +314,14 @@ function workerLoopEvidence({ wallet, sessionId, jobId }) {
       rewardRaw: "100000",
       minBalanceRaw: "70000"
     },
+    signerFundingReadiness: {
+      signer: wallet,
+      asset: "USDC",
+      rewardRaw: "100000",
+      totalClaimLockRaw: "0",
+      requiredRaw: "100000",
+      availableRaw: "155000"
+    },
     liquidityReadiness: {
       wallet,
       asset: "USDC",
@@ -321,6 +330,14 @@ function workerLoopEvidence({ wallet, sessionId, jobId }) {
     },
     claimLiquidityReadiness: {
       wallet,
+      asset: "USDC",
+      rewardRaw: "100000",
+      totalClaimLockRaw: "55000",
+      requiredRaw: "155000",
+      availableRaw: "155000"
+    },
+    claimSignerFundingReadiness: {
+      signer: wallet,
       asset: "USDC",
       rewardRaw: "100000",
       totalClaimLockRaw: "55000",

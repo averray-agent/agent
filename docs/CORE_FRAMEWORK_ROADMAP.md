@@ -154,8 +154,10 @@ discipline for custom/off-platform schemas.
   `schema://jobs/product-proof-worker-loop` output contract, validates its
   structured submission before claim, probes an invalid `submission.output`
   wrapper through the read-only validation route, runs verification from the
-  stored structured session submission, and records both validation traces plus
-  the verifier-input mode in the launch evidence gate
+  stored structured session submission, checks configured-signer and worker
+  AgentAccountCore USDC liquidity before mutation/claim, and records both
+  validation traces plus the verifier-input and funding modes in the launch
+  evidence gate
 - the generic claim-and-submit helper now uses the same schema-native readiness
   guard before claim, so the pattern is available outside the product-proof
   smoke loop
@@ -547,7 +549,9 @@ should prioritize live-proof and launch-risk items before adding new product
 surface:
 
 1. complete the hosted worker-loop product-proof evidence gate, including the
-   valid direct-object validation and invalid-wrapper validation proof
+   valid direct-object validation, invalid-wrapper validation proof, configured
+   KMS signer funding proof, and final hosted evidence artifact after the signer
+   has live USDC deposited in AgentAccountCore
 2. close operator self-report proof through Hermes/operator reporting: keep
    `run_hermes_post_deploy=1`, confirm scheduled ops-health and daily-brief
    evidence, and run the hosted smoke's bootstrap instrumentation gate to prove
