@@ -351,7 +351,7 @@ Same shape as `AUDIT_PACKAGE.md` §8:
 
 ## 11. Contact
 
-- Primary: <TBD — fill in before sending>
-- Escalation: <TBD>
+- Primary: <pkuriger@averray.com>
+- Escalation: <ops@averray.com>
 - Response SLA: within 2 business days for questions during audit;
   within 1 business day for findings classified Critical.
