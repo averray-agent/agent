@@ -35,7 +35,11 @@ const DEFAULT_JWT_CLOCK_SKEW_SECONDS = 60;
  *   AWS_JWT_SECRET_ACCESS_KEY: AWS credentials + key reference for
  *   KmsJwtSigner. Required when JWT_BACKEND ∈ {kms, both}.
  * - JWT_PUBLIC_KEY_PEM, JWT_PUBLIC_KEY_FINGERPRINT: rendered into env at
- *   deploy time. Required when JWT_BACKEND ∈ {kms, both}.
+ *   deploy time. Required when JWT_BACKEND ∈ {kms, both}. The PEM may
+ *   alternatively be supplied as JWT_PUBLIC_KEY_PEM_BASE64 (single-line
+ *   base64 of the PEM text) — required in prod because docker-compose's
+ *   env_file parser doesn't support multi-line values. If both are set
+ *   the explicit PEM wins.
  * - JWT_KID: header kid (default "jwt-1").
  * - JWT_EXPECTED_ISSUER, JWT_EXPECTED_AUDIENCE: required iss/aud claims
  *   for ES256 verification. Default to "averray-backend-testnet" /
@@ -155,6 +159,14 @@ function parseKmsJwtConfig(env, backend) {
     return null;
   }
 
+  // PR 4b.6b — accept JWT_PUBLIC_KEY_PEM_BASE64 as an alternative input
+  // because docker compose's env_file parser does NOT support multi-line
+  // values; the raw PEM (with embedded newlines) trips line-by-line
+  // VAR=VALUE parsing. The base64-wrapped variant is single-line and
+  // round-trips through env_file safely. Either input is accepted; if
+  // both are present, the explicit PEM wins (operator override path).
+  const publicKeyPem = resolvePublicKeyPem(env);
+
   // Variables that must be non-empty when KMS verify is active. Region
   // is needed only when no KMSClient is provided at runtime (it always
   // is, in normal boot) — we still enforce it so a misconfigured prod
@@ -163,7 +175,7 @@ function parseKmsJwtConfig(env, backend) {
   const required = {
     AWS_JWT_REGION: env.AWS_JWT_REGION,
     AWS_JWT_KEY_ID: env.AWS_JWT_KEY_ID,
-    JWT_PUBLIC_KEY_PEM: env.JWT_PUBLIC_KEY_PEM,
+    JWT_PUBLIC_KEY_PEM: publicKeyPem,
     JWT_PUBLIC_KEY_FINGERPRINT: env.JWT_PUBLIC_KEY_FINGERPRINT,
   };
   // Access keys are required only when JWT_BACKEND ∈ {kms, both} AND
@@ -178,8 +190,13 @@ function parseKmsJwtConfig(env, backend) {
     .filter(([, value]) => value === undefined || value === null || String(value).trim() === "")
     .map(([name]) => name);
   if (missing.length > 0) {
+    // Rename JWT_PUBLIC_KEY_PEM → "JWT_PUBLIC_KEY_PEM (or _BASE64)" so
+    // operators see the alternative variable name in the error too.
+    const renamed = missing.map((name) =>
+      name === "JWT_PUBLIC_KEY_PEM" ? "JWT_PUBLIC_KEY_PEM (or JWT_PUBLIC_KEY_PEM_BASE64)" : name,
+    );
     throw new ConfigError(
-      `JWT_BACKEND=${backend} requires the following env vars to be set: ${missing.join(", ")}.`,
+      `JWT_BACKEND=${backend} requires the following env vars to be set: ${renamed.join(", ")}.`,
     );
   }
 
@@ -192,7 +209,6 @@ function parseKmsJwtConfig(env, backend) {
       `AWS_JWT_KEY_ID must be the full KMS key ARN, not an alias ("${keyId}"). Aliases can be retargeted.`,
     );
   }
-  const publicKeyPem = String(env.JWT_PUBLIC_KEY_PEM);
   const publicKeyFingerprint = String(env.JWT_PUBLIC_KEY_FINGERPRINT).trim();
   const kid = (env.JWT_KID ?? DEFAULT_JWT_KID).toString().trim() || DEFAULT_JWT_KID;
   const expectedIssuer = (env.JWT_EXPECTED_ISSUER ?? "averray-backend-testnet").toString().trim();
@@ -213,6 +229,55 @@ function parseKmsJwtConfig(env, backend) {
     maxTtlSeconds,
     clockSkewSeconds,
   };
+}
+
+/**
+ * Resolve the JWT public-key PEM from env, accepting either the raw
+ * multi-line PEM (`JWT_PUBLIC_KEY_PEM`, used in dev / `op run` flows)
+ * or a single-line base64-wrapped variant (`JWT_PUBLIC_KEY_PEM_BASE64`,
+ * required in prod because docker-compose's env_file parser does not
+ * support multi-line values).
+ *
+ * If both are set, the explicit PEM wins (operator-override path).
+ * Returns null if neither is set; the caller surfaces the missing-var
+ * error so it can list both names together.
+ *
+ * The base64 path validates that the decoded bytes are a textual PEM
+ * with BEGIN/END markers — a misconfigured field (e.g. raw DER bytes
+ * base64-encoded) would fail loudly at boot here rather than producing
+ * a confusing parse error in p256-spki.js several stack frames deeper.
+ *
+ * @param {Record<string, string | undefined>} env
+ * @returns {string | null}
+ */
+export function resolvePublicKeyPem(env) {
+  const direct = env.JWT_PUBLIC_KEY_PEM;
+  if (typeof direct === "string" && direct.trim().length > 0) {
+    return direct;
+  }
+  const base64 = env.JWT_PUBLIC_KEY_PEM_BASE64;
+  if (typeof base64 !== "string" || base64.trim().length === 0) {
+    return null;
+  }
+  let decoded;
+  try {
+    decoded = Buffer.from(base64.trim(), "base64").toString("utf8");
+  } catch (err) {
+    throw new ConfigError(
+      `JWT_PUBLIC_KEY_PEM_BASE64 is set but failed to base64-decode: ${err?.message ?? err}`,
+    );
+  }
+  // Sanity check: must round-trip into something that looks like a PEM.
+  // A common foot-gun is base64-ing the raw DER instead of the PEM text;
+  // catch that here with a clear message.
+  if (!decoded.includes("-----BEGIN ") || !decoded.includes("-----END ")) {
+    throw new ConfigError(
+      "JWT_PUBLIC_KEY_PEM_BASE64 decoded to bytes that don't contain PEM BEGIN/END markers. " +
+        "Confirm the 1Password field stores base64 of the PEM text (BEGIN PUBLIC KEY ... END PUBLIC KEY), " +
+        "not the raw DER bytes.",
+    );
+  }
+  return decoded;
 }
 
 function parseJwtRoles(raw) {
