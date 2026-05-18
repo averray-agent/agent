@@ -1423,24 +1423,35 @@ function normalizeServiceTokenTtlSeconds(payload, grant) {
   return Math.max(1, ttlSeconds);
 }
 
-function signServiceToken(grant, payload = {}) {
-  if (!authConfig.signingSecret) {
+async function signServiceToken(grant, payload = {}) {
+  if (!authConfig.signingSecret && authConfig.jwtBackend === "hmac") {
+    // Under JWT_BACKEND=hmac the dispatcher still needs an HMAC secret.
+    // Under kms / both the secret may legitimately be absent (we're past
+    // the HMAC retirement window).
     throw new AuthenticationError(
       "Auth not configured — set AUTH_JWT_SECRETS to issue service tokens.",
       "auth_not_configured"
     );
   }
   const ttlSeconds = normalizeServiceTokenTtlSeconds(payload, grant);
-  return signToken(
+  // Phase 4b.6 Stage 2C-1 — route through the dispatcher so service-token
+  // mint respects JWT_PRIMARY_ALG (HS256 today, ES256 once 2C-2 flips
+  // JWT_BACKEND=kms). The `roles: ["service"]` claim is informational —
+  // capabilities for a service token come from the capabilityGrantId
+  // lookup in middleware.expandCapabilities, not from hasRole. The
+  // "service" entry is in VALID_ROLES (auth/config.js) so KmsJwtSigner's
+  // expectedRoles allowlist accepts the ES256 shape after 2C-2.
+  return await signTokenFromConfig(
     {
       sub: grant.subject,
-      roles: [],
+      roles: ["service"],
       tokenKind: "service",
       serviceToken: true,
       capabilityGrantId: grant.id,
       ...(grant.scope ? { serviceScope: grant.scope } : {})
     },
-    { secret: authConfig.signingSecret, expiresInSeconds: ttlSeconds }
+    { expiresInSeconds: ttlSeconds },
+    authConfig,
   );
 }
 
@@ -4082,7 +4093,7 @@ const server = createServer(async (request, response) => {
       assertIssuerCanGrantCapabilities(grant, auth);
       await stateStore.upsertCapabilityGrant?.(grant);
       authMiddleware.invalidateCapabilityGrantCache?.(grant.subject);
-      const { token, claims } = signServiceToken(grant, payload);
+      const { token, claims } = await signServiceToken(grant, payload);
       const body = serviceTokenIssueResponse({ grant, token, claims });
       await storeIdempotentMutationReceipt({
         bucket: "service_token_issue",
@@ -4160,7 +4171,7 @@ const server = createServer(async (request, response) => {
       });
       await stateStore.upsertCapabilityGrant?.(nextGrant);
       authMiddleware.invalidateCapabilityGrantCache?.(nextGrant.subject);
-      const { token, claims } = signServiceToken(nextGrant, payload);
+      const { token, claims } = await signServiceToken(nextGrant, payload);
       const body = serviceTokenIssueResponse({ grant: nextGrant, token, claims, rotatedFrom: revoked });
       await storeIdempotentMutationReceipt({
         bucket: "service_token_rotate",

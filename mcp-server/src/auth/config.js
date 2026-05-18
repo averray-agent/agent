@@ -1,7 +1,17 @@
 import { ConfigError } from "../core/errors.js";
 
 const VALID_MODES = new Set(["strict", "permissive"]);
-const VALID_ROLES = new Set(["admin", "verifier"]);
+// Roles that may appear in a JWT's `roles` claim. SIWE-issued tokens
+// carry "admin" / "verifier" derived from the wallet-set env vars
+// (AUTH_ADMIN_WALLETS / AUTH_VERIFIER_WALLETS, resolved by
+// resolveRoles below). Service tokens (issued via /admin/service-tokens)
+// carry "service" — added in Phase 4b.6 Stage 2C-1 so KmsJwtSigner's
+// expectedRoles allowlist accepts the canonical ES256 service-token
+// shape. The "service" role is informational only — capabilities for a
+// service token come from the capabilityGrantId lookup, NOT from
+// hasRole(claims, "service"). resolveRoles never emits "service";
+// it can only originate from signServiceToken (server.js L1426).
+const VALID_ROLES = new Set(["admin", "verifier", "service"]);
 const VALID_JWT_BACKENDS = new Set(["hmac", "kms", "both"]);
 const VALID_JWT_PRIMARY_ALGS = new Set(["hmac", "kms"]);
 const DEFAULT_JWT_KID = "jwt-1";
