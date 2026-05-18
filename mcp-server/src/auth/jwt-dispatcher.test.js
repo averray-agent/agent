@@ -251,6 +251,56 @@ test("dispatcher kms: verifyTokenFromConfig accepts ES256", async () => {
   assert.equal(claims.role, "admin");
   assert.equal(claims.iss, ISSUER);
   assert.equal(claims.aud, AUDIENCE);
+  // Normalization: ES256 emits singular `role` per design doc §6 but
+  // downstream auth code (capabilities, hasRole) reads plural `roles`.
+  // The dispatcher bridges the two so middleware/handler code is
+  // algorithm-agnostic.
+  assert.deepEqual(claims.roles, ["admin"]);
+});
+
+test("dispatcher kms: verifyTokenFromConfig normalizes role → roles for verifier role", async () => {
+  // Same path as above but with a different role value — proves the
+  // normalization isn't hardcoded to "admin".
+  const cfg = buildAuthConfig({ jwtBackend: "kms", withKms: true });
+  const { token } = await signTokenFromConfig(
+    {},
+    { issuer: ISSUER, audience: AUDIENCE, subject: SUBJECT, role: "verifier", expiresInSeconds: 60 },
+    cfg,
+  );
+  const claims = await verifyTokenFromConfig(token, cfg);
+  assert.equal(claims.role, "verifier");
+  assert.deepEqual(claims.roles, ["verifier"]);
+});
+
+test("dispatcher kms: verifyTokenFromConfig preserves an existing claims.roles array (does not overwrite)", async () => {
+  // Defense-in-depth: if a future ES256 variant carries a `roles`
+  // array alongside `role`, the dispatcher must NOT overwrite the
+  // explicit roles array with `[role]`. Mint with both.
+  const cfg = buildAuthConfig({ jwtBackend: "kms", withKms: true });
+  // Use signAsync directly to inject an extra claim (roles) that the
+  // dispatcher's signTokenFromConfig strips by default.
+  const signer = await (async () => {
+    const { KmsJwtSigner } = await import("./kms-jwt-signer.js");
+    return new KmsJwtSigner({
+      kmsClient: cfg.kmsJwt.kmsClient,
+      region: cfg.kmsJwt.region,
+      keyId: cfg.kmsJwt.keyId,
+      kid: cfg.kmsJwt.kid,
+      publicKeyPem: cfg.kmsJwt.publicKeyPem,
+      expectedIssuer: cfg.kmsJwt.expectedIssuer,
+      expectedAudience: cfg.kmsJwt.expectedAudience,
+      expectedRoles: ["admin", "verifier"],
+      maxTtlSeconds: cfg.kmsJwt.maxTtlSeconds,
+    });
+  })();
+  const token = await signer.signAsync(
+    { roles: ["admin", "verifier"] },
+    { issuer: ISSUER, audience: AUDIENCE, subject: SUBJECT, role: "admin", expiresInSeconds: 60 },
+  );
+  const claims = await verifyTokenFromConfig(token, cfg);
+  assert.equal(claims.role, "admin");
+  // The explicit roles array is preserved as-is — NOT replaced by [claims.role].
+  assert.deepEqual(claims.roles, ["admin", "verifier"]);
 });
 
 test("dispatcher kms: verifyTokenFromConfig rejects HS256 with clear error", async () => {

@@ -325,7 +325,20 @@ export async function verifyTokenFromConfig(token, authConfig) {
 async function verifyEs256(token, authConfig) {
   const signer = await getKmsSigner(authConfig);
   try {
-    return signer.verify(token);
+    const claims = signer.verify(token);
+    // Bridge ES256's singular `role` claim (per design doc §6) to the
+    // plural `roles` array that the rest of the auth stack expects
+    // (capabilities.resolveCapabilities, config.hasRole, middleware
+    // expandCapabilities — all read claims.roles). The HS256 path
+    // already produces roles: array via the SIWE handler; this keeps
+    // downstream code algorithm-agnostic. If the token already carries
+    // a `roles` array (e.g., a future multi-role variant), we leave it
+    // untouched — `role` is the canonical ES256 shape but we don't
+    // forbid `roles` if present.
+    if (typeof claims.role === "string" && !Array.isArray(claims.roles)) {
+      claims.roles = [claims.role];
+    }
+    return claims;
   } catch (err) {
     // KmsJwtSigner throws plain Error objects with explanatory
     // messages. Convert to AuthenticationError so the HTTP layer

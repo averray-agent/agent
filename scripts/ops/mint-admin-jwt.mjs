@@ -275,7 +275,25 @@ async function mintViaKms({ wallet, roles, expiresInSeconds, expiresInDays, quie
   }
   const role = roles[0];
 
+  // Construct an explicit KMSClient so the AWS SDK reads the
+  // AWS_JWT_*-prefixed credentials this script's env contract uses.
+  // Without this, the SDK would fall back to its default credential
+  // chain (unprefixed AWS_ACCESS_KEY_ID / shared config / EC2 IMDS),
+  // which doesn't see the AWS_JWT_ACCESS_KEY_ID we read from
+  // 1Password. If those prefixed creds aren't set (e.g., running under
+  // IAM Roles Anywhere or an EC2 instance profile), we still pass
+  // through to the default chain by leaving `credentials` unset.
+  const accessKeyId = process.env.AWS_JWT_ACCESS_KEY_ID;
+  const secretAccessKey = process.env.AWS_JWT_SECRET_ACCESS_KEY;
+  const kmsClientOpts = { region };
+  if (accessKeyId && secretAccessKey) {
+    kmsClientOpts.credentials = { accessKeyId, secretAccessKey };
+  }
+  const { KMSClient } = await import("@aws-sdk/client-kms");
+  const kmsClient = new KMSClient(kmsClientOpts);
+
   const signer = new KmsJwtSigner({
+    kmsClient,
     region,
     keyId,
     kid,
