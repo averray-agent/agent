@@ -52,7 +52,10 @@ const KID = "jwt-1";
 const ISSUER = "averray-backend-testnet";
 const AUDIENCE = "averray-backend";
 const SUBJECT = "0x000000000000000000000000000000000000abcd";
-const ROLES = ["admin", "verifier"];
+// Mirror VALID_ROLES in mcp-server/src/auth/config.js — "service" was
+// added in Stage 2C-1 (#438) so the dispatcher's expectedRoles allowlist
+// accepts service-token claim shapes minted via signTokenFromConfig.
+const ROLES = ["admin", "verifier", "service"];
 const HMAC_SECRET = "h".repeat(48);
 const LONG_HMAC_SECRET = "L".repeat(48);
 
@@ -311,6 +314,75 @@ test("dispatcher kms: legacy single-`role` token (minted pre-2B) still verifies 
   // claims.role-only tokens are crafted with a test keypair.
   const claims = await verifyTokenFromConfig(newToken, cfg);
   assert.deepEqual(claims.roles, ["admin"]);
+});
+
+test("dispatcher kms: service-token claim shape round-trips (Stage 2C-1)", async () => {
+  // Stage 2C-1 service-token migration — signServiceToken in server.js
+  // now routes through signTokenFromConfig with roles: ["service"]. Under
+  // JWT_BACKEND=kms the dispatcher mints a token carrying:
+  //   - roles: ["service"]               (canonical multi-role shape)
+  //   - tokenKind: "service"             (extra claim, payload spread)
+  //   - serviceToken: true               (extra claim)
+  //   - capabilityGrantId: <id>          (extra claim, used by middleware
+  //                                       to look up the grant)
+  //   - serviceScope: <optional>         (extra claim, advisory)
+  // This test pins all five so a future signer refactor can't silently
+  // strip the extras.
+  const cfg = buildAuthConfig({ jwtBackend: "kms", withKms: true });
+  const { token, claims } = await signTokenFromConfig(
+    {
+      sub: SUBJECT,
+      roles: ["service"],
+      tokenKind: "service",
+      serviceToken: true,
+      capabilityGrantId: "grant_abc123",
+      serviceScope: "hosted-smoke",
+    },
+    { expiresInSeconds: 600 },
+    cfg,
+  );
+  // Issued claims (decoded by dispatcher before return).
+  assert.deepEqual(claims.roles, ["service"]);
+  assert.equal(claims.tokenKind, "service");
+  assert.equal(claims.serviceToken, true);
+  assert.equal(claims.capabilityGrantId, "grant_abc123");
+  assert.equal(claims.serviceScope, "hosted-smoke");
+  // Verify round-trip preserves every extra claim.
+  const verified = await verifyTokenFromConfig(token, cfg);
+  assert.deepEqual(verified.roles, ["service"]);
+  assert.equal(verified.tokenKind, "service");
+  assert.equal(verified.serviceToken, true);
+  assert.equal(verified.capabilityGrantId, "grant_abc123");
+  assert.equal(verified.serviceScope, "hosted-smoke");
+});
+
+test("dispatcher hmac: service-token claim shape (HS256 path, pre-2C-2 default)", async () => {
+  // Under JWT_BACKEND=hmac the same signServiceToken payload routes
+  // through the legacy HMAC signer. Roles claim still ends up as
+  // ["service"] in the issued token — the HS256 signer doesn't enforce
+  // an expectedRoles allowlist, so any roles value passes verify. This
+  // pins the HS256 mint shape so Stage 2C-2 (the JWT_BACKEND=kms flip)
+  // can rely on cross-alg claim-shape uniformity.
+  const cfg = buildAuthConfig({ jwtBackend: "hmac" });
+  const { token, claims } = await signTokenFromConfig(
+    {
+      sub: SUBJECT,
+      roles: ["service"],
+      tokenKind: "service",
+      serviceToken: true,
+      capabilityGrantId: "grant_xyz789",
+    },
+    { expiresInSeconds: 600 },
+    cfg,
+  );
+  assert.deepEqual(claims.roles, ["service"]);
+  assert.equal(claims.tokenKind, "service");
+  assert.equal(claims.serviceToken, true);
+  assert.equal(claims.capabilityGrantId, "grant_xyz789");
+  const verified = await verifyTokenFromConfig(token, cfg);
+  assert.deepEqual(verified.roles, ["service"]);
+  assert.equal(verified.tokenKind, "service");
+  assert.equal(verified.serviceToken, true);
 });
 
 test("dispatcher kms: verifyTokenFromConfig rejects HS256 with clear error", async () => {
