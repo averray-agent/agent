@@ -182,3 +182,65 @@ function resolveGasSponsorStatus(health) {
     ? GAS_SPONSOR_STATUS.ENABLED
     : GAS_SPONSOR_STATUS.DISABLED;
 }
+
+/**
+ * Translate a `capabilityHealth` block into an ordered list of structured
+ * warning entries. Each warning has a stable `code` so operator dashboards
+ * and CLI smoke checks can match on it without parsing prose. Severity is
+ * `critical` only for capabilities that block real treasury action; the
+ * rest are `warning` so an XCM observer that is staged on a trust-core
+ * launch does not page the on-call.
+ *
+ * The shape is deliberately additive: capabilities in their happy state
+ * (blockchain enabled, treasury available, xcm live, indexer synced, gas
+ * sponsor enabled) produce no entry. Operator app code can render the
+ * array as-is or pick out a single capability by `code` prefix.
+ */
+export function buildCapabilityWarnings(capabilityHealth) {
+  if (!capabilityHealth) return [];
+  const warnings = [];
+
+  if (capabilityHealth.blockchain !== BLOCKCHAIN_STATUS.ENABLED) {
+    warnings.push({
+      code: `blockchain_${capabilityHealth.blockchain}`,
+      severity: capabilityHealth.blockchain === BLOCKCHAIN_STATUS.UNHEALTHY ? "critical" : "warning",
+      message: `Blockchain capability is ${capabilityHealth.blockchain}.`
+    });
+  }
+
+  if (capabilityHealth.treasuryMutations !== TREASURY_MUTATIONS_STATUS.AVAILABLE) {
+    warnings.push({
+      code: `treasury_mutations_${capabilityHealth.treasuryMutations}`,
+      severity: capabilityHealth.treasuryMutations === TREASURY_MUTATIONS_STATUS.UNAVAILABLE
+        ? "critical"
+        : "warning",
+      message: `Treasury mutations are ${capabilityHealth.treasuryMutations}.`
+    });
+  }
+
+  if (capabilityHealth.xcmObserver !== XCM_OBSERVER_STATUS.LIVE) {
+    warnings.push({
+      code: `xcm_observer_${capabilityHealth.xcmObserver}`,
+      severity: "warning",
+      message: `XCM observer is ${capabilityHealth.xcmObserver}.`
+    });
+  }
+
+  if (capabilityHealth.indexer !== INDEXER_STATUS.SYNCED) {
+    warnings.push({
+      code: `indexer_${capabilityHealth.indexer}`,
+      severity: "warning",
+      message: `Indexer capability is ${capabilityHealth.indexer}.`
+    });
+  }
+
+  if (capabilityHealth.gasSponsor && capabilityHealth.gasSponsor !== GAS_SPONSOR_STATUS.ENABLED) {
+    warnings.push({
+      code: `gas_sponsor_${capabilityHealth.gasSponsor}`,
+      severity: "warning",
+      message: `Gas sponsor capability is ${capabilityHealth.gasSponsor}.`
+    });
+  }
+
+  return warnings;
+}

@@ -7,6 +7,7 @@ import {
   INDEXER_STATUS,
   TREASURY_MUTATIONS_STATUS,
   XCM_OBSERVER_STATUS,
+  buildCapabilityWarnings,
   resolveCapabilityHealth,
   resolveServiceHealth
 } from "./health-capability.js";
@@ -168,4 +169,67 @@ test("resolveCapabilityHealth — blockchain: disabled when health probe omitted
   assert.equal(result.blockchain, BLOCKCHAIN_STATUS.DISABLED);
   assert.equal(result.treasuryMutations, TREASURY_MUTATIONS_STATUS.UNAVAILABLE);
   assert.equal(result.gasSponsor, GAS_SPONSOR_STATUS.DISABLED);
+});
+
+// ─── buildCapabilityWarnings ─────────────────────────────────────────
+
+test("buildCapabilityWarnings — empty array when every capability is in its happy state", () => {
+  const warnings = buildCapabilityWarnings({
+    blockchain: BLOCKCHAIN_STATUS.ENABLED,
+    treasuryMutations: TREASURY_MUTATIONS_STATUS.AVAILABLE,
+    xcmObserver: XCM_OBSERVER_STATUS.LIVE,
+    indexer: INDEXER_STATUS.SYNCED,
+    gasSponsor: GAS_SPONSOR_STATUS.ENABLED
+  });
+  assert.deepEqual(warnings, []);
+});
+
+test("buildCapabilityWarnings — chain-disabled posture: treasury critical, blockchain/xcm/indexer warning", () => {
+  const warnings = buildCapabilityWarnings({
+    blockchain: BLOCKCHAIN_STATUS.DISABLED,
+    treasuryMutations: TREASURY_MUTATIONS_STATUS.UNAVAILABLE,
+    xcmObserver: XCM_OBSERVER_STATUS.UNAVAILABLE,
+    indexer: INDEXER_STATUS.UNAVAILABLE,
+    gasSponsor: GAS_SPONSOR_STATUS.DISABLED
+  });
+  const treasury = warnings.find((w) => w.code === "treasury_mutations_unavailable");
+  assert.ok(treasury);
+  assert.equal(treasury.severity, "critical");
+  const blockchain = warnings.find((w) => w.code === "blockchain_disabled");
+  assert.ok(blockchain);
+  assert.equal(blockchain.severity, "warning");
+  assert.ok(warnings.some((w) => w.code === "xcm_observer_unavailable"));
+  assert.ok(warnings.some((w) => w.code === "indexer_unavailable"));
+  assert.ok(warnings.some((w) => w.code === "gas_sponsor_disabled"));
+});
+
+test("buildCapabilityWarnings — unhealthy chain is critical at the blockchain layer too", () => {
+  const warnings = buildCapabilityWarnings({
+    blockchain: BLOCKCHAIN_STATUS.UNHEALTHY,
+    treasuryMutations: TREASURY_MUTATIONS_STATUS.UNAVAILABLE,
+    xcmObserver: XCM_OBSERVER_STATUS.UNAVAILABLE,
+    indexer: INDEXER_STATUS.UNAVAILABLE,
+    gasSponsor: GAS_SPONSOR_STATUS.ENABLED
+  });
+  const blockchain = warnings.find((w) => w.code === "blockchain_unhealthy");
+  assert.ok(blockchain);
+  assert.equal(blockchain.severity, "critical");
+});
+
+test("buildCapabilityWarnings — degraded treasury (memory-mode dev) is warning, not critical", () => {
+  const warnings = buildCapabilityWarnings({
+    blockchain: BLOCKCHAIN_STATUS.DISABLED,
+    treasuryMutations: TREASURY_MUTATIONS_STATUS.DEGRADED,
+    xcmObserver: XCM_OBSERVER_STATUS.UNAVAILABLE,
+    indexer: INDEXER_STATUS.UNAVAILABLE,
+    gasSponsor: GAS_SPONSOR_STATUS.DISABLED
+  });
+  const treasury = warnings.find((w) => w.code === "treasury_mutations_degraded");
+  assert.ok(treasury);
+  assert.equal(treasury.severity, "warning");
+});
+
+test("buildCapabilityWarnings — null input resolves to empty array (no crash)", () => {
+  assert.deepEqual(buildCapabilityWarnings(undefined), []);
+  assert.deepEqual(buildCapabilityWarnings(null), []);
 });

@@ -6,6 +6,7 @@ import {
   getMutationBackendStatus
 } from "../../core/mutation-backend.js";
 import {
+  buildCapabilityWarnings,
   resolveCapabilityHealth,
   resolveServiceHealth
 } from "../../core/health-capability.js";
@@ -1709,6 +1710,11 @@ const server = createServer(async (request, response) => {
         auth: { mode: authConfig.mode, domain: authConfig.domain, chainId: authConfig.chainId },
         serviceHealth,
         capabilityHealth,
+        // Structured, codeable warnings derived from capabilityHealth.
+        // Operator dashboards / smoke checks can match on `code` rather
+        // than parsing prose. Empty array when every capability is in
+        // its happy state.
+        warnings: buildCapabilityWarnings(capabilityHealth),
         components: {
           stateStore: storeHealth,
           blockchain: chainHealth,

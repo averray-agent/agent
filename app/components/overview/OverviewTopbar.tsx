@@ -9,7 +9,18 @@ import {
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
-export function OverviewTopbar({ freshness }: { freshness?: FreshnessState }) {
+export type CapabilityWarning = {
+  label: string;
+  title: string;
+};
+
+export function OverviewTopbar({
+  capabilityWarning,
+  freshness,
+}: {
+  capabilityWarning?: CapabilityWarning;
+  freshness?: FreshnessState;
+}) {
   const [time, setTime] = useState("");
 
   useEffect(() => {
@@ -44,6 +55,17 @@ export function OverviewTopbar({ freshness }: { freshness?: FreshnessState }) {
         </span>
       </div>
       <div className="flex items-center gap-2">
+        {capabilityWarning ? (
+          <span
+            className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full bg-[var(--avy-warn-soft)] px-2 py-0.5 font-[family-name:var(--font-display)] text-[10px] font-extrabold uppercase text-[var(--avy-warn)]"
+            style={{ letterSpacing: "0.08em" }}
+            title={capabilityWarning.title}
+            data-testid="overview-capability-warning"
+          >
+            <span className="h-1.5 w-1.5 rounded-full bg-[var(--avy-warn)]" />
+            {capabilityWarning.label}
+          </span>
+        ) : null}
         {freshness ? <DataFreshnessPill state={freshness} /> : null}
         <button
           type="button"

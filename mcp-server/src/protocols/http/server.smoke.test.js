@@ -179,6 +179,16 @@ test("http smoke: /health separates service liveness from treasury capability", 
     assert.equal(payload.capabilityHealth.xcmObserver, "unavailable");
     assert.equal(payload.capabilityHealth.indexer, "unavailable");
     assert.equal(payload.components.blockchain.enabled, false);
+    // Structured warnings: operator dashboards / smoke checks match on
+    // `code` rather than parsing prose. Treasury unavailable on a
+    // production / chain-required posture must be `critical`.
+    assert.ok(Array.isArray(payload.warnings), "warnings must be an array");
+    const treasury = payload.warnings.find((w) => w.code === "treasury_mutations_unavailable");
+    assert.ok(treasury, "treasury_mutations_unavailable warning must be present");
+    assert.equal(treasury.severity, "critical");
+    const blockchain = payload.warnings.find((w) => w.code === "blockchain_disabled");
+    assert.ok(blockchain);
+    assert.equal(blockchain.severity, "warning");
   });
 });
 

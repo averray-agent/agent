@@ -1,7 +1,10 @@
 "use client";
 
 import { useMemo } from "react";
-import { OverviewTopbar } from "@/components/overview/OverviewTopbar";
+import {
+  OverviewTopbar,
+  type CapabilityWarning,
+} from "@/components/overview/OverviewTopbar";
 import { MissionHero } from "@/components/overview/MissionHero";
 import { RoomVitals } from "@/components/overview/RoomVitals";
 import {
@@ -143,10 +146,14 @@ export default function OverviewPage() {
     providerOps,
     publicProviderOps
   );
+  const capabilityWarning = useMemo(
+    () => buildCapabilityWarning(health.data),
+    [health.data]
+  );
 
   return (
     <div className="flex w-full max-w-[1100px] flex-col gap-7">
-      <OverviewTopbar freshness={freshness} />
+      <OverviewTopbar capabilityWarning={capabilityWarning} freshness={freshness} />
       <MissionHero
         // Use the explicit `hasLiveOverview` gate rather than `||`
         // fallbacks — the previous form (`liveJobs.length || 14`) silently
@@ -202,6 +209,38 @@ function extractAlerts(data: unknown): AlertItem[] {
       alerts.push(alert);
       return alerts;
     }, []);
+}
+
+function buildCapabilityWarning(data: unknown): CapabilityWarning | undefined {
+  // Reads the operator-facing `/health` payload (post-#416 / Package B
+  // truth split) and surfaces a single topbar chip when the treasury
+  // capability is unavailable or degraded. Other capability warnings
+  // are intentionally not surfaced in the overview topbar — the topbar
+  // is the cross-cutting truth signal for "can this room actually move
+  // money?". The full warnings[] array remains available to other UI.
+  const root = asRecord(data);
+  if (!root) return undefined;
+  const capabilities = asRecord(root.capabilityHealth);
+  const treasuryState = text(capabilities?.treasuryMutations, "");
+  if (treasuryState !== "unavailable" && treasuryState !== "degraded") {
+    return undefined;
+  }
+
+  const warnings = Array.isArray(root.warnings)
+    ? root.warnings.filter(isRecord)
+    : [];
+  const treasuryWarning = warnings.find((warning) =>
+    text(warning.code, "").startsWith("treasury_mutations_")
+  );
+  const fallback =
+    treasuryState === "unavailable"
+      ? "Treasury mutations are unavailable."
+      : "Treasury mutations are degraded.";
+
+  return {
+    label: treasuryState === "unavailable" ? "Treasury unavailable" : "Treasury degraded",
+    title: text(treasuryWarning?.message, fallback),
+  };
 }
 
 function countPoliciesAppliedToday(data: unknown): number {
