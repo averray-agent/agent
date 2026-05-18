@@ -1544,6 +1544,119 @@ read backend, indexer, or CI vaults.
 - [ ] Calendar entry's `expires_at` updated to the new mint's 30-day
       expiry
 
+### PR 2.6b operator runbook — boot-time env render service
+
+**When**: after the PR shipping
+`deploy/agent-stack-env-render.service` + `scripts/ops/render-vps-env-all.sh`
+lands. One-time per VPS, then it stays installed across reboots.
+
+**Why this exists**: Phase 2 PR 2.5's cutover moved
+`/run/agent-stack/{backend,indexer}.env` to tmpfs. Tmpfs is wiped on
+every reboot. The deploy pipeline re-renders these files on every
+deploy, but the deploy pipeline does NOT run at boot. Without a
+boot-time render service, a bare reboot leaves docker-compose
+unable to find its `env_file:` paths — the backend stays down until
+an operator manually re-renders or triggers a deploy.
+
+This service closes that gap: at every boot, BEFORE `docker.service`
+starts, a systemd oneshot re-renders the env files via the same
+`render-vps-env.sh` script the deploy uses. Containers come up clean
+on the first try.
+
+**Pre-flight (verify the VPS already has the prerequisites from PR 2.3)**:
+
+```bash
+# All four must exist for the service to do anything useful.
+ls -la /etc/agent-stack/op-backend.env /etc/agent-stack/op-indexer.env
+ls -la /etc/tmpfiles.d/agent-stack.conf
+ls -la /srv/agent-stack/app/scripts/ops/render-vps-env.sh
+test -d /run/agent-stack && echo "runtime dir OK"
+```
+
+If any of these are missing, follow the PR 2.3 operator runbook
+("VPS bootstrap + atomic render script") first.
+
+**Install**:
+
+```bash
+# 1. Link the unit file from the in-repo source. Using `link` rather
+#    than `cp` means future updates to the unit ride along with
+#    deploys — no need to re-copy.
+sudo systemctl link /srv/agent-stack/app/deploy/agent-stack-env-render.service
+
+# 2. Reload systemd so it sees the new unit.
+sudo systemctl daemon-reload
+
+# 3. Enable it to start at boot.
+sudo systemctl enable agent-stack-env-render.service
+
+# 4. Test it WITHOUT rebooting — start it manually, confirm exit 0,
+#    confirm the env files have been re-rendered.
+sudo systemctl start agent-stack-env-render.service
+sudo systemctl status agent-stack-env-render.service
+# Expect: "active (exited); ... Process: ... ExecStart=...
+#          render-vps-env-all.sh ... status=0/SUCCESS"
+
+# 5. Verify both env files now exist with the expected size + perms.
+sudo ls -la /run/agent-stack/
+# Expect: backend.env and indexer.env, mode 0400 ubuntu:ubuntu,
+#         non-zero size.
+```
+
+**Verification under realistic conditions** (optional but recommended):
+
+```bash
+# Simulate a reboot's effect on tmpfs: wipe both env files, restart
+# the unit, confirm containers can still start.
+sudo rm /run/agent-stack/backend.env /run/agent-stack/indexer.env
+sudo systemctl restart agent-stack-env-render.service
+sudo ls -la /run/agent-stack/
+# Files should be back, fresh content.
+```
+
+**Coupling to docker.service** (tighter, optional):
+
+The shipped unit uses `Before=docker.service` without `Requires=`.
+That means docker starts AFTER our render, but a render FAILURE
+doesn't prevent docker from starting (it'll fail later at
+`env_file:` validation, surfacing the error there). To make the
+render a hard prerequisite — i.e., docker refuses to start until
+render succeeds — add a drop-in:
+
+```bash
+sudo mkdir -p /etc/systemd/system/docker.service.d
+sudo tee /etc/systemd/system/docker.service.d/agent-stack-env-render.conf >/dev/null <<'CONF'
+[Unit]
+Requires=agent-stack-env-render.service
+CONF
+sudo systemctl daemon-reload
+```
+
+This is recommended for prod once you've watched a few real reboots
+go clean.
+
+**Rollback** (if the unit causes problems):
+
+```bash
+sudo systemctl disable agent-stack-env-render.service
+sudo systemctl stop agent-stack-env-render.service
+# Optionally remove the symlink:
+sudo systemctl unlink agent-stack-env-render.service  # newer systemd
+# OR
+sudo rm /etc/systemd/system/agent-stack-env-render.service
+sudo systemctl daemon-reload
+```
+
+The system returns to "deploy is the only env-render path" — the
+state before this PR. Reboots once again leave prod down until a
+deploy runs, but nothing is corrupted.
+
+**Future**: when the deploy pipeline is taught to re-run
+`systemctl daemon-reload` after every push (so unit-file changes
+in the repo propagate automatically), this whole runbook becomes
+"one PR + one redeploy" instead of "PR + manual operator install".
+Tracked as a follow-up.
+
 ---
 
 ## Legacy Phase 2 implementation reference

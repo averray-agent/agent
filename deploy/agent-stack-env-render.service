@@ -1,0 +1,79 @@
+# systemd oneshot that re-renders /run/agent-stack/{backend,indexer}.env
+# from the in-repo templates BEFORE docker.service starts.
+#
+# Install location on VPS: /etc/systemd/system/agent-stack-env-render.service
+# Activate with:
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable agent-stack-env-render.service
+#
+# Why this exists
+# ────────────────
+# `/run/agent-stack/` is tmpfs (created at boot by
+# /etc/tmpfiles.d/agent-stack.conf, mode 0750 root:ubuntu). The rendered
+# env files inside it are wiped on every reboot. Before this service,
+# the deploy pipeline was the ONLY thing that populated them — so a
+# bare reboot left the backend in a degraded state until a manual
+# deploy ran.
+#
+# This unit closes that gap: at every boot, the env files are
+# re-rendered from `op://` references via the same `render-vps-env.sh`
+# script the deploy uses. Containers then come up with fresh env on
+# the first docker.service start of the boot.
+#
+# Coupling to docker.service
+# ──────────────────────────
+# `Before=docker.service` orders this unit ahead of docker, so docker
+# only sees the populated /run/agent-stack/*.env. We do NOT use
+# `Requires=` or `BindsTo=` on docker — a render failure leaves
+# docker.service to start anyway and fail at compose `env_file:`
+# validation, surfacing the issue via the docker side rather than a
+# black-box failed boot. To tighten this to "render must succeed
+# before docker starts", drop a /etc/systemd/system/docker.service.d/
+# override that adds `Requires=agent-stack-env-render.service`.
+#
+# Failure mode
+# ────────────
+# render-vps-env.sh is strictly fail-closed: it writes to a temp file,
+# validates that NO `op://` references remain unresolved, then mv's
+# into place atomically. If it fails (op inject error, network down,
+# token rotated and not refreshed, etc.) the live env file is NEVER
+# replaced with a partial. The unit enters failed state; `journalctl
+# -u agent-stack-env-render.service` shows the operator-facing error.
+
+[Unit]
+Description=Render agent-stack runtime env files from 1Password before docker
+Documentation=https://github.com/averray-agent/agent/blob/main/docs/SECRETS_MIGRATION.md
+Wants=network-online.target
+After=network-online.target systemd-tmpfiles-setup.service
+Before=docker.service
+ConditionPathExists=/etc/agent-stack/op-backend.env
+ConditionPathExists=/etc/agent-stack/op-indexer.env
+ConditionPathExists=/srv/agent-stack/app/scripts/ops/render-vps-env-all.sh
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Run as root — /etc/agent-stack/op-*.env are mode 0400 root:root and
+# /run/agent-stack/ is mode 0750 root:ubuntu (created by tmpfiles.d).
+User=root
+Group=root
+# render-vps-env.sh outputs counts + byte lengths only; no rendered
+# content reaches stderr/stdout. systemd captures whatever it does
+# emit to journal under this unit name.
+ExecStart=/srv/agent-stack/app/scripts/ops/render-vps-env-all.sh
+# If render fails after a partial success on one of the two files,
+# the next deploy will re-render both atomically. No cleanup needed.
+TimeoutStartSec=120
+# Standard hardening for a one-shot that only reads/writes well-known
+# paths. NoNewPrivileges blocks the process from gaining additional
+# capabilities via setuid binaries. PrivateTmp gives the process its
+# own /tmp namespace (op inject writes nothing there, but
+# defense-in-depth).
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/run/agent-stack
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
