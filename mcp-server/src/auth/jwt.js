@@ -196,26 +196,34 @@ export async function signTokenFromConfig(payload, opts, authConfig) {
   const signer = await getKmsSigner(authConfig);
   const subject =
     opts.subject ?? (typeof payload?.sub === "string" ? payload.sub : undefined);
+  // Stage 2B — pass the full role array through to KmsJwtSigner so
+  // multi-role wallets (admin + verifier) keep both capabilities under
+  // ES256 issuance. KmsJwtSigner.signAsync normalizes string → [string]
+  // internally, so legacy callers passing a single string still work.
   const role =
     opts.role
-    ?? (Array.isArray(payload?.roles) && payload.roles.length > 0 ? payload.roles[0] : undefined)
+    ?? (Array.isArray(payload?.roles) && payload.roles.length > 0 ? payload.roles : undefined)
     ?? (typeof payload?.role === "string" ? payload.role : undefined);
   const issuer = opts.issuer ?? authConfig.kmsJwt?.expectedIssuer;
   const audience = opts.audience ?? authConfig.kmsJwt?.expectedAudience;
 
   if (!issuer || !audience || !subject || !role) {
     throw new ConfigError(
-      "signTokenFromConfig (ES256): issuer/audience/subject/role must each be derivable from opts or authConfig.kmsJwt + payload.",
+      "signTokenFromConfig (ES256): issuer/audience/subject/role(s) must each be derivable from opts or authConfig.kmsJwt + payload.",
     );
   }
 
   // Strip registered claims the signer manages itself so the merged
-  // payload doesn't accidentally override iat/exp/jti/iss/aud/sub/role.
+  // payload doesn't accidentally override iat/exp/jti/iss/aud/sub/roles.
+  // Both `role` (legacy) and `roles` (Stage 2B canonical) are stripped —
+  // the signer emits `roles` from the normalized opts.role, never from
+  // payload spread.
   const {
     iss: _iss,
     aud: _aud,
     sub: _sub,
     role: _role,
+    roles: _roles,
     iat: _iat,
     nbf: _nbf,
     exp: _exp,

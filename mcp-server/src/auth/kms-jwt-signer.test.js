@@ -210,12 +210,81 @@ test("KmsJwtSigner: sign + verify happy-path round-trip", async () => {
   assert.equal(claims.iss, ISSUER);
   assert.equal(claims.aud, AUDIENCE);
   assert.equal(claims.sub, SUBJECT);
-  assert.equal(claims.role, "admin");
+  // Stage 2B canonical shape: emitted as `roles` array, not singular `role`.
+  assert.deepEqual(claims.roles, ["admin"]);
+  assert.equal(claims.role, undefined);
   assert.equal(typeof claims.iat, "number");
   assert.equal(typeof claims.nbf, "number");
   assert.equal(typeof claims.exp, "number");
   assert.equal(claims.exp - claims.iat, TTL_SECONDS);
   assert.match(claims.jti, /^[0-9a-f-]{36}$/u);
+});
+
+test("KmsJwtSigner: signAsync accepts multi-role array and emits canonical roles claim", async () => {
+  const signer = buildSigner({ expectedRoles: ["admin", "verifier"] });
+  const token = await signer.signAsync(
+    {},
+    {
+      ...defaultSignOpts(),
+      role: ["admin", "verifier"],
+    },
+  );
+  const claims = signer.verify(token);
+  assert.deepEqual(claims.roles, ["admin", "verifier"]);
+});
+
+test("KmsJwtSigner: signAsync rejects empty role array", async () => {
+  const signer = buildSigner();
+  await assert.rejects(
+    () => signer.signAsync({}, { ...defaultSignOpts(), role: [] }),
+    /role .* is required/,
+  );
+});
+
+test("KmsJwtSigner: signAsync rejects non-string entries inside role array", async () => {
+  const signer = buildSigner({ expectedRoles: ["admin", "verifier"] });
+  await assert.rejects(
+    () => signer.signAsync({}, { ...defaultSignOpts(), role: ["admin", 42] }),
+    /every entry of role must be a non-empty string/,
+  );
+});
+
+test("KmsJwtSigner: verify rejects a token whose roles include an unknown value", async () => {
+  // Build the signer with a permissive sign-side allowlist so we can
+  // craft a multi-role token, then verify it through a stricter signer
+  // (which only allows admin) — that's the realistic prod shape where
+  // expectedRoles is the verifier-side allowlist.
+  const permissive = buildSigner({ expectedRoles: ["admin", "verifier", "weirdo"] });
+  const token = await permissive.signAsync(
+    {},
+    { ...defaultSignOpts(), role: ["admin", "weirdo"] },
+  );
+  const strict = buildSigner({ expectedRoles: ["admin", "verifier"] });
+  assert.throws(
+    () => strict.verify(token),
+    /role "weirdo" not in allowlist/,
+  );
+});
+
+test("KmsJwtSigner: legacy claims.role-only token (pre-2B emission) still verifies", async () => {
+  // Backward compat — a token issued by the pre-Stage-2B signer carries
+  // `role: "admin"` (singular) and no `roles` array. The Stage 2B
+  // verifier must continue to accept these until they expire so we
+  // don't brick any active op://prod-smoke/admin-jwt mid-cutover.
+  // Hand-craft via forgeTokenWithKey (the same helper other negative
+  // tests use) so we can produce a claims shape KmsJwtSigner.signAsync
+  // no longer emits.
+  const header = makeHeader();
+  const legacyClaims = makeClaims(); // makeClaims already includes role:"admin"
+  delete legacyClaims.roles; // belt-and-suspenders — make sure no `roles` snuck in
+  const token = await forgeTokenWithKey(header, legacyClaims);
+  const signer = buildSigner();
+  const verified = signer.verify(token);
+  assert.equal(verified.role, "admin");
+  // Signer does NOT add `roles` array here — that normalization happens
+  // in the dispatcher (jwt.js verifyEs256) which bridges role → roles
+  // for downstream consumers.
+  assert.equal(verified.roles, undefined);
 });
 
 test("KmsJwtSigner: cross-library verify via `jose` (RFC conformance)", async () => {

@@ -107,7 +107,7 @@ function printUsage() {
       "  --wallet <0x…>          Subject wallet to sign for. Defaults to deployments/<profile>.json#verifier when --profile is given.",
       "  --profile <name>        Read default wallet from deployments/<name>.json (e.g. testnet, mainnet).",
       "  --roles <a,b,c>         Comma-separated role list. Default: admin.",
-      "                          With --use-kms only the first role is used (ES256 JWTs carry one `role` claim).",
+      "                          Both signing paths emit a roles array claim (multi-role supported).",
       "  --expires-in-days <n>   Token lifetime in days. Default: 30.",
       "  --use-kms               Sign ES256 via the JWT KMS key (post-PR 4b.6).",
       "                          Without it: HS256 via AUTH_JWT_SECRETS (legacy path).",
@@ -239,11 +239,10 @@ async function main() {
 /**
  * Sign an ES256 admin JWT via the JWT KMS key (PR 4b.6 path).
  *
- * The KmsJwtSigner produces a single-role token; if multiple roles
- * were requested we use the first one and warn. (Multi-role tokens
- * remain a property of the legacy HS256 path until the backend's
- * ES256 verify accepts `roles: []`; this is fine for testnet smoke
- * which only needs `admin`.)
+ * Phase 4b.6 Stage 2B — emits a multi-role `roles` array claim. Passes
+ * the full --roles list through to KmsJwtSigner.signAsync, which
+ * normalizes string|array internally and writes the canonical `roles`
+ * claim into the JWT.
  */
 async function mintViaKms({ wallet, roles, expiresInSeconds, expiresInDays, quiet }) {
   const region = (process.env.AWS_JWT_REGION ?? "").trim();
@@ -270,10 +269,10 @@ async function mintViaKms({ wallet, roles, expiresInSeconds, expiresInDays, quie
   const expectedIssuer = (process.env.JWT_EXPECTED_ISSUER ?? "averray-backend-testnet").trim();
   const expectedAudience = (process.env.JWT_EXPECTED_AUDIENCE ?? "averray-backend").trim();
 
-  if (roles.length > 1) {
-    console.error(`# warning: --use-kms signs a single-role ES256 JWT (got --roles ${roles.join(",")}). Using "${roles[0]}".`);
-  }
-  const role = roles[0];
+  // Phase 4b.6 Stage 2B — KmsJwtSigner now emits a `roles` array claim.
+  // Pass the full roles list so multi-role admin/verifier tokens keep
+  // both capabilities.
+  const rolesForSigner = roles.length === 1 ? roles[0] : roles;
 
   // Construct an explicit KMSClient so the AWS SDK reads the
   // AWS_JWT_*-prefixed credentials this script's env contract uses.
@@ -300,7 +299,7 @@ async function mintViaKms({ wallet, roles, expiresInSeconds, expiresInDays, quie
     publicKeyPem,
     expectedIssuer,
     expectedAudience,
-    expectedRoles: [role],
+    expectedRoles: roles,
     // Allow the full admin TTL (up to 30 days for testnet smoke). The
     // backend's verifier caps via JWT_MAX_TTL_SECONDS — the env template
     // sets that to 2592000 (30d) to match.
@@ -313,7 +312,7 @@ async function mintViaKms({ wallet, roles, expiresInSeconds, expiresInDays, quie
       issuer: expectedIssuer,
       audience: expectedAudience,
       subject: wallet.toLowerCase(),
-      role,
+      role: rolesForSigner,
       expiresInSeconds,
     },
   );
@@ -332,7 +331,7 @@ async function mintViaKms({ wallet, roles, expiresInSeconds, expiresInDays, quie
   const issuedAt = new Date(claims.iat * 1000).toISOString();
   console.error("# admin-jwt mint (KMS / ES256)");
   console.error(`subject:        ${claims.sub}`);
-  console.error(`role:           ${claims.role}`);
+  console.error(`roles:          ${(claims.roles ?? (claims.role ? [claims.role] : [])).join(", ") || "(none)"}`);
   console.error(`iss / aud:      ${claims.iss} / ${claims.aud}`);
   console.error(`kid:            ${kid}`);
   console.error(`jti:            ${claims.jti}`);
