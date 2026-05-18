@@ -378,7 +378,8 @@ test("dispatcher both: primaryAlg=hmac signs HS256 and verifies both algs", asyn
   // generates the keypair once at module load, so this holds.
   const es256Claims = await verifyTokenFromConfig(es256Token, cfg);
   assert.equal(es256Claims.sub, SUBJECT);
-  assert.equal(es256Claims.role, "admin");
+  // Stage 2B canonical claim shape: emit `roles` array, never singular `role`.
+  assert.deepEqual(es256Claims.roles, ["admin"]);
 });
 
 test("dispatcher both: primaryAlg=kms signs ES256 and verifies both algs", async () => {
