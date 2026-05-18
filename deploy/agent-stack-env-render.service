@@ -69,11 +69,25 @@ TimeoutStartSec=120
 # capabilities via setuid binaries. PrivateTmp gives the process its
 # own /tmp namespace (op inject writes nothing there, but
 # defense-in-depth).
+#
+# We intentionally do NOT set ProtectHome=true. The 1Password CLI
+# writes its config to $HOME/.config/op/ (i.e., /root/.config/op/
+# under User=root) the first time it's invoked. Under ProtectHome=true,
+# /root is mounted read-only and `op inject` fails with:
+#
+#   cannot create directory "/root/.config/op": read-only file system
+#
+# We considered redirecting op's state via XDG_CONFIG_HOME or
+# HOME=/run/agent-stack, but the cleanest tradeoff for a root-only
+# oneshot with NoNewPrivileges + PrivateTmp + ProtectSystem=strict +
+# ReadWritePaths=/run/agent-stack is just to let op use /root as it
+# expects. There's no user data on this VPS in /root or /home that
+# this service has any business touching, so ProtectHome's value here
+# is marginal.
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ReadWritePaths=/run/agent-stack
-ProtectHome=true
 
 [Install]
 WantedBy=multi-user.target
