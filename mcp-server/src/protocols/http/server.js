@@ -19,7 +19,7 @@ import {
 } from "../../core/errors.js";
 import { hashCanonicalContent } from "../../core/canonical-content.js";
 import { buildSiweMessage, verifySiweMessage } from "../../auth/siwe.js";
-import { signToken } from "../../auth/jwt.js";
+import { signToken, signTokenFromConfig } from "../../auth/jwt.js";
 import {
   REFRESH_COOKIE_NAME,
   RefreshError,
@@ -2494,9 +2494,16 @@ const server = createServer(async (request, response) => {
       }
 
       const roles = authConfig.resolveRoles?.(verified.recoveredAddress) ?? [];
-      const { token, claims } = signToken(
+      // Phase 4b.6 Stage 2A — route SIWE mint through the dispatcher so
+      // JWT_PRIMARY_ALG controls the emitted algorithm (default still
+      // hmac under JWT_BACKEND=both). Functionally byte-for-byte
+      // identical to the prior `signToken` call when primary_alg=hmac;
+      // flipping primary_alg=kms in a follow-up makes SIWE start
+      // minting ES256 tokens without further code change.
+      const { token, claims } = await signTokenFromConfig(
         { sub: verified.recoveredAddress, roles },
-        { secret: authConfig.signingSecret, expiresInSeconds: authConfig.tokenTtlSeconds }
+        { expiresInSeconds: authConfig.tokenTtlSeconds },
+        authConfig,
       );
 
       // Phase 4b.5b — also mint an opaque refresh token and return it
@@ -2688,9 +2695,12 @@ const server = createServer(async (request, response) => {
           store: refreshAdapter,
         });
 
-        const { token, claims } = signToken(
+        // Phase 4b.6 Stage 2A — dispatcher-routed mint. See /auth/verify
+        // for the rationale; this is the cookie-refresh sibling.
+        const { token, claims } = await signTokenFromConfig(
           { sub: consumed.record.wallet, roles },
-          { secret: authConfig.signingSecret, expiresInSeconds: authConfig.tokenTtlSeconds }
+          { expiresInSeconds: authConfig.tokenTtlSeconds },
+          authConfig,
         );
 
         return respond(
@@ -2753,9 +2763,13 @@ const server = createServer(async (request, response) => {
       // Re-resolve roles at refresh time (an operator may have been added
       // or removed since the original sign-in).
       const roles = authConfig.resolveRoles?.(auth.wallet) ?? auth.claims?.roles ?? [];
-      const { token, claims } = signToken(
+      // Phase 4b.6 Stage 2A — dispatcher-routed mint for the legacy
+      // bearer-token rotation flow. Same byte-for-byte semantics under
+      // JWT_PRIMARY_ALG=hmac.
+      const { token, claims } = await signTokenFromConfig(
         { sub: auth.wallet, roles },
-        { secret: authConfig.signingSecret, expiresInSeconds: authConfig.tokenTtlSeconds }
+        { expiresInSeconds: authConfig.tokenTtlSeconds },
+        authConfig,
       );
 
       return respond(response, 200, {
