@@ -131,9 +131,9 @@ This is not complete launch planning. The audit does not surface every open item
 
 ### P1.3 - Sync money-like routes lack standard idempotency coverage
 
-**Status:** Closing in PR #422 (*Package D - sync money route idempotency*). Open until merged/deployed.
-**Verification:** `RUN_HTTP_SMOKE=1 node --test mcp-server/src/protocols/http/server.smoke.test.js` covers same-key replay, payload-drift conflict, and no double side effect for `/account/fund`, sync `/account/allocate`, sync `/account/deallocate`, and `/payments/send`; `npm --workspace mcp-server test`; `npm run test:sdk`.
-**Notes:** Sync money routes now use the standard mutation receipt contract with buckets `account_fund`, `account_allocate_sync`, `account_deallocate_sync`, `account_borrow`, `account_repay`, and `payments_send`. Completed replay durability follows the configured state store through the existing mutation receipt layer. In-flight duplicate detection returns `409 idempotency_key_in_flight` within the current API process; completed retries replay from the receipt store after the first request finishes.
+**Status:** Closed on 2026-05-17 in `4447780` (PR #422 *Package D - sync money route idempotency*).
+**Verification:** `RUN_HTTP_SMOKE=1 node --test mcp-server/src/protocols/http/server.smoke.test.js` covers same-key replay, payload-drift conflict, and no double side effect for `/account/fund`, sync `/account/allocate`, sync `/account/deallocate`, `/account/borrow`, `/account/repay`, and `/payments/send`; `npm --workspace mcp-server test`; `npm run test:sdk`. The duplicate branch at `claude/p1-money-route-idempotency` (PR #419, lower-level primitives) was closed without merge once the helper-based pattern in #422 landed first.
+**Notes:** All six money routes go through the shared `buildIdempotentMutationContext()` + `runIdempotentMutation()` helper at `mcp-server/src/protocols/http/server.js` (call sites at lines 2873 fund, 2953 allocate, 3030 deallocate, 3196 borrow, 3220 repay, 4444 payments/send). Buckets `account_fund`, `account_allocate_sync`, `account_deallocate_sync`, `account_borrow`, `account_repay`, and `payments_send` route through the configured state-store receipt layer for durability. In-flight duplicate detection returns `409 idempotency_key_in_flight` within the current API process; completed retries replay from the receipt store. **Naming variance worth noting for spec consumers:** the original audit spec called for error code `idempotency_conflict`; the implementation and updated close criteria use `idempotency_key_payload_mismatch` (more specific — distinguishes payload drift from in-flight clashes which use `idempotency_key_in_flight`). Semantics match; if an external SDK or doc reader was pinned to the original `idempotency_conflict` string, treat that as a follow-up rename/alias decision, not a re-open of P1.3.
 
 **Audit reference:** `docs/IDEMPOTENCY.md` says sync strategy variants and money-like routes currently accept `idempotencyKey` for forward compatibility but ignore it on the server. Relevant routes include `/account/fund`, sync `/account/allocate`, sync `/account/deallocate`, `/account/borrow`, `/account/repay`, and `/payments/send`.
 
@@ -482,6 +482,8 @@ The remediation work should be split into narrow branches so multiple agents can
 
 ### Package D - P1.3 sync mutation idempotency
 
+**Status:** Closed on 2026-05-17 in `4447780` (PR #422). Sync money-like routes can be enabled for rc1 — the close-criteria gate is satisfied. The parallel branch `claude/p1-money-route-idempotency` (PR #419) was closed without merge as a duplicate once #422 landed first; coordination note for future work: the helper pattern (`buildIdempotentMutationContext` + `runIdempotentMutation`) is the canonical surface, not the lower-level `parseIdempotencyKey` + `getIdempotentMutationReplay` primitives.
+
 **Suggested branch:** `codex/p1-money-route-idempotency`
 **Can start:** Design and service tests can start now. Route integration waits until Package A lands to avoid conflicts in the same handlers.
 **Blocks:** Enabling sync money-like routes in rc1.
@@ -502,7 +504,7 @@ The remediation work should be split into narrow branches so multiple agents can
 - Public site or operator UI
 
 **Status:** Closing in PR #422.
-**Close output:** Money-like routes replay same-key/same-payload responses, reject same-key/different-payload with `409 idempotency_key_payload_mismatch`, reject current-process in-flight duplicates with `409 idempotency_key_in_flight`, and `docs/IDEMPOTENCY.md` no longer says those routes ignore the key.
+**Close output:** Money-like routes replay same-key/same-payload responses, reject same-key/different-payload with `409 idempotency_key_payload_mismatch`, reject current-process in-flight duplicates with `409 idempotency_key_in_flight`, and `docs/IDEMPOTENCY.md` no longer says those routes ignore the key. **Achieved** — see the P1.3 finding section above for the full verification trail.
 
 ### Package E - P2.4 operator frontend truth modes
 
