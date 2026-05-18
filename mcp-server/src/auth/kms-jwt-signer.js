@@ -196,14 +196,23 @@ export class KmsJwtSigner {
   /**
    * Sign a JWT with the KMS-backed P-256 key. Builds the standard
    * registered claims (iat, nbf, exp, jti) on top of the caller's
-   * payload, plus iss/aud/sub/role from `opts`.
+   * payload, plus iss/aud/sub/roles from `opts`.
+   *
+   * Phase 4b.6 Stage 2B: `opts.role` accepts either a single string
+   * (legacy single-role admin JWTs minted via `mint-admin-jwt.mjs
+   * --use-kms`) or an array (SIWE multi-role wallets that hold both
+   * admin AND verifier). Emitted tokens always carry a `roles` array
+   * claim — never the singular `role` — so downstream consumers
+   * (middleware, capabilities) have one canonical shape. The dispatcher
+   * (jwt.js verifyEs256) still bridges legacy single-`role` tokens
+   * minted before this PR for backward compat.
    *
    * @param {object} payload                       Extra claims to merge in (must not override registered claims).
    * @param {object} opts
    * @param {string} opts.issuer                   `iss` claim value.
    * @param {string} opts.audience                 `aud` claim value.
    * @param {string} opts.subject                  `sub` claim value (lowercase EVM address or canonical user id).
-   * @param {string} opts.role                     `role` claim value.
+   * @param {string | string[]} opts.role          `roles` claim source — single string or non-empty array of strings.
    * @param {number} opts.expiresInSeconds         Token lifetime; will set exp = iat + this.
    * @returns {Promise<string>}                    The serialized ES256 JWT.
    */
@@ -221,8 +230,24 @@ export class KmsJwtSigner {
     if (!subject || typeof subject !== "string") {
       throw new Error("KmsJwtSigner.signAsync: subject is required");
     }
-    if (!role || typeof role !== "string") {
-      throw new Error("KmsJwtSigner.signAsync: role is required");
+    // Normalize role/roles input. Caller may pass a single string
+    // (admin-JWT minting path) or an array (SIWE multi-role wallet).
+    const rolesArr = Array.isArray(role)
+      ? role
+      : typeof role === "string" && role.length > 0
+        ? [role]
+        : null;
+    if (!rolesArr || rolesArr.length === 0) {
+      throw new Error(
+        "KmsJwtSigner.signAsync: role (string or non-empty array of strings) is required",
+      );
+    }
+    for (const r of rolesArr) {
+      if (typeof r !== "string" || r.length === 0) {
+        throw new Error(
+          `KmsJwtSigner.signAsync: every entry of role must be a non-empty string (got ${JSON.stringify(r)})`,
+        );
+      }
     }
     if (!Number.isInteger(expiresInSeconds) || expiresInSeconds <= 0) {
       throw new Error("KmsJwtSigner.signAsync: expiresInSeconds must be a positive integer");
@@ -244,7 +269,7 @@ export class KmsJwtSigner {
       iss: issuer,
       aud: audience,
       sub: subject,
-      role,
+      roles: rolesArr,
       iat: now,
       nbf: now,
       exp: now + expiresInSeconds,
@@ -395,8 +420,27 @@ export class KmsJwtSigner {
     if (claims.sub !== claims.sub.toLowerCase()) {
       throw new Error("KmsJwtSigner.verify: sub claim must be lowercase");
     }
-    if (typeof claims.role !== "string" || !expectedRoles.has(claims.role)) {
-      throw new Error(`KmsJwtSigner.verify: role "${claims.role}" not in allowlist`);
+    // Accept either claims.roles (Stage 2B canonical multi-role shape)
+    // or claims.role (legacy single-role tokens minted pre-2B; still
+    // need to verify until they expire). Every entry must be in the
+    // allowlist — a single bad role rejects the whole token. The
+    // dispatcher's verifyEs256 normalizes downstream so middleware sees
+    // claims.roles consistently regardless of which path we took here.
+    let claimedRoles;
+    if (Array.isArray(claims.roles)) {
+      claimedRoles = claims.roles;
+    } else if (typeof claims.role === "string") {
+      claimedRoles = [claims.role];
+    } else {
+      throw new Error("KmsJwtSigner.verify: roles/role claim missing");
+    }
+    if (claimedRoles.length === 0) {
+      throw new Error("KmsJwtSigner.verify: roles claim is empty");
+    }
+    for (const r of claimedRoles) {
+      if (typeof r !== "string" || !expectedRoles.has(r)) {
+        throw new Error(`KmsJwtSigner.verify: role "${r}" not in allowlist`);
+      }
     }
     if (typeof claims.iat !== "number" || !Number.isFinite(claims.iat)) {
       throw new Error("KmsJwtSigner.verify: iat claim missing or not numeric");
