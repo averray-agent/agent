@@ -1,5 +1,8 @@
 # Phase 4b Stage 2C — Service-token ES256 migration + JWT_BACKEND=kms flip
 
+> Current roadmap/status source: [`PROJECT_ROADMAP.md`](./PROJECT_ROADMAP.md).
+> This plan remains the detailed Stage 2C KMS JWT cutover reference.
+
 Audit + implementation plan. **No code in this document.** Treat as the
 review surface; once approved, the work splits into 2-3 PRs.
 

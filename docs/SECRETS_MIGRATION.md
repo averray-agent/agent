@@ -1,5 +1,9 @@
 # Secrets Migration — From "Starter Tier" to Pre-Mainnet Hardened
 
+> Current roadmap/status source: [`PROJECT_ROADMAP.md`](./PROJECT_ROADMAP.md).
+> This secrets migration doc remains the detailed operator checklist and
+> implementation history.
+
 This doc is the operator's checklist for moving from where we are today
 (plain-text env files + GitHub Actions secrets + ad-hoc password
 managers) to where we need to be for mainnet (centralized vault for

@@ -1,5 +1,8 @@
 # Production Readiness Checklist
 
+> Current roadmap/status source: [`PROJECT_ROADMAP.md`](./PROJECT_ROADMAP.md).
+> This checklist remains the operator go/no-go gate for launch readiness.
+
 This is the operator-facing gate for promoting Averray from a healthy
 testnet deployment into something we can treat like a real production
 service. It complements:
