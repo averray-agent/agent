@@ -403,7 +403,36 @@ still in use** — we haven't told the backend to switch yet.
 
 ### 5.5 Mount into the backend container
 
-In `docker-compose.yml` for the backend service, add:
+**The "open implementation question" called out in v1 of this doc is
+RESOLVED.** Both signers now accept an optional `credentialsProvider`
+constructor option that the lazy KMSClient passes to its `credentials`
+field when set. The plumbing lives in a single small helper:
+
+- `mcp-server/src/services/aws-credentials.js` — exports
+  `buildKmsCredentialsProvider({ profile })`. Reads
+  `AWS_USE_ROLES_ANYWHERE` env var; returns `fromIni({ profile })` when
+  the flag is `"true"`, returns `null` otherwise. Profile constants
+  `PROFILE_BLOCKCHAIN_SIGNER` and `PROFILE_JWT_SIGNER` are exported and
+  match the section names in `/etc/agent-stack/aws-config` (§5.3).
+- `mcp-server/src/auth/jwt.js` `getKmsSigner` — builds the JWT-side
+  provider and passes it to `KmsJwtSigner`.
+- `mcp-server/src/blockchain/gateway.js` `createSigner` — builds the
+  blockchain-side provider and passes it to `KmsSigner`.
+
+Both `KmsJwtSigner` and `KmsSigner` constructors take the optional
+`credentialsProvider` and pass it through to `new KMSClient({...})`
+only when set. When unset (`AWS_USE_ROLES_ANYWHERE` not `"true"`), the
+KMSClient gets no explicit credentials and falls through to the SDK's
+default chain — preserving pre-5a behavior.
+
+**Why a flag instead of always-on**: the backend hasn't been deployed
+with the docker-compose mounts yet. The first deploy of this code
+ships with the flag default-off, so it's a pure no-op. The operator
+flips the flag and adds the mounts in a single controlled change.
+
+#### Docker-compose mounts (operator step, on the VPS)
+
+Edit `/srv/agent-stack/docker-compose.yml`, add to the backend service:
 
 ```yaml
 services:
@@ -411,57 +440,25 @@ services:
     volumes:
       - /etc/agent-stack/aws-config:/root/.aws/config:ro
       - /etc/agent-stack/roles-anywhere:/etc/agent-stack/roles-anywhere:ro
+      - /usr/local/bin/aws_signing_helper:/usr/local/bin/aws_signing_helper:ro
     environment:
-      # AWS_PROFILE per role isn't ideal because the backend uses one
-      # SDK process for both signers. Two reasonable patterns:
-      #   (a) Set AWS_PROFILE for ONE role and pass `credentials` per
-      #       KMSClient in code (cleanest, requires code change).
-      #   (b) Use the `default` profile for one signer; second signer
-      #       uses code-level explicit profile via the SDK.
-      # Recommend pattern (b) initially — minimize code change.
-      AWS_PROFILE: averray-jwt-signer
+      AWS_USE_ROLES_ANYWHERE: "true"
       AWS_CONFIG_FILE: /root/.aws/config
 ```
 
-**Open implementation question, do not ship until resolved**: the
-backend uses two distinct KMS keys with two distinct IAM roles in the
-same Node process. The AWS SDK's default credential chain is
-single-profile-per-process. Three resolution paths:
+Three read-only mounts:
+- `aws-config` → `~/.aws/config` (SDK reads it via `AWS_CONFIG_FILE`)
+- `roles-anywhere/` cert+key dir at the exact path referenced by
+  `credential_process` directives in `aws-config`
+- `aws_signing_helper` binary at the exact path referenced by
+  `credential_process` directives
 
-1. Set `AWS_PROFILE=averray-jwt-signer` (default) and have `KmsSigner`
-   (blockchain) explicitly construct its KMSClient with `credentials:
-   fromIni({ profile: "averray-signer" })`. Requires a small backend
-   code change.
-2. Same as #1 but other way around (`AWS_PROFILE=averray-signer`
-   default, `KmsJwtSigner` overrides).
-3. Use a single Roles Anywhere profile / IAM role that has policies
-   for both KMS keys. **Rejected** — collapses the key-separation
-   invariant we deliberately built into Phase 3 + 4b.
-
-Recommend path #1. The code change is ~10 lines in
-`mcp-server/src/blockchain/kms-signer.js`:
-
-```js
-// Before:
-this.#kmsClient = new KMSClient({ region: this.#region });
-
-// After:
-const { fromIni } = await import("@aws-sdk/credential-providers");
-this.#kmsClient = new KMSClient({
-  region: this.#region,
-  credentials: fromIni({ profile: "averray-signer" }),
-});
-```
-
-This change is **safe to ship today** even before Roles Anywhere is
-active — `fromIni({ profile: "averray-signer" })` falls back to the
-default chain if the profile doesn't exist, so the existing static
-`AWS_ACCESS_KEY_ID` path keeps working until the operator wires the
-profile in.
-
-Same change pattern goes into
-`mcp-server/src/auth/kms-jwt-signer.js` for the JWT signer with
-`profile: "averray-jwt-signer"`.
+The `AWS_USE_ROLES_ANYWHERE=true` env activates the code path added
+in this PR. The static `AWS_*_ACCESS_KEY_*` env vars remain in the
+rendered `/run/agent-stack/backend.env` during the soak — both paths
+are wired but only Roles Anywhere is reached because each signer's
+KMSClient gets an explicit `credentials` field that wins over default
+chain lookups.
 
 ## 6. Migration phases
 
@@ -476,21 +473,50 @@ Same change pattern goes into
 - New 1Password inventory rows in `deploy/secrets-inventory.md` for
   the future client certs (status: deferred until 5a-cutover).
 
-### Phase 5a-cutover (operator-led, separate PR after AWS setup)
+### Phase 5a-cutover-code (this PR's follow-up; ships the dispatcher wiring)
 
-- Operator completes §4 (AWS setup) + §5 (VPS setup) on a Wednesday
-  morning maintenance window.
-- Operator opens a small follow-up PR that:
-  - Adds the `KMSClient({ credentials: fromIni(...) })` change in both
-    signer modules (~10 lines per signer).
-  - Comments out the four `AWS_*_ACCESS_KEY_*` op:// refs in
-    `deploy/backend.env.template`.
-  - Updates `secrets-inventory.md` to ✅ yes for the new cert rows
-    and ⚠️ no (retired) for the static-key rows.
-- Verify with `aws sts get-caller-identity` from inside the backend
-  container post-deploy: returned `Arn` should be
-  `arn:aws:sts::079209845430:assumed-role/averray-signer-testnet/<session-id>`
-  (note `assumed-role`, NOT `user`).
+- Adds `mcp-server/src/services/aws-credentials.js` (the flag-gated
+  `fromIni` provider builder).
+- Both signers (`KmsJwtSigner`, `KmsSigner`) accept an optional
+  `credentialsProvider` constructor option, lazy KMSClient passes it
+  through to `new KMSClient({ credentials })` when non-null.
+- Both signer factories (`getKmsSigner` in jwt.js, `createSigner` in
+  gateway.js) call `buildKmsCredentialsProvider` to populate the option.
+- Flag (`AWS_USE_ROLES_ANYWHERE`) default-off — zero runtime change at
+  merge. Operator flips on the VPS post-deploy.
+
+### Phase 5a-cutover-flip (operator-led, on the VPS)
+
+After §4 (AWS) + §5 (VPS cert install + aws-config) + §5.5 (docker-
+compose mounts) are all in place:
+
+1. Set `AWS_USE_ROLES_ANYWHERE=true` in the rendered `/run/agent-stack/backend.env`.
+   Either via a small env-template PR (preferred; tracked in git) or by
+   adding the flag directly to the docker-compose `environment:` block
+   so it's set at container start regardless of the env file.
+2. Restart the backend container: `docker compose -f /srv/agent-stack/docker-compose.yml up -d --force-recreate agent-backend`.
+3. Verify from inside the running container:
+   ```bash
+   sudo docker compose -f /srv/agent-stack/docker-compose.yml exec agent-backend \
+     node -e "import('@aws-sdk/client-sts').then(({STSClient,GetCallerIdentityCommand})=>new STSClient({region:'eu-central-2',credentials:require('@aws-sdk/credential-provider-ini').fromIni({profile:'averray-jwt-signer'})}).send(new GetCallerIdentityCommand({}))).then(r=>console.log(r.Arn))"
+   ```
+   Expected `Arn`:
+   `arn:aws:sts::079209845430:assumed-role/averray-jwt-signer-testnet-role/<session-id>`
+   The `assumed-role` (not `user`) prefix is the proof Roles Anywhere
+   is in use.
+4. Watch the backend logs + CloudWatch metrics. SIWE should keep
+   working (signs ES256 via Roles Anywhere now), and the backend's
+   boot-time JWT-KMS credential validation (added in #444) should
+   print `jwt-kms-credential-check.ok` with the same key metadata.
+
+### Phase 5a-cutover-retire-static-env (small follow-up PR)
+
+After the cutover-flip has been clean for ≥ 24h:
+- Comment out the four `AWS_*_ACCESS_KEY_*` op:// refs in
+  `deploy/backend.env.template`.
+- Update `secrets-inventory.md` to mark them ⚠️ no (no longer in
+  template). The 1Password items stay for now — IAM keys remain in
+  AWS for rollback.
 
 ### Phase 5a-retire (≥30 days after 5a-cutover)
 
