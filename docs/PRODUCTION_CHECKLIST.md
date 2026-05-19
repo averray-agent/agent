@@ -203,7 +203,7 @@ RUN_SUBSCAN_XCM_VALIDATION=1 ./scripts/ops/check-release-readiness.sh testnet
 
 ## 5. Observability
 
-- [ ] Backend metrics are reachable and, if public, bearer-protected.
+- [ ] Backend metrics are bearer-protected and reachable with the scraper token.
 - [ ] Backend Sentry is configured for the active environment.
 - [ ] Frontend Sentry runtime config is set if browser error reporting is required.
 - [ ] Structured logs are visible from the current deploy target.
@@ -244,13 +244,17 @@ deployed-config evidence that lives outside the repo. The wiring exists in
 code; only the production env vars need to be set. Concrete verification
 commands per box:
 
-- **Backend metrics reachable and bearer-protected.** Verify reachable:
-  `curl -sS -o /dev/null -w "%{http_code}\n" https://api.averray.com/metrics`
-  must return `200`. Verify bearer-gated: the same request **without** a
-  bearer must return `401` once `METRICS_BEARER_TOKEN` is set in
-  `deploy/backend.env.template`. Current state (2026-05-17): reachable
-  `200`, **not** bearer-gated. Flip after the env var is set and a
-  no-bearer request returns `401`.
+- **Backend metrics bearer-protected and reachable.** Production now fails
+  closed when metrics auth is required but no token is configured. Flip this
+  box only after `METRICS_BEARER_TOKEN` is configured in the production backend
+  environment and this hosted gate passes:
+  ```bash
+  METRICS_BEARER_TOKEN='<metrics-scraper-token>' \
+  CHECK_METRICS_AUTH=1 \
+  ./scripts/ops/check-hosted-stack.sh
+  ```
+  The gate requires unauthenticated `/metrics` to return `401` and the same
+  request with `Authorization: Bearer <token>` to return `200`.
 - **Backend Sentry configured for the active environment.** Set
   `SENTRY_DSN` (and optionally `SENTRY_ENVIRONMENT`, `SENTRY_RELEASE`,
   `SENTRY_TRACES_SAMPLE_RATE`) in `deploy/backend.env.template`, then

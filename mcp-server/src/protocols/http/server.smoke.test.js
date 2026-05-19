@@ -2008,6 +2008,45 @@ test("http smoke: /metrics emits Prometheus text format with baseline series", {
   });
 });
 
+test("http smoke: /metrics is bearer-gated when metrics auth is required", { skip: !RUN }, async () => {
+  await runWithServerEnv(
+    {
+      METRICS_AUTH_REQUIRED: "1",
+      METRICS_BEARER_TOKEN: "metrics-smoke-token-1234567890"
+    },
+    async (base) => {
+      const noBearer = await fetch(`${base}/metrics`);
+      assert.equal(noBearer.status, 401);
+
+      const wrongBearer = await fetch(`${base}/metrics`, {
+        headers: { authorization: "Bearer wrong-token" }
+      });
+      assert.equal(wrongBearer.status, 401);
+
+      const response = await fetch(`${base}/metrics`, {
+        headers: { authorization: "Bearer metrics-smoke-token-1234567890" }
+      });
+      assert.equal(response.status, 200);
+      assert.match(response.headers.get("content-type") ?? "", /text\/plain/);
+      assert.match(await response.text(), /# HELP http_requests_total/);
+    }
+  );
+});
+
+test("http smoke: production /metrics fails closed when token is missing", { skip: !RUN }, async () => {
+  await runWithServerEnv(
+    {
+      NODE_ENV: "production",
+      METRICS_BEARER_TOKEN: ""
+    },
+    async (base) => {
+      const response = await fetch(`${base}/metrics`);
+      assert.equal(response.status, 503);
+      assert.deepEqual(await response.json(), { error: "metrics_auth_unconfigured" });
+    }
+  );
+});
+
 test("http smoke: discovery manifest is served at both /agent-tools.json and the RFC 8615 .well-known path", { skip: !RUN }, async () => {
   await runWithServer(async (base) => {
     const [canonical, wellKnown] = await Promise.all([

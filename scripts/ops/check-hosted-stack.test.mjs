@@ -145,3 +145,33 @@ test("scoped service-token proof gate is opt-in, admin-gated, and supports evide
     "docker fallback should mount service-token evidence at the same absolute path"
   );
 });
+
+test("metrics auth gate is opt-in and verifies both denied and allowed scrapes", async () => {
+  const script = await readFile(CHECK_SCRIPT, "utf8");
+
+  assert.match(
+    script,
+    /CHECK_METRICS_AUTH=\$\{CHECK_METRICS_AUTH:-0\}/u,
+    "metrics auth proof should be opt-in"
+  );
+  assert.match(
+    script,
+    /CHECK_METRICS_AUTH=1 requires METRICS_BEARER_TOKEN/u,
+    "metrics auth proof should fail closed without the scraper token"
+  );
+  assert.match(
+    script,
+    /Expected unauthenticated \/metrics to return 401/u,
+    "metrics auth proof should require no-bearer requests to be denied"
+  );
+  assert.match(
+    script,
+    /authorization: Bearer \$METRICS_BEARER_TOKEN/u,
+    "metrics auth proof should send the scraper bearer token"
+  );
+  assert.match(
+    script,
+    /Expected bearer-authenticated \/metrics to return 200/u,
+    "metrics auth proof should require bearer-authenticated scrapes to work"
+  );
+});
