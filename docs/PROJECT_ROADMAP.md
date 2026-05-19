@@ -1,7 +1,7 @@
 # Averray Unified Project Roadmap
 
 - **Status date:** 2026-05-19
-- **Baseline reviewed:** `origin/main` at `163bd76`
+- **Baseline reviewed:** `origin/main` at `d93bf57`
 - **Latest docs audit:** [`DOCS_AUDIT_2026-05-19.md`](./DOCS_AUDIT_2026-05-19.md)
 - **Purpose:** one status and roadmap page for the specs, audits, launch
   checklists, security plans, and product-proof work.
@@ -78,7 +78,8 @@ Polkadot-specific USDC facts were checked against the Polkadot docs MCP:
 | [`DOCS_AUDIT_2026-05-19.md`](./DOCS_AUDIT_2026-05-19.md) | Latest audit of roadmap/spec/checklist doc drift and missing governance. |
 | [`PRODUCTION_CHECKLIST.md`](./PRODUCTION_CHECKLIST.md) | Operator launch gate. Still authoritative for go/no-go checkboxes. |
 | [`PRODUCT_PROOF_GATE.md`](./PRODUCT_PROOF_GATE.md) | Product-proof evidence and smoke command references. |
-| [`PHASE_4B_STAGE_2C_PLAN.md`](./PHASE_4B_STAGE_2C_PLAN.md) | Current KMS JWT cutover plan. |
+| [`PHASE_4B_STAGE_2C_PLAN.md`](./PHASE_4B_STAGE_2C_PLAN.md) | Current KMS JWT cutover plan (Stage 2C-1 → 2C-2 → 2C-3). |
+| [`PHASE_4E_PLAN.md`](./PHASE_4E_PLAN.md) | Hardware MFA enrollment plan + adjacent mainnet-prep (IAM Roles Anywhere, multi-region KMS, worker-loop refresh-flow). |
 | [`SECRETS_MIGRATION.md`](./SECRETS_MIGRATION.md) | Secrets and custody migration history and mainnet requirements. |
 | [`THREAT_MODEL.md`](./THREAT_MODEL.md) | Launch threat model and security posture. |
 | [`RC1_WORKING_SPEC.md`](./RC1_WORKING_SPEC.md) | Historical only. |
@@ -90,7 +91,7 @@ Polkadot-specific USDC facts were checked against the Polkadot docs MCP:
 | --- | --- | --- |
 | Trust-core product model | Done | Current working spec v2.10 locks receipts, reputation, no token, USDC-only v1. |
 | USDC settlement baseline | Done | Contracts and product-proof path use USDC Trust-Backed Asset ID 1337. |
-| Product-proof worker loop | Proofed | Hosted proof in `PRODUCT_PROOF_GATE.md`, GitHub Actions run `25988470399`, 2026-05-17. |
+| Product-proof worker loop | Proofed | Hosted proof in `PRODUCT_PROOF_GATE.md`. Deploy Production workflow run `25988470399` (2026-05-17), dispatched with `smoke_check_product_proof_gate=1` and `product_proof_require_worker_loop=1`. |
 | Public proof pages | Done | Homepage proof stream relabeled/scripted; public discovery/schema/trust pages exist. |
 | Schema-native first-wave jobs | Done | Schema validation and canonical job output path landed. |
 | Job definitions and submit payload ergonomics | Done | `/jobs/definition` and submission schema guidance hardened. |
@@ -112,7 +113,10 @@ Polkadot-specific USDC facts were checked against the Polkadot docs MCP:
 | Generated output guard | Done | CI guard prevents normal PRs from committing generated `frontend/` and `site/` output. |
 | Testnet owner multisig | Done | Multisig owner verified in deployment manifest and used for owner-only rehearsal. |
 | Testnet KMS verifier signer | Done | Raw verifier key removed from steady-state testnet signing path. |
-| KMS JWT migration through Stage 2C-1 | Done | Route-level signer dispatcher landed in `#438`. |
+| Phase 2 VPS env-render cutover | Done | Backend + indexer env files rendered at deploy time via `op inject` from `deploy/*.env.template` into `/run/agent-stack/*.env` (tmpfs, mode 0400). Service-account-scoped 1Password tokens; no plaintext secrets at rest in `/srv`. |
+| Boot-time env render service | Done | `deploy/agent-stack-env-render.service` (systemd oneshot, `Before=docker.service`) re-renders `/run/agent-stack/*.env` after every reboot via `scripts/ops/render-vps-env-all.sh`. Validated by destroy-and-recover test and a full prod reboot through kernel `6.8.0-117`. Ships in `#436` + hotfix `#437`. |
+| GitHub org code-security configuration | Done | Org-level configuration `248474` enforced on `averray-agent/agent`: secret scanning + push protection + non-provider patterns + generic-secret AI detection + validity checks. New repos in the org auto-enable secret scanning, push protection, and Dependabot via the org default flags. |
+| KMS JWT migration through Stage 2C-1 | Done | Five stages live in prod: **Stage 1** (`JWT_BACKEND=both`, `#430`) — verifier accepts HS256 + ES256; **Stage 2A** (`#432`) — SIWE + `/auth/refresh` route through `signTokenFromConfig`; **Stage 2B** (`#433`) — multi-role ES256 (`roles: [...]` array claim); **Stage 2B activation** (`#434`) — `JWT_PRIMARY_ALG=kms` flipped, SIWE actively mints multi-role ES256 against the KMS key; **Stage 2C-1** (`#438`) — `signServiceToken` migrated to dispatcher with `roles: ["service"]`. End-to-end verified in prod (admin+verifier wallet returns 48 capabilities via `/auth/session`). Remaining: Stage 2C-2 env flip (`#439`, draft) and Stage 2C-3 HMAC retirement (≥30d after 2C-2). |
 
 ## Open Work To RC1/Testnet Launch
 
@@ -146,31 +150,37 @@ externally ready.
 | Verifier replay hardening | Open | Split verifier policy version from config version and require handler-versioned fixtures before v2 handler changes. |
 | Schema registration for external jobs | Open | Custom/off-platform references can register signed schemas with clear trust boundaries. |
 | Dispute/arbitration semantics | Open | Decide release path, store arbitrator reasoning under content hash, expose dispute UI fields, and rehearse arbitrator notifications. |
-| Timeline operator UX verification | Verify | Backend trace filters landed; confirm the operator app has the intended visible filters and close the item if already merged. |
+| Timeline operator UX verification | Open | Backend trace filters landed. Close criterion: confirm the operator app exposes the intended filters and either mark Done (if already wired in `app/`) or open a narrow PR to wire them. |
 | Reference-agent workflow generalization | Open | Wikipedia one-command workflow exists; general workflow pattern should be documented for other job families. |
 
 ## Auth, Secrets, And Capability Roadmap
 
 ### Completed
 
-- Service-token capability model and primitives.
-- Scoped service-token proof route.
-- Refresh-cookie auth flow.
-- KMS-backed verifier signer on testnet.
-- KMS JWT migration through Stage 2C-1: route-level signer dispatcher.
+- Service-token capability model and primitives (scoped issue/sign/rotate/revoke).
+- Scoped service-token proof route + `Hosted Service Token Proof` workflow.
+- Refresh-cookie auth flow with strict-replay semantics (`#410` + `#417`).
+- KMS-backed verifier signer on testnet (Phase 3 KMS cutover).
+- Phase 4b — KMS JWT migration, all stages through 2C-1 live in prod:
+  - **Stage 1** (`#430`): `JWT_BACKEND=both` — verifier accepts HS256 + ES256.
+  - **Stage 2A** (`#432`): SIWE + `/auth/refresh` route through `signTokenFromConfig` (dispatcher introduced earlier in `#407` / Phase 4b.4).
+  - **Stage 2B** (`#433`): multi-role ES256 — `KmsJwtSigner` emits canonical `roles: [...]` array claim; verifier accepts either shape for backward compat.
+  - **Stage 2B activation** (`#434`): `JWT_PRIMARY_ALG=kms` — SIWE actively mints multi-role ES256 against the KMS key; existing HS256 sessions migrate as their TTL expires.
+  - **Stage 2C-1** (`#438`): `signServiceToken` routes through dispatcher with `roles: ["service"]`; `VALID_ROLES` widened to accept the synthetic service role.
+- Phase 2 VPS env-render cutover: deploy-time + boot-time render of `/run/agent-stack/*.env` from 1Password (`#436` boot service + `#437` hardening fix).
+- GitHub UI hardening: org code-security configuration `248474` enforced (secret scanning + push protection + non-provider + generic-secret + validity checks); org-default flags flipped so future repos inherit the same protection.
 
 ### In Flight
 
 | PR / Work | Status | Notes |
 | --- | --- | --- |
-| `#439` Stage 2C-2: `JWT_BACKEND=both` to `kms` | Draft/open | Do not merge until `#438` has deployed and soaked for at least 24 hours, service-token proof stays green, no new `jwt_verify_failed`, and admin/verifier `/auth/session` is confirmed. |
-| `#440` Phase 4e plan | Open/review-ready | Docs-only plan for hardware MFA and adjacent mainnet-prep security. |
+| `#439` Stage 2C-2: `JWT_BACKEND=both` to `kms` | Open | Drafted on GitHub. Mark ready and auto-merge only after `#438` has deployed and soaked for at least 24 hours, the service-token proof stays green, no new `jwt_verify_failed`, and admin/verifier `/auth/session` is re-confirmed under the soaked config. |
 
 ### Remaining
 
 - Stage 2C-3 HMAC retirement after KMS-only soak period.
 - Remove or disable HMAC verifier path once retirement criteria pass.
-- Hardware MFA for admin chain accounts, GitHub, AWS, Cloudflare/Vercel, domain registrar, and emergency email.
+- Hardware MFA for admin chain accounts: 1Password, AWS root, AWS IAM admins, GitHub org admin, domain registrar, and the OVH VPS provider (full enrollment plan in [`PHASE_4E_PLAN.md`](./PHASE_4E_PLAN.md)).
 - Replace static AWS access keys with IAM Roles Anywhere or equivalent workload identity.
 - Mainnet multi-region KMS from day one.
 - Worker-loop refresh-flow so hosted smokes do not depend on manually rotated 30-day admin JWTs.
@@ -258,22 +268,27 @@ As of 2026-05-19:
 - Open issues in `averray-agent/agent`: none.
 - Open PRs:
   - `#439` draft: Stage 2C-2 KMS-only JWT backend flip. Blocked on soak and
-    verification criteria.
-  - `#440` review-ready docs: Phase 4e hardware MFA and mainnet-prep security
-    plan.
+    verification criteria above.
 
 ## Immediate Work Queue
 
-1. Review and merge `#440` if the Phase 4e plan is acceptable.
-2. Keep `#439` draft until `#438` has soaked and the service-token/auth checks
-   pass under `JWT_BACKEND=both`.
+1. Keep `#439` draft until `#438` has soaked and the service-token/auth checks
+   pass under `JWT_BACKEND=both`. Then mark ready → auto-merge picks it up and
+   the Stage 2C-2 deploy refuses HS256.
+2. Track the Stage 2C-3 HMAC retirement window: ≥30 days after `#439` lands,
+   delete `op://prod-backend/auth-jwt-secrets`, drop the HMAC code branch
+   from `mcp-server/src/auth/jwt.js`, and retire `AUTH_JWT_SECRETS` from the
+   secrets inventory + calendar.
 3. Close the remaining `PRODUCTION_CHECKLIST.md` P0 launch gates:
    pauser/rehearsal, backups, restore drill, `/admin/status` hosted check,
    metrics/logging/alerts, self-report evidence, dispute verdict proof, and
    public discovery/schema/trust proof.
 4. Open or assign narrow PRs for `P2.3` route split and `P3.7` frontend auth
    guard if no existing agent owns them.
-5. Keep native XCM/vDOT work behind the staging evidence gate and week-12
+5. Operator: act on `PHASE_4E_PLAN.md` § 7 decision points (one vs two
+   operators, registrar identity + FIDO2 support, GitHub org-2FA member
+   audit before flipping enforcement) before procuring YubiKeys.
+6. Keep native XCM/vDOT work behind the staging evidence gate and week-12
    product gate.
 
 ## Completion Definition
