@@ -8,6 +8,7 @@ APP_URL=${APP_URL:-https://app.averray.com/}
 API_HEALTH_URL=${API_HEALTH_URL:-https://api.averray.com/health}
 API_ONBOARDING_URL=${API_ONBOARDING_URL:-https://api.averray.com/onboarding}
 API_ADMIN_STATUS_URL=${API_ADMIN_STATUS_URL:-https://api.averray.com/admin/status}
+API_METRICS_URL=${API_METRICS_URL:-https://api.averray.com/metrics}
 INDEXER_URL=${INDEXER_URL:-https://index.averray.com/}
 INDEXER_READY_URL=${INDEXER_READY_URL:-https://index.averray.com/ready}
 INDEXER_STATUS_URL=${INDEXER_STATUS_URL:-https://index.averray.com/status}
@@ -34,6 +35,8 @@ SERVICE_TOKEN_PROOF_ALLOWED_PATH=${SERVICE_TOKEN_PROOF_ALLOWED_PATH:-}
 SERVICE_TOKEN_PROOF_DENIED_PATHS=${SERVICE_TOKEN_PROOF_DENIED_PATHS:-}
 SERVICE_TOKEN_PROOF_TOKEN_TTL_SECONDS=${SERVICE_TOKEN_PROOF_TOKEN_TTL_SECONDS:-}
 SERVICE_TOKEN_PROOF_IDEMPOTENCY_KEY=${SERVICE_TOKEN_PROOF_IDEMPOTENCY_KEY:-}
+CHECK_METRICS_AUTH=${CHECK_METRICS_AUTH:-0}
+METRICS_BEARER_TOKEN=${METRICS_BEARER_TOKEN:-}
 TIMEOUT_SEC=${TIMEOUT_SEC:-20}
 APP_BASIC_AUTH_USER=${APP_BASIC_AUTH_USER:-}
 APP_BASIC_AUTH_PASSWORD=${APP_BASIC_AUTH_PASSWORD:-}
@@ -182,6 +185,28 @@ echo "Checking onboarding contract"
 onboarding_json="$(fetch "$API_ONBOARDING_URL")"
 jq -e '.name | length > 0' >/dev/null <<<"$onboarding_json"
 jq -e '.protocols | index("http") != null' >/dev/null <<<"$onboarding_json"
+
+if enabled "$CHECK_METRICS_AUTH"; then
+  if [[ -z "$METRICS_BEARER_TOKEN" ]]; then
+    echo "CHECK_METRICS_AUTH=1 requires METRICS_BEARER_TOKEN." >&2
+    exit 1
+  fi
+
+  echo "Checking metrics bearer gate"
+  metrics_status_without_bearer="$(curl -sS --max-time "$TIMEOUT_SEC" -o /dev/null -w "%{http_code}" "$API_METRICS_URL")"
+  if [[ "$metrics_status_without_bearer" != "401" ]]; then
+    echo "Expected unauthenticated /metrics to return 401, got HTTP $metrics_status_without_bearer." >&2
+    exit 1
+  fi
+
+  metrics_status_with_bearer="$(curl -sS --max-time "$TIMEOUT_SEC" -o /dev/null -w "%{http_code}" \
+    -H "authorization: Bearer $METRICS_BEARER_TOKEN" \
+    "$API_METRICS_URL")"
+  if [[ "$metrics_status_with_bearer" != "200" ]]; then
+    echo "Expected bearer-authenticated /metrics to return 200, got HTTP $metrics_status_with_bearer." >&2
+    exit 1
+  fi
+fi
 
 if enabled "$CHECK_INDEXER"; then
   echo "Checking indexer root"

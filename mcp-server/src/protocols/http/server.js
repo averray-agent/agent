@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { randomBytes } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createPlatformRuntime } from "../../services/bootstrap.js";
 import {
   assertMutationBackendAvailable,
@@ -119,6 +119,10 @@ metrics.gauge("state_store_backend", "1 when state store backend matches the lab
 );
 
 const METRICS_BEARER_TOKEN = process.env.METRICS_BEARER_TOKEN?.trim() || undefined;
+const METRICS_AUTH_REQUIRED = parseRequiredFlag(
+  process.env.METRICS_AUTH_REQUIRED,
+  process.env.NODE_ENV === "production" ? "1" : "0"
+);
 const port = Number(process.env.PORT ?? 8787);
 
 const SIWE_STATEMENT = "Sign in to the Agent Platform.";
@@ -136,6 +140,20 @@ function respond(response, statusCode, payload, extraHeaders = {}) {
   }
   response.writeHead(statusCode, headers);
   response.end(JSON.stringify(payload, null, 2));
+}
+
+function bearerTokenMatches(header, expectedToken) {
+  const prefix = "Bearer ";
+  if (!header.startsWith(prefix)) return false;
+  const actualToken = header.slice(prefix.length);
+  const actual = Buffer.from(actualToken);
+  const expected = Buffer.from(expectedToken);
+  return actual.length === expected.length && timingSafeEqual(actual, expected);
+}
+
+function parseRequiredFlag(value, defaultValue) {
+  const normalized = String(value ?? defaultValue).trim().toLowerCase();
+  return !["0", "false", "no", "off"].includes(normalized);
 }
 
 function respondSse(response) {
@@ -1744,12 +1762,14 @@ const server = createServer(async (request, response) => {
     }
 
     if (request.method === "GET" && pathname === "/metrics") {
-      // Optionally gated. Leave METRICS_BEARER_TOKEN unset for the standard
-      // Prometheus "scrape any network peer" convention; set it to a random
-      // token when /metrics is reachable from the public internet.
-      if (METRICS_BEARER_TOKEN) {
+      // Fail closed in production: public metrics reveal request paths,
+      // status-code mix, and operational posture.
+      if (METRICS_AUTH_REQUIRED && !METRICS_BEARER_TOKEN) {
+        return respond(response, 503, { error: "metrics_auth_unconfigured" });
+      }
+      if (METRICS_AUTH_REQUIRED) {
         const header = request.headers.authorization ?? "";
-        if (header !== `Bearer ${METRICS_BEARER_TOKEN}`) {
+        if (!bearerTokenMatches(header, METRICS_BEARER_TOKEN)) {
           return respond(response, 401, { error: "unauthorized" });
         }
       }

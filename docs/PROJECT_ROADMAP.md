@@ -158,7 +158,7 @@ externally ready.
 | Redis backup readiness | Open | `check-backup-readiness.sh --json` reports recent Redis backup if Redis contains non-rebuildable state. |
 | Restore drill | Open | Restore drill performed and documented with date, source backup, and target. |
 | Hosted `/admin/status` async XCM smoke | Open | Run hosted check with live admin JWT and verify async XCM watcher lane. |
-| Metrics auth | Open | Backend metrics endpoint is bearer-protected or otherwise not public. |
+| Metrics auth | Open | Backend metrics endpoint fails closed when unconfigured in production and `CHECK_METRICS_AUTH=1` proves unauthenticated `401` plus scraper-token `200` against the hosted stack. |
 | Sentry/logging decision | Open | Backend Sentry configured or explicitly deferred; frontend decision recorded; structured logs visible. |
 | Alert destination | Open | At least one deploy/health failure path reaches the operator. |
 | Operator self-report evidence | Open | Hermes/operator report proof replaces optional Resend email proof. Evidence should include correlation ID and durable destination. |
