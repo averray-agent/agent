@@ -5,6 +5,10 @@
 **Status:** v0.2 - updated 2026-05-17 against expanded audit and current `origin/main`. Two new findings surfaced in the expanded audit (`P1.1b` health truth, `P2.5b` policy durability), one additional repo-review finding was added here (`P1.3` sync mutation idempotency), acceptance criteria were sharpened with specific endpoint paths, status codes, and env var names, and the execution sequence is locked.
 **Owner:** Pascal
 
+> Current roadmap/status source: [`PROJECT_ROADMAP.md`](./PROJECT_ROADMAP.md).
+> This remediation plan keeps the detailed audit finding definitions and close
+> criteria; several item statuses have since been superseded by merged PRs.
+
 ---
 
 ## Honest read on the audit

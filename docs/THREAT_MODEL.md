@@ -1,5 +1,8 @@
 # Threat Model
 
+> Current roadmap/status source: [`PROJECT_ROADMAP.md`](./PROJECT_ROADMAP.md).
+> This threat model remains the detailed risk and mitigation reference.
+
 This document records the launch threat model for Averray's v1 control plane.
 It is intentionally operational: each entry names the trust boundary, the
 current mitigation, and the follow-up that would reduce the risk further.

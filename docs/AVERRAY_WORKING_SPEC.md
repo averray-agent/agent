@@ -4,6 +4,9 @@
 **Spec version:** 2.10 (blockchain audit pass 2: native borrow balance-sheet invariant fixed, debt-first payout settlement documented, XCM strict-decode and zero-share gates recorded)
 **Owner:** Pascal
 
+> Current roadmap/status source: [`PROJECT_ROADMAP.md`](./PROJECT_ROADMAP.md).
+> This working spec remains the product and architecture detail reference.
+
 ---
 
 ## Summary

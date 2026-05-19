@@ -1,5 +1,9 @@
 # Core Framework Roadmap
 
+> Current roadmap/status source: [`PROJECT_ROADMAP.md`](./PROJECT_ROADMAP.md).
+> This framework roadmap remains the detailed implementation reference for
+> jobs, sessions, verification, SDK, timeline, and operations work.
+
 This roadmap turns the current platform framework into a more durable
 production core.
 

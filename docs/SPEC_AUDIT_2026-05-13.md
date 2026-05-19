@@ -1,5 +1,9 @@
 # Spec Audit - 2026-05-13
 
+> Current roadmap/status source: [`PROJECT_ROADMAP.md`](./PROJECT_ROADMAP.md).
+> This audit is a historical reconciliation snapshot; use it for rationale, not
+> for current completion status.
+
 This audit reconciles the current spec and roadmap after the recent framework,
 USDC, discovery, secrets, product-proof, lineage, event-log, schema-native,
 idempotency, dispute, and async-XCM foundation work.
