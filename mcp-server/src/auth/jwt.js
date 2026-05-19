@@ -121,6 +121,13 @@ async function getKmsSigner(authConfig) {
   // Lazy-import; ensures hmac-only callers never pull in
   // @aws-sdk/client-kms (KmsJwtSigner's own SDK import is also lazy).
   const { KmsJwtSigner } = await import("./kms-jwt-signer.js");
+  // Phase 5a: when AWS_USE_ROLES_ANYWHERE=true, plumb an SDK credential
+  // provider keyed to the JWT-signer shared-config profile. Null
+  // otherwise — KmsJwtSigner falls through to the SDK's default chain.
+  const { buildKmsCredentialsProvider, PROFILE_JWT_SIGNER } = await import(
+    "../services/aws-credentials.js"
+  );
+  const credentialsProvider = buildKmsCredentialsProvider({ profile: PROFILE_JWT_SIGNER });
   // Allow tests to inject a KMSClient via authConfig.kmsJwt.kmsClient
   // without leaking that field into the loaded-from-env public shape —
   // production env never sets it.
@@ -135,6 +142,7 @@ async function getKmsSigner(authConfig) {
     expectedRoles: authConfig.kmsJwt.expectedRoles,
     maxTtlSeconds: authConfig.kmsJwt.maxTtlSeconds,
     clockSkewSeconds: authConfig.kmsJwt.clockSkewSeconds,
+    credentialsProvider,
   });
   SIGNER_CACHE.set(authConfig.kmsJwt, signer);
   return signer;

@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-kms": "^3.700.0",
+    "@aws-sdk/credential-provider-ini": "^3.700.0",
     "@paraspell/sdk-core": "^13.4.0",
     "ethers": "^6.16.0",
     "redis": "^5.11.0"

@@ -24,6 +24,10 @@ import {
 } from "./abis.js";
 import { loadBlockchainConfig } from "./config.js";
 import { KmsSigner } from "./kms-signer.js";
+import {
+  buildKmsCredentialsProvider,
+  PROFILE_BLOCKCHAIN_SIGNER,
+} from "../services/aws-credentials.js";
 import { buildXcmRequestPayload } from "./xcm-message-builder.js";
 import { hashCanonicalContent } from "../core/canonical-content.js";
 import {
@@ -1732,10 +1736,19 @@ function createSigner(config, provider) {
     // KmsSigner lazy-constructs the KMSClient on first signing call,
     // so importing this module doesn't load the AWS SDK for local-
     // backend deploys.
+    //
+    // Phase 5a: when AWS_USE_ROLES_ANYWHERE=true, plumb an SDK
+    // credentials provider keyed to the blockchain-signer shared-config
+    // profile. Null otherwise — KmsSigner falls through to the SDK's
+    // default chain (pre-5a behavior, unchanged).
+    const credentialsProvider = buildKmsCredentialsProvider({
+      profile: PROFILE_BLOCKCHAIN_SIGNER,
+    });
     return new KmsSigner({
       region: config.awsRegion,
       keyId: config.kmsKeyId,
       provider,
+      credentialsProvider,
     });
   }
   // Default "local" path — unchanged from pre-Phase-3 behavior.

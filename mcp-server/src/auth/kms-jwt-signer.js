@@ -63,6 +63,7 @@ const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9
 export class KmsJwtSigner {
   #kmsClient;
   #region;
+  #credentialsProvider;
   #keyId;
   #kid;
   #kidBuf;
@@ -88,6 +89,13 @@ export class KmsJwtSigner {
    * @param {number} [opts.maxTtlSeconds]       Cap on `exp - iat`; defaults to 3600 (1h).
    * @param {number} [opts.clockSkewSeconds]    Skew tolerance for nbf/exp; defaults to 60.
    * @param {() => number} [opts.now]           Override clock (epoch seconds) for tests.
+   * @param {import("@aws-sdk/types").AwsCredentialIdentityProvider} [opts.credentialsProvider]
+   *   Optional AWS SDK credentials provider passed to the lazy-constructed
+   *   KMSClient. Used by Phase 5a (Roles Anywhere) — see
+   *   `mcp-server/src/services/aws-credentials.js`. When null/undefined,
+   *   the lazy KMSClient gets no explicit credentials and falls through to
+   *   the SDK's default credential chain (env vars, shared config, etc.) —
+   *   the pre-5a behavior, unchanged.
    */
   constructor(opts) {
     if (!opts || typeof opts !== "object") {
@@ -105,6 +113,7 @@ export class KmsJwtSigner {
       maxTtlSeconds,
       clockSkewSeconds,
       now,
+      credentialsProvider,
     } = opts;
     if (!keyId || typeof keyId !== "string") {
       throw new Error("KmsJwtSigner: keyId is required (full KMS key ARN)");
@@ -150,6 +159,7 @@ export class KmsJwtSigner {
 
     this.#kmsClient = kmsClient ?? null;
     this.#region = region ?? null;
+    this.#credentialsProvider = credentialsProvider ?? null;
     this.#keyId = keyId;
     this.#kid = kid;
     // Pre-compute the buffer for constant-time kid comparison. The kid
@@ -184,7 +194,13 @@ export class KmsJwtSigner {
   async #getClient() {
     if (this.#kmsClient) return this.#kmsClient;
     const { KMSClient } = await import("@aws-sdk/client-kms");
-    this.#kmsClient = new KMSClient({ region: this.#region });
+    // Phase 5a: pass the optional credentialsProvider through to
+    // KMSClient. When null (default chain), behavior matches pre-5a.
+    const clientOpts = { region: this.#region };
+    if (this.#credentialsProvider) {
+      clientOpts.credentials = this.#credentialsProvider;
+    }
+    this.#kmsClient = new KMSClient(clientOpts);
     return this.#kmsClient;
   }
 
