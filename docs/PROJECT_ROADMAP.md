@@ -24,6 +24,9 @@ Use this file as the operational guideline for sequencing work.
   of claiming to be the active roadmap.
 - Chain-specific claims should be checked against the Polkadot docs MCP or
   runtime state before they are promoted into this roadmap.
+- Parallel agents should not use this file as a shared scratchpad. If a status
+  update is not part of a narrow implementing PR, capture it as a fragment in
+  [`roadmap-updates/`](./roadmap-updates/) for later steward consolidation.
 
 ## Status Terms
 
@@ -31,9 +34,31 @@ Use this file as the operational guideline for sequencing work.
   deployable product surface.
 - **Proofed:** done and backed by a hosted smoke, real workflow, chain proof, or
   durable operator evidence.
+- **Ready for proof:** implementation has landed, but hosted, chain, or
+  operator evidence is still missing.
+- **Blocked:** not actionable until an explicit external dependency, operator
+  action, secret, deploy, wallet action, or design decision is complete.
+- **In progress:** currently owned by an active PR or assigned worktree.
 - **Open:** not implemented, not fully verified, or still blocked by an
   operational prerequisite.
 - **Deferred:** intentionally out of v1 or blocked on a later phase gate.
+
+## Parallel Update Protocol
+
+`PROJECT_ROADMAP.md` remains the single source of truth, but parallel agents
+should usually submit small update fragments first. This avoids two agents
+rewriting the same tables and makes consolidation reviewable.
+
+- Use [`docs/roadmap-updates/README.md`](./roadmap-updates/README.md) for the
+  fragment template, file naming, and pasteable agent instruction.
+- An implementing PR may directly update the exact roadmap row it closes or
+  moves, provided it owns that item and includes evidence.
+- A research, audit, design, or handoff PR should usually add a roadmap-update
+  fragment instead of editing this file.
+- The roadmap steward consolidates accepted fragments into this file and deletes
+  or archives consumed fragments in a separate narrow PR.
+- Avoid formatting-only changes, table reshuffles, or broad wording edits unless
+  the task is explicitly a roadmap-steward consolidation.
 
 ## Current Product Posture
 
