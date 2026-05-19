@@ -10,6 +10,7 @@ import { PimlicoClient } from "./pimlico-client.js";
 import { EventBus } from "../core/event-bus.js";
 import { EventListener } from "../blockchain/event-listener.js";
 import { loadAuthConfig } from "../auth/config.js";
+import { validateJwtKmsCredentialAccess } from "../auth/credential-check.js";
 import { createAuthMiddleware } from "../auth/middleware.js";
 import { createRateLimiter } from "../auth/rate-limit.js";
 import { resolveCapabilities, capabilityMatrix } from "../auth/capabilities.js";
@@ -165,6 +166,27 @@ export async function createPlatformRuntime() {
   // the step name before the process exits. Without this, a cryptic stack
   // trace is the only signal that a required env var was missing.
   const authConfig = initStep("load-auth-config", logger, () => loadAuthConfig());
+
+  // Phase 5a prep — verify the AWS credential chain can actually reach
+  // the JWT KMS key before declaring the backend healthy. Without this
+  // a misconfigured credential chain (most common future failure mode:
+  // a botched IAM Roles Anywhere cert install) lets the backend boot
+  // green and only surface as a 500 on the next user-facing SIWE
+  // refresh. Skipped automatically under JWT_BACKEND=hmac (no kmsJwt
+  // config) and bypassable via JWT_KMS_CREDENTIAL_CHECK_SKIP=1 for
+  // tests / disconnected dev environments.
+  if (authConfig.kmsJwt) {
+    try {
+      await validateJwtKmsCredentialAccess(authConfig.kmsJwt, { logger });
+    } catch (error) {
+      logger.error(
+        { step: "validate-jwt-kms-credentials", err: error instanceof Error ? error : new Error(String(error)) },
+        "bootstrap.init_failed",
+      );
+      throw error;
+    }
+  }
+
   const mutationBackendConfig = initStep("load-mutation-backend-config", logger, () =>
     loadMutationBackendConfig(process.env)
   );
