@@ -7,14 +7,15 @@
 This roadmap turns the current platform framework into a more durable
 production core.
 
-The current product and architecture source document lives in
-[AVERRAY_WORKING_SPEC.md](AVERRAY_WORKING_SPEC.md). Use that spec as the
-roadmap boundary when prioritizing contract, backend, indexer, and operations
-work. [RC1_WORKING_SPEC.md](RC1_WORKING_SPEC.md) is retained as historical
-context only. The PR-sized rc1 execution sequence still lives in
-[RC1_IMPLEMENTATION_PLAN.md](RC1_IMPLEMENTATION_PLAN.md), and the latest
-cross-plan reconciliation lives in
-[SPEC_AUDIT_2026-05-13.md](SPEC_AUDIT_2026-05-13.md).
+The current project status and sequencing boundary lives in
+[PROJECT_ROADMAP.md](PROJECT_ROADMAP.md). The product and architecture source
+document remains [AVERRAY_WORKING_SPEC.md](AVERRAY_WORKING_SPEC.md).
+[RC1_WORKING_SPEC.md](RC1_WORKING_SPEC.md) is retained as historical context
+only. The PR-sized rc1 execution sequence in
+[RC1_IMPLEMENTATION_PLAN.md](RC1_IMPLEMENTATION_PLAN.md) and the
+[SPEC_AUDIT_2026-05-13.md](SPEC_AUDIT_2026-05-13.md) reconciliation are
+historical references unless `PROJECT_ROADMAP.md` explicitly pulls an item
+forward.
 
 It is intentionally grounded in the code that exists today:
 

@@ -7,7 +7,8 @@
 
 > Current roadmap/status source: [`PROJECT_ROADMAP.md`](./PROJECT_ROADMAP.md).
 > This remediation plan keeps the detailed audit finding definitions and close
-> criteria; several item statuses have since been superseded by merged PRs.
+> criteria. Current sequencing lives in the roadmap.
+> Latest docs-status audit: [`DOCS_AUDIT_2026-05-19.md`](./DOCS_AUDIT_2026-05-19.md).
 
 ---
 
@@ -110,7 +111,9 @@ This is not complete launch planning. The audit does not surface every open item
 
 ### P1.2 - Account overlay state is process memory, not durable state
 
-**Status:** Open. **Launch-blocking.**
+**Status:** Closed on 2026-05-17 in `a36f633` (PR #408 *Package C - account overlay durability*).
+**Verification:** The closure moved account overlay handling into classified, durable, write-through storage semantics and inverted precedence so live account fields win over cached overlay fields. `PROJECT_ROADMAP.md` treats `P1.2` as done.
+**Historical note:** The original audit rationale and close criteria remain below for reference.
 
 **Audit reference:** `mcp-server/src/services/bootstrap.js` (`accounts = new Map(...)`), `mcp-server/src/core/account-mutation-service.js` (`attachStoredTreasuryMetadata`).
 
@@ -194,7 +197,7 @@ This is not complete launch planning. The audit does not surface every open item
 
 ### P2.4 - Operator frontend can mix live API with demo truth
 
-**Status:** Closed on 2026-05-17 in PR #<TBD> (*Package E — operator frontend truth modes*).
+**Status:** Closed on 2026-05-18 in `8a57a12` (PR #425 *Package E - operator frontend truth modes*).
 **Verification:** `npm run test:app` runs `app/lib/ui/page-mode.test.mjs` — 11/11 pass, covering the classifier's precedence (demo > degraded > live-while-loading > empty > live), the `isDemoModeEnabled()` strict-`"true"` check, and a fixture-absence regression that fails if anyone re-adds `app/components/disputes/data.ts` or `app/components/sessions/data.ts`. `npm --workspace app run typecheck` clean against the new `app/lib/ui/page-mode.js` + `<DemoModeBanner />` wiring.
 **Notes:** The mechanical enforcement lives in three small pieces: (a) `app/lib/ui/page-mode.js` is the single classifier any page reaches for to decide `live`/`empty`/`degraded`/`demo`; (b) `<DemoModeBanner />` mounted in the authed layout (`app/app/(authed)/layout.tsx`) renders only when `NEXT_PUBLIC_DEMO_MODE=true`, so demo data can never appear without an unmistakable on-screen marker; (c) the two known-orphaned fixture exports (`DISPUTES`, `SESSIONS`) were already not imported by any live page and are now deleted, so they cannot drift back into a production code path. The classifier + the deletion together make the empty-state contract impossible to bypass silently. Per-page visible mode chips are deliberately not part of this PR — operator pages already drive empty / degraded views through their own copy; the classifier just makes that decision uniform.
 
@@ -222,7 +225,9 @@ This is not complete launch planning. The audit does not surface every open item
 
 ### P2.5 - Public site shows a fake "Live" stream
 
-**Status:** Open. **Launch-blocking.**
+**Status:** Closed on 2026-05-17 in `0c313e3` (PR #405 *Package F - relabel homepage console as Example, not Live*) and reinforced by `5947c01` (PR #409 *Make homepage proof stream explicitly scripted*).
+**Verification:** Path B was chosen for rc1: the deterministic public stream is explicitly example/scripted and no longer presents itself as live platform activity.
+**Historical note:** The original path options remain below for reference.
 
 **Audit reference:** `marketing/src/pages/index.astro` labels the homepage console as live/operator staging; `marketing/public/console-stream.js` contains deterministic scripted output and explicitly says there is no network.
 
@@ -258,7 +263,9 @@ This is not complete launch planning. The audit does not surface every open item
 
 ### P2.5b - Policy state is process-local demo state
 
-**Status:** Open. **Not launch-blocking for bootstrap, but should close before public posters arrive.**
+**Status:** Closed on 2026-05-18 in `b94dd42` (PR #421 *Package G - durable PolicyService + extracted built-in seed*).
+**Verification:** Durable `PolicyService` and extracted built-in seed landed; `PROJECT_ROADMAP.md` treats policy durability as done.
+**Historical note:** The original audit rationale and close criteria remain below for reference.
 
 **Audit reference:** `mcp-server/src/protocols/http/server.js` stores `POLICY_PROPOSALS` in a process-local `Map` and defines built-in policies inline.
 
@@ -330,7 +337,9 @@ This is not complete launch planning. The audit does not surface every open item
 
 ### P3.8 - Generated output beside source
 
-**Status:** Open. **Not launch-blocking, but worth catching now.**
+**Status:** Closed on 2026-05-17 in `17fe61b` (PR #406 *Guard generated deploy output edits*).
+**Verification:** The generated output guard is now a CI check and `AGENTS.md` documents normal source-vs-generated edit rules.
+**Historical note:** The original audit rationale and close criteria remain below for reference.
 
 **Audit reference:** `AGENTS.md`, root scripts, generated `frontend/` and `site/` deploy outputs.
 
@@ -512,7 +521,7 @@ The remediation work should be split into narrow branches so multiple agents can
 
 ### Package E - P2.4 operator frontend truth modes
 
-**Status:** Closed on 2026-05-17 in PR #<TBD>. The mechanical enforcement now lives in `app/lib/ui/page-mode.js`, `<DemoModeBanner />` mounted globally in the authed layout, the `NEXT_PUBLIC_DEMO_MODE` env (defaulting to `false` and inlined at build time by Next.js), and the orphaned fixture exports under `app/components/{disputes,sessions}/data.ts` are deleted with a `node --test` regression that fails if anyone re-adds them or any of the other known fixture re-entry paths.
+**Status:** Closed on 2026-05-18 in `8a57a12` (PR #425 *Package E - operator frontend truth modes*). The mechanical enforcement now lives in `app/lib/ui/page-mode.js`, `<DemoModeBanner />` mounted globally in the authed layout, the `NEXT_PUBLIC_DEMO_MODE` env (defaulting to `false` and inlined at build time by Next.js), and the orphaned fixture exports under `app/components/{disputes,sessions}/data.ts` are deleted with a `node --test` regression that fails if anyone re-adds them or any of the other known fixture re-entry paths.
 
 **Suggested branch:** `codex/p2-operator-demo-truth`
 **Can start:** Yes, but wire health capability warnings after Package B lands.

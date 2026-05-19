@@ -8,10 +8,11 @@ This audit reconciles the current spec and roadmap after the recent framework,
 USDC, discovery, secrets, product-proof, lineage, event-log, schema-native,
 idempotency, dispute, and async-XCM foundation work.
 
-Primary source of truth:
+Historical source context at the time of this audit:
 
-- [AVERRAY_WORKING_SPEC.md](./AVERRAY_WORKING_SPEC.md) - current v2.9 product
-  and launch spec.
+- [AVERRAY_WORKING_SPEC.md](./AVERRAY_WORKING_SPEC.md) - then-current product
+  and launch spec. Current status now lives in
+  [PROJECT_ROADMAP.md](./PROJECT_ROADMAP.md).
 - [CORE_FRAMEWORK_ROADMAP.md](./CORE_FRAMEWORK_ROADMAP.md) - framework
   implementation tracker.
 - [RC1_IMPLEMENTATION_PLAN.md](./RC1_IMPLEMENTATION_PLAN.md) - historical rc1
@@ -276,8 +277,9 @@ SSH/basic-auth/admin-JWT cutovers, and the basic hosted smoke is green.
 ## Missed Or Upgraded Plan Items
 
 1. `CORE_FRAMEWORK_ROADMAP.md` still referenced `RC1_WORKING_SPEC.md` as the
-   roadmap boundary. The current source of truth is `AVERRAY_WORKING_SPEC.md`;
-   `RC1_WORKING_SPEC.md` is historical context.
+   roadmap boundary. At the time of this audit, the current source of truth was
+   `AVERRAY_WORKING_SPEC.md`; `PROJECT_ROADMAP.md` now owns current status and
+   sequencing.
 2. The current spec summary still implied wallet yield as if it were live. This
    audit updates it to reflect the v2.2 decision: v1 is USDC-only; yield is
    post-week-12 and post-native-XCM proof.

@@ -1,13 +1,29 @@
 # Averray Unified Project Roadmap
 
-**Status date:** 2026-05-19  
-**Baseline reviewed:** `origin/main` at `ca32856`  
-**Purpose:** one status and roadmap page for the specs, audits, launch checklists,
-security plans, and product-proof work.
+- **Status date:** 2026-05-19
+- **Baseline reviewed:** `origin/main` at `163bd76`
+- **Latest docs audit:** [`DOCS_AUDIT_2026-05-19.md`](./DOCS_AUDIT_2026-05-19.md)
+- **Purpose:** one status and roadmap page for the specs, audits, launch
+  checklists, security plans, and product-proof work.
 
 This page is the current source of truth for "what is done, what is open, and
 what comes next." The older docs remain useful for deep context, acceptance
 criteria, and implementation notes, but this file owns the unified status.
+
+## Roadmap Authority
+
+Use this file as the operational guideline for sequencing work.
+
+- If another docs file conflicts with this roadmap, this roadmap wins unless
+  code, production evidence, or a newer PR proves otherwise.
+- Detail docs may define implementation criteria, but they do not reopen or
+  close roadmap items by themselves.
+- Any PR that materially changes status, launch readiness, mainnet readiness,
+  security posture, or deferred scope should update this file in the same PR.
+- Historical docs should keep their context, but must point back here instead
+  of claiming to be the active roadmap.
+- Chain-specific claims should be checked against the Polkadot docs MCP or
+  runtime state before they are promoted into this roadmap.
 
 ## Status Terms
 
@@ -59,6 +75,7 @@ Polkadot-specific USDC facts were checked against the Polkadot docs MCP:
 | [`AUDIT_REMEDIATION.md`](./AUDIT_REMEDIATION.md) | Detailed audit finding definitions and acceptance criteria. Some statuses are now stale; use this roadmap for current status. |
 | [`CORE_FRAMEWORK_ROADMAP.md`](./CORE_FRAMEWORK_ROADMAP.md) | Framework implementation detail for jobs, sessions, verification, SDK, timelines, and operations. |
 | [`SPEC_AUDIT_2026-05-13.md`](./SPEC_AUDIT_2026-05-13.md) | Historical reconciliation audit. Superseded for current status, still useful for rationale. |
+| [`DOCS_AUDIT_2026-05-19.md`](./DOCS_AUDIT_2026-05-19.md) | Latest audit of roadmap/spec/checklist doc drift and missing governance. |
 | [`PRODUCTION_CHECKLIST.md`](./PRODUCTION_CHECKLIST.md) | Operator launch gate. Still authoritative for go/no-go checkboxes. |
 | [`PRODUCT_PROOF_GATE.md`](./PRODUCT_PROOF_GATE.md) | Product-proof evidence and smoke command references. |
 | [`PHASE_4B_STAGE_2C_PLAN.md`](./PHASE_4B_STAGE_2C_PLAN.md) | Current KMS JWT cutover plan. |
@@ -271,4 +288,3 @@ The project should be tracked in three completion layers:
 3. **Business thesis complete:** week-12 acceptance gate passes, pilot
    integrations exist, and the receipt/reputation network is useful without
    relying on token speculation or unproven yield.
-
