@@ -160,7 +160,7 @@ externally ready.
 | Hosted `/admin/status` async XCM smoke | Open | Run hosted check with live admin JWT and verify async XCM watcher lane. |
 | Metrics auth | Ready for proof | Code deployed in `#445`; hosted `/metrics` now fails closed with `503 metrics_auth_unconfigured` when no scraper token is configured. Close after production `METRICS_BEARER_TOKEN` is set and `CHECK_METRICS_AUTH=1` proves unauthenticated `401` plus scraper-token `200` against the hosted stack. |
 | Sentry/logging decision | Open | Backend Sentry configured or explicitly deferred; frontend decision recorded; structured logs visible. |
-| Alert destination | Open | At least one deploy/health failure path reaches the operator. |
+| Alert destination | Ready for proof | Alert wrapper is tested for structured webhook delivery on smoke failure in `#449`. Close after `ALERT_WEBHOOK_URL` is configured in the production scheduler environment and one deliberate hosted smoke failure reaches the operator channel. |
 | Operator self-report evidence | Open | Hermes/operator report proof replaces optional Resend email proof. Evidence should include correlation ID and durable destination. |
 | Dispute verdict hosted proof | Open | Hosted smoke creates a dispute verdict receipt or documented equivalent. |
 | Public discovery/schema/trust gate | Open | Hosted gate proves deployed public pages and API mirror match current behavior. |
