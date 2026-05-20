@@ -14,15 +14,15 @@
  *   2. Set SENTRY_DSN (and optionally SENTRY_ENVIRONMENT / SENTRY_RELEASE)
  */
 
-export async function createObservability({ logger }) {
-  const dsn = process.env.SENTRY_DSN?.trim();
+export async function createObservability({ logger, env = process.env, sentryLoader = loadSentry } = {}) {
+  const dsn = env.SENTRY_DSN?.trim();
   if (!dsn) {
     return logOnly(logger);
   }
 
   let sentry;
   try {
-    sentry = await loadSentry(dsn, logger);
+    sentry = await sentryLoader(dsn, logger, env);
   } catch (error) {
     logger.warn?.(
       { err: error instanceof Error ? error : new Error(String(error)) },
@@ -55,7 +55,7 @@ export async function createObservability({ logger }) {
   };
 }
 
-async function loadSentry(dsn, logger) {
+async function loadSentry(dsn, logger, env = process.env) {
   let mod;
   try {
     mod = await import("@sentry/node");
@@ -67,12 +67,12 @@ async function loadSentry(dsn, logger) {
   }
   mod.init({
     dsn,
-    environment: process.env.SENTRY_ENVIRONMENT ?? process.env.NODE_ENV ?? "production",
-    release: process.env.SENTRY_RELEASE,
-    tracesSampleRate: parseRate(process.env.SENTRY_TRACES_SAMPLE_RATE, 0)
+    environment: env.SENTRY_ENVIRONMENT ?? env.NODE_ENV ?? "production",
+    release: env.SENTRY_RELEASE,
+    tracesSampleRate: parseRate(env.SENTRY_TRACES_SAMPLE_RATE, 0)
   });
   logger.info?.(
-    { environment: process.env.SENTRY_ENVIRONMENT ?? process.env.NODE_ENV ?? "production" },
+    { environment: env.SENTRY_ENVIRONMENT ?? env.NODE_ENV ?? "production" },
     "observability.sentry_ready"
   );
   return mod;

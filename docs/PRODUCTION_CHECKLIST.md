@@ -255,20 +255,20 @@ commands per box:
   ```
   The gate requires unauthenticated `/metrics` to return `401` and the same
   request with `Authorization: Bearer <token>` to return `200`.
-- **Backend Sentry configured for the active environment.** Set
-  `SENTRY_DSN` (and optionally `SENTRY_ENVIRONMENT`, `SENTRY_RELEASE`,
-  `SENTRY_TRACES_SAMPLE_RATE`) in `deploy/backend.env.template`, then
-  `npm install @sentry/node` in `mcp-server`. The backend log line
-  `observability.sentry_ready` confirms init. Flip when that log line is
-  present in the current deploy.
-- **Frontend Sentry runtime config.** Conditional. v1 has no frontend
-  Sentry scaffolding. Two valid postures: (a) flip with the inline note
-  *"N/A — frontend error reporting not required for v1"* if that is the
-  decision, or (b) leave unchecked until frontend Sentry is scaffolded.
+- **Sentry/logging posture recorded for the active environment.** The current
+  v1 posture is recorded in
+  [`OBSERVABILITY_POSTURE.md`](./OBSERVABILITY_POSTURE.md): backend Sentry is
+  optional/deferred unless a `SENTRY_DSN` is configured, backend 5xx capture
+  always falls back to structured logs, and frontend Sentry is deferred for v1.
+  If Sentry is enabled, set `SENTRY_DSN` (and optionally
+  `SENTRY_ENVIRONMENT`, `SENTRY_RELEASE`, `SENTRY_TRACES_SAMPLE_RATE`) and
+  verify `observability.sentry_ready` appears after backend startup.
 - **Structured logs visible from the current deploy target.**
   `LOG_LEVEL=info` is set; the backend writes structured JSON via the
-  default logger. Verify the operator can read backend logs (via
-  `journalctl`, `docker logs`, or the platform's log surface), then flip.
+  default logger and records 5xx captures as
+  `observability.captured_exception`. Verify the operator can read backend
+  logs (via `journalctl`, `docker logs`, or the platform's log surface), then
+  flip.
 - **Alert destination for hosted smoke-check failures.** Set
   `ALERT_WEBHOOK_URL` (and optionally `ALERT_SERVICE_NAME`,
   `ALERT_ENVIRONMENT`) in the environment that runs
