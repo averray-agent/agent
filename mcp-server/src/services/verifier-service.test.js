@@ -5,12 +5,15 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { VerifierService } from "./verifier-service.js";
-import { VerifierRegistry } from "./verifier-handlers.js";
+import { HANDLER_VERSIONS, VerifierRegistry } from "./verifier-handlers.js";
 import { MemoryStateStore } from "../core/state-store.js";
 import { transitionSession } from "../core/session-state-machine.js";
 import { normalizeSubmission } from "../core/submission.js";
 import { buildAverrayDisclosureFooter } from "../core/maintainer-surface-policy.js";
-import { buildVerificationContract } from "../core/verifier-contract.js";
+import {
+  buildVerificationAuditFields,
+  buildVerificationContract,
+} from "../core/verifier-contract.js";
 
 const FIXTURE_ROOT = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -462,7 +465,76 @@ test("verification contract prefers job.verification.evidenceSchemaRef when both
   assert.equal(contract.evidenceSchemaRef, "schema://jobs/github-pr-evidence-output");
 });
 
-for (const handlerId of ["benchmark", "deterministic", "github_pr"]) {
+// ── policyVersion split (P1 verifier replay hardening) ───────────────
+// verifierConfigVersion is the *data* version of the config blob shape.
+// policyVersion is the *rules* version (what the verifier enforces).
+// They are independent so a rules bump does not force a config-shape
+// bump, and a shape migration does not pretend the rules changed.
+
+test("verification contract reads policyVersion when explicitly set on verifierConfig", () => {
+  const job = {
+    verifierMode: "benchmark",
+    verifierConfig: {
+      version: 2,
+      policyVersion: 3,
+      handler: "benchmark",
+      requiredKeywords: ["alpha"],
+      minimumMatches: 1
+    }
+  };
+  const contract = buildVerificationContract(job, {});
+  // Config-shape version reflects `version` (the blob shape bumped to 2).
+  assert.equal(contract.verifierConfigVersion, 2);
+  // Rules version reflects `policyVersion` (the rules bumped to 3,
+  // independent of the shape bump).
+  assert.equal(contract.policyVersion, 3);
+  assert.ok(contract.snapshotFields.includes("policyVersion"));
+});
+
+test("verification contract falls back to verifierConfig.version when policyVersion is absent (legacy compat)", () => {
+  // Pre-split fixtures and stored verifications only carry `version`.
+  // policyVersion must derive from version so legacy data still
+  // produces a meaningful rules-version signal.
+  const job = {
+    verifierMode: "deterministic",
+    verifierConfig: {
+      version: 1,
+      handler: "deterministic",
+      expectedOutputs: ["release_id"],
+      matchMode: "contains_all"
+    }
+  };
+  const contract = buildVerificationContract(job, {});
+  assert.equal(contract.verifierConfigVersion, 1);
+  assert.equal(contract.policyVersion, 1);
+});
+
+test("verification audit fields surface policyVersion alongside verifierConfigVersion", () => {
+  // The audit-fields helper is what the persistence layer writes to
+  // state-store. policyVersion must ride along so detectReplayDrift can
+  // compare it on replay independently of the config-shape version and
+  // the handler-code version.
+  const job = {
+    verifierMode: "benchmark",
+    verifierConfig: {
+      version: 2,
+      policyVersion: 5,
+      handler: "benchmark",
+      requiredKeywords: ["alpha"],
+      minimumMatches: 1
+    }
+  };
+  const fields = buildVerificationAuditFields(job, { verdict: { handlerVersion: 1 } });
+  assert.equal(fields.verifierConfigVersion, 2);
+  assert.equal(fields.policyVersion, 5);
+  assert.equal(fields.verificationContract.policyVersion, 5);
+});
+
+// Iterate the live handler registry — adding a new handler to
+// HANDLER_VERSIONS automatically picks up its fixtures here, and the
+// fixture-coverage lint test below fails first if a handler version
+// ships without a fixture.
+for (const handlerId of Object.keys(HANDLER_VERSIONS)) {
   for (const { name, version, fixture } of loadFixturesForHandler(handlerId)) {
     test(`handler-versioned replay fixture remains stable under current handler: ${name}`, async () => {
       // Force the github_pr handler down its tokenless path so replay does not depend on a live GitHub fetch.
@@ -492,6 +564,35 @@ for (const handlerId of ["benchmark", "deterministic", "github_pr"]) {
       }
     });
   }
+}
+
+// ── Fixture-coverage lint (P1 verifier replay hardening) ─────────────
+// The operational enforcement of the roadmap close criterion "require
+// handler-versioned fixtures before v2 handler changes". For every entry
+// in HANDLER_VERSIONS, assert there is a v<N>/<case>.json fixture file
+// on disk. Bumping a handler version in the registry without committing
+// a fixture for the new version fails this test in CI — the bump cannot
+// land without its replay evidence.
+for (const [handlerId, version] of Object.entries(HANDLER_VERSIONS)) {
+  test(`fixture coverage: ${handlerId} v${version} has at least one replay fixture`, () => {
+    const versionDir = path.join(FIXTURE_ROOT, handlerId, `v${version}`);
+    const cases = readdirSync(versionDir).filter((name) => name.endsWith(".json"));
+    assert.ok(
+      cases.length >= 1,
+      `Handler ${handlerId} declares version ${version} in HANDLER_VERSIONS but has no fixture at ${versionDir}/. Add at least one v${version}/<case>.json before the version bump can ship.`
+    );
+    // Also assert each fixture's handlerVersion matches what the registry
+    // claims — a fixture stale by a bump that someone forgot to refresh
+    // would otherwise silently slip through as "covered".
+    for (const file of cases) {
+      const fixture = JSON.parse(readFileSync(path.join(versionDir, file), "utf8"));
+      assert.equal(
+        fixture.handlerVersion,
+        version,
+        `Fixture ${handlerId}/v${version}/${file} declares handlerVersion ${fixture.handlerVersion}, but HANDLER_VERSIONS[${handlerId}] = ${version}. Move the fixture under v${fixture.handlerVersion}/ or update its handlerVersion.`
+      );
+    }
+  });
 }
 
 test("replayVerification reads stored verifier config snapshot when live job config drifts (benchmark)", async () => {
