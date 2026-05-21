@@ -171,7 +171,7 @@ externally ready.
 | Item | Status | Close criteria |
 | --- | --- | --- |
 | HTTP server route split (`P2.3`) | Open | Split high-risk route groups out of the monolith without changing behavior; add route-level tests. |
-| Frontend auth guard (`P3.7`) | Open | Authenticated app layout has a real guard/401 flow and cannot show misleading authed shells. |
+| Frontend auth guard (`P3.7`) | Done | `(authed)/layout.tsx` wraps the operator shell in `<AuthedGuard>`, which consumes `useAuth()` and the pure-decision module `app/lib/auth/auth-guard-decisions.js`. Unauthed visitors see a neutral placeholder and redirect to `/sign-in?next=<path>` (open-redirect-safe, `/sign-in` loops blocked); mid-session 401 cascades via the existing `AuthRefreshBridge` clearing the token store. Hydration-race guarded so neither side of the auth boundary flashes the wrong frame. Tests: `node --test app/lib/auth/auth-guard-decisions.test.mjs` (9 cases); `test:app` extended to cover `app/lib/auth/*.test.mjs`. |
 | Verifier replay hardening | Open | Split verifier policy version from config version and require handler-versioned fixtures before v2 handler changes. |
 | Schema registration for external jobs | Open | Custom/off-platform references can register signed schemas with clear trust boundaries. |
 | Dispute/arbitration semantics | Open | Decide release path, store arbitrator reasoning under content hash, expose dispute UI fields, and rehearse arbitrator notifications. |
@@ -308,8 +308,8 @@ As of 2026-05-19:
    pauser/rehearsal, backups, restore drill, `/admin/status` hosted check,
    metrics/logging/alerts, self-report evidence, dispute verdict proof, and
    public discovery/schema/trust proof.
-4. Open or assign narrow PRs for `P2.3` route split and `P3.7` frontend auth
-   guard if no existing agent owns them.
+4. Open or assign a narrow PR for `P2.3` route split if no existing agent
+   owns it. (`P3.7` frontend auth guard closed; row marked Done above.)
 5. Operator: act on `PHASE_4E_PLAN.md` § 7 decision points (one vs two
    operators, registrar identity + FIDO2 support, GitHub org-2FA member
    audit before flipping enforcement) before procuring YubiKeys.
