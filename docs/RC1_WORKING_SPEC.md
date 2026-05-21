@@ -552,10 +552,13 @@ Before public v1.0.0-rc1 launch:
 **Instrumentation (week 1 prerequisite):**
 - [ ] `funded_jobs` table live and populating
 - [ ] Daily upstream-status poller running against GitHub + MediaWiki APIs
-- [ ] Hermes/operator self-report proof scheduled and visible
+- [x] Hermes/operator self-report proof scheduled and visible
   - Scheduled/manual GitHub workflow exists for `ops_health` and
-    `daily_operator_brief`; keep open until the first production artifacts are
-    recorded.
+    `daily_operator_brief`; first production artifacts were recorded in
+    workflow run `26211100734` on 2026-05-21.
+  - Broader launch evidence still needs the hosted bootstrap instrumentation
+    smoke rerun with a live admin JWT so `/admin/status` sanitization is
+    freshly recorded.
 - [ ] Optional branded email self-report configured after sender-domain verification
 
 **Contract surface:**

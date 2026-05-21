@@ -85,6 +85,24 @@ scheduled operator self-reports.
   - `failed` — any other non-zero exit. Fails the report workflow after the
     artifact upload step.
 
+**First production proof:** manual workflow run
+[`26211100734`](https://github.com/averray-agent/agent/actions/runs/26211100734)
+on 2026-05-21 completed both report kinds successfully against the deployed
+production stack:
+
+- `ops_health`: artifact
+  `hermes-operator-report-ops_health-26211100734-1`, artifact id
+  `7129369151`, correlation id
+  `github-operator-report-ops_health-26211100734-1`.
+- `daily_operator_brief`: artifact
+  `hermes-operator-report-daily_operator_brief-26211100734-1`, artifact id
+  `7129370901`, correlation id
+  `github-operator-report-daily_operator_brief-26211100734-1`.
+
+The downloaded manifests reported `outcome: success` for both reports, and a
+local scan of the artifacts found no obvious API key, JWT, 1Password service
+account token, or SSH private-key patterns.
+
 ## Routines without a surface in this repo
 
 The repo-visible scheduled workflow above proves that GitHub can ask
@@ -125,8 +143,7 @@ a single id:
 
 ## Remaining follow-up hardening
 
-- Run the scheduled operator-report workflow once on `main` and record the
-  first successful `ops_health` and `daily_operator_brief` artifact ids in
-  the production checklist.
+- Keep the scheduled operator-report workflow enabled and periodically confirm
+  that new daily runs still upload both report artifacts.
 - Confirm any Hermes-container-native Slack or cron routines in
   `averray-reference-agent` use the same durable correlation-id discipline.

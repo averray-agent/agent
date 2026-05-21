@@ -222,9 +222,20 @@ RUN_SUBSCAN_XCM_VALIDATION=1 ./scripts/ops/check-release-readiness.sh testnet
     `ops_health` and `daily_operator_brief`, and each run includes a
     `hermes-operator-report-<report-kind>-<run-id>-<run-attempt>` artifact
     with the full Hermes log plus JSON evidence manifest.
+    - First proof captured on 2026-05-21: workflow run
+      `26211100734` succeeded with artifacts
+      `hermes-operator-report-ops_health-26211100734-1` (artifact id
+      `7129369151`) and
+      `hermes-operator-report-daily_operator_brief-26211100734-1`
+      (artifact id `7129370901`).
   - The workflow summaries or artifacts expose correlation ids with the
     `github-operator-report-<report-kind>-<run-id>-<run-attempt>` format
     and no API keys, JWTs, or provider tokens.
+    - Verified against the downloaded run `26211100734` artifacts: correlation
+      ids `github-operator-report-ops_health-26211100734-1` and
+      `github-operator-report-daily_operator_brief-26211100734-1`; no obvious
+      API key, JWT, 1Password service-account token, or SSH private-key
+      patterns found.
   - This command passes:
     ```bash
     ADMIN_JWT='<admin-jwt>' \

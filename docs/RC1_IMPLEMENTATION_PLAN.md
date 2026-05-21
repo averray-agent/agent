@@ -200,9 +200,15 @@ generation are implemented as backend foundations.
 - [x] Add a scheduled/manual `Hermes Operator Report` workflow for read-only
   `ops_health` and `daily_operator_brief` evidence with correlation IDs,
   step summaries, and 90-day artifacts.
-- [ ] Close the operator-visible self-report proof through Hermes post-deploy
+- [x] Close the operator-visible self-report proof through Hermes post-deploy
   verification plus the first successful scheduled/manual ops-health and
-  daily-brief artifacts.
+  daily-brief artifacts. Production deploy run `26211011993` uploaded
+  `hermes-post-deploy-26211011993`; operator report run `26211100734`
+  uploaded `hermes-operator-report-ops_health-26211100734-1` and
+  `hermes-operator-report-daily_operator_brief-26211100734-1`.
+- [ ] Rerun the hosted bootstrap instrumentation smoke with a live admin JWT
+  and record the sanitized `/admin/status` evidence in the production
+  checklist.
 - [ ] Optional: wire branded email delivery once a verified sender domain,
   recipients, and cadence are finalized.
 
