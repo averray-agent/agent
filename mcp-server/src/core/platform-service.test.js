@@ -485,9 +485,11 @@ test("getSessionTimeline includes transitions and verification state", async () 
   const timeline = await service.getSessionTimeline(submitted.sessionId);
   assert.equal(timeline.timelineVersion, "v2");
   assert.equal(timeline.session.status, "resolved");
+  assert.equal(result.verifierPolicyVersion, 1);
   assert.equal(result.verifierConfigVersion, 1);
   assert.equal(result.verificationContract.version, "verification-contract-v1");
   assert.equal(result.verificationContract.handler, "benchmark");
+  assert.equal(result.verificationContract.verifierPolicyVersion, 1);
   assert.equal(result.verificationInput.kind, "structured");
   assert.equal(typeof result.verifierConfigHash, "string");
   assert.equal(typeof result.verificationInputHash, "string");
@@ -512,6 +514,7 @@ test("getSessionTimeline includes transitions and verification state", async () 
   assert.equal(verificationEvent.topic, "session.verification");
   assert.equal(verificationEvent.source, "verification");
   assert.equal(verificationEvent.data.handlerVersion, 1);
+  assert.equal(verificationEvent.data.verifierPolicyVersion, 1);
   assert.equal(verificationEvent.data.verifierConfigVersion, 1);
 });
 

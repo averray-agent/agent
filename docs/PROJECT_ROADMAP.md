@@ -172,7 +172,7 @@ externally ready.
 | --- | --- | --- |
 | HTTP server route split (`P2.3`) | Open | Split high-risk route groups out of the monolith without changing behavior; add route-level tests. |
 | Frontend auth guard (`P3.7`) | Open | Authenticated app layout has a real guard/401 flow and cannot show misleading authed shells. |
-| Verifier replay hardening | Open | Split verifier policy version from config version and require handler-versioned fixtures before v2 handler changes. |
+| Verifier replay hardening | Done | Verification audit fields now split `verifierPolicyVersion` from `verifierConfigVersion`; replay drift reports policy-version changes; every registered verifier handler must carry current-version replay fixtures before handler changes. |
 | Schema registration for external jobs | Open | Custom/off-platform references can register signed schemas with clear trust boundaries. |
 | Dispute/arbitration semantics | Open | Decide release path, store arbitrator reasoning under content hash, expose dispute UI fields, and rehearse arbitrator notifications. |
 | Timeline operator UX verification | Open | Backend trace filters landed. Close criterion: confirm the operator app exposes the intended filters and either mark Done (if already wired in `app/`) or open a narrow PR to wire them. |

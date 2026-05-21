@@ -40,6 +40,7 @@ export class VerificationIngestionService {
         reasonCode: verdict.reasonCode,
         handler: verdict.handler,
         handlerVersion: auditFields.handlerVersion ?? verdict.handlerVersion,
+        verifierPolicyVersion: auditFields.verifierPolicyVersion,
         verifierConfigVersion: auditFields.verifierConfigVersion
       }
     }, status, {
@@ -49,6 +50,7 @@ export class VerificationIngestionService {
         reasonCode: verdict.reasonCode,
         handler: verdict.handler,
         handlerVersion: auditFields.handlerVersion ?? verdict.handlerVersion,
+        verifierPolicyVersion: auditFields.verifierPolicyVersion,
         verifierConfigVersion: auditFields.verifierConfigVersion
       }
     });
@@ -86,6 +88,7 @@ export class VerificationIngestionService {
         status,
         handler: verdict.handler,
         handlerVersion: auditFields.handlerVersion ?? verdict.handlerVersion,
+        verifierPolicyVersion: auditFields.verifierPolicyVersion,
         verifierConfigVersion: auditFields.verifierConfigVersion
       }
     });
@@ -135,6 +138,7 @@ export class VerificationIngestionService {
         reasonCode: verdict.reasonCode,
         handler: verdict.handler,
         handlerVersion: auditFields.handlerVersion ?? verdict.handlerVersion,
+        verifierPolicyVersion: auditFields.verifierPolicyVersion,
         verifierConfigVersion: auditFields.verifierConfigVersion,
         disputeId: disputed ? disputeIdForSession(session.sessionId) : undefined
       }

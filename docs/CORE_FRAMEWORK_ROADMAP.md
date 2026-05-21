@@ -106,26 +106,28 @@ is still too loose for high-trust operation.
   endpoints
 - verification results persist `verificationInput`,
   `verificationInputHash`, `verifierConfigSnapshot`, `verifierConfigHash`,
-  `verifierConfigVersion`, and `handlerVersion`
+  `verifierPolicyVersion`, `verifierConfigVersion`, and `handlerVersion`
 - direct verification ingestion and `/verifier/run` both enrich stored verdicts
   with the same audit fields
 - `/verifier/replay` evaluates against the stored verifier config snapshot when
   one exists, so audits are not silently affected by later config edits
+- replay drift reports handler, handler-version, verifier-policy-version,
+  evidence-schema, and verifier-config-hash mismatches
+- every registered verifier handler has a current-version fixture under
+  `mcp-server/src/services/__fixtures__/verifier-replay/<handler>/vN/`
 
 ### Remaining gaps
 
 - `benchmark` and `deterministic` handlers can still operate on plain text
   evidence for legacy jobs
-- verifier policy version is not yet separate from verifier config version
 - replay still uses the current handler implementation; `handlerVersion`
   records the version that ran, but the code itself is not version-pinned
 
 ### Concrete next changes
 
 - add `evidenceSchemaRef` or `submissionSchemaRef` to jobs
-- split `policyVersion` from `verifierConfig.version` when verifier rules move
-  beyond simple config data
-- add handler-versioned replay fixtures before introducing v2 verifier handlers
+- keep adding handler-versioned replay fixtures before introducing v2 verifier
+  handlers or changing current handler semantics
 
 ### What this unlocks
 
