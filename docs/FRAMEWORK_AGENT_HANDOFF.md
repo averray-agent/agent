@@ -1,12 +1,26 @@
 # Framework Agent Handoff — Averray Implementation
 
-**Doc version:** v2.4 (2026-05-17)
+**Doc version:** v2.5 (2026-05-21)
 **Purpose:** Context document for the framework agent picking up implementation work on Averray.
-**Companion documents:** `AVERRAY_WORKING_SPEC.md` (v2.2 architecture spec),
-`AVERRAY_VERIFICATION_LEDGER.md` (post-verification, 2026-04-28), and
-`AUDIT_REMEDIATION.md` (multi-agent remediation board, the active coordination
-contract for in-flight P1.x and P2.x findings).
-**Read this first.** Then read the three companion documents in the order described below.
+**Companion documents:**
+
+- [`PROJECT_ROADMAP.md`](./PROJECT_ROADMAP.md) — **current status authority**;
+  the consolidated source of truth for "what is done, what is open, what
+  comes next." If another doc conflicts with the roadmap, the roadmap wins
+  unless code or production evidence proves otherwise.
+- [`AVERRAY_WORKING_SPEC.md`](./AVERRAY_WORKING_SPEC.md) — v2.2 architecture
+  spec; design.
+- [`AVERRAY_VERIFICATION_LEDGER.md`](./AVERRAY_VERIFICATION_LEDGER.md) —
+  post-verification (2026-04-28); empirical receipts against `docs.polkadot.com`.
+- [`AUDIT_REMEDIATION.md`](./AUDIT_REMEDIATION.md) — multi-agent
+  remediation board; coordination contract for in-flight P1.x and P2.x
+  findings.
+- [`PHASE_4B_KMS_JWT_PLAN.md`](./PHASE_4B_KMS_JWT_PLAN.md) and
+  [`PHASE_5A_IAM_ROLES_ANYWHERE_PLAN.md`](./PHASE_5A_IAM_ROLES_ANYWHERE_PLAN.md)
+  — the two production cutovers that landed 2026-05-21; required
+  reading for anyone touching auth or backend AWS credentials.
+
+**Read this first.** Then read the companion documents in the order described below.
 
 ---
 
@@ -32,10 +46,14 @@ Cross-reference the ledger any time the spec asserts something about Polkadot se
 
 ## Read these first, in this order
 
-1. **The spec's reconciliation log (§15) bottom-up** — newest entry (v2.2) first, then v2.1, etc. This shows how the design evolved and why specific decisions were made. The log is preserved across versions deliberately; it's the audit trail for the design itself.
-2. **The spec's §12 pre-launch checklist** — the canonical list of what `v1.0.0-rc1` needs.
-3. **The verification ledger top summary** — the count of verified vs. corrections-needed vs. empirical claims, and the seven correction themes that flowed into the spec.
-4. **The audit remediation board (`AUDIT_REMEDIATION.md`) "Multi-agent execution board" section** — packages A–J, file scopes, dependencies. Treat that doc as the coordination contract for any in-flight P1.x or P2.x work; one package = one branch = one PR.
+1. **`PROJECT_ROADMAP.md`** — the consolidated status doc. Skim
+   §"Completed Foundations", §"Open Work To RC1/Testnet Launch", and
+   §"Immediate Work Queue" to get oriented on what's done and what's
+   actively in flight. This is the doc to update when you close an item.
+2. **The spec's reconciliation log (§15) bottom-up** — newest entry (v2.2) first, then v2.1, etc. This shows how the design evolved and why specific decisions were made. The log is preserved across versions deliberately; it's the audit trail for the design itself.
+3. **The spec's §12 pre-launch checklist** — the canonical list of what `v1.0.0-rc1` needs. The roadmap is the running status against it.
+4. **The verification ledger top summary** — the count of verified vs. corrections-needed vs. empirical claims, and the seven correction themes that flowed into the spec.
+5. **The audit remediation board (`AUDIT_REMEDIATION.md`) "Multi-agent execution board" section** — packages A–J, file scopes, dependencies. Treat that doc as the coordination contract for any in-flight P1.x or P2.x work; one package = one branch = one PR.
 
 ---
 
@@ -114,10 +132,15 @@ These three are the highest-leverage marketing-surface items per spec §10 Reput
 - Reputation soulbound non-transferability — non-negotiable, hardcoded contract revert
 - **Trust-core-first remediation posture** — every product surface must declare whether it is real, degraded, empty, demo, or local-simulation, and must enforce that declaration mechanically. The audit board (`AUDIT_REMEDIATION.md`) is the live tracker.
 - **Mutation backend gate (`MUTATION_BACKEND=memory|chain|required`)** — Package A, merged 2026-05-17. Money-like routes refuse to mutate local memory in production when chain backend is unavailable.
-- **Backend signer is KMS-backed** — Phase 3 cutover 2026-05-16. `SIGNER_BACKEND=kms`; raw `SIGNER_PRIVATE_KEY` removed from `deploy/backend.env.template`.
+- **Backend blockchain signer is KMS-backed** — Phase 3 cutover 2026-05-16. `SIGNER_BACKEND=kms`; raw `SIGNER_PRIVATE_KEY` removed from `deploy/backend.env.template`.
+- **Backend JWT signer is KMS-backed (ES256)** — Phase 4b Stage 2C-2 cutover 2026-05-21. `JWT_BACKEND=kms`; verifier refuses HS256 and accepts only ES256 against the JWT KMS key (`ECC_NIST_P256`, `kid=jwt-1`). Multi-role array claim shape (`roles: ["admin", …]`) is the canonical token format; service tokens carry `roles: ["service"]`. See [`PHASE_4B_KMS_JWT_PLAN.md`](./PHASE_4B_KMS_JWT_PLAN.md) for the staged cutover and [`PHASE_4B_STAGE_2C_PLAN.md`](./PHASE_4B_STAGE_2C_PLAN.md) §"Stage 2C-3" for the HMAC retirement window (≥30 days after 2026-05-21).
+- **Backend KMS credentials come from IAM Roles Anywhere** — Phase 5a cutover 2026-05-21. The backend's `KMSClient` for both signers uses short-lived STS sessions (`ASIA*`-prefixed) vended by `aws_signing_helper` from X.509 client certs on the VPS. Static IAM access keys are retired from the env template as of Stage 2C-3 (PR #463). Boot-time `kms:GetPublicKey` check (PR #461) validates the credential chain at every container start. See [`PHASE_5A_IAM_ROLES_ANYWHERE_PLAN.md`](./PHASE_5A_IAM_ROLES_ANYWHERE_PLAN.md).
+- **Key separation between blockchain signer and JWT signer is enforced by IAM** — distinct KMS keys, distinct IAM roles, distinct shared-config profiles (`averray-signer-testnet-role` vs. `averray-jwt-signer-testnet-role`). A compromise of one signer cannot mint signatures on the other. The JWT signer's permissions policy (`deploy/iam-policies/averray-jwt-signer-prod-role.json`) is sign-only with an explicit `Deny` on key-deletion / key-disable / policy-mutation actions.
 - **Account overlay precedence and durability** — Package C, merged 2026-05-17. Live chain reads win over stored cache per-key; the `AccountOverlayStore` write-through cache mirrors overlay state to Redis so it survives process restart.
 - **Public-site console is labeled "Example"** — Package F, merged 2026-05-17. No "Live" badge on deterministic animation.
 - **Generated-output guard** — Package H, merged 2026-05-17. Manual edits under `frontend/` and `site/` are rejected without an explicit bypass.
+- **Package I (launch docs) closed 2026-05-21** — `OPERATOR_ONBOARDING.md` (#468), `THREAT_MODEL.md` (#470), and this `FRAMEWORK_AGENT_HANDOFF.md` v2.5 refresh together close Package I from the audit-remediation board. Packages **B, D, E, G, J** remain open at the time of this update.
+- **Phase 2 VPS env-render cutover** — backend + indexer env files rendered at deploy time via `op inject` from `deploy/*.env.template` into `/run/agent-stack/*.env` (tmpfs, mode 0400). Service-account-scoped 1Password tokens; no plaintext secrets at rest in `/srv`. Boot-time `agent-stack-env-render.service` re-renders after every reboot.
 
 ### Open (genuinely undecided)
 
@@ -176,12 +199,44 @@ The same discipline that makes the platform credible to its agents makes the cod
 ## Final notes
 
 - The reconciliation log entries v1.0 through v2.2 in the spec capture eleven sessions of design work. Read them; don't re-derive decisions that were already made deliberately.
-- The spec and ledger were last updated on 2026-04-28. This handoff doc was last updated on 2026-05-17 (v2.4). If you're reading this much later, re-verify ✅ items in the ledger before relying on them — Polkadot is moving fast and the runtime semantics shift with each release.
-- The spec is now ~1100 lines and 15 sections. The ledger is 343 lines. The audit remediation board adds a third document at ~650 lines tracking the trust-core-first remediation packages. The three were designed to be read together; neither alone tells the full story.
+- The spec and ledger were last updated on 2026-04-28. This handoff doc was last updated on 2026-05-21 (v2.5). If you're reading this much later, re-verify ✅ items in the ledger before relying on them — Polkadot is moving fast and the runtime semantics shift with each release.
+- The spec is now ~1100 lines and 15 sections. The ledger is 343 lines. The audit remediation board adds a third document at ~650 lines tracking the trust-core-first remediation packages. [`PROJECT_ROADMAP.md`](./PROJECT_ROADMAP.md) consolidates the current status across all of these.
+
+### v2.5 doc-update notes (2026-05-21)
+
+- **Phase 4b KMS JWT migration complete in prod.** All five stages
+  through Stage 2C-2 landed: HMAC + ES256 verify (#430), SIWE +
+  refresh dispatcher (#432), multi-role array claim (#433),
+  `JWT_PRIMARY_ALG=kms` activation (#434), service-token dispatcher
+  migration (#438), and `JWT_BACKEND=kms` cutover (#439). Verifier
+  no longer accepts HS256. Stage 2C-3 HMAC retirement is still
+  pending ≥30 days after 2026-05-21.
+- **Phase 5a IAM Roles Anywhere live in prod.** The backend's
+  `KMSClient` uses short-lived STS sessions from `aws_signing_helper`
+  rather than long-lived IAM access keys. Cutover landed end-to-end
+  (operator AWS setup, VPS cert + aws-config install, code wiring via
+  `mcp-server/src/services/aws-credentials.js`, Dockerfile
+  `ca-certificates` install in #451, boot-check + provider
+  consistency fixes in #457 and #461, Stage 2C-3 template retirement
+  in #463, rollback robustness fix in #467). One operator-side
+  follow-up remains: Phase 5a-retire (≥30 days after 2026-05-21)
+  deletes the static IAM keys and 1Password fields.
+- **Package I (launch docs) closed.** `OPERATOR_ONBOARDING.md`
+  refreshed for Phase 4b/5a in #468; `THREAT_MODEL.md` refreshed in
+  #470; this v2.5 update is the third deliverable. The package is
+  removed from the active board.
+- **`PROJECT_ROADMAP.md` is now the current status authority.**
+  Earlier docs (this handoff, the spec's §12, `AUDIT_REMEDIATION.md`)
+  remain valuable for design rationale and acceptance criteria, but
+  current "done vs open" lives in the roadmap. Reading order in §"Read
+  these first" now leads with the roadmap.
+- **Reading order grew to five steps** to put the roadmap first.
+- **Locked list expanded** to capture the Phase 4b and Phase 5a
+  cutovers and the key-separation IAM model.
 
 ### v2.4 doc-update notes (2026-05-17)
 
-- Added `AUDIT_REMEDIATION.md` as a third companion document. Packages A–J cover the trust-core-first remediation work; Package I closes with this doc refresh, leaving B, D, E, G, and J open at the time of this update.
-- "Locked" list expanded to cover the Phase 3 KMS signer cutover and Packages A, C, F, H that have closed.
+- Added `AUDIT_REMEDIATION.md` as a companion document. Packages A–J cover the trust-core-first remediation work.
+- "Locked" list expanded to cover the Phase 3 KMS signer cutover and Packages A, C, F, H that closed.
 - Reading order grew to four steps to include the remediation board.
 - For ongoing operational duties, see `OPERATOR_ONBOARDING.md` (new in v2.4) and `INCIDENT_RESPONSE.md`.
