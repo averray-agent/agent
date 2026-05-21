@@ -509,14 +509,17 @@ compose mounts) are all in place:
    boot-time JWT-KMS credential validation (added in #444) should
    print `jwt-kms-credential-check.ok` with the same key metadata.
 
-### Phase 5a-cutover-retire-static-env (small follow-up PR)
+### Phase 5a-cutover-retire-static-env (Stage 2C-3, this PR)
 
 After the cutover-flip has been clean for ≥ 24h:
-- Comment out the four `AWS_*_ACCESS_KEY_*` op:// refs in
-  `deploy/backend.env.template`.
-- Update `secrets-inventory.md` to mark them ⚠️ no (no longer in
-  template). The 1Password items stay for now — IAM keys remain in
-  AWS for rollback.
+- Remove the four `AWS_*_ACCESS_KEY_*` op:// refs from
+  `deploy/backend.env.template`. (Removed rather than commented-out
+  because `scripts/ops/check-env-template-structure.mjs` rejects
+  commented `op://` substrings — `op inject` scans the whole file and
+  fails any literal `op://` outside a valid `KEY=op://...` assignment.)
+- Update `secrets-inventory.md` to strikethrough the four rows and mark
+  them retired from the template; the 1Password items stay for now —
+  IAM keys remain in AWS for rollback.
 
 ### Phase 5a-retire (≥30 days after 5a-cutover)
 
