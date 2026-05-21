@@ -1,16 +1,21 @@
 # Core Framework Roadmap
 
+> Current roadmap/status source: [`PROJECT_ROADMAP.md`](./PROJECT_ROADMAP.md).
+> This framework roadmap remains the detailed implementation reference for
+> jobs, sessions, verification, SDK, timeline, and operations work.
+
 This roadmap turns the current platform framework into a more durable
 production core.
 
-The current product and architecture source document lives in
-[AVERRAY_WORKING_SPEC.md](AVERRAY_WORKING_SPEC.md). Use that spec as the
-roadmap boundary when prioritizing contract, backend, indexer, and operations
-work. [RC1_WORKING_SPEC.md](RC1_WORKING_SPEC.md) is retained as historical
-context only. The PR-sized rc1 execution sequence still lives in
-[RC1_IMPLEMENTATION_PLAN.md](RC1_IMPLEMENTATION_PLAN.md), and the latest
-cross-plan reconciliation lives in
-[SPEC_AUDIT_2026-05-13.md](SPEC_AUDIT_2026-05-13.md).
+The current project status and sequencing boundary lives in
+[PROJECT_ROADMAP.md](PROJECT_ROADMAP.md). The product and architecture source
+document remains [AVERRAY_WORKING_SPEC.md](AVERRAY_WORKING_SPEC.md).
+[RC1_WORKING_SPEC.md](RC1_WORKING_SPEC.md) is retained as historical context
+only. The PR-sized rc1 execution sequence in
+[RC1_IMPLEMENTATION_PLAN.md](RC1_IMPLEMENTATION_PLAN.md) and the
+[SPEC_AUDIT_2026-05-13.md](SPEC_AUDIT_2026-05-13.md) reconciliation are
+historical references unless `PROJECT_ROADMAP.md` explicitly pulls an item
+forward.
 
 It is intentionally grounded in the code that exists today:
 
@@ -551,13 +556,16 @@ As of [SPEC_AUDIT_2026-05-13.md](SPEC_AUDIT_2026-05-13.md), the next work
 should prioritize live-proof and launch-risk items before adding new product
 surface:
 
-1. close operator self-report proof through Hermes/operator reporting: keep
-   `run_hermes_post_deploy=1`, confirm scheduled ops-health and daily-brief
-   evidence, and run the hosted smoke's bootstrap instrumentation gate to prove
-   upstream-status plus optional email status are well-formed and do not leak
-   provider/API-key-shaped tokens. Branded Resend email delivery remains an
-   optional transport to prove later with `bootstrap_self_report_send_now=1`
-   after a verified sender domain exists.
+1. finish the remaining hosted bootstrap instrumentation proof: Hermes
+   post-deploy verification and the first `Hermes Operator Report`
+   `ops_health`/`daily_operator_brief` artifacts are captured in production
+   workflow runs `26211011993` and `26211100734`; the remaining launch proof is
+   to rerun the hosted smoke's bootstrap instrumentation gate with a live admin
+   JWT and record that upstream-status plus optional email status are
+   well-formed and do not leak provider/API-key-shaped tokens. Branded Resend
+   email delivery remains an optional transport to prove later with
+   `bootstrap_self_report_send_now=1` after a verified sender domain
+   exists.
 2. tighten schema-native jobs for the first-wave job families and extend helper
    adoption beyond the product-proof loop
 3. finish dispute/arbitration launch wiring

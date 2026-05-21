@@ -57,6 +57,7 @@ import {
 export class KmsSigner extends AbstractSigner {
   #kmsClient;
   #region;
+  #credentialsProvider;
   #keyId;
   #cachedAddress = null;
   // Promise-coalescing: if two callers race for getAddress() before
@@ -78,8 +79,14 @@ export class KmsSigner extends AbstractSigner {
    * @param {object} [options.provider]   ethers Provider; required for
    *                                      sendTransaction, optional for
    *                                      pure signing.
+   * @param {import("@aws-sdk/types").AwsCredentialIdentityProvider} [options.credentialsProvider]
+   *   Optional AWS SDK credentials provider passed to the lazy KMSClient.
+   *   Wired by Phase 5a — see `mcp-server/src/services/aws-credentials.js`.
+   *   When null/undefined, the lazy KMSClient gets no explicit credentials
+   *   and falls through to the SDK's default credential chain (env vars,
+   *   shared config, etc.), preserving pre-5a behavior.
    */
-  constructor({ kmsClient, region, keyId, provider }) {
+  constructor({ kmsClient, region, keyId, provider, credentialsProvider }) {
     super(provider ?? null);
     if (!keyId || typeof keyId !== "string") {
       throw new Error("KmsSigner: keyId is required (KMS key id, ARN, or alias)");
@@ -89,6 +96,7 @@ export class KmsSigner extends AbstractSigner {
     }
     this.#kmsClient = kmsClient ?? null;
     this.#region = region ?? null;
+    this.#credentialsProvider = credentialsProvider ?? null;
     this.#keyId = keyId;
   }
 
@@ -97,7 +105,14 @@ export class KmsSigner extends AbstractSigner {
     // Lazy-import + lazy-construct KMSClient on first signing call.
     // Cached for the lifetime of the KmsSigner.
     const { KMSClient } = await import("@aws-sdk/client-kms");
-    this.#kmsClient = new KMSClient({ region: this.#region });
+    // Phase 5a: pass the optional credentialsProvider through. When
+    // null (Roles Anywhere disabled), behavior matches pre-5a — the
+    // SDK uses its default credential chain.
+    const clientOpts = { region: this.#region };
+    if (this.#credentialsProvider) {
+      clientOpts.credentials = this.#credentialsProvider;
+    }
+    this.#kmsClient = new KMSClient(clientOpts);
     return this.#kmsClient;
   }
 
@@ -144,6 +159,7 @@ export class KmsSigner extends AbstractSigner {
       region: this.#region ?? undefined,
       keyId: this.#keyId,
       provider,
+      credentialsProvider: this.#credentialsProvider ?? undefined,
     });
   }
 

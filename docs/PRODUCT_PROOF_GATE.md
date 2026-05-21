@@ -1,5 +1,8 @@
 # Product-Proof Gate
 
+> Current roadmap/status source: [`PROJECT_ROADMAP.md`](./PROJECT_ROADMAP.md).
+> This product-proof gate remains the detailed evidence and smoke reference.
+
 This gate is the last public-surface check before production claims. It keeps
 two things separate:
 

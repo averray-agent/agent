@@ -4,6 +4,9 @@
 **Spec version:** 2.10 (blockchain audit pass 2: native borrow balance-sheet invariant fixed, debt-first payout settlement documented, XCM strict-decode and zero-share gates recorded)
 **Owner:** Pascal
 
+> Current roadmap/status source: [`PROJECT_ROADMAP.md`](./PROJECT_ROADMAP.md).
+> This working spec remains the product and architecture detail reference.
+
 ---
 
 ## Summary
@@ -788,7 +791,13 @@ Before public v1.0.0-rc1 launch:
 **Instrumentation (week 1 prerequisite):**
 - [ ] `funded_jobs` table live and populating
 - [ ] Daily upstream-status poller running against GitHub + MediaWiki APIs
-- [ ] Hermes/operator self-report proof scheduled and visible
+- [x] Hermes/operator self-report proof scheduled and visible
+  - Scheduled/manual GitHub workflow exists for `ops_health` and
+    `daily_operator_brief`; first production artifacts were recorded in
+    workflow run `26211100734` on 2026-05-21.
+  - Broader launch evidence still needs the hosted bootstrap instrumentation
+    smoke rerun with a live admin JWT so `/admin/status` sanitization is
+    freshly recorded.
 - [ ] Optional branded email self-report configured after sender-domain verification
 
 **Contract surface:**
@@ -1049,6 +1058,15 @@ Stripe Link's launch and Stripe Sessions 2026 announcements positioned agents as
 
 For traceability.
 
+### v2.11 (documentation governance pass)
+
+1. **Current status ownership moved to `PROJECT_ROADMAP.md`:** the working spec
+   remains the product and architecture reference, but roadmap status,
+   sequencing, and project completion tracking now live in
+   `PROJECT_ROADMAP.md`.
+2. **Docs audit recorded:** `DOCS_AUDIT_2026-05-19.md` records the stale status
+   corrections and authority rules introduced by the unified roadmap.
+
 ### v2.10 (blockchain audit pass 2)
 
 1. **Native borrow balance-sheet invariant fixed and documented:** debt-backed liquid credit is no longer externally withdrawable, and successful job payouts now repay outstanding debt before crediting surplus liquid. This keeps native launch borrow as over-collateralized balance-sheet credit rather than unbacked cash.
@@ -1078,7 +1096,7 @@ For traceability.
 
 ### v2.7 (spec audit and roadmap reconciliation)
 
-1. **Canonical roadmap alignment:** `CORE_FRAMEWORK_ROADMAP.md` now points at this working spec as the current source of truth, while `RC1_WORKING_SPEC.md` is retained as historical context.
+1. **Canonical roadmap alignment at the time:** `CORE_FRAMEWORK_ROADMAP.md` pointed at this working spec as the current source of truth, while `RC1_WORKING_SPEC.md` was retained as historical context. This status ownership was superseded by `PROJECT_ROADMAP.md` in the v2.11 documentation governance pass.
 2. **USDC-only v1 wording corrected:** the summary now matches the v2.1+ architecture: v1 settlement is USDC-only, with DOT/vDOT yield strategies gated behind week-12 evidence and native XCM correlation proof.
 3. **Bootstrap budget aligned:** the top-level bootstrap model now matches the three-tier Micro/Standard/Substantive receipt-density plan instead of the older Light/Substantive allocation.
 4. **Audit doc published:** `SPEC_AUDIT_2026-05-13.md` records what is complete, what remains, what changed in the main plan, and the remaining production proof gates around the 1Password SSH/basic-auth/admin-JWT cutover path.

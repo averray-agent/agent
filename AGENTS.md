@@ -57,6 +57,22 @@ Run the smallest relevant set locally before opening a PR:
 
 CI is the merge gate. Do not bypass failing checks.
 
+## Roadmap Coordination
+
+- `docs/PROJECT_ROADMAP.md` is the canonical project roadmap and status file.
+- Parallel agents should avoid broad rewrites of the roadmap. Keep roadmap edits
+  scoped to the exact item or section owned by the PR.
+- If another active PR is already editing the same roadmap section, or if the
+  update is a handoff/status note rather than the implementing PR itself, add a
+  fragment under `docs/roadmap-updates/` instead of editing the canonical file.
+- Use the template and rules in
+  [docs/roadmap-updates/README.md](./docs/roadmap-updates/README.md).
+- Do not mark roadmap work `Done` or `Proofed` without evidence. At minimum,
+  include the merged PR, passing CI/checks, and hosted/chain/operator proof when
+  the item changes deployed behavior.
+- Chain-specific roadmap claims must cite Polkadot docs MCP findings, runtime
+  state, or transaction evidence before being promoted into the roadmap.
+
 ## Hermes PR Handoff
 
 - After PR CI passes, `.github/workflows/hermes-pr-handoff.yml` asks the

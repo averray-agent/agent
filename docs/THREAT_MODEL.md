@@ -1,5 +1,8 @@
 # Threat Model
 
+> Current roadmap/status source: [`PROJECT_ROADMAP.md`](./PROJECT_ROADMAP.md).
+> This threat model remains the detailed risk and mitigation reference.
+
 This document records the launch threat model for Averray's v1 control plane.
 It is intentionally operational: each entry names the trust boundary, the
 current mitigation, and the follow-up that would reduce the risk further.
@@ -205,8 +208,10 @@ Current mitigation:
 - `/graphql` accepts an optional `GRAPHQL_BEARER_TOKEN` Bearer gate; when the
   env is unset a loud startup warning records that the route is intentionally
   public
-- `/metrics` on `api.averray.com` accepts an optional `METRICS_BEARER_TOKEN`
-  Bearer gate; the env var is documented in
+- `/metrics` on `api.averray.com` is bearer-gated in production by
+  `METRICS_BEARER_TOKEN`; if production is configured to require metrics auth
+  and no token is present, the route fails closed instead of serving metrics.
+  The env vars are documented in
   [`deploy/backend.env.template`](../deploy/backend.env.template)
 - Ponder's SQL validator rejects schema-qualified queries
   (`information_schema.tables`) and function calls (`current_user`,
@@ -270,7 +275,7 @@ Follow-up:
 - finish Package E — operator pages adopt explicit `live` / `empty` /
   `degraded` / `demo` modes with a persistent banner when
   `NEXT_PUBLIC_DEMO_MODE=true`
-- gate `/metrics` and `/graphql` in production by setting the bearer tokens
+- keep `/metrics` and `/graphql` gated in production by setting the bearer tokens
   documented in `deploy/backend.env.template` and
   `deploy/indexer.env.template`
 - continue documenting `<TBD>` placeholders as work items, not as silent

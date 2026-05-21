@@ -16,9 +16,9 @@ surface for Hermes is therefore exactly what those workflows record on
 the GitHub side; anything else lives on the Hermes container and is
 audited from the `averray-reference-agent` repo.
 
-The four operator-report families that an audit might ask about are
-covered to different depths. Two have a workflow surface in this repo;
-two do not.
+The operator-report families that an audit might ask about now have a
+repo-visible evidence lane for PR handoff, post-deploy verification, and
+scheduled operator self-reports.
 
 ## Routines with a surface in this repo
 
@@ -57,18 +57,62 @@ two do not.
   - `timeout` — `HERMES_POST_DEPLOY_TIMEOUT=12m` elapsed (exit 124). The deploy itself already completed at this point; the verification result is what becomes uncertain.
   - `failed` — any other non-zero exit. Fails the deploy workflow at the final "Fail if Hermes post-deploy verification failed" step.
 
+### 3. Scheduled operator self-reports
+
+- Workflow: [.github/workflows/hermes-operator-report.yml](../.github/workflows/hermes-operator-report.yml)
+- Trigger: daily `schedule` at `07:17 UTC`, plus manual `workflow_dispatch`
+  with `report_kind=all`, `ops_health`, or `daily_operator_brief`
+- Hermes invocation: `averray_handle_operator_command` through the Hermes
+  chat CLI with one of two read-only commands:
+  - `ops health`
+  - `daily operator brief`
+- **Correlation ID format:** `github-operator-report-${report_kind}-${run_id}-${run_attempt}`
+- Evidence destinations:
+  1. **Workflow artifact** — full log plus a JSON evidence manifest,
+     uploaded as `hermes-operator-report-<report-kind>-<run-id>-<run-attempt>`
+     with 90-day retention.
+  2. **`$GITHUB_STEP_SUMMARY`** — compact report kind, command,
+     correlation id, outcome, artifact name, and first 220 lines of Hermes
+     output.
+  3. **Hermes-container audit trail** — whatever Hermes records under the
+     same correlation id. Outside this repo's evidence model, but now
+     cross-referenceable from the GitHub run.
+- The job explicitly asks Hermes not to claim jobs, submit jobs, mutate
+  GitHub, send Slack messages, edit Wikipedia, or request approvals.
+- Outcomes:
+  - `success` — exit 0.
+  - `timeout` — `HERMES_OPERATOR_REPORT_TIMEOUT=12m` elapsed (exit 124).
+  - `failed` — any other non-zero exit. Fails the report workflow after the
+    artifact upload step.
+
+**First production proof:** manual workflow run
+[`26211100734`](https://github.com/averray-agent/agent/actions/runs/26211100734)
+on 2026-05-21 completed both report kinds successfully against the deployed
+production stack:
+
+- `ops_health`: artifact
+  `hermes-operator-report-ops_health-26211100734-1`, artifact id
+  `7129369151`, correlation id
+  `github-operator-report-ops_health-26211100734-1`.
+- `daily_operator_brief`: artifact
+  `hermes-operator-report-daily_operator_brief-26211100734-1`, artifact id
+  `7129370901`, correlation id
+  `github-operator-report-daily_operator_brief-26211100734-1`.
+
+The downloaded manifests reported `outcome: success` for both reports, and a
+local scan of the artifacts found no obvious API key, JWT, 1Password service
+account token, or SSH private-key patterns.
+
 ## Routines without a surface in this repo
 
-The audit also asked about two report families that are commonly named
-in operator discussions but have **no representation in this repo's
-workflows or scripts on `main`**. Calling that out explicitly so a
-future audit does not waste time looking:
+The repo-visible scheduled workflow above proves that GitHub can ask
+Hermes for ops-health and daily-brief reports and retain the output.
+Hermes may still have its own container-side cron or Slack routines in
+`averray-reference-agent`; those are outside this repo's evidence model.
+Audit them in the reference-agent repo and cross-reference their
+correlation ids with the GitHub artifacts where possible.
 
-### 3. Ops health — *not in this repo*
-
-If Hermes runs an "ops health" routine, it is a Hermes-container-side
-cron in `averray-reference-agent`, not a GitHub workflow here. From
-this repo's POV the closest adjacent surfaces are:
+The adjacent platform health surfaces remain:
 
 - `/admin/status` JSON (HTTP request/response; not durable per se, but
   the bootstrap self-report, XCM watcher/relay, and treasury-policy
@@ -76,19 +120,6 @@ this repo's POV the closest adjacent surfaces are:
 - `scripts/ops/check-hosted-stack.sh` and
   `scripts/ops/check-hosted-stack-and-alert.sh` (operator-run hosted
   smoke; separately from Hermes).
-
-To audit Hermes's own ops-health routine, look in
-`averray-reference-agent`. To audit *the platform's* health-evidence
-surface from this repo, use `/admin/status` directly.
-
-### 4. Daily operator brief — *not in this repo*
-
-Same shape: if there is a "daily operator brief" Hermes routine, it
-lives on the Hermes container. From this repo's POV the closest
-adjacent surface is `BootstrapSelfReportSchedulerService`, which sends
-a **weekly** (not daily) Resend email summarizing funded-jobs state.
-That email path is governed by `/admin/status.bootstrapSelfReport`
-(see `PRODUCTION_CHECKLIST.md` Section 5).
 
 ## Quoting an id during an audit
 
@@ -104,10 +135,15 @@ a single id:
   `run-id`; download the `hermes-post-deploy-<run-id>` artifact for
   full output, then read the step summary for the compact verdict.
   There is no comment thread on this side.
+- For a scheduled/manual operator report, quote
+  `github-operator-report-<report-kind>-<run-id>-<run-attempt>` and
+  locate the workflow run by `run-id`; download
+  `hermes-operator-report-<report-kind>-<run-id>-<run-attempt>` for the
+  full log and JSON evidence manifest.
 
 ## Remaining follow-up hardening
 
-- Confirm the scheduled Hermes ops-health and daily operator brief
-  routines in `averray-reference-agent` have their own durable
-  correlation ids and retention policy. This repo can prove deploy and
-  PR Hermes invocations; the scheduled routines live outside this repo.
+- Keep the scheduled operator-report workflow enabled and periodically confirm
+  that new daily runs still upload both report artifacts.
+- Confirm any Hermes-container-native Slack or cron routines in
+  `averray-reference-agent` use the same durable correlation-id discipline.

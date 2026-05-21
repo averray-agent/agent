@@ -7,7 +7,7 @@ const DEFAULT_OPERATOR_APP_URL = "https://app.averray.com";
 
 const DISCOVERY_PUBLIC_ENDPOINTS = [
   { path: "/health", description: "Liveness plus serviceHealth/capabilityHealth for state store, blockchain, treasury mutations, XCM observer, indexer, and gas sponsor." },
-  { path: "/metrics", description: "Prometheus text-format metrics. Optionally bearer-gated via METRICS_BEARER_TOKEN." },
+  { path: "/metrics", description: "Prometheus text-format metrics. Bearer-gated in production via METRICS_BEARER_TOKEN." },
   { path: "/onboarding", description: "Canonical platform capabilities + tool list." },
   { path: "/jobs", description: "Public job catalog (no auth)." },
   { path: "/jobs/definition?jobId=X", description: "Canonical job definition by id." },

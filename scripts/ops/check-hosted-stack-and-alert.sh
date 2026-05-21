@@ -3,12 +3,13 @@
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-CHECK_SCRIPT="${SCRIPT_DIR}/check-hosted-stack.sh"
+CHECK_SCRIPT=${CHECK_HOSTED_STACK_SCRIPT:-"${SCRIPT_DIR}/check-hosted-stack.sh"}
 
 ALERT_WEBHOOK_URL=${ALERT_WEBHOOK_URL:-}
 ALERT_SERVICE_NAME=${ALERT_SERVICE_NAME:-averray-hosted-stack}
 ALERT_ENVIRONMENT=${ALERT_ENVIRONMENT:-production-like}
 TIMEOUT_SEC=${TIMEOUT_SEC:-20}
+CURL_BIN=${CURL_BIN:-curl}
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -32,7 +33,7 @@ if [[ -z "$ALERT_WEBHOOK_URL" ]]; then
   exit 1
 fi
 
-require_command curl
+require_command "$CURL_BIN"
 require_command jq
 
 payload=$(
@@ -55,7 +56,7 @@ payload=$(
     }'
 )
 
-curl -fsS --max-time "$TIMEOUT_SEC" \
+"$CURL_BIN" -fsS --max-time "$TIMEOUT_SEC" \
   -H "Content-Type: application/json" \
   -d "$payload" \
   "$ALERT_WEBHOOK_URL" >/dev/null

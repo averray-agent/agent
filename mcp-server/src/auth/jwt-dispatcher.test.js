@@ -52,7 +52,10 @@ const KID = "jwt-1";
 const ISSUER = "averray-backend-testnet";
 const AUDIENCE = "averray-backend";
 const SUBJECT = "0x000000000000000000000000000000000000abcd";
-const ROLES = ["admin", "verifier"];
+// Mirror VALID_ROLES in mcp-server/src/auth/config.js — "service" was
+// added in Stage 2C-1 (#438) so the dispatcher's expectedRoles allowlist
+// accepts service-token claim shapes minted via signTokenFromConfig.
+const ROLES = ["admin", "verifier", "service"];
 const HMAC_SECRET = "h".repeat(48);
 const LONG_HMAC_SECRET = "L".repeat(48);
 

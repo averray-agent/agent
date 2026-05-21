@@ -1,5 +1,8 @@
 # Production Readiness Checklist
 
+> Current roadmap/status source: [`PROJECT_ROADMAP.md`](./PROJECT_ROADMAP.md).
+> This checklist remains the operator go/no-go gate for launch readiness.
+
 This is the operator-facing gate for promoting Averray from a healthy
 testnet deployment into something we can treat like a real production
 service. It complements:
@@ -200,7 +203,7 @@ RUN_SUBSCAN_XCM_VALIDATION=1 ./scripts/ops/check-release-readiness.sh testnet
 
 ## 5. Observability
 
-- [ ] Backend metrics are reachable and, if public, bearer-protected.
+- [ ] Backend metrics are bearer-protected and reachable with the scraper token.
 - [ ] Backend Sentry is configured for the active environment.
 - [ ] Frontend Sentry runtime config is set if browser error reporting is required.
 - [ ] Structured logs are visible from the current deploy target.
@@ -215,8 +218,24 @@ RUN_SUBSCAN_XCM_VALIDATION=1 ./scripts/ops/check-release-readiness.sh testnet
   - The same workflow run includes the `hermes-post-deploy-<run-id>`
     artifact, which preserves the full `hermes-post-deploy.log` beyond the
     truncated summary.
-  - The Hermes/operator surface has scheduled ops-health and daily-brief
-    evidence available for the current deployment window.
+  - The `Hermes Operator Report` workflow has run successfully for both
+    `ops_health` and `daily_operator_brief`, and each run includes a
+    `hermes-operator-report-<report-kind>-<run-id>-<run-attempt>` artifact
+    with the full Hermes log plus JSON evidence manifest.
+    - First proof captured on 2026-05-21: workflow run
+      `26211100734` succeeded with artifacts
+      `hermes-operator-report-ops_health-26211100734-1` (artifact id
+      `7129369151`) and
+      `hermes-operator-report-daily_operator_brief-26211100734-1`
+      (artifact id `7129370901`).
+  - The workflow summaries or artifacts expose correlation ids with the
+    `github-operator-report-<report-kind>-<run-id>-<run-attempt>` format
+    and no API keys, JWTs, or provider tokens.
+    - Verified against the downloaded run `26211100734` artifacts: correlation
+      ids `github-operator-report-ops_health-26211100734-1` and
+      `github-operator-report-daily_operator_brief-26211100734-1`; no obvious
+      API key, JWT, 1Password service-account token, or SSH private-key
+      patterns found.
   - This command passes:
     ```bash
     ADMIN_JWT='<admin-jwt>' \
@@ -241,27 +260,31 @@ deployed-config evidence that lives outside the repo. The wiring exists in
 code; only the production env vars need to be set. Concrete verification
 commands per box:
 
-- **Backend metrics reachable and bearer-protected.** Verify reachable:
-  `curl -sS -o /dev/null -w "%{http_code}\n" https://api.averray.com/metrics`
-  must return `200`. Verify bearer-gated: the same request **without** a
-  bearer must return `401` once `METRICS_BEARER_TOKEN` is set in
-  `deploy/backend.env.template`. Current state (2026-05-17): reachable
-  `200`, **not** bearer-gated. Flip after the env var is set and a
-  no-bearer request returns `401`.
-- **Backend Sentry configured for the active environment.** Set
-  `SENTRY_DSN` (and optionally `SENTRY_ENVIRONMENT`, `SENTRY_RELEASE`,
-  `SENTRY_TRACES_SAMPLE_RATE`) in `deploy/backend.env.template`, then
-  `npm install @sentry/node` in `mcp-server`. The backend log line
-  `observability.sentry_ready` confirms init. Flip when that log line is
-  present in the current deploy.
-- **Frontend Sentry runtime config.** Conditional. v1 has no frontend
-  Sentry scaffolding. Two valid postures: (a) flip with the inline note
-  *"N/A — frontend error reporting not required for v1"* if that is the
-  decision, or (b) leave unchecked until frontend Sentry is scaffolded.
+- **Backend metrics bearer-protected and reachable.** Production now fails
+  closed when metrics auth is required but no token is configured. Flip this
+  box only after `METRICS_BEARER_TOKEN` is configured in the production backend
+  environment and this hosted gate passes:
+  ```bash
+  METRICS_BEARER_TOKEN='<metrics-scraper-token>' \
+  CHECK_METRICS_AUTH=1 \
+  ./scripts/ops/check-hosted-stack.sh
+  ```
+  The gate requires unauthenticated `/metrics` to return `401` and the same
+  request with `Authorization: Bearer <token>` to return `200`.
+- **Sentry/logging posture recorded for the active environment.** The current
+  v1 posture is recorded in
+  [`OBSERVABILITY_POSTURE.md`](./OBSERVABILITY_POSTURE.md): backend Sentry is
+  optional/deferred unless a `SENTRY_DSN` is configured, backend 5xx capture
+  always falls back to structured logs, and frontend Sentry is deferred for v1.
+  If Sentry is enabled, set `SENTRY_DSN` (and optionally
+  `SENTRY_ENVIRONMENT`, `SENTRY_RELEASE`, `SENTRY_TRACES_SAMPLE_RATE`) and
+  verify `observability.sentry_ready` appears after backend startup.
 - **Structured logs visible from the current deploy target.**
   `LOG_LEVEL=info` is set; the backend writes structured JSON via the
-  default logger. Verify the operator can read backend logs (via
-  `journalctl`, `docker logs`, or the platform's log surface), then flip.
+  default logger and records 5xx captures as
+  `observability.captured_exception`. Verify the operator can read backend
+  logs (via `journalctl`, `docker logs`, or the platform's log surface), then
+  flip.
 - **Alert destination for hosted smoke-check failures.** Set
   `ALERT_WEBHOOK_URL` (and optionally `ALERT_SERVICE_NAME`,
   `ALERT_ENVIRONMENT`) in the environment that runs
@@ -269,6 +292,12 @@ commands per box:
   Verify with a deliberate smoke failure (e.g. point `API_BASE_URL` at a
   non-existent host) and confirm the webhook receives the JSON payload.
   Flip after one verified delivery.
+- **Operator self-report proof visible after deploy and on schedule.** Use
+  [HERMES_OPERATOR_REPORTS.md](./HERMES_OPERATOR_REPORTS.md) as the evidence
+  map. Run `Hermes Operator Report` manually with `report_kind=all` after this
+  workflow lands, or wait for the next daily schedule. Flip only after both
+  `ops_health` and `daily_operator_brief` reports succeed, each artifact is
+  downloadable, and the hosted bootstrap instrumentation smoke above passes.
 
 ---
 

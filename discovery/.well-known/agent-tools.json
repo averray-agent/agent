@@ -382,7 +382,7 @@
     },
     {
       "path": "/metrics",
-      "description": "Prometheus text-format metrics. Optionally bearer-gated via METRICS_BEARER_TOKEN."
+      "description": "Prometheus text-format metrics. Bearer-gated in production via METRICS_BEARER_TOKEN."
     },
     {
       "path": "/onboarding",
