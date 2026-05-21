@@ -11,6 +11,7 @@ import { EventBus } from "../core/event-bus.js";
 import { EventListener } from "../blockchain/event-listener.js";
 import { loadAuthConfig } from "../auth/config.js";
 import { validateJwtKmsCredentialAccess } from "../auth/credential-check.js";
+import { buildKmsCredentialsProvider, PROFILE_JWT_SIGNER } from "./aws-credentials.js";
 import { createAuthMiddleware } from "../auth/middleware.js";
 import { createRateLimiter } from "../auth/rate-limit.js";
 import { resolveCapabilities, capabilityMatrix } from "../auth/capabilities.js";
@@ -177,7 +178,14 @@ export async function createPlatformRuntime() {
   // tests / disconnected dev environments.
   if (authConfig.kmsJwt) {
     try {
-      await validateJwtKmsCredentialAccess(authConfig.kmsJwt, { logger });
+      // Build the same Roles Anywhere credentials-provider the runtime
+      // KmsJwtSigner uses (see getKmsSigner in auth/jwt.js). Without it
+      // the boot check falls through to the SDK default chain — which
+      // disagrees with the runtime path once AWS_USE_ROLES_ANYWHERE=true
+      // and static AWS_*_ACCESS_KEY_* env vars are absent (the Phase 5a
+      // Stage 2C-3 outage in #455/#456).
+      const credentialsProvider = buildKmsCredentialsProvider({ profile: PROFILE_JWT_SIGNER });
+      await validateJwtKmsCredentialAccess(authConfig.kmsJwt, { logger, credentialsProvider });
     } catch (error) {
       logger.error(
         { step: "validate-jwt-kms-credentials", err: error instanceof Error ? error : new Error(String(error)) },
