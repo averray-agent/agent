@@ -152,8 +152,8 @@ externally ready.
 
 | Item | Status | Close criteria |
 | --- | --- | --- |
-| Control-plane pauser | Open | `TreasuryPolicy.pauser` is a hot key with only pause power, recorded in deploy docs. |
-| Pause/unpause rehearsal | Open | Rehearse pause and unpause from pauser key and record tx hashes in `PRODUCTION_CHECKLIST.md`. |
+| Control-plane pauser | Ready for proof | `TreasuryPolicy` already scopes `pauser` to `setPaused(bool)`. `scripts/ops/run-pauser-rehearsal.mjs` now proves the live pauser can pause, cannot call owner-only functions, and reports role overlap. Read-only proof captured in `docs/evidence/pauser-rehearsal-readonly-2026-05-21.json`. Close after the live testnet evidence is recorded; mainnet must run with `--require-dedicated-pauser`. |
+| Pause/unpause rehearsal | Ready for proof | Run `PAUSER_PRIVATE_KEY=... node scripts/ops/run-pauser-rehearsal.mjs --profile testnet --live --out docs/evidence/pauser-rehearsal-testnet-YYYY-MM-DD.json`, then record the pause and unpause tx hashes in `PRODUCTION_CHECKLIST.md`. |
 | Postgres backup readiness | Open | `check-backup-readiness.sh --json` reports recent Postgres backup. |
 | Redis backup readiness | Open | `check-backup-readiness.sh --json` reports recent Redis backup if Redis contains non-rebuildable state. |
 | Restore drill | Open | Restore drill performed and documented with date, source backup, and target. |

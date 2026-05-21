@@ -1,0 +1,191 @@
+{
+  "schemaVersion": 1,
+  "kind": "averray.pauserRehearsalEvidence",
+  "profile": "testnet",
+  "generatedAt": "2026-05-21T18:44:13.061Z",
+  "mode": "read_only_capability_proof",
+  "manifestPath": "deployments/testnet.json",
+  "rpcUrl": "https://eth-rpc-testnet.polkadot.io/",
+  "contracts": {
+    "treasuryPolicy": "0x648Cc5fdE94435992296C4e5ac642d18bB64c12B"
+  },
+  "manifest": {
+    "owner": "0x1f8C4da4AAAC79916350f1fabF1221309591B6F9",
+    "pauser": "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519",
+    "verifier": "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519",
+    "arbitrator": "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519",
+    "deployer": "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519"
+  },
+  "live": {
+    "owner": "0x1f8C4da4AAAC79916350f1fabF1221309591B6F9",
+    "pauser": "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519",
+    "paused": false
+  },
+  "roleOverlap": {
+    "dedicated": false,
+    "overlaps": [
+      "deployer",
+      "verifier",
+      "arbitrator"
+    ],
+    "severity": "warning"
+  },
+  "roleReads": {
+    "serviceOperator": false,
+    "verifier": false,
+    "arbitrator": true
+  },
+  "simulation": [
+    {
+      "name": "pauser_can_call_setPaused_true",
+      "expected": "success",
+      "actual": "success"
+    },
+    {
+      "name": "pauser_cannot_call_setPauser",
+      "expected": "revert",
+      "actual": "revert"
+    },
+    {
+      "name": "pauser_cannot_call_setVerifier",
+      "expected": "revert",
+      "actual": "revert"
+    },
+    {
+      "name": "pauser_cannot_call_setServiceOperator",
+      "expected": "revert",
+      "actual": "revert"
+    },
+    {
+      "name": "pauser_cannot_call_transferOwnership",
+      "expected": "revert",
+      "actual": "revert"
+    }
+  ],
+  "transactions": {},
+  "checks": [
+    {
+      "name": "owner_matches_manifest",
+      "ok": true,
+      "details": {
+        "expected": "0x1f8C4da4AAAC79916350f1fabF1221309591B6F9",
+        "actual": "0x1f8C4da4AAAC79916350f1fabF1221309591B6F9"
+      }
+    },
+    {
+      "name": "pauser_matches_manifest",
+      "ok": true,
+      "details": {
+        "expected": "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519",
+        "actual": "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519"
+      }
+    },
+    {
+      "name": "pauser_is_nonzero",
+      "ok": true,
+      "details": {
+        "pauser": "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519"
+      }
+    },
+    {
+      "name": "pauser_not_owner",
+      "ok": true,
+      "details": {
+        "owner": "0x1f8C4da4AAAC79916350f1fabF1221309591B6F9",
+        "pauser": "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519"
+      }
+    },
+    {
+      "name": "pauser_not_service_operator",
+      "ok": true,
+      "details": {
+        "serviceOperator": false,
+        "verifier": false,
+        "arbitrator": true
+      }
+    },
+    {
+      "name": "pauser_not_owner_admin_if_owner_distinct",
+      "ok": true,
+      "details": {
+        "owner": "0x1f8C4da4AAAC79916350f1fabF1221309591B6F9",
+        "pauser": "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519"
+      }
+    },
+    {
+      "name": "pauser_can_call_setPaused_true",
+      "ok": true,
+      "details": {
+        "expected": "success",
+        "actual": "success"
+      }
+    },
+    {
+      "name": "pauser_cannot_call_setPauser",
+      "ok": true,
+      "details": {
+        "expected": "revert",
+        "actual": "revert",
+        "error": "execution reverted (unknown custom error)"
+      }
+    },
+    {
+      "name": "pauser_cannot_call_setVerifier",
+      "ok": true,
+      "details": {
+        "expected": "revert",
+        "actual": "revert",
+        "error": "execution reverted (unknown custom error)"
+      }
+    },
+    {
+      "name": "pauser_cannot_call_setServiceOperator",
+      "ok": true,
+      "details": {
+        "expected": "revert",
+        "actual": "revert",
+        "error": "execution reverted (unknown custom error)"
+      }
+    },
+    {
+      "name": "pauser_cannot_call_transferOwnership",
+      "ok": true,
+      "details": {
+        "expected": "revert",
+        "actual": "revert",
+        "error": "execution reverted (unknown custom error)"
+      }
+    }
+  ],
+  "warnings": [
+    {
+      "code": "pauser_role_overlap",
+      "severity": "warning",
+      "message": "Current pauser address overlaps other manifest roles. This is acceptable only for bounded testnet rehearsal; mainnet must use a dedicated pauser.",
+      "overlaps": [
+        "deployer",
+        "verifier",
+        "arbitrator"
+      ]
+    },
+    {
+      "code": "pauser_onchain_role_overlap",
+      "severity": "warning",
+      "message": "Current pauser address also has other on-chain TreasuryPolicy roles. This is acceptable only for bounded testnet rehearsal; mainnet must use a dedicated pauser.",
+      "overlaps": [
+        "arbitrator"
+      ]
+    },
+    {
+      "code": "live_rehearsal_not_run",
+      "severity": "warning",
+      "message": "Read-only capability proof passed, but the launch checklist still needs a live pause/unpause tx pair."
+    }
+  ],
+  "ok": true,
+  "launchGate": {
+    "controlPlanePauserReady": true,
+    "pauseUnpauseRehearsed": false,
+    "requiresLiveRehearsal": true
+  }
+}
