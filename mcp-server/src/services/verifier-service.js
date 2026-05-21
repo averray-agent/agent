@@ -88,6 +88,10 @@ export class VerifierService {
     return this.registry.listHandlers();
   }
 
+  listHandlerMetadata() {
+    return this.registry.listHandlerMetadata?.() ?? this.listHandlers().map((id) => ({ id }));
+  }
+
   resolveVerificationInput(session, overrideEvidence = undefined) {
     if (overrideEvidence !== undefined) {
       return session?.submission && typeof overrideEvidence === "string" && !overrideEvidence.length
@@ -143,6 +147,16 @@ function detectReplayDrift({ existing, verdict, auditFields }) {
     && capturedEvidenceSchemaRef !== liveEvidenceSchemaRef
   ) {
     drift.evidenceSchemaRef = { captured: capturedEvidenceSchemaRef, live: liveEvidenceSchemaRef };
+  }
+
+  const capturedPolicyVersion = existing.verifierPolicyVersion;
+  const livePolicyVersion = auditFields?.verifierPolicyVersion;
+  if (
+    capturedPolicyVersion !== undefined
+    && livePolicyVersion !== undefined
+    && capturedPolicyVersion !== livePolicyVersion
+  ) {
+    drift.verifierPolicyVersion = { captured: capturedPolicyVersion, live: livePolicyVersion };
   }
 
   // verifierConfigHash drift means the stored snapshot disagrees with the

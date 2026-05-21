@@ -32,6 +32,20 @@ function loadFixturesForHandler(handlerId) {
   return fixtures;
 }
 
+function listFixtureHandlerIds() {
+  return readdirSync(FIXTURE_ROOT, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+}
+
+function fixtureVersionsForHandler(handlerId) {
+  const handlerDir = path.join(FIXTURE_ROOT, handlerId);
+  return readdirSync(handlerDir)
+    .filter((entry) => /^v\d+$/u.test(entry))
+    .sort();
+}
+
 const SESSION_ID = "release-readiness-check-001:0xabc";
 
 test("verifySubmission persists verification input and supports replay", async () => {
@@ -82,11 +96,13 @@ test("verifySubmission persists verification input and supports replay", async (
 
   assert.equal(result.outcome, "approved");
   assert.equal(result.handlerVersion, 1);
+  assert.equal(result.verifierPolicyVersion, 1);
   assert.equal(result.verifierConfigVersion, 1);
   assert.deepEqual(result.verifierConfigSnapshot, job.verifierConfig);
   assert.equal(result.verificationContract.version, "verification-contract-v1");
   assert.equal(result.verificationContract.handler, "deterministic");
   assert.equal(result.verificationContract.handlerVersion, 1);
+  assert.equal(result.verificationContract.verifierPolicyVersion, 1);
   assert.equal(typeof result.verifierConfigHash, "string");
   assert.equal(typeof result.verificationInputHash, "string");
   assert.equal(result.verificationInput.kind, "structured");
@@ -452,6 +468,29 @@ test("verification contract carries evidenceSchemaRef and lists it in snapshot f
   assert.ok(contract.snapshotFields.includes("evidenceSchemaRef"));
 });
 
+test("verification contract separates verifier policy version from config version", () => {
+  const job = {
+    id: "policy-versioned-job",
+    outputSchemaRef: "schema://jobs/release-readiness-output",
+    verifierMode: "deterministic",
+    verification: {
+      policyVersion: 3
+    },
+    verifierConfig: {
+      version: 7,
+      handler: "deterministic",
+      expectedOutputs: ["release_id"],
+      matchMode: "contains_all"
+    }
+  };
+
+  const contract = buildVerificationContract(job, { verdict: { handlerVersion: 1 } });
+  assert.equal(contract.verifierPolicyVersion, 3);
+  assert.equal(contract.verifierConfigVersion, 7);
+  assert.ok(contract.snapshotFields.includes("verifierPolicyVersion"));
+  assert.ok(contract.snapshotFields.includes("verifierConfigVersion"));
+});
+
 test("verification contract prefers job.verification.evidenceSchemaRef when both are set", () => {
   const job = {
     outputSchemaRef: "schema://jobs/release-readiness-output",
@@ -462,7 +501,22 @@ test("verification contract prefers job.verification.evidenceSchemaRef when both
   assert.equal(contract.evidenceSchemaRef, "schema://jobs/github-pr-evidence-output");
 });
 
-for (const handlerId of ["benchmark", "deterministic", "github_pr"]) {
+test("every registered verifier handler has replay fixtures for its current handler version", () => {
+  const registry = new VerifierRegistry({ githubToken: "" });
+  const fixtureHandlers = new Set(listFixtureHandlerIds());
+
+  for (const { id, version } of registry.listHandlerMetadata()) {
+    assert.ok(fixtureHandlers.has(id), `missing replay fixture directory for handler ${id}`);
+    const versions = fixtureVersionsForHandler(id);
+    assert.ok(versions.includes(`v${version}`), `missing replay fixtures for ${id} current handler version v${version}`);
+    assert.ok(
+      loadFixturesForHandler(id).some((entry) => entry.version === `v${version}`),
+      `no replay fixture JSON files for ${id} current handler version v${version}`
+    );
+  }
+});
+
+for (const handlerId of listFixtureHandlerIds()) {
   for (const { name, version, fixture } of loadFixturesForHandler(handlerId)) {
     test(`handler-versioned replay fixture remains stable under current handler: ${name}`, async () => {
       // Force the github_pr handler down its tokenless path so replay does not depend on a live GitHub fetch.
@@ -600,6 +654,7 @@ test("replayVerification surfaces handler version drift instead of silently re-r
     reasonCode: fixture.expected.reasonCode,
     handler: fixture.handler,
     handlerVersion: 99,
+    verifierPolicyVersion: 99,
     verifierConfigSnapshot: fixture.job.verifierConfig,
     verifierConfigHash: "stale-hash-from-prior-snapshot",
     verificationInput: normalizeSubmission(fixture.verificationInput.structured),
@@ -611,6 +666,7 @@ test("replayVerification surfaces handler version drift instead of silently re-r
 
   assert.ok(replay.replayDrift, "expected replayDrift to be set when captured handler version differs from live");
   assert.deepEqual(replay.replayDrift.handlerVersion, { captured: 99, live: 1 });
+  assert.deepEqual(replay.replayDrift.verifierPolicyVersion, { captured: 99, live: 1 });
   // Snapshot-hash drift exposes snapshot tampering; here it is forced by the stale stored hash.
   assert.equal(replay.replayDrift.verifierConfigHash.captured, "stale-hash-from-prior-snapshot");
 });
