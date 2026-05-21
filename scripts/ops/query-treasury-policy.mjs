@@ -2,7 +2,7 @@
 // Quick read-only probe of TreasuryPolicy state. Cutover support script.
 import { JsonRpcProvider, Contract } from "ethers";
 
-const RPC = process.env.RPC_URL || "https://testnet-passet-hub-eth-rpc.polkadot.io";
+const RPC = process.env.RPC_URL || "https://eth-rpc-testnet.polkadot.io/";
 const POLICY = "0x648Cc5fdE94435992296C4e5ac642d18bB64c12B";
 const ABI = [
   "function owner() view returns (address)",
