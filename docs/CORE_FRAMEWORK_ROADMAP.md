@@ -557,12 +557,13 @@ should prioritize live-proof and launch-risk items before adding new product
 surface:
 
 1. close operator self-report proof through Hermes/operator reporting: keep
-   `run_hermes_post_deploy=1`, confirm scheduled ops-health and daily-brief
-   evidence, and run the hosted smoke's bootstrap instrumentation gate to prove
-   upstream-status plus optional email status are well-formed and do not leak
-   provider/API-key-shaped tokens. Branded Resend email delivery remains an
-   optional transport to prove later with `bootstrap_self_report_send_now=1`
-   after a verified sender domain exists.
+   `run_hermes_post_deploy=1`, run the `Hermes Operator Report` workflow for
+   both `ops_health` and `daily_operator_brief`, and run the hosted smoke's
+   bootstrap instrumentation gate to prove upstream-status plus optional email
+   status are well-formed and do not leak provider/API-key-shaped tokens.
+   Branded Resend email delivery remains an optional transport to prove later
+   with `bootstrap_self_report_send_now=1` after a verified sender domain
+   exists.
 2. tighten schema-native jobs for the first-wave job families and extend helper
    adoption beyond the product-proof loop
 3. finish dispute/arbitration launch wiring

@@ -197,8 +197,12 @@ generation are implemented as backend foundations.
   self-report status are present and sanitized.
 - [x] Preserve Hermes PR-handoff and post-deploy verification logs as GitHub
   workflow artifacts so operator proof is not limited to truncated summaries.
+- [x] Add a scheduled/manual `Hermes Operator Report` workflow for read-only
+  `ops_health` and `daily_operator_brief` evidence with correlation IDs,
+  step summaries, and 90-day artifacts.
 - [ ] Close the operator-visible self-report proof through Hermes post-deploy
-  verification plus scheduled ops-health / daily-brief evidence.
+  verification plus the first successful scheduled/manual ops-health and
+  daily-brief artifacts.
 - [ ] Optional: wire branded email delivery once a verified sender domain,
   recipients, and cadence are finalized.
 

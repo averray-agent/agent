@@ -218,8 +218,13 @@ RUN_SUBSCAN_XCM_VALIDATION=1 ./scripts/ops/check-release-readiness.sh testnet
   - The same workflow run includes the `hermes-post-deploy-<run-id>`
     artifact, which preserves the full `hermes-post-deploy.log` beyond the
     truncated summary.
-  - The Hermes/operator surface has scheduled ops-health and daily-brief
-    evidence available for the current deployment window.
+  - The `Hermes Operator Report` workflow has run successfully for both
+    `ops_health` and `daily_operator_brief`, and each run includes a
+    `hermes-operator-report-<report-kind>-<run-id>-<run-attempt>` artifact
+    with the full Hermes log plus JSON evidence manifest.
+  - The workflow summaries or artifacts expose correlation ids with the
+    `github-operator-report-<report-kind>-<run-id>-<run-attempt>` format
+    and no API keys, JWTs, or provider tokens.
   - This command passes:
     ```bash
     ADMIN_JWT='<admin-jwt>' \
@@ -276,6 +281,12 @@ commands per box:
   Verify with a deliberate smoke failure (e.g. point `API_BASE_URL` at a
   non-existent host) and confirm the webhook receives the JSON payload.
   Flip after one verified delivery.
+- **Operator self-report proof visible after deploy and on schedule.** Use
+  [HERMES_OPERATOR_REPORTS.md](./HERMES_OPERATOR_REPORTS.md) as the evidence
+  map. Run `Hermes Operator Report` manually with `report_kind=all` after this
+  workflow lands, or wait for the next daily schedule. Flip only after both
+  `ops_health` and `daily_operator_brief` reports succeed, each artifact is
+  downloadable, and the hosted bootstrap instrumentation smoke above passes.
 
 ---
 
