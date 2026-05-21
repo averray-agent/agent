@@ -53,20 +53,46 @@ Current mitigation:
 - the GitHub workflow only publishes when the served manifest hash differs
 - owner authority has moved toward the 2-of-3 multisig flow documented in
   [MULTISIG_SETUP.md](./MULTISIG_SETUP.md)
-- backend signer is **KMS-backed** since the 2026-05-16 Phase 3 cutover
-  (`SIGNER_BACKEND=kms` in `deploy/backend.env.template`); the private key
-  material lives only inside AWS KMS and is non-exportable. The backend
-  only ever calls `kms:Sign`. See [`docs/SECRETS_MIGRATION.md`](./SECRETS_MIGRATION.md).
+- backend **blockchain signer** is **KMS-backed** since the 2026-05-16
+  Phase 3 cutover (`SIGNER_BACKEND=kms` in `deploy/backend.env.template`);
+  the private key material lives only inside AWS KMS and is
+  non-exportable. The backend only ever calls `kms:Sign`. See
+  [`docs/SECRETS_MIGRATION.md`](./SECRETS_MIGRATION.md).
+- backend **JWT signer** is also KMS-backed since the 2026-05-21 Phase
+  4b Stage 2C-2 cutover (`JWT_BACKEND=kms`). Distinct KMS key
+  (`ECC_NIST_P256`, signing-only role policy), distinct IAM principal
+  (`averray-jwt-signer-testnet-role`), distinct alarm surface. A
+  blockchain-signer key compromise cannot mint JWTs; a JWT-signer key
+  compromise cannot move on-chain funds. See
+  [`docs/PHASE_4B_KMS_JWT_PLAN.md`](./PHASE_4B_KMS_JWT_PLAN.md) §3.
+- backend AWS credentials are provisioned via **IAM Roles Anywhere**
+  (Phase 5a cutover 2026-05-21) — short-lived STS sessions (~1h TTL,
+  `ASIA*`-prefixed) issued via `aws_signing_helper` from X.509 client
+  certs on the VPS. The previously-rendered long-lived static IAM
+  access keys (`AKIA*`) are no longer in `/run/agent-stack/backend.env`
+  as of Stage 2C-3 (PR #463). 1Password retention for the static keys
+  is ~30 days as rollback target, then deleted. See
+  [`docs/PHASE_5A_IAM_ROLES_ANYWHERE_PLAN.md`](./PHASE_5A_IAM_ROLES_ANYWHERE_PLAN.md).
 
 Follow-up:
 
 - keep signer duties separated from hot operational wallets
 - finish the recovery playbook dry run for lost-key scenarios
 - require multisig review for any mainnet-adjacent owner mutation
-- migrate the `DISCOVERY_PUBLISHER_PRIVATE_KEY` (still a raw private key in
-  GitHub Secrets) to a KMS-backed signer, mirroring the Phase 3 backend
-  pattern. Practical risk is bounded — that key only publishes manifest
-  hashes — but the asymmetry is worth closing once Phase 4c lands.
+- rotate the Roles Anywhere X.509 client certs every 90 days per the
+  cadence in
+  [`PHASE_5A_IAM_ROLES_ANYWHERE_PLAN.md`](./PHASE_5A_IAM_ROLES_ANYWHERE_PLAN.md)
+  §"Cert TTL: 90 days, rotated on calendar". Expired certs mean the
+  backend cannot mint new STS sessions and existing sessions degrade
+  silently as their 1h TTL lapses.
+- complete Phase 5a-retire (≥30 days after 2026-05-21 cutover): delete
+  the static IAM access keys + their 1Password fields so the rollback
+  target — and a potential leak vector — disappears.
+- migrate the `DISCOVERY_PUBLISHER_PRIVATE_KEY` (still a raw private
+  key in GitHub Secrets) to a KMS-backed signer, mirroring the Phase
+  3 backend pattern. Practical risk is bounded — that key only
+  publishes manifest hashes — but the asymmetry is worth closing once
+  Phase 4c lands.
 
 ### Pauser Compromise
 
@@ -232,18 +258,144 @@ Follow-up:
 ### Authentication Token Exposure
 
 Risk: browser JWTs or API keys copied into chat, logs, or issue comments can be
-used until expiry or revocation.
+used until expiry or revocation. A leaked HMAC secret would let an attacker
+forge tokens for any subject; a leaked asymmetric public key cannot mint
+tokens.
 
 Current mitigation:
 
-- JWTs expire and can be revoked through logout
-- production auth is strict SIWE JWT auth
-- secrets are stored in GitHub Actions secrets, not committed to the repo
+- production auth is strict SIWE JWT — every issued token has a finite
+  TTL, a `kid`-bound issuer, and an explicit audience claim
+- since the 2026-05-21 Phase 4b Stage 2C-2 cutover, the backend's
+  dispatcher runs `JWT_BACKEND=kms` — verifier **refuses HS256** and
+  accepts only ES256 signed against the KMS JWT key (`kid=jwt-1`,
+  `ECC_NIST_P256`). A leaked HMAC secret can no longer mint accepted
+  tokens; the only mint path is `kms:Sign` against the JWT key, which
+  is restricted to the `averray-jwt-signer-*-role` IAM role
+- tokens carry a `roles: [...]` array claim (multi-role); the verifier
+  matches against `JWT_EXPECTED_ROLES` and rejects unknown roles —
+  preventing privilege escalation via a leaked operator token to a
+  capability the original subject wasn't granted
+- boot-time `kms:GetPublicKey` against the JWT key validates the
+  credential chain at every container start
+  (`jwt-kms-credential-check.ok` log line); misconfiguration is loud
+  (`bootstrap.init_failed`) rather than silent
+- secrets are stored in 1Password (`prod-backend`, `prod-smoke`,
+  `prod-ci`, `prod-indexer` vaults; service-account-scoped tokens) and
+  in GitHub Actions secrets — not committed to the repo
+- refresh tokens follow RFC 9700 strict-replay semantics — a stolen
+  refresh token rotates on first use, invalidating both the stolen
+  and the legitimate copy and surfacing the theft in audit logs
 
 Follow-up:
 
-- rotate any API key or token pasted into shared chat
-- add operator docs that distinguish signing secrets from bearer JWTs
+- rotate any API key or token pasted into shared chat (still applies —
+  the asymmetric move closes the forgery vector but not the
+  use-until-expiry one)
+- rotate `op://prod-smoke/admin-jwt/password` every 25 days. It's a
+  30-day ES256 token used by the hosted product-proof smoke; if it
+  expires, smoke step `Checking admin async XCM status` 401s and
+  every Deploy Production run fails until rotated. Mint via
+  `scripts/ops/mint-admin-jwt.mjs --use-kms` per
+  [`OPERATOR_ONBOARDING.md`](./OPERATOR_ONBOARDING.md) §5.4.
+- complete Stage 2C-3 HMAC retirement: ≥30 days after 2026-05-21,
+  delete `op://prod-backend/auth-jwt-secrets`, drop the HMAC code
+  branch from `mcp-server/src/auth/jwt.js`, and retire
+  `AUTH_JWT_SECRETS` from the secrets inventory and rotation
+  calendar. Until then, the HMAC secret is still on disk in
+  `/run/agent-stack/backend.env` even though the dispatcher refuses
+  to use it.
+- add operator docs that distinguish signing secrets (KMS keys, never
+  exportable) from bearer JWTs (rotatable, leakable, finite-TTL) —
+  partly closed by
+  [`OPERATOR_ONBOARDING.md`](./OPERATOR_ONBOARDING.md) §5.4 and §6,
+  but the dedicated "what is a signing secret" section is still TODO.
+
+### Credential Provisioning Pipeline Compromise
+
+Risk: IAM Roles Anywhere replaces a single high-trust artifact (the
+static IAM access key) with a chain of artifacts — self-signed CA
+private key, trust-anchor configuration, client cert + key, signing
+helper binary, AWS shared-config file. Each link is a new
+supply-chain surface; tampering with any one can let an attacker mint
+STS sessions as the JWT signer role or the blockchain signer role.
+
+Current mitigation:
+
+- the self-signed CA private key never lives on the VPS — operator
+  generates it locally, uploads to 1Password (`op://prod-critical/
+  roles-anywhere-ca`), shreds the local copy. Per-cert issuance is a
+  one-shot operator action that re-downloads, signs, and shreds again.
+  See [`PHASE_5A_IAM_ROLES_ANYWHERE_PLAN.md`](./PHASE_5A_IAM_ROLES_ANYWHERE_PLAN.md)
+  §"CA private key handling"
+- `aws_signing_helper` binary integrity is verified against the
+  AWS-published SHA256 checksum at install per
+  [`PHASE_5A_IAM_ROLES_ANYWHERE_PLAN.md`](./PHASE_5A_IAM_ROLES_ANYWHERE_PLAN.md)
+  §5.1; the binary lives at `/usr/local/bin/aws_signing_helper` (mode
+  `0755`, owned by `root`) and is mounted read-only into the backend
+  container
+- client cert + key files in `/etc/agent-stack/roles-anywhere/` are
+  mode `0400` owned by `root`, mounted read-only into the container;
+  no other process on the VPS can read them
+- the JWT signer role's IAM permissions policy
+  (`deploy/iam-policies/averray-jwt-signer-prod-role.json`) is
+  intentionally sign-only: `kms:Sign` with `ECDSA_SHA_256` + `DIGEST`
+  condition keys, `kms:GetPublicKey`, and an explicit `Deny` on
+  `kms:ScheduleKeyDeletion`, `kms:DisableKey`, `kms:PutKeyPolicy`,
+  `kms:CreateGrant`, `kms:ReplicateKey`, `kms:UpdatePrimaryRegion` —
+  a compromised role can mint tokens but cannot kill the key or
+  silently re-target it
+- IAM Roles Anywhere role trust policy requires
+  `aws:PrincipalTag/x509Subject/CN` to match the expected CN and
+  `aws:SourceArn` to match the trust-anchor ARN — a stolen client cert
+  used against an attacker's trust anchor would be rejected
+
+Follow-up:
+
+- add CloudTrail alarms for `sts:AssumeRoleWithSAML` /
+  `sts:AssumeRoleWithWebIdentity` calls from outside the expected VPS
+  source IP / subnet ranges
+- add an integrity check at deploy time that re-verifies
+  `aws_signing_helper` checksum (catches a future supply-chain
+  poisoning between install and the next operator-triggered re-install)
+- consider an SCP at the AWS account / org level that explicitly
+  refuses any IAM action targeting the JWT or blockchain signer keys
+  from a principal other than the deploy account's IAM admin —
+  belt-and-braces against a compromised IAM user that has broad-enough
+  permissions to bypass the signer role's narrow policy
+
+### Boot-Time Credential-Check Bypass
+
+Risk: `JWT_KMS_CREDENTIAL_CHECK_SKIP=1` is an explicit emergency-bypass
+flag for the boot-time JWT KMS credential check (a `kms:GetPublicKey`
+call that exercises the full Roles Anywhere → KMS path before the
+backend accepts requests). A stray production-set flag would hide the
+misconfiguration the check exists to catch.
+
+Current mitigation:
+
+- the flag is documented as emergency-only in
+  [`OPERATOR_ONBOARDING.md`](./OPERATOR_ONBOARDING.md) §6, with a
+  guardrail telling the operator to remove it once the underlying
+  issue is fixed and never to ship a PR that defaults it on
+- the bypass logs a `warn`-level `jwt-kms-credential-check.skipped`
+  line at every container start when the flag is set, so the bypass
+  is visible in normal log inspection
+- the flag does NOT bypass actual `kms:Sign` calls — runtime SIWE +
+  refresh flows still require a working credential chain; the flag
+  only defers the failure from boot to the first user-facing request
+
+Follow-up:
+
+- add a deploy-time check that fails the deploy if the rendered
+  `/run/agent-stack/backend.env` or docker-compose `environment:`
+  block has `JWT_KMS_CREDENTIAL_CHECK_SKIP=1` set without a matching
+  comment block in
+  [`MULTISIG_DECISION.md`](./MULTISIG_DECISION.md) or
+  `INCIDENT_RESPONSE.md` referencing an active incident
+- add an `/admin/status` field that surfaces "boot check skipped" so
+  operators can see at a glance that the platform is running with the
+  safety bypass on
 
 ## Truth-Boundary Discipline
 
@@ -288,13 +440,31 @@ publish flow, and bootstrap instrumentation are green. It is not mainnet-ready
 until mainnet parameters, audit sign-off, incident ownership, and async XCM
 staging evidence are complete.
 
-`v1.0.0-rc1` close progress as of 2026-05-17:
+`v1.0.0-rc1` close progress as of 2026-05-21:
 
 - Multisig owner control plane is live on testnet
   (`deployments/testnet-multisig-owner.json` is `status: "verified"`)
-- KMS-backed backend signer is live (Phase 3 cutover 2026-05-16)
+- KMS-backed backend **blockchain** signer is live (Phase 3 cutover
+  2026-05-16, `SIGNER_BACKEND=kms`)
+- KMS-backed backend **JWT** signer is live (Phase 4b Stage 2C-2
+  cutover 2026-05-21, `JWT_BACKEND=kms`). Verifier refuses HS256;
+  multi-role ES256 active in SIWE, refresh, and service-token paths.
+- IAM Roles Anywhere is the active credential source for both signers
+  (Phase 5a cutover 2026-05-21). Static IAM access keys retired from
+  the env template via PR #463 (Stage 2C-3); 1Password retention for
+  the static keys is the 30-day rollback window before Phase 5a-retire.
 - Audit remediation board ([`docs/AUDIT_REMEDIATION.md`](./AUDIT_REMEDIATION.md))
-  has closed Packages A, F, H, C, and I; Packages B, D, E, G, and J still open
+  has closed Packages A, F, H, C, and I; Packages B, D, E, G, and J
+  still open. `OPERATOR_ONBOARDING.md` was refreshed for the Phase
+  4b/5a state in PR #468; this threat-model refresh is its sibling.
+- The remaining `v1.0.0-rc1` P0 launch gates in
+  [`PROJECT_ROADMAP.md`](./PROJECT_ROADMAP.md) §"P0 Launch Gates" are
+  operator-side (multisig `setVerifier` call from the audit, pause/
+  unpause rehearsal, backup readiness + restore drill, metrics +
+  Sentry + alert-destination operator-set values, dispute verdict
+  hosted proof) and a small set of code/ops items
+  (`/admin/status` async XCM smoke, public discovery/schema/trust
+  gate + canonical API mirror proof).
 - External contract audit has not yet been engaged. See
   [`AUDIT_PACKAGE.md`](./AUDIT_PACKAGE.md) and
   [`STRATEGY_ADAPTER_AUDIT_SCOPE.md`](./STRATEGY_ADAPTER_AUDIT_SCOPE.md) for
