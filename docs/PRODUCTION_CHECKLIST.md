@@ -24,11 +24,9 @@ If this checklist is not green, the answer is "not ready yet".
 - [x] `TreasuryPolicy.owner` is the intended multisig address.
 - [x] `deployments/testnet-multisig-owner.json` is `status: "verified"` and matches the deployment manifest owner.
 - [ ] `TreasuryPolicy.pauser` is a hot key that only holds pause power.
-- [ ] `./scripts/verify_deployment.sh testnet` passes cleanly. Last checked on
-  2026-05-21 with `--require-owner-record-final`: owner, pauser, and owner
-  record passed, but `verifiers(0xFd2E...6519)` was false while
-  `deployments/testnet.json` still expected it to be true. Resolve the
-  manifest/on-chain verifier mismatch before launch.
+- [x] `./scripts/verify_deployment.sh testnet --require-owner-record-final`
+  passes cleanly after `deployments/testnet.json` was updated to the live
+  KMS verifier address (`0x31ad...7ab7F`).
 - [ ] Pause and unpause were rehearsed from the pauser key.
 - [x] At least one owner-only admin operation was rehearsed from the multisig.
 

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "kind": "averray.pauserRehearsalEvidence",
   "profile": "testnet",
-  "generatedAt": "2026-05-21T18:44:13.061Z",
+  "generatedAt": "2026-05-21T20:05:59.470Z",
   "mode": "read_only_capability_proof",
   "manifestPath": "deployments/testnet.json",
   "rpcUrl": "https://eth-rpc-testnet.polkadot.io/",
@@ -12,7 +12,7 @@
   "manifest": {
     "owner": "0x1f8C4da4AAAC79916350f1fabF1221309591B6F9",
     "pauser": "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519",
-    "verifier": "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519",
+    "verifier": "0x31ad432dFe083B998c69B6dB88A984ec5207ab7F",
     "arbitrator": "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519",
     "deployer": "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519"
   },
@@ -25,7 +25,6 @@
     "dedicated": false,
     "overlaps": [
       "deployer",
-      "verifier",
       "arbitrator"
     ],
     "severity": "warning"
@@ -164,7 +163,6 @@
       "message": "Current pauser address overlaps other manifest roles. This is acceptable only for bounded testnet rehearsal; mainnet must use a dedicated pauser.",
       "overlaps": [
         "deployer",
-        "verifier",
         "arbitrator"
       ]
     },
