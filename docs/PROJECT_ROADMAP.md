@@ -176,7 +176,7 @@ externally ready.
 | Schema registration for external jobs | Open | Custom/off-platform references can register signed schemas with clear trust boundaries. |
 | Dispute/arbitration semantics | Open | Decide release path, store arbitrator reasoning under content hash, expose dispute UI fields, and rehearse arbitrator notifications. |
 | Timeline operator UX verification | Open | Backend trace filters landed. Close criterion: confirm the operator app exposes the intended filters and either mark Done (if already wired in `app/`) or open a narrow PR to wire them. |
-| Reference-agent workflow generalization | Open | Wikipedia one-command workflow exists; general workflow pattern should be documented for other job families. |
+| Reference-agent workflow generalization | Done | General workflow pattern documented in `docs/REFERENCE_AGENT_WORKFLOWS.md` for GitHub, dependency/OSV, open-data, OpenAPI, standards, and Wikipedia job families; anchored to existing claim, submit, schema, and timeline surfaces. |
 
 ## Auth, Secrets, And Capability Roadmap
 
