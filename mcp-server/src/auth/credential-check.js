@@ -2,10 +2,26 @@ import { ConfigError } from "../core/errors.js";
 
 /**
  * Boot-time validation that the AWS credential chain can reach the JWT
- * KMS key. Calls `kms:DescribeKey` against the configured `keyId` —
- * cheap (returns metadata only, no signing), but exercises the full
- * credential resolution path the backend would use on the first
- * `kms:Sign` call.
+ * KMS key. Calls `kms:GetPublicKey` against the configured `keyId` —
+ * cheap (returns the SPKI public-key DER + key metadata, no signing),
+ * but exercises the full credential resolution path the backend would
+ * use on the first `kms:Sign` call.
+ *
+ * Why GetPublicKey rather than DescribeKey: the JWT signer's IAM role
+ * (`averray-jwt-signer-*-role`) is intentionally sign-only — its
+ * permissions policy grants `kms:Sign` (with `ECDSA_SHA_256 / DIGEST`
+ * conditions) and `kms:GetPublicKey`, but NOT `kms:DescribeKey`. See
+ * `deploy/iam-policies/averray-jwt-signer-prod-role.json` and the
+ * design rationale in `docs/PHASE_4B_KMS_JWT_PLAN.md` §3. The previous
+ * boot check used DescribeKey and only happened to pass because the
+ * SDK default credential chain was resolving the BLOCKCHAIN signer's
+ * static keys (broader IAM principal) instead of the JWT signer's.
+ * After #457 fixed the provider plumbing so the boot check uses the
+ * JWT signer's Roles Anywhere creds (same as runtime), the check
+ * started failing with `AccessDeniedException` on DescribeKey — the
+ * correct least-privilege behavior. Switching to GetPublicKey aligns
+ * the check with what the policy permits and what the runtime
+ * KmsJwtSigner already calls.
  *
  * Why this exists (Phase 5a prep): under static IAM keys today, a
  * misconfigured `AWS_JWT_ACCESS_KEY_ID`/`AWS_JWT_SECRET_ACCESS_KEY`
@@ -46,8 +62,8 @@ const VALIDATION_TIMEOUT_MS = 10_000;
  *   Anywhere wired in, but this boot check did not — so removing the env-
  *   rendered static keys broke the boot check (`CredentialsProviderError`)
  *   while the runtime kept working. Production callers MUST pass this opt.
- * @returns {Promise<{ ok: true, keyId: string, keyArn: string, keyState: string }>}
- * @throws {ConfigError}            If the credential chain cannot resolve or DescribeKey fails.
+ * @returns {Promise<{ ok: true, keyId: string, keyArn: string, keyUsage: string }>}
+ * @throws {ConfigError}            If the credential chain cannot resolve or GetPublicKey fails.
  */
 export async function validateJwtKmsCredentialAccess(kmsJwtConfig, opts = {}) {
   if (!kmsJwtConfig) {
@@ -72,7 +88,7 @@ export async function validateJwtKmsCredentialAccess(kmsJwtConfig, opts = {}) {
 
   // Lazy-import the SDK to keep cold-import light for HMAC-only
   // callers. Matches the import strategy in KmsJwtSigner.
-  const { KMSClient, DescribeKeyCommand } = await import("@aws-sdk/client-kms");
+  const { KMSClient, GetPublicKeyCommand } = await import("@aws-sdk/client-kms");
 
   // Reuse the test-injected KMSClient if present (KmsJwtSigner does
   // the same), so unit tests can stub the check without configuring a
@@ -91,7 +107,7 @@ export async function validateJwtKmsCredentialAccess(kmsJwtConfig, opts = {}) {
   let response;
   try {
     response = await withTimeout(
-      client.send(new DescribeKeyCommand({ KeyId: kmsJwtConfig.keyId })),
+      client.send(new GetPublicKeyCommand({ KeyId: kmsJwtConfig.keyId })),
       VALIDATION_TIMEOUT_MS,
       "jwt-kms-credential-check",
     );
@@ -99,33 +115,54 @@ export async function validateJwtKmsCredentialAccess(kmsJwtConfig, opts = {}) {
     throw classifyError(error, kmsJwtConfig);
   }
 
-  const meta = response?.KeyMetadata;
-  if (!meta) {
+  // GetPublicKey returns the key's ARN (in the KeyId field by default),
+  // public-key DER bytes, KeySpec, KeyUsage, SigningAlgorithms. Note: a
+  // Disabled key surfaces as a `DisabledException` thrown from
+  // client.send above — handled in classifyError — rather than via a
+  // KeyState field on the success response. Likewise a wrong-account /
+  // wrong-region key surfaces as NotFoundException.
+  if (!response || !response.PublicKey) {
     throw new ConfigError(
-      `JWT KMS credential check returned no KeyMetadata for ${kmsJwtConfig.keyId}. ` +
+      `JWT KMS credential check returned no PublicKey for ${kmsJwtConfig.keyId}. ` +
         "Either the key was deleted between config-load and this call, or the AWS SDK returned an unexpected shape.",
     );
   }
-  if (meta.KeyState && meta.KeyState !== "Enabled") {
+  if (response.KeyUsage && response.KeyUsage !== "SIGN_VERIFY") {
     throw new ConfigError(
-      `JWT KMS key ${kmsJwtConfig.keyId} is in state "${meta.KeyState}" (not "Enabled"). ` +
-        "kms:Sign calls will fail until the key is re-enabled.",
-    );
-  }
-  if (meta.KeyUsage && meta.KeyUsage !== "SIGN_VERIFY") {
-    throw new ConfigError(
-      `JWT KMS key ${kmsJwtConfig.keyId} has KeyUsage="${meta.KeyUsage}" (expected "SIGN_VERIFY"). ` +
+      `JWT KMS key ${kmsJwtConfig.keyId} has KeyUsage="${response.KeyUsage}" (expected "SIGN_VERIFY"). ` +
         "This is the wrong key — confirm AWS_JWT_KEY_ID points at the JWT signer key, not the blockchain signer key.",
     );
   }
+  if (
+    Array.isArray(response.SigningAlgorithms) &&
+    response.SigningAlgorithms.length > 0 &&
+    !response.SigningAlgorithms.includes("ECDSA_SHA_256")
+  ) {
+    // ES256 (RFC 7518) requires SHA-256 over the ECDSA signature.
+    // A key whose SigningAlgorithms doesn't include ECDSA_SHA_256
+    // (e.g. an RSA key, or an ECC_SECG_P256K1 secp256k1 key — that's
+    // the BLOCKCHAIN signer key, NOT the JWT signer key) can't be
+    // used to mint ES256 tokens at all.
+    throw new ConfigError(
+      `JWT KMS key ${kmsJwtConfig.keyId} does not support ECDSA_SHA_256 ` +
+        `(SigningAlgorithms=${JSON.stringify(response.SigningAlgorithms)}). ` +
+        "This is the wrong key spec — JWT signing requires ECC_NIST_P256 (ES256). " +
+        "Confirm AWS_JWT_KEY_ID points at the JWT signer key, not the blockchain signer (secp256k1) key.",
+    );
+  }
 
+  // GetPublicKey returns the resolved ARN in the KeyId field even when
+  // the request used a non-ARN identifier (alias / key-id only). When
+  // the request already used a full ARN this round-trips unchanged.
+  const keyArn = response.KeyId ?? kmsJwtConfig.keyId;
   const durationMs = Date.now() - startedAt;
   opts.logger?.info?.(
     {
       keyId: kmsJwtConfig.keyId,
-      keyArn: meta.Arn,
-      keyState: meta.KeyState,
-      keyUsage: meta.KeyUsage,
+      keyArn,
+      keyUsage: response.KeyUsage,
+      keySpec: response.KeySpec,
+      signingAlgorithms: response.SigningAlgorithms,
       durationMs,
     },
     "jwt-kms-credential-check.ok",
@@ -134,8 +171,8 @@ export async function validateJwtKmsCredentialAccess(kmsJwtConfig, opts = {}) {
   return {
     ok: true,
     keyId: kmsJwtConfig.keyId,
-    keyArn: meta.Arn,
-    keyState: meta.KeyState,
+    keyArn,
+    keyUsage: response.KeyUsage,
   };
 }
 
@@ -161,14 +198,31 @@ function classifyError(error, kmsJwtConfig) {
   }
 
   // Auth failures from KMS itself — credentials resolved, but the
-  // resolved principal doesn't have kms:DescribeKey on this key.
+  // resolved principal doesn't have kms:GetPublicKey on this key. The
+  // canonical JWT signer policy in deploy/iam-policies/
+  // averray-jwt-signer-prod-role.json grants this; if you see this,
+  // the role policy has drifted from the canonical shape.
   if (name === "AccessDeniedException" || httpStatus === 403) {
     return new ConfigError(
       "JWT KMS credential chain resolved, but the resulting principal lacks " +
-        `kms:DescribeKey on ${kmsJwtConfig.keyId}. The IAM policy attached to the JWT signer ` +
-        "role/user should permit kms:DescribeKey (a low-privilege metadata read; the existing " +
-        "kms:Sign-only policy needs to be expanded to include DescribeKey for boot validation, " +
-        "or this check needs to be skipped via JWT_KMS_CREDENTIAL_CHECK_SKIP=1). " +
+        `kms:GetPublicKey on ${kmsJwtConfig.keyId}. The canonical JWT signer policy ` +
+        "(deploy/iam-policies/averray-jwt-signer-prod-role.json) grants this — if your role " +
+        "policy is missing it, re-apply the canonical policy. Or skip this check via " +
+        "JWT_KMS_CREDENTIAL_CHECK_SKIP=1 (boot proceeds; runtime kms:Sign still requires the " +
+        "key to be reachable, so this only defers the failure to first sign). " +
+        `Underlying error: ${message}`,
+    );
+  }
+
+  // The key exists but is in the `Disabled` state. GetPublicKey is one
+  // of the operations KMS rejects for disabled keys; this surfaces as
+  // a DisabledException rather than via a KeyState field on a success
+  // response (which is what DescribeKey would have shown).
+  if (name === "DisabledException") {
+    return new ConfigError(
+      `JWT KMS key ${kmsJwtConfig.keyId} is disabled. kms:Sign + kms:GetPublicKey ` +
+        "calls will fail until the key is re-enabled (via aws kms enable-key, or via the " +
+        "KMS console). Disabled keys do NOT roll back to working over time on their own. " +
         `Underlying error: ${message}`,
     );
   }
