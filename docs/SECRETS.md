@@ -217,9 +217,9 @@ live in D.
 | Deployer | `0xFd2EAE…6519` | Local one-shot env | Only used during `deploy_contracts.sh`; transferred to multisig at end |
 | Owner (mainnet) | TBD multisig | Three signer set in D | 2-of-3 threshold per `MULTISIG_SETUP.md` |
 | Owner (testnet) | `0x1f8C…b6F9` | Same multisig signer set | |
-| Pauser | `0xFd2EAE…6519` | Local env / hot key (testnet); **multisig-controlled on mainnet** | EOA on testnet, rotated via `rotate_pauser.sh`. **Mainnet**: the pauser must be a separate multisig (or at minimum a separate hardware-protected EOA that is NOT the verifier/arbitrator key). Reusing the verifier key for pause defeats the purpose — a leaked verifier signing capability would otherwise also be able to pause/un-pause arbitrarily. |
-| Verifier | `0xFd2EAE…6519` | `SIGNER_PRIVATE_KEY` (current) → AWS KMS (target) | The hottest key |
-| Arbitrator | `0xFd2EAE…6519` | `SIGNER_PRIVATE_KEY` (current) → AWS KMS (target) | **Currently the SAME key as verifier — this is an accepted risk on testnet, NOT acceptable for mainnet.** Mainnet must split verifier and arbitrator into two distinct KMS keys (different IAM roles, different alarm thresholds, different on-chain addresses). A compromised verifier key should not also be able to resolve disputes. Track the split as a Phase 5 prerequisite. |
+| Pauser | `0xFd2EAE…6519` | Local env / hot key (testnet); **multisig-controlled on mainnet** | EOA on testnet, rotated via `rotate_pauser.sh`. **Mainnet**: the pauser must be a separate multisig (or at minimum a separate hardware-protected EOA that is NOT the verifier/arbitrator key). Reusing any verifier or arbitrator key for pause defeats the purpose — a leaked signing capability would otherwise also be able to pause/un-pause arbitrarily. |
+| Verifier | `0x31ad…7ab7F` | AWS KMS | Sole on-chain verifier after the Phase 3 cutover and old raw-key verifier revocation. |
+| Arbitrator | `0xFd2EAE…6519` | Local env / hot key (testnet); AWS KMS target | No longer the same address as the KMS verifier, but still overlaps the pauser/deployer testnet hot key. This is an accepted testnet risk only; mainnet must split verifier, arbitrator, and pauser into distinct controlled authorities. |
 
 ### F. External service tokens (vendor portals)
 
