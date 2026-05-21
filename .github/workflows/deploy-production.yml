@@ -80,13 +80,13 @@ on:
           - "0"
           - "1"
       smoke_check_product_proof_gate:
-        description: Require public discovery/schema/trust surfaces to match the live API.
+        description: Require public discovery/schema/trust surfaces to match the live API. Defaults to "1" — set "0" only for an explicit smoke-bypass dispatch.
         required: false
-        default: "0"
+        default: "1"
         type: choice
         options:
-          - "0"
           - "1"
+          - "0"
       product_proof_require_worker_loop:
         description: Run one real hosted worker loop, write evidence, and require it in the product-proof gate.
         required: false
@@ -171,7 +171,15 @@ jobs:
       DEPLOY_BOOTSTRAP_SELF_REPORT_SEND_NOW: ${{ github.event_name == 'workflow_dispatch' && inputs.bootstrap_self_report_send_now || '0' }}
       DEPLOY_SMOKE_CHECK_BOOTSTRAP_INSTRUMENTATION: ${{ github.event_name == 'workflow_dispatch' && inputs.smoke_check_bootstrap_instrumentation || '0' }}
       DEPLOY_SMOKE_CHECK_BOOTSTRAP_SELF_REPORT_SENT: ${{ github.event_name == 'workflow_dispatch' && inputs.smoke_check_bootstrap_self_report_sent || '0' }}
-      DEPLOY_SMOKE_CHECK_PRODUCT_PROOF_GATE: ${{ github.event_name == 'workflow_dispatch' && inputs.smoke_check_product_proof_gate || '0' }}
+      # Closes both PROJECT_ROADMAP.md P0 gates "Public discovery/schema/
+      # trust gate" and "Canonical public discovery/API mirror" — the
+      # product-proof gate (scripts/ops/check-product-proof-gate.mjs)
+      # now runs on every deploy, fail-closed. The check is cheap
+      # read-only HTTP (deep-equal between /.well-known/agent-tools.json
+      # on averray.com and /agent-tools.json on api.averray.com, plus
+      # onboarding + trust + schema page integrity); chain mutation
+      # remains gated by PRODUCT_PROOF_REQUIRE_WORKER_LOOP below.
+      DEPLOY_SMOKE_CHECK_PRODUCT_PROOF_GATE: ${{ github.event_name == 'workflow_dispatch' && inputs.smoke_check_product_proof_gate || '1' }}
       DEPLOY_PRODUCT_PROOF_REQUIRE_WORKER_LOOP: ${{ github.event_name == 'workflow_dispatch' && inputs.product_proof_require_worker_loop || '0' }}
       DEPLOY_PRODUCT_PROOF_REWARD_ASSET: ${{ github.event_name == 'workflow_dispatch' && inputs.product_proof_reward_asset || '' }}
       DEPLOY_RUN_HERMES_POST_DEPLOY: ${{ github.event_name == 'workflow_dispatch' && inputs.run_hermes_post_deploy || '1' }}

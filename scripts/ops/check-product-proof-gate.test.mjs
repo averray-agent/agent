@@ -1,12 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 
 import { buildDiscoveryManifest } from "../../mcp-server/src/core/discovery-manifest.js";
 import { listBuiltinJobSchemas } from "../../mcp-server/src/core/job-schema-registry.js";
 import { checkProductProofGate } from "./check-product-proof-gate.mjs";
+
+const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
+const WORKFLOW_PATH = join(REPO_ROOT, ".github/workflows/deploy-production.yml");
 
 test("checkProductProofGate validates public discovery, pages, and schemas", async () => {
   const manifest = buildDiscoveryManifest();
@@ -388,3 +392,49 @@ function workerLoopEvidence({ wallet, sessionId, jobId }) {
     completedAt: "2026-05-13T11:11:31.000Z"
   };
 }
+
+test("deploy-production workflow defaults the product-proof gate to run on every deploy", async () => {
+  // Structural lock-in for the PROJECT_ROADMAP.md P0 gates "Public
+  // discovery/schema/trust gate" and "Canonical public discovery/API
+  // mirror" — both close by having the product-proof gate run on
+  // every deploy (not opt-in only). The fallback value in the
+  // DEPLOY_SMOKE_CHECK_PRODUCT_PROOF_GATE env expression IS the gate
+  // — if it goes back to '0', auto-deploys (workflow_run) stop
+  // running the gate and the P0 reopens silently.
+  const yaml = await readFile(WORKFLOW_PATH, "utf8");
+
+  assert.match(
+    yaml,
+    /DEPLOY_SMOKE_CHECK_PRODUCT_PROOF_GATE:\s*\$\{\{\s*github\.event_name\s*==\s*'workflow_dispatch'\s*&&\s*inputs\.smoke_check_product_proof_gate\s*\|\|\s*'1'\s*\}\}/u,
+    "Deploy Production workflow must default DEPLOY_SMOKE_CHECK_PRODUCT_PROOF_GATE to '1' for auto-deploys (workflow_run). Found a different default — auto-deploys would skip the public-discovery + API-mirror gate.",
+  );
+
+  // The workflow_dispatch input default also flipped to '1' so manual
+  // deploys run the gate unless the operator explicitly sets '0'.
+  // Keeps the surface consistent: opting OUT requires intent.
+  assert.match(
+    yaml,
+    /smoke_check_product_proof_gate:[\s\S]{0,200}default:\s*"1"/u,
+    "workflow_dispatch input smoke_check_product_proof_gate must default to \"1\".",
+  );
+});
+
+test("deploy-production workflow keeps PRODUCT_PROOF_REQUIRE_WORKER_LOOP opt-in by default", async () => {
+  // The worker-loop flag triggers a real on-chain mutation cycle
+  // (claim → submit → settle USDC). It MUST stay opt-in to avoid
+  // burning signer balance and writing chain state on every CI deploy.
+  // The gate-bundle change in this PR only enables the cheap read-only
+  // checks (discovery, mirror, trust, schema) — not the worker loop.
+  const yaml = await readFile(WORKFLOW_PATH, "utf8");
+
+  assert.match(
+    yaml,
+    /product_proof_require_worker_loop:[\s\S]{0,200}default:\s*"0"/u,
+    "workflow_dispatch input product_proof_require_worker_loop must stay default \"0\" — chain mutation is not safe to run on every deploy.",
+  );
+  assert.match(
+    yaml,
+    /DEPLOY_PRODUCT_PROOF_REQUIRE_WORKER_LOOP:\s*\$\{\{\s*github\.event_name\s*==\s*'workflow_dispatch'\s*&&\s*inputs\.product_proof_require_worker_loop\s*\|\|\s*'0'\s*\}\}/u,
+    "DEPLOY_PRODUCT_PROOF_REQUIRE_WORKER_LOOP must default to '0' for auto-deploys (workflow_run) — chain mutation stays opt-in.",
+  );
+});
