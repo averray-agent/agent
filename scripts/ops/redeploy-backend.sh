@@ -102,7 +102,61 @@ rollback() {
   fi
 
   echo "Health check failed; rolling back to $PREVIOUS_SHA" >&2
-  git -C "$APP_ROOT" checkout --quiet "$PREVIOUS_SHA"
+  if ! git -C "$APP_ROOT" checkout --quiet "$PREVIOUS_SHA"; then
+    echo "Rollback: git checkout $PREVIOUS_SHA failed. Working tree may be dirty or the SHA may be unreachable." >&2
+    echo "Manual intervention required: inspect $APP_ROOT for uncommitted changes or fetch the missing commit." >&2
+    exit 1
+  fi
+
+  # Verify the checkout actually moved HEAD. The Phase 5a Stage 2C-3
+  # rollback outage post-mortem (2026-05-21, PR #455) showed `git
+  # rev-parse HEAD` still pointing at the failed-deploy SHA after this
+  # function claimed to have rolled back — root cause never fully
+  # isolated (suspected: silent checkout no-op when working tree state
+  # interferes). This guard turns that class of failure into a loud
+  # bail before the rollback's compose_up rebuilds with the still-
+  # broken code.
+  local checked_out_head
+  checked_out_head=$(git -C "$APP_ROOT" rev-parse HEAD)
+  if [[ "$checked_out_head" != "$PREVIOUS_SHA" ]]; then
+    echo "Rollback checkout did NOT move HEAD: expected $PREVIOUS_SHA, got $checked_out_head." >&2
+    echo "Manual intervention required: the working tree is still at the failed-deploy SHA." >&2
+    exit 1
+  fi
+  echo "Working tree restored to $PREVIOUS_SHA"
+
+  # Re-render /run/agent-stack/backend.env from the rolled-back
+  # template. Without this step the rendered env on disk still
+  # reflects the FAILED deploy's template — restoring just the code
+  # while leaving the new env in place can produce mismatched runtime
+  # state (env vars the rolled-back code still expects, or vice
+  # versa). This is the gap that prevented the Phase 5a Stage 2C-3
+  # rollback from restoring health: PR #455 removed static-key env
+  # lines from backend.env.template; the wrapping deploy rendered the
+  # new (smaller) env before container-restart; rollback then restored
+  # the OLD code that read those env vars, but /run/agent-stack/
+  # backend.env no longer carried them.
+  local render_script="$APP_ROOT/scripts/ops/render-vps-env.sh"
+  local template="$APP_ROOT/deploy/backend.env.template"
+  local target="/run/agent-stack/backend.env"
+  local token="/etc/agent-stack/op-backend.env"
+
+  if [[ -x "$render_script" && -f "$template" && -f "$token" ]]; then
+    echo "Re-rendering $target from $template @ $PREVIOUS_SHA"
+    if ! sudo bash "$render_script" "$template" "$target" "$token"; then
+      echo "Rollback env re-render failed; backend may boot with NEW-deploy env on OLD-deploy code." >&2
+      echo "Manual intervention required: inspect $target vs $template at $PREVIOUS_SHA." >&2
+      exit 1
+    fi
+  else
+    # On a freshly-bootstrapped VPS the render path may not be fully
+    # installed yet — log the skip but don't fail, mirroring the
+    # forward-deploy render step's skip-clean conditions in
+    # deploy-production.sh::render_runtime_envs.
+    echo "Rollback skipping env re-render: render-vps-env.sh ($render_script), template ($template), or op token ($token) not present." >&2
+    echo "  This is OK on a not-yet-bootstrapped VPS but suspicious on a deployed one." >&2
+  fi
+
   compose_up
   if wait_for_health; then
     echo "Rollback succeeded; service is serving the previous build."
