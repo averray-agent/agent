@@ -209,7 +209,7 @@ RUN_SUBSCAN_XCM_VALIDATION=1 ./scripts/ops/check-release-readiness.sh testnet
 - [ ] Structured logs are visible from the current deploy target.
 - [ ] An alert destination is configured for hosted smoke-check failures.
 - [x] [INCIDENT_RESPONSE.md](./INCIDENT_RESPONSE.md) has named on-call ownership.
-- [ ] Operator self-report proof is visible after deploy and on schedule. Flip
+- [x] Operator self-report proof is visible after deploy and on schedule. Flip
   this box only when ALL of the following are true against the production stack:
   - The production deploy workflow completes with `run_hermes_post_deploy=1`
     and the GitHub Actions summary contains a Hermes post-deploy verification
@@ -218,6 +218,9 @@ RUN_SUBSCAN_XCM_VALIDATION=1 ./scripts/ops/check-release-readiness.sh testnet
   - The same workflow run includes the `hermes-post-deploy-<run-id>`
     artifact, which preserves the full `hermes-post-deploy.log` beyond the
     truncated summary.
+    - Verified on 2026-05-21: deploy run `26241427864` completed the Hermes
+      post-deploy step and uploaded artifact `hermes-post-deploy-26241427864`
+      (artifact id `7142450191`).
   - The `Hermes Operator Report` workflow has run successfully for both
     `ops_health` and `daily_operator_brief`, and each run includes a
     `hermes-operator-report-<report-kind>-<run-id>-<run-attempt>` artifact
@@ -242,6 +245,10 @@ RUN_SUBSCAN_XCM_VALIDATION=1 ./scripts/ops/check-release-readiness.sh testnet
     CHECK_BOOTSTRAP_INSTRUMENTATION=1 \
     ./scripts/ops/check-hosted-stack.sh
     ```
+    - Verified on 2026-05-21: focused deploy smoke run `26241544177` loaded the
+      production `ADMIN_JWT` from 1Password, ran with
+      `smoke_check_bootstrap_instrumentation=1`, reached `Checking bootstrap
+      instrumentation`, and ended with `Hosted stack smoke check passed.`
   - The smoke gate verifies `upstreamStatus` is enabled/running and that the
     optional `.bootstrapSelfReport` status is well-formed and sanitized.
   - `/admin/status.bootstrapSelfReport` does not contain API-key-shaped
