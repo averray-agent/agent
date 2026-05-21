@@ -32,6 +32,20 @@ const VALIDATION_TIMEOUT_MS = 10_000;
  * @param {object} [opts]
  * @param {object} [opts.logger]   Logger with `.info`/`.warn` methods.
  * @param {boolean} [opts.skip]    Test-only escape hatch — skip the live check.
+ * @param {Function} [opts.credentialsProvider]
+ *   AWS SDK credentials-provider function (e.g. the `fromIni` result from
+ *   `buildKmsCredentialsProvider`). When provided AND no `kmsJwtConfig.kmsClient`
+ *   is injected, the constructed `KMSClient` is built with this provider so the
+ *   boot check uses the same credential resolution path as the runtime signer
+ *   (`getKmsSigner` in `jwt.js`). Without it, `new KMSClient({ region })` falls
+ *   through to the SDK default chain (env vars / shared config / IMDS) — which
+ *   does NOT pick up Roles Anywhere by default and therefore disagrees with the
+ *   runtime path when `AWS_USE_ROLES_ANYWHERE=true` is set + static keys are
+ *   not in env. That drift was the root cause of the Phase 5a Stage 2C-3 prod
+ *   outage (#455 → reverted in #456): the runtime KmsJwtSigner had Roles
+ *   Anywhere wired in, but this boot check did not — so removing the env-
+ *   rendered static keys broke the boot check (`CredentialsProviderError`)
+ *   while the runtime kept working. Production callers MUST pass this opt.
  * @returns {Promise<{ ok: true, keyId: string, keyArn: string, keyState: string }>}
  * @throws {ConfigError}            If the credential chain cannot resolve or DescribeKey fails.
  */
@@ -62,9 +76,16 @@ export async function validateJwtKmsCredentialAccess(kmsJwtConfig, opts = {}) {
 
   // Reuse the test-injected KMSClient if present (KmsJwtSigner does
   // the same), so unit tests can stub the check without configuring a
-  // real AWS account.
+  // real AWS account. When none is injected, build one with the same
+  // credentials-provider the runtime signer uses — see the
+  // opts.credentialsProvider JSDoc above for the failure mode this
+  // avoids.
   const client =
-    kmsJwtConfig.kmsClient ?? new KMSClient({ region: kmsJwtConfig.region });
+    kmsJwtConfig.kmsClient ??
+    new KMSClient({
+      region: kmsJwtConfig.region,
+      ...(opts.credentialsProvider ? { credentials: opts.credentialsProvider } : {}),
+    });
 
   const startedAt = Date.now();
   let response;

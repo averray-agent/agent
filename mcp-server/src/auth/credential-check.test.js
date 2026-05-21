@@ -216,6 +216,43 @@ test("validateJwtKmsCredentialAccess: rejects when key has wrong KeyUsage (likel
   );
 });
 
+test("validateJwtKmsCredentialAccess: opts.credentialsProvider is accepted (regression for #455/#456 outage)", async () => {
+  // Regression coverage for the Phase 5a Stage 2C-3 outage. Pre-fix,
+  // the function silently ignored any caller-supplied credentials
+  // provider — production constructed a KMSClient via the SDK default
+  // chain while the runtime KmsJwtSigner used Roles Anywhere. Removing
+  // env-rendered static keys (#455) made the two paths disagree and
+  // the boot check threw CredentialsProviderError even though signing
+  // would have worked fine.
+  //
+  // We don't exercise the real fromIni path here (no AWS in tests).
+  // The injected kmsClient short-circuits client construction, so the
+  // provider can't be observed via the client itself. Instead we
+  // assert the call accepts the opt without throwing and the happy
+  // path still returns ok — confirming the new opt is wired without
+  // regressing existing behavior. The structural fix (passing the
+  // provider into `new KMSClient`) is exercised end-to-end on the
+  // first prod boot after merge: a failure there would resurface the
+  // same CredentialsProviderError seen in the outage.
+  const provider = async () => {
+    throw new Error("test credentialsProvider should not be invoked when kmsClient is injected");
+  };
+  const cfg = {
+    ...VALID_CFG,
+    kmsClient: new FakeKMSClient({
+      describeKey: () => ({
+        KeyMetadata: { Arn: KEY_ARN, KeyState: "Enabled", KeyUsage: "SIGN_VERIFY" },
+      }),
+    }),
+  };
+  const result = await validateJwtKmsCredentialAccess(cfg, {
+    logger: silentLogger(),
+    credentialsProvider: provider,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.keyArn, KEY_ARN);
+});
+
 test("validateJwtKmsCredentialAccess: logs at info level on success", async () => {
   const logs = [];
   const logger = {
