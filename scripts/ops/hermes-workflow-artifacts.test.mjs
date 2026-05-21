@@ -34,6 +34,30 @@ test("Hermes PR handoff keeps the full log as a correlation-id artifact", async 
   assert.match(workflow, /retention-days: 90/u);
 });
 
+test("Hermes operator self-report runs on schedule and uploads durable evidence", async () => {
+  const workflow = await readFile(join(REPO_ROOT, ".github/workflows/hermes-operator-report.yml"), "utf8");
+
+  assert.match(workflow, /workflow_dispatch:/u);
+  assert.match(workflow, /schedule:/u);
+  assert.match(workflow, /cron: "17 7 \* \* \*"/u);
+  assert.match(workflow, /report_kind:/u);
+  assert.match(workflow, /ops_health/u);
+  assert.match(workflow, /daily_operator_brief/u);
+  assert.match(workflow, /correlation_id="github-operator-report-\$\{\{ matrix\.report_kind \}\}-\$\{GITHUB_RUN_ID\}-\$\{GITHUB_RUN_ATTEMPT\}"/u);
+  assert.match(workflow, /averray_handle_operator_command/u);
+  assert.match(workflow, /durableEvidenceDestination/u);
+  assert.match(workflow, /name: Upload Hermes operator report evidence/u);
+  // Accept either tag-pinned (@v7) or SHA-pinned with v7 tag comment
+  // (e.g., `@<40-char-sha> # v7`). Phase 4c moved this repo to SHA pins
+  // for supply-chain hardening; the comment preserves audit traceability.
+  assert.match(workflow, /uses: actions\/upload-artifact@(?:v7\b|[a-f0-9]{40} # v7\b)/u);
+  assert.match(workflow, /name: \$\{\{ steps\.select\.outputs\.artifact_name \}\}/u);
+  assert.match(workflow, /artifacts\/hermes-operator-\$\{\{ matrix\.report_kind \}\}\.log/u);
+  assert.match(workflow, /artifacts\/hermes-operator-\$\{\{ matrix\.report_kind \}\}\.json/u);
+  assert.match(workflow, /if-no-files-found: error/u);
+  assert.match(workflow, /retention-days: 90/u);
+});
+
 test("hosted service-token proof uploads sanitized evidence as a workflow artifact", async () => {
   const workflow = await readFile(join(REPO_ROOT, ".github/workflows/hosted-service-token-proof.yml"), "utf8");
 

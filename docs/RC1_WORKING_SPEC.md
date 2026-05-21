@@ -553,6 +553,9 @@ Before public v1.0.0-rc1 launch:
 - [ ] `funded_jobs` table live and populating
 - [ ] Daily upstream-status poller running against GitHub + MediaWiki APIs
 - [ ] Hermes/operator self-report proof scheduled and visible
+  - Scheduled/manual GitHub workflow exists for `ops_health` and
+    `daily_operator_brief`; keep open until the first production artifacts are
+    recorded.
 - [ ] Optional branded email self-report configured after sender-domain verification
 
 **Contract surface:**
