@@ -1,7 +1,31 @@
 import { extractSubmissionText } from "../core/submission.js";
 import { hasAverrayDisclosureFooter } from "../core/maintainer-surface-policy.js";
 
-const HANDLER_VERSION = 1;
+/**
+ * Per-handler version registry. Each handler's `version` is independent of
+ * the others — bumping `benchmark` from v1 to v2 should NOT pretend that
+ * `deterministic` also changed. Replay fixtures live at
+ *   mcp-server/src/services/__fixtures__/verifier-replay/<handler>/v<version>/
+ * and the fixture-coverage lint test asserts each entry in this map has at
+ * least one matching fixture file. That gate is the operational meaning of
+ * the roadmap close criterion "require handler-versioned fixtures before
+ * v2 handler changes": you cannot land a handler version bump in this
+ * registry without committing a v<N>/<case>.json fixture in the same PR.
+ *
+ * When a handler changes logic in a way that would alter past verdicts,
+ * bump THIS handler's version here, add v<N>/<case>.json fixture(s)
+ * covering the new branch(es), and keep the previous v<N-1>/ tree intact
+ * — historic replay continues to load the older fixtures and the live
+ * registry exposes the version the verifier ran under via verdict
+ * `handlerVersion`. detectReplayDrift() flags handler-version drift on a
+ * mismatch.
+ */
+export const HANDLER_VERSIONS = Object.freeze({
+  benchmark: 1,
+  deterministic: 1,
+  human_fallback: 1,
+  github_pr: 1
+});
 
 function normalizeEvidence(input) {
   return extractSubmissionText(input).trim().toLowerCase();
@@ -31,7 +55,7 @@ function createBenchmarkHandler() {
       return {
         jobId: job.id,
         handler: "benchmark",
-        handlerVersion: HANDLER_VERSION,
+        handlerVersion: HANDLER_VERSIONS.benchmark,
         outcome: approved ? "approved" : "rejected",
         score: Math.round((matched.length / Math.max(job.verifierConfig.requiredKeywords.length, 1)) * 100),
         reasonCode: approved ? "BENCHMARK_THRESHOLD_MET" : "BENCHMARK_THRESHOLD_MISSED",
@@ -54,7 +78,7 @@ function createDeterministicHandler() {
       return {
         jobId: job.id,
         handler: "deterministic",
-        handlerVersion: HANDLER_VERSION,
+        handlerVersion: HANDLER_VERSIONS.deterministic,
         outcome: approved ? "approved" : "rejected",
         score: approved ? 100 : 0,
         reasonCode: approved ? "DETERMINISTIC_MATCH" : "DETERMINISTIC_MISMATCH",
@@ -73,7 +97,7 @@ function createHumanFallbackHandler() {
       return {
         jobId: job.id,
         handler: "human_fallback",
-        handlerVersion: HANDLER_VERSION,
+        handlerVersion: HANDLER_VERSIONS.human_fallback,
         outcome: job.verifierConfig.autoApprove ? "approved" : "disputed",
         score: job.verifierConfig.autoApprove ? 100 : 0,
         reasonCode: job.verifierConfig.autoApprove ? "HUMAN_FALLBACK_AUTO_APPROVE" : "HUMAN_REVIEW_REQUIRED",
@@ -174,7 +198,7 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
       return {
         jobId: job.id,
         handler: "github_pr",
-        handlerVersion: HANDLER_VERSION,
+        handlerVersion: HANDLER_VERSIONS.github_pr,
         outcome: approved ? "approved" : "rejected",
         score,
         reasonCode: approved ? "GITHUB_PR_EVIDENCE_ACCEPTED" : "GITHUB_PR_EVIDENCE_INCOMPLETE",

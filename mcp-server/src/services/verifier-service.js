@@ -135,6 +135,23 @@ function detectReplayDrift({ existing, verdict, auditFields }) {
     drift.handlerVersion = { captured: capturedHandlerVersion, live: liveHandlerVersion };
   }
 
+  // policyVersion drift (P1 verifier replay hardening). Rules version is
+  // independent of config-shape version (verifierConfigVersion) and of
+  // handler-code version (handlerVersion). All three can drift independently
+  // and each is surfaced explicitly so the operator dashboard can attribute
+  // the cause. Legacy stored verifications may omit policyVersion entirely;
+  // in that case fall back to verifierConfigVersion so a pre-split record
+  // still compares meaningfully.
+  const capturedPolicyVersion = existing.policyVersion ?? existing.verifierConfigVersion;
+  const livePolicyVersion = auditFields?.policyVersion ?? auditFields?.verifierConfigVersion;
+  if (
+    capturedPolicyVersion !== undefined
+    && livePolicyVersion !== undefined
+    && capturedPolicyVersion !== livePolicyVersion
+  ) {
+    drift.policyVersion = { captured: capturedPolicyVersion, live: livePolicyVersion };
+  }
+
   const capturedEvidenceSchemaRef = existing.evidenceSchemaRef;
   const liveEvidenceSchemaRef = auditFields?.evidenceSchemaRef;
   if (

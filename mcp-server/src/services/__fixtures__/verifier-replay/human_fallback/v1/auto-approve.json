@@ -1,0 +1,22 @@
+{
+  "handler": "human_fallback",
+  "handlerVersion": 1,
+  "policyVersion": 1,
+  "job": {
+    "id": "human-fallback-auto-approve-001",
+    "verifierMode": "human_fallback",
+    "verifierConfig": {
+      "version": 1,
+      "policyVersion": 1,
+      "handler": "human_fallback",
+      "autoApprove": true,
+      "escalationMessage": "auto-approved per policy v1; no human reviewer queued"
+    }
+  },
+  "verificationInput": "Operator reviewed the output offline and approved out of band.",
+  "expected": {
+    "outcome": "approved",
+    "reasonCode": "HUMAN_FALLBACK_AUTO_APPROVE",
+    "score": 100
+  }
+}

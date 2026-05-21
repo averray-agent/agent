@@ -4,7 +4,21 @@ export const VERIFICATION_CONTRACT_VERSION = "verification-contract-v1";
 
 export function buildVerificationContract(job, { verdict = undefined, verificationInput = undefined } = {}) {
   const verifierConfig = cloneJson(job?.verifierConfig);
+  // verifierConfigVersion is the *data* version of the config blob itself
+  // (bump when the shape of `verifierConfig` evolves). policyVersion is the
+  // *rules* version — i.e. "verifier policy v3 means signers must include
+  // at least two of N, not the v2 single-signer rule." They are intentionally
+  // independent so a policy change does not require a backwards-incompatible
+  // config-shape bump, and a config-shape migration does not pretend to
+  // re-version the rules.
+  //
+  // Back-compat: pre-split fixtures and stored verifications only carry
+  // `verifierConfig.version`. Read `policyVersion` first; fall back to
+  // `version` when absent so legacy data keeps working.
   const verifierConfigVersion = normalizeVersion(verifierConfig?.version);
+  const policyVersion = normalizeVersion(
+    verifierConfig?.policyVersion ?? verifierConfig?.version
+  );
   const handler = firstString(verdict?.handler, verifierConfig?.handler, job?.verifierMode, "unknown");
   const handlerVersion = normalizeOptionalVersion(verdict?.handlerVersion);
   const evidenceSchemaRef = firstString(
@@ -19,6 +33,7 @@ export function buildVerificationContract(job, { verdict = undefined, verificati
     verifierMode: firstString(job?.verifierMode, undefined),
     handler,
     handlerVersion,
+    policyVersion,
     verifierConfigVersion,
     verifierConfigHash: hashCanonicalContent(verifierConfig ?? null),
     evidenceSchemaRef,
@@ -31,6 +46,7 @@ export function buildVerificationContract(job, { verdict = undefined, verificati
       "verifierConfigSnapshot",
       "verifierConfigHash",
       "verifierConfigVersion",
+      "policyVersion",
       "handlerVersion",
       "evidenceSchemaRef"
     ]
@@ -42,6 +58,7 @@ export function buildVerificationAuditFields(job, { verdict = {}, verificationIn
   const contract = buildVerificationContract(job, { verdict, verificationInput });
   const fields = {
     verifierConfigVersion: contract.verifierConfigVersion,
+    policyVersion: contract.policyVersion,
     verifierConfigHash: contract.verifierConfigHash,
     verifierConfigSnapshot,
     verificationContract: contract
