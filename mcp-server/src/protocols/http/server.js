@@ -86,6 +86,7 @@ import {
 } from "../../jobs/ingest-osv-advisories.js";
 import { ingestStandardsSpecs, parseSpecs as parseStandardsSpecs } from "../../jobs/ingest-standards-specs.js";
 import { ingestWikipediaMaintenance, parseCategories } from "../../jobs/ingest-wikipedia-maintenance.js";
+import { createAdminStatusRoutes } from "./admin-status-routes.js";
 import { buildPublicJobsResponse } from "./jobs-response.js";
 import { OPERATOR_SIGNERS, makePolicy } from "../../core/builtin-policies.js";
 
@@ -1400,6 +1401,18 @@ async function runIdempotentMutation(response, context, statusCode, operation) {
     }
   }
 }
+
+const handleAdminStatusRoute = createAdminStatusRoutes({
+  authMiddleware,
+  buildIdempotentMutationContext,
+  enforceLimit,
+  getIdempotentMutationReplay,
+  rateLimitConfig,
+  readJsonBody,
+  respond,
+  respondWithMutationReceipt,
+  service,
+});
 
 function assertIssuerCanGrantCapabilities(grant, auth) {
   const issuerCapabilities = new Set(Array.isArray(auth?.capabilities) ? auth.capabilities : []);
@@ -3973,27 +3986,8 @@ const server = createServer(async (request, response) => {
       return respond(response, 200, status);
     }
 
-    if (request.method === "GET" && pathname === "/admin/status") {
-      const auth = await authMiddleware(request, url, { requireRole: "admin" });
-      return respond(response, 200, await service.getAdminStatus({ auth }));
-    }
-
-    if (request.method === "POST" && pathname === "/admin/bootstrap-self-report/send") {
-      const auth = await authMiddleware(request, url, { requireRole: "admin" });
-      await enforceLimit("admin_jobs", auth.wallet, rateLimitConfig.adminJobs);
-      const payload = await readJsonBody(request);
-      const idempotency = buildIdempotentMutationContext({
-        route: "/admin/bootstrap-self-report/send",
-        auth,
-        payload,
-        bucket: "bootstrap_self_report_send"
-      });
-      const replay = await getIdempotentMutationReplay(idempotency);
-      if (replay) {
-        return respond(response, replay.statusCode, replay.body);
-      }
-      const result = await service.runBootstrapSelfReport();
-      return respondWithMutationReceipt(response, idempotency, 200, result);
+    if (await handleAdminStatusRoute({ request, response, url, pathname })) {
+      return;
     }
 
     /*
