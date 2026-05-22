@@ -18,6 +18,26 @@ checklist invocation is in
 duplicated here. This runbook is what an operator reads *before*
 flipping `LIVE=1` for the first time.
 
+The hosted smoke check also has an opt-in gate for the live proof:
+
+```bash
+ADMIN_JWT=$op_admin_jwt \
+DISPUTE_PROOF_ID=dispute-xxxxxxxxxx \
+DISPUTE_PROOF_VERDICT=dismissed \
+DISPUTE_PROOF_RATIONALE="upstream PR merged after the verifier's rejection" \
+DISPUTE_PROOF_LIVE=1 \
+DISPUTE_PROOF_EVIDENCE_FILE=docs/evidence/dispute-verdict-YYYY-MM-DD.json \
+CHECK_DISPUTE_VERDICT_PROOF=1 \
+  ./scripts/ops/check-hosted-stack.sh
+```
+
+This opt-in smoke path sets `DISPUTE_PROOF_REQUIRE_CHAIN=1`, so
+`chainStatus: "local_only"` fails the gate. It accepts only
+`confirmed` or `submitted`, requires a tx hash, re-checks the persisted
+dispute, and writes the same JSON evidence file when
+`DISPUTE_PROOF_EVIDENCE_FILE` is set. Do not enable this on routine
+deploy smoke; it resolves the named dispute.
+
 ## Preconditions (must hold before any live verdict)
 
 The proof harness will refuse to mutate if any of the first three

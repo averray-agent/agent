@@ -176,6 +176,51 @@ test("metrics auth gate is opt-in and verifies both denied and allowed scrapes",
   );
 });
 
+test("dispute verdict proof gate is opt-in, live-only, and requires chain dispatch", async () => {
+  const script = await readFile(CHECK_SCRIPT, "utf8");
+
+  assert.match(
+    script,
+    /CHECK_DISPUTE_VERDICT_PROOF=\$\{CHECK_DISPUTE_VERDICT_PROOF:-0\}/u,
+    "dispute verdict proof should be opt-in"
+  );
+  assert.match(
+    script,
+    /CHECK_DISPUTE_VERDICT_PROOF=1 requires ADMIN_JWT or AVERRAY_TOKEN/u,
+    "dispute verdict proof should fail closed without an authenticated operator token"
+  );
+  assert.match(
+    script,
+    /CHECK_DISPUTE_VERDICT_PROOF=1 requires DISPUTE_PROOF_LIVE=1/u,
+    "hosted proof should not accept dry-run output as launch evidence"
+  );
+  assert.match(
+    script,
+    /DISPUTE_PROOF_REQUIRE_CHAIN=1/u,
+    "hosted proof should require confirmed/submitted chain dispatch, not local_only receipts"
+  );
+  assert.match(
+    script,
+    /DISPUTE_PROOF_JSON_ONLY=1/u,
+    "hosted proof should request machine-readable JSON without progress logs"
+  );
+  assert.match(
+    script,
+    /run-dispute-verdict-proof\.mjs/u,
+    "hosted proof should invoke the dispute verdict proof harness"
+  );
+  assert.match(
+    script,
+    /\.response\.chainStatus == "confirmed" or \.response\.chainStatus == "submitted"/u,
+    "hosted proof should only accept confirmed or submitted chain status"
+  );
+  assert.match(
+    script,
+    /\.persisted\.reasoningHash == \.response\.reasoningHash/u,
+    "hosted proof should assert persistence matches the verdict response"
+  );
+});
+
 test("admin async XCM smoke verifies the watcher lane is publishing, not just configured", async () => {
   // Structural lock-in for the PROJECT_ROADMAP.md P0 row "Hosted
   // /admin/status async XCM smoke" — the close criterion is "Run

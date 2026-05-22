@@ -35,6 +35,9 @@ SERVICE_TOKEN_PROOF_ALLOWED_PATH=${SERVICE_TOKEN_PROOF_ALLOWED_PATH:-}
 SERVICE_TOKEN_PROOF_DENIED_PATHS=${SERVICE_TOKEN_PROOF_DENIED_PATHS:-}
 SERVICE_TOKEN_PROOF_TOKEN_TTL_SECONDS=${SERVICE_TOKEN_PROOF_TOKEN_TTL_SECONDS:-}
 SERVICE_TOKEN_PROOF_IDEMPOTENCY_KEY=${SERVICE_TOKEN_PROOF_IDEMPOTENCY_KEY:-}
+CHECK_DISPUTE_VERDICT_PROOF=${CHECK_DISPUTE_VERDICT_PROOF:-0}
+DISPUTE_PROOF_NODE_IMAGE=${DISPUTE_PROOF_NODE_IMAGE:-node:22-bookworm-slim}
+DISPUTE_PROOF_EVIDENCE_FILE=${DISPUTE_PROOF_EVIDENCE_FILE:-}
 CHECK_METRICS_AUTH=${CHECK_METRICS_AUTH:-0}
 METRICS_BEARER_TOKEN=${METRICS_BEARER_TOKEN:-}
 TIMEOUT_SEC=${TIMEOUT_SEC:-20}
@@ -44,6 +47,7 @@ APP_EXPECTED_MARKER=${APP_EXPECTED_MARKER:-Opening the operator control room.}
 APP_ALLOW_PROTECTED_SHELL=${APP_ALLOW_PROTECTED_SHELL:-0}
 APP_PROTECTED_STATUS_CODES=${APP_PROTECTED_STATUS_CODES:-401}
 ADMIN_JWT=${ADMIN_JWT:-}
+AVERRAY_TOKEN=${AVERRAY_TOKEN:-}
 admin_status_json=""
 
 require_command() {
@@ -110,7 +114,7 @@ enabled() {
   esac
 }
 
-if { enabled "$CHECK_PRODUCT_PROOF_GATE" || enabled "$CHECK_SERVICE_TOKEN_PROOF"; } && ! command -v node >/dev/null 2>&1; then
+if { enabled "$CHECK_PRODUCT_PROOF_GATE" || enabled "$CHECK_SERVICE_TOKEN_PROOF" || enabled "$CHECK_DISPUTE_VERDICT_PROOF"; } && ! command -v node >/dev/null 2>&1; then
   require_command docker
 fi
 
@@ -452,6 +456,71 @@ if enabled "$CHECK_SERVICE_TOKEN_PROOF"; then
       "$SERVICE_TOKEN_PROOF_NODE_IMAGE" \
       node scripts/ops/check-service-token-proof.mjs
   fi
+fi
+
+if enabled "$CHECK_DISPUTE_VERDICT_PROOF"; then
+  if [[ -z "$ADMIN_JWT" && -z "$AVERRAY_TOKEN" ]]; then
+    echo "CHECK_DISPUTE_VERDICT_PROOF=1 requires ADMIN_JWT or AVERRAY_TOKEN." >&2
+    exit 1
+  fi
+  if [[ "${DISPUTE_PROOF_LIVE:-}" != "1" ]]; then
+    echo "CHECK_DISPUTE_VERDICT_PROOF=1 requires DISPUTE_PROOF_LIVE=1; dry-run output is not enough for the hosted proof gate." >&2
+    exit 1
+  fi
+
+  echo "Checking hosted dispute verdict proof"
+  script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+  repo_root="$(cd "$script_dir/../.." && pwd)"
+  if [[ -n "$DISPUTE_PROOF_EVIDENCE_FILE" ]]; then
+    if [[ "$DISPUTE_PROOF_EVIDENCE_FILE" != /* ]]; then
+      DISPUTE_PROOF_EVIDENCE_FILE="$repo_root/$DISPUTE_PROOF_EVIDENCE_FILE"
+    fi
+    dispute_proof_evidence_dir="$(dirname "$DISPUTE_PROOF_EVIDENCE_FILE")"
+    mkdir -p "$dispute_proof_evidence_dir"
+  fi
+  if command -v node >/dev/null 2>&1; then
+    dispute_proof_json="$(
+      API_BASE_URL="${API_HEALTH_URL%/health}" \
+        ADMIN_JWT="$ADMIN_JWT" \
+        AVERRAY_TOKEN="$AVERRAY_TOKEN" \
+        DISPUTE_PROOF_EVIDENCE_FILE="$DISPUTE_PROOF_EVIDENCE_FILE" \
+        DISPUTE_PROOF_JSON_ONLY=1 \
+        DISPUTE_PROOF_REQUIRE_CHAIN=1 \
+        node "$script_dir/run-dispute-verdict-proof.mjs"
+    )"
+  else
+    dispute_proof_docker_volume_args=(-v "$repo_root:/workspace")
+    if [[ -n "${dispute_proof_evidence_dir:-}" ]]; then
+      dispute_proof_docker_volume_args+=(-v "$dispute_proof_evidence_dir:$dispute_proof_evidence_dir")
+    fi
+    dispute_proof_json="$(
+      docker run --rm \
+        "${dispute_proof_docker_volume_args[@]}" \
+        -w /workspace \
+        -e API_BASE_URL="${API_HEALTH_URL%/health}" \
+        -e ADMIN_JWT="$ADMIN_JWT" \
+        -e AVERRAY_TOKEN="$AVERRAY_TOKEN" \
+        -e DISPUTE_PROOF_ID="${DISPUTE_PROOF_ID:-}" \
+        -e DISPUTE_PROOF_VERDICT="${DISPUTE_PROOF_VERDICT:-}" \
+        -e DISPUTE_PROOF_RATIONALE="${DISPUTE_PROOF_RATIONALE:-}" \
+        -e DISPUTE_PROOF_WORKER_PAYOUT="${DISPUTE_PROOF_WORKER_PAYOUT:-}" \
+        -e DISPUTE_PROOF_IDEMPOTENCY_KEY="${DISPUTE_PROOF_IDEMPOTENCY_KEY:-}" \
+        -e DISPUTE_PROOF_LIVE="$DISPUTE_PROOF_LIVE" \
+        -e DISPUTE_PROOF_EVIDENCE_FILE="$DISPUTE_PROOF_EVIDENCE_FILE" \
+        -e DISPUTE_PROOF_JSON_ONLY=1 \
+        -e DISPUTE_PROOF_REQUIRE_CHAIN=1 \
+        "$DISPUTE_PROOF_NODE_IMAGE" \
+        node scripts/ops/run-dispute-verdict-proof.mjs
+    )"
+  fi
+  jq -e '
+    .mode == "live" and
+    (.response.chainStatus == "confirmed" or .response.chainStatus == "submitted") and
+    (.response.txHash | type) == "string" and
+    (.response.txHash | test("^0x[a-fA-F0-9]{64}$")) and
+    .persisted.status == "resolved" and
+    .persisted.reasoningHash == .response.reasoningHash
+  ' >/dev/null <<<"$dispute_proof_json"
 fi
 
 echo "Hosted stack smoke check passed."

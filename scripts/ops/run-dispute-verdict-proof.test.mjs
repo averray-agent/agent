@@ -6,6 +6,7 @@ import { runDisputeVerdictProof } from "./run-dispute-verdict-proof.mjs";
 const DISPUTE_ID = "dispute-abc123def4";
 const SESSION_ID = "session-product-proof";
 const REASONING_HASH = "0x" + "a".repeat(64);
+const TX_HASH = "0x" + "b".repeat(64);
 
 function openDispute(overrides = {}) {
   return {
@@ -230,6 +231,85 @@ test("live mode rejects an unknown chainStatus value to catch wiring drift", asy
       log: () => {}
     }),
     /Unknown chainStatus 'fictional_state'/u
+  );
+});
+
+test("live mode can require a real chain dispatch for hosted proof", async () => {
+  const client = recordingClient({
+    disputeBeforeVerdict: openDispute(),
+    disputeAfterVerdict: persistedDispute({
+      txHash: TX_HASH,
+      chainStatus: "submitted"
+    }),
+    response: verdictResponse({
+      chainStatus: "submitted",
+      txHash: TX_HASH
+    })
+  });
+
+  const result = await runDisputeVerdictProof({
+    env: baseEnv({
+      DISPUTE_PROOF_LIVE: "1",
+      DISPUTE_PROOF_REQUIRE_CHAIN: "1"
+    }),
+    client,
+    log: () => {}
+  });
+
+  assert.equal(result.mode, "live");
+  assert.equal(result.response.chainStatus, "submitted");
+  assert.equal(result.response.txHash, TX_HASH);
+});
+
+test("hosted proof mode rejects local_only chain status", async () => {
+  const client = recordingClient({
+    disputeBeforeVerdict: openDispute(),
+    disputeAfterVerdict: persistedDispute(),
+    response: verdictResponse({ chainStatus: "local_only" })
+  });
+
+  await assert.rejects(
+    () => runDisputeVerdictProof({
+      env: baseEnv({
+        DISPUTE_PROOF_LIVE: "1",
+        DISPUTE_PROOF_REQUIRE_CHAIN: "1"
+      }),
+      client,
+      log: () => {}
+    }),
+    /DISPUTE_PROOF_REQUIRE_CHAIN=1 requires chainStatus/u
+  );
+});
+
+test("chain dispatch responses must include txHash and confirmed responses must include blockNumber", async () => {
+  const missingTxClient = recordingClient({
+    disputeBeforeVerdict: openDispute(),
+    disputeAfterVerdict: persistedDispute(),
+    response: verdictResponse({ chainStatus: "submitted", txHash: undefined })
+  });
+
+  await assert.rejects(
+    () => runDisputeVerdictProof({
+      env: baseEnv({ DISPUTE_PROOF_LIVE: "1" }),
+      client: missingTxClient,
+      log: () => {}
+    }),
+    /txHash is required/u
+  );
+
+  const missingBlockClient = recordingClient({
+    disputeBeforeVerdict: openDispute(),
+    disputeAfterVerdict: persistedDispute(),
+    response: verdictResponse({ chainStatus: "confirmed", txHash: TX_HASH, blockNumber: undefined })
+  });
+
+  await assert.rejects(
+    () => runDisputeVerdictProof({
+      env: baseEnv({ DISPUTE_PROOF_LIVE: "1" }),
+      client: missingBlockClient,
+      log: () => {}
+    }),
+    /blockNumber is required/u
   );
 });
 
