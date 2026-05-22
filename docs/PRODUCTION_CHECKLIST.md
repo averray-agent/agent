@@ -70,7 +70,9 @@ functions, but it does not close the live pause/unpause rehearsal box.
 - [ ] The monthly restore drill has been run on the current stack
   shape. Evidence: a dated line in the operator log naming both
   backup file paths used, the row count from the Postgres spot-check,
-  and the key count from `DBSIZE` on the restored Redis container.
+  and the key count from `DBSIZE` on the restored Redis container,
+  plus a validated `docs/evidence/restore-drill-YYYY-MM-DD.json`
+  artifact checked with `node scripts/ops/check-restore-drill-evidence.mjs`.
   Procedure: [BACKUP_RESTORE_DRILL.md](./BACKUP_RESTORE_DRILL.md).
 
 Run backups (writes new snapshots):

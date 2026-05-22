@@ -131,9 +131,12 @@ key count within a reasonable band of the production count.
 
 Cleanup: `docker rm -f drill-redis`.
 
-### 5. Record the drill in the operator log
+### 5. Record the drill evidence
 
-A successful drill writes one line to the operator log naming:
+A successful drill records both a human-readable operator-log line and a
+machine-readable evidence file.
+
+The operator-log line names:
 
 - Date of the drill.
 - The two backup file paths used (postgres + redis).
@@ -142,9 +145,77 @@ A successful drill writes one line to the operator log naming:
 - Key count from the Redis DBSIZE check.
 - Operator name and signature (initials).
 
-This is the evidence that closes the `PRODUCTION_CHECKLIST.md` line
-"The monthly restore drill has been run at least once on the current
-stack shape."
+The evidence file should live under `docs/evidence/` with a date-stamped name,
+for example `docs/evidence/restore-drill-2026-05-22.json`, and follow this
+shape:
+
+```json
+{
+  "schemaVersion": "restore-drill-evidence-v1",
+  "drillDate": "2026-05-22",
+  "completedAt": "2026-05-22T16:30:00.000Z",
+  "operator": {
+    "name": "Pascal",
+    "signature": "PK"
+  },
+  "target": {
+    "type": "disposable_container",
+    "label": "local restore drill containers"
+  },
+  "readiness": {
+    "checkedAt": "2026-05-22T16:00:00.000Z",
+    "backupDir": "/srv/agent-stack/backups",
+    "maxAgeHours": 26,
+    "overallStatus": "ok",
+    "components": [
+      {
+        "name": "postgres",
+        "status": "ok",
+        "file": "/srv/agent-stack/backups/postgres/agent-20260522-010000.sql.gz",
+        "ageSeconds": 3600,
+        "message": "Newest backup is 1.0h old"
+      },
+      {
+        "name": "redis",
+        "status": "ok",
+        "file": "/srv/agent-stack/backups/redis/redis-20260522-010000.rdb.gz",
+        "ageSeconds": 3600,
+        "message": "Newest backup is 1.0h old"
+      }
+    ]
+  },
+  "postgres": {
+    "backupFile": "agent-20260522-010000.sql.gz",
+    "restoreTarget": "drill-postgres",
+    "restoreExitCode": 0,
+    "rowCheck": {
+      "query": "select count(*) from submissions;",
+      "rowCount": 42
+    }
+  },
+  "redis": {
+    "backupFile": "redis-20260522-010000.rdb.gz",
+    "restoreTarget": "drill-redis",
+    "restoreExitCode": 0,
+    "dbSize": 13
+  },
+  "cleanup": {
+    "postgresTargetRemoved": true,
+    "redisTargetRemoved": true
+  }
+}
+```
+
+Validate the evidence before using it to close the checklist row:
+
+```bash
+node scripts/ops/check-restore-drill-evidence.mjs \
+  --file docs/evidence/restore-drill-YYYY-MM-DD.json \
+  --json
+```
+
+This is the evidence that closes the `PRODUCTION_CHECKLIST.md` line "The
+monthly restore drill has been run at least once on the current stack shape."
 
 ## What the drill does NOT do
 
