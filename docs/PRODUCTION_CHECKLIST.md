@@ -291,8 +291,11 @@ RUN_SUBSCAN_XCM_VALIDATION=1 ./scripts/ops/check-release-readiness.sh testnet
 
 The first five boxes are intentionally not auto-flipped — they need
 deployed-config evidence that lives outside the repo. The wiring exists in
-code; only the production env vars need to be set. Concrete verification
-commands per box:
+code; only the production env vars need to be set. Record the three
+observability gates as one dated artifact and validate it with
+`node scripts/ops/check-observability-proof.mjs --file
+docs/evidence/observability-YYYY-MM-DD.json --json` before moving the
+roadmap rows to `Proofed`. Concrete verification commands per box:
 
 - **Backend metrics bearer-protected and reachable.** Production now fails
   closed when metrics auth is required but no token is configured. Flip this
