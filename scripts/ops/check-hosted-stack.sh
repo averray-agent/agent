@@ -236,10 +236,56 @@ if [[ -n "$ADMIN_JWT" ]]; then
   jq -e '.maintenance.policy.enabled == true' >/dev/null <<<"$admin_status_json"
   jq -e '.xcmSettlementWatcher.enabled == true' >/dev/null <<<"$admin_status_json"
   jq -e '.xcmSettlementWatcher.pendingCount >= 0' >/dev/null <<<"$admin_status_json"
+  # `enabled` only proves the watcher was wired in at construction.
+  # `running` proves the start() side actually ran and the polling
+  # loop is alive — without it, pending observations queue up but
+  # never settle. Closes the rc1 P0 row "Hosted /admin/status async
+  # XCM smoke" by verifying the watcher lane is publishing, not just
+  # configured. See docs/PROJECT_ROADMAP.md §"P0 Launch Gates".
+  jq -e '.xcmSettlementWatcher.running == true' >/dev/null <<<"$admin_status_json" || {
+    echo "xcmSettlementWatcher.enabled is true but .running is false — settlement watcher loop is not alive; pending observations would not settle." >&2
+    exit 1
+  }
   jq -e '
     (.xcmObservationRelay | type) == "object" and
     (.xcmObservationRelay.enabled | type) == "boolean"
   ' >/dev/null <<<"$admin_status_json"
+  # When the observation relay is enabled, verify the polling loop is
+  # alive AND the last poll was either a clean success (no lastError)
+  # or hasn't happened yet (lastError null). A stale lastError after a
+  # successful poll is cleared by the relay; a sticky lastError means
+  # the upstream observer feed is broken from the backend's side.
+  jq -e '
+    .xcmObservationRelay.enabled == false or
+    (
+      .xcmObservationRelay.running == true and
+      (.xcmObservationRelay.lastError == null or (.xcmObservationRelay.lastError | tostring | length) == 0)
+    )
+  ' >/dev/null <<<"$admin_status_json" || {
+    echo "xcmObservationRelay is enabled but either not running, or its lastError is non-empty (upstream observer feed broken)." >&2
+    jq '.xcmObservationRelay' <<<"$admin_status_json" >&2
+    exit 1
+  }
+  # Optional freshness gate. Skipped when the relay is disabled or
+  # hasn't polled yet (lastSyncedAt null). Default 30 min — 2× a
+  # 15-min poll interval gives the smoke headroom on a freshly-
+  # restarted relay that hasn't ticked yet. Operators can tighten
+  # via XCM_OBSERVATION_RELAY_MAX_STALENESS_SEC if the deploy is
+  # known to poll faster.
+  jq -e --argjson maxAge "${XCM_OBSERVATION_RELAY_MAX_STALENESS_SEC:-1800}" '
+    .xcmObservationRelay.enabled == false or
+    .xcmObservationRelay.lastSyncedAt == null or
+    (
+      .xcmObservationRelay.lastSyncedAt
+      | sub("\\.[0-9]+Z$"; "Z")
+      | fromdateiso8601 as $lastSynced
+      | (now - $lastSynced) >= 0 and (now - $lastSynced) <= $maxAge
+    )
+  ' >/dev/null <<<"$admin_status_json" || {
+    echo "xcmObservationRelay.lastSyncedAt is older than ${XCM_OBSERVATION_RELAY_MAX_STALENESS_SEC:-1800}s — relay is not polling at the expected cadence." >&2
+    jq '.xcmObservationRelay' <<<"$admin_status_json" >&2
+    exit 1
+  }
 fi
 
 if enabled "$CHECK_BOOTSTRAP_INSTRUMENTATION"; then

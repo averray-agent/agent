@@ -191,19 +191,44 @@ Every line must print `[ok]`. If anything says `[FAIL]` do **not** proceed.
 
 ### 5c. Rehearse pause from the hot key
 
-The pauser is a single EOA, so you can use `cast`:
+The pauser is a single EOA, but do the read-only proof first so you know the
+live transaction will exercise the right address and the right contract
+capability:
 
 ```bash
-cast send "$TREASURY_POLICY" "setPaused(bool)" true \
-  --rpc-url "$RPC_URL" --private-key "$PAUSER_KEY"
-
-# Confirm it stuck
-cast call "$TREASURY_POLICY" "paused()(bool)" --rpc-url "$RPC_URL"
-
-# Unpause
-cast send "$TREASURY_POLICY" "setPaused(bool)" false \
-  --rpc-url "$RPC_URL" --private-key "$PAUSER_KEY"
+node scripts/ops/run-pauser-rehearsal.mjs \
+  --profile testnet \
+  --out artifacts/pauser-rehearsal-readonly.json
 ```
+
+That proof checks:
+
+- live `owner`, `pauser`, and `paused` values against `deployments/testnet.json`
+- `pauser != owner` and `pauser != address(0)`
+- `eth_call` from the pauser can call `setPaused(bool)`
+- `eth_call` from the pauser cannot call owner-only functions such as
+  `setPauser`, `setVerifier`, `setServiceOperator`, or `transferOwnership`
+- whether the pauser address overlaps verifier/arbitrator/deployer roles
+
+For mainnet or any real-funds rehearsal, add `--require-dedicated-pauser` so
+the proof fails if the pauser overlaps deployer, verifier, arbitrator, or
+owner. The current testnet manifest deliberately carries a bounded overlap
+while we finish launch rehearsal; do not copy that shape to mainnet.
+
+Then run the live rehearsal from the pauser key:
+
+```bash
+PAUSER_PRIVATE_KEY=0x<pauser-testnet-key> \
+node scripts/ops/run-pauser-rehearsal.mjs \
+  --profile testnet \
+  --live \
+  --out docs/evidence/pauser-rehearsal-testnet-YYYY-MM-DD.json
+```
+
+The live mode sends `setPaused(true)`, confirms `paused() == true`, sends
+`setPaused(false)`, confirms `paused() == false`, and writes a sanitized JSON
+evidence file containing only public addresses, checks, and transaction hashes.
+Do not commit private keys or shell history containing them.
 
 ### 5d. Rehearse an admin op from the multisig
 

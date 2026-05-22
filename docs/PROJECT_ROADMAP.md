@@ -152,26 +152,26 @@ externally ready.
 
 | Item | Status | Close criteria |
 | --- | --- | --- |
-| Control-plane pauser | Open | `TreasuryPolicy.pauser` is a hot key with only pause power, recorded in deploy docs. |
-| Pause/unpause rehearsal | Open | Rehearse pause and unpause from pauser key and record tx hashes in `PRODUCTION_CHECKLIST.md`. |
+| Control-plane pauser | Ready for proof | `TreasuryPolicy` already scopes `pauser` to `setPaused(bool)`. `scripts/ops/run-pauser-rehearsal.mjs` now proves the live pauser can pause, cannot call owner-only functions, and reports role overlap. Read-only proof captured in `docs/evidence/pauser-rehearsal-readonly-2026-05-21.json`. Close after the live testnet evidence is recorded; mainnet must run with `--require-dedicated-pauser`. |
+| Pause/unpause rehearsal | Ready for proof | Run `PAUSER_PRIVATE_KEY=... node scripts/ops/run-pauser-rehearsal.mjs --profile testnet --live --out docs/evidence/pauser-rehearsal-testnet-YYYY-MM-DD.json`, then record the pause and unpause tx hashes in `PRODUCTION_CHECKLIST.md`. |
 | Postgres backup readiness | Open | `check-backup-readiness.sh --json` reports recent Postgres backup. |
 | Redis backup readiness | Open | `check-backup-readiness.sh --json` reports recent Redis backup if Redis contains non-rebuildable state. |
 | Restore drill | Open | Restore drill performed and documented with date, source backup, and target. |
-| Hosted `/admin/status` async XCM smoke | Open | Run hosted check with live admin JWT and verify async XCM watcher lane. |
+| Hosted `/admin/status` async XCM smoke | Ready for proof | `scripts/ops/check-hosted-stack.sh` (the "Checking admin async XCM status" step) now asserts (a) `.xcmSettlementWatcher.running == true` — proves the watcher's start() loop is alive, not just that the watcher was wired in, (b) when `.xcmObservationRelay.enabled == true`, `.running == true` AND `.lastError` is null/empty — catches a sticky upstream observer-feed error, and (c) an optional freshness gate on `.xcmObservationRelay.lastSyncedAt` (default 1800s, tunable via `XCM_OBSERVATION_RELAY_MAX_STALENESS_SEC`) — catches a stalled poll loop. Structural lock-in tests in `scripts/ops/check-hosted-stack.test.mjs` prevent the assertions from being silently dropped. Close after one post-merge auto-deploy passes the new assertions against live state. |
 | Metrics auth | Ready for proof | Code deployed in `#445`; hosted `/metrics` now fails closed with `503 metrics_auth_unconfigured` when no scraper token is configured. Close after production `METRICS_BEARER_TOKEN` is set and `CHECK_METRICS_AUTH=1` proves unauthenticated `401` plus scraper-token `200` against the hosted stack. |
 | Sentry/logging decision | Ready for proof | Backend/frontend Sentry posture is recorded in `OBSERVABILITY_POSTURE.md`; backend 5xx capture falls back to structured JSON logs and optional Sentry has regression coverage. Close after an operator verifies structured logs are visible from the active deploy target, and `observability.sentry_ready` is observed if Sentry is enabled. |
 | Alert destination | Ready for proof | Alert wrapper is tested for structured webhook delivery on smoke failure in `#449`. Close after `ALERT_WEBHOOK_URL` is configured in the production scheduler environment and one deliberate hosted smoke failure reaches the operator channel. |
 | Operator self-report evidence | Done | `Hermes Operator Report` workflow schedules and manually runs `ops_health` and `daily_operator_brief` through Hermes with correlation IDs, step summaries, and 90-day artifacts. Production proof: operator report run `26211100734` on 2026-05-21 produced artifacts `hermes-operator-report-ops_health-26211100734-1` and `hermes-operator-report-daily_operator_brief-26211100734-1`, both `success`, with no obvious secret patterns found in downloaded evidence. Post-deploy proof run `26241427864` uploaded artifact `hermes-post-deploy-26241427864`. Hosted bootstrap instrumentation proof run `26241544177` passed `CHECK_BOOTSTRAP_INSTRUMENTATION=1` against live `ADMIN_JWT`; the log reached `Checking bootstrap instrumentation` and ended with `Hosted stack smoke check passed.` Branded email delivery remains optional/deferred. |
 | Dispute verdict hosted proof | Open | Hosted smoke creates a dispute verdict receipt or documented equivalent. |
-| Public discovery/schema/trust gate | Open | Hosted gate proves deployed public pages and API mirror match current behavior. |
-| Canonical public discovery/API mirror | Open | Public mirror is checked by product-proof smoke or equivalent hosted workflow. |
+| Public discovery/schema/trust gate | Ready for proof | `scripts/ops/check-product-proof-gate.mjs` (deep-equal between `https://averray.com/.well-known/agent-tools.json` and `https://api.averray.com/agent-tools.json`, plus onboarding + trust + schema page integrity) now runs on every Deploy Production via `DEPLOY_SMOKE_CHECK_PRODUCT_PROOF_GATE='1'` default for auto-deploys — see workflow YAML and structural lock-in tests in `scripts/ops/check-product-proof-gate.test.mjs`. Close after one post-merge auto-deploy proves the gate runs green on the new default. |
+| Canonical public discovery/API mirror | Ready for proof | Same gate as the row above — the deep-equal between the public mirror and the API mirror is what proves the canonical mirror. Same evidence closes both rows. |
 
 ### P1 Product And Platform Hardening
 
 | Item | Status | Close criteria |
 | --- | --- | --- |
 | HTTP server route split (`P2.3`) | Open | Split high-risk route groups out of the monolith without changing behavior; add route-level tests. |
-| Frontend auth guard (`P3.7`) | Open | Authenticated app layout has a real guard/401 flow and cannot show misleading authed shells. |
+| Frontend auth guard (`P3.7`) | Done | `(authed)/layout.tsx` wraps the operator shell in `<AuthedGuard>`, which consumes `useAuth()` and the pure-decision module `app/lib/auth/auth-guard-decisions.js`. Unauthed visitors see a neutral placeholder and redirect to `/sign-in?next=<path>` (open-redirect-safe, `/sign-in` loops blocked); mid-session 401 cascades via the existing `AuthRefreshBridge` clearing the token store. Hydration-race guarded so neither side of the auth boundary flashes the wrong frame. Tests: `node --test app/lib/auth/auth-guard-decisions.test.mjs` (9 cases); `test:app` extended to cover `app/lib/auth/*.test.mjs`. |
 | Verifier replay hardening | Done | Verification audit fields now split `verifierPolicyVersion` from `verifierConfigVersion`; replay drift reports policy-version changes; every registered verifier handler must carry current-version replay fixtures before handler changes. |
 | Schema registration for external jobs | Open | Custom/off-platform references can register signed schemas with clear trust boundaries. |
 | Dispute/arbitration semantics | Open | Decide release path, store arbitrator reasoning under content hash, expose dispute UI fields, and rehearse arbitrator notifications. |
@@ -308,8 +308,8 @@ As of 2026-05-19:
    pauser/rehearsal, backups, restore drill, `/admin/status` hosted check,
    metrics/logging/alerts, self-report evidence, dispute verdict proof, and
    public discovery/schema/trust proof.
-4. Open or assign narrow PRs for `P2.3` route split and `P3.7` frontend auth
-   guard if no existing agent owns them.
+4. Open or assign a narrow PR for `P2.3` route split if no existing agent
+   owns it. (`P3.7` frontend auth guard closed; row marked Done above.)
 5. Operator: act on `PHASE_4E_PLAN.md` § 7 decision points (one vs two
    operators, registrar identity + FIDO2 support, GitHub org-2FA member
    audit before flipping enforcement) before procuring YubiKeys.

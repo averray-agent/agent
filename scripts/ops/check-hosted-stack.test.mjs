@@ -175,3 +175,74 @@ test("metrics auth gate is opt-in and verifies both denied and allowed scrapes",
     "metrics auth proof should require bearer-authenticated scrapes to work"
   );
 });
+
+test("admin async XCM smoke verifies the watcher lane is publishing, not just configured", async () => {
+  // Structural lock-in for the PROJECT_ROADMAP.md P0 row "Hosted
+  // /admin/status async XCM smoke" — the close criterion is "Run
+  // hosted check with live admin JWT and verify async XCM watcher
+  // lane". Before this PR the smoke asserted only .enabled == true on
+  // the watcher; that proves the watcher was wired in at backend
+  // construction, not that the polling loop is alive. The new
+  // assertion adds .running == true.
+  const script = await readFile(CHECK_SCRIPT, "utf8");
+
+  assert.match(
+    script,
+    /\.xcmSettlementWatcher\.running == true/u,
+    "admin async XCM smoke must assert .xcmSettlementWatcher.running == true so a watcher whose start() never ran fails the deploy."
+  );
+  assert.match(
+    script,
+    /settlement watcher loop is not alive/u,
+    "smoke must surface a clear operator-facing error when .running is false."
+  );
+});
+
+test("admin async XCM smoke gates xcmObservationRelay on running + no lastError when enabled", async () => {
+  // The observation relay is the upstream observer-feed poll loop. A
+  // sticky lastError indicates the backend can't reach the observer
+  // feed and async XCM settlement is silently degraded. Smoke must
+  // catch this before the operator does.
+  const script = await readFile(CHECK_SCRIPT, "utf8");
+
+  // The conditional shape: either disabled, or (running AND empty
+  // lastError). Disabled means the deploy intentionally didn't wire
+  // the relay — that's not a smoke failure.
+  assert.match(
+    script,
+    /\.xcmObservationRelay\.enabled == false or\s*\([\s\S]{0,200}\.xcmObservationRelay\.running == true and\s*\([\s\S]{0,200}\.xcmObservationRelay\.lastError == null or \(\.xcmObservationRelay\.lastError \| tostring \| length\) == 0/u,
+    "xcmObservationRelay assertion must be (disabled OR (running AND empty lastError))."
+  );
+  assert.match(
+    script,
+    /upstream observer feed broken/u,
+    "smoke must surface a clear operator-facing error when the relay is enabled but lastError is non-empty."
+  );
+});
+
+test("admin async XCM smoke has an optional freshness gate on xcmObservationRelay.lastSyncedAt", async () => {
+  // Freshness gate proves the relay is polling at the expected
+  // cadence — a relay that's "running: true" but whose loop has
+  // stalled would otherwise pass the previous assertion. Gate is
+  // off when relay is disabled or lastSyncedAt is null (freshly
+  // restarted, hasn't polled yet). Default 1800s (30 min) — 2× a
+  // 15-min poll interval gives headroom; tunable via
+  // XCM_OBSERVATION_RELAY_MAX_STALENESS_SEC.
+  const script = await readFile(CHECK_SCRIPT, "utf8");
+
+  assert.match(
+    script,
+    /XCM_OBSERVATION_RELAY_MAX_STALENESS_SEC:-1800/u,
+    "freshness gate must have a default staleness budget (1800s) and be tunable via XCM_OBSERVATION_RELAY_MAX_STALENESS_SEC."
+  );
+  assert.match(
+    script,
+    /\.xcmObservationRelay\.lastSyncedAt == null/u,
+    "freshness gate must skip when lastSyncedAt is null (relay never polled yet — not a failure)."
+  );
+  assert.match(
+    script,
+    /relay is not polling at the expected cadence/u,
+    "freshness gate must surface a clear operator-facing error when the cadence has stalled."
+  );
+});

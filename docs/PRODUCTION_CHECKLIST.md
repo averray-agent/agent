@@ -24,11 +24,38 @@ If this checklist is not green, the answer is "not ready yet".
 - [x] `TreasuryPolicy.owner` is the intended multisig address.
 - [x] `deployments/testnet-multisig-owner.json` is `status: "verified"` and matches the deployment manifest owner.
 - [ ] `TreasuryPolicy.pauser` is a hot key that only holds pause power.
-- [x] `./scripts/verify_deployment.sh testnet` passes cleanly.
+- [x] `./scripts/verify_deployment.sh testnet --require-owner-record-final`
+  passes cleanly after `deployments/testnet.json` was updated to the live
+  KMS verifier address (`0x31ad...7ab7F`).
 - [ ] Pause and unpause were rehearsed from the pauser key.
 - [x] At least one owner-only admin operation was rehearsed from the multisig.
 
 See [MULTISIG_SETUP.md](./MULTISIG_SETUP.md) for the exact rehearsal flow.
+Use the dedicated pauser proof before closing the two remaining boxes:
+
+```bash
+# Read-only capability proof: no mutation, no private key.
+node scripts/ops/run-pauser-rehearsal.mjs \
+  --profile testnet \
+  --out artifacts/pauser-rehearsal-readonly.json
+
+# Live launch evidence: pauses and unpauses the deployed TreasuryPolicy.
+PAUSER_PRIVATE_KEY=0x<pauser-testnet-key> \
+node scripts/ops/run-pauser-rehearsal.mjs \
+  --profile testnet \
+  --live \
+  --out docs/evidence/pauser-rehearsal-testnet-YYYY-MM-DD.json
+```
+
+For mainnet or any real-funds rehearsal, add `--require-dedicated-pauser`.
+The current testnet pauser address overlaps other testnet roles in
+`deployments/testnet.json`; that is acceptable only as a bounded testnet
+shortcut and must not be carried into mainnet.
+
+Read-only evidence captured on 2026-05-21:
+[`docs/evidence/pauser-rehearsal-readonly-2026-05-21.json`](evidence/pauser-rehearsal-readonly-2026-05-21.json).
+It proves the live pauser can call `setPaused(bool)` and cannot call owner-only
+functions, but it does not close the live pause/unpause rehearsal box.
 
 ---
 
