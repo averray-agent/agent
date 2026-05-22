@@ -146,6 +146,79 @@ out of each account, sign back in using the BACKUP key, confirm it
 works, sign out, sign back in with PRIMARY. If backup doesn't work,
 the enrollment is broken — fix before storing the keys.
 
+### Evidence artifact
+
+After enrollment, capture a sanitized evidence file and validate it
+before moving the roadmap item. The evidence file must say where the
+recovery material lives, but it must not contain recovery codes,
+private keys, JWTs, access keys, or provider tokens.
+
+Recommended path:
+
+```bash
+node scripts/ops/check-hardware-mfa-evidence.mjs \
+  --file docs/evidence/hardware-mfa-YYYY-MM-DD.json \
+  --json
+```
+
+Minimum shape:
+
+```json
+{
+  "schemaVersion": "hardware-mfa-evidence-v1",
+  "completedAt": "YYYY-MM-DDTHH:mm:ss.sssZ",
+  "operator": {
+    "name": "Pascal",
+    "signature": "PK"
+  },
+  "hardwareKeys": [
+    {
+      "label": "YK1-primary",
+      "serialFingerprint": "yk-primary-last4-or-hash",
+      "physicalCustodyConfirmed": true
+    },
+    {
+      "label": "YK2-backup-safe",
+      "serialFingerprint": "yk-backup-last4-or-hash",
+      "physicalCustodyConfirmed": true
+    }
+  ],
+  "accounts": [
+    {
+      "id": "one_password_admin",
+      "provider": "1Password",
+      "accountLabel": "Averray admin",
+      "status": "hardware_key_enrolled",
+      "primaryKeyLabel": "YK1-primary",
+      "backupKeyLabel": "YK2-backup-safe",
+      "backupKeyLoginTested": true,
+      "recoveryPathDocumented": true,
+      "recoveryCodesStored": true,
+      "recoveryLocation": "op://prod-critical/yubikey-recovery-runbook/notes",
+      "lastVerifiedAt": "YYYY-MM-DDTHH:mm:ss.sssZ",
+      "evidence": {
+        "method": "provider_ui",
+        "reference": "security settings inspected by operator"
+      }
+    }
+  ],
+  "recoveryRunbook": {
+    "location": "op://prod-critical/yubikey-recovery-runbook/notes",
+    "backupKeyTestedAcrossAllAccounts": true,
+    "noRawRecoveryCodesInEvidence": true
+  }
+}
+```
+
+The validator requires entries for `one_password_admin`, `aws_root`,
+`aws_iam_admins`, `github_org_admin`, `domain_registrar`, and
+`vps_provider`. For `aws_iam_admins`, include a `subjects` array with
+each human admin username and backup-key login test result. For
+GitHub it also requires member audit completion and org-wide 2FA
+enforcement. For the registrar it requires FIDO2 support; if the
+registrar cannot support FIDO2, migrate before mainnet instead of
+marking the evidence valid.
+
 ## 5. Adjacent mainnet-prep work
 
 Two items are mentioned in Phase 5 pre-flight that show up together
