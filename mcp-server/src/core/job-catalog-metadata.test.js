@@ -226,6 +226,7 @@ test("public Wikipedia definitions include direct agent affordances", () => {
   assert.equal(job.verificationContract.version, "verification-contract-v1");
   assert.equal(job.verificationContract.verifierMode, "benchmark");
   assert.equal(job.verificationContract.handler, "benchmark");
+  assert.equal(job.verificationContract.verifierPolicyVersion, 1);
   assert.equal(job.verificationContract.verifierConfigVersion, 1);
   assert.equal(job.verificationContract.replayEndpoint, "POST /verifier/replay");
   assert.equal(typeof job.verificationContract.verifierConfigHash, "string");

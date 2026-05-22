@@ -5,6 +5,12 @@ export const VERIFICATION_CONTRACT_VERSION = "verification-contract-v1";
 export function buildVerificationContract(job, { verdict = undefined, verificationInput = undefined } = {}) {
   const verifierConfig = cloneJson(job?.verifierConfig);
   const verifierConfigVersion = normalizeVersion(verifierConfig?.version);
+  const verifierPolicyVersion = normalizeVersion(firstDefined(
+    job?.verification?.policyVersion,
+    job?.verifierPolicy?.version,
+    job?.verifierPolicyVersion,
+    undefined
+  ));
   const handler = firstString(verdict?.handler, verifierConfig?.handler, job?.verifierMode, "unknown");
   const handlerVersion = normalizeOptionalVersion(verdict?.handlerVersion);
   const evidenceSchemaRef = firstString(
@@ -19,6 +25,7 @@ export function buildVerificationContract(job, { verdict = undefined, verificati
     verifierMode: firstString(job?.verifierMode, undefined),
     handler,
     handlerVersion,
+    verifierPolicyVersion,
     verifierConfigVersion,
     verifierConfigHash: hashCanonicalContent(verifierConfig ?? null),
     evidenceSchemaRef,
@@ -30,6 +37,7 @@ export function buildVerificationContract(job, { verdict = undefined, verificati
       "verificationInputHash",
       "verifierConfigSnapshot",
       "verifierConfigHash",
+      "verifierPolicyVersion",
       "verifierConfigVersion",
       "handlerVersion",
       "evidenceSchemaRef"
@@ -41,6 +49,7 @@ export function buildVerificationAuditFields(job, { verdict = {}, verificationIn
   const verifierConfigSnapshot = cloneJson(job?.verifierConfig);
   const contract = buildVerificationContract(job, { verdict, verificationInput });
   const fields = {
+    verifierPolicyVersion: contract.verifierPolicyVersion,
     verifierConfigVersion: contract.verifierConfigVersion,
     verifierConfigHash: contract.verifierConfigHash,
     verifierConfigSnapshot,
@@ -81,6 +90,10 @@ function normalizeOptionalVersion(value) {
 
 function firstString(...values) {
   return values.find((value) => typeof value === "string" && value.trim())?.trim();
+}
+
+function firstDefined(...values) {
+  return values.find((value) => value !== undefined && value !== null);
 }
 
 function cloneJson(value) {

@@ -1354,6 +1354,7 @@ function buildVerificationTimelineEntry(session, verificationOverride = undefine
       reasonCode: verification.reasonCode,
       handler: verification.handler,
       handlerVersion: verification.handlerVersion,
+      verifierPolicyVersion: verification.verifierPolicyVersion,
       verifierConfigVersion: verification.verifierConfigVersion
     })
   });

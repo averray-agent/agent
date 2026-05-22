@@ -23,6 +23,7 @@ function structuredEvidence(input) {
 function createBenchmarkHandler() {
   return {
     id: "benchmark",
+    version: HANDLER_VERSION,
     evaluate(job, evidence) {
       const normalized = normalizeEvidence(evidence);
       const matched = job.verifierConfig.requiredKeywords.filter((keyword) => normalized.includes(keyword.toLowerCase()));
@@ -44,6 +45,7 @@ function createBenchmarkHandler() {
 function createDeterministicHandler() {
   return {
     id: "deterministic",
+    version: HANDLER_VERSION,
     evaluate(job, evidence) {
       const normalized = normalizeEvidence(evidence);
       const expected = job.verifierConfig.expectedOutputs.map((value) => value.toLowerCase());
@@ -69,6 +71,7 @@ function createDeterministicHandler() {
 function createHumanFallbackHandler() {
   return {
     id: "human_fallback",
+    version: HANDLER_VERSION,
     evaluate(job) {
       return {
         jobId: job.id,
@@ -86,6 +89,7 @@ function createHumanFallbackHandler() {
 function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = process.env.GITHUB_TOKEN, githubApiBaseUrl = "https://api.github.com" } = {}) {
   return {
     id: "github_pr",
+    version: HANDLER_VERSION,
     async evaluate(job, evidence) {
       const normalized = normalizeEvidence(evidence);
       const structured = structuredEvidence(evidence);
@@ -217,6 +221,13 @@ export class VerifierRegistry {
 
   listHandlers() {
     return [...this.handlers.keys()];
+  }
+
+  listHandlerMetadata() {
+    return [...this.handlers.values()].map((handler) => ({
+      id: handler.id,
+      version: handler.version
+    }));
   }
 
   async evaluate(job, evidence) {
