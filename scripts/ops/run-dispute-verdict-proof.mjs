@@ -22,6 +22,8 @@
 // This script never creates disputes and never iterates the queue
 // looking for "something to resolve". The caller chooses the dispute.
 
+import { writeFile } from "node:fs/promises";
+
 import { AgentPlatformClient } from "../../sdk/agent-platform-client.js";
 
 const DEFAULT_API_BASE_URL = "https://api.averray.com";
@@ -63,7 +65,7 @@ export async function runDisputeVerdictProof({
 
   log(`Submitting verdict for ${config.disputeId} (idempotencyKey=${payload.idempotencyKey})`);
   const response = await platform.submitDisputeVerdict(config.disputeId, payload);
-  assertVerdictEvidence(response, config.disputeId);
+  assertVerdictEvidence(response, config.disputeId, { requireChain: config.requireChain });
 
   log(`Re-fetching dispute ${config.disputeId} to confirm persistence`);
   const persisted = await platform.getDispute(config.disputeId);
@@ -118,7 +120,8 @@ function parseConfig(env) {
   // id; the second is already enforced above but kept here as the
   // single point of truth for "we are about to mutate".
   const live = pick(env.DISPUTE_PROOF_LIVE) === "1";
-  return { token, disputeId, verdict: rawVerdict, rationale, workerPayout, idempotencyKey, apiBaseUrl, live };
+  const requireChain = pick(env.DISPUTE_PROOF_REQUIRE_CHAIN) === "1";
+  return { token, disputeId, verdict: rawVerdict, rationale, workerPayout, idempotencyKey, apiBaseUrl, live, requireChain };
 }
 
 function assertDisputable(dispute, disputeId) {
@@ -152,7 +155,7 @@ function buildVerdictPayload(config) {
   return payload;
 }
 
-function assertVerdictEvidence(response, disputeId) {
+function assertVerdictEvidence(response, disputeId, { requireChain = false } = {}) {
   if (!response || typeof response !== "object") {
     throw new Error(`Verdict response was not a JSON object (disputeId=${disputeId}).`);
   }
@@ -181,6 +184,19 @@ function assertVerdictEvidence(response, disputeId) {
     throw new Error(
       `Unknown chainStatus '${response.chainStatus}'. Expected one of ${[...allowedChainStatus].join(" | ")}.`
     );
+  }
+  if (requireChain && response.chainStatus === "local_only") {
+    throw new Error(
+      "DISPUTE_PROOF_REQUIRE_CHAIN=1 requires chainStatus to be confirmed or submitted; got local_only."
+    );
+  }
+  if (response.chainStatus === "submitted" || response.chainStatus === "confirmed") {
+    if (!/^0x[a-fA-F0-9]{64}$/u.test(String(response.txHash))) {
+      throw new Error(`Verdict response txHash is required for chainStatus=${response.chainStatus}.`);
+    }
+  }
+  if (response.chainStatus === "confirmed" && !Number.isInteger(response.blockNumber)) {
+    throw new Error("Verdict response blockNumber is required when chainStatus=confirmed.");
   }
 }
 
@@ -251,9 +267,16 @@ function stripTrailingSlash(value) {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  runDisputeVerdictProof()
-    .then((result) => {
-      console.log(JSON.stringify(result, null, 2));
+  runDisputeVerdictProof({
+    log: pick(process.env.DISPUTE_PROOF_JSON_ONLY) === "1" ? () => {} : console.log
+  })
+    .then(async (result) => {
+      const output = `${JSON.stringify(result, null, 2)}\n`;
+      const evidenceFile = pick(process.env.DISPUTE_PROOF_EVIDENCE_FILE);
+      if (evidenceFile) {
+        await writeFile(evidenceFile, output, "utf8");
+      }
+      console.log(output.trimEnd());
     })
     .catch((error) => {
       console.error(error?.message ?? String(error));
