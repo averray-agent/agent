@@ -73,6 +73,7 @@ import { createAdminCapabilityRoutes } from "./admin-capability-routes.js";
 import { createAdminGithubRoutes } from "./admin-github-routes.js";
 import { createAdminJobsRoutes } from "./admin-jobs-routes.js";
 import { createAdminStatusRoutes } from "./admin-status-routes.js";
+import { createAdminXcmRoutes } from "./admin-xcm-routes.js";
 import { buildPublicJobsResponse } from "./jobs-response.js";
 import { OPERATOR_SIGNERS, makePolicy } from "../../core/builtin-policies.js";
 
@@ -1438,6 +1439,18 @@ const handleAdminGithubRoute = createAdminGithubRoutes({
   parseLimit,
   respond,
   service,
+});
+
+const handleAdminXcmRoute = createAdminXcmRoutes({
+  authMiddleware,
+  buildMutationRequestHash,
+  enforceLimit,
+  getIdempotentMutationReplay,
+  rateLimitConfig,
+  readJsonBody,
+  respond,
+  service,
+  storeIdempotentMutationReceipt,
 });
 
 function buildLaneAttention({ shares, isMock, debtTotal, borrowCapacity, deploymentShareBps }) {
@@ -3302,100 +3315,8 @@ const server = createServer(async (request, response) => {
       return;
     }
 
-    if (request.method === "POST" && pathname === "/admin/xcm/observe") {
-      const auth = await authMiddleware(request, url, { requireRole: "admin" });
-      await enforceLimit("admin_jobs", auth.wallet, rateLimitConfig.adminJobs);
-      const payload = await readJsonBody(request);
-      const requestId = typeof payload?.requestId === "string" && payload.requestId.trim()
-        ? payload.requestId.trim()
-        : (url.searchParams.get("requestId") ?? "");
-      if (!requestId) {
-        throw new ValidationError("requestId is required.");
-      }
-      const idempotencyKey = typeof payload?.idempotencyKey === "string" && payload.idempotencyKey.trim()
-        ? payload.idempotencyKey.trim()
-        : undefined;
-      const mutationKey = idempotencyKey ? `${auth.wallet}:${requestId}:${idempotencyKey}` : undefined;
-      const requestHash = buildMutationRequestHash({
-        route: "/admin/xcm/observe",
-        wallet: auth.wallet,
-        payload: {
-          ...payload,
-          requestId
-        }
-      });
-      const replay = await getIdempotentMutationReplay({
-        bucket: "admin_xcm_observe",
-        key: mutationKey,
-        requestHash
-      });
-      if (replay) {
-        return respond(response, replay.statusCode, replay.body);
-      }
-      const observed = await service.observeXcmOutcome(requestId, {
-        status: payload?.status,
-        settledAssets: payload?.settledAssets ?? 0,
-        settledShares: payload?.settledShares ?? 0,
-        remoteRef: payload?.remoteRef,
-        failureCode: payload?.failureCode,
-        source: payload?.source ?? "admin_observer",
-        observedAt: payload?.observedAt
-      });
-      await storeIdempotentMutationReceipt({
-        bucket: "admin_xcm_observe",
-        key: mutationKey,
-        requestHash,
-        response: observed,
-        statusCode: 200
-      });
-      return respond(response, 200, observed);
-    }
-
-    if (request.method === "POST" && pathname === "/admin/xcm/finalize") {
-      const auth = await authMiddleware(request, url, { requireRole: "admin" });
-      await enforceLimit("admin_jobs", auth.wallet, rateLimitConfig.adminJobs);
-      const payload = await readJsonBody(request);
-      const requestId = typeof payload?.requestId === "string" && payload.requestId.trim()
-        ? payload.requestId.trim()
-        : (url.searchParams.get("requestId") ?? "");
-      if (!requestId) {
-        throw new ValidationError("requestId is required.");
-      }
-      const idempotencyKey = typeof payload?.idempotencyKey === "string" && payload.idempotencyKey.trim()
-        ? payload.idempotencyKey.trim()
-        : undefined;
-      const mutationKey = idempotencyKey ? `${auth.wallet}:${requestId}:${idempotencyKey}` : undefined;
-      const requestHash = buildMutationRequestHash({
-        route: "/admin/xcm/finalize",
-        wallet: auth.wallet,
-        payload: {
-          ...payload,
-          requestId
-        }
-      });
-      const replay = await getIdempotentMutationReplay({
-        bucket: "admin_xcm_finalize",
-        key: mutationKey,
-        requestHash
-      });
-      if (replay) {
-        return respond(response, replay.statusCode, replay.body);
-      }
-      const finalized = await service.finalizeXcmRequest(requestId, {
-        status: payload?.status,
-        settledAssets: payload?.settledAssets ?? 0,
-        settledShares: payload?.settledShares ?? 0,
-        remoteRef: payload?.remoteRef,
-        failureCode: payload?.failureCode
-      });
-      await storeIdempotentMutationReceipt({
-        bucket: "admin_xcm_finalize",
-        key: mutationKey,
-        requestHash,
-        response: finalized,
-        statusCode: 200
-      });
-      return respond(response, 200, finalized);
+    if (await handleAdminXcmRoute({ request, response, url, pathname })) {
+      return;
     }
 
     if (request.method === "POST" && pathname === "/gas/quote") {
