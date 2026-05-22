@@ -4,7 +4,7 @@
 - **Agent:** codex/admin-xcm-route-split
 - **Roadmap section:** P1 Product And Platform Hardening
 - **Item:** HTTP server route split (`P2.3`)
-- **Related PRs/issues:** current PR; overlaps active route-split PRs #479 and #482
+- **Related PRs/issues:** current PR; overlaps recently merged route-split PR #483 and earlier route-split PRs #479/#482
 - **Proposed status:** Open
 - **Owner:** roadmap steward
 
@@ -20,7 +20,7 @@ This slice extracts the `/admin/xcm/observe` and `/admin/xcm/finalize` mutation 
 
 ## Blockers Or Caveats
 
-- PRs #479 and #482 are already editing the same roadmap row, so this PR intentionally avoids editing `docs/PROJECT_ROADMAP.md`.
+- Route-split PRs #479/#482/#483 touched or overlapped the same roadmap row, so this PR intentionally avoids editing `docs/PROJECT_ROADMAP.md`.
 - This PR does not make new chain-readiness or Polkadot runtime claims; it only preserves and relocates existing HTTP route behavior.
 
 ## Requested Roadmap Change
