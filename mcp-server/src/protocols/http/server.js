@@ -76,6 +76,7 @@ import {
   listBuiltinJobSchemas,
   schemaRefToJobSchemaPath
 } from "../../core/job-schema-registry.js";
+import { createAdminCapabilityGrantRoutes } from "./admin-capability-grant-routes.js";
 import { createAdminJobsRoutes } from "./admin-jobs-routes.js";
 import { createAdminStatusRoutes } from "./admin-status-routes.js";
 import { buildPublicJobsResponse } from "./jobs-response.js";
@@ -1420,6 +1421,22 @@ const handleAdminJobsRoute = createAdminJobsRoutes({
   respond,
   respondWithMutationReceipt,
   service,
+  storeIdempotentMutationReceipt,
+});
+
+const handleAdminCapabilityGrantRoute = createAdminCapabilityGrantRoutes({
+  assertIssuerCanGrantCapabilities,
+  authMiddleware,
+  buildMutationRequestHash,
+  enforceLimit,
+  eventBus,
+  getIdempotentMutationReplay,
+  parseIdempotencyKey,
+  parseLimit,
+  rateLimitConfig,
+  readJsonBody,
+  respond,
+  stateStore,
   storeIdempotentMutationReceipt,
 });
 
@@ -3395,77 +3412,8 @@ const server = createServer(async (request, response) => {
       return;
     }
 
-    /*
-     * Capability grants — operator-issued, scoped delegations of
-     * platform capabilities to a subject wallet (a service token,
-     * an automation bot, or a co-operator). Modelled after
-     * Polkadot's Staking Operator Proxy: a strict subset of the
-     * issuer's capabilities, no further delegation, revocable at
-     * any time. Roadmap §6.
-     */
-    if (request.method === "GET" && pathname === "/admin/capability-grants") {
-      await authMiddleware(request, url, { requireRole: "admin" });
-      const subject = (url.searchParams.get("subject") ?? "").trim().toLowerCase() || undefined;
-      const status = (url.searchParams.get("status") ?? "").trim().toLowerCase() || undefined;
-      const limit = parseLimit(url, 50, 200);
-      const offset = Math.max(0, Number(url.searchParams.get("offset") ?? 0) || 0);
-      const grants = (await stateStore.listCapabilityGrants?.({ subject, status, limit, offset })) ?? [];
-      return respond(response, 200, {
-        items: grants.map((grant) => projectGrant(grant)).filter(Boolean),
-        limit,
-        offset
-      });
-    }
-
-    if (request.method === "POST" && pathname === "/admin/capability-grants") {
-      const auth = await authMiddleware(request, url, { requireRole: "admin" });
-      await enforceLimit("admin_jobs", auth.wallet, rateLimitConfig.adminJobs);
-      const payload = await readJsonBody(request);
-      const idempotencyKey = parseIdempotencyKey(payload);
-      const mutationKey = idempotencyKey ? `${auth.wallet}:${idempotencyKey}` : undefined;
-      const requestHash = buildMutationRequestHash({
-        route: "/admin/capability-grants",
-        wallet: auth.wallet,
-        payload
-      });
-      const replay = await getIdempotentMutationReplay({
-        bucket: "capability_grant",
-        key: mutationKey,
-        requestHash
-      });
-      if (replay) {
-        return respond(response, replay.statusCode, replay.body);
-      }
-      const knownCapabilities = listAllKnownCapabilities();
-      const grant = buildCapabilityGrant(payload ?? {}, {
-        knownCapabilities,
-        issuerWallet: auth.wallet
-      });
-      assertIssuerCanGrantCapabilities(grant, auth);
-      await stateStore.upsertCapabilityGrant?.(grant);
-      authMiddleware.invalidateCapabilityGrantCache?.(grant.subject);
-      const projection = projectGrant(grant);
-      await storeIdempotentMutationReceipt({
-        bucket: "capability_grant",
-        key: mutationKey,
-        requestHash,
-        response: projection,
-        statusCode: 201
-      });
-      eventBus?.publish({
-        id: `capability-grant-${grant.id}-${Date.now()}`,
-        topic: "capability.grant",
-        wallet: auth.wallet,
-        wallets: [auth.wallet, grant.subject],
-        timestamp: new Date().toISOString(),
-        data: {
-          grantId: grant.id,
-          subject: grant.subject,
-          capabilities: grant.capabilities,
-          scope: grant.scope ?? null
-        }
-      });
-      return respond(response, 201, projection);
+    if (await handleAdminCapabilityGrantRoute({ request, response, url, pathname })) {
+      return;
     }
 
     if (request.method === "GET" && pathname === "/admin/service-tokens") {
@@ -3674,66 +3622,6 @@ const server = createServer(async (request, response) => {
         });
       }
       return respond(response, 200, body);
-    }
-
-    if (request.method === "POST" && pathname.startsWith("/admin/capability-grants/") && pathname.endsWith("/revoke")) {
-      const auth = await authMiddleware(request, url, { requireRole: "admin" });
-      await enforceLimit("admin_jobs", auth.wallet, rateLimitConfig.adminJobs);
-      const grantId = decodeURIComponent(pathname.slice("/admin/capability-grants/".length, -"/revoke".length));
-      if (!grantId) {
-        throw new ValidationError("grantId is required.");
-      }
-      const payload = (await readJsonBody(request).catch(() => undefined)) ?? {};
-      const idempotencyKey = parseIdempotencyKey(payload);
-      const mutationKey = idempotencyKey ? `${auth.wallet}:${grantId}:${idempotencyKey}` : undefined;
-      const requestHash = buildMutationRequestHash({
-        route: "/admin/capability-grants/:id/revoke",
-        wallet: auth.wallet,
-        payload: { grantId, ...payload }
-      });
-      const replay = await getIdempotentMutationReplay({
-        bucket: "capability_revoke",
-        key: mutationKey,
-        requestHash
-      });
-      if (replay) {
-        return respond(response, replay.statusCode, replay.body);
-      }
-      const current = await stateStore.getCapabilityGrant?.(grantId);
-      if (!current) {
-        throw new ValidationError("Unknown grant id.", { grantId });
-      }
-      const { record, alreadyRevoked } = applyRevocation(current, {
-        revokedBy: auth.wallet,
-        revokeNote: payload?.note
-      });
-      if (!alreadyRevoked) {
-        await stateStore.upsertCapabilityGrant?.(record);
-        authMiddleware.invalidateCapabilityGrantCache?.(record.subject);
-      }
-      const projection = projectGrant(record);
-      await storeIdempotentMutationReceipt({
-        bucket: "capability_revoke",
-        key: mutationKey,
-        requestHash,
-        response: projection,
-        statusCode: 200
-      });
-      if (!alreadyRevoked) {
-        eventBus?.publish({
-          id: `capability-revoke-${record.id}-${Date.now()}`,
-          topic: "capability.revoke",
-          wallet: auth.wallet,
-          wallets: [auth.wallet, record.subject],
-          timestamp: new Date().toISOString(),
-          data: {
-            grantId: record.id,
-            subject: record.subject,
-            revokedBy: record.revokedBy ?? auth.wallet
-          }
-        });
-      }
-      return respond(response, 200, projection);
     }
 
     if (request.method === "GET" && pathname === "/admin/github/status") {
