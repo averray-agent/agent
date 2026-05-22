@@ -175,7 +175,7 @@ externally ready.
 | Verifier replay hardening | Done | Verification audit fields now split `verifierPolicyVersion` from `verifierConfigVersion`; replay drift reports policy-version changes; every registered verifier handler must carry current-version replay fixtures before handler changes. |
 | Schema registration for external jobs | Open | Custom/off-platform references can register signed schemas with clear trust boundaries. |
 | Dispute/arbitration semantics | Open | Decide release path, store arbitrator reasoning under content hash, expose dispute UI fields, and rehearse arbitrator notifications. |
-| Timeline operator UX verification | Open | Backend trace filters landed. Close criterion: confirm the operator app exposes the intended filters and either mark Done (if already wired in `app/`) or open a narrow PR to wire them. |
+| Timeline operator UX verification | Done | Backend trace filters landed, and the operator app exposes URL-backed job timeline filters for source, topic, phase, severity, wallet, and correlation ID. Session drawer reuses the same controls client-side for session movement review. Evidence: `app/components/runs/TimelineEventFilters.tsx`, `app/components/runs/JobTimelinePanel.tsx`, `app/app/(authed)/sessions/page.tsx`, `app/components/sessions/SessionDrawerBody.tsx`, `app/lib/api/hooks.ts`, `mcp-server/src/protocols/http/server.js`, and `mcp-server/src/core/platform-service.test.js`. |
 | Reference-agent workflow generalization | Done | General workflow pattern documented in `docs/REFERENCE_AGENT_WORKFLOWS.md` for GitHub, dependency/OSV, open-data, OpenAPI, standards, and Wikipedia job families; anchored to existing claim, submit, schema, and timeline surfaces. |
 
 ## Auth, Secrets, And Capability Roadmap
