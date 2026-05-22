@@ -70,6 +70,7 @@ import {
   schemaRefToJobSchemaPath
 } from "../../core/job-schema-registry.js";
 import { createAdminCapabilityRoutes } from "./admin-capability-routes.js";
+import { createAdminGithubRoutes } from "./admin-github-routes.js";
 import { createAdminJobsRoutes } from "./admin-jobs-routes.js";
 import { createAdminStatusRoutes } from "./admin-status-routes.js";
 import { buildPublicJobsResponse } from "./jobs-response.js";
@@ -1430,6 +1431,13 @@ const handleAdminCapabilityRoute = createAdminCapabilityRoutes({
   respond,
   stateStore,
   storeIdempotentMutationReceipt,
+});
+
+const handleAdminGithubRoute = createAdminGithubRoutes({
+  authMiddleware,
+  parseLimit,
+  respond,
+  service,
 });
 
 function buildLaneAttention({ shares, isMock, debtTotal, borrowCapacity, deploymentShareBps }) {
@@ -3290,13 +3298,8 @@ const server = createServer(async (request, response) => {
       return;
     }
 
-    if (request.method === "GET" && pathname === "/admin/github/status") {
-      await authMiddleware(request, url, { requireRole: "admin" });
-      return respond(response, 200, await service.getGithubOperatorStatus({
-        repos: url.searchParams.has("repos") ? url.searchParams.get("repos") : undefined,
-        limit: parseLimit(url, 5, 20),
-        view: url.searchParams.get("view") ?? undefined
-      }));
+    if (await handleAdminGithubRoute({ request, response, url, pathname })) {
+      return;
     }
 
     if (request.method === "POST" && pathname === "/admin/xcm/observe") {
