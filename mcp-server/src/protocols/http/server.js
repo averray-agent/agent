@@ -72,6 +72,7 @@ import {
 import { createAdminCapabilityRoutes } from "./admin-capability-routes.js";
 import { createAdminGithubRoutes } from "./admin-github-routes.js";
 import { createAdminJobsRoutes } from "./admin-jobs-routes.js";
+import { createAdminSessionsRoutes } from "./admin-sessions-routes.js";
 import { createAdminStatusRoutes } from "./admin-status-routes.js";
 import { createAdminXcmRoutes } from "./admin-xcm-routes.js";
 import { buildPublicJobsResponse } from "./jobs-response.js";
@@ -1442,6 +1443,13 @@ const handleAdminGithubRoute = createAdminGithubRoutes({
   service,
 });
 
+const handleAdminSessionsRoute = createAdminSessionsRoutes({
+  authMiddleware,
+  parseLimit,
+  respond,
+  service,
+});
+
 const handleAdminXcmRoute = createAdminXcmRoutes({
   authMiddleware,
   buildMutationRequestHash,
@@ -1767,20 +1775,8 @@ const server = createServer(async (request, response) => {
       return;
     }
 
-    if (request.method === "GET" && pathname === "/admin/sessions") {
-      await authMiddleware(request, url, { requireRole: "admin" });
-      const limit = parseLimit(url, 50, 250);
-      const jobId = url.searchParams.get("jobId") ?? undefined;
-      const sessions = jobId
-        ? await service.listSessionHistory({ jobId, limit })
-        : await service.listRecentSessions(limit);
-      return respond(response, 200, {
-        sessions,
-        count: sessions.length,
-        limit,
-        ...(jobId ? { jobId } : {}),
-        scope: "operator"
-      });
+    if (await handleAdminSessionsRoute({ request, response, url, pathname })) {
+      return;
     }
 
     if (request.method === "GET" && pathname === "/strategies") {
