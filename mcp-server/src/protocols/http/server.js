@@ -77,6 +77,7 @@ import { createAdminStatusRoutes } from "./admin-status-routes.js";
 import { createAdminXcmRoutes } from "./admin-xcm-routes.js";
 import { buildPublicJobsResponse } from "./jobs-response.js";
 import { createGasRoutes } from "./gas-routes.js";
+import { createPolicyRoutes } from "./policy-routes.js";
 import { createSchemaRoutes } from "./schema-routes.js";
 import { createSessionRoutes } from "./session-routes.js";
 import { createVerifierRoutes } from "./verifier-routes.js";
@@ -1495,6 +1496,17 @@ const handleSchemaRoute = createSchemaRoutes({
   schemaRefToJobSchemaPath,
 });
 
+const handlePolicyRoute = createPolicyRoutes({
+  authMiddleware,
+  buildPolicyProposal,
+  eventBus,
+  findPolicy,
+  listPolicies,
+  policyService,
+  readJsonBody,
+  respond,
+});
+
 function buildLaneAttention({ shares, isMock, debtTotal, borrowCapacity, deploymentShareBps }) {
   if (!(shares > 0)) {
     return undefined;
@@ -1980,41 +1992,8 @@ const server = createServer(async (request, response) => {
       return respond(response, 200, await listAuditEvents(parseLimit(url, 100, 500)));
     }
 
-    if (request.method === "GET" && pathname === "/policies") {
-      await authMiddleware(request, url);
-      return respond(response, 200, listPolicies());
-    }
-
-    if (request.method === "POST" && pathname === "/policies") {
-      const auth = await authMiddleware(request, url, { requireRole: "admin" });
-      const payload = await readJsonBody(request);
-      const proposal = buildPolicyProposal(payload, auth);
-      // Package G — PolicyService.propose updates the cache
-      // synchronously and enqueues a write-through persist against the
-      // state-store, so a server restart no longer loses the proposal.
-      policyService.propose(proposal);
-      eventBus?.publish({
-        id: `policy-proposal-${proposal.id}-${Date.now()}`,
-        topic: "policy.proposed",
-        wallet: auth.wallet,
-        wallets: [auth.wallet],
-        timestamp: new Date().toISOString(),
-        data: { tag: proposal.tag, status: proposal.state }
-      });
-      return respond(response, 201, proposal);
-    }
-
-    if (request.method === "GET" && pathname.startsWith("/policies/")) {
-      await authMiddleware(request, url);
-      const tag = decodeURIComponent(pathname.slice("/policies/".length));
-      if (!tag) {
-        throw new ValidationError("policy tag path segment is required.");
-      }
-      const policy = findPolicy(tag);
-      if (!policy) {
-        return respond(response, 404, { status: "not_found", tag });
-      }
-      return respond(response, 200, policy);
+    if (await handlePolicyRoute({ request, response, url, pathname })) {
+      return;
     }
 
     if (request.method === "POST" && pathname === "/content") {
