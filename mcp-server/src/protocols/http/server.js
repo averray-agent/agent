@@ -75,6 +75,7 @@ import { createAdminJobsRoutes } from "./admin-jobs-routes.js";
 import { createAdminSessionsRoutes } from "./admin-sessions-routes.js";
 import { createAdminStatusRoutes } from "./admin-status-routes.js";
 import { createAdminXcmRoutes } from "./admin-xcm-routes.js";
+import { createBadgeRoutes } from "./badge-routes.js";
 import { buildPublicJobsResponse } from "./jobs-response.js";
 import { createGasRoutes } from "./gas-routes.js";
 import { createPolicyRoutes } from "./policy-routes.js";
@@ -1507,6 +1508,19 @@ const handlePolicyRoute = createPolicyRoutes({
   respond,
 });
 
+const handleBadgeRoute = createBadgeRoutes({
+  buildBadgeFromSession,
+  deriveBadgeLineage,
+  listBadgeReceipts,
+  parseLimit,
+  publicBaseUrl: process.env.PUBLIC_BASE_URL,
+  posterAddress: process.env.DEFAULT_POSTER_ADDRESS,
+  respond,
+  service,
+  verifierAddress: process.env.DEFAULT_VERIFIER_ADDRESS,
+  verifierService,
+});
+
 function buildLaneAttention({ shares, isMock, debtTotal, borrowCapacity, deploymentShareBps }) {
   if (!(shares > 0)) {
     return undefined;
@@ -1930,56 +1944,8 @@ const server = createServer(async (request, response) => {
       return respond(response, 200, profile, { "cache-control": "public, max-age=30" });
     }
 
-    if (request.method === "GET" && pathname === "/badges") {
-      return respond(response, 200, await listBadgeReceipts(parseLimit(url, 100, 500)), {
-        "cache-control": "public, max-age=30"
-      });
-    }
-
-    // Public badge metadata — the "LinkedIn for agents" read surface.
-    // Anyone can fetch `/badges/<sessionId>` to inspect a completed job's
-    // badge without auth. Returns 404 for missing or not-yet-approved
-    // sessions; returns schema-compliant JSON otherwise. See
-    // docs/schemas/agent-badge-v1.md for the full format.
-    if (request.method === "GET" && pathname.startsWith("/badges/")) {
-      const sessionId = decodeURIComponent(pathname.slice("/badges/".length));
-      if (!sessionId) {
-        throw new ValidationError("sessionId path segment is required.");
-      }
-      let session;
-      try {
-        session = await service.resumeSession(sessionId);
-      } catch (error) {
-        const normalized = normalizeError(error);
-        if (normalized.code === "session_not_found") {
-          return respond(response, 404, { status: "not_found", sessionId });
-        }
-        throw normalized;
-      }
-      const verification = await verifierService.getResult(sessionId);
-      const job = service.getJobDefinition(session.jobId);
-      try {
-        const badge = buildBadgeFromSession({
-          session,
-          job,
-          verification,
-          context: {
-            publicBaseUrl: process.env.PUBLIC_BASE_URL,
-            posterAddress: process.env.DEFAULT_POSTER_ADDRESS,
-            verifierAddress: process.env.DEFAULT_VERIFIER_ADDRESS,
-            lineage: deriveBadgeLineage(session, job)
-          }
-        });
-        // Keep badge JSON browser-cacheable for a minute — it's deterministic
-        // once the session is resolved.
-        return respond(response, 200, badge, { "cache-control": "public, max-age=60" });
-      } catch (error) {
-        const normalized = normalizeError(error);
-        if (normalized.code === "badge_not_ready") {
-          return respond(response, 404, { status: "not_ready", sessionId, reason: normalized.message });
-        }
-        throw normalized;
-      }
+    if (await handleBadgeRoute({ request, response, url, pathname })) {
+      return;
     }
 
     if (request.method === "GET" && pathname === "/alerts") {
