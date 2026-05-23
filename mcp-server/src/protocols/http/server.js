@@ -77,6 +77,7 @@ import { createAdminStatusRoutes } from "./admin-status-routes.js";
 import { createAdminXcmRoutes } from "./admin-xcm-routes.js";
 import { buildPublicJobsResponse } from "./jobs-response.js";
 import { createGasRoutes } from "./gas-routes.js";
+import { createVerifierRoutes } from "./verifier-routes.js";
 import { OPERATOR_SIGNERS, makePolicy } from "../../core/builtin-policies.js";
 
 const {
@@ -1469,6 +1470,15 @@ const handleGasRoute = createGasRoutes({
   respond,
 });
 
+const handleVerifierRoute = createVerifierRoutes({
+  authMiddleware,
+  enforceLimit,
+  rateLimitConfig,
+  readJsonBody,
+  respond,
+  verifierService,
+});
+
 function buildLaneAttention({ shares, isMock, debtTotal, borrowCapacity, deploymentShareBps }) {
   if (!(shares > 0)) {
     return undefined;
@@ -1858,23 +1868,8 @@ const server = createServer(async (request, response) => {
       return;
     }
 
-    if (request.method === "GET" && pathname === "/verifier/handlers") {
-      return respond(response, 200, { handlers: verifierService.listHandlers() });
-    }
-
-    if (request.method === "GET" && pathname === "/verifier/result") {
-      const sessionId = url.searchParams.get("sessionId") ?? "";
-      return respond(response, 200, await verifierService.getResult(sessionId) ?? { status: "not_found" });
-    }
-
-    if (request.method === "POST" && pathname === "/verifier/replay") {
-      const auth = await authMiddleware(request, url, { requireRole: "verifier" });
-      await enforceLimit("verifier_run", auth.wallet, rateLimitConfig.verifierRun);
-      const payload = await readJsonBody(request);
-      const sessionId = typeof payload?.sessionId === "string" && payload.sessionId.trim()
-        ? payload.sessionId.trim()
-        : (url.searchParams.get("sessionId") ?? "");
-      return respond(response, 200, await verifierService.replayVerification(sessionId));
+    if (await handleVerifierRoute({ request, response, url, pathname })) {
+      return;
     }
 
     // Public agent directory for the new operator app. It is derived from
@@ -3423,22 +3418,6 @@ const server = createServer(async (request, response) => {
       }
       await ensureSessionOwnership(sessionId, auth.wallet);
       return respond(response, 200, await service.submitWork(sessionId, "http", submission));
-    }
-
-    if (request.method === "POST" && pathname === "/verifier/run") {
-      const auth = await authMiddleware(request, url, { requireRole: "verifier" });
-      await enforceLimit("verifier_run", auth.wallet, rateLimitConfig.verifierRun);
-      const payload = await readJsonBody(request);
-      const sessionId = typeof payload?.sessionId === "string" && payload.sessionId.trim()
-        ? payload.sessionId.trim()
-        : (url.searchParams.get("sessionId") ?? "");
-      const evidence = payload && typeof payload === "object" && "evidence" in payload
-        ? payload.evidence
-        : (url.searchParams.get("evidence") ?? "");
-      const metadataURI = typeof payload?.metadataURI === "string" && payload.metadataURI.trim()
-        ? payload.metadataURI.trim()
-        : (url.searchParams.get("metadataURI") ?? "ipfs://pending-badge");
-      return respond(response, 200, await verifierService.verifySubmission({ sessionId, evidence, metadataURI }));
     }
 
     return respond(response, 404, { error: "not_found" });
