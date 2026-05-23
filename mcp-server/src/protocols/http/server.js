@@ -75,6 +75,7 @@ import { createAdminJobsRoutes } from "./admin-jobs-routes.js";
 import { createAdminStatusRoutes } from "./admin-status-routes.js";
 import { createAdminXcmRoutes } from "./admin-xcm-routes.js";
 import { buildPublicJobsResponse } from "./jobs-response.js";
+import { createGasRoutes } from "./gas-routes.js";
 import { OPERATOR_SIGNERS, makePolicy } from "../../core/builtin-policies.js";
 
 const {
@@ -1453,6 +1454,13 @@ const handleAdminXcmRoute = createAdminXcmRoutes({
   storeIdempotentMutationReceipt,
 });
 
+const handleGasRoute = createGasRoutes({
+  authMiddleware,
+  pimlicoClient,
+  readJsonBody,
+  respond,
+});
+
 function buildLaneAttention({ shares, isMock, debtTotal, borrowCapacity, deploymentShareBps }) {
   if (!(shares > 0)) {
     return undefined;
@@ -1850,12 +1858,8 @@ const server = createServer(async (request, response) => {
       }));
     }
 
-    if (request.method === "GET" && pathname === "/gas/health") {
-      return respond(response, 200, await pimlicoClient.healthCheck());
-    }
-
-    if (request.method === "GET" && pathname === "/gas/capabilities") {
-      return respond(response, 200, pimlicoClient.getCapabilities());
+    if (request.method === "GET" && await handleGasRoute({ request, response, url, pathname })) {
+      return;
     }
 
     if (request.method === "GET" && pathname === "/verifier/handlers") {
@@ -3319,20 +3323,8 @@ const server = createServer(async (request, response) => {
       return;
     }
 
-    if (request.method === "POST" && pathname === "/gas/quote") {
-      await authMiddleware(request, url);
-      const payload = await readJsonBody(request);
-      return respond(response, 200, await pimlicoClient.quoteUserOperation(payload.userOperation));
-    }
-
-    if (request.method === "POST" && pathname === "/gas/sponsor") {
-      await authMiddleware(request, url);
-      const payload = await readJsonBody(request);
-      return respond(
-        response,
-        200,
-        await pimlicoClient.sponsorUserOperation(payload.userOperation, payload.context ?? {})
-      );
+    if (request.method === "POST" && await handleGasRoute({ request, response, url, pathname })) {
+      return;
     }
 
     if (request.method === "POST" && pathname === "/payments/send") {
