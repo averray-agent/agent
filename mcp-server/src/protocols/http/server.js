@@ -40,7 +40,6 @@ import { hasRole } from "../../auth/config.js";
 import { resolveRequestId } from "../../core/logger.js";
 import { getAddress, keccak256, toUtf8Bytes } from "ethers";
 import { buildBadgeFromSession } from "../../core/badge-metadata.js";
-import { buildAgentProfile } from "../../core/agent-profile.js";
 import { buildDiscoveryManifest } from "../../core/discovery-manifest.js";
 import {
   ARBITRATOR_SLA_SECONDS,
@@ -80,6 +79,7 @@ import { createBadgeRoutes } from "./badge-routes.js";
 import { buildPublicJobsResponse } from "./jobs-response.js";
 import { createGasRoutes } from "./gas-routes.js";
 import { createPolicyRoutes } from "./policy-routes.js";
+import { createProfileRoutes } from "./profile-routes.js";
 import { createSchemaRoutes } from "./schema-routes.js";
 import { createSessionRoutes } from "./session-routes.js";
 import { createVerifierRoutes } from "./verifier-routes.js";
@@ -303,202 +303,6 @@ function parsePositiveInteger(value, fallback, max = Number.MAX_SAFE_INTEGER) {
   return Math.min(Math.trunc(raw), max);
 }
 
-function profileTierToOperatorTier(reputation = {}) {
-  const skill = Number(reputation.skill ?? 0);
-  if (skill >= 300) return "master";
-  if (reputation.tier === "elite" || skill >= 200) return "expert";
-  if (reputation.tier === "pro" || skill >= 100) return "journeyman";
-  return "apprentice";
-}
-
-function handleForWallet(wallet) {
-  const normalized = String(wallet ?? "").toLowerCase();
-  return `agent-${normalized.slice(2, 6)}-${normalized.slice(-4)}`;
-}
-
-function buildAgentDirectoryRow(profile) {
-  const reputation = profile.reputation ?? {};
-  const approvedCount = Number(profile.stats?.approvedCount ?? 0);
-  const rejectedCount = Number(profile.stats?.rejectedCount ?? 0);
-  const totalJobs = approvedCount + rejectedCount;
-  // Slash events are upheld disputes — the verdict went against the
-  // worker. Map straight off the profile's dispute history so the
-  // agents directory exposes the same slashed-state the operator
-  // app rail already gates on.
-  const slashEvents = (profile.disputes ?? [])
-    .filter((dispute) => dispute.verdict === "upheld")
-    .map((dispute) => ({
-      disputeId: dispute.id ?? null,
-      jobId: dispute.jobId,
-      sessionId: dispute.sessionId,
-      reasonCode: dispute.reasonCode ?? null,
-      txHash: dispute.txHash ?? null,
-      at: dispute.openedAt,
-    }));
-  return {
-    wallet: profile.wallet,
-    handle: handleForWallet(profile.wallet),
-    tier: profileTierToOperatorTier(reputation),
-    reputationScore:
-      Number(reputation.skill ?? 0) +
-      Number(reputation.reliability ?? 0) +
-      Number(reputation.economic ?? 0),
-    successRate: profile.stats?.completionRate ?? null,
-    totalJobs,
-    currentActivity: profile.currentActivity ?? null,
-    activeStake: 0,
-    badges: profile.badges ?? [],
-    slashEvents,
-  };
-}
-
-/**
- * For each session in the history, fetch any dispute receipts the
- * state store carries against it. Builds the sync lookup
- * `buildAgentProfile` expects via its `getDisputeReceipts` arg so
- * the profile can emit dispute history without reaching into the
- * store itself. Skips sessions that aren't dispute candidates
- * (status !== "disputed" and no disputedAt) so the average wallet
- * with no contested submissions pays no extra fetches.
- */
-async function preloadDisputeReceipts(sessions) {
-  if (!Array.isArray(sessions) || sessions.length === 0) {
-    return () => undefined;
-  }
-  const candidates = sessions.filter((session) => {
-    if (!session || typeof session !== "object") return false;
-    const status = String(session.status ?? "").toLowerCase();
-    return status === "disputed" || Boolean(session.disputedAt);
-  });
-  if (candidates.length === 0) return () => undefined;
-  const receiptsBySession = new Map();
-  await Promise.all(
-    candidates.map(async (session) => {
-      const id = disputeIdForSession(session.sessionId);
-      const [verdict, release] = await Promise.all([
-        stateStore.getMutationReceipt?.("dispute_verdict", id),
-        stateStore.getMutationReceipt?.("dispute_release", id),
-      ]);
-      if (verdict || release) {
-        receiptsBySession.set(session.sessionId, {
-          ...(verdict ? { verdict } : {}),
-          ...(release ? { release } : {}),
-        });
-      } else {
-        // Session is in the disputed state but no receipt landed
-        // yet. Still register it so buildAgentProfile picks it up
-        // as an "open" dispute.
-        receiptsBySession.set(session.sessionId, {});
-      }
-    })
-  );
-  return (sessionId) => receiptsBySession.get(sessionId);
-}
-
-/**
- * Walk the wallet's session history and pre-build the slim
- * sub-contracting lookup `buildAgentProfile` consumes via its
- * `getLineage` arg. For each session we record:
- *   - `parent`  if the job this session is on was itself a child of
- *               another session (`job.parentSessionId` set; the
- *               parent wallet lives on `job.lineage.parentWallet`).
- *   - `children` if any sub-jobs were posted from this session
- *               (`listChildJobsByParentSession`).
- * Sessions with neither role are skipped so a wallet that's never
- * sub-contracted pays no extra cost. Roadmap §8.
- */
-function preloadLineage(sessions) {
-  if (!Array.isArray(sessions) || sessions.length === 0) {
-    return () => undefined;
-  }
-  const lookup = new Map();
-  for (const session of sessions) {
-    if (!session || typeof session !== "object") continue;
-    const sessionId = String(session.sessionId ?? "");
-    if (!sessionId) continue;
-
-    const entry = {};
-    let job;
-    try {
-      job = service.getJobDefinition(session.jobId);
-    } catch {
-      job = undefined;
-    }
-    if (job?.parentSessionId) {
-      const parent = {
-        sessionId: String(job.parentSessionId),
-        ...(job.lineage?.parentJobId ? { jobId: String(job.lineage.parentJobId) } : {}),
-        ...(typeof job.lineage?.parentWallet === "string"
-          ? { wallet: job.lineage.parentWallet }
-          : {})
-      };
-      if (Object.keys(parent).length > 0) entry.parent = parent;
-    }
-    let childJobs;
-    try {
-      childJobs = service.listChildJobsByParentSession?.(sessionId) ?? [];
-    } catch {
-      childJobs = [];
-    }
-    if (childJobs.length > 0) {
-      entry.children = childJobs.map((childJob) => ({
-        jobId: String(childJob.id ?? ""),
-        ...(typeof childJob.lineage?.parentWallet === "string"
-          ? { parentWallet: childJob.lineage.parentWallet }
-          : {})
-      })).filter((child) => child.jobId);
-    }
-
-    if (entry.parent || (entry.children && entry.children.length > 0)) {
-      lookup.set(sessionId, entry);
-    }
-  }
-  if (lookup.size === 0) return () => undefined;
-  return (sessionId) => lookup.get(sessionId);
-}
-
-async function buildAgentDirectory(limit = 50) {
-  const sessions = await service.listRecentSessions(limit);
-  const wallets = [...new Set(sessions.map((session) => session.wallet).filter(Boolean))];
-  const rows = await Promise.all(wallets.map(async (wallet) => {
-    const checksummed = safeChecksum(wallet);
-    const [reputation, history] = await Promise.all([
-      service.getReputation(checksummed),
-      service.collectSessionHistory(checksummed, { logger })
-    ]);
-    // Pre-fetch dispute receipts so directory rows correctly mark
-    // slashed (upheld-verdict) wallets. Skips wallets with no
-    // disputed sessions, so this is free in the common case.
-    const getDisputeReceipts = await preloadDisputeReceipts(history);
-    // Walk job lineage so directory rows can surface a "delegated"
-    // / "subcontracted" counter alongside the rest. Free for wallets
-    // that haven't sub-contracted.
-    const getLineage = preloadLineage(history);
-    const profile = buildAgentProfile({
-      wallet: wallet.toLowerCase(),
-      reputation,
-      sessions: history,
-      getJobDefinition: (jobId) => {
-        try {
-          return service.getJobDefinition(jobId);
-        } catch {
-          return undefined;
-        }
-      },
-      publicBaseUrl: process.env.PUBLIC_BASE_URL,
-      getDisputeReceipts,
-      getLineage,
-    });
-    return buildAgentDirectoryRow(profile);
-  }));
-  return rows.sort((left, right) => {
-    if (right.reputationScore !== left.reputationScore) {
-      return right.reputationScore - left.reputationScore;
-    }
-    return String(left.wallet).localeCompare(String(right.wallet));
-  });
-}
-
 function buildBadgeReceipt(badge) {
   const averray = badge.averray ?? {};
   return {
@@ -517,14 +321,6 @@ function buildBadgeReceipt(badge) {
   };
 }
 
-/**
- * Derive the badge `lineage` block at fetch time from the session +
- * job pair. Mirrors what `preloadLineage` does for the agent
- * profile but for a single badge: parent (if the job was a sub-job)
- * and children (if the session itself spawned sub-jobs). Returns
- * `undefined` when there's nothing to surface so the badge stays
- * clean. Roadmap §8.
- */
 function deriveBadgeLineage(session, job) {
   if (!session || !job) return undefined;
   const lineage = {};
@@ -1484,6 +1280,15 @@ const handleVerifierRoute = createVerifierRoutes({
   verifierService,
 });
 
+const handleProfileRoute = createProfileRoutes({
+  authMiddleware,
+  logger,
+  parseLimit,
+  respond,
+  service,
+  stateStore,
+});
+
 const handleSessionRoute = createSessionRoutes({
   authMiddleware,
   ensureSessionOwnership,
@@ -1894,63 +1699,8 @@ const server = createServer(async (request, response) => {
       return;
     }
 
-    // Public agent directory for the new operator app. It is derived from
-    // the same recent session + reputation source as the per-wallet profile.
-    if (request.method === "GET" && pathname === "/agents") {
-      return respond(response, 200, await buildAgentDirectory(parseLimit(url, 50, 250)), {
-        "cache-control": "public, max-age=30"
-      });
-    }
-
-    // Public agent profile — the aggregate "LinkedIn for agents" resume.
-    // Returns reputation + per-category levels + lifetime stats + ordered
-    // badges. Public (no auth) so other agents/humans can verify. See
-    // docs/schemas/agent-profile-v1.md for the full format.
-    if (request.method === "GET" && pathname.startsWith("/agents/")) {
-      const rawWallet = decodeURIComponent(pathname.slice("/agents/".length));
-      if (!/^0x[a-fA-F0-9]{40}$/u.test(rawWallet)) {
-        throw new ValidationError("wallet path segment must be a 0x-prefixed 20-byte hex address.");
-      }
-      // Sessions are keyed by the checksummed form (authMiddleware calls
-      // getAddress before persisting). We accept lowercase or checksummed
-      // in the URL, normalise for lookup, and return lowercase in the body
-      // so consumers have a single canonical form to compare against.
-      const checksummed = safeChecksum(rawWallet);
-      // Lifetime aggregates need every session, not a truncated page.
-      // collectSessionHistory walks the state store page-by-page up to a
-      // safety cap (10_000 by default) — see
-      // src/core/job-execution-service.js#collectSessionHistory.
-      const [reputation, sessions] = await Promise.all([
-        service.getReputation(checksummed),
-        service.collectSessionHistory(checksummed, { logger: requestLogger })
-      ]);
-      // Pre-fetch dispute receipts so the public profile carries
-      // dispute history (status, verdict, reasonCode) without the
-      // frontend needing a separate /disputes call. Free for wallets
-      // with no contested sessions — `preloadDisputeReceipts` short-
-      // circuits when there's nothing to fetch.
-      const getDisputeReceipts = await preloadDisputeReceipts(sessions);
-      // Pre-walk sub-contracting lineage so the profile carries a
-      // delegated / subcontracted history block + counters without
-      // a separate /jobs/sub or /admin/jobs/timeline call. Free for
-      // wallets that haven't sub-contracted. Roadmap §8.
-      const getLineage = preloadLineage(sessions);
-      const profile = buildAgentProfile({
-        wallet: rawWallet.toLowerCase(),
-        reputation,
-        sessions,
-        getJobDefinition: (jobId) => {
-          try {
-            return service.getJobDefinition(jobId);
-          } catch {
-            return undefined;
-          }
-        },
-        publicBaseUrl: process.env.PUBLIC_BASE_URL,
-        getDisputeReceipts,
-        getLineage,
-      });
-      return respond(response, 200, profile, { "cache-control": "public, max-age=30" });
+    if (await handleProfileRoute({ request, response, url, pathname, requestLogger })) {
+      return;
     }
 
     if (await handleBadgeRoute({ request, response, url, pathname })) {
@@ -3105,11 +2855,6 @@ const server = createServer(async (request, response) => {
         await requireChainBackedMutation("/account/repay");
         return service.repay(auth.wallet, asset, amount);
       });
-    }
-
-    if (request.method === "GET" && pathname === "/reputation") {
-      const auth = await authMiddleware(request, url);
-      return respond(response, 200, await service.getReputation(auth.wallet));
     }
 
     if (request.method === "GET" && pathname === "/xcm/request") {
