@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { Wallet } from "ethers";
 
 import { ValidationError } from "./errors.js";
 import { JobExecutionService } from "./job-execution-service.js";
@@ -7,9 +8,14 @@ import { MemoryStateStore } from "./state-store.js";
 import { computeClaimEconomics } from "./claim-economics.js";
 import { claimExpiresAt } from "./claim-state.js";
 import { buildAverrayDisclosureFooter } from "./maintainer-surface-policy.js";
+import {
+  buildExternalSchemaRegistrationMessage,
+  normalizeExternalSchemaRegistrations
+} from "./job-schema-registry.js";
 
 const WALLET = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const WALLET_2 = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const EXTERNAL_SCHEMA_SIGNER = new Wallet("0x0f4f07793b1c0fcd93c573bd21f40074441c202d8b0cd64bc9453fbd89f3ed1f");
 
 function makeJob(overrides = {}) {
   return {
@@ -29,6 +35,34 @@ function makeJob(overrides = {}) {
     claimTtlSeconds: 3600,
     ...overrides
   };
+}
+
+async function makeExternalSchemaRegistrations(schemaRef = "schema://jobs/external-review-output") {
+  const base = {
+    schemaRef,
+    schemaUrl: "https://schemas.example.com/jobs/external-review-output.json",
+    schema: {
+      $id: schemaRef,
+      type: "object",
+      additionalProperties: false,
+      required: ["summary", "result"],
+      properties: {
+        summary: { type: "string", minLength: 1 },
+        result: { type: "string", enum: ["pass", "fail"] }
+      }
+    },
+    issuer: EXTERNAL_SCHEMA_SIGNER.address,
+    signedAt: "2026-05-23T00:00:00.000Z"
+  };
+  return normalizeExternalSchemaRegistrations([
+    {
+      ...base,
+      signature: await EXTERNAL_SCHEMA_SIGNER.signMessage(buildExternalSchemaRegistrationMessage(base))
+    }
+  ], {
+    allowedSchemaRefs: [schemaRef],
+    trustedIssuers: [EXTERNAL_SCHEMA_SIGNER.address]
+  });
 }
 
 test("submitWork accepts structured output for built-in schemas", async () => {
@@ -159,7 +193,43 @@ test("submitWork rejects structured output when the schema ref is unknown", asyn
 
   await assert.rejects(
     () => service.submitWork(claimed.sessionId, "http", { anything: "goes" }),
-    (error) => error instanceof ValidationError && /known built-in schema/.test(error.message)
+    (error) => error instanceof ValidationError && /known built-in or registered schema/.test(error.message)
+  );
+});
+
+test("submitWork validates structured output against registered external schemas", async () => {
+  const stateStore = new MemoryStateStore();
+  const outputSchemaRef = "schema://jobs/external-review-output";
+  const schemaRegistrations = await makeExternalSchemaRegistrations(outputSchemaRef);
+  const job = makeJob({ outputSchemaRef, schemaRegistrations });
+  const service = new JobExecutionService(stateStore, undefined, () => job);
+
+  const claimed = await service.claimJob(WALLET, job.id, "http", "idemp-external-schema");
+  const submitted = await service.submitWork(claimed.sessionId, "http", {
+    summary: "External schema output is valid.",
+    result: "pass"
+  });
+
+  assert.equal(submitted.outputSchemaBuiltin, false);
+  assert.equal(submitted.outputSchemaRegistered, true);
+  assert.equal(submitted.submission.structured.result, "pass");
+});
+
+test("submitWork rejects invalid registered external schema output", async () => {
+  const stateStore = new MemoryStateStore();
+  const outputSchemaRef = "schema://jobs/external-review-output";
+  const schemaRegistrations = await makeExternalSchemaRegistrations(outputSchemaRef);
+  const job = makeJob({ outputSchemaRef, schemaRegistrations });
+  const service = new JobExecutionService(stateStore, undefined, () => job);
+
+  const claimed = await service.claimJob(WALLET, job.id, "http", "idemp-external-schema-invalid");
+
+  await assert.rejects(
+    () => service.submitWork(claimed.sessionId, "http", {
+      summary: "External schema output is invalid.",
+      result: "maybe"
+    }),
+    /submission.result must be one of pass, fail/u
   );
 });
 
