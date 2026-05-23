@@ -77,6 +77,7 @@ import { createAdminStatusRoutes } from "./admin-status-routes.js";
 import { createAdminXcmRoutes } from "./admin-xcm-routes.js";
 import { buildPublicJobsResponse } from "./jobs-response.js";
 import { createGasRoutes } from "./gas-routes.js";
+import { createSchemaRoutes } from "./schema-routes.js";
 import { createSessionRoutes } from "./session-routes.js";
 import { createVerifierRoutes } from "./verifier-routes.js";
 import { OPERATOR_SIGNERS, makePolicy } from "../../core/builtin-policies.js";
@@ -1487,6 +1488,13 @@ const handleSessionRoute = createSessionRoutes({
   service,
 });
 
+const handleSchemaRoute = createSchemaRoutes({
+  getPublicBuiltinJobSchemaByName,
+  listBuiltinJobSchemas,
+  respond,
+  schemaRefToJobSchemaPath,
+});
+
 function buildLaneAttention({ shares, isMock, debtTotal, borrowCapacity, deploymentShareBps }) {
   if (!(shares > 0)) {
     return undefined;
@@ -1833,32 +1841,8 @@ const server = createServer(async (request, response) => {
       return;
     }
 
-    if (request.method === "GET" && pathname === "/schemas/jobs") {
-      const schemas = listBuiltinJobSchemas().map((entry) => ({
-        ...entry,
-        path: schemaRefToJobSchemaPath(entry.$id)
-      }));
-      return respond(
-        response,
-        200,
-        {
-          schemas,
-          count: schemas.length,
-          docs: "https://github.com/depre-dev/agent/tree/main/docs/schemas/jobs"
-        },
-        { "cache-control": "public, max-age=300" }
-      );
-    }
-
-    if (request.method === "GET" && pathname.startsWith("/schemas/jobs/")) {
-      const schema = getPublicBuiltinJobSchemaByName(decodeURIComponent(pathname.slice("/schemas/jobs/".length)));
-      if (!schema) {
-        return respond(response, 404, {
-          status: "not_found",
-          message: "Unknown built-in job schema."
-        });
-      }
-      return respond(response, 200, schema, { "cache-control": "public, max-age=300" });
+    if (request.method === "GET" && await handleSchemaRoute({ request, response, pathname })) {
+      return;
     }
 
     if (request.method === "GET" && pathname === "/jobs/definition") {
