@@ -75,6 +75,7 @@ import { createAdminJobsRoutes } from "./admin-jobs-routes.js";
 import { createAdminSessionsRoutes } from "./admin-sessions-routes.js";
 import { createAdminStatusRoutes } from "./admin-status-routes.js";
 import { createAdminXcmRoutes } from "./admin-xcm-routes.js";
+import { createActivityRoutes } from "./activity-routes.js";
 import { createBadgeRoutes } from "./badge-routes.js";
 import { buildPublicJobsResponse } from "./jobs-response.js";
 import { createGasRoutes } from "./gas-routes.js";
@@ -1521,6 +1522,14 @@ const handleBadgeRoute = createBadgeRoutes({
   verifierService,
 });
 
+const handleActivityRoute = createActivityRoutes({
+  authMiddleware,
+  listAlerts,
+  listAuditEvents,
+  parseLimit,
+  respond,
+});
+
 function buildLaneAttention({ shares, isMock, debtTotal, borrowCapacity, deploymentShareBps }) {
   if (!(shares > 0)) {
     return undefined;
@@ -1948,14 +1957,8 @@ const server = createServer(async (request, response) => {
       return;
     }
 
-    if (request.method === "GET" && pathname === "/alerts") {
-      await authMiddleware(request, url);
-      return respond(response, 200, await listAlerts(parseLimit(url, 20, 100)));
-    }
-
-    if (request.method === "GET" && pathname === "/audit") {
-      await authMiddleware(request, url);
-      return respond(response, 200, await listAuditEvents(parseLimit(url, 100, 500)));
+    if (await handleActivityRoute({ request, response, url, pathname })) {
+      return;
     }
 
     if (await handlePolicyRoute({ request, response, url, pathname })) {
