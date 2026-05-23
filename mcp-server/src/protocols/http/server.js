@@ -77,6 +77,7 @@ import { createAdminStatusRoutes } from "./admin-status-routes.js";
 import { createAdminXcmRoutes } from "./admin-xcm-routes.js";
 import { buildPublicJobsResponse } from "./jobs-response.js";
 import { createGasRoutes } from "./gas-routes.js";
+import { createSessionRoutes } from "./session-routes.js";
 import { createVerifierRoutes } from "./verifier-routes.js";
 import { OPERATOR_SIGNERS, makePolicy } from "../../core/builtin-policies.js";
 
@@ -1479,6 +1480,13 @@ const handleVerifierRoute = createVerifierRoutes({
   verifierService,
 });
 
+const handleSessionRoute = createSessionRoutes({
+  authMiddleware,
+  ensureSessionOwnership,
+  respond,
+  service,
+});
+
 function buildLaneAttention({ shares, isMock, debtTotal, borrowCapacity, deploymentShareBps }) {
   if (!(shares > 0)) {
     return undefined;
@@ -1821,13 +1829,8 @@ const server = createServer(async (request, response) => {
       );
     }
 
-    if (request.method === "GET" && pathname === "/session/state-machine") {
-      return respond(
-        response,
-        200,
-        service.getSessionStateMachine(),
-        { "cache-control": "public, max-age=300" }
-      );
+    if (await handleSessionRoute({ request, response, url, pathname })) {
+      return;
     }
 
     if (request.method === "GET" && pathname === "/schemas/jobs") {
@@ -3177,34 +3180,6 @@ const server = createServer(async (request, response) => {
       return respond(response, 200, await service.getReputation(auth.wallet));
     }
 
-    if (request.method === "GET" && pathname === "/session") {
-      const auth = await authMiddleware(request, url);
-      const sessionId = url.searchParams.get("sessionId") ?? "";
-      try {
-        const session = await service.resumeSession(sessionId);
-        if (!walletsMatch(session.wallet, auth.wallet)) {
-          throw new AuthorizationError(
-            `Session ${sessionId} does not belong to authenticated wallet.`,
-            "session_not_owned"
-          );
-        }
-        return respond(response, 200, session);
-      } catch (error) {
-        const normalized = normalizeError(error);
-        if (normalized.code === "session_not_found") {
-          return respond(response, 404, { status: "not_found", sessionId });
-        }
-        throw normalized;
-      }
-    }
-
-    if (request.method === "GET" && pathname === "/session/timeline") {
-      const auth = await authMiddleware(request, url);
-      const sessionId = url.searchParams.get("sessionId") ?? "";
-      await ensureSessionOwnership(sessionId, auth.wallet);
-      return respond(response, 200, await service.getSessionTimeline(sessionId));
-    }
-
     if (request.method === "GET" && pathname === "/xcm/request") {
       const auth = await authMiddleware(request, url);
       const requestId = url.searchParams.get("requestId") ?? "";
@@ -3214,21 +3189,6 @@ const server = createServer(async (request, response) => {
       const record = await service.getXcmRequest(requestId);
       ensureXcmRequestOwnership(record, auth);
       return respond(response, 200, record);
-    }
-
-    if (request.method === "GET" && pathname === "/sessions") {
-      const auth = await authMiddleware(request, url);
-      const limit = Number(url.searchParams.get("limit") ?? 8);
-      const jobId = url.searchParams.get("jobId") ?? undefined;
-      return respond(
-        response,
-        200,
-        await service.listSessionHistory({
-          wallet: auth.wallet,
-          limit: Number.isFinite(limit) ? limit : 8,
-          jobId
-        })
-      );
     }
 
     if (request.method === "GET" && pathname === "/jobs/recommendations") {
