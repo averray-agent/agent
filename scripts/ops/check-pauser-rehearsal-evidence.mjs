@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 const SCRIPT_NAME = basename(fileURLToPath(import.meta.url));
 export const SCHEMA_VERSION = 1;
 export const EVIDENCE_KIND = "averray.pauserRehearsalEvidence";
+const FUTURE_SKEW_MS = 5 * 60 * 1000;
 
 const READ_ONLY_REQUIRED_CHECKS = [
   "owner_matches_manifest",
@@ -37,11 +38,14 @@ const ADDRESS_PATTERN = /^0x[a-fA-F0-9]{40}$/u;
 const TX_HASH_PATTERN = /^0x[a-fA-F0-9]{64}$/u;
 
 function usage() {
-  return `Usage: node scripts/ops/${SCRIPT_NAME} --file docs/evidence/pauser-rehearsal-YYYY-MM-DD.json [--json] [--require-live] [--require-dedicated-pauser]
+  return `Usage: node scripts/ops/${SCRIPT_NAME} --file docs/evidence/pauser-rehearsal-YYYY-MM-DD.json [--json] [--require-live] [--require-dedicated-pauser] [--max-generated-age-hours N]
 
 Validates the machine-readable evidence produced by run-pauser-rehearsal.mjs.
 This check is read-only; it does not call RPC, sign transactions, pause, or
 unpause contracts.
+
+Use --max-generated-age-hours when validating live launch evidence so stale
+historical artifacts cannot be reused as current pauser proof.
 `;
 }
 
@@ -51,6 +55,7 @@ function parseArgs(argv) {
     json: false,
     requireLive: false,
     requireDedicatedPauser: false,
+    maxGeneratedAgeHours: undefined,
     help: false
   };
 
@@ -65,6 +70,13 @@ function parseArgs(argv) {
       args.requireLive = true;
     } else if (arg === "--require-dedicated-pauser") {
       args.requireDedicatedPauser = true;
+    } else if (arg === "--max-generated-age-hours") {
+      const value = Number(argv[index + 1]);
+      if (!Number.isFinite(value) || value <= 0) {
+        throw new Error("--max-generated-age-hours must be a positive number");
+      }
+      args.maxGeneratedAgeHours = value;
+      index += 1;
     } else if (arg === "-h" || arg === "--help") {
       args.help = true;
     } else if (!args.file && !arg.startsWith("-")) {
@@ -124,6 +136,12 @@ function requireIsoDate(value, path, errors) {
     errors.push(`${path} must be an ISO-8601 date/time`);
   }
   return raw;
+}
+
+function requireIsoTimestamp(value, path, errors) {
+  const raw = requireIsoDate(value, path, errors);
+  const timestamp = Date.parse(raw);
+  return Number.isFinite(timestamp) ? timestamp : undefined;
 }
 
 function requireArray(value, path, errors) {
@@ -186,6 +204,30 @@ function validateTx(tx, path, errors) {
   }
 }
 
+function validateGeneratedFreshness(generatedAt, options, errors) {
+  const maxGeneratedAgeHours = options.maxGeneratedAgeHours;
+  if (maxGeneratedAgeHours === undefined) return;
+  if (!Number.isFinite(maxGeneratedAgeHours) || maxGeneratedAgeHours <= 0) {
+    errors.push("maxGeneratedAgeHours must be a positive number");
+    return;
+  }
+  if (!Number.isFinite(generatedAt)) return;
+
+  const now = options.now instanceof Date ? options.now : new Date(options.now ?? Date.now());
+  const nowMs = now.getTime();
+  if (!Number.isFinite(nowMs)) {
+    errors.push("now must be a valid Date or timestamp");
+    return;
+  }
+  if (generatedAt > nowMs + FUTURE_SKEW_MS) {
+    errors.push("generatedAt must not be in the future");
+  }
+  const maxAgeMs = maxGeneratedAgeHours * 60 * 60 * 1000;
+  if (nowMs - generatedAt > maxAgeMs) {
+    errors.push(`generatedAt must be within ${maxGeneratedAgeHours} hour(s)`);
+  }
+}
+
 export function validateEvidence(evidence, options = {}) {
   const errors = [];
   const warnings = [];
@@ -198,7 +240,8 @@ export function validateEvidence(evidence, options = {}) {
     errors.push(`kind must be ${EVIDENCE_KIND}`);
   }
   requireString(doc.profile, "profile", errors);
-  requireIsoDate(doc.generatedAt, "generatedAt", errors);
+  const generatedAt = requireIsoTimestamp(doc.generatedAt, "generatedAt", errors);
+  validateGeneratedFreshness(generatedAt, options, errors);
   const mode = requireString(doc.mode, "mode", errors);
   if (!["read_only_capability_proof", "live_pause_unpause"].includes(mode)) {
     errors.push("mode must be read_only_capability_proof or live_pause_unpause");
@@ -298,7 +341,8 @@ export function validateEvidence(evidence, options = {}) {
       pauser: live.pauser,
       controlPlanePauserReady: launchGate.controlPlanePauserReady,
       pauseUnpauseRehearsed: launchGate.pauseUnpauseRehearsed,
-      dedicatedPauser: roleOverlap.dedicated
+      dedicatedPauser: roleOverlap.dedicated,
+      freshnessEnforced: Number.isFinite(options.maxGeneratedAgeHours)
     }
   };
 }
@@ -317,7 +361,8 @@ async function main() {
   const parsed = JSON.parse(raw);
   const result = validateEvidence(parsed, {
     requireLive: args.requireLive,
-    requireDedicatedPauser: args.requireDedicatedPauser
+    requireDedicatedPauser: args.requireDedicatedPauser,
+    maxGeneratedAgeHours: args.maxGeneratedAgeHours
   });
 
   if (args.json) {

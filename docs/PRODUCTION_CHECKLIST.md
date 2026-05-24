@@ -48,15 +48,19 @@ node scripts/ops/run-pauser-rehearsal.mjs \
 
 # Validate the captured evidence before ticking checklist boxes.
 node scripts/ops/check-pauser-rehearsal-evidence.mjs \
-  --file docs/evidence/pauser-rehearsal-readonly-YYYY-MM-DD.json
+  --file docs/evidence/pauser-rehearsal-readonly-YYYY-MM-DD.json \
+  --max-generated-age-hours 30
 
 node scripts/ops/check-pauser-rehearsal-evidence.mjs \
   --file docs/evidence/pauser-rehearsal-testnet-YYYY-MM-DD.json \
-  --require-live
+  --require-live \
+  --max-generated-age-hours 30
 ```
 
 For mainnet or any real-funds rehearsal, add `--require-dedicated-pauser`
 to both the rehearsal and evidence validation commands.
+The max-age flag keeps older proof files useful for audit history without
+letting stale evidence close current launch boxes.
 The current testnet pauser address overlaps other testnet roles in
 `deployments/testnet.json`; that is acceptable only as a bounded testnet
 shortcut and must not be carried into mainnet.

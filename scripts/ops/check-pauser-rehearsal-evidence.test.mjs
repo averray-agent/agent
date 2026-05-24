@@ -135,6 +135,13 @@ function liveEvidence(overrides = {}) {
   });
 }
 
+function freshLiveEvidence(overrides = {}) {
+  return liveEvidence({
+    generatedAt: new Date().toISOString(),
+    ...overrides
+  });
+}
+
 async function writeEvidenceFile(doc) {
   const dir = await mkdtemp(join(tmpdir(), "pauser-rehearsal-evidence-"));
   const file = join(dir, "evidence.json");
@@ -157,6 +164,19 @@ test("validateEvidence accepts live pause and unpause proof", () => {
   assert.deepEqual(result.warnings, []);
   assert.equal(result.summary.pauseUnpauseRehearsed, true);
   assert.equal(result.summary.dedicatedPauser, true);
+  assert.equal(result.summary.freshnessEnforced, false);
+});
+
+test("validateEvidence accepts fresh live proof with a max generated age", () => {
+  const result = validateEvidence(liveEvidence(), {
+    requireLive: true,
+    requireDedicatedPauser: true,
+    now: new Date("2026-05-24T11:00:00.000Z"),
+    maxGeneratedAgeHours: 2
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.summary.freshnessEnforced, true);
 });
 
 test("validateEvidence rejects read-only evidence when live proof is required", () => {
@@ -213,6 +233,36 @@ test("validateEvidence rejects role overlap when dedicated pauser proof is requi
   assert.ok(result.errors.includes("checks must include pauser_is_dedicated_role"));
 });
 
+test("validateEvidence rejects stale or future-dated generatedAt for launch proof", () => {
+  const stale = validateEvidence(liveEvidence(), {
+    requireLive: true,
+    now: new Date("2026-05-25T10:01:00.000Z"),
+    maxGeneratedAgeHours: 24
+  });
+  assert.equal(stale.ok, false);
+  assert.ok(stale.errors.includes("generatedAt must be within 24 hour(s)"));
+
+  const future = validateEvidence(liveEvidence({
+    generatedAt: "2026-05-24T11:10:00.000Z"
+  }), {
+    requireLive: true,
+    now: new Date("2026-05-24T11:00:00.000Z"),
+    maxGeneratedAgeHours: 24
+  });
+  assert.equal(future.ok, false);
+  assert.ok(future.errors.includes("generatedAt must not be in the future"));
+});
+
+test("validateEvidence rejects invalid freshness options", () => {
+  const result = validateEvidence(liveEvidence(), {
+    requireLive: true,
+    now: new Date("2026-05-24T11:00:00.000Z"),
+    maxGeneratedAgeHours: 0
+  });
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.includes("maxGeneratedAgeHours must be a positive number"));
+});
+
 test("CLI exits zero and prints JSON for valid read-only evidence", async () => {
   const file = await writeEvidenceFile(validEvidence());
   const { stdout, stderr } = await execFileAsync(process.execPath, [scriptPath, "--file", file, "--json"]);
@@ -221,6 +271,23 @@ test("CLI exits zero and prints JSON for valid read-only evidence", async () => 
   assert.equal(parsed.status, "ok");
   assert.equal(parsed.summary.pauser, PAUSER);
   assert.equal(parsed.warnings.length, 1);
+});
+
+test("CLI accepts max generated age for fresh live evidence", async () => {
+  const file = await writeEvidenceFile(freshLiveEvidence());
+  const { stdout } = await execFileAsync(process.execPath, [
+    scriptPath,
+    "--file",
+    file,
+    "--require-live",
+    "--require-dedicated-pauser",
+    "--max-generated-age-hours",
+    "1",
+    "--json"
+  ]);
+  const parsed = JSON.parse(stdout);
+  assert.equal(parsed.status, "ok");
+  assert.equal(parsed.summary.freshnessEnforced, true);
 });
 
 test("CLI exits non-zero for evidence that does not satisfy live proof", async () => {
@@ -232,6 +299,25 @@ test("CLI exits non-zero for evidence that does not satisfy live proof", async (
       assert.notEqual(error.code, 0);
       assert.match(error.stderr, /mode must be live_pause_unpause/u);
       assert.match(error.stderr, /transactions\.pause must be an object/u);
+      return true;
+    }
+  );
+});
+
+test("CLI exits non-zero for invalid max generated age", async () => {
+  const file = await writeEvidenceFile(liveEvidence());
+
+  await assert.rejects(
+    () => execFileAsync(process.execPath, [
+      scriptPath,
+      "--file",
+      file,
+      "--max-generated-age-hours",
+      "0"
+    ]),
+    (error) => {
+      assert.notEqual(error.code, 0);
+      assert.match(error.stderr, /--max-generated-age-hours must be a positive number/u);
       return true;
     }
   );
