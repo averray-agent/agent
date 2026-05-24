@@ -1,7 +1,7 @@
 # Averray — Working Spec (v1.0.0-rc1)
 
 **Status:** Reconciled with deployed reality and operational docs
-**Spec version:** 2.10 (blockchain audit pass 2: native borrow balance-sheet invariant fixed, debt-first payout settlement documented, XCM strict-decode and zero-share gates recorded)
+**Spec version:** 2.12 (spec-consolidation pass: v2.5 Phase 1 storage discipline restored into the consolidated spec without downgrading v2.10/v2.11 status)
 **Owner:** Pascal
 
 > Current roadmap/status source: [`PROJECT_ROADMAP.md`](./PROJECT_ROADMAP.md).
@@ -605,6 +605,32 @@ Before any v1.0.0-rc1 deploy (testnet or mainnet), the following must be address
 - [x] Blockchain gateway display/base-unit boundary audited: API inputs stay display-denominated, contract calls convert to raw base units, and account/XCM reads expose display values plus explicit `*Raw` fields.
 - [x] Test ERC20 (TestDOT-style) deployments removed from v1.0.0-rc1 scope — USDC precompile is real on both networks, no mock needed
 
+### Pre-deploy items (Phase 1 storage — three-layer content discipline)
+
+Per §6, v1.0.0-rc1 ships with Phase 1 storage: the Averray API serves content by hash, with off-platform recovery before any Phase 2 IPFS-compatible backend decision. Phase 2 remains a real choice between Bulletin Chain and Crust. *Phase 1 storage* is not *save files to the VPS disk*. It is a three-layer discipline that keeps the content layer credible for a trust-infrastructure platform while the system is still too small to justify a decentralized storage migration.
+
+**Layer 1 — Hot state-store content.** `GET /content/:hash` reads from the configured backend state store on the happy path. Redis-backed production state is the live serving surface; memory mode remains development only.
+
+**Layer 2 — Append-only recovery log.** Every persisted content record is appended to the private JSONL recovery log before the API write completes. Production can also mirror each append to S3-compatible object storage through `CONTENT_RECOVERY_OBJECT_*` env vars. When the object mirror is enabled, mirror-write failure fails the append; no successful API write should create content that exists only in the hot serving store.
+
+**Layer 3 — Hash verification at the content boundary.** Content records are built from canonical payload hashes and recovery replay re-validates hashes before writing anything back to the state store. If the API ever serves content from a source that can drift independently from the canonical record, the read path must re-hash and refuse mismatched content instead of serving wrong content with right-looking metadata.
+
+**Current implementation state:**
+
+- [x] `/content/:hash` route serves content records by normalized hash with read-time visibility rules.
+- [x] Content writes append to `ContentRecoveryLog` before `stateStore.upsertContent`.
+- [x] Local JSONL recovery log defaults to enabled; production path is configured with `CONTENT_RECOVERY_LOG_ENABLED` and `CONTENT_RECOVERY_LOG_DIR`.
+- [x] Optional S3-compatible object mirror exists through `CONTENT_RECOVERY_OBJECT_ENABLED`, `CONTENT_RECOVERY_OBJECT_ENDPOINT`, `CONTENT_RECOVERY_OBJECT_BUCKET`, `CONTENT_RECOVERY_OBJECT_REGION`, `CONTENT_RECOVERY_OBJECT_ACCESS_KEY_ID`, `CONTENT_RECOVERY_OBJECT_SECRET_ACCESS_KEY`, and `CONTENT_RECOVERY_OBJECT_PREFIX`.
+- [x] Recovery replay CLI and operator runbook exist in `docs/CONTENT_RECOVERY_RUNBOOK.md`.
+- [ ] Hosted proof should confirm the production object mirror is enabled and that a fresh state store can be rebuilt from the recovery log/object mirror during a drill.
+- [ ] If product requirements require literal re-hash-on-every-GET semantics, add an explicit HTTP regression returning `409 content_hash_mismatch` for a corrupted stored record. The current guarantee is canonical hash validation on write and replay.
+
+**What this is not:**
+
+- Not a substitute for Phase 2 IPFS-compatible storage. Phase 1 is the bridge until content volume or operational complexity justifies migration.
+- Not a single-VPS trust assumption. Layer 2 is what prevents catastrophic content loss if hot state disappears.
+- Not a new architecture. It is content-addressing discipline applied at Phase 1 scale with simpler infrastructure.
+
 ---
 
 ## 9. Threat model entries
@@ -1058,6 +1084,12 @@ Stripe Link's launch and Stripe Sessions 2026 announcements positioned agents as
 
 For traceability.
 
+### v2.12 (spec-consolidation pass)
+
+1. **v2.5 Phase 1 storage discipline restored into the consolidated spec:** the uploaded v2.5 working spec carried an important three-layer content-storage model that was not present in the current consolidated `AVERRAY_WORKING_SPEC.md`. This pass ports the durable parts into §8 while preserving the newer v2.10 blockchain audit corrections and v2.11 documentation-governance authority.
+2. **Storage close criteria aligned with current implementation names:** the old uploaded draft used placeholder `STORAGE_RECOVERY_*` names. The consolidated spec now points to the implemented `CONTENT_RECOVERY_LOG_*` and `CONTENT_RECOVERY_OBJECT_*` env names and to `docs/CONTENT_RECOVERY_RUNBOOK.md`.
+3. **No older audit status imported:** the uploaded `AUDIT_REMEDIATION.md` predates the closed P1/P2 packages. Current audit status remains the existing consolidated remediation doc and `PROJECT_ROADMAP.md`.
+
 ### v2.11 (documentation governance pass)
 
 1. **Current status ownership moved to `PROJECT_ROADMAP.md`:** the working spec
@@ -1297,4 +1329,4 @@ External verification work resolved every ⏳ item in `AVERRAY_VERIFICATION_LEDG
 
 ---
 
-*Last updated: 2026-05-13*
+*Last updated: 2026-05-24*
