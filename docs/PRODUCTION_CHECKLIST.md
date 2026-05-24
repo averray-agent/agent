@@ -73,9 +73,10 @@ functions, but it does not close the live pause/unpause rehearsal box.
 - [ ] Latest Postgres backup exists and is recent. Evidence:
   `./scripts/ops/check-backup-readiness.sh --json` reports
   `components[postgres].status == "ok"` with `ageSeconds <
-  maxAgeHours * 3600`.
+  maxAgeHours * 3600`, then the saved JSON passes
+  `node scripts/ops/check-backup-readiness-evidence.mjs`.
 - [ ] Latest Redis backup exists and is recent. Same readiness check,
-  `components[redis].status == "ok"`.
+  `components[redis].status == "ok"` and the saved JSON validator passes.
 - [ ] The monthly restore drill has been run on the current stack
   shape. Evidence: a dated line in the operator log naming both
   backup file paths used, the row count from the Postgres spot-check,
@@ -97,7 +98,12 @@ backup file):
 ```bash
 ./scripts/ops/check-backup-readiness.sh
 # or for machine-readable output:
-./scripts/ops/check-backup-readiness.sh --json
+./scripts/ops/check-backup-readiness.sh --json \
+  > docs/evidence/backup-readiness-YYYY-MM-DD.json
+
+node scripts/ops/check-backup-readiness-evidence.mjs \
+  --file docs/evidence/backup-readiness-YYYY-MM-DD.json \
+  --max-checked-age-hours 30
 ```
 
 Restore procedures:
