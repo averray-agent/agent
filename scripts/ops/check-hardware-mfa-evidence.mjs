@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const SCRIPT_NAME = basename(fileURLToPath(import.meta.url));
 export const SCHEMA_VERSION = "hardware-mfa-evidence-v1";
+const FUTURE_SKEW_MS = 5 * 60 * 1000;
 
 const REQUIRED_ACCOUNT_IDS = [
   "one_password_admin",
@@ -19,11 +20,14 @@ const REQUIRED_ACCOUNT_IDS = [
 const ALLOWED_METHODS = new Set(["provider_ui", "provider_api", "operator_attestation"]);
 
 function usage() {
-  return `Usage: node scripts/ops/${SCRIPT_NAME} --file docs/evidence/hardware-mfa-YYYY-MM-DD.json [--json]
+  return `Usage: node scripts/ops/${SCRIPT_NAME} --file docs/evidence/hardware-mfa-YYYY-MM-DD.json [--json] [--max-completed-age-hours N]
 
 Validates the operator evidence that hardware-backed MFA is enrolled across the
 admin trust chain. This check is read-only; it does not call providers or store
 recovery codes.
+
+Use --max-completed-age-hours when validating live launch evidence so stale
+historical artifacts cannot be reused as current admin-trust proof.
 `;
 }
 
@@ -31,7 +35,8 @@ function parseArgs(argv) {
   const args = {
     file: undefined,
     json: false,
-    help: false
+    help: false,
+    maxCompletedAgeHours: undefined
   };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -40,6 +45,13 @@ function parseArgs(argv) {
       index += 1;
     } else if (arg === "--json") {
       args.json = true;
+    } else if (arg === "--max-completed-age-hours") {
+      const value = Number(argv[index + 1]);
+      if (!Number.isFinite(value) || value <= 0) {
+        throw new Error("--max-completed-age-hours must be a positive number");
+      }
+      args.maxCompletedAgeHours = value;
+      index += 1;
     } else if (arg === "-h" || arg === "--help") {
       args.help = true;
     } else if (!args.file && !arg.startsWith("-")) {
@@ -88,6 +100,12 @@ function requireIsoDate(value, path, errors) {
   return raw;
 }
 
+function requireIsoTimestamp(value, path, errors) {
+  const raw = requireIsoDate(value, path, errors);
+  const timestamp = Date.parse(raw);
+  return Number.isFinite(timestamp) ? timestamp : undefined;
+}
+
 function requireNonEmptyArray(value, path, errors) {
   if (!Array.isArray(value) || value.length === 0) {
     errors.push(`${path} must be a non-empty array`);
@@ -129,6 +147,34 @@ function scanForSecretLikeValues(value, path, errors) {
   }
 }
 
+function assertFreshTimestamp(timestamp, path, options, errors, { completedAt = undefined } = {}) {
+  if (!Number.isFinite(timestamp)) return;
+  if (Number.isFinite(completedAt) && timestamp > completedAt + FUTURE_SKEW_MS) {
+    errors.push(`${path} must not be later than completedAt`);
+  }
+
+  const maxCompletedAgeHours = options.maxCompletedAgeHours;
+  if (maxCompletedAgeHours === undefined) return;
+  if (!Number.isFinite(maxCompletedAgeHours) || maxCompletedAgeHours <= 0) {
+    errors.push("maxCompletedAgeHours must be a positive number");
+    return;
+  }
+
+  const now = options.now instanceof Date ? options.now : new Date(options.now ?? Date.now());
+  const nowMs = now.getTime();
+  if (!Number.isFinite(nowMs)) {
+    errors.push("now must be a valid Date or timestamp");
+    return;
+  }
+  if (timestamp > nowMs + FUTURE_SKEW_MS) {
+    errors.push(`${path} must not be in the future`);
+  }
+  const maxAgeMs = maxCompletedAgeHours * 60 * 60 * 1000;
+  if (nowMs - timestamp > maxAgeMs) {
+    errors.push(`${path} must be within ${maxCompletedAgeHours} hour(s)`);
+  }
+}
+
 function validateHardwareKeys(keys, errors) {
   const items = requireNonEmptyArray(keys, "hardwareKeys", errors);
   if (items.length < 2) {
@@ -150,7 +196,7 @@ function validateHardwareKeys(keys, errors) {
   return labels;
 }
 
-function validateAccount(rawAccount, index, keyLabels, errors) {
+function validateAccount(rawAccount, index, keyLabels, errors, { completedAt, freshnessOptions }) {
   const path = `accounts[${index}]`;
   const account = assertObject(rawAccount, path, errors);
   const id = requireString(account.id, `${path}.id`, errors);
@@ -180,7 +226,8 @@ function validateAccount(rawAccount, index, keyLabels, errors) {
     errors.push(`${path}.recoveryCodesStored must be true`);
   }
   requireString(account.recoveryLocation, `${path}.recoveryLocation`, errors);
-  requireIsoDate(account.lastVerifiedAt, `${path}.lastVerifiedAt`, errors);
+  const lastVerifiedAt = requireIsoTimestamp(account.lastVerifiedAt, `${path}.lastVerifiedAt`, errors);
+  assertFreshTimestamp(lastVerifiedAt, `${path}.lastVerifiedAt`, freshnessOptions, errors, { completedAt });
 
   const evidence = assertObject(account.evidence, `${path}.evidence`, errors);
   const method = requireString(evidence.method, `${path}.evidence.method`, errors);
@@ -219,14 +266,15 @@ function validateAccount(rawAccount, index, keyLabels, errors) {
   return id;
 }
 
-export function validateEvidence(evidence) {
+export function validateEvidence(evidence, options = {}) {
   const errors = [];
   const doc = assertObject(evidence, "evidence", errors);
 
   if (doc.schemaVersion !== SCHEMA_VERSION) {
     errors.push(`schemaVersion must be ${SCHEMA_VERSION}`);
   }
-  requireIsoDate(doc.completedAt, "completedAt", errors);
+  const completedAt = requireIsoTimestamp(doc.completedAt, "completedAt", errors);
+  assertFreshTimestamp(completedAt, "completedAt", options, errors);
 
   const operator = assertObject(doc.operator, "operator", errors);
   requireString(operator.name, "operator.name", errors);
@@ -236,7 +284,10 @@ export function validateEvidence(evidence) {
   const accounts = requireNonEmptyArray(doc.accounts, "accounts", errors);
   const seenAccountIds = new Set();
   accounts.forEach((account, index) => {
-    const id = validateAccount(account, index, keyLabels, errors);
+    const id = validateAccount(account, index, keyLabels, errors, {
+      completedAt,
+      freshnessOptions: options
+    });
     if (id) {
       if (seenAccountIds.has(id)) {
         errors.push(`accounts must not contain duplicate id ${id}`);
@@ -272,7 +323,8 @@ export function validateEvidence(evidence) {
       accountCount: Array.isArray(doc.accounts) ? doc.accounts.length : 0,
       accounts: Array.isArray(doc.accounts)
         ? doc.accounts.map((account) => account?.id).filter(Boolean)
-        : []
+        : [],
+      freshnessEnforced: Number.isFinite(options.maxCompletedAgeHours)
     }
   };
 }
@@ -288,7 +340,9 @@ async function main() {
   }
   const raw = await readFile(args.file, "utf8");
   const parsed = JSON.parse(raw);
-  const result = validateEvidence(parsed);
+  const result = validateEvidence(parsed, {
+    maxCompletedAgeHours: args.maxCompletedAgeHours
+  });
   if (args.json) {
     process.stdout.write(`${JSON.stringify({
       status: result.ok ? "ok" : "not_ok",

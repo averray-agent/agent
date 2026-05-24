@@ -92,6 +92,19 @@ function validEvidence(overrides = {}) {
   };
 }
 
+function freshEvidence() {
+  const now = new Date();
+  const verifiedAt = new Date(now.getTime() - 10 * 60 * 1000).toISOString();
+  return validEvidence({
+    completedAt: now.toISOString(),
+    accounts: validEvidence().accounts.map((entry) => ({
+      ...entry,
+      lastVerifiedAt: verifiedAt,
+      subjects: entry.subjects?.map((subject) => ({ ...subject }))
+    }))
+  });
+}
+
 async function writeEvidenceFile(doc) {
   const dir = await mkdtemp(join(tmpdir(), "hardware-mfa-evidence-"));
   const file = join(dir, "evidence.json");
@@ -105,6 +118,17 @@ test("validateEvidence accepts complete hardware MFA evidence", () => {
   assert.deepEqual(result.errors, []);
   assert.equal(result.summary.hardwareKeyCount, 2);
   assert.equal(result.summary.accountCount, 6);
+  assert.equal(result.summary.freshnessEnforced, false);
+});
+
+test("validateEvidence accepts fresh launch proof with a max completed age", () => {
+  const result = validateEvidence(validEvidence(), {
+    now: new Date("2026-05-22T13:30:00.000Z"),
+    maxCompletedAgeHours: 2
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.summary.freshnessEnforced, true);
 });
 
 test("validateEvidence rejects missing trust-chain accounts", () => {
@@ -214,12 +238,72 @@ test("validateEvidence rejects raw secret-looking values", () => {
   assert.ok(result.errors.some((error) => error.includes("appears to contain a secret value")));
 });
 
+test("validateEvidence rejects stale or future-dated launch proof", () => {
+  const stale = validateEvidence(validEvidence(), {
+    now: new Date("2026-05-23T13:01:00.000Z"),
+    maxCompletedAgeHours: 24
+  });
+  assert.equal(stale.ok, false);
+  assert.ok(stale.errors.includes("completedAt must be within 24 hour(s)"));
+  assert.ok(stale.errors.includes("accounts[0].lastVerifiedAt must be within 24 hour(s)"));
+
+  const future = validateEvidence(validEvidence({
+    completedAt: "2026-05-22T13:10:00.000Z"
+  }), {
+    now: new Date("2026-05-22T13:00:00.000Z"),
+    maxCompletedAgeHours: 24
+  });
+  assert.equal(future.ok, false);
+  assert.ok(future.errors.includes("completedAt must not be in the future"));
+});
+
+test("validateEvidence rejects account verification after evidence completion", () => {
+  const result = validateEvidence(validEvidence({
+    accounts: [
+      account("one_password_admin", {
+        lastVerifiedAt: "2026-05-22T13:10:01.000Z"
+      }),
+      account("aws_root"),
+      account("aws_iam_admins"),
+      account("github_org_admin"),
+      account("domain_registrar"),
+      account("vps_provider")
+    ]
+  }));
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.includes("accounts[0].lastVerifiedAt must not be later than completedAt"));
+});
+
+test("validateEvidence rejects invalid freshness options", () => {
+  const result = validateEvidence(validEvidence(), {
+    now: new Date("2026-05-22T13:30:00.000Z"),
+    maxCompletedAgeHours: 0
+  });
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.includes("maxCompletedAgeHours must be a positive number"));
+});
+
 test("CLI exits zero and prints JSON for valid evidence", async () => {
   const file = await writeEvidenceFile(validEvidence());
   const { stdout } = await execFileAsync(process.execPath, [scriptPath, "--file", file, "--json"]);
   const parsed = JSON.parse(stdout);
   assert.equal(parsed.status, "ok");
   assert.equal(parsed.summary.operator, "Pascal");
+});
+
+test("CLI accepts max completed age for fresh evidence", async () => {
+  const file = await writeEvidenceFile(freshEvidence());
+  const { stdout } = await execFileAsync(process.execPath, [
+    scriptPath,
+    "--file",
+    file,
+    "--max-completed-age-hours",
+    "1",
+    "--json"
+  ]);
+  const parsed = JSON.parse(stdout);
+  assert.equal(parsed.status, "ok");
+  assert.equal(parsed.summary.freshnessEnforced, true);
 });
 
 test("CLI exits non-zero for invalid evidence", async () => {
@@ -240,6 +324,24 @@ test("CLI exits non-zero for invalid evidence", async () => {
     (error) => {
       assert.notEqual(error.code, 0);
       assert.match(error.stderr, /accounts\[0\]\.status must be hardware_key_enrolled/u);
+      return true;
+    }
+  );
+});
+
+test("CLI exits non-zero for invalid max completed age", async () => {
+  const file = await writeEvidenceFile(validEvidence());
+  await assert.rejects(
+    () => execFileAsync(process.execPath, [
+      scriptPath,
+      "--file",
+      file,
+      "--max-completed-age-hours",
+      "0"
+    ]),
+    (error) => {
+      assert.notEqual(error.code, 0);
+      assert.match(error.stderr, /--max-completed-age-hours must be a positive number/u);
       return true;
     }
   );
