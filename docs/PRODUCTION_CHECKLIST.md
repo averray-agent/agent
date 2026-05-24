@@ -37,7 +37,7 @@ Use the dedicated pauser proof before closing the two remaining boxes:
 # Read-only capability proof: no mutation, no private key.
 node scripts/ops/run-pauser-rehearsal.mjs \
   --profile testnet \
-  --out artifacts/pauser-rehearsal-readonly.json
+  --out docs/evidence/pauser-rehearsal-readonly-YYYY-MM-DD.json
 
 # Live launch evidence: pauses and unpauses the deployed TreasuryPolicy.
 PAUSER_PRIVATE_KEY=0x<pauser-testnet-key> \
@@ -45,9 +45,18 @@ node scripts/ops/run-pauser-rehearsal.mjs \
   --profile testnet \
   --live \
   --out docs/evidence/pauser-rehearsal-testnet-YYYY-MM-DD.json
+
+# Validate the captured evidence before ticking checklist boxes.
+node scripts/ops/check-pauser-rehearsal-evidence.mjs \
+  --file docs/evidence/pauser-rehearsal-readonly-YYYY-MM-DD.json
+
+node scripts/ops/check-pauser-rehearsal-evidence.mjs \
+  --file docs/evidence/pauser-rehearsal-testnet-YYYY-MM-DD.json \
+  --require-live
 ```
 
-For mainnet or any real-funds rehearsal, add `--require-dedicated-pauser`.
+For mainnet or any real-funds rehearsal, add `--require-dedicated-pauser`
+to both the rehearsal and evidence validation commands.
 The current testnet pauser address overlaps other testnet roles in
 `deployments/testnet.json`; that is acceptable only as a bounded testnet
 shortcut and must not be carried into mainnet.
@@ -64,9 +73,10 @@ functions, but it does not close the live pause/unpause rehearsal box.
 - [ ] Latest Postgres backup exists and is recent. Evidence:
   `./scripts/ops/check-backup-readiness.sh --json` reports
   `components[postgres].status == "ok"` with `ageSeconds <
-  maxAgeHours * 3600`.
+  maxAgeHours * 3600`, then the saved JSON passes
+  `node scripts/ops/check-backup-readiness-evidence.mjs`.
 - [ ] Latest Redis backup exists and is recent. Same readiness check,
-  `components[redis].status == "ok"`.
+  `components[redis].status == "ok"` and the saved JSON validator passes.
 - [ ] The monthly restore drill has been run on the current stack
   shape. Evidence: a dated line in the operator log naming both
   backup file paths used, the row count from the Postgres spot-check,
@@ -88,7 +98,12 @@ backup file):
 ```bash
 ./scripts/ops/check-backup-readiness.sh
 # or for machine-readable output:
-./scripts/ops/check-backup-readiness.sh --json
+./scripts/ops/check-backup-readiness.sh --json \
+  > docs/evidence/backup-readiness-YYYY-MM-DD.json
+
+node scripts/ops/check-backup-readiness-evidence.mjs \
+  --file docs/evidence/backup-readiness-YYYY-MM-DD.json \
+  --max-checked-age-hours 30
 ```
 
 Restore procedures:

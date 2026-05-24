@@ -6,7 +6,7 @@ import {
 } from "../core/verifier-contract.js";
 import { assertSessionCanReceiveVerification } from "../core/session-state-machine.js";
 import { normalizeSubmission } from "../core/submission.js";
-import { getBuiltinJobSchema } from "../core/job-schema-registry.js";
+import { getJobSchema } from "../core/job-schema-registry.js";
 import { normalizeSubmitPayloadShape, validateSubmissionContract } from "../core/job-execution-service.js";
 
 export class VerifierService {
@@ -105,14 +105,19 @@ export class VerifierService {
   }
 
   validateVerificationInput(job, verificationInput) {
-    if (!getBuiltinJobSchema(job?.outputSchemaRef)) {
+    if (!getJobSchema(job?.outputSchemaRef, { registrations: job?.schemaRegistrations })) {
       return verificationInput;
     }
 
     const normalized = isNormalizedSubmission(verificationInput)
       ? verificationInput
-      : normalizeSubmission(normalizeSubmitPayloadShape(job.outputSchemaRef, verificationInput));
-    validateSubmissionContract(job.outputSchemaRef, normalized, { path: "verificationInput" });
+      : normalizeSubmission(normalizeSubmitPayloadShape(job.outputSchemaRef, verificationInput, {
+        registrations: job.schemaRegistrations
+      }));
+    validateSubmissionContract(job.outputSchemaRef, normalized, {
+      path: "verificationInput",
+      registrations: job.schemaRegistrations
+    });
     return normalized;
   }
 }

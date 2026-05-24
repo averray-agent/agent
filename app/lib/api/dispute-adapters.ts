@@ -8,6 +8,10 @@ import type {
   EvidenceRow,
   ReleaseDestination,
 } from "@/components/disputes/types";
+import {
+  decisionToVerdict as mapDecisionToVerdict,
+  verdictToDecision as mapVerdictToDecision,
+} from "./dispute-verdicts";
 
 const DEFAULT_REVIEWER = "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519";
 
@@ -239,16 +243,11 @@ function stakeBreakdown(total: number): Dispute["stakeBreakdown"] {
 }
 
 export function decisionToVerdict(decision: DecisionKind): "upheld" | "dismissed" | "split" {
-  if (decision === "uphold") return "upheld";
-  if (decision === "reject") return "dismissed";
-  return "split";
+  return mapDecisionToVerdict(decision) as "upheld" | "dismissed" | "split";
 }
 
 function verdictToDecision(value: unknown): DecisionKind | null {
-  if (value === "upheld" || value === "uphold") return "uphold";
-  if (value === "dismissed" || value === "reject" || value === "rejected") return "reject";
-  if (value === "split" || value === "request-more") return "request-more";
-  return null;
+  return mapVerdictToDecision(value) as DecisionKind | null;
 }
 
 function releaseToDestination(value: Record<string, unknown> | null, decision: DecisionKind | null): ReleaseDestination {

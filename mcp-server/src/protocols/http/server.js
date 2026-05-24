@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { timingSafeEqual } from "node:crypto";
 import { createPlatformRuntime } from "../../services/bootstrap.js";
 import {
   assertMutationBackendAvailable,
@@ -11,30 +11,12 @@ import {
   resolveServiceHealth
 } from "../../core/health-capability.js";
 import {
-  AuthenticationError,
   AuthorizationError,
   ConflictError,
   normalizeError,
   ValidationError
 } from "../../core/errors.js";
 import { hashCanonicalContent } from "../../core/canonical-content.js";
-import { buildSiweMessage, verifySiweMessage } from "../../auth/siwe.js";
-import { signToken, signTokenFromConfig } from "../../auth/jwt.js";
-import {
-  REFRESH_COOKIE_NAME,
-  RefreshError,
-  consumeRefreshToken,
-  hashRefreshToken,
-  issueRefreshToken,
-  revokeChain,
-  rotateRefreshToken,
-} from "../../auth/refresh.js";
-import {
-  buildClearCookieHeader,
-  buildSetCookieHeader,
-  makeRefreshStoreAdapter,
-  parseCookie,
-} from "../../auth/refresh-cookie.js";
 import { extractClientKey } from "../../auth/rate-limit.js";
 import { hasRole } from "../../auth/config.js";
 import { resolveRequestId } from "../../core/logger.js";
@@ -53,9 +35,11 @@ import { createAdminSessionsRoutes } from "./admin-sessions-routes.js";
 import { createAdminStatusRoutes } from "./admin-status-routes.js";
 import { createAdminXcmRoutes } from "./admin-xcm-routes.js";
 import { createActivityRoutes } from "./activity-routes.js";
+import { createAuthRoutes } from "./auth-routes.js";
 import { createBadgeRoutes } from "./badge-routes.js";
 import { createContentRoutes } from "./content-routes.js";
 import { createDisputeRoutes } from "./dispute-routes.js";
+import { createEventRoutes } from "./event-routes.js";
 import { createGasRoutes } from "./gas-routes.js";
 import { createJobRoutes } from "./job-routes.js";
 import { createPolicyRoutes } from "./policy-routes.js";
@@ -101,7 +85,6 @@ const METRICS_AUTH_REQUIRED = parseRequiredFlag(
 );
 const port = Number(process.env.PORT ?? 8787);
 
-const SIWE_STATEMENT = "Sign in to the Agent Platform.";
 const inFlightIdempotentMutations = new Map();
 
 function respond(response, statusCode, payload, extraHeaders = {}) {
@@ -131,19 +114,6 @@ function parseRequiredFlag(value, defaultValue) {
   return !["0", "false", "no", "off"].includes(normalized);
 }
 
-function respondSse(response) {
-  const headers = {
-    "content-type": "text/event-stream",
-    "cache-control": "no-cache, no-transform",
-    connection: "keep-alive",
-    ...(response._corsHeaders ?? {})
-  };
-  if (response._requestId) {
-    headers["x-request-id"] = response._requestId;
-  }
-  response.writeHead(200, headers);
-}
-
 async function readJsonBody(request, { maxBytes = httpConfig.maxBodyBytes } = {}) {
   const chunks = [];
   let received = 0;
@@ -165,16 +135,6 @@ async function readJsonBody(request, { maxBytes = httpConfig.maxBodyBytes } = {}
   } catch {
     throw new ValidationError("Invalid JSON body.");
   }
-}
-
-function writeSseEvent(response, { id, topic, data }) {
-  if (id) {
-    response.write(`id: ${id}\n`);
-  }
-  if (topic) {
-    response.write(`event: ${topic}\n`);
-  }
-  response.write(`data: ${JSON.stringify(data)}\n\n`);
 }
 
 function parseTopics(url) {
@@ -201,10 +161,6 @@ function parseEventFilters(url, { includeWallet = false } = {}) {
     filters.eventWallet = url.searchParams.get("eventWallet")?.trim() || url.searchParams.get("wallet")?.trim() || undefined;
   }
   return filters;
-}
-
-function generateNonce() {
-  return randomBytes(16).toString("hex");
 }
 
 function walletsMatch(a, b) {
@@ -1177,6 +1133,16 @@ const handleActivityRoute = createActivityRoutes({
   respond,
 });
 
+const handleEventRoute = createEventRoutes({
+  authMiddleware,
+  enforceLimit,
+  eventBus,
+  metrics,
+  parseEventFilters,
+  parseLimit,
+  rateLimitConfig,
+});
+
 const handleContentRoute = createContentRoutes({
   authMiddleware,
   gateway,
@@ -1188,6 +1154,19 @@ const handleContentRoute = createContentRoutes({
   respond,
   stateStore,
   walletsMatch,
+});
+
+const handleAuthRoute = createAuthRoutes({
+  authCapabilities,
+  authConfig,
+  authMiddleware,
+  clientIp,
+  enforceLimit,
+  logger,
+  rateLimitConfig,
+  readJsonBody,
+  respond,
+  stateStore,
 });
 
 function buildLaneAttention({ shares, isMock, debtTotal, borrowCapacity, deploymentShareBps }) {
@@ -1262,7 +1241,7 @@ const server = createServer(async (request, response) => {
   const requestId = resolveRequestId(request);
   const requestLogger = logger.child({ requestId });
   const startedAt = process.hrtime.bigint();
-  // Stash CORS headers + request id on the response so `respond`/`respondSse`
+  // Stash CORS headers + request id on the response so JSON and SSE responders
   // can echo them back without each route needing to thread them through.
   response._corsHeaders = resolveCorsHeaders(request);
   response._requestId = requestId;
@@ -1548,417 +1527,13 @@ const server = createServer(async (request, response) => {
       return;
     }
 
-    // ---------- auth routes ----------
-
-    if (request.method === "POST" && pathname === "/auth/nonce") {
-      await enforceLimit("auth_nonce", clientIp(request), rateLimitConfig.authNonce);
-      const payload = await readJsonBody(request);
-      const wallet = String(payload?.wallet ?? "").trim();
-      if (!/^0x[a-fA-F0-9]{40}$/u.test(wallet)) {
-        throw new ValidationError("wallet must be a 0x-prefixed 20-byte hex address.");
-      }
-      const nonce = generateNonce();
-      const stored = await stateStore.storeNonce?.(nonce, wallet.toLowerCase(), authConfig.nonceTtlSeconds);
-      if (stored === false) {
-        throw new ValidationError("Nonce collision — retry.");
-      }
-      const issuedAt = new Date().toISOString();
-      const expiresAt = new Date(Date.now() + authConfig.nonceTtlSeconds * 1000).toISOString();
-      return respond(response, 200, {
-        wallet,
-        nonce,
-        domain: authConfig.domain,
-        chainId: authConfig.chainId,
-        statement: SIWE_STATEMENT,
-        issuedAt,
-        expiresAt,
-        message: buildSiweMessage({
-          domain: authConfig.domain,
-          address: wallet,
-          statement: SIWE_STATEMENT,
-          uri: `https://${authConfig.domain}`,
-          chainId: authConfig.chainId,
-          nonce,
-          issuedAt,
-          expirationTime: expiresAt
-        })
-      });
-    }
-
-    if (request.method === "POST" && pathname === "/auth/verify") {
-      await enforceLimit("auth_verify", clientIp(request), rateLimitConfig.authVerify);
-      const payload = await readJsonBody(request);
-      const message = typeof payload?.message === "string" ? payload.message : "";
-      const signature = typeof payload?.signature === "string" ? payload.signature : "";
-      if (!message || !signature) {
-        throw new ValidationError("message and signature are required.");
-      }
-      if (message.length > 4096) {
-        throw new ValidationError("SIWE message exceeds 4096 characters.");
-      }
-      // EIP-191 personal_sign signatures are 65 bytes -> 132 chars incl. 0x.
-      // Some wallets return r/s/v concatenated without 0x; accept both but cap
-      // the length to discourage callers from submitting unrelated payloads.
-      if (!/^(0x)?[0-9a-fA-F]{130,132}$/u.test(signature)) {
-        throw new ValidationError("signature must be a 65-byte hex string.");
-      }
-      if (!authConfig.signingSecret) {
-        throw new AuthenticationError(
-          "Auth not configured — set AUTH_JWT_SECRETS to issue tokens.",
-          "auth_not_configured"
-        );
-      }
-
-      const verified = verifySiweMessage(message, signature, {
-        expectedDomain: authConfig.domain,
-        expectedChainId: authConfig.chainId
-      });
-
-      const consumedWallet = await stateStore.consumeNonce?.(verified.nonce);
-      if (!consumedWallet) {
-        throw new AuthenticationError("Nonce missing or already consumed.", "invalid_nonce");
-      }
-      if (!walletsMatch(consumedWallet, verified.recoveredAddress)) {
-        throw new AuthenticationError("Nonce was issued for a different wallet.", "nonce_wallet_mismatch");
-      }
-
-      const roles = authConfig.resolveRoles?.(verified.recoveredAddress) ?? [];
-      // Phase 4b.6 Stage 2A — route SIWE mint through the dispatcher so
-      // JWT_PRIMARY_ALG controls the emitted algorithm (default still
-      // hmac under JWT_BACKEND=both). Functionally byte-for-byte
-      // identical to the prior `signToken` call when primary_alg=hmac;
-      // flipping primary_alg=kms in a follow-up makes SIWE start
-      // minting ES256 tokens without further code change.
-      const { token, claims } = await signTokenFromConfig(
-        { sub: verified.recoveredAddress, roles },
-        { expiresInSeconds: authConfig.tokenTtlSeconds },
-        authConfig,
-      );
-
-      // Phase 4b.5b — also mint an opaque refresh token and return it
-      // as an HttpOnly cookie. The state-store exposes refresh-record
-      // CRUD via `makeRefreshStoreAdapter`. If the store backend doesn't
-      // implement the refresh methods (e.g. an older test harness), we
-      // skip cookie issuance silently and fall back to access-token-only
-      // behavior so the SIWE path itself doesn't fail.
-      let setCookieHeader = null;
-      try {
-        if (typeof stateStore?.getRefreshRecord === "function" &&
-            typeof stateStore?.upsertRefreshRecord === "function") {
-          const refreshAdapter = makeRefreshStoreAdapter(stateStore);
-          const refreshIssue = await issueRefreshToken({
-            wallet: verified.recoveredAddress,
-            role: roles[0] ?? "user",
-            store: refreshAdapter,
-          });
-          setCookieHeader = buildSetCookieHeader(refreshIssue.rawToken);
-        }
-      } catch (err) {
-        // Refresh-cookie issuance is best-effort here — if it fails for
-        // any reason, log and continue. The client just won't get a
-        // refresh cookie and will have to re-SIWE when the access token
-        // expires (the legacy behavior, fully backward compatible).
-        logger?.warn?.(
-          { err, wallet: verified.recoveredAddress },
-          "auth_verify.refresh_issue_failed"
-        );
-      }
-
-      return respond(
-        response,
-        200,
-        {
-          token,
-          wallet: verified.recoveredAddress,
-          roles,
-          capabilities: authCapabilities.resolveCapabilities({ roles }),
-          expiresAt: new Date(claims.exp * 1000).toISOString(),
-          tokenType: "Bearer"
-        },
-        setCookieHeader ? { "Set-Cookie": setCookieHeader } : {}
-      );
-    }
-
-    if (request.method === "GET" && pathname === "/auth/session") {
-      const auth = await authMiddleware(request, url);
-      return respond(response, 200, {
-        wallet: auth.wallet,
-        roles: auth.claims?.roles ?? [],
-        tokenKind: auth.claims?.tokenKind ?? (auth.claims?.serviceToken === true ? "service" : "wallet"),
-        serviceToken: auth.claims?.serviceToken === true,
-        ...(auth.claims?.capabilityGrantId ? { capabilityGrantId: auth.claims.capabilityGrantId } : {}),
-        capabilities: auth.capabilities ?? [],
-        capabilityMatrix: authCapabilities.capabilityMatrix()
-      });
-    }
-
-    if (request.method === "POST" && pathname === "/auth/logout") {
-      // Revoke the current JWT by its `jti`. Requires authentication so a
-      // random caller can't revoke someone else's token.
-      const auth = await authMiddleware(request, url);
-      const jti = auth.claims?.jti;
-      const exp = auth.claims?.exp;
-      if (jti && Number.isFinite(exp)) {
-        const ttlSeconds = Math.max(1, exp - Math.floor(Date.now() / 1000));
-        await stateStore.revokeToken?.(jti, ttlSeconds);
-      }
-
-      // Phase 4b.5b — best-effort: if the caller also carries a refresh
-      // cookie, revoke the entire refresh chain and clear the cookie. We
-      // never fail logout because of a refresh-token error; the access-
-      // token revocation above is the source of truth for "logged out".
-      const refreshCookie = parseCookie(request.headers?.cookie ?? null, REFRESH_COOKIE_NAME);
-      if (refreshCookie &&
-          typeof stateStore?.getRefreshRecord === "function" &&
-          typeof stateStore?.upsertRefreshRecord === "function") {
-        try {
-          const refreshAdapter = makeRefreshStoreAdapter(stateStore);
-          // We can't use consumeRefreshToken here because it throws on
-          // already-revoked / expired records. We hash-and-revoke directly.
-          const hash = hashRefreshToken(refreshCookie);
-          await revokeChain({
-            hash,
-            store: refreshAdapter,
-            reason: "logout",
-          });
-        } catch (err) {
-          logger?.warn?.({ err, wallet: auth.wallet }, "auth_logout.refresh_chain_revoke_failed");
-        }
-      }
-
-      return respond(
-        response,
-        200,
-        {
-          status: "logged_out",
-          wallet: auth.wallet,
-          jti
-        },
-        // Always clear the refresh cookie on logout, even if the caller
-        // didn't send one — defense-in-depth for stale browser state.
-        { "Set-Cookie": buildClearCookieHeader() }
-      );
-    }
-
-    if (request.method === "POST" && pathname === "/auth/refresh") {
-      // Phase 4b.5b — dual-mode dispatcher.
-      //
-      // NEW FLOW (preferred): an HttpOnly `refresh_token` cookie carries
-      // an opaque token. We consume it, re-resolve roles, rotate the
-      // refresh record, mint a fresh short-lived access token, and emit
-      // a new Set-Cookie. Replay of a previously-rotated cookie revokes
-      // the entire chain (see auth/refresh.js strict-replay semantics).
-      //
-      // LEGACY FLOW (fallback): an Authorization Bearer header carries
-      // a still-valid wallet JWT. We revoke its jti and mint a fresh
-      // one with the same sub. Maintained for backward compat with the
-      // operator app prior to the cookie cutover.
-      const refreshCookie = parseCookie(request.headers?.cookie ?? null, REFRESH_COOKIE_NAME);
-
-      if (refreshCookie &&
-          typeof stateStore?.getRefreshRecord === "function" &&
-          typeof stateStore?.upsertRefreshRecord === "function") {
-        // ── NEW FLOW: opaque refresh cookie ─────────────────────────
-        await enforceLimit("auth_refresh", clientIp(request), rateLimitConfig.authRefresh);
-        if (!authConfig.signingSecret) {
-          throw new AuthenticationError(
-            "Auth not configured — set AUTH_JWT_SECRETS to issue tokens.",
-            "auth_not_configured"
-          );
-        }
-
-        const refreshAdapter = makeRefreshStoreAdapter(stateStore);
-
-        let consumed;
-        try {
-          consumed = await consumeRefreshToken({ rawToken: refreshCookie, store: refreshAdapter });
-        } catch (err) {
-          // On any refresh-token failure, clear the cookie so the client
-          // doesn't keep retrying with a known-bad token. Map the refresh
-          // error to an AuthenticationError with a stable error code.
-          response.setHeader?.("Set-Cookie", buildClearCookieHeader());
-          if (err instanceof RefreshError) {
-            const code = err.code === "refresh_replay_detected"
-              ? "refresh_replay_detected"
-              : err.code === "refresh_expired"
-                ? "refresh_expired"
-                : err.code === "refresh_revoked"
-                  ? "refresh_revoked"
-                  : "invalid_refresh_token";
-            logger?.warn?.(
-              { code, hashPrefix: err.details?.hashPrefix },
-              "auth_refresh.cookie_rejected"
-            );
-            throw new AuthenticationError(err.message, code);
-          }
-          throw err;
-        }
-
-        // Role-recheck hook: re-resolve roles at refresh time so a wallet
-        // that lost its admin/verifier role since issue-time cannot keep
-        // refreshing into a privileged session.
-        const roles = authConfig.resolveRoles?.(consumed.record.wallet) ?? [];
-        if (roles.length === 0) {
-          // Wallet lost all roles since issue — revoke the chain and
-          // reject. The client will be forced back to SIWE.
-          await revokeChain({
-            hash: consumed.hash,
-            store: refreshAdapter,
-            reason: "no_roles_at_refresh",
-          });
-          response.setHeader?.("Set-Cookie", buildClearCookieHeader());
-          logger?.warn?.(
-            { wallet: consumed.record.wallet },
-            "auth_refresh.no_roles_chain_revoked"
-          );
-          throw new AuthenticationError(
-            "Wallet has no roles at refresh time.",
-            "no_roles_at_refresh"
-          );
-        }
-
-        const primaryRole = roles[0];
-        const rotated = await rotateRefreshToken({
-          oldRecord: { ...consumed.record, role: primaryRole },
-          oldHash: consumed.hash,
-          store: refreshAdapter,
-        });
-
-        // Phase 4b.6 Stage 2A — dispatcher-routed mint. See /auth/verify
-        // for the rationale; this is the cookie-refresh sibling.
-        const { token, claims } = await signTokenFromConfig(
-          { sub: consumed.record.wallet, roles },
-          { expiresInSeconds: authConfig.tokenTtlSeconds },
-          authConfig,
-        );
-
-        return respond(
-          response,
-          200,
-          {
-            token,
-            wallet: consumed.record.wallet,
-            roles,
-            capabilities: authCapabilities.resolveCapabilities({ roles }),
-            expiresAt: new Date(claims.exp * 1000).toISOString(),
-            tokenType: "Bearer"
-          },
-          { "Set-Cookie": buildSetCookieHeader(rotated.rawToken) }
-        );
-      }
-
-      // ── LEGACY FLOW: access-token rotation via Authorization header ─
-      // Rotate the caller's wallet JWT: revoke the old `jti`, mint a new one
-      // with the same `sub` + `roles`, fresh `iat` / `exp`. The operator app
-      // avoids re-SIWE every AUTH_TOKEN_TTL_SECONDS by calling this when it
-      // notices its token is approaching expiry.
-      //
-      // Hard guardrails:
-      //  - Service tokens are NOT refreshable here. They have their own
-      //    lifecycle via /admin/service-tokens/:id/rotate, signed by an
-      //    admin, and their claims (`capabilities`, `capabilityGrantId`,
-      //    `scope`) are not safe to re-mint from a stale token. Service
-      //    tokens that need a longer life rotate via the admin surface.
-      //  - The old token must currently verify (authMiddleware enforces
-      //    signature + exp + revocation), so a leaked-and-revoked token
-      //    cannot be used to bootstrap a fresh one.
-      //  - We revoke the old jti BEFORE issuing the new one, so there is
-      //    no window where two tokens for the same wallet are both valid
-      //    from a single refresh.
-      const auth = await authMiddleware(request, url);
-      if (auth.claims?.serviceToken === true || auth.claims?.tokenKind === "service") {
-        throw new AuthenticationError(
-          "Service tokens cannot be refreshed via /auth/refresh; rotate them via /admin/service-tokens/:id/rotate.",
-          "service_token_refresh_unsupported"
-        );
-      }
-      await enforceLimit("auth_refresh", auth.wallet, rateLimitConfig.authRefresh);
-      if (!authConfig.signingSecret) {
-        throw new AuthenticationError(
-          "Auth not configured — set AUTH_JWT_SECRETS to issue tokens.",
-          "auth_not_configured"
-        );
-      }
-
-      const oldJti = auth.claims?.jti;
-      const oldExp = auth.claims?.exp;
-      if (oldJti && Number.isFinite(oldExp)) {
-        // Revoke the old jti for whatever remains of its TTL so it can't
-        // be replayed if it leaked between sign and revoke.
-        const ttlSeconds = Math.max(1, oldExp - Math.floor(Date.now() / 1000));
-        await stateStore.revokeToken?.(oldJti, ttlSeconds);
-      }
-
-      // Re-resolve roles at refresh time (an operator may have been added
-      // or removed since the original sign-in).
-      const roles = authConfig.resolveRoles?.(auth.wallet) ?? auth.claims?.roles ?? [];
-      // Phase 4b.6 Stage 2A — dispatcher-routed mint for the legacy
-      // bearer-token rotation flow. Same byte-for-byte semantics under
-      // JWT_PRIMARY_ALG=hmac.
-      const { token, claims } = await signTokenFromConfig(
-        { sub: auth.wallet, roles },
-        { expiresInSeconds: authConfig.tokenTtlSeconds },
-        authConfig,
-      );
-
-      return respond(response, 200, {
-        token,
-        wallet: auth.wallet,
-        roles,
-        capabilities: authCapabilities.resolveCapabilities({ roles }),
-        expiresAt: new Date(claims.exp * 1000).toISOString(),
-        tokenType: "Bearer",
-        rotatedFromJti: oldJti
-      });
+    if (await handleAuthRoute({ request, response, url, pathname })) {
+      return;
     }
 
     // ---------- protected routes ----------
 
-    if (request.method === "GET" && pathname === "/events") {
-      const auth = await authMiddleware(request, url, { allowQueryToken: true });
-      await enforceLimit("events", auth.wallet, rateLimitConfig.events);
-      respondSse(response);
-      const filter = {
-        wallet: auth.wallet,
-        jobId: url.searchParams.get("jobId") ?? undefined,
-        sessionId: url.searchParams.get("sessionId") ?? undefined,
-        ...parseEventFilters(url)
-      };
-      const lastEventId = request.headers["last-event-id"] ?? url.searchParams.get("lastEventId") ?? undefined;
-      const replay = eventBus?.replayDurable
-        ? await eventBus.replayDurable(filter, lastEventId, { limit: parseLimit(url, 100, 500) })
-        : eventBus?.replay?.(filter, lastEventId);
-
-      if (replay?.gap) {
-        writeSseEvent(response, {
-          id: `gap-${Date.now()}`,
-          topic: "gap",
-          data: {
-            topic: "gap",
-            lastDelivered: lastEventId ?? null
-          }
-        });
-      }
-
-      for (const event of replay?.events ?? []) {
-        writeSseEvent(response, { id: event.id, topic: event.topic, data: event });
-      }
-
-      const heartbeat = setInterval(() => {
-        response.write(": ping\n\n");
-      }, 15_000);
-
-      const unsubscribe = eventBus?.subscribe?.(filter, (event) => {
-        writeSseEvent(response, { id: event.id, topic: event.topic, data: event });
-      });
-
-      metrics.gauge("sse_active_connections").inc();
-      request.on("close", () => {
-        clearInterval(heartbeat);
-        unsubscribe?.();
-        metrics.gauge("sse_active_connections").dec();
-        response.end();
-      });
+    if (await handleEventRoute({ request, response, url, pathname })) {
       return;
     }
 

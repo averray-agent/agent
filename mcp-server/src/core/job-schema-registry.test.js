@@ -3,13 +3,16 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { Wallet } from "ethers";
 
 import { ValidationError } from "./errors.js";
 import {
+  buildExternalSchemaRegistrationMessage,
   getBuiltinJobSchema,
   getBuiltinJobSchemaByName,
   getPublicBuiltinJobSchemaByName,
   listBuiltinJobSchemas,
+  normalizeExternalSchemaRegistrations,
   schemaRefToJobSchemaPath,
   validateStructuredSubmission
 } from "./job-schema-registry.js";
@@ -26,6 +29,37 @@ const FIRST_WAVE_SCHEMA_REFS = [
 ];
 
 const repoRoot = resolve(fileURLToPath(new URL("../../..", import.meta.url)));
+const EXTERNAL_SCHEMA_SIGNER = new Wallet("0x59c6995e998f97a5a004497e5da795437b4466ad5c2af1c6a6d1dcb1b1ce36b9");
+
+function externalRegistrationBase(overrides = {}) {
+  const schemaRef = overrides.schemaRef ?? "schema://jobs/external-audit-output";
+  const schema = overrides.schema ?? {
+    $id: schemaRef,
+    type: "object",
+    additionalProperties: false,
+    required: ["summary", "score"],
+    properties: {
+      summary: { type: "string", minLength: 1 },
+      score: { type: "integer", minimum: 1 }
+    }
+  };
+  return {
+    schemaRef,
+    schemaUrl: "https://schemas.example.com/jobs/external-audit-output.json",
+    schema,
+    issuer: EXTERNAL_SCHEMA_SIGNER.address,
+    signedAt: "2026-05-23T00:00:00.000Z",
+    ...overrides
+  };
+}
+
+async function signedExternalRegistration(overrides = {}) {
+  const base = externalRegistrationBase(overrides);
+  return {
+    ...base,
+    signature: await EXTERNAL_SCHEMA_SIGNER.signMessage(buildExternalSchemaRegistrationMessage(base))
+  };
+}
 
 test("getBuiltinJobSchema resolves built-in first-wave schemas", () => {
   const schema = getBuiltinJobSchema("schema://jobs/pr-review-findings-output");
@@ -287,7 +321,80 @@ test("validateStructuredSubmission rejects missing required fields", () => {
 test("validateStructuredSubmission rejects unknown schemas for structured payloads", () => {
   assert.throws(
     () => validateStructuredSubmission("schema://jobs/custom-output", { ok: true }),
-    (error) => error instanceof ValidationError && /known built-in schema/.test(error.message)
+    (error) => error instanceof ValidationError && /known built-in or registered schema/.test(error.message)
+  );
+});
+
+test("signed external schema registrations expose a trusted validation boundary", async () => {
+  const registration = await signedExternalRegistration();
+  const [normalized] = normalizeExternalSchemaRegistrations([registration], {
+    allowedSchemaRefs: [registration.schemaRef],
+    trustedIssuers: [EXTERNAL_SCHEMA_SIGNER.address]
+  });
+
+  assert.equal(normalized.schemaRef, "schema://jobs/external-audit-output");
+  assert.equal(normalized.issuer, EXTERNAL_SCHEMA_SIGNER.address);
+  assert.equal(normalized.trustBoundary, "external_signed_schema");
+  assert.equal(normalized.signatureVerified, true);
+  assert.equal(normalized.trusted, true);
+  assert.match(normalized.schemaHash, /^0x[0-9a-f]{64}$/u);
+  assert.equal(
+    schemaRefToJobSchemaPath(registration.schemaRef, { registrations: [normalized] }),
+    "https://schemas.example.com/jobs/external-audit-output.json"
+  );
+  assert.doesNotThrow(() => {
+    validateStructuredSubmission(
+      registration.schemaRef,
+      { summary: "Looks sane.", score: 3 },
+      { registrations: [normalized] }
+    );
+  });
+  assert.throws(
+    () => validateStructuredSubmission(
+      registration.schemaRef,
+      { summary: "Missing score." },
+      { registrations: [normalized] }
+    ),
+    /submission.score is required/u
+  );
+});
+
+test("external schema registrations reject untrusted issuers and tampered schemas", async () => {
+  const registration = await signedExternalRegistration();
+
+  assert.throws(
+    () => normalizeExternalSchemaRegistrations([registration], {
+      allowedSchemaRefs: [registration.schemaRef],
+      trustedIssuers: []
+    }),
+    /trustedIssuers must include/u
+  );
+
+  assert.throws(
+    () => normalizeExternalSchemaRegistrations([registration], {
+      allowedSchemaRefs: [registration.schemaRef],
+      trustedIssuers: ["0x0000000000000000000000000000000000000001"]
+    }),
+    /not trusted/u
+  );
+
+  assert.throws(
+    () => normalizeExternalSchemaRegistrations([
+      {
+        ...registration,
+        schema: {
+          ...registration.schema,
+          properties: {
+            ...registration.schema.properties,
+            summary: { type: "string", minLength: 2 }
+          }
+        }
+      }
+    ], {
+      allowedSchemaRefs: [registration.schemaRef],
+      trustedIssuers: [EXTERNAL_SCHEMA_SIGNER.address]
+    }),
+    /signature does not match issuer/u
   );
 });
 
