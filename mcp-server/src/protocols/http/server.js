@@ -50,7 +50,6 @@ import {
   normalizeDisputeVerdictRequestPayload
 } from "../../core/dispute-resolution.js";
 import { transitionSession } from "../../core/session-state-machine.js";
-import { TIER_REQUIREMENTS } from "../../core/job-catalog-service.js";
 import {
   getPublicBuiltinJobSchemaByName,
   listBuiltinJobSchemas,
@@ -65,8 +64,8 @@ import { createAdminXcmRoutes } from "./admin-xcm-routes.js";
 import { createActivityRoutes } from "./activity-routes.js";
 import { createBadgeRoutes } from "./badge-routes.js";
 import { createContentRoutes } from "./content-routes.js";
-import { buildPublicJobsResponse } from "./jobs-response.js";
 import { createGasRoutes } from "./gas-routes.js";
+import { createJobRoutes } from "./job-routes.js";
 import { createPolicyRoutes } from "./policy-routes.js";
 import { createProfileRoutes } from "./profile-routes.js";
 import { createSchemaRoutes } from "./schema-routes.js";
@@ -1239,6 +1238,16 @@ const handleSessionRoute = createSessionRoutes({
   service,
 });
 
+const handleJobRoute = createJobRoutes({
+  authMiddleware,
+  enforceLimit,
+  ensureSessionOwnership,
+  rateLimitConfig,
+  readJsonBody,
+  respond,
+  service,
+});
+
 const handleSchemaRoute = createSchemaRoutes({
   getPublicBuiltinJobSchemaByName,
   listBuiltinJobSchemas,
@@ -1581,16 +1590,8 @@ const server = createServer(async (request, response) => {
       );
     }
 
-    if (request.method === "GET" && pathname === "/jobs") {
-      // Use the session-joined variant so claimed jobs surface their
-      // state / claimedBy / sessionId. The public catalog stays
-      // immutable; this endpoint reads the live join. Without it
-      // browser agents would re-attempt already-claimed jobs and
-      // operator UIs would show "Ready" forever.
-      const jobs = await service.listJobsWithSessions({
-        wallet: url.searchParams.get("wallet") ?? undefined
-      });
-      return respond(response, 200, buildPublicJobsResponse(jobs, url.searchParams));
+    if (await handleJobRoute({ request, response, url, pathname })) {
+      return;
     }
 
     if (await handleAdminJobsRoute({ request, response, url, pathname })) {
@@ -1617,34 +1618,12 @@ const server = createServer(async (request, response) => {
       );
     }
 
-    if (request.method === "GET" && pathname === "/jobs/tiers") {
-      // Public tier-requirements ladder. No auth; no per-wallet data.
-      // Agents use this endpoint for discovery — "what does each tier of
-      // work cost in reputation?" — without needing to sign in first.
-      // Personalised progress lives on /jobs/recommendations (per-job
-      // tierGate) and on the authenticated /jobs/preflight.
-      return respond(
-        response,
-        200,
-        {
-          tiers: Object.entries(TIER_REQUIREMENTS).map(([tier, requires]) => ({ tier, requires }))
-        },
-        { "cache-control": "public, max-age=300" }
-      );
-    }
-
     if (await handleSessionRoute({ request, response, url, pathname })) {
       return;
     }
 
     if (request.method === "GET" && await handleSchemaRoute({ request, response, pathname })) {
       return;
-    }
-
-    if (request.method === "GET" && pathname === "/jobs/definition") {
-      return respond(response, 200, await service.getPublicJobDefinition(url.searchParams.get("jobId") ?? "", {
-        wallet: url.searchParams.get("wallet") ?? undefined
-      }));
     }
 
     if (request.method === "GET" && await handleGasRoute({ request, response, url, pathname })) {
@@ -2759,73 +2738,6 @@ const server = createServer(async (request, response) => {
       return respond(response, 200, record);
     }
 
-    if (request.method === "GET" && pathname === "/jobs/recommendations") {
-      const auth = await authMiddleware(request, url);
-      return respond(response, 200, await service.recommendJobs(auth.wallet));
-    }
-
-    if (request.method === "GET" && pathname === "/jobs/preflight") {
-      const auth = await authMiddleware(request, url);
-      return respond(
-        response,
-        200,
-        await service.preflightJob(auth.wallet, url.searchParams.get("jobId") ?? "")
-      );
-    }
-
-    // Discovery-tool surface for the platformService.explainEligibility helper.
-    // The discovery manifest at core/discovery-manifest.js advertises this tool
-    // as standalone, but until now it was only reachable as a sub-field of
-    // preflightJob / recommendJobs. Surfacing it directly closes that drift.
-    if (request.method === "GET" && pathname === "/jobs/explain-eligibility") {
-      const auth = await authMiddleware(request, url);
-      const jobId = url.searchParams.get("jobId") ?? "";
-      if (!jobId) {
-        throw new ValidationError("jobId query parameter is required.");
-      }
-      return respond(
-        response,
-        200,
-        await service.explainEligibility(auth.wallet, jobId)
-      );
-    }
-
-    // Discovery-tool surface for platformService.estimateNetReward — same
-    // motivation as /jobs/explain-eligibility above.
-    if (request.method === "GET" && pathname === "/jobs/estimate-reward") {
-      const auth = await authMiddleware(request, url);
-      const jobId = url.searchParams.get("jobId") ?? "";
-      if (!jobId) {
-        throw new ValidationError("jobId query parameter is required.");
-      }
-      return respond(
-        response,
-        200,
-        await service.estimateNetReward(auth.wallet, jobId)
-      );
-    }
-
-    if (request.method === "GET" && pathname === "/jobs/sub") {
-      const auth = await authMiddleware(request, url);
-      const parentSessionId = url.searchParams.get("parentSessionId") ?? "";
-      await ensureSessionOwnership(parentSessionId, auth.wallet);
-      return respond(response, 200, await service.listSubJobs(parentSessionId));
-    }
-
-    if (request.method === "POST" && pathname === "/jobs/sub") {
-      const auth = await authMiddleware(request, url);
-      await enforceLimit("admin_jobs", auth.wallet, rateLimitConfig.adminJobs);
-      const payload = await readJsonBody(request);
-      const parentSessionId = typeof payload?.parentSessionId === "string" && payload.parentSessionId.trim()
-        ? payload.parentSessionId.trim()
-        : (url.searchParams.get("parentSessionId") ?? "");
-      if (!parentSessionId) {
-        throw new ValidationError("parentSessionId is required.");
-      }
-      const created = await service.createSubJob(parentSessionId, auth.wallet, payload);
-      return respond(response, 201, created);
-    }
-
     if (await handleAdminStatusRoute({ request, response, url, pathname })) {
       return;
     }
@@ -2892,60 +2804,6 @@ const server = createServer(async (request, response) => {
           balances
         };
       });
-    }
-
-    if (request.method === "POST" && pathname === "/jobs/claim") {
-      const auth = await authMiddleware(request, url);
-      const payload = await readJsonBody(request);
-      const jobId = typeof payload?.jobId === "string" && payload.jobId.trim()
-        ? payload.jobId.trim()
-        : (url.searchParams.get("jobId") ?? "");
-      const idempotencyKey = typeof payload?.idempotencyKey === "string" && payload.idempotencyKey.trim()
-        ? payload.idempotencyKey.trim()
-        : (url.searchParams.get("idempotencyKey") ?? `${auth.wallet}:${jobId}`);
-      return respond(response, 200, await service.claimJob(auth.wallet, jobId, "http", idempotencyKey));
-    }
-
-    if (request.method === "POST" && pathname === "/jobs/validate-submission") {
-      const payload = await readJsonBody(request);
-      const jobId = typeof payload?.jobId === "string" && payload.jobId.trim()
-        ? payload.jobId.trim()
-        : (url.searchParams.get("jobId") ?? "");
-      if (!jobId) {
-        throw new ValidationError("jobId is required.");
-      }
-      const submission = payload && typeof payload === "object" && "submission" in payload
-        ? payload.submission
-        : (payload && typeof payload === "object" && "output" in payload
-            ? payload.output
-            : (typeof payload?.evidence === "string"
-                ? payload.evidence
-                : undefined));
-      if (submission === undefined) {
-        throw new ValidationError("submission is required.");
-      }
-      return respond(response, 200, service.validateJobSubmission(jobId, submission));
-    }
-
-    if (request.method === "POST" && pathname === "/jobs/submit") {
-      const auth = await authMiddleware(request, url);
-      const payload = await readJsonBody(request);
-      const sessionId = typeof payload?.sessionId === "string" && payload.sessionId.trim()
-        ? payload.sessionId.trim()
-        : (url.searchParams.get("sessionId") ?? "");
-      const submission = payload && typeof payload === "object" && "submission" in payload
-        ? payload.submission
-        : (typeof payload?.evidence === "string"
-            ? payload.evidence
-            : (url.searchParams.get("evidence") ?? "submitted-via-http"));
-      if (!sessionId) {
-        throw new ValidationError("sessionId is required.");
-      }
-      if (typeof submission === "string" && submission.length > 16 * 1024) {
-        throw new ValidationError("evidence exceeds 16 KiB. Submit long payloads via evidenceURI once supported.");
-      }
-      await ensureSessionOwnership(sessionId, auth.wallet);
-      return respond(response, 200, await service.submitWork(sessionId, "http", submission));
     }
 
     return respond(response, 404, { error: "not_found" });
