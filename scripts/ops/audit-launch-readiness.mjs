@@ -6,6 +6,14 @@
  * Read-only — no signing. Hits Hub TestNet and reports:
  *   - TreasuryPolicy.paused / owner / pauser
  *   - verifiers(backendSigner)
+ *   - serviceOperators(backendSigner) — the wallet that calls
+ *     EscrowCore.claimJobFor and other onlyOperator entry points.
+ *     Distinct from the verifier role; both flip independently and a
+ *     KMS-signer rotation needs both. Missing this check let a real
+ *     prod misconfig (Phase 3 KMS cutover authorized the new signer as
+ *     verifier but not as service operator) slip past launch readiness
+ *     until the first hosted worker-loop hit a bare `require(false)`
+ *     on `claimJobFor`. The audit now flags it preemptively.
  *   - serviceOperators(EscrowCore) / serviceOperators(AgentAccountCore)
  *   - approvedAssets(USDC) (auto-generated getter on the public mapping)
  * Then prints a punch list of any setVerifier / setServiceOperator /
@@ -120,6 +128,7 @@ async function main() {
     pauser,
     paused,
     signerIsVerifier,
+    signerIsOperator,
     escrowIsOperator,
     agentAccountIsOperator,
     arbitratorIsApproved,
@@ -138,6 +147,7 @@ async function main() {
     policy.pauser(),
     policy.paused(),
     policy.verifiers(backendSigner),
+    policy.serviceOperators(backendSigner),
     policy.serviceOperators(escrowAddress),
     policy.serviceOperators(agentAccountAddress),
     policy.arbitrators(expectedArbitrator),
@@ -180,6 +190,7 @@ async function main() {
   console.log(`pauser:        ${pauser}  ${ciEqual(pauser, expectedPauser) ? "✅" : `⚠ expected ${expectedPauser}`}`);
   console.log(`paused:        ${paused}  ${paused ? "❌" : "✅"}`);
   console.log(`verifiers(${short(backendSigner)})         ${signerIsVerifier ? "✅" : "❌"}  ${signerIsVerifier}`);
+  console.log(`serviceOperators(${short(backendSigner)})  ${signerIsOperator ? "✅" : "❌"}  ${signerIsOperator}  (backend signer must be an operator to call EscrowCore.claimJobFor)`);
   console.log(`serviceOperators(escrow)         ${escrowIsOperator ? "✅" : "❌"}  ${escrowIsOperator}`);
   console.log(`serviceOperators(agentAccount)   ${agentAccountIsOperator ? "✅" : "❌"}  ${agentAccountIsOperator}  (defensive — strictly required for v1 single-payout is escrow only)`);
   console.log(`arbitrators(${short(expectedArbitrator)})  ${arbitratorIsApproved ? "✅" : "❌"}  ${arbitratorIsApproved}  (required for resolveDispute)`);
@@ -218,6 +229,18 @@ async function main() {
   }
   if (!signerIsVerifier) {
     fixes.push(buildCall("setVerifier", [backendSigner, true], policyAddress));
+  }
+  if (!signerIsOperator) {
+    // Backend signer must be a service operator to call
+    // EscrowCore.claimJobFor (the admin-operated path that brokers
+    // claim-on-behalf-of-worker, dispute resolution, etc.). Without
+    // this, the platform's user-facing job lifecycle silently
+    // reverts with bare `require(false)` on every chain mutation
+    // initiated by the backend. The signer-rotation runbook needs
+    // to flip BOTH verifiers[signer]=true AND
+    // serviceOperators[signer]=true; missing either one is a launch
+    // blocker.
+    fixes.push(buildCall("setServiceOperator", [backendSigner, true], policyAddress));
   }
   if (!escrowIsOperator) {
     fixes.push(buildCall("setServiceOperator", [escrowAddress, true], policyAddress));
