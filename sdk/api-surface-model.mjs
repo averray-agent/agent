@@ -256,6 +256,10 @@ export interface SubmissionContract<TSubmission = StructuredSubmission> extends 
   compatibilityAliases?: string[];
   outputSchemaRef?: BuiltinJobSchemaRef | string;
   outputSchemaUrl?: string;
+  registeredSchema?: boolean;
+  schemaHash?: string;
+  schemaIssuer?: string;
+  trustBoundary?: "external_signed_schema" | string;
   submitPayloadExample?: SubmissionPayloadExample<TSubmission>;
   invalidWrappedOutputHint?: string;
 }
@@ -264,6 +268,12 @@ export interface SchemaContractSide extends ApiEnvelope {
   schemaRef?: BuiltinJobSchemaRef | string;
   schemaUrl?: string;
   knownBuiltin?: boolean;
+  registered?: boolean;
+  schemaHash?: string;
+  issuer?: string;
+  trustBoundary?: "external_signed_schema" | string;
+  signatureVerified?: boolean;
+  trusted?: boolean;
   validates?: "payload.submission" | string;
   validationEndpoint?: "POST /jobs/validate-submission" | string;
 }

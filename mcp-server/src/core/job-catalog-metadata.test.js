@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { Wallet } from "ethers";
 
 import {
   JobCatalogService,
@@ -7,6 +8,7 @@ import {
   roleRequirements,
   summarizeRoleGate
 } from "./job-catalog-service.js";
+import { buildExternalSchemaRegistrationMessage } from "./job-schema-registry.js";
 
 function makeService(reputation = { skill: 0, reliability: 0, economic: 0, tier: "starter" }) {
   const jobs = [];
@@ -30,6 +32,31 @@ const BASE_JOB = {
   claimTtlSeconds: 3600,
   retryLimit: 1
 };
+
+const EXTERNAL_SCHEMA_SIGNER = new Wallet("0x8b3a350cf5c34c9194ca3a545d0ec67d61f328d6e5d11dd95b9af16e70ec4c63");
+
+async function signedExternalSchemaRegistration(schemaRef = "schema://jobs/external-review-output") {
+  const base = {
+    schemaRef,
+    schemaUrl: "https://schemas.example.com/jobs/external-review-output.json",
+    schema: {
+      $id: schemaRef,
+      type: "object",
+      additionalProperties: false,
+      required: ["summary", "result"],
+      properties: {
+        summary: { type: "string", minLength: 1 },
+        result: { type: "string", enum: ["pass", "fail"] }
+      }
+    },
+    issuer: EXTERNAL_SCHEMA_SIGNER.address,
+    signedAt: "2026-05-23T00:00:00.000Z"
+  };
+  return {
+    ...base,
+    signature: await EXTERNAL_SCHEMA_SIGNER.signMessage(buildExternalSchemaRegistrationMessage(base))
+  };
+}
 
 test("createJob preserves autonomous work metadata", () => {
   const service = makeService();
@@ -230,6 +257,32 @@ test("public Wikipedia definitions include direct agent affordances", () => {
   assert.equal(job.verificationContract.verifierConfigVersion, 1);
   assert.equal(job.verificationContract.replayEndpoint, "POST /verifier/replay");
   assert.equal(typeof job.verificationContract.verifierConfigHash, "string");
+});
+
+test("createJob exposes signed external schema contracts with trust metadata", async () => {
+  const service = makeService();
+  const registration = await signedExternalSchemaRegistration();
+  const job = service.createJob({
+    ...BASE_JOB,
+    id: "external-schema-review-001",
+    outputSchemaRef: registration.schemaRef,
+    schemaTrustPolicy: {
+      trustedIssuers: [EXTERNAL_SCHEMA_SIGNER.address]
+    },
+    schemaRegistrations: [registration]
+  });
+
+  assert.equal(job.schemaRegistrations[0].schemaRef, registration.schemaRef);
+  assert.equal(job.schemaRegistrations[0].trusted, true);
+  const publicJob = service.getPublicJobDefinition("external-schema-review-001");
+  assert.equal(publicJob.submissionContract.registeredSchema, true);
+  assert.equal(publicJob.submissionContract.outputSchemaUrl, registration.schemaUrl);
+  assert.equal(publicJob.submissionContract.schemaIssuer, EXTERNAL_SCHEMA_SIGNER.address);
+  assert.equal(publicJob.submissionContract.trustBoundary, "external_signed_schema");
+  assert.equal(publicJob.schemaContract.output.knownBuiltin, false);
+  assert.equal(publicJob.schemaContract.output.registered, true);
+  assert.equal(publicJob.schemaContract.output.trusted, true);
+  assert.equal(publicJob.schemaContract.output.signatureVerified, true);
 });
 
 test("reviewer role gate blocks low-score agents", async () => {

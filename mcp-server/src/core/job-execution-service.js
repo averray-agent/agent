@@ -12,7 +12,13 @@ import {
   transitionSession
 } from "./session-state-machine.js";
 import { hashSubmission, isStructuredSubmission, normalizeSubmission } from "./submission.js";
-import { getBuiltinJobSchema, validateAgainstSchema, validateStructuredSubmission } from "./job-schema-registry.js";
+import {
+  getBuiltinJobSchema,
+  getJobSchema,
+  isRegisteredJobSchemaRef,
+  validateAgainstSchema,
+  validateStructuredSubmission
+} from "./job-schema-registry.js";
 import {
   buildFundedJobFromClaim,
   parseGithubPullRequestUrl,
@@ -242,11 +248,13 @@ export class JobExecutionService {
       );
     }
     assertSessionCanTransition(refreshed, "submitted", { reason: "work_submitted" });
-    const submission = normalizeSubmission(normalizeSubmitPayloadShape(job.outputSchemaRef, submissionInput));
-    validateSubmissionContract(job.outputSchemaRef, submission);
+    const submission = normalizeSubmission(normalizeSubmitPayloadShape(job.outputSchemaRef, submissionInput, {
+      registrations: job.schemaRegistrations
+    }));
+    validateSubmissionContract(job.outputSchemaRef, submission, { registrations: job.schemaRegistrations });
     await this.enforceMaintainerOpenPrCap(job, submission);
     const guardedSubmission = this.applyMaintainerSubmissionGuards(job, refreshed, submission);
-    validateSubmissionContract(job.outputSchemaRef, guardedSubmission);
+    validateSubmissionContract(job.outputSchemaRef, guardedSubmission, { registrations: job.schemaRegistrations });
     if (this.blockchainGateway?.isEnabled()) {
       await this.blockchainGateway.submitWork(session.chainJobId ?? session.jobId, hashSubmission(guardedSubmission));
     }
@@ -255,7 +263,8 @@ export class JobExecutionService {
       ...refreshed,
       protocolHistory,
       submission: guardedSubmission,
-      outputSchemaBuiltin: Boolean(getBuiltinJobSchema(job.outputSchemaRef))
+      outputSchemaBuiltin: Boolean(getBuiltinJobSchema(job.outputSchemaRef)),
+      outputSchemaRegistered: isRegisteredJobSchemaRef(job.outputSchemaRef, job.schemaRegistrations)
     }, "submitted", {
       reason: "work_submitted",
       metadata: {
@@ -540,12 +549,12 @@ export class JobExecutionService {
   }
 }
 
-export function normalizeSubmitPayloadShape(schemaRef, submissionInput) {
+export function normalizeSubmitPayloadShape(schemaRef, submissionInput, { registrations = [] } = {}) {
   if (!isPlainObject(submissionInput) || !isStructuredSubmission(submissionInput.output)) {
     return submissionInput;
   }
 
-  const schema = getBuiltinJobSchema(schemaRef);
+  const schema = getJobSchema(schemaRef, { registrations });
   if (!schema) {
     return submissionInput;
   }
@@ -573,11 +582,11 @@ export function normalizeSubmitPayloadShape(schemaRef, submissionInput) {
   );
 }
 
-export function validateSubmissionContract(schemaRef, submission, { path = "submission" } = {}) {
-  const schema = getBuiltinJobSchema(schemaRef);
+export function validateSubmissionContract(schemaRef, submission, { path = "submission", registrations = [] } = {}) {
+  const schema = getJobSchema(schemaRef, { registrations });
   if (!schema) {
     if (submission.kind === "structured") {
-      validateStructuredSubmission(schemaRef, submission.structured, { path });
+      validateStructuredSubmission(schemaRef, submission.structured, { path, registrations });
     }
     return submission;
   }
@@ -595,7 +604,7 @@ export function validateSubmissionContract(schemaRef, submission, { path = "subm
     );
   }
 
-  validateStructuredSubmission(schemaRef, submission.structured, { path });
+  validateStructuredSubmission(schemaRef, submission.structured, { path, registrations });
   return submission;
 }
 

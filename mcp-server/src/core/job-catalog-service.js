@@ -3,7 +3,15 @@ import {
   NotFoundError,
   ValidationError
 } from "./errors.js";
-import { getBuiltinJobSchema, isBuiltinJobSchemaRef, schemaRefToJobSchemaPath } from "./job-schema-registry.js";
+import {
+  getBuiltinJobSchema,
+  getJobSchema,
+  getRegisteredJobSchemaRegistration,
+  isBuiltinJobSchemaRef,
+  isRegisteredJobSchemaRef,
+  normalizeExternalSchemaRegistrations,
+  schemaRefToJobSchemaPath
+} from "./job-schema-registry.js";
 import { buildVerificationContract } from "./verifier-contract.js";
 import { normalizeAssetSymbol } from "./assets.js";
 
@@ -695,6 +703,11 @@ export class JobCatalogService {
     const outputSchemaRef = String(input?.outputSchemaRef ?? `schema://jobs/${category}-output`).trim();
     this.validateSchemaRef(inputSchemaRef, "inputSchemaRef");
     this.validateSchemaRef(outputSchemaRef, "outputSchemaRef");
+    const schemaTrustPolicy = normaliseSchemaTrustPolicy(input?.schemaTrustPolicy);
+    const schemaRegistrations = normalizeExternalSchemaRegistrations(input?.schemaRegistrations, {
+      allowedSchemaRefs: [inputSchemaRef, outputSchemaRef],
+      trustedIssuers: schemaTrustPolicy?.trustedIssuers ?? []
+    });
 
     // Optional sub-job lineage. When an agent spawns a sub-job from inside
     // its own session, include `parentSessionId` so the indexer + profile
@@ -740,6 +753,8 @@ export class JobCatalogService {
       verifierConfig: this.buildVerifierConfig(verifierMode, input),
       inputSchemaRef,
       outputSchemaRef,
+      ...(schemaRegistrations.length ? { schemaRegistrations } : {}),
+      ...(schemaTrustPolicy ? { schemaTrustPolicy } : {}),
       claimTtlSeconds,
       retryLimit,
       requiresSponsoredGas: Boolean(input?.requiresSponsoredGas),
@@ -1095,6 +1110,15 @@ function normalisePlainObject(value, field) {
   return JSON.parse(JSON.stringify(value));
 }
 
+function normaliseSchemaTrustPolicy(value) {
+  const raw = normalisePlainObject(value, "schemaTrustPolicy");
+  if (!raw) {
+    return undefined;
+  }
+  const trustedIssuers = normaliseStringList(raw.trustedIssuers);
+  return trustedIssuers.length ? { trustedIssuers } : undefined;
+}
+
 function normaliseLifecycle(value, { disableStale = false, now = new Date() } = {}) {
   const raw = normalisePlainObject(value, "lifecycle") ?? {};
   const createdAt = typeof raw.createdAt === "string" && raw.createdAt.trim()
@@ -1168,10 +1192,11 @@ function buildPublicJobDetails(job) {
 }
 
 function buildSubmissionContract(job) {
-  const schema = getBuiltinJobSchema(job?.outputSchemaRef);
+  const schema = getJobSchema(job?.outputSchemaRef, { registrations: job?.schemaRegistrations });
   if (!schema) {
     return undefined;
   }
+  const registration = getRegisteredJobSchemaRegistration(job?.outputSchemaRef, job?.schemaRegistrations);
 
   return {
     endpoint: "POST /jobs/submit",
@@ -1182,7 +1207,15 @@ function buildSubmissionContract(job) {
     doNotWrapInOutput: true,
     compatibilityAliases: ["payload.submission.output"],
     outputSchemaRef: job.outputSchemaRef,
-    outputSchemaUrl: schemaRefToJobSchemaPath(job.outputSchemaRef),
+    outputSchemaUrl: schemaRefToJobSchemaPath(job.outputSchemaRef, { registrations: job?.schemaRegistrations }),
+    ...(registration
+      ? {
+          registeredSchema: true,
+          schemaHash: registration.schemaHash,
+          schemaIssuer: registration.issuer,
+          trustBoundary: registration.trustBoundary
+        }
+      : {}),
     submitPayloadExample: {
       sessionId: "<session-id>",
       submission: buildSchemaExample(schema)
@@ -1194,23 +1227,41 @@ function buildSubmissionContract(job) {
 function buildSchemaContract(job) {
   const inputSchemaKnown = isBuiltinJobSchemaRef(job?.inputSchemaRef);
   const outputSchemaKnown = isBuiltinJobSchemaRef(job?.outputSchemaRef);
-  if (!inputSchemaKnown && !outputSchemaKnown) {
+  const inputSchemaRegistered = isRegisteredJobSchemaRef(job?.inputSchemaRef, job?.schemaRegistrations);
+  const outputSchemaRegistered = isRegisteredJobSchemaRef(job?.outputSchemaRef, job?.schemaRegistrations);
+  if (!inputSchemaKnown && !outputSchemaKnown && !inputSchemaRegistered && !outputSchemaRegistered) {
     return undefined;
   }
+  const inputRegistration = getRegisteredJobSchemaRegistration(job?.inputSchemaRef, job?.schemaRegistrations);
+  const outputRegistration = getRegisteredJobSchemaRegistration(job?.outputSchemaRef, job?.schemaRegistrations);
 
   return {
     input: {
       schemaRef: job.inputSchemaRef,
-      schemaUrl: schemaRefToJobSchemaPath(job.inputSchemaRef),
-      knownBuiltin: inputSchemaKnown
+      schemaUrl: schemaRefToJobSchemaPath(job.inputSchemaRef, { registrations: job?.schemaRegistrations }),
+      knownBuiltin: inputSchemaKnown,
+      registered: inputSchemaRegistered,
+      ...(inputRegistration ? schemaTrustFields(inputRegistration) : {})
     },
     output: {
       schemaRef: job.outputSchemaRef,
-      schemaUrl: schemaRefToJobSchemaPath(job.outputSchemaRef),
+      schemaUrl: schemaRefToJobSchemaPath(job.outputSchemaRef, { registrations: job?.schemaRegistrations }),
       knownBuiltin: outputSchemaKnown,
+      registered: outputSchemaRegistered,
+      ...(outputRegistration ? schemaTrustFields(outputRegistration) : {}),
       validates: "payload.submission",
       validationEndpoint: "POST /jobs/validate-submission"
     }
+  };
+}
+
+function schemaTrustFields(registration) {
+  return {
+    schemaHash: registration.schemaHash,
+    issuer: registration.issuer,
+    trustBoundary: registration.trustBoundary,
+    signatureVerified: registration.signatureVerified === true,
+    trusted: registration.trusted === true
   };
 }
 

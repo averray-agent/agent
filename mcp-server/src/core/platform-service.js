@@ -10,7 +10,7 @@ import { VerificationIngestionService } from "../services/verification-ingestion
 import { ConflictError, InsufficientLiquidityError, ValidationError } from "./errors.js";
 import { normalizeSubmission } from "./submission.js";
 import { buildPlatformCapabilities } from "./discovery-manifest.js";
-import { getBuiltinJobSchema } from "./job-schema-registry.js";
+import { getBuiltinJobSchema, getJobSchema } from "./job-schema-registry.js";
 import {
   buildSessionLifecycle,
   describeSessionStatus,
@@ -543,10 +543,12 @@ export class PlatformService {
 
   validateJobSubmission(jobId, submissionInput) {
     const job = this.getJobDefinition(jobId);
-    const contract = buildSubmissionValidationContract(job.outputSchemaRef);
+    const contract = buildSubmissionValidationContract(job);
     try {
-      const normalized = normalizeSubmission(normalizeSubmitPayloadShape(job.outputSchemaRef, submissionInput));
-      validateSubmissionContract(job.outputSchemaRef, normalized);
+      const normalized = normalizeSubmission(normalizeSubmitPayloadShape(job.outputSchemaRef, submissionInput, {
+        registrations: job.schemaRegistrations
+      }));
+      validateSubmissionContract(job.outputSchemaRef, normalized, { registrations: job.schemaRegistrations });
       return {
         jobId,
         valid: true,
@@ -1815,8 +1817,9 @@ function stringOrUndefined(value) {
   return typeof value === "string" && value.trim() ? value : undefined;
 }
 
-function buildSubmissionValidationContract(schemaRef) {
-  const schema = getBuiltinJobSchema(schemaRef);
+function buildSubmissionValidationContract(job) {
+  const schemaRef = job?.outputSchemaRef;
+  const schema = getJobSchema(schemaRef, { registrations: job?.schemaRegistrations });
   const requiredTopLevelKeys = Array.isArray(schema?.required) ? schema.required : [];
   return {
     validationEndpoint: "POST /jobs/validate-submission",
