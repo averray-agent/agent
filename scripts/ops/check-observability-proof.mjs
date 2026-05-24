@@ -6,20 +6,25 @@ import { fileURLToPath } from "node:url";
 
 const SCRIPT_NAME = basename(fileURLToPath(import.meta.url));
 const SCHEMA_VERSION = "observability-proof-v1";
+const FUTURE_SKEW_MS = 5 * 60 * 1000;
 
 function usage() {
-  return `Usage: node scripts/ops/${SCRIPT_NAME} --file docs/evidence/observability-YYYY-MM-DD.json [--json]
+  return `Usage: node scripts/ops/${SCRIPT_NAME} --file docs/evidence/observability-YYYY-MM-DD.json [--json] [--max-completed-age-hours N]
 
 Validates the operator evidence for the RC1 observability gates:
 metrics bearer auth, hosted alert delivery, and Sentry/logging posture.
 This check is read-only; it does not call the hosted stack or alert vendors.
+
+Use --max-completed-age-hours when validating live launch evidence so stale
+historical artifacts cannot be reused as current production proof.
 `;
 }
 
 function parseArgs(argv) {
   const args = {
     file: undefined,
-    json: false
+    json: false,
+    maxCompletedAgeHours: undefined
   };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -28,6 +33,14 @@ function parseArgs(argv) {
       index += 1;
     } else if (arg === "--json") {
       args.json = true;
+    } else if (arg === "--max-completed-age-hours") {
+      const raw = argv[index + 1];
+      const value = Number(raw);
+      if (!Number.isFinite(value) || value <= 0) {
+        throw new Error("--max-completed-age-hours must be a positive number");
+      }
+      args.maxCompletedAgeHours = value;
+      index += 1;
     } else if (arg === "-h" || arg === "--help") {
       args.help = true;
     } else if (!args.file && !arg.startsWith("-")) {
@@ -95,6 +108,12 @@ function requireDateOnly(value, path, errors) {
   return requireString(value, path, errors, { pattern: /^\d{4}-\d{2}-\d{2}$/u });
 }
 
+function requireIsoTimestamp(value, path, errors) {
+  const raw = requireIsoDate(value, path, errors);
+  const timestamp = Date.parse(raw);
+  return Number.isFinite(timestamp) ? timestamp : undefined;
+}
+
 function requireHttpUrl(value, path, errors) {
   const raw = requireString(value, path, errors);
   if (!raw) return "";
@@ -109,22 +128,63 @@ function requireHttpUrl(value, path, errors) {
   return raw;
 }
 
-function validateEvidence(evidence) {
+function assertNotAfterCompletedAt(value, path, completedAt, errors) {
+  if (!Number.isFinite(value) || !Number.isFinite(completedAt)) return;
+  if (value > completedAt + FUTURE_SKEW_MS) {
+    errors.push(`${path} must not be later than completedAt`);
+  }
+}
+
+function validateFreshness(completedAt, options, errors) {
+  const maxCompletedAgeHours = options.maxCompletedAgeHours;
+  if (maxCompletedAgeHours === undefined) return;
+  if (!Number.isFinite(maxCompletedAgeHours) || maxCompletedAgeHours <= 0) {
+    errors.push("maxCompletedAgeHours must be a positive number");
+    return;
+  }
+  if (!Number.isFinite(completedAt)) return;
+
+  const now = options.now instanceof Date ? options.now : new Date(options.now ?? Date.now());
+  const nowMs = now.getTime();
+  if (!Number.isFinite(nowMs)) {
+    errors.push("now must be a valid Date or timestamp");
+    return;
+  }
+  if (completedAt > nowMs + FUTURE_SKEW_MS) {
+    errors.push("completedAt must not be in the future");
+  }
+  const maxAgeMs = maxCompletedAgeHours * 60 * 60 * 1000;
+  if (nowMs - completedAt > maxAgeMs) {
+    errors.push(`completedAt must be within ${maxCompletedAgeHours} hour(s)`);
+  }
+}
+
+function validateEvidence(evidence, options = {}) {
   const errors = [];
   const doc = assertObject(evidence, "evidence", errors);
 
   if (doc.schemaVersion !== SCHEMA_VERSION) {
     errors.push(`schemaVersion must be ${SCHEMA_VERSION}`);
   }
-  requireDateOnly(doc.proofDate, "proofDate", errors);
-  requireIsoDate(doc.completedAt, "completedAt", errors);
+  const proofDate = requireDateOnly(doc.proofDate, "proofDate", errors);
+  const completedAt = requireIsoTimestamp(doc.completedAt, "completedAt", errors);
+  if (proofDate && Number.isFinite(completedAt)) {
+    const completedDate = new Date(completedAt).toISOString().slice(0, 10);
+    if (proofDate !== completedDate) {
+      errors.push("proofDate must match completedAt UTC date");
+    }
+  }
+  validateFreshness(completedAt, options, errors);
 
   const operator = assertObject(doc.operator, "operator", errors);
   requireString(operator.name, "operator.name", errors);
   requireString(operator.signature, "operator.signature", errors);
 
   const target = assertObject(doc.target, "target", errors);
-  requireString(target.environment, "target.environment", errors);
+  const environment = requireString(target.environment, "target.environment", errors);
+  if (environment && environment !== "production") {
+    errors.push("target.environment must be production");
+  }
   const apiBaseUrl = requireHttpUrl(target.apiBaseUrl, "target.apiBaseUrl", errors);
   if (apiBaseUrl && !/^https:\/\/api\.averray\.com\/?$/u.test(apiBaseUrl)) {
     errors.push("target.apiBaseUrl must be the hosted production API base URL");
@@ -152,7 +212,8 @@ function validateEvidence(evidence) {
   if (metrics.authenticatedStatus !== 200) {
     errors.push("metricsAuth.authenticatedStatus must be 200");
   }
-  requireIsoDate(metrics.observedAt, "metricsAuth.observedAt", errors);
+  const metricsObservedAt = requireIsoTimestamp(metrics.observedAt, "metricsAuth.observedAt", errors);
+  assertNotAfterCompletedAt(metricsObservedAt, "metricsAuth.observedAt", completedAt, errors);
 
   const alert = assertObject(doc.alertDestination, "alertDestination", errors);
   if (requireBoolean(alert.webhookConfigured, "alertDestination.webhookConfigured", errors) !== true) {
@@ -163,7 +224,8 @@ function validateEvidence(evidence) {
   }
   requireString(alert.channel, "alertDestination.channel", errors);
   requireString(alert.messageId, "alertDestination.messageId", errors);
-  requireIsoDate(alert.receivedAt, "alertDestination.receivedAt", errors);
+  const alertReceivedAt = requireIsoTimestamp(alert.receivedAt, "alertDestination.receivedAt", errors);
+  assertNotAfterCompletedAt(alertReceivedAt, "alertDestination.receivedAt", completedAt, errors);
   requireString(alert.failureMode, "alertDestination.failureMode", errors);
 
   const logging = assertObject(doc.sentryLogging, "sentryLogging", errors);
@@ -178,7 +240,8 @@ function validateEvidence(evidence) {
   requireString(logging.observedLogLine, "sentryLogging.observedLogLine", errors, {
     forbidden: /(Bearer\s+[-._~+/A-Za-z0-9]+=*|gho_[A-Za-z0-9_]+|re_[A-Za-z0-9_-]{12,}|https:\/\/[^@\s]+@sentry)/iu
   });
-  requireIsoDate(logging.observedAt, "sentryLogging.observedAt", errors);
+  const loggingObservedAt = requireIsoTimestamp(logging.observedAt, "sentryLogging.observedAt", errors);
+  assertNotAfterCompletedAt(loggingObservedAt, "sentryLogging.observedAt", completedAt, errors);
   if (decision === "sentry_enabled") {
     if (requireBoolean(logging.sentryReadyObserved, "sentryLogging.sentryReadyObserved", errors) !== true) {
       errors.push("sentryLogging.sentryReadyObserved must be true when Sentry is enabled");
@@ -225,7 +288,9 @@ async function main() {
   }
   const raw = await readFile(args.file, "utf8");
   const parsed = JSON.parse(raw);
-  const result = validateEvidence(parsed);
+  const result = validateEvidence(parsed, {
+    maxCompletedAgeHours: args.maxCompletedAgeHours
+  });
   if (args.json) {
     process.stdout.write(`${JSON.stringify({
       status: result.ok ? "ok" : "not_ok",

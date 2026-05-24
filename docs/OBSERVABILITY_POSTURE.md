@@ -97,5 +97,10 @@ artifact. Validate it before using it to close the P0 observability rows:
 ```bash
 node scripts/ops/check-observability-proof.mjs \
   --file docs/evidence/observability-YYYY-MM-DD.json \
+  --max-completed-age-hours 30 \
   --json
 ```
+
+The freshness flag is intentionally explicit: it lets older artifacts remain
+auditable while preventing stale evidence from being reused as current launch
+proof.
