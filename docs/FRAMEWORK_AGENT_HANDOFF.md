@@ -1,6 +1,6 @@
 # Framework Agent Handoff — Averray Implementation
 
-**Doc version:** v2.5 (2026-05-21)
+**Doc version:** v2.6 (2026-05-24)
 **Purpose:** Context document for the framework agent picking up implementation work on Averray.
 **Companion documents:**
 
@@ -8,8 +8,8 @@
   the consolidated source of truth for "what is done, what is open, what
   comes next." If another doc conflicts with the roadmap, the roadmap wins
   unless code or production evidence proves otherwise.
-- [`AVERRAY_WORKING_SPEC.md`](./AVERRAY_WORKING_SPEC.md) — v2.2 architecture
-  spec; design.
+- [`AVERRAY_WORKING_SPEC.md`](./AVERRAY_WORKING_SPEC.md) — current
+  architecture/product spec; design authority.
 - [`AVERRAY_VERIFICATION_LEDGER.md`](./AVERRAY_VERIFICATION_LEDGER.md) —
   post-verification (2026-04-28); empirical receipts against `docs.polkadot.com`.
 - [`AUDIT_REMEDIATION.md`](./AUDIT_REMEDIATION.md) — multi-agent
@@ -42,6 +42,19 @@ Where the spec references Polkadot behavior, the ledger says whether it's verifi
 
 Cross-reference the ledger any time the spec asserts something about Polkadot semantics. **The ledger is post-verification — every claim has been resolved to ✅, ⚠️, or 🔬. If you find a claim that doesn't appear in the ledger, that's a gap worth flagging, not assuming.**
 
+`PROJECT_ROADMAP.md` is the current status authority. `AVERRAY_WORKING_SPEC.md` records product and architecture decisions. `AUDIT_REMEDIATION.md` keeps detailed findings and close criteria, but some uploaded or older copies may predate closed work. If a bundled doc says something is open and the roadmap says it is done with evidence, keep the roadmap status and port only the still-useful design/criteria text.
+
+### Spec consolidation rules for parallel agents
+
+When another agent produces a new or updated spec bundle:
+
+1. **Do not replace `docs/AVERRAY_WORKING_SPEC.md` wholesale.** Compare the bundle against the current consolidated spec and port only missing deltas.
+2. **Never edit `docs/RC1_WORKING_SPEC.md` for current design.** That file is historical and explicitly superseded by `AVERRAY_WORKING_SPEC.md`.
+3. **Never downgrade status from an older uploaded document.** Current "done/open/proofed" state lives in `PROJECT_ROADMAP.md`, with roadmap fragments under `docs/roadmap-updates/` for parallel work.
+4. **Every spec edit gets a reconciliation-log entry.** Preserve old entries; add a new top entry explaining what was imported and what was intentionally not imported.
+5. **Polkadot-specific claims require verification.** Use the Polkadot docs MCP, runtime state, or transaction evidence before adding new chain/runtime semantics. If the uploaded bundle only repeats a claim already covered by `AVERRAY_VERIFICATION_LEDGER.md`, cite that ledger instead of re-verifying from scratch.
+6. **Use implemented env var names.** If an uploaded draft has placeholder names, reconcile to code and deploy docs before copying it into the spec.
+
 ---
 
 ## Read these first, in this order
@@ -50,7 +63,7 @@ Cross-reference the ledger any time the spec asserts something about Polkadot se
    §"Completed Foundations", §"Open Work To RC1/Testnet Launch", and
    §"Immediate Work Queue" to get oriented on what's done and what's
    actively in flight. This is the doc to update when you close an item.
-2. **The spec's reconciliation log (§15) bottom-up** — newest entry (v2.2) first, then v2.1, etc. This shows how the design evolved and why specific decisions were made. The log is preserved across versions deliberately; it's the audit trail for the design itself.
+2. **The spec's reconciliation log (§15) bottom-up** — newest entry first, then older entries. This shows how the design evolved and why specific decisions were made. The log is preserved across versions deliberately; it's the audit trail for the design itself.
 3. **The spec's §12 pre-launch checklist** — the canonical list of what `v1.0.0-rc1` needs. The roadmap is the running status against it.
 4. **The verification ledger top summary** — the count of verified vs. corrections-needed vs. empirical claims, and the seven correction themes that flowed into the spec.
 5. **The audit remediation board (`AUDIT_REMEDIATION.md`) "Multi-agent execution board" section** — packages A–J, file scopes, dependencies. Treat that doc as the coordination contract for any in-flight P1.x or P2.x work; one package = one branch = one PR.
@@ -72,9 +85,11 @@ The ledger flags this as 🔬 in the "Account and identity claims" section. Capt
 
 ---
 
-## Pre-deploy items (USDC settlement)
+## Pre-deploy items
 
 Before any v1.0.0-rc1 deploy, these must be addressed (see spec §8 Pre-deploy items for full list):
+
+### USDC settlement
 
 - Done: `scripts/write_server_env.sh` defaults updated from DOT/18-decimals to USDC/6-decimals
 - Done: `deployments/mainnet.env.example` defaults updated from DOT/18-decimals to USDC/6-decimals
@@ -85,6 +100,16 @@ Before any v1.0.0-rc1 deploy, these must be addressed (see spec §8 Pre-deploy i
 - Still intentional: local mock ERC20 demos/tests and DOT/vDOT strategy-path docs/code keep DOT-specific 18-decimal assumptions
 
 These prevent silent 10^12 scaling bugs at deploy time.
+
+### Phase 1 storage
+
+The uploaded v2.5 spec bundle added useful storage discipline that has now been folded into the consolidated spec. The rule is: Phase 1 content storage is three-layered, not "save to VPS and hope."
+
+- **Layer 1:** hot state-store records served by `/content/:hash`
+- **Layer 2:** append-only recovery log, optionally mirrored to S3-compatible object storage through `CONTENT_RECOVERY_OBJECT_*`
+- **Layer 3:** canonical hash validation at write/replay boundaries, with an explicit read-path mismatch contract to add if future serving sources can drift from canonical records
+
+Do not reintroduce old placeholder env names such as `STORAGE_RECOVERY_*`. The implemented names are `CONTENT_RECOVERY_LOG_*` and `CONTENT_RECOVERY_OBJECT_*`, and the operator procedure lives in [`CONTENT_RECOVERY_RUNBOOK.md`](./CONTENT_RECOVERY_RUNBOOK.md).
 
 ---
 
@@ -123,6 +148,7 @@ These three are the highest-leverage marketing-surface items per spec §10 Reput
 - Three-tier fee structure: Micro $0.50, Standard $2, Substantive $5 (§2 worked examples)
 - USDC as v1 escrow asset
 - Source-of-truth architecture: commitments on-chain, content off-chain, hashes binding
+- **Phase 1 storage discipline:** hot content serving plus append-only recovery log, optional object mirror, and canonical hash validation. Phase 2 decentralized/IPFS-compatible storage remains deferred.
 - v1.0.0-rc1 contract scope (§8)
 - XCM correlation primitive: SetTopic = requestId — verified ✅ against upstream `pallet-xcm` source
 - Backend SCALE assembler design: PAPI primary, parity-tested request-id module
@@ -198,9 +224,15 @@ The same discipline that makes the platform credible to its agents makes the cod
 
 ## Final notes
 
-- The reconciliation log entries v1.0 through v2.2 in the spec capture eleven sessions of design work. Read them; don't re-derive decisions that were already made deliberately.
-- The spec and ledger were last updated on 2026-04-28. This handoff doc was last updated on 2026-05-21 (v2.5). If you're reading this much later, re-verify ✅ items in the ledger before relying on them — Polkadot is moving fast and the runtime semantics shift with each release.
-- The spec is now ~1100 lines and 15 sections. The ledger is 343 lines. The audit remediation board adds a third document at ~650 lines tracking the trust-core-first remediation packages. [`PROJECT_ROADMAP.md`](./PROJECT_ROADMAP.md) consolidates the current status across all of these.
+- The reconciliation log entries in the spec capture many sessions of design work. Read them; don't re-derive decisions that were already made deliberately.
+- The spec was last updated on 2026-05-24. The verification ledger remains the post-verification record. If you're reading this much later, re-verify ✅ items in the ledger before relying on them — Polkadot is moving fast and the runtime semantics shift with each release.
+- The spec is now ~1300 lines and 15 sections. The ledger is 343 lines. The audit remediation board keeps detailed finding history and close criteria. [`PROJECT_ROADMAP.md`](./PROJECT_ROADMAP.md) consolidates the current status across all of these.
+
+### v2.6 doc-update notes (2026-05-24)
+
+- **Spec consolidation rules added.** Parallel agents should merge uploaded spec bundles by delta, not wholesale replacement. `AVERRAY_WORKING_SPEC.md` is the design authority; `PROJECT_ROADMAP.md` is current status authority; `RC1_WORKING_SPEC.md` is historical.
+- **v2.5 storage discipline restored into the consolidated spec.** The uploaded bundle's Phase 1 storage model was useful but older than the current v2.10/v2.11 spec. It has been ported into §8 with current env names and implementation status.
+- **Older uploaded status intentionally not imported.** The uploaded `AUDIT_REMEDIATION.md` predates multiple closed packages. Keep the existing consolidated audit/roadmap status instead.
 
 ### v2.5 doc-update notes (2026-05-21)
 
