@@ -56,6 +56,7 @@ import { createActivityRoutes } from "./activity-routes.js";
 import { createBadgeRoutes } from "./badge-routes.js";
 import { createContentRoutes } from "./content-routes.js";
 import { createDisputeRoutes } from "./dispute-routes.js";
+import { createEventRoutes } from "./event-routes.js";
 import { createGasRoutes } from "./gas-routes.js";
 import { createJobRoutes } from "./job-routes.js";
 import { createPolicyRoutes } from "./policy-routes.js";
@@ -131,19 +132,6 @@ function parseRequiredFlag(value, defaultValue) {
   return !["0", "false", "no", "off"].includes(normalized);
 }
 
-function respondSse(response) {
-  const headers = {
-    "content-type": "text/event-stream",
-    "cache-control": "no-cache, no-transform",
-    connection: "keep-alive",
-    ...(response._corsHeaders ?? {})
-  };
-  if (response._requestId) {
-    headers["x-request-id"] = response._requestId;
-  }
-  response.writeHead(200, headers);
-}
-
 async function readJsonBody(request, { maxBytes = httpConfig.maxBodyBytes } = {}) {
   const chunks = [];
   let received = 0;
@@ -165,16 +153,6 @@ async function readJsonBody(request, { maxBytes = httpConfig.maxBodyBytes } = {}
   } catch {
     throw new ValidationError("Invalid JSON body.");
   }
-}
-
-function writeSseEvent(response, { id, topic, data }) {
-  if (id) {
-    response.write(`id: ${id}\n`);
-  }
-  if (topic) {
-    response.write(`event: ${topic}\n`);
-  }
-  response.write(`data: ${JSON.stringify(data)}\n\n`);
 }
 
 function parseTopics(url) {
@@ -1177,6 +1155,16 @@ const handleActivityRoute = createActivityRoutes({
   respond,
 });
 
+const handleEventRoute = createEventRoutes({
+  authMiddleware,
+  enforceLimit,
+  eventBus,
+  metrics,
+  parseEventFilters,
+  parseLimit,
+  rateLimitConfig,
+});
+
 const handleContentRoute = createContentRoutes({
   authMiddleware,
   gateway,
@@ -1262,7 +1250,7 @@ const server = createServer(async (request, response) => {
   const requestId = resolveRequestId(request);
   const requestLogger = logger.child({ requestId });
   const startedAt = process.hrtime.bigint();
-  // Stash CORS headers + request id on the response so `respond`/`respondSse`
+  // Stash CORS headers + request id on the response so JSON and SSE responders
   // can echo them back without each route needing to thread them through.
   response._corsHeaders = resolveCorsHeaders(request);
   response._requestId = requestId;
@@ -1914,51 +1902,7 @@ const server = createServer(async (request, response) => {
 
     // ---------- protected routes ----------
 
-    if (request.method === "GET" && pathname === "/events") {
-      const auth = await authMiddleware(request, url, { allowQueryToken: true });
-      await enforceLimit("events", auth.wallet, rateLimitConfig.events);
-      respondSse(response);
-      const filter = {
-        wallet: auth.wallet,
-        jobId: url.searchParams.get("jobId") ?? undefined,
-        sessionId: url.searchParams.get("sessionId") ?? undefined,
-        ...parseEventFilters(url)
-      };
-      const lastEventId = request.headers["last-event-id"] ?? url.searchParams.get("lastEventId") ?? undefined;
-      const replay = eventBus?.replayDurable
-        ? await eventBus.replayDurable(filter, lastEventId, { limit: parseLimit(url, 100, 500) })
-        : eventBus?.replay?.(filter, lastEventId);
-
-      if (replay?.gap) {
-        writeSseEvent(response, {
-          id: `gap-${Date.now()}`,
-          topic: "gap",
-          data: {
-            topic: "gap",
-            lastDelivered: lastEventId ?? null
-          }
-        });
-      }
-
-      for (const event of replay?.events ?? []) {
-        writeSseEvent(response, { id: event.id, topic: event.topic, data: event });
-      }
-
-      const heartbeat = setInterval(() => {
-        response.write(": ping\n\n");
-      }, 15_000);
-
-      const unsubscribe = eventBus?.subscribe?.(filter, (event) => {
-        writeSseEvent(response, { id: event.id, topic: event.topic, data: event });
-      });
-
-      metrics.gauge("sse_active_connections").inc();
-      request.on("close", () => {
-        clearInterval(heartbeat);
-        unsubscribe?.();
-        metrics.gauge("sse_active_connections").dec();
-        response.end();
-      });
+    if (await handleEventRoute({ request, response, url, pathname })) {
       return;
     }
 
