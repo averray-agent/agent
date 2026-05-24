@@ -37,7 +37,7 @@ Use the dedicated pauser proof before closing the two remaining boxes:
 # Read-only capability proof: no mutation, no private key.
 node scripts/ops/run-pauser-rehearsal.mjs \
   --profile testnet \
-  --out artifacts/pauser-rehearsal-readonly.json
+  --out docs/evidence/pauser-rehearsal-readonly-YYYY-MM-DD.json
 
 # Live launch evidence: pauses and unpauses the deployed TreasuryPolicy.
 PAUSER_PRIVATE_KEY=0x<pauser-testnet-key> \
@@ -45,9 +45,18 @@ node scripts/ops/run-pauser-rehearsal.mjs \
   --profile testnet \
   --live \
   --out docs/evidence/pauser-rehearsal-testnet-YYYY-MM-DD.json
+
+# Validate the captured evidence before ticking checklist boxes.
+node scripts/ops/check-pauser-rehearsal-evidence.mjs \
+  --file docs/evidence/pauser-rehearsal-readonly-YYYY-MM-DD.json
+
+node scripts/ops/check-pauser-rehearsal-evidence.mjs \
+  --file docs/evidence/pauser-rehearsal-testnet-YYYY-MM-DD.json \
+  --require-live
 ```
 
-For mainnet or any real-funds rehearsal, add `--require-dedicated-pauser`.
+For mainnet or any real-funds rehearsal, add `--require-dedicated-pauser`
+to both the rehearsal and evidence validation commands.
 The current testnet pauser address overlaps other testnet roles in
 `deployments/testnet.json`; that is acceptable only as a bounded testnet
 shortcut and must not be carried into mainnet.
