@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { mutate } from "swr";
 import { DrawerSection } from "@/components/shell/DetailDrawer";
 import { decisionToVerdict } from "@/lib/api/dispute-adapters";
+import { releaseAmountForDecision } from "@/lib/api/dispute-verdicts";
 import { swrFetcher } from "@/lib/api/client";
 import { DisputeStatePill, OriginPill } from "./pills";
 import { PartyChip } from "./PartyChip";
@@ -50,18 +51,14 @@ export function DisputeDrawerBody({
   }, [dispute.id, dispute.resolution, dispute.state]);
 
   // If the decision changes, reset the destination to stay consistent
-  // (uphold/reject pick different valid destinations; request-more has none).
+  // with the backend verdict settlement path.
   const handleDecision = (d: DecisionKind) => {
     setDecision(d);
-    if (d === "request-more") setDestination(null);
-    else {
-      // auto-pick a default that matches the decision.
-      if (d === "uphold" && destination !== "slash-to-treasury" && destination !== "pay-verifier") {
-        setDestination("slash-to-treasury");
-      }
-      if (d === "reject" && destination !== "return-to-depositor") {
-        setDestination("return-to-depositor");
-      }
+    if (d === "uphold" && destination !== "slash-to-treasury" && destination !== "pay-verifier") {
+      setDestination("slash-to-treasury");
+    }
+    if ((d === "reject" || d === "split") && destination !== "return-to-depositor") {
+      setDestination("return-to-depositor");
     }
   };
 
@@ -90,7 +87,7 @@ export function DisputeDrawerBody({
       ]);
       verdictCommitted = true;
 
-      if (destination && decision !== "request-more") {
+      if (destination) {
         await swrFetcher([
           `${detailKey}/release`,
           {
@@ -99,7 +96,11 @@ export function DisputeDrawerBody({
             body: JSON.stringify({
               action: destination,
               destination,
-              amount: dispute.stakeFrozen,
+              amount: releaseAmountForDecision({
+                decision,
+                remainingPayout: dispute.remainingPayout,
+                stakeFrozen: dispute.stakeFrozen,
+              }),
             }),
           },
         ]);
@@ -378,7 +379,7 @@ function ResolvedCard({ dispute }: { dispute: Dispute }) {
       ? "Upheld"
       : decision === "reject"
         ? "Rejected"
-        : "Requested more evidence";
+        : "Split payout";
   const destinationLabel =
     destination === "return-to-depositor"
       ? "Returned to depositor"

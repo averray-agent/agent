@@ -31,7 +31,7 @@ export type ReleaseDestination =
   | "pay-verifier"
   | "slash-to-treasury";
 
-export type DecisionKind = "uphold" | "reject" | "request-more";
+export type DecisionKind = "uphold" | "reject" | "split";
 
 export interface DisputeParty {
   handle: string;
