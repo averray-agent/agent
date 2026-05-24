@@ -125,6 +125,31 @@ CI is the merge gate. Do not bypass failing checks.
 - Contract changes require an explicit contract deployment plan. A normal
   production deploy does not deploy smart contracts.
 
+## Supply-Chain Hygiene
+
+- The CI job `AI-instruction integrity (zero-width Unicode lint)` rejects PRs
+  that introduce zero-width Unicode codepoints (U+200B, U+200C, U+200D, U+2060,
+  or mid-file U+FEFF) into `AGENTS.md`, `docs/*.md`, or any tracked
+  `CLAUDE.md` / `.cursorrules` file. This is a defense against the
+  TrapDoor-class persistence vector documented by Socket on 2026-05-24
+  ([advisory](https://socket.dev/blog/trapdoor-crypto-stealer-npm-pypi-crates)):
+  a compromised npm/PyPI/Crates dependency installs a hook that grafts
+  hidden instructions into an AI assistant's config file using invisible
+  characters that pass code review.
+- The lint also runs as a `npm run test:ops` test, so a regression is caught
+  locally before push.
+- This repo additionally relies on the Socket Security GitHub App for
+  PR-level malicious-dependency detection. The App posts a check status on
+  PRs that touch `package-lock.json`, `requirements*.txt`, or `Cargo.lock`;
+  do not bypass that check without an explicit security review.
+- Adding a new third-party dependency (npm, PyPI, or Cargo) requires PR
+  notes that include the upstream repo URL, weekly download count, last-
+  publish date, and one sentence on what the dep does. This applies to
+  any new entry in any workspace's `package.json` `dependencies` /
+  `devDependencies`, or any new Cargo crate.
+- The operator app has zero `postinstall` lifecycle scripts. Adding one
+  requires an explicit security justification in the PR body.
+
 ## PR Notes
 
 Every PR should include:
