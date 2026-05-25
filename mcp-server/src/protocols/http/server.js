@@ -49,6 +49,7 @@ import { createPublicMetadataRoutes } from "./public-metadata-routes.js";
 import { createSchemaRoutes } from "./schema-routes.js";
 import { createSessionRoutes } from "./session-routes.js";
 import { createVerifierRoutes } from "./verifier-routes.js";
+import { createXcmRequestRoutes } from "./xcm-request-routes.js";
 import { OPERATOR_SIGNERS, makePolicy } from "../../core/builtin-policies.js";
 
 const {
@@ -927,6 +928,13 @@ const handleAdminXcmRoute = createAdminXcmRoutes({
   storeIdempotentMutationReceipt,
 });
 
+const handleXcmRequestRoute = createXcmRequestRoutes({
+  authMiddleware,
+  ensureXcmRequestOwnership,
+  respond,
+  service,
+});
+
 const handleGasRoute = createGasRoutes({
   authMiddleware,
   pimlicoClient,
@@ -1278,15 +1286,8 @@ const server = createServer(async (request, response) => {
       return;
     }
 
-    if (request.method === "GET" && pathname === "/xcm/request") {
-      const auth = await authMiddleware(request, url);
-      const requestId = url.searchParams.get("requestId") ?? "";
-      if (!requestId) {
-        throw new ValidationError("requestId is required.");
-      }
-      const record = await service.getXcmRequest(requestId);
-      ensureXcmRequestOwnership(record, auth);
-      return respond(response, 200, record);
+    if (await handleXcmRequestRoute({ request, response, url, pathname })) {
+      return;
     }
 
     if (await handleAdminStatusRoute({ request, response, url, pathname })) {
