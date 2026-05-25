@@ -56,6 +56,27 @@ function validEvidence(overrides = {}) {
   };
 }
 
+function freshEvidence() {
+  const now = new Date();
+  const observedAt = new Date(now.getTime() - 5 * 60 * 1000).toISOString();
+  return validEvidence({
+    proofDate: now.toISOString().slice(0, 10),
+    completedAt: now.toISOString(),
+    metricsAuth: {
+      ...validEvidence().metricsAuth,
+      observedAt
+    },
+    alertDestination: {
+      ...validEvidence().alertDestination,
+      receivedAt: observedAt
+    },
+    sentryLogging: {
+      ...validEvidence().sentryLogging,
+      observedAt
+    }
+  });
+}
+
 async function writeEvidenceFile(doc) {
   const dir = await mkdtemp(join(tmpdir(), "observability-proof-"));
   const file = join(dir, "evidence.json");
@@ -70,6 +91,15 @@ test("validateEvidence accepts log-only observability proof", () => {
   assert.equal(result.summary.metrics.unauthenticatedStatus, 401);
   assert.equal(result.summary.alertDelivered, true);
   assert.equal(result.summary.sentryLoggingDecision, "log_only_deferred");
+});
+
+test("validateEvidence accepts fresh launch proof with a max completed age", () => {
+  const result = validateEvidence(validEvidence(), {
+    now: new Date("2026-05-22T19:00:00.000Z"),
+    maxCompletedAgeHours: 2
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.errors, []);
 });
 
 test("validateEvidence accepts Sentry-enabled observability proof", () => {
@@ -92,7 +122,7 @@ test("validateEvidence accepts Sentry-enabled observability proof", () => {
 test("validateEvidence rejects incomplete or misleading proof", () => {
   const doc = validEvidence({
     target: {
-      environment: "production",
+      environment: "staging",
       apiBaseUrl: "https://api.example.test"
     },
     metricsAuth: {
@@ -113,6 +143,7 @@ test("validateEvidence rejects incomplete or misleading proof", () => {
 
   const result = validateEvidence(doc);
   assert.equal(result.ok, false);
+  assert.ok(result.errors.includes("target.environment must be production"));
   assert.ok(result.errors.includes("target.apiBaseUrl must be the hosted production API base URL"));
   assert.ok(result.errors.includes("metricsAuth.command must include CHECK_METRICS_AUTH=1"));
   assert.ok(result.errors.includes("metricsAuth.command must not include the raw metrics token"));
@@ -121,6 +152,57 @@ test("validateEvidence rejects incomplete or misleading proof", () => {
   assert.ok(result.errors.includes("alertDestination.deliberateFailureDelivered must be true"));
   assert.ok(result.errors.includes("sentryLogging.observedLogLine must not contain secret-looking material"));
   assert.ok(result.errors.includes("evidence must not include bearer tokens, provider API keys, or Sentry DSNs"));
+});
+
+test("validateEvidence rejects stale or future-dated launch proof", () => {
+  const stale = validateEvidence(validEvidence(), {
+    now: new Date("2026-05-25T18:31:00.000Z"),
+    maxCompletedAgeHours: 24
+  });
+  assert.equal(stale.ok, false);
+  assert.ok(stale.errors.includes("completedAt must be within 24 hour(s)"));
+
+  const future = validateEvidence(validEvidence({
+    proofDate: "2026-05-22",
+    completedAt: "2026-05-22T19:10:00.000Z"
+  }), {
+    now: new Date("2026-05-22T19:00:00.000Z"),
+    maxCompletedAgeHours: 24
+  });
+  assert.equal(future.ok, false);
+  assert.ok(future.errors.includes("completedAt must not be in the future"));
+});
+
+test("validateEvidence rejects mismatched or post-completion timestamps", () => {
+  const result = validateEvidence(validEvidence({
+    proofDate: "2026-05-23",
+    metricsAuth: {
+      ...validEvidence().metricsAuth,
+      observedAt: "2026-05-22T18:40:01.000Z"
+    },
+    alertDestination: {
+      ...validEvidence().alertDestination,
+      receivedAt: "2026-05-22T18:40:01.000Z"
+    },
+    sentryLogging: {
+      ...validEvidence().sentryLogging,
+      observedAt: "2026-05-22T18:40:01.000Z"
+    }
+  }));
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.includes("proofDate must match completedAt UTC date"));
+  assert.ok(result.errors.includes("metricsAuth.observedAt must not be later than completedAt"));
+  assert.ok(result.errors.includes("alertDestination.receivedAt must not be later than completedAt"));
+  assert.ok(result.errors.includes("sentryLogging.observedAt must not be later than completedAt"));
+});
+
+test("validateEvidence rejects invalid freshness options", () => {
+  const result = validateEvidence(validEvidence(), {
+    now: new Date("2026-05-22T19:00:00.000Z"),
+    maxCompletedAgeHours: 0
+  });
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.includes("maxCompletedAgeHours must be a positive number"));
 });
 
 test("validateEvidence rejects Sentry-enabled proof without ready observation", () => {
@@ -147,6 +229,20 @@ test("CLI exits zero and prints JSON for valid evidence", async () => {
   assert.equal(parsed.summary.operator, "Pascal");
 });
 
+test("CLI accepts max completed age for fresh evidence", async () => {
+  const file = await writeEvidenceFile(freshEvidence());
+  const { stdout } = await execFileAsync(process.execPath, [
+    scriptPath,
+    "--file",
+    file,
+    "--max-completed-age-hours",
+    "1",
+    "--json"
+  ]);
+  const parsed = JSON.parse(stdout);
+  assert.equal(parsed.status, "ok");
+});
+
 test("CLI exits non-zero for invalid evidence", async () => {
   const file = await writeEvidenceFile(validEvidence({
     alertDestination: {
@@ -159,6 +255,24 @@ test("CLI exits non-zero for invalid evidence", async () => {
     (error) => {
       assert.notEqual(error.code, 0);
       assert.match(error.stderr, /alertDestination\.webhookConfigured must be true/u);
+      return true;
+    }
+  );
+});
+
+test("CLI exits non-zero for invalid max completed age", async () => {
+  const file = await writeEvidenceFile(validEvidence());
+  await assert.rejects(
+    () => execFileAsync(process.execPath, [
+      scriptPath,
+      "--file",
+      file,
+      "--max-completed-age-hours",
+      "0"
+    ]),
+    (error) => {
+      assert.notEqual(error.code, 0);
+      assert.match(error.stderr, /--max-completed-age-hours must be a positive number/u);
       return true;
     }
   );

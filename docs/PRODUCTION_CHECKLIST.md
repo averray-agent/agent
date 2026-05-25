@@ -311,7 +311,7 @@ deployed-config evidence that lives outside the repo. The wiring exists in
 code; only the production env vars need to be set. Record the three
 observability gates as one dated artifact and validate it with
 `node scripts/ops/check-observability-proof.mjs --file
-docs/evidence/observability-YYYY-MM-DD.json --json` before moving the
+docs/evidence/observability-YYYY-MM-DD.json --max-completed-age-hours 30 --json` before moving the
 roadmap rows to `Proofed`. Concrete verification commands per box:
 
 - **Backend metrics bearer-protected and reachable.** Production now fails
