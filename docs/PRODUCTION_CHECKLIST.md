@@ -465,9 +465,14 @@ This checklist improves release discipline, but it does not replace:
 - a real, audited strategy adapter path instead of the mock vDOT adapter
 - explicit incident ownership and paging
 - hardware MFA across the admin trust chain. Evidence must be captured in
-  `docs/evidence/hardware-mfa-YYYY-MM-DD.json` and validated with
-  `node scripts/ops/check-hardware-mfa-evidence.mjs --file <path> --json`
-  before mainnet launch sign-off.
+  `docs/evidence/hardware-mfa-YYYY-MM-DD.json` and validated before mainnet
+  launch sign-off:
+  ```bash
+  node scripts/ops/check-hardware-mfa-evidence.mjs \
+    --file docs/evidence/hardware-mfa-YYYY-MM-DD.json \
+    --max-completed-age-hours 30 \
+    --json
+  ```
 
 Until those are done, treat the stack as production-like testnet, not
 irreversible real-funds infrastructure.

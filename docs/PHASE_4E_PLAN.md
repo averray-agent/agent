@@ -158,8 +158,13 @@ Recommended path:
 ```bash
 node scripts/ops/check-hardware-mfa-evidence.mjs \
   --file docs/evidence/hardware-mfa-YYYY-MM-DD.json \
+  --max-completed-age-hours 30 \
   --json
 ```
+
+The max-age flag is required for launch sign-off. Older artifacts can remain
+useful audit history, but they must not be reused as current proof that the
+admin trust chain is hardware-MFA protected.
 
 Minimum shape:
 
