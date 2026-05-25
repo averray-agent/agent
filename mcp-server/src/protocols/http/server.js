@@ -45,6 +45,7 @@ import { createGasRoutes } from "./gas-routes.js";
 import { createJobRoutes } from "./job-routes.js";
 import { createPolicyRoutes } from "./policy-routes.js";
 import { createProfileRoutes } from "./profile-routes.js";
+import { createPublicMetadataRoutes } from "./public-metadata-routes.js";
 import { createSchemaRoutes } from "./schema-routes.js";
 import { createSessionRoutes } from "./session-routes.js";
 import { createVerifierRoutes } from "./verifier-routes.js";
@@ -1038,6 +1039,15 @@ const handleEventRoute = createEventRoutes({
   rateLimitConfig,
 });
 
+const handlePublicMetadataRoute = createPublicMetadataRoutes({
+  authConfig,
+  buildDiscoveryManifest,
+  publicBaseUrl: process.env.PUBLIC_BASE_URL,
+  respond,
+  service,
+  strategies,
+});
+
 const handleContentRoute = createContentRoutes({
   authMiddleware,
   gateway,
@@ -1126,81 +1136,8 @@ const server = createServer(async (request, response) => {
   try {
     // ---------- public routes ----------
 
-    if (request.method === "GET" && pathname === "/") {
-      return respond(response, 200, {
-        name: "agent-platform",
-        status: "ok",
-        authMode: authConfig.mode,
-        endpoints: [
-          "/health",
-          "/metrics",
-          "/agent-tools.json",
-          "/onboarding",
-          "/auth/nonce",
-          "/auth/verify",
-          "/auth/refresh",
-          "/auth/logout",
-          "/auth/session",
-          "/events",
-          "/account",
-          "/account/allocate",
-          "/account/borrow",
-          "/account/borrow-capacity",
-          "/account/deallocate",
-          "/account/fund",
-          "/account/repay",
-          "/account/strategies",
-          "/xcm/request",
-          "/payments/send",
-          "/reputation",
-          "/session",
-          "/session/timeline",
-          "/sessions",
-          "/jobs",
-          "/jobs/sub",
-          "/jobs/tiers",
-          "/agents",
-          "/agents/:wallet",
-          "/badges",
-          "/badges/:sessionId",
-          "/alerts",
-          "/audit",
-          "/policies",
-          "/policies/:tag",
-          "/disputes",
-          "/disputes/:id",
-          "/disputes/:id/verdict",
-          "/disputes/:id/release",
-          "/strategies",
-          "/admin/jobs/pause",
-          "/admin/jobs/resume",
-          "/jobs/preflight",
-          "/jobs/recommendations",
-          "/gas/health",
-          "/gas/capabilities",
-          "/gas/quote",
-          "/gas/sponsor",
-          "/verifier/handlers",
-          "/verifier/replay",
-          "/admin/jobs",
-          "/admin/jobs/timeline",
-          "/admin/sessions",
-          "/admin/jobs/ingest/github",
-          "/admin/jobs/ingest/openapi",
-          "/admin/jobs/ingest/open-data",
-          "/admin/jobs/ingest/osv",
-          "/admin/jobs/ingest/standards",
-          "/admin/jobs/ingest/wikipedia",
-          "/admin/jobs/fire",
-          "/admin/jobs/lifecycle",
-          "/admin/jobs/pause",
-          "/admin/jobs/resume",
-          "/admin/xcm/observe",
-          "/admin/xcm/finalize",
-          "/admin/status",
-          "/admin/github/status"
-        ]
-      });
+    if (await handlePublicMetadataRoute({ request, response, pathname })) {
+      return;
     }
 
     if (request.method === "GET" && pathname === "/health") {
@@ -1254,15 +1191,6 @@ const server = createServer(async (request, response) => {
       });
     }
 
-    if (request.method === "GET" && pathname === "/status/providers") {
-      // Public, sanitized counterpart to /admin/status.providerOperations.
-      // Returns the same shape minus lastRun.errors[] / lastRun.skipped[]
-      // (those carry candidate URLs / stack traces / internal IDs).
-      // External trust dashboards can call this without auth to show
-      // "is each ingestion provider healthy?" without leaking internals.
-      return respond(response, 200, await service.getPublicProviderOperations());
-    }
-
     if (request.method === "GET" && pathname === "/metrics") {
       // Fail closed in production: public metrics reveal request paths,
       // status-code mix, and operational posture.
@@ -1282,33 +1210,6 @@ const server = createServer(async (request, response) => {
       });
       response.end(metrics.serialize());
       return;
-    }
-
-    if (request.method === "GET" && pathname === "/onboarding") {
-      return respond(response, 200, service.getPlatformCapabilities());
-    }
-
-    if (
-      request.method === "GET"
-      && (pathname === "/agent-tools.json" || pathname === "/.well-known/agent-tools.json")
-    ) {
-      // Discovery manifest. The canonical copy is served by the static
-      // site at https://averray.com/.well-known/agent-tools.json — this
-      // API mirror lets MCP clients that only know the api host still
-      // find the capability listing. Both `/agent-tools.json` and the
-      // RFC 8615-conformant `/.well-known/agent-tools.json` are served
-      // from the same handler so a spec-following MCP client can
-      // discover the same manifest at the same path it uses on the
-      // canonical host. Bumps refer to
-      // discovery/.well-known/agent-tools.json in the repo.
-      return respond(
-        response,
-        200,
-        buildDiscoveryManifest({
-          baseUrl: process.env.PUBLIC_BASE_URL?.trim() || undefined
-        }),
-        { "cache-control": "public, max-age=300" }
-      );
     }
 
     if (await handleJobRoute({ request, response, url, pathname })) {
