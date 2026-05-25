@@ -30,6 +30,21 @@
  *     calling deposit() leaves liquid=0; surfacing balanceOf separately
  *     points the operator at fund-signer-usdc-deposit.mjs instead of
  *     "where did my USDC go".
+ *   - Deployed-bytecode selector presence — for every contract the
+ *     BlockchainGateway holds an ABI for, confirm the deployed runtime
+ *     bytecode at `deployments.contracts.<address>` contains the 4-byte
+ *     selector of every function in that ABI. Authorization + balances
+ *     are necessary but not sufficient: if the source the contract was
+ *     compiled from predates a function the gateway calls, dispatch
+ *     fails at the EVM with bare `data=0x`, surfacing as the same kind
+ *     of opaque revert that the role/balance checks were added to
+ *     prevent. The 2026-05-25 worker-loop debugging session burned ~2h
+ *     chasing exactly this — EscrowCore at 0x7BB8…8b0a had been
+ *     deployed pre-#357 and was missing `claimJobFor(bytes32,address)`,
+ *     so every backend-brokered claim reverted at chain-side dispatch.
+ *     This check catches that pre-deploy by comparing each gateway-ABI
+ *     selector against the bytecode as a 4-byte substring (the EVM
+ *     dispatch table embeds selectors verbatim as PUSH4 operands).
  * Then prints a punch list of any setVerifier / setServiceOperator /
  * setApprovedAsset calls that need to happen on the multisig owner.
  *
@@ -41,6 +56,13 @@ import { JsonRpcProvider, Contract, Interface } from "ethers";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+
+import {
+  AGENT_ACCOUNT_ABI,
+  ESCROW_CORE_ABI,
+  REPUTATION_SBT_ABI,
+  TREASURY_POLICY_ABI
+} from "../../mcp-server/src/blockchain/abis.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..", "..");
@@ -207,6 +229,101 @@ export function formatUsdc(baseUnits) {
   return fractionText ? `${whole}.${fractionText}` : whole.toString();
 }
 
+// The contracts whose deployed bytecode we audit for selector presence.
+// Scope: every contract the BlockchainGateway constructs in
+// `mcp-server/src/blockchain/gateway.js` with a bundled ABI from
+// `mcp-server/src/blockchain/abis.js`. EscrowCore and AgentAccountCore
+// the gateway mutates against; TreasuryPolicy and ReputationSBT it only
+// reads, but a missing read selector reverts at dispatch the same way a
+// missing mutation does, so the check is equally load-bearing for them.
+//
+// Skipped:
+//   - ESCROW_CORE_LEGACY_ABI: intentional fallback ABI for older escrow
+//     deployments. A "missing" selector here means "this is a new
+//     contract", which is expected, not a bug.
+//   - ERC20_MOCK_ABI: targets the ERC20 precompile. Precompiles do not
+//     have a Solidity dispatch table — the runtime resolves them via
+//     pallet code, not bytecode pattern matching.
+//   - STRATEGY_ADAPTER_ABI: addresses are dynamic (per strategy in
+//     `deployments.strategies`), not in `deployments.contracts`.
+//   - XCM_WRAPPER_ABI: optional contract; current testnet has xcmWrapper=null.
+//   - DISCOVERY_REGISTRY_ABI: the gateway holds it but never constructs
+//     a contract instance against it; `scripts/ops/publish-discovery-manifest.mjs`
+//     uses its own copy of the ABI for the one-shot publisher flow.
+const SELECTOR_TARGETS = [
+  {
+    name: "EscrowCore",
+    addressKey: "escrowCore",
+    abi: ESCROW_CORE_ABI,
+    gatewayHandle: "BlockchainGateway.escrowContract"
+  },
+  {
+    name: "AgentAccountCore",
+    addressKey: "agentAccountCore",
+    abi: AGENT_ACCOUNT_ABI,
+    gatewayHandle: "BlockchainGateway.accountContract"
+  },
+  {
+    name: "TreasuryPolicy",
+    addressKey: "treasuryPolicy",
+    abi: TREASURY_POLICY_ABI,
+    gatewayHandle: "BlockchainGateway.policyContract"
+  },
+  {
+    name: "ReputationSBT",
+    addressKey: "reputationSbt",
+    abi: REPUTATION_SBT_ABI,
+    gatewayHandle: "BlockchainGateway.reputationContract"
+  }
+];
+
+// Extract every external/public function in `abi` as { signature, selector }
+// pairs. Events, constructors, receive/fallback are excluded — they don't
+// participate in the dispatch table, so their absence wouldn't cause a
+// gateway call to revert with bare 0x.
+export function selectorsFromAbi(abi) {
+  const iface = new Interface(abi);
+  const entries = [];
+  iface.forEachFunction((frag) => {
+    entries.push({
+      signature: frag.format("sighash"),
+      selector: frag.selector.toLowerCase()
+    });
+  });
+  return entries;
+}
+
+// Return the subset of `selectors` whose 4-byte selector does NOT appear
+// as a substring of `bytecode`. The EVM dispatch table embeds each
+// selector verbatim as the operand of a PUSH4 (or as a constant in the
+// binary-search variant Solidity 0.8 emits), so a 4-byte substring search
+// is a coarse but reliable presence check — see commit log of #357 for
+// why this matters in practice.
+//
+// Coarseness goes one way: a selector reported as PRESENT might still be
+// non-dispatched if it happens to coincide with a random 4-byte window in
+// constant data (probability ≈ N/2^32 per selector; with ~70 selectors
+// across ~50KB of code, expected false positives ≈ 1e-4). A selector
+// reported as MISSING is always genuinely absent — there's no way for the
+// dispatch table to omit a PUSH4 of the selector value.
+export function findMissingSelectors(bytecode, selectors) {
+  const hex = normalizeBytecodeHex(bytecode);
+  if (hex === "") return selectors.slice();
+  return selectors.filter((entry) => !hex.includes(stripHexPrefix(entry.selector)));
+}
+
+// Lowercase, drop the 0x prefix. `provider.getCode(addr)` returns "0x"
+// for an EOA or undeployed address — normalize that to "" so callers can
+// treat it as "everything is missing".
+function normalizeBytecodeHex(bytecode) {
+  const text = String(bytecode ?? "").toLowerCase();
+  return stripHexPrefix(text);
+}
+
+function stripHexPrefix(hex) {
+  return hex.startsWith("0x") ? hex.slice(2) : hex;
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const rewardRaw = resolveRewardRaw({
@@ -244,7 +361,16 @@ async function main() {
   const agentAccount = new Contract(agentAccountAddress, AGENT_ACCOUNT_READ_ABI, provider);
   const usdc = new Contract(usdcAddress, ERC20_READ_ABI, provider);
 
-  // Read everything in parallel — all view calls.
+  // Resolve the per-target address up front so the bytecode fetches can
+  // share the same parallel-read block as the policy view calls.
+  const selectorTargets = SELECTOR_TARGETS.map((target) => ({
+    ...target,
+    address: deployments.contracts?.[target.addressKey] ?? null,
+    selectors: selectorsFromAbi(target.abi)
+  }));
+
+  // Read everything in parallel — all view calls + one eth_getCode per
+  // selector target (4 RPC calls today: escrow, account, policy, sbt).
   const [
     owner,
     pauser,
@@ -265,7 +391,8 @@ async function main() {
     signerPosition,
     signerUsdcBalance,
     blockNumber,
-    chainId
+    chainId,
+    ...selectorBytecodes
   ] = await Promise.all([
     policy.owner(),
     policy.pauser(),
@@ -286,7 +413,10 @@ async function main() {
     agentAccount.positions(backendSigner, usdcAddress),
     usdc.balanceOf(backendSigner),
     provider.getBlockNumber(),
-    provider.getNetwork().then((n) => Number(n.chainId))
+    provider.getNetwork().then((n) => Number(n.chainId)),
+    ...selectorTargets.map((target) =>
+      target.address ? provider.getCode(target.address) : Promise.resolve("0x")
+    )
   ]);
 
   // The auto-generated getter on `mapping(address => mapping(address =>
@@ -301,6 +431,24 @@ async function main() {
   });
   const liquidityOk = signerLiquidUsdc >= requiredPerClaim;
   const liquidityGap = liquidityOk ? 0n : requiredPerClaim - signerLiquidUsdc;
+
+  // Reconcile each target with the bytecode we just fetched, in the same
+  // order they were dispatched. A missing address (null in deployments) is
+  // surfaced as a separate "skipped" reason rather than a false missing-
+  // selector list — that's a deployment-file problem, not a chain one.
+  const selectorChecks = selectorTargets.map((target, index) => {
+    if (!target.address) {
+      return { ...target, status: "skipped", reason: "address not set in deployments.contracts" };
+    }
+    const bytecode = selectorBytecodes[index];
+    const missing = findMissingSelectors(bytecode, target.selectors);
+    return {
+      ...target,
+      status: missing.length === 0 ? "ok" : "missing",
+      bytecodeBytes: Math.max(0, (stripHexPrefix(String(bytecode ?? "")).length) / 2),
+      missing
+    };
+  });
 
   // Drift check: confirm we're talking to the chain we expected.
   const chainOk = chainId === EXPECTED_CHAIN_ID;
@@ -370,6 +518,32 @@ async function main() {
     console.log(`${check.label.padEnd(36, " ")}  ${check.ok ? "✅" : "❌"}  live=${live}  expected=${expected}`);
   }
 
+  // Deployed-bytecode selector presence. The 2026-05-25 worker-loop debug
+  // session burned ~2h on the missing `claimJobFor(bytes32,address)` selector
+  // (PR #357) — every role/balance/parameter check above passed, but the
+  // contract had been compiled from a pre-#357 source so dispatch reverted
+  // with bare 0x. This block compares each ABI selector the gateway might
+  // call against the runtime bytecode and flags mismatches pre-deploy.
+  console.log("");
+  console.log(`## Deployed-bytecode selector presence`);
+  for (const check of selectorChecks) {
+    const headerLeft = `${check.name.padEnd(18, " ")} (${short(check.address ?? "0x0000000000000000000000000000000000000000")})`;
+    if (check.status === "skipped") {
+      console.log(`${headerLeft}  ⏭  ${check.reason}`);
+      continue;
+    }
+    const present = check.selectors.length - check.missing.length;
+    const summary = `${present}/${check.selectors.length} selectors`;
+    if (check.status === "ok") {
+      console.log(`${headerLeft}  ✅  ${summary}  (${check.bytecodeBytes} bytes runtime)`);
+      continue;
+    }
+    console.log(`${headerLeft}  ❌  ${summary} — ${check.missing.length} missing  (${check.bytecodeBytes} bytes runtime)`);
+    for (const entry of check.missing) {
+      console.log(`   missing: ${entry.signature.padEnd(48, " ")} [${entry.selector}]  via ${check.gatewayHandle}`);
+    }
+  }
+
   // Punch list of fixes needed.
   const fixes = [];
   if (paused) {
@@ -434,6 +608,22 @@ async function main() {
       label: `backend signer is under-funded for one claim: positions[signer][USDC].liquid = ${formatUsdc(signerLiquidUsdc)} USDC, required ${formatUsdc(requiredPerClaim)} USDC (short by ${formatUsdc(liquidityGap)} USDC)${hint}`,
       reasonCode: "signer_liquidity_short",
       runbook: `node scripts/ops/fund-signer-usdc-deposit.mjs --amount ${liquidityGap.toString()} --use-kms --commit`
+    });
+  }
+  // Bytecode-selector mismatches are not fixable on the multisig — the
+  // remediation is a redeploy from a source that includes the missing
+  // selectors, not a setter call. We surface them in the punch list with
+  // a `reasonCode` so the operator gets a runbook hint, and so CI's
+  // non-zero exit catches them on every audit run.
+  for (const check of selectorChecks) {
+    if (check.status !== "missing") continue;
+    const missingList = check.missing
+      .map((entry) => `${entry.signature} [${entry.selector}]`)
+      .join(", ");
+    fixes.push({
+      label: `${check.name} deployed bytecode at ${short(check.address)} is missing ${check.missing.length} selector${check.missing.length === 1 ? "" : "s"} the gateway calls: ${missingList}`,
+      reasonCode: "bytecode_selector_missing",
+      runbook: `redeploy ${check.name} from a source that includes ${check.missing.map((entry) => entry.signature).join(" + ")} and update deployments/${deployments.profile}.json#contracts.${check.addressKey}`
     });
   }
   // Parameter drift fixes — only emit calldata for the cases where the
