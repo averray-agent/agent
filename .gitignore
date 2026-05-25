@@ -22,3 +22,4 @@ app/tsconfig.tsbuildinfo
 
 .claude/
 .codex/
+.keys/
