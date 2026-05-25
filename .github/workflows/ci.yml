@@ -256,6 +256,35 @@ jobs:
   # The job is intentionally separate from env-template-structure so
   # it can use fetch-depth: 0 for full-history scans without slowing
   # the other lints.
+  ai-instruction-integrity:
+    # Supply-chain hygiene gate (TrapDoor-class defense). Lints AI-
+    # instruction files (AGENTS.md, docs/*.md, plus any tracked
+    # CLAUDE.md / .cursorrules) for zero-width Unicode codepoints, the
+    # signature persistence vector used by the npm/PyPI/Crates malware
+    # campaign Socket disclosed on 2026-05-24
+    # (https://socket.dev/blog/trapdoor-crypto-stealer-npm-pypi-crates).
+    # The lint is a single node:test script with no network deps and
+    # runs in <1s; making it a required check ensures any compromised
+    # package that tries to graft hidden instructions into the repo's
+    # AI-assistant guides fails CI before merge.
+    name: AI-instruction integrity (zero-width Unicode lint)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "22"
+
+      - name: Run AI-instruction integrity lint
+        run: node scripts/ops/check-ai-instruction-integrity.mjs
+
+      - name: Run lint unit tests
+        run: node --test scripts/ops/check-ai-instruction-integrity.test.mjs
+
   secrets-scan:
     name: Phase 4a — gitleaks scan
     runs-on: ubuntu-latest
