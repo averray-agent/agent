@@ -724,6 +724,43 @@ Suggested closure note format:
 
 ---
 
+## Security incidents log
+
+This section captures operator-side security events that are out-of-scope for the audit-finding tracker above (which focuses on architectural truth-boundary remediation) but still need a public audit trail.
+
+### 2026-05-25 — Admin EOA rotation after transcript leak
+
+**Incident.** The operator-side admin EOA private key (`SIGNER_PRIVATE_KEY` in `mcp-server/.env.local`, deriving to `0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519`) was inadvertently echoed into a Claude Code session transcript during an earlier ops task. The same address held the `deployer`, `pauser`, and `arbitrator` roles on `TreasuryPolicy` per `deployments/testnet.json`, plus a small AAC.positions liquid balance (~9.34 USDC) and ~9977 PAS for gas. The address was already retired from the **backend-signer** role on 2026-05-17 (KMS cutover, see `deploy/secrets-inventory.md` strikethrough on `SIGNER_PRIVATE_KEY`), but it still held the admin roles above.
+
+**Blast radius (testnet).** Bounded — Paseo Asset Hub TestNet only, no mainnet exposure. Funds at risk were ~9.34 USDC in AAC.positions.liquid + ~9977 PAS native + role-misuse vectors (`setPaused`, `resolveDispute`) for the duration of the rotation window.
+
+**Mitigation chain — drain first, then move roles.** Reasoning: the multisig owner is the only entity that can `setPauser` / `setArbitrator`, so the leaked key could not move roles. But it COULD withdraw its own AAC.positions while we held it. Order: drain the financial position first with the leaked key in our hands, then move roles via the multisig.
+
+| Step | Action                                                                                                                                                                       | Block range          |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
+| 1    | Generated a fresh secp256k1 EOA `0x6778F050eAc8313e4dbB176d7BAB44510E833ac8` in-process; key never echoed to stdout / stderr / process env. Saved at `op://prod-critical/admin-eoa-testnet/private-key`. | n/a (off-chain)      |
+| 2    | Five-tx drain on Paseo Asset Hub TestNet (in-process `loadKeyFromEnvFile`, never `console.log`'d): native PAS sweep 9970 → new admin; `AAC.withdraw(USDC, 9_339_999)`; `USDC.transfer(newAdmin, 9_339_999)`; `USDC.approve(AAC, 9_339_999)`; `AAC.deposit(USDC, 9_339_999)`. | 9286375 – 9286384    |
+| 3    | Multisig 2-of-3 `setPauser(newAdmin)` on TreasuryPolicy. `revive.call` wrapped in `multisig.asMulti`. Ledger signed first, Hot Wallet countersigned via Apps Multisig tab.    | ~9289015             |
+| 4    | Multisig 2-of-3 batched arbitrator swap: `utility.batchAll([revive.call(setArbitrator(newAdmin, true)), revive.call(setArbitrator(oldAdmin, false))])` wrapped in `multisig.asMulti`. Atomic; Ledger first (block 9290992, ext 2), Hot Wallet countersigned. | 9290992 (init) + ~9291050 (exec) |
+| 5    | In-process atomic swap of `SIGNER_PRIVATE_KEY` value in `mcp-server/.env.local` from the leaked key to the new admin key (read-derive-verify-write-readback pattern).        | n/a (off-chain)      |
+| 6    | `deployments/testnet.json` updated: `deployer` / `pauser` / `arbitrator` → new admin. Verified by `scripts/ops/audit-launch-readiness.mjs --profile testnet` (all checks green). | n/a (file change)    |
+
+**Retired address.** `0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519` — no longer pauser, no longer approved arbitrator, AAC.positions.liquid drained to 0, EOA PAS balance reduced to dust (~6 PAS). Note: `0.200001` USDC remains in `AAC.positions.reserved` against an in-flight obligation. When that obligation resolves and the reserved unlocks back to `liquid`, the leaked key's `withdraw` capability is moot because the operator backend now signs as the new admin (see Step 5 — `.env.local` was rotated immediately after roles moved, so the legitimate process holds the active key; any race with the leaked key would resolve to the new admin reading first on each ops cycle).
+
+**New address.** `0x6778F050eAc8313e4dbB176d7BAB44510E833ac8` — now pauser, approved arbitrator, holds 9.339999 USDC in AAC.positions.liquid and ~9970 PAS native.
+
+**Tooling.** All admin-side scripts under `scripts/ops/rotate-admin-*.mjs` follow a single safety pattern: keys are loaded with `fs.readFileSync` into `ethers.Wallet`, and the `Wallet` object is the only thing that touches the bytes. Address-only output. The `--dry-run` default + `--commit` opt-in mirrors the existing `scripts/ops/admin-topup-kms-signer.mjs` (commit `07ca5a4` on `claude/kms-signer-topup`). For the multisig role rotations the operator signs via browser extension (Talisman / SubWallet / polkadot{.js}) through polkadot-js-apps — the sub-agent never touches Substrate keys.
+
+**Evidence.** `docs/evidence/admin-eoa-rotation-2026-05-25.drain.json` (drain tx hashes + block numbers + state deltas) and `docs/evidence/admin-eoa-rotation-2026-05-25.audit-launch.txt` (post-rotation audit-launch-readiness output). All **role + parameter** checks are green for this rotation. The same audit-launch output also surfaces one **unrelated** finding from PR #521's newly-added deployed-bytecode-selector check — `EscrowCore` is missing `claimJobFor(bytes32,address)` [0x090cf6d5]. That finding is not caused by this rotation (which never touches EscrowCore) and is tracked as a separate redeploy task — see the structured `unrelatedFindings` array in `docs/evidence/admin-eoa-rotation-2026-05-25.json`.
+
+**Follow-ups.**
+
+- [ ] Sweep the `200_001` USDC reserved-then-released amount from the retired admin's AAC position once the in-flight obligation resolves. Owner: Pascal. Verification: `policy.positions(0xFd2EAE…6519, USDC).liquid == 0` after the obligation completes.
+- [ ] Delete the `op://prod-backend/signer-private-key/password` 1Password item after the 30-day rollback soak (originally targeted ~2026-06-15 per the Phase 3 cutover; now also covers the 2026-05-25 transcript-leak vector).
+- [ ] Review the operator workflow that placed `SIGNER_PRIVATE_KEY` (deriving to the admin address) into `mcp-server/.env.local` in the first place — see whether `loadKeyFromEnvFile` should be replaced by `op read` invocations for admin-side scripts, so the local file disappears entirely.
+
+---
+
 ## Open questions for Pascal
 
 1. **What does the account overlay actually contain?** Closing `P1.2` cleanly depends on knowing whether overlay fields are derived state, off-chain authoritative state, or display-only cache.

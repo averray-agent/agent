@@ -1,0 +1,55 @@
+# Launch readiness audit
+Profile: testnet
+RPC:     https://eth-rpc-testnet.polkadot.io/
+Policy:  0x648Cc5fdE94435992296C4e5ac642d18bB64c12B
+Escrow:  0x7BB8fea44bDeE9870cF27c1dB616E7017BC38b0a
+Agent:   0x71B111d8c9DF84Be26cb9067D27dAd7A2d5E7e08
+USDC:    0x0000053900000000000000000000000001200000
+Signer:  0x31ad432dFe083B998c69B6dB88A984ec5207ab7F
+
+## Live state
+block:         9293465
+chainId:       420420417  ✅
+owner:         0x1f8C4da4AAAC79916350f1fabF1221309591B6F9  ✅
+pauser:        0x6778F050eAc8313e4dbB176d7BAB44510E833ac8  ✅
+paused:        false  ✅
+verifiers(0x31ad…ab7F)         ✅  true
+serviceOperators(0x31ad…ab7F)  ✅  true  (backend signer must be an operator to call EscrowCore.claimJobFor)
+serviceOperators(escrow)         ✅  true
+serviceOperators(agentAccount)   ✅  true  (defensive — strictly required for v1 single-payout is escrow only)
+arbitrators(0x6778…3ac8)  ✅  true  (required for resolveDispute)
+approvedAssets(USDC)             ✅  true
+USDC asset class (suffix)        ✅  trust_backed  (expected trust_backed)
+
+## Backend-signer USDC liquidity
+reward (per claim):              0.1 USDC (100000 raw)
+defaultClaimStakeBps:            1000
+claimFeeBps:                     200
+required (reward+stake+fee):     0.112 USDC (112000 raw)
+positions[signer][USDC].liquid   ✅  0.2 USDC (200000 raw)
+USDC.balanceOf(signer)           ℹ  0 USDC (0 raw)
+
+## Parameter drift vs deployments/testnet.json
+dailyOutflowCap                       ✅  live=250000000  expected=250000000
+perAccountBorrowCap                   ✅  live=25000000  expected=25000000
+defaultClaimStakeBps                  ✅  live=1000  expected=1000
+claimFeeBps                           ✅  live=200  expected=200
+claimFeeVerifierBps                   ✅  live=7000  expected=7000
+onboardingWaiverClaimCount            ✅  live=3  expected=3
+minClaimFeeByAsset(USDC)              ✅  live=50000  expected=50000
+
+## Deployed-bytecode selector presence
+EscrowCore         (0x7BB8…8b0a)  ❌  16/17 selectors — 1 missing  (21933 bytes runtime)
+   missing: claimJobFor(bytes32,address)                     [0x090cf6d5]  via BlockchainGateway.escrowContract
+AgentAccountCore   (0x71B1…7e08)  ✅  24/24 selectors  (24485 bytes runtime)
+TreasuryPolicy     (0x648C…c12B)  ✅  21/21 selectors  (5943 bytes runtime)
+ReputationSBT      (0x68Db…e27c)  ✅  4/4 selectors  (3810 bytes runtime)
+
+## Multisig fix list (1 call)
+Owner that must sign: 0x1f8c4da4aaac79916350f1fabf1221309591b6f9
+
+### 1. EscrowCore deployed bytecode at 0x7BB8…8b0a is missing 1 selector the gateway calls: claimJobFor(bytes32,address) [0x090cf6d5]
+   reason: bytecode_selector_missing
+   runbook: redeploy EscrowCore from a source that includes claimJobFor(bytes32,address) and update deployments/testnet.json#contracts.escrowCore
+
+⚠ None of these calls are signed. Hand the (to, value, data) tuples to the multisig owner.
