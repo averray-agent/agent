@@ -16,6 +16,20 @@
  *     on `claimJobFor`. The audit now flags it preemptively.
  *   - serviceOperators(EscrowCore) / serviceOperators(AgentAccountCore)
  *   - approvedAssets(USDC) (auto-generated getter on the public mapping)
+ *   - AgentAccountCore.positions(backendSigner, USDC).liquid — the
+ *     deposited USDC balance the backend signer can draw against when
+ *     EscrowCore.claimJobFor moves reward + claimStake + claimFee out
+ *     of its position. Authorization (serviceOperators) is necessary
+ *     but not sufficient: a rotated signer also needs funded liquidity
+ *     before the first claim. Missing this check let the 2026-05-25
+ *     hosted deploy burn 24s of CI on a settlement attempt that the
+ *     contract reverted because positions[signer][USDC].liquid was
+ *     0.10 USDC — short of the 0.16 USDC required for one claim.
+ *   - USDC.balanceOf(backendSigner) — the raw precompile balance that
+ *     never made it into the position. Funding the EOA without then
+ *     calling deposit() leaves liquid=0; surfacing balanceOf separately
+ *     points the operator at fund-signer-usdc-deposit.mjs instead of
+ *     "where did my USDC go".
  * Then prints a punch list of any setVerifier / setServiceOperator /
  * setApprovedAsset calls that need to happen on the multisig owner.
  *
@@ -61,7 +75,33 @@ const WRITE_ABI = [
   "function setDailyOutflowCap(uint256 cap)"
 ];
 
+const AGENT_ACCOUNT_READ_ABI = [
+  // Matches the AssetPosition struct in contracts/AgentAccountCore.sol: the
+  // auto-generated getter returns the six fields in declaration order. We
+  // only consume `liquid` (the first slot), but ethers v6 demands the full
+  // tuple layout in the fragment.
+  "function positions(address wallet, address asset) view returns (uint256 liquid, uint256 reserved, uint256 strategyAllocated, uint256 collateralLocked, uint256 jobStakeLocked, uint256 debtOutstanding)"
+];
+
+const ERC20_READ_ABI = [
+  // The Polkadot Hub ERC20 precompile does NOT implement name/symbol/
+  // decimals, but balanceOf is part of the mandatory subset (per
+  // https://docs.polkadot.com/smart-contracts/precompiles/erc20/). We only
+  // need balanceOf to surface un-deposited USDC sitting in the EOA.
+  "function balanceOf(address) view returns (uint256)"
+];
+
 const EXPECTED_CHAIN_ID = 420420417; // Polkadot Hub TestNet
+
+// USDC base unit scale on Hub TestNet (6 decimals, asset id 1337 / Trust-Backed).
+const USDC_DECIMALS_SCALE = 1_000_000n;
+
+// Default product-proof reward used by `scripts/ops/run-hosted-worker-loop.mjs`
+// (DEFAULT_REWARD_AMOUNT = 0.1, scaled by 10**6). Kept in sync with that
+// script — if it ever changes there, change it here. The audit accepts
+// `--min-reward <rawBaseUnits>` (or `PRODUCT_PROOF_REWARD_AMOUNT` decimal
+// env, same name the worker loop reads) to override.
+const DEFAULT_PRODUCT_PROOF_REWARD_RAW = 100_000n;
 
 // Polkadot Hub ERC20-precompile address-suffix conventions.
 //
@@ -93,9 +133,89 @@ function classifyAssetSuffix(address) {
   return "unknown";
 }
 
+export function parseArgs(argv) {
+  const args = { profile: "testnet", minRewardRaw: undefined };
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === "--profile") args.profile = argv[++i];
+    else if (arg === "--min-reward") args.minRewardRaw = argv[++i];
+  }
+  return args;
+}
+
+// Resolve the per-claim reward (USDC base units) used to compute the
+// required signer liquidity. Precedence:
+//   1. --min-reward <raw>             (CLI flag, base units)
+//   2. PRODUCT_PROOF_REWARD_AMOUNT    (env, decimal USDC — same shape the
+//                                      hosted worker loop reads)
+//   3. DEFAULT_PRODUCT_PROOF_REWARD_RAW (0.1 USDC)
+export function resolveRewardRaw({ cliRaw, envDecimal } = {}) {
+  if (cliRaw !== undefined && cliRaw !== null && cliRaw !== "") {
+    const raw = BigInt(cliRaw);
+    if (raw <= 0n) throw new Error(`--min-reward must be positive; got ${cliRaw}`);
+    return raw;
+  }
+  if (envDecimal !== undefined && envDecimal !== null && String(envDecimal).trim() !== "") {
+    return decimalUsdcToRaw(String(envDecimal).trim());
+  }
+  return DEFAULT_PRODUCT_PROOF_REWARD_RAW;
+}
+
+// Decimal USDC (e.g. "0.1", "1.234567") → raw base units. Rejects more
+// than 6 fractional digits and negative / non-numeric input. Matches the
+// shape `PRODUCT_PROOF_REWARD_AMOUNT` takes in run-hosted-worker-loop.
+function decimalUsdcToRaw(text) {
+  if (!/^\d+(\.\d+)?$/u.test(text)) {
+    throw new Error(`PRODUCT_PROOF_REWARD_AMOUNT must be a positive decimal; got ${JSON.stringify(text)}`);
+  }
+  const [whole, fraction = ""] = text.split(".");
+  if (fraction.length > 6) {
+    throw new Error(`PRODUCT_PROOF_REWARD_AMOUNT must fit 6 decimal places; got ${JSON.stringify(text)}`);
+  }
+  const padded = (fraction + "000000").slice(0, 6);
+  const raw = BigInt(whole) * USDC_DECIMALS_SCALE + BigInt(padded);
+  if (raw <= 0n) {
+    throw new Error(`PRODUCT_PROOF_REWARD_AMOUNT must be greater than zero; got ${JSON.stringify(text)}`);
+  }
+  return raw;
+}
+
+// Mirrors EscrowCore.claimJobFor's economics: when the backend signer
+// brokers a claim it locks `reward + claimStake + claimFee` out of its
+// own position. claimStake is `reward * defaultClaimStakeBps / 10_000`
+// and claimFee is `reward * claimFeeBps / 10_000`. The contract uses
+// integer division and the same rounding semantics; we replicate that
+// with BigInt division so the audit's "required" matches the chain.
+export function computeRequiredClaimAmount({ reward, defaultClaimStakeBps, claimFeeBps }) {
+  const r = BigInt(reward);
+  const stakeBps = BigInt(defaultClaimStakeBps);
+  const feeBps = BigInt(claimFeeBps);
+  if (r <= 0n) throw new Error("reward must be positive");
+  if (stakeBps < 0n || feeBps < 0n) throw new Error("bps values must be non-negative");
+  const stake = (r * stakeBps) / 10_000n;
+  const fee = (r * feeBps) / 10_000n;
+  return r + stake + fee;
+}
+
+export function formatUsdc(baseUnits) {
+  // 6 decimals per Polkadot docs (asset id 1337). Render with up to 6
+  // fractional digits and trim trailing zeros for readability.
+  const big = BigInt(baseUnits);
+  const whole = big / USDC_DECIMALS_SCALE;
+  const fraction = big % USDC_DECIMALS_SCALE;
+  const fractionText = fraction.toString().padStart(6, "0").replace(/0+$/u, "");
+  return fractionText ? `${whole}.${fractionText}` : whole.toString();
+}
+
 async function main() {
+  const args = parseArgs(process.argv.slice(2));
+  const rewardRaw = resolveRewardRaw({
+    cliRaw: args.minRewardRaw,
+    envDecimal: process.env.PRODUCT_PROOF_REWARD_AMOUNT
+  });
+
   const deployments = JSON.parse(
-    await readFile(resolve(repoRoot, "deployments/testnet.json"), "utf8")
+    await readFile(resolve(repoRoot, "deployments", `${args.profile}.json`), "utf8")
   );
 
   const rpcUrl = deployments.rpcUrl;
@@ -121,6 +241,8 @@ async function main() {
 
   const provider = new JsonRpcProvider(rpcUrl);
   const policy = new Contract(policyAddress, READ_ABI, provider);
+  const agentAccount = new Contract(agentAccountAddress, AGENT_ACCOUNT_READ_ABI, provider);
+  const usdc = new Contract(usdcAddress, ERC20_READ_ABI, provider);
 
   // Read everything in parallel — all view calls.
   const [
@@ -140,6 +262,8 @@ async function main() {
     claimFeeBps,
     claimFeeVerifierBps,
     onboardingWaiverClaimCount,
+    signerPosition,
+    signerUsdcBalance,
     blockNumber,
     chainId
   ] = await Promise.all([
@@ -159,9 +283,24 @@ async function main() {
     policy.claimFeeBps(),
     policy.claimFeeVerifierBps(),
     policy.onboardingWaiverClaimCount(),
+    agentAccount.positions(backendSigner, usdcAddress),
+    usdc.balanceOf(backendSigner),
     provider.getBlockNumber(),
     provider.getNetwork().then((n) => Number(n.chainId))
   ]);
+
+  // The auto-generated getter on `mapping(address => mapping(address =>
+  // AssetPosition))` returns the struct's fields in declaration order. We
+  // only need `liquid`.
+  const signerLiquidUsdc = BigInt(signerPosition.liquid ?? signerPosition[0] ?? 0n);
+  const signerUsdcBalanceRaw = BigInt(signerUsdcBalance ?? 0n);
+  const requiredPerClaim = computeRequiredClaimAmount({
+    reward: rewardRaw,
+    defaultClaimStakeBps,
+    claimFeeBps
+  });
+  const liquidityOk = signerLiquidUsdc >= requiredPerClaim;
+  const liquidityGap = liquidityOk ? 0n : requiredPerClaim - signerLiquidUsdc;
 
   // Drift check: confirm we're talking to the chain we expected.
   const chainOk = chainId === EXPECTED_CHAIN_ID;
@@ -203,8 +342,28 @@ async function main() {
   const usdcSuffixOk = usdcAssetClass === "trust_backed";
   console.log(`USDC asset class (suffix)        ${usdcSuffixOk ? "✅" : "❌"}  ${usdcAssetClass}  (expected trust_backed)`);
 
+  // Backend-signer USDC liquidity — authorization is necessary but not
+  // sufficient. The 2026-05-25 hosted deploy proved the failure mode:
+  // serviceOperators[signer] was true, but positions[signer][USDC].liquid
+  // was 0.10 USDC, short of the 0.16 USDC required for one claim.
   console.log("");
-  console.log(`## Parameter drift vs deployments/testnet.json`);
+  console.log(`## Backend-signer USDC liquidity`);
+  console.log(`reward (per claim):              ${formatUsdc(rewardRaw)} USDC (${rewardRaw} raw)`);
+  console.log(`defaultClaimStakeBps:            ${defaultClaimStakeBps}`);
+  console.log(`claimFeeBps:                     ${claimFeeBps}`);
+  console.log(`required (reward+stake+fee):     ${formatUsdc(requiredPerClaim)} USDC (${requiredPerClaim} raw)`);
+  console.log(`positions[signer][USDC].liquid   ${liquidityOk ? "✅" : "❌"}  ${formatUsdc(signerLiquidUsdc)} USDC (${signerLiquidUsdc} raw)`);
+  if (!liquidityOk) {
+    console.log(`   short by:                     ${formatUsdc(liquidityGap)} USDC (${liquidityGap} raw)`);
+  }
+  // Surface the raw EOA balance separately. This is the giveaway when
+  // someone funds the wallet but forgets to call deposit() — USDC sits
+  // at the precompile, position stays empty, claims keep reverting.
+  const balanceHintsAtUndeposited = !liquidityOk && signerUsdcBalanceRaw > 0n;
+  console.log(`USDC.balanceOf(signer)           ${signerUsdcBalanceRaw === 0n ? "ℹ" : "•"}  ${formatUsdc(signerUsdcBalanceRaw)} USDC (${signerUsdcBalanceRaw} raw)${balanceHintsAtUndeposited ? "  ← un-deposited; run fund-signer-usdc-deposit.mjs" : ""}`);
+
+  console.log("");
+  console.log(`## Parameter drift vs deployments/${args.profile}.json`);
   for (const check of paramChecks) {
     const live = String(check.live);
     const expected = check.expected === undefined ? "(not pinned)" : String(check.expected);
@@ -263,6 +422,20 @@ async function main() {
       // the chain.
     });
   }
+  if (!liquidityOk) {
+    // Not a multisig-owner fix — the signer (or anyone with USDC) can
+    // top this up directly via fund-signer-usdc-deposit.mjs, which does
+    // ERC20 approve + AgentAccountCore.deposit in one shot. We hand the
+    // operator the exact gap so they can `--amount <gap-raw>` it.
+    const hint = balanceHintsAtUndeposited
+      ? ` — wallet already holds ${formatUsdc(signerUsdcBalanceRaw)} USDC at the precompile; deposit() it into the position`
+      : " — wallet does not hold enough USDC at the precompile; acquire USDC first (swap PAS→USDC or transfer from a funded wallet), then deposit";
+    fixes.push({
+      label: `backend signer is under-funded for one claim: positions[signer][USDC].liquid = ${formatUsdc(signerLiquidUsdc)} USDC, required ${formatUsdc(requiredPerClaim)} USDC (short by ${formatUsdc(liquidityGap)} USDC)${hint}`,
+      reasonCode: "signer_liquidity_short",
+      runbook: `node scripts/ops/fund-signer-usdc-deposit.mjs --amount ${liquidityGap.toString()} --use-kms --commit`
+    });
+  }
   // Parameter drift fixes — only emit calldata for the cases where the
   // contract has a setter we know about. dailyOutflowCap and
   // minClaimFeeByAsset both do. The rest (claimFeeBps, etc.) require
@@ -296,6 +469,9 @@ async function main() {
     console.log(`### ${index + 1}. ${fix.label}`);
     if (fix.reasonCode) {
       console.log(`   reason: ${fix.reasonCode}`);
+      if (fix.runbook) {
+        console.log(`   runbook: ${fix.runbook}`);
+      }
       continue;
     }
     console.log(`   to:    ${fix.to}`);
@@ -339,7 +515,10 @@ function ciEqual(a, b) {
   return String(a ?? "").toLowerCase() === String(b ?? "").toLowerCase();
 }
 
-main().catch((error) => {
-  console.error(`audit failed: ${error?.stack ?? error?.message ?? error}`);
-  process.exitCode = 1;
-});
+// Only run main() when invoked as a CLI — not when imported (e.g. by tests).
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((error) => {
+    console.error(`audit failed: ${error?.stack ?? error?.message ?? error}`);
+    process.exitCode = 1;
+  });
+}
