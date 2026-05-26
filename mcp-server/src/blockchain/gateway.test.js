@@ -18,6 +18,8 @@ const USDC_TRUST_ASSET = {
   decimals: 6,
   minBalanceRaw: "70000"
 };
+const CREATE_SINGLE_PAYOUT_WITH_SCHEMA =
+  "createSinglePayoutJob(bytes32,address,uint256,uint256,uint256,uint256,bytes32,bytes32,bytes32,(bytes32,string,address,bytes))";
 
 function gatewayWithDot() {
   return new BlockchainGateway({ enabled: false, supportedAssets: [DOT_ASSET] });
@@ -1374,8 +1376,61 @@ test("createSinglePayoutJobForJob consumes recurring template reserve when fundi
     claimTtl: 3600,
     verifierMode: encodeBytes32String("BENCH"),
     category: encodeBytes32String("WIKI"),
-    specHash: `0x${"1".repeat(64)}`
+    specHash: `0x${"1".repeat(64)}`,
+    schemaHash: `0x${"0".repeat(64)}`,
+    schemaUrl: "",
+    schemaIssuer: "0x0000000000000000000000000000000000000000",
+    schemaSignature: "0x"
   }]);
+});
+
+test("createSinglePayoutJobForJob forwards registered external schema metadata", async () => {
+  const gateway = gatewayWithDot();
+  const calls = [];
+  gateway.escrowContract = {
+    async createSinglePayoutJob() {
+      throw new Error("plain rc1 signature should not be used");
+    },
+    [CREATE_SINGLE_PAYOUT_WITH_SCHEMA]: async (...args) => {
+      calls.push(args);
+      return { async wait() {} };
+    }
+  };
+  const schemaHash = `0x${"2".repeat(64)}`;
+  const schemaIssuer = "0x4444444444444444444444444444444444444444";
+  const schemaSignature = "0x1234";
+
+  await gateway.createSinglePayoutJobForJob(
+    {
+      outputSchemaRef: "schema://jobs/external-output",
+      schemaRegistrations: [{
+        schemaRef: "schema://jobs/external-output",
+        registrationVersion: "external-job-schema-eip191-v1",
+        schemaHash,
+        schemaUrl: "https://schemas.example.com/external-output.json",
+        schemaIssuer,
+        signature: schemaSignature
+      }]
+    },
+    "rc1",
+    gateway.toJobId("external-output-job"),
+    DOT_ASSET.address,
+    5_000_000_000_000_000_000n,
+    0,
+    0,
+    3600,
+    encodeBytes32String("BENCH"),
+    encodeBytes32String("EXT"),
+    `0x${"1".repeat(64)}`
+  );
+
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0][9], {
+    schemaHash,
+    schemaUrl: "https://schemas.example.com/external-output.json",
+    schemaIssuer,
+    schemaSignature
+  });
 });
 
 test("createSinglePayoutJobForLayout uses the legacy signature for legacy escrow deployments", async () => {

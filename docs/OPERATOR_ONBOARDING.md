@@ -488,6 +488,48 @@ Both docs cite `<pkuriger@averray.com>` (primary) and `<ops@averray.com>`
 ownership, confirm those addresses route to you and update if they do
 not.
 
+### 5.6 Adding a trusted schema issuer
+
+External job schemas are not trusted just because a poster supplies a URL.
+The contract path requires an EVM issuer signature and an owner-approved
+issuer entry in `TreasuryPolicy.trustedSchemaIssuers`. Treat issuer approval
+like `setServiceOperator`: it is an owner-multisig operation, not a backend
+admin shortcut.
+
+Before proposing the multisig call:
+
+1. Confirm the issuer address is an EVM address controlled by the schema
+   publisher and that the issuer can sign an EIP-191 message.
+2. Confirm the schema document is canonical JSON Schema served at the expected
+   HTTPS URL and that its `keccak256` hash matches the registration request.
+3. Dry-run one representative registration through the backend or local
+   `schema-registry` validation path so bad URLs, bad hashes, or bad
+   signatures fail before signers touch wallets.
+
+The owner-gated call is:
+
+```solidity
+TreasuryPolicy.setTrustedSchemaIssuer(address issuer, bool approved)
+```
+
+Run it with the same two-leg `multisig.asMulti` flow documented in
+[`MULTISIG_SETUP.md`](./MULTISIG_SETUP.md). For batching, it can share a
+`utility.batchAll` with adjacent owner-gated policy changes, but do not bundle
+it with an unrelated emergency rotation unless the incident runbook says so.
+
+After the second leg lands:
+
+1. Read `TreasuryPolicy.trustedSchemaIssuers(issuer)` from chain and confirm it
+   returns `true`.
+2. Run the launch-readiness audit script and confirm the trusted-schema-issuer
+   section is green for any configured external-schema jobs.
+3. Only then post the external-schema job through `/admin/jobs`. The job must
+   carry `externalSchema.schemaHash`, `externalSchema.schemaUrl`,
+   `externalSchema.schemaIssuer`, and `externalSchema.signature`.
+4. Capture hosted proof that the off-platform schema was registered, fetched,
+   hash-checked, and used for submission validation before marking the roadmap
+   item Done or Proofed.
+
 ## 6. Recovery playbooks
 
 These exist as separate documents; this section is just the routing

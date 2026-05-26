@@ -30,6 +30,7 @@ import {
 } from "../services/aws-credentials.js";
 import { buildXcmRequestPayload } from "./xcm-message-builder.js";
 import { hashCanonicalContent } from "../core/canonical-content.js";
+import { getRegisteredJobSchemaRegistration } from "../core/job-schema-registry.js";
 import {
   BlockchainRevertError,
   ConfigError,
@@ -46,6 +47,14 @@ const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const MAX_SAFE_INTEGER_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
 const UINT64_MAX = (1n << 64n) - 1n;
 const UINT256_MAX = (1n << 256n) - 1n;
+const EMPTY_EXTERNAL_SCHEMA = {
+  schemaHash: ZERO_BYTES32,
+  schemaUrl: "",
+  schemaIssuer: ZERO_ADDRESS,
+  schemaSignature: "0x"
+};
+const CREATE_SINGLE_PAYOUT_WITH_SCHEMA =
+  "createSinglePayoutJob(bytes32,address,uint256,uint256,uint256,uint256,bytes32,bytes32,bytes32,(bytes32,string,address,bytes))";
 
 function summarizeSupportedAssets(assets = []) {
   return assets.map(summarizeSupportedAsset);
@@ -948,6 +957,15 @@ export class BlockchainGateway {
     });
   }
 
+  async isTrustedSchemaIssuer(issuer) {
+    return this.withGatewayError("isTrustedSchemaIssuer", async () => {
+      if (!this.policyContract?.trustedSchemaIssuers) {
+        return false;
+      }
+      return Boolean(await this.policyContract.trustedSchemaIssuers(issuer));
+    });
+  }
+
   async discloseContent(hash, byWallet = undefined) {
     return this.withGatewayError("discloseContent", async () => {
       this.requireSigner("discloseContent");
@@ -1036,7 +1054,8 @@ export class BlockchainGateway {
     claimTtl,
     verifierMode,
     category,
-    specHash
+    specHash,
+    externalSchema = EMPTY_EXTERNAL_SCHEMA
   ) {
     if (contractLayout === "legacy") {
       return this.legacyEscrowContract.createSinglePayoutJob(
@@ -1048,6 +1067,20 @@ export class BlockchainGateway {
         claimTtl,
         verifierMode,
         category
+      );
+    }
+    if (this.hasExternalSchemaMetadata(externalSchema)) {
+      return this.escrowContract[CREATE_SINGLE_PAYOUT_WITH_SCHEMA](
+        jobId,
+        assetAddress,
+        reward,
+        opsReserve,
+        contingencyReserve,
+        claimTtl,
+        verifierMode,
+        category,
+        specHash,
+        externalSchema
       );
     }
     return this.escrowContract.createSinglePayoutJob(
@@ -1077,6 +1110,7 @@ export class BlockchainGateway {
     specHash
   ) {
     const funding = job?.funding;
+    const externalSchema = this.externalSchemaMetadataForJob(job);
     if (
       contractLayout !== "legacy"
       && funding?.source === "recurring_template_reserve"
@@ -1094,7 +1128,8 @@ export class BlockchainGateway {
         claimTtl,
         verifierMode,
         category,
-        specHash
+        specHash,
+        ...externalSchema
       });
     }
     return this.createSinglePayoutJobForLayout(
@@ -1107,7 +1142,34 @@ export class BlockchainGateway {
       claimTtl,
       verifierMode,
       category,
-      specHash
+      specHash,
+      externalSchema
+    );
+  }
+
+  externalSchemaMetadataForJob(job) {
+    const registration = getRegisteredJobSchemaRegistration(job?.outputSchemaRef, job?.schemaRegistrations);
+    if (registration?.registrationVersion !== "external-job-schema-eip191-v1") {
+      return EMPTY_EXTERNAL_SCHEMA;
+    }
+    return {
+      schemaHash: registration.schemaHash,
+      schemaUrl: registration.schemaUrl,
+      schemaIssuer: registration.schemaIssuer ?? registration.issuer,
+      schemaSignature: registration.signature
+    };
+  }
+
+  hasExternalSchemaMetadata(externalSchema) {
+    return Boolean(
+      externalSchema
+        && externalSchema.schemaHash
+        && externalSchema.schemaHash !== ZERO_BYTES32
+        && externalSchema.schemaUrl
+        && externalSchema.schemaIssuer
+        && externalSchema.schemaIssuer !== ZERO_ADDRESS
+        && externalSchema.schemaSignature
+        && externalSchema.schemaSignature !== "0x"
     );
   }
 

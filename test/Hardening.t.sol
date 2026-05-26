@@ -58,19 +58,17 @@ contract HardeningTest is Test {
 
         vm.prank(poster);
         (bool ok,) = address(escrow).call(
-            abi.encodeCall(
-                escrow.createSinglePayoutJob,
-                (
-                    keccak256("paused-job"),
-                    address(dot),
-                    10 ether,
-                    1 ether,
-                    1 ether,
-                    1 days,
-                    bytes32("AUTO"),
-                    bytes32("CODING"),
-                    SPEC_HASH
-                )
+            abi.encodeWithSelector(
+                bytes4(0x0b452fa4),
+                keccak256("paused-job"),
+                address(dot),
+                10 ether,
+                1 ether,
+                1 ether,
+                1 days,
+                bytes32("AUTO"),
+                bytes32("CODING"),
+                SPEC_HASH
             )
         );
         require(!ok, "EXPECTED_PAUSED_REVERT");

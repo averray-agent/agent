@@ -77,6 +77,7 @@ const READ_ABI = [
   "function paused() view returns (bool)",
   "function verifiers(address) view returns (bool)",
   "function serviceOperators(address) view returns (bool)",
+  "function trustedSchemaIssuers(address) view returns (bool)",
   "function arbitrators(address) view returns (bool)",
   "function approvedAssets(address) view returns (bool)",
   "function dailyOutflowCap() view returns (uint256)",
@@ -91,6 +92,7 @@ const READ_ABI = [
 const WRITE_ABI = [
   "function setVerifier(address verifier, bool approved)",
   "function setServiceOperator(address operator, bool approved)",
+  "function setTrustedSchemaIssuer(address issuer, bool approved)",
   "function setArbitrator(address arbitrator, bool approved)",
   "function setApprovedAsset(address asset, bool approved)",
   "function setMinClaimFee(address asset, uint256 amount)",
@@ -345,6 +347,12 @@ async function main() {
   const expectedOwner = deployments.owner;
   const expectedPauser = deployments.pauser;
   const expectedParameters = deployments.parameters ?? {};
+  const configuredSchemaIssuers = Array.isArray(deployments.trustedSchemaIssuers)
+    ? deployments.trustedSchemaIssuers
+    : [];
+  const externalSchemaJobs = Array.isArray(deployments.externalSchemaJobs)
+    ? deployments.externalSchemaJobs
+    : [];
 
   console.log(`# Launch readiness audit`);
   console.log(`Profile: ${deployments.profile}`);
@@ -392,7 +400,7 @@ async function main() {
     signerUsdcBalance,
     blockNumber,
     chainId,
-    ...selectorBytecodes
+    ...rest
   ] = await Promise.all([
     policy.owner(),
     policy.pauser(),
@@ -416,8 +424,14 @@ async function main() {
     provider.getNetwork().then((n) => Number(n.chainId)),
     ...selectorTargets.map((target) =>
       target.address ? provider.getCode(target.address) : Promise.resolve("0x")
-    )
+    ),
+    ...configuredSchemaIssuers.map((issuer) => policy.trustedSchemaIssuers(issuer))
   ]);
+  const selectorBytecodes = rest.slice(0, selectorTargets.length);
+  const schemaIssuerStatuses = configuredSchemaIssuers.map((issuer, index) => ({
+    issuer,
+    trusted: Boolean(rest[selectorTargets.length + index])
+  }));
 
   // The auto-generated getter on `mapping(address => mapping(address =>
   // AssetPosition))` returns the struct's fields in declaration order. We
@@ -482,6 +496,13 @@ async function main() {
   console.log(`serviceOperators(agentAccount)   ${agentAccountIsOperator ? "✅" : "❌"}  ${agentAccountIsOperator}  (defensive — strictly required for v1 single-payout is escrow only)`);
   console.log(`arbitrators(${short(expectedArbitrator)})  ${arbitratorIsApproved ? "✅" : "❌"}  ${arbitratorIsApproved}  (required for resolveDispute)`);
   console.log(`approvedAssets(USDC)             ${usdcIsApproved ? "✅" : "❌"}  ${usdcIsApproved}`);
+  if (schemaIssuerStatuses.length > 0) {
+    for (const entry of schemaIssuerStatuses) {
+      console.log(`trustedSchemaIssuers(${short(entry.issuer)}) ${entry.trusted ? "✅" : "❌"}  ${entry.trusted}`);
+    }
+  } else {
+    console.log("trustedSchemaIssuers             ℹ  no configured issuer list in deployment profile");
+  }
 
   // Suffix classification — only thing we can introspect about the
   // ERC20-precompile address itself, since name/symbol/decimals are
@@ -586,6 +607,23 @@ async function main() {
   }
   if (!usdcIsApproved) {
     fixes.push(buildCall("setApprovedAsset", [usdcAddress, true], policyAddress));
+  }
+  for (const entry of schemaIssuerStatuses) {
+    if (!entry.trusted) {
+      fixes.push(buildCall("setTrustedSchemaIssuer", [entry.issuer, true], policyAddress));
+    }
+  }
+  for (const job of externalSchemaJobs) {
+    const issuer = job?.schemaIssuer;
+    if (!issuer) continue;
+    const known = schemaIssuerStatuses.find((entry) => ciEqual(entry.issuer, issuer));
+    if (!known?.trusted) {
+      fixes.push({
+        label: `external schema job ${job.jobId ?? "(unknown)"} uses untrusted issuer ${issuer}`,
+        reasonCode: "external_schema_issuer_untrusted",
+        runbook: `add ${issuer} to deployments/${deployments.profile}.json#trustedSchemaIssuers, rerun this audit, then prepare setTrustedSchemaIssuer(${issuer}, true)`
+      });
+    }
   }
   if (!usdcSuffixOk) {
     fixes.push({

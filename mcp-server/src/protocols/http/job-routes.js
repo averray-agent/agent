@@ -137,7 +137,7 @@ export function createJobRoutes({
       if (submission === undefined) {
         throw new ValidationError("submission is required.");
       }
-      respond(response, 200, service.validateJobSubmission(jobId, submission));
+      respond(response, 200, await service.validateJobSubmission(jobId, submission));
       return true;
     }
 

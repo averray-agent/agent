@@ -1,9 +1,11 @@
-import { getAddress, isAddress, verifyMessage } from "ethers";
+import { AbiCoder, getAddress, getBytes, id, isAddress, keccak256, toUtf8Bytes, verifyMessage } from "ethers";
 
 import { canonicalizeContent, hashCanonicalContent } from "./canonical-content.js";
 import { ValidationError } from "./errors.js";
 
 export const EXTERNAL_SCHEMA_TRUST_BOUNDARY = "external_signed_schema";
+export const EXTERNAL_SCHEMA_EIP191_VERSION = "external-job-schema-eip191-v1";
+const abiCoder = AbiCoder.defaultAbiCoder();
 
 const BUILTIN_JOB_SCHEMAS = new Map([
   ["schema://jobs/coding-input", objectSchema({
@@ -591,9 +593,13 @@ export function normalizeExternalSchemaRegistration(raw, { index = 0 } = {}) {
     throw new ValidationError(`schemaRegistrations[${index}] must be an object.`);
   }
   const prefix = `schemaRegistrations[${index}]`;
+  const schema = cloneSchema(requirePlainObject(raw.schema, `${prefix}.schema`));
+  if (raw.schemaHash !== undefined || raw.schemaIssuer !== undefined || raw.jobId !== undefined) {
+    return normalizeExternalSchemaRegistrationV1(raw, { index, schema });
+  }
+
   const schemaRef = requireJobSchemaRef(raw.schemaRef, `${prefix}.schemaRef`);
   const schemaUrl = requireNonEmptyString(raw.schemaUrl, `${prefix}.schemaUrl`);
-  const schema = cloneSchema(requirePlainObject(raw.schema, `${prefix}.schema`));
   if (schema.$id !== schemaRef) {
     throw new ValidationError(`${prefix}.schema.$id must match ${schemaRef}.`);
   }
@@ -633,6 +639,75 @@ export function normalizeExternalSchemaRegistration(raw, { index = 0 } = {}) {
     signatureVerified: true,
     registrationMessageHash: hashCanonicalContent(signingMessage)
   };
+}
+
+function normalizeExternalSchemaRegistrationV1(raw, { index, schema }) {
+  const prefix = `schemaRegistrations[${index}]`;
+  const schemaRef = requireJobSchemaRef(raw.schemaRef ?? schema.$id, `${prefix}.schemaRef`);
+  const schemaUrl = requireNonEmptyString(raw.schemaUrl, `${prefix}.schemaUrl`);
+  if (schema.$id !== schemaRef) {
+    throw new ValidationError(`${prefix}.schema.$id must match ${schemaRef}.`);
+  }
+  assertSupportedExternalSchema(schema, `${prefix}.schema`);
+
+  const schemaHash = normalizeBytes32(raw.schemaHash ?? hashExternalSchemaContent(schema), `${prefix}.schemaHash`);
+  const computedHash = hashExternalSchemaContent(schema);
+  if (schemaHash.toLowerCase() !== computedHash.toLowerCase()) {
+    throw new ValidationError(`${prefix}.schemaHash does not match fetched schema content.`);
+  }
+  const issuer = normalizeIssuerAddress(raw.schemaIssuer ?? raw.issuer, `${prefix}.schemaIssuer`);
+  const jobId = requireNonEmptyString(raw.jobId, `${prefix}.jobId`);
+  const chainJobId = normalizeBytes32(raw.chainJobId ?? id(jobId), `${prefix}.chainJobId`);
+  const signature = requireNonEmptyString(raw.schemaSignature ?? raw.signature, `${prefix}.signature`);
+  const recovered = recoverExternalSchemaRegistrationSignerV1({
+    schemaHash,
+    schemaUrl,
+    jobId: chainJobId,
+    signature
+  });
+  if (recovered !== issuer) {
+    throw new ValidationError(`${prefix}.signature does not match schemaIssuer.`);
+  }
+
+  return {
+    schemaRef,
+    schemaUrl,
+    schema,
+    schemaHash,
+    issuer,
+    schemaIssuer: issuer,
+    jobId,
+    chainJobId,
+    signature,
+    registrationVersion: EXTERNAL_SCHEMA_EIP191_VERSION,
+    trustBoundary: EXTERNAL_SCHEMA_TRUST_BOUNDARY,
+    signatureVerified: true,
+    registrationMessageHash: buildExternalSchemaRegistrationDigest({ schemaHash, schemaUrl, jobId: chainJobId })
+  };
+}
+
+export function hashExternalSchemaContent(schema) {
+  return keccak256(toUtf8Bytes(canonicalizeContent(requirePlainObject(schema, "schema"))));
+}
+
+export function buildExternalSchemaRegistrationDigest({ schemaHash, schemaUrl, jobId }) {
+  return keccak256(abiCoder.encode(
+    ["bytes32", "string", "bytes32"],
+    [
+      normalizeBytes32(schemaHash, "schemaHash"),
+      requireNonEmptyString(schemaUrl, "schemaUrl"),
+      normalizeBytes32(jobId, "jobId")
+    ]
+  ));
+}
+
+export function recoverExternalSchemaRegistrationSignerV1({ schemaHash, schemaUrl, jobId, signature }) {
+  const digest = buildExternalSchemaRegistrationDigest({ schemaHash, schemaUrl, jobId });
+  try {
+    return getAddress(verifyMessage(getBytes(digest), requireNonEmptyString(signature, "signature")));
+  } catch (error) {
+    throw new ValidationError(`External schema signature verification failed: ${error?.message ?? "invalid signature"}`);
+  }
 }
 
 export function buildExternalSchemaRegistrationMessage(registration) {
@@ -788,6 +863,14 @@ function normalizeIssuerAddress(value, field) {
     throw new ValidationError(`${field} must be an EVM address.`);
   }
   return getAddress(text);
+}
+
+function normalizeBytes32(value, field) {
+  const text = requireNonEmptyString(value, field);
+  if (!/^0x[a-fA-F0-9]{64}$/u.test(text)) {
+    throw new ValidationError(`${field} must be a bytes32 hex string.`);
+  }
+  return text;
 }
 
 function assertSupportedExternalSchema(schema, path) {
