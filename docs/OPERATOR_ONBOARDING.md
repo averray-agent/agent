@@ -130,12 +130,13 @@ the setup is wired.
 op item get aws-signer-testnet --vault prod-backend --fields kms-key-id
 op item get aws-jwt-signer-testnet --vault prod-backend --fields kms-key-id
 op item get admin-jwt --vault prod-smoke --fields password >/dev/null
+op item get admin-refresh-token --vault prod-smoke --fields password >/dev/null
 ```
 
 Expected: each call resolves without prompting for a vault unlock.
 The two `aws-*-signer-testnet` items resolve KMS key ARNs (non-secret
-metadata); the `prod-smoke/admin-jwt` resolve confirms you have
-prod-smoke vault scope for any future admin-JWT rotation. If you see
+metadata); the `prod-smoke/admin-jwt` and `prod-smoke/admin-refresh-token`
+resolves confirm you have prod-smoke vault scope for hosted-smoke auth. If you see
 "permission denied" or "vault not found", your service-account token
 is not scoped correctly — see [`SECRETS.md`](./SECRETS.md) §"Vault
 scopes" before continuing.
@@ -278,13 +279,59 @@ Expected: `published` or `already_current` in the job log. A failure
 here is operationally noisy but not fund-affecting; investigate but do
 not panic.
 
-### 5.4 The admin-JWT rotation ritual
+### 5.4 Hosted smoke auth
 
-The hosted product-proof smoke calls `/admin/async-xcm-status` with a
-30-day ES256 admin token stored at `op://prod-smoke/admin-jwt/password`.
-After Stage 2C-2 (`JWT_BACKEND=kms`), HS256 tokens are refused — an
-expired or stale-format admin-JWT will surface as `curl exit 22` /
-`HTTP 401` on the deploy's `Checking admin async XCM status` step.
+The hosted product-proof worker loop should use the same short-lived access
+token pattern as browser SIWE sessions. Store a refresh cookie once at
+`op://prod-smoke/admin-refresh-token/password`, then let
+`scripts/ops/get-admin-refresh-token.mjs` exchange it for a fresh access token
+via `POST /auth/refresh` at the start of each run.
+
+The refresh route has strict replay semantics and rotates the refresh cookie on
+every successful exchange. For scheduled smokes, the helper must write the
+rotated cookie back to the same 1Password item; otherwise the next run will
+reuse the old cookie and trigger `refresh_replay_detected`.
+
+To seed the new path:
+
+1. Sign in through the normal SIWE operator flow with the admin/verifier wallet.
+2. Copy the `refresh_token` cookie value scoped to `/auth/refresh`.
+3. Store it in 1Password:
+
+```bash
+op item edit admin-refresh-token --vault prod-smoke "password=$REFRESH_TOKEN"
+unset REFRESH_TOKEN
+```
+
+4. Verify the helper can exchange and rotate it:
+
+```bash
+cd /path/to/agent
+ADMIN_REFRESH_TOKEN_OP='op://prod-smoke/admin-refresh-token/password' \
+  node scripts/ops/get-admin-refresh-token.mjs >/tmp/averray-admin-access.jwt
+rm -f /tmp/averray-admin-access.jwt
+```
+
+Expected: the command exits `0`, prints one short-lived access JWT to stdout,
+and updates `op://prod-smoke/admin-refresh-token/password` with the rotated
+refresh cookie. The prod-smoke 1Password service account used by scheduled
+smokes therefore needs read/write access to that one item. `--no-write-back` is
+only for one-off diagnostics because it leaves the stored refresh cookie stale.
+
+During the soak period, the legacy direct-JWT path remains available. Set
+`ADMIN_JWT_OP` to force the old path, or leave the existing `ADMIN_JWT` env var
+in place as a rollback fallback. When both `ADMIN_REFRESH_TOKEN_OP` and
+`ADMIN_JWT` are present, the worker-loop script uses the refresh-flow path; when
+`ADMIN_JWT_OP` is present, it uses the legacy path intentionally. If you want
+the helper to use the default 1Password reference without spelling it out, set
+`ADMIN_REFRESH_FLOW=1`.
+
+The legacy path uses a 30-day ES256 admin token stored at
+`op://prod-smoke/admin-jwt/password`. After Stage 2C-2 (`JWT_BACKEND=kms`),
+HS256 tokens are refused — an expired or stale-format admin-JWT will surface as
+`curl exit 22` / `HTTP 401` on smoke steps that still depend on `ADMIN_JWT`.
+This direct-JWT path is retained for backward compatibility and should be
+deprecated after the refresh path has soaked for 30 days.
 
 To rotate (run from your laptop with `op` signed in):
 

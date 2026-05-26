@@ -4,6 +4,11 @@ import { dirname } from "node:path";
 
 import { AgentPlatformClient } from "../../sdk/agent-platform-client.js";
 import { DEFAULT_ESCROW_ASSET } from "../../mcp-server/src/core/assets.js";
+import {
+  DEFAULT_ADMIN_REFRESH_TOKEN_OP,
+  getAdminRefreshToken,
+  readOpSecret
+} from "./get-admin-refresh-token.mjs";
 
 const DEFAULT_API_BASE_URL = "https://api.averray.com";
 const PRODUCT_PROOF_OUTPUT_SCHEMA_REF = "schema://jobs/product-proof-worker-loop";
@@ -23,16 +28,27 @@ const REQUIRED_ESCROW_ASSET = {
 export async function runHostedWorkerLoop({
   env = process.env,
   client = undefined,
+  fetchImpl = globalThis.fetch,
+  readSecretImpl = readOpSecret,
+  writeSecretImpl = undefined,
   now = () => Date.now(),
   log = console.log
 } = {}) {
   const apiBaseUrl = stripTrailingSlash(env.API_BASE_URL || DEFAULT_API_BASE_URL);
-  const token = env.PRODUCT_PROOF_WORKER_TOKEN || env.AVERRAY_TOKEN || env.ADMIN_JWT;
-  if (!token) {
-    throw new Error("PRODUCT_PROOF_WORKER_TOKEN, AVERRAY_TOKEN, or ADMIN_JWT is required.");
+  const auth = client
+    ? { token: undefined, mode: "injected_client", source: "client" }
+    : await resolveHostedWorkerLoopAuth({
+        env,
+        apiBaseUrl,
+        fetchImpl,
+        readSecretImpl,
+        writeSecretImpl
+      });
+  if (!client) {
+    log(`Hosted worker-loop auth path: ${auth.mode} (${auth.source})`);
   }
 
-  const platform = client ?? new AgentPlatformClient({ baseUrl: apiBaseUrl, token });
+  const platform = client ?? new AgentPlatformClient({ baseUrl: apiBaseUrl, token: auth.token, fetchImpl });
   const timestamp = now();
   const jobId = env.PRODUCT_PROOF_JOB_ID || `product-proof-worker-loop-${timestamp}`;
   const idempotencyKey = env.PRODUCT_PROOF_IDEMPOTENCY_KEY || `product-proof:${jobId}`;
@@ -214,6 +230,87 @@ export async function runHostedWorkerLoop({
   return evidenceDoc;
 }
 
+export function selectHostedWorkerLoopAuthPath(env = process.env) {
+  const productProofToken = pick(env.PRODUCT_PROOF_WORKER_TOKEN);
+  if (productProofToken) {
+    return { mode: "direct_token", source: "PRODUCT_PROOF_WORKER_TOKEN", token: productProofToken };
+  }
+
+  const averrayToken = pick(env.AVERRAY_TOKEN);
+  if (averrayToken) {
+    return { mode: "direct_token", source: "AVERRAY_TOKEN", token: averrayToken };
+  }
+
+  const adminJwtOp = pick(env.ADMIN_JWT_OP);
+  if (adminJwtOp) {
+    return { mode: "legacy_admin_jwt", source: "ADMIN_JWT_OP", token: adminJwtOp };
+  }
+
+  const adminRefreshToken = pick(env.ADMIN_REFRESH_TOKEN);
+  if (adminRefreshToken) {
+    return { mode: "admin_refresh", source: "ADMIN_REFRESH_TOKEN" };
+  }
+
+  const adminRefreshTokenOp = pick(env.ADMIN_REFRESH_TOKEN_OP);
+  if (adminRefreshTokenOp) {
+    return { mode: "admin_refresh", source: "ADMIN_REFRESH_TOKEN_OP" };
+  }
+
+  if (enabled(env.ADMIN_REFRESH_FLOW)) {
+    return { mode: "admin_refresh", source: DEFAULT_ADMIN_REFRESH_TOKEN_OP };
+  }
+
+  const adminJwt = pick(env.ADMIN_JWT);
+  if (adminJwt) {
+    return { mode: "legacy_admin_jwt", source: "ADMIN_JWT", token: adminJwt };
+  }
+
+  return { mode: "admin_refresh", source: DEFAULT_ADMIN_REFRESH_TOKEN_OP };
+}
+
+export async function resolveHostedWorkerLoopAuth({
+  env = process.env,
+  apiBaseUrl = DEFAULT_API_BASE_URL,
+  fetchImpl = globalThis.fetch,
+  readSecretImpl = readOpSecret,
+  writeSecretImpl = undefined
+} = {}) {
+  const selection = selectHostedWorkerLoopAuthPath(env);
+
+  if (selection.mode === "admin_refresh") {
+    const result = await getAdminRefreshToken({
+      env: {
+        ...env,
+        API_BASE_URL: apiBaseUrl
+      },
+      fetchImpl,
+      readSecretImpl,
+      ...(writeSecretImpl ? { writeSecretImpl } : {})
+    });
+    return {
+      mode: "admin_refresh",
+      source: result.credentialSource,
+      token: result.accessToken
+    };
+  }
+
+  if (selection.mode === "legacy_admin_jwt") {
+    const token = selection.token.startsWith("op://")
+      ? await readSecretImpl(selection.token)
+      : selection.token;
+    if (!pick(token)) {
+      throw new Error(`${selection.source} resolved to an empty admin JWT.`);
+    }
+    return {
+      mode: selection.mode,
+      source: selection.source,
+      token: token.trim()
+    };
+  }
+
+  return selection;
+}
+
 export function formatHostedWorkerLoopError(error) {
   const message = error?.message ?? String(error);
   const parts = [message];
@@ -246,6 +343,14 @@ function redactDiagnosticValue(value) {
       ? "[redacted]"
       : redactDiagnosticValue(entry)
   ]));
+}
+
+function pick(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+function enabled(value) {
+  return ["1", "true", "yes"].includes(String(value ?? "").trim().toLowerCase());
 }
 
 function buildProductProofSubmission({ jobId, evidence, timestamp }) {

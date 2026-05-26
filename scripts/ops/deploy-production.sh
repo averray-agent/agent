@@ -314,6 +314,11 @@ run_node_script() {
     -w /workspace \
     -e API_BASE_URL="${API_BASE_URL:-https://api.averray.com}" \
     -e ADMIN_JWT="${ADMIN_JWT:-}" \
+    -e ADMIN_JWT_OP="${ADMIN_JWT_OP:-}" \
+    -e ADMIN_REFRESH_FLOW="${ADMIN_REFRESH_FLOW:-}" \
+    -e ADMIN_REFRESH_TOKEN="${ADMIN_REFRESH_TOKEN:-}" \
+    -e ADMIN_REFRESH_TOKEN_OP="${ADMIN_REFRESH_TOKEN_OP:-}" \
+    -e ADMIN_REFRESH_TOKEN_WRITE_BACK="${ADMIN_REFRESH_TOKEN_WRITE_BACK:-}" \
     -e AVERRAY_TOKEN="${AVERRAY_TOKEN:-}" \
     -e PRODUCT_PROOF_WORKER_TOKEN="${PRODUCT_PROOF_WORKER_TOKEN:-}" \
     -e PRODUCT_PROOF_EVIDENCE_FILE="$PRODUCT_PROOF_EVIDENCE_FILE" \
@@ -336,8 +341,19 @@ run_product_proof_worker_loop() {
       ;;
   esac
 
-  if [[ -z "${PRODUCT_PROOF_WORKER_TOKEN:-}" && -z "${AVERRAY_TOKEN:-}" && -z "${ADMIN_JWT:-}" ]]; then
-    echo "PRODUCT_PROOF_REQUIRE_WORKER_LOOP=1 requires PRODUCT_PROOF_WORKER_TOKEN, AVERRAY_TOKEN, or ADMIN_JWT." >&2
+  local has_admin_refresh_flow=0
+  case "${ADMIN_REFRESH_FLOW:-}" in
+    1|true|yes) has_admin_refresh_flow=1 ;;
+  esac
+
+  if [[ -z "${PRODUCT_PROOF_WORKER_TOKEN:-}" \
+    && -z "${AVERRAY_TOKEN:-}" \
+    && -z "${ADMIN_JWT:-}" \
+    && -z "${ADMIN_JWT_OP:-}" \
+    && -z "${ADMIN_REFRESH_TOKEN:-}" \
+    && -z "${ADMIN_REFRESH_TOKEN_OP:-}" \
+    && "$has_admin_refresh_flow" -ne 1 ]]; then
+    echo "PRODUCT_PROOF_REQUIRE_WORKER_LOOP=1 requires PRODUCT_PROOF_WORKER_TOKEN, AVERRAY_TOKEN, ADMIN_JWT, ADMIN_JWT_OP, ADMIN_REFRESH_TOKEN, ADMIN_REFRESH_TOKEN_OP, or ADMIN_REFRESH_FLOW=1." >&2
     exit 1
   fi
 

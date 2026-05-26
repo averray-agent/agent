@@ -206,7 +206,9 @@ externally ready.
 
 ### In Flight
 
-(None — Phase 4b Stage 2C-2 (`#439`), Stage 2C-3 (`#463`), and the Phase 5a Roles Anywhere cutover all landed 2026-05-21 and moved to the Completed list above.)
+- **Worker-loop refresh-flow** — shipped in PR #529. `ADMIN_JWT`
+  30-day-manual-rotation path retained for backward compatibility; retire
+  after a 30-day soak period proves the refresh path stable in CI.
 
 ### Remaining
 
@@ -214,7 +216,6 @@ externally ready.
 - **HMAC retirement (Stage 2C-3 cleanup)** — ≥30 days after 2026-05-21: delete `op://prod-backend/auth-jwt-secrets`, drop the HMAC code branch from `mcp-server/src/auth/jwt.js`, retire `AUTH_JWT_SECRETS` from the secrets inventory + rotation calendar. Dispatcher already refuses HS256 at the verifier level since 2C-2; this is cleanup of unused config/code.
 - **Phase 5a-retire** — ≥30 days after 2026-05-21: `aws iam delete-access-key` for the static keys still in 1Password (`op://prod-backend/aws-signer-testnet`, `op://prod-backend/aws-jwt-signer-testnet`), delete the `access-key-id` + `secret-access-key` 1Password fields. Backend already runs entirely on Roles Anywhere — this removes the static-key rollback escape hatch once Roles Anywhere is proven stable.
 - Mainnet multi-region KMS from day one.
-- Worker-loop refresh-flow so hosted smokes do not depend on manually rotated 30-day admin JWTs.
 - CloudTrail/CloudWatch alarms for KMS signing and anomalous auth failures.
 
 ## Blockchain And Mainnet Roadmap
