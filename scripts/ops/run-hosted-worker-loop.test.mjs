@@ -6,7 +6,9 @@ import test from "node:test";
 
 import {
   formatHostedWorkerLoopError,
-  runHostedWorkerLoop
+  resolveHostedWorkerLoopAuth,
+  runHostedWorkerLoop,
+  selectHostedWorkerLoopAuthPath
 } from "./run-hosted-worker-loop.mjs";
 
 test("runHostedWorkerLoop creates, claims, submits, verifies, and writes evidence", async () => {
@@ -156,9 +158,93 @@ test("runHostedWorkerLoop creates, claims, submits, verifies, and writes evidenc
 
 test("runHostedWorkerLoop fails closed without a token", async () => {
   await assert.rejects(
-    runHostedWorkerLoop({ env: {}, log: () => {} }),
-    /PRODUCT_PROOF_WORKER_TOKEN, AVERRAY_TOKEN, or ADMIN_JWT is required/u
+    runHostedWorkerLoop({
+      env: {},
+      log: () => {},
+      async readSecretImpl() {
+        throw new Error("op read failed for admin-refresh-token");
+      }
+    }),
+    /op read failed for admin-refresh-token/u
   );
+});
+
+test("selectHostedWorkerLoopAuthPath chooses explicit refresh and legacy branches", () => {
+  assert.deepEqual(selectHostedWorkerLoopAuthPath({ PRODUCT_PROOF_WORKER_TOKEN: "worker-token" }), {
+    mode: "direct_token",
+    source: "PRODUCT_PROOF_WORKER_TOKEN",
+    token: "worker-token"
+  });
+  assert.deepEqual(selectHostedWorkerLoopAuthPath({ AVERRAY_TOKEN: "averray-token" }), {
+    mode: "direct_token",
+    source: "AVERRAY_TOKEN",
+    token: "averray-token"
+  });
+  assert.deepEqual(selectHostedWorkerLoopAuthPath({
+    ADMIN_JWT_OP: "legacy-token",
+    ADMIN_REFRESH_TOKEN_OP: "op://prod-smoke/admin-refresh-token/password"
+  }), {
+    mode: "legacy_admin_jwt",
+    source: "ADMIN_JWT_OP",
+    token: "legacy-token"
+  });
+  assert.deepEqual(selectHostedWorkerLoopAuthPath({
+    ADMIN_JWT: "legacy-token",
+    ADMIN_REFRESH_TOKEN_OP: "op://prod-smoke/admin-refresh-token/password"
+  }), {
+    mode: "admin_refresh",
+    source: "ADMIN_REFRESH_TOKEN_OP"
+  });
+  assert.deepEqual(selectHostedWorkerLoopAuthPath({ ADMIN_JWT: "legacy-token" }), {
+    mode: "legacy_admin_jwt",
+    source: "ADMIN_JWT",
+    token: "legacy-token"
+  });
+  assert.deepEqual(selectHostedWorkerLoopAuthPath({}), {
+    mode: "admin_refresh",
+    source: "op://prod-smoke/admin-refresh-token/password"
+  });
+});
+
+test("resolveHostedWorkerLoopAuth exchanges refresh token without running the loop", async () => {
+  const calls = [];
+  const auth = await resolveHostedWorkerLoopAuth({
+    apiBaseUrl: "https://api.example.test",
+    env: { ADMIN_REFRESH_TOKEN_OP: "op://prod-smoke/admin-refresh-token/password" },
+    async readSecretImpl(ref) {
+      calls.push(["read", ref]);
+      return "refresh-old";
+    },
+    async writeSecretImpl(ref, value) {
+      calls.push(["write", ref, value]);
+    },
+    async fetchImpl(url, options) {
+      calls.push(["fetch", url, options.headers.cookie]);
+      return new Response(JSON.stringify({
+        token: "short-lived-access-token",
+        roles: ["admin", "verifier"],
+        wallet: "0x1111111111111111111111111111111111111111",
+        expiresAt: "2026-05-26T12:15:00.000Z"
+      }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "set-cookie": "refresh_token=refresh-new; HttpOnly; Secure; SameSite=Strict; Path=/auth/refresh"
+        }
+      });
+    }
+  });
+
+  assert.deepEqual(auth, {
+    mode: "admin_refresh",
+    source: "op://prod-smoke/admin-refresh-token/password",
+    token: "short-lived-access-token"
+  });
+  assert.deepEqual(calls, [
+    ["read", "op://prod-smoke/admin-refresh-token/password"],
+    ["fetch", "https://api.example.test/auth/refresh", "refresh_token=refresh-old"],
+    ["write", "op://prod-smoke/admin-refresh-token/password", "refresh-new"]
+  ]);
 });
 
 test("runHostedWorkerLoop fails closed before mutation when token lacks verifier capability", async () => {
