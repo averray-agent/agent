@@ -1,7 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Interface } from "ethers";
-import { parseArgs, buildInnerCalls } from "./redeploy-escrowcore-wire-multisig.mjs";
+import {
+  parseArgs,
+  buildInnerCalls,
+  resolveWs,
+  verifyEvmCalldataEmbedded,
+  UTILITY_BATCH_ALL_CALL_INDEX
+} from "./redeploy-escrowcore-wire-multisig.mjs";
 
 const TREASURY_POLICY_ABI = [
   "function setServiceOperator(address account, bool allowed)"
@@ -79,4 +85,55 @@ test("setServiceOperator(0x7BB8…, false) encodes to the revoke calldata", () =
     data,
     "0xeea03c280000000000000000000000007bb8fea44bdee9870cf27c1db616e7017bc38b0a0000000000000000000000000000000000000000000000000000000000000000"
   );
+});
+
+test("parseArgs reads --ws / --no-ws", () => {
+  const a = parseArgs(["--ws", "wss://custom.example/asset-hub-paseo"]);
+  assert.equal(a.ws, "wss://custom.example/asset-hub-paseo");
+  assert.equal(a.noWs, false);
+  const b = parseArgs(["--no-ws"]);
+  assert.equal(b.noWs, true);
+});
+
+test("resolveWs prefers --ws over env, env over default, --no-ws returns null", () => {
+  const prevEnv = process.env.PASEO_AH_WS;
+  try {
+    process.env.PASEO_AH_WS = "wss://env-endpoint.example";
+    assert.equal(resolveWs({ ws: "wss://cli.example", noWs: false }), "wss://cli.example");
+    assert.equal(resolveWs({ noWs: false }), "wss://env-endpoint.example");
+    assert.equal(resolveWs({ noWs: true }), null);
+    delete process.env.PASEO_AH_WS;
+    assert.equal(resolveWs({ noWs: false }), "wss://sys.ibp.network/asset-hub-paseo");
+  } finally {
+    if (prevEnv === undefined) delete process.env.PASEO_AH_WS;
+    else process.env.PASEO_AH_WS = prevEnv;
+  }
+});
+
+test("UTILITY_BATCH_ALL_CALL_INDEX is the Asset Hub Paseo runtime prefix", () => {
+  // pallet_utility (40 = 0x28) + batchAll call (2 = 0x02). If a runtime
+  // upgrade reshuffles pallet indexes, this constant — and the on-chain
+  // hex emitter that checks against it — needs to be updated.
+  assert.equal(UTILITY_BATCH_ALL_CALL_INDEX, "0x2802");
+});
+
+test("verifyEvmCalldataEmbedded flags missing calldata inside the outer SCALE hex", () => {
+  const NEW_DATA = iface.encodeFunctionData("setServiceOperator", [NEW, true]);
+  const OLD_DATA = iface.encodeFunctionData("setServiceOperator", [OLD, false]);
+  const innerCalls = [
+    { label: "approve new", data: NEW_DATA },
+    { label: "revoke old", data: OLD_DATA }
+  ];
+  // Construct an outer hex that contains both calldatas verbatim.
+  const outerCallHex = "0x2802" + NEW_DATA.slice(2) + OLD_DATA.slice(2);
+  const ok = verifyEvmCalldataEmbedded({ outerCallHex, innerCalls });
+  assert.equal(ok.length, 2);
+  assert.equal(ok[0].embedded, true);
+  assert.equal(ok[1].embedded, true);
+
+  // Drop the revoke calldata from the outer hex; the verifier should catch it.
+  const tampered = "0x2802" + NEW_DATA.slice(2);
+  const bad = verifyEvmCalldataEmbedded({ outerCallHex: tampered, innerCalls });
+  assert.equal(bad[0].embedded, true);
+  assert.equal(bad[1].embedded, false);
 });

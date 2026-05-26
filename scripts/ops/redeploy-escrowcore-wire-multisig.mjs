@@ -58,6 +58,13 @@ import { loadDeployments, isAddress } from "./rotate-admin-lib.mjs";
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..", "..");
 
+const DEFAULT_WS = "wss://sys.ibp.network/asset-hub-paseo";
+
+// Asset Hub Paseo runtime: pallet_utility is index 0x28, batchAll is call 0x02.
+// Every successful encoding of utility.batchAll([...]) starts with these two
+// bytes. The on-chain hex test pins this so a runtime reshuffle gets caught.
+export const UTILITY_BATCH_ALL_CALL_INDEX = "0x2802";
+
 const SIGNER_ALIASES = {
   vault: { label: "Polkadot Vault", ss58: "13pav6xpfdapyCAqfRhWZXxUnqDhjrF92dJr3FBwVfBKUKSM" },
   ledger: { label: "Ledger Account", ss58: "148tqwhGxeCva7ZX8RwvaLjCS7HvDJJaSbxfTUwE9Zyc5Xtm" },
@@ -69,7 +76,7 @@ const TREASURY_POLICY_ABI = [
 ];
 
 export function parseArgs(argv) {
-  const args = { profile: "testnet", skipRevoke: false };
+  const args = { profile: "testnet", skipRevoke: false, noWs: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--new-escrow") args.newEscrow = argv[++i];
@@ -79,9 +86,93 @@ export function parseArgs(argv) {
     else if (arg === "--timepoint-height") args.tpHeight = argv[++i];
     else if (arg === "--timepoint-index") args.tpIndex = argv[++i];
     else if (arg === "--skip-revoke") args.skipRevoke = true;
+    else if (arg === "--ws") args.ws = argv[++i];
+    else if (arg === "--no-ws") args.noWs = true;
     else if (arg === "--help" || arg === "-h") args.help = true;
   }
   return args;
+}
+
+export function resolveWs(args) {
+  if (args.noWs) return null;
+  if (args.ws) return args.ws;
+  const envWs = String(process.env.PASEO_AH_WS ?? "").trim();
+  return envWs || DEFAULT_WS;
+}
+
+/**
+ * Build the SCALE-encoded utility.batchAll([revive.call, ...]) and the
+ * matching asMulti wrapper from an already-connected polkadot-js api.
+ *
+ * Returns the inner call hex (paste into Apps multisig "call data for final
+ * approval"), the blake2 call hash (matches multisig.NewMultisig event), the
+ * encoded revive.call hex of each leg, and the asMulti hex for the first-leg
+ * Decode-and-submit shortcut.
+ *
+ * Exported so it can be exercised by tests independently of CLI plumbing.
+ */
+export async function buildOnchainPayload({
+  api,
+  blake2AsHex,
+  treasuryPolicy,
+  innerCalls,
+  reviveRefTime,
+  reviveProofSize,
+  storageDepositLimit,
+  threshold,
+  otherSignatories,
+  timepoint,
+  maxWeightRefTime,
+  maxWeightProofSize
+}) {
+  const reviveGas = { refTime: BigInt(reviveRefTime), proofSize: BigInt(reviveProofSize) };
+  const deposit = BigInt(storageDepositLimit);
+
+  const reviveCalls = innerCalls.map((call) =>
+    api.tx.revive.call(treasuryPolicy, 0, reviveGas, deposit, call.data)
+  );
+  const reviveCallHexes = reviveCalls.map((c) => c.method.toHex());
+
+  let outerCall;
+  if (reviveCalls.length === 1) {
+    outerCall = reviveCalls[0];
+  } else {
+    outerCall = api.tx.utility.batchAll(reviveCalls);
+  }
+  const outerCallHex = outerCall.method.toHex();
+  const outerCallHash = blake2AsHex(outerCall.method.toU8a(), 256);
+
+  const asMulti = api.tx.multisig.asMulti(
+    threshold,
+    otherSignatories,
+    timepoint
+      ? { height: Number(timepoint.height), index: Number(timepoint.index) }
+      : null,
+    outerCall,
+    { refTime: BigInt(maxWeightRefTime), proofSize: BigInt(maxWeightProofSize) }
+  );
+
+  return {
+    outerCallHex,
+    outerCallHash,
+    reviveCallHexes,
+    asMultiHex: asMulti.method.toHex(),
+    isBatch: reviveCalls.length > 1
+  };
+}
+
+/**
+ * Cross-check: each inner EVM calldata that was printed in the chain-free
+ * section MUST appear verbatim in the SCALE-encoded outer call. If a
+ * runtime metadata change or operator typo silently rewrote what we
+ * wrapped, this catches it before anyone signs.
+ */
+export function verifyEvmCalldataEmbedded({ outerCallHex, innerCalls }) {
+  const haystack = outerCallHex.toLowerCase();
+  return innerCalls.map((call) => {
+    const needle = call.data.toLowerCase().replace(/^0x/u, "");
+    return { label: call.label, embedded: haystack.includes(needle) };
+  });
 }
 
 function printUsage() {
@@ -93,7 +184,9 @@ function printUsage() {
       "         [--timepoint-height N --timepoint-index M] \\",
       "         [--old-escrow 0xADDR]   # defaults to current deployments/<profile>.json#contracts.escrowCore",
       "         [--skip-revoke]         # emit single-call recipe instead of batched",
-      "         [--profile testnet]",
+      "         [--profile testnet] \\",
+      `         [--ws WSS_URL]          # default ${DEFAULT_WS}; env PASEO_AH_WS overrides`,
+      "         [--no-ws]               # skip on-chain hex emission; chain-free recipe only",
       "",
       "First leg (initiate): omit --timepoint-*; maybeTimepoint is None.",
       "Second leg (countersign): pass --timepoint-height and --timepoint-index",
@@ -286,6 +379,108 @@ async function main() {
     console.log("       node scripts/ops/redeploy-escrowcore.mjs --phase finalize \\");
     console.log(`         --new-escrow ${newEscrow} \\`);
     console.log("         --deploy-tx 0xDEPLOY_TX --multisig-exec-tx 0xEXEC_TX --commit");
+  }
+
+  // ----- On-chain hex emission (optional, requires Paseo AH WS reachability) -----
+  const wsUrl = resolveWs(args);
+  if (!wsUrl) {
+    console.log("");
+    console.log("## Inner call hex");
+    console.log("  --no-ws was passed; on-chain SCALE encoding skipped.");
+    console.log("  The chain-free recipe above is sufficient to construct the call in Apps.");
+    return;
+  }
+
+  console.log("");
+  console.log(`## Connecting to ${wsUrl} to SCALE-encode the inner call…`);
+  let api;
+  let blake2AsHex;
+  try {
+    const [{ ApiPromise, WsProvider }, utilCrypto] = await Promise.all([
+      import("@polkadot/api"),
+      import("@polkadot/util-crypto")
+    ]);
+    blake2AsHex = utilCrypto.blake2AsHex;
+    const provider = new WsProvider(wsUrl);
+    api = await ApiPromise.create({ provider, noInitWarn: true, throwOnConnect: true });
+  } catch (error) {
+    console.log("");
+    console.log("## Inner call hex");
+    console.log(`  WS connect to ${wsUrl} failed: ${error?.message ?? error}`);
+    console.log("  Falling back to chain-free recipe above. To skip this attempt, pass --no-ws.");
+    console.log("  To retry with a different endpoint: --ws wss://... or PASEO_AH_WS=wss://...");
+    if (api) {
+      try { await api.disconnect(); } catch { /* best effort */ }
+    }
+    return;
+  }
+
+  try {
+    const payload = await buildOnchainPayload({
+      api,
+      blake2AsHex,
+      treasuryPolicy,
+      innerCalls,
+      reviveRefTime,
+      reviveProofSize,
+      storageDepositLimit,
+      threshold: ownerRecord.threshold,
+      otherSignatories,
+      timepoint,
+      maxWeightRefTime,
+      maxWeightProofSize
+    });
+
+    console.log("");
+    console.log("## Inner call hex (paste into Apps multisig pending → 'call data for final approval')");
+    if (payload.isBatch) {
+      payload.reviveCallHexes.forEach((hex, i) => {
+        console.log(`  revive.call[${i + 1}] hex: ${hex}`);
+      });
+      console.log("");
+      console.log(`  utility.batchAll hex:  ${payload.outerCallHex}`);
+    } else {
+      console.log(`  revive.call hex:       ${payload.outerCallHex}`);
+    }
+    console.log(`  length:                ${(payload.outerCallHex.length - 2) / 2} bytes`);
+    console.log(`  blake2 call hash:      ${payload.outerCallHash}`);
+    console.log("    ↑ this is the call_hash that will appear in the multisig.NewMultisig event,");
+    console.log("      and the storage key for the pending multisig entry. Verify it matches what");
+    console.log("      polkadot-js-apps shows under 'Multisig' → 'pending approvals' before the");
+    console.log("      second-leg signer countersigns.");
+
+    if (payload.isBatch) {
+      const expectedPrefix = UTILITY_BATCH_ALL_CALL_INDEX;
+      const actualPrefix = payload.outerCallHex.slice(0, expectedPrefix.length).toLowerCase();
+      const prefixOk = actualPrefix === expectedPrefix.toLowerCase();
+      console.log("");
+      console.log(`  call index check:      ${prefixOk ? "✓" : "✗"} ${actualPrefix} (expected ${expectedPrefix} for utility.batchAll)`);
+      if (!prefixOk) {
+        console.log("    ↑ runtime metadata may have moved utility.batchAll — do NOT submit until investigated.");
+      }
+    }
+
+    console.log("");
+    console.log("## Cross-check: inner EVM calldata embedded in SCALE blob");
+    const embedChecks = verifyEvmCalldataEmbedded({ outerCallHex: payload.outerCallHex, innerCalls });
+    embedChecks.forEach((c, i) => {
+      console.log(`  [${i + 1}] ${c.embedded ? "✓ embedded" : "✗ MISSING"} — ${c.label}`);
+    });
+    const anyMissing = embedChecks.some((c) => !c.embedded);
+    if (anyMissing) {
+      console.log("    ↑ At least one inner EVM calldata is NOT present inside the SCALE call hex.");
+      console.log("      The chain-free recipe and the on-chain encoding have drifted — do NOT submit.");
+      process.exitCode = 4;
+    } else {
+      console.log("  → on-chain hash above corresponds to exactly the EVM calldata printed earlier.");
+    }
+
+    console.log("");
+    console.log("## First-leg shortcut (paste-and-submit asMulti)");
+    console.log(`  asMulti hex:           ${payload.asMultiHex}`);
+    console.log("  Apps → Developer → Extrinsics → Decode tab → paste this → review → Submission.");
+  } finally {
+    try { await api.disconnect(); } catch { /* best effort */ }
   }
 }
 
