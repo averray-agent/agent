@@ -150,6 +150,29 @@ CI is the merge gate. Do not bypass failing checks.
 - The operator app has zero `postinstall` lifecycle scripts. Adding one
   requires an explicit security justification in the PR body.
 
+## GitHub Credential Safety
+
+- Prefer the GitHub connector/plugin for GitHub operations such as PR,
+  issue, check, workflow, and repository reads or writes. Use `gh` only when
+  the connector cannot perform the action or when a local git/GitHub CLI
+  workflow is explicitly required.
+- Never run `gh auth token`, never print or request a GitHub token, and never
+  paste a token into the shell, a PR, an issue, a log, or an agent transcript.
+  Treat the local GitHub CLI session as a sensitive credential even when the
+  token is stored in the macOS Keychain instead of plaintext `hosts.yml`.
+- Keep `gh` commands non-secret and narrow. Do not pass tokens on the command
+  line or through environment variables, and do not ask another agent to do so.
+- Do not run untrusted dependency scripts, generated setup scripts, or random
+  repository automation while a broad-scope human `gh` session is available to
+  that same local user. Local processes can often act through the authenticated
+  CLI session even without reading the raw token.
+- Agent workstations should use the lowest-privilege GitHub account or token
+  practical for the task, and broad scopes such as `admin:org`, `workflow`, or
+  full `repo` should be revoked or rotated when they are no longer needed.
+- VPS, CI, and production automation must not rely on a human `gh auth login`.
+  Use GitHub Actions `GITHUB_TOKEN`, GitHub App credentials, or approved
+  1Password-backed service credentials instead.
+
 ## PR Notes
 
 Every PR should include:
