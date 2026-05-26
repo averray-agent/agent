@@ -364,6 +364,39 @@ async function updateManifest({ deploymentsPath, manifest, newEscrow, deployTx, 
   await writeFile(deploymentsPath, text, "utf8");
 }
 
+/**
+ * Rewrite the ESCROW_CORE_ADDRESS= line in deploy/<envFile>.template to
+ * track the manifest. Phase 2 PR 2.6 made the template the single source
+ * of truth at deploy time and added check-template-matches-manifest.mjs
+ * as a CI guard — if finalize only writes the manifest, that lint fails.
+ *
+ * Returns true if the template was rewritten, false if no change was
+ * needed (already up to date or no ESCROW_CORE_ADDRESS line found).
+ * Exported for direct testing.
+ */
+export function rewriteEscrowAddressInTemplate(text, newEscrow) {
+  const re = /^(ESCROW_CORE_ADDRESS=)(.*)$/m;
+  const match = text.match(re);
+  if (!match) return { changed: false, reason: "no ESCROW_CORE_ADDRESS line" };
+  if (match[2].trim() === newEscrow) return { changed: false, reason: "already up to date" };
+  const next = text.replace(re, `$1${newEscrow}`);
+  return { changed: true, text: next, previousValue: match[2].trim() };
+}
+
+async function syncEnvTemplate({ templatePath, newEscrow, dryRun }) {
+  let text;
+  try {
+    text = await readFile(templatePath, "utf8");
+  } catch (error) {
+    if (error?.code === "ENOENT") return { skipped: true, reason: "template file not found" };
+    throw error;
+  }
+  const result = rewriteEscrowAddressInTemplate(text, newEscrow);
+  if (!result.changed) return { skipped: true, reason: result.reason };
+  if (!dryRun) await writeFile(templatePath, result.text, "utf8");
+  return { changed: true, previousValue: result.previousValue };
+}
+
 async function runFinalize({ args, deploymentsPath, manifest, provider, wiringState }) {
   if (!args.newEscrow || !/^0x[a-fA-F0-9]{40}$/u.test(args.newEscrow)) {
     throw new Error("--phase finalize requires --new-escrow 0xADDRESS.");
@@ -428,8 +461,21 @@ async function runFinalize({ args, deploymentsPath, manifest, provider, wiringSt
       skipRevoke: args.skipRevoke
     });
     console.log(`\n  Wrote ${deploymentsPath}#contracts.escrowCore = ${newEscrow}`);
+
+    // Phase 2 PR 2.6 made deploy/backend.env.template the single source of
+    // truth at deploy time; check-template-matches-manifest.mjs is the CI
+    // guard. Keep the template in sync with the new escrow address or that
+    // lint will fail on the next push.
+    const templatePath = resolve(repoRoot, "deploy", "backend.env.template");
+    const tplResult = await syncEnvTemplate({ templatePath, newEscrow, dryRun: false });
+    if (tplResult.changed) {
+      console.log(`  Wrote ${templatePath}#ESCROW_CORE_ADDRESS = ${newEscrow}  (was ${tplResult.previousValue})`);
+    } else {
+      console.log(`  ${templatePath}: no change needed (${tplResult.reason})`);
+    }
   } else {
     console.log(`\n  Manifest update planned (dry-run): would write contracts.escrowCore = ${newEscrow}`);
+    console.log(`  Env template update planned (dry-run): would rewrite ESCROW_CORE_ADDRESS in deploy/backend.env.template`);
   }
 
   // 3. Audit re-run.

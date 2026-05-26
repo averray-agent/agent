@@ -4,6 +4,7 @@ import { Interface } from "ethers";
 import {
   parseArgs,
   buildInnerCalls,
+  buildOnchainPayload,
   resolveWs,
   verifyEvmCalldataEmbedded,
   UTILITY_BATCH_ALL_CALL_INDEX
@@ -116,6 +117,57 @@ test("UTILITY_BATCH_ALL_CALL_INDEX is the Asset Hub Paseo runtime prefix", () =>
   // hex emitter that checks against it — needs to be updated.
   assert.equal(UTILITY_BATCH_ALL_CALL_INDEX, "0x2802");
 });
+
+// Live SCALE-encoding check against Paseo Asset Hub. Default-skipped to keep
+// `npm run test:ops` runnable offline / in CI. Opt in with
+//   RUN_PASEO_AH_WS_TESTS=1 npm run test:ops
+// or by pointing PASEO_AH_WS at any reachable Asset Hub Paseo endpoint and
+// setting RUN_PASEO_AH_WS_TESTS=1. The test is the only check tied to runtime
+// metadata, so it catches pallet-index reshuffles in CI when explicitly run.
+const RUN_WS = process.env.RUN_PASEO_AH_WS_TESTS === "1";
+test(
+  `buildOnchainPayload emits a utility.batchAll call whose hex starts with ${UTILITY_BATCH_ALL_CALL_INDEX}`,
+  { skip: RUN_WS ? false : "set RUN_PASEO_AH_WS_TESTS=1 to exercise the live Paseo AH endpoint" },
+  async () => {
+    const { ApiPromise, WsProvider } = await import("@polkadot/api");
+    const { blake2AsHex } = await import("@polkadot/util-crypto");
+    const wsUrl = process.env.PASEO_AH_WS || "wss://sys.ibp.network/asset-hub-paseo";
+    const provider = new WsProvider(wsUrl);
+    const api = await ApiPromise.create({ provider, noInitWarn: true, throwOnConnect: true });
+    try {
+      const innerCalls = buildInnerCalls({ iface, newEscrow: NEW, oldEscrow: OLD, skipRevoke: false });
+      const payload = await buildOnchainPayload({
+        api,
+        blake2AsHex,
+        treasuryPolicy: "0x648Cc5fdE94435992296C4e5ac642d18bB64c12B",
+        innerCalls,
+        reviveRefTime: 4_000_000_000,
+        reviveProofSize: 100_000,
+        storageDepositLimit: 1_000_000_000,
+        threshold: 2,
+        otherSignatories: [
+          "13pav6xpfdapyCAqfRhWZXxUnqDhjrF92dJr3FBwVfBKUKSM",
+          "148tqwhGxeCva7ZX8RwvaLjCS7HvDJJaSbxfTUwE9Zyc5Xtm"
+        ],
+        timepoint: null,
+        maxWeightRefTime: 9_000_000_000,
+        maxWeightProofSize: 300_000
+      });
+
+      assert.equal(payload.isBatch, true);
+      assert.ok(
+        payload.outerCallHex.toLowerCase().startsWith(UTILITY_BATCH_ALL_CALL_INDEX.toLowerCase()),
+        `outerCallHex ${payload.outerCallHex.slice(0, 12)}… should start with ${UTILITY_BATCH_ALL_CALL_INDEX}`
+      );
+      assert.match(payload.outerCallHash, /^0x[0-9a-f]{64}$/u);
+      // Sanity: the EVM calldata we passed in must show up inside the SCALE blob.
+      const checks = verifyEvmCalldataEmbedded({ outerCallHex: payload.outerCallHex, innerCalls });
+      assert.ok(checks.every((c) => c.embedded), "every inner EVM calldata must be embedded in batchAll hex");
+    } finally {
+      await api.disconnect();
+    }
+  }
+);
 
 test("verifyEvmCalldataEmbedded flags missing calldata inside the outer SCALE hex", () => {
   const NEW_DATA = iface.encodeFunctionData("setServiceOperator", [NEW, true]);

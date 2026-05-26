@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Interface } from "ethers";
-import { parseArgs, loadKeyFromOp } from "./redeploy-escrowcore.mjs";
+import { parseArgs, loadKeyFromOp, rewriteEscrowAddressInTemplate } from "./redeploy-escrowcore.mjs";
 
 test("parseArgs defaults to dry-run + phase=all + profile=testnet", () => {
   const args = parseArgs([]);
@@ -77,4 +77,35 @@ test("setServiceOperator(address,bool) selector encoding is stable", () => {
     data,
     "0xeea03c28000000000000000000000000b8fd8a932f69bd5e39700b7cf6d2920af84d1b270000000000000000000000000000000000000000000000000000000000000001"
   );
+});
+
+test("rewriteEscrowAddressInTemplate updates the ESCROW_CORE_ADDRESS line in place", () => {
+  const before = [
+    "TREASURY_POLICY_ADDRESS=0x648Cc5fdE94435992296C4e5ac642d18bB64c12B",
+    "AGENT_ACCOUNT_ADDRESS=0x71B111d8c9DF84Be26cb9067D27dAd7A2d5E7e08",
+    "ESCROW_CORE_ADDRESS=0x7BB8fea44bDeE9870cF27c1dB616E7017BC38b0a",
+    "REPUTATION_SBT_ADDRESS=0x68Db90db715Be59E5800Bea08c058E4CFd88e27c"
+  ].join("\n") + "\n";
+  const NEW = "0xb8fd8A932F69bD5E39700b7cf6D2920aF84d1B27";
+  const result = rewriteEscrowAddressInTemplate(before, NEW);
+  assert.equal(result.changed, true);
+  assert.equal(result.previousValue, "0x7BB8fea44bDeE9870cF27c1dB616E7017BC38b0a");
+  assert.ok(result.text.includes(`ESCROW_CORE_ADDRESS=${NEW}`));
+  // Other lines must be untouched.
+  assert.ok(result.text.includes("TREASURY_POLICY_ADDRESS=0x648Cc5fdE94435992296C4e5ac642d18bB64c12B"));
+  assert.ok(result.text.includes("REPUTATION_SBT_ADDRESS=0x68Db90db715Be59E5800Bea08c058E4CFd88e27c"));
+});
+
+test("rewriteEscrowAddressInTemplate is a no-op when value already matches", () => {
+  const NEW = "0xb8fd8A932F69bD5E39700b7cf6D2920aF84d1B27";
+  const text = `ESCROW_CORE_ADDRESS=${NEW}\n`;
+  const result = rewriteEscrowAddressInTemplate(text, NEW);
+  assert.equal(result.changed, false);
+  assert.equal(result.reason, "already up to date");
+});
+
+test("rewriteEscrowAddressInTemplate reports missing ESCROW_CORE_ADDRESS line", () => {
+  const result = rewriteEscrowAddressInTemplate("FOO=bar\n", "0xb8fd8A932F69bD5E39700b7cf6D2920aF84d1B27");
+  assert.equal(result.changed, false);
+  assert.equal(result.reason, "no ESCROW_CORE_ADDRESS line");
 });
