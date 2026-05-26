@@ -146,6 +146,56 @@ test("scoped service-token proof gate is opt-in, admin-gated, and supports evide
   );
 });
 
+test("external schema proof gate is opt-in, admin-gated, and supports evidence files", async () => {
+  const script = await readFile(CHECK_SCRIPT, "utf8");
+
+  assert.match(
+    script,
+    /CHECK_EXTERNAL_SCHEMA_PROOF=\$\{CHECK_EXTERNAL_SCHEMA_PROOF:-0\}/u,
+    "external-schema proof should be opt-in"
+  );
+  assert.match(
+    script,
+    /CHECK_EXTERNAL_SCHEMA_PROOF=1 requires ADMIN_JWT/u,
+    "external-schema proof should fail closed without an admin token"
+  );
+  assert.match(
+    script,
+    /EXTERNAL_SCHEMA_PROOF_EVIDENCE_FILE="\$repo_root\/\$EXTERNAL_SCHEMA_PROOF_EVIDENCE_FILE"/u,
+    "relative external-schema evidence paths should be normalized before node or docker checks"
+  );
+  assert.match(
+    script,
+    /external_schema_proof_evidence_dir="\$\(dirname "\$EXTERNAL_SCHEMA_PROOF_EVIDENCE_FILE"\)"/u,
+    "docker fallback should derive the external-schema evidence host directory"
+  );
+  assert.match(
+    script,
+    /mkdir -p "\$external_schema_proof_evidence_dir"/u,
+    "docker fallback should create the external-schema evidence host directory"
+  );
+  assert.match(
+    script,
+    /node "\$script_dir\/check-external-schema-registration-proof\.mjs"/u,
+    "node path should invoke the external-schema proof checker"
+  );
+  assert.match(
+    script,
+    /node scripts\/ops\/check-external-schema-registration-proof\.mjs/u,
+    "docker fallback should invoke the external-schema proof checker"
+  );
+  assert.match(
+    script,
+    /EXTERNAL_SCHEMA_PROOF_IDEMPOTENCY_KEY="\$EXTERNAL_SCHEMA_PROOF_IDEMPOTENCY_KEY"/u,
+    "external-schema proof should pass idempotency override through"
+  );
+  assert.match(
+    script,
+    /external_schema_proof_docker_volume_args\+=\(-v "\$external_schema_proof_evidence_dir:\$external_schema_proof_evidence_dir"\)/u,
+    "docker fallback should mount external-schema evidence at the same absolute path"
+  );
+});
+
 test("metrics auth gate is opt-in and verifies both denied and allowed scrapes", async () => {
   const script = await readFile(CHECK_SCRIPT, "utf8");
 
