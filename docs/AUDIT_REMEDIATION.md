@@ -745,17 +745,39 @@ This section captures operator-side security events that are out-of-scope for th
 | 5    | In-process atomic swap of `SIGNER_PRIVATE_KEY` value in `mcp-server/.env.local` from the leaked key to the new admin key (read-derive-verify-write-readback pattern).        | n/a (off-chain)      |
 | 6    | `deployments/testnet.json` updated: `deployer` / `pauser` / `arbitrator` → new admin. Verified by `scripts/ops/audit-launch-readiness.mjs --profile testnet` (all checks green). | n/a (file change)    |
 
-**Retired address.** `0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519` — no longer pauser, no longer approved arbitrator, AAC.positions.liquid drained to 0, EOA PAS balance reduced to dust (~6 PAS). Note: `0.200001` USDC remains in `AAC.positions.reserved` against an in-flight obligation. When that obligation resolves and the reserved unlocks back to `liquid`, the leaked key's `withdraw` capability is moot because the operator backend now signs as the new admin (see Step 5 — `.env.local` was rotated immediately after roles moved, so the legitimate process holds the active key; any race with the leaked key would resolve to the new admin reading first on each ops cycle).
+**Retired address.** `0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519` — no longer pauser, no longer approved arbitrator, AAC.positions.liquid drained to 0, EOA PAS balance reduced to dust (~6 PAS). Verified on 2026-05-26: `AAC.positions(oldAdmin, USDC)` still has `reserved=200001` and `jobStakeLocked=60000`. These amounts no longer have a normal release path because the old EscrowCore `0x7BB8fea44bDeE9870cF27c1dB616E7017BC38b0a` was revoked from `TreasuryPolicy.serviceOperators` during PR #525, and the relevant old EscrowCore settlement/timeout paths call `AgentAccountCore` mutation functions that are `onlyOperator` gated.
 
 **New address.** `0x6778F050eAc8313e4dbB176d7BAB44510E833ac8` — now pauser, approved arbitrator, holds 9.339999 USDC in AAC.positions.liquid and ~9970 PAS native.
 
 **Tooling.** All admin-side scripts under `scripts/ops/rotate-admin-*.mjs` follow a single safety pattern: keys are loaded with `fs.readFileSync` into `ethers.Wallet`, and the `Wallet` object is the only thing that touches the bytes. Address-only output. The `--dry-run` default + `--commit` opt-in mirrors the existing `scripts/ops/admin-topup-kms-signer.mjs` (commit `07ca5a4` on `claude/kms-signer-topup`). For the multisig role rotations the operator signs via browser extension (Talisman / SubWallet / polkadot{.js}) through polkadot-js-apps — the sub-agent never touches Substrate keys.
 
-**Evidence.** `docs/evidence/admin-eoa-rotation-2026-05-25.drain.json` (drain tx hashes + block numbers + state deltas) and `docs/evidence/admin-eoa-rotation-2026-05-25.audit-launch.txt` (post-rotation audit-launch-readiness output). All **role + parameter** checks are green for this rotation. The same audit-launch output also surfaces one **unrelated** finding from PR #521's newly-added deployed-bytecode-selector check — `EscrowCore` is missing `claimJobFor(bytes32,address)` [0x090cf6d5]. That finding is not caused by this rotation (which never touches EscrowCore) and is tracked as a separate redeploy task — see the structured `unrelatedFindings` array in `docs/evidence/admin-eoa-rotation-2026-05-25.json`.
+**Evidence.** `docs/evidence/admin-eoa-rotation-2026-05-25.drain.json` (drain tx hashes + block numbers + state deltas), `docs/evidence/admin-eoa-rotation-2026-05-25.audit-launch.txt` (post-rotation audit-launch-readiness output), and [`docs/evidence/orphaned-balances-2026-05-26.json`](./evidence/orphaned-balances-2026-05-26.json) (fresh read-only chain verification of the orphaned balances). All **role + parameter** checks are green for this rotation. The same audit-launch output also surfaces one **unrelated** finding from PR #521's newly-added deployed-bytecode-selector check — `EscrowCore` is missing `claimJobFor(bytes32,address)` [0x090cf6d5]. That finding is not caused by this rotation (which never touches EscrowCore) and was resolved by the PR #525 EscrowCore redeploy.
+
+**Orphaned balance verification — 2026-05-26.** Read-only chain evidence at [`docs/evidence/orphaned-balances-2026-05-26.json`](./evidence/orphaned-balances-2026-05-26.json) recorded:
+
+- `TreasuryPolicy.serviceOperators(0x7BB8fea44bDeE9870cF27c1dB616E7017BC38b0a) == false`.
+- Old admin `AAC.positions(oldAdmin, USDC)`: `liquid=0`, `reserved=200001`, `jobStakeLocked=60000`, `debtOutstanding=0`.
+- KMS signer `AAC.positions(kmsSigner, USDC)`: `liquid=200000`, `reserved=200000`, `jobStakeLocked=0`, `debtOutstanding=0`.
+- Four unsettled jobs remain on the old EscrowCore:
+  - `0xde082633770170fbab249604d031ac90d8ee966d9e245ce133ea0ab11947429f` — old admin poster/worker, `Submitted`, `claimExpiry=1778682156`, `reward=100000`, `claimStake=0`, `claimFee=0`.
+  - `0x4024b69fed02a193e009a4ca9c6433ad962e1c5de5a7f3683795ded07b9638fa` — old admin poster/worker, `Submitted`, `claimExpiry=1778878728`, `reward=100000`, `claimStake=10000`, `claimFee=50000`.
+  - `0x0ef0e5bb5bb6eedb0c607e052aa11222a1f2a51a3f8e7a4b569b013f54789bf9` — KMS signer poster, no worker, `Open`, `claimExpiry=0`, `reward=100000`.
+  - `0x98e3c985a26d50a744c82d0cd4d8368da455cc20a5ab71ea1e3cd9ae0dae196a` — KMS signer poster, no worker, `Open`, `claimExpiry=0`, `reward=100000`.
+- Total orphaned position tail at verification time: `460001` USDC base units (`0.460001` USDC). The two old-admin submitted jobs account for `200000` base units of reserved USDC; one extra reserved base unit is dust from the prior cutover/debugging sequence.
+
+**Recovery feasibility.** Normal old-escrow release is blocked in practice. [`contracts/EscrowCore.sol`](../contracts/EscrowCore.sol) can only move the old job balances by calling `AgentAccountCore.settleReservedTo`, `refundReserved`, `releaseJobStake`, `slashJobStake`, or `slashClaimFee`. Those functions are all `onlyOperator` in [`contracts/AgentAccountCore.sol`](../contracts/AgentAccountCore.sol), and the old EscrowCore is no longer a service operator in [`contracts/TreasuryPolicy.sol`](../contracts/TreasuryPolicy.sol). There is no dedicated `EscrowCore.recover` or `cancelOpenJob` function in the current contract surface. A recovery attempt would require a deliberate owner/multisig session, for example:
+
+1. Multisig owner temporarily calls `TreasuryPolicy.setServiceOperator(oldEscrowCore, true)`.
+2. Operator executes state-specific old EscrowCore flows (`resolveSinglePayout` / timeout / dispute paths for submitted jobs; claim + submit + resolve for open jobs), or an explicitly reviewed direct-AAC recovery plan that temporarily grants a recovery caller operator status and calls `AgentAccountCore.refundReserved` / `releaseJobStake` directly. The latter bypasses old escrow state and should be treated as a separate recovery runbook, not routine cleanup.
+3. Multisig owner calls `TreasuryPolicy.setServiceOperator(oldEscrowCore, false)` again and verifies both old/new service-operator statuses.
+
+For the old-admin balances, any normal settlement/refund would land liquid value back on the retired/leaked old-admin AAC position, so an additional compromised-key drain or bespoke recovery action would still be needed to move it elsewhere. This increases operational risk for a sub-dollar testnet amount.
+
+**Recommendation.** Accept loss for testnet. Do not attempt recovery for `0.460001` USDC. The recovery procedure would require at least two owner/multisig role changes, one or more state-machine/recovery transactions, and a careful post-check for a value smaller than operator time and risk. Record this as accepted testnet loss and keep the evidence for mainnet launch discipline.
 
 **Follow-ups.**
 
-- [ ] Sweep the `200_001` USDC reserved-then-released amount from the retired admin's AAC position once the in-flight obligation resolves. Owner: Pascal. Verification: `policy.positions(0xFd2EAE…6519, USDC).liquid == 0` after the obligation completes.
+- [x] Verify and write off the `460001` USDC-base-unit orphaned balance tail (`0.460001` USDC) left behind old EscrowCore. Owner: Pascal/Codex. Verification: [`docs/evidence/orphaned-balances-2026-05-26.json`](./evidence/orphaned-balances-2026-05-26.json); recommendation is accepted testnet loss, not recovery.
 - [ ] Delete the `op://prod-backend/signer-private-key/password` 1Password item after the 30-day rollback soak (originally targeted ~2026-06-15 per the Phase 3 cutover; now also covers the 2026-05-25 transcript-leak vector).
 - [ ] Review the operator workflow that placed `SIGNER_PRIVATE_KEY` (deriving to the admin address) into `mcp-server/.env.local` in the first place — see whether `loadKeyFromEnvFile` should be replaced by `op read` invocations for admin-side scripts, so the local file disappears entirely.
 
@@ -822,11 +844,13 @@ redaction commands.
 
 ### Follow-ups that remain open
 
-- The `200_001` USDC reserved tail on the retired
-  `0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519` admin address remains open.
-  After PR #525 redeployed EscrowCore, that tail is tied to the old retired
-  contract path and is effectively orphaned until the original in-flight
-  obligation can be resolved or conclusively written off.
+- The old EscrowCore balance tail is now verified and written off as accepted
+  testnet loss. Evidence:
+  [`docs/evidence/orphaned-balances-2026-05-26.json`](./evidence/orphaned-balances-2026-05-26.json).
+  Total at risk was `0.460001` USDC: old admin `reserved=200001` +
+  `jobStakeLocked=60000`, KMS signer `reserved=200000`. The remediation lesson
+  is to settle or finalize in-flight obligations through reviewed state-machine
+  paths before revoking a contract from `TreasuryPolicy.serviceOperators`.
 - Delete `op://prod-backend/signer-private-key/password` after the 30-day soak
   period ends. That item was already backend-retired by the KMS cutover and is
   now also incident-related.
