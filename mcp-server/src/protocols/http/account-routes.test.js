@@ -60,6 +60,20 @@ function makeHarness(overrides = {}) {
       calls.push(["getAccountSummary", wallet]);
       return account;
     },
+    getAccountPosition: async (wallet, asset) => {
+      calls.push(["getAccountPosition", { wallet, asset }]);
+      return overrides.accountPosition ?? {
+        wallet,
+        asset: { symbol: asset },
+        source: {
+          contract: "AgentAccountCore",
+          address: gateway.config.agentAccountAddress,
+          method: "positions",
+          field: "liquid"
+        },
+        position: { liquidRaw: "123000", liquid: 0.123 }
+      };
+    },
     getBorrowCapacity: async (wallet, asset) => {
       calls.push(["getBorrowCapacity", { wallet, asset }]);
       return overrides.borrowCapacity ?? 5;
@@ -213,6 +227,29 @@ test("GET /account overlays live strategy allocation by asset symbol", async () 
 
   assert.equal(handled, true);
   assert.deepEqual(response.body.strategyAllocated, { DOT: 1, USDC: 10 });
+});
+
+test("GET /account/position returns chain-backed wallet asset position", async () => {
+  const { calls, response, route } = makeHarness();
+
+  const handled = await route({
+    request: { method: "GET" },
+    response,
+    url: new URL("http://localhost/account/position?asset=usdc"),
+    pathname: "/account/position",
+  });
+
+  assert.equal(handled, true);
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.wallet, AUTH.wallet);
+  assert.equal(response.body.asset.symbol, "USDC");
+  assert.equal(response.body.source.method, "positions");
+  assert.equal(response.body.position.liquidRaw, "123000");
+  assert.deepEqual(calls.slice(0, 3), [
+    ["auth"],
+    ["getAccountPosition", { wallet: AUTH.wallet, asset: "USDC" }],
+    ["respond", { statusCode: 200, body: response.body, headers: {} }],
+  ]);
 });
 
 test("GET /account/borrow-capacity returns wallet-scoped capacity", async () => {

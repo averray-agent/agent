@@ -432,26 +432,17 @@ async function assertProductProofLiquidity({
   settlementReadiness,
   requireRewardLiquidity = true
 }) {
-  if (typeof platform.getAccountSummary !== "function") {
-    throw new Error("Hosted product-proof worker loop requires /account liquidity readiness.");
-  }
-
-  const account = await platform.getAccountSummary();
-  if (!sameWallet(account?.wallet, wallet)) {
-    throw new Error(
-      `Hosted product-proof worker loop requires /account to match /auth/session; ` +
-      `authWallet=${wallet}; accountWallet=${account?.wallet ?? "missing"}.`
-    );
-  }
   const asset = settlementReadiness.asset;
   const decimals = Number(asset.decimals);
   const requiredRaw = toBaseUnits(rewardAmount, decimals);
-  const availableRaw = toRawAssetAmount({
-    rawValue: account?.raw?.liquid?.[rewardAsset],
-    displayValue: account?.liquid?.[rewardAsset],
-    decimals,
-    label: `${rewardAsset} liquid balance`
+  const liquidity = await readProductProofLiquidity({
+    platform,
+    wallet,
+    rewardAsset,
+    settlementReadiness,
+    decimals
   });
+  const availableRaw = liquidity.availableRaw;
   if (requireRewardLiquidity && availableRaw < requiredRaw) {
     const agentAccountAddress = settlementReadiness.contracts?.agentAccountAddress ?? "AgentAccountCore";
     throw new Error(
@@ -467,7 +458,91 @@ async function assertProductProofLiquidity({
     requiredRaw: requiredRaw.toString(),
     availableRaw: availableRaw.toString(),
     required: formatBaseUnits(requiredRaw, decimals),
-    available: formatBaseUnits(availableRaw, decimals)
+    available: formatBaseUnits(availableRaw, decimals),
+    source: liquidity.source,
+    accountContract: liquidity.accountContract ?? null
+  };
+}
+
+async function readProductProofLiquidity({
+  platform,
+  wallet,
+  rewardAsset,
+  settlementReadiness,
+  decimals
+}) {
+  if (typeof platform.getAccountPosition === "function") {
+    const accountPosition = await platform.getAccountPosition(rewardAsset);
+    if (!sameWallet(accountPosition?.wallet, wallet)) {
+      throw new Error(
+        `Hosted product-proof worker loop requires /account/position to match /auth/session; ` +
+        `authWallet=${wallet}; accountWallet=${accountPosition?.wallet ?? "missing"}.`
+      );
+    }
+    const settlementAsset = settlementReadiness.asset;
+    const positionAsset = accountPosition?.asset ?? {};
+    const positionSymbol = typeof positionAsset.symbol === "string" && positionAsset.symbol.trim()
+      ? normalizeAssetSymbol(positionAsset.symbol)
+      : null;
+    if (positionSymbol !== rewardAsset) {
+      throw new Error(
+        `Hosted product-proof worker loop requires /account/position asset ${rewardAsset}; got ${positionAsset.symbol ?? "missing"}.`
+      );
+    }
+    if (
+      positionAsset.address
+      && settlementAsset.address
+      && String(positionAsset.address).toLowerCase() !== String(settlementAsset.address).toLowerCase()
+    ) {
+      throw new Error(
+        `Hosted product-proof worker loop /account/position asset address mismatch; ` +
+        `expected=${settlementAsset.address}; got=${positionAsset.address}.`
+      );
+    }
+    const source = accountPosition?.source ?? {};
+    const expectedAccount = settlementReadiness.contracts?.agentAccountAddress;
+    if (
+      source.contract !== "AgentAccountCore"
+      || source.method !== "positions"
+      || source.field !== "liquid"
+      || (expectedAccount && String(source.address ?? "").toLowerCase() !== String(expectedAccount).toLowerCase())
+    ) {
+      throw new Error(
+        `Hosted product-proof worker loop requires chain-authoritative AgentAccountCore.positions liquidity from /account/position; ` +
+        `source=${JSON.stringify(source)}.`
+      );
+    }
+    return {
+      availableRaw: toRawAssetAmount({
+        rawValue: accountPosition?.position?.liquidRaw,
+        displayValue: accountPosition?.position?.liquid,
+        decimals,
+        label: `${rewardAsset} AgentAccountCore.positions.liquid`
+      }),
+      source: "AgentAccountCore.positions.liquid",
+      accountContract: source.address ?? null
+    };
+  }
+
+  if (typeof platform.getAccountSummary !== "function") {
+    throw new Error("Hosted product-proof worker loop requires /account/position or /account liquidity readiness.");
+  }
+  const account = await platform.getAccountSummary();
+  if (!sameWallet(account?.wallet, wallet)) {
+    throw new Error(
+      `Hosted product-proof worker loop requires /account to match /auth/session; ` +
+      `authWallet=${wallet}; accountWallet=${account?.wallet ?? "missing"}.`
+    );
+  }
+  return {
+    availableRaw: toRawAssetAmount({
+      rawValue: account?.raw?.liquid?.[rewardAsset],
+      displayValue: account?.liquid?.[rewardAsset],
+      decimals,
+      label: `${rewardAsset} liquid balance`
+    }),
+    source: "account.summary.liquid",
+    accountContract: null
   };
 }
 

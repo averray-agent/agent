@@ -249,6 +249,33 @@ test("getAccountSummary returns display balances and preserves raw base units", 
   assert.deepEqual(summary.raw.debtOutstanding, { USDC: "250000" });
 });
 
+test("getAccountPosition returns direct AgentAccountCore position with provenance", async () => {
+  const gateway = new BlockchainGateway({ enabled: false, agentAccountAddress: "0x2222222222222222222222222222222222222222", supportedAssets: [USDC_TRUST_ASSET] });
+  gateway.accountContract = {
+    async positions(wallet, asset) {
+      assert.equal(wallet, "0x3333333333333333333333333333333333333333");
+      assert.equal(asset, USDC_TRUST_ASSET.address);
+      return emptyPosition({
+        liquid: 250_000n,
+        jobStakeLocked: 125_000n
+      });
+    }
+  };
+
+  const position = await gateway.getAccountPosition("0x3333333333333333333333333333333333333333", "USDC");
+
+  assert.equal(position.wallet, "0x3333333333333333333333333333333333333333");
+  assert.equal(position.asset.symbol, "USDC");
+  assert.deepEqual(position.source, {
+    contract: "AgentAccountCore",
+    address: "0x2222222222222222222222222222222222222222",
+    method: "positions",
+    field: "liquid"
+  });
+  assert.equal(position.position.liquidRaw, "250000");
+  assert.equal(position.position.jobStakeLockedRaw, "125000");
+});
+
 test("getClaimEconomicsConfig converts chain min fees back to display units", async () => {
   const gateway = gatewayWithDot();
   gateway.policyContract = {

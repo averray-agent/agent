@@ -1017,6 +1017,13 @@ export class PlatformService {
     };
   }
 
+  async getAccountPosition(wallet, asset) {
+    if (!this.blockchainGateway?.isEnabled() || typeof this.blockchainGateway.getAccountPosition !== "function") {
+      throw new ValidationError("Account position reads require the blockchain gateway.");
+    }
+    return this.blockchainGateway.getAccountPosition(wallet, asset);
+  }
+
   async fundAccount(wallet, asset, amount) {
     if (this.blockchainGateway?.isEnabled()) {
       this.accountMutationService.attachStoredTreasuryMetadata(

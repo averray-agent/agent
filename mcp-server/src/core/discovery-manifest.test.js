@@ -25,6 +25,7 @@ test("buildDiscoveryManifest returns the full public discovery shape", () => {
   assert.ok(Array.isArray(manifest.publicEndpoints));
   assert.ok(Array.isArray(manifest.authenticatedEndpoints));
   assert.ok(Array.isArray(manifest.tools));
+  assert.ok(manifest.authenticatedEndpoints.some((entry) => entry.path === "/account/position"));
   assert.ok(manifest.authenticatedEndpoints.some((entry) => entry.path === "/account/borrow-capacity"));
   assert.ok(!manifest.authenticatedEndpoints.some((entry) => entry.path === "/payments/send"));
   assert.ok(!manifest.tools.some((tool) => tool.name === "sendToAgent"));

@@ -15,6 +15,7 @@ const ROOT_ENDPOINTS = [
   "/account/borrow-capacity",
   "/account/deallocate",
   "/account/fund",
+  "/account/position",
   "/account/repay",
   "/account/strategies",
   "/xcm/request",

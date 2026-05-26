@@ -164,6 +164,10 @@ export class AgentPlatformClient {
     return this.request("/account");
   }
 
+  async getAccountPosition(asset = DEFAULT_ESCROW_ASSET_SYMBOL) {
+    return this.request(`/account/position?asset=${encodeURIComponent(asset)}`);
+  }
+
   async getBorrowCapacity(asset = DEFAULT_ESCROW_ASSET_SYMBOL) {
     return this.request(`/account/borrow-capacity?asset=${encodeURIComponent(asset)}`);
   }

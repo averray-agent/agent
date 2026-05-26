@@ -97,6 +97,23 @@ test("authenticated helpers send bearer token and compact JSON bodies", async ()
   });
 });
 
+test("getAccountPosition reads the direct chain position endpoint", async () => {
+  const calls = [];
+  const client = new AgentPlatformClient({
+    baseUrl: "https://api.example.test",
+    token: "test-token",
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      return jsonResponse({ ok: true });
+    }
+  });
+
+  await client.getAccountPosition("USDC");
+
+  assert.equal(calls[0].url, "https://api.example.test/account/position?asset=USDC");
+  assert.equal(calls[0].options.headers.get("authorization"), "Bearer test-token");
+});
+
 test("listSessions builds optional query string without empty params", async () => {
   const calls = [];
   const client = new AgentPlatformClient({

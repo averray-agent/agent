@@ -394,6 +394,43 @@ test("runHostedWorkerLoop fails closed before mutation when AgentAccountCore USD
   assert.deepEqual(calls.map(([name]) => name), ["getAuthSession", "getAdminStatus", "getAccountSummary"]);
 });
 
+test("runHostedWorkerLoop prefers direct AgentAccountCore position over stale account summary liquidity", async () => {
+  const calls = [];
+  const wallet = "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519";
+  await assert.rejects(
+    runHostedWorkerLoop({
+      client: {
+        async getAuthSession() {
+          calls.push(["getAuthSession"]);
+          return authSession({ wallet });
+        },
+        async getAdminStatus() {
+          calls.push(["getAdminStatus"]);
+          return settlementReadyStatus();
+        },
+        async getAccountPosition(asset) {
+          calls.push(["getAccountPosition", asset]);
+          return accountPosition({ wallet, liquidUsdcRaw: 0 });
+        },
+        async getAccountSummary() {
+          calls.push(["getAccountSummary"]);
+          return accountSummary({ wallet, liquidUsdcRaw: 1_000_000 });
+        },
+        async createJob() {
+          calls.push(["createJob"]);
+          throw new Error("should not create a catalog job when direct chain position is empty");
+        }
+      },
+      now: () => 1700000000000,
+      log: () => {},
+      env: { ADMIN_JWT: "token" }
+    }),
+    /requires funded USDC liquidity before mutation; wallet=0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519; account=0x3333333333333333333333333333333333333333; required=0\.1 USDC \(raw 100000\); available=0 USDC \(raw 0\)/u
+  );
+
+  assert.deepEqual(calls.map(([name]) => name), ["getAuthSession", "getAdminStatus", "getAccountPosition"]);
+});
+
 test("runHostedWorkerLoop fails closed before mutation when signer funding telemetry is missing", async () => {
   const calls = [];
   await assert.rejects(
@@ -1053,6 +1090,40 @@ function accountSummary({
     };
   }
   return summary;
+}
+
+function accountPosition({
+  wallet = "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519",
+  liquidUsdcRaw,
+  liquidUsdc = Number(liquidUsdcRaw) / 1_000_000,
+  source = {}
+}) {
+  return {
+    wallet,
+    asset: {
+      symbol: "USDC",
+      address: "0x0000053900000000000000000000000001200000",
+      assetClass: "trust_backed",
+      assetId: 1337,
+      decimals: 6,
+      minBalanceRaw: "70000"
+    },
+    source: {
+      contract: "AgentAccountCore",
+      address: "0x3333333333333333333333333333333333333333",
+      method: "positions",
+      field: "liquid",
+      ...source
+    },
+    position: {
+      liquid: liquidUsdc,
+      liquidRaw: String(liquidUsdcRaw),
+      reserved: 0,
+      reservedRaw: "0",
+      jobStakeLocked: 0,
+      jobStakeLockedRaw: "0"
+    }
+  };
 }
 
 function preflightReady({

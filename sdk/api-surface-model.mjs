@@ -150,6 +150,38 @@ export interface AccountSummary extends ApiEnvelope {
   debtOutstanding?: AssetBalances;
 }
 
+export interface AccountPositionResponse extends ApiEnvelope {
+  wallet: WalletAddress;
+  asset?: {
+    symbol?: AssetSymbol;
+    address?: WalletAddress;
+    assetClass?: string;
+    assetId?: number;
+    decimals?: number;
+    minBalanceRaw?: string;
+  };
+  source?: {
+    contract?: "AgentAccountCore" | string;
+    address?: WalletAddress;
+    method?: "positions" | string;
+    field?: "liquid" | string;
+  };
+  position?: {
+    liquid?: number;
+    liquidRaw?: string;
+    reserved?: number;
+    reservedRaw?: string;
+    strategyAllocated?: number;
+    strategyAllocatedRaw?: string;
+    collateralLocked?: number;
+    collateralLockedRaw?: string;
+    jobStakeLocked?: number;
+    jobStakeLockedRaw?: string;
+    debtOutstanding?: number;
+    debtOutstandingRaw?: string;
+  };
+}
+
 export interface BorrowCapacityResponse extends ApiEnvelope {
   wallet?: WalletAddress;
   asset?: AssetSymbol;
@@ -779,6 +811,7 @@ export class AgentPlatformClient {
   getAuthSession(): Promise<AuthSessionResponse>;
 
   getAccountSummary(): Promise<AccountSummary>;
+  getAccountPosition(asset?: AssetSymbol): Promise<AccountPositionResponse>;
   getBorrowCapacity(asset?: AssetSymbol): Promise<BorrowCapacityResponse>;
   getStrategyPositions(): Promise<StrategyPositionsResponse>;
   fundAccount(input: FundAccountInput): Promise<AccountSummary>;
