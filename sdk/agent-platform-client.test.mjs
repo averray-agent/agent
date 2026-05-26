@@ -114,6 +114,37 @@ test("getAccountPosition reads the direct chain position endpoint", async () => 
   assert.equal(calls[0].options.headers.get("authorization"), "Bearer test-token");
 });
 
+test("submitDisputeVerdict forwards safety and arbitration payload fields", async () => {
+  const calls = [];
+  const client = new AgentPlatformClient({
+    baseUrl: "https://api.example.test",
+    token: "test-token",
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      return jsonResponse({ ok: true });
+    }
+  });
+
+  await client.submitDisputeVerdict("dispute/with space", {
+    verdict: "split",
+    rationale: "partial evidence",
+    workerPayout: "5",
+    metadataURI: "urn:averray:content:0xabc",
+    idempotencyKey: "dispute-proof-1",
+    reasoningHash: undefined
+  });
+
+  assert.equal(calls[0].url, "https://api.example.test/disputes/dispute%2Fwith%20space/verdict");
+  assert.equal(calls[0].options.method, "POST");
+  assert.deepEqual(JSON.parse(calls[0].options.body), {
+    verdict: "split",
+    rationale: "partial evidence",
+    workerPayout: "5",
+    metadataURI: "urn:averray:content:0xabc",
+    idempotencyKey: "dispute-proof-1"
+  });
+});
+
 test("listSessions builds optional query string without empty params", async () => {
   const calls = [];
   const client = new AgentPlatformClient({

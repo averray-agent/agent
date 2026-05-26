@@ -910,11 +910,52 @@ export interface SessionListResponse extends ApiEnvelope {
   scope?: "wallet" | "operator" | string;
 }
 
+export interface DisputeArbitrationSemantics {
+  version: number;
+  authority?: {
+    verdict?: string;
+    release?: string;
+  };
+  allowedVerdicts?: string[];
+  sla?: {
+    seconds?: number;
+    openedAt?: string;
+    windowEndsAt?: string;
+    expired?: boolean;
+    secondsRemaining?: number;
+  };
+  reasoning?: {
+    contentType?: string;
+    hashAlgorithm?: string;
+    hashField?: string;
+    uriField?: string;
+    canonicalHashRequired?: boolean;
+    publicContentPath?: string;
+  };
+  release?: {
+    mode?: string;
+    verdictEndpoint?: string;
+    releaseEndpoint?: string;
+    requiresVerdict?: boolean;
+    ready?: boolean;
+    reason?: string;
+  };
+}
+
 export interface DisputeSummary extends ApiEnvelope {
   id: string;
   sessionId?: SessionId;
   status?: string;
   verdict?: string;
+  reasonCode?: string;
+  reasoningHash?: string;
+  metadataURI?: string;
+  txHash?: string;
+  chainStatus?: string;
+  openedAt?: string;
+  windowEndsAt?: string;
+  slaSeconds?: number;
+  arbitration?: DisputeArbitrationSemantics;
 }
 
 export interface DisputeListResponse extends ApiEnvelope {
@@ -925,6 +966,11 @@ export interface DisputeListResponse extends ApiEnvelope {
 export interface DisputeVerdictInput {
   verdict: string;
   rationale?: string;
+  workerPayout?: number | string;
+  payoutAmount?: number | string;
+  reasoningHash?: string;
+  metadataURI?: string;
+  idempotencyKey?: string;
 }
 
 export interface SubJobCreateInput extends ApiEnvelope {

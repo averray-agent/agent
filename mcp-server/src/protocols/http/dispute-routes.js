@@ -1,6 +1,8 @@
 import { AuthorizationError, ValidationError } from "../../core/errors.js";
 import {
   ARBITRATOR_SLA_SECONDS,
+  addSecondsIso,
+  buildDisputeArbitrationSemantics,
   buildDisputeReasoningReceipt,
   buildDisputeResolution,
   disputeIdForSession,
@@ -13,12 +15,6 @@ function compactObject(value) {
   return Object.fromEntries(
     Object.entries(value).filter(([, entry]) => entry !== undefined && entry !== null)
   );
-}
-
-function addSecondsIso(value, seconds) {
-  const parsed = Date.parse(value ?? "");
-  const base = Number.isFinite(parsed) ? parsed : Date.now();
-  return new Date(base + seconds * 1000).toISOString();
 }
 
 export function createDisputeRoutes({
@@ -92,7 +88,7 @@ export function createDisputeRoutes({
       job = undefined;
     }
 
-    return {
+    return withDisputeArbitration({
       id,
       status: releaseReceipt || verdictReceipt ? "resolved" : "open",
       sessionId: session.sessionId,
@@ -129,6 +125,13 @@ export function createDisputeRoutes({
       totalClaimLock: Number(session.totalClaimLock ?? session.claimStake ?? 0),
       release: releaseReceipt ?? null,
       timeline: timeline.sort((left, right) => String(left.at ?? "").localeCompare(String(right.at ?? "")))
+    });
+  }
+
+  function withDisputeArbitration(dispute) {
+    return {
+      ...dispute,
+      arbitration: buildDisputeArbitrationSemantics(dispute)
     };
   }
 
@@ -305,7 +308,7 @@ export function createDisputeRoutes({
           chainStatus: receipt.chainStatus
         }
       });
-      const body = {
+      const body = withDisputeArbitration({
         ...dispute,
         status: "resolved",
         verdict: resolution.verdict,
@@ -326,7 +329,7 @@ export function createDisputeRoutes({
             data: receipt
           }
         ]
-      };
+      });
       await respondWithMutationReceipt(response, idempotency, 200, body);
       return true;
     }
@@ -356,6 +359,12 @@ export function createDisputeRoutes({
       if (dispute.release) {
         await respondWithMutationReceipt(response, idempotency, 200, dispute);
         return true;
+      }
+      if (!dispute.arbitration?.release?.ready) {
+        throw new ValidationError("dispute release requires a recorded arbitration verdict first.", {
+          disputeId: id,
+          reason: dispute.arbitration?.release?.reason ?? "awaiting_arbitrator_verdict"
+        });
       }
       const session = await service.resumeSession(dispute.sessionId).catch(() => undefined);
       const receipt = {
@@ -397,7 +406,7 @@ export function createDisputeRoutes({
           txHash: receipt.txHash
         }
       });
-      const body = {
+      const body = withDisputeArbitration({
         ...dispute,
         status: "resolved",
         release: receipt,
@@ -411,7 +420,7 @@ export function createDisputeRoutes({
             data: receipt
           }
         ]
-      };
+      });
       await respondWithMutationReceipt(response, idempotency, 200, body);
       return true;
     }

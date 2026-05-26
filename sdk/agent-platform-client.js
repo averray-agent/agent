@@ -438,10 +438,10 @@ export class AgentPlatformClient {
     return this.request(`/disputes/${encodeURIComponent(id)}`);
   }
 
-  async submitDisputeVerdict(id, { verdict, rationale = undefined } = {}) {
+  async submitDisputeVerdict(id, input = {}) {
     return this.request(`/disputes/${encodeURIComponent(id)}/verdict`, {
       method: "POST",
-      body: compact({ verdict, rationale })
+      body: compact(input)
     });
   }
 

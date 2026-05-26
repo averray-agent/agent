@@ -3,6 +3,7 @@ import { ValidationError } from "./errors.js";
 import { buildContentRecord } from "./content-addressed-store.js";
 
 export const ARBITRATOR_SLA_SECONDS = 14 * 24 * 60 * 60;
+export const DISPUTE_VERDICTS = Object.freeze(["upheld", "dismissed", "split", "timeout"]);
 
 /**
  * Stable id for the dispute associated with a session. Hashed from
@@ -43,7 +44,7 @@ export function normalizeDisputeVerdict(value) {
   }
   if (verdict === "split" || verdict === "partial" || verdict === "request-more") return "split";
   if (verdict === "timeout" || verdict === "arb_timeout") return "timeout";
-  throw new ValidationError("verdict must be one of upheld, dismissed, split.");
+  throw new ValidationError("verdict must be one of upheld, dismissed, split, timeout.");
 }
 
 export function buildDisputeResolution({ verdict, remainingPayout, workerPayout = undefined } = {}) {
@@ -89,6 +90,59 @@ export function buildDisputeResolution({ verdict, remainingPayout, workerPayout 
     payoutSource: workerPayout === undefined || workerPayout === null || workerPayout === ""
       ? "default_half_remaining"
       : "operator_supplied"
+  };
+}
+
+export function buildDisputeArbitrationSemantics(dispute = {}, { now = new Date() } = {}) {
+  const openedAt = typeof dispute.openedAt === "string" ? dispute.openedAt : undefined;
+  const windowEndsAt = typeof dispute.windowEndsAt === "string"
+    ? dispute.windowEndsAt
+    : addSecondsIso(openedAt, ARBITRATOR_SLA_SECONDS);
+  const verdictRecorded = Boolean(dispute.verdict || dispute.reasonCode);
+  const releaseRecorded = Boolean(dispute.release);
+  const releaseReady = verdictRecorded && !releaseRecorded;
+  const nowMs = now instanceof Date ? now.getTime() : Date.parse(String(now ?? ""));
+  const windowMs = Date.parse(windowEndsAt ?? "");
+  const canComputeSla = Number.isFinite(nowMs) && Number.isFinite(windowMs);
+  const secondsRemaining = canComputeSla
+    ? Math.max(0, Math.ceil((windowMs - nowMs) / 1000))
+    : undefined;
+  const expired = canComputeSla ? nowMs >= windowMs : undefined;
+
+  return {
+    version: 1,
+    authority: {
+      verdict: "admin_or_verifier",
+      release: "admin"
+    },
+    allowedVerdicts: [...DISPUTE_VERDICTS],
+    sla: {
+      seconds: ARBITRATOR_SLA_SECONDS,
+      openedAt,
+      windowEndsAt,
+      expired,
+      secondsRemaining
+    },
+    reasoning: {
+      contentType: "arbitrator_reasoning",
+      hashAlgorithm: "keccak256",
+      hashField: "reasoningHash",
+      uriField: "metadataURI",
+      canonicalHashRequired: true,
+      publicContentPath: "/content/:hash"
+    },
+    release: {
+      mode: "verdict_records_chain_resolution_then_operator_receipt",
+      verdictEndpoint: "/disputes/:id/verdict",
+      releaseEndpoint: "/disputes/:id/release",
+      requiresVerdict: true,
+      ready: releaseReady,
+      reason: releaseRecorded
+        ? "release_already_recorded"
+        : verdictRecorded
+          ? "verdict_recorded"
+          : "awaiting_arbitrator_verdict"
+    }
   };
 }
 
