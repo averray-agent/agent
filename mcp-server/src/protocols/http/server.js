@@ -20,7 +20,7 @@ import { hashCanonicalContent } from "../../core/canonical-content.js";
 import { extractClientKey } from "../../auth/rate-limit.js";
 import { hasRole } from "../../auth/config.js";
 import { resolveRequestId } from "../../core/logger.js";
-import { getAddress, keccak256, toUtf8Bytes } from "ethers";
+import { keccak256, toUtf8Bytes } from "ethers";
 import { buildBadgeFromSession } from "../../core/badge-metadata.js";
 import { buildDiscoveryManifest } from "../../core/discovery-manifest.js";
 import {
@@ -43,6 +43,7 @@ import { createDisputeRoutes } from "./dispute-routes.js";
 import { createEventRoutes } from "./event-routes.js";
 import { createGasRoutes } from "./gas-routes.js";
 import { createJobRoutes } from "./job-routes.js";
+import { createPaymentRoutes } from "./payment-routes.js";
 import { createPolicyRoutes } from "./policy-routes.js";
 import { createProfileRoutes } from "./profile-routes.js";
 import { createPublicMetadataRoutes } from "./public-metadata-routes.js";
@@ -216,14 +217,6 @@ async function requireChainBackedMutation(route) {
 
 function clientIp(request) {
   return extractClientKey(request, { trustProxy });
-}
-
-function safeChecksum(raw) {
-  try {
-    return getAddress(raw);
-  } catch {
-    return raw;
-  }
 }
 
 function parseLimit(url, fallback = 50, max = 250) {
@@ -1100,6 +1093,16 @@ const handleAccountRoute = createAccountRoutes({
   stripIdempotencyKey,
 });
 
+const handlePaymentRoute = createPaymentRoutes({
+  authMiddleware,
+  buildIdempotentMutationContext,
+  readJsonBody,
+  requireChainBackedMutation,
+  runIdempotentMutation,
+  service,
+  stripIdempotencyKey,
+});
+
 const server = createServer(async (request, response) => {
   const url = new URL(request.url ?? "/", "http://localhost");
   const pathname = url.pathname.replace(/\/+$/, "") || "/";
@@ -1311,52 +1314,8 @@ const server = createServer(async (request, response) => {
       return;
     }
 
-    if (request.method === "POST" && pathname === "/payments/send") {
-      // Agent-to-agent transfer. Pillar 5 of docs/AGENT_BANKING.md.
-      // Authenticated: the signed-in wallet is the sender, and the
-      // backend relays via AgentAccountCore.sendToAgentFor so the hot
-      // signer key on the platform is the one paying gas, not the user.
-      const auth = await authMiddleware(request, url);
-      const payload = await readJsonBody(request);
-      const recipientRaw = String(payload?.recipient ?? "").trim();
-      if (!/^0x[a-fA-F0-9]{40}$/u.test(recipientRaw)) {
-        throw new ValidationError("recipient must be a 0x-prefixed 20-byte hex address.");
-      }
-      const recipient = safeChecksum(recipientRaw);
-      if (recipient.toLowerCase() === auth.wallet.toLowerCase()) {
-        throw new ValidationError("recipient must differ from the sender.");
-      }
-      const asset = typeof payload?.asset === "string" && payload.asset.trim()
-        ? payload.asset.trim().toUpperCase()
-        : "DOT";
-      const amount = Number(payload?.amount);
-      if (!Number.isFinite(amount) || amount <= 0) {
-        throw new ValidationError("amount must be a positive number.");
-      }
-      const idempotency = buildIdempotentMutationContext({
-        route: "/payments/send",
-        auth,
-        payload,
-        normalizedPayload: {
-          ...stripIdempotencyKey(payload),
-          recipient,
-          asset,
-          amount
-        },
-        bucket: "payments_send"
-      });
-      return await runIdempotentMutation(response, idempotency, 200, async () => {
-        await requireChainBackedMutation("/payments/send");
-        const balances = await service.sendToAgent(auth.wallet, recipient, asset, amount);
-        return {
-          status: "sent",
-          from: auth.wallet,
-          to: recipient,
-          asset,
-          amount,
-          balances
-        };
-      });
+    if (await handlePaymentRoute({ request, response, url, pathname })) {
+      return;
     }
 
     return respond(response, 404, { error: "not_found" });
