@@ -1,15 +1,6 @@
 import { createServer } from "node:http";
-import { timingSafeEqual } from "node:crypto";
 import { createPlatformRuntime } from "../../services/bootstrap.js";
-import {
-  assertMutationBackendAvailable,
-  getMutationBackendStatus
-} from "../../core/mutation-backend.js";
-import {
-  buildCapabilityWarnings,
-  resolveCapabilityHealth,
-  resolveServiceHealth
-} from "../../core/health-capability.js";
+import { assertMutationBackendAvailable } from "../../core/mutation-backend.js";
 import {
   AuthorizationError,
   ConflictError,
@@ -43,6 +34,7 @@ import { createDisputeRoutes } from "./dispute-routes.js";
 import { createEventRoutes } from "./event-routes.js";
 import { createGasRoutes } from "./gas-routes.js";
 import { createJobRoutes } from "./job-routes.js";
+import { createOperationalRoutes, resolveMetricsAuthConfig } from "./operational-routes.js";
 import { createPaymentRoutes } from "./payment-routes.js";
 import { createPolicyRoutes } from "./policy-routes.js";
 import { createProfileRoutes } from "./profile-routes.js";
@@ -82,11 +74,7 @@ metrics.gauge("state_store_backend", "1 when state store backend matches the lab
   1
 );
 
-const METRICS_BEARER_TOKEN = process.env.METRICS_BEARER_TOKEN?.trim() || undefined;
-const METRICS_AUTH_REQUIRED = parseRequiredFlag(
-  process.env.METRICS_AUTH_REQUIRED,
-  process.env.NODE_ENV === "production" ? "1" : "0"
-);
+const { metricsBearerToken, metricsAuthRequired } = resolveMetricsAuthConfig(process.env);
 const port = Number(process.env.PORT ?? 8787);
 
 const inFlightIdempotentMutations = new Map();
@@ -102,20 +90,6 @@ function respond(response, statusCode, payload, extraHeaders = {}) {
   }
   response.writeHead(statusCode, headers);
   response.end(JSON.stringify(payload, null, 2));
-}
-
-function bearerTokenMatches(header, expectedToken) {
-  const prefix = "Bearer ";
-  if (!header.startsWith(prefix)) return false;
-  const actualToken = header.slice(prefix.length);
-  const actual = Buffer.from(actualToken);
-  const expected = Buffer.from(expectedToken);
-  return actual.length === expected.length && timingSafeEqual(actual, expected);
-}
-
-function parseRequiredFlag(value, defaultValue) {
-  const normalized = String(value ?? defaultValue).trim().toLowerCase();
-  return !["0", "false", "no", "off"].includes(normalized);
 }
 
 async function readJsonBody(request, { maxBytes = httpConfig.maxBodyBytes } = {}) {
@@ -1103,6 +1077,19 @@ const handlePaymentRoute = createPaymentRoutes({
   stripIdempotencyKey,
 });
 
+const handleOperationalRoute = createOperationalRoutes({
+  authConfig,
+  gateway,
+  metrics,
+  metricsAuthRequired,
+  metricsBearerToken,
+  mutationBackendConfig,
+  pimlicoClient,
+  respond,
+  service,
+  stateStore,
+});
+
 const server = createServer(async (request, response) => {
   const url = new URL(request.url ?? "/", "http://localhost");
   const pathname = url.pathname.replace(/\/+$/, "") || "/";
@@ -1152,75 +1139,7 @@ const server = createServer(async (request, response) => {
       return;
     }
 
-    if (request.method === "GET" && pathname === "/health") {
-      // Package B (P1.1b) — health truth split. `serviceHealth` is the
-      // API-process liveness contract: state-store reachable + auth
-      // config loaded. HTTP status follows `serviceHealth.ok` alone, so
-      // a trust-core-only launch (chain disabled, treasury capability
-      // unavailable) still returns 200/"ok" at the liveness layer and
-      // surfaces the capability state via `capabilityHealth`. Legacy
-      // top-level `components` is preserved for existing consumers.
-      const [storeHealth, chainHealth, gasHealth, xcmWatcherStatus] = await Promise.all([
-        stateStore.healthCheck?.() ?? { ok: true, backend: stateStore.constructor.name },
-        gateway?.healthCheck?.() ?? { ok: false, backend: "blockchain", enabled: false, mode: "disabled" },
-        pimlicoClient?.healthCheck?.() ?? { ok: true, backend: "pimlico", enabled: false, mode: "disabled" },
-        service?.xcmSettlementWatcher?.getStatus?.()?.catch?.(() => undefined) ?? undefined
-      ]);
-      const mutationBackendStatus = await getMutationBackendStatus({
-        gateway,
-        config: mutationBackendConfig,
-        route: "/health",
-        gatewayStatus: chainHealth
-      }).catch(() => ({ ok: false, route: "/health" }));
-
-      const serviceHealth = resolveServiceHealth({ stateStoreHealth: storeHealth, authConfig });
-      const capabilityHealth = resolveCapabilityHealth({
-        blockchainHealth: chainHealth,
-        mutationBackendStatus,
-        xcmWatcherStatus,
-        // Backend has no direct indexer URL dependency today; the field
-        // resolves to "unavailable" via the helper's default branch.
-        // Wiring an explicit probe is a follow-up.
-        indexerProbe: undefined,
-        gasSponsorHealth: gasHealth
-      });
-
-      return respond(response, serviceHealth.ok ? 200 : 503, {
-        status: serviceHealth.ok ? "ok" : "degraded",
-        auth: { mode: authConfig.mode, domain: authConfig.domain, chainId: authConfig.chainId },
-        serviceHealth,
-        capabilityHealth,
-        // Structured, codeable warnings derived from capabilityHealth.
-        // Operator dashboards / smoke checks can match on `code` rather
-        // than parsing prose. Empty array when every capability is in
-        // its happy state.
-        warnings: buildCapabilityWarnings(capabilityHealth),
-        components: {
-          stateStore: storeHealth,
-          blockchain: chainHealth,
-          gasSponsor: gasHealth
-        }
-      });
-    }
-
-    if (request.method === "GET" && pathname === "/metrics") {
-      // Fail closed in production: public metrics reveal request paths,
-      // status-code mix, and operational posture.
-      if (METRICS_AUTH_REQUIRED && !METRICS_BEARER_TOKEN) {
-        return respond(response, 503, { error: "metrics_auth_unconfigured" });
-      }
-      if (METRICS_AUTH_REQUIRED) {
-        const header = request.headers.authorization ?? "";
-        if (!bearerTokenMatches(header, METRICS_BEARER_TOKEN)) {
-          return respond(response, 401, { error: "unauthorized" });
-        }
-      }
-      response.writeHead(200, {
-        "content-type": "text/plain; version=0.0.4",
-        ...(response._corsHeaders ?? {}),
-        "x-request-id": response._requestId ?? ""
-      });
-      response.end(metrics.serialize());
+    if (await handleOperationalRoute({ request, response, pathname })) {
       return;
     }
 
