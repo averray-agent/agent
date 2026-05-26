@@ -8,6 +8,20 @@ const SESSION_ID = "session-product-proof";
 const REASONING_HASH = "0x" + "a".repeat(64);
 const TX_HASH = "0x" + "b".repeat(64);
 
+function arbitrationSemantics(overrides = {}) {
+  return {
+    reasoning: {
+      contentType: "arbitrator_reasoning",
+      canonicalHashRequired: true
+    },
+    release: {
+      requiresVerdict: true,
+      ready: false
+    },
+    ...overrides
+  };
+}
+
 function openDispute(overrides = {}) {
   return {
     id: DISPUTE_ID,
@@ -20,6 +34,7 @@ function openDispute(overrides = {}) {
     slaSeconds: 14 * 24 * 60 * 60,
     stakedAmount: 0.5,
     verdict: null,
+    arbitration: arbitrationSemantics(),
     timeline: [],
     ...overrides
   };
@@ -38,6 +53,12 @@ function verdictResponse(overrides = {}) {
     txHash: undefined,
     blockNumber: undefined,
     chainStatus: "local_only",
+    arbitration: arbitrationSemantics({
+      release: {
+        requiresVerdict: true,
+        ready: true
+      }
+    }),
     timeline: [
       {
         id: `${DISPUTE_ID}:verdict`,

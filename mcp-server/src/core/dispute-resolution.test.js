@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   ARBITRATOR_SLA_SECONDS,
+  buildDisputeArbitrationSemantics,
   buildDisputeReasoningReceipt,
   buildDisputeResolution,
   normalizeDisputeReleaseRequestPayload,
@@ -49,8 +50,45 @@ test("buildDisputeResolution has a timeout-shaped worker-favorable outcome", () 
 test("normalizeDisputeVerdict rejects unknown values", () => {
   assert.throws(
     () => normalizeDisputeVerdict("maybe"),
-    (error) => error instanceof ValidationError && /verdict must be/u.test(error.message)
+    (error) => error instanceof ValidationError && /upheld, dismissed, split, timeout/u.test(error.message)
   );
+});
+
+test("buildDisputeArbitrationSemantics exposes SLA, reasoning, verdict, and release contract", () => {
+  const dispute = {
+    openedAt: "2026-05-01T00:00:00.000Z",
+    windowEndsAt: "2026-05-15T00:00:00.000Z"
+  };
+  const semantics = buildDisputeArbitrationSemantics(dispute, {
+    now: new Date("2026-05-02T00:00:00.000Z")
+  });
+
+  assert.deepEqual(semantics.allowedVerdicts, ["upheld", "dismissed", "split", "timeout"]);
+  assert.equal(semantics.sla.seconds, ARBITRATOR_SLA_SECONDS);
+  assert.equal(semantics.sla.expired, false);
+  assert.equal(semantics.sla.secondsRemaining, 13 * 24 * 60 * 60);
+  assert.equal(semantics.reasoning.contentType, "arbitrator_reasoning");
+  assert.equal(semantics.reasoning.canonicalHashRequired, true);
+  assert.equal(semantics.release.requiresVerdict, true);
+  assert.equal(semantics.release.ready, false);
+  assert.equal(semantics.release.reason, "awaiting_arbitrator_verdict");
+});
+
+test("buildDisputeArbitrationSemantics marks release ready after verdict and closed after release", () => {
+  const afterVerdict = buildDisputeArbitrationSemantics({
+    verdict: "dismissed",
+    openedAt: "2026-05-01T00:00:00.000Z"
+  });
+  const afterRelease = buildDisputeArbitrationSemantics({
+    verdict: "dismissed",
+    release: { action: "release" },
+    openedAt: "2026-05-01T00:00:00.000Z"
+  });
+
+  assert.equal(afterVerdict.release.ready, true);
+  assert.equal(afterVerdict.release.reason, "verdict_recorded");
+  assert.equal(afterRelease.release.ready, false);
+  assert.equal(afterRelease.release.reason, "release_already_recorded");
 });
 
 test("normalizeDisputeVerdictRequestPayload folds synonyms so equivalent retries replay", () => {

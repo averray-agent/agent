@@ -190,6 +190,10 @@ test("GET /disputes authenticates, parses limit, and returns open and receipt-ba
     [resolvedSession.sessionId, "resolved"],
   ]);
   assert.equal(response.body[0].respondent, VERIFIER);
+  assert.equal(response.body[0].arbitration.release.ready, false);
+  assert.equal(response.body[0].arbitration.reasoning.contentType, "arbitrator_reasoning");
+  assert.deepEqual(response.body[0].arbitration.allowedVerdicts, ["upheld", "dismissed", "split", "timeout"]);
+  assert.equal(response.body[1].arbitration.release.ready, true);
   assert.ok(calls.some(([name, detail]) => name === "parseLimit" && detail.limit === "7"));
   assert.ok(calls.some(([name]) => name === "authMiddleware"));
 });
@@ -260,6 +264,8 @@ test("POST /disputes/:id/verdict records a local resolution and session transiti
   assert.equal(response.body.workerPayout, JOB.rewardAmount);
   assert.equal(response.body.chainStatus, "local_only");
   assert.ok(response.body.metadataURI.startsWith("https://api.example.test/content/"));
+  assert.equal(response.body.arbitration.release.ready, true);
+  assert.equal(response.body.arbitration.release.reason, "verdict_recorded");
   assert.ok(calls.some(([name]) => name === "persistContentRecord"));
   assert.ok(calls.some(([name, detail]) => name === "upsertMutationReceipt"
     && detail.bucket === "dispute_verdict"
@@ -270,10 +276,33 @@ test("POST /disputes/:id/verdict records a local resolution and session transiti
   assert.ok(calls.some(([name]) => name === "respondWithMutationReceipt"));
 });
 
-test("POST /disputes/:id/release requires admin auth and records release", async () => {
+test("POST /disputes/:id/release requires a verdict before recording release", async () => {
   const id = disputeIdForSession(SESSION.sessionId);
-  const { calls, response, route } = makeHarness({
+  const { calls, route } = makeHarness({
     payload: { action: "return-stake", amount: 4, idempotencyKey: "idem-3" }
+  });
+
+  await assert.rejects(
+    call(route, { method: "POST", path: `/disputes/${id}/release` }),
+    (error) => error instanceof ValidationError && /requires a recorded arbitration verdict/u.test(error.message)
+  );
+  assert.ok(!calls.some(([name]) => name === "upsertMutationReceipt"));
+});
+
+test("POST /disputes/:id/release requires admin auth and records post-verdict release", async () => {
+  const id = disputeIdForSession(SESSION.sessionId);
+  const verdictReceipt = {
+    id,
+    verdict: "dismissed",
+    reasonCode: "DISPUTE_OVERTURNED",
+    decidedAt: "2026-05-02T00:00:00.000Z",
+    decidedBy: ADMIN
+  };
+  const { calls, response, route } = makeHarness({
+    payload: { action: "return-stake", amount: 4, idempotencyKey: "idem-3" },
+    receipts: {
+      [`dispute_verdict:${id}`]: verdictReceipt
+    }
   });
 
   const handled = await route({
@@ -288,6 +317,8 @@ test("POST /disputes/:id/release requires admin auth and records release", async
   assert.equal(response.body.status, "resolved");
   assert.equal(response.body.release.action, "return-stake");
   assert.equal(response.body.release.amount, 4);
+  assert.equal(response.body.arbitration.release.ready, false);
+  assert.equal(response.body.arbitration.release.reason, "release_already_recorded");
   assert.deepEqual(calls.find(([name]) => name === "authMiddleware")?.[1].options, { requireRole: "admin" });
   assert.ok(calls.some(([name, detail]) => name === "upsertMutationReceipt"
     && detail.bucket === "dispute_release"

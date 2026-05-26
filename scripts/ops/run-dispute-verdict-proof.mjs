@@ -198,6 +198,13 @@ function assertVerdictEvidence(response, disputeId, { requireChain = false } = {
   if (response.chainStatus === "confirmed" && !Number.isInteger(response.blockNumber)) {
     throw new Error("Verdict response blockNumber is required when chainStatus=confirmed.");
   }
+  if (response.arbitration?.reasoning?.contentType !== "arbitrator_reasoning"
+    || response.arbitration?.reasoning?.canonicalHashRequired !== true) {
+    throw new Error("Verdict response is missing arbitration reasoning semantics.");
+  }
+  if (response.arbitration?.release?.requiresVerdict !== true || response.arbitration?.release?.ready !== true) {
+    throw new Error("Verdict response does not mark post-verdict release as ready.");
+  }
 }
 
 function assertPersisted(persisted, response, disputeId) {
@@ -226,7 +233,8 @@ function projectDisputeSummary(dispute) {
     openedAt: dispute.openedAt,
     windowEndsAt: dispute.windowEndsAt,
     slaSeconds: dispute.slaSeconds,
-    stakedAmount: dispute.stakedAmount
+    stakedAmount: dispute.stakedAmount,
+    arbitration: dispute.arbitration
   };
 }
 
@@ -241,7 +249,8 @@ function projectVerdictResponse(response) {
     remainingPayout: response.remainingPayout,
     txHash: response.txHash,
     blockNumber: response.blockNumber,
-    chainStatus: response.chainStatus
+    chainStatus: response.chainStatus,
+    arbitration: response.arbitration
   };
 }
 
