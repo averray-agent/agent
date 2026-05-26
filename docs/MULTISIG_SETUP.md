@@ -271,6 +271,149 @@ owner differs from the record owner or the record is still draft.
 
 ---
 
+## Multisig.asMulti operational recipe — Paseo Asset Hub
+
+This section records the exact Paseo Asset Hub TestNet pattern exercised during
+the 2026-05-25/26 cutover. Polkadot docs MCP verification for this section:
+the official Polkadot Hub smart-contract docs confirm Hub supports Solidity
+contracts through REVM and that Asset Hub smart contracts use `pallet_revive`
+with multi-dimensional `refTime`, `proofSize`, and `storage_deposit`
+accounting. The concrete signer set, weights, blocks, and failure modes below
+are Averray testnet operator evidence from the cutover.
+
+### Owner and signer set
+
+The current testnet owner is the pallet multisig:
+
+- SS58: `12nHTKYfV64pnxsVRB6Cjn6kQPPH64Ehnr8zgqZxvfa8hJvQ`
+- H160 mapping: `0x1f8C4da4AAAC79916350f1fabF1221309591B6F9`
+
+The H160 is **not an EOA**. There is no private key for it. Any owner-gated
+`TreasuryPolicy` call must be wrapped in `multisig.asMulti` and executed by
+two of the three Substrate signers.
+
+Canonical signer order is AccountId32 byte order, not UI order:
+
+| Order | Signer | SS58 | AccountId32 prefix |
+| --- | --- | --- | --- |
+| 1 | Polkadot Vault | `13pav6xpfdapyCAqfRhWZXxUnqDhjrF92dJr3FBwVfBKUKSM` | `0x7c` |
+| 2 | Ledger | `148tqwhGxeCva7ZX8RwvaLjCS7HvDJJaSbxfTUwE9Zyc5Xtm` | `0x8a` |
+| 3 | Hot Wallet | `14ruuTeh5cXMTr9SLNuLt1NiroQZgt5ZQnwYrhg7K5LHiXQb` | `0xaa` |
+
+Canonical order matters because `otherSignatories` must be sorted by AccountId32
+bytes with the active signer omitted. Wrong order fails at dispatch with
+`SignatoriesOutOfOrder`. Do not trust the order a wallet UI happens to show.
+
+### asMulti shape for owner-gated EVM calls
+
+For a typical owner-gated `TreasuryPolicy` EVM call on Paseo Asset Hub:
+
+```text
+multisig.asMulti(
+  threshold: 2,
+  otherSignatories: <the other two signers, in canonical AccountId32 byte order>,
+  maybeTimepoint: None | Some({ height, index }),
+  call: revive.call(
+    dest: <TreasuryPolicy H160>,
+    value: 0,
+    weightLimit: { refTime: 4_000_000_000, proofSize: 100_000 },
+    storageDepositLimit: 1_000_000_000,
+    data: <4-byte selector + ABI-encoded args>
+  ),
+  maxWeight: { refTime: 4_500_000_000, proofSize: 150_000 }
+)
+```
+
+The inner `weightLimit` caps the `revive.call`. The outer `maxWeight` must
+cover the whole dispatch tree. For a single `revive.call`,
+`refTime: 4_500_000_000` and `proofSize: 150_000` are generous enough for the
+owner-gated role calls rehearsed so far. For a two-call `utility.batchAll`, the
+cutover scripts used `refTime: 9_000_000_000` and `proofSize: 300_000`.
+
+Use `storageDepositLimit: 1_000_000_000` (1 PAS) as the safe default. A zero
+storage deposit limit can revert with `StorageDepositLimitExhausted` when the
+inner call writes contract state.
+
+Reference generators:
+
+- `scripts/ops/rotate-admin-multisig-payload.mjs` for `setPauser` and batched
+  `setArbitrator(new, true)` / `setArbitrator(old, false)`.
+- `scripts/ops/redeploy-escrowcore-wire-multisig.mjs` for the EscrowCore swap
+  path from PR #525.
+
+### Two-leg execution
+
+1. First signer submits `multisig.asMulti` with `maybeTimepoint: None`.
+2. Wait for the extrinsic to be `inBlock` and for `multisig.NewMultisig`.
+3. Record the first leg's block height and extrinsic index. In the cutover
+   evidence this looked like `height: 9290992, index: 2`.
+4. Hand those values to the second signer.
+5. Second signer submits the same inner call with
+   `maybeTimepoint: Some({ height, index })`.
+6. Confirm `multisig.MultisigExecuted` and the inner contract event, then verify
+   the target state with a read call.
+
+The first leg stores intent. The second leg executes. If the second signer uses
+the wrong timepoint, wrong inner call, or wrong `otherSignatories` list, the
+runtime will not match the pending multisig.
+
+### Batch owner-gated calls when the state transition is one operation
+
+Use `utility.batchAll` to combine several owner-gated calls into a single
+multisig flow when they are one logical operation. It saves `N - 1` Hot+Ledger
+rounds and makes the transition atomic.
+
+The exact PR #525 EscrowCore swap used this shape to replace stale
+`0x7BB8fea44bDeE9870cF27c1dB616E7017BC38b0a` with
+`0xb8fd8A932F69bD5E39700b7cf6D2920aF84d1B27`:
+
+```text
+multisig.asMulti(
+  threshold: 2,
+  otherSignatories: <canonical other two>,
+  maybeTimepoint: None | Some({ height, index }),
+  call: utility.batchAll([
+    revive.call(setServiceOperator(newEscrowCore, true)),
+    revive.call(setServiceOperator(oldEscrowCore, false))
+  ]),
+  maxWeight: { refTime: 9_000_000_000, proofSize: 300_000 }
+)
+```
+
+The same pattern was used for admin arbitration rotation:
+`setArbitrator(new, true)` plus `setArbitrator(old, false)` in one
+`batchAll`. If either inner call fails, the batch fails as a unit.
+
+### Pre-flight before anyone signs
+
+Before either signer touches their wallet, dry-run the inner EVM call from the
+multisig H160:
+
+```js
+await provider.call({
+  from: "0x1f8C4da4AAAC79916350f1fabF1221309591B6F9",
+  to: treasuryPolicyAddress,
+  data: innerCallData,
+});
+```
+
+Use this against each inner `TreasuryPolicy` call before building the
+`revive.call`. It catches wrong selectors, wrong ABI arguments, wrong target
+contract, and role assumptions without consuming signer attention. The
+2026-05-25 cutover evidence explicitly records this pre-flight as green before
+wallet signing.
+
+### Common dispatch errors
+
+| Error | Diagnosis |
+| --- | --- |
+| `SignatoriesOutOfOrder` | `otherSignatories` are not in canonical AccountId32 byte order, or the active signer was included instead of omitted. |
+| `StorageDepositLimitExhausted` | `storageDepositLimit` is too low for the inner `revive.call` state writes. Use `1_000_000_000` unless a measured call proves less is safe. |
+| `MaxWeightTooLow` | Outer `maxWeight` is below actual consumed weight. Increase the outer value; do not confuse it with the inner `weightLimit`. |
+| `InvalidStateUnknownJob`, `InvalidStateAlreadyClaimed`, or another 4-byte revert | This is an inner contract custom error, not a multisig error. Decode the selector against the Solidity ABI before changing multisig parameters. |
+
+---
+
 ## 6. Day-to-day operations
 
 | Operation | Who signs | How |

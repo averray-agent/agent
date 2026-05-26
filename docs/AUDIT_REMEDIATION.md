@@ -738,7 +738,7 @@ This section captures operator-side security events that are out-of-scope for th
 
 | Step | Action                                                                                                                                                                       | Block range          |
 | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
-| 1    | Generated a fresh secp256k1 EOA `0x6778F050eAc8313e4dbB176d7BAB44510E833ac8` in-process; key never echoed to stdout / stderr / process env. Saved at `op://prod-critical/admin-eoa-testnet/private-key`. | n/a (off-chain)      |
+| 1    | Generated a fresh secp256k1 EOA `0x6778F050eAc8313e4dbB176d7BAB44510E833ac8` in-process; key never echoed to stdout / stderr / process env. Saved at `op://prod-critical/admin-eoa-testnet/private key`. | n/a (off-chain)      |
 | 2    | Five-tx drain on Paseo Asset Hub TestNet (in-process `loadKeyFromEnvFile`, never `console.log`'d): native PAS sweep 9970 → new admin; `AAC.withdraw(USDC, 9_339_999)`; `USDC.transfer(newAdmin, 9_339_999)`; `USDC.approve(AAC, 9_339_999)`; `AAC.deposit(USDC, 9_339_999)`. | 9286375 – 9286384    |
 | 3    | Multisig 2-of-3 `setPauser(newAdmin)` on TreasuryPolicy. `revive.call` wrapped in `multisig.asMulti`. Ledger signed first, Hot Wallet countersigned via Apps Multisig tab.    | ~9289015             |
 | 4    | Multisig 2-of-3 batched arbitrator swap: `utility.batchAll([revive.call(setArbitrator(newAdmin, true)), revive.call(setArbitrator(oldAdmin, false))])` wrapped in `multisig.asMulti`. Atomic; Ledger first (block 9290992, ext 2), Hot Wallet countersigned. | 9290992 (init) + ~9291050 (exec) |
@@ -758,6 +758,82 @@ This section captures operator-side security events that are out-of-scope for th
 - [ ] Sweep the `200_001` USDC reserved-then-released amount from the retired admin's AAC position once the in-flight obligation resolves. Owner: Pascal. Verification: `policy.positions(0xFd2EAE…6519, USDC).liquid == 0` after the obligation completes.
 - [ ] Delete the `op://prod-backend/signer-private-key/password` 1Password item after the 30-day rollback soak (originally targeted ~2026-06-15 per the Phase 3 cutover; now also covers the 2026-05-25 transcript-leak vector).
 - [ ] Review the operator workflow that placed `SIGNER_PRIVATE_KEY` (deriving to the admin address) into `mcp-server/.env.local` in the first place — see whether `loadKeyFromEnvFile` should be replaced by `op read` invocations for admin-side scripts, so the local file disappears entirely.
+
+---
+
+## Lessons from 2026-05-25 cutover
+
+The 2026-05-25/26 worker-loop cutover closed several testnet blockers and left
+three operator lessons that should shape future launch work. The final unblock
+was the EscrowCore redeploy on Paseo Asset Hub TestNet:
+`0xb8fd8A932F69bD5E39700b7cf6D2920aF84d1B27` replaced stale
+`0x7BB8fea44bDeE9870cF27c1dB616E7017BC38b0a`. Root cause: the
+2026-05-08 EscrowCore deployment predated PR #357's `claimJobFor` selector by
+eight days, so every `claimJobFor` call reverted at EVM dispatch with bare
+`data=0x`.
+
+### Audit scripts are the first line of defense
+
+Three hardenings landed in `scripts/ops/audit-launch-readiness.mjs` during the
+cutover:
+
+- PR #518: `serviceOperators[backendSigner]` presence. The backend signer must
+  be authorized before it can call `EscrowCore.claimJobFor` or any other
+  `onlyOperator` path.
+- PR #520: signer USDC liquidity vs `reward + stake`. Authorization is not
+  enough if the signer account has no spendable USDC liquidity for the
+  product-proof worker loop.
+- PR #521: deployed-bytecode selector presence vs the gateway-bundled ABI. This
+  catches deploy-vs-source drift such as a stale EscrowCore missing
+  `claimJobFor(bytes32,address)` even though the local ABI contains it.
+
+These checks should run before every testnet/mainnet cutover and before calling
+a green/red launch gate. They are meant to catch the next class of
+misconfiguration before a human spends hours debugging a bare `data=0x` EVM
+dispatch revert.
+
+### Drain financial positions before moving roles
+
+When rotating an EOA whose key leaked or may have leaked, drain financial
+positions before moving role assignments. The leaked-key holder can drain its
+own `AgentAccountCore.positions` and native PAS. It cannot move owner-gated
+roles such as pauser, arbitrator, verifier, or service operator. Therefore the
+right order is:
+
+1. Use the compromised key, while still controlled by the operator, to move its
+   own financial position to the replacement address.
+2. Use the owner multisig to move role assignments.
+3. Update local/runtime references so legitimate ops use the replacement key.
+4. Re-run `scripts/ops/audit-launch-readiness.mjs --profile testnet`.
+
+This ordering defended the financial surface first during the 2026-05-25 admin
+EOA rotation.
+
+### The durable patterns live in the runbooks
+
+See [`MULTISIG_SETUP.md`](./MULTISIG_SETUP.md) for the canonical
+`multisig.asMulti` recipe: signer order, `maybeTimepoint`, `revive.call`,
+`utility.batchAll`, storage deposit limits, and common dispatch errors.
+
+See [`OPERATOR_ONBOARDING.md`](./OPERATOR_ONBOARDING.md) for the
+1Password-only key-handling pattern: scripts read keys via in-process loaders or
+`op read`; private keys never touch stdout, shell env vars, temp files, or
+redaction commands.
+
+### Follow-ups that remain open
+
+- The `200_001` USDC reserved tail on the retired
+  `0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519` admin address remains open.
+  After PR #525 redeployed EscrowCore, that tail is tied to the old retired
+  contract path and is effectively orphaned until the original in-flight
+  obligation can be resolved or conclusively written off.
+- Delete `op://prod-backend/signer-private-key/password` after the 30-day soak
+  period ends. That item was already backend-retired by the KMS cutover and is
+  now also incident-related.
+- Decide whether `mcp-server/.env.local` should hold any admin EOA private key
+  going forward. **Partially resolved:** new and migrated ops paths now support
+  direct 1Password reads; `.env.local` remains only for long-lived backend/local
+  boot paths until the remaining scripts stop needing it.
 
 ---
 
