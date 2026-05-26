@@ -651,6 +651,7 @@ function metricPathLabel(pathname) {
     "/account/borrow-capacity",
     "/account/deallocate",
     "/account/fund",
+    "/account/position",
     "/account/repay",
     "/account/strategies",
     "/auth/session",

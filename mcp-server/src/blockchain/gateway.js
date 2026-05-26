@@ -226,6 +226,29 @@ export class BlockchainGateway {
     });
   }
 
+  async getAccountPosition(wallet, symbol) {
+    return this.withGatewayError("getAccountPosition", async () => {
+      const asset = this.requireAsset(String(symbol ?? "").trim().toUpperCase());
+      const position = await this.accountContract.positions(wallet, asset.address);
+      return {
+        wallet,
+        asset: summarizeSupportedAsset(asset),
+        source: {
+          contract: "AgentAccountCore",
+          address: this.config.agentAccountAddress,
+          method: "positions",
+          field: "liquid"
+        },
+        position: summarizeAssetPosition(
+          position,
+          asset,
+          this.toDisplayUnits.bind(this),
+          this.toRawString.bind(this)
+        )
+      };
+    });
+  }
+
   normalizeStrategyId(strategyId) {
     if (typeof strategyId === "string" && /^0x[a-fA-F0-9]{64}$/u.test(strategyId)) {
       return strategyId;

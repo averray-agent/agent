@@ -60,6 +60,7 @@ const ROLE_CAPABILITIES = {
 
 const ROUTE_CAPABILITY_RULES = [
   { method: "GET", path: "/account", capabilities: ["account:read"] },
+  { method: "GET", path: "/account/position", capabilities: ["account:read"] },
   { method: "GET", path: "/account/strategies", capabilities: ["account:read", "strategies:list"] },
   { method: "GET", path: "/account/borrow-capacity", capabilities: ["account:read"] },
   { method: "POST", path: "/account/fund", capabilities: ["account:fund"] },

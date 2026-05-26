@@ -422,6 +422,30 @@ test("preflight uses chain worker claim count for claim economics in blockchain 
   assert.equal(preflight.totalClaimLock, 0.35);
 });
 
+test("getAccountPosition delegates to blockchain gateway for chain-authoritative liquidity", async () => {
+  const blockchainGateway = {
+    isEnabled() {
+      return true;
+    },
+    async getAccountPosition(wallet, asset) {
+      assert.equal(wallet, WALLET);
+      assert.equal(asset, "USDC");
+      return {
+        wallet,
+        asset: CANONICAL_USDC_ASSET,
+        source: { contract: "AgentAccountCore", method: "positions", field: "liquid" },
+        position: { liquidRaw: "250000", liquid: 0.25 }
+      };
+    }
+  };
+  const service = makePlatformService(blockchainGateway);
+
+  const position = await service.getAccountPosition(WALLET, "USDC");
+
+  assert.equal(position.position.liquidRaw, "250000");
+  assert.equal(position.source.contract, "AgentAccountCore");
+});
+
 test("validateJobSubmission gives a non-mutating schema-native verdict", () => {
   const service = makePlatformService();
 

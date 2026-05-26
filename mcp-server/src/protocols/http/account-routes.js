@@ -285,6 +285,16 @@ export function createAccountRoutes({
       return true;
     }
 
+    if (request.method === "GET" && pathname === "/account/position") {
+      const auth = await authMiddleware(request, url);
+      const asset = url.searchParams.get("asset")?.trim().toUpperCase();
+      if (!asset) {
+        throw new ValidationError("asset query parameter is required.");
+      }
+      respond(response, 200, await service.getAccountPosition(auth.wallet, asset));
+      return true;
+    }
+
     if (request.method === "GET" && pathname === "/account/borrow-capacity") {
       const auth = await authMiddleware(request, url);
       const asset = url.searchParams.get("asset")?.trim() || "DOT";

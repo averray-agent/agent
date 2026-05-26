@@ -459,6 +459,10 @@
       "description": "Live borrow headroom for the signed-in wallet against its current collateral."
     },
     {
+      "path": "/account/position",
+      "description": "Direct AgentAccountCore.positions(wallet, asset) read for the signed-in wallet; use for claim-liquidity preflight."
+    },
+    {
       "path": "/account/strategies",
       "description": "Signed-in lane positions plus treasury-share and adapter-backed yield/performance posture for each registered strategy adapter."
     },
