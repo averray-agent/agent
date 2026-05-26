@@ -57,7 +57,7 @@ export function DisputeDrawerBody({
     if (d === "uphold" && destination !== "slash-to-treasury" && destination !== "pay-verifier") {
       setDestination("slash-to-treasury");
     }
-    if ((d === "reject" || d === "split") && destination !== "return-to-depositor") {
+    if ((d === "reject" || d === "split" || d === "timeout") && destination !== "return-to-depositor") {
       setDestination("return-to-depositor");
     }
   };
@@ -163,6 +163,10 @@ export function DisputeDrawerBody({
             </span>
           </div>
         </div>
+      </DrawerSection>
+
+      <DrawerSection title="Arbitration">
+        <ArbitrationCard dispute={dispute} />
       </DrawerSection>
 
       <DrawerSection title="Evidence">
@@ -307,6 +311,115 @@ function PartyBlock({
   );
 }
 
+function ArbitrationCard({ dispute }: { dispute: Dispute }) {
+  const { arbitration } = dispute;
+  const slaStatus = arbitration.sla.expired
+    ? "Expired"
+    : typeof arbitration.sla.secondsRemaining === "number"
+      ? `${formatDuration(arbitration.sla.secondsRemaining)} left`
+      : "Window active";
+  const releaseReady = arbitration.release.ready;
+
+  return (
+    <div className="rounded-[10px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] p-4">
+      <div className="grid gap-3 md:grid-cols-[1fr_1fr]">
+        <ArbitrationDatum
+          label="SLA"
+          value={slaStatus}
+          note={
+            arbitration.sla.windowEndsAt
+              ? `Ends ${formatIso(arbitration.sla.windowEndsAt)}`
+              : `${formatDuration(arbitration.sla.seconds)} window`
+          }
+          tone={arbitration.sla.expired ? "warn" : "accent"}
+        />
+        <ArbitrationDatum
+          label="Release"
+          value={releaseReady ? "Ready after verdict" : releaseReasonLabel(arbitration.release.reason)}
+          note={arbitration.release.requiresVerdict ? "Requires verdict receipt first" : "Admin receipt only"}
+          tone={releaseReady ? "accent" : "neutral"}
+        />
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-1.5">
+        {arbitration.allowedVerdicts.map((verdict) => (
+          <span
+            key={verdict}
+            className="rounded-full border border-[var(--avy-line)] bg-[color:rgba(17,19,21,0.03)] px-2.5 py-1 font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-ink)]"
+            style={{ letterSpacing: 0 }}
+          >
+            {verdictLabel(verdict)}
+          </span>
+        ))}
+      </div>
+
+      <div
+        className="mt-3 grid gap-1.5 border-t border-[var(--avy-line-soft)] pt-3 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]"
+        style={{ letterSpacing: 0 }}
+      >
+        <span>
+          Reasoning ·{" "}
+          <b className="font-semibold text-[var(--avy-ink)]">
+            {arbitration.reasoning.hashAlgorithm} {arbitration.reasoning.hashField}
+          </b>{" "}
+          → <b className="font-semibold text-[var(--avy-ink)]">{arbitration.reasoning.uriField}</b>
+        </span>
+        <span>
+          Authority ·{" "}
+          <b className="font-semibold text-[var(--avy-ink)]">
+            {authorityLabel(arbitration.authority.verdict)}
+          </b>{" "}
+          verdict ·{" "}
+          <b className="font-semibold text-[var(--avy-ink)]">
+            {authorityLabel(arbitration.authority.release)}
+          </b>{" "}
+          release
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function ArbitrationDatum({
+  label,
+  value,
+  note,
+  tone,
+}: {
+  label: string;
+  value: string;
+  note: string;
+  tone: "accent" | "neutral" | "warn";
+}) {
+  const toneClass = {
+    accent: "text-[var(--avy-accent)]",
+    neutral: "text-[var(--avy-ink)]",
+    warn: "text-[var(--avy-warn)]",
+  }[tone];
+  return (
+    <div className="rounded-[8px] border border-[var(--avy-line-soft)] bg-[color:rgba(17,19,21,0.025)] px-3 py-2.5">
+      <div
+        className="font-[family-name:var(--font-display)] text-[10px] font-extrabold uppercase text-[var(--avy-muted)]"
+        style={{ letterSpacing: 0 }}
+      >
+        {label}
+      </div>
+      <div
+        className={`mt-1 font-[family-name:var(--font-display)] text-[13px] font-bold ${toneClass}`}
+        style={{ letterSpacing: 0 }}
+      >
+        {value}
+      </div>
+      <div
+        className="mt-0.5 font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]"
+        style={{ letterSpacing: 0 }}
+      >
+        {note}
+      </div>
+    </div>
+  );
+}
+
 // Polkadot Asset Hub block-explorer (Subscan). Hardcoded as the
 // platform's settlement chain today; if/when settlement moves to
 // another chain, swap this constant or thread the explorer URL
@@ -334,6 +447,45 @@ function humaniseChainStatus(status: string): string {
 
 function chainStatusDotClass(status: string): string {
   return CHAIN_STATUS_DOT_CLASS[status] ?? "bg-[var(--avy-muted)]";
+}
+
+function verdictLabel(value: string): string {
+  const normalized = value.replace(/_/g, " ");
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
+function authorityLabel(value: string): string {
+  return value.replace(/_/g, " ");
+}
+
+function releaseReasonLabel(value: string): string {
+  const labels: Record<string, string> = {
+    awaiting_arbitrator_verdict: "Awaiting verdict",
+    verdict_recorded: "Verdict recorded",
+    release_already_recorded: "Release recorded",
+  };
+  return labels[value] ?? authorityLabel(value);
+}
+
+function formatDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "0m";
+  const days = Math.floor(seconds / 86400);
+  if (days >= 1) return `${days}d`;
+  const hours = Math.floor(seconds / 3600);
+  if (hours >= 1) return `${hours}h`;
+  const minutes = Math.max(1, Math.floor(seconds / 60));
+  return `${minutes}m`;
+}
+
+function formatIso(value: string): string {
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) return value;
+  const date = new Date(parsed);
+  const month = date.toLocaleString("en", { month: "short", timeZone: "UTC" });
+  const day = date.toLocaleString("en", { day: "numeric", timeZone: "UTC" });
+  const hh = String(date.getUTCHours()).padStart(2, "0");
+  const mm = String(date.getUTCMinutes()).padStart(2, "0");
+  return `${month} ${day} · ${hh}:${mm} UTC`;
 }
 
 function shortHash(hash: string): string {
@@ -379,7 +531,9 @@ function ResolvedCard({ dispute }: { dispute: Dispute }) {
       ? "Upheld"
       : decision === "reject"
         ? "Rejected"
-        : "Split payout";
+        : decision === "timeout"
+          ? "Timeout"
+          : "Split payout";
   const destinationLabel =
     destination === "return-to-depositor"
       ? "Returned to depositor"

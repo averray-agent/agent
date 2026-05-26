@@ -31,7 +31,7 @@ export type ReleaseDestination =
   | "pay-verifier"
   | "slash-to-treasury";
 
-export type DecisionKind = "uphold" | "reject" | "split";
+export type DecisionKind = "uphold" | "reject" | "split" | "timeout";
 
 export interface DisputeParty {
   handle: string;
@@ -60,6 +60,37 @@ export interface DisputeTimelineEvent {
   label: string;
   body: string;
   tone?: "neutral" | "accent" | "warn" | "bad";
+}
+
+export interface DisputeArbitrationSemantics {
+  allowedVerdicts: string[];
+  authority: {
+    verdict: string;
+    release: string;
+  };
+  sla: {
+    seconds: number;
+    openedAt?: string;
+    windowEndsAt?: string;
+    expired?: boolean;
+    secondsRemaining?: number;
+  };
+  reasoning: {
+    contentType: string;
+    hashAlgorithm: string;
+    hashField: string;
+    uriField: string;
+    canonicalHashRequired: boolean;
+    publicContentPath: string;
+  };
+  release: {
+    mode: string;
+    verdictEndpoint: string;
+    releaseEndpoint: string;
+    requiresVerdict: boolean;
+    ready: boolean;
+    reason: string;
+  };
 }
 
 export interface Dispute {
@@ -92,6 +123,7 @@ export interface Dispute {
   metadataURI?: string;
   txHash?: string;
   chainStatus?: "confirmed" | "submitted" | "local_only" | "settled_by_verdict" | string;
+  arbitration: DisputeArbitrationSemantics;
   stakeBreakdown: StakeBreakdown;
   /** ISO-ish string opened-at used only for the window countdown seed. */
   openedAt: string;

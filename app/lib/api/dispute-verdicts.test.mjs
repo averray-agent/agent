@@ -11,6 +11,7 @@ test("decisionToVerdict maps operator decisions to backend verdict tokens", () =
   assert.equal(decisionToVerdict("uphold"), "upheld");
   assert.equal(decisionToVerdict("reject"), "dismissed");
   assert.equal(decisionToVerdict("split"), "split");
+  assert.equal(decisionToVerdict("timeout"), "timeout");
 });
 
 test("decisionToVerdict rejects unknown decision tokens instead of silently settling", () => {
@@ -31,6 +32,8 @@ test("verdictToDecision maps resolved verdict aliases and ignores unknown tokens
   assert.equal(verdictToDecision("uphold"), "uphold");
   assert.equal(verdictToDecision("dismissed"), "reject");
   assert.equal(verdictToDecision("rejected"), "reject");
+  assert.equal(verdictToDecision("timeout"), "timeout");
+  assert.equal(verdictToDecision("arb_timeout"), "timeout");
   assert.equal(verdictToDecision("needs-human"), null);
 });
 
@@ -45,6 +48,10 @@ test("releaseAmountForDecision mirrors backend default split payout semantics", 
   );
   assert.equal(
     releaseAmountForDecision({ decision: "reject", remainingPayout: 7, stakeFrozen: 9 }),
+    7
+  );
+  assert.equal(
+    releaseAmountForDecision({ decision: "timeout", remainingPayout: 7, stakeFrozen: 9 }),
     7
   );
   assert.equal(

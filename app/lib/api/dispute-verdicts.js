@@ -2,6 +2,7 @@ export function decisionToVerdict(decision) {
   if (decision === "uphold") return "upheld";
   if (decision === "reject") return "dismissed";
   if (decision === "split") return "split";
+  if (decision === "timeout") return "timeout";
   throw new TypeError(`Unknown dispute decision: ${String(decision)}`);
 }
 
@@ -14,6 +15,7 @@ export function verdictToDecision(value) {
   if (verdict === "split" || verdict === "partial" || verdict === "request-more") {
     return "split";
   }
+  if (verdict === "timeout" || verdict === "arb_timeout") return "timeout";
   return null;
 }
 
@@ -26,7 +28,7 @@ export function releaseAmountForDecision({
   if (decision === "split") {
     return remaining <= 1 ? remaining : Math.floor(remaining / 2);
   }
-  if (decision === "reject") {
+  if (decision === "reject" || decision === "timeout") {
     return remaining;
   }
   return stakeFrozen;
