@@ -1,6 +1,7 @@
 import type {
   DecisionKind,
   Dispute,
+  DisputeArbitrationSemantics,
   DisputeOrigin,
   DisputeParty,
   DisputeSeverity,
@@ -28,7 +29,18 @@ export function extractDispute(data: unknown): Dispute | null {
   const id = text(record.id, "");
   if (!id) return null;
 
-  if (isUiDispute(record)) return record as unknown as Dispute;
+  if (isUiDispute(record)) {
+    const openedAt = text(record.openedAt, new Date().toISOString());
+    const windowSeconds = number(record.windowSeconds, 72 * 60 * 60);
+    return {
+      ...(record as unknown as Dispute),
+      arbitration: arbitrationSemantics(record.arbitration, {
+        openedAt,
+        windowEndsAt: text(record.windowEndsAt, ""),
+        windowSeconds,
+      }),
+    };
+  }
 
   const sessionId = text(record.sessionId, text(record.runRef, id));
   const evidence = objectField(record, "evidence");
@@ -37,7 +49,6 @@ export function extractDispute(data: unknown): Dispute | null {
   const openedAt = text(record.openedAt, new Date().toISOString());
   const windowEndsAt = text(record.windowEndsAt, "");
   const windowSeconds = secondsBetween(openedAt, windowEndsAt) ?? 72 * 60 * 60;
-  const windowElapsed = elapsedSeconds(openedAt, windowSeconds);
   const status = text(record.status, text(record.state, "open"));
   const verdict = verdictToDecision(record.verdict);
   const release = objectField(record, "release");
@@ -50,6 +61,13 @@ export function extractDispute(data: unknown): Dispute | null {
   const reasonCode = text(record.reasonCode, "");
   const metadataURI = text(record.metadataURI, "");
   const reasoningHash = text(record.reasoningHash, "");
+  const arbitration = arbitrationSemantics(record.arbitration, {
+    openedAt,
+    windowEndsAt,
+    windowSeconds,
+  });
+  const effectiveWindowSeconds = arbitration.sla.seconds || windowSeconds;
+  const windowElapsed = elapsedSeconds(openedAt, effectiveWindowSeconds);
 
   return {
     id,
@@ -70,9 +88,10 @@ export function extractDispute(data: unknown): Dispute | null {
     metadataURI: metadataURI || undefined,
     txHash: txHash || undefined,
     chainStatus: chainStatus || undefined,
+    arbitration,
     stakeBreakdown: stakeBreakdown(stakeFrozen),
     openedAt: displayDate(openedAt),
-    windowSeconds,
+    windowSeconds: effectiveWindowSeconds,
     windowElapsed,
     evidence: evidenceRows(before, after),
     workerPayload: prettyJson(after),
@@ -255,8 +274,49 @@ function releaseToDestination(value: Record<string, unknown> | null, decision: D
   if (action.includes("verifier")) return "pay-verifier";
   if (action.includes("return") || action.includes("depositor")) return "return-to-depositor";
   if (action.includes("slash") || action.includes("treasury")) return "slash-to-treasury";
-  if (decision === "reject") return "return-to-depositor";
+  if (decision === "reject" || decision === "timeout") return "return-to-depositor";
   return "slash-to-treasury";
+}
+
+function arbitrationSemantics(
+  value: unknown,
+  fallback: { openedAt: string; windowEndsAt: string; windowSeconds: number }
+): DisputeArbitrationSemantics {
+  const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const authority = objectField(record, "authority") ?? ({} as Record<string, unknown>);
+  const sla = objectField(record, "sla") ?? ({} as Record<string, unknown>);
+  const reasoning = objectField(record, "reasoning") ?? ({} as Record<string, unknown>);
+  const release = objectField(record, "release") ?? ({} as Record<string, unknown>);
+  return {
+    allowedVerdicts: stringArray(record.allowedVerdicts, ["upheld", "dismissed", "split", "timeout"]),
+    authority: {
+      verdict: text(authority.verdict, "admin_or_verifier"),
+      release: text(authority.release, "admin"),
+    },
+    sla: {
+      seconds: optionalNumber(sla.seconds) ?? fallback.windowSeconds,
+      openedAt: text(sla.openedAt, fallback.openedAt),
+      windowEndsAt: text(sla.windowEndsAt, fallback.windowEndsAt),
+      expired: optionalBoolean(sla.expired),
+      secondsRemaining: optionalNumber(sla.secondsRemaining),
+    },
+    reasoning: {
+      contentType: text(reasoning.contentType, "arbitrator_reasoning"),
+      hashAlgorithm: text(reasoning.hashAlgorithm, "keccak256"),
+      hashField: text(reasoning.hashField, "reasoningHash"),
+      uriField: text(reasoning.uriField, "metadataURI"),
+      canonicalHashRequired: optionalBoolean(reasoning.canonicalHashRequired) ?? true,
+      publicContentPath: text(reasoning.publicContentPath, "/content/:hash"),
+    },
+    release: {
+      mode: text(release.mode, "verdict_records_chain_resolution_then_operator_receipt"),
+      verdictEndpoint: text(release.verdictEndpoint, "/disputes/:id/verdict"),
+      releaseEndpoint: text(release.releaseEndpoint, "/disputes/:id/release"),
+      requiresVerdict: optionalBoolean(release.requiresVerdict) ?? true,
+      ready: optionalBoolean(release.ready) ?? false,
+      reason: text(release.reason, "awaiting_arbitrator_verdict"),
+    },
+  };
 }
 
 function displayDate(value: string): string {
@@ -308,6 +368,16 @@ function number(value: unknown, fallback: number): number {
 
 function optionalNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function optionalBoolean(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function stringArray(value: unknown, fallback: string[]): string[] {
+  if (!Array.isArray(value)) return fallback;
+  const strings = value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0);
+  return strings.length ? strings : fallback;
 }
 
 function objectField(value: unknown, key: string): Record<string, unknown> | null {

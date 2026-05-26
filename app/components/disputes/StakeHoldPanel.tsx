@@ -35,12 +35,15 @@ export function StakeHoldPanel({
     uphold: ["slash-to-treasury", "pay-verifier"],
     reject: ["return-to-depositor"],
     split: ["return-to-depositor"],
+    timeout: ["return-to-depositor"],
   };
   const allowed = decision ? allowedFor[decision] : [];
   const returnDestinationMeta =
     decision === "split"
       ? "Partial worker payout recorded by the split verdict."
-      : "Full unlock to the worker wallet. Run resumes.";
+      : decision === "timeout"
+        ? "Worker-favorable auto-resolution after the arbitration window."
+        : "Full unlock to the worker wallet. Run resumes.";
 
   return (
     <div className="flex flex-col gap-3 rounded-[10px] border border-[color:rgba(167,97,34,0.28)] bg-[color:rgba(244,227,207,0.28)] p-4">
