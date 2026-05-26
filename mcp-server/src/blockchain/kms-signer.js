@@ -327,16 +327,6 @@ export class KmsSigner extends AbstractSigner {
     let derSig;
     try {
       ({ Signature: derSig } = await client.send(command));
-      emitKmsSignDuration(this.#logger, "info", {
-        event: KMS_SIGN_EVENT,
-        signer: "blockchain",
-        operation: "kms:Sign",
-        keyId: this.#keyId,
-        messageType: "DIGEST",
-        signingAlgorithm: "ECDSA_SHA_256",
-        durationMs: durationMsSince(startedAt),
-        success: true,
-      });
     } catch (error) {
       emitKmsSignDuration(this.#logger, "warn", {
         event: KMS_SIGN_EVENT,
@@ -352,8 +342,30 @@ export class KmsSigner extends AbstractSigner {
       throw error;
     }
     if (!derSig) {
-      throw new Error("KMS Sign returned empty Signature");
+      const error = new Error("KMS Sign returned empty Signature");
+      emitKmsSignDuration(this.#logger, "warn", {
+        event: KMS_SIGN_EVENT,
+        signer: "blockchain",
+        operation: "kms:Sign",
+        keyId: this.#keyId,
+        messageType: "DIGEST",
+        signingAlgorithm: "ECDSA_SHA_256",
+        durationMs: durationMsSince(startedAt),
+        success: false,
+        ...serializeKmsSignError(error),
+      });
+      throw error;
     }
+    emitKmsSignDuration(this.#logger, "info", {
+      event: KMS_SIGN_EVENT,
+      signer: "blockchain",
+      operation: "kms:Sign",
+      keyId: this.#keyId,
+      messageType: "DIGEST",
+      signingAlgorithm: "ECDSA_SHA_256",
+      durationMs: durationMsSince(startedAt),
+      success: true,
+    });
 
     const { r, s: rawS } = parseDerEcdsaSignature(new Uint8Array(derSig));
     const { s: normalizedS, flipped } = normalizeSignatureS(rawS);

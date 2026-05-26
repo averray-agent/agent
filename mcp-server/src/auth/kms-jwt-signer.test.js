@@ -67,10 +67,11 @@ const ROLES = ["admin", "verifier"];
 const TTL_SECONDS = 900; // 15 min
 
 class FakeKMSClient {
-  constructor({ failNextSign = false, signWithRawKey = KMS_RAW_PRIVATE } = {}) {
+  constructor({ failNextSign = false, signWithRawKey = KMS_RAW_PRIVATE, emptySignature = false } = {}) {
     this.calls = [];
     this.failNextSign = failNextSign;
     this.signWithRawKey = signWithRawKey;
+    this.emptySignature = emptySignature;
   }
   async send(command) {
     this.calls.push(command);
@@ -94,6 +95,9 @@ class FakeKMSClient {
         const err = new Error(`AccessDeniedException: MessageType "${command.input.MessageType}" not allowed`);
         err.name = "AccessDeniedException";
         throw err;
+      }
+      if (this.emptySignature) {
+        return {};
       }
       // Sign the digest. KMS in DIGEST mode treats `Message` as a
       // pre-computed SHA-256 digest — it does NOT re-hash. Node's
@@ -655,6 +659,25 @@ test("KmsJwtSigner: failed KMS Sign emits a structured duration log", async () =
   assert.equal(record.fields.errorName, "AccessDeniedException");
   assert.equal(record.fields.errorCode, "AccessDeniedException");
   assert.match(record.fields.errorMessage, /simulated KMS Sign denied/);
+});
+
+test("KmsJwtSigner: empty KMS Sign response emits a failed duration log", async () => {
+  const logger = collectingLogger();
+  const kms = new FakeKMSClient({ emptySignature: true });
+  const signer = buildSigner({ kmsClient: kms, logger });
+
+  await assert.rejects(
+    () => signer.signAsync({}, defaultSignOpts()),
+    /KmsJwtSigner: KMS Sign returned empty Signature/,
+  );
+  const record = logger.records.find((entry) => entry.message === "kms.sign.duration");
+  assert.ok(record, "expected failed kms.sign.duration log record");
+  assert.equal(record.level, "warn");
+  assert.equal(record.fields.signer, "jwt");
+  assert.equal(record.fields.success, false);
+  assert.equal(record.fields.errorName, "Error");
+  assert.equal(record.fields.errorCode, "Error");
+  assert.match(record.fields.errorMessage, /empty Signature/);
 });
 
 test("KmsJwtSigner: FakeKMS denies wrong SigningAlgorithm (mirrors IAM policy)", async () => {

@@ -77,10 +77,11 @@ function toDerSig(r, s) {
 }
 
 class FakeKMSClient {
-  constructor({ failNextSign = false, returnHighS = false } = {}) {
+  constructor({ failNextSign = false, returnHighS = false, emptySignature = false } = {}) {
     this.calls = [];
     this.failNextSign = failNextSign;
     this.returnHighS = returnHighS;
+    this.emptySignature = emptySignature;
   }
   async send(command) {
     this.calls.push(command);
@@ -92,6 +93,9 @@ class FakeKMSClient {
       if (this.failNextSign) {
         this.failNextSign = false;
         throw new Error("simulated KMS Sign failure");
+      }
+      if (this.emptySignature) {
+        return {};
       }
       // Sign the digest with our local key. ethers SigningKey gives us
       // r, s, v (or yParity); convert to DER for KMS-shaped response.
@@ -335,6 +339,25 @@ test("KmsSigner surfaces KMS Sign failures with the underlying error message", a
   assert.equal(record.fields.errorName, "Error");
   assert.equal(record.fields.errorCode, "Error");
   assert.match(record.fields.errorMessage, /simulated KMS Sign failure/);
+});
+
+test("KmsSigner treats an empty KMS Sign response as a failed duration log", async () => {
+  const kms = new FakeKMSClient({ emptySignature: true });
+  const logger = collectingLogger();
+  const signer = new KmsSigner({ kmsClient: kms, keyId: "test-key", logger });
+  await signer.getAddress();
+  await assert.rejects(
+    () => signer.signMessage("x"),
+    /KMS Sign returned empty Signature/,
+  );
+  const record = logger.records.find((entry) => entry.message === "kms.sign.duration");
+  assert.ok(record, "expected failed kms.sign.duration log record");
+  assert.equal(record.level, "warn");
+  assert.equal(record.fields.signer, "blockchain");
+  assert.equal(record.fields.success, false);
+  assert.equal(record.fields.errorName, "Error");
+  assert.equal(record.fields.errorCode, "Error");
+  assert.match(record.fields.errorMessage, /empty Signature/);
 });
 
 test("KmsSigner constructor rejects missing required options", () => {
