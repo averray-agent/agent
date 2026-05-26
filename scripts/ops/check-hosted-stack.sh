@@ -35,6 +35,11 @@ SERVICE_TOKEN_PROOF_ALLOWED_PATH=${SERVICE_TOKEN_PROOF_ALLOWED_PATH:-}
 SERVICE_TOKEN_PROOF_DENIED_PATHS=${SERVICE_TOKEN_PROOF_DENIED_PATHS:-}
 SERVICE_TOKEN_PROOF_TOKEN_TTL_SECONDS=${SERVICE_TOKEN_PROOF_TOKEN_TTL_SECONDS:-}
 SERVICE_TOKEN_PROOF_IDEMPOTENCY_KEY=${SERVICE_TOKEN_PROOF_IDEMPOTENCY_KEY:-}
+CHECK_EXTERNAL_SCHEMA_PROOF=${CHECK_EXTERNAL_SCHEMA_PROOF:-0}
+EXTERNAL_SCHEMA_PROOF_NODE_IMAGE=${EXTERNAL_SCHEMA_PROOF_NODE_IMAGE:-node:22-bookworm-slim}
+EXTERNAL_SCHEMA_PROOF_EVIDENCE_FILE=${EXTERNAL_SCHEMA_PROOF_EVIDENCE_FILE:-}
+EXTERNAL_SCHEMA_PROOF_JOB_ID=${EXTERNAL_SCHEMA_PROOF_JOB_ID:-}
+EXTERNAL_SCHEMA_PROOF_IDEMPOTENCY_KEY=${EXTERNAL_SCHEMA_PROOF_IDEMPOTENCY_KEY:-}
 CHECK_DISPUTE_VERDICT_PROOF=${CHECK_DISPUTE_VERDICT_PROOF:-0}
 DISPUTE_PROOF_NODE_IMAGE=${DISPUTE_PROOF_NODE_IMAGE:-node:22-bookworm-slim}
 DISPUTE_PROOF_EVIDENCE_FILE=${DISPUTE_PROOF_EVIDENCE_FILE:-}
@@ -114,7 +119,7 @@ enabled() {
   esac
 }
 
-if { enabled "$CHECK_PRODUCT_PROOF_GATE" || enabled "$CHECK_SERVICE_TOKEN_PROOF" || enabled "$CHECK_DISPUTE_VERDICT_PROOF"; } && ! command -v node >/dev/null 2>&1; then
+if { enabled "$CHECK_PRODUCT_PROOF_GATE" || enabled "$CHECK_SERVICE_TOKEN_PROOF" || enabled "$CHECK_EXTERNAL_SCHEMA_PROOF" || enabled "$CHECK_DISPUTE_VERDICT_PROOF"; } && ! command -v node >/dev/null 2>&1; then
   require_command docker
 fi
 
@@ -455,6 +460,47 @@ if enabled "$CHECK_SERVICE_TOKEN_PROOF"; then
       -e SERVICE_TOKEN_PROOF_IDEMPOTENCY_KEY="$SERVICE_TOKEN_PROOF_IDEMPOTENCY_KEY" \
       "$SERVICE_TOKEN_PROOF_NODE_IMAGE" \
       node scripts/ops/check-service-token-proof.mjs
+  fi
+fi
+
+if enabled "$CHECK_EXTERNAL_SCHEMA_PROOF"; then
+  if [[ -z "$ADMIN_JWT" ]]; then
+    echo "CHECK_EXTERNAL_SCHEMA_PROOF=1 requires ADMIN_JWT." >&2
+    exit 1
+  fi
+
+  echo "Checking external schema registration proof"
+  script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+  repo_root="$(cd "$script_dir/../.." && pwd)"
+  if [[ -n "$EXTERNAL_SCHEMA_PROOF_EVIDENCE_FILE" ]]; then
+    if [[ "$EXTERNAL_SCHEMA_PROOF_EVIDENCE_FILE" != /* ]]; then
+      EXTERNAL_SCHEMA_PROOF_EVIDENCE_FILE="$repo_root/$EXTERNAL_SCHEMA_PROOF_EVIDENCE_FILE"
+    fi
+    external_schema_proof_evidence_dir="$(dirname "$EXTERNAL_SCHEMA_PROOF_EVIDENCE_FILE")"
+    mkdir -p "$external_schema_proof_evidence_dir"
+  fi
+  if command -v node >/dev/null 2>&1; then
+    API_BASE_URL="${API_HEALTH_URL%/health}" \
+      ADMIN_JWT="$ADMIN_JWT" \
+      EXTERNAL_SCHEMA_PROOF_EVIDENCE_FILE="$EXTERNAL_SCHEMA_PROOF_EVIDENCE_FILE" \
+      EXTERNAL_SCHEMA_PROOF_JOB_ID="$EXTERNAL_SCHEMA_PROOF_JOB_ID" \
+      EXTERNAL_SCHEMA_PROOF_IDEMPOTENCY_KEY="$EXTERNAL_SCHEMA_PROOF_IDEMPOTENCY_KEY" \
+      node "$script_dir/check-external-schema-registration-proof.mjs"
+  else
+    external_schema_proof_docker_volume_args=(-v "$repo_root:/workspace")
+    if [[ -n "${external_schema_proof_evidence_dir:-}" ]]; then
+      external_schema_proof_docker_volume_args+=(-v "$external_schema_proof_evidence_dir:$external_schema_proof_evidence_dir")
+    fi
+    docker run --rm \
+      "${external_schema_proof_docker_volume_args[@]}" \
+      -w /workspace \
+      -e API_BASE_URL="${API_HEALTH_URL%/health}" \
+      -e ADMIN_JWT="$ADMIN_JWT" \
+      -e EXTERNAL_SCHEMA_PROOF_EVIDENCE_FILE="$EXTERNAL_SCHEMA_PROOF_EVIDENCE_FILE" \
+      -e EXTERNAL_SCHEMA_PROOF_JOB_ID="$EXTERNAL_SCHEMA_PROOF_JOB_ID" \
+      -e EXTERNAL_SCHEMA_PROOF_IDEMPOTENCY_KEY="$EXTERNAL_SCHEMA_PROOF_IDEMPOTENCY_KEY" \
+      "$EXTERNAL_SCHEMA_PROOF_NODE_IMAGE" \
+      node scripts/ops/check-external-schema-registration-proof.mjs
   fi
 fi
 
