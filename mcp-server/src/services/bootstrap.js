@@ -167,6 +167,9 @@ export async function createPlatformRuntime() {
   // the step name before the process exits. Without this, a cryptic stack
   // trace is the only signal that a required env var was missing.
   const authConfig = initStep("load-auth-config", logger, () => loadAuthConfig());
+  if (authConfig.kmsJwt) {
+    authConfig.kmsJwt.logger = logger;
+  }
 
   // Phase 5a prep — verify the AWS credential chain can actually reach
   // the JWT KMS key before declaring the backend healthy. Without this
@@ -198,7 +201,7 @@ export async function createPlatformRuntime() {
   const mutationBackendConfig = initStep("load-mutation-backend-config", logger, () =>
     loadMutationBackendConfig(process.env)
   );
-  const gateway = initStep("init-blockchain-gateway", logger, () => new BlockchainGateway());
+  const gateway = initStep("init-blockchain-gateway", logger, () => new BlockchainGateway(undefined, { logger }));
   logger.info(
     describeMutationBackendStartup(mutationBackendConfig, gateway),
     "mutation_backend.configured"

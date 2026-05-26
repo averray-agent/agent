@@ -94,7 +94,7 @@ function canAutoMintAsset(asset) {
 }
 
 export class BlockchainGateway {
-  constructor(config = loadBlockchainConfig()) {
+  constructor(config = loadBlockchainConfig(), { logger = undefined } = {}) {
     this.config = config;
     if (!config.enabled) {
       this.provider = undefined;
@@ -109,7 +109,7 @@ export class BlockchainGateway {
     }
 
     this.provider = new JsonRpcProvider(config.rpcUrl);
-    this.signer = createSigner(config, this.provider);
+    this.signer = createSigner(config, this.provider, { logger });
     this.accountContract = new Contract(
       config.agentAccountAddress,
       AGENT_ACCOUNT_ABI,
@@ -1746,7 +1746,7 @@ export class BlockchainGateway {
  * gateway, no signing capability) — matches the pre-Phase-3 contract where
  * an empty SIGNER_PRIVATE_KEY would also yield an undefined signer.
  */
-function createSigner(config, provider) {
+function createSigner(config, provider, { logger = undefined } = {}) {
   if (config.signerBackend === "kms") {
     if (!config.kmsKeyId || !config.awsRegion) {
       // Should be caught upstream by loadBlockchainConfig's required-field
@@ -1771,6 +1771,7 @@ function createSigner(config, provider) {
       region: config.awsRegion,
       keyId: config.kmsKeyId,
       provider,
+      logger,
       credentialsProvider,
     });
   }

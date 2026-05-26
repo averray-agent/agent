@@ -118,6 +118,19 @@ class FakeKMSClient {
   }
 }
 
+function collectingLogger() {
+  const records = [];
+  return {
+    records,
+    info(fields, message) {
+      records.push({ level: "info", fields, message });
+    },
+    warn(fields, message) {
+      records.push({ level: "warn", fields, message });
+    },
+  };
+}
+
 // ───────────────────────────────────────────────────────────────────
 // Tests
 // ───────────────────────────────────────────────────────────────────
@@ -144,6 +157,26 @@ test("KmsSigner.signMessage produces a signature that recovers to the expected a
   // ethers' own verifyMessage path (EIP-191).
   const recovered = recoverAddress(getBytes(hashMessage(msg)), sigHex);
   assert.equal(recovered, EXPECTED_ADDRESS);
+});
+
+test("KmsSigner.signMessage emits a structured kms:Sign duration log", async () => {
+  const kms = new FakeKMSClient();
+  const logger = collectingLogger();
+  const signer = new KmsSigner({ kmsClient: kms, keyId: "test-key", logger });
+  await signer.signMessage("observability test");
+
+  const record = logger.records.find((entry) => entry.message === "kms.sign.duration");
+  assert.ok(record, "expected kms.sign.duration log record");
+  assert.equal(record.level, "info");
+  assert.equal(record.fields.event, "kms.sign.duration");
+  assert.equal(record.fields.signer, "blockchain");
+  assert.equal(record.fields.operation, "kms:Sign");
+  assert.equal(record.fields.keyId, "test-key");
+  assert.equal(record.fields.messageType, "DIGEST");
+  assert.equal(record.fields.signingAlgorithm, "ECDSA_SHA_256");
+  assert.equal(record.fields.success, true);
+  assert.equal(typeof record.fields.durationMs, "number");
+  assert.ok(record.fields.durationMs >= 0);
 });
 
 test("KmsSigner.signMessage normalizes high-s signatures to low form (EIP-2)", async () => {
@@ -286,13 +319,22 @@ test("KmsSigner.connect returns a new instance bound to the given provider", asy
 
 test("KmsSigner surfaces KMS Sign failures with the underlying error message", async () => {
   const kms = new FakeKMSClient({ failNextSign: true });
-  const signer = new KmsSigner({ kmsClient: kms, keyId: "test-key" });
+  const logger = collectingLogger();
+  const signer = new KmsSigner({ kmsClient: kms, keyId: "test-key", logger });
   // getAddress works (it only needs GetPublicKey, not Sign).
   await signer.getAddress();
   await assert.rejects(
     () => signer.signMessage("x"),
     /simulated KMS Sign failure/,
   );
+  const record = logger.records.find((entry) => entry.message === "kms.sign.duration");
+  assert.ok(record, "expected failed kms.sign.duration log record");
+  assert.equal(record.level, "warn");
+  assert.equal(record.fields.signer, "blockchain");
+  assert.equal(record.fields.success, false);
+  assert.equal(record.fields.errorName, "Error");
+  assert.equal(record.fields.errorCode, "Error");
+  assert.match(record.fields.errorMessage, /simulated KMS Sign failure/);
 });
 
 test("KmsSigner constructor rejects missing required options", () => {

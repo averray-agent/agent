@@ -55,10 +55,42 @@ const HEADER_ALG = "ES256";
 const DEFAULT_CLOCK_SKEW_SECONDS = 60;
 const DEFAULT_MAX_TTL_SECONDS = 3600;
 const FORBIDDEN_HEADERS = ["jku", "jwk", "x5u", "x5c", "crit"];
+const KMS_SIGN_EVENT = "kms.sign.duration";
 // Standard UUIDv4 shape. We don't enforce that other UUID versions are
 // rejected at the regex level — the version-4 nibble is checked
 // explicitly so the error message stays specific.
 const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+
+function durationMsSince(startedAt) {
+  return Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+}
+
+function serializeKmsSignError(error) {
+  return {
+    errorName: error?.name ?? "Error",
+    errorCode: error?.code ?? error?.name ?? "unknown",
+    errorMessage: error?.message ?? String(error),
+  };
+}
+
+function emitKmsSignDuration(logger, level, fields) {
+  if (!logger) {
+    return;
+  }
+  if (logger && logger !== console && typeof logger[level] === "function") {
+    logger[level](fields, KMS_SIGN_EVENT);
+    return;
+  }
+
+  const line = JSON.stringify({
+    timestamp: new Date().toISOString(),
+    level,
+    ...fields,
+    msg: KMS_SIGN_EVENT,
+  });
+  const consoleMethod = level === "warn" ? "warn" : "info";
+  console[consoleMethod](line);
+}
 
 export class KmsJwtSigner {
   #kmsClient;
@@ -75,6 +107,7 @@ export class KmsJwtSigner {
   #maxTtlSeconds;
   #clockSkewSeconds;
   #now;
+  #logger;
 
   /**
    * @param {object} opts
@@ -89,6 +122,7 @@ export class KmsJwtSigner {
    * @param {number} [opts.maxTtlSeconds]       Cap on `exp - iat`; defaults to 3600 (1h).
    * @param {number} [opts.clockSkewSeconds]    Skew tolerance for nbf/exp; defaults to 60.
    * @param {() => number} [opts.now]           Override clock (epoch seconds) for tests.
+   * @param {object} [opts.logger]              Optional pino-style logger.
    * @param {import("@aws-sdk/types").AwsCredentialIdentityProvider} [opts.credentialsProvider]
    *   Optional AWS SDK credentials provider passed to the lazy-constructed
    *   KMSClient. Used by Phase 5a (Roles Anywhere) — see
@@ -113,6 +147,7 @@ export class KmsJwtSigner {
       maxTtlSeconds,
       clockSkewSeconds,
       now,
+      logger,
       credentialsProvider,
     } = opts;
     if (!keyId || typeof keyId !== "string") {
@@ -174,6 +209,7 @@ export class KmsJwtSigner {
     this.#maxTtlSeconds = maxTtlSeconds ?? DEFAULT_MAX_TTL_SECONDS;
     this.#clockSkewSeconds = clockSkewSeconds ?? DEFAULT_CLOCK_SKEW_SECONDS;
     this.#now = typeof now === "function" ? now : null;
+    this.#logger = logger ?? null;
   }
 
   /** Configured `kid` header value. */
@@ -301,17 +337,45 @@ export class KmsJwtSigner {
     // paths that never construct a KmsJwtSigner (HMAC mode).
     const { SignCommand } = await import("@aws-sdk/client-kms");
     const client = await this.#getClient();
-    const { Signature: derSig } = await client.send(
-      new SignCommand({
-        KeyId: this.#keyId,
-        Message: digest,
-        // DIGEST: our Message is already a SHA-256 digest, do not
-        // re-hash. ECDSA_SHA_256: P-256 + SHA-256 = ES256. Both are
-        // enforced by the signer principal's IAM policy condition keys.
-        MessageType: "DIGEST",
-        SigningAlgorithm: "ECDSA_SHA_256",
-      }),
-    );
+    const command = new SignCommand({
+      KeyId: this.#keyId,
+      Message: digest,
+      // DIGEST: our Message is already a SHA-256 digest, do not
+      // re-hash. ECDSA_SHA_256: P-256 + SHA-256 = ES256. Both are
+      // enforced by the signer principal's IAM policy condition keys.
+      MessageType: "DIGEST",
+      SigningAlgorithm: "ECDSA_SHA_256",
+    });
+    const startedAt = process.hrtime.bigint();
+    let derSig;
+    try {
+      ({ Signature: derSig } = await client.send(command));
+      emitKmsSignDuration(this.#logger, "info", {
+        event: KMS_SIGN_EVENT,
+        signer: "jwt",
+        operation: "kms:Sign",
+        keyId: this.#keyId,
+        kid: this.#kid,
+        messageType: "DIGEST",
+        signingAlgorithm: "ECDSA_SHA_256",
+        durationMs: durationMsSince(startedAt),
+        success: true,
+      });
+    } catch (error) {
+      emitKmsSignDuration(this.#logger, "warn", {
+        event: KMS_SIGN_EVENT,
+        signer: "jwt",
+        operation: "kms:Sign",
+        keyId: this.#keyId,
+        kid: this.#kid,
+        messageType: "DIGEST",
+        signingAlgorithm: "ECDSA_SHA_256",
+        durationMs: durationMsSince(startedAt),
+        success: false,
+        ...serializeKmsSignError(error),
+      });
+      throw error;
+    }
     if (!derSig) {
       throw new Error("KmsJwtSigner: KMS Sign returned empty Signature");
     }
