@@ -295,6 +295,45 @@ Please run 'eval $(op signin)' first
 Do not print the 1Password error verbatim if it might include item names or
 partial secret context. Print the instruction above, then exit non-zero.
 
+## EscrowCore redeploy orphan-balance check
+
+Before retiring an EscrowCore from `TreasuryPolicy.serviceOperators`, the
+operator must prove the old contract has no unsettled job entries that still
+touch `AgentAccountCore.positions(...).reserved` or `jobStakeLocked`.
+
+`scripts/ops/redeploy-escrowcore.mjs` runs this pre-Phase-2 check during
+`--phase all` and `--phase deploy`:
+
+```bash
+node scripts/ops/redeploy-escrowcore.mjs --phase all
+```
+
+If the check reports unsettled old jobs, stop and settle or finalize them
+through a reviewed state-machine path before wiring the new contract, or
+explicitly accept that the balances may be orphaned after the old contract is
+revoked.
+
+The escape hatch is intentionally loud:
+
+```bash
+node scripts/ops/redeploy-escrowcore.mjs --phase all \
+  --acknowledge-orphaned-balances
+```
+
+`--acknowledge-orphaned-balances` means the operator has reviewed the listed
+jobs, understands that the old EscrowCore may lose the `AgentAccountCore`
+`onlyOperator` capability after Phase 2, and accepts the resulting orphaned
+balance risk. Do not use it as routine cleanup. For mainnet, the expected path
+is to clear all obligations first and run without the flag.
+
+For older contracts deployed before the current manifest window, operators may
+bound the log scan explicitly:
+
+```bash
+node scripts/ops/redeploy-escrowcore.mjs --phase all \
+  --orphan-scan-from-block <old-escrow-deploy-block>
+```
+
 ## 5. Day-to-day duties
 
 ### 5.1 The deploy ritual

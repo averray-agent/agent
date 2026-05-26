@@ -70,7 +70,16 @@
  *     --multisig-exec-tx 0xEXEC_TX --commit
  */
 
-import { JsonRpcProvider, Wallet, Contract, ContractFactory, Interface, formatEther, getCreateAddress } from "ethers";
+import {
+  JsonRpcProvider,
+  Wallet,
+  Contract,
+  ContractFactory,
+  Interface,
+  ZeroAddress,
+  formatUnits,
+  getCreateAddress
+} from "ethers";
 import { readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
@@ -85,8 +94,33 @@ const TREASURY_POLICY_ABI = [
   "function setServiceOperator(address account, bool allowed)"
 ];
 
+const AGENT_ACCOUNT_READ_ABI = [
+  "function positions(address account, address asset) view returns (uint256 liquid,uint256 reserved,uint256 strategyAllocated,uint256 collateralLocked,uint256 jobStakeLocked,uint256 debtOutstanding)"
+];
+
+const ESCROW_TAIL_SCAN_ABI = [
+  "function jobs(bytes32 jobId) view returns (address poster,address worker,address asset,bytes32 verifierMode,bytes32 category,bytes32 specHash,uint256 reward,uint256 opsReserve,uint256 contingencyReserve,uint256 released,uint256 claimExpiry,uint256 claimStake,uint16 claimStakeBps,uint256 claimFee,uint16 claimFeeBps,bool claimEconomicsWaived,address rejectingVerifier,uint256 rejectedAt,uint256 disputedAt,uint8 payoutMode,uint8 state)",
+  "event JobCreated(bytes32 indexed jobId,address indexed poster,bytes32 indexed specHash,address asset,uint256 totalReserved,uint8 payoutMode)",
+  "event JobFunded(bytes32 indexed jobId,address indexed poster,address indexed asset,uint256 totalReserved,uint8 payoutMode)",
+  "event RecurringJobFundedFromTemplate(bytes32 indexed jobId,bytes32 indexed templateId,address indexed poster,address asset,uint256 totalReserved)",
+  "event JobClaimed(bytes32 indexed jobId,address indexed worker,uint256 claimExpiry,uint256 claimStake)",
+  "event ClaimEconomicsLocked(bytes32 indexed jobId,address indexed worker,uint256 claimStake,uint256 claimFee,bool waived,uint256 claimNumber)",
+  "event WorkSubmitted(bytes32 indexed jobId,address indexed worker,bytes32 evidenceHash)",
+  "event Submitted(bytes32 indexed jobId,address indexed worker,bytes32 indexed payloadHash)",
+  "event JobReopened(bytes32 indexed jobId)",
+  "event JobRejected(bytes32 indexed jobId,bytes32 reasonCode)",
+  "event Verified(bytes32 indexed jobId,address indexed verifier,bool approved,bytes32 reasonCode,bytes32 reasoningHash)",
+  "event DisputeOpened(bytes32 indexed jobId,address indexed opener,uint256 disputedAt)",
+  "event DisputeResolved(bytes32 indexed jobId,address indexed arbitrator,uint256 workerPayout,bytes32 reasonCode,string metadataURI)",
+  "event AutoResolvedOnTimeout(bytes32 indexed jobId,address indexed caller,uint256 workerPayout,bytes32 reasonCode)",
+  "event JobClosed(bytes32 indexed jobId,address indexed worker,uint256 releasedAmount)"
+];
+
 const PHASES = new Set(["deploy", "finalize", "all"]);
 const PRIVATE_KEY_RE = /^0x[a-fA-F0-9]{64}$/u;
+const DEFAULT_ORPHAN_SCAN_CHUNK_SIZE = 25_000;
+const JOB_STATE_NAMES = ["None", "Open", "Claimed", "Submitted", "Rejected", "Disputed", "Closed"];
+const PAYOUT_MODE_NAMES = ["Single", "Milestone"];
 
 /**
  * Spawn `op read <ref>` and capture stdout. The secret is consumed via
@@ -146,7 +180,10 @@ export function parseArgs(argv) {
     signerSecretRef: undefined,
     skipRevoke: false,
     skipManifestUpdate: false,
-    skipAuditRerun: false
+    skipAuditRerun: false,
+    acknowledgeOrphanedBalances: false,
+    orphanScanFromBlock: 0,
+    orphanScanChunkSize: DEFAULT_ORPHAN_SCAN_CHUNK_SIZE
   };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -161,6 +198,9 @@ export function parseArgs(argv) {
     else if (arg === "--skip-revoke") args.skipRevoke = true;
     else if (arg === "--skip-manifest-update") args.skipManifestUpdate = true;
     else if (arg === "--skip-audit-rerun") args.skipAuditRerun = true;
+    else if (arg === "--acknowledge-orphaned-balances") args.acknowledgeOrphanedBalances = true;
+    else if (arg === "--orphan-scan-from-block") args.orphanScanFromBlock = Number(argv[++i]);
+    else if (arg === "--orphan-scan-chunk-size") args.orphanScanChunkSize = Number(argv[++i]);
     else if (arg === "--help" || arg === "-h") args.help = true;
   }
   return args;
@@ -179,6 +219,19 @@ function printUsage() {
       "Modes:",
       "  --dry-run                 (default) Print plan, no side effects.",
       "  --commit                  Send/write side effects for the chosen phase.",
+      "",
+      "Pre-Phase-2 safety check:",
+      "  --acknowledge-orphaned-balances",
+      "                            Allow the deploy/all plan to proceed even if the",
+      "                            old EscrowCore still has unsettled jobs tied to",
+      "                            AAC reserved/jobStakeLocked balances. This means",
+      "                            those balances may become orphaned after Phase 2",
+      "                            revokes the old EscrowCore service-operator role.",
+      "  --orphan-scan-from-block <n>",
+      "                            First block to scan for old EscrowCore job events",
+      "                            (default: 0).",
+      "  --orphan-scan-chunk-size <n>",
+      `                            getLogs chunk size (default: ${DEFAULT_ORPHAN_SCAN_CHUNK_SIZE}).`,
       "",
       "Phase 1 (deploy) options:",
       "  --signer-secret-ref <ref> 1Password secret reference, e.g.",
@@ -279,6 +332,229 @@ async function readWiringState({ provider, manifest }) {
     treasury.serviceOperators(manifest.contracts.escrowCore)
   ]);
   return { owner, oldIsOperator };
+}
+
+function assertPositiveInteger(label, value) {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`${label} must be a non-negative safe integer. Got: ${value}`);
+  }
+}
+
+function normalizePosition(position) {
+  return {
+    liquid: BigInt(position.liquid),
+    reserved: BigInt(position.reserved),
+    strategyAllocated: BigInt(position.strategyAllocated),
+    collateralLocked: BigInt(position.collateralLocked),
+    jobStakeLocked: BigInt(position.jobStakeLocked),
+    debtOutstanding: BigInt(position.debtOutstanding)
+  };
+}
+
+function serializePosition(position, decimals = 6) {
+  const normalized = normalizePosition(position);
+  return {
+    liquid: normalized.liquid.toString(),
+    reserved: normalized.reserved.toString(),
+    strategyAllocated: normalized.strategyAllocated.toString(),
+    collateralLocked: normalized.collateralLocked.toString(),
+    jobStakeLocked: normalized.jobStakeLocked.toString(),
+    debtOutstanding: normalized.debtOutstanding.toString(),
+    formatted: {
+      liquid: formatUnits(normalized.liquid, decimals),
+      reserved: formatUnits(normalized.reserved, decimals),
+      jobStakeLocked: formatUnits(normalized.jobStakeLocked, decimals),
+      debtOutstanding: formatUnits(normalized.debtOutstanding, decimals)
+    }
+  };
+}
+
+function hasReservedOrLockedStake(position) {
+  const normalized = normalizePosition(position);
+  return normalized.reserved > 0n || normalized.jobStakeLocked > 0n;
+}
+
+function serializeJobEscrow(jobId, job) {
+  return {
+    jobId,
+    poster: job.poster,
+    worker: job.worker,
+    asset: job.asset,
+    reward: job.reward.toString(),
+    opsReserve: job.opsReserve.toString(),
+    contingencyReserve: job.contingencyReserve.toString(),
+    released: job.released.toString(),
+    claimExpiry: job.claimExpiry.toString(),
+    claimStake: job.claimStake.toString(),
+    claimFee: job.claimFee.toString(),
+    rejectedAt: job.rejectedAt.toString(),
+    disputedAt: job.disputedAt.toString(),
+    payoutMode: PAYOUT_MODE_NAMES[Number(job.payoutMode)] ?? String(job.payoutMode),
+    state: JOB_STATE_NAMES[Number(job.state)] ?? String(job.state),
+    stateIndex: Number(job.state)
+  };
+}
+
+function getNamedArg(args, name) {
+  try {
+    const value = args[name];
+    return value === undefined ? undefined : value;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function collectOldEscrowJobIds({ provider, escrowAddress, fromBlock = 0, toBlock, chunkSize = DEFAULT_ORPHAN_SCAN_CHUNK_SIZE }) {
+  assertPositiveInteger("fromBlock", fromBlock);
+  assertPositiveInteger("chunkSize", chunkSize);
+  if (chunkSize === 0) throw new Error("chunkSize must be greater than 0.");
+  const latest = toBlock ?? await provider.getBlockNumber();
+  assertPositiveInteger("toBlock", latest);
+
+  const iface = new Interface(ESCROW_TAIL_SCAN_ABI);
+  const jobIds = new Set();
+  let scannedLogCount = 0;
+
+  for (let from = fromBlock; from <= latest; from += chunkSize) {
+    const to = Math.min(latest, from + chunkSize - 1);
+    const logs = await provider.getLogs({ address: escrowAddress, fromBlock: from, toBlock: to });
+    scannedLogCount += logs.length;
+    for (const log of logs) {
+      let parsed;
+      try {
+        parsed = iface.parseLog(log);
+      } catch {
+        continue;
+      }
+      const jobId = getNamedArg(parsed.args, "jobId");
+      if (jobId) jobIds.add(jobId);
+    }
+  }
+
+  return {
+    fromBlock,
+    toBlock: latest,
+    chunkSize,
+    scannedLogCount,
+    jobIds: [...jobIds].sort()
+  };
+}
+
+export async function findUnsettledOldEscrowBalances({ provider, manifest, fromBlock = 0, chunkSize = DEFAULT_ORPHAN_SCAN_CHUNK_SIZE }) {
+  const oldEscrow = manifest.contracts.escrowCore;
+  const accountCore = manifest.contracts.agentAccountCore;
+  assertAddress("contracts.escrowCore", oldEscrow);
+  assertAddress("contracts.agentAccountCore", accountCore);
+
+  const scan = await collectOldEscrowJobIds({ provider, escrowAddress: oldEscrow, fromBlock, chunkSize });
+  const escrow = new Contract(oldEscrow, ESCROW_TAIL_SCAN_ABI, provider);
+  const accounts = new Contract(accountCore, AGENT_ACCOUNT_READ_ABI, provider);
+  const findings = [];
+
+  for (const jobId of scan.jobIds) {
+    const job = await escrow.jobs(jobId);
+    const jobJson = serializeJobEscrow(jobId, job);
+    if (jobJson.state === "None" || jobJson.state === "Closed") {
+      continue;
+    }
+
+    const [posterPositionRaw, workerPositionRaw] = await Promise.all([
+      accounts.positions(job.poster, job.asset),
+      job.worker === ZeroAddress
+        ? Promise.resolve(null)
+        : accounts.positions(job.worker, job.asset)
+    ]);
+
+    const posterHasTail = hasReservedOrLockedStake(posterPositionRaw);
+    const workerHasTail = workerPositionRaw ? hasReservedOrLockedStake(workerPositionRaw) : false;
+    if (!posterHasTail && !workerHasTail) {
+      continue;
+    }
+
+    findings.push({
+      ...jobJson,
+      posterPosition: serializePosition(posterPositionRaw),
+      workerPosition: workerPositionRaw ? serializePosition(workerPositionRaw) : null,
+      nonZeroTails: {
+        poster: posterHasTail,
+        worker: workerHasTail
+      }
+    });
+  }
+
+  return {
+    oldEscrow,
+    agentAccountCore: accountCore,
+    scan: {
+      fromBlock: scan.fromBlock,
+      toBlock: scan.toBlock,
+      chunkSize: scan.chunkSize,
+      scannedLogCount: scan.scannedLogCount,
+      scannedJobCount: scan.jobIds.length
+    },
+    findings
+  };
+}
+
+function formatOrphanedBalanceFinding(finding) {
+  const worker = finding.worker === ZeroAddress ? "(none)" : finding.worker;
+  const posterTail = `${finding.posterPosition.formatted.reserved} reserved / ${finding.posterPosition.formatted.jobStakeLocked} stake`;
+  const workerTail = finding.workerPosition
+    ? `${finding.workerPosition.formatted.reserved} reserved / ${finding.workerPosition.formatted.jobStakeLocked} stake`
+    : "n/a";
+  return [
+    `- ${finding.jobId}`,
+    `  state=${finding.state} claimExpiry=${finding.claimExpiry}`,
+    `  poster=${finding.poster} (${posterTail})`,
+    `  worker=${worker} (${workerTail})`,
+    `  reward=${formatUnits(finding.reward, 6)} USDC claimStake=${formatUnits(finding.claimStake, 6)} claimFee=${formatUnits(finding.claimFee, 6)}`
+  ].join("\n");
+}
+
+export function evaluateOrphanedBalancePreflight(report, { acknowledge = false } = {}) {
+  if (!report.findings.length) {
+    return {
+      ok: true,
+      acknowledged: false,
+      message: `No unsettled old EscrowCore jobs with non-zero AAC reserved/jobStakeLocked tails found across ${report.scan.scannedJobCount} scanned job(s).`
+    };
+  }
+
+  const body = report.findings.map(formatOrphanedBalanceFinding).join("\n");
+  const message = [
+    `${report.findings.length} unsettled old EscrowCore job(s) still touch AAC reserved/jobStakeLocked balances.`,
+    `Retiring ${report.oldEscrow} from TreasuryPolicy.serviceOperators can orphan those balances because normal escrow release paths call AgentAccountCore onlyOperator mutation functions.`,
+    "",
+    body
+  ].join("\n");
+
+  if (acknowledge) {
+    return {
+      ok: true,
+      acknowledged: true,
+      message: `${message}\n\nAcknowledged via --acknowledge-orphaned-balances; continuing.`
+    };
+  }
+
+  throw new Error(
+    `${message}\n\nAbort: settle or finalize these jobs first, or pass --acknowledge-orphaned-balances to record that the operator accepts the orphaning risk.`
+  );
+}
+
+async function runOrphanedBalancePreflight({ args, provider, manifest }) {
+  const report = await findUnsettledOldEscrowBalances({
+    provider,
+    manifest,
+    fromBlock: args.orphanScanFromBlock,
+    chunkSize: args.orphanScanChunkSize
+  });
+  const decision = evaluateOrphanedBalancePreflight(report, {
+    acknowledge: args.acknowledgeOrphanedBalances
+  });
+  const log = decision.acknowledged ? console.warn : console.log;
+  log(`\n## Pre-Phase-2 orphaned balance check`);
+  log(decision.message);
+  return { report, decision };
 }
 
 function runAudit(profile) {
@@ -549,6 +825,8 @@ async function main() {
     await runFinalize({ args, deploymentsPath, manifest, provider, wiringState });
     return;
   }
+
+  await runOrphanedBalancePreflight({ args, provider, manifest });
 
   // --phase deploy: print plan; with --commit, send EVM CREATE.
   if (args.phase === "deploy") {

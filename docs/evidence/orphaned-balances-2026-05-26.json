@@ -1,0 +1,211 @@
+{
+  "schemaVersion": 1,
+  "kind": "averray.orphanedBalancesEvidence",
+  "profile": "testnet",
+  "generatedAt": "2026-05-26T19:51:20.671Z",
+  "mode": "read_only_chain_verification",
+  "chain": {
+    "name": "Paseo Asset Hub TestNet",
+    "chainId": "420420417",
+    "ethRpc": "https://eth-rpc-testnet.polkadot.io/",
+    "observedBlockNumber": 9329023
+  },
+  "contracts": {
+    "oldEscrowCore": "0x7BB8fea44bDeE9870cF27c1dB616E7017BC38b0a",
+    "newEscrowCore": "0xb8fd8A932F69bD5E39700b7cf6D2920aF84d1B27",
+    "agentAccountCore": "0x71B111d8c9DF84Be26cb9067D27dAd7A2d5E7e08",
+    "treasuryPolicy": "0x648Cc5fdE94435992296C4e5ac642d18bB64c12B",
+    "usdc": "0x0000053900000000000000000000000001200000"
+  },
+  "targets": {
+    "oldAdmin": "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519",
+    "kmsSigner": "0x31ad432dFe083B998c69B6dB88A984ec5207ab7F"
+  },
+  "treasuryPolicyReads": {
+    "owner": "0x1f8C4da4AAAC79916350f1fabF1221309591B6F9",
+    "paused": false,
+    "oldEscrowServiceOperator": false,
+    "newEscrowServiceOperator": true
+  },
+  "positions": {
+    "oldAdmin": {
+      "account": "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519",
+      "asset": "USDC",
+      "assetAddress": "0x0000053900000000000000000000000001200000",
+      "raw": {
+        "liquid": "0",
+        "reserved": "200001",
+        "strategyAllocated": "0",
+        "collateralLocked": "0",
+        "jobStakeLocked": "60000",
+        "debtOutstanding": "0"
+      },
+      "formatted": {
+        "liquid": "0.0",
+        "reserved": "0.200001",
+        "jobStakeLocked": "0.06",
+        "debtOutstanding": "0.0"
+      }
+    },
+    "kmsSigner": {
+      "account": "0x31ad432dFe083B998c69B6dB88A984ec5207ab7F",
+      "asset": "USDC",
+      "assetAddress": "0x0000053900000000000000000000000001200000",
+      "raw": {
+        "liquid": "200000",
+        "reserved": "200000",
+        "strategyAllocated": "0",
+        "collateralLocked": "0",
+        "jobStakeLocked": "0",
+        "debtOutstanding": "0"
+      },
+      "formatted": {
+        "liquid": "0.2",
+        "reserved": "0.2",
+        "jobStakeLocked": "0.0",
+        "debtOutstanding": "0.0"
+      }
+    }
+  },
+  "oldEscrowLogScan": {
+    "fromBlock": 8700000,
+    "toBlock": 9329023,
+    "chunkSize": 25000,
+    "oldEscrowLogCount": 64,
+    "matchedJobCount": 10,
+    "unsettledMatchedJobCount": 4
+  },
+  "unsettledJobEscrows": [
+    {
+      "jobId": "0xde082633770170fbab249604d031ac90d8ee966d9e245ce133ea0ab11947429f",
+      "poster": "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519",
+      "worker": "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519",
+      "state": "Submitted",
+      "claimExpiry": "1778682156",
+      "reward": "100000",
+      "claimStake": "0",
+      "claimFee": "0",
+      "released": "0",
+      "firstEvent": {
+        "name": "JobCreated",
+        "blockNumber": 8798331,
+        "transactionHash": "0x341bbcfd87aca515570ac9cb8ce603603eee9e1f52953594c6094fbd967159e8"
+      },
+      "lastObservedEvent": {
+        "name": "Submitted",
+        "blockNumber": 8798335,
+        "transactionHash": "0xa1133398fad6aef3b373030816244e76223d04934f782312a72b0710de6625b2"
+      }
+    },
+    {
+      "jobId": "0x4024b69fed02a193e009a4ca9c6433ad962e1c5de5a7f3683795ded07b9638fa",
+      "poster": "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519",
+      "worker": "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519",
+      "state": "Submitted",
+      "claimExpiry": "1778878728",
+      "reward": "100000",
+      "claimStake": "10000",
+      "claimFee": "50000",
+      "released": "0",
+      "firstEvent": {
+        "name": "JobCreated",
+        "blockNumber": 8890635,
+        "transactionHash": "0x867683b820202c5ee95a8f79e644388af18dfd84ca4007a148232087473c74e4"
+      },
+      "lastObservedEvent": {
+        "name": "Submitted",
+        "blockNumber": 8890640,
+        "transactionHash": "0xdf0a065a70da70c4b908010cdb685fed455645d49c885f64b875b71c6b57b7cb"
+      }
+    },
+    {
+      "jobId": "0x0ef0e5bb5bb6eedb0c607e052aa11222a1f2a51a3f8e7a4b569b013f54789bf9",
+      "poster": "0x31ad432dFe083B998c69B6dB88A984ec5207ab7F",
+      "worker": "0x0000000000000000000000000000000000000000",
+      "state": "Open",
+      "claimExpiry": "0",
+      "reward": "100000",
+      "claimStake": "0",
+      "claimFee": "0",
+      "released": "0",
+      "firstEvent": {
+        "name": "JobCreated",
+        "blockNumber": 9254892,
+        "transactionHash": "0x7a23830c95205790017dc92120fc352173489995f095b57837e28824370125e5"
+      },
+      "lastObservedEvent": {
+        "name": "JobFunded",
+        "blockNumber": 9254892,
+        "transactionHash": "0x7a23830c95205790017dc92120fc352173489995f095b57837e28824370125e5"
+      }
+    },
+    {
+      "jobId": "0x98e3c985a26d50a744c82d0cd4d8368da455cc20a5ab71ea1e3cd9ae0dae196a",
+      "poster": "0x31ad432dFe083B998c69B6dB88A984ec5207ab7F",
+      "worker": "0x0000000000000000000000000000000000000000",
+      "state": "Open",
+      "claimExpiry": "0",
+      "reward": "100000",
+      "claimStake": "0",
+      "claimFee": "0",
+      "released": "0",
+      "firstEvent": {
+        "name": "JobCreated",
+        "blockNumber": 9280145,
+        "transactionHash": "0x8152cb87dd6e77aba27bbad6aacd10b71c6e9b0c0b0ca0457776070adb630f0f"
+      },
+      "lastObservedEvent": {
+        "name": "JobFunded",
+        "blockNumber": 9280145,
+        "transactionHash": "0x8152cb87dd6e77aba27bbad6aacd10b71c6e9b0c0b0ca0457776070adb630f0f"
+      }
+    }
+  ],
+  "accountingSummary": {
+    "oldAdminReservedRaw": "200001",
+    "oldAdminJobStakeLockedRaw": "60000",
+    "kmsSignerReservedRaw": "200000",
+    "totalAtRiskRaw": "460001",
+    "totalAtRiskUsdc": "0.460001",
+    "notes": [
+      "The two old-admin Submitted jobs account for 200000 base units of reserved USDC; the observed position has one additional reserved base unit of dust.",
+      "The second old-admin Submitted job accounts for 10000 base units of claim stake plus 50000 base units of claim fee locked as jobStakeLocked.",
+      "The two KMS-signer Open jobs account for 200000 base units of reserved USDC."
+    ]
+  },
+  "contractCodePaths": [
+    {
+      "file": "contracts/EscrowCore.sol",
+      "paths": [
+        "resolveSinglePayout -> AgentAccountCore.settleReservedTo/refundReserved/releaseJobStake",
+        "resolveMilestone -> AgentAccountCore.settleReservedTo/refundReserved/releaseJobStake",
+        "handleClaimTimeout -> AgentAccountCore.slashJobStake/slashClaimFee",
+        "finalizeRejectedJob -> _refundPosterBalances/_slashRejectedWorker",
+        "resolveDispute/autoResolveOnTimeout -> _resolveDispute"
+      ]
+    },
+    {
+      "file": "contracts/AgentAccountCore.sol",
+      "paths": [
+        "refundReserved is onlyOperator",
+        "settleReservedTo is onlyOperator",
+        "releaseJobStake is onlyOperator",
+        "slashJobStake is onlyOperator",
+        "slashClaimFee is onlyOperator"
+      ]
+    },
+    {
+      "file": "contracts/TreasuryPolicy.sol",
+      "paths": [
+        "setServiceOperator is onlyOwner",
+        "serviceOperators(oldEscrowCore) currently reads false"
+      ]
+    }
+  ],
+  "conclusion": {
+    "normalOldEscrowReleaseBlocked": true,
+    "reason": "The old EscrowCore still owns the only normal state-machine paths for these jobs, but TreasuryPolicy.serviceOperators(oldEscrowCore) is false. EscrowCore callbacks into AgentAccountCore value-mutation functions therefore revert at AgentAccountCore.onlyOperator.",
+    "recommendedRemediation": "accept_loss_testnet",
+    "recoveryNotAttempted": true
+  }
+}
