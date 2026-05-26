@@ -1,0 +1,573 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Averray KMS signing observability. Captures KMS API activity in CloudTrail,
+  emits CloudWatch metrics for signer calls/errors/auth failures, and alarms on
+  non-zero signing failures or baseline-defined spikes.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: testnet
+    AllowedPattern: "^[a-z0-9-]+$"
+    Description: Short environment label used in names and alarm labels.
+  MetricNamespace:
+    Type: String
+    Default: Averray/KMS
+    Description: CloudWatch namespace for KMS/auth observability metrics.
+  CloudTrailLogGroupName:
+    Type: String
+    Default: /averray/testnet/cloudtrail/kms
+    Description: Log group that receives CloudTrail KMS API activity.
+  BackendLogGroupName:
+    Type: String
+    Default: /averray/testnet/backend
+    Description: Existing backend structured-log group to filter for signer latency and auth failures.
+  BlockchainSignerKeyArn:
+    Type: String
+    AllowedPattern: "^arn:aws:kms:[a-z0-9-]+:[0-9]{12}:key/.+$"
+    Description: Full ARN for the blockchain mutation signer KMS key.
+  JwtSignerKeyArn:
+    Type: String
+    AllowedPattern: "^arn:aws:kms:[a-z0-9-]+:[0-9]{12}:key/.+$"
+    Description: Full ARN for the JWT signer KMS key.
+  BlockchainSignSpikeThresholdPer5Min:
+    Type: Number
+    MinValue: 1
+    Description: Baseline-derived blockchain kms:Sign spike threshold for a 5-minute window. Intentionally no default.
+  JwtSignSpikeThresholdPer5Min:
+    Type: Number
+    MinValue: 1
+    Description: Baseline-derived JWT kms:Sign spike threshold for a 5-minute window. Intentionally no default.
+  AuthFailureThresholdPer5Min:
+    Type: Number
+    MinValue: 1
+    Description: Baseline-derived 401/403 auth failure threshold for a 5-minute window. Intentionally no default.
+  PageTopicArn:
+    Type: String
+    Default: ""
+    Description: Optional SNS topic ARN wired to the page-on-call destination.
+  AlertTopicArn:
+    Type: String
+    Default: ""
+    Description: Optional SNS topic ARN wired to the Slack/operator alert channel.
+
+Conditions:
+  HasPageTopic: !Not [!Equals [!Ref PageTopicArn, ""]]
+  HasAlertTopic: !Not [!Equals [!Ref AlertTopicArn, ""]]
+
+Resources:
+  CloudTrailBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub averray-${EnvironmentName}-${AWS::AccountId}-${AWS::Region}-cloudtrail-kms
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireTestnetCloudTrailAfter90Days
+            Status: Enabled
+            ExpirationInDays: 90
+
+  CloudTrailBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref CloudTrailBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AWSCloudTrailAclCheck
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: s3:GetBucketAcl
+            Resource: !GetAtt CloudTrailBucket.Arn
+            Condition:
+              StringEquals:
+                aws:SourceArn: !Sub arn:${AWS::Partition}:cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/averray-${EnvironmentName}-kms-audit
+          - Sid: AWSCloudTrailWrite
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: s3:PutObject
+            Resource: !Sub ${CloudTrailBucket.Arn}/AWSLogs/${AWS::AccountId}/*
+            Condition:
+              StringEquals:
+                s3:x-amz-acl: bucket-owner-full-control
+                aws:SourceArn: !Sub arn:${AWS::Partition}:cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/averray-${EnvironmentName}-kms-audit
+
+  CloudTrailKmsLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Ref CloudTrailLogGroupName
+      RetentionInDays: 90
+
+  CloudTrailLogsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: cloudtrail-kms-log-writer
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub ${CloudTrailKmsLogGroup.Arn}:log-stream:*
+
+  KmsAuditTrail:
+    Type: AWS::CloudTrail::Trail
+    DependsOn:
+      - CloudTrailBucketPolicy
+      - CloudTrailLogsRole
+    Properties:
+      TrailName: !Sub averray-${EnvironmentName}-kms-audit
+      IsLogging: true
+      IncludeGlobalServiceEvents: false
+      IsMultiRegionTrail: false
+      EnableLogFileValidation: true
+      S3BucketName: !Ref CloudTrailBucket
+      CloudWatchLogsLogGroupArn: !GetAtt CloudTrailKmsLogGroup.Arn
+      CloudWatchLogsRoleArn: !GetAtt CloudTrailLogsRole.Arn
+      AdvancedEventSelectors:
+        - Name: KMS signer API activity
+          FieldSelectors:
+            - Field: eventCategory
+              Equals:
+                - Management
+            - Field: eventSource
+              Equals:
+                - kms.amazonaws.com
+            - Field: eventName
+              Equals:
+                - Sign
+                - GetPublicKey
+                - DescribeKey
+                - Encrypt
+                - Decrypt
+
+  BlockchainKMSSignCallCountMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref CloudTrailLogGroupName
+      FilterPattern: !Sub '{ ($.eventSource = "kms.amazonaws.com") && ($.eventName = "Sign") && ($.resources[0].ARN = "${BlockchainSignerKeyArn}") }'
+      MetricTransformations:
+        - MetricNamespace: !Ref MetricNamespace
+          MetricName: BlockchainKMSSignCallCount
+          MetricValue: "1"
+          Unit: Count
+
+  JwtKMSSignCallCountMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref CloudTrailLogGroupName
+      FilterPattern: !Sub '{ ($.eventSource = "kms.amazonaws.com") && ($.eventName = "Sign") && ($.resources[0].ARN = "${JwtSignerKeyArn}") }'
+      MetricTransformations:
+        - MetricNamespace: !Ref MetricNamespace
+          MetricName: JwtKMSSignCallCount
+          MetricValue: "1"
+          Unit: Count
+
+  BlockchainKMSSignErrorCountMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref CloudTrailLogGroupName
+      FilterPattern: !Sub '{ ($.eventSource = "kms.amazonaws.com") && ($.eventName = "Sign") && ($.resources[0].ARN = "${BlockchainSignerKeyArn}") && ($.errorCode = *) }'
+      MetricTransformations:
+        - MetricNamespace: !Ref MetricNamespace
+          MetricName: BlockchainKMSSignErrorCount
+          MetricValue: "1"
+          Unit: Count
+
+  JwtKMSSignErrorCountMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref CloudTrailLogGroupName
+      FilterPattern: !Sub '{ ($.eventSource = "kms.amazonaws.com") && ($.eventName = "Sign") && ($.resources[0].ARN = "${JwtSignerKeyArn}") && ($.errorCode = *) }'
+      MetricTransformations:
+        - MetricNamespace: !Ref MetricNamespace
+          MetricName: JwtKMSSignErrorCount
+          MetricValue: "1"
+          Unit: Count
+
+  BlockchainKMSSignErrorByCodeMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref CloudTrailLogGroupName
+      FilterPattern: !Sub '{ ($.eventSource = "kms.amazonaws.com") && ($.eventName = "Sign") && ($.resources[0].ARN = "${BlockchainSignerKeyArn}") && ($.errorCode = *) }'
+      MetricTransformations:
+        - MetricNamespace: !Ref MetricNamespace
+          MetricName: BlockchainKMSSignErrorByCodeCount
+          MetricValue: "1"
+          Unit: Count
+          Dimensions:
+            - Key: ErrorCode
+              Value: $.errorCode
+
+  JwtKMSSignErrorByCodeMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref CloudTrailLogGroupName
+      FilterPattern: !Sub '{ ($.eventSource = "kms.amazonaws.com") && ($.eventName = "Sign") && ($.resources[0].ARN = "${JwtSignerKeyArn}") && ($.errorCode = *) }'
+      MetricTransformations:
+        - MetricNamespace: !Ref MetricNamespace
+          MetricName: JwtKMSSignErrorByCodeCount
+          MetricValue: "1"
+          Unit: Count
+          Dimensions:
+            - Key: ErrorCode
+              Value: $.errorCode
+
+  BlockchainKMSGetPublicKeyCallCountMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref CloudTrailLogGroupName
+      FilterPattern: !Sub '{ ($.eventSource = "kms.amazonaws.com") && ($.eventName = "GetPublicKey") && ($.resources[0].ARN = "${BlockchainSignerKeyArn}") }'
+      MetricTransformations:
+        - MetricNamespace: !Ref MetricNamespace
+          MetricName: BlockchainKMSGetPublicKeyCallCount
+          MetricValue: "1"
+          Unit: Count
+
+  JwtKMSGetPublicKeyCallCountMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref CloudTrailLogGroupName
+      FilterPattern: !Sub '{ ($.eventSource = "kms.amazonaws.com") && ($.eventName = "GetPublicKey") && ($.resources[0].ARN = "${JwtSignerKeyArn}") }'
+      MetricTransformations:
+        - MetricNamespace: !Ref MetricNamespace
+          MetricName: JwtKMSGetPublicKeyCallCount
+          MetricValue: "1"
+          Unit: Count
+
+  BlockchainKMSAccessDeniedCountMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref CloudTrailLogGroupName
+      FilterPattern: !Sub '{ ($.eventSource = "kms.amazonaws.com") && ($.resources[0].ARN = "${BlockchainSignerKeyArn}") && (($.errorCode = "AccessDenied") || ($.errorCode = "AccessDeniedException")) }'
+      MetricTransformations:
+        - MetricNamespace: !Ref MetricNamespace
+          MetricName: BlockchainKMSAccessDeniedCount
+          MetricValue: "1"
+          Unit: Count
+
+  JwtKMSAccessDeniedCountMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref CloudTrailLogGroupName
+      FilterPattern: !Sub '{ ($.eventSource = "kms.amazonaws.com") && ($.resources[0].ARN = "${JwtSignerKeyArn}") && (($.errorCode = "AccessDenied") || ($.errorCode = "AccessDeniedException")) }'
+      MetricTransformations:
+        - MetricNamespace: !Ref MetricNamespace
+          MetricName: JwtKMSAccessDeniedCount
+          MetricValue: "1"
+          Unit: Count
+
+  BlockchainKMSSignDurationMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref BackendLogGroupName
+      FilterPattern: '{ ($.event = "kms.sign.duration") && ($.signer = "blockchain") && ($.success = true) }'
+      MetricTransformations:
+        - MetricNamespace: !Ref MetricNamespace
+          MetricName: BlockchainKMSSignDurationMs
+          MetricValue: $.durationMs
+          Unit: Milliseconds
+
+  JwtKMSSignDurationMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref BackendLogGroupName
+      FilterPattern: '{ ($.event = "kms.sign.duration") && ($.signer = "jwt") && ($.success = true) }'
+      MetricTransformations:
+        - MetricNamespace: !Ref MetricNamespace
+          MetricName: JwtKMSSignDurationMs
+          MetricValue: $.durationMs
+          Unit: Milliseconds
+
+  AuthFailureCountMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref BackendLogGroupName
+      FilterPattern: '{ ($.msg = "http.error") && (($.status = 401) || ($.status = 403)) }'
+      MetricTransformations:
+        - MetricNamespace: !Ref MetricNamespace
+          MetricName: AuthFailureCount
+          MetricValue: "1"
+          Unit: Count
+
+  AuthRefreshReplayCountMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref BackendLogGroupName
+      FilterPattern: '{ (($.msg = "http.error") && ($.code = "refresh_replay_detected")) || (($.msg = "auth_refresh.cookie_rejected") && ($.code = "refresh_replay_detected")) }'
+      MetricTransformations:
+        - MetricNamespace: !Ref MetricNamespace
+          MetricName: AuthRefreshReplayDetectedCount
+          MetricValue: "1"
+          Unit: Count
+
+  BlockchainKMSSignErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub averray-${EnvironmentName}-blockchain-kms-sign-error
+      AlarmDescription: Blockchain signer kms:Sign produced at least one CloudTrail error in 5 minutes.
+      Namespace: !Ref MetricNamespace
+      MetricName: BlockchainKMSSignErrorCount
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If
+        - HasPageTopic
+        - - !Ref PageTopicArn
+        - !Ref AWS::NoValue
+
+  JwtKMSSignErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub averray-${EnvironmentName}-jwt-kms-sign-error
+      AlarmDescription: JWT signer kms:Sign produced at least one CloudTrail error in 5 minutes.
+      Namespace: !Ref MetricNamespace
+      MetricName: JwtKMSSignErrorCount
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If
+        - HasPageTopic
+        - - !Ref PageTopicArn
+        - !Ref AWS::NoValue
+
+  BlockchainKMSAccessDeniedAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub averray-${EnvironmentName}-blockchain-kms-access-denied
+      AlarmDescription: Blockchain signer KMS access was denied; inspect IAM/Roles Anywhere/KMS policy immediately.
+      Namespace: !Ref MetricNamespace
+      MetricName: BlockchainKMSAccessDeniedCount
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If
+        - HasPageTopic
+        - - !Ref PageTopicArn
+        - !Ref AWS::NoValue
+
+  JwtKMSAccessDeniedAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub averray-${EnvironmentName}-jwt-kms-access-denied
+      AlarmDescription: JWT signer KMS access was denied; inspect IAM/Roles Anywhere/KMS policy immediately.
+      Namespace: !Ref MetricNamespace
+      MetricName: JwtKMSAccessDeniedCount
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If
+        - HasPageTopic
+        - - !Ref PageTopicArn
+        - !Ref AWS::NoValue
+
+  BlockchainKMSSignSpikeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub averray-${EnvironmentName}-blockchain-kms-sign-spike
+      AlarmDescription: Blockchain signer kms:Sign calls exceeded the baseline-derived 5-minute threshold.
+      Namespace: !Ref MetricNamespace
+      MetricName: BlockchainKMSSignCallCount
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: !Ref BlockchainSignSpikeThresholdPer5Min
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If
+        - HasAlertTopic
+        - - !Ref AlertTopicArn
+        - !Ref AWS::NoValue
+
+  JwtKMSSignSpikeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub averray-${EnvironmentName}-jwt-kms-sign-spike
+      AlarmDescription: JWT signer kms:Sign calls exceeded the baseline-derived 5-minute threshold.
+      Namespace: !Ref MetricNamespace
+      MetricName: JwtKMSSignCallCount
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: !Ref JwtSignSpikeThresholdPer5Min
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If
+        - HasAlertTopic
+        - - !Ref AlertTopicArn
+        - !Ref AWS::NoValue
+
+  AuthFailureSpikeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub averray-${EnvironmentName}-auth-failure-spike
+      AlarmDescription: Auth 401/403 responses exceeded the baseline-derived 5-minute threshold.
+      Namespace: !Ref MetricNamespace
+      MetricName: AuthFailureCount
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: !Ref AuthFailureThresholdPer5Min
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If
+        - HasAlertTopic
+        - - !Ref AlertTopicArn
+        - !Ref AWS::NoValue
+
+  AuthRefreshReplayDetectedAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub averray-${EnvironmentName}-auth-refresh-replay-detected
+      AlarmDescription: Refresh-token strict replay detection fired; treat as credential theft until disproven.
+      Namespace: !Ref MetricNamespace
+      MetricName: AuthRefreshReplayDetectedCount
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If
+        - HasPageTopic
+        - - !Ref PageTopicArn
+        - !Ref AWS::NoValue
+
+  KmsSigningDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub averray-${EnvironmentName}-kms-signing
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 0,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "title": "KMS Sign calls and errors",
+                "region": "${AWS::Region}",
+                "metrics": [
+                  [ "${MetricNamespace}", "BlockchainKMSSignCallCount", { "stat": "Sum", "label": "blockchain sign calls" } ],
+                  [ ".", "JwtKMSSignCallCount", { "stat": "Sum", "label": "jwt sign calls" } ],
+                  [ ".", "BlockchainKMSSignErrorCount", { "stat": "Sum", "label": "blockchain sign errors" } ],
+                  [ ".", "JwtKMSSignErrorCount", { "stat": "Sum", "label": "jwt sign errors" } ]
+                ],
+                "period": 300
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12,
+              "y": 0,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "title": "KMS Sign duration percentiles",
+                "region": "${AWS::Region}",
+                "metrics": [
+                  [ "${MetricNamespace}", "BlockchainKMSSignDurationMs", { "stat": "p50", "label": "blockchain p50" } ],
+                  [ ".", "BlockchainKMSSignDurationMs", { "stat": "p95", "label": "blockchain p95" } ],
+                  [ ".", "BlockchainKMSSignDurationMs", { "stat": "p99", "label": "blockchain p99" } ],
+                  [ ".", "JwtKMSSignDurationMs", { "stat": "p50", "label": "jwt p50" } ],
+                  [ ".", "JwtKMSSignDurationMs", { "stat": "p95", "label": "jwt p95" } ],
+                  [ ".", "JwtKMSSignDurationMs", { "stat": "p99", "label": "jwt p99" } ]
+                ],
+                "period": 300,
+                "yAxis": { "left": { "label": "milliseconds" } }
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 6,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "title": "KMS GetPublicKey and AccessDenied",
+                "region": "${AWS::Region}",
+                "metrics": [
+                  [ "${MetricNamespace}", "BlockchainKMSGetPublicKeyCallCount", { "stat": "Sum", "label": "blockchain GetPublicKey" } ],
+                  [ ".", "JwtKMSGetPublicKeyCallCount", { "stat": "Sum", "label": "jwt GetPublicKey" } ],
+                  [ ".", "BlockchainKMSAccessDeniedCount", { "stat": "Sum", "label": "blockchain AccessDenied" } ],
+                  [ ".", "JwtKMSAccessDeniedCount", { "stat": "Sum", "label": "jwt AccessDenied" } ]
+                ],
+                "period": 300
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12,
+              "y": 6,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "title": "Auth failures",
+                "region": "${AWS::Region}",
+                "metrics": [
+                  [ "${MetricNamespace}", "AuthFailureCount", { "stat": "Sum", "label": "401/403 failures" } ],
+                  [ ".", "AuthRefreshReplayDetectedCount", { "stat": "Sum", "label": "refresh replay detected" } ]
+                ],
+                "period": 300
+              }
+            }
+          ]
+        }
+
+Outputs:
+  TrailName:
+    Description: CloudTrail trail that captures KMS API activity.
+    Value: !Ref KmsAuditTrail
+  TrailBucketName:
+    Description: S3 bucket holding CloudTrail logs with 90-day expiration.
+    Value: !Ref CloudTrailBucket
+  TrailLogGroupName:
+    Description: CloudWatch Logs group receiving CloudTrail KMS API activity.
+    Value: !Ref CloudTrailLogGroupName
+  MetricNamespace:
+    Description: CloudWatch namespace containing KMS/auth alarm metrics.
+    Value: !Ref MetricNamespace
+  DashboardName:
+    Description: Dashboard with KMS call, error, auth failure, and p50/p95/p99 sign-duration widgets.
+    Value: !Ref KmsSigningDashboard

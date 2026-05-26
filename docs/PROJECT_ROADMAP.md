@@ -222,6 +222,7 @@ HTTP route-split closeout audit after `#526`: `mcp-server/src/protocols/http/ser
 - **Worker-loop refresh-flow** — shipped in PR #529. `ADMIN_JWT`
   30-day-manual-rotation path retained for backward compatibility; retire
   after a 30-day soak period proves the refresh path stable in CI.
+- **CloudTrail/CloudWatch KMS signing alarms** — shipped in PR #532. Adds a CloudFormation alarm foundation for blockchain/JWT KMS signing, auth failure anomalies, refresh replay detection, and structured `kms.sign.duration` logs. Close after the stack is deployed with baseline-derived thresholds and an alert-channel proof reaches the operator channel.
 
 ### Remaining
 

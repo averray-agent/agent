@@ -67,10 +67,11 @@ const ROLES = ["admin", "verifier"];
 const TTL_SECONDS = 900; // 15 min
 
 class FakeKMSClient {
-  constructor({ failNextSign = false, signWithRawKey = KMS_RAW_PRIVATE } = {}) {
+  constructor({ failNextSign = false, signWithRawKey = KMS_RAW_PRIVATE, emptySignature = false } = {}) {
     this.calls = [];
     this.failNextSign = failNextSign;
     this.signWithRawKey = signWithRawKey;
+    this.emptySignature = emptySignature;
   }
   async send(command) {
     this.calls.push(command);
@@ -94,6 +95,9 @@ class FakeKMSClient {
         const err = new Error(`AccessDeniedException: MessageType "${command.input.MessageType}" not allowed`);
         err.name = "AccessDeniedException";
         throw err;
+      }
+      if (this.emptySignature) {
+        return {};
       }
       // Sign the digest. KMS in DIGEST mode treats `Message` as a
       // pre-computed SHA-256 digest — it does NOT re-hash. Node's
@@ -132,6 +136,7 @@ function buildSigner(overrides = {}) {
     maxTtlSeconds: overrides.maxTtlSeconds ?? 3600,
     clockSkewSeconds: overrides.clockSkewSeconds ?? 60,
     now: overrides.now,
+    logger: overrides.logger,
   });
 }
 
@@ -199,6 +204,19 @@ function makeHeader(overrides = {}) {
   };
 }
 
+function collectingLogger() {
+  const records = [];
+  return {
+    records,
+    info(fields, message) {
+      records.push({ level: "info", fields, message });
+    },
+    warn(fields, message) {
+      records.push({ level: "warn", fields, message });
+    },
+  };
+}
+
 // ───────────────────────────────────────────────────────────────────
 // Tests
 // ───────────────────────────────────────────────────────────────────
@@ -218,6 +236,26 @@ test("KmsJwtSigner: sign + verify happy-path round-trip", async () => {
   assert.equal(typeof claims.exp, "number");
   assert.equal(claims.exp - claims.iat, TTL_SECONDS);
   assert.match(claims.jti, /^[0-9a-f-]{36}$/u);
+});
+
+test("KmsJwtSigner: signAsync emits a structured kms:Sign duration log", async () => {
+  const logger = collectingLogger();
+  const signer = buildSigner({ logger });
+  await signer.signAsync({}, defaultSignOpts());
+
+  const record = logger.records.find((entry) => entry.message === "kms.sign.duration");
+  assert.ok(record, "expected kms.sign.duration log record");
+  assert.equal(record.level, "info");
+  assert.equal(record.fields.event, "kms.sign.duration");
+  assert.equal(record.fields.signer, "jwt");
+  assert.equal(record.fields.operation, "kms:Sign");
+  assert.equal(record.fields.keyId, KEY_ARN);
+  assert.equal(record.fields.kid, KID);
+  assert.equal(record.fields.messageType, "DIGEST");
+  assert.equal(record.fields.signingAlgorithm, "ECDSA_SHA_256");
+  assert.equal(record.fields.success, true);
+  assert.equal(typeof record.fields.durationMs, "number");
+  assert.ok(record.fields.durationMs >= 0);
 });
 
 test("KmsJwtSigner: signAsync accepts multi-role array and emits canonical roles claim", async () => {
@@ -602,6 +640,44 @@ test("KmsJwtSigner: KMS Sign called with exactly the expected parameters", async
   assert.equal(input.MessageType, "DIGEST", "MessageType is DIGEST");
   assert.equal(input.SigningAlgorithm, "ECDSA_SHA_256", "SigningAlgorithm is ECDSA_SHA_256");
   assert.equal(input.Message.length, 32, "Message is a 32-byte SHA-256 digest");
+});
+
+test("KmsJwtSigner: failed KMS Sign emits a structured duration log", async () => {
+  const logger = collectingLogger();
+  const kms = new FakeKMSClient({ failNextSign: true });
+  const signer = buildSigner({ kmsClient: kms, logger });
+
+  await assert.rejects(
+    () => signer.signAsync({}, defaultSignOpts()),
+    /AccessDeniedException: simulated KMS Sign denied/,
+  );
+  const record = logger.records.find((entry) => entry.message === "kms.sign.duration");
+  assert.ok(record, "expected failed kms.sign.duration log record");
+  assert.equal(record.level, "warn");
+  assert.equal(record.fields.signer, "jwt");
+  assert.equal(record.fields.success, false);
+  assert.equal(record.fields.errorName, "AccessDeniedException");
+  assert.equal(record.fields.errorCode, "AccessDeniedException");
+  assert.match(record.fields.errorMessage, /simulated KMS Sign denied/);
+});
+
+test("KmsJwtSigner: empty KMS Sign response emits a failed duration log", async () => {
+  const logger = collectingLogger();
+  const kms = new FakeKMSClient({ emptySignature: true });
+  const signer = buildSigner({ kmsClient: kms, logger });
+
+  await assert.rejects(
+    () => signer.signAsync({}, defaultSignOpts()),
+    /KmsJwtSigner: KMS Sign returned empty Signature/,
+  );
+  const record = logger.records.find((entry) => entry.message === "kms.sign.duration");
+  assert.ok(record, "expected failed kms.sign.duration log record");
+  assert.equal(record.level, "warn");
+  assert.equal(record.fields.signer, "jwt");
+  assert.equal(record.fields.success, false);
+  assert.equal(record.fields.errorName, "Error");
+  assert.equal(record.fields.errorCode, "Error");
+  assert.match(record.fields.errorMessage, /empty Signature/);
 });
 
 test("KmsJwtSigner: FakeKMS denies wrong SigningAlgorithm (mirrors IAM policy)", async () => {

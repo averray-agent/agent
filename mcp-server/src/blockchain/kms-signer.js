@@ -54,11 +54,45 @@ import {
   parseSecp256k1Spki,
 } from "./spki.js";
 
+const KMS_SIGN_EVENT = "kms.sign.duration";
+
+function durationMsSince(startedAt) {
+  return Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+}
+
+function serializeKmsSignError(error) {
+  return {
+    errorName: error?.name ?? "Error",
+    errorCode: error?.code ?? error?.name ?? "unknown",
+    errorMessage: error?.message ?? String(error),
+  };
+}
+
+function emitKmsSignDuration(logger, level, fields) {
+  if (!logger) {
+    return;
+  }
+  if (logger && logger !== console && typeof logger[level] === "function") {
+    logger[level](fields, KMS_SIGN_EVENT);
+    return;
+  }
+
+  const line = JSON.stringify({
+    timestamp: new Date().toISOString(),
+    level,
+    ...fields,
+    msg: KMS_SIGN_EVENT,
+  });
+  const consoleMethod = level === "warn" ? "warn" : "info";
+  console[consoleMethod](line);
+}
+
 export class KmsSigner extends AbstractSigner {
   #kmsClient;
   #region;
   #credentialsProvider;
   #keyId;
+  #logger;
   #cachedAddress = null;
   // Promise-coalescing: if two callers race for getAddress() before
   // the first GetPublicKey response lands, share the in-flight promise
@@ -79,6 +113,7 @@ export class KmsSigner extends AbstractSigner {
    * @param {object} [options.provider]   ethers Provider; required for
    *                                      sendTransaction, optional for
    *                                      pure signing.
+   * @param {object} [options.logger]     Optional pino-style logger.
    * @param {import("@aws-sdk/types").AwsCredentialIdentityProvider} [options.credentialsProvider]
    *   Optional AWS SDK credentials provider passed to the lazy KMSClient.
    *   Wired by Phase 5a — see `mcp-server/src/services/aws-credentials.js`.
@@ -86,7 +121,7 @@ export class KmsSigner extends AbstractSigner {
    *   and falls through to the SDK's default credential chain (env vars,
    *   shared config, etc.), preserving pre-5a behavior.
    */
-  constructor({ kmsClient, region, keyId, provider, credentialsProvider }) {
+  constructor({ kmsClient, region, keyId, provider, logger, credentialsProvider }) {
     super(provider ?? null);
     if (!keyId || typeof keyId !== "string") {
       throw new Error("KmsSigner: keyId is required (KMS key id, ARN, or alias)");
@@ -98,6 +133,7 @@ export class KmsSigner extends AbstractSigner {
     this.#region = region ?? null;
     this.#credentialsProvider = credentialsProvider ?? null;
     this.#keyId = keyId;
+    this.#logger = logger ?? null;
   }
 
   async #getClient() {
@@ -159,6 +195,7 @@ export class KmsSigner extends AbstractSigner {
       region: this.#region ?? undefined,
       keyId: this.#keyId,
       provider,
+      logger: this.#logger,
       credentialsProvider: this.#credentialsProvider ?? undefined,
     });
   }
@@ -274,23 +311,61 @@ export class KmsSigner extends AbstractSigner {
 
     const { SignCommand } = await import("@aws-sdk/client-kms");
     const client = await this.#getClient();
-    const { Signature: derSig } = await client.send(
-      new SignCommand({
-        KeyId: this.#keyId,
-        Message: digestBytes,
-        // CRITICAL: DIGEST tells KMS our Message is already a digest;
-        // ECDSA_SHA_256 specifies the signing algorithm. Both are
-        // enforced as condition keys in the IAM policy
-        // (deploy/iam-policies/averray-signer-prod-role.json) so even
-        // a compromised role credential can't ask KMS to sign a raw
-        // message under a different algorithm.
-        MessageType: "DIGEST",
-        SigningAlgorithm: "ECDSA_SHA_256",
-      }),
-    );
-    if (!derSig) {
-      throw new Error("KMS Sign returned empty Signature");
+    const command = new SignCommand({
+      KeyId: this.#keyId,
+      Message: digestBytes,
+      // CRITICAL: DIGEST tells KMS our Message is already a digest;
+      // ECDSA_SHA_256 specifies the signing algorithm. Both are
+      // enforced as condition keys in the IAM policy
+      // (deploy/iam-policies/averray-signer-prod-role.json) so even
+      // a compromised role credential can't ask KMS to sign a raw
+      // message under a different algorithm.
+      MessageType: "DIGEST",
+      SigningAlgorithm: "ECDSA_SHA_256",
+    });
+    const startedAt = process.hrtime.bigint();
+    let derSig;
+    try {
+      ({ Signature: derSig } = await client.send(command));
+    } catch (error) {
+      emitKmsSignDuration(this.#logger, "warn", {
+        event: KMS_SIGN_EVENT,
+        signer: "blockchain",
+        operation: "kms:Sign",
+        keyId: this.#keyId,
+        messageType: "DIGEST",
+        signingAlgorithm: "ECDSA_SHA_256",
+        durationMs: durationMsSince(startedAt),
+        success: false,
+        ...serializeKmsSignError(error),
+      });
+      throw error;
     }
+    if (!derSig) {
+      const error = new Error("KMS Sign returned empty Signature");
+      emitKmsSignDuration(this.#logger, "warn", {
+        event: KMS_SIGN_EVENT,
+        signer: "blockchain",
+        operation: "kms:Sign",
+        keyId: this.#keyId,
+        messageType: "DIGEST",
+        signingAlgorithm: "ECDSA_SHA_256",
+        durationMs: durationMsSince(startedAt),
+        success: false,
+        ...serializeKmsSignError(error),
+      });
+      throw error;
+    }
+    emitKmsSignDuration(this.#logger, "info", {
+      event: KMS_SIGN_EVENT,
+      signer: "blockchain",
+      operation: "kms:Sign",
+      keyId: this.#keyId,
+      messageType: "DIGEST",
+      signingAlgorithm: "ECDSA_SHA_256",
+      durationMs: durationMsSince(startedAt),
+      success: true,
+    });
 
     const { r, s: rawS } = parseDerEcdsaSignature(new Uint8Array(derSig));
     const { s: normalizedS, flipped } = normalizeSignatureS(rawS);

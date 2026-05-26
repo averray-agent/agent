@@ -92,7 +92,9 @@ The minimum useful alert set is:
 1. External uptime / cron runner hitting:
    - `./scripts/ops/check-hosted-stack-and-alert.sh`
 2. Backend Sentry for 5xx exceptions
-3. Human reports from operators or counterparties
+3. CloudWatch alarms from the KMS/auth alarm stack in
+   [`deploy/iac/cloudwatch/kms-signing-alarms.yaml`](../deploy/iac/cloudwatch/kms-signing-alarms.yaml)
+4. Human reports from operators or counterparties
 
 Recommended webhook env for the smoke-alert wrapper:
 
@@ -107,7 +109,59 @@ relay that accepts JSON POSTs.
 
 ---
 
-## 4. First 15 minutes
+## 4. KMS and auth alerts
+
+The KMS/auth alarm bundle separates the blockchain mutation signer from the JWT
+signer. Treat the alarm name prefix as the first routing clue:
+
+- `blockchain-kms-*`: chain mutations, escrow, settlement, and treasury actions
+  may be unable to sign or may be signing unexpectedly often.
+- `jwt-kms-*`: SIWE, refresh, service-token issuance, and admin JWT minting may
+  be unable to issue ES256 tokens.
+- `auth-*`: the backend is seeing anomalous authentication failures or refresh
+  replay detection.
+
+### Alarm meanings
+
+| Alarm | Severity | Meaning | First move |
+|---|---|---|---|
+| `*-kms-sign-error` | P1 | `kms:Sign` returned a CloudTrail error for that signer key. | Check CloudTrail event details, backend `kms.sign.duration` failure logs, and whether the key/role/region changed. |
+| `*-kms-access-denied` | P1 | KMS rejected the caller. This usually means a broken Roles Anywhere session, revoked permission, wrong key ARN, or policy drift. | Verify the shared-config profile and role session, then compare the effective IAM/KMS policy to the last known-good deployment. |
+| `*-kms-sign-spike` | P2 unless value movement is suspicious, then P1 | Sign call volume exceeded the baseline-derived 5-minute threshold. | Compare against expected worker traffic and recent deploys; pause mutating flows if the blockchain signer spike does not match known activity. |
+| `auth-failure-spike` | P2 | 401/403 responses exceeded the baseline-derived 5-minute threshold. | Inspect `http.error` logs by `code`, especially `bad_signature`, `token_expired`, `token_revoked`, and `missing_capability`. |
+| `auth-refresh-replay-detected` | P1 | Strict refresh-token replay detection fired. Treat as credential theft until disproven. | Revoke the affected refresh chain if not already revoked, identify wallet/session, and rotate any exposed operator credential. |
+
+### First debug commands
+
+```bash
+aws cloudwatch describe-alarms \
+  --region eu-central-2 \
+  --alarm-name-prefix averray-testnet
+
+aws logs filter-log-events \
+  --region eu-central-2 \
+  --log-group-name /averray/testnet/cloudtrail/kms \
+  --filter-pattern '{ ($.eventSource = "kms.amazonaws.com") && ($.eventName = "Sign") }'
+
+aws logs filter-log-events \
+  --region eu-central-2 \
+  --log-group-name /averray/testnet/backend \
+  --filter-pattern '{ $.event = "kms.sign.duration" }'
+
+aws logs filter-log-events \
+  --region eu-central-2 \
+  --log-group-name /averray/testnet/backend \
+  --filter-pattern '{ ($.msg = "http.error") && (($.status = 401) || ($.status = 403)) }'
+```
+
+If the blockchain signer alarm coincides with unexpected value movement, pause
+first and debug second. If the JWT signer is failing, expect wallet login,
+refresh, admin minting, and service-token issuance to fail while existing valid
+tokens continue until expiry.
+
+---
+
+## 5. First 15 minutes
 
 ### If value movement looks wrong
 
@@ -140,7 +194,7 @@ relay that accepts JSON POSTs.
 
 ---
 
-## 5. Response matrix
+## 6. Response matrix
 
 | Symptom | Severity | First move | Likely owner |
 |---|---|---|---|
@@ -149,13 +203,17 @@ relay that accepts JSON POSTs.
 | `index.averray.com/ready` failing | P2 | Check indexer logs/status, roll back or widen readiness window | Primary on-call |
 | Public site/app shell failing | P2 | Check Caddy + static mounts | Primary on-call |
 | Async XCM requests stuck in `pending` | P2 | Check watcher status, inspect `/xcm/request`, and rehearse manual finalize if needed | Primary on-call |
+| Blockchain KMS signer error or access denied | P1 | Pause if value movement is suspicious; inspect CloudTrail + backend signer logs | Primary on-call + pauser |
+| JWT KMS signer error or access denied | P1 | Inspect CloudTrail + backend signer logs; expect auth issuance failures | Primary on-call |
+| KMS sign call spike | P2/P1 | Compare against expected traffic; pause mutating flows if unexplained | Primary on-call |
+| Refresh replay detected | P1 | Revoke affected chain/session, identify exposure source | Primary on-call |
 | `/content/:hash` unexpectedly 404s after Redis loss/restore | P2 | Dry-run the content recovery replay log, then apply if clean | Primary on-call |
 | Redis restore drill fails | P1 | Treat as backup failure; stop risky deploys | Primary on-call |
 | Smoke check drift only | P3 | Fix docs/config/runtime mismatch | Repo owner |
 
 ---
 
-## 6. Rollback guidance
+## 7. Rollback guidance
 
 ### Backend
 
@@ -211,7 +269,7 @@ docker compose restart caddy
 
 ---
 
-## 7. Post-incident note
+## 8. Post-incident note
 
 Every P1/P2 should leave behind a short note containing:
 
@@ -229,7 +287,7 @@ If the incident required a pause, include:
 
 ---
 
-## 8. Minimum “ready for prod” bar
+## 9. Minimum “ready for prod” bar
 
 Before calling the stack truly production-ready:
 

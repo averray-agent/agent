@@ -142,6 +142,7 @@ async function getKmsSigner(authConfig) {
     expectedRoles: authConfig.kmsJwt.expectedRoles,
     maxTtlSeconds: authConfig.kmsJwt.maxTtlSeconds,
     clockSkewSeconds: authConfig.kmsJwt.clockSkewSeconds,
+    logger: authConfig.kmsJwt.logger,
     credentialsProvider,
   });
   SIGNER_CACHE.set(authConfig.kmsJwt, signer);
