@@ -229,6 +229,71 @@ restart via the deploy workflow.
 The boot check exercises the full Roles Anywhere → KMS path. If it
 ever fails, see [§6 recovery playbooks](#6-recovery-playbooks).
 
+## Operator key handling — 1Password-only pattern
+
+This is the post-2026-05-25 rule. An admin EOA key was leaked into a session
+transcript when a sub-agent's failed `sed` redaction echoed the key to bash
+output. The replacement admin key lives at
+`op://prod-critical/admin-eoa-testnet/private key`, and operator scripts must
+not repeat the old shell pattern.
+
+The rule is simple: ops scripts read keys via `op read` inside the process, or
+through an in-process file loader when the backend's own env file is the
+explicit input. Do not pass private keys through shell variables, temp files, or
+redaction output. `mcp-server/.env.local` remains acceptable only as the
+long-lived backend/local-ops boot file it already is; it is not the preferred
+source for one-off operational scripts.
+
+Canonical script shape:
+
+- Accept `--env-file mcp-server/.env.local` when the script intentionally reads
+  the same dotenv file as the backend/local runtime. Parse with `fs.readFileSync`
+  inside Node, derive the address, print only the derived address, then keep the
+  bytes inside an `ethers.Wallet`.
+- Prefer `--signer-secret-ref 'op://vault/item/field'` for new ops scripts.
+  The script itself should run `op read <ref>` via `spawnSync` or `execSync`,
+  capture stdout in memory, validate it as a private key, and never echo it.
+  `scripts/ops/redeploy-escrowcore.mjs` is the current production example.
+- KMS-backed scripts such as `scripts/ops/fund-signer-usdc-deposit.mjs` still
+  use the AWS SDK credential chain for KMS (`KMS_KEY_ID`, `AWS_REGION`, IAM
+  credentials, or Roles Anywhere). That path signs in KMS and should not be
+  replaced by a raw EOA key.
+
+Current repo examples to copy:
+
+| Pattern | Reference |
+| --- | --- |
+| In-process dotenv key read | `scripts/ops/rotate-admin-lib.mjs`, used by `scripts/ops/rotate-admin-drain.mjs` and `scripts/ops/rotate-admin-swap-env.mjs` |
+| 1Password-direct signer secret | `scripts/ops/redeploy-escrowcore.mjs` (`--signer-secret-ref 'op://prod-critical/admin-eoa-testnet/private key'`) |
+| KMS signer, no raw private key | `scripts/ops/fund-signer-usdc-deposit.mjs --use-kms` |
+
+If older notes mention `scripts/ops/admin-topup-kms-signer.mjs`, treat that as
+historical context from the branch that introduced the pattern; that filename is
+not present on current `main`. The current-tree equivalent is the
+`rotate-admin-lib.mjs` in-process loader plus the `redeploy-escrowcore.mjs`
+1Password-direct loader.
+
+Anti-patterns to avoid:
+
+- `KEY=$(cat keyfile)` — the key can appear in process arguments, shell state,
+  debug logs, or `ps` output.
+- `sed s/=.*/=<redacted>/g` — redaction substitutions are easy to get wrong.
+  The only safe pattern is to never echo the key.
+- `PRIVATE_KEY=0x... node script.mjs` — the key lands in shell history and may
+  be visible in process listings.
+- Writing keys to temp files, even at mode `0600` — a crash between write and
+  cleanup leaves a key on disk.
+
+For `op read`-based scripts, fail closed when 1Password is not authenticated.
+The operator-facing message should be:
+
+```text
+Please run 'eval $(op signin)' first
+```
+
+Do not print the 1Password error verbatim if it might include item names or
+partial secret context. Print the instruction above, then exit non-zero.
+
 ## 5. Day-to-day duties
 
 ### 5.1 The deploy ritual

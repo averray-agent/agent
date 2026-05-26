@@ -1,7 +1,7 @@
 # Averray Unified Project Roadmap
 
-- **Status date:** 2026-05-19
-- **Baseline reviewed:** `origin/main` at `d93bf57`
+- **Status date:** 2026-05-26
+- **Baseline reviewed:** `origin/main` at `814e351`
 - **Latest docs audit:** [`DOCS_AUDIT_2026-05-19.md`](./DOCS_AUDIT_2026-05-19.md)
 - **Purpose:** one status and roadmap page for the specs, audits, launch
   checklists, security plans, and product-proof work.
@@ -154,6 +154,7 @@ externally ready.
 | --- | --- | --- |
 | Control-plane pauser | Ready for proof | `TreasuryPolicy` already scopes `pauser` to `setPaused(bool)`. `scripts/ops/run-pauser-rehearsal.mjs` now proves the live pauser can pause, cannot call owner-only functions, and reports role overlap. Read-only proof captured in `docs/evidence/pauser-rehearsal-readonly-2026-05-21.json`. Close after the live testnet evidence is recorded; mainnet must run with `--require-dedicated-pauser`. |
 | Pause/unpause rehearsal | Ready for proof | Run `PAUSER_PRIVATE_KEY=... node scripts/ops/run-pauser-rehearsal.mjs --profile testnet --live --out docs/evidence/pauser-rehearsal-testnet-YYYY-MM-DD.json`, then record the pause and unpause tx hashes in `PRODUCTION_CHECKLIST.md`. |
+| Hosted product-proof worker loop E2E (claim → submit → verify → settle) | Proofed | Worker-loop E2E proven green on testnet 2026-05-26 after layered unblock (multisig serviceOperators, KMS signer USDC funding, admin EOA rotation, EscrowCore redeploy with `claimJobFor` selector). See PR #525 for the EscrowCore redeploy that completed the loop. Audit gate green against new contracts. |
 | Postgres backup readiness | Open | `check-backup-readiness.sh --json` reports recent Postgres backup. |
 | Redis backup readiness | Open | `check-backup-readiness.sh --json` reports recent Redis backup if Redis contains non-rebuildable state. |
 | Restore drill | Open | Operator runs the disposable-target restore drill, then `node scripts/ops/check-restore-drill-evidence.mjs --file docs/evidence/restore-drill-YYYY-MM-DD.json --json` validates the sanitized evidence artifact (`#480` shipped the validator + runbook in `docs/BACKUP_RESTORE_DRILL.md`). Close after the live drill produces validated evidence with backup file names, Postgres row count, Redis `DBSIZE`, and the readiness JSON captured. |
@@ -189,6 +190,16 @@ HTTP route-split closeout audit after `#526`: `mcp-server/src/protocols/http/ser
 - Scoped service-token proof route + `Hosted Service Token Proof` workflow.
 - Refresh-cookie auth flow with strict-replay semantics (`#410` + `#417`).
 - KMS-backed verifier signer on testnet (Phase 3 KMS cutover).
+- Admin EOA rotation 2026-05-25 — drained 9.34 USDC + ~9970 PAS from
+  `0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519` to
+  `0x6778F050eAc8313e4dbB176d7BAB44510E833ac8` after in-session key leak,
+  role transitions via multisig `setPauser` + `setArbitrator(new, true)` +
+  `setArbitrator(old, false)`. PR #522.
+- Audit gate hardened with three new checks (PRs #518, #520, #521):
+  `serviceOperators[backend-signer]` presence, signer USDC liquidity vs
+  reward+stake, deployed-bytecode selector presence vs gateway-bundled ABI.
+  Catches the class of cutover misconfig that caused the 2026-05-25 worker-loop
+  debugging session pre-deploy at green/red gate time.
 - Phase 4b — KMS JWT migration, complete in prod:
   - **Stage 1** (`#430`): `JWT_BACKEND=both` — verifier accepts HS256 + ES256.
   - **Stage 2A** (`#432`): SIWE + `/auth/refresh` route through `signTokenFromConfig` (dispatcher introduced earlier in `#407` / Phase 4b.4).
