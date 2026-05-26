@@ -563,6 +563,39 @@ contract DiscoveryRegistry {
 | `EscrowCore` | New `autoResolveOnTimeout(bytes32 jobId)` — permissionless, callable after `ARBITRATOR_SLA = 14 days` from `disputedAt`. Forces full-payout-to-worker resolution with `REASON_ARBITRATOR_TIMEOUT`. | Stake never locks indefinitely. Agent-favorable default — system unavailability is the platform's failure, not the agent's. Anyone can call (typically the agent themselves, to free their stake). |
 | `EscrowCore` | Add `disputedAt` timestamp to job state and `Disputed` event (confirm if exists). | Required for SLA enforcement above. |
 
+### External output schema registration
+
+External posters can bring their own output schema only through an explicitly
+trusted registration path. Built-in job schemas remain server-side defaults.
+External schemas add four fields to the job contract metadata:
+
+- `schemaHash`: `keccak256` of the canonical JSON Schema document.
+- `schemaUrl`: HTTPS fetch hint for the schema document.
+- `schemaIssuer`: EVM address that endorsed the schema.
+- `schemaSignature`: EIP-191 signature by `schemaIssuer` over
+  `keccak256(abi.encode(schemaHash, schemaUrl, jobId))`.
+
+`TreasuryPolicy.trustedSchemaIssuers(address)` is the trust boundary. The
+owner multisig approves issuers through `setTrustedSchemaIssuer(issuer, true)`;
+`EscrowCore` rejects external schema jobs when the issuer is unset, the
+signature does not recover to `schemaIssuer`, or the issuer is not trusted.
+Built-in schemas omit all four fields and keep the existing path.
+
+The backend mirrors the same validation before broadcasting a job transaction:
+`POST /admin/jobs` accepts optional `externalSchema`, verifies the EIP-191
+signature, checks the trusted-issuer policy, fetches the schema URL, verifies
+the content hash, and stores the registration on the job definition. Runtime
+submission validation selects the registered external schema for that job and
+falls back to built-in validation only when no external schema registration is
+present. This keeps the public receipt trail honest: the schema used to judge a
+submission is the one the trusted issuer signed and the contract committed to.
+
+First-slice close criteria remain operational, not just code-level: redeploy
+the changed contracts, approve at least one schema issuer through multisig,
+post an off-platform-schema job through the hosted admin API, submit work
+against that schema, and capture hosted proof before marking the roadmap row
+Done or Proofed.
+
 ### Reason-code registry (off-chain convention)
 
 `EscrowCore.resolveDispute` accepts freeform `bytes32 reasonCode` — the contract doesn't restrict values. The platform conventions are documented and indexer-recognized:
@@ -1084,6 +1117,18 @@ Stripe Link's launch and Stripe Sessions 2026 announcements positioned agents as
 
 For traceability.
 
+### v2.13 (external schema registration first slice)
+
+1. **§8** Added the external output schema registration flow. External schemas
+   are optional job metadata, signed by an EVM issuer over
+   `keccak256(abi.encode(schemaHash, schemaUrl, jobId))`, approved through
+   `TreasuryPolicy.trustedSchemaIssuers`, stored with the job contract
+   metadata, and re-used by runtime submission validation.
+2. **Operator gate preserved:** the spec now states that the code slice is not
+   enough to mark the roadmap row Done or Proofed. Contract redeploy, multisig
+   `setTrustedSchemaIssuer`, hosted admin-job creation, hosted submission
+   validation, and proof capture are still required.
+
 ### v2.12 (spec-consolidation pass)
 
 1. **v2.5 Phase 1 storage discipline restored into the consolidated spec:** the uploaded v2.5 working spec carried an important three-layer content-storage model that was not present in the current consolidated `AVERRAY_WORKING_SPEC.md`. This pass ports the durable parts into §8 while preserving the newer v2.10 blockchain audit corrections and v2.11 documentation-governance authority.
@@ -1329,4 +1374,4 @@ External verification work resolved every ⏳ item in `AVERRAY_VERIFICATION_LEDG
 
 ---
 
-*Last updated: 2026-05-24*
+*Last updated: 2026-05-26*

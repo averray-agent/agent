@@ -15,10 +15,12 @@ import { hashSubmission, isStructuredSubmission, normalizeSubmission } from "./s
 import {
   getBuiltinJobSchema,
   getJobSchema,
+  getRegisteredJobSchemaRegistration,
   isRegisteredJobSchemaRef,
   validateAgainstSchema,
   validateStructuredSubmission
 } from "./job-schema-registry.js";
+import { validateSubmissionAgainstRegisteredSchema } from "../services/schema-registry.js";
 import {
   buildFundedJobFromClaim,
   parseGithubPullRequestUrl,
@@ -251,10 +253,10 @@ export class JobExecutionService {
     const submission = normalizeSubmission(normalizeSubmitPayloadShape(job.outputSchemaRef, submissionInput, {
       registrations: job.schemaRegistrations
     }));
-    validateSubmissionContract(job.outputSchemaRef, submission, { registrations: job.schemaRegistrations });
+    await validateJobSubmissionAgainstSchema(job, submission);
     await this.enforceMaintainerOpenPrCap(job, submission);
     const guardedSubmission = this.applyMaintainerSubmissionGuards(job, refreshed, submission);
-    validateSubmissionContract(job.outputSchemaRef, guardedSubmission, { registrations: job.schemaRegistrations });
+    await validateJobSubmissionAgainstSchema(job, guardedSubmission);
     if (this.blockchainGateway?.isEnabled()) {
       await this.blockchainGateway.submitWork(session.chainJobId ?? session.jobId, hashSubmission(guardedSubmission));
     }
@@ -606,6 +608,18 @@ export function validateSubmissionContract(schemaRef, submission, { path = "subm
 
   validateStructuredSubmission(schemaRef, submission.structured, { path, registrations });
   return submission;
+}
+
+async function validateJobSubmissionAgainstSchema(job, submission) {
+  const registration = getRegisteredJobSchemaRegistration(job?.outputSchemaRef, job?.schemaRegistrations);
+  if (registration?.registrationVersion === "external-job-schema-eip191-v1") {
+    await validateSubmissionAgainstRegisteredSchema(submission, job.id, {
+      schemaRef: job.outputSchemaRef,
+      registrations: job.schemaRegistrations
+    });
+    return;
+  }
+  validateSubmissionContract(job.outputSchemaRef, submission, { registrations: job.schemaRegistrations });
 }
 
 function tryValidateAgainstSchema(value, schema, path) {

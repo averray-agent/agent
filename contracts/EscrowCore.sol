@@ -61,6 +61,13 @@ contract EscrowCore is ReentrancyGuard {
         JobState state;
     }
 
+    struct ExternalSchemaRegistration {
+        bytes32 schemaHash;
+        string schemaUrl;
+        address schemaIssuer;
+        bytes schemaSignature;
+    }
+
     struct RecurringSinglePayoutJob {
         bytes32 jobId;
         bytes32 templateId;
@@ -73,9 +80,14 @@ contract EscrowCore is ReentrancyGuard {
         bytes32 verifierMode;
         bytes32 category;
         bytes32 specHash;
+        bytes32 schemaHash;
+        string schemaUrl;
+        address schemaIssuer;
+        bytes schemaSignature;
     }
 
     mapping(bytes32 => JobEscrow) internal _jobs;
+    mapping(bytes32 => ExternalSchemaRegistration) public jobExternalSchemas;
     mapping(address => uint256) public workerClaimCount;
     mapping(bytes32 => uint256[]) public milestoneAmounts;
     mapping(bytes32 => mapping(uint256 => bool)) public milestoneReleased;
@@ -98,6 +110,9 @@ contract EscrowCore is ReentrancyGuard {
         address asset,
         uint256 totalReserved,
         PayoutMode payoutMode
+    );
+    event ExternalSchemaRegistered(
+        bytes32 indexed jobId, bytes32 indexed schemaHash, address indexed schemaIssuer, string schemaUrl
     );
     event RecurringJobFundedFromTemplate(
         bytes32 indexed jobId, bytes32 indexed templateId, address indexed poster, address asset, uint256 totalReserved
@@ -135,6 +150,8 @@ contract EscrowCore is ReentrancyGuard {
     error ProtocolPaused();
     error MilestoneLimitExceeded();
     error AlreadyAutoDisclosed();
+    error InvalidSchemaSignature();
+    error UnauthorizedSchemaIssuer(address issuer);
 
     constructor(TreasuryPolicy policy_, AgentAccountCore accounts_, ReputationSBT reputation_) {
         policy = policy_;
@@ -143,30 +160,27 @@ contract EscrowCore is ReentrancyGuard {
     }
 
     modifier onlyVerifier() {
-        if (!policy.verifiers(msg.sender)) revert Unauthorized();
+        _onlyVerifier();
         _;
     }
 
     modifier onlyDisclosurePublisher() {
-        if (msg.sender != policy.owner() && !policy.serviceOperators(msg.sender) && !policy.verifiers(msg.sender)) {
-            revert Unauthorized();
-        }
+        _onlyDisclosurePublisher();
         _;
     }
 
     modifier onlyArbitrator() {
-        if (!policy.arbitrators(msg.sender)) revert Unauthorized();
+        _onlyArbitrator();
         _;
     }
 
     modifier onlyOperator() {
-        if (!policy.serviceOperators(msg.sender)) revert Unauthorized();
+        _onlyOperator();
         _;
     }
 
     modifier onlyParticipant(bytes32 jobId) {
-        JobEscrow memory job = _jobs[jobId];
-        if (msg.sender != job.poster && msg.sender != job.worker) revert Unauthorized();
+        _onlyParticipant(jobId);
         _;
     }
 
@@ -177,8 +191,35 @@ contract EscrowCore is ReentrancyGuard {
     ///      the escrow state machine fail fast with a clearer error instead
     ///      of bubbling an opaque ProtocolPaused from a nested call.
     modifier whenNotPaused() {
-        if (policy.paused()) revert ProtocolPaused();
+        _whenNotPaused();
         _;
+    }
+
+    function _onlyVerifier() internal view {
+        if (!policy.verifiers(msg.sender)) revert Unauthorized();
+    }
+
+    function _onlyDisclosurePublisher() internal view {
+        if (msg.sender != policy.owner() && !policy.serviceOperators(msg.sender) && !policy.verifiers(msg.sender)) {
+            revert Unauthorized();
+        }
+    }
+
+    function _onlyArbitrator() internal view {
+        if (!policy.arbitrators(msg.sender)) revert Unauthorized();
+    }
+
+    function _onlyOperator() internal view {
+        if (!policy.serviceOperators(msg.sender)) revert Unauthorized();
+    }
+
+    function _onlyParticipant(bytes32 jobId) internal view {
+        JobEscrow memory job = _jobs[jobId];
+        if (msg.sender != job.poster && msg.sender != job.worker) revert Unauthorized();
+    }
+
+    function _whenNotPaused() internal view {
+        if (policy.paused()) revert ProtocolPaused();
     }
 
     function jobs(bytes32 jobId) external view returns (JobEscrow memory) {
@@ -213,7 +254,61 @@ contract EscrowCore is ReentrancyGuard {
         bytes32 category,
         bytes32 specHash
     ) external whenNotPaused nonReentrant {
+        ExternalSchemaRegistration memory emptySchema;
+        _createSinglePayoutJob(
+            jobId,
+            asset,
+            reward,
+            opsReserve,
+            contingencyReserve,
+            claimTtl,
+            verifierMode,
+            category,
+            specHash,
+            emptySchema
+        );
+    }
+
+    function createSinglePayoutJob(
+        bytes32 jobId,
+        address asset,
+        uint256 reward,
+        uint256 opsReserve,
+        uint256 contingencyReserve,
+        uint256 claimTtl,
+        bytes32 verifierMode,
+        bytes32 category,
+        bytes32 specHash,
+        ExternalSchemaRegistration calldata externalSchema
+    ) external whenNotPaused nonReentrant {
+        _createSinglePayoutJob(
+            jobId,
+            asset,
+            reward,
+            opsReserve,
+            contingencyReserve,
+            claimTtl,
+            verifierMode,
+            category,
+            specHash,
+            externalSchema
+        );
+    }
+
+    function _createSinglePayoutJob(
+        bytes32 jobId,
+        address asset,
+        uint256 reward,
+        uint256 opsReserve,
+        uint256 contingencyReserve,
+        uint256 claimTtl,
+        bytes32 verifierMode,
+        bytes32 category,
+        bytes32 specHash,
+        ExternalSchemaRegistration memory externalSchema
+    ) internal {
         if (_jobs[jobId].state != JobState.None) revert InvalidState();
+        _validateAndStoreExternalSchema(jobId, externalSchema);
         _jobs[jobId] = JobEscrow({
             poster: msg.sender,
             worker: address(0),
@@ -253,6 +348,7 @@ contract EscrowCore is ReentrancyGuard {
     {
         if (_jobs[params.jobId].state != JobState.None) revert InvalidState();
         if (params.poster == address(0)) revert Unauthorized();
+        _validateAndStoreExternalSchema(params.jobId, _externalSchemaFromRecurring(params));
         JobEscrow storage job = _jobs[params.jobId];
         job.poster = params.poster;
         job.worker = address(0);
@@ -585,6 +681,80 @@ contract EscrowCore is ReentrancyGuard {
         if (workerPayout > 0) {
             reputation.mintBadge(job.worker, job.category, 1, metadataURI);
         }
+    }
+
+    function _externalSchemaFromRecurring(RecurringSinglePayoutJob calldata params)
+        internal
+        pure
+        returns (ExternalSchemaRegistration memory)
+    {
+        return ExternalSchemaRegistration({
+            schemaHash: params.schemaHash,
+            schemaUrl: params.schemaUrl,
+            schemaIssuer: params.schemaIssuer,
+            schemaSignature: params.schemaSignature
+        });
+    }
+
+    function _validateAndStoreExternalSchema(bytes32 jobId, ExternalSchemaRegistration memory externalSchema) internal {
+        bool hasHash = externalSchema.schemaHash != bytes32(0);
+        bool hasUrl = bytes(externalSchema.schemaUrl).length > 0;
+        bool hasIssuer = externalSchema.schemaIssuer != address(0);
+        bool hasSignature = externalSchema.schemaSignature.length > 0;
+        if (!hasHash && !hasUrl && !hasIssuer && !hasSignature) {
+            return;
+        }
+        if (!hasHash || !hasUrl || !hasIssuer || !hasSignature) {
+            revert InvalidSchemaSignature();
+        }
+
+        address recovered = _recoverExternalSchemaSigner(
+            _externalSchemaSigningHash(externalSchema.schemaHash, externalSchema.schemaUrl, jobId),
+            externalSchema.schemaSignature
+        );
+        if (recovered != externalSchema.schemaIssuer) revert InvalidSchemaSignature();
+        if (!policy.trustedSchemaIssuers(externalSchema.schemaIssuer)) {
+            revert UnauthorizedSchemaIssuer(externalSchema.schemaIssuer);
+        }
+
+        jobExternalSchemas[jobId] = externalSchema;
+        emit ExternalSchemaRegistered(
+            jobId, externalSchema.schemaHash, externalSchema.schemaIssuer, externalSchema.schemaUrl
+        );
+    }
+
+    function _externalSchemaSigningHash(bytes32 schemaHash, string memory schemaUrl, bytes32 jobId)
+        internal
+        pure
+        returns (bytes32)
+    {
+        bytes32 digest = keccak256(abi.encode(schemaHash, schemaUrl, jobId));
+        return keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", digest));
+    }
+
+    function _recoverExternalSchemaSigner(bytes32 ethSignedHash, bytes memory signature)
+        internal
+        pure
+        returns (address)
+    {
+        if (signature.length != 65) revert InvalidSchemaSignature();
+
+        bytes32 r;
+        bytes32 s;
+        uint8 v;
+        assembly {
+            r := mload(add(signature, 32))
+            s := mload(add(signature, 64))
+            v := byte(0, mload(add(signature, 96)))
+        }
+        if (v < 27) {
+            v += 27;
+        }
+        if (v != 27 && v != 28) revert InvalidSchemaSignature();
+
+        address signer = ecrecover(ethSignedHash, v, r, s);
+        if (signer == address(0)) revert InvalidSchemaSignature();
+        return signer;
     }
 
     function _computeClaimEconomics(address worker, JobEscrow storage job)

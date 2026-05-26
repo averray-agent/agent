@@ -10,7 +10,7 @@ import { VerificationIngestionService } from "../services/verification-ingestion
 import { ConflictError, InsufficientLiquidityError, ValidationError } from "./errors.js";
 import { normalizeSubmission } from "./submission.js";
 import { buildPlatformCapabilities } from "./discovery-manifest.js";
-import { getBuiltinJobSchema, getJobSchema } from "./job-schema-registry.js";
+import { getBuiltinJobSchema, getJobSchema, getRegisteredJobSchemaRegistration } from "./job-schema-registry.js";
 import {
   buildSessionLifecycle,
   describeSessionStatus,
@@ -22,6 +22,7 @@ import { capabilityMatrix } from "../auth/capabilities.js";
 import { knownAssetMinBalanceRaw, normalizeAssetSymbol } from "./assets.js";
 import { collectGithubOperatorStatus } from "./github-operator-helper.js";
 import { collectHostDiagnostics } from "./host-diagnostics.js";
+import { registerExternalSchema, validateSubmissionAgainstRegisteredSchema } from "../services/schema-registry.js";
 
 const TIMELINE_VERSION = "v2";
 
@@ -195,7 +196,8 @@ export class PlatformService {
   }
 
   async createAdminJob(input, { posterWallet = undefined } = {}) {
-    const created = this.createJob(input);
+    const jobInput = await this.withRegisteredExternalSchema(input);
+    const created = this.createJob(jobInput);
     try {
       await this.reserveRecurringTemplateFunding(created, posterWallet);
       return created;
@@ -203,6 +205,45 @@ export class PlatformService {
       this.jobCatalogService.removeJob(created.id);
       throw error;
     }
+  }
+
+  async withRegisteredExternalSchema(input = {}) {
+    if (!input?.externalSchema) {
+      return input;
+    }
+    const outputSchemaRef = String(input.outputSchemaRef ?? `schema://jobs/${input.category}-output`).trim();
+    const existingTrustPolicy = input.schemaTrustPolicy && typeof input.schemaTrustPolicy === "object"
+      ? input.schemaTrustPolicy
+      : {};
+    const trustedIssuers = Array.isArray(existingTrustPolicy.trustedIssuers)
+      ? existingTrustPolicy.trustedIssuers
+      : [];
+    const external = input.externalSchema;
+    const registration = await registerExternalSchema({
+      schemaHash: external.schemaHash,
+      schemaUrl: external.schemaUrl,
+      schemaIssuer: external.schemaIssuer,
+      signature: external.signature ?? external.schemaSignature,
+      jobId: input.id,
+      schemaRef: outputSchemaRef,
+      trustedIssuers,
+      isTrustedIssuer: this.blockchainGateway?.isEnabled?.() && this.blockchainGateway?.isTrustedSchemaIssuer
+        ? (issuer) => this.blockchainGateway.isTrustedSchemaIssuer(issuer)
+        : undefined
+    });
+
+    return {
+      ...input,
+      outputSchemaRef,
+      schemaTrustPolicy: {
+        ...existingTrustPolicy,
+        trustedIssuers: [...new Set([...trustedIssuers, registration.schemaIssuer])]
+      },
+      schemaRegistrations: [
+        ...(Array.isArray(input.schemaRegistrations) ? input.schemaRegistrations : []),
+        registration
+      ]
+    };
   }
 
   updateJobLifecycle(jobId, patch = {}) {
@@ -541,14 +582,22 @@ export class PlatformService {
     );
   }
 
-  validateJobSubmission(jobId, submissionInput) {
+  async validateJobSubmission(jobId, submissionInput) {
     const job = this.getJobDefinition(jobId);
     const contract = buildSubmissionValidationContract(job);
     try {
       const normalized = normalizeSubmission(normalizeSubmitPayloadShape(job.outputSchemaRef, submissionInput, {
         registrations: job.schemaRegistrations
       }));
-      validateSubmissionContract(job.outputSchemaRef, normalized, { registrations: job.schemaRegistrations });
+      const registration = getRegisteredJobSchemaRegistration(job.outputSchemaRef, job.schemaRegistrations);
+      if (registration?.registrationVersion === "external-job-schema-eip191-v1") {
+        await validateSubmissionAgainstRegisteredSchema(normalized, job.id, {
+          schemaRef: job.outputSchemaRef,
+          registrations: job.schemaRegistrations
+        });
+      } else {
+        validateSubmissionContract(job.outputSchemaRef, normalized, { registrations: job.schemaRegistrations });
+      }
       return {
         jobId,
         valid: true,

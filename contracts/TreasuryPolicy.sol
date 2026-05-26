@@ -30,6 +30,7 @@ contract TreasuryPolicy {
     mapping(address => bool) public approvedAssets;
     mapping(address => bool) public approvedStrategies;
     mapping(address => bool) public serviceOperators;
+    mapping(address => bool) public trustedSchemaIssuers;
     mapping(address => bool) public verifiers;
     mapping(address => uint64) public authorizedSince;
     mapping(address => uint64) public authorizedUntil;
@@ -46,6 +47,7 @@ contract TreasuryPolicy {
     event AssetApprovalUpdated(address indexed asset, bool approved);
     event StrategyApprovalUpdated(address indexed strategy, bool approved);
     event ServiceOperatorUpdated(address indexed operator, bool approved);
+    event TrustedSchemaIssuerSet(address indexed issuer, bool approved);
     event VerifierUpdated(address indexed verifier, bool approved);
     event ArbitratorUpdated(address indexed arbitrator, bool approved);
     event DailyOutflowCapUpdated(uint256 newCap);
@@ -128,6 +130,11 @@ contract TreasuryPolicy {
     function setServiceOperator(address operator, bool approved) external onlyOwner {
         serviceOperators[operator] = approved;
         emit ServiceOperatorUpdated(operator, approved);
+    }
+
+    function setTrustedSchemaIssuer(address issuer, bool approved) external onlyOwner {
+        trustedSchemaIssuers[issuer] = approved;
+        emit TrustedSchemaIssuerSet(issuer, approved);
     }
 
     function setVerifier(address verifier, bool approved) external onlyOwner {

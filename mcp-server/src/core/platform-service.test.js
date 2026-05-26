@@ -1,9 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { Wallet, getBytes, id } from "ethers";
 
 import { PlatformService } from "./platform-service.js";
 import { EventBus } from "./event-bus.js";
 import { MemoryStateStore } from "./state-store.js";
+import {
+  buildExternalSchemaRegistrationDigest,
+  hashExternalSchemaContent
+} from "./job-schema-registry.js";
 
 const WALLET = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const CANONICAL_USDC_ASSET = {
@@ -13,6 +18,19 @@ const CANONICAL_USDC_ASSET = {
   decimals: 6,
   address: "0x0000053900000000000000000000000001200000",
   minBalanceRaw: "70000"
+};
+const EXTERNAL_SCHEMA_SIGNER = new Wallet("0x8b3a350cf5c34c9194ca3a545d0ec67d61f328d6e5d11dd95b9af16e70ec4c63");
+const EXTERNAL_SCHEMA_REF = "schema://jobs/off-platform-output";
+const EXTERNAL_SCHEMA_URL = "https://schemas.example.com/jobs/off-platform-output.json";
+const EXTERNAL_SCHEMA = {
+  $id: EXTERNAL_SCHEMA_REF,
+  type: "object",
+  additionalProperties: false,
+  required: ["summary", "result"],
+  properties: {
+    summary: { type: "string", minLength: 1 },
+    result: { type: "string", enum: ["pass", "fail"] }
+  }
 };
 
 function makePlatformService(blockchainGateway = undefined, eventBus = undefined, stateStore = undefined) {
@@ -128,6 +146,83 @@ test("createAdminJob reserves finite recurring template funding from the poster 
   assert.equal(derivative.funding.source, "recurring_template_reserve");
   assert.equal(derivative.funding.wallet, WALLET);
   assert.equal(derivative.funding.amount, 5);
+});
+
+test("external-schema admin job posts, claims, and validates against off-platform schema", async () => {
+  const schemaHash = hashExternalSchemaContent(EXTERNAL_SCHEMA);
+  const jobId = "off-platform-schema-job-001";
+  const signature = await EXTERNAL_SCHEMA_SIGNER.signMessage(getBytes(buildExternalSchemaRegistrationDigest({
+    schemaHash,
+    schemaUrl: EXTERNAL_SCHEMA_URL,
+    jobId: id(jobId)
+  })));
+  const calls = [];
+  let liveState = 0;
+  const gateway = {
+    isEnabled: () => true,
+    toJobId: (value) => id(value),
+    getDefaultClaimStakeBps: async () => 500,
+    getClaimEconomicsConfig: async () => ({}),
+    isTrustedSchemaIssuer: async (issuer) => issuer === EXTERNAL_SCHEMA_SIGNER.address,
+    getJob: async () => ({ state: liveState }),
+    ensureJob: async (job, instanceJobId) => {
+      calls.push(["ensureJob", { job, instanceJobId }]);
+    },
+    ensureClaimStakeLiquidity: async () => {},
+    claimJob: async () => {
+      liveState = 1;
+      calls.push(["claimJob"]);
+    },
+    submitWork: async (_jobId, evidenceHash) => {
+      calls.push(["submitWork", evidenceHash]);
+    }
+  };
+  const service = makePlatformService(gateway, undefined, new MemoryStateStore());
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    async json() {
+      return EXTERNAL_SCHEMA;
+    }
+  });
+  try {
+    const job = await service.createAdminJob({
+      id: jobId,
+      category: "off-platform",
+      tier: "starter",
+      rewardAmount: 1,
+      rewardAsset: "DOT",
+      verifierMode: "benchmark",
+      verifierTerms: ["summary"],
+      verifierMinimumMatches: 1,
+      inputSchemaRef: "schema://jobs/coding-input",
+      outputSchemaRef: EXTERNAL_SCHEMA_REF,
+      claimTtlSeconds: 3600,
+      retryLimit: 1,
+      externalSchema: {
+        schemaHash,
+        schemaUrl: EXTERNAL_SCHEMA_URL,
+        schemaIssuer: EXTERNAL_SCHEMA_SIGNER.address,
+        signature
+      }
+    }, { posterWallet: WALLET });
+
+    assert.equal(job.schemaRegistrations[0].schemaIssuer, EXTERNAL_SCHEMA_SIGNER.address);
+    assert.equal(job.schemaRegistrations[0].schemaHash, schemaHash);
+    const claimed = await service.claimJob(WALLET, jobId, "http", "external-schema-claim");
+    const submitted = await service.submitWork(claimed.sessionId, "http", {
+      summary: "External schema was honored.",
+      result: "pass"
+    });
+
+    assert.equal(submitted.outputSchemaRegistered, true);
+    assert.equal(submitted.submission.structured.result, "pass");
+    assert.equal(calls.find(([name]) => name === "ensureJob")?.[1].job.schemaRegistrations[0].schemaHash, schemaHash);
+    assert.ok(calls.some(([name]) => name === "submitWork"));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("createJob allows USDC rewards at or above asset minBalance", () => {
@@ -446,10 +541,10 @@ test("getAccountPosition delegates to blockchain gateway for chain-authoritative
   assert.equal(position.source.contract, "AgentAccountCore");
 });
 
-test("validateJobSubmission gives a non-mutating schema-native verdict", () => {
+test("validateJobSubmission gives a non-mutating schema-native verdict", async () => {
   const service = makePlatformService();
 
-  const valid = service.validateJobSubmission("parent-job-001", {
+  const valid = await service.validateJobSubmission("parent-job-001", {
     summary: "Parser fixed.",
     output: "Added regression coverage.",
     status: "complete"
@@ -462,7 +557,7 @@ test("validateJobSubmission gives a non-mutating schema-native verdict", () => {
   assert.deepEqual(valid.requiredTopLevelKeys, ["summary", "output", "status"]);
   assert.equal(valid.submissionKind, "structured");
 
-  const invalid = service.validateJobSubmission("parent-job-001", "complete");
+  const invalid = await service.validateJobSubmission("parent-job-001", "complete");
   assert.equal(invalid.valid, false);
   assert.equal(invalid.submitSafe, false);
   assert.equal(invalid.schemaRef, "schema://jobs/coding-output");

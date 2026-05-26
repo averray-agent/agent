@@ -154,7 +154,11 @@ contract AgentPlatformTest is Test {
                 claimTtl: 1 days,
                 verifierMode: bytes32("AUTO"),
                 category: bytes32("CODING"),
-                specHash: SPEC_HASH
+                specHash: SPEC_HASH,
+                schemaHash: bytes32(0),
+                schemaUrl: "",
+                schemaIssuer: address(0),
+                schemaSignature: hex""
             })
         );
 

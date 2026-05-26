@@ -197,6 +197,29 @@ test("POST /admin/jobs creates an admin job and stores idempotent receipt", asyn
   });
 });
 
+test("POST /admin/jobs forwards external schema registration metadata", async () => {
+  const externalSchema = {
+    schemaHash: "0x8d9f6cc5431d6f2f8ddf397c7f6c96941a9df9f733c12b94be2f6a72e1f2f3d2",
+    schemaUrl: "https://schemas.example.com/agent-output.json",
+    schemaIssuer: "0x1111111111111111111111111111111111111111",
+    signature: "0xabcdef"
+  };
+  const { calls, response, route } = makeHarness({
+    payload: { id: "job-1", title: "External schema job", externalSchema, idempotencyKey: "idem-1" }
+  });
+
+  const handled = await route({
+    request: { method: "POST" },
+    response,
+    url: new URL("http://localhost/admin/jobs"),
+    pathname: "/admin/jobs",
+  });
+
+  assert.equal(handled, true);
+  assert.equal(response.statusCode, 201);
+  assert.deepEqual(calls.find(([name]) => name === "createAdminJob")?.[1].body.externalSchema, externalSchema);
+});
+
 test("POST /admin/jobs returns idempotent replay without creating another job", async () => {
   const replay = { statusCode: 200, body: { id: "job-1", replay: true } };
   const { calls, response, route } = makeHarness({ replay });
