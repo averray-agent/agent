@@ -1,26 +1,31 @@
 "use client";
 
-// Hermes Handoff Monitor — board page (M4)
+// Hermes Handoff Monitor — board page (M5)
 //
-// Live-data wired. Reads from /api/monitor/board (SWR) + receives
-// per-card mutations via /api/monitor/stream (SSE). The page no
-// longer imports fixtures directly — the backend's monitor-service
-// is the source of truth; for M4 that service is seeded from the
-// SAME fixture set the frontend used to ship, so visually
-// nothing changes vs. M3.
+// Drawer wiring lands. Clicking a card sets `?card=<id>` on the
+// URL; the page reads the param and mounts <DetailDrawer/> when
+// present. Esc closes (drops the param), scrim click closes,
+// the drawer's own close button closes. j/k inside the drawer
+// traverse cards in the same visible order the board renders.
 //
-// What changed from M3:
-//   - useMonitorBoard() replaces the static FIXTURE_CARDS import
-//   - LIVE indicator reflects real SSE stream status
-//   - localStorage snapshots written on every refresh (per §21
-//     decision #4 of the spec)
-//   - The TopStrip's "Refresh" button now actually refreshes
+// What changed from M4:
+//   - URL-param routing via Next.js useSearchParams + useRouter
+//   - CardRouter onClick wires to setFocusedCard
+//   - DetailDrawer mounts when ?card= is set
+//   - j/k traversal scoped to the drawer when open; M9 wires the
+//     board-level j/k
 //
-// Still M3-level for the click path (drawer is M5).
+// Still M5-level for keyboard nav across the board itself (M9).
 
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
+import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { deriveBoardState } from "@/lib/monitor/board-state.js";
 import type { BoardCard } from "@/lib/monitor/card-types.js";
+import {
+  decodeCardParam,
+  encodeCardParam,
+  traverseDrawerCard,
+} from "@/lib/monitor/drawer-routing.js";
 import { useMonitorBoard } from "@/lib/api/hooks/useMonitorBoard";
 import { TopStrip } from "@/components/monitor/TopStrip";
 import { BoardNowBanner } from "@/components/monitor/BoardNowBanner";
@@ -32,14 +37,15 @@ import {
   CALM_EXPANDED,
 } from "@/components/monitor/Board";
 import { CardRouter } from "@/components/monitor/cards/CardRouter";
+import { DetailDrawer } from "@/components/monitor/drawer/DetailDrawer";
 
 export default function MonitorPage() {
   const { data, isLoading, streamStatus, refresh } = useMonitorBoard();
+  const router = useRouter();
+  const pathname = usePathname() ?? "/monitor";
+  const searchParams = useSearchParams();
 
-  const cards: BoardCard[] = useMemo(
-    () => data?.cards ?? [],
-    [data]
-  );
+  const cards: BoardCard[] = useMemo(() => data?.cards ?? [], [data]);
   const nowLabel = useMemo(() => buildNowLabel(data?.at), [data?.at]);
 
   const state = useMemo(
@@ -51,7 +57,47 @@ export default function MonitorPage() {
     [cards, nowLabel, streamStatus]
   );
 
-  // Expansion preset follows the derived mode.
+  // Focused card id from the URL param. Resolve to the actual
+  // BoardCard object; if the param points at an id we no longer
+  // have (archived between paint cycles), drop the focus.
+  const focusedCardId = decodeCardParam(searchParams?.get("card"));
+  const focusedCard = useMemo(
+    () =>
+      focusedCardId
+        ? cards.find((c) => c.id === focusedCardId)
+        : undefined,
+    [cards, focusedCardId]
+  );
+
+  const setFocusedCard = useCallback(
+    (id: string | null) => {
+      const next = new URLSearchParams(searchParams?.toString() ?? "");
+      if (id) {
+        const encoded = encodeCardParam(id);
+        if (encoded) next.set("card", id);
+      } else {
+        next.delete("card");
+      }
+      const query = next.toString();
+      router.replace(query ? `${pathname}?${query}` : pathname);
+    },
+    [router, pathname, searchParams]
+  );
+
+  const onCardClick = useCallback(
+    (card: BoardCard) => setFocusedCard(card.id),
+    [setFocusedCard]
+  );
+  const onCloseDrawer = useCallback(() => setFocusedCard(null), [setFocusedCard]);
+  const onDrawerNext = useCallback(() => {
+    const nextId = traverseDrawerCard(cards, focusedCardId, "next");
+    if (nextId && nextId !== focusedCardId) setFocusedCard(nextId);
+  }, [cards, focusedCardId, setFocusedCard]);
+  const onDrawerPrev = useCallback(() => {
+    const prevId = traverseDrawerCard(cards, focusedCardId, "prev");
+    if (prevId && prevId !== focusedCardId) setFocusedCard(prevId);
+  }, [cards, focusedCardId, setFocusedCard]);
+
   const initialExpanded =
     state.mode === "action"
       ? ACTION_EXPANDED
@@ -68,7 +114,7 @@ export default function MonitorPage() {
         onRefresh={() => {
           refresh().catch(() => {
             // Errors surface via the SWR `error` field; the manual
-            // refresh button doesn't need its own toast for M4.
+            // refresh button doesn't need its own toast for M5.
           });
         }}
       />
@@ -87,18 +133,22 @@ export default function MonitorPage() {
               grouped={state.grouped}
               initialExpanded={initialExpanded}
               renderCard={(card) => (
-                <CardRouter
-                  key={card.id}
-                  card={card}
-                  // M5 wires the actual drawer.
-                  onClick={() => undefined}
-                />
+                <CardRouter key={card.id} card={card} onClick={onCardClick} />
               )}
             />
           )}
         </div>
         {/* M7 mounts <CoPilotRail /> here. */}
       </div>
+
+      {focusedCard ? (
+        <DetailDrawer
+          card={focusedCard}
+          onClose={onCloseDrawer}
+          onNext={onDrawerNext}
+          onPrev={onDrawerPrev}
+        />
+      ) : null}
     </div>
   );
 }
