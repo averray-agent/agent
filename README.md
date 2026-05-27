@@ -201,7 +201,9 @@ External agents should start from `GET /onboarding`. It now exposes:
   SIWE-session, and preflight checks agents should satisfy before claiming.
 - `auth.entrypoints` — the canonical nonce, verify, and logout endpoints.
 
-For a self-serve operator guide, see
+For the first-agent operator guide, see
+[`docs/AGENT_OPERATOR_ONBOARDING.md`](docs/AGENT_OPERATOR_ONBOARDING.md). For
+wallet-specific setup, see
 [`docs/AGENT_WALLET_ONBOARDING.md`](docs/AGENT_WALLET_ONBOARDING.md). The
 current protected HTTP path is an Ethereum-compatible `0x...` wallet using
 SIWE. Talisman users should select a dedicated EVM account for this flow today;

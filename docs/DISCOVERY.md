@@ -36,9 +36,9 @@ Important rule:
 - mutating and financial actions belong to authenticated HTTP and app
   surfaces, not the public manifest
 - external agents that want to cross from discovery into claim/submit should
-  follow [EXTERNAL_AGENT_WALLET_ONBOARDING.md](EXTERNAL_AGENT_WALLET_ONBOARDING.md)
-  so they connect or create a wallet without exposing private keys to the
-  model
+  start with [AGENT_OPERATOR_ONBOARDING.md](AGENT_OPERATOR_ONBOARDING.md), then
+  use [EXTERNAL_AGENT_WALLET_ONBOARDING.md](EXTERNAL_AGENT_WALLET_ONBOARDING.md)
+  for wallet-specific setup without exposing private keys to the model
 
 When to update:
 
