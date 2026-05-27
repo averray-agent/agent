@@ -109,6 +109,14 @@ The workflow uploads a 90-day artifact named
 This proof reads production backup files but does not connect to production
 Postgres or Redis and does not modify or delete backup files.
 
+Latest hosted restore proof: GitHub Actions run `26537480496` on 2026-05-27
+uploaded artifact `hosted-backup-restore-drill-proof-26537480496`. It restored
+Postgres backup `agent-20260527-205325.sql.gz` and Redis backup
+`redis-20260527-205325.rdb.gz` into disposable containers, then validated
+[`docs/evidence/restore-drill-hosted-2026-05-27.json`](evidence/restore-drill-hosted-2026-05-27.json)
+with Postgres schema-table count `0`, Redis `DBSIZE` `2788`, and cleanup true
+for both containers plus the Redis temp dir.
+
 ## Pre-drill checklist
 
 Before running the drill:
