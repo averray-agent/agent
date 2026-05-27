@@ -39,7 +39,9 @@ AVERRAY_TOKEN="$TOKEN" node examples/claim-and-submit-job/index.mjs \
 ```
 
 The example calls the SDK's `assertSchemaNativeSubmissionReady` guard before
-claiming. That makes the direct draft pass `/jobs/validate-submission`, records
-the schema ref used, and probes an intentionally invalid `submission.output`
-wrapper through the same read-only route. If the draft is missing required
-fields, it stops before consuming a claim attempt.
+claiming. It first resolves the expected schema from `/jobs/definition` and
+`/jobs/preflight`, then makes the direct draft pass `/jobs/validate-submission`,
+records the schema ref used, and probes an intentionally invalid
+`submission.output` wrapper through the same read-only route. If the advertised
+schema surfaces drift or the draft is missing required fields, it stops before
+consuming a claim attempt.

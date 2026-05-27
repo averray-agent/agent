@@ -4,7 +4,8 @@ import { pathToFileURL } from "node:url";
 
 import {
   AgentPlatformClient,
-  AgentPlatformValidationError
+  AgentPlatformValidationError,
+  resolveExpectedSubmissionSchemaRef
 } from "../../sdk/agent-platform-client.js";
 
 const DEFAULT_API_URL = "https://api.averray.com";
@@ -53,7 +54,14 @@ export async function runClaimAndSubmit({
     client.getJobDefinition(jobId),
     token ? client.preflightJob(jobId) : Promise.resolve(undefined)
   ]);
-  const readiness = buildReadinessSummary({ onboarding, definition, preflight, tokenPresent: Boolean(token) });
+  const expectedSchemaRef = resolveExpectedSubmissionSchemaRef(definition, preflight);
+  const readiness = buildReadinessSummary({
+    onboarding,
+    definition,
+    preflight,
+    tokenPresent: Boolean(token),
+    expectedSchemaRef
+  });
 
   if (!execute) {
     return {
@@ -82,7 +90,9 @@ export async function runClaimAndSubmit({
   const draftSubmission = submission ?? evidence;
   let validationReadiness;
   try {
-    validationReadiness = await client.assertSchemaNativeSubmissionReady(jobId, draftSubmission);
+    validationReadiness = await client.assertSchemaNativeSubmissionReady(jobId, draftSubmission, {
+      expectedSchemaRef
+    });
   } catch (error) {
     if (!(error instanceof AgentPlatformValidationError)) {
       throw error;
@@ -129,17 +139,19 @@ export async function runClaimAndSubmit({
   };
 }
 
-export function buildReadinessSummary({ onboarding, definition, preflight, tokenPresent }) {
+export function buildReadinessSummary({ onboarding, definition, preflight, tokenPresent, expectedSchemaRef = undefined }) {
   const claimStatus = definition?.claimStatus ?? {};
   const preflightClaimable = preflight?.claimable ?? preflight?.eligible ?? preflight?.allowed;
   const definitionClaimable = claimStatus.claimable ?? definition?.claimable;
   const claimable = preflightClaimable ?? definitionClaimable ?? false;
   const reason = preflight?.reason ?? claimStatus.reason ?? definition?.reason ?? null;
+  const resolvedSchemaRef = expectedSchemaRef ?? resolveExpectedSubmissionSchemaRef(definition, preflight);
   return {
     tokenPresent,
     onboardingEntrypoint: onboarding?.onboarding?.entrypoint ?? onboarding?.entrypoint ?? "/onboarding",
     jobId: definition?.id ?? definition?.jobId ?? null,
     title: definition?.title ?? null,
+    expectedSubmissionSchemaRef: resolvedSchemaRef ?? null,
     claimState: claimStatus.claimState ?? definition?.claimState ?? null,
     claimable: Boolean(claimable),
     reason,

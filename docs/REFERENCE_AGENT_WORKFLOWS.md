@@ -18,19 +18,22 @@ The smallest safe worker loop is implemented in
    contract.
 3. Read `/jobs/preflight?jobId=<id>` with the worker token before consuming a
    claim attempt.
-4. Build the direct structured submission object required by the job's output
+4. Resolve the expected output schema from the definition and preflight
+   surfaces; stop if they disagree.
+5. Build the direct structured submission object required by the job's output
    schema.
-5. Call `POST /jobs/validate-submission` with that exact object before any
+6. Call `POST /jobs/validate-submission` with that exact object before any
    mutation.
-6. Claim once through `POST /jobs/claim`, using a stable idempotency key for
+7. Claim once through `POST /jobs/claim`, using a stable idempotency key for
    the intended run.
-7. Submit once through `POST /jobs/submit`.
-8. Read `/session/timeline?sessionId=<id>` and record the receipt summary.
+8. Submit once through `POST /jobs/submit`.
+9. Read `/session/timeline?sessionId=<id>` and record the receipt summary.
 
 The worker must not wrap structured output under `submission.output`. The SDK
-helper `assertSchemaNativeSubmissionReady(jobId, submission)` validates the
-direct object and probes that an invalid wrapper is rejected before the claim is
-attempted.
+helpers `resolveExpectedSubmissionSchemaRef(definition, preflight)` and
+`assertSchemaNativeSubmissionReady(jobId, submission, { expectedSchemaRef })`
+bind the advertised contract to the validator, validate the direct object, and
+probe that an invalid wrapper is rejected before the claim is attempted.
 
 Dry run first:
 
