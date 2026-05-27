@@ -1,0 +1,111 @@
+name: Hosted External Schema Proof
+
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: Proof job id. Leave blank for a unique archived proof job.
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hosted-external-schema-proof
+  cancel-in-progress: false
+
+jobs:
+  proof:
+    name: Run hosted external schema registration proof
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    env:
+      APP_ALLOW_PROTECTED_SHELL: "1"
+      CHECK_INDEXER: "0"
+      CHECK_EXTERNAL_SCHEMA_PROOF: "1"
+      EXTERNAL_SCHEMA_PROOF_EVIDENCE_FILE: artifacts/external-schema-proof-hosted-${{ github.run_id }}.json
+      EXTERNAL_SCHEMA_PROOF_JOB_ID: ${{ inputs.job_id }}
+      EXTERNAL_SCHEMA_PROOF_IDEMPOTENCY_KEY: github-hosted-external-schema-proof-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Load ADMIN_JWT from 1Password (fail-closed)
+        uses: 1password/load-secrets-action@92467eb28f72e8255933372f1e0707c567ce2259 # v4.0.0
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN_PROD_SMOKE }}
+          ADMIN_JWT_OP: op://prod-smoke/admin-jwt/password
+
+      - name: Verify ADMIN_JWT_OP loaded and shape-valid
+        run: |
+          set -euo pipefail
+          set +x
+
+          if [ -z "${ADMIN_JWT_OP:-}" ]; then
+            echo "::error::ADMIN_JWT_OP is empty after load step — check op://prod-smoke/admin-jwt/password and OP_SERVICE_ACCOUNT_TOKEN_PROD_SMOKE."
+            exit 1
+          fi
+
+          case "$ADMIN_JWT_OP" in
+            ey*.*.*)
+              echo "ADMIN_JWT_OP: JWT shape valid"
+              ;;
+            *)
+              echo "::error::ADMIN_JWT_OP does not look like a JWT (expected ey<...>.<...>.<...>)"
+              exit 1
+              ;;
+          esac
+
+      - name: Run hosted proof
+        run: |
+          set -euo pipefail
+          set +x
+
+          ADMIN_JWT="$ADMIN_JWT_OP" ./scripts/ops/check-hosted-stack.sh
+
+      - name: Summarize proof evidence
+        if: always()
+        run: |
+          set -euo pipefail
+
+          evidence_file="$EXTERNAL_SCHEMA_PROOF_EVIDENCE_FILE"
+          if [ ! -s "$evidence_file" ]; then
+            echo "No external-schema evidence file was produced." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          status="$(jq -r '.status' "$evidence_file")"
+          job_id="$(jq -r '.jobId' "$evidence_file")"
+          schema_ref="$(jq -r '.schemaRef' "$evidence_file")"
+          issuer="$(jq -r '.issuer' "$evidence_file")"
+          trust_boundary="$(jq -r '.definition.trustBoundary' "$evidence_file")"
+          signature_verified="$(jq -r '.definition.outputSignatureVerified' "$evidence_file")"
+          valid_status="$(jq -r '.validSubmission.status' "$evidence_file")"
+          invalid_path="$(jq -r '.invalidSubmission.path' "$evidence_file")"
+
+          {
+            echo "## Hosted External Schema Proof"
+            echo
+            echo "- Status: \`${status}\`"
+            echo "- Job: \`${job_id}\`"
+            echo "- Schema: \`${schema_ref}\`"
+            echo "- Issuer: \`${issuer}\`"
+            echo "- Trust boundary: \`${trust_boundary}\`"
+            echo "- Signature verified: \`${signature_verified}\`"
+            echo "- Valid submission status: \`${valid_status}\`"
+            echo "- Invalid submission path: \`${invalid_path}\`"
+            echo "- Evidence artifact: \`hosted-external-schema-proof-${GITHUB_RUN_ID}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sanitized external-schema proof evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: hosted-external-schema-proof-${{ github.run_id }}
+          path: ${{ env.EXTERNAL_SCHEMA_PROOF_EVIDENCE_FILE }}
+          if-no-files-found: error
+          retention-days: 90
