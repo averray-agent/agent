@@ -302,6 +302,7 @@ async function restoreRedis(backupFile, suffix) {
   const container = `drill-redis-${suffix}`;
   const redisDataDir = await mkdtemp(join(tmpdir(), "averray-restore-drill-redis-"));
   let removed = false;
+  let dataDirRemoved = false;
   try {
     await pipeline(
       createReadStream(backupFile),
@@ -331,9 +332,40 @@ async function restoreRedis(backupFile, suffix) {
     } catch {
       removed = false;
     }
-    await rm(redisDataDir, { recursive: true, force: true });
+    try {
+      await rm(redisDataDir, { recursive: true, force: true });
+      dataDirRemoved = true;
+    } catch {
+      await makeDockerBindMountWritable(redisDataDir);
+      await rm(redisDataDir, { recursive: true, force: true });
+      dataDirRemoved = true;
+    }
     restoreRedis.lastRemoved = removed;
+    restoreRedis.lastDataDirRemoved = dataDirRemoved;
   }
+}
+
+async function makeDockerBindMountWritable(path) {
+  if (typeof process.getuid !== "function" || typeof process.getgid !== "function") {
+    return;
+  }
+
+  await run("docker", dockerBindMountWritableArgs(path, process.getuid(), process.getgid()));
+}
+
+function dockerBindMountWritableArgs(path, uid, gid) {
+  return [
+    "run",
+    "--rm",
+    "--user",
+    "0:0",
+    "-v",
+    `${path}:/data`,
+    REDIS_IMAGE,
+    "sh",
+    "-c",
+    `chown -R ${uid}:${gid} /data && chmod -R u+rwX /data`
+  ];
 }
 
 function buildEvidence({ readiness, selected, postgres, redis, operatorName, operatorSignature, completedAt }) {
@@ -360,7 +392,10 @@ function buildEvidence({ readiness, selected, postgres, redis, operatorName, ope
     },
     cleanup: {
       postgresTargetRemoved: restorePostgres.lastRemoved === true,
-      redisTargetRemoved: restoreRedis.lastRemoved === true
+      redisTargetRemoved: restoreRedis.lastRemoved === true,
+      ...(typeof restoreRedis.lastDataDirRemoved === "boolean"
+        ? { redisDataDirRemoved: restoreRedis.lastDataDirRemoved === true }
+        : {})
     }
   };
 }
@@ -406,6 +441,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 
 export {
   buildEvidence,
+  dockerBindMountWritableArgs,
+  makeDockerBindMountWritable,
   parseArgs,
   parseIntegerStdout,
   selectBackupCopies
