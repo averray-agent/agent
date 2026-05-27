@@ -74,12 +74,12 @@ functions, but it does not close the live pause/unpause rehearsal box.
 
 ## 2. Data durability
 
-- [ ] Latest Postgres backup exists and is recent. Evidence:
+- [x] Latest Postgres backup exists and is recent. Evidence:
   `./scripts/ops/check-backup-readiness.sh --json` reports
   `components[postgres].status == "ok"` with `ageSeconds <
   maxAgeHours * 3600`, then the saved JSON passes
   `node scripts/ops/check-backup-readiness-evidence.mjs`.
-- [ ] Latest Redis backup exists and is recent. Same readiness check,
+- [x] Latest Redis backup exists and is recent. Same readiness check,
   `components[redis].status == "ok"` and the saved JSON validator passes.
 - [ ] The monthly restore drill has been run on the current stack
   shape. Evidence: a dated line in the operator log naming both
@@ -100,6 +100,13 @@ Or use GitHub Actions to create and prove hosted snapshots in one operator-run:
 run the `Hosted Backup Snapshot Proof` workflow from the production environment.
 It runs the two scripts above on the VPS, then uploads the readiness JSON and
 validator result as `hosted-backup-snapshot-proof-<run-id>`.
+
+Latest hosted proof: GitHub Actions run `26531944215` on 2026-05-27 uploaded
+`hosted-backup-snapshot-proof-26531944215`. The saved readiness evidence in
+[`docs/evidence/backup-readiness-hosted-2026-05-27.json`](evidence/backup-readiness-hosted-2026-05-27.json)
+validated with `overallStatus: "ok"`, Postgres file
+`agent-20260527-205325.sql.gz` at age 3s, and Redis file
+`redis-20260527-205325.rdb.gz` at age 2s.
 
 Run the readiness check (read-only, never restores or modifies a
 backup file):

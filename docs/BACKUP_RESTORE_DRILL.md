@@ -79,6 +79,14 @@ Then it immediately runs the same readiness check and validator, uploading a
 This workflow writes new backup files but does not restore, delete, or modify
 production data.
 
+Latest hosted freshness proof: GitHub Actions run `26531944215` on 2026-05-27
+uploaded artifact `hosted-backup-snapshot-proof-26531944215`. It created
+Postgres backup `agent-20260527-205325.sql.gz` and Redis backup
+`redis-20260527-205325.rdb.gz`; the saved readiness JSON in
+[`docs/evidence/backup-readiness-hosted-2026-05-27.json`](evidence/backup-readiness-hosted-2026-05-27.json)
+validated with `overallStatus: "ok"`. This closes backup freshness only; the
+restore drill below still proves the files are usable.
+
 ## Pre-drill checklist
 
 Before running the drill:
