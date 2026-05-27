@@ -1,5 +1,18 @@
 # Hermes Handoff Monitor — Redesign Implementation Spec
 
+> **2026-05-28 — Architecture correction in progress.** M1–M4 of the original
+> implementation landed inside the operator app (`app/app/(authed)/monitor/`
+> + `mcp-server/src/services/monitor-service.js`) and have been reverted
+> because the Hermes monitor is deliberately a *separate deployment* from
+> the operator app — its own backend, its own auth (Cloudflare Access, not
+> SIWE), its own Docker stack at `monitor.averray.com`. The redesign
+> restarts inside `monitor-memory-aware-narration/` (the existing monitor
+> codebase). File paths in this spec still reference the operator-app
+> locations from the original draft; they will be updated as part of the
+> M1 restart. The visual design (Direction A), the 10-milestone breakdown,
+> the data model, and the §21 open-question decisions all remain
+> authoritative.
+
 - **Version:** 1.0
 - **Status:** ready for implementation
 - **Owner:** assigned engineer (Codex or Claude in IDE)
