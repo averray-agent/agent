@@ -569,26 +569,26 @@ As of [SPEC_AUDIT_2026-05-13.md](SPEC_AUDIT_2026-05-13.md), the next work
 should prioritize live-proof and launch-risk items before adding new product
 surface:
 
-1. finish the remaining hosted bootstrap instrumentation proof: Hermes
-   post-deploy verification and the first `Hermes Operator Report`
-   `ops_health`/`daily_operator_brief` artifacts are captured in production
-   workflow runs `26211011993` and `26211100734`; the remaining launch proof is
-   to rerun the hosted smoke's bootstrap instrumentation gate with a live admin
-   JWT and record that upstream-status plus optional email status are
-   well-formed and do not leak provider/API-key-shaped tokens. Branded Resend
-   email delivery remains an optional transport to prove later with
-   `bootstrap_self_report_send_now=1` after a verified sender domain
-   exists.
-2. tighten schema-native jobs for the first-wave job families and extend helper
+1. tighten schema-native jobs for the first-wave job families and extend helper
    adoption beyond the product-proof loop
-3. finish dispute/arbitration launch wiring
-4. capture the native XCM deposit, withdraw, and failure evidence pack
-5. add visible timeline filters to the operator app
-6. continue Phase 4 JWT hardening, KMS signer monitoring, and mainnet custody
+2. finish dispute/arbitration launch wiring
+3. capture the native XCM deposit, withdraw, and failure evidence pack
+4. add visible timeline filters to the operator app
+5. continue Phase 4 JWT hardening, KMS signer monitoring, and mainnet custody
    readiness
 
 Completed or reconciled since the audit:
 
+- The hosted bootstrap instrumentation proof is complete through the Hermes
+  operator-reporting path. Production deploy run
+  [`26511414359`](https://github.com/averray-agent/agent/actions/runs/26511414359)
+  passed on 2026-05-27 with `smoke_check_bootstrap_instrumentation=1`, a live
+  admin JWT loaded from 1Password, Hermes post-deploy verification enabled,
+  and no branded Resend send required. Publish Discovery Manifest run
+  [`26511490876`](https://github.com/averray-agent/agent/actions/runs/26511490876)
+  passed immediately afterward. Branded email remains an optional transport to
+  prove later with `bootstrap_self_report_send_now=1` after a verified sender
+  domain exists.
 - The hosted worker-loop product-proof evidence gate passed in Deploy
   Production run `25988470399` on 2026-05-17 with
   `smoke_check_product_proof_gate=1` and

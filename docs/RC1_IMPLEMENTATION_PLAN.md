@@ -206,9 +206,12 @@ generation are implemented as backend foundations.
   `hermes-post-deploy-26211011993`; operator report run `26211100734`
   uploaded `hermes-operator-report-ops_health-26211100734-1` and
   `hermes-operator-report-daily_operator_brief-26211100734-1`.
-- [ ] Rerun the hosted bootstrap instrumentation smoke with a live admin JWT
+- [x] Rerun the hosted bootstrap instrumentation smoke with a live admin JWT
   and record the sanitized `/admin/status` evidence in the production
-  checklist.
+  checklist. Verified on 2026-05-27: Deploy Production run `26511414359`
+  loaded the production admin JWT from 1Password, ran with
+  `smoke_check_bootstrap_instrumentation=1`, completed Hermes post-deploy
+  verification, and triggered successful discovery publish run `26511490876`.
 - [ ] Optional: wire branded email delivery once a verified sender domain,
   recipients, and cadence are finalized.
 

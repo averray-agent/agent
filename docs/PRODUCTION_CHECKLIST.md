@@ -297,6 +297,12 @@ RUN_SUBSCAN_XCM_VALIDATION=1 ./scripts/ops/check-release-readiness.sh testnet
       production `ADMIN_JWT` from 1Password, ran with
       `smoke_check_bootstrap_instrumentation=1`, reached `Checking bootstrap
       instrumentation`, and ended with `Hosted stack smoke check passed.`
+    - Refreshed on 2026-05-27: Deploy Production run
+      [`26511414359`](https://github.com/averray-agent/agent/actions/runs/26511414359)
+      loaded `ADMIN_JWT` from `op://prod-smoke/admin-jwt/password`, ran with
+      `smoke_check_bootstrap_instrumentation=1`, completed Hermes post-deploy
+      verification, and triggered successful Publish Discovery Manifest run
+      [`26511490876`](https://github.com/averray-agent/agent/actions/runs/26511490876).
   - The smoke gate verifies `upstreamStatus` is enabled/running, exposes a
     durable evidence note plus bounded `fundedJobs` table counters, and that
     the optional `.bootstrapSelfReport` status is well-formed and sanitized.
