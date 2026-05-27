@@ -230,6 +230,27 @@ function classifyEventTopic(topic, data = {}) {
       severity: "info"
     };
   }
+  if (topic.startsWith("jobs.lifecycle.")) {
+    return {
+      source: "schedule",
+      phase: "job_lifecycle",
+      severity: topic.includes("failed") ? "error" : "info"
+    };
+  }
+  if (topic.startsWith("funded_jobs.")) {
+    return {
+      source: "ingestion",
+      phase: "upstream_status",
+      severity: fundedJobSeverity(data)
+    };
+  }
+  if (topic.startsWith("bootstrap.")) {
+    return {
+      source: "system",
+      phase: "bootstrap",
+      severity: bootstrapSeverity(topic, data)
+    };
+  }
   if (topic.startsWith("system.")) {
     return {
       source: "system",
@@ -308,6 +329,20 @@ function xcmSeverity(topic, data) {
 }
 
 function fundingSeverity(topic, data) {
+  const status = normalizeText(data?.status);
+  if (topic.includes("failed") || status === "failed") return "error";
+  return "info";
+}
+
+function fundedJobSeverity(data) {
+  const finalStatus = normalizeText(data?.finalStatus);
+  const upstreamStatus = normalizeText(data?.upstreamStatus);
+  if (finalStatus === "reverted" || upstreamStatus === "reverted") return "error";
+  if (["closed_unmerged", "open_stale"].includes(finalStatus)) return "warn";
+  return "info";
+}
+
+function bootstrapSeverity(topic, data) {
   const status = normalizeText(data?.status);
   if (topic.includes("failed") || status === "failed") return "error";
   return "info";

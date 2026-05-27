@@ -6,6 +6,23 @@ Inventory of every `eventBus.publish(...)` call site on `main` (HEAD
 correlationId`. Docs / report only; no code changes ship in this
 audit pass.
 
+## 2026-05-27 reconciliation
+
+The original audit findings below were accurate at `89e05e6`, but the
+runtime has since caught up:
+
+- Gap A is closed: `policy.`, `capability.`, and `service-token.` topics now
+  classify into `source: "governance"` with stable phases and revocation
+  warning severity.
+- Gap B is closed: XCM outcome relay/observe/finalize events now promote
+  their `requestId` to top-level `correlationId`.
+- Additional producer families discovered after the audit are now classified:
+  `jobs.lifecycle.*`, `funded_jobs.*`, and `bootstrap.*`.
+
+The remaining taxonomy watch item is future producer drift: new event families
+should either use an existing registered prefix or add classifier coverage and
+tests in the same PR.
+
 ## How the envelope is filled
 
 `EventBus.normalizeEvent` ([`mcp-server/src/core/event-bus.js`](../mcp-server/src/core/event-bus.js))
@@ -67,7 +84,7 @@ forward at `event-listener.js:429` (which publishes whatever each
 
 ## Findings
 
-### Gap A — three topic prefixes not in `classifyEventTopic`
+### Gap A — three topic prefixes not in `classifyEventTopic` (closed)
 
 Affected publish sites: **#10, #13–#17** (policy, capability, service-token).
 
@@ -89,19 +106,19 @@ and replayable — but the canonical phase is just the topic itself,
 which makes phase-based filtering ("show me all `governance` events")
 a non-starter for this family.
 
-Recommended fix (when scope allows): extend `classifyEventTopic` to
-recognize these prefixes. Reasonable mappings:
+Implemented fix: `classifyEventTopic` recognizes these prefixes. The current
+runtime mappings are:
 
 | Prefix | `source` | `phase` | `severity` rule |
 |---|---|---|---|
 | `policy.` | `governance` | `governance` | `info` |
-| `capability.` | `governance` | `capability` | `info` (consider `warn` on `capability.revoke`) |
-| `service-token.` | `governance` | `service_token` | `info` (consider `warn` on `service-token.revoke`) |
+| `capability.` | `governance` | `capability` | `warn` on `capability.revoke`, otherwise `info` |
+| `service-token.` | `governance` | `service_token` | `warn` on `service-token.revoke`, otherwise `info` |
 
-These are **out of scope for this audit PR.** Worth a small follow-up
-PR if the team agrees on the proposed mappings.
+Regression coverage lives in
+[`mcp-server/src/core/event-bus.test.js`](../mcp-server/src/core/event-bus.test.js).
 
-### Gap B — XCM events with `requestId` not promoted to `correlationId`
+### Gap B — XCM events with `requestId` not promoted to `correlationId` (closed)
 
 Affected publish sites: **#7, #8, #9, #18**.
 
@@ -112,16 +129,11 @@ events with `correlationId: undefined`. A consumer trying to thread
 the lifecycle `queued → observed → finalized` (or `queued → observed
 → finalize_failed`) by correlation id can't.
 
-Recommended fix: set `correlationId: normalizedRequestId` on each of
-these four calls. One line per site. Behavior change is purely
-*additive* for consumers — anyone currently relying on
-`correlationId === undefined` is not load-bearing on undefined.
-
-I considered this a **borderline "tiny obvious fix"** under the
-audit brief and chose not to ship it in this PR since it does change
-runtime envelope shape on a load-bearing settlement path. Recommend
-shipping as its own focused PR with a backend test asserting the
-correlationId values on the four call sites.
+Implemented fix: each request-scoped XCM observer/watcher event sets
+`correlationId` to the normalized `requestId`. Regression coverage lives in
+[`mcp-server/src/services/xcm-settlement-watcher.test.js`](../mcp-server/src/services/xcm-settlement-watcher.test.js)
+and
+[`mcp-server/src/services/xcm-observation-relay.test.js`](../mcp-server/src/services/xcm-observation-relay.test.js).
 
 ### Gap C — `service-token.` hyphenated topic family
 
@@ -168,11 +180,9 @@ to match the rest of the family.
 
 ## Suggested follow-up PRs (separate from this report)
 
-1. **Extend `classifyEventTopic`** for `policy.`, `capability.`,
-   `service-token.` per the table in Gap A. Single function change in
-   `event-bus.js`, add tests asserting the new branches resolve.
-2. **Promote `requestId → correlationId`** on the four XCM publish
-   sites in Gap B. One-line changes per site, backed by tests.
-3. **(Optional, larger)** Decide on `service-token` vs `service_token`
+1. **Keep the classifier in lockstep with new producer families.** New
+   `eventBus.publish` topic prefixes should add classifier tests in the same
+   PR.
+2. **(Optional, larger)** Decide on `service-token` vs `service_token`
    topic naming and migrate downstream consumers + tests if the
    underscore form wins.

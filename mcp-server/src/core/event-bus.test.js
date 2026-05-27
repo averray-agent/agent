@@ -180,6 +180,74 @@ test("EventBus classifies governance topics (policy, capability, service-token)"
   assert.equal(tokenRevoke.severity, "warn");
 });
 
+test("EventBus classifies operational job and bootstrap topics", () => {
+  const bus = new EventBus();
+
+  const lifecycle = bus.publish({
+    id: "lifecycle-1",
+    topic: "jobs.lifecycle.swept",
+    jobId: "job-stale",
+    timestamp: "2026-01-01T00:00:00.000Z"
+  });
+  assert.equal(lifecycle.source, "schedule");
+  assert.equal(lifecycle.phase, "job_lifecycle");
+  assert.equal(lifecycle.severity, "info");
+  assert.equal(lifecycle.correlationId, "job-stale");
+
+  const merged = bus.publish({
+    id: "funded-merged-1",
+    topic: "funded_jobs.upstream_status",
+    jobId: "job-merged",
+    sessionId: "session-merged",
+    timestamp: "2026-01-01T00:00:01.000Z",
+    data: { finalStatus: "merged", upstreamStatus: "merged" }
+  });
+  assert.equal(merged.source, "ingestion");
+  assert.equal(merged.phase, "upstream_status");
+  assert.equal(merged.severity, "info");
+  assert.equal(merged.correlationId, "session-merged");
+
+  const closedUnmerged = bus.publish({
+    id: "funded-closed-1",
+    topic: "funded_jobs.upstream_status",
+    jobId: "job-closed",
+    timestamp: "2026-01-01T00:00:02.000Z",
+    data: { finalStatus: "closed_unmerged", upstreamStatus: "closed_unmerged" }
+  });
+  assert.equal(closedUnmerged.source, "ingestion");
+  assert.equal(closedUnmerged.phase, "upstream_status");
+  assert.equal(closedUnmerged.severity, "warn");
+
+  const reverted = bus.publish({
+    id: "funded-reverted-1",
+    topic: "funded_jobs.upstream_status",
+    jobId: "job-reverted",
+    timestamp: "2026-01-01T00:00:03.000Z",
+    data: { finalStatus: "reverted", upstreamStatus: "reverted" }
+  });
+  assert.equal(reverted.severity, "error");
+
+  const selfReport = bus.publish({
+    id: "bootstrap-report-1",
+    topic: "bootstrap.self_report.sent",
+    timestamp: "2026-01-01T00:00:04.000Z",
+    data: { status: "sent" }
+  });
+  assert.equal(selfReport.source, "system");
+  assert.equal(selfReport.phase, "bootstrap");
+  assert.equal(selfReport.severity, "info");
+
+  const failedSelfReport = bus.publish({
+    id: "bootstrap-report-failed-1",
+    topic: "bootstrap.self_report.failed",
+    timestamp: "2026-01-01T00:00:05.000Z",
+    data: { status: "failed" }
+  });
+  assert.equal(failedSelfReport.source, "system");
+  assert.equal(failedSelfReport.phase, "bootstrap");
+  assert.equal(failedSelfReport.severity, "error");
+});
+
 test("EventBus persists events and replays durable filters beyond the ring buffer", async () => {
   const store = new MemoryStateStore();
   const bus = new EventBus({ bufferSize: 1, eventStore: store });
