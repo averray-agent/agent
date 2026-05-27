@@ -7,6 +7,7 @@ import { join } from "node:path";
 
 import {
   buildEvidence,
+  dockerBindMountWritableArgs,
   parseArgs,
   parseIntegerStdout,
   selectBackupCopies
@@ -83,6 +84,24 @@ test("selectBackupCopies rejects non-ok readiness before any restore", async () 
 test("parseIntegerStdout accepts non-negative integer command output", () => {
   assert.equal(parseIntegerStdout("42\n", "rows"), 42);
   assert.throws(() => parseIntegerStdout("nope", "rows"), /rows did not return/u);
+});
+
+test("dockerBindMountWritableArgs regains access to Redis-owned bind mount", () => {
+  const args = dockerBindMountWritableArgs("/tmp/redis-owned", 501, 20);
+  const redisImage = process.env.RESTORE_DRILL_REDIS_IMAGE || "redis:7";
+
+  assert.deepEqual(args.slice(0, 7), [
+    "run",
+    "--rm",
+    "--user",
+    "0:0",
+    "-v",
+    "/tmp/redis-owned:/data",
+    redisImage
+  ]);
+  assert.equal(args.at(-2), "-c");
+  assert.match(args.at(-1), /chown -R 501:20 \/data/u);
+  assert.match(args.at(-1), /chmod -R u\+rwX \/data/u);
 });
 
 test("buildEvidence preserves readiness and selected backup filenames", () => {
