@@ -111,12 +111,8 @@ jobs:
             -o ServerAliveInterval=30 \
             -o ServerAliveCountMax=20 \
             "$VPS_USER@$VPS_HOST" \
-            "bash -s" > "$BACKUP_SNAPSHOT_LOG_FILE" <<'REMOTE'
-          set -euo pipefail
-          cd /srv/agent-stack/app
-          ./scripts/ops/backup-postgres.sh
-          ./scripts/ops/backup-redis.sh
-          REMOTE
+            "bash -lc 'set -euo pipefail; cd /srv/agent-stack/app; ./scripts/ops/backup-postgres.sh </dev/null; ./scripts/ops/backup-redis.sh </dev/null'" \
+            > "$BACKUP_SNAPSHOT_LOG_FILE"
 
       - name: Run backup readiness check on VPS
         run: |

@@ -125,8 +125,9 @@ test("hosted backup snapshot proof creates backups before validating readiness",
   assert.match(workflow, /BACKUP_SNAPSHOT_LOG_FILE: artifacts\/backup-snapshot-hosted-\$\{\{ github\.run_id \}\}\.log/u);
   assert.match(workflow, /BACKUP_READINESS_EVIDENCE_FILE: artifacts\/backup-readiness-hosted-\$\{\{ github\.run_id \}\}\.json/u);
   assert.match(workflow, /BACKUP_READINESS_VALIDATION_FILE: artifacts\/backup-readiness-validation-hosted-\$\{\{ github\.run_id \}\}\.json/u);
-  assert.match(workflow, /\.\/scripts\/ops\/backup-postgres\.sh/u);
-  assert.match(workflow, /\.\/scripts\/ops\/backup-redis\.sh/u);
+  assert.match(workflow, /\.\/scripts\/ops\/backup-postgres\.sh <\/dev\/null/u);
+  assert.match(workflow, /\.\/scripts\/ops\/backup-redis\.sh <\/dev\/null/u);
+  assert.doesNotMatch(workflow, /"bash -s" > "\$BACKUP_SNAPSHOT_LOG_FILE" <<'REMOTE'/u);
   assert.match(workflow, /\.\/scripts\/ops\/check-backup-readiness\.sh --json --max-age-hours "\$MAX_AGE_HOURS"/u);
   assert.match(workflow, /node scripts\/ops\/check-backup-readiness-evidence\.mjs/u);
   assert.match(workflow, /--max-checked-age-hours "\$EVIDENCE_MAX_CHECKED_AGE_HOURS"/u);
