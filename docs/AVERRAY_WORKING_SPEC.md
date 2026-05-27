@@ -848,8 +848,18 @@ Short, linkable, defensible. Drop into docs root and README:
 Before public v1.0.0-rc1 launch:
 
 **Instrumentation (week 1 prerequisite):**
-- [ ] `funded_jobs` table live and populating
+- [x] `funded_jobs` table live and populating
+  - Records are written on claim, enriched on submit/verify, and persisted
+    through the durable state store. `/admin/status.upstreamStatus.fundedJobs`
+    now exposes bounded table evidence (`totalRecords`, open/final/pollable
+    counts, source/status buckets, latest timestamps) so the operator can prove
+    the table survived restart and is receiving records.
 - [ ] Daily upstream-status poller running against GitHub + MediaWiki APIs
+  - Poller, CLI, and report generation are implemented. The remaining launch
+    proof is production configuration/evidence: set
+    `UPSTREAM_STATUS_POLLER_ENABLED=true`, then verify
+    `/admin/status.upstreamStatus.running`, `lastSuccessfulAt`, and
+    `fundedJobs.pollableRecords`/status buckets after a hosted run.
 - [x] Hermes/operator self-report proof scheduled and visible
   - Scheduled/manual GitHub workflow exists for `ops_health` and
     `daily_operator_brief`; first production artifacts were recorded in

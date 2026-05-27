@@ -196,3 +196,53 @@ test("UpstreamStatusPollerService updates records and generates report", async (
   assert.equal(report.mergeRate, 1);
   assert.equal(report.confirmedPayout, 5);
 });
+
+test("UpstreamStatusPollerService status exposes durable funded-job evidence", async () => {
+  const stateStore = new MemoryStateStore();
+  await stateStore.upsertFundedJob({
+    ...githubRecord,
+    upstreamStatus: "submitted"
+  });
+  await stateStore.upsertFundedJob({
+    jobId: "wiki-proposal-only",
+    sourceType: "wikipedia_article",
+    rewardAmount: 2,
+    fundedAt: "2026-01-02T00:00:00.000Z",
+    deadlineAt: "2027-01-16T00:00:00.000Z",
+    finalStatus: "open",
+    upstreamStatus: "not_submitted",
+    upstream: {
+      kind: "mediawiki_revision",
+      language: "en",
+      proposalOnly: true,
+      reviewRevisionId: "123"
+    }
+  });
+  const poller = new UpstreamStatusPollerService(stateStore, undefined, {
+    enabled: true,
+    fetchImpl: async () => jsonResponse({ state: "closed", merged: true, merged_at: "2026-01-03T00:00:00Z" })
+  });
+
+  const beforeRun = await poller.getStatus();
+  assert.equal(beforeRun.evidencePersistenceNote, "durable_service_state");
+  assert.equal(beforeRun.fundedJobs.totalRecords, 2);
+  assert.equal(beforeRun.fundedJobs.openRecords, 2);
+  assert.equal(beforeRun.fundedJobs.pollableRecords, 1);
+  assert.equal(beforeRun.fundedJobs.awaitingSubmissionRecords, 1);
+  assert.equal(beforeRun.fundedJobs.recordsWithUpstreamEvidence, 1);
+  assert.deepEqual(beforeRun.fundedJobs.bySourceType, {
+    github_issue: 1,
+    wikipedia_article: 1
+  });
+
+  await poller.runOnce(new Date("2026-01-04T00:00:00.000Z"));
+  const resumed = new UpstreamStatusPollerService(stateStore, undefined, { enabled: true });
+  const afterRestart = await resumed.getStatus();
+  assert.equal(afterRestart.lastRun.checked, 1);
+  assert.equal(afterRestart.lastRun.updated, 1);
+  assert.equal(afterRestart.lastAttemptedAt, "2026-01-04T00:00:00.000Z");
+  assert.ok(afterRestart.lastSuccessfulAt);
+  assert.equal(afterRestart.lastFailureReason, null);
+  assert.equal(afterRestart.fundedJobs.finalRecords, 1);
+  assert.equal(afterRestart.fundedJobs.byFinalStatus.merged, 1);
+});

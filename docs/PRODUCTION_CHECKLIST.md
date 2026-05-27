@@ -297,8 +297,9 @@ RUN_SUBSCAN_XCM_VALIDATION=1 ./scripts/ops/check-release-readiness.sh testnet
       production `ADMIN_JWT` from 1Password, ran with
       `smoke_check_bootstrap_instrumentation=1`, reached `Checking bootstrap
       instrumentation`, and ended with `Hosted stack smoke check passed.`
-  - The smoke gate verifies `upstreamStatus` is enabled/running and that the
-    optional `.bootstrapSelfReport` status is well-formed and sanitized.
+  - The smoke gate verifies `upstreamStatus` is enabled/running, exposes a
+    durable evidence note plus bounded `fundedJobs` table counters, and that
+    the optional `.bootstrapSelfReport` status is well-formed and sanitized.
   - `/admin/status.bootstrapSelfReport` does not contain API-key-shaped
     tokens such as `Bearer ...` or `re_...`; only the boolean
     `providerConfigured` may reveal that the provider is configured.

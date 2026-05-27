@@ -311,7 +311,18 @@ if enabled "$CHECK_BOOTSTRAP_INSTRUMENTATION"; then
     (.upstreamStatus.intervalMs | type) == "number" and
     .upstreamStatus.intervalMs <= 86400000 and
     (.upstreamStatus.batchSize | type) == "number" and
-    .upstreamStatus.batchSize > 0
+    .upstreamStatus.batchSize > 0 and
+    (.upstreamStatus.evidencePersistenceNote | type) == "string" and
+    (.upstreamStatus.lastRun == null or (.upstreamStatus.lastRun | type) == "object") and
+    (.upstreamStatus.fundedJobs | type) == "object" and
+    (.upstreamStatus.fundedJobs.totalRecords | type) == "number" and
+    (.upstreamStatus.fundedJobs.openRecords | type) == "number" and
+    (.upstreamStatus.fundedJobs.finalRecords | type) == "number" and
+    (.upstreamStatus.fundedJobs.pollableRecords | type) == "number" and
+    (.upstreamStatus.fundedJobs.awaitingSubmissionRecords | type) == "number" and
+    (.upstreamStatus.fundedJobs.recordsWithUpstreamEvidence | type) == "number" and
+    (.upstreamStatus.fundedJobs.byFinalStatus | type) == "object" and
+    (.upstreamStatus.fundedJobs.bySourceType | type) == "object"
   ' >/dev/null <<<"$admin_status_json"
   jq -e '
     (.bootstrapSelfReport | type) == "object" and
