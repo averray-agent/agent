@@ -119,6 +119,9 @@ export class BlockchainGateway {
 
     this.provider = new JsonRpcProvider(config.rpcUrl);
     this.signer = createSigner(config, this.provider, { logger });
+    this.arbitratorSigner = config.arbitratorSignerPrivateKey
+      ? new Wallet(config.arbitratorSignerPrivateKey, this.provider)
+      : this.signer;
     this.accountContract = new Contract(
       config.agentAccountAddress,
       AGENT_ACCOUNT_ABI,
@@ -133,6 +136,11 @@ export class BlockchainGateway {
       config.escrowCoreAddress,
       ESCROW_CORE_ABI,
       this.signer ?? this.provider
+    );
+    this.arbitratorEscrowContract = new Contract(
+      config.escrowCoreAddress,
+      ESCROW_CORE_ABI,
+      this.arbitratorSigner ?? this.provider
     );
     this.legacyEscrowContract = new Contract(
       config.escrowCoreAddress,
@@ -175,6 +183,7 @@ export class BlockchainGateway {
         enabled: true,
         blockNumber,
         signerConfigured: Boolean(this.signer),
+        arbitratorSignerConfigured: Boolean(this.arbitratorSigner),
         xcmWrapperConfigured: this.hasXcmWrapper()
       };
     } catch (error) {
@@ -183,6 +192,7 @@ export class BlockchainGateway {
         backend: "blockchain",
         enabled: true,
         signerConfigured: Boolean(this.signer),
+        arbitratorSignerConfigured: Boolean(this.arbitratorSigner),
         xcmWrapperConfigured: this.hasXcmWrapper(),
         error: this.wrapGatewayError("healthCheck", error).message
       };
@@ -393,7 +403,9 @@ export class BlockchainGateway {
           },
           roles: {
             signerAddress: undefined,
+            arbitratorSignerAddress: undefined,
             signerIsVerifier: false,
+            arbitratorSignerIsArbitrator: false,
             escrowIsServiceOperator: false,
             agentAccountIsServiceOperator: false
           },
@@ -402,7 +414,10 @@ export class BlockchainGateway {
         };
       }
 
-      const signerAddress = await this.signer?.getAddress?.();
+      const [signerAddress, arbitratorSignerAddress] = await Promise.all([
+        this.signer?.getAddress?.(),
+        this.arbitratorSigner?.getAddress?.()
+      ]);
       const readErrors = [];
       const optionalRead = async (field, promise, fallback) => {
         try {
@@ -423,6 +438,7 @@ export class BlockchainGateway {
         pauser,
         paused,
         signerIsVerifier,
+        arbitratorSignerIsArbitrator,
         escrowIsServiceOperator,
         agentAccountIsServiceOperator,
         dailyOutflowCap,
@@ -441,6 +457,9 @@ export class BlockchainGateway {
         optionalRead("pauser", this.policyContract.pauser(), undefined),
         optionalRead("paused", this.policyContract.paused(), undefined),
         signerAddress ? optionalBool("verifiers(signer)", this.policyContract.verifiers(signerAddress)) : false,
+        arbitratorSignerAddress && typeof this.policyContract.arbitrators === "function"
+          ? optionalBool("arbitrators(arbitratorSigner)", this.policyContract.arbitrators(arbitratorSignerAddress))
+          : false,
         this.config.escrowCoreAddress
           ? optionalBool("serviceOperators(escrowCore)", this.policyContract.serviceOperators(this.config.escrowCoreAddress))
           : false,
@@ -517,7 +536,9 @@ export class BlockchainGateway {
         },
         roles: {
           signerAddress,
+          arbitratorSignerAddress,
           signerIsVerifier,
+          arbitratorSignerIsArbitrator,
           escrowIsServiceOperator,
           agentAccountIsServiceOperator
         },
@@ -939,10 +960,23 @@ export class BlockchainGateway {
     });
   }
 
+  async openDispute(jobId) {
+    return this.withGatewayError("openDispute", async () => {
+      this.requireSigner("openDispute");
+      const tx = await this.escrowContract.openDispute(this.toJobId(jobId));
+      const receipt = await tx.wait();
+      return {
+        txHash: tx.hash,
+        blockNumber: receipt?.blockNumber,
+        status: Number(receipt?.status ?? 0)
+      };
+    });
+  }
+
   async resolveDispute(jobId, workerPayout, reasonCode, metadataURI = "") {
     return this.withGatewayError("resolveDispute", async () => {
-      this.requireSigner("resolveDispute");
-      const tx = await this.escrowContract.resolveDispute(
+      this.requireArbitratorSigner("resolveDispute");
+      const tx = await this.arbitratorEscrowContract.resolveDispute(
         this.toJobId(jobId),
         workerPayout,
         this.toDisputeReasonCode(reasonCode),
@@ -1510,6 +1544,12 @@ export class BlockchainGateway {
   requireSigner(operation) {
     if (!this.signer) {
       throw new ConfigError(`${operation} requires SIGNER_PRIVATE_KEY`);
+    }
+  }
+
+  requireArbitratorSigner(operation) {
+    if (!this.arbitratorSigner) {
+      throw new ConfigError(`${operation} requires ARBITRATOR_SIGNER_PRIVATE_KEY or SIGNER_PRIVATE_KEY`);
     }
   }
 

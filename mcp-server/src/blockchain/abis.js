@@ -107,6 +107,7 @@ export const TREASURY_POLICY_ABI = [
   "function trustedSchemaIssuers(address issuer) view returns (bool)",
   "function setTrustedSchemaIssuer(address issuer, bool approved)",
   "function verifiers(address verifier) view returns (bool)",
+  "function arbitrators(address arbitrator) view returns (bool)",
   "function authorizedSince(address verifier) view returns (uint64)",
   "function authorizedUntil(address verifier) view returns (uint64)",
   "function wasAuthorizedAt(address verifier, uint64 timestamp) view returns (bool)",
