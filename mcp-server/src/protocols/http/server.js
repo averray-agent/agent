@@ -21,8 +21,6 @@ import {
 } from "../../core/job-schema-registry.js";
 import { createAdminCapabilityRoutes } from "./admin-capability-routes.js";
 import { createAdminGithubRoutes } from "./admin-github-routes.js";
-import { createMonitorRoutes } from "./monitor-routes.js";
-import { MonitorService } from "../../services/monitor-service.js";
 import { createAdminJobsRoutes } from "./admin-jobs-routes.js";
 import { createAdminSessionsRoutes } from "./admin-sessions-routes.js";
 import { createAdminStatusRoutes } from "./admin-status-routes.js";
@@ -1017,21 +1015,6 @@ const handleEventRoute = createEventRoutes({
   rateLimitConfig,
 });
 
-// Hermes Handoff Monitor (M4) — owns the in-memory board state +
-// SSE event bus seeded from `monitor-fixtures.js`. M5+ progressively
-// replaces the fixture source with real GitHub / Codex / Hermes /
-// deploy reads. The service is intentionally instantiated here
-// rather than in bootstrap.js because it has no init dependencies
-// (no chain, no state-store) and ownership is colocated with the
-// HTTP route layer.
-const monitorService = new MonitorService({ logger });
-const handleMonitorRoute = createMonitorRoutes({
-  authMiddleware,
-  hasRole,
-  monitorService,
-  respond,
-});
-
 const handlePublicMetadataRoute = createPublicMetadataRoutes({
   authConfig,
   buildDiscoveryManifest,
@@ -1223,10 +1206,6 @@ const server = createServer(async (request, response) => {
     // ---------- protected routes ----------
 
     if (await handleEventRoute({ request, response, url, pathname })) {
-      return;
-    }
-
-    if (await handleMonitorRoute({ request, response, url, pathname })) {
       return;
     }
 

@@ -1,27 +1,25 @@
 "use client";
 
-// Hermes Handoff Monitor — board page (M4)
+// Hermes Handoff Monitor — board page (M3)
 //
-// Live-data wired. Reads from /api/monitor/board (SWR) + receives
-// per-card mutations via /api/monitor/stream (SSE). The page no
-// longer imports fixtures directly — the backend's monitor-service
-// is the source of truth; for M4 that service is seeded from the
-// SAME fixture set the frontend used to ship, so visually
-// nothing changes vs. M3.
+// Static rich-mix layout. Wires:
+//   - TopStrip (KPIs derived from fixture cards)
+//   - BoardNowBanner (mode follows fixture state — action when an
+//     action card is present, calm otherwise)
+//   - LanesBar (search disabled, filter chips count-only)
+//   - Board with full card rendering via CardRouter
 //
-// What changed from M3:
-//   - useMonitorBoard() replaces the static FIXTURE_CARDS import
-//   - LIVE indicator reflects real SSE stream status
-//   - localStorage snapshots written on every refresh (per §21
-//     decision #4 of the spec)
-//   - The TopStrip's "Refresh" button now actually refreshes
+// M3 swaps M2's empty card array for the fixtures so the page
+// demonstrates every card type + variant. M4 swaps fixtures for
+// live SWR data. M5 wires the drawer (click handler currently
+// no-ops; M5 routes ?card= URL param).
 //
-// Still M3-level for the click path (drawer is M5).
+// The auth guard (PR #462 / Package E) already wraps this via the
+// (authed) layout, so unauthed visitors never see it.
 
 import { useMemo } from "react";
 import { deriveBoardState } from "@/lib/monitor/board-state.js";
-import type { BoardCard } from "@/lib/monitor/card-types.js";
-import { useMonitorBoard } from "@/lib/api/hooks/useMonitorBoard";
+import { FIXTURE_CARDS } from "@/lib/monitor/fixtures";
 import { TopStrip } from "@/components/monitor/TopStrip";
 import { BoardNowBanner } from "@/components/monitor/BoardNowBanner";
 import { LanesBar } from "@/components/monitor/LanesBar";
@@ -34,24 +32,23 @@ import {
 import { CardRouter } from "@/components/monitor/cards/CardRouter";
 
 export default function MonitorPage() {
-  const { data, isLoading, streamStatus, refresh } = useMonitorBoard();
-
-  const cards: BoardCard[] = useMemo(
-    () => data?.cards ?? [],
-    [data]
-  );
-  const nowLabel = useMemo(() => buildNowLabel(data?.at), [data?.at]);
+  // M3: fixture data. M4 replaces with `useBoardState()` (SWR over
+  // /api/monitor/board) + SSE-driven updates. The current-time
+  // stamp is deterministic across SSR hydration because we compute
+  // it once at mount.
+  const cards = FIXTURE_CARDS;
+  const nowLabel = useMemo(() => buildNowLabel(), []);
 
   const state = useMemo(
-    () =>
-      deriveBoardState(cards, {
-        nowLabel,
-        streamOnline: streamStatus === "open",
-      }),
-    [cards, nowLabel, streamStatus]
+    () => deriveBoardState(cards, { nowLabel, streamOnline: true }),
+    [cards, nowLabel]
   );
 
-  // Expansion preset follows the derived mode.
+  // Pick the expansion preset based on the board's mode so the
+  // first paint already shows the right shape:
+  //   - action  → ACTION_EXPANDED (operator-review + hermes-checking + deploying + done)
+  //   - calm    → CALM_EXPANDED (just done)
+  //   - default → DEFAULT_EXPANDED
   const initialExpanded =
     state.mode === "action"
       ? ACTION_EXPANDED
@@ -63,14 +60,7 @@ export default function MonitorPage() {
     <div className="hm-board">
       <TopStrip
         counts={state.counts}
-        liveAt={liveIndicatorLabel(streamStatus, nowLabel)}
-        deployHealth={streamStatus === "open" ? "OK" : "UNKNOWN"}
-        onRefresh={() => {
-          refresh().catch(() => {
-            // Errors surface via the SWR `error` field; the manual
-            // refresh button doesn't need its own toast for M4.
-          });
-        }}
+        liveAt={nowLabel.replace(/ utc$/i, "")}
       />
 
       <BoardNowBanner banner={state.banner} />
@@ -78,24 +68,20 @@ export default function MonitorPage() {
       <div className="hm-main">
         <div className="hm-lanes-wrap">
           <LanesBar counts={state.counts} mode={state.mode} />
-          {isLoading && !data ? (
-            <div className="hm-lane-empty" style={{ padding: "2rem" }}>
-              Loading board…
-            </div>
-          ) : (
-            <Board
-              grouped={state.grouped}
-              initialExpanded={initialExpanded}
-              renderCard={(card) => (
-                <CardRouter
-                  key={card.id}
-                  card={card}
-                  // M5 wires the actual drawer.
-                  onClick={() => undefined}
-                />
-              )}
-            />
-          )}
+          <Board
+            grouped={state.grouped}
+            initialExpanded={initialExpanded}
+            renderCard={(card) => (
+              <CardRouter
+                key={card.id}
+                card={card}
+                // M5 wires the actual drawer; M3's click is a no-op
+                // so the cards are still clickable (visual focus state)
+                // without yet routing to a detail surface.
+                onClick={() => undefined}
+              />
+            )}
+          />
         </div>
         {/* M7 mounts <CoPilotRail /> here. */}
       </div>
@@ -104,26 +90,11 @@ export default function MonitorPage() {
 }
 
 /**
- * Render the board's `at` timestamp as "HH:MM:SS utc". Falls back
- * to the local clock if data hasn't arrived yet.
+ * Render the current UTC time as "HH:MM:SS utc". Stable across SSR
+ * hydration because we compute once per mount and never re-render.
  */
-function buildNowLabel(serverAt: string | undefined): string {
-  const d = serverAt ? new Date(serverAt) : new Date();
+function buildNowLabel(): string {
+  const d = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())} utc`;
-}
-
-/**
- * Format the LIVE indicator label in the TopStrip. When the stream
- * is open, show the timestamp; when reconnecting, show
- * "reconnecting…"; when closed, show "—".
- */
-function liveIndicatorLabel(
-  status: "idle" | "connecting" | "open" | "reconnecting" | "closed",
-  nowLabel: string
-): string {
-  if (status === "open") return nowLabel.replace(/ utc$/i, "");
-  if (status === "reconnecting") return "reconnecting…";
-  if (status === "connecting") return "connecting…";
-  return "—";
 }
