@@ -99,6 +99,65 @@ test("autoDiscloseContent skips when the contract already recorded the hash", as
   );
 });
 
+test("openDispute uses the primary service signer participant path", async () => {
+  const gateway = new BlockchainGateway({ enabled: false });
+  const calls = [];
+  gateway.signer = {};
+  gateway.escrowContract = {
+    async openDispute(...args) {
+      calls.push(args);
+      return {
+        hash: "0xopen",
+        async wait() {
+          return { blockNumber: 7, status: 1 };
+        }
+      };
+    }
+  };
+
+  const receipt = await gateway.openDispute("wiki-job");
+
+  assert.deepEqual(calls, [[gateway.toJobId("wiki-job")]]);
+  assert.deepEqual(receipt, { txHash: "0xopen", blockNumber: 7, status: 1 });
+});
+
+test("resolveDispute uses the arbitrator signer contract when configured", async () => {
+  const gateway = new BlockchainGateway({ enabled: false });
+  const calls = [];
+  gateway.signer = {
+    marker: "service"
+  };
+  gateway.escrowContract = {
+    async resolveDispute() {
+      throw new Error("service signer must not resolve disputes when an arbitrator signer exists");
+    }
+  };
+  gateway.arbitratorSigner = {
+    marker: "arbitrator"
+  };
+  gateway.arbitratorEscrowContract = {
+    async resolveDispute(...args) {
+      calls.push(args);
+      return {
+        hash: "0xresolve",
+        async wait() {
+          return { blockNumber: 8, status: 1 };
+        }
+      };
+    }
+  };
+
+  const receipt = await gateway.resolveDispute("wiki-job", 0, "DISPUTE_LOST", "https://api.example.test/content/0xabc");
+
+  assert.deepEqual(calls, [[
+    gateway.toJobId("wiki-job"),
+    0,
+    gateway.toDisputeReasonCode("DISPUTE_LOST"),
+    "https://api.example.test/content/0xabc"
+  ]]);
+  assert.deepEqual(receipt, { txHash: "0xresolve", blockNumber: 8, status: 1 });
+});
+
 test("handleClaimTimeout reopens the canonical chain job id", async () => {
   const gateway = new BlockchainGateway({ enabled: false });
   const calls = [];

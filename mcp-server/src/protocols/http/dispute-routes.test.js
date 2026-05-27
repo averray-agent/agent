@@ -276,6 +276,47 @@ test("POST /disputes/:id/verdict records a local resolution and session transiti
   assert.ok(calls.some(([name]) => name === "respondWithMutationReceipt"));
 });
 
+test("POST /disputes/:id/verdict opens the chain dispute before arbitrator resolution", async () => {
+  const id = disputeIdForSession(SESSION.sessionId);
+  const gatewayCalls = [];
+  const { calls, response, route } = makeHarness({
+    auth: { wallet: ADMIN, claims: { roles: ["admin"] } },
+    payload: { verdict: "upheld", rationale: "Verifier rejection stands.", idempotencyKey: "idem-chain-1" },
+    gateway: {
+      isEnabled: () => true,
+      async getJob(jobId) {
+        gatewayCalls.push(["getJob", jobId]);
+        return { reward: JOB.rewardAmount, released: 0, state: 4 };
+      },
+      async openDispute(jobId) {
+        gatewayCalls.push(["openDispute", jobId]);
+        return { txHash: "0xopen", blockNumber: 41, status: 1 };
+      },
+      async resolveDispute(jobId, workerPayout, reasonCode, metadataURI) {
+        gatewayCalls.push(["resolveDispute", { jobId, workerPayout, reasonCode, metadataURI }]);
+        return { txHash: "0xresolve", blockNumber: 42, status: 1 };
+      }
+    }
+  });
+
+  const handled = await route({
+    request: { method: "POST" },
+    response,
+    url: new URL(`http://localhost/disputes/${id}/verdict`),
+    pathname: `/disputes/${id}/verdict`,
+  });
+
+  assert.equal(handled, true);
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.chainStatus, "confirmed");
+  assert.equal(response.body.chainDisputeTxHash, "0xopen");
+  assert.equal(response.body.txHash, "0xresolve");
+  assert.deepEqual(gatewayCalls.map(([name]) => name), ["getJob", "getJob", "openDispute", "resolveDispute"]);
+  assert.ok(calls.some(([name, detail]) => name === "upsertMutationReceipt"
+    && detail.receipt.chainDisputeTxHash === "0xopen"
+    && detail.receipt.txHash === "0xresolve"));
+});
+
 test("POST /disputes/:id/release requires a verdict before recording release", async () => {
   const id = disputeIdForSession(SESSION.sessionId);
   const { calls, route } = makeHarness({
