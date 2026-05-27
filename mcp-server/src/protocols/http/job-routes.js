@@ -33,8 +33,13 @@ export function createJobRoutes({
     }
 
     if (request.method === "GET" && pathname === "/jobs/definition") {
+      const includeArchived = isTruthyFlag(url.searchParams.get("includeArchived"));
+      const auth = includeArchived
+        ? await authMiddleware(request, url, { requireRole: "admin" })
+        : undefined;
       respond(response, 200, await service.getPublicJobDefinition(url.searchParams.get("jobId") ?? "", {
-        wallet: url.searchParams.get("wallet") ?? undefined
+        wallet: url.searchParams.get("wallet") ?? undefined,
+        ...(includeArchived ? { includeArchived: true, currentWallet: auth.wallet } : {})
       }));
       return true;
     }
@@ -165,4 +170,8 @@ export function createJobRoutes({
 
     return false;
   };
+}
+
+function isTruthyFlag(value) {
+  return ["1", "true", "yes"].includes(String(value ?? "").trim().toLowerCase());
 }
