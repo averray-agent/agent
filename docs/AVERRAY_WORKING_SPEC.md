@@ -920,7 +920,7 @@ Before public v1.0.0-rc1 launch:
 **Agent and operator distribution (v1.x launch-critical):**
 - [ ] `averray-agent-sdk` published as standalone npm/PyPI package (not buried in main repo)
 - [ ] Working agent example repo (`averray-example-agent` or similar) — `git clone && pnpm install && pnpm start` produces a working test agent in ≤ 5 minutes
-- [ ] Repo README absolute-path bugs fixed (currently references `/Users/pascalkuriger/...`)
+- [x] Repo README absolute-path bugs fixed (README uses repo-relative links)
 - [ ] Averray's MCP server registered in MCP server registry/discovery surfaces that exist at launch time
 - [ ] `/.well-known/agent-tools.json` discoverability live
 - [ ] Pre-launch content produced (≥ 3 technical blog posts ranking for agent-monetization queries — see `DISTRIBUTION_STRATEGY.md`)

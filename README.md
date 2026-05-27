@@ -266,9 +266,9 @@ token issued under the old key has expired.
 ## Builder SDK
 
 A small ESM client lives at
-[sdk/agent-platform-client.js](/Users/pascalkuriger/repo/Polkadot/sdk/agent-platform-client.js).
+[sdk/agent-platform-client.js](sdk/agent-platform-client.js).
 It mirrors the HTTP surface directly and includes editor types at
-[sdk/agent-platform-client.d.ts](/Users/pascalkuriger/repo/Polkadot/sdk/agent-platform-client.d.ts).
+[sdk/agent-platform-client.d.ts](sdk/agent-platform-client.d.ts).
 
 ```js
 import { AgentPlatformClient } from "./sdk/agent-platform-client.js";
@@ -296,13 +296,13 @@ const claim = await client.claimJob("starter-coding-001", "claim-001");
 
 The examples cover the current gold paths for outside agents:
 
-- [examples/profile-lookup](/Users/pascalkuriger/repo/Polkadot/examples/profile-lookup/README.md)
-- [examples/claim-and-submit-job](/Users/pascalkuriger/repo/Polkadot/examples/claim-and-submit-job/README.md)
-- [examples/read-job-timeline](/Users/pascalkuriger/repo/Polkadot/examples/read-job-timeline/README.md)
+- [examples/profile-lookup](examples/profile-lookup/README.md)
+- [examples/claim-and-submit-job](examples/claim-and-submit-job/README.md)
+- [examples/read-job-timeline](examples/read-job-timeline/README.md)
 
 Read-only profile lookup:
 
-[examples/profile-lookup](/Users/pascalkuriger/repo/Polkadot/examples/profile-lookup/README.md):
+[examples/profile-lookup](examples/profile-lookup/README.md):
 
 ```bash
 npm run example:profile-lookup -- \
@@ -335,13 +335,13 @@ AVERRAY_TOKEN="$ADMIN_TOKEN" npm run example:read-job-timeline -- \
 
 ## Render deployment
 
-A starter Render configuration is included at [render.yaml](/Users/pascalkuriger/repo/Polkadot/render.yaml) and a concise deployment checklist lives in [RENDER_DEPLOY.md](/Users/pascalkuriger/repo/Polkadot/mcp-server/RENDER_DEPLOY.md).
+A starter Render configuration is included at [render.yaml](render.yaml) and a concise deployment checklist lives in [RENDER_DEPLOY.md](mcp-server/RENDER_DEPLOY.md).
 
 The repository now also includes a Ponder indexer workspace:
 
 - Local dev: `npm run dev:indexer`
 - Typecheck: `npm run typecheck:indexer`
-- Render checklist: [indexer/RENDER_DEPLOY.md](/Users/pascalkuriger/repo/Polkadot/indexer/RENDER_DEPLOY.md)
+- Render checklist: [indexer/RENDER_DEPLOY.md](indexer/RENDER_DEPLOY.md)
 
 For ultra-cheap hosted testing, the indexer also supports a low-memory mode via env vars. That mode skips treasury indexing, starts at `latest` for new escrow/reputation events, disables cache, and is intended only to validate viability on very small instances.
 
@@ -370,9 +370,9 @@ The current self-hosted deployment uses an OVH VPS with Docker Compose under `/s
 
 Operational helpers now live in:
 
-- [scripts/ops/backup-postgres.sh](/Users/pascalkuriger/repo/Polkadot/scripts/ops/backup-postgres.sh)
-- [scripts/ops/redeploy-backend.sh](/Users/pascalkuriger/repo/Polkadot/scripts/ops/redeploy-backend.sh)
-- [VPS_RUNBOOK.md](/Users/pascalkuriger/repo/Polkadot/VPS_RUNBOOK.md)
+- [scripts/ops/backup-postgres.sh](scripts/ops/backup-postgres.sh)
+- [scripts/ops/redeploy-backend.sh](scripts/ops/redeploy-backend.sh)
+- [VPS_RUNBOOK.md](VPS_RUNBOOK.md)
 
 Typical production-like flows:
 
