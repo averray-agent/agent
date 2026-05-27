@@ -38,6 +38,6 @@ echo "Creating Postgres backup at $OUTPUT_FILE"
 docker compose \
   --project-directory "$STACK_ROOT" \
   -f "$COMPOSE_FILE" \
-  exec -T postgres pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" | gzip > "$OUTPUT_FILE"
+  exec -T postgres pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" </dev/null | gzip > "$OUTPUT_FILE"
 
 echo "Backup complete: $OUTPUT_FILE"

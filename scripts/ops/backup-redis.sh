@@ -57,7 +57,7 @@ redis_cli() {
   docker compose \
     --project-directory "$STACK_ROOT" \
     -f "$COMPOSE_FILE" \
-    exec -T "$REDIS_SERVICE" redis-cli "${REDIS_AUTH_ARGS[@]}" "$@"
+    exec -T "$REDIS_SERVICE" redis-cli "${REDIS_AUTH_ARGS[@]}" "$@" </dev/null
 }
 
 read_redis_config_value() {
@@ -88,6 +88,6 @@ echo "Creating Redis backup from $SNAPSHOT_PATH"
 docker compose \
   --project-directory "$STACK_ROOT" \
   -f "$COMPOSE_FILE" \
-  exec -T "$REDIS_SERVICE" cat "$SNAPSHOT_PATH" | gzip > "$OUTPUT_FILE"
+  exec -T "$REDIS_SERVICE" cat "$SNAPSHOT_PATH" </dev/null | gzip > "$OUTPUT_FILE"
 
 echo "Backup complete: $OUTPUT_FILE"
