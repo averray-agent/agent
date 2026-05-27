@@ -1,0 +1,225 @@
+name: Hosted Backup Restore Drill Proof
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_age_hours:
+        description: Maximum allowed age for newest Postgres and Redis backups.
+        required: false
+        default: "26"
+        type: string
+      evidence_max_checked_age_hours:
+        description: Maximum age for the saved readiness evidence at validation time.
+        required: false
+        default: "2"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hosted-backup-restore-drill-proof
+  cancel-in-progress: false
+
+jobs:
+  proof:
+    name: Run hosted backup restore drill proof
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_PORT: ${{ secrets.VPS_PORT }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      BACKUP_MAX_AGE_HOURS: ${{ inputs.max_age_hours }}
+      EVIDENCE_MAX_CHECKED_AGE_HOURS: ${{ inputs.evidence_max_checked_age_hours }}
+      BACKUP_READINESS_EVIDENCE_FILE: artifacts/backup-readiness-hosted-${{ github.run_id }}.json
+      RESTORE_DRILL_EVIDENCE_FILE: artifacts/restore-drill-hosted-${{ github.run_id }}.json
+      RESTORE_DRILL_VALIDATION_FILE: artifacts/restore-drill-validation-hosted-${{ github.run_id }}.json
+      LOCAL_BACKUP_DIR: artifacts/backups
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Validate proof inputs
+        run: |
+          set -euo pipefail
+          set +x
+
+          test -n "$VPS_HOST"
+          test -n "$VPS_USER"
+
+          case "$BACKUP_MAX_AGE_HOURS" in
+            ''|*[!0-9]*|0)
+              echo "::error::max_age_hours must be a positive integer."
+              exit 1
+              ;;
+          esac
+
+          case "$EVIDENCE_MAX_CHECKED_AGE_HOURS" in
+            ''|*[!0-9]*|0)
+              echo "::error::evidence_max_checked_age_hours must be a positive integer."
+              exit 1
+              ;;
+          esac
+
+      - name: Load VPS SSH key from 1Password (fail-closed)
+        uses: 1password/load-secrets-action@92467eb28f72e8255933372f1e0707c567ce2259 # v4.0.0
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN_PROD_CI }}
+          VPS_SSH_KEY_OP: op://prod-ci/vps-ssh-key/private key
+
+      - name: Verify VPS_SSH_KEY_OP loaded and shape-valid
+        run: |
+          set -euo pipefail
+          set +x
+
+          if [ -z "${VPS_SSH_KEY_OP:-}" ]; then
+            echo "::error::VPS_SSH_KEY_OP is empty after load step — check op://prod-ci/vps-ssh-key/private key."
+            exit 1
+          fi
+
+          case "$VPS_SSH_KEY_OP" in
+            -----BEGIN*PRIVATE\ KEY-----*)
+              echo "VPS_SSH_KEY_OP: SSH private-key shape valid"
+              ;;
+            *)
+              echo "::error::VPS_SSH_KEY_OP does not look like an OpenSSH/PEM private key"
+              exit 1
+              ;;
+          esac
+
+      - name: Configure SSH
+        run: |
+          set -euo pipefail
+          set +x
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY_OP" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p "${VPS_PORT:-22}" -H "$VPS_HOST" >> ~/.ssh/known_hosts
+
+      - name: Run backup readiness check on VPS
+        run: |
+          set -euo pipefail
+          set +x
+
+          mkdir -p artifacts
+          remote_env=$(printf 'MAX_AGE_HOURS=%q ' "$BACKUP_MAX_AGE_HOURS")
+
+          ssh -p "${VPS_PORT:-22}" \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=20 \
+            "$VPS_USER@$VPS_HOST" \
+            "${remote_env} bash -s" > "$BACKUP_READINESS_EVIDENCE_FILE" <<'REMOTE'
+          set -euo pipefail
+          cd /srv/agent-stack/app
+          ./scripts/ops/check-backup-readiness.sh --json --max-age-hours "$MAX_AGE_HOURS"
+          REMOTE
+
+          node scripts/ops/check-backup-readiness-evidence.mjs \
+            --file "$BACKUP_READINESS_EVIDENCE_FILE" \
+            --max-checked-age-hours "$EVIDENCE_MAX_CHECKED_AGE_HOURS" \
+            --json
+
+      - name: Copy selected backup files from VPS
+        run: |
+          set -euo pipefail
+          set +x
+
+          mkdir -p "$LOCAL_BACKUP_DIR/postgres" "$LOCAL_BACKUP_DIR/redis"
+
+          postgres_file="$(jq -r '.components[] | select(.name == "postgres") | .file' "$BACKUP_READINESS_EVIDENCE_FILE")"
+          redis_file="$(jq -r '.components[] | select(.name == "redis") | .file' "$BACKUP_READINESS_EVIDENCE_FILE")"
+
+          case "$postgres_file" in
+            /srv/agent-stack/backups/postgres/*.sql.gz) ;;
+            *)
+              echo "::error::unexpected Postgres backup path: $postgres_file"
+              exit 1
+              ;;
+          esac
+
+          case "$redis_file" in
+            /srv/agent-stack/backups/redis/*.rdb.gz) ;;
+            *)
+              echo "::error::unexpected Redis backup path: $redis_file"
+              exit 1
+              ;;
+          esac
+
+          scp -P "${VPS_PORT:-22}" \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=20 \
+            "$VPS_USER@$VPS_HOST:$postgres_file" \
+            "$LOCAL_BACKUP_DIR/postgres/"
+
+          scp -P "${VPS_PORT:-22}" \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=20 \
+            "$VPS_USER@$VPS_HOST:$redis_file" \
+            "$LOCAL_BACKUP_DIR/redis/"
+
+      - name: Restore backups into disposable containers
+        run: |
+          set -euo pipefail
+
+          node scripts/ops/run-restore-drill-from-backups.mjs \
+            --readiness "$BACKUP_READINESS_EVIDENCE_FILE" \
+            --backup-dir "$LOCAL_BACKUP_DIR" \
+            --out "$RESTORE_DRILL_EVIDENCE_FILE" \
+            --operator-name "GitHub Actions hosted restore drill" \
+            --operator-signature "gh-${GITHUB_RUN_ID}"
+
+      - name: Validate restore drill evidence
+        run: |
+          set -euo pipefail
+
+          node scripts/ops/check-restore-drill-evidence.mjs \
+            --file "$RESTORE_DRILL_EVIDENCE_FILE" \
+            --json > "$RESTORE_DRILL_VALIDATION_FILE"
+
+      - name: Summarize restore drill proof
+        if: always()
+        run: |
+          set -euo pipefail
+
+          {
+            echo "## Hosted Backup Restore Drill Proof"
+            echo
+            echo "- Evidence artifact: \`hosted-backup-restore-drill-proof-${GITHUB_RUN_ID}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ ! -s "$RESTORE_DRILL_EVIDENCE_FILE" ]; then
+            echo "- Status: \`missing_restore_evidence\`" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          postgres_file="$(jq -r '.postgres.backupFile' "$RESTORE_DRILL_EVIDENCE_FILE")"
+          postgres_rows="$(jq -r '.postgres.rowCheck.rowCount' "$RESTORE_DRILL_EVIDENCE_FILE")"
+          redis_file="$(jq -r '.redis.backupFile' "$RESTORE_DRILL_EVIDENCE_FILE")"
+          redis_dbsize="$(jq -r '.redis.dbSize' "$RESTORE_DRILL_EVIDENCE_FILE")"
+          validation_status="missing"
+          if [ -s "$RESTORE_DRILL_VALIDATION_FILE" ]; then
+            validation_status="$(jq -r '.status' "$RESTORE_DRILL_VALIDATION_FILE")"
+          fi
+
+          {
+            echo "- Validation: \`${validation_status}\`"
+            echo "- Postgres backup: \`${postgres_file}\`, schema-table count \`${postgres_rows}\`"
+            echo "- Redis backup: \`${redis_file}\`, DBSIZE \`${redis_dbsize}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload restore drill proof evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: hosted-backup-restore-drill-proof-${{ github.run_id }}
+          path: |
+            ${{ env.BACKUP_READINESS_EVIDENCE_FILE }}
+            ${{ env.RESTORE_DRILL_EVIDENCE_FILE }}
+            ${{ env.RESTORE_DRILL_VALIDATION_FILE }}
+          if-no-files-found: error
+          retention-days: 90

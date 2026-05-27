@@ -87,6 +87,28 @@ Postgres backup `agent-20260527-205325.sql.gz` and Redis backup
 validated with `overallStatus: "ok"`. This closes backup freshness only; the
 restore drill below still proves the files are usable.
 
+## Hosted restore drill proof
+
+The restore part can be captured from GitHub Actions with
+`Hosted Backup Restore Drill Proof`. It:
+
+1. Runs the hosted backup-readiness check against the VPS.
+2. Copies only the selected Postgres and Redis backup files from the VPS into
+   the GitHub runner.
+3. Restores Postgres into a disposable `postgres:16` container.
+4. Restores Redis into a disposable `redis:7` container.
+5. Writes and validates `restore-drill-evidence-v1`.
+
+The workflow uploads a 90-day artifact named
+`hosted-backup-restore-drill-proof-<run-id>` containing:
+
+- `backup-readiness-hosted-<run-id>.json`
+- `restore-drill-hosted-<run-id>.json`
+- `restore-drill-validation-hosted-<run-id>.json`
+
+This proof reads production backup files but does not connect to production
+Postgres or Redis and does not modify or delete backup files.
+
 ## Pre-drill checklist
 
 Before running the drill:

@@ -137,3 +137,24 @@ test("hosted backup snapshot proof creates backups before validating readiness",
   assert.match(workflow, /if-no-files-found: error/u);
   assert.match(workflow, /retention-days: 90/u);
 });
+
+test("hosted backup restore drill proof restores selected backups into disposable containers", async () => {
+  const workflow = await readFile(join(REPO_ROOT, ".github/workflows/hosted-backup-restore-drill-proof.yml"), "utf8");
+
+  assert.match(workflow, /workflow_dispatch:/u);
+  assert.match(workflow, /environment: production/u);
+  assert.match(workflow, /OP_SERVICE_ACCOUNT_TOKEN_PROD_CI/u);
+  assert.match(workflow, /VPS_SSH_KEY_OP: op:\/\/prod-ci\/vps-ssh-key\/private key/u);
+  assert.match(workflow, /BACKUP_READINESS_EVIDENCE_FILE: artifacts\/backup-readiness-hosted-\$\{\{ github\.run_id \}\}\.json/u);
+  assert.match(workflow, /RESTORE_DRILL_EVIDENCE_FILE: artifacts\/restore-drill-hosted-\$\{\{ github\.run_id \}\}\.json/u);
+  assert.match(workflow, /RESTORE_DRILL_VALIDATION_FILE: artifacts\/restore-drill-validation-hosted-\$\{\{ github\.run_id \}\}\.json/u);
+  assert.match(workflow, /node scripts\/ops\/check-backup-readiness-evidence\.mjs/u);
+  assert.match(workflow, /scp -P "\$\{VPS_PORT:-22\}"/u);
+  assert.match(workflow, /node scripts\/ops\/run-restore-drill-from-backups\.mjs/u);
+  assert.match(workflow, /node scripts\/ops\/check-restore-drill-evidence\.mjs/u);
+  assert.match(workflow, /uses: actions\/upload-artifact@(?:v7\b|[a-f0-9]{40} # v7\b)/u);
+  assert.match(workflow, /name: hosted-backup-restore-drill-proof-\$\{\{ github\.run_id \}\}/u);
+  assert.match(workflow, /path: \|\n\s+\$\{\{ env\.BACKUP_READINESS_EVIDENCE_FILE \}\}\n\s+\$\{\{ env\.RESTORE_DRILL_EVIDENCE_FILE \}\}\n\s+\$\{\{ env\.RESTORE_DRILL_VALIDATION_FILE \}\}/u);
+  assert.match(workflow, /if-no-files-found: error/u);
+  assert.match(workflow, /retention-days: 90/u);
+});

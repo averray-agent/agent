@@ -88,6 +88,8 @@ functions, but it does not close the live pause/unpause rehearsal box.
   plus a validated `docs/evidence/restore-drill-YYYY-MM-DD.json`
   artifact checked with `node scripts/ops/check-restore-drill-evidence.mjs`.
   Procedure: [BACKUP_RESTORE_DRILL.md](./BACKUP_RESTORE_DRILL.md).
+  Hosted path: run `Hosted Backup Restore Drill Proof`, then archive the
+  validated `restore-drill-hosted-<run-id>.json` evidence if it passes.
 
 Run backups (writes new snapshots):
 
