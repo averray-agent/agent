@@ -81,15 +81,18 @@ functions, but it does not close the live pause/unpause rehearsal box.
   `node scripts/ops/check-backup-readiness-evidence.mjs`.
 - [x] Latest Redis backup exists and is recent. Same readiness check,
   `components[redis].status == "ok"` and the saved JSON validator passes.
-- [ ] The monthly restore drill has been run on the current stack
+- [x] The monthly restore drill has been run on the current stack
   shape. Evidence: a dated line in the operator log naming both
   backup file paths used, the row count from the Postgres spot-check,
   and the key count from `DBSIZE` on the restored Redis container,
   plus a validated `docs/evidence/restore-drill-YYYY-MM-DD.json`
   artifact checked with `node scripts/ops/check-restore-drill-evidence.mjs`.
   Procedure: [BACKUP_RESTORE_DRILL.md](./BACKUP_RESTORE_DRILL.md).
-  Hosted path: run `Hosted Backup Restore Drill Proof`, then archive the
-  validated `restore-drill-hosted-<run-id>.json` evidence if it passes.
+  Hosted proof: GitHub Actions run `26537480496` on 2026-05-27 restored
+  `agent-20260527-205325.sql.gz` and `redis-20260527-205325.rdb.gz`
+  into disposable containers, validated
+  [`docs/evidence/restore-drill-hosted-2026-05-27.json`](./evidence/restore-drill-hosted-2026-05-27.json),
+  and reported Postgres schema-table count `0` plus Redis `DBSIZE` `2788`.
 
 Run backups (writes new snapshots):
 
