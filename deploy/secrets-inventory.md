@@ -135,3 +135,4 @@ grep -rE "from ['\"]drizzle-orm" --include='*.ts' --include='*.tsx' --include='*
 ```
 
 If either grep's result diverges from the above, **re-do the per-alert audit** before relying on the dismissals. The alerts themselves are dismissed via the GitHub Dependabot API with reason `tolerable_risk` and a link to this section.
+| `ARBITRATOR_SIGNER_PRIVATE_KEY` | `op://prod-critical/admin-eoa-testnet/private key` | ✅ yes (post-#557) | deployer | Private key for the on-chain arbitrator role used by `mcp-server/src/blockchain/gateway.js` `resolveDispute`. New admin EOA from the 2026-05-25 rotation (PR #522) — holds `arbitrators(newAdmin)=true` on `TreasuryPolicy`. Distinct from the KMS-backed blockchain signer (`KMS_KEY_ID`) and the JWT signer (`AWS_JWT_KEY_ID`). |
