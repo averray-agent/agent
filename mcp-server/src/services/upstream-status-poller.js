@@ -5,11 +5,16 @@ import {
   summarizeFundedJobs
 } from "../core/funded-jobs.js";
 
+const DEFAULT_STATUS_RECORD_LIMIT = 10_000;
+const UPSTREAM_STATUS_STATE_SCOPE = "upstream-status-poller";
+
 export class UpstreamStatusPollerService {
   constructor(stateStore, eventBus = undefined, {
     enabled = false,
     intervalMs = 24 * 60 * 60 * 1000,
     batchSize = 50,
+    statusRecordLimit = DEFAULT_STATUS_RECORD_LIMIT,
+    stateScope = UPSTREAM_STATUS_STATE_SCOPE,
     githubToken = undefined,
     githubApiBaseUrl = "https://api.github.com",
     fetchImpl = fetch,
@@ -20,6 +25,8 @@ export class UpstreamStatusPollerService {
     this.enabled = enabled;
     this.intervalMs = intervalMs;
     this.batchSize = batchSize;
+    this.statusRecordLimit = statusRecordLimit;
+    this.stateScope = stateScope;
     this.githubToken = githubToken;
     this.githubApiBaseUrl = githubApiBaseUrl;
     this.fetchImpl = fetchImpl;
@@ -44,12 +51,42 @@ export class UpstreamStatusPollerService {
   }
 
   async getStatus() {
+    const persisted = await this.stateStore.getServiceState?.(this.stateScope) ?? {};
+    const fundedJobs = await this.getFundedJobStatusSnapshot(new Date());
     return {
       enabled: this.enabled,
       running: this.running,
       intervalMs: this.intervalMs,
       batchSize: this.batchSize,
-      lastRun: this.lastRun
+      lastRun: this.lastRun ?? persisted.lastRun,
+      lastAttemptedAt: persisted.lastAttemptedAt,
+      lastFinishedAt: persisted.lastFinishedAt,
+      lastSuccessfulAt: persisted.lastSuccessfulAt,
+      lastFailureReason: persisted.lastFailureReason,
+      evidencePersistenceNote: typeof this.stateStore.upsertServiceState === "function"
+        ? "durable_service_state"
+        : "in_process_only",
+      fundedJobs
+    };
+  }
+
+  async getFundedJobStatusSnapshot(now = new Date()) {
+    const records = await this.stateStore.listFundedJobs?.({ limit: this.statusRecordLimit }) ?? [];
+    const finalRecords = records.filter(isFinalFundedJob);
+    const pollableRecords = records.filter((record) => !isFinalFundedJob(record) && isPollableFundedJobRecord(record, now));
+    const recordsWithUpstreamEvidence = records.filter(hasPollableUpstreamEvidence);
+    return {
+      totalRecords: records.length,
+      openRecords: records.length - finalRecords.length,
+      finalRecords: finalRecords.length,
+      pollableRecords: pollableRecords.length,
+      awaitingSubmissionRecords: records.filter((record) => !isFinalFundedJob(record) && record?.upstreamStatus === "not_submitted").length,
+      recordsWithUpstreamEvidence: recordsWithUpstreamEvidence.length,
+      byFinalStatus: countBy(records, (record) => record?.finalStatus ?? FUNDED_JOB_STATUSES.OPEN),
+      bySourceType: countBy(records, (record) => record?.sourceType ?? "unknown"),
+      lastFundedAt: maxIso(records.map((record) => record?.fundedAt)),
+      lastUpdatedAt: maxIso(records.map((record) => record?.updatedAt)),
+      recordLimit: this.statusRecordLimit
     };
   }
 
@@ -120,9 +157,21 @@ export class UpstreamStatusPollerService {
     }, this.intervalMs);
   }
 
-  finishRun(summary) {
+  async finishRun(summary) {
     summary.finishedAt = new Date().toISOString();
     this.lastRun = summary;
+    const previous = await this.stateStore.getServiceState?.(this.stateScope) ?? {};
+    await this.stateStore.upsertServiceState?.(this.stateScope, {
+      lastAttemptedAt: summary.startedAt,
+      lastFinishedAt: summary.finishedAt,
+      lastSuccessfulAt: summary.errors.length === 0
+        ? summary.finishedAt
+        : previous.lastSuccessfulAt,
+      lastFailureReason: summary.errors.length === 0
+        ? null
+        : `${summary.errors.length} upstream status poll error${summary.errors.length === 1 ? "" : "s"}`,
+      lastRun: summary
+    });
     return summary;
   }
 
@@ -356,6 +405,36 @@ export function loadUpstreamStatusPollerConfig(env = process.env) {
 function isPastDeadline(record, now) {
   const deadline = Date.parse(record?.deadlineAt ?? "");
   return Number.isFinite(deadline) && now.getTime() > deadline;
+}
+
+function hasPollableUpstreamEvidence(record) {
+  const upstream = record?.upstream;
+  if (upstream?.kind === "github_pull_request") {
+    return Boolean(upstream.owner && upstream.name && upstream.pullNumber);
+  }
+  if (upstream?.kind === "mediawiki_revision") {
+    return Boolean(!upstream.proposalOnly && upstream.editRevisionId && upstream.language);
+  }
+  return false;
+}
+
+function isPollableFundedJobRecord(record, now) {
+  return hasPollableUpstreamEvidence(record) || isPastDeadline(record, now);
+}
+
+function countBy(records, selector) {
+  return records.reduce((accumulator, record) => {
+    const key = selector(record);
+    accumulator[key] = (accumulator[key] ?? 0) + 1;
+    return accumulator;
+  }, {});
+}
+
+function maxIso(values) {
+  return values
+    .filter((value) => typeof value === "string" && Number.isFinite(Date.parse(value)))
+    .sort()
+    .at(-1);
 }
 
 function parseBooleanEnv(raw) {

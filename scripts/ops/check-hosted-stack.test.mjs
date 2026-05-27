@@ -62,6 +62,16 @@ test("operator reporting gate keeps email optional and guards secrets", async ()
   );
   assert.match(
     script,
+    /\.upstreamStatus\.fundedJobs\.totalRecords \| type\) == "number"/u,
+    "operator reporting instrumentation should expose bounded funded-job table counters"
+  );
+  assert.match(
+    script,
+    /\.upstreamStatus\.evidencePersistenceNote \| type\) == "string"/u,
+    "upstream status evidence should say whether service state is durable"
+  );
+  assert.match(
+    script,
     /\.bootstrapSelfReport\.to \| type\) == "array"/u,
     "operator reporting instrumentation should expose a concrete recipient list"
   );

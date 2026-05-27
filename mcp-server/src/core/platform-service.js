@@ -382,7 +382,25 @@ export class PlatformService {
         running: false,
         intervalMs: 0,
         batchSize: 0,
-        lastRun: undefined
+        lastRun: undefined,
+        lastAttemptedAt: undefined,
+        lastFinishedAt: undefined,
+        lastSuccessfulAt: undefined,
+        lastFailureReason: undefined,
+        evidencePersistenceNote: "poller not initialised",
+        fundedJobs: {
+          totalRecords: 0,
+          openRecords: 0,
+          finalRecords: 0,
+          pollableRecords: 0,
+          awaitingSubmissionRecords: 0,
+          recordsWithUpstreamEvidence: 0,
+          byFinalStatus: {},
+          bySourceType: {},
+          lastFundedAt: undefined,
+          lastUpdatedAt: undefined,
+          recordLimit: 0
+        }
       },
       this.bootstrapSelfReportScheduler?.getStatus?.() ?? {
         enabled: false,
