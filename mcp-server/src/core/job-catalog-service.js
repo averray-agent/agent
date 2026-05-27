@@ -412,12 +412,13 @@ export class JobCatalogService {
     return this.withLifecycle(this.requireJob(jobId));
   }
 
-  getPublicJobDefinition(jobId) {
+  getPublicJobDefinition(jobId, visibility = {}) {
     const job = this.requireJob(jobId);
-    if (!this.isVisibleJob(job)) {
+    const { now = new Date(), ...visibilityOptions } = visibility;
+    if (!this.isVisibleJob(job, { ...visibilityOptions, now })) {
       throw new NotFoundError(`Unknown job: ${jobId}`, "job_not_found");
     }
-    return this.withLifecycle(job);
+    return this.withLifecycle(job, now);
   }
 
   getClaimableJobDefinition(jobId) {

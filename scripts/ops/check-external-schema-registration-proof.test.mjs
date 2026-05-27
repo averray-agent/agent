@@ -10,6 +10,7 @@ import { checkExternalSchemaRegistrationProof } from "./check-external-schema-re
 const API_BASE_URL = "https://api.example.test";
 const ADMIN_TOKEN = "admin-token";
 const JOB_ID = "external-schema-proof-test";
+const NORMALIZED_UPPERCASE_JOB_ID = "external-schema-proof-2026-05-27t12-00-00-000z";
 const SCHEMA_REF = "schema://jobs/external-proof-output";
 const SCHEMA_URL = "https://schemas.example.com/jobs/external-proof-output.json";
 const ISSUER = "0xF4Bc6F29F319dE2e6A9197F3f214a3C4B6138BAB";
@@ -55,6 +56,10 @@ test("checkExternalSchemaRegistrationProof creates an archived job and proves re
   assert.equal(normalizedRegistrations[0].signatureVerified, true);
   assert.equal(normalizedRegistrations[0].trusted, true);
 
+  const definitionCall = calls.find((call) => call.method === "GET" && call.url.startsWith(`${API_BASE_URL}/jobs/definition?`));
+  assert.equal(definitionCall.authorization, `Bearer ${ADMIN_TOKEN}`);
+  assert.equal(definitionCall.url, `${API_BASE_URL}/jobs/definition?jobId=${encodeURIComponent(JOB_ID)}&includeArchived=true`);
+
   const validationCalls = calls.filter((call) => call.method === "POST" && call.url === `${API_BASE_URL}/jobs/validate-submission`);
   assert.equal(validationCalls.length, 2);
   assert.deepEqual(validationCalls[0].body, {
@@ -68,6 +73,27 @@ test("checkExternalSchemaRegistrationProof creates an archived job and proves re
   const evidenceText = await readFile(evidenceFile, "utf8");
   assert.doesNotMatch(evidenceText, new RegExp(ADMIN_TOKEN, "u"));
   assert.equal(JSON.parse(evidenceText).schemaRef, SCHEMA_REF);
+});
+
+test("checkExternalSchemaRegistrationProof normalizes jobId before create and lookup", async () => {
+  const { fetch, calls } = fakeExternalSchemaFetch({ expectedJobId: NORMALIZED_UPPERCASE_JOB_ID });
+
+  const evidence = await checkExternalSchemaRegistrationProof({
+    env: {
+      ADMIN_JWT: ADMIN_TOKEN,
+      API_BASE_URL,
+      EXTERNAL_SCHEMA_PROOF_JOB_ID: "External Schema Proof 2026-05-27T12:00:00.000Z"
+    },
+    fetchImpl: fetch,
+    log: () => {},
+    now: () => new Date("2026-05-26T12:00:00.000Z")
+  });
+
+  assert.equal(evidence.jobId, NORMALIZED_UPPERCASE_JOB_ID);
+  const createCall = calls.find((call) => call.method === "POST" && call.url === `${API_BASE_URL}/admin/jobs`);
+  assert.equal(createCall.body.id, NORMALIZED_UPPERCASE_JOB_ID);
+  const definitionCall = calls.find((call) => call.method === "GET" && call.url.startsWith(`${API_BASE_URL}/jobs/definition?`));
+  assert.equal(definitionCall.url, `${API_BASE_URL}/jobs/definition?jobId=${encodeURIComponent(NORMALIZED_UPPERCASE_JOB_ID)}&includeArchived=true`);
 });
 
 test("checkExternalSchemaRegistrationProof fails closed before network calls without ADMIN_JWT", async () => {
@@ -123,6 +149,7 @@ test("checkExternalSchemaRegistrationProof rejects definitions missing trust met
 
 function fakeExternalSchemaFetch({
   adminSession = defaultAdminSession(),
+  expectedJobId = JOB_ID,
   omitTrustMetadata = false
 } = {}) {
   const calls = [];
@@ -143,16 +170,16 @@ function fakeExternalSchemaFetch({
 
     if (call.url === `${API_BASE_URL}/admin/jobs` && method === "POST") {
       return json({
-        id: call.body.id,
+        id: normalizeJobIdForTest(call.body.id),
         outputSchemaRef: call.body.outputSchemaRef,
         schemaRegistrations: call.body.schemaRegistrations,
         lifecycle: call.body.lifecycle
       }, 201);
     }
 
-    if (call.url === `${API_BASE_URL}/jobs/definition?jobId=${encodeURIComponent(JOB_ID)}`) {
+    if (call.url === `${API_BASE_URL}/jobs/definition?jobId=${encodeURIComponent(expectedJobId)}&includeArchived=true`) {
       return json({
-        id: JOB_ID,
+        id: expectedJobId,
         submissionContract: {
           registeredSchema: true,
           outputSchemaRef: SCHEMA_REF,
@@ -228,4 +255,12 @@ function text(body, status = 200) {
     status,
     text: async () => body
   };
+}
+
+function normalizeJobIdForTest(value) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }

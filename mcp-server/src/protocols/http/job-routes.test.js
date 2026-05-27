@@ -59,8 +59,8 @@ function makeHarness(overrides = {}) {
     ...overrides.service,
   };
   const route = createJobRoutes({
-    authMiddleware: async (_request, _url) => {
-      calls.push(["authMiddleware"]);
+    authMiddleware: async (_request, _url, options) => {
+      calls.push(options === undefined ? ["authMiddleware"] : ["authMiddleware", options]);
       return auth;
     },
     enforceLimit: async (bucket, key, limits) => {
@@ -149,6 +149,25 @@ test("GET /jobs/definition forwards job and optional wallet", async () => {
   assert.deepEqual(calls.slice(0, 2), [
     ["getPublicJobDefinition", { jobId: "job-1", options: { wallet: "0xabc" } }],
     ["respond", { statusCode: 200, body: { id: "job-1", wallet: "0xabc" }, headers: {} }],
+  ]);
+});
+
+test("GET /jobs/definition requires admin auth to include archived jobs", async () => {
+  const { calls, response, route } = makeHarness();
+
+  assert.equal(await invoke(route, { path: "/jobs/definition?jobId=archive-1&includeArchived=true", response }), true);
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(calls.slice(0, 3), [
+    ["authMiddleware", { requireRole: "admin" }],
+    ["getPublicJobDefinition", {
+      jobId: "archive-1",
+      options: {
+        wallet: undefined,
+        includeArchived: true,
+        currentWallet: WALLET
+      }
+    }],
+    ["respond", { statusCode: 200, body: { id: "archive-1", wallet: undefined }, headers: {} }],
   ]);
 });
 

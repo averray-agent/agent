@@ -160,6 +160,9 @@ test("job lifecycle supports archival and claimability guardrails", () => {
     () => service.getPublicJobDefinition("archive-lifecycle-001"),
     /Unknown job: archive-lifecycle-001/
   );
+  const archivedDefinition = service.getPublicJobDefinition("archive-lifecycle-001", { includeArchived: true });
+  assert.equal(archivedDefinition.id, "archive-lifecycle-001");
+  assert.equal(archivedDefinition.lifecycle.state, "archived");
   assert.throws(
     () => service.getClaimableJobDefinition("archive-lifecycle-001"),
     /not claimable/

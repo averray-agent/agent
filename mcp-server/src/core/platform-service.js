@@ -593,9 +593,21 @@ export class PlatformService {
   }
 
   async getPublicJobDefinition(jobId, options = {}) {
-    const { wallet, currentWallet, now = new Date() } = options;
+    const {
+      wallet,
+      currentWallet,
+      now = new Date(),
+      includeArchived = false,
+      includePaused = false,
+      includeStale = false
+    } = options;
     return this.attachClaimState(
-      this.jobCatalogService.getPublicJobDefinition(jobId),
+      this.jobCatalogService.getPublicJobDefinition(jobId, {
+        includeArchived,
+        includePaused,
+        includeStale,
+        now
+      }),
       { wallet: currentWallet ?? wallet, now }
     );
   }

@@ -48,7 +48,10 @@ export async function checkExternalSchemaRegistrationProof({
 
   const apiBaseUrl = stripTrailingSlash(env.API_BASE_URL || DEFAULT_API_BASE_URL);
   const runStamp = `${now().toISOString().replace(/[:.]/gu, "-")}-${randomUUID().slice(0, 8)}`;
-  const jobId = string(env.EXTERNAL_SCHEMA_PROOF_JOB_ID) || `external-schema-proof-${runStamp}`;
+  const jobId = normalizeJobId(string(env.EXTERNAL_SCHEMA_PROOF_JOB_ID) || `external-schema-proof-${runStamp}`);
+  if (!jobId) {
+    throw new Error("External schema proof jobId is empty after normalization.");
+  }
   const idempotencyKey = string(env.EXTERNAL_SCHEMA_PROOF_IDEMPOTENCY_KEY) || `external-schema-proof:${jobId}`;
   const evidenceFile = string(env.EXTERNAL_SCHEMA_PROOF_EVIDENCE_FILE);
 
@@ -91,8 +94,12 @@ export async function checkExternalSchemaRegistrationProof({
     lifecycleStatus: created.lifecycle?.status
   };
 
-  log("Checking public job definition exposes registered schema trust metadata");
-  const definition = await fetchJson(fetchImpl, `${apiBaseUrl}/jobs/definition?jobId=${encodeURIComponent(jobId)}`);
+  log("Checking authenticated archived job definition exposes registered schema trust metadata");
+  const definition = await fetchJson(
+    fetchImpl,
+    `${apiBaseUrl}/jobs/definition?jobId=${encodeURIComponent(jobId)}&includeArchived=true`,
+    { headers: bearer(adminToken) }
+  );
   assert.equal(definition.id, jobId);
   assert.equal(definition.submissionContract?.registeredSchema, true);
   assert.equal(definition.submissionContract?.outputSchemaRef, DEFAULT_SCHEMA_REF);
@@ -262,6 +269,13 @@ function stripTrailingSlash(value) {
 
 function string(value) {
   return String(value ?? "").trim();
+}
+
+function normalizeJobId(value) {
+  return string(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 function truncate(value, max = 400) {
