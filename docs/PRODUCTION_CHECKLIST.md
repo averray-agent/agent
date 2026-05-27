@@ -96,6 +96,11 @@ Run backups (writes new snapshots):
 ./scripts/ops/backup-redis.sh
 ```
 
+Or use GitHub Actions to create and prove hosted snapshots in one operator-run:
+run the `Hosted Backup Snapshot Proof` workflow from the production environment.
+It runs the two scripts above on the VPS, then uploads the readiness JSON and
+validator result as `hosted-backup-snapshot-proof-<run-id>`.
+
 Run the readiness check (read-only, never restores or modifies a
 backup file):
 

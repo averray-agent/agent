@@ -1,0 +1,212 @@
+name: Hosted Backup Snapshot Proof
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_age_hours:
+        description: Maximum allowed age for newest Postgres and Redis backups after the snapshot run.
+        required: false
+        default: "26"
+        type: string
+      evidence_max_checked_age_hours:
+        description: Maximum age for the saved readiness evidence at validation time.
+        required: false
+        default: "2"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hosted-backup-snapshot-proof
+  cancel-in-progress: false
+
+jobs:
+  proof:
+    name: Run hosted backup snapshot proof
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_PORT: ${{ secrets.VPS_PORT }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      BACKUP_MAX_AGE_HOURS: ${{ inputs.max_age_hours }}
+      EVIDENCE_MAX_CHECKED_AGE_HOURS: ${{ inputs.evidence_max_checked_age_hours }}
+      BACKUP_SNAPSHOT_LOG_FILE: artifacts/backup-snapshot-hosted-${{ github.run_id }}.log
+      BACKUP_READINESS_EVIDENCE_FILE: artifacts/backup-readiness-hosted-${{ github.run_id }}.json
+      BACKUP_READINESS_VALIDATION_FILE: artifacts/backup-readiness-validation-hosted-${{ github.run_id }}.json
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Validate proof inputs
+        run: |
+          set -euo pipefail
+          set +x
+
+          test -n "$VPS_HOST"
+          test -n "$VPS_USER"
+
+          case "$BACKUP_MAX_AGE_HOURS" in
+            ''|*[!0-9]*|0)
+              echo "::error::max_age_hours must be a positive integer."
+              exit 1
+              ;;
+          esac
+
+          case "$EVIDENCE_MAX_CHECKED_AGE_HOURS" in
+            ''|*[!0-9]*|0)
+              echo "::error::evidence_max_checked_age_hours must be a positive integer."
+              exit 1
+              ;;
+          esac
+
+      - name: Load VPS SSH key from 1Password (fail-closed)
+        uses: 1password/load-secrets-action@92467eb28f72e8255933372f1e0707c567ce2259 # v4.0.0
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN_PROD_CI }}
+          VPS_SSH_KEY_OP: op://prod-ci/vps-ssh-key/private key
+
+      - name: Verify VPS_SSH_KEY_OP loaded and shape-valid
+        run: |
+          set -euo pipefail
+          set +x
+
+          if [ -z "${VPS_SSH_KEY_OP:-}" ]; then
+            echo "::error::VPS_SSH_KEY_OP is empty after load step — check op://prod-ci/vps-ssh-key/private key."
+            exit 1
+          fi
+
+          case "$VPS_SSH_KEY_OP" in
+            -----BEGIN*PRIVATE\ KEY-----*)
+              echo "VPS_SSH_KEY_OP: SSH private-key shape valid"
+              ;;
+            *)
+              echo "::error::VPS_SSH_KEY_OP does not look like an OpenSSH/PEM private key"
+              exit 1
+              ;;
+          esac
+
+      - name: Configure SSH
+        run: |
+          set -euo pipefail
+          set +x
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY_OP" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p "${VPS_PORT:-22}" -H "$VPS_HOST" >> ~/.ssh/known_hosts
+
+      - name: Run hosted backup snapshot on VPS
+        run: |
+          set -euo pipefail
+          set +x
+
+          mkdir -p artifacts
+
+          ssh -p "${VPS_PORT:-22}" \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=20 \
+            "$VPS_USER@$VPS_HOST" \
+            "bash -s" > "$BACKUP_SNAPSHOT_LOG_FILE" <<'REMOTE'
+          set -euo pipefail
+          cd /srv/agent-stack/app
+          ./scripts/ops/backup-postgres.sh
+          ./scripts/ops/backup-redis.sh
+          REMOTE
+
+      - name: Run backup readiness check on VPS
+        run: |
+          set -euo pipefail
+          set +x
+
+          remote_env=$(printf 'MAX_AGE_HOURS=%q ' "$BACKUP_MAX_AGE_HOURS")
+
+          ssh -p "${VPS_PORT:-22}" \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=20 \
+            "$VPS_USER@$VPS_HOST" \
+            "${remote_env} bash -s" > "$BACKUP_READINESS_EVIDENCE_FILE" <<'REMOTE'
+          set -euo pipefail
+          cd /srv/agent-stack/app
+          ./scripts/ops/check-backup-readiness.sh --json --max-age-hours "$MAX_AGE_HOURS"
+          REMOTE
+
+      - name: Validate saved backup readiness evidence
+        run: |
+          set -euo pipefail
+
+          node scripts/ops/check-backup-readiness-evidence.mjs \
+            --file "$BACKUP_READINESS_EVIDENCE_FILE" \
+            --max-checked-age-hours "$EVIDENCE_MAX_CHECKED_AGE_HOURS" \
+            --json > "$BACKUP_READINESS_VALIDATION_FILE"
+
+      - name: Summarize backup snapshot proof
+        if: always()
+        run: |
+          set -euo pipefail
+
+          evidence_file="$BACKUP_READINESS_EVIDENCE_FILE"
+          validation_file="$BACKUP_READINESS_VALIDATION_FILE"
+
+          {
+            echo "## Hosted Backup Snapshot Proof"
+            echo
+            echo "- Evidence artifact: \`hosted-backup-snapshot-proof-${GITHUB_RUN_ID}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -s "$BACKUP_SNAPSHOT_LOG_FILE" ]; then
+            postgres_backup="$(grep -E 'Backup complete: .+\.sql\.gz$' "$BACKUP_SNAPSHOT_LOG_FILE" | tail -1 | sed 's/^Backup complete: //' || true)"
+            redis_backup="$(grep -E 'Backup complete: .+\.rdb\.gz$' "$BACKUP_SNAPSHOT_LOG_FILE" | tail -1 | sed 's/^Backup complete: //' || true)"
+            if [ -n "$postgres_backup" ]; then
+              echo "- Created Postgres backup: \`$(basename "$postgres_backup")\`" >> "$GITHUB_STEP_SUMMARY"
+            fi
+            if [ -n "$redis_backup" ]; then
+              echo "- Created Redis backup: \`$(basename "$redis_backup")\`" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          else
+            echo "- Snapshot log: \`missing\`" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          if [ ! -s "$evidence_file" ]; then
+            echo "- Status: \`missing_readiness_evidence\`" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          overall="$(jq -r '.overallStatus' "$evidence_file")"
+          checked_at="$(jq -r '.checkedAt' "$evidence_file")"
+          max_age="$(jq -r '.maxAgeHours' "$evidence_file")"
+          postgres_status="$(jq -r '.components[] | select(.name == "postgres") | .status' "$evidence_file")"
+          postgres_age="$(jq -r '.components[] | select(.name == "postgres") | .ageSeconds' "$evidence_file")"
+          postgres_file="$(basename "$(jq -r '.components[] | select(.name == "postgres") | .file' "$evidence_file")")"
+          redis_status="$(jq -r '.components[] | select(.name == "redis") | .status' "$evidence_file")"
+          redis_age="$(jq -r '.components[] | select(.name == "redis") | .ageSeconds' "$evidence_file")"
+          redis_file="$(basename "$(jq -r '.components[] | select(.name == "redis") | .file' "$evidence_file")")"
+          validation_status="missing"
+          if [ -s "$validation_file" ]; then
+            validation_status="$(jq -r '.status' "$validation_file")"
+          fi
+
+          {
+            echo "- Status: \`${overall}\`"
+            echo "- Validation: \`${validation_status}\`"
+            echo "- Checked at: \`${checked_at}\`"
+            echo "- Max age: \`${max_age}h\`"
+            echo "- Postgres: \`${postgres_status}\`, age \`${postgres_age}s\`, file \`${postgres_file}\`"
+            echo "- Redis: \`${redis_status}\`, age \`${redis_age}s\`, file \`${redis_file}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload backup snapshot proof evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: hosted-backup-snapshot-proof-${{ github.run_id }}
+          path: |
+            ${{ env.BACKUP_SNAPSHOT_LOG_FILE }}
+            ${{ env.BACKUP_READINESS_EVIDENCE_FILE }}
+            ${{ env.BACKUP_READINESS_VALIDATION_FILE }}
+          if-no-files-found: error
+          retention-days: 90

@@ -60,6 +60,25 @@ The workflow uploads a 90-day artifact named
 validator result. This proves backup freshness only; the separate restore drill
 below still proves the backups are usable.
 
+If the readiness proof reports `missing_directory` or `no_files_match`, run the
+`Hosted Backup Snapshot Proof` workflow. It SSHes to the VPS, runs the existing
+snapshot scripts:
+
+```bash
+./scripts/ops/backup-postgres.sh
+./scripts/ops/backup-redis.sh
+```
+
+Then it immediately runs the same readiness check and validator, uploading a
+90-day artifact named `hosted-backup-snapshot-proof-<run-id>` with:
+
+- `backup-snapshot-hosted-<run-id>.log`
+- `backup-readiness-hosted-<run-id>.json`
+- `backup-readiness-validation-hosted-<run-id>.json`
+
+This workflow writes new backup files but does not restore, delete, or modify
+production data.
+
 ## Pre-drill checklist
 
 Before running the drill:
