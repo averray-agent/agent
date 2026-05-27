@@ -169,8 +169,8 @@ discipline for custom/off-platform schemas.
   validation traces plus the verifier-input and funding modes in the launch
   evidence gate
 - the generic claim-and-submit helper now uses the same schema-native readiness
-  guard before claim, so the pattern is available outside the product-proof
-  smoke loop
+  guard before claim and resolves the expected schema from definition/preflight
+  first, so advertised contract drift blocks before any claim is consumed
 
 ### Gaps today
 

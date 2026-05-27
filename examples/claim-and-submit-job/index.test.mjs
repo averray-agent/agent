@@ -51,6 +51,7 @@ test("buildReadinessSummary treats claimStatus as the claimability source", () =
 
   assert.equal(readiness.canAttemptClaim, true);
   assert.equal(readiness.reason, "claimable");
+  assert.equal(readiness.expectedSubmissionSchemaRef, null);
 });
 
 test("runClaimAndSubmit dry-run avoids claim and submit mutations", async () => {
@@ -64,6 +65,7 @@ test("runClaimAndSubmit dry-run avoids claim and submit mutations", async () => 
 
   assert.equal(summary.mode, "dry_run");
   assert.equal(summary.readiness.canAttemptClaim, true);
+  assert.equal(summary.readiness.expectedSubmissionSchemaRef, "schema://jobs/example-output");
   assert.deepEqual(calls, [
     "https://api.example/onboarding",
     "https://api.example/jobs/definition?jobId=job-1",
@@ -87,6 +89,7 @@ test("runClaimAndSubmit executes claim, submit, and timeline reads when requeste
   assert.equal(summary.mode, "executed");
   assert.equal(summary.claim.sessionId, "session-1");
   assert.equal(summary.validation.valid, true);
+  assert.equal(summary.validation.schemaRef, "schema://jobs/example-output");
   assert.equal(summary.validationReadiness.validatedBeforeClaim, true);
   assert.equal(summary.validationReadiness.invalidWrappedOutput.valid, false);
   assert.equal(summary.submit.status, "submitted");
@@ -116,6 +119,26 @@ test("runClaimAndSubmit blocks before claim when local draft validation fails", 
   assert.ok(!calls.includes("https://api.example/jobs/claim"));
 });
 
+test("runClaimAndSubmit blocks before claim when validation schema drifts from advertised contract", async () => {
+  const calls = [];
+  const summary = await runClaimAndSubmit({
+    apiUrl: "https://api.example",
+    token: "token",
+    jobId: "job-1",
+    submission: { result: "complete" },
+    execute: true,
+    fetchImpl: fakeFetch(calls, { validationSchemaRef: "schema://jobs/other-output" })
+  });
+
+  assert.equal(summary.mode, "blocked");
+  assert.equal(summary.readiness.expectedSubmissionSchemaRef, "schema://jobs/example-output");
+  assert.equal(summary.validation.schemaRef, "schema://jobs/other-output");
+  assert.equal(summary.claim, null);
+  assert.equal(summary.submit, null);
+  assert.ok(calls.includes("https://api.example/jobs/validate-submission"));
+  assert.ok(!calls.includes("https://api.example/jobs/claim"));
+});
+
 test("summarizeTimeline returns compact timeline metadata", () => {
   assert.deepEqual(summarizeTimeline({
     timelineVersion: "v2",
@@ -129,7 +152,12 @@ test("summarizeTimeline returns compact timeline metadata", () => {
   });
 });
 
-function fakeFetch(calls, { validationValid = true } = {}) {
+function fakeFetch(calls, {
+  definitionSchemaRef = "schema://jobs/example-output",
+  preflightSchemaRef = "schema://jobs/example-output",
+  validationSchemaRef = "schema://jobs/example-output",
+  validationValid = true
+} = {}) {
   return async (url, options = {}) => {
     calls.push(String(url));
     if (String(url).endsWith("/onboarding")) {
@@ -138,11 +166,17 @@ function fakeFetch(calls, { validationValid = true } = {}) {
     if (String(url).includes("/jobs/definition")) {
       return jsonResponse({
         id: "job-1",
+        outputSchemaRef: definitionSchemaRef,
+        submissionContract: {
+          outputSchemaRef: definitionSchemaRef,
+          schemaValidates: "payload.submission",
+          doNotWrapInOutput: true
+        },
         claimStatus: { claimState: "open", claimable: true, reason: "claimable" }
       });
     }
     if (String(url).includes("/jobs/preflight")) {
-      return jsonResponse({ claimable: true, reason: "claimable" });
+      return jsonResponse({ claimable: true, reason: "claimable", requiredOutputSchema: preflightSchemaRef });
     }
     if (String(url).endsWith("/jobs/validate-submission")) {
       assert.equal(options.method, "POST");
@@ -152,7 +186,7 @@ function fakeFetch(calls, { validationValid = true } = {}) {
         return jsonResponse({
           valid: false,
           submitSafe: false,
-          schemaRef: "schema://jobs/example-output",
+          schemaRef: validationSchemaRef,
           schemaValidates: "payload.submission",
           message: "Send the structured proposal object directly as submission, not under submission.output.",
           path: "payload.submission.output",
@@ -166,11 +200,11 @@ function fakeFetch(calls, { validationValid = true } = {}) {
         ? {
             valid: true,
             submitSafe: true,
-            schemaRef: "schema://jobs/example-output",
+            schemaRef: validationSchemaRef,
             schemaValidates: "payload.submission",
             submissionKind: "structured"
           }
-        : { valid: false, schemaRef: "schema://jobs/example-output", message: "submission.result is required" });
+        : { valid: false, schemaRef: validationSchemaRef, message: "submission.result is required" });
     }
     if (String(url).endsWith("/jobs/claim")) {
       assert.equal(options.method, "POST");

@@ -30,6 +30,31 @@ export function createIdempotencyKey(prefix = "run") {
   return `${safePrefix}-${timestamp}-${suffix}`;
 }
 
+/**
+ * Resolve the output schema a worker should expect from job definition and
+ * preflight surfaces. Returns undefined for legacy/plain-evidence jobs.
+ */
+export function resolveExpectedSubmissionSchemaRef(...records) {
+  const refs = [];
+  for (const record of records) {
+    collectSubmissionSchemaRefs(record, refs);
+  }
+  const uniqueRefs = [...new Set(refs)];
+  if (uniqueRefs.length > 1) {
+    throw new AgentPlatformValidationError({
+      message: `Conflicting submission schema refs: ${uniqueRefs.join(", ")}.`,
+      validation: {
+        valid: false,
+        submitSafe: false,
+        code: "submission_schema_ref_conflict",
+        schemaRefs: uniqueRefs,
+        message: "Job definition and preflight returned conflicting submission schema refs."
+      }
+    });
+  }
+  return uniqueRefs[0];
+}
+
 function generateRandomSuffix() {
   const cryptoImpl = globalThis.crypto;
   if (cryptoImpl?.randomUUID) {
@@ -633,6 +658,22 @@ export class AgentPlatformValidationError extends Error {
 
 function isSubmitSafeValidation(validation) {
   return validation?.valid === true && validation?.submitSafe !== false;
+}
+
+function collectSubmissionSchemaRefs(record, refs) {
+  if (!isStructuredObject(record)) return;
+  pushSchemaRef(refs, record.submissionContract?.outputSchemaRef);
+  pushSchemaRef(refs, record.submissionContract?.schemaRef);
+  pushSchemaRef(refs, record.requiredOutputSchema);
+  pushSchemaRef(refs, record.outputSchemaRef);
+  pushSchemaRef(refs, record.source?.outputSchemaRef);
+  pushSchemaRef(refs, record.verification?.evidenceSchemaRef);
+}
+
+function pushSchemaRef(refs, value) {
+  if (typeof value !== "string") return;
+  const trimmed = value.trim();
+  if (trimmed) refs.push(trimmed);
 }
 
 function isStructuredObject(value) {

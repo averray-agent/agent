@@ -16,6 +16,12 @@ export const DEFAULT_ESCROW_ASSET_SYMBOL: "USDC";
  */
 export function createIdempotencyKey(prefix?: string): IdempotencyKey;
 
+/**
+ * Resolve the output schema ref advertised by job definition/preflight records.
+ * Throws AgentPlatformValidationError when the records disagree.
+ */
+export function resolveExpectedSubmissionSchemaRef(...records: unknown[]): BuiltinJobSchemaRef | string | undefined;
+
 export interface AgentPlatformClientOptions {
   baseUrl: string;
   token?: string;

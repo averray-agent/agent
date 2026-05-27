@@ -5,7 +5,8 @@ import {
   AgentPlatformApiError,
   AgentPlatformClient,
   AgentPlatformValidationError,
-  createIdempotencyKey
+  createIdempotencyKey,
+  resolveExpectedSubmissionSchemaRef
 } from "./agent-platform-client.js";
 
 test("builder read helpers call the expected public endpoints", async () => {
@@ -340,6 +341,38 @@ test("schema-native readiness validates direct output and rejected wrapper befor
     "https://api.example.test/jobs/validate-submission",
     "https://api.example.test/jobs/validate-submission"
   ]);
+});
+
+test("resolveExpectedSubmissionSchemaRef reads definition and preflight schema refs", () => {
+  assert.equal(resolveExpectedSubmissionSchemaRef(
+    {
+      outputSchemaRef: "schema://jobs/pr-review-findings-output",
+      submissionContract: {
+        outputSchemaRef: "schema://jobs/pr-review-findings-output"
+      }
+    },
+    {
+      requiredOutputSchema: "schema://jobs/pr-review-findings-output"
+    }
+  ), "schema://jobs/pr-review-findings-output");
+
+  assert.equal(resolveExpectedSubmissionSchemaRef({ claimStatus: { claimable: true } }), undefined);
+
+  assert.throws(
+    () => resolveExpectedSubmissionSchemaRef(
+      { outputSchemaRef: "schema://jobs/pr-review-findings-output" },
+      { requiredOutputSchema: "schema://jobs/release-readiness-output" }
+    ),
+    (error) => {
+      assert.ok(error instanceof AgentPlatformValidationError);
+      assert.equal(error.code, "submission_schema_ref_conflict");
+      assert.deepEqual(error.validation.schemaRefs, [
+        "schema://jobs/pr-review-findings-output",
+        "schema://jobs/release-readiness-output"
+      ]);
+      return true;
+    }
+  );
 });
 
 test("operator surface helpers call policy, audit, and alert endpoints", async () => {
