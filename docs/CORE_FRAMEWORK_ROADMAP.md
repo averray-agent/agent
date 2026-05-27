@@ -327,6 +327,13 @@ emit into it with the same topic taxonomy.
 - the operator app exposes visible job/session timeline controls for source,
   topic, phase, severity, wallet, and correlation-id filters, and keeps the
   filtered state in the URL for refreshable evidence links
+- event topic classification now covers the known non-chain producer families:
+  policy, capability grants, service tokens, job ingestion, job lifecycle
+  sweeps, funded-job upstream status, bootstrap self-reporting, recurring
+  scheduler events, and XCM observer/watcher events
+- request-scoped XCM observer/watcher events promote `requestId` to the
+  top-level `correlationId`, so queue/observe/finalize timelines are filterable
+  by one identifier
 - local claim-lock funding, verification settlement/rejection, disputed
   verification, dispute verdict, and stake-release receipts emit canonical
   `settlement` source events with funding, settlement, and dispute phases plus
@@ -336,7 +343,10 @@ emit into it with the same topic taxonomy.
 
 ### Remaining gaps
 
-- not every producer emits a canonical topic and payload shape yet
+- future producer families can still drift if they add new topic prefixes
+  without classifier coverage and tests
+- payload schemas are still producer-owned; the next taxonomy pass should
+  standardize compact `data` shapes for newly added operational families
 
 ### Improve to
 
@@ -347,7 +357,8 @@ emit into it with the same topic taxonomy.
 
 ### Concrete next changes
 
-- standardize the remaining platform event topics and payload shapes
+- require classifier tests alongside any new `eventBus.publish` topic family
+- standardize compact payload shapes for future operational event producers
 - keep operator filter presets in step with new canonical source, phase, and
   topic names as producer coverage expands
 
