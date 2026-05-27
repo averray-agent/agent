@@ -188,8 +188,20 @@ test("loadBlockchainConfig defaults SIGNER_BACKEND to 'local'", () => {
   });
   assert.equal(config.signerBackend, "local");
   assert.equal(config.signerPrivateKey, "0xabc");
+  assert.equal(config.arbitratorSignerPrivateKey, "");
   assert.equal(config.kmsKeyId, "");
   assert.equal(config.awsRegion, "");
+});
+
+test("loadBlockchainConfig accepts a separate dispute arbitrator signer", () => {
+  const config = loadBlockchainConfig({
+    ...baseEnv,
+    RPC_URL: "https://legacy.example",
+    ARBITRATOR_SIGNER_PRIVATE_KEY: "0xdef"
+  });
+
+  assert.equal(config.signerPrivateKey, "0xabc");
+  assert.equal(config.arbitratorSignerPrivateKey, "0xdef");
 });
 
 test("loadBlockchainConfig accepts SIGNER_BACKEND=kms with KMS_KEY_ID + AWS_REGION", () => {

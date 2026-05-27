@@ -47,6 +47,18 @@ export function createDisputeRoutes({
     }
   }
 
+  async function ensureChainDisputeOpen(session) {
+    if (!gateway?.isEnabled?.() || typeof gateway.getJob !== "function" || typeof gateway.openDispute !== "function") {
+      return undefined;
+    }
+    const chainJobId = session.chainJobId ?? session.jobId;
+    const live = await gateway.getJob(chainJobId);
+    if (Number(live?.state) !== 4) {
+      return undefined;
+    }
+    return gateway.openDispute(chainJobId);
+  }
+
   async function buildDisputeFromSession(session) {
     const id = disputeIdForSession(session.sessionId);
     const [verdictReceipt, releaseReceipt] = await Promise.all([
@@ -116,6 +128,8 @@ export function createDisputeRoutes({
       reasonCode: verdictReceipt?.reasonCode,
       reasoningHash: verdictReceipt?.reasoningHash,
       metadataURI: verdictReceipt?.metadataURI,
+      chainDisputeTxHash: verdictReceipt?.chainDisputeTxHash,
+      chainDisputeBlockNumber: verdictReceipt?.chainDisputeBlockNumber,
       txHash: verdictReceipt?.txHash,
       chainStatus: verdictReceipt?.chainStatus,
       workerPayout: verdictReceipt?.workerPayout,
@@ -227,6 +241,7 @@ export function createDisputeRoutes({
         publicBaseUrl
       });
       await persistContentRecord(reasoning.contentRecord);
+      const chainDisputeReceipt = await ensureChainDisputeOpen(session);
       const chainReceipt = gateway?.isEnabled?.() && typeof gateway.resolveDispute === "function"
         ? await gateway.resolveDispute(
             session.chainJobId ?? session.jobId,
@@ -254,6 +269,8 @@ export function createDisputeRoutes({
         rationale: reasoning.rationale || undefined,
         releaseAction: resolution.releaseAction,
         payoutSource: resolution.payoutSource,
+        chainDisputeTxHash: chainDisputeReceipt?.txHash,
+        chainDisputeBlockNumber: chainDisputeReceipt?.blockNumber,
         txHash: chainReceipt.txHash,
         blockNumber: chainReceipt.blockNumber,
         chainStatus: gateway?.isEnabled?.()
@@ -303,6 +320,8 @@ export function createDisputeRoutes({
           reasonCode: resolution.reasonCode,
           reasoningHash: receipt.reasoningHash,
           metadataURI: receipt.metadataURI,
+          chainDisputeTxHash: receipt.chainDisputeTxHash,
+          chainDisputeBlockNumber: receipt.chainDisputeBlockNumber,
           txHash: receipt.txHash,
           blockNumber: receipt.blockNumber,
           chainStatus: receipt.chainStatus
@@ -315,6 +334,8 @@ export function createDisputeRoutes({
         reasonCode: resolution.reasonCode,
         reasoningHash: reasoning.reasoningHash,
         metadataURI: reasoning.metadataURI,
+        chainDisputeTxHash: receipt.chainDisputeTxHash,
+        chainDisputeBlockNumber: receipt.chainDisputeBlockNumber,
         txHash: receipt.txHash,
         chainStatus: receipt.chainStatus,
         workerPayout: resolution.workerPayout,

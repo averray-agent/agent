@@ -245,6 +245,7 @@ export function loadBlockchainConfig(env = process.env) {
     rpcUrl,
     signerBackend,
     signerPrivateKey: env.SIGNER_PRIVATE_KEY ?? "",
+    arbitratorSignerPrivateKey: env.ARBITRATOR_SIGNER_PRIVATE_KEY ?? "",
     kmsKeyId: env.KMS_KEY_ID ?? "",
     awsRegion: env.AWS_REGION ?? "",
     treasuryPolicyAddress: env.TREASURY_POLICY_ADDRESS ?? "",

@@ -89,8 +89,10 @@ Required env on the backend for live dispatch:
 
 - `AVERRAY_RPC_URL` — Polkadot Hub EVM RPC.
 - `ESCROW_CORE_ADDRESS` — deployed `EscrowCore` contract address.
-- Arbitrator signer key — the wallet behind this key is what
-  `EscrowCore.resolveDispute(...)` is called with.
+- Arbitrator signer key — set `ARBITRATOR_SIGNER_PRIVATE_KEY` when the
+  verifier/backend signer is intentionally different from the phase-0
+  arbitrator. If unset, the backend `SIGNER_PRIVATE_KEY` / KMS signer is
+  also used for `EscrowCore.resolveDispute(...)`.
 
 Required on-chain config:
 
@@ -103,12 +105,14 @@ Required on-chain config:
 
 Required on the deployed `EscrowCore` for the specific dispute id:
 
-- The job state must be in `Disputed`. The verdict route trusts the
-  off-chain dispute record's `status: "open"`; the on-chain side
-  enforces its own invariant. If the chain says the job is already
-  `Resolved` (or never reached `Disputed`), the `resolveDispute` call
-  will revert, the response throws, and the harness fails closed
-  with a 5xx — no receipt is persisted in that case.
+- The job state must be `Rejected` or `Disputed`. If the chain is still
+  `Rejected`, the verdict route first calls `EscrowCore.openDispute(...)`
+  with the normal backend participant signer and records
+  `chainDisputeTxHash` before calling `resolveDispute(...)` with the
+  arbitrator signer. If the chain says the job is already `Resolved`
+  (or never reached a rejectable/disputed state), the response throws
+  and the harness fails closed with a 5xx — no receipt is persisted in
+  that case.
 
 ## Proof sequence
 
