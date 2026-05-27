@@ -95,3 +95,22 @@ test("hosted external-schema proof uploads sanitized evidence as a workflow arti
   assert.match(workflow, /if-no-files-found: error/u);
   assert.match(workflow, /retention-days: 90/u);
 });
+
+test("hosted backup readiness proof uploads validated evidence as a workflow artifact", async () => {
+  const workflow = await readFile(join(REPO_ROOT, ".github/workflows/hosted-backup-readiness-proof.yml"), "utf8");
+
+  assert.match(workflow, /workflow_dispatch:/u);
+  assert.match(workflow, /environment: production/u);
+  assert.match(workflow, /OP_SERVICE_ACCOUNT_TOKEN_PROD_CI/u);
+  assert.match(workflow, /VPS_SSH_KEY_OP: op:\/\/prod-ci\/vps-ssh-key\/private key/u);
+  assert.match(workflow, /BACKUP_READINESS_EVIDENCE_FILE: artifacts\/backup-readiness-hosted-\$\{\{ github\.run_id \}\}\.json/u);
+  assert.match(workflow, /BACKUP_READINESS_VALIDATION_FILE: artifacts\/backup-readiness-validation-hosted-\$\{\{ github\.run_id \}\}\.json/u);
+  assert.match(workflow, /\.\/scripts\/ops\/check-backup-readiness\.sh --json --max-age-hours "\$MAX_AGE_HOURS"/u);
+  assert.match(workflow, /node scripts\/ops\/check-backup-readiness-evidence\.mjs/u);
+  assert.match(workflow, /--max-checked-age-hours "\$EVIDENCE_MAX_CHECKED_AGE_HOURS"/u);
+  assert.match(workflow, /uses: actions\/upload-artifact@(?:v7\b|[a-f0-9]{40} # v7\b)/u);
+  assert.match(workflow, /name: hosted-backup-readiness-proof-\$\{\{ github\.run_id \}\}/u);
+  assert.match(workflow, /path: \|\n\s+\$\{\{ env\.BACKUP_READINESS_EVIDENCE_FILE \}\}\n\s+\$\{\{ env\.BACKUP_READINESS_VALIDATION_FILE \}\}/u);
+  assert.match(workflow, /if-no-files-found: error/u);
+  assert.match(workflow, /retention-days: 90/u);
+});

@@ -37,6 +37,29 @@ A successful drill produces three pieces of recorded evidence:
 All three are written into the operator log for the month with the
 backup-file timestamps quoted.
 
+## Hosted readiness proof
+
+The read-only readiness part can also be captured from GitHub Actions via the
+`Hosted Backup Readiness Proof` workflow. It SSHes to the VPS, runs:
+
+```bash
+./scripts/ops/check-backup-readiness.sh --json --max-age-hours "$MAX_AGE_HOURS"
+```
+
+Then it validates the saved JSON with:
+
+```bash
+node scripts/ops/check-backup-readiness-evidence.mjs \
+  --file artifacts/backup-readiness-hosted-<run-id>.json \
+  --max-checked-age-hours "$EVIDENCE_MAX_CHECKED_AGE_HOURS" \
+  --json
+```
+
+The workflow uploads a 90-day artifact named
+`hosted-backup-readiness-proof-<run-id>` containing the readiness JSON and the
+validator result. This proves backup freshness only; the separate restore drill
+below still proves the backups are usable.
+
 ## Pre-drill checklist
 
 Before running the drill:
