@@ -99,13 +99,30 @@ The minimum useful alert set is:
 Recommended webhook env for the smoke-alert wrapper:
 
 ```bash
-ALERT_WEBHOOK_URL=https://your-alert-webhook
+ALERT_WEBHOOK_URL=<rendered from prod-backend/alert-webhook-url url field>
 ALERT_SERVICE_NAME=averray-hosted-stack
 ALERT_ENVIRONMENT=production-like
 ```
 
-The webhook can point at Slack, Discord, PagerDuty Events API, or any internal
-relay that accepts JSON POSTs.
+The canonical v1 alert destination is a Slack Incoming Webhook for the operator
+channel. The URL lives in 1Password at `op://prod-backend/alert-webhook-url/url`
+and is rendered into `/run/agent-stack/backend.env` as `ALERT_WEBHOOK_URL`.
+The operator must create the Slack webhook and 1Password item before merging a
+template change that references it; the production env render fails closed if
+the item is missing.
+
+To prove alert delivery without adding a synthetic endpoint, run a deliberate
+hosted smoke failure:
+
+1. Temporarily tighten the production scheduler env to
+   `INDEXER_MAX_STALENESS_SEC=1`.
+2. Run `./scripts/ops/check-hosted-stack-and-alert.sh`.
+3. Confirm the Slack operator channel receives the structured smoke-failure
+   alert.
+4. Restore the previous staleness value and re-run the hosted smoke green.
+
+Capture the Slack delivery confirmation in the observability evidence bundle
+with Metrics auth and the Sentry/logging decision.
 
 ---
 
