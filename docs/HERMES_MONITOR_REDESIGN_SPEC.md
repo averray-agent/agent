@@ -690,17 +690,23 @@ Sit with the operator for one full shift after launch. Note every moment they ha
 
 ---
 
-## 21. Open Questions for Engineering
+## 21. Decisions Made
 
-Decisions to make during M1–M2, not by design:
+The seven questions originally posed in this section were resolved with the operator on 2026-05-27 (before M4 started). The implementation milestones below build against these decisions; later milestones that depend on a decision are flagged.
 
-1. **`document.title` update strategy** — direct mutation vs. Next.js `<Head>` vs. metadata API. Pick what fits the app-router pattern.
-2. **Favicon badge rendering** — Badging API (Chromium-only) vs. canvas-rendered favicon swap. Latter works everywhere; former is one line. Pick based on operator's primary browser.
-3. **Audio asset for the alert tone** — provide a short (<200ms) royalty-free tone. Check `marketing/` for existing brand audio or source from a standard library. Operator should be able to swap via settings later.
-4. **Snapshot data retention** — log board snapshots to localStorage with 24h TTL? IndexedDB with longer? Time-travel UI is held for v1.1 but the data should exist now. Agree on the storage shape in M1.
-5. **Mission-spawn auth boundary** — anyone authed can view; only admin can spawn. Reuse the existing `AdminAuth` middleware in `mcp-server`.
-6. **Multi-repo support** — the screenshot showed a `REPO: all / agent / hermes` filter. Confirm: are we monitoring one repo or multiple? If multiple, `repo` must be on every card (data model has it; verify the source-of-truth aggregation).
-7. **Card-relationships data model** — held for v1.1. Worth a 5-min ADR now so the v1 backend doesn't have to migrate later.
+1. **`document.title` update strategy** — **Direct mutation via `useEffect`** in a small top-level `TitleBadge` component. The app ships as a Next.js static export; runtime-changing title values are incompatible with the build-time metadata API. App-router supports a dynamic title via metadata, but for a value that changes on every action-count delta a one-line `useEffect(() => { document.title = …; }, [count])` is simpler and more reliable. **Used by:** M8.
+
+2. **Favicon badge rendering** — **Canvas-rendered swap, with Badging API as progressive enhancement.** Canvas works on every browser: draw a small circle with the count, encode as `data:image/png`, swap the `<link rel="icon">`. Additionally feature-detect `navigator.setAppBadge` and call it where supported — gives Chromium users the OS-level dock badge. ~30 lines total. **Used by:** M8.
+
+3. **Audio asset for the alert tone** — **Procedural Web Audio API tone**. Soft sine-wave chime, 200ms duration, exponential decay. ~10 lines, no asset file, no licensing, deterministic across browsers. M8 also wires a settings hook so the operator can swap to an uploaded audio file later. **Used by:** M8.
+
+4. **Snapshot data retention** — **`localStorage` with 24h sliding TTL**, key shape `monitor.snapshot.<isoTimestamp>`. The data exists from M4 onward but no UI surfaces it yet (time-travel UI deferred to v1.1). The key shape lets a future time-travel page-back through stored snapshots without a migration. **Used by:** M4 (write); v1.1 (read).
+
+5. **Mission-spawn auth boundary** — **Admin role OR new `mission-operator` role.** Anyone authed can view missions; spawning requires `roles: ["admin"]` OR `roles: ["mission-operator"]`. The new role goes into `VALID_ROLES` in the auth config. Today the operator (admin) is the only caller; tomorrow the operator can delegate mission running to a team member without giving them full admin. Reuses the existing `AdminAuth` middleware pattern with a widened allow-list. **Used by:** M6.
+
+6. **Multi-repo support** — **Single repo now, design API for multi-repo later.** `/api/monitor/board` returns cards for the single configured `AVERRAY_REPO` (env var), but every card carries a `repo: string` field in the response. The TopStrip's REPO filter renders as a static single-repo label in M4 — becomes a real dropdown the day the server starts aggregating across N configured repos. No client migration when that happens; only the server-side aggregator changes. **Used by:** M4.
+
+7. **Card-relationships data model** — **Fully deferred to v1.1.** The platform does not track "PR X waits on PR Y" today; designing the data shape ahead of the platform feature is premature. Open a fresh ADR when the dependency graph is real. **Used by:** v1.1.
 
 ---
 
