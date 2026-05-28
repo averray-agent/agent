@@ -126,6 +126,7 @@ test("hosted stack alert wrapper sends a structured webhook payload on failure",
     ALERT_WEBHOOK_URL: "https://alerts.example.test/webhook",
     ALERT_SERVICE_NAME: "averray-smoke-test",
     ALERT_ENVIRONMENT: "ci",
+    ALERT_CORRELATION_ID: "github-observability-alert-123",
     CURL_BIN: curlCapture.curl,
   });
 
@@ -143,6 +144,7 @@ test("hosted stack alert wrapper sends a structured webhook payload on failure",
   assert.equal(payload.status, "firing");
   assert.equal(payload.service, "averray-smoke-test");
   assert.equal(payload.environment, "ci");
+  assert.equal(payload.correlationId, "github-observability-alert-123");
   assert.equal(payload.check, "scripts/ops/check-hosted-stack.sh");
   assert.equal(payload.summary, "Hosted stack smoke check failed");
   assert.match(payload.output, /smoke failed/);

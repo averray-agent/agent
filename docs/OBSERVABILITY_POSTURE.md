@@ -51,6 +51,21 @@ For RC1, record the observability proof as a machine-readable artifact under
 The artifact should cover metrics auth, alert delivery, and Sentry/logging
 posture in one place:
 
+The preferred hosted path is the `Hosted Observability Proof` GitHub Actions
+workflow. It SSHes to the VPS, reads the rendered `/run/agent-stack/backend.env`
+without printing it, proves the `/metrics` bearer gate, sends one deliberate
+smoke-failure alert through the configured webhook, samples recent backend
+structured logs, validates the sanitized evidence with
+[`check-observability-proof.mjs`](../scripts/ops/check-observability-proof.mjs),
+and uploads a 90-day artifact. It intentionally fails closed until both
+`METRICS_BEARER_TOKEN` and `ALERT_WEBHOOK_URL` are present in the hosted
+runtime environment.
+
+For Slack incoming webhooks, the provider response does not include the Slack
+message timestamp. In that case, use the workflow's channel-visible
+`ALERT_CORRELATION_ID` as `alertDestination.messageId`; the alert payload
+includes the same `correlationId` so an operator can find the delivered message.
+
 ```json
 {
   "schemaVersion": "observability-proof-v1",
@@ -75,9 +90,9 @@ posture in one place:
     "webhookConfigured": true,
     "deliberateFailureDelivered": true,
     "channel": "ops-alerts",
-    "messageId": "1747936800.123456",
+    "messageId": "github-observability-alert-123456789-1",
     "receivedAt": "2026-05-22T18:05:00.000Z",
-    "failureMode": "API_HEALTH_URL pointed at a disposable non-existent host"
+    "failureMode": "Deliberate hosted smoke failure via local stub; alert payload included correlationId github-observability-alert-123456789-1."
   },
   "sentryLogging": {
     "decision": "log_only_deferred",
