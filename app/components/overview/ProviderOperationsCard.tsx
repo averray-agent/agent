@@ -9,6 +9,12 @@ import {
   PROVIDER_TARGET_UNIT,
   summarizeSkipReasons,
 } from "@/lib/api/provider-operations";
+import {
+  formatProviderRunSummary,
+  providerOperationMetricLabel,
+  providerOperationMetricValue,
+  PROVIDER_OPERATION_LEGEND,
+} from "@/lib/ui/provider-operation-language";
 
 export interface ProviderOperationsCardProps {
   providers: ProviderOperation[];
@@ -26,6 +32,7 @@ export function ProviderOperationsCard({
         meta={meta ?? `${providers.length} sources`}
       />
       <div className="overflow-hidden rounded-[10px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] shadow-[var(--shadow-card)]">
+        <ProviderOperationsLegend />
         {providers.length === 0 ? (
           <EmptyRow />
         ) : (
@@ -116,14 +123,34 @@ function ProviderRow({ provider }: { provider: ProviderOperation }) {
       </div>
 
       <div className="flex flex-col gap-1 font-[family-name:var(--font-body)] text-[12.5px] leading-[1.45] text-[var(--avy-ink)]">
-        {lastRun && lastRun.summary ? (
-          <span>{lastRun.summary}</span>
+        {lastRun ? (
+          <span>{formatProviderRunSummary(lastRun)}</span>
         ) : (
           <span className="text-[var(--avy-muted)]">No runs recorded yet.</span>
         )}
+        {lastRun ? (
+          <div className="grid grid-cols-2 gap-1.5 font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)] sm:grid-cols-4">
+            {PROVIDER_OPERATION_LEGEND.map((entry) => (
+              <span
+                key={entry.key}
+                className={cn(
+                  "rounded-[6px] border border-[var(--avy-line-soft)] bg-[color:rgba(17,19,21,0.025)] px-2 py-1",
+                  entry.key === "error" &&
+                    providerOperationMetricValue(entry.key, lastRun) > 0 &&
+                    "border-[#e1aaa4] bg-[#f3d7d4] text-[#a0322a]"
+                )}
+              >
+                <span className="block font-[family-name:var(--font-display)] text-[9.5px] font-extrabold uppercase text-[var(--avy-muted)]" style={{ letterSpacing: "0.08em" }}>
+                  {providerOperationMetricLabel(entry.key)}
+                </span>
+                <span className="text-[var(--avy-ink)]">{providerOperationMetricValue(entry.key, lastRun)}</span>
+              </span>
+            ))}
+          </div>
+        ) : null}
         {lastRun && lastRun.skipped.length > 0 ? (
           <span className="font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]">
-            skipped:{" "}
+            ignored because:{" "}
             {summarizeSkipReasons(lastRun.skipped)
               .map((entry) => `${entry.count} ${entry.label}`)
               .join(" · ")}
@@ -133,7 +160,7 @@ function ProviderRow({ provider }: { provider: ProviderOperation }) {
           <span>{provider.lastRunAt ? `last run ${formatRelative(provider.lastRunAt)}` : "never"}</span>
           {errored ? (
             <span className="rounded-full bg-[var(--avy-warn-soft)] px-1.5 py-px font-[family-name:var(--font-display)] text-[10px] font-extrabold uppercase text-[var(--avy-warn)]" style={{ letterSpacing: "0.08em" }}>
-              {lastRun!.errorCount} error{lastRun!.errorCount === 1 ? "" : "s"}
+              {lastRun!.errorCount} need attention
             </span>
           ) : null}
           {provider.running ? (
@@ -144,6 +171,23 @@ function ProviderRow({ provider }: { provider: ProviderOperation }) {
           ) : null}
         </div>
       </div>
+    </div>
+  );
+}
+
+function ProviderOperationsLegend() {
+  return (
+    <div className="grid gap-2 border-b border-[var(--avy-line-soft)] bg-[color:rgba(116,211,192,0.08)] p-[0.85rem_1.15rem] md:grid-cols-4">
+      {PROVIDER_OPERATION_LEGEND.map((entry) => (
+        <div key={entry.key} className="min-w-0">
+          <div className="font-[family-name:var(--font-display)] text-[10px] font-extrabold uppercase text-[var(--avy-accent)]" style={{ letterSpacing: "0.08em" }}>
+            {entry.label}
+          </div>
+          <div className="mt-0.5 text-[11.5px] leading-[1.35] text-[var(--avy-muted)]">
+            {entry.description}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
