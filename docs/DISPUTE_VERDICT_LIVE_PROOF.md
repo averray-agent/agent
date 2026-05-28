@@ -38,6 +38,14 @@ dispute, and writes the same JSON evidence file when
 `DISPUTE_PROOF_EVIDENCE_FILE` is set. Do not enable this on routine
 deploy smoke; it resolves the named dispute.
 
+Preferred hosted path: run the **Hosted Dispute Verdict Proof** GitHub
+Actions workflow from the production environment. It loads the current
+admin/arbitrator JWT from `op://prod-smoke/admin-jwt/password`, requires
+the `live` input to be true, runs the same opt-in smoke gate, and uploads
+`hosted-dispute-verdict-proof-<run-id>` as the 90-day evidence artifact.
+The workflow still requires the same named dispute id, verdict, rationale,
+and optional split payout inputs described below.
+
 ## Preconditions (must hold before any live verdict)
 
 The proof harness will refuse to mutate if any of the first three

@@ -483,6 +483,12 @@ roadmap rows to `Proofed`. Concrete verification commands per box:
   pre-existing open dispute. It never creates disputes and never iterates
   the queue. Regression covered by
   `node --test scripts/ops/run-dispute-verdict-proof.test.mjs`.
+
+  Preferred operator path: run the `Hosted Dispute Verdict Proof` workflow
+  from GitHub Actions with the same named dispute id, verdict, rationale,
+  optional split payout, and `live=true`. The workflow loads the production
+  admin/arbitrator JWT from 1Password, runs the live opt-in smoke gate, and
+  uploads a 90-day `hosted-dispute-verdict-proof-<run-id>` artifact.
 - [x] Public discovery, schema, and trust pages reflect the current deployed behavior.
   Evidence: Deploy Production run `26256248052` on 2026-05-21 reached
   `Checking product-proof gate` and passed public discovery manifest, API
