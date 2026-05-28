@@ -310,10 +310,14 @@ test("POST /disputes/:id/verdict opens the chain dispute before arbitrator resol
   assert.equal(response.statusCode, 200);
   assert.equal(response.body.chainStatus, "confirmed");
   assert.equal(response.body.chainDisputeTxHash, "0xopen");
+  assert.equal(response.body.chainDisputeBlockNumber, 41);
   assert.equal(response.body.txHash, "0xresolve");
+  assert.equal(response.body.blockNumber, 42);
   assert.deepEqual(gatewayCalls.map(([name]) => name), ["getJob", "getJob", "openDispute", "resolveDispute"]);
   assert.ok(calls.some(([name, detail]) => name === "upsertMutationReceipt"
     && detail.receipt.chainDisputeTxHash === "0xopen"
+    && detail.receipt.chainDisputeBlockNumber === 41
+    && detail.receipt.blockNumber === 42
     && detail.receipt.txHash === "0xresolve"));
 });
 
