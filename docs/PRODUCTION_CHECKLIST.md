@@ -548,6 +548,26 @@ block hash, plus USDC asset metadata (`assetId: 1337`, `decimals: 6`,
 metadata functions marked unimplemented; the precompile only supports the core
 ERC20 subset.
 
+- [ ] Mainnet env/secrets proof has been captured from the private mainnet
+  runtime configuration and validated without exposing secrets:
+  ```bash
+  node scripts/ops/check-mainnet-env-secrets-proof.mjs \
+    --file docs/evidence/mainnet-env-secrets-YYYY-MM-DD.json \
+    --max-completed-age-hours 24 \
+    --json
+  ```
+
+Env/secrets evidence must use schema `mainnet-env-secrets-proof-v1` and stay
+redacted. It must prove: `environment.chainEnv` and `environment.profile` are
+mainnet, the RPC URL is `https://eth-rpc.polkadot.io/`, final contract
+addresses are non-zero and unique, role signers are fresh mainnet keys, the
+owner is the mapped mainnet multisig, blockchain signing uses multi-region
+`ECC_SECG_P256K1` KMS through IAM Roles Anywhere, JWT signing uses multi-region
+`ECC_NIST_P256` KMS with public-key fingerprint evidence, HMAC JWT fallback is
+off, raw private-key/static-AWS/JWT-secret fallbacks are absent, service-account
+tokens are mainnet-only and do not read `prod-critical` or wildcard vaults, and
+no testnet vault item, KMS key, service token, or wallet seed is reused.
+
 ---
 
 ## 9. Mainnet blockers that still remain
