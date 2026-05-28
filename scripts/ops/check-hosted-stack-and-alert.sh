@@ -37,17 +37,25 @@ fi
 require_command "$CURL_BIN"
 require_command jq
 
+alert_text="$ALERT_SERVICE_NAME smoke check failed in $ALERT_ENVIRONMENT"
+if [[ -n "$ALERT_CORRELATION_ID" ]]; then
+  alert_text="$alert_text (correlation: $ALERT_CORRELATION_ID)"
+fi
+
 payload=$(
   jq -n \
     --arg service "$ALERT_SERVICE_NAME" \
     --arg environment "$ALERT_ENVIRONMENT" \
     --arg correlationId "$ALERT_CORRELATION_ID" \
+    --arg text "$alert_text" \
     --arg hostname "$(hostname)" \
     --arg check "scripts/ops/check-hosted-stack.sh" \
     --arg output "$output" \
     --arg timestamp "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
     '{
       status: "firing",
+      text: $text,
+      content: $text,
       service: $service,
       environment: $environment,
       hostname: $hostname,
