@@ -736,6 +736,8 @@ reuse it on mainnet — even if no leak is known.
 - [ ] On-call rotation tested with a synthetic alert
 - [ ] No raw `SIGNER_PRIVATE_KEY` value exists anywhere in any
   mainnet vault, env file, backup, or operator's machine
+- [ ] Redacted env/secrets proof validates with
+  `node scripts/ops/check-mainnet-env-secrets-proof.mjs --file docs/evidence/mainnet-env-secrets-YYYY-MM-DD.json --max-completed-age-hours 24 --json`
 
 **Rollback safety**: For mainnet, "rollback" = abort before going
 live, not unwind after. Once contracts are deployed and the multisig

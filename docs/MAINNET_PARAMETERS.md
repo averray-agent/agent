@@ -144,6 +144,15 @@ Before a mainnet deploy:
   ```
 - before sign-off, capture Polkadot Hub mainnet runtime evidence for USDC
   and rerun the guard with `--runtime-evidence ... --require-runtime`
+- capture redacted mainnet env/secrets evidence and validate that no testnet
+  secret material, raw-key fallback, or over-broad service token scope made it
+  into the launch configuration:
+  ```bash
+  node scripts/ops/check-mainnet-env-secrets-proof.mjs \
+    --file docs/evidence/mainnet-env-secrets-YYYY-MM-DD.json \
+    --max-completed-age-hours 24 \
+    --json
+  ```
 - run the multisig and pause rehearsals from
   [MULTISIG_SETUP.md](./MULTISIG_SETUP.md)
 - run the release gate and deployment verification from
@@ -183,5 +192,7 @@ Before using this profile on mainnet, confirm:
 - [ ] the chosen values are copied into the private deployment env
 - [ ] USDC asset config validates with
       `scripts/ops/check-mainnet-usdc-config.mjs`
+- [ ] redacted mainnet env/secrets proof validates with
+      `scripts/ops/check-mainnet-env-secrets-proof.mjs`
 - [ ] audit sign-off still applies to the exact contract set being deployed
 - [ ] no one is assuming the old testnet defaults still apply
