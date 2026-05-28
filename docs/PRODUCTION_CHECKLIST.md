@@ -568,6 +568,31 @@ off, raw private-key/static-AWS/JWT-secret fallbacks are absent, service-account
 tokens are mainnet-only and do not read `prod-critical` or wildcard vaults, and
 no testnet vault item, KMS key, service token, or wallet seed is reused.
 
+- [ ] Mainnet smoke proof has been captured from at least three low-value
+  mainnet claim/submit/settle runs and validated without exposing secrets:
+  ```bash
+  node scripts/ops/check-mainnet-smoke-proof.mjs \
+    --file docs/evidence/mainnet-smoke-YYYY-MM-DD.json \
+    --max-completed-age-hours 24 \
+    --json
+  ```
+
+Smoke evidence must use schema `mainnet-smoke-proof-v1`. It must cite the
+Polkadot docs paths `smart-contracts/precompiles/erc20.md`,
+`reference/polkadot-hub/assets.md`, and `smart-contracts/explorers.md`; use
+`environment.network: polkadot-hub-mainnet`; keep RPC at
+`https://eth-rpc.polkadot.io/`; include only mainnet API/explorer links; and
+prove canonical USDC (`assetId: 1337`, 6 decimals, Trust-Backed precompile
+`0x0000053900000000000000000000000001200000`, `minBalanceRaw: 70000`, ERC20
+metadata functions unimplemented). Each smoke run must have unique run/job/
+session IDs, a reward at least the USDC min balance and no more than
+`1_000_000` raw units by default, a confirmed claim transaction, a submitted
+session, approved verification using the stored structured submission, a
+confirmed settlement transaction, badge/profile verification, and timeline
+entries for claim, submit, and settlement. Mainnet smoke must use short-lived
+scoped auth or delegated-wallet/refresh flow evidence; do not use a long-lived
+admin JWT.
+
 ---
 
 ## 9. Mainnet blockers that still remain

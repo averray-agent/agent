@@ -731,6 +731,8 @@ reuse it on mainnet — even if no leak is known.
 - [ ] Audit script green on mainnet
 - [ ] Calendar check shows zero entries within 7 days of expiry
 - [ ] Hosted product-proof smoke passes 3 consecutive runs on mainnet
+- [ ] Redacted mainnet smoke proof validates with
+  `node scripts/ops/check-mainnet-smoke-proof.mjs --file docs/evidence/mainnet-smoke-YYYY-MM-DD.json --max-completed-age-hours 24 --json`
 - [ ] No secret appears in any log file, process listing, or
   rendered env file checksum
 - [ ] On-call rotation tested with a synthetic alert

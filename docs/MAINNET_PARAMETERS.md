@@ -153,6 +153,15 @@ Before a mainnet deploy:
     --max-completed-age-hours 24 \
     --json
   ```
+- after contracts, roles, service operators, asset config, and secrets are
+  final, run at least three low-value mainnet claim/submit/settle smokes and
+  validate the redacted evidence:
+  ```bash
+  node scripts/ops/check-mainnet-smoke-proof.mjs \
+    --file docs/evidence/mainnet-smoke-YYYY-MM-DD.json \
+    --max-completed-age-hours 24 \
+    --json
+  ```
 - run the multisig and pause rehearsals from
   [MULTISIG_SETUP.md](./MULTISIG_SETUP.md)
 - run the release gate and deployment verification from
@@ -194,5 +203,7 @@ Before using this profile on mainnet, confirm:
       `scripts/ops/check-mainnet-usdc-config.mjs`
 - [ ] redacted mainnet env/secrets proof validates with
       `scripts/ops/check-mainnet-env-secrets-proof.mjs`
+- [ ] three-run low-value mainnet smoke proof validates with
+      `scripts/ops/check-mainnet-smoke-proof.mjs`
 - [ ] audit sign-off still applies to the exact contract set being deployed
 - [ ] no one is assuming the old testnet defaults still apply
