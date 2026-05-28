@@ -98,7 +98,7 @@ includes the same `correlationId` so an operator can find the delivered message.
     "decision": "log_only_deferred",
     "structuredLogsVisible": true,
     "logSurface": "docker logs agent-backend --tail 50",
-    "observedLogLine": "{\"level\":30,\"name\":\"averray-mcp\",\"msg\":\"server.started\"}",
+    "observedLogLine": "{\"level\":\"info\",\"name\":\"averray-mcp\",\"msg\":\"http.listening\"}",
     "observedAt": "2026-05-22T18:10:00.000Z",
     "sentryReadyObserved": false,
     "deferredReason": "Backend Sentry intentionally deferred for v1; structured logs are the active launch surface."

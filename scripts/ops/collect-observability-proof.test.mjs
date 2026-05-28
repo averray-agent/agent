@@ -88,7 +88,7 @@ if [[ "$1" != "logs" ]]; then
   echo "unexpected docker command" >&2
   exit 1
 fi
-echo '{"level":30,"name":"averray-mcp","msg":"server.started","requestId":"req_123"}'
+echo '{"ts":"2026-05-28T17:54:00.000Z","level":"info","name":"averray-mcp","msg":"http.listening","requestId":"req_123"}'
 `);
 
   const { stdout } = await execFileAsync("bash", [scriptPath], {
@@ -115,7 +115,7 @@ echo '{"level":30,"name":"averray-mcp","msg":"server.started","requestId":"req_1
   assert.equal(evidence.metricsAuth.authenticatedStatus, 200);
   assert.equal(evidence.alertDestination.messageId, "github-observability-alert-123");
   assert.equal(evidence.sentryLogging.decision, "log_only_deferred");
-  assert.match(evidence.sentryLogging.observedLogLine, /server\.started/u);
+  assert.match(evidence.sentryLogging.observedLogLine, /http\.listening/u);
 
   assert.doesNotMatch(stdout, /metrics-secret-token/u);
   assert.doesNotMatch(stdout, /secret-webhook/u);
@@ -168,7 +168,7 @@ while [[ $# -gt 0 ]]; do
 done
 printf '%s' "$status"
 `);
-  const docker = await writeExecutable(root, "docker.sh", 'echo \'{"level":30,"name":"averray-mcp","msg":"server.started"}\'');
+  const docker = await writeExecutable(root, "docker.sh", 'echo \'{"level":"info","name":"averray-mcp","msg":"http.listening"}\'');
 
   await assert.rejects(
     () => execFileAsync("bash", [scriptPath], {

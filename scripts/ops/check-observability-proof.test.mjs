@@ -47,7 +47,7 @@ function validEvidence(overrides = {}) {
       decision: "log_only_deferred",
       structuredLogsVisible: true,
       logSurface: "docker logs agent-backend --tail 50",
-      observedLogLine: "{\"level\":30,\"name\":\"averray-mcp\",\"msg\":\"server.started\"}",
+      observedLogLine: "{\"level\":\"info\",\"name\":\"averray-mcp\",\"msg\":\"http.listening\"}",
       observedAt: "2026-05-22T18:10:00.000Z",
       sentryReadyObserved: false,
       deferredReason: "Backend Sentry intentionally deferred for v1; structured logs are the active launch surface."
@@ -108,7 +108,7 @@ test("validateEvidence accepts Sentry-enabled observability proof", () => {
       decision: "sentry_enabled",
       structuredLogsVisible: true,
       logSurface: "docker logs agent-backend --tail 50",
-      observedLogLine: "{\"level\":30,\"name\":\"averray-mcp\",\"msg\":\"observability.sentry_ready\"}",
+      observedLogLine: "{\"level\":\"info\",\"name\":\"averray-mcp\",\"msg\":\"observability.sentry_ready\"}",
       observedAt: "2026-05-22T18:10:00.000Z",
       sentryReadyObserved: true,
       sentryProject: "averray-backend-prod"
@@ -211,7 +211,7 @@ test("validateEvidence rejects Sentry-enabled proof without ready observation", 
       decision: "sentry_enabled",
       structuredLogsVisible: true,
       logSurface: "docker logs agent-backend --tail 50",
-      observedLogLine: "{\"level\":30,\"name\":\"averray-mcp\",\"msg\":\"server.started\"}",
+      observedLogLine: "{\"level\":\"info\",\"name\":\"averray-mcp\",\"msg\":\"http.listening\"}",
       observedAt: "2026-05-22T18:10:00.000Z",
       sentryReadyObserved: false,
       sentryProject: "averray-backend-prod"
