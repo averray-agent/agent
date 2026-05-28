@@ -550,6 +550,11 @@ for the evidence file shape.
 ## 8. Mainnet parameter package
 
 - [ ] [MAINNET_PARAMETERS.md](./MAINNET_PARAMETERS.md) is still the intended launch profile.
+- [ ] [AUDIT_PACKAGE.md](./AUDIT_PACKAGE.md) has been refreshed for the frozen
+  audit commit/tag, sent to the auditor, and linked from the audit engagement
+  brief.
+- [ ] External audit report names the reviewed commit/tag and scope, and every
+  Critical/High finding is fixed or explicitly risk-accepted before real funds.
 - [ ] The private mainnet deploy env matches [deployments/mainnet.env.example](../deployments/mainnet.env.example) except for secrets and final addresses.
 - [ ] Any deviation from the recommended launch values has been written down and approved before deploy.
 - [ ] No operator is relying on the old testnet-friendly defaults from `deploy_contracts.sh`.
@@ -628,7 +633,7 @@ admin JWT.
 
 This checklist improves release discipline, but it does not replace:
 
-- external audit sign-off on the mainnet contract set
+- external audit sign-off on the frozen mainnet audit package and contract set
 - the explicit mainnet launch profile in [MAINNET_PARAMETERS.md](./MAINNET_PARAMETERS.md)
 - a real, audited strategy adapter path instead of the mock vDOT adapter
 - explicit incident ownership and paging

@@ -1,411 +1,326 @@
-# Audit Package
+# Mainnet Audit Package
 
-A single document for external auditors. Everything needed to evaluate the
-system lives either here or at the paths cited — no "ask us" deliverables.
+This is the external-auditor handoff for Averray mainnet readiness. It is a
+package map and acceptance checklist, not an audit report and not sign-off.
 
----
+The goal is simple: an auditor should be able to clone the repo, read this
+document, reproduce the critical checks, and know exactly which findings block
+mainnet real funds.
 
-## 1. Scope
+## Current Status
 
-**In scope** (Solidity):
+- Testnet/RC1 proof gates are complete in the roadmap.
+- Mainnet real-funds readiness is not complete.
+- External audit is still open.
+- Native XCM/vDOT/yield is deferred unless explicitly added to a separate audit
+  engagement.
 
-- [`contracts/TreasuryPolicy.sol`](../contracts/TreasuryPolicy.sol) — central admin config + pause
-- [`contracts/AgentAccountCore.sol`](../contracts/AgentAccountCore.sol) — per-account balance, collateral, job stake, borrow/debt
-- [`contracts/EscrowCore.sol`](../contracts/EscrowCore.sol) — job lifecycle, milestone + dispute flow
-- [`contracts/ReputationSBT.sol`](../contracts/ReputationSBT.sol) — non-transferable reputation badges
-- [`contracts/StrategyAdapterRegistry.sol`](../contracts/StrategyAdapterRegistry.sol) — strategy registration
-- [`contracts/lib/ReentrancyGuard.sol`](../contracts/lib/ReentrancyGuard.sol) — vendored non-reentrant modifier
-- [`contracts/lib/SafeTransfer.sol`](../contracts/lib/SafeTransfer.sol) — SafeERC20-style transfer helpers
-- [`contracts/interfaces/IStrategyAdapter.sol`](../contracts/interfaces/IStrategyAdapter.sol)
-
-Solidity version: **0.8.24** (via [foundry.toml](../foundry.toml)). No
-external libraries beyond the two files under `contracts/lib/`.
-
-**In scope** (off-chain, auxiliary — flagged as non-canonical):
-
-- [`mcp-server/src/auth/`](../mcp-server/src/auth) — SIWE + JWT flow,
-  capability matrix, route gating, rate-limit primitive
-- [`mcp-server/src/core/state-store.js`](../mcp-server/src/core/state-store.js) — Redis/memory backing for nonces, token revocations, rate-limit counters, capability grants, idempotency receipts, claim locks
-- [`mcp-server/src/protocols/http/server.js`](../mcp-server/src/protocols/http/server.js) — HTTP adapter, SIWE/JWT endpoints, admin and service-token surfaces, CORS handling
-
-### Off-chain audit attention points
-
-The contracts are the trust anchor; the off-chain layer is a separate
-engagement scope (typical web-app pen-test). The items below are the
-non-obvious places a reviewer should focus rather than a generic checklist.
-
-1. **SIWE replay and nonce binding**
-   ([`siwe.js`](../mcp-server/src/auth/siwe.js),
-   [`server.js`](../mcp-server/src/protocols/http/server.js) lines 2453–2539).
-   `POST /auth/verify` requires that `consumeNonce(nonce)` returns the same
-   wallet that recovered from the signature; the nonce is removed atomically
-   at consume time. Worth probing: concurrent submits of the same nonce on
-   the Redis backend (Lua/GETDEL semantics), nonce TTL exhaustion under load
-   (`AUTH_NONCE_TTL_SECONDS`, default 300s), domain/chain-id pinning
-   downgrades, and clock-skew tolerance (±60s on `Issued At` / `Not Before`
-   / `Expiration Time`).
-
-2. **JWT validation strictness**
-   ([`jwt.js`](../mcp-server/src/auth/jwt.js)). HS256-only, hand-rolled,
-   constant-time signature compare. No `kid` field — rotation works by
-   accepting any secret in `AUTH_JWT_SECRETS`, so old tokens stay valid
-   until natural expiry. No issuer/audience claims enforced. Worth probing:
-   `alg: none` and algorithm-confusion attacks (header is parsed before
-   signature check; verify the alg/typ guard at line 63 cannot be bypassed),
-   token-malformedness handling, and the ±60s `iat`/`exp` skew.
-
-3. **Permissive-mode fallback and admin reach**
-   ([`middleware.js`](../mcp-server/src/auth/middleware.js) lines 135–164,
-   [`config.js`](../mcp-server/src/auth/config.js)). In `AUTH_MODE=permissive`
-   the middleware accepts `?wallet=` with no token; admin/verifier roles are
-   re-resolved from `AUTH_ADMIN_WALLETS` / `AUTH_VERIFIER_WALLETS`. Production
-   defaults to strict, but the gating depends on `NODE_ENV` and `AUTH_MODE`
-   together — verify no production deploy can boot permissive (and that
-   `state-store.js` line 837 cannot be bypassed except by the explicit
-   `STATE_STORE_ALLOW_MEMORY=1` override).
-
-4. **Service-token capability containment**
-   ([`capabilities.js`](../mcp-server/src/auth/capabilities.js) `resolveCapabilities`,
-   [`server.js`](../mcp-server/src/protocols/http/server.js) `/admin/service-tokens`
-   handlers from line 3720). Service-token claims (`tokenKind: "service"`)
-   receive **only** the capabilities from the linked capability grant — no
-   base capabilities, no role expansion, no `claims.capabilities` honored.
-   Issuance is gated by `assertIssuerCanGrantCapabilities`, so an admin can
-   only delegate capabilities they themselves hold. Worth probing: forging
-   `serviceToken: false` in claims to inherit base capabilities, grant-cache
-   staleness during revoke (15s in-process TTL plus cross-process backstop —
-   see `GRANT_CACHE_TTL_MS` in `middleware.js`), and the rotate/revoke flows
-   for receipt replay.
-
-5. **State-store availability fail-open**
-   ([`state-store.js`](../mcp-server/src/core/state-store.js) `createStateStore`).
-   Without `REDIS_URL`, production + strict-auth refuses to boot unless
-   `STATE_STORE_ALLOW_MEMORY=1` is explicitly set; memory mode wipes nonces,
-   token revocations, rate-limit counters, capability grants, and
-   idempotency receipts on every restart. Worth probing: that the env
-   override is never enabled on any production deploy
-   ([`deployments/mainnet.env.example`](../deployments/mainnet.env.example)),
-   and that Redis namespace isolation (`REDIS_NAMESPACE`) prevents
-   key collisions across environments.
-
-6. **Rate-limit client identity and proxy trust**
-   ([`rate-limit.js`](../mcp-server/src/auth/rate-limit.js) `extractClientKey`).
-   When `TRUST_PROXY=true` the rate limiter trusts the first
-   `X-Forwarded-For` entry; otherwise it uses the raw socket address. If
-   `TRUST_PROXY` is set without a real upstream proxy stripping the header,
-   any caller can spoof their identity and exhaust another wallet's quota.
-   Verify production has either Caddy or an explicit allowlist of trusted
-   forwarders.
-
-7. **Idempotent mutation receipts**
-   (`buildMutationRequestHash`, `getIdempotentMutationReplay`,
-   `storeIdempotentMutationReceipt` in
-   [`server.js`](../mcp-server/src/protocols/http/server.js)). Admin
-   write routes use `wallet:idempotencyKey` keys with payload-hash rebinding
-   so a replay with a different body returns a conflict rather than the
-   cached receipt. Worth probing: cross-wallet collisions, key omission
-   (the route accepts missing `idempotencyKey` for non-mutation paths but
-   not for sensitive mutations), and TTL-driven receipt expiry vs. token
-   lifetime.
-
-8. **CORS allowlist scope**
-   ([`server.js`](../mcp-server/src/protocols/http/server.js) lines 1113–1133).
-   Preflight responses only emit `Access-Control-Allow-Origin` when the
-   request origin is in `httpConfig.allowedOrigins`. Verify the production
-   allowlist contains no wildcards and no legacy preview/staging origins
-   that could be hijacked.
-
-9. **SSE query-token surface**
-   ([`middleware.js`](../mcp-server/src/auth/middleware.js) `allowQueryToken`).
-   SSE routes accept `?token=` because EventSource cannot set headers; a
-   warning is logged if a query token shows up on a non-SSE route, but the
-   token is still verified. Confirm this is the intended behavior and that
-   no admin/mutation route is mounted with `allowQueryToken: true`.
-
-10. **Disclosure of secrets via `/admin/status` and event bus**
-    Service-token issuance publishes a `service-token.issue` event
-    ([`server.js`](../mcp-server/src/protocols/http/server.js) line 3773)
-    carrying `subject`, `capabilities`, `scope`, and `tokenExpiresAt` — not
-    the token itself. `/admin/service-tokens` GET (`projectGrant`) returns
-    `tokenAvailable: false` so listing never re-reveals tokens. The hosted
-    service-token proof in
-    [`docs/evidence/`](./evidence/) confirms this on the live stack;
-    auditors should re-run that proof against their own deploy.
-
-**Out of scope**:
-
-- Frontend (`frontend/`) — no trust boundary; all authorization decisions
-  happen server-side or on-chain.
-- Indexer (`indexer/`) — Ponder-based; read-only derivation of on-chain state.
-- Deployment scripts (`scripts/`) — operator tooling; no runtime trust.
-- Pimlico gas-sponsor integration (`mcp-server/src/services/pimlico-*`) —
-  feature-flagged, disabled on all current deployments.
-- Strategy adapter implementations (`contracts/strategies/`) and the XCM
-  transport wrapper (`contracts/XcmWrapper.sol`, plus
-  `contracts/interfaces/{IXcmStrategyAdapter,IXcmWrapper}.sol`). The v1
-  set ships only the testnet-only `MockVDotAdapter`; the real adapter
-  and the wrapper are reviewed in a separate engagement scoped in
-  [`STRATEGY_ADAPTER_AUDIT_SCOPE.md`](./STRATEGY_ADAPTER_AUDIT_SCOPE.md).
-
----
-
-## 2. System overview
-
-Three-layer stack:
-
-1. **Solidity contracts** on Polkadot Hub (Ethereum-compatible).
-2. **mcp-server** — Node.js service exposing HTTP plus directory-safe MCP
-   discovery surfaces. A2A is intentionally out of the public product
-   contract until a real protocol endpoint exists. Authenticated via
-   Sign-In with Ethereum (EIP-4361) -> HS256 JWT.
-3. **Frontend** — vanilla JS served as static files.
-
-A worker's lifecycle:
-
-```
-  SIWE sign-in                  On-chain escrow
-  ───────────                   ───────────────
-   wallet ── POST /auth/nonce ── server ── nonce ─── wallet
-   wallet ── signs SIWE msg ─────────────────────
-   wallet ── POST /auth/verify ── server (JWT issued)
-                                   │
-                                   ├── POST /jobs/claim  ── EscrowCore.claimJob
-                                   │   └── locks claim stake via AgentAccountCore
-                                   ├── POST /jobs/submit ── EscrowCore.submitWork
-                                   └── POST /verifier/run ─ EscrowCore.resolveSinglePayout
-                                       ├── approved → settles reward + mints SBT badge
-                                       └── rejected → opens dispute window
-```
-
-Trust boundary: all mutating calls to `EscrowCore` and `AgentAccountCore`
-originate from a server-side signer; the `serviceOperators` allowlist on
-`TreasuryPolicy` gates privileged cross-contract calls.
-
----
-
-## 3. Trust model
-
-### Roles
-
-| Role | Identity | Capability |
-|---|---|---|
-| `owner` | 2-of-3 multisig (native pallet) on mainnet | All admin on `TreasuryPolicy` |
-| `pauser` | 1-key hot EOA | Only `setPaused(bool)` |
-| `serviceOperators` | `EscrowCore`, `AgentAccountCore` contract addresses; server signer optional | Privileged reserve/release/settle calls on `AgentAccountCore`; `recordOutflow` on `TreasuryPolicy` |
-| `verifiers` | Designated EOA(s) configured by owner | `resolveSinglePayout`, `resolveMilestone` |
-| `arbitrators` | Designated EOA(s) | `resolveDispute` |
-
-### Trust assumptions
-
-- **Owner key (multisig)** is honest and available. Loss of 2/3 keys means
-  the stack is un-configurable; see [MULTISIG_SETUP.md](MULTISIG_SETUP.md)
-  recovery section.
-- **Pauser key** is available. Its only power is pausing; compromise lets
-  an attacker grief by pausing but cannot drain funds.
-- **Verifier key** follows the verifier logic honestly. A malicious verifier
-  can reject valid work and trigger a dispute; they cannot steal funds.
-- **ERC20 tokens** on the approved-asset list are well-behaved modulo the
-  SafeTransfer wrapping (rebasing tokens are NOT supported; fee-on-transfer
-  tokens are NOT supported).
-
-### Adversary model
-
-We expect auditors to consider:
-
-- Worker races / double-claim attempts on a single job.
-- Poster-side griefing (e.g., funding then cancelling, interfering with
-  milestone settlement).
-- Verifier collusion with poster or worker.
-- Reentrancy via malicious ERC20 hooks (guarded by `ReentrancyGuard` but
-  please test adversarial token contracts).
-- Unauthorized operator / verifier / arbitrator registration.
-- Pause bypass or state-machine desync between pause and unpause.
-
----
-
-## 4. Key invariants
-
-In the order we'd like auditors to break:
-
-1. **Funds are never double-spent.** `settleReservedTo` decrements
-   `position.reserved` before transferring; `settlementExecuted[jobId][key]`
-   is set before settlement to prevent replay.
-2. **Claim stake cannot exit the system without resolution.** Every path
-   that decrements `jobStakeLocked` either releases to liquid
-   (`releaseJobStake`) or slashes (`slashJobStake`).
-3. **Borrow capacity respects `minimumCollateralRatioBps`.** `_isHealthy`
-   must reject any operation that would drop collateral ratio below the
-   configured minimum.
-4. **Reputation is monotonic modulo slashing.** `updateReputation` only
-   raises; `slashReputation` only lowers and saturates at zero.
-5. **Milestone array is bounded.** `MAX_MILESTONES = 32` enforced in
-   `createMilestoneJob` (prevents unbounded loop in `resolveMilestone`).
-6. **Pause halts all value movement.** Every mutating function in
-   `EscrowCore` and `AgentAccountCore` carries `whenNotPaused`.
-7. **Non-re-entrancy.** External calls happen after state mutation
-   (CEI ordering); `nonReentrant` modifier guards callbacks from malicious
-   tokens.
-
----
-
-## 5. Known quirks and deliberate choices
-
-- **No proxies, no upgrades.** All five contracts are immutable. v1 ships
-  this way deliberately to shrink audit scope. A bug that escapes the audit
-  requires a full redeploy + migration, not a proxy upgrade.
-- **Pauser has zero admin reach.** Only `setPaused`. Intentional — the hot
-  key compromise model is "pause-grief only".
-- **`slashJobStake` splits 50/50** between poster and treasury
-  (via `recordOutflow`). Not parameterized.
-- **Single verifier per job**, verifier chosen by `TreasuryPolicy.verifiers`
-  allowlist, not per-job assignment. Multi-verifier consensus is out of scope.
-- **Dispute window is 7 days** (`EscrowCore.DISPUTE_WINDOW`). Constant, not
-  per-job. Disputed jobs also carry `disputedAt` and can be auto-resolved in
-  the worker's favor after the 14-day `ARBITRATOR_SLA`.
-- **`IERC20Like` vs full ERC20.** We never call `approve`/`allowance`
-  on-chain (the deposit flow expects the EOA to pre-approve). SafeTransfer
-  handles tokens that don't return a bool (USDT-style) and tokens that
-  return false on failure. We do NOT support:
-  - Rebasing tokens (balance drift breaks accounting).
-  - Fee-on-transfer tokens (actual received < stated amount).
-  - ERC777 / callback tokens with reentrancy hooks (guarded, but
-    deliberately not on the approved-asset list).
-- **No timelock on admin ops**. Multisig is the only governance layer for
-  v1. Auditors may flag this — it's a deliberate trade-off for simplicity;
-  timelock is on the v2 roadmap.
-- **Claim TTL is per-job** (`claimTtls[jobId]`), set at creation time.
-  Claim timeout reopens the job for re-claim after stake slash.
-- **State-store fallback**. The off-chain layer refuses to boot in
-  production without Redis (see [state-store.js](../mcp-server/src/core/state-store.js)).
-  Auditors reviewing the auth flow should be aware that `AUTH_JWT_SECRETS`
-  also gates all write-path endpoints via JWT verification.
-
----
-
-## 6. Deployment parameters
-
-Current testnet on-chain values
-([`deployments/testnet.json#parameters`](../deployments/testnet.json)).
-The live testnet deliberately runs the same conservative parameter stance
-as the intended mainnet deploy, so an auditor reviewing the testnet
-contracts is reviewing the parameter values intended for mainnet:
-
-| Parameter | Raw value | Human value | Notes |
-|---|---:|---:|---|
-| `dailyOutflowCap` | `250_000_000` | 250 USDC | Launch-phase circuit breaker on aggregate daily outflow. |
-| `borrowCap` | `25_000_000` | 25 USDC per account | Bridges claim stake; flat (not reputation-weighted). |
-| `minimumCollateralRatioBps` | `20_000` | 200% | More conservative than the original 150% testnet stance; no liquidation yet. |
-| `defaultClaimStakeBps` | `1_000` | 10% | Fraction of reward locked as worker stake. |
-| `onboardingWaiverClaimCount` | `3` | 3 claims | First three claims waive both stake and anti-spam fee. |
-| `claimFeeBps` | `200` | 2% | Refundable anti-spam fee on claims past onboarding. |
-| `minClaimFee` | `50_000` | 0.05 USDC | Floor on the anti-spam fee. |
-| `claimFeeVerifierBps` | `7_000` | 70% | Share of a slashed fee routed to the verifier path. |
-| `rejectionSkillPenalty` | `10` | — | Applied on terminal rejection. |
-| `rejectionReliabilityPenalty` | `25` | — | Reliability hit is harsher than skill. |
-| `disputeLossSkillPenalty` | `35` | — | Applied when the arbitrator sides against the worker. |
-| `disputeLossReliabilityPenalty` | `60` | — | Disputed-loss costs more than ordinary rejection. |
-| `MAX_MILESTONES` | `32` | — | Constant in `EscrowCore` (bounds the resolveMilestone loop). |
-| `DISPUTE_WINDOW` | — | 7 days | Constant in `EscrowCore`. |
-| `ARBITRATOR_SLA` | — | 14 days | Constant in `EscrowCore`; gates `autoResolveOnTimeout`. |
-
-USDC raw values use 6 decimals (Polkadot Hub TestNet USDC asset
-precompile at `0x0000053900000000000000000000000001200000`). Basis points
-are out of 10,000.
-
-These values mirror the recommended mainnet launch profile in
-[MAINNET_PARAMETERS.md](./MAINNET_PARAMETERS.md) and the operator env
-template in
-[deployments/mainnet.env.example](../deployments/mainnet.env.example).
-`scripts/deploy_contracts.sh` carries looser fallback constants for
-isolated local development; production deploys (`PROFILE=mainnet`) refuse
-to proceed unless the outflow cap, borrow cap, collateral ratio,
-claim-stake basis points, and slash penalties are all set explicitly at
-deploy time.
-
-The backend operator status surface preserves these policy parameters as
-exact raw chain strings. Numeric mirrors are only populated when the
-value fits JavaScript safe-integer precision, so sentinel values such as
-`uint256.max` do not appear as precise decimal numbers in
-`/admin/status`.
-
----
-
-## 7. How to run the tests
-
-Auditors should be able to reproduce every test green from a clean clone:
+Before engaging an auditor, freeze an audit candidate:
 
 ```bash
-git clone <repo>
-cd <repo>
-npm install
-
-# Solidity tests
-forge test -vv
-
-# Node backend (mcp-server) integration tests
-npm --workspace mcp-server test
-
-# Subprocess smoke tests (spin up a real HTTP server; gated by env var).
-# The smoke file lives two directories deep, which the workspace test script
-# does not currently glob into, so invoke it directly:
-RUN_HTTP_SMOKE=1 node --test mcp-server/src/protocols/http/server.smoke.test.js
-
-# Operator-app guard tests (structured-submission gating)
-npm run test:app
+git fetch origin main
+git checkout origin/main
+git tag audit/mainnet-YYYY-MM-DD
+git rev-parse HEAD
 ```
 
-Expected counts at the time this doc was last refreshed (2026-05-17):
+Record the freeze commit, tag, and any deployed contract addresses in the audit
+issue or engagement brief. Do not ask the auditor to review a moving target.
 
-- Foundry: **97** tests across 8 suites (`AgentAccountAsyncStrategy`,
-  `AgentPlatform`, `Hardening`, `Rc1Backbone`, `SendToAgent`, `XcmVdotAdapter`,
-  `XcmWrapper`, `strategies/MockVDotAdapter`). Covers core lifecycle, claim
-  stake, milestone/dispute, async strategy accounting, XCM dispatch/wrapper,
-  Rc1 verifier authorization and disclosure, and the mock vDOT adapter path.
-- Node backend (`npm --workspace mcp-server test`): **571** tests across
-  `core`, `services`, `jobs`, `blockchain`, `auth`, and `protocols`. Covers
-  SIWE/JWT auth, rate limits, state store, HTTP config, event bus, discovery,
-  jobs/sessions/recurring, verifier handlers, settlement and XCM observation,
-  service tokens, capability and policy surfaces. The HTTP smoke suite is
-  gated behind `RUN_HTTP_SMOKE=1` and does not contribute to this count.
-- HTTP smoke (opt-in, direct invocation): **40** tests covering admin
-  endpoints, validate-submission, sub-jobs, async XCM allocation guards,
-  CORS preflight, badge/borrow-capacity surfaces, and rate-limit headers.
-  Each test is individually `skip: !RUN_HTTP_SMOKE` so the file no-ops when
-  the env var is unset. Use the explicit `node --test` command above to
-  invoke the file directly; the workspace test script's bash glob does not
-  currently recurse into `src/protocols/http/`, so `RUN_HTTP_SMOKE=1
-  npm --workspace mcp-server test` is a no-op today.
-- Operator-app guards (`npm run test:app`): **5** tests in
-  `app/lib/api/guarded-submit.test.mjs` exercising the structured-submission
-  validation gate (valid + invalid responses, malformed payloads, non-
-  structured passthrough).
+## Audit Outcomes Required
 
-These numbers should be refreshed whenever new tests land. Auditors who want
-the full repo-wide suite (root `npm test`) also pick up SDK (`16`), examples
-(`22`), indexer API (`19`), and ops scripts (`87`) tests on top of the four
-suites above.
+The external audit is complete only after all of the following are true:
 
----
+- Auditor reviewed the frozen commit and named scope below.
+- Auditor delivered severity-ranked findings: Critical, High, Medium, Low,
+  Informational.
+- All Critical and High findings are fixed or explicitly rejected with written
+  risk acceptance before any real-funds mainnet launch.
+- Fixes for Critical and High findings are reviewed by the auditor or by an
+  agreed independent reviewer.
+- Final report, remediation PRs, and the final reviewed commit are linked from
+  `docs/PROJECT_ROADMAP.md`.
+- The mainnet deployment uses the same audited artifact set, or every
+  post-audit delta is separately reviewed.
 
-## 8. Deliverables requested from the audit
+## Primary Scope
 
-1. Written report with severity-ranked findings (Critical / High / Medium /
-   Low / Informational).
-2. Proof-of-concept exploits for any Critical or High findings, expressed
-   as Foundry tests against [test/AgentPlatform.t.sol](../test/AgentPlatform.t.sol)
-   style harness.
-3. Recommendations split into:
-   - Must-fix before mainnet
-   - Should-fix within N weeks
-   - Nice-to-have / v2 roadmap
-4. Sign-off statement once Critical + High items are resolved, for public
-   posting alongside the mainnet announcement.
+### Solidity Contracts
 
----
+Mandatory review:
 
-## 9. Contact
+- [`contracts/TreasuryPolicy.sol`](../contracts/TreasuryPolicy.sol)
+- [`contracts/AgentAccountCore.sol`](../contracts/AgentAccountCore.sol)
+- [`contracts/EscrowCore.sol`](../contracts/EscrowCore.sol)
+- [`contracts/ReputationSBT.sol`](../contracts/ReputationSBT.sol)
+- [`contracts/DiscoveryRegistry.sol`](../contracts/DiscoveryRegistry.sol)
+- [`contracts/StrategyAdapterRegistry.sol`](../contracts/StrategyAdapterRegistry.sol)
+- [`contracts/lib/ReentrancyGuard.sol`](../contracts/lib/ReentrancyGuard.sol)
+- [`contracts/lib/SafeTransfer.sol`](../contracts/lib/SafeTransfer.sol)
+- [`contracts/interfaces/IStrategyAdapter.sol`](../contracts/interfaces/IStrategyAdapter.sol)
+
+Mainnet launch should not include native XCM/vDOT/yield until the separate
+native-XCM evidence gate and strategy-adapter audit are complete. If those
+contracts are added to the launch scope, include:
+
+- [`contracts/XcmWrapper.sol`](../contracts/XcmWrapper.sol)
+- [`contracts/strategies/XcmVdotAdapter.sol`](../contracts/strategies/XcmVdotAdapter.sol)
+- [`contracts/interfaces/IXcmWrapper.sol`](../contracts/interfaces/IXcmWrapper.sol)
+- [`contracts/interfaces/IXcmStrategyAdapter.sol`](../contracts/interfaces/IXcmStrategyAdapter.sol)
+- [`docs/STRATEGY_ADAPTER_AUDIT_SCOPE.md`](./STRATEGY_ADAPTER_AUDIT_SCOPE.md)
+
+Test-only or deferred:
+
+- [`contracts/mocks/MockERC20.sol`](../contracts/mocks/MockERC20.sol)
+- [`contracts/strategies/MockVDotAdapter.sol`](../contracts/strategies/MockVDotAdapter.sol)
+
+### Backend Money And Control Routes
+
+Mandatory review:
+
+- [`mcp-server/src/auth/`](../mcp-server/src/auth)
+- [`mcp-server/src/core/state-store.js`](../mcp-server/src/core/state-store.js)
+- [`mcp-server/src/core/capability-grants.js`](../mcp-server/src/core/capability-grants.js)
+- [`mcp-server/src/core/platform-service.js`](../mcp-server/src/core/platform-service.js)
+- [`mcp-server/src/core/job-schema-registry.js`](../mcp-server/src/core/job-schema-registry.js)
+- [`mcp-server/src/protocols/http/auth-routes.js`](../mcp-server/src/protocols/http/auth-routes.js)
+- [`mcp-server/src/protocols/http/job-routes.js`](../mcp-server/src/protocols/http/job-routes.js)
+- [`mcp-server/src/protocols/http/verifier-routes.js`](../mcp-server/src/protocols/http/verifier-routes.js)
+- [`mcp-server/src/protocols/http/admin-capability-routes.js`](../mcp-server/src/protocols/http/admin-capability-routes.js)
+- [`mcp-server/src/protocols/http/admin-jobs-routes.js`](../mcp-server/src/protocols/http/admin-jobs-routes.js)
+- [`mcp-server/src/protocols/http/admin-xcm-routes.js`](../mcp-server/src/protocols/http/admin-xcm-routes.js)
+- [`mcp-server/src/protocols/http/dispute-routes.js`](../mcp-server/src/protocols/http/dispute-routes.js)
+- [`mcp-server/src/protocols/http/payment-routes.js`](../mcp-server/src/protocols/http/payment-routes.js)
+- [`mcp-server/src/protocols/http/gas-routes.js`](../mcp-server/src/protocols/http/gas-routes.js)
+- [`mcp-server/src/protocols/http/event-routes.js`](../mcp-server/src/protocols/http/event-routes.js)
+- [`mcp-server/src/protocols/http/operational-routes.js`](../mcp-server/src/protocols/http/operational-routes.js)
+- [`mcp-server/src/protocols/http/server.js`](../mcp-server/src/protocols/http/server.js)
+
+The HTTP server has been route-split. `server.js` now primarily owns shared
+plumbing: CORS preflight, request logging, metric labeling, route ordering,
+idempotency helpers, and normalized errors. Review it as shared middleware, not
+as the canonical location for every route.
+
+### Deployment, Secrets, And Operations
+
+Mandatory review:
+
+- [`docs/THREAT_MODEL.md`](./THREAT_MODEL.md)
+- [`docs/PRODUCTION_CHECKLIST.md`](./PRODUCTION_CHECKLIST.md)
+- [`docs/MAINNET_PARAMETERS.md`](./MAINNET_PARAMETERS.md)
+- [`docs/INCIDENT_RESPONSE.md`](./INCIDENT_RESPONSE.md)
+- [`docs/MULTISIG_SETUP.md`](./MULTISIG_SETUP.md)
+- [`docs/PHASE_4E_PLAN.md`](./PHASE_4E_PLAN.md)
+- [`docs/PHASE_5A_IAM_ROLES_ANYWHERE_PLAN.md`](./PHASE_5A_IAM_ROLES_ANYWHERE_PLAN.md)
+- [`docs/SECRETS.md`](./SECRETS.md)
+- [`docs/SECRETS_MIGRATION.md`](./SECRETS_MIGRATION.md)
+- [`deployments/mainnet.env.example`](../deployments/mainnet.env.example)
+- [`scripts/ops/check-mainnet-usdc-config.mjs`](../scripts/ops/check-mainnet-usdc-config.mjs)
+- [`scripts/ops/check-mainnet-env-secrets-proof.mjs`](../scripts/ops/check-mainnet-env-secrets-proof.mjs)
+- [`scripts/ops/check-mainnet-smoke-proof.mjs`](../scripts/ops/check-mainnet-smoke-proof.mjs)
+- [`scripts/ops/check-incident-response-proof.mjs`](../scripts/ops/check-incident-response-proof.mjs)
+
+## Polkadot Hub Assumptions
+
+These assumptions were checked against the Polkadot docs MCP when this package
+was refreshed:
+
+- `reference/polkadot-hub/smart-contracts.md`: Polkadot Hub supports Solidity
+  contracts through REVM/EVM-compatible tooling.
+- `smart-contracts/precompiles/erc20.md`: Trust-Backed assets have deterministic
+  ERC20 precompile addresses. USDC is asset ID `1337`, has 6 decimals, and uses
+  precompile `0x0000053900000000000000000000000001200000`.
+- `smart-contracts/precompiles/erc20.md`: the ERC20 precompile implements core
+  ERC20 calls only; optional metadata functions `name()`, `symbol()`, and
+  `decimals()` are not implemented through the precompile.
+- `smart-contracts/for-eth-devs/accounts.md`: native Polkadot accounts must use
+  `pallet_revive.map_account()` before they can safely interact with the
+  Ethereum-compatible smart-contract layer through Ethereum tooling.
+- `smart-contracts/explorers.md`: BlockScout, Routescan, and Subscan are valid
+  Polkadot Hub evidence surfaces for transaction status, account history, and
+  smart-contract interaction history.
+
+Any auditor-facing mainnet asset, account, or explorer claim should cite one of
+these docs paths or newer official Polkadot documentation.
+
+## Critical Invariants To Break
+
+Auditors should try to disprove these before reviewing lower-risk style issues.
+
+1. **Funds are never double-spent.** A job, milestone, dispute, or settlement
+   path cannot pay the same reserved balance twice.
+2. **Job state machines cannot be skipped.** Claim, submit, verify, dispute,
+   release, slash, and settle transitions must reject stale or out-of-order
+   calls.
+3. **Claims are mutation-safe.** A retry, timeout, or network failure cannot
+   create an unintended second claim or submit for the same logical run.
+4. **Idempotency is bound to actor and payload.** Reusing an idempotency key
+   with a different body, wallet, service token, or session cannot replay a
+   privileged mutation.
+5. **Service tokens cannot escape their grant.** A service token must receive
+   only the grant-backed capabilities linked by `capabilityGrantId`, not admin
+   defaults or user base capabilities.
+6. **Verifier replay is stable.** Replaying a verifier result must detect
+   policy/config drift and cannot approve a result under a different rule set
+   without an explicit audit trail.
+7. **Pause halts value movement.** Paused contracts reject claim, submit,
+   settle, dispute, release, and treasury/account value mutations.
+8. **The pauser cannot administer funds.** A compromised pauser can only grief
+   by pausing/unpausing, not change owner, verifier, arbitrator, asset, or
+   service-operator state.
+9. **USDC accounting uses raw base units consistently.** Rewards, reserves,
+   deposits, claims, fees, min-balance checks, and UI/API projections must not
+   mix DOT, PAS, display units, and USDC raw units.
+10. **Mainnet env cannot reuse testnet keys.** Mainnet signers, service tokens,
+    KMS keys, RPCs, contract addresses, and wallet seeds must be fresh and
+    provably not the testnet material.
+11. **Native account mapping is explicit.** Any native owner/multisig account
+    that interacts with contracts through Ethereum tooling must have documented
+    `map_account()` evidence.
+12. **Observability does not leak secrets.** `/admin/status`, event streams,
+    logs, alert payloads, and artifacts must never reveal private keys, bearer
+    tokens, JWTs, webhook URLs, API keys, or seed material.
+
+## Known Launch Choices
+
+- Contracts are not proxy-upgradeable in v1. A serious bug requires redeploy
+  and migration, not proxy admin intervention.
+- Timelock governance is not in v1. Mainnet owner governance is expected to be a
+  hardware-backed multisig with documented role separation.
+- Yield/native XCM is not part of first real-funds launch unless separately
+  audited.
+- Backend KMS signing is required for mainnet. Long-lived raw private keys and
+  static AWS access-key fallbacks are not acceptable mainnet launch posture.
+- Mainnet JWTs must use KMS-backed ES256. HMAC fallback is a testnet rollback
+  legacy and is scheduled for retirement after the soak window.
+- Metrics, alerts, backups, restore drill, service-token proof, and worker-loop
+  product proof are already proven for testnet/RC1. Mainnet still needs fresh
+  mainnet evidence.
+
+## Required Reproduction Commands
+
+Run from a clean clone of the frozen audit commit:
+
+```bash
+npm install
+
+# Contracts
+forge build
+forge test
+
+# Backend and HTTP route modules
+npm --workspace mcp-server test
+
+# Root regression suite
+npm test
+
+# Operator app
+npm run typecheck:app
+npm run build:frontend
+
+# Public site
+npm run build:site
+
+# Indexer
+npm run typecheck:indexer
+
+# SDK generated types
+npm run check:sdk-types
+```
+
+For hosted or private mainnet configuration evidence, auditors should expect
+redacted JSON artifacts validated by these scripts:
+
+```bash
+node scripts/ops/check-mainnet-usdc-config.mjs \
+  --env /path/to/private-mainnet.env \
+  --runtime-evidence docs/evidence/mainnet-usdc-asset-config-YYYY-MM-DD.json \
+  --require-runtime \
+  --json
+
+node scripts/ops/check-mainnet-env-secrets-proof.mjs \
+  --file docs/evidence/mainnet-env-secrets-YYYY-MM-DD.json \
+  --max-completed-age-hours 24 \
+  --json
+
+node scripts/ops/check-mainnet-smoke-proof.mjs \
+  --file docs/evidence/mainnet-smoke-YYYY-MM-DD.json \
+  --max-completed-age-hours 24 \
+  --json
+
+node scripts/ops/check-incident-response-proof.mjs \
+  --file docs/evidence/incident-response-YYYY-MM-DD.json \
+  --max-completed-age-hours 24 \
+  --require-mainnet \
+  --json
+```
+
+Do not include secret values in evidence artifacts. Artifacts should prove
+configuration shape and freshness without exposing private material.
+
+## Mainnet Pre-Audit Checklist
+
+Use this checklist before sending the package to an auditor:
+
+- [ ] Freeze commit/tag recorded.
+- [ ] `docs/PROJECT_ROADMAP.md` has no stale open-PR/open-issue status.
+- [ ] `docs/MAINNET_PARAMETERS.md` is the intended launch profile.
+- [ ] `deployments/mainnet.env.example` matches the intended launch profile.
+- [ ] Mainnet USDC docs assumptions still match official Polkadot docs.
+- [ ] Final in-scope contract set is named.
+- [ ] Any excluded contracts are explicitly not deployed or not enabled.
+- [ ] Expected owner, pauser, verifier, arbitrator, and service-operator roles
+      are named by role, not by private key.
+- [ ] Mainnet multisig and all native accounts that need EVM interaction have
+      account-mapping evidence.
+- [ ] Mainnet KMS/JWT/secrets architecture has a redacted evidence plan.
+- [ ] Testnet-only rollback fallbacks are listed with retirement dates.
+- [ ] Known risks and deferred work are named in the engagement brief.
+
+## Auditor Questions To Answer Explicitly
+
+Ask the auditor for written answers on these topics:
+
+- Can any path drain or double-spend escrowed funds?
+- Can any actor settle without a valid claim, submit, and verification path?
+- Can stale idempotency, retry, or timeout behavior mutate twice?
+- Can a service token, delegated wallet, or query-token SSE path escalate scope?
+- Can a verifier replay result approve under a different policy/config version?
+- Can a malicious token or precompile behavior break USDC accounting?
+- Can a native Polkadot account mapping mistake strand funds?
+- Can admin, pauser, arbitrator, verifier, or service-operator roles be
+  reassigned without the intended owner authority?
+- Can logs, events, artifacts, or status routes leak secrets?
+- Are mainnet env/secrets checks strong enough to catch testnet material reuse?
+
+## Deliverables Requested From Auditor
+
+1. Written report with severity-ranked findings.
+2. Reproduction steps or tests for Critical and High findings.
+3. Explicit "must fix before mainnet" list.
+4. Review of remediation commits for Critical and High findings.
+5. Final sign-off statement naming the reviewed commit/tag and audited scope.
+
+Preferred proof format for contract bugs: Foundry tests near the existing
+contract test suites. Preferred proof format for backend bugs: Node tests near
+the affected route or auth module.
+
+## Mainnet Blockers After Audit
+
+Even after a clean audit, mainnet is still blocked until:
+
+- fresh hardware-backed mainnet multisig is created and mapped where needed
+- mainnet contracts are deployed from audited artifacts
+- deploy key transfers ownership to the multisig
+- verifier, arbitrator, pauser, and service operators are assigned and rehearsed
+- mainnet USDC config proof validates
+- mainnet env/secrets proof validates
+- at least three low-value mainnet smoke runs validate
+- incident-response proof validates with mainnet mode
+
+## Contact
 
 - Primary: <pkuriger@averray.com>
 - Escalation: <ops@averray.com>
-- Response SLA: within 2 business days for questions during audit; within
-  1 business day for findings classified Critical.
+- Response SLA during audit: within 2 business days for questions, within
+  1 business day for Critical findings.
