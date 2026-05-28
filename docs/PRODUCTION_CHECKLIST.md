@@ -351,30 +351,36 @@ RUN_SUBSCAN_XCM_VALIDATION=1 ./scripts/ops/check-release-readiness.sh testnet
 
 ### How to verify each §5 box
 
-The first five boxes are intentionally not auto-flipped — they need
-deployed-config evidence that lives outside the repo. The wiring exists in
-code; only the production env vars need to be set. Record the three
-observability gates as one dated artifact. Prefer the manual
-`Hosted Observability Proof` GitHub Actions workflow, which collects the live
-VPS evidence, validates it, and uploads the sanitized artifact. Validate any
-archived copy with
+The first five boxes are intentionally not auto-flipped because they need
+deployed-config evidence that lives outside the repo. The current RC1
+observability proof is complete: `Hosted Observability Proof` run
+`26594855907` on 2026-05-28 uploaded artifact
+`hosted-observability-proof-26594855907`, and the validation artifact returned
+`status: "ok"`. It proves unauthenticated `/metrics` `401`, authenticated
+`/metrics` `200`, deliberate alert delivery to `ops-alerts`, and the intended
+`log_only_deferred` Sentry posture with structured backend logs visible from
+`docker logs agent-backend --tail 200`. Future re-proofs should use the same
+manual workflow, which collects live VPS evidence, validates it, and uploads a
+sanitized artifact. Validate any archived copy with
 `node scripts/ops/check-observability-proof.mjs --file
-docs/evidence/observability-YYYY-MM-DD.json --max-completed-age-hours 30 --json` before moving the
-roadmap rows to `Proofed`. Concrete verification commands per box:
+docs/evidence/observability-YYYY-MM-DD.json --max-completed-age-hours 30 --json`
+before moving the roadmap rows to `Proofed`. Concrete verification commands per
+box:
 
-- **Backend metrics bearer-protected and reachable.** Production now fails
-  closed when metrics auth is required but no token is configured. Flip this
-  box only after `METRICS_BEARER_TOKEN` is configured in the production backend
-  environment and this hosted gate passes:
+- **Backend metrics bearer-protected and reachable.** Production fails closed
+  when metrics auth is required but no token is configured. Current proof:
+  hosted run `26594855907` confirmed unauthenticated `/metrics` `401` and
+  scraper-token `/metrics` `200`. Re-run this hosted gate when rotating the
+  metrics token:
   ```bash
   METRICS_BEARER_TOKEN='<metrics-scraper-token>' \
   CHECK_METRICS_AUTH=1 \
   ./scripts/ops/check-hosted-stack.sh
   ```
   The gate requires unauthenticated `/metrics` to return `401` and the same
-  request with `Authorization: Bearer <token>` to return `200`.
-  The hosted workflow performs this same check on the VPS by sourcing
-  `/run/agent-stack/backend.env` and never writing the token to the artifact.
+  request with `Authorization: Bearer <token>` to return `200`. The hosted
+  workflow performs this same check on the VPS by reading only the required
+  env-file keys and never writing the token to the artifact.
 - **Sentry/logging posture recorded for the active environment.** The current
   v1 posture is recorded in
   [`OBSERVABILITY_POSTURE.md`](./OBSERVABILITY_POSTURE.md): backend Sentry is
@@ -394,9 +400,11 @@ roadmap rows to `Proofed`. Concrete verification commands per box:
   `ALERT_WEBHOOK_URL` (and optionally `ALERT_SERVICE_NAME`,
   `ALERT_ENVIRONMENT`) in the environment that runs
   [`scripts/ops/check-hosted-stack-and-alert.sh`](../scripts/ops/check-hosted-stack-and-alert.sh).
-  Verify with a deliberate smoke failure (e.g. point `API_BASE_URL` at a
-  non-existent host) and confirm the webhook receives the JSON payload. The
-  hosted workflow uses a local deliberate-failure stub and includes
+  Current proof: hosted run `26594855907` delivered the deliberate failure to
+  `ops-alerts` as `github-observability-alert-26594855907-1`. Re-verify with a
+  deliberate smoke failure (e.g. point `API_BASE_URL` at a non-existent host)
+  and confirm the webhook receives the JSON payload. The hosted workflow uses a
+  local deliberate-failure stub and includes
   `correlationId: github-observability-alert-<run-id>-<attempt>` in the alert
   payload; use that value as the evidence `messageId` when the webhook provider
   does not return a native message timestamp. Flip after one verified delivery.
