@@ -38,6 +38,42 @@ sanitize_output() {
     -e 's#https://[^@[:space:]]+@sentry#https://[redacted]@sentry#g'
 }
 
+read_env_value() {
+  local name=$1
+  local file=$2
+  local line value
+
+  line="$(grep -E "^${name}=" "$file" | tail -n 1 || true)"
+  if [[ -z "$line" ]]; then
+    return 1
+  fi
+
+  value="${line#*=}"
+  value="${value%$'\r'}"
+
+  if [[ "$value" == \"*\" && "$value" == *\" ]]; then
+    value="${value:1:${#value}-2}"
+  elif [[ "$value" == \'*\' && "$value" == *\' ]]; then
+    value="${value:1:${#value}-2}"
+  fi
+
+  printf '%s' "$value"
+}
+
+load_backend_env_value() {
+  local name=$1
+  local value
+
+  if [[ -n "${!name:-}" || ! -r "$BACKEND_ENV_FILE" ]]; then
+    return 0
+  fi
+
+  if value="$(read_env_value "$name" "$BACKEND_ENV_FILE")"; then
+    printf -v "$name" '%s' "$value"
+    export "$name"
+  fi
+}
+
 iso_now() {
   date -u +"%Y-%m-%dT%H:%M:%SZ"
 }
@@ -47,10 +83,9 @@ require_command "$JQ_BIN"
 require_command mktemp
 
 if [[ -r "$BACKEND_ENV_FILE" ]]; then
-  set -a
-  # shellcheck disable=SC1090
-  . "$BACKEND_ENV_FILE"
-  set +a
+  load_backend_env_value METRICS_BEARER_TOKEN
+  load_backend_env_value ALERT_WEBHOOK_URL
+  load_backend_env_value SENTRY_DSN
 elif [[ -z "${METRICS_BEARER_TOKEN:-}" || -z "${ALERT_WEBHOOK_URL:-}" ]]; then
   echo "Backend env file is not readable and required observability secrets were not supplied: $BACKEND_ENV_FILE" >&2
   exit 1

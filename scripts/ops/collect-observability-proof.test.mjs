@@ -31,6 +31,7 @@ test("collect-observability-proof emits sanitized hosted evidence", async () => 
     envFile,
     [
       "METRICS_BEARER_TOKEN=metrics-secret-token",
+      "BOOTSTRAP_SELF_REPORT_SUBJECT_PREFIX=Averray bootstrap self-report",
       "ALERT_WEBHOOK_URL=https://hooks.example.test/secret-webhook",
       "",
     ].join("\n"),
