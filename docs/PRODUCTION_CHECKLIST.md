@@ -350,7 +350,10 @@ RUN_SUBSCAN_XCM_VALIDATION=1 ./scripts/ops/check-release-readiness.sh testnet
 The first five boxes are intentionally not auto-flipped — they need
 deployed-config evidence that lives outside the repo. The wiring exists in
 code; only the production env vars need to be set. Record the three
-observability gates as one dated artifact and validate it with
+observability gates as one dated artifact. Prefer the manual
+`Hosted Observability Proof` GitHub Actions workflow, which collects the live
+VPS evidence, validates it, and uploads the sanitized artifact. Validate any
+archived copy with
 `node scripts/ops/check-observability-proof.mjs --file
 docs/evidence/observability-YYYY-MM-DD.json --max-completed-age-hours 30 --json` before moving the
 roadmap rows to `Proofed`. Concrete verification commands per box:
@@ -366,6 +369,8 @@ roadmap rows to `Proofed`. Concrete verification commands per box:
   ```
   The gate requires unauthenticated `/metrics` to return `401` and the same
   request with `Authorization: Bearer <token>` to return `200`.
+  The hosted workflow performs this same check on the VPS by sourcing
+  `/run/agent-stack/backend.env` and never writing the token to the artifact.
 - **Sentry/logging posture recorded for the active environment.** The current
   v1 posture is recorded in
   [`OBSERVABILITY_POSTURE.md`](./OBSERVABILITY_POSTURE.md): backend Sentry is
@@ -379,14 +384,18 @@ roadmap rows to `Proofed`. Concrete verification commands per box:
   default logger and records 5xx captures as
   `observability.captured_exception`. Verify the operator can read backend
   logs (via `journalctl`, `docker logs`, or the platform's log surface), then
-  flip.
+  flip. The hosted workflow samples `docker logs agent-backend --tail 200` and
+  fails closed if no structured JSON log line is visible.
 - **Alert destination for hosted smoke-check failures.** Set
   `ALERT_WEBHOOK_URL` (and optionally `ALERT_SERVICE_NAME`,
   `ALERT_ENVIRONMENT`) in the environment that runs
   [`scripts/ops/check-hosted-stack-and-alert.sh`](../scripts/ops/check-hosted-stack-and-alert.sh).
   Verify with a deliberate smoke failure (e.g. point `API_BASE_URL` at a
-  non-existent host) and confirm the webhook receives the JSON payload.
-  Flip after one verified delivery.
+  non-existent host) and confirm the webhook receives the JSON payload. The
+  hosted workflow uses a local deliberate-failure stub and includes
+  `correlationId: github-observability-alert-<run-id>-<attempt>` in the alert
+  payload; use that value as the evidence `messageId` when the webhook provider
+  does not return a native message timestamp. Flip after one verified delivery.
 - **Operator self-report proof visible after deploy and on schedule.** Use
   [HERMES_OPERATOR_REPORTS.md](./HERMES_OPERATOR_REPORTS.md) as the evidence
   map. Run `Hermes Operator Report` manually with `report_kind=all` after this

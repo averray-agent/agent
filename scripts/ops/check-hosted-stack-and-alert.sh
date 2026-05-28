@@ -8,6 +8,7 @@ CHECK_SCRIPT=${CHECK_HOSTED_STACK_SCRIPT:-"${SCRIPT_DIR}/check-hosted-stack.sh"}
 ALERT_WEBHOOK_URL=${ALERT_WEBHOOK_URL:-}
 ALERT_SERVICE_NAME=${ALERT_SERVICE_NAME:-averray-hosted-stack}
 ALERT_ENVIRONMENT=${ALERT_ENVIRONMENT:-production-like}
+ALERT_CORRELATION_ID=${ALERT_CORRELATION_ID:-}
 TIMEOUT_SEC=${TIMEOUT_SEC:-20}
 CURL_BIN=${CURL_BIN:-curl}
 
@@ -40,6 +41,7 @@ payload=$(
   jq -n \
     --arg service "$ALERT_SERVICE_NAME" \
     --arg environment "$ALERT_ENVIRONMENT" \
+    --arg correlationId "$ALERT_CORRELATION_ID" \
     --arg hostname "$(hostname)" \
     --arg check "scripts/ops/check-hosted-stack.sh" \
     --arg output "$output" \
@@ -53,7 +55,11 @@ payload=$(
       timestamp: $timestamp,
       summary: "Hosted stack smoke check failed",
       output: $output
-    }'
+    } + (
+      if $correlationId == "" then {}
+      else {correlationId: $correlationId}
+      end
+    )'
 )
 
 "$CURL_BIN" -fsS --max-time "$TIMEOUT_SEC" \

@@ -1,0 +1,190 @@
+name: Hosted Observability Proof
+
+on:
+  workflow_dispatch:
+    inputs:
+      operator_name:
+        description: Operator name to record in the sanitized evidence.
+        required: false
+        default: GitHub Actions
+        type: string
+      operator_signature:
+        description: Short operator signature to record in the sanitized evidence.
+        required: false
+        default: hosted-observability-proof
+        type: string
+      alert_channel:
+        description: Operator alert channel that receives the deliberate failure payload.
+        required: false
+        default: ops-alerts
+        type: string
+      max_completed_age_hours:
+        description: Maximum allowed evidence age during validation.
+        required: false
+        default: "2"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hosted-observability-proof
+  cancel-in-progress: false
+
+jobs:
+  proof:
+    name: Run hosted observability proof
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_PORT: ${{ secrets.VPS_PORT }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      OPERATOR_NAME: ${{ inputs.operator_name }}
+      OPERATOR_SIGNATURE: ${{ inputs.operator_signature }}
+      ALERT_CHANNEL: ${{ inputs.alert_channel }}
+      ALERT_CORRELATION_ID: github-observability-alert-${{ github.run_id }}-${{ github.run_attempt }}
+      MAX_COMPLETED_AGE_HOURS: ${{ inputs.max_completed_age_hours }}
+      OBSERVABILITY_EVIDENCE_FILE: artifacts/observability-hosted-${{ github.run_id }}.json
+      OBSERVABILITY_VALIDATION_FILE: artifacts/observability-validation-hosted-${{ github.run_id }}.json
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Validate proof inputs
+        run: |
+          set -euo pipefail
+          set +x
+
+          test -n "$VPS_HOST"
+          test -n "$VPS_USER"
+          test -n "$OPERATOR_NAME"
+          test -n "$OPERATOR_SIGNATURE"
+          test -n "$ALERT_CHANNEL"
+
+          case "$MAX_COMPLETED_AGE_HOURS" in
+            ''|*[!0-9]*|0)
+              echo "::error::max_completed_age_hours must be a positive integer."
+              exit 1
+              ;;
+          esac
+
+      - name: Load VPS SSH key from 1Password (fail-closed)
+        uses: 1password/load-secrets-action@92467eb28f72e8255933372f1e0707c567ce2259 # v4.0.0
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN_PROD_CI }}
+          VPS_SSH_KEY_OP: op://prod-ci/vps-ssh-key/private key
+
+      - name: Verify VPS_SSH_KEY_OP loaded and shape-valid
+        run: |
+          set -euo pipefail
+          set +x
+
+          if [ -z "${VPS_SSH_KEY_OP:-}" ]; then
+            echo "::error::VPS_SSH_KEY_OP is empty after load step — check op://prod-ci/vps-ssh-key/private key."
+            exit 1
+          fi
+
+          case "$VPS_SSH_KEY_OP" in
+            -----BEGIN*PRIVATE\ KEY-----*)
+              echo "VPS_SSH_KEY_OP: SSH private-key shape valid"
+              ;;
+            *)
+              echo "::error::VPS_SSH_KEY_OP does not look like an OpenSSH/PEM private key"
+              exit 1
+              ;;
+          esac
+
+      - name: Configure SSH
+        run: |
+          set -euo pipefail
+          set +x
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY_OP" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p "${VPS_PORT:-22}" -H "$VPS_HOST" >> ~/.ssh/known_hosts
+
+      - name: Collect hosted observability proof
+        run: |
+          set -euo pipefail
+          set +x
+
+          mkdir -p artifacts
+          remote_env=$(
+            printf 'OPERATOR_NAME=%q OPERATOR_SIGNATURE=%q ALERT_CHANNEL=%q ALERT_CORRELATION_ID=%q ' \
+              "$OPERATOR_NAME" \
+              "$OPERATOR_SIGNATURE" \
+              "$ALERT_CHANNEL" \
+              "$ALERT_CORRELATION_ID"
+          )
+
+          ssh -p "${VPS_PORT:-22}" \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=20 \
+            "$VPS_USER@$VPS_HOST" \
+            "sudo env ${remote_env} bash -lc 'cd /srv/agent-stack/app && ./scripts/ops/collect-observability-proof.sh'" \
+            > "$OBSERVABILITY_EVIDENCE_FILE"
+
+      - name: Validate saved observability evidence
+        run: |
+          set -euo pipefail
+
+          node scripts/ops/check-observability-proof.mjs \
+            --file "$OBSERVABILITY_EVIDENCE_FILE" \
+            --max-completed-age-hours "$MAX_COMPLETED_AGE_HOURS" \
+            --json > "$OBSERVABILITY_VALIDATION_FILE"
+
+      - name: Summarize observability proof
+        if: always()
+        run: |
+          set -euo pipefail
+
+          evidence_file="$OBSERVABILITY_EVIDENCE_FILE"
+          validation_file="$OBSERVABILITY_VALIDATION_FILE"
+
+          {
+            echo "## Hosted Observability Proof"
+            echo
+            echo "- Evidence artifact: \`hosted-observability-proof-${GITHUB_RUN_ID}\`"
+            echo "- Alert correlation id: \`${ALERT_CORRELATION_ID}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ ! -s "$evidence_file" ]; then
+            echo "- Status: \`missing_evidence\`" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          validation_status="missing"
+          if [ -s "$validation_file" ]; then
+            validation_status="$(jq -r '.status' "$validation_file")"
+          fi
+          unauthenticated_status="$(jq -r '.metricsAuth.unauthenticatedStatus' "$evidence_file")"
+          authenticated_status="$(jq -r '.metricsAuth.authenticatedStatus' "$evidence_file")"
+          alert_delivered="$(jq -r '.alertDestination.deliberateFailureDelivered' "$evidence_file")"
+          sentry_decision="$(jq -r '.sentryLogging.decision' "$evidence_file")"
+          log_surface="$(jq -r '.sentryLogging.logSurface' "$evidence_file")"
+          completed_at="$(jq -r '.completedAt' "$evidence_file")"
+
+          {
+            echo "- Validation: \`${validation_status}\`"
+            echo "- Completed at: \`${completed_at}\`"
+            echo "- Metrics: unauthenticated \`${unauthenticated_status}\`, authenticated \`${authenticated_status}\`"
+            echo "- Alert delivered: \`${alert_delivered}\`"
+            echo "- Sentry/logging decision: \`${sentry_decision}\`"
+            echo "- Log surface: \`${log_surface}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sanitized observability proof evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: hosted-observability-proof-${{ github.run_id }}
+          path: |
+            ${{ env.OBSERVABILITY_EVIDENCE_FILE }}
+            ${{ env.OBSERVABILITY_VALIDATION_FILE }}
+          if-no-files-found: error
+          retention-days: 90
