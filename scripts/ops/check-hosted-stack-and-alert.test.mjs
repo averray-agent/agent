@@ -142,6 +142,11 @@ test("hosted stack alert wrapper sends a structured webhook payload on failure",
   const body = await readFile(curlCapture.payloadPath, "utf8");
   const payload = JSON.parse(body);
   assert.equal(payload.status, "firing");
+  assert.equal(
+    payload.text,
+    "averray-smoke-test smoke check failed in ci (correlation: github-observability-alert-123)"
+  );
+  assert.equal(payload.content, payload.text);
   assert.equal(payload.service, "averray-smoke-test");
   assert.equal(payload.environment, "ci");
   assert.equal(payload.correlationId, "github-observability-alert-123");
