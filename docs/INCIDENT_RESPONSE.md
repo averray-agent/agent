@@ -305,7 +305,52 @@ If the incident required a pause, include:
 
 ---
 
-## 9. Minimum “ready for prod” bar
+## 9. Evidence gate
+
+Capture a redacted rehearsal artifact before closing the roadmap's incident
+response row. Validate it with:
+
+```bash
+node scripts/ops/check-incident-response-proof.mjs \
+  --file docs/evidence/incident-response-YYYY-MM-DD.json \
+  --max-completed-age-hours 24 \
+  --json
+```
+
+For mainnet readiness, add `--require-mainnet`. That requires the evidence to
+name Polkadot Hub mainnet, use a dedicated-pauser validation command, and point
+pause/unpause transaction proof at Polkadot Hub explorer URLs.
+
+The artifact must use schema `incident-response-proof-v1` and include:
+
+- `polkadotDocs`: must include `smart-contracts/explorers.md` and
+  `smart-contracts/for-eth-devs/accounts.md`.
+- `contacts`: primary/backup on-call, pauser operator, and either an engaged
+  external escalation contact or an explicit `not_engaged_v1` fallback.
+- `severityDrills`: P1 acknowledge <=5 minutes with owner engaged, P2
+  acknowledge <=15 minutes and mitigate/rollback <=60 minutes, P3 same-day
+  triage.
+- `alertDelivery`: `check-hosted-stack-and-alert.sh` ran, a deliberate failure
+  reached the operator channel, the webhook value is redacted, and the hosted
+  smoke returned green after restore.
+- `pauseFlow`: evidence validated by
+  `check-pauser-rehearsal-evidence.mjs`, live pause/unpause observed, final
+  paused state false, and both pause/unpause tx hashes plus explorer URLs.
+- `rollbackRehearsal`: backend, indexer, and frontend rollback paths exercised
+  through their component redeploy scripts with health gates observed.
+- `escalation`: primary/backup acknowledgements, owner signer reachability, and
+  a durable handoff record.
+- `postIncidentRecord`: timeline, blast radius, root cause, detection review,
+  prevention change, resume criteria, and no secrets.
+- `guardrails`: no private keys, raw webhooks, JWTs, provider keys, direct fund
+  movement claims, or leftover paused state.
+
+This validator is offline and read-only. It never sends alerts, pauses
+contracts, calls chain RPC, or rolls back services.
+
+---
+
+## 10. Minimum “ready for prod” bar
 
 Before calling the stack truly production-ready:
 
@@ -314,3 +359,5 @@ Before calling the stack truly production-ready:
 - [ ] `check-hosted-stack-and-alert.sh` is running from an external scheduler
 - [ ] Pause path has been rehearsed recently
 - [ ] Rollback path has been rehearsed recently
+- [ ] A dated `incident-response-proof-v1` artifact validates with
+  `check-incident-response-proof.mjs`

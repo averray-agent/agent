@@ -407,6 +407,27 @@ roadmap rows to `Proofed`. Concrete verification commands per box:
   `ops_health` and `daily_operator_brief` reports succeed, each artifact is
   downloadable, and the hosted bootstrap instrumentation smoke above passes.
 
+### Incident response rehearsal evidence
+
+Before treating the stack as mainnet incident-ready, record the paging, alert,
+pause/unpause, rollback, escalation, and post-incident-note rehearsal in one
+redacted artifact:
+
+```bash
+node scripts/ops/check-incident-response-proof.mjs \
+  --file docs/evidence/incident-response-YYYY-MM-DD.json \
+  --max-completed-age-hours 24 \
+  --require-mainnet \
+  --json
+```
+
+The guard is offline and read-only. It expects schema
+`incident-response-proof-v1`, requires the live pauser proof to have passed
+`check-pauser-rehearsal-evidence.mjs`, requires backend/indexer/frontend
+rollback paths through the component redeploy scripts, and rejects pasted JWTs,
+private keys, Slack webhook URLs, provider API keys, or unlabelled 32-byte hex
+payloads. Omit `--require-mainnet` only for bounded testnet rehearsals.
+
 ---
 
 ## 6. Launch Documentation

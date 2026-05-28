@@ -736,6 +736,8 @@ reuse it on mainnet — even if no leak is known.
 - [ ] No secret appears in any log file, process listing, or
   rendered env file checksum
 - [ ] On-call rotation tested with a synthetic alert
+- [ ] Redacted incident-response rehearsal proof validates with
+  `node scripts/ops/check-incident-response-proof.mjs --file docs/evidence/incident-response-YYYY-MM-DD.json --max-completed-age-hours 24 --require-mainnet --json`
 - [ ] No raw `SIGNER_PRIVATE_KEY` value exists anywhere in any
   mainnet vault, env file, backup, or operator's machine
 - [ ] Redacted env/secrets proof validates with
