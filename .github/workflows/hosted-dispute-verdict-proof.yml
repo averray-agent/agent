@@ -1,0 +1,158 @@
+name: Hosted Dispute Verdict Proof
+
+on:
+  workflow_dispatch:
+    inputs:
+      dispute_id:
+        description: Existing hosted dispute id to resolve. Must already be open.
+        required: true
+        type: string
+      verdict:
+        description: Verdict to submit for the named dispute.
+        required: true
+        default: dismissed
+        type: choice
+        options:
+          - dismissed
+          - upheld
+          - split
+          - timeout
+      rationale:
+        description: Arbitrator reasoning text. Stored as content-addressed evidence.
+        required: true
+        type: string
+      worker_payout:
+        description: Required only for split verdicts. Positive worker payout amount.
+        required: false
+        default: ""
+        type: string
+      idempotency_key:
+        description: Optional explicit replay key. Blank uses dispute-proof-<dispute_id>.
+        required: false
+        default: ""
+        type: string
+      live:
+        description: Must be true. This resolves the named dispute through the hosted API.
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hosted-dispute-verdict-proof-${{ inputs.dispute_id }}
+  cancel-in-progress: false
+
+jobs:
+  proof:
+    name: Run hosted dispute verdict proof
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    env:
+      APP_ALLOW_PROTECTED_SHELL: "1"
+      CHECK_INDEXER: "0"
+      CHECK_DISPUTE_VERDICT_PROOF: "1"
+      DISPUTE_PROOF_ID: ${{ inputs.dispute_id }}
+      DISPUTE_PROOF_VERDICT: ${{ inputs.verdict }}
+      DISPUTE_PROOF_RATIONALE: ${{ inputs.rationale }}
+      DISPUTE_PROOF_WORKER_PAYOUT: ${{ inputs.worker_payout }}
+      DISPUTE_PROOF_IDEMPOTENCY_KEY: ${{ inputs.idempotency_key }}
+      DISPUTE_PROOF_LIVE: ${{ inputs.live && '1' || '0' }}
+      DISPUTE_PROOF_EVIDENCE_FILE: artifacts/dispute-verdict-proof-hosted-${{ github.run_id }}.json
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Confirm live mutation input
+        run: |
+          set -euo pipefail
+          set +x
+
+          if [ "$DISPUTE_PROOF_LIVE" != "1" ]; then
+            echo "::error::The live input must be true. This workflow is the live hosted proof and will not run as an ambiguous dry-run."
+            exit 1
+          fi
+
+          if [ -z "$DISPUTE_PROOF_ID" ]; then
+            echo "::error::dispute_id is required."
+            exit 1
+          fi
+
+      - name: Load ADMIN_JWT from 1Password (fail-closed)
+        uses: 1password/load-secrets-action@92467eb28f72e8255933372f1e0707c567ce2259 # v4.0.0
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN_PROD_SMOKE }}
+          ADMIN_JWT_OP: op://prod-smoke/admin-jwt/password
+
+      - name: Verify ADMIN_JWT_OP loaded and shape-valid
+        run: |
+          set -euo pipefail
+          set +x
+
+          if [ -z "${ADMIN_JWT_OP:-}" ]; then
+            echo "::error::ADMIN_JWT_OP is empty after load step - check op://prod-smoke/admin-jwt/password and OP_SERVICE_ACCOUNT_TOKEN_PROD_SMOKE."
+            exit 1
+          fi
+
+          case "$ADMIN_JWT_OP" in
+            ey*.*.*)
+              echo "ADMIN_JWT_OP: JWT shape valid"
+              ;;
+            *)
+              echo "::error::ADMIN_JWT_OP does not look like a JWT (expected ey<...>.<...>.<...>)"
+              exit 1
+              ;;
+          esac
+
+      - name: Run hosted proof
+        run: |
+          set -euo pipefail
+          set +x
+
+          ADMIN_JWT="$ADMIN_JWT_OP" ./scripts/ops/check-hosted-stack.sh
+
+      - name: Summarize proof evidence
+        if: always()
+        run: |
+          set -euo pipefail
+
+          evidence_file="$DISPUTE_PROOF_EVIDENCE_FILE"
+          if [ ! -s "$evidence_file" ]; then
+            echo "No dispute verdict evidence file was produced." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          mode="$(jq -r '.mode' "$evidence_file")"
+          dispute_id="$(jq -r '.disputeId' "$evidence_file")"
+          verdict="$(jq -r '.response.verdict' "$evidence_file")"
+          reason_code="$(jq -r '.response.reasonCode' "$evidence_file")"
+          chain_status="$(jq -r '.response.chainStatus' "$evidence_file")"
+          tx_hash="$(jq -r '.response.txHash // empty' "$evidence_file")"
+          block_number="$(jq -r '.response.blockNumber // empty' "$evidence_file")"
+          persisted_status="$(jq -r '.persisted.status' "$evidence_file")"
+
+          {
+            echo "## Hosted Dispute Verdict Proof"
+            echo
+            echo "- Mode: \`${mode}\`"
+            echo "- Dispute: \`${dispute_id}\`"
+            echo "- Verdict: \`${verdict}\`"
+            echo "- Reason code: \`${reason_code}\`"
+            echo "- Chain status: \`${chain_status}\`"
+            echo "- Tx hash: \`${tx_hash}\`"
+            echo "- Block number: \`${block_number}\`"
+            echo "- Persisted status: \`${persisted_status}\`"
+            echo "- Evidence artifact: \`hosted-dispute-verdict-proof-${GITHUB_RUN_ID}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sanitized dispute verdict proof evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: hosted-dispute-verdict-proof-${{ github.run_id }}
+          path: ${{ env.DISPUTE_PROOF_EVIDENCE_FILE }}
+          if-no-files-found: error
+          retention-days: 90

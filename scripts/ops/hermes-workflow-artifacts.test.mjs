@@ -96,6 +96,28 @@ test("hosted external-schema proof uploads sanitized evidence as a workflow arti
   assert.match(workflow, /retention-days: 90/u);
 });
 
+test("hosted dispute verdict proof requires live confirmation and uploads evidence", async () => {
+  const workflow = await readFile(join(REPO_ROOT, ".github/workflows/hosted-dispute-verdict-proof.yml"), "utf8");
+
+  assert.match(workflow, /workflow_dispatch:/u);
+  assert.match(workflow, /environment: production/u);
+  assert.match(workflow, /OP_SERVICE_ACCOUNT_TOKEN_PROD_SMOKE/u);
+  assert.match(workflow, /ADMIN_JWT_OP: op:\/\/prod-smoke\/admin-jwt\/password/u);
+  assert.match(workflow, /CHECK_DISPUTE_VERDICT_PROOF: "1"/u);
+  assert.match(workflow, /DISPUTE_PROOF_ID: \$\{\{ inputs\.dispute_id \}\}/u);
+  assert.match(workflow, /DISPUTE_PROOF_VERDICT: \$\{\{ inputs\.verdict \}\}/u);
+  assert.match(workflow, /DISPUTE_PROOF_RATIONALE: \$\{\{ inputs\.rationale \}\}/u);
+  assert.match(workflow, /DISPUTE_PROOF_LIVE: \$\{\{ inputs\.live && '1' \|\| '0' \}\}/u);
+  assert.match(workflow, /if \[ "\$DISPUTE_PROOF_LIVE" != "1" \]/u);
+  assert.match(workflow, /DISPUTE_PROOF_EVIDENCE_FILE: artifacts\/dispute-verdict-proof-hosted-\$\{\{ github\.run_id \}\}\.json/u);
+  assert.match(workflow, /ADMIN_JWT="\$ADMIN_JWT_OP" \.\/scripts\/ops\/check-hosted-stack\.sh/u);
+  assert.match(workflow, /uses: actions\/upload-artifact@(?:v7\b|[a-f0-9]{40} # v7\b)/u);
+  assert.match(workflow, /name: hosted-dispute-verdict-proof-\$\{\{ github\.run_id \}\}/u);
+  assert.match(workflow, /path: \$\{\{ env\.DISPUTE_PROOF_EVIDENCE_FILE \}\}/u);
+  assert.match(workflow, /if-no-files-found: error/u);
+  assert.match(workflow, /retention-days: 90/u);
+});
+
 test("hosted backup readiness proof uploads validated evidence as a workflow artifact", async () => {
   const workflow = await readFile(join(REPO_ROOT, ".github/workflows/hosted-backup-readiness-proof.yml"), "utf8");
 
