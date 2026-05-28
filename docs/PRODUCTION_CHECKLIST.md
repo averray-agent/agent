@@ -170,8 +170,12 @@ Restore procedures:
 - [x] Indexer freshness is within the accepted lag budget.
 - [x] Latest `Deploy Production` workflow on `main` is green after the
   1Password SSH/basic-auth/admin-JWT cutovers.
-- [ ] When an admin JWT is available, `/admin/status` reports the async XCM
-  watcher lane cleanly.
+- [x] When an admin JWT is available, `/admin/status` reports the async XCM
+  watcher lane cleanly. Evidence: Deploy Production run `26256776666` on
+  2026-05-21 reached `Checking admin async XCM status` against live
+  `/admin/status` with the rotated ES256 `ADMIN_JWT` and passed all watcher,
+  relay, and freshness assertions. Deploy Production run `26273097236`
+  reproduced the green assertion bundle on 2026-05-22.
 - [x] Hosted scoped service-token proof passes with sanitized evidence:
   issue a least-privilege token, prove allowed and denied routes, revoke it,
   and confirm `listServiceTokens` does not expose raw token material.
@@ -479,8 +483,19 @@ roadmap rows to `Proofed`. Concrete verification commands per box:
   pre-existing open dispute. It never creates disputes and never iterates
   the queue. Regression covered by
   `node --test scripts/ops/run-dispute-verdict-proof.test.mjs`.
-- [ ] Public discovery, schema, and trust pages reflect the current deployed behavior.
-- [ ] Canonical public discovery manifest matches the API mirror.
+- [x] Public discovery, schema, and trust pages reflect the current deployed behavior.
+  Evidence: Deploy Production run `26256248052` on 2026-05-21 reached
+  `Checking product-proof gate` and passed public discovery manifest, API
+  mirror, onboarding/discovery agreement, public trust and schema pages,
+  identity schemas, and job schema index/sample schema checks before printing
+  `Product-proof gate passed.` Runs `26256776666` and `26273097236` reproduced
+  the green gate.
+- [x] Canonical public discovery manifest matches the API mirror. Evidence:
+  the same product-proof gate deep-equals
+  `https://averray.com/.well-known/agent-tools.json` against
+  `https://api.averray.com/agent-tools.json`; run `26256248052` passed that
+  assertion via `Checking public discovery manifest` then
+  `Checking API discovery mirror`.
 
 If any of these drift, external agents will learn the wrong contract.
 

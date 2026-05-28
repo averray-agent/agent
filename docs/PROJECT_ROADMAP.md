@@ -1,7 +1,7 @@
 # Averray Unified Project Roadmap
 
-- **Status date:** 2026-05-27
-- **Baseline reviewed:** `origin/main` at `38702bf`
+- **Status date:** 2026-05-28
+- **Baseline reviewed:** `origin/main` at `39ab1b8`
 - **Latest docs audit:** [`DOCS_AUDIT_2026-05-19.md`](./DOCS_AUDIT_2026-05-19.md)
 - **Purpose:** one status and roadmap page for the specs, audits, launch
   checklists, security plans, and product-proof work.
@@ -309,32 +309,27 @@ Metrics:
 
 ## Current Open PRs And Issues
 
-As of 2026-05-19:
+As of 2026-05-28:
 
 - Open issues in `averray-agent/agent`: none.
-- Open PRs:
-  - `#439` draft: Stage 2C-2 KMS-only JWT backend flip. Blocked on soak and
-    verification criteria above.
+- Open PRs in `averray-agent/agent`: none.
 
 ## Immediate Work Queue
 
-1. Keep `#439` draft until `#438` has soaked and the service-token/auth checks
-   pass under `JWT_BACKEND=both`. Then mark ready → auto-merge picks it up and
-   the Stage 2C-2 deploy refuses HS256.
-2. Track the Stage 2C-3 HMAC retirement window: ≥30 days after `#439` lands,
-   delete `op://prod-backend/auth-jwt-secrets`, drop the HMAC code branch
-   from `mcp-server/src/auth/jwt.js`, and retire `AUTH_JWT_SECRETS` from the
-   secrets inventory + calendar.
-3. Close the remaining `PRODUCTION_CHECKLIST.md` P0 launch gates:
-   pauser/rehearsal, backups, restore drill, `/admin/status` hosted check,
-   metrics/logging/alerts, self-report evidence, dispute verdict proof, and
-   public discovery/schema/trust proof.
-4. Open or assign a narrow PR for `P2.3` route split if no existing agent
-   owns it. (`P3.7` frontend auth guard closed; row marked Done above.)
-5. Operator: act on `PHASE_4E_PLAN.md` § 7 decision points (one vs two
+1. Configure production `METRICS_BEARER_TOKEN` and `ALERT_WEBHOOK_URL`, then
+   run the `Hosted Observability Proof` workflow and move Metrics auth,
+   Sentry/logging, and Alert destination from `Ready for proof` to `Proofed`
+   only after the sanitized artifact validates.
+2. Run the hosted dispute verdict proof against a specific open dispute and
+   record the evidence artifact plus chain dispatch status.
+3. Track the Stage 2C-3 HMAC retirement window: ≥30 days after the 2026-05-21
+   KMS-only JWT cutover, delete `op://prod-backend/auth-jwt-secrets`, drop the
+   HMAC code branch from `mcp-server/src/auth/jwt.js`, and retire
+   `AUTH_JWT_SECRETS` from the secrets inventory + calendar.
+4. Operator: act on `PHASE_4E_PLAN.md` § 7 decision points (one vs two
    operators, registrar identity + FIDO2 support, GitHub org-2FA member
    audit before flipping enforcement) before procuring YubiKeys.
-6. Keep native XCM/vDOT work behind the staging evidence gate and week-12
+5. Keep native XCM/vDOT work behind the staging evidence gate and week-12
    product gate.
 
 ## Completion Definition
