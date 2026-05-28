@@ -359,6 +359,16 @@ test("end-to-end: ESCROW_CORE_ABI exposes claimJobFor — the selector the 2026-
   assert.equal(claimJobFor.selector, "0x090cf6d5");
 });
 
+test("end-to-end: ESCROW_CORE_ABI exposes openDispute for live dispute proof", () => {
+  // The hosted dispute verdict proof moves rejected chain jobs into the
+  // disputed state before the arbitrator resolves them. Keep the gateway ABI
+  // pinned to that contract surface so the live path cannot regress silently.
+  const selectors = selectorsFromAbi(ESCROW_CORE_ABI);
+  const openDispute = selectors.find((s) => s.signature === "openDispute(bytes32)");
+  assert.ok(openDispute, "ESCROW_CORE_ABI must include openDispute(bytes32)");
+  assert.equal(openDispute.selector, "0xf08ef6cb");
+});
+
 test("end-to-end: synthetic 'pre-#357' bytecode reports claimJobFor as the only missing selector", () => {
   // Reconstruct the exact failure mode: a bytecode that contains every
   // ESCROW_CORE_ABI selector except claimJobFor. This is the report the
