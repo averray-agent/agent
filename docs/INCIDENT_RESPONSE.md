@@ -104,13 +104,27 @@ ALERT_SERVICE_NAME=averray-hosted-stack
 ALERT_ENVIRONMENT=production-like
 ```
 
-The canonical v1 alert destination is a Slack Incoming Webhook for the operator
-channel. `ALERT_WEBHOOK_URL` stays blank in `deploy/backend.env.template` until
-the Slack webhook and production 1Password item exist. This keeps normal deploys
-green while alert delivery is still a proof item: `op inject` resolves every
-active secret reference in the template and fails closed if an optional item is
-missing. Once provisioned, render the URL into the scheduler environment that
-runs `check-hosted-stack-and-alert.sh`, then capture the deliberate failure proof.
+The v1 alert destination is a Slack Incoming Webhook for the operator channel.
+The `Hosted Observability Proof` workflow does not read `ALERT_WEBHOOK_URL`
+from a GitHub secret: it SSHes to the VPS, runs
+`scripts/ops/collect-observability-proof.sh`, and that script sources the
+rendered `/run/agent-stack/backend.env` before calling
+`check-hosted-stack-and-alert.sh`. Keep the webhook in the `prod-backend`
+1Password vault so the VPS backend service account can render it from
+`deploy/backend.env.template` at deploy/boot time.
+
+Operator setup before running the proof:
+
+1. Pick the Slack destination channel for hosted smoke failures. The workflow
+   input defaults the evidence label to `ops-alerts`; if Pascal chooses another
+   channel, pass that exact channel name in the `alert_channel` input.
+2. Create a Slack Incoming Webhook for that channel.
+3. Store the webhook URL at `op://prod-backend/alert-webhook-url/url`.
+4. Redeploy or re-render the VPS backend env so `/run/agent-stack/backend.env`
+   contains `ALERT_WEBHOOK_URL`.
+5. Run the `Hosted Observability Proof` workflow in a separate proof step; it
+   sends one deliberate hosted smoke failure and records the channel-visible
+   correlation id in the sanitized observability artifact.
 
 To prove alert delivery without adding a synthetic endpoint, run a deliberate
 hosted smoke failure:
