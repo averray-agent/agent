@@ -13,6 +13,7 @@ import {
 
 const here = dirname(fileURLToPath(import.meta.url));
 const appRoot = resolve(here, "..", "..");
+const RAW_COUNTER_WORDS = /\b(candidate|candidates|created|skipped|error|errors)\b/u;
 
 test("provider operation legend replaces scheduler jargon with operator language", () => {
   assert.deepEqual(
@@ -39,22 +40,29 @@ test("provider operation metrics read the backend counters without exposing raw 
 });
 
 test("provider operation summaries tell the operator what happened", () => {
-  assert.equal(
-    formatProviderRunSummary({ candidateCount: 26, createdCount: 4, skippedCount: 22, errorCount: 0 }),
-    "4 jobs opened from 26 upstream items."
-  );
-  assert.equal(
-    formatProviderRunSummary({ dryRun: true, candidateCount: 12, createdCount: 0, skippedCount: 12, errorCount: 0 }),
-    "Dry run: 12 upstream items checked; 12 items safely ignored."
-  );
-  assert.equal(
-    formatProviderRunSummary({ candidateCount: 5, createdCount: 0, skippedCount: 3, errorCount: 2 }),
-    "2 items need operator attention after checking 5 upstream items."
-  );
-  assert.equal(
-    formatProviderRunSummary({ candidateCount: 1, createdCount: 0, skippedCount: 0, errorCount: 1 }),
-    "1 item needs operator attention after checking 1 upstream item."
-  );
+  const summaries = [
+    [
+      formatProviderRunSummary({ candidateCount: 26, createdCount: 4, skippedCount: 22, errorCount: 0 }),
+      "4 jobs opened from 26 upstream items.",
+    ],
+    [
+      formatProviderRunSummary({ dryRun: true, candidateCount: 12, createdCount: 0, skippedCount: 12, errorCount: 0 }),
+      "Dry run: 12 upstream items checked; 12 items safely ignored.",
+    ],
+    [
+      formatProviderRunSummary({ candidateCount: 5, createdCount: 0, skippedCount: 3, errorCount: 2 }),
+      "2 items need operator attention after checking 5 upstream items.",
+    ],
+    [
+      formatProviderRunSummary({ candidateCount: 1, createdCount: 0, skippedCount: 0, errorCount: 1 }),
+      "1 item needs operator attention after checking 1 upstream item.",
+    ],
+  ];
+
+  for (const [actual, expected] of summaries) {
+    assert.equal(actual, expected);
+    assert.doesNotMatch(actual, RAW_COUNTER_WORDS);
+  }
 });
 
 test("ProviderOperationsCard renders the legend and derived operator summary", () => {
