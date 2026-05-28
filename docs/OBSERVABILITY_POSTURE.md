@@ -53,13 +53,21 @@ posture in one place:
 
 The preferred hosted path is the `Hosted Observability Proof` GitHub Actions
 workflow. It SSHes to the VPS, reads the rendered `/run/agent-stack/backend.env`
-without printing it, proves the `/metrics` bearer gate, sends one deliberate
-smoke-failure alert through the configured webhook, samples recent backend
-structured logs, validates the sanitized evidence with
+without printing secrets, proves the `/metrics` bearer gate, sends one
+deliberate smoke-failure alert through the configured webhook, samples recent
+backend structured logs, validates the sanitized evidence with
 [`check-observability-proof.mjs`](../scripts/ops/check-observability-proof.mjs),
 and uploads a 90-day artifact. It intentionally fails closed until both
 `METRICS_BEARER_TOKEN` and `ALERT_WEBHOOK_URL` are present in the hosted
 runtime environment.
+
+Current live proof: workflow run `26594855907` on 2026-05-28 uploaded artifact
+`hosted-observability-proof-26594855907`, with validation `status: "ok"`. The
+artifact records unauthenticated `/metrics` `401`, authenticated `/metrics`
+`200`, deliberate alert delivery to `ops-alerts` as
+`github-observability-alert-26594855907-1`, and `log_only_deferred` Sentry
+posture with a structured `http.response` line sampled from
+`docker logs agent-backend --tail 200`.
 
 For Slack incoming webhooks, the provider response does not include the Slack
 message timestamp. In that case, use the workflow's channel-visible
