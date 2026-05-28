@@ -48,6 +48,7 @@ export const ESCROW_CORE_ABI = [
   "function autoDisclose(bytes32 hash)",
   "function autoDisclosed(bytes32 hash) view returns (bool)",
   "function autoResolveOnTimeout(bytes32 jobId)",
+  "function openDispute(bytes32 jobId)",
   "function resolveDispute(bytes32 jobId, uint256 workerPayout, bytes32 reasonCode, string metadataURI)",
   "function previewClaimEconomics(address worker, bytes32 jobId) view returns (uint256 claimStake, uint16 claimStakeBps, uint256 claimFee, uint16 claimFeeBps, bool waived, uint256 claimNumber)",
   "function workerClaimCount(address worker) view returns (uint256)",
