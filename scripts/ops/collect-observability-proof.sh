@@ -46,11 +46,35 @@ require_command "$CURL_BIN"
 require_command "$JQ_BIN"
 require_command mktemp
 
+load_observability_env() {
+  local line key value first last
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line=${line%$'\r'}
+    [[ -z "$line" || "$line" == \#* || "$line" != *=* ]] && continue
+
+    key=${line%%=*}
+    value=${line#*=}
+    key=${key#export }
+
+    case "$key" in
+      METRICS_BEARER_TOKEN|ALERT_WEBHOOK_URL|SENTRY_DSN)
+        if [[ ${#value} -ge 2 ]]; then
+          first=${value:0:1}
+          last=${value: -1}
+          if [[ "$first" == "$last" && ( "$first" == '"' || "$first" == "'" ) ]]; then
+            value=${value:1:${#value}-2}
+          fi
+        fi
+        printf -v "$key" '%s' "$value"
+        export "$key"
+        ;;
+    esac
+  done < "$BACKEND_ENV_FILE"
+}
+
 if [[ -r "$BACKEND_ENV_FILE" ]]; then
-  set -a
-  # shellcheck disable=SC1090
-  . "$BACKEND_ENV_FILE"
-  set +a
+  load_observability_env
 elif [[ -z "${METRICS_BEARER_TOKEN:-}" || -z "${ALERT_WEBHOOK_URL:-}" ]]; then
   echo "Backend env file is not readable and required observability secrets were not supplied: $BACKEND_ENV_FILE" >&2
   exit 1
