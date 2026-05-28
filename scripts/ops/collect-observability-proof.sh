@@ -152,7 +152,7 @@ logging_observed_at="$(iso_now)"
 raw_logs="$("$DOCKER_BIN" logs "$BACKEND_CONTAINER" --tail 200 2>&1 || true)"
 structured_log_line="$(
   printf '%s\n' "$raw_logs" \
-    | grep -E '\{.*"level":[0-9]+.*"msg":' \
+    | grep -E '\{.*"level":("[a-z]+"|[0-9]+).*"msg":' \
     | tail -1 \
     | sanitize_output \
     | cut -c 1-1000 || true
