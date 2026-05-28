@@ -299,6 +299,22 @@ npm run capture:native-xcm-evidence -- \
   --output artifacts/xcm/native-observer-evidence.json
 ```
 
+If the replay output is raw decoded event JSON, normalize each side first:
+
+```bash
+npm run extract:native-xcm-event -- \
+  --chain hub \
+  --events-json artifacts/xcm/hub-events.json \
+  --request-id 0x1111111111111111111111111111111111111111111111111111111111111111 \
+  --output artifacts/xcm/hub.json
+```
+
+The extractor only promotes an explicit `messageTopic`, `topic`, `setTopic`, or
+`message_id`/`messageId` field to SetTopic evidence. It deliberately does not
+infer `messageTopic` just because the request id appears somewhere else in the
+decoded event body. Use `--allow-missing-topic` only when investigating the
+`remote_ref` fallback path; do not use it for SetTopic preservation proof.
+
 Validate a captured envelope with:
 
 ```bash

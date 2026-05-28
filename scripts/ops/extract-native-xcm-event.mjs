@@ -74,9 +74,12 @@ export function extractEventEvidence({ input, chain, requestId, overrides = {} }
   if (!blockHash) fail("blockHash is required; pass --block-hash or include it in the decoded event JSON.");
   if (!eventIndex) fail("eventIndex is required; pass --event-index or include it in the decoded event JSON.");
 
-  const messageTopic = pickTopic(source, normalizedRequestId) || (matched ? normalizedRequestId : "");
+  const messageTopic = pickTopic(source);
   if (!messageTopic && !allowMissingTopic) {
-    fail("messageTopic is required unless --allow-missing-topic is set.");
+    fail(
+      "messageTopic is required unless --allow-missing-topic is set. " +
+      "The extractor will not infer SetTopic proof from requestId text outside an explicit topic/message-id field."
+    );
   }
 
   if (normalizedChain === "hub") {
@@ -219,7 +222,11 @@ function looksLikeEvent(value) {
 }
 
 function findMatchingEvent(events, requestId) {
-  return events.find(({ event }) => containsString(event, requestId));
+  const normalizedRequestId = String(requestId).toLowerCase();
+  return events.find(({ event }) => {
+    const topic = pickTopic(event);
+    return topic && String(topic).toLowerCase() === normalizedRequestId;
+  }) ?? events.find(({ event }) => containsString(event, requestId));
 }
 
 function containsString(value, needle) {
@@ -237,14 +244,14 @@ const BLOCK_HASH_KEYS = ["blockHash", "block_hash"];
 const EVENT_INDEX_KEYS = ["eventIndex", "event_index", "index"];
 const EXTRINSIC_HASH_KEYS = ["extrinsicHash", "extrinsic_hash", "txHash", "transactionHash"];
 const MESSAGE_HASH_KEYS = ["messageHash", "message_hash"];
-const TOPIC_KEYS = ["messageTopic", "message_topic", "topic", "setTopic", "set_topic"];
+const TOPIC_KEYS = ["messageTopic", "message_topic", "topic", "setTopic", "set_topic", "messageId", "message_id"];
 const ASSET_LOCATION_KEYS = ["assetLocation", "asset_location", "location", "asset"];
 const AMOUNT_KEYS = ["amount", "settledAssets", "settled_assets", "assets", "value"];
 
-function pickTopic(source, requestId) {
+function pickTopic(source) {
   const explicit = pickDeep(source, TOPIC_KEYS);
   if (explicit) return explicit;
-  return containsString(source, requestId) ? requestId : "";
+  return "";
 }
 
 function pickDeep(value, keys) {
