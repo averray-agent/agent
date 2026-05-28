@@ -27,7 +27,7 @@ If this checklist is not green, the answer is "not ready yet".
 - [x] `./scripts/verify_deployment.sh testnet --require-owner-record-final`
   passes cleanly after `deployments/testnet.json` was updated to the live
   KMS verifier address (`0x31ad...7ab7F`).
-- [ ] Pause and unpause were rehearsed from the pauser key.
+- [x] Pause and unpause were rehearsed from the pauser key.
 - [x] At least one owner-only admin operation was rehearsed from the multisig.
 
 See [MULTISIG_SETUP.md](./MULTISIG_SETUP.md) for the exact rehearsal flow.
@@ -69,6 +69,19 @@ Read-only evidence captured on 2026-05-21:
 [`docs/evidence/pauser-rehearsal-readonly-2026-05-21.json`](evidence/pauser-rehearsal-readonly-2026-05-21.json).
 It proves the live pauser can call `setPaused(bool)` and cannot call owner-only
 functions, but it does not close the live pause/unpause rehearsal box.
+
+Live testnet pause/unpause evidence captured on 2026-05-27:
+[`docs/evidence/pauser-rehearsal-testnet-2026-05-27.json`](evidence/pauser-rehearsal-testnet-2026-05-27.json).
+It records pause tx
+`0x67da41f74f014af24c11926a901acca3f98be0fda29fd9ba2034465f8899a3e5`
+at block `9357194` and unpause tx
+`0x98ac3689daebef0e116229064b72cc328dc20125fa48f1259a82d2dea1f122ce`
+at block `9357197`, both with receipt status `1`, and confirms the final
+paused state returned to `false`.
+
+The current testnet pauser still overlaps deployer/arbitrator roles, so the
+"only holds pause power" box stays open for mainnet/real-funds readiness.
+Run the same proof with `--require-dedicated-pauser` before checking that box.
 
 ---
 
