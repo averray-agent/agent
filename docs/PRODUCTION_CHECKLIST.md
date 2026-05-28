@@ -524,6 +524,29 @@ for the evidence file shape.
 - [ ] The private mainnet deploy env matches [deployments/mainnet.env.example](../deployments/mainnet.env.example) except for secrets and final addresses.
 - [ ] Any deviation from the recommended launch values has been written down and approved before deploy.
 - [ ] No operator is relying on the old testnet-friendly defaults from `deploy_contracts.sh`.
+- [ ] Mainnet USDC asset config has been checked against the Polkadot docs and
+  runtime evidence. Static env proof:
+  ```bash
+  node scripts/ops/check-mainnet-usdc-config.mjs \
+    --env deployments/mainnet.env.example
+  ```
+  Final mainnet proof, after capturing runtime state:
+  ```bash
+  node scripts/ops/check-mainnet-usdc-config.mjs \
+    --env /path/to/private-mainnet.env \
+    --runtime-evidence docs/evidence/mainnet-usdc-asset-config-YYYY-MM-DD.json \
+    --require-runtime \
+    --json
+  ```
+
+Runtime evidence must use schema `mainnet-usdc-asset-config-v1`, cite the
+Polkadot docs paths `smart-contracts/precompiles/erc20.md` and
+`reference/polkadot-hub/assets.md`, and include the runtime source, runtime
+block hash, plus USDC asset metadata (`assetId: 1337`, `decimals: 6`,
+`sufficient: true`, the Trust-Backed ERC20 precompile address, and
+`minBalanceRaw` from chain state). The ERC20 evidence must explicitly keep
+metadata functions marked unimplemented; the precompile only supports the core
+ERC20 subset.
 
 ---
 

@@ -137,6 +137,13 @@ Before a mainnet deploy:
 - replace the placeholder role addresses with the final owner, pauser,
   verifier, and arbitrator addresses
 - confirm the values still match this document
+- run the static USDC launch config guard:
+  ```bash
+  node scripts/ops/check-mainnet-usdc-config.mjs \
+    --env /path/to/private-mainnet.env
+  ```
+- before sign-off, capture Polkadot Hub mainnet runtime evidence for USDC
+  and rerun the guard with `--runtime-evidence ... --require-runtime`
 - run the multisig and pause rehearsals from
   [MULTISIG_SETUP.md](./MULTISIG_SETUP.md)
 - run the release gate and deployment verification from
@@ -174,5 +181,7 @@ Before using this profile on mainnet, confirm:
 - [ ] pauser hot key is final
 - [ ] verifier and arbitrator addresses are final
 - [ ] the chosen values are copied into the private deployment env
+- [ ] USDC asset config validates with
+      `scripts/ops/check-mainnet-usdc-config.mjs`
 - [ ] audit sign-off still applies to the exact contract set being deployed
 - [ ] no one is assuming the old testnet defaults still apply

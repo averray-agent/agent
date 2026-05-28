@@ -251,7 +251,7 @@ HTTP route-split closeout audit after `#526`: `mcp-server/src/protocols/http/ser
 | Mainnet contract deploy | Open | Escrow, treasury/account, policy, verifier, registry, and related contracts deployed from audited artifacts. |
 | Ownership transfer | Open | Deploy key transfers ownership to multisig as first post-deploy action. |
 | Role assignment | Open | Verifier, arbitrator, pauser, and service operators configured and rehearsed. |
-| Mainnet asset config | Open | USDC mainnet asset config verified against Polkadot docs and runtime state. |
+| Mainnet asset config | Ready for proof | Static guard `scripts/ops/check-mainnet-usdc-config.mjs --env deployments/mainnet.env.example` validates the launch env against the canonical Polkadot-docs-backed USDC config: Trust-Backed Asset ID `1337`, 6 decimals, ERC20 precompile `0x0000053900000000000000000000000001200000`, no ERC20 metadata functions, and the conservative raw launch parameters. Close after the operator captures `mainnet-usdc-asset-config-v1` runtime evidence from Polkadot Hub mainnet and reruns the same script with `--runtime-evidence ... --require-runtime`. Polkadot docs MCP check: `smart-contracts/precompiles/erc20.md` confirms the Trust-Backed precompile address format/core ERC20 subset and `reference/polkadot-hub/assets.md` confirms USDC asset ID `1337`, 6 decimals, and sufficiency. |
 | Mainnet env/secrets | Open | `CHAIN_ENV=mainnet`, RPC URLs, contract addresses, KMS keys, JWT keys, and service-token secrets configured without raw-key fallbacks. |
 | Mainnet smoke | Open | Complete claim/submit/settle smoke at least three times with low-value jobs. |
 | Incident response | Open | Paging, pause flow, rollback, and operator escalation rehearsed. |
