@@ -52,7 +52,7 @@ function isMain() {
   return import.meta.url === pathToFileURL(process.argv[1] ?? "").href;
 }
 
-function parseArgs(argv) {
+export function parseArgs(argv) {
   const parsed = {};
   for (let idx = 0; idx < argv.length; idx += 1) {
     const arg = argv[idx];
@@ -99,7 +99,7 @@ function nextArg(argv, idx, flag) {
   return value;
 }
 
-async function checkDeclaredTooling() {
+export async function checkDeclaredTooling() {
   const rootPackage = await readPackageJson("package.json");
   const workspacePackages = await Promise.all([
     readPackageJson("mcp-server/package.json"),
@@ -135,7 +135,7 @@ async function readPackageJson(relativePath) {
   return JSON.parse(await readFile(path.resolve(relativePath), "utf8"));
 }
 
-async function checkBuilderOutputs(options) {
+export async function checkBuilderOutputs(options) {
   const details = [];
   let ok = true;
   const strategy = await loadPreflightStrategy(options);
@@ -214,7 +214,7 @@ async function checkBuilderOutputs(options) {
   };
 }
 
-async function loadPreflightStrategy(options) {
+export async function loadPreflightStrategy(options) {
   const raw = options.strategyFile
     ? await readFile(path.resolve(options.strategyFile), "utf8")
     : process.env.STRATEGIES_JSON;
@@ -227,7 +227,7 @@ async function loadPreflightStrategy(options) {
   return strategies.find((entry) => String(entry?.kind ?? "").trim().toLowerCase() === "polkadot_vdot");
 }
 
-function checkRuntimeEnv() {
+export function checkRuntimeEnv(env = process.env) {
   const required = [
     "API_URL",
     "ADMIN_JWT",
@@ -235,7 +235,7 @@ function checkRuntimeEnv() {
     "XCM_NATIVE_HUB_WS",
     "XCM_NATIVE_BIFROST_WS"
   ];
-  const missing = required.filter((name) => !String(process.env[name] ?? "").trim());
+  const missing = required.filter((name) => !String(env[name] ?? "").trim());
   return {
     name: "live capture environment is configured",
     ok: missing.length === 0,
