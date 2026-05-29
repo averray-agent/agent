@@ -49,10 +49,10 @@ export function AgentsAggregateStrip({ agents }: AgentsAggregateStripProps) {
       />
       <AggCard
         scope="visible roster"
-        label="Verified badges"
+        label="Badge receipts"
         value={`${verifiedBadges}`}
         unit="badges"
-        meta={rosterCount === 0 ? "no agents visible" : "from indexed agent profiles"}
+        meta={rosterCount === 0 ? "no agents visible" : "verified outcomes only"}
         metaTone={verifiedBadges > 0 ? "ok" : "muted"}
       />
       <AggCard
