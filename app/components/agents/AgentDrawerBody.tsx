@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { cn } from "@/lib/utils/cn";
 import { Sparkline } from "@/components/overview/Sparkline";
+import { publicProfileUrl } from "@/lib/agents/public-profile";
 import { BadgeChip } from "./BadgeStrip";
 import { TierChip } from "./TierChip";
 import {
@@ -26,7 +27,7 @@ export function AgentDrawerBody({ agent }: { agent: AgentRecord }) {
   const lockPct = agent.stake.deposited > 0 ? agent.stake.locked / agent.stake.deposited : 0;
   const curTier = tierFor(agent.score);
   const next = nextThreshold(agent.score);
-  const profileUrl = `https://averray.com/agents/${agent.walletFull}`;
+  const profileUrl = publicProfileUrl(agent.walletFull);
   const showSparkline = agent.sparkline.some((v) => v > 0);
   // Badge section copy depends on whether any badge represents a
   // verified-receipt outcome. Capability markers granted on registration
@@ -245,7 +246,7 @@ function PublicIdentityCard({
   profileUrl,
 }: {
   wallet: string;
-  profileUrl: string;
+  profileUrl: string | null;
 }) {
   const [copied, setCopied] = useState<"wallet" | "url" | null>(null);
 
@@ -274,27 +275,31 @@ function PublicIdentityCard({
         {wallet}
       </span>
       <div className="flex flex-wrap items-center gap-1.5">
-        <a
-          href={profileUrl}
-          target="_blank"
-          rel="noreferrer"
-          title={profileUrl}
-          className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-[6px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-2.5 py-1.5 font-[family-name:var(--font-mono)] text-[12px] text-[var(--avy-ink)] hover:border-[color:rgba(30,102,66,0.35)] hover:text-[var(--avy-accent)]"
-          style={{ letterSpacing: 0 }}
-        >
-          <span className="shrink-0">↗</span>
-          <span className="min-w-0 truncate">
-            averray.com/agents/{middleTruncate(wallet, 14)}
-          </span>
-        </a>
-        <button
-          type="button"
-          onClick={() => copy("url", profileUrl)}
-          className="inline-flex shrink-0 items-center rounded-[6px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-2 py-1.5 font-[family-name:var(--font-display)] text-[10.5px] font-bold uppercase text-[var(--avy-ink)] transition-colors hover:border-[color:rgba(30,102,66,0.35)] hover:text-[var(--avy-accent)]"
-          style={{ letterSpacing: "0.06em" }}
-        >
-          {copied === "url" ? "Copied" : "Copy URL"}
-        </button>
+        {profileUrl ? (
+          <>
+            <a
+              href={profileUrl}
+              target="_blank"
+              rel="noreferrer"
+              title={profileUrl}
+              className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-[6px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-2.5 py-1.5 font-[family-name:var(--font-mono)] text-[12px] text-[var(--avy-ink)] hover:border-[color:rgba(30,102,66,0.35)] hover:text-[var(--avy-accent)]"
+              style={{ letterSpacing: 0 }}
+            >
+              <span className="shrink-0">↗</span>
+              <span className="min-w-0 truncate">
+                averray.com/agents/{middleTruncate(wallet, 14)}
+              </span>
+            </a>
+            <button
+              type="button"
+              onClick={() => copy("url", profileUrl)}
+              className="inline-flex shrink-0 items-center rounded-[6px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-2 py-1.5 font-[family-name:var(--font-display)] text-[10.5px] font-bold uppercase text-[var(--avy-ink)] transition-colors hover:border-[color:rgba(30,102,66,0.35)] hover:text-[var(--avy-accent)]"
+              style={{ letterSpacing: "0.06em" }}
+            >
+              {copied === "url" ? "Copied" : "Copy URL"}
+            </button>
+          </>
+        ) : null}
         <button
           type="button"
           onClick={() => copy("wallet", wallet)}
