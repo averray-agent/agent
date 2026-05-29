@@ -6,6 +6,7 @@ import {
   type CapabilityWarning,
 } from "@/components/overview/OverviewTopbar";
 import { MissionHero } from "@/components/overview/MissionHero";
+import { OrientationCard } from "@/components/overview/OrientationCard";
 import { RoomVitals } from "@/components/overview/RoomVitals";
 import {
   NeedsActionList,
@@ -94,6 +95,19 @@ export default function OverviewPage() {
     [badges.data, badges.isLoading]
   );
   const liveJobs = extractRunJobs(jobs.data);
+  // First-load orientation (A4): the card shows only when the room is
+  // genuinely empty (no open runs, sessions, or receipts) AND those
+  // requests have resolved — so it never flashes while data loads.
+  const sessionsCount = Array.isArray(sessions.data) ? sessions.data.length : 0;
+  const receiptsCount = extractRows(badges.data, [
+    "badges",
+    "receipts",
+    "items",
+    "data",
+  ]).length;
+  const roomActivityCount = liveJobs.length + sessionsCount + receiptsCount;
+  const activityResolved =
+    !jobs.isLoading && !sessions.isLoading && !badges.isLoading;
   const adminLifecycleSummary = useMemo(
     () => buildJobLifecycleSummary(providerOps.data),
     [providerOps.data]
@@ -154,6 +168,10 @@ export default function OverviewPage() {
   return (
     <div className="flex w-full max-w-[1100px] flex-col gap-7">
       <OverviewTopbar capabilityWarning={capabilityWarning} freshness={freshness} />
+      <OrientationCard
+        roomActivityCount={roomActivityCount}
+        activityResolved={activityResolved}
+      />
       <MissionHero
         // Use the explicit `hasLiveOverview` gate rather than `||`
         // fallbacks — the previous form (`liveJobs.length || 14`) silently
