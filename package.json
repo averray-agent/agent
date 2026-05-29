@@ -44,6 +44,7 @@
     "validate:subscan-xcm": "node scripts/ops/validate-subscan-xcm-source.mjs",
     "validate:native-xcm-evidence": "node scripts/ops/validate-native-xcm-evidence.mjs",
     "exercise:async-xcm": "node scripts/ops/exercise-async-xcm-request.mjs",
+    "prepare:mainnet-audit-freeze": "node scripts/ops/prepare-mainnet-audit-freeze.mjs",
     "example:profile-lookup": "node examples/profile-lookup/index.mjs",
     "example:claim-and-submit-job": "node examples/claim-and-submit-job/index.mjs",
     "example:read-job-timeline": "node examples/read-job-timeline/index.mjs"

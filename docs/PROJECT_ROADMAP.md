@@ -270,7 +270,7 @@ HTTP route-split closeout audit after `#526`: `mcp-server/src/protocols/http/ser
 
 | Item | Status | Close criteria |
 | --- | --- | --- |
-| External audit | Open | Freeze a mainnet audit commit/tag, hand auditors [`AUDIT_PACKAGE.md`](./AUDIT_PACKAGE.md), complete review of contracts, backend money routes, verifier/auth/control routes, and ops runbooks, then fix or explicitly accept every Critical/High finding before real funds. Close only after the final report names the reviewed commit/tag and remediation PRs. |
+| External audit | Open | Run `npm run prepare:mainnet-audit-freeze -- --tag audit/mainnet-YYYY-MM-DD --create-tag --evidence docs/evidence/mainnet-audit-freeze-YYYY-MM-DD.json --json`, push the frozen tag, hand auditors [`AUDIT_PACKAGE.md`](./AUDIT_PACKAGE.md), complete review of contracts, backend money routes, verifier/auth/control routes, and ops runbooks, then fix or explicitly accept every Critical/High finding before real funds. Close only after the final report names the reviewed commit/tag and remediation PRs. |
 | Fresh mainnet multisig | Open | Mainnet owner multisig created with hardware-backed signers. |
 | Mainnet contract deploy | Open | Escrow, treasury/account, policy, verifier, registry, and related contracts deployed from audited artifacts. |
 | Ownership transfer | Open | Deploy key transfers ownership to multisig as first post-deploy action. |
