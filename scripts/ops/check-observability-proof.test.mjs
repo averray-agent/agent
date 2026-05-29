@@ -56,27 +56,6 @@ function validEvidence(overrides = {}) {
   };
 }
 
-function freshEvidence() {
-  const now = new Date();
-  const observedAt = new Date(now.getTime() - 5 * 60 * 1000).toISOString();
-  return validEvidence({
-    proofDate: now.toISOString().slice(0, 10),
-    completedAt: now.toISOString(),
-    metricsAuth: {
-      ...validEvidence().metricsAuth,
-      observedAt
-    },
-    alertDestination: {
-      ...validEvidence().alertDestination,
-      receivedAt: observedAt
-    },
-    sentryLogging: {
-      ...validEvidence().sentryLogging,
-      observedAt
-    }
-  });
-}
-
 async function writeEvidenceFile(doc) {
   const dir = await mkdtemp(join(tmpdir(), "observability-proof-"));
   const file = join(dir, "evidence.json");
@@ -230,13 +209,15 @@ test("CLI exits zero and prints JSON for valid evidence", async () => {
 });
 
 test("CLI accepts max completed age for fresh evidence", async () => {
-  const file = await writeEvidenceFile(freshEvidence());
+  const file = await writeEvidenceFile(validEvidence());
   const { stdout } = await execFileAsync(process.execPath, [
     scriptPath,
     "--file",
     file,
     "--max-completed-age-hours",
-    "1",
+    "2",
+    "--now",
+    "2026-05-22T19:00:00.000Z",
     "--json"
   ]);
   const parsed = JSON.parse(stdout);

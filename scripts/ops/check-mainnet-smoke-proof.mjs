@@ -61,13 +61,14 @@ const CANONICAL_USDC = Object.freeze({
 });
 
 function usage() {
-  return `Usage: node scripts/ops/${SCRIPT_NAME} --file docs/evidence/mainnet-smoke-YYYY-MM-DD.json [--json] [--max-completed-age-hours N] [--min-runs N] [--max-reward-raw N]
+  return `Usage: node scripts/ops/${SCRIPT_NAME} --file docs/evidence/mainnet-smoke-YYYY-MM-DD.json [--json] [--max-completed-age-hours N] [--min-runs N] [--max-reward-raw N] [--now <iso>]
 
 Validates a redacted mainnet smoke proof artifact. This check is offline and
 read-only: it does not call chain RPC, mutate jobs, or settle funds.
 
 The evidence file must use schema ${SCHEMA_VERSION}. Use --max-completed-age-hours
 when validating launch evidence so stale smoke artifacts cannot be reused.
+--now <iso> pins the freshness clock (ISO-8601); defaults to the current time.
 `;
 }
 
@@ -78,6 +79,7 @@ export function parseArgs(argv) {
     maxCompletedAgeHours: undefined,
     minRuns: DEFAULT_MIN_RUNS,
     maxRewardRaw: DEFAULT_MAX_REWARD_RAW,
+    now: undefined,
     help: false
   };
   for (let index = 0; index < argv.length; index += 1) {
@@ -96,6 +98,9 @@ export function parseArgs(argv) {
     } else if (arg === "--max-reward-raw") {
       args.maxRewardRaw = parsePositiveBigInt(argv[index + 1], "--max-reward-raw");
       index += 1;
+    } else if (arg === "--now") {
+      args.now = parseTimestampArg(argv[index + 1], "--now");
+      index += 1;
     } else if (arg === "-h" || arg === "--help") {
       args.help = true;
     } else if (!args.file && !arg.startsWith("-")) {
@@ -112,6 +117,15 @@ function parsePositiveInteger(value, flag) {
     throw new Error(`${flag} must be a positive integer`);
   }
   return Number(value);
+}
+
+function parseTimestampArg(value, flag) {
+  const text = String(value ?? "");
+  const parsed = new Date(text);
+  if (!/^\d{4}-\d{2}-\d{2}T/u.test(text) || Number.isNaN(parsed.getTime())) {
+    throw new Error(`${flag} must be an ISO-8601 date/time`);
+  }
+  return parsed;
 }
 
 function parsePositiveBigInt(value, flag) {

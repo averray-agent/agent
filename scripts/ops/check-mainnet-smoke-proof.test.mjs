@@ -278,7 +278,9 @@ test("CLI prints JSON for a valid evidence file", async () => {
     file,
     "--json",
     "--max-completed-age-hours",
-    "24"
+    "24",
+    "--now",
+    "2026-05-28T13:00:00.000Z"
   ]);
 
   const parsed = JSON.parse(stdout);

@@ -92,8 +92,12 @@ function validEvidence(overrides = {}) {
   };
 }
 
+// Fixed clock the CLI freshness happy-path pins via --now, mirroring the
+// in-process "fresh launch proof" case so wall-clock drift cannot expire it.
+const FRESH_NOW_ISO = "2026-05-22T13:30:00.000Z";
+
 function freshEvidence() {
-  const now = new Date();
+  const now = new Date(FRESH_NOW_ISO);
   const verifiedAt = new Date(now.getTime() - 10 * 60 * 1000).toISOString();
   return validEvidence({
     completedAt: now.toISOString(),
@@ -299,6 +303,8 @@ test("CLI accepts max completed age for fresh evidence", async () => {
     file,
     "--max-completed-age-hours",
     "1",
+    "--now",
+    FRESH_NOW_ISO,
     "--json"
   ]);
   const parsed = JSON.parse(stdout);

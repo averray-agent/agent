@@ -290,7 +290,7 @@ test("validateEvidence rejects stale and future-dated proof when freshness is re
 
 test("CLI exits zero and prints JSON for valid evidence", async () => {
   const file = await writeEvidenceFile(validEvidence({
-    completedAt: new Date().toISOString()
+    completedAt: "2026-05-28T12:00:00.000Z"
   }));
 
   const { stdout, stderr } = await execFileAsync(process.execPath, [
@@ -299,6 +299,8 @@ test("CLI exits zero and prints JSON for valid evidence", async () => {
     file,
     "--max-completed-age-hours",
     "24",
+    "--now",
+    "2026-05-28T13:00:00.000Z",
     "--json"
   ]);
 

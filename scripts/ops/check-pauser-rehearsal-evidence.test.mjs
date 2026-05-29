@@ -137,7 +137,7 @@ function liveEvidence(overrides = {}) {
 
 function freshLiveEvidence(overrides = {}) {
   return liveEvidence({
-    generatedAt: new Date().toISOString(),
+    generatedAt: "2026-05-24T10:00:00.000Z",
     ...overrides
   });
 }
@@ -283,6 +283,8 @@ test("CLI accepts max generated age for fresh live evidence", async () => {
     "--require-dedicated-pauser",
     "--max-generated-age-hours",
     "1",
+    "--now",
+    "2026-05-24T10:30:00.000Z",
     "--json"
   ]);
   const parsed = JSON.parse(stdout);
