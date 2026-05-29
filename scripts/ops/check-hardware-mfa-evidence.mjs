@@ -20,7 +20,7 @@ const REQUIRED_ACCOUNT_IDS = [
 const ALLOWED_METHODS = new Set(["provider_ui", "provider_api", "operator_attestation"]);
 
 function usage() {
-  return `Usage: node scripts/ops/${SCRIPT_NAME} --file docs/evidence/hardware-mfa-YYYY-MM-DD.json [--json] [--max-completed-age-hours N]
+  return `Usage: node scripts/ops/${SCRIPT_NAME} --file docs/evidence/hardware-mfa-YYYY-MM-DD.json [--json] [--max-completed-age-hours N] [--now <iso>]
 
 Validates the operator evidence that hardware-backed MFA is enrolled across the
 admin trust chain. This check is read-only; it does not call providers or store
@@ -28,7 +28,21 @@ recovery codes.
 
 Use --max-completed-age-hours when validating live launch evidence so stale
 historical artifacts cannot be reused as current admin-trust proof.
+
+Use --now <iso> to pin the freshness comparison clock to an ISO-8601 date/time
+(defaults to the current time); primarily for deterministic tests.
 `;
+}
+
+function parseIsoNow(value) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T/u.test(value.trim())) {
+    throw new Error("--now must be an ISO-8601 date/time");
+  }
+  const date = new Date(value.trim());
+  if (!Number.isFinite(date.getTime())) {
+    throw new Error("--now must be an ISO-8601 date/time");
+  }
+  return date;
 }
 
 function parseArgs(argv) {
@@ -36,7 +50,8 @@ function parseArgs(argv) {
     file: undefined,
     json: false,
     help: false,
-    maxCompletedAgeHours: undefined
+    maxCompletedAgeHours: undefined,
+    now: undefined
   };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -51,6 +66,9 @@ function parseArgs(argv) {
         throw new Error("--max-completed-age-hours must be a positive number");
       }
       args.maxCompletedAgeHours = value;
+      index += 1;
+    } else if (arg === "--now") {
+      args.now = parseIsoNow(argv[index + 1]);
       index += 1;
     } else if (arg === "-h" || arg === "--help") {
       args.help = true;
@@ -341,7 +359,8 @@ async function main() {
   const raw = await readFile(args.file, "utf8");
   const parsed = JSON.parse(raw);
   const result = validateEvidence(parsed, {
-    maxCompletedAgeHours: args.maxCompletedAgeHours
+    maxCompletedAgeHours: args.maxCompletedAgeHours,
+    now: args.now
   });
   if (args.json) {
     process.stdout.write(`${JSON.stringify({

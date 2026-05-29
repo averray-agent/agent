@@ -36,7 +36,7 @@ const ROLLBACK_COMPONENTS = [
 const SAFE_HEX_PATH_PATTERN = /(blockHash|callHash|contentHash|evidenceHash|explorerUrl|explorerUrls\[\d+\]|proofHash|receiptHash|reasoningHash|transactionHash|txHash|pauseTxHash|unpauseTxHash)$/iu;
 
 function usage() {
-  return `Usage: node scripts/ops/${SCRIPT_NAME} --file docs/evidence/incident-response-YYYY-MM-DD.json [--json] [--max-completed-age-hours N] [--require-mainnet]
+  return `Usage: node scripts/ops/${SCRIPT_NAME} --file docs/evidence/incident-response-YYYY-MM-DD.json [--json] [--max-completed-age-hours N] [--require-mainnet] [--now <iso>]
 
 Validates a redacted incident-response rehearsal proof artifact. This check is
 offline and read-only: it does not call RPC, send alerts, pause contracts, or
@@ -45,7 +45,8 @@ roll back services.
 The evidence file must use schema ${SCHEMA_VERSION}. Use
 --max-completed-age-hours when validating launch evidence so stale rehearsal
 artifacts cannot be reused. Add --require-mainnet before closing the mainnet
-incident-response launch row.
+incident-response launch row. Use --now <iso> to pin the freshness clock to a
+fixed ISO-8601 instant (primarily for deterministic tests).
 `;
 }
 
@@ -55,6 +56,7 @@ export function parseArgs(argv) {
     json: false,
     maxCompletedAgeHours: undefined,
     requireMainnet: false,
+    now: undefined,
     help: false
   };
 
@@ -70,6 +72,9 @@ export function parseArgs(argv) {
       index += 1;
     } else if (arg === "--require-mainnet") {
       args.requireMainnet = true;
+    } else if (arg === "--now") {
+      args.now = parseIsoDateTime(argv[index + 1]);
+      index += 1;
     } else if (arg === "-h" || arg === "--help") {
       args.help = true;
     } else if (!args.file && !arg.startsWith("-")) {
@@ -88,6 +93,13 @@ function parsePositiveNumber(value, flag) {
     throw new Error(`${flag} must be a positive number`);
   }
   return number;
+}
+
+function parseIsoDateTime(value) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T/u.test(value) || !Number.isFinite(Date.parse(value))) {
+    throw new Error("--now must be an ISO-8601 date/time");
+  }
+  return new Date(value);
 }
 
 function assertObject(value, path, errors) {
@@ -561,7 +573,8 @@ async function main() {
   const parsed = JSON.parse(raw);
   const result = validateEvidence(parsed, {
     maxCompletedAgeHours: args.maxCompletedAgeHours,
-    requireMainnet: args.requireMainnet
+    requireMainnet: args.requireMainnet,
+    now: args.now
   });
 
   if (args.json) {

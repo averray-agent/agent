@@ -38,7 +38,7 @@ const ADDRESS_PATTERN = /^0x[a-fA-F0-9]{40}$/u;
 const TX_HASH_PATTERN = /^0x[a-fA-F0-9]{64}$/u;
 
 function usage() {
-  return `Usage: node scripts/ops/${SCRIPT_NAME} --file docs/evidence/pauser-rehearsal-YYYY-MM-DD.json [--json] [--require-live] [--require-dedicated-pauser] [--max-generated-age-hours N]
+  return `Usage: node scripts/ops/${SCRIPT_NAME} --file docs/evidence/pauser-rehearsal-YYYY-MM-DD.json [--json] [--require-live] [--require-dedicated-pauser] [--max-generated-age-hours N] [--now <iso>]
 
 Validates the machine-readable evidence produced by run-pauser-rehearsal.mjs.
 This check is read-only; it does not call RPC, sign transactions, pause, or
@@ -46,7 +46,17 @@ unpause contracts.
 
 Use --max-generated-age-hours when validating live launch evidence so stale
 historical artifacts cannot be reused as current pauser proof.
+
+Use --now <iso> to pin the reference clock (ISO-8601 date/time) when checking
+freshness; defaults to the current time.
 `;
+}
+
+function parseIsoNow(value) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T/u.test(value) || !Number.isFinite(Date.parse(value))) {
+    throw new Error("--now must be an ISO-8601 date/time");
+  }
+  return new Date(value);
 }
 
 function parseArgs(argv) {
@@ -56,6 +66,7 @@ function parseArgs(argv) {
     requireLive: false,
     requireDedicatedPauser: false,
     maxGeneratedAgeHours: undefined,
+    now: undefined,
     help: false
   };
 
@@ -76,6 +87,9 @@ function parseArgs(argv) {
         throw new Error("--max-generated-age-hours must be a positive number");
       }
       args.maxGeneratedAgeHours = value;
+      index += 1;
+    } else if (arg === "--now") {
+      args.now = parseIsoNow(argv[index + 1]);
       index += 1;
     } else if (arg === "-h" || arg === "--help") {
       args.help = true;
@@ -362,7 +376,8 @@ async function main() {
   const result = validateEvidence(parsed, {
     requireLive: args.requireLive,
     requireDedicatedPauser: args.requireDedicatedPauser,
-    maxGeneratedAgeHours: args.maxGeneratedAgeHours
+    maxGeneratedAgeHours: args.maxGeneratedAgeHours,
+    now: args.now
   });
 
   if (args.json) {
