@@ -15,17 +15,28 @@ mainnet real funds.
 - Native XCM/vDOT/yield is deferred unless explicitly added to a separate audit
   engagement.
 
-Before engaging an auditor, freeze an audit candidate:
+Before engaging an auditor, freeze an audit candidate with the checked helper:
 
 ```bash
 git fetch origin main
-git checkout origin/main
-git tag audit/mainnet-YYYY-MM-DD
-git rev-parse HEAD
+git switch main
+git merge --ff-only origin/main
+
+npm run prepare:mainnet-audit-freeze -- \
+  --tag audit/mainnet-YYYY-MM-DD \
+  --create-tag \
+  --evidence docs/evidence/mainnet-audit-freeze-YYYY-MM-DD.json \
+  --json
+
+git push origin refs/tags/audit/mainnet-YYYY-MM-DD
 ```
 
-Record the freeze commit, tag, and any deployed contract addresses in the audit
-issue or engagement brief. Do not ask the auditor to review a moving target.
+The helper checks that `HEAD` matches `origin/main`, the worktree is clean, the
+audit package local links resolve, required package files exist, the required
+Polkadot docs paths are named, and the reproduction commands remain listed.
+Record the freeze commit, tag, generated evidence artifact, and any deployed
+contract addresses in the audit issue or engagement brief. Do not ask the
+auditor to review a moving target.
 
 ## Audit Outcomes Required
 
@@ -232,6 +243,11 @@ For hosted or private mainnet configuration evidence, auditors should expect
 redacted JSON artifacts validated by these scripts:
 
 ```bash
+node scripts/ops/prepare-mainnet-audit-freeze.mjs \
+  --tag audit/mainnet-YYYY-MM-DD \
+  --evidence docs/evidence/mainnet-audit-freeze-YYYY-MM-DD.json \
+  --json
+
 node scripts/ops/check-mainnet-usdc-config.mjs \
   --env /path/to/private-mainnet.env \
   --runtime-evidence docs/evidence/mainnet-usdc-asset-config-YYYY-MM-DD.json \
@@ -262,7 +278,8 @@ configuration shape and freshness without exposing private material.
 
 Use this checklist before sending the package to an auditor:
 
-- [ ] Freeze commit/tag recorded.
+- [ ] `prepare-mainnet-audit-freeze` passed and freeze commit/tag/evidence are
+      recorded.
 - [ ] `docs/PROJECT_ROADMAP.md` has no stale open-PR/open-issue status.
 - [ ] `docs/MAINNET_PARAMETERS.md` is the intended launch profile.
 - [ ] `deployments/mainnet.env.example` matches the intended launch profile.

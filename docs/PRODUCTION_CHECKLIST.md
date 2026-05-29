@@ -551,8 +551,11 @@ for the evidence file shape.
 
 - [ ] [MAINNET_PARAMETERS.md](./MAINNET_PARAMETERS.md) is still the intended launch profile.
 - [ ] [AUDIT_PACKAGE.md](./AUDIT_PACKAGE.md) has been refreshed for the frozen
-  audit commit/tag, sent to the auditor, and linked from the audit engagement
-  brief.
+  audit commit/tag; `npm run prepare:mainnet-audit-freeze -- --tag
+  audit/mainnet-YYYY-MM-DD --create-tag --evidence
+  docs/evidence/mainnet-audit-freeze-YYYY-MM-DD.json --json` passed; the tag
+  was pushed; and the package was sent to the auditor and linked from the audit
+  engagement brief.
 - [ ] External audit report names the reviewed commit/tag and scope, and every
   Critical/High finding is fixed or explicitly risk-accepted before real funds.
 - [ ] The private mainnet deploy env matches [deployments/mainnet.env.example](../deployments/mainnet.env.example) except for secrets and final addresses.
