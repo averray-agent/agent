@@ -21,12 +21,14 @@ import { shortAddress } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import {
   useAdminSessions,
-  useAgents,
-  useBadges,
   useDisputes,
   useJobs,
-  usePolicies,
 } from "@/lib/api/hooks";
+import {
+  activeSessionsCount,
+  openDisputesCount,
+  openJobsCount,
+} from "@/lib/ui/sidebar-counts";
 
 interface NavItem {
   href: string;
@@ -72,21 +74,20 @@ export function OperatorRail() {
   const pathname = usePathname();
   const auth = useAuth();
   const jobs = useJobs();
-  const badges = useBadges();
-  const agents = useAgents();
-  // Operator-wide count for the left-rail "Sessions" badge — should
-  // include external-agent activity, not just the signed-in wallet's
-  // own sessions. Matches what the /sessions page itself reads.
+  // Operator-wide sessions (includes external-agent activity, not just
+  // the signed-in wallet) — matches what the /sessions page reads.
   const sessions = useAdminSessions();
-  const policies = usePolicies();
   const disputes = useDisputes();
+  // Attention-only count convention (roadmap A5): a badge appears only
+  // where the number is an action signal — open work, in-flight
+  // sessions, open disputes. Receipts/Agents/Policies/Capabilities/Audit
+  // intentionally carry no count (a raw total there is noise, not a
+  // decision input). Each helper returns undefined while loading so the
+  // rail never renders a confident "0".
   const counts: Record<string, number | string | undefined> = {
-    "/runs": countOf(jobs.data),
-    "/receipts": countOf(badges.data),
-    "/agents": countOf(agents.data),
-    "/sessions": countOf(sessions.data) ?? activeClaimCount(jobs.data),
-    "/policies": countOf(policies.data),
-    "/disputes": countOf(disputes.data),
+    "/runs": openJobsCount(jobs.data),
+    "/sessions": activeSessionsCount(sessions.data),
+    "/disputes": openDisputesCount(disputes.data),
   };
 
   return (
@@ -186,52 +187,3 @@ export function OperatorRail() {
   );
 }
 
-function countOf(value: unknown): number | undefined {
-  if (Array.isArray(value)) return value.length;
-  if (!value || typeof value !== "object") return undefined;
-  const record = value as Record<string, unknown>;
-  for (const key of ["items", "data", "jobs", "sessions", "agents", "badges", "policies", "disputes"]) {
-    if (Array.isArray(record[key])) return record[key].length;
-  }
-  return undefined;
-}
-
-function activeClaimCount(value: unknown): number | undefined {
-  const jobs = recordsFrom(value, ["jobs", "items", "data"]);
-  if (!jobs) return undefined;
-  const now = Date.now();
-  return jobs.filter((job) => {
-    const state = String(
-      job.effectiveState ?? job.claimState ?? job.state ?? job.lifecycle ?? ""
-    ).toLowerCase();
-    const claimedBy =
-      typeof job.claimedBy === "string" ||
-      typeof job.worker === "string" ||
-      typeof job.claimedByWallet === "string";
-    const expiresAt =
-      typeof job.claimExpiresAt === "string"
-        ? Date.parse(job.claimExpiresAt)
-        : undefined;
-    const unexpired = !expiresAt || Number.isNaN(expiresAt) || expiresAt > now;
-    return claimedBy && state.includes("claim") && unexpired;
-  }).length;
-}
-
-function recordsFrom(
-  value: unknown,
-  keys: string[]
-): Array<Record<string, unknown>> | undefined {
-  if (Array.isArray(value)) {
-    return value.filter(isRecord);
-  }
-  if (!isRecord(value)) return undefined;
-  for (const key of keys) {
-    const nested = value[key];
-    if (Array.isArray(nested)) return nested.filter(isRecord);
-  }
-  return undefined;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object";
-}
