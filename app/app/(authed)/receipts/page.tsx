@@ -26,15 +26,16 @@ import {
   extractReceiptRows,
   type ReceiptRowWithMeta,
 } from "@/lib/api/receipt-adapters";
+import { formatReceiptKindBreakdown } from "@/lib/ui/receipt-metrics";
 import { useBadge, useBadges } from "@/lib/api/hooks";
 import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
 
 const KPIS: ReceiptsKpi[] = [
   {
-    label: "Total receipts",
+    label: "Receipt ledger",
     value: "0",
-    unit: "indexed",
-    meta: "from /badges",
+    unit: "receipts",
+    meta: "run 0 · badge 0 · settle 0 · policy 0",
   },
   {
     label: "Signed in 24h",
@@ -237,8 +238,8 @@ function receiptKpis(rows: ReceiptRowWithMeta[]): ReceiptsKpi[] {
     {
       ...KPIS[0],
       value: rows.length.toLocaleString(),
-      unit: "indexed",
-      meta: "from /badges",
+      unit: "receipts",
+      meta: formatReceiptKindBreakdown(rows),
     },
     {
       ...KPIS[1],
