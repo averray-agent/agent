@@ -1,3 +1,4 @@
+import { classifyChainReference } from "@/lib/chain/chain-reference";
 import type { SourceKind } from "@/components/runs/StatePill";
 import type {
   LifecycleStageState,
@@ -312,7 +313,7 @@ export function buildSessionDetails(sessionPayload: unknown, jobsPayload: unknow
           from: shortAddress(session.wallet),
           to: "AgentAccountCore",
           amount: `${amount(session.totalClaimLock ?? session.claimStake)} ${rewardAsset}`,
-          tx: text(session.chainJobId, "-"),
+          ref: classifyChainReference({ jobId: session.chainJobId }),
           tone: "accent",
         },
       ],
@@ -323,7 +324,7 @@ export function buildSessionDetails(sessionPayload: unknown, jobsPayload: unknow
               role: "worker",
               amount: `${rewardAmount} ${rewardAsset}`,
               at: timeLabel(session.resolvedAt ?? session.closedAt),
-              tx: text(session.chainJobId, "-"),
+              ref: classifyChainReference({ jobId: session.chainJobId }),
             },
           ]
         : [],
@@ -365,7 +366,10 @@ export function mergeSessionTimeline(
           from: shortAddress(data.from ?? data.wallet ?? "system"),
           to: shortAddress(data.to ?? "AgentAccountCore"),
           amount: text(data.amount, session.escrow.amount ? `${session.escrow.amount} ${session.escrow.asset}` : "-"),
-          tx: text(data.tx, text(data.chainJobId, "-")),
+          // `data.tx` is a genuine transaction; `data.chainJobId` is the escrow
+          // job key (bytes32, tx-hash-shaped but not a transaction). Classify
+          // by provenance so only a real tx is ever presented/linked as one.
+          ref: classifyChainReference({ txHash: data.tx, jobId: data.chainJobId }),
           tone: movementTone(entry.phase ?? entry.type),
           ...(source ? { source } : {}),
           ...(topic ? { topic } : {}),
