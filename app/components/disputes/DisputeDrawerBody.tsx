@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { mutate } from "swr";
 import { DrawerSection } from "@/components/shell/DetailDrawer";
+import { ExplorerLink } from "@/components/common/ExplorerLink";
 import { decisionToVerdict } from "@/lib/api/dispute-adapters";
 import { releaseAmountForDecision } from "@/lib/api/dispute-verdicts";
 import { swrFetcher } from "@/lib/api/client";
@@ -420,13 +421,6 @@ function ArbitrationDatum({
   );
 }
 
-// Polkadot Asset Hub block-explorer (Subscan). Hardcoded as the
-// platform's settlement chain today; if/when settlement moves to
-// another chain, swap this constant or thread the explorer URL
-// through the dispute payload.
-const SUBSCAN_EXTRINSIC_BASE =
-  "https://assethub-polkadot.subscan.io/extrinsic/";
-
 const CHAIN_STATUS_LABEL: Record<string, string> = {
   confirmed: "Confirmed",
   submitted: "Submitted",
@@ -602,15 +596,7 @@ function ResolvedCard({ dispute }: { dispute: Dispute }) {
           {txHash ? (
             <span>
               Tx ·{" "}
-              <a
-                href={`${SUBSCAN_EXTRINSIC_BASE}${txHash}`}
-                target="_blank"
-                rel="noreferrer noopener"
-                title={txHash}
-                className="font-semibold text-[var(--avy-accent)] hover:underline"
-              >
-                {shortHash(txHash)} ↗
-              </a>
+              <ExplorerLink kind="tx" value={txHash} label={shortHash(txHash)} />
             </span>
           ) : null}
           {metadataURI ? (

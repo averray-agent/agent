@@ -7,11 +7,13 @@ import {
   buildJobTimeline,
   describeTimelineDetail,
   describeTimelineEntry,
+  timelineChainAnchor,
   EMPTY_JOB_TIMELINE,
   type TimelineEntry,
   type TimelineSeverity,
   type TimelineSource,
 } from "@/lib/api/job-timeline";
+import { ExplorerLink } from "@/components/common/ExplorerLink";
 import { useJobTimeline, type JobTimelineFilters } from "@/lib/api/hooks";
 import { ApiError } from "@/lib/api/client";
 import {
@@ -265,6 +267,8 @@ function TimelineRow({
   entry: TimelineEntry;
   isLast: boolean;
 }) {
+  const detail = describeTimelineDetail(entry);
+  const anchor = timelineChainAnchor(entry);
   return (
     <li className="relative flex gap-3 pb-3">
       {/* Vertical gutter line tying entries together. */}
@@ -294,12 +298,23 @@ function TimelineRow({
         >
           <SourceChip source={entry.source} />
           {entry.topic ? <span>{entry.topic}</span> : null}
-          {describeTimelineDetail(entry) ? (
+          {detail ? (
             <>
               <span className="opacity-40">·</span>
-              <span className="text-[var(--avy-ink)]/80">
-                {describeTimelineDetail(entry)}
-              </span>
+              <span className="text-[var(--avy-ink)]/80">{detail}</span>
+            </>
+          ) : null}
+          {anchor ? (
+            <>
+              <span className="opacity-40">·</span>
+              <ExplorerLink
+                kind={anchor.kind}
+                value={anchor.value}
+                label={
+                  anchor.kind === "block" ? `block ${anchor.value}` : undefined
+                }
+                className="text-[var(--avy-accent)] hover:underline"
+              />
             </>
           ) : null}
         </div>
