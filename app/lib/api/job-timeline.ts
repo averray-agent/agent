@@ -322,9 +322,8 @@ export function describeTimelineDetail(entry: TimelineEntry): string {
         parts.push(data.derivativeJobId);
       break;
     case "event_bus":
-      if (typeof data.txHash === "string") parts.push(data.txHash);
-      else if (typeof data.blockNumber === "number")
-        parts.push(`block ${data.blockNumber}`);
+      // Chain anchors (txHash / blockNumber) are surfaced as an explorer
+      // link via timelineChainAnchor() rather than inline text.
       break;
     case "job_state":
       if (typeof data.effectiveState === "string")
@@ -342,4 +341,35 @@ export function describeTimelineDetail(entry: TimelineEntry): string {
 function shortId(value: string): string {
   if (value.length <= 12) return value;
   return `${value.slice(0, 6)}…${value.slice(-4)}`;
+}
+
+export type TimelineChainAnchor =
+  | { kind: "tx"; value: string }
+  | { kind: "block"; value: number };
+
+/**
+ * The genuine on-chain anchor for a timeline entry, if any.
+ *
+ * Only `event_bus` entries carry chain anchors, and only `data.txHash`
+ * (a real EVM tx hash) and `data.blockNumber` are explorer-resolvable.
+ * Other `0x` identifiers that can appear on entries (e.g. a chainJobId,
+ * which is `0x`+64 hex like a tx hash but does NOT exist on any
+ * explorer) must never be returned here.
+ */
+export function timelineChainAnchor(
+  entry: TimelineEntry
+): TimelineChainAnchor | null {
+  if (entry.type !== "event_bus") return null;
+  const { txHash, blockNumber } = entry.data;
+  if (typeof txHash === "string" && /^0x[0-9a-fA-F]{64}$/u.test(txHash)) {
+    return { kind: "tx", value: txHash };
+  }
+  if (
+    typeof blockNumber === "number" &&
+    Number.isInteger(blockNumber) &&
+    blockNumber >= 0
+  ) {
+    return { kind: "block", value: blockNumber };
+  }
+  return null;
 }
