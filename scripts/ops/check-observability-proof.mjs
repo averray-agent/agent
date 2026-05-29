@@ -9,7 +9,7 @@ const SCHEMA_VERSION = "observability-proof-v1";
 const FUTURE_SKEW_MS = 5 * 60 * 1000;
 
 function usage() {
-  return `Usage: node scripts/ops/${SCRIPT_NAME} --file docs/evidence/observability-YYYY-MM-DD.json [--json] [--max-completed-age-hours N]
+  return `Usage: node scripts/ops/${SCRIPT_NAME} --file docs/evidence/observability-YYYY-MM-DD.json [--json] [--max-completed-age-hours N] [--now <iso>]
 
 Validates the operator evidence for the RC1 observability gates:
 metrics bearer auth, hosted alert delivery, and Sentry/logging posture.
@@ -17,14 +17,28 @@ This check is read-only; it does not call the hosted stack or alert vendors.
 
 Use --max-completed-age-hours when validating live launch evidence so stale
 historical artifacts cannot be reused as current production proof.
+Use --now <iso> to pin the freshness comparison clock (defaults to the wall
+clock); the value must be an ISO-8601 date/time.
 `;
+}
+
+function parseIsoNow(raw) {
+  if (typeof raw !== "string" || !/^\d{4}-\d{2}-\d{2}T/u.test(raw.trim())) {
+    throw new Error("--now must be an ISO-8601 date/time");
+  }
+  const date = new Date(raw.trim());
+  if (!Number.isFinite(date.getTime())) {
+    throw new Error("--now must be an ISO-8601 date/time");
+  }
+  return date;
 }
 
 function parseArgs(argv) {
   const args = {
     file: undefined,
     json: false,
-    maxCompletedAgeHours: undefined
+    maxCompletedAgeHours: undefined,
+    now: undefined
   };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -40,6 +54,9 @@ function parseArgs(argv) {
         throw new Error("--max-completed-age-hours must be a positive number");
       }
       args.maxCompletedAgeHours = value;
+      index += 1;
+    } else if (arg === "--now") {
+      args.now = parseIsoNow(argv[index + 1]);
       index += 1;
     } else if (arg === "-h" || arg === "--help") {
       args.help = true;
@@ -289,7 +306,8 @@ async function main() {
   const raw = await readFile(args.file, "utf8");
   const parsed = JSON.parse(raw);
   const result = validateEvidence(parsed, {
-    maxCompletedAgeHours: args.maxCompletedAgeHours
+    maxCompletedAgeHours: args.maxCompletedAgeHours,
+    now: args.now
   });
   if (args.json) {
     process.stdout.write(`${JSON.stringify({

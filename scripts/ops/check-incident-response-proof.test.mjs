@@ -386,10 +386,7 @@ test("CLI exits zero and prints JSON for valid evidence", async () => {
 });
 
 test("CLI accepts fresh mainnet evidence with hardening flags", async () => {
-  const file = await writeEvidenceFile(mainnetEvidence({
-    proofDate: new Date().toISOString().slice(0, 10),
-    completedAt: new Date().toISOString()
-  }));
+  const file = await writeEvidenceFile(mainnetEvidence());
   const { stdout } = await execFileAsync(process.execPath, [
     scriptPath,
     "--file",
@@ -397,6 +394,8 @@ test("CLI accepts fresh mainnet evidence with hardening flags", async () => {
     "--max-completed-age-hours",
     "1",
     "--require-mainnet",
+    "--now",
+    "2026-05-28T15:00:00.000Z",
     "--json"
   ]);
   const parsed = JSON.parse(stdout);
