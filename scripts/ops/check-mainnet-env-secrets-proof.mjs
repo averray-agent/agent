@@ -42,14 +42,15 @@ const REQUIRED_POLKADOT_DOCS = [
 ];
 
 function usage() {
-  return `Usage: node scripts/ops/${SCRIPT_NAME} --file docs/evidence/mainnet-env-secrets-YYYY-MM-DD.json [--json] [--max-completed-age-hours N]
+  return `Usage: node scripts/ops/${SCRIPT_NAME} --file docs/evidence/mainnet-env-secrets-YYYY-MM-DD.json [--json] [--max-completed-age-hours N] [--now <iso>]
 
 Validates a redacted mainnet env/secrets proof artifact. This check is offline
 and read-only: it does not render secrets, call providers, call chain RPC, or
 store raw credentials.
 
 The evidence file must use schema ${SCHEMA_VERSION}. Use --max-completed-age-hours
-when validating launch evidence so a stale artifact cannot be reused.
+when validating launch evidence so a stale artifact cannot be reused. Use --now to
+pin the freshness clock to an ISO-8601 date/time (deterministic tests).
 `;
 }
 
@@ -58,6 +59,7 @@ export function parseArgs(argv) {
     file: undefined,
     json: false,
     maxCompletedAgeHours: undefined,
+    now: undefined,
     help: false
   };
   for (let index = 0; index < argv.length; index += 1) {
@@ -69,6 +71,9 @@ export function parseArgs(argv) {
       args.json = true;
     } else if (arg === "--max-completed-age-hours") {
       args.maxCompletedAgeHours = parsePositiveInteger(argv[index + 1], "--max-completed-age-hours");
+      index += 1;
+    } else if (arg === "--now") {
+      args.now = parseIsoDate(argv[index + 1]);
       index += 1;
     } else if (arg === "-h" || arg === "--help") {
       args.help = true;
@@ -86,6 +91,14 @@ function parsePositiveInteger(value, flag) {
     throw new Error(`${flag} must be a positive integer`);
   }
   return Number(value);
+}
+
+function parseIsoDate(value) {
+  const raw = String(value ?? "");
+  if (!/^\d{4}-\d{2}-\d{2}([T ].*)?$/u.test(raw) || !Number.isFinite(Date.parse(raw))) {
+    throw new Error("--now must be an ISO-8601 date/time");
+  }
+  return new Date(Date.parse(raw));
 }
 
 function assertObject(value, path, errors) {
@@ -504,7 +517,8 @@ async function main() {
 
   const parsed = JSON.parse(await readFile(args.file, "utf8"));
   const result = validateEvidence(parsed, {
-    maxCompletedAgeHours: args.maxCompletedAgeHours
+    maxCompletedAgeHours: args.maxCompletedAgeHours,
+    now: args.now
   });
 
   if (args.json) {
