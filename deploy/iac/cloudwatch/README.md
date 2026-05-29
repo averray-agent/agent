@@ -51,3 +51,45 @@ aws cloudformation deploy \
 If the alert SNS topics are not ready yet, omit `PageTopicArn` and
 `AlertTopicArn`; the alarms will still be created without actions and can be
 wired later by updating the stack.
+
+## Proof
+
+The roadmap row is not proofed by this template alone. To close it, capture a
+sanitized operator evidence artifact after the stack is deployed with
+baseline-derived thresholds and at least one alarm notification reaches the
+operator alert channel.
+
+Recommended file name:
+
+```text
+docs/evidence/kms-cloudwatch-alarms-YYYY-MM-DD.json
+```
+
+Validate the artifact before asking the roadmap steward to mark the row
+`Proofed`:
+
+```bash
+node scripts/ops/check-kms-cloudwatch-alarm-proof.mjs \
+  --file docs/evidence/kms-cloudwatch-alarms-YYYY-MM-DD.json \
+  --max-completed-age-hours 24
+```
+
+The evidence must show:
+
+- CloudFormation stack status is `CREATE_COMPLETE` or `UPDATE_COMPLETE` for
+  `deploy/iac/cloudwatch/kms-signing-alarms.yaml`, including the template SHA.
+- CloudTrail is actively logging KMS management events for `Sign`,
+  `GetPublicKey`, `DescribeKey`, `Encrypt`, and `Decrypt`, with log-file
+  validation and at least 90-day retention.
+- Recent CloudTrail events include both `Sign` and `GetPublicKey` activity.
+- Spike thresholds are derived from a real CloudWatch baseline window, not
+  guessed defaults.
+- All required alarms exist, are back in `OK`, have actions enabled, and point
+  at the page or alert SNS destination.
+- CloudWatch metrics include KMS call/error/access-denied counts, auth anomaly
+  counts, and backend `kms.sign.duration` percentile data.
+- A synthetic or controlled alarm notification reached the operator channel and
+  was reset to `OK`.
+
+Keep the artifact sanitized. Do not include bearer tokens, AWS access keys,
+Slack webhook URLs, private keys, or raw 1Password values.
