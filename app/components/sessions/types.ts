@@ -27,6 +27,18 @@ export type VerifierMode =
 
 export type LifecycleStageState = "done" | "current" | "pending";
 
+/** Provenance-decided kind of a chain-anchored reference. Only `tx` is a real
+ *  on-chain transaction that may be linked to a block explorer. `job` is an
+ *  escrow `chainJobId` — the bytes32 EscrowCore key, shape-identical to a tx
+ *  hash but never a transaction and never linkable. `none` is the empty
+ *  placeholder. Classified by `@/lib/chain/chain-reference`. */
+export type ChainRefKind = "tx" | "job" | "none";
+
+export interface ChainRef {
+  kind: ChainRefKind;
+  value: string;
+}
+
 export interface SessionLifecycleStage {
   label: string;
   meta: string;
@@ -40,7 +52,11 @@ export interface EscrowMovement {
   from: string;
   to: string;
   amount: string;
-  tx: string;
+  /** Chain-anchored reference for the movement. Most movements carry the
+   *  escrow `chainJobId` (`kind: "job"`); only timeline events with a genuine
+   *  transaction field carry `kind: "tx"`. The ledger labels and styles the
+   *  two differently so a job id never reads as a transaction. */
+  ref: ChainRef;
   tone?: "neutral" | "accent" | "warn" | "bad";
   /** Raw timeline metadata used by the session-drawer event filter. The
    *  /session/timeline endpoint does not (yet) accept query-string
@@ -60,7 +76,8 @@ export interface PayoutEntry {
   role: "worker" | "verifier" | "co-signer" | "treasury";
   amount: string;
   at: string;
-  tx: string;
+  /** Chain-anchored reference for the payout — see `EscrowMovement.ref`. */
+  ref: ChainRef;
 }
 
 export interface SessionRow {
