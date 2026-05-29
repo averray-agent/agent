@@ -2,6 +2,7 @@
 
 import { cn } from "@/lib/utils/cn";
 import { Sparkline } from "@/components/overview/Sparkline";
+import { publicProfileUrl } from "@/lib/agents/public-profile";
 import { formatDeadline } from "@/components/runs/buildLifecycleStages";
 import { BadgeStrip } from "./BadgeStrip";
 import { TierChip } from "./TierChip";
@@ -93,6 +94,7 @@ export function AgentDirectoryTable({
                 const pill = STATE_PILL[a.state];
                 const selected = a.handle === selectedHandle;
                 const activityParts = a.activity.msg.split(a.activity.ref);
+                const profileHref = publicProfileUrl(a.walletFull);
                 return (
                   <tr
                     key={a.handle}
@@ -112,6 +114,19 @@ export function AgentDirectoryTable({
                       >
                         {a.wallet}
                       </div>
+                      {profileHref ? (
+                        <a
+                          href={profileHref}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                          onClick={(e) => e.stopPropagation()}
+                          title={`Public profile · ${a.walletFull}`}
+                          className="mt-1 inline-flex items-center gap-1 font-[family-name:var(--font-display)] text-[10px] font-bold uppercase text-[var(--avy-muted)] transition-colors hover:text-[var(--avy-accent)]"
+                          style={{ letterSpacing: "0.06em" }}
+                        >
+                          Public profile ↗
+                        </a>
+                      ) : null}
                     </Td>
                     <Td>
                       <TierChip tier={a.tier} />

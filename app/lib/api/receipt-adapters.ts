@@ -11,7 +11,10 @@ export type ReceiptRowWithMeta = ReceiptRow & {
   sessionId: string;
   issuedAtIso: string;
   evidenceHash?: string;
-  blockRef?: string;
+  /** Escrow `chainJobId` — the on-chain bytes32 EscrowCore key for this job.
+   *  Shape-identical to a tx hash but NOT a transaction and not block-explorer
+   *  resolvable, so it is surfaced as "Escrow job", never as a block/tx. */
+  chainJobId?: string;
   badge?: unknown;
 };
 
@@ -76,7 +79,7 @@ export function extractReceiptRow(data: unknown): ReceiptRowWithMeta | null {
   const subject = kind === "badge" && category ? `${category}-tier-${level || "1"}` : jobId;
   const signers = extractSigners(record.signers, averray);
   const evidenceHash = text(record.evidenceHash, text(averray?.evidenceHash, ""));
-  const blockRef = text(record.blockRef, text(averray?.chainJobId, ""));
+  const chainJobId = text(record.chainJobId, text(averray?.chainJobId, ""));
 
   return {
     id: receiptId(record.id, sessionId, evidenceHash),
@@ -90,7 +93,7 @@ export function extractReceiptRow(data: unknown): ReceiptRowWithMeta | null {
     signedAt: displayTime(issuedAtIso),
     issuedAtIso,
     evidenceHash: evidenceHash || undefined,
-    blockRef: blockRef || undefined,
+    chainJobId: chainJobId || undefined,
     badge: badge ?? undefined,
   };
 }
@@ -107,7 +110,7 @@ export function buildReceiptDrawer(
     sessionId: row.sessionId,
     jobId: row.subject,
     evidenceHash: row.evidenceHash,
-    blockRef: row.blockRef,
+    chainJobId: row.chainJobId,
     signers: row.signers,
   };
   const evidenceJson = `// signed JSON — first 40 lines\n${JSON.stringify(raw, null, 2)}`;
@@ -127,7 +130,9 @@ export function buildReceiptDrawer(
       { role: "Evidence", ref: text(averray?.evidenceHash, row.evidenceHash ?? "not indexed") },
       { role: "Policy ref", ref: row.policy },
       { role: "Session", ref: row.sessionId },
-      { role: "Block ref", ref: text(averray?.chainJobId, row.blockRef ?? "pending") },
+      // Escrow job key (chainJobId) — an on-chain EscrowCore id, not a block or
+      // transaction. Labelled honestly and never linked to a block explorer.
+      { role: "Escrow job", ref: text(averray?.chainJobId, row.chainJobId ?? "pending") },
     ],
     ...(row.source ? { source: receiptSource(row.source) } : {}),
   };

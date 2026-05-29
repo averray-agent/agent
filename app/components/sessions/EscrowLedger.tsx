@@ -1,11 +1,13 @@
+import { chainReferenceTitle } from "@/lib/chain/chain-reference";
 import { cn } from "@/lib/utils/cn";
 import type { EscrowMovement } from "./types";
 
 /**
  * Tightly-typed ledger of escrow movements for one session.
- * Presented as a small mono table; each row cites its tx hash and
- * tone-codes the movement (sage for lock/funded, warn for freeze,
- * deep-red for slash, neutral for settle).
+ * Presented as a small mono table; each row cites its chain reference
+ * (an escrow job id for most movements, a genuine transaction only for
+ * timeline events that carry one) and tone-codes the movement (sage for
+ * lock/funded, warn for freeze, deep-red for slash, neutral for settle).
  */
 export function EscrowLedger({ movements }: { movements: EscrowMovement[] }) {
   if (movements.length === 0) {
@@ -32,7 +34,7 @@ export function EscrowLedger({ movements }: { movements: EscrowMovement[] }) {
         <span>From</span>
         <span>To</span>
         <span className="text-right">Amount</span>
-        <span>Tx</span>
+        <span>Ref</span>
       </header>
       <ul className="m-0 flex flex-col p-0">
         {movements.map((m, i) => (
@@ -80,10 +82,18 @@ export function EscrowLedger({ movements }: { movements: EscrowMovement[] }) {
               {m.amount}
             </span>
             <span
-              className="font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-accent)]"
+              className={cn(
+                "truncate font-[family-name:var(--font-mono)] text-[11.5px]",
+                // Only a genuine transaction reads as on-chain (accent); an
+                // escrow job id stays plain ink so it never looks linkable.
+                m.ref.kind === "tx" && "text-[var(--avy-accent)]",
+                m.ref.kind === "job" && "text-[var(--avy-ink)]",
+                m.ref.kind === "none" && "text-[var(--avy-muted)]"
+              )}
               style={{ letterSpacing: 0 }}
+              title={chainReferenceTitle(m.ref)}
             >
-              {m.tx}
+              {m.ref.kind === "none" ? "-" : m.ref.value}
             </span>
           </li>
         ))}
