@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { DrawerSection } from "@/components/shell/DetailDrawer";
+import { OutcomeRationaleInline } from "@/components/common/OutcomeRationaleInline";
 import { SessionStatePill, VerifierModeChip } from "./pills";
 import { WorkerChip } from "./WorkerChip";
 import { VerticalLifecycleRail } from "./VerticalLifecycleRail";
@@ -101,6 +102,9 @@ export function SessionDrawerBody({
               </a>
             ) : null}
           </div>
+          {session.outcomeRationale ? (
+            <OutcomeRationaleInline rationale={session.outcomeRationale} />
+          ) : null}
         </div>
       </DrawerSection>
 

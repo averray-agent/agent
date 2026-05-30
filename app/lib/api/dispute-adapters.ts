@@ -9,6 +9,8 @@ import type {
   EvidenceRow,
   ReleaseDestination,
 } from "@/components/disputes/types";
+import { buildDisputeOutcomeRationale } from "@/lib/ui/outcome-rationale";
+import type { OutcomeRationale } from "@/lib/ui/outcome-rationale-types";
 import {
   decisionToVerdict as mapDecisionToVerdict,
   verdictToDecision as mapVerdictToDecision,
@@ -32,13 +34,28 @@ export function extractDispute(data: unknown): Dispute | null {
   if (isUiDispute(record)) {
     const openedAt = text(record.openedAt, new Date().toISOString());
     const windowSeconds = number(record.windowSeconds, 72 * 60 * 60);
+    const dispute = record as unknown as Dispute;
     return {
-      ...(record as unknown as Dispute),
+      ...dispute,
       arbitration: arbitrationSemantics(record.arbitration, {
         openedAt,
         windowEndsAt: text(record.windowEndsAt, ""),
         windowSeconds,
       }),
+      outcomeRationale:
+        dispute.outcomeRationale ??
+        (buildDisputeOutcomeRationale({
+          state: dispute.state,
+          origin: dispute.origin,
+          openingReceipt: dispute.openingReceipt,
+          sessionId: dispute.sessionId,
+          resolution: dispute.resolution,
+          reasonCode: dispute.reasonCode,
+          reasoningHash: dispute.reasoningHash,
+          metadataURI: dispute.metadataURI,
+          txHash: dispute.txHash,
+          arbitration: dispute.arbitration,
+        }) as OutcomeRationale),
     };
   }
 
@@ -68,15 +85,45 @@ export function extractDispute(data: unknown): Dispute | null {
   });
   const effectiveWindowSeconds = arbitration.sla.seconds || windowSeconds;
   const windowElapsed = elapsedSeconds(openedAt, effectiveWindowSeconds);
+  const origin = originFor(record);
+  const disputeState = stateFor(status, verdict);
+  const resolution = verdict
+    ? {
+        decision: verdict,
+        destination: releaseDestination,
+        rationale: text(record.rationale, text(record.reason, "Resolved by operator verdict.")),
+        at: displayDate(text(release?.releasedAt, text(record.decidedAt, new Date().toISOString()))),
+        signer: party(record.decidedBy ?? release?.releasedBy ?? record.reviewer ?? DEFAULT_REVIEWER, "operator-primary", "sage"),
+        reasonCode: reasonCode || undefined,
+        workerPayout,
+        txHash: txHash || undefined,
+        chainStatus: chainStatus || undefined,
+        metadataURI: metadataURI || undefined,
+        reasoningHash: reasoningHash || undefined,
+      }
+    : undefined;
+  const outcomeRationale = buildDisputeOutcomeRationale({
+    state: disputeState,
+    origin,
+    openingReceipt: text(record.openingReceipt, id),
+    sessionId,
+    resolution,
+    reasonCode,
+    reasoningHash,
+    metadataURI,
+    txHash,
+    arbitration,
+  }) as OutcomeRationale;
 
   return {
     id,
     runRef: text(record.runRef, sessionId),
+    sessionId,
     openingReceipt: text(record.openingReceipt, id),
     summary: text(record.summary, disputeSummary(record, sessionId)),
-    origin: originFor(record),
+    origin,
     severity: severityFor(record, stakeFrozen),
-    state: stateFor(status, verdict),
+    state: disputeState,
     opener: party(record.claimant, "claimant", "blue"),
     respondent: party(record.respondent, "respondent", "clay"),
     reviewer: party(record.reviewer ?? DEFAULT_REVIEWER, "operator-primary", "sage"),
@@ -88,6 +135,7 @@ export function extractDispute(data: unknown): Dispute | null {
     metadataURI: metadataURI || undefined,
     txHash: txHash || undefined,
     chainStatus: chainStatus || undefined,
+    outcomeRationale,
     arbitration,
     stakeBreakdown: stakeBreakdown(stakeFrozen),
     openedAt: displayDate(openedAt),
@@ -97,21 +145,7 @@ export function extractDispute(data: unknown): Dispute | null {
     workerPayload: prettyJson(after),
     expectedPayload: prettyJson(before),
     timeline: timeline(record.timeline),
-    resolution: verdict
-      ? {
-          decision: verdict,
-          destination: releaseDestination,
-          rationale: text(record.rationale, text(record.reason, "Resolved by operator verdict.")),
-          at: displayDate(text(release?.releasedAt, text(record.decidedAt, new Date().toISOString()))),
-          signer: party(record.decidedBy ?? release?.releasedBy ?? record.reviewer ?? DEFAULT_REVIEWER, "operator-primary", "sage"),
-          reasonCode: reasonCode || undefined,
-          workerPayout,
-          txHash: txHash || undefined,
-          chainStatus: chainStatus || undefined,
-          metadataURI: metadataURI || undefined,
-          reasoningHash: reasoningHash || undefined,
-        }
-      : undefined,
+    resolution,
   };
 }
 

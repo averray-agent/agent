@@ -7,6 +7,7 @@
  */
 
 import type { SourceKind } from "@/components/runs/StatePill";
+import type { OutcomeRationale } from "@/lib/ui/outcome-rationale-types";
 
 export type DisputeState =
   | "open"
@@ -96,6 +97,7 @@ export interface DisputeArbitrationSemantics {
 export interface Dispute {
   id: string;
   runRef: string;
+  sessionId?: string;
   /**
    * Provenance of the disputed run — orthogonal to `origin`, which is
    * the *reason* a dispute was raised (signature, schema, …). When
@@ -123,6 +125,7 @@ export interface Dispute {
   metadataURI?: string;
   txHash?: string;
   chainStatus?: "confirmed" | "submitted" | "local_only" | "settled_by_verdict" | string;
+  outcomeRationale?: OutcomeRationale;
   arbitration: DisputeArbitrationSemantics;
   stakeBreakdown: StakeBreakdown;
   /** ISO-ish string opened-at used only for the window countdown seed. */

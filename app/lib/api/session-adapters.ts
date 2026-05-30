@@ -1,4 +1,5 @@
 import { classifyChainReference } from "@/lib/chain/chain-reference";
+import { buildSessionOutcomeRationale } from "@/lib/ui/outcome-rationale";
 import type { SourceKind } from "@/components/runs/StatePill";
 import type {
   LifecycleStageState,
@@ -7,6 +8,7 @@ import type {
   SessionState,
   VerifierMode,
 } from "@/components/sessions/types";
+import type { OutcomeRationale } from "@/lib/ui/outcome-rationale-types";
 
 type RawRecord = Record<string, unknown>;
 
@@ -256,6 +258,21 @@ export function buildSessionDetails(sessionPayload: unknown, jobsPayload: unknow
     const currentState = state(session.status);
     const updatedAt = session.updatedAt ?? session.resolvedAt ?? session.submittedAt ?? session.claimedAt;
     const verification = asRecord(session.verification);
+    const policy = text(job.outputSchemaRef, "schema pending");
+    const verifierHref = `/session/timeline?sessionId=${encodeURIComponent(id)}`;
+    const disputeHref = currentState === "disputed" || currentState === "slashed"
+      ? `/disputes?sessionId=${encodeURIComponent(id)}`
+      : undefined;
+    const outcomeRationale = buildSessionOutcomeRationale({
+      state: currentState,
+      sessionId: id,
+      policy,
+      statusHistory: session.statusHistory,
+      verification,
+      verificationSummary: session.verificationSummary,
+      disputeHref,
+      verifierHref,
+    }) as OutcomeRationale | null;
     // Settled timestamp = resolvedAt (verifier produced a final
     // outcome) and falls back to closedAt for sessions whose terminal
     // state predates the resolvedAt rollout. Both are ISO strings on
@@ -299,11 +316,18 @@ export function buildSessionDetails(sessionPayload: unknown, jobsPayload: unknow
           ? `Verifier ${text(verification.outcome)}`
           : `Session ${text(session.status, "claimed")}`,
         meta: timeLabel(updatedAt),
-        tone: currentState === "approved" || currentState === "settled" ? "accent" : currentState === "disputed" ? "warn" : "neutral",
+        tone: currentState === "approved" || currentState === "settled"
+          ? "accent"
+          : currentState === "disputed"
+            ? "warn"
+            : currentState === "rejected" || currentState === "slashed"
+              ? "bad"
+              : "neutral",
       },
+      ...(outcomeRationale ? { outcomeRationale } : {}),
       openedAt: timeLabel(session.claimedAt),
       ...(timestamps ? { timestamps } : {}),
-      policy: text(job.outputSchemaRef, "schema pending"),
+      policy,
       receipt: currentState === "approved" || currentState === "settled" ? text(session.sessionId) : undefined,
       lifecycle: lifecycle(session),
       movements: [
@@ -329,8 +353,8 @@ export function buildSessionDetails(sessionPayload: unknown, jobsPayload: unknow
           ]
         : [],
       evidenceHref: `/runs#${encodeURIComponent(jobId)}`,
-      verifierHref: `/session/timeline?sessionId=${encodeURIComponent(id)}`,
-      disputeHref: currentState === "disputed" ? `/disputes?sessionId=${encodeURIComponent(id)}` : undefined,
+      verifierHref,
+      disputeHref,
     };
   });
 }

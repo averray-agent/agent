@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils/cn";
 import { DisputeStatePill, OriginPill } from "./pills";
 import { PartyChip } from "./PartyChip";
 import { WindowCountdown } from "./WindowCountdown";
+import { OutcomeRationaleInline } from "@/components/common/OutcomeRationaleInline";
 import { SourceBadge } from "@/components/runs/StatePill";
 import type { Dispute } from "./types";
 
@@ -117,6 +118,9 @@ export function DisputesTable({
                     </Td>
                     <Td>
                       <DisputeStatePill state={d.state} />
+                      {d.outcomeRationale ? (
+                        <OutcomeRationaleInline rationale={d.outcomeRationale} compact />
+                      ) : null}
                     </Td>
                   </tr>
                 );

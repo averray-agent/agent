@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { mutate } from "swr";
 import { DrawerSection } from "@/components/shell/DetailDrawer";
 import { ExplorerLink } from "@/components/common/ExplorerLink";
+import { OutcomeRationaleInline } from "@/components/common/OutcomeRationaleInline";
 import { decisionToVerdict } from "@/lib/api/dispute-adapters";
 import { releaseAmountForDecision } from "@/lib/api/dispute-verdicts";
 import { swrFetcher } from "@/lib/api/client";
@@ -163,6 +164,9 @@ export function DisputeDrawerBody({
               Opened · <span className="text-[var(--avy-ink)]">{dispute.openedAt}</span>
             </span>
           </div>
+          {dispute.outcomeRationale ? (
+            <OutcomeRationaleInline rationale={dispute.outcomeRationale} />
+          ) : null}
         </div>
       </DrawerSection>
 
