@@ -8,6 +8,7 @@ import {
   type AgentsFilterState,
 } from "@/components/agents/AgentsFilterRail";
 import { AgentDirectoryTable } from "@/components/agents/AgentDirectoryTable";
+import { AgentComparisonDialog } from "@/components/agents/AgentComparisonDialog";
 import { AgentTierLegend } from "@/components/agents/AgentTierLegend";
 import { AgentDrawerBody } from "@/components/agents/AgentDrawerBody";
 import { TierChip } from "@/components/agents/TierChip";
@@ -27,6 +28,10 @@ export default function AgentsPage() {
   });
   const [openHandle, setOpenHandle] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // Cross-agent comparison (C4): operators check up to 3 agents, then
+  // open an exportable side-by-side. Keyed by handle (the row's stable id).
+  const [comparingHandles, setComparingHandles] = useState<string[]>([]);
+  const [compareOpen, setCompareOpen] = useState(false);
   const liveAgents = useMemo(() => extractAgents(agentsRequest.data), [agentsRequest.data]);
   const agents = liveAgents;
   const openAgentFromList = openHandle
@@ -54,6 +59,30 @@ export default function AgentsPage() {
     });
   }, [agents, filter]);
 
+  const COMPARE_MAX = 3;
+  const comparingSet = useMemo(() => new Set(comparingHandles), [comparingHandles]);
+  // Preserve selection order, and drop any handle that's no longer in the
+  // current data (e.g. after a refetch) so the compare bar can't reference
+  // a stale agent.
+  const comparingAgents = useMemo(
+    () =>
+      comparingHandles
+        .map((handle) => agents.find((a) => a.handle === handle))
+        .filter((a): a is (typeof agents)[number] => Boolean(a)),
+    [comparingHandles, agents]
+  );
+  const liveHandles = useMemo(() => new Set(agents.map((agent) => agent.handle)), [agents]);
+  const toggleCompare = (agent: { handle: string }) => {
+    setComparingHandles((prev) => {
+      const livePrev = prev.filter((handle) => liveHandles.has(handle));
+      if (livePrev.includes(agent.handle)) {
+        return livePrev.filter((h) => h !== agent.handle);
+      }
+      if (livePrev.length >= COMPARE_MAX) return livePrev;
+      return [...livePrev, agent.handle];
+    });
+  };
+
   const freshness = freshnessFromRequests(agentsRequest);
 
   return (
@@ -80,6 +109,35 @@ export default function AgentsPage() {
 
       <AgentsFilterRail filter={filter} onChange={setFilter} />
 
+      {comparingAgents.length > 0 ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-[10px] border border-[color:rgba(30,102,66,0.28)] bg-[var(--avy-accent-soft)] px-4 py-2.5">
+          <span className="font-[family-name:var(--font-mono)] text-[12.5px] text-[var(--avy-ink)]" style={{ letterSpacing: 0 }}>
+            {comparingAgents.length} selected to compare
+            <span className="text-[var(--avy-muted)]"> · up to {COMPARE_MAX}</span>
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setComparingHandles([])}
+              className="rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3 py-1.5 font-[family-name:var(--font-display)] text-[11px] font-bold uppercase text-[var(--avy-muted)] transition-colors hover:text-[var(--avy-ink)]"
+              style={{ letterSpacing: "0.04em" }}
+            >
+              Clear
+            </button>
+            <button
+              type="button"
+              disabled={comparingAgents.length < 2}
+              onClick={() => setCompareOpen(true)}
+              title={comparingAgents.length < 2 ? "Select at least two agents" : undefined}
+              className="rounded-[8px] border border-[var(--avy-accent)] bg-[var(--avy-accent)] px-3 py-1.5 font-[family-name:var(--font-display)] text-[11px] font-bold uppercase text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+              style={{ letterSpacing: "0.04em" }}
+            >
+              Compare →
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       <AgentDirectoryTable
         rows={filtered}
         total={agents.length}
@@ -88,6 +146,9 @@ export default function AgentsPage() {
           setOpenHandle(agent.handle);
           setDrawerOpen(true);
         }}
+        comparing={comparingSet}
+        onToggleCompare={toggleCompare}
+        compareFull={comparingAgents.length >= COMPARE_MAX}
       />
 
       <AgentTierLegend />
@@ -142,6 +203,12 @@ export default function AgentsPage() {
       >
         {openAgent ? <AgentDrawerBody agent={openAgent} /> : null}
       </DetailDrawer>
+
+      <AgentComparisonDialog
+        open={compareOpen}
+        onClose={() => setCompareOpen(false)}
+        agents={comparingAgents}
+      />
     </div>
   );
 }

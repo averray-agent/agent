@@ -13,6 +13,12 @@ export interface AgentDirectoryTableProps {
   total: number;
   selectedHandle: string | null;
   onSelect: (agent: AgentRecord) => void;
+  /** Handles currently checked for side-by-side comparison (C4). */
+  comparing: Set<string>;
+  /** Toggle an agent's comparison selection. */
+  onToggleCompare: (agent: AgentRecord) => void;
+  /** True when the comparison cap is reached — disables unchecked boxes. */
+  compareFull: boolean;
 }
 
 // State pill palette. Lifecycle-position tones:
@@ -51,6 +57,9 @@ export function AgentDirectoryTable({
   total,
   selectedHandle,
   onSelect,
+  comparing,
+  onToggleCompare,
+  compareFull,
 }: AgentDirectoryTableProps) {
   return (
     <div className="overflow-hidden rounded-[10px] border border-[var(--avy-line)] bg-[var(--avy-paper)] shadow-[var(--shadow-card)] backdrop-blur-[10px]">
@@ -67,6 +76,9 @@ export function AgentDirectoryTable({
         <table className="w-full border-collapse font-[family-name:var(--font-body)] text-[13px]">
           <thead>
             <tr>
+              <Th>
+                <span className="sr-only">Compare</span>
+              </Th>
               <Th>Handle / wallet</Th>
               <Th>Tier</Th>
               <Th>Reputation</Th>
@@ -80,7 +92,7 @@ export function AgentDirectoryTable({
             {rows.length === 0 ? (
               <tr>
                 <td
-                  colSpan={7}
+                  colSpan={8}
                   className="p-8 text-center font-[family-name:var(--font-mono)] text-[13px] text-[var(--avy-muted)]"
                   style={{ letterSpacing: 0 }}
                 >
@@ -104,6 +116,19 @@ export function AgentDirectoryTable({
                       selected && "bg-[color:rgba(30,102,66,0.06)]"
                     )}
                   >
+                    <td
+                      className="border-t border-[var(--avy-line-soft)] px-3 py-3 align-top"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${a.handle} to compare`}
+                        checked={comparing.has(a.handle)}
+                        disabled={compareFull && !comparing.has(a.handle)}
+                        onChange={() => onToggleCompare(a)}
+                        className="h-4 w-4 cursor-pointer accent-[var(--avy-accent)] disabled:cursor-not-allowed disabled:opacity-40"
+                      />
+                    </td>
                     <Td>
                       <div className="text-[14px] font-semibold leading-tight text-[var(--avy-ink)]">
                         {a.handle}
