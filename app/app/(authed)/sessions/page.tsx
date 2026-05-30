@@ -3,6 +3,7 @@
 import { Suspense, useCallback, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { DetailDrawer } from "@/components/shell/DetailDrawer";
+import { ShareReadonlyButton } from "@/components/common/ShareReadonlyButton";
 import { SessionsTopbar } from "@/components/sessions/SessionsTopbar";
 import { SessionsAggregateStrip } from "@/components/sessions/SessionsAggregateStrip";
 import {
@@ -212,6 +213,7 @@ function SessionsPageInner() {
               <span>
                 {picked.escrow.amount} {picked.escrow.asset} escrow
               </span>
+              <ShareReadonlyButton surface="session" id={picked.id} label="Copy share link" />
             </div>
           ) : null
         }

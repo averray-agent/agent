@@ -12,6 +12,7 @@ import { DisputesTable } from "@/components/disputes/DisputesTable";
 import { DisputesLegend } from "@/components/disputes/DisputesLegend";
 import { DisputeDrawerBody } from "@/components/disputes/DisputeDrawerBody";
 import { DisputeStatePill, OriginPill } from "@/components/disputes/pills";
+import { ShareReadonlyButton } from "@/components/common/ShareReadonlyButton";
 import { extractDispute, extractDisputeList } from "@/lib/api/dispute-adapters";
 import { useDispute, useDisputes } from "@/lib/api/hooks";
 import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
@@ -139,6 +140,7 @@ export default function DisputesPage() {
               </span>
               <span>·</span>
               <span>opened {picked.openedAt}</span>
+              <ShareReadonlyButton surface="dispute" id={picked.id} label="Copy share link" />
             </div>
           ) : null
         }
