@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react";
 import { mutate } from "swr";
+import { WhatChangedPanel } from "@/components/governance/WhatChangedPanel";
+import { DiffView } from "@/components/policies/DiffView";
 import { useAuthSession, useCapabilityGrants } from "@/lib/api/hooks";
 import { ApiError } from "@/lib/api/client";
 import {
@@ -14,6 +16,7 @@ import {
   revokeCapabilityGrant,
   type CapabilityGrant,
 } from "@/lib/api/capability-grants";
+import { buildCapabilityChangeEntries } from "@/lib/ui/governance-changelog";
 
 const GRANTS_PATH = "/admin/capability-grants?limit=200";
 
@@ -39,6 +42,7 @@ export default function CapabilitiesPage() {
 
   const grants = extractGrants(grantsRequest.data);
   const known = useMemo(() => listKnownCapabilities(session), [session]);
+  const capabilityChanges = useMemo(() => buildCapabilityChangeEntries(grants), [grants]);
 
   const viewGate = canUseControl(session, "admin.capabilities.view");
   const grantGate = canUseControl(session, "admin.capabilities.grant");
@@ -57,6 +61,8 @@ export default function CapabilitiesPage() {
     }
     return [a, r];
   }, [grants]);
+  const [pickedChangeId, setPickedChangeId] = useState<string | null>(null);
+  const pickedChange = capabilityChanges.find((change) => change.id === pickedChangeId) ?? capabilityChanges[0] ?? null;
 
   return (
     <div className="flex w-full max-w-[1100px] flex-col gap-5">
@@ -97,6 +103,19 @@ export default function CapabilitiesPage() {
         onIssued={() => mutate(GRANTS_PATH)}
       />
 
+      <WhatChangedPanel
+        eyebrow="What changed"
+        title="Recent capability grant changes"
+        changes={capabilityChanges}
+        emptyHint="No grant or revoke event has been recorded yet."
+        activeId={pickedChange?.id ?? null}
+        onSelect={(change) => setPickedChangeId(change.id)}
+      />
+
+      {pickedChange ? (
+        <CapabilityChangeDiff change={pickedChange} />
+      ) : null}
+
       <GrantList
         title="Active grants"
         emptyHint="No active grants. Use the form above to issue one."
@@ -125,6 +144,38 @@ export default function CapabilitiesPage() {
         records every grant and revoke with the issuing admin wallet.
       </p>
     </div>
+  );
+}
+
+function CapabilityChangeDiff({ change }: { change: ReturnType<typeof buildCapabilityChangeEntries>[number] }) {
+  return (
+    <section className="flex flex-col gap-3 rounded-[var(--radius-lg)] border border-[var(--line)] bg-[var(--paper-solid)] p-5 shadow-[var(--shadow-sm)]">
+      <header className="flex flex-wrap items-baseline justify-between gap-2">
+        <div className="flex flex-col gap-0.5">
+          <span
+            className="font-[family-name:var(--font-display)] text-[10.5px] font-extrabold uppercase text-[var(--avy-accent)]"
+            style={{ letterSpacing: "0.12em" }}
+          >
+            Capability diff
+          </span>
+          <h2 className="m-0 font-[family-name:var(--font-display)] text-[18px] font-bold text-[var(--ink)]">
+            {change.title}
+          </h2>
+        </div>
+        <span
+          className="font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--muted)]"
+          style={{ letterSpacing: 0 }}
+        >
+          {change.subjectLabel}
+        </span>
+      </header>
+      <DiffView
+        prev={change.before}
+        next={change.after}
+        prevLabel={change.beforeLabel}
+        nextLabel={change.afterLabel}
+      />
+    </section>
   );
 }
 

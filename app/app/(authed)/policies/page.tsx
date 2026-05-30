@@ -10,6 +10,7 @@ import {
 } from "@/components/policies/PoliciesFilterRail";
 import { PoliciesTable } from "@/components/policies/PoliciesTable";
 import { PolicyLegend } from "@/components/policies/PolicyLegend";
+import { WhatChangedPanel } from "@/components/governance/WhatChangedPanel";
 import {
   PolicyDrawerBody,
   PolicyDrawerHeader,
@@ -17,6 +18,7 @@ import {
 import { SIGNERS } from "@/components/policies/signers";
 import type { Policy, PolicyState } from "@/components/policies/types";
 import { usePolicies, usePolicy } from "@/lib/api/hooks";
+import { buildPolicyChangeEntries } from "@/lib/ui/governance-changelog";
 import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
 
 const STATUS_TO_STATE: Record<Exclude<PoliciesFilter["status"], "all">, PolicyState> = {
@@ -35,6 +37,7 @@ export default function PoliciesPage() {
     q: "",
   });
   const [pickedId, setPickedId] = useState<string | null>(null);
+  const [pickedDiffRev, setPickedDiffRev] = useState<number | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const livePolicies = useMemo(() => extractPolicies(policiesRequest.data), [policiesRequest.data]);
   const policies = livePolicies;
@@ -70,6 +73,7 @@ export default function PoliciesPage() {
     });
   }, [filter, policies]);
 
+  const policyChanges = useMemo(() => buildPolicyChangeEntries(policies), [policies]);
   const freshness = freshnessFromRequests(policiesRequest);
 
   return (
@@ -92,6 +96,25 @@ export default function PoliciesPage() {
       </header>
 
       <PoliciesAggregateStrip policies={policies} />
+      <WhatChangedPanel
+        eyebrow="What changed"
+        title="Recent policy revisions"
+        changes={policyChanges}
+        emptyHint="No policy revision with a before/after rule is available yet."
+        activeId={
+          pickedDiffRev
+            ? policyChanges.find(
+                (change) => change.subjectId === pickedId && change.fromRevision === pickedDiffRev
+              )?.id
+            : null
+        }
+        onSelect={(change) => {
+          if (!change.subjectId || !change.fromRevision) return;
+          setPickedId(change.subjectId);
+          setPickedDiffRev(change.fromRevision);
+          setDrawerOpen(true);
+        }}
+      />
       <PoliciesFilterRail filter={filter} onChange={setFilter} />
       <PoliciesTable
         rows={filtered}
@@ -99,6 +122,7 @@ export default function PoliciesPage() {
         selectedId={pickedId}
         onSelect={(p) => {
           setPickedId(p.id);
+          setPickedDiffRev(null);
           setDrawerOpen(true);
         }}
       />
@@ -110,7 +134,13 @@ export default function PoliciesPage() {
         width={620}
         title={picked ? <PolicyDrawerHeader policy={picked} /> : null}
       >
-        {picked ? <PolicyDrawerBody policy={picked} live={isLive} /> : null}
+        {picked ? (
+          <PolicyDrawerBody
+            policy={picked}
+            live={isLive}
+            initialDiffRev={pickedDiffRev}
+          />
+        ) : null}
       </DetailDrawer>
     </div>
   );
