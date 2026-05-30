@@ -12,6 +12,11 @@ import type { AuditActor, AuditCategory, AuditEvent, AuditSource } from "@/compo
 import { useAudit } from "@/lib/api/hooks";
 import { ApiError } from "@/lib/api/client";
 import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
+import {
+  buildAuditManifestPayload,
+  buildManifestEnvelope,
+  verifyManifestEnvelope,
+} from "@/lib/ui/evidence-verification";
 
 const DAY_BUCKETS: Record<AuditFilter["day"], (d: string, now?: Date) => boolean> = {
   all: () => true,
@@ -22,6 +27,11 @@ const DAY_BUCKETS: Record<AuditFilter["day"], (d: string, now?: Date) => boolean
 
 export default function AuditLogPage() {
   const auditRequest = useAudit();
+  const [manifestStatus, setManifestStatus] = useState<{
+    tone: "ok" | "bad";
+    title: string;
+    detail: string;
+  } | null>(null);
   const [filter, setFilter] = useState<AuditFilter>({
     source: "all",
     category: "all",
@@ -69,6 +79,25 @@ export default function AuditLogPage() {
     filter.category !== "all" ||
     filter.day !== "all" ||
     filter.q.trim().length > 0;
+  const verifyAuditManifest = () => {
+    const payload = buildAuditManifestPayload(events);
+    const envelope = buildManifestEnvelope(payload);
+    const result = verifyManifestEnvelope(envelope);
+    if (result.ok) {
+      const manifestHash = result.manifestHash ?? "";
+      setManifestStatus({
+        tone: "ok",
+        title: "Manifest verified",
+        detail: `${result.entryCount ?? 0} audit event${result.entryCount === 1 ? "" : "s"} · ${manifestHash.slice(0, 14)}…${manifestHash.slice(-8)}`,
+      });
+      return;
+    }
+    setManifestStatus({
+      tone: "bad",
+      title: "Manifest rejected",
+      detail: result.error ?? "Manifest verification failed.",
+    });
+  };
 
   return (
     <div className="flex w-full max-w-[1100px] flex-col gap-5">
@@ -99,15 +128,53 @@ export default function AuditLogPage() {
         filtersApplied={filtersApplied}
       />
 
+      <section className="rounded-[10px] border border-[var(--avy-line)] bg-[var(--avy-paper)] px-4 py-3.5 shadow-[var(--shadow-card)]">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <span
+              className="font-[family-name:var(--font-display)] text-[10.5px] font-extrabold uppercase text-[var(--avy-accent)]"
+              style={{ letterSpacing: "0.12em" }}
+            >
+              Audit manifest
+            </span>
+            <p className="m-0 mt-1 max-w-[66ch] font-[family-name:var(--font-body)] text-[13px] leading-[1.45] text-[var(--avy-muted)]">
+              Rebuild the manifest hash from the current authenticated audit response
+              before exporting or handing it to an operator.
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={unauthenticated || events.length === 0}
+            onClick={verifyAuditManifest}
+            className="inline-flex h-9 items-center rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3 font-[family-name:var(--font-display)] text-[10.5px] font-extrabold uppercase text-[var(--avy-ink)] transition-transform hover:-translate-y-px hover:border-[color:rgba(30,102,66,0.24)] disabled:cursor-not-allowed disabled:text-[var(--avy-muted)] disabled:opacity-60 disabled:hover:translate-y-0"
+            style={{ letterSpacing: "0.08em" }}
+          >
+            Verify manifest
+          </button>
+        </div>
+        {manifestStatus ? (
+          <div
+            className={`mt-3 rounded-[8px] border px-3 py-2 font-[family-name:var(--font-mono)] text-[11px] leading-[1.5] ${
+              manifestStatus.tone === "ok"
+                ? "border-[color:rgba(30,102,66,0.24)] bg-[color:rgba(30,102,66,0.08)] text-[var(--avy-accent)]"
+                : "border-[color:rgba(176,72,55,0.28)] bg-[color:rgba(176,72,55,0.08)] text-[#b04837]"
+            }`}
+            style={{ letterSpacing: 0 }}
+          >
+            <b className="font-semibold">{manifestStatus.title}:</b>{" "}
+            {manifestStatus.detail}
+          </div>
+        ) : null}
+      </section>
+
       <p
         className="font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]"
         style={{ letterSpacing: 0 }}
       >
         Showing <b className="font-semibold text-[var(--avy-ink)]">{filtered.length}</b> of{" "}
         <b className="font-semibold text-[var(--avy-ink)]">{events.length}</b> events.
-        The full history lives at <span className="text-[var(--avy-accent)]">/audit/export</span>{" "}
-        — signed manifest includes hashes, actor wallets, and block references for
-        every row.
+        The manifest verifier hashes event ids, actors, categories, targets, and
+        row hashes from the live audit response.
       </p>
     </div>
   );
