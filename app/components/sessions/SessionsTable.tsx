@@ -3,6 +3,7 @@
 import { cn } from "@/lib/utils/cn";
 import { SessionStatePill, VerifierModeChip } from "./pills";
 import { WorkerChip } from "./WorkerChip";
+import { OutcomeRationaleInline } from "@/components/common/OutcomeRationaleInline";
 import { SourceBadge } from "@/components/runs/StatePill";
 import type { SessionDetail } from "./types";
 
@@ -156,6 +157,9 @@ export function SessionsTable({
                       >
                         {s.lastEvent.meta}
                       </div>
+                      {s.outcomeRationale ? (
+                        <OutcomeRationaleInline rationale={s.outcomeRationale} compact />
+                      ) : null}
                     </Td>
                   </tr>
                 );

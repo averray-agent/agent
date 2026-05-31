@@ -96,6 +96,11 @@ function SessionsPageInner() {
           s.worker.address,
           s.policy,
           s.receipt ?? "",
+          s.outcomeRationale?.reason ?? "",
+          s.outcomeRationale?.reasonCode ?? "",
+          s.outcomeRationale?.policyLabel ?? "",
+          s.outcomeRationale?.receiptLabel ?? "",
+          s.outcomeRationale?.summary ?? "",
         ]
           .join(" ")
           .toLowerCase();

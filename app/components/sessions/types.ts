@@ -7,6 +7,7 @@
  */
 
 import type { SourceKind } from "@/components/runs/StatePill";
+import type { OutcomeRationale } from "@/lib/ui/outcome-rationale-types";
 
 export type SessionState =
   | "active"
@@ -103,6 +104,7 @@ export interface SessionRow {
   age: string;
   ageStale?: boolean;
   lastEvent: { text: string; meta: string; tone?: "neutral" | "accent" | "warn" | "bad" };
+  outcomeRationale?: OutcomeRationale;
   openedAt: string;
   /**
    * Raw ISO timestamps from the backend session record. The `openedAt`

@@ -55,6 +55,11 @@ export default function DisputesPage() {
           d.respondent.handle,
           d.respondent.address,
           d.summary,
+          d.outcomeRationale?.reason ?? "",
+          d.outcomeRationale?.reasonCode ?? "",
+          d.outcomeRationale?.policyLabel ?? "",
+          d.outcomeRationale?.receiptLabel ?? "",
+          d.outcomeRationale?.summary ?? "",
         ]
           .join(" ")
           .toLowerCase();
