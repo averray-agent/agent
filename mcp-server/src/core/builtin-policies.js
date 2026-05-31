@@ -63,6 +63,7 @@ export function makePolicy({
   activeSince,
   lastChange,
   rule,
+  history = [],
   attachedJobs = [],
   signerKeys = ["fd2e", "9a13", "3e42"],
   signersReq = 2
@@ -93,7 +94,11 @@ export function makePolicy({
         at: String(lastChange.at ?? "").slice(0, 10),
         summary: lastChange.text,
         active: true
-      }
+      },
+      ...history.map((entry) => ({
+        ...entry,
+        active: Boolean(entry.active)
+      }))
     ]
   };
 }
@@ -118,6 +123,13 @@ export const BUILTIN_POLICIES = [
       at: "2026-04-24 14:08 UTC"
     },
     rule: {
+      v3: JSON.stringify({
+        kind: "claim.auto",
+        scope: "deps-bump",
+        require: { advisory_type: "security", semver_delta: ["patch"], max_cvss: 7.0 },
+        deny: { lockfile_drift: true, transitive_majors: true },
+        receipt: { co_sign: ["verifier_handler"], attach_cvss_trail: false }
+      }, null, 2),
       v4: JSON.stringify({
         kind: "claim.auto",
         scope: "deps-bump",
@@ -125,7 +137,16 @@ export const BUILTIN_POLICIES = [
         deny: { lockfile_drift: true, transitive_majors: true },
         receipt: { co_sign: ["verifier_handler"], attach_cvss_trail: true }
       }, null, 2)
-    }
+    },
+    history: [
+      {
+        rev: 3,
+        author: "9a13",
+        at: "2026-03-11",
+        summary: "Initial staged dependency gate: patch-only security updates with CVSS ceiling 7.0.",
+        active: false
+      }
+    ]
   }),
   makePolicy({
     id: "p-settle-receipt-before-payout",

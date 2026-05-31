@@ -12,16 +12,33 @@ import { ProposeForm } from "./ProposeForm";
 import { syntaxTint } from "./syntax-tint";
 import type { Policy } from "./types";
 
-export function PolicyDrawerBody({ policy, live }: { policy: Policy; live?: boolean }) {
+export function PolicyDrawerBody({
+  policy,
+  live,
+  initialDiffRev,
+}: {
+  policy: Policy;
+  live?: boolean;
+  initialDiffRev?: number | null;
+}) {
   const [mode, setMode] = useState<"detail" | "propose">("detail");
   const [selectedRev, setSelectedRev] = useState(policy.revision);
   const [diffOpen, setDiffOpen] = useState(false);
 
   useEffect(() => {
     setMode("detail");
+    if (
+      initialDiffRev &&
+      initialDiffRev !== policy.revision &&
+      policy.rule[`v${initialDiffRev}`]
+    ) {
+      setSelectedRev(initialDiffRev);
+      setDiffOpen(true);
+      return;
+    }
     setSelectedRev(policy.revision);
     setDiffOpen(false);
-  }, [policy.id, policy.revision]);
+  }, [policy.id, policy.revision, initialDiffRev, policy.rule]);
 
   const activeRule = policy.rule[`v${policy.revision}`] ?? "";
   const selectedRule = policy.rule[`v${selectedRev}`] ?? "";
