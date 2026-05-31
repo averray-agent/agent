@@ -21,6 +21,7 @@ const DISCOVERY_PUBLIC_ENDPOINTS = [
   { path: "/badges/:sessionId", description: "Averray Agent Badge v1 metadata for a completed session." },
   { path: "/agents", description: "Recent public agent directory derived from live session and reputation data." },
   { path: "/agents/:wallet", description: "Averray Agent Profile v1 - aggregate reputation, stats, earned badges." },
+  { path: "/shares/:token", description: "Public signed read-only snapshot resolver for share URLs." },
   { path: "/verifier/handlers", description: "List of supported verifier modes." },
   { path: "/gas/health", description: "Pimlico gas-sponsor health." },
   { path: "/gas/capabilities", description: "Available ERC-4337 sponsorship features." }
@@ -50,6 +51,7 @@ const DISCOVERY_AUTHENTICATED_ENDPOINTS = [
   { path: "/jobs/preflight", description: "Per-job eligibility + claim-stake + tier-gate snapshot." },
   { path: "/jobs/explain-eligibility", description: "Per-wallet reason why a job is eligible or blocked (used by the explainEligibility tool)." },
   { path: "/jobs/estimate-reward", description: "Profile-aware net-reward estimate after fees, waivers, and stake (used by the estimateNetReward tool)." },
+  { path: "/shares", description: "Create an expiring signed read-only URL for agent, session, dispute, or policy snapshots." },
   { path: "/admin/jobs/timeline", description: "Admin-gated job/session timeline and lineage endpoint." },
   { path: "/admin/jobs/ingest/github", description: "Admin-gated GitHub issue ingestion preview/create endpoint with optional idempotencyKey replay." },
   { path: "/admin/jobs/ingest/openapi", description: "Admin-gated OpenAPI quality audit ingestion preview/create endpoint with optional idempotencyKey replay." },

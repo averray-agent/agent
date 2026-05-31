@@ -4,6 +4,7 @@ import { useState } from "react";
 import { cn } from "@/lib/utils/cn";
 import { Sparkline } from "@/components/overview/Sparkline";
 import { publicProfileUrl } from "@/lib/agents/public-profile";
+import { ShareReadonlyButton } from "@/components/common/ShareReadonlyButton";
 import { BadgeChip } from "./BadgeStrip";
 import { TierChip } from "./TierChip";
 import {
@@ -308,6 +309,7 @@ function PublicIdentityCard({
         >
           {copied === "wallet" ? "Copied" : "Copy wallet"}
         </button>
+        <ShareReadonlyButton surface="agent" id={wallet} label="Share profile" />
       </div>
     </div>
   );

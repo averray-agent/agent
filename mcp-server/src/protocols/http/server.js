@@ -11,7 +11,8 @@ import { hashCanonicalContent } from "../../core/canonical-content.js";
 import { extractClientKey } from "../../auth/rate-limit.js";
 import { hasRole } from "../../auth/config.js";
 import { resolveRequestId } from "../../core/logger.js";
-import { keccak256, toUtf8Bytes } from "ethers";
+import { getAddress, keccak256, toUtf8Bytes } from "ethers";
+import { buildAgentProfile } from "../../core/agent-profile.js";
 import { buildBadgeFromSession } from "../../core/badge-metadata.js";
 import { buildDiscoveryManifest } from "../../core/discovery-manifest.js";
 import {
@@ -41,6 +42,7 @@ import { createProfileRoutes } from "./profile-routes.js";
 import { createPublicMetadataRoutes } from "./public-metadata-routes.js";
 import { createSchemaRoutes } from "./schema-routes.js";
 import { createSessionRoutes } from "./session-routes.js";
+import { createShareRoutes } from "./share-routes.js";
 import { createVerifierRoutes } from "./verifier-routes.js";
 import { createXcmRequestRoutes } from "./xcm-request-routes.js";
 import { OPERATOR_SIGNERS, makePolicy } from "../../core/builtin-policies.js";
@@ -157,6 +159,77 @@ async function ensureSessionOwnership(sessionId, wallet) {
     );
   }
   return session;
+}
+
+function safeChecksum(raw) {
+  try {
+    return getAddress(raw);
+  } catch {
+    return raw;
+  }
+}
+
+async function buildShareAgentProfile(wallet) {
+  const checksummed = safeChecksum(wallet);
+  const [reputation, sessions] = await Promise.all([
+    service.getReputation(checksummed),
+    service.collectSessionHistory(checksummed, { logger })
+  ]);
+  return buildAgentProfile({
+    wallet: String(wallet).toLowerCase(),
+    reputation,
+    sessions,
+    getJobDefinition: (jobId) => {
+      try {
+        return service.getJobDefinition(jobId);
+      } catch {
+        return undefined;
+      }
+    },
+    publicBaseUrl: process.env.PUBLIC_BASE_URL
+  });
+}
+
+async function resolveShareResource({ surface, id }) {
+  if (surface === "agent") {
+    return {
+      kind: "agent_profile",
+      profile: await buildShareAgentProfile(id)
+    };
+  }
+
+  if (surface === "session") {
+    const session = await service.resumeSession(id);
+    return {
+      kind: "session_audit_trail",
+      session,
+      timeline: await service.getSessionTimeline(id)
+    };
+  }
+
+  if (surface === "dispute") {
+    const disputes = await listDisputes(250);
+    const dispute = disputes.find((candidate) => candidate.id === id);
+    return dispute ? { kind: "dispute_snapshot", dispute } : null;
+  }
+
+  if (surface === "policy") {
+    const policy = findPolicy(id);
+    return policy ? { kind: "policy_snapshot", policy } : null;
+  }
+
+  return null;
+}
+
+async function authorizeShareTarget({ surface, id, auth }) {
+  if (surface === "session" && !hasRole(auth.claims, "admin")) {
+    await ensureSessionOwnership(id, auth.wallet);
+    return;
+  }
+  const resource = await resolveShareResource({ surface, id });
+  if (!resource) {
+    throw new ValidationError("Cannot create a share URL for an unknown resource.");
+  }
 }
 
 function ensureXcmRequestOwnership(record, auth) {
@@ -596,6 +669,7 @@ function metricPathLabel(pathname) {
     "/jobs/claim",
     "/jobs/submit",
     "/jobs/tiers",
+    "/shares",
     "/session/state-machine",
     "/strategies",
     "/admin/jobs",
@@ -659,6 +733,7 @@ function metricPathLabel(pathname) {
   if (pathname.startsWith("/policies/")) return "/policies/:tag";
   if (pathname.startsWith("/badges/")) return "/badges/:sessionId";
   if (pathname.startsWith("/agents/")) return "/agents/:wallet";
+  if (pathname.startsWith("/shares/")) return "/shares/:token";
   return "other";
 }
 
@@ -1005,6 +1080,16 @@ const handleActivityRoute = createActivityRoutes({
   respond,
 });
 
+const handleShareRoute = createShareRoutes({
+  authConfig,
+  authMiddleware,
+  authorizeShareTarget,
+  publicBaseUrl: process.env.PUBLIC_BASE_URL,
+  readJsonBody,
+  resolveShareResource,
+  respond,
+});
+
 const handleEventRoute = createEventRoutes({
   authMiddleware,
   enforceLimit,
@@ -1144,6 +1229,10 @@ const server = createServer(async (request, response) => {
     }
 
     if (await handleJobRoute({ request, response, url, pathname })) {
+      return;
+    }
+
+    if (await handleShareRoute({ request, response, url, pathname })) {
       return;
     }
 

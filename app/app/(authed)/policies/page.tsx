@@ -15,6 +15,7 @@ import {
   PolicyDrawerBody,
   PolicyDrawerHeader,
 } from "@/components/policies/PolicyDrawerBody";
+import { ShareReadonlyButton } from "@/components/common/ShareReadonlyButton";
 import { SIGNERS } from "@/components/policies/signers";
 import type { Policy, PolicyState } from "@/components/policies/types";
 import { usePolicies, usePolicy } from "@/lib/api/hooks";
@@ -135,11 +136,16 @@ export default function PoliciesPage() {
         title={picked ? <PolicyDrawerHeader policy={picked} /> : null}
       >
         {picked ? (
-          <PolicyDrawerBody
-            policy={picked}
-            live={isLive}
-            initialDiffRev={pickedDiffRev}
-          />
+          <>
+            <div className="mb-3 flex justify-end">
+              <ShareReadonlyButton surface="policy" id={picked.tag} label="Copy share link" />
+            </div>
+            <PolicyDrawerBody
+              policy={picked}
+              live={isLive}
+              initialDiffRev={pickedDiffRev}
+            />
+          </>
         ) : null}
       </DetailDrawer>
     </div>
