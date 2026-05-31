@@ -27,6 +27,11 @@ import {
   type ReceiptRowWithMeta,
 } from "@/lib/api/receipt-adapters";
 import { formatReceiptKindBreakdown } from "@/lib/ui/receipt-metrics";
+import {
+  buildManifestEnvelope,
+  buildReceiptManifestPayload,
+  verifyManifestEnvelope,
+} from "@/lib/ui/evidence-verification";
 import { useBadge, useBadges } from "@/lib/api/hooks";
 import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
 
@@ -141,6 +146,7 @@ export default function ReceiptsPage() {
   const badgesRequest = useBadges();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [manifestStatus, setManifestStatus] = useState<string | null>(null);
   const liveRows = useMemo(() => extractReceiptRows(badgesRequest.data), [badgesRequest.data]);
   const rows = liveRows;
   const kpis = useMemo(() => receiptKpis(rows), [rows]);
@@ -149,6 +155,19 @@ export default function ReceiptsPage() {
   const drawerModel = selected ? buildReceiptDrawer(selected, detailRequest.data) : null;
 
   const freshness = freshnessFromRequests(badgesRequest);
+  const verifyReceiptManifest = () => {
+    const payload = buildReceiptManifestPayload(rows);
+    const envelope = buildManifestEnvelope(payload);
+    const result = verifyManifestEnvelope(envelope);
+    if (result.ok) {
+      const manifestHash = result.manifestHash ?? "";
+      setManifestStatus(
+        `${result.entryCount ?? 0} receipt${result.entryCount === 1 ? "" : "s"} verified · ${manifestHash.slice(0, 14)}…${manifestHash.slice(-8)}`
+      );
+      return;
+    }
+    setManifestStatus(`Manifest rejected · ${result.error ?? "Manifest verification failed."}`);
+  };
 
   return (
     <div className="flex w-full max-w-[1100px] flex-col gap-5">
@@ -181,6 +200,8 @@ export default function ReceiptsPage() {
         }}
         shownCount={rows.length}
         totalCount={rows.length}
+        onVerifyManifest={verifyReceiptManifest}
+        manifestStatus={manifestStatus}
       />
       <ReceiptShapesLegend shapes={SHAPES} />
 
@@ -212,6 +233,7 @@ export default function ReceiptsPage() {
       >
         {drawerModel ? (
           <ReceiptDrawerBody
+            receiptId={selected?.id ?? "unknown-receipt"}
             signatures={drawerModel.signatures}
             evidenceJson={drawerModel.evidenceJson}
             evidenceMeta={drawerModel.evidenceMeta}

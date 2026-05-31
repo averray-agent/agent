@@ -30,6 +30,8 @@ export interface ReceiptsTableProps {
   onSelect: (row: ReceiptRow) => void;
   shownCount: number;
   totalCount: number;
+  onVerifyManifest?: () => void;
+  manifestStatus?: React.ReactNode;
 }
 
 export function ReceiptsTable({
@@ -38,6 +40,8 @@ export function ReceiptsTable({
   onSelect,
   shownCount,
   totalCount,
+  onVerifyManifest,
+  manifestStatus,
 }: ReceiptsTableProps) {
   return (
     <div className="overflow-hidden rounded-[10px] border border-[var(--avy-line)] bg-[var(--avy-paper)] shadow-[var(--shadow-card)] backdrop-blur-[10px]">
@@ -150,18 +154,34 @@ export function ReceiptsTable({
       </div>
 
       <footer className="flex items-center justify-between gap-3 border-t border-[var(--avy-line-soft)] bg-[rgba(250,248,241,0.5)] px-4 py-3 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]">
-        <span>
-          Showing <b className="font-semibold text-[var(--avy-ink)]">{shownCount}</b> of{" "}
-          <b className="font-semibold text-[var(--avy-ink)]">{totalCount.toLocaleString()}</b>
-        </span>
+        <div className="flex min-w-0 flex-col gap-1">
+          <span>
+            Showing <b className="font-semibold text-[var(--avy-ink)]">{shownCount}</b> of{" "}
+            <b className="font-semibold text-[var(--avy-ink)]">{totalCount.toLocaleString()}</b>
+          </span>
+          {manifestStatus ? (
+            <span className="truncate text-[11px] text-[var(--avy-accent)]">
+              {manifestStatus}
+            </span>
+          ) : null}
+        </div>
         <button
           type="button"
-          disabled
-          title="Manifest export is not yet wired to a live backend."
-          className="cursor-not-allowed rounded-[6px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3 py-1.5 font-[family-name:var(--font-display)] text-[10.5px] font-extrabold uppercase text-[var(--avy-muted)] opacity-60"
+          disabled={!onVerifyManifest || rows.length === 0}
+          onClick={onVerifyManifest}
+          title={
+            rows.length === 0
+              ? "No receipt rows are present in this view."
+              : "Rebuild and verify the manifest hash for the current receipt view."
+          }
+          className={cn(
+            "rounded-[6px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3 py-1.5 font-[family-name:var(--font-display)] text-[10.5px] font-extrabold uppercase text-[var(--avy-ink)] transition-transform hover:-translate-y-px hover:border-[color:rgba(30,102,66,0.24)]",
+            (!onVerifyManifest || rows.length === 0) &&
+              "cursor-not-allowed text-[var(--avy-muted)] opacity-60 hover:translate-y-0"
+          )}
           style={{ letterSpacing: "0.1em" }}
         >
-          ⤓ Download signed manifest of this view
+          Verify manifest of this view
         </button>
       </footer>
     </div>

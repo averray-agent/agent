@@ -1,8 +1,13 @@
 "use client";
 
+import { useState } from "react";
 import { DrawerSection } from "@/components/shell/DetailDrawer";
 import { SourceBadge, type SourceKind } from "@/components/runs/StatePill";
 import { cn } from "@/lib/utils/cn";
+import {
+  hashEvidencePreview,
+  verifyEvidenceSignature,
+} from "@/lib/ui/evidence-verification";
 
 export interface SignatureEntry {
   role: string;
@@ -29,6 +34,7 @@ export interface ReceiptDrawerSource {
 }
 
 export interface ReceiptDrawerBodyProps {
+  receiptId: string;
   signatures: SignatureEntry[];
   evidenceJson: string;
   evidenceMeta: string;
@@ -43,6 +49,7 @@ export interface ReceiptDrawerBodyProps {
 }
 
 export function ReceiptDrawerBody({
+  receiptId,
   signatures,
   evidenceJson,
   evidenceMeta,
@@ -124,7 +131,7 @@ export function ReceiptDrawerBody({
       </DrawerSection>
 
       <DrawerSection title="Verify">
-        <VerifyPanel />
+        <VerifyPanel receiptId={receiptId} evidenceJson={evidenceJson} />
       </DrawerSection>
     </>
   );
@@ -204,7 +211,78 @@ function EvidenceCodeBlock({ raw }: { raw: string }) {
   );
 }
 
-function VerifyPanel() {
+type VerifyStatus =
+  | { tone: "idle"; title: string; detail: string }
+  | { tone: "pending"; title: string; detail: string }
+  | { tone: "ok"; title: string; detail: string }
+  | { tone: "bad"; title: string; detail: string };
+
+function VerifyPanel({
+  receiptId,
+  evidenceJson,
+}: {
+  receiptId: string;
+  evidenceJson: string;
+}) {
+  const [envelope, setEnvelope] = useState("");
+  const [status, setStatus] = useState<VerifyStatus>({
+    tone: "idle",
+    title: "Ready",
+    detail: "Paste a JSON envelope with signer, signature, and payloadHash.",
+  });
+
+  const rehashContent = () => {
+    try {
+      const payloadHash = hashEvidencePreview(evidenceJson);
+      setStatus({
+        tone: "ok",
+        title: "Evidence hash rebuilt",
+        detail: payloadHash,
+      });
+    } catch (error) {
+      setStatus({
+        tone: "bad",
+        title: "Evidence hash failed",
+        detail: error instanceof Error ? error.message : "Unable to hash evidence.",
+      });
+    }
+  };
+
+  const verifyPaste = async () => {
+    if (!envelope.trim()) {
+      setStatus({
+        tone: "bad",
+        title: "No signature envelope",
+        detail: "Paste the detached JSON envelope before verifying.",
+      });
+      return;
+    }
+
+    setStatus({
+      tone: "pending",
+      title: "Verifying signature",
+      detail: "Recovering the EVM signer against the canonical evidence hash.",
+    });
+    const result = await verifyEvidenceSignature({
+      receiptId,
+      evidenceJson,
+      envelope,
+    });
+    if (result.ok) {
+      setStatus({
+        tone: "ok",
+        title: "Signature verified",
+        detail: `${result.signer} signed ${result.payloadHash}`,
+      });
+      return;
+    }
+    setStatus({
+      tone: "bad",
+      title: "Signature rejected",
+      detail: result.error ?? "Signature verification failed.",
+    });
+  };
+
   return (
     <div className="flex flex-col gap-2 rounded-[10px] border border-[color:rgba(30,102,66,0.24)] bg-[color:rgba(30,102,66,0.05)] px-3.5 py-3.5">
       <span
@@ -214,13 +292,16 @@ function VerifyPanel() {
         Re-verify evidence
       </span>
       <textarea
-        placeholder="Paste detached signature to re-verify — base64 or hex…"
+        value={envelope}
+        onChange={(event) => setEnvelope(event.target.value)}
+        placeholder='Paste JSON envelope: {"signer":"0x...","payloadHash":"0x...","signature":"0x..."}'
         className="min-h-[68px] resize-y rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] p-2.5 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-ink)] placeholder:text-[var(--avy-muted)] focus:outline focus:outline-2 focus:outline-[color:rgba(30,102,66,0.26)]"
         style={{ letterSpacing: 0 }}
       />
       <div className="flex gap-2">
         <button
           type="button"
+          onClick={verifyPaste}
           className="inline-flex h-8 items-center gap-1.5 rounded-[8px] bg-[var(--avy-accent)] px-3 font-[family-name:var(--font-display)] text-[10.5px] font-bold uppercase text-[var(--fg-invert)] transition-transform hover:-translate-y-px hover:bg-[var(--avy-accent-2)]"
           style={{ letterSpacing: "0.04em" }}
         >
@@ -228,11 +309,28 @@ function VerifyPanel() {
         </button>
         <button
           type="button"
+          onClick={rehashContent}
           className="inline-flex h-8 items-center gap-1.5 rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3 font-[family-name:var(--font-display)] text-[10.5px] font-bold uppercase text-[var(--avy-ink)] transition-transform hover:-translate-y-px hover:border-[color:rgba(30,102,66,0.24)]"
           style={{ letterSpacing: "0.04em" }}
         >
           ⟳ Re-hash content
         </button>
+      </div>
+      <div
+        className={cn(
+          "rounded-[8px] border px-3 py-2 font-[family-name:var(--font-mono)] text-[11px] leading-[1.5]",
+          status.tone === "ok" &&
+            "border-[color:rgba(30,102,66,0.24)] bg-[color:rgba(30,102,66,0.08)] text-[var(--avy-accent)]",
+          status.tone === "bad" &&
+            "border-[color:rgba(176,72,55,0.28)] bg-[color:rgba(176,72,55,0.08)] text-[#b04837]",
+          status.tone === "pending" &&
+            "border-[color:rgba(211,145,27,0.26)] bg-[color:rgba(211,145,27,0.08)] text-[var(--avy-warn)]",
+          status.tone === "idle" &&
+            "border-[var(--avy-line)] bg-[var(--avy-paper-solid)] text-[var(--avy-muted)]"
+        )}
+        style={{ letterSpacing: 0 }}
+      >
+        <b className="font-semibold">{status.title}:</b> {status.detail}
       </div>
     </div>
   );
