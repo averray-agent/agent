@@ -108,6 +108,14 @@ on:
         options:
           - "1"
           - "0"
+      run_surface_sweep:
+        description: Run the read-only Tier-1 surface sweep (public-routes load + truth-boundary honesty) after a successful deploy. Report-only — never blocks the deploy.
+        required: false
+        default: "1"
+        type: choice
+        options:
+          - "1"
+          - "0"
 
 concurrency:
   group: production
@@ -183,6 +191,7 @@ jobs:
       DEPLOY_PRODUCT_PROOF_REQUIRE_WORKER_LOOP: ${{ github.event_name == 'workflow_dispatch' && inputs.product_proof_require_worker_loop || '0' }}
       DEPLOY_PRODUCT_PROOF_REWARD_ASSET: ${{ github.event_name == 'workflow_dispatch' && inputs.product_proof_reward_asset || '' }}
       DEPLOY_RUN_HERMES_POST_DEPLOY: ${{ github.event_name == 'workflow_dispatch' && inputs.run_hermes_post_deploy || '1' }}
+      DEPLOY_RUN_SURFACE_SWEEP: ${{ github.event_name == 'workflow_dispatch' && inputs.run_surface_sweep || '1' }}
       HERMES_POST_DEPLOY_TIMEOUT: 12m
     steps:
       - name: Validate required secrets
@@ -557,3 +566,79 @@ jobs:
           exit 1
         env:
           HERMES_STATUS: ${{ steps.hermes_post_deploy.outputs.exit_status }}
+
+      # Tier-1 surface sweep (depre-dev/averray-reference-agent). Read-only:
+      # walks the public surfaces, flags console/network errors per route, and
+      # asserts each surface labels its state honestly (real/degraded/empty/
+      # demo/local-simulation). REPORT-ONLY by design — the deploy has already
+      # completed, so this is a detection signal, never a gate. The per-route
+      # report lands on the /monitor board; this step only queues the mission.
+      # (Promote to a deploy gate later, once it's proven low-false-positive.)
+      - name: Queue post-deploy surface sweep (T1)
+        id: surface_sweep
+        if: env.DEPLOY_RUN_SURFACE_SWEEP == '1'
+        continue-on-error: true
+        env:
+          SWEEP_BASE_URL: https://app.averray.com
+        run: |
+          # Public surfaces to sweep. Relative routes resolve against the app
+          # base URL; the marketing site is passed as an absolute URL.
+          body=$(cat <<JSON
+          {"targetUrl":"${SWEEP_BASE_URL}","mode":"surface_sweep","goal":"Post-deploy surface sweep: public surfaces load clean + truth-boundary honesty (read-only).","routes":["/","/onboarding","/jobs","/strategies","https://averray.com/"]}
+          JSON
+          )
+          remote_env=$(printf 'SWEEP_BODY=%q ' "$body")
+
+          : > surface-sweep.log
+          set +e
+          timeout 120 ssh -p "${VPS_PORT:-22}" \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=120 \
+            "$VPS_USER@$VPS_HOST" \
+            "${remote_env} bash -s" <<'REMOTE' | tee surface-sweep.log
+          set -euo pipefail
+          cd /srv/averray-reference-agent
+          token=$(grep -E '^SLACK_OPERATOR_MONITOR_TOKEN=' .env.prod 2>/dev/null | head -1 | cut -d= -f2- || true)
+          port=$(grep -E '^SLACK_OPERATOR_HTTP_PORT=' .env.prod 2>/dev/null | head -1 | cut -d= -f2- || true)
+          port=${port:-8790}
+          hdr=(-H "content-type: application/json")
+          [ -n "$token" ] && hdr+=(-H "Authorization: Bearer $token")
+          resp=$(curl -fsS -X POST "http://127.0.0.1:${port}/monitor/testbed-missions" "${hdr[@]}" --data "$SWEEP_BODY" || echo '{"error":"surface_sweep_queue_failed"}')
+          echo "$resp"
+          id=$(printf '%s' "$resp" | grep -oE '"id":"[^"]+"' | head -1 | cut -d'"' -f4 || true)
+          if [ -n "$id" ]; then
+            echo "queued_mission_id=$id"
+          else
+            echo "surface sweep was NOT queued — is SLACK_OPERATOR_MONITOR_ENABLED=1 and the endpoint reachable?"
+          fi
+          echo "Note: the per-route report appears on the board once the testbed-mission-runner (profile testbed-runner, TESTBED_MISSION_RUNNER_ENABLED=1) claims it."
+          REMOTE
+          status=${PIPESTATUS[0]}
+          set -e
+
+          {
+            echo "## Post-Deploy Surface Sweep (T1, report-only)"
+            echo
+            echo "- Read-only public-surface sweep + truth-boundary honesty check."
+            echo "- Result: board → https://monitor.averray.com/monitor (the queued mission card + its per-route report)."
+            echo "- This step does NOT gate the deploy."
+            echo
+            echo '```text'
+            sed -n '1,120p' surface-sweep.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Report-only: surface SSH/transport problems in the log, never fail the deploy.
+          if [ "$status" -ne 0 ]; then
+            echo "Surface sweep queue step exited ${status} (report-only; deploy is unaffected)."
+          fi
+          exit 0
+
+      - name: Upload surface sweep log
+        if: always() && env.DEPLOY_RUN_SURFACE_SWEEP == '1' && steps.surface_sweep.outcome != 'skipped'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: surface-sweep-${{ github.run_id }}
+          path: surface-sweep.log
+          if-no-files-found: ignore
+          retention-days: 90
