@@ -335,7 +335,7 @@ function Th({
   children,
   align,
 }: {
-  children: React.ReactNode;
+  children?: React.ReactNode;
   align?: "left" | "right";
 }) {
   return (
