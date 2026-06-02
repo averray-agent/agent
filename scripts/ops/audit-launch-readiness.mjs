@@ -30,6 +30,11 @@
  *     calling deposit() leaves liquid=0; surfacing balanceOf separately
  *     points the operator at fund-signer-usdc-deposit.mjs instead of
  *     "where did my USDC go".
+ *   - Optional USDC liquidity monitor registry — if
+ *     USDC_LIQUIDITY_ACCOUNTS_JSON is configured, read every registered
+ *     poster/worker position plus the treasury reserve account through
+ *     AgentAccountCore.positions(account, USDC), then print the same
+ *     desired-refill math the hosted status endpoint exposes.
  *   - Deployed-bytecode selector presence — for every contract the
  *     BlockchainGateway holds an ABI for, confirm the deployed runtime
  *     bytecode at `deployments.contracts.<address>` contains the 4-byte
@@ -63,6 +68,10 @@ import {
   REPUTATION_SBT_ABI,
   TREASURY_POLICY_ABI
 } from "../../mcp-server/src/blockchain/abis.js";
+import {
+  buildUsdcLiquidityStatus,
+  loadUsdcLiquidityConfig
+} from "../../mcp-server/src/services/usdc-liquidity-status.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..", "..");
@@ -463,6 +472,15 @@ async function main() {
       missing
     };
   });
+  const usdcLiquidityConfig = loadUsdcLiquidityConfig(process.env);
+  const usdcLiquidityRegistryConfigured = usdcLiquidityConfig.accounts.length > 0
+    || Boolean(usdcLiquidityConfig.treasuryReserve?.account);
+  const usdcLiquidityStatus = usdcLiquidityRegistryConfigured
+    ? await buildUsdcLiquidityStatus({
+        config: usdcLiquidityConfig,
+        readLiquidRaw: (account) => agentAccount.positions(account, usdcAddress)
+      })
+    : undefined;
 
   // Drift check: confirm we're talking to the chain we expected.
   const chainOk = chainId === EXPECTED_CHAIN_ID;
@@ -530,6 +548,20 @@ async function main() {
   // at the precompile, position stays empty, claims keep reverting.
   const balanceHintsAtUndeposited = !liquidityOk && signerUsdcBalanceRaw > 0n;
   console.log(`USDC.balanceOf(signer)           ${signerUsdcBalanceRaw === 0n ? "ℹ" : "•"}  ${formatUsdc(signerUsdcBalanceRaw)} USDC (${signerUsdcBalanceRaw} raw)${balanceHintsAtUndeposited ? "  ← un-deposited; run fund-signer-usdc-deposit.mjs" : ""}`);
+
+  console.log("");
+  console.log(`## USDC liquidity monitor registry`);
+  if (!usdcLiquidityRegistryConfigured) {
+    console.log(`not configured — set USDC_LIQUIDITY_ACCOUNTS_JSON and USDC_LIQUIDITY_TREASURY_RESERVE_ACCOUNT to audit managed replenishment targets`);
+  } else {
+    console.log(`asOf: ${usdcLiquidityStatus.asOf}`);
+    for (const account of usdcLiquidityStatus.accounts) {
+      const belowFloor = BigInt(account.liquidUsdcRaw) < BigInt(account.floorUsdcRaw);
+      const needsRefill = BigInt(account.desiredUsdcRaw) > 0n;
+      console.log(`${account.role.padEnd(6, " ")} ${short(account.account)}  ${belowFloor ? "❌" : needsRefill ? "⚠" : "✅"}  liquid=${account.liquidUsdc} USDC  floor=${account.floorUsdc}  target=${account.targetUsdc}  desired=${account.desiredUsdc}`);
+    }
+    console.log(`reserve ${short(usdcLiquidityStatus.treasuryReserveAccount ?? "")}  ${usdcLiquidityStatus.treasuryReserveHealthy ? "✅" : "❌"}  liquid=${usdcLiquidityStatus.treasuryReserveUsdc} USDC  floor=${usdcLiquidityStatus.treasuryReserveFloorUsdc}  totalDesired=${usdcLiquidityStatus.totalDesiredUsdc}`);
+  }
 
   console.log("");
   console.log(`## Parameter drift vs deployments/${args.profile}.json`);
@@ -647,6 +679,27 @@ async function main() {
       reasonCode: "signer_liquidity_short",
       runbook: `node scripts/ops/fund-signer-usdc-deposit.mjs --amount ${liquidityGap.toString()} --use-kms --commit`
     });
+  }
+  if (usdcLiquidityRegistryConfigured) {
+    for (const account of usdcLiquidityStatus.accounts) {
+      if (BigInt(account.desiredUsdcRaw) === 0n) continue;
+      fixes.push({
+        label: `USDC liquidity monitor target gap for ${account.role} ${short(account.account)}: liquid ${account.liquidUsdc} USDC, target ${account.targetUsdc} USDC, desired ${account.desiredUsdc} USDC`,
+        reasonCode: "usdc_liquidity_target_gap",
+        runbook: "PR 1 is read-only; top up the AgentAccountCore position manually or wait for the mutating refiller PR."
+      });
+    }
+    if (!usdcLiquidityStatus.treasuryReserveAccount) {
+      fixes.push({
+        label: "USDC liquidity monitor has managed accounts but no treasury reserve account configured",
+        reasonCode: "usdc_liquidity_reserve_missing"
+      });
+    } else if (!usdcLiquidityStatus.treasuryReserveHealthy) {
+      fixes.push({
+        label: `USDC liquidity treasury reserve is not healthy: reserve ${usdcLiquidityStatus.treasuryReserveUsdc} USDC, floor ${usdcLiquidityStatus.treasuryReserveFloorUsdc} USDC, desired ${usdcLiquidityStatus.totalDesiredUsdc} USDC`,
+        reasonCode: "usdc_liquidity_reserve_short"
+      });
+    }
   }
   // Bytecode-selector mismatches are not fixable on the multisig — the
   // remediation is a redeploy from a source that includes the missing
