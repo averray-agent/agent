@@ -349,6 +349,17 @@ test("end-to-end: every gateway ABI yields a non-empty selector list", () => {
   }
 });
 
+test("end-to-end: AGENT_ACCOUNT_ABI exposes positions for USDC liquidity status", () => {
+  // The read-only replenisher status endpoint and audit registry both depend
+  // on AgentAccountCore.positions(account, USDC). Keep that getter inside the
+  // bytecode selector audit so a source/deploy drift cannot make liquidity
+  // preflight silently go blind.
+  const selectors = selectorsFromAbi(AGENT_ACCOUNT_ABI);
+  const positions = selectors.find((s) => s.signature === "positions(address,address)");
+  assert.ok(positions, "AGENT_ACCOUNT_ABI must include positions(address,address)");
+  assert.equal(positions.selector, "0x4bd21445");
+});
+
 test("end-to-end: ESCROW_CORE_ABI exposes claimJobFor — the selector the 2026-05-25 incident missed", () => {
   // This is the specific selector PR #357 added. If the gateway ABI
   // ever drops it, the audit would never have caught the original

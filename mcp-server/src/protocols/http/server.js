@@ -43,9 +43,11 @@ import { createPublicMetadataRoutes } from "./public-metadata-routes.js";
 import { createSchemaRoutes } from "./schema-routes.js";
 import { createSessionRoutes } from "./session-routes.js";
 import { createShareRoutes } from "./share-routes.js";
+import { createUsdcLiquidityRoutes } from "./usdc-liquidity-routes.js";
 import { createVerifierRoutes } from "./verifier-routes.js";
 import { createXcmRequestRoutes } from "./xcm-request-routes.js";
 import { OPERATOR_SIGNERS, makePolicy } from "../../core/builtin-policies.js";
+import { createUsdcLiquidityStatusService } from "../../services/usdc-liquidity-status.js";
 
 const {
   platformService: service,
@@ -911,6 +913,13 @@ const handleAdminStatusRoute = createAdminStatusRoutes({
   service,
 });
 
+const usdcLiquidityStatusService = createUsdcLiquidityStatusService({ gateway });
+const handleUsdcLiquidityRoute = createUsdcLiquidityRoutes({
+  authMiddleware,
+  respond,
+  usdcLiquidityStatusService,
+});
+
 const handleAdminJobsRoute = createAdminJobsRoutes({
   authMiddleware,
   buildIdempotentMutationContext,
@@ -1303,6 +1312,10 @@ const server = createServer(async (request, response) => {
     }
 
     if (await handleAdminStatusRoute({ request, response, url, pathname })) {
+      return;
+    }
+
+    if (await handleUsdcLiquidityRoute({ request, response, url, pathname })) {
       return;
     }
 
