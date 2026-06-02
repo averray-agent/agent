@@ -103,6 +103,29 @@ CI is the merge gate. Do not bypass failing checks.
   GitHub Actions summary. CI remains the merge gate, and a human or explicitly
   authorized merge workflow still owns the final merge.
 
+## Hermes tester (request a browser-agent run)
+
+- A building agent here can ask the Hermes **browser tester** to run a mission
+  against the product (e.g. "can a fresh outside agent reach the first
+  receipt?") and read the report back. You are a **requester, never a runner**.
+- The contract is **Discover → Request → (operator) Approve → Run → Report**:
+  1. **Discover** `GET /monitor/tester/capabilities` — the self-describing
+     manifest; the per-flow `status` tells you what is actually runnable now.
+  2. **Request** `POST /monitor/testbed-missions/request` with
+     `requesterAgent` + `reason` (+ `targetUrl`, `goal`, `mode`) — this parks a
+     board-gated `requested` card; it does **not** run.
+  3. **Approve** — the operator approves on the Hermes board (or a trust policy).
+  4. **Run** — the Hermes testbed runner claims + runs it.
+  5. **Report** `GET /monitor/testbed-missions/:id` — read the structured report
+     back (poll by id).
+- Use the thin helper at
+  [examples/request-tester-run](./examples/request-tester-run/)
+  (`discoverTesterCapabilities`, `requestTesterRun`, `readTesterReport`). It is
+  **request-only, operator-gated, and read-only by default** — it sends no
+  run/approve/mutation field, and the server forces the mission to `requested` +
+  read-only and keeps mutation testnet-only. Do not add a "run" or "approve"
+  path here; that authority stays with the operator.
+
 ## Deployment
 
 - Agents do not SSH into production unless explicitly asked.
