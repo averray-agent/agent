@@ -47,7 +47,8 @@
     "prepare:mainnet-audit-freeze": "node scripts/ops/prepare-mainnet-audit-freeze.mjs",
     "example:profile-lookup": "node examples/profile-lookup/index.mjs",
     "example:claim-and-submit-job": "node examples/claim-and-submit-job/index.mjs",
-    "example:read-job-timeline": "node examples/read-job-timeline/index.mjs"
+    "example:read-job-timeline": "node examples/read-job-timeline/index.mjs",
+    "example:request-tester-run": "node examples/request-tester-run/index.mjs"
   },
   "devDependencies": {
     "@acala-network/chopsticks": "^1.3.1",
