@@ -2,11 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  ROLE_REQUIREMENTS,
   TIER_REQUIREMENTS,
   nextLockedTier,
+  roleRequirements,
+  summarizeRoleGate,
   summarizeTierGate,
   tierRequirements
-} from "./job-catalog-service.js";
+} from "./job-catalog-gates.js";
 
 test("TIER_REQUIREMENTS exposes starter/pro/elite with ascending skill gates", () => {
   assert.deepEqual(TIER_REQUIREMENTS, {
@@ -65,4 +68,31 @@ test("nextLockedTier starts from starter when reputation is empty", () => {
   // Pro is the first locked rung.
   const locked = nextLockedTier(undefined);
   assert.equal(locked.tier, "pro");
+});
+
+test("ROLE_REQUIREMENTS exposes autonomy unlock thresholds", () => {
+  assert.deepEqual(ROLE_REQUIREMENTS, {
+    worker: { skill: 0 },
+    curator: { skill: 50 },
+    reviewer: { skill: 100 },
+    publisher: { skill: 200 },
+    verifier: { skill: 300 },
+    arbitrator: { skill: 500 }
+  });
+  assert.deepEqual(roleRequirements("publisher"), { skill: 200 });
+});
+
+test("roleRequirements falls back to worker for unknown roles", () => {
+  assert.deepEqual(roleRequirements("unknown"), { skill: 0 });
+});
+
+test("summarizeRoleGate reports unlocked and missing role requirements", () => {
+  assert.equal(summarizeRoleGate("curator", { skill: 75 }).unlocked, true);
+  assert.deepEqual(summarizeRoleGate("verifier", { skill: 225 }).missing, { skill: 75 });
+});
+
+test("summarizeRoleGate normalises unknown roles to worker", () => {
+  const summary = summarizeRoleGate("unknown", { skill: 0 });
+  assert.equal(summary.role, "worker");
+  assert.equal(summary.unlocked, true);
 });
