@@ -33,7 +33,8 @@
  * Claims validation:
  *   - iss, aud match configured expected values
  *   - sub present, non-empty, lowercase
- *   - role in the configured allowlist
+ *   - role(s), when present, all in the configured allowlist; an empty
+ *     roles array is valid (a roleless ordinary-worker token)
  *   - iat, nbf, exp numeric; exp - iat ≤ MAX_TTL_SECONDS
  *   - clock skew bounded by ±clockSkewSeconds (default 60)
  *   - jti is a UUIDv4-shaped string
@@ -253,18 +254,21 @@ export class KmsJwtSigner {
    * Phase 4b.6 Stage 2B: `opts.role` accepts either a single string
    * (legacy single-role admin JWTs minted via `mint-admin-jwt.mjs
    * --use-kms`) or an array (SIWE multi-role wallets that hold both
-   * admin AND verifier). Emitted tokens always carry a `roles` array
-   * claim — never the singular `role` — so downstream consumers
-   * (middleware, capabilities) have one canonical shape. The dispatcher
-   * (jwt.js verifyEs256) still bridges legacy single-`role` tokens
-   * minted before this PR for backward compat.
+   * admin AND verifier). It may also be ABSENT (undefined / "" / []),
+   * which mints a roleless ordinary-worker token (`roles: []`) — the
+   * common case for external agents that hold no admin/verifier role.
+   * Emitted tokens always carry a `roles` array claim — never the
+   * singular `role` — so downstream consumers (middleware, capabilities)
+   * have one canonical shape. The dispatcher (jwt.js verifyEs256) still
+   * bridges legacy single-`role` tokens minted before this PR for
+   * backward compat.
    *
    * @param {object} payload                       Extra claims to merge in (must not override registered claims).
    * @param {object} opts
    * @param {string} opts.issuer                   `iss` claim value.
    * @param {string} opts.audience                 `aud` claim value.
    * @param {string} opts.subject                  `sub` claim value (lowercase EVM address or canonical user id).
-   * @param {string | string[]} opts.role          `roles` claim source — single string or non-empty array of strings.
+   * @param {string | string[]} [opts.role]        `roles` claim source — single string, array of strings, or absent (→ roleless `roles: []`).
    * @param {number} opts.expiresInSeconds         Token lifetime; will set exp = iat + this.
    * @returns {Promise<string>}                    The serialized ES256 JWT.
    */
@@ -282,16 +286,27 @@ export class KmsJwtSigner {
     if (!subject || typeof subject !== "string") {
       throw new Error("KmsJwtSigner.signAsync: subject is required");
     }
-    // Normalize role/roles input. Caller may pass a single string
-    // (admin-JWT minting path) or an array (SIWE multi-role wallet).
-    const rolesArr = Array.isArray(role)
-      ? role
-      : typeof role === "string" && role.length > 0
-        ? [role]
-        : null;
-    if (!rolesArr || rolesArr.length === 0) {
+    // Normalize role/roles input. Caller may pass:
+    //   - a single string   → admin-JWT minting path
+    //   - an array           → SIWE multi-role wallet (admin + verifier)
+    //   - nothing / "" / []  → ROLELESS ordinary-worker wallet (the
+    //                          common case for external agents; see
+    //                          jwt.js signTokenFromConfig + the SIWE
+    //                          handler in auth-routes.js)
+    // A roleless mint emits `roles: []` so downstream consumers always
+    // see a `roles` array. Roleless tokens grant NO privileges —
+    // capabilities derive from role membership — so an empty array just
+    // identifies the wallet via `sub` for auth-gated actions.
+    let rolesArr;
+    if (Array.isArray(role)) {
+      rolesArr = role;
+    } else if (typeof role === "string" && role.length > 0) {
+      rolesArr = [role];
+    } else if (role === undefined || role === null || role === "") {
+      rolesArr = [];
+    } else {
       throw new Error(
-        "KmsJwtSigner.signAsync: role (string or non-empty array of strings) is required",
+        `KmsJwtSigner.signAsync: role must be a string, an array of strings, or absent (got ${JSON.stringify(role)})`,
       );
     }
     for (const r of rolesArr) {
@@ -527,9 +542,10 @@ export class KmsJwtSigner {
     } else {
       throw new Error("KmsJwtSigner.verify: roles/role claim missing");
     }
-    if (claimedRoles.length === 0) {
-      throw new Error("KmsJwtSigner.verify: roles claim is empty");
-    }
+    // An empty `roles` array is the canonical roleless-worker shape — a
+    // valid token that simply carries no role-derived capabilities. It is
+    // NOT rejected (the allowlist loop below is a no-op for it). Only a
+    // non-empty array containing an out-of-allowlist entry is rejected.
     for (const r of claimedRoles) {
       if (typeof r !== "string" || !expectedRoles.has(r)) {
         throw new Error(`KmsJwtSigner.verify: role "${r}" not in allowlist`);

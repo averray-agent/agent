@@ -209,6 +209,20 @@ export async function signTokenFromConfig(payload, opts, authConfig) {
   // multi-role wallets (admin + verifier) keep both capabilities under
   // ES256 issuance. KmsJwtSigner.signAsync normalizes string → [string]
   // internally, so legacy callers passing a single string still work.
+  // `role` is OPTIONAL. Ordinary worker wallets are roleless by design
+  // (config.resolveRoles returns [] for any non-admin/non-verifier
+  // wallet), and claiming / submitting jobs is auth-gated, not
+  // role-gated. When no role is derivable we mint a ROLELESS token
+  // (KmsJwtSigner.signAsync emits `roles: []`) instead of throwing —
+  // matching the HS256 path, which has never required a role. Only
+  // iss / aud / sub stay mandatory.
+  //
+  // Before this fix the ES256 path threw ConfigError → HTTP 500
+  // invalid_configuration for every roleless SIWE login once prod went
+  // ES256-only (JWT_BACKEND=kms). The HS256 path had no such check; that
+  // asymmetry was the bug. A roleless token grants NO privileges
+  // (capabilities derive from role membership via capabilities.js); it
+  // only identifies the wallet via `sub` for auth-gated actions.
   const role =
     opts.role
     ?? (Array.isArray(payload?.roles) && payload.roles.length > 0 ? payload.roles : undefined)
@@ -216,9 +230,9 @@ export async function signTokenFromConfig(payload, opts, authConfig) {
   const issuer = opts.issuer ?? authConfig.kmsJwt?.expectedIssuer;
   const audience = opts.audience ?? authConfig.kmsJwt?.expectedAudience;
 
-  if (!issuer || !audience || !subject || !role) {
+  if (!issuer || !audience || !subject) {
     throw new ConfigError(
-      "signTokenFromConfig (ES256): issuer/audience/subject/role(s) must each be derivable from opts or authConfig.kmsJwt + payload.",
+      "signTokenFromConfig (ES256): issuer/audience/subject must each be derivable from opts or authConfig.kmsJwt + payload.",
     );
   }
 
