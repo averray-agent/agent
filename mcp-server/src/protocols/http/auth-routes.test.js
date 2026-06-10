@@ -6,6 +6,10 @@ import { createAuthRoutes } from "./auth-routes.js";
 
 const WALLET = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const OTHER_WALLET = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+// A real EIP-55 *checksummed* address (mixed case) — the exact form ethers'
+// signature recovery returns. The platform's canonical wallet form (and every
+// minted JWT `sub`) is lowercase, so the mint sites must lowercase this.
+const CHECKSUMMED_WALLET = "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed";
 const VALID_SIGNATURE = `0x${"1".repeat(130)}`;
 
 function makeHarness(overrides = {}) {
@@ -242,6 +246,76 @@ test("POST /auth/verify rejects nonce wallet mismatch", async () => {
     (error) => error instanceof AuthenticationError && error.code === "nonce_wallet_mismatch"
   );
   assert.ok(!calls.some(([name]) => name === "signToken"));
+});
+
+test("POST /auth/verify lowercases a checksummed recovered address before minting (regression)", async () => {
+  // ethers recovers an EIP-55 *checksummed* address, but the verifier
+  // requires a lowercase `sub` (KmsJwtSigner.verify: "sub claim must be
+  // lowercase"). Before the fix the handler minted the checksummed address
+  // verbatim, so /auth/verify returned 200 yet every authed call with the
+  // minted token self-rejected with 401 claims_mismatch.
+  const { calls, response, route } = makeHarness({
+    payload: { message: "siwe", signature: VALID_SIGNATURE },
+    refreshStore: true,
+    roles: [],
+    consumedWallet: CHECKSUMMED_WALLET.toLowerCase(),
+    verified: { nonce: "nonce-1", recoveredAddress: CHECKSUMMED_WALLET },
+  });
+
+  assert.equal(await callRoute(route, response, "POST", "/auth/verify"), true);
+  assert.equal(response.statusCode, 200);
+
+  // The minted `sub` is the input address lowercased — NOT the checksummed form.
+  const mintedSub = calls.find(([name]) => name === "signToken")?.[1].claims.sub;
+  assert.equal(mintedSub, CHECKSUMMED_WALLET.toLowerCase());
+  assert.notEqual(mintedSub, CHECKSUMMED_WALLET);
+  assert.equal(mintedSub, mintedSub.toLowerCase());
+
+  // The refresh record seeds future /auth/refresh subs — it must be lowercase too.
+  const refreshWallet = calls.find(([name]) => name === "issueRefreshToken")?.[1].wallet;
+  assert.equal(refreshWallet, CHECKSUMMED_WALLET.toLowerCase());
+
+  // The response wallet uses the canonical lowercase form.
+  assert.equal(response.body.wallet, CHECKSUMMED_WALLET.toLowerCase());
+});
+
+test("POST /auth/refresh lowercases a legacy checksummed refresh-record wallet before minting", async () => {
+  // Refresh records issued before the /auth/verify fix hold a checksummed
+  // wallet; the cookie-rotation path must still mint a lowercase `sub`.
+  const { calls, response, route } = makeHarness({
+    refreshCookie: "refresh-cookie",
+    refreshStore: true,
+    roles: ["admin"],
+    consumedRefresh: {
+      hash: "refresh-hash",
+      record: { wallet: CHECKSUMMED_WALLET, role: "admin" },
+    },
+  });
+
+  assert.equal(await callRoute(route, response, "POST", "/auth/refresh"), true);
+  assert.equal(response.statusCode, 200);
+
+  const mintedSub = calls.find(([name]) => name === "signToken")?.[1].claims.sub;
+  assert.equal(mintedSub, CHECKSUMMED_WALLET.toLowerCase());
+  assert.equal(mintedSub, mintedSub.toLowerCase());
+});
+
+test("POST /auth/refresh (bearer path) lowercases a checksummed auth wallet before minting", async () => {
+  const { calls, response, route } = makeHarness({
+    roles: ["verifier"],
+    auth: {
+      wallet: CHECKSUMMED_WALLET,
+      claims: { roles: ["verifier"], jti: "old-jti", exp: Math.floor(Date.now() / 1000) + 120 },
+      capabilities: ["*"],
+    },
+  });
+
+  assert.equal(await callRoute(route, response, "POST", "/auth/refresh"), true);
+  assert.equal(response.statusCode, 200);
+
+  const mintedSub = calls.find(([name]) => name === "signToken")?.[1].claims.sub;
+  assert.equal(mintedSub, CHECKSUMMED_WALLET.toLowerCase());
+  assert.equal(mintedSub, mintedSub.toLowerCase());
 });
 
 test("GET /auth/session returns wallet, token kind, grants, and capability matrix", async () => {
