@@ -271,11 +271,45 @@ test("KmsJwtSigner: signAsync accepts multi-role array and emits canonical roles
   assert.deepEqual(claims.roles, ["admin", "verifier"]);
 });
 
-test("KmsJwtSigner: signAsync rejects empty role array", async () => {
+test("KmsJwtSigner: signAsync with an empty role array mints a roleless token (roles: [])", async () => {
+  // Roleless ordinary-worker wallet — the common case for external
+  // agents. An empty role array is no longer an error; it mints a token
+  // carrying `roles: []`, which round-trips through verify.
+  const signer = buildSigner();
+  const token = await signer.signAsync({}, { ...defaultSignOpts(), role: [] });
+  const claims = signer.verify(token);
+  assert.deepEqual(claims.roles, []);
+  assert.equal(claims.role, undefined);
+  assert.equal(claims.sub, SUBJECT);
+});
+
+test("KmsJwtSigner: signAsync with no role at all mints a roleless token that verifies", async () => {
+  // Mirrors the dispatcher path where opts.role is undefined for a
+  // roleless wallet. signAsync must NOT throw and must emit roles: [].
+  const signer = buildSigner();
+  const { role: _role, ...optsWithoutRole } = defaultSignOpts();
+  const token = await signer.signAsync({}, optsWithoutRole);
+  const claims = signer.verify(token);
+  assert.deepEqual(claims.roles, []);
+});
+
+test("KmsJwtSigner: verify accepts a roleless token even with a non-empty expectedRoles allowlist", async () => {
+  // The verifier-side allowlist is configured (prod = VALID_ROLES), but
+  // a roleless token's empty array makes the allowlist check a no-op —
+  // it must still verify.
+  const signer = buildSigner({ expectedRoles: ["admin", "verifier"] });
+  const token = await signer.signAsync({}, { ...defaultSignOpts(), role: [] });
+  const claims = signer.verify(token);
+  assert.deepEqual(claims.roles, []);
+});
+
+test("KmsJwtSigner: signAsync still rejects a non-string role value", async () => {
+  // Guard against regressing the validation for genuinely malformed
+  // input — a number is neither a string, an array, nor "absent".
   const signer = buildSigner();
   await assert.rejects(
-    () => signer.signAsync({}, { ...defaultSignOpts(), role: [] }),
-    /role .* is required/,
+    () => signer.signAsync({}, { ...defaultSignOpts(), role: 42 }),
+    /role must be a string, an array of strings, or absent/,
   );
 });
 

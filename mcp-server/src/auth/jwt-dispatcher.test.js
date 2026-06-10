@@ -19,13 +19,14 @@ import { generateKeyPairSync } from "node:crypto";
 
 import { p256 } from "@noble/curves/nist.js";
 
-import { loadAuthConfig } from "./config.js";
+import { loadAuthConfig, hasRole } from "./config.js";
 import {
   signToken,
   signTokenFromConfig,
   verifyTokenFromConfig,
 } from "./jwt.js";
 import { createAuthMiddleware } from "./middleware.js";
+import { resolveCapabilities } from "./capabilities.js";
 import { ConfigError, AuthenticationError } from "../core/errors.js";
 
 // ───────────────────────────────────────────────────────────────────
@@ -276,6 +277,92 @@ test("dispatcher kms: signTokenFromConfig with payload.roles array mints multi-r
   // Verify round-trips with both roles preserved.
   const verified = await verifyTokenFromConfig(token, cfg);
   assert.deepEqual(verified.roles, ["admin", "verifier"]);
+});
+
+test("dispatcher kms: roleless wallet mints a valid ES256 token (LAUNCH-CRITICAL regression)", async () => {
+  // The exact bug: once prod went ES256-only (JWT_BACKEND=kms), the SIWE
+  // handler called signTokenFromConfig({ sub, roles: [] }, ...) for every
+  // ordinary worker wallet, and the ES256 path THREW ConfigError →
+  // HTTP 500 invalid_configuration. resolveRoles returns [] for any
+  // non-admin/non-verifier wallet, so this is the common external-agent
+  // path. It must mint, not throw.
+  const cfg = buildAuthConfig({ jwtBackend: "kms", withKms: true });
+  const { token, claims } = await signTokenFromConfig(
+    { sub: SUBJECT, roles: [] }, // ← exactly what auth-routes.js passes for a roleless wallet
+    { expiresInSeconds: 60 },
+    cfg,
+  );
+  const [headerB64] = token.split(".");
+  const header = JSON.parse(b64uDecode(headerB64).toString("utf8"));
+  assert.equal(header.alg, "ES256");
+  assert.equal(claims.sub, SUBJECT);
+  // Canonical shape: roles is an (empty) array, never a singular role.
+  assert.deepEqual(claims.roles, []);
+  assert.equal(claims.role, undefined);
+});
+
+test("dispatcher kms: signTokenFromConfig with no derivable role does not throw and mints roleless", async () => {
+  // Covers the path where neither opts.role, payload.roles, nor
+  // payload.role is present — the dispatcher must default to a roleless
+  // mint rather than the old ConfigError throw.
+  const cfg = buildAuthConfig({ jwtBackend: "kms", withKms: true });
+  const { token, claims } = await signTokenFromConfig(
+    { sub: SUBJECT }, // no roles/role anywhere
+    { issuer: ISSUER, audience: AUDIENCE, subject: SUBJECT, expiresInSeconds: 60 },
+    cfg,
+  );
+  assert.deepEqual(claims.roles, []);
+  // Sanity: with-roles path is unaffected — still emits the array verbatim.
+  const { claims: adminClaims } = await signTokenFromConfig(
+    { sub: SUBJECT, roles: ["admin"] },
+    { issuer: ISSUER, audience: AUDIENCE, subject: SUBJECT, expiresInSeconds: 60 },
+    cfg,
+  );
+  assert.deepEqual(adminClaims.roles, ["admin"]);
+  // Token is structurally valid (verifies below in the round-trip test).
+  assert.equal(typeof token, "string");
+});
+
+test("dispatcher kms: roleless ES256 token round-trips through verify and hasRole returns false gracefully", async () => {
+  const cfg = buildAuthConfig({ jwtBackend: "kms", withKms: true });
+  const { token } = await signTokenFromConfig(
+    { sub: SUBJECT, roles: [] },
+    { expiresInSeconds: 60 },
+    cfg,
+  );
+  const claims = await verifyTokenFromConfig(token, cfg);
+  assert.equal(claims.sub, SUBJECT);
+  assert.deepEqual(claims.roles, []);
+  // hasRole must not throw and must report false for a roleless token.
+  assert.equal(hasRole(claims, "admin"), false);
+  assert.equal(hasRole(claims, "verifier"), false);
+  // A roleless wallet still receives the base capabilities — including
+  // jobs:claim / jobs:submit, which are auth-gated, not role-gated. This
+  // is what makes an ordinary worker functional after sign-in.
+  const capabilities = resolveCapabilities(claims);
+  assert.ok(capabilities.includes("jobs:claim"), "roleless token should carry jobs:claim");
+  assert.ok(capabilities.includes("jobs:submit"), "roleless token should carry jobs:submit");
+  assert.ok(capabilities.includes("account:read"), "roleless token should carry account:read");
+  // ...but NOT any admin capability.
+  assert.ok(!capabilities.includes("jobs:create"), "roleless token must NOT carry admin caps");
+});
+
+test("middleware integration: roleless ES256 token authenticates and can reach /jobs/claim", async () => {
+  // End-to-end through the real middleware: a roleless wallet's token
+  // must authenticate AND satisfy the jobs:claim route capability
+  // (auth-gated, not role-gated). This is the path the first real
+  // product test exercised and that 500'd before the fix.
+  const cfg = buildAuthConfig({ jwtBackend: "kms", withKms: true });
+  const middleware = createAuthMiddleware({ authConfig: cfg, logger: silentLogger() });
+  const { token } = await signTokenFromConfig(
+    { sub: SUBJECT, roles: [] },
+    { expiresInSeconds: 60 },
+    cfg,
+  );
+  const request = { method: "POST", headers: { authorization: `Bearer ${token}` } };
+  const result = await middleware(request, new URL("http://localhost/jobs/claim"));
+  assert.equal(result.wallet.toLowerCase(), SUBJECT.toLowerCase());
+  assert.deepEqual(result.claims.roles, []);
 });
 
 test("dispatcher kms: legacy single-`role` token (minted pre-2B) still verifies and is normalized", async () => {

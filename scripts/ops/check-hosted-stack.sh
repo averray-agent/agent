@@ -43,6 +43,10 @@ EXTERNAL_SCHEMA_PROOF_IDEMPOTENCY_KEY=${EXTERNAL_SCHEMA_PROOF_IDEMPOTENCY_KEY:-}
 CHECK_DISPUTE_VERDICT_PROOF=${CHECK_DISPUTE_VERDICT_PROOF:-0}
 DISPUTE_PROOF_NODE_IMAGE=${DISPUTE_PROOF_NODE_IMAGE:-node:22-bookworm-slim}
 DISPUTE_PROOF_EVIDENCE_FILE=${DISPUTE_PROOF_EVIDENCE_FILE:-}
+CHECK_SIWE_FRESH_WALLET_PROOF=${CHECK_SIWE_FRESH_WALLET_PROOF:-0}
+SIWE_FRESH_WALLET_PROOF_NODE_IMAGE=${SIWE_FRESH_WALLET_PROOF_NODE_IMAGE:-node:22-bookworm-slim}
+SIWE_FRESH_WALLET_PROOF_EVIDENCE_FILE=${SIWE_FRESH_WALLET_PROOF_EVIDENCE_FILE:-}
+SIWE_FRESH_WALLET_PRIVATE_KEY=${SIWE_FRESH_WALLET_PRIVATE_KEY:-}
 CHECK_METRICS_AUTH=${CHECK_METRICS_AUTH:-0}
 METRICS_BEARER_TOKEN=${METRICS_BEARER_TOKEN:-}
 TIMEOUT_SEC=${TIMEOUT_SEC:-20}
@@ -119,7 +123,7 @@ enabled() {
   esac
 }
 
-if { enabled "$CHECK_PRODUCT_PROOF_GATE" || enabled "$CHECK_SERVICE_TOKEN_PROOF" || enabled "$CHECK_EXTERNAL_SCHEMA_PROOF" || enabled "$CHECK_DISPUTE_VERDICT_PROOF"; } && ! command -v node >/dev/null 2>&1; then
+if { enabled "$CHECK_PRODUCT_PROOF_GATE" || enabled "$CHECK_SERVICE_TOKEN_PROOF" || enabled "$CHECK_EXTERNAL_SCHEMA_PROOF" || enabled "$CHECK_DISPUTE_VERDICT_PROOF" || enabled "$CHECK_SIWE_FRESH_WALLET_PROOF"; } && ! command -v node >/dev/null 2>&1; then
   require_command docker
 fi
 
@@ -578,6 +582,43 @@ if enabled "$CHECK_DISPUTE_VERDICT_PROOF"; then
     .persisted.status == "resolved" and
     .persisted.reasoningHash == .response.reasoningHash
   ' >/dev/null <<<"$dispute_proof_json"
+fi
+
+if enabled "$CHECK_SIWE_FRESH_WALLET_PROOF"; then
+  # Real SIWE login with a FRESH, non-admin/non-verifier wallet — the
+  # regression guard for the roleless-wallet JWT mint. Needs no ADMIN_JWT
+  # (that's the whole point: it exercises the live front door, not a
+  # pre-minted multi-role token). Must FAIL before the auth fix (verify
+  # 500s) and PASS after.
+  echo "Checking SIWE fresh-wallet proof"
+  script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+  repo_root="$(cd "$script_dir/../.." && pwd)"
+  if [[ -n "$SIWE_FRESH_WALLET_PROOF_EVIDENCE_FILE" ]]; then
+    if [[ "$SIWE_FRESH_WALLET_PROOF_EVIDENCE_FILE" != /* ]]; then
+      SIWE_FRESH_WALLET_PROOF_EVIDENCE_FILE="$repo_root/$SIWE_FRESH_WALLET_PROOF_EVIDENCE_FILE"
+    fi
+    siwe_fresh_wallet_proof_evidence_dir="$(dirname "$SIWE_FRESH_WALLET_PROOF_EVIDENCE_FILE")"
+    mkdir -p "$siwe_fresh_wallet_proof_evidence_dir"
+  fi
+  if command -v node >/dev/null 2>&1; then
+    API_BASE_URL="${API_HEALTH_URL%/health}" \
+      SIWE_FRESH_WALLET_PROOF_EVIDENCE_FILE="$SIWE_FRESH_WALLET_PROOF_EVIDENCE_FILE" \
+      SIWE_FRESH_WALLET_PRIVATE_KEY="$SIWE_FRESH_WALLET_PRIVATE_KEY" \
+      node "$script_dir/check-siwe-fresh-wallet-proof.mjs"
+  else
+    siwe_fresh_wallet_proof_docker_volume_args=(-v "$repo_root:/workspace")
+    if [[ -n "${siwe_fresh_wallet_proof_evidence_dir:-}" ]]; then
+      siwe_fresh_wallet_proof_docker_volume_args+=(-v "$siwe_fresh_wallet_proof_evidence_dir:$siwe_fresh_wallet_proof_evidence_dir")
+    fi
+    docker run --rm \
+      "${siwe_fresh_wallet_proof_docker_volume_args[@]}" \
+      -w /workspace \
+      -e API_BASE_URL="${API_HEALTH_URL%/health}" \
+      -e SIWE_FRESH_WALLET_PROOF_EVIDENCE_FILE="$SIWE_FRESH_WALLET_PROOF_EVIDENCE_FILE" \
+      -e SIWE_FRESH_WALLET_PRIVATE_KEY="$SIWE_FRESH_WALLET_PRIVATE_KEY" \
+      "$SIWE_FRESH_WALLET_PROOF_NODE_IMAGE" \
+      node scripts/ops/check-siwe-fresh-wallet-proof.mjs
+  fi
 fi
 
 echo "Hosted stack smoke check passed."
