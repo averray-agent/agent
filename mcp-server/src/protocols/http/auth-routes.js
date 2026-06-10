@@ -154,9 +154,19 @@ export function createAuthRoutes({
         throw new AuthenticationError("Nonce was issued for a different wallet.", "nonce_wallet_mismatch");
       }
 
-      const roles = authConfig.resolveRoles?.(verified.recoveredAddress) ?? [];
+      // ethers' signature recovery returns the EIP-55 *checksummed* address,
+      // but the canonical wallet form across the platform is lowercase: every
+      // JWT `sub` is minted lowercase and KmsJwtSigner.verify REJECTS a non-
+      // lowercase `sub` ("sub claim must be lowercase" → 401 claims_mismatch).
+      // Normalize once here so the access-token `sub`, the refresh record
+      // (whose wallet seeds future `sub`s on /auth/refresh), and the response
+      // wallet all use the canonical lowercase form. Without this, /auth/verify
+      // returns 200 yet every authed call with the minted token self-rejects.
+      const wallet = verified.recoveredAddress.toLowerCase();
+
+      const roles = authConfig.resolveRoles?.(wallet) ?? [];
       const { token, claims } = await signTokenFromConfigImpl(
-        { sub: verified.recoveredAddress, roles },
+        { sub: wallet, roles },
         { expiresInSeconds: authConfig.tokenTtlSeconds },
         authConfig,
       );
@@ -166,7 +176,7 @@ export function createAuthRoutes({
         if (supportsRefreshStore(stateStore)) {
           const refreshAdapter = makeRefreshStoreAdapterImpl(stateStore);
           const refreshIssue = await issueRefreshTokenImpl({
-            wallet: verified.recoveredAddress,
+            wallet,
             role: roles[0] ?? "user",
             store: refreshAdapter,
           });
@@ -174,7 +184,7 @@ export function createAuthRoutes({
         }
       } catch (err) {
         logger?.warn?.(
-          { err, wallet: verified.recoveredAddress },
+          { err, wallet },
           "auth_verify.refresh_issue_failed"
         );
       }
@@ -185,7 +195,7 @@ export function createAuthRoutes({
         buildTokenResponse({
           token,
           claims,
-          wallet: verified.recoveredAddress,
+          wallet,
           roles,
           authCapabilities,
         }),
@@ -303,8 +313,12 @@ export function createAuthRoutes({
           store: refreshAdapter,
         });
 
+        // Defensive lowercase: new refresh records seed a lowercase wallet
+        // (see /auth/verify), but records issued before that fix landed hold a
+        // checksummed wallet. Every minted `sub` must be lowercase or the
+        // verifier rejects it (claims_mismatch).
         const { token, claims } = await signTokenFromConfigImpl(
-          { sub: consumed.record.wallet, roles },
+          { sub: consumed.record.wallet.toLowerCase(), roles },
           { expiresInSeconds: authConfig.tokenTtlSeconds },
           authConfig,
         );
@@ -346,8 +360,11 @@ export function createAuthRoutes({
       }
 
       const roles = authConfig.resolveRoles?.(auth.wallet) ?? auth.claims?.roles ?? [];
+      // auth.wallet derives from a verified token's `sub`, which the verifier
+      // already enforces lowercase — lowercased here too to keep the "every
+      // minted sub is lowercase" invariant explicit at every mint site.
       const { token, claims } = await signTokenFromConfigImpl(
-        { sub: auth.wallet, roles },
+        { sub: auth.wallet.toLowerCase(), roles },
         { expiresInSeconds: authConfig.tokenTtlSeconds },
         authConfig,
       );
