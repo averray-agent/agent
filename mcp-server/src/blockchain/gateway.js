@@ -935,13 +935,17 @@ export class BlockchainGateway {
       && Boolean(job?.funding?.templateId);
   }
 
-  async submitWork(jobId, evidence) {
+  async submitWork(jobId, evidence, worker) {
     return this.withGatewayError("submitWork", async () => {
       this.requireSigner("submitWork");
+      const chainJobId = this.toJobId(jobId);
       const evidenceHash = typeof evidence === "string" && /^0x[a-fA-F0-9]{64}$/u.test(evidence)
         ? evidence
         : hashCanonicalContent(evidence);
-      const tx = await this.escrowContract.submitWork(this.toJobId(jobId), evidenceHash);
+      const signerAddress = worker ? await this.signer.getAddress() : undefined;
+      const tx = worker && worker.toLowerCase() !== signerAddress.toLowerCase()
+        ? await this.escrowContract.submitWorkFor(chainJobId, worker, evidenceHash)
+        : await this.escrowContract.submitWork(chainJobId, evidenceHash);
       await tx.wait();
     });
   }
@@ -960,10 +964,14 @@ export class BlockchainGateway {
     });
   }
 
-  async openDispute(jobId) {
+  async openDispute(jobId, participant) {
     return this.withGatewayError("openDispute", async () => {
       this.requireSigner("openDispute");
-      const tx = await this.escrowContract.openDispute(this.toJobId(jobId));
+      const chainJobId = this.toJobId(jobId);
+      const signerAddress = participant ? await this.signer.getAddress() : undefined;
+      const tx = participant && participant.toLowerCase() !== signerAddress.toLowerCase()
+        ? await this.escrowContract.openDisputeFor(chainJobId, participant)
+        : await this.escrowContract.openDispute(chainJobId);
       const receipt = await tx.wait();
       return {
         txHash: tx.hash,

@@ -288,8 +288,8 @@ test("POST /disputes/:id/verdict opens the chain dispute before arbitrator resol
         gatewayCalls.push(["getJob", jobId]);
         return { reward: JOB.rewardAmount, released: 0, state: 4 };
       },
-      async openDispute(jobId) {
-        gatewayCalls.push(["openDispute", jobId]);
+      async openDispute(jobId, participant) {
+        gatewayCalls.push(["openDispute", jobId, participant]);
         return { txHash: "0xopen", blockNumber: 41, status: 1 };
       },
       async resolveDispute(jobId, workerPayout, reasonCode, metadataURI) {
@@ -314,6 +314,9 @@ test("POST /disputes/:id/verdict opens the chain dispute before arbitrator resol
   assert.equal(response.body.txHash, "0xresolve");
   assert.equal(response.body.blockNumber, 42);
   assert.deepEqual(gatewayCalls.map(([name]) => name), ["getJob", "getJob", "openDispute", "resolveDispute"]);
+  // The chain dispute is brokered on behalf of the worker (the claimant) so the
+  // operator signer can open it even when it is not a participant on chain.
+  assert.ok(gatewayCalls.some(([name, , participant]) => name === "openDispute" && participant === WORKER));
   assert.ok(calls.some(([name, detail]) => name === "upsertMutationReceipt"
     && detail.receipt.chainDisputeTxHash === "0xopen"
     && detail.receipt.chainDisputeBlockNumber === 41

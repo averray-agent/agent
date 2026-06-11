@@ -256,6 +256,12 @@ async function loadDeployments(profile) {
   return { path, manifest: JSON.parse(await readFile(path, "utf8")) };
 }
 
+// Operator-brokered entrypoints the gateway calls on behalf of the worker /
+// participant. Every redeploy MUST ship an artifact that defines all of them,
+// or the deployed-bytecode-selector audit fails and the worker loop reverts
+// Unauthorized (claimJobFor #357/#525, submitWorkFor/openDisputeFor this PR).
+const REQUIRED_BROKERED_FNS = ["claimJobFor", "submitWorkFor", "openDisputeFor"];
+
 async function loadEscrowArtifact() {
   const path = resolve(repoRoot, "out", "EscrowCore.sol", "EscrowCore.json");
   let raw;
@@ -269,6 +275,23 @@ async function loadEscrowArtifact() {
     bytecode: artifact.bytecode.object,
     abi: artifact.abi
   };
+}
+
+function summarizeBrokeredSelectors(artifact) {
+  return REQUIRED_BROKERED_FNS
+    .map((name) => `${name}=${artifact.abi.some((f) => f.name === name)}`)
+    .join(" ");
+}
+
+export function assertArtifactHasBrokeredSelectors(artifact) {
+  const missing = REQUIRED_BROKERED_FNS.filter((name) => !artifact.abi.some((f) => f.name === name));
+  if (missing.length) {
+    throw new Error(
+      `Build artifact is missing operator-brokered selector(s): ${missing.join(", ")}. ` +
+      "Run `forge build` on a source tree that defines them before redeploying " +
+      "(else the new EscrowCore would reproduce the Unauthorized worker-loop blocker)."
+    );
+  }
 }
 
 function resolveSignerKey(args) {
@@ -831,7 +854,9 @@ async function main() {
   // --phase deploy: print plan; with --commit, send EVM CREATE.
   if (args.phase === "deploy") {
     const artifact = await loadEscrowArtifact();
-    console.log(`build runtime size:    ${(artifact.bytecode.length - 2) / 2} bytes creation / artifact ABI has claimJobFor: ${artifact.abi.some(f => f.name === "claimJobFor")}`);
+    assertArtifactHasBrokeredSelectors(artifact);
+    console.log(`build runtime size:    ${(artifact.bytecode.length - 2) / 2} bytes creation`);
+    console.log(`artifact brokered selectors: ${summarizeBrokeredSelectors(artifact)}`);
     const plan = await planDeploy({ provider, manifest, artifact });
     printDeployPlan(plan);
 
@@ -877,7 +902,9 @@ async function main() {
       return;
     }
     const artifact = await loadEscrowArtifact();
-    console.log(`build runtime size:    ${(artifact.bytecode.length - 2) / 2} bytes creation / artifact ABI has claimJobFor: ${artifact.abi.some(f => f.name === "claimJobFor")}`);
+    assertArtifactHasBrokeredSelectors(artifact);
+    console.log(`build runtime size:    ${(artifact.bytecode.length - 2) / 2} bytes creation`);
+    console.log(`artifact brokered selectors: ${summarizeBrokeredSelectors(artifact)}`);
     const plan = await planDeploy({ provider, manifest, artifact });
     printDeployPlan(plan);
     printWireOverview({ manifest, wiringState, predictedNewEscrow: plan.predicted });

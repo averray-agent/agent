@@ -228,6 +228,89 @@ test("claimJob uses direct claim when the signer is the authenticated wallet", a
   assert.deepEqual(calls, [[gateway.toJobId("wiki-job")]]);
 });
 
+test("submitWork relays the worker via submitWorkFor when the signer is an operator", async () => {
+  const gateway = new BlockchainGateway({ enabled: false });
+  const worker = "0x3333333333333333333333333333333333333333";
+  const evidence = `0x${"a".repeat(64)}`;
+  const calls = [];
+  gateway.signer = {
+    async getAddress() {
+      return "0x9999999999999999999999999999999999999999";
+    }
+  };
+  gateway.escrowContract = {
+    async submitWork() {
+      throw new Error("operator signer must not submit as the worker");
+    },
+    async submitWorkFor(...args) {
+      calls.push(args);
+      return {
+        async wait() {}
+      };
+    }
+  };
+
+  await gateway.submitWork("wiki-job", evidence, worker);
+
+  assert.deepEqual(calls, [[gateway.toJobId("wiki-job"), worker, evidence]]);
+});
+
+test("submitWork uses direct submitWork when no relayed worker is supplied", async () => {
+  const gateway = new BlockchainGateway({ enabled: false });
+  const evidence = `0x${"b".repeat(64)}`;
+  const calls = [];
+  gateway.signer = {
+    async getAddress() {
+      throw new Error("direct submits must not need the signer address");
+    }
+  };
+  gateway.escrowContract = {
+    async submitWork(...args) {
+      calls.push(args);
+      return {
+        async wait() {}
+      };
+    },
+    async submitWorkFor() {
+      throw new Error("direct submits should not use submitWorkFor");
+    }
+  };
+
+  await gateway.submitWork("wiki-job", evidence);
+
+  assert.deepEqual(calls, [[gateway.toJobId("wiki-job"), evidence]]);
+});
+
+test("openDispute relays the participant via openDisputeFor when the signer is not the participant", async () => {
+  const gateway = new BlockchainGateway({ enabled: false });
+  const participant = "0x3333333333333333333333333333333333333333";
+  const calls = [];
+  gateway.signer = {
+    async getAddress() {
+      return "0x9999999999999999999999999999999999999999";
+    }
+  };
+  gateway.escrowContract = {
+    async openDispute() {
+      throw new Error("operator signer must not open the dispute as itself when brokering");
+    },
+    async openDisputeFor(...args) {
+      calls.push(args);
+      return {
+        hash: "0xopenfor",
+        async wait() {
+          return { blockNumber: 9, status: 1 };
+        }
+      };
+    }
+  };
+
+  const receipt = await gateway.openDispute("wiki-job", participant);
+
+  assert.deepEqual(calls, [[gateway.toJobId("wiki-job"), participant]]);
+  assert.deepEqual(receipt, { txHash: "0xopenfor", blockNumber: 9, status: 1 });
+});
+
 test("getJob falls back to the legacy escrow struct when rc1 decoding fails", async () => {
   const gateway = gatewayWithDot();
   gateway.escrowContract = {
