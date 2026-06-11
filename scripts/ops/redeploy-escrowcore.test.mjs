@@ -5,8 +5,28 @@ import {
   parseArgs,
   loadKeyFromOp,
   rewriteEscrowAddressInTemplate,
-  evaluateOrphanedBalancePreflight
+  evaluateOrphanedBalancePreflight,
+  assertArtifactHasBrokeredSelectors
 } from "./redeploy-escrowcore.mjs";
+
+function abiWith(names) {
+  return { abi: names.map((name) => ({ type: "function", name })) };
+}
+
+test("assertArtifactHasBrokeredSelectors passes when every brokered entrypoint is present", () => {
+  assert.doesNotThrow(() =>
+    assertArtifactHasBrokeredSelectors(
+      abiWith(["claimJobFor", "submitWorkFor", "openDisputeFor", "submitWork", "openDispute"])
+    )
+  );
+});
+
+test("assertArtifactHasBrokeredSelectors throws naming the missing brokered selectors", () => {
+  assert.throws(
+    () => assertArtifactHasBrokeredSelectors(abiWith(["claimJobFor"])),
+    /missing operator-brokered selector\(s\): submitWorkFor, openDisputeFor/
+  );
+});
 
 test("parseArgs defaults to dry-run + phase=all + profile=testnet", () => {
   const args = parseArgs([]);

@@ -461,14 +461,26 @@ contract EscrowCore is ReentrancyGuard {
     }
 
     function submitWork(bytes32 jobId, bytes32 evidenceHash) external whenNotPaused {
+        _submitWork(jobId, msg.sender, evidenceHash);
+    }
+
+    /// @dev Operator-brokered submit. The backend signs as the service
+    ///      operator on behalf of `worker` (the wallet that claimed the job)
+    ///      so agents call HTTP only and never sign chain txs. Authorization
+    ///      gates on the claimed `worker`, not msg.sender. Mirrors claimJobFor.
+    function submitWorkFor(bytes32 jobId, address worker, bytes32 evidenceHash) external whenNotPaused onlyOperator {
+        _submitWork(jobId, worker, evidenceHash);
+    }
+
+    function _submitWork(bytes32 jobId, address worker, bytes32 evidenceHash) internal {
         JobEscrow storage job = _jobs[jobId];
         if (job.state != JobState.Claimed) revert InvalidState();
-        if (msg.sender != job.worker) revert Unauthorized();
+        if (worker != job.worker) revert Unauthorized();
         if (block.timestamp > job.claimExpiry) revert InvalidState();
         latestEvidence[jobId] = evidenceHash;
         job.state = JobState.Submitted;
-        emit WorkSubmitted(jobId, msg.sender, evidenceHash);
-        emit Submitted(jobId, msg.sender, evidenceHash);
+        emit WorkSubmitted(jobId, worker, evidenceHash);
+        emit Submitted(jobId, worker, evidenceHash);
     }
 
     function disclose(bytes32 hash) external whenNotPaused {
@@ -610,13 +622,28 @@ contract EscrowCore is ReentrancyGuard {
     }
 
     function openDispute(bytes32 jobId) external whenNotPaused onlyParticipant(jobId) {
+        _openDispute(jobId, msg.sender);
+    }
+
+    /// @dev Operator-brokered dispute. The backend signs as the service
+    ///      operator on behalf of `participant` (the job's poster or worker).
+    ///      Without it a brokered openDispute reverts Unauthorized whenever the
+    ///      operator signer is neither participant — e.g. recurring-template
+    ///      jobs whose poster is a distinct funding wallet. Mirrors submitWorkFor.
+    function openDisputeFor(bytes32 jobId, address participant) external whenNotPaused onlyOperator {
+        JobEscrow storage job = _jobs[jobId];
+        if (participant != job.poster && participant != job.worker) revert Unauthorized();
+        _openDispute(jobId, participant);
+    }
+
+    function _openDispute(bytes32 jobId, address opener) internal {
         JobEscrow storage job = _jobs[jobId];
         if (job.state != JobState.Rejected) revert InvalidState();
         require(job.rejectedAt != 0, "NO_REJECTION_TIMESTAMP");
         require(block.timestamp <= job.rejectedAt + DISPUTE_WINDOW, "DISPUTE_WINDOW_CLOSED");
         job.disputedAt = block.timestamp;
         job.state = JobState.Disputed;
-        emit DisputeOpened(jobId, msg.sender, job.disputedAt);
+        emit DisputeOpened(jobId, opener, job.disputedAt);
     }
 
     function finalizeRejectedJob(bytes32 jobId) external whenNotPaused nonReentrant {

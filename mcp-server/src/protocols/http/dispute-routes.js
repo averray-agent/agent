@@ -56,7 +56,10 @@ export function createDisputeRoutes({
     if (Number(live?.state) !== 4) {
       return undefined;
     }
-    return gateway.openDispute(chainJobId);
+    // Broker as the worker (the dispute claimant) so the operator signer can
+    // open the dispute even when it is neither participant on chain — e.g.
+    // recurring-template jobs whose poster is a distinct funding wallet.
+    return gateway.openDispute(chainJobId, session.wallet);
   }
 
   async function buildDisputeFromSession(session) {

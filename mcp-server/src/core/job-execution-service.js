@@ -258,7 +258,11 @@ export class JobExecutionService {
     const guardedSubmission = this.applyMaintainerSubmissionGuards(job, refreshed, submission);
     await validateJobSubmissionAgainstSchema(job, guardedSubmission);
     if (this.blockchainGateway?.isEnabled()) {
-      await this.blockchainGateway.submitWork(session.chainJobId ?? session.jobId, hashSubmission(guardedSubmission));
+      await this.blockchainGateway.submitWork(
+        session.chainJobId ?? session.jobId,
+        hashSubmission(guardedSubmission),
+        session.wallet
+      );
     }
     const protocolHistory = [...new Set([...refreshed.protocolHistory, protocol])];
     const transitioned = transitionSession({

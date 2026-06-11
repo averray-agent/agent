@@ -36,6 +36,7 @@ contract AgentPlatformTest is Test {
     bytes32 internal constant REASONING_HASH = bytes32("REASONING_HASH");
 
     event DisputeOpened(bytes32 indexed jobId, address indexed opener, uint256 disputedAt);
+    event WorkSubmitted(bytes32 indexed jobId, address indexed worker, bytes32 evidenceHash);
 
     function setUp() public {
         policy = new TreasuryPolicy();
@@ -122,6 +123,81 @@ contract AgentPlatformTest is Test {
         assertEq(workerLiquid, WORKER_DEPOSIT - 5 ether);
         assertEq(workerJobStake, 5 ether);
         assertEq(operatorJobStake, 0);
+    }
+
+    function testOperatorRelayedSubmitWorkUsesWorkerIdentity() public {
+        bytes32 jobId = keccak256("job/relayed-submit/1");
+
+        vm.prank(poster);
+        escrow.createSinglePayoutJob(
+            jobId, address(dot), 100 ether, 10 ether, 5 ether, 1 days, bytes32("AUTO"), bytes32("CODING"), SPEC_HASH
+        );
+
+        escrow.claimJobFor(jobId, worker);
+
+        // Backend signer (address(this), a service operator) brokers the submit
+        // for the worker wallet; the agent never signs a chain tx. The event is
+        // attributed to the worker, not the operator.
+        vmEvent.expectEmit(true, true, false, true, address(escrow));
+        emit WorkSubmitted(jobId, worker, keccak256("relayed-evidence"));
+        escrow.submitWorkFor(jobId, worker, keccak256("relayed-evidence"));
+
+        EscrowCore.JobEscrow memory submittedJob = escrow.jobs(jobId);
+        assertEq(uint256(submittedJob.state), uint256(EscrowCore.JobState.Submitted));
+        assertEq(uint256(escrow.latestEvidence(jobId)), uint256(keccak256("relayed-evidence")));
+    }
+
+    function testSubmitWorkForRejectsWalletThatIsNotTheClaimedWorker() public {
+        bytes32 jobId = keccak256("job/relayed-submit/wrong-worker");
+
+        vm.prank(poster);
+        escrow.createSinglePayoutJob(
+            jobId, address(dot), 100 ether, 10 ether, 5 ether, 1 days, bytes32("AUTO"), bytes32("CODING"), SPEC_HASH
+        );
+
+        escrow.claimJobFor(jobId, worker);
+
+        (bool ok,) =
+            address(escrow).call(abi.encodeCall(escrow.submitWorkFor, (jobId, address(0xBADD), keccak256("evidence"))));
+        require(!ok, "EXPECTED_UNAUTHORIZED_REVERT");
+    }
+
+    function testSubmitWorkForRequiresOperator() public {
+        bytes32 jobId = keccak256("job/relayed-submit/non-operator");
+
+        vm.prank(poster);
+        escrow.createSinglePayoutJob(
+            jobId, address(dot), 100 ether, 10 ether, 5 ether, 1 days, bytes32("AUTO"), bytes32("CODING"), SPEC_HASH
+        );
+
+        escrow.claimJobFor(jobId, worker);
+
+        // The claimed worker is not a service operator, so the brokered
+        // entrypoint must reject it — workers use the worker-direct submitWork.
+        vm.prank(worker);
+        (bool ok,) = address(escrow).call(abi.encodeCall(escrow.submitWorkFor, (jobId, worker, keccak256("evidence"))));
+        require(!ok, "EXPECTED_UNAUTHORIZED_REVERT");
+    }
+
+    function testOperatorRelayedOpenDisputeUsesParticipantIdentity() public {
+        bytes32 jobId = createRejectedSinglePayoutJob("job/relayed-dispute/1", 50 ether);
+
+        // Backend signer brokers the dispute for the worker (the claimant); the
+        // DisputeOpened event is attributed to the worker, not the operator.
+        vmEvent.expectEmit(true, true, false, true, address(escrow));
+        emit DisputeOpened(jobId, worker, block.timestamp);
+        escrow.openDisputeFor(jobId, worker);
+
+        EscrowCore.JobEscrow memory disputedJob = escrow.jobs(jobId);
+        assertEq(uint256(disputedJob.state), uint256(EscrowCore.JobState.Disputed));
+        assertEq(disputedJob.disputedAt, block.timestamp);
+    }
+
+    function testOpenDisputeForRejectsNonParticipant() public {
+        bytes32 jobId = createRejectedSinglePayoutJob("job/relayed-dispute/non-participant", 50 ether);
+
+        (bool ok,) = address(escrow).call(abi.encodeCall(escrow.openDisputeFor, (jobId, address(0xBADD))));
+        require(!ok, "EXPECTED_UNAUTHORIZED_REVERT");
     }
 
     function testDisputeWindowAndArbitratorSlaMatchSpec() public view {
