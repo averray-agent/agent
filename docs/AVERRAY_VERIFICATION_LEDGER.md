@@ -3,7 +3,7 @@
 **Purpose:** Track every empirical claim in `AVERRAY_WORKING_SPEC.md` against authoritative documentation.
 **Status:** Verification pass complete. All previously-⏳ items have been resolved against the authoritative Polkadot docs MCP (`https://docs-mcp.polkadot.com`) or the explicit upstream sources cited in each row.
 **Owner:** Pascal
-**Last updated:** 2026-04-28
+**Last updated:** 2026-05-27
 
 ---
 
@@ -11,9 +11,9 @@
 
 After this pass:
 
-- ✅ **Verified:** 32
-- ⚠️ **Verified with corrections needed:** 19
-- 🔬 **Empirical (cannot be answered from docs):** 8
+- ✅ **Verified:** 36
+- ⚠️ **Verified with corrections needed:** 20
+- 🔬 **Empirical (cannot be answered from docs):** 9
 - ⏳ **Still pending:** 0
 
 **Items not fully resolvable from docs alone:**
@@ -118,26 +118,31 @@ claude mcp add --transport http polkadot-docs https://docs-mcp.polkadot.com --sc
 |---|---|---|
 | Bulletin Chain provides decentralized, content-addressable storage | ✅ | "Decentralized data storage with IPFS-compatible content addressing" |
 | CID is the content identifier; IPFS-compatible | ✅ | Default Blake2b-256 hash, Raw codec |
+| `transactionStorage.store(data)` is the prototype write path in `polkadot-ios-community` | ✅ | Source review of `Packages/BulletinChain/` confirms the Swift `StoreCall` wraps the `TransactionStorage.store` runtime call, and `HexToCIDConverter` builds CIDv1 values from Blake2b-256 content hashes. This is reference implementation evidence only; it does not un-defer Phase 2 storage. |
 | No native token; access via authorization, not fees | ✅ | Confirmed |
 | Authorization grants transactions + bytes allowance, with optional expiration block | ✅ | Documented schema |
 | Currently OpenGov is the only authorization source on mainnet; PoP planned | ✅ | "Currently, only OpenGov can provide authorizations but the PoP subsystem is also planned to have this privilege in the future" |
 | `authorize_account` extrinsic requires Root origin | ⚠️ | Spec said "OpenGov for mainnet" but reality is **Root origin everywhere**. OpenGov is one path to Root on mainnet. |
 | Polkadot Mainnet authorization model "being finalized" | ⚠️ | Not yet finalized — adds uncertainty to Phase 2 timeline |
-| Retention period ~2 weeks on Polkadot TestNet | ⚠️ | **Spec was wrong.** Spec described per-blob retention up to ~7 months. Reality: fixed ~2 weeks; must renew. |
+| `polkadot-ios-community` does not resolve Bulletin Chain mainnet authorization maturity | 🔬 | The prototype is explicitly testnet/prototype-oriented. Treat the production path to obtaining storage authorization as an open Phase 2 dependency until Bulletin Chain mainnet authorization is production-final. |
+| Retention period ~2 weeks on Polkadot TestNet | ⚠️ | **Spec was wrong.** Spec described per-blob retention up to ~7 months. Reality: fixed ~2 weeks on Polkadot TestNet; retention duration is a network/runtime-specific value and must be re-verified before quoting mainnet numbers. |
+| `AuthorizationPeriod` is a network/runtime constant, not a universal protocol constant | ✅ | The 2026-05-27 `polkadot-ios-community` verification confirmed the authorization/expiration shape in source and the "~2 weeks" figure only for Polkadot TestNet via docs MCP. |
 | Renewal extends retention for another full period | ✅ | `renew(block, index)` extrinsic |
 | Each renewal generates new `(block, index)` pair; original values fail after renewal | ⚠️ | **Spec didn't account for this.** Real ops complexity: persistent `(cid, latest_block, latest_index, expires_at)` tracking required. |
 | CID stays stable across renewals; future plans to reference data by CID alone | ✅ | Documented as future improvement |
 | Max transaction size ~8 MiB; max chunked file ~64 MiB | ✅ | Documented |
 | Retrieval: P2P (Helia), IPFS gateway, Smoldot light client (coming soon) | ✅ | Multiple paths confirmed |
 | Generic public IPFS gateways (`ipfs.io`, `cloudflare-ipfs.com`) **deprecated** for Bulletin retrieval | ✅ | Important: do NOT cite these as fallback in spec |
+| `polkadot-ios-community` fetches through a configurable gateway, but Averray should prefer Bulletin gateway / P2P-Helia if adopted | ⚠️ | The iOS prototype's `IpfsFetcher` can fetch by gateway URL, but official docs discourage generic public IPFS gateways for Bulletin retrieval. Treat public-gateway language in research notes as corrected. |
 | Polkadot TestNet Bulletin RPC: `wss://paseo-bulletin-rpc.polkadot.io` | ✅ | Documented endpoint |
 | Polkadot TestNet IPFS gateway: `https://paseo-ipfs.polkadot.io` | ✅ | Documented endpoint |
 
 **Sources:**
 - https://docs.polkadot.com/reference/polkadot-hub/data-storage/
 - https://docs.polkadot.com/chain-interactions/store-data/bulletin-chain/
+- https://github.com/paritytech/polkadot-ios-community/tree/main/Packages/BulletinChain
 
-**Last verified:** 2026-04-25
+**Last verified:** 2026-05-27
 
 **Spec actions required:**
 
@@ -160,14 +165,18 @@ claude mcp add --transport http polkadot-docs https://docs-mcp.polkadot.com --sc
 | EVM-mapped Substrate multisig can own EVM contracts on Asset Hub | 🔬 | The docs state mapped 32-byte accounts can interact with the EVM layer (transfer funds, call contracts via Ethereum tooling) but make **no specific claim about pallet_multisig accounts being valid `map_account` callers** or about a multisig acting as a contract owner. The mechanism (multisig → derived AccountId32 → map_account → 20-byte H160) is plausible from the documented primitives but not confirmed end-to-end in the docs. **Empirical test required on Polkadot Hub TestNet** before treating as fact in `MULTISIG_SETUP.md §4`. |
 | `0xEE` suffix convention for EVM ↔ AccountId32 mapping | ✅ | *"Ethereum to Polkadot: The system adds twelve `0xEE` bytes to the end of the address, which is a reversible operation."* And: *"Takes a 20-byte Ethereum address and extends it to 32 bytes by adding twelve `0xEE` bytes at the end. The key benefits of this approach are: Able to fully revert ... Provides clear identification of Ethereum-controlled accounts through the `0xEE` suffix pattern."* **Source URL correction needed:** the ledger originally cited `https://docs.polkadot.com/reference/parachains/accounts/`, which covers SS58 format only. The `0xEE` suffix is documented at https://docs.polkadot.com/smart-contracts/for-eth-devs/accounts/#ethereum-to-polkadot-mapping. |
 | Native DOT precompile address on Asset Hub | ⚠️ | **There is no "native DOT precompile address" on Asset Hub.** The ERC20 precompile (https://docs.polkadot.com/smart-contracts/precompiles/erc20/) is documented to support exactly three asset categories — *"Polkadot Hub runs three instances of the Assets pallet — Trust-Backed Assets, Foreign Assets, and Pool Assets — each mapped to a distinct ERC20 precompile address suffix."* Native DOT is the chain's intrinsic balance, not in the Assets pallet, and has no ERC20 precompile address. The "Common Trust-Backed Asset IDs" table lists USDt and USDC; native DOT is **not** present. The ETH-native precompile list (`0x01`–`0x09`) covers cryptographic helpers (ECRecover, sha256, etc.), not currency. |
+| People Chain allowance solves Asset Hub escrow onboarding friction | ✅ verified-negative | Source review found resource-scoped allowance managers for Bulletin storage, StatementStore messaging, and PGAS, with no evidence of a path to arbitrary Asset Hub EVM escrow transactions. This is absence-of-evidence strong enough to keep Averray's onboarding-friction answer on Path A, not categorical proof of impossibility. |
+| People Chain Score pallet is reputation prior art for recognition/streak concepts | ✅ | `Packages/Individuality/Score/` exposes recognition states (`recognized`, `notRecognized`, `suspended`, `externallyRecognized`) and attended/absent streak tracking. This validates a similar pattern but is not adopted: People Chain Score is personhood-tied; Averray reputation remains Asset Hub EVM soulbound-token/account-work based. |
 
 **Sources:**
 - https://docs.polkadot.com/smart-contracts/for-eth-devs/accounts/
 - https://docs.polkadot.com/reference/parachains/accounts/
 - https://docs.polkadot.com/smart-contracts/precompiles/erc20/
 - https://docs.polkadot.com/smart-contracts/precompiles/eth-native/
+- https://docs.polkadot.com/reference/polkadot-hub/people-and-identity/
+- https://github.com/paritytech/polkadot-ios-community/tree/main/Packages/Individuality
 
-**Last verified:** 2026-04-28
+**Last verified:** 2026-05-27
 
 **⚠️ Spec correction (Native DOT precompile):** `MULTISIG_SETUP.md §5` references `TOKEN_ADDRESS=0x<hub-dot-precompile-or-testdot>` as if a native DOT precompile address existed. It does not. The correct deployment recipe is one of:
 
