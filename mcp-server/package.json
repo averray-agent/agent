@@ -9,6 +9,7 @@
     "test": "node --test src/**/*.test.js",
     "demo:e2e": "node src/demo/e2e-local.js",
     "demo:e2e:remote": "node src/demo/e2e-remote.js",
+    "demo:auto-verify:remote": "node src/demo/auto-verify-remote-smoke.js",
     "check:redis": "node src/demo/redis-persistence-check.js",
     "replay:content-recovery": "node src/demo/replay-content-recovery-log.js",
     "ingest:github-issues": "node src/jobs/ingest-github-issues.js",

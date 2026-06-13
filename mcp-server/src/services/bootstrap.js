@@ -59,6 +59,10 @@ import {
   JobStaleSweeperService,
   loadJobStaleSweeperConfig
 } from "./job-stale-sweeper.js";
+import {
+  SubmittedJobAutoVerifierService,
+  loadSubmittedJobAutoVerifierConfig
+} from "./submitted-job-auto-verifier.js";
 import { normaliseStrategyAssetConfig } from "./strategy-asset-config.js";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -327,6 +331,12 @@ export async function createPlatformRuntime() {
       logger
     })
   );
+  const submittedJobAutoVerifier = initStep("init-submitted-job-auto-verifier", logger, () =>
+    new SubmittedJobAutoVerifierService(platformService, verifierService, gateway, eventBus, {
+      ...loadSubmittedJobAutoVerifierConfig(process.env),
+      logger
+    })
+  );
   platformService.recurringScheduler = recurringScheduler;
   platformService.githubIssueIngestionScheduler = githubIssueIngestionScheduler;
   platformService.wikipediaMaintenanceIngestionScheduler = wikipediaMaintenanceIngestionScheduler;
@@ -339,6 +349,7 @@ export async function createPlatformRuntime() {
   platformService.upstreamStatusPoller = upstreamStatusPoller;
   platformService.bootstrapSelfReportScheduler = bootstrapSelfReportScheduler;
   platformService.jobStaleSweeper = jobStaleSweeper;
+  platformService.submittedJobAutoVerifier = submittedJobAutoVerifier;
   recurringScheduler.start();
   githubIssueIngestionScheduler.start();
   wikipediaMaintenanceIngestionScheduler.start();
@@ -351,6 +362,7 @@ export async function createPlatformRuntime() {
   upstreamStatusPoller.start();
   bootstrapSelfReportScheduler.start();
   jobStaleSweeper.start();
+  submittedJobAutoVerifier.start();
 
   const authMiddleware = createAuthMiddleware({ authConfig, stateStore, logger });
   const rateLimiter = createRateLimiter({ stateStore, logger });
@@ -386,6 +398,7 @@ export async function createPlatformRuntime() {
     xcmObservationRelay,
     upstreamStatusPoller,
     jobStaleSweeper,
+    submittedJobAutoVerifier,
     authConfig,
     authMiddleware,
     authCapabilities: {
