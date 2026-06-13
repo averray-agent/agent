@@ -13,7 +13,7 @@
     "agentAccountCore": "0x71B111d8c9DF84Be26cb9067D27dAd7A2d5E7e08",
     "reputationSbt": "0x68Db90db715Be59E5800Bea08c058E4CFd88e27c",
     "discoveryRegistry": "0x0a1b78F8A2A3C28dB47f35Cb3E6b3b83412dad57",
-    "escrowCore": "0xb8fd8A932F69bD5E39700b7cf6D2920aF84d1B27",
+    "escrowCore": "0x70d661C3A5DdE64bB8cbFa0A5336470c1662eFCa",
     "xcmWrapper": null,
     "token": "0x0000053900000000000000000000000001200000"
   },
@@ -32,10 +32,10 @@
     "disputeLossReliabilityPenalty": "60"
   },
   "strategies": [],
-  "escrowRedeployedAt": "2026-05-26T17:37:25.763Z",
+  "escrowRedeployedAt": "2026-06-13T17:54:27.996Z",
   "escrowRedeployTxHashes": {
-    "deploy": "0xb0619fe610959432f2db143d426507a927e663bc8e7b1b8b35a307408dd3e59d",
-    "multisigExec": "0x0bc371e91ec6c0f08f2f76bcdcdeea87a583047d80752fdb5afa60265a3c633e",
+    "deploy": "0xfa8a100ea824ab264d11553d073650bb6382701dde8c0ba84c14c1f4428fa6a3",
+    "multisigExec": "0xa88a157a13668e1e7c55e3bc0c0995f38807931efeb5005c6444de9cc34781d6",
     "revokeOld": "batched-in-multisig-exec"
   }
 }
