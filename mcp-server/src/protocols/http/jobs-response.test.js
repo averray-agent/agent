@@ -84,6 +84,7 @@ test("public jobs response filters and compacts agent-friendly queries", () => {
     "effectiveState",
     "claimable",
     "currentWalletCanClaim",
+    "fundingState",
     "reason",
     "claimedBy",
     "claimedAt",

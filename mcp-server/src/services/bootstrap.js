@@ -350,6 +350,10 @@ export async function createPlatformRuntime() {
   platformService.bootstrapSelfReportScheduler = bootstrapSelfReportScheduler;
   platformService.jobStaleSweeper = jobStaleSweeper;
   platformService.submittedJobAutoVerifier = submittedJobAutoVerifier;
+  // Opt-in (testnet-only operational invariant): escrow auto-ingested job
+  // rewards on-chain at ingestion so they are funded before being advertised
+  // claimable. Off by default; see deploy/backend.env.template.
+  platformService.prefundIngestedJobs = parseBooleanEnv(process.env.INGESTION_PREFUND_ENABLED);
   recurringScheduler.start();
   githubIssueIngestionScheduler.start();
   wikipediaMaintenanceIngestionScheduler.start();

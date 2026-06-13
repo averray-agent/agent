@@ -149,7 +149,13 @@ export class OpenDataIngestionScheduler {
             }
           }
           if (!this.dryRun) {
-            this.platformService.createJob(job);
+            // Prefer the prefunding create path so the reward is escrowed at
+            // ingestion; fall back to createJob for callers/tests without it.
+            if (typeof this.platformService.createIngestedJob === "function") {
+              await this.platformService.createIngestedJob(job);
+            } else {
+              this.platformService.createJob(job);
+            }
           }
           if (resourceKey) seenResources.add(resourceKey);
           if (datasetKey) seenDatasets.add(datasetKey);

@@ -53,3 +53,94 @@ test("summarizeJobClaimState uses chain expiry before local claimedAt ttl", () =
   assert.equal(status.effectiveState, "claimable");
   assert.equal(status.claimExpiresAt, "2026-05-01T10:00:45.000Z");
 });
+
+const OPEN_JOB = { id: "job-fund", lifecycle: { state: "open" }, retryLimit: 2 };
+const WALLET = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+test("ingestion-prefund pending job is never advertised claimable (no session)", () => {
+  const status = summarizeJobClaimState({
+    job: { ...OPEN_JOB, funding: { source: "ingestion_prefund", state: "pending" } },
+    wallet: WALLET
+  });
+  assert.equal(status.claimable, false);
+  assert.equal(status.currentWalletCanClaim, false);
+  assert.equal(status.reason, "reward_funding_pending");
+  assert.equal(status.fundingState, "pending");
+  assert.notEqual(status.effectiveState, "claimable");
+});
+
+test("ingestion-prefund pending job is null (not false) when no wallet is supplied", () => {
+  const status = summarizeJobClaimState({
+    job: { ...OPEN_JOB, funding: { source: "ingestion_prefund", state: "pending" } }
+  });
+  assert.equal(status.claimable, false);
+  assert.equal(status.currentWalletCanClaim, null);
+  assert.equal(status.reason, "reward_funding_pending");
+});
+
+test("ingestion-prefund funded job behaves exactly like a normal open job", () => {
+  const status = summarizeJobClaimState({
+    job: { ...OPEN_JOB, funding: { source: "ingestion_prefund", state: "funded" } },
+    wallet: WALLET
+  });
+  assert.equal(status.claimable, true);
+  assert.equal(status.currentWalletCanClaim, true);
+  assert.equal(status.reason, "claimable");
+  assert.equal(status.fundingState, "funded");
+  assert.equal(status.effectiveState, "claimable");
+});
+
+test("a job with no funding field is unaffected by the gate (no regression)", () => {
+  const status = summarizeJobClaimState({ job: OPEN_JOB, wallet: WALLET });
+  assert.equal(status.claimable, true);
+  assert.equal(status.reason, "claimable");
+  assert.equal(status.fundingState, undefined);
+});
+
+test("the gate is scoped to ingestion_prefund — recurring reserve jobs stay claimable", () => {
+  const status = summarizeJobClaimState({
+    job: {
+      ...OPEN_JOB,
+      funding: { source: "recurring_template_reserve", state: "pending", wallet: WALLET, templateId: "tpl-1" }
+    },
+    wallet: WALLET
+  });
+  assert.equal(status.claimable, true);
+  assert.equal(status.fundingState, undefined);
+});
+
+test("expired claim on an unfunded prefund job never re-advertises as claimable", () => {
+  const expiredSession = {
+    sessionId: "job-fund:0xexpired",
+    jobId: "job-fund",
+    wallet: WALLET,
+    status: "claimed",
+    claimedAt: "2026-05-01T10:00:00.000Z",
+    chainClaimExpiresAt: "2026-05-01T10:00:30.000Z"
+  };
+  const status = summarizeJobClaimState({
+    job: { ...OPEN_JOB, claimTtlSeconds: 30, funding: { source: "ingestion_prefund", state: "pending" } },
+    session: expiredSession,
+    sessions: [expiredSession],
+    wallet: WALLET,
+    now: new Date("2026-05-01T10:01:00.000Z")
+  });
+  assert.equal(status.claimState, "expired");
+  assert.equal(status.claimable, false);
+  assert.equal(status.reason, "reward_funding_pending");
+  assert.equal(status.effectiveState, "expired");
+});
+
+test("retry exhaustion takes precedence over funding-pending in the reason", () => {
+  const attempts = [
+    { sessionId: "job-fund:0x1", status: "expired", claimedAt: "2026-05-01T10:00:00.000Z" },
+    { sessionId: "job-fund:0x2", status: "expired", claimedAt: "2026-05-01T10:05:00.000Z" }
+  ];
+  const status = summarizeJobClaimState({
+    job: { ...OPEN_JOB, retryLimit: 2, funding: { source: "ingestion_prefund", state: "pending" } },
+    sessions: attempts,
+    wallet: WALLET
+  });
+  assert.equal(status.claimable, false);
+  assert.equal(status.reason, "retry_limit_exhausted");
+});

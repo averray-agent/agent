@@ -4,6 +4,7 @@ import { Wallet, getBytes, id } from "ethers";
 
 import { PlatformService } from "./platform-service.js";
 import { EventBus } from "./event-bus.js";
+import { InsufficientLiquidityError } from "./errors.js";
 import { MemoryStateStore } from "./state-store.js";
 import {
   buildExternalSchemaRegistrationDigest,
@@ -1347,4 +1348,122 @@ test("getGithubOperatorStatus exposes the read-only GitHub helper", async () => 
   assert.equal(status.configured, false);
   assert.equal(status.selectedView.name, "prs");
   assert.equal(status.digest.pullRequestsNeedingAttention.length, 0);
+});
+
+const INGEST_JOB_INPUT = {
+  id: "open-data-job-001",
+  category: "coding",
+  tier: "starter",
+  rewardAmount: 2,
+  rewardAsset: "DOT",
+  verifierMode: "benchmark",
+  verifierTerms: ["complete"],
+  verifierMinimumMatches: 1,
+  source: { type: "open_data_dataset" }
+};
+
+function makePrefundGateway(ensureJob) {
+  const calls = [];
+  return {
+    calls,
+    isEnabled: () => true,
+    ensureJob: async (job, instanceJobId, claimStake) => {
+      calls.push({ jobId: instanceJobId, claimStake });
+      return ensureJob(job, instanceJobId, claimStake);
+    }
+  };
+}
+
+test("createIngestedJob does not prefund when the flag is off (no funding stamp)", async () => {
+  const gateway = makePrefundGateway(async () => ({ state: 1 }));
+  const service = makePlatformService(gateway);
+  // prefundIngestedJobs defaults to false
+  const created = await service.createIngestedJob(INGEST_JOB_INPUT);
+  assert.equal(created.funding, undefined);
+  assert.equal(gateway.calls.length, 0);
+});
+
+test("createIngestedJob does not prefund when the gateway is disabled", async () => {
+  const gateway = { isEnabled: () => false, calls: [], ensureJob: async () => { gateway.calls.push(1); } };
+  const service = makePlatformService(gateway);
+  service.prefundIngestedJobs = true;
+  const created = await service.createIngestedJob(INGEST_JOB_INPUT);
+  assert.equal(created.funding, undefined);
+  assert.equal(gateway.calls.length, 0);
+});
+
+test("createIngestedJob escrows the reward and stamps funded on success", async () => {
+  const bus = new EventBus();
+  const gateway = makePrefundGateway(async () => ({ state: 1 }));
+  const service = makePlatformService(gateway, bus);
+  service.prefundIngestedJobs = true;
+
+  const created = await service.createIngestedJob(INGEST_JOB_INPUT);
+
+  assert.equal(gateway.calls.length, 1);
+  assert.equal(gateway.calls[0].claimStake, 0); // worker funds their own stake
+  assert.equal(created.funding.source, "ingestion_prefund");
+  assert.equal(created.funding.state, "funded");
+  assert.equal(created.funding.asset, "DOT");
+  assert.equal(created.funding.amount, 2);
+  assert.ok(created.funding.fundedAt);
+  // Must NOT carry recurring-reserve keys, or gateway.usesRecurringTemplateReserve misfires.
+  assert.equal("wallet" in created.funding, false);
+  assert.equal("templateId" in created.funding, false);
+  // The stamp is persisted on the catalog job and surfaces through discovery.
+  const claimable = await service.attachClaimState(created, {});
+  assert.equal(claimable.claimable, true);
+  assert.equal(claimable.fundingState, "funded");
+  const events = bus.replay({}, undefined).events;
+  assert.ok(events.some((event) => event.topic === "funding.ingestion_prefund_funded"));
+});
+
+test("createIngestedJob keeps the job and stamps pending on insufficient liquidity", async () => {
+  const bus = new EventBus();
+  const gateway = makePrefundGateway(async () => {
+    throw new InsufficientLiquidityError("DOT", { operation: "ensureJob" });
+  });
+  const service = makePlatformService(gateway, bus);
+  service.prefundIngestedJobs = true;
+
+  // Resolves (never rejects) so the ingest run is not aborted.
+  const created = await service.createIngestedJob(INGEST_JOB_INPUT);
+
+  assert.equal(created.funding.state, "pending");
+  assert.equal(created.funding.reason, "insufficient_liquidity");
+  assert.ok(created.funding.attemptedAt);
+  // Job is still in the catalog, discoverable but NOT claimable.
+  const fetched = service.getJobDefinition("open-data-job-001");
+  assert.equal(fetched.id, "open-data-job-001");
+  const claimable = await service.attachClaimState(fetched, { wallet: WALLET });
+  assert.equal(claimable.claimable, false);
+  assert.equal(claimable.currentWalletCanClaim, false);
+  assert.equal(claimable.reason, "reward_funding_pending");
+  assert.equal(claimable.fundingState, "pending");
+  const events = bus.replay({}, undefined).events;
+  assert.ok(events.some((event) => event.topic === "funding.ingestion_prefund_pending"));
+});
+
+test("createIngestedJob stamps pending on an unexpected gateway error and never aborts", async () => {
+  const gateway = makePrefundGateway(async () => {
+    throw new Error("RPC timeout");
+  });
+  const service = makePlatformService(gateway);
+  service.prefundIngestedJobs = true;
+
+  const created = await service.createIngestedJob(INGEST_JOB_INPUT);
+  assert.equal(created.funding.state, "pending");
+  assert.equal(created.funding.reason, "prefund_failed");
+});
+
+test("createIngestedJob propagates creation errors and does not attempt prefund", async () => {
+  const gateway = makePrefundGateway(async () => ({ state: 1 }));
+  const service = makePlatformService(gateway);
+  service.prefundIngestedJobs = true;
+
+  await service.createIngestedJob(INGEST_JOB_INPUT);
+  assert.equal(gateway.calls.length, 1);
+  // Duplicate id must reject from createJob before any second prefund attempt.
+  await assert.rejects(() => service.createIngestedJob(INGEST_JOB_INPUT));
+  assert.equal(gateway.calls.length, 1);
 });

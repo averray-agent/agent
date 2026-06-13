@@ -241,3 +241,66 @@ test("loadOpenDataIngestionConfig parses env knobs safely", () => {
   assert.equal(config.maxOpenJobs, 11);
   assert.deepEqual(config.datasets, [TARGET]);
 });
+
+test("OpenDataIngestionScheduler prefers createIngestedJob (prefund path) when available", async () => {
+  const jobs = [];
+  const createIngestedJobCalls = [];
+  let createJobCalled = false;
+  const platform = {
+    listJobs: () => [...jobs],
+    createJob: (job) => { createJobCalled = true; jobs.unshift(job); return job; },
+    getJobDefinition: (jobId) => {
+      const job = jobs.find((candidate) => candidate.id === jobId);
+      if (!job) throw new Error("not found");
+      return job;
+    },
+    createIngestedJob: async (job) => {
+      createIngestedJobCalls.push(job.id);
+      jobs.unshift(job);
+      return job;
+    }
+  };
+  const scheduler = new OpenDataIngestionScheduler(platform, undefined, {
+    enabled: true,
+    dryRun: false,
+    datasets: [TARGET],
+    fetchImpl: makeFetch()
+  });
+
+  const summary = await scheduler.runOnce(new Date("2026-04-26T10:00:00.000Z"));
+  assert.equal(summary.createdCount, 1);
+  assert.equal(createIngestedJobCalls.length, 1);
+  assert.equal(createJobCalled, false);
+  assert.equal(jobs.length, 1);
+});
+
+test("OpenDataIngestionScheduler run is not aborted if prefund stamps pending", async () => {
+  // Mirrors PlatformService.createIngestedJob: it resolves even when on-chain
+  // funding is short, so the ingest run still records the created job.
+  const jobs = [];
+  const platform = {
+    listJobs: () => [...jobs],
+    createJob: (job) => { jobs.unshift(job); return job; },
+    getJobDefinition: (jobId) => {
+      const job = jobs.find((candidate) => candidate.id === jobId);
+      if (!job) throw new Error("not found");
+      return job;
+    },
+    createIngestedJob: async (job) => {
+      jobs.unshift(job);
+      job.funding = { source: "ingestion_prefund", state: "pending", reason: "insufficient_liquidity" };
+      return job;
+    }
+  };
+  const scheduler = new OpenDataIngestionScheduler(platform, undefined, {
+    enabled: true,
+    dryRun: false,
+    datasets: [TARGET],
+    fetchImpl: makeFetch()
+  });
+
+  const summary = await scheduler.runOnce(new Date("2026-04-26T10:00:00.000Z"));
+  assert.equal(summary.createdCount, 1);
+  assert.equal(summary.errors.length, 0);
+  assert.equal(jobs[0].funding.state, "pending");
+});
