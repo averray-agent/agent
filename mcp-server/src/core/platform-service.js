@@ -88,6 +88,7 @@ export class PlatformService {
     this.xcmObservationRelay = undefined;
     this.upstreamStatusPoller = undefined;
     this.bootstrapSelfReportScheduler = undefined;
+    this.submittedJobAutoVerifier = undefined;
 
     this.accountMutationService = new AccountMutationService(
       this.accounts,
@@ -269,6 +270,7 @@ export class PlatformService {
       upstreamStatus,
       bootstrapSelfReport,
       jobStaleSweeper,
+      submittedJobAutoVerifier,
       recentSessions,
       hostDiagnostics
     ] = await Promise.all([
@@ -398,6 +400,18 @@ export class PlatformService {
         intervalMs: 0,
         action: "archive",
         maxJobsPerRun: 0,
+        lastRun: undefined
+      },
+      this.submittedJobAutoVerifier?.getStatus?.() ?? {
+        enabled: false,
+        running: false,
+        dryRun: false,
+        mode: "live",
+        intervalMs: 0,
+        scanLimit: 0,
+        maxPerRun: 0,
+        autoModes: ["benchmark", "deterministic"],
+        requireSettlementReady: true,
         lastRun: undefined
       },
       this.jobExecutionService.listRecentSessions(14),
@@ -530,6 +544,7 @@ export class PlatformService {
       recurring: recurring,
       jobLifecycle: this.jobCatalogService.getJobLifecycleSummary(),
       jobStaleSweeper,
+      submittedJobAutoVerifier,
       scheduler,
       hostDiagnostics,
       providerOperations,
