@@ -83,11 +83,15 @@ the public board. It never consumes claim attempts on real board jobs.
    - `OP_SERVICE_ACCOUNT_TOKEN_PROD_BACKEND` — a least-privilege service account scoped to **read** `op://prod-backend/canary-worker-testnet`.
 
 4. **Keep the worker claimable.** A fresh wallet's first
-   `onboardingWaiverClaimCount` (3) claims are stake/fee-waived. The dedicated
-   canary wallet exhausts that after a few runs, so for ongoing daily runs
-   **pre-fund** its `AgentAccountCore` position with ≥ the per-claim lock (operator
-   step; becomes a no-op once auto-fund lands). Until then, stage 3 fails loud if
-   the wallet is both waiver-exhausted and underfunded.
+   `onboardingWaiverClaimCount` (3) claims are stake/fee-waived. The **scheduled
+   and post-deploy runs mint a fresh ephemeral wallet each time**, so every run is
+   a first claim inside the waiver — they stay green indefinitely with no funding
+   to maintain, and don't depend on `OP_SERVICE_ACCOUNT_TOKEN_PROD_BACKEND`. The
+   **dedicated persistent wallet** is used only by manual dispatch (without
+   `allow_ephemeral`); after its 3 waiver claims it needs its `AgentAccountCore`
+   position **pre-funded** with ≥ the per-claim lock to keep claiming — use that
+   path on demand to exercise the funded/staked-claim flow. Stage 3 fails loud if a
+   persistent wallet is both waiver-exhausted and underfunded.
 
 ## Running it locally
 

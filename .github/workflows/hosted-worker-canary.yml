@@ -11,10 +11,13 @@ name: Hosted Worker Canary
 # them because they all used the pre-minted multi-role ADMIN_JWT and bypassed the
 # SIWE front door.
 #
-# The WORKER stages use a dedicated roleless testnet wallet
-# (op://prod-backend/canary-worker-testnet). Only the OPERATOR stages
-# (create/fund/verify/cleanup) use the ADMIN_JWT. Testnet-only — the script
-# refuses any other chain.
+# The WORKER stages use a roleless testnet wallet. Scheduled + post-deploy runs
+# mint a fresh EPHEMERAL wallet each time — always within the onboarding waiver,
+# so the loop stays green indefinitely with no stake funding to maintain. Manual
+# dispatches use the dedicated 1Password key (op://prod-backend/canary-worker-testnet)
+# unless allow_ephemeral is set, so the persistent/funded-claim path stays testable
+# on demand. Only the OPERATOR stages (create/fund/verify/cleanup) use the ADMIN_JWT.
+# Testnet-only — the script refuses any other chain.
 
 on:
   # Manual run, with knobs for one-off debugging.
@@ -81,7 +84,9 @@ jobs:
       WORKER_CANARY_REWARD_AMOUNT: ${{ inputs.reward_amount }}
       WORKER_CANARY_VERIFY_MODE: ${{ inputs.verify_mode }}
       WORKER_CANARY_TOKEN_MIN_DAYS: ${{ inputs.token_min_days }}
-      WORKER_CANARY_ALLOW_EPHEMERAL: ${{ inputs.allow_ephemeral && '1' || '' }}
+      # Scheduled + post-deploy runs use a throwaway wallet (always within the
+      # onboarding waiver — no stake funding needed); manual dispatch opts in via input.
+      WORKER_CANARY_ALLOW_EPHEMERAL: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_run' || inputs.allow_ephemeral) && '1' || '' }}
       WORKER_CANARY_KEEP_JOB: ${{ inputs.keep_job && '1' || '' }}
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
@@ -106,9 +111,11 @@ jobs:
 
       # The roleless worker key lives in prod-backend (VPS-readable; prod-critical
       # is not). Loaded with a least-privilege service account scoped to
-      # prod-backend. Skipped for one-off ephemeral dispatches.
+      # prod-backend. Only the persistent-wallet path needs it — a manual dispatch
+      # that didn't opt into allow_ephemeral. Scheduled + post-deploy runs mint an
+      # ephemeral wallet and skip this step (and its prod-backend token dependency).
       - name: Load canary worker key from 1Password (fail-closed)
-        if: ${{ inputs.allow_ephemeral != true }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_ephemeral != true }}
         uses: 1password/load-secrets-action@92467eb28f72e8255933372f1e0707c567ce2259 # v4.0.0
         with:
           export-env: true
@@ -130,7 +137,7 @@ jobs:
             *) echo "::error::ADMIN_JWT_OP does not look like a JWT (expected ey<...>.<...>.<...>)"; exit 1 ;;
           esac
 
-          if [ "${{ inputs.allow_ephemeral }}" != "true" ] && [ -z "${WORKER_CANARY_WORKER_PRIVATE_KEY:-}" ]; then
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.allow_ephemeral }}" != "true" ] && [ -z "${WORKER_CANARY_WORKER_PRIVATE_KEY:-}" ]; then
             echo "::error::WORKER_CANARY_WORKER_PRIVATE_KEY is empty — check op://prod-backend/canary-worker-testnet/private key and OP_SERVICE_ACCOUNT_TOKEN_PROD_BACKEND."
             exit 1
           fi
