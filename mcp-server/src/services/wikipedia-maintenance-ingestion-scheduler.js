@@ -141,7 +141,13 @@ export class WikipediaMaintenanceIngestionScheduler {
         }
         const replenishedJob = withReissueJobId(job, inventory.allJobIds, { now });
         if (!this.dryRun) {
-          this.platformService.createJob(replenishedJob);
+          // Prefer the prefunding create path so the reward is escrowed at
+          // ingestion; fall back to createJob for callers/tests without it.
+          if (typeof this.platformService.createIngestedJob === "function") {
+            await this.platformService.createIngestedJob(replenishedJob);
+          } else {
+            this.platformService.createJob(replenishedJob);
+          }
         }
         seenSources.add(sourceKey);
         summary.createdCount += 1;

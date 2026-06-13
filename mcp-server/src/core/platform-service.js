@@ -89,6 +89,10 @@ export class PlatformService {
     this.upstreamStatusPoller = undefined;
     this.bootstrapSelfReportScheduler = undefined;
     this.submittedJobAutoVerifier = undefined;
+    // Opt-in: pre-fund auto-ingested job rewards on-chain at ingestion time so a
+    // job is genuinely funded before it is advertised claimable. Set in bootstrap
+    // from INGESTION_PREFUND_ENABLED. Testnet-only is an operational invariant.
+    this.prefundIngestedJobs = false;
 
     this.accountMutationService = new AccountMutationService(
       this.accounts,
@@ -178,6 +182,72 @@ export class PlatformService {
       this.jobCatalogService.removeJob(created.id);
       throw error;
     }
+  }
+
+  /**
+   * Create an auto-ingested job and, when prefunding is enabled, escrow its
+   * reward on-chain immediately by reusing the idempotent gateway.ensureJob.
+   * This makes the job genuinely funded before discovery can advertise it
+   * claimable. A funding shortfall (e.g. the backend signer is short on a
+   * settlement asset that cannot be auto-minted) is the expected steady state
+   * until liquidity is topped up out-of-band — it must NEVER abort the ingest
+   * run, so the job is kept and stamped funding.state="pending"; the discovery
+   * gate (summarizeJobClaimState) then keeps it out of the claimable set.
+   */
+  async createIngestedJob(input, { now = new Date() } = {}) {
+    const created = this.createJob(input);
+    if (!this.shouldPrefundIngestedJobs()) {
+      return created;
+    }
+    try {
+      // claimStake 0: the worker funds their own claim stake at claim time;
+      // here we only escrow the reward (totalRequired = rewardAmount).
+      await this.blockchainGateway.ensureJob(created, created.id, 0);
+      created.funding = {
+        source: "ingestion_prefund",
+        state: "funded",
+        asset: created.rewardAsset,
+        amount: created.rewardAmount,
+        fundedAt: now.toISOString()
+      };
+      this.publishIngestionPrefundEvent(created, "funded");
+    } catch (error) {
+      created.funding = {
+        source: "ingestion_prefund",
+        state: "pending",
+        asset: created.rewardAsset,
+        amount: created.rewardAmount,
+        reason: error?.code ?? "prefund_failed",
+        attemptedAt: now.toISOString()
+      };
+      this.publishIngestionPrefundEvent(created, "pending", error);
+    }
+    return created;
+  }
+
+  shouldPrefundIngestedJobs() {
+    return this.prefundIngestedJobs === true
+      && Boolean(this.blockchainGateway?.isEnabled?.());
+  }
+
+  publishIngestionPrefundEvent(job, state, error = undefined) {
+    this.eventBus?.publish?.({
+      topic: state === "funded"
+        ? "funding.ingestion_prefund_funded"
+        : "funding.ingestion_prefund_pending",
+      jobId: job.id,
+      // "pending" is a normal, expected outcome (signer short of liquidity) —
+      // emit it at info severity, not as an error.
+      severity: "info",
+      data: {
+        jobId: job.id,
+        state,
+        asset: job.rewardAsset,
+        amount: job.rewardAmount,
+        source: job.source,
+        ...(error ? { reason: error?.code ?? "prefund_failed" } : {})
+      }
+    });
   }
 
   async withRegisteredExternalSchema(input = {}) {

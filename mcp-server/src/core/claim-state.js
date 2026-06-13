@@ -49,9 +49,17 @@ export function summarizeJobClaimState({
   const walletMatchesClaim = Boolean(normalizedWallet && claimedBy && normalizedWallet === claimedBy);
   const claimExpiresAtValue = claimExpiresAt(session, job);
   const expired = isExpiredClaim(session, job, now) || session?.status === "expired";
+  // Truth boundary: a job whose reward was scheduled for prefunding at ingestion
+  // but is not yet escrowed on-chain must never be advertised claimable — claiming
+  // it would revert insufficient_liquidity at funding time. Scoped to the
+  // ingestion_prefund funding source so manual/recurring jobs are unaffected.
+  const fundingState = job?.funding?.source === "ingestion_prefund"
+    ? job.funding.state
+    : undefined;
+  const fundingPending = fundingState !== undefined && fundingState !== "funded";
 
   if (!session) {
-    const claimable = lifecycleState === "open" && !retryExhausted;
+    const claimable = lifecycleState === "open" && !retryExhausted && !fundingPending;
     const claimState = retryExhausted ? "exhausted" : claimable ? "open" : lifecycleState;
     return compact({
       claimState,
@@ -59,7 +67,12 @@ export function summarizeJobClaimState({
       effectiveState: claimable ? "claimable" : claimState,
       claimable,
       currentWalletCanClaim: normalizedWallet ? claimable : null,
-      reason: retryExhausted ? "retry_limit_exhausted" : claimable ? "claimable" : `job_${lifecycleState}`,
+      fundingState,
+      reason: retryExhausted
+        ? "retry_limit_exhausted"
+        : fundingPending
+          ? "reward_funding_pending"
+          : claimable ? "claimable" : `job_${lifecycleState}`,
       retryLimit,
       claimAttemptCount,
       remainingClaimAttempts,
@@ -72,7 +85,7 @@ export function summarizeJobClaimState({
   }
 
   if (expired) {
-    const claimable = lifecycleState === "open" && !retryExhausted;
+    const claimable = lifecycleState === "open" && !retryExhausted && !fundingPending;
     const claimState = retryExhausted ? "exhausted" : "expired";
     return compact({
       claimState,
@@ -80,7 +93,12 @@ export function summarizeJobClaimState({
       effectiveState: claimable ? "claimable" : claimState,
       claimable,
       currentWalletCanClaim: normalizedWallet ? claimable : null,
-      reason: retryExhausted ? "retry_limit_exhausted" : "claim_ttl_expired_reopen_available",
+      fundingState,
+      reason: retryExhausted
+        ? "retry_limit_exhausted"
+        : fundingPending
+          ? "reward_funding_pending"
+          : "claim_ttl_expired_reopen_available",
       retryLimit,
       claimAttemptCount,
       remainingClaimAttempts,
@@ -100,6 +118,7 @@ export function summarizeJobClaimState({
       effectiveState: "claimed",
       claimable: false,
       currentWalletCanClaim: normalizedWallet ? false : null,
+      fundingState,
       reason: walletMatchesClaim ? "already_claimed_by_current_wallet" : "claimed_by_other_wallet",
       retryLimit,
       claimAttemptCount,
@@ -119,6 +138,7 @@ export function summarizeJobClaimState({
     effectiveState: claimState,
     claimable: false,
     currentWalletCanClaim: normalizedWallet ? false : null,
+    fundingState,
     reason: claimState === "exhausted" ? "job_session_completed" : `session_${claimState}`,
     retryLimit,
     claimAttemptCount,
@@ -143,6 +163,7 @@ export function claimStatusFields(claimStatus) {
     effectiveState: claimStatus.effectiveState ?? claimStatus.claimState,
     claimable: claimStatus.claimable,
     currentWalletCanClaim: claimStatus.currentWalletCanClaim,
+    fundingState: claimStatus.fundingState ?? null,
     reason: claimStatus.reason,
     retryLimit: claimStatus.retryLimit,
     claimAttemptCount: claimStatus.claimAttemptCount ?? null,

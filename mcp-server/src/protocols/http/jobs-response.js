@@ -101,6 +101,7 @@ function toCompactJobRow(job) {
     effectiveState: job.effectiveState ?? (claimable ? "claimable" : job.claimState ?? state),
     claimable,
     currentWalletCanClaim: job.currentWalletCanClaim ?? null,
+    fundingState: job.fundingState ?? null,
     reason: job.reason ?? null,
     claimedBy: job.claimedBy ?? null,
     claimedAt: job.claimedAt ?? null,
