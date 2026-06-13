@@ -1,0 +1,187 @@
+name: Hosted Worker Canary
+
+# End-to-end EXTERNAL-WORKER CANARY. A fresh, ROLELESS worker wallet walks the
+# real SIWE front door and drives the full paid loop on a disposable,
+# operator-funded benchmark job: SIWE → account → claim → submit → verify →
+# settle, plus an operator-token freshness check. Each stage fails loud with the
+# launch-blocker class it guards (#625 roleless-mint 500, #626 JWT sub-casing
+# 401, claim-funding 409 + claimJobFor brokering, #627 submitWork revert,
+# settlement stall, #628 ADMIN_JWT expiry). This is the regression guard for the
+# whole class found on 2026-06-13 — none of the prior hosted proofs could see
+# them because they all used the pre-minted multi-role ADMIN_JWT and bypassed the
+# SIWE front door.
+#
+# The WORKER stages use a dedicated roleless testnet wallet
+# (op://prod-backend/canary-worker-testnet). Only the OPERATOR stages
+# (create/fund/verify/cleanup) use the ADMIN_JWT. Testnet-only — the script
+# refuses any other chain.
+
+on:
+  # Manual run, with knobs for one-off debugging.
+  workflow_dispatch:
+    inputs:
+      reward_amount:
+        description: Reward in USDC for the disposable canary job (blank = 0.1).
+        required: false
+        default: ""
+        type: string
+      verify_mode:
+        description: How stage 5 verifies. "operator" triggers /verifier/run; "auto" polls the public result (no-op once auto-verify lands).
+        required: false
+        default: operator
+        type: choice
+        options:
+          - operator
+          - auto
+      token_min_days:
+        description: Fail if the operator ADMIN_JWT is within this many days of expiry (blank = 7).
+        required: false
+        default: ""
+        type: string
+      allow_ephemeral:
+        description: Use a throwaway random worker wallet instead of the dedicated 1Password key (one-off override; always within the onboarding waiver).
+        required: false
+        default: false
+        type: boolean
+      keep_job:
+        description: Leave the disposable canary job live instead of archiving it (debugging only).
+        required: false
+        default: false
+        type: boolean
+  # Daily evidence lane — catches the blocker class before an external agent does.
+  schedule:
+    - cron: "37 6 * * *"
+  # Post-deploy gate — re-walk the whole loop right after every production deploy.
+  workflow_run:
+    workflows: ["Deploy Production"]
+    branches: [main]
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hosted-worker-canary
+  cancel-in-progress: false
+
+jobs:
+  canary:
+    name: Run hosted external-worker canary
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Skip the post-deploy run when the deploy itself failed.
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+    environment: production
+    env:
+      APP_ALLOW_PROTECTED_SHELL: "1"
+      CHECK_INDEXER: "0"
+      CHECK_WORKER_CANARY_PROOF: "1"
+      WORKER_CANARY_PROFILE: testnet
+      WORKER_CANARY_EVIDENCE_FILE: artifacts/worker-canary-hosted-${{ github.run_id }}.json
+      WORKER_CANARY_REWARD_AMOUNT: ${{ inputs.reward_amount }}
+      WORKER_CANARY_VERIFY_MODE: ${{ inputs.verify_mode }}
+      WORKER_CANARY_TOKEN_MIN_DAYS: ${{ inputs.token_min_days }}
+      WORKER_CANARY_ALLOW_EPHEMERAL: ${{ inputs.allow_ephemeral && '1' || '' }}
+      WORKER_CANARY_KEEP_JOB: ${{ inputs.keep_job && '1' || '' }}
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      # The canary signs the SIWE message and reads on-chain settlement state
+      # with `ethers` (a prod dependency of mcp-server), so it needs node_modules.
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Load operator ADMIN_JWT from 1Password (fail-closed)
+        uses: 1password/load-secrets-action@92467eb28f72e8255933372f1e0707c567ce2259 # v4.0.0
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN_PROD_SMOKE }}
+          ADMIN_JWT_OP: op://prod-smoke/admin-jwt/password
+
+      # The roleless worker key lives in prod-backend (VPS-readable; prod-critical
+      # is not). Loaded with a least-privilege service account scoped to
+      # prod-backend. Skipped for one-off ephemeral dispatches.
+      - name: Load canary worker key from 1Password (fail-closed)
+        if: ${{ inputs.allow_ephemeral != true }}
+        uses: 1password/load-secrets-action@92467eb28f72e8255933372f1e0707c567ce2259 # v4.0.0
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN_PROD_BACKEND }}
+          WORKER_CANARY_WORKER_PRIVATE_KEY: op://prod-backend/canary-worker-testnet/private key
+
+      - name: Verify operator credential loaded and shape-valid
+        run: |
+          set -euo pipefail
+          set +x
+
+          if [ -z "${ADMIN_JWT_OP:-}" ]; then
+            echo "::error::ADMIN_JWT_OP is empty after load step — check op://prod-smoke/admin-jwt/password and OP_SERVICE_ACCOUNT_TOKEN_PROD_SMOKE."
+            exit 1
+          fi
+          case "$ADMIN_JWT_OP" in
+            ey*.*.*) echo "ADMIN_JWT_OP: JWT shape valid" ;;
+            *) echo "::error::ADMIN_JWT_OP does not look like a JWT (expected ey<...>.<...>.<...>)"; exit 1 ;;
+          esac
+
+          if [ "${{ inputs.allow_ephemeral }}" != "true" ] && [ -z "${WORKER_CANARY_WORKER_PRIVATE_KEY:-}" ]; then
+            echo "::error::WORKER_CANARY_WORKER_PRIVATE_KEY is empty — check op://prod-backend/canary-worker-testnet/private key and OP_SERVICE_ACCOUNT_TOKEN_PROD_BACKEND."
+            exit 1
+          fi
+
+      - name: Run hosted worker canary
+        run: |
+          set -euo pipefail
+          set +x
+
+          ADMIN_JWT="$ADMIN_JWT_OP" ./scripts/ops/check-hosted-stack.sh
+
+      - name: Summarize canary evidence
+        if: always()
+        run: |
+          set -euo pipefail
+
+          evidence_file="$WORKER_CANARY_EVIDENCE_FILE"
+          if [ ! -s "$evidence_file" ]; then
+            echo "No worker-canary evidence file was produced (the canary failed before writing it — see the run log for the failing stage)." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          worker="$(jq -r '.workerWallet' "$evidence_file")"
+          job_id="$(jq -r '.jobId' "$evidence_file")"
+          chain_job_id="$(jq -r '.chainJobId // "—"' "$evidence_file")"
+          claim_mechanism="$(jq -r '.stages.claim.mechanism // "—"' "$evidence_file")"
+          submit_status="$(jq -r '.stages.submit.status // "—"' "$evidence_file")"
+          verify_outcome="$(jq -r '.stages.verify.outcome // "—"' "$evidence_file")"
+          job_state="$(jq -r '.stages.settle.jobState // "—"' "$evidence_file")"
+          released="$(jq -r '.stages.settle.released // "—"' "$evidence_file")"
+          credited_to="$(jq -r '.stages.settle.creditedTo // "—"' "$evidence_file")"
+          token_days="$(jq -r '.stages.tokenFreshness.daysToExpiry // "n/a"' "$evidence_file")"
+          total_ms="$(jq -r '.timings.totalMs // "—"' "$evidence_file")"
+
+          {
+            echo "## Hosted Worker Canary"
+            echo
+            echo "- Worker (roleless): \`${worker}\`"
+            echo "- Job: \`${job_id}\` (chainJobId \`${chain_job_id}\`)"
+            echo "- Claim: \`${claim_mechanism}\` · Submit: \`${submit_status}\` · Verify: \`${verify_outcome}\`"
+            echo "- Settle: job \`${job_state}\`, released \`${released}\` USDC → \`${credited_to}\`"
+            echo "- Operator token: \`${token_days}\` day(s) to expiry"
+            echo "- Total: \`${total_ms} ms\`"
+            echo "- Evidence artifact: \`hosted-worker-canary-${GITHUB_RUN_ID}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sanitized worker-canary evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: hosted-worker-canary-${{ github.run_id }}
+          path: ${{ env.WORKER_CANARY_EVIDENCE_FILE }}
+          if-no-files-found: warn
+          retention-days: 90

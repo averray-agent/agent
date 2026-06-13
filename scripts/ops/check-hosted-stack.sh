@@ -47,6 +47,17 @@ CHECK_SIWE_FRESH_WALLET_PROOF=${CHECK_SIWE_FRESH_WALLET_PROOF:-0}
 SIWE_FRESH_WALLET_PROOF_NODE_IMAGE=${SIWE_FRESH_WALLET_PROOF_NODE_IMAGE:-node:22-bookworm-slim}
 SIWE_FRESH_WALLET_PROOF_EVIDENCE_FILE=${SIWE_FRESH_WALLET_PROOF_EVIDENCE_FILE:-}
 SIWE_FRESH_WALLET_PRIVATE_KEY=${SIWE_FRESH_WALLET_PRIVATE_KEY:-}
+CHECK_WORKER_CANARY_PROOF=${CHECK_WORKER_CANARY_PROOF:-0}
+WORKER_CANARY_NODE_IMAGE=${WORKER_CANARY_NODE_IMAGE:-node:22-bookworm-slim}
+WORKER_CANARY_EVIDENCE_FILE=${WORKER_CANARY_EVIDENCE_FILE:-}
+WORKER_CANARY_WORKER_PRIVATE_KEY=${WORKER_CANARY_WORKER_PRIVATE_KEY:-}
+WORKER_CANARY_WORKER_KEY_OP=${WORKER_CANARY_WORKER_KEY_OP:-}
+WORKER_CANARY_PROFILE=${WORKER_CANARY_PROFILE:-}
+WORKER_CANARY_REWARD_AMOUNT=${WORKER_CANARY_REWARD_AMOUNT:-}
+WORKER_CANARY_TOKEN_MIN_DAYS=${WORKER_CANARY_TOKEN_MIN_DAYS:-}
+WORKER_CANARY_VERIFY_MODE=${WORKER_CANARY_VERIFY_MODE:-}
+WORKER_CANARY_ALLOW_EPHEMERAL=${WORKER_CANARY_ALLOW_EPHEMERAL:-}
+WORKER_CANARY_KEEP_JOB=${WORKER_CANARY_KEEP_JOB:-}
 CHECK_METRICS_AUTH=${CHECK_METRICS_AUTH:-0}
 METRICS_BEARER_TOKEN=${METRICS_BEARER_TOKEN:-}
 TIMEOUT_SEC=${TIMEOUT_SEC:-20}
@@ -123,7 +134,7 @@ enabled() {
   esac
 }
 
-if { enabled "$CHECK_PRODUCT_PROOF_GATE" || enabled "$CHECK_SERVICE_TOKEN_PROOF" || enabled "$CHECK_EXTERNAL_SCHEMA_PROOF" || enabled "$CHECK_DISPUTE_VERDICT_PROOF" || enabled "$CHECK_SIWE_FRESH_WALLET_PROOF"; } && ! command -v node >/dev/null 2>&1; then
+if { enabled "$CHECK_PRODUCT_PROOF_GATE" || enabled "$CHECK_SERVICE_TOKEN_PROOF" || enabled "$CHECK_EXTERNAL_SCHEMA_PROOF" || enabled "$CHECK_DISPUTE_VERDICT_PROOF" || enabled "$CHECK_SIWE_FRESH_WALLET_PROOF" || enabled "$CHECK_WORKER_CANARY_PROOF"; } && ! command -v node >/dev/null 2>&1; then
   require_command docker
 fi
 
@@ -618,6 +629,66 @@ if enabled "$CHECK_SIWE_FRESH_WALLET_PROOF"; then
       -e SIWE_FRESH_WALLET_PRIVATE_KEY="$SIWE_FRESH_WALLET_PRIVATE_KEY" \
       "$SIWE_FRESH_WALLET_PROOF_NODE_IMAGE" \
       node scripts/ops/check-siwe-fresh-wallet-proof.mjs
+  fi
+fi
+
+if enabled "$CHECK_WORKER_CANARY_PROOF"; then
+  # End-to-end external-worker canary: a FRESH ROLELESS wallet walks the real
+  # SIWE front door, then claim→submit→verify→settle on a disposable,
+  # operator-funded testnet job. Worker stages use the roleless token; only the
+  # operator stages (create/fund/verify/cleanup) use the ADMIN_JWT. Each stage
+  # fails loud with the launch-blocker class it guards (#625/#626/claim-409/
+  # #627/settlement/#628). Testnet-only — it refuses any other chain.
+  if [[ -z "$ADMIN_JWT" && -z "$AVERRAY_TOKEN" ]]; then
+    echo "CHECK_WORKER_CANARY_PROOF=1 requires an operator credential (ADMIN_JWT or AVERRAY_TOKEN) for the create/verify/cleanup stages." >&2
+    exit 1
+  fi
+  echo "Checking external-worker canary"
+  script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+  repo_root="$(cd "$script_dir/../.." && pwd)"
+  if [[ -n "$WORKER_CANARY_EVIDENCE_FILE" ]]; then
+    if [[ "$WORKER_CANARY_EVIDENCE_FILE" != /* ]]; then
+      WORKER_CANARY_EVIDENCE_FILE="$repo_root/$WORKER_CANARY_EVIDENCE_FILE"
+    fi
+    worker_canary_evidence_dir="$(dirname "$WORKER_CANARY_EVIDENCE_FILE")"
+    mkdir -p "$worker_canary_evidence_dir"
+  fi
+  if command -v node >/dev/null 2>&1; then
+    API_BASE_URL="${API_HEALTH_URL%/health}" \
+      ADMIN_JWT="$ADMIN_JWT" \
+      AVERRAY_TOKEN="$AVERRAY_TOKEN" \
+      WORKER_CANARY_EVIDENCE_FILE="$WORKER_CANARY_EVIDENCE_FILE" \
+      WORKER_CANARY_WORKER_PRIVATE_KEY="$WORKER_CANARY_WORKER_PRIVATE_KEY" \
+      WORKER_CANARY_WORKER_KEY_OP="$WORKER_CANARY_WORKER_KEY_OP" \
+      WORKER_CANARY_PROFILE="$WORKER_CANARY_PROFILE" \
+      WORKER_CANARY_REWARD_AMOUNT="$WORKER_CANARY_REWARD_AMOUNT" \
+      WORKER_CANARY_TOKEN_MIN_DAYS="$WORKER_CANARY_TOKEN_MIN_DAYS" \
+      WORKER_CANARY_VERIFY_MODE="$WORKER_CANARY_VERIFY_MODE" \
+      WORKER_CANARY_ALLOW_EPHEMERAL="$WORKER_CANARY_ALLOW_EPHEMERAL" \
+      WORKER_CANARY_KEEP_JOB="$WORKER_CANARY_KEEP_JOB" \
+      node "$script_dir/run-worker-canary.mjs"
+  else
+    worker_canary_docker_volume_args=(-v "$repo_root:/workspace")
+    if [[ -n "${worker_canary_evidence_dir:-}" ]]; then
+      worker_canary_docker_volume_args+=(-v "$worker_canary_evidence_dir:$worker_canary_evidence_dir")
+    fi
+    docker run --rm \
+      "${worker_canary_docker_volume_args[@]}" \
+      -w /workspace \
+      -e API_BASE_URL="${API_HEALTH_URL%/health}" \
+      -e ADMIN_JWT="$ADMIN_JWT" \
+      -e AVERRAY_TOKEN="$AVERRAY_TOKEN" \
+      -e WORKER_CANARY_EVIDENCE_FILE="$WORKER_CANARY_EVIDENCE_FILE" \
+      -e WORKER_CANARY_WORKER_PRIVATE_KEY="$WORKER_CANARY_WORKER_PRIVATE_KEY" \
+      -e WORKER_CANARY_WORKER_KEY_OP="$WORKER_CANARY_WORKER_KEY_OP" \
+      -e WORKER_CANARY_PROFILE="$WORKER_CANARY_PROFILE" \
+      -e WORKER_CANARY_REWARD_AMOUNT="$WORKER_CANARY_REWARD_AMOUNT" \
+      -e WORKER_CANARY_TOKEN_MIN_DAYS="$WORKER_CANARY_TOKEN_MIN_DAYS" \
+      -e WORKER_CANARY_VERIFY_MODE="$WORKER_CANARY_VERIFY_MODE" \
+      -e WORKER_CANARY_ALLOW_EPHEMERAL="$WORKER_CANARY_ALLOW_EPHEMERAL" \
+      -e WORKER_CANARY_KEEP_JOB="$WORKER_CANARY_KEEP_JOB" \
+      "$WORKER_CANARY_NODE_IMAGE" \
+      node scripts/ops/run-worker-canary.mjs
   fi
 fi
 
