@@ -858,6 +858,34 @@ redaction commands.
   going forward. **Partially resolved:** new and migrated ops paths now support
   direct 1Password reads; `.env.local` remains only for long-lived backend/local
   boot paths until the remaining scripts stop needing it.
+- **TreasuryPolicy deployed-bytecode drift — deferred, not active (added 2026-06-13).**
+  The 2026-06-13 EscrowCore redeploy (PR #630; new escrow
+  `0x70d661C3A5DdE64bB8cbFa0A5336470c1662eFCa` replacing
+  `0xb8fd8A932F69bD5E39700b7cf6D2920aF84d1B27`, which predated PR #627's
+  operator-brokered `submitWorkFor`/`openDisputeFor`) left `audit-launch-readiness`
+  at exit 2 on a **separate, unrelated** finding: `TreasuryPolicy`
+  `0x648Cc5fdE94435992296C4e5ac642d18bB64c12B` is 22/24 selectors, missing
+  `setTrustedSchemaIssuer(address,bool)` [0xd5080d6a] and
+  `trustedSchemaIssuers(address)` [0xf055e5a1]. Same drift class as the EscrowCore
+  fixes — the deployed contract predates the source functions (both are present in
+  `contracts/TreasuryPolicy.sol`).
+  **Latent, not broken-in-flight.** The only runtime path that touches these
+  selectors is external-schema job creation (`contracts/EscrowCore.sol:743` →
+  `policy.trustedSchemaIssuers(...)`; gateway `isTrustedSchemaIssuer()` reached only
+  when an admin-created job carries an `externalSchema` payload). That path needs a
+  trusted issuer configured first, and there are **zero configured issuers**
+  (`deployments/testnet.json` has no `trustedSchemaIssuers`). Regular jobs never hit
+  `:743`; an external-schema job would revert, but none can usefully be created
+  because the `onlyOwner` setter selector is also missing. Feature is *unavailable*,
+  not *broken*. Only live impact is the launch-gate exit 2.
+  **Recommendation (do NOT emergency-redeploy).** TreasuryPolicy is multisig-owned,
+  holds parameters + serviceOperator wiring, and is the constructor arg for
+  EscrowCore/AAC, so a redeploy is a full rewire — high-risk and chain/settlement
+  (Codex). Fold it into the *next planned* policy redeploy rather than a one-off for
+  an unused feature. Reassess only when trusted external-schema issuers are actually
+  needed. Until then treat exit 2 as a known/annotated gap; **do not soften the gate**
+  (truth-boundary: "deferred", not "ready"). Read-only analysis 2026-06-13; actionable
+  redeploy handed to Codex via a session task.
 
 ---
 
