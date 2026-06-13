@@ -1,7 +1,7 @@
 # Averray — Working Spec (v1.0.0-rc1)
 
 **Status:** Reconciled with deployed reality and operational docs
-**Spec version:** 2.12 (spec-consolidation pass: v2.5 Phase 1 storage discipline restored into the consolidated spec without downgrading v2.10/v2.11 status)
+**Spec version:** 2.14 (Bulletin Chain retention wording narrowed to TestNet-specific / network-runtime-specific after 2026-05-27 ledger verification)
 **Owner:** Pascal
 
 > Current roadmap/status source: [`PROJECT_ROADMAP.md`](./PROJECT_ROADMAP.md).
@@ -419,7 +419,7 @@ Every on-chain event referencing off-chain content carries `sha256(canonicalJSON
 | Content addressing | CID (IPFS-compatible, Blake2b-256 default) | CID (IPFS-compatible) |
 | Cost model | No fees; authorization grants tx + byte allowances | Per-byte pinning fees, paid in CRU |
 | Authorization gate | **Root origin required** (OpenGov on mainnet — model still being finalized; testnet via faucet UI) | Self-service (purchase CRU; pin) |
-| Retention | **Fixed ~2 weeks; mandatory `renew(block, index)` per blob** | Pin duration controlled by user |
+| Retention | **Network-specific runtime value (Polkadot TestNet ~2 weeks); mandatory `renew(block, index)` per blob** | Pin duration controlled by user |
 | Per-blob ops complexity | Track `(cid, latest_block, latest_index, expires_at)`; auto-renew before expiry | Track expiry; renew pin |
 | Renewal generates new identifier | **Yes — `(block, index)` mutates with each renewal**; CID stays stable | No |
 | Acceptable IPFS gateways for retrieval | **Only Bulletin Chain's own gateway / collator P2P / Smoldot** — generic gateways like `ipfs.io` are deprecated for Bulletin retrieval | Standard IPFS infrastructure |
@@ -1127,6 +1127,11 @@ Stripe Link's launch and Stripe Sessions 2026 announcements positioned agents as
 
 For traceability.
 
+### v2.14 (polkadot-ios reference verification routing)
+
+1. **§6** Narrowed Bulletin Chain retention wording from a bare "fixed ~2 weeks" to "network-specific runtime value (Polkadot TestNet ~2 weeks)." The source was the 2026-05-27 verification entries added to `AVERRAY_VERIFICATION_LEDGER.md` from Polkadot docs MCP and `polkadot-ios-community` source review. Phase 2 storage remains deferred and this change does not make Bulletin Chain the selected backend.
+2. **Ledger routing only:** the `polkadot-ios-community` reference note was added as a roadmap-update research fragment, and its six verification findings were folded into the verification ledger. No roadmap status was moved to Done or Proofed.
+
 ### v2.13 (external schema registration first slice)
 
 1. **§8** Added the external output schema registration flow. External schemas
@@ -1305,7 +1310,7 @@ External verification work resolved every ⏳ item in `AVERRAY_VERIFICATION_LEDG
 ### v1.8 (Bulletin Chain corrections from official-doc verification)
 
 1. **§6** Replaced "Why Bulletin Chain is the primary candidate" subsection with corrected "Phase 2 storage candidates: comparison" — explicit table of differences between Bulletin Chain and Crust, grounded in the official Bulletin Chain reference docs.
-2. **§6** Corrected Bulletin Chain retention claim. Spec previously implied configurable per-blob retention covering the 6-month disclosure window. Reality (per docs): fixed ~2 weeks on Polkadot TestNet, mandatory `renew(block, index)` per blob to extend.
+2. **§6** Corrected Bulletin Chain retention claim. Spec previously implied configurable per-blob retention covering the 6-month disclosure window. Reality (per docs): fixed ~2 weeks on Polkadot TestNet, mandatory `renew(block, index)` per blob to extend; treat the duration as a network-specific runtime value before quoting it for any other network.
 3. **§6** Corrected authorization claim. Spec previously said "OpenGov for mainnet, PoP eventually." Reality (per docs): `authorize_account` and `authorize_preimage` extrinsics require Root origin; OpenGov is the production path to Root, but the mainnet authorization model is "still being finalized."
 4. **§6** Documented operational implication of renewal: each renewal generates new `(block, index)` pair; CID stays stable for retrieval, but renewal requires the most recent identifier pair — persistent `(cid, latest_block, latest_index, expires_at)` tracking is required.
 5. **§6** Added "Choice deferred" section explicitly. Phase 2 backend choice between Bulletin Chain and Crust is now treated as a real choice to defer, not a commitment to either.
