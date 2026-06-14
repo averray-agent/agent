@@ -229,6 +229,64 @@ test("GET /account overlays live strategy allocation by asset symbol", async () 
   assert.deepEqual(response.body.strategyAllocated, { DOT: 1, USDC: 10 });
 });
 
+test("GET /account surfaces the worker's EOA wallet balance as a separate field", async () => {
+  const gateway = {
+    isEnabled: () => true,
+    config: {
+      supportedAssets: [{ address: "0x0000000000000000000000000000000000000abc", symbol: "USDC" }]
+    },
+    getWalletTokenBalances: async () => ({
+      walletBalance: { USDC: 2 },
+      raw: { USDC: "2000000" }
+    }),
+    getStrategyPositions: async () => [],
+    getStrategyTelemetry: async () => []
+  };
+  const { response, route } = makeHarness({ gateway, strategies: [] });
+
+  const handled = await route({
+    request: { method: "GET" },
+    response,
+    url: new URL("http://localhost/account"),
+    pathname: "/account",
+  });
+
+  assert.equal(handled, true);
+  assert.equal(response.statusCode, 200);
+  // EOA balance surfaced as its own field, with raw base units...
+  assert.deepEqual(response.body.walletBalance, { USDC: 2 });
+  assert.deepEqual(response.body.raw.walletBalance, { USDC: "2000000" });
+  // ...but NEVER folded into the AAC `liquid` position (truth boundary: EOA
+  // funds are paid-out, not yet stakeable in-platform).
+  assert.deepEqual(response.body.liquid, { DOT: 10 });
+});
+
+test("GET /account tolerates a wallet-balance read failure without 500ing", async () => {
+  const gateway = {
+    isEnabled: () => true,
+    config: {
+      supportedAssets: [{ address: "0x0000000000000000000000000000000000000abc", symbol: "USDC" }]
+    },
+    getWalletTokenBalances: async () => {
+      throw new Error("rpc unavailable");
+    },
+    getStrategyPositions: async () => [],
+    getStrategyTelemetry: async () => []
+  };
+  const { response, route } = makeHarness({ gateway, strategies: [] });
+
+  await route({
+    request: { method: "GET" },
+    response,
+    url: new URL("http://localhost/account"),
+    pathname: "/account",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.walletBalance, undefined);
+  assert.deepEqual(response.body.liquid, { DOT: 10 });
+});
+
 test("GET /account/position returns chain-backed wallet asset position", async () => {
   const { calls, response, route } = makeHarness();
 

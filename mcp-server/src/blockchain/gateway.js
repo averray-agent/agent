@@ -245,6 +245,31 @@ export class BlockchainGateway {
     });
   }
 
+  // Reads the worker's raw ERC-20 wallet (EOA) balance per supported asset.
+  // This is DISTINCT from getAccountSummary's `liquid`, which is the
+  // AgentAccountCore position. A settled job reward lands in the worker's EOA,
+  // not their AAC position — so it shows up here but NOT in `liquid` until the
+  // worker deposits it. Callers must keep the two separate: EOA funds are
+  // paid-out, not yet stakeable in-platform.
+  async getWalletTokenBalances(wallet) {
+    return this.withGatewayError("getWalletTokenBalances", async () => {
+      const walletBalance = {};
+      const raw = {};
+      const results = await Promise.all(
+        this.config.supportedAssets.map(async (asset) => {
+          const token = new Contract(asset.address, ERC20_MOCK_ABI, this.provider);
+          const balance = await token.balanceOf(wallet);
+          return { asset, balance };
+        })
+      );
+      for (const { asset, balance } of results) {
+        raw[asset.symbol] = this.toRawString(balance);
+        walletBalance[asset.symbol] = this.toDisplayUnits(balance, asset);
+      }
+      return { walletBalance, raw };
+    });
+  }
+
   async getAccountPosition(wallet, symbol) {
     return this.withGatewayError("getAccountPosition", async () => {
       const asset = this.requireAsset(String(symbol ?? "").trim().toUpperCase());

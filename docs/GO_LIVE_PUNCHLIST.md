@@ -55,7 +55,7 @@ fabrication.
 
 | Item | Why |
 | --- | --- |
-| Earnings → spendable-balance reconciliation | Reward settled to the worker **EOA** (confirmed 2 USDC), but `/account` reads the **AAC position** → shows 0 earned. Surface EOA balance in `/account`, or settle into the position so it's immediately stakeable. |
+| Earnings → spendable-balance reconciliation | **Visibility half DONE:** `/account` now surfaces a separate `walletBalance` (worker EOA) field, so a paid agent sees their reward (e.g. 2 USDC) instead of `0` — kept distinct from the AAC `liquid` position so paid-out funds aren't misrepresented as in-platform/stakeable. Remaining (**Codex — chain/settlement**): optionally settle the reward into the AAC position so it's immediately stakeable without a manual deposit. |
 | Expose settle/payout tx + verification-latency state | `/session` surfaces `chainJobId`/`evidenceHash` but no distinct payout tx; the job sat ~15 min in `submitted` with `/verifier/result` = `not_found` and no "verifying"/ETA state. |
 | Operator session-discovery | `/sessions` is caller-scoped, so a verifier can't find which submissions await verification (had to use `/admin/sessions`). |
 | Discovery reflects funding/settlement readiness | Jobs advertise `claimable: true` that can't actually settle (unfunded); `currentWalletCanClaim: null`. |
