@@ -258,11 +258,24 @@ export class JobExecutionService {
     const guardedSubmission = this.applyMaintainerSubmissionGuards(job, refreshed, submission);
     await validateJobSubmissionAgainstSchema(job, guardedSubmission);
     if (this.blockchainGateway?.isEnabled()) {
-      await this.blockchainGateway.submitWork(
-        session.chainJobId ?? session.jobId,
-        hashSubmission(guardedSubmission),
-        session.wallet
-      );
+      try {
+        await this.blockchainGateway.submitWork(
+          session.chainJobId ?? session.jobId,
+          hashSubmission(guardedSubmission),
+          session.wallet
+        );
+      } catch (error) {
+        // The submission passed validation but the on-chain submit failed (a
+        // contract revert or an RPC outage) — an infra failure, not a delivered
+        // attempt. Stamp the still-claimed session so countClaimAttempts won't
+        // burn the job's retry budget for it, then surface the error so the
+        // worker can retry the submit on the same claim.
+        await this.stateStore.upsertSession({
+          ...refreshed,
+          submitFailedAt: new Date().toISOString()
+        });
+        throw error;
+      }
     }
     const protocolHistory = [...new Set([...refreshed.protocolHistory, protocol])];
     const transitioned = transitionSession({

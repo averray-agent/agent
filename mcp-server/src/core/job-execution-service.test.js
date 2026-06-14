@@ -2,11 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { Wallet } from "ethers";
 
-import { ValidationError } from "./errors.js";
+import { BlockchainRevertError, ValidationError } from "./errors.js";
 import { JobExecutionService } from "./job-execution-service.js";
 import { MemoryStateStore } from "./state-store.js";
 import { computeClaimEconomics } from "./claim-economics.js";
-import { claimExpiresAt } from "./claim-state.js";
+import { claimExpiresAt, countClaimAttempts } from "./claim-state.js";
+import { transitionSession } from "./session-state-machine.js";
 import { buildAverrayDisclosureFooter } from "./maintainer-surface-policy.js";
 import {
   buildExternalSchemaRegistrationMessage,
@@ -608,4 +609,57 @@ test("submitWork does not duplicate an existing Averray disclosure footer", asyn
   });
 
   assert.equal(submitted.submission.structured.prBody, prBody);
+});
+
+test("submitWork stamps submitFailedAt and re-throws on a chain-revert, preserving the claim's retry budget", async () => {
+  const stateStore = new MemoryStateStore();
+  const job = makeJob();
+  const revertingGateway = {
+    isEnabled: () => true,
+    submitWork: async () => {
+      throw new BlockchainRevertError("submit reverted", { reason: "ClaimNotActive" });
+    }
+  };
+  const service = new JobExecutionService(stateStore, revertingGateway, () => job);
+
+  // Seed a claimed session directly so the reverting gateway is only exercised
+  // on the submit path (claimJob has its own on-chain dependencies, irrelevant here).
+  const claimed = transitionSession(
+    {
+      sessionId: `${job.id}:0xaaa`,
+      wallet: WALLET,
+      jobId: job.id,
+      chainJobId: `${job.id}:0xaaa`,
+      protocolHistory: []
+    },
+    "claimed",
+    { reason: "job_claimed" }
+  );
+  await stateStore.upsertSession(claimed);
+
+  await assert.rejects(
+    () =>
+      service.submitWork(claimed.sessionId, "http", {
+        summary: "Auth flow has one blocker.",
+        findings: [
+          {
+            severity: "high",
+            file: "frontend/auth.js",
+            issue: "Session refresh is hidden behind retry logic.",
+            recommendation: "Show a visible sign-in refresh path."
+          }
+        ],
+        risk_level: "high",
+        files_touched: ["frontend/auth.js"],
+        recommended_next_step: "request_changes"
+      }),
+    (error) => error.code === "blockchain_revert"
+  );
+
+  const after = await stateStore.getSession(claimed.sessionId);
+  assert.ok(after.submitFailedAt, "submitFailedAt should be stamped on a chain-reverted submit");
+  assert.equal(after.submittedAt, undefined, "the session never reached submitted");
+  assert.equal(after.status, "claimed", "the claim is preserved, not consumed");
+  // The infra-failed attempt must NOT burn the job's retry budget.
+  assert.equal(countClaimAttempts([after]), 0);
 });

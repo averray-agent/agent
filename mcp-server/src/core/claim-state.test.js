@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { claimExpiresAt, isExpiredClaim, summarizeJobClaimState } from "./claim-state.js";
+import { claimExpiresAt, countClaimAttempts, isExpiredClaim, summarizeJobClaimState } from "./claim-state.js";
 
 const CLAIMED_SESSION = {
   sessionId: "job-001:0xabc",
@@ -143,4 +143,38 @@ test("retry exhaustion takes precedence over funding-pending in the reason", () 
   });
   assert.equal(status.claimable, false);
   assert.equal(status.reason, "retry_limit_exhausted");
+});
+
+test("countClaimAttempts excludes an infra-failed submit that never reached submitted", () => {
+  const sessions = [
+    {
+      sessionId: "job-x:0x1",
+      claimedAt: "2026-05-01T10:00:00.000Z",
+      status: "claimed",
+      submitFailedAt: "2026-05-01T10:00:05.000Z"
+    }
+  ];
+  assert.equal(countClaimAttempts(sessions), 0);
+});
+
+test("countClaimAttempts counts a session that reached submitted even if an earlier submit failed", () => {
+  const sessions = [
+    {
+      sessionId: "job-x:0x1",
+      claimedAt: "2026-05-01T10:00:00.000Z",
+      status: "submitted",
+      submitFailedAt: "2026-05-01T10:00:05.000Z",
+      submittedAt: "2026-05-01T10:00:10.000Z"
+    }
+  ];
+  assert.equal(countClaimAttempts(sessions), 1);
+});
+
+test("countClaimAttempts still counts normal claims, no-show expiries, and rejections", () => {
+  assert.equal(countClaimAttempts([{ sessionId: "a", claimedAt: "t", status: "claimed" }]), 1);
+  assert.equal(countClaimAttempts([{ sessionId: "b", claimedAt: "t", status: "expired" }]), 1);
+  assert.equal(
+    countClaimAttempts([{ sessionId: "c", claimedAt: "t", status: "rejected", submittedAt: "t2" }]),
+    1
+  );
 });

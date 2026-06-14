@@ -59,7 +59,7 @@ fabrication.
 | Expose settle/payout tx + verification-latency state | **Latency half DONE:** `/verifier/result` is now session-aware — a submitted/disputed job without a verdict returns `{ status: "verifying", awaitingSince }` instead of an indistinguishable `not_found`, so a just-submitted worker sees in-progress + elapsed wait. Remaining (**Codex — chain/settlement**): capture the settle tx hash (`resolveSinglePayout` discards it; mirror `openDispute`'s `{ txHash, blockNumber }`) and persist `payoutTx` on the session — once persisted it auto-surfaces in `/session` and I can add it to the `verifying`→resolved result. |
 | Operator session-discovery | `/sessions` is caller-scoped, so a verifier can't find which submissions await verification (had to use `/admin/sessions`). |
 | Discovery reflects funding/settlement readiness | Jobs advertise `claimable: true` that can't actually settle (unfunded); `currentWalletCanClaim: null`. |
-| Don't burn claims on contract-reverted submits | "Crashes in DC" is stuck `retry_limit_exhausted` — its one attempt was spent on a round that reverted on-chain. |
+| Don't burn claims on contract-reverted submits | **DONE:** a submit whose on-chain call fails (contract revert / RPC outage) now stamps `submitFailedAt` on the still-claimed session, and `countClaimAttempts` skips sessions with `submitFailedAt` but no `submittedAt` — so an infra-failed submit no longer burns the job's retry budget (the worker can re-submit on the same claim; the job stays claimable). Genuine no-shows and rejections still consume an attempt. |
 
 ## P2 — polish & docs
 
