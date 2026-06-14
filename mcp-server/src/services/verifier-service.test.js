@@ -765,3 +765,49 @@ test("getResult does not report 'verifying' for a merely claimed (not-yet-submit
 
   assert.equal(result, null);
 });
+
+test("listPendingVerifications returns only submitted, unverified sessions tagged with verifier mode", async () => {
+  const sessions = [
+    { sessionId: "s-sub", jobId: "job-a", wallet: "0xworker1", status: "submitted", submittedAt: "2026-06-13T10:00:00.000Z" },
+    { sessionId: "s-claim", jobId: "job-b", wallet: "0xworker2", status: "claimed" },
+    { sessionId: "s-done", jobId: "job-c", wallet: "0xworker3", status: "submitted", submittedAt: "t", verification: { status: "approved" } },
+    { sessionId: "s-resolved", jobId: "job-d", wallet: "0xworker4", status: "resolved" }
+  ];
+  const platformService = {
+    listRecentSessions: async () => sessions,
+    getJobDefinition: (jobId) => ({ jobId, verifierConfig: { handler: jobId === "job-a" ? "benchmark" : "human_fallback" } })
+  };
+  const service = new VerifierService(platformService, new MemoryStateStore());
+
+  const result = await service.listPendingVerifications({ limit: 10 });
+
+  assert.equal(result.count, 1);
+  assert.equal(result.pending.length, 1);
+  assert.equal(result.pending[0].sessionId, "s-sub");
+  assert.equal(result.pending[0].wallet, "0xworker1");
+  assert.equal(result.pending[0].verifierMode, "benchmark");
+  assert.equal(result.pending[0].awaitingSince, "2026-06-13T10:00:00.000Z");
+});
+
+test("listPendingVerifications respects the limit and tolerates a missing job definition", async () => {
+  const sessions = Array.from({ length: 5 }, (_, i) => ({
+    sessionId: `s${i}`,
+    jobId: "job",
+    wallet: "0xw",
+    status: "submitted",
+    submittedAt: "2026-06-13T10:00:00.000Z"
+  }));
+  const platformService = {
+    listRecentSessions: async () => sessions,
+    getJobDefinition: () => {
+      throw new Error("job not found");
+    }
+  };
+  const service = new VerifierService(platformService, new MemoryStateStore());
+
+  const result = await service.listPendingVerifications({ limit: 2 });
+
+  assert.equal(result.count, 2);
+  assert.equal(result.pending.length, 2);
+  assert.equal(result.pending[0].verifierMode, null);
+});

@@ -103,6 +103,38 @@ export class VerifierService {
     return null;
   }
 
+  // Verifier-scoped discovery of submissions awaiting verification. Scans the
+  // recent-session window for sessions still in `submitted` (no verdict yet) and
+  // returns a lightweight queue tagged with each job's verifier mode, so a
+  // verifier can find pending work without the admin-only /admin/sessions view.
+  // `scanned`/`window` are surfaced so the recent-window bound isn't silent.
+  async listPendingVerifications({ limit = 50 } = {}) {
+    const safeLimit = Number.isFinite(limit) && limit > 0 ? Math.min(Math.floor(limit), 200) : 50;
+    const window = Math.min(Math.max(safeLimit * 4, 200), 500);
+    const sessions = (await this.platformService.listRecentSessions?.(window)) ?? [];
+    const pending = [];
+    for (const session of sessions) {
+      if (session?.status !== "submitted" || session.verification) continue;
+      let verifierMode = null;
+      try {
+        const job = this.platformService.getJobDefinition(session.jobId);
+        verifierMode = job?.verifierConfig?.handler ?? job?.verifierMode ?? null;
+      } catch {
+        verifierMode = null;
+      }
+      pending.push({
+        sessionId: session.sessionId,
+        jobId: session.jobId,
+        wallet: session.wallet,
+        verifierMode,
+        submittedAt: session.submittedAt ?? null,
+        awaitingSince: session.submittedAt ?? null
+      });
+      if (pending.length >= safeLimit) break;
+    }
+    return { pending, count: pending.length, scanned: sessions.length, window };
+  }
+
   listHandlers() {
     return this.registry.listHandlers();
   }

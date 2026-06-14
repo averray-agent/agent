@@ -41,6 +41,10 @@ function makeHarness(overrides = {}) {
         calls.push(["getResult", sessionId]);
         return overrides.result;
       },
+      listPendingVerifications: async (opts) => {
+        calls.push(["listPendingVerifications", opts]);
+        return overrides.pending ?? { pending: [], count: 0, scanned: 0, window: 200 };
+      },
       replayVerification: async (sessionId) => {
         calls.push(["replayVerification", sessionId]);
         return overrides.replay ?? { status: "replayed", sessionId };
@@ -214,4 +218,51 @@ test("POST /verifier/run preserves query fallbacks and default metadata URI", as
       metadataURI: "ipfs://pending-badge",
     },
   ]);
+});
+
+test("GET /verifier/pending requires the verifier role and returns the pending queue", async () => {
+  const pending = {
+    pending: [{ sessionId: "s1", jobId: "job", wallet: "0xw", verifierMode: "benchmark" }],
+    count: 1,
+    scanned: 3,
+    window: 200,
+  };
+  const { calls, response, route } = makeHarness({ pending });
+
+  const handled = await route({
+    request: { method: "GET" },
+    response,
+    url: new URL("http://localhost/verifier/pending?limit=10"),
+    pathname: "/verifier/pending",
+  });
+
+  assert.equal(handled, true);
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.body, pending);
+  // Auth was enforced with the verifier-role requirement...
+  const authCall = calls.find((entry) => entry[0] === "auth");
+  assert.deepEqual(authCall[1], { requireRole: "verifier" });
+  // ...and the parsed limit was passed through to the service.
+  const listCall = calls.find((entry) => entry[0] === "listPendingVerifications");
+  assert.deepEqual(listCall[1], { limit: 10 });
+});
+
+test("GET /verifier/pending clamps an oversized limit and defaults a bad one", async () => {
+  const big = makeHarness();
+  await big.route({
+    request: { method: "GET" },
+    response: big.response,
+    url: new URL("http://localhost/verifier/pending?limit=9999"),
+    pathname: "/verifier/pending",
+  });
+  assert.deepEqual(big.calls.find((e) => e[0] === "listPendingVerifications")[1], { limit: 200 });
+
+  const bad = makeHarness();
+  await bad.route({
+    request: { method: "GET" },
+    response: bad.response,
+    url: new URL("http://localhost/verifier/pending?limit=abc"),
+    pathname: "/verifier/pending",
+  });
+  assert.deepEqual(bad.calls.find((e) => e[0] === "listPendingVerifications")[1], { limit: 50 });
 });

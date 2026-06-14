@@ -24,6 +24,16 @@ export function createVerifierRoutes({
       return true;
     }
 
+    if (request.method === "GET" && pathname === "/verifier/pending") {
+      // Verifier-scoped queue of submissions awaiting verification, so a verifier
+      // doesn't need the admin-only /admin/sessions view to find pending work.
+      await authMiddleware(request, url, { requireRole: "verifier" });
+      const limitRaw = Number.parseInt(url.searchParams.get("limit") ?? "", 10);
+      const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 200) : 50;
+      respond(response, 200, await verifierService.listPendingVerifications({ limit }));
+      return true;
+    }
+
     if (request.method === "POST" && pathname === "/verifier/replay") {
       await authenticateVerifierRun(request, url);
       const payload = await readJsonBody(request);
