@@ -811,3 +811,63 @@ test("listPendingVerifications respects the limit and tolerates a missing job de
   assert.equal(result.pending.length, 2);
   assert.equal(result.pending[0].verifierMode, null);
 });
+
+test("verifySubmission surfaces the on-chain payout tx on the result and the session", async () => {
+  const stateStore = new MemoryStateStore();
+  const session = transitionSession({
+    sessionId: "payout-check-001:0xabc",
+    wallet: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    jobId: "payout-check-001",
+    submission: normalizeSubmission({
+      release_id: "release-2026-06-13",
+      checks_passed: ["api-health"],
+      checks_failed: [],
+      blockers: [],
+      go_no_go: "go"
+    })
+  }, "claimed", { reason: "job_claimed" });
+  const submitted = transitionSession(session, "submitted", { reason: "work_submitted" });
+  await stateStore.upsertSession(submitted);
+
+  const job = {
+    id: "payout-check-001",
+    outputSchemaRef: "schema://jobs/release-readiness-output",
+    verifierMode: "deterministic",
+    verifierConfig: {
+      version: 1,
+      handler: "deterministic",
+      expectedOutputs: ["release_id", "checks_passed", "go_no_go"],
+      matchMode: "contains_all"
+    }
+  };
+
+  const platformService = {
+    resumeSession: (sessionId) => stateStore.getSession(sessionId),
+    getJobDefinition: () => job,
+    ingestVerification: async (sessionId, verdict) => {
+      const current = await stateStore.getSession(sessionId);
+      const updated = transitionSession(current, verdict.outcome === "approved" ? "resolved" : "rejected", {
+        reason: "verification_resolved"
+      });
+      await stateStore.upsertSession(updated);
+      return updated;
+    }
+  };
+
+  const payoutReceipt = { txHash: "0xpayouttx", blockNumber: 4242, status: 1 };
+  const blockchainGateway = {
+    isEnabled: () => true,
+    resolveSinglePayout: async () => payoutReceipt
+  };
+
+  const service = new VerifierService(platformService, stateStore, blockchainGateway);
+  const result = await service.verifySubmission({ sessionId: submitted.sessionId });
+
+  assert.equal(result.outcome, "approved");
+  // payout tx surfaced on the verification result (where the worker polls /verifier/result)...
+  assert.deepEqual(result.payoutTx, payoutReceipt);
+  assert.deepEqual(result.session.payoutTx, payoutReceipt);
+  // ...and persisted on the session record (so /session shows it too).
+  const stored = await stateStore.getSession(submitted.sessionId);
+  assert.deepEqual(stored.payoutTx, payoutReceipt);
+});

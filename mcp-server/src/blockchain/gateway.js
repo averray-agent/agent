@@ -985,7 +985,15 @@ export class BlockchainGateway {
         metadataURI,
         reasoningHash
       );
-      await tx.wait();
+      // Return the settle/payout tx receipt (additive — mirrors openDispute /
+      // resolveDispute below) so callers can surface the on-chain payout tx to
+      // the worker instead of discarding it. Settlement behavior is unchanged.
+      const receipt = await tx.wait();
+      return {
+        txHash: tx.hash,
+        blockNumber: receipt?.blockNumber,
+        status: Number(receipt?.status ?? 0)
+      };
     });
   }
 

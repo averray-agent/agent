@@ -33,8 +33,9 @@ export class VerifierService {
       details: verdict.details ?? null
     });
 
+    let payoutTx;
     if (this.blockchainGateway?.isEnabled() && this.blockchainGateway.resolveSinglePayout) {
-      await this.blockchainGateway.resolveSinglePayout(
+      payoutTx = await this.blockchainGateway.resolveSinglePayout(
         chainJobId,
         verdict.outcome === "approved",
         verdict.reasonCode,
@@ -44,12 +45,21 @@ export class VerifierService {
     }
 
     const updatedSession = await this.platformService.ingestVerification(sessionId, verdict);
+    // Surface the on-chain settle/payout tx (when settled here) so the worker can
+    // see the actual payout — both via /session (stamped on the session record)
+    // and /verifier/result (on the verification result) — instead of it being
+    // discarded. Guarded on a real txHash so disabled-chain flows are unchanged.
+    let settledSession = updatedSession ?? session;
+    if (payoutTx?.txHash && typeof this.stateStore.upsertSession === "function") {
+      settledSession = await this.stateStore.upsertSession({ ...settledSession, payoutTx });
+    }
     const result = {
       ...verdict,
       sessionId,
       metadataURI,
+      ...(payoutTx ? { payoutTx } : {}),
       ...buildVerificationAuditFields(job, { verdict, verificationInput: validatedVerificationInput }),
-      session: updatedSession ?? session
+      session: settledSession
     };
 
     return this.stateStore.upsertVerificationResult(sessionId, result);
