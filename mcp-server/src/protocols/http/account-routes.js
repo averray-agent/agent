@@ -138,8 +138,30 @@ export function createAccountRoutes({
     if (request.method === "GET" && pathname === "/account") {
       const auth = await authMiddleware(request, url);
       const account = await service.getAccountSummary(auth.wallet);
-      if (!gateway?.isEnabled?.() || !strategies.length) {
+      if (!gateway?.isEnabled?.()) {
         respond(response, 200, account);
+        return true;
+      }
+
+      // Surface the worker's EOA wallet balance alongside the AAC position. A
+      // settled job reward lands in the worker's EOA, not their AAC `liquid`
+      // position — so without this an agent that just got paid sees 0 earned.
+      // Kept as a SEPARATE field, never folded into `liquid`: EOA funds are
+      // paid-out, not yet stakeable in-platform until the worker deposits them.
+      let withWallet = account;
+      if (typeof gateway.getWalletTokenBalances === "function") {
+        const wallet = await gateway.getWalletTokenBalances(auth.wallet).catch(() => null);
+        if (wallet) {
+          withWallet = {
+            ...account,
+            walletBalance: wallet.walletBalance,
+            raw: { ...account.raw, walletBalance: wallet.raw }
+          };
+        }
+      }
+
+      if (!strategies.length) {
+        respond(response, 200, withWallet);
         return true;
       }
 
@@ -155,9 +177,9 @@ export function createAccountRoutes({
       });
 
       respond(response, 200, {
-        ...account,
+        ...withWallet,
         strategyAllocated: {
-          ...account.strategyAllocated,
+          ...withWallet.strategyAllocated,
           ...liveAllocatedByAsset
         }
       });
