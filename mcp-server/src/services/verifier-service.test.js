@@ -711,3 +711,57 @@ test("replayVerification does not flag drift when captured handler version match
   assert.equal(replay.replayDrift, undefined);
   assert.equal(replay.handlerVersion, fixture.handlerVersion);
 });
+
+test("getResult returns the persisted verification result when one exists", async () => {
+  const stateStore = new MemoryStateStore();
+  const verdict = { status: "approved", outcome: "approved", score: 100 };
+  await stateStore.upsertVerificationResult("sid:0xabc", verdict);
+
+  const service = new VerifierService({}, stateStore);
+  const result = await service.getResult("sid:0xabc");
+
+  assert.deepEqual(result, verdict);
+});
+
+test("getResult reports 'verifying' with awaitingSince for a submitted session without a verdict", async () => {
+  const stateStore = new MemoryStateStore();
+  const claimed = transitionSession(
+    { sessionId: "sid:0xdef", wallet: "0xdddddddddddddddddddddddddddddddddddddddd", jobId: "job-1" },
+    "claimed",
+    { reason: "job_claimed" }
+  );
+  const submitted = transitionSession(claimed, "submitted", { reason: "work_submitted" });
+  await stateStore.upsertSession(submitted);
+
+  const service = new VerifierService({}, stateStore);
+  const result = await service.getResult("sid:0xdef");
+
+  assert.equal(result.status, "verifying");
+  assert.equal(result.sessionStatus, "submitted");
+  assert.equal(result.awaitingSince, submitted.submittedAt);
+  assert.ok(submitted.submittedAt, "submittedAt should be set by the transition");
+});
+
+test("getResult returns null (→ not_found) when the session does not exist", async () => {
+  const stateStore = new MemoryStateStore();
+  const service = new VerifierService({}, stateStore);
+
+  const result = await service.getResult("sid:missing");
+
+  assert.equal(result, null);
+});
+
+test("getResult does not report 'verifying' for a merely claimed (not-yet-submitted) session", async () => {
+  const stateStore = new MemoryStateStore();
+  const claimed = transitionSession(
+    { sessionId: "sid:0x111", wallet: "0x1111111111111111111111111111111111111111", jobId: "job-2" },
+    "claimed",
+    { reason: "job_claimed" }
+  );
+  await stateStore.upsertSession(claimed);
+
+  const service = new VerifierService({}, stateStore);
+  const result = await service.getResult("sid:0x111");
+
+  assert.equal(result, null);
+});

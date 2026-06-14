@@ -81,7 +81,26 @@ export class VerifierService {
   }
 
   async getResult(sessionId) {
-    return this.stateStore.getVerificationResult(sessionId);
+    const result = await this.stateStore.getVerificationResult(sessionId);
+    if (result) {
+      return result;
+    }
+    // No verdict persisted yet. If the session exists and is awaiting
+    // verification (submitted, or disputed pending human resolution), report a
+    // distinct "verifying" status with the timestamp it has been waiting since,
+    // so a worker who just submitted sees in-progress + elapsed latency instead
+    // of an indistinguishable not_found. Any other state falls through to
+    // not_found (the route maps a null return to { status: "not_found" }).
+    const session = await this.stateStore.getSession(sessionId);
+    if (session && (session.status === "submitted" || session.status === "disputed")) {
+      return {
+        status: "verifying",
+        sessionId,
+        sessionStatus: session.status,
+        awaitingSince: session.disputedAt ?? session.submittedAt ?? null
+      };
+    }
+    return null;
   }
 
   listHandlers() {
