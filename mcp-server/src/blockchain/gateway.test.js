@@ -158,6 +158,28 @@ test("resolveDispute uses the arbitrator signer contract when configured", async
   assert.deepEqual(receipt, { txHash: "0xresolve", blockNumber: 8, status: 1 });
 });
 
+test("resolveSinglePayout returns the settle/payout tx receipt", async () => {
+  const gateway = new BlockchainGateway({ enabled: false });
+  const calls = [];
+  gateway.signer = {};
+  gateway.escrowContract = {
+    async resolveSinglePayout(...args) {
+      calls.push(args);
+      return {
+        hash: "0xpayout",
+        async wait() {
+          return { blockNumber: 99, status: 1 };
+        }
+      };
+    }
+  };
+
+  const receipt = await gateway.resolveSinglePayout("wiki-job", true, "OK", "ipfs://badge");
+
+  assert.equal(calls.length, 1);
+  assert.deepEqual(receipt, { txHash: "0xpayout", blockNumber: 99, status: 1 });
+});
+
 test("handleClaimTimeout reopens the canonical chain job id", async () => {
   const gateway = new BlockchainGateway({ enabled: false });
   const calls = [];
