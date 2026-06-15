@@ -324,7 +324,7 @@ which this entry retires.
 **Mint with the script** (current procedure):
 ```bash
 NEW_JWT=$(AUTH_JWT_SECRETS=$(op read "op://prod-backend/auth-jwt-secrets/password") \
-  node scripts/ops/mint-admin-jwt.mjs --profile testnet --expires-in-days 30 --quiet)
+  node scripts/ops/mint-admin-jwt.mjs --profile testnet --roles admin,verifier --expires-in-days 30 --quiet)
 
 # Store in 1Password (canonical home, used by Phase 2 PR 2.5 onward):
 op item create --vault=prod-smoke --category=password --title=admin-jwt \
@@ -337,9 +337,21 @@ unset NEW_JWT
 ```
 
 Notes:
+- `--roles admin,verifier` is **required**. The script defaults to
+  `admin` only, and the backend authorizes each request from the
+  verified token's `roles` claim — NOT from `sub`/the wallet allowlists
+  (`AUTH_ADMIN_WALLETS` / `AUTH_VERIFIER_WALLETS` only *seed* roles at
+  SIWE sign-in; see `mcp-server/src/auth/middleware.js` `enforceRole` →
+  `hasRole`). Omitting `--roles` mints an admin-only token that 403s on
+  `/verifier/*`.
 - `--profile testnet` — the current production system runs against
-  Polkadot Hub TestNet, so the mint script reads the verifier wallet
-  from `deployments/testnet.json`. After Phase 5 cutover provisions
+  Polkadot Hub TestNet, so the mint script reads the wallet from
+  `deployments/testnet.json` (`verifier ?? deployer`). Note
+  `testnet.json#verifier` is the **KMS signer** `0x31ad…ab7F`, so the
+  token's `sub` becomes the signer, not the admin EOA — harmless for
+  access (authorization is role-based, above), but pass
+  `--wallet 0x6778F050eAc8313e4dbB176d7BAB44510E833ac8` if you want the
+  token identity to be the admin EOA. After Phase 5 cutover provisions
   `deployments/mainnet.json`, this becomes `--profile mainnet`.
   (Earlier v3 doc drafts said `--profile production`, which doesn't
   match a real profile file — corrected in Phase 2 PR 2.1.)

@@ -65,7 +65,7 @@ fabrication.
 
 | Item | Why |
 | --- | --- |
-| `--profile` rotation footgun doc fix | Calendar/onboarding rotation notes recommend `--profile testnet` → resolves to the wrong wallet + drops the verifier role (doc-fix PR pending). |
+| `--profile` rotation footgun doc fix | **DONE / clarified:** confirmed the backend authorizes on the token's `roles` claim, not `sub` (`middleware.js` `enforceRole`→`hasRole`; `AUTH_*_WALLETS` only seed roles at SIWE sign-in). So the "wrong wallet" `sub` (`--profile testnet` → `testnet.json#verifier` = the KMS signer) is **cosmetic**; the real bug was the **missing `--roles admin,verifier`** (script defaults to `admin` only) in one `SECRETS.md` mint command — fixed, with a clarifying note. The calendar's command already passed `--roles admin,verifier`. |
 | Worker-loop refresh-flow | **DONE:** shipped in PR #529 (recorded as shipped in `PROJECT_ROADMAP.md`) — retires the recurring 30-day manual `ADMIN_JWT` rotation toil; smoke moves to short-lived refresh-minted tokens. (Punch-list previously said "in soak.") |
 | Standalone API-only smoke ladder | `claim-readiness-smoke.sh` needs the full Docker/Hermes stack; an API-only probe (nonce→verify→authed read→preflight→funding) would catch the blockers in seconds. |
 | `/jobs/preflight` readiness endpoint | **DONE (stale claim corrected):** the endpoint is implemented — `GET /jobs/preflight` (`job-routes.js`) → `platformService.preflightJob` → `jobCatalogService.preflightJob`, and it's advertised in the discovery manifest. The earlier "unimplemented/404" note predated the implementation. |
