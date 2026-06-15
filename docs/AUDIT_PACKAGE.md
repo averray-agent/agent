@@ -10,6 +10,11 @@ mainnet real funds.
 ## Current Status
 
 - Testnet/RC1 proof gates are complete in the roadmap.
+- The self-driving job loop is live on testnet: a real job ran claim → submit →
+  **auto-verify → settle** with no operator in the loop (`AUTO_VERIFY_ENABLED` +
+  `INGESTION_PREFUND_ENABLED` active), proven end-to-end 2026-06-15. This is the
+  autonomous money-movement surface the audit must cover — see invariants 13–14
+  and the settlement/claim money layer in scope below.
 - Mainnet real-funds readiness is not complete.
 - External audit is still open.
 - Native XCM/vDOT/yield is deferred unless explicitly added to a separate audit
@@ -105,7 +110,20 @@ Mandatory review:
 - [`mcp-server/src/protocols/http/gas-routes.js`](../mcp-server/src/protocols/http/gas-routes.js)
 - [`mcp-server/src/protocols/http/event-routes.js`](../mcp-server/src/protocols/http/event-routes.js)
 - [`mcp-server/src/protocols/http/operational-routes.js`](../mcp-server/src/protocols/http/operational-routes.js)
+- [`mcp-server/src/protocols/http/account-routes.js`](../mcp-server/src/protocols/http/account-routes.js)
 - [`mcp-server/src/protocols/http/server.js`](../mcp-server/src/protocols/http/server.js)
+
+Settlement and claim money layer — the service/core/chain modules where the
+claim → submit → verify → settle → payout decisions actually execute (the HTTP
+routes above are thin entry points over these):
+
+- [`mcp-server/src/core/job-execution-service.js`](../mcp-server/src/core/job-execution-service.js) — claim/submit lifecycle, retry accounting, claim-time `ensureJob` funding.
+- [`mcp-server/src/core/claim-state.js`](../mcp-server/src/core/claim-state.js) — claimability gate: retry-limit, onboarding waiver, and reward-funding (`ingestion_prefund`) state that decides what discovery advertises claimable.
+- [`mcp-server/src/core/claim-economics.js`](../mcp-server/src/core/claim-economics.js) — claim stake/fee math.
+- [`mcp-server/src/services/verifier-service.js`](../mcp-server/src/services/verifier-service.js) — `verifySubmission` evaluates the verdict, calls `resolveSinglePayout` on chain, and surfaces the settle/payout tx.
+- [`mcp-server/src/services/verification-ingestion-service.js`](../mcp-server/src/services/verification-ingestion-service.js) — persists the verdict + session transition (submitted → resolved/rejected/disputed).
+- [`mcp-server/src/services/submitted-job-auto-verifier.js`](../mcp-server/src/services/submitted-job-auto-verifier.js) — **autonomous settlement scheduler**: with `AUTO_VERIFY_ENABLED`, verifies + settles `submitted` jobs with no human in the loop (hard `{benchmark, deterministic}` mode allowlist, HALT-aware, idempotent). High-priority review surface — this is the only path that moves funds without an operator action.
+- [`mcp-server/src/blockchain/gateway.js`](../mcp-server/src/blockchain/gateway.js) — the on-chain money calls: `ensureJob` (escrow), `claimJobFor`/`submitWorkFor` (operator-brokered), `resolveSinglePayout` (settle/release), dispute resolution. KMS-signed.
 
 The HTTP server has been route-split. `server.js` now primarily owns shared
 plumbing: CORS preflight, request logging, metric labeling, route ordering,
@@ -191,6 +209,18 @@ Auditors should try to disprove these before reviewing lower-risk style issues.
 12. **Observability does not leak secrets.** `/admin/status`, event streams,
     logs, alert payloads, and artifacts must never reveal private keys, bearer
     tokens, JWTs, webhook URLs, API keys, or seed material.
+13. **Autonomous verification cannot over-settle.** With `AUTO_VERIFY_ENABLED`,
+    the scheduler may auto-verify and settle only jobs whose verifier mode is in
+    the hard `{benchmark, deterministic}` allowlist — never a
+    `human_fallback`/`github_pr`/disputed job. It must never advance a session to
+    `resolved` without a real on-chain payout (no fake-settled state), and must
+    stay idempotent and halt-aware so a retry, a re-scan, or a paused protocol
+    cannot double-pay or settle during a halt.
+14. **Discovery never advertises an unfunded job as claimable.** With
+    `INGESTION_PREFUND_ENABLED`, a job whose reward is not yet escrowed on-chain
+    must report `claimable: false` / `fundingState: pending` and stay out of the
+    claimable set — a worker must never be able to claim a job that would then
+    fail to settle for insufficient liquidity.
 
 ## Known Launch Choices
 
@@ -207,6 +237,22 @@ Auditors should try to disprove these before reviewing lower-risk style issues.
 - Metrics, alerts, backups, restore drill, service-token proof, and worker-loop
   product proof are already proven for testnet/RC1. Mainnet still needs fresh
   mainnet evidence.
+- **Autonomous settlement is on.** `AUTO_VERIFY_ENABLED` lets the backend verify
+  and settle `submitted` benchmark/deterministic jobs with no operator action,
+  and `INGESTION_PREFUND_ENABLED` escrows auto-ingested rewards on-chain at
+  ingestion. Both are active on testnet and proven end-to-end (a real job auto-
+  verified + settled with the reward paid). Auditors should treat the
+  auto-verifier as an in-scope money-mover (invariants 13–14), not a convenience
+  feature.
+- **Rewards settle to the worker's EOA, not the in-platform AAC position.** A
+  settled reward lands in the worker's external account; the platform surfaces it
+  as a separate `walletBalance` on `/account` rather than folding it into the
+  stakeable `liquid` position. This is a deliberate truth-boundary choice, not a
+  reconciliation bug.
+- **Admin/verifier authority is allowlist-based.** `AUTH_ADMIN_WALLETS` /
+  `AUTH_VERIFIER_WALLETS` gate the SIWE admin and verifier roles; an EOA key
+  rotation is only complete once these allowlists drop the old wallet (see the
+  2026-06-14 rotation off the leaked `0xFd2EAE…6519`).
 
 ## Required Reproduction Commands
 
