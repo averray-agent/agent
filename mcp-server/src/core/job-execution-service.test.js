@@ -734,3 +734,32 @@ test("submitWork still stamps submitFailedAt + rethrows on a true revert (on-cha
   assert.ok(after.submitFailedAt, "true revert is still stamped as an infra failure");
   assert.equal(after.status, "claimed");
 });
+
+test("submitWork refuses to start a second submit while the session lock is held (pre-audit #6)", async () => {
+  const stateStore = new MemoryStateStore();
+  const job = makeJob();
+  const service = new JobExecutionService(stateStore, undefined, () => job);
+  const claimed = transitionSession(
+    { sessionId: `${job.id}:0xc6`, wallet: WALLET, jobId: job.id, chainJobId: `${job.id}:0xc6`, protocolHistory: [] },
+    "claimed",
+    { reason: "job_claimed" }
+  );
+  await stateStore.upsertSession(claimed);
+  // A concurrent submit/claim holds the per-session lock.
+  await stateStore.acquireClaimLock(claimed.sessionId, "other-owner", 30);
+
+  await assert.rejects(
+    () =>
+      service.submitWork(claimed.sessionId, "http", {
+        summary: "Auth flow has one blocker.",
+        findings: [{ severity: "high", file: "frontend/auth.js", issue: "x", recommendation: "y" }],
+        risk_level: "high",
+        files_touched: ["frontend/auth.js"],
+        recommended_next_step: "request_changes"
+      }),
+    (error) => error.code === "submit_in_progress"
+  );
+  // The contender did not advance the session.
+  const stored = await stateStore.getSession(claimed.sessionId);
+  assert.equal(stored.status, "claimed");
+});

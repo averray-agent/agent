@@ -238,6 +238,34 @@ export class JobExecutionService {
   async submitWork(sessionId, protocol, submissionInput = "submitted-via-service") {
     const session = await this.requireSession(sessionId);
     const job = this.getJobDefinition(session.jobId);
+    // Serialize on the session so concurrent/retried submits for the same claim
+    // cannot broker duplicate on-chain submitWork txs (pre-audit #6). Reuses the
+    // per-session claim lock, so a claim and a submit for one session also cannot
+    // race. On contention: return an already-advanced session idempotently, else
+    // surface a conflict rather than starting a second on-chain submit.
+    const sessionLockId = sessionId;
+    const lockOwner = randomUUID();
+    const lockAcquired = await this.stateStore.acquireClaimLock?.(
+      sessionLockId,
+      lockOwner,
+      this.getClaimLockTtlSeconds(job)
+    );
+    if (lockAcquired === false) {
+      const current = await this.stateStore.getSession(sessionId);
+      if (current && current.status && current.status !== "claimed") {
+        return current;
+      }
+      throw new ConflictError(`Submit already in progress for ${sessionId}`, "submit_in_progress");
+    }
+    try {
+      return await this.submitWorkLocked(session, job, protocol, submissionInput);
+    } finally {
+      await this.stateStore.releaseClaimLock?.(sessionLockId, lockOwner);
+    }
+  }
+
+  async submitWorkLocked(session, job, protocol, submissionInput) {
+    const sessionId = session.sessionId;
     const refreshed = await this.materializeExpiredClaim(session, job);
     if (refreshed.status === "expired") {
       throw new ConflictError(
