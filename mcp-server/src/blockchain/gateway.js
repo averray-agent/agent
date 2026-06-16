@@ -1017,9 +1017,12 @@ export class BlockchainGateway {
   async resolveDispute(jobId, workerPayout, reasonCode, metadataURI = "") {
     return this.withGatewayError("resolveDispute", async () => {
       this.requireArbitratorSigner("resolveDispute");
+      const job = await this.getJob(jobId);
+      const asset = this.assetForAddress(job.asset);
+      const workerPayoutBase = this.toBaseUnits(workerPayout, asset, "dispute worker payout");
       const tx = await this.arbitratorEscrowContract.resolveDispute(
         this.toJobId(jobId),
-        workerPayout,
+        workerPayoutBase,
         this.toDisputeReasonCode(reasonCode),
         metadataURI
       );
