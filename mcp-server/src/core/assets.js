@@ -19,6 +19,16 @@ export const ASSET_DECIMALS_BY_SYMBOL = {
   VDOT: 10
 };
 
+// Symbols that ARE the chain's native gas token (Polkadot DOT, Paseo testnet
+// PAS). Used to gate native-gas-denominated heuristics — e.g. a gas-cost or
+// risk haircut calibrated in DOT must not be subtracted from a USDC reward,
+// which would mix units and silently shrink the payout (USDC unit invariant).
+export const NATIVE_GAS_ASSET_SYMBOLS = new Set(["DOT", "PAS"]);
+
+export function isNativeGasAsset(symbol) {
+  return NATIVE_GAS_ASSET_SYMBOLS.has(normalizeAssetSymbol(symbol));
+}
+
 export function normalizeAssetSymbol(value, fallback = DEFAULT_ESCROW_ASSET_SYMBOL) {
   const symbol = String(value ?? fallback).trim();
   return symbol ? symbol.toUpperCase() : fallback;
