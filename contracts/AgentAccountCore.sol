@@ -248,6 +248,7 @@ contract AgentAccountCore is ReentrancyGuard {
 
     function allocateIdleFunds(address account, bytes32 strategyId, uint256 amount)
         external
+        nonReentrant
         whenNotPaused
         onlyOwnerOrOperator(account)
     {
@@ -270,6 +271,7 @@ contract AgentAccountCore is ReentrancyGuard {
 
     function deallocateIdleFunds(address account, bytes32 strategyId, uint256 amount)
         external
+        nonReentrant
         whenNotPaused
         onlyOwnerOrOperator(account)
     {
@@ -297,6 +299,7 @@ contract AgentAccountCore is ReentrancyGuard {
 
     function requestStrategyDeposit(address account, StrategyDepositRequestParams calldata params)
         external
+        nonReentrant
         whenNotPaused
         onlyOwnerOrOperator(account)
         returns (bytes32 requestId)
@@ -322,6 +325,7 @@ contract AgentAccountCore is ReentrancyGuard {
 
     function requestStrategyWithdraw(address account, StrategyWithdrawRequestParams calldata params)
         external
+        nonReentrant
         whenNotPaused
         onlyOwnerOrOperator(account)
         returns (bytes32 requestId)
@@ -369,7 +373,7 @@ contract AgentAccountCore is ReentrancyGuard {
         uint256 settledShares,
         bytes32 remoteRef,
         bytes32 failureCode
-    ) external whenNotPaused onlyOperator {
+    ) external nonReentrant whenNotPaused onlyOperator {
         if (status == IXcmWrapper.RequestStatus.Unknown || status == IXcmWrapper.RequestStatus.Pending) {
             revert InvalidStrategyRequest();
         }
