@@ -1,3 +1,5 @@
+import { redactProviderError } from "../core/redact-provider-error.js";
+
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const DEFAULT_POLL_INTERVAL_MS = 4_000;
 const DEFAULT_MAX_BLOCKS_PER_QUERY = 1_000;
@@ -571,7 +573,7 @@ export class EventListener {
       timestamp: new Date().toISOString(),
       data: {
         eventName,
-        message: error?.message ?? "listener_error"
+        message: redactProviderError(error?.message ?? "listener_error")
       }
     });
   }
@@ -649,7 +651,7 @@ export class EventListener {
       topic: "system.provider_error",
       timestamp: new Date().toISOString(),
       data: {
-        message: error?.message ?? "provider_error"
+        message: redactProviderError(error?.message ?? "provider_error")
       }
     });
   }

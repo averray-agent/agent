@@ -31,6 +31,7 @@ import {
 import { buildXcmRequestPayload } from "./xcm-message-builder.js";
 import { hashCanonicalContent } from "../core/canonical-content.js";
 import { getRegisteredJobSchemaRegistration } from "../core/job-schema-registry.js";
+import { redactProviderError } from "../core/redact-provider-error.js";
 import {
   BlockchainRevertError,
   ConfigError,
@@ -1876,13 +1877,16 @@ export class BlockchainGateway {
   }
 
   extractGatewayReason(error) {
-    return (
+    // Redact credential-looking material (RPC URLs with embedded keys, Bearer
+    // tokens, JWTs) before this reason is surfaced on /health, logged, or
+    // stamped onto the thrown error's rawReason (pre-audit #8).
+    return redactProviderError(
       error?.reason ||
-      error?.shortMessage ||
-      error?.info?.error?.message ||
-      error?.info?.payload?.method ||
-      error?.message ||
-      "unknown_error"
+        error?.shortMessage ||
+        error?.info?.error?.message ||
+        error?.info?.payload?.method ||
+        error?.message ||
+        "unknown_error"
     );
   }
 }
