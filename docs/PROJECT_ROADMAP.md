@@ -1,10 +1,16 @@
 # Averray Unified Project Roadmap
 
-- **Status date:** 2026-05-28
-- **Baseline reviewed:** `origin/main` at `39ab1b8`
+- **Status date:** 2026-06-16
+- **Baseline reviewed:** `origin/main` at `fb6a558`
 - **Latest docs audit:** [`DOCS_AUDIT_2026-05-19.md`](./DOCS_AUDIT_2026-05-19.md)
 - **Purpose:** one status and roadmap page for the specs, audits, launch
   checklists, security plans, and product-proof work.
+- **Recent window:** since the 2026-05-28 baseline (`39ab1b8`), ~89 commits have
+  landed (through `fb6a558`). Headline events: the first fully-settled
+  external-agent loop (2026-06-13), the autonomous self-driving loop
+  (2026-06-15, now **paused on signer liquidity**), and a pre-audit security
+  sweep (2026-06-16, 8 findings remediated — **not** the external audit). See
+  Current Product Posture and the Blockchain/Mainnet section.
 
 This page is the current source of truth for "what is done, what is open, and
 what comes next." The older docs remain useful for deep context, acceptance
@@ -65,12 +71,21 @@ rewriting the same tables and makes consolidation reviewable.
 Averray is currently a **testnet product-proof platform**. The core backend,
 operator app, public discovery/trust surfaces, schema-native job path, USDC
 settlement route, service-token capability primitives, and product-proof worker
-loop have all landed.
+loop have all landed. The first fully-settled product loop ran on testnet on
+2026-06-13 (real external agent: claim → submit → verify → settle, 2 USDC reward,
+PRO badge). The autonomous self-driving loop (auto-verify + settle, zero operator,
+via `#633` auto-verify and `#643`/`#635` ingestion-prefund) was proven end-to-end
+on 2026-06-15, but is **PROVEN-BUT-PAUSED-ON-LIQUIDITY** as of 2026-06-16: the
+Hosted Worker Canary is RED on `settlementReady=false` because the backend signer
+EOA has 0 USDC. It is not currently live/settling.
 
-It is **not yet mainnet real-funds ready**. Mainnet readiness still requires an
-external audit, mainnet custody/secrets setup, mainnet contract deployment,
-control-plane rehearsals, production observability, backups/restore proof, and
-final launch gates.
+It is **not yet mainnet real-funds ready**. A 2026-06-16 pre-audit security
+sweep found 8 findings (3 HIGH / 2 MED / 2 LOW / 1 INFO) plus invariant-9, all
+remediated via `#649`–`#656`; this was a **pre-audit pass, not the external
+audit**. The external audit remains **OPEN** and is the hard gate before mainnet
+real funds. Mainnet readiness still requires that external audit, mainnet
+custody/secrets setup, mainnet contract deployment, control-plane rehearsals,
+production observability, backups/restore proof, and final launch gates.
 
 The v1 business and technical posture is:
 
@@ -114,7 +129,7 @@ Polkadot-specific USDC facts were checked against the Polkadot docs MCP:
 
 | Area | Status | Evidence |
 | --- | --- | --- |
-| Trust-core product model | Done | Current working spec v2.10 locks receipts, reputation, no token, USDC-only v1. |
+| Trust-core product model | Done | Current working spec v2.14 locks receipts, reputation, no token, USDC-only v1. |
 | USDC settlement baseline | Done | Contracts and product-proof path use USDC Trust-Backed Asset ID 1337. |
 | Product-proof worker loop | Proofed | Hosted proof in `PRODUCT_PROOF_GATE.md`. Deploy Production workflow run `25988470399` (2026-05-17), dispatched with `smoke_check_product_proof_gate=1` and `product_proof_require_worker_loop=1`. |
 | Public proof pages | Done | Homepage proof stream relabeled/scripted; public discovery/schema/trust pages exist. |
@@ -141,7 +156,7 @@ Polkadot-specific USDC facts were checked against the Polkadot docs MCP:
 | Phase 2 VPS env-render cutover | Done | Backend + indexer env files rendered at deploy time via `op inject` from `deploy/*.env.template` into `/run/agent-stack/*.env` (tmpfs, mode 0400). Service-account-scoped 1Password tokens; no plaintext secrets at rest in `/srv`. |
 | Boot-time env render service | Done | `deploy/agent-stack-env-render.service` (systemd oneshot, `Before=docker.service`) re-renders `/run/agent-stack/*.env` after every reboot via `scripts/ops/render-vps-env-all.sh`. Validated by destroy-and-recover test and a full prod reboot through kernel `6.8.0-117`. Ships in `#436` + hotfix `#437`. |
 | GitHub org code-security configuration | Done | Org-level configuration `248474` enforced on `averray-agent/agent`: secret scanning + push protection + non-provider patterns + generic-secret AI detection + validity checks. New repos in the org auto-enable secret scanning, push protection, and Dependabot via the org default flags. |
-| KMS JWT migration through Stage 2C-1 | Done | Five stages live in prod: **Stage 1** (`JWT_BACKEND=both`, `#430`) — verifier accepts HS256 + ES256; **Stage 2A** (`#432`) — SIWE + `/auth/refresh` route through `signTokenFromConfig`; **Stage 2B** (`#433`) — multi-role ES256 (`roles: [...]` array claim); **Stage 2B activation** (`#434`) — `JWT_PRIMARY_ALG=kms` flipped, SIWE actively mints multi-role ES256 against the KMS key; **Stage 2C-1** (`#438`) — `signServiceToken` migrated to dispatcher with `roles: ["service"]`. End-to-end verified in prod (admin+verifier wallet returns 48 capabilities via `/auth/session`). Remaining: Stage 2C-2 env flip (`#439`, draft) and Stage 2C-3 HMAC retirement (≥30d after 2C-2). |
+| KMS JWT migration through Stage 2C-2 | Done | Six stages live in prod: **Stage 1** (`JWT_BACKEND=both`, `#430`) — verifier accepts HS256 + ES256; **Stage 2A** (`#432`) — SIWE + `/auth/refresh` route through `signTokenFromConfig`; **Stage 2B** (`#433`) — multi-role ES256 (`roles: [...]` array claim); **Stage 2B activation** (`#434`) — `JWT_PRIMARY_ALG=kms` flipped, SIWE actively mints multi-role ES256 against the KMS key; **Stage 2C-1** (`#438`) — `signServiceToken` migrated to dispatcher with `roles: ["service"]`; **Stage 2C-2** (`#439`, merged 2026-05-21) — `JWT_BACKEND` flipped `both` → `kms` in `deploy/backend.env.template`, so the prod verifier now refuses HS256. End-to-end verified in prod (admin+verifier wallet returns 48 capabilities via `/auth/session`). Remaining: only Stage 2C-3 HMAC code-path retirement (deferred ≥30d after 2C-2; HS256 verify branch + `AUTH_JWT_SECRETS` still present). |
 
 ## Open Work To RC1/Testnet Launch
 
@@ -194,7 +209,7 @@ Source fragment: [`roadmap-updates/control-room-ui-observations-2026-05-27.md`](
 | A6 — Provider Operations operator-language pass | Done | Frontend | overview comprehension | Overview provider-operation rows now render a four-term operator legend (`Found upstream`, `Opened as jobs`, `Safely ignored`, `Needs attention`), derive readable last-run summaries from the backend counters, and relabel skip details as `ignored because`. | Component contract and helper coverage in `app/lib/ui/provider-operation-language.test.mjs`; app typecheck/build run in the implementing PR. |
 | A7 — Treasury DOT borrow-capacity / USDC debt reconciliation | Blocked | Operator / docs steward | treasury / capital clarity | Verify whether DOT borrow capacity with USDC debt is intentional architecture or USDC-plumbing drift. If intentional, add rationale to `AVERRAY_WORKING_SPEC.md` and an in-UI explanation; if drift, reopen the relevant USDC settlement/plumbing status claim with evidence. | Authenticated live Treasury check plus screenshot/API state for capacity, debt asset, and related account position. |
 | B1 — Sparkline signal clarity | Open | Design / frontend | metric-trend readability | Decide whether small sparklines are meaningful enough to keep. If kept, add readable trend context such as hover values, visible delta, and a clear time window; if not, replace decorative-only sparklines with a compact last-7-days delta. Scope starts with Overview vitals, Agents directory/aggregate, Treasury balance cards, and Receipts KPI cards. | Backlog generated from `roadmap-updates/control-room-ui-observations-2026-05-27.md` B1. Implementation proof should include screenshots or component tests showing at least Overview + Agents trend cards expose either meaningful sparkline context or explicit delta text, with no decorative-only trend glyphs left in scope. |
-| C1 — Chain explorer link on chain-anchored entities | In review | Frontend | trust-surface / reputation deepening | Every page that displays a genuine chain-anchored tx/block exposes a small explorer link that lands on the correct environment-specific explorer view. Scope clarified: only values whose *provenance* is a real on-chain anchor are linked. | Implemented: shared `app/lib/chain/explorer.js` (Subscan + Blockscout registry keyed by `NEXT_PUBLIC_CHAIN_ENV`; unset → Paseo TestNet default, unknown → fail-closed no link) + `app/components/common/ExplorerLink.tsx`, wired into the Disputes drawer (replaces a hardcoded `assethub-polkadot.subscan.io` link that pointed operators at **mainnet** while we run on TestNet) and the Runs job timeline (`event_bus` `txHash`/`blockNumber`). Truth-boundary: Sessions `tx` and Receipts "Block ref" are deliberately NOT linked — their value is a `chainJobId` (bytes32, shape-identical to a tx hash but not explorer-resolvable); the "Block ref" mislabel is a separate follow-up. Capabilities/agents/treasury/audit carry no genuine anchor. Evidence: `app/lib/chain/explorer.test.mjs` asserts testnet (`assethub-paseo.subscan.io`) + mainnet (`assethub-polkadot.subscan.io`) URL fixtures; live resolution confirmed for real dispute tx `0x3632…d7472` at `https://assethub-paseo.subscan.io/tx/0x3632c402966de8bf7dda55fb88627a9fa1019d9a867017008cf02b2ce02d7472` (Subscan renders the Revive Eth_transact, block 9387753, status Success), cross-checked via Blockscout `/api/v2/transactions`. `npm run test:app` 55/55, `typecheck:app` + `build:app` green. Explorer URLs verified against polkadot-docs MCP (`smart-contracts/explorers.md`, `connect.md`). **Remaining:** live authenticated UI screenshot of the rendered link on Disputes + Runs. |
+| C1 — Chain explorer link on chain-anchored entities | In review | Frontend | trust-surface / reputation deepening | Every page that displays a genuine chain-anchored tx/block exposes a small explorer link that lands on the correct environment-specific explorer view. Scope clarified: only values whose *provenance* is a real on-chain anchor are linked. | Implemented: shared `app/lib/chain/explorer.js` (Subscan + Blockscout registry keyed by `NEXT_PUBLIC_CHAIN_ENV`; unset → Paseo TestNet default, unknown → fail-closed no link) + `app/components/common/ExplorerLink.tsx`, wired into the Disputes drawer (replaces a hardcoded `assethub-polkadot.subscan.io` link that pointed operators at **mainnet** while we run on TestNet) and the Runs job timeline (`event_bus` `txHash`/`blockNumber`). Truth-boundary: Sessions `tx` and Receipts "Block ref" are deliberately NOT linked — their value is a `chainJobId` (bytes32, shape-identical to a tx hash but not explorer-resolvable). The "Block ref" mislabel follow-up has since landed (PR #596, commit `4454a62`): Receipts now renders the value as "Escrow job" (`app/lib/api/receipt-adapters.ts:135`) and Sessions tags it as a provenance-typed `ChainRef` via `classifyChainReference` (`app/lib/api/session-adapters.ts`), with the `isLinkableChainReference` seam in `app/lib/chain/chain-reference.js` keeping a chainJobId unlinked. Capabilities/agents/treasury/audit carry no genuine anchor. Evidence: `app/lib/chain/explorer.test.mjs` asserts testnet (`assethub-paseo.subscan.io`) + mainnet (`assethub-polkadot.subscan.io`) URL fixtures; live resolution confirmed for real dispute tx `0x3632…d7472` at `https://assethub-paseo.subscan.io/tx/0x3632c402966de8bf7dda55fb88627a9fa1019d9a867017008cf02b2ce02d7472` (Subscan renders the Revive Eth_transact, block 9387753, status Success), cross-checked via Blockscout `/api/v2/transactions`. `npm run test:app` 55/55, `typecheck:app` + `build:app` green. Explorer URLs verified against polkadot-docs MCP (`smart-contracts/explorers.md`, `connect.md`). **Remaining:** live authenticated UI screenshot of the rendered link on Disputes + Runs. |
 | C2 — Shareable read-only view URLs | In review | Frontend / backend | reputation deepening / distribution | Signed, expiring read-only share URLs now cover four surfaces: agent profiles, session audit trails, dispute snapshots, and policy snapshots. Authenticated operators create shares through `POST /shares`; unauthenticated viewers resolve snapshots through `GET /shares/:token` and the public `/share` app page. | Implemented: HMAC share-token helper + tests (`mcp-server/src/core/share-links.js`), HTTP share routes + tests (`mcp-server/src/protocols/http/share-routes.js`), public no-auth viewer (`app/app/share/page.tsx`), and copy-link controls on Agents/Sessions/Disputes/Policies. **Remaining:** hosted incognito/browser proof for agent, session, and dispute/policy snapshots after deploy; production must set `SHARE_URL_SECRET` or rely on the auth signing secret. |
 | C3 — Verify Signature and Verify Manifest end-to-end | In review | Frontend | receipts / audit verification | Receipt verification is no longer a placeholder: the drawer accepts a detached `averray.receipt.signature.v1` JSON envelope, rebuilds the canonical evidence hash from the displayed receipt JSON, checks the envelope hash/receipt id, and verifies the EVM signature with `viem` `verifyMessage`. Receipts and Audit log now both expose real manifest verification controls that rebuild deterministic manifest payloads from the current live view and detect hash drift instead of rendering disabled/export-only affordances. | Evidence: `app/lib/ui/evidence-verification.js` + `evidence-verification.test.mjs` cover canonical JSON, real EVM signer recovery for fixture `r_c3_real_receipt_001`, tamper rejection, and audit manifest fixture `audit-c3-manifest-001`; `npm run test:app`, `npm run typecheck:app`, and `npm run build:frontend` green. **Remaining:** authenticated browser screenshot of the receipt signature result + audit manifest verifier on hosted or local data. |
 | C4 — Cross-agent reputation comparison | In review | Frontend | reputation deepening | The Agents directory now has a per-row compare checkbox (cap 3). Selecting 2–3 agents reveals a compare bar; "Compare →" opens a side-by-side dialog showing tier, reputation score, specialty, badges, recent activity, stake (deposited/locked), 30d slashes, and sub-contracting lineage, with an "Export CSV" download. | Implemented: `app/components/agents/AgentComparisonDialog.tsx` (Radix `Dialog`), selection state + compare bar in `app/app/(authed)/agents/page.tsx`, checkbox column in `AgentDirectoryTable.tsx` (click stops row-drawer propagation; unchecked boxes disabled at the cap). Comparison rows + RFC-4180 CSV serializer are the tested pure module `app/lib/ui/agent-comparison.js` (+ `agent-comparison.test.mjs`, 8 cases). Truth-boundary: empty/missing metric values render an em-dash (never a fake blank/0); badge ids resolve to human labels via `BADGES`. `npm run test:app` (incl. new suite), `typecheck:app` + `build:app` green. **Remaining:** UI screenshot of a live 2–3 agent comparison + CSV. |
@@ -241,13 +256,16 @@ HTTP route-split closeout audit after `#526`: `mcp-server/src/protocols/http/ser
 - Phase 2 VPS env-render cutover: deploy-time + boot-time render of `/run/agent-stack/*.env` from 1Password (`#436` boot service + `#437` hardening fix).
 - Deploy-script rollback hardening (`#467` for backend, `#476` for indexer): rollback path now verifies `git checkout` actually moved HEAD and re-renders the env from the rolled-back template before `compose_up`. Closes the class of "half-rolled-back" failure that prevented the Phase 5a Stage 2C-3 outage from auto-recovering.
 - GitHub UI hardening: org code-security configuration `248474` enforced (secret scanning + push protection + non-provider + generic-secret + validity checks); org-default flags flipped so future repos inherit the same protection.
+- Pre-audit security review (2026-06-16): an in-house adversarial sweep of the autonomous-settlement surface found 8 findings (3 HIGH / 2 MED / 2 LOW / 1 INFO) plus invariant-9, all remediated — `#649` (self-heal mined-but-receipt-lost submits + bounded retry, findings #2/#4), `#650` (dispute payouts in base units), `#651` (gate `AgentAccountCore` settlement to escrow), `#652` (idempotent `verifySubmission` across a post-payout persist failure, #5), `#653` (serialize `submitWork` on the session lock, #6), `#654` (fail closed on permissive `AUTH_MODE` + live gateway, #7), `#655` (redact credential-looking tokens from provider errors, #8), `#656` (gate the net-reward haircut to native-gas reward assets, invariant-9); plus `#648` (nonReentrant strategy-lifecycle entrypoints). **This was a pre-audit pass, not the external audit — the external audit (Blockchain/Mainnet section below) remains the hard gate before mainnet real funds.**
+- Deploy-pipeline hardening (2026-06-16, `#657`): the Hermes post-deploy verification step is now advisory, not a deploy gate. Context: `avg-hermes` crash-looped on an `/opt/data/skills` volume permission (root-owned `0700` vs the UID-10000 Hermes user), reddening Deploy Production for hours and skipping the worker canary, while `api.averray.com/health` stayed 200. Fixed by a host `chown` + `#657` (a non-zero Hermes result now emits a `::warning::` and exits 0). The Hosted Worker Canary remains the **hard** gate for the brokered claim/submit/settle path; pre-deploy 1Password-validation gates are untouched.
+- Go-live P2 ops tooling: a standalone API-only claim-readiness smoke (`#658`, `scripts/ops/api-readiness-smoke.mjs` — SIWE → `/account` → preflight → optional `/admin/status`, read-only, no Docker/Hermes/chain RPC) and zero-exposure key provisioning for the admin-EOA rotation (`#659`, `--write-to-op` passes the key as a discrete `execFile` argv element — no shell, no echo, no command-line placeholder, no shell history).
 
 ### In Flight
 
 - **Worker-loop refresh-flow** — shipped in PR #529. `ADMIN_JWT`
   30-day-manual-rotation path retained for backward compatibility; retire
   after a 30-day soak period proves the refresh path stable in CI.
-- **CloudTrail/CloudWatch KMS signing alarms** — shipped in PR #532. Adds a CloudFormation alarm foundation for blockchain/JWT KMS signing, auth failure anomalies, refresh replay detection, and structured `kms.sign.duration` logs. Close after the stack is deployed with baseline-derived thresholds and an alert-channel proof reaches the operator channel.
+- **CloudTrail/CloudWatch KMS signing alarms** — CloudFormation foundation shipped in PR #532 (`deploy/iac/cloudwatch/kms-signing-alarms.yaml`); proof-format follow-up shipped in PR #590 (read-only validator `scripts/ops/check-kms-cloudwatch-alarm-proof.mjs` + operator flow in `deploy/iac/cloudwatch/README.md`). Adds a CloudFormation alarm foundation for blockchain/JWT KMS signing, auth failure anomalies, refresh replay detection, and structured `kms.sign.duration` logs. Close after the stack is deployed with baseline-derived thresholds, a sanitized `docs/evidence/kms-cloudwatch-alarms-YYYY-MM-DD.json` artifact validates against the #590 guard, and an alert-channel proof reaches the operator channel.
 
 ### Remaining
 
@@ -255,7 +273,6 @@ HTTP route-split closeout audit after `#526`: `mcp-server/src/protocols/http/ser
 - **HMAC retirement (Stage 2C-3 cleanup)** — ≥30 days after 2026-05-21: delete `op://prod-backend/auth-jwt-secrets`, drop the HMAC code branch from `mcp-server/src/auth/jwt.js`, retire `AUTH_JWT_SECRETS` from the secrets inventory + rotation calendar. Dispatcher already refuses HS256 at the verifier level since 2C-2; this is cleanup of unused config/code.
 - **Phase 5a-retire** — ≥30 days after 2026-05-21: `aws iam delete-access-key` for the static keys still in 1Password (`op://prod-backend/aws-signer-testnet`, `op://prod-backend/aws-jwt-signer-testnet`), delete the `access-key-id` + `secret-access-key` 1Password fields. Backend already runs entirely on Roles Anywhere — this removes the static-key rollback escape hatch once Roles Anywhere is proven stable.
 - Mainnet multi-region KMS from day one.
-- CloudTrail/CloudWatch alarms for KMS signing and anomalous auth failures.
 
 ## Blockchain And Mainnet Roadmap
 
@@ -265,7 +282,16 @@ HTTP route-split closeout audit after `#526`: `mcp-server/src/protocols/http/ser
 - Owner multisig exists and is verified.
 - KMS verifier signer is active.
 - USDC testnet funding, approval, deposit, claim, submit, and settlement have
-  all been proven through the product-proof worker loop.
+  all been proven through the product-proof worker loop (first fully-settled
+  external-agent loop 2026-06-13).
+- The self-driving loop (auto-verify + auto-settle, zero operator) was proven
+  on 2026-06-15 via `#633` auto-verify+settle, `#634` CI worker canary,
+  `#643` ingestion-prefund, and `#644` admin/verifier allowlist rotation off
+  the leaked key. It is currently **PROVEN-BUT-PAUSED-ON-LIQUIDITY** (2026-06-16):
+  the hosted Worker Canary is RED on `settlementReady=false` because the backend
+  signer EOA's USDC balance is depleted (signer `0x31ad` EOA USDC = 0, admin
+  `0x6778` = 0.2 per operator brief). The loop resumes on a signer top-up, not
+  new code.
 
 ### Mainnet Required Work
 
@@ -334,21 +360,30 @@ Metrics:
 
 ## Current Open PRs And Issues
 
-As of 2026-05-28:
+As of 2026-06-16:
 
 - Open issues in `averray-agent/agent`: none.
-- Open PRs in `averray-agent/agent`: none.
+- Open PRs in `averray-agent/agent`: #660 (Dependabot npm_and_yarn group bump, opened 2026-06-16, base `main`).
 
 ## Immediate Work Queue
 
-1. Track the Stage 2C-3 HMAC retirement window: ≥30 days after the 2026-05-21
+1. Re-fund the backend signer's USDC to resume the self-driving loop. The
+   Hosted Worker Canary is RED on `settlementReady=false` (signer `0x31ad` EOA
+   USDC = 0); the loop is proven but paused until the signer is topped up.
+   Chain/settlement ops: source testnet USDC, admin → signer EOA transfer, then
+   `fund-signer-usdc-deposit.mjs` to land it in the signer's AAC position.
+2. Engage the external audit — the hard gate for the entire mainnet sequence.
+   Run `npm run prepare:mainnet-audit-freeze`, push the frozen tag, and hand
+   auditors [`AUDIT_PACKAGE.md`](./AUDIT_PACKAGE.md). The 2026-06-16 pre-audit
+   sweep prepped this; it is not a substitute.
+3. Track the Stage 2C-3 HMAC retirement window: ≥30 days after the 2026-05-21
    KMS-only JWT cutover, delete `op://prod-backend/auth-jwt-secrets`, drop the
    HMAC code branch from `mcp-server/src/auth/jwt.js`, and retire
    `AUTH_JWT_SECRETS` from the secrets inventory + calendar.
-2. Operator: act on `PHASE_4E_PLAN.md` § 7 decision points (one vs two
+4. Operator: act on `PHASE_4E_PLAN.md` § 7 decision points (one vs two
    operators, registrar identity + FIDO2 support, GitHub org-2FA member
    audit before flipping enforcement) before procuring YubiKeys.
-3. Keep native XCM/vDOT work behind the staging evidence gate and week-12
+5. Keep native XCM/vDOT work behind the staging evidence gate and week-12
    product gate.
 
 ## Completion Definition
