@@ -310,6 +310,7 @@ function workerLoopEvidence({ wallet, sessionId, jobId }) {
         signerAddress: wallet,
         signerIsVerifier: true,
         escrowIsServiceOperator: true,
+        escrowIsAgentAccountEscrowOperator: true,
         agentAccountIsServiceOperator: true
       }
     },

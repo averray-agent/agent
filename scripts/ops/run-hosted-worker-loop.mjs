@@ -930,6 +930,7 @@ async function assertSettlementReadiness(platform, rewardAsset) {
       signerAddress: policy.roles?.signerAddress,
       signerIsVerifier: Boolean(policy.roles?.signerIsVerifier),
       escrowIsServiceOperator: Boolean(policy.roles?.escrowIsServiceOperator),
+      escrowIsAgentAccountEscrowOperator: Boolean(policy.roles?.escrowIsAgentAccountEscrowOperator),
       agentAccountIsServiceOperator: Boolean(policy.roles?.agentAccountIsServiceOperator)
     },
     signerFunding: policy.signerFunding,
@@ -962,6 +963,9 @@ function formatSettlementReadiness(policy) {
   if (policy?.paused) reasons.push("policyPaused=true");
   if (!policy?.roles?.signerIsVerifier) reasons.push("signerIsVerifier=false");
   if (!policy?.roles?.escrowIsServiceOperator) reasons.push("escrowIsServiceOperator=false");
+  if (!policy?.roles?.escrowIsAgentAccountEscrowOperator) {
+    reasons.push("escrowIsAgentAccountEscrowOperator=false");
+  }
   if (!policy?.roles?.agentAccountIsServiceOperator) reasons.push("agentAccountIsServiceOperator=false");
   const unapprovedAssets = (policy?.contracts?.supportedAssets ?? [])
     .filter((asset) => asset.approved !== true)

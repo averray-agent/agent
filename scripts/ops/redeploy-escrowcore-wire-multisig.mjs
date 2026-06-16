@@ -2,8 +2,9 @@
 
 /**
  * Emit the polkadot-js-apps multisig.asMulti recipe for wiring a freshly
- * redeployed EscrowCore as a TreasuryPolicy serviceOperator (and optionally
- * revoking the stale one in the same batch).
+ * redeployed EscrowCore as both an AgentAccountCore escrow operator and a
+ * TreasuryPolicy serviceOperator (and optionally revoking the stale one in
+ * the same batch).
  *
  * Why a recipe and not an EVM commit:
  *   TreasuryPolicy.owner() is the H160 mapping of the SS58 2-of-3 multisig
@@ -16,8 +17,10 @@
  *     otherSignatories: [other two signers in AccountId32 byte order],
  *     maybeTimepoint: <None for first leg, Some({height,index}) for second>,
  *     call: utility.batchAll([
- *       revive.call(setServiceOperator(newEscrow, true)),   // approve new
- *       revive.call(setServiceOperator(oldEscrow, false))   // revoke old
+ *       revive.call(AgentAccountCore.setEscrowOperator(newEscrow, true)),
+ *       revive.call(TreasuryPolicy.setServiceOperator(newEscrow, true)),
+ *       revive.call(AgentAccountCore.setEscrowOperator(oldEscrow, false)),
+ *       revive.call(TreasuryPolicy.setServiceOperator(oldEscrow, false))
  *     ]),
  *     maxWeight: { refTime, proofSize }
  *   )
@@ -27,7 +30,10 @@
  *
  * Single-leg variant (pass --skip-revoke):
  *   multisig.asMulti(
- *     call: revive.call(setServiceOperator(newEscrow, true))
+ *     call: utility.batchAll([
+ *       revive.call(AgentAccountCore.setEscrowOperator(newEscrow, true)),
+ *       revive.call(TreasuryPolicy.setServiceOperator(newEscrow, true))
+ *     ])
  *   )
  *
  *   Use only if you have a reason to leave the stale EscrowCore wired
@@ -75,6 +81,10 @@ const TREASURY_POLICY_ABI = [
   "function setServiceOperator(address account, bool allowed)"
 ];
 
+const AGENT_ACCOUNT_ABI = [
+  "function setEscrowOperator(address escrowOperator, bool approved)"
+];
+
 export function parseArgs(argv) {
   const args = { profile: "testnet", skipRevoke: false, noWs: false };
   for (let i = 0; i < argv.length; i += 1) {
@@ -114,7 +124,6 @@ export function resolveWs(args) {
 export async function buildOnchainPayload({
   api,
   blake2AsHex,
-  treasuryPolicy,
   innerCalls,
   reviveRefTime,
   reviveProofSize,
@@ -129,7 +138,7 @@ export async function buildOnchainPayload({
   const deposit = BigInt(storageDepositLimit);
 
   const reviveCalls = innerCalls.map((call) =>
-    api.tx.revive.call(treasuryPolicy, 0, reviveGas, deposit, call.data)
+    api.tx.revive.call(call.to, 0, reviveGas, deposit, call.data)
   );
   const reviveCallHexes = reviveCalls.map((c) => c.method.toHex());
 
@@ -195,17 +204,29 @@ function printUsage() {
   );
 }
 
-export function buildInnerCalls({ iface, newEscrow, oldEscrow, skipRevoke }) {
+export function buildInnerCalls({ policyIface, accountIface, treasuryPolicy, agentAccount, newEscrow, oldEscrow, skipRevoke }) {
   const calls = [
     {
-      label: `setServiceOperator(${newEscrow}, true)  // approve new EscrowCore`,
-      data: iface.encodeFunctionData("setServiceOperator", [newEscrow, true])
+      label: `AgentAccountCore.setEscrowOperator(${newEscrow}, true)  // approve new EscrowCore ledger authority`,
+      to: agentAccount,
+      data: accountIface.encodeFunctionData("setEscrowOperator", [newEscrow, true])
+    },
+    {
+      label: `TreasuryPolicy.setServiceOperator(${newEscrow}, true)  // approve new EscrowCore policy authority`,
+      to: treasuryPolicy,
+      data: policyIface.encodeFunctionData("setServiceOperator", [newEscrow, true])
     }
   ];
   if (!skipRevoke) {
     calls.push({
-      label: `setServiceOperator(${oldEscrow}, false)  // revoke stale EscrowCore`,
-      data: iface.encodeFunctionData("setServiceOperator", [oldEscrow, false])
+      label: `AgentAccountCore.setEscrowOperator(${oldEscrow}, false)  // revoke stale EscrowCore ledger authority`,
+      to: agentAccount,
+      data: accountIface.encodeFunctionData("setEscrowOperator", [oldEscrow, false])
+    });
+    calls.push({
+      label: `TreasuryPolicy.setServiceOperator(${oldEscrow}, false)  // revoke stale EscrowCore policy authority`,
+      to: treasuryPolicy,
+      data: policyIface.encodeFunctionData("setServiceOperator", [oldEscrow, false])
     });
   }
   return calls;
@@ -241,6 +262,7 @@ async function main() {
   const ownerRecord = JSON.parse(await readFile(multisigOwnerPath, "utf8"));
 
   const treasuryPolicy = getAddress(deployments.contracts.treasuryPolicy);
+  const agentAccount = getAddress(deployments.contracts.agentAccountCore);
   const oldEscrow = getAddress(args.oldEscrow ?? deployments.contracts.escrowCore);
 
   if (newEscrow.toLowerCase() === oldEscrow.toLowerCase()) {
@@ -271,16 +293,25 @@ async function main() {
     : null;
 
   // Build inner EVM calldata.
-  const iface = new Interface(TREASURY_POLICY_ABI);
-  const innerCalls = buildInnerCalls({ iface, newEscrow, oldEscrow, skipRevoke: args.skipRevoke });
+  const policyIface = new Interface(TREASURY_POLICY_ABI);
+  const accountIface = new Interface(AGENT_ACCOUNT_ABI);
+  const innerCalls = buildInnerCalls({
+    policyIface,
+    accountIface,
+    treasuryPolicy,
+    agentAccount,
+    newEscrow,
+    oldEscrow,
+    skipRevoke: args.skipRevoke
+  });
   const isBatch = innerCalls.length > 1;
 
   // Weight knobs — mirror rotate-admin-multisig-payload.mjs.
   const reviveRefTime = 4_000_000_000;
   const reviveProofSize = 100_000;
   const storageDepositLimit = 1_000_000_000;
-  const maxWeightRefTime = isBatch ? 9_000_000_000 : 4_500_000_000;
-  const maxWeightProofSize = isBatch ? 300_000 : 150_000;
+  const maxWeightRefTime = 4_500_000_000 * innerCalls.length;
+  const maxWeightProofSize = 150_000 * innerCalls.length;
 
   console.log("# redeploy-escrowcore-wire-multisig");
   console.log(`profile:                 ${args.profile}`);
@@ -288,6 +319,7 @@ async function main() {
   if (!args.skipRevoke) console.log(`old EscrowCore (revoke): ${oldEscrow}`);
   else console.log(`old EscrowCore:          ${oldEscrow}  (left wired; --skip-revoke set)`);
   console.log(`treasury policy (H160):  ${treasuryPolicy}`);
+  console.log(`agent account (H160):    ${agentAccount}`);
   console.log(`owner multisig (SS58):   ${ownerRecord.multisig.ss58Address}`);
   console.log(`owner multisig (H160):   ${ownerRecord.multisig.ownerEnvValue}`);
   console.log(`threshold:               ${ownerRecord.threshold}`);
@@ -295,19 +327,20 @@ async function main() {
   console.log(`leg:                     ${timepoint ? `countersign (timepoint ${timepoint.height}/${timepoint.index})` : "initiate (timepoint None)"}`);
   console.log("");
 
-  console.log("## Inner EVM calldata (TreasuryPolicy):");
+  console.log("## Inner EVM calldata:");
   innerCalls.forEach((call, i) => {
     console.log(`  ${isBatch ? `[${i + 1}] ` : ""}call:    ${call.label}`);
+    console.log(`  ${isBatch ? "    " : ""}to:      ${call.to}`);
     console.log(`  ${isBatch ? "    " : ""}data:    ${call.data}`);
     console.log(`  ${isBatch ? "    " : ""}length:  ${(call.data.length - 2) / 2} bytes`);
     if (i < innerCalls.length - 1) console.log("");
   });
   console.log("");
 
-  console.log(`## Wrap as ${isBatch ? "utility.batchAll([revive.call, revive.call])" : "revive.call"}`);
+  console.log(`## Wrap as ${isBatch ? `utility.batchAll(${innerCalls.length} revive.call entries)` : "revive.call"}`);
   innerCalls.forEach((call, i) => {
     console.log(`  ${isBatch ? `[${i + 1}] ` : ""}revive.call:`);
-    console.log(`    dest (H160):         ${treasuryPolicy}`);
+    console.log(`    dest (H160):         ${call.to}`);
     console.log("    value:               0");
     console.log("    gasLimit:");
     console.log(`      refTime:           ${reviveRefTime.toLocaleString("en-US")}`);
@@ -349,10 +382,10 @@ async function main() {
   if (isBatch) {
     console.log("       pallet:    utility");
     console.log("       function:  batchAll");
-    console.log("       calls: (add two revive.call entries)");
+    console.log(`       calls: (add ${innerCalls.length} revive.call entries)`);
     innerCalls.forEach((call, i) => {
       console.log(`         [${i + 1}]: revive > call`);
-      console.log(`              dest:      ${treasuryPolicy}`);
+      console.log(`              dest:      ${call.to}`);
       console.log("              value:     0");
       console.log(`              gasLimit:  refTime ${reviveRefTime}, proofSize ${reviveProofSize}`);
       console.log(`              storageDepositLimit: ${storageDepositLimit}`);
@@ -361,7 +394,7 @@ async function main() {
   } else {
     console.log("       pallet:    revive");
     console.log("       function:  call");
-    console.log(`       dest:      ${treasuryPolicy}`);
+    console.log(`       dest:      ${innerCalls[0].to}`);
     console.log("       value:     0");
     console.log(`       gasLimit:  refTime ${reviveRefTime}, proofSize ${reviveProofSize}`);
     console.log(`       storageDepositLimit: ${storageDepositLimit}`);
@@ -419,7 +452,6 @@ async function main() {
     const payload = await buildOnchainPayload({
       api,
       blake2AsHex,
-      treasuryPolicy,
       innerCalls,
       reviveRefTime,
       reviveProofSize,

@@ -19,6 +19,7 @@ export const DEFAULT_TREASURY_POLICY_STATUS = {
     signerAddress: undefined,
     signerIsVerifier: false,
     escrowIsServiceOperator: false,
+    escrowIsAgentAccountEscrowOperator: false,
     agentAccountIsServiceOperator: false
   },
   readErrors: [],

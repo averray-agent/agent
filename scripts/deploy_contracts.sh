@@ -224,6 +224,7 @@ echo "Configuring TreasuryPolicy"
 send_tx "$TREASURY_POLICY" "setApprovedAsset(address,bool)" "$TOKEN_ADDRESS" true
 send_tx "$TREASURY_POLICY" "setServiceOperator(address,bool)" "$AGENT_ACCOUNT" true
 send_tx "$TREASURY_POLICY" "setServiceOperator(address,bool)" "$ESCROW_CORE" true
+send_tx "$AGENT_ACCOUNT" "setEscrowOperator(address,bool)" "$ESCROW_CORE" true
 if [[ -n "$XCM_WRAPPER" ]]; then
   send_tx "$TREASURY_POLICY" "setServiceOperator(address,bool)" "$XCM_WRAPPER" true
 fi

@@ -550,7 +550,7 @@ contract EscrowCore is ReentrancyGuard {
         job.state = JobState.Closed;
 
         _releaseClaimEconomics(job);
-        accounts.settleReservedTo(job.poster, job.asset, job.worker, job.reward);
+        accounts.settleReservedTo(settlementKey, job.poster, job.asset, job.worker, job.reward);
         if (job.opsReserve > 0) {
             accounts.refundReserved(job.poster, job.asset, job.opsReserve);
         }
@@ -593,7 +593,7 @@ contract EscrowCore is ReentrancyGuard {
         milestoneReleased[jobId][milestoneIndex] = true;
         job.released += amount;
 
-        accounts.settleReservedTo(job.poster, job.asset, job.worker, amount);
+        accounts.settleReservedTo(settlementKey, job.poster, job.asset, job.worker, amount);
 
         bool allReleased = true;
         for (uint256 i = 0; i < milestoneAmounts[jobId].length; i++) {
@@ -694,7 +694,8 @@ contract EscrowCore is ReentrancyGuard {
         string memory metadataURI
     ) internal {
         if (workerPayout > 0) {
-            accounts.settleReservedTo(job.poster, job.asset, job.worker, workerPayout);
+            bytes32 settlementKey = keccak256(abi.encode(jobId, bytes32("DISPUTE"), job.released, workerPayout));
+            accounts.settleReservedTo(settlementKey, job.poster, job.asset, job.worker, workerPayout);
             job.released += workerPayout;
             _releaseClaimEconomics(job);
         } else {

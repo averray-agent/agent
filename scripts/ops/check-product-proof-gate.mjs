@@ -177,6 +177,11 @@ function assertWorkerLoopCompletionEvidence(evidence, { apiBaseUrl }) {
   assert.equal(asset?.approved, true, "worker-loop evidence settlement asset must be approved");
   assert.equal(settlement.roles?.signerIsVerifier, true, "worker-loop evidence requires signer verifier role");
   assert.equal(settlement.roles?.escrowIsServiceOperator, true, "worker-loop evidence requires EscrowCore service-operator role");
+  assert.equal(
+    settlement.roles?.escrowIsAgentAccountEscrowOperator,
+    true,
+    "worker-loop evidence requires EscrowCore AgentAccountCore escrow-operator role"
+  );
   assert.equal(settlement.roles?.agentAccountIsServiceOperator, true, "worker-loop evidence requires AgentAccountCore service-operator role");
   assert.ok(settlement.roles?.signerAddress, "worker-loop evidence requires configured signer address");
 

@@ -10,6 +10,7 @@
 #   - TreasuryPolicy.pauser() matches the expected pauser hot-key
 #   - TreasuryPolicy.verifiers(VERIFIER) and TreasuryPolicy.arbitrators(ARBITRATOR) are true
 #   - TreasuryPolicy.serviceOperators({escrow,account}) are true
+#   - AgentAccountCore.escrowOperators(escrow) is true
 #   - TreasuryPolicy.approvedAssets(TOKEN) is true
 #   - TreasuryPolicy is NOT paused (unless --allow-paused is set)
 #
@@ -193,6 +194,7 @@ echo ""
 echo "Operator + verifier registration:"
 check_bool "serviceOperator(EscrowCore)"   "true" "$(call "$TREASURY_POLICY" "serviceOperators(address)(bool)" "$ESCROW_CORE")"
 check_bool "serviceOperator(AgentAccount)" "true" "$(call "$TREASURY_POLICY" "serviceOperators(address)(bool)" "$AGENT_ACCOUNT")"
+check_bool "agentAccountEscrowOperator(EscrowCore)" "true" "$(call "$AGENT_ACCOUNT" "escrowOperators(address)(bool)" "$ESCROW_CORE")"
 if [[ -n "$XCM_WRAPPER" ]]; then
   check_bool "serviceOperator(XcmWrapper)" "true" "$(call "$TREASURY_POLICY" "serviceOperators(address)(bool)" "$XCM_WRAPPER")"
 fi

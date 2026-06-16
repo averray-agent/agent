@@ -54,6 +54,7 @@ contract ExternalSchemaRegistrationTest is Test {
         dot = new MockERC20("Mock DOT", "mDOT");
         policy.setApprovedAsset(address(dot), true);
         policy.setServiceOperator(address(escrow), true);
+        accounts.setEscrowOperator(address(escrow), true);
         policy.setServiceOperator(address(accounts), true);
         policy.setServiceOperator(address(this), true);
 

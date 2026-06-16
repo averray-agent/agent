@@ -101,6 +101,7 @@ const READ_ABI = [
 const WRITE_ABI = [
   "function setVerifier(address verifier, bool approved)",
   "function setServiceOperator(address operator, bool approved)",
+  "function setEscrowOperator(address escrowOperator, bool approved)",
   "function setTrustedSchemaIssuer(address issuer, bool approved)",
   "function setArbitrator(address arbitrator, bool approved)",
   "function setApprovedAsset(address asset, bool approved)",
@@ -109,6 +110,7 @@ const WRITE_ABI = [
 ];
 
 const AGENT_ACCOUNT_READ_ABI = [
+  "function escrowOperators(address escrowOperator) view returns (bool)",
   // Matches the AssetPosition struct in contracts/AgentAccountCore.sol: the
   // auto-generated getter returns the six fields in declaration order. We
   // only consume `liquid` (the first slot), but ethers v6 demands the full
@@ -395,6 +397,7 @@ async function main() {
     signerIsVerifier,
     signerIsOperator,
     escrowIsOperator,
+    escrowIsAgentAccountEscrowOperator,
     agentAccountIsOperator,
     arbitratorIsApproved,
     usdcIsApproved,
@@ -417,6 +420,7 @@ async function main() {
     policy.verifiers(backendSigner),
     policy.serviceOperators(backendSigner),
     policy.serviceOperators(escrowAddress),
+    agentAccount.escrowOperators(escrowAddress),
     policy.serviceOperators(agentAccountAddress),
     policy.arbitrators(expectedArbitrator),
     policy.approvedAssets(usdcAddress),
@@ -511,7 +515,8 @@ async function main() {
   console.log(`verifiers(${short(backendSigner)})         ${signerIsVerifier ? "✅" : "❌"}  ${signerIsVerifier}`);
   console.log(`serviceOperators(${short(backendSigner)})  ${signerIsOperator ? "✅" : "❌"}  ${signerIsOperator}  (backend signer must be an operator to call EscrowCore.claimJobFor)`);
   console.log(`serviceOperators(escrow)         ${escrowIsOperator ? "✅" : "❌"}  ${escrowIsOperator}`);
-  console.log(`serviceOperators(agentAccount)   ${agentAccountIsOperator ? "✅" : "❌"}  ${agentAccountIsOperator}  (defensive — strictly required for v1 single-payout is escrow only)`);
+  console.log(`AgentAccountCore.escrowOperators(escrow) ${escrowIsAgentAccountEscrowOperator ? "✅" : "❌"}  ${escrowIsAgentAccountEscrowOperator}`);
+  console.log(`serviceOperators(agentAccount)   ${agentAccountIsOperator ? "✅" : "❌"}  ${agentAccountIsOperator}  (required for AgentAccountCore.recordOutflow accounting)`);
   console.log(`arbitrators(${short(expectedArbitrator)})  ${arbitratorIsApproved ? "✅" : "❌"}  ${arbitratorIsApproved}  (required for resolveDispute)`);
   console.log(`approvedAssets(USDC)             ${usdcIsApproved ? "✅" : "❌"}  ${usdcIsApproved}`);
   if (schemaIssuerStatuses.length > 0) {
@@ -630,6 +635,9 @@ async function main() {
   }
   if (!escrowIsOperator) {
     fixes.push(buildCall("setServiceOperator", [escrowAddress, true], policyAddress));
+  }
+  if (!escrowIsAgentAccountEscrowOperator) {
+    fixes.push(buildCall("setEscrowOperator", [escrowAddress, true], agentAccountAddress));
   }
   if (!agentAccountIsOperator) {
     fixes.push(buildCall("setServiceOperator", [agentAccountAddress, true], policyAddress));

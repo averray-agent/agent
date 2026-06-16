@@ -13,10 +13,16 @@ import {
 const TREASURY_POLICY_ABI = [
   "function setServiceOperator(address account, bool allowed)"
 ];
-const iface = new Interface(TREASURY_POLICY_ABI);
+const AGENT_ACCOUNT_ABI = [
+  "function setEscrowOperator(address escrowOperator, bool approved)"
+];
+const policyIface = new Interface(TREASURY_POLICY_ABI);
+const accountIface = new Interface(AGENT_ACCOUNT_ABI);
 
 const NEW = "0xb8fd8A932F69bD5E39700b7cf6D2920aF84d1B27";
 const OLD = "0x7BB8fea44bDeE9870cF27c1dB616E7017BC38b0a";
+const TREASURY_POLICY = "0x648Cc5fdE94435992296C4e5ac642d18bB64c12B";
+const AGENT_ACCOUNT = "0x71B111d8c9DF84Be26cb9067D27dAd7A2d5E7e08";
 
 test("parseArgs defaults profile=testnet, skipRevoke=false", () => {
   const args = parseArgs([]);
@@ -48,32 +54,62 @@ test("parseArgs reads --skip-revoke + --old-escrow override", () => {
   assert.equal(args.skipRevoke, true);
 });
 
-test("buildInnerCalls produces two calls by default (batched)", () => {
-  const calls = buildInnerCalls({ iface, newEscrow: NEW, oldEscrow: OLD, skipRevoke: false });
-  assert.equal(calls.length, 2);
-  assert.match(calls[0].label, /approve new/u);
-  assert.match(calls[1].label, /revoke stale/u);
+function buildFixtureCalls({ skipRevoke = false } = {}) {
+  return buildInnerCalls({
+    policyIface,
+    accountIface,
+    treasuryPolicy: TREASURY_POLICY,
+    agentAccount: AGENT_ACCOUNT,
+    newEscrow: NEW,
+    oldEscrow: OLD,
+    skipRevoke
+  });
+}
+
+test("buildInnerCalls produces four calls by default (batched approve + revoke across both contracts)", () => {
+  const calls = buildFixtureCalls();
+  assert.equal(calls.length, 4);
+  assert.match(calls[0].label, /AgentAccountCore\.setEscrowOperator/u);
+  assert.match(calls[1].label, /TreasuryPolicy\.setServiceOperator/u);
+  assert.match(calls[2].label, /AgentAccountCore\.setEscrowOperator/u);
+  assert.match(calls[3].label, /TreasuryPolicy\.setServiceOperator/u);
+  assert.equal(calls[0].to, AGENT_ACCOUNT);
+  assert.equal(calls[1].to, TREASURY_POLICY);
+  assert.equal(calls[2].to, AGENT_ACCOUNT);
+  assert.equal(calls[3].to, TREASURY_POLICY);
   assert.equal(
     calls[0].data,
-    iface.encodeFunctionData("setServiceOperator", [NEW, true])
+    accountIface.encodeFunctionData("setEscrowOperator", [NEW, true])
   );
   assert.equal(
     calls[1].data,
-    iface.encodeFunctionData("setServiceOperator", [OLD, false])
+    policyIface.encodeFunctionData("setServiceOperator", [NEW, true])
+  );
+  assert.equal(
+    calls[2].data,
+    accountIface.encodeFunctionData("setEscrowOperator", [OLD, false])
+  );
+  assert.equal(
+    calls[3].data,
+    policyIface.encodeFunctionData("setServiceOperator", [OLD, false])
   );
 });
 
-test("buildInnerCalls produces one call when --skip-revoke is set", () => {
-  const calls = buildInnerCalls({ iface, newEscrow: NEW, oldEscrow: OLD, skipRevoke: true });
-  assert.equal(calls.length, 1);
+test("buildInnerCalls produces two approve calls when --skip-revoke is set", () => {
+  const calls = buildFixtureCalls({ skipRevoke: true });
+  assert.equal(calls.length, 2);
   assert.equal(
     calls[0].data,
-    iface.encodeFunctionData("setServiceOperator", [NEW, true])
+    accountIface.encodeFunctionData("setEscrowOperator", [NEW, true])
+  );
+  assert.equal(
+    calls[1].data,
+    policyIface.encodeFunctionData("setServiceOperator", [NEW, true])
   );
 });
 
 test("setServiceOperator(0xb8fd…, true) encodes to the same calldata used by Apps recipe", () => {
-  const data = iface.encodeFunctionData("setServiceOperator", [NEW, true]);
+  const data = policyIface.encodeFunctionData("setServiceOperator", [NEW, true]);
   assert.equal(
     data,
     "0xeea03c28000000000000000000000000b8fd8a932f69bd5e39700b7cf6d2920af84d1b270000000000000000000000000000000000000000000000000000000000000001"
@@ -81,10 +117,18 @@ test("setServiceOperator(0xb8fd…, true) encodes to the same calldata used by A
 });
 
 test("setServiceOperator(0x7BB8…, false) encodes to the revoke calldata", () => {
-  const data = iface.encodeFunctionData("setServiceOperator", [OLD, false]);
+  const data = policyIface.encodeFunctionData("setServiceOperator", [OLD, false]);
   assert.equal(
     data,
     "0xeea03c280000000000000000000000007bb8fea44bdee9870cf27c1db616e7017bc38b0a0000000000000000000000000000000000000000000000000000000000000000"
+  );
+});
+
+test("setEscrowOperator(0xb8fd…, true) encodes to the ledger-authority calldata", () => {
+  const data = accountIface.encodeFunctionData("setEscrowOperator", [NEW, true]);
+  assert.equal(
+    data,
+    "0x7205676e000000000000000000000000b8fd8a932f69bd5e39700b7cf6d2920af84d1b270000000000000000000000000000000000000000000000000000000000000001"
   );
 });
 
@@ -135,11 +179,10 @@ test(
     const provider = new WsProvider(wsUrl);
     const api = await ApiPromise.create({ provider, noInitWarn: true, throwOnConnect: true });
     try {
-      const innerCalls = buildInnerCalls({ iface, newEscrow: NEW, oldEscrow: OLD, skipRevoke: false });
+      const innerCalls = buildFixtureCalls();
       const payload = await buildOnchainPayload({
         api,
         blake2AsHex,
-        treasuryPolicy: "0x648Cc5fdE94435992296C4e5ac642d18bB64c12B",
         innerCalls,
         reviveRefTime: 4_000_000_000,
         reviveProofSize: 100_000,
@@ -170,8 +213,8 @@ test(
 );
 
 test("verifyEvmCalldataEmbedded flags missing calldata inside the outer SCALE hex", () => {
-  const NEW_DATA = iface.encodeFunctionData("setServiceOperator", [NEW, true]);
-  const OLD_DATA = iface.encodeFunctionData("setServiceOperator", [OLD, false]);
+  const NEW_DATA = policyIface.encodeFunctionData("setServiceOperator", [NEW, true]);
+  const OLD_DATA = policyIface.encodeFunctionData("setServiceOperator", [OLD, false]);
   const innerCalls = [
     { label: "approve new", data: NEW_DATA },
     { label: "revoke old", data: OLD_DATA }

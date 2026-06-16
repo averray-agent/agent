@@ -48,6 +48,7 @@ contract AgentPlatformTest is Test {
 
         policy.setApprovedAsset(address(dot), true);
         policy.setServiceOperator(address(escrow), true);
+        accounts.setEscrowOperator(address(escrow), true);
         policy.setServiceOperator(address(accounts), true);
         policy.setServiceOperator(address(this), true);
         policy.setVerifier(verifier, true);
@@ -177,6 +178,68 @@ contract AgentPlatformTest is Test {
         vm.prank(worker);
         (bool ok,) = address(escrow).call(abi.encodeCall(escrow.submitWorkFor, (jobId, worker, keccak256("evidence"))));
         require(!ok, "EXPECTED_UNAUTHORIZED_REVERT");
+    }
+
+    function testServiceOperatorCannotSettleReserveWithoutEscrowLifecycle() public {
+        bytes32 jobId = keccak256("job/direct-settle/blocked");
+        address attacker = address(0xA77A);
+
+        vm.prank(poster);
+        escrow.createSinglePayoutJob(
+            jobId, address(dot), 100 ether, 10 ether, 5 ether, 1 days, bytes32("AUTO"), bytes32("CODING"), SPEC_HASH
+        );
+
+        bytes32 settlementKey = keccak256(abi.encode(jobId, uint256(0), uint256(100 ether)));
+        (bool ok, bytes memory data) = address(accounts)
+            .call(abi.encodeCall(accounts.settleReservedTo, (settlementKey, poster, address(dot), attacker, 100 ether)));
+        require(!ok, "EXPECTED_ESCROW_ROLE_REVERT");
+        require(bytes4(data) == AgentAccountCore.Unauthorized.selector, "EXPECTED_UNAUTHORIZED_SELECTOR");
+
+        vm.prank(worker);
+        escrow.claimJob(jobId);
+        vm.prank(worker);
+        escrow.submitWork(jobId, keccak256("work-after-blocked-drain"));
+        vm.prank(verifier);
+        escrow.resolveSinglePayout(jobId, true, bytes32("OK"), "ipfs://badge/direct-settle", REASONING_HASH);
+
+        (uint256 attackerLiquid,,,,,) = accounts.positions(attacker, address(dot));
+        (uint256 workerLiquid,,,,,) = accounts.positions(worker, address(dot));
+        assertEq(attackerLiquid, 0);
+        assertEq(workerLiquid, WORKER_DEPOSIT + 100 ether);
+    }
+
+    function testSettlementPrimitiveRejectsDuplicateSettlementKey() public {
+        bytes32 settlementKey = keccak256("ledger-settlement/duplicate");
+
+        vm.prank(poster);
+        accounts.reserveForJob(poster, address(dot), 2 ether);
+
+        accounts.setEscrowOperator(address(this), true);
+        accounts.settleReservedTo(settlementKey, poster, address(dot), worker, 1 ether);
+
+        (bool ok, bytes memory data) = address(accounts)
+            .call(abi.encodeCall(accounts.settleReservedTo, (settlementKey, poster, address(dot), worker, 1 ether)));
+        require(!ok, "EXPECTED_DUPLICATE_SETTLEMENT_REVERT");
+        require(
+            bytes4(data) == AgentAccountCore.SettlementAlreadyExecuted.selector, "EXPECTED_SETTLEMENT_ALREADY_EXECUTED"
+        );
+    }
+
+    function testRefundReservedRequiresEscrowRoleAndUnpausedProtocol() public {
+        vm.prank(poster);
+        accounts.reserveForJob(poster, address(dot), 1 ether);
+
+        (bool unauthorizedOk, bytes memory unauthorizedData) =
+            address(accounts).call(abi.encodeCall(accounts.refundReserved, (poster, address(dot), 1 ether)));
+        require(!unauthorizedOk, "EXPECTED_REFUND_ESCROW_ROLE_REVERT");
+        require(bytes4(unauthorizedData) == AgentAccountCore.Unauthorized.selector, "EXPECTED_UNAUTHORIZED_SELECTOR");
+
+        accounts.setEscrowOperator(address(this), true);
+        policy.setPaused(true);
+        (bool pausedOk, bytes memory pausedData) =
+            address(accounts).call(abi.encodeCall(accounts.refundReserved, (poster, address(dot), 1 ether)));
+        require(!pausedOk, "EXPECTED_PAUSED_REFUND_REVERT");
+        require(bytes4(pausedData) == AgentAccountCore.ProtocolPaused.selector, "EXPECTED_PROTOCOL_PAUSED_SELECTOR");
     }
 
     function testOperatorRelayedOpenDisputeUsesParticipantIdentity() public {

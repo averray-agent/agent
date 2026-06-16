@@ -3,11 +3,13 @@ export const ZERO_BYTES32 = `0x${"0".repeat(64)}`;
 export const AGENT_ACCOUNT_ABI = [
   "function positions(address account, address asset) view returns (uint256 liquid, uint256 reserved, uint256 strategyAllocated, uint256 collateralLocked, uint256 jobStakeLocked, uint256 debtOutstanding)",
   "function getBorrowCapacity(address account, address asset) view returns (uint256)",
+  "function escrowOperators(address escrowOperator) view returns (bool)",
   "function deposit(address asset, uint256 amount)",
   "function reserveForJob(address account, address asset, uint256 amount)",
   "function reserveForRecurringTemplate(address account, address asset, bytes32 templateId, uint256 amount)",
   "function consumeRecurringTemplateReserve(address account, address asset, bytes32 templateId, uint256 amount)",
   "function recurringTemplateReserves(address account, address asset, bytes32 templateId) view returns (uint256)",
+  "function setEscrowOperator(address escrowOperator, bool approved)",
   "function lockJobStake(address account, address asset, uint256 amount)",
   "function releaseJobStake(address account, address asset, uint256 amount)",
   "function slashJobStake(address account, address asset, uint256 amount, address posterRecipient)",

@@ -917,6 +917,7 @@ test("runHostedWorkerLoop fails closed before mutation when settlement is not re
               signerAddress: "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519",
               signerIsVerifier: false,
               escrowIsServiceOperator: true,
+              escrowIsAgentAccountEscrowOperator: true,
               agentAccountIsServiceOperator: true
             }
           });
@@ -1284,6 +1285,7 @@ function settlementReadyStatus(overrides = {}) {
           signerAddress: "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519",
           signerIsVerifier: true,
           escrowIsServiceOperator: true,
+          escrowIsAgentAccountEscrowOperator: true,
           agentAccountIsServiceOperator: true
         },
         signerFunding: signerFundingReady(),
