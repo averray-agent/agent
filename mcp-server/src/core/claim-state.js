@@ -191,12 +191,19 @@ export function countClaimAttempts(sessions = undefined, session = undefined) {
     if (!candidate?.sessionId || seen.has(candidate.sessionId)) continue;
     seen.add(candidate.sessionId);
     // A claim whose on-chain submit failed (infra revert / RPC outage) and that
-    // never reached a real submission must NOT burn the job's retry budget — the
-    // worker never got a fair shot. submittedAt is the ground-truth that a real
-    // submission landed (set only on the → submitted transition); an infra-failed
-    // claim carries submitFailedAt but no submittedAt. Genuine no-shows (claim
-    // left to expire without an attempt) and rejections still count.
-    if (candidate.submitFailedAt && !candidate.submittedAt) {
+    // never reached a real submission must NOT burn the job's retry budget WHILE
+    // the claim is still live — the worker can re-submit on the same claim, so it
+    // gets a fair shot. submittedAt is the ground-truth that a real submission
+    // landed (set only on the → submitted transition). But once the claim reaches
+    // a TERMINAL state (it expired / timed out without a successful re-submit), it
+    // must count — otherwise a job whose submit always reverts could be claimed
+    // forever and never reach retry_limit_exhausted (anti-grief). Genuine no-shows
+    // and rejections still count regardless.
+    if (
+      candidate.submitFailedAt &&
+      !candidate.submittedAt &&
+      !TERMINAL_SESSION_STATUSES.has(candidate.status)
+    ) {
       continue;
     }
     if (candidate.claimedAt || candidate.status) {
