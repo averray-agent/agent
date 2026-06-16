@@ -559,13 +559,29 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-      - name: Fail if Hermes post-deploy verification failed
+      # ADVISORY (not a gate). By this point the averray deploy has already
+      # completed and passed its own readiness wait + rollback checks, so the
+      # backend's health is established independently. Hermes post-deploy
+      # verification runs inside the avg-hermes testbed sidecar — a Hermes-side
+      # problem (e.g. avg-hermes crash-looping on an /opt/data/skills volume
+      # permission, which red-flagged every deploy on 2026-06-16 while
+      # api.averray.com/health was a clean 200 the whole time) must NOT red an
+      # otherwise-good averray deploy. So surface a non-zero result loudly as a
+      # warning annotation + step summary instead of exiting 1. The Hosted
+      # Worker Canary remains the hard gate for the brokered
+      # claim/submit/settle path.
+      - name: Surface Hermes post-deploy verification result (advisory)
         if: always() && env.DEPLOY_RUN_HERMES_POST_DEPLOY == '1' && steps.hermes_post_deploy.outcome != 'skipped' && steps.hermes_post_deploy.outputs.exit_status != '0'
         run: |
-          echo "Hermes post-deploy verification failed with status ${HERMES_STATUS:-unknown}."
-          exit 1
+          echo "::warning title=Hermes post-deploy verification not OK::Hermes returned status ${HERMES_STATUS:-unknown} (outcome=${HERMES_OUTCOME:-unknown}). The averray deploy completed and passed its own health checks; this is an advisory signal about the Hermes testbed sidecar, not a deploy failure. Inspect the uploaded hermes-post-deploy log."
+          {
+            echo "> [!WARNING]"
+            echo "> **Hermes post-deploy verification advisory** — returned status \`${HERMES_STATUS:-unknown}\` (outcome \`${HERMES_OUTCOME:-unknown}\`)."
+            echo "> The averray deploy itself succeeded and is **not** gated on this. See the uploaded \`hermes-post-deploy\` log, and the Hosted Worker Canary for the brokered claim/submit/settle path."
+          } >> "$GITHUB_STEP_SUMMARY"
         env:
           HERMES_STATUS: ${{ steps.hermes_post_deploy.outputs.exit_status }}
+          HERMES_OUTCOME: ${{ steps.hermes_post_deploy.outputs.outcome }}
 
       # Tier-1 surface sweep (depre-dev/averray-reference-agent). Read-only:
       # walks the public surfaces, flags console/network errors per route, and
