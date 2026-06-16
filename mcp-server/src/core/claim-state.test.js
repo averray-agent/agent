@@ -178,3 +178,22 @@ test("countClaimAttempts still counts normal claims, no-show expiries, and rejec
     1
   );
 });
+
+test("countClaimAttempts counts an infra-failed claim once it reaches a terminal state (retry budget must exhaust)", () => {
+  // While the claim is still live (non-terminal), an infra-failed submit is skipped
+  // so the worker can re-submit on the same claim (preserves the original guard)...
+  assert.equal(
+    countClaimAttempts([{ sessionId: "live", claimedAt: "t", status: "claimed", submitFailedAt: "t2" }]),
+    0
+  );
+  // ...but once it expires / times out without a successful re-submit, it MUST count —
+  // otherwise a job whose submit always reverts could be claimed forever.
+  assert.equal(
+    countClaimAttempts([{ sessionId: "exp", claimedAt: "t", status: "expired", submitFailedAt: "t2" }]),
+    1
+  );
+  assert.equal(
+    countClaimAttempts([{ sessionId: "to", claimedAt: "t", status: "timed_out", submitFailedAt: "t2" }]),
+    1
+  );
+});

@@ -663,3 +663,74 @@ test("submitWork stamps submitFailedAt and re-throws on a chain-revert, preservi
   // The infra-failed attempt must NOT burn the job's retry budget.
   assert.equal(countClaimAttempts([after]), 0);
 });
+
+test("submitWork self-heals a mined-but-receipt-lost submit (on-chain already Submitted) instead of stranding it", async () => {
+  const stateStore = new MemoryStateStore();
+  const job = makeJob();
+  // submitWork throws (lost receipt) but the tx actually mined → on-chain job is Submitted (3).
+  const gateway = {
+    isEnabled: () => true,
+    submitWork: async () => {
+      throw new Error("RPC connection dropped before tx.wait() returned");
+    },
+    getJob: async () => ({ state: 3 })
+  };
+  const service = new JobExecutionService(stateStore, gateway, () => job);
+
+  const claimed = transitionSession(
+    { sessionId: `${job.id}:0xa1`, wallet: WALLET, jobId: job.id, chainJobId: `${job.id}:0xa1`, protocolHistory: [] },
+    "claimed",
+    { reason: "job_claimed" }
+  );
+  await stateStore.upsertSession(claimed);
+
+  const submitted = await service.submitWork(claimed.sessionId, "http", {
+    summary: "Auth flow has one blocker.",
+    findings: [{ severity: "high", file: "frontend/auth.js", issue: "x", recommendation: "y" }],
+    risk_level: "high",
+    files_touched: ["frontend/auth.js"],
+    recommended_next_step: "request_changes"
+  });
+
+  assert.equal(submitted.status, "submitted", "session advanced to submitted, not stranded");
+  assert.equal(submitted.submitFailedAt, undefined, "not marked as an infra failure");
+  const stored = await stateStore.getSession(claimed.sessionId);
+  assert.equal(stored.status, "submitted");
+});
+
+test("submitWork still stamps submitFailedAt + rethrows on a true revert (on-chain not Submitted)", async () => {
+  const stateStore = new MemoryStateStore();
+  const job = makeJob();
+  // submitWork reverts AND the on-chain job is still Claimed (2) → genuine failure.
+  const gateway = {
+    isEnabled: () => true,
+    submitWork: async () => {
+      throw new BlockchainRevertError("submit reverted", { reason: "InvalidState" });
+    },
+    getJob: async () => ({ state: 2 })
+  };
+  const service = new JobExecutionService(stateStore, gateway, () => job);
+
+  const claimed = transitionSession(
+    { sessionId: `${job.id}:0xb2`, wallet: WALLET, jobId: job.id, chainJobId: `${job.id}:0xb2`, protocolHistory: [] },
+    "claimed",
+    { reason: "job_claimed" }
+  );
+  await stateStore.upsertSession(claimed);
+
+  await assert.rejects(
+    () =>
+      service.submitWork(claimed.sessionId, "http", {
+        summary: "Auth flow has one blocker.",
+        findings: [{ severity: "high", file: "frontend/auth.js", issue: "x", recommendation: "y" }],
+        risk_level: "high",
+        files_touched: ["frontend/auth.js"],
+        recommended_next_step: "request_changes"
+      }),
+    (error) => error.code === "blockchain_revert"
+  );
+
+  const after = await stateStore.getSession(claimed.sessionId);
+  assert.ok(after.submitFailedAt, "true revert is still stamped as an infra failure");
+  assert.equal(after.status, "claimed");
+});

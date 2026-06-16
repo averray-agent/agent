@@ -34,6 +34,10 @@ import {
 } from "./maintainer-surface-policy.js";
 import { claimExpiresAt, countClaimAttempts, isExpiredClaim, isTerminalSession } from "./claim-state.js";
 
+// EscrowCore JobState enum: None=0, Open=1, Claimed=2, Submitted=3, Rejected=4,
+// Disputed=5, Closed=6. Used to reconcile a mined-but-receipt-lost submit.
+const ESCROW_JOB_STATE_SUBMITTED = 3;
+
 export class JobExecutionService {
   constructor(
     stateStore,
@@ -265,16 +269,22 @@ export class JobExecutionService {
           session.wallet
         );
       } catch (error) {
-        // The submission passed validation but the on-chain submit failed (a
-        // contract revert or an RPC outage) — an infra failure, not a delivered
-        // attempt. Stamp the still-claimed session so countClaimAttempts won't
-        // burn the job's retry budget for it, then surface the error so the
-        // worker can retry the submit on the same claim.
-        await this.stateStore.upsertSession({
-          ...refreshed,
-          submitFailedAt: new Date().toISOString()
-        });
-        throw error;
+        // Reconcile against on-chain state before treating this as a failed
+        // attempt: a mined-but-receipt-lost submit (a flaky RPC dropping the
+        // connection before tx.wait() returns) still advanced the job to
+        // Submitted on-chain. If so, the submit really landed — fall through to
+        // the normal 'submitted' transition so the (auto-)verifier can settle it,
+        // instead of stranding the job and its escrowed reward with submitFailedAt.
+        // Only a genuine failure (true revert, or the chain unreachable so we
+        // cannot confirm) stamps submitFailedAt and rethrows.
+        const landed = await this.onChainSubmitLanded(session.chainJobId ?? session.jobId);
+        if (!landed) {
+          await this.stateStore.upsertSession({
+            ...refreshed,
+            submitFailedAt: new Date().toISOString()
+          });
+          throw error;
+        }
       }
     }
     const protocolHistory = [...new Set([...refreshed.protocolHistory, protocol])];
@@ -300,6 +310,19 @@ export class JobExecutionService {
       schemaRef: job.outputSchemaRef
     });
     return persisted;
+  }
+
+  // True only if the on-chain job has already advanced to Submitted (i.e. a prior
+  // submitWork tx mined even though its receipt was lost). Any read failure — e.g.
+  // the same RPC outage that dropped the receipt — returns false, so the caller
+  // safely treats the submit as a failed attempt rather than assuming it landed.
+  async onChainSubmitLanded(jobId) {
+    try {
+      const job = await this.blockchainGateway?.getJob?.(jobId);
+      return Number(job?.state) === ESCROW_JOB_STATE_SUBMITTED;
+    } catch {
+      return false;
+    }
   }
 
   async resumeSession(sessionId) {
