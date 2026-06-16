@@ -871,3 +871,79 @@ test("verifySubmission surfaces the on-chain payout tx on the result and the ses
   const stored = await stateStore.getSession(submitted.sessionId);
   assert.deepEqual(stored.payoutTx, payoutReceipt);
 });
+
+function makeIdempotencyHarness(onChainState) {
+  const stateStore = new MemoryStateStore();
+  const job = {
+    id: "idem-001",
+    outputSchemaRef: "schema://jobs/release-readiness-output",
+    verifierMode: "deterministic",
+    verifierConfig: {
+      version: 1,
+      handler: "deterministic",
+      expectedOutputs: ["release_id", "checks_passed", "go_no_go"],
+      matchMode: "contains_all"
+    }
+  };
+  const claimed = transitionSession({
+    sessionId: "idem-001:0xabc",
+    wallet: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    jobId: "idem-001",
+    submission: normalizeSubmission({
+      release_id: "release-2026-06-15",
+      checks_passed: ["api-health"],
+      checks_failed: [],
+      blockers: [],
+      go_no_go: "go"
+    })
+  }, "claimed", { reason: "job_claimed" });
+  const platformService = {
+    resumeSession: (id) => stateStore.getSession(id),
+    getJobDefinition: () => job,
+    ingestVerification: async (id, verdict) => {
+      const current = await stateStore.getSession(id);
+      const updated = transitionSession(current, verdict.outcome === "approved" ? "resolved" : "rejected", {
+        reason: "verification_resolved"
+      });
+      await stateStore.upsertSession(updated);
+      return updated;
+    }
+  };
+  const calls = { settle: 0 };
+  const blockchainGateway = {
+    isEnabled: () => true,
+    getJob: async () => ({ state: onChainState }),
+    resolveSinglePayout: async () => {
+      calls.settle += 1;
+      return { txHash: "0xpayout", blockNumber: 1, status: 1 };
+    }
+  };
+  return { stateStore, claimed, platformService, blockchainGateway, calls };
+}
+
+test("verifySubmission is idempotent: skips re-settling an already-resolved (Closed) on-chain job and still converges the session", async () => {
+  const h = makeIdempotencyHarness(6); // EscrowCore JobState.Closed — a prior attempt already settled
+  const submitted = transitionSession(h.claimed, "submitted", { reason: "work_submitted" });
+  await h.stateStore.upsertSession(submitted);
+
+  const service = new VerifierService(h.platformService, h.stateStore, h.blockchainGateway);
+  const result = await service.verifySubmission({ sessionId: submitted.sessionId });
+
+  assert.equal(h.calls.settle, 0, "must NOT re-settle a job the chain already resolved (would revert InvalidState)");
+  assert.equal(result.outcome, "approved");
+  const stored = await h.stateStore.getSession(submitted.sessionId);
+  assert.equal(stored.status, "resolved", "session converges to resolved despite the earlier persistence failure");
+});
+
+test("verifySubmission still settles when the on-chain job is genuinely unsettled (Submitted)", async () => {
+  const h = makeIdempotencyHarness(3); // EscrowCore JobState.Submitted — not yet settled
+  const submitted = transitionSession(h.claimed, "submitted", { reason: "work_submitted" });
+  await h.stateStore.upsertSession(submitted);
+
+  const service = new VerifierService(h.platformService, h.stateStore, h.blockchainGateway);
+  const result = await service.verifySubmission({ sessionId: submitted.sessionId });
+
+  assert.equal(h.calls.settle, 1, "an unsettled job must still be settled exactly once");
+  assert.equal(result.outcome, "approved");
+  assert.deepEqual(result.payoutTx, { txHash: "0xpayout", blockNumber: 1, status: 1 });
+});

@@ -9,6 +9,13 @@ import { normalizeSubmission } from "../core/submission.js";
 import { getJobSchema } from "../core/job-schema-registry.js";
 import { normalizeSubmitPayloadShape, validateSubmissionContract } from "../core/job-execution-service.js";
 
+// EscrowCore JobState enum: None=0, Open=1, Claimed=2, Submitted=3, Rejected=4,
+// Disputed=5, Closed=6. resolveSinglePayout only runs from Submitted and reverts
+// once the job has been resolved (approved→Closed, rejected→Rejected) — used to
+// make verifySubmission idempotent across a post-payout persistence failure.
+const ESCROW_JOB_STATE_REJECTED = 4;
+const ESCROW_JOB_STATE_CLOSED = 6;
+
 export class VerifierService {
   constructor(platformService, stateStore, blockchainGateway = undefined, registry = new VerifierRegistry()) {
     this.platformService = platformService;
@@ -33,8 +40,18 @@ export class VerifierService {
       details: verdict.details ?? null
     });
 
+    // Idempotent settle. resolveSinglePayout mutates on-chain state BEFORE the
+    // verdict is persisted below; if a prior attempt settled on-chain but then
+    // failed to persist (e.g. a Redis blip), the session is left 'submitted'
+    // while the reward was already paid, and a naive retry would call
+    // resolveSinglePayout again and revert InvalidState (the contract only
+    // settles from Submitted) — wedging the session forever. So skip the settle
+    // when the on-chain job has already been resolved, and let ingestVerification
+    // (re-run with the same deterministic verdict) converge submitted →
+    // resolved/rejected. Only a genuinely-unsettled job is settled here.
     let payoutTx;
-    if (this.blockchainGateway?.isEnabled() && this.blockchainGateway.resolveSinglePayout) {
+    const alreadySettled = await this.onChainAlreadySettled(chainJobId);
+    if (!alreadySettled && this.blockchainGateway?.isEnabled() && this.blockchainGateway.resolveSinglePayout) {
       payoutTx = await this.blockchainGateway.resolveSinglePayout(
         chainJobId,
         verdict.outcome === "approved",
@@ -63,6 +80,23 @@ export class VerifierService {
     };
 
     return this.stateStore.upsertVerificationResult(sessionId, result);
+  }
+
+  // True if the on-chain job has already been resolved by a prior settle
+  // (approved → Closed, rejected → Rejected), i.e. resolveSinglePayout must not
+  // run again. Any read failure returns false (we cannot confirm), so the caller
+  // falls back to attempting the settle rather than silently skipping a real one.
+  async onChainAlreadySettled(jobId) {
+    try {
+      if (!this.blockchainGateway?.isEnabled?.() || typeof this.blockchainGateway.getJob !== "function") {
+        return false;
+      }
+      const job = await this.blockchainGateway.getJob(jobId);
+      const state = Number(job?.state);
+      return state === ESCROW_JOB_STATE_REJECTED || state === ESCROW_JOB_STATE_CLOSED;
+    } catch {
+      return false;
+    }
   }
 
   async replayVerification(sessionId) {
