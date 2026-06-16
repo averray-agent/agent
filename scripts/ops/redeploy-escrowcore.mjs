@@ -18,8 +18,9 @@
  *   1. deploy    EVM CREATE of a fresh EscrowCore, signed by the deployer
  *                EOA (deployments.deployer). One transaction.
  *
- *   2. wire      TreasuryPolicy.setServiceOperator(new, true) — and
- *                (recommended) setServiceOperator(old, false) batched in
+ *   2. wire      AgentAccountCore.setEscrowOperator(new, true) plus
+ *                TreasuryPolicy.setServiceOperator(new, true) — and
+ *                (recommended) revoke both old roles batched in
  *                utility.batchAll. The owner is the H160 of the SS58 2-of-3
  *                multisig 12nHTKYf… — no private key. Generate the Apps
  *                recipe via:
@@ -95,6 +96,8 @@ const TREASURY_POLICY_ABI = [
 ];
 
 const AGENT_ACCOUNT_READ_ABI = [
+  "function escrowOperators(address escrowOperator) view returns (bool)",
+  "function setEscrowOperator(address escrowOperator, bool approved)",
   "function positions(address account, address asset) view returns (uint256 liquid,uint256 reserved,uint256 strategyAllocated,uint256 collateralLocked,uint256 jobStakeLocked,uint256 debtOutstanding)"
 ];
 
@@ -350,11 +353,13 @@ async function planDeploy({ provider, manifest, artifact }) {
 
 async function readWiringState({ provider, manifest }) {
   const treasury = new Contract(manifest.contracts.treasuryPolicy, TREASURY_POLICY_ABI, provider);
-  const [owner, oldIsOperator] = await Promise.all([
+  const accounts = new Contract(manifest.contracts.agentAccountCore, AGENT_ACCOUNT_READ_ABI, provider);
+  const [owner, oldIsOperator, oldIsEscrowOperator] = await Promise.all([
     treasury.owner(),
-    treasury.serviceOperators(manifest.contracts.escrowCore)
+    treasury.serviceOperators(manifest.contracts.escrowCore),
+    accounts.escrowOperators(manifest.contracts.escrowCore)
   ]);
-  return { owner, oldIsOperator };
+  return { owner, oldIsOperator, oldIsEscrowOperator };
 }
 
 function assertPositiveInteger(label, value) {
@@ -546,7 +551,7 @@ export function evaluateOrphanedBalancePreflight(report, { acknowledge = false }
   const body = report.findings.map(formatOrphanedBalanceFinding).join("\n");
   const message = [
     `${report.findings.length} unsettled old EscrowCore job(s) still touch AAC reserved/jobStakeLocked balances.`,
-    `Retiring ${report.oldEscrow} from TreasuryPolicy.serviceOperators can orphan those balances because normal escrow release paths call AgentAccountCore onlyOperator mutation functions.`,
+    `Retiring ${report.oldEscrow} from AgentAccountCore.escrowOperators can orphan those balances because normal escrow release paths must call escrow-only AgentAccountCore mutation functions.`,
     "",
     body
   ].join("\n");
@@ -619,9 +624,12 @@ function printDeployPlan(plan) {
 
 function printWireOverview({ manifest, wiringState, predictedNewEscrow }) {
   const placeholder = predictedNewEscrow ?? "<NEW_ESCROW>";
-  const iface = new Interface(TREASURY_POLICY_ABI);
-  const approveData = iface.encodeFunctionData("setServiceOperator", [placeholder, true]);
-  const revokeData = iface.encodeFunctionData("setServiceOperator", [manifest.contracts.escrowCore, false]);
+  const policyIface = new Interface(TREASURY_POLICY_ABI);
+  const accountIface = new Interface(AGENT_ACCOUNT_READ_ABI);
+  const approveAccountData = accountIface.encodeFunctionData("setEscrowOperator", [placeholder, true]);
+  const approvePolicyData = policyIface.encodeFunctionData("setServiceOperator", [placeholder, true]);
+  const revokeAccountData = accountIface.encodeFunctionData("setEscrowOperator", [manifest.contracts.escrowCore, false]);
+  const revokePolicyData = policyIface.encodeFunctionData("setServiceOperator", [manifest.contracts.escrowCore, false]);
 
   console.log(`\n## Phase 2: wire (multisig.asMulti via Apps, NOT this script)`);
   console.log(`  owner is the H160 of SS58 multisig — no private key. Generate the recipe with:`);
@@ -630,14 +638,23 @@ function printWireOverview({ manifest, wiringState, predictedNewEscrow }) {
   console.log(`  then sign in polkadot-js-apps, record {height, index}, run again with --signer ledger.`);
   console.log("");
   console.log(`  Inner EVM calldata that the recipe will wrap (for review):`);
-  console.log(`    [1] setServiceOperator(${placeholder}, true)`);
-  console.log(`        data: ${approveData}`);
-  console.log(`    [2] setServiceOperator(${manifest.contracts.escrowCore}, false)`);
-  console.log(`        data: ${revokeData}`);
+  console.log(`    [1] AgentAccountCore.setEscrowOperator(${placeholder}, true)`);
+  console.log(`        to:   ${manifest.contracts.agentAccountCore}`);
+  console.log(`        data: ${approveAccountData}`);
+  console.log(`    [2] TreasuryPolicy.setServiceOperator(${placeholder}, true)`);
+  console.log(`        to:   ${manifest.contracts.treasuryPolicy}`);
+  console.log(`        data: ${approvePolicyData}`);
+  console.log(`    [3] AgentAccountCore.setEscrowOperator(${manifest.contracts.escrowCore}, false)`);
+  console.log(`        to:   ${manifest.contracts.agentAccountCore}`);
+  console.log(`        data: ${revokeAccountData}`);
+  console.log(`    [4] TreasuryPolicy.setServiceOperator(${manifest.contracts.escrowCore}, false)`);
+  console.log(`        to:   ${manifest.contracts.treasuryPolicy}`);
+  console.log(`        data: ${revokePolicyData}`);
   console.log("");
   console.log(`  Owner (multisig SS58):           12nHTKYfV64pnxsVRB6Cjn6kQPPH64Ehnr8zgqZxvfa8hJvQ`);
   console.log(`  Owner (H160 onchain):            ${wiringState.owner}`);
-  console.log(`  Old escrow operator currently:   ${wiringState.oldIsOperator}`);
+  console.log(`  Old policy operator currently:   ${wiringState.oldIsOperator}`);
+  console.log(`  Old AAC escrow operator now:     ${wiringState.oldIsEscrowOperator}`);
 }
 
 function printFinalizeOverview() {
@@ -720,15 +737,20 @@ async function runFinalize({ args, deploymentsPath, manifest, provider, wiringSt
 
   // 1. Read-only verification.
   const treasury = new Contract(manifest.contracts.treasuryPolicy, TREASURY_POLICY_ABI, provider);
-  const [newIsOperator, oldIsOperator, newCode] = await Promise.all([
+  const accounts = new Contract(manifest.contracts.agentAccountCore, AGENT_ACCOUNT_READ_ABI, provider);
+  const [newIsOperator, oldIsOperator, newIsEscrowOperator, oldIsEscrowOperator, newCode] = await Promise.all([
     treasury.serviceOperators(newEscrow),
     treasury.serviceOperators(oldEscrow),
+    accounts.escrowOperators(newEscrow),
+    accounts.escrowOperators(oldEscrow),
     provider.getCode(newEscrow)
   ]);
   console.log("");
-  console.log(`  serviceOperators[newEscrow]: ${newIsOperator}  (expected: true)`);
-  console.log(`  serviceOperators[oldEscrow]: ${oldIsOperator}  (expected: false unless --skip-revoke)`);
-  console.log(`  newEscrow code size:         ${newCode === "0x" ? 0 : (newCode.length - 2) / 2} bytes`);
+  console.log(`  serviceOperators[newEscrow]:             ${newIsOperator}  (expected: true)`);
+  console.log(`  serviceOperators[oldEscrow]:             ${oldIsOperator}  (expected: false unless --skip-revoke)`);
+  console.log(`  AgentAccountCore.escrowOperators[new]:   ${newIsEscrowOperator}  (expected: true)`);
+  console.log(`  AgentAccountCore.escrowOperators[old]:   ${oldIsEscrowOperator}  (expected: false unless --skip-revoke)`);
+  console.log(`  newEscrow code size:                     ${newCode === "0x" ? 0 : (newCode.length - 2) / 2} bytes`);
 
   if (!newIsOperator) {
     throw new Error(
@@ -736,9 +758,22 @@ async function runFinalize({ args, deploymentsPath, manifest, provider, wiringSt
       `The multisig swap has not landed yet — re-run finalize after multisig.MultisigExecuted fires.`
     );
   }
+  if (!newIsEscrowOperator) {
+    throw new Error(
+      `On-chain check failed: AgentAccountCore.escrowOperators[${newEscrow}] is false. ` +
+      `The multisig swap has not granted the escrow-only ledger role yet.`
+    );
+  }
   if (!args.skipRevoke && oldIsOperator) {
     throw new Error(
       `On-chain check failed: serviceOperators[${oldEscrow}] is still true. ` +
+      `Either run revoke-old via the multisig (re-run the wire recipe without --skip-revoke) ` +
+      `or pass --skip-revoke here to acknowledge.`
+    );
+  }
+  if (!args.skipRevoke && oldIsEscrowOperator) {
+    throw new Error(
+      `On-chain check failed: AgentAccountCore.escrowOperators[${oldEscrow}] is still true. ` +
       `Either run revoke-old via the multisig (re-run the wire recipe without --skip-revoke) ` +
       `or pass --skip-revoke here to acknowledge.`
     );
@@ -804,6 +839,8 @@ async function runFinalize({ args, deploymentsPath, manifest, provider, wiringSt
     onchainAfter: {
       newEscrowIsOperator: newIsOperator,
       oldEscrowIsOperator: oldIsOperator,
+      newEscrowIsAgentAccountEscrowOperator: newIsEscrowOperator,
+      oldEscrowIsAgentAccountEscrowOperator: oldIsEscrowOperator,
       newEscrowCodeBytes: newCode === "0x" ? 0 : (newCode.length - 2) / 2
     },
     auditExitCode
@@ -838,7 +875,8 @@ async function main() {
   console.log(`old escrow:            ${manifest.contracts.escrowCore}`);
   console.log(`treasury:              ${manifest.contracts.treasuryPolicy}`);
   console.log(`treasury.owner():      ${wiringState.owner} (multisig 12nHTKYf… H160 mapping)`);
-  console.log(`old escrow operator?:  ${wiringState.oldIsOperator}`);
+  console.log(`old policy operator?:  ${wiringState.oldIsOperator}`);
+  console.log(`old AAC escrow op?:    ${wiringState.oldIsEscrowOperator}`);
   console.log(`deployer (manifest):   ${manifest.deployer}`);
   console.log(`phase:                 ${args.phase}`);
   console.log(`mode:                  ${args.dryRun ? "dry-run" : "commit"}`);

@@ -600,6 +600,10 @@ test("getTreasuryPolicyStatus surfaces settlement readiness roles", async () => 
     }
   };
   gateway.accountContract = {
+    async escrowOperators(address) {
+      assert.equal(address, "0x2222222222222222222222222222222222222222");
+      return true;
+    },
     async positions(account, asset) {
       assert.equal(account, signerAddress);
       assert.equal(asset, DOT_ASSET.address);
@@ -616,6 +620,7 @@ test("getTreasuryPolicyStatus surfaces settlement readiness roles", async () => 
   assert.equal(status.roles.signerAddress, signerAddress);
   assert.equal(status.roles.signerIsVerifier, true);
   assert.equal(status.roles.escrowIsServiceOperator, true);
+  assert.equal(status.roles.escrowIsAgentAccountEscrowOperator, true);
   assert.equal(status.roles.agentAccountIsServiceOperator, true);
   assert.deepEqual(status.readErrors, []);
   assert.deepEqual(status.contracts.supportedAssets, [{
@@ -721,6 +726,9 @@ test("getTreasuryPolicyStatus preserves raw policy risk values when numbers are 
     }
   };
   gateway.accountContract = {
+    async escrowOperators() {
+      return true;
+    },
     async positions() {
       return emptyPosition();
     }
@@ -809,6 +817,11 @@ test("getTreasuryPolicyStatus records individual read errors without hiding role
     }
   };
   gateway.accountContract = {
+    async escrowOperators() {
+      const error = new Error("require(false)");
+      error.shortMessage = "execution reverted";
+      throw error;
+    },
     async positions() {
       return emptyPosition();
     }
@@ -818,11 +831,16 @@ test("getTreasuryPolicyStatus records individual read errors without hiding role
 
   assert.equal(status.roles.signerIsVerifier, true);
   assert.equal(status.roles.escrowIsServiceOperator, false);
+  assert.equal(status.roles.escrowIsAgentAccountEscrowOperator, false);
   assert.equal(status.roles.agentAccountIsServiceOperator, false);
   assert.equal(status.settlementReady, false);
   assert.deepEqual(status.readErrors, [
     {
       field: "serviceOperators(escrowCore)",
+      message: "execution reverted"
+    },
+    {
+      field: "AgentAccountCore.escrowOperators(escrowCore)",
       message: "execution reverted"
     },
     {

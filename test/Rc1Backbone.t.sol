@@ -50,6 +50,7 @@ contract Rc1BackboneTest is Test {
 
         policy.setApprovedAsset(address(dot), true);
         policy.setServiceOperator(address(escrow), true);
+        accounts.setEscrowOperator(address(escrow), true);
         policy.setServiceOperator(address(accounts), true);
         policy.setServiceOperator(address(this), true);
         policy.setDailyOutflowCap(type(uint256).max);

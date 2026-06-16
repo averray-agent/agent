@@ -363,7 +363,7 @@ Use `utility.batchAll` to combine several owner-gated calls into a single
 multisig flow when they are one logical operation. It saves `N - 1` Hot+Ledger
 rounds and makes the transition atomic.
 
-The exact PR #525 EscrowCore swap used this shape to replace stale
+The current EscrowCore swap shape replaces stale
 `0x7BB8fea44bDeE9870cF27c1dB616E7017BC38b0a` with
 `0xb8fd8A932F69bD5E39700b7cf6D2920aF84d1B27`:
 
@@ -373,12 +373,19 @@ multisig.asMulti(
   otherSignatories: <canonical other two>,
   maybeTimepoint: None | Some({ height, index }),
   call: utility.batchAll([
-    revive.call(setServiceOperator(newEscrowCore, true)),
-    revive.call(setServiceOperator(oldEscrowCore, false))
+    revive.call(AgentAccountCore.setEscrowOperator(newEscrowCore, true)),
+    revive.call(TreasuryPolicy.setServiceOperator(newEscrowCore, true)),
+    revive.call(AgentAccountCore.setEscrowOperator(oldEscrowCore, false)),
+    revive.call(TreasuryPolicy.setServiceOperator(oldEscrowCore, false))
   ]),
-  maxWeight: { refTime: 9_000_000_000, proofSize: 300_000 }
+  maxWeight: { refTime: 18_000_000_000, proofSize: 600_000 }
 )
 ```
+
+`setEscrowOperator` is the dedicated AgentAccountCore ledger authority for
+reserve/stake settlement. `setServiceOperator` remains the TreasuryPolicy
+authority used by EscrowCore entrypoints and readiness checks. Treat the two
+roles as a pair during EscrowCore swaps.
 
 The same pattern was used for admin arbitration rotation:
 `setArbitrator(new, true)` plus `setArbitrator(old, false)` in one

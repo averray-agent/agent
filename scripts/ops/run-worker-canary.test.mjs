@@ -49,7 +49,18 @@ function okOperatorClient(overrides = {}) {
     },
     async getAdminStatus() {
       calls.push(["getAdminStatus"]);
-      return { maintenance: { policy: { enabled: true, settlementReady: true, roles: { escrowIsServiceOperator: true } } } };
+      return {
+        maintenance: {
+          policy: {
+            enabled: true,
+            settlementReady: true,
+            roles: {
+              escrowIsServiceOperator: true,
+              escrowIsAgentAccountEscrowOperator: true
+            }
+          }
+        }
+      };
     },
     async createJob(payload) {
       calls.push(["createJob", payload]);

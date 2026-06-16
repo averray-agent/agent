@@ -64,12 +64,17 @@ contract AgentAccountCore is ReentrancyGuard {
     mapping(address => mapping(address => uint256)) public pendingStrategyAssets;
     mapping(address => mapping(bytes32 => uint256)) public pendingStrategyWithdrawalShares;
     mapping(address => mapping(address => mapping(bytes32 => uint256))) public recurringTemplateReserves;
+    mapping(address => bool) public escrowOperators;
+    mapping(bytes32 => bool) public settlementExecuted;
 
+    event EscrowOperatorUpdated(address indexed escrowOperator, bool approved);
     event Deposited(address indexed account, address indexed asset, uint256 amount);
     event Withdrawn(address indexed account, address indexed asset, uint256 amount);
     event Reserved(address indexed account, address indexed asset, uint256 amount);
     event ReservationReleased(address indexed account, address indexed asset, uint256 amount);
-    event ReservationSettled(address indexed account, address indexed recipient, address indexed asset, uint256 amount);
+    event ReservationSettled(
+        bytes32 indexed settlementId, address indexed account, address indexed recipient, address asset, uint256 amount
+    );
     event StrategyAllocated(address indexed account, bytes32 indexed strategyId, address indexed asset, uint256 amount);
     event StrategyDeallocated(
         address indexed account, bytes32 indexed strategyId, address indexed asset, uint256 amount
@@ -122,6 +127,8 @@ contract AgentAccountCore is ReentrancyGuard {
     error ZeroAmount();
     error InvalidStrategy();
     error InvalidStrategyRequest();
+    error InvalidSettlement();
+    error SettlementAlreadyExecuted();
 
     constructor(TreasuryPolicy policy_, StrategyAdapterRegistry registry_) {
         policy = policy_;
@@ -135,6 +142,16 @@ contract AgentAccountCore is ReentrancyGuard {
 
     modifier onlyOperator() {
         _onlyOperator();
+        _;
+    }
+
+    modifier onlyPolicyOwner() {
+        _onlyPolicyOwner();
+        _;
+    }
+
+    modifier onlyEscrow() {
+        _onlyEscrow();
         _;
     }
 
@@ -156,12 +173,26 @@ contract AgentAccountCore is ReentrancyGuard {
         if (!policy.serviceOperators(msg.sender)) revert Unauthorized();
     }
 
+    function _onlyPolicyOwner() internal view {
+        if (msg.sender != policy.owner()) revert Unauthorized();
+    }
+
+    function _onlyEscrow() internal view {
+        if (!escrowOperators[msg.sender]) revert Unauthorized();
+    }
+
     function _whenNotPaused() internal view {
         if (policy.paused()) revert ProtocolPaused();
     }
 
     function _onlySupportedAsset(address asset) internal view {
         if (!policy.approvedAssets(asset)) revert UnsupportedAsset();
+    }
+
+    function setEscrowOperator(address escrowOperator, bool approved) external onlyPolicyOwner {
+        if (escrowOperator == address(0)) revert InvalidRecipient();
+        escrowOperators[escrowOperator] = approved;
+        emit EscrowOperatorUpdated(escrowOperator, approved);
     }
 
     function deposit(address asset, uint256 amount) external nonReentrant whenNotPaused onlySupportedAsset(asset) {
@@ -208,18 +239,23 @@ contract AgentAccountCore is ReentrancyGuard {
         emit Reserved(account, asset, amount);
     }
 
-    function consumeRecurringTemplateReserve(
-        address account,
-        address asset,
-        bytes32 templateId,
-        uint256 amount
-    ) external whenNotPaused onlyOperator onlySupportedAsset(asset) {
+    function consumeRecurringTemplateReserve(address account, address asset, bytes32 templateId, uint256 amount)
+        external
+        whenNotPaused
+        onlyEscrow
+        onlySupportedAsset(asset)
+    {
         uint256 templateReserve = recurringTemplateReserves[account][asset][templateId];
         if (templateReserve < amount) revert InsufficientReserved();
         recurringTemplateReserves[account][asset][templateId] = templateReserve - amount;
     }
 
-    function refundReserved(address account, address asset, uint256 amount) external onlyOperator {
+    function refundReserved(address account, address asset, uint256 amount)
+        external
+        whenNotPaused
+        onlyEscrow
+        onlySupportedAsset(asset)
+    {
         AssetPosition storage position = positions[account][asset];
         if (position.reserved < amount) revert InsufficientReserved();
         position.reserved -= amount;
@@ -227,13 +263,20 @@ contract AgentAccountCore is ReentrancyGuard {
         emit ReservationReleased(account, asset, amount);
     }
 
-    function settleReservedTo(address account, address asset, address recipient, uint256 amount)
+    function settleReservedTo(bytes32 settlementId, address account, address asset, address recipient, uint256 amount)
         external
         nonReentrant
-        onlyOperator
+        whenNotPaused
+        onlyEscrow
+        onlySupportedAsset(asset)
     {
+        if (settlementId == bytes32(0)) revert InvalidSettlement();
+        if (recipient == address(0)) revert InvalidRecipient();
+        if (amount == 0) revert ZeroAmount();
+        if (settlementExecuted[settlementId]) revert SettlementAlreadyExecuted();
         AssetPosition storage position = positions[account][asset];
         if (position.reserved < amount) revert InsufficientReserved();
+        settlementExecuted[settlementId] = true;
         position.reserved -= amount;
         policy.recordOutflow(amount);
         AssetPosition storage recipientPosition = positions[recipient][asset];
@@ -243,7 +286,7 @@ contract AgentAccountCore is ReentrancyGuard {
         unchecked {
             recipientPosition.liquid += amount - debtPaid;
         }
-        emit ReservationSettled(account, recipient, asset, amount);
+        emit ReservationSettled(settlementId, account, recipient, asset, amount);
     }
 
     function allocateIdleFunds(address account, bytes32 strategyId, uint256 amount)
@@ -464,7 +507,7 @@ contract AgentAccountCore is ReentrancyGuard {
 
     function lockJobStake(address account, address asset, uint256 amount)
         external
-        onlyOperator
+        onlyEscrow
         whenNotPaused
         onlySupportedAsset(asset)
     {
@@ -481,7 +524,7 @@ contract AgentAccountCore is ReentrancyGuard {
 
     function releaseJobStake(address account, address asset, uint256 amount)
         external
-        onlyOperator
+        onlyEscrow
         whenNotPaused
         onlySupportedAsset(asset)
     {
@@ -499,7 +542,7 @@ contract AgentAccountCore is ReentrancyGuard {
     function slashJobStake(address account, address asset, uint256 amount, address posterRecipient)
         external
         nonReentrant
-        onlyOperator
+        onlyEscrow
         whenNotPaused
         onlySupportedAsset(asset)
     {
@@ -527,7 +570,7 @@ contract AgentAccountCore is ReentrancyGuard {
     function slashClaimFee(address account, address asset, uint256 amount, address verifierRecipient)
         external
         nonReentrant
-        onlyOperator
+        onlyEscrow
         whenNotPaused
         onlySupportedAsset(asset)
     {

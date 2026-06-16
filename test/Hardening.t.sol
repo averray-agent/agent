@@ -36,6 +36,7 @@ contract HardeningTest is Test {
 
         policy.setApprovedAsset(address(dot), true);
         policy.setServiceOperator(address(escrow), true);
+        accounts.setEscrowOperator(address(escrow), true);
         policy.setServiceOperator(address(accounts), true);
         policy.setVerifier(verifier, true);
 

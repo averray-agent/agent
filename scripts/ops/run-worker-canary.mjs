@@ -622,10 +622,17 @@ async function assertOperatorReady(operatorPlatform) {
         "brokered claimJobFor/submitWorkFor path is disabled. (This is what #627 + the EscrowCore redeploy fixed.)"
     );
   }
+  if (policy.roles?.escrowIsAgentAccountEscrowOperator !== true) {
+    throw new Error(
+      "Operator readiness FAILED: EscrowCore is not an AgentAccountCore escrow operator, so claim-stake and settlement " +
+        "ledger mutations are disabled. Run the EscrowCore multisig wiring recipe before the canary."
+    );
+  }
   return {
     capabilities: REQUIRED_OPERATOR_CAPABILITIES,
     settlementReady: true,
-    escrowIsServiceOperator: true
+    escrowIsServiceOperator: true,
+    escrowIsAgentAccountEscrowOperator: true
   };
 }
 

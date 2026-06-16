@@ -325,9 +325,10 @@ reputation gates, auto-escrow, and atomic multi-party flows.
 
 ### What exists
 
-- `AgentAccountCore.settleReservedTo(from, asset, to, amount)` moves reserved
-  escrow value into the worker's platform account with debt-first crediting,
-  currently only usable by escrow contract via operator role.
+- `AgentAccountCore.settleReservedTo(settlementId, from, asset, to, amount)`
+  moves reserved escrow value into the worker's platform account with
+  debt-first crediting. It is escrow-only and idempotent at the ledger layer;
+  generic service operators cannot call it directly.
 - `AgentAccountCore.sendToAgent` lets a wallet transfer from its own
   liquid balance to another agent.
 - `AgentAccountCore.sendToAgentFor` lets the authenticated backend relay

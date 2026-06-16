@@ -432,6 +432,7 @@ export class BlockchainGateway {
             signerIsVerifier: false,
             arbitratorSignerIsArbitrator: false,
             escrowIsServiceOperator: false,
+            escrowIsAgentAccountEscrowOperator: false,
             agentAccountIsServiceOperator: false
           },
           readErrors: [],
@@ -465,6 +466,7 @@ export class BlockchainGateway {
         signerIsVerifier,
         arbitratorSignerIsArbitrator,
         escrowIsServiceOperator,
+        escrowIsAgentAccountEscrowOperator,
         agentAccountIsServiceOperator,
         dailyOutflowCap,
         perAccountBorrowCap,
@@ -487,6 +489,12 @@ export class BlockchainGateway {
           : false,
         this.config.escrowCoreAddress
           ? optionalBool("serviceOperators(escrowCore)", this.policyContract.serviceOperators(this.config.escrowCoreAddress))
+          : false,
+        this.config.escrowCoreAddress && typeof this.accountContract.escrowOperators === "function"
+          ? optionalBool(
+              "AgentAccountCore.escrowOperators(escrowCore)",
+              this.accountContract.escrowOperators(this.config.escrowCoreAddress)
+            )
           : false,
         this.config.agentAccountAddress
           ? optionalBool("serviceOperators(agentAccount)", this.policyContract.serviceOperators(this.config.agentAccountAddress))
@@ -549,6 +557,7 @@ export class BlockchainGateway {
         settlementReady: Boolean(
           signerIsVerifier
             && escrowIsServiceOperator
+            && escrowIsAgentAccountEscrowOperator
             && agentAccountIsServiceOperator
             && supportedAssetsReady
             && paused === false
@@ -565,6 +574,7 @@ export class BlockchainGateway {
           signerIsVerifier,
           arbitratorSignerIsArbitrator,
           escrowIsServiceOperator,
+          escrowIsAgentAccountEscrowOperator,
           agentAccountIsServiceOperator
         },
         signerFunding,

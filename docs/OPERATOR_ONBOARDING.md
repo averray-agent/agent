@@ -297,9 +297,10 @@ partial secret context. Print the instruction above, then exit non-zero.
 
 ## EscrowCore redeploy orphan-balance check
 
-Before retiring an EscrowCore from `TreasuryPolicy.serviceOperators`, the
-operator must prove the old contract has no unsettled job entries that still
-touch `AgentAccountCore.positions(...).reserved` or `jobStakeLocked`.
+Before retiring an EscrowCore from `AgentAccountCore.escrowOperators` or
+`TreasuryPolicy.serviceOperators`, the operator must prove the old contract has
+no unsettled job entries that still touch
+`AgentAccountCore.positions(...).reserved` or `jobStakeLocked`.
 
 `scripts/ops/redeploy-escrowcore.mjs` runs this pre-Phase-2 check during
 `--phase all` and `--phase deploy`:
@@ -322,7 +323,7 @@ node scripts/ops/redeploy-escrowcore.mjs --phase all \
 
 `--acknowledge-orphaned-balances` means the operator has reviewed the listed
 jobs, understands that the old EscrowCore may lose the `AgentAccountCore`
-`onlyOperator` capability after Phase 2, and accepts the resulting orphaned
+`escrowOperators` capability after Phase 2, and accepts the resulting orphaned
 balance risk. Do not use it as routine cleanup. For mainnet, the expected path
 is to clear all obligations first and run without the flag.
 
