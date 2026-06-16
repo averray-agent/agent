@@ -67,6 +67,7 @@ import { normaliseStrategyAssetConfig } from "./strategy-asset-config.js";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_ESCROW_ASSET_SYMBOL } from "../core/assets.js";
+import { ConfigError } from "../core/errors.js";
 
 const moduleDir = dirname(fileURLToPath(import.meta.url));
 loadLocalEnv(process.cwd(), resolve(moduleDir, "../../"));
@@ -209,6 +210,14 @@ export async function createPlatformRuntime() {
   logger.info(
     describeMutationBackendStartup(mutationBackendConfig, gateway),
     "mutation_backend.configured"
+  );
+  // Refuse to boot a real on-chain broker behind permissive auth (pre-audit
+  // #7). Permissive mode accepts an unauthenticated `?wallet=` and resolves
+  // that wallet's roles with no signature — harmless against a disabled
+  // gateway, but with chain brokering live it lets any caller broker on-chain
+  // operations as any allowlisted wallet.
+  initStep("check-auth-brokering-posture", logger, () =>
+    assertSafeAuthBrokeringPosture({ authConfig, gateway, env: process.env, logger })
   );
   const pimlicoClient = initStep("init-pimlico-client", logger, () => new PimlicoClient());
   const stateStore = initStep("init-state-store", logger, () => createStateStore(process.env, { logger }));
@@ -441,6 +450,44 @@ function initStep(name, logger, factory) {
     );
     throw error;
   }
+}
+
+/**
+ * Fail closed when a real on-chain broker is paired with permissive auth
+ * (pre-audit #7). In permissive mode, requireAuth accepts an unauthenticated
+ * `?wallet=<addr>` and grants that wallet's allowlisted roles with no
+ * signature check. That is acceptable for local dev against a disabled
+ * gateway, but if `gateway.isEnabled()` is true the same path lets any
+ * unauthenticated caller broker on-chain operations (claim/submit/settle) as
+ * any AUTH_*_WALLETS member. Refuse to boot that combination unless an
+ * operator has explicitly opted in via AUTH_ALLOW_PERMISSIVE_BROKERING — in
+ * which case we still log a loud warning so the posture is never silent.
+ *
+ * @param {object} args
+ * @param {{ permissive?: boolean }} args.authConfig
+ * @param {{ isEnabled?: () => boolean }} args.gateway
+ * @param {Record<string, string | undefined>} [args.env]
+ * @param {{ warn?: Function }} [args.logger]
+ */
+export function assertSafeAuthBrokeringPosture({ authConfig, gateway, env = process.env, logger } = {}) {
+  const permissive = authConfig?.permissive === true;
+  const gatewayEnabled = typeof gateway?.isEnabled === "function" && gateway.isEnabled() === true;
+  if (!permissive || !gatewayEnabled) {
+    return;
+  }
+  if (parseBooleanEnv(env.AUTH_ALLOW_PERMISSIVE_BROKERING)) {
+    logger?.warn?.(
+      { authMode: "permissive", gatewayEnabled: true },
+      "auth.permissive_brokering_explicitly_allowed"
+    );
+    return;
+  }
+  throw new ConfigError(
+    "AUTH_MODE=permissive with the blockchain gateway enabled lets an unauthenticated " +
+      "?wallet= caller broker on-chain operations as any allowlisted wallet. Set AUTH_MODE=strict " +
+      "(recommended), or, only if you intentionally want unauthenticated brokering (e.g. local dev " +
+      "against a live chain), set AUTH_ALLOW_PERMISSIVE_BROKERING=1."
+  );
 }
 
 function loadRateLimitConfig(env = process.env) {
