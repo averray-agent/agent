@@ -27,6 +27,7 @@ import {
   summarizeTierGate
 } from "./job-catalog-gates.js";
 import { buildVerificationContract } from "./verifier-contract.js";
+import { isNativeGasAsset } from "./assets.js";
 
 export {
   ROLE_REQUIREMENTS,
@@ -456,6 +457,14 @@ export class JobCatalogService {
   async estimateNetReward(wallet, jobId) {
     const job = this.requireJob(jobId);
     const profile = this.requireProfile(wallet);
+    // The gas and risk haircuts are heuristics calibrated in the chain's
+    // native gas token (DOT/PAS). Subtracting them from a non-native reward
+    // (e.g. a USDC bounty) mixes units and silently shrinks the payout — a
+    // 0.5+5 haircut would zero out a sub-unit USDC reward (invariant-9, the
+    // USDC unit invariant). Only apply them when the reward IS native gas.
+    if (!isNativeGasAsset(job.rewardAsset)) {
+      return Math.max(job.rewardAmount, 0);
+    }
     const gasPenalty = job.requiresSponsoredGas ? 0 : 0.5;
     const riskPenalty = profile.preferredRiskLevel === "low" && job.tier === "elite" ? 5 : 0;
     return Math.max(job.rewardAmount - gasPenalty - riskPenalty, 0);
