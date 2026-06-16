@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { encodeBytes32String } from "ethers";
+import { encodeBytes32String, Interface } from "ethers";
 
 import { BlockchainGateway } from "./gateway.js";
 import { InsufficientLiquidityError, ValidationError } from "../core/errors.js";
@@ -146,16 +146,61 @@ test("resolveDispute uses the arbitrator signer contract when configured", async
       };
     }
   };
+  gateway.getJob = async (jobId) => {
+    assert.equal(jobId, "wiki-job");
+    return { asset: DOT_ASSET.address };
+  };
 
   const receipt = await gateway.resolveDispute("wiki-job", 0, "DISPUTE_LOST", "https://api.example.test/content/0xabc");
 
   assert.deepEqual(calls, [[
     gateway.toJobId("wiki-job"),
-    0,
+    0n,
     gateway.toDisputeReasonCode("DISPUTE_LOST"),
     "https://api.example.test/content/0xabc"
   ]]);
   assert.deepEqual(receipt, { txHash: "0xresolve", blockNumber: 8, status: 1 });
+});
+
+test("resolveDispute converts display worker payout to asset base units", async () => {
+  const gateway = new BlockchainGateway({ enabled: false, supportedAssets: [USDC_TRUST_ASSET] });
+  const iface = new Interface([
+    "function resolveDispute(bytes32 jobId,uint256 workerPayout,bytes32 reasonCode,string metadataURI)"
+  ]);
+  const encodedCalls = [];
+  gateway.signer = {
+    marker: "service"
+  };
+  gateway.escrowContract = {
+    async resolveDispute() {
+      throw new Error("service signer must not resolve disputes when an arbitrator signer exists");
+    }
+  };
+  gateway.arbitratorSigner = {
+    marker: "arbitrator"
+  };
+  gateway.arbitratorEscrowContract = {
+    async resolveDispute(...args) {
+      encodedCalls.push(iface.encodeFunctionData("resolveDispute", args));
+      return {
+        hash: "0xresolve",
+        async wait() {
+          return { blockNumber: 9, status: 1 };
+        }
+      };
+    }
+  };
+  gateway.getJob = async (jobId) => {
+    assert.equal(jobId, "wiki-job");
+    return { asset: USDC_TRUST_ASSET.address };
+  };
+
+  const receipt = await gateway.resolveDispute("wiki-job", 2, "WORKER_WINS", "averray://disputes/dispute-1");
+
+  assert.deepEqual(receipt, { txHash: "0xresolve", blockNumber: 9, status: 1 });
+  assert.equal(encodedCalls.length, 1);
+  const [, workerPayout] = iface.decodeFunctionData("resolveDispute", encodedCalls[0]);
+  assert.equal(workerPayout, 2_000_000n);
 });
 
 test("resolveSinglePayout returns the settle/payout tx receipt", async () => {
