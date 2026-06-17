@@ -17,6 +17,27 @@ function compactObject(value) {
   );
 }
 
+// EscrowCore JobState: …Rejected=4, Disputed=5, Closed=6. The dispute path is
+// Rejected → openDispute → Disputed → resolveDispute → CLOSED, so a dispute is
+// "already resolved on-chain" ONLY at Closed(6) — resolveDispute reverts
+// InvalidState once the job has left Disputed. (Unlike verifier settlement,
+// Rejected(4) is the dispute's STARTING state, not a resolved one.) Used to make
+// the dispute verdict idempotent across a post-chain-write failure (MAIN-003): a
+// read failure returns false so the caller falls back to attempting the settle.
+const ESCROW_JOB_STATE_CLOSED = 6;
+
+async function disputeAlreadyResolvedOnChain(gateway, jobId) {
+  try {
+    if (!gateway?.isEnabled?.() || typeof gateway.getJob !== "function") {
+      return false;
+    }
+    const job = await gateway.getJob(jobId);
+    return Number(job?.state) === ESCROW_JOB_STATE_CLOSED;
+  } catch {
+    return false;
+  }
+}
+
 export function createDisputeRoutes({
   authMiddleware,
   buildScopedIdempotentMutationContext,
@@ -246,7 +267,17 @@ export function createDisputeRoutes({
       });
       await persistContentRecord(reasoning.contentRecord);
       const chainDisputeReceipt = await ensureChainDisputeOpen(session);
-      const chainReceipt = gateway?.isEnabled?.() && typeof gateway.resolveDispute === "function"
+      // Idempotent settle (MAIN-003). resolveDispute mutates chain state BEFORE
+      // the receipt/session writes below; if a prior attempt resolved on-chain
+      // but failed to persist, a naive retry re-calls resolveDispute and reverts
+      // InvalidState (it only runs from Disputed) — wedging the arbitration. So
+      // skip the settle when the dispute is already resolved on-chain and let the
+      // receipt + session writes below converge local state.
+      const chainEnabled = gateway?.isEnabled?.() && typeof gateway.resolveDispute === "function";
+      const alreadyResolvedOnChain = chainEnabled
+        ? await disputeAlreadyResolvedOnChain(gateway, session.chainJobId ?? session.jobId)
+        : false;
+      const chainReceipt = chainEnabled && !alreadyResolvedOnChain
         ? await gateway.resolveDispute(
             session.chainJobId ?? session.jobId,
             resolution.workerPayout,
@@ -278,7 +309,7 @@ export function createDisputeRoutes({
         txHash: chainReceipt.txHash,
         blockNumber: chainReceipt.blockNumber,
         chainStatus: gateway?.isEnabled?.()
-          ? (chainReceipt.status === 1 ? "confirmed" : "submitted")
+          ? (alreadyResolvedOnChain || chainReceipt.status === 1 ? "confirmed" : "submitted")
           : "local_only",
         decidedBy: auth.wallet,
         decidedAt

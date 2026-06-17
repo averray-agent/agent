@@ -313,7 +313,10 @@ test("POST /disputes/:id/verdict opens the chain dispute before arbitrator resol
   assert.equal(response.body.chainDisputeBlockNumber, 41);
   assert.equal(response.body.txHash, "0xresolve");
   assert.equal(response.body.blockNumber, 42);
-  assert.deepEqual(gatewayCalls.map(([name]) => name), ["getJob", "getJob", "openDispute", "resolveDispute"]);
+  // The extra getJob before resolveDispute is the MAIN-003 idempotency guard
+  // (disputeAlreadyResolvedOnChain) — here the job is not yet Closed, so the
+  // settle proceeds normally.
+  assert.deepEqual(gatewayCalls.map(([name]) => name), ["getJob", "getJob", "openDispute", "getJob", "resolveDispute"]);
   // The chain dispute is brokered on behalf of the worker (the claimant) so the
   // operator signer can open it even when it is not a participant on chain.
   assert.ok(gatewayCalls.some(([name, , participant]) => name === "openDispute" && participant === WORKER));
@@ -322,6 +325,49 @@ test("POST /disputes/:id/verdict opens the chain dispute before arbitrator resol
     && detail.receipt.chainDisputeBlockNumber === 41
     && detail.receipt.blockNumber === 42
     && detail.receipt.txHash === "0xresolve"));
+});
+
+test("POST /disputes/:id/verdict converges when the dispute is already resolved on-chain (MAIN-003)", async () => {
+  const id = disputeIdForSession(SESSION.sessionId);
+  const gatewayCalls = [];
+  const { calls, response, route } = makeHarness({
+    auth: { wallet: ADMIN, claims: { roles: ["admin"] } },
+    payload: { verdict: "upheld", rationale: "Replay after a lost receipt write.", idempotencyKey: "idem-converge-1" },
+    gateway: {
+      isEnabled: () => true,
+      // A prior resolveDispute already mined → the job is Closed (state 6).
+      async getJob(jobId) {
+        gatewayCalls.push(["getJob", jobId]);
+        return { reward: JOB.rewardAmount, released: JOB.rewardAmount, state: 6 };
+      },
+      async openDispute(jobId, participant) {
+        gatewayCalls.push(["openDispute", jobId, participant]);
+        return { txHash: "0xopen", blockNumber: 41, status: 1 };
+      },
+      async resolveDispute(jobId, workerPayout, reasonCode, metadataURI) {
+        gatewayCalls.push(["resolveDispute", { jobId, workerPayout, reasonCode, metadataURI }]);
+        return { txHash: "0xresolve", blockNumber: 42, status: 1 };
+      }
+    }
+  });
+
+  const handled = await route({
+    request: { method: "POST" },
+    response,
+    url: new URL(`http://localhost/disputes/${id}/verdict`),
+    pathname: `/disputes/${id}/verdict`,
+  });
+
+  assert.equal(handled, true);
+  assert.equal(response.statusCode, 200);
+  // resolveDispute must NOT be called again (would revert InvalidState); the
+  // already-Closed job converges to a confirmed verdict, and the session still
+  // transitions out of `disputed`.
+  assert.ok(!gatewayCalls.some(([name]) => name === "resolveDispute"), "resolveDispute must not re-run");
+  assert.ok(!gatewayCalls.some(([name]) => name === "openDispute"), "openDispute must not run on a Closed job");
+  assert.equal(response.body.chainStatus, "confirmed");
+  assert.ok(calls.some(([name]) => name === "upsertMutationReceipt"), "verdict receipt is persisted");
+  assert.ok(calls.some(([name]) => name === "upsertSession"), "session transition is converged");
 });
 
 test("POST /disputes/:id/release requires a verdict before recording release", async () => {
