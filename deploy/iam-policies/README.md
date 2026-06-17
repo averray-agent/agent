@@ -12,14 +12,21 @@ account/region/key creation order.
 
 ## Substituting placeholders
 
+Mainnet topology (decided 2026-06-16): single AWS account **079209845430**
+(same as testnet — fresh keys + distinct prod roles/profiles within it),
+**primary region `eu-central-2`** (Zurich, matches the live signer), **replica
+region `eu-west-1`** (Ireland). Both the blockchain signer and JWT signer keys
+are multi-region KMS keys (`mrk-*`, same key id in both regions). Testnet stays
+single-region (`eu-central-2` only). See `docs/MAINNET_CREDENTIALS_PLAN.md`.
+
 ```bash
 # Single-region testnet: drop the replica ARN line.
 # Multi-region mainnet: fill both ARNs.
 sed \
-  -e 's|<primary-region>|eu-central-1|g' \
-  -e 's|<account>|123456789012|g' \
+  -e 's|<primary-region>|eu-central-2|g' \
+  -e 's|<account>|079209845430|g' \
   -e 's|<key-id>|abcd1234-aaaa-aaaa-aaaa-aaaaaaaaaaaa|g' \
-  -e 's|<replica-region>|us-east-1|g' \
+  -e 's|<replica-region>|eu-west-1|g' \
   averray-signer-prod-role.json > /tmp/averray-signer-prod-role.rendered.json
 
 aws iam create-policy \
@@ -28,11 +35,14 @@ aws iam create-policy \
   --description "Phase 3a — KMS sign-only permissions for the backend signer role"
 ```
 
-For the **JWT** signer policy (`averray-jwt-signer-prod-role.json`), the
-placeholder is a single token `<JWT_KEY_ID_PLACEHOLDER>` (the AWS account and
-region are hard-coded — same account/region as the blockchain signer, distinct
-key). See `docs/SECRETS_MIGRATION.md` §"PR 4b.3 operator runbook" for the full
-provisioning sequence (key creation, IAM user, 1Password item, verification).
+For the **JWT** signer policy (`averray-jwt-signer-prod-role.json`), the only
+placeholder is `<JWT_KEY_ID_PLACEHOLDER>` — the AWS account (079209845430) and
+regions are hard-coded: mainnet lists both the primary `eu-central-2` and replica
+`eu-west-1` ARNs (the multi-region key shares one key id); testnet uses the
+primary ARN only (drop the `eu-west-1` line). Same account as the blockchain
+signer, distinct key. See `docs/SECRETS_MIGRATION.md` §"PR 4b.3 operator runbook"
+for the full provisioning sequence (key creation, IAM user, 1Password item,
+verification).
 
 ## Why the deny statement is constrained to this role
 
