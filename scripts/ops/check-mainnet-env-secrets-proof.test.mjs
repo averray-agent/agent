@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 import {
+  EXPECTED_MAINNET_CHAIN_ID,
   EXPECTED_MAINNET_RPC_URL,
   SCHEMA_VERSION,
   validateEvidence
@@ -31,6 +32,7 @@ function validEvidence(overrides = {}) {
       chainEnv: "mainnet",
       profile: "mainnet",
       rpcUrl: EXPECTED_MAINNET_RPC_URL,
+      chainId: EXPECTED_MAINNET_CHAIN_ID,
       additionalRpcUrls: [EXPECTED_MAINNET_RPC_URL],
       deployEnvExample: "deployments/mainnet.env.example",
       privateEnvSource: "op://prod-mainnet-backend/backend-env/notes",
@@ -76,7 +78,9 @@ function validEvidence(overrides = {}) {
       jwtBackend: "kms",
       jwtPrimaryAlg: "kms",
       hmacVerifyAccepted: false,
-      maxTtlSeconds: 2_592_000
+      maxTtlSeconds: 2_592_000,
+      shareUrlSecretConfigured: true,
+      shareUrlSecretInheritedFromJwt: false
     },
     rawFallbacks: {
       signerPrivateKeyRendered: false,
@@ -177,6 +181,32 @@ test("validateEvidence rejects testnet RPCs and missing Polkadot docs evidence",
   assert.ok(result.errors.includes("polkadotDocs must include smart-contracts/precompiles/erc20.md"));
   assert.ok(result.errors.includes(`environment.rpcUrl must be ${EXPECTED_MAINNET_RPC_URL}`));
   assert.ok(result.errors.includes("environment.additionalRpcUrls[0] must not point at testnet, Paseo, localhost, or a private endpoint"));
+});
+
+test("validateEvidence rejects a non-mainnet chain id (the silent SIWE break)", () => {
+  const result = validateEvidence(validEvidence({
+    environment: {
+      ...validEvidence().environment,
+      chainId: 420420417
+    }
+  }));
+
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.some((error) => error.startsWith(`environment.chainId must be ${EXPECTED_MAINNET_CHAIN_ID}`)));
+});
+
+test("validateEvidence rejects an unprovisioned or JWT-inherited SHARE_URL_SECRET", () => {
+  const result = validateEvidence(validEvidence({
+    auth: {
+      ...validEvidence().auth,
+      shareUrlSecretConfigured: false,
+      shareUrlSecretInheritedFromJwt: true
+    }
+  }));
+
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.includes("auth.shareUrlSecretConfigured must be true (SHARE_URL_SECRET must be explicitly provisioned for mainnet)"));
+  assert.ok(result.errors.includes("auth.shareUrlSecretInheritedFromJwt must be false (do not let SHARE_URL_SECRET fall back to AUTH_JWT_SECRETS once HMAC is retired)"));
 });
 
 test("validateEvidence rejects placeholder, zero, or duplicate contract addresses", () => {
