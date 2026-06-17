@@ -55,8 +55,8 @@ enforced by `check-mainnet-env-secrets-proof.mjs` and recorded in
 | F2 | **Blockchain-signer KMS key** (secp256k1) → derives the on-chain verifier + serviceOperator address | AWS KMS HSM (non-exportable); access via IAM Roles Anywhere SA on the VPS. No human holds the key. | Proof: `kms.blockchainSigner.keySpec=ECC_SECG_P256K1`, `multiRegion=true`, `rolesAnywhere=true`, `staticAccessKeysRendered=false`. **Multi-region is irreversible at creation.** |
 | F3 | **JWT-signer KMS key** (P-256, ES256) → `AWS_JWT_KEY_ID` + `JWT_PUBLIC_KEY_PEM_BASE64` + `JWT_PUBLIC_KEY_FINGERPRINT` | AWS KMS HSM; distinct IAM principal/profile from F2 (key separation). | Proof: `kms.jwtSigner.keySpec=ECC_NIST_P256`, `multiRegion`, `rolesAnywhere`, `publicKeyPemBase64Present`, `publicKeyFingerprint=sha256:…`. PEM/fingerprint are key-derived ⇒ fresh by dependency. |
 | F4 | **Burnable mainnet deployer key** → `PRIVATE_KEY` | One-shot operator EOA; optional time-boxed `op://…critical` break-glass item; deleted post-launch. | Must deploy from audited artifacts; transfers ownership to F1 as its last act, then retired. |
-| F5 | **Dedicated pauser EOA / sub-multisig** → `PAUSER` | Hardware-protected EOA distinct from owner/verifier/arbitrator; key in operator custody, NOT backend env. | Proof: `roleSigners.pauser.freshMainnetKey`. Testnet collapses pauser==deployer==arbitrator; mainnet rehearsal runs `--require-dedicated-pauser`. |
-| F6 | **Dedicated arbitrator authority** → `ARBITRATOR` (raw `ARBITRATOR_SIGNER_PRIVATE_KEY` retired) | Recommend KMS-backed or dedicated hardware EOA. Raw-key-in-env path forbidden. | Proof: `roleSigners.arbitrator.freshMainnetKey`, `rawPrivateKeyFallback=false`. Must split from verifier + pauser. |
+| F5 | **Dedicated pauser hardware EOA** → `PAUSER` | **Hardware EOA, out-of-band in operator custody; signs `setPaused(bool)` only, by hand, rarely.** Distinct from owner/verifier/arbitrator; NOT backend env, NOT KMS. | Proof: `roleSigners.pauser.freshMainnetKey`. Backend never signs `setPaused` (read-only `policyContract.pauser()`) — **no backend code change.** Mainnet rehearsal runs `--require-dedicated-pauser`. |
+| F6 | **Dedicated arbitrator hardware EOA, human-reviewed** → `ARBITRATOR` | **Hardware EOA — NOT KMS, NOT backend env. The backend holds NO arbitrator signing key**; `resolveDispute` becomes a human-in-the-loop hardware signature, out-of-band. Backend stores the arbitrator ADDRESS for display/validation only. | Proof: `roleSigners.arbitrator.freshMainnetKey`, `rawPrivateKeyFallback=false`, `rawFallbacks.arbitratorPrivateKeyRendered=false`. **Needs backend code changes (see ⚠ below) — deleting the env var alone is NOT enough.** Distinct from owner/verifier/pauser. |
 | F7 | **4 mainnet 1Password service-account tokens** (ciDeploy, vpsBackend, vpsIndexer, smokeTests) | Token *items* human-only in the mainnet-critical vault; never readable by any SA (firebreak). | Proof: each `mainnetOnly`, `reusedTestnetToken=false`, `rawTokenRendered=false`; vaults non-empty and excluding `prod-critical`/wildcard. Scope is immutable post-create. |
 | F8 | **Fresh mainnet 1Password vault set** (mainnet-critical + scoped backend/backend-external/indexer/ci/ci-external/smoke) | Tiered; human-only critical tier. | `noTestnetReuse.reusedVaultItems` must be empty; per-environment vault separation mandatory. |
 | F9 | **IAM Roles Anywhere mainnet CA + 2 client certs + 2 trust anchors + 2 profiles + 2 prod roles** (`averray-signer-prod-role`, `averray-jwt-signer-prod-role`) | CA key human-only (1Password Critical / YubiKey / AWS Private CA — **open decision**); client keys generated ON the VPS, mode 0400 root, never in any SA vault. | New mainnet trust anchors/profiles/roles; testnet ones not reusable. Required so `staticAccessKeysRendered=false`. |
@@ -69,6 +69,25 @@ enforced by `check-mainnet-env-secrets-proof.mjs` and recorded in
 | F16 | **`SHARE_URL_SECRET`** | mainnet backend vault. | Silent-break trap — see above. |
 | F17 | **YubiKey hardware MFA** — 2× YubiKey 5 NFC per operator across the 6 admin-trust-chain accounts (1Password admin, AWS root, AWS IAM, GitHub org, registrar, OVH) | Physical keys; recovery codes in `op://…critical/yubikey-recovery-runbook/notes`. | Mainnet-blocking ([`PHASE_4E_PLAN.md`](./PHASE_4E_PLAN.md)). Validated by `check-hardware-mfa-evidence.mjs`. Today: TOTP everywhere, GitHub org-2FA not enabled. |
 | F18 | **Enabled vendor keys** — Resend, alert webhook, GitHub ingestion PAT (fine-grained), + Pimlico/Sentry/Subscan IF enabled | mainnet backend-external / ci-external vaults. | Proof `vendorKeys[]`: `mainnetDedicated`, `reusedTestnetKey=false`, `rawKeyRendered=false` for each enabled vendor. |
+
+> ### ⚠ Arbitrator: keyless backend is NOT self-executing (verified 2026-06-16)
+> Deleting `ARBITRATOR_SIGNER_PRIVATE_KEY` from the mainnet env does **not**, by
+> itself, make the backend keyless for arbitration. The gateway silently falls
+> back to the main signer (`gateway.js:122-124` — `arbitratorSigner = key ? Wallet
+> : this.signer`), so `resolveDispute` would then be signed by the **KMS verifier
+> key** (a separation-of-powers violation; it reverts on-chain since the verifier
+> isn't a registered arbitrator, but the backend still originates a fund-moving
+> tx). Realizing F6 needs **three coupled backend changes**, not one:
+> 1. remove the `: this.signer` fallback (`gateway.js:122-124`) so `arbitratorSigner` is unset;
+> 2. stop the backend signing/broadcasting `resolveDispute` (`gateway.js:1017-1036` + the chain leg in `dispute-routes.js:249-255`) — record the verdict off-chain / hand off an unsigned tx, gated to mainnet;
+> 3. stop rendering the key (env follow-up, below).
+>
+> Doing only (3) → wrong-signer revert; (1)+(3) without (2) → every verdict POST 500s.
+> These touch the money-moving dispute path → **Codex/chain-settlement domain**.
+> There is also **no tool yet** that emits an unsigned/recipe `resolveDispute` for a
+> hardware signer (the only resolution path, `run-dispute-verdict-proof.mjs`, is
+> backend-brokered) — a recipe-emitter (arbitrator analogue of
+> `rotate-admin-multisig-payload.mjs`) is the biggest net-new launch-time gap.
 
 ## 2. Reused or pure config (no secret regeneration)
 
@@ -140,8 +159,10 @@ address-derivers (`derive-kms-signer-address`, `verify-kms-signer`,
    (×2, `eu-central-2` + `eu-west-1`) + `replicate-key` + trust-anchor/profile/role
    creation, then auto-runs the verify/derive scripts (collapses the
    error-prone steps 3–6).
-2. **Multi-region prod-role JSON templates** — current `averray-*-prod-role.json`
-   model single-region only; extend to both region ARNs before mainnet apply.
+2. **Multi-region prod-role JSON templates** — ✅ done in
+   [PR #664](https://github.com/averray-agent/agent/pull/664) (JWT role carries
+   both `eu-central-2` + `eu-west-1` ARNs; signer role was already a both-ARN
+   template).
 3. **Mainnet backend env profile + secrets-inventory rows** — repoint `op://`
    paths, remove HMAC, and let `check-env-template-structure.mjs` enforce the
    new keys (`AUTH_CHAIN_ID`, `SHARE_URL_SECRET`).
@@ -150,6 +171,12 @@ address-derivers (`derive-kms-signer-address`, `verify-kms-signer`,
 5. **Guided multisig-ceremony checklist** (extend `MULTISIG_SETUP.md`) — 3-device
    seed gen, deterministic SS58, `map_account` verification, otherSignatory
    ordering, recovery dry-run, incident tabletop.
+6. **Arbitrator hardware-signing kit** (Codex / chain-settlement) — (a) the three
+   backend changes in the ⚠ note (fallback removal + dispute-route chain-leg
+   disablement, mainnet-gated); (b) a `resolveDispute(...)` recipe-emitter for an
+   off-backend hardware signer (analogue of `rotate-admin-multisig-payload.mjs`)
+   that echoes the txHash back for display; (c) an arbitrator rehearsal +
+   evidence-validator pair (analogue of `run-pauser-rehearsal.mjs`).
 
 **Already done:** the `AUTH_CHAIN_ID` + `SHARE_URL_SECRET` guard rows
 ([PR #662](https://github.com/averray-agent/agent/pull/662), closes the two
@@ -178,6 +205,13 @@ must be set at creation (irreversible).
   + **replica `eu-west-1`** (Ireland), both signer + JWT keys multi-region.
   IAM role JSONs + README reconciled in
   [PR #664](https://github.com/averray-agent/agent/pull/664).
+- **Arbitrator identity** — **dedicated hardware EOA, human-reviewed**; the
+  backend holds no arbitrator signing key (testnet's brokered
+  `ARBITRATOR_SIGNER_PRIVATE_KEY` is retired). Dispute resolution is a
+  human-in-the-loop hardware signature. **Requires the three backend changes in
+  the ⚠ note above — the env-var deletion alone is insufficient.**
+- **Pauser identity** — **dedicated hardware EOA**, out-of-band, signs
+  `setPaused(bool)` only, by hand. No backend code change needed.
 
 ### Still open
 
@@ -189,15 +223,11 @@ must be set at creation (irreversible).
 3. **Roles Anywhere CA-key custody** — 1Password Critical ($0) vs YubiKey vs AWS
    Private CA (~$50/mo). Reconcile cert cadence (calendar says 7-day; PHASE_5A
    says 90-day).
-4. **Arbitrator identity** — dedicated KMS key vs hardware EOA (must be distinct
-   from verifier + pauser).
-5. **Pauser identity** — dedicated hardware EOA vs sub-multisig (distinct from
-   owner/verifier/arbitrator).
-6. **`JWT_MAX_TTL_SECONDS`** — proof allows ≤30d; PHASE_4B intent is ≤1h with
+4. **`JWT_MAX_TTL_SECONDS`** — proof allows ≤30d; PHASE_4B intent is ≤1h with
    refresh-flow only. Pick the tighter value; retire long-lived `ADMIN_JWT`.
-7. **Mainnet vault topology** — confirm the per-runtime scoped vault set; whether
+5. **Mainnet vault topology** — confirm the per-runtime scoped vault set; whether
    to keep `APP_BASIC_AUTH` on the mainnet operator UI.
-8. **Which optional vendors launch enabled** (Pimlico, Sentry, Subscan) — each
+6. **Which optional vendors launch enabled** (Pimlico, Sentry, Subscan) — each
    enabled one needs a mainnet-dedicated key + a `vendorKeys` proof entry.
 
 ## Related
