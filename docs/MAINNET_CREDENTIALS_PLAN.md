@@ -137,8 +137,8 @@ address-derivers (`derive-kms-signer-address`, `verify-kms-signer`,
 
 **Worth building (highest leverage first):**
 1. **One-shot KMS + Roles-Anywhere bootstrap** — wraps `create-key --multi-region`
-   (×2) + `replicate-key` + trust-anchor/profile/role creation + region-drift
-   reconciliation, then auto-runs the verify/derive scripts (collapses the
+   (×2, `eu-central-2` + `eu-west-1`) + `replicate-key` + trust-anchor/profile/role
+   creation, then auto-runs the verify/derive scripts (collapses the
    error-prone steps 3–6).
 2. **Multi-region prod-role JSON templates** — current `averray-*-prod-role.json`
    model single-region only; extend to both region ARNs before mainnet apply.
@@ -151,9 +151,10 @@ address-derivers (`derive-kms-signer-address`, `verify-kms-signer`,
    seed gen, deterministic SS58, `map_account` verification, otherSignatory
    ordering, recovery dry-run, incident tabletop.
 
-**Done in [PR #662](https://github.com/averray-agent/agent/pull/662):**
-the `AUTH_CHAIN_ID` + `SHARE_URL_SECRET` guard rows (closes the two silent-break
-traps the machine gate previously missed).
+**Already done:** the `AUTH_CHAIN_ID` + `SHARE_URL_SECRET` guard rows
+([PR #662](https://github.com/averray-agent/agent/pull/662), closes the two
+silent-break traps the machine gate previously missed); the KMS region pin +
+IAM-role/README reconciliation ([PR #664](https://github.com/averray-agent/agent/pull/664)).
 
 **Irreducible human floor (do NOT design these away):** 3 hardware multisig
 signers + Ledger; every role mutation = a 2-of-3 `asMulti` two-leg ceremony;
@@ -163,13 +164,26 @@ must be set at creation (irreversible).
 
 ---
 
-## 5. Open decisions (operator)
+## 5. Decisions
 
-`AUTH_CHAIN_ID` is now settled (`420420419`). Remaining:
+### Decided (2026-06-16)
 
-1. **Multisig** — confirm 2-of-3 threshold and the Hot/Warm/Cold device +
-   backup-location assignments; one vs two operators (two doubles YubiKey
-   procurement and shared-account enrollment).
+- **Chain ID** — `420420419` (Polkadot Hub mainnet). Gated by
+  `check-mainnet-env-secrets-proof.mjs` ([PR #662](https://github.com/averray-agent/agent/pull/662)).
+- **Owner multisig** — **2-of-3**, 3 fresh hardware-backed signers (Hot / Warm /
+  Cold).
+- **AWS account** — **single account `079209845430`** (same as testnet), with
+  fresh keys + distinct prod roles/profiles within it (`reusedTestnetKey=false`).
+- **KMS regions** — **primary `eu-central-2`** (Zurich, matches the live signer)
+  + **replica `eu-west-1`** (Ireland), both signer + JWT keys multi-region.
+  IAM role JSONs + README reconciled in
+  [PR #664](https://github.com/averray-agent/agent/pull/664).
+
+### Still open
+
+1. **Multisig sub-detail** — Hot/Warm/Cold device + backup-location assignments;
+   one vs two operators (two doubles YubiKey procurement and shared-account
+   enrollment).
 2. **Cold-signer hardware** (Ledger?) + **registrar FIDO2 support** (migrate
    pre-mainnet if absent — highest blast radius).
 3. **Roles Anywhere CA-key custody** — 1Password Critical ($0) vs YubiKey vs AWS
@@ -185,8 +199,6 @@ must be set at creation (irreversible).
    to keep `APP_BASIC_AUTH` on the mainnet operator UI.
 8. **Which optional vendors launch enabled** (Pimlico, Sentry, Subscan) — each
    enabled one needs a mainnet-dedicated key + a `vendorKeys` proof entry.
-9. **Mainnet AWS account/region** — same account as testnet or a fresh mainnet
-   account? Drives every IAM/KMS/Roles-Anywhere ARN.
 
 ## Related
 
