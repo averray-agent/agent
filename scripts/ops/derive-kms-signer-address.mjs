@@ -10,7 +10,7 @@
  * SubjectPublicKeyInfo (SPKI).
  *
  * Usage:
- *   AWS_REGION=eu-central-1 \
+ *   AWS_REGION=eu-central-2 \
  *     node scripts/ops/derive-kms-signer-address.mjs <key-arn-or-id>
  *
  * Or, for offline testing against a captured fixture (no AWS creds
@@ -40,7 +40,7 @@ import {
 } from "../../mcp-server/src/blockchain/spki.js";
 
 const HELP = `Usage:
-  AWS_REGION=eu-central-1 node scripts/ops/derive-kms-signer-address.mjs <key-arn-or-id>
+  AWS_REGION=eu-central-2 node scripts/ops/derive-kms-signer-address.mjs <key-arn-or-id>
   node scripts/ops/derive-kms-signer-address.mjs --spki-file <path-to-der>
 
 Flags:
