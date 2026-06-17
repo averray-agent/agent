@@ -8,6 +8,10 @@ const SCRIPT_NAME = basename(fileURLToPath(import.meta.url));
 
 export const SCHEMA_VERSION = "mainnet-env-secrets-proof-v1";
 export const EXPECTED_MAINNET_RPC_URL = "https://eth-rpc.polkadot.io/";
+// Polkadot Hub mainnet EVM chain id (verified via polkadot-docs MCP
+// smart-contracts/connect.md). TestNet is 420420417, Kusama Hub is 420420418 —
+// a wrong AUTH_CHAIN_ID silently breaks every SIWE sign-in, so the proof pins it.
+export const EXPECTED_MAINNET_CHAIN_ID = 420420419;
 export const MAX_MAINNET_JWT_TTL_SECONDS = 30 * 24 * 60 * 60;
 
 const FUTURE_SKEW_MS = 5 * 60 * 1000;
@@ -248,6 +252,10 @@ function validateEnvironment(rawEnvironment, errors) {
   if (rpcUrl && rpcUrl !== EXPECTED_MAINNET_RPC_URL) {
     errors.push(`environment.rpcUrl must be ${EXPECTED_MAINNET_RPC_URL}`);
   }
+  const chainId = requireNumber(environment.chainId, "environment.chainId", errors, { integer: true });
+  if (chainId !== undefined && chainId !== EXPECTED_MAINNET_CHAIN_ID) {
+    errors.push(`environment.chainId must be ${EXPECTED_MAINNET_CHAIN_ID} (Polkadot Hub mainnet; testnet 420420417 is not allowed)`);
+  }
   for (const [index, rawUrl] of requireArray(environment.additionalRpcUrls ?? [], "environment.additionalRpcUrls", errors).entries()) {
     const url = requireString(rawUrl, `environment.additionalRpcUrls[${index}]`, errors);
     if (url && looksLikeNonMainnetUrl(url)) {
@@ -263,6 +271,7 @@ function validateEnvironment(rawEnvironment, errors) {
   }
   return {
     rpcUrl,
+    chainId,
     privateEnvSource: environment.privateEnvSource,
     renderedEnvChecksum: environment.renderedEnvChecksum
   };
@@ -380,6 +389,15 @@ function validateAuth(rawAuth, errors) {
     min: 1,
     max: MAX_MAINNET_JWT_TTL_SECONDS
   });
+  // SHARE_URL_SECRET silently falls back to AUTH_JWT_SECRETS[0] today. Once HMAC
+  // is retired for mainnet that fallback disappears, so share-link signing must
+  // have its own explicitly-provisioned secret or it fails closed at runtime.
+  if (requireBoolean(auth.shareUrlSecretConfigured, "auth.shareUrlSecretConfigured", errors) !== true) {
+    errors.push("auth.shareUrlSecretConfigured must be true (SHARE_URL_SECRET must be explicitly provisioned for mainnet)");
+  }
+  if (requireBoolean(auth.shareUrlSecretInheritedFromJwt, "auth.shareUrlSecretInheritedFromJwt", errors) !== false) {
+    errors.push("auth.shareUrlSecretInheritedFromJwt must be false (do not let SHARE_URL_SECRET fall back to AUTH_JWT_SECRETS once HMAC is retired)");
+  }
 }
 
 function validateRawFallbacks(rawFallbacks, errors) {
@@ -496,6 +514,7 @@ export function validateEvidence(evidence, options = {}) {
       schemaVersion: doc.schemaVersion,
       completedAt: doc.completedAt,
       rpcUrl: doc.environment?.rpcUrl,
+      chainId: doc.environment?.chainId,
       contractCount: REQUIRED_CONTRACTS.length,
       serviceTokenCount: REQUIRED_SERVICE_TOKENS.length,
       jwtBackend: doc.auth?.jwtBackend,
