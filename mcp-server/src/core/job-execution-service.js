@@ -36,6 +36,7 @@ import { claimExpiresAt, countClaimAttempts, isExpiredClaim, isTerminalSession }
 
 // EscrowCore JobState enum: None=0, Open=1, Claimed=2, Submitted=3, Rejected=4,
 // Disputed=5, Closed=6. Used to reconcile a mined-but-receipt-lost submit.
+const ESCROW_JOB_STATE_CLAIMED = 2;
 const ESCROW_JOB_STATE_SUBMITTED = 3;
 
 export class JobExecutionService {
@@ -187,6 +188,17 @@ export class JobExecutionService {
       if (this.blockchainGateway?.isEnabled()) {
         const live = await this.blockchainGateway.getJob(jobId);
         if (live.state !== 0 && live.state !== 1) {
+          // The job is no longer Open on-chain. If a prior claim already mined
+          // for THIS wallet but the local session write was lost, converge and
+          // return the rebuilt session instead of stranding the worker behind
+          // job_not_claimable (MAIN-002). Any other non-open state is genuinely
+          // not claimable.
+          const converged = await this.convergeStrandedClaim({
+            sessionId, wallet, jobId, chainJobId, claimEconomics, job, protocol, idempotencyKey, live
+          });
+          if (converged) {
+            return converged;
+          }
           throw new ConflictError(`Job ${jobId} is not claimable in its current on-chain state.`, "job_not_claimable");
         }
         if (this.blockchainGateway.ensureJob) {
@@ -204,35 +216,75 @@ export class JobExecutionService {
         await this.accountMutationService?.lockJobStake?.(wallet, job.rewardAsset, claimEconomics.totalClaimLock, undefined);
       }
 
-      const baseSession = {
-        sessionId,
-        wallet,
-        jobId,
-        chainJobId,
-        claimStake: claimEconomics.claimStake,
-        claimStakeBps: claimEconomics.claimStakeBps,
-        claimFee: claimEconomics.claimFee,
-        claimFeeBps: claimEconomics.claimFeeBps,
-        claimEconomicsWaived: claimEconomics.claimEconomicsWaived,
-        claimNumber: claimEconomics.claimNumber,
-        totalClaimLock: claimEconomics.totalClaimLock,
-        ...chainClaimTiming,
-        idempotencyKey,
-        protocolHistory: [protocol]
-      };
-      const session = transitionSession(baseSession, "claimed", {
-        reason: "job_claimed",
-        metadata: { protocol, idempotencyKey }
+      return await this.finalizeClaim({
+        sessionId, wallet, jobId, chainJobId, claimEconomics, chainClaimTiming, job, protocol, idempotencyKey
       });
-
-      const persisted = await this.stateStore.upsertSession(session);
-      await this.stateStore.upsertFundedJob?.(buildFundedJobFromClaim({ job, session: persisted }));
-      this.publishSessionEvent("session.claimed", persisted);
-      this.publishClaimFundingEvent(persisted, job, claimEconomics);
-      return persisted;
     } finally {
       await this.stateStore.releaseClaimLock?.(sessionLockId, lockOwner);
     }
+  }
+
+  // Build + persist the local 'claimed' session, the funded-job record, and the
+  // claim events from an on-chain claim. Shared by the normal claim path and the
+  // MAIN-002 convergence path so both produce an identical session.
+  async finalizeClaim({ sessionId, wallet, jobId, chainJobId, claimEconomics, chainClaimTiming = {}, job, protocol, idempotencyKey }) {
+    const baseSession = {
+      sessionId,
+      wallet,
+      jobId,
+      chainJobId,
+      claimStake: claimEconomics.claimStake,
+      claimStakeBps: claimEconomics.claimStakeBps,
+      claimFee: claimEconomics.claimFee,
+      claimFeeBps: claimEconomics.claimFeeBps,
+      claimEconomicsWaived: claimEconomics.claimEconomicsWaived,
+      claimNumber: claimEconomics.claimNumber,
+      totalClaimLock: claimEconomics.totalClaimLock,
+      ...chainClaimTiming,
+      idempotencyKey,
+      protocolHistory: [protocol]
+    };
+    const session = transitionSession(baseSession, "claimed", {
+      reason: "job_claimed",
+      metadata: { protocol, idempotencyKey }
+    });
+
+    const persisted = await this.stateStore.upsertSession(session);
+    await this.stateStore.upsertFundedJob?.(buildFundedJobFromClaim({ job, session: persisted }));
+    this.publishSessionEvent("session.claimed", persisted);
+    this.publishClaimFundingEvent(persisted, job, claimEconomics);
+    return persisted;
+  }
+
+  // MAIN-002 self-heal. When claimJob mines on-chain but the subsequent local
+  // session/funded-job write fails, the chain job is left CLAIMED while Averray
+  // has no durable session — and a retry would 'job_not_claimable' because the
+  // job is no longer Open. If the on-chain claim is CLAIMED by THIS wallet and
+  // no local session exists, rebuild + persist the expected session (idempotent
+  // recovery, no second claimJob). Returns null for any other non-open state
+  // (claimed by another worker, submitted, closed) so the caller fails closed.
+  async convergeStrandedClaim({ sessionId, wallet, jobId, chainJobId, claimEconomics, job, protocol, idempotencyKey, live }) {
+    if (Number(live?.state) !== ESCROW_JOB_STATE_CLAIMED) {
+      return null;
+    }
+    if (typeof live?.worker !== "string" || live.worker.toLowerCase() !== String(wallet).toLowerCase()) {
+      return null;
+    }
+    const existing = await this.stateStore.getSession?.(sessionId);
+    if (existing) {
+      return existing;
+    }
+    return this.finalizeClaim({
+      sessionId,
+      wallet,
+      jobId,
+      chainJobId,
+      claimEconomics,
+      chainClaimTiming: this.buildChainClaimTiming(live),
+      job,
+      protocol,
+      idempotencyKey
+    });
   }
 
   async submitWork(sessionId, protocol, submissionInput = "submitted-via-service") {

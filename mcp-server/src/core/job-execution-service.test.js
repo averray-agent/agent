@@ -367,6 +367,76 @@ test("claimJob stores on-chain claim expiry when blockchain is enabled", async (
   assert.equal(claimExpiresAt(claimed, job), "2026-05-01T10:01:00.000Z");
 });
 
+test("claimJob converges a stranded claim: chain claim mined but local session write failed (MAIN-002)", async () => {
+  const stateStore = new MemoryStateStore();
+  const job = makeJob({ claimTtlSeconds: 60 });
+  let claimJobCalls = 0;
+  let onChainClaimed = false;
+  const blockchainGateway = {
+    isEnabled: () => true,
+    toJobId: (jobId) => `chain:${jobId}`,
+    async getWorkerClaimCount() { return 0; },
+    async getJob() {
+      // Open until the on-chain claim lands, then CLAIMED (state 2) by WALLET.
+      return onChainClaimed
+        ? { state: 2, worker: WALLET, claimExpiry: Date.parse("2026-05-01T10:01:00.000Z") / 1000 }
+        : { state: 0 };
+    },
+    async ensureJob() {},
+    async ensureClaimStakeLiquidity() {},
+    async claimJob() {
+      claimJobCalls += 1;
+      onChainClaimed = true; // the tx mines
+    }
+  };
+  const service = new JobExecutionService(stateStore, blockchainGateway, () => job);
+
+  // First attempt: the on-chain claim mines, but the local session write fails once.
+  const realUpsert = stateStore.upsertSession.bind(stateStore);
+  let upsertFailed = false;
+  stateStore.upsertSession = async (session) => {
+    if (!upsertFailed) {
+      upsertFailed = true;
+      throw new Error("redis blip");
+    }
+    return realUpsert(session);
+  };
+
+  await assert.rejects(() => service.claimJob(WALLET, job.id, "http", "idemp-strand"), /redis blip/);
+  assert.equal(claimJobCalls, 1, "the on-chain claim mined exactly once");
+
+  // Retry: the chain job is now CLAIMED by this wallet, but there is no local
+  // session. claimJob must CONVERGE (rebuild the session) without re-claiming.
+  const recovered = await service.claimJob(WALLET, job.id, "http", "idemp-strand");
+  assert.equal(claimJobCalls, 1, "retry must NOT call claimJob again");
+  assert.equal(recovered.status, "claimed");
+  assert.equal(recovered.wallet, WALLET);
+  assert.equal(recovered.jobId, job.id);
+});
+
+test("claimJob does NOT converge when the chain job is claimed by a different worker (MAIN-002 guard)", async () => {
+  const stateStore = new MemoryStateStore();
+  const job = makeJob({ claimTtlSeconds: 60 });
+  const blockchainGateway = {
+    isEnabled: () => true,
+    toJobId: (jobId) => `chain:${jobId}`,
+    async getWorkerClaimCount() { return 0; },
+    async getJob() {
+      // Already claimed on-chain by someone else.
+      return { state: 2, worker: WALLET_2 };
+    },
+    async ensureJob() {},
+    async ensureClaimStakeLiquidity() {},
+    async claimJob() { throw new Error("should not claim"); }
+  };
+  const service = new JobExecutionService(stateStore, blockchainGateway, () => job);
+
+  await assert.rejects(
+    () => service.claimJob(WALLET, job.id, "http", "idemp-other"),
+    (error) => error.code === "job_not_claimable"
+  );
+});
+
 test("claimJob uses chain worker claim count before ensuring a chain job", async () => {
   const stateStore = new MemoryStateStore();
   const job = makeJob({ rewardAmount: 5 });
