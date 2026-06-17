@@ -71,9 +71,19 @@ export function loadAuthConfig(env = process.env) {
     .map((value) => value.trim())
     .filter(Boolean);
 
-  if (rawMode === "strict" && secrets.length === 0) {
+  // Which JWT algorithm(s) the dispatcher signs/verifies. HMAC (HS256) secrets
+  // are only needed when an HMAC path is active — JWT_BACKEND=hmac, or the dual
+  // "both" migration mode. Under JWT_BACKEND=kms the verifier signs AND verifies
+  // ES256 via the KMS JWT signer, so strict mode must NOT demand an HMAC secret:
+  // the mainnet posture renders none, and requiring one would leave a symmetric
+  // admin-token-minting secret in the environment (MAIN-001). parseKmsJwtConfig
+  // (below) enforces the KMS signer config for the kms/both backends.
+  const jwtBackend = parseJwtBackend(env.JWT_BACKEND);
+  const jwtBackendUsesHmac = jwtBackend === "hmac" || jwtBackend === "both";
+
+  if (rawMode === "strict" && jwtBackendUsesHmac && secrets.length === 0) {
     throw new ConfigError(
-      "AUTH_MODE=strict requires AUTH_JWT_SECRETS (or AUTH_JWT_SECRET). Set at least one secret with >=32 chars."
+      `AUTH_MODE=strict with JWT_BACKEND=${jwtBackend} requires AUTH_JWT_SECRETS (or AUTH_JWT_SECRET); set at least one secret with >=32 chars. (JWT_BACKEND=kms needs no HMAC secret — it signs/verifies ES256 via KMS.)`
     );
   }
 
@@ -103,7 +113,7 @@ export function loadAuthConfig(env = process.env) {
   const verifierWallets = parseWalletSet(env.AUTH_VERIFIER_WALLETS, "AUTH_VERIFIER_WALLETS");
 
   // ── Phase 4b — JWT dispatcher mode ────────────────────────────────────
-  const jwtBackend = parseJwtBackend(env.JWT_BACKEND);
+  // jwtBackend is parsed above (it gates the HMAC-secret requirement).
   const jwtPrimaryAlg = parseJwtPrimaryAlg(env.JWT_PRIMARY_ALG, jwtBackend);
   const kmsJwt = parseKmsJwtConfig(env, jwtBackend);
 

@@ -208,6 +208,23 @@ test("POST /auth/nonce rejects malformed wallet before storing", async () => {
   assert.ok(!calls.some(([name]) => name === "storeNonce"));
 });
 
+test("POST /auth/verify issues a token under KMS-only auth with no HMAC signingSecret (MAIN-001)", async () => {
+  const { response, route } = makeHarness({
+    payload: { message: "siwe", signature: VALID_SIGNATURE },
+    authConfig: {
+      signingSecret: undefined,
+      jwtPrimaryAlg: "kms",
+      kmsJwt: { keyId: "arn:aws:kms:eu-central-2:079209845430:key/mrk-test" }
+    }
+  });
+
+  // Must NOT 401 auth_not_configured just because there is no HMAC secret —
+  // signTokenFromConfig signs ES256 via the KMS JWT signer.
+  assert.equal(await callRoute(route, response, "POST", "/auth/verify"), true);
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.token, "signed-token");
+});
+
 test("POST /auth/verify consumes nonce, signs token, and issues refresh cookie when supported", async () => {
   const { calls, response, route } = makeHarness({
     payload: { message: "siwe", signature: VALID_SIGNATURE },

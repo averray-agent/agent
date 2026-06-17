@@ -34,6 +34,17 @@ function walletsMatch(a, b) {
   return String(a).toLowerCase() === String(b).toLowerCase();
 }
 
+// True when the configured primary JWT signer can actually mint a token.
+// Under JWT_BACKEND=kms there is no HMAC `signingSecret` (the KMS-only mainnet
+// posture renders none — MAIN-001), yet signTokenFromConfig can still issue
+// ES256 via the KMS JWT signer. Gating on `signingSecret` alone wrongly locked
+// out SIWE verify/refresh in that posture, so check the primary signer instead.
+function canIssueTokens(authConfig) {
+  return authConfig?.jwtPrimaryAlg === "kms"
+    ? Boolean(authConfig?.kmsJwt)
+    : Boolean(authConfig?.signingSecret);
+}
+
 function supportsRefreshStore(stateStore) {
   return Boolean(
     stateStore
@@ -134,9 +145,9 @@ export function createAuthRoutes({
       if (!SIGNATURE_RE.test(signature)) {
         throw new ValidationError("signature must be a 65-byte hex string.");
       }
-      if (!authConfig.signingSecret) {
+      if (!canIssueTokens(authConfig)) {
         throw new AuthenticationError(
-          "Auth not configured — set AUTH_JWT_SECRETS to issue tokens.",
+          "Auth not configured — configure the JWT signer (AUTH_JWT_SECRETS for HMAC, or the KMS JWT signer for ES256).",
           "auth_not_configured"
         );
       }
@@ -257,9 +268,9 @@ export function createAuthRoutes({
 
       if (refreshCookie && supportsRefreshStore(stateStore)) {
         await enforceLimit("auth_refresh", clientIp(request), rateLimitConfig.authRefresh);
-        if (!authConfig.signingSecret) {
+        if (!canIssueTokens(authConfig)) {
           throw new AuthenticationError(
-            "Auth not configured — set AUTH_JWT_SECRETS to issue tokens.",
+            "Auth not configured — configure the JWT signer (AUTH_JWT_SECRETS for HMAC, or the KMS JWT signer for ES256).",
             "auth_not_configured"
           );
         }
@@ -345,9 +356,9 @@ export function createAuthRoutes({
         );
       }
       await enforceLimit("auth_refresh", auth.wallet, rateLimitConfig.authRefresh);
-      if (!authConfig.signingSecret) {
+      if (!canIssueTokens(authConfig)) {
         throw new AuthenticationError(
-          "Auth not configured — set AUTH_JWT_SECRETS to issue tokens.",
+          "Auth not configured — configure the JWT signer (AUTH_JWT_SECRETS for HMAC, or the KMS JWT signer for ES256).",
           "auth_not_configured"
         );
       }
