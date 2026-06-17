@@ -121,6 +121,7 @@ Polkadot-specific USDC facts were checked against the Polkadot docs MCP:
 | [`PHASE_4B_STAGE_2C_PLAN.md`](./PHASE_4B_STAGE_2C_PLAN.md) | Current KMS JWT cutover plan (Stage 2C-1 → 2C-2 → 2C-3). |
 | [`PHASE_4E_PLAN.md`](./PHASE_4E_PLAN.md) | Hardware MFA enrollment plan + adjacent mainnet-prep (IAM Roles Anywhere, multi-region KMS, worker-loop refresh-flow). |
 | [`SECRETS_MIGRATION.md`](./SECRETS_MIGRATION.md) | Secrets and custody migration history and mainnet requirements. |
+| [`MAINNET_CREDENTIALS_PLAN.md`](./MAINNET_CREDENTIALS_PLAN.md) | Mainnet credential/key inventory (fresh-vs-reuse), ordered provisioning runbook, and friction reducers for the real-funds launch. |
 | [`THREAT_MODEL.md`](./THREAT_MODEL.md) | Launch threat model and security posture. |
 | [`RC1_WORKING_SPEC.md`](./RC1_WORKING_SPEC.md) | Historical only. |
 | [`RC1_IMPLEMENTATION_PLAN.md`](./RC1_IMPLEMENTATION_PLAN.md) | Historical rc1 slice tracker. Keep for old acceptance criteria only. |
