@@ -32,40 +32,55 @@ jobs:
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
-      - name: Load ADMIN_JWT from 1Password (fail-closed)
-        uses: 1password/load-secrets-action@92467eb28f72e8255933372f1e0707c567ce2259 # v4.0.0
-        with:
-          export-env: true
+      # JWT-TTL hardening (F13): mint a SHORT-LIVED admin access token via the
+      # refresh flow instead of loading the long-lived static admin JWT
+      # (op://prod-smoke/admin-jwt). This is what lets JWT_MAX_TTL_SECONDS drop
+      # from 30d to 1h on mainnet — see docs/MAINNET_CREDENTIALS_PLAN.md. A
+      # DEDICATED per-consumer refresh item is used so this workflow never
+      # rotate-collides with another consumer (refresh tokens rotate on every
+      # use; replaying a stale one revokes the chain).
+      - name: Install 1Password CLI (refresh-token rotation write-back)
+        uses: 1password/install-cli-action@a5215d3a7f75c1629216c465ea9ab3ab399c4b71 # v4.0.0
+
+      - name: Mint short-lived admin access token (refresh flow)
         env:
           OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN_PROD_SMOKE }}
-          ADMIN_JWT_OP: op://prod-smoke/admin-jwt/password
-
-      - name: Verify ADMIN_JWT_OP loaded and shape-valid
+          ADMIN_REFRESH_TOKEN_OP: op://prod-smoke/admin-refresh-token-schema-proof/password
+          API_BASE_URL: https://api.averray.com
         run: |
           set -euo pipefail
           set +x
 
-          if [ -z "${ADMIN_JWT_OP:-}" ]; then
-            echo "::error::ADMIN_JWT_OP is empty after load step — check op://prod-smoke/admin-jwt/password and OP_SERVICE_ACCOUNT_TOKEN_PROD_SMOKE."
+          # get-admin-refresh-token.mjs POSTs the refresh cookie to
+          # /auth/refresh, prints a fresh access token to stdout, and writes
+          # the rotated refresh cookie back to $ADMIN_REFRESH_TOKEN_OP (needs
+          # the prod-smoke service account to have READ+WRITE on that item).
+          token="$(node scripts/ops/get-admin-refresh-token.mjs)"
+
+          if [ -z "${token:-}" ]; then
+            echo "::error::refresh exchange returned an empty access token — check $ADMIN_REFRESH_TOKEN_OP is seeded and the prod-smoke service account has READ+WRITE on it."
             exit 1
           fi
 
-          case "$ADMIN_JWT_OP" in
+          case "$token" in
             ey*.*.*)
-              echo "ADMIN_JWT_OP: JWT shape valid"
+              echo "minted admin access token: JWT shape valid"
               ;;
             *)
-              echo "::error::ADMIN_JWT_OP does not look like a JWT (expected ey<...>.<...>.<...>)"
+              echo "::error::minted value does not look like a JWT (expected ey<...>.<...>.<...>)"
               exit 1
               ;;
           esac
+
+          echo "::add-mask::$token"
+          printf 'ADMIN_ACCESS_TOKEN=%s\n' "$token" >> "$GITHUB_ENV"
 
       - name: Run hosted proof
         run: |
           set -euo pipefail
           set +x
 
-          ADMIN_JWT="$ADMIN_JWT_OP" ./scripts/ops/check-hosted-stack.sh
+          ADMIN_JWT="$ADMIN_ACCESS_TOKEN" ./scripts/ops/check-hosted-stack.sh
 
       - name: Summarize proof evidence
         if: always()
