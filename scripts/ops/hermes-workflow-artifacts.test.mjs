@@ -84,11 +84,17 @@ test("hosted external-schema proof uploads sanitized evidence as a workflow arti
   assert.match(workflow, /workflow_dispatch:/u);
   assert.match(workflow, /environment: production/u);
   assert.match(workflow, /OP_SERVICE_ACCOUNT_TOKEN_PROD_SMOKE/u);
-  assert.match(workflow, /ADMIN_JWT_OP: op:\/\/prod-smoke\/admin-jwt\/password/u);
+  // JWT-TTL phase 1: this workflow mints a short-lived admin access token via
+  // the refresh flow (dedicated per-consumer item) instead of loading the
+  // long-lived static admin JWT — see PR #670 / docs/MAINNET_CREDENTIALS_PLAN.md (F13).
+  assert.match(workflow, /uses: 1password\/install-cli-action@[a-f0-9]{40} # v4\.0\.0/u);
+  assert.match(workflow, /ADMIN_REFRESH_TOKEN_OP: op:\/\/prod-smoke\/admin-refresh-token-schema-proof\/password/u);
+  assert.match(workflow, /node scripts\/ops\/get-admin-refresh-token\.mjs/u);
+  assert.doesNotMatch(workflow, /ADMIN_JWT_OP: op:\/\/prod-smoke\/admin-jwt\/password/u);
   assert.match(workflow, /CHECK_EXTERNAL_SCHEMA_PROOF: "1"/u);
   assert.match(workflow, /EXTERNAL_SCHEMA_PROOF_EVIDENCE_FILE: artifacts\/external-schema-proof-hosted-\$\{\{ github\.run_id \}\}\.json/u);
   assert.match(workflow, /EXTERNAL_SCHEMA_PROOF_IDEMPOTENCY_KEY: github-hosted-external-schema-proof-\$\{\{ github\.run_id \}\}/u);
-  assert.match(workflow, /ADMIN_JWT="\$ADMIN_JWT_OP" \.\/scripts\/ops\/check-hosted-stack\.sh/u);
+  assert.match(workflow, /ADMIN_JWT="\$ADMIN_ACCESS_TOKEN" \.\/scripts\/ops\/check-hosted-stack\.sh/u);
   assert.match(workflow, /uses: actions\/upload-artifact@(?:v7\b|[a-f0-9]{40} # v7\b)/u);
   assert.match(workflow, /name: hosted-external-schema-proof-\$\{\{ github\.run_id \}\}/u);
   assert.match(workflow, /path: \$\{\{ env\.EXTERNAL_SCHEMA_PROOF_EVIDENCE_FILE \}\}/u);
