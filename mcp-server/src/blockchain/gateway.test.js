@@ -659,6 +659,104 @@ test("getTreasuryPolicyStatus surfaces settlement readiness roles", async () => 
   });
 });
 
+test("getTreasuryPolicyStatus accepts legacy AgentAccountCore operator authorization when escrowOperators getter is absent", async () => {
+  const gateway = new BlockchainGateway({
+    enabled: true,
+    rpcUrl: "http://127.0.0.1:8545",
+    signerPrivateKey: `0x${"11".repeat(32)}`,
+    treasuryPolicyAddress: "0x1111111111111111111111111111111111111111",
+    agentAccountAddress: "0x3333333333333333333333333333333333333333",
+    escrowCoreAddress: "0x2222222222222222222222222222222222222222",
+    reputationSbtAddress: "0x4444444444444444444444444444444444444444",
+    supportedAssets: [DOT_ASSET]
+  });
+  const signerAddress = await gateway.signer.getAddress();
+  gateway.policyContract = {
+    async owner() {
+      return "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    },
+    async pauser() {
+      return "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    },
+    async paused() {
+      return false;
+    },
+    async verifiers(address) {
+      assert.equal(address, signerAddress);
+      return true;
+    },
+    async serviceOperators(address) {
+      assert.ok([
+        "0x2222222222222222222222222222222222222222",
+        "0x3333333333333333333333333333333333333333"
+      ].includes(address));
+      return true;
+    },
+    async approvedAssets(address) {
+      assert.equal(address, DOT_ASSET.address);
+      return true;
+    },
+    async dailyOutflowCap() {
+      return 100n;
+    },
+    async perAccountBorrowCap() {
+      return 200n;
+    },
+    async minimumCollateralRatioBps() {
+      return 300n;
+    },
+    async defaultClaimStakeBps() {
+      return 400n;
+    },
+    async claimFeeBps() {
+      return 5n;
+    },
+    async claimFeeVerifierBps() {
+      return 6000n;
+    },
+    async onboardingWaiverClaimCount() {
+      return 7n;
+    },
+    async rejectionSkillPenalty() {
+      return 8n;
+    },
+    async rejectionReliabilityPenalty() {
+      return 9n;
+    },
+    async disputeLossSkillPenalty() {
+      return 10n;
+    },
+    async disputeLossReliabilityPenalty() {
+      return 11n;
+    }
+  };
+  gateway.accountContract = {
+    async escrowOperators() {
+      const error = new Error("selector missing on deployed legacy AgentAccountCore");
+      error.shortMessage = "execution reverted";
+      throw error;
+    },
+    async positions(account, asset) {
+      assert.equal(account, signerAddress);
+      assert.equal(asset, DOT_ASSET.address);
+      return emptyPosition();
+    }
+  };
+
+  const status = await gateway.getTreasuryPolicyStatus();
+
+  assert.equal(status.settlementReady, true);
+  assert.equal(status.roles.escrowIsServiceOperator, true);
+  assert.equal(status.roles.escrowIsAgentAccountEscrowOperator, true);
+  assert.equal(status.roles.agentAccountIsServiceOperator, true);
+  assert.equal(status.roles.agentAccountEscrowAuthorizationMode, "legacyServiceOperator");
+  assert.equal(status.roles.agentAccountEscrowOperatorsGetterReady, false);
+  assert.deepEqual(status.readErrors, [{
+    field: "AgentAccountCore.escrowOperators(escrowCore)",
+    message: "execution reverted"
+  }]);
+});
+
 test("getTreasuryPolicyStatus preserves raw policy risk values when numbers are unsafe", async () => {
   const gateway = new BlockchainGateway({
     enabled: true,
