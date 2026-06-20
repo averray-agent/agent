@@ -512,6 +512,16 @@ export class BlockchainGateway {
         optionalRead("disputeLossSkillPenalty", this.policyContract.disputeLossSkillPenalty(), 0),
         optionalRead("disputeLossReliabilityPenalty", this.policyContract.disputeLossReliabilityPenalty(), 0)
       ]);
+      // Testnet AgentAccountCore may still be the legacy deployment where
+      // escrow settlement mutators are authorized through TreasuryPolicy.
+      const agentAccountEscrowAuthorizationMode = escrowIsAgentAccountEscrowOperator
+        ? "escrowOperators"
+        : escrowIsServiceOperator
+          ? "legacyServiceOperator"
+          : "missing";
+      const agentAccountEscrowAuthorized = escrowIsAgentAccountEscrowOperator || (
+        agentAccountEscrowAuthorizationMode === "legacyServiceOperator"
+      );
       const supportedAssets = await Promise.all((this.config.supportedAssets ?? []).map(async (asset) => ({
         ...summarizeSupportedAsset(asset),
         approved: asset.address
@@ -558,7 +568,7 @@ export class BlockchainGateway {
         settlementReady: Boolean(
           signerIsVerifier
             && escrowIsServiceOperator
-            && escrowIsAgentAccountEscrowOperator
+            && agentAccountEscrowAuthorized
             && agentAccountIsServiceOperator
             && supportedAssetsReady
             && paused === false
@@ -575,7 +585,9 @@ export class BlockchainGateway {
           signerIsVerifier,
           arbitratorSignerIsArbitrator,
           escrowIsServiceOperator,
-          escrowIsAgentAccountEscrowOperator,
+          escrowIsAgentAccountEscrowOperator: agentAccountEscrowAuthorized,
+          agentAccountEscrowAuthorizationMode,
+          agentAccountEscrowOperatorsGetterReady: escrowIsAgentAccountEscrowOperator,
           agentAccountIsServiceOperator
         },
         signerFunding,
