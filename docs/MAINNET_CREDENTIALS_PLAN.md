@@ -100,7 +100,26 @@ enforced by `check-mainnet-env-secrets-proof.mjs` and recorded in
 | `AUTH_DOMAIN=api.averray.com` | **CONFIG (likely unchanged)** | Must match the mainnet SIWE message domain the frontend sends. |
 | `RPC_URL` / `AUTH_CHAIN_ID` | **CONFIG (new values, not secret)** | `https://eth-rpc.polkadot.io/` + `420420419`. Proof exact-matches and rejects testnet/paseo/localhost. |
 | Conservative launch economic params (12 values) | **CONFIG (new values)** | Exact-matched by `check-mainnet-usdc-config.mjs`; must also match on-chain TreasuryPolicy params. |
-| `JWT_MAX_TTL_SECONDS` | **CONFIG (new value)** | Proof ceiling is 30d, but PHASE_4B intent is ≤1h — pick the tighter value. |
+| `JWT_MAX_TTL_SECONDS` | **CONFIG (new value)** | Proof ceiling is 30d, but PHASE_4B intent is ≤1h. **≤1h is a workflow migration, not a standalone flip** (callout below): the static `admin-jwt` is rejected the moment the ceiling drops under its lifetime. |
+
+> **JWT TTL ≤1h is automation, not a config flip — deferred testnet → mainnet (2026-06).**
+> Today every hosted workflow authenticates with the long-lived static `admin-jwt`
+> (hand-minted ~monthly via `mint-admin-jwt.mjs`; **not** auto-rotated — confirmed: no
+> workflow/cron re-mints it). Dropping `JWT_MAX_TTL_SECONDS` below 30d rejects that token
+> → all 5 hosted workflows 401. So ≤1h first requires migrating them to the **refresh flow**
+> (short-lived tokens minted on demand, refresh cookie rotated server-side). Mainnet sequence:
+> 1. **One read+write 1Password service account** for the rotation write-back. NB: 1P
+>    service-account permissions are **immutable** — you cannot add write to the existing
+>    read-only `prod-smoke-tests`/`prod-smoke-deploy`; create a *new* R+W SA. One R+W SA
+>    serves all workflows; per-consumer isolation lives at the **item** level, not the SA.
+> 2. **Seed** a per-consumer refresh item per workflow (`op://…/admin-refresh-token-<name>`)
+>    with `seed-admin-refresh-token.mjs` (#672, on `main`) using the **mainnet hardware admin
+>    wallet** — testnet seeds are throwaway.
+> 3. **Re-apply** the per-workflow change (install `op` CLI → `get-admin-refresh-token.mjs`
+>    mints a masked short-lived Bearer → rotation write-back) to all 5 hosted workflows.
+>    Reference pattern: **PR #670** (reverted from `main`, preserved in git history).
+> 4. **Then** drop `JWT_MAX_TTL_SECONDS` 2592000 → 3600. Bonus: this also retires the manual
+>    monthly `admin-jwt` re-mint toil.
 
 **Retired (rendered nowhere on mainnet):** `AUTH_JWT_SECRETS` (HMAC),
 `SIGNER_PRIVATE_KEY`, raw `ARBITRATOR_SIGNER_PRIVATE_KEY`, all static
@@ -122,7 +141,7 @@ ceremony.
 |---|---|---|---|
 | 0 | Pass external audit; freeze audited artifacts | no-multiparty | `prepare-mainnet-audit-freeze.mjs` |
 | 1 | Enroll 2× YubiKey across the 6 accounts; flip GitHub org 2FA; registrar FIDO2 | **no-human-hardware** | validate: `check-hardware-mfa-evidence.mjs` |
-| 2 | Create mainnet 1Password vault tier + mint 4 SA tokens | partial | 1P admin UI + `op service-account create`; **GAP: vault/token bootstrap script** |
+| 2 | Create mainnet 1Password vault tier + mint SA tokens (incl. **one read+write SA** for refresh-token rotation — 1P SA perms are immutable, so set R+W at creation) | partial | 1P admin UI + `op service-account create`; **GAP: vault/token bootstrap script** |
 | 3 | Create multi-region KMS blockchain key (secp256k1); derive + verify EVM address | partial | `aws kms create-key`/`replicate-key` → `derive-kms-signer-address.mjs` + `verify-kms-signer.mjs` |
 | 4 | Create multi-region KMS JWT key (P-256); capture PEM-base64 + fingerprint | partial | `aws kms create-key` → `verify-jwt-kms-signer.mjs` |
 | 5 | Roles Anywhere mainnet CA + 2 trust anchors + 2 profiles + 2 prod roles; client certs on VPS | partial → **no-human-hardware** (CA custody) | `deploy/iam-policies/*-prod-role.json`; **GAP: multi-region role JSON + unscripted IAM apply** |
@@ -137,7 +156,7 @@ ceremony.
 | 14 | Verify all on-chain roles green | yes | `audit-launch-readiness.mjs` |
 | 15 | Rehearse pause/unpause from the dedicated pauser | partial | `run-pauser-rehearsal.mjs --live --require-dedicated-pauser` → `check-pauser-rehearsal-evidence.mjs` |
 | 16 | Author mainnet backend env profile (repoint `op://` to mainnet items; remove HMAC; set `SHARE_URL_SECRET`, `AUTH_CHAIN_ID`, launch caps); drop 4 SA tokens to the VPS; render | partial / no-multiparty | `install-op-vps.sh` + `render-vps-env.sh`; **GAP: no committed mainnet backend env profile** |
-| 17 | Capture `ADMIN_REFRESH_TOKEN` via human SIWE with the mainnet admin wallet | **no-multiparty** | `get-admin-refresh-token.mjs` (first capture manual) |
+| 17 | Seed per-consumer `ADMIN_REFRESH_TOKEN` items via human SIWE with the mainnet admin wallet (enables the ≤1h JWT-TTL migration — see §2 callout) | **no-multiparty** | `seed-admin-refresh-token.mjs` (SIWE login → writes the op item; #672) |
 | 18 | Capture USDC runtime evidence; validate | partial | `check-mainnet-usdc-config.mjs --runtime-evidence … --require-runtime` |
 | 19 | Fund mainnet signer with real low-value USDC; run ≥3 claim→submit→verify→settle loops | partial | `run-hosted-worker-loop.mjs`; liquidity is manual (not auto-mintable) |
 | 20 | Validate the 3 closing proofs (<24h fresh, secret-scanned) | yes | `check-mainnet-env-secrets-proof.mjs`, `-usdc-config`, `-smoke --max-completed-age-hours 24` |
