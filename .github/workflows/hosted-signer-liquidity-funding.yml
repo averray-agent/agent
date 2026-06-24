@@ -116,8 +116,11 @@ jobs:
             --project-directory /srv/agent-stack \
             -f /srv/agent-stack/docker-compose.yml \
             run --rm --no-deps -T \
+            -e AWS_PROFILE=averray-signer \
+            -e AWS_SDK_LOAD_CONFIG=1 \
             -v /srv/agent-stack/app/scripts:/app/scripts:ro \
             -v /srv/agent-stack/app/deployments:/app/deployments:ro \
+            -v /srv/agent-stack/app/mcp-server:/app/mcp-server:ro \
             backend \
             sh -lc 'cd /app && node scripts/ops/fund-signer-usdc-deposit.mjs "$@"' \
             sh "${mode_args[@]}"
