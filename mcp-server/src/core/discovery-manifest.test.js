@@ -73,6 +73,14 @@ test("buildDiscoveryManifest returns the full public discovery shape", () => {
     && mode.mappingRequirement.includes("pallet_revive.map_account")
     && mode.currentBlocker.includes("do not yet accept native Substrate signatures")
   )));
+  assert.ok(manifest.onboarding.walletModes.some((mode) => (
+    mode.id === "agent-self-custody"
+    && mode.status === "supported"
+    && mode.forAutonomousAgents === true
+    && mode.authScheme === "SIWE_JWT"
+    && Array.isArray(mode.bootstrap) && mode.bootstrap.length >= 3
+    && mode.setup.secretHandling.includes("Never paste it into chat")
+  )));
   assert.ok(manifest.onboarding.readinessChecks.some((check) => (
     check.id === "wallet-funded" && check.faucetUrl === "https://faucet.polkadot.io/"
   )));
