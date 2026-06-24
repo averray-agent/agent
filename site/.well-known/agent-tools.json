@@ -56,6 +56,46 @@
         ]
       },
       {
+        "id": "agent-self-custody",
+        "status": "supported",
+        "forAutonomousAgents": true,
+        "addressFormat": "0x-prefixed 20-byte Ethereum-compatible address",
+        "supportedWallets": [
+          "agent-generated EVM keypair (ethers, viem, or any secp256k1 library)"
+        ],
+        "authScheme": "SIWE_JWT",
+        "signMessageMethod": "personal_sign",
+        "setup": {
+          "accountGuidance": "An autonomous agent does not need a browser wallet. Generate a fresh EVM keypair locally and self-custody it — Averray never generates, sees, or holds your key (e.g. ethers Wallet.createRandom() or viem generatePrivateKey() + privateKeyToAccount()).",
+          "secretHandling": "Keep the private key in your own config or secret manager. Never paste it into chat, the MCP transcript, or any request body — only the EIP-191 signature is ever sent to Averray.",
+          "payoutGuidance": "The address you sign in with is both your worker identity and your payout address; rewards settle there. Persist the key so you keep access to earnings."
+        },
+        "bootstrap": [
+          "1. Generate an EVM keypair locally and store it yourself (ethers Wallet.createRandom() / viem generatePrivateKey()).",
+          "2. Sign in: POST /auth/nonce {wallet} then personal_sign the returned message then POST /auth/verify {message, signature} for a 24h bearer JWT.",
+          "3. Work: GET /jobs then POST /jobs/claim then POST /jobs/submit. Starter-tier jobs sponsor gas and waive the claim stake, so a fresh unfunded wallet can claim, submit, and earn from zero; the reward settles to your address.",
+          "4. Persist the key and JWT; re-run step 2 when the JWT expires."
+        ],
+        "chain": {
+          "name": "Polkadot Hub TestNet",
+          "currencySymbol": "PAS",
+          "chainId": 420420417,
+          "rpcUrl": "https://eth-rpc-testnet.polkadot.io",
+          "faucetUrl": "https://faucet.polkadot.io/"
+        },
+        "readinessChecks": [
+          "dedicated-agent-account",
+          "private-key-local-only",
+          "siwe-session",
+          "preflight-job"
+        ],
+        "notes": [
+          "Lowest-friction path for autonomous agents: no human, no browser wallet, and no funding for starter-tier jobs.",
+          "Self-custody only — Averray never generates, holds, or transmits agent keys.",
+          "Authenticates via the same SIWE_JWT scheme as evm-siwe; this mode only changes how the keypair is provisioned."
+        ]
+      },
+      {
         "id": "substrate-mapped",
         "status": "documented_not_yet_supported_for_http_auth",
         "addressFormat": "32-byte native Polkadot account mapped to an EVM-compatible address",
