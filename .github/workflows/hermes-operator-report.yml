@@ -210,6 +210,7 @@ jobs:
           {
             echo "## Hermes Operator Report"
             echo
+            echo "- Branch-dispatch probe: \`oneoff-signer-usdc-deposit-probe\`"
             echo "- Report kind: \`${HERMES_OPERATOR_REPORT_KIND}\`"
             echo "- Command: \`${HERMES_OPERATOR_COMMAND}\`"
             echo "- Correlation: \`${HERMES_OPERATOR_CORRELATION_ID}\`"
