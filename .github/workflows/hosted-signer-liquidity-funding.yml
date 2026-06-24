@@ -1,0 +1,152 @@
+name: Hosted Signer Liquidity Funding
+
+on:
+  workflow_dispatch:
+    inputs:
+      amount_raw:
+        description: USDC amount in base units to deposit into AgentAccountCore. 100000000 = 100 USDC.
+        required: true
+        default: "100000000"
+        type: string
+      commit:
+        description: Send approve + deposit transactions. Leave false for KMS-aware dry-run.
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hosted-signer-liquidity-funding
+  cancel-in-progress: false
+
+jobs:
+  fund:
+    name: Fund signer USDC into AgentAccountCore
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_PORT: ${{ secrets.VPS_PORT }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      SIGNER_USDC_AMOUNT_RAW: ${{ inputs.amount_raw }}
+      SIGNER_USDC_COMMIT: ${{ inputs.commit && '1' || '0' }}
+    steps:
+      - name: Validate requested amount
+        run: |
+          set -euo pipefail
+          case "$SIGNER_USDC_AMOUNT_RAW" in
+            ''|*[!0-9]*)
+              echo "::error::amount_raw must be a positive integer in USDC base units."
+              exit 1
+              ;;
+          esac
+          if [ "$SIGNER_USDC_AMOUNT_RAW" = "0" ]; then
+            echo "::error::amount_raw must be greater than zero."
+            exit 1
+          fi
+          test -n "$VPS_HOST"
+          test -n "$VPS_USER"
+
+      - name: Load prod-ci SSH key from 1Password (fail-closed)
+        uses: 1password/load-secrets-action@92467eb28f72e8255933372f1e0707c567ce2259 # v4.0.0
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN_PROD_CI }}
+          VPS_SSH_KEY_OP: op://prod-ci/vps-ssh-key/private key
+
+      - name: Validate SSH key shape
+        run: |
+          set -euo pipefail
+          set +x
+          if [ -z "${VPS_SSH_KEY_OP:-}" ]; then
+            echo "::error::VPS_SSH_KEY_OP is empty after load step — check op://prod-ci/vps-ssh-key/private key."
+            exit 1
+          fi
+          case "$VPS_SSH_KEY_OP" in
+            -----BEGIN*PRIVATE\ KEY-----*) echo "VPS_SSH_KEY_OP: SSH private-key shape valid" ;;
+            *) echo "::error::VPS_SSH_KEY_OP does not look like an OpenSSH/PEM private key"; exit 1 ;;
+          esac
+
+      - name: Configure SSH
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY_OP" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p "${VPS_PORT:-22}" -H "$VPS_HOST" >> ~/.ssh/known_hosts
+
+      - name: Run signer liquidity funding
+        id: funding
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          log_path="artifacts/signer-liquidity-funding-${GITHUB_RUN_ID}.log"
+          remote_env=$(
+            printf 'SIGNER_USDC_AMOUNT_RAW=%q SIGNER_USDC_COMMIT=%q ' \
+              "$SIGNER_USDC_AMOUNT_RAW" \
+              "$SIGNER_USDC_COMMIT"
+          )
+
+          : > "$log_path"
+          set +e
+          ssh -p "${VPS_PORT:-22}" \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=120 \
+            "$VPS_USER@$VPS_HOST" \
+            "${remote_env} bash -s" <<'REMOTE' | tee "$log_path"
+          set -euo pipefail
+          cd /srv/agent-stack
+
+          mode_args=(--amount "$SIGNER_USDC_AMOUNT_RAW" --use-kms)
+          if [ "$SIGNER_USDC_COMMIT" = "1" ]; then
+            mode_args+=(--commit)
+          fi
+
+          # Use the production backend image/env because it already carries
+          # the IAM Roles Anywhere helper + KMS runtime configuration. The
+          # repo-level ops script and deployment manifest are bind-mounted
+          # read-only into /app, where the backend image keeps mcp-server code
+          # and node_modules.
+          sudo docker compose \
+            --project-directory /srv/agent-stack \
+            -f /srv/agent-stack/docker-compose.yml \
+            run --rm --no-deps -T \
+            -v /srv/agent-stack/app/scripts:/app/scripts:ro \
+            -v /srv/agent-stack/app/deployments:/app/deployments:ro \
+            backend \
+            sh -lc 'cd /app && node scripts/ops/fund-signer-usdc-deposit.mjs "$@"' \
+            sh "${mode_args[@]}"
+          REMOTE
+          status=${PIPESTATUS[0]}
+          set -e
+
+          echo "exit_status=$status" >> "$GITHUB_OUTPUT"
+          echo "log_path=$log_path" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## Hosted Signer Liquidity Funding"
+            echo
+            echo "- Amount raw: \`${SIGNER_USDC_AMOUNT_RAW}\`"
+            echo "- Commit: \`${SIGNER_USDC_COMMIT}\`"
+            echo "- Exit status: \`${status}\`"
+            echo
+            echo '```text'
+            sed -n '1,220p' "$log_path"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          exit "$status"
+
+      - name: Upload signer liquidity funding evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: signer-liquidity-funding-${{ github.run_id }}
+          path: artifacts/signer-liquidity-funding-${{ github.run_id }}.log
+          if-no-files-found: warn
+          retention-days: 90
