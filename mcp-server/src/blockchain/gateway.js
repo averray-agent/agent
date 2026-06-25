@@ -699,6 +699,31 @@ export class BlockchainGateway {
     });
   }
 
+  async cancelRecurringTemplateReserve(wallet, assetSymbol, amount, templateId) {
+    return this.withGatewayError("cancelRecurringTemplateReserve", async () => {
+      this.requireSigner("cancelRecurringTemplateReserve");
+      const asset = this.requireAsset(assetSymbol);
+      const templateKey = this.toJobId(templateId);
+      const baseAmount = this.toBaseUnits(amount, asset, "recurring reserve cancellation amount");
+      const tx = await this.accountContract.cancelRecurringTemplateReserve(
+        wallet,
+        asset.address,
+        templateKey,
+        baseAmount
+      );
+      await tx.wait();
+      return {
+        wallet,
+        asset: asset.symbol,
+        amount: this.toDisplayUnits(baseAmount, asset),
+        amountRaw: baseAmount.toString(),
+        templateId,
+        templateKey,
+        source: "agent_account_recurring_template_cancel"
+      };
+    });
+  }
+
   async allocateIdleFunds(wallet, strategyId, amount, assetSymbol = "DOT") {
     return this.withGatewayError("allocateIdleFunds", async () => {
       this.requireSigner("allocateIdleFunds");

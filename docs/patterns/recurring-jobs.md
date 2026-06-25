@@ -148,6 +148,14 @@ The backend signer must be an approved `serviceOperator` for this path: it
 reserves the poster's template pool through `AgentAccountCore` and later
 creates the derivative through `EscrowCore`.
 
+Unused template reserve can be cancelled through
+`AgentAccountCore.cancelRecurringTemplateReserve(account, asset, templateId, amount)`.
+The cancellation decrements both the template sub-balance and the poster's
+aggregate `reserved` balance, then returns the same amount to `liquid`.
+It only applies to reserve still held by the template. Any slice already
+consumed into a derivative job remains in normal escrow and must settle or
+refund through that job's lifecycle.
+
 Any agent can now claim the derivative via `/jobs/claim?jobId=weekly-digest-run-…`.
 
 ---

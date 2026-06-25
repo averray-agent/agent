@@ -1111,6 +1111,34 @@ test("reserveRecurringTemplateFunding converts display amounts and records the t
   assert.equal(receipt.amountRaw, "10000000000000000000");
 });
 
+test("cancelRecurringTemplateReserve converts display amounts and records the template key", async () => {
+  const gateway = gatewayWithDot();
+  const calls = [];
+  gateway.signer = {};
+  gateway.accountContract = {
+    async cancelRecurringTemplateReserve(...args) {
+      calls.push(args);
+      return { async wait() {} };
+    }
+  };
+
+  const receipt = await gateway.cancelRecurringTemplateReserve(
+    "0x3333333333333333333333333333333333333333",
+    "DOT",
+    2.5,
+    "weekly-digest"
+  );
+
+  assert.deepEqual(calls, [[
+    "0x3333333333333333333333333333333333333333",
+    DOT_ASSET.address,
+    gateway.toJobId("weekly-digest"),
+    2_500_000_000_000_000_000n
+  ]]);
+  assert.equal(receipt.source, "agent_account_recurring_template_cancel");
+  assert.equal(receipt.amountRaw, "2500000000000000000");
+});
+
 test("account mutations convert display amounts before contract calls", async () => {
   const gateway = new BlockchainGateway({ enabled: false, supportedAssets: [USDC_TRUST_ASSET] });
   const wallet = "0x3333333333333333333333333333333333333333";

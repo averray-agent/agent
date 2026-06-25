@@ -72,6 +72,9 @@ contract AgentAccountCore is ReentrancyGuard {
     event Withdrawn(address indexed account, address indexed asset, uint256 amount);
     event Reserved(address indexed account, address indexed asset, uint256 amount);
     event ReservationReleased(address indexed account, address indexed asset, uint256 amount);
+    event RecurringTemplateReserveCancelled(
+        address indexed account, address indexed asset, bytes32 indexed templateId, uint256 amount
+    );
     event ReservationSettled(
         bytes32 indexed settlementId, address indexed account, address indexed recipient, address asset, uint256 amount
     );
@@ -248,6 +251,26 @@ contract AgentAccountCore is ReentrancyGuard {
         uint256 templateReserve = recurringTemplateReserves[account][asset][templateId];
         if (templateReserve < amount) revert InsufficientReserved();
         recurringTemplateReserves[account][asset][templateId] = templateReserve - amount;
+    }
+
+    function cancelRecurringTemplateReserve(address account, address asset, bytes32 templateId, uint256 amount)
+        external
+        whenNotPaused
+        onlyOwnerOrOperator(account)
+        onlySupportedAsset(asset)
+    {
+        if (templateId == bytes32(0)) revert ZeroAmount();
+        if (amount == 0) revert ZeroAmount();
+        uint256 templateReserve = recurringTemplateReserves[account][asset][templateId];
+        if (templateReserve < amount) revert InsufficientReserved();
+
+        AssetPosition storage position = positions[account][asset];
+        if (position.reserved < amount) revert InsufficientReserved();
+        recurringTemplateReserves[account][asset][templateId] = templateReserve - amount;
+        position.reserved -= amount;
+        position.liquid += amount;
+        emit RecurringTemplateReserveCancelled(account, asset, templateId, amount);
+        emit ReservationReleased(account, asset, amount);
     }
 
     function refundReserved(address account, address asset, uint256 amount)
