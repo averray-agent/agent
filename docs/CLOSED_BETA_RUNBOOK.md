@@ -34,7 +34,7 @@ Each tester now holds ~5 USDC + 1 PAS (gas).
 **2. Post the test jobs** the agents will claim (dedups by id; safe to re-run):
 ```
 node scripts/post_job_bundle.mjs --api https://api.averray.com \
-  --token <admin-jwt> docs/ready-to-post-jobs.json
+  --token <admin-jwt> --file docs/ready-to-post-jobs.json
 ```
 
 ## Tester onboarding (each friendly user / their agent)
