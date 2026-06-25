@@ -70,11 +70,34 @@ export async function validateJwtKmsCredentialAccess(kmsJwtConfig, opts = {}) {
     // HMAC-only mode; nothing to validate.
     return { ok: true, skipped: "hmac-only" };
   }
-  if (opts.skip === true || process.env.JWT_KMS_CREDENTIAL_CHECK_SKIP === "1") {
-    // Explicit escape hatch for test environments where AWS is not
-    // available. Logged at warn level so a stray prod skip is loud.
+  if (opts.skip === true) {
+    // Programmatic test-only hatch. bootstrap never sets opts.skip, so it
+    // cannot reach production — honor it directly.
+    opts.logger?.warn?.({ reason: "opts.skip=true" }, "jwt-kms-credential-check.skipped");
+    return { ok: true, skipped: "explicit" };
+  }
+  if (process.env.JWT_KMS_CREDENTIAL_CHECK_SKIP === "1") {
+    // Operator/emergency env hatch for disconnected dev + CI where AWS is
+    // unreachable. In production it must NOT silently bypass the check: a
+    // stray skip masks exactly the credential misconfiguration this check
+    // exists to catch (the backend boots green, then every SIWE sign-in
+    // returns 500). Fail closed unless a deliberate second ack flag is also
+    // set, so an accidental production skip is caught at boot, not shipped.
+    const isProduction = process.env.NODE_ENV === "production";
+    const acknowledged = process.env.JWT_KMS_CREDENTIAL_CHECK_SKIP_ACK_PRODUCTION === "1";
+    if (isProduction && !acknowledged) {
+      throw new ConfigError(
+        "JWT_KMS_CREDENTIAL_CHECK_SKIP=1 is set under NODE_ENV=production. This emergency " +
+          "boot hatch bypasses the JWT KMS credential check and must not ship to production " +
+          "unintentionally — a stray skip masks exactly the misconfiguration the check exists " +
+          "to catch (the backend boots green, then every SIWE sign-in returns 500). Remove " +
+          "JWT_KMS_CREDENTIAL_CHECK_SKIP from the production environment. If this is a " +
+          "deliberate, supervised emergency boot, also set " +
+          "JWT_KMS_CREDENTIAL_CHECK_SKIP_ACK_PRODUCTION=1 to acknowledge the risk explicitly.",
+      );
+    }
     opts.logger?.warn?.(
-      { reason: "JWT_KMS_CREDENTIAL_CHECK_SKIP=1 or opts.skip=true" },
+      { reason: "JWT_KMS_CREDENTIAL_CHECK_SKIP=1", production: isProduction, acknowledged },
       "jwt-kms-credential-check.skipped",
     );
     return { ok: true, skipped: "explicit" };
