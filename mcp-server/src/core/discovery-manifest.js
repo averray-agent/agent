@@ -23,7 +23,7 @@ const DISCOVERY_PUBLIC_ENDPOINTS = [
   { path: "/agents/:wallet", description: "Averray Agent Profile v1 - aggregate reputation, stats, earned badges." },
   { path: "/shares/:token", description: "Public signed read-only snapshot resolver for share URLs." },
   { path: "/verifier/handlers", description: "List of supported verifier modes." },
-  { path: "/gas/health", description: "Pimlico gas-sponsor health." },
+  { path: "/gas/health", description: "Pimlico ERC-4337 gas-sponsor (paymaster) health. Distinct from starter-tier gas: starter jobs are claimed and settled on-chain by the backend signer, so they earn from zero even when this paymaster reads 'disabled'." },
   { path: "/gas/capabilities", description: "Available ERC-4337 sponsorship features." }
 ];
 
@@ -169,7 +169,7 @@ const WALLET_MODES = [
     bootstrap: [
       "1. Generate an EVM keypair locally and store it yourself (ethers Wallet.createRandom() / viem generatePrivateKey()).",
       "2. Sign in: POST /auth/nonce {wallet} then personal_sign the returned message then POST /auth/verify {message, signature} for a 24h bearer JWT.",
-      "3. Work: GET /jobs then POST /jobs/claim then POST /jobs/submit. Starter-tier jobs sponsor gas and waive the claim stake, so a fresh unfunded wallet can claim, submit, and earn from zero; the reward settles to your address.",
+      "3. Work: GET /jobs then POST /jobs/claim then POST /jobs/submit. Starter-tier jobs are operator-brokered — Averray's backend signer submits the on-chain claim and settlement on your behalf and covers the gas, and the claim stake is waived — so a fresh unfunded wallet can claim, submit, and earn from zero; the reward settles to your address. This brokered sponsorship is independent of the /health gasSponsor (Pimlico ERC-4337 paymaster) capability, which may read 'disabled' without affecting starter-tier earning.",
       "4. Persist the key and JWT; re-run step 2 when the JWT expires."
     ],
     chain: {
