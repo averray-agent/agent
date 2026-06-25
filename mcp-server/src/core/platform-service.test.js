@@ -1,13 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { Wallet, getBytes, id } from "ethers";
+import { Wallet, id } from "ethers";
 
 import { PlatformService } from "./platform-service.js";
 import { EventBus } from "./event-bus.js";
 import { InsufficientLiquidityError } from "./errors.js";
 import { MemoryStateStore } from "./state-store.js";
 import {
-  buildExternalSchemaRegistrationDigest,
+  buildExternalSchemaRegistrationTypedData,
   hashExternalSchemaContent
 } from "./job-schema-registry.js";
 
@@ -23,6 +23,8 @@ const CANONICAL_USDC_ASSET = {
 const EXTERNAL_SCHEMA_SIGNER = new Wallet("0x8b3a350cf5c34c9194ca3a545d0ec67d61f328d6e5d11dd95b9af16e70ec4c63");
 const EXTERNAL_SCHEMA_REF = "schema://jobs/off-platform-output";
 const EXTERNAL_SCHEMA_URL = "https://schemas.example.com/jobs/off-platform-output.json";
+const EXTERNAL_SCHEMA_CHAIN_ID = 420420421n;
+const EXTERNAL_SCHEMA_VERIFYING_CONTRACT = "0x2222222222222222222222222222222222222222";
 const EXTERNAL_SCHEMA = {
   $id: EXTERNAL_SCHEMA_REF,
   type: "object",
@@ -153,11 +155,14 @@ test("createAdminJob reserves finite recurring template funding from the poster 
 test("external-schema admin job posts, claims, and validates against off-platform schema", async () => {
   const schemaHash = hashExternalSchemaContent(EXTERNAL_SCHEMA);
   const jobId = "off-platform-schema-job-001";
-  const signature = await EXTERNAL_SCHEMA_SIGNER.signMessage(getBytes(buildExternalSchemaRegistrationDigest({
+  const typedData = buildExternalSchemaRegistrationTypedData({
     schemaHash,
     schemaUrl: EXTERNAL_SCHEMA_URL,
-    jobId: id(jobId)
-  })));
+    jobId: id(jobId),
+    chainId: EXTERNAL_SCHEMA_CHAIN_ID,
+    verifyingContract: EXTERNAL_SCHEMA_VERIFYING_CONTRACT
+  });
+  const signature = await EXTERNAL_SCHEMA_SIGNER.signTypedData(typedData.domain, typedData.types, typedData.value);
   const calls = [];
   let liveState = 0;
   const gateway = {
@@ -166,6 +171,10 @@ test("external-schema admin job posts, claims, and validates against off-platfor
     getDefaultClaimStakeBps: async () => 500,
     getClaimEconomicsConfig: async () => ({}),
     isTrustedSchemaIssuer: async (issuer) => issuer === EXTERNAL_SCHEMA_SIGNER.address,
+    getExternalSchemaSigningDomain: async () => ({
+      chainId: EXTERNAL_SCHEMA_CHAIN_ID,
+      verifyingContract: EXTERNAL_SCHEMA_VERIFYING_CONTRACT
+    }),
     getJob: async () => ({ state: liveState }),
     ensureJob: async (job, instanceJobId) => {
       calls.push(["ensureJob", { job, instanceJobId }]);

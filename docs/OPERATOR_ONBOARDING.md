@@ -500,7 +500,8 @@ admin shortcut.
 Before proposing the multisig call:
 
 1. Confirm the issuer address is an EVM address controlled by the schema
-   publisher and that the issuer can sign an EIP-191 message.
+   publisher and that the issuer can sign EIP-712 typed data for the live
+   `Averray EscrowCore` domain.
 2. Confirm the schema document is canonical JSON Schema served at the expected
    HTTPS URL and that its `keccak256` hash matches the registration request.
 3. Dry-run one representative registration through the backend or local

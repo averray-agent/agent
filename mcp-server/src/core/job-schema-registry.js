@@ -13,10 +13,13 @@ import { normalizeJobSchemaRef } from "./job-schema-registration.js";
 export { validateAgainstSchema } from "./job-schema-validation.js";
 
 export {
-  EXTERNAL_SCHEMA_EIP191_VERSION,
+  EXTERNAL_SCHEMA_EIP712_DOMAIN_NAME,
+  EXTERNAL_SCHEMA_EIP712_DOMAIN_VERSION,
+  EXTERNAL_SCHEMA_EIP712_VERSION,
   EXTERNAL_SCHEMA_TRUST_BOUNDARY,
   buildExternalSchemaRegistrationDigest,
   buildExternalSchemaRegistrationMessage,
+  buildExternalSchemaRegistrationTypedData,
   hashExternalSchemaContent,
   normalizeExternalSchemaRegistration,
   normalizeExternalSchemaRegistrations,

@@ -1,5 +1,5 @@
 import {
-  EXTERNAL_SCHEMA_EIP191_VERSION,
+  EXTERNAL_SCHEMA_EIP712_VERSION,
   getRegisteredJobSchemaRegistration,
   hashExternalSchemaContent,
   normalizeExternalSchemaRegistrations,
@@ -16,6 +16,8 @@ export async function registerExternalSchema({
   schemaIssuer,
   signature,
   jobId,
+  chainId,
+  verifyingContract,
   schemaRef = undefined,
   trustedIssuers = [],
   isTrustedIssuer = undefined,
@@ -36,6 +38,8 @@ export async function registerExternalSchema({
     schemaHash: computedHash,
     schemaUrl,
     jobId: chainJobId,
+    chainId,
+    verifyingContract,
     signature
   });
   if (recovered.toLowerCase() !== String(schemaIssuer ?? "").toLowerCase()) {
@@ -64,7 +68,9 @@ export async function registerExternalSchema({
       signature,
       jobId,
       chainJobId,
-      registrationVersion: EXTERNAL_SCHEMA_EIP191_VERSION
+      chainId,
+      verifyingContract,
+      registrationVersion: EXTERNAL_SCHEMA_EIP712_VERSION
     }
   ], {
     allowedSchemaRefs: [schemaRef ?? schema.$id].filter(Boolean),
@@ -139,7 +145,7 @@ function selectRegistrationForJob({ jobId, schemaRef, registrations }) {
   }
   const normalizedChainJobId = jobId ? id(String(jobId)) : undefined;
   return registrations.find((entry) =>
-    entry?.registrationVersion === EXTERNAL_SCHEMA_EIP191_VERSION
+    entry?.registrationVersion === EXTERNAL_SCHEMA_EIP712_VERSION
       && (!normalizedChainJobId || entry.chainJobId === normalizedChainJobId || entry.jobId === jobId)
   );
 }

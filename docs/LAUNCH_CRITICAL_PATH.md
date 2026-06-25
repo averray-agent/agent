@@ -101,7 +101,7 @@ and must land in the audited artifact.
 | **Med** | `reserveForRecurringTemplate` has no cancellation/refund path → misconfigured/retired templates strand funds | Covered by `cancelRecurringTemplateReserve`: refunds unused template reserve to liquid, emits cancellation event, and keeps template + aggregate reserved accounting synchronized. Not used in the beta. |
 | **Med** | Open prod dep advisories | `drizzle`/`kysely` = **H3** (partially fixed, #686). **New:** `ws` (via `ethers`/`viem` — fix bumps `viem` out-of-range, chain-lib care needed) + `vite` (in `app/`, Windows-only advisories → frontend owner). |
 | **Low** | `_refreshStrategyAllocated` loops all registered strategies → owner-controlled OOG / config DoS | Covered by touched-strategy accounting: cache each strategy's contribution and resync only the strategy whose shares changed. Requires contract deployment with the frozen artifact. |
-| **Low** | External-schema sig lacks low-s + chainId/address domain separation | Move to EIP-712 typed data (chainId + `address(this)`) + enforce low-s. |
+| **Low** | External-schema sig lacks low-s + chainId/address domain separation | Addressed in `codex/external-schema-eip712`: EIP-712 typed data is bound to `chainId` + `address(this)`, and low-s signatures are rejected. Requires the hardened EscrowCore artifact to be deployed before mainnet. |
 
 ## Explicitly NOT blocking v1
 

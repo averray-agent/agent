@@ -4,6 +4,7 @@ import { encodeBytes32String, Interface } from "ethers";
 
 import { BlockchainGateway } from "./gateway.js";
 import { InsufficientLiquidityError, ValidationError } from "../core/errors.js";
+import { EXTERNAL_SCHEMA_EIP712_VERSION } from "../core/job-schema-registry.js";
 
 const DOT_ASSET = {
   symbol: "DOT",
@@ -1817,7 +1818,7 @@ test("createSinglePayoutJobForJob forwards registered external schema metadata",
       outputSchemaRef: "schema://jobs/external-output",
       schemaRegistrations: [{
         schemaRef: "schema://jobs/external-output",
-        registrationVersion: "external-job-schema-eip191-v1",
+        registrationVersion: EXTERNAL_SCHEMA_EIP712_VERSION,
         schemaHash,
         schemaUrl: "https://schemas.example.com/external-output.json",
         schemaIssuer,
