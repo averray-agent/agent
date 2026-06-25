@@ -32,6 +32,34 @@ test("external outcome upsert ignores stale observedAt replays", () => {
   ]);
 });
 
+test("external outcome upsert keeps dynamic values parameterized", () => {
+  const injectedOutcome = {
+    ...outcome,
+    requestId: `0x${"33".repeat(32)}`,
+    status: "succeeded'); DROP TABLE xcm_external_outcomes; --",
+    settledAssets: "0); DROP TABLE xcm_external_observer_state; --",
+    settledShares: "1",
+    remoteRef: "remote'); SELECT current_user; --",
+    failureCode: "failure'); DELETE FROM xcm_external_outcomes; --",
+    source: "feed'); DROP SCHEMA public; --"
+  };
+  const query = buildUpsertExternalOutcomeSql(injectedOutcome);
+  const text = sqlText(query);
+
+  assert.doesNotMatch(text, /DROP TABLE|DELETE FROM|DROP SCHEMA|current_user/u);
+  assert.match(text, /VALUES \(\s*\?,\s*\?,\s*\?,\s*\?,\s*\?,\s*\?,\s*\?,\s*\?\s*\)/u);
+  assert.deepEqual(sqlParams(query), [
+    injectedOutcome.requestId,
+    injectedOutcome.status,
+    injectedOutcome.settledAssets,
+    injectedOutcome.settledShares,
+    injectedOutcome.remoteRef,
+    injectedOutcome.failureCode,
+    injectedOutcome.observedAt,
+    injectedOutcome.source
+  ]);
+});
+
 function sqlText(query: { queryChunks: unknown[] }) {
   return query.queryChunks
     .map((chunk) => isStringChunk(chunk) ? chunk.value.join("") : "?")
