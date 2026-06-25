@@ -95,6 +95,7 @@ contract EscrowCore is ReentrancyGuard {
     mapping(bytes32 => bytes32) public latestEvidence;
     mapping(bytes32 => uint256) public claimTtls;
     mapping(bytes32 => bool) public autoDisclosed;
+    mapping(bytes32 => bool) public onboardingWaiverEligibleJobs;
 
     event JobFunded(
         bytes32 indexed jobId,
@@ -126,6 +127,7 @@ contract EscrowCore is ReentrancyGuard {
         bool waived,
         uint256 claimNumber
     );
+    event OnboardingWaiverEligibilityUpdated(bytes32 indexed jobId, bool eligible);
     event WorkSubmitted(bytes32 indexed jobId, address indexed worker, bytes32 evidenceHash);
     event Submitted(bytes32 indexed jobId, address indexed worker, bytes32 indexed payloadHash);
     event JobReopened(bytes32 indexed jobId);
@@ -240,7 +242,13 @@ contract EscrowCore is ReentrancyGuard {
     {
         JobEscrow storage job = _jobs[jobId];
         if (job.state == JobState.None) revert UnknownJob();
-        return _computeClaimEconomics(worker, job);
+        return _computeClaimEconomics(worker, jobId, job);
+    }
+
+    function setOnboardingWaiverEligible(bytes32 jobId, bool eligible) external whenNotPaused onlyOperator {
+        if (_jobs[jobId].state == JobState.None) revert UnknownJob();
+        onboardingWaiverEligibleJobs[jobId] = eligible;
+        emit OnboardingWaiverEligibilityUpdated(jobId, eligible);
     }
 
     function createSinglePayoutJob(
@@ -439,7 +447,7 @@ contract EscrowCore is ReentrancyGuard {
             uint16 claimFeeBps,
             bool waived,
             uint256 claimNumber
-        ) = _computeClaimEconomics(worker, job);
+        ) = _computeClaimEconomics(worker, jobId, job);
 
         uint256 totalLocked = claimStake + claimFee;
         if (totalLocked > 0) {
@@ -785,7 +793,7 @@ contract EscrowCore is ReentrancyGuard {
         return signer;
     }
 
-    function _computeClaimEconomics(address worker, JobEscrow storage job)
+    function _computeClaimEconomics(address worker, bytes32 jobId, JobEscrow storage job)
         internal
         view
         returns (
@@ -798,7 +806,7 @@ contract EscrowCore is ReentrancyGuard {
         )
     {
         claimNumber = workerClaimCount[worker] + 1;
-        waived = claimNumber <= policy.onboardingWaiverClaimCount();
+        waived = onboardingWaiverEligibleJobs[jobId] && claimNumber <= policy.onboardingWaiverClaimCount();
         if (waived) {
             return (0, 0, 0, 0, true, claimNumber);
         }

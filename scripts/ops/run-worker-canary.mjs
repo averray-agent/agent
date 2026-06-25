@@ -649,6 +649,7 @@ function buildCanaryJob({ jobId, rewardAmount }) {
     verifierTerms: VERIFIER_TERMS,
     verifierMinimumMatches: 2,
     requiresSponsoredGas: true,
+    onboardingWaiverEligible: true,
     claimTtlSeconds: 3600,
     retryLimit: 1,
     outputSchemaRef: OUTPUT_SCHEMA_REF

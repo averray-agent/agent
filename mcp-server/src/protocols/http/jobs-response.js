@@ -116,6 +116,7 @@ function toCompactJobRow(job) {
     category: job.category ?? null,
     jobType: job.jobType ?? null,
     tier: job.tier ?? null,
+    onboardingWaiverEligible: job.onboardingWaiverEligible === true,
     stake: job.claimStake ?? job.stake ?? null,
     reward: {
       asset: job.rewardAsset ?? null,

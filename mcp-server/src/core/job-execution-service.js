@@ -182,6 +182,7 @@ export class JobExecutionService {
         rewardAmount: job.rewardAmount,
         rewardAsset: job.rewardAsset,
         priorClaimCount,
+        onboardingWaiverEligible: Boolean(job.onboardingWaiverEligible),
         claimStakeBps: await this.getDefaultClaimStakeBps(),
         ...claimEconomicsConfig
       });

@@ -20,12 +20,14 @@ export function computeClaimEconomics({
   claimFeeBps = DEFAULT_CLAIM_FEE_BPS,
   claimFeeVerifierBps = DEFAULT_CLAIM_FEE_VERIFIER_BPS,
   onboardingWaiverClaimCount = DEFAULT_ONBOARDING_WAIVER_CLAIM_COUNT,
+  onboardingWaiverEligible = false,
   minClaimFeeByAsset = DEFAULT_MIN_CLAIM_FEE_BY_ASSET
 } = {}) {
   const reward = finiteNumber(rewardAmount, 0);
   const asset = normalizeAssetSymbol(rewardAsset);
   const claimNumber = Math.max(0, Math.floor(finiteNumber(priorClaimCount, 0))) + 1;
-  const waived = claimNumber <= Math.max(0, Math.floor(finiteNumber(onboardingWaiverClaimCount, 0)));
+  const waived = Boolean(onboardingWaiverEligible)
+    && claimNumber <= Math.max(0, Math.floor(finiteNumber(onboardingWaiverClaimCount, 0)));
 
   if (waived) {
     return {

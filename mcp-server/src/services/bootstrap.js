@@ -89,7 +89,8 @@ const jobs = [
     outputSchemaRef: "schema://jobs/coding-output",
     claimTtlSeconds: 3600,
     retryLimit: 1,
-    requiresSponsoredGas: true
+    requiresSponsoredGas: true,
+    onboardingWaiverEligible: true
   },
   {
     id: "governance-pro-001",

@@ -1213,6 +1213,7 @@ export class PlatformService {
       rewardAmount: job.rewardAmount,
       rewardAsset: job.rewardAsset,
       priorClaimCount,
+      onboardingWaiverEligible: Boolean(job.onboardingWaiverEligible),
       claimStakeBps: await this.getDefaultClaimStakeBps(),
       ...(await this.getClaimEconomicsConfig())
     });

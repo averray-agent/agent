@@ -520,21 +520,35 @@ test("claimJob reports exhausted retry budget after an expired single-attempt jo
   assert.equal((await stateStore.getSession(first.sessionId)).status, "expired");
 });
 
-test("computeClaimEconomics waives first three claims and then applies stake plus fee", () => {
+test("computeClaimEconomics waives only explicitly eligible first claims", () => {
   const waived = computeClaimEconomics({
     rewardAmount: 5,
     rewardAsset: "DOT",
     priorClaimCount: 2,
+    onboardingWaiverEligible: true,
     claimStakeBps: 1000,
     minClaimFeeByAsset: { DOT: 0.05 }
   });
   assert.equal(waived.claimEconomicsWaived, true);
   assert.equal(waived.totalClaimLock, 0);
 
+  const notEligible = computeClaimEconomics({
+    rewardAmount: 5,
+    rewardAsset: "DOT",
+    priorClaimCount: 2,
+    claimStakeBps: 1000,
+    minClaimFeeByAsset: { DOT: 0.05 }
+  });
+  assert.equal(notEligible.claimEconomicsWaived, false);
+  assert.equal(notEligible.claimStake, 0.5);
+  assert.equal(notEligible.claimFee, 0.1);
+  assert.equal(notEligible.totalClaimLock, 0.6);
+
   const paid = computeClaimEconomics({
     rewardAmount: 5,
     rewardAsset: "DOT",
     priorClaimCount: 3,
+    onboardingWaiverEligible: true,
     claimStakeBps: 1000,
     minClaimFeeByAsset: { DOT: 0.05 }
   });
@@ -547,6 +561,7 @@ test("computeClaimEconomics waives first three claims and then applies stake plu
     rewardAmount: 1,
     rewardAsset: "DOT",
     priorClaimCount: 3,
+    onboardingWaiverEligible: true,
     claimStakeBps: 1000,
     minClaimFeeByAsset: { DOT: 0.05 }
   });
@@ -557,7 +572,7 @@ test("claimJob records onboarding waiver and claim fee economics on sessions", a
   const stateStore = new MemoryStateStore();
   const jobs = new Map(
     Array.from({ length: 4 }, (_, index) => {
-      const job = makeJob({ id: `job-${index + 1}`, rewardAmount: 5 });
+      const job = makeJob({ id: `job-${index + 1}`, rewardAmount: 5, onboardingWaiverEligible: true });
       return [job.id, job];
     })
   );
