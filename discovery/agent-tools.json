@@ -388,7 +388,7 @@
     "entrypoint": "https://api.averray.com/onboarding"
   },
   "auth": {
-    "scheme": "SIWE + JWT (HS256)",
+    "scheme": "SIWE + JWT (ES256)",
     "schemeId": "SIWE_JWT",
     "flow": [
       "POST /auth/nonce { wallet } -> { nonce, message }",
