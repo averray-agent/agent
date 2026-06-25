@@ -1,13 +1,32 @@
-import { AbiCoder, getAddress, getBytes, id, isAddress, keccak256, toUtf8Bytes, verifyMessage } from "ethers";
+import {
+  Signature,
+  TypedDataEncoder,
+  getAddress,
+  id,
+  isAddress,
+  keccak256,
+  toUtf8Bytes,
+  verifyMessage,
+  verifyTypedData
+} from "ethers";
 
 import { canonicalizeContent, hashCanonicalContent } from "./canonical-content.js";
 import { ValidationError } from "./errors.js";
 import { isPlainObject } from "./job-schema-validation.js";
 
 export const EXTERNAL_SCHEMA_TRUST_BOUNDARY = "external_signed_schema";
-export const EXTERNAL_SCHEMA_EIP191_VERSION = "external-job-schema-eip191-v1";
+export const EXTERNAL_SCHEMA_EIP712_VERSION = "external-job-schema-eip712-v1";
+export const EXTERNAL_SCHEMA_EIP712_DOMAIN_NAME = "Averray EscrowCore";
+export const EXTERNAL_SCHEMA_EIP712_DOMAIN_VERSION = "1";
 
-const abiCoder = AbiCoder.defaultAbiCoder();
+const EXTERNAL_SCHEMA_TYPES = {
+  ExternalSchemaRegistration: [
+    { name: "schemaHash", type: "bytes32" },
+    { name: "schemaUrl", type: "string" },
+    { name: "jobId", type: "bytes32" }
+  ]
+};
+const SECP256K1N_HALF = BigInt("0x7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0");
 
 export function normalizeExternalSchemaRegistrations(raw, {
   allowedSchemaRefs = [],
@@ -126,10 +145,14 @@ function normalizeExternalSchemaRegistrationV1(raw, { index, schema }) {
   const jobId = requireNonEmptyString(raw.jobId, `${prefix}.jobId`);
   const chainJobId = normalizeBytes32(raw.chainJobId ?? id(jobId), `${prefix}.chainJobId`);
   const signature = requireNonEmptyString(raw.schemaSignature ?? raw.signature, `${prefix}.signature`);
+  const chainId = normalizeChainId(raw.chainId, `${prefix}.chainId`);
+  const verifyingContract = normalizeIssuerAddress(raw.verifyingContract, `${prefix}.verifyingContract`);
   const recovered = recoverExternalSchemaRegistrationSignerV1({
     schemaHash,
     schemaUrl,
     jobId: chainJobId,
+    chainId,
+    verifyingContract,
     signature
   });
   if (recovered !== issuer) {
@@ -145,11 +168,19 @@ function normalizeExternalSchemaRegistrationV1(raw, { index, schema }) {
     schemaIssuer: issuer,
     jobId,
     chainJobId,
+    chainId: chainId.toString(),
+    verifyingContract,
     signature,
-    registrationVersion: EXTERNAL_SCHEMA_EIP191_VERSION,
+    registrationVersion: EXTERNAL_SCHEMA_EIP712_VERSION,
     trustBoundary: EXTERNAL_SCHEMA_TRUST_BOUNDARY,
     signatureVerified: true,
-    registrationMessageHash: buildExternalSchemaRegistrationDigest({ schemaHash, schemaUrl, jobId: chainJobId })
+    registrationMessageHash: buildExternalSchemaRegistrationDigest({
+      schemaHash,
+      schemaUrl,
+      jobId: chainJobId,
+      chainId,
+      verifyingContract
+    })
   };
 }
 
@@ -157,21 +188,57 @@ export function hashExternalSchemaContent(schema) {
   return keccak256(toUtf8Bytes(canonicalizeContent(requirePlainObject(schema, "schema"))));
 }
 
-export function buildExternalSchemaRegistrationDigest({ schemaHash, schemaUrl, jobId }) {
-  return keccak256(abiCoder.encode(
-    ["bytes32", "string", "bytes32"],
-    [
-      normalizeBytes32(schemaHash, "schemaHash"),
-      requireNonEmptyString(schemaUrl, "schemaUrl"),
-      normalizeBytes32(jobId, "jobId")
-    ]
-  ));
+export function buildExternalSchemaRegistrationTypedData({
+  schemaHash,
+  schemaUrl,
+  jobId,
+  chainId,
+  verifyingContract
+}) {
+  return {
+    domain: {
+      name: EXTERNAL_SCHEMA_EIP712_DOMAIN_NAME,
+      version: EXTERNAL_SCHEMA_EIP712_DOMAIN_VERSION,
+      chainId: normalizeChainId(chainId, "chainId"),
+      verifyingContract: normalizeIssuerAddress(verifyingContract, "verifyingContract")
+    },
+    types: EXTERNAL_SCHEMA_TYPES,
+    value: {
+      schemaHash: normalizeBytes32(schemaHash, "schemaHash"),
+      schemaUrl: requireNonEmptyString(schemaUrl, "schemaUrl"),
+      jobId: normalizeBytes32(jobId, "jobId")
+    }
+  };
 }
 
-export function recoverExternalSchemaRegistrationSignerV1({ schemaHash, schemaUrl, jobId, signature }) {
-  const digest = buildExternalSchemaRegistrationDigest({ schemaHash, schemaUrl, jobId });
+export function buildExternalSchemaRegistrationDigest(params) {
+  const typedData = buildExternalSchemaRegistrationTypedData(params);
+  return TypedDataEncoder.hash(typedData.domain, typedData.types, typedData.value);
+}
+
+export function recoverExternalSchemaRegistrationSignerV1({
+  schemaHash,
+  schemaUrl,
+  jobId,
+  chainId,
+  verifyingContract,
+  signature
+}) {
+  const typedData = buildExternalSchemaRegistrationTypedData({
+    schemaHash,
+    schemaUrl,
+    jobId,
+    chainId,
+    verifyingContract
+  });
   try {
-    return getAddress(verifyMessage(getBytes(digest), requireNonEmptyString(signature, "signature")));
+    assertLowSSignature(signature);
+    return getAddress(verifyTypedData(
+      typedData.domain,
+      typedData.types,
+      typedData.value,
+      requireNonEmptyString(signature, "signature")
+    ));
   } catch (error) {
     throw new ValidationError(`External schema signature verification failed: ${error?.message ?? "invalid signature"}`);
   }
@@ -251,12 +318,27 @@ function normalizeIssuerAddress(value, field) {
   return getAddress(text);
 }
 
+function normalizeChainId(value, field) {
+  const text = typeof value === "bigint" ? value.toString() : String(value ?? "").trim();
+  if (!/^[1-9][0-9]*$/u.test(text)) {
+    throw new ValidationError(`${field} must be a positive chain id.`);
+  }
+  return BigInt(text);
+}
+
 function normalizeBytes32(value, field) {
   const text = requireNonEmptyString(value, field);
   if (!/^0x[a-fA-F0-9]{64}$/u.test(text)) {
     throw new ValidationError(`${field} must be a bytes32 hex string.`);
   }
   return text;
+}
+
+function assertLowSSignature(signature) {
+  const parsed = Signature.from(requireNonEmptyString(signature, "signature"));
+  if (BigInt(parsed.s) > SECP256K1N_HALF) {
+    throw new ValidationError("signature must use a low-s secp256k1 value.");
+  }
 }
 
 function assertSupportedExternalSchema(schema, path) {

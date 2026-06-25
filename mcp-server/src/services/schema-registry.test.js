@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { Wallet, getBytes, id } from "ethers";
+import { Wallet, id } from "ethers";
 
 import {
-  buildExternalSchemaRegistrationDigest,
+  buildExternalSchemaRegistrationTypedData,
   hashExternalSchemaContent
 } from "../core/job-schema-registry.js";
 import {
@@ -14,6 +14,8 @@ import {
 const ISSUER = new Wallet("0x59c6995e998f97a5a004497e5da795437b4466ad5c2af1c6a6d1dcb1b1ce36b9");
 const OTHER = new Wallet("0x8b3a350cf5c34c9194ca3a545d0ec67d61f328d6e5d11dd95b9af16e70ec4c63");
 const JOB_ID = "external-schema-job-001";
+const CHAIN_ID = 420420421n;
+const VERIFYING_CONTRACT = "0x2222222222222222222222222222222222222222";
 const SCHEMA_URL = "https://schemas.example.com/jobs/external-audit-output.json";
 const SCHEMA_REF = "schema://jobs/external-audit-output";
 const SCHEMA = {
@@ -29,14 +31,16 @@ const SCHEMA = {
 
 async function signSchema({ signer = ISSUER, schema = SCHEMA, schemaUrl = SCHEMA_URL, jobId = JOB_ID } = {}) {
   const schemaHash = hashExternalSchemaContent(schema);
-  const digest = buildExternalSchemaRegistrationDigest({
+  const typedData = buildExternalSchemaRegistrationTypedData({
     schemaHash,
     schemaUrl,
-    jobId: id(jobId)
+    jobId: id(jobId),
+    chainId: CHAIN_ID,
+    verifyingContract: VERIFYING_CONTRACT
   });
   return {
     schemaHash,
-    signature: await signer.signMessage(getBytes(digest))
+    signature: await signer.signTypedData(typedData.domain, typedData.types, typedData.value)
   };
 }
 
@@ -59,12 +63,14 @@ test("registerExternalSchema verifies signer, trust, URL fetch, and content hash
     schemaIssuer: ISSUER.address,
     signature: signed.signature,
     jobId: JOB_ID,
+    chainId: CHAIN_ID,
+    verifyingContract: VERIFYING_CONTRACT,
     schemaRef: SCHEMA_REF,
     isTrustedIssuer: async (issuer) => issuer === ISSUER.address,
     fetchImpl: fetchSchema()
   });
 
-  assert.equal(registration.registrationVersion, "external-job-schema-eip191-v1");
+  assert.equal(registration.registrationVersion, "external-job-schema-eip712-v1");
   assert.equal(registration.schemaHash, signed.schemaHash);
   assert.equal(registration.schemaIssuer, ISSUER.address);
   assert.equal(registration.chainJobId, id(JOB_ID));
@@ -82,6 +88,8 @@ test("registerExternalSchema rejects invalid signatures and untrusted issuers", 
       schemaIssuer: ISSUER.address,
       signature: signedByOther.signature,
       jobId: JOB_ID,
+      chainId: CHAIN_ID,
+      verifyingContract: VERIFYING_CONTRACT,
       schemaRef: SCHEMA_REF,
       isTrustedIssuer: async () => true,
       fetchImpl: fetchSchema()
@@ -97,6 +105,8 @@ test("registerExternalSchema rejects invalid signatures and untrusted issuers", 
       schemaIssuer: ISSUER.address,
       signature: signed.signature,
       jobId: JOB_ID,
+      chainId: CHAIN_ID,
+      verifyingContract: VERIFYING_CONTRACT,
       schemaRef: SCHEMA_REF,
       isTrustedIssuer: async () => false,
       fetchImpl: fetchSchema()
@@ -113,6 +123,8 @@ test("validateSubmissionAgainstRegisteredSchema fetches schema and catches hash 
     schemaIssuer: ISSUER.address,
     signature: signed.signature,
     jobId: JOB_ID,
+    chainId: CHAIN_ID,
+    verifyingContract: VERIFYING_CONTRACT,
     schemaRef: SCHEMA_REF,
     trustedIssuers: [ISSUER.address],
     fetchImpl: fetchSchema()

@@ -7,6 +7,13 @@ import {ReputationSBT} from "./ReputationSBT.sol";
 import {ReentrancyGuard} from "./lib/ReentrancyGuard.sol";
 
 contract EscrowCore is ReentrancyGuard {
+    bytes32 public constant EXTERNAL_SCHEMA_REGISTRATION_TYPEHASH =
+        keccak256("ExternalSchemaRegistration(bytes32 schemaHash,string schemaUrl,bytes32 jobId)");
+    bytes32 internal constant EIP712_DOMAIN_TYPEHASH =
+        keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
+    bytes32 internal constant EIP712_NAME_HASH = keccak256("Averray EscrowCore");
+    bytes32 internal constant EIP712_VERSION_HASH = keccak256("1");
+    uint256 internal constant SECP256K1N_HALF = 0x7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0;
     uint256 public constant DISPUTE_WINDOW = 7 days;
     uint256 public constant ARBITRATOR_SLA = 14 days;
     // Caps the per-job milestone count so the settlement loop in
@@ -745,7 +752,7 @@ contract EscrowCore is ReentrancyGuard {
         }
 
         address recovered = _recoverExternalSchemaSigner(
-            _externalSchemaSigningHash(externalSchema.schemaHash, externalSchema.schemaUrl, jobId),
+            hashExternalSchemaRegistration(externalSchema.schemaHash, externalSchema.schemaUrl, jobId),
             externalSchema.schemaSignature
         );
         if (recovered != externalSchema.schemaIssuer) revert InvalidSchemaSignature();
@@ -759,13 +766,21 @@ contract EscrowCore is ReentrancyGuard {
         );
     }
 
-    function _externalSchemaSigningHash(bytes32 schemaHash, string memory schemaUrl, bytes32 jobId)
-        internal
-        pure
+    function externalSchemaDomainSeparator() public view returns (bytes32) {
+        return keccak256(
+            abi.encode(EIP712_DOMAIN_TYPEHASH, EIP712_NAME_HASH, EIP712_VERSION_HASH, block.chainid, address(this))
+        );
+    }
+
+    function hashExternalSchemaRegistration(bytes32 schemaHash, string memory schemaUrl, bytes32 jobId)
+        public
+        view
         returns (bytes32)
     {
-        bytes32 digest = keccak256(abi.encode(schemaHash, schemaUrl, jobId));
-        return keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", digest));
+        bytes32 structHash = keccak256(
+            abi.encode(EXTERNAL_SCHEMA_REGISTRATION_TYPEHASH, schemaHash, keccak256(bytes(schemaUrl)), jobId)
+        );
+        return keccak256(abi.encodePacked("\x19\x01", externalSchemaDomainSeparator(), structHash));
     }
 
     function _recoverExternalSchemaSigner(bytes32 ethSignedHash, bytes memory signature)
@@ -787,6 +802,7 @@ contract EscrowCore is ReentrancyGuard {
             v += 27;
         }
         if (v != 27 && v != 28) revert InvalidSchemaSignature();
+        if (uint256(s) > SECP256K1N_HALF) revert InvalidSchemaSignature();
 
         address signer = ecrecover(ethSignedHash, v, r, s);
         if (signer == address(0)) revert InvalidSchemaSignature();

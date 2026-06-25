@@ -14,8 +14,13 @@ interface VmEvent {
     function expectEmit(bool checkTopic1, bool checkTopic2, bool checkTopic3, bool checkData, address emitter) external;
 }
 
+interface VmSign {
+    function sign(uint256 privateKey, bytes32 digest) external returns (uint8 v, bytes32 r, bytes32 s);
+}
+
 contract ExternalSchemaRegistrationTest is Test {
     VmEvent internal constant vmEvent = VmEvent(address(uint160(uint256(keccak256("hevm cheat code")))));
+    VmSign internal constant vmSign = VmSign(address(uint160(uint256(keccak256("hevm cheat code")))));
 
     TreasuryPolicy internal policy;
     StrategyAdapterRegistry internal registry;
@@ -25,20 +30,19 @@ contract ExternalSchemaRegistrationTest is Test {
     MockERC20 internal dot;
 
     address internal poster = address(0xA11CE);
+    uint256 internal constant ISSUER_KEY = 0xA11CE123;
+    uint256 internal constant OTHER_ISSUER_KEY = 0xB0B;
     address internal issuer = 0xCc8940b1c72567cf04c9Ccc96242Ee7A4444534C;
-    address internal otherIssuer = 0xFf1914A904ed524aec571244c5aEb2140C234304;
+    address internal otherIssuer = 0x0376AAc07Ad725E01357B1725B5ceC61aE10473c;
 
     bytes32 internal constant SPEC_HASH = bytes32("SPEC_HASH");
     bytes32 internal constant SCHEMA_HASH = keccak256("external schema");
     string internal constant SCHEMA_URL = "https://schemas.example.com/jobs/external-output.json";
-    bytes internal constant VALID_SIGNATURE =
-        hex"876a9ed85c63b0773c3d2d5a7eac09204aa00c7da465bfe2648f063336d5efba33eda920e896a1f5d977e15bc55c29813382e9d0fcac3679a96bc1d760c576e01b";
-    bytes internal constant BAD_SIGNATURE =
-        hex"a1d1c6d2e40953c768d6b12351c9029ab3d0a7d0b238444fca2163ff8934b79e56eceb48f9440700cdf90bbf372e4d7e0d06cf2162df0d5961aaa72400104aed1c";
-    bytes internal constant UNTRUSTED_SIGNATURE =
-        hex"1aa6b1387ef692d01bccd36f02a8e05f202500db457f28f1c558e0b3bf43c9fc1c5525a8c931d1928b10aa1083e19e649ef91691d24dc94f003f5ba338689b811b";
-    bytes internal constant RECURRING_SIGNATURE =
-        hex"64e2697330e5627eb177c3c9f7e5849f8a9ee101f0b04263a5bb3c824fd6cea15b243561da102b39c329e036650435b9562f5ca11e68e06f0ad36ba03c849f031b";
+    bytes32 internal constant EIP712_DOMAIN_TYPEHASH =
+        keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
+    bytes32 internal constant EIP712_NAME_HASH = keccak256("Averray EscrowCore");
+    bytes32 internal constant EIP712_VERSION_HASH = keccak256("1");
+    uint256 internal constant SECP256K1N = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141;
 
     event TrustedSchemaIssuerSet(address indexed issuer, bool approved);
     event ExternalSchemaRegistered(
@@ -79,7 +83,7 @@ contract ExternalSchemaRegistrationTest is Test {
     function testValidExternalSchemaAccepted() public {
         policy.setTrustedSchemaIssuer(issuer, true);
         bytes32 jobId = keccak256("job/external-schema/valid");
-        bytes memory signature = VALID_SIGNATURE;
+        bytes memory signature = signExternalSchema(escrow, jobId, ISSUER_KEY);
 
         vmEvent.expectEmit(true, true, true, true, address(escrow));
         emit ExternalSchemaRegistered(jobId, SCHEMA_HASH, issuer, SCHEMA_URL);
@@ -111,7 +115,7 @@ contract ExternalSchemaRegistrationTest is Test {
     function testInvalidSignatureRejected() public {
         policy.setTrustedSchemaIssuer(issuer, true);
         bytes32 jobId = keccak256("job/external-schema/bad-signature");
-        bytes memory signature = BAD_SIGNATURE;
+        bytes memory signature = signExternalSchema(escrow, jobId, OTHER_ISSUER_KEY);
 
         vm.prank(poster);
         (bool ok,) = address(escrow).call(createExternalSchemaJobCalldata(jobId, issuer, signature));
@@ -120,18 +124,51 @@ contract ExternalSchemaRegistrationTest is Test {
 
     function testUntrustedIssuerRejected() public {
         bytes32 jobId = keccak256("job/external-schema/untrusted");
-        bytes memory signature = UNTRUSTED_SIGNATURE;
+        bytes memory signature = signExternalSchema(escrow, jobId, ISSUER_KEY);
 
         vm.prank(poster);
         (bool ok,) = address(escrow).call(createExternalSchemaJobCalldata(jobId, issuer, signature));
         require(!ok, "EXPECTED_UNTRUSTED_ISSUER_REVERT");
     }
 
+    function testExternalSchemaSignatureCannotReplayAcrossEscrowContracts() public {
+        policy.setTrustedSchemaIssuer(issuer, true);
+        bytes32 jobId = keccak256("job/external-schema/replay-contract");
+        bytes memory signature = signExternalSchema(escrow, jobId, ISSUER_KEY);
+        EscrowCore otherEscrow = new EscrowCore(policy, accounts, reputation);
+        policy.setServiceOperator(address(otherEscrow), true);
+        accounts.setEscrowOperator(address(otherEscrow), true);
+
+        vm.prank(poster);
+        (bool ok,) = address(otherEscrow).call(createExternalSchemaJobCalldata(jobId, issuer, signature));
+        require(!ok, "EXPECTED_CROSS_CONTRACT_REPLAY_REVERT");
+    }
+
+    function testExternalSchemaSignatureCannotReplayAcrossChainIds() public {
+        policy.setTrustedSchemaIssuer(issuer, true);
+        bytes32 jobId = keccak256("job/external-schema/replay-chain");
+        bytes memory signature = signExternalSchemaForDomain(escrow, jobId, ISSUER_KEY, block.chainid + 1);
+
+        vm.prank(poster);
+        (bool ok,) = address(escrow).call(createExternalSchemaJobCalldata(jobId, issuer, signature));
+        require(!ok, "EXPECTED_CROSS_CHAIN_REPLAY_REVERT");
+    }
+
+    function testHighSSignatureRejected() public {
+        policy.setTrustedSchemaIssuer(issuer, true);
+        bytes32 jobId = keccak256("job/external-schema/high-s");
+        bytes memory signature = highSSignature(escrow, jobId, ISSUER_KEY);
+
+        vm.prank(poster);
+        (bool ok,) = address(escrow).call(createExternalSchemaJobCalldata(jobId, issuer, signature));
+        require(!ok, "EXPECTED_HIGH_S_REVERT");
+    }
+
     function testRecurringReserveAcceptsExternalSchemaMetadata() public {
         policy.setTrustedSchemaIssuer(issuer, true);
         bytes32 templateId = keccak256("template/external-schema");
         bytes32 jobId = keccak256("template/external-schema/run/1");
-        bytes memory signature = RECURRING_SIGNATURE;
+        bytes memory signature = signExternalSchema(escrow, jobId, ISSUER_KEY);
 
         vm.prank(poster);
         accounts.reserveForRecurringTemplate(poster, address(dot), templateId, 10 ether);
@@ -185,5 +222,36 @@ contract ExternalSchemaRegistrationTest is Test {
                 schemaHash: SCHEMA_HASH, schemaUrl: SCHEMA_URL, schemaIssuer: schemaIssuer, schemaSignature: signature
             })
         );
+    }
+
+    function signExternalSchema(EscrowCore target, bytes32 jobId, uint256 signerKey) internal returns (bytes memory) {
+        bytes32 digest = target.hashExternalSchemaRegistration(SCHEMA_HASH, SCHEMA_URL, jobId);
+        (uint8 v, bytes32 r, bytes32 s) = vmSign.sign(signerKey, digest);
+        return abi.encodePacked(r, s, v);
+    }
+
+    function signExternalSchemaForDomain(EscrowCore target, bytes32 jobId, uint256 signerKey, uint256 chainId)
+        internal
+        returns (bytes memory)
+    {
+        bytes32 domainSeparator = keccak256(
+            abi.encode(EIP712_DOMAIN_TYPEHASH, EIP712_NAME_HASH, EIP712_VERSION_HASH, chainId, address(target))
+        );
+        bytes32 structHash = keccak256(
+            abi.encode(
+                target.EXTERNAL_SCHEMA_REGISTRATION_TYPEHASH(), SCHEMA_HASH, keccak256(bytes(SCHEMA_URL)), jobId
+            )
+        );
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
+        (uint8 v, bytes32 r, bytes32 s) = vmSign.sign(signerKey, digest);
+        return abi.encodePacked(r, s, v);
+    }
+
+    function highSSignature(EscrowCore target, bytes32 jobId, uint256 signerKey) internal returns (bytes memory) {
+        bytes32 digest = target.hashExternalSchemaRegistration(SCHEMA_HASH, SCHEMA_URL, jobId);
+        (uint8 v, bytes32 r, bytes32 s) = vmSign.sign(signerKey, digest);
+        bytes32 highS = bytes32(SECP256K1N - uint256(s));
+        uint8 highV = v == 27 ? 28 : 27;
+        return abi.encodePacked(r, highS, highV);
     }
 }

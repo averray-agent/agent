@@ -10,7 +10,11 @@ import { VerificationIngestionService } from "../services/verification-ingestion
 import { ConflictError, InsufficientLiquidityError, ValidationError } from "./errors.js";
 import { normalizeSubmission } from "./submission.js";
 import { buildPlatformCapabilities } from "./discovery-manifest.js";
-import { getBuiltinJobSchema, getRegisteredJobSchemaRegistration } from "./job-schema-registry.js";
+import {
+  EXTERNAL_SCHEMA_EIP712_VERSION,
+  getBuiltinJobSchema,
+  getRegisteredJobSchemaRegistration
+} from "./job-schema-registry.js";
 import {
   buildSessionLifecycle,
   getSessionStateMachineDefinition
@@ -262,12 +266,17 @@ export class PlatformService {
       ? existingTrustPolicy.trustedIssuers
       : [];
     const external = input.externalSchema;
+    const signingDomain = this.blockchainGateway?.isEnabled?.() && this.blockchainGateway?.getExternalSchemaSigningDomain
+      ? await this.blockchainGateway.getExternalSchemaSigningDomain()
+      : undefined;
     const registration = await registerExternalSchema({
       schemaHash: external.schemaHash,
       schemaUrl: external.schemaUrl,
       schemaIssuer: external.schemaIssuer,
       signature: external.signature ?? external.schemaSignature,
       jobId: input.id,
+      chainId: signingDomain?.chainId ?? external.chainId,
+      verifyingContract: signingDomain?.verifyingContract ?? external.verifyingContract,
       schemaRef: outputSchemaRef,
       trustedIssuers,
       isTrustedIssuer: this.blockchainGateway?.isEnabled?.() && this.blockchainGateway?.isTrustedSchemaIssuer
@@ -677,7 +686,7 @@ export class PlatformService {
         registrations: job.schemaRegistrations
       }));
       const registration = getRegisteredJobSchemaRegistration(job.outputSchemaRef, job.schemaRegistrations);
-      if (registration?.registrationVersion === "external-job-schema-eip191-v1") {
+      if (registration?.registrationVersion === EXTERNAL_SCHEMA_EIP712_VERSION) {
         await validateSubmissionAgainstRegisteredSchema(normalized, job.id, {
           schemaRef: job.outputSchemaRef,
           registrations: job.schemaRegistrations

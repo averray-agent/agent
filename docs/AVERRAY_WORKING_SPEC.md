@@ -572,8 +572,10 @@ External schemas add four fields to the job contract metadata:
 - `schemaHash`: `keccak256` of the canonical JSON Schema document.
 - `schemaUrl`: HTTPS fetch hint for the schema document.
 - `schemaIssuer`: EVM address that endorsed the schema.
-- `schemaSignature`: EIP-191 signature by `schemaIssuer` over
-  `keccak256(abi.encode(schemaHash, schemaUrl, jobId))`.
+- `schemaSignature`: EIP-712 signature by `schemaIssuer` over
+  `ExternalSchemaRegistration(bytes32 schemaHash,string schemaUrl,bytes32 jobId)`,
+  using the `Averray EscrowCore` domain bound to the live `chainId` and
+  `EscrowCore` address.
 
 `TreasuryPolicy.trustedSchemaIssuers(address)` is the trust boundary. The
 owner multisig approves issuers through `setTrustedSchemaIssuer(issuer, true)`;
@@ -582,9 +584,10 @@ signature does not recover to `schemaIssuer`, or the issuer is not trusted.
 Built-in schemas omit all four fields and keep the existing path.
 
 The backend mirrors the same validation before broadcasting a job transaction:
-`POST /admin/jobs` accepts optional `externalSchema`, verifies the EIP-191
-signature, checks the trusted-issuer policy, fetches the schema URL, verifies
-the content hash, and stores the registration on the job definition. Runtime
+`POST /admin/jobs` accepts optional `externalSchema`, verifies the EIP-712
+signature against the live EscrowCore domain, checks the trusted-issuer policy,
+fetches the schema URL, verifies the content hash, and stores the registration
+on the job definition. Runtime
 submission validation selects the registered external schema for that job and
 falls back to built-in validation only when no external schema registration is
 present. This keeps the public receipt trail honest: the schema used to judge a

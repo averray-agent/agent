@@ -30,7 +30,10 @@ import {
 } from "../services/aws-credentials.js";
 import { buildXcmRequestPayload } from "./xcm-message-builder.js";
 import { hashCanonicalContent } from "../core/canonical-content.js";
-import { getRegisteredJobSchemaRegistration } from "../core/job-schema-registry.js";
+import {
+  EXTERNAL_SCHEMA_EIP712_VERSION,
+  getRegisteredJobSchemaRegistration
+} from "../core/job-schema-registry.js";
 import { redactProviderError } from "../core/redact-provider-error.js";
 import {
   BlockchainRevertError,
@@ -164,6 +167,17 @@ export class BlockchainGateway {
 
   isEnabled() {
     return this.config.enabled;
+  }
+
+  async getExternalSchemaSigningDomain() {
+    if (!this.isEnabled()) {
+      return undefined;
+    }
+    const network = await this.provider.getNetwork();
+    return {
+      chainId: network.chainId.toString(),
+      verifyingContract: this.config.escrowCoreAddress
+    };
   }
 
   async healthCheck() {
@@ -1304,7 +1318,7 @@ export class BlockchainGateway {
 
   externalSchemaMetadataForJob(job) {
     const registration = getRegisteredJobSchemaRegistration(job?.outputSchemaRef, job?.schemaRegistrations);
-    if (registration?.registrationVersion !== "external-job-schema-eip191-v1") {
+    if (registration?.registrationVersion !== EXTERNAL_SCHEMA_EIP712_VERSION) {
       return EMPTY_EXTERNAL_SCHEMA;
     }
     return {

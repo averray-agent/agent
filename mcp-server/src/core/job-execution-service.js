@@ -13,6 +13,7 @@ import {
 } from "./session-state-machine.js";
 import { hashSubmission, isStructuredSubmission, normalizeSubmission } from "./submission.js";
 import {
+  EXTERNAL_SCHEMA_EIP712_VERSION,
   getBuiltinJobSchema,
   getJobSchema,
   getRegisteredJobSchemaRegistration,
@@ -733,7 +734,7 @@ export function validateSubmissionContract(schemaRef, submission, { path = "subm
 
 async function validateJobSubmissionAgainstSchema(job, submission) {
   const registration = getRegisteredJobSchemaRegistration(job?.outputSchemaRef, job?.schemaRegistrations);
-  if (registration?.registrationVersion === "external-job-schema-eip191-v1") {
+  if (registration?.registrationVersion === EXTERNAL_SCHEMA_EIP712_VERSION) {
     await validateSubmissionAgainstRegisteredSchema(submission, job.id, {
       schemaRef: job.outputSchemaRef,
       registrations: job.schemaRegistrations
