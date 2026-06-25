@@ -63,6 +63,20 @@ The clean, *certain* place is a guard at the handler entry — **not** capabilit
 - **JWT TTL ≤1h automation** — deferred to mainnet prep (refresh-flow build; see the JWT callout in `MAINNET_CREDENTIALS_PLAN`). Testnet stays on the 30d hand-minted `admin-jwt`.
 - **MAIN-005** — display-unit rounding in `resolveRemainingPayout`; LOW, deferred.
 
+## Security-review hardening — mainnet prep (from external-agent review)
+
+Two independent reviewer agents (onboarding to the closed beta) read the published threat
+model and probed the live surface. Most findings were already-documented or by-design; the
+live checks confirmed `/metrics` is bearer-gated (401) and the JWT alg is ES256 (manifest
+fixed, #682). These three are the concrete hardening items worth tracking — **none block the
+testnet beta** (testnet financial risk ≈ 0); all are mainnet-prep.
+
+| # | Item | Owner | Notes |
+|---|------|-------|-------|
+| H1 | **Deploy-time guard for `JWT_KMS_CREDENTIAL_CHECK_SKIP`** | Claude | The emergency boot-cred-check bypass has no guard against accidental ship. Add a CI/deploy assertion that it's unset in the rendered production env (fail closed). |
+| H2 | **Move `DISCOVERY_PUBLISHER_PRIVATE_KEY` off GitHub Secrets → KMS** | Pascal / infra | The last raw signer key not on KMS; signs discovery-manifest hashes (not funds), and the on-chain `DiscoveryRegistry` hash-check bounds the blast radius today. Migrate before mainnet. |
+| H3 | **Known-vuln deps: `drizzle-orm` + `kysely` SQLi** | Codex | `drizzle-orm <0.45.2` (GHSA-gpj5-g38j-94v9) + `kysely <=0.28.16` (3× SQLi). **Not a clean bump:** (a) direct `drizzle-orm ^0.41→^0.45.2` is breaking and touches settlement code (`indexer/src/api/xcm-outcome*.ts` import `sql`/`eq`/`and`) → Codex must verify against a live chain+DB; (b) `kysely` + ponder-nested `drizzle` are **transitive via `ponder@0.16.6`, already the latest** — unclearable by upgrade until ponder patches, or via a risky `overrides` force that may break ponder's runtime. Bounded today by the indexer SQL validator + testnet-only. Track upstream ponder; revisit before real funds. |
+
 ## Honest timeline
 
 Audit (weeks) and hardware/multisig (weeks) run **in parallel** — not days. There is no
