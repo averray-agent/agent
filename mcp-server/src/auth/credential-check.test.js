@@ -78,23 +78,67 @@ test("validateJwtKmsCredentialAccess: respects opts.skip escape hatch", async ()
   assert.equal(result.skipped, "explicit");
 });
 
-test("validateJwtKmsCredentialAccess: respects JWT_KMS_CREDENTIAL_CHECK_SKIP=1 env hatch", async () => {
-  const prior = process.env.JWT_KMS_CREDENTIAL_CHECK_SKIP;
+function restoreEnv(name, prior) {
+  if (prior === undefined) delete process.env[name];
+  else process.env[name] = prior;
+}
+
+const SKIP_HATCH_CFG = () => ({
+  ...VALID_CFG,
+  kmsClient: new FakeKMSClient({
+    getPublicKey: () => {
+      throw new Error("should not be called");
+    },
+  }),
+});
+
+test("validateJwtKmsCredentialAccess: respects JWT_KMS_CREDENTIAL_CHECK_SKIP=1 env hatch (non-production)", async () => {
+  const priorSkip = process.env.JWT_KMS_CREDENTIAL_CHECK_SKIP;
+  const priorNodeEnv = process.env.NODE_ENV;
   process.env.JWT_KMS_CREDENTIAL_CHECK_SKIP = "1";
+  process.env.NODE_ENV = "test";
   try {
-    const cfg = {
-      ...VALID_CFG,
-      kmsClient: new FakeKMSClient({
-        getPublicKey: () => {
-          throw new Error("should not be called");
-        },
-      }),
-    };
-    const result = await validateJwtKmsCredentialAccess(cfg, { logger: silentLogger() });
+    const result = await validateJwtKmsCredentialAccess(SKIP_HATCH_CFG(), { logger: silentLogger() });
     assert.equal(result.skipped, "explicit");
   } finally {
-    if (prior === undefined) delete process.env.JWT_KMS_CREDENTIAL_CHECK_SKIP;
-    else process.env.JWT_KMS_CREDENTIAL_CHECK_SKIP = prior;
+    restoreEnv("JWT_KMS_CREDENTIAL_CHECK_SKIP", priorSkip);
+    restoreEnv("NODE_ENV", priorNodeEnv);
+  }
+});
+
+test("validateJwtKmsCredentialAccess: env hatch fails closed under NODE_ENV=production without ack", async () => {
+  const priorSkip = process.env.JWT_KMS_CREDENTIAL_CHECK_SKIP;
+  const priorNodeEnv = process.env.NODE_ENV;
+  const priorAck = process.env.JWT_KMS_CREDENTIAL_CHECK_SKIP_ACK_PRODUCTION;
+  process.env.JWT_KMS_CREDENTIAL_CHECK_SKIP = "1";
+  process.env.NODE_ENV = "production";
+  delete process.env.JWT_KMS_CREDENTIAL_CHECK_SKIP_ACK_PRODUCTION;
+  try {
+    await assert.rejects(
+      () => validateJwtKmsCredentialAccess(SKIP_HATCH_CFG(), { logger: silentLogger() }),
+      (err) => err instanceof ConfigError && /NODE_ENV=production/.test(err.message),
+    );
+  } finally {
+    restoreEnv("JWT_KMS_CREDENTIAL_CHECK_SKIP", priorSkip);
+    restoreEnv("NODE_ENV", priorNodeEnv);
+    restoreEnv("JWT_KMS_CREDENTIAL_CHECK_SKIP_ACK_PRODUCTION", priorAck);
+  }
+});
+
+test("validateJwtKmsCredentialAccess: env hatch honored under production with explicit ack", async () => {
+  const priorSkip = process.env.JWT_KMS_CREDENTIAL_CHECK_SKIP;
+  const priorNodeEnv = process.env.NODE_ENV;
+  const priorAck = process.env.JWT_KMS_CREDENTIAL_CHECK_SKIP_ACK_PRODUCTION;
+  process.env.JWT_KMS_CREDENTIAL_CHECK_SKIP = "1";
+  process.env.NODE_ENV = "production";
+  process.env.JWT_KMS_CREDENTIAL_CHECK_SKIP_ACK_PRODUCTION = "1";
+  try {
+    const result = await validateJwtKmsCredentialAccess(SKIP_HATCH_CFG(), { logger: silentLogger() });
+    assert.equal(result.skipped, "explicit");
+  } finally {
+    restoreEnv("JWT_KMS_CREDENTIAL_CHECK_SKIP", priorSkip);
+    restoreEnv("NODE_ENV", priorNodeEnv);
+    restoreEnv("JWT_KMS_CREDENTIAL_CHECK_SKIP_ACK_PRODUCTION", priorAck);
   }
 });
 
