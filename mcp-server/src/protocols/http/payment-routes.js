@@ -2,12 +2,47 @@ import { getAddress } from "ethers";
 
 import { ValidationError } from "../../core/errors.js";
 
+const SIGNATURE_RE = /^0x[a-fA-F0-9]{130}$/u;
+
 function safeChecksum(raw) {
   try {
     return getAddress(raw);
   } catch {
     return raw;
   }
+}
+
+function normalizeUint256String(value, label) {
+  if (typeof value === "number") {
+    if (!Number.isSafeInteger(value) || value < 0) {
+      throw new ValidationError(`${label} must be an exact non-negative uint256.`);
+    }
+    return String(value);
+  }
+  if (typeof value === "bigint") {
+    if (value < 0n) {
+      throw new ValidationError(`${label} must be an exact non-negative uint256.`);
+    }
+    return value.toString();
+  }
+  if (typeof value !== "string" || !/^\d+$/u.test(value.trim())) {
+    throw new ValidationError(`${label} must be an exact non-negative uint256.`);
+  }
+  return value.trim();
+}
+
+function readTransferAuthorization(payload = {}) {
+  const raw = payload.transferAuthorization ?? payload.authorization;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new ValidationError("transferAuthorization with nonce, deadline, and signature is required.");
+  }
+  const nonce = normalizeUint256String(raw.nonce, "transferAuthorization.nonce");
+  const deadline = normalizeUint256String(raw.deadline, "transferAuthorization.deadline");
+  const signature = typeof raw.signature === "string" ? raw.signature.trim() : "";
+  if (!SIGNATURE_RE.test(signature)) {
+    throw new ValidationError("transferAuthorization.signature must be a 65-byte hex string.");
+  }
+  return { nonce, deadline, signature };
 }
 
 export function createPaymentRoutes({
@@ -45,6 +80,7 @@ export function createPaymentRoutes({
     if (!Number.isFinite(amount) || amount <= 0) {
       throw new ValidationError("amount must be a positive number.");
     }
+    const transferAuthorization = readTransferAuthorization(payload);
     const idempotency = buildIdempotentMutationContext({
       route: "/payments/send",
       auth,
@@ -53,20 +89,25 @@ export function createPaymentRoutes({
         ...stripIdempotencyKey(payload),
         recipient,
         asset,
-        amount
+        amount,
+        transferAuthorization
       },
       bucket: "payments_send"
     });
 
     await runIdempotentMutation(response, idempotency, 200, async () => {
       await requireChainBackedMutation("/payments/send");
-      const balances = await service.sendToAgent(auth.wallet, recipient, asset, amount);
+      const balances = await service.sendToAgent(auth.wallet, recipient, asset, amount, transferAuthorization);
       return {
         status: "sent",
         from: auth.wallet,
         to: recipient,
         asset,
         amount,
+        transferAuthorization: {
+          nonce: transferAuthorization.nonce,
+          deadline: transferAuthorization.deadline
+        },
         balances
       };
     });

@@ -96,6 +96,7 @@ test("agentTransfer rejects when sender has insufficient liquid", async () => {
 
 test("agentTransfer delegates to blockchain gateway when enabled", async () => {
   const calls = [];
+  const authorization = { nonce: "42", deadline: "2000000000", signature: `0x${"1".repeat(130)}` };
   const gateway = {
     isEnabled: () => true,
     sendToAgent: async (...args) => {
@@ -114,13 +115,30 @@ test("agentTransfer delegates to blockchain gateway when enabled", async () => {
   });
   const service = new AccountMutationService(accounts, gateway, getAccountSummary);
 
-  const result = await service.agentTransfer("0xAlice", "0xBob", "DOT", 5);
+  const result = await service.agentTransfer("0xAlice", "0xBob", "DOT", 5, authorization);
   assert.equal(calls.length, 1);
-  assert.deepEqual(calls[0], ["0xAlice", "0xBob", "DOT", 5]);
+  assert.deepEqual(calls[0], ["0xAlice", "0xBob", "DOT", 5, authorization]);
   // When the gateway is enabled, the in-memory map isn't the source of
   // truth; we just return the fresh summaries from the gateway.
   assert.equal(result.from.liquid.DOT, 50);
   assert.equal(result.to.liquid.DOT, 10);
+});
+
+test("agentTransfer only spends liquid above outstanding debt", async () => {
+  const { service, accounts } = makeService();
+  await fund(accounts, "0xAlice", "DOT", 10);
+  const account = accounts.get("0xAlice");
+  account.debtOutstanding.DOT = 4;
+  accounts.set("0xAlice", account);
+
+  await assert.rejects(
+    () => service.agentTransfer("0xAlice", "0xBob", "DOT", 7),
+    (err) => err instanceof InsufficientLiquidityError
+      && err.details.available === 6
+      && err.details.debtOutstanding === 4
+  );
+  assert.equal(accounts.get("0xAlice").liquid.DOT, 10);
+  assert.equal(accounts.get("0xBob")?.liquid?.DOT ?? 0, 0);
 });
 
 test("allocateIdleFunds moves liquid DOT into the strategy bucket", async () => {
@@ -140,6 +158,23 @@ test("allocateIdleFunds rejects zero and negative amounts", async () => {
   const { service } = makeService();
   await assert.rejects(() => service.allocateIdleFunds("0xAlice", "DOT", 0), ValidationError);
   await assert.rejects(() => service.allocateIdleFunds("0xAlice", "DOT", -1), ValidationError);
+});
+
+test("allocateIdleFunds only spends liquid above outstanding debt", async () => {
+  const { service, accounts } = makeService();
+  await fund(accounts, "0xAlice", "DOT", 10);
+  const account = accounts.get("0xAlice");
+  account.debtOutstanding.DOT = 4;
+  accounts.set("0xAlice", account);
+
+  await assert.rejects(
+    () => service.allocateIdleFunds("0xAlice", "DOT", 7, "mock-vdot"),
+    (err) => err instanceof InsufficientLiquidityError
+      && err.details.available === 6
+      && err.details.debtOutstanding === 4
+  );
+  assert.equal(accounts.get("0xAlice").liquid.DOT, 10);
+  assert.equal(accounts.get("0xAlice").strategyAllocated.DOT ?? 0, 0);
 });
 
 test("requestStrategyDeposit delegates async lanes to the blockchain gateway and records pending state", async () => {

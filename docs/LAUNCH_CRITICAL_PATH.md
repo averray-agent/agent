@@ -68,8 +68,12 @@ per-user **EIP-712 authorization** (the operator relays a user-signed intent car
 (kills the operator-drain Critical), the nonce is the missing **idempotency** (kills the
 double-debit), and the meta-transaction shape **preserves the brokered / gas-sponsored model**
 (the operator still relays and pays gas — it just can't move funds without the user's
-signature). Contract change → must be in the frozen artifact. Interim hardening until (B)
-lands: per-account + global operator-transfer caps.
+signature). Contract change → must be in the frozen artifact.
+
+**Status:** PR #688 implements (B) with an EIP-712 `SendToAgent` authorization signed by
+`from` plus a per-`(from, nonce)` replay guard. Live chain use still requires the updated
+contract artifact to be deployed and payment clients to sign the EIP-712 `SendToAgent`
+payload before calling `/payments/send`.
 
 **Recommendation:** ship **(A)** (defer `payments/send`) *and* **(B)** for mainnet — (A) alone
 leaves the operator-drain Critical open. (A) is the quick HTTP cut; (B) is the contract fix the
@@ -146,6 +150,7 @@ Close criteria:
 
 Audit (weeks) and hardware/multisig (weeks) run **in parallel** — not days. There is no
 version where an external auditor and a hardware signing ceremony happen overnight. The only
-real levers: (1) start the audit **and** hardware procurement *today*; (2) cut scope
-(MAIN-006 option A); (3) pre-script and rehearse the deploy sprint so it's a one-day
+real levers: (1) start the audit **and** hardware procurement *today*; (2) keep
+`/payments/send` out of live scope unless the signed MAIN-006 artifact is deployed;
+(3) pre-script and rehearse the deploy sprint so it's a one-day
 operation the moment the audit clears.

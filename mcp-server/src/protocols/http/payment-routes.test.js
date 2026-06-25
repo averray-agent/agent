@@ -8,6 +8,11 @@ const AUTH = {
   wallet: "0x1111111111111111111111111111111111111111",
   claims: { roles: ["user"] }
 };
+const TRANSFER_AUTHORIZATION = {
+  nonce: "42",
+  deadline: "2000000000",
+  signature: `0x${"1".repeat(130)}`
+};
 
 function stripIdempotencyKey(payload = {}) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
@@ -24,11 +29,12 @@ function makeHarness(overrides = {}) {
     recipient: "0x2222222222222222222222222222222222222222",
     asset: "usdc",
     amount: "0.25",
+    transferAuthorization: TRANSFER_AUTHORIZATION,
     idempotencyKey: "idem-1"
   };
   const service = overrides.service ?? {
-    sendToAgent: async (from, recipient, asset, amount) => {
-      calls.push(["sendToAgent", { from, recipient, asset, amount }]);
+    sendToAgent: async (from, recipient, asset, amount, transferAuthorization) => {
+      calls.push(["sendToAgent", { from, recipient, asset, amount, transferAuthorization }]);
       return { liquid: { [asset]: 1 } };
     }
   };
@@ -96,6 +102,10 @@ test("POST /payments/send relays idempotent chain-backed agent payment", async (
     to: "0x2222222222222222222222222222222222222222",
     asset: "USDC",
     amount: 0.25,
+    transferAuthorization: {
+      nonce: "42",
+      deadline: "2000000000"
+    },
     balances: { liquid: { USDC: 1 } }
   });
   assert.deepEqual(calls[2], [
@@ -107,12 +117,14 @@ test("POST /payments/send relays idempotent chain-backed agent payment", async (
         recipient: "0x2222222222222222222222222222222222222222",
         asset: "usdc",
         amount: "0.25",
+        transferAuthorization: TRANSFER_AUTHORIZATION,
         idempotencyKey: "idem-1"
       },
       normalizedPayload: {
         recipient: "0x2222222222222222222222222222222222222222",
         asset: "USDC",
-        amount: 0.25
+        amount: 0.25,
+        transferAuthorization: TRANSFER_AUTHORIZATION
       },
       bucket: "payments_send"
     }
@@ -132,7 +144,8 @@ test("POST /payments/send defaults the asset to DOT", async () => {
   const { calls, response, route } = makeHarness({
     payload: {
       recipient: "0x2222222222222222222222222222222222222222",
-      amount: 1
+      amount: 1,
+      transferAuthorization: TRANSFER_AUTHORIZATION
     }
   });
 
@@ -150,9 +163,27 @@ test("POST /payments/send defaults the asset to DOT", async () => {
       from: AUTH.wallet,
       recipient: "0x2222222222222222222222222222222222222222",
       asset: "DOT",
-      amount: 1
+      amount: 1,
+      transferAuthorization: TRANSFER_AUTHORIZATION
     }
   ]);
+});
+
+test("POST /payments/send requires a transfer authorization envelope", async () => {
+  const { route } = makeHarness({
+    payload: { recipient: "0x2222222222222222222222222222222222222222", amount: 1 }
+  });
+
+  await assert.rejects(
+    () => route({
+      request: { method: "POST" },
+      response: {},
+      url: new URL("http://localhost/payments/send"),
+      pathname: "/payments/send",
+    }),
+    (error) => error instanceof ValidationError
+      && error.message === "transferAuthorization with nonce, deadline, and signature is required."
+  );
 });
 
 test("POST /payments/send rejects invalid recipient shape", async () => {
@@ -174,7 +205,7 @@ test("POST /payments/send rejects invalid recipient shape", async () => {
 
 test("POST /payments/send rejects self-transfer", async () => {
   const { route } = makeHarness({
-    payload: { recipient: AUTH.wallet, amount: 1 }
+    payload: { recipient: AUTH.wallet, amount: 1, transferAuthorization: TRANSFER_AUTHORIZATION }
   });
 
   await assert.rejects(
@@ -191,7 +222,7 @@ test("POST /payments/send rejects self-transfer", async () => {
 
 test("POST /payments/send rejects non-positive amount", async () => {
   const { route } = makeHarness({
-    payload: { recipient: "0x2222222222222222222222222222222222222222", amount: 0 }
+    payload: { recipient: "0x2222222222222222222222222222222222222222", amount: 0, transferAuthorization: TRANSFER_AUTHORIZATION }
   });
 
   await assert.rejects(

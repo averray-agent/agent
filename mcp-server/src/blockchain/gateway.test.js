@@ -1184,7 +1184,12 @@ test("account mutations convert display amounts before contract calls", async ()
   await gateway.deallocateIdleFunds(wallet, "usdc-yield", 0.75, "USDC");
   await gateway.borrow(wallet, "USDC", 3);
   await gateway.repay(wallet, "USDC", 1.5);
-  await gateway.sendToAgent(wallet, recipient, "USDC", 0.125);
+  const transferAuthorization = {
+    nonce: "42",
+    deadline: "2000000000",
+    signature: `0x${"1".repeat(130)}`
+  };
+  await gateway.sendToAgent(wallet, recipient, "USDC", 0.125, transferAuthorization);
 
   assert.deepEqual(calls, [
     ["reserveForJob", wallet, USDC_TRUST_ASSET.address, 1_250_000n],
@@ -1192,7 +1197,7 @@ test("account mutations convert display amounts before contract calls", async ()
     ["deallocateIdleFunds", wallet, gateway.normalizeStrategyId("usdc-yield"), 750_000n],
     ["borrow", USDC_TRUST_ASSET.address, 3_000_000n],
     ["repay", USDC_TRUST_ASSET.address, 1_500_000n],
-    ["sendToAgentFor", wallet, recipient, USDC_TRUST_ASSET.address, 125_000n]
+    ["sendToAgentFor", wallet, recipient, USDC_TRUST_ASSET.address, 125_000n, 42n, 2_000_000_000n, transferAuthorization.signature]
   ]);
 });
 
