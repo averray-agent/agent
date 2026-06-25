@@ -42,11 +42,19 @@ not ship without it. Everything else parallelizes around it; the on-chain deploy
 
 ---
 
-## MAIN-006 — payments/send double-debit (gates the audit freeze) · owner: Codex
+## MAIN-006 — `sendToAgentFor` operator-relay (double-debit **+ Critical operator-drain**) · owner: Codex
 
 `payments:send` ships at v1 (in `BASE_CAPABILITIES`), and `POST /payments/send` can
 **double-debit on a retry** after a lost local write — `AgentAccountCore.sendToAgentFor`
-has no on-chain idempotency. Clear it **before** the freeze. Two options:
+has no on-chain idempotency. Clear it **before** the freeze.
+
+**⚠ Escalated by the 2026-06-25 pre-audit contract review (Critical).** The same
+`sendToAgentFor` primitive has a *second*, worse weakness: it is gated only by `onlyOperator`
+(`AgentAccountCore.sol:630`) with **no per-user authorization**, so a **compromised backend/KMS
+serviceOperator can move *any* user's liquid balance** to an attacker-controlled recipient, who
+then withdraws normally. This is an on-chain operator-key issue — **option (A)'s HTTP-route
+defer does NOT mitigate it** — so the contract fix is now a hard mainnet requirement, not a
+deferrable feature. Two options:
 
 **(A) Defer the feature — fastest, recommended for v1.** Gate the route off until (B) lands.
 The clean, *certain* place is a guard at the handler entry — **not** capability surgery:
@@ -54,9 +62,42 @@ The clean, *certain* place is a guard at the handler entry — **not** capabilit
 - Wire `paymentsSendEnabled` from env (**default false**) into `createPaymentRoutes`; add a disabled-path test.
 - ⚠ Do **not** cut by removing `payments:send` from `BASE_CAPABILITIES` alone — enforcement is spread across `capabilities.js`, `http-helpers.js`, the route-rule table, and `listAllKnownCapabilities` (multiple consumers + tests), so that risks an *incomplete* cut on the money path.
 
-**(B) Fix it.** Add a per-`(from, key)` on-chain dedup mapping to `sendToAgentFor` (re-broadcast = no-op) plus a durable pre-send intent record. Contract change → must be in the frozen artifact.
+**(B) Fix it — now required for mainnet, not optional.** Make `sendToAgentFor` verify a
+per-user **EIP-712 authorization** (the operator relays a user-signed intent carrying `nonce`
++ `deadline`). One change closes both weaknesses: the signature is the missing **authorization**
+(kills the operator-drain Critical), the nonce is the missing **idempotency** (kills the
+double-debit), and the meta-transaction shape **preserves the brokered / gas-sponsored model**
+(the operator still relays and pays gas — it just can't move funds without the user's
+signature). Contract change → must be in the frozen artifact. Interim hardening until (B)
+lands: per-account + global operator-transfer caps.
 
-**Recommendation:** (A) for v1 unless agent-to-agent transfer is day-1 essential; (B) post-launch.
+**Recommendation:** ship **(A)** (defer `payments/send`) *and* **(B)** for mainnet — (A) alone
+leaves the operator-drain Critical open. (A) is the quick HTTP cut; (B) is the contract fix the
+audit will require regardless.
+
+## Pre-audit contract findings — feed the external audit (2026-06-25) · owner: Codex
+
+A deep contract-level agent review (full-source pass) on current `main`. Headline: the core
+escrow lifecycle is **materially stronger** — the "generic operator can settle reserves" class
+is closed (`escrowOperators` + ledger-level `settlementExecuted` + tests). Confirmed-secure:
+0.8.24 overflow checks, non-reentrant settlement, escrow + ledger idempotency, milestone cap,
+owner-gated mutations, and the mainnet deploy script refusing to enable XCM vDOT before
+observer evidence.
+
+**None of these are exploitable on the closed testnet beta** (test USDC, trusted testers,
+uncompromised signer) — they are mainnet / real-funds gates. All contract fixes are Codex-owned
+and must land in the audited artifact.
+
+| Sev | Finding | Disposition |
+|-----|---------|-------------|
+| **Critical** | `sendToAgentFor` operator-relay, no per-user auth → compromised operator moves any user's liquid | **= MAIN-006 primitive** (above). Fix = EIP-712 per-user auth. Hard mainnet blocker. |
+| **High** | Debt-gate asymmetry: `withdraw` checks `liquid >= amount + debtOutstanding`, but `_sendToAgent` / async-strategy paths only check `liquid >= amount` → debt-backed credit becomes withdrawable via transfer | Enforce withdrawable = `liquid - debtOutstanding` on `sendToAgent` / `sendToAgentFor` + strategy paths. Bounded by `BORROW_CAP`; sybils multiply it. |
+| **High** | XCM `finalizeRequest` is operator-oracle (terminal status + amounts from owner/operator, no remote proof) | **Already tracked / staged** — XCM vDOT stays disabled for mainnet until native observer correlation is live. Confirmed, not new. |
+| **Med** | Onboarding claim-waiver enables sybil claim-griefing (free claim → no submit → timeout → repeat with fresh wallets) | Bounded for the *closed* beta (trusted testers + curated starter jobs). For open/mainnet: restrict waivers to curated jobs / verified workers, or a minimal refundable fee. |
+| **Med** | `reserveForRecurringTemplate` has no cancellation/refund path → misconfigured/retired templates strand funds | Add admin/escrow-mediated template cancellation with eventing + invariant checks. Not used in the beta. |
+| **Med** | Open prod dep advisories | `drizzle`/`kysely` = **H3** (partially fixed, #686). **New:** `ws` (via `ethers`/`viem` — fix bumps `viem` out-of-range, chain-lib care needed) + `vite` (in `app/`, Windows-only advisories → frontend owner). |
+| **Low** | `_refreshStrategyAllocated` loops all registered strategies → owner-controlled OOG / config DoS | Cap strategy count / per-asset lists / touch-only accounting. |
+| **Low** | External-schema sig lacks low-s + chainId/address domain separation | Move to EIP-712 typed data (chainId + `address(this)`) + enforce low-s. |
 
 ## Explicitly NOT blocking v1
 
