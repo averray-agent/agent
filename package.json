@@ -60,7 +60,10 @@
     "polkadot-api": "^2.1.1"
   },
   "overrides": {
-    "@hono/node-server": "^1.19.13",
+    "@hono/node-server": "1.19.14",
+    "ponder@0.16.6": {
+      "@hono/node-server": "1.19.14"
+    },
     "@tootallnate/once": "^3.0.1",
     "esbuild": ">=0.25.0",
     "fast-uri": "^3.1.2",
