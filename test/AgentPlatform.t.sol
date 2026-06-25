@@ -37,6 +37,9 @@ contract AgentPlatformTest is Test {
 
     event DisputeOpened(bytes32 indexed jobId, address indexed opener, uint256 disputedAt);
     event WorkSubmitted(bytes32 indexed jobId, address indexed worker, bytes32 evidenceHash);
+    event RecurringTemplateReserveCancelled(
+        address indexed account, address indexed asset, bytes32 indexed templateId, uint256 amount
+    );
 
     function setUp() public {
         policy = new TreasuryPolicy();
@@ -319,6 +322,78 @@ contract AgentPlatformTest is Test {
         (uint256 workerLiquid,,,,,) = accounts.positions(worker, address(dot));
         assertEq(workerLiquid, WORKER_DEPOSIT + 5 ether);
         assertEq(dot.balanceOf(worker), 1_000 ether - WORKER_DEPOSIT);
+    }
+
+    function testCancelRecurringTemplateReserveRefundsOnlyUnusedTemplateBalance() public {
+        bytes32 templateId = keccak256("template/weekly/cancel");
+        bytes32 jobId = keccak256("template/weekly/cancel/run/1");
+
+        vm.prank(poster);
+        accounts.reserveForRecurringTemplate(poster, address(dot), templateId, 10 ether);
+
+        escrow.createSinglePayoutJobFromRecurringReserve(
+            EscrowCore.RecurringSinglePayoutJob({
+                jobId: jobId,
+                templateId: templateId,
+                poster: poster,
+                asset: address(dot),
+                reward: 5 ether,
+                opsReserve: 0,
+                contingencyReserve: 0,
+                claimTtl: 1 days,
+                verifierMode: bytes32("AUTO"),
+                category: bytes32("CODING"),
+                specHash: SPEC_HASH,
+                schemaHash: bytes32(0),
+                schemaUrl: "",
+                schemaIssuer: address(0),
+                schemaSignature: hex""
+            })
+        );
+
+        vmEvent.expectEmit(true, true, true, true, address(accounts));
+        emit RecurringTemplateReserveCancelled(poster, address(dot), templateId, 5 ether);
+        accounts.cancelRecurringTemplateReserve(poster, address(dot), templateId, 5 ether);
+
+        assertEq(accounts.recurringTemplateReserves(poster, address(dot), templateId), 0);
+        (uint256 liquidAfterCancel, uint256 reservedAfterCancel,,,,) = accounts.positions(poster, address(dot));
+        assertEq(liquidAfterCancel, POSTER_DEPOSIT - 5 ether);
+        assertEq(reservedAfterCancel, 5 ether);
+
+        vm.prank(worker);
+        escrow.claimJob(jobId);
+        vm.prank(worker);
+        escrow.submitWork(jobId, keccak256("work"));
+        vm.prank(verifier);
+        escrow.resolveSinglePayout(jobId, true, bytes32("OK"), "ipfs://badge/recurring-cancel", REASONING_HASH);
+
+        (uint256 liquidAfterClose, uint256 reservedAfterClose,,,,) = accounts.positions(poster, address(dot));
+        (uint256 workerLiquid,,,,,) = accounts.positions(worker, address(dot));
+        assertEq(liquidAfterClose, POSTER_DEPOSIT - 5 ether);
+        assertEq(reservedAfterClose, 0);
+        assertEq(workerLiquid, WORKER_DEPOSIT + 5 ether);
+    }
+
+    function testCancelRecurringTemplateReserveRejectsOverRefundAndUnauthorizedCaller() public {
+        bytes32 templateId = keccak256("template/weekly/reject");
+
+        vm.prank(poster);
+        accounts.reserveForRecurringTemplate(poster, address(dot), templateId, 10 ether);
+
+        (bool overRefund, bytes memory overRefundData) = address(accounts)
+            .call(
+                abi.encodeCall(
+                    accounts.cancelRecurringTemplateReserve, (poster, address(dot), templateId, 10 ether + 1)
+                )
+            );
+        require(!overRefund, "EXPECTED_OVER_REFUND_REVERT");
+        require(bytes4(overRefundData) == AgentAccountCore.InsufficientReserved.selector, "EXPECTED_RESERVED_SELECTOR");
+
+        vm.prank(worker);
+        (bool unauthorized, bytes memory unauthorizedData) = address(accounts)
+            .call(abi.encodeCall(accounts.cancelRecurringTemplateReserve, (poster, address(dot), templateId, 1 ether)));
+        require(!unauthorized, "EXPECTED_UNAUTHORIZED_REVERT");
+        require(bytes4(unauthorizedData) == AgentAccountCore.Unauthorized.selector, "EXPECTED_UNAUTHORIZED_SELECTOR");
     }
 
     function testOnboardingWaivesFirstThreeClaimsThenLocksStakeAndFee() public {

@@ -8,6 +8,7 @@ export const AGENT_ACCOUNT_ABI = [
   "function reserveForJob(address account, address asset, uint256 amount)",
   "function reserveForRecurringTemplate(address account, address asset, bytes32 templateId, uint256 amount)",
   "function consumeRecurringTemplateReserve(address account, address asset, bytes32 templateId, uint256 amount)",
+  "function cancelRecurringTemplateReserve(address account, address asset, bytes32 templateId, uint256 amount)",
   "function recurringTemplateReserves(address account, address asset, bytes32 templateId) view returns (uint256)",
   "function setEscrowOperator(address escrowOperator, bool approved)",
   "function lockJobStake(address account, address asset, uint256 amount)",
