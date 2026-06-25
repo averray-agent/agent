@@ -420,7 +420,7 @@ const BASE_MANIFEST = {
     ]
   },
   auth: {
-    scheme: "SIWE + JWT (HS256)",
+    scheme: "SIWE + JWT (ES256)",
     schemeId: "SIWE_JWT",
     flow: [
       "POST /auth/nonce { wallet } -> { nonce, message }",
