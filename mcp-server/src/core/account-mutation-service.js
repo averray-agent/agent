@@ -465,8 +465,15 @@ export class AccountMutationService {
     const account = await this.getAccountSummary(wallet);
     this.ensureTreasuryMetadata(account);
     const liquid = account.liquid[asset] ?? 0;
-    if (liquid < amount) {
-      throw new InsufficientLiquidityError(asset);
+    const withdrawable = this.withdrawableLiquid(account, asset);
+    if (withdrawable < amount) {
+      throw new InsufficientLiquidityError(asset, {
+        wallet,
+        required: amount,
+        available: withdrawable,
+        liquid,
+        debtOutstanding: account.debtOutstanding[asset] ?? 0
+      });
     }
 
     account.liquid[asset] = liquid - amount;
@@ -779,7 +786,11 @@ export class AccountMutationService {
    * contract primitive when the blockchain gateway is enabled, and falls
    * back to an in-memory bookkeeping update on the local dev path.
    */
-  async agentTransfer(from, recipient, asset, amount) {
+  withdrawableLiquid(account, asset) {
+    return Math.max((account.liquid[asset] ?? 0) - (account.debtOutstanding[asset] ?? 0), 0);
+  }
+
+  async agentTransfer(from, recipient, asset, amount, authorization = undefined) {
     if (!from || !recipient) {
       throw new ValidationError("from and recipient are required");
     }
@@ -791,7 +802,7 @@ export class AccountMutationService {
     }
 
     if (this.blockchainGateway?.isEnabled() && this.blockchainGateway.sendToAgent) {
-      await this.blockchainGateway.sendToAgent(from, recipient, asset, amount);
+      await this.blockchainGateway.sendToAgent(from, recipient, asset, amount, authorization);
       return {
         from: await this.getAccountSummary(from),
         to: await this.getAccountSummary(recipient)
@@ -801,11 +812,14 @@ export class AccountMutationService {
     const fromAccount = await this.getAccountSummary(from);
     const toAccount = await this.getAccountSummary(recipient);
     const fromLiquid = fromAccount.liquid[asset] ?? 0;
-    if (fromLiquid < amount) {
+    const fromWithdrawable = this.withdrawableLiquid(fromAccount, asset);
+    if (fromWithdrawable < amount) {
       throw new InsufficientLiquidityError(asset, {
         wallet: from,
         required: amount,
-        available: fromLiquid
+        available: fromWithdrawable,
+        liquid: fromLiquid,
+        debtOutstanding: fromAccount.debtOutstanding[asset] ?? 0
       });
     }
     fromAccount.liquid[asset] = fromLiquid - amount;

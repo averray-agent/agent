@@ -1302,8 +1302,8 @@ export class PlatformService {
     return assets.find((asset) => normalizeAssetSymbol(asset.symbol) === symbol);
   }
 
-  async sendToAgent(from, recipient, asset, amount) {
-    return this.accountMutationService.agentTransfer(from, recipient, asset, amount);
+  async sendToAgent(from, recipient, asset, amount, authorization = undefined) {
+    return this.accountMutationService.agentTransfer(from, recipient, asset, amount, authorization);
   }
 
   async allocateIdleFunds(wallet, asset, amount, strategyId = "default-low-risk", strategy = undefined, options = {}) {

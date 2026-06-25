@@ -891,12 +891,23 @@ export class BlockchainGateway {
    * contracts/AgentAccountCore.sol#sendToAgentFor for the contract-level
    * permission model.
    */
-  async sendToAgent(from, recipient, assetSymbol, amount) {
+  async sendToAgent(from, recipient, assetSymbol, amount, authorization = {}) {
     return this.withGatewayError("sendToAgent", async () => {
       this.requireSigner("sendToAgent");
       const asset = this.requireAsset(assetSymbol);
       const baseAmount = this.toBaseUnits(amount, asset, "agent transfer amount");
-      const tx = await this.accountContract.sendToAgentFor(from, recipient, asset.address, baseAmount);
+      const nonce = this.normalizeUint256(authorization?.nonce, "transferAuthorization.nonce");
+      const deadline = this.normalizeUint256(authorization?.deadline, "transferAuthorization.deadline");
+      const signature = this.normalizeSignature(authorization?.signature, "transferAuthorization.signature");
+      const tx = await this.accountContract.sendToAgentFor(
+        from,
+        recipient,
+        asset.address,
+        baseAmount,
+        nonce,
+        deadline,
+        signature
+      );
       await tx.wait();
     });
   }
@@ -1820,6 +1831,13 @@ export class BlockchainGateway {
       throw new ValidationError(`${label} must fit uint256.`);
     }
     return parsed;
+  }
+
+  normalizeSignature(value, label) {
+    if (typeof value !== "string" || !/^0x[a-fA-F0-9]{130}$/u.test(value)) {
+      throw new ValidationError(`${label} must be a 65-byte hex string.`);
+    }
+    return value;
   }
 
   toBytesPayload(value, label) {

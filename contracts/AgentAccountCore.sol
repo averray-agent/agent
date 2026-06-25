@@ -10,6 +10,15 @@ import {ReentrancyGuard} from "./lib/ReentrancyGuard.sol";
 import {SafeTransfer} from "./lib/SafeTransfer.sol";
 
 contract AgentAccountCore is ReentrancyGuard {
+    bytes32 public constant SEND_TO_AGENT_TYPEHASH = keccak256(
+        "SendToAgent(address from,address recipient,address asset,uint256 amount,uint256 nonce,uint256 deadline)"
+    );
+    bytes32 internal constant EIP712_DOMAIN_TYPEHASH =
+        keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
+    bytes32 internal constant EIP712_NAME_HASH = keccak256("Averray AgentAccountCore");
+    bytes32 internal constant EIP712_VERSION_HASH = keccak256("1");
+    uint256 internal constant SECP256K1N_HALF = 0x7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0;
+
     TreasuryPolicy public immutable policy;
     StrategyAdapterRegistry public immutable registry;
 
@@ -64,6 +73,7 @@ contract AgentAccountCore is ReentrancyGuard {
     mapping(address => mapping(address => uint256)) public pendingStrategyAssets;
     mapping(address => mapping(bytes32 => uint256)) public pendingStrategyWithdrawalShares;
     mapping(address => mapping(address => mapping(bytes32 => uint256))) public recurringTemplateReserves;
+    mapping(address => mapping(uint256 => bool)) public sendToAgentAuthorizationUsed;
     mapping(address => bool) public escrowOperators;
     mapping(bytes32 => bool) public settlementExecuted;
 
@@ -118,6 +128,7 @@ contract AgentAccountCore is ReentrancyGuard {
     event Borrowed(address indexed account, address indexed asset, uint256 amount);
     event Repaid(address indexed account, address indexed asset, uint256 amount);
     event AgentTransfer(address indexed from, address indexed to, address indexed asset, uint256 amount);
+    event SendToAgentAuthorizationUsed(address indexed from, uint256 indexed nonce, bytes32 indexed digest);
 
     error Unauthorized();
     error UnsupportedAsset();
@@ -132,6 +143,9 @@ contract AgentAccountCore is ReentrancyGuard {
     error InvalidStrategyRequest();
     error InvalidSettlement();
     error SettlementAlreadyExecuted();
+    error InvalidSignature();
+    error ExpiredAuthorization();
+    error AuthorizationAlreadyUsed();
 
     constructor(TreasuryPolicy policy_, StrategyAdapterRegistry registry_) {
         policy = policy_;
@@ -207,7 +221,7 @@ contract AgentAccountCore is ReentrancyGuard {
 
     function withdraw(address asset, uint256 amount) external nonReentrant whenNotPaused onlySupportedAsset(asset) {
         AssetPosition storage position = positions[msg.sender][asset];
-        if (position.liquid < amount + position.debtOutstanding) revert InsufficientLiquidity();
+        _requireWithdrawable(position, amount);
         position.liquid -= amount;
         SafeTransfer.safeTransfer(asset, msg.sender, amount);
         emit Withdrawn(msg.sender, asset, amount);
@@ -323,7 +337,7 @@ contract AgentAccountCore is ReentrancyGuard {
         if (strategy.adapter == address(0) || !strategy.active) revert InvalidStrategy();
         if (_supportsAsyncStrategyAdapter(strategy.adapter)) revert InvalidStrategy();
         AssetPosition storage position = positions[account][strategy.asset];
-        if (position.liquid < amount) revert InsufficientLiquidity();
+        _requireWithdrawable(position, amount);
 
         IStrategyAdapter adapter = IStrategyAdapter(strategy.adapter);
         position.liquid -= amount;
@@ -642,17 +656,20 @@ contract AgentAccountCore is ReentrancyGuard {
     /**
      * Operator-initiated variant of `sendToAgent`. Used by the HTTP
      * backend when relaying a user-authorised transfer: the backend's
-     * signer (a service operator) calls this on behalf of `from`, which
-     * must have authenticated via SIWE so the backend is confident it is
-     * acting on the right wallet's behalf. Policy gating is strict —
-     * only service operators can invoke this path.
+     * signer (a service operator) pays gas, but the contract still
+     * requires an EIP-712 signature from `from` over the exact transfer,
+     * nonce, deadline, chain id, and this contract address.
      */
-    function sendToAgentFor(address from, address recipient, address asset, uint256 amount)
-        external
-        whenNotPaused
-        onlyOperator
-        onlySupportedAsset(asset)
-    {
+    function sendToAgentFor(
+        address from,
+        address recipient,
+        address asset,
+        uint256 amount,
+        uint256 nonce,
+        uint256 deadline,
+        bytes calldata signature
+    ) external whenNotPaused onlyOperator onlySupportedAsset(asset) {
+        _useSendToAgentAuthorization(from, recipient, asset, amount, nonce, deadline, signature);
         _sendToAgent(from, recipient, asset, amount);
     }
 
@@ -660,10 +677,74 @@ contract AgentAccountCore is ReentrancyGuard {
         if (recipient == address(0) || recipient == from) revert InvalidRecipient();
         if (amount == 0) revert ZeroAmount();
         AssetPosition storage fromPos = positions[from][asset];
-        if (fromPos.liquid < amount) revert InsufficientLiquidity();
+        _requireWithdrawable(fromPos, amount);
         fromPos.liquid -= amount;
         positions[recipient][asset].liquid += amount;
         emit AgentTransfer(from, recipient, asset, amount);
+    }
+
+    function domainSeparator() public view returns (bytes32) {
+        return keccak256(
+            abi.encode(EIP712_DOMAIN_TYPEHASH, EIP712_NAME_HASH, EIP712_VERSION_HASH, block.chainid, address(this))
+        );
+    }
+
+    function hashSendToAgentAuthorization(
+        address from,
+        address recipient,
+        address asset,
+        uint256 amount,
+        uint256 nonce,
+        uint256 deadline
+    ) public view returns (bytes32) {
+        bytes32 structHash = keccak256(
+            abi.encode(SEND_TO_AGENT_TYPEHASH, from, recipient, asset, amount, nonce, deadline)
+        );
+        return keccak256(abi.encodePacked("\x19\x01", domainSeparator(), structHash));
+    }
+
+    function _useSendToAgentAuthorization(
+        address from,
+        address recipient,
+        address asset,
+        uint256 amount,
+        uint256 nonce,
+        uint256 deadline,
+        bytes calldata signature
+    ) internal {
+        if (block.timestamp > deadline) revert ExpiredAuthorization();
+        if (sendToAgentAuthorizationUsed[from][nonce]) revert AuthorizationAlreadyUsed();
+        bytes32 digest = hashSendToAgentAuthorization(from, recipient, asset, amount, nonce, deadline);
+        if (_recoverSigner(digest, signature) != from) revert InvalidSignature();
+        sendToAgentAuthorizationUsed[from][nonce] = true;
+        emit SendToAgentAuthorizationUsed(from, nonce, digest);
+    }
+
+    function _recoverSigner(bytes32 digest, bytes calldata signature) internal pure returns (address) {
+        if (signature.length != 65) revert InvalidSignature();
+
+        bytes32 r;
+        bytes32 s;
+        uint8 v;
+        assembly {
+            r := calldataload(signature.offset)
+            s := calldataload(add(signature.offset, 32))
+            v := byte(0, calldataload(add(signature.offset, 64)))
+        }
+        if (v < 27) {
+            v += 27;
+        }
+        if (v != 27 && v != 28) revert InvalidSignature();
+        if (uint256(s) > SECP256K1N_HALF) revert InvalidSignature();
+
+        address signer = ecrecover(digest, v, r, s);
+        if (signer == address(0)) revert InvalidSignature();
+        return signer;
+    }
+
+    function _requireWithdrawable(AssetPosition storage position, uint256 amount) internal view {
+        if (position.liquid <= position.debtOutstanding) revert InsufficientLiquidity();
+        if (position.liquid - position.debtOutstanding < amount) revert InsufficientLiquidity();
     }
 
     function getBorrowCapacity(address account, address asset) external view returns (uint256) {
@@ -735,7 +816,7 @@ contract AgentAccountCore is ReentrancyGuard {
         uint256 amount
     ) internal {
         AssetPosition storage position = positions[account][asset];
-        if (position.liquid < amount) revert InsufficientLiquidity();
+        _requireWithdrawable(position, amount);
 
         position.liquid -= amount;
         pendingStrategyAssets[account][asset] += amount;

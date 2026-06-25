@@ -332,7 +332,8 @@ reputation gates, auto-escrow, and atomic multi-party flows.
 - `AgentAccountCore.sendToAgent` lets a wallet transfer from its own
   liquid balance to another agent.
 - `AgentAccountCore.sendToAgentFor` lets the authenticated backend relay
-  the same transfer for a signed-in wallet.
+  the same transfer for a signed-in wallet only when the wallet supplied
+  an EIP-712 `SendToAgent` authorization with a fresh nonce and deadline.
 - `POST /payments/send` exposes the authenticated HTTP surface.
 - [`docs/payments/send-to-agent.md`](payments/send-to-agent.md) documents
   the primitive and risk posture.

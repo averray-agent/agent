@@ -23,6 +23,11 @@ const LONG_SECRET = "x".repeat(40);
 const ADMIN_WALLET = "0x1111111111111111111111111111111111111111";
 const VERIFIER_WALLET = "0x2222222222222222222222222222222222222222";
 const STRANGER_WALLET = "0x3333333333333333333333333333333333333333";
+const TRANSFER_AUTHORIZATION = {
+  nonce: "42",
+  deadline: "2000000000",
+  signature: `0x${"1".repeat(130)}`
+};
 const OPEN_DATA_INGEST_TARGET = {
   portal: "data.gov",
   datasetId: "provider-idempotency-dataset",
@@ -145,7 +150,7 @@ test("http smoke: production money-like routes require a chain backend", { skip:
       ["/account/deallocate", { asset: "DOT", amount: 1, strategyId: "default-low-risk" }],
       ["/account/borrow", { asset: "DOT", amount: 1 }],
       ["/account/repay", { asset: "DOT", amount: 1 }],
-      ["/payments/send", { recipient: VERIFIER_WALLET, asset: "DOT", amount: 1 }]
+      ["/payments/send", { recipient: VERIFIER_WALLET, asset: "DOT", amount: 1, transferAuthorization: TRANSFER_AUTHORIZATION }]
     ];
 
     for (const [path, body] of routes) {
@@ -252,6 +257,7 @@ test("http smoke: sync money-like routes replay idempotent receipts", { skip: !R
       recipient: VERIFIER_WALLET,
       asset: "DOT",
       amount: 2,
+      transferAuthorization: TRANSFER_AUTHORIZATION,
       idempotencyKey: "money-transfer-1"
     };
     const firstTransfer = await postJson("/payments/send", transferBody);
@@ -1304,7 +1310,7 @@ test("http smoke: /payments/send moves liquid balance between agent accounts", {
         "content-type": "application/json",
         authorization: `Bearer ${senderToken}`
       },
-      body: JSON.stringify({ recipient: VERIFIER_WALLET, asset: "DOT", amount: 5 })
+      body: JSON.stringify({ recipient: VERIFIER_WALLET, asset: "DOT", amount: 5, transferAuthorization: TRANSFER_AUTHORIZATION })
     });
     assert.equal(response.status, 200);
     const body = await response.json();
@@ -1325,7 +1331,7 @@ test("http smoke: /payments/send rejects self-transfer", { skip: !RUN }, async (
         "content-type": "application/json",
         authorization: `Bearer ${token}`
       },
-      body: JSON.stringify({ recipient: ADMIN_WALLET, asset: "DOT", amount: 1 })
+      body: JSON.stringify({ recipient: ADMIN_WALLET, asset: "DOT", amount: 1, transferAuthorization: TRANSFER_AUTHORIZATION })
     });
     assert.equal(response.status, 400);
     const body = await response.json();

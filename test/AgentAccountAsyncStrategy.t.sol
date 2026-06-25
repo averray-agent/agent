@@ -83,6 +83,35 @@ contract AgentAccountAsyncStrategyTest is Test {
         assertEq(dot.balanceOf(address(adapter)), 20 ether);
     }
 
+    function testRequestStrategyDepositRespectsDebtOutstanding() public {
+        vm.startPrank(worker);
+        accounts.lockCollateral(address(dot), 150 ether);
+        accounts.borrow(address(dot), 100 ether);
+
+        IXcmWrapper.Weight memory maxWeight = IXcmWrapper.Weight({refTime: 10, proofSize: 5});
+        bytes32 requestId = _previewDepositRequestId(worker, 51 ether, 11);
+        (bool ok, bytes memory data) = address(accounts)
+            .call(
+                abi.encodeCall(
+                    accounts.requestStrategyDeposit,
+                    (
+                        worker,
+                        AgentAccountCore.StrategyDepositRequestParams({
+                            strategyId: STRATEGY_ID,
+                            amount: 51 ether,
+                            destination: hex"0102",
+                            message: _depositMessage(requestId),
+                            maxWeight: maxWeight,
+                            nonce: 11
+                        })
+                    )
+                )
+            );
+        vm.stopPrank();
+
+        _assertCustomError(ok, data, AgentAccountCore.InsufficientLiquidity.selector);
+    }
+
     function testSettleStrategyDepositBooksSharesAfterSuccess() public {
         bytes32 requestId = _requestDeposit(20 ether, 1);
 
