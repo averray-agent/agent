@@ -99,6 +99,7 @@ test("public jobs response filters and compacts agent-friendly queries", () => {
     "category",
     "jobType",
     "tier",
+    "onboardingWaiverEligible",
     "stake",
     "reward",
     "createdAt",
@@ -113,6 +114,7 @@ test("public jobs response filters and compacts agent-friendly queries", () => {
   assert.equal(response.jobs[0].claimable, true);
   assert.equal(response.jobs[0].source, "wikipedia");
   assert.equal(response.jobs[0].sourceType, "wikipedia_article");
+  assert.equal(response.jobs[0].onboardingWaiverEligible, false);
   assert.equal(response.jobs[0].definitionUrl, "/jobs/definition?jobId=wiki-en-123-citation-repair-example");
   assert.deepEqual(response.jobs[0].sourceDetails, {
     taskType: "citation_repair",

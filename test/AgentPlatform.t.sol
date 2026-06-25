@@ -40,6 +40,7 @@ contract AgentPlatformTest is Test {
     event RecurringTemplateReserveCancelled(
         address indexed account, address indexed asset, bytes32 indexed templateId, uint256 amount
     );
+    event OnboardingWaiverEligibilityUpdated(bytes32 indexed jobId, bool eligible);
 
     function setUp() public {
         policy = new TreasuryPolicy();
@@ -407,6 +408,7 @@ contract AgentPlatformTest is Test {
             escrow.createSinglePayoutJob(
                 jobId, address(dot), 50 ether, 0, 0, 1 days, bytes32("AUTO"), bytes32("DATA"), SPEC_HASH
             );
+            escrow.setOnboardingWaiverEligible(jobId, true);
 
             vm.prank(worker);
             escrow.claimJob(jobId);
@@ -427,6 +429,7 @@ contract AgentPlatformTest is Test {
         escrow.createSinglePayoutJob(
             paidJobId, address(dot), 50 ether, 0, 0, 1 days, bytes32("AUTO"), bytes32("DATA"), SPEC_HASH
         );
+        escrow.setOnboardingWaiverEligible(paidJobId, true);
 
         vm.prank(worker);
         escrow.claimJob(paidJobId);
@@ -439,6 +442,49 @@ contract AgentPlatformTest is Test {
         assertEq(paidJob.claimFee, 1 ether);
         require(!paidJob.claimEconomicsWaived, "EXPECTED_NO_WAIVER");
         assertEq(workerJobStake, 3.5 ether);
+    }
+
+    function testOnboardingWaiverRequiresExplicitJobEligibility() public {
+        policy.setOnboardingWaiverClaimCount(3);
+        policy.setClaimFeeBps(200);
+        policy.setMinClaimFee(address(dot), 0.05 ether);
+
+        bytes32 jobId = keccak256("job/onboarding/not-curated");
+        vm.prank(poster);
+        escrow.createSinglePayoutJob(
+            jobId, address(dot), 50 ether, 0, 0, 1 days, bytes32("AUTO"), bytes32("DATA"), SPEC_HASH
+        );
+
+        vm.prank(worker);
+        escrow.claimJob(jobId);
+
+        EscrowCore.JobEscrow memory job = escrow.jobs(jobId);
+        (,,,, uint256 workerJobStake,) = accounts.positions(worker, address(dot));
+
+        assertEq(escrow.workerClaimCount(worker), 1);
+        assertEq(job.claimStake, 2.5 ether);
+        assertEq(job.claimFee, 1 ether);
+        require(!job.claimEconomicsWaived, "EXPECTED_NO_WAIVER");
+        assertEq(workerJobStake, 3.5 ether);
+    }
+
+    function testOnlyOperatorCanMarkOnboardingWaiverEligibility() public {
+        bytes32 jobId = keccak256("job/onboarding/operator-only");
+        vm.prank(poster);
+        escrow.createSinglePayoutJob(
+            jobId, address(dot), 50 ether, 0, 0, 1 days, bytes32("AUTO"), bytes32("DATA"), SPEC_HASH
+        );
+
+        vm.prank(worker);
+        (bool ok, bytes memory data) =
+            address(escrow).call(abi.encodeCall(escrow.setOnboardingWaiverEligible, (jobId, true)));
+        require(!ok, "EXPECTED_UNAUTHORIZED_REVERT");
+        require(bytes4(data) == EscrowCore.Unauthorized.selector, "EXPECTED_UNAUTHORIZED");
+
+        vmEvent.expectEmit(true, false, false, true, address(escrow));
+        emit OnboardingWaiverEligibilityUpdated(jobId, true);
+        escrow.setOnboardingWaiverEligible(jobId, true);
+        require(escrow.onboardingWaiverEligibleJobs(jobId), "EXPECTED_WAIVER_ELIGIBLE");
     }
 
     function testSuccessfulVerificationRefundsClaimStakeAndFee() public {

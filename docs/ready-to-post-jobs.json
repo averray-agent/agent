@@ -18,7 +18,8 @@
     "outputSchemaRef": "schema://jobs/pr-review-findings-output",
     "claimTtlSeconds": 5400,
     "retryLimit": 1,
-    "requiresSponsoredGas": true
+    "requiresSponsoredGas": true,
+    "onboardingWaiverEligible": true
   },
   {
     "id": "release-readiness-check-001",
@@ -39,7 +40,8 @@
     "outputSchemaRef": "schema://jobs/release-readiness-output",
     "claimTtlSeconds": 3600,
     "retryLimit": 1,
-    "requiresSponsoredGas": true
+    "requiresSponsoredGas": true,
+    "onboardingWaiverEligible": true
   },
   {
     "id": "issue-defect-triage-001",
@@ -61,7 +63,8 @@
     "outputSchemaRef": "schema://jobs/issue-defect-triage-output",
     "claimTtlSeconds": 2700,
     "retryLimit": 1,
-    "requiresSponsoredGas": true
+    "requiresSponsoredGas": true,
+    "onboardingWaiverEligible": true
   },
   {
     "id": "docs-drift-audit-001",
@@ -82,7 +85,8 @@
     "outputSchemaRef": "schema://jobs/docs-drift-audit-output",
     "claimTtlSeconds": 3600,
     "retryLimit": 1,
-    "requiresSponsoredGas": true
+    "requiresSponsoredGas": true,
+    "onboardingWaiverEligible": true
   },
   {
     "id": "wikipedia-citation-repair-001",
@@ -106,6 +110,7 @@
     "claimTtlSeconds": 3600,
     "retryLimit": 1,
     "requiresSponsoredGas": true,
+    "onboardingWaiverEligible": true,
     "source": {
       "type": "wikipedia_article",
       "project": "wikipedia",
@@ -153,6 +158,7 @@
     "claimTtlSeconds": 3600,
     "retryLimit": 1,
     "requiresSponsoredGas": true,
+    "onboardingWaiverEligible": true,
     "source": {
       "type": "wikipedia_article",
       "project": "wikipedia",
@@ -200,6 +206,7 @@
     "claimTtlSeconds": 3600,
     "retryLimit": 1,
     "requiresSponsoredGas": true,
+    "onboardingWaiverEligible": true,
     "source": {
       "type": "wikipedia_article",
       "project": "wikipedia",

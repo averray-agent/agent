@@ -1083,6 +1083,60 @@ test("ensureJob rejects real settlement asset shortfalls before mock minting", a
   );
 });
 
+test("ensureJob marks explicitly eligible onboarding-waiver jobs on-chain", async () => {
+  const gateway = gatewayWithDot();
+  const signer = "0x3333333333333333333333333333333333333333";
+  const waiverCalls = [];
+  gateway.signer = {
+    async getAddress() {
+      return signer;
+    }
+  };
+  gateway.readEscrowJob = async () => ({ state: 0, contractLayout: "rc1" });
+  gateway.accountContract = {
+    async positions(account, asset) {
+      assert.equal(account, signer);
+      assert.equal(asset, DOT_ASSET.address);
+      return { liquid: 10_000_000_000_000_000_000n };
+    }
+  };
+  gateway.createSinglePayoutJobForJob = async () => ({
+    async wait() {
+      return { blockNumber: 9, status: 1 };
+    }
+  });
+  gateway.escrowContract = {
+    async onboardingWaiverEligibleJobs(jobId) {
+      waiverCalls.push(["read", jobId]);
+      return false;
+    },
+    async setOnboardingWaiverEligible(jobId, eligible) {
+      waiverCalls.push(["set", jobId, eligible]);
+      return {
+        async wait() {
+          return { blockNumber: 10, status: 1 };
+        }
+      };
+    }
+  };
+  gateway.getJob = async () => ({ id: "eligible-job", state: 1 });
+
+  await gateway.ensureJob({
+    id: "eligible-job",
+    rewardAsset: "DOT",
+    rewardAmount: 1,
+    claimTtlSeconds: 3600,
+    verifierMode: "benchmark",
+    category: "coding",
+    onboardingWaiverEligible: true
+  });
+
+  assert.deepEqual(waiverCalls, [
+    ["read", gateway.toJobId("eligible-job")],
+    ["set", gateway.toJobId("eligible-job"), true]
+  ]);
+});
+
 test("reserveRecurringTemplateFunding converts display amounts and records the template key", async () => {
   const gateway = gatewayWithDot();
   const calls = [];

@@ -959,6 +959,7 @@ export class BlockchainGateway {
       const asset = this.requireAsset(job.rewardAsset);
       const live = await this.readEscrowJob(instanceJobId);
       if (live.state !== 0) {
+        await this.ensureOnboardingWaiverEligibility(this.toJobId(instanceJobId), job, live.contractLayout);
         return this.publicEscrowJob(live);
       }
 
@@ -1009,8 +1010,25 @@ export class BlockchainGateway {
         specHash
       );
       await createTx.wait();
+      await this.ensureOnboardingWaiverEligibility(this.toJobId(instanceJobId), job, live.contractLayout);
       return this.getJob(instanceJobId);
     });
+  }
+
+  async ensureOnboardingWaiverEligibility(chainJobId, job, contractLayout = "current") {
+    if (contractLayout === "legacy" || job?.onboardingWaiverEligible !== true) {
+      return;
+    }
+    if (typeof this.escrowContract.onboardingWaiverEligibleJobs !== "function"
+      || typeof this.escrowContract.setOnboardingWaiverEligible !== "function") {
+      return;
+    }
+    const current = await this.escrowContract.onboardingWaiverEligibleJobs(chainJobId).catch(() => false);
+    if (current === true) {
+      return;
+    }
+    const tx = await this.escrowContract.setOnboardingWaiverEligible(chainJobId, true);
+    await tx.wait();
   }
 
   usesRecurringTemplateReserve(job) {
