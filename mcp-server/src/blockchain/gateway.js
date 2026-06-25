@@ -448,6 +448,7 @@ export class BlockchainGateway {
             arbitratorSignerIsArbitrator: false,
             escrowIsServiceOperator: false,
             escrowIsAgentAccountEscrowOperator: false,
+            escrowAgentAccountMatchesConfig: false,
             agentAccountIsServiceOperator: false
           },
           readErrors: [],
@@ -483,6 +484,7 @@ export class BlockchainGateway {
         escrowIsServiceOperator,
         escrowIsAgentAccountEscrowOperator,
         agentAccountIsServiceOperator,
+        escrowCoreAgentAccountAddress,
         dailyOutflowCap,
         perAccountBorrowCap,
         minimumCollateralRatioBps,
@@ -514,6 +516,9 @@ export class BlockchainGateway {
         this.config.agentAccountAddress
           ? optionalBool("serviceOperators(agentAccount)", this.policyContract.serviceOperators(this.config.agentAccountAddress))
           : false,
+        this.config.escrowCoreAddress && typeof this.escrowContract?.accounts === "function"
+          ? optionalRead("EscrowCore.accounts()", this.escrowContract.accounts(), undefined)
+          : undefined,
         optionalRead("dailyOutflowCap", this.policyContract.dailyOutflowCap(), 0),
         optionalRead("perAccountBorrowCap", this.policyContract.perAccountBorrowCap(), 0),
         optionalRead("minimumCollateralRatioBps", this.policyContract.minimumCollateralRatioBps(), 0),
@@ -535,6 +540,11 @@ export class BlockchainGateway {
           : "missing";
       const agentAccountEscrowAuthorized = escrowIsAgentAccountEscrowOperator || (
         agentAccountEscrowAuthorizationMode === "legacyServiceOperator"
+      );
+      const escrowAgentAccountMatchesConfig = Boolean(
+        escrowCoreAgentAccountAddress
+          && this.config.agentAccountAddress
+          && String(escrowCoreAgentAccountAddress).toLowerCase() === String(this.config.agentAccountAddress).toLowerCase()
       );
       const supportedAssets = await Promise.all((this.config.supportedAssets ?? []).map(async (asset) => ({
         ...summarizeSupportedAsset(asset),
@@ -583,6 +593,7 @@ export class BlockchainGateway {
           signerIsVerifier
             && escrowIsServiceOperator
             && agentAccountEscrowAuthorized
+            && escrowAgentAccountMatchesConfig
             && agentAccountIsServiceOperator
             && supportedAssetsReady
             && paused === false
@@ -590,6 +601,7 @@ export class BlockchainGateway {
         contracts: {
           escrowCoreAddress: this.config.escrowCoreAddress,
           agentAccountAddress: this.config.agentAccountAddress,
+          escrowCoreAgentAccountAddress,
           reputationSbtAddress: this.config.reputationSbtAddress,
           supportedAssets
         },
@@ -602,6 +614,7 @@ export class BlockchainGateway {
           escrowIsAgentAccountEscrowOperator: agentAccountEscrowAuthorized,
           agentAccountEscrowAuthorizationMode,
           agentAccountEscrowOperatorsGetterReady: escrowIsAgentAccountEscrowOperator,
+          escrowAgentAccountMatchesConfig,
           agentAccountIsServiceOperator
         },
         signerFunding,

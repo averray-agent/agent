@@ -614,6 +614,11 @@ test("getTreasuryPolicyStatus surfaces settlement readiness roles", async () => 
       });
     }
   };
+  gateway.escrowContract = {
+    async accounts() {
+      return "0x3333333333333333333333333333333333333333";
+    }
+  };
 
   const status = await gateway.getTreasuryPolicyStatus();
 
@@ -622,8 +627,10 @@ test("getTreasuryPolicyStatus surfaces settlement readiness roles", async () => 
   assert.equal(status.roles.signerIsVerifier, true);
   assert.equal(status.roles.escrowIsServiceOperator, true);
   assert.equal(status.roles.escrowIsAgentAccountEscrowOperator, true);
+  assert.equal(status.roles.escrowAgentAccountMatchesConfig, true);
   assert.equal(status.roles.agentAccountIsServiceOperator, true);
   assert.deepEqual(status.readErrors, []);
+  assert.equal(status.contracts.escrowCoreAgentAccountAddress, "0x3333333333333333333333333333333333333333");
   assert.deepEqual(status.contracts.supportedAssets, [{
     symbol: "DOT",
     address: DOT_ASSET.address,
@@ -658,6 +665,91 @@ test("getTreasuryPolicyStatus surfaces settlement readiness roles", async () => 
       debtOutstandingRaw: "0"
     }]
   });
+});
+
+test("getTreasuryPolicyStatus marks settlement not ready when EscrowCore points at a different AgentAccountCore", async () => {
+  const gateway = new BlockchainGateway({
+    enabled: true,
+    rpcUrl: "http://127.0.0.1:8545",
+    signerPrivateKey: `0x${"11".repeat(32)}`,
+    treasuryPolicyAddress: "0x1111111111111111111111111111111111111111",
+    agentAccountAddress: "0x3333333333333333333333333333333333333333",
+    escrowCoreAddress: "0x2222222222222222222222222222222222222222",
+    reputationSbtAddress: "0x4444444444444444444444444444444444444444",
+    supportedAssets: [DOT_ASSET]
+  });
+  gateway.policyContract = {
+    async owner() {
+      return "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    },
+    async pauser() {
+      return "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    },
+    async paused() {
+      return false;
+    },
+    async verifiers() {
+      return true;
+    },
+    async serviceOperators() {
+      return true;
+    },
+    async approvedAssets() {
+      return true;
+    },
+    async dailyOutflowCap() {
+      return 100n;
+    },
+    async perAccountBorrowCap() {
+      return 200n;
+    },
+    async minimumCollateralRatioBps() {
+      return 300n;
+    },
+    async defaultClaimStakeBps() {
+      return 400n;
+    },
+    async claimFeeBps() {
+      return 5n;
+    },
+    async claimFeeVerifierBps() {
+      return 6000n;
+    },
+    async onboardingWaiverClaimCount() {
+      return 7n;
+    },
+    async rejectionSkillPenalty() {
+      return 8n;
+    },
+    async rejectionReliabilityPenalty() {
+      return 9n;
+    },
+    async disputeLossSkillPenalty() {
+      return 10n;
+    },
+    async disputeLossReliabilityPenalty() {
+      return 11n;
+    }
+  };
+  gateway.accountContract = {
+    async escrowOperators() {
+      return true;
+    },
+    async positions() {
+      return emptyPosition();
+    }
+  };
+  gateway.escrowContract = {
+    async accounts() {
+      return "0x9999999999999999999999999999999999999999";
+    }
+  };
+
+  const status = await gateway.getTreasuryPolicyStatus();
+
+  assert.equal(status.roles.escrowAgentAccountMatchesConfig, false);
+  assert.equal(status.contracts.escrowCoreAgentAccountAddress, "0x9999999999999999999999999999999999999999");
+  assert.equal(status.settlementReady, false);
 });
 
 test("getTreasuryPolicyStatus accepts legacy AgentAccountCore operator authorization when escrowOperators getter is absent", async () => {
@@ -743,6 +835,11 @@ test("getTreasuryPolicyStatus accepts legacy AgentAccountCore operator authoriza
       return emptyPosition();
     }
   };
+  gateway.escrowContract = {
+    async accounts() {
+      return "0x3333333333333333333333333333333333333333";
+    }
+  };
 
   const status = await gateway.getTreasuryPolicyStatus();
 
@@ -752,6 +849,7 @@ test("getTreasuryPolicyStatus accepts legacy AgentAccountCore operator authoriza
   assert.equal(status.roles.agentAccountIsServiceOperator, true);
   assert.equal(status.roles.agentAccountEscrowAuthorizationMode, "legacyServiceOperator");
   assert.equal(status.roles.agentAccountEscrowOperatorsGetterReady, false);
+  assert.equal(status.roles.escrowAgentAccountMatchesConfig, true);
   assert.deepEqual(status.readErrors, [{
     field: "AgentAccountCore.escrowOperators(escrowCore)",
     message: "execution reverted"
@@ -830,6 +928,11 @@ test("getTreasuryPolicyStatus preserves raw policy risk values when numbers are 
     },
     async positions() {
       return emptyPosition();
+    }
+  };
+  gateway.escrowContract = {
+    async accounts() {
+      return "0x3333333333333333333333333333333333333333";
     }
   };
 
@@ -923,6 +1026,11 @@ test("getTreasuryPolicyStatus records individual read errors without hiding role
     },
     async positions() {
       return emptyPosition();
+    }
+  };
+  gateway.escrowContract = {
+    async accounts() {
+      return "0x3333333333333333333333333333333333333333";
     }
   };
 

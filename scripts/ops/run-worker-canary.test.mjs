@@ -12,7 +12,8 @@ import {
   runSubmitStage,
   runVerifyStage,
   runSettleStage,
-  assertOperatorTokenFreshness
+  assertOperatorTokenFreshness,
+  assertOperatorReady
 } from "./run-worker-canary.mjs";
 
 // ── fixtures ──────────────────────────────────────────────────────────────
@@ -56,7 +57,22 @@ function okOperatorClient(overrides = {}) {
             settlementReady: true,
             roles: {
               escrowIsServiceOperator: true,
-              escrowIsAgentAccountEscrowOperator: true
+              escrowIsAgentAccountEscrowOperator: true,
+              escrowAgentAccountMatchesConfig: true
+            },
+            contracts: {
+              escrowCoreAddress: "0x2222222222222222222222222222222222222222",
+              agentAccountAddress: "0x3333333333333333333333333333333333333333",
+              escrowCoreAgentAccountAddress: "0x3333333333333333333333333333333333333333"
+            },
+            signerFunding: {
+              agentAccountAddress: "0x3333333333333333333333333333333333333333",
+              assets: [{
+                symbol: "USDC",
+                readable: true,
+                liquid: 1,
+                liquidRaw: "1000000"
+              }]
             }
           }
         }
@@ -248,6 +264,63 @@ test("operator readiness fails loud if the escrow service-operator broker is dis
   await assert.rejects(() => runFull({ operatorClient }), /service operator/u);
 });
 
+test("operator readiness fails before job creation when EscrowCore points at a different AgentAccountCore", async () => {
+  const operatorClient = okOperatorClient({
+    async getAdminStatus() {
+      return {
+        maintenance: {
+          policy: {
+            enabled: true,
+            settlementReady: false,
+            roles: {
+              escrowIsServiceOperator: true,
+              escrowIsAgentAccountEscrowOperator: true,
+              escrowAgentAccountMatchesConfig: false
+            },
+            contracts: {
+              escrowCoreAddress: "0x2222222222222222222222222222222222222222",
+              agentAccountAddress: "0x3333333333333333333333333333333333333333",
+              escrowCoreAgentAccountAddress: "0x9999999999999999999999999999999999999999"
+            }
+          }
+        }
+      };
+    }
+  });
+  await assert.rejects(() => runFull({ operatorClient }), /EscrowCore\.accounts\(\) does not match/u);
+});
+
+test("operator readiness fails before job creation when signer reward bank is short", async () => {
+  const operatorPlatform = {
+    async getAuthSession() {
+      return { roles: ["admin", "verifier"], capabilities: ["jobs:create", "jobs:lifecycle", "verifier:run", "admin:status"] };
+    },
+    async getAdminStatus() {
+      return {
+        maintenance: {
+          policy: {
+            enabled: true,
+            settlementReady: true,
+            roles: {
+              escrowIsServiceOperator: true,
+              escrowIsAgentAccountEscrowOperator: true,
+              escrowAgentAccountMatchesConfig: true
+            },
+            signerFunding: {
+              agentAccountAddress: "0x3333333333333333333333333333333333333333",
+              assets: [{ symbol: "USDC", readable: true, liquid: 0, liquidRaw: "0" }]
+            }
+          }
+        }
+      };
+    }
+  };
+  await assert.rejects(
+    () => assertOperatorReady(operatorPlatform, { rewardRaw: REWARD_RAW, rewardAssetSymbol: "USDC" }),
+    /reward bank is underfunded/u
+  );
+});
+
 // ── STAGE 1: SIWE (guards #625) ──────────────────────────────────────────────
 test("stage 1 SIWE: HTTP 500 on /auth/verify names the #625 roleless-mint regression", async () => {
   const anonClient = {
@@ -319,6 +392,21 @@ test("stage 3 claim: a 409 from /jobs/claim names the claim-funding class", asyn
   await assert.rejects(
     () => runClaimStage({ authedWorker, jobId: JOB_ID, workerAddress: WORKER, idempotencyKey: "k", before: { aacLiquidRaw: 0n } }),
     /409 class|claim-funding/u
+  );
+});
+
+test("stage 3 claim: ensureJob blockchain_revert names canary job funding/setup diagnostics", async () => {
+  const authedWorker = {
+    async preflightJob(jobId) {
+      return { jobId, eligible: true, claimable: true, currentWalletCanClaim: true, claimEconomicsWaived: true, totalClaimLock: 0 };
+    },
+    async claimJob() {
+      throw new FakeApiError(409, { error: "blockchain_revert", message: "ensureJob failed: require(false)" });
+    }
+  };
+  await assert.rejects(
+    () => runClaimStage({ authedWorker, jobId: JOB_ID, workerAddress: WORKER, idempotencyKey: "k", before: { aacLiquidRaw: 0n } }),
+    /funding\/setup|EscrowCore\.accounts\(\)|ensureJob/u
   );
 });
 

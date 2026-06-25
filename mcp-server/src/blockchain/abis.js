@@ -38,6 +38,7 @@ export const AGENT_ACCOUNT_ABI = [
 ];
 
 export const ESCROW_CORE_ABI = [
+  "function accounts() view returns (address)",
   "function createSinglePayoutJob(bytes32 jobId, address asset, uint256 reward, uint256 opsReserve, uint256 contingencyReserve, uint256 claimTtl, bytes32 verifierMode, bytes32 category, bytes32 specHash)",
   "function createSinglePayoutJob(bytes32 jobId, address asset, uint256 reward, uint256 opsReserve, uint256 contingencyReserve, uint256 claimTtl, bytes32 verifierMode, bytes32 category, bytes32 specHash, (bytes32 schemaHash, string schemaUrl, address schemaIssuer, bytes schemaSignature) externalSchema)",
   "function createSinglePayoutJobFromRecurringReserve((bytes32 jobId, bytes32 templateId, address poster, address asset, uint256 reward, uint256 opsReserve, uint256 contingencyReserve, uint256 claimTtl, bytes32 verifierMode, bytes32 category, bytes32 specHash, bytes32 schemaHash, string schemaUrl, address schemaIssuer, bytes schemaSignature) params)",
