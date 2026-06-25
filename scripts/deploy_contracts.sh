@@ -104,6 +104,26 @@ fail() {
   exit 1
 }
 
+validate_optional_strategy_flags() {
+  if [[ "${WITH_VDOT_MOCK:-}" == "1" && "${WITH_XCM_VDOT_ADAPTER:-}" == "1" ]]; then
+    fail "WITH_VDOT_MOCK=1 and WITH_XCM_VDOT_ADAPTER=1 are mutually exclusive"
+  fi
+
+  if [[ "${WITH_XCM_VDOT_ADAPTER:-}" == "1" && "${WITH_XCM_WRAPPER:-}" != "1" ]]; then
+    fail "WITH_XCM_VDOT_ADAPTER=1 requires WITH_XCM_WRAPPER=1"
+  fi
+
+  if [[ "$PROFILE" == "mainnet" && "${WITH_VDOT_MOCK:-}" == "1" ]]; then
+    fail "WITH_VDOT_MOCK=1 is not allowed on PROFILE=mainnet (see docs/strategies/vdot.md for the real mainnet path)"
+  fi
+
+  if [[ "$PROFILE" == "mainnet" && "${WITH_XCM_VDOT_ADAPTER:-}" == "1" ]]; then
+    fail "WITH_XCM_VDOT_ADAPTER=1 is not allowed on PROFILE=mainnet until native observer evidence has passed"
+  fi
+}
+
+validate_optional_strategy_flags
+
 require_command forge
 require_command cast
 
@@ -255,12 +275,6 @@ VDOT_ADAPTER=""
 VDOT_STRATEGY_ID=""
 VDOT_ADAPTER_KIND=""
 if [[ "${WITH_VDOT_MOCK:-}" == "1" ]]; then
-  if [[ "$PROFILE" == "mainnet" ]]; then
-    fail "WITH_VDOT_MOCK=1 is not allowed on PROFILE=mainnet (see docs/strategies/vdot.md for the real mainnet path)"
-  fi
-  if [[ "${WITH_XCM_VDOT_ADAPTER:-}" == "1" ]]; then
-    fail "WITH_VDOT_MOCK=1 and WITH_XCM_VDOT_ADAPTER=1 are mutually exclusive"
-  fi
   VDOT_STRATEGY_ID="${VDOT_STRATEGY_ID_HEX:-0x56444f545f56315f4d4f434b0000000000000000000000000000000000000000}"  # bytes32("VDOT_V1_MOCK")
   VDOT_ADAPTER_KIND="mock_vdot"
   echo "Deploying MockVDotAdapter"
@@ -276,12 +290,6 @@ if [[ "${WITH_VDOT_MOCK:-}" == "1" ]]; then
 fi
 
 if [[ "${WITH_XCM_VDOT_ADAPTER:-}" == "1" ]]; then
-  if [[ "$PROFILE" == "mainnet" ]]; then
-    fail "WITH_XCM_VDOT_ADAPTER=1 is not allowed on PROFILE=mainnet until native observer evidence has passed"
-  fi
-  if [[ -z "$XCM_WRAPPER" ]]; then
-    fail "WITH_XCM_VDOT_ADAPTER=1 requires WITH_XCM_WRAPPER=1"
-  fi
   VDOT_STRATEGY_ID="${VDOT_STRATEGY_ID_HEX:-0x56444f545f56315f58434d0000000000000000000000000000000000000000}"  # bytes32("VDOT_V1_XCM")
   VDOT_ADAPTER_KIND="polkadot_vdot"
   echo "Deploying XcmVdotAdapter"
