@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, inArray, or } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, or } from "ponder";
 
 import { db } from "ponder:api";
 import schema from "ponder:schema";

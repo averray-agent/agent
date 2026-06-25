@@ -75,7 +75,31 @@ testnet beta** (testnet financial risk ≈ 0); all are mainnet-prep.
 |---|------|-------|-------|
 | H1 | **Deploy-time guard for `JWT_KMS_CREDENTIAL_CHECK_SKIP`** | Claude | The emergency boot-cred-check bypass has no guard against accidental ship. Add a CI/deploy assertion that it's unset in the rendered production env (fail closed). |
 | H2 | **Move `DISCOVERY_PUBLISHER_PRIVATE_KEY` off GitHub Secrets → KMS** | Pascal / infra | The last raw signer key not on KMS; signs discovery-manifest hashes (not funds), and the on-chain `DiscoveryRegistry` hash-check bounds the blast radius today. Migrate before mainnet. |
-| H3 | **Known-vuln deps: `drizzle-orm` + `kysely` SQLi** | Codex | `drizzle-orm <0.45.2` (GHSA-gpj5-g38j-94v9) + `kysely <=0.28.16` (3× SQLi). **Not a clean bump:** (a) direct `drizzle-orm ^0.41→^0.45.2` is breaking and touches settlement code (`indexer/src/api/xcm-outcome*.ts` import `sql`/`eq`/`and`) → Codex must verify against a live chain+DB; (b) `kysely` + ponder-nested `drizzle` are **transitive via `ponder@0.16.6`, already the latest** — unclearable by upgrade until ponder patches, or via a risky `overrides` force that may break ponder's runtime. Bounded today by the indexer SQL validator + testnet-only. Track upstream ponder; revisit before real funds. |
+| H3 | **Known-vuln deps: `drizzle-orm` + `kysely` SQLi** | Codex | Partially remediated 2026-06-25: the direct indexer `drizzle-orm <0.45.2` dependency was removed and XCM outcome code now consumes Ponder's Drizzle re-export, avoiding a broken mixed-Drizzle runtime. Residual risk remains inside `ponder@0.16.6`, which is still latest and still vendors vulnerable Drizzle/Kysely. Track upstream Ponder or ship only a separately rehearsed override. |
+
+### H3 detail — indexer ORM SQLi advisories
+
+**Status as of 2026-06-25:** partially remediated. The indexer's direct
+`drizzle-orm` dependency is removed and Averray-owned XCM outcome queries now
+use Ponder's Drizzle re-export, avoiding a broken mixed-Drizzle runtime while
+closing the direct dependency exposure in `indexer/package.json`. The XCM
+outcome publisher has a regression test proving external outcome values remain
+parameterized through the SQL template.
+
+Residual risk remains in `ponder@0.16.6`, which is still the latest Ponder
+release and still vendors `drizzle-orm@0.41.0` plus `kysely@0.26.3`. Do not
+force an override into Ponder without a dedicated live-ingest rehearsal; that
+could break Ponder's runtime query layer while giving a false sense of security.
+
+Close criteria:
+
+- [x] Direct indexer `drizzle-orm <0.45.2` dependency is removed.
+- [x] `npm --workspace indexer run typecheck` and
+  `npm --workspace indexer run test:api` pass with XCM queries using Ponder's
+  Drizzle re-export.
+- [ ] Ponder releases a compatible version that removes its vulnerable
+  transitive `drizzle-orm` / `kysely` copies, or Averray validates and ships a
+  deliberately tested override with live ingest evidence.
 
 ## Honest timeline
 

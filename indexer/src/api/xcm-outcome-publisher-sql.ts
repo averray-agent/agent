@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm";
+import { sql } from "ponder";
 
 import type { PublishedOutcome } from "./xcm-upstream-source";
 
