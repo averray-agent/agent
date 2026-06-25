@@ -100,7 +100,7 @@ and must land in the audited artifact.
 | **Med** | Onboarding claim-waiver enables sybil claim-griefing (free claim → no submit → timeout → repeat with fresh wallets) | Bounded for the *closed* beta (trusted testers + curated starter jobs). For open/mainnet: restrict waivers to curated jobs / verified workers, or a minimal refundable fee. |
 | **Med** | `reserveForRecurringTemplate` has no cancellation/refund path → misconfigured/retired templates strand funds | Covered by `cancelRecurringTemplateReserve`: refunds unused template reserve to liquid, emits cancellation event, and keeps template + aggregate reserved accounting synchronized. Not used in the beta. |
 | **Med** | Open prod dep advisories | `drizzle`/`kysely` = **H3** (partially fixed, #686). **New:** `ws` (via `ethers`/`viem` — fix bumps `viem` out-of-range, chain-lib care needed) + `vite` (in `app/`, Windows-only advisories → frontend owner). |
-| **Low** | `_refreshStrategyAllocated` loops all registered strategies → owner-controlled OOG / config DoS | Cap strategy count / per-asset lists / touch-only accounting. |
+| **Low** | `_refreshStrategyAllocated` loops all registered strategies → owner-controlled OOG / config DoS | Covered by touched-strategy accounting: cache each strategy's contribution and resync only the strategy whose shares changed. Requires contract deployment with the frozen artifact. |
 | **Low** | External-schema sig lacks low-s + chainId/address domain separation | Move to EIP-712 typed data (chainId + `address(this)`) + enforce low-s. |
 
 ## Explicitly NOT blocking v1

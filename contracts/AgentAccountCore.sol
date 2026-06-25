@@ -69,6 +69,7 @@ contract AgentAccountCore is ReentrancyGuard {
 
     mapping(address => mapping(address => AssetPosition)) public positions;
     mapping(address => mapping(bytes32 => uint256)) public strategyShares;
+    mapping(address => mapping(bytes32 => uint256)) public strategyAllocationValues;
     mapping(bytes32 => StrategyRequest) public strategyRequests;
     mapping(address => mapping(address => uint256)) public pendingStrategyAssets;
     mapping(address => mapping(bytes32 => uint256)) public pendingStrategyWithdrawalShares;
@@ -345,7 +346,7 @@ contract AgentAccountCore is ReentrancyGuard {
         SafeTransfer.safeApprove(strategy.asset, strategy.adapter, amount);
         uint256 sharesMinted = adapter.deposit(amount);
         strategyShares[account][strategyId] += sharesMinted;
-        _refreshStrategyAllocated(account, strategy.asset);
+        _syncStrategyAllocation(account, strategy.asset, strategyId, strategy.adapter);
         emit StrategyAllocated(account, strategyId, strategy.asset, amount);
     }
 
@@ -373,7 +374,7 @@ contract AgentAccountCore is ReentrancyGuard {
         uint256 assetsReturned = adapter.withdraw(sharesToBurn, address(this));
         strategyShares[account][strategyId] = accountShares - sharesToBurn;
         position.liquid += assetsReturned;
-        _refreshStrategyAllocated(account, strategy.asset);
+        _syncStrategyAllocation(account, strategy.asset, strategyId, strategy.adapter);
         emit StrategyDeallocated(account, strategyId, strategy.asset, assetsReturned);
     }
 
@@ -502,7 +503,7 @@ contract AgentAccountCore is ReentrancyGuard {
         request.failureCode = failureCode;
         request.settled = true;
 
-        _refreshStrategyAllocated(request.account, request.asset);
+        _syncStrategyAllocation(request.account, request.asset, request.strategyId, request.adapter);
         emit StrategyRequestSettled(
             request.account, request.strategyId, requestId, status, settledAssets, settledShares, request.recipient
         );
@@ -789,22 +790,26 @@ contract AgentAccountCore is ReentrancyGuard {
         return ((assets * totalShares_) + totalAssets_ - 1) / totalAssets_;
     }
 
-    function _refreshStrategyAllocated(address account, address asset) internal {
-        bytes32[] memory ids = registry.listStrategyIds();
-        uint256 totalAllocated;
-        for (uint256 i = 0; i < ids.length; i++) {
-            StrategyAdapterRegistry.StrategyMetadata memory strategy = registry.getStrategy(ids[i]);
-            if (strategy.adapter == address(0) || strategy.asset != asset) {
-                continue;
-            }
-            uint256 shares = strategyShares[account][ids[i]];
-            if (shares == 0) {
-                continue;
-            }
-            IStrategyAdapter adapter = IStrategyAdapter(strategy.adapter);
-            totalAllocated += _assetValueForShares(shares, adapter.totalAssets(), adapter.totalShares());
+    function _syncStrategyAllocation(address account, address asset, bytes32 strategyId, address adapterAddress)
+        internal
+    {
+        uint256 previousValue = strategyAllocationValues[account][strategyId];
+        IStrategyAdapter adapter = IStrategyAdapter(adapterAddress);
+        uint256 currentValue =
+            _assetValueForShares(strategyShares[account][strategyId], adapter.totalAssets(), adapter.totalShares());
+        if (currentValue == previousValue) {
+            return;
         }
-        positions[account][asset].strategyAllocated = totalAllocated;
+
+        AssetPosition storage position = positions[account][asset];
+        if (currentValue > previousValue) {
+            position.strategyAllocated += currentValue - previousValue;
+        } else {
+            uint256 decrease = previousValue - currentValue;
+            if (position.strategyAllocated < decrease) revert InvalidSettlement();
+            position.strategyAllocated -= decrease;
+        }
+        strategyAllocationValues[account][strategyId] = currentValue;
     }
 
     function _createPendingDepositRequest(
