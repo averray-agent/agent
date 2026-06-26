@@ -4,7 +4,10 @@
  * Emit the polkadot-js-apps multisig.asMulti recipe for wiring a freshly
  * redeployed EscrowCore as both an AgentAccountCore escrow operator and a
  * TreasuryPolicy serviceOperator (and optionally revoking the stale one in
- * the same batch).
+ * the same batch). When AgentAccountCore is redeployed too, pass
+ * --new-agent-account so the same batch also approves the fresh AAC as a
+ * TreasuryPolicy serviceOperator and targets setEscrowOperator on that
+ * fresh AAC.
  *
  * Why a recipe and not an EVM commit:
  *   TreasuryPolicy.owner() is the H160 mapping of the SS58 2-of-3 multisig
@@ -17,9 +20,10 @@
  *     otherSignatories: [other two signers in AccountId32 byte order],
  *     maybeTimepoint: <None for first leg, Some({height,index}) for second>,
  *     call: utility.batchAll([
- *       revive.call(AgentAccountCore.setEscrowOperator(newEscrow, true)),
+ *       revive.call(TreasuryPolicy.setServiceOperator(newAgentAccount, true)), // only with --new-agent-account
+ *       revive.call(NewAgentAccountCore.setEscrowOperator(newEscrow, true)),
  *       revive.call(TreasuryPolicy.setServiceOperator(newEscrow, true)),
- *       revive.call(AgentAccountCore.setEscrowOperator(oldEscrow, false)),
+ *       revive.call(OldAgentAccountCore.setEscrowOperator(oldEscrow, false)),
  *       revive.call(TreasuryPolicy.setServiceOperator(oldEscrow, false))
  *     ]),
  *     maxWeight: { refTime, proofSize }
@@ -43,12 +47,12 @@
  * -----
  *   # First leg (Hot Wallet, no timepoint):
  *   node scripts/ops/redeploy-escrowcore-wire-multisig.mjs \
- *     --new-escrow 0xNEW --signer hot
+ *     --new-escrow 0xNEW --new-agent-account 0xNEW_AAC --signer hot
  *
  *   # Second leg (Ledger, with timepoint from first leg's
  *   # multisig.NewMultisig event):
  *   node scripts/ops/redeploy-escrowcore-wire-multisig.mjs \
- *     --new-escrow 0xNEW --signer ledger \
+ *     --new-escrow 0xNEW --new-agent-account 0xNEW_AAC --signer ledger \
  *     --timepoint-height H --timepoint-index I
  *
  * This script does not touch Substrate keys. The actual signing happens
@@ -91,6 +95,8 @@ export function parseArgs(argv) {
     const arg = argv[i];
     if (arg === "--new-escrow") args.newEscrow = argv[++i];
     else if (arg === "--old-escrow") args.oldEscrow = argv[++i];
+    else if (arg === "--new-agent-account") args.newAgentAccount = argv[++i];
+    else if (arg === "--old-agent-account") args.oldAgentAccount = argv[++i];
     else if (arg === "--signer") args.signer = argv[++i];
     else if (arg === "--profile") args.profile = argv[++i];
     else if (arg === "--timepoint-height") args.tpHeight = argv[++i];
@@ -191,6 +197,8 @@ function printUsage() {
       "         --new-escrow 0xADDR \\",
       "         --signer hot|ledger|vault \\",
       "         [--timepoint-height N --timepoint-index M] \\",
+      "         [--new-agent-account 0xADDR] # when AAC is redeployed too",
+      "         [--old-agent-account 0xADDR] # defaults to current deployments/<profile>.json#contracts.agentAccountCore",
       "         [--old-escrow 0xADDR]   # defaults to current deployments/<profile>.json#contracts.escrowCore",
       "         [--skip-revoke]         # emit single-call recipe instead of batched",
       "         [--profile testnet] \\",
@@ -204,11 +212,31 @@ function printUsage() {
   );
 }
 
-export function buildInnerCalls({ policyIface, accountIface, treasuryPolicy, agentAccount, newEscrow, oldEscrow, skipRevoke }) {
-  const calls = [
+export function buildInnerCalls({
+  policyIface,
+  accountIface,
+  treasuryPolicy,
+  agentAccount,
+  newEscrow,
+  oldEscrow,
+  skipRevoke,
+  newAgentAccount,
+  oldAgentAccount
+}) {
+  const activeAgentAccount = newAgentAccount ?? agentAccount;
+  const staleAgentAccount = oldAgentAccount ?? agentAccount;
+  const calls = [];
+  if (newAgentAccount) {
+    calls.push({
+      label: `TreasuryPolicy.setServiceOperator(${newAgentAccount}, true)  // approve new AgentAccountCore accounting authority`,
+      to: treasuryPolicy,
+      data: policyIface.encodeFunctionData("setServiceOperator", [newAgentAccount, true])
+    });
+  }
+  calls.push(
     {
       label: `AgentAccountCore.setEscrowOperator(${newEscrow}, true)  // approve new EscrowCore ledger authority`,
-      to: agentAccount,
+      to: activeAgentAccount,
       data: accountIface.encodeFunctionData("setEscrowOperator", [newEscrow, true])
     },
     {
@@ -216,11 +244,11 @@ export function buildInnerCalls({ policyIface, accountIface, treasuryPolicy, age
       to: treasuryPolicy,
       data: policyIface.encodeFunctionData("setServiceOperator", [newEscrow, true])
     }
-  ];
+  );
   if (!skipRevoke) {
     calls.push({
       label: `AgentAccountCore.setEscrowOperator(${oldEscrow}, false)  // revoke stale EscrowCore ledger authority`,
-      to: agentAccount,
+      to: staleAgentAccount,
       data: accountIface.encodeFunctionData("setEscrowOperator", [oldEscrow, false])
     });
     calls.push({
@@ -262,7 +290,8 @@ async function main() {
   const ownerRecord = JSON.parse(await readFile(multisigOwnerPath, "utf8"));
 
   const treasuryPolicy = getAddress(deployments.contracts.treasuryPolicy);
-  const agentAccount = getAddress(deployments.contracts.agentAccountCore);
+  const agentAccount = getAddress(args.newAgentAccount ?? deployments.contracts.agentAccountCore);
+  const oldAgentAccount = getAddress(args.oldAgentAccount ?? deployments.contracts.agentAccountCore);
   const oldEscrow = getAddress(args.oldEscrow ?? deployments.contracts.escrowCore);
 
   if (newEscrow.toLowerCase() === oldEscrow.toLowerCase()) {
@@ -302,7 +331,9 @@ async function main() {
     agentAccount,
     newEscrow,
     oldEscrow,
-    skipRevoke: args.skipRevoke
+    skipRevoke: args.skipRevoke,
+    newAgentAccount: args.newAgentAccount ? agentAccount : undefined,
+    oldAgentAccount
   });
   const isBatch = innerCalls.length > 1;
 
@@ -316,8 +347,10 @@ async function main() {
   console.log("# redeploy-escrowcore-wire-multisig");
   console.log(`profile:                 ${args.profile}`);
   console.log(`new EscrowCore:          ${newEscrow}`);
+  if (args.newAgentAccount) console.log(`new AgentAccountCore:    ${agentAccount}`);
   if (!args.skipRevoke) console.log(`old EscrowCore (revoke): ${oldEscrow}`);
   else console.log(`old EscrowCore:          ${oldEscrow}  (left wired; --skip-revoke set)`);
+  if (args.newAgentAccount) console.log(`old AgentAccountCore:    ${oldAgentAccount}  (old escrow revoke target)`);
   console.log(`treasury policy (H160):  ${treasuryPolicy}`);
   console.log(`agent account (H160):    ${agentAccount}`);
   console.log(`owner multisig (SS58):   ${ownerRecord.multisig.ss58Address}`);

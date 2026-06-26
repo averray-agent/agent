@@ -23,6 +23,7 @@ const NEW = "0xb8fd8A932F69bD5E39700b7cf6D2920aF84d1B27";
 const OLD = "0x7BB8fea44bDeE9870cF27c1dB616E7017BC38b0a";
 const TREASURY_POLICY = "0x648Cc5fdE94435992296C4e5ac642d18bB64c12B";
 const AGENT_ACCOUNT = "0x71B111d8c9DF84Be26cb9067D27dAd7A2d5E7e08";
+const NEW_AGENT_ACCOUNT = "0xbd9c2d9336a91415287bb032ec34e8b80a1f38a0";
 
 test("parseArgs defaults profile=testnet, skipRevoke=false", () => {
   const args = parseArgs([]);
@@ -54,12 +55,37 @@ test("parseArgs reads --skip-revoke + --old-escrow override", () => {
   assert.equal(args.skipRevoke, true);
 });
 
+test("parseArgs reads fresh AgentAccountCore overrides", () => {
+  const args = parseArgs([
+    "--new-escrow", NEW,
+    "--new-agent-account", NEW_AGENT_ACCOUNT,
+    "--old-agent-account", AGENT_ACCOUNT,
+    "--signer", "hot"
+  ]);
+  assert.equal(args.newAgentAccount, NEW_AGENT_ACCOUNT);
+  assert.equal(args.oldAgentAccount, AGENT_ACCOUNT);
+});
+
 function buildFixtureCalls({ skipRevoke = false } = {}) {
   return buildInnerCalls({
     policyIface,
     accountIface,
     treasuryPolicy: TREASURY_POLICY,
     agentAccount: AGENT_ACCOUNT,
+    newEscrow: NEW,
+    oldEscrow: OLD,
+    skipRevoke
+  });
+}
+
+function buildFreshAgentAccountCalls({ skipRevoke = false } = {}) {
+  return buildInnerCalls({
+    policyIface,
+    accountIface,
+    treasuryPolicy: TREASURY_POLICY,
+    agentAccount: NEW_AGENT_ACCOUNT,
+    newAgentAccount: NEW_AGENT_ACCOUNT,
+    oldAgentAccount: AGENT_ACCOUNT,
     newEscrow: NEW,
     oldEscrow: OLD,
     skipRevoke
@@ -106,6 +132,29 @@ test("buildInnerCalls produces two approve calls when --skip-revoke is set", () 
     calls[1].data,
     policyIface.encodeFunctionData("setServiceOperator", [NEW, true])
   );
+});
+
+test("buildInnerCalls wires a freshly redeployed AgentAccountCore in the same batch", () => {
+  const calls = buildFreshAgentAccountCalls();
+  assert.equal(calls.length, 5);
+  assert.match(calls[0].label, /approve new AgentAccountCore/u);
+  assert.equal(calls[0].to, TREASURY_POLICY);
+  assert.equal(
+    calls[0].data,
+    policyIface.encodeFunctionData("setServiceOperator", [NEW_AGENT_ACCOUNT, true])
+  );
+  assert.equal(calls[1].to, NEW_AGENT_ACCOUNT);
+  assert.equal(
+    calls[1].data,
+    accountIface.encodeFunctionData("setEscrowOperator", [NEW, true])
+  );
+  assert.equal(calls[2].to, TREASURY_POLICY);
+  assert.equal(calls[3].to, AGENT_ACCOUNT);
+  assert.equal(
+    calls[3].data,
+    accountIface.encodeFunctionData("setEscrowOperator", [OLD, false])
+  );
+  assert.equal(calls[4].to, TREASURY_POLICY);
 });
 
 test("setServiceOperator(0xb8fd…, true) encodes to the same calldata used by Apps recipe", () => {
