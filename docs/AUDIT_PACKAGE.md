@@ -43,6 +43,42 @@ Record the freeze commit, tag, generated evidence artifact, and any deployed
 contract addresses in the audit issue or engagement brief. Do not ask the
 auditor to review a moving target.
 
+## Pre-Audit Review & Static Baseline
+
+An internal multi-agent security pass on 2026-06-25 found 8 findings (1 Critical, 2 High,
+3 Medium, 2 Low). **All contract findings are remediated in code** (PRs #688–#695) but are
+**not yet deployed** — the live testnet still runs the pre-fix contracts. These fixes must
+land in the frozen audit artifact and be **independently verified by this engagement**; they
+are not a substitute for it. The full finding table and disposition is in
+[`docs/LAUNCH_CRITICAL_PATH.md`](./LAUNCH_CRITICAL_PATH.md).
+
+Remediated — please **verify, do not assume** (this is fresh, unaudited code and new attack
+surface):
+
+- **Critical** — `AgentAccountCore.sendToAgentFor` now requires a per-user **EIP-712**
+  authorization (`from` signature + `nonce`/`deadline` replay guard). It was previously gated
+  only by `onlyOperator`, so a compromised backend/KMS service-operator could move any user's
+  liquid balance. (#688)
+- **High** — transfer paths now enforce withdrawable = `liquid − debtOutstanding` via
+  `_requireWithdrawable`; debt-backed credit was externally withdrawable through
+  `_sendToAgent` / async-strategy paths. (#688)
+- **Medium** — recurring-template cancellation/refund path (#689); the onboarding stake/fee
+  waiver is gated to owner-flagged `onboardingWaiverEligibleJobs` only (#690).
+- **Low** — `_refreshStrategyAllocated` unbounded loop replaced by touched-only
+  `_syncStrategyAllocation` (#691); external-schema signatures moved to an EIP-712 domain with
+  `chainId` + `address(this)` (#692 — low-s malleability not separately enforced).
+- **Staged** — XCM `finalizeRequest` remains operator-oracle; the deploy preflight now **fails**
+  when `PROFILE=mainnet` with the vDOT adapter enabled (#693). Off-chain dependency advisories
+  cleared (#686, #694, #695); residual is upstream-blocked inside `ponder@0.16.6` (indexer
+  only, no contract impact).
+
+**Static-analysis baseline (Slither 0.11.4, 2026-06-25):** 0 high · 26 medium · 18 low ·
+14 info/optimization across the in-scope contracts. The mediums are standard categories
+(`reentrancy-benign`/`-events` behind `nonReentrant`, `block-timestamp` for deadlines,
+`missing-zero-address-validation`) — no critical static red flags. Static analysis does **not**
+cover logic/economic bugs: the Critical above was invisible to it. Reproduce with
+`pip install slither-analyzer && slither .` from the repo root.
+
 ## Audit Outcomes Required
 
 The external audit is complete only after all of the following are true:
