@@ -124,7 +124,10 @@ export async function runWorkerCanary({
     assertTestnet({ chainId, profile: config.profile });
 
     // ── operator readiness: capabilities + settlement, BEFORE creating a job
-    await stage("operatorReadiness", () => assertOperatorReady(operatorPlatform));
+    await stage("operatorReadiness", () => assertOperatorReady(operatorPlatform, {
+      rewardRaw: config.rewardRaw,
+      rewardAssetSymbol: DEFAULT_ESCROW_ASSET.symbol
+    }));
 
     // ── worker identity: a fresh, roleless wallet — NOT the admin JWT ─────
     const wallet = injectedWallet ?? (await resolveWorkerWallet({ env, config, readSecretImpl, log }));
@@ -386,6 +389,15 @@ export async function runClaimStage({ authedWorker, jobId, workerAddress, idempo
     claim = await authedWorker.claimJob(jobId, idempotencyKey);
   } catch (error) {
     if (error?.status === 409) {
+      if (isEnsureJobRevert(error)) {
+        throw new Error(
+          `Claim stage FAILED during canary job funding/setup: /jobs/claim returned HTTP 409 (${describeApiError(error)}). ` +
+            "The disposable canary job is created in the API first and funded on-chain by ensureJob during claim; " +
+            "ensureJob reverted before claimJobFor could run. Check /admin/status for signerFunding, " +
+            "EscrowCore.accounts() -> AgentAccountCore binding, service-operator grants, and asset approval. " +
+            `mechanism=${mechanism}; totalClaimLock=${lockRaw}.`
+        );
+      }
       throw new Error(
         `Claim stage FAILED: /jobs/claim returned HTTP 409 (${describeApiError(error)}). ` +
           "This is the claim-funding 409 class: the brokered on-chain claimJobFor could not lock the claim " +
@@ -595,7 +607,7 @@ export function assertOperatorTokenFreshness({ operatorAuth, minDays, now }) {
 }
 
 // ── operator readiness ───────────────────────────────────────────────────────
-async function assertOperatorReady(operatorPlatform) {
+export async function assertOperatorReady(operatorPlatform, { rewardRaw = undefined, rewardAssetSymbol = DEFAULT_ESCROW_ASSET.symbol } = {}) {
   const authSession = await operatorPlatform.getAuthSession();
   const capabilities = Array.isArray(authSession?.capabilities) ? authSession.capabilities : [];
   const missing = REQUIRED_OPERATOR_CAPABILITIES.filter((cap) => !capabilities.includes(cap));
@@ -609,7 +621,7 @@ async function assertOperatorReady(operatorPlatform) {
 
   const status = await operatorPlatform.getAdminStatus();
   const policy = status?.maintenance?.policy;
-  if (!policy?.enabled || policy.settlementReady !== true) {
+  if (!policy?.enabled) {
     throw new Error(
       "Operator readiness FAILED: on-chain settlement is not ready (/admin/status). " +
         `enabled=${String(policy?.enabled)}; settlementReady=${String(policy?.settlementReady)}. ` +
@@ -628,11 +640,51 @@ async function assertOperatorReady(operatorPlatform) {
         "ledger mutations are disabled. Run the EscrowCore multisig wiring recipe before the canary."
     );
   }
+  if (policy.roles?.escrowAgentAccountMatchesConfig === false) {
+    throw new Error(
+      "Operator readiness FAILED: EscrowCore.accounts() does not match the configured AgentAccountCore. " +
+        `escrowCore=${policy.contracts?.escrowCoreAddress ?? "unknown"}; ` +
+        `EscrowCore.accounts=${policy.contracts?.escrowCoreAgentAccountAddress ?? "unknown"}; ` +
+        `configured AgentAccountCore=${policy.contracts?.agentAccountAddress ?? "unknown"}. ` +
+        "The backend may read signer liquidity from one AgentAccountCore while EscrowCore reserves from another, " +
+        "which makes ensureJob revert during canary claim setup."
+    );
+  }
+  const fundingAsset = Array.isArray(policy.signerFunding?.assets)
+    ? policy.signerFunding.assets.find((asset) => asset?.symbol === rewardAssetSymbol)
+    : undefined;
+  if (fundingAsset) {
+    if (fundingAsset.readable !== true) {
+      throw new Error(
+        `Operator readiness FAILED: signer reward-bank position for ${rewardAssetSymbol} is not readable from ` +
+          `AgentAccountCore ${policy.signerFunding?.agentAccountAddress ?? policy.contracts?.agentAccountAddress ?? "unknown"}. ` +
+          "The canary cannot prove the disposable job can be funded."
+      );
+    }
+    const liquidRaw = BigInt(fundingAsset.liquidRaw ?? 0);
+    if (rewardRaw !== undefined && liquidRaw < BigInt(rewardRaw)) {
+      throw new Error(
+        `Operator readiness FAILED: signer reward bank is underfunded for ${rewardAssetSymbol}. ` +
+          `liquid=${liquidRaw} raw (${fundingAsset.liquid ?? "unknown"} ${rewardAssetSymbol}); ` +
+          `required=${rewardRaw} raw (${formatBaseUnits(rewardRaw)} ${rewardAssetSymbol}). ` +
+          "Deposit reward liquidity into AgentAccountCore before running the worker canary."
+      );
+    }
+  }
+  if (policy.settlementReady !== true) {
+    throw new Error(
+      "Operator readiness FAILED: on-chain settlement is not ready (/admin/status). " +
+        `enabled=${String(policy?.enabled)}; settlementReady=${String(policy?.settlementReady)}. ` +
+        "Brokered claim/submit/settle cannot complete."
+    );
+  }
   return {
     capabilities: REQUIRED_OPERATOR_CAPABILITIES,
     settlementReady: true,
     escrowIsServiceOperator: true,
-    escrowIsAgentAccountEscrowOperator: true
+    escrowIsAgentAccountEscrowOperator: true,
+    escrowAgentAccountMatchesConfig: policy.roles?.escrowAgentAccountMatchesConfig,
+    signerFundingChecked: Boolean(fundingAsset)
   };
 }
 
@@ -892,6 +944,12 @@ function describeApiError(error) {
   const message = error?.payload?.message ?? error?.message ?? "";
   const requestId = error?.payload?.requestId ? `; requestId=${error.payload.requestId}` : "";
   return `status=${error?.status ?? "?"}; code=${code || "?"}; message=${message}${requestId}`;
+}
+
+function isEnsureJobRevert(error) {
+  const code = String(error?.payload?.error ?? error?.payload?.code ?? "");
+  const message = String(error?.payload?.message ?? error?.message ?? "");
+  return code === "blockchain_revert" || /ensureJob failed|require\(false\)/iu.test(message);
 }
 
 function round1(value) {
