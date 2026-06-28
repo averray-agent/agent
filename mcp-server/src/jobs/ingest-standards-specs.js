@@ -316,12 +316,14 @@ function isHttpUrl(value) {
 }
 
 function decodeHtml(value) {
+  // Decode &amp; LAST so an already-encoded entity like "&amp;lt;" stays "&lt;"
+  // instead of being double-unescaped to "<" (CodeQL js/double-escaping).
   return String(value)
-    .replace(/&amp;/gu, "&")
     .replace(/&lt;/gu, "<")
     .replace(/&gt;/gu, ">")
     .replace(/&quot;/gu, "\"")
-    .replace(/&#39;/gu, "'");
+    .replace(/&#39;/gu, "'")
+    .replace(/&amp;/gu, "&");
 }
 
 function text(value) {
