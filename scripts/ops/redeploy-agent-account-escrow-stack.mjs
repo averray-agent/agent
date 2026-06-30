@@ -55,8 +55,6 @@ const TREASURY_POLICY_ABI = [
 const AGENT_ACCOUNT_READ_ABI = [
   "function domainSeparator() view returns (bytes32)",
   "function escrowOperators(address escrowOperator) view returns (bool)",
-  "function policyServiceOperatorReady() view returns (bool)",
-  "function requirePolicyServiceOperatorReady() view returns (bool)",
   "function positions(address account, address asset) view returns (uint256 liquid,uint256 reserved,uint256 strategyAllocated,uint256 collateralLocked,uint256 jobStakeLocked,uint256 debtOutstanding)"
 ];
 
@@ -68,8 +66,6 @@ const REQUIRED_AGENT_ACCOUNT_FNS = [
   "escrowOperators",
   "setEscrowOperator",
   "domainSeparator",
-  "policyServiceOperatorReady",
-  "requirePolicyServiceOperatorReady",
   "sendToAgentFor",
   "hashSendToAgentAuthorization",
   "sendToAgentAuthorizationUsed",
@@ -455,7 +451,6 @@ async function runFinalize({ args, deploymentsPath, manifest, provider }) {
     escrowAccounts,
     newAgentIsOperator,
     newEscrowIsOperator,
-    newPolicyServiceOperatorReady,
     oldEscrowIsOperator,
     newAacEscrowOperator,
     oldAacOldEscrowOperator,
@@ -468,7 +463,6 @@ async function runFinalize({ args, deploymentsPath, manifest, provider }) {
     newEscrow.accounts(),
     treasury.serviceOperators(args.newAgentAccount),
     treasury.serviceOperators(args.newEscrow),
-    newAccount.policyServiceOperatorReady(),
     treasury.serviceOperators(oldEscrow),
     newAccount.escrowOperators(args.newEscrow),
     oldAccount.escrowOperators(oldEscrow),
@@ -487,7 +481,6 @@ async function runFinalize({ args, deploymentsPath, manifest, provider }) {
   console.log(`  AgentAccountCore.domainSeparator():     ${domainSeparator}`);
   console.log(`  EscrowCore.accounts():                  ${escrowAccounts}`);
   console.log(`  serviceOperators[new AAC]:              ${newAgentIsOperator}`);
-  console.log(`  newAAC.policyServiceOperatorReady():    ${newPolicyServiceOperatorReady}`);
   console.log(`  serviceOperators[new Escrow]:           ${newEscrowIsOperator}`);
   console.log(`  newAAC.escrowOperators[new Escrow]:     ${newAacEscrowOperator}`);
   console.log(`  serviceOperators[signer]:               ${signerIsOperator}`);
@@ -501,7 +494,6 @@ async function runFinalize({ args, deploymentsPath, manifest, provider }) {
     throw new Error(`EscrowCore.accounts()=${escrowAccounts} does not match new AgentAccountCore ${args.newAgentAccount}.`);
   }
   if (!newAgentIsOperator) throw new Error("TreasuryPolicy.serviceOperators(new AgentAccountCore) is false.");
-  if (!newPolicyServiceOperatorReady) throw new Error("new AgentAccountCore.policyServiceOperatorReady() is false.");
   if (!newEscrowIsOperator) throw new Error("TreasuryPolicy.serviceOperators(new EscrowCore) is false.");
   if (!newAacEscrowOperator) throw new Error("new AgentAccountCore.escrowOperators(new EscrowCore) is false.");
   if (!signerIsOperator) throw new Error(`TreasuryPolicy.serviceOperators(signer ${signer}) is false.`);
@@ -559,7 +551,6 @@ async function runFinalize({ args, deploymentsPath, manifest, provider }) {
       domainSeparator,
       escrowAccounts,
       newAgentIsOperator,
-      newPolicyServiceOperatorReady,
       newEscrowIsOperator,
       newAacEscrowOperator,
       signerIsOperator,

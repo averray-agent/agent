@@ -65,8 +65,6 @@ test("assertArtifactHasAgentAccountSelectors accepts the current AAC surface", (
         "escrowOperators",
         "setEscrowOperator",
         "domainSeparator",
-        "policyServiceOperatorReady",
-        "requirePolicyServiceOperatorReady",
         "sendToAgentFor",
         "hashSendToAgentAuthorization",
         "sendToAgentAuthorizationUsed",

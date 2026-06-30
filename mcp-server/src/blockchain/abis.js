@@ -4,8 +4,6 @@ export const AGENT_ACCOUNT_ABI = [
   "function positions(address account, address asset) view returns (uint256 liquid, uint256 reserved, uint256 strategyAllocated, uint256 collateralLocked, uint256 jobStakeLocked, uint256 debtOutstanding)",
   "function getBorrowCapacity(address account, address asset) view returns (uint256)",
   "function escrowOperators(address escrowOperator) view returns (bool)",
-  "function policyServiceOperatorReady() view returns (bool)",
-  "function requirePolicyServiceOperatorReady() view returns (bool)",
   "function deposit(address asset, uint256 amount)",
   "function reserveForJob(address account, address asset, uint256 amount)",
   "function reserveForRecurringTemplate(address account, address asset, bytes32 templateId, uint256 amount)",
@@ -102,7 +100,6 @@ export const REPUTATION_SBT_ABI = [
 
 export const TREASURY_POLICY_ABI = [
   "function owner() view returns (address)",
-  "function treasury() view returns (address)",
   "function pauser() view returns (address)",
   "function paused() view returns (bool)",
   "function dailyOutflowCap() view returns (uint256)",
@@ -144,7 +141,7 @@ export const STRATEGY_ADAPTER_ABI = [
 
 export const XCM_WRAPPER_ABI = [
   "function weighMessage(bytes message) view returns ((uint64 refTime, uint64 proofSize))",
-  "function getRequest(bytes32 requestId) view returns (((bytes32 strategyId, uint8 kind, address account, address asset, address recipient, uint256 assets, uint256 shares, uint64 nonce) context, uint8 status, uint256 settledAssets, uint256 settledShares, bytes32 remoteRef, bytes32 failureCode, uint64 createdAt, uint64 updatedAt, uint64 expiresAt))",
+  "function getRequest(bytes32 requestId) view returns (((bytes32 strategyId, uint8 kind, address account, address asset, address recipient, uint256 assets, uint256 shares, uint64 nonce) context, uint8 status, uint256 settledAssets, uint256 settledShares, bytes32 remoteRef, bytes32 failureCode, uint64 createdAt, uint64 updatedAt))",
   "function finalizeRequest(bytes32 requestId, uint8 status, uint256 settledAssets, uint256 settledShares, bytes32 remoteRef, bytes32 failureCode)",
   "event RequestQueued(bytes32 indexed requestId, bytes32 indexed strategyId, uint8 indexed kind, address account, address asset, address recipient, uint256 assets, uint256 shares, uint64 nonce)",
   "event RequestPayloadStored(bytes32 indexed requestId, bytes32 destinationHash, bytes32 messageHash, uint64 refTime, uint64 proofSize)",
