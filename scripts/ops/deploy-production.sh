@@ -47,6 +47,9 @@ PRODUCT_PROOF_NODE_IMAGE=${PRODUCT_PROOF_NODE_IMAGE:-node:22-bookworm-slim}
 INDEXER_DATABASE_SCHEMA=${INDEXER_DATABASE_SCHEMA:-}
 INDEXER_FRESH_SCHEMA=${INDEXER_FRESH_SCHEMA:-0}
 INDEXER_ENV_FILE=${INDEXER_ENV_FILE:-/run/agent-stack/indexer.env}
+DEPLOY_CONTRACT_COMPAT_FREEZE=${DEPLOY_CONTRACT_COMPAT_FREEZE:-1}
+DEPLOY_ALLOW_CONTRACT_SURFACE_DRIFT=${DEPLOY_ALLOW_CONTRACT_SURFACE_DRIFT:-0}
+DEPLOY_CONTRACT_COMPAT_PROFILE=${DEPLOY_CONTRACT_COMPAT_PROFILE:-testnet}
 # BACKEND_ENV_FILE: removed in PR 2.6 — backend env now rendered to
 # /run/agent-stack/backend.env by render_runtime_envs (1Password →
 # op inject → /run); /srv/agent-stack/backend.env is no longer written.
@@ -178,6 +181,75 @@ component_changed_matches() {
     return 1
   fi
   git -C "$APP_ROOT" diff --name-only "$base_sha" "$NEW_SHA" | grep -Eq "$pattern"
+}
+
+deploy_range_changed_files() {
+  if [[ "$OLD_SHA" == "$NEW_SHA" ]]; then
+    return 0
+  fi
+  git -C "$APP_ROOT" diff --name-only "$OLD_SHA" "$NEW_SHA"
+}
+
+enforce_contract_compat_freeze() {
+  case "$DEPLOY_CONTRACT_COMPAT_FREEZE" in
+    1|true|yes) ;;
+    0|false|no)
+      echo "D-03 contract compatibility freeze disabled by DEPLOY_CONTRACT_COMPAT_FREEZE=$DEPLOY_CONTRACT_COMPAT_FREEZE"
+      return 0
+      ;;
+    *)
+      echo "Invalid DEPLOY_CONTRACT_COMPAT_FREEZE: $DEPLOY_CONTRACT_COMPAT_FREEZE" >&2
+      exit 1
+      ;;
+  esac
+
+  if [[ "$OLD_SHA" == "$NEW_SHA" ]]; then
+    return 0
+  fi
+
+  local manifest_path="deployments/${DEPLOY_CONTRACT_COMPAT_PROFILE}.json"
+  local changed
+  changed=$(deploy_range_changed_files)
+
+  local surface_changes
+  surface_changes=$(printf '%s\n' "$changed" | grep -E '^(contracts/|mcp-server/src/blockchain/|scripts/ops/redeploy-(agent-account-escrow-stack|escrowcore|escrowcore-wire-multisig)\.mjs|scripts/verify_deployment\.sh)' || true)
+  if [[ -z "$surface_changes" ]]; then
+    return 0
+  fi
+
+  if printf '%s\n' "$changed" | grep -Fxq "$manifest_path"; then
+    echo "D-03 contract compatibility freeze: contract-surface changes are paired with $manifest_path; allowing deploy."
+    return 0
+  fi
+
+  case "$DEPLOY_ALLOW_CONTRACT_SURFACE_DRIFT" in
+    1|true|yes)
+      echo "::warning::D-03 contract compatibility freeze override set; deploying contract-surface/backend changes without a $manifest_path update."
+      printf 'Changed contract-surface files:\n%s\n' "$surface_changes"
+      return 0
+      ;;
+    0|false|no) ;;
+    *)
+      echo "Invalid DEPLOY_ALLOW_CONTRACT_SURFACE_DRIFT: $DEPLOY_ALLOW_CONTRACT_SURFACE_DRIFT" >&2
+      exit 1
+      ;;
+  esac
+
+  {
+    echo "D-03 contract compatibility freeze: refusing production deploy."
+    echo
+    echo "This deploy range changes contract/settlement surface files, but $manifest_path did not change."
+    echo "A normal production deploy updates backend/indexer/app containers; it does not deploy or rewire smart contracts."
+    echo "Deploying this range can put backend ABI/settlement expectations ahead of the live contracts and red the Hosted Worker Canary."
+    echo
+    echo "Changed contract-surface files:"
+    while IFS= read -r file; do
+      [[ -n "$file" ]] && printf '  %s\n' "$file"
+    done <<< "$surface_changes"
+    echo
+    echo "To proceed intentionally, first deploy/rewire contracts and commit the updated $manifest_path, or run a manual dispatch with DEPLOY_ALLOW_CONTRACT_SURFACE_DRIFT=1 after an operator records the compatibility rationale."
+  } >&2
+  exit 1
 }
 
 mark_component_deployed() {
@@ -837,6 +909,7 @@ deploy() {
     echo "No new commits. Running smoke check only."
   fi
 
+  enforce_contract_compat_freeze
   initialize_component_state
 
   # Phase 2 PR 2.5: render /run/agent-stack/*.env from 1Password.

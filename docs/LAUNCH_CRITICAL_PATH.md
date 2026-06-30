@@ -40,6 +40,20 @@ not ship without it. Everything else parallelizes around it; the on-chain deploy
 4. `audit-launch-readiness.mjs` green → render mainnet env → 3 closing proofs (env-secrets, usdc-config, smoke <24h).
 5. Fund the signer with real low-value USDC → **≥3 live** claim→submit→verify→settle loops → **LIVE**.
 
+### D-03 — deploy/backend contract-surface freeze
+
+Normal production deploys update containers only; they do **not** deploy or rewire smart
+contracts. The 2026-06-30 Hosted Worker Canary regression showed why this matters:
+backend/ABI settlement code can roll forward while testnet contracts remain pinned, leaving
+the brokered claim/submit/settle path red even though `/health` is green.
+
+`deploy-production.sh` now fails closed when a deploy range changes contract/settlement
+surface files (`contracts/`, `mcp-server/src/blockchain/`, or escrow redeploy tooling) without
+also changing the active deployment manifest (`deployments/testnet.json` by default). To
+proceed intentionally, first deploy/rewire contracts and commit the updated manifest, or use
+the manual workflow-dispatch override `allow_contract_surface_drift=1` only after recording an
+operator compatibility rationale. Automatic CI-triggered deploys keep the override disabled.
+
 ---
 
 ## MAIN-006 — `sendToAgentFor` operator-relay (double-debit **+ Critical operator-drain**) · owner: Codex
