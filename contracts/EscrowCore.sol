@@ -323,7 +323,6 @@ contract EscrowCore is ReentrancyGuard {
         ExternalSchemaRegistration memory externalSchema
     ) internal {
         if (_jobs[jobId].state != JobState.None) revert InvalidState();
-        if (reward == 0) revert InvalidState();
         _validateAndStoreExternalSchema(jobId, externalSchema);
         _jobs[jobId] = JobEscrow({
             poster: msg.sender,
@@ -364,7 +363,6 @@ contract EscrowCore is ReentrancyGuard {
     {
         if (_jobs[params.jobId].state != JobState.None) revert InvalidState();
         if (params.poster == address(0)) revert Unauthorized();
-        if (params.reward == 0) revert InvalidState();
         _validateAndStoreExternalSchema(params.jobId, _externalSchemaFromRecurring(params));
         JobEscrow storage job = _jobs[params.jobId];
         job.poster = params.poster;
@@ -405,7 +403,6 @@ contract EscrowCore is ReentrancyGuard {
             milestoneAmounts[jobId].push(milestones[i]);
             reward += milestones[i];
         }
-        if (reward == 0) revert InvalidState();
         _jobs[jobId] = JobEscrow({
             poster: msg.sender,
             worker: address(0),
@@ -528,7 +525,6 @@ contract EscrowCore is ReentrancyGuard {
             accounts.slashClaimFee(job.worker, job.asset, job.claimFee, address(0));
         }
 
-        _decrementWorkerClaimCount(job.worker);
         job.worker = address(0);
         job.claimExpiry = 0;
         job.claimStake = 0;
@@ -874,7 +870,6 @@ contract EscrowCore is ReentrancyGuard {
             return;
         }
 
-        _decrementWorkerClaimCount(job.worker);
         if (job.claimStake > 0) {
             accounts.slashJobStake(job.worker, job.asset, job.claimStake, job.poster);
             job.claimStake = 0;
@@ -897,7 +892,6 @@ contract EscrowCore is ReentrancyGuard {
             return;
         }
 
-        _decrementWorkerClaimCount(job.worker);
         if (job.claimStake > 0) {
             accounts.slashJobStake(job.worker, job.asset, job.claimStake, job.poster);
             job.claimStake = 0;
@@ -913,16 +907,5 @@ contract EscrowCore is ReentrancyGuard {
         reputation.slashReputation(
             job.worker, policy.disputeLossSkillPenalty(), policy.disputeLossReliabilityPenalty(), 0, REASON_DISPUTE_LOST
         );
-    }
-
-    function _decrementWorkerClaimCount(address worker) internal {
-        if (worker == address(0)) {
-            return;
-        }
-
-        uint256 claimCount = workerClaimCount[worker];
-        if (claimCount > 0) {
-            workerClaimCount[worker] = claimCount - 1;
-        }
     }
 }
