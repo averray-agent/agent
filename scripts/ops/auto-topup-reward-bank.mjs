@@ -122,10 +122,12 @@ async function main() {
   const deployments = JSON.parse(
     await readFile(resolve(repoRoot, "deployments", `${args.profile}.json`), "utf8"),
   );
-  const aac = deployments.agentAccountCore || deployments.AgentAccountCore;
-  const usdcAddress = deployments.token || USDC_PRECOMPILE;
+  // deployments/<profile>.json nests addresses under `contracts`; roles are top-level.
+  const contracts = deployments.contracts || deployments;
+  const aac = contracts.agentAccountCore || contracts.AgentAccountCore;
+  const usdcAddress = contracts.token || USDC_PRECOMPILE;
   const signer = args.signer || process.env.SIGNER_ADDRESS || deployments.verifier;
-  const rpc = args.rpc || process.env.RPC_URL || DEFAULT_RPC;
+  const rpc = args.rpc || process.env.RPC_URL || deployments.rpcUrl || DEFAULT_RPC;
   if (!aac || !signer) throw new Error("could not resolve agentAccountCore + signer from deployments/env");
 
   const lowWaterMark = args.lowWaterMark != null ? BigInt(args.lowWaterMark) : DEFAULT_LOW_WATER;
