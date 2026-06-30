@@ -529,6 +529,7 @@ contract AgentPlatformTest is Test {
 
         uint256 posterBalanceBefore = dot.balanceOf(poster);
         uint256 verifierBalanceBefore = dot.balanceOf(verifier);
+        uint256 treasuryBalanceBefore = dot.balanceOf(policy.treasury());
 
         vm.prank(worker);
         escrow.claimJob(jobId);
@@ -550,6 +551,8 @@ contract AgentPlatformTest is Test {
         assertEq(workerJobStake, 0);
         assertEq(dot.balanceOf(poster), posterBalanceBefore + 1.25 ether);
         assertEq(dot.balanceOf(verifier), verifierBalanceBefore + 0.7 ether);
+        assertEq(dot.balanceOf(policy.treasury()), treasuryBalanceBefore + 1.55 ether);
+        assertEq(escrow.workerClaimCount(worker), 0);
     }
 
     function testBorrowCapacityAndRepayment() public {
@@ -684,6 +687,7 @@ contract AgentPlatformTest is Test {
         assertEq(workerLiquid, WORKER_DEPOSIT - 2.5 ether);
         assertEq(workerJobStake, 0);
         assertEq(dot.balanceOf(poster), posterBalanceBefore + 1.25 ether);
+        assertEq(escrow.workerClaimCount(worker), 0);
     }
 
     function testExpiredClaimCannotSubmitWork() public {
@@ -810,6 +814,7 @@ contract AgentPlatformTest is Test {
         assertEq(dot.balanceOf(poster), posterBalanceBefore + 1.25 ether);
         assertEq(skillAfter, 90);
         assertEq(reliabilityAfter, 80);
+        assertEq(escrow.workerClaimCount(worker), 0);
     }
 
     function testRejectedJobCannotBeFinalizedAfterDisputeOpenedAndDoesNotSlashEarly() public {
@@ -897,6 +902,7 @@ contract AgentPlatformTest is Test {
         assertEq(dot.balanceOf(poster), posterBalanceBefore + 1.25 ether);
         assertEq(skillAfter, 70);
         assertEq(reliabilityAfter, 50);
+        assertEq(escrow.workerClaimCount(worker), 0);
     }
 
     function testAutoResolveOnTimeoutRejectsBeforeArbitratorSla() public {

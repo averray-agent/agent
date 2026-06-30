@@ -183,6 +183,11 @@ contract AgentAccountCore is ReentrancyGuard {
         _;
     }
 
+    modifier requiresPolicyServiceOperator() {
+        _requirePolicyServiceOperator();
+        _;
+    }
+
     function _onlyOwnerOrOperator(address account) internal view {
         if (msg.sender != account && !policy.serviceOperators(msg.sender)) revert Unauthorized();
     }
@@ -205,6 +210,19 @@ contract AgentAccountCore is ReentrancyGuard {
 
     function _onlySupportedAsset(address asset) internal view {
         if (!policy.approvedAssets(asset)) revert UnsupportedAsset();
+    }
+
+    function policyServiceOperatorReady() external view returns (bool) {
+        return policy.serviceOperators(address(this));
+    }
+
+    function requirePolicyServiceOperatorReady() external view returns (bool) {
+        _requirePolicyServiceOperator();
+        return true;
+    }
+
+    function _requirePolicyServiceOperator() internal view {
+        if (!policy.serviceOperators(address(this))) revert Unauthorized();
     }
 
     function setEscrowOperator(address escrowOperator, bool approved) external onlyPolicyOwner {
@@ -305,6 +323,7 @@ contract AgentAccountCore is ReentrancyGuard {
         external
         nonReentrant
         whenNotPaused
+        requiresPolicyServiceOperator
         onlyEscrow
         onlySupportedAsset(asset)
     {
@@ -582,6 +601,7 @@ contract AgentAccountCore is ReentrancyGuard {
         nonReentrant
         onlyEscrow
         whenNotPaused
+        requiresPolicyServiceOperator
         onlySupportedAsset(asset)
     {
         if (amount == 0) {
@@ -600,6 +620,7 @@ contract AgentAccountCore is ReentrancyGuard {
         }
         if (treasuryAmount > 0) {
             policy.recordOutflow(treasuryAmount);
+            SafeTransfer.safeTransfer(asset, policy.treasury(), treasuryAmount);
         }
 
         emit JobStakeSlashed(account, asset, amount, posterAmount, treasuryAmount);
@@ -610,6 +631,7 @@ contract AgentAccountCore is ReentrancyGuard {
         nonReentrant
         onlyEscrow
         whenNotPaused
+        requiresPolicyServiceOperator
         onlySupportedAsset(asset)
     {
         if (amount == 0) {
@@ -628,6 +650,7 @@ contract AgentAccountCore is ReentrancyGuard {
         }
         if (treasuryAmount > 0) {
             policy.recordOutflow(treasuryAmount);
+            SafeTransfer.safeTransfer(asset, policy.treasury(), treasuryAmount);
         }
 
         emit ClaimFeeSlashed(account, asset, amount, verifierRecipient, verifierAmount, treasuryAmount);
@@ -643,11 +666,12 @@ contract AgentAccountCore is ReentrancyGuard {
      * bucket and can `withdraw` it to their external wallet whenever
      * they want; nothing here touches external tokens or approvals.
      *
-     * Because there's no external call, no ReentrancyGuard is needed —
-     * every state update is bounded by a single uint256 arithmetic pair.
+     * Even though this is internal bookkeeping only, the public entrypoint
+     * is guarded consistently with the rest of the mutation surface.
      */
     function sendToAgent(address recipient, address asset, uint256 amount)
         external
+        nonReentrant
         whenNotPaused
         onlySupportedAsset(asset)
     {
@@ -669,7 +693,7 @@ contract AgentAccountCore is ReentrancyGuard {
         uint256 nonce,
         uint256 deadline,
         bytes calldata signature
-    ) external whenNotPaused onlyOperator onlySupportedAsset(asset) {
+    ) external nonReentrant whenNotPaused onlyOperator onlySupportedAsset(asset) {
         _useSendToAgentAuthorization(from, recipient, asset, amount, nonce, deadline, signature);
         _sendToAgent(from, recipient, asset, amount);
     }

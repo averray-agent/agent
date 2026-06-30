@@ -33,9 +33,11 @@ contract XcmWrapper is IXcmWrapper, ReentrancyGuard {
     bytes1 internal constant XCM_INSTRUCTION_PAY_FEES = 0x13;
     bytes1 internal constant XCM_SET_TOPIC_INSTRUCTION = 0x2c;
     uint256 internal constant XCM_MIN_VERSIONED_SET_TOPIC_LENGTH = 35;
+    uint64 public constant DEFAULT_REQUEST_TTL = 7 days;
 
     TreasuryPolicy public immutable policy;
     address public immutable override xcmPrecompile;
+    uint64 public requestTtl;
 
     mapping(bytes32 => RequestRecord) internal requests;
     mapping(bytes32 => bytes32) public requestDestinationHash;
@@ -49,17 +51,26 @@ contract XcmWrapper is IXcmWrapper, ReentrancyGuard {
     error InvalidTransition();
     error InvalidSetTopic();
     error InvalidWeight();
+    error RequestExpired();
     error XcmPrecompileUnavailable();
     error PayloadMismatch();
     error XcmDispatchFailed(bytes reason);
 
+    event RequestTtlUpdated(uint64 ttl);
+
     constructor(TreasuryPolicy policy_, address xcmPrecompile_) {
         policy = policy_;
         xcmPrecompile = xcmPrecompile_ == address(0) ? DEFAULT_XCM_PRECOMPILE : xcmPrecompile_;
+        requestTtl = DEFAULT_REQUEST_TTL;
     }
 
     modifier onlyOwnerOrOperator() {
         if (msg.sender != policy.owner() && !policy.serviceOperators(msg.sender)) revert Unauthorized();
+        _;
+    }
+
+    modifier onlyOwner() {
+        if (msg.sender != policy.owner()) revert Unauthorized();
         _;
     }
 
@@ -91,6 +102,12 @@ contract XcmWrapper is IXcmWrapper, ReentrancyGuard {
         return quoted;
     }
 
+    function setRequestTtl(uint64 ttl) external onlyOwner {
+        if (ttl == 0) revert InvalidRequest();
+        requestTtl = ttl;
+        emit RequestTtlUpdated(ttl);
+    }
+
     function queueRequest(
         RequestContext calldata context,
         bytes calldata destination,
@@ -116,6 +133,8 @@ contract XcmWrapper is IXcmWrapper, ReentrancyGuard {
 
         _validateXcmPrecompileAvailable(message);
 
+        uint64 createdAt = uint64(block.timestamp);
+        if (type(uint64).max - createdAt < requestTtl) revert InvalidRequest();
         requests[requestId] = RequestRecord({
             context: RequestContext({
                 strategyId: context.strategyId,
@@ -132,8 +151,9 @@ contract XcmWrapper is IXcmWrapper, ReentrancyGuard {
             settledShares: 0,
             remoteRef: bytes32(0),
             failureCode: bytes32(0),
-            createdAt: uint64(block.timestamp),
-            updatedAt: uint64(block.timestamp)
+            createdAt: createdAt,
+            updatedAt: createdAt,
+            expiresAt: createdAt + requestTtl
         });
         requestDestinationHash[requestId] = destinationHash;
         requestMessageHash[requestId] = messageHash;
@@ -158,6 +178,7 @@ contract XcmWrapper is IXcmWrapper, ReentrancyGuard {
         if (record.context.account == address(0)) revert UnknownRequest();
 
         if (record.status == RequestStatus.Pending) {
+            if (block.timestamp > record.expiresAt && status == RequestStatus.Succeeded) revert RequestExpired();
             record.status = status;
             record.settledAssets = settledAssets;
             record.settledShares = settledShares;

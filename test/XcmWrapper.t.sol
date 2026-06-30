@@ -82,6 +82,7 @@ contract XcmWrapperTest is Test {
         assertEq(record.context.assets, 25 ether);
         assertEq(record.context.shares, 0);
         assertEq(record.context.nonce, 1);
+        assertEq(record.expiresAt, record.createdAt + wrapper.requestTtl());
         require(wrapper.requestDestinationHash(requestId) == keccak256(hex"0102"), "WRONG_DEST_HASH");
         require(wrapper.requestMessageHash(requestId) == keccak256(message), "WRONG_MESSAGE_HASH");
         assertEq(precompile.sendCount(), 1);
@@ -294,6 +295,41 @@ contract XcmWrapperTest is Test {
         assertEq(record.settledAssets, 25 ether);
         assertEq(record.settledShares, 23 ether);
         require(record.remoteRef == keccak256("remote-ref"), "WRONG_REMOTE_REF");
+    }
+
+    function testFinalizeSuccessfulRequestRejectsExpiredPendingRequest() public {
+        wrapper.setRequestTtl(1 hours);
+        IXcmWrapper.RequestContext memory context = _context(25 ether, 0, 1);
+        bytes memory message = _depositMessage(wrapper.previewRequestId(context));
+
+        vm.prank(operator);
+        bytes32 requestId =
+            wrapper.queueRequest(context, hex"0102", message, IXcmWrapper.Weight({refTime: 1, proofSize: 2}));
+
+        vm.warp(block.timestamp + 1 hours + 1);
+        vm.prank(operator);
+        (bool ok, bytes memory data) = address(wrapper)
+            .call(
+                abi.encodeCall(
+                    wrapper.finalizeRequest,
+                    (
+                        requestId,
+                        IXcmWrapper.RequestStatus.Succeeded,
+                        25 ether,
+                        23 ether,
+                        keccak256("remote-ref"),
+                        bytes32(0)
+                    )
+                )
+            );
+        _assertCustomError(ok, data, XcmWrapper.RequestExpired.selector);
+
+        vm.prank(operator);
+        wrapper.finalizeRequest(requestId, IXcmWrapper.RequestStatus.Failed, 0, 0, bytes32(0), bytes32("EXPIRED"));
+
+        IXcmWrapper.RequestRecord memory record = wrapper.getRequest(requestId);
+        assertEq(uint256(record.status), uint256(IXcmWrapper.RequestStatus.Failed));
+        require(record.failureCode == bytes32("EXPIRED"), "WRONG_FAILURE_CODE");
     }
 
     function testFinalizeIsIdempotentForRepeatedSameSettlement() public {

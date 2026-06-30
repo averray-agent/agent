@@ -1,8 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-contract TreasuryPolicy {
+import {ReentrancyGuard} from "./lib/ReentrancyGuard.sol";
+
+contract TreasuryPolicy is ReentrancyGuard {
+    uint256 public constant DEFAULT_DAILY_OUTFLOW_CAP = 1_000_000_000;
+    uint256 public constant MAX_MINIMUM_COLLATERAL_RATIO_BPS = 50_000;
+
     address public owner;
+    address public treasury;
     /// @dev Separate hot-key role authorised to flip the pause bit without
     ///      requiring owner (multisig) signatures. Intentionally scoped to
     ///      exactly one capability — `setPaused` — so a compromised pauser
@@ -42,6 +48,7 @@ contract TreasuryPolicy {
     uint256 public outflowToday;
 
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+    event TreasuryUpdated(address indexed previousTreasury, address indexed newTreasury);
     event PauserUpdated(address indexed previousPauser, address indexed newPauser);
     event PauseUpdated(bool paused);
     event AssetApprovalUpdated(address indexed asset, bool approved);
@@ -70,7 +77,8 @@ contract TreasuryPolicy {
 
     constructor() {
         owner = msg.sender;
-        dailyOutflowCap = type(uint256).max;
+        treasury = msg.sender;
+        dailyOutflowCap = DEFAULT_DAILY_OUTFLOW_CAP;
         perAccountBorrowCap = type(uint256).max;
         minimumCollateralRatioBps = 15_000;
         defaultClaimStakeBps = 500;
@@ -102,6 +110,12 @@ contract TreasuryPolicy {
         require(newOwner != address(0), "ZERO_ADDRESS");
         emit OwnershipTransferred(owner, newOwner);
         owner = newOwner;
+    }
+
+    function setTreasury(address newTreasury) external onlyOwner {
+        require(newTreasury != address(0), "ZERO_ADDRESS");
+        emit TreasuryUpdated(treasury, newTreasury);
+        treasury = newTreasury;
     }
 
     /// @notice Rotate the hot-key pauser. Passing address(0) disables pause
@@ -199,6 +213,7 @@ contract TreasuryPolicy {
 
     function setMinimumCollateralRatioBps(uint256 ratioBps) external onlyOwner {
         require(ratioBps >= 10_000, "LOW_RATIO");
+        require(ratioBps <= MAX_MINIMUM_COLLATERAL_RATIO_BPS, "HIGH_RATIO");
         minimumCollateralRatioBps = ratioBps;
         emit MinimumCollateralRatioUpdated(ratioBps);
     }
@@ -251,7 +266,7 @@ contract TreasuryPolicy {
         emit DisputeLossReliabilityPenaltyUpdated(penalty);
     }
 
-    function recordOutflow(uint256 amount) external whenNotPaused {
+    function recordOutflow(uint256 amount) external nonReentrant whenNotPaused {
         if (!serviceOperators[msg.sender]) revert Unauthorized();
         uint256 dayNumber = block.timestamp / 1 days;
         if (dayNumber != currentDay) {

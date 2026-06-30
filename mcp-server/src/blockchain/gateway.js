@@ -1419,7 +1419,9 @@ export class BlockchainGateway {
         createdAt: this.toSafeIntegerOrRaw(record.createdAt, "createdAt"),
         createdAtRaw: this.toRawString(record.createdAt),
         updatedAt: this.toSafeIntegerOrRaw(record.updatedAt, "updatedAt"),
-        updatedAtRaw: this.toRawString(record.updatedAt)
+        updatedAtRaw: this.toRawString(record.updatedAt),
+        expiresAt: this.toSafeIntegerOrRaw(record.expiresAt, "expiresAt"),
+        expiresAtRaw: this.toRawString(record.expiresAt)
       };
     });
   }

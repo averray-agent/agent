@@ -1408,7 +1408,8 @@ test("async XCM request readers return display amounts and raw base-unit fields"
         remoteRef: `0x${"0".repeat(64)}`,
         failureCode: `0x${"0".repeat(64)}`,
         createdAt: 10n,
-        updatedAt: 12n
+        updatedAt: 12n,
+        expiresAt: 610n
       };
     }
   };
@@ -1446,6 +1447,8 @@ test("async XCM request readers return display amounts and raw base-unit fields"
   assert.equal(xcmRequest.createdAtRaw, "10");
   assert.equal(xcmRequest.updatedAt, 12);
   assert.equal(xcmRequest.updatedAtRaw, "12");
+  assert.equal(xcmRequest.expiresAt, 610);
+  assert.equal(xcmRequest.expiresAtRaw, "610");
   assert.equal(xcmRequest.settledAssets, 0.25);
   assert.equal(strategyRequest.requestedAssets, 1.25);
   assert.equal(strategyRequest.requestedAssetsRaw, "1250000");
@@ -1459,6 +1462,7 @@ test("async XCM request reader preserves unsafe uint64 metadata as raw strings",
   const unsafeNonce = BigInt(Number.MAX_SAFE_INTEGER) + 42n;
   const unsafeCreatedAt = BigInt(Number.MAX_SAFE_INTEGER) + 100n;
   const unsafeUpdatedAt = BigInt(Number.MAX_SAFE_INTEGER) + 101n;
+  const unsafeExpiresAt = BigInt(Number.MAX_SAFE_INTEGER) + 102n;
   gateway.xcmWrapperContract = {
     async getRequest(id) {
       assert.equal(id, requestId);
@@ -1479,7 +1483,8 @@ test("async XCM request reader preserves unsafe uint64 metadata as raw strings",
         remoteRef: `0x${"0".repeat(64)}`,
         failureCode: `0x${"0".repeat(64)}`,
         createdAt: unsafeCreatedAt,
-        updatedAt: unsafeUpdatedAt
+        updatedAt: unsafeUpdatedAt,
+        expiresAt: unsafeExpiresAt
       };
     }
   };
@@ -1492,6 +1497,8 @@ test("async XCM request reader preserves unsafe uint64 metadata as raw strings",
   assert.equal(xcmRequest.createdAtRaw, unsafeCreatedAt.toString());
   assert.equal(xcmRequest.updatedAt, unsafeUpdatedAt.toString());
   assert.equal(xcmRequest.updatedAtRaw, unsafeUpdatedAt.toString());
+  assert.equal(xcmRequest.expiresAt, unsafeExpiresAt.toString());
+  assert.equal(xcmRequest.expiresAtRaw, unsafeExpiresAt.toString());
 });
 
 test("finalizeXcmRequest rejects successful strategy withdrawals with zero settled assets before tx", async () => {
@@ -1590,7 +1597,8 @@ test("finalizeXcmRequest preserves exact uint256 settlement amounts", async () =
         remoteRef: `0x${"0".repeat(64)}`,
         failureCode: `0x${"0".repeat(64)}`,
         createdAt: 10n,
-        updatedAt: 12n
+        updatedAt: 12n,
+        expiresAt: 610n
       };
     }
   };
@@ -1659,7 +1667,8 @@ test("finalizeXcmRequest skips matching already-settled strategy requests", asyn
         remoteRef: `0x${"0".repeat(64)}`,
         failureCode: `0x${"0".repeat(64)}`,
         createdAt: 10n,
-        updatedAt: 12n
+        updatedAt: 12n,
+        expiresAt: 610n
       };
     }
   };
