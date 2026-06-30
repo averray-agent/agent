@@ -65,6 +65,7 @@ interface IXcmWrapper {
         bytes32 failureCode;
         uint64 createdAt;
         uint64 updatedAt;
+        uint64 expiresAt;
     }
 
     event RequestQueued(

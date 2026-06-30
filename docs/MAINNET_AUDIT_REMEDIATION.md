@@ -16,10 +16,10 @@ default-config warning).
 
 | ID | Finding | Location | Owner | Status |
 |----|---------|----------|-------|--------|
-| **C-01** | Daily outflow cap defaults to `type(uint256).max` — no on-chain protection | `TreasuryPolicy.sol` ctor | Codex | ☐ open |
-| **C-02** | Slashed treasury portion recorded but never transferred → funds trapped in AAC | `AgentAccountCore.sol` `slashJobStake`/`slashClaimFee` | Codex | ☐ open |
-| **C-03** | AAC must be `serviceOperator` or **all slashing reverts** (silent deploy dependency) | `TreasuryPolicy.sol` `recordOutflow` | Codex | ☐ open |
-| **C-18** | `workerClaimCount` never decrements → workers permanently penalized for timeouts | `EscrowCore.sol` `handleClaimTimeout` | Codex | ☐ open |
+| **C-01** | Daily outflow cap defaults to `type(uint256).max` — no on-chain protection | `TreasuryPolicy.sol` ctor | Codex | ✅ **this PR** |
+| **C-02** | Slashed treasury portion recorded but never transferred → funds trapped in AAC | `AgentAccountCore.sol` `slashJobStake`/`slashClaimFee` | Codex | ✅ **this PR** |
+| **C-03** | AAC must be `serviceOperator` or **all slashing reverts** (silent deploy dependency) | `TreasuryPolicy.sol` `recordOutflow` | Codex | ✅ **this PR** |
+| **C-18** | `workerClaimCount` never decrements → workers permanently penalized for timeouts | `EscrowCore.sol` `handleClaimTimeout` | Codex | ✅ **this PR** |
 | **B-01** | Auto-verifier triggers settlement in-process, bypassing JWT auth | `submitted-job-auto-verifier.js` | Claude | ✅ **this PR** |
 | **B-11** | Autonomous verdict ingestion has no auth | `verification-ingestion-service.js` | Claude | ✅ **this PR** |
 | **D-01** | Long-lived 1Password service-account tokens (3) | `deploy/secrets-inventory.md` | Pascal/infra | ☐ open |
@@ -28,11 +28,11 @@ default-config warning).
 
 | ID | Finding | Owner | Status |
 |----|---------|-------|--------|
-| C-04 | `sendToAgent` lacks `nonReentrant` (defense-in-depth) | Codex | ☐ |
-| C-05 | `recordOutflow` lacks `nonReentrant` | Codex | ☐ |
-| C-09 | `XcmWrapper` async request ledger has no expiry | Codex | ☐ |
-| C-12 | No upper bound on `minimumCollateralRatioBps` | Codex | ☐ |
-| C-15 | Zero-reward jobs allowed → queue griefing (`require(reward > 0)`) | Codex | ☐ |
+| C-04 | `sendToAgent` lacks `nonReentrant` (defense-in-depth) | Codex | ✅ **this PR** |
+| C-05 | `recordOutflow` lacks `nonReentrant` | Codex | ✅ **this PR** |
+| C-09 | `XcmWrapper` async request ledger has no expiry | Codex | ✅ **this PR** |
+| C-12 | No upper bound on `minimumCollateralRatioBps` | Codex | ✅ **this PR** |
+| C-15 | Zero-reward jobs allowed → queue griefing (`require(reward > 0)`) | Codex | ✅ **this PR** |
 | B-02 | HS256 testnet JWT — add a mainnet `SIGNER_BACKEND=kms` startup assertion | Claude | ☐ |
 | B-03 | Grant cache 15s staleness on revocation (shorten for mutations) | Claude | ☐ |
 | B-04 | X-Forwarded-For spoofing under `TRUST_PROXY` (Caddy must strip it) | Claude/infra | ☐ |
@@ -70,3 +70,14 @@ in-process caller).
 
 Fix the 7 High → (optionally) the 12 Medium → **re-verify the fixes with the same auditor**
 → ship **capped** (guarded-launch profile, `LAUNCH_CRITICAL_PATH.md`). No redesign required.
+
+## 2026-06-30 contract remediation note
+
+Codex remediation branch `codex/mainnet-audit-contract-remediations` covers the four
+contract High findings and the five Codex-owned Medium findings listed above. C-03 is
+implemented as an explicit mutation-boundary/deployment-readiness check rather than a
+constructor-only check because the multisig ceremony grants `TreasuryPolicy.serviceOperators`
+to the freshly deployed AAC after deployment. AAC now exposes
+`policyServiceOperatorReady()` / `requirePolicyServiceOperatorReady()`, slashing and escrow
+settlement paths fail closed before state changes if the grant is missing, and the stack
+redeploy finalizer verifies the readiness selector during the ceremony.
