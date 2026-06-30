@@ -1246,6 +1246,57 @@ test("ensureJob marks explicitly eligible onboarding-waiver jobs on-chain", asyn
   ]);
 });
 
+test("ensureJob skips optional onboarding-waiver write when pinned EscrowCore lacks the selector", async () => {
+  const gateway = gatewayWithDot();
+  const signer = "0x3333333333333333333333333333333333333333";
+  let setCalled = false;
+  gateway.signer = {
+    async getAddress() {
+      return signer;
+    }
+  };
+  gateway.readEscrowJob = async () => ({ state: 0, contractLayout: "rc1" });
+  gateway.accountContract = {
+    async positions(account, asset) {
+      assert.equal(account, signer);
+      assert.equal(asset, DOT_ASSET.address);
+      return { liquid: 10_000_000_000_000_000_000n };
+    }
+  };
+  gateway.createSinglePayoutJobForJob = async () => ({
+    async wait() {
+      return { blockNumber: 9, status: 1 };
+    }
+  });
+  gateway.escrowContract = {
+    async onboardingWaiverEligibleJobs() {
+      const error = new Error("execution reverted (no data present; likely require(false) occurred");
+      error.code = "CALL_EXCEPTION";
+      error.reason = "require(false)";
+      error.shortMessage = "execution reverted (no data present; likely require(false) occurred";
+      error.data = "0x";
+      throw error;
+    },
+    async setOnboardingWaiverEligible() {
+      setCalled = true;
+      throw new Error("setOnboardingWaiverEligible should not be called for legacy bytecode");
+    }
+  };
+  gateway.getJob = async () => ({ id: "legacy-waiver-job", state: 1 });
+
+  await gateway.ensureJob({
+    id: "legacy-waiver-job",
+    rewardAsset: "DOT",
+    rewardAmount: 1,
+    claimTtlSeconds: 3600,
+    verifierMode: "benchmark",
+    category: "coding",
+    onboardingWaiverEligible: true
+  });
+
+  assert.equal(setCalled, false);
+});
+
 test("reserveRecurringTemplateFunding converts display amounts and records the template key", async () => {
   const gateway = gatewayWithDot();
   const calls = [];
