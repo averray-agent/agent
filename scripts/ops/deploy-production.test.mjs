@@ -315,6 +315,16 @@ test("deploy workflow wires the D-03 contract surface override as manual-only", 
     /DEPLOY_ALLOW_CONTRACT_SURFACE_DRIFT:\s*\$\{\{\s*github\.event_name\s*==\s*'workflow_dispatch'\s*&&\s*inputs\.allow_contract_surface_drift\s*\|\|\s*'0'\s*\}\}/u,
     "automatic workflow_run deploys must leave the contract-surface drift override disabled"
   );
+  assert.match(
+    workflow,
+    /printf 'APP_BASIC_AUTH_USER=.*DEPLOY_ALLOW_CONTRACT_SURFACE_DRIFT=%q /u,
+    "the manual override must be forwarded through the SSH remote_env wrapper"
+  );
+  assert.match(
+    workflow,
+    /"\$DEPLOY_ALLOW_CONTRACT_SURFACE_DRIFT"/u,
+    "remote_env must include the evaluated override value"
+  );
 });
 
 async function writeExecutable(path, content) {
