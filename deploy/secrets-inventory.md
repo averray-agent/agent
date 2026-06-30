@@ -51,18 +51,42 @@ set a 90-day expiry. The four tokens are tracked in `docs/SECRETS_CALENDAR.yml`
 (audit-D-01 section) — align each `expires_at` to the real token expiry; CI then
 warns 14 days out and forces the rotation.
 
+**Use the helper — it gets the scope right.** `scripts/ops/rotate-sa-token.mjs`
+does the mechanical middle (set the new token at the *consumed* scope, flag a
+dual-scope shadow) so the steps below can't be fat-fingered:
+
+```
+# dry-run (prints the exact plan + a shadow check; touches nothing):
+node scripts/ops/rotate-sa-token.mjs --token prod-smoke-tests
+# apply (pipe the freshly-minted token; never pass it as an argument):
+pbpaste | node scripts/ops/rotate-sa-token.mjs --token prod-smoke-tests --commit
+```
+
+> **SCOPE — the trap that already bit us.** Every workflow that consumes these
+> tokens pins `environment: production`, and GitHub resolves an **environment**
+> secret OVER a same-named **repo** secret. A `gh secret set …` *without*
+> `--env production` writes a repo-scoped copy that **nothing reads** — the live
+> env-scoped token stays stale and the rotation is silently ineffective. Always
+> set `--env production`; if a same-named repo-scoped copy exists, delete it
+> (`gh secret delete <NAME> --repo averray-agent/agent`) so there's one source of
+> truth. The helper checks and warns about this automatically.
+
 **Rotation procedure** (per token; scope is immutable, so re-mint, don't widen):
 
 1. In the 1Password admin console, mint a **new token on the same service account**
    (90-day expiry). Copy it once.
-2. Update the consumer:
+2. Update the consumer (the helper does this for you):
    - `op-token-prod-ci-deploy` → GH secret `OP_SERVICE_ACCOUNT_TOKEN_PROD_CI`
-     (`gh secret set …`).
-   - `op-token-prod-smoke-tests` → GH secret `OP_SERVICE_ACCOUNT_TOKEN_PROD_SMOKE`.
+     at **`--env production`**.
+   - `op-token-prod-smoke-tests` → GH secret `OP_SERVICE_ACCOUNT_TOKEN_PROD_SMOKE`
+     at **`--env production`**.
+   - `op-token-prod-backend-canary` → GH secret `OP_SERVICE_ACCOUNT_TOKEN_PROD_BACKEND`
+     at **`--env production`**.
    - `op-token-prod-vps-backend` / `op-token-prod-vps-indexer` → the VPS env
-     (`OP_SERVICE_ACCOUNT_TOKEN`), then redeploy that service.
+     (`OP_SERVICE_ACCOUNT_TOKEN`) in `/etc/agent-stack/op-{backend,indexer}.env`,
+     then restart `agent-stack-env-render.service`.
 3. Run the consuming workflow / redeploy once to confirm the new token reads OK.
-4. **Revoke the old token** in 1Password.
+4. **Revoke the old token** in 1Password (after a short grace window).
 5. Update the token's `expires_at` in `docs/SECRETS_CALENDAR.yml` to the new horizon.
 
 **Anomaly monitoring.** Enable the 1Password **Events API** (or review the Activity
