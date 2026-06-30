@@ -22,7 +22,7 @@ default-config warning).
 | **C-18** | `workerClaimCount` never decrements → workers permanently penalized for timeouts | `EscrowCore.sol` `handleClaimTimeout` | Codex | ✅ **this PR** |
 | **B-01** | Auto-verifier triggers settlement in-process, bypassing JWT auth | `submitted-job-auto-verifier.js` | Claude | ✅ **this PR** |
 | **B-11** | Autonomous verdict ingestion has no auth | `verification-ingestion-service.js` | Claude | ✅ **this PR** |
-| **D-01** | Long-lived 1Password service-account tokens (4) | `deploy/secrets-inventory.md`, `docs/SECRETS_CALENDAR.yml`, `scripts/ops/rotate-sa-token.mjs` | Pascal/infra | 🟢 SMOKE + CI both re-rotated at **env scope** + repo shadows **deleted**, scope-verified 2026-06-30 ✓ (env `PROD_CI` 16:11, `PROD_SMOKE` 15:53; 0 repo shadows). Tails: value-verify on next consuming run · revoke old tokens · prune duplicate service accounts (13 SAs, several strays) · Events-API monitoring. |
+| **D-01** | Long-lived 1Password service-account tokens (4) | `deploy/secrets-inventory.md`, `docs/SECRETS_CALENDAR.yml`, `scripts/ops/rotate-sa-token.mjs` | Pascal/infra | 🟢 SMOKE + CI re-rotated at **env scope** + repo shadows **deleted**, scope-verified 2026-06-30 ✓. Old tokens revoked + 7 duplicate service accounts pruned (13→6, one SA per role) 2026-06-30. Tails: confirm keepers survived the prune (next consuming run / canary 1P-load) · Events-API monitoring. |
 
 ## Medium (12) — should fix before mainnet
 
