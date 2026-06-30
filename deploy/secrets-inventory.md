@@ -37,6 +37,39 @@ themselves plus the basic-auth raw password, Roles Anywhere CA private key,
 and other human-only material. This is the firebreak: a leaked runtime token
 cannot read its own replacement, cannot escalate.
 
+### Service-account token rotation (audit D-01)
+
+These tokens are long-lived bearer credentials. Scope is already least-privilege
+(the firebreak above), and CI usage is safe — they're passed only as masked env
+(`OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.* }}`) into the `op` CLI, never echoed or
+written to a log (verified across `.github/workflows/`). The two remaining gaps the
+audit flags are **expiry** and **anomaly monitoring**; close them as follows.
+
+**Set an expiry (one-time, then per rotation).** 1Password service-account tokens
+can carry an expiration; older tokens often have none. When you mint each token,
+set a 90-day expiry. The four tokens are tracked in `docs/SECRETS_CALENDAR.yml`
+(audit-D-01 section) — align each `expires_at` to the real token expiry; CI then
+warns 14 days out and forces the rotation.
+
+**Rotation procedure** (per token; scope is immutable, so re-mint, don't widen):
+
+1. In the 1Password admin console, mint a **new token on the same service account**
+   (90-day expiry). Copy it once.
+2. Update the consumer:
+   - `op-token-prod-ci-deploy` → GH secret `OP_SERVICE_ACCOUNT_TOKEN_PROD_CI`
+     (`gh secret set …`).
+   - `op-token-prod-smoke-tests` → GH secret `OP_SERVICE_ACCOUNT_TOKEN_PROD_SMOKE`.
+   - `op-token-prod-vps-backend` / `op-token-prod-vps-indexer` → the VPS env
+     (`OP_SERVICE_ACCOUNT_TOKEN`), then redeploy that service.
+3. Run the consuming workflow / redeploy once to confirm the new token reads OK.
+4. **Revoke the old token** in 1Password.
+5. Update the token's `expires_at` in `docs/SECRETS_CALENDAR.yml` to the new horizon.
+
+**Anomaly monitoring.** Enable the 1Password **Events API** (or review the Activity
+Log) for service-account usage, and alert on access from unexpected times/IPs or to
+items a token shouldn't touch. The Events API is the real-time/SIEM path; the
+Activity Log is the manual review.
+
 ## Backend runtime secrets
 
 Read by the `op-token-prod-vps-backend` service-account token. Rendered into
