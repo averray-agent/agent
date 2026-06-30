@@ -22,7 +22,7 @@ default-config warning).
 | **C-18** | `workerClaimCount` never decrements → workers permanently penalized for timeouts | `EscrowCore.sol` `handleClaimTimeout` | Codex | ✅ **this PR** |
 | **B-01** | Auto-verifier triggers settlement in-process, bypassing JWT auth | `submitted-job-auto-verifier.js` | Claude | ✅ **this PR** |
 | **B-11** | Autonomous verdict ingestion has no auth | `verification-ingestion-service.js` | Claude | ✅ **this PR** |
-| **D-01** | Long-lived 1Password service-account tokens (3) | `deploy/secrets-inventory.md` | Pascal/infra | ☐ open |
+| **D-01** | Long-lived 1Password service-account tokens (4) | `deploy/secrets-inventory.md`, `docs/SECRETS_CALENDAR.yml`, `scripts/ops/rotate-sa-token.mjs` | Pascal/infra | 🟢 SMOKE + CI re-rotated at **env scope** + repo shadows **deleted**, scope-verified 2026-06-30 ✓. Old tokens revoked + 7 duplicate service accounts pruned (13→6, one SA per role) 2026-06-30. Tails: confirm keepers survived the prune (next consuming run / canary 1P-load) · Events-API monitoring. |
 
 ## Medium (12) — should fix before mainnet
 
@@ -37,7 +37,7 @@ default-config warning).
 | B-03 | Grant cache 15s staleness on revocation (shorten for mutations) | Claude | ☐ |
 | B-04 | X-Forwarded-For spoofing under `TRUST_PROXY` (Caddy must strip it) | Claude/infra | ☐ |
 | D-02 | Chain-ID mismatch risk — startup check configured vs RPC-reported | Claude/infra | ☐ |
-| D-03 | CI auto-deploy without manual gate — verify GitHub prod-env required reviewers | Pascal/infra | ☐ |
+| D-03 | CI auto-deploy without manual gate | Pascal/infra → Codex | 🟢 #706 (ff670f4): contract-surface drift now **fails closed** on auto-deploys (the 2026-06-30 canary regression's root cause); override is dispatch-only `allow_contract_surface_drift=1`. A broad GitHub "required reviewers" human gate remains a separate optional hardening. |
 | E-17 | **JS `Number` for off-chain USDC math** (systemic) → BigInt | Claude | ☐ |
 
 ## Low (14) — fix opportunistically / post-launch
