@@ -7,10 +7,14 @@ import { buildVerificationAuditFields } from "../core/verifier-contract.js";
 import { disputeIdForSession } from "../core/dispute-resolution.js";
 
 export class VerificationIngestionService {
-  constructor(stateStore, eventBus = undefined, getJobDefinition = undefined) {
+  constructor(stateStore, eventBus = undefined, getJobDefinition = undefined, logger = undefined) {
     this.stateStore = stateStore;
     this.eventBus = eventBus;
     this.getJobDefinition = getJobDefinition;
+    // Reached by the autonomous (no-JWT) settlement path as well as the manual
+    // route. Log under a synthetic principal so autonomous verdict ingestion is
+    // auditable (audit B-11). Default to console so it logs even unwired.
+    this.logger = logger || console;
   }
 
   async ingest(sessionId, verdict) {
@@ -21,6 +25,10 @@ export class VerificationIngestionService {
       return undefined;
     }
     assertSessionCanReceiveVerification(session);
+    this.logger.info?.(
+      { principal: "system:auto-verifier", sessionId: session.sessionId, jobId: session.jobId, outcome: verdict.outcome },
+      "verification_ingest.autonomous"
+    );
     const job = this.resolveJob(session, verdict);
     const verificationInput = verdict.verificationInput ?? session.submission ?? "";
     const auditFields = job
