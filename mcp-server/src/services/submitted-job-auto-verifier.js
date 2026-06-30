@@ -177,13 +177,24 @@ export class SubmittedJobAutoVerifierService {
     const { sessionId, jobId, mode } = candidate;
     this.inFlight.add(sessionId);
     try {
+      // Autonomous settlement entry point. Runs in-process with NO JWT principal —
+      // the manual /verifier/run route reaches the same verifySubmission (which
+      // brokers resolveSinglePayout on-chain). Logged under a synthetic principal so
+      // every autonomous settlement is attributable in the audit trail (audit B-01).
+      // Trust boundary: a process compromise is the threat; damage is bounded by
+      // requireChainBackedMutation + the hard {benchmark, deterministic} mode
+      // allowlist + HALT-awareness. See docs/MAINNET_AUDIT_REMEDIATION.md.
+      this.logger.info?.(
+        { principal: "system:auto-verifier", sessionId, jobId, mode },
+        "auto_verify.settlement_triggered"
+      );
       const result = await this.verifierService.verifySubmission({ sessionId });
       const outcome = result?.outcome;
       summary.verifiedCount += 1;
       if (outcome === "approved") summary.approvedCount += 1;
       else if (outcome === "rejected") summary.rejectedCount += 1;
       this.logger.info?.(
-        { sessionId, jobId, mode, outcome, reasonCode: result?.reasonCode },
+        { principal: "system:auto-verifier", sessionId, jobId, mode, outcome, reasonCode: result?.reasonCode },
         "auto_verify.verified"
       );
       this.eventBus?.publish?.({

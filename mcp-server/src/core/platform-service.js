@@ -124,7 +124,8 @@ export class PlatformService {
     this.verificationIngestionService = new VerificationIngestionService(
       this.stateStore,
       this.eventBus,
-      this.getJobDefinition.bind(this)
+      this.getJobDefinition.bind(this),
+      this.logger
     );
   }
 
