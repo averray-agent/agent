@@ -116,6 +116,14 @@ on:
         options:
           - "1"
           - "0"
+      allow_contract_surface_drift:
+        description: Emergency override for D-03 contract/backend compatibility freeze. Leave "0" unless an operator has recorded why backend can safely deploy without a contract manifest update.
+        required: false
+        default: "0"
+        type: choice
+        options:
+          - "0"
+          - "1"
 
 concurrency:
   group: production
@@ -192,6 +200,7 @@ jobs:
       DEPLOY_PRODUCT_PROOF_REWARD_ASSET: ${{ github.event_name == 'workflow_dispatch' && inputs.product_proof_reward_asset || '' }}
       DEPLOY_RUN_HERMES_POST_DEPLOY: ${{ github.event_name == 'workflow_dispatch' && inputs.run_hermes_post_deploy || '1' }}
       DEPLOY_RUN_SURFACE_SWEEP: ${{ github.event_name == 'workflow_dispatch' && inputs.run_surface_sweep || '1' }}
+      DEPLOY_ALLOW_CONTRACT_SURFACE_DRIFT: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_contract_surface_drift || '0' }}
       HERMES_POST_DEPLOY_TIMEOUT: 12m
     steps:
       - name: Validate required secrets

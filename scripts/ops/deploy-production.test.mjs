@@ -209,9 +209,151 @@ test("indexer schema recovery persists across normal runtime-env renders", async
   );
 });
 
+test("deploy wrapper freezes contract surface changes without a manifest update", async () => {
+  const { appRoot, stackRoot, fakeBin, stateDir, baseSha, nextSha } = await makeDeployFreezeFixture(
+    async (appRoot) => {
+      await mkdir(join(appRoot, "contracts"), { recursive: true });
+      await writeFile(join(appRoot, "contracts/AgentAccountCore.sol"), "contract AgentAccountCore {}\n");
+    },
+    "contract surface change"
+  );
+
+  const run = runDeploy(appRoot, {
+    PATH: `${fakeBin}:${process.env.PATH}`,
+    STACK_ROOT: stackRoot,
+    COMPOSE_FILE: join(stackRoot, "docker-compose.yml"),
+    DEPLOY_LOCK_FILE: join(appRoot, "deploy.lock"),
+    DEPLOY_STATE_DIR: stateDir,
+    DEPLOY_OLD_SHA: baseSha,
+    DEPLOY_NEW_SHA: nextSha,
+    RUN_BACKEND: "0",
+    RUN_INDEXER: "0",
+    RUN_FRONTEND: "0",
+    RUN_SITE: "0",
+    RUN_CADDY: "0",
+    RUN_SMOKE: "0"
+  });
+
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /D-03 contract compatibility freeze: refusing production deploy/u);
+  assert.match(run.stderr, /contracts\/AgentAccountCore\.sol/u);
+  assert.match(run.stderr, /deployments\/testnet\.json did not change/u);
+});
+
+test("deploy wrapper allows contract surface changes when the deployment manifest moves with them", async () => {
+  const { appRoot, stackRoot, fakeBin, stateDir, baseSha, nextSha } = await makeDeployFreezeFixture(
+    async (appRoot) => {
+      await mkdir(join(appRoot, "contracts"), { recursive: true });
+      await mkdir(join(appRoot, "deployments"), { recursive: true });
+      await writeFile(join(appRoot, "contracts/AgentAccountCore.sol"), "contract AgentAccountCore {}\n");
+      await writeFile(join(appRoot, "deployments/testnet.json"), '{"contracts":{"agentAccountCore":"0x0000000000000000000000000000000000000001"}}\n');
+    },
+    "contract surface plus manifest"
+  );
+
+  const run = runDeploy(appRoot, {
+    PATH: `${fakeBin}:${process.env.PATH}`,
+    STACK_ROOT: stackRoot,
+    COMPOSE_FILE: join(stackRoot, "docker-compose.yml"),
+    DEPLOY_LOCK_FILE: join(appRoot, "deploy.lock"),
+    DEPLOY_STATE_DIR: stateDir,
+    DEPLOY_OLD_SHA: baseSha,
+    DEPLOY_NEW_SHA: nextSha,
+    RUN_BACKEND: "0",
+    RUN_INDEXER: "0",
+    RUN_FRONTEND: "0",
+    RUN_SITE: "0",
+    RUN_CADDY: "0",
+    RUN_SMOKE: "0"
+  });
+
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(run.stdout, /contract-surface changes are paired with deployments\/testnet\.json; allowing deploy/u);
+});
+
+test("deploy wrapper exposes an explicit contract surface drift override", async () => {
+  const { appRoot, stackRoot, fakeBin, stateDir, baseSha, nextSha } = await makeDeployFreezeFixture(
+    async (appRoot) => {
+      await mkdir(join(appRoot, "mcp-server/src/blockchain"), { recursive: true });
+      await writeFile(join(appRoot, "mcp-server/src/blockchain/abis.js"), "export const ABI = [];\n");
+    },
+    "backend contract abi change"
+  );
+
+  const run = runDeploy(appRoot, {
+    PATH: `${fakeBin}:${process.env.PATH}`,
+    STACK_ROOT: stackRoot,
+    COMPOSE_FILE: join(stackRoot, "docker-compose.yml"),
+    DEPLOY_LOCK_FILE: join(appRoot, "deploy.lock"),
+    DEPLOY_STATE_DIR: stateDir,
+    DEPLOY_OLD_SHA: baseSha,
+    DEPLOY_NEW_SHA: nextSha,
+    DEPLOY_ALLOW_CONTRACT_SURFACE_DRIFT: "1",
+    RUN_BACKEND: "0",
+    RUN_INDEXER: "0",
+    RUN_FRONTEND: "0",
+    RUN_SITE: "0",
+    RUN_CADDY: "0",
+    RUN_SMOKE: "0"
+  });
+
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(run.stdout, /D-03 contract compatibility freeze override set/u);
+  assert.match(run.stdout, /mcp-server\/src\/blockchain\/abis\.js/u);
+});
+
+test("deploy workflow wires the D-03 contract surface override as manual-only", async () => {
+  const workflow = await readFile(join(REPO_ROOT, ".github/workflows/deploy-production.yml"), "utf8");
+
+  assert.match(
+    workflow,
+    /allow_contract_surface_drift:/u,
+    "workflow_dispatch should expose a named D-03 override"
+  );
+  assert.match(
+    workflow,
+    /DEPLOY_ALLOW_CONTRACT_SURFACE_DRIFT:\s*\$\{\{\s*github\.event_name\s*==\s*'workflow_dispatch'\s*&&\s*inputs\.allow_contract_surface_drift\s*\|\|\s*'0'\s*\}\}/u,
+    "automatic workflow_run deploys must leave the contract-surface drift override disabled"
+  );
+});
+
 async function writeExecutable(path, content) {
   await writeFile(path, `${content}\n`);
   await chmod(path, 0o755);
+}
+
+async function makeDeployFreezeFixture(applyChange, message) {
+  const root = await mkdtemp(join(tmpdir(), "deploy-contract-freeze-"));
+  const appRoot = join(root, "app");
+  const stackRoot = join(root, "stack");
+  const fakeBin = join(root, "bin");
+  const stateDir = join(root, "state");
+
+  await mkdir(join(appRoot, "scripts/ops"), { recursive: true });
+  await mkdir(stackRoot, { recursive: true });
+  await mkdir(fakeBin, { recursive: true });
+  await writeFile(join(stackRoot, "docker-compose.yml"), "services: {}\n");
+  await copyFile(DEPLOY_SCRIPT, join(appRoot, "scripts/ops/deploy-production.sh"));
+  await chmod(join(appRoot, "scripts/ops/deploy-production.sh"), 0o755);
+
+  for (const command of ["docker", "curl", "npm", "flock", "jq"]) {
+    await writeExecutable(join(fakeBin, command), "#!/usr/bin/env bash\nexit 0\n");
+  }
+
+  git(appRoot, "init");
+  git(appRoot, "config", "user.email", "test@example.com");
+  git(appRoot, "config", "user.name", "Deploy Test");
+  await writeFile(join(appRoot, "README.md"), "base\n");
+  git(appRoot, "add", ".");
+  git(appRoot, "commit", "-m", "base");
+  const baseSha = revParse(appRoot, "HEAD");
+
+  await applyChange(appRoot);
+  git(appRoot, "add", ".");
+  git(appRoot, "commit", "-m", message);
+  const nextSha = revParse(appRoot, "HEAD");
+
+  return { appRoot, stackRoot, fakeBin, stateDir, baseSha, nextSha };
 }
 
 function git(cwd, ...args) {
