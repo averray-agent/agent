@@ -1050,11 +1050,27 @@ export class BlockchainGateway {
       || typeof this.escrowContract.setOnboardingWaiverEligible !== "function") {
       return;
     }
-    const current = await this.escrowContract.onboardingWaiverEligibleJobs(chainJobId).catch(() => false);
+    let current = false;
+    try {
+      current = await this.escrowContract.onboardingWaiverEligibleJobs(chainJobId);
+    } catch (error) {
+      if (this.isMissingOptionalContractSelector(error)) {
+        return;
+      }
+      throw error;
+    }
     if (current === true) {
       return;
     }
-    const tx = await this.escrowContract.setOnboardingWaiverEligible(chainJobId, true);
+    let tx;
+    try {
+      tx = await this.escrowContract.setOnboardingWaiverEligible(chainJobId, true);
+    } catch (error) {
+      if (this.isMissingOptionalContractSelector(error)) {
+        return;
+      }
+      throw error;
+    }
     await tx.wait();
   }
 
@@ -1359,6 +1375,15 @@ export class BlockchainGateway {
     const code = String(error?.code ?? "");
     const message = `${error?.shortMessage ?? ""} ${error?.message ?? ""}`;
     return code === "BAD_DATA" || /could not decode result data|decode result data|invalid length/u.test(message);
+  }
+
+  isMissingOptionalContractSelector(error) {
+    const code = String(error?.code ?? "");
+    const data = error?.data ?? error?.info?.error?.data ?? error?.error?.data;
+    const message = `${error?.reason ?? ""} ${error?.shortMessage ?? ""} ${error?.message ?? ""}`;
+    return code === "CALL_EXCEPTION"
+      && (data === undefined || data === null || data === "0x")
+      && /require\(false\)|no data present|could not decode result data/u.test(message);
   }
 
   async getJob(jobId) {
