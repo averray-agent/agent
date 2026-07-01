@@ -697,3 +697,102 @@ test("requireAuth binds service tokens to exactly one active grant without base 
     (error) => error instanceof AuthorizationError && error.code === "missing_capability"
   );
 });
+
+// ─── B-03: mutations use a tighter grant-cache freshness bound than reads ──
+
+test("B-03: a mutation re-checks the grant within ~2s even without explicit cache invalidation (cross-process revoke)", async () => {
+  const subject = "0xdddddddddddddddddddddddddddddddddddddddd";
+  const issuedBy = "0x1111111111111111111111111111111111111111";
+  const stateStore = new MemoryStateStore();
+  await stateStore.upsertCapabilityGrant({
+    id: "grant-mut",
+    subject,
+    status: "active",
+    capabilities: ["jobs:lifecycle"],
+    issuedAt: new Date().toISOString(),
+    issuedBy
+  });
+  const authConfig = { secrets: [LONG_SECRET], signingSecret: LONG_SECRET, permissive: false, strict: true };
+  let clockMs = 1_000_000;
+  const middleware = createAuthMiddleware({
+    authConfig,
+    stateStore,
+    logger: silentLogger(),
+    now: () => new Date(clockMs)
+  });
+  const { token } = signToken({ sub: subject, roles: [] }, { secret: LONG_SECRET, expiresInSeconds: 3600 });
+  const postReq = { method: "POST", headers: { authorization: `Bearer ${token}` } };
+  const url = new URL("http://localhost/admin/jobs/lifecycle");
+
+  // First mutation → grant honored and cached at t=0.
+  assert.ok((await middleware(postReq, url)).capabilities.includes("jobs:lifecycle"));
+
+  // Revoke in the store WITHOUT invalidating the in-process cache — the
+  // cross-process case (another node revoked; this node's cache is stale).
+  await stateStore.upsertCapabilityGrant({
+    id: "grant-mut",
+    subject,
+    status: "revoked",
+    capabilities: ["jobs:lifecycle"],
+    issuedAt: new Date().toISOString(),
+    revokedAt: new Date().toISOString(),
+    issuedBy,
+    revokedBy: issuedBy
+  });
+
+  // Past the 2s mutation TTL (but within the 15s read backstop).
+  clockMs += 2_500;
+
+  // The next mutation re-fetches, sees the revoke, and is rejected.
+  await assert.rejects(
+    () => middleware(postReq, url),
+    (error) => error instanceof AuthorizationError && error.code === "missing_capability"
+  );
+});
+
+test("B-03: reads keep the 15s cache — a GET still serves the grant in that same window (tightening is mutation-only)", async () => {
+  const subject = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+  const issuedBy = "0x1111111111111111111111111111111111111111";
+  const stateStore = new MemoryStateStore();
+  await stateStore.upsertCapabilityGrant({
+    id: "grant-read",
+    subject,
+    status: "active",
+    capabilities: ["jobs:lifecycle"],
+    issuedAt: new Date().toISOString(),
+    issuedBy
+  });
+  const authConfig = { secrets: [LONG_SECRET], signingSecret: LONG_SECRET, permissive: false, strict: true };
+  let clockMs = 1_000_000;
+  const middleware = createAuthMiddleware({
+    authConfig,
+    stateStore,
+    logger: silentLogger(),
+    now: () => new Date(clockMs)
+  });
+  const { token } = signToken({ sub: subject, roles: [] }, { secret: LONG_SECRET, expiresInSeconds: 3600 });
+  const getReq = { method: "GET", headers: { authorization: `Bearer ${token}` } };
+  const url = new URL("http://localhost/some/read");
+  const opts = { requireCapability: "jobs:lifecycle" };
+
+  // First read → grant honored and cached at t=0.
+  assert.ok((await middleware(getReq, url, opts)).capabilities.includes("jobs:lifecycle"));
+
+  // Same cross-process revoke, no explicit invalidation.
+  await stateStore.upsertCapabilityGrant({
+    id: "grant-read",
+    subject,
+    status: "revoked",
+    capabilities: ["jobs:lifecycle"],
+    issuedAt: new Date().toISOString(),
+    revokedAt: new Date().toISOString(),
+    issuedBy,
+    revokedBy: issuedBy
+  });
+
+  // The +2.5s window that fails a mutation is still inside the read's 15s
+  // backstop, so the read keeps serving the (stale) grant — mutation-only.
+  clockMs += 2_500;
+  const res = await middleware(getReq, url, opts);
+  assert.ok(res.capabilities.includes("jobs:lifecycle"));
+});
