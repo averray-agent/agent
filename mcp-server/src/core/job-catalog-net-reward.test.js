@@ -47,3 +47,13 @@ test("a non-native reward defaults (undefined asset → USDC) take no haircut", 
   ]);
   assert.equal(await svc.estimateNetReward(WALLET, "def"), 3);
 });
+
+test("E-17: the native-gas haircut nets exactly in base units (no float drift)", async () => {
+  const svc = makeService([
+    // pro tier ⇒ no risk haircut, so only the 0.5 gas haircut applies.
+    { id: "drift", rewardAmount: 0.6, rewardAsset: "DOT", tier: "pro", requiresSponsoredGas: false }
+  ]);
+  // Pre-fix, `0.6 - 0.5` evaluates to 0.09999999999999998 — a different double
+  // than 0.1. Netting in integer base units returns exactly 0.1.
+  assert.equal(await svc.estimateNetReward(WALLET, "drift"), 0.1);
+});
