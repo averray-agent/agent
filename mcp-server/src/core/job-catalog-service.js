@@ -27,7 +27,8 @@ import {
   summarizeTierGate
 } from "./job-catalog-gates.js";
 import { buildVerificationContract } from "./verifier-contract.js";
-import { isNativeGasAsset } from "./assets.js";
+import { decimalsForAssetSymbol, isNativeGasAsset } from "./assets.js";
+import { decimalToBaseUnits, formatBaseUnits } from "./platform-service-helpers.js";
 
 export {
   ROLE_REQUIREMENTS,
@@ -467,7 +468,19 @@ export class JobCatalogService {
     }
     const gasPenalty = job.requiresSponsoredGas ? 0 : 0.5;
     const riskPenalty = profile.preferredRiskLevel === "low" && job.tier === "elite" ? 5 : 0;
-    return Math.max(job.rewardAmount - gasPenalty - riskPenalty, 0);
+    const penalty = gasPenalty + riskPenalty;
+    // E-17: net the haircut in integer base units so `reward - penalty` doesn't
+    // accumulate IEEE-754 drift on the native-gas (18-decimal) asset. Fall back
+    // to the legacy Number subtraction if the inputs aren't exactly representable.
+    try {
+      const decimals = decimalsForAssetSymbol(job.rewardAsset);
+      const rewardBase = decimalToBaseUnits(Math.max(job.rewardAmount, 0), decimals, "reward");
+      const penaltyBase = decimalToBaseUnits(Math.max(penalty, 0), decimals, "net reward haircut");
+      const netBase = rewardBase > penaltyBase ? rewardBase - penaltyBase : 0n;
+      return Number(formatBaseUnits(netBase, decimals));
+    } catch {
+      return Math.max(job.rewardAmount - penalty, 0);
+    }
   }
 
   requireJob(jobId) {
