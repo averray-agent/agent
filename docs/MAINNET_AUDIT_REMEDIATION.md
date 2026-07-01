@@ -38,7 +38,7 @@ default-config warning).
 | B-04 | X-Forwarded-For spoofing under `TRUST_PROXY` (Caddy must strip it) | Claude/infra | ☐ |
 | D-02 | Chain-ID mismatch risk — startup check configured vs RPC-reported | Claude/infra | ✅ **this PR** — `assertChainIdMatchesRpc` fails closed on a confirmed mismatch (warns if RPC unreachable) |
 | D-03 | CI auto-deploy without manual gate | Pascal/infra → Codex | 🟢 #706 (ff670f4): contract-surface drift now **fails closed** on auto-deploys (the 2026-06-30 canary regression's root cause); override is dispatch-only `allow_contract_surface_drift=1`. A broad GitHub "required reviewers" human gate remains a separate optional hardening. |
-| E-17 | **JS `Number` for off-chain USDC math** (systemic) → BigInt | Claude | ☐ |
+| E-17 | **JS `Number` for off-chain USDC math** (systemic) → BigInt | Claude | ✅ **this PR** — the authoritative treasury/settlement/strategy accounting was already BigInt (the `*Raw` base-unit migration, #337→#618) and on-chain amounts are brokered as `uint256`; this closes the residual **projection-layer** Number math: `claim-economics.js` bps stake/fee and `estimateNetReward` now compute in integer base units at the asset's precision (matching the on-chain floor) and format back only for the Number return contract |
 
 ## Low (14) — fix opportunistically / post-launch
 
