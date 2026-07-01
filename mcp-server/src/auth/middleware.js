@@ -11,6 +11,12 @@ import { isGrantActive, mergeGrantCapabilities } from "../core/capability-grants
 import { buildAuthRequirementDetails } from "../core/discovery-manifest.js";
 
 const GRANT_CACHE_TTL_MS = 15_000;
+// B-03 — state-changing (mutating) requests re-check grants on a much tighter
+// freshness bound than reads, so a *cross-process* revoke stops authorizing
+// MUTATIONS within ~2s instead of the 15s read-path backstop. A revoked grant
+// briefly still being *read* is far lower-stakes than one briefly still
+// *settling*; reads keep the 15s TTL for steady-state throughput.
+const MUTATION_GRANT_CACHE_TTL_MS = 2_000;
 
 /**
  * Create an auth middleware bound to a specific auth configuration.
@@ -34,22 +40,22 @@ const GRANT_CACHE_TTL_MS = 15_000;
  * middleware rejects tokens whose `jti` is in the revocation list.
  */
 export function createAuthMiddleware({ authConfig, stateStore, logger = console, now = () => new Date() }) {
-  // Per-subject grant cache. The grant list is stable for the
-  // lifetime of a JWT and lookups happen on every authed request,
-  // so a 15s in-process cache keeps the steady-state cost of
-  // capability merging low. Grant/revoke routes explicitly invalidate
-  // touched subjects so operator-initiated revokes take effect on the
-  // next request in this process; the TTL remains a cross-process
-  // backstop.
+  // Per-subject grant cache. The grant list is stable for the lifetime of a
+  // JWT and lookups happen on every authed request, so a short in-process
+  // cache keeps the steady-state cost of capability merging low. Grant/revoke
+  // routes explicitly invalidate touched subjects so operator-initiated
+  // revokes take effect on the next request in THIS process; the TTL is the
+  // cross-process backstop. Entries store `fetchedAt` so the caller can apply a
+  // per-request freshness bound — tighter for mutations (B-03).
   const grantCache = new Map();
 
-  async function loadActiveGrantsFor(wallet) {
+  async function loadActiveGrantsFor(wallet, maxAgeMs = GRANT_CACHE_TTL_MS) {
     if (!wallet) return [];
     if (typeof stateStore?.listCapabilityGrants !== "function") return [];
     const cacheKey = String(wallet).toLowerCase();
     const cached = grantCache.get(cacheKey);
     const nowMs = now().getTime();
-    if (cached && cached.expiresAt > nowMs) {
+    if (cached && nowMs - cached.fetchedAt < maxAgeMs) {
       return cached.grants;
     }
     let grants = [];
@@ -65,12 +71,12 @@ export function createAuthMiddleware({ authConfig, stateStore, logger = console,
     }
     grantCache.set(cacheKey, {
       grants: Array.isArray(grants) ? grants : [],
-      expiresAt: nowMs + GRANT_CACHE_TTL_MS
+      fetchedAt: nowMs
     });
     return grantCache.get(cacheKey).grants;
   }
 
-  async function expandCapabilities(claims, baseCapabilities) {
+  async function expandCapabilities(claims, baseCapabilities, grantMaxAgeMs = GRANT_CACHE_TTL_MS) {
     const subject = String(claims?.sub ?? "").trim();
     if (!subject) return baseCapabilities;
     if (isServiceTokenClaims(claims)) {
@@ -92,7 +98,7 @@ export function createAuthMiddleware({ authConfig, stateStore, logger = console,
         return baseCapabilities;
       }
     }
-    const grants = await loadActiveGrantsFor(subject);
+    const grants = await loadActiveGrantsFor(subject, grantMaxAgeMs);
     if (!grants.length) return baseCapabilities;
     return mergeGrantCapabilities(baseCapabilities, grants, { now });
   }
@@ -128,6 +134,9 @@ export function createAuthMiddleware({ authConfig, stateStore, logger = console,
       requireRole,
       requiredCapabilities
     });
+    // B-03 — mutating requests re-check grants on a tighter freshness bound so a
+    // cross-process revoke can't keep authorizing a state change for the full 15s.
+    const grantMaxAgeMs = isMutatingRequest(request) ? MUTATION_GRANT_CACHE_TTL_MS : GRANT_CACHE_TTL_MS;
     const headerToken = extractBearer(request);
     const queryToken = allowQueryToken ? (url.searchParams.get("token") ?? "").trim() || undefined : undefined;
     const token = headerToken ?? queryToken;
@@ -148,7 +157,7 @@ export function createAuthMiddleware({ authConfig, stateStore, logger = console,
             })
           };
           const baseCapabilities = resolveCapabilities(permissiveClaims);
-          const capabilities = await expandCapabilities(permissiveClaims, baseCapabilities);
+          const capabilities = await expandCapabilities(permissiveClaims, baseCapabilities, grantMaxAgeMs);
           enforceRole(permissiveClaims, requireRole, authDetails);
           enforceCapabilities(capabilities, requiredCapabilities, authDetails);
           return {
@@ -191,7 +200,7 @@ export function createAuthMiddleware({ authConfig, stateStore, logger = console,
     }
 
     const baseCapabilities = resolveCapabilities(claims);
-    const capabilities = await expandCapabilities(claims, baseCapabilities);
+    const capabilities = await expandCapabilities(claims, baseCapabilities, grantMaxAgeMs);
     enforceRole(claims, requireRole, authDetails);
     enforceCapabilities(capabilities, requiredCapabilities, authDetails);
 
@@ -206,6 +215,11 @@ export function createAuthMiddleware({ authConfig, stateStore, logger = console,
 
   requireAuth.invalidateCapabilityGrantCache = invalidateCapabilityGrantCache;
   return requireAuth;
+}
+
+function isMutatingRequest(request) {
+  const method = String(request?.method ?? "").toUpperCase();
+  return method !== "GET" && method !== "HEAD" && method !== "OPTIONS";
 }
 
 function isServiceTokenClaims(claims = {}) {
