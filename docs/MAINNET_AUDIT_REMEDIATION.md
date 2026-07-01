@@ -33,10 +33,10 @@ default-config warning).
 | C-09 | `XcmWrapper` async request ledger has no expiry | Codex | ☐ |
 | C-12 | No upper bound on `minimumCollateralRatioBps` | Codex | ☐ |
 | C-15 | Zero-reward jobs allowed → queue griefing (`require(reward > 0)`) | Codex | ☐ |
-| B-02 | HS256 testnet JWT — add a mainnet `SIGNER_BACKEND=kms` startup assertion | Claude | ☐ |
+| B-02 | HS256 testnet JWT — add a mainnet `SIGNER_BACKEND=kms` startup assertion | Claude | ✅ **this PR** — `assertMainnetSignerPosture` fails boot closed on mainnet + local signer |
 | B-03 | Grant cache 15s staleness on revocation (shorten for mutations) | Claude | ☐ |
 | B-04 | X-Forwarded-For spoofing under `TRUST_PROXY` (Caddy must strip it) | Claude/infra | ☐ |
-| D-02 | Chain-ID mismatch risk — startup check configured vs RPC-reported | Claude/infra | ☐ |
+| D-02 | Chain-ID mismatch risk — startup check configured vs RPC-reported | Claude/infra | ✅ **this PR** — `assertChainIdMatchesRpc` fails closed on a confirmed mismatch (warns if RPC unreachable) |
 | D-03 | CI auto-deploy without manual gate | Pascal/infra → Codex | 🟢 #706 (ff670f4): contract-surface drift now **fails closed** on auto-deploys (the 2026-06-30 canary regression's root cause); override is dispatch-only `allow_contract_surface_drift=1`. A broad GitHub "required reviewers" human gate remains a separate optional hardening. |
 | E-17 | **JS `Number` for off-chain USDC math** (systemic) → BigInt | Claude | ☐ |
 
