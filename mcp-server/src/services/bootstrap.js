@@ -68,6 +68,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_ESCROW_ASSET_SYMBOL } from "../core/assets.js";
 import { ConfigError } from "../core/errors.js";
+import { assertMainnetSignerPosture, assertChainIdMatchesRpc } from "./startup-guards.js";
 
 const moduleDir = dirname(fileURLToPath(import.meta.url));
 loadLocalEnv(process.cwd(), resolve(moduleDir, "../../"));
@@ -220,6 +221,23 @@ export async function createPlatformRuntime() {
   initStep("check-auth-brokering-posture", logger, () =>
     assertSafeAuthBrokeringPosture({ authConfig, gateway, env: process.env, logger })
   );
+  // B-02 — on mainnet the on-chain broker must sign via KMS, never a local
+  // hot key. Fail-closed launch gate; no-op off mainnet / gateway disabled.
+  initStep("check-mainnet-signer-posture", logger, () =>
+    assertMainnetSignerPosture({ authConfig, gateway, env: process.env })
+  );
+  // D-02 — verify the RPC actually serves the configured chain id before the
+  // backend brokers anything. Async (an eth_chainId call), so it mirrors the
+  // KMS-credential check's try/catch rather than the sync initStep wrapper.
+  try {
+    await assertChainIdMatchesRpc({ authConfig, gateway, logger });
+  } catch (error) {
+    logger.error(
+      { step: "check-chain-id-match", err: error instanceof Error ? error : new Error(String(error)) },
+      "bootstrap.init_failed"
+    );
+    throw error;
+  }
   const pimlicoClient = initStep("init-pimlico-client", logger, () => new PimlicoClient());
   const stateStore = initStep("init-state-store", logger, () => createStateStore(process.env, { logger }));
   const contentRecoveryLog = initStep("init-content-recovery-log", logger, () =>
