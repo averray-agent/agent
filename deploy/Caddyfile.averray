@@ -1,3 +1,14 @@
+# ---------------------------------------------------------------------------
+# B-04 (audit): Caddy is the edge proxy — clients connect to it directly (there
+# is no CDN or tunnel in front). Overwrite any client-supplied X-Forwarded-For
+# with the real connecting IP before proxying upstream, so the backend's
+# TRUST_PROXY rate-limit key (and any other XFF consumer) can't be spoofed by a
+# forged header. Imported into every reverse_proxy block below.
+# ---------------------------------------------------------------------------
+(strip_forwarded_for) {
+  header_up X-Forwarded-For {http.request.remote.host}
+}
+
 # Main public site
 # Serves the marketing / trust / schemas-lite surface from the repo's `site/`
 # folder, including robots/sitemap/llms and the discovery manifest. Public
@@ -30,6 +41,7 @@ app.averray.com {
   handle /api/events* {
     uri strip_prefix /api
     reverse_proxy backend:8787 {
+      import strip_forwarded_for
       flush_interval -1
       transport http {
         read_timeout 0
@@ -38,11 +50,15 @@ app.averray.com {
   }
 
   handle_path /api/* {
-    reverse_proxy backend:8787
+    reverse_proxy backend:8787 {
+      import strip_forwarded_for
+    }
   }
 
   handle_path /index/* {
-    reverse_proxy indexer:42069
+    reverse_proxy indexer:42069 {
+      import strip_forwarded_for
+    }
   }
 
   root * /srv/frontend
@@ -55,6 +71,7 @@ api.averray.com {
 
   handle /events* {
     reverse_proxy backend:8787 {
+      import strip_forwarded_for
       flush_interval -1
       transport http {
         read_timeout 0
@@ -62,11 +79,15 @@ api.averray.com {
     }
   }
 
-  reverse_proxy backend:8787
+  reverse_proxy backend:8787 {
+    import strip_forwarded_for
+  }
 }
 
 # Indexer
 index.averray.com {
   encode zstd gzip
-  reverse_proxy indexer:42069
+  reverse_proxy indexer:42069 {
+    import strip_forwarded_for
+  }
 }

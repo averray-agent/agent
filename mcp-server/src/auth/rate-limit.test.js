@@ -83,13 +83,34 @@ test("createRateLimiter rejects state stores without consumeRateLimit", () => {
   assert.throws(() => createRateLimiter({ stateStore: {} }), /consumeRateLimit/);
 });
 
-test("extractClientKey prefers X-Forwarded-For when trustProxy=true", () => {
+test("extractClientKey uses the proxy-appended (rightmost) X-Forwarded-For value", () => {
   const request = {
     headers: { "x-forwarded-for": "9.9.9.9, 10.10.10.10" },
     socket: { remoteAddress: "127.0.0.1" }
   };
-  assert.equal(extractClientKey(request, { trustProxy: true }), "9.9.9.9");
+  // The rightmost hop is the address Caddy observed and appended; the leftmost
+  // is client-supplied. B-04: key on the rightmost, never the leftmost.
+  assert.equal(extractClientKey(request, { trustProxy: true }), "10.10.10.10");
   assert.equal(extractClientKey(request, { trustProxy: false }), "127.0.0.1");
+});
+
+test("extractClientKey B-04: a forged X-Forwarded-For prefix cannot spoof the key", () => {
+  // Attacker sends a bogus X-Forwarded-For; the trusted proxy appends the real
+  // peer IP. Pre-fix this returned the attacker-controlled "1.1.1.1", letting
+  // them rotate fake IPs to evade per-IP auth rate limits.
+  const request = {
+    headers: { "x-forwarded-for": "1.1.1.1, 203.0.113.7" },
+    socket: { remoteAddress: "10.0.0.2" }
+  };
+  assert.equal(extractClientKey(request, { trustProxy: true }), "203.0.113.7");
+});
+
+test("extractClientKey ignores trailing empty hops", () => {
+  const request = {
+    headers: { "x-forwarded-for": "203.0.113.7, " },
+    socket: { remoteAddress: "10.0.0.2" }
+  };
+  assert.equal(extractClientKey(request, { trustProxy: true }), "203.0.113.7");
 });
 
 test("extractClientKey falls back to remoteAddress when header missing", () => {
