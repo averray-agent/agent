@@ -24,6 +24,7 @@ import {
 } from "./abis.js";
 import { loadBlockchainConfig } from "./config.js";
 import { KmsSigner } from "./kms-signer.js";
+import { applyGasFeeBuffer } from "./fee-buffer.js";
 import {
   buildKmsCredentialsProvider,
   PROFILE_BLOCKCHAIN_SIGNER,
@@ -122,6 +123,9 @@ export class BlockchainGateway {
     }
 
     this.provider = new JsonRpcProvider(config.rpcUrl);
+    // Raise the fee ceiling by a small buffer so a Polkadot Hub tx isn't left
+    // underpriced when the per-block fee multiplier rises during KMS-sign latency.
+    applyGasFeeBuffer(this.provider, config.gasFeeBufferBps, logger);
     this.signer = createSigner(config, this.provider, { logger });
     this.arbitratorSigner = config.arbitratorSignerPrivateKey
       ? new Wallet(config.arbitratorSignerPrivateKey, this.provider)

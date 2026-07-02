@@ -2,6 +2,8 @@ import { ConfigError } from "../core/errors.js";
 import { knownAssetMinBalanceRaw } from "../core/assets.js";
 import { derivePolkadotHubAssetAddress } from "../services/strategy-asset-config.js";
 
+const DEFAULT_GAS_FEE_BUFFER_BPS = 2000;
+
 function parseLegacyAssets(rawAssets) {
   if (!rawAssets) {
     return [];
@@ -254,8 +256,23 @@ export function loadBlockchainConfig(env = process.env) {
     reputationSbtAddress: env.REPUTATION_SBT_ADDRESS ?? "",
     discoveryRegistryAddress: normalizeOptionalAddress(env.DISCOVERY_REGISTRY_ADDRESS, "DISCOVERY_REGISTRY_ADDRESS"),
     xcmWrapperAddress: normalizeOptionalAddress(env.XCM_WRAPPER_ADDRESS, "XCM_WRAPPER_ADDRESS"),
-    supportedAssets
+    supportedAssets,
+    gasFeeBufferBps: resolveGasFeeBufferBps(env)
   };
+}
+
+// Basis-point buffer added to Polkadot Hub tx fee ceilings (see fee-buffer.js).
+// Default 2000 (20%); GAS_FEE_BUFFER_BPS=0 disables it.
+function resolveGasFeeBufferBps(env = process.env) {
+  const raw = env.GAS_FEE_BUFFER_BPS;
+  if (raw === undefined || raw === null || String(raw).trim() === "") {
+    return DEFAULT_GAS_FEE_BUFFER_BPS;
+  }
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 0 || value > 10_000) {
+    throw new ConfigError("GAS_FEE_BUFFER_BPS must be an integer in [0, 10000] (basis points).");
+  }
+  return value;
 }
 
 function resolveRpcUrl(env = process.env) {

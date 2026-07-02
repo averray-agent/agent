@@ -65,8 +65,27 @@ test("planBatchFund: PAS shortfall accounts for gas headroom", () => {
   assert.equal(plan.pasShort, true);
 });
 
+test("planBatchFund: rejects a sub-existential-deposit --pas", () => {
+  assert.throws(
+    () =>
+      planBatchFund({
+        wallets: [A],
+        usdcPerWallet: 5_000_000n,
+        pasPerWallet: 1_000_000_000_000_000n, // 0.001 PAS — below the 0.01 floor
+        poolUsdc: 100_000_000n,
+        poolPas: 100_000_000_000_000_000_000n
+      }),
+    /existential deposit/u
+  );
+});
+
 test("planBatchFund: rejects empty list, bad address, and duplicates", () => {
-  const base = { usdcPerWallet: 5_000_000n, pasPerWallet: 1n, poolUsdc: 100_000_000n, poolPas: 100n ** 6n };
+  const base = {
+    usdcPerWallet: 5_000_000n,
+    pasPerWallet: 1_000_000_000_000_000_000n,
+    poolUsdc: 100_000_000n,
+    poolPas: 100_000_000_000_000_000_000n
+  };
   assert.throws(() => planBatchFund({ ...base, wallets: [] }), /No target wallets/u);
   assert.throws(() => planBatchFund({ ...base, wallets: ["0xnothex"] }), /valid 0x address/u);
   assert.throws(() => planBatchFund({ ...base, wallets: [A, A] }), /Duplicate/u);
