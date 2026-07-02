@@ -52,6 +52,7 @@ contract XcmWrapper is IXcmWrapper, ReentrancyGuard {
     error InvalidWeight();
     error XcmPrecompileUnavailable();
     error PayloadMismatch();
+    error XcmContextMismatch();
     error XcmDispatchFailed(bytes reason);
 
     constructor(TreasuryPolicy policy_, address xcmPrecompile_) {
@@ -102,7 +103,7 @@ contract XcmWrapper is IXcmWrapper, ReentrancyGuard {
         _validateWeight(maxWeight);
 
         requestId = previewRequestId(context);
-        _validateSetTopic(message, requestId);
+        _validateXcmPayload(message, requestId, context);
 
         bytes32 destinationHash = keccak256(destination);
         bytes32 messageHash = keccak256(message);
@@ -274,7 +275,10 @@ contract XcmWrapper is IXcmWrapper, ReentrancyGuard {
         if (maxWeight.refTime == 0) revert InvalidWeight();
     }
 
-    function _validateSetTopic(bytes calldata message, bytes32 requestId) internal pure {
+    function _validateXcmPayload(bytes calldata message, bytes32 requestId, RequestContext calldata context)
+        internal
+        pure
+    {
         if (message.length < XCM_MIN_VERSIONED_SET_TOPIC_LENGTH) revert InvalidSetTopic();
         if (message[0] != XCM_VERSION_V5) revert InvalidSetTopic();
 
@@ -282,6 +286,8 @@ contract XcmWrapper is IXcmWrapper, ReentrancyGuard {
         if (instructionCount == 0) revert InvalidSetTopic();
 
         bool foundTopic = false;
+        bool foundWithdraw = false;
+        bool foundDeposit = false;
         for (uint256 i = 0; i < instructionCount; i++) {
             if (cursor >= message.length) revert InvalidSetTopic();
 
@@ -303,10 +309,21 @@ contract XcmWrapper is IXcmWrapper, ReentrancyGuard {
             }
 
             if (finalInstruction) revert InvalidSetTopic();
+            if (instruction == XCM_INSTRUCTION_WITHDRAW_ASSET) {
+                cursor = _decodeWithdrawAssetAndAssert(message, cursor, context);
+                foundWithdraw = true;
+                continue;
+            }
+            if (instruction == XCM_INSTRUCTION_DEPOSIT_ASSET) {
+                cursor = _decodeDepositAssetAndAssert(message, cursor, context.recipient);
+                foundDeposit = true;
+                continue;
+            }
             cursor = _skipSupportedInstruction(message, instruction, cursor);
         }
 
         if (!foundTopic || cursor != message.length) revert InvalidSetTopic();
+        if (!foundWithdraw || !foundDeposit) revert InvalidSetTopic();
     }
 
     function _decodeCompactU32(bytes calldata data, uint256 offset)
@@ -344,16 +361,52 @@ contract XcmWrapper is IXcmWrapper, ReentrancyGuard {
         pure
         returns (uint256 nextOffset)
     {
-        if (instruction == XCM_INSTRUCTION_WITHDRAW_ASSET) {
-            return _skipAssetVector(data, offset);
-        }
         if (instruction == XCM_INSTRUCTION_PAY_FEES) {
             return _skipAsset(data, offset);
         }
-        if (instruction == XCM_INSTRUCTION_DEPOSIT_ASSET) {
-            return _skipLocation(data, _skipAssetFilter(data, offset));
-        }
         revert InvalidSetTopic();
+    }
+
+    /**
+     * @dev Narrow vDOT launch encoding contract for backend builders:
+     * WithdrawAsset must contain exactly one Fungible asset whose id is
+     * `Location { parents: 0, interior: X1(AccountKey20 { network: Any, key:
+     * context.asset }) }`. The withdrawn amount must equal `context.assets`;
+     * withdraw requests with `assets == 0` use `context.shares` because the
+     * adapter's withdraw context is share-denominated.
+     */
+    function _decodeWithdrawAssetAndAssert(bytes calldata data, uint256 offset, RequestContext calldata context)
+        internal
+        pure
+        returns (uint256 nextOffset)
+    {
+        (uint256 assetCount, uint256 cursor) = _decodeCompactU32(data, offset);
+        if (assetCount != 1) revert XcmContextMismatch();
+
+        (bool assetMatches, uint256 amount, uint256 next) = _decodeAsset(data, cursor, context.asset);
+        if (!assetMatches) revert XcmContextMismatch();
+        if (amount != _expectedWithdrawAmount(context)) revert XcmContextMismatch();
+        return next;
+    }
+
+    /**
+     * @dev DepositAsset must use the supported Wild.AllCounted(1) filter and a
+     * beneficiary encoded as `Location { parents: 0, interior:
+     * X1(AccountKey20 { network: Any, key: context.recipient }) }`.
+     */
+    function _decodeDepositAssetAndAssert(bytes calldata data, uint256 offset, address expectedRecipient)
+        internal
+        pure
+        returns (uint256 nextOffset)
+    {
+        uint256 cursor = _skipAssetFilter(data, offset);
+        (bool recipientMatches, uint256 next) = _decodeLocationMatchesAccountKey20(data, cursor, expectedRecipient);
+        if (!recipientMatches) revert XcmContextMismatch();
+        return next;
+    }
+
+    function _expectedWithdrawAmount(RequestContext calldata context) internal pure returns (uint256) {
+        return context.assets == 0 ? context.shares : context.assets;
     }
 
     function _skipAssetVector(bytes calldata data, uint256 offset) internal pure returns (uint256 nextOffset) {
@@ -374,6 +427,20 @@ contract XcmWrapper is IXcmWrapper, ReentrancyGuard {
         return _skipCompact(data, cursor);
     }
 
+    function _decodeAsset(bytes calldata data, uint256 offset, address expectedAsset)
+        internal
+        pure
+        returns (bool locationMatches, uint256 amount, uint256 nextOffset)
+    {
+        (bool matches, uint256 cursor) = _decodeLocationMatchesAccountKey20(data, offset, expectedAsset);
+        _requireAvailable(data, cursor, 1);
+        bytes1 fun = data[cursor];
+        cursor += 1;
+        if (fun != 0x00) revert InvalidSetTopic();
+        (uint256 decodedAmount, uint256 next) = _decodeCompactU256(data, cursor);
+        return (matches, decodedAmount, next);
+    }
+
     function _skipAssetFilter(bytes calldata data, uint256 offset) internal pure returns (uint256 nextOffset) {
         _requireAvailable(data, offset, 6);
         if (data[offset] != 0x01 || data[offset + 1] != 0x01) revert InvalidSetTopic();
@@ -391,6 +458,43 @@ contract XcmWrapper is IXcmWrapper, ReentrancyGuard {
         if (interior == 0x01) {
             return _skipJunction(data, cursor);
         }
+        revert InvalidSetTopic();
+    }
+
+    function _decodeLocationMatchesAccountKey20(bytes calldata data, uint256 offset, address expected)
+        internal
+        pure
+        returns (bool matches, uint256 nextOffset)
+    {
+        _requireAvailable(data, offset, 2);
+        uint8 parents = uint8(data[offset]);
+        uint256 cursor = offset + 1;
+        bytes1 interior = data[cursor];
+        cursor += 1;
+
+        if (interior == 0x00) {
+            return (false, cursor);
+        }
+
+        if (interior != 0x01) revert InvalidSetTopic();
+
+        _requireAvailable(data, cursor, 1);
+        bytes1 junction = data[cursor];
+        if (junction == 0x00) {
+            _requireAvailable(data, cursor, 5);
+            return (false, cursor + 5);
+        }
+        if (junction == 0x01) {
+            _requireAvailable(data, cursor, 34);
+            return (false, cursor + 34);
+        }
+        if (junction == 0x03) {
+            _requireAvailable(data, cursor, 22);
+            bytes1 network = data[cursor + 1];
+            address key = _readAddress(data, cursor + 2);
+            return (parents == 0 && network == 0x00 && key == expected, cursor + 22);
+        }
+
         revert InvalidSetTopic();
     }
 
@@ -432,6 +536,49 @@ contract XcmWrapper is IXcmWrapper, ReentrancyGuard {
         uint256 byteLength = uint256(b0 >> 2) + 4;
         _requireAvailable(data, offset + 1, byteLength);
         return offset + 1 + byteLength;
+    }
+
+    function _decodeCompactU256(bytes calldata data, uint256 offset)
+        internal
+        pure
+        returns (uint256 value, uint256 nextOffset)
+    {
+        _requireAvailable(data, offset, 1);
+        uint8 b0 = uint8(data[offset]);
+        uint8 mode = b0 & 0x03;
+
+        if (mode == 0) {
+            return (uint256(b0 >> 2), offset + 1);
+        }
+        if (mode == 1) {
+            _requireAvailable(data, offset, 2);
+            uint16 raw = uint16(uint8(data[offset])) | (uint16(uint8(data[offset + 1])) << 8);
+            return (uint256(raw >> 2), offset + 2);
+        }
+        if (mode == 2) {
+            _requireAvailable(data, offset, 4);
+            uint32 raw = uint32(uint8(data[offset])) | (uint32(uint8(data[offset + 1])) << 8)
+                | (uint32(uint8(data[offset + 2])) << 16) | (uint32(uint8(data[offset + 3])) << 24);
+            return (uint256(raw >> 2), offset + 4);
+        }
+
+        uint256 byteLength = uint256(b0 >> 2) + 4;
+        if (byteLength > 32) revert InvalidSetTopic();
+        _requireAvailable(data, offset + 1, byteLength);
+        uint256 decoded;
+        for (uint256 i = 0; i < byteLength; i++) {
+            decoded |= uint256(uint8(data[offset + 1 + i])) << (8 * i);
+        }
+        return (decoded, offset + 1 + byteLength);
+    }
+
+    function _readAddress(bytes calldata data, uint256 offset) internal pure returns (address value) {
+        _requireAvailable(data, offset, 20);
+        uint160 raw;
+        for (uint256 i = 0; i < 20; i++) {
+            raw = (raw << 8) | uint160(uint8(data[offset + i]));
+        }
+        return address(raw);
     }
 
     function _requireAvailable(bytes calldata data, uint256 offset, uint256 length) internal pure {
