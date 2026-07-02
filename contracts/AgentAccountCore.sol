@@ -224,6 +224,7 @@ contract AgentAccountCore is ReentrancyGuard {
         AssetPosition storage position = positions[msg.sender][asset];
         _requireWithdrawable(position, amount);
         position.liquid -= amount;
+        policy.recordOutflow(msg.sender, amount);
         SafeTransfer.safeTransfer(asset, msg.sender, amount);
         emit Withdrawn(msg.sender, asset, amount);
     }
@@ -316,7 +317,6 @@ contract AgentAccountCore is ReentrancyGuard {
         if (position.reserved < amount) revert InsufficientReserved();
         settlementExecuted[settlementId] = true;
         position.reserved -= amount;
-        policy.recordOutflow(amount);
         AssetPosition storage recipientPosition = positions[recipient][asset];
         uint256 debt = recipientPosition.debtOutstanding;
         uint256 debtPaid = amount < debt ? amount : debt;
@@ -596,10 +596,8 @@ contract AgentAccountCore is ReentrancyGuard {
         uint256 treasuryAmount = amount - posterAmount;
 
         if (posterAmount > 0) {
+            policy.recordOutflow(account, posterAmount);
             SafeTransfer.safeTransfer(asset, posterRecipient, posterAmount);
-        }
-        if (treasuryAmount > 0) {
-            policy.recordOutflow(treasuryAmount);
         }
 
         emit JobStakeSlashed(account, asset, amount, posterAmount, treasuryAmount);
@@ -624,10 +622,8 @@ contract AgentAccountCore is ReentrancyGuard {
         uint256 treasuryAmount = amount - verifierAmount;
 
         if (verifierAmount > 0) {
+            policy.recordOutflow(account, verifierAmount);
             SafeTransfer.safeTransfer(asset, verifierRecipient, verifierAmount);
-        }
-        if (treasuryAmount > 0) {
-            policy.recordOutflow(treasuryAmount);
         }
 
         emit ClaimFeeSlashed(account, asset, amount, verifierRecipient, verifierAmount, treasuryAmount);

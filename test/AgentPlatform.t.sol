@@ -229,6 +229,80 @@ contract AgentPlatformTest is Test {
         );
     }
 
+    function testSettlementBookMovesDoNotTripFiniteOutflowCap() public {
+        policy.setDailyOutflowCap(1 ether);
+
+        vm.prank(poster);
+        accounts.reserveForJob(poster, address(dot), 4 ether);
+
+        accounts.setEscrowOperator(address(this), true);
+        accounts.settleReservedTo(keccak256("settlement/cap-free/1"), poster, address(dot), worker, 2 ether);
+        accounts.settleReservedTo(keccak256("settlement/cap-free/2"), poster, address(dot), worker, 2 ether);
+
+        (uint256 workerLiquid,,,,,) = accounts.positions(worker, address(dot));
+        (, uint256 posterReserved,,,,) = accounts.positions(poster, address(dot));
+
+        assertEq(workerLiquid, WORKER_DEPOSIT + 4 ether);
+        assertEq(posterReserved, 0);
+        assertEq(policy.accountOutflowToday(poster), 0);
+        assertEq(policy.outflowToday(), 0);
+    }
+
+    function testWithdrawEgressTripsFiniteOutflowCapPerAccount() public {
+        policy.setDailyOutflowCap(75 ether);
+
+        vm.startPrank(worker);
+        accounts.withdraw(address(dot), 50 ether);
+        (bool ok, bytes memory data) =
+            address(accounts).call(abi.encodeCall(accounts.withdraw, (address(dot), 26 ether)));
+        vm.stopPrank();
+
+        require(!ok, "EXPECTED_OUTFLOW_CAP_REVERT");
+        require(bytes4(data) == TreasuryPolicy.OutflowCapExceeded.selector, "EXPECTED_OUTFLOW_CAP_SELECTOR");
+        assertEq(policy.accountOutflowToday(worker), 50 ether);
+        assertEq(policy.outflowToday(), 50 ether);
+    }
+
+    function testOneAccountOutflowCapDoesNotBlockUnrelatedSettlement() public {
+        policy.setDailyOutflowCap(50 ether);
+
+        vm.startPrank(worker);
+        accounts.withdraw(address(dot), 50 ether);
+        (bool ok, bytes memory data) =
+            address(accounts).call(abi.encodeCall(accounts.withdraw, (address(dot), 1 ether)));
+        vm.stopPrank();
+        require(!ok, "EXPECTED_OUTFLOW_CAP_REVERT");
+        require(bytes4(data) == TreasuryPolicy.OutflowCapExceeded.selector, "EXPECTED_OUTFLOW_CAP_SELECTOR");
+
+        vm.prank(poster);
+        accounts.reserveForJob(poster, address(dot), 100 ether);
+
+        accounts.setEscrowOperator(address(this), true);
+        accounts.settleReservedTo(keccak256("settlement/after-worker-cap"), poster, address(dot), verifier, 100 ether);
+
+        (uint256 verifierLiquid,,,,,) = accounts.positions(verifier, address(dot));
+        assertEq(verifierLiquid, 100 ether);
+        assertEq(policy.accountOutflowToday(worker), 50 ether);
+        assertEq(policy.accountOutflowToday(poster), 0);
+    }
+
+    function testSlashMetersOnlyTransferredEgressLegs() public {
+        accounts.setEscrowOperator(address(this), true);
+        policy.setDailyOutflowCap(12 ether);
+
+        uint256 posterTokenBalanceBefore = dot.balanceOf(poster);
+        uint256 verifierTokenBalanceBefore = dot.balanceOf(verifier);
+
+        accounts.lockJobStake(worker, address(dot), 20 ether);
+        accounts.slashJobStake(worker, address(dot), 10 ether, poster);
+        accounts.slashClaimFee(worker, address(dot), 10 ether, verifier);
+
+        assertEq(dot.balanceOf(poster), posterTokenBalanceBefore + 5 ether);
+        assertEq(dot.balanceOf(verifier), verifierTokenBalanceBefore + 7 ether);
+        assertEq(policy.accountOutflowToday(worker), 12 ether);
+        assertEq(policy.outflowToday(), 12 ether);
+    }
+
     function testRefundReservedRequiresEscrowRoleAndUnpausedProtocol() public {
         vm.prank(poster);
         accounts.reserveForJob(poster, address(dot), 1 ether);
