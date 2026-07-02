@@ -178,4 +178,20 @@ To prevent double-tracking between this board and `MAINNET_AUDIT_REMEDIATION.md`
 
 ## Ownership
 
-**Contracts = Codex** — every H/M/L/I item on this board is Codex-owned. All Claude-owned audit-1 findings (**B-01, B-11, B-02, B-03, B-04, D-02, D-04, E-17**) are already merged (#711–#715). No open Claude-owned contract work remains from either audit.
+**Contract code = Codex** — every H/M/L/I *code* fix on this board is Codex-owned, all writable + Foundry-testable now (only redeploy waits on the Paseo halt). All Claude-owned audit-1 findings (**B-01, B-11, B-02, B-03, B-04, D-02, D-04, E-17**) are already merged (#711–#715). No open Claude-owned *contract* work remains from either audit.
+
+### Coordinated non-contract actions (a few fixes aren't purely Codex)
+
+Several contract fixes carry an off-chain or ops action that must land alongside them:
+
+| Action | Owner | Tied to | When |
+|--------|-------|---------|------|
+| **Do NOT arm a finite `DAILY_OUTFLOW_CAP`** until the breaker is re-wired (currently specced at 250 USDC in `MAINNET_PARAMETERS.md`) | Pascal / ops | H-1 | now — config discipline |
+| **Designate the treasury-sink destination** (which multisig/address collects slashed treasury funds) | Pascal / ops | H-2 | before Codex implements the sink |
+| **Provision + assign the split operator-role keys** (`escrowSettler` / `outflowRecorder` / `xcmFinalizer` / `strategySettler`) | Pascal / ops | serviceOperators split | after Codex defines the roles |
+| **owner → multisig** for all owner-only setters | Pascal / ops | Architectural | launch ceremony (already roadmapped) |
+| **Backend adopts the split roles** — `mcp-server/src/blockchain/gateway.js` reads `serviceOperators(escrowCore/agentAccount)` and the KMS signer *acts as* an operator; needs role-scoped keys + role-aware health checks | Claude (backend) | serviceOperators split | follow-on, after Codex lands the role shape |
+| **Backend XCM settlement echo** — `mcp-server/src/services/xcm-observation-relay.js` produces the operator-supplied `settledAssets/settledShares`; must align if M-5 moves share derivation on-chain (ties to invariant-9 / 6dp↔18dp) | Claude (backend) | M-5 | follow-on, after Codex's M-5 fix |
+| **Indexer consumes any new events** (e.g. the L-11 debt-repayment event) | Claude (indexer) | L-11 + new events | follow-on |
+
+None of the Claude backend/indexer follow-ons are startable until Codex defines the contract shape they adapt to. The two Pascal decisions (treasury-sink address, cap discipline) are actionable now and gate Codex.
