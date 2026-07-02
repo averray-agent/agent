@@ -98,7 +98,7 @@ contract XcmVdotAdapterTest is Test {
 
         vm.prank(operator);
         adapter.settleRequest(
-            requestId, IXcmWrapper.RequestStatus.Succeeded, 25 ether, 23 ether, keccak256("remote-deposit"), bytes32(0)
+            requestId, IXcmWrapper.RequestStatus.Succeeded, 25 ether, 25 ether, keccak256("remote-deposit"), bytes32(0)
         );
 
         IXcmStrategyAdapter.AdapterRequest memory request = adapter.getAdapterRequest(requestId);
@@ -106,13 +106,40 @@ contract XcmVdotAdapterTest is Test {
 
         assertEq(adapter.pendingDepositAssets(), 0);
         assertEq(adapter.totalAssets(), 25 ether);
-        assertEq(adapter.totalShares(), 23 ether);
+        assertEq(adapter.totalShares(), 25 ether);
         assertEq(uint256(request.status), uint256(IXcmWrapper.RequestStatus.Succeeded));
         assertEq(request.settledAssets, 25 ether);
-        assertEq(request.settledShares, 23 ether);
+        assertEq(request.settledShares, 25 ether);
         assertEq(uint256(wrapperRequest.status), uint256(IXcmWrapper.RequestStatus.Succeeded));
         assertEq(wrapperRequest.settledAssets, 25 ether);
-        assertEq(wrapperRequest.settledShares, 23 ether);
+        assertEq(wrapperRequest.settledShares, 25 ether);
+    }
+
+    function testSettleDepositRejectsOffRatioShares() public {
+        bytes32 requestId = _requestDeposit(worker, 25 ether, 1);
+
+        vm.prank(operator);
+        (bool ok, bytes memory data) = address(adapter)
+            .call(
+                abi.encodeCall(
+                    adapter.settleRequest,
+                    (
+                        requestId,
+                        IXcmWrapper.RequestStatus.Succeeded,
+                        25 ether,
+                        23 ether,
+                        keccak256("remote-deposit"),
+                        bytes32(0)
+                    )
+                )
+            );
+        _assertCustomError(ok, data, XcmVdotAdapter.InvalidSettlementRatio.selector);
+
+        IXcmStrategyAdapter.AdapterRequest memory request = adapter.getAdapterRequest(requestId);
+        assertEq(adapter.pendingDepositAssets(), 25 ether);
+        assertEq(adapter.totalAssets(), 0);
+        assertEq(adapter.totalShares(), 0);
+        assertEq(uint256(request.status), uint256(IXcmWrapper.RequestStatus.Pending));
     }
 
     function testSettleDepositRejectsSuccessWithZeroAssets() public {
@@ -177,6 +204,25 @@ contract XcmVdotAdapterTest is Test {
         assertEq(uint256(wrapperRequest.status), uint256(IXcmWrapper.RequestStatus.Pending));
     }
 
+    function testDepositFailureRefundSettlesWhilePaused() public {
+        bytes32 requestId = _requestDeposit(worker, 25 ether, 1);
+        policy.setPaused(true);
+
+        vm.prank(operator);
+        adapter.settleRequest(requestId, IXcmWrapper.RequestStatus.Failed, 0, 0, bytes32(0), bytes32("XCM_FAIL"));
+
+        IXcmStrategyAdapter.AdapterRequest memory request = adapter.getAdapterRequest(requestId);
+        IXcmWrapper.RequestRecord memory wrapperRequest = wrapper.getRequest(requestId);
+
+        assertEq(adapter.pendingDepositAssets(), 0);
+        assertEq(adapter.totalAssets(), 0);
+        assertEq(adapter.totalShares(), 0);
+        assertEq(asset.balanceOf(operator), 100 ether);
+        assertEq(asset.balanceOf(address(adapter)), 0);
+        assertEq(uint256(request.status), uint256(IXcmWrapper.RequestStatus.Failed));
+        assertEq(uint256(wrapperRequest.status), uint256(IXcmWrapper.RequestStatus.Failed));
+    }
+
     function testRequestWithdrawQueuesAndReservesShares() public {
         bytes32 depositRequestId = _seedSettledDeposit();
         bytes32 previewId = _previewWithdrawRequestId(worker, 10 ether, recipient, 2);
@@ -224,7 +270,7 @@ contract XcmVdotAdapterTest is Test {
         adapter.settleRequest(
             withdrawRequestId,
             IXcmWrapper.RequestStatus.Succeeded,
-            11 ether,
+            10 ether,
             0,
             keccak256("remote-withdraw"),
             bytes32(0)
@@ -233,11 +279,49 @@ contract XcmVdotAdapterTest is Test {
         IXcmStrategyAdapter.AdapterRequest memory request = adapter.getAdapterRequest(withdrawRequestId);
 
         assertEq(adapter.pendingWithdrawalShares(), 0);
-        assertEq(adapter.totalShares(), 13 ether);
-        assertEq(adapter.totalAssets(), 14 ether);
-        assertEq(asset.balanceOf(recipient), 11 ether);
+        assertEq(adapter.totalShares(), 15 ether);
+        assertEq(adapter.totalAssets(), 15 ether);
+        assertEq(asset.balanceOf(recipient), 10 ether);
         assertEq(uint256(request.status), uint256(IXcmWrapper.RequestStatus.Succeeded));
-        assertEq(request.settledAssets, 11 ether);
+        assertEq(request.settledAssets, 10 ether);
+    }
+
+    function testSettleWithdrawRejectsOverRatioAssets() public {
+        _seedSettledDeposit();
+        bytes32 previewId = _previewWithdrawRequestId(worker, 10 ether, recipient, 2);
+
+        vm.prank(operator);
+        bytes32 withdrawRequestId = adapter.requestWithdraw(
+            worker,
+            10 ether,
+            recipient,
+            hex"0304",
+            _withdrawMessage(previewId),
+            IXcmWrapper.Weight({refTime: 5, proofSize: 6}),
+            2
+        );
+
+        vm.prank(operator);
+        (bool ok, bytes memory data) = address(adapter)
+            .call(
+                abi.encodeCall(
+                    adapter.settleRequest,
+                    (
+                        withdrawRequestId,
+                        IXcmWrapper.RequestStatus.Succeeded,
+                        11 ether,
+                        0,
+                        keccak256("remote-withdraw"),
+                        bytes32(0)
+                    )
+                )
+            );
+        _assertCustomError(ok, data, XcmVdotAdapter.InvalidSettlementRatio.selector);
+
+        assertEq(adapter.pendingWithdrawalShares(), 10 ether);
+        assertEq(adapter.totalShares(), 25 ether);
+        assertEq(adapter.totalAssets(), 25 ether);
+        assertEq(asset.balanceOf(recipient), 0);
     }
 
     function testSettleWithdrawRejectsSuccessWithZeroAssets() public {
@@ -276,7 +360,7 @@ contract XcmVdotAdapterTest is Test {
         IXcmWrapper.RequestRecord memory wrapperRequest = wrapper.getRequest(withdrawRequestId);
 
         assertEq(adapter.pendingWithdrawalShares(), 10 ether);
-        assertEq(adapter.totalShares(), 23 ether);
+        assertEq(adapter.totalShares(), 25 ether);
         assertEq(adapter.totalAssets(), 25 ether);
         assertEq(asset.balanceOf(recipient), 0);
         assertEq(uint256(request.status), uint256(IXcmWrapper.RequestStatus.Pending));
@@ -288,7 +372,7 @@ contract XcmVdotAdapterTest is Test {
 
         vm.prank(operator);
         adapter.settleRequest(
-            requestId, IXcmWrapper.RequestStatus.Succeeded, 25 ether, 23 ether, keccak256("remote-deposit"), bytes32(0)
+            requestId, IXcmWrapper.RequestStatus.Succeeded, 25 ether, 25 ether, keccak256("remote-deposit"), bytes32(0)
         );
     }
 

@@ -47,6 +47,7 @@ contract XcmWrapper is IXcmWrapper, ReentrancyGuard {
     error InvalidRequest();
     error InvalidStatus();
     error InvalidTransition();
+    error InvalidSettlement();
     error InvalidSetTopic();
     error InvalidWeight();
     error XcmPrecompileUnavailable();
@@ -127,6 +128,7 @@ contract XcmWrapper is IXcmWrapper, ReentrancyGuard {
                 shares: context.shares,
                 nonce: context.nonce
             }),
+            queuedBy: msg.sender,
             status: RequestStatus.Pending,
             settledAssets: 0,
             settledShares: 0,
@@ -149,15 +151,18 @@ contract XcmWrapper is IXcmWrapper, ReentrancyGuard {
         uint256 settledShares,
         bytes32 remoteRef,
         bytes32 failureCode
-    ) external override nonReentrant whenNotPaused onlyOwnerOrOperator {
+    ) external override nonReentrant onlyOwnerOrOperator {
         if (status == RequestStatus.Unknown || status == RequestStatus.Pending) {
             revert InvalidStatus();
         }
+        if (policy.paused() && status == RequestStatus.Succeeded) revert ProtocolPaused();
 
         RequestRecord storage record = requests[requestId];
         if (record.context.account == address(0)) revert UnknownRequest();
+        if (msg.sender != record.queuedBy && msg.sender != policy.owner()) revert Unauthorized();
 
         if (record.status == RequestStatus.Pending) {
+            _validateSettlementBounds(record.context, status, settledAssets, settledShares);
             record.status = status;
             record.settledAssets = settledAssets;
             record.settledShares = settledShares;
@@ -176,6 +181,31 @@ contract XcmWrapper is IXcmWrapper, ReentrancyGuard {
         }
 
         revert InvalidTransition();
+    }
+
+    function _validateSettlementBounds(
+        RequestContext memory context,
+        RequestStatus status,
+        uint256 settledAssets,
+        uint256 settledShares
+    ) internal pure {
+        if (status != RequestStatus.Succeeded) {
+            if (settledAssets != 0 || settledShares != 0) revert InvalidSettlement();
+            return;
+        }
+
+        if (context.kind == RequestKind.Deposit) {
+            if (settledAssets > context.assets) revert InvalidSettlement();
+            return;
+        }
+
+        if (context.kind == RequestKind.Withdraw) {
+            if (settledShares > context.shares) revert InvalidSettlement();
+            return;
+        }
+
+        if (context.assets != 0 && settledAssets > context.assets) revert InvalidSettlement();
+        if (context.shares != 0 && settledShares > context.shares) revert InvalidSettlement();
     }
 
     function getRequest(bytes32 requestId) external view override returns (RequestRecord memory) {

@@ -207,6 +207,15 @@ contract AgentAccountCore is ReentrancyGuard {
         if (policy.paused()) revert ProtocolPaused();
     }
 
+    function _isPausedStrategyRefund(StrategyRequest storage request, IXcmWrapper.RequestStatus status)
+        internal
+        view
+        returns (bool)
+    {
+        return request.kind == IXcmWrapper.RequestKind.Deposit
+            && (status == IXcmWrapper.RequestStatus.Failed || status == IXcmWrapper.RequestStatus.Cancelled);
+    }
+
     function _onlySupportedAsset(address asset) internal view {
         if (!policy.approvedAssets(asset)) revert UnsupportedAsset();
     }
@@ -422,6 +431,9 @@ contract AgentAccountCore is ReentrancyGuard {
     {
         if (params.shares == 0) revert ZeroAmount();
         if (params.recipient == address(0)) revert InvalidRecipient();
+        if (msg.sender != account && params.recipient != account && params.recipient != address(this)) {
+            revert InvalidRecipient();
+        }
 
         if (
             strategyShares[account][params.strategyId]
@@ -463,7 +475,7 @@ contract AgentAccountCore is ReentrancyGuard {
         uint256 settledShares,
         bytes32 remoteRef,
         bytes32 failureCode
-    ) external nonReentrant whenNotPaused onlyOperator {
+    ) external nonReentrant onlyOperator {
         if (status == IXcmWrapper.RequestStatus.Unknown || status == IXcmWrapper.RequestStatus.Pending) {
             revert InvalidStrategyRequest();
         }
@@ -479,6 +491,10 @@ contract AgentAccountCore is ReentrancyGuard {
                 return;
             }
             revert InvalidStrategyRequest();
+        }
+
+        if (policy.paused() && !_isPausedStrategyRefund(request, status)) {
+            revert ProtocolPaused();
         }
 
         IXcmStrategyAdapter(request.adapter)

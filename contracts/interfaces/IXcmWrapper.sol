@@ -58,6 +58,7 @@ interface IXcmWrapper {
      */
     struct RequestRecord {
         RequestContext context;
+        address queuedBy;
         RequestStatus status;
         uint256 settledAssets;
         uint256 settledShares;

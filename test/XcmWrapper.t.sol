@@ -49,6 +49,7 @@ contract XcmWrapperTest is Test {
     XcmWrapper internal wrapper;
 
     address internal operator = address(0xB0B);
+    address internal operator2 = address(0xB0C);
     address internal stranger = address(0xDEAD);
 
     bytes32 internal constant STRATEGY_ID = bytes32("VDOT_XCM_V1");
@@ -61,6 +62,7 @@ contract XcmWrapperTest is Test {
         wrapper = new XcmWrapper(policy, address(precompile));
 
         policy.setServiceOperator(operator, true);
+        policy.setServiceOperator(operator2, true);
     }
 
     function testQueueRequestPersistsPendingRecord() public {
@@ -291,9 +293,85 @@ contract XcmWrapperTest is Test {
 
         IXcmWrapper.RequestRecord memory record = wrapper.getRequest(requestId);
         assertEq(uint256(record.status), uint256(IXcmWrapper.RequestStatus.Succeeded));
+        assertEq(record.queuedBy, operator);
         assertEq(record.settledAssets, 25 ether);
         assertEq(record.settledShares, 23 ether);
         require(record.remoteRef == keccak256("remote-ref"), "WRONG_REMOTE_REF");
+    }
+
+    function testOnlyQueueingOperatorOrOwnerCanFinalize() public {
+        IXcmWrapper.RequestContext memory context = _context(25 ether, 0, 1);
+        bytes memory message = _depositMessage(wrapper.previewRequestId(context));
+
+        vm.prank(operator);
+        bytes32 requestId =
+            wrapper.queueRequest(context, hex"0102", message, IXcmWrapper.Weight({refTime: 1, proofSize: 2}));
+
+        vm.prank(operator2);
+        (bool operatorOk, bytes memory operatorData) = address(wrapper)
+            .call(
+                abi.encodeCall(
+                    wrapper.finalizeRequest,
+                    (
+                        requestId,
+                        IXcmWrapper.RequestStatus.Succeeded,
+                        25 ether,
+                        23 ether,
+                        keccak256("remote-ref"),
+                        bytes32(0)
+                    )
+                )
+            );
+        _assertCustomError(operatorOk, operatorData, XcmWrapper.Unauthorized.selector);
+
+        wrapper.finalizeRequest(
+            requestId, IXcmWrapper.RequestStatus.Succeeded, 25 ether, 23 ether, keccak256("remote-ref"), bytes32(0)
+        );
+    }
+
+    function testFinalizeRejectsDepositAssetOverSettlement() public {
+        IXcmWrapper.RequestContext memory context = _context(25 ether, 0, 1);
+        bytes memory message = _depositMessage(wrapper.previewRequestId(context));
+
+        vm.prank(operator);
+        bytes32 requestId =
+            wrapper.queueRequest(context, hex"0102", message, IXcmWrapper.Weight({refTime: 1, proofSize: 2}));
+
+        vm.prank(operator);
+        (bool ok, bytes memory data) = address(wrapper)
+            .call(
+                abi.encodeCall(
+                    wrapper.finalizeRequest,
+                    (
+                        requestId,
+                        IXcmWrapper.RequestStatus.Succeeded,
+                        26 ether,
+                        26 ether,
+                        keccak256("remote-ref"),
+                        bytes32(0)
+                    )
+                )
+            );
+        _assertCustomError(ok, data, XcmWrapper.InvalidSettlement.selector);
+    }
+
+    function testFinalizeRejectsWithdrawShareOverSettlement() public {
+        IXcmWrapper.RequestContext memory context = _withdrawContext(10 ether, 1);
+        bytes memory message = _withdrawMessage(wrapper.previewRequestId(context));
+
+        vm.prank(operator);
+        bytes32 requestId =
+            wrapper.queueRequest(context, hex"0102", message, IXcmWrapper.Weight({refTime: 1, proofSize: 2}));
+
+        vm.prank(operator);
+        (bool ok, bytes memory data) = address(wrapper)
+            .call(
+                abi.encodeCall(
+                    wrapper.finalizeRequest,
+                    (requestId, IXcmWrapper.RequestStatus.Succeeded, 0, 11 ether, keccak256("remote-ref"), bytes32(0))
+                )
+            );
+        _assertCustomError(ok, data, XcmWrapper.InvalidSettlement.selector);
     }
 
     function testFinalizeIsIdempotentForRepeatedSameSettlement() public {
@@ -349,19 +427,47 @@ contract XcmWrapperTest is Test {
         _assertCustomError(finalizeOk, finalizeData, XcmWrapper.Unauthorized.selector);
     }
 
-    function testPauseBlocksQueueAndFinalize() public {
+    function testPauseBlocksQueueAndSuccessfulFinalizeButAllowsFailureFinalize() public {
         IXcmWrapper.RequestContext memory context = _context(25 ether, 0, 1);
         bytes memory message = _depositMessage(wrapper.previewRequestId(context));
+
+        vm.prank(operator);
+        bytes32 requestId =
+            wrapper.queueRequest(context, hex"0102", message, IXcmWrapper.Weight({refTime: 1, proofSize: 2}));
+
         policy.setPaused(true);
 
         vm.prank(operator);
-        (bool ok, bytes memory data) = address(wrapper)
+        (bool queueOk, bytes memory queueData) = address(wrapper)
             .call(
                 abi.encodeCall(
                     wrapper.queueRequest, (context, hex"0102", message, IXcmWrapper.Weight({refTime: 1, proofSize: 2}))
                 )
             );
-        _assertCustomError(ok, data, XcmWrapper.ProtocolPaused.selector);
+        _assertCustomError(queueOk, queueData, XcmWrapper.ProtocolPaused.selector);
+
+        vm.prank(operator);
+        (bool successOk, bytes memory successData) = address(wrapper)
+            .call(
+                abi.encodeCall(
+                    wrapper.finalizeRequest,
+                    (
+                        requestId,
+                        IXcmWrapper.RequestStatus.Succeeded,
+                        25 ether,
+                        23 ether,
+                        keccak256("remote-ref"),
+                        bytes32(0)
+                    )
+                )
+            );
+        _assertCustomError(successOk, successData, XcmWrapper.ProtocolPaused.selector);
+
+        vm.prank(operator);
+        wrapper.finalizeRequest(requestId, IXcmWrapper.RequestStatus.Failed, 0, 0, bytes32(0), bytes32("XCM_FAIL"));
+
+        IXcmWrapper.RequestRecord memory record = wrapper.getRequest(requestId);
+        assertEq(uint256(record.status), uint256(IXcmWrapper.RequestStatus.Failed));
     }
 
     function testWeighMessageUsesConfiguredPrecompile() public {
@@ -391,6 +497,19 @@ contract XcmWrapperTest is Test {
             asset: ASSET,
             recipient: RECIPIENT,
             assets: assets,
+            shares: shares,
+            nonce: nonce
+        });
+    }
+
+    function _withdrawContext(uint256 shares, uint64 nonce) internal view returns (IXcmWrapper.RequestContext memory) {
+        return IXcmWrapper.RequestContext({
+            strategyId: STRATEGY_ID,
+            kind: IXcmWrapper.RequestKind.Withdraw,
+            account: operator,
+            asset: ASSET,
+            recipient: RECIPIENT,
+            assets: 0,
             shares: shares,
             nonce: nonce
         });
