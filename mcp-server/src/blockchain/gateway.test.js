@@ -1453,6 +1453,7 @@ test("async XCM request readers return display amounts and raw base-unit fields"
           shares: 500_000n,
           nonce: 7n
         },
+        queuedBy: "0x2222222222222222222222222222222222222222",
         status: 1,
         settledAssets: 250_000n,
         settledShares: 100_000n,
@@ -1492,6 +1493,7 @@ test("async XCM request readers return display amounts and raw base-unit fields"
   assert.equal(xcmRequest.requestedAssetsRaw, "1250000");
   assert.equal(xcmRequest.requestedShares, 0.5);
   assert.equal(xcmRequest.nonce, 7);
+  assert.equal(xcmRequest.queuedBy, "0x2222222222222222222222222222222222222222");
   assert.equal(xcmRequest.nonceRaw, "7");
   assert.equal(xcmRequest.createdAt, 10);
   assert.equal(xcmRequest.createdAtRaw, "10");

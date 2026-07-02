@@ -1431,6 +1431,7 @@ export class BlockchainGateway {
         requestedSharesRaw: this.toRawString(record.context.shares),
         nonce: this.toSafeIntegerOrRaw(record.context.nonce, "nonce"),
         nonceRaw: this.toRawString(record.context.nonce),
+        queuedBy: record.queuedBy,
         status: Number(record.status),
         statusLabel: REQUEST_STATUS_LABELS[Number(record.status)] ?? "unknown",
         settledAssets: this.toDisplayUnits(record.settledAssets, this.assetForAddress(record.context.asset)),
