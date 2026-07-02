@@ -952,9 +952,47 @@ contract AgentPlatformTest is Test {
 
         assertEq(job.worker, worker);
         assertEq(job.claimExpiry, block.timestamp + 1 days);
-        assertEq(job.claimStake, 2.5 ether);
-        assertEq(workerJobStake, 2.5 ether);
+        assertEq(job.claimStake, 1.25 ether);
+        assertEq(workerJobStake, 1.25 ether);
         assertEq(uint256(job.state), uint256(EscrowCore.JobState.Claimed));
+    }
+
+    function testMilestonePartialReleaseRescopesFinalTimeoutStake() public {
+        bytes32 jobId = keccak256("job/milestone/rescope-timeout");
+        uint256[] memory milestones = new uint256[](2);
+        milestones[0] = 40 ether;
+        milestones[1] = 10 ether;
+
+        vm.prank(poster);
+        escrow.createMilestoneJob(
+            jobId, address(dot), milestones, 5 ether, 5 ether, 1 days, bytes32("AUTO"), bytes32("DATA"), SPEC_HASH
+        );
+
+        vm.prank(worker);
+        escrow.claimJob(jobId);
+        vm.prank(worker);
+        escrow.submitWork(jobId, keccak256("first-milestone"));
+        vm.prank(verifier);
+        escrow.resolveMilestone(jobId, 0, true, bytes32("OK"), "ipfs://badge/milestone", REASONING_HASH);
+
+        EscrowCore.JobEscrow memory jobAfterFirstRelease = escrow.jobs(jobId);
+        (,,,, uint256 workerJobStakeAfterFirstRelease,) = accounts.positions(worker, address(dot));
+        assertEq(jobAfterFirstRelease.claimStake, 0.5 ether);
+        assertEq(workerJobStakeAfterFirstRelease, 0.5 ether);
+
+        uint256 posterTokenBalanceBeforeTimeout = dot.balanceOf(poster);
+        vm.warp(jobAfterFirstRelease.claimExpiry + 1);
+        escrow.handleClaimTimeout(jobId);
+
+        EscrowCore.JobEscrow memory reopenedJob = escrow.jobs(jobId);
+        (,,,, uint256 workerJobStakeAfterTimeout,) = accounts.positions(worker, address(dot));
+        (uint256 treasuryLiquid,,,,,) = accounts.positions(treasury, address(dot));
+
+        assertEq(uint256(reopenedJob.state), uint256(EscrowCore.JobState.Open));
+        assertEq(reopenedJob.claimStake, 0);
+        assertEq(workerJobStakeAfterTimeout, 0);
+        assertEq(dot.balanceOf(poster), posterTokenBalanceBeforeTimeout + 0.25 ether);
+        assertEq(treasuryLiquid, 0.25 ether);
     }
 
     function testRejectedJobCanBeFinalizedAfterDisputeWindowAndThenSlashesReputation() public {
@@ -1097,9 +1135,11 @@ contract AgentPlatformTest is Test {
         require(!ok, "EXPECTED_ARBITRATOR_SLA_REVERT");
     }
 
-    function testAutoResolveOnTimeoutPaysWorkerAndReleasesStake() public {
+    function testAutoResolveOnTimeoutSplitsRemainderAndSlashesClaimEconomicsWithoutBadge() public {
+        policy.setClaimFeeBps(200);
         bytes32 jobId = createRejectedSinglePayoutJob("job/dispute/timeout/success", 50 ether);
         uint256 workerTokenBalanceBefore = dot.balanceOf(worker);
+        uint256 posterTokenBalanceBefore = dot.balanceOf(poster);
 
         vm.prank(worker);
         escrow.openDispute(jobId);
@@ -1110,16 +1150,21 @@ contract AgentPlatformTest is Test {
         EscrowCore.JobEscrow memory job = escrow.jobs(jobId);
         (uint256 liquidPoster, uint256 reservedPoster,,,,) = accounts.positions(poster, address(dot));
         (uint256 liquidWorker,,,, uint256 workerJobStake,) = accounts.positions(worker, address(dot));
+        (uint256 treasuryLiquid,,,,,) = accounts.positions(treasury, address(dot));
 
         assertEq(uint256(job.state), uint256(EscrowCore.JobState.Closed));
-        assertEq(job.released, 50 ether);
+        assertEq(job.released, 25 ether);
+        assertEq(job.claimStake, 0);
+        assertEq(job.claimFee, 0);
         require(job.disputedAt > 0, "EXPECTED_DISPUTED_AT");
-        assertEq(liquidPoster, POSTER_DEPOSIT - 50 ether);
+        assertEq(liquidPoster, POSTER_DEPOSIT - 25 ether);
         assertEq(reservedPoster, 0);
-        assertEq(liquidWorker, WORKER_DEPOSIT + 50 ether);
+        assertEq(liquidWorker, WORKER_DEPOSIT + 25 ether - 3.5 ether);
         assertEq(workerJobStake, 0);
+        assertEq(treasuryLiquid, 2.25 ether);
+        assertEq(dot.balanceOf(poster), posterTokenBalanceBefore + 1.25 ether);
         assertEq(dot.balanceOf(worker), workerTokenBalanceBefore);
-        assertEq(reputation.balanceOf(worker), 1);
+        assertEq(reputation.balanceOf(worker), 0);
     }
 
     function testSlashReputationSaturatesAtZero() public {
