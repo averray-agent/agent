@@ -204,6 +204,37 @@ contract AgentAccountAsyncStrategyTest is Test {
         assertEq(policy.accountOutflowToday(worker), 0);
     }
 
+    function testOperatorCannotRedirectStrategyWithdrawToArbitraryRecipient() public {
+        _seedSettledDeposit(40 ether, 43);
+
+        address recipient = address(0xCAFE);
+        IXcmWrapper.Weight memory maxWeight = IXcmWrapper.Weight({refTime: 10, proofSize: 5});
+        bytes32 previewId = _previewWithdrawRequestId(worker, 15 ether, recipient, 44);
+
+        (bool ok, bytes memory data) = address(accounts)
+            .call(
+                abi.encodeCall(
+                    accounts.requestStrategyWithdraw,
+                    (
+                        worker,
+                        AgentAccountCore.StrategyWithdrawRequestParams({
+                            strategyId: STRATEGY_ID,
+                            shares: 15 ether,
+                            recipient: recipient,
+                            destination: hex"0b",
+                            message: _withdrawMessage(previewId),
+                            maxWeight: maxWeight,
+                            nonce: 44
+                        })
+                    )
+                )
+            );
+        _assertCustomError(ok, data, AgentAccountCore.InvalidRecipient.selector);
+
+        assertEq(accounts.pendingStrategyWithdrawalShares(worker, STRATEGY_ID), 0);
+        assertEq(accounts.strategyShares(worker, STRATEGY_ID), 40 ether);
+    }
+
     function testExternalStrategyWithdrawEgressTripsFiniteOutflowCap() public {
         _seedSettledDeposit(40 ether, 33);
         policy.setDailyOutflowCap(10 ether);

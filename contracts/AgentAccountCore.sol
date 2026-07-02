@@ -422,6 +422,9 @@ contract AgentAccountCore is ReentrancyGuard {
     {
         if (params.shares == 0) revert ZeroAmount();
         if (params.recipient == address(0)) revert InvalidRecipient();
+        if (msg.sender != account && params.recipient != account && params.recipient != address(this)) {
+            revert InvalidRecipient();
+        }
 
         if (
             strategyShares[account][params.strategyId]
