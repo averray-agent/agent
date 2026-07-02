@@ -450,10 +450,10 @@ export class BlockchainGateway {
             arbitratorSignerAddress: undefined,
             signerIsVerifier: false,
             arbitratorSignerIsArbitrator: false,
-            escrowIsServiceOperator: false,
+            signerIsSettlementBroker: false,
             escrowIsAgentAccountEscrowOperator: false,
             escrowAgentAccountMatchesConfig: false,
-            agentAccountIsServiceOperator: false
+            agentAccountIsOutflowRecorder: false
           },
           readErrors: [],
           risk: {}
@@ -485,9 +485,9 @@ export class BlockchainGateway {
         paused,
         signerIsVerifier,
         arbitratorSignerIsArbitrator,
-        escrowIsServiceOperator,
+        signerIsSettlementBroker,
         escrowIsAgentAccountEscrowOperator,
-        agentAccountIsServiceOperator,
+        agentAccountIsOutflowRecorder,
         escrowCoreAgentAccountAddress,
         dailyOutflowCap,
         perAccountBorrowCap,
@@ -508,8 +508,8 @@ export class BlockchainGateway {
         arbitratorSignerAddress && typeof this.policyContract.arbitrators === "function"
           ? optionalBool("arbitrators(arbitratorSigner)", this.policyContract.arbitrators(arbitratorSignerAddress))
           : false,
-        this.config.escrowCoreAddress
-          ? optionalBool("serviceOperators(escrowCore)", this.policyContract.serviceOperators(this.config.escrowCoreAddress))
+        signerAddress
+          ? optionalBool("settlementBroker(signer)", this.policyContract.settlementBroker(signerAddress))
           : false,
         this.config.escrowCoreAddress && typeof this.accountContract.escrowOperators === "function"
           ? optionalBool(
@@ -518,7 +518,7 @@ export class BlockchainGateway {
             )
           : false,
         this.config.agentAccountAddress
-          ? optionalBool("serviceOperators(agentAccount)", this.policyContract.serviceOperators(this.config.agentAccountAddress))
+          ? optionalBool("outflowRecorder(agentAccount)", this.policyContract.outflowRecorder(this.config.agentAccountAddress))
           : false,
         this.config.escrowCoreAddress && typeof this.escrowContract?.accounts === "function"
           ? optionalRead("EscrowCore.accounts()", this.escrowContract.accounts(), undefined)
@@ -535,16 +535,12 @@ export class BlockchainGateway {
         optionalRead("disputeLossSkillPenalty", this.policyContract.disputeLossSkillPenalty(), 0),
         optionalRead("disputeLossReliabilityPenalty", this.policyContract.disputeLossReliabilityPenalty(), 0)
       ]);
-      // Testnet AgentAccountCore may still be the legacy deployment where
-      // escrow settlement mutators are authorized through TreasuryPolicy.
+      // Post role-split (#724): EscrowCore drives AgentAccountCore purely via the
+      // escrowOperators mechanism — the legacy serviceOperator escrow path is gone.
       const agentAccountEscrowAuthorizationMode = escrowIsAgentAccountEscrowOperator
         ? "escrowOperators"
-        : escrowIsServiceOperator
-          ? "legacyServiceOperator"
-          : "missing";
-      const agentAccountEscrowAuthorized = escrowIsAgentAccountEscrowOperator || (
-        agentAccountEscrowAuthorizationMode === "legacyServiceOperator"
-      );
+        : "missing";
+      const agentAccountEscrowAuthorized = escrowIsAgentAccountEscrowOperator;
       const escrowAgentAccountMatchesConfig = Boolean(
         escrowCoreAgentAccountAddress
           && this.config.agentAccountAddress
@@ -595,10 +591,10 @@ export class BlockchainGateway {
         pauser,
         settlementReady: Boolean(
           signerIsVerifier
-            && escrowIsServiceOperator
+            && signerIsSettlementBroker
             && agentAccountEscrowAuthorized
             && escrowAgentAccountMatchesConfig
-            && agentAccountIsServiceOperator
+            && agentAccountIsOutflowRecorder
             && supportedAssetsReady
             && paused === false
         ),
@@ -614,12 +610,12 @@ export class BlockchainGateway {
           arbitratorSignerAddress,
           signerIsVerifier,
           arbitratorSignerIsArbitrator,
-          escrowIsServiceOperator,
+          signerIsSettlementBroker,
           escrowIsAgentAccountEscrowOperator: agentAccountEscrowAuthorized,
           agentAccountEscrowAuthorizationMode,
           agentAccountEscrowOperatorsGetterReady: escrowIsAgentAccountEscrowOperator,
           escrowAgentAccountMatchesConfig,
-          agentAccountIsServiceOperator
+          agentAccountIsOutflowRecorder
         },
         signerFunding,
         readErrors,
