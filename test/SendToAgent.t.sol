@@ -41,7 +41,7 @@ contract SendToAgentTest is Test {
         dot = new MockERC20("Mock DOT", "mDOT");
 
         policy.setApprovedAsset(address(dot), true);
-        policy.setServiceOperator(operator, true);
+        policy.setAgentTransferBroker(operator, true);
 
         dot.mint(alice, ALICE_DEPOSIT);
         vm.startPrank(alice);

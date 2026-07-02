@@ -157,13 +157,23 @@ contract AgentAccountCore is ReentrancyGuard {
         registry = registry_;
     }
 
-    modifier onlyOwnerOrOperator(address account) {
-        _onlyOwnerOrOperator(account);
+    modifier onlyAccountOrSettlementBroker(address account) {
+        _onlyAccountOrSettlementBroker(account);
         _;
     }
 
-    modifier onlyOperator() {
-        _onlyOperator();
+    modifier onlyAccountOrStrategySettler(address account) {
+        _onlyAccountOrStrategySettler(account);
+        _;
+    }
+
+    modifier onlyAgentTransferBroker() {
+        _onlyAgentTransferBroker();
+        _;
+    }
+
+    modifier onlyStrategySettler() {
+        _onlyStrategySettler();
         _;
     }
 
@@ -187,12 +197,20 @@ contract AgentAccountCore is ReentrancyGuard {
         _;
     }
 
-    function _onlyOwnerOrOperator(address account) internal view {
-        if (msg.sender != account && !policy.serviceOperators(msg.sender)) revert Unauthorized();
+    function _onlyAccountOrSettlementBroker(address account) internal view {
+        if (msg.sender != account && !policy.settlementBroker(msg.sender)) revert Unauthorized();
     }
 
-    function _onlyOperator() internal view {
-        if (!policy.serviceOperators(msg.sender)) revert Unauthorized();
+    function _onlyAccountOrStrategySettler(address account) internal view {
+        if (msg.sender != account && !policy.strategySettler(msg.sender)) revert Unauthorized();
+    }
+
+    function _onlyAgentTransferBroker() internal view {
+        if (!policy.agentTransferBroker(msg.sender)) revert Unauthorized();
+    }
+
+    function _onlyStrategySettler() internal view {
+        if (!policy.strategySettler(msg.sender)) revert Unauthorized();
     }
 
     function _onlyPolicyOwner() internal view {
@@ -250,7 +268,7 @@ contract AgentAccountCore is ReentrancyGuard {
     function reserveForJob(address account, address asset, uint256 amount)
         external
         whenNotPaused
-        onlyOwnerOrOperator(account)
+        onlyAccountOrSettlementBroker(account)
         onlySupportedAsset(asset)
     {
         AssetPosition storage position = positions[account][asset];
@@ -263,7 +281,7 @@ contract AgentAccountCore is ReentrancyGuard {
     function reserveForRecurringTemplate(address account, address asset, bytes32 templateId, uint256 amount)
         external
         whenNotPaused
-        onlyOwnerOrOperator(account)
+        onlyAccountOrSettlementBroker(account)
         onlySupportedAsset(asset)
     {
         if (templateId == bytes32(0)) revert ZeroAmount();
@@ -290,7 +308,7 @@ contract AgentAccountCore is ReentrancyGuard {
     function cancelRecurringTemplateReserve(address account, address asset, bytes32 templateId, uint256 amount)
         external
         whenNotPaused
-        onlyOwnerOrOperator(account)
+        onlyAccountOrSettlementBroker(account)
         onlySupportedAsset(asset)
     {
         if (templateId == bytes32(0)) revert ZeroAmount();
@@ -349,7 +367,7 @@ contract AgentAccountCore is ReentrancyGuard {
         external
         nonReentrant
         whenNotPaused
-        onlyOwnerOrOperator(account)
+        onlyAccountOrSettlementBroker(account)
     {
         if (amount == 0) revert ZeroAmount();
         StrategyAdapterRegistry.StrategyMetadata memory strategy = registry.getStrategy(strategyId);
@@ -372,7 +390,7 @@ contract AgentAccountCore is ReentrancyGuard {
         external
         nonReentrant
         whenNotPaused
-        onlyOwnerOrOperator(account)
+        onlyAccountOrSettlementBroker(account)
     {
         if (amount == 0) revert ZeroAmount();
         StrategyAdapterRegistry.StrategyMetadata memory strategy = registry.getStrategy(strategyId);
@@ -400,7 +418,7 @@ contract AgentAccountCore is ReentrancyGuard {
         external
         nonReentrant
         whenNotPaused
-        onlyOwnerOrOperator(account)
+        onlyAccountOrStrategySettler(account)
         returns (bytes32 requestId)
     {
         if (params.amount == 0) revert ZeroAmount();
@@ -426,7 +444,7 @@ contract AgentAccountCore is ReentrancyGuard {
         external
         nonReentrant
         whenNotPaused
-        onlyOwnerOrOperator(account)
+        onlyAccountOrStrategySettler(account)
         returns (bytes32 requestId)
     {
         if (params.shares == 0) revert ZeroAmount();
@@ -475,7 +493,7 @@ contract AgentAccountCore is ReentrancyGuard {
         uint256 settledShares,
         bytes32 remoteRef,
         bytes32 failureCode
-    ) external nonReentrant onlyOperator {
+    ) external nonReentrant onlyStrategySettler {
         if (status == IXcmWrapper.RequestStatus.Unknown || status == IXcmWrapper.RequestStatus.Pending) {
             revert InvalidStrategyRequest();
         }
@@ -624,7 +642,7 @@ contract AgentAccountCore is ReentrancyGuard {
 
         _creditTreasury(asset, treasuryAmount);
         if (posterAmount > 0) {
-            policy.recordOutflow(account, posterAmount);
+            policy.recordProtocolOutflow(account, posterAmount);
             SafeTransfer.safeTransfer(asset, posterRecipient, posterAmount);
         }
 
@@ -651,7 +669,7 @@ contract AgentAccountCore is ReentrancyGuard {
 
         _creditTreasury(asset, treasuryAmount);
         if (verifierAmount > 0) {
-            policy.recordOutflow(account, verifierAmount);
+            policy.recordProtocolOutflow(account, verifierAmount);
             SafeTransfer.safeTransfer(asset, verifierRecipient, verifierAmount);
         }
 
@@ -682,7 +700,7 @@ contract AgentAccountCore is ReentrancyGuard {
     /**
      * Operator-initiated variant of `sendToAgent`. Used by the HTTP
      * backend when relaying a user-authorised transfer: the backend's
-     * signer (a service operator) pays gas, but the contract still
+     * signer (an agent-transfer broker) pays gas, but the contract still
      * requires an EIP-712 signature from `from` over the exact transfer,
      * nonce, deadline, chain id, and this contract address.
      */
@@ -694,7 +712,7 @@ contract AgentAccountCore is ReentrancyGuard {
         uint256 nonce,
         uint256 deadline,
         bytes calldata signature
-    ) external whenNotPaused onlyOperator onlySupportedAsset(asset) {
+    ) external whenNotPaused onlyAgentTransferBroker onlySupportedAsset(asset) {
         _useSendToAgentAuthorization(from, recipient, asset, amount, nonce, deadline, signature);
         _sendToAgent(from, recipient, asset, amount);
     }

@@ -61,8 +61,8 @@ contract XcmWrapperTest is Test {
         precompile = new MockXcmPrecompile();
         wrapper = new XcmWrapper(policy, address(precompile));
 
-        policy.setServiceOperator(operator, true);
-        policy.setServiceOperator(operator2, true);
+        policy.setStrategySettler(operator, true);
+        policy.setStrategySettler(operator2, true);
     }
 
     function testQueueRequestPersistsPendingRecord() public {

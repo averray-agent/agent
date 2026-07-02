@@ -29,7 +29,11 @@ contract TreasuryPolicy {
 
     mapping(address => bool) public approvedAssets;
     mapping(address => bool) public approvedStrategies;
-    mapping(address => bool) public serviceOperators;
+    mapping(address => bool) public settlementBroker;
+    mapping(address => bool) public agentTransferBroker;
+    mapping(address => bool) public strategySettler;
+    mapping(address => bool) public reputationWriter;
+    mapping(address => bool) public outflowRecorder;
     mapping(address => bool) public trustedSchemaIssuers;
     mapping(address => bool) public verifiers;
     mapping(address => uint64) public authorizedSince;
@@ -50,7 +54,11 @@ contract TreasuryPolicy {
     event PauseUpdated(bool paused);
     event AssetApprovalUpdated(address indexed asset, bool approved);
     event StrategyApprovalUpdated(address indexed strategy, bool approved);
-    event ServiceOperatorUpdated(address indexed operator, bool approved);
+    event SettlementBrokerUpdated(address indexed operator, bool approved);
+    event AgentTransferBrokerUpdated(address indexed operator, bool approved);
+    event StrategySettlerUpdated(address indexed operator, bool approved);
+    event ReputationWriterUpdated(address indexed operator, bool approved);
+    event OutflowRecorderUpdated(address indexed operator, bool approved);
     event TrustedSchemaIssuerSet(address indexed issuer, bool approved);
     event VerifierUpdated(address indexed verifier, bool approved);
     event ArbitratorUpdated(address indexed arbitrator, bool approved);
@@ -133,9 +141,29 @@ contract TreasuryPolicy {
         emit StrategyApprovalUpdated(strategy, approved);
     }
 
-    function setServiceOperator(address operator, bool approved) external onlyOwner {
-        serviceOperators[operator] = approved;
-        emit ServiceOperatorUpdated(operator, approved);
+    function setSettlementBroker(address operator, bool approved) external onlyOwner {
+        settlementBroker[operator] = approved;
+        emit SettlementBrokerUpdated(operator, approved);
+    }
+
+    function setAgentTransferBroker(address operator, bool approved) external onlyOwner {
+        agentTransferBroker[operator] = approved;
+        emit AgentTransferBrokerUpdated(operator, approved);
+    }
+
+    function setStrategySettler(address operator, bool approved) external onlyOwner {
+        strategySettler[operator] = approved;
+        emit StrategySettlerUpdated(operator, approved);
+    }
+
+    function setReputationWriter(address operator, bool approved) external onlyOwner {
+        reputationWriter[operator] = approved;
+        emit ReputationWriterUpdated(operator, approved);
+    }
+
+    function setOutflowRecorder(address operator, bool approved) external onlyOwner {
+        outflowRecorder[operator] = approved;
+        emit OutflowRecorderUpdated(operator, approved);
     }
 
     function setTrustedSchemaIssuer(address issuer, bool approved) external onlyOwner {
@@ -257,8 +285,17 @@ contract TreasuryPolicy {
         emit DisputeLossReliabilityPenaltyUpdated(penalty);
     }
 
-    function recordOutflow(address account, uint256 amount) external whenNotPaused {
-        if (!serviceOperators[msg.sender]) revert Unauthorized();
+    function recordOutflow(address account, uint256 amount) external {
+        if (!outflowRecorder[msg.sender]) revert Unauthorized();
+        _recordOutflow(account, amount, true);
+    }
+
+    function recordProtocolOutflow(address account, uint256 amount) external {
+        if (!outflowRecorder[msg.sender]) revert Unauthorized();
+        _recordOutflow(account, amount, false);
+    }
+
+    function _recordOutflow(address account, uint256 amount, bool enforceCap) internal {
         require(account != address(0), "ZERO_ACCOUNT");
         uint256 dayNumber = block.timestamp / 1 days;
         if (dayNumber != currentDay) {
@@ -270,7 +307,7 @@ contract TreasuryPolicy {
             accountOutflowToday[account] = 0;
         }
         uint256 accountTotal = accountOutflowToday[account] + amount;
-        if (accountTotal > dailyOutflowCap) revert OutflowCapExceeded();
+        if (enforceCap && accountTotal > dailyOutflowCap) revert OutflowCapExceeded();
         accountOutflowToday[account] = accountTotal;
         outflowToday += amount;
         emit OutflowRecorded(account, dayNumber, amount, accountTotal, outflowToday);

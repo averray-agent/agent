@@ -57,10 +57,11 @@ contract ExternalSchemaRegistrationTest is Test {
         escrow = new EscrowCore(policy, accounts, reputation);
         dot = new MockERC20("Mock DOT", "mDOT");
         policy.setApprovedAsset(address(dot), true);
-        policy.setServiceOperator(address(escrow), true);
+        policy.setSettlementBroker(address(escrow), true);
+        policy.setReputationWriter(address(escrow), true);
         accounts.setEscrowOperator(address(escrow), true);
-        policy.setServiceOperator(address(accounts), true);
-        policy.setServiceOperator(address(this), true);
+        policy.setOutflowRecorder(address(accounts), true);
+        policy.setSettlementBroker(address(this), true);
 
         dot.mint(poster, 1_000 ether);
         vm.startPrank(poster);
@@ -136,7 +137,8 @@ contract ExternalSchemaRegistrationTest is Test {
         bytes32 jobId = keccak256("job/external-schema/replay-contract");
         bytes memory signature = signExternalSchema(escrow, jobId, ISSUER_KEY);
         EscrowCore otherEscrow = new EscrowCore(policy, accounts, reputation);
-        policy.setServiceOperator(address(otherEscrow), true);
+        policy.setSettlementBroker(address(otherEscrow), true);
+        policy.setReputationWriter(address(otherEscrow), true);
         accounts.setEscrowOperator(address(otherEscrow), true);
 
         vm.prank(poster);
@@ -238,9 +240,7 @@ contract ExternalSchemaRegistrationTest is Test {
             abi.encode(EIP712_DOMAIN_TYPEHASH, EIP712_NAME_HASH, EIP712_VERSION_HASH, chainId, address(target))
         );
         bytes32 structHash = keccak256(
-            abi.encode(
-                target.EXTERNAL_SCHEMA_REGISTRATION_TYPEHASH(), SCHEMA_HASH, keccak256(bytes(SCHEMA_URL)), jobId
-            )
+            abi.encode(target.EXTERNAL_SCHEMA_REGISTRATION_TYPEHASH(), SCHEMA_HASH, keccak256(bytes(SCHEMA_URL)), jobId)
         );
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
         (uint8 v, bytes32 r, bytes32 s) = vmSign.sign(signerKey, digest);

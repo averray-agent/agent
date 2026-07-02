@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   parseArgs,
   assertArtifactHasAgentAccountSelectors,
+  assertArtifactHasTreasuryPolicySelectors,
   rewriteSettlementAddressesInTemplate
 } from "./redeploy-agent-account-escrow-stack.mjs";
 
@@ -80,6 +81,34 @@ test("assertArtifactHasAgentAccountSelectors rejects stale May-era AAC artifacts
   assert.throws(
     () => assertArtifactHasAgentAccountSelectors(abiWith(["deposit", "withdraw", "reserveForJob"])),
     /missing selector\(s\): escrowOperators, setEscrowOperator, domainSeparator/u
+  );
+});
+
+test("assertArtifactHasTreasuryPolicySelectors accepts the role-split policy surface", () => {
+  assert.doesNotThrow(() =>
+    assertArtifactHasTreasuryPolicySelectors(
+      abiWith([
+        "settlementBroker",
+        "setSettlementBroker",
+        "agentTransferBroker",
+        "setAgentTransferBroker",
+        "strategySettler",
+        "setStrategySettler",
+        "reputationWriter",
+        "setReputationWriter",
+        "outflowRecorder",
+        "setOutflowRecorder",
+        "recordOutflow",
+        "recordProtocolOutflow"
+      ])
+    )
+  );
+});
+
+test("assertArtifactHasTreasuryPolicySelectors rejects the stale service-operator policy surface", () => {
+  assert.throws(
+    () => assertArtifactHasTreasuryPolicySelectors(abiWith(["serviceOperators", "setServiceOperator", "recordOutflow"])),
+    /missing selector\(s\): settlementBroker, setSettlementBroker/u
   );
 });
 

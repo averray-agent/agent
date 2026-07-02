@@ -38,8 +38,8 @@ contract XcmVdotAdapterTest is Test {
         wrapper = new XcmWrapper(policy, address(precompile));
         adapter = new XcmVdotAdapter(policy, address(asset), STRATEGY_ID, IXcmWrapper(address(wrapper)));
 
-        policy.setServiceOperator(operator, true);
-        policy.setServiceOperator(address(adapter), true);
+        policy.setStrategySettler(operator, true);
+        policy.setStrategySettler(address(adapter), true);
 
         asset.mint(operator, 100 ether);
         vm.prank(operator);

@@ -24,7 +24,7 @@ Two consequences, both bad:
 - **Meter real egress only:** call `recordOutflow` from `withdraw` and from the *transferred* legs of `slashJobStake` / `slashClaimFee`.
 - **Stop metering internal book-moves:** remove `recordOutflow` from `settleReservedTo` and from the trapped treasury legs (tokens-stay-in-contract paths).
 - **Make a breach non-fatal to internal accounting:** a settlement-volume or egress breach must not brick settlement — prefer a **per-account** meter and/or a non-reverting throttle over the single global reverting counter.
-- **Split + restrict the `serviceOperators` role** (see Architectural section) so the arming of a finite cap does not simultaneously widen attack surface.
+- **Split + restrict the former broad operator role** (see Architectural section) so the arming of a finite cap does not simultaneously widen attack surface.
 
 Only after this re-wire is a finite `dailyOutflowCap` a genuine guardrail. This directly rewrites the "ship capped, then set finite caps" line in the guarded-launch profile.
 
@@ -42,7 +42,7 @@ Only after this re-wire is a finite `dailyOutflowCap` a genuine guardrail. This 
 - `settleReservedTo()` no longer calls `recordOutflow` (a `reserved → liquid/debt` book-move records nothing); self-recipient strategy withdraws and treasury slash legs record nothing (they move no tokens externally — resolved jointly with H-2).
 - Foundry test: driving `settleReservedTo` volume past a finite `dailyOutflowCap` does **not** revert any settlement.
 - Foundry test: cumulative `withdraw` egress past a finite `dailyOutflowCap` **does** trip the breaker.
-- The breach path does not brick internal accounting (per-account meter and/or non-reverting throttle), and the `serviceOperators` role has been split before the finite cap is armed.
+- The breach path does not brick internal accounting (per-account meter and/or non-reverting throttle), and the former broad operator role has been split before the finite cap is armed.
 
 ### H-2 — Acceptance criteria
 - After `slashJobStake` / `slashClaimFee`, the `treasuryAmount` is credited to a designated treasury account's liquid balance or transferred to a treasury address — never left as an orphaned contract balance.
@@ -72,7 +72,7 @@ Only after this re-wire is a finite `dailyOutflowCap` a genuine guardrail. This 
 | ID | Finding | Location | Prior board | One-line fix |
 |----|---------|----------|-------------|--------------|
 | **L-1** | `dailyOutflowCap` / `perAccountBorrowCap` default to `type(uint256).max` — guardrails inert until set | `TreasuryPolicy.sol` ctor:73-74 | **= C-01 (defaults)** | Set finite caps post-deploy — **but note H-1: do NOT arm `dailyOutflowCap` until the breaker is re-wired to meter real egress.** |
-| **L-2** | If AAC isn't a registered `serviceOperator`, every settlement/slash reverts `Unauthorized()` — silent deploy dependency | `TreasuryPolicy.recordOutflow`:254-255 (callers AAC:319,602,630) | **= C-03** | Add a deploy-script assertion + post-deploy verification that AAC is `setServiceOperator`-registered before enabling settlement/slash. |
+| **L-2** | If AAC isn't registered as `outflowRecorder`, egress metering and protocol slash outflow recording revert `Unauthorized()` — silent deploy dependency | `TreasuryPolicy.recordOutflow` / `recordProtocolOutflow` (callers AAC withdraw / strategy / slash paths) | **= C-03** | **In review; auditor re-verification pending.** Deploy finalization now asserts `outflowRecorder(newAAC)` plus role-split broker grants before enabling settlement/slash. |
 | **L-3** | `workerClaimCount` never restored on timeout → a timed-out claim permanently burns an onboarding-waiver slot | `EscrowCore.handleClaimTimeout`:516-538 | **= C-18** | Decrement `workerClaimCount[job.worker]` (guard underflow) before clearing `job.worker`. |
 | **L-4** | `SafeTransfer` to a codeless address returns `ok=true` with empty data → silently "succeeds" | `SafeTransfer.sol` `_checkResult`:29-36 (call site :14-15) | new | Add an `extcodesize > 0` check before the low-level call when return data is empty, so codeless-address transfers revert. |
 | **L-5** | XcmWrapper request has no expiry/cancel; only lifecycle exit is operator-called `finalizeRequest` → never-settled requests stuck `Pending` forever | `XcmWrapper.sol` `finalizeRequest`:145-179 (no expiry path in file) | **= C-09** | Add an expiry deadline or owner/user-callable `cancelRequest` (`Pending → Cancelled` after `createdAt + TTL`). |
@@ -110,7 +110,7 @@ To prevent double-tracking between this board and `MAINNET_AUDIT_REMEDIATION.md`
 | **M-2** | **= (confirms)** | **C-17** | Same `autoResolveOnTimeout`-favors-worker finding; audit-2 upgrades severity to Medium and adds the merit-free reputation-badge concern. |
 | **M-6** | **= (confirms)** | **C-13** | XCM-path analog of the audit-1 "pause blocks slashing/refunds" class — pausing traps in-flight strategy deposits. |
 | **L-1** | **= (confirms, defaults)** | **C-01** (defaults) | The `type(uint256).max` default caps. Gated on the H-1 re-wire before any finite value is armed. |
-| **L-2** | **= (confirms)** | **C-03** | Same "AAC must be `serviceOperator` or slashing reverts" silent deploy dependency. |
+| **L-2** | **= (confirms)** | **C-03** | Same silent deploy dependency, now narrowed to `outflowRecorder(newAAC)` and the paired broker-role grants instead of a broad service-operator role. |
 | **L-3** | **= (confirms)** | **C-18** | Same `workerClaimCount` never-decremented onboarding-waiver burn. |
 | **L-5** | **= (confirms)** | **C-09** | Same "XcmWrapper request ledger has no expiry" finding. |
 
@@ -149,7 +149,7 @@ To prevent double-tracking between this board and `MAINNET_AUDIT_REMEDIATION.md`
 - **M-8 — `EscrowCore.resolveMilestone` (:633-636):** in review; on the re-Claim branch, re-scope `job.claimStake` to `(job.reward − job.released)` and release the excess locked stake. *Test:* after N−1 releases, the final-milestone timeout slashes only the remaining-reward-scaled stake.
 
 ### 4. Lows
-- **L-1 / L-2 — `TreasuryPolicy` ctor + deploy script:** set finite `perAccountBorrowCap` post-deploy; **defer `dailyOutflowCap` arming until H-1 lands**; add a deploy assertion that AAC is `setServiceOperator`-registered. *Test:* deploy script fails closed if AAC isn't a service operator.
+- **L-1 / L-2 — `TreasuryPolicy` ctor + deploy script:** set finite `perAccountBorrowCap` post-deploy; **defer `dailyOutflowCap` arming until H-1 lands**; add deploy assertions that the new AAC is `outflowRecorder` and the new Escrow/backend signer have the required broker roles. *Test:* deploy script fails closed if the role-split grants are missing.
 - **L-3 — `EscrowCore.handleClaimTimeout` (:528):** decrement `workerClaimCount[job.worker]` (underflow-guarded) before clearing `job.worker`. *Test:* a timed-out claim restores waiver eligibility.
 - **L-4 — `SafeTransfer._checkResult` (:29-36):** `extcodesize > 0` guard before the low-level call when return data is empty. *Test:* transfer to an EOA/codeless address reverts.
 - **L-5 — `XcmWrapper`:** add `cancelRequest` (`Pending → Cancelled` after `createdAt + TTL`) or an expiry deadline. *Test:* a stale `Pending` request is reclaimable after TTL.
@@ -174,7 +174,7 @@ To prevent double-tracking between this board and `MAINNET_AUDIT_REMEDIATION.md`
 
 ## Architectural & centralization
 
-- **Split the overloaded `serviceOperators` role — do this BEFORE arming any finite cap.** A single `serviceOperators` mapping currently gates `recordOutflow`, `finalizeRequest`, `settleRequest`, `requestStrategyWithdraw`, and the escrow settlement path. It is simultaneously the trust root behind H-1 (outflow metering), M-4 (XCM finalize), M-5 (share-price minting), and L-9 (strategy-withdraw redirect). Arming a finite `dailyOutflowCap` (the H-1 fix) on top of this single broad role would *add* attack surface: the same key that can now settle could also self-DoS or shape the meter. Decompose into least-privilege roles (e.g. `escrowSettler`, `outflowRecorder`, `xcmFinalizer`, `strategySettler`) so each path is gated by the narrowest role and no single operator key spans egress + settlement + XCM + strategy.
+- **Split the former overloaded `serviceOperators` role — in review; do this BEFORE arming any finite cap.** The broad mapping is removed from the contract surface and replaced by owner-settable `settlementBroker`, `agentTransferBroker`, `strategySettler`, `reputationWriter`, and `outflowRecorder` roles. `recordOutflow` is now an enforcing `outflowRecorder` path, while protocol slash egress uses record-only `recordProtocolOutflow` so the penalized account cannot self-DoS penalties by exhausting its own meter. Launch wiring grants `outflowRecorder(newAAC)`, `settlementBroker(newEscrow + signer)`, `agentTransferBroker(signer)`, and `reputationWriter(newEscrow + signer)`; `strategySettler` stays ungranted while XCM is disabled.
 - **Owner → multisig.** All owner-only setters (caps, verifier/operator/pauser/arbitrator roles, strategy approvals, treasury sink) must resolve to the mapped 2-of-3 multisig, not a single deployer EOA, before mainnet — consistent with the deploy-sprint ceremony in `LAUNCH_CRITICAL_PATH.md`.
 - **No treasury sink exists (root cause of H-2).** A repo-wide grep for `rescue|sweep|skim|withdrawTreasury|treasuryRecipient|collectFees` returns zero matches. The absence of any treasury destination is why slashed treasury portions and full claim-timeout fees are permanently trapped. Adding a real, owner/multisig-gated treasury sink is a prerequisite, not a nicety.
 - **XCM operator trust is the least-hardened value path.** `XcmWrapper.finalizeRequest`, `XcmVdotAdapter.settleRequest`, and `StrategyAdapterRegistry` collectively let an operator supply terminal status, arbitrary settled amounts, arbitrary share prices, and re-point adapters — with the raw XCM bytes trusted (no asset/amount/beneficiary decode, L-6) and no remote proof. This is the weakest link in the value path and reinforces keeping **XCM vDOT disabled for mainnet** until native observer correlation is live (consistent with the audit-1 disposition of the XCM operator-oracle High).
@@ -193,9 +193,9 @@ Several contract fixes carry an off-chain or ops action that must land alongside
 |--------|-------|---------|------|
 | **Do NOT arm a finite `DAILY_OUTFLOW_CAP`** until the breaker is re-wired and protocol-initiated slash egress is made record-only/cap-exempt (currently specced at 250 USDC in `MAINNET_PARAMETERS.md`) | Pascal / ops | H-1 | now — config discipline |
 | **Set the treasury-sink destination** (which multisig/address collects slashed treasury funds) via `AgentAccountCore.setTreasuryAccount` during the deploy ceremony | Pascal / ops | H-2 | before finalizing the paired contract manifest |
-| **Provision + assign the split operator-role keys** (`escrowSettler` / `outflowRecorder` / `xcmFinalizer` / `strategySettler`) | Pascal / ops | serviceOperators split | after Codex defines the roles |
+| **Provision + assign the split operator-role keys** (`settlementBroker` / `agentTransferBroker` / `strategySettler` / `reputationWriter` / `outflowRecorder`) | Pascal / ops | role split | after Codex defines the roles |
 | **owner → multisig** for all owner-only setters | Pascal / ops | Architectural | launch ceremony (already roadmapped) |
-| **Backend adopts the split roles** — `mcp-server/src/blockchain/gateway.js` reads `serviceOperators(escrowCore/agentAccount)` and the KMS signer *acts as* an operator; needs role-scoped keys + role-aware health checks | Claude (backend) | serviceOperators split | follow-on, after Codex lands the role shape |
+| **Backend adopts the split roles** — `mcp-server/src/blockchain/gateway.js` still needs role-aware health checks and KMS signer readiness against `settlementBroker` / `agentTransferBroker` / `reputationWriter` rather than the removed broad operator mapping | Claude (backend) | role split | follow-on, after Codex lands the role shape |
 | **Backend XCM settlement echo** — `mcp-server/src/services/xcm-observation-relay.js` produces the operator-supplied `settledAssets/settledShares`; must align if M-5 moves share derivation on-chain (ties to invariant-9 / 6dp↔18dp) | Claude (backend) | M-5 | follow-on, after Codex's M-5 fix |
 | **Indexer consumes any new events** (e.g. the L-11 debt-repayment event) | Claude (indexer) | L-11 + new events | follow-on |
 

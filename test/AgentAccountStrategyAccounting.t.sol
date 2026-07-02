@@ -79,7 +79,7 @@ contract RevertingValuationStrategyAdapter is IStrategyAdapter {
             token = new MockERC20("Mock DOT", "mDOT");
 
             policy.setApprovedAsset(address(token), true);
-            policy.setServiceOperator(address(accounts), true);
+            policy.setStrategySettler(address(accounts), true);
 
             token.mint(worker, WORKER_DEPOSIT);
             vm.startPrank(worker);

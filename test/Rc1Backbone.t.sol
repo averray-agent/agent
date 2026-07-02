@@ -34,9 +34,18 @@ contract Rc1BackboneTest is Test {
     bytes32 internal constant PAYLOAD_HASH = bytes32("PAYLOAD_HASH");
     bytes32 internal constant REASONING_HASH = bytes32("REASONING_HASH");
 
-    event JobCreated(bytes32 indexed jobId, address indexed poster, bytes32 indexed specHash, address asset, uint256 totalReserved, EscrowCore.PayoutMode payoutMode);
+    event JobCreated(
+        bytes32 indexed jobId,
+        address indexed poster,
+        bytes32 indexed specHash,
+        address asset,
+        uint256 totalReserved,
+        EscrowCore.PayoutMode payoutMode
+    );
     event Submitted(bytes32 indexed jobId, address indexed worker, bytes32 indexed payloadHash);
-    event Verified(bytes32 indexed jobId, address indexed verifier, bool approved, bytes32 reasonCode, bytes32 reasoningHash);
+    event Verified(
+        bytes32 indexed jobId, address indexed verifier, bool approved, bytes32 reasonCode, bytes32 reasoningHash
+    );
     event Disclosed(bytes32 indexed hash, address indexed byWallet, uint64 timestamp);
     event AutoDisclosed(bytes32 indexed hash, uint64 timestamp);
 
@@ -49,10 +58,11 @@ contract Rc1BackboneTest is Test {
         dot = new MockERC20("Mock DOT", "mDOT");
 
         policy.setApprovedAsset(address(dot), true);
-        policy.setServiceOperator(address(escrow), true);
+        policy.setSettlementBroker(address(escrow), true);
+        policy.setReputationWriter(address(escrow), true);
         accounts.setEscrowOperator(address(escrow), true);
-        policy.setServiceOperator(address(accounts), true);
-        policy.setServiceOperator(address(this), true);
+        policy.setOutflowRecorder(address(accounts), true);
+        policy.setSettlementBroker(address(this), true);
         policy.setDailyOutflowCap(type(uint256).max);
 
         dot.mint(poster, 1_000 ether);
@@ -73,12 +83,13 @@ contract Rc1BackboneTest is Test {
         bytes32 jobId = prepareSubmittedJob("job/unauthorized");
 
         vm.prank(stranger);
-        (bool ok,) = address(escrow).call(
-            abi.encodeCall(
-                escrow.resolveSinglePayout,
-                (jobId, true, bytes32("OK"), "ipfs://badge/unauthorized", REASONING_HASH)
-            )
-        );
+        (bool ok,) = address(escrow)
+            .call(
+                abi.encodeCall(
+                    escrow.resolveSinglePayout,
+                    (jobId, true, bytes32("OK"), "ipfs://badge/unauthorized", REASONING_HASH)
+                )
+            );
 
         require(!ok, "EXPECTED_UNAUTHORIZED_REVERT");
     }
@@ -100,12 +111,12 @@ contract Rc1BackboneTest is Test {
         policy.setVerifier(verifier, false);
 
         vm.prank(verifier);
-        (bool ok,) = address(escrow).call(
-            abi.encodeCall(
-                escrow.resolveSinglePayout,
-                (jobId, true, bytes32("OK"), "ipfs://badge/removed", REASONING_HASH)
-            )
-        );
+        (bool ok,) = address(escrow)
+            .call(
+                abi.encodeCall(
+                    escrow.resolveSinglePayout, (jobId, true, bytes32("OK"), "ipfs://badge/removed", REASONING_HASH)
+                )
+            );
 
         require(!ok, "EXPECTED_REMOVED_VERIFIER_REVERT");
     }
@@ -173,27 +184,24 @@ contract Rc1BackboneTest is Test {
     }
 
     function testReputationSbtTransferMethodsAreSoulbound() public {
-        policy.setServiceOperator(address(this), true);
+        policy.setReputationWriter(address(this), true);
         uint256 tokenId = reputation.mintBadge(worker, bytes32("CODING"), 1, "ipfs://badge/sbt");
 
-        (bool transferFromOk,) = address(reputation).call(
-            abi.encodeCall(reputation.transferFrom, (worker, poster, tokenId))
-        );
+        (bool transferFromOk,) =
+            address(reputation).call(abi.encodeCall(reputation.transferFrom, (worker, poster, tokenId)));
         require(!transferFromOk, "EXPECTED_TRANSFER_FROM_REVERT");
 
-        (bool transferOk,) = address(reputation).call(
-            abi.encodeCall(reputation.transfer, (poster, tokenId))
-        );
+        (bool transferOk,) = address(reputation).call(abi.encodeCall(reputation.transfer, (poster, tokenId)));
         require(!transferOk, "EXPECTED_TRANSFER_REVERT");
 
-        (bool safeTransferOk,) = address(reputation).call(
-            abi.encodeWithSignature("safeTransferFrom(address,address,uint256)", worker, poster, tokenId)
-        );
+        (bool safeTransferOk,) = address(reputation)
+            .call(abi.encodeWithSignature("safeTransferFrom(address,address,uint256)", worker, poster, tokenId));
         require(!safeTransferOk, "EXPECTED_SAFE_TRANSFER_REVERT");
 
-        (bool safeTransferWithDataOk,) = address(reputation).call(
-            abi.encodeWithSignature("safeTransferFrom(address,address,uint256,bytes)", worker, poster, tokenId, "")
-        );
+        (bool safeTransferWithDataOk,) = address(reputation)
+            .call(
+                abi.encodeWithSignature("safeTransferFrom(address,address,uint256,bytes)", worker, poster, tokenId, "")
+            );
         require(!safeTransferWithDataOk, "EXPECTED_SAFE_TRANSFER_DATA_REVERT");
     }
 
@@ -204,7 +212,9 @@ contract Rc1BackboneTest is Test {
         vmEvent.expectEmit(true, true, true, true, address(escrow));
         emit JobCreated(jobId, poster, SPEC_HASH, address(dot), 10 ether, EscrowCore.PayoutMode.Single);
         vm.prank(poster);
-        escrow.createSinglePayoutJob(jobId, address(dot), 10 ether, 0, 0, 1 days, bytes32("AUTO"), bytes32("CODING"), SPEC_HASH);
+        escrow.createSinglePayoutJob(
+            jobId, address(dot), 10 ether, 0, 0, 1 days, bytes32("AUTO"), bytes32("CODING"), SPEC_HASH
+        );
 
         vm.prank(worker);
         escrow.claimJob(jobId);
@@ -223,7 +233,9 @@ contract Rc1BackboneTest is Test {
     function prepareSubmittedJob(string memory label) internal returns (bytes32 jobId) {
         jobId = keccak256(bytes(label));
         vm.prank(poster);
-        escrow.createSinglePayoutJob(jobId, address(dot), 10 ether, 0, 0, 1 days, bytes32("AUTO"), bytes32("CODING"), SPEC_HASH);
+        escrow.createSinglePayoutJob(
+            jobId, address(dot), 10 ether, 0, 0, 1 days, bytes32("AUTO"), bytes32("CODING"), SPEC_HASH
+        );
         vm.prank(worker);
         escrow.claimJob(jobId);
         vm.prank(worker);

@@ -2,12 +2,11 @@
 
 /**
  * Emit the polkadot-js-apps multisig.asMulti recipe for wiring a freshly
- * redeployed EscrowCore as both an AgentAccountCore escrow operator and a
- * TreasuryPolicy serviceOperator (and optionally revoking the stale one in
- * the same batch). When AgentAccountCore is redeployed too, pass
- * --new-agent-account so the same batch also approves the fresh AAC as a
- * TreasuryPolicy serviceOperator and targets setEscrowOperator on that
- * fresh AAC.
+ * redeployed EscrowCore as an AgentAccountCore escrow operator plus the
+ * least-privilege TreasuryPolicy roles it needs (and optionally revoking
+ * stale roles in the same batch). When AgentAccountCore is redeployed too,
+ * pass --new-agent-account so the same batch also approves the fresh AAC
+ * as the outflow recorder and targets setEscrowOperator on that fresh AAC.
  *
  * Why a recipe and not an EVM commit:
  *   TreasuryPolicy.owner() is the H160 mapping of the SS58 2-of-3 multisig
@@ -20,11 +19,16 @@
  *     otherSignatories: [other two signers in AccountId32 byte order],
  *     maybeTimepoint: <None for first leg, Some({height,index}) for second>,
  *     call: utility.batchAll([
- *       revive.call(TreasuryPolicy.setServiceOperator(newAgentAccount, true)), // only with --new-agent-account
+ *       revive.call(TreasuryPolicy.setOutflowRecorder(newAgentAccount, true)), // only with --new-agent-account
  *       revive.call(NewAgentAccountCore.setEscrowOperator(newEscrow, true)),
- *       revive.call(TreasuryPolicy.setServiceOperator(newEscrow, true)),
+ *       revive.call(TreasuryPolicy.setSettlementBroker(newEscrow, true)),
+ *       revive.call(TreasuryPolicy.setReputationWriter(newEscrow, true)),
+ *       revive.call(TreasuryPolicy.setSettlementBroker(backendSigner, true)),
+ *       revive.call(TreasuryPolicy.setAgentTransferBroker(backendSigner, true)),
+ *       revive.call(TreasuryPolicy.setReputationWriter(backendSigner, true)),
  *       revive.call(OldAgentAccountCore.setEscrowOperator(oldEscrow, false)),
- *       revive.call(TreasuryPolicy.setServiceOperator(oldEscrow, false))
+ *       revive.call(TreasuryPolicy.setSettlementBroker(oldEscrow, false)),
+ *       revive.call(TreasuryPolicy.setReputationWriter(oldEscrow, false))
  *     ]),
  *     maxWeight: { refTime, proofSize }
  *   )
@@ -35,8 +39,13 @@
  * Single-leg variant (pass --skip-revoke):
  *   multisig.asMulti(
  *     call: utility.batchAll([
+ *       revive.call(TreasuryPolicy.setOutflowRecorder(newAgentAccount, true)), // only with --new-agent-account
  *       revive.call(AgentAccountCore.setEscrowOperator(newEscrow, true)),
- *       revive.call(TreasuryPolicy.setServiceOperator(newEscrow, true))
+ *       revive.call(TreasuryPolicy.setSettlementBroker(newEscrow, true)),
+ *       revive.call(TreasuryPolicy.setReputationWriter(newEscrow, true)),
+ *       revive.call(TreasuryPolicy.setSettlementBroker(backendSigner, true)),
+ *       revive.call(TreasuryPolicy.setAgentTransferBroker(backendSigner, true)),
+ *       revive.call(TreasuryPolicy.setReputationWriter(backendSigner, true))
  *     ])
  *   )
  *
@@ -82,7 +91,10 @@ const SIGNER_ALIASES = {
 };
 
 const TREASURY_POLICY_ABI = [
-  "function setServiceOperator(address account, bool allowed)"
+  "function setSettlementBroker(address account, bool allowed)",
+  "function setAgentTransferBroker(address account, bool allowed)",
+  "function setReputationWriter(address account, bool allowed)",
+  "function setOutflowRecorder(address account, bool allowed)"
 ];
 
 const AGENT_ACCOUNT_ABI = [
@@ -219,6 +231,7 @@ export function buildInnerCalls({
   agentAccount,
   newEscrow,
   oldEscrow,
+  backendSigner,
   skipRevoke,
   newAgentAccount,
   oldAgentAccount
@@ -228,9 +241,9 @@ export function buildInnerCalls({
   const calls = [];
   if (newAgentAccount) {
     calls.push({
-      label: `TreasuryPolicy.setServiceOperator(${newAgentAccount}, true)  // approve new AgentAccountCore accounting authority`,
+      label: `TreasuryPolicy.setOutflowRecorder(${newAgentAccount}, true)  // approve new AgentAccountCore egress-meter writer`,
       to: treasuryPolicy,
-      data: policyIface.encodeFunctionData("setServiceOperator", [newAgentAccount, true])
+      data: policyIface.encodeFunctionData("setOutflowRecorder", [newAgentAccount, true])
     });
   }
   calls.push(
@@ -240,11 +253,35 @@ export function buildInnerCalls({
       data: accountIface.encodeFunctionData("setEscrowOperator", [newEscrow, true])
     },
     {
-      label: `TreasuryPolicy.setServiceOperator(${newEscrow}, true)  // approve new EscrowCore policy authority`,
+      label: `TreasuryPolicy.setSettlementBroker(${newEscrow}, true)  // approve new EscrowCore account-reserve broker`,
       to: treasuryPolicy,
-      data: policyIface.encodeFunctionData("setServiceOperator", [newEscrow, true])
+      data: policyIface.encodeFunctionData("setSettlementBroker", [newEscrow, true])
+    },
+    {
+      label: `TreasuryPolicy.setReputationWriter(${newEscrow}, true)  // approve new EscrowCore reputation writer`,
+      to: treasuryPolicy,
+      data: policyIface.encodeFunctionData("setReputationWriter", [newEscrow, true])
     }
   );
+  if (backendSigner) {
+    calls.push(
+      {
+        label: `TreasuryPolicy.setSettlementBroker(${backendSigner}, true)  // approve backend signer brokered escrow entrypoints`,
+        to: treasuryPolicy,
+        data: policyIface.encodeFunctionData("setSettlementBroker", [backendSigner, true])
+      },
+      {
+        label: `TreasuryPolicy.setAgentTransferBroker(${backendSigner}, true)  // approve backend signer user-authorized agent transfers`,
+        to: treasuryPolicy,
+        data: policyIface.encodeFunctionData("setAgentTransferBroker", [backendSigner, true])
+      },
+      {
+        label: `TreasuryPolicy.setReputationWriter(${backendSigner}, true)  // approve backend signer direct reputation maintenance`,
+        to: treasuryPolicy,
+        data: policyIface.encodeFunctionData("setReputationWriter", [backendSigner, true])
+      }
+    );
+  }
   if (!skipRevoke) {
     calls.push({
       label: `AgentAccountCore.setEscrowOperator(${oldEscrow}, false)  // revoke stale EscrowCore ledger authority`,
@@ -252,9 +289,14 @@ export function buildInnerCalls({
       data: accountIface.encodeFunctionData("setEscrowOperator", [oldEscrow, false])
     });
     calls.push({
-      label: `TreasuryPolicy.setServiceOperator(${oldEscrow}, false)  // revoke stale EscrowCore policy authority`,
+      label: `TreasuryPolicy.setSettlementBroker(${oldEscrow}, false)  // revoke stale EscrowCore broker authority`,
       to: treasuryPolicy,
-      data: policyIface.encodeFunctionData("setServiceOperator", [oldEscrow, false])
+      data: policyIface.encodeFunctionData("setSettlementBroker", [oldEscrow, false])
+    });
+    calls.push({
+      label: `TreasuryPolicy.setReputationWriter(${oldEscrow}, false)  // revoke stale EscrowCore reputation authority`,
+      to: treasuryPolicy,
+      data: policyIface.encodeFunctionData("setReputationWriter", [oldEscrow, false])
     });
   }
   return calls;
@@ -293,6 +335,7 @@ async function main() {
   const agentAccount = getAddress(args.newAgentAccount ?? deployments.contracts.agentAccountCore);
   const oldAgentAccount = getAddress(args.oldAgentAccount ?? deployments.contracts.agentAccountCore);
   const oldEscrow = getAddress(args.oldEscrow ?? deployments.contracts.escrowCore);
+  const backendSigner = deployments.verifier ? getAddress(deployments.verifier) : null;
 
   if (newEscrow.toLowerCase() === oldEscrow.toLowerCase()) {
     console.error(`--new-escrow and --old-escrow are the same address (${newEscrow}); refusing to emit a no-op recipe.`);
@@ -331,6 +374,7 @@ async function main() {
     agentAccount,
     newEscrow,
     oldEscrow,
+    backendSigner,
     skipRevoke: args.skipRevoke,
     newAgentAccount: args.newAgentAccount ? agentAccount : undefined,
     oldAgentAccount
@@ -353,6 +397,7 @@ async function main() {
   if (args.newAgentAccount) console.log(`old AgentAccountCore:    ${oldAgentAccount}  (old escrow revoke target)`);
   console.log(`treasury policy (H160):  ${treasuryPolicy}`);
   console.log(`agent account (H160):    ${agentAccount}`);
+  if (backendSigner) console.log(`backend signer (H160):  ${backendSigner}`);
   console.log(`owner multisig (SS58):   ${ownerRecord.multisig.ss58Address}`);
   console.log(`owner multisig (H160):   ${ownerRecord.multisig.ownerEnvValue}`);
   console.log(`threshold:               ${ownerRecord.threshold}`);
@@ -401,7 +446,7 @@ async function main() {
   console.log("");
 
   console.log("## polkadot-js-apps recipe");
-  console.log("  1. Open https://polkadot.js.org/apps/?rpc=wss%3A%2F%2Fasset-hub-paseo-rpc.dwellir.com#/extrinsics");
+  console.log("  1. Open https://polkadot.js.org/apps/?rpc=wss%3A%2F%2Fasset-hub-paseo-rpc.n.dwellir.com#/extrinsics");
   console.log(`  2. Selected account: ${SIGNER_ALIASES[args.signer].label} (${me.address})`);
   console.log("     — sign via browser extension (polkadot{.js}, Talisman, SubWallet) or Ledger USB.");
   console.log("  3. submit extrinsic: multisig > asMulti(threshold, otherSignatories, maybeTimepoint, call, maxWeight)");
