@@ -335,6 +335,26 @@ node scripts/ops/redeploy-escrowcore.mjs --phase all \
   --orphan-scan-from-block <old-escrow-deploy-block>
 ```
 
+## AgentAccountCore + EscrowCore redeploy treasury sink
+
+When redeploying the paired settlement stack with
+`scripts/ops/redeploy-agent-account-escrow-stack.mjs`, the fresh
+`AgentAccountCore` starts with `treasuryAccount() == address(0)` by design.
+That is the fail-closed state: any slash that would credit the treasury reverts
+rather than trapping funds.
+
+Before running the `--phase finalize --commit` step, the policy owner
+(the mapped multisig in production/mainnet ceremonies) must call:
+
+```text
+AgentAccountCore(0xNEW_AAC).setTreasuryAccount(<treasury/multisig>)
+```
+
+Use the operator-approved treasury sink address supplied for that deployment.
+Do not hardcode a testnet address into the contract or manifest. The finalize
+phase asserts `treasuryAccount()` is non-zero and stops with the remediation
+step if this ceremony call has not landed yet.
+
 ## 5. Day-to-day duties
 
 ### 5.1 The deploy ritual

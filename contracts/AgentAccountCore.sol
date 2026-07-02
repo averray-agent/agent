@@ -245,7 +245,7 @@ contract AgentAccountCore is ReentrancyGuard {
         onlySupportedAsset(asset)
     {
         AssetPosition storage position = positions[account][asset];
-        if (position.liquid < amount) revert InsufficientLiquidity();
+        _requireWithdrawable(position, amount);
         position.liquid -= amount;
         position.reserved += amount;
         emit Reserved(account, asset, amount);
@@ -260,7 +260,7 @@ contract AgentAccountCore is ReentrancyGuard {
         if (templateId == bytes32(0)) revert ZeroAmount();
         if (amount == 0) revert ZeroAmount();
         AssetPosition storage position = positions[account][asset];
-        if (position.liquid < amount) revert InsufficientLiquidity();
+        _requireWithdrawable(position, amount);
         position.liquid -= amount;
         position.reserved += amount;
         recurringTemplateReserves[account][asset][templateId] += amount;
@@ -522,7 +522,7 @@ contract AgentAccountCore is ReentrancyGuard {
 
     function lockCollateral(address asset, uint256 amount) external whenNotPaused onlySupportedAsset(asset) {
         AssetPosition storage position = positions[msg.sender][asset];
-        if (position.liquid < amount) revert InsufficientLiquidity();
+        _requireWithdrawable(position, amount);
         position.liquid -= amount;
         position.collateralLocked += amount;
         emit CollateralLocked(msg.sender, asset, amount);
@@ -565,7 +565,7 @@ contract AgentAccountCore is ReentrancyGuard {
         }
 
         AssetPosition storage position = positions[account][asset];
-        if (position.liquid < amount) revert InsufficientLiquidity();
+        _requireWithdrawable(position, amount);
         position.liquid -= amount;
         position.jobStakeLocked += amount;
         emit JobStakeLocked(account, asset, amount);

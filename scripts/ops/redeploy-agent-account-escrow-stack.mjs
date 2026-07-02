@@ -373,6 +373,10 @@ function printWireOverview({ plan, manifest, recommendSkipRevoke }) {
 function printFinalizeOverview() {
   console.log("\n## Phase 3: finalize and fund");
   console.log("  After multisig.MultisigExecuted:");
+  console.log("  First set the treasury sink on the fresh AAC:");
+  console.log("    AgentAccountCore(0xNEW_AAC).setTreasuryAccount(<treasury/multisig>)");
+  console.log("  (finalize fails closed while treasuryAccount() is zero.)");
+  console.log("");
   console.log("    node scripts/ops/redeploy-agent-account-escrow-stack.mjs --phase finalize \\");
   console.log("      --new-agent-account 0xNEW_AAC --new-escrow 0xNEW_ESCROW \\");
   console.log("      --agent-account-deploy-tx 0xAAC_DEPLOY \\");
@@ -503,7 +507,11 @@ async function runFinalize({ args, deploymentsPath, manifest, provider }) {
   if (!newAgentIsOperator) throw new Error("TreasuryPolicy.serviceOperators(new AgentAccountCore) is false.");
   if (!newEscrowIsOperator) throw new Error("TreasuryPolicy.serviceOperators(new EscrowCore) is false.");
   if (!newAacEscrowOperator) throw new Error("new AgentAccountCore.escrowOperators(new EscrowCore) is false.");
-  if (ciEqual(treasuryAccount, ZERO_ADDRESS)) throw new Error("new AgentAccountCore.treasuryAccount() is unset.");
+  if (ciEqual(treasuryAccount, ZERO_ADDRESS)) {
+    throw new Error(
+      "new AgentAccountCore.treasuryAccount() is unset; owner/multisig must call setTreasuryAccount(<treasury/multisig>) before finalize."
+    );
+  }
   if (!signerIsOperator) throw new Error(`TreasuryPolicy.serviceOperators(signer ${signer}) is false.`);
   if (!args.skipRevoke && oldEscrowIsOperator) throw new Error("Old EscrowCore is still a TreasuryPolicy serviceOperator.");
   if (!args.skipRevoke && oldAacOldEscrowOperator) throw new Error("Old EscrowCore is still wired on old AgentAccountCore.");

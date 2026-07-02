@@ -743,6 +743,43 @@ contract AgentPlatformTest is Test {
         vm.stopPrank();
     }
 
+    function testBorrowedLiquidityCannotReserveOrLockPhantomLiquid() public {
+        vm.startPrank(worker);
+        accounts.lockCollateral(address(dot), 150 ether);
+        accounts.borrow(address(dot), 100 ether);
+
+        (bool reserveJobOk, bytes memory reserveJobData) =
+            address(accounts).call(abi.encodeCall(accounts.reserveForJob, (worker, address(dot), 100 ether)));
+        _assertInsufficientLiquidityRevert(reserveJobOk, reserveJobData);
+
+        (bool reserveTemplateOk, bytes memory reserveTemplateData) = address(accounts)
+            .call(
+                abi.encodeCall(
+                    accounts.reserveForRecurringTemplate,
+                    (worker, address(dot), keccak256("template/debt-gated"), 100 ether)
+                )
+            );
+        _assertInsufficientLiquidityRevert(reserveTemplateOk, reserveTemplateData);
+
+        (bool lockCollateralOk, bytes memory lockCollateralData) =
+            address(accounts).call(abi.encodeCall(accounts.lockCollateral, (address(dot), 100 ether)));
+        _assertInsufficientLiquidityRevert(lockCollateralOk, lockCollateralData);
+        vm.stopPrank();
+
+        accounts.setEscrowOperator(address(this), true);
+        (bool lockStakeOk, bytes memory lockStakeData) =
+            address(accounts).call(abi.encodeCall(accounts.lockJobStake, (worker, address(dot), 100 ether)));
+        _assertInsufficientLiquidityRevert(lockStakeOk, lockStakeData);
+
+        (uint256 liquid, uint256 reserved,, uint256 collateralLocked, uint256 jobStakeLocked, uint256 debtOutstanding) =
+            accounts.positions(worker, address(dot));
+        assertEq(liquid, 150 ether);
+        assertEq(reserved, 0);
+        assertEq(collateralLocked, 150 ether);
+        assertEq(jobStakeLocked, 0);
+        assertEq(debtOutstanding, 100 ether);
+    }
+
     function testJobPayoutRepaysDebtBeforeCreditingLiquid() public {
         bytes32 jobId = keccak256("job/borrow/payout-repay");
         uint256 workerTokenBalanceBefore = dot.balanceOf(worker);
@@ -1124,5 +1161,10 @@ contract AgentPlatformTest is Test {
         (uint256 liquid, uint256 reserved,, uint256 collateralLocked, uint256 jobStakeLocked,) =
             accounts.positions(account, address(dot));
         return liquid + reserved + collateralLocked + jobStakeLocked;
+    }
+
+    function _assertInsufficientLiquidityRevert(bool ok, bytes memory data) internal pure {
+        require(!ok, "EXPECTED_INSUFFICIENT_LIQUIDITY_REVERT");
+        require(bytes4(data) == AgentAccountCore.InsufficientLiquidity.selector, "EXPECTED_LIQUIDITY_SELECTOR");
     }
 }
