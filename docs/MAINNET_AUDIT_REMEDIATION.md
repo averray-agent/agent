@@ -6,6 +6,8 @@ The core escrow/settlement logic was rated *"well-designed with strong idempoten
 guarantees."* This board tracks every actionable finding to closure; it is the coordination
 contract — only edit your own rows.
 
+> **⚠ SECOND CONTRACT AUDIT (2026-07-02) — contract findings are now tracked in [`MAINNET_AUDIT_2_REMEDIATION.md`](MAINNET_AUDIT_2_REMEDIATION.md).** A deeper adversarial multi-agent contract audit (0 Critical · 2 High · 8 Medium · 15 Low · 5 Info), independently code-verified, supersedes/confirms the contract rows here. **Critically, audit-2 H-1 supersedes C-01:** the daily-outflow circuit-breaker meters internal book-transfers, not real withdrawals, so "set a finite `dailyOutflowCap`" is **not** a valid mitigation and must be re-implemented *before* it is armed. Reconciled contract items: C-01→H-1(+L-1 defaults), C-02→H-2, C-03→L-2, C-18→L-3, C-13→M-6, C-17→M-2, C-09→L-5. All Claude-owned items on this board are merged (#711–#715).
+
 **Auditor-verified strengths (no action):** settlement idempotency *("among the best
 reviewed")*, KMS/EIP-2 signing *("exemplary")*, SafeTransfer (USDT-style + standard ERC20),
 session state machine, idempotent-mutation framework, SIWE/EIP-4361, **debt-gate fix

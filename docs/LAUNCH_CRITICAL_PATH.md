@@ -16,6 +16,14 @@ detailed runbooks; it does not duplicate them:
 not ship without it. Everything else parallelizes around it; the on-chain deploy itself is
 ~1 day of scripted work once the audit clears.
 
+**Update (2026-07-02) — a second, deeper contract audit landed** (0 Critical · 2 High · 8 Medium ·
+15 Low · 5 Info; independently code-verified) → [`MAINNET_AUDIT_2_REMEDIATION.md`](MAINNET_AUDIT_2_REMEDIATION.md).
+Its 2 Highs are additional pre-mainnet gates (Codex-owned contract work — writable + Foundry-testable
+now; only redeploy waits on the Paseo halt). **H-1 changes this plan directly:** the launch-phase
+daily outflow cap (`MAINNET_PARAMETERS.md`) is wired to the wrong paths — it must be **re-implemented
+before it is armed**, or it self-DoSes settlement while leaving real withdrawals unmetered. "Set the
+cap" (audit-1 C-01) is not, by itself, a valid mitigation.
+
 ## Now — the levers that compress the timeline
 
 | # | Action | Owner | Why it's critical-path |

@@ -46,6 +46,15 @@ These values should be treated as the **baseline launch policy** until:
 
 ### Daily outflow cap — `250 USDC`
 
+> **⛔ DO NOT ARM A FINITE `DAILY_OUTFLOW_CAP` YET — audit-2 [H-1](MAINNET_AUDIT_2_REMEDIATION.md).**
+> As currently wired, `recordOutflow` meters internal `reserved → liquid` settlements (which move
+> **no** tokens) and is **never** called by `withdraw()` (the real ERC20 egress). A finite `250 USDC`
+> cap would therefore (a) do **nothing** to stop actual capital flight and (b) **self-DoS every
+> settlement/slash** once a day's *settlement volume* exceeds 250 USDC — freezing payouts until UTC
+> midnight while moving no funds. The `type(uint256).max` default is the only reason the system is
+> not already self-DoS-able. The breaker must be **re-implemented to meter real egress** (Codex,
+> audit-2 H-1) **before** this value is set to anything finite.
+
 The cap should be small enough that a policy or verifier mistake is
 painful but not existential. At the current product maturity, the right
 question is not "what is the most volume we can support?" but "what is
