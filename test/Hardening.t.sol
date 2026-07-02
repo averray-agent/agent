@@ -58,20 +58,21 @@ contract HardeningTest is Test {
         policy.setPaused(true);
 
         vm.prank(poster);
-        (bool ok,) = address(escrow).call(
-            abi.encodeWithSelector(
-                bytes4(0x0b452fa4),
-                keccak256("paused-job"),
-                address(dot),
-                10 ether,
-                1 ether,
-                1 ether,
-                1 days,
-                bytes32("AUTO"),
-                bytes32("CODING"),
-                SPEC_HASH
-            )
-        );
+        (bool ok,) = address(escrow)
+            .call(
+                abi.encodeWithSelector(
+                    bytes4(0x0b452fa4),
+                    keccak256("paused-job"),
+                    address(dot),
+                    10 ether,
+                    1 ether,
+                    1 ether,
+                    1 days,
+                    bytes32("AUTO"),
+                    bytes32("CODING"),
+                    SPEC_HASH
+                )
+            );
         require(!ok, "EXPECTED_PAUSED_REVERT");
     }
 
@@ -79,15 +80,7 @@ contract HardeningTest is Test {
         bytes32 jobId = keccak256("job/pause-claim");
         vm.prank(poster);
         escrow.createSinglePayoutJob(
-            jobId,
-            address(dot),
-            10 ether,
-            1 ether,
-            1 ether,
-            1 days,
-            bytes32("AUTO"),
-            bytes32("CODING"),
-            SPEC_HASH
+            jobId, address(dot), 10 ether, 1 ether, 1 ether, 1 days, bytes32("AUTO"), bytes32("CODING"), SPEC_HASH
         );
 
         policy.setPaused(true);
@@ -101,9 +94,7 @@ contract HardeningTest is Test {
         policy.setPaused(true);
         dot.mint(worker, 50 ether);
         vm.prank(worker);
-        (bool ok,) = address(accounts).call(
-            abi.encodeCall(accounts.deposit, (address(dot), 50 ether))
-        );
+        (bool ok,) = address(accounts).call(abi.encodeCall(accounts.deposit, (address(dot), 50 ether)));
         require(!ok, "EXPECTED_PAUSED_REVERT");
     }
 
@@ -113,45 +104,74 @@ contract HardeningTest is Test {
             milestones[i] = 1 ether;
         }
         vm.prank(poster);
-        (bool ok,) = address(escrow).call(
-            abi.encodeCall(
-                escrow.createMilestoneJob,
-                (
-                    keccak256("job/too-many"),
-                    address(dot),
-                    milestones,
-                    0,
-                    0,
-                    1 days,
-                    bytes32("AUTO"),
-                    bytes32("CODING"),
-                    SPEC_HASH
+        (bool ok,) = address(escrow)
+            .call(
+                abi.encodeCall(
+                    escrow.createMilestoneJob,
+                    (
+                        keccak256("job/too-many"),
+                        address(dot),
+                        milestones,
+                        0,
+                        0,
+                        1 days,
+                        bytes32("AUTO"),
+                        bytes32("CODING"),
+                        SPEC_HASH
+                    )
                 )
-            )
-        );
+            );
         require(!ok, "EXPECTED_MILESTONE_LIMIT_REVERT");
     }
 
     function testEmptyMilestoneArrayRejected() public {
         uint256[] memory milestones = new uint256[](0);
         vm.prank(poster);
-        (bool ok,) = address(escrow).call(
-            abi.encodeCall(
-                escrow.createMilestoneJob,
-                (
-                    keccak256("job/empty"),
-                    address(dot),
-                    milestones,
-                    0,
-                    0,
-                    1 days,
-                    bytes32("AUTO"),
-                    bytes32("CODING"),
-                    SPEC_HASH
+        (bool ok,) = address(escrow)
+            .call(
+                abi.encodeCall(
+                    escrow.createMilestoneJob,
+                    (
+                        keccak256("job/empty"),
+                        address(dot),
+                        milestones,
+                        0,
+                        0,
+                        1 days,
+                        bytes32("AUTO"),
+                        bytes32("CODING"),
+                        SPEC_HASH
+                    )
                 )
-            )
-        );
+            );
         require(!ok, "EXPECTED_MILESTONE_LIMIT_REVERT");
+    }
+
+    function testZeroMilestoneAmountRejected() public {
+        uint256[] memory milestones = new uint256[](2);
+        milestones[0] = 1 ether;
+        milestones[1] = 0;
+
+        vm.prank(poster);
+        (bool ok, bytes memory data) = address(escrow)
+            .call(
+                abi.encodeCall(
+                    escrow.createMilestoneJob,
+                    (
+                        keccak256("job/zero-milestone"),
+                        address(dot),
+                        milestones,
+                        0,
+                        0,
+                        1 days,
+                        bytes32("AUTO"),
+                        bytes32("CODING"),
+                        SPEC_HASH
+                    )
+                )
+            );
+        require(!ok, "EXPECTED_ZERO_MILESTONE_REVERT");
+        require(bytes4(data) == EscrowCore.ZeroAmount.selector, "EXPECTED_ZERO_AMOUNT_SELECTOR");
     }
 
     function testMilestoneAtCapStillAccepted() public {
@@ -180,9 +200,7 @@ contract HardeningTest is Test {
 
         vm.startPrank(worker);
         bad.approve(address(accounts), type(uint256).max);
-        (bool ok,) = address(accounts).call(
-            abi.encodeCall(accounts.deposit, (address(bad), 5 ether))
-        );
+        (bool ok,) = address(accounts).call(abi.encodeCall(accounts.deposit, (address(bad), 5 ether)));
         vm.stopPrank();
         require(!ok, "EXPECTED_SAFE_TRANSFER_REVERT");
     }
@@ -225,9 +243,7 @@ contract HardeningTest is Test {
 
         // Non-pause admin ops still require owner signature.
         vm.prank(hotPauser);
-        (bool ok,) = address(policy).call(
-            abi.encodeCall(policy.setApprovedAsset, (address(0xDEAD), true))
-        );
+        (bool ok,) = address(policy).call(abi.encodeCall(policy.setApprovedAsset, (address(0xDEAD), true)));
         require(!ok, "EXPECTED_UNAUTHORIZED_REVERT");
     }
 

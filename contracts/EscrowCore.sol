@@ -158,6 +158,7 @@ contract EscrowCore is ReentrancyGuard {
     error UnknownJob();
     error ProtocolPaused();
     error MilestoneLimitExceeded();
+    error ZeroAmount();
     error AlreadyAutoDisclosed();
     error InvalidSchemaSignature();
     error UnauthorizedSchemaIssuer(address issuer);
@@ -400,6 +401,7 @@ contract EscrowCore is ReentrancyGuard {
         if (milestones.length == 0 || milestones.length > MAX_MILESTONES) revert MilestoneLimitExceeded();
         uint256 reward;
         for (uint256 i = 0; i < milestones.length; i++) {
+            if (milestones[i] == 0) revert ZeroAmount();
             milestoneAmounts[jobId].push(milestones[i]);
             reward += milestones[i];
         }
@@ -631,6 +633,7 @@ contract EscrowCore is ReentrancyGuard {
             reputation.updateReputation(job.worker, 200, 150, job.reward);
             emit JobClosed(jobId, job.worker, job.reward);
         } else {
+            _rescopeClaimStakeToRemainingReward(job);
             job.claimExpiry = block.timestamp + claimTtls[jobId];
             job.state = JobState.Claimed;
         }
@@ -694,8 +697,8 @@ contract EscrowCore is ReentrancyGuard {
         require(job.disputedAt != 0, "NO_DISPUTE_TIMESTAMP");
         require(block.timestamp >= job.disputedAt + ARBITRATOR_SLA, "ARBITRATOR_SLA_ACTIVE");
 
-        uint256 workerPayout = job.reward - job.released;
-        _resolveDispute(jobId, job, workerPayout, REASON_ARBITRATOR_TIMEOUT, "");
+        uint256 workerPayout = (job.reward - job.released) / 2;
+        _resolveArbitratorTimeout(jobId, job, workerPayout);
         emit DisputeResolved(jobId, msg.sender, workerPayout, REASON_ARBITRATOR_TIMEOUT, "");
         emit AutoResolvedOnTimeout(jobId, msg.sender, workerPayout, REASON_ARBITRATOR_TIMEOUT);
         emit JobClosed(jobId, job.worker, job.released);
@@ -724,6 +727,19 @@ contract EscrowCore is ReentrancyGuard {
         if (workerPayout > 0) {
             reputation.mintBadge(job.worker, job.category, 1, metadataURI);
         }
+    }
+
+    function _resolveArbitratorTimeout(bytes32 jobId, JobEscrow storage job, uint256 workerPayout) internal {
+        if (workerPayout > 0) {
+            bytes32 settlementKey = keccak256(abi.encode(jobId, REASON_ARBITRATOR_TIMEOUT, job.released, workerPayout));
+            accounts.settleReservedTo(settlementKey, job.poster, job.asset, job.worker, workerPayout);
+            job.released += workerPayout;
+        }
+
+        _slashClaimEconomics(job, address(0));
+        _refundPosterBalances(job);
+        job.claimExpiry = 0;
+        job.state = JobState.Closed;
     }
 
     function _externalSchemaFromRecurring(RecurringSinglePayoutJob calldata params)
@@ -856,6 +872,18 @@ contract EscrowCore is ReentrancyGuard {
         _clearClaimEconomics(job);
     }
 
+    function _rescopeClaimStakeToRemainingReward(JobEscrow storage job) internal {
+        if (job.claimStake == 0 || job.worker == address(0)) {
+            return;
+        }
+        uint256 remainingReward = job.reward - job.released;
+        uint256 scopedClaimStake = (remainingReward * job.claimStakeBps) / 10_000;
+        if (scopedClaimStake < job.claimStake) {
+            accounts.releaseJobStake(job.worker, job.asset, job.claimStake - scopedClaimStake);
+            job.claimStake = scopedClaimStake;
+        }
+    }
+
     function _clearClaimEconomics(JobEscrow storage job) internal {
         job.claimStake = 0;
         job.claimStakeBps = 0;
@@ -870,18 +898,7 @@ contract EscrowCore is ReentrancyGuard {
             return;
         }
 
-        if (job.claimStake > 0) {
-            accounts.slashJobStake(job.worker, job.asset, job.claimStake, job.poster);
-            job.claimStake = 0;
-            job.claimStakeBps = 0;
-        }
-        if (job.claimFee > 0) {
-            accounts.slashClaimFee(job.worker, job.asset, job.claimFee, job.rejectingVerifier);
-            job.claimFee = 0;
-            job.claimFeeBps = 0;
-        }
-        job.claimEconomicsWaived = false;
-        job.rejectingVerifier = address(0);
+        _slashClaimEconomics(job, job.rejectingVerifier);
         reputation.slashReputation(
             job.worker, policy.rejectionSkillPenalty(), policy.rejectionReliabilityPenalty(), 0, REASON_REJECTED
         );
@@ -892,20 +909,24 @@ contract EscrowCore is ReentrancyGuard {
             return;
         }
 
+        _slashClaimEconomics(job, job.rejectingVerifier);
+        reputation.slashReputation(
+            job.worker, policy.disputeLossSkillPenalty(), policy.disputeLossReliabilityPenalty(), 0, REASON_DISPUTE_LOST
+        );
+    }
+
+    function _slashClaimEconomics(JobEscrow storage job, address claimFeeRecipient) internal {
         if (job.claimStake > 0) {
             accounts.slashJobStake(job.worker, job.asset, job.claimStake, job.poster);
             job.claimStake = 0;
             job.claimStakeBps = 0;
         }
         if (job.claimFee > 0) {
-            accounts.slashClaimFee(job.worker, job.asset, job.claimFee, job.rejectingVerifier);
+            accounts.slashClaimFee(job.worker, job.asset, job.claimFee, claimFeeRecipient);
             job.claimFee = 0;
             job.claimFeeBps = 0;
         }
         job.claimEconomicsWaived = false;
         job.rejectingVerifier = address(0);
-        reputation.slashReputation(
-            job.worker, policy.disputeLossSkillPenalty(), policy.disputeLossReliabilityPenalty(), 0, REASON_DISPUTE_LOST
-        );
     }
 }
