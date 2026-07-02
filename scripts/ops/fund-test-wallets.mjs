@@ -37,6 +37,11 @@ const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/u;
 // Pool gas headroom kept back beyond the PAS actually handed out (covers the
 // 2 txs per wallet the pool itself signs).
 const POOL_GAS_HEADROOM_WEI = 500_000_000_000_000_000n; // 0.5 PAS
+// Floor for native PAS per wallet. A native transfer at/below the chain's
+// existential deposit can fail to create — or strand — a fresh account (Polkadot
+// Hub reports ED-adjusted balances and account creation reserves the ED). 0.01 PAS
+// sits comfortably above any plausible ED and any real gas-funding amount.
+const MIN_PAS_PER_WALLET_WEI = 10_000_000_000_000_000n; // 0.01 PAS
 
 const ERC20_ABI = [
   "function balanceOf(address) view returns (uint256)",
@@ -71,6 +76,12 @@ export function planBatchFund({ wallets, usdcPerWallet, pasPerWallet, poolUsdc, 
   }
   if (usdcPerWallet <= 0n || pasPerWallet <= 0n) {
     throw new Error("--usdc and --pas must both be positive.");
+  }
+  if (pasPerWallet < MIN_PAS_PER_WALLET_WEI) {
+    throw new Error(
+      `--pas per wallet (${pasPerWallet} wei) is below the ${MIN_PAS_PER_WALLET_WEI} wei (0.01 PAS) floor; ` +
+        "a native transfer at/below the existential deposit can fail to create or strand a fresh account."
+    );
   }
   const seen = new Set();
   const targets = [];
