@@ -27,7 +27,9 @@ contract ReputationSBT {
     mapping(address => mapping(bytes32 => uint256)) public categoryLevels;
     mapping(address => ReputationView) public reputations;
 
-    event BadgeMinted(uint256 indexed tokenId, address indexed account, bytes32 indexed category, uint256 level, string metadataURI);
+    event BadgeMinted(
+        uint256 indexed tokenId, address indexed account, bytes32 indexed category, uint256 level, string metadataURI
+    );
     event ReputationUpdated(address indexed account, uint256 skill, uint256 reliability, uint256 economic);
     event ReputationSlashed(
         address indexed account,
@@ -48,7 +50,7 @@ contract ReputationSBT {
     }
 
     modifier onlyOperator() {
-        if (!policy.serviceOperators(msg.sender)) revert Unauthorized();
+        if (!policy.reputationWriter(msg.sender)) revert Unauthorized();
         _;
     }
 
@@ -60,14 +62,13 @@ contract ReputationSBT {
         return badges[tokenId].owner;
     }
 
-    function mintBadge(address account, bytes32 category, uint256 level, string calldata metadataURI) external onlyOperator returns (uint256 tokenId) {
+    function mintBadge(address account, bytes32 category, uint256 level, string calldata metadataURI)
+        external
+        onlyOperator
+        returns (uint256 tokenId)
+    {
         tokenId = nextTokenId++;
-        badges[tokenId] = Badge({
-            owner: account,
-            category: category,
-            level: level,
-            metadataURI: metadataURI
-        });
+        badges[tokenId] = Badge({owner: account, category: category, level: level, metadataURI: metadataURI});
         tokensByOwner[account].push(tokenId);
         if (level > categoryLevels[account][category]) {
             categoryLevels[account][category] = level;
@@ -75,7 +76,10 @@ contract ReputationSBT {
         emit BadgeMinted(tokenId, account, category, level, metadataURI);
     }
 
-    function updateReputation(address account, uint256 skill, uint256 reliability, uint256 economic) external onlyOperator {
+    function updateReputation(address account, uint256 skill, uint256 reliability, uint256 economic)
+        external
+        onlyOperator
+    {
         reputations[account] = ReputationView(skill, reliability, economic);
         emit ReputationUpdated(account, skill, reliability, economic);
     }

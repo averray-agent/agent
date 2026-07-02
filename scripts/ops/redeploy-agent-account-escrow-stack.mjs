@@ -50,7 +50,11 @@ const DEFAULT_ORPHAN_SCAN_CHUNK_SIZE = 25_000;
 
 const TREASURY_POLICY_ABI = [
   "function owner() view returns (address)",
-  "function serviceOperators(address) view returns (bool)"
+  "function settlementBroker(address) view returns (bool)",
+  "function agentTransferBroker(address) view returns (bool)",
+  "function strategySettler(address) view returns (bool)",
+  "function reputationWriter(address) view returns (bool)",
+  "function outflowRecorder(address) view returns (bool)"
 ];
 
 const AGENT_ACCOUNT_READ_ABI = [
@@ -74,6 +78,21 @@ const REQUIRED_AGENT_ACCOUNT_FNS = [
   "cancelRecurringTemplateReserve",
   "treasuryAccount",
   "setTreasuryAccount"
+];
+
+const REQUIRED_TREASURY_POLICY_FNS = [
+  "settlementBroker",
+  "setSettlementBroker",
+  "agentTransferBroker",
+  "setAgentTransferBroker",
+  "strategySettler",
+  "setStrategySettler",
+  "reputationWriter",
+  "setReputationWriter",
+  "outflowRecorder",
+  "setOutflowRecorder",
+  "recordOutflow",
+  "recordProtocolOutflow"
 ];
 
 export function parseArgs(argv) {
@@ -193,6 +212,17 @@ export function assertArtifactHasAgentAccountSelectors(artifact) {
     throw new Error(
       `AgentAccountCore artifact is missing selector(s): ${missing.join(", ")}. ` +
       "Run `forge build` against current main before redeploying."
+    );
+  }
+}
+
+export function assertArtifactHasTreasuryPolicySelectors(artifact) {
+  const names = artifactFunctionNames(artifact);
+  const missing = REQUIRED_TREASURY_POLICY_FNS.filter((name) => !names.has(name));
+  if (missing.length) {
+    throw new Error(
+      `TreasuryPolicy artifact is missing selector(s): ${missing.join(", ")}. ` +
+      "Run `forge build` against the role-split policy surface before redeploying."
     );
   }
 }
@@ -359,14 +389,20 @@ function printWireOverview({ plan, manifest, recommendSkipRevoke }) {
   }
   console.log("");
   console.log("  The batch approves:");
-  console.log(`    TreasuryPolicy.setServiceOperator(${plan.predictedAgentAccount}, true)`);
+  console.log(`    TreasuryPolicy.setOutflowRecorder(${plan.predictedAgentAccount}, true)`);
   console.log(`    AgentAccountCore(${plan.predictedAgentAccount}).setEscrowOperator(${plan.predictedEscrow}, true)`);
-  console.log(`    TreasuryPolicy.setServiceOperator(${plan.predictedEscrow}, true)`);
+  console.log(`    TreasuryPolicy.setSettlementBroker(${plan.predictedEscrow}, true)`);
+  console.log(`    TreasuryPolicy.setReputationWriter(${plan.predictedEscrow}, true)`);
+  console.log(`    TreasuryPolicy.setSettlementBroker(${manifest.verifier}, true)`);
+  console.log(`    TreasuryPolicy.setAgentTransferBroker(${manifest.verifier}, true)`);
+  console.log(`    TreasuryPolicy.setReputationWriter(${manifest.verifier}, true)`);
+  console.log("    TreasuryPolicy.setStrategySettler(...) is intentionally skipped while XCM is disabled at launch.");
   if (recommendSkipRevoke) {
     console.log("  The batch leaves old EscrowCore roles wired for old-balance reconciliation.");
   } else {
     console.log(`    AgentAccountCore(${manifest.contracts.agentAccountCore}).setEscrowOperator(${manifest.contracts.escrowCore}, false)`);
-    console.log(`    TreasuryPolicy.setServiceOperator(${manifest.contracts.escrowCore}, false)`);
+    console.log(`    TreasuryPolicy.setSettlementBroker(${manifest.contracts.escrowCore}, false)`);
+    console.log(`    TreasuryPolicy.setReputationWriter(${manifest.contracts.escrowCore}, false)`);
   }
 }
 
@@ -457,26 +493,36 @@ async function runFinalize({ args, deploymentsPath, manifest, provider }) {
     newEscrowCode,
     domainSeparator,
     escrowAccounts,
-    newAgentIsOperator,
-    newEscrowIsOperator,
-    oldEscrowIsOperator,
+    newAgentIsOutflowRecorder,
+    newEscrowIsSettlementBroker,
+    newEscrowIsReputationWriter,
+    oldEscrowIsSettlementBroker,
+    oldEscrowIsReputationWriter,
     newAacEscrowOperator,
     treasuryAccount,
     oldAacOldEscrowOperator,
-    signerIsOperator,
+    signerIsSettlementBroker,
+    signerIsAgentTransferBroker,
+    signerIsReputationWriter,
+    signerIsStrategySettler,
     signerPosition
   ] = await Promise.all([
     provider.getCode(args.newAgentAccount),
     provider.getCode(args.newEscrow),
     newAccount.domainSeparator(),
     newEscrow.accounts(),
-    treasury.serviceOperators(args.newAgentAccount),
-    treasury.serviceOperators(args.newEscrow),
-    treasury.serviceOperators(oldEscrow),
+    treasury.outflowRecorder(args.newAgentAccount),
+    treasury.settlementBroker(args.newEscrow),
+    treasury.reputationWriter(args.newEscrow),
+    treasury.settlementBroker(oldEscrow),
+    treasury.reputationWriter(oldEscrow),
     newAccount.escrowOperators(args.newEscrow),
     newAccount.treasuryAccount(),
     oldAccount.escrowOperators(oldEscrow),
-    treasury.serviceOperators(signer),
+    treasury.settlementBroker(signer),
+    treasury.agentTransferBroker(signer),
+    treasury.reputationWriter(signer),
+    treasury.strategySettler(signer),
     newAccount.positions(signer, asset)
   ]);
 
@@ -490,13 +536,18 @@ async function runFinalize({ args, deploymentsPath, manifest, provider }) {
   console.log(`  new Escrow code bytes:                  ${newEscrowCode === "0x" ? 0 : (newEscrowCode.length - 2) / 2}`);
   console.log(`  AgentAccountCore.domainSeparator():     ${domainSeparator}`);
   console.log(`  EscrowCore.accounts():                  ${escrowAccounts}`);
-  console.log(`  serviceOperators[new AAC]:              ${newAgentIsOperator}`);
-  console.log(`  serviceOperators[new Escrow]:           ${newEscrowIsOperator}`);
+  console.log(`  outflowRecorder[new AAC]:               ${newAgentIsOutflowRecorder}`);
+  console.log(`  settlementBroker[new Escrow]:           ${newEscrowIsSettlementBroker}`);
+  console.log(`  reputationWriter[new Escrow]:           ${newEscrowIsReputationWriter}`);
   console.log(`  newAAC.escrowOperators[new Escrow]:     ${newAacEscrowOperator}`);
   console.log(`  newAAC.treasuryAccount():               ${treasuryAccount}`);
-  console.log(`  serviceOperators[signer]:               ${signerIsOperator}`);
+  console.log(`  settlementBroker[signer]:               ${signerIsSettlementBroker}`);
+  console.log(`  agentTransferBroker[signer]:            ${signerIsAgentTransferBroker}`);
+  console.log(`  reputationWriter[signer]:               ${signerIsReputationWriter}`);
+  console.log(`  strategySettler[signer]:                ${signerIsStrategySettler} (expected false while XCM is disabled)`);
   console.log(`  newAAC.positions(signer, USDC):         ${JSON.stringify(normalizePosition(signerPosition))}`);
-  console.log(`  serviceOperators[old Escrow]:           ${oldEscrowIsOperator} (expected false unless --skip-revoke)`);
+  console.log(`  settlementBroker[old Escrow]:           ${oldEscrowIsSettlementBroker} (expected false unless --skip-revoke)`);
+  console.log(`  reputationWriter[old Escrow]:           ${oldEscrowIsReputationWriter} (expected false unless --skip-revoke)`);
   console.log(`  oldAAC.escrowOperators[old Escrow]:     ${oldAacOldEscrowOperator} (expected false unless --skip-revoke)`);
 
   if (newAgentCode === "0x") throw new Error(`No code at new AgentAccountCore ${args.newAgentAccount}.`);
@@ -504,16 +555,20 @@ async function runFinalize({ args, deploymentsPath, manifest, provider }) {
   if (!ciEqual(escrowAccounts, args.newAgentAccount)) {
     throw new Error(`EscrowCore.accounts()=${escrowAccounts} does not match new AgentAccountCore ${args.newAgentAccount}.`);
   }
-  if (!newAgentIsOperator) throw new Error("TreasuryPolicy.serviceOperators(new AgentAccountCore) is false.");
-  if (!newEscrowIsOperator) throw new Error("TreasuryPolicy.serviceOperators(new EscrowCore) is false.");
+  if (!newAgentIsOutflowRecorder) throw new Error("TreasuryPolicy.outflowRecorder(new AgentAccountCore) is false.");
+  if (!newEscrowIsSettlementBroker) throw new Error("TreasuryPolicy.settlementBroker(new EscrowCore) is false.");
+  if (!newEscrowIsReputationWriter) throw new Error("TreasuryPolicy.reputationWriter(new EscrowCore) is false.");
   if (!newAacEscrowOperator) throw new Error("new AgentAccountCore.escrowOperators(new EscrowCore) is false.");
   if (ciEqual(treasuryAccount, ZERO_ADDRESS)) {
     throw new Error(
       "new AgentAccountCore.treasuryAccount() is unset; owner/multisig must call setTreasuryAccount(<treasury/multisig>) before finalize."
     );
   }
-  if (!signerIsOperator) throw new Error(`TreasuryPolicy.serviceOperators(signer ${signer}) is false.`);
-  if (!args.skipRevoke && oldEscrowIsOperator) throw new Error("Old EscrowCore is still a TreasuryPolicy serviceOperator.");
+  if (!signerIsSettlementBroker) throw new Error(`TreasuryPolicy.settlementBroker(signer ${signer}) is false.`);
+  if (!signerIsAgentTransferBroker) throw new Error(`TreasuryPolicy.agentTransferBroker(signer ${signer}) is false.`);
+  if (!signerIsReputationWriter) throw new Error(`TreasuryPolicy.reputationWriter(signer ${signer}) is false.`);
+  if (!args.skipRevoke && oldEscrowIsSettlementBroker) throw new Error("Old EscrowCore is still a TreasuryPolicy settlementBroker.");
+  if (!args.skipRevoke && oldEscrowIsReputationWriter) throw new Error("Old EscrowCore is still a TreasuryPolicy reputationWriter.");
   if (!args.skipRevoke && oldAacOldEscrowOperator) throw new Error("Old EscrowCore is still wired on old AgentAccountCore.");
 
   if (args.skipManifestUpdate) {
@@ -566,10 +621,14 @@ async function runFinalize({ args, deploymentsPath, manifest, provider }) {
     onchainAfter: {
       domainSeparator,
       escrowAccounts,
-      newAgentIsOperator,
-      newEscrowIsOperator,
+      newAgentIsOutflowRecorder,
+      newEscrowIsSettlementBroker,
+      newEscrowIsReputationWriter,
       newAacEscrowOperator,
-      signerIsOperator,
+      signerIsSettlementBroker,
+      signerIsAgentTransferBroker,
+      signerIsReputationWriter,
+      signerIsStrategySettler,
       signerPosition: normalizePosition(signerPosition)
     },
     auditExitCode
@@ -615,13 +674,16 @@ async function main() {
   const reservePreflight = await runOldStackReservePreflight({ args, provider, manifest });
   const recommendSkipRevoke = reservePreflight.report.findings.length > 0;
 
-  const [accountArtifact, escrowArtifact] = await Promise.all([
+  const [accountArtifact, escrowArtifact, treasuryPolicyArtifact] = await Promise.all([
     loadContractArtifact("AgentAccountCore"),
-    loadContractArtifact("EscrowCore")
+    loadContractArtifact("EscrowCore"),
+    loadContractArtifact("TreasuryPolicy")
   ]);
   assertArtifactHasAgentAccountSelectors(accountArtifact);
   assertArtifactHasBrokeredSelectors(escrowArtifact);
+  assertArtifactHasTreasuryPolicySelectors(treasuryPolicyArtifact);
   console.log(summarizeSelectors("AgentAccountCore selectors", accountArtifact, REQUIRED_AGENT_ACCOUNT_FNS));
+  console.log(summarizeSelectors("TreasuryPolicy role selectors", treasuryPolicyArtifact, REQUIRED_TREASURY_POLICY_FNS));
   console.log("EscrowCore brokered selectors verified.");
 
   const plan = await planDeployStack({ provider, manifest, accountArtifact, escrowArtifact });

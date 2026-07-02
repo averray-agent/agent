@@ -44,9 +44,10 @@ contract AgentAccountAsyncStrategyTest is Test {
 
         policy.setApprovedAsset(address(dot), true);
         policy.setApprovedStrategy(address(adapter), true);
-        policy.setServiceOperator(address(this), true);
-        policy.setServiceOperator(address(accounts), true);
-        policy.setServiceOperator(address(adapter), true);
+        policy.setStrategySettler(address(this), true);
+        policy.setStrategySettler(address(accounts), true);
+        policy.setStrategySettler(address(adapter), true);
+        policy.setOutflowRecorder(address(accounts), true);
         registry.registerStrategy(address(adapter));
 
         dot.mint(worker, WORKER_DEPOSIT);

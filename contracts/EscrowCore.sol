@@ -210,7 +210,7 @@ contract EscrowCore is ReentrancyGuard {
     }
 
     function _onlyDisclosurePublisher() internal view {
-        if (msg.sender != policy.owner() && !policy.serviceOperators(msg.sender) && !policy.verifiers(msg.sender)) {
+        if (msg.sender != policy.owner() && !policy.verifiers(msg.sender)) {
             revert Unauthorized();
         }
     }
@@ -220,7 +220,7 @@ contract EscrowCore is ReentrancyGuard {
     }
 
     function _onlyOperator() internal view {
-        if (!policy.serviceOperators(msg.sender)) revert Unauthorized();
+        if (!policy.settlementBroker(msg.sender)) revert Unauthorized();
     }
 
     function _onlyParticipant(bytes32 jobId) internal view {

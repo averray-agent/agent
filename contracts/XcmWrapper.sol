@@ -59,8 +59,8 @@ contract XcmWrapper is IXcmWrapper, ReentrancyGuard {
         xcmPrecompile = xcmPrecompile_ == address(0) ? DEFAULT_XCM_PRECOMPILE : xcmPrecompile_;
     }
 
-    modifier onlyOwnerOrOperator() {
-        if (msg.sender != policy.owner() && !policy.serviceOperators(msg.sender)) revert Unauthorized();
+    modifier onlyOwnerOrStrategySettler() {
+        if (msg.sender != policy.owner() && !policy.strategySettler(msg.sender)) revert Unauthorized();
         _;
     }
 
@@ -97,7 +97,7 @@ contract XcmWrapper is IXcmWrapper, ReentrancyGuard {
         bytes calldata destination,
         bytes calldata message,
         Weight calldata maxWeight
-    ) external override nonReentrant whenNotPaused onlyOwnerOrOperator returns (bytes32 requestId) {
+    ) external override nonReentrant whenNotPaused onlyOwnerOrStrategySettler returns (bytes32 requestId) {
         _validateRequestContext(context);
         _validateWeight(maxWeight);
 
@@ -151,7 +151,7 @@ contract XcmWrapper is IXcmWrapper, ReentrancyGuard {
         uint256 settledShares,
         bytes32 remoteRef,
         bytes32 failureCode
-    ) external override nonReentrant onlyOwnerOrOperator {
+    ) external override nonReentrant onlyOwnerOrStrategySettler {
         if (status == RequestStatus.Unknown || status == RequestStatus.Pending) {
             revert InvalidStatus();
         }

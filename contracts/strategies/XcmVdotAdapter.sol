@@ -66,7 +66,7 @@ contract XcmVdotAdapter is IXcmStrategyAdapter, ReentrancyGuard {
     }
 
     modifier onlyOperator() {
-        if (!policy.serviceOperators(msg.sender)) revert Unauthorized();
+        if (!policy.strategySettler(msg.sender)) revert Unauthorized();
         _;
     }
 

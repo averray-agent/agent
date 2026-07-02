@@ -42,8 +42,8 @@ contract MockVDotAdapter is IStrategyAdapter, ReentrancyGuard {
     ///      owner can't mint arbitrary "profit" in one tx. 500 bps = 5%.
     uint256 public constant MAX_YIELD_BPS_PER_CALL = 500;
     /// @dev Operator-only caller for deposit/withdraw — any address the
-    ///      TreasuryPolicy marks as a service operator (for v1 that's the
-    ///      AgentAccountCore + EscrowCore contracts).
+    ///      TreasuryPolicy marks as a strategy settler (for v1 that's the
+    ///      AgentAccountCore contract).
     uint256 public totalShares;
     /// @dev Live principal+accrued-yield balance expressed in the asset's
     ///      smallest unit. `shares * totalAssets / totalShares` gives the
@@ -69,7 +69,7 @@ contract MockVDotAdapter is IStrategyAdapter, ReentrancyGuard {
     }
 
     modifier onlyOperator() {
-        if (!policy.serviceOperators(msg.sender)) revert Unauthorized();
+        if (!policy.strategySettler(msg.sender)) revert Unauthorized();
         _;
     }
 
@@ -84,7 +84,14 @@ contract MockVDotAdapter is IStrategyAdapter, ReentrancyGuard {
     }
 
     /// @inheritdoc IStrategyAdapter
-    function deposit(uint256 amount) external override nonReentrant whenNotPaused onlyOperator returns (uint256 sharesMinted) {
+    function deposit(uint256 amount)
+        external
+        override
+        nonReentrant
+        whenNotPaused
+        onlyOperator
+        returns (uint256 sharesMinted)
+    {
         if (amount == 0) revert ZeroAmount();
         // Classic share-math: share_price = totalAssets / totalShares.
         // First depositor gets 1:1, subsequent depositors mint at the
@@ -102,7 +109,14 @@ contract MockVDotAdapter is IStrategyAdapter, ReentrancyGuard {
     }
 
     /// @inheritdoc IStrategyAdapter
-    function withdraw(uint256 sharesToBurn, address recipient) external override nonReentrant whenNotPaused onlyOperator returns (uint256 assetsReturned) {
+    function withdraw(uint256 sharesToBurn, address recipient)
+        external
+        override
+        nonReentrant
+        whenNotPaused
+        onlyOperator
+        returns (uint256 assetsReturned)
+    {
         if (sharesToBurn == 0) revert ZeroAmount();
         if (shares[msg.sender] < sharesToBurn) revert InsufficientShares();
         // Redeem at the current exchange rate: share_price = totalAssets / totalShares.

@@ -52,10 +52,13 @@ contract AgentPlatformTest is Test {
         dot = new MockERC20("Mock DOT", "mDOT");
 
         policy.setApprovedAsset(address(dot), true);
-        policy.setServiceOperator(address(escrow), true);
+        policy.setSettlementBroker(address(escrow), true);
+        policy.setReputationWriter(address(escrow), true);
         accounts.setEscrowOperator(address(escrow), true);
-        policy.setServiceOperator(address(accounts), true);
-        policy.setServiceOperator(address(this), true);
+        policy.setOutflowRecorder(address(accounts), true);
+        policy.setStrategySettler(address(accounts), true);
+        policy.setSettlementBroker(address(this), true);
+        policy.setReputationWriter(address(this), true);
         policy.setVerifier(verifier, true);
         policy.setArbitrator(arbitrator, true);
         policy.setDailyOutflowCap(type(uint256).max);
@@ -142,7 +145,7 @@ contract AgentPlatformTest is Test {
 
         escrow.claimJobFor(jobId, worker);
 
-        // Backend signer (address(this), a service operator) brokers the submit
+        // Backend signer (address(this), a settlement broker) brokers the submit
         // for the worker wallet; the agent never signs a chain tx. The event is
         // attributed to the worker, not the operator.
         vmEvent.expectEmit(true, true, false, true, address(escrow));
@@ -179,14 +182,14 @@ contract AgentPlatformTest is Test {
 
         escrow.claimJobFor(jobId, worker);
 
-        // The claimed worker is not a service operator, so the brokered
+        // The claimed worker is not a settlement broker, so the brokered
         // entrypoint must reject it — workers use the worker-direct submitWork.
         vm.prank(worker);
         (bool ok,) = address(escrow).call(abi.encodeCall(escrow.submitWorkFor, (jobId, worker, keccak256("evidence"))));
         require(!ok, "EXPECTED_UNAUTHORIZED_REVERT");
     }
 
-    function testServiceOperatorCannotSettleReserveWithoutEscrowLifecycle() public {
+    function testSettlementBrokerCannotSettleReserveWithoutEscrowLifecycle() public {
         bytes32 jobId = keccak256("job/direct-settle/blocked");
         address attacker = address(0xA77A);
 

@@ -35,9 +35,10 @@ contract HardeningTest is Test {
         dot = new MockERC20("Mock DOT", "mDOT");
 
         policy.setApprovedAsset(address(dot), true);
-        policy.setServiceOperator(address(escrow), true);
+        policy.setSettlementBroker(address(escrow), true);
+        policy.setReputationWriter(address(escrow), true);
         accounts.setEscrowOperator(address(escrow), true);
-        policy.setServiceOperator(address(accounts), true);
+        policy.setOutflowRecorder(address(accounts), true);
         policy.setVerifier(verifier, true);
 
         dot.mint(poster, 1_000 ether);

@@ -11,7 +11,10 @@ import {
 } from "./redeploy-escrowcore-wire-multisig.mjs";
 
 const TREASURY_POLICY_ABI = [
-  "function setServiceOperator(address account, bool allowed)"
+  "function setSettlementBroker(address account, bool allowed)",
+  "function setAgentTransferBroker(address account, bool allowed)",
+  "function setReputationWriter(address account, bool allowed)",
+  "function setOutflowRecorder(address account, bool allowed)"
 ];
 const AGENT_ACCOUNT_ABI = [
   "function setEscrowOperator(address escrowOperator, bool approved)"
@@ -24,6 +27,7 @@ const OLD = "0x7BB8fea44bDeE9870cF27c1dB616E7017BC38b0a";
 const TREASURY_POLICY = "0x648Cc5fdE94435992296C4e5ac642d18bB64c12B";
 const AGENT_ACCOUNT = "0x71B111d8c9DF84Be26cb9067D27dAd7A2d5E7e08";
 const NEW_AGENT_ACCOUNT = "0xbd9c2d9336a91415287bb032ec34e8b80a1f38a0";
+const BACKEND_SIGNER = "0x31ad432dFe083B998c69B6dB88A984ec5207ab7F";
 
 test("parseArgs defaults profile=testnet, skipRevoke=false", () => {
   const args = parseArgs([]);
@@ -74,6 +78,7 @@ function buildFixtureCalls({ skipRevoke = false } = {}) {
     agentAccount: AGENT_ACCOUNT,
     newEscrow: NEW,
     oldEscrow: OLD,
+    backendSigner: BACKEND_SIGNER,
     skipRevoke
   });
 }
@@ -88,60 +93,107 @@ function buildFreshAgentAccountCalls({ skipRevoke = false } = {}) {
     oldAgentAccount: AGENT_ACCOUNT,
     newEscrow: NEW,
     oldEscrow: OLD,
+    backendSigner: BACKEND_SIGNER,
     skipRevoke
   });
 }
 
-test("buildInnerCalls produces four calls by default (batched approve + revoke across both contracts)", () => {
+test("buildInnerCalls produces least-privilege role calls by default", () => {
   const calls = buildFixtureCalls();
-  assert.equal(calls.length, 4);
+  assert.equal(calls.length, 9);
   assert.match(calls[0].label, /AgentAccountCore\.setEscrowOperator/u);
-  assert.match(calls[1].label, /TreasuryPolicy\.setServiceOperator/u);
-  assert.match(calls[2].label, /AgentAccountCore\.setEscrowOperator/u);
-  assert.match(calls[3].label, /TreasuryPolicy\.setServiceOperator/u);
+  assert.match(calls[1].label, /TreasuryPolicy\.setSettlementBroker/u);
+  assert.match(calls[2].label, /TreasuryPolicy\.setReputationWriter/u);
+  assert.match(calls[3].label, /TreasuryPolicy\.setSettlementBroker/u);
+  assert.match(calls[4].label, /TreasuryPolicy\.setAgentTransferBroker/u);
+  assert.match(calls[5].label, /TreasuryPolicy\.setReputationWriter/u);
+  assert.match(calls[6].label, /AgentAccountCore\.setEscrowOperator/u);
+  assert.match(calls[7].label, /TreasuryPolicy\.setSettlementBroker/u);
+  assert.match(calls[8].label, /TreasuryPolicy\.setReputationWriter/u);
   assert.equal(calls[0].to, AGENT_ACCOUNT);
   assert.equal(calls[1].to, TREASURY_POLICY);
-  assert.equal(calls[2].to, AGENT_ACCOUNT);
+  assert.equal(calls[2].to, TREASURY_POLICY);
   assert.equal(calls[3].to, TREASURY_POLICY);
+  assert.equal(calls[4].to, TREASURY_POLICY);
+  assert.equal(calls[5].to, TREASURY_POLICY);
+  assert.equal(calls[6].to, AGENT_ACCOUNT);
+  assert.equal(calls[7].to, TREASURY_POLICY);
+  assert.equal(calls[8].to, TREASURY_POLICY);
   assert.equal(
     calls[0].data,
     accountIface.encodeFunctionData("setEscrowOperator", [NEW, true])
   );
   assert.equal(
     calls[1].data,
-    policyIface.encodeFunctionData("setServiceOperator", [NEW, true])
+    policyIface.encodeFunctionData("setSettlementBroker", [NEW, true])
   );
   assert.equal(
     calls[2].data,
-    accountIface.encodeFunctionData("setEscrowOperator", [OLD, false])
+    policyIface.encodeFunctionData("setReputationWriter", [NEW, true])
   );
   assert.equal(
     calls[3].data,
-    policyIface.encodeFunctionData("setServiceOperator", [OLD, false])
+    policyIface.encodeFunctionData("setSettlementBroker", [BACKEND_SIGNER, true])
+  );
+  assert.equal(
+    calls[4].data,
+    policyIface.encodeFunctionData("setAgentTransferBroker", [BACKEND_SIGNER, true])
+  );
+  assert.equal(
+    calls[5].data,
+    policyIface.encodeFunctionData("setReputationWriter", [BACKEND_SIGNER, true])
+  );
+  assert.equal(
+    calls[6].data,
+    accountIface.encodeFunctionData("setEscrowOperator", [OLD, false])
+  );
+  assert.equal(
+    calls[7].data,
+    policyIface.encodeFunctionData("setSettlementBroker", [OLD, false])
+  );
+  assert.equal(
+    calls[8].data,
+    policyIface.encodeFunctionData("setReputationWriter", [OLD, false])
   );
 });
 
-test("buildInnerCalls produces two approve calls when --skip-revoke is set", () => {
+test("buildInnerCalls produces approve-only role calls when --skip-revoke is set", () => {
   const calls = buildFixtureCalls({ skipRevoke: true });
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 6);
   assert.equal(
     calls[0].data,
     accountIface.encodeFunctionData("setEscrowOperator", [NEW, true])
   );
   assert.equal(
     calls[1].data,
-    policyIface.encodeFunctionData("setServiceOperator", [NEW, true])
+    policyIface.encodeFunctionData("setSettlementBroker", [NEW, true])
+  );
+  assert.equal(
+    calls[2].data,
+    policyIface.encodeFunctionData("setReputationWriter", [NEW, true])
+  );
+  assert.equal(
+    calls[3].data,
+    policyIface.encodeFunctionData("setSettlementBroker", [BACKEND_SIGNER, true])
+  );
+  assert.equal(
+    calls[4].data,
+    policyIface.encodeFunctionData("setAgentTransferBroker", [BACKEND_SIGNER, true])
+  );
+  assert.equal(
+    calls[5].data,
+    policyIface.encodeFunctionData("setReputationWriter", [BACKEND_SIGNER, true])
   );
 });
 
 test("buildInnerCalls wires a freshly redeployed AgentAccountCore in the same batch", () => {
   const calls = buildFreshAgentAccountCalls();
-  assert.equal(calls.length, 5);
+  assert.equal(calls.length, 10);
   assert.match(calls[0].label, /approve new AgentAccountCore/u);
   assert.equal(calls[0].to, TREASURY_POLICY);
   assert.equal(
     calls[0].data,
-    policyIface.encodeFunctionData("setServiceOperator", [NEW_AGENT_ACCOUNT, true])
+    policyIface.encodeFunctionData("setOutflowRecorder", [NEW_AGENT_ACCOUNT, true])
   );
   assert.equal(calls[1].to, NEW_AGENT_ACCOUNT);
   assert.equal(
@@ -149,27 +201,35 @@ test("buildInnerCalls wires a freshly redeployed AgentAccountCore in the same ba
     accountIface.encodeFunctionData("setEscrowOperator", [NEW, true])
   );
   assert.equal(calls[2].to, TREASURY_POLICY);
-  assert.equal(calls[3].to, AGENT_ACCOUNT);
+  assert.equal(
+    calls[2].data,
+    policyIface.encodeFunctionData("setSettlementBroker", [NEW, true])
+  );
+  assert.equal(calls[3].to, TREASURY_POLICY);
   assert.equal(
     calls[3].data,
-    accountIface.encodeFunctionData("setEscrowOperator", [OLD, false])
+    policyIface.encodeFunctionData("setReputationWriter", [NEW, true])
   );
   assert.equal(calls[4].to, TREASURY_POLICY);
-});
-
-test("setServiceOperator(0xb8fd…, true) encodes to the same calldata used by Apps recipe", () => {
-  const data = policyIface.encodeFunctionData("setServiceOperator", [NEW, true]);
+  assert.equal(calls[5].to, TREASURY_POLICY);
+  assert.equal(calls[6].to, TREASURY_POLICY);
+  assert.equal(calls[7].to, AGENT_ACCOUNT);
   assert.equal(
-    data,
-    "0xeea03c28000000000000000000000000b8fd8a932f69bd5e39700b7cf6d2920af84d1b270000000000000000000000000000000000000000000000000000000000000001"
+    calls[7].data,
+    accountIface.encodeFunctionData("setEscrowOperator", [OLD, false])
   );
+  assert.equal(calls[8].to, TREASURY_POLICY);
+  assert.equal(calls[9].to, TREASURY_POLICY);
 });
 
-test("setServiceOperator(0x7BB8…, false) encodes to the revoke calldata", () => {
-  const data = policyIface.encodeFunctionData("setServiceOperator", [OLD, false]);
-  assert.equal(
-    data,
-    "0xeea03c280000000000000000000000007bb8fea44bdee9870cf27c1db616e7017bc38b0a0000000000000000000000000000000000000000000000000000000000000000"
+test("role-setter calldata uses distinct selectors for the multisig recipe", () => {
+  assert.notEqual(
+    policyIface.encodeFunctionData("setSettlementBroker", [NEW, true]).slice(0, 10),
+    policyIface.encodeFunctionData("setAgentTransferBroker", [NEW, true]).slice(0, 10)
+  );
+  assert.notEqual(
+    policyIface.encodeFunctionData("setReputationWriter", [NEW, true]).slice(0, 10),
+    policyIface.encodeFunctionData("setOutflowRecorder", [NEW, true]).slice(0, 10)
   );
 });
 
@@ -262,8 +322,8 @@ test(
 );
 
 test("verifyEvmCalldataEmbedded flags missing calldata inside the outer SCALE hex", () => {
-  const NEW_DATA = policyIface.encodeFunctionData("setServiceOperator", [NEW, true]);
-  const OLD_DATA = policyIface.encodeFunctionData("setServiceOperator", [OLD, false]);
+  const NEW_DATA = policyIface.encodeFunctionData("setSettlementBroker", [NEW, true]);
+  const OLD_DATA = policyIface.encodeFunctionData("setReputationWriter", [OLD, false]);
   const innerCalls = [
     { label: "approve new", data: NEW_DATA },
     { label: "revoke old", data: OLD_DATA }
