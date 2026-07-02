@@ -37,8 +37,12 @@ contract TreasuryPolicy {
     mapping(address => bool) public arbitrators;
     mapping(address => uint256) public minClaimFeeByAsset;
     mapping(address => AuthorizationWindow[]) internal verifierAuthorizationWindows;
+    mapping(address => uint256) public accountOutflowDay;
+    mapping(address => uint256) public accountOutflowToday;
 
     uint256 public currentDay;
+    /// @notice Aggregate egress observed today. Informational only; caps are
+    ///         enforced per source account via accountOutflowToday.
     uint256 public outflowToday;
 
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
@@ -62,7 +66,9 @@ contract TreasuryPolicy {
     event RejectionReliabilityPenaltyUpdated(uint256 newPenalty);
     event DisputeLossSkillPenaltyUpdated(uint256 newPenalty);
     event DisputeLossReliabilityPenaltyUpdated(uint256 newPenalty);
-    event OutflowRecorded(uint256 day, uint256 amount, uint256 newTotal);
+    event OutflowRecorded(
+        address indexed account, uint256 day, uint256 amount, uint256 accountTotal, uint256 aggregateTotal
+    );
 
     error Unauthorized();
     error Paused();
@@ -251,15 +257,22 @@ contract TreasuryPolicy {
         emit DisputeLossReliabilityPenaltyUpdated(penalty);
     }
 
-    function recordOutflow(uint256 amount) external whenNotPaused {
+    function recordOutflow(address account, uint256 amount) external whenNotPaused {
         if (!serviceOperators[msg.sender]) revert Unauthorized();
+        require(account != address(0), "ZERO_ACCOUNT");
         uint256 dayNumber = block.timestamp / 1 days;
         if (dayNumber != currentDay) {
             currentDay = dayNumber;
             outflowToday = 0;
         }
+        if (dayNumber != accountOutflowDay[account]) {
+            accountOutflowDay[account] = dayNumber;
+            accountOutflowToday[account] = 0;
+        }
+        uint256 accountTotal = accountOutflowToday[account] + amount;
+        if (accountTotal > dailyOutflowCap) revert OutflowCapExceeded();
+        accountOutflowToday[account] = accountTotal;
         outflowToday += amount;
-        if (outflowToday > dailyOutflowCap) revert OutflowCapExceeded();
-        emit OutflowRecorded(dayNumber, amount, outflowToday);
+        emit OutflowRecorded(account, dayNumber, amount, accountTotal, outflowToday);
     }
 }
