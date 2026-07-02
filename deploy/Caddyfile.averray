@@ -9,6 +9,34 @@
   header_up X-Forwarded-For {http.request.remote.host}
 }
 
+# ---------------------------------------------------------------------------
+# D-04 (audit): baseline security response headers, applied to every site.
+#   • HSTS — force HTTPS for a year incl. subdomains (Caddy already serves TLS).
+#   • X-Content-Type-Options — block MIME-type sniffing.
+#   • X-Frame-Options SAMEORIGIN — prevent cross-origin clickjacking (nothing
+#     here is meant to be embedded off-origin).
+#   • Referrer-Policy — don't leak full URLs cross-origin.
+#   • Permissions-Policy — deny browser features the surface doesn't use.
+#   • -Server — don't advertise the server software/version.
+# ---------------------------------------------------------------------------
+(security_headers) {
+  header {
+    Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    X-Content-Type-Options "nosniff"
+    X-Frame-Options "SAMEORIGIN"
+    Referrer-Policy "strict-origin-when-cross-origin"
+    Permissions-Policy "geolocation=(), microphone=(), camera=(), payment=(), usb=()"
+    -Server
+  }
+}
+
+# The API and indexer only ever return JSON — never a document that legitimately
+# loads sub-resources — so lock content loading and framing all the way down.
+# (Deliberately NOT applied to the HTML sites, whose frontends load scripts.)
+(api_csp) {
+  header Content-Security-Policy "default-src 'none'; frame-ancestors 'none'"
+}
+
 # Main public site
 # Serves the marketing / trust / schemas-lite surface from the repo's `site/`
 # folder, including robots/sitemap/llms and the discovery manifest. Public
@@ -16,6 +44,7 @@
 # the static profile shell that hydrates itself from
 # https://api.averray.com/agents/:wallet.
 averray.com, www.averray.com {
+  import security_headers
   root * /srv/site
   encode zstd gzip
 
@@ -36,6 +65,7 @@ averray.com, www.averray.com {
 # Caddyfile through `scripts/ops/render-caddyfile.sh` instead of copying this
 # template directly.
 app.averray.com {
+  import security_headers
   encode zstd gzip
 
   handle /api/events* {
@@ -67,6 +97,8 @@ app.averray.com {
 
 # Backend API
 api.averray.com {
+  import security_headers
+  import api_csp
   encode zstd gzip
 
   handle /events* {
@@ -86,6 +118,8 @@ api.averray.com {
 
 # Indexer
 index.averray.com {
+  import security_headers
+  import api_csp
   encode zstd gzip
   reverse_proxy indexer:42069 {
     import strip_forwarded_for
