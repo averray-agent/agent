@@ -128,6 +128,30 @@ contract AgentAccountAsyncStrategyTest is Test {
         assertEq(adapter.totalShares(), 20 ether);
     }
 
+    function testPausedProtocolBlocksSuccessfulStrategyDepositSettlement() public {
+        bytes32 requestId = _requestDeposit(20 ether, 12);
+
+        policy.setPaused(true);
+
+        (bool ok, bytes memory data) = address(accounts)
+            .call(
+                abi.encodeCall(
+                    accounts.settleStrategyRequest,
+                    (requestId, IXcmWrapper.RequestStatus.Succeeded, 20 ether, 20 ether, bytes32("REMOTE"), bytes32(0))
+                )
+            );
+        _assertCustomError(ok, data, AgentAccountCore.ProtocolPaused.selector);
+
+        (uint256 liquid,, uint256 strategyAllocated,,,) = accounts.positions(worker, address(dot));
+        assertEq(liquid, WORKER_DEPOSIT - 20 ether);
+        assertEq(strategyAllocated, 0);
+        assertEq(accounts.pendingStrategyAssets(worker, address(dot)), 20 ether);
+        assertEq(accounts.strategyShares(worker, STRATEGY_ID), 0);
+        assertEq(adapter.pendingDepositAssets(), 20 ether);
+        assertEq(dot.balanceOf(address(accounts)), WORKER_DEPOSIT - 20 ether);
+        assertEq(dot.balanceOf(address(adapter)), 20 ether);
+    }
+
     function testSettleStrategyDepositRejectsZeroShareSuccessAndKeepsPending() public {
         bytes32 requestId = _requestDeposit(20 ether, 1);
 
@@ -162,6 +186,42 @@ contract AgentAccountAsyncStrategyTest is Test {
         assertEq(strategyAllocated, 0);
         assertEq(accounts.pendingStrategyAssets(worker, address(dot)), 0);
         assertEq(accounts.strategyShares(worker, STRATEGY_ID), 0);
+        assertEq(dot.balanceOf(address(accounts)), WORKER_DEPOSIT);
+        assertEq(dot.balanceOf(address(adapter)), 0);
+    }
+
+    function testPausedProtocolAllowsStrategyDepositFailureRefundThroughAccountCore() public {
+        bytes32 requestId = _requestDeposit(20 ether, 13);
+
+        policy.setPaused(true);
+
+        accounts.settleStrategyRequest(requestId, IXcmWrapper.RequestStatus.Failed, 0, 0, bytes32(0), bytes32("FAILED"));
+
+        (uint256 liquid,, uint256 strategyAllocated,,,) = accounts.positions(worker, address(dot));
+        assertEq(liquid, WORKER_DEPOSIT);
+        assertEq(strategyAllocated, 0);
+        assertEq(accounts.pendingStrategyAssets(worker, address(dot)), 0);
+        assertEq(accounts.strategyShares(worker, STRATEGY_ID), 0);
+        assertEq(adapter.pendingDepositAssets(), 0);
+        assertEq(dot.balanceOf(address(accounts)), WORKER_DEPOSIT);
+        assertEq(dot.balanceOf(address(adapter)), 0);
+    }
+
+    function testPausedProtocolAllowsStrategyDepositCancellationRefundThroughAccountCore() public {
+        bytes32 requestId = _requestDeposit(20 ether, 14);
+
+        policy.setPaused(true);
+
+        accounts.settleStrategyRequest(
+            requestId, IXcmWrapper.RequestStatus.Cancelled, 0, 0, bytes32(0), bytes32("CANCELLED")
+        );
+
+        (uint256 liquid,, uint256 strategyAllocated,,,) = accounts.positions(worker, address(dot));
+        assertEq(liquid, WORKER_DEPOSIT);
+        assertEq(strategyAllocated, 0);
+        assertEq(accounts.pendingStrategyAssets(worker, address(dot)), 0);
+        assertEq(accounts.strategyShares(worker, STRATEGY_ID), 0);
+        assertEq(adapter.pendingDepositAssets(), 0);
         assertEq(dot.balanceOf(address(accounts)), WORKER_DEPOSIT);
         assertEq(dot.balanceOf(address(adapter)), 0);
     }
