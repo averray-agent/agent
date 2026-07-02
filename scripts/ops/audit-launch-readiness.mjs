@@ -6,20 +6,28 @@
  * Read-only — no signing. Hits Hub TestNet and reports:
  *   - TreasuryPolicy.paused / owner / pauser
  *   - verifiers(backendSigner)
- *   - serviceOperators(backendSigner) — the wallet that calls
- *     EscrowCore.claimJobFor and other onlyOperator entry points.
- *     Distinct from the verifier role; both flip independently and a
- *     KMS-signer rotation needs both. Missing this check let a real
- *     prod misconfig (Phase 3 KMS cutover authorized the new signer as
- *     verifier but not as service operator) slip past launch readiness
- *     until the first hosted worker-loop hit a bare `require(false)`
- *     on `claimJobFor`. The audit now flags it preemptively.
- *   - serviceOperators(EscrowCore) / serviceOperators(AgentAccountCore)
+ *   - settlementBroker(backendSigner) — the wallet that calls
+ *     EscrowCore.claimJobFor and other onlyOperator entry points, plus
+ *     agentTransferBroker(backendSigner) for sendToAgentFor. Post-#724
+ *     these are two of the five capability roles that replaced the old
+ *     single `serviceOperators` role; each flips independently and a
+ *     KMS-signer rotation needs all of verifier + settlementBroker +
+ *     agentTransferBroker. Missing this check let a real prod misconfig
+ *     (Phase 3 KMS cutover authorized the new signer as verifier but not
+ *     as service operator) slip past launch readiness until the first
+ *     hosted worker-loop hit a bare `require(false)` on `claimJobFor`.
+ *     The audit now flags it preemptively.
+ *   - settlementBroker(EscrowCore) + reputationWriter(EscrowCore) and
+ *     outflowRecorder(AgentAccountCore) — EscrowCore brokers
+ *     AgentAccountCore.reserve/allocate (settlementBroker) and writes
+ *     ReputationSBT (reputationWriter); AgentAccountCore meters
+ *     TreasuryPolicy.recordOutflow (outflowRecorder). Missing any one
+ *     reverts the settlement path even when claimJobFor itself passes.
  *   - approvedAssets(USDC) (auto-generated getter on the public mapping)
  *   - AgentAccountCore.positions(backendSigner, USDC).liquid — the
  *     deposited USDC balance the backend signer can draw against when
  *     EscrowCore.claimJobFor moves reward + claimStake + claimFee out
- *     of its position. Authorization (serviceOperators) is necessary
+ *     of its position. Authorization (settlementBroker) is necessary
  *     but not sufficient: a rotated signer also needs funded liquidity
  *     before the first claim. Missing this check let the 2026-05-25
  *     hosted deploy burn 24s of CI on a settlement attempt that the
@@ -50,7 +58,8 @@
  *     This check catches that pre-deploy by comparing each gateway-ABI
  *     selector against the bytecode as a 4-byte substring (the EVM
  *     dispatch table embeds selectors verbatim as PUSH4 operands).
- * Then prints a punch list of any setVerifier / setServiceOperator /
+ * Then prints a punch list of any setVerifier / setSettlementBroker /
+ * setAgentTransferBroker / setReputationWriter / setOutflowRecorder /
  * setApprovedAsset calls that need to happen on the multisig owner.
  *
  * Prepares the unsigned function-call data for any required fix so a
@@ -85,7 +94,19 @@ const READ_ABI = [
   "function pauser() view returns (address)",
   "function paused() view returns (bool)",
   "function verifiers(address) view returns (bool)",
-  "function serviceOperators(address) view returns (bool)",
+  // Post-#724 the single `serviceOperators` role was split into five
+  // capability roles. The launch gate reads the four that gate the
+  // brokered claim + settlement path (strategySettler is XCM-only and
+  // stays unwired while XCM is disabled):
+  //   settlementBroker    — EscrowCore._onlyOperator (claimJobFor) AND
+  //                         AgentAccountCore.reserve/allocate
+  //   agentTransferBroker — AgentAccountCore.sendToAgentFor
+  //   reputationWriter    — ReputationSBT mint/update
+  //   outflowRecorder     — TreasuryPolicy.recordOutflow accounting
+  "function settlementBroker(address) view returns (bool)",
+  "function agentTransferBroker(address) view returns (bool)",
+  "function reputationWriter(address) view returns (bool)",
+  "function outflowRecorder(address) view returns (bool)",
   "function trustedSchemaIssuers(address) view returns (bool)",
   "function arbitrators(address) view returns (bool)",
   "function approvedAssets(address) view returns (bool)",
@@ -100,7 +121,10 @@ const READ_ABI = [
 
 const WRITE_ABI = [
   "function setVerifier(address verifier, bool approved)",
-  "function setServiceOperator(address operator, bool approved)",
+  "function setSettlementBroker(address broker, bool approved)",
+  "function setAgentTransferBroker(address broker, bool approved)",
+  "function setReputationWriter(address writer, bool approved)",
+  "function setOutflowRecorder(address recorder, bool approved)",
   "function setEscrowOperator(address escrowOperator, bool approved)",
   "function setTrustedSchemaIssuer(address issuer, bool approved)",
   "function setArbitrator(address arbitrator, bool approved)",
@@ -395,10 +419,12 @@ async function main() {
     pauser,
     paused,
     signerIsVerifier,
-    signerIsOperator,
-    escrowIsOperator,
+    signerIsSettlementBroker,
+    signerIsAgentTransferBroker,
+    escrowIsSettlementBroker,
+    escrowIsReputationWriter,
     escrowIsAgentAccountEscrowOperator,
-    agentAccountIsOperator,
+    agentAccountIsOutflowRecorder,
     arbitratorIsApproved,
     usdcIsApproved,
     minClaimFeeUsdc,
@@ -418,10 +444,12 @@ async function main() {
     policy.pauser(),
     policy.paused(),
     policy.verifiers(backendSigner),
-    policy.serviceOperators(backendSigner),
-    policy.serviceOperators(escrowAddress),
+    policy.settlementBroker(backendSigner),
+    policy.agentTransferBroker(backendSigner),
+    policy.settlementBroker(escrowAddress),
+    policy.reputationWriter(escrowAddress),
     agentAccount.escrowOperators(escrowAddress),
-    policy.serviceOperators(agentAccountAddress),
+    policy.outflowRecorder(agentAccountAddress),
     policy.arbitrators(expectedArbitrator),
     policy.approvedAssets(usdcAddress),
     policy.minClaimFeeByAsset(usdcAddress),
@@ -512,11 +540,13 @@ async function main() {
   console.log(`owner:         ${owner}  ${ciEqual(owner, expectedOwner) ? "✅" : `⚠ expected ${expectedOwner}`}`);
   console.log(`pauser:        ${pauser}  ${ciEqual(pauser, expectedPauser) ? "✅" : `⚠ expected ${expectedPauser}`}`);
   console.log(`paused:        ${paused}  ${paused ? "❌" : "✅"}`);
-  console.log(`verifiers(${short(backendSigner)})         ${signerIsVerifier ? "✅" : "❌"}  ${signerIsVerifier}`);
-  console.log(`serviceOperators(${short(backendSigner)})  ${signerIsOperator ? "✅" : "❌"}  ${signerIsOperator}  (backend signer must be an operator to call EscrowCore.claimJobFor)`);
-  console.log(`serviceOperators(escrow)         ${escrowIsOperator ? "✅" : "❌"}  ${escrowIsOperator}`);
+  console.log(`verifiers(${short(backendSigner)})               ${signerIsVerifier ? "✅" : "❌"}  ${signerIsVerifier}`);
+  console.log(`settlementBroker(${short(backendSigner)})        ${signerIsSettlementBroker ? "✅" : "❌"}  ${signerIsSettlementBroker}  (backend signer must broker to call EscrowCore.claimJobFor)`);
+  console.log(`agentTransferBroker(${short(backendSigner)})     ${signerIsAgentTransferBroker ? "✅" : "❌"}  ${signerIsAgentTransferBroker}  (backend signer must broker AgentAccountCore.sendToAgentFor)`);
+  console.log(`settlementBroker(escrow)               ${escrowIsSettlementBroker ? "✅" : "❌"}  ${escrowIsSettlementBroker}  (EscrowCore brokers AgentAccountCore.reserve/allocate)`);
+  console.log(`reputationWriter(escrow)               ${escrowIsReputationWriter ? "✅" : "❌"}  ${escrowIsReputationWriter}  (EscrowCore writes ReputationSBT during settlement)`);
   console.log(`AgentAccountCore.escrowOperators(escrow) ${escrowIsAgentAccountEscrowOperator ? "✅" : "❌"}  ${escrowIsAgentAccountEscrowOperator}`);
-  console.log(`serviceOperators(agentAccount)   ${agentAccountIsOperator ? "✅" : "❌"}  ${agentAccountIsOperator}  (required for AgentAccountCore.recordOutflow accounting)`);
+  console.log(`outflowRecorder(agentAccount)          ${agentAccountIsOutflowRecorder ? "✅" : "❌"}  ${agentAccountIsOutflowRecorder}  (required for TreasuryPolicy.recordOutflow accounting)`);
   console.log(`arbitrators(${short(expectedArbitrator)})  ${arbitratorIsApproved ? "✅" : "❌"}  ${arbitratorIsApproved}  (required for resolveDispute)`);
   console.log(`approvedAssets(USDC)             ${usdcIsApproved ? "✅" : "❌"}  ${usdcIsApproved}`);
   if (schemaIssuerStatuses.length > 0) {
@@ -536,8 +566,9 @@ async function main() {
 
   // Backend-signer USDC liquidity — authorization is necessary but not
   // sufficient. The 2026-05-25 hosted deploy proved the failure mode:
-  // serviceOperators[signer] was true, but positions[signer][USDC].liquid
-  // was 0.10 USDC, short of the 0.16 USDC required for one claim.
+  // serviceOperators[signer] (now settlementBroker[signer]) was true, but
+  // positions[signer][USDC].liquid was 0.10 USDC, short of the 0.16 USDC
+  // required for one claim.
   console.log("");
   console.log(`## Backend-signer USDC liquidity`);
   console.log(`reward (per claim):              ${formatUsdc(rewardRaw)} USDC (${rewardRaw} raw)`);
@@ -621,26 +652,40 @@ async function main() {
   if (!signerIsVerifier) {
     fixes.push(buildCall("setVerifier", [backendSigner, true], policyAddress));
   }
-  if (!signerIsOperator) {
-    // Backend signer must be a service operator to call
+  if (!signerIsSettlementBroker) {
+    // Backend signer must be a settlementBroker to call
     // EscrowCore.claimJobFor (the admin-operated path that brokers
     // claim-on-behalf-of-worker, dispute resolution, etc.). Without
     // this, the platform's user-facing job lifecycle silently
     // reverts with bare `require(false)` on every chain mutation
     // initiated by the backend. The signer-rotation runbook needs
-    // to flip BOTH verifiers[signer]=true AND
-    // serviceOperators[signer]=true; missing either one is a launch
-    // blocker.
-    fixes.push(buildCall("setServiceOperator", [backendSigner, true], policyAddress));
+    // to flip verifiers[signer]=true AND settlementBroker[signer]=true
+    // AND agentTransferBroker[signer]=true; missing any one is a
+    // launch blocker.
+    fixes.push(buildCall("setSettlementBroker", [backendSigner, true], policyAddress));
   }
-  if (!escrowIsOperator) {
-    fixes.push(buildCall("setServiceOperator", [escrowAddress, true], policyAddress));
+  if (!signerIsAgentTransferBroker) {
+    // Needed for AgentAccountCore.sendToAgentFor (the brokered
+    // agent-to-agent USDC transfer path that ships in BASE_CAPABILITIES).
+    fixes.push(buildCall("setAgentTransferBroker", [backendSigner, true], policyAddress));
+  }
+  if (!escrowIsSettlementBroker) {
+    // EscrowCore calls AgentAccountCore.reserve/allocate under the
+    // settlementBroker role during job funding + settlement.
+    fixes.push(buildCall("setSettlementBroker", [escrowAddress, true], policyAddress));
+  }
+  if (!escrowIsReputationWriter) {
+    // EscrowCore mints/updates ReputationSBT during settlement under
+    // the reputationWriter role; missing it reverts the whole close.
+    fixes.push(buildCall("setReputationWriter", [escrowAddress, true], policyAddress));
   }
   if (!escrowIsAgentAccountEscrowOperator) {
     fixes.push(buildCall("setEscrowOperator", [escrowAddress, true], agentAccountAddress));
   }
-  if (!agentAccountIsOperator) {
-    fixes.push(buildCall("setServiceOperator", [agentAccountAddress, true], policyAddress));
+  if (!agentAccountIsOutflowRecorder) {
+    // AgentAccountCore meters TreasuryPolicy.recordOutflow under the
+    // outflowRecorder role; missing it reverts settlement accounting.
+    fixes.push(buildCall("setOutflowRecorder", [agentAccountAddress, true], policyAddress));
   }
   if (!arbitratorIsApproved) {
     fixes.push(buildCall("setArbitrator", [expectedArbitrator, true], policyAddress));

@@ -8,7 +8,11 @@ const ABI = [
   "function owner() view returns (address)",
   "function pauser() view returns (address)",
   "function verifiers(address) view returns (bool)",
-  "function serviceOperators(address) view returns (bool)",
+  // Post-#724 the single `serviceOperators` role was split into five
+  // capability roles. A signer cutover needs verifier + settlementBroker
+  // (EscrowCore.claimJobFor) + agentTransferBroker (sendToAgentFor).
+  "function settlementBroker(address) view returns (bool)",
+  "function agentTransferBroker(address) view returns (bool)",
   "function paused() view returns (bool)",
 ];
 
@@ -20,16 +24,21 @@ const policy = new Contract(POLICY, ABI, provider);
 console.log(`Probing TreasuryPolicy at ${POLICY}`);
 console.log(`RPC: ${RPC}\n`);
 
-const [owner, pauser, paused, newApproved] = await Promise.all([
-  policy.owner(),
-  policy.pauser(),
-  policy.paused(),
-  policy.verifiers(NEW_VERIFIER),
-]);
+const [owner, pauser, paused, newApproved, newSettlementBroker, newAgentTransferBroker] =
+  await Promise.all([
+    policy.owner(),
+    policy.pauser(),
+    policy.paused(),
+    policy.verifiers(NEW_VERIFIER),
+    policy.settlementBroker(NEW_VERIFIER),
+    policy.agentTransferBroker(NEW_VERIFIER),
+  ]);
 
 console.log("Owner:           ", owner);
 console.log("Pauser:          ", pauser);
 console.log("Paused:          ", paused);
 console.log("");
-console.log(`verifiers(${NEW_VERIFIER}):`);
-console.log(`  → ${newApproved}  (false = needs approval; true = already approved)`);
+console.log(`Signer roles for ${NEW_VERIFIER} (false = needs approval; true = already approved):`);
+console.log(`  verifiers:            ${newApproved}`);
+console.log(`  settlementBroker:     ${newSettlementBroker}`);
+console.log(`  agentTransferBroker:  ${newAgentTransferBroker}`);
