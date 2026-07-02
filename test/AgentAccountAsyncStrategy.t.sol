@@ -68,7 +68,7 @@ contract AgentAccountAsyncStrategyTest is Test {
                 strategyId: STRATEGY_ID,
                 amount: 20 ether,
                 destination: hex"0102",
-                message: _depositMessage(requestId),
+                message: _depositMessage(requestId, worker, 20 ether),
                 maxWeight: maxWeight,
                 nonce: 1
             })
@@ -101,7 +101,7 @@ contract AgentAccountAsyncStrategyTest is Test {
                             strategyId: STRATEGY_ID,
                             amount: 51 ether,
                             destination: hex"0102",
-                            message: _depositMessage(requestId),
+                            message: _depositMessage(requestId, worker, 51 ether),
                             maxWeight: maxWeight,
                             nonce: 11
                         })
@@ -241,7 +241,7 @@ contract AgentAccountAsyncStrategyTest is Test {
                 shares: 15 ether,
                 recipient: address(accounts),
                 destination: hex"0a",
-                message: _withdrawMessage(previewId),
+                message: _withdrawMessage(previewId, address(accounts), 15 ether),
                 maxWeight: maxWeight,
                 nonce: 4
             })
@@ -283,7 +283,7 @@ contract AgentAccountAsyncStrategyTest is Test {
                             shares: 15 ether,
                             recipient: recipient,
                             destination: hex"0b",
-                            message: _withdrawMessage(previewId),
+                            message: _withdrawMessage(previewId, recipient, 15 ether),
                             maxWeight: maxWeight,
                             nonce: 44
                         })
@@ -311,7 +311,7 @@ contract AgentAccountAsyncStrategyTest is Test {
                 shares: 15 ether,
                 recipient: recipient,
                 destination: hex"0b",
-                message: _withdrawMessage(previewId),
+                message: _withdrawMessage(previewId, recipient, 15 ether),
                 maxWeight: maxWeight,
                 nonce: 34
             })
@@ -348,7 +348,7 @@ contract AgentAccountAsyncStrategyTest is Test {
                 shares: 15 ether,
                 recipient: address(accounts),
                 destination: hex"0a",
-                message: _withdrawMessage(previewId),
+                message: _withdrawMessage(previewId, address(accounts), 15 ether),
                 maxWeight: maxWeight,
                 nonce: 4
             })
@@ -388,7 +388,7 @@ contract AgentAccountAsyncStrategyTest is Test {
                 shares: 10 ether,
                 recipient: address(accounts),
                 destination: hex"0c",
-                message: _withdrawMessage(previewId),
+                message: _withdrawMessage(previewId, address(accounts), 10 ether),
                 maxWeight: maxWeight,
                 nonce: 6
             })
@@ -424,7 +424,7 @@ contract AgentAccountAsyncStrategyTest is Test {
                 strategyId: STRATEGY_ID,
                 amount: amount,
                 destination: hex"0102",
-                message: _depositMessage(previewId),
+                message: _depositMessage(previewId, worker, amount),
                 maxWeight: maxWeight,
                 nonce: nonce
             })
@@ -466,20 +466,73 @@ contract AgentAccountAsyncStrategyTest is Test {
         );
     }
 
-    function _depositMessage(bytes32 requestId) internal pure returns (bytes memory) {
+    function _depositMessage(bytes32 requestId, address account, uint256 amount) internal view returns (bytes memory) {
+        return _message(requestId, account, amount);
+    }
+
+    function _withdrawMessage(bytes32 requestId, address recipient, uint256 shares)
+        internal
+        view
+        returns (bytes memory)
+    {
+        return _message(requestId, recipient, shares);
+    }
+
+    function _message(bytes32 requestId, address beneficiary, uint256 amount) internal view returns (bytes memory) {
         return abi.encodePacked(
-            hex"0510000401000002286bee1301000002093d000d01010100000000010300aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            hex"05",
+            _compact(4),
+            bytes1(0x00),
+            _compact(1),
+            _xcmAsset(amount),
+            bytes1(0x13),
+            _xcmAsset(1),
+            bytes1(0x0d),
+            hex"010101000000",
+            _accountKey20Location(beneficiary),
             bytes1(0x2c),
             requestId
         );
     }
 
-    function _withdrawMessage(bytes32 requestId) internal pure returns (bytes memory) {
-        return abi.encodePacked(
-            hex"0510000401000003009435771301000002093d000d01010100000000010300bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            bytes1(0x2c),
-            requestId
-        );
+    function _xcmAsset(uint256 amount) internal view returns (bytes memory) {
+        return abi.encodePacked(_accountKey20Location(address(dot)), bytes1(0x00), _compact(amount));
+    }
+
+    function _accountKey20Location(address key) internal pure returns (bytes memory) {
+        return abi.encodePacked(bytes1(0x00), bytes1(0x01), bytes1(0x03), bytes1(0x00), key);
+    }
+
+    function _compact(uint256 value) internal pure returns (bytes memory) {
+        if (value < 64) {
+            return abi.encodePacked(bytes1(uint8(value << 2)));
+        }
+        if (value < 16_384) {
+            uint16 raw16 = uint16((value << 2) | 1);
+            return abi.encodePacked(bytes1(uint8(raw16)), bytes1(uint8(raw16 >> 8)));
+        }
+        if (value < 1_073_741_824) {
+            uint32 raw32 = uint32((value << 2) | 2);
+            return abi.encodePacked(
+                bytes1(uint8(raw32)), bytes1(uint8(raw32 >> 8)), bytes1(uint8(raw32 >> 16)), bytes1(uint8(raw32 >> 24))
+            );
+        }
+
+        uint256 byteLength;
+        uint256 remaining = value;
+        while (remaining > 0) {
+            byteLength += 1;
+            remaining >>= 8;
+        }
+        if (byteLength < 4) byteLength = 4;
+        require(byteLength <= 67, "compact too large");
+
+        bytes memory encoded = new bytes(1 + byteLength);
+        encoded[0] = bytes1(uint8(((byteLength - 4) << 2) | 3));
+        for (uint256 i = 0; i < byteLength; i++) {
+            encoded[1 + i] = bytes1(uint8(value >> (8 * i)));
+        }
+        return encoded;
     }
 
     function _assertCustomError(bool ok, bytes memory data, bytes4 selector) internal pure {

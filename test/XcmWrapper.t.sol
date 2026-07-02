@@ -164,10 +164,57 @@ contract XcmWrapperTest is Test {
             .call(
                 abi.encodeCall(
                     wrapper.queueRequest,
-                    (context, hex"0102", _withdrawMessage(requestId), IXcmWrapper.Weight({refTime: 1, proofSize: 2}))
+                    (
+                        context,
+                        hex"0102",
+                        _depositMessageWithFee(requestId, 2),
+                        IXcmWrapper.Weight({refTime: 1, proofSize: 2})
+                    )
                 )
             );
         _assertCustomError(ok, data, XcmWrapper.PayloadMismatch.selector);
+    }
+
+    function testQueueRequestRejectsBeneficiaryContextMismatch() public {
+        IXcmWrapper.RequestContext memory context = _context(25 ether, 0, 1);
+        bytes memory message = _message(wrapper.previewRequestId(context), ASSET, address(0x9999), 25 ether, 1);
+
+        vm.prank(operator);
+        (bool ok, bytes memory data) = address(wrapper)
+            .call(
+                abi.encodeCall(
+                    wrapper.queueRequest, (context, hex"0102", message, IXcmWrapper.Weight({refTime: 1, proofSize: 2}))
+                )
+            );
+        _assertCustomError(ok, data, XcmWrapper.XcmContextMismatch.selector);
+    }
+
+    function testQueueRequestRejectsWithdrawAssetContextMismatch() public {
+        IXcmWrapper.RequestContext memory context = _context(25 ether, 0, 1);
+        bytes memory message = _message(wrapper.previewRequestId(context), address(0x9999), RECIPIENT, 25 ether, 1);
+
+        vm.prank(operator);
+        (bool ok, bytes memory data) = address(wrapper)
+            .call(
+                abi.encodeCall(
+                    wrapper.queueRequest, (context, hex"0102", message, IXcmWrapper.Weight({refTime: 1, proofSize: 2}))
+                )
+            );
+        _assertCustomError(ok, data, XcmWrapper.XcmContextMismatch.selector);
+    }
+
+    function testQueueRequestRejectsWithdrawAmountContextMismatch() public {
+        IXcmWrapper.RequestContext memory context = _context(25 ether, 0, 1);
+        bytes memory message = _message(wrapper.previewRequestId(context), ASSET, RECIPIENT, 24 ether, 1);
+
+        vm.prank(operator);
+        (bool ok, bytes memory data) = address(wrapper)
+            .call(
+                abi.encodeCall(
+                    wrapper.queueRequest, (context, hex"0102", message, IXcmWrapper.Weight({refTime: 1, proofSize: 2}))
+                )
+            );
+        _assertCustomError(ok, data, XcmWrapper.XcmContextMismatch.selector);
     }
 
     function testQueueRequestRejectsMissingSetTopic() public {
@@ -516,19 +563,76 @@ contract XcmWrapperTest is Test {
     }
 
     function _depositMessage(bytes32 requestId) internal pure returns (bytes memory) {
+        return _message(requestId, ASSET, RECIPIENT, 25 ether, 1);
+    }
+
+    function _depositMessageWithFee(bytes32 requestId, uint256 feeAmount) internal pure returns (bytes memory) {
+        return _message(requestId, ASSET, RECIPIENT, 25 ether, feeAmount);
+    }
+
+    function _withdrawMessage(bytes32 requestId) internal pure returns (bytes memory) {
+        return _message(requestId, ASSET, RECIPIENT, 10 ether, 1);
+    }
+
+    function _message(bytes32 requestId, address asset, address recipient, uint256 amount, uint256 feeAmount)
+        internal
+        pure
+        returns (bytes memory)
+    {
         return abi.encodePacked(
-            hex"0510000401000002286bee1301000002093d000d01010100000000010300aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            hex"05",
+            _compact(4),
+            bytes1(0x00),
+            _compact(1),
+            _asset(asset, amount),
+            bytes1(0x13),
+            _asset(asset, feeAmount),
+            bytes1(0x0d),
+            hex"010101000000",
+            _accountKey20Location(recipient),
             bytes1(0x2c),
             requestId
         );
     }
 
-    function _withdrawMessage(bytes32 requestId) internal pure returns (bytes memory) {
-        return abi.encodePacked(
-            hex"0510000401000003009435771301000002093d000d01010100000000010300bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            bytes1(0x2c),
-            requestId
-        );
+    function _asset(address asset, uint256 amount) internal pure returns (bytes memory) {
+        return abi.encodePacked(_accountKey20Location(asset), bytes1(0x00), _compact(amount));
+    }
+
+    function _accountKey20Location(address key) internal pure returns (bytes memory) {
+        return abi.encodePacked(bytes1(0x00), bytes1(0x01), bytes1(0x03), bytes1(0x00), key);
+    }
+
+    function _compact(uint256 value) internal pure returns (bytes memory) {
+        if (value < 64) {
+            return abi.encodePacked(bytes1(uint8(value << 2)));
+        }
+        if (value < 16_384) {
+            uint16 raw16 = uint16((value << 2) | 1);
+            return abi.encodePacked(bytes1(uint8(raw16)), bytes1(uint8(raw16 >> 8)));
+        }
+        if (value < 1_073_741_824) {
+            uint32 raw32 = uint32((value << 2) | 2);
+            return abi.encodePacked(
+                bytes1(uint8(raw32)), bytes1(uint8(raw32 >> 8)), bytes1(uint8(raw32 >> 16)), bytes1(uint8(raw32 >> 24))
+            );
+        }
+
+        uint256 byteLength;
+        uint256 remaining = value;
+        while (remaining > 0) {
+            byteLength += 1;
+            remaining >>= 8;
+        }
+        if (byteLength < 4) byteLength = 4;
+        require(byteLength <= 67, "compact too large");
+
+        bytes memory encoded = new bytes(1 + byteLength);
+        encoded[0] = bytes1(uint8(((byteLength - 4) << 2) | 3));
+        for (uint256 i = 0; i < byteLength; i++) {
+            encoded[1 + i] = bytes1(uint8(value >> (8 * i)));
+        }
+        return encoded;
     }
 
     function _assertCustomError(bool ok, bytes memory data, bytes4 selector) internal pure {
