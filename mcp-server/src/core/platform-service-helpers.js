@@ -18,9 +18,9 @@ export const DEFAULT_TREASURY_POLICY_STATUS = {
   roles: {
     signerAddress: undefined,
     signerIsVerifier: false,
-    escrowIsServiceOperator: false,
+    signerIsSettlementBroker: false,
     escrowIsAgentAccountEscrowOperator: false,
-    agentAccountIsServiceOperator: false
+    agentAccountIsOutflowRecorder: false
   },
   readErrors: [],
   risk: {}

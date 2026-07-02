@@ -906,7 +906,7 @@ test("getAdminStatus reports treasury policy failures without failing the status
 
   assert.equal(status.maintenance.policy.enabled, true);
   assert.equal(status.maintenance.policy.policyAddress, "0x1111111111111111111111111111111111111111");
-  assert.equal(status.maintenance.policy.roles.agentAccountIsServiceOperator, false);
+  assert.equal(status.maintenance.policy.roles.agentAccountIsOutflowRecorder, false);
   assert.equal(status.maintenance.policy.error.code, "blockchain_revert");
   assert.equal(status.maintenance.policy.error.details.rawReason, "require(false)");
   assert.ok(status.anomalies.some((entry) => entry.code === "policy_status_unavailable"));

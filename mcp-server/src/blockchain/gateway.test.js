@@ -555,11 +555,12 @@ test("getTreasuryPolicyStatus surfaces settlement readiness roles", async () => 
       assert.equal(address, signerAddress);
       return true;
     },
-    async serviceOperators(address) {
-      assert.ok([
-        "0x2222222222222222222222222222222222222222",
-        "0x3333333333333333333333333333333333333333"
-      ].includes(address));
+    async settlementBroker(address) {
+      assert.equal(address, signerAddress);
+      return true;
+    },
+    async outflowRecorder(address) {
+      assert.equal(address, "0x3333333333333333333333333333333333333333");
       return true;
     },
     async approvedAssets(address) {
@@ -625,10 +626,10 @@ test("getTreasuryPolicyStatus surfaces settlement readiness roles", async () => 
   assert.equal(status.settlementReady, true);
   assert.equal(status.roles.signerAddress, signerAddress);
   assert.equal(status.roles.signerIsVerifier, true);
-  assert.equal(status.roles.escrowIsServiceOperator, true);
+  assert.equal(status.roles.signerIsSettlementBroker, true);
   assert.equal(status.roles.escrowIsAgentAccountEscrowOperator, true);
   assert.equal(status.roles.escrowAgentAccountMatchesConfig, true);
-  assert.equal(status.roles.agentAccountIsServiceOperator, true);
+  assert.equal(status.roles.agentAccountIsOutflowRecorder, true);
   assert.deepEqual(status.readErrors, []);
   assert.equal(status.contracts.escrowCoreAgentAccountAddress, "0x3333333333333333333333333333333333333333");
   assert.deepEqual(status.contracts.supportedAssets, [{
@@ -691,7 +692,10 @@ test("getTreasuryPolicyStatus marks settlement not ready when EscrowCore points 
     async verifiers() {
       return true;
     },
-    async serviceOperators() {
+    async settlementBroker() {
+      return true;
+    },
+    async outflowRecorder() {
       return true;
     },
     async approvedAssets() {
@@ -752,7 +756,7 @@ test("getTreasuryPolicyStatus marks settlement not ready when EscrowCore points 
   assert.equal(status.settlementReady, false);
 });
 
-test("getTreasuryPolicyStatus accepts legacy AgentAccountCore operator authorization when escrowOperators getter is absent", async () => {
+test("getTreasuryPolicyStatus reports missing escrow authorization when escrowOperators getter is absent (no legacy serviceOperator fallback)", async () => {
   const gateway = new BlockchainGateway({
     enabled: true,
     rpcUrl: "http://127.0.0.1:8545",
@@ -778,11 +782,12 @@ test("getTreasuryPolicyStatus accepts legacy AgentAccountCore operator authoriza
       assert.equal(address, signerAddress);
       return true;
     },
-    async serviceOperators(address) {
-      assert.ok([
-        "0x2222222222222222222222222222222222222222",
-        "0x3333333333333333333333333333333333333333"
-      ].includes(address));
+    async settlementBroker(address) {
+      assert.equal(address, signerAddress);
+      return true;
+    },
+    async outflowRecorder(address) {
+      assert.equal(address, "0x3333333333333333333333333333333333333333");
       return true;
     },
     async approvedAssets(address) {
@@ -843,11 +848,13 @@ test("getTreasuryPolicyStatus accepts legacy AgentAccountCore operator authoriza
 
   const status = await gateway.getTreasuryPolicyStatus();
 
-  assert.equal(status.settlementReady, true);
-  assert.equal(status.roles.escrowIsServiceOperator, true);
-  assert.equal(status.roles.escrowIsAgentAccountEscrowOperator, true);
-  assert.equal(status.roles.agentAccountIsServiceOperator, true);
-  assert.equal(status.roles.agentAccountEscrowAuthorizationMode, "legacyServiceOperator");
+  // No escrowOperators getter → escrow is NOT authorized to drive AAC, and there is
+  // no longer a legacy serviceOperator fallback (#724), so settlement is not ready.
+  assert.equal(status.settlementReady, false);
+  assert.equal(status.roles.signerIsSettlementBroker, true);
+  assert.equal(status.roles.agentAccountIsOutflowRecorder, true);
+  assert.equal(status.roles.escrowIsAgentAccountEscrowOperator, false);
+  assert.equal(status.roles.agentAccountEscrowAuthorizationMode, "missing");
   assert.equal(status.roles.agentAccountEscrowOperatorsGetterReady, false);
   assert.equal(status.roles.escrowAgentAccountMatchesConfig, true);
   assert.deepEqual(status.readErrors, [{
@@ -882,7 +889,10 @@ test("getTreasuryPolicyStatus preserves raw policy risk values when numbers are 
     async verifiers() {
       return true;
     },
-    async serviceOperators() {
+    async settlementBroker() {
+      return true;
+    },
+    async outflowRecorder() {
       return true;
     },
     async approvedAssets() {
@@ -976,7 +986,12 @@ test("getTreasuryPolicyStatus records individual read errors without hiding role
     async verifiers() {
       return true;
     },
-    async serviceOperators() {
+    async settlementBroker() {
+      const error = new Error("require(false)");
+      error.shortMessage = "execution reverted";
+      throw error;
+    },
+    async outflowRecorder() {
       const error = new Error("require(false)");
       error.shortMessage = "execution reverted";
       throw error;
@@ -1037,13 +1052,13 @@ test("getTreasuryPolicyStatus records individual read errors without hiding role
   const status = await gateway.getTreasuryPolicyStatus();
 
   assert.equal(status.roles.signerIsVerifier, true);
-  assert.equal(status.roles.escrowIsServiceOperator, false);
+  assert.equal(status.roles.signerIsSettlementBroker, false);
   assert.equal(status.roles.escrowIsAgentAccountEscrowOperator, false);
-  assert.equal(status.roles.agentAccountIsServiceOperator, false);
+  assert.equal(status.roles.agentAccountIsOutflowRecorder, false);
   assert.equal(status.settlementReady, false);
   assert.deepEqual(status.readErrors, [
     {
-      field: "serviceOperators(escrowCore)",
+      field: "settlementBroker(signer)",
       message: "execution reverted"
     },
     {
@@ -1051,7 +1066,7 @@ test("getTreasuryPolicyStatus records individual read errors without hiding role
       message: "execution reverted"
     },
     {
-      field: "serviceOperators(agentAccount)",
+      field: "outflowRecorder(agentAccount)",
       message: "execution reverted"
     }
   ]);
