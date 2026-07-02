@@ -912,13 +912,13 @@ test("runHostedWorkerLoop fails closed before mutation when settlement is not re
           calls.push(["getAdminStatus"]);
           return settlementReadyStatus({
             settlementReady: false,
-            readErrors: [{ field: "serviceOperators(escrowCore)", message: "execution reverted" }],
+            readErrors: [{ field: "settlementBroker(signer)", message: "execution reverted" }],
             roles: {
-              signerAddress: "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519",
+              signerAddress: "0x31ad432dFe083B998c69B6dB88A984ec5207ab7F",
               signerIsVerifier: false,
-              escrowIsServiceOperator: true,
+              signerIsSettlementBroker: true,
               escrowIsAgentAccountEscrowOperator: true,
-              agentAccountIsServiceOperator: true
+              agentAccountIsOutflowRecorder: true
             }
           });
         },
@@ -931,7 +931,7 @@ test("runHostedWorkerLoop fails closed before mutation when settlement is not re
       log: () => {},
       env: { ADMIN_JWT: "token" }
     }),
-    /signerIsVerifier=false, policyReadErrors=serviceOperators\(escrowCore\)/u
+    /signerIsVerifier=false, policyReadErrors=settlementBroker\(signer\)/u
   );
 
   assert.deepEqual(calls.map(([name]) => name), ["getAuthSession", "getAdminStatus"]);
@@ -1284,9 +1284,9 @@ function settlementReadyStatus(overrides = {}) {
         roles: {
           signerAddress: "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519",
           signerIsVerifier: true,
-          escrowIsServiceOperator: true,
+          signerIsSettlementBroker: true,
           escrowIsAgentAccountEscrowOperator: true,
-          agentAccountIsServiceOperator: true
+          agentAccountIsOutflowRecorder: true
         },
         signerFunding: signerFundingReady(),
         contracts: {

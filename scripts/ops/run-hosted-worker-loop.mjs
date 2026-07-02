@@ -929,9 +929,12 @@ async function assertSettlementReadiness(platform, rewardAsset) {
     roles: {
       signerAddress: policy.roles?.signerAddress,
       signerIsVerifier: Boolean(policy.roles?.signerIsVerifier),
-      escrowIsServiceOperator: Boolean(policy.roles?.escrowIsServiceOperator),
+      // Post-#724/#726 the gateway reports the split roles: the signer's
+      // settlementBroker (was escrowIsServiceOperator) and the agent
+      // account's outflowRecorder (was agentAccountIsServiceOperator).
+      signerIsSettlementBroker: Boolean(policy.roles?.signerIsSettlementBroker),
       escrowIsAgentAccountEscrowOperator: Boolean(policy.roles?.escrowIsAgentAccountEscrowOperator),
-      agentAccountIsServiceOperator: Boolean(policy.roles?.agentAccountIsServiceOperator)
+      agentAccountIsOutflowRecorder: Boolean(policy.roles?.agentAccountIsOutflowRecorder)
     },
     signerFunding: policy.signerFunding,
     contracts: policy.contracts
@@ -962,11 +965,11 @@ function formatSettlementReadiness(policy) {
   const reasons = [];
   if (policy?.paused) reasons.push("policyPaused=true");
   if (!policy?.roles?.signerIsVerifier) reasons.push("signerIsVerifier=false");
-  if (!policy?.roles?.escrowIsServiceOperator) reasons.push("escrowIsServiceOperator=false");
+  if (!policy?.roles?.signerIsSettlementBroker) reasons.push("signerIsSettlementBroker=false");
   if (!policy?.roles?.escrowIsAgentAccountEscrowOperator) {
     reasons.push("escrowIsAgentAccountEscrowOperator=false");
   }
-  if (!policy?.roles?.agentAccountIsServiceOperator) reasons.push("agentAccountIsServiceOperator=false");
+  if (!policy?.roles?.agentAccountIsOutflowRecorder) reasons.push("agentAccountIsOutflowRecorder=false");
   const unapprovedAssets = (policy?.contracts?.supportedAssets ?? [])
     .filter((asset) => asset.approved !== true)
     .map((asset) => asset.symbol ?? asset.address ?? "unknown");
