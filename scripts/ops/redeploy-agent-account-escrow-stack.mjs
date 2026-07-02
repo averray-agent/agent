@@ -45,6 +45,7 @@ const PHASES = new Set(["deploy", "finalize", "all"]);
 const PRIVATE_KEY_RE = /^0x[a-fA-F0-9]{64}$/u;
 const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/u;
 const TX_HASH_RE = /^0x[a-fA-F0-9]{64}$/u;
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const DEFAULT_ORPHAN_SCAN_CHUNK_SIZE = 25_000;
 
 const TREASURY_POLICY_ABI = [
@@ -55,6 +56,7 @@ const TREASURY_POLICY_ABI = [
 const AGENT_ACCOUNT_READ_ABI = [
   "function domainSeparator() view returns (bytes32)",
   "function escrowOperators(address escrowOperator) view returns (bool)",
+  "function treasuryAccount() view returns (address)",
   "function positions(address account, address asset) view returns (uint256 liquid,uint256 reserved,uint256 strategyAllocated,uint256 collateralLocked,uint256 jobStakeLocked,uint256 debtOutstanding)"
 ];
 
@@ -69,7 +71,9 @@ const REQUIRED_AGENT_ACCOUNT_FNS = [
   "sendToAgentFor",
   "hashSendToAgentAuthorization",
   "sendToAgentAuthorizationUsed",
-  "cancelRecurringTemplateReserve"
+  "cancelRecurringTemplateReserve",
+  "treasuryAccount",
+  "setTreasuryAccount"
 ];
 
 export function parseArgs(argv) {
@@ -453,6 +457,7 @@ async function runFinalize({ args, deploymentsPath, manifest, provider }) {
     newEscrowIsOperator,
     oldEscrowIsOperator,
     newAacEscrowOperator,
+    treasuryAccount,
     oldAacOldEscrowOperator,
     signerIsOperator,
     signerPosition
@@ -465,6 +470,7 @@ async function runFinalize({ args, deploymentsPath, manifest, provider }) {
     treasury.serviceOperators(args.newEscrow),
     treasury.serviceOperators(oldEscrow),
     newAccount.escrowOperators(args.newEscrow),
+    newAccount.treasuryAccount(),
     oldAccount.escrowOperators(oldEscrow),
     treasury.serviceOperators(signer),
     newAccount.positions(signer, asset)
@@ -483,6 +489,7 @@ async function runFinalize({ args, deploymentsPath, manifest, provider }) {
   console.log(`  serviceOperators[new AAC]:              ${newAgentIsOperator}`);
   console.log(`  serviceOperators[new Escrow]:           ${newEscrowIsOperator}`);
   console.log(`  newAAC.escrowOperators[new Escrow]:     ${newAacEscrowOperator}`);
+  console.log(`  newAAC.treasuryAccount():               ${treasuryAccount}`);
   console.log(`  serviceOperators[signer]:               ${signerIsOperator}`);
   console.log(`  newAAC.positions(signer, USDC):         ${JSON.stringify(normalizePosition(signerPosition))}`);
   console.log(`  serviceOperators[old Escrow]:           ${oldEscrowIsOperator} (expected false unless --skip-revoke)`);
@@ -496,6 +503,7 @@ async function runFinalize({ args, deploymentsPath, manifest, provider }) {
   if (!newAgentIsOperator) throw new Error("TreasuryPolicy.serviceOperators(new AgentAccountCore) is false.");
   if (!newEscrowIsOperator) throw new Error("TreasuryPolicy.serviceOperators(new EscrowCore) is false.");
   if (!newAacEscrowOperator) throw new Error("new AgentAccountCore.escrowOperators(new EscrowCore) is false.");
+  if (ciEqual(treasuryAccount, ZERO_ADDRESS)) throw new Error("new AgentAccountCore.treasuryAccount() is unset.");
   if (!signerIsOperator) throw new Error(`TreasuryPolicy.serviceOperators(signer ${signer}) is false.`);
   if (!args.skipRevoke && oldEscrowIsOperator) throw new Error("Old EscrowCore is still a TreasuryPolicy serviceOperator.");
   if (!args.skipRevoke && oldAacOldEscrowOperator) throw new Error("Old EscrowCore is still wired on old AgentAccountCore.");

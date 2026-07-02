@@ -77,8 +77,10 @@ contract AgentAccountCore is ReentrancyGuard {
     mapping(address => mapping(uint256 => bool)) public sendToAgentAuthorizationUsed;
     mapping(address => bool) public escrowOperators;
     mapping(bytes32 => bool) public settlementExecuted;
+    address public treasuryAccount;
 
     event EscrowOperatorUpdated(address indexed escrowOperator, bool approved);
+    event TreasuryAccountUpdated(address indexed previousTreasuryAccount, address indexed newTreasuryAccount);
     event Deposited(address indexed account, address indexed asset, uint256 amount);
     event Withdrawn(address indexed account, address indexed asset, uint256 amount);
     event Reserved(address indexed account, address indexed asset, uint256 amount);
@@ -126,6 +128,7 @@ contract AgentAccountCore is ReentrancyGuard {
         uint256 verifierAmount,
         uint256 treasuryAmount
     );
+    event TreasuryCredited(address indexed treasuryAccount, address indexed asset, uint256 amount);
     event Borrowed(address indexed account, address indexed asset, uint256 amount);
     event Repaid(address indexed account, address indexed asset, uint256 amount);
     event AgentTransfer(address indexed from, address indexed to, address indexed asset, uint256 amount);
@@ -147,6 +150,7 @@ contract AgentAccountCore is ReentrancyGuard {
     error InvalidSignature();
     error ExpiredAuthorization();
     error AuthorizationAlreadyUsed();
+    error TreasuryAccountUnset();
 
     constructor(TreasuryPolicy policy_, StrategyAdapterRegistry registry_) {
         policy = policy_;
@@ -211,6 +215,11 @@ contract AgentAccountCore is ReentrancyGuard {
         if (escrowOperator == address(0)) revert InvalidRecipient();
         escrowOperators[escrowOperator] = approved;
         emit EscrowOperatorUpdated(escrowOperator, approved);
+    }
+
+    function setTreasuryAccount(address newTreasuryAccount) external onlyPolicyOwner {
+        emit TreasuryAccountUpdated(treasuryAccount, newTreasuryAccount);
+        treasuryAccount = newTreasuryAccount;
     }
 
     function deposit(address asset, uint256 amount) external nonReentrant whenNotPaused onlySupportedAsset(asset) {
@@ -490,6 +499,8 @@ contract AgentAccountCore is ReentrancyGuard {
                 strategyShares[request.account][request.strategyId] = accountShares - request.requestedShares;
                 if (request.recipient == address(this)) {
                     positions[request.account][request.asset].liquid += settledAssets;
+                } else {
+                    policy.recordOutflow(request.account, settledAssets);
                 }
             }
         } else {
@@ -595,6 +606,7 @@ contract AgentAccountCore is ReentrancyGuard {
         uint256 posterAmount = amount / 2;
         uint256 treasuryAmount = amount - posterAmount;
 
+        _creditTreasury(asset, treasuryAmount);
         if (posterAmount > 0) {
             policy.recordOutflow(account, posterAmount);
             SafeTransfer.safeTransfer(asset, posterRecipient, posterAmount);
@@ -621,6 +633,7 @@ contract AgentAccountCore is ReentrancyGuard {
         uint256 verifierAmount = verifierRecipient == address(0) ? 0 : (amount * policy.claimFeeVerifierBps()) / 10_000;
         uint256 treasuryAmount = amount - verifierAmount;
 
+        _creditTreasury(asset, treasuryAmount);
         if (verifierAmount > 0) {
             policy.recordOutflow(account, verifierAmount);
             SafeTransfer.safeTransfer(asset, verifierRecipient, verifierAmount);
@@ -806,6 +819,16 @@ contract AgentAccountCore is ReentrancyGuard {
             position.strategyAllocated -= decrease;
         }
         strategyAllocationValues[account][strategyId] = currentValue;
+    }
+
+    function _creditTreasury(address asset, uint256 amount) internal {
+        if (amount == 0) {
+            return;
+        }
+        address account = treasuryAccount;
+        if (account == address(0)) revert TreasuryAccountUnset();
+        positions[account][asset].liquid += amount;
+        emit TreasuryCredited(account, asset, amount);
     }
 
     function _createPendingDepositRequest(

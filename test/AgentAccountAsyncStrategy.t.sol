@@ -168,6 +168,7 @@ contract AgentAccountAsyncStrategyTest is Test {
 
     function testSettleStrategyWithdrawReturnsLiquidityToAccountCore() public {
         _seedSettledDeposit(40 ether, 3);
+        policy.setDailyOutflowCap(1 ether);
 
         IXcmWrapper.Weight memory maxWeight = IXcmWrapper.Weight({refTime: 10, proofSize: 5});
         bytes32 previewId = _previewWithdrawRequestId(worker, 15 ether, address(accounts), 4);
@@ -200,6 +201,46 @@ contract AgentAccountAsyncStrategyTest is Test {
         assertEq(accounts.strategyShares(worker, STRATEGY_ID), 25 ether);
         assertEq(dot.balanceOf(address(accounts)), WORKER_DEPOSIT - 25 ether);
         assertEq(dot.balanceOf(address(adapter)), 25 ether);
+        assertEq(policy.accountOutflowToday(worker), 0);
+    }
+
+    function testExternalStrategyWithdrawEgressTripsFiniteOutflowCap() public {
+        _seedSettledDeposit(40 ether, 33);
+        policy.setDailyOutflowCap(10 ether);
+
+        address recipient = address(0xCAFE);
+        IXcmWrapper.Weight memory maxWeight = IXcmWrapper.Weight({refTime: 10, proofSize: 5});
+        bytes32 previewId = _previewWithdrawRequestId(worker, 15 ether, recipient, 34);
+        vm.prank(worker);
+        bytes32 requestId = accounts.requestStrategyWithdraw(
+            worker,
+            AgentAccountCore.StrategyWithdrawRequestParams({
+                strategyId: STRATEGY_ID,
+                shares: 15 ether,
+                recipient: recipient,
+                destination: hex"0b",
+                message: _withdrawMessage(previewId),
+                maxWeight: maxWeight,
+                nonce: 34
+            })
+        );
+        require(requestId == previewId, "WRONG_REQUEST_ID");
+
+        (bool ok, bytes memory data) = address(accounts)
+            .call(
+                abi.encodeCall(
+                    accounts.settleStrategyRequest,
+                    (requestId, IXcmWrapper.RequestStatus.Succeeded, 15 ether, 0, bytes32("WITHDRAW"), bytes32(0))
+                )
+            );
+
+        _assertCustomError(ok, data, TreasuryPolicy.OutflowCapExceeded.selector);
+        assertEq(dot.balanceOf(recipient), 0);
+        assertEq(policy.accountOutflowToday(worker), 0);
+        assertEq(accounts.pendingStrategyWithdrawalShares(worker, STRATEGY_ID), 15 ether);
+        assertEq(accounts.strategyShares(worker, STRATEGY_ID), 40 ether);
+        assertEq(adapter.totalAssets(), 40 ether);
+        assertEq(adapter.totalShares(), 40 ether);
     }
 
     function testSettleStrategyWithdrawRejectsZeroAssetSuccessAndKeepsPending() public {

@@ -68,7 +68,9 @@ test("assertArtifactHasAgentAccountSelectors accepts the current AAC surface", (
         "sendToAgentFor",
         "hashSendToAgentAuthorization",
         "sendToAgentAuthorizationUsed",
-        "cancelRecurringTemplateReserve"
+        "cancelRecurringTemplateReserve",
+        "treasuryAccount",
+        "setTreasuryAccount"
       ])
     )
   );
