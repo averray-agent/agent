@@ -45,7 +45,10 @@ default-config warning).
 `C-06` per-contract ReentrancyGuard · `C-10` `finalizeXcm` permissionless · `C-13` pause
 blocks slashing · `C-14` milestone spam within cap · `C-17` `autoResolveOnTimeout` favors
 worker · `B-06` payment asset defaults to DOT · `B-12` verifier-result endpoint public ·
-`E-10/E-18/E-21/E-24/E-26/E-27` economic edge cases · `D-04` missing Caddyfile security headers.
+`E-10/E-18/E-21/E-24/E-26/E-27` economic edge cases · ~~`D-04` missing Caddyfile security
+headers~~ → **✅ this PR**: HSTS, `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`,
+`Permissions-Policy` on every Caddy site (+ `-Server`), and a strict `default-src 'none'; frame-ancestors 'none'`
+CSP on the JSON API + indexer sites (`caddy validate` clean).
 
 ## Autonomous-settlement trust model (documents B-01 / B-11)
 
