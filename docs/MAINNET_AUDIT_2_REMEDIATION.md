@@ -34,12 +34,12 @@ Only after this re-wire is a finite `dailyOutflowCap` a genuine guardrail. This 
 
 | ID | Verified location | Verdict | Prior board | Owner | Remediation |
 |----|-------------------|---------|-------------|-------|-------------|
-| **H-1** | `AgentAccountCore.sol` `withdraw`:223-229; `settleReservedTo`:304-328 (`recordOutflow`:319); `slashJobStake`:580-606 (:602); `slashClaimFee`:608-634 (:630); `TreasuryPolicy.recordOutflow`:254-264 | **PARTIAL** (sub-claim (a) overstated — `withdraw` is not the *only* real egress; slash-transfer legs also egress unmetered; net effect (b)-(e) fully holds) | **supersedes C-01** | Codex | **Egress-metering fix in review; auditor re-verification pending.** `recordOutflow` is now called only from real-egress paths (`withdraw` + the transferred slash legs), removed from tokens-stay-in-contract book-moves (`settleReservedTo`, trapped treasury legs), and enforced per source account/day so one account's breach cannot halt unrelated settlement. Do not arm a finite cap until the split-role follow-on also lands. |
-| **H-2** | `AgentAccountCore.sol` `slashJobStake`:580-606; `slashClaimFee`:608-634; `EscrowCore.handleClaimTimeout`:516-525 (:525) | **CONFIRMED** | **= C-02** | Codex | Route `treasuryAmount` to a real destination — credit a designated treasury account's liquid balance (or `SafeTransfer` to a treasury address) inside the slash paths, or add an owner-gated treasury sweep — so slashed treasury portions and full claim-timeout fees are recoverable instead of permanently trapped. |
+| **H-1** | `AgentAccountCore.sol` `withdraw`:223-229; `settleReservedTo`:304-328 (`recordOutflow`:319); `settleStrategyRequest` external-recipient withdraw branch; `slashJobStake`:580-606 (:602); `slashClaimFee`:608-634 (:630); `TreasuryPolicy.recordOutflow`:254-264 | **PARTIAL** (sub-claim (a) overstated — `withdraw` is not the *only* real egress; slash-transfer legs also egress unmetered; net effect (b)-(e) fully holds) | **supersedes C-01** | Codex | **Complete egress-metering fix in review; auditor re-verification pending.** `recordOutflow` is now called only from real-egress paths (`withdraw`, external-recipient strategy-withdraw settlement, and transferred slash legs), removed from tokens-stay-in-contract book-moves (`settleReservedTo`, self-recipient strategy withdraws, trapped treasury legs), and enforced per source account/day so one account's breach cannot halt unrelated settlement. Do not arm a finite cap until the split-role/cap-exempt slash follow-on also lands. |
+| **H-2** | `AgentAccountCore.sol` `slashJobStake`:580-606; `slashClaimFee`:608-634; `EscrowCore.handleClaimTimeout`:516-525 (:525) | **CONFIRMED** | **= C-02** | Codex | **Treasury sink in review; auditor re-verification pending.** Slashed treasury portions credit an owner-settable in-contract `treasuryAccount` liquid balance and fail closed while unset, so slashed treasury portions and full claim-timeout fees are recoverable via normal metered `withdraw` instead of permanently trapped. |
 
 ### H-1 — Acceptance criteria
-- `withdraw()` calls `policy.recordOutflow(account, amount)` on the real ERC20 egress; the transferred legs of `slashJobStake`/`slashClaimFee` also record their transferred amounts against the source account.
-- `settleReservedTo()` no longer calls `recordOutflow` (a `reserved → liquid/debt` book-move records nothing); trapped treasury legs record nothing (they move no tokens — resolved jointly with H-2).
+- `withdraw()` calls `policy.recordOutflow(account, amount)` on the real ERC20 egress; external-recipient strategy-withdraw settlements and the transferred legs of `slashJobStake`/`slashClaimFee` also record their transferred amounts against the source account.
+- `settleReservedTo()` no longer calls `recordOutflow` (a `reserved → liquid/debt` book-move records nothing); self-recipient strategy withdraws and treasury slash legs record nothing (they move no tokens externally — resolved jointly with H-2).
 - Foundry test: driving `settleReservedTo` volume past a finite `dailyOutflowCap` does **not** revert any settlement.
 - Foundry test: cumulative `withdraw` egress past a finite `dailyOutflowCap` **does** trip the breaker.
 - The breach path does not brick internal accounting (per-account meter and/or non-reverting throttle), and the `serviceOperators` role has been split before the finite cap is armed.
@@ -124,16 +124,19 @@ To prevent double-tracking between this board and `MAINNET_AUDIT_REMEDIATION.md`
 **All fixes below can be WRITTEN and Foundry-tested now.** Only the on-chain redeploy waits on the current Paseo Asset Hub testnet halt — do not block the code work on the chain.
 
 ### 1. H-1 — re-wire the outflow breaker *(LAUNCH-CRITICAL; do before arming any finite cap)*
-**Status:** egress-metering fix in review; `forge test` covers the three acceptance cases plus slash-leg metering. Mainnet sign-off still requires merge, split-role follow-on before any finite cap is armed, and external auditor re-verification.
+**Status:** complete egress-metering fix in review; `forge test` covers the three acceptance cases, slash-leg metering, and external-recipient strategy-withdraw metering. Mainnet sign-off still requires merge, split-role/cap-exempt slash follow-on before any finite cap is armed, and external auditor re-verification.
 
-- **`AgentAccountCore.withdraw` (:223-229):** add `policy.recordOutflow(account, amount)` on the real ERC20 egress. Add the same source-account metering to the *transferred* legs of `slashJobStake` (:599) and `slashClaimFee` (:627).
+- **`AgentAccountCore.withdraw` (:223-229):** add `policy.recordOutflow(account, amount)` on the real ERC20 egress. Add the same source-account metering to external-recipient strategy-withdraw settlements and to the *transferred* legs of `slashJobStake` (:599) and `slashClaimFee` (:627).
 - **`AgentAccountCore.settleReservedTo` (:319):** remove the `recordOutflow(amount)` call — this is a book-move, tokens stay in-contract.
 - **`TreasuryPolicy.recordOutflow` (:254-264):** move from a single global reverting `outflowToday` to a **per-account** meter and/or a non-reverting throttle so a breach cannot brick settlement.
 - **Test:** (a) `settleReservedTo` volume past a finite `dailyOutflowCap` never reverts; (b) cumulative `withdraw` egress past the cap trips the breaker; (c) hitting the egress cap does not block unrelated accounts' settlement.
 
 ### 2. H-2 — treasury sink for slashed portions
-- **`AgentAccountCore.slashJobStake` (:601-603) / `slashClaimFee` (:629-631):** credit `treasuryAmount` to a designated treasury account's liquid balance (or `SafeTransfer` to a treasury address); or add an owner-gated `sweepTreasury`. Resolve jointly with H-1 so treasury legs don't record outflow.
-- **Test:** after slash + `handleClaimTimeout` (which sends the full fee to treasury), total accounted == contract balance; treasury balance is recoverable; no `jobStakeLocked` decrement without a matching credit/transfer.
+**Status:** treasury sink in review; `forge test` covers treasury credit, recoverability, unset-treasury fail-closed behavior, full claim-timeout fee routing, and no-orphan accounting. The concrete treasury destination remains an owner-set value supplied during the deploy ceremony.
+
+- **`AgentAccountCore.slashJobStake` (:601-603) / `slashClaimFee` (:629-631):** credit `treasuryAmount` to the owner-settable `treasuryAccount` liquid balance. Resolve jointly with H-1 so treasury legs don't record outflow until the treasury account withdraws through the normal metered path.
+- **Deploy check:** `redeploy-agent-account-escrow-stack.mjs --phase finalize` asserts the freshly deployed `AgentAccountCore.treasuryAccount()` is non-zero before writing the paired manifest.
+- **Test:** after slash + `handleClaimTimeout` (which sends the full fee to treasury), total accounted == contract balance; treasury balance is recoverable; no `jobStakeLocked` decrement without a matching credit/transfer; slash reverts while treasury is unset.
 
 ### 3. Mediums
 - **M-1 — `AgentAccountCore` `reserveForJob`/`reserveForRecurringTemplate`/`lockCollateral`/`lockJobStake`:** replace raw `liquid < amount` with the debt-aware check (subtract `debtOutstanding` / route through `_requireWithdrawable`). *Test:* a borrowed position cannot reserve/lock the phantom liquid.
@@ -188,8 +191,8 @@ Several contract fixes carry an off-chain or ops action that must land alongside
 
 | Action | Owner | Tied to | When |
 |--------|-------|---------|------|
-| **Do NOT arm a finite `DAILY_OUTFLOW_CAP`** until the breaker is re-wired (currently specced at 250 USDC in `MAINNET_PARAMETERS.md`) | Pascal / ops | H-1 | now — config discipline |
-| **Designate the treasury-sink destination** (which multisig/address collects slashed treasury funds) | Pascal / ops | H-2 | before Codex implements the sink |
+| **Do NOT arm a finite `DAILY_OUTFLOW_CAP`** until the breaker is re-wired and protocol-initiated slash egress is made record-only/cap-exempt (currently specced at 250 USDC in `MAINNET_PARAMETERS.md`) | Pascal / ops | H-1 | now — config discipline |
+| **Set the treasury-sink destination** (which multisig/address collects slashed treasury funds) via `AgentAccountCore.setTreasuryAccount` during the deploy ceremony | Pascal / ops | H-2 | before finalizing the paired contract manifest |
 | **Provision + assign the split operator-role keys** (`escrowSettler` / `outflowRecorder` / `xcmFinalizer` / `strategySettler`) | Pascal / ops | serviceOperators split | after Codex defines the roles |
 | **owner → multisig** for all owner-only setters | Pascal / ops | Architectural | launch ceremony (already roadmapped) |
 | **Backend adopts the split roles** — `mcp-server/src/blockchain/gateway.js` reads `serviceOperators(escrowCore/agentAccount)` and the KMS signer *acts as* an operator; needs role-scoped keys + role-aware health checks | Claude (backend) | serviceOperators split | follow-on, after Codex lands the role shape |

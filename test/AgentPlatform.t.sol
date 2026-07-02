@@ -29,6 +29,7 @@ contract AgentPlatformTest is Test {
     address internal worker = address(0xB0B);
     address internal verifier = address(0xCAFE);
     address internal arbitrator = address(0xDADA);
+    address internal treasury = address(0x7E45);
 
     uint256 internal constant POSTER_DEPOSIT = 5_000 ether;
     uint256 internal constant WORKER_DEPOSIT = 200 ether;
@@ -61,6 +62,7 @@ contract AgentPlatformTest is Test {
         policy.setPerAccountBorrowCap(1_000 ether);
         policy.setOnboardingWaiverClaimCount(0);
         policy.setClaimFeeBps(0);
+        accounts.setTreasuryAccount(treasury);
 
         dot.mint(poster, 10_000 ether);
         dot.mint(worker, 1_000 ether);
@@ -299,8 +301,82 @@ contract AgentPlatformTest is Test {
 
         assertEq(dot.balanceOf(poster), posterTokenBalanceBefore + 5 ether);
         assertEq(dot.balanceOf(verifier), verifierTokenBalanceBefore + 7 ether);
+        (uint256 treasuryLiquid,,,,,) = accounts.positions(treasury, address(dot));
+        assertEq(treasuryLiquid, 8 ether);
         assertEq(policy.accountOutflowToday(worker), 12 ether);
         assertEq(policy.outflowToday(), 12 ether);
+        assertEq(
+            _trackedPositionBalance(poster) + _trackedPositionBalance(worker) + _trackedPositionBalance(treasury),
+            dot.balanceOf(address(accounts))
+        );
+    }
+
+    function testSlashJobStakeCreditsTreasuryAndTreasuryCanWithdraw() public {
+        accounts.setEscrowOperator(address(this), true);
+        accounts.lockJobStake(worker, address(dot), 10 ether);
+
+        accounts.slashJobStake(worker, address(dot), 10 ether, poster);
+
+        (uint256 treasuryLiquid,,,,,) = accounts.positions(treasury, address(dot));
+        (,,,, uint256 workerJobStake,) = accounts.positions(worker, address(dot));
+        assertEq(treasuryLiquid, 5 ether);
+        assertEq(workerJobStake, 0);
+
+        uint256 treasuryTokenBalanceBefore = dot.balanceOf(treasury);
+        vm.prank(treasury);
+        accounts.withdraw(address(dot), 5 ether);
+
+        (treasuryLiquid,,,,,) = accounts.positions(treasury, address(dot));
+        assertEq(treasuryLiquid, 0);
+        assertEq(dot.balanceOf(treasury), treasuryTokenBalanceBefore + 5 ether);
+        assertEq(policy.accountOutflowToday(treasury), 5 ether);
+    }
+
+    function testSlashRevertsWhenTreasuryAccountUnsetAndKeepsStakeLocked() public {
+        accounts.setEscrowOperator(address(this), true);
+        accounts.setTreasuryAccount(address(0));
+        accounts.lockJobStake(worker, address(dot), 10 ether);
+        uint256 posterTokenBalanceBefore = dot.balanceOf(poster);
+
+        (bool ok, bytes memory data) =
+            address(accounts).call(abi.encodeCall(accounts.slashJobStake, (worker, address(dot), 10 ether, poster)));
+
+        require(!ok, "EXPECTED_TREASURY_ACCOUNT_REVERT");
+        require(bytes4(data) == AgentAccountCore.TreasuryAccountUnset.selector, "EXPECTED_TREASURY_ACCOUNT_SELECTOR");
+        (,,,, uint256 workerJobStake,) = accounts.positions(worker, address(dot));
+        assertEq(workerJobStake, 10 ether);
+        assertEq(dot.balanceOf(poster), posterTokenBalanceBefore);
+    }
+
+    function testClaimTimeoutRoutesFullClaimFeeToTreasury() public {
+        policy.setDefaultClaimStakeBps(0);
+        policy.setClaimFeeBps(200);
+        policy.setMinClaimFee(address(dot), 0.05 ether);
+
+        bytes32 jobId = keccak256("job/timeout/fee-to-treasury");
+        vm.prank(poster);
+        escrow.createSinglePayoutJob(
+            jobId, address(dot), 50 ether, 0, 0, 1 days, bytes32("AUTO"), bytes32("DATA"), SPEC_HASH
+        );
+
+        vm.prank(worker);
+        escrow.claimJob(jobId);
+
+        vm.warp(block.timestamp + 2 days);
+        escrow.handleClaimTimeout(jobId);
+
+        EscrowCore.JobEscrow memory job = escrow.jobs(jobId);
+        (uint256 treasuryLiquid,,,,,) = accounts.positions(treasury, address(dot));
+        (,,,, uint256 workerJobStake,) = accounts.positions(worker, address(dot));
+
+        assertEq(job.worker, address(0));
+        assertEq(job.claimFee, 0);
+        assertEq(treasuryLiquid, 1 ether);
+        assertEq(workerJobStake, 0);
+        assertEq(
+            _trackedPositionBalance(poster) + _trackedPositionBalance(worker) + _trackedPositionBalance(treasury),
+            dot.balanceOf(address(accounts))
+        );
     }
 
     function testRefundReservedRequiresEscrowRoleAndUnpausedProtocol() public {
@@ -1042,5 +1118,11 @@ contract AgentPlatformTest is Test {
 
         vm.prank(verifier);
         escrow.resolveSinglePayout(jobId, false, bytes32("REJECTED"), "ipfs://badge/rejected", REASONING_HASH);
+    }
+
+    function _trackedPositionBalance(address account) internal view returns (uint256 total) {
+        (uint256 liquid, uint256 reserved,, uint256 collateralLocked, uint256 jobStakeLocked,) =
+            accounts.positions(account, address(dot));
+        return liquid + reserved + collateralLocked + jobStakeLocked;
     }
 }
