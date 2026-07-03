@@ -4,7 +4,7 @@ import {
   InsufficientLiquidityError,
   ValidationError
 } from "./errors.js";
-import { DEFAULT_ESCROW_ASSET_SYMBOL } from "./assets.js";
+import { DEFAULT_ESCROW_ASSET_SYMBOL, decimalsForAssetSymbol } from "./assets.js";
 import {
   addRawAmount,
   addRequestId,
@@ -15,6 +15,7 @@ import {
   removeRequestId,
   subtractRawAmount
 } from "./account-raw-amounts.js";
+import { formatBaseUnits } from "./platform-service-helpers.js";
 
 /**
  * Classification of every account-level field this service produces or
@@ -661,9 +662,6 @@ export class AccountMutationService {
       this.accounts.set(wallet, account);
       return account;
     }
-    const requestedAssets = Number(result?.strategyRequest?.requestedAssets ?? 0);
-    const requestedShares = Number(result?.strategyRequest?.requestedShares ?? 0);
-    const settledAssets = Number(result?.strategyRequest?.settledAssets ?? result?.settledAssets ?? 0);
     const requestedAssetsRaw = normalizeUnsignedRawAmount(
       result?.strategyRequest?.requestedAssetsRaw ?? result?.requestedAssetsRaw
     );
@@ -675,6 +673,21 @@ export class AccountMutationService {
     );
     const settledSharesRaw = normalizeUnsignedRawAmount(
       result?.strategyRequest?.settledSharesRaw ?? result?.settledSharesRaw
+    );
+    const requestedAssets = displayAmountFromRawOrValue(
+      requestedAssetsRaw,
+      result?.strategyRequest?.requestedAssets,
+      asset
+    );
+    const requestedShares = displayAmountFromRawOrValue(
+      requestedSharesRaw,
+      result?.strategyRequest?.requestedShares,
+      asset
+    );
+    const settledAssets = displayAmountFromRawOrValue(
+      settledAssetsRaw,
+      result?.strategyRequest?.settledAssets ?? result?.settledAssets,
+      asset
     );
 
     if (kind === "deposit") {
@@ -854,4 +867,18 @@ export class AccountMutationService {
     this.accounts.set(wallet, account);
     return account;
   }
+}
+
+function displayAmountFromRawOrValue(rawValue, displayValue, asset) {
+  if (displayValue !== undefined && displayValue !== null && displayValue !== "") {
+    const parsed = Number(displayValue);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  const normalizedRaw = normalizeUnsignedRawAmount(rawValue);
+  if (normalizedRaw !== undefined) {
+    return Number(formatBaseUnits(BigInt(normalizedRaw), decimalsForAssetSymbol(asset)));
+  }
+  return 0;
 }

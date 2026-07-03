@@ -715,3 +715,69 @@ test("recordAsyncStrategySettlement preserves raw asset accounting when withdraw
   assert.equal(updated.treasuryTimeline[0].amountRaw, "4000000");
   assert.equal(updated.treasuryTimeline[0].principalAfterRaw, "6000000");
 });
+
+test("recordAsyncStrategySettlement carries unsafe uint256 raw values without precision loss", async () => {
+  const { service, accounts } = makeService();
+  const account = await service.getAccountSummary("0xAlice");
+  const requestedRaw = "9007199254740993";
+  const settledRaw = "9007199254740995";
+  account.strategyPending["0xstrategy"] = {
+    asset: "USDC",
+    pendingDepositAssets: 0,
+    pendingDepositAssetsRaw: requestedRaw,
+    pendingDepositRequestIds: ["0xlarge"],
+    pendingWithdrawalShares: 0
+  };
+  accounts.set("0xAlice", account);
+
+  const updated = await service.recordAsyncStrategySettlement({
+    requestId: "0xlarge",
+    strategyRequest: {
+      account: "0xAlice",
+      strategyId: "0xstrategy",
+      assetSymbol: "USDC",
+      kindLabel: "deposit",
+      statusLabel: "succeeded",
+      requestedAssetsRaw: requestedRaw,
+      settledAssetsRaw: settledRaw
+    }
+  });
+
+  assert.equal(updated.strategyPending["0xstrategy"].pendingDepositAssetsRaw, "0");
+  assert.equal(updated.strategyAccounting["0xstrategy"].principalRaw, settledRaw);
+  assert.equal(updated.strategyAccounting["0xstrategy"].markValueRaw, settledRaw);
+  assert.equal(updated.treasuryTimeline[0].amountRaw, settledRaw);
+  assert.equal(updated.treasuryTimeline[0].principalAfterRaw, settledRaw);
+});
+
+test("recordAsyncStrategySettlement derives missing display values from raw strategy asset decimals", async () => {
+  const { service, accounts } = makeService();
+  const account = await service.getAccountSummary("0xAlice");
+  account.strategyPending["0xvdot"] = {
+    asset: "VDOT",
+    pendingDepositAssets: 1,
+    pendingDepositAssetsRaw: "10000000000",
+    pendingDepositRequestIds: ["0xvdot-request"],
+    pendingWithdrawalShares: 0
+  };
+  accounts.set("0xAlice", account);
+
+  const updated = await service.recordAsyncStrategySettlement({
+    requestId: "0xvdot-request",
+    strategyRequest: {
+      account: "0xAlice",
+      strategyId: "0xvdot",
+      assetSymbol: "VDOT",
+      kindLabel: "deposit",
+      statusLabel: "succeeded",
+      requestedAssetsRaw: "10000000000",
+      settledAssetsRaw: "25000000000"
+    }
+  });
+
+  assert.equal(updated.strategyPending["0xvdot"].pendingDepositAssets, 0);
+  assert.equal(updated.strategyAccounting["0xvdot"].principal, 2.5);
+  assert.equal(updated.strategyAccounting["0xvdot"].principalRaw, "25000000000");
+  assert.equal(updated.treasuryTimeline[0].amount, 2.5);
+  assert.equal(updated.treasuryTimeline[0].amountRaw, "25000000000");
+});

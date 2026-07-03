@@ -839,9 +839,15 @@ export class BlockchainGateway {
       this.requireAsyncStrategyConfig(strategy, "requestStrategyWithdraw");
       const asset = this.assetForStrategy(strategy);
       const baseAmount = this.toBaseUnits(amount, asset, "strategy withdraw amount");
-      const shares = Number.isFinite(Number(requestedShares)) && Number(requestedShares) > 0
+      const hasRequestedShares = requestedShares !== undefined
+        && requestedShares !== null
+        && String(requestedShares).trim() !== "";
+      const shares = hasRequestedShares
         ? this.toBaseUnits(requestedShares, asset, "strategy withdraw shares")
         : await this.quoteStrategySharesForAssets(strategy, baseAmount);
+      if (shares <= 0n) {
+        throw new ValidationError("strategy withdraw shares must be greater than zero.");
+      }
       const requestId = this.previewStrategyRequestId({
         strategyId: strategy.strategyId,
         kind: 1,
@@ -1534,6 +1540,12 @@ export class BlockchainGateway {
         normalizedSettledAssets,
         normalizedSettledShares
       );
+      const settlementPreflight = await this.preflightStrategySettlementRatio(
+        strategyRequest,
+        normalizedStatus,
+        normalizedSettledAssets,
+        normalizedSettledShares
+      );
 
       const tx = strategyRequest
         ? await this.accountContract.settleStrategyRequest(
@@ -1556,8 +1568,48 @@ export class BlockchainGateway {
       return {
         ...(await this.getXcmRequest(normalizedRequestId)),
         strategyRequest: await this.getStrategyRequest(normalizedRequestId).catch(() => undefined),
+        ...(settlementPreflight ? { settlementPreflight } : {}),
         settledVia: strategyRequest ? "agent_account" : "xcm_wrapper",
         alreadySettled: false
+      };
+    });
+  }
+
+  async preflightXcmSettlementOutcome(requestId, {
+    status,
+    settledAssets = 0,
+    settledShares = 0
+  } = {}) {
+    return this.withGatewayError("preflightXcmSettlementOutcome", async () => {
+      const normalizedRequestId = this.toRequestId(requestId);
+      const normalizedStatus = this.toXcmStatus(status);
+      const normalizedSettledAssets = this.normalizeUint256(settledAssets, "settledAssets");
+      const normalizedSettledShares = this.normalizeUint256(settledShares, "settledShares");
+      let strategyRequest;
+      try {
+        strategyRequest = await this.getStrategyRequest(normalizedRequestId);
+      } catch (error) {
+        if (error?.code !== "strategy_request_not_found") {
+          throw error;
+        }
+      }
+      this.validateStrategySettlementOutcome(
+        strategyRequest,
+        normalizedStatus,
+        normalizedSettledAssets,
+        normalizedSettledShares
+      );
+      const settlementPreflight = await this.preflightStrategySettlementRatio(
+        strategyRequest,
+        normalizedStatus,
+        normalizedSettledAssets,
+        normalizedSettledShares
+      );
+      return {
+        requestId: normalizedRequestId,
+        ok: true,
+        strategyBacked: Boolean(strategyRequest),
+        ...(settlementPreflight ? { settlementPreflight } : {})
       };
     });
   }
@@ -1583,6 +1635,50 @@ export class BlockchainGateway {
     if (strategyRequest.kind === 1 && settledAssets === 0n) {
       throw new ValidationError("Successful async strategy withdrawals require non-zero settledAssets.");
     }
+  }
+
+  async preflightStrategySettlementRatio(strategyRequest, status, settledAssets, settledShares) {
+    if (!strategyRequest || status !== 2) {
+      return undefined;
+    }
+
+    const { totalAssets, totalShares } = await this.getStrategyAdapterTotals(strategyRequest.adapter);
+    if (strategyRequest.kind === 0) {
+      const expectedShares = totalAssets <= 0n || totalShares <= 0n
+        ? settledAssets
+        : (settledAssets * totalShares) / totalAssets;
+      if (settledShares !== expectedShares) {
+        throw new ValidationError(
+          `Async strategy deposit settlement ratio mismatch: expected settledShares=${expectedShares.toString()} for settledAssets=${settledAssets.toString()}.`
+        );
+      }
+      return {
+        kind: "deposit",
+        adapter: strategyRequest.adapter,
+        totalAssetsRaw: totalAssets.toString(),
+        totalSharesRaw: totalShares.toString(),
+        expectedSharesRaw: expectedShares.toString()
+      };
+    }
+
+    if (strategyRequest.kind === 1) {
+      const requestedShares = BigInt(strategyRequest.requestedSharesRaw ?? 0);
+      const maxAssets = totalShares <= 0n ? 0n : (requestedShares * totalAssets) / totalShares;
+      if (settledAssets > maxAssets) {
+        throw new ValidationError(
+          `Async strategy withdraw settlement ratio mismatch: settledAssets=${settledAssets.toString()} exceeds maxAssets=${maxAssets.toString()}.`
+        );
+      }
+      return {
+        kind: "withdraw",
+        adapter: strategyRequest.adapter,
+        totalAssetsRaw: totalAssets.toString(),
+        totalSharesRaw: totalShares.toString(),
+        maxAssetsRaw: maxAssets.toString()
+      };
+    }
+
+    return undefined;
   }
 
   requireAutoMintableAsset(asset, operation, details = {}) {
@@ -1955,18 +2051,24 @@ export class BlockchainGateway {
   }
 
   async quoteStrategySharesForAssets(strategy, assets) {
-    const adapterContract = new Contract(strategy.adapter, STRATEGY_ADAPTER_ABI, this.provider);
-    const [rawTotalAssets, rawTotalShares] = await Promise.all([
-      adapterContract.totalAssets(),
-      adapterContract.totalShares()
-    ]);
-    const totalAssets = BigInt(rawTotalAssets ?? 0);
-    const totalShares = BigInt(rawTotalShares ?? 0);
+    const { totalAssets, totalShares } = await this.getStrategyAdapterTotals(strategy.adapter);
     const requestedAssets = BigInt(assets ?? 0);
     if (totalAssets <= 0n || totalShares <= 0n) {
       return requestedAssets;
     }
-    return (requestedAssets * totalShares + totalAssets - 1n) / totalAssets;
+    return (requestedAssets * totalShares) / totalAssets;
+  }
+
+  async getStrategyAdapterTotals(adapterAddress) {
+    const adapterContract = new Contract(adapterAddress, STRATEGY_ADAPTER_ABI, this.provider);
+    const [rawTotalAssets, rawTotalShares] = await Promise.all([
+      adapterContract.totalAssets(),
+      adapterContract.totalShares()
+    ]);
+    return {
+      totalAssets: BigInt(rawTotalAssets ?? 0),
+      totalShares: BigInt(rawTotalShares ?? 0)
+    };
   }
 
   async withGatewayError(operation, action) {
