@@ -182,6 +182,42 @@ test("runPendingSettlements emits a request_finalize_failed event with correlati
   assert.match(events[0].data.message, /downstream settle failed/u);
 });
 
+test("runPendingSettlements runs settlement preflight before finalizing observed outcomes", async () => {
+  const stateStore = new MemoryStateStore();
+  const eventBus = new EventBus();
+  const events = [];
+  eventBus.subscribe({ topics: ["xcm.request_finalize_failed"] }, (event) => events.push(event));
+  let finalizeCalled = false;
+  const watcher = new XcmSettlementWatcherService(
+    {
+      preflightXcmSettlementOutcome: async (requestId, outcome) => {
+        assert.equal(requestId, REQUEST_ID);
+        assert.equal(outcome.settledAssets, "5");
+        throw new ValidationError("settlement ratio mismatch");
+      },
+      finalizeXcmRequest: async () => {
+        finalizeCalled = true;
+        return {};
+      }
+    },
+    stateStore,
+    eventBus,
+    { enabled: false, logger: { warn: () => {} } }
+  );
+
+  await watcher.observeOutcome(REQUEST_ID, {
+    status: "succeeded",
+    settledAssets: 5,
+    settledShares: 7
+  });
+  await watcher.runPendingSettlements();
+
+  assert.equal(finalizeCalled, false);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].topic, "xcm.request_finalize_failed");
+  assert.match(events[0].data.message, /settlement ratio mismatch/u);
+});
+
 test("observeOutcome preserves large uint256 settlement amounts exactly", async () => {
   const stateStore = new MemoryStateStore();
   const watcher = new XcmSettlementWatcherService(

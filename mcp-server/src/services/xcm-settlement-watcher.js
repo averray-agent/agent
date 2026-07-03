@@ -137,12 +137,24 @@ export class XcmSettlementWatcherService {
 
     for (const observation of pending) {
       try {
+        let settlementPreflight;
+        if (typeof this.platformService.preflightXcmSettlementOutcome === "function") {
+          settlementPreflight = await this.platformService.preflightXcmSettlementOutcome(
+            observation.requestId,
+            observation
+          );
+        }
         const finalized = await this.platformService.finalizeXcmRequest(observation.requestId, observation);
         await this.stateStore.markXcmObservationProcessed?.(observation.requestId, {
           finalizedAt: new Date().toISOString(),
           settledVia: finalized?.settledVia,
-          status: finalized?.strategyRequest?.statusLabel ?? finalized?.statusLabel ?? observation.status
+          status: finalized?.strategyRequest?.statusLabel ?? finalized?.statusLabel ?? observation.status,
+          ...(settlementPreflight ? { settlementPreflight } : {})
         });
+        const finalizedWithPreflight = {
+          ...finalized,
+          ...(settlementPreflight ? { settlementPreflight } : {})
+        };
         this.eventBus?.publish({
           id: `xcm-auto-finalized-${observation.requestId}-${Date.now()}`,
           topic: "xcm.request_auto_finalized",
@@ -163,7 +175,7 @@ export class XcmSettlementWatcherService {
             settledVia: finalized?.settledVia
           }
         });
-        results.push(finalized);
+        results.push(finalizedWithPreflight);
       } catch (error) {
         await this.stateStore.markXcmObservationFailed?.(observation.requestId, error);
         this.eventBus?.publish({

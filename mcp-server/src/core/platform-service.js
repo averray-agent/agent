@@ -1365,6 +1365,16 @@ export class PlatformService {
     return finalized;
   }
 
+  async preflightXcmSettlementOutcome(requestId, outcome) {
+    if (!this.blockchainGateway?.isEnabled()) {
+      throw new ValidationError("XCM settlement preflight requires the blockchain gateway.");
+    }
+    if (typeof this.blockchainGateway.preflightXcmSettlementOutcome !== "function") {
+      return { requestId, ok: true, strategyBacked: false };
+    }
+    return this.blockchainGateway.preflightXcmSettlementOutcome(requestId, outcome);
+  }
+
   async observeXcmOutcome(requestId, outcome) {
     if (!this.xcmSettlementWatcher) {
       throw new ValidationError("XCM outcome observation requires the settlement watcher.");

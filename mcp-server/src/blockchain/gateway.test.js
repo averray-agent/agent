@@ -1613,6 +1613,10 @@ test("finalizeXcmRequest preserves exact uint256 settlement amounts", async () =
   const calls = [];
 
   gateway.signer = {};
+  gateway.getStrategyAdapterTotals = async () => ({
+    totalAssets: BigInt(settledAssets),
+    totalShares: BigInt(settledShares)
+  });
   gateway.accountContract = {
     async strategyRequests(id) {
       assert.equal(id, requestId);
@@ -1672,6 +1676,191 @@ test("finalizeXcmRequest preserves exact uint256 settlement amounts", async () =
   assert.equal(calls.length, 1);
   assert.equal(calls[0][2], 9007199254740993n);
   assert.equal(calls[0][3], 18446744073709551616n);
+});
+
+test("preflightXcmSettlementOutcome rejects strategy deposit ratios that the adapter would revert", async () => {
+  const gateway = new BlockchainGateway({ enabled: false, supportedAssets: [USDC_TRUST_ASSET] });
+  const requestId = `0x${"7".repeat(64)}`;
+  let settlementRelayed = false;
+
+  gateway.signer = {};
+  gateway.getStrategyAdapterTotals = async () => ({
+    totalAssets: 10_000_000n,
+    totalShares: 5_000_000n
+  });
+  gateway.accountContract = {
+    async strategyRequests() {
+      return {
+        strategyId: encodeBytes32String("USDC"),
+        adapter: "0x5555555555555555555555555555555555555555",
+        account: "0x3333333333333333333333333333333333333333",
+        asset: USDC_TRUST_ASSET.address,
+        recipient: "0x4444444444444444444444444444444444444444",
+        kind: 0,
+        status: 1,
+        requestedAssets: 4_000_000n,
+        requestedShares: 0n,
+        settledAssets: 0n,
+        settledShares: 0n,
+        remoteRef: `0x${"0".repeat(64)}`,
+        failureCode: `0x${"0".repeat(64)}`,
+        settled: false
+      };
+    },
+    async settleStrategyRequest() {
+      settlementRelayed = true;
+      return { async wait() {} };
+    }
+  };
+
+  await assert.rejects(
+    () => gateway.finalizeXcmRequest(requestId, {
+      status: "succeeded",
+      settledAssets: "4000000",
+      settledShares: "3000000"
+    }),
+    /settledShares=2000000/u
+  );
+  assert.equal(settlementRelayed, false);
+});
+
+test("preflightXcmSettlementOutcome rejects strategy withdrawals above adapter ratio cap", async () => {
+  const gateway = new BlockchainGateway({ enabled: false, supportedAssets: [USDC_TRUST_ASSET] });
+  const requestId = `0x${"8".repeat(64)}`;
+  let settlementRelayed = false;
+
+  gateway.signer = {};
+  gateway.getStrategyAdapterTotals = async () => ({
+    totalAssets: 10_000_000n,
+    totalShares: 5_000_000n
+  });
+  gateway.accountContract = {
+    async strategyRequests() {
+      return {
+        strategyId: encodeBytes32String("USDC"),
+        adapter: "0x5555555555555555555555555555555555555555",
+        account: "0x3333333333333333333333333333333333333333",
+        asset: USDC_TRUST_ASSET.address,
+        recipient: "0x4444444444444444444444444444444444444444",
+        kind: 1,
+        status: 1,
+        requestedAssets: 0n,
+        requestedShares: 2_000_000n,
+        settledAssets: 0n,
+        settledShares: 0n,
+        remoteRef: `0x${"0".repeat(64)}`,
+        failureCode: `0x${"0".repeat(64)}`,
+        settled: false
+      };
+    },
+    async settleStrategyRequest() {
+      settlementRelayed = true;
+      return { async wait() {} };
+    }
+  };
+
+  await assert.rejects(
+    () => gateway.finalizeXcmRequest(requestId, {
+      status: "succeeded",
+      settledAssets: "4000001",
+      settledShares: "0"
+    }),
+    /maxAssets=4000000/u
+  );
+  assert.equal(settlementRelayed, false);
+});
+
+test("preflightXcmSettlementOutcome returns contract-ratio metadata for matching outcomes", async () => {
+  const gateway = new BlockchainGateway({ enabled: false, supportedAssets: [USDC_TRUST_ASSET] });
+  const requestId = `0x${"9".repeat(64)}`;
+
+  gateway.getStrategyAdapterTotals = async () => ({
+    totalAssets: 10_000_000n,
+    totalShares: 5_000_000n
+  });
+  gateway.accountContract = {
+    async strategyRequests() {
+      return {
+        strategyId: encodeBytes32String("USDC"),
+        adapter: "0x5555555555555555555555555555555555555555",
+        account: "0x3333333333333333333333333333333333333333",
+        asset: USDC_TRUST_ASSET.address,
+        recipient: "0x4444444444444444444444444444444444444444",
+        kind: 0,
+        status: 1,
+        requestedAssets: 4_000_000n,
+        requestedShares: 0n,
+        settledAssets: 0n,
+        settledShares: 0n,
+        remoteRef: `0x${"0".repeat(64)}`,
+        failureCode: `0x${"0".repeat(64)}`,
+        settled: false
+      };
+    }
+  };
+
+  const preflight = await gateway.preflightXcmSettlementOutcome(requestId, {
+    status: "succeeded",
+    settledAssets: "4000000",
+    settledShares: "2000000"
+  });
+
+  assert.equal(preflight.ok, true);
+  assert.equal(preflight.strategyBacked, true);
+  assert.equal(preflight.settlementPreflight.expectedSharesRaw, "2000000");
+});
+
+test("quoteStrategySharesForAssets uses the adapter floor formula", async () => {
+  const gateway = new BlockchainGateway({ enabled: false, supportedAssets: [USDC_TRUST_ASSET] });
+  gateway.getStrategyAdapterTotals = async () => ({
+    totalAssets: 3n,
+    totalShares: 2n
+  });
+
+  const shares = await gateway.quoteStrategySharesForAssets({ adapter: "0x5555555555555555555555555555555555555555" }, 10n);
+
+  assert.equal(shares, 6n);
+});
+
+test("strategy settlement preflight matches adapter floor math across representative ratios", async () => {
+  const gateway = new BlockchainGateway({ enabled: false, supportedAssets: [USDC_TRUST_ASSET] });
+  const adapter = "0x5555555555555555555555555555555555555555";
+  const cases = [
+    { settledAssets: 1n, totalAssets: 3n, totalShares: 2n },
+    { settledAssets: 1_000_000n, totalAssets: 10_000_000n, totalShares: 25_000_000n },
+    { settledAssets: 9_007_199_254_740_993n, totalAssets: 12_345_678_901_234_567n, totalShares: 8_765_432_109_876_543n },
+    { settledAssets: 42n, totalAssets: 0n, totalShares: 0n }
+  ];
+
+  for (const vector of cases) {
+    gateway.getStrategyAdapterTotals = async () => ({
+      totalAssets: vector.totalAssets,
+      totalShares: vector.totalShares
+    });
+    const expectedShares = vector.totalAssets <= 0n || vector.totalShares <= 0n
+      ? vector.settledAssets
+      : (vector.settledAssets * vector.totalShares) / vector.totalAssets;
+
+    const depositPreflight = await gateway.preflightStrategySettlementRatio(
+      { kind: 0, adapter },
+      2,
+      vector.settledAssets,
+      expectedShares
+    );
+    assert.equal(depositPreflight.expectedSharesRaw, expectedShares.toString());
+
+    const requestedShares = expectedShares + 1n;
+    const maxAssets = vector.totalShares <= 0n
+      ? 0n
+      : (requestedShares * vector.totalAssets) / vector.totalShares;
+    const withdrawPreflight = await gateway.preflightStrategySettlementRatio(
+      { kind: 1, adapter, requestedSharesRaw: requestedShares.toString() },
+      2,
+      maxAssets,
+      0n
+    );
+    assert.equal(withdrawPreflight.maxAssetsRaw, maxAssets.toString());
+  }
 });
 
 test("finalizeXcmRequest skips matching already-settled strategy requests", async () => {
