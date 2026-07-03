@@ -201,6 +201,14 @@ jobs:
       - name: Structural lint
         run: node scripts/ops/check-env-template-structure.mjs
 
+      # H1 (THREAT_MODEL "Boot-Time Credential-Check Bypass" follow-up): fail
+      # closed if an emergency-bypass env flag (JWT_KMS_CREDENTIAL_CHECK_SKIP and
+      # friends) is committed *enabled* in any env template. A clean template can't
+      # render a dirty /run/agent-stack/backend.env, so this catches the accident
+      # at PR time — earlier than the backend's boot-time guard.
+      - name: Forbidden production env-flag guard
+        run: node scripts/ops/check-forbidden-prod-env.mjs
+
       # Phase 2 PR 2.6: enforce that deploy/backend.env.template matches
       # the settlement values derived from deployments/testnet.json. Before
       # this guard, the runtime configure_settlement_env in

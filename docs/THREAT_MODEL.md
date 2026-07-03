@@ -385,14 +385,27 @@ Current mitigation:
   refresh flows still require a working credential chain; the flag
   only defers the failure from boot to the first user-facing request
 
+Additional mitigation (H1, added):
+
+- `scripts/ops/check-forbidden-prod-env.mjs` runs in CI (Phase 2 job,
+  right after the structural lint) and **fails closed** if
+  `JWT_KMS_CREDENTIAL_CHECK_SKIP` (or its `_ACK_PRODUCTION` companion, or
+  `AUTH_ALLOW_PERMISSIVE_BROKERING`) is committed *enabled* in any env
+  template. A clean template cannot render a dirty
+  `/run/agent-stack/backend.env` — `op inject` only substitutes `op://`
+  refs, it never adds keys — so guarding the committed templates catches
+  the accidental-ship vector at PR time, earlier than the backend's
+  boot-time guard. Emergency use stays a supervised runtime-only override
+  (never committed), acknowledged in-process via
+  `JWT_KMS_CREDENTIAL_CHECK_SKIP_ACK_PRODUCTION`.
+
 Follow-up:
 
-- add a deploy-time check that fails the deploy if the rendered
-  `/run/agent-stack/backend.env` or docker-compose `environment:`
-  block has `JWT_KMS_CREDENTIAL_CHECK_SKIP=1` set without a matching
-  comment block in
-  [`MULTISIG_DECISION.md`](./MULTISIG_DECISION.md) or
-  `INCIDENT_RESPONSE.md` referencing an active incident
+- extend the guard to the deploy step: have the render/deploy path run
+  `check-forbidden-prod-env.mjs --file /run/agent-stack/backend.env`
+  (the `--file` mode already exists) so a runtime override is also gated,
+  optionally keyed to an active-incident acknowledgement in
+  [`MULTISIG_DECISION.md`](./MULTISIG_DECISION.md) or `INCIDENT_RESPONSE.md`.
 - add an `/admin/status` field that surfaces "boot check skipped" so
   operators can see at a glance that the platform is running with the
   safety bypass on
