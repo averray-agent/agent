@@ -159,7 +159,7 @@ function encodeAssetFilterHex(value) {
   if (allCounted === undefined || allCounted === null) {
     throw new ValidationError("Only DepositAsset.assets Wild.AllCounted is supported for vDOT XCM messages.");
   }
-  return `01${toU8Hex(0x01)}${encodeU32LeHex(normalizeU32(allCounted, "DepositAsset.assets.Wild.AllCounted"))}`;
+  return `01${toU8Hex(0x02)}${encodeCompactBigIntHex(BigInt(normalizeU32(allCounted, "DepositAsset.assets.Wild.AllCounted")))}`;
 }
 
 function encodeAssetHex(asset) {
@@ -194,7 +194,7 @@ function encodeJunctionsHex(interior) {
 
 function encodeJunctionHex(junction) {
   if (junction?.Parachain !== undefined) {
-    return `00${encodeU32LeHex(normalizeParaId(junction.Parachain, "junction.Parachain"))}`;
+    return `00${encodeCompactBigIntHex(BigInt(normalizeParaId(junction.Parachain, "junction.Parachain")))}`;
   }
   if (junction?.AccountId32 !== undefined) {
     const value = junction.AccountId32;
@@ -210,7 +210,10 @@ function encodeJunctionHex(junction) {
 }
 
 function encodeNetworkIdHex(network) {
-  if (network === undefined || network === null || network === "Any" || network?.Any !== undefined) {
+  if (
+    network === undefined || network === null || network === "None" || network?.None !== undefined
+      || network === "Any" || network?.Any !== undefined
+  ) {
     return "00";
   }
   if (network === "Polkadot" || network?.Polkadot !== undefined) {

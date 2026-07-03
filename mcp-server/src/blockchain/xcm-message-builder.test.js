@@ -13,6 +13,10 @@ import {
 const REQUEST_ID = `0x${"11".repeat(32)}`;
 const ACCOUNT = "0x1234567890123456789012345678901234567890";
 const RECIPIENT = "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd";
+const EXPECTED_DEPOSIT_MESSAGE =
+  `0x0510000401000002286bee1301000002286bee0d01020400010300${ACCOUNT.slice(2)}2c${"11".repeat(32)}`;
+const EXPECTED_WITHDRAW_MESSAGE =
+  `0x0510000401000003009435771301000002286bee0d01020400010300${RECIPIENT.slice(2)}2c${"11".repeat(32)}`;
 
 function vdotStrategy(overrides = {}) {
   return {
@@ -32,7 +36,7 @@ function vdotStrategy(overrides = {}) {
 }
 
 test("encodeVersionedParachainLocation builds the Bifrost destination location", () => {
-  assert.equal(encodeVersionedParachainLocation(2030), "0x05010100ee070000");
+  assert.equal(encodeVersionedParachainLocation(2030), "0x05010100b91f");
 });
 
 test("buildParaSpellDestination returns a ParaSpell VersionedLocation", () => {
@@ -83,7 +87,7 @@ test("encodeVersionedXcm encodes the supported PAPI/ParaSpell v5 instruction sub
 
   assert.ok(message.startsWith("0x0510"));
   assert.ok(message.includes("1301000002"));
-  assert.ok(message.includes(`0d01010100000000010300${ACCOUNT.slice(2)}`));
+  assert.ok(message.includes(`0d01020400010300${ACCOUNT.slice(2)}`));
   assert.ok(message.endsWith(`${XCM_SET_TOPIC_INSTRUCTION.toString(16)}${"11".repeat(32)}`));
 });
 
@@ -106,12 +110,10 @@ test("buildXcmRequestPayload creates deterministic deposit and withdraw payloads
     shares: 2_000_000_000
   });
 
-  assert.equal(deposit.destination, "0x05010100ee070000");
-  assert.equal(withdraw.destination, "0x05010100ee070000");
-  assert.ok(deposit.message.startsWith("0x0510"));
-  assert.ok(withdraw.message.startsWith("0x0510"));
-  assert.ok(deposit.message.endsWith(`2c${"11".repeat(32)}`));
-  assert.ok(withdraw.message.endsWith(`2c${"11".repeat(32)}`));
+  assert.equal(deposit.destination, "0x05010100b91f");
+  assert.equal(withdraw.destination, "0x05010100b91f");
+  assert.equal(deposit.message, EXPECTED_DEPOSIT_MESSAGE);
+  assert.equal(withdraw.message, EXPECTED_WITHDRAW_MESSAGE);
   assert.notEqual(deposit.message, withdraw.message);
   assert.deepEqual(deposit.maxWeight, { refTime: 0, proofSize: 0 });
 });

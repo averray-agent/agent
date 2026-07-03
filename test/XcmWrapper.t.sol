@@ -55,6 +55,8 @@ contract XcmWrapperTest is Test {
     bytes32 internal constant STRATEGY_ID = bytes32("VDOT_XCM_V1");
     address internal constant ASSET = address(0x1234);
     address internal constant RECIPIENT = address(0x5678);
+    address internal constant BACKEND_ACCOUNT = 0x1234567890123456789012345678901234567890;
+    address internal constant BACKEND_RECIPIENT = 0xABcdEFABcdEFabcdEfAbCdefabcdeFABcDEFabCD;
 
     function setUp() public {
         policy = new TreasuryPolicy();
@@ -89,6 +91,50 @@ contract XcmWrapperTest is Test {
         assertEq(precompile.sendCount(), 1);
         require(precompile.lastDestinationHash() == keccak256(hex"0102"), "PRECOMPILE_DESTINATION_NOT_SENT");
         require(precompile.lastMessageHash() == keccak256(message), "PRECOMPILE_MESSAGE_NOT_SENT");
+    }
+
+    function testQueueRequestAcceptsBackendBuilderDepositFixture() public {
+        IXcmWrapper.RequestContext memory context = IXcmWrapper.RequestContext({
+            strategyId: STRATEGY_ID,
+            kind: IXcmWrapper.RequestKind.Deposit,
+            account: operator,
+            asset: ASSET,
+            recipient: BACKEND_ACCOUNT,
+            assets: 1_000_000_000,
+            shares: 0,
+            nonce: 77
+        });
+        bytes32 requestId = wrapper.previewRequestId(context);
+        bytes memory message = _backendDepositFixture(requestId);
+
+        vm.prank(operator);
+        bytes32 queued =
+            wrapper.queueRequest(context, hex"05010100b91f", message, IXcmWrapper.Weight({refTime: 1, proofSize: 2}));
+
+        require(queued == requestId, "WRONG_REQUEST_ID");
+        require(wrapper.requestMessageHash(requestId) == keccak256(message), "BACKEND_FIXTURE_NOT_QUEUED");
+    }
+
+    function testQueueRequestAcceptsBackendBuilderWithdrawFixture() public {
+        IXcmWrapper.RequestContext memory context = IXcmWrapper.RequestContext({
+            strategyId: STRATEGY_ID,
+            kind: IXcmWrapper.RequestKind.Withdraw,
+            account: operator,
+            asset: ASSET,
+            recipient: BACKEND_RECIPIENT,
+            assets: 0,
+            shares: 2_000_000_000,
+            nonce: 78
+        });
+        bytes32 requestId = wrapper.previewRequestId(context);
+        bytes memory message = _backendWithdrawFixture(requestId);
+
+        vm.prank(operator);
+        bytes32 queued =
+            wrapper.queueRequest(context, hex"05010100b91f", message, IXcmWrapper.Weight({refTime: 1, proofSize: 2}));
+
+        require(queued == requestId, "WRONG_REQUEST_ID");
+        require(wrapper.requestMessageHash(requestId) == keccak256(message), "BACKEND_FIXTURE_NOT_QUEUED");
     }
 
     function testQueueRequestIsIdempotentForSamePayload() public {
@@ -192,6 +238,22 @@ contract XcmWrapperTest is Test {
     function testQueueRequestRejectsWithdrawAssetContextMismatch() public {
         IXcmWrapper.RequestContext memory context = _context(25 ether, 0, 1);
         bytes memory message = _message(wrapper.previewRequestId(context), address(0x9999), RECIPIENT, 25 ether, 1);
+
+        vm.prank(operator);
+        (bool ok, bytes memory data) = address(wrapper)
+            .call(
+                abi.encodeCall(
+                    wrapper.queueRequest, (context, hex"0102", message, IXcmWrapper.Weight({refTime: 1, proofSize: 2}))
+                )
+            );
+        _assertCustomError(ok, data, XcmWrapper.XcmContextMismatch.selector);
+    }
+
+    function testQueueRequestRejectsNonCanonicalDepositFilter() public {
+        IXcmWrapper.RequestContext memory context = _context(25 ether, 0, 1);
+        bytes memory message = _messageWithFilter(
+            wrapper.previewRequestId(context), address(0), RECIPIENT, 25 ether, 1, hex"010101000000"
+        );
 
         vm.prank(operator);
         (bool ok, bytes memory data) = address(wrapper)
@@ -517,7 +579,7 @@ contract XcmWrapperTest is Test {
         assertEq(uint256(record.status), uint256(IXcmWrapper.RequestStatus.Failed));
     }
 
-    function testWeighMessageUsesConfiguredPrecompile() public {
+    function testWeighMessageUsesConfiguredPrecompile() public view {
         IXcmWrapper.Weight memory weight = wrapper.weighMessage(hex"aabbcc");
         assertEq(weight.refTime, 30);
         assertEq(weight.proofSize, 3);
@@ -563,15 +625,15 @@ contract XcmWrapperTest is Test {
     }
 
     function _depositMessage(bytes32 requestId) internal pure returns (bytes memory) {
-        return _message(requestId, ASSET, RECIPIENT, 25 ether, 1);
+        return _message(requestId, address(0), RECIPIENT, 25 ether, 1);
     }
 
     function _depositMessageWithFee(bytes32 requestId, uint256 feeAmount) internal pure returns (bytes memory) {
-        return _message(requestId, ASSET, RECIPIENT, 25 ether, feeAmount);
+        return _message(requestId, address(0), RECIPIENT, 25 ether, feeAmount);
     }
 
     function _withdrawMessage(bytes32 requestId) internal pure returns (bytes memory) {
-        return _message(requestId, ASSET, RECIPIENT, 10 ether, 1);
+        return _message(requestId, address(0), RECIPIENT, 10 ether, 1);
     }
 
     function _message(bytes32 requestId, address asset, address recipient, uint256 amount, uint256 feeAmount)
@@ -579,6 +641,17 @@ contract XcmWrapperTest is Test {
         pure
         returns (bytes memory)
     {
+        return _messageWithFilter(requestId, asset, recipient, amount, feeAmount, hex"010204");
+    }
+
+    function _messageWithFilter(
+        bytes32 requestId,
+        address asset,
+        address recipient,
+        uint256 amount,
+        uint256 feeAmount,
+        bytes memory assetFilter
+    ) internal pure returns (bytes memory) {
         return abi.encodePacked(
             hex"05",
             _compact(4),
@@ -588,15 +661,34 @@ contract XcmWrapperTest is Test {
             bytes1(0x13),
             _asset(asset, feeAmount),
             bytes1(0x0d),
-            hex"010101000000",
+            assetFilter,
             _accountKey20Location(recipient),
             bytes1(0x2c),
             requestId
         );
     }
 
+    function _backendDepositFixture(bytes32 requestId) internal pure returns (bytes memory) {
+        return abi.encodePacked(
+            hex"0510000401000002286bee1301000002286bee0d0102040001030012345678901234567890123456789012345678902c",
+            requestId
+        );
+    }
+
+    function _backendWithdrawFixture(bytes32 requestId) internal pure returns (bytes memory) {
+        return abi.encodePacked(
+            hex"0510000401000003009435771301000002286bee0d01020400010300abcdefabcdefabcdefabcdefabcdefabcdefabcd2c",
+            requestId
+        );
+    }
+
     function _asset(address asset, uint256 amount) internal pure returns (bytes memory) {
-        return abi.encodePacked(_accountKey20Location(asset), bytes1(0x00), _compact(amount));
+        bytes memory location = asset == address(0) ? _nativeRelayAssetLocation() : _accountKey20Location(asset);
+        return abi.encodePacked(location, bytes1(0x00), _compact(amount));
+    }
+
+    function _nativeRelayAssetLocation() internal pure returns (bytes memory) {
+        return hex"0100";
     }
 
     function _accountKey20Location(address key) internal pure returns (bytes memory) {
