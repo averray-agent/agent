@@ -39,7 +39,9 @@ umask 077
 usage() {
   cat >&2 <<'USAGE'
 Usage: validate-env-render.sh <runtime>
-   runtime: "backend" or "indexer"
+   runtime: "backend" | "indexer" | "backend-mainnet" | "indexer-mainnet"
+   (the *-mainnet runtimes render the generated deploy/<base>.mainnet.env.template;
+    they need the mainnet-* 1Password vault items to exist to resolve.)
 
 Render deploy/<runtime>.env.template via `op inject`, validate the output
 against deploy/secrets-inventory.md, then delete the rendered file.
@@ -58,11 +60,16 @@ runtime="$1"
 
 case "$runtime" in
   backend|indexer) ;;
+  backend-mainnet|indexer-mainnet) ;;
   *) echo "validate-env-render.sh: unknown runtime '$runtime'" >&2; usage ;;
 esac
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-template="$repo_root/deploy/${runtime}.env.template"
+# *-mainnet runtimes render the generated deploy/<base>.mainnet.env.template.
+case "$runtime" in
+  *-mainnet) template="$repo_root/deploy/${runtime%-mainnet}.mainnet.env.template" ;;
+  *)         template="$repo_root/deploy/${runtime}.env.template" ;;
+esac
 inventory="$repo_root/deploy/secrets-inventory.md"
 
 [ -f "$template" ] || { echo "validate-env-render.sh: missing template: $template" >&2; exit 1; }
