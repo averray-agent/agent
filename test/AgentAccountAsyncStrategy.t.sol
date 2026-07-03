@@ -466,19 +466,19 @@ contract AgentAccountAsyncStrategyTest is Test {
         );
     }
 
-    function _depositMessage(bytes32 requestId, address account, uint256 amount) internal view returns (bytes memory) {
+    function _depositMessage(bytes32 requestId, address account, uint256 amount) internal pure returns (bytes memory) {
         return _message(requestId, account, amount);
     }
 
     function _withdrawMessage(bytes32 requestId, address recipient, uint256 shares)
         internal
-        view
+        pure
         returns (bytes memory)
     {
         return _message(requestId, recipient, shares);
     }
 
-    function _message(bytes32 requestId, address beneficiary, uint256 amount) internal view returns (bytes memory) {
+    function _message(bytes32 requestId, address beneficiary, uint256 amount) internal pure returns (bytes memory) {
         return abi.encodePacked(
             hex"05",
             _compact(4),
@@ -488,15 +488,19 @@ contract AgentAccountAsyncStrategyTest is Test {
             bytes1(0x13),
             _xcmAsset(1),
             bytes1(0x0d),
-            hex"010101000000",
+            hex"010204",
             _accountKey20Location(beneficiary),
             bytes1(0x2c),
             requestId
         );
     }
 
-    function _xcmAsset(uint256 amount) internal view returns (bytes memory) {
-        return abi.encodePacked(_accountKey20Location(address(dot)), bytes1(0x00), _compact(amount));
+    function _xcmAsset(uint256 amount) internal pure returns (bytes memory) {
+        return abi.encodePacked(_nativeRelayAssetLocation(), bytes1(0x00), _compact(amount));
+    }
+
+    function _nativeRelayAssetLocation() internal pure returns (bytes memory) {
+        return hex"0100";
     }
 
     function _accountKey20Location(address key) internal pure returns (bytes memory) {
