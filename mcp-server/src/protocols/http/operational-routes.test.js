@@ -113,6 +113,15 @@ test("GET /health reports service liveness separately from disabled capabilities
   assert.equal(response.body.capabilityHealth.xcmObserver, "staged");
   assert.equal(response.body.capabilityHealth.indexer, "unavailable");
   assert.equal(response.body.capabilityHealth.gasSponsor, "disabled");
+  assert.equal(response.body.addresses.token, "0x0000053900000000000000000000000001200000");
+  assert.equal(response.body.addresses.agentAccountCore, "0x71B111d8c9DF84Be26cb9067D27dAd7A2d5E7e08");
+  assert.equal(response.body.addresses.escrowCore, "0x70d661C3A5DdE64bB8cbFa0A5336470c1662eFCa");
+  assert.equal(response.body.addresses.settlementSigner, "0x31ad432dFe083B998c69B6dB88A984ec5207ab7F");
+  assert.equal(response.body.addresses.treasuryReserve, "0x6778F050eAc8313e4dbB176d7BAB44510E833ac8");
+  assert.equal(Object.hasOwn(response.body.addresses, "treasuryPolicy"), false);
+  assert.equal(response.body.rewardBank.readable, false);
+  assert.equal(response.body.rewardBank.decimals, 6);
+  assert.equal(response.body.settlement.source, "backend_state_store");
   assert.deepEqual(response.body.components.stateStore, { ok: true, backend: "memory", mode: "memory" });
   assert.ok(response.body.warnings.some((warning) => warning.code === "treasury_mutations_unavailable"));
   assert.deepEqual(calls.map(([name]) => name), [

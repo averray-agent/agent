@@ -7,6 +7,7 @@
   "pauser": "0x6778F050eAc8313e4dbB176d7BAB44510E833ac8",
   "verifier": "0x31ad432dFe083B998c69B6dB88A984ec5207ab7F",
   "arbitrator": "0x6778F050eAc8313e4dbB176d7BAB44510E833ac8",
+  "treasuryReserve": "0x6778F050eAc8313e4dbB176d7BAB44510E833ac8",
   "contracts": {
     "treasuryPolicy": "0x648Cc5fdE94435992296C4e5ac642d18bB64c12B",
     "strategyAdapterRegistry": "0x9F12547FD782664ADbe0FC19c3CCd3dD4837B0eB",
