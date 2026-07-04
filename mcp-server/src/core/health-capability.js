@@ -1,3 +1,7 @@
+import { readFileSync } from "node:fs";
+
+import { disputeIdForSession } from "./dispute-resolution.js";
+
 /**
  * /health truth split — Package B (P1.1b) close.
  *
@@ -60,6 +64,22 @@ export const GAS_SPONSOR_STATUS = Object.freeze({
   ENABLED: "enabled",
   DISABLED: "disabled"
 });
+
+const DEFAULT_PRODUCT_HEALTH_CACHE_MS = 60_000;
+const DEFAULT_SETTLEMENT_SESSION_LIMIT = 1_000;
+const DEFAULT_SETTLEMENT_STUCK_AFTER_MS = 30 * 60 * 1000;
+const DEFAULT_REWARD_BANK_DECIMALS = 6;
+const SETTLED_SESSION_STATUSES = new Set(["resolved", "rejected", "closed"]);
+const EXECUTION_FAILURE_CODES = new Set([
+  "blockchain_revert",
+  "mutation_receipt_error",
+  "tx_reverted",
+  "transaction_reverted",
+  "settlement_failed"
+]);
+const TESTNET_DEPLOYMENT_MANIFEST_URL = new URL("../../../deployments/testnet.json", import.meta.url);
+
+let deploymentManifestCache;
 
 /**
  * Compute `serviceHealth` from process-local liveness signals.
@@ -243,4 +263,340 @@ export function buildCapabilityWarnings(capabilityHealth) {
   }
 
   return warnings;
+}
+
+export function createProductHealthSnapshotProvider({
+  gateway,
+  stateStore,
+  env = process.env,
+  deploymentManifest = undefined,
+  now = () => new Date(),
+  cacheMs = DEFAULT_PRODUCT_HEALTH_CACHE_MS,
+  settlementSessionLimit = DEFAULT_SETTLEMENT_SESSION_LIMIT,
+  settlementStuckAfterMs = DEFAULT_SETTLEMENT_STUCK_AFTER_MS
+} = {}) {
+  let cached;
+  let refreshPromise;
+
+  return async function getProductHealthSnapshot() {
+    const currentTime = now();
+    const nowMs = currentTime.getTime();
+    if (cached && cached.expiresAtMs > nowMs) {
+      return cached.value;
+    }
+    if (refreshPromise) {
+      return refreshPromise;
+    }
+
+    refreshPromise = buildProductHealthSnapshot({
+      gateway,
+      stateStore,
+      env,
+      deploymentManifest,
+      now: currentTime,
+      settlementSessionLimit,
+      settlementStuckAfterMs
+    })
+      .then((value) => {
+        cached = {
+          expiresAtMs: nowMs + Math.max(0, cacheMs),
+          value
+        };
+        return value;
+      })
+      .finally(() => {
+        refreshPromise = undefined;
+      });
+
+    return refreshPromise;
+  };
+}
+
+export async function buildProductHealthSnapshot({
+  gateway,
+  stateStore,
+  env = process.env,
+  deploymentManifest = undefined,
+  now = new Date(),
+  settlementSessionLimit = DEFAULT_SETTLEMENT_SESSION_LIMIT,
+  settlementStuckAfterMs = DEFAULT_SETTLEMENT_STUCK_AFTER_MS
+} = {}) {
+  const manifest = deploymentManifest ?? loadTestnetDeploymentManifest();
+  const addresses = resolveHealthAddresses({ deploymentManifest: manifest, env });
+  const [rewardBank, settlement] = await Promise.all([
+    resolveRewardBankHealth({ gateway, addresses, now }),
+    resolveSettlementHealth({
+      stateStore,
+      now,
+      limit: settlementSessionLimit,
+      stuckAfterMs: settlementStuckAfterMs
+    })
+  ]);
+
+  return {
+    addresses,
+    rewardBank,
+    settlement
+  };
+}
+
+export function resolveHealthAddresses({
+  deploymentManifest = loadTestnetDeploymentManifest(),
+  env = process.env
+} = {}) {
+  const contracts = deploymentManifest?.contracts ?? {};
+  const treasuryReserve = firstPresent(
+    deploymentManifest?.treasuryReserve,
+    deploymentManifest?.opsReserve,
+    deploymentManifest?.opsReserveAddress,
+    env.USDC_LIQUIDITY_TREASURY_RESERVE_ACCOUNT
+  );
+
+  return compactPlainObject({
+    token: contracts.token,
+    agentAccountCore: contracts.agentAccountCore,
+    escrowCore: contracts.escrowCore,
+    settlementSigner: deploymentManifest?.verifier,
+    treasuryReserve
+  });
+}
+
+async function resolveRewardBankHealth({ gateway, addresses, now }) {
+  const asOf = now.toISOString();
+  const fallback = {
+    liquid: null,
+    liquidRaw: null,
+    decimals: DEFAULT_REWARD_BANK_DECIMALS,
+    asOf,
+    readable: false,
+    source: "gateway_unavailable"
+  };
+
+  if (!gateway?.isEnabled?.() || typeof gateway.getTreasuryPolicyStatus !== "function") {
+    return fallback;
+  }
+
+  try {
+    const status = await gateway.getTreasuryPolicyStatus();
+    const token = normalizeAddressish(addresses?.token);
+    const asset = (status?.signerFunding?.assets ?? []).find((candidate) => {
+      const candidateAddress = normalizeAddressish(candidate?.address);
+      return (token && candidateAddress && token === candidateAddress)
+        || String(candidate?.symbol ?? "").toUpperCase() === "USDC";
+    });
+    const decimals = Number.isFinite(Number(asset?.decimals))
+      ? Number(asset.decimals)
+      : DEFAULT_REWARD_BANK_DECIMALS;
+    if (!asset?.readable) {
+      return {
+        ...fallback,
+        decimals,
+        source: "agent_account_position",
+        error: "position_unreadable"
+      };
+    }
+    return {
+      liquid: normalizeNumericAmount(asset.liquid),
+      liquidRaw: asset.liquidRaw ?? null,
+      decimals,
+      asOf,
+      readable: true,
+      account: status?.signerFunding?.account ?? addresses?.settlementSigner,
+      asset: asset.symbol ?? "USDC",
+      source: "agent_account_position"
+    };
+  } catch (error) {
+    return {
+      ...fallback,
+      source: "agent_account_position",
+      error: error?.code ?? error?.shortMessage ?? error?.message ?? "read_failed"
+    };
+  }
+}
+
+async function resolveSettlementHealth({ stateStore, now, limit, stuckAfterMs }) {
+  const asOf = now.toISOString();
+  const fallback = {
+    settled24h: 0,
+    stuck: 0,
+    failed24h: 0,
+    asOf,
+    source: "backend_state_store",
+    readable: false
+  };
+
+  if (typeof stateStore?.listRecentSessions !== "function") {
+    return fallback;
+  }
+
+  try {
+    const sessions = await stateStore.listRecentSessions(limit);
+    const nowMs = now.getTime();
+    const cutoffMs = nowMs - 24 * 60 * 60 * 1000;
+    let settled24h = 0;
+    let stuck = 0;
+    let failed24h = 0;
+    const seenFailures = new Set();
+
+    for (const session of Array.isArray(sessions) ? sessions : []) {
+      if (isSettledWithinWindow(session, cutoffMs)) {
+        settled24h += 1;
+      }
+      if (isSubmittedStuck(session, nowMs, stuckAfterMs)) {
+        stuck += 1;
+      }
+      if (isSubmitExecutionFailureWithinWindow(session, cutoffMs)) {
+        failed24h += 1;
+        seenFailures.add(`session:${session.sessionId ?? session.jobId ?? failed24h}`);
+      }
+    }
+
+    if (typeof stateStore.getMutationReceipt === "function") {
+      for (const session of Array.isArray(sessions) ? sessions : []) {
+        const receiptKeys = settlementReceiptKeysForSession(session);
+        for (const { bucket, key } of receiptKeys) {
+          let receipt;
+          try {
+            receipt = await stateStore.getMutationReceipt(bucket, key);
+          } catch {
+            continue;
+          }
+          if (!isMutationExecutionFailureWithinWindow(receipt, cutoffMs)) {
+            continue;
+          }
+          const failureKey = `${bucket}:${key}`;
+          if (!seenFailures.has(failureKey)) {
+            failed24h += 1;
+            seenFailures.add(failureKey);
+          }
+        }
+      }
+    }
+
+    return {
+      settled24h,
+      stuck,
+      failed24h,
+      asOf,
+      source: "backend_state_store",
+      readable: true
+    };
+  } catch (error) {
+    return {
+      ...fallback,
+      error: error?.message ?? "read_failed"
+    };
+  }
+}
+
+function loadTestnetDeploymentManifest() {
+  if (!deploymentManifestCache) {
+    deploymentManifestCache = JSON.parse(readFileSync(TESTNET_DEPLOYMENT_MANIFEST_URL, "utf8"));
+  }
+  return deploymentManifestCache;
+}
+
+function settlementReceiptKeysForSession(session) {
+  const keys = [];
+  const sessionId = session?.sessionId;
+  const disputeId = session?.disputeId ?? session?.dispute?.id ?? session?.arbitration?.disputeId;
+  const shouldCheckDisputeReceipt = Boolean(
+    disputeId
+      || session?.disputedAt
+      || session?.status === "disputed"
+      || session?.status === "closed"
+  );
+  if (sessionId && shouldCheckDisputeReceipt) {
+    const stableDisputeId = disputeId ?? stableDisputeIdForSession(sessionId);
+    keys.push({ bucket: "dispute_verdict", key: stableDisputeId });
+    keys.push({ bucket: "dispute_release", key: stableDisputeId });
+  }
+  return keys;
+}
+
+function stableDisputeIdForSession(sessionId) {
+  return disputeIdForSession(sessionId);
+}
+
+function isSettledWithinWindow(session, cutoffMs) {
+  if (!SETTLED_SESSION_STATUSES.has(session?.status)) {
+    return false;
+  }
+  const settledAt = timestampMs(
+    session.resolvedAt
+      ?? session.rejectedAt
+      ?? session.closedAt
+      ?? session.updatedAt
+  );
+  return Number.isFinite(settledAt) && settledAt >= cutoffMs;
+}
+
+function isSubmittedStuck(session, nowMs, stuckAfterMs) {
+  if (session?.status !== "submitted") {
+    return false;
+  }
+  const submittedAt = timestampMs(session.submittedAt ?? session.updatedAt);
+  return Number.isFinite(submittedAt) && nowMs - submittedAt >= stuckAfterMs;
+}
+
+function isSubmitExecutionFailureWithinWindow(session, cutoffMs) {
+  const failedAt = timestampMs(session?.submitFailedAt);
+  return Number.isFinite(failedAt) && failedAt >= cutoffMs;
+}
+
+function isMutationExecutionFailureWithinWindow(receipt, cutoffMs) {
+  if (!receipt || typeof receipt !== "object") {
+    return false;
+  }
+  const createdAt = timestampMs(receipt.createdAt ?? receipt.decidedAt ?? receipt.updatedAt);
+  if (!Number.isFinite(createdAt) || createdAt < cutoffMs) {
+    return false;
+  }
+  const statusCode = Number(receipt.statusCode);
+  if (Number.isFinite(statusCode) && statusCode >= 500) {
+    return true;
+  }
+  const response = receipt.response && typeof receipt.response === "object"
+    ? receipt.response
+    : {};
+  const code = String(response.code ?? receipt.code ?? "").trim();
+  if (EXECUTION_FAILURE_CODES.has(code)) {
+    return true;
+  }
+  const chainStatus = String(receipt.chainStatus ?? response.chainStatus ?? "").trim();
+  if (["failed", "reverted"].includes(chainStatus)) {
+    return true;
+  }
+  const error = String(response.error ?? receipt.error ?? "").toLowerCase();
+  return error.includes("revert") || error.includes("mutation");
+}
+
+function timestampMs(value) {
+  if (!value) return Number.NaN;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : Number.NaN;
+}
+
+function normalizeAddressish(value) {
+  return typeof value === "string" && value.trim()
+    ? value.trim().toLowerCase()
+    : undefined;
+}
+
+function normalizeNumericAmount(value) {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function compactPlainObject(value) {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, entry]) => entry !== undefined && entry !== null && entry !== "")
+  );
+}
+
+function firstPresent(...values) {
+  return values.find((value) => value !== undefined && value !== null && value !== "");
 }

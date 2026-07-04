@@ -3,6 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 import { getMutationBackendStatus } from "../../core/mutation-backend.js";
 import {
   buildCapabilityWarnings,
+  createProductHealthSnapshotProvider,
   resolveCapabilityHealth,
   resolveServiceHealth
 } from "../../core/health-capability.js";
@@ -43,6 +44,11 @@ export function createOperationalRoutes({
   service,
   stateStore
 }) {
+  const getProductHealthSnapshot = createProductHealthSnapshotProvider({
+    gateway,
+    stateStore
+  });
+
   return async function handleOperationalRoute({ request, response, pathname }) {
     if (request.method === "GET" && pathname === "/health") {
       // Package B (P1.1b) — health truth split. `serviceHealth` is the
@@ -73,12 +79,14 @@ export function createOperationalRoutes({
         indexerProbe: undefined,
         gasSponsorHealth: gasHealth
       });
+      const productHealth = await getProductHealthSnapshot();
 
       respond(response, serviceHealth.ok ? 200 : 503, {
         status: serviceHealth.ok ? "ok" : "degraded",
         auth: { mode: authConfig.mode, domain: authConfig.domain, chainId: authConfig.chainId },
         serviceHealth,
         capabilityHealth,
+        ...productHealth,
         // Structured, codeable warnings derived from capabilityHealth.
         warnings: buildCapabilityWarnings(capabilityHealth),
         components: {

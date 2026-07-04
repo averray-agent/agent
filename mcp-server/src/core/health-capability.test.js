@@ -7,8 +7,11 @@ import {
   INDEXER_STATUS,
   TREASURY_MUTATIONS_STATUS,
   XCM_OBSERVER_STATUS,
+  buildProductHealthSnapshot,
   buildCapabilityWarnings,
+  createProductHealthSnapshotProvider,
   resolveCapabilityHealth,
+  resolveHealthAddresses,
   resolveServiceHealth
 } from "./health-capability.js";
 
@@ -232,4 +235,125 @@ test("buildCapabilityWarnings — degraded treasury (memory-mode dev) is warning
 test("buildCapabilityWarnings — null input resolves to empty array (no crash)", () => {
   assert.deepEqual(buildCapabilityWarnings(undefined), []);
   assert.deepEqual(buildCapabilityWarnings(null), []);
+});
+
+// ─── product-health monitor blocks ───────────────────────────────────
+
+const TEST_DEPLOYMENT = Object.freeze({
+  verifier: "0x31ad432dFe083B998c69B6dB88A984ec5207ab7F",
+  treasuryReserve: "0x6778F050eAc8313e4dbB176d7BAB44510E833ac8",
+  contracts: {
+    treasuryPolicy: "0x9999999999999999999999999999999999999999",
+    token: "0x0000053900000000000000000000000001200000",
+    agentAccountCore: "0x71B111d8c9DF84Be26cb9067D27dAd7A2d5E7e08",
+    escrowCore: "0x70d661C3A5DdE64bB8cbFa0A5336470c1662eFCa"
+  }
+});
+
+test("resolveHealthAddresses exposes monitor addresses without logic-only TreasuryPolicy", () => {
+  const addresses = resolveHealthAddresses({ deploymentManifest: TEST_DEPLOYMENT, env: {} });
+  assert.deepEqual(addresses, {
+    token: "0x0000053900000000000000000000000001200000",
+    agentAccountCore: "0x71B111d8c9DF84Be26cb9067D27dAd7A2d5E7e08",
+    escrowCore: "0x70d661C3A5DdE64bB8cbFa0A5336470c1662eFCa",
+    settlementSigner: "0x31ad432dFe083B998c69B6dB88A984ec5207ab7F",
+    treasuryReserve: "0x6778F050eAc8313e4dbB176d7BAB44510E833ac8"
+  });
+  assert.equal(Object.hasOwn(addresses, "treasuryPolicy"), false);
+});
+
+test("buildProductHealthSnapshot reports reward bank and Redis settlement counters", async () => {
+  const now = new Date("2026-07-05T12:00:00.000Z");
+  const receiptStore = new Map([
+    ["dispute_verdict:dispute-revert", {
+      statusCode: 409,
+      response: { code: "blockchain_revert" },
+      createdAt: "2026-07-05T11:50:00.000Z"
+    }]
+  ]);
+  const stateStore = {
+    async listRecentSessions(limit) {
+      assert.equal(limit, 1000);
+      return [
+        { sessionId: "settled-approved", status: "resolved", resolvedAt: "2026-07-05T11:00:00.000Z" },
+        { sessionId: "settled-rejected", status: "rejected", rejectedAt: "2026-07-05T10:30:00.000Z" },
+        { sessionId: "stuck-submitted", status: "submitted", submittedAt: "2026-07-05T11:20:00.000Z" },
+        { sessionId: "submit-failed", status: "claimed", submitFailedAt: "2026-07-05T11:55:00.000Z" },
+        { sessionId: "receipt-failed", disputeId: "dispute-revert", status: "disputed", updatedAt: "2026-07-05T11:45:00.000Z" },
+        { sessionId: "old-failed", status: "claimed", submitFailedAt: "2026-07-03T11:55:00.000Z" }
+      ];
+    },
+    async getMutationReceipt(bucket, key) {
+      return receiptStore.get(`${bucket}:${key}`);
+    }
+  };
+  const gateway = {
+    isEnabled: () => true,
+    async getTreasuryPolicyStatus() {
+      return {
+        signerFunding: {
+          account: "0x31ad432dFe083B998c69B6dB88A984ec5207ab7F",
+          assets: [{
+            symbol: "USDC",
+            address: "0x0000053900000000000000000000000001200000",
+            decimals: 6,
+            readable: true,
+            liquid: 42.3,
+            liquidRaw: "42300000"
+          }]
+        }
+      };
+    }
+  };
+
+  const snapshot = await buildProductHealthSnapshot({
+    gateway,
+    stateStore,
+    deploymentManifest: TEST_DEPLOYMENT,
+    now
+  });
+
+  assert.deepEqual(snapshot.rewardBank, {
+    liquid: 42.3,
+    liquidRaw: "42300000",
+    decimals: 6,
+    asOf: "2026-07-05T12:00:00.000Z",
+    readable: true,
+    account: "0x31ad432dFe083B998c69B6dB88A984ec5207ab7F",
+    asset: "USDC",
+    source: "agent_account_position"
+  });
+  assert.deepEqual(snapshot.settlement, {
+    settled24h: 2,
+    stuck: 1,
+    failed24h: 2,
+    asOf: "2026-07-05T12:00:00.000Z",
+    source: "backend_state_store",
+    readable: true
+  });
+});
+
+test("createProductHealthSnapshotProvider caches public health recompute", async () => {
+  let current = new Date("2026-07-05T12:00:00.000Z");
+  let scans = 0;
+  const provider = createProductHealthSnapshotProvider({
+    gateway: { isEnabled: () => false },
+    stateStore: {
+      async listRecentSessions() {
+        scans += 1;
+        return [];
+      }
+    },
+    deploymentManifest: TEST_DEPLOYMENT,
+    now: () => current,
+    cacheMs: 60_000
+  });
+
+  await provider();
+  await provider();
+  assert.equal(scans, 1);
+
+  current = new Date("2026-07-05T12:01:01.000Z");
+  await provider();
+  assert.equal(scans, 2);
 });
