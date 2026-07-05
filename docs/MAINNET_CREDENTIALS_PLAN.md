@@ -232,22 +232,29 @@ must be set at creation (irreversible).
 - **Pauser identity** — **dedicated hardware EOA**, out-of-band, signs
   `setPaused(bool)` only, by hand. No backend code change needed.
 
-### Still open
+### Decided (2026-07-05) — the 6 open calls are now made
 
-1. **Multisig sub-detail** — Hot/Warm/Cold device + backup-location assignments;
-   one vs two operators (two doubles YubiKey procurement and shared-account
-   enrollment).
-2. **Cold-signer hardware** (Ledger?) + **registrar FIDO2 support** (migrate
-   pre-mainnet if absent — highest blast radius).
-3. **Roles Anywhere CA-key custody** — 1Password Critical ($0) vs YubiKey vs AWS
-   Private CA (~$50/mo). Reconcile cert cadence (calendar says 7-day; PHASE_5A
-   says 90-day).
-4. **`JWT_MAX_TTL_SECONDS`** — proof allows ≤30d; PHASE_4B intent is ≤1h with
-   refresh-flow only. Pick the tighter value; retire long-lived `ADMIN_JWT`.
-5. **Mainnet vault topology** — confirm the per-runtime scoped vault set; whether
-   to keep `APP_BASIC_AUTH` on the mainnet operator UI.
-6. **Which optional vendors launch enabled** (Pimlico, Sentry, Subscan) — each
-   enabled one needs a mainnet-dedicated key + a `vendorKeys` proof entry.
+1. **Multisig sub-detail** — **ONE operator**, holding all 3 hardware-backed 2-of-3
+   seeds distributed **Hot** (password manager) / **Warm** (paper, separate location) /
+   **Cold** (Ledger 24-word + steel). One YubiKey set (×6 accounts); no shared-account
+   enrollment.
+2. **Cold-signer hardware** — **Ledger** (24-word + steel backup) for the cold seed.
+   Verify/migrate **registrar FIDO2** pre-mainnet (highest blast radius if absent).
+3. **Roles Anywhere CA-key custody** — **1Password Critical ($0)**, human-only item; no
+   SA reads it. Cert cadence reconciled to **90-day** (PHASE_5A) — supersede the calendar's
+   7-day.
+4. **`JWT_MAX_TTL_SECONDS`** — **30 days (`2592000`)** for v1. The ≤1h tightening is a
+   per-consumer refresh-flow *migration*, not a config flip (it would reject the static
+   `ADMIN_JWT`), and is **deferred to post-launch** (groundwork: `seed-admin-refresh-token.mjs`
+   #672).
+5. **Mainnet vault topology** — **confirmed**: the per-runtime scoped set encoded in
+   `scripts/ops/bootstrap-mainnet-vault.mjs` (#731) — `mainnet-critical` firebreak +
+   `mainnet-{backend,backend-external,indexer,ci,ci-external,smoke,observability}` + the 4
+   least-privilege SA tokens. **Keep `APP_BASIC_AUTH`** on the operator UI (split-vault: raw
+   in `mainnet-critical`, bcrypt hash in `mainnet-ci`).
+6. **Optional vendors** — **LEAN: none enabled.** Pimlico/gasSponsor stays disabled (starter
+   gas is operator-brokered); Sentry + Subscan off. Baseline `vendorKeys` = Resend + alert
+   webhook + GitHub ingestion PAT only.
 
 ## Related
 
