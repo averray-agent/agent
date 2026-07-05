@@ -149,8 +149,7 @@ test("http smoke: production money-like routes require a chain backend", { skip:
       ["/account/allocate", { asset: "DOT", amount: 1, strategyId: "default-low-risk" }],
       ["/account/deallocate", { asset: "DOT", amount: 1, strategyId: "default-low-risk" }],
       ["/account/borrow", { asset: "DOT", amount: 1 }],
-      ["/account/repay", { asset: "DOT", amount: 1 }],
-      ["/payments/send", { recipient: VERIFIER_WALLET, asset: "DOT", amount: 1, transferAuthorization: TRANSFER_AUTHORIZATION }]
+      ["/account/repay", { asset: "DOT", amount: 1 }]
     ];
 
     for (const [path, body] of routes) {
@@ -166,6 +165,14 @@ test("http smoke: production money-like routes require a chain backend", { skip:
       assert.equal(payload.details.mode, "required", path);
       assert.equal(payload.details.route, path);
     }
+
+    const paymentResponse = await fetch(`${base}/payments/send`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ recipient: VERIFIER_WALLET, asset: "DOT", amount: 1, transferAuthorization: TRANSFER_AUTHORIZATION })
+    });
+    assert.equal(paymentResponse.status, 503);
+    assert.deepEqual(await paymentResponse.json(), { reason: "payments_send_disabled" });
   });
 });
 
@@ -198,7 +205,7 @@ test("http smoke: /health separates service liveness from treasury capability", 
 });
 
 test("http smoke: sync money-like routes replay idempotent receipts", { skip: !RUN }, async () => {
-  await runWithServer(async (base) => {
+  await runWithServerEnv({ PAYMENTS_SEND_ENABLED: "1" }, async (base) => {
     const token = issueToken(ADMIN_WALLET);
     const headers = {
       "content-type": "application/json",
@@ -1299,7 +1306,7 @@ test("http smoke: /agents/:wallet rejects non-address path segments", { skip: !R
 });
 
 test("http smoke: /payments/send moves liquid balance between agent accounts", { skip: !RUN }, async () => {
-  await runWithServer(async (base) => {
+  await runWithServerEnv({ PAYMENTS_SEND_ENABLED: "1" }, async (base) => {
     const senderToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
 
     // Fund the sender wallet so there's something to send.
@@ -1328,7 +1335,7 @@ test("http smoke: /payments/send moves liquid balance between agent accounts", {
 });
 
 test("http smoke: /payments/send rejects self-transfer", { skip: !RUN }, async () => {
-  await runWithServer(async (base) => {
+  await runWithServerEnv({ PAYMENTS_SEND_ENABLED: "1" }, async (base) => {
     const token = issueToken(ADMIN_WALLET, { roles: ["admin"] });
     const response = await fetch(`${base}/payments/send`, {
       method: "POST",
