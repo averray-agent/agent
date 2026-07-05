@@ -44,7 +44,7 @@ import { createIdempotentMutationHelpers } from "./idempotent-mutations.js";
 import { createJobRoutes } from "./job-routes.js";
 import { createOperationalRoutes, resolveMetricsAuthConfig } from "./operational-routes.js";
 import { createOperatorActivityFeed } from "./operator-activity-feed.js";
-import { createPaymentRoutes } from "./payment-routes.js";
+import { createPaymentRoutes, resolvePaymentRouteConfig } from "./payment-routes.js";
 import { createPolicyRoutes } from "./policy-routes.js";
 import { createProfileRoutes } from "./profile-routes.js";
 import { createPublicMetadataRoutes } from "./public-metadata-routes.js";
@@ -87,6 +87,7 @@ metrics.gauge("state_store_backend", "1 when state store backend matches the lab
 );
 
 const { metricsBearerToken, metricsAuthRequired } = resolveMetricsAuthConfig(process.env);
+const { paymentsSendEnabled } = resolvePaymentRouteConfig(process.env);
 const port = Number(process.env.PORT ?? 8787);
 const readJsonBody = createJsonBodyReader({ maxBytes: httpConfig.maxBodyBytes });
 const resolveCorsHeaders = createCorsHeaderResolver(httpConfig);
@@ -638,8 +639,10 @@ const handleAccountRoute = createAccountRoutes({
 const handlePaymentRoute = createPaymentRoutes({
   authMiddleware,
   buildIdempotentMutationContext,
+  paymentsSendEnabled,
   readJsonBody,
   requireChainBackedMutation,
+  respond,
   runIdempotentMutation,
   service,
   stripIdempotencyKey,

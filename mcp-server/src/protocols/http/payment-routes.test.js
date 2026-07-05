@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { ValidationError } from "../../core/errors.js";
-import { createPaymentRoutes } from "./payment-routes.js";
+import { createPaymentRoutes, resolvePaymentRouteConfig } from "./payment-routes.js";
 
 const AUTH = {
   wallet: "0x1111111111111111111111111111111111111111",
@@ -52,8 +52,14 @@ function makeHarness(overrides = {}) {
       calls.push(["body"]);
       return payload;
     },
+    paymentsSendEnabled: overrides.paymentsSendEnabled ?? true,
     requireChainBackedMutation: async (routeName) => {
       calls.push(["requireChainBackedMutation", routeName]);
+    },
+    respond: (res, statusCode, body) => {
+      res.statusCode = statusCode;
+      res.body = body;
+      calls.push(["respond", { statusCode, body }]);
     },
     runIdempotentMutation: async (res, context, statusCode, operation) => {
       calls.push(["runIdempotentMutation", { context, statusCode }]);
@@ -69,6 +75,12 @@ function makeHarness(overrides = {}) {
   return { calls, response, route };
 }
 
+test("resolvePaymentRouteConfig defaults /payments/send off", () => {
+  assert.deepEqual(resolvePaymentRouteConfig({}), { paymentsSendEnabled: false });
+  assert.deepEqual(resolvePaymentRouteConfig({ PAYMENTS_SEND_ENABLED: "1" }), { paymentsSendEnabled: true });
+  assert.deepEqual(resolvePaymentRouteConfig({ PAYMENTS_SEND_ENABLED: "false" }), { paymentsSendEnabled: false });
+});
+
 test("payment routes ignore unrelated paths", async () => {
   const { calls, response, route } = makeHarness();
 
@@ -82,6 +94,24 @@ test("payment routes ignore unrelated paths", async () => {
   assert.equal(handled, false);
   assert.deepEqual(calls, []);
   assert.deepEqual(response, {});
+});
+
+test("POST /payments/send returns 503 when payments send is disabled", async () => {
+  const { calls, response, route } = makeHarness({ paymentsSendEnabled: false });
+
+  const handled = await route({
+    request: { method: "POST" },
+    response,
+    url: new URL("http://localhost/payments/send"),
+    pathname: "/payments/send",
+  });
+
+  assert.equal(handled, true);
+  assert.equal(response.statusCode, 503);
+  assert.deepEqual(response.body, { reason: "payments_send_disabled" });
+  assert.deepEqual(calls, [
+    ["respond", { statusCode: 503, body: { reason: "payments_send_disabled" } }]
+  ]);
 });
 
 test("POST /payments/send relays idempotent chain-backed agent payment", async () => {

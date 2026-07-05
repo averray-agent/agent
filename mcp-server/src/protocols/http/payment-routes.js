@@ -4,6 +4,23 @@ import { ValidationError } from "../../core/errors.js";
 
 const SIGNATURE_RE = /^0x[a-fA-F0-9]{130}$/u;
 
+function parseBooleanFlag(value, defaultValue = false) {
+  if (value === undefined || value === null || value === "") {
+    return defaultValue;
+  }
+  if (typeof value === "boolean") {
+    return value;
+  }
+  const normalized = String(value).trim().toLowerCase();
+  return ["1", "true", "yes", "on"].includes(normalized);
+}
+
+export function resolvePaymentRouteConfig(env = process.env) {
+  return {
+    paymentsSendEnabled: parseBooleanFlag(env.PAYMENTS_SEND_ENABLED, false)
+  };
+}
+
 function safeChecksum(raw) {
   try {
     return getAddress(raw);
@@ -48,8 +65,10 @@ function readTransferAuthorization(payload = {}) {
 export function createPaymentRoutes({
   authMiddleware,
   buildIdempotentMutationContext,
+  paymentsSendEnabled = false,
   readJsonBody,
   requireChainBackedMutation,
+  respond,
   runIdempotentMutation,
   service,
   stripIdempotencyKey,
@@ -57,6 +76,10 @@ export function createPaymentRoutes({
   return async function handlePaymentRoute({ request, response, url, pathname }) {
     if (request.method !== "POST" || pathname !== "/payments/send") {
       return false;
+    }
+    if (!paymentsSendEnabled) {
+      respond(response, 503, { reason: "payments_send_disabled" });
+      return true;
     }
 
     // Agent-to-agent transfer. Pillar 5 of docs/AGENT_BANKING.md.
