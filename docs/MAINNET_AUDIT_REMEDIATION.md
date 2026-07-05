@@ -18,10 +18,10 @@ default-config warning).
 
 | ID | Finding | Location | Owner | Status |
 |----|---------|----------|-------|--------|
-| **C-01** | Daily outflow cap defaults to `type(uint256).max` — no on-chain protection | `TreasuryPolicy.sol` ctor | Codex | ☐ open |
-| **C-02** | Slashed treasury portion recorded but never transferred → funds trapped in AAC | `AgentAccountCore.sol` `slashJobStake`/`slashClaimFee` | Codex | ☐ open |
-| **C-03** | AAC must be `serviceOperator` or **all slashing reverts** (silent deploy dependency) | `TreasuryPolicy.sol` `recordOutflow` | Codex | ☐ open |
-| **C-18** | `workerClaimCount` never decrements → workers permanently penalized for timeouts | `EscrowCore.sol` `handleClaimTimeout` | Codex | ☐ open |
+| **C-01** | Daily outflow cap defaults to `type(uint256).max` — no on-chain protection | `TreasuryPolicy.sol` ctor | Codex | ✅ remediated → **audit-2 H-1** (breaker re-implemented, #717/#718, merged); re-verify pending. ⛔ do **not** arm a finite cap until the split-role/cap-exempt slash follow-on lands |
+| **C-02** | Slashed treasury portion recorded but never transferred → funds trapped in AAC | `AgentAccountCore.sol` `slashJobStake`/`slashClaimFee` | Codex | ✅ remediated → **audit-2 H-2** (owner-settable treasury sink, #718, merged); re-verify pending |
+| **C-03** | AAC must be `serviceOperator` or **all slashing reverts** (silent deploy dependency) | `TreasuryPolicy.sol` `recordOutflow` | Codex | ✅ remediated → **audit-2 L-2** (role-split + deploy-finalization asserts `outflowRecorder(AAC)`, #724, merged); re-verify pending |
+| **C-18** | `workerClaimCount` never decrements → workers permanently penalized for timeouts | `EscrowCore.sol` `handleClaimTimeout` | Codex | ⬜ **OPEN** → reclassified **audit-2 L-3** (severity downgraded High→Low); the underflow-guarded decrement in `handleClaimTimeout` is **not yet implemented** |
 | **B-01** | Auto-verifier triggers settlement in-process, bypassing JWT auth | `submitted-job-auto-verifier.js` | Claude | ✅ **this PR** |
 | **B-11** | Autonomous verdict ingestion has no auth | `verification-ingestion-service.js` | Claude | ✅ **this PR** |
 | **D-01** | Long-lived 1Password service-account tokens (4) | `deploy/secrets-inventory.md`, `docs/SECRETS_CALENDAR.yml`, `scripts/ops/rotate-sa-token.mjs` | Pascal/infra | 🟢 SMOKE + CI re-rotated at **env scope** + repo shadows **deleted**, scope-verified 2026-06-30 ✓. Old tokens revoked + 7 duplicate service accounts pruned (13→6, one SA per role) 2026-06-30. Tails: confirm keepers survived the prune (next consuming run / canary 1P-load) · Events-API monitoring. |

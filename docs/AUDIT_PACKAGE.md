@@ -16,9 +16,20 @@ mainnet real funds.
   autonomous money-movement surface the audit must cover — see invariants 13–14
   and the settlement/claim money layer in scope below.
 - Mainnet real-funds readiness is not complete.
-- External audit is still open.
-- Native XCM/vDOT/yield is deferred unless explicitly added to a separate audit
-  engagement.
+- **Audit posture (2026-07-04):** a solo external auditor delivered **Conditional
+  Mainnet Approval** on 2026-06-30 (0 Critical · 7 High · 12 Medium · 14 Low · 18 Info;
+  core escrow/settlement + KMS signing praised). A subsequent deeper internal
+  multi-agent contract audit on 2026-07-02 found **0 Critical · 2 High · 8 Medium ·
+  15 Low · 5 Info** ([`docs/MAINNET_AUDIT_2_REMEDIATION.md`](./MAINNET_AUDIT_2_REMEDIATION.md)).
+  **Every finding from both passes is remediated in code and MERGED to `main`** (see the
+  Pre-Audit / audit-2 sections below), and the contract Critical on the money path
+  (MAIN-006 `sendToAgentFor`) is closed by #688. The remaining gate is: **freeze the
+  build → external-auditor re-verification of the merged remediations → deploy.** No
+  remediated contract has been deployed to a live chain yet (testnet is mid–V1→V2
+  migration); the fixes are Foundry/CI-green only.
+- Native XCM/vDOT/yield is deferred: the adapters/wrapper are audited but XCM
+  settlement stays **disabled** for mainnet until native observer correlation is live
+  (unless explicitly added to a separate engagement).
 
 Before engaging an auditor, freeze an audit candidate with the checked helper:
 
@@ -78,6 +89,49 @@ surface):
 `missing-zero-address-validation`) — no critical static red flags. Static analysis does **not**
 cover logic/economic bugs: the Critical above was invisible to it. Reproduce with
 `pip install slither-analyzer && slither .` from the repo root.
+
+### Audit-2 — deeper contract audit (2026-07-02), all findings remediated + merged
+
+A second, deeper adversarial multi-agent contract pass (line-by-line, on-chain Solidity
+only, ~6.3k LoC) landed **0 Critical · 2 High · 8 Medium · 15 Low · 5 Info** — verdict
+Medium-High, mainnet gated on remediation. Core escrow/settlement was re-affirmed solid
+(idempotent 2-layer settlement, exemplary EIP-712, correct ReentrancyGuard/SafeTransfer).
+The full finding table, reconciliation with audit-1 (C-01→H-1, C-02→H-2, C-03→L-2,
+C-18→L-3, C-13→M-6, C-17→M-2, C-09→L-5), and per-item disposition are in
+[`docs/MAINNET_AUDIT_2_REMEDIATION.md`](./MAINNET_AUDIT_2_REMEDIATION.md).
+
+**Every audit-2 finding is remediated in code and MERGED to `main`** — please **verify,
+do not assume** (fresh code + new attack surface, not yet deployed or re-verified):
+
+- **H-1 (launch-critical, supersedes C-01)** — the daily-outflow breaker was metering
+  internal book-moves, not real egress. Re-implemented to meter real egress only
+  (`withdraw`, external-recipient strategy-withdraw, transferred slash legs), per-account/day,
+  non-halting. #717 + #718. **⛔ A finite `DAILY_OUTFLOW_CAP` must NOT be armed** until the
+  split-role / cap-exempt slash follow-on is also live.
+- **H-2 (= C-02)** — slashed treasury portions were `recordOutflow`'d but never transferred
+  (trapped). Now credit an owner-settable in-contract `treasuryAccount`, fail-closed while
+  unset, recoverable via metered `withdraw`. #718.
+- **M-1..M-8** — debt-aware reserve guards (#719); escrow timeout economics: half-reward
+  timeout payout, zero-milestone revert, re-scoped claim stake (#720); XCM/strategy: M-4
+  queue-time-caller finalize + settlement bounds, M-5 on-chain-derived shares / capped
+  withdraw, M-6 paused-refund path, M-7 no silent adapter re-point (#721).
+- **Role-split** — the single overloaded `serviceOperators` role split into five
+  least-privilege roles (`settlementBroker` / `agentTransferBroker` / `strategySettler` /
+  `reputationWriter` / `outflowRecorder`); `strategySettler` stays ungranted while XCM is off.
+  #724 (contract) + #726 (backend) + #727 (ops). **Split roles must land before any finite cap.**
+- **L-6** — `XcmWrapper.queueRequest` now decodes the SCALE XCM payload and binds
+  withdrawn-asset / amount / deposit-beneficiary to the on-chain `RequestContext` (not just
+  `SetTopic`); wire shape is lockstep with the backend builder. #728 + #729. Backend settlement
+  correlate (BigInt precision + the M-5 ratio preflight): #730. **Enablement gate:** a real
+  staging-xcm-encoder differential + one live testnet `queueRequest` dispatch before XCM is enabled.
+- Backend M-4 ABI realignment (#722), gas-fee buffer + ED-safe funding (#725).
+
+**Money-path Critical (MAIN-006, `sendToAgentFor`) — closed by #688:** the transfer relay now
+requires a per-user **EIP-712** authorization (signature = authorization → kills the
+operator-drain; `(from, nonce)` replay guard → kills the double-debit), preserving the
+brokered/gas-sponsored model. Merged. Residual before live use: **deploy the artifact**, have
+payment clients sign the `SendToAgent` payload, and (optional defensive belt) gate
+`POST /payments/send` behind a `paymentsSendEnabled` flag (default off) until deployed.
 
 ## Audit Outcomes Required
 
