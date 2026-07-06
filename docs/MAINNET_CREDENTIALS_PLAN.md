@@ -51,7 +51,7 @@ enforced by `check-mainnet-env-secrets-proof.mjs` and recorded in
 
 | # | Credential | Custody | Why fresh |
 |---|---|---|---|
-| F1 | **Owner multisig — 3 fresh hardware-backed signer seeds (2-of-3)** → SS58 mapped to H160 `OWNER` | Hot (password mgr), Warm (paper, separate location), Cold (Ledger 24-word + steel). Seeds NEVER in 1Password/CI/VPS. | Proof: `roleSigners.owner.kind=multisig_mapped_evm`, `hardwareBackedSignerCount>=2`, `freshMainnetKey`, `reusedTestnetKey=false`. Testnet multisig is bounded-risk / not reusable. |
+| F1 | **Owner multisig — 3 fresh hardware-backed signer seeds (2-of-3)** → SS58 mapped to H160 `OWNER` | **All 3 = a dedicated Ledger + its own steel backup plate**, tiered by **access/location** (Hot = readily accessible · Warm = separate secured location · Cold = deep offline storage), **not** hardware-vs-software — no password-manager/software signer. Each plate stored apart from its device and the other two. Seeds NEVER in 1Password/CI/VPS; throwaway software seeds are rehearsal/health-check only, never a real signatory. | Proof: `roleSigners.owner.kind=multisig_mapped_evm`, `hardwareBackedSignerCount>=2` (all 3 hardware ⇒ honest for every signing pair), `freshMainnetKey`, `reusedTestnetKey=false`. Testnet multisig is bounded-risk / not reusable. |
 | F2 | **Blockchain-signer KMS key** (secp256k1) → derives the on-chain verifier + serviceOperator address | AWS KMS HSM (non-exportable); access via IAM Roles Anywhere SA on the VPS. No human holds the key. | Proof: `kms.blockchainSigner.keySpec=ECC_SECG_P256K1`, `multiRegion=true`, `rolesAnywhere=true`, `staticAccessKeysRendered=false`. **Multi-region is irreversible at creation.** |
 | F3 | **JWT-signer KMS key** (P-256, ES256) → `AWS_JWT_KEY_ID` + `JWT_PUBLIC_KEY_PEM_BASE64` + `JWT_PUBLIC_KEY_FINGERPRINT` | AWS KMS HSM; distinct IAM principal/profile from F2 (key separation). | Proof: `kms.jwtSigner.keySpec=ECC_NIST_P256`, `multiRegion`, `rolesAnywhere`, `publicKeyPemBase64Present`, `publicKeyFingerprint=sha256:…`. PEM/fingerprint are key-derived ⇒ fresh by dependency. |
 | F4 | **Burnable mainnet deployer key** → `PRIVATE_KEY` | One-shot operator EOA; optional time-boxed `op://…critical` break-glass item; deleted post-launch. | Must deploy from audited artifacts; transfers ownership to F1 as its last act, then retired. |
@@ -234,12 +234,22 @@ must be set at creation (irreversible).
 
 ### Decided (2026-07-05) — the 6 open calls are now made
 
-1. **Multisig sub-detail** — **ONE operator**, holding all 3 hardware-backed 2-of-3
-   seeds distributed **Hot** (password manager) / **Warm** (paper, separate location) /
-   **Cold** (Ledger 24-word + steel). One YubiKey set (×6 accounts); no shared-account
-   enrollment.
-2. **Cold-signer hardware** — **Ledger** (24-word + steel backup) for the cold seed.
-   Verify/migrate **registrar FIDO2** pre-mainnet (highest blast radius if absent).
+1. **Multisig sub-detail** — **ONE operator**, holding all 3 of the 2-of-3 seeds, **each on
+   its own dedicated Ledger + its own steel backup plate**. Tier by **access/location** —
+   **Hot** (readily accessible for routine ceremonies) / **Warm** (separate secured location) /
+   **Cold** (deep offline storage) — **not** by hardware-vs-software; no signer lives in a
+   password manager or software wallet. *(Refined 2026-07-06 — supersedes the earlier
+   Hot=password-manager / Warm=paper framing; all three are now hardware, so every 2-of-3
+   signing pair is honestly hardware-backed.)* Hardware **MFA** is a separate mechanism: **one
+   YubiKey pair — a primary + a backup, each enrolled across all 6 admin-trust accounts** (not
+   six keys); no shared-account enrollment.
+2. **Signer hardware** — **Ledger for all three signers** (24-word seed, each with its own
+   steel backup plate stored apart from its device). Rehearse the ceremony mechanics with
+   **quarantined throwaway seeds** against a *separate* throwaway multisig — never the
+   production owner set, never `map_account`'d to the real `OWNER`. Verify/migrate **registrar
+   FIDO2** pre-mainnet (highest blast radius if absent). *(Chain mechanics — the Ledger
+   app/signing curve for the OWNER signatories and `map_account` on the keyless multisig
+   account — are Codex-owned; see [`MULTISIG_SETUP.md`](./MULTISIG_SETUP.md).)*
 3. **Roles Anywhere CA-key custody** — **1Password Critical ($0)**, human-only item; no
    SA reads it. Cert cadence reconciled to **90-day** (PHASE_5A) — supersede the calendar's
    7-day.

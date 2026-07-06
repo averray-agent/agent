@@ -31,7 +31,7 @@ cap" (audit-1 C-01) is not, by itself, a valid mitigation.
 | 1 | **Book the audit firm**; freeze audited artifacts (`prepare-mainnet-audit-freeze.mjs`) | Pascal | Scheduling lead time is the bottleneck — book before anything else. |
 | 2 | **Resolve MAIN-006** before the freeze (see below) | Codex | Known double-debit ships at v1; must not be in the audited build. |
 | 3 | **Make the 5 open decisions** (`MAINNET_CREDENTIALS_PLAN` §5.2) | Pascal | Calls, not work — they unblock the parallel tracks. |
-| 4 | **Order / enroll hardware**: 3 multisig signers + Ledger + YubiKeys ×6 | Pascal | Procurement lead time; fully parallel to the audit. |
+| 4 | **Order / enroll hardware**: 3× Ledger (one per 2-of-3 signer) + 3 steel backup plates + a YubiKey pair (primary + backup, each enrolled across the 6 admin-trust accounts) | Pascal | Procurement lead time; fully parallel to the audit. |
 
 ## Parallel track — while the audit runs (zero audit dependency)
 
