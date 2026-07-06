@@ -15,6 +15,16 @@ interface VmEvent {
     function expectEmit(bool checkTopic1, bool checkTopic2, bool checkTopic3, bool checkData, address emitter) external;
 }
 
+contract EscrowCoreHarness is EscrowCore {
+    constructor(TreasuryPolicy policy_, AgentAccountCore accounts_, ReputationSBT reputation_)
+        EscrowCore(policy_, accounts_, reputation_)
+    {}
+
+    function restoreTimedOutClaimSlotForTest(address worker) external {
+        _restoreTimedOutClaimSlot(worker);
+    }
+}
+
 contract AgentPlatformTest is Test {
     VmEvent internal constant vmEvent = VmEvent(address(uint160(uint256(keccak256("hevm cheat code")))));
 
@@ -48,7 +58,7 @@ contract AgentPlatformTest is Test {
         registry = new StrategyAdapterRegistry(policy);
         accounts = new AgentAccountCore(policy, registry);
         reputation = new ReputationSBT(policy);
-        escrow = new EscrowCore(policy, accounts, reputation);
+        escrow = new EscrowCoreHarness(policy, accounts, reputation);
         dot = new MockERC20("Mock DOT", "mDOT");
 
         policy.setApprovedAsset(address(dot), true);
@@ -621,6 +631,83 @@ contract AgentPlatformTest is Test {
         assertEq(workerJobStake, 3.5 ether);
     }
 
+    function testClaimTimeoutRestoresWaiverSlotForNextEligibleClaim() public {
+        policy.setOnboardingWaiverClaimCount(1);
+
+        bytes32 timedOutJobId = keccak256("job/onboarding/timeout-slot");
+        vm.prank(poster);
+        escrow.createSinglePayoutJob(
+            timedOutJobId, address(dot), 50 ether, 0, 0, 1 days, bytes32("AUTO"), bytes32("DATA"), SPEC_HASH
+        );
+        escrow.setOnboardingWaiverEligible(timedOutJobId, true);
+
+        vm.prank(worker);
+        escrow.claimJob(timedOutJobId);
+
+        EscrowCore.JobEscrow memory timedOutClaim = escrow.jobs(timedOutJobId);
+        assertEq(escrow.workerClaimCount(worker), 1);
+        require(timedOutClaim.claimEconomicsWaived, "EXPECTED_FIRST_WAIVER");
+
+        vm.warp(block.timestamp + 2 days);
+        escrow.handleClaimTimeout(timedOutJobId);
+
+        assertEq(escrow.workerClaimCount(worker), 0);
+        assertEq(escrow.workerClaimCount(address(0)), 0);
+
+        bytes32 nextJobId = keccak256("job/onboarding/slot-returned");
+        vm.prank(poster);
+        escrow.createSinglePayoutJob(
+            nextJobId, address(dot), 50 ether, 0, 0, 1 days, bytes32("AUTO"), bytes32("DATA"), SPEC_HASH
+        );
+        escrow.setOnboardingWaiverEligible(nextJobId, true);
+
+        vm.prank(worker);
+        escrow.claimJob(nextJobId);
+
+        EscrowCore.JobEscrow memory nextClaim = escrow.jobs(nextJobId);
+        assertEq(escrow.workerClaimCount(worker), 1);
+        assertEq(nextClaim.claimStake, 0);
+        assertEq(nextClaim.claimFee, 0);
+        require(nextClaim.claimEconomicsWaived, "EXPECTED_RETURNED_WAIVER");
+    }
+
+    function testClaimTimeoutRestoresNonWaivedCountButKeepsSlashPenalty() public {
+        policy.setOnboardingWaiverClaimCount(1);
+
+        bytes32 jobId = keccak256("job/onboarding/non-waived-timeout");
+        vm.prank(poster);
+        escrow.createSinglePayoutJob(
+            jobId, address(dot), 50 ether, 0, 0, 1 days, bytes32("AUTO"), bytes32("DATA"), SPEC_HASH
+        );
+
+        uint256 posterBalanceBefore = dot.balanceOf(poster);
+
+        vm.prank(worker);
+        escrow.claimJob(jobId);
+
+        EscrowCore.JobEscrow memory claimedJob = escrow.jobs(jobId);
+        (,,,, uint256 workerJobStakeBefore,) = accounts.positions(worker, address(dot));
+        assertEq(escrow.workerClaimCount(worker), 1);
+        require(!claimedJob.claimEconomicsWaived, "EXPECTED_NO_WAIVER");
+        assertEq(workerJobStakeBefore, 2.5 ether);
+
+        vm.warp(block.timestamp + 2 days);
+        escrow.handleClaimTimeout(jobId);
+
+        (,,,, uint256 workerJobStakeAfter,) = accounts.positions(worker, address(dot));
+        (uint256 treasuryLiquid,,,,,) = accounts.positions(treasury, address(dot));
+
+        assertEq(escrow.workerClaimCount(worker), 0);
+        assertEq(workerJobStakeAfter, 0);
+        assertEq(dot.balanceOf(poster), posterBalanceBefore + 1.25 ether);
+        assertEq(treasuryLiquid, 1.25 ether);
+    }
+
+    function testTimedOutClaimSlotRestoreGuardDoesNotUnderflow() public {
+        EscrowCoreHarness(address(escrow)).restoreTimedOutClaimSlotForTest(worker);
+        assertEq(escrow.workerClaimCount(worker), 0);
+    }
+
     function testOnlyOperatorCanMarkOnboardingWaiverEligibility() public {
         bytes32 jobId = keccak256("job/onboarding/operator-only");
         vm.prank(poster);
@@ -1012,6 +1099,7 @@ contract AgentPlatformTest is Test {
 
         vm.prank(worker);
         escrow.claimJob(jobId);
+        assertEq(escrow.workerClaimCount(worker), 1);
 
         vm.prank(worker);
         escrow.submitWork(jobId, keccak256("rejected-work"));
@@ -1038,6 +1126,7 @@ contract AgentPlatformTest is Test {
         assertEq(dot.balanceOf(poster), posterBalanceBefore + 1.25 ether);
         assertEq(skillAfter, 90);
         assertEq(reliabilityAfter, 80);
+        assertEq(escrow.workerClaimCount(worker), 1);
     }
 
     function testRejectedJobCannotBeFinalizedAfterDisputeOpenedAndDoesNotSlashEarly() public {
@@ -1102,6 +1191,7 @@ contract AgentPlatformTest is Test {
 
         vm.prank(worker);
         escrow.claimJob(jobId);
+        assertEq(escrow.workerClaimCount(worker), 1);
 
         vm.prank(worker);
         escrow.submitWork(jobId, keccak256("contested-work"));
@@ -1125,6 +1215,7 @@ contract AgentPlatformTest is Test {
         assertEq(dot.balanceOf(poster), posterBalanceBefore + 1.25 ether);
         assertEq(skillAfter, 70);
         assertEq(reliabilityAfter, 50);
+        assertEq(escrow.workerClaimCount(worker), 1);
     }
 
     function testAutoResolveOnTimeoutRejectsBeforeArbitratorSla() public {
