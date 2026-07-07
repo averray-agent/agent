@@ -56,7 +56,7 @@ function okOperatorClient(overrides = {}) {
             enabled: true,
             settlementReady: true,
             roles: {
-              escrowIsServiceOperator: true,
+              signerIsSettlementBroker: true,
               escrowIsAgentAccountEscrowOperator: true,
               escrowAgentAccountMatchesConfig: true
             },
@@ -258,10 +258,18 @@ test("operator readiness fails loud if the operator token lacks a required capab
 test("operator readiness fails loud if the escrow service-operator broker is disabled (#627 regressed)", async () => {
   const operatorClient = okOperatorClient({
     async getAdminStatus() {
-      return { maintenance: { policy: { enabled: true, settlementReady: true, roles: { escrowIsServiceOperator: false } } } };
+      return { maintenance: { policy: { enabled: true, settlementReady: true, roles: { signerIsSettlementBroker: false } } } };
     }
   });
-  await assert.rejects(() => runFull({ operatorClient }), /service operator/u);
+  await assert.rejects(() => runFull({ operatorClient }), /settlement broker/u);
+});
+
+test("operator readiness accepts the post-#724 signer settlement broker role", async () => {
+  const readiness = await assertOperatorReady(okOperatorClient(), {
+    rewardRaw: REWARD_RAW,
+    rewardAssetSymbol: "USDC"
+  });
+  assert.equal(readiness.signerIsSettlementBroker, true);
 });
 
 test("operator readiness fails before job creation when EscrowCore points at a different AgentAccountCore", async () => {
@@ -273,7 +281,7 @@ test("operator readiness fails before job creation when EscrowCore points at a d
             enabled: true,
             settlementReady: false,
             roles: {
-              escrowIsServiceOperator: true,
+              signerIsSettlementBroker: true,
               escrowIsAgentAccountEscrowOperator: true,
               escrowAgentAccountMatchesConfig: false
             },
@@ -302,7 +310,7 @@ test("operator readiness fails before job creation when signer reward bank is sh
             enabled: true,
             settlementReady: true,
             roles: {
-              escrowIsServiceOperator: true,
+              signerIsSettlementBroker: true,
               escrowIsAgentAccountEscrowOperator: true,
               escrowAgentAccountMatchesConfig: true
             },

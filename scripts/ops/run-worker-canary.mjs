@@ -628,9 +628,11 @@ export async function assertOperatorReady(operatorPlatform, { rewardRaw = undefi
         "Brokered claim/submit/settle cannot complete."
     );
   }
-  if (policy.roles?.escrowIsServiceOperator !== true) {
+  const signerIsSettlementBroker =
+    policy.roles?.signerIsSettlementBroker === true || policy.roles?.escrowIsServiceOperator === true;
+  if (!signerIsSettlementBroker) {
     throw new Error(
-      "Operator readiness FAILED: the backend signer is not a registered EscrowCore service operator, so the " +
+      "Operator readiness FAILED: the backend signer is not approved as a TreasuryPolicy settlement broker, so the " +
         "brokered claimJobFor/submitWorkFor path is disabled. (This is what #627 + the EscrowCore redeploy fixed.)"
     );
   }
@@ -681,6 +683,7 @@ export async function assertOperatorReady(operatorPlatform, { rewardRaw = undefi
   return {
     capabilities: REQUIRED_OPERATOR_CAPABILITIES,
     settlementReady: true,
+    signerIsSettlementBroker: true,
     escrowIsServiceOperator: true,
     escrowIsAgentAccountEscrowOperator: true,
     escrowAgentAccountMatchesConfig: policy.roles?.escrowAgentAccountMatchesConfig,
