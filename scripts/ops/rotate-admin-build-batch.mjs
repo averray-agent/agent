@@ -24,7 +24,7 @@ import { Interface } from "ethers";
 
 const WS = process.env.PASEO_AH_WS || "wss://asset-hub-paseo-rpc.dwellir.com";
 
-const TREASURY_POLICY = "0x648Cc5fdE94435992296C4e5ac642d18bB64c12B";
+const TREASURY_POLICY = "0xE0b8170137f03F90d681451a97C68A9EAf85e4A7";
 const NEW_ADMIN = "0x6778F050eAc8313e4dbB176d7BAB44510E833ac8";
 const OLD_ADMIN = "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519";
 

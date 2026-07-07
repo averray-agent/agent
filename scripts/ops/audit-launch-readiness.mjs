@@ -126,6 +126,7 @@ const WRITE_ABI = [
   "function setReputationWriter(address writer, bool approved)",
   "function setOutflowRecorder(address recorder, bool approved)",
   "function setEscrowOperator(address escrowOperator, bool approved)",
+  "function setTreasuryAccount(address treasuryAccount)",
   "function setTrustedSchemaIssuer(address issuer, bool approved)",
   "function setArbitrator(address arbitrator, bool approved)",
   "function setApprovedAsset(address asset, bool approved)",
@@ -135,6 +136,7 @@ const WRITE_ABI = [
 
 const AGENT_ACCOUNT_READ_ABI = [
   "function escrowOperators(address escrowOperator) view returns (bool)",
+  "function treasuryAccount() view returns (address)",
   // Matches the AssetPosition struct in contracts/AgentAccountCore.sol: the
   // auto-generated getter returns the six fields in declaration order. We
   // only consume `liquid` (the first slot), but ethers v6 demands the full
@@ -381,6 +383,7 @@ async function main() {
   const expectedArbitrator = deployments.arbitrator;
   const expectedOwner = deployments.owner;
   const expectedPauser = deployments.pauser;
+  const expectedTreasuryAccount = deployments.treasuryAccount ?? deployments.treasuryReserve ?? deployments.owner;
   const expectedParameters = deployments.parameters ?? {};
   const configuredSchemaIssuers = Array.isArray(deployments.trustedSchemaIssuers)
     ? deployments.trustedSchemaIssuers
@@ -424,6 +427,7 @@ async function main() {
     escrowIsSettlementBroker,
     escrowIsReputationWriter,
     escrowIsAgentAccountEscrowOperator,
+    treasuryAccount,
     agentAccountIsOutflowRecorder,
     arbitratorIsApproved,
     usdcIsApproved,
@@ -449,6 +453,7 @@ async function main() {
     policy.settlementBroker(escrowAddress),
     policy.reputationWriter(escrowAddress),
     agentAccount.escrowOperators(escrowAddress),
+    agentAccount.treasuryAccount(),
     policy.outflowRecorder(agentAccountAddress),
     policy.arbitrators(expectedArbitrator),
     policy.approvedAssets(usdcAddress),
@@ -546,6 +551,7 @@ async function main() {
   console.log(`settlementBroker(escrow)               ${escrowIsSettlementBroker ? "✅" : "❌"}  ${escrowIsSettlementBroker}  (EscrowCore brokers AgentAccountCore.reserve/allocate)`);
   console.log(`reputationWriter(escrow)               ${escrowIsReputationWriter ? "✅" : "❌"}  ${escrowIsReputationWriter}  (EscrowCore writes ReputationSBT during settlement)`);
   console.log(`AgentAccountCore.escrowOperators(escrow) ${escrowIsAgentAccountEscrowOperator ? "✅" : "❌"}  ${escrowIsAgentAccountEscrowOperator}`);
+  console.log(`AgentAccountCore.treasuryAccount       ${ciEqual(treasuryAccount, expectedTreasuryAccount) ? "✅" : "❌"}  ${treasuryAccount}  (expected ${expectedTreasuryAccount})`);
   console.log(`outflowRecorder(agentAccount)          ${agentAccountIsOutflowRecorder ? "✅" : "❌"}  ${agentAccountIsOutflowRecorder}  (required for TreasuryPolicy.recordOutflow accounting)`);
   console.log(`arbitrators(${short(expectedArbitrator)})  ${arbitratorIsApproved ? "✅" : "❌"}  ${arbitratorIsApproved}  (required for resolveDispute)`);
   console.log(`approvedAssets(USDC)             ${usdcIsApproved ? "✅" : "❌"}  ${usdcIsApproved}`);
@@ -681,6 +687,9 @@ async function main() {
   }
   if (!escrowIsAgentAccountEscrowOperator) {
     fixes.push(buildCall("setEscrowOperator", [escrowAddress, true], agentAccountAddress));
+  }
+  if (!ciEqual(treasuryAccount, expectedTreasuryAccount)) {
+    fixes.push(buildCall("setTreasuryAccount", [expectedTreasuryAccount], agentAccountAddress));
   }
   if (!agentAccountIsOutflowRecorder) {
     // AgentAccountCore meters TreasuryPolicy.recordOutflow under the
