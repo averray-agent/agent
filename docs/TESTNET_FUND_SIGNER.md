@@ -366,7 +366,7 @@ first `Submit Transaction`, otherwise the spinner times out at
 |---|---|---|
 | `assetConversion.InvalidAssetPair` | Asset reference doesn't match a registered pool | Verify path entries match the canonical XCM locations. Most often Trap 1. |
 | `assetConversion.PoolNotFound` | Pool exists but pair lookup canonicalizes differently | Same as above — check Trap 1 |
-| `Token expired.` (in hosted worker loop) | `ADMIN_JWT` GitHub secret expired | Rotate the secret. Sign in to the operator app, copy the JWT from local-storage, `gh secret set ADMIN_JWT --body 'eyJ…'` |
+| `Token expired.` (in hosted worker loop) | The admin JWT at `op://prod-smoke/admin-jwt/password` expired | Re-mint with `scripts/ops/mint-admin-jwt.mjs --wallet <old-sub> --roles admin,verifier --use-kms`, then `op item edit admin-jwt --vault prod-smoke "password=$NEW_JWT"` — there is no `ADMIN_JWT` GitHub secret any more. Full runbook: [`SECRETS.md`](SECRETS.md) § `ADMIN_JWT` |
 | `execution reverted (unknown custom error)` with revert data `0x90b8ec18` | `SafeTransfer.TransferFailed` — Trap 4 | Bump `PRODUCT_PROOF_REWARD_AMOUNT` so reward ≥ minBalance after decimals scaling |
 | `OUT_OF_MEMORY(65)` PVM panic | Calling an unknown selector on the precompile (e.g. `mint()` on a real USDC precompile) | The precompile only implements `transfer/transferFrom/approve/allowance/balanceOf/totalSupply`. Use `safeTransferFrom` for funds movement, never `mint` |
 | `InsufficientLiquidityError: USDC is a trust_backed settlement asset and cannot be auto-minted` | PR #213's auto-mint guard caught a path that tried to call `MockERC20.mint` on a real precompile | Pre-fund the signer (this doc) and don't add custom assets without setting `assetClass: "custom"` |
