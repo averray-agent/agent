@@ -519,13 +519,15 @@ contract EscrowCore is ReentrancyGuard {
         JobEscrow storage job = _jobs[jobId];
         if (job.state != JobState.Claimed) revert InvalidState();
         require(block.timestamp > job.claimExpiry, "NOT_EXPIRED");
+        address timedOutWorker = job.worker;
 
         if (job.claimStake > 0) {
-            accounts.slashJobStake(job.worker, job.asset, job.claimStake, job.poster);
+            accounts.slashJobStake(timedOutWorker, job.asset, job.claimStake, job.poster);
         }
         if (job.claimFee > 0) {
-            accounts.slashClaimFee(job.worker, job.asset, job.claimFee, address(0));
+            accounts.slashClaimFee(timedOutWorker, job.asset, job.claimFee, address(0));
         }
+        _restoreTimedOutClaimSlot(timedOutWorker);
 
         job.worker = address(0);
         job.claimExpiry = 0;
@@ -891,6 +893,15 @@ contract EscrowCore is ReentrancyGuard {
         job.claimFeeBps = 0;
         job.claimEconomicsWaived = false;
         job.rejectingVerifier = address(0);
+    }
+
+    function _restoreTimedOutClaimSlot(address worker) internal {
+        uint256 claimCount = workerClaimCount[worker];
+        if (claimCount > 0) {
+            unchecked {
+                workerClaimCount[worker] = claimCount - 1;
+            }
+        }
     }
 
     function _slashRejectedWorker(JobEscrow storage job) internal {
