@@ -19,6 +19,11 @@ Use it together with:
 
 ## Signer roles
 
+> **All three signers are dedicated Ledger hardware wallets** — the private key
+> never leaves the secure element. The A/B/C split below is an **access/location**
+> tier (how reachable each device is), **not** hardware-vs-software: none of the
+> three is a browser-extension or software wallet.
+
 ### Signer A — primary operator
 
 Purpose:
@@ -28,9 +33,9 @@ Purpose:
 
 Requirements:
 
-- dedicated wallet account
-- browser profile used only for crypto operations
-- separate seed backup from all other signers
+- dedicated Ledger hardware wallet (secure element; key never exported)
+- device used only for treasury signing
+- separate steel seed backup, stored apart from the device and from all other signers
 
 ### Signer B — second core signer
 
@@ -54,8 +59,8 @@ Purpose:
 
 Requirements:
 
-- hardware-backed if possible
-- not used for normal day-to-day browsing
+- hardware-backed (Ledger) — required, as for all three signers
+- kept in deep offline storage; not reached for routine ceremonies
 - strongest backup discipline of the three
 
 ---
@@ -66,8 +71,9 @@ Requirements:
 - no signer may share a recovery phrase with another signer
 - no two signers should live on the same device
 - backups must not be stored in the same location
-- at least one signer should be recoverable without relying on a browser
-  extension-only environment
+- each steel backup plate lives apart from its own device (never together)
+- no signer is a browser-extension or software-only key — all three are Ledger
+  hardware wallets
 
 If these are not true, the multisig may look distributed while still being a
 single point of failure in practice.
@@ -92,9 +98,10 @@ Do not move meaningful funds until this checklist is complete.
 ## Daily operating rules
 
 - use the multisig only for actions that justify shared approval
-- keep signer devices updated
-- use a dedicated browser profile for wallet actions
-- verify destination addresses and calldata before approval
+- keep signer devices (Ledger firmware) updated; drive signing from a dedicated,
+  clean machine/browser profile — the key stays on the device either way
+- always confirm the destination address and calldata **on the Ledger screen**
+  itself before approving (never trust only the host display)
 - document important approvals in an operator note or internal log
 
 For any unusual transaction:
@@ -128,7 +135,8 @@ Do not do these:
 
 - one person controlling all signers as a permanent setup
 - storing all recovery phrases in one password manager entry
-- keeping all signers in one browser profile
+- provisioning any signer as a browser-extension or software wallet (all three must be Ledger hardware)
+- storing a steel backup plate next to the device it backs
 - skipping a real test transaction before funding the vault
 - using the treasury multisig as a convenience wallet for every small action
 

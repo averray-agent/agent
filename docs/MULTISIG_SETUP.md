@@ -20,43 +20,81 @@ Decisions that frame everything below:
   Required for all admin ops on `TreasuryPolicy` (and therefore the stack).
 - **Pauser** (single hot key): 1-key EOA with one capability — `setPaused`.
   The fastest escape hatch; safe because pause only freezes, never moves funds.
-- **Recovery**: cold key stored offline (hardware wallet + steel-backup seed).
-  Lose any one key and the other two still satisfy the 2-of-3 threshold.
+- **Recovery**: **all three keys are Ledger hardware wallets**, each with its own
+  steel-backup seed plate stored offline in a separate location. Lose any one
+  key (device **and** its plate) and the other two still satisfy the 2-of-3
+  threshold.
 
 ---
 
 ## 2. Generate the three signer keys
 
-Create each key on its own device to keep the keys truly independent.
+**All three signers are dedicated Ledger hardware wallets** — one device per
+key, each on its own 24-word seed with its own steel backup plate. The private
+key never leaves the secure element, so there is no software/hot signer to steal
+online. The Hot / Warm / Cold labels are **access/location tiers, not
+hardware-vs-software**: the security floor is identical (all secure-element);
+what differs is how reachable each device is and how far apart the devices and
+their plates live.
 
-### Key A — Hot (daily-driver)
+> **Chain detail (Codex-owned):** the Ledger app / signing curve the `OWNER`
+> signatories use, and how `pallet_revive.map_account()` binds the **keyless**
+> 2-of-3 multisig account to the H160 `OWNER`, are confirmed by Codex before the
+> ceremony — a wrong owner **bricks the contract**. Do not improvise the curve or
+> the mapping call. (The secp256k1 KMS key in the credentials plan is the
+> *backend* signer, **not** these OWNER signers.)
 
-1. Install the [Polkadot.js browser extension](https://polkadot.js.org/extension/).
-2. "Add account" → generate → write the 12-word seed into a password manager
-   or a sealed envelope you control.
-3. Name it "averray-hot" so it's obvious in the signing UI.
+Buy the three Ledgers **sealed, direct from the vendor**; verify genuineness on
+first boot and pin firmware. Initialize each on an offline machine.
 
-### Key B — Warm (separate device)
+### Key A — Hot (readily accessible)
 
-1. On a phone you don't browse the web with, install
-   [Nova Wallet](https://novawallet.io) or [SubWallet](https://subwallet.app).
-2. Create a new account; record the seed on paper + store in a different
-   location from Key A's seed.
+1. Initialize a dedicated Ledger; set a PIN. Derive the OWNER signer account.
+2. Stamp the device's 24-word seed onto its **own steel plate**; store the plate
+   **apart from the device** (never next to it).
+3. Name the account "averray-hot" so it's obvious in the signing UI. This is the
+   device you reach for routine 2-of-3 ceremonies (Hot + one other).
+
+### Key B — Warm (separate secured location)
+
+1. Initialize a **second** dedicated Ledger; set a **different** PIN. Derive the
+   OWNER signer account.
+2. Stamp its 24-word seed onto a **separate steel plate**; store device + plate
+   in a secured location distinct from Key A's.
 3. Name it "averray-warm".
 
-### Key C — Cold (Ledger + steel backup)
+### Key C — Cold (deep offline storage)
 
-1. On a Ledger device install the Polkadot app.
-2. Derive a new account. The seed is the Ledger's own 24-word recovery seed
-   — stamp it on a metal backup plate (Cryptosteel / Billfodl) and store in
-   a bank safe deposit box **or** a split-knowledge arrangement.
+1. Initialize a **third** dedicated Ledger; set a **different** PIN. Derive the
+   OWNER signer account.
+2. Stamp its 24-word seed onto a **third steel plate** (stainless/titanium —
+   Cryptosteel / Billfodl are examples, not the only option); store the device
+   and the plate in deep storage (e.g. a bank safe-deposit box or a
+   split-knowledge arrangement), in a third distinct location.
 3. Name the account "averray-cold".
+
+**Steel-backup rules (all three):** one plate per signer; **no two signers ever
+share a plate**; each plate lives in a different location from **both** its own
+Ledger **and** the other two plates+devices; the plate is not labeled with what
+it controls; any BIP39 passphrase (25th word) is stored separately from the
+plate, never stamped on it. The three device PINs are themselves secrets — never
+store a PIN next to its device or its plate.
+
+**Rehearsal:** to practice the `asMulti` ceremony, `map_account`, and the health
+checks, use **quarantined throwaway seeds** against a **separate throwaway
+multisig** on testnet / a local fork. A throwaway address must **never** be added
+as a signatory of the real OWNER multisig or `map_account`'d to the real `OWNER`,
+and never funded with real value. Rehearsal proves the runbook; it does not
+replace the one real ceremony on the real devices.
 
 Sanity checks before moving on:
 
+- [ ] All three signers are on **separate Ledger devices**, each with a different PIN.
 - [ ] All three addresses are recorded in a secure note you can read offline.
 - [ ] You can sign a dummy transaction with each key independently.
-- [ ] No two keys share a device or a seed backup location.
+- [ ] Three steel plates, one per signer — no two keys share a device or a plate.
+- [ ] Every device and every plate is in a distinct location; no plate sits with
+      its own device.
 
 ---
 
@@ -475,7 +513,7 @@ value movement regardless of owner compromise.
 
 ## 8. Checklist before tagging v1.0.0-rc2
 
-- [ ] All three keys generated, backups stored in distinct locations.
+- [ ] All three Ledger signers generated; three steel backup plates, one per signer, stored in distinct locations (each apart from its device).
 - [x] Multisig address computed + EVM-mapped form recorded.
 - [x] Testnet deploy transferred ownership to the multisig.
 - [x] `verify_deployment.sh testnet` passes cleanly.

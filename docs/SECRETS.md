@@ -31,7 +31,7 @@ never holds the private bytes in memory.
 | GitHub Actions | 9 | repo settings → secrets | synced from 1Password via `op` CLI |
 | VPS backend env (`/srv/agent-stack/backend.env`) | ~40 | plain-text on disk | rendered at deploy from 1Password via `op inject` |
 | VPS indexer env (`/srv/agent-stack/indexer.env`) | 3 | plain-text on disk | same as backend |
-| Local-machine / human passwords (deployer key, signer seeds, SSH passphrases) | ~7 | personal password manager + Ledger | 1Password Business shared vault (where applicable) + hardware wallet (signers) |
+| Local-machine / human passwords (deployer key, signer seeds, SSH passphrases) | ~7 | personal password manager + Ledgers | 1Password Business shared vault (where applicable) + 3× Ledger hardware wallet + steel plates (all multisig signers) |
 | External service tokens (Pimlico, Sentry, GitHub PAT, Subscan, alert webhook, RPC provider) | ~8 | mixed (vendor portals + VPS env) | 1Password Business shared vault |
 | **Cryptographic signing key** (`SIGNER_PRIVATE_KEY`) | 1 | plain-text in VPS env | **AWS KMS asymmetric secp256k1 key** (private bytes never exported) |
 
@@ -188,10 +188,11 @@ Loaded by `mcp-server/src/services/bootstrap.js`. Today rendered by
 
 ### D. Local-machine / human-managed
 
-Today: deployer's personal password manager + Ledger + (in some cases)
+Today: deployer's personal password manager + Ledgers + (in some cases)
 shell history. Target: same vault structure as the platform (1Password
 Business shared `Averray/Operators/<role>` vaults), except for the three
-hardware-wallet seeds which stay on hardware by design.
+multisig signer seeds, which stay on **dedicated Ledger hardware wallets**
+(each with its own steel backup plate) by design — never in a vault.
 
 | Role | Secret | Where it lives today | Where it should live |
 |---|---|---|---|
@@ -199,9 +200,9 @@ hardware-wallet seeds which stay on hardware by design.
 | Deployer | `OWNER_KEY` for `rotate_pauser.sh` | Local env | 1Password vault; mainnet path uses multisig instead of EOA |
 | Operator | `APP_BASIC_AUTH_PASSWORD` | Local password manager | 1Password vault item, rendered by `op inject` |
 | Operator | SSH key passphrase | gpg-agent / SSH agent | Same |
-| Multisig signer A (hot) | Polkadot.js extension seed | Browser extension + offline backup | Same — **do not move to 1Password** |
-| Multisig signer B (warm) | Nova Wallet / SubWallet seed | Mobile wallet + paper backup | Same — **do not move to 1Password** |
-| Multisig signer C (cold) | Ledger recovery seed | Cryptosteel / sealed envelope | Same — **do not move to 1Password** |
+| Multisig signer A (hot-tier) | Ledger 24-word seed | Ledger device + its own steel backup plate | Same — **do not move to 1Password** |
+| Multisig signer B (warm-tier) | Ledger 24-word seed | Second Ledger + its own steel backup plate (separate location) | Same — **do not move to 1Password** |
+| Multisig signer C (cold-tier) | Ledger 24-word seed | Third Ledger + its own steel backup plate (deep storage) | Same — **do not move to 1Password** |
 
 Rule: **multisig signer seeds never go into a centralized vault**. The
 whole point of multisig is independent compromise paths; co-locating the
