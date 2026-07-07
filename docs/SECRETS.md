@@ -108,7 +108,7 @@ would mean a compromised CI service-account token could read a
 credential that operators use to authenticate — a real privilege
 escalation against the operator UI. Keep raw passwords out of any
 vault a service-account can read.
-| `ADMIN_JWT` | Long-lived JWT | Hosted product-proof smoke + ops scripts | Deployer | On expiry (was 30d, expired today) | Backend admin role |
+| `ADMIN_JWT` | Long-lived JWT (30d mints) at `op://prod-smoke/admin-jwt` | Hosted product-proof smoke + ops scripts | Deployer | On expiry (calendar-tracked) | Backend admin role |
 | `RESEND_API_KEY` | Optional email API key | Branded email self-report / alert emails if enabled | Deployer | On vendor rotation | Optional branded email delivery |
 
 ### B. VPS backend env (`/srv/agent-stack/backend.env`)
@@ -322,17 +322,22 @@ Phase 4b (`SECRETS_INTEGRATION_PLAN.md`) replaces this with
 short-lived JWTs minted per-run from a CI OIDC → KMS path, after
 which this entry retires.
 
-**Mint with the script** (current procedure):
+**Mint with the script** (current procedure — ES256 via the JWT KMS
+key; the backend refuses HS256 tokens since Stage 2C-2 flipped
+`JWT_BACKEND=kms`):
 ```bash
-NEW_JWT=$(AUTH_JWT_SECRETS=$(op read "op://prod-backend/auth-jwt-secrets/password") \
-  node scripts/ops/mint-admin-jwt.mjs --profile testnet --roles admin,verifier --expires-in-days 30 --quiet)
+# KMS env for --use-kms (reads op://prod-backend/aws-jwt-signer-testnet):
+# see OPERATOR_ONBOARDING.md §5.4 for the export block.
+NEW_JWT=$(node scripts/ops/mint-admin-jwt.mjs \
+  --wallet <old-sub> --roles admin,verifier --expires-in-days 30 --use-kms --quiet)
 
-# Store in 1Password (canonical home, used by Phase 2 PR 2.5 onward):
-op item create --vault=prod-smoke --category=password --title=admin-jwt \
-  "password=$NEW_JWT" \
-  "notes=Long-lived (30d) admin JWT. TRANSITIONAL until Phase 4b."
-# OR, during the transition window, also update the GH Actions secret:
-printf '%s' "$NEW_JWT" | gh secret set ADMIN_JWT -R averray-agent/agent
+# Update the existing 1Password item — the SINGLE rotation target.
+# (item-name + --vault flag; using the op:// URI as the item name
+# silently no-ops):
+op item edit admin-jwt --vault prod-smoke "password=$NEW_JWT"
+
+# Round-trip verify (expect {"alg":"ES256",...}):
+op read 'op://prod-smoke/admin-jwt/password' | awk -F. '{print $1}' | base64 --decode
 
 unset NEW_JWT
 ```
@@ -345,27 +350,31 @@ Notes:
   SIWE sign-in; see `mcp-server/src/auth/middleware.js` `enforceRole` →
   `hasRole`). Omitting `--roles` mints an admin-only token that 403s on
   `/verifier/*`.
-- `--profile testnet` — the current production system runs against
-  Polkadot Hub TestNet, so the mint script reads the wallet from
-  `deployments/testnet.json` (`verifier ?? deployer`). Note
-  `testnet.json#verifier` is the **KMS signer** `0x31ad…ab7F`, so the
-  token's `sub` becomes the signer, not the admin EOA — harmless for
-  access (authorization is role-based, above), but pass
-  `--wallet 0x6778F050eAc8313e4dbB176d7BAB44510E833ac8` if you want the
-  token identity to be the admin EOA. After Phase 5 cutover provisions
-  `deployments/mainnet.json`, this becomes `--profile mainnet`.
-  (Earlier v3 doc drafts said `--profile production`, which doesn't
-  match a real profile file — corrected in Phase 2 PR 2.1.)
+- `--wallet <old-sub>` — pass the `sub` of the token currently stored
+  at `op://prod-smoke/admin-jwt/password` (decode its payload to
+  check) so rotation preserves the token identity. Do NOT use
+  `--profile testnet`: it re-derives the wallet from
+  `deployments/testnet.json` (`verifier ?? deployer` — the **KMS
+  signer** `0x31ad…ab7F`), silently changing `sub`. Access itself is
+  role-based (previous bullet), but the token identity should stay
+  the admin EOA `0x6778F050eAc8313e4dbB176d7BAB44510E833ac8`.
 - The op:// paths use the **flat** vault names (`prod-backend`,
   `prod-smoke`) committed in Phase 1, not the aspirational hierarchical
   `op://Averray/Production/...` scheme from the original plan docs.
-- Both the GH Actions secret (`ADMIN_JWT`) and the 1Password item
-  (`prod-smoke/admin-jwt`) must agree until PR 2.5 wires the smoke
-  workflow to read from 1Password exclusively.
+- There is no `ADMIN_JWT` GitHub Actions secret any more (repo or env
+  scope). Phase 2 PR 2.8b removed the `secrets.ADMIN_JWT` binding from
+  `deploy-production.yml`; every consuming workflow
+  (deploy-production, hosted-worker-canary, hosted-service-token-proof,
+  hosted-external-schema-proof, hosted-dispute-verdict-proof) loads
+  the token from `op://prod-smoke/admin-jwt/password` via
+  `1password/load-secrets-action`. Updating the 1Password item is the
+  whole rotation — a `gh secret set ADMIN_JWT` would write a secret
+  nothing reads.
 
-**Rotate**: Mint a new one with the script before the old expires.
-Add a [`SECRETS_CALENDAR.yml`](SECRETS_CALENDAR.yml) entry so CI warns
-you ~7 days out.
+**Rotate**: Mint a new one with the script before the old expires,
+update the 1Password item, then bump the entry's `expires_at` in
+[`SECRETS_CALENDAR.yml`](SECRETS_CALENDAR.yml) so CI warns you ~7 days
+out.
 
 ### `SIGNER_PRIVATE_KEY` (backend signer)
 
@@ -472,7 +481,7 @@ per-phase checks lives in
 
 | Script | Does | When to use |
 |---|---|---|
-| `scripts/ops/mint-admin-jwt.mjs` | Offline mint of admin JWTs | Rotating `ADMIN_JWT` GitHub secret |
+| `scripts/ops/mint-admin-jwt.mjs` | Offline mint of admin JWTs | Rotating the `op://prod-smoke/admin-jwt` 1Password item |
 | `scripts/ops/check-secrets-calendar.mjs` | Reads `SECRETS_CALENDAR.yml`, fails CI if any token expires within 7 days | Run on every CI build to catch drift before tokens die in production |
 | `scripts/ops/audit-launch-readiness.mjs` | Reads on-chain TreasuryPolicy state | Pre-mainnet check; complements but doesn't overlap with this doc |
 | `scripts/ops/fund-signer-usdc-deposit.mjs` | Approve + deposit USDC into AgentAccountCore | Funding flow only; see [`TESTNET_FUND_SIGNER.md`](TESTNET_FUND_SIGNER.md) |
