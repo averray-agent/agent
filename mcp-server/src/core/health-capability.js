@@ -345,6 +345,7 @@ export function resolveHealthAddresses({
   env = process.env
 } = {}) {
   const contracts = deploymentManifest?.contracts ?? {};
+  const token = firstPresent(contracts.token, firstSupportedAssetAddress(env));
   const treasuryReserve = firstPresent(
     deploymentManifest?.treasuryReserve,
     deploymentManifest?.opsReserve,
@@ -353,10 +354,14 @@ export function resolveHealthAddresses({
   );
 
   return compactPlainObject({
-    token: contracts.token,
-    agentAccountCore: contracts.agentAccountCore,
-    escrowCore: contracts.escrowCore,
-    settlementSigner: deploymentManifest?.verifier,
+    token,
+    agentAccountCore: firstPresent(contracts.agentAccountCore, env.AGENT_ACCOUNT_ADDRESS),
+    escrowCore: firstPresent(contracts.escrowCore, env.ESCROW_CORE_ADDRESS),
+    settlementSigner: firstPresent(
+      deploymentManifest?.verifier,
+      env.SIGNER_ADDRESS,
+      env.SIGNER_ADDRESS_OVERRIDE
+    ),
     treasuryReserve
   });
 }
@@ -490,10 +495,47 @@ async function resolveSettlementHealth({ stateStore, now, limit, stuckAfterMs })
 }
 
 function loadTestnetDeploymentManifest() {
-  if (!deploymentManifestCache) {
-    deploymentManifestCache = JSON.parse(readFileSync(TESTNET_DEPLOYMENT_MANIFEST_URL, "utf8"));
+  if (deploymentManifestCache !== undefined) {
+    return deploymentManifestCache;
   }
+
+  deploymentManifestCache = loadDeploymentManifestFromUrl(TESTNET_DEPLOYMENT_MANIFEST_URL);
   return deploymentManifestCache;
+}
+
+export function loadDeploymentManifestFromUrl(url) {
+  try {
+    return JSON.parse(readFileSync(url, "utf8"));
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      throw error;
+    }
+    return null;
+  }
+}
+
+function firstSupportedAssetAddress(env = process.env) {
+  const rawJson = env.SUPPORTED_ASSETS_JSON?.trim();
+  if (rawJson) {
+    try {
+      const assets = JSON.parse(rawJson);
+      if (Array.isArray(assets)) {
+        const preferred = assets.find((asset) => String(asset?.symbol ?? "").toUpperCase() === "USDC")
+          ?? assets.find((asset) => typeof asset?.address === "string" && asset.address.trim());
+        return preferred?.address;
+      }
+    } catch {
+      return undefined;
+    }
+  }
+
+  const legacy = env.SUPPORTED_ASSETS?.split(",")
+    .map((entry) => entry.trim())
+    .find(Boolean);
+  if (!legacy) {
+    return undefined;
+  }
+  return legacy.split(":")[1]?.trim();
 }
 
 function settlementReceiptKeysForSession(session) {

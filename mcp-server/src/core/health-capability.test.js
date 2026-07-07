@@ -10,6 +10,7 @@ import {
   buildProductHealthSnapshot,
   buildCapabilityWarnings,
   createProductHealthSnapshotProvider,
+  loadDeploymentManifestFromUrl,
   resolveCapabilityHealth,
   resolveHealthAddresses,
   resolveServiceHealth
@@ -260,6 +261,35 @@ test("resolveHealthAddresses exposes monitor addresses without logic-only Treasu
     treasuryReserve: "0x6778F050eAc8313e4dbB176d7BAB44510E833ac8"
   });
   assert.equal(Object.hasOwn(addresses, "treasuryPolicy"), false);
+});
+
+test("resolveHealthAddresses falls back to runtime env when manifest is absent", () => {
+  const addresses = resolveHealthAddresses({
+    deploymentManifest: null,
+    env: {
+      AGENT_ACCOUNT_ADDRESS: "0x510918E24DEbcA163F306923CA234319e72b22d5",
+      ESCROW_CORE_ADDRESS: "0xfE841c2dc58E4389b1AB59E3e42F9EB12A694Bea",
+      SIGNER_ADDRESS: "0x31ad432dFe083B998c69B6dB88A984ec5207ab7F",
+      SUPPORTED_ASSETS_JSON: JSON.stringify([{
+        symbol: "USDC",
+        address: "0x0000053900000000000000000000000001200000"
+      }]),
+      USDC_LIQUIDITY_TREASURY_RESERVE_ACCOUNT: "0x1f8c4da4aaac79916350f1fabf1221309591b6f9"
+    }
+  });
+
+  assert.deepEqual(addresses, {
+    token: "0x0000053900000000000000000000000001200000",
+    agentAccountCore: "0x510918E24DEbcA163F306923CA234319e72b22d5",
+    escrowCore: "0xfE841c2dc58E4389b1AB59E3e42F9EB12A694Bea",
+    settlementSigner: "0x31ad432dFe083B998c69B6dB88A984ec5207ab7F",
+    treasuryReserve: "0x1f8c4da4aaac79916350f1fabf1221309591b6f9"
+  });
+});
+
+test("loadDeploymentManifestFromUrl treats a missing manifest as optional", () => {
+  const manifest = loadDeploymentManifestFromUrl(new URL("./fixtures/missing-testnet-manifest.json", import.meta.url));
+  assert.equal(manifest, null);
 });
 
 test("buildProductHealthSnapshot reports reward bank and Redis settlement counters", async () => {
