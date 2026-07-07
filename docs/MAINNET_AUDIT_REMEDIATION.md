@@ -28,6 +28,8 @@ default-config warning).
 
 ## Medium (12) — should fix before mainnet
 
+> The 7 Highs are the mainnet gate; these Mediums are *should-fix / optionally-before-mainnet* per the auditor's own path. **The open (`☐`) items are acceptable deferrals for a capped launch** (verified 2026-07-07): `C-04`/`C-05` (defense-in-depth `nonReentrant`), `C-09` (XCM ledger expiry — also audit-2 `L-5`), `C-12` (upper bound on `minimumCollateralRatioBps`), `C-15` (zero-reward *single-payout* guard; the *milestone* variant is already fixed via audit-2 `M-3`). Merged: `B-02`/`D-02` (#711), `B-03` (#712), `B-04` (#714), `E-17` (#713), `D-03` (#706).
+
 | ID | Finding | Owner | Status |
 |----|---------|-------|--------|
 | C-04 | `sendToAgent` lacks `nonReentrant` (defense-in-depth) | Codex | ☐ |

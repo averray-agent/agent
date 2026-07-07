@@ -21,9 +21,13 @@ mainnet real funds.
   core escrow/settlement + KMS signing praised). A subsequent deeper internal
   multi-agent contract audit on 2026-07-02 found **0 Critical · 2 High · 8 Medium ·
   15 Low · 5 Info** ([`docs/MAINNET_AUDIT_2_REMEDIATION.md`](./MAINNET_AUDIT_2_REMEDIATION.md)).
-  **Every finding from both passes is remediated in code and MERGED to `main`** (see the
-  Pre-Audit / audit-2 sections below), and the contract Critical on the money path
-  (MAIN-006 `sendToAgentFor`) is closed by #688. The remaining gate is: **freeze the
+  **Every Critical and High from both passes — and every audit-2 Medium — is remediated and
+  MERGED to `main`** (see the Pre-Audit / audit-2 sections below), and the contract Critical on
+  the money path (MAIN-006 `sendToAgentFor`) is closed by #688. A lower-severity residue is
+  intentionally **open as acceptable deferrals** for a capped launch — none on the Critical/High
+  gate: audit-1 Mediums `C-04/C-05/C-09/C-12/C-15` (defense-in-depth guards + parameter bounds)
+  and audit-2 Lows `L-4/L-5/L-10/L-11/L-13/L-14/L-15` + Info `I-4`; `L-1` (finite-cap arming) and
+  `L-12` (lending finish-or-remove) are deferred by decision. The remaining gate is: **freeze the
   build → external-auditor re-verification of the merged remediations → deploy.** No
   remediated contract has been deployed to a live chain yet (testnet is mid–V1→V2
   migration); the fixes are Foundry/CI-green only.
@@ -90,7 +94,7 @@ surface):
 cover logic/economic bugs: the Critical above was invisible to it. Reproduce with
 `pip install slither-analyzer && slither .` from the repo root.
 
-### Audit-2 — deeper contract audit (2026-07-02), all findings remediated + merged
+### Audit-2 — deeper contract audit (2026-07-02): all High + Medium remediated + merged; a set of Lows deferred
 
 A second, deeper adversarial multi-agent contract pass (line-by-line, on-chain Solidity
 only, ~6.3k LoC) landed **0 Critical · 2 High · 8 Medium · 15 Low · 5 Info** — verdict
@@ -100,8 +104,11 @@ The full finding table, reconciliation with audit-1 (C-01→H-1, C-02→H-2, C-0
 C-18→L-3, C-13→M-6, C-17→M-2, C-09→L-5), and per-item disposition are in
 [`docs/MAINNET_AUDIT_2_REMEDIATION.md`](./MAINNET_AUDIT_2_REMEDIATION.md).
 
-**Every audit-2 finding is remediated in code and MERGED to `main`** — please **verify,
-do not assume** (fresh code + new attack surface, not yet deployed or re-verified):
+**Every audit-2 High + Medium is remediated in code and MERGED to `main`** (both Highs H-1/H-2,
+all eight Mediums M-1…M-8, plus Lows L-2/L-3/L-6/L-7/L-8/L-9 and Info I-5) — please **verify,
+do not assume** (fresh code + new attack surface, not yet deployed or re-verified). The remaining
+Lows `L-4/L-5/L-10/L-11/L-13/L-14/L-15` + Info `I-4` are **open, acceptable deferrals** for a
+capped launch; `L-1` (finite-cap arming) and `L-12` (lending) are deferred by decision:
 
 - **H-1 (launch-critical, supersedes C-01)** — the daily-outflow breaker was metering
   internal book-moves, not real egress. Re-implemented to meter real egress only
