@@ -3,7 +3,7 @@
 import { JsonRpcProvider, Contract } from "ethers";
 
 const RPC = process.env.RPC_URL || "https://eth-rpc-testnet.polkadot.io/";
-const POLICY = "0x648Cc5fdE94435992296C4e5ac642d18bB64c12B";
+const POLICY = "0xE0b8170137f03F90d681451a97C68A9EAf85e4A7";
 const ABI = [
   "function owner() view returns (address)",
   "function pauser() view returns (address)",

@@ -1,20 +1,21 @@
 {
   "profile": "testnet",
   "rpcUrl": "https://eth-rpc-testnet.polkadot.io/",
-  "deployedAt": "2026-05-08T16:42:04Z",
+  "deployedAt": "2026-07-07T09:55:54Z",
   "deployer": "0x6778F050eAc8313e4dbB176d7BAB44510E833ac8",
   "owner": "0x1f8c4da4aaac79916350f1fabf1221309591b6f9",
   "pauser": "0x6778F050eAc8313e4dbB176d7BAB44510E833ac8",
   "verifier": "0x31ad432dFe083B998c69B6dB88A984ec5207ab7F",
   "arbitrator": "0x6778F050eAc8313e4dbB176d7BAB44510E833ac8",
-  "treasuryReserve": "0x6778F050eAc8313e4dbB176d7BAB44510E833ac8",
+  "treasuryAccount": "0x1f8c4da4aaac79916350f1fabf1221309591b6f9",
+  "treasuryReserve": "0x1f8c4da4aaac79916350f1fabf1221309591b6f9",
   "contracts": {
-    "treasuryPolicy": "0x648Cc5fdE94435992296C4e5ac642d18bB64c12B",
-    "strategyAdapterRegistry": "0x9F12547FD782664ADbe0FC19c3CCd3dD4837B0eB",
-    "agentAccountCore": "0x71B111d8c9DF84Be26cb9067D27dAd7A2d5E7e08",
-    "reputationSbt": "0x68Db90db715Be59E5800Bea08c058E4CFd88e27c",
-    "discoveryRegistry": "0x0a1b78F8A2A3C28dB47f35Cb3E6b3b83412dad57",
-    "escrowCore": "0x70d661C3A5DdE64bB8cbFa0A5336470c1662eFCa",
+    "treasuryPolicy": "0xE0b8170137f03F90d681451a97C68A9EAf85e4A7",
+    "strategyAdapterRegistry": "0x892E88839933026b76934b0284b229437dD97189",
+    "agentAccountCore": "0x510918E24DEbcA163F306923CA234319e72b22d5",
+    "reputationSbt": "0x307bAEa6A05b7136fd94252cB9B6331Ab724C63B",
+    "discoveryRegistry": "0xef1EC161DFce8bCaf2Be6270286706ae123444Bc",
+    "escrowCore": "0xfE841c2dc58E4389b1AB59E3e42F9EB12A694Bea",
     "xcmWrapper": null,
     "token": "0x0000053900000000000000000000000001200000"
   },
@@ -32,11 +33,5 @@
     "disputeLossSkillPenalty": "35",
     "disputeLossReliabilityPenalty": "60"
   },
-  "strategies": [],
-  "escrowRedeployedAt": "2026-06-13T17:54:27.996Z",
-  "escrowRedeployTxHashes": {
-    "deploy": "0xfa8a100ea824ab264d11553d073650bb6382701dde8c0ba84c14c1f4428fa6a3",
-    "multisigExec": "0xa88a157a13668e1e7c55e3bc0c0995f38807931efeb5005c6444de9cc34781d6",
-    "revokeOld": "batched-in-multisig-exec"
-  }
+  "strategies": []
 }
