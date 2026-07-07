@@ -468,7 +468,7 @@ export AWS_JWT_ACCESS_KEY_ID=$(op read 'op://prod-backend/aws-jwt-signer-testnet
 export AWS_JWT_SECRET_ACCESS_KEY=$(op read 'op://prod-backend/aws-jwt-signer-testnet/secret-access-key')
 export JWT_PUBLIC_KEY_PEM=$(op read 'op://prod-backend/aws-jwt-signer-testnet/public-key-pem')
 
-NEW_JWT=$(node scripts/ops/mint-admin-jwt.mjs --profile testnet --roles admin --expires-in-days 30 --use-kms --quiet)
+NEW_JWT=$(node scripts/ops/mint-admin-jwt.mjs --wallet 0x6778F050eAc8313e4dbB176d7BAB44510E833ac8 --roles admin,verifier --expires-in-days 30 --use-kms --quiet)
 
 # Sanity check the new token is ES256 before writing
 echo "$NEW_JWT" | awk -F. '{print $1}' | base64 --decode 2>/dev/null
