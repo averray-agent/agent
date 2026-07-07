@@ -29,6 +29,7 @@
 #   PAUSER                  hot-key pauser EOA          (defaults to deployer)
 #   VERIFIER                backend verifier signer EOA (defaults to deployer on dev)
 #   ARBITRATOR              arbitrator EOA              (defaults to deployer on dev)
+#   TREASURY_ACCOUNT        AAC treasury sink            (defaults to OWNER; required for mainnet)
 #   DOT_NAME / DOT_SYMBOL   mock token name (dev only)
 #   *_BPS / *_CAP / *_PENALTY  policy params (defaults retained from v1;
 #                              see docs/MAINNET_PARAMETERS.md for the
@@ -148,6 +149,7 @@ if [[ "$PROFILE" == "mainnet" ]]; then
   [[ -n "${PAUSER:-}" ]] || fail "PAUSER is required for mainnet"
   [[ -n "${VERIFIER:-}" ]] || fail "VERIFIER is required for mainnet"
   [[ -n "${ARBITRATOR:-}" ]] || fail "ARBITRATOR is required for mainnet"
+  [[ -n "${TREASURY_ACCOUNT:-}" ]] || fail "TREASURY_ACCOUNT is required for mainnet"
   [[ "${TOKEN_ADDRESS,,}" == "${USDC_PRECOMPILE_ADDRESS,,}" ]] || \
     fail "mainnet TOKEN_ADDRESS must be the v1 USDC precompile $USDC_PRECOMPILE_ADDRESS"
   [[ -n "$RAW_DAILY_OUTFLOW_CAP" ]] || fail "DAILY_OUTFLOW_CAP must be set explicitly for mainnet"
@@ -177,6 +179,7 @@ OWNER_ADDRESS="${OWNER:-$DEPLOYER_ADDRESS}"
 PAUSER_ADDRESS="${PAUSER:-$DEPLOYER_ADDRESS}"
 VERIFIER_ADDRESS="${VERIFIER:-$DEPLOYER_ADDRESS}"
 ARBITRATOR_ADDRESS="${ARBITRATOR:-$DEPLOYER_ADDRESS}"
+TREASURY_ACCOUNT_ADDRESS="${TREASURY_ACCOUNT:-$OWNER_ADDRESS}"
 
 extract_address() {
   echo "$1" | awk '/Deployed to:/ { print $3 }'
@@ -242,13 +245,15 @@ fi
 
 echo "Configuring TreasuryPolicy"
 send_tx "$TREASURY_POLICY" "setApprovedAsset(address,bool)" "$TOKEN_ADDRESS" true
-send_tx "$TREASURY_POLICY" "setServiceOperator(address,bool)" "$AGENT_ACCOUNT" true
-send_tx "$TREASURY_POLICY" "setServiceOperator(address,bool)" "$ESCROW_CORE" true
+send_tx "$TREASURY_POLICY" "setOutflowRecorder(address,bool)" "$AGENT_ACCOUNT" true
+send_tx "$TREASURY_POLICY" "setSettlementBroker(address,bool)" "$ESCROW_CORE" true
+send_tx "$TREASURY_POLICY" "setReputationWriter(address,bool)" "$ESCROW_CORE" true
 send_tx "$AGENT_ACCOUNT" "setEscrowOperator(address,bool)" "$ESCROW_CORE" true
-if [[ -n "$XCM_WRAPPER" ]]; then
-  send_tx "$TREASURY_POLICY" "setServiceOperator(address,bool)" "$XCM_WRAPPER" true
-fi
+send_tx "$AGENT_ACCOUNT" "setTreasuryAccount(address)" "$TREASURY_ACCOUNT_ADDRESS"
 send_tx "$TREASURY_POLICY" "setVerifier(address,bool)" "$VERIFIER_ADDRESS" true
+send_tx "$TREASURY_POLICY" "setSettlementBroker(address,bool)" "$VERIFIER_ADDRESS" true
+send_tx "$TREASURY_POLICY" "setAgentTransferBroker(address,bool)" "$VERIFIER_ADDRESS" true
+send_tx "$TREASURY_POLICY" "setReputationWriter(address,bool)" "$VERIFIER_ADDRESS" true
 send_tx "$TREASURY_POLICY" "setArbitrator(address,bool)" "$ARBITRATOR_ADDRESS" true
 send_tx "$TREASURY_POLICY" "setDailyOutflowCap(uint256)" "$DAILY_OUTFLOW_CAP"
 send_tx "$TREASURY_POLICY" "setPerAccountBorrowCap(uint256)" "$BORROW_CAP"
@@ -280,12 +285,11 @@ if [[ "${WITH_VDOT_MOCK:-}" == "1" ]]; then
   echo "Deploying MockVDotAdapter"
   VDOT_ADAPTER="$(extract_address "$(forge_deploy contracts/strategies/MockVDotAdapter.sol:MockVDotAdapter --constructor-args "$TREASURY_POLICY" "$TOKEN_ADDRESS" "$VDOT_STRATEGY_ID")")"
   echo "MockVDotAdapter:         $VDOT_ADAPTER"
-  # The adapter must be a service operator so AgentAccountCore (a future
-  # wiring PR) can route allocateIdleFunds → adapter.deposit calls through
-  # policy-gated paths. Also mark it as an approved strategy so the
-  # registry accepts it.
+  # AgentAccountCore is the caller into the sync adapter, and the adapter gates
+  # deposit/withdraw behind the strategySettler role. Mark the adapter as an
+  # approved strategy so the registry accepts it.
   send_tx "$TREASURY_POLICY" "setApprovedStrategy(address,bool)" "$VDOT_ADAPTER" true
-  send_tx "$TREASURY_POLICY" "setServiceOperator(address,bool)" "$VDOT_ADAPTER" true
+  send_tx "$TREASURY_POLICY" "setStrategySettler(address,bool)" "$AGENT_ACCOUNT" true
   send_tx "$STRATEGY_REGISTRY" "registerStrategy(address)" "$VDOT_ADAPTER"
 fi
 
@@ -296,7 +300,8 @@ if [[ "${WITH_XCM_VDOT_ADAPTER:-}" == "1" ]]; then
   VDOT_ADAPTER="$(extract_address "$(forge_deploy contracts/strategies/XcmVdotAdapter.sol:XcmVdotAdapter --constructor-args "$TREASURY_POLICY" "$TOKEN_ADDRESS" "$VDOT_STRATEGY_ID" "$XCM_WRAPPER")")"
   echo "XcmVdotAdapter:          $VDOT_ADAPTER"
   send_tx "$TREASURY_POLICY" "setApprovedStrategy(address,bool)" "$VDOT_ADAPTER" true
-  send_tx "$TREASURY_POLICY" "setServiceOperator(address,bool)" "$VDOT_ADAPTER" true
+  send_tx "$TREASURY_POLICY" "setStrategySettler(address,bool)" "$AGENT_ACCOUNT" true
+  send_tx "$TREASURY_POLICY" "setStrategySettler(address,bool)" "$VDOT_ADAPTER" true
   send_tx "$STRATEGY_REGISTRY" "registerStrategy(address)" "$VDOT_ADAPTER"
 fi
 
@@ -360,6 +365,8 @@ cat > "$manifest_path" <<JSON
   "pauser": "$PAUSER_ADDRESS",
   "verifier": "$VERIFIER_ADDRESS",
   "arbitrator": "$ARBITRATOR_ADDRESS",
+  "treasuryAccount": "$TREASURY_ACCOUNT_ADDRESS",
+  "treasuryReserve": "$TREASURY_ACCOUNT_ADDRESS",
   "contracts": {
     "treasuryPolicy": "$TREASURY_POLICY",
     "strategyAdapterRegistry": "$STRATEGY_REGISTRY",

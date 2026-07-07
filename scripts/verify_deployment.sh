@@ -8,8 +8,12 @@
 #   - optional deployments/<profile>-multisig-owner.json matches owner
 #   - optional owner record finality when --require-owner-record-final is set
 #   - TreasuryPolicy.pauser() matches the expected pauser hot-key
+#   - AgentAccountCore.treasuryAccount() matches the expected treasury sink
 #   - TreasuryPolicy.verifiers(VERIFIER) and TreasuryPolicy.arbitrators(ARBITRATOR) are true
-#   - TreasuryPolicy.serviceOperators({escrow,account}) are true
+#   - TreasuryPolicy split roles are wired:
+#       * settlementBroker(VERIFIER) + agentTransferBroker(VERIFIER) + reputationWriter(VERIFIER)
+#       * settlementBroker(EscrowCore) + reputationWriter(EscrowCore)
+#       * outflowRecorder(AgentAccountCore)
 #   - AgentAccountCore.escrowOperators(escrow) is true
 #   - TreasuryPolicy.approvedAssets(TOKEN) is true
 #   - TreasuryPolicy is NOT paused (unless --allow-paused is set)
@@ -61,6 +65,7 @@ EXPECTED_OWNER="$(echo "$manifest" | jq -r '.owner')"
 EXPECTED_PAUSER="$(echo "$manifest" | jq -r '.pauser')"
 EXPECTED_VERIFIER="$(echo "$manifest" | jq -r '.verifier')"
 EXPECTED_ARBITRATOR="$(echo "$manifest" | jq -r '.arbitrator')"
+EXPECTED_TREASURY_ACCOUNT="$(echo "$manifest" | jq -r '.treasuryAccount // .treasuryReserve // .owner')"
 TREASURY_POLICY="$(echo "$manifest" | jq -r '.contracts.treasuryPolicy')"
 STRATEGY_REGISTRY="$(echo "$manifest" | jq -r '.contracts.strategyAdapterRegistry')"
 AGENT_ACCOUNT="$(echo "$manifest" | jq -r '.contracts.agentAccountCore')"
@@ -192,11 +197,16 @@ fi
 
 echo ""
 echo "Operator + verifier registration:"
-check_bool "serviceOperator(EscrowCore)"   "true" "$(call "$TREASURY_POLICY" "serviceOperators(address)(bool)" "$ESCROW_CORE")"
-check_bool "serviceOperator(AgentAccount)" "true" "$(call "$TREASURY_POLICY" "serviceOperators(address)(bool)" "$AGENT_ACCOUNT")"
+check_bool "settlementBroker(verifier)"    "true" "$(call "$TREASURY_POLICY" "settlementBroker(address)(bool)" "$EXPECTED_VERIFIER")"
+check_bool "agentTransferBroker(verifier)" "true" "$(call "$TREASURY_POLICY" "agentTransferBroker(address)(bool)" "$EXPECTED_VERIFIER")"
+check_bool "reputationWriter(verifier)"    "true" "$(call "$TREASURY_POLICY" "reputationWriter(address)(bool)" "$EXPECTED_VERIFIER")"
+check_bool "settlementBroker(EscrowCore)"  "true" "$(call "$TREASURY_POLICY" "settlementBroker(address)(bool)" "$ESCROW_CORE")"
+check_bool "reputationWriter(EscrowCore)"  "true" "$(call "$TREASURY_POLICY" "reputationWriter(address)(bool)" "$ESCROW_CORE")"
+check_bool "outflowRecorder(AgentAccount)" "true" "$(call "$TREASURY_POLICY" "outflowRecorder(address)(bool)" "$AGENT_ACCOUNT")"
 check_bool "agentAccountEscrowOperator(EscrowCore)" "true" "$(call "$AGENT_ACCOUNT" "escrowOperators(address)(bool)" "$ESCROW_CORE")"
+check "agentAccount treasuryAccount" "$EXPECTED_TREASURY_ACCOUNT" "$(call "$AGENT_ACCOUNT" "treasuryAccount()(address)")"
 if [[ -n "$XCM_WRAPPER" ]]; then
-  check_bool "serviceOperator(XcmWrapper)" "true" "$(call "$TREASURY_POLICY" "serviceOperators(address)(bool)" "$XCM_WRAPPER")"
+  printf "  [info] XcmWrapper configured at %s; strategySettler checks are adapter/key-specific\n" "$XCM_WRAPPER"
 fi
 check_bool "verifier"                      "true" "$(call "$TREASURY_POLICY" "verifiers(address)(bool)" "$EXPECTED_VERIFIER")"
 check "discovery publisher"                "$EXPECTED_OWNER" "$(call "$DISCOVERY_REGISTRY" "publisher()(address)")"
@@ -231,7 +241,10 @@ if [[ "$strategy_count" != "0" ]]; then
       printf "  [ok] strategy %s (%s) at %s\n" "$strategy_id" "$kind" "$adapter"
     fi
     check_bool "approvedStrategy($kind)" "true" "$(call "$TREASURY_POLICY" "approvedStrategies(address)(bool)" "$adapter")"
-    check_bool "serviceOperator($kind)" "true" "$(call "$TREASURY_POLICY" "serviceOperators(address)(bool)" "$adapter")"
+    check_bool "strategySettler(AgentAccount:$kind)" "true" "$(call "$TREASURY_POLICY" "strategySettler(address)(bool)" "$AGENT_ACCOUNT")"
+    if [[ "$kind" == "polkadot_vdot" ]]; then
+      check_bool "strategySettler($kind)" "true" "$(call "$TREASURY_POLICY" "strategySettler(address)(bool)" "$adapter")"
+    fi
   done < <(echo "$manifest" | jq -r '.strategies[] | [.strategyId, .adapter, .kind] | @tsv')
 fi
 
