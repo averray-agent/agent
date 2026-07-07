@@ -292,7 +292,8 @@ Add to 1Password as a new field; do **not** delete the old one yet.
    un-minted admin token would be rejected after Phase B):
    ```bash
    NEW_JWT=$(AUTH_JWT_SECRETS="$NEW_HEX,$OLD_HEX" \
-     node scripts/ops/mint-admin-jwt.mjs --profile testnet \
+     node scripts/ops/mint-admin-jwt.mjs \
+     --wallet 0x6778F050eAc8313e4dbB176d7BAB44510E833ac8 \
      --roles admin,verifier --expires-in-days 30 --quiet)
    op item edit admin-jwt --vault=prod-smoke "password=$NEW_JWT"
    ```
@@ -329,7 +330,8 @@ key; the backend refuses HS256 tokens since Stage 2C-2 flipped
 # KMS env for --use-kms (reads op://prod-backend/aws-jwt-signer-testnet):
 # see OPERATOR_ONBOARDING.md §5.4 for the export block.
 NEW_JWT=$(node scripts/ops/mint-admin-jwt.mjs \
-  --wallet <old-sub> --roles admin,verifier --expires-in-days 30 --use-kms --quiet)
+  --wallet 0x6778F050eAc8313e4dbB176d7BAB44510E833ac8 \
+  --roles admin,verifier --expires-in-days 30 --use-kms --quiet)
 
 # Update the existing 1Password item — the SINGLE rotation target.
 # (item-name + --vault flag; using the op:// URI as the item name
@@ -350,14 +352,15 @@ Notes:
   SIWE sign-in; see `mcp-server/src/auth/middleware.js` `enforceRole` →
   `hasRole`). Omitting `--roles` mints an admin-only token that 403s on
   `/verifier/*`.
-- `--wallet <old-sub>` — pass the `sub` of the token currently stored
-  at `op://prod-smoke/admin-jwt/password` (decode its payload to
-  check) so rotation preserves the token identity. Do NOT use
+- `--wallet 0x6778F050eAc8313e4dbB176d7BAB44510E833ac8` pins the
+  current admin EOA as the token subject. Do not preserve the old
+  `sub` if the stored token still decodes to the leaked, rotated-out
+  admin EOA `0xfd2eae2043243fddd2721c0b42af1b8284fd6519`. Do NOT use
   `--profile testnet`: it re-derives the wallet from
   `deployments/testnet.json` (`verifier ?? deployer` — the **KMS
   signer** `0x31ad…ab7F`), silently changing `sub`. Access itself is
-  role-based (previous bullet), but the token identity should stay
-  the admin EOA `0x6778F050eAc8313e4dbB176d7BAB44510E833ac8`.
+  role-based (previous bullet), but the token identity should be
+  the current admin EOA above.
 - The op:// paths use the **flat** vault names (`prod-backend`,
   `prod-smoke`) committed in Phase 1, not the aspirational hierarchical
   `op://Averray/Production/...` scheme from the original plan docs.
@@ -365,7 +368,8 @@ Notes:
   scope). Phase 2 PR 2.8b removed the `secrets.ADMIN_JWT` binding from
   `deploy-production.yml`; every consuming workflow
   (deploy-production, hosted-worker-canary, hosted-service-token-proof,
-  hosted-external-schema-proof, hosted-dispute-verdict-proof) loads
+  hosted-external-schema-proof, hosted-dispute-verdict-proof,
+  hosted-siwe-fresh-wallet-proof) loads
   the token from `op://prod-smoke/admin-jwt/password` via
   `1password/load-secrets-action`. Updating the 1Password item is the
   whole rotation — a `gh secret set ADMIN_JWT` would write a secret
