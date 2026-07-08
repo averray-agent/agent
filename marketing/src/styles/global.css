@@ -304,7 +304,7 @@ a:hover { color: var(--avy-ink); }
   padding: 18px 20px 14px;
   border-bottom: 1px solid rgba(245, 243, 238, 0.07);
 }
-.lifestep { position: relative; padding-right: 12px; }
+.lifestep { position: relative; min-width: 0; padding-right: 12px; }
 .lifestep + .lifestep { padding-left: 14px; }
 .lifestep + .lifestep::before {
   content: ""; position: absolute; left: 0; top: 9px;
@@ -315,6 +315,10 @@ a:hover { color: var(--avy-ink); }
   letter-spacing: 0.14em; text-transform: uppercase;
   color: rgba(245, 243, 238, 0.45);
   display: flex; align-items: center; gap: 6px;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .lifestep__dot {
   width: 7px; height: 7px; border-radius: 50%;
@@ -335,6 +339,22 @@ a:hover { color: var(--avy-ink); }
   background: #f4c989;
   box-shadow: 0 0 0 0 rgba(244, 201, 137, 0.7);
   animation: pulse-warm 1.2s var(--ease) infinite;
+}
+
+@media (max-width: 520px) {
+  .lifecycle {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    row-gap: 14px;
+    padding: 16px 18px 14px;
+  }
+
+  .lifestep:nth-child(odd) {
+    padding-left: 0;
+  }
+
+  .lifestep:nth-child(odd)::before {
+    display: none;
+  }
 }
 @keyframes pulse-warm {
   0%, 100% { box-shadow: 0 0 0 0 rgba(244, 201, 137, 0.55); }
