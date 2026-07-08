@@ -56,6 +56,9 @@ DEPLOY_CONTRACT_COMPAT_PROFILE=${DEPLOY_CONTRACT_COMPAT_PROFILE:-testnet}
 
 SITE_BUILD_RUNNER=${SITE_BUILD_RUNNER:-auto}
 SITE_NODE_IMAGE=${SITE_NODE_IMAGE:-node:22-bookworm-slim}
+PUBLIC_SITE_URL=${PUBLIC_SITE_URL:-https://averray.com}
+SITE_SERVE_CHECK_ATTEMPTS=${SITE_SERVE_CHECK_ATTEMPTS:-3}
+SITE_SERVE_CHECK_INTERVAL_SEC=${SITE_SERVE_CHECK_INTERVAL_SEC:-5}
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -365,6 +368,59 @@ build_site() {
     -w /workspace \
     "$SITE_NODE_IMAGE" \
     sh -lc "npm ci && npm run build:site"
+}
+
+# 2026-06-28 → 2026-07-08 marketing-staleness incident: verify that the
+# public homepage Caddy actually serves is byte-identical to the build
+# just synced into $APP_ROOT/site. Caddy serves site/ from the checkout
+# via a bind mount, so served-vs-built drift means the served directory
+# is not the one we built into (stale bind mount after a directory
+# replace, wrong Caddy root, or a cache in front). The old smoke check
+# only grepped for "<title>Averray" — a 7-week-old page passed it.
+verify_site_served() {
+  local base_url="${PUBLIC_SITE_URL%/}"
+  local entry
+  for entry in "index.html /" "console-stream.js /console-stream.js"; do
+    local file="${entry%% *}"
+    local url_path="${entry#* }"
+    local local_file="$APP_ROOT/site/$file"
+    if [[ ! -f "$local_file" ]]; then
+      echo "ERROR: built site file missing: $local_file — build:site did not produce it." >&2
+      return 1
+    fi
+
+    local want have="" attempt ok=0
+    want=$(sha256sum "$local_file" | awk '{print $1}')
+    local tmp
+    tmp=$(mktemp)
+    for (( attempt=1; attempt<=SITE_SERVE_CHECK_ATTEMPTS; attempt++ )); do
+      if curl -fsS --max-time 10 -H 'Cache-Control: no-cache' -o "$tmp" "$base_url$url_path"; then
+        have=$(sha256sum "$tmp" | awk '{print $1}')
+        if [[ "$have" == "$want" ]]; then
+          ok=1
+          break
+        fi
+      else
+        have="fetch-failed"
+      fi
+      if (( attempt < SITE_SERVE_CHECK_ATTEMPTS )); then
+        sleep "$SITE_SERVE_CHECK_INTERVAL_SEC"
+      fi
+    done
+    rm -f "$tmp"
+
+    if [[ "$ok" != "1" ]]; then
+      {
+        echo "ERROR: $base_url$url_path does not match the freshly built site/$file"
+        echo "       (want sha256=$want, got ${have:-unknown})."
+        echo "       Caddy serves site/ from the checkout bind mount; a mismatch means the served"
+        echo "       directory is not the one just built. Check 'sudo docker inspect agent-caddy'"
+        echo "       mounts, 'git -C $APP_ROOT status site/', and any cache/CDN in front."
+      } >&2
+      return 1
+    fi
+    echo "Served $base_url$url_path matches built site/$file (sha256 ${want:0:8})."
+  done
 }
 
 run_node_script() {
@@ -1009,17 +1065,35 @@ deploy() {
     fi
   fi
 
-  if should_run site "$RUN_SITE" '^(marketing/|site/|scripts/sync-marketing-site\.mjs|package(-lock)?\.json)'; then
-    run_site=1
-    echo "Building public site"
-    build_site
-    mark_component_deployed site
-  else
-    echo "Skipping public site build"
-    if [[ "$RUN_SITE" == "auto" ]]; then
+  # 2026-06-28 → 2026-07-08 marketing-staleness incident: the site build
+  # is no longer path-gated. The served site is UNCOMMITTED working-tree
+  # output layered over stale committed site/ copies, so the path gate's
+  # assumption — "if no site path changed since the site pointer, the
+  # working tree still holds the last build" — is false whenever anything
+  # stash-cleans the checkout. On 2026-06-28 an ops backend rollback ran
+  # `git stash push -u` ("ops path-b backend rollback pre-state") before
+  # checking out c683f39 and never popped it; that swept the built
+  # site/index.html + console-stream.js away and restored the committed
+  # pre-#409 copies, which Caddy served for 10 days because no subsequent
+  # deploy range matched the site path gate. Rebuilding every deploy
+  # (~45s in the docker runner) makes any such revert self-heal on the
+  # next deploy; RUN_SITE=0 stays as the escape hatch for an urgent
+  # deploy while the marketing build itself is broken.
+  case "$RUN_SITE" in
+    0|false|no)
+      echo "Skipping public site build (RUN_SITE=$RUN_SITE) — served-site hash verification is also skipped; www.averray.com is NOT checked by this deploy"
+      ;;
+    1|true|yes|auto)
+      run_site=1
+      echo "Building public site (always rebuilt; path gate removed after the 2026-06-28 stash regression)"
+      build_site
       mark_component_deployed site
-    fi
-  fi
+      ;;
+    *)
+      echo "Invalid deploy toggle: $RUN_SITE" >&2
+      exit 1
+      ;;
+  esac
 
   # Phase 2 PR 2.7d.2: always run apply_caddy unless explicitly
   # disabled (RUN_CADDY=0). The old path-based `should_run caddy`
@@ -1043,6 +1117,14 @@ deploy() {
       mark_component_deployed caddy
       ;;
   esac
+
+  # Runs after apply_caddy so a Caddy restart in this deploy is the state
+  # being verified. Fail-closed: a mismatch here is exactly the silent
+  # staleness the 2026-06-28 incident shipped for 10 days.
+  if [[ "$run_site" == "1" ]]; then
+    echo "Verifying served public site matches the fresh build"
+    verify_site_served
+  fi
 
   if changed_matches '^(contracts/|script/|foundry\.toml|remappings\.txt)'; then
     echo "Contract-related files changed. Smart contracts still require an explicit contract deployment flow." >&2

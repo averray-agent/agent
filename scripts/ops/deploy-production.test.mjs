@@ -122,6 +122,68 @@ test("deploy wrapper retries frontend after an earlier failed indexer deploy", a
   assert.equal((await readFile(join(stateDir, "frontend.last-good"), "utf8")).trim(), indexerFixSha);
 });
 
+test("deploy rebuilds and verifies the public site even when no site paths changed", async () => {
+  const { appRoot, stackRoot, fakeBin, stateDir, deployLog, baseSha, nextSha } =
+    await makeSiteFixture();
+
+  const run = runDeploy(appRoot, {
+    PATH: `${fakeBin}:${process.env.PATH}`,
+    STACK_ROOT: stackRoot,
+    COMPOSE_FILE: join(stackRoot, "docker-compose.yml"),
+    DEPLOY_LOCK_FILE: join(appRoot, "deploy.lock"),
+    DEPLOY_STATE_DIR: stateDir,
+    DEPLOY_OLD_SHA: baseSha,
+    DEPLOY_NEW_SHA: nextSha,
+    DEPLOY_LOG: deployLog,
+    FAKE_SERVED_DIR: join(appRoot, "site"),
+    RUN_BACKEND: "0",
+    RUN_INDEXER: "0",
+    RUN_FRONTEND: "0",
+    RUN_CADDY: "0",
+    RUN_SMOKE: "0"
+  });
+
+  assert.equal(run.status, 0, run.stderr);
+  // The deploy range only touches README.md — the retired path gate would
+  // have skipped the build here, which is exactly how the 2026-06-28 stash
+  // regression stayed live for 10 days.
+  assert.match(await readFile(deployLog, "utf8"), /run build:site/u);
+  assert.match(run.stdout, /Served .*\/ matches built site\/index\.html/u);
+  assert.match(run.stdout, /Served .*\/console-stream\.js matches built site\/console-stream\.js/u);
+  assert.equal((await readFile(join(stateDir, "site.last-good"), "utf8")).trim(), nextSha);
+});
+
+test("post-deploy site serve check fails closed when served bytes differ from the built site", async () => {
+  const { appRoot, stackRoot, fakeBin, stateDir, deployLog, baseSha, nextSha, root } =
+    await makeSiteFixture();
+
+  const staleDir = join(root, "stale-served");
+  await mkdir(staleDir, { recursive: true });
+  await writeFile(join(staleDir, "index.html"), "<title>Averray</title> stale pre-#409 copy\n");
+  await writeFile(join(staleDir, "console-stream.js"), "// stale console stream\n");
+
+  const run = runDeploy(appRoot, {
+    PATH: `${fakeBin}:${process.env.PATH}`,
+    STACK_ROOT: stackRoot,
+    COMPOSE_FILE: join(stackRoot, "docker-compose.yml"),
+    DEPLOY_LOCK_FILE: join(appRoot, "deploy.lock"),
+    DEPLOY_STATE_DIR: stateDir,
+    DEPLOY_OLD_SHA: baseSha,
+    DEPLOY_NEW_SHA: nextSha,
+    DEPLOY_LOG: deployLog,
+    FAKE_SERVED_DIR: staleDir,
+    SITE_SERVE_CHECK_ATTEMPTS: "1",
+    RUN_BACKEND: "0",
+    RUN_INDEXER: "0",
+    RUN_FRONTEND: "0",
+    RUN_CADDY: "0",
+    RUN_SMOKE: "0"
+  });
+
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /does not match the freshly built site\/index\.html/u);
+});
+
 test("docker node fallback persists product-proof evidence on the host", async () => {
   const script = await readFile(DEPLOY_SCRIPT, "utf8");
 
@@ -330,6 +392,72 @@ test("deploy workflow wires the D-03 contract surface override as manual-only", 
 async function writeExecutable(path, content) {
   await writeFile(path, `${content}\n`);
   await chmod(path, 0o755);
+}
+
+// Sandbox for the always-build site path: committed site/ files stand in
+// for the build output (the fake npm only logs), and the fake curl serves
+// bytes from $FAKE_SERVED_DIR so tests control what "Caddy" returns.
+async function makeSiteFixture() {
+  const root = await mkdtemp(join(tmpdir(), "deploy-site-"));
+  const appRoot = join(root, "app");
+  const stackRoot = join(root, "stack");
+  const fakeBin = join(root, "bin");
+  const stateDir = join(root, "state");
+  const deployLog = join(root, "deploy.log");
+
+  await mkdir(join(appRoot, "scripts/ops"), { recursive: true });
+  await mkdir(join(appRoot, "site"), { recursive: true });
+  await mkdir(stackRoot, { recursive: true });
+  await mkdir(fakeBin, { recursive: true });
+  await writeFile(join(stackRoot, "docker-compose.yml"), "services: {}\n");
+  await copyFile(DEPLOY_SCRIPT, join(appRoot, "scripts/ops/deploy-production.sh"));
+  await chmod(join(appRoot, "scripts/ops/deploy-production.sh"), 0o755);
+
+  for (const command of ["docker", "flock", "jq"]) {
+    await writeExecutable(join(fakeBin, command), "#!/usr/bin/env bash\nexit 0\n");
+  }
+  await writeExecutable(join(fakeBin, "npm"), [
+    "#!/usr/bin/env bash",
+    "echo \"npm $*\" >> \"$DEPLOY_LOG\"",
+    "exit 0"
+  ].join("\n"));
+  await writeExecutable(join(fakeBin, "curl"), [
+    "#!/usr/bin/env bash",
+    "# fake file_server: honours `-o <file> <url>`, serving from $FAKE_SERVED_DIR",
+    "out=\"\"",
+    "url=\"\"",
+    "args=(\"$@\")",
+    "for ((i=0; i<${#args[@]}; i++)); do",
+    "  case \"${args[i]}\" in",
+    "    -o|-H|--max-time) ((i+=1)); [[ \"${args[i-1]}\" == \"-o\" ]] && out=\"${args[i]}\" ;;",
+    "    -*) ;;",
+    "    *) url=\"${args[i]}\" ;;",
+    "  esac",
+    "done",
+    "name=index.html",
+    "case \"$url\" in */console-stream.js) name=console-stream.js ;; esac",
+    "if [[ -n \"$out\" && -n \"${FAKE_SERVED_DIR:-}\" ]]; then",
+    "  cp \"$FAKE_SERVED_DIR/$name\" \"$out\"",
+    "fi",
+    "exit 0"
+  ].join("\n"));
+
+  git(appRoot, "init");
+  git(appRoot, "config", "user.email", "test@example.com");
+  git(appRoot, "config", "user.name", "Deploy Test");
+  await writeFile(join(appRoot, "README.md"), "base\n");
+  await writeFile(join(appRoot, "site/index.html"), "<title>Averray</title> fresh build\n");
+  await writeFile(join(appRoot, "site/console-stream.js"), "// fresh console stream\n");
+  git(appRoot, "add", ".");
+  git(appRoot, "commit", "-m", "base");
+  const baseSha = revParse(appRoot, "HEAD");
+
+  await writeFile(join(appRoot, "README.md"), "docs-only change\n");
+  git(appRoot, "add", ".");
+  git(appRoot, "commit", "-m", "docs-only change");
+  const nextSha = revParse(appRoot, "HEAD");
+
+  return { root, appRoot, stackRoot, fakeBin, stateDir, deployLog, baseSha, nextSha };
 }
 
 async function makeDeployFreezeFixture(applyChange, message) {
