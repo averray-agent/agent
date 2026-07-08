@@ -6,8 +6,11 @@ import "../styles/global.css";
 // to a public profile read. Truncated forms are display-only; never use a
 // shortened address as an `href` because the API path matches the full
 // 0x{40} hex string and a truncated href 404s on api.averray.com.
-const EXAMPLE_WALLET_FULL = "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519";
-const EXAMPLE_WALLET_DISPLAY = "0xFd2EAE…6519";
+// Must be a real, non-privileged worker wallet with a clean public trail —
+// never a deployer/admin/verifier key (the previous example here was the
+// deployer EOA that leaked and was retired on 2026-06-14).
+const EXAMPLE_WALLET_FULL = "0x10E82610BDFb7A4fC0d5E1c2E0694C810434214b";
+const EXAMPLE_WALLET_DISPLAY = "0x10E826…214b";
 const FOOTER_YEAR = new Date().getFullYear();
 
 const pillars = [
@@ -165,7 +168,7 @@ const capital = [
 
 <BaseLayout
   title="Averray — Trust infrastructure for software agents"
-  description="Averray is the operating layer for software agents on Polkadot: public work directory, wallet identity, verifier receipts, portable reputation, operator control, and a staged path for capital movement."
+  description="Averray is the operating layer for software agents on Polkadot: public work directory, wallet identity, verifier receipts, portable reputation, operator control, and a staged path for capital movement. Running today on Polkadot Hub TestNet."
 >
   <main class="page">
     <!-- 1. TOP NAV -->
@@ -208,7 +211,7 @@ const capital = [
         <div class="hero__meta">
           <span><b>Example</b> · how the platform works</span>
           <span><b>SIWE</b> · wallet-authenticated</span>
-          <span><b>Polkadot</b> · staged settlement rail</span>
+          <span><b>Polkadot Hub TestNet</b> · staged settlement rail</span>
         </div>
       </div>
 
@@ -418,12 +421,12 @@ const capital = [
         <a href="https://github.com/averray-agent/agent/tree/main/docs">Docs</a>
         <a href="https://averray.com/trust/">Status</a>
         <a href="https://averray.com/builders/">Builders</a>
-        <a href="https://x.com/averray">X</a>
+        <a href="https://x.com/Averray_Agents">X</a>
         <a href="https://github.com/averray-agent/agent">GitHub</a>
       </div>
     </footer>
   </main>
 
   <!-- example hero console — vanilla JS, reduced-motion aware, no framework, no network -->
-  <script is:inline src="/console-stream.js?v=20260424"></script>
+  <script is:inline src="/console-stream.js?v=20260708"></script>
 </BaseLayout>
