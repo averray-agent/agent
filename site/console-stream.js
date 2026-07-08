@@ -1,9 +1,12 @@
 /* ================================================================
-   Averray homepage — live-feel console stream.
-   Renders a faux SSE feed of a run moving through the lifecycle:
-   claimed → submitted → verified → settled, then cycles.
-   Topics mirror the operator app's real SSE channel names.
-   No network, deterministic, respects prefers-reduced-motion.
+   Averray homepage — example console stream.
+   Scripted, deterministic animation that illustrates the platform
+   lifecycle (claimed → submitted → verified → recorded, then cycles).
+   Topics mirror the operator app's real SSE channel names so a viewer
+   sees the *shape* of a real run, but no data here is real and no
+   network call is made. The DOM is labeled "Scripted" so a fresh
+   visitor cannot reasonably conclude the stream is live operations.
+   Respects prefers-reduced-motion.
    ================================================================ */
 (function () {
   const streamEl = document.getElementById("stream");
@@ -14,7 +17,7 @@
 
   // ---- realistic-looking identifiers ------------------------------
   const WALLETS = [
-    "0xFd2EAE…6519",
+    "0x10E826…214b",
     "0x9A13C2…0cb2",
     "0x72aA41…d110",
     "0x4e12C9…b11e",
@@ -37,7 +40,7 @@
     if (valEl && value !== undefined) valEl.textContent = value;
   }
   function resetRail() {
-    ["claimed", "submitted", "verified", "settled"].forEach(s => setStep(s, "idle", "—"));
+    ["claimed", "submitted", "verified", "recorded"].forEach(s => setStep(s, "idle", "—"));
   }
 
   // ---- time helpers -----------------------------------------------
@@ -133,7 +136,7 @@
     await addEvent({
       topic: "siwe.signature.accepted",
       tone: "ok",
-      body: `<span class="ev__meta">run</span> <span class="ev__hash">${rid}</span> <span class="ev__meta">stake</span> <span class="ev__hash">12.0 DOT · locked</span>`,
+      body: `<span class="ev__meta">run</span> <span class="ev__hash">${rid}</span> <span class="ev__meta">claim</span> <span class="ev__hash">wallet accountable</span>`,
       wait: 480,
     });
     setStep("claimed", "done", wallet);
@@ -166,28 +169,29 @@
       wait: 420,
     });
     setStep("verified", "done", "3/3 passed");
-    setStep("settled", "active", "writing…");
+    setStep("recorded", "active", "writing…");
 
     // 4. the receipt itself
     tickClock(1100);
     await addReceipt({ runId: rid, job, wallet, cosigner, hash: h });
 
-    // 5. settle on polkadot
+    // 5. publish the trust-core record. Capital movement is intentionally
+    // not simulated here; the public site should not imply XCM settlement is live.
     tickClock(2100);
     await addEvent({
-      topic: "settle.xcm.submitted",
+      topic: "profile.receipt.attached",
       tone: "info",
-      body: `<span class="ev__meta">para</span> <span class="ev__hash">asset-hub</span> <span class="ev__meta">hash</span> <span class="ev__hash">${h}</span>`,
+      body: `<span class="ev__meta">wallet</span> <span class="ev__hash">${wallet}</span> <span class="ev__meta">hash</span> <span class="ev__hash">${h}</span>`,
       wait: 460,
     });
     tickClock(1600);
     await addEvent({
-      topic: "settle.finalized",
+      topic: "record.public.readable",
       tone: "ok",
-      body: `<span class="ev__meta">block</span> <span class="ev__hash">#5,471,${Math.floor(100 + Math.random()*900)}</span> <span class="ev__meta">in</span> <span class="ev__hash">12.4s</span>`,
+      body: `<span class="ev__meta">surface</span> <span class="ev__hash">/agents/${wallet}</span> <span class="ev__meta">capital</span> <span class="ev__hash">staged</span>`,
       wait: 800,
     });
-    setStep("settled", "done", "finalized");
+    setStep("recorded", "done", "public");
 
     // pause and loop (unless reduced motion — then stop after one cycle)
     if (reduced) return;

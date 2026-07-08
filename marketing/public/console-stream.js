@@ -17,7 +17,7 @@
 
   // ---- realistic-looking identifiers ------------------------------
   const WALLETS = [
-    "0xFd2EAE…6519",
+    "0x10E826…214b",
     "0x9A13C2…0cb2",
     "0x72aA41…d110",
     "0x4e12C9…b11e",
