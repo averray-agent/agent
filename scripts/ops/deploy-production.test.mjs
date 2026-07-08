@@ -184,6 +184,162 @@ test("post-deploy site serve check fails closed when served bytes differ from th
   assert.match(run.stderr, /does not match the freshly built site\/index\.html/u);
 });
 
+test("frontend staleness detector seeds on first deploy and skips while frontend/ matches it", async () => {
+  const { appRoot, stackRoot, fakeBin, stateDir, deployLog, baseSha, nextSha, root } =
+    await makeFrontendFixture();
+  const env = (overrides) => ({
+    PATH: `${fakeBin}:${process.env.PATH}`,
+    STACK_ROOT: stackRoot,
+    COMPOSE_FILE: join(stackRoot, "docker-compose.yml"),
+    DEPLOY_LOCK_FILE: join(root, "deploy.lock"),
+    DEPLOY_STATE_DIR: stateDir,
+    DEPLOY_LOG: deployLog,
+    RUN_BACKEND: "0",
+    RUN_INDEXER: "0",
+    RUN_SITE: "0",
+    RUN_CADDY: "0",
+    RUN_SMOKE: "0",
+    ...overrides
+  });
+
+  // Docs-only range: the path gate would skip, but no build tree hash has
+  // ever been recorded — the detector forces one build to seed it.
+  const first = runDeploy(appRoot, env({ DEPLOY_OLD_SHA: baseSha, DEPLOY_NEW_SHA: nextSha }));
+  assert.equal(first.status, 0, first.stderr);
+  assert.match(first.stdout, /no recorded frontend build tree hash/u);
+  assert.match(await readFile(deployLog, "utf8"), /^frontend$/m);
+  const seeded = (await readFile(join(stateDir, "frontend.built-tree-hash"), "utf8")).trim();
+  assert.match(seeded, /^[0-9a-f]{64}$/u);
+
+  // No-op redeploy with the build output still on disk: skip the rebuild.
+  await writeFile(deployLog, "");
+  const second = runDeploy(appRoot, env({ DEPLOY_OLD_SHA: nextSha, DEPLOY_NEW_SHA: nextSha }));
+  assert.equal(second.status, 0, second.stderr);
+  assert.match(second.stdout, /matches the last recorded build tree hash/u);
+  assert.doesNotMatch(await readFile(deployLog, "utf8"), /^frontend$/m);
+  assert.equal(
+    (await readFile(join(stateDir, "frontend.built-tree-hash"), "utf8")).trim(),
+    seeded
+  );
+});
+
+test("frontend staleness detector force-rebuilds after an un-popped stash reverts the build output", async () => {
+  const { appRoot, stackRoot, fakeBin, stateDir, deployLog, baseSha, nextSha, root } =
+    await makeFrontendFixture();
+  const env = (overrides) => ({
+    PATH: `${fakeBin}:${process.env.PATH}`,
+    STACK_ROOT: stackRoot,
+    COMPOSE_FILE: join(stackRoot, "docker-compose.yml"),
+    DEPLOY_LOCK_FILE: join(root, "deploy.lock"),
+    DEPLOY_STATE_DIR: stateDir,
+    DEPLOY_LOG: deployLog,
+    RUN_BACKEND: "0",
+    RUN_INDEXER: "0",
+    RUN_SITE: "0",
+    RUN_CADDY: "0",
+    RUN_SMOKE: "0",
+    ...overrides
+  });
+
+  const first = runDeploy(appRoot, env({ DEPLOY_OLD_SHA: baseSha, DEPLOY_NEW_SHA: nextSha }));
+  assert.equal(first.status, 0, first.stderr);
+  assert.match(await readFile(deployLog, "utf8"), /^frontend$/m);
+
+  // The 2026-06-28 incident, replayed: an ops rollback stashes the checkout
+  // (untracked build output included) and never pops — frontend/ silently
+  // reverts to the stale committed copies while the path gate sees nothing.
+  git(appRoot, "stash", "push", "-u", "-m", "ops path-b backend rollback pre-state");
+  assert.equal(
+    (await readFile(join(appRoot, "frontend/index.html"), "utf8")).trim(),
+    "stale committed operator shell"
+  );
+
+  await writeFile(deployLog, "");
+  const second = runDeploy(appRoot, env({ DEPLOY_OLD_SHA: nextSha, DEPLOY_NEW_SHA: nextSha }));
+  assert.equal(second.status, 0, second.stderr);
+  assert.match(second.stdout, /no longer matches the recorded last-build tree hash/u);
+  assert.match(await readFile(deployLog, "utf8"), /^frontend$/m);
+  assert.equal(
+    (await readFile(join(appRoot, "frontend/index.html"), "utf8")).trim(),
+    "fresh operator build 1"
+  );
+});
+
+test("frontend staleness detector fails closed when the hash tooling breaks", async () => {
+  const { appRoot, stackRoot, fakeBin, stateDir, deployLog, baseSha, nextSha, root } =
+    await makeFrontendFixture();
+  const brokenBin = join(root, "broken-bin");
+  await mkdir(brokenBin, { recursive: true });
+  await writeExecutable(join(brokenBin, "sha256sum"), "#!/usr/bin/env bash\nexit 1\n");
+  const env = (overrides) => ({
+    PATH: `${fakeBin}:${process.env.PATH}`,
+    STACK_ROOT: stackRoot,
+    COMPOSE_FILE: join(stackRoot, "docker-compose.yml"),
+    DEPLOY_LOCK_FILE: join(root, "deploy.lock"),
+    DEPLOY_STATE_DIR: stateDir,
+    DEPLOY_LOG: deployLog,
+    RUN_BACKEND: "0",
+    RUN_INDEXER: "0",
+    RUN_SITE: "0",
+    RUN_CADDY: "0",
+    RUN_SMOKE: "0",
+    ...overrides
+  });
+
+  // Healthy first deploy seeds the recorded hash.
+  const first = runDeploy(appRoot, env({ DEPLOY_OLD_SHA: baseSha, DEPLOY_NEW_SHA: nextSha }));
+  assert.equal(first.status, 0, first.stderr);
+  const seeded = (await readFile(join(stateDir, "frontend.built-tree-hash"), "utf8")).trim();
+
+  // With sha256sum broken, the unhashable tree must force a rebuild
+  // (fail-safe), and the deploy must then abort rather than record an
+  // empty hash — recording it would make every later deploy claim a match
+  // by comparing empty to empty.
+  await writeFile(deployLog, "");
+  const second = runDeploy(appRoot, env({
+    PATH: `${brokenBin}:${fakeBin}:${process.env.PATH}`,
+    DEPLOY_OLD_SHA: nextSha,
+    DEPLOY_NEW_SHA: nextSha
+  }));
+  assert.equal(second.status, 1);
+  assert.match(second.stdout, /could not compute the frontend tree hash/u);
+  assert.match(await readFile(deployLog, "utf8"), /^frontend$/m);
+  assert.match(second.stderr, /refusing to record it/u);
+  assert.equal(
+    (await readFile(join(stateDir, "frontend.built-tree-hash"), "utf8")).trim(),
+    seeded
+  );
+});
+
+test("RUN_FRONTEND=0 skips the frontend staleness detector loudly", async () => {
+  const { appRoot, stackRoot, fakeBin, stateDir, deployLog, baseSha, nextSha, root } =
+    await makeFrontendFixture();
+  await writeFile(deployLog, "");
+
+  const run = runDeploy(appRoot, {
+    PATH: `${fakeBin}:${process.env.PATH}`,
+    STACK_ROOT: stackRoot,
+    COMPOSE_FILE: join(stackRoot, "docker-compose.yml"),
+    DEPLOY_LOCK_FILE: join(root, "deploy.lock"),
+    DEPLOY_STATE_DIR: stateDir,
+    DEPLOY_OLD_SHA: baseSha,
+    DEPLOY_NEW_SHA: nextSha,
+    DEPLOY_LOG: deployLog,
+    RUN_BACKEND: "0",
+    RUN_INDEXER: "0",
+    RUN_FRONTEND: "0",
+    RUN_SITE: "0",
+    RUN_CADDY: "0",
+    RUN_SMOKE: "0"
+  });
+
+  assert.equal(run.status, 0, run.stderr);
+  assert.doesNotMatch(await readFile(deployLog, "utf8"), /^frontend$/m);
+  // Truth boundary: the escape hatch must say the disk check is off, not
+  // just that the deploy step was skipped.
+  assert.match(run.stdout, /frontend\/ disk staleness is also NOT checked/u);
+});
+
 test("docker node fallback persists product-proof evidence on the host", async () => {
   const script = await readFile(DEPLOY_SCRIPT, "utf8");
 
@@ -448,6 +604,59 @@ async function makeSiteFixture() {
   await writeFile(join(appRoot, "README.md"), "base\n");
   await writeFile(join(appRoot, "site/index.html"), "<title>Averray</title> fresh build\n");
   await writeFile(join(appRoot, "site/console-stream.js"), "// fresh console stream\n");
+  git(appRoot, "add", ".");
+  git(appRoot, "commit", "-m", "base");
+  const baseSha = revParse(appRoot, "HEAD");
+
+  await writeFile(join(appRoot, "README.md"), "docs-only change\n");
+  git(appRoot, "add", ".");
+  git(appRoot, "commit", "-m", "docs-only change");
+  const nextSha = revParse(appRoot, "HEAD");
+
+  return { root, appRoot, stackRoot, fakeBin, stateDir, deployLog, baseSha, nextSha };
+}
+
+// Sandbox for the frontend staleness detector: the fake redeploy-frontend.sh
+// stands in for the real Next build by leaving the same disk shape the real
+// `npm run build:frontend` does — a tracked modification (index.html) plus an
+// untracked build file (_next/chunk.js) layered over the stale committed
+// frontend/ copies. `git stash push -u` in a test then reverts both, exactly
+// like the 2026-06-28 VPS stash.
+async function makeFrontendFixture() {
+  const root = await mkdtemp(join(tmpdir(), "deploy-frontend-"));
+  const appRoot = join(root, "app");
+  const stackRoot = join(root, "stack");
+  const fakeBin = join(root, "bin");
+  const stateDir = join(root, "state");
+  const deployLog = join(root, "deploy.log");
+
+  await mkdir(join(appRoot, "scripts/ops"), { recursive: true });
+  await mkdir(join(appRoot, "frontend"), { recursive: true });
+  await mkdir(stackRoot, { recursive: true });
+  await mkdir(fakeBin, { recursive: true });
+  await writeFile(join(stackRoot, "docker-compose.yml"), "services: {}\n");
+  await copyFile(DEPLOY_SCRIPT, join(appRoot, "scripts/ops/deploy-production.sh"));
+  await chmod(join(appRoot, "scripts/ops/deploy-production.sh"), 0o755);
+
+  await writeExecutable(join(appRoot, "scripts/ops/redeploy-frontend.sh"), [
+    "#!/usr/bin/env bash",
+    "set -euo pipefail",
+    "APP_ROOT=$(cd \"$(dirname \"${BASH_SOURCE[0]}\")/../..\" && pwd)",
+    "echo frontend >> \"$DEPLOY_LOG\"",
+    "printf 'fresh operator build %s\\n' \"${FAKE_FRONTEND_BUILD_STAMP:-1}\" > \"$APP_ROOT/frontend/index.html\"",
+    "mkdir -p \"$APP_ROOT/frontend/_next\"",
+    "printf '// chunk %s\\n' \"${FAKE_FRONTEND_BUILD_STAMP:-1}\" > \"$APP_ROOT/frontend/_next/chunk.js\""
+  ].join("\n"));
+
+  for (const command of ["docker", "curl", "npm", "flock", "jq"]) {
+    await writeExecutable(join(fakeBin, command), "#!/usr/bin/env bash\nexit 0\n");
+  }
+
+  git(appRoot, "init");
+  git(appRoot, "config", "user.email", "test@example.com");
+  git(appRoot, "config", "user.name", "Deploy Test");
+  await writeFile(join(appRoot, "README.md"), "base\n");
+  await writeFile(join(appRoot, "frontend/index.html"), "stale committed operator shell\n");
   git(appRoot, "add", ".");
   git(appRoot, "commit", "-m", "base");
   const baseSha = revParse(appRoot, "HEAD");
