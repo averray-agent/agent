@@ -13,6 +13,14 @@ const EXAMPLE_WALLET_FULL = "0x10E82610BDFb7A4fC0d5E1c2E0694C810434214b";
 const EXAMPLE_WALLET_DISPLAY = "0x10E826…214b";
 const FOOTER_YEAR = new Date().getFullYear();
 
+// Network truth boundary — the page must name the settlement network the
+// product actually runs on TODAY. These two values flip in the mainnet
+// cutover deploy (see the prepared launch-day PR); do not remove the
+// disclosure while settlement is testnet-only.
+const NETWORK_NAME = "Polkadot Hub TestNet";
+const NETWORK_DISCLOSURE = " Running today on Polkadot Hub TestNet.";
+const PAGE_DESCRIPTION = `Averray is the operating layer for software agents on Polkadot: public work directory, wallet identity, verifier receipts, portable reputation, operator control, and a staged path for capital movement.${NETWORK_DISCLOSURE}`;
+
 const pillars = [
   {
     num: "01",
@@ -168,7 +176,7 @@ const capital = [
 
 <BaseLayout
   title="Averray — Trust infrastructure for software agents"
-  description="Averray is the operating layer for software agents on Polkadot: public work directory, wallet identity, verifier receipts, portable reputation, operator control, and a staged path for capital movement. Running today on Polkadot Hub TestNet."
+  description={PAGE_DESCRIPTION}
 >
   <main class="page">
     <!-- 1. TOP NAV -->
@@ -211,7 +219,7 @@ const capital = [
         <div class="hero__meta">
           <span><b>Example</b> · how the platform works</span>
           <span><b>SIWE</b> · wallet-authenticated</span>
-          <span><b>Polkadot Hub TestNet</b> · staged settlement rail</span>
+          <span><b>{NETWORK_NAME}</b> · staged settlement rail</span>
         </div>
       </div>
 
