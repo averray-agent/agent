@@ -1,0 +1,213 @@
+{
+  "schema": "mainnet-audit-freeze-v1",
+  "generatedAt": "2026-07-07T16:43:56.332Z",
+  "ok": true,
+  "tag": "audit/mainnet-2026-07-07",
+  "commit": "fd9b306b8d0c5e26c338b4806545cba20dbb0872",
+  "originMainCommit": "fd9b306b8d0c5e26c338b4806545cba20dbb0872",
+  "checks": [
+    {
+      "name": "tag.format",
+      "ok": true,
+      "tag": "audit/mainnet-2026-07-07"
+    },
+    {
+      "name": "git.headCommit",
+      "ok": true,
+      "commit": "fd9b306b8d0c5e26c338b4806545cba20dbb0872"
+    },
+    {
+      "name": "git.headMatchesOriginMain",
+      "ok": true,
+      "headCommit": "fd9b306b8d0c5e26c338b4806545cba20dbb0872",
+      "originMainCommit": "fd9b306b8d0c5e26c338b4806545cba20dbb0872"
+    },
+    {
+      "name": "git.worktreeClean",
+      "ok": true,
+      "allowDirty": false,
+      "dirtyEntries": []
+    },
+    {
+      "name": "git.tagAvailable",
+      "ok": true,
+      "existingTagCommit": "fd9b306b8d0c5e26c338b4806545cba20dbb0872",
+      "headCommit": "fd9b306b8d0c5e26c338b4806545cba20dbb0872"
+    },
+    {
+      "name": "auditPackage.exists",
+      "ok": true,
+      "path": "docs/AUDIT_PACKAGE.md"
+    },
+    {
+      "name": "auditPackage.sha256",
+      "ok": true,
+      "sha256": "f2d8ce7d7ada6c5933af2fdeb3aace2c5c6496d1f43c9fed60557c1a042d603c"
+    },
+    {
+      "name": "auditPackage.localLinks",
+      "ok": true,
+      "missing": []
+    },
+    {
+      "name": "auditPackage.polkadotDocs.reference/polkadot-hub/smart-contracts.md",
+      "ok": true,
+      "path": "reference/polkadot-hub/smart-contracts.md"
+    },
+    {
+      "name": "auditPackage.polkadotDocs.smart-contracts/precompiles/erc20.md",
+      "ok": true,
+      "path": "smart-contracts/precompiles/erc20.md"
+    },
+    {
+      "name": "auditPackage.polkadotDocs.smart-contracts/for-eth-devs/accounts.md",
+      "ok": true,
+      "path": "smart-contracts/for-eth-devs/accounts.md"
+    },
+    {
+      "name": "auditPackage.polkadotDocs.smart-contracts/explorers.md",
+      "ok": true,
+      "path": "smart-contracts/explorers.md"
+    },
+    {
+      "name": "auditPackage.reproduction.npm install",
+      "ok": true,
+      "command": "npm install"
+    },
+    {
+      "name": "auditPackage.reproduction.forge build",
+      "ok": true,
+      "command": "forge build"
+    },
+    {
+      "name": "auditPackage.reproduction.forge test",
+      "ok": true,
+      "command": "forge test"
+    },
+    {
+      "name": "auditPackage.reproduction.npm --workspace mcp-server test",
+      "ok": true,
+      "command": "npm --workspace mcp-server test"
+    },
+    {
+      "name": "auditPackage.reproduction.npm test",
+      "ok": true,
+      "command": "npm test"
+    },
+    {
+      "name": "auditPackage.reproduction.npm run typecheck:app",
+      "ok": true,
+      "command": "npm run typecheck:app"
+    },
+    {
+      "name": "auditPackage.reproduction.npm run build:frontend",
+      "ok": true,
+      "command": "npm run build:frontend"
+    },
+    {
+      "name": "auditPackage.reproduction.npm run build:site",
+      "ok": true,
+      "command": "npm run build:site"
+    },
+    {
+      "name": "auditPackage.reproduction.npm run typecheck:indexer",
+      "ok": true,
+      "command": "npm run typecheck:indexer"
+    },
+    {
+      "name": "auditPackage.reproduction.npm run check:sdk-types",
+      "ok": true,
+      "command": "npm run check:sdk-types"
+    },
+    {
+      "name": "auditPackage.noObviousSecrets",
+      "ok": true
+    },
+    {
+      "name": "requiredFile.docs/AUDIT_PACKAGE.md",
+      "ok": true,
+      "path": "docs/AUDIT_PACKAGE.md"
+    },
+    {
+      "name": "requiredFile.docs/PROJECT_ROADMAP.md",
+      "ok": true,
+      "path": "docs/PROJECT_ROADMAP.md"
+    },
+    {
+      "name": "requiredFile.docs/PRODUCTION_CHECKLIST.md",
+      "ok": true,
+      "path": "docs/PRODUCTION_CHECKLIST.md"
+    },
+    {
+      "name": "requiredFile.docs/THREAT_MODEL.md",
+      "ok": true,
+      "path": "docs/THREAT_MODEL.md"
+    },
+    {
+      "name": "requiredFile.docs/MAINNET_PARAMETERS.md",
+      "ok": true,
+      "path": "docs/MAINNET_PARAMETERS.md"
+    },
+    {
+      "name": "requiredFile.docs/INCIDENT_RESPONSE.md",
+      "ok": true,
+      "path": "docs/INCIDENT_RESPONSE.md"
+    },
+    {
+      "name": "requiredFile.docs/MULTISIG_SETUP.md",
+      "ok": true,
+      "path": "docs/MULTISIG_SETUP.md"
+    },
+    {
+      "name": "requiredFile.docs/PHASE_4E_PLAN.md",
+      "ok": true,
+      "path": "docs/PHASE_4E_PLAN.md"
+    },
+    {
+      "name": "requiredFile.docs/PHASE_5A_IAM_ROLES_ANYWHERE_PLAN.md",
+      "ok": true,
+      "path": "docs/PHASE_5A_IAM_ROLES_ANYWHERE_PLAN.md"
+    },
+    {
+      "name": "requiredFile.docs/SECRETS.md",
+      "ok": true,
+      "path": "docs/SECRETS.md"
+    },
+    {
+      "name": "requiredFile.docs/SECRETS_MIGRATION.md",
+      "ok": true,
+      "path": "docs/SECRETS_MIGRATION.md"
+    },
+    {
+      "name": "requiredFile.deployments/mainnet.env.example",
+      "ok": true,
+      "path": "deployments/mainnet.env.example"
+    },
+    {
+      "name": "requiredFile.scripts/ops/check-mainnet-usdc-config.mjs",
+      "ok": true,
+      "path": "scripts/ops/check-mainnet-usdc-config.mjs"
+    },
+    {
+      "name": "requiredFile.scripts/ops/check-mainnet-env-secrets-proof.mjs",
+      "ok": true,
+      "path": "scripts/ops/check-mainnet-env-secrets-proof.mjs"
+    },
+    {
+      "name": "requiredFile.scripts/ops/check-mainnet-smoke-proof.mjs",
+      "ok": true,
+      "path": "scripts/ops/check-mainnet-smoke-proof.mjs"
+    },
+    {
+      "name": "requiredFile.scripts/ops/check-incident-response-proof.mjs",
+      "ok": true,
+      "path": "scripts/ops/check-incident-response-proof.mjs"
+    }
+  ],
+  "nextActions": [
+    "git push origin refs/tags/audit/mainnet-2026-07-07",
+    "Record the tag, commit, report destination, and final deployed contract addresses in the external audit engagement brief.",
+    "Do not deploy real-funds mainnet contracts from post-audit deltas unless they receive separate review."
+  ],
+  "createdTag": false
+}

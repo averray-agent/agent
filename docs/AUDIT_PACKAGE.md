@@ -27,10 +27,16 @@ mainnet real funds.
   intentionally **open as acceptable deferrals** for a capped launch — none on the Critical/High
   gate: audit-1 Mediums `C-04/C-05/C-09/C-12/C-15` (defense-in-depth guards + parameter bounds)
   and audit-2 Lows `L-4/L-5/L-10/L-11/L-13/L-14/L-15` + Info `I-4`; `L-1` (finite-cap arming) and
-  `L-12` (lending finish-or-remove) are deferred by decision. The remaining gate is: **freeze the
-  build → external-auditor re-verification of the merged remediations → deploy.** No
-  remediated contract has been deployed to a live chain yet (testnet is mid–V1→V2
-  migration); the fixes are Foundry/CI-green only.
+  `L-12` (lending finish-or-remove) are deferred by decision. **RE-VERIFIED 2026-07-08 —
+  CONDITIONAL PASS** (independent verifier Ash / OpenClaw, against frozen tag
+  `audit/mainnet-2026-07-07` @ `fd9b306`; report in
+  [`docs/evidence/mainnet-audit-reverification-2026-07-08.pdf`](evidence/mainnet-audit-reverification-2026-07-08.pdf)):
+  *"no code-level remediation remains open on the Critical/High gate,"* and the deferrals were
+  accepted for a capped launch. **The remaining gate is now the deploy/ops ceremony only** —
+  deploy-from-audited-artifact → owner→2-of-3 multisig → split-roles + `setTreasuryAccount` sink →
+  keep the finite `dailyOutflowCap` un-armed → mainnet USDC/env/secrets/smoke/incident-response
+  proofs → XCM stays disabled. No contract has been deployed to a production chain yet (fixes are
+  Foundry/CI-green; the 2026-07-07 V2 testnet cutover was a rehearsal).
 - Native XCM/vDOT/yield is deferred: the adapters/wrapper are audited but XCM
   settlement stays **disabled** for mainnet until native observer correlation is live
   (unless explicitly added to a separate engagement).
@@ -105,8 +111,8 @@ C-18→L-3, C-13→M-6, C-17→M-2, C-09→L-5), and per-item disposition are in
 [`docs/MAINNET_AUDIT_2_REMEDIATION.md`](./MAINNET_AUDIT_2_REMEDIATION.md).
 
 **Every audit-2 High + Medium is remediated in code and MERGED to `main`** (both Highs H-1/H-2,
-all eight Mediums M-1…M-8, plus Lows L-2/L-3/L-6/L-7/L-8/L-9 and Info I-5) — please **verify,
-do not assume** (fresh code + new attack surface, not yet deployed or re-verified). The remaining
+all eight Mediums M-1…M-8, plus Lows L-2/L-3/L-6/L-7/L-8/L-9 and Info I-5) — **re-verified
+2026-07-08 (CONDITIONAL PASS)**; not yet deployed to a production chain. The remaining
 Lows `L-4/L-5/L-10/L-11/L-13/L-14/L-15` + Info `I-4` are **open, acceptable deferrals** for a
 capped launch; `L-1` (finite-cap arming) and `L-12` (lending) are deferred by decision:
 
