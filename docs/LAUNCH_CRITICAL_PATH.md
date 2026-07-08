@@ -10,43 +10,56 @@ detailed runbooks; it does not duplicate them:
 
 ---
 
-## The one gate
+## Status — the audit gate is CLEARED ✅
 
-**The external audit is the long pole — its lead time *is* the launch date.** Real funds do
-not ship without it. Everything else parallelizes around it; the on-chain deploy itself is
-~1 day of scripted work once the audit clears.
+**External re-verification: CONDITIONAL PASS (2026-07-08)** against frozen tag
+**`audit/mainnet-2026-07-07`** (commit `fd9b306`). Every Critical + High (both audits) + all
+audit-2 Mediums re-verified **PASS**; the Medium/Low deferrals were **accepted** for a capped
+launch; *"no code-level remediation remains open on the Critical/High gate."* Report:
+[`docs/evidence/mainnet-audit-reverification-2026-07-08.pdf`](evidence/mainnet-audit-reverification-2026-07-08.pdf) ·
+boards: [`MAINNET_AUDIT_REMEDIATION.md`](MAINNET_AUDIT_REMEDIATION.md) · [`MAINNET_AUDIT_2_REMEDIATION.md`](MAINNET_AUDIT_2_REMEDIATION.md).
 
-**Update (2026-07-02) — a second, deeper contract audit landed** (0 Critical · 2 High · 8 Medium ·
-15 Low · 5 Info; independently code-verified) → [`MAINNET_AUDIT_2_REMEDIATION.md`](MAINNET_AUDIT_2_REMEDIATION.md).
-Its 2 Highs are additional pre-mainnet gates (Codex-owned contract work — writable + Foundry-testable
-now; only redeploy waits on the Paseo halt). **H-1 changes this plan directly:** the launch-phase
-daily outflow cap (`MAINNET_PARAMETERS.md`) is wired to the wrong paths — it must be **re-implemented
-before it is armed**, or it self-DoSes settlement while leaving real withdrawals unmetered. "Set the
-cap" (audit-1 C-01) is not, by itself, a valid mitigation.
+The old long poles (audit + hardware procurement) are done. **All that remains is the
+deploy/ops ceremony — deploy the audited artifact only; no post-audit code deltas into the
+deployed set without separate review** (auditor condition). The on-chain work is ~1 day, scripted.
 
-## Now — the levers that compress the timeline
+## Launch checklist (ordered)
 
-| # | Action | Owner | Why it's critical-path |
-|---|--------|-------|------------------------|
-| 1 | **Book the audit firm**; freeze audited artifacts (`prepare-mainnet-audit-freeze.mjs`) | Pascal | Scheduling lead time is the bottleneck — book before anything else. |
-| 2 | **Resolve MAIN-006** before the freeze (see below) | Codex | Known double-debit ships at v1; must not be in the audited build. |
-| 3 | **Make the 5 open decisions** (`MAINNET_CREDENTIALS_PLAN` §5.2) | Pascal | Calls, not work — they unblock the parallel tracks. |
-| 4 | **Order / enroll hardware**: 3× Ledger (one per 2-of-3 signer) + 3 steel backup plates + a YubiKey pair (primary + backup, each enrolled across the 6 admin-trust accounts) | Pascal | Procurement lead time; fully parallel to the audit. |
+### ✅ Done
+- [x] **MAIN-006** resolved (EIP-712 per-user auth #688 + `PAYMENTS_SEND_ENABLED` default-off 503 gate #737).
+- [x] All audit-1 + audit-2 remediations merged and **re-verified — CONDITIONAL PASS 2026-07-08**.
+- [x] Audit artifact **frozen** → tag `audit/mainnet-2026-07-07` @ `fd9b306`.
+- [x] The 6 credential decisions made (`MAINNET_CREDENTIALS_PLAN` §5).
+- [x] **Track 1 — hardware provisioned:** 3 Ledgers initialized (offline, distinct PINs), OWNER account derived per device, each 24-word seed on its own steel plate stored apart; YubiKey pair enrolled across the 6 accounts; GitHub org 2FA + registrar FIDO2.
 
-## Parallel track — while the audit runs (zero audit dependency)
+### ▶ Track 2 — mainnet infra · *Pascal / infra* · in flight, no hardware dependency
+- [ ] **Fresh mainnet KMS keys — multi-region `eu-central-2` + `eu-west-1`.** ⚠ **irreversible at creation** — get it right once.
+- [ ] Roles Anywhere mainnet CA (**1Password Critical, $0**) + trust anchors + profiles + prod roles + VPS client certs.
+- [ ] Bootstrap the mainnet 1Password vault + 4 SA tokens (`bootstrap-mainnet-vault.mjs`).
+- [ ] Render the mainnet backend env (`render-mainnet-backend-env.mjs --check`).
 
-- **Multisig ceremony** — 3 hardware signers → `pallet_revive.map_account()` → owner record (`prepare-multisig-owner-record.mjs`). *[Pascal + signers]*
-- **KMS multi-region** keys — ⚠ set at creation, **irreversible** — + **Roles Anywhere** CA + 2 profiles + VPS client certs. *[Pascal / infra]*
-- **1Password mainnet vault tier** + SA tokens (incl. a read+write SA *if* the JWT refresh-flow automation is brought into mainnet scope). *[Pascal]*
-- **Build the GAP scripts** (don't exist yet): mainnet backend env profile *[Claude]*, vault/token bootstrap *[Claude]*, `deployments/mainnet.json` + `mainnet-multisig-owner.json` *[Codex / ceremony]*.
+### ▶ Ceremony — 2-of-3 owner multisig · *Pascal + the 3 Ledgers · Codex owns the chain call*
+- [ ] Compute the 2-of-3 multisig SS58 from the 3 Ledger OWNER signatories.
+- [ ] ⚠ **`pallet_revive.map_account` → H160 `OWNER`** — Codex confirms the exact call for the *keyless* multisig account **before signing** (wrong owner **bricks the contract**).
+- [ ] Record the owner record (`prepare-multisig-owner-record.mjs --profile mainnet`).
 
-## Deploy sprint — after the audit passes (~1 day, scripted)
+### ▶ Deploy from the audited tag · *Codex* · chainId `420420419`, DOT gas
+- [ ] Deploy the 5 contracts **from `audit/mainnet-2026-07-07`**, `OWNER` = the mapped multisig.
+- [ ] `transferOwnership(multisig)` as the deployer's **last act** → verify deployer holds zero roles → **burn the deployer key.**
+- [ ] Multisig wiring (each a 2-of-3 `asMulti` two-leg): `setVerifier`, the split roles (`settlementBroker` + `agentTransferBroker` + `reputationWriter` on the signer/escrow; `outflowRecorder(AAC)`; **`strategySettler` ungranted** — XCM off), `setArbitrator` (F6 hw EOA), `setPauser` (F5 hw EOA), **`setTreasuryAccount`**.
+- [ ] ⛔ **Do NOT arm a finite `dailyOutflowCap`** — leave `type(uint256).max` until the split-role/cap-exempt-slash follow-on lands (auditor condition #4).
+- [ ] Confirm the **mainnet USDC** precompile/asset via `check-mainnet-usdc-config.mjs` — do not assume the testnet asset id.
 
-1. Deploy 5 contracts with a **burnable deployer** key (`OWNER` = mapped multisig).
-2. `transferOwnership(multisig)` as the deployer's last act → verify deployer holds zero roles → burn the key.
-3. Role ceremonies (each a 2-of-3 `asMulti` two-leg): `setVerifier` **+** `setServiceOperator` (both), `setServiceOperator(escrowCore)`, `setArbitrator`, `setPauser`.
-4. `audit-launch-readiness.mjs` green → render mainnet env → 3 closing proofs (env-secrets, usdc-config, smoke <24h).
-5. Fund the signer with real low-value USDC → **≥3 live** claim→submit→verify→settle loops → **LIVE**.
+### ▶ Proofs → funding → capped launch · *Pascal / Codex*
+- [ ] `audit-launch-readiness.mjs --profile mainnet` green.
+- [ ] Closing proofs: `check-mainnet-env-secrets-proof.mjs`, `check-mainnet-usdc-config.mjs`, `check-mainnet-smoke-proof.mjs`, `check-incident-response-proof.mjs`.
+- [ ] Fund real low-value USDC + a DOT gas float.
+- [ ] **≥3 live** claim→submit→verify→settle loops on mainnet.
+- [ ] **LIVE — capped guarded profile:** caps on, XCM/vDOT disabled, pauser armed, invariant watcher. Widen caps as confidence grows.
+
+### Post-launch / not launch-blocking
+- **D-03 (the one auditor PARTIAL):** the contract-surface drift auto-deploy gate is in place (code-level ✓, #706); the broad GitHub *required-reviewers human gate* is the remaining **optional hardening** — flip to full PASS by enabling branch-protection required review on `main`.
+- **XCM / vDOT enablement gate:** stays disabled until (a) native observer correlation is live, (b) one real testnet `queueRequest` dispatch proof, (c) `strategySettler` granted.
 
 ### D-03 — deploy/backend contract-surface freeze
 
@@ -64,7 +77,14 @@ operator compatibility rationale. Automatic CI-triggered deploys keep the overri
 
 ---
 
-## MAIN-006 — `sendToAgentFor` operator-relay (double-debit **+ Critical operator-drain**) · owner: Codex
+---
+
+> **✅ HISTORICAL / RESOLVED — kept for the record.** Everything below (MAIN-006, the pre-audit
+> contract findings, the security-review hardening) is **remediated, merged, and re-verified
+> (CONDITIONAL PASS 2026-07-08)** at the frozen tag. These are the *record* of what was fixed —
+> not open work. The live checklist is above.
+
+## MAIN-006 — `sendToAgentFor` operator-relay (double-debit **+ Critical operator-drain**) · owner: Codex · ✅ RESOLVED (#688 + #737, re-verified)
 
 `payments:send` ships at v1 (in `BASE_CAPABILITIES`), and `POST /payments/send` can
 **double-debit on a retry** after a lost local write — `AgentAccountCore.sendToAgentFor`
@@ -168,11 +188,17 @@ Close criteria:
   transitive `drizzle-orm` / `kysely` copies, or Averray validates and ships a
   deliberately tested override with live ingest evidence.
 
-## Honest timeline
+## Honest timeline (2026-07-08)
 
-Audit (weeks) and hardware/multisig (weeks) run **in parallel** — not days. There is no
-version where an external auditor and a hardware signing ceremony happen overnight. The only
-real levers: (1) start the audit **and** hardware procurement *today*; (2) keep
-`/payments/send` out of live scope unless the signed MAIN-006 artifact is deployed;
-(3) pre-script and rehearse the deploy sprint so it's a one-day
-operation the moment the audit clears.
+The two multi-week long poles — **external audit** and **hardware procurement** — are **both
+done**. The audit came back CONDITIONAL PASS and the hardware is provisioned and enrolled
+(Track 1 ✅). What remains is entirely execution with no external lead time:
+
+- **Track 2 (mainnet infra)** — a focused infra session (KMS is the one careful, irreversible step).
+- **Ceremony + deploy** — ~1 day of scripted, rehearsed work (the exact flow was proven on the
+  2026-07-07 V2 testnet cutover: fresh deploy → multisig owner → split-role wiring →
+  `setTreasuryAccount` → E2E settle).
+- **Proofs → fund → ≥3 smoke runs → capped launch.**
+
+Standing guardrails: `/payments/send` requires the signed MAIN-006 artifact (deployed at the
+tag ✅); keep the finite `dailyOutflowCap` un-armed; keep XCM/vDOT disabled at launch.
