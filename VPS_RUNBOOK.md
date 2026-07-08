@@ -189,9 +189,25 @@ The script:
 5. Calls the component deploy scripts for backend, indexer, and frontend.
    Those scripts run with `SKIP_GIT_UPDATE=1` so the deploy stays pinned to
    the commit selected by this top-level entrypoint.
-6. Builds the public site if marketing/site files changed.
-7. Applies Caddy only when Caddy files changed and basic-auth env is provided.
-8. Runs the hosted stack smoke check.
+6. Always rebuilds the public site (`RUN_SITE=0` is the escape hatch) — the
+   build is no longer path-gated because the served `site/` files are
+   uncommitted working-tree output; see the stash warning below.
+7. Applies Caddy (render → validate → hash-compare → install if changed).
+8. Verifies the served homepage and `console-stream.js` are byte-identical
+   (sha256) to the freshly built `site/` files, fail-closed.
+9. Runs the hosted stack smoke check.
+
+**Never leave a `git stash` un-popped on the VPS checkout.** Caddy serves
+`site/` and `frontend/` straight from the working tree, and the fresh builds
+live there as *uncommitted* modifications over stale committed copies. Any
+`git stash push -u` (including the ones a manual rollback needs before
+`git checkout <sha>`) instantly reverts www.averray.com and app.averray.com
+to the stale committed files. That is how the homepage regressed from
+2026-06-28 ("ops path-b backend rollback pre-state" stash, never popped)
+until the 2026-07-08 deploys. After any stash/checkout dance, either pop the
+stash or immediately re-run `./scripts/ops/deploy-production.sh` (the site
+step self-heals; the frontend step only rebuilds when its paths changed, so
+run `./scripts/ops/redeploy-frontend.sh` too if in doubt).
 
 GitHub Actions should call this script after CI passes on `main`. Configure
 these repository secrets for `.github/workflows/deploy-production.yml`:
