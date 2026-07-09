@@ -10,7 +10,7 @@ import { hasRole } from "../../auth/config.js";
 import { resolveRequestId } from "../../core/logger.js";
 import { getAddress, keccak256, toUtf8Bytes } from "ethers";
 import { buildAgentProfile } from "../../core/agent-profile.js";
-import { buildBadgeFromSession } from "../../core/badge-metadata.js";
+import { buildBadgeFromSession, buildBadgeSigners } from "../../core/badge-metadata.js";
 import { buildDiscoveryManifest } from "../../core/discovery-manifest.js";
 import {
   getPublicBuiltinJobSchemaByName,
@@ -215,18 +215,18 @@ function clientIp(request) {
   return extractClientKey(request, { trustProxy });
 }
 
-function buildBadgeReceipt(badge) {
+function buildBadgeReceipt(badge, { session, verification, context } = {}) {
   const averray = badge.averray ?? {};
+  const signers = Array.isArray(badge.signers) && badge.signers.length > 0
+    ? badge.signers
+    : buildBadgeSigners({ session, verification, context });
   return {
     sessionId: averray.sessionId,
     jobId: averray.jobId,
     worker: averray.worker,
     kind: "badge",
     issuedAt: averray.completedAt,
-    signers: [
-      { wallet: averray.poster, status: "posted" },
-      { wallet: averray.verifier, status: "signed" }
-    ],
+    signers,
     evidenceHash: averray.evidenceHash,
     blockRef: averray.chainJobId,
     badge
@@ -264,21 +264,24 @@ async function listBadgeReceipts(limit = 100) {
   const receipts = [];
   for (const session of sessions) {
     let badge;
+    const job = service.getJobDefinition(session.jobId);
+    const verification = session.verification;
+    const context = {
+      publicBaseUrl: process.env.PUBLIC_BASE_URL,
+      posterAddress: process.env.DEFAULT_POSTER_ADDRESS,
+      verifierAddress: process.env.DEFAULT_VERIFIER_ADDRESS
+    };
     try {
       badge = buildBadgeFromSession({
         session,
-        job: service.getJobDefinition(session.jobId),
-        verification: session.verification,
-        context: {
-          publicBaseUrl: process.env.PUBLIC_BASE_URL,
-          posterAddress: process.env.DEFAULT_POSTER_ADDRESS,
-          verifierAddress: process.env.DEFAULT_VERIFIER_ADDRESS
-        }
+        job,
+        verification,
+        context
       });
     } catch {
       continue;
     }
-    receipts.push(buildBadgeReceipt(badge));
+    receipts.push(buildBadgeReceipt(badge, { session, verification, context }));
   }
   return receipts;
 }
