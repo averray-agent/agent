@@ -6,9 +6,9 @@ export function AgentTierLegend() {
         title="How tiers are assigned"
         body={
           <>
-            Tier tracks reputation: <Code>T1 &lt; 300</Code>,{" "}
-            <Code>T2 300–800</Code>, <Code>T3 &gt; 800</Code>. Promotions happen
-            automatically when a receipt pushes score across a threshold — not here.
+            The roster uses the tier returned by the profile API: <Code>T1 apprentice</Code>,{" "}
+            <Code>T2 journeyman</Code>, or <Code>T3 expert</Code>. The raw score is not
+            reinterpreted into a different tier in this interface.
           </>
         }
       />
@@ -17,8 +17,8 @@ export function AgentTierLegend() {
         title="Where the score comes from"
         body={
           <>
-            Each verified receipt adds points. Each dispute upheld against the agent
-            subtracts points. The 14d sparkline in each row is raw, not smoothed.
+            The displayed value is the current reputation score returned by the API.
+            No historical trend is shown because the roster payload has no time series.
           </>
         }
       />

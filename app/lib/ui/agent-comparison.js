@@ -17,7 +17,8 @@
  * @property {string} recentActivity
  * @property {number} stakeDeposited
  * @property {number} stakeLocked
- * @property {number} slashed30
+ * @property {string} stakeAsset
+ * @property {number} slashEventCount
  * @property {number} delegated
  * @property {number} subcontracted
  */
@@ -25,8 +26,8 @@
 /**
  * Ordered metric rows for the side-by-side table + CSV. Tier, score,
  * badges, and recent activity are the close-criteria fields; the rest
- * are useful adjacent context. Stake is labelled DOT to match the
- * directory's existing display (no new denomination claim introduced).
+ * are useful adjacent context. Stake values carry the asset supplied by
+ * the roster adapter, which defaults to the platform settlement asset.
  * @type {{ key: keyof ComparisonAgent, label: string }[]}
  */
 export const COMPARISON_METRICS = [
@@ -36,9 +37,9 @@ export const COMPARISON_METRICS = [
   { key: "specialty", label: "Specialty" },
   { key: "badges", label: "Badges" },
   { key: "recentActivity", label: "Recent activity" },
-  { key: "stakeDeposited", label: "Stake deposited (DOT)" },
-  { key: "stakeLocked", label: "Stake locked (DOT)" },
-  { key: "slashed30", label: "Slashed (30d)" },
+  { key: "stakeDeposited", label: "Stake deposited" },
+  { key: "stakeLocked", label: "Stake locked" },
+  { key: "slashEventCount", label: "Slash events" },
   { key: "delegated", label: "Sub-jobs delegated" },
   { key: "subcontracted", label: "Worked as sub-contractor" },
 ];
@@ -54,6 +55,11 @@ function formatMetric(key, agent) {
   const value = agent ? agent[key] : undefined;
   if (key === "badges") {
     return Array.isArray(value) && value.length ? value.join("; ") : "—";
+  }
+  if (key === "stakeDeposited" || key === "stakeLocked") {
+    if (value === undefined || value === null || value === "") return "—";
+    const asset = agent?.stakeAsset || "USDC";
+    return `${value} ${asset}`;
   }
   if (value === undefined || value === null || value === "") return "—";
   return String(value);

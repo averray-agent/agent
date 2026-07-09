@@ -2,15 +2,12 @@
 
 import { useState } from "react";
 import { cn } from "@/lib/utils/cn";
-import { Sparkline } from "@/components/overview/Sparkline";
 import { publicProfileUrl } from "@/lib/agents/public-profile";
 import { ShareReadonlyButton } from "@/components/common/ShareReadonlyButton";
 import { BadgeChip } from "./BadgeStrip";
 import { TierChip } from "./TierChip";
 import {
   BADGES,
-  tierFor,
-  nextThreshold,
   type AgentActiveSession,
   type AgentDelegatedLineage,
   type AgentRecord,
@@ -18,18 +15,15 @@ import {
   type AgentTier,
 } from "./types";
 
-const TIERS: { id: AgentTier; lo: number; hi: number }[] = [
-  { id: "T1", lo: 0, hi: 300 },
-  { id: "T2", lo: 300, hi: 800 },
-  { id: "T3", lo: 800, hi: 1000 },
+const TIERS: { id: AgentTier; label: string }[] = [
+  { id: "T1", label: "Apprentice" },
+  { id: "T2", label: "Journeyman" },
+  { id: "T3", label: "Expert" },
 ];
 
 export function AgentDrawerBody({ agent }: { agent: AgentRecord }) {
   const lockPct = agent.stake.deposited > 0 ? agent.stake.locked / agent.stake.deposited : 0;
-  const curTier = tierFor(agent.score);
-  const next = nextThreshold(agent.score);
   const profileUrl = publicProfileUrl(agent.walletFull);
-  const showSparkline = agent.sparkline.some((v) => v > 0);
   // Badge section copy depends on whether any badge represents a
   // verified-receipt outcome. Capability markers granted on registration
   // (e.g. "Coding L1" assigned to every fresh wallet) shouldn't be
@@ -54,7 +48,7 @@ export function AgentDrawerBody({ agent }: { agent: AgentRecord }) {
         </Section>
       ) : null}
 
-      <Section title="Reputation · 30d">
+      <Section title="Reputation">
         <div className="grid gap-3 rounded-[10px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-4 py-3.5">
           <div className="flex items-end justify-between gap-4">
             <div>
@@ -65,52 +59,27 @@ export function AgentDrawerBody({ agent }: { agent: AgentRecord }) {
                 </span>
               </div>
               <div className="mt-1 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]">
-                {next
-                  ? `+${next - agent.score} to ${tierFor(next)}`
-                  : "top tier — no further ladder"}
+                Current API score · no historical series available
               </div>
             </div>
-            {showSparkline ? (
-              <Sparkline points={agent.sparkline} width={160} height={34} />
-            ) : (
-              <span
-                aria-hidden="true"
-                className="block h-[2px] w-[160px] rounded-full bg-[color:rgba(17,19,21,0.08)]"
-              />
-            )}
           </div>
           <div className="grid gap-1.5">
             {TIERS.map((t) => {
-              const isCur = t.id === curTier;
-              const pct =
-                Math.max(0, Math.min(1, (agent.score - t.lo) / (t.hi - t.lo))) * 100;
-              const hiLabel = t.hi === 1000 ? "∞" : t.hi;
+              const isCur = t.id === agent.tier;
               return (
                 <div
                   key={t.id}
                   className={cn(
-                    "grid items-center gap-3 font-[family-name:var(--font-mono)] text-[11.5px]",
+                    "grid items-center gap-3 rounded-[6px] px-2.5 py-1.5 font-[family-name:var(--font-mono)] text-[11.5px]",
                     isCur
-                      ? "font-semibold text-[var(--avy-ink)]"
+                      ? "bg-[var(--avy-accent-soft)] font-semibold text-[var(--avy-accent)]"
                       : "text-[var(--avy-muted)]"
                   )}
                   style={{ gridTemplateColumns: "2.5rem 1fr auto", letterSpacing: 0 }}
                 >
                   <span>{t.id}</span>
-                  <div className="h-1.5 overflow-hidden rounded-[3px] bg-[color:rgba(17,19,21,0.08)]">
-                    <span
-                      className={cn(
-                        "block h-full",
-                        isCur
-                          ? "bg-[var(--avy-accent)]"
-                          : "bg-[color:rgba(30,102,66,0.35)]"
-                      )}
-                      style={{ width: `${pct}%` }}
-                    />
-                  </div>
-                  <span>
-                    {t.lo}–{hiLabel}
-                  </span>
+                  <span>{t.label}</span>
+                  <span>{isCur ? "Resolved tier" : "Reference tier"}</span>
                 </div>
               );
             })}
@@ -178,17 +147,17 @@ export function AgentDrawerBody({ agent }: { agent: AgentRecord }) {
 
       <Section title="Stake">
         <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-          <StakeCell label="Deposited" value={`${agent.stake.deposited} DOT`} />
+          <StakeCell label="Deposited" value={`${agent.stake.deposited} ${agent.stake.asset}`} />
           <StakeCell
             label="Locked"
-            value={`${agent.stake.locked} DOT`}
+            value={`${agent.stake.locked} ${agent.stake.asset}`}
             tone={lockPct > 0.8 ? "warn" : undefined}
           />
-          <StakeCell label="Available" value={`${agent.stake.available} DOT`} />
+          <StakeCell label="Available" value={`${agent.stake.available} ${agent.stake.asset}`} />
           <StakeCell
-            label="Slashed 30d"
-            value={`${agent.stake.slashed30} DOT`}
-            tone={agent.stake.slashed30 > 0 ? "bad" : undefined}
+            label="Slash events"
+            value={`${agent.stake.slashEventCount}`}
+            tone={agent.stake.slashEventCount > 0 ? "bad" : undefined}
           />
         </div>
       </Section>

@@ -1,12 +1,11 @@
 import {
   BADGES,
-  tierFor,
   type AgentActiveSession,
   type AgentRecord,
   type AgentSpecialty,
   type AgentState,
-  type AgentTier,
 } from "@/components/agents/types";
+import { stateFor, tierFrom } from "./agent-roster-truth.js";
 
 type RawRecord = Record<string, unknown>;
 
@@ -41,19 +40,23 @@ export function extractAgent(data: unknown): AgentRecord | null {
   const verifiedBadgeCount = badgesRaw.length;
   const lineage = lineageFor(record);
   const lineageStats = lineageStatsFor(record, lineage);
+  const stake = stakeFor(record);
   return {
     handle: text(record.handle, handleForWallet(walletFull)),
     wallet: shortAddress(walletFull),
     walletFull,
     tier: tierFrom(record.tier, score),
     score,
-    sparkline: sparkline(score),
     badges: badgeIds,
     badgeDates: badgeDatesFor(badgesRaw, badgeIds),
     specialty,
-    stake: stakeFor(record),
+    stake,
     activity: activityFor(record, badgesRaw, totalJobs, activeSession),
-    state: stateFor(record, totalJobs, activeSession),
+    state: stateFor({
+      slashEventCount: stake.slashEventCount,
+      activeStatus: activeSession?.status,
+      totalJobs,
+    }) as AgentState,
     ...(activeSession ? { activeSession } : {}),
     hasVerifiedBadges: verifiedBadgeCount > 0,
     recentRuns: recentRunsFor(badgesRaw),
@@ -69,14 +72,6 @@ function isUiAgent(record: RawRecord): boolean {
 
 function reputationScore(reputation: RawRecord | null): number {
   return number(reputation?.skill, 0) + number(reputation?.reliability, 0) + number(reputation?.economic, 0);
-}
-
-function tierFrom(value: unknown, score: number): AgentTier {
-  const raw = text(value, "").toLowerCase();
-  if (raw === "t3" || raw === "expert" || raw === "master") return "T3";
-  if (raw === "t2" || raw === "journeyman") return "T2";
-  if (raw === "t1" || raw === "apprentice") return "T1";
-  return tierFor(score);
 }
 
 function specialtyFor(record: RawRecord, stats: RawRecord | null, badges: unknown[]): AgentSpecialty {
@@ -132,14 +127,20 @@ function badgeDatesFor(badges: unknown[], ids: string[]): Record<string, string>
 }
 
 function stakeFor(record: RawRecord): AgentRecord["stake"] {
-  const deposited = number(record.activeStake, 0);
+  const activeStake = objectField(record, "activeStake");
+  const stake = objectField(record, "stake");
+  const deposited = number(
+    activeStake?.amount,
+    number(activeStake?.value, number(record.activeStake, 0))
+  );
   const locked = Math.min(deposited, number(record.lockedStake, 0));
   const slashed = Array.isArray(record.slashEvents) ? record.slashEvents.length : 0;
   return {
+    asset: assetSymbol(activeStake?.asset ?? record.stakeAsset ?? stake?.asset),
     deposited,
     locked,
     available: Math.max(0, deposited - locked),
-    slashed30: slashed,
+    slashEventCount: slashed,
   };
 }
 
@@ -180,16 +181,6 @@ function activityFor(
     ref: totalJobs ? `${totalJobs}` : "first run",
     when: relativeTime(record.fetchedAt),
   };
-}
-
-function stateFor(
-  record: RawRecord,
-  totalJobs: number,
-  activeSession: AgentActiveSession | undefined
-): AgentState {
-  if (Array.isArray(record.slashEvents) && record.slashEvents.length) return "slashed";
-  if (activeSession) return activeSession.status;
-  return totalJobs > 0 ? "active" : "idle";
 }
 
 function activeSessionFor(record: RawRecord): AgentActiveSession | undefined {
@@ -265,11 +256,18 @@ function slashEvents(value: unknown): AgentRecord["slashes"] {
     const record = entry && typeof entry === "object" ? (entry as RawRecord) : {};
     return {
       when: text(record.when, text(record.at, "-")),
-      amount: text(record.amount, "0 DOT"),
+      amount: slashAmount(record),
       reason: text(record.reason, "Slash recorded"),
       ref: text(record.ref, `slash-${index + 1}`),
     };
   });
+}
+
+function slashAmount(record: RawRecord): string {
+  const amount = text(record.amount, "");
+  if (!amount) return "Amount not reported";
+  const asset = text(record.asset, text(record.assetSymbol, "")).toUpperCase();
+  return asset && !amount.toUpperCase().endsWith(asset) ? `${amount} ${asset}` : amount;
 }
 
 function lineageFor(record: RawRecord): AgentRecord["lineage"] {
@@ -344,11 +342,6 @@ function subcontractedLineageEntry(value: unknown): AgentRecord["lineage"]["subc
   };
 }
 
-function sparkline(score: number): number[] {
-  const base = Math.max(0, score - 32);
-  return Array.from({ length: 14 }, (_, index) => Math.max(0, base + Math.round(index * 2.4)));
-}
-
 function handleForWallet(wallet: string): string {
   const raw = wallet.toLowerCase().replace(/^0x/u, "");
   return `agent-${raw.slice(0, 4)}-${raw.slice(-4)}`;
@@ -385,6 +378,10 @@ function shortAddress(value: string): string {
 function text(value: unknown, fallback = ""): string {
   if (typeof value === "number" && Number.isFinite(value)) return String(value);
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function assetSymbol(value: unknown): string {
+  return text(value, "USDC").toUpperCase();
 }
 
 function number(value: unknown, fallback = 0): number {

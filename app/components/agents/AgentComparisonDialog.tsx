@@ -33,7 +33,8 @@ function toComparisonAgent(agent: AgentRecord) {
       : "",
     stakeDeposited: agent.stake.deposited,
     stakeLocked: agent.stake.locked,
-    slashed30: agent.stake.slashed30,
+    stakeAsset: agent.stake.asset,
+    slashEventCount: agent.stake.slashEventCount,
     delegated: agent.lineageStats?.delegated ?? 0,
     subcontracted: agent.lineageStats?.subcontracted ?? 0,
   };
