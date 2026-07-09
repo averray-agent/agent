@@ -34,6 +34,7 @@ import {
   countOpenGithubPullRequestsForRepo
 } from "./maintainer-surface-policy.js";
 import { claimExpiresAt, countClaimAttempts, isExpiredClaim, isTerminalSession } from "./claim-state.js";
+import { buildBadgeJobSnapshot } from "./badge-metadata.js";
 
 // EscrowCore JobState enum: None=0, Open=1, Claimed=2, Submitted=3, Rejected=4,
 // Disputed=5, Closed=6. Used to reconcile a mined-but-receipt-lost submit.
@@ -242,6 +243,7 @@ export class JobExecutionService {
       claimEconomicsWaived: claimEconomics.claimEconomicsWaived,
       claimNumber: claimEconomics.claimNumber,
       totalClaimLock: claimEconomics.totalClaimLock,
+      badgeSnapshot: buildBadgeJobSnapshot(job),
       ...chainClaimTiming,
       idempotencyKey,
       protocolHistory: [protocol]

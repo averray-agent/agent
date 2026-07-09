@@ -556,8 +556,9 @@ function normalizeIso(raw) {
  *
  * @param {object} params
  * @param {object} params.session                 Session object from the state store
- * @param {object} params.job                     Canonical job definition
- * @param {object} [params.verification]          Verification result, if any
+ * @param {object} [params.job]                   Canonical job definition, when still retained
+ * @param {object} [params.verification]          Verification result, if any. Session/verdict
+ *                                                 snapshots supply badge facts after job pruning.
  * @param {object} [params.context]               { publicBaseUrl, posterAddress, verifierAddress, image, lineage }
  *                                                 `context.lineage` (optional) is the slim
  *                                                 sub-contracting block: `{ parent?, children? }`.
@@ -567,12 +568,9 @@ function normalizeIso(raw) {
  *                                                 (children) so this builder doesn't need
  *                                                 to reach into the catalog. Roadmap §8.
  */
-export function buildBadgeFromSession({ session, job, verification, context = {} }) {
+export function buildBadgeFromSession({ session, job = undefined, verification, context = {} }) {
   if (!session) {
     throw new NotFoundError("Unknown session.", "session_not_found");
-  }
-  if (!job) {
-    throw new NotFoundError(`Unknown job definition for session ${session.sessionId}.`, "job_not_found");
   }
   if (verification?.outcome !== "approved" && session.status !== "resolved") {
     throw new NotFoundError(
@@ -581,11 +579,12 @@ export function buildBadgeFromSession({ session, job, verification, context = {}
     );
   }
 
-  const rewardAsset = job.rewardAsset ?? DEFAULT_ESCROW_ASSET_SYMBOL;
-  const decimals = Number.isInteger(job.rewardDecimals)
-    ? job.rewardDecimals
+  const badgeFacts = resolveBadgeFacts({ session, job, verification });
+  const rewardAsset = badgeFacts.rewardAsset ?? DEFAULT_ESCROW_ASSET_SYMBOL;
+  const decimals = Number.isInteger(badgeFacts.rewardDecimals)
+    ? badgeFacts.rewardDecimals
     : decimalsForAssetSymbol(rewardAsset);
-  const rewardBase = toBaseUnits(job.rewardAmount, decimals);
+  const rewardBase = toBaseUnits(badgeFacts.rewardAmount, decimals);
   const stakeBase = toBaseUnits(session.claimStake, decimals);
   const publicBaseUrl = context.publicBaseUrl ?? undefined;
   const selfUrl = publicBaseUrl
@@ -598,9 +597,9 @@ export function buildBadgeFromSession({ session, job, verification, context = {}
     jobId: session.jobId,
     chainJobId,
     sessionId: session.sessionId,
-    category: job.category,
-    level: inferLevel(job),
-    verifierMode: job.verifierMode,
+    category: badgeFacts.category,
+    level: inferLevel(badgeFacts),
+    verifierMode: badgeFacts.verifierMode,
     reward: { asset: rewardAsset, amount: rewardBase, decimals },
     claimStake: { asset: rewardAsset, amount: stakeBase, decimals },
     evidenceHash,
@@ -622,6 +621,49 @@ export function buildBadgeFromSession({ session, job, verification, context = {}
   });
 }
 
+export function buildBadgeJobSnapshot(job) {
+  if (!job || typeof job !== "object") return undefined;
+  const snapshot = {
+    category: job.category,
+    tier: job.tier,
+    level: job.level,
+    rewardAsset: job.rewardAsset ?? job.reward?.asset,
+    rewardAmount: job.rewardAmount ?? job.reward?.amount,
+    rewardDecimals: job.rewardDecimals ?? job.reward?.decimals,
+    verifierMode: job.verifierMode,
+    payoutMode: job.payoutMode
+  };
+  const compact = Object.fromEntries(Object.entries(snapshot).filter(([, value]) => value !== undefined));
+  return Object.keys(compact).length > 0 ? compact : undefined;
+}
+
+function resolveBadgeFacts({ session, job, verification }) {
+  return {
+    ...buildBadgeJobSnapshot(verification?.badgeSnapshot),
+    ...buildBadgeJobSnapshot(verification?.session?.badgeSnapshot),
+    ...buildBadgeJobSnapshot({
+      category: verification?.category ?? verification?.reputationSignals?.category,
+      rewardAsset: verification?.rewardAsset ?? verification?.reward?.asset,
+      rewardAmount: verification?.rewardAmount ?? verification?.reward?.amount,
+      rewardDecimals: verification?.rewardDecimals ?? verification?.reward?.decimals,
+      verifierMode: verification?.verificationContract?.verifierMode ?? verification?.handler,
+      level: verification?.level,
+      payoutMode: verification?.payoutMode
+    }),
+    ...buildBadgeJobSnapshot({
+      category: session.category ?? session.jobCategory,
+      rewardAsset: session.rewardAsset ?? session.reward?.asset,
+      rewardAmount: session.rewardAmount ?? session.reward?.amount,
+      rewardDecimals: session.rewardDecimals ?? session.reward?.decimals,
+      verifierMode: session.verifierMode ?? session.verificationSummary?.handler,
+      level: session.level,
+      payoutMode: session.payoutMode
+    }),
+    ...buildBadgeJobSnapshot(session.badgeSnapshot),
+    ...buildBadgeJobSnapshot(job)
+  };
+}
+
 function deriveEvidenceHash(session) {
   const submitted = extractSubmissionText(session.submission);
   const input = submitted || `averray:badge:${session.sessionId}|${session.wallet}|${session.updatedAt ?? ""}`;
@@ -641,6 +683,7 @@ function inferLevel(job) {
   //   single-payout approved → 1
   //   milestone job approved  → 2
   // Future levels reserved for multi-stage credentials.
+  if (Number.isInteger(job?.level) && job.level > 0) return job.level;
   return job?.payoutMode === "milestone" ? 2 : 1;
 }
 

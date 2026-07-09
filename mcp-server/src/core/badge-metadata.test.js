@@ -253,6 +253,28 @@ test("buildBadgeFromSession milestone jobs earn level 2", () => {
   assert.equal(doc.averray.level, 2);
 });
 
+test("buildBadgeFromSession rebuilds a sparse badge after its job is pruned", () => {
+  const fixture = approvedSessionFixture();
+  fixture.session.badgeSnapshot = {
+    category: "security",
+    rewardAsset: "USDC",
+    rewardAmount: 12.5,
+    rewardDecimals: 6,
+    payoutMode: "milestone"
+  };
+  fixture.verification = {
+    outcome: "approved",
+    handler: "deterministic"
+  };
+  delete fixture.job;
+
+  const doc = buildBadgeFromSession(fixture);
+  assert.equal(doc.averray.category, "security");
+  assert.equal(doc.averray.level, 2);
+  assert.deepEqual(doc.averray.reward, { asset: "USDC", amount: "12500000", decimals: 6 });
+  assert.equal(doc.averray.verifierMode, "deterministic");
+});
+
 test("buildBadgeFromSession returns 404-ish error for unknown session", () => {
   assert.throws(
     () => buildBadgeFromSession({ session: undefined, job: undefined }),

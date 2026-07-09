@@ -62,6 +62,21 @@ test("MemoryStateStore mutation receipts round-trip", async () => {
   assert.deepEqual(loaded, receipt);
 });
 
+test("MemoryStateStore badge documents are write-once and cloned", async () => {
+  const store = new MemoryStateStore();
+  const original = { averray: { sessionId: "session-1", category: "security" } };
+  const replacement = { averray: { sessionId: "session-1", category: "coding" } };
+
+  await store.putBadgeDocument("session-1", original);
+  original.averray.category = "mutated";
+  await store.putBadgeDocument("session-1", replacement);
+
+  const loaded = await store.getBadgeDocument("session-1");
+  assert.equal(loaded.averray.category, "security");
+  loaded.averray.category = "changed-after-read";
+  assert.equal((await store.getBadgeDocument("session-1")).averray.category, "security");
+});
+
 test("MemoryStateStore content blobs round-trip by lowercase hash", async () => {
   const store = new MemoryStateStore();
   const record = {

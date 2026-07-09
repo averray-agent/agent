@@ -1,4 +1,69 @@
 import { ValidationError, normalizeError } from "../../core/errors.js";
+import { buildBadgeSigners } from "../../core/badge-metadata.js";
+
+export function createListBadgeReceipts({
+  buildBadgeFromSession,
+  deriveBadgeLineage,
+  publicBaseUrl,
+  posterAddress,
+  service,
+  stateStore,
+  verifierAddress,
+  verifierService
+}) {
+  return async function listBadgeReceipts(limit = 100) {
+    const sessions = await service.listRecentSessions(limit);
+    const receipts = [];
+    for (const session of sessions) {
+      try {
+        const storedBadge = await stateStore.getBadgeDocument?.(session.sessionId);
+        if (storedBadge) {
+          receipts.push(buildBadgeReceipt(storedBadge, { session }));
+          continue;
+        }
+
+        const verification = await verifierService.getResult(session.sessionId);
+        let job;
+        try {
+          job = service.getJobDefinition(session.jobId);
+        } catch {
+          job = undefined;
+        }
+        const context = {
+          publicBaseUrl,
+          posterAddress,
+          verifierAddress,
+          lineage: deriveBadgeLineage(session, job)
+        };
+        const rebuiltBadge = buildBadgeFromSession({ session, job, verification, context });
+        const badge = await stateStore.putBadgeDocument?.(session.sessionId, rebuiltBadge) ?? rebuiltBadge;
+        receipts.push(buildBadgeReceipt(badge, { session, verification, context }));
+      } catch {
+        // One stale or malformed row must never take down the public listing.
+        continue;
+      }
+    }
+    return receipts;
+  };
+}
+
+function buildBadgeReceipt(badge, { session, verification, context } = {}) {
+  const averray = badge.averray ?? {};
+  const signers = Array.isArray(badge.signers) && badge.signers.length > 0
+    ? badge.signers
+    : buildBadgeSigners({ session, verification, context });
+  return {
+    sessionId: averray.sessionId ?? session?.sessionId,
+    jobId: averray.jobId ?? session?.jobId,
+    worker: averray.worker ?? session?.wallet,
+    kind: "badge",
+    issuedAt: averray.completedAt ?? session?.resolvedAt ?? session?.updatedAt,
+    signers,
+    evidenceHash: averray.evidenceHash,
+    blockRef: averray.chainJobId,
+    badge
+  };
+}
 
 export function createBadgeRoutes({
   buildBadgeFromSession,
@@ -9,6 +74,7 @@ export function createBadgeRoutes({
   posterAddress,
   respond,
   service,
+  stateStore,
   verifierAddress,
   verifierService,
 }) {
@@ -26,6 +92,12 @@ export function createBadgeRoutes({
         throw new ValidationError("sessionId path segment is required.");
       }
 
+      const storedBadge = await stateStore?.getBadgeDocument?.(sessionId);
+      if (storedBadge) {
+        respond(response, 200, storedBadge, { "cache-control": "public, max-age=60" });
+        return true;
+      }
+
       let session;
       try {
         session = await service.resumeSession(sessionId);
@@ -38,10 +110,15 @@ export function createBadgeRoutes({
         throw normalized;
       }
 
-      const verification = await verifierService.getResult(sessionId);
-      const job = service.getJobDefinition(session.jobId);
       try {
-        const badge = buildBadgeFromSession({
+        const verification = await verifierService.getResult(sessionId);
+        let job;
+        try {
+          job = service.getJobDefinition(session.jobId);
+        } catch {
+          job = undefined;
+        }
+        const rebuiltBadge = buildBadgeFromSession({
           session,
           job,
           verification,
@@ -52,6 +129,7 @@ export function createBadgeRoutes({
             lineage: deriveBadgeLineage(session, job)
           }
         });
+        const badge = await stateStore?.putBadgeDocument?.(sessionId, rebuiltBadge) ?? rebuiltBadge;
         // Badge JSON is deterministic once a session is resolved.
         respond(response, 200, badge, { "cache-control": "public, max-age=60" });
         return true;

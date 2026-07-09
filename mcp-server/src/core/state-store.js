@@ -57,6 +57,7 @@ export class MemoryStateStore {
     this.walletSessions = new Map();
     this.recentSessionIds = [];
     this.verificationResults = new Map();
+    this.badgeDocuments = new Map();
     this.claimLocks = new Map();
     this.nonces = new Map();
     this.rateLimits = new Map();
@@ -176,6 +177,20 @@ export class MemoryStateStore {
   async upsertVerificationResult(sessionId, result) {
     this.verificationResults.set(sessionId, result);
     return result;
+  }
+
+  async getBadgeDocument(sessionId) {
+    return cloneJsonRecord(this.badgeDocuments.get(sessionId));
+  }
+
+  async putBadgeDocument(sessionId, document) {
+    const existing = this.badgeDocuments.get(sessionId);
+    if (existing) {
+      return cloneJsonRecord(existing);
+    }
+    const stored = cloneJsonRecord(document);
+    this.badgeDocuments.set(sessionId, stored);
+    return cloneJsonRecord(stored);
   }
 
   async listSessionsByWallet(wallet, limit = 10, offset = 0) {
@@ -552,6 +567,19 @@ export class RedisStateStore {
     await this.connect();
     await this.client.set(this.key("verification", sessionId), JSON.stringify(result));
     return result;
+  }
+
+  async getBadgeDocument(sessionId) {
+    await this.connect();
+    const raw = await this.client.get(this.key("badge", sessionId));
+    return raw ? JSON.parse(raw) : undefined;
+  }
+
+  async putBadgeDocument(sessionId, document) {
+    await this.connect();
+    const key = this.key("badge", sessionId);
+    await this.client.set(key, JSON.stringify(document), { NX: true });
+    return this.getBadgeDocument(sessionId);
   }
 
   async listSessionsByWallet(wallet, limit = 10, offset = 0) {

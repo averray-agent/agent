@@ -5,6 +5,7 @@ import {
 import { updateFundedJobFromSession } from "../core/funded-jobs.js";
 import { buildVerificationAuditFields } from "../core/verifier-contract.js";
 import { disputeIdForSession } from "../core/dispute-resolution.js";
+import { buildBadgeFromSession, buildBadgeJobSnapshot } from "../core/badge-metadata.js";
 
 export class VerificationIngestionService {
   constructor(stateStore, eventBus = undefined, getJobDefinition = undefined, logger = undefined) {
@@ -41,8 +42,10 @@ export class VerificationIngestionService {
         ? "disputed"
         : "rejected";
 
+    const badgeSnapshot = session.badgeSnapshot ?? buildBadgeJobSnapshot(job);
     const transitioned = transitionSession({
       ...session,
+      ...(badgeSnapshot ? { badgeSnapshot } : {}),
       verificationSummary: {
         outcome: verdict.outcome,
         reasonCode: verdict.reasonCode,
@@ -68,9 +71,10 @@ export class VerificationIngestionService {
       session: updatedSession,
       verification: verdict
     }));
-    await this.stateStore.upsertVerificationResult(updatedSession.sessionId, {
+    const storedVerification = await this.stateStore.upsertVerificationResult(updatedSession.sessionId, {
       ...verdict,
       ...auditFields,
+      ...(badgeSnapshot ? { badgeSnapshot } : {}),
       session: {
         sessionId: updatedSession.sessionId,
         jobId: updatedSession.jobId,
@@ -80,6 +84,9 @@ export class VerificationIngestionService {
         resolvedAt: updatedSession.resolvedAt
       }
     });
+    if (status === "resolved") {
+      await this.persistBadgeDocument(updatedSession, job, storedVerification);
+    }
     const eventTimestamp = new Date().toISOString();
     this.eventBus?.publish({
       id: `platform-verification-${updatedSession.sessionId}-${Date.now()}`,
@@ -102,6 +109,28 @@ export class VerificationIngestionService {
     });
     this.publishWorkflowOutcomeEvent(updatedSession, verdict, auditFields, status, eventTimestamp);
     return updatedSession;
+  }
+
+  async persistBadgeDocument(session, job, verification) {
+    if (typeof this.stateStore.putBadgeDocument !== "function") return;
+    try {
+      const badge = buildBadgeFromSession({
+        session,
+        job,
+        verification,
+        context: {
+          publicBaseUrl: process.env.PUBLIC_BASE_URL,
+          posterAddress: process.env.DEFAULT_POSTER_ADDRESS,
+          verifierAddress: process.env.DEFAULT_VERIFIER_ADDRESS
+        }
+      });
+      await this.stateStore.putBadgeDocument(session.sessionId, badge);
+    } catch (error) {
+      this.logger.warn?.(
+        { sessionId: session.sessionId, jobId: session.jobId, error: error?.message },
+        "badge_document.persist_failed"
+      );
+    }
   }
 
   resolveJob(session, verdict) {
