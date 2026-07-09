@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { ReactNode } from "react";
 import { SectionHead } from "./SectionHead";
+import type { StreamState } from "@/lib/events/stream-status";
 import { cn } from "@/lib/utils/cn";
 
 export type EventTone = "accent" | "warn" | "neutral" | "blue";
@@ -21,9 +22,48 @@ export interface PulseEvent {
 
 export interface PlatformPulseProps {
   events: PulseEvent[];
+  /**
+   * Real state of the SSE connection. The card must never imply a
+   * healthy-but-quiet stream while the connection is failing — "no
+   * events" (empty) and "can't receive events" (degraded) are
+   * different states and render differently.
+   */
+  streamState: StreamState;
   endpoint: string;
   meta?: string;
 }
+
+const STREAM_BADGE: Record<
+  StreamState,
+  { label: string; className: string; emptyCopy: string }
+> = {
+  open: {
+    label: "Connected",
+    className: "text-[var(--avy-accent)] [&>span]:bg-[var(--avy-accent)]",
+    emptyCopy: "Connected — no events received in this view yet.",
+  },
+  connecting: {
+    label: "Connecting…",
+    className: "text-[#254e9a] [&>span]:bg-[#254e9a]",
+    emptyCopy: "Connecting to the event stream…",
+  },
+  reconnecting: {
+    label: "Reconnecting…",
+    className: "text-[var(--avy-warn)] [&>span]:bg-[var(--avy-warn)]",
+    emptyCopy: "Event stream reconnecting — recent events may be missing.",
+  },
+  stalled: {
+    label: "Stream down",
+    className: "text-[var(--avy-warn)] [&>span]:bg-[var(--avy-warn)]",
+    emptyCopy:
+      "Event stream is down (reconnect attempts exhausted) — live activity is not visible here.",
+  },
+  off: {
+    label: "Not connected",
+    className: "text-[var(--avy-muted)] [&>span]:bg-[#a8a294]",
+    emptyCopy: "Event stream is not connected for this session.",
+  },
+};
 
 const FILTERS: { id: EventKind; label: string }[] = [
   { id: "all", label: "All" },
@@ -32,11 +72,14 @@ const FILTERS: { id: EventKind; label: string }[] = [
   { id: "identity", label: "Identity" },
 ];
 
-export function PlatformPulse({ events, endpoint, meta }: PlatformPulseProps) {
+export function PlatformPulse({ events, streamState, endpoint, meta }: PlatformPulseProps) {
   const [active, setActive] = useState<EventKind>("all");
 
   const visible = active === "all" ? events : events.filter((e) => e.kind === active);
   const hasEvents = events.length > 0;
+  const badge = STREAM_BADGE[streamState];
+  const badgeLabel =
+    streamState === "open" && hasEvents ? "Streaming" : badge.label;
 
   return (
     <section>
@@ -51,16 +94,20 @@ export function PlatformPulse({ events, endpoint, meta }: PlatformPulseProps) {
               Live event feed
             </h3>
             <span
-              className="inline-flex items-center gap-1.5 font-[family-name:var(--font-display)] text-[10px] font-extrabold uppercase text-[var(--avy-accent)]"
+              className={cn(
+                "inline-flex items-center gap-1.5 font-[family-name:var(--font-display)] text-[10px] font-extrabold uppercase",
+                badge.className
+              )}
               style={{ letterSpacing: "0.12em" }}
             >
               <span
                 className={cn(
-                  "h-1.5 w-1.5 rounded-full bg-[var(--avy-accent)]",
-                  hasEvents && "[animation:pulse_2.2s_ease-in-out_infinite]"
+                  "h-1.5 w-1.5 rounded-full",
+                  streamState === "open" && hasEvents &&
+                    "[animation:pulse_2.2s_ease-in-out_infinite]"
                 )}
               />
-              {hasEvents ? "Streaming" : "No live events"}
+              {badgeLabel}
             </span>
           </div>
           <div
@@ -90,7 +137,9 @@ export function PlatformPulse({ events, endpoint, meta }: PlatformPulseProps) {
             visible.map((event) => <EventRow key={event.id} event={event} />)
           ) : (
             <div className="p-[1rem_1.15rem] font-[family-name:var(--font-body)] text-[13.5px] leading-[1.45] text-[var(--avy-muted)]">
-              No live pulse events available for this view.
+              {hasEvents
+                ? "No events match this filter."
+                : badge.emptyCopy}
             </div>
           )}
         </div>

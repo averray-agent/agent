@@ -20,7 +20,10 @@ test("provider operation legend replaces scheduler jargon with operator language
     PROVIDER_OPERATION_LEGEND.map((entry) => entry.key),
     ["candidate", "created", "skipped", "error"]
   );
-  assert.equal(providerOperationMetricLabel("candidate"), "Found upstream");
+  // candidateCount is post-gate (survivors), verified against
+  // mcp-server/src/jobs/ingest-*.js — the label must not imply raw
+  // upstream discovery.
+  assert.equal(providerOperationMetricLabel("candidate"), "Passed gates");
   assert.equal(providerOperationMetricLabel("created"), "Opened as jobs");
   assert.equal(providerOperationMetricLabel("skipped"), "Safely ignored");
   assert.equal(providerOperationMetricLabel("error"), "Needs attention");
@@ -40,18 +43,21 @@ test("provider operation metrics read the backend counters without exposing raw 
 });
 
 test("provider operation summaries tell the operator what happened", () => {
+  // "checked" totals are candidates + skipped: candidateCount only counts
+  // gate survivors, so the old sentences ("2 upstream items checked; 18
+  // safely ignored") were arithmetically impossible.
   const summaries = [
     [
       formatProviderRunSummary({ candidateCount: 26, createdCount: 4, skippedCount: 22, errorCount: 0 }),
-      "4 jobs opened from 26 upstream items.",
+      "4 jobs opened from 48 upstream items.",
     ],
     [
       formatProviderRunSummary({ dryRun: true, candidateCount: 12, createdCount: 0, skippedCount: 12, errorCount: 0 }),
-      "Dry run: 12 upstream items checked; 12 items safely ignored.",
+      "Dry run: 24 upstream items checked; 12 items safely ignored.",
     ],
     [
       formatProviderRunSummary({ candidateCount: 5, createdCount: 0, skippedCount: 3, errorCount: 2 }),
-      "2 items need operator attention after checking 5 upstream items.",
+      "2 items need operator attention after checking 8 upstream items.",
     ],
     [
       formatProviderRunSummary({ candidateCount: 1, createdCount: 0, skippedCount: 0, errorCount: 1 }),

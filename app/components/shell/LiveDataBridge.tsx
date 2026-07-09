@@ -3,6 +3,11 @@
 import { useEffect } from "react";
 import { mutate } from "swr";
 import { startEventStream, type EventTopic } from "@/lib/events/stream";
+import {
+  recordStreamEvent,
+  reportStreamState,
+  resetStream,
+} from "@/lib/events/stream-status";
 import { useAuth } from "@/lib/auth/use-auth";
 
 const INVALIDATE_BY_TOPIC: Partial<Record<EventTopic, string[]>> = {
@@ -31,10 +36,18 @@ export function LiveDataBridge() {
   const auth = useAuth();
 
   useEffect(() => {
-    if (!auth.authenticated) return undefined;
-    return startEventStream({
+    if (!auth.authenticated) {
+      resetStream();
+      return undefined;
+    }
+    reportStreamState("connecting");
+    const stop = startEventStream({
       wallet: auth.wallet,
-      onEvent: ({ topic }) => {
+      onOpen: () => reportStreamState("open"),
+      onError: () => reportStreamState("reconnecting"),
+      onStalled: () => reportStreamState("stalled"),
+      onEvent: ({ topic, data, id }) => {
+        recordStreamEvent({ topic, data, id });
         for (const key of INVALIDATE_BY_TOPIC[topic] ?? []) {
           mutate(key);
         }
@@ -45,6 +58,10 @@ export function LiveDataBridge() {
         }
       },
     });
+    return () => {
+      stop();
+      resetStream();
+    };
   }, [auth.authenticated, auth.wallet]);
 
   return null;

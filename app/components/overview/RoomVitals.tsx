@@ -9,7 +9,11 @@ export interface KpiData {
   label: string;
   value: ReactNode;
   unit?: string;
-  spark: number[];
+  /**
+   * Real history points only. Omit when no time series exists — the
+   * card renders without a trend rather than implying one.
+   */
+  spark?: number[];
   sparkColor?: string;
   delta: ReactNode;
   deltaTone?: DeltaTone;
@@ -67,7 +71,9 @@ function KpiCard({
             </span>
           ) : null}
         </span>
-        <Sparkline points={spark} color={sparkColor ?? "var(--avy-accent)"} />
+        {spark && spark.length > 0 ? (
+          <Sparkline points={spark} color={sparkColor ?? "var(--avy-accent)"} />
+        ) : null}
       </div>
       <span
         className={cn(

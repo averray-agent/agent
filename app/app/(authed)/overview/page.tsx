@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import {
   OverviewTopbar,
   type CapabilityWarning,
@@ -15,7 +15,7 @@ import {
 import {
   LaneStatusGrid,
 } from "@/components/overview/LaneStatusGrid";
-import { PlatformPulse } from "@/components/overview/PlatformPulse";
+import { PlatformPulse, type PulseEvent } from "@/components/overview/PlatformPulse";
 import { ProviderOperationsCard } from "@/components/overview/ProviderOperationsCard";
 import { RecurringRuntimeCard } from "@/components/overview/RecurringRuntimeCard";
 import { JobLifecycleStrip } from "@/components/overview/JobLifecycleStrip";
@@ -23,7 +23,9 @@ import {
   useAccount,
   useAdminSessions,
   useAlerts,
+  useAudit,
   useBadges,
+  useDisputes,
   useHealth,
   useJobs,
   usePolicies,
@@ -31,6 +33,7 @@ import {
   usePublicProviderOperations,
   useStrategyPositions,
 } from "@/lib/api/hooks";
+import { extractDisputeList } from "@/lib/api/dispute-adapters";
 import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
 import { extractRunJobs } from "@/lib/api/run-adapters";
 import { buildProviderOperations } from "@/lib/api/provider-operations";
@@ -45,6 +48,13 @@ import {
   buildOverviewAlerts,
   buildRoomVitals,
 } from "@/lib/api/treasury-adapters";
+import { feedPresence, FEED_STATE_LABEL } from "@/lib/api/feed-presence";
+import {
+  getStreamServerSnapshot,
+  getStreamSnapshot,
+  subscribeStream,
+} from "@/lib/events/stream-status";
+import { buildPulseEvents } from "@/lib/events/pulse-adapter";
 
 export default function OverviewPage() {
   const jobs = useJobs();
@@ -55,12 +65,34 @@ export default function OverviewPage() {
   const apiAlerts = useAlerts();
   const badges = useBadges();
   const policies = usePolicies();
+  const audit = useAudit();
+  const disputes = useDisputes();
   const providerOps = useProviderOperations();
   const publicProviderOps = usePublicProviderOperations();
 
+  const sessionsPresence = feedPresence(sessions);
+  const sessionsBlocked = sessionsPresence === "locked" || sessionsPresence === "down";
+  const policiesPresence = feedPresence(policies);
+  const policiesBlocked = policiesPresence === "locked" || policiesPresence === "down";
+  const strategyPresence = feedPresence(strategyPositions);
   const liveVitals = useMemo(
-    () => buildRoomVitals(jobs.data, sessions.data, account.data, strategyPositions.data),
-    [account.data, jobs.data, sessions.data, strategyPositions.data]
+    () =>
+      buildRoomVitals(
+        jobs.data,
+        sessions.data,
+        account.data,
+        strategyPositions.data,
+        sessionsPresence,
+        strategyPresence
+      ),
+    [
+      account.data,
+      jobs.data,
+      sessions.data,
+      sessionsPresence,
+      strategyPresence,
+      strategyPositions.data,
+    ]
   );
   // The Runs-in-motion + Agents-active cards both pull from
   // /admin/sessions. While that request is still in flight on first
@@ -82,9 +114,43 @@ export default function OverviewPage() {
     [account.data, sessions.data]
   );
   const endpointAlerts = useMemo(() => extractAlerts(apiAlerts.data), [apiAlerts.data]);
+  const openDisputeCount = useMemo(
+    () =>
+      extractDisputeList(disputes.data).filter(
+        (dispute) => dispute.state !== "resolved"
+      ).length,
+    [disputes.data]
+  );
+  const activePolicyCount = useMemo(
+    () => countActivePolicies(policies.data),
+    [policies.data]
+  );
   const liveLanes = useMemo(
-    () => buildLaneCards(jobs.data, sessions.data, strategyPositions.data),
-    [jobs.data, sessions.data, strategyPositions.data]
+    () =>
+      buildLaneCards(
+        jobs.data,
+        sessions.data,
+        strategyPositions.data,
+        {
+          policies: { presence: policiesPresence, activeCount: activePolicyCount },
+          audit: { presence: feedPresence(audit) },
+          disputes: { presence: feedPresence(disputes), openCount: openDisputeCount },
+        },
+        sessionsPresence,
+        strategyPresence
+      ),
+    [
+      activePolicyCount,
+      audit,
+      disputes,
+      jobs.data,
+      openDisputeCount,
+      policiesPresence,
+      sessions.data,
+      sessionsPresence,
+      strategyPresence,
+      strategyPositions.data,
+    ]
   );
   const policiesAppliedToday = useMemo(
     () => countPoliciesAppliedToday(policies.data),
@@ -136,14 +202,29 @@ export default function OverviewPage() {
     [providerOps.data, publicProviderOps.data]
   );
   const recurringRuntime = useMemo(
-    () => buildRecurringRuntimeSummary(providerOps.data),
-    [providerOps.data]
+    () => buildRecurringRuntimeSummary(providerOps.data, feedPresence(providerOps)),
+    [providerOps]
   );
   const providerRows = liveProviderOps;
   const hasLiveOverview = Boolean(jobs.data || sessions.data || account.data || strategyPositions.data);
   const vitals = vitalsWithLoadingHints;
   const alerts = endpointAlerts.length ? endpointAlerts : liveAlerts;
   const lanes = liveLanes;
+  // Needs-action truth boundary: when the alert feed is locked (this
+  // session lacks an operator role) or down, an empty list means "can't
+  // see", not "nothing to do" — never render it as `0 open`.
+  const alertsPresence = feedPresence(apiAlerts);
+  const alertFeedBlocked = alertsPresence === "locked" || alertsPresence === "down";
+  const alertsMeta = alertFeedBlocked
+    ? `${alerts.length} visible · alert feed ${FEED_STATE_LABEL[alertsPresence]}`
+    : alertsPresence === "loading"
+      ? "loading"
+      : `${alerts.length} open`;
+  const alertsNotice = alertFeedBlocked
+    ? alertsPresence === "locked"
+      ? "The operator alert feed is locked for this session (no operator role on this wallet), so open alerts can't be listed here. What is shown comes from the feeds this session can read."
+      : "The operator alert feed is unavailable right now, so open alerts can't be listed here. What is shown comes from the feeds this session can read."
+    : undefined;
   const disputedSessions = Array.isArray(sessions.data)
     ? sessions.data.filter((session) => session?.status === "disputed").length
     : 0;
@@ -164,6 +245,23 @@ export default function OverviewPage() {
     () => buildCapabilityWarning(health.data),
     [health.data]
   );
+  // Live SSE snapshot written by LiveDataBridge — the pulse card renders
+  // the connection's real state instead of a hardcoded empty feed.
+  const stream = useSyncExternalStore(
+    subscribeStream,
+    getStreamSnapshot,
+    getStreamServerSnapshot
+  );
+  // Cast across the allowJs boundary — pulse-adapter guarantees the
+  // kind/tone unions (covered by its node --test suite).
+  const pulseEvents = useMemo(
+    () => buildPulseEvents(stream.events) as PulseEvent[],
+    [stream.events]
+  );
+  const pulseMeta =
+    stream.state === "off"
+      ? "event stream requires wallet sign-in"
+      : `stream ${stream.state} · ${stream.events.length} recent events`;
 
   return (
     <div className="flex w-full max-w-[1100px] flex-col gap-7">
@@ -177,18 +275,25 @@ export default function OverviewPage() {
         // fallbacks — the previous form (`liveJobs.length || 14`) silently
         // showed the fixture's `14` whenever live data legitimately
         // returned zero rows, masking real "queue is empty" signals.
+        // Locked/down feeds render "—", never a fabricated zero.
         openRuns={hasLiveOverview ? liveJobs.length : 0}
-        awaitingSignature={hasLiveOverview ? disputedSessions : 0}
+        awaitingSignature={sessionsBlocked ? "—" : hasLiveOverview ? disputedSessions : 0}
         lastReceiptTime={lastReceiptTime}
-        treasuryPosture={liveVitals[3]?.value === "Amber" ? "Amber" : "Green"}
-        policiesAppliedToday={policiesAppliedToday}
+        treasuryPosture={
+          liveVitals[3]?.value === "Amber"
+            ? "Amber"
+            : liveVitals[3]?.value === "Green"
+              ? "Green"
+              : "Unknown"
+        }
+        policiesAppliedToday={policiesBlocked ? "—" : policiesAppliedToday}
       />
       <RoomVitals vitals={vitals} comparedTo={hasLiveOverview ? "live API" : "waiting for live API"} />
       <JobLifecycleStrip
         summary={hasLifecycleData ? lifecycleSummary : EMPTY_JOB_LIFECYCLE_SUMMARY}
         meta={lifecycleMeta}
       />
-      <NeedsActionList alerts={alerts} meta={`${alerts.length} open`} />
+      <NeedsActionList alerts={alerts} meta={alertsMeta} notice={alertsNotice} />
       <LaneStatusGrid lanes={lanes} meta={hasLiveOverview ? "live API snapshot" : undefined} />
       <ProviderOperationsCard
         providers={providerRows}
@@ -200,9 +305,10 @@ export default function OverviewPage() {
       />
       <RecurringRuntimeCard runtime={recurringRuntime} />
       <PlatformPulse
-        events={[]}
+        events={pulseEvents}
+        streamState={stream.state}
         endpoint="/events"
-        meta="event stream requires wallet"
+        meta={pulseMeta}
       />
     </div>
   );
@@ -259,6 +365,15 @@ function buildCapabilityWarning(data: unknown): CapabilityWarning | undefined {
     label: treasuryState === "unavailable" ? "Treasury unavailable" : "Treasury degraded",
     title: text(treasuryWarning?.message, fallback),
   };
+}
+
+function countActivePolicies(data: unknown): number {
+  if (!Array.isArray(data)) return 0;
+  return data.reduce((count, item) => {
+    if (!item || typeof item !== "object") return count;
+    const record = item as Record<string, unknown>;
+    return text(record.state, "").toLowerCase() === "active" ? count + 1 : count;
+  }, 0);
 }
 
 function countPoliciesAppliedToday(data: unknown): number {

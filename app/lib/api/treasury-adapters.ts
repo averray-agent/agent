@@ -95,9 +95,10 @@ function pct(numerator: number, denominator: number): number {
   return Math.max(0, Math.min(100, Math.round((numerator / denominator) * 100)));
 }
 
-function spark(seed: number): number[] {
-  return Array.from({ length: 16 }, (_, i) => Math.max(3, seed + Math.sin(i / 2) * 5 + i / 4));
-}
+// NOTE: there is deliberately no sparkline factory here. Trend curves on
+// "vs. live API" tiles were previously synthesized from a sine wave —
+// fabricated history on an operator surface. Sparklines come back only
+// when a real time series backs them.
 
 function isActiveClaim(job: RawRecord): boolean {
   const state = text(job.effectiveState, text(job.claimState, text(job.state))).toLowerCase();
@@ -160,35 +161,32 @@ export function buildBalanceCards(accountPayload: unknown, strategyPayload: unkn
   const debtFill = debt.unit === "DOT" ? pct(debt.value, debt.value + capacity) : 0;
   const debtCap = debt.unit === "DOT"
     ? { label: `Capacity ${fmt(debt.value + capacity)} DOT · headroom ${fmt(capacity)}`, fill: debtFill }
-    : { label: `DOT borrow capacity ${fmt(capacity)} · debt shown in ${debt.unit}`, fill: 0 };
+    : // Non-DOT debt has no DOT-denominated capacity claim to make.
+      { label: `Debt shown in ${debt.unit}`, fill: 0 };
 
   return [
     {
       label: "Spendable",
       value: fmt(liquid.value),
       unit: liquid.unit,
-      spark: spark(18),
       delta: { value: "live balance", tone: "flat", pct: "now" },
     },
     {
       label: "Capital at work",
       value: fmt(allocated.value),
       unit: allocated.unit,
-      spark: spark(24),
       delta: { value: `${numberValue(summary.deployedLanes)} lanes`, tone: "flat", pct: "routed" },
     },
     {
       label: "Collateral",
       value: fmt(collateral.value),
       unit: collateral.unit,
-      spark: spark(14),
       delta: { value: "live account", tone: "flat", pct: "locked" },
     },
     {
       label: debt.unit === "DOT" ? `Debt · ${debtFill}% of cap` : "Debt",
       value: fmt(debt.value),
       unit: debt.unit,
-      spark: spark(28),
       delta: {
         value: debt.unit === "DOT" ? "live debt" : "asset-aware debt",
         tone: debtFill >= 80 ? "up" : "flat",
@@ -208,9 +206,11 @@ export function buildStrategyLanes(strategyPayload: unknown): StrategyLane[] {
     return {
       id: text(position.strategyId, `lane-${index + 1}`),
       laneTitle: text(position.strategyId, `Strategy ${index + 1}`),
-      laneMeta: `${text(position.assetSymbol, text(position.asset, "DOT"))} · ${text(position.executionMode, "sync")}`,
+      // Asset ticker only when the payload names one — an unknown asset
+      // must not silently render as DOT (settlement asset here is USDC).
+      laneMeta: `${text(position.assetSymbol, text(position.asset, "asset n/a"))} · ${text(position.executionMode, "sync")}`,
       strategyKind: text(position.riskLabel, text(position.yieldLabel, "strategy")),
-      allocated: `${fmt(routed)} ${text(position.assetSymbol, "DOT")}`,
+      allocated: `${fmt(routed)}${text(position.assetSymbol) ? ` ${text(position.assetSymbol)}` : ""}`,
       coverage: numberValue(position.deploymentShareBps) ? Math.round(numberValue(position.deploymentShareBps) / 100) : routed > 0 ? 100 : 0,
       status,
       statusLabel: text(position.statusLabel, status === "ok" ? "Routed" : "Idle"),
@@ -291,7 +291,14 @@ export function buildCreditLine(accountPayload: unknown, borrowPayload: unknown)
   };
 }
 
-export function buildRoomVitals(jobsPayload: unknown, sessionsPayload: unknown, accountPayload: unknown, strategyPayload: unknown): KpiData[] {
+export function buildRoomVitals(
+  jobsPayload: unknown,
+  sessionsPayload: unknown,
+  accountPayload: unknown,
+  strategyPayload: unknown,
+  sessionsPresence: FeedPresence = "live",
+  strategyPresence: FeedPresence = "live"
+): KpiData[] {
   const jobs = asArray(jobsPayload);
   const sessions = activeWorkSessions(jobsPayload, sessionsPayload);
   const account = asRecord(accountPayload);
@@ -305,32 +312,59 @@ export function buildRoomVitals(jobsPayload: unknown, sessionsPayload: unknown, 
   );
   const attentionCount = numberValue(summary.attentionCount);
   const activeAgents = new Set(sessions.map((s) => text(s.wallet)).filter(Boolean)).size;
+  // /admin/sessions can be locked for this session (role-less wallet) or
+  // down. Claims reconstructed from the public /jobs feed still count,
+  // but "no claims observed yet" may only be said when the sessions feed
+  // was actually readable — otherwise the room fabricates quiet.
+  const sessionsBlocked = sessionsPresence === "locked" || sessionsPresence === "down";
+  const sessionsStateLabel =
+    sessionsPresence === "locked" ? "locked for this session" : "unavailable";
 
   return [
     {
       label: "Runs in motion",
       value: jobs.length || sessions.length,
-      spark: spark(12),
       // Both surfaces feed this card: every open job in the catalog
       // plus every active session pulled from /admin/sessions
       // (operator-wide, includes external-agent claims). The hint
       // makes that obvious so a reader doesn't think the number is
       // wallet-scoped.
-      delta: "open jobs + operator-wide sessions",
-      deltaTone: "good",
+      delta: sessionsBlocked
+        ? `open jobs only · sessions feed ${sessionsStateLabel}`
+        : "open jobs + operator-wide sessions",
+      deltaTone: sessionsBlocked ? "neutral" : "good",
     },
     {
       label: "Agents active",
       value: activeAgents || "-",
-      spark: spark(8),
-      sparkColor: "#8a8f88",
       delta: activeAgents
-        ? "distinct wallets · operator-wide"
-        : "no claims observed yet · operator-wide",
+        ? sessionsBlocked
+          ? `from public claims · sessions feed ${sessionsStateLabel}`
+          : "distinct wallets · operator-wide"
+        : sessionsBlocked
+          ? `sessions feed ${sessionsStateLabel} — claims not observable`
+          : "no claims observed yet · operator-wide",
       deltaTone: "neutral",
     },
-    { label: "Capital at work", value: fmt(capital.value), unit: capital.unit, spark: spark(20), delta: "strategy + stake", deltaTone: "good" },
-    { label: "Treasury posture", value: attentionCount ? "Amber" : "Green", valueAccent: !attentionCount, spark: spark(1), delta: attentionCount ? `${attentionCount} lane attention` : "No lane attention", deltaTone: attentionCount ? "warn" : "good" },
+    { label: "Capital at work", value: fmt(capital.value), unit: capital.unit, delta: "strategy + stake", deltaTone: "good" },
+    // "Green" is a claim that the strategy feed was read and showed no
+    // lane attention — an unreadable feed must render Unknown, never
+    // default to the good state.
+    {
+      label: "Treasury posture",
+      value: strategyPresence === "live" ? (attentionCount ? "Amber" : "Green") : "Unknown",
+      valueAccent: strategyPresence === "live" && !attentionCount,
+      delta:
+        strategyPresence === "live"
+          ? attentionCount
+            ? `${attentionCount} lane attention`
+            : "No lane attention"
+          : strategyPresence === "loading"
+            ? "waiting for strategy feed"
+            : `strategy feed ${strategyPresence === "locked" ? "locked for this session" : "unavailable"}`,
+      deltaTone:
+        strategyPresence === "live" ? (attentionCount ? "warn" : "good") : "neutral",
+    },
   ];
 }
 
@@ -362,13 +396,72 @@ export function buildOverviewAlerts(sessionsPayload: unknown, accountPayload: un
   return alerts;
 }
 
-export function buildLaneCards(jobsPayload: unknown, sessionsPayload: unknown, strategyPayload: unknown): LaneCardData[] {
+export type FeedPresence = "live" | "loading" | "locked" | "down";
+
+export interface GovernanceLaneInputs {
+  policies: { presence: FeedPresence; activeCount: number };
+  audit: { presence: FeedPresence };
+  disputes: { presence: FeedPresence; openCount: number };
+}
+
+/**
+ * Compact metric-slot label for a feed that can't show a number. Live
+ * feeds render their real value; everything else names its state so a
+ * blocked feed can never read as "0".
+ */
+function metricUnavailable(presence: FeedPresence): string {
+  if (presence === "loading") return "…";
+  if (presence === "locked") return "locked";
+  return "unavailable";
+}
+
+export function buildLaneCards(
+  jobsPayload: unknown,
+  sessionsPayload: unknown,
+  strategyPayload: unknown,
+  governance?: GovernanceLaneInputs,
+  sessionsPresence: FeedPresence = "live",
+  strategyPresence: FeedPresence = "live"
+): LaneCardData[] {
   const jobs = asArray(jobsPayload);
   const sessions = activeWorkSessions(jobsPayload, sessionsPayload);
   const summary = asRecord(asRecord(strategyPayload).summary);
   const disputed = sessions.filter((session) => text(session.status) === "disputed").length;
   const attention = numberValue(summary.attentionCount);
   const latestSessionStatus = text(sessions[0]?.status, "claimed");
+  const sessionsBlockedForLane =
+    sessionsPresence === "locked" || sessionsPresence === "down";
+
+  // Governance truth boundary: the lane previously hardcoded
+  // `policies: "pending"` and `audit: "live"` and derived "Quiet" from
+  // feeds this session may not even be allowed to read. Without real
+  // inputs the lane must say "unknown", never imply calm.
+  const gov: GovernanceLaneInputs = governance ?? {
+    policies: { presence: "loading", activeCount: 0 },
+    audit: { presence: "loading" },
+    disputes: { presence: "loading", openCount: 0 },
+  };
+  const disputesKnown = gov.disputes.presence === "live";
+  const openDisputes = disputesKnown ? gov.disputes.openCount : disputed;
+  const disputesVisible = disputesKnown || openDisputes > 0;
+  const govFeeds = [gov.policies.presence, gov.audit.presence, gov.disputes.presence];
+  const govAllLive = govFeeds.every((presence) => presence === "live");
+  const govAnyLocked = govFeeds.includes("locked");
+  const govAnyDown = govFeeds.includes("down");
+  const governancePill = openDisputes
+    ? { label: "Needs review", tone: "warn" as const }
+    : govAllLive
+      ? { label: "Quiet", tone: "neutral" as const }
+      : { label: "Limited view", tone: "neutral" as const };
+  const governanceEvent = openDisputes
+    ? "Dispute queue has open work"
+    : govAllLive
+      ? "No open governance work"
+      : govAnyLocked
+        ? "Some governance feeds are locked for this session"
+        : govAnyDown
+          ? "Some governance feeds are unavailable"
+          : "Waiting for governance feeds";
 
   return [
     {
@@ -378,34 +471,81 @@ export function buildLaneCards(jobsPayload: unknown, sessionsPayload: unknown, s
       pillTone: "ok",
       metrics: [
         { label: "queue", value: `${jobs.length}` },
-        { label: "sessions", value: `${sessions.length}` },
-        { label: "disputed", value: `${disputed}` },
+        {
+          label: "sessions",
+          value: sessionsBlockedForLane
+            ? sessions.length
+              ? `≥${sessions.length}`
+              : metricUnavailable(sessionsPresence)
+            : `${sessions.length}`,
+        },
+        {
+          label: "disputed",
+          value: sessionsBlockedForLane ? metricUnavailable(sessionsPresence) : `${disputed}`,
+        },
       ],
-      recentEvent: sessions[0] ? `Latest session ${latestSessionStatus}` : "No live sessions yet",
+      recentEvent: sessions[0]
+        ? `Latest session ${latestSessionStatus}`
+        : sessionsBlockedForLane
+          ? sessionsPresence === "locked"
+            ? "Sessions feed locked for this session"
+            : "Sessions feed unavailable"
+          : "No live sessions yet",
     },
     {
       name: "Treasury",
       href: "/treasury",
-      pillLabel: attention ? "Attention" : "Stable",
-      pillTone: attention ? "warn" : "ok",
+      // "Stable" may only be claimed from a live strategy read.
+      pillLabel:
+        strategyPresence === "live" ? (attention ? "Attention" : "Stable") : "Unknown",
+      pillTone: strategyPresence === "live" && attention ? "warn" : strategyPresence === "live" ? "ok" : "neutral",
       metrics: [
-        { label: "locked", value: `${fmt(numberValue(summary.allocated))} DOT` },
+        // Unit comes from the routed positions' actual asset (USDC on this
+        // platform) — never a hardcoded ticker. With nothing routed there
+        // is no meaningful unit, so none is shown.
+        {
+          label: "locked",
+          value: `${fmt(numberValue(summary.allocated))}${
+            strategyAssetUnit(strategyPayload, "") ? ` ${strategyAssetUnit(strategyPayload, "")}` : ""
+          }`,
+        },
         { label: "lanes", value: `${numberValue(summary.deployedLanes)}` },
         { label: "debt", value: `${fmt(numberValue(summary.debt))}` },
       ],
-      recentEvent: attention ? `${attention} lane needs attention` : "Strategy lanes reporting normally",
+      recentEvent:
+        strategyPresence === "live"
+          ? attention
+            ? `${attention} lane needs attention`
+            : "Strategy lanes reporting normally"
+          : strategyPresence === "loading"
+            ? "Waiting for strategy feed"
+            : strategyPresence === "locked"
+              ? "Strategy feed locked for this session"
+              : "Strategy feed unavailable",
     },
     {
       name: "Governance",
       href: "/policies",
-      pillLabel: disputed ? "Needs review" : "Quiet",
-      pillTone: disputed ? "warn" : "neutral",
+      pillLabel: governancePill.label,
+      pillTone: governancePill.tone,
       metrics: [
-        { label: "policies", value: "pending" },
-        { label: "disputes", value: `${disputed}` },
-        { label: "audit", value: "live" },
+        {
+          label: "policies",
+          value:
+            gov.policies.presence === "live"
+              ? `${gov.policies.activeCount} active`
+              : metricUnavailable(gov.policies.presence),
+        },
+        {
+          label: "disputes",
+          value: disputesVisible ? `${openDisputes}` : metricUnavailable(gov.disputes.presence),
+        },
+        {
+          label: "audit",
+          value: gov.audit.presence === "live" ? "readable" : metricUnavailable(gov.audit.presence),
+        },
       ],
-      recentEvent: disputed ? "Dispute queue has open work" : "No live governance alerts",
+      recentEvent: governanceEvent,
     },
   ];
 }

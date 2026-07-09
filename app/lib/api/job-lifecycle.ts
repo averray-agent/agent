@@ -89,18 +89,25 @@ export function buildPublicJobLifecycleSummary(payload: unknown): JobLifecycleSu
     const status = text(lifecycle?.status) || text(job.status);
     const state = text(lifecycle?.state) || text(job.state) || status || "open";
     const effectiveState = text(job.effectiveState);
+    // An exhausted job (recurring reserve spent) is not open work even
+    // when its raw status still reads "open" — counting it inflated the
+    // OPEN bucket past what agents can actually claim.
+    const exhausted =
+      status === "exhausted" || state === "exhausted" || effectiveState === "exhausted";
     const claimable =
-      job.claimable === true ||
-      effectiveState === "claimable" ||
-      (!effectiveState && state === "open");
+      !exhausted &&
+      (job.claimable === true ||
+        effectiveState === "claimable" ||
+        (!effectiveState && state === "open"));
 
     summary.total += 1;
     if (
-      status === "open" ||
-      state === "open" ||
-      state === "ready" ||
-      state === "claimable" ||
-      effectiveState === "claimable"
+      !exhausted &&
+      (status === "open" ||
+        state === "open" ||
+        state === "ready" ||
+        state === "claimable" ||
+        effectiveState === "claimable")
     ) {
       summary.open += 1;
     }

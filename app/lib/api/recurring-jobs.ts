@@ -37,11 +37,20 @@ export interface RecurringTemplateStatus {
   reserve: RecurringReserveStatus;
 }
 
+export type RecurringFeedPresence = "live" | "loading" | "locked" | "down";
+
 export interface RecurringRuntimeSummary {
   count: number;
   enabled: boolean;
   running: boolean;
   templates: RecurringTemplateStatus[];
+  /**
+   * State of the /admin/status feed this summary was built from.
+   * `enabled`/`running` are only meaningful when this is "live" — a
+   * locked or down feed must render as unknown, never as
+   * "scheduler disabled".
+   */
+  presence: RecurringFeedPresence;
 }
 
 export type RecurringTemplateAction = "fire" | "pause" | "resume";
@@ -50,7 +59,10 @@ export type JsonFetcher = <T = unknown>(
   key: string | [string, RequestInit?]
 ) => Promise<T>;
 
-export function buildRecurringRuntimeSummary(payload: unknown): RecurringRuntimeSummary {
+export function buildRecurringRuntimeSummary(
+  payload: unknown,
+  presence: RecurringFeedPresence = "live"
+): RecurringRuntimeSummary {
   const root = asRecord(payload);
   const recurring = asRecord(root?.recurring);
   const scheduler = asRecord(root?.scheduler);
@@ -70,6 +82,7 @@ export function buildRecurringRuntimeSummary(payload: unknown): RecurringRuntime
     enabled: scheduler?.enabled === true,
     running: scheduler?.running === true,
     templates,
+    presence,
   };
 }
 

@@ -49,6 +49,8 @@ export interface StreamOptions {
   topics?: EventTopic[];
   onEvent?: (payload: { topic: EventTopic; data: unknown; id?: string }) => void;
   onGap?: (info: { lastEventId?: string }) => void;
+  /** Fired when the SSE connection (re)opens successfully. */
+  onOpen?: () => void;
   onError?: (error: Event) => void;
   onStalled?: (info: { reconnectAttempts: number }) => void;
   onReauthNeeded?: () => void;
@@ -73,6 +75,10 @@ export function startEventStream(opts: StreamOptions) {
   const bumpHeartbeat = () => {
     if (heartbeatTimer) clearTimeout(heartbeatTimer);
     heartbeatTimer = setTimeout(() => {
+      // A silent stall is a disconnect: notify like any other error so
+      // status surfaces flip to "reconnecting" instead of staying
+      // "connected" over a dead stream.
+      opts.onError?.(new Event("heartbeat-timeout"));
       source?.close();
       scheduleReconnect();
     }, HEARTBEAT_TIMEOUT_MS);
@@ -111,6 +117,7 @@ export function startEventStream(opts: StreamOptions) {
       reconnectAttempts = 0;
       reconnectDelayMs = 1000;
       bumpHeartbeat();
+      opts.onOpen?.();
     });
 
     source.addEventListener("ping", bumpHeartbeat);
