@@ -4,8 +4,9 @@ import type {
   SignatureEntry,
 } from "@/components/receipts/ReceiptDrawerBody";
 import type { ReceiptRow } from "@/components/receipts/ReceiptsTable";
-import type { Signer, SignerTone } from "@/components/receipts/SignerAvatars";
+import type { Signer } from "@/components/receipts/SignerAvatars";
 import type { SourceKind } from "@/components/runs/StatePill";
+import { extractReceiptSigners } from "./receipt-signers";
 
 export type ReceiptRowWithMeta = ReceiptRow & {
   sessionId: string;
@@ -170,55 +171,7 @@ function isUiReceiptRow(record: Record<string, unknown>): boolean {
 }
 
 function extractSigners(value: unknown, averray: Record<string, unknown> | null): Signer[] {
-  if (Array.isArray(value)) {
-    const signers = value
-      .map((entry, index) => {
-        if (!entry || typeof entry !== "object") return null;
-        const record = entry as Record<string, unknown>;
-        const address = text(record.address, text(record.wallet, ""));
-        const role = signerRole(record.status, index);
-        const signedAt = text(
-          record.signedAt,
-          text(record.signed_at, text(record.timestamp, text(record.at, "")))
-        );
-        return signer(address, role, toneForRole(role), signedAt);
-      })
-      .filter((entry): entry is Signer => Boolean(entry));
-    if (signers.length) return signers;
-  }
-
-  return [
-    signer(text(averray?.poster, ""), "operator", "sage"),
-    signer(text(averray?.verifier, ""), "verifier", "blue"),
-    signer(text(averray?.worker, ""), "worker", "ink"),
-  ].filter((entry) => entry.identified);
-}
-
-function signer(address: string, role: string, tone: SignerTone, signedAt = ""): Signer {
-  const identified = isIdentifiedSignerAddress(address);
-  return {
-    initials: identified ? initials(role || address) : "?",
-    tone: identified ? tone : "muted",
-    role,
-    address: identified ? shortAddress(address) : "",
-    identified,
-    ...(signedAt ? { signedAt: displayTime(signedAt) } : {}),
-  };
-}
-
-function signerRole(status: unknown, index: number): string {
-  const raw = text(status, "");
-  if (raw === "posted") return "operator";
-  if (raw === "signed") return index === 0 ? "operator" : "verifier";
-  return raw || (index === 0 ? "operator" : "cosigner");
-}
-
-function toneForRole(role: string): SignerTone {
-  if (role === "operator") return "sage";
-  if (role === "verifier") return "blue";
-  if (role === "worker") return "ink";
-  if (role === "cosigner") return "clay";
-  return "muted";
+  return extractReceiptSigners(value, averray) as Signer[];
 }
 
 function receiptKind(value: unknown, fallback: ReceiptKind): ReceiptKind {
