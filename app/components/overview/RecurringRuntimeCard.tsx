@@ -45,16 +45,28 @@ const STATE_LABEL: Record<RecurringTemplateState, string> = {
 };
 
 export function RecurringRuntimeCard({ runtime }: RecurringRuntimeCardProps) {
-  const meta = runtime.enabled
-    ? `${runtime.running ? "scheduler running" : "scheduler idle"} · ${runtime.count} templates`
-    : `${runtime.count} templates · scheduler disabled`;
+  // "scheduler disabled" is a definite operational claim — it may only be
+  // made from a live /admin/status read. A locked or down feed says so
+  // instead (previously a role-less session's 403 rendered here as
+  // "0 templates · scheduler disabled" while the body admitted the status
+  // was unavailable).
+  const meta =
+    runtime.presence === "locked"
+      ? "scheduler status locked for this session"
+      : runtime.presence === "down"
+        ? "scheduler status unavailable"
+        : runtime.presence === "loading"
+          ? "loading scheduler status"
+          : runtime.enabled
+            ? `${runtime.running ? "scheduler running" : "scheduler idle"} · ${runtime.count} templates`
+            : `${runtime.count} templates · scheduler disabled`;
 
   return (
     <section>
       <SectionHead title="Recurring jobs" meta={meta} />
       <div className="overflow-hidden rounded-[10px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] shadow-[var(--shadow-card)]">
         {runtime.templates.length === 0 ? (
-          <EmptyRow enabled={runtime.enabled} />
+          <EmptyRow enabled={runtime.enabled} presence={runtime.presence} />
         ) : (
           runtime.templates.map((template) => (
             <RecurringTemplateRow key={template.templateId} template={template} />
@@ -304,12 +316,24 @@ function StatePill({ state }: { state: RecurringTemplateState }) {
   );
 }
 
-function EmptyRow({ enabled }: { enabled: boolean }) {
+function EmptyRow({
+  enabled,
+  presence,
+}: {
+  enabled: boolean;
+  presence: RecurringRuntimeSummary["presence"];
+}) {
   return (
     <div className="p-[1.05rem_1.15rem] font-[family-name:var(--font-body)] text-[13px] text-[var(--avy-muted)]">
-      {enabled
-        ? "No recurring templates are configured yet."
-        : "Recurring scheduler status is unavailable right now."}
+      {presence === "locked"
+        ? "Recurring scheduler status is locked for this session — this wallet lacks the operator role to read /admin/status."
+        : presence === "down"
+          ? "Recurring scheduler status is unavailable right now."
+          : presence === "loading"
+            ? "Loading recurring scheduler status…"
+            : enabled
+              ? "No recurring templates are configured yet."
+              : "The recurring scheduler is disabled and no templates are configured."}
     </div>
   );
 }

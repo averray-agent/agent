@@ -185,8 +185,8 @@ export default function OverviewPage() {
     [providerOps.data, publicProviderOps.data]
   );
   const recurringRuntime = useMemo(
-    () => buildRecurringRuntimeSummary(providerOps.data),
-    [providerOps.data]
+    () => buildRecurringRuntimeSummary(providerOps.data, feedPresence(providerOps)),
+    [providerOps]
   );
   const providerRows = liveProviderOps;
   const hasLiveOverview = Boolean(jobs.data || sessions.data || account.data || strategyPositions.data);
