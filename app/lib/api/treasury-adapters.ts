@@ -362,13 +362,68 @@ export function buildOverviewAlerts(sessionsPayload: unknown, accountPayload: un
   return alerts;
 }
 
-export function buildLaneCards(jobsPayload: unknown, sessionsPayload: unknown, strategyPayload: unknown): LaneCardData[] {
+export type FeedPresence = "live" | "loading" | "locked" | "down";
+
+export interface GovernanceLaneInputs {
+  policies: { presence: FeedPresence; activeCount: number };
+  audit: { presence: FeedPresence };
+  disputes: { presence: FeedPresence; openCount: number };
+}
+
+/**
+ * Compact metric-slot label for a feed that can't show a number. Live
+ * feeds render their real value; everything else names its state so a
+ * blocked feed can never read as "0".
+ */
+function metricUnavailable(presence: FeedPresence): string {
+  if (presence === "loading") return "…";
+  if (presence === "locked") return "locked";
+  return "unavailable";
+}
+
+export function buildLaneCards(
+  jobsPayload: unknown,
+  sessionsPayload: unknown,
+  strategyPayload: unknown,
+  governance?: GovernanceLaneInputs
+): LaneCardData[] {
   const jobs = asArray(jobsPayload);
   const sessions = activeWorkSessions(jobsPayload, sessionsPayload);
   const summary = asRecord(asRecord(strategyPayload).summary);
   const disputed = sessions.filter((session) => text(session.status) === "disputed").length;
   const attention = numberValue(summary.attentionCount);
   const latestSessionStatus = text(sessions[0]?.status, "claimed");
+
+  // Governance truth boundary: the lane previously hardcoded
+  // `policies: "pending"` and `audit: "live"` and derived "Quiet" from
+  // feeds this session may not even be allowed to read. Without real
+  // inputs the lane must say "unknown", never imply calm.
+  const gov: GovernanceLaneInputs = governance ?? {
+    policies: { presence: "loading", activeCount: 0 },
+    audit: { presence: "loading" },
+    disputes: { presence: "loading", openCount: 0 },
+  };
+  const disputesKnown = gov.disputes.presence === "live";
+  const openDisputes = disputesKnown ? gov.disputes.openCount : disputed;
+  const disputesVisible = disputesKnown || openDisputes > 0;
+  const govFeeds = [gov.policies.presence, gov.audit.presence, gov.disputes.presence];
+  const govAllLive = govFeeds.every((presence) => presence === "live");
+  const govAnyLocked = govFeeds.includes("locked");
+  const govAnyDown = govFeeds.includes("down");
+  const governancePill = openDisputes
+    ? { label: "Needs review", tone: "warn" as const }
+    : govAllLive
+      ? { label: "Quiet", tone: "neutral" as const }
+      : { label: "Limited view", tone: "neutral" as const };
+  const governanceEvent = openDisputes
+    ? "Dispute queue has open work"
+    : govAllLive
+      ? "No open governance work"
+      : govAnyLocked
+        ? "Some governance feeds are locked for this session"
+        : govAnyDown
+          ? "Some governance feeds are unavailable"
+          : "Waiting for governance feeds";
 
   return [
     {
@@ -398,14 +453,26 @@ export function buildLaneCards(jobsPayload: unknown, sessionsPayload: unknown, s
     {
       name: "Governance",
       href: "/policies",
-      pillLabel: disputed ? "Needs review" : "Quiet",
-      pillTone: disputed ? "warn" : "neutral",
+      pillLabel: governancePill.label,
+      pillTone: governancePill.tone,
       metrics: [
-        { label: "policies", value: "pending" },
-        { label: "disputes", value: `${disputed}` },
-        { label: "audit", value: "live" },
+        {
+          label: "policies",
+          value:
+            gov.policies.presence === "live"
+              ? `${gov.policies.activeCount} active`
+              : metricUnavailable(gov.policies.presence),
+        },
+        {
+          label: "disputes",
+          value: disputesVisible ? `${openDisputes}` : metricUnavailable(gov.disputes.presence),
+        },
+        {
+          label: "audit",
+          value: gov.audit.presence === "live" ? "readable" : metricUnavailable(gov.audit.presence),
+        },
       ],
-      recentEvent: disputed ? "Dispute queue has open work" : "No live governance alerts",
+      recentEvent: governanceEvent,
     },
   ];
 }

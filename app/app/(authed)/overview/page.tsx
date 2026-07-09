@@ -23,7 +23,9 @@ import {
   useAccount,
   useAdminSessions,
   useAlerts,
+  useAudit,
   useBadges,
+  useDisputes,
   useHealth,
   useJobs,
   usePolicies,
@@ -31,6 +33,7 @@ import {
   usePublicProviderOperations,
   useStrategyPositions,
 } from "@/lib/api/hooks";
+import { extractDisputeList } from "@/lib/api/dispute-adapters";
 import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
 import { extractRunJobs } from "@/lib/api/run-adapters";
 import { buildProviderOperations } from "@/lib/api/provider-operations";
@@ -56,6 +59,8 @@ export default function OverviewPage() {
   const apiAlerts = useAlerts();
   const badges = useBadges();
   const policies = usePolicies();
+  const audit = useAudit();
+  const disputes = useDisputes();
   const providerOps = useProviderOperations();
   const publicProviderOps = usePublicProviderOperations();
 
@@ -83,9 +88,34 @@ export default function OverviewPage() {
     [account.data, sessions.data]
   );
   const endpointAlerts = useMemo(() => extractAlerts(apiAlerts.data), [apiAlerts.data]);
+  const openDisputeCount = useMemo(
+    () =>
+      extractDisputeList(disputes.data).filter(
+        (dispute) => dispute.state !== "resolved"
+      ).length,
+    [disputes.data]
+  );
+  const activePolicyCount = useMemo(
+    () => countActivePolicies(policies.data),
+    [policies.data]
+  );
   const liveLanes = useMemo(
-    () => buildLaneCards(jobs.data, sessions.data, strategyPositions.data),
-    [jobs.data, sessions.data, strategyPositions.data]
+    () =>
+      buildLaneCards(jobs.data, sessions.data, strategyPositions.data, {
+        policies: { presence: feedPresence(policies), activeCount: activePolicyCount },
+        audit: { presence: feedPresence(audit) },
+        disputes: { presence: feedPresence(disputes), openCount: openDisputeCount },
+      }),
+    [
+      activePolicyCount,
+      audit,
+      disputes,
+      jobs.data,
+      openDisputeCount,
+      policies,
+      sessions.data,
+      strategyPositions.data,
+    ]
   );
   const policiesAppliedToday = useMemo(
     () => countPoliciesAppliedToday(policies.data),
@@ -275,6 +305,15 @@ function buildCapabilityWarning(data: unknown): CapabilityWarning | undefined {
     label: treasuryState === "unavailable" ? "Treasury unavailable" : "Treasury degraded",
     title: text(treasuryWarning?.message, fallback),
   };
+}
+
+function countActivePolicies(data: unknown): number {
+  if (!Array.isArray(data)) return 0;
+  return data.reduce((count, item) => {
+    if (!item || typeof item !== "object") return count;
+    const record = item as Record<string, unknown>;
+    return text(record.state, "").toLowerCase() === "active" ? count + 1 : count;
+  }, 0);
 }
 
 function countPoliciesAppliedToday(data: unknown): number {
