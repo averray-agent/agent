@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { mutate } from "swr";
-import { LoadedRunPanel } from "./LoadedRunPanel";
+import { LoadedRunPanel, type VerifierOutputView } from "./LoadedRunPanel";
 import { LifecycleRail } from "./LifecycleRail";
 import { JobTimelinePanel } from "./JobTimelinePanel";
 import { JobLineagePanel } from "./JobLineagePanel";
@@ -20,12 +20,17 @@ import {
 import type { RunRow } from "./RunQueueTable";
 import { ApiError, swrFetcher } from "@/lib/api/client";
 import {
+  useBadge,
   useAdminJobs,
   useJobDefinition,
   useJobPreflight,
   useJobs,
   useJobTimeline,
+  useSession,
+  useSessionTimeline,
+  useVerifierResult,
 } from "@/lib/api/hooks";
+import { feedPresence } from "@/lib/api/feed-presence";
 import { buildJobTimeline } from "@/lib/api/job-timeline";
 import {
   buildGitHubContext,
@@ -36,6 +41,8 @@ import {
   extractRunJobs,
 } from "@/lib/api/run-adapters";
 import { extractAdminJobs } from "@/lib/api/job-lifecycle";
+import { extractClaimStatus } from "@/lib/api/claim-status";
+import { buildClaimWindowLabel } from "@/lib/api/run-detail-values";
 import {
   extractJobSchemaContract,
   extractSubmissionContract,
@@ -47,6 +54,7 @@ import {
   type SubmissionValidationState,
 } from "@/lib/api/submission-contract";
 import { runGuardedSubmit } from "@/lib/api/guarded-submit";
+import { buildVerifierOutput } from "@/lib/api/verifier-output";
 
 /**
  * Self-contained detail view for a single run.
@@ -92,11 +100,12 @@ export function LoadedRunView({
     () => buildJobTimeline(timelineRequest.data),
     [timelineRequest.data]
   );
-  // Prefer the admin job feed (carries lifecycle metadata + paused/
-  // archived/stale rows). Fall back to the public feed until the admin
-  // payload arrives so we don't render an empty panel on first paint.
-  const adminPayload = adminJobs.data ? extractAdminJobs(adminJobs.data) : [];
-  const sourceForRows = adminPayload.length ? adminPayload : jobs.data;
+  const adminPresence = feedPresence(adminJobs);
+  // Prefer the admin job feed when it is live because it carries lifecycle
+  // metadata + paused/archived/stale rows. Role-less sessions are expected to
+  // 403 on /admin/jobs, so they intentionally use the public feed instead.
+  const adminPayload = adminPresence === "live" ? extractAdminJobs(adminJobs.data) : [];
+  const sourceForRows = adminPresence === "live" ? adminPayload : jobs.data;
   const liveRows = useMemo(() => buildRunRows(sourceForRows), [sourceForRows]);
   const rows = liveRows;
   const rawJobs = useMemo(() => extractRunJobs(sourceForRows), [sourceForRows]);
@@ -111,6 +120,92 @@ export function LoadedRunView({
   const loadedWikipedia = loadedRow ? buildWikipediaContext(loadedRow, selectedJob) : undefined;
   const loadedOsv = loadedRow ? buildOsvContext(loadedRow, selectedJob) : undefined;
   const loadedOpenData = loadedRow ? buildOpenDataContext(loadedRow, selectedJob) : undefined;
+  const claimStatus = useMemo(() => extractClaimStatus(selectedJob), [selectedJob]);
+  const selectedSessionId =
+    loadedRow?.sessionId ??
+    claimStatus?.sessionId ??
+    timelineData.summary.activeSessionIds[0] ??
+    timelineData.summary.terminalSessionIds[0] ??
+    null;
+  const session = useSession(selectedSessionId);
+  const sessionTimeline = useSessionTimeline(selectedSessionId);
+  const verifierResult = useVerifierResult(selectedSessionId);
+  const badge = useBadge(selectedSessionId);
+  const actualVerifierMode = text(selectedJob?.verifierMode);
+  const verifierOutput = useMemo<VerifierOutputView>(
+    () =>
+      buildVerifierOutput({
+        sessionId: selectedSessionId ?? undefined,
+        verifierMode: actualVerifierMode,
+        claimState: loadedRow?.claim?.state ?? claimStatus?.state,
+        sessionPayload: session.data,
+        sessionPresence: feedPresence(session),
+        sessionTimelinePayload: sessionTimeline.data,
+        sessionTimelinePresence: feedPresence(sessionTimeline),
+        verifierResultPayload: verifierResult.data,
+        verifierResultPresence: feedPresence(verifierResult),
+        badgePayload: badge.data,
+        badgePresence: feedPresence(badge),
+        jobTimeline: timelineData,
+        jobTimelinePresence: feedPresence(timelineRequest),
+      }) as VerifierOutputView,
+    [
+      actualVerifierMode,
+      badge,
+      claimStatus?.state,
+      loadedRow?.claim?.state,
+      selectedSessionId,
+      session,
+      sessionTimeline,
+      timelineData,
+      timelineRequest,
+      verifierResult,
+    ]
+  );
+  const receiptDraft =
+    loadedRow && verifierOutput.kind === "terminal"
+      ? buildReceiptDraft(
+          loadedRow,
+          verifierOutput,
+          badge.data,
+          selectedJob,
+          loadedGitHub,
+          loadedWikipedia,
+          loadedOsv,
+          loadedOpenData
+        )
+      : null;
+  const claimExpiresAt =
+    loadedRow?.claim?.claimExpiresAt ?? claimStatus?.claimExpiresAt;
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const claimState = loadedRow?.claim?.state ?? claimStatus?.state;
+    if (claimState !== "claimed" || !claimExpiresAt) return;
+    const interval = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(interval);
+  }, [claimExpiresAt, claimStatus?.state, loadedRow?.claim?.state]);
+  const claimWindowLabel = useMemo(
+    () =>
+      buildClaimWindowLabel({
+        claimState: loadedRow?.claim?.state ?? claimStatus?.state,
+        claimExpiresAt,
+        claimTtlSeconds: selectedJob?.claimTtlSeconds,
+        nowMs,
+      }),
+    [
+      claimExpiresAt,
+      claimStatus?.state,
+      loadedRow?.claim?.state,
+      nowMs,
+      selectedJob?.claimTtlSeconds,
+    ]
+  );
+  const claimWindowCopy = claimWindowLabel ? (
+    <>
+      {" "}
+      Window <b className="text-[var(--avy-ink)]">{claimWindowLabel}</b>.
+    </>
+  ) : null;
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -271,17 +366,18 @@ export function LoadedRunView({
         wikipedia={loadedWikipedia}
         osv={loadedOsv}
         openData={loadedOpenData}
-        onReceiptPreview={() => setReceiptOpen(true)}
+        onReceiptPreview={receiptDraft ? () => setReceiptOpen(true) : undefined}
         standaloneUrl={standaloneUrl}
         stake={{
           amount: loadedRow.stake,
+          currency: rewardAssetFor(selectedJob, badge.data),
           aux: selectedJob
-            ? `${selectedJob.rewardAsset ?? "DOT"} reward · verifier ${selectedJob.verifierMode ?? "unknown"}`
+            ? rewardAux(rewardAssetFor(selectedJob, badge.data), actualVerifierMode)
             : "waiting for live job definition",
           breakdown: {
-            worker: `${loadedRow.stake} DOT`,
-            verifier: "0 DOT",
-            treasury: "0 DOT",
+            worker: formatAmountWithAsset(loadedRow.stake, rewardAssetFor(selectedJob, badge.data)),
+            verifier: formatAmountWithAsset("0", rewardAssetFor(selectedJob, badge.data)),
+            treasury: formatAmountWithAsset("0", rewardAssetFor(selectedJob, badge.data)),
           },
         }}
         // When `github` or `wikipedia` is set the panel swaps Evidence
@@ -298,6 +394,7 @@ export function LoadedRunView({
           metaRight: outputSchemaUrl ? "schema-shaped JSON" : "",
           metaFoot: outputSchemaUrl ? `output schema · ${outputSchemaUrl}` : "",
           sample: submissionSample,
+          draftStorageKey: `averray:runs:draft:${loadedRow.id}`,
         }}
         submissionContract={
           submissionContract
@@ -326,29 +423,28 @@ export function LoadedRunView({
             <>
               Submits{" "}
               <b className="text-[var(--avy-ink)]">proposed change summary + citations</b>{" "}
-              to Averray. No direct Wikipedia edits. Window{" "}
-              <b className="text-[var(--avy-ink)]">00:08:14 / 02:00:00</b>.
+              to Averray. No direct Wikipedia edits.
+              {claimWindowCopy}
             </>
           ) : loadedOsv ? (
             <>
               Submits{" "}
               <b className="text-[var(--avy-ink)]">PR URL + lockfile + install/test evidence</b>{" "}
-              to the verifier. Window{" "}
-              <b className="text-[var(--avy-ink)]">00:08:14 / 02:00:00</b>.
+              to the verifier.
+              {claimWindowCopy}
             </>
           ) : loadedOpenData ? (
             <>
               Submits{" "}
               <b className="text-[var(--avy-ink)]">checks + findings + recommended actions</b>{" "}
               to the verifier. Audit only — no edits to source data.
-              Window{" "}
-              <b className="text-[var(--avy-ink)]">00:08:14 / 02:00:00</b>.
+              {claimWindowCopy}
             </>
           ) : (
             <>
               Submits <b className="text-[var(--avy-ink)]">PR URL + evidence</b>{" "}
-              to the verifier. Window{" "}
-              <b className="text-[var(--avy-ink)]">00:08:14 / 02:00:00</b>.
+              to the verifier.
+              {claimWindowCopy}
             </>
           ),
           cta: loadedWikipedia
@@ -380,359 +476,15 @@ export function LoadedRunView({
                     ? "No retries left on this row"
                     : "Claim this run before submitting evidence",
         }}
-        verifier={
-          loadedOpenData
-            ? {
-                runner: "verifier-2 · open_data_quality_audit · handler-v0.14",
-                elapsed: "stream · 2.8s",
-                modeNote: "open_data_quality_audit · audit only",
-                lines: [
-                  {
-                    time: "14:28:01",
-                    level: "info",
-                    label: "dataset",
-                    message: (
-                      <>
-                        loaded{" "}
-                        <span className="text-[#f4c989]">
-                          {loadedOpenData.datasetTitle}
-                        </span>
-                        {loadedOpenData.agency
-                          ? ` · ${loadedOpenData.agency}`
-                          : null}
-                      </>
-                    ),
-                  },
-                  {
-                    time: "14:28:01",
-                    level: "ok",
-                    label: "pass",
-                    message: <>dataset URL reachable · landing page 200</>,
-                  },
-                  {
-                    time: "14:28:02",
-                    level: "ok",
-                    label: "pass",
-                    message: (
-                      <>
-                        resource URL reachable
-                        {loadedOpenData.resourceFormat ? (
-                          <>
-                            {" · "}
-                            <span className="text-[#9bd7b5]">
-                              {loadedOpenData.resourceFormat}
-                            </span>
-                          </>
-                        ) : null}
-                      </>
-                    ),
-                  },
-                  {
-                    time: "14:28:02",
-                    level: "info",
-                    label: "policy",
-                    message: (
-                      <>
-                        audit-only path enforced ·{" "}
-                        <span className="text-[#f4c989]">no source edits</span>
-                      </>
-                    ),
-                  },
-                  {
-                    time: "14:28:03",
-                    level: "warn",
-                    label: "note",
-                    message: (
-                      <>
-                        catalog metadata{" "}
-                        <span className="text-[#f4c989]">stale</span> ·
-                        recommendations attached
-                      </>
-                    ),
-                  },
-                  {
-                    time: "14:28:03",
-                    level: "ok",
-                    label: "verdict",
-                    message: (
-                      <>
-                        4/5 signals pass · receipt draft{" "}
-                        <span className="text-[#f4c989]">r_4e133</span>
-                      </>
-                    ),
-                  },
-                ],
-                verdict: {
-                  status: "Audit complete (advisory)",
-                  score: "4 / 5",
-                  scoreLabel: "0.84 confidence",
-                },
-              }
-            : loadedOsv
-            ? {
-                runner: "verifier-2 · osv_dependency_pr · handler-v0.14",
-                elapsed: "stream · 3.4s",
-                modeNote: "osv_dependency_pr · maintainer-reviewed",
-                lines: [
-                  {
-                    time: "14:28:01",
-                    level: "info",
-                    label: "advisory",
-                    message: (
-                      <>
-                        loaded{" "}
-                        <span className="text-[#f4c989]">
-                          {loadedOsv.advisoryId}
-                        </span>{" "}
-                        · {loadedOsv.ecosystem}/{loadedOsv.packageName}{" "}
-                        {loadedOsv.vulnerableVersion} → {loadedOsv.fixedVersion}
-                      </>
-                    ),
-                  },
-                  {
-                    time: "14:28:01",
-                    level: "ok",
-                    label: "pass",
-                    message: (
-                      <>
-                        manifest scope ok · only{" "}
-                        <span className="text-[#f4c989]">
-                          {loadedOsv.manifestPath}
-                        </span>{" "}
-                        + lockfile touched
-                      </>
-                    ),
-                  },
-                  {
-                    time: "14:28:02",
-                    level: "ok",
-                    label: "pass",
-                    message: <>lockfile resolves to {loadedOsv.fixedVersion}</>,
-                  },
-                  {
-                    time: "14:28:02",
-                    level: "ok",
-                    label: "pass",
-                    message: (
-                      <>
-                        install + test green ·{" "}
-                        <span className="text-[#9bd7b5]">npm ci · npm test</span>
-                      </>
-                    ),
-                  },
-                  {
-                    time: "14:28:03",
-                    level: "warn",
-                    label: "note",
-                    message: (
-                      <>
-                        maintainer review{" "}
-                        <span className="text-[#f4c989]">pending</span>
-                      </>
-                    ),
-                  },
-                  {
-                    time: "14:28:03",
-                    level: "ok",
-                    label: "verdict",
-                    message: (
-                      <>
-                        3/4 signals pass · awaiting maintainer · receipt draft{" "}
-                        <span className="text-[#f4c989]">r_4e133</span>
-                      </>
-                    ),
-                  },
-                ],
-                verdict: {
-                  status: "Awaiting maintainer review",
-                  score: "3 / 4",
-                  scoreLabel: "0.91 confidence",
-                },
-              }
-            : loadedWikipedia
-            ? {
-                runner: "verifier-2 · wikipedia_proposal_review · handler-v0.14",
-                elapsed: "stream · 3.4s",
-                modeNote:
-                  "wikipedia_proposal_review · Averray-approved editor only",
-                lines: [
-                  {
-                    time: "14:28:01",
-                    level: "info",
-                    label: "source",
-                    message: (
-                      <>
-                        loaded article{" "}
-                        <span className="text-[#f4c989]">
-                          {loadedWikipedia.language}.wikipedia /{" "}
-                          {loadedWikipedia.pageTitle}
-                        </span>{" "}
-                        · rev {loadedWikipedia.revisionId}
-                      </>
-                    ),
-                  },
-                  {
-                    time: "14:28:01",
-                    level: "ok",
-                    label: "pass",
-                    message: <>proposal payload present · structured ok</>,
-                  },
-                  {
-                    time: "14:28:02",
-                    level: "ok",
-                    label: "pass",
-                    message: <>citations resolve · 4/4 sources reachable</>,
-                  },
-                  {
-                    time: "14:28:02",
-                    level: "info",
-                    label: "policy",
-                    message: (
-                      <>
-                        proposal-only path enforced ·{" "}
-                        <span className="text-[#f4c989]">no direct edit</span>
-                      </>
-                    ),
-                  },
-                  {
-                    time: "14:28:03",
-                    level: "warn",
-                    label: "note",
-                    message: (
-                      <>
-                        Averray editor reviewer{" "}
-                        <span className="text-[#f4c989]">pending</span>
-                      </>
-                    ),
-                  },
-                  {
-                    time: "14:28:03",
-                    level: "ok",
-                    label: "verdict",
-                    message: (
-                      <>
-                        1/2 signals pass · awaiting reviewer · receipt draft{" "}
-                        <span className="text-[#f4c989]">r_4e133</span>
-                      </>
-                    ),
-                  },
-                ],
-                verdict: {
-                  status: "Awaiting Averray editor review",
-                  score: "1 / 2",
-                  scoreLabel: "0.74 confidence",
-                },
-              }
-            : {
-                runner: "verifier-2 · github_pr · handler-v0.14",
-                elapsed: "stream · 3.4s",
-                modeNote: "github_pr · maintainer-reviewed",
-                lines: [
-                  {
-                    time: "14:28:01",
-                    level: "info",
-                    label: "source",
-                    message: (
-                      <>
-                        loaded issue{" "}
-                        <span className="text-[#f4c989]">
-                          paritytech/polkadot-sdk#4812
-                        </span>{" "}
-                        · score 74/100
-                      </>
-                    ),
-                  },
-                  {
-                    time: "14:28:01",
-                    level: "ok",
-                    label: "pass",
-                    message: (
-                      <>
-                        PR URL present ·{" "}
-                        <span className="text-[#f4c989]">pull/4931</span>
-                      </>
-                    ),
-                  },
-                  {
-                    time: "14:28:02",
-                    level: "ok",
-                    label: "pass",
-                    message: <>PR body references issue #4812</>,
-                  },
-                  {
-                    time: "14:28:02",
-                    level: "ok",
-                    label: "pass",
-                    message: (
-                      <>
-                        CI checks green ·{" "}
-                        <span className="text-[#9bd7b5]">7/7</span> on
-                        ubuntu-latest · macos-13
-                      </>
-                    ),
-                  },
-                  {
-                    time: "14:28:03",
-                    level: "warn",
-                    label: "note",
-                    message: (
-                      <>
-                        maintainer review{" "}
-                        <span className="text-[#f4c989]">pending</span> ·
-                        requested from @bkchr
-                      </>
-                    ),
-                  },
-                  {
-                    time: "14:28:03",
-                    level: "ok",
-                    label: "verdict",
-                    message: (
-                      <>
-                        2/3 signals pass · awaiting maintainer · receipt draft{" "}
-                        <span className="text-[#f4c989]">r_4e133</span>
-                      </>
-                    ),
-                  },
-                ],
-                verdict: {
-                  status: "Awaiting maintainer review",
-                  score: "2 / 3",
-                  scoreLabel: "0.86 confidence",
-                },
-              }
-        }
-        settle={{
-          title: "Awaiting verification",
-          detail: (
-            <>
-              On verification, pay{" "}
-              <b className="text-[var(--avy-ink)]">25.00 DOT</b> · unlock{" "}
-              <b className="text-[var(--avy-ink)]">25.00 DOT</b> stake · sign
-              receipt <b className="text-[var(--avy-ink)]">r_4e133</b>
-            </>
-          ),
-          cta: "Mark verified & pay",
-          ctaDisabled: true,
-          note: loadedWikipedia
-            ? "pays worker & verifier once an Averray editor approves the proposal"
-            : loadedOsv
-              ? "pays worker & verifier once the maintainer merges the remediation PR"
-              : loadedOpenData
-                ? "pays worker & verifier once the audit report verifies"
-                : "pays worker & verifier once the maintainer approves the PR",
-        }}
+        verifier={verifierOutput}
+        settle={buildSettlementView(loadedRow, verifierOutput, badge.data, selectedJob)}
       />
 
       {showLifecycle ? (
         <LifecycleRail
           runId={loadedRow.id}
           contextNote={(() => {
-            const verificationLabel =
-              loadedWikipedia?.verification.method ??
-              loadedOsv?.verification.method ??
-              loadedOpenData?.verification.method ??
-              "github_pr";
+            const verificationLabel = actualVerifierMode || "unknown";
             const claim = loadedRow.claim;
             const deadlineLabel = claim?.claimExpiresAt
               ? formatDeadline(claim.claimExpiresAt)
@@ -805,17 +557,13 @@ export function LoadedRunView({
        *  has the rail above the sticky pane. */}
       {showLifecycle ? <JobTimelinePanel jobId={loadedRow.id} /> : null}
 
-      <ReceiptPreviewDrawer
-        open={receiptOpen}
-        onClose={() => setReceiptOpen(false)}
-        draft={buildReceiptDraft(
-          loadedRow,
-          loadedGitHub,
-          loadedWikipedia,
-          loadedOsv,
-          loadedOpenData
-        )}
-      />
+      {receiptDraft ? (
+        <ReceiptPreviewDrawer
+          open={receiptOpen}
+          onClose={() => setReceiptOpen(false)}
+          draft={receiptDraft}
+        />
+      ) : null}
     </div>
   );
 }
@@ -1011,96 +759,164 @@ function text(value: unknown, fallback = ""): string {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
 }
 
-/**
- * Assemble the unsigned receipt that would be signed on "Mark verified
- * & pay". Derived entirely from what the panel already shows — no
- * extra fetch. Source-aware: GitHub flows reference a PR + maintainer,
- * Wikipedia flows reference the article + an Averray editor reviewer
- * (since the platform never edits Wikipedia directly), OSV flows
- * reference the advisory + the consumer's maintainer (the focused PR
- * lands in the consumer repo, not the upstream package), native flows
- * fall back to a generic cosign signer list.
- */
+function buildSettlementView(
+  row: RunRow,
+  verifier: VerifierOutputView,
+  badgePayload: unknown,
+  selectedJob: Record<string, unknown> | undefined
+) {
+  const asset = rewardAssetFor(selectedJob, badgePayload);
+  if (verifier.kind === "terminal") {
+    return {
+      title: "Verifier result recorded",
+      detail: (
+        <>
+          Verdict <b className="text-[var(--avy-ink)]">{verifier.verdict.status}</b>{" "}
+          · receipt <b className="text-[var(--avy-ink)]">{verifier.receiptRef}</b>
+        </>
+      ),
+      cta: "Settle from result",
+      ctaDisabled: true,
+      note: asset
+        ? `uses ${asset} reward and public badge metadata`
+        : "uses public badge metadata",
+    };
+  }
+  if (verifier.kind === "locked") {
+    return {
+      title: "Verifier log locked",
+      detail: verifier.message,
+      cta: "Settle from result",
+      ctaDisabled: true,
+      note: "operator role required",
+    };
+  }
+  if (verifier.kind === "awaiting") {
+    return {
+      title: "Awaiting verification",
+      detail: "No receipt has been issued yet.",
+      cta: "Settle from result",
+      ctaDisabled: true,
+      note: "settlement unlocks after a real verifier verdict",
+    };
+  }
+  return {
+    title: "No verifier result",
+    detail:
+      row.sessionId || row.claim?.state === "claimed"
+        ? "Evidence has not produced a verifier result yet."
+        : "This run has not been claimed.",
+    cta: "Settle from result",
+    ctaDisabled: true,
+    note: "settlement requires a real verifier receipt",
+  };
+}
+
 function buildReceiptDraft(
   row: RunRow,
+  verifier: Extract<VerifierOutputView, { kind: "terminal" }>,
+  badgePayload: unknown,
+  selectedJob: Record<string, unknown> | undefined,
   github: ReturnType<typeof buildGitHubContext>,
   wikipedia: ReturnType<typeof buildWikipediaContext>,
   osv: ReturnType<typeof buildOsvContext>,
   openData: ReturnType<typeof buildOpenDataContext>
-): ReceiptPreviewDraft {
+): ReceiptPreviewDraft | null {
+  const badgeAverray = asRecord(asRecord(badgePayload)?.averray);
+  const receiptRef = verifier.receiptRef;
+  if (!receiptRef) return null;
+
   const workerSignerLabel = row.worker.isSelf
     ? `Worker · ${row.worker.label} (you)`
     : `Worker · ${row.worker.label}`;
-
-  const verdict = github
-    ? {
-        status: "Awaiting maintainer review",
-        score: "2 / 3",
-        confidence: "0.86 confidence",
-      }
-    : wikipedia
-      ? {
-          status: "Awaiting Averray editor review",
-          score: "1 / 2",
-          confidence: "0.74 confidence",
-        }
-      : osv
-        ? {
-            status: "Awaiting maintainer merge",
-            score: "3 / 4",
-            confidence: "0.91 confidence",
-          }
-        : openData
-          ? {
-              status: "Audit complete (advisory)",
-              score: "4 / 5",
-              confidence: "0.84 confidence",
-            }
-          : {
-              status: "Verified (pending cosign)",
-              score: "4 / 5",
-              confidence: "0.92 confidence",
-            };
-
-  const reviewerSigner = github
-    ? "Maintainer · awaiting review"
-    : wikipedia
-      ? "Averray editor reviewer · awaiting review"
-      : osv
-        ? "Maintainer · awaiting merge"
-        : openData
-          ? "Verifier · audit signed"
-          : "Cosigner · 0x9A13…0cb2";
+  const asset = rewardAssetFor(selectedJob, badgePayload);
+  const reward = asRecord(badgeAverray?.reward);
+  const claimStake = asRecord(badgeAverray?.claimStake);
+  const rewardAmount = formatBadgeAmount(reward?.amount, reward?.decimals) ?? row.stake;
+  const stakeRows = [
+    { label: "Worker reward", value: formatAmountWithAsset(rewardAmount, asset) },
+  ];
+  const claimStakeAmount = formatBadgeAmount(claimStake?.amount, claimStake?.decimals);
+  if (claimStakeAmount) {
+    stakeRows.push({
+      label: "Claim stake",
+      value: formatAmountWithAsset(claimStakeAmount, asset),
+    });
+  }
+  const signers = [
+    { label: workerSignerLabel, status: "signed" as const },
+    ...signerFromBadge("Poster", badgeAverray?.poster),
+    ...signerFromBadge("Verifier", badgeAverray?.verifier),
+  ];
 
   return {
-    receiptRef: "r_4e133",
+    receiptRef,
     runId: row.id,
     jobMeta: row.jobMeta,
     state: row.state,
     stake: {
-      amount: row.stake,
-      currency: "DOT",
-      breakdown: [
-        { label: "Worker payout", value: `${row.stake} DOT` },
-        { label: "Verifier fee", value: "0 DOT" },
-        { label: "Treasury reserve", value: "0 DOT" },
-      ],
+      amount: rewardAmount,
+      currency: asset,
+      breakdown: stakeRows,
     },
-    verdict,
-    evidenceHash: "sha256 0x9c…41",
+    verdict: {
+      status: verifier.verdict.status,
+      score: verifier.reasonCode || verifier.verdict.score,
+      detail: receiptRef,
+    },
+    evidenceHash: verifier.evidenceHash,
     ...(github ? { github } : {}),
     ...(wikipedia ? { wikipedia } : {}),
     ...(osv ? { osv } : {}),
     ...(openData ? { openData } : {}),
-    prUrl: github
-      ? `https://github.com/${github.repo}/pull/4931`
-      : osv
-        ? `https://github.com/${osv.repo}/pull/8421`
-        : undefined,
-    signers: [
-      { label: workerSignerLabel, status: "pending" },
-      { label: reviewerSigner, status: "pending" },
-      { label: "Verifier · verifier-2", status: "signed" },
-    ],
+    signers,
   };
+}
+
+function rewardAssetFor(
+  selectedJob: Record<string, unknown> | undefined,
+  badgePayload: unknown
+): string {
+  const badgeAverray = asRecord(asRecord(badgePayload)?.averray);
+  const reward = asRecord(badgeAverray?.reward);
+  return text(selectedJob?.rewardAsset, text(reward?.asset, ""));
+}
+
+function rewardAux(asset: string, verifierMode: string): string {
+  const parts = [
+    asset ? `${asset} reward` : "reward",
+    `verifier ${verifierMode || "unknown"}`,
+  ];
+  return parts.join(" · ");
+}
+
+function formatAmountWithAsset(amount: string, asset: string): string {
+  return asset ? `${amount} ${asset}` : amount;
+}
+
+function formatBadgeAmount(value: unknown, decimalsValue: unknown): string | null {
+  const raw = typeof value === "string" ? value.trim() : "";
+  if (!/^[0-9]+$/u.test(raw)) return null;
+  const decimals = Number(decimalsValue);
+  if (!Number.isInteger(decimals) || decimals < 0) return null;
+  if (decimals === 0) return Number(raw).toLocaleString("en-US");
+  const padded = raw.padStart(decimals + 1, "0");
+  const whole = padded.slice(0, -decimals);
+  const fractional = padded.slice(-decimals).replace(/0+$/u, "");
+  const valueNumber = Number(`${whole}.${fractional || "0"}`);
+  if (!Number.isFinite(valueNumber)) return `${whole}${fractional ? `.${fractional}` : ""}`;
+  return valueNumber.toLocaleString("en-US", {
+    minimumFractionDigits: valueNumber > 0 && valueNumber < 10 ? 2 : 0,
+    maximumFractionDigits: Math.min(decimals, 6),
+  });
+}
+
+function signerFromBadge(label: string, value: unknown) {
+  const raw = text(value);
+  if (!raw || /^0x0{40}$/iu.test(raw)) return [];
+  return [{ label: `${label} · ${shortAddress(raw)}`, status: "signed" as const }];
+}
+
+function shortAddress(value: string): string {
+  return value.length > 12 ? `${value.slice(0, 6)}…${value.slice(-4)}` : value;
 }

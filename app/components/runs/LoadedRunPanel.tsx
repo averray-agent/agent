@@ -86,6 +86,36 @@ export interface VerifierVerdict {
   scoreLabel: string;
 }
 
+export type VerifierOutputView =
+  | {
+      kind: "terminal";
+      runner: string;
+      elapsed: string;
+      lines: VerifierLine[];
+      verdict: VerifierVerdict;
+      modeNote: string;
+      receiptRef?: string;
+      evidenceHash?: string;
+      chainJobId?: string;
+      completedAt?: string;
+      outcome?: string;
+      reasonCode?: string;
+    }
+  | {
+      kind: "awaiting";
+      runner: string;
+      elapsed: string;
+      lines: VerifierLine[];
+      verdict: VerifierVerdict;
+      modeNote: string;
+    }
+  | {
+      kind: "empty" | "loading" | "locked" | "down";
+      message: string;
+      modeNote: string;
+    };
+type VerifierStatusView = Extract<VerifierOutputView, { message: string }>;
+
 export interface SubmissionContractView extends SubmissionContract {
   schemaContract?: JobSchemaContract | null;
   validation: SubmissionValidationState;
@@ -99,6 +129,7 @@ export interface LoadedRunPanelProps {
   meta: string;
   stake: {
     amount: string;
+    currency?: string;
     aux: string;
     breakdown: StakeBreakdown;
   };
@@ -108,6 +139,7 @@ export interface LoadedRunPanelProps {
     sample: string;
     metaRight: string;
     metaFoot: string;
+    draftStorageKey?: string;
   };
   submissionContract?: SubmissionContractView;
   submission: {
@@ -124,13 +156,7 @@ export interface LoadedRunPanelProps {
      */
     disabledReason?: string;
   };
-  verifier: {
-    runner: string;
-    elapsed: string;
-    lines: VerifierLine[];
-    verdict: VerifierVerdict;
-    modeNote: string;
-  };
+  verifier: VerifierOutputView;
   settle: {
     title: string;
     detail: React.ReactNode;
@@ -198,10 +224,48 @@ export function LoadedRunPanel(props: LoadedRunPanelProps) {
     props.evidence.activeTab ?? props.evidence.tabs[0]?.id
   );
   const [evidenceValue, setEvidenceValue] = useState(props.evidence.sample);
+  const [draftIntegrity, setDraftIntegrity] = useState<{
+    hash: string;
+    savedAt: string;
+  } | null>(null);
 
   useEffect(() => {
-    setEvidenceValue(props.evidence.sample);
-  }, [props.evidence.sample]);
+    const stored = readStoredDraft(props.evidence.draftStorageKey);
+    setEvidenceValue(stored?.draft ?? props.evidence.sample);
+    setDraftIntegrity(null);
+  }, [props.evidence.draftStorageKey, props.evidence.sample]);
+
+  useEffect(() => {
+    const storageKey = props.evidence.draftStorageKey;
+    if (!storageKey || !evidenceValue.trim()) {
+      setDraftIntegrity(null);
+      return;
+    }
+    let cancelled = false;
+    const handle = window.setTimeout(async () => {
+      const savedAt = new Date().toISOString();
+      const hash = await sha256Hex(evidenceValue).catch(() => "");
+      if (cancelled) return;
+      if (!hash) {
+        setDraftIntegrity(null);
+        return;
+      }
+      try {
+        window.localStorage.setItem(
+          storageKey,
+          JSON.stringify({ draft: evidenceValue, savedAt, hash })
+        );
+      } catch {
+        // Local draft persistence is best-effort. If storage is blocked,
+        // still show the real hash for the current in-memory draft.
+      }
+      setDraftIntegrity({ hash, savedAt });
+    }, 350);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(handle);
+    };
+  }, [evidenceValue, props.evidence.draftStorageKey]);
 
   const stakeDisplay = STAKE_BY_STATE[props.state ?? "claimed"];
 
@@ -249,7 +313,7 @@ export function LoadedRunPanel(props: LoadedRunPanelProps) {
               <button
                 type="button"
                 onClick={props.onReceiptPreview}
-                title="Preview the signed receipt draft"
+                title="Preview the verifier receipt"
                 className="inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3 font-[family-name:var(--font-display)] text-[11px] font-bold uppercase text-[var(--avy-ink)] transition-transform hover:-translate-y-px hover:border-[color:rgba(30,102,66,0.24)] hover:text-[var(--avy-accent)]"
                 style={{ letterSpacing: "0.04em" }}
               >
@@ -282,12 +346,14 @@ export function LoadedRunPanel(props: LoadedRunPanelProps) {
               <div>
                 <div className="font-[family-name:var(--font-display)] text-[26px] font-bold leading-none text-[var(--avy-ink)]">
                   {props.stake.amount}
-                  <span
-                    className="ml-1 font-[family-name:var(--font-mono)] text-[11px] font-medium text-[var(--avy-muted)]"
-                    style={{ letterSpacing: 0 }}
-                  >
-                    DOT
-                  </span>
+                  {props.stake.currency ? (
+                    <span
+                      className="ml-1 font-[family-name:var(--font-mono)] text-[11px] font-medium text-[var(--avy-muted)]"
+                      style={{ letterSpacing: 0 }}
+                    >
+                      {props.stake.currency}
+                    </span>
+                  ) : null}
                 </div>
                 <p
                   className="mt-1 font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]"
@@ -384,7 +450,12 @@ export function LoadedRunPanel(props: LoadedRunPanelProps) {
                   <span className="inline-flex items-center gap-1 text-[var(--avy-accent)]">
                     ＋ Attach file
                   </span>
-                  <span>sha256 0x9c…41 · autosave 4s ago</span>
+                  {draftIntegrity ? (
+                    <span>
+                      sha256 {shortHash(draftIntegrity.hash)} · saved{" "}
+                      {formatSavedTime(draftIntegrity.savedAt)}
+                    </span>
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -462,58 +533,75 @@ export function LoadedRunPanel(props: LoadedRunPanelProps) {
             <BlockLabel right={<span className="lock">{props.verifier.modeNote}</span>}>
               Verifier output
             </BlockLabel>
-            <div className="overflow-hidden rounded-[8px] border border-[color:rgba(30,102,66,0.18)] bg-[#131715] text-[#f5f3ee]">
-              <div
-                className="flex items-center justify-between border-b border-white/5 bg-[#0f1210] px-3 py-1.5 font-[family-name:var(--font-mono)] text-[10.5px] text-[#9ba29c]"
-                style={{ letterSpacing: 0 }}
-              >
-                <span>
-                  {props.verifier.runner.split(" · ").map((part, i) => (
-                    <span key={i}>
-                      {i > 0 ? " · " : null}
-                      {i === 1 ? <b className="text-[#cfe8dc]">{part}</b> : part}
-                    </span>
-                  ))}
-                </span>
-                <span>{props.verifier.elapsed}</span>
-              </div>
-              <div
-                className="px-3.5 py-3 font-[family-name:var(--font-mono)] text-[11.5px] leading-[1.6]"
-                style={{ letterSpacing: 0 }}
-              >
-                {props.verifier.lines.map((line, i) => (
-                  <div
-                    key={i}
-                    className="grid grid-cols-[44px_92px_1fr] gap-2.5"
-                  >
-                    <span className="text-[#6c7a72]">{line.time}</span>
-                    <span
-                      className={cn(
-                        "font-semibold",
-                        line.level === "info" && "text-[#a5c8ef]",
-                        line.level === "ok" && "text-[#9bd7b5]",
-                        line.level === "warn" && "text-[#f4c989]"
-                      )}
-                    >
-                      {line.label}
-                    </span>
-                    <span className="text-[#e7ebe5]">{line.message}</span>
-                  </div>
-                ))}
-              </div>
-              <div
-                className="flex items-center justify-between border-t border-white/5 bg-[color:rgba(30,102,66,0.18)] px-3 py-2 font-[family-name:var(--font-display)] text-[11px] font-extrabold uppercase text-[#d6eadf]"
-                style={{ letterSpacing: "0.12em" }}
-              >
-                <span>● {props.verifier.verdict.status}</span>
-                <span
-                  className="font-[family-name:var(--font-mono)] text-[11.5px] text-[#9bd7b5]"
+            {props.verifier.kind === "terminal" ||
+            props.verifier.kind === "awaiting" ? (
+              <div className="overflow-hidden rounded-[8px] border border-[color:rgba(30,102,66,0.18)] bg-[#131715] text-[#f5f3ee]">
+                <div
+                  className="flex items-center justify-between border-b border-white/5 bg-[#0f1210] px-3 py-1.5 font-[family-name:var(--font-mono)] text-[10.5px] text-[#9ba29c]"
                   style={{ letterSpacing: 0 }}
                 >
-                  {props.verifier.verdict.score} · {props.verifier.verdict.scoreLabel}
-                </span>
+                  <span>
+                    {props.verifier.runner.split(" · ").map((part, i) => (
+                      <span key={i}>
+                        {i > 0 ? " · " : null}
+                        {i === 1 ? <b className="text-[#cfe8dc]">{part}</b> : part}
+                      </span>
+                    ))}
+                  </span>
+                  <span>{props.verifier.elapsed}</span>
+                </div>
+                <div
+                  className="px-3.5 py-3 font-[family-name:var(--font-mono)] text-[11.5px] leading-[1.6]"
+                  style={{ letterSpacing: 0 }}
+                >
+                  {props.verifier.lines.map((line, i) => (
+                    <div
+                      key={i}
+                      className="grid grid-cols-[44px_92px_1fr] gap-2.5"
+                    >
+                      <span className="text-[#6c7a72]">{line.time}</span>
+                      <span
+                        className={cn(
+                          "font-semibold",
+                          line.level === "info" && "text-[#a5c8ef]",
+                          line.level === "ok" && "text-[#9bd7b5]",
+                          line.level === "warn" && "text-[#f4c989]"
+                        )}
+                      >
+                        {line.label}
+                      </span>
+                      <span className="text-[#e7ebe5]">{line.message}</span>
+                    </div>
+                  ))}
+                </div>
+                <div
+                  className="flex items-center justify-between border-t border-white/5 bg-[color:rgba(30,102,66,0.18)] px-3 py-2 font-[family-name:var(--font-display)] text-[11px] font-extrabold uppercase text-[#d6eadf]"
+                  style={{ letterSpacing: "0.12em" }}
+                >
+                  <span>● {props.verifier.verdict.status}</span>
+                  <span
+                    className="font-[family-name:var(--font-mono)] text-[11.5px] text-[#9bd7b5]"
+                    style={{ letterSpacing: 0 }}
+                  >
+                    {props.verifier.verdict.score} · {props.verifier.verdict.scoreLabel}
+                  </span>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div
+                className={cn(
+                  "rounded-[8px] border px-3.5 py-3 font-[family-name:var(--font-mono)] text-[12px] leading-[1.5]",
+                  props.verifier.kind === "locked"
+                    ? "border-[#d3911b] bg-[color:rgba(211,145,27,0.08)] text-[#7a4c00]"
+                    : props.verifier.kind === "down"
+                      ? "border-[#a03a1a] bg-[color:rgba(160,58,26,0.08)] text-[#8c2a17]"
+                      : "border-[var(--avy-line)] bg-white text-[var(--avy-muted)]"
+                )}
+                style={{ letterSpacing: 0 }}
+              >
+                {(props.verifier as VerifierStatusView).message}
+              </div>
+            )}
           </div>
 
           {/* Settle */}
@@ -2285,4 +2373,39 @@ function SmallGhostBtn({
       {children}
     </button>
   );
+}
+
+function readStoredDraft(storageKey?: string): { draft: string } | null {
+  if (!storageKey || typeof window === "undefined") return null;
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(storageKey) ?? "null");
+    if (parsed && typeof parsed.draft === "string") {
+      return { draft: parsed.draft };
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const bytes = new TextEncoder().encode(value);
+  const digest = await window.crypto.subtle.digest("SHA-256", bytes);
+  return `0x${Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("")}`;
+}
+
+function shortHash(value: string): string {
+  return value.length > 18 ? `${value.slice(0, 10)}…${value.slice(-6)}` : value;
+}
+
+function formatSavedTime(value: string): string {
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) return value;
+  return new Intl.DateTimeFormat("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(parsed);
 }

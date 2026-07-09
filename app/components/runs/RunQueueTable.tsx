@@ -49,7 +49,13 @@ export interface RunRow {
     isSelf?: boolean;
   };
   state: RunState;
+  /**
+   * Display-formatted reward amount from the job payload. Historical naming
+   * says "stake", but this is the reward chip value; pair it with
+   * `stakeCurrency` when the payload supplies an asset.
+   */
   stake: string;
+  stakeCurrency?: string;
   age: string;
   ageStale?: boolean;
   lastEvent: ReactNode;
@@ -84,7 +90,7 @@ export function RunQueueTable({
           Run queue
         </h3>
         <span className="font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]">
-          {totalCount} open · {assignedToMe} assigned to you · live
+          {totalCount} open · {assignedToMe} assigned to you · {liveStatus}
         </span>
       </header>
 
@@ -297,7 +303,12 @@ function RunRowCard({
             </div>
             <span className="font-[family-name:var(--font-mono)] text-[12.5px] leading-tight text-[var(--avy-ink)]">
               {row.stake}
-              <small className="font-normal text-[var(--avy-muted)]"> DOT</small>
+              {row.stakeCurrency ? (
+                <small className="font-normal text-[var(--avy-muted)]">
+                  {" "}
+                  {row.stakeCurrency}
+                </small>
+              ) : null}
             </span>
             <span
               className={cn(
