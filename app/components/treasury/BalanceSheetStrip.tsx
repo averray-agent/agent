@@ -7,7 +7,11 @@ export interface BalanceCard {
   label: string;
   value: string;
   unit?: string;
-  spark: number[];
+  /**
+   * Real history points only. Omit when no time series exists — the
+   * cell renders without a trend rather than implying one.
+   */
+  spark?: number[];
   sparkColor?: string;
   delta: { value: string; tone: "up" | "down" | "flat"; pct: string };
   warn?: boolean;
@@ -23,7 +27,7 @@ export interface BalanceSheetStripProps {
 export function BalanceSheetStrip({ cards, scope }: BalanceSheetStripProps) {
   return (
     <div>
-      <SectionEyebrow label="Balance sheet · rolling 24h" scope={scope} />
+      <SectionEyebrow label="Balance sheet · live snapshot" scope={scope} />
       <div className="grid grid-cols-1 overflow-hidden rounded-[10px] border border-[var(--avy-line)] bg-[var(--avy-paper)] shadow-[var(--shadow-card)] backdrop-blur-[10px] md:grid-cols-2 xl:grid-cols-4">
         {cards.map((card, i) => (
           <BalanceCell key={card.label} card={card} isLast={i === cards.length - 1} />
@@ -69,13 +73,17 @@ function BalanceCell({ card, isLast }: { card: BalanceCard; isLast: boolean }) {
         ) : null}
       </span>
 
-      <Sparkline
-        points={card.spark}
-        color={card.sparkColor ?? (card.warn ? "var(--avy-warn)" : "var(--avy-accent)")}
-        width={120}
-        height={34}
-        className="block w-full"
-      />
+      {card.spark && card.spark.length > 0 ? (
+        <Sparkline
+          points={card.spark}
+          color={card.sparkColor ?? (card.warn ? "var(--avy-warn)" : "var(--avy-accent)")}
+          width={120}
+          height={34}
+          className="block w-full"
+        />
+      ) : (
+        <span aria-hidden="true" />
+      )}
 
       <div className="flex justify-between gap-2 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]">
         <span

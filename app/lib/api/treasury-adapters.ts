@@ -95,9 +95,10 @@ function pct(numerator: number, denominator: number): number {
   return Math.max(0, Math.min(100, Math.round((numerator / denominator) * 100)));
 }
 
-function spark(seed: number): number[] {
-  return Array.from({ length: 16 }, (_, i) => Math.max(3, seed + Math.sin(i / 2) * 5 + i / 4));
-}
+// NOTE: there is deliberately no sparkline factory here. Trend curves on
+// "vs. live API" tiles were previously synthesized from a sine wave —
+// fabricated history on an operator surface. Sparklines come back only
+// when a real time series backs them.
 
 function isActiveClaim(job: RawRecord): boolean {
   const state = text(job.effectiveState, text(job.claimState, text(job.state))).toLowerCase();
@@ -167,28 +168,24 @@ export function buildBalanceCards(accountPayload: unknown, strategyPayload: unkn
       label: "Spendable",
       value: fmt(liquid.value),
       unit: liquid.unit,
-      spark: spark(18),
       delta: { value: "live balance", tone: "flat", pct: "now" },
     },
     {
       label: "Capital at work",
       value: fmt(allocated.value),
       unit: allocated.unit,
-      spark: spark(24),
       delta: { value: `${numberValue(summary.deployedLanes)} lanes`, tone: "flat", pct: "routed" },
     },
     {
       label: "Collateral",
       value: fmt(collateral.value),
       unit: collateral.unit,
-      spark: spark(14),
       delta: { value: "live account", tone: "flat", pct: "locked" },
     },
     {
       label: debt.unit === "DOT" ? `Debt · ${debtFill}% of cap` : "Debt",
       value: fmt(debt.value),
       unit: debt.unit,
-      spark: spark(28),
       delta: {
         value: debt.unit === "DOT" ? "live debt" : "asset-aware debt",
         tone: debtFill >= 80 ? "up" : "flat",
@@ -323,7 +320,6 @@ export function buildRoomVitals(
     {
       label: "Runs in motion",
       value: jobs.length || sessions.length,
-      spark: spark(12),
       // Both surfaces feed this card: every open job in the catalog
       // plus every active session pulled from /admin/sessions
       // (operator-wide, includes external-agent claims). The hint
@@ -337,8 +333,6 @@ export function buildRoomVitals(
     {
       label: "Agents active",
       value: activeAgents || "-",
-      spark: spark(8),
-      sparkColor: "#8a8f88",
       delta: activeAgents
         ? sessionsBlocked
           ? `from public claims · sessions feed ${sessionsStateLabel}`
@@ -348,8 +342,8 @@ export function buildRoomVitals(
           : "no claims observed yet · operator-wide",
       deltaTone: "neutral",
     },
-    { label: "Capital at work", value: fmt(capital.value), unit: capital.unit, spark: spark(20), delta: "strategy + stake", deltaTone: "good" },
-    { label: "Treasury posture", value: attentionCount ? "Amber" : "Green", valueAccent: !attentionCount, spark: spark(1), delta: attentionCount ? `${attentionCount} lane attention` : "No lane attention", deltaTone: attentionCount ? "warn" : "good" },
+    { label: "Capital at work", value: fmt(capital.value), unit: capital.unit, delta: "strategy + stake", deltaTone: "good" },
+    { label: "Treasury posture", value: attentionCount ? "Amber" : "Green", valueAccent: !attentionCount, delta: attentionCount ? `${attentionCount} lane attention` : "No lane attention", deltaTone: attentionCount ? "warn" : "good" },
   ];
 }
 
