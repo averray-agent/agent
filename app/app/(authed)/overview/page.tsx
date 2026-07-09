@@ -45,6 +45,7 @@ import {
   buildOverviewAlerts,
   buildRoomVitals,
 } from "@/lib/api/treasury-adapters";
+import { feedPresence, FEED_STATE_LABEL } from "@/lib/api/feed-presence";
 
 export default function OverviewPage() {
   const jobs = useJobs();
@@ -144,6 +145,21 @@ export default function OverviewPage() {
   const vitals = vitalsWithLoadingHints;
   const alerts = endpointAlerts.length ? endpointAlerts : liveAlerts;
   const lanes = liveLanes;
+  // Needs-action truth boundary: when the alert feed is locked (this
+  // session lacks an operator role) or down, an empty list means "can't
+  // see", not "nothing to do" — never render it as `0 open`.
+  const alertsPresence = feedPresence(apiAlerts);
+  const alertFeedBlocked = alertsPresence === "locked" || alertsPresence === "down";
+  const alertsMeta = alertFeedBlocked
+    ? `${alerts.length} visible · alert feed ${FEED_STATE_LABEL[alertsPresence]}`
+    : alertsPresence === "loading"
+      ? "loading"
+      : `${alerts.length} open`;
+  const alertsNotice = alertFeedBlocked
+    ? alertsPresence === "locked"
+      ? "The operator alert feed is locked for this session (no operator role on this wallet), so open alerts can't be listed here. What is shown comes from the feeds this session can read."
+      : "The operator alert feed is unavailable right now, so open alerts can't be listed here. What is shown comes from the feeds this session can read."
+    : undefined;
   const disputedSessions = Array.isArray(sessions.data)
     ? sessions.data.filter((session) => session?.status === "disputed").length
     : 0;
@@ -188,7 +204,7 @@ export default function OverviewPage() {
         summary={hasLifecycleData ? lifecycleSummary : EMPTY_JOB_LIFECYCLE_SUMMARY}
         meta={lifecycleMeta}
       />
-      <NeedsActionList alerts={alerts} meta={`${alerts.length} open`} />
+      <NeedsActionList alerts={alerts} meta={alertsMeta} notice={alertsNotice} />
       <LaneStatusGrid lanes={lanes} meta={hasLiveOverview ? "live API snapshot" : undefined} />
       <ProviderOperationsCard
         providers={providerRows}

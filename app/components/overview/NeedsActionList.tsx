@@ -18,9 +18,14 @@ export interface AlertItem {
 export interface NeedsActionListProps {
   alerts: AlertItem[];
   meta?: string;
+  /**
+   * Feed-state banner. Set when the alert feed is locked/down so the
+   * surface says WHY it is empty instead of implying "nothing to do".
+   */
+  notice?: ReactNode;
 }
 
-export function NeedsActionList({ alerts, meta }: NeedsActionListProps) {
+export function NeedsActionList({ alerts, meta, notice }: NeedsActionListProps) {
   return (
     <section>
       <SectionHead
@@ -28,6 +33,11 @@ export function NeedsActionList({ alerts, meta }: NeedsActionListProps) {
         meta={meta ?? `${alerts.length} open`}
       />
       <div className="flex flex-col gap-2">
+        {notice ? (
+          <div className="rounded-[10px] border border-dashed border-[var(--avy-line)] bg-[var(--avy-paper-solid)] p-[0.95rem_1.1rem] font-[family-name:var(--font-body)] text-[13.5px] leading-[1.45] text-[var(--avy-muted)]">
+            {notice}
+          </div>
+        ) : null}
         {alerts.map((alert) => (
           <AlertRow key={alert.id} alert={alert} />
         ))}
