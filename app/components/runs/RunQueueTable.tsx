@@ -49,6 +49,11 @@ export interface RunRow {
     isSelf?: boolean;
   };
   state: RunState;
+  /**
+   * Display-formatted reward amount from the job payload. Historical naming
+   * says "stake", but this is the reward chip value; pair it with
+   * `stakeCurrency` when the payload supplies an asset.
+   */
   stake: string;
   stakeCurrency?: string;
   age: string;
