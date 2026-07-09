@@ -72,6 +72,32 @@ test("approved sessions use real verifier and badge references", () => {
   assert.match(output.lines.at(-1).message, /\/badges\/session-2/u);
 });
 
+test("summary-only rejected sessions render rejected, not approved", () => {
+  const output = buildVerifierOutput({
+    ...base,
+    sessionId: "session-rejected",
+    claimState: "submitted",
+    sessionPayload: {
+      verificationSummary: {
+        outcome: "rejected",
+        reasonCode: "BENCHMARK_FAILED",
+        handler: "benchmark",
+        handlerVersion: "v2",
+      },
+      resolvedAt: "2026-07-09T11:20:00.000Z",
+    },
+  });
+
+  assert.equal(output.kind, "terminal");
+  assert.equal(output.outcome, "rejected");
+  assert.equal(output.verdict.status, "Rejected");
+  assert.equal(output.verdict.score, "BENCHMARK_FAILED");
+  assert.match(
+    output.lines.find((line) => line.label === "verdict")?.message ?? "",
+    /Rejected/u
+  );
+});
+
 test("locked admin/session feeds are explicit when no public result is available", () => {
   const output = buildVerifierOutput({
     ...base,

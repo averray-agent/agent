@@ -169,9 +169,13 @@ function terminalOutput({
   timeline,
   sessionTimeline,
 }) {
+  const approvedBadge = Boolean(badgeAverray?.sessionId);
   const outcome = text(
     verifierResult?.outcome,
-    text(session?.verification?.outcome, "approved")
+    text(
+      session?.verification?.outcome,
+      text(session?.verificationSummary?.outcome, approvedBadge ? "approved" : "verified")
+    )
   );
   const reasonCode = text(
     verifierResult?.reasonCode,
