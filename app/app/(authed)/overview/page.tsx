@@ -15,7 +15,7 @@ import {
 import {
   LaneStatusGrid,
 } from "@/components/overview/LaneStatusGrid";
-import { PlatformPulse } from "@/components/overview/PlatformPulse";
+import { PlatformPulse, type PulseEvent } from "@/components/overview/PlatformPulse";
 import { ProviderOperationsCard } from "@/components/overview/ProviderOperationsCard";
 import { RecurringRuntimeCard } from "@/components/overview/RecurringRuntimeCard";
 import { JobLifecycleStrip } from "@/components/overview/JobLifecycleStrip";
@@ -252,7 +252,12 @@ export default function OverviewPage() {
     getStreamSnapshot,
     getStreamServerSnapshot
   );
-  const pulseEvents = useMemo(() => buildPulseEvents(stream.events), [stream.events]);
+  // Cast across the allowJs boundary — pulse-adapter guarantees the
+  // kind/tone unions (covered by its node --test suite).
+  const pulseEvents = useMemo(
+    () => buildPulseEvents(stream.events) as PulseEvent[],
+    [stream.events]
+  );
   const pulseMeta =
     stream.state === "off"
       ? "event stream requires wallet sign-in"
