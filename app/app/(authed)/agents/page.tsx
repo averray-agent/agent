@@ -15,6 +15,7 @@ import { TierChip } from "@/components/agents/TierChip";
 import { DetailDrawer } from "@/components/shell/DetailDrawer";
 import { BADGES } from "@/components/agents/types";
 import { extractAgent, extractAgents } from "@/lib/api/agent-adapters";
+import { matchesAgentStatusFilter } from "@/lib/api/agent-roster-truth.js";
 import { useAgent, useAgents } from "@/lib/api/hooks";
 import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
 
@@ -44,7 +45,7 @@ export default function AgentsPage() {
     const q = filter.query.trim().toLowerCase();
     return agents.filter((a) => {
       if (filter.tier !== "all" && a.tier !== filter.tier) return false;
-      if (filter.status !== "all" && a.state !== filter.status) return false;
+      if (!matchesAgentStatusFilter(a.state, filter.status)) return false;
       if (filter.specialty !== "all" && a.specialty !== filter.specialty) return false;
       if (q) {
         const badgeText = a.badges

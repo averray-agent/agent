@@ -1,7 +1,5 @@
 import { cn } from "@/lib/utils/cn";
-import { Sparkline } from "@/components/overview/Sparkline";
-import { TierChip } from "./TierChip";
-import { tierFor, type AgentRecord } from "./types";
+import type { AgentRecord } from "./types";
 
 export interface AgentsAggregateStripProps {
   agents: AgentRecord[];
@@ -18,12 +16,11 @@ export function AgentsAggregateStrip({ agents }: AgentsAggregateStripProps) {
   const slashed = agents.filter((a) => a.state === "slashed").length;
   const verifiedBadges = agents.reduce((count, agent) => count + agent.badges.length, 0);
 
-  const repPoints = agents.map((a) => a.score);
+  const scores = agents.map((a) => a.score);
   const avgRep =
     rosterCount > 0
-      ? Math.round(repPoints.reduce((s, n) => s + n, 0) / rosterCount)
+      ? Math.round(scores.reduce((s, n) => s + n, 0) / rosterCount)
       : 0;
-  const allRepsZero = repPoints.every((p) => p === 0);
 
   // Working / Roster meta uses the actual roster size so the copy stays
   // honest at small N: "1 visible agent" reads better than "below
@@ -66,21 +63,16 @@ export function AgentsAggregateStrip({ agents }: AgentsAggregateStripProps) {
             : `across ${rosterCount} visible agent${rosterCount === 1 ? "" : "s"}`
         }
         metaTone={avgRep > 0 ? "ok" : "muted"}
-        rightSlot={avgRep > 0 ? <TierChip tier={tierFor(avgRep)} /> : undefined}
-        // Suppress the empty trend bar when every visible agent has a
-        // 0 score — a flat-zero line read as a fake spark on the
-        // first-agent screenshot.
-        sparkline={allRepsZero ? null : repPoints}
       />
       <AggCard
-        scope="visible roster · 30d"
-        label="Slashed"
+        scope="visible roster"
+        label="Agents slashed"
         value={`${slashed}`}
         valueAccent={slashed > 0 ? "bad" : undefined}
         meta={
           slashed > 0
-            ? `${slashed} event · stake recovery pending`
-            : "clean record"
+            ? `${slashed} with recorded slash events`
+            : "no recorded slash events"
         }
         metaTone={slashed > 0 ? "bad" : "ok"}
       />
@@ -104,14 +96,7 @@ interface AggCardProps {
   mono?: boolean;
   meta: string;
   metaTone?: "muted" | "ok" | "warn" | "bad";
-  rightSlot?: React.ReactNode;
   valueAccent?: "bad";
-  /**
-   * When provided, render a small sparkline next to the value. Pass
-   * `null` to *suppress* a trend slot on cards whose data doesn't have
-   * any meaningful variation — flat-zero sparks read as fake.
-   */
-  sparkline?: number[] | null;
 }
 
 function AggCard({
@@ -122,11 +107,8 @@ function AggCard({
   mono,
   meta,
   metaTone = "muted",
-  rightSlot,
   valueAccent,
-  sparkline,
 }: AggCardProps) {
-  const showSpark = Array.isArray(sparkline) && sparkline.length > 0;
   return (
     <article className="flex min-h-[96px] flex-col gap-1.5 rounded-[10px] border border-[var(--avy-line)] bg-[var(--avy-paper)] p-4 shadow-[var(--shadow-card)] backdrop-blur-[8px]">
       <div className="flex items-baseline justify-between gap-2">
@@ -144,7 +126,6 @@ function AggCard({
             {scope}
           </span>
         </div>
-        {rightSlot ? <div className="shrink-0">{rightSlot}</div> : null}
       </div>
       <div className="flex items-end justify-between gap-2">
         <span
@@ -162,9 +143,6 @@ function AggCard({
             </span>
           ) : null}
         </span>
-        {showSpark ? (
-          <Sparkline points={sparkline as number[]} width={72} height={20} />
-        ) : null}
       </div>
       <span
         className={cn(

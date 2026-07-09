@@ -1,7 +1,6 @@
 "use client";
 
 import { cn } from "@/lib/utils/cn";
-import { Sparkline } from "@/components/overview/Sparkline";
 import { publicProfileUrl } from "@/lib/agents/public-profile";
 import { formatDeadline } from "@/components/runs/buildLifecycleStages";
 import { BadgeStrip } from "./BadgeStrip";
@@ -23,8 +22,9 @@ export interface AgentDirectoryTableProps {
 
 // State pill palette. Lifecycle-position tones:
 //   - idle: neutral parchment, "no claim, no work in flight"
-//   - claimed/working/active: green family — currently producing or has
-//     a verified history
+//   - claimed/working: green family — explicitly producing now
+//   - active: legacy fixture state, rendered neutral because it only means
+//     the agent has verified history
 //   - submitted: amber — produced something, awaiting verification
 //   - disputed/slashed: red family — operator action wanted
 const STATE_PILL: Record<
@@ -46,8 +46,8 @@ const STATE_PILL: Record<
   },
   disputed: { cls: "bg-[#f3d9d9] text-[#8a2a2a]", label: "Disputed" },
   active: {
-    cls: "bg-[var(--avy-accent-soft)] text-[var(--avy-accent)]",
-    label: "Active",
+    cls: "bg-[#ebe7da] text-[#756d58]",
+    label: "Idle · history",
   },
   slashed: { cls: "bg-[#f3d9d9] text-[#8a2a2a]", label: "Slashed" },
 };
@@ -157,24 +157,12 @@ export function AgentDirectoryTable({
                       <TierChip tier={a.tier} />
                     </Td>
                     <Td>
-                      <div className="flex items-center gap-2">
-                        <span
-                          className="min-w-[2.6rem] font-[family-name:var(--font-mono)] text-[13.5px] font-semibold tabular-nums text-[var(--avy-ink)]"
-                          style={{ letterSpacing: 0 }}
-                        >
-                          {a.score}
-                        </span>
-                        {/* Suppress a flat-zero spark on first-agent rows;
-                            it read as fake against a 0 score. */}
-                        {a.sparkline.some((v) => v > 0) ? (
-                          <Sparkline points={a.sparkline} width={72} height={20} />
-                        ) : (
-                          <span
-                            aria-hidden="true"
-                            className="block h-[2px] w-[72px] rounded-full bg-[color:rgba(17,19,21,0.08)]"
-                          />
-                        )}
-                      </div>
+                      <span
+                        className="font-[family-name:var(--font-mono)] text-[13.5px] font-semibold tabular-nums text-[var(--avy-ink)]"
+                        style={{ letterSpacing: 0 }}
+                      >
+                        {a.score}
+                      </span>
                     </Td>
                     <Td>
                       <BadgeStrip badges={a.badges} />
@@ -185,7 +173,7 @@ export function AgentDirectoryTable({
                           className="font-[family-name:var(--font-mono)] text-[13px] tabular-nums text-[var(--avy-ink)]"
                           style={{ letterSpacing: 0 }}
                         >
-                          {a.stake.deposited.toFixed(0)} DOT
+                          {a.stake.deposited.toFixed(0)} {a.stake.asset}
                         </span>
                         <div
                           className={cn(
@@ -194,7 +182,7 @@ export function AgentDirectoryTable({
                           )}
                           style={{ letterSpacing: 0 }}
                         >
-                          {a.stake.locked} locked · {Math.round(lockPct * 100)}%
+                          {a.stake.locked} {a.stake.asset} locked · {Math.round(lockPct * 100)}%
                         </div>
                       </div>
                     </Td>

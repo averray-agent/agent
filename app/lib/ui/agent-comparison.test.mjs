@@ -18,7 +18,8 @@ const A = {
   recentActivity: "Claimed dispute-proof, 1d ago",
   stakeDeposited: 0,
   stakeLocked: 0,
-  slashed30: 0,
+  stakeAsset: "USDC",
+  slashEventCount: 0,
   delegated: 0,
   subcontracted: 0,
 };
@@ -33,7 +34,8 @@ const B = {
   recentActivity: "",
   stakeDeposited: 12,
   stakeLocked: 4,
-  slashed30: 1,
+  stakeAsset: "USDC",
+  slashEventCount: 1,
   delegated: 2,
   subcontracted: 3,
 };
@@ -59,6 +61,14 @@ test("empty/zero-ish missing values render '—' (no fake blank)", () => {
   assert.deepEqual(activity, ["—"]); // empty string → em-dash
   const score = rows.find((r) => r.key === "score").values;
   assert.deepEqual(score, ["100105"]); // a real 0 would still print "0"
+});
+
+test("stake and slash metrics use explicit units and all-time count labels", () => {
+  const rows = buildComparisonRows([B]);
+  assert.deepEqual(rows.find((r) => r.key === "stakeDeposited").values, ["12 USDC"]);
+  assert.deepEqual(rows.find((r) => r.key === "stakeLocked").values, ["4 USDC"]);
+  assert.deepEqual(rows.find((r) => r.key === "slashEventCount").values, ["1"]);
+  assert.equal(rows.find((r) => r.key === "slashEventCount").label, "Slash events");
 });
 
 test("supports three agents", () => {

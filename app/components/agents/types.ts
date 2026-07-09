@@ -115,10 +115,11 @@ export interface AgentLineageStats {
 }
 
 export interface AgentStake {
+  asset: string;
   deposited: number;
   locked: number;
   available: number;
-  slashed30: number;
+  slashEventCount: number;
 }
 
 export interface AgentRecord {
@@ -127,7 +128,6 @@ export interface AgentRecord {
   walletFull: string;
   tier: AgentTier;
   score: number;
-  sparkline: number[];
   badges: string[];
   badgeDates: Record<string, string>;
   specialty: AgentSpecialty;
@@ -185,16 +185,4 @@ export function specialtyColor(s: AgentSpecialty): BadgeSpecialtyColor {
   if (s === "writer-gov") return "write";
   if (s === "ops") return "ops";
   return "gov";
-}
-
-export function tierFor(score: number): AgentTier {
-  if (score < 300) return "T1";
-  if (score < 800) return "T2";
-  return "T3";
-}
-
-export function nextThreshold(score: number): number | null {
-  if (score < 300) return 300;
-  if (score < 800) return 800;
-  return null;
 }

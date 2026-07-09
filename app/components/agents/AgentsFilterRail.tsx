@@ -2,11 +2,13 @@
 
 import { useEffect, useRef } from "react";
 import { cn } from "@/lib/utils/cn";
-import type { AgentTier, AgentState, AgentSpecialty } from "./types";
+import type { AgentTier, AgentSpecialty } from "./types";
+
+export type AgentStatusFilter = "all" | "working" | "idle" | "disputed" | "slashed";
 
 export interface AgentsFilterState {
   tier: AgentTier | "all";
-  status: AgentState | "all";
+  status: AgentStatusFilter;
   specialty: AgentSpecialty | "all";
   query: string;
 }
@@ -56,11 +58,14 @@ export function AgentsFilterRail({ filter, onChange }: AgentsFilterRailProps) {
         <Chip on={filter.status === "all"} onClick={() => set("status", "all")}>
           All
         </Chip>
-        <Chip on={filter.status === "active"} onClick={() => set("status", "active")}>
-          Active
+        <Chip on={filter.status === "working"} onClick={() => set("status", "working")}>
+          Working
         </Chip>
         <Chip on={filter.status === "idle"} onClick={() => set("status", "idle")}>
           Idle
+        </Chip>
+        <Chip on={filter.status === "disputed"} onClick={() => set("status", "disputed")}>
+          Disputed
         </Chip>
         <Chip on={filter.status === "slashed"} onClick={() => set("status", "slashed")}>
           Slashed
