@@ -189,13 +189,18 @@ The script:
 5. Calls the component deploy scripts for backend, indexer, and frontend.
    Those scripts run with `SKIP_GIT_UPDATE=1` so the deploy stays pinned to
    the commit selected by this top-level entrypoint.
-6. Always rebuilds the public site (`RUN_SITE=0` is the escape hatch) — the
+6. Force-rebuilds the operator frontend when `frontend/` on disk no longer
+   matches the tree hash recorded at the last deploy-driven build
+   (`.deploy-state/frontend.built-tree-hash`, stored outside the checkout) —
+   even when no frontend path changed. `RUN_FRONTEND=0` skips the deploy AND
+   this disk check.
+7. Always rebuilds the public site (`RUN_SITE=0` is the escape hatch) — the
    build is no longer path-gated because the served `site/` files are
    uncommitted working-tree output; see the stash warning below.
-7. Applies Caddy (render → validate → hash-compare → install if changed).
-8. Verifies the served homepage and `console-stream.js` are byte-identical
+8. Applies Caddy (render → validate → hash-compare → install if changed).
+9. Verifies the served homepage and `console-stream.js` are byte-identical
    (sha256) to the freshly built `site/` files, fail-closed.
-9. Runs the hosted stack smoke check.
+10. Runs the hosted stack smoke check.
 
 **Never leave a `git stash` un-popped on the VPS checkout.** Caddy serves
 `site/` and `frontend/` straight from the working tree, and the fresh builds
@@ -205,9 +210,13 @@ live there as *uncommitted* modifications over stale committed copies. Any
 to the stale committed files. That is how the homepage regressed from
 2026-06-28 ("ops path-b backend rollback pre-state" stash, never popped)
 until the 2026-07-08 deploys. After any stash/checkout dance, either pop the
-stash or immediately re-run `./scripts/ops/deploy-production.sh` (the site
-step self-heals; the frontend step only rebuilds when its paths changed, so
-run `./scripts/ops/redeploy-frontend.sh` too if in doubt).
+stash or immediately re-run `./scripts/ops/deploy-production.sh` — both
+served surfaces self-heal there: the site step always rebuilds, and the
+frontend step force-rebuilds when `frontend/` no longer matches the last
+recorded build tree hash. Note that a manual `./scripts/ops/redeploy-frontend.sh`
+run changes `frontend/` without updating that recorded hash, so the next
+production deploy will force one extra frontend rebuild to re-converge —
+expected, not a fault.
 
 GitHub Actions should call this script after CI passes on `main`. Configure
 these repository secrets for `.github/workflows/deploy-production.yml`:

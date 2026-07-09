@@ -21,6 +21,7 @@ DEPLOY_OLD_SHA=${DEPLOY_OLD_SHA:-}
 DEPLOY_NEW_SHA=${DEPLOY_NEW_SHA:-}
 DEPLOY_STATE_DIR=${DEPLOY_STATE_DIR:-"$STACK_ROOT/.deploy-state"}
 INDEXER_SCHEMA_STATE_FILE=${INDEXER_SCHEMA_STATE_FILE:-"$DEPLOY_STATE_DIR/indexer.database-schema"}
+FRONTEND_TREE_HASH_FILE=${FRONTEND_TREE_HASH_FILE:-"$DEPLOY_STATE_DIR/frontend.built-tree-hash"}
 
 RUN_BACKEND=${RUN_BACKEND:-auto}
 RUN_FRONTEND=${RUN_FRONTEND:-auto}
@@ -259,6 +260,79 @@ mark_component_deployed() {
   local component="$1"
   write_component_sha "$component" "$NEW_SHA"
   echo "Recorded $component deploy pointer: $NEW_SHA"
+}
+
+# 2026-06-28 stash regression, frontend edition (PR #754 follow-up). Like
+# site/, the operator app Caddy serves at app.averray.com is UNCOMMITTED
+# `npm run build:frontend` output layered over stale committed frontend/
+# copies, and the same un-popped `git stash push -u` that reverted the
+# homepage also reverted frontend/ (it self-healed sooner only because the
+# frontend path gate fires on many more paths). The path gate tracks
+# commits, not disk state, so it cannot see a working-tree revert.
+#
+# Fix: after every deploy-driven frontend build, record a sha256 tree hash
+# of frontend/ in $DEPLOY_STATE_DIR — OUTSIDE the checkout, where a stash
+# cannot sweep it. When the path gate would skip, compare disk against the
+# recorded hash and force a rebuild on mismatch (or when no hash was ever
+# recorded). This also self-heals in the same run when pull_latest's own
+# DEPLOY_AUTOSTASH sweeps the previous build output.
+#
+# Hash the working-tree content of every tracked or untracked-but-not-
+# ignored file under frontend/ (git's ls-files does the listing so
+# frontend/node_modules/ stays excluded via .gitignore). A file listed but
+# missing on disk makes xargs/sha256sum complain — the output still covers
+# the surviving files, so the final hash differs and drift is detected;
+# `|| true` keeps set -e/pipefail from turning that signal into an abort.
+frontend_tree_hash() {
+  (
+    cd "$APP_ROOT"
+    git ls-files -z --cached --others --exclude-standard -- frontend/ \
+      | xargs -0 sha256sum 2>/dev/null \
+      | sha256sum \
+      | awk '{print $1}'
+  ) || true
+}
+
+# Prints a human-readable drift reason and returns 0 when frontend/ on disk
+# no longer matches the recorded last-build tree hash; returns 1 (prints
+# nothing) when they match.
+frontend_tree_drift_reason() {
+  if [[ ! -f "$FRONTEND_TREE_HASH_FILE" ]]; then
+    echo "no recorded frontend build tree hash at $FRONTEND_TREE_HASH_FILE — rebuilding to seed it"
+    return 0
+  fi
+
+  local want have
+  want=$(head -n 1 "$FRONTEND_TREE_HASH_FILE" | tr -d '[:space:]')
+  have=$(frontend_tree_hash)
+  if [[ ! "$have" =~ ^[0-9a-f]{64}$ ]]; then
+    echo "could not compute the frontend tree hash (got '${have}') — rebuilding fail-safe instead of trusting the recorded hash"
+    return 0
+  fi
+  if [[ "$have" != "$want" ]]; then
+    echo "frontend/ working tree (sha256 ${have:0:8}) no longer matches the recorded last-build tree hash (${want:0:8}) — build output was likely reverted, e.g. by an un-popped git stash"
+    return 0
+  fi
+  return 1
+}
+
+record_frontend_tree_hash() {
+  local hash
+  hash=$(frontend_tree_hash)
+  # Fail closed on a malformed hash (empty when sha256sum/xargs break):
+  # recording it would make every later deploy report "frontend/ matches
+  # the last recorded build tree hash" by comparing empty to empty — a
+  # green claim with no evidence behind it.
+  if [[ ! "$hash" =~ ^[0-9a-f]{64}$ ]]; then
+    echo "ERROR: computed frontend tree hash is malformed ('${hash}') — refusing to record it." >&2
+    echo "       The frontend deploy itself succeeded, but the staleness detector cannot produce evidence; fix the hash tooling (git/xargs/sha256sum) before the next deploy." >&2
+    return 1
+  fi
+  mkdir -p "$DEPLOY_STATE_DIR"
+  local tmp="${FRONTEND_TREE_HASH_FILE}.tmp.$$"
+  printf '%s\n' "$hash" > "$tmp"
+  mv "$tmp" "$FRONTEND_TREE_HASH_FILE"
+  echo "Recorded frontend build tree hash: ${hash:0:8}"
 }
 
 # Phase 2 PR 2.7d.1 follow-up: wait for backend /health to return 200
@@ -1053,16 +1127,48 @@ deploy() {
     fi
   fi
 
-  if should_run frontend "$RUN_FRONTEND" '^(app/|frontend/|scripts/sync-operator-frontend\.mjs|scripts/ops/redeploy-frontend\.sh|scripts/ops/deploy-production\.sh|package(-lock)?\.json)'; then
+  # The frontend keeps its path gate — unlike the site (~45s astro build),
+  # build:frontend is a full Next.js workspace build (npm ci + next build,
+  # minutes in the docker runner) plus the wait_for_app/rollback cycle, too
+  # expensive to pay on every docs-only deploy. Instead, the auto path adds
+  # the frontend_tree_drift_reason disk check (see its comment block for the
+  # 2026-06-28 stash incident) so a reverted working tree forces a rebuild
+  # even when no frontend path changed. A served-hash check like
+  # verify_site_served is NOT possible here: app.averray.com sits behind
+  # Caddy basic-auth and the deploy runner deliberately has no credentials
+  # (see wait_for_app's 401-pass rationale in redeploy-frontend.sh); Caddy
+  # serves frontend/ from the same checkout bind mount, so for this failure
+  # class disk state IS what gets served.
+  local frontend_reason=""
+  case "$RUN_FRONTEND" in
+    0|false|no)
+      echo "Skipping operator frontend deploy (RUN_FRONTEND=$RUN_FRONTEND) — frontend/ disk staleness is also NOT checked; app.averray.com may keep serving stale committed files"
+      ;;
+    1|true|yes)
+      frontend_reason="forced by RUN_FRONTEND=$RUN_FRONTEND"
+      ;;
+    auto)
+      if component_changed_matches frontend '^(app/|frontend/|scripts/sync-operator-frontend\.mjs|scripts/ops/redeploy-frontend\.sh|scripts/ops/deploy-production\.sh|package(-lock)?\.json)'; then
+        frontend_reason="code path changed"
+      else
+        frontend_reason=$(frontend_tree_drift_reason || true)
+      fi
+      ;;
+    *)
+      echo "Invalid deploy toggle: $RUN_FRONTEND" >&2
+      exit 1
+      ;;
+  esac
+
+  if [[ -n "$frontend_reason" ]]; then
     run_frontend=1
-    echo "Deploying operator frontend"
+    echo "Deploying operator frontend (reason: $frontend_reason)"
     SKIP_GIT_UPDATE=1 PRE_DEPLOY_SHA="$OLD_SHA" "$APP_ROOT/scripts/ops/redeploy-frontend.sh"
+    record_frontend_tree_hash
     mark_component_deployed frontend
-  else
-    echo "Skipping operator frontend deploy"
-    if [[ "$RUN_FRONTEND" == "auto" ]]; then
-      mark_component_deployed frontend
-    fi
+  elif [[ "$RUN_FRONTEND" == "auto" ]]; then
+    echo "Skipping operator frontend deploy (frontend/ matches the last recorded build tree hash)"
+    mark_component_deployed frontend
   fi
 
   # 2026-06-28 → 2026-07-08 marketing-staleness incident: the site build
