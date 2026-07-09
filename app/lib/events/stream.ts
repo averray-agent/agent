@@ -49,6 +49,8 @@ export interface StreamOptions {
   topics?: EventTopic[];
   onEvent?: (payload: { topic: EventTopic; data: unknown; id?: string }) => void;
   onGap?: (info: { lastEventId?: string }) => void;
+  /** Fired when the SSE connection (re)opens successfully. */
+  onOpen?: () => void;
   onError?: (error: Event) => void;
   onStalled?: (info: { reconnectAttempts: number }) => void;
   onReauthNeeded?: () => void;
@@ -111,6 +113,7 @@ export function startEventStream(opts: StreamOptions) {
       reconnectAttempts = 0;
       reconnectDelayMs = 1000;
       bumpHeartbeat();
+      opts.onOpen?.();
     });
 
     source.addEventListener("ping", bumpHeartbeat);

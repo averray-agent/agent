@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import {
   OverviewTopbar,
   type CapabilityWarning,
@@ -49,6 +49,12 @@ import {
   buildRoomVitals,
 } from "@/lib/api/treasury-adapters";
 import { feedPresence, FEED_STATE_LABEL } from "@/lib/api/feed-presence";
+import {
+  getStreamServerSnapshot,
+  getStreamSnapshot,
+  subscribeStream,
+} from "@/lib/events/stream-status";
+import { buildPulseEvents } from "@/lib/events/pulse-adapter";
 
 export default function OverviewPage() {
   const jobs = useJobs();
@@ -228,6 +234,18 @@ export default function OverviewPage() {
     () => buildCapabilityWarning(health.data),
     [health.data]
   );
+  // Live SSE snapshot written by LiveDataBridge — the pulse card renders
+  // the connection's real state instead of a hardcoded empty feed.
+  const stream = useSyncExternalStore(
+    subscribeStream,
+    getStreamSnapshot,
+    getStreamServerSnapshot
+  );
+  const pulseEvents = useMemo(() => buildPulseEvents(stream.events), [stream.events]);
+  const pulseMeta =
+    stream.state === "off"
+      ? "event stream requires wallet sign-in"
+      : `stream ${stream.state} · ${stream.events.length} recent events`;
 
   return (
     <div className="flex w-full max-w-[1100px] flex-col gap-7">
@@ -265,9 +283,10 @@ export default function OverviewPage() {
       />
       <RecurringRuntimeCard runtime={recurringRuntime} />
       <PlatformPulse
-        events={[]}
+        events={pulseEvents}
+        streamState={stream.state}
         endpoint="/events"
-        meta="event stream requires wallet"
+        meta={pulseMeta}
       />
     </div>
   );
