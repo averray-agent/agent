@@ -1,11 +1,12 @@
 import { JobCard, type JobCardData } from "./JobCard";
-import { cn } from "@/lib/utils/cn";
+import { feedPresence } from "@/lib/api/feed-presence";
+
+type FeedPresence = ReturnType<typeof feedPresence>;
 
 export interface RecommendationRailProps {
-  workerTier: string;
-  workerScore: number;
   jobs: JobCardData[];
   totalMatches: number;
+  presence: FeedPresence;
   /**
    * `"vertical"` stacks cards in a narrow sidebar (original shape, used when
    * there's real estate to the right of the queue). `"horizontal"` lays the
@@ -18,13 +19,13 @@ export interface RecommendationRailProps {
 }
 
 export function RecommendationRail({
-  workerTier,
-  workerScore,
   jobs,
   totalMatches,
+  presence,
   layout = "vertical",
 }: RecommendationRailProps) {
   const isHorizontal = layout === "horizontal";
+  const isLive = presence === "live";
   return (
     <aside className="flex flex-col overflow-hidden rounded-[10px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)]">
       <header className="border-b border-[var(--avy-line-soft)] px-3.5 py-3 pb-2.5">
@@ -35,16 +36,30 @@ export function RecommendationRail({
           className="mt-0.5 font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]"
           style={{ letterSpacing: 0 }}
         >
-          Ranked by tier fit · your reputation{" "}
-          <b className="font-semibold text-[var(--avy-ink)]">
-            {workerTier} · {workerScore}
-          </b>
+          {isLive
+            ? "Ranked by the live recommendation feed"
+            : presence === "loading"
+              ? "Loading /jobs/recommendations…"
+              : presence === "locked"
+                ? "Recommendation feed locked for this session"
+                : "Recommendation feed unavailable"}
         </p>
       </header>
 
-      {!jobs.length ? (
+      {!isLive ? (
+        <div
+          role="status"
+          className="p-3.5 font-[family-name:var(--font-body)] text-[13px] leading-[1.5] text-[var(--avy-muted)]"
+        >
+          {presence === "loading"
+            ? "Waiting for live recommendation and job data."
+            : presence === "locked"
+              ? "Recommendations cannot be shown with this session's access."
+              : "Live recommendations cannot be shown right now."}
+        </div>
+      ) : !jobs.length ? (
         <div className="p-3.5 font-[family-name:var(--font-body)] text-[13px] leading-[1.5] text-[var(--avy-muted)]">
-          No live recommendations available.
+          The live recommendation feed is genuinely empty. There are no ready-to-claim matches for this wallet.
         </div>
       ) : isHorizontal ? (
         // Flex-wrap grid: cards keep a ~300px target width and reflow into
@@ -74,13 +89,11 @@ export function RecommendationRail({
         className="flex items-center justify-between border-t border-[var(--avy-line-soft)] bg-[#faf8f1] px-3.5 py-2.5 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]"
         style={{ letterSpacing: 0 }}
       >
-        <span>
-          {jobs.length} of {totalMatches} matches
-        </span>
-        {jobs.length ? (
+        <span>{isLive ? `${jobs.length} of ${totalMatches} matches` : "Match count unavailable"}</span>
+        {isLive && jobs.length ? (
           <a className="cursor-pointer text-[var(--avy-accent)]">See all ready →</a>
         ) : (
-          <span>waiting for /jobs/recommendations</span>
+          <span>{isLive ? "live feed empty" : presence}</span>
         )}
       </footer>
     </aside>

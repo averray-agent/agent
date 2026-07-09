@@ -20,6 +20,21 @@ test("runs components do not hardcode DOT units", () => {
   assert.deepEqual(offenders, []);
 });
 
+test("runs summary chrome does not fabricate freshness or wallet metrics", () => {
+  const queue = readFileSync(
+    resolve(runsComponentsDir, "RunQueueTable.tsx"),
+    "utf8"
+  );
+  const recommendations = readFileSync(
+    resolve(runsComponentsDir, "RecommendationRail.tsx"),
+    "utf8"
+  );
+
+  assert.doesNotMatch(queue, /Updated.*2s ago/u);
+  assert.doesNotMatch(queue, /assigned to you/u);
+  assert.doesNotMatch(recommendations, /your reputation/u);
+});
+
 function componentFiles(dir) {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const path = join(dir, entry.name);
