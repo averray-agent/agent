@@ -5,6 +5,7 @@ export interface ShapeEntry {
   title: string;
   body: React.ReactNode;
   fields: string[];
+  emitted?: boolean;
 }
 
 export interface ReceiptShapesLegendProps {
@@ -36,9 +37,19 @@ function ShapeCard({ shape }: { shape: ShapeEntry }) {
       <span className="inline-flex self-start">
         <KindChip kind={shape.kind} />
       </span>
-      <span className="font-[family-name:var(--font-display)] text-[13px] font-bold text-[var(--avy-ink)]">
-        {shape.title}
-      </span>
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-[family-name:var(--font-display)] text-[13px] font-bold text-[var(--avy-ink)]">
+          {shape.title}
+        </span>
+        {shape.emitted === false ? (
+          <span
+            className="rounded-full bg-[var(--avy-warn-soft)] px-2 py-0.5 font-[family-name:var(--font-display)] text-[9px] font-extrabold uppercase text-[var(--avy-warn)]"
+            style={{ letterSpacing: "0.08em" }}
+          >
+            not yet emitted
+          </span>
+        ) : null}
+      </div>
       <span className="font-[family-name:var(--font-body)] text-[12px] leading-[1.5] text-[var(--avy-muted)]">
         {shape.body}
       </span>

@@ -105,7 +105,7 @@ export function buildReceiptDrawer(
   const detail = detailData && typeof detailData === "object" ? detailData : row.badge;
   const badge = detail && typeof detail === "object" ? (detail as Record<string, unknown>) : null;
   const averray = objectField(badge, "averray");
-  const signers = averray ? extractSigners(undefined, averray) : row.signers;
+  const signers = badge ? extractSigners(badge.signers, averray) : row.signers;
   const raw = badge ?? row.badge ?? {
     sessionId: row.sessionId,
     jobId: row.subject,
@@ -113,17 +113,18 @@ export function buildReceiptDrawer(
     chainJobId: row.chainJobId,
     signers: row.signers,
   };
-  const evidenceJson = `// signed JSON — first 40 lines\n${JSON.stringify(raw, null, 2)}`;
+  const evidenceJson = `// badge JSON — served by /badges/:sessionId\n${JSON.stringify(raw, null, 2)}`;
 
   return {
     signatures: signers.map((signer) => ({
       role: signer.role,
       address: signer.address,
-      time: row.signedAt.replace(" UTC", ""),
+      ...(signer.signedAt ? { time: signer.signedAt.replace(" UTC", "") } : {}),
       pending: signer.address === "pending...",
+      identified: signer.identified,
     })),
     evidenceJson,
-    evidenceMeta: `${sizeOf(raw)} · application/jose+json`,
+    evidenceMeta: `${sizeOf(raw)} · application/json`,
     evidenceRawHref: `/badges/${row.sessionId}`,
     links: [
       { role: "Origin run", ref: text(averray?.jobId, row.subject) },
@@ -174,27 +175,34 @@ function extractSigners(value: unknown, averray: Record<string, unknown> | null)
       .map((entry, index) => {
         if (!entry || typeof entry !== "object") return null;
         const record = entry as Record<string, unknown>;
-        const address = text(record.address, text(record.wallet, "pending..."));
+        const address = text(record.address, text(record.wallet, ""));
         const role = signerRole(record.status, index);
-        return signer(address, role, toneForRole(role));
+        const signedAt = text(
+          record.signedAt,
+          text(record.signed_at, text(record.timestamp, text(record.at, "")))
+        );
+        return signer(address, role, toneForRole(role), signedAt);
       })
       .filter((entry): entry is Signer => Boolean(entry));
     if (signers.length) return signers;
   }
 
   return [
-    signer(text(averray?.poster, "pending..."), "operator", "sage"),
-    signer(text(averray?.verifier, "pending..."), "verifier", "blue"),
-    signer(text(averray?.worker, "pending..."), "worker", "ink"),
-  ].filter((entry) => entry.address !== "pending...");
+    signer(text(averray?.poster, ""), "operator", "sage"),
+    signer(text(averray?.verifier, ""), "verifier", "blue"),
+    signer(text(averray?.worker, ""), "worker", "ink"),
+  ].filter((entry) => entry.identified);
 }
 
-function signer(address: string, role: string, tone: SignerTone): Signer {
+function signer(address: string, role: string, tone: SignerTone, signedAt = ""): Signer {
+  const identified = isIdentifiedSignerAddress(address);
   return {
-    initials: initials(role || address),
-    tone,
+    initials: identified ? initials(role || address) : "?",
+    tone: identified ? tone : "muted",
     role,
-    address: shortAddress(address),
+    address: identified ? shortAddress(address) : "",
+    identified,
+    ...(signedAt ? { signedAt: displayTime(signedAt) } : {}),
   };
 }
 
@@ -276,6 +284,11 @@ function arrayField(value: unknown, key: string): unknown[] | null {
 function shortAddress(value: string): string {
   if (!value.startsWith("0x") || value.length <= 14) return value;
   return `${value.slice(0, 8)}…${value.slice(-4)}`;
+}
+
+function isIdentifiedSignerAddress(value: string): boolean {
+  const raw = value.trim();
+  return /^0x[0-9a-fA-F]{40}$/u.test(raw) && !/^0x0{40}$/iu.test(raw);
 }
 
 function initials(value: string): string {

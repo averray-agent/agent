@@ -14,7 +14,17 @@ function formatClock(d: Date): string {
   )}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())} UTC`;
 }
 
-export function ReceiptsTopbar({ freshness }: { freshness?: FreshnessState }) {
+export function ReceiptsTopbar({
+  freshness,
+  onExportBundle,
+  onVerifyManifest,
+  actionsDisabled,
+}: {
+  freshness?: FreshnessState;
+  onExportBundle?: () => void;
+  onVerifyManifest?: () => void;
+  actionsDisabled?: boolean;
+}) {
   const [clock, setClock] = useState("");
 
   useEffect(() => {
@@ -49,17 +59,21 @@ export function ReceiptsTopbar({ freshness }: { freshness?: FreshnessState }) {
         {freshness ? <DataFreshnessPill state={freshness} /> : null}
         <button
           type="button"
-          className="inline-flex h-[34px] items-center gap-1.5 rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3.5 font-[family-name:var(--font-display)] text-[11.5px] font-bold uppercase text-[var(--avy-ink)] transition-transform hover:-translate-y-px hover:border-[color:rgba(30,102,66,0.24)] hover:bg-white/96"
+          disabled={actionsDisabled || !onExportBundle}
+          onClick={onExportBundle}
+          className="inline-flex h-[34px] items-center gap-1.5 rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3.5 font-[family-name:var(--font-display)] text-[11.5px] font-bold uppercase text-[var(--avy-ink)] transition-transform hover:-translate-y-px hover:border-[color:rgba(30,102,66,0.24)] hover:bg-white/96 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
           style={{ letterSpacing: "0.04em" }}
         >
           ⤓ Export bundle
         </button>
         <button
           type="button"
-          className="inline-flex h-[34px] items-center gap-1.5 rounded-[8px] bg-[var(--avy-accent)] px-3.5 font-[family-name:var(--font-display)] text-[11.5px] font-bold uppercase text-[var(--fg-invert)] transition-transform hover:-translate-y-px hover:bg-[var(--avy-accent-2)]"
+          disabled={actionsDisabled || !onVerifyManifest}
+          onClick={onVerifyManifest}
+          className="inline-flex h-[34px] items-center gap-1.5 rounded-[8px] bg-[var(--avy-accent)] px-3.5 font-[family-name:var(--font-display)] text-[11.5px] font-bold uppercase text-[var(--fg-invert)] transition-transform hover:-translate-y-px hover:bg-[var(--avy-accent-2)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:bg-[var(--avy-accent)]"
           style={{ letterSpacing: "0.04em" }}
         >
-          ✓ Verify signature
+          Verify manifest
         </button>
       </div>
     </header>
