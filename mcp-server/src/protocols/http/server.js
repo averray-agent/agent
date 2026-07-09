@@ -10,7 +10,7 @@ import { hasRole } from "../../auth/config.js";
 import { resolveRequestId } from "../../core/logger.js";
 import { getAddress, keccak256, toUtf8Bytes } from "ethers";
 import { buildAgentProfile } from "../../core/agent-profile.js";
-import { buildBadgeFromSession, buildBadgeSigners } from "../../core/badge-metadata.js";
+import { buildBadgeFromSession } from "../../core/badge-metadata.js";
 import { buildDiscoveryManifest } from "../../core/discovery-manifest.js";
 import {
   getPublicBuiltinJobSchemaByName,
@@ -26,7 +26,7 @@ import { createAdminXcmRoutes } from "./admin-xcm-routes.js";
 import { createActivityRoutes } from "./activity-routes.js";
 import { createAccountRoutes } from "./account-routes.js";
 import { createAuthRoutes } from "./auth-routes.js";
-import { createBadgeRoutes } from "./badge-routes.js";
+import { createBadgeRoutes, createListBadgeReceipts } from "./badge-routes.js";
 import { createContentRoutes } from "./content-routes.js";
 import { createDisputeRoutes } from "./dispute-routes.js";
 import { createEventRoutes } from "./event-routes.js";
@@ -215,24 +215,6 @@ function clientIp(request) {
   return extractClientKey(request, { trustProxy });
 }
 
-function buildBadgeReceipt(badge, { session, verification, context } = {}) {
-  const averray = badge.averray ?? {};
-  const signers = Array.isArray(badge.signers) && badge.signers.length > 0
-    ? badge.signers
-    : buildBadgeSigners({ session, verification, context });
-  return {
-    sessionId: averray.sessionId,
-    jobId: averray.jobId,
-    worker: averray.worker,
-    kind: "badge",
-    issuedAt: averray.completedAt,
-    signers,
-    evidenceHash: averray.evidenceHash,
-    blockRef: averray.chainJobId,
-    badge
-  };
-}
-
 function deriveBadgeLineage(session, job) {
   if (!session || !job) return undefined;
   const lineage = {};
@@ -259,32 +241,16 @@ function deriveBadgeLineage(session, job) {
   return Object.keys(lineage).length > 0 ? lineage : undefined;
 }
 
-async function listBadgeReceipts(limit = 100) {
-  const sessions = await service.listRecentSessions(limit);
-  const receipts = [];
-  for (const session of sessions) {
-    let badge;
-    const job = service.getJobDefinition(session.jobId);
-    const verification = session.verification;
-    const context = {
-      publicBaseUrl: process.env.PUBLIC_BASE_URL,
-      posterAddress: process.env.DEFAULT_POSTER_ADDRESS,
-      verifierAddress: process.env.DEFAULT_VERIFIER_ADDRESS
-    };
-    try {
-      badge = buildBadgeFromSession({
-        session,
-        job,
-        verification,
-        context
-      });
-    } catch {
-      continue;
-    }
-    receipts.push(buildBadgeReceipt(badge, { session, verification, context }));
-  }
-  return receipts;
-}
+const listBadgeReceipts = createListBadgeReceipts({
+  buildBadgeFromSession,
+  deriveBadgeLineage,
+  publicBaseUrl: process.env.PUBLIC_BASE_URL,
+  posterAddress: process.env.DEFAULT_POSTER_ADDRESS,
+  service,
+  stateStore,
+  verifierAddress: process.env.DEFAULT_VERIFIER_ADDRESS,
+  verifierService
+});
 
 // Package G (P2.5b) — policy state is now owned by `policyService`.
 // `OPERATOR_SIGNERS`, `signerApproval`, `makePolicy`, and the
@@ -526,6 +492,7 @@ const handleBadgeRoute = createBadgeRoutes({
   posterAddress: process.env.DEFAULT_POSTER_ADDRESS,
   respond,
   service,
+  stateStore,
   verifierAddress: process.env.DEFAULT_VERIFIER_ADDRESS,
   verifierService,
 });

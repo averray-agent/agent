@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { NotFoundError, ValidationError } from "../../core/errors.js";
-import { createBadgeRoutes } from "./badge-routes.js";
+import { createBadgeRoutes, createListBadgeReceipts } from "./badge-routes.js";
 
 const SESSION = { sessionId: "session-1", jobId: "job-1" };
 const JOB = { id: "job-1", title: "Demo job" };
@@ -28,6 +28,17 @@ const SIGNERS = [
 ];
 const BADGE = { schemaVersion: "averray.agent-badge.v1", sessionId: "session-1", signers: SIGNERS };
 const RECEIPTS = [{ sessionId: "session-1", badgeHash: "0xabc", signers: SIGNERS }];
+const STORED_BADGE = {
+  averray: {
+    sessionId: "session-pruned",
+    jobId: "job-pruned",
+    worker: "0x3333333333333333333333333333333333333333",
+    completedAt: "2026-04-16T14:29:00.000Z",
+    evidenceHash: "0xabc",
+    chainJobId: "0xdef"
+  },
+  signers: SIGNERS
+};
 
 function makeHarness(overrides = {}) {
   const calls = [];
@@ -70,9 +81,13 @@ function makeHarness(overrides = {}) {
       },
       getJobDefinition: (jobId) => {
         calls.push(["getJobDefinition", jobId]);
+        if (overrides.jobError) {
+          throw overrides.jobError;
+        }
         return overrides.job ?? JOB;
       },
     },
+    stateStore: overrides.stateStore,
     verifierAddress: "0xverifier",
     verifierService: {
       getResult: async (sessionId) => {
@@ -237,4 +252,90 @@ test("GET /badges/:sessionId returns not_ready when badge construction says so",
     sessionId: "session-1",
     reason: "Badge not ready.",
   });
+});
+
+test("GET /badges/:sessionId serves the immutable document after its job is pruned", async () => {
+  const { calls, response, route } = makeHarness({
+    stateStore: {
+      getBadgeDocument: async (sessionId) => {
+        calls.push(["getBadgeDocument", sessionId]);
+        return STORED_BADGE;
+      }
+    }
+  });
+
+  const handled = await route({
+    request: { method: "GET" },
+    response,
+    url: new URL("http://localhost/badges/session-pruned"),
+    pathname: "/badges/session-pruned"
+  });
+
+  assert.equal(handled, true);
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.body, STORED_BADGE);
+  assert.deepEqual(calls.map(([name]) => name), ["getBadgeDocument", "respond"]);
+});
+
+test("listBadgeReceipts includes a stored badge without looking up its pruned job", async () => {
+  let jobLookups = 0;
+  const listBadgeReceipts = createListBadgeReceipts({
+    buildBadgeFromSession: () => {
+      throw new Error("stored badges must not rebuild");
+    },
+    deriveBadgeLineage: () => undefined,
+    service: {
+      listRecentSessions: async () => [{ sessionId: "session-pruned", jobId: "job-pruned" }],
+      getJobDefinition: () => {
+        jobLookups += 1;
+        throw new Error("Unknown job");
+      }
+    },
+    stateStore: {
+      getBadgeDocument: async () => STORED_BADGE
+    },
+    verifierService: { getResult: async () => VERIFICATION }
+  });
+
+  const receipts = await listBadgeReceipts(100);
+  assert.equal(receipts.length, 1);
+  assert.equal(receipts[0].sessionId, "session-pruned");
+  assert.deepEqual(receipts[0].badge, STORED_BADGE);
+  assert.equal(jobLookups, 0);
+});
+
+test("listBadgeReceipts isolates a row whose job lookup cannot be rebuilt", async () => {
+  const sessions = [
+    { sessionId: "session-pruned", jobId: "job-pruned" },
+    { sessionId: "session-live", jobId: "job-live" }
+  ];
+  const listBadgeReceipts = createListBadgeReceipts({
+    buildBadgeFromSession: ({ session, job }) => {
+      if (!job) throw new Error("missing job facts");
+      return {
+        averray: {
+          sessionId: session.sessionId,
+          jobId: session.jobId,
+          worker: "0x3333333333333333333333333333333333333333"
+        },
+        signers: SIGNERS
+      };
+    },
+    deriveBadgeLineage: () => undefined,
+    service: {
+      listRecentSessions: async () => sessions,
+      getJobDefinition: (jobId) => {
+        if (jobId === "job-pruned") throw new Error("Unknown job");
+        return JOB;
+      }
+    },
+    stateStore: {
+      getBadgeDocument: async () => undefined,
+      putBadgeDocument: async (_sessionId, badge) => badge
+    },
+    verifierService: { getResult: async () => VERIFICATION }
+  });
+
+  const receipts = await listBadgeReceipts(100);
+  assert.deepEqual(receipts.map((receipt) => receipt.sessionId), ["session-live"]);
 });
