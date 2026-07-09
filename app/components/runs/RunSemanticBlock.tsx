@@ -94,7 +94,11 @@ function describeRow(row: RunRow): Field[] {
     }
   }
   fields.push({ id: "state", label: "State", value: row.state });
-  fields.push({ id: "reward", label: "Reward", value: `${row.stake} DOT` });
+  fields.push({
+    id: "reward",
+    label: "Reward",
+    value: row.stakeCurrency ? `${row.stake} ${row.stakeCurrency}` : row.stake,
+  });
   fields.push({ id: "worker", label: "Worker", value: row.worker.label });
   fields.push({ id: "window", label: "Claim window", value: row.age });
   if (row.lifecycle) {

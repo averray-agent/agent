@@ -42,6 +42,7 @@ import {
 } from "@/lib/api/run-adapters";
 import { extractAdminJobs } from "@/lib/api/job-lifecycle";
 import { extractClaimStatus } from "@/lib/api/claim-status";
+import { buildClaimWindowLabel } from "@/lib/api/run-detail-values";
 import {
   extractJobSchemaContract,
   extractSubmissionContract,
@@ -173,6 +174,37 @@ export function LoadedRunView({
           loadedOpenData
         )
       : null;
+  const claimExpiresAt =
+    loadedRow?.claim?.claimExpiresAt ?? claimStatus?.claimExpiresAt;
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const claimState = loadedRow?.claim?.state ?? claimStatus?.state;
+    if (claimState !== "claimed" || !claimExpiresAt) return;
+    const interval = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(interval);
+  }, [claimExpiresAt, claimStatus?.state, loadedRow?.claim?.state]);
+  const claimWindowLabel = useMemo(
+    () =>
+      buildClaimWindowLabel({
+        claimState: loadedRow?.claim?.state ?? claimStatus?.state,
+        claimExpiresAt,
+        claimTtlSeconds: selectedJob?.claimTtlSeconds,
+        nowMs,
+      }),
+    [
+      claimExpiresAt,
+      claimStatus?.state,
+      loadedRow?.claim?.state,
+      nowMs,
+      selectedJob?.claimTtlSeconds,
+    ]
+  );
+  const claimWindowCopy = claimWindowLabel ? (
+    <>
+      {" "}
+      Window <b className="text-[var(--avy-ink)]">{claimWindowLabel}</b>.
+    </>
+  ) : null;
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -339,12 +371,12 @@ export function LoadedRunView({
           amount: loadedRow.stake,
           currency: rewardAssetFor(selectedJob, badge.data),
           aux: selectedJob
-            ? `${rewardAssetFor(selectedJob, badge.data)} reward · verifier ${actualVerifierMode || "unknown"}`
+            ? rewardAux(rewardAssetFor(selectedJob, badge.data), actualVerifierMode)
             : "waiting for live job definition",
           breakdown: {
-            worker: `${loadedRow.stake} ${rewardAssetFor(selectedJob, badge.data)}`,
-            verifier: `0 ${rewardAssetFor(selectedJob, badge.data)}`,
-            treasury: `0 ${rewardAssetFor(selectedJob, badge.data)}`,
+            worker: formatAmountWithAsset(loadedRow.stake, rewardAssetFor(selectedJob, badge.data)),
+            verifier: formatAmountWithAsset("0", rewardAssetFor(selectedJob, badge.data)),
+            treasury: formatAmountWithAsset("0", rewardAssetFor(selectedJob, badge.data)),
           },
         }}
         // When `github` or `wikipedia` is set the panel swaps Evidence
@@ -361,6 +393,7 @@ export function LoadedRunView({
           metaRight: outputSchemaUrl ? "schema-shaped JSON" : "",
           metaFoot: outputSchemaUrl ? `output schema · ${outputSchemaUrl}` : "",
           sample: submissionSample,
+          draftStorageKey: `averray:runs:draft:${loadedRow.id}`,
         }}
         submissionContract={
           submissionContract
@@ -389,29 +422,28 @@ export function LoadedRunView({
             <>
               Submits{" "}
               <b className="text-[var(--avy-ink)]">proposed change summary + citations</b>{" "}
-              to Averray. No direct Wikipedia edits. Window{" "}
-              <b className="text-[var(--avy-ink)]">00:08:14 / 02:00:00</b>.
+              to Averray. No direct Wikipedia edits.
+              {claimWindowCopy}
             </>
           ) : loadedOsv ? (
             <>
               Submits{" "}
               <b className="text-[var(--avy-ink)]">PR URL + lockfile + install/test evidence</b>{" "}
-              to the verifier. Window{" "}
-              <b className="text-[var(--avy-ink)]">00:08:14 / 02:00:00</b>.
+              to the verifier.
+              {claimWindowCopy}
             </>
           ) : loadedOpenData ? (
             <>
               Submits{" "}
               <b className="text-[var(--avy-ink)]">checks + findings + recommended actions</b>{" "}
               to the verifier. Audit only — no edits to source data.
-              Window{" "}
-              <b className="text-[var(--avy-ink)]">00:08:14 / 02:00:00</b>.
+              {claimWindowCopy}
             </>
           ) : (
             <>
               Submits <b className="text-[var(--avy-ink)]">PR URL + evidence</b>{" "}
-              to the verifier. Window{" "}
-              <b className="text-[var(--avy-ink)]">00:08:14 / 02:00:00</b>.
+              to the verifier.
+              {claimWindowCopy}
             </>
           ),
           cta: loadedWikipedia
@@ -744,7 +776,9 @@ function buildSettlementView(
       ),
       cta: "Settle from result",
       ctaDisabled: true,
-      note: `uses ${asset} reward and public badge metadata`,
+      note: asset
+        ? `uses ${asset} reward and public badge metadata`
+        : "uses public badge metadata",
     };
   }
   if (verifier.kind === "locked") {
@@ -799,11 +833,14 @@ function buildReceiptDraft(
   const claimStake = asRecord(badgeAverray?.claimStake);
   const rewardAmount = formatBadgeAmount(reward?.amount, reward?.decimals) ?? row.stake;
   const stakeRows = [
-    { label: "Worker reward", value: `${rewardAmount} ${asset}` },
+    { label: "Worker reward", value: formatAmountWithAsset(rewardAmount, asset) },
   ];
   const claimStakeAmount = formatBadgeAmount(claimStake?.amount, claimStake?.decimals);
   if (claimStakeAmount) {
-    stakeRows.push({ label: "Claim stake", value: `${claimStakeAmount} ${asset}` });
+    stakeRows.push({
+      label: "Claim stake",
+      value: formatAmountWithAsset(claimStakeAmount, asset),
+    });
   }
   const signers = [
     { label: workerSignerLabel, status: "signed" as const },
@@ -841,7 +878,19 @@ function rewardAssetFor(
 ): string {
   const badgeAverray = asRecord(asRecord(badgePayload)?.averray);
   const reward = asRecord(badgeAverray?.reward);
-  return text(selectedJob?.rewardAsset, text(reward?.asset, "USDC"));
+  return text(selectedJob?.rewardAsset, text(reward?.asset, ""));
+}
+
+function rewardAux(asset: string, verifierMode: string): string {
+  const parts = [
+    asset ? `${asset} reward` : "reward",
+    `verifier ${verifierMode || "unknown"}`,
+  ];
+  return parts.join(" · ");
+}
+
+function formatAmountWithAsset(amount: string, asset: string): string {
+  return asset ? `${amount} ${asset}` : amount;
 }
 
 function formatBadgeAmount(value: unknown, decimalsValue: unknown): string | null {

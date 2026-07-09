@@ -129,7 +129,7 @@ export interface LoadedRunPanelProps {
   meta: string;
   stake: {
     amount: string;
-    currency: string;
+    currency?: string;
     aux: string;
     breakdown: StakeBreakdown;
   };
@@ -139,6 +139,7 @@ export interface LoadedRunPanelProps {
     sample: string;
     metaRight: string;
     metaFoot: string;
+    draftStorageKey?: string;
   };
   submissionContract?: SubmissionContractView;
   submission: {
@@ -223,10 +224,48 @@ export function LoadedRunPanel(props: LoadedRunPanelProps) {
     props.evidence.activeTab ?? props.evidence.tabs[0]?.id
   );
   const [evidenceValue, setEvidenceValue] = useState(props.evidence.sample);
+  const [draftIntegrity, setDraftIntegrity] = useState<{
+    hash: string;
+    savedAt: string;
+  } | null>(null);
 
   useEffect(() => {
-    setEvidenceValue(props.evidence.sample);
-  }, [props.evidence.sample]);
+    const stored = readStoredDraft(props.evidence.draftStorageKey);
+    setEvidenceValue(stored?.draft ?? props.evidence.sample);
+    setDraftIntegrity(null);
+  }, [props.evidence.draftStorageKey, props.evidence.sample]);
+
+  useEffect(() => {
+    const storageKey = props.evidence.draftStorageKey;
+    if (!storageKey || !evidenceValue.trim()) {
+      setDraftIntegrity(null);
+      return;
+    }
+    let cancelled = false;
+    const handle = window.setTimeout(async () => {
+      const savedAt = new Date().toISOString();
+      const hash = await sha256Hex(evidenceValue).catch(() => "");
+      if (cancelled) return;
+      if (!hash) {
+        setDraftIntegrity(null);
+        return;
+      }
+      try {
+        window.localStorage.setItem(
+          storageKey,
+          JSON.stringify({ draft: evidenceValue, savedAt, hash })
+        );
+      } catch {
+        // Local draft persistence is best-effort. If storage is blocked,
+        // still show the real hash for the current in-memory draft.
+      }
+      setDraftIntegrity({ hash, savedAt });
+    }, 350);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(handle);
+    };
+  }, [evidenceValue, props.evidence.draftStorageKey]);
 
   const stakeDisplay = STAKE_BY_STATE[props.state ?? "claimed"];
 
@@ -307,12 +346,14 @@ export function LoadedRunPanel(props: LoadedRunPanelProps) {
               <div>
                 <div className="font-[family-name:var(--font-display)] text-[26px] font-bold leading-none text-[var(--avy-ink)]">
                   {props.stake.amount}
-                  <span
-                    className="ml-1 font-[family-name:var(--font-mono)] text-[11px] font-medium text-[var(--avy-muted)]"
-                    style={{ letterSpacing: 0 }}
-                  >
-                    {props.stake.currency}
-                  </span>
+                  {props.stake.currency ? (
+                    <span
+                      className="ml-1 font-[family-name:var(--font-mono)] text-[11px] font-medium text-[var(--avy-muted)]"
+                      style={{ letterSpacing: 0 }}
+                    >
+                      {props.stake.currency}
+                    </span>
+                  ) : null}
                 </div>
                 <p
                   className="mt-1 font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]"
@@ -409,7 +450,12 @@ export function LoadedRunPanel(props: LoadedRunPanelProps) {
                   <span className="inline-flex items-center gap-1 text-[var(--avy-accent)]">
                     ＋ Attach file
                   </span>
-                  <span>sha256 0x9c…41 · autosave 4s ago</span>
+                  {draftIntegrity ? (
+                    <span>
+                      sha256 {shortHash(draftIntegrity.hash)} · saved{" "}
+                      {formatSavedTime(draftIntegrity.savedAt)}
+                    </span>
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -2327,4 +2373,39 @@ function SmallGhostBtn({
       {children}
     </button>
   );
+}
+
+function readStoredDraft(storageKey?: string): { draft: string } | null {
+  if (!storageKey || typeof window === "undefined") return null;
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(storageKey) ?? "null");
+    if (parsed && typeof parsed.draft === "string") {
+      return { draft: parsed.draft };
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const bytes = new TextEncoder().encode(value);
+  const digest = await window.crypto.subtle.digest("SHA-256", bytes);
+  return `0x${Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("")}`;
+}
+
+function shortHash(value: string): string {
+  return value.length > 18 ? `${value.slice(0, 10)}…${value.slice(-6)}` : value;
+}
+
+function formatSavedTime(value: string): string {
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) return value;
+  return new Intl.DateTimeFormat("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(parsed);
 }

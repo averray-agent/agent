@@ -50,6 +50,7 @@ export interface RunRow {
   };
   state: RunState;
   stake: string;
+  stakeCurrency?: string;
   age: string;
   ageStale?: boolean;
   lastEvent: ReactNode;
@@ -297,7 +298,12 @@ function RunRowCard({
             </div>
             <span className="font-[family-name:var(--font-mono)] text-[12.5px] leading-tight text-[var(--avy-ink)]">
               {row.stake}
-              <small className="font-normal text-[var(--avy-muted)]"> DOT</small>
+              {row.stakeCurrency ? (
+                <small className="font-normal text-[var(--avy-muted)]">
+                  {" "}
+                  {row.stakeCurrency}
+                </small>
+              ) : null}
             </span>
             <span
               className={cn(

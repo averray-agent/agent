@@ -107,6 +107,10 @@ function formatReward(value: unknown): string {
   });
 }
 
+function formatAmountWithOptionalAsset(amount: string, asset: string): string {
+  return asset ? `${amount} ${asset}` : amount;
+}
+
 function formatWindow(seconds: unknown): string {
   const total = numberValue(seconds);
   if (!total) return "-";
@@ -573,6 +577,7 @@ export function buildRunRows(payload: unknown): RunRow[] {
     // and pills must derive from this, never from `lifecycle.status`
     // alone (a row can be lifecycle.open + claim.exhausted).
     const claim = buildClaimSummary(job);
+    const rewardAsset = text(job.rewardAsset);
     return {
       id,
       sessionId: text(job.sessionId),
@@ -588,6 +593,7 @@ export function buildRunRows(payload: unknown): RunRow[] {
       },
       state,
       stake: formatReward(job.stake ?? job.rewardAmount),
+      ...(rewardAsset ? { stakeCurrency: rewardAsset } : {}),
       age: formatWindow(job.claimTtlSeconds),
       // The SourceBadge already shows where the row came from, so the
       // lastEvent line carries the work *kind* instead of restating the
@@ -666,7 +672,12 @@ export function buildRunRows(payload: unknown): RunRow[] {
                         )
                         .join(" · ") ||
                       `verifier ${verifierLabel(job.verifierMode)}`
-                    : `${text(job.rewardAsset, "DOT")} · verifier ${verifierLabel(job.verifierMode)}`,
+                    : [
+                        rewardAsset,
+                        `verifier ${verifierLabel(job.verifierMode)}`,
+                      ]
+                        .filter(Boolean)
+                        .join(" · "),
     };
   });
 }
@@ -729,13 +740,19 @@ export function buildRecommendationCards(
       category,
       ...(source ? { source } : {}),
       rewardValue: formatReward(recommendation.netReward ?? job.rewardAmount),
-      rewardCurrency: text(job.rewardAsset, "DOT"),
+      rewardCurrency: text(job.rewardAsset),
       rewardUsd: "live",
       tier: tierFromRaw(recommendation.tier ?? job.tier),
       modeLabel: verifierLabel(job.verifierMode),
       modeTone: recommendation.eligible === false ? "disputed" : "claimed",
       meta: [
-        { label: "Reward", value: `${formatReward(job.rewardAmount)} ${text(job.rewardAsset, "DOT")}` },
+        {
+          label: "Reward",
+          value: formatAmountWithOptionalAsset(
+            formatReward(job.rewardAmount),
+            text(job.rewardAsset)
+          ),
+        },
         { label: "Verifier", value: verifierLabel(job.verifierMode) },
         { label: "Window", value: formatWindow(job.claimTtlSeconds), accent: true },
         {
@@ -766,5 +783,16 @@ export function sumReadyStake(rows: RunRow[]): string {
   const total = rows
     .filter((row) => row.state === "ready")
     .reduce((sum, row) => sum + numberValue(row.stake), 0);
-  return `${formatReward(total)} DOT`;
+  const assets = new Set(
+    rows
+      .filter(
+        (row): row is RunRow & { stakeCurrency: string } =>
+          row.state === "ready" && Boolean(row.stakeCurrency)
+      )
+      .map((row) => row.stakeCurrency)
+  );
+  return formatAmountWithOptionalAsset(
+    formatReward(total),
+    assets.size === 1 ? [...assets][0] : ""
+  );
 }
