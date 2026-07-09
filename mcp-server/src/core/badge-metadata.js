@@ -39,9 +39,11 @@ export const UNKNOWN_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 export const BADGE_SCHEMA_VERSION = "v1";
 const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/u;
+const ZERO_ADDRESS_RE = /^0x0{40}$/u;
 const BYTES32_RE = /^0x[a-fA-F0-9]{64}$/u;
 const UINT_STRING_RE = /^[0-9]+$/u;
 const VERIFIER_MODES = new Set(["benchmark", "deterministic", "human_fallback", "github_pr"]);
+const SIGNER_ROLES = new Set(["operator", "verifier", "worker"]);
 const LEVEL_MIN = 1;
 const LEVEL_MAX = 255;
 const NAME_MAX = 140;
@@ -69,6 +71,7 @@ const DESCRIPTION_MAX = 1024;
  * @param {string} input.worker               0x EVM address
  * @param {string} input.poster               0x EVM address
  * @param {string} input.verifier             0x EVM address
+ * @param {Array<object>} [input.signers]     Optional real signer chain entries ({ role, wallet, at, status? })
  * @param {string} [input.metadataURI]        Self-reference (optional)
  * @param {string} [input.image]              Badge image URL (optional)
  * @param {string} [input.externalUrl]        Profile page URL override
@@ -95,6 +98,7 @@ export function buildBadgeMetadata(input) {
     worker,
     poster,
     verifier,
+    signers,
     metadataURI,
     image,
     externalUrl,
@@ -140,6 +144,10 @@ export function buildBadgeMetadata(input) {
   }
   if (metadataURI) {
     doc.averray.metadataURI = metadataURI;
+  }
+  const normalizedSigners = normalizeBadgeSigners(signers);
+  if (normalizedSigners.length > 0) {
+    doc.signers = normalizedSigners;
   }
   const normalizedLineage = normalizeBadgeLineage(lineage);
   if (normalizedLineage) {
@@ -218,6 +226,9 @@ export function validateBadgeMetadata(doc) {
   requireString(doc, "external_url", { urlLike: true });
   if ("image" in doc) {
     requireString(doc, "image", { urlLike: true });
+  }
+  if ("signers" in doc) {
+    validateBadgeSigners(doc.signers);
   }
   requireAttributes(doc.attributes);
   requireAverray(doc.averray);
@@ -448,6 +459,84 @@ function stripTrailingSlash(value) {
   return value.replace(/\/+$/u, "");
 }
 
+export function buildBadgeSigners({ session, verification, context = {} } = {}) {
+  return normalizeBadgeSigners([
+    {
+      role: "operator",
+      status: "posted",
+      wallet: context.posterAddress,
+      at: session?.claimedAt
+    },
+    {
+      role: "verifier",
+      status: "signed",
+      wallet: verification?.verifier ?? verification?.signer ?? context.verifierAddress,
+      at: verification?.resolvedAt ?? verification?.session?.resolvedAt ?? session?.resolvedAt
+    },
+    {
+      role: "worker",
+      status: "submitted",
+      wallet: session?.wallet,
+      at: session?.submittedAt
+    }
+  ]);
+}
+
+function normalizeBadgeSigners(signers) {
+  if (!Array.isArray(signers)) return [];
+  return signers
+    .map((entry) => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) return null;
+      const role = typeof entry.role === "string" ? entry.role.trim().toLowerCase() : "";
+      const wallet = normalizeRealAddress(entry.wallet ?? entry.address);
+      const at = normalizeIso(entry.at ?? entry.signedAt);
+      if (!SIGNER_ROLES.has(role) || !wallet || !at) return null;
+      const normalized = { role, wallet, at };
+      if (typeof entry.status === "string" && entry.status.trim()) {
+        normalized.status = entry.status.trim();
+      }
+      return normalized;
+    })
+    .filter(Boolean);
+}
+
+function validateBadgeSigners(signers) {
+  if (!Array.isArray(signers)) {
+    throw new ValidationError("signers must be an array");
+  }
+  signers.forEach((entry, idx) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new ValidationError(`signers[${idx}] must be an object`);
+    }
+    if (!SIGNER_ROLES.has(entry.role)) {
+      throw new ValidationError(`signers[${idx}].role must be one of ${Array.from(SIGNER_ROLES).join(", ")}`);
+    }
+    if (!normalizeRealAddress(entry.wallet)) {
+      throw new ValidationError(`signers[${idx}].wallet must be a real 0x-prefixed 20-byte EVM address`);
+    }
+    if (!normalizeIso(entry.at)) {
+      throw new ValidationError(`signers[${idx}].at must be a valid ISO-8601 date`);
+    }
+    for (const key of Object.keys(entry)) {
+      if (key !== "role" && key !== "wallet" && key !== "at" && key !== "status") {
+        throw new ValidationError(`signers[${idx}].${key} is not a recognised signer field`);
+      }
+    }
+  });
+}
+
+function normalizeRealAddress(raw) {
+  if (typeof raw !== "string" || !ADDRESS_RE.test(raw)) return "";
+  const lowered = raw.toLowerCase();
+  return ZERO_ADDRESS_RE.test(lowered) ? "" : lowered;
+}
+
+function normalizeIso(raw) {
+  if (typeof raw !== "string" || !raw.trim()) return "";
+  const parsed = Date.parse(raw);
+  return Number.isNaN(parsed) ? "" : new Date(parsed).toISOString();
+}
+
 /**
  * Adapt the in-memory platform state into a badge metadata document.
  *
@@ -525,6 +614,7 @@ export function buildBadgeFromSession({ session, job, verification, context = {}
     // job. See UNKNOWN_ADDRESS docs above.
     poster: requireLowerAddress(context.posterAddress ?? UNKNOWN_ADDRESS, "context.posterAddress"),
     verifier: requireLowerAddress(context.verifierAddress ?? UNKNOWN_ADDRESS, "context.verifierAddress"),
+    signers: buildBadgeSigners({ session, verification, context }),
     metadataURI: selfUrl,
     image: context.image,
     publicBaseUrl,

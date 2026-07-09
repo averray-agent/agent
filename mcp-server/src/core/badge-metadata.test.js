@@ -6,6 +6,7 @@ import {
   UNKNOWN_ADDRESS,
   buildBadgeFromSession,
   buildBadgeMetadata,
+  buildBadgeSigners,
   validateBadgeMetadata
 } from "./badge-metadata.js";
 import { NotFoundError, ValidationError } from "./errors.js";
@@ -153,6 +154,9 @@ function approvedSessionFixture() {
       claimStakeBps: 500,
       status: "resolved",
       protocolHistory: ["http"],
+      claimedAt: "2026-04-16T14:00:00.000Z",
+      submittedAt: "2026-04-16T14:12:00.000Z",
+      resolvedAt: "2026-04-16T14:29:00.000Z",
       updatedAt: "2026-04-16T14:30:00.000Z"
     },
     job: {
@@ -163,7 +167,7 @@ function approvedSessionFixture() {
       rewardAmount: 5,
       verifierMode: "benchmark"
     },
-    verification: { outcome: "approved", reasonCode: "OK" },
+    verification: { outcome: "approved", reasonCode: "OK", resolvedAt: "2026-04-16T14:29:00.000Z" },
     context: {
       publicBaseUrl: "https://api.averray.com",
       posterAddress: "0x0987654321098765432109876543210987654321",
@@ -183,6 +187,26 @@ test("buildBadgeFromSession produces a valid v1 document", () => {
     "https://api.averray.com/badges/session-0x1234-starter-coding-001-1700000000000"
   );
   assert.equal(doc.averray.verifierMode, "benchmark");
+  assert.deepEqual(doc.signers, [
+    {
+      role: "operator",
+      wallet: "0x0987654321098765432109876543210987654321",
+      at: "2026-04-16T14:00:00.000Z",
+      status: "posted"
+    },
+    {
+      role: "verifier",
+      wallet: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+      at: "2026-04-16T14:29:00.000Z",
+      status: "signed"
+    },
+    {
+      role: "worker",
+      wallet: "0x1234567890123456789012345678901234567890",
+      at: "2026-04-16T14:12:00.000Z",
+      status: "submitted"
+    }
+  ]);
   // Validator round-trips
   assert.doesNotThrow(() => validateBadgeMetadata(doc));
 });
@@ -243,6 +267,14 @@ test("buildBadgeFromSession emits UNKNOWN_ADDRESS for poster/verifier when conte
   const doc = buildBadgeFromSession(fixture);
   assert.equal(doc.averray.poster, UNKNOWN_ADDRESS);
   assert.equal(doc.averray.verifier, UNKNOWN_ADDRESS);
+  assert.deepEqual(doc.signers, [
+    {
+      role: "worker",
+      wallet: "0x1234567890123456789012345678901234567890",
+      at: "2026-04-16T14:12:00.000Z",
+      status: "submitted"
+    }
+  ]);
   // The worker stays authoritative — it's always session.wallet.
   assert.equal(doc.averray.worker, fixture.session.wallet.toLowerCase());
 });
@@ -258,6 +290,26 @@ test("buildBadgeFromSession never attributes poster/verifier back to the worker"
   const doc = buildBadgeFromSession(fixture);
   assert.notEqual(doc.averray.poster, doc.averray.worker);
   assert.notEqual(doc.averray.verifier, doc.averray.worker);
+});
+
+test("buildBadgeSigners omits entries missing identity or timestamp", () => {
+  const fixture = approvedSessionFixture();
+  delete fixture.session.submittedAt;
+  delete fixture.session.resolvedAt;
+  fixture.verification = { outcome: "approved" };
+  fixture.context.verifierAddress = UNKNOWN_ADDRESS;
+
+  const signers = buildBadgeSigners(fixture);
+
+  assert.deepEqual(signers, [
+    {
+      role: "operator",
+      wallet: "0x0987654321098765432109876543210987654321",
+      at: "2026-04-16T14:00:00.000Z",
+      status: "posted"
+    }
+  ]);
+  assert.ok(signers.every((signer) => signer.wallet !== UNKNOWN_ADDRESS));
 });
 
 test("buildBadgeMetadata accepts an optional lineage block (parent only)", () => {

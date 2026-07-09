@@ -6,8 +6,28 @@ import { createBadgeRoutes } from "./badge-routes.js";
 const SESSION = { sessionId: "session-1", jobId: "job-1" };
 const JOB = { id: "job-1", title: "Demo job" };
 const VERIFICATION = { outcome: "approved" };
-const BADGE = { schemaVersion: "averray.agent-badge.v1", sessionId: "session-1" };
-const RECEIPTS = [{ sessionId: "session-1", badgeHash: "0xabc" }];
+const SIGNERS = [
+  {
+    role: "operator",
+    wallet: "0x1111111111111111111111111111111111111111",
+    at: "2026-04-16T14:00:00.000Z",
+    status: "posted",
+  },
+  {
+    role: "verifier",
+    wallet: "0x2222222222222222222222222222222222222222",
+    at: "2026-04-16T14:29:00.000Z",
+    status: "signed",
+  },
+  {
+    role: "worker",
+    wallet: "0x3333333333333333333333333333333333333333",
+    at: "2026-04-16T14:12:00.000Z",
+    status: "submitted",
+  },
+];
+const BADGE = { schemaVersion: "averray.agent-badge.v1", sessionId: "session-1", signers: SIGNERS };
+const RECEIPTS = [{ sessionId: "session-1", badgeHash: "0xabc", signers: SIGNERS }];
 
 function makeHarness(overrides = {}) {
   const calls = [];
@@ -92,6 +112,8 @@ test("GET /badges parses limit and returns cached receipts", async () => {
   assert.equal(handled, true);
   assert.equal(response.statusCode, 200);
   assert.deepEqual(response.body, RECEIPTS);
+  assert.deepEqual(response.body[0].signers.map((signer) => signer.role), ["operator", "verifier", "worker"]);
+  assert.ok(response.body[0].signers.every((signer) => signer.at && !/^0x0{40}$/u.test(signer.wallet)));
   assert.deepEqual(calls, [
     ["parseLimit", { fallback: 100, max: 500 }],
     ["listBadgeReceipts", 17],
@@ -116,6 +138,8 @@ test("GET /badges/:sessionId builds public badge metadata", async () => {
   assert.equal(handled, true);
   assert.equal(response.statusCode, 200);
   assert.deepEqual(response.body, BADGE);
+  assert.deepEqual(response.body.signers, SIGNERS);
+  assert.ok(response.body.signers.every((signer) => signer.at && !/^0x0{40}$/u.test(signer.wallet)));
   assert.deepEqual(calls, [
     ["resumeSession", "session-1"],
     ["getResult", "session-1"],
