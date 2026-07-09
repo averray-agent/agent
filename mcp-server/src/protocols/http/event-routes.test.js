@@ -165,6 +165,28 @@ test("GET /events authenticates, replays durable events, subscribes, and cleans 
   ]);
 });
 
+test("GET /events flushes the SSE handshake immediately even with no replayable events", async () => {
+  // Node buffers status + headers until the first body write. Without an
+  // immediate write, a wallet with no replayable events sends NOTHING
+  // until the 15s heartbeat — EventSource clients sit in "connecting"
+  // and edge timeouts surface as 5xx (2026-07-09 overview regression).
+  const { route } = makeHarness({ replay: { gap: false, events: [] } });
+  const request = makeRequest();
+  const response = makeResponse();
+
+  await route({
+    request,
+    response,
+    url: new URL("http://localhost/events"),
+    pathname: "/events",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.ok(response.chunks.length >= 1, "expected an immediate first byte");
+  assert.equal(response.chunks[0], ": connected\n\n");
+  request.emit("close");
+});
+
 test("GET /events falls back to volatile replay and uses last-event-id header", async () => {
   const calls = [];
   const eventBus = {

@@ -9,6 +9,14 @@ function respondSse(response) {
     headers["x-request-id"] = response._requestId;
   }
   response.writeHead(200, headers);
+  // Node buffers the status line + headers until the first body write.
+  // A wallet with no replayable events otherwise writes nothing until
+  // the 15s heartbeat, so EventSource clients sit headerless in
+  // "connecting" and edge/proxy timeouts surface as 5xx (found via the
+  // 2026-07-09 /overview regression: /events "503" on quiet wallets).
+  // An SSE comment is invisible to clients and flushes the handshake
+  // immediately.
+  response.write(": connected\n\n");
 }
 
 function writeSseEvent(response, { id, topic, data }) {
