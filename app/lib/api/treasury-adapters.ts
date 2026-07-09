@@ -296,7 +296,8 @@ export function buildRoomVitals(
   sessionsPayload: unknown,
   accountPayload: unknown,
   strategyPayload: unknown,
-  sessionsPresence: FeedPresence = "live"
+  sessionsPresence: FeedPresence = "live",
+  strategyPresence: FeedPresence = "live"
 ): KpiData[] {
   const jobs = asArray(jobsPayload);
   const sessions = activeWorkSessions(jobsPayload, sessionsPayload);
@@ -346,7 +347,24 @@ export function buildRoomVitals(
       deltaTone: "neutral",
     },
     { label: "Capital at work", value: fmt(capital.value), unit: capital.unit, delta: "strategy + stake", deltaTone: "good" },
-    { label: "Treasury posture", value: attentionCount ? "Amber" : "Green", valueAccent: !attentionCount, delta: attentionCount ? `${attentionCount} lane attention` : "No lane attention", deltaTone: attentionCount ? "warn" : "good" },
+    // "Green" is a claim that the strategy feed was read and showed no
+    // lane attention — an unreadable feed must render Unknown, never
+    // default to the good state.
+    {
+      label: "Treasury posture",
+      value: strategyPresence === "live" ? (attentionCount ? "Amber" : "Green") : "Unknown",
+      valueAccent: strategyPresence === "live" && !attentionCount,
+      delta:
+        strategyPresence === "live"
+          ? attentionCount
+            ? `${attentionCount} lane attention`
+            : "No lane attention"
+          : strategyPresence === "loading"
+            ? "waiting for strategy feed"
+            : `strategy feed ${strategyPresence === "locked" ? "locked for this session" : "unavailable"}`,
+      deltaTone:
+        strategyPresence === "live" ? (attentionCount ? "warn" : "good") : "neutral",
+    },
   ];
 }
 
@@ -402,7 +420,8 @@ export function buildLaneCards(
   sessionsPayload: unknown,
   strategyPayload: unknown,
   governance?: GovernanceLaneInputs,
-  sessionsPresence: FeedPresence = "live"
+  sessionsPresence: FeedPresence = "live",
+  strategyPresence: FeedPresence = "live"
 ): LaneCardData[] {
   const jobs = asArray(jobsPayload);
   const sessions = activeWorkSessions(jobsPayload, sessionsPayload);
@@ -476,8 +495,10 @@ export function buildLaneCards(
     {
       name: "Treasury",
       href: "/treasury",
-      pillLabel: attention ? "Attention" : "Stable",
-      pillTone: attention ? "warn" : "ok",
+      // "Stable" may only be claimed from a live strategy read.
+      pillLabel:
+        strategyPresence === "live" ? (attention ? "Attention" : "Stable") : "Unknown",
+      pillTone: strategyPresence === "live" && attention ? "warn" : strategyPresence === "live" ? "ok" : "neutral",
       metrics: [
         // Unit comes from the routed positions' actual asset (USDC on this
         // platform) — never a hardcoded ticker. With nothing routed there
@@ -491,7 +512,16 @@ export function buildLaneCards(
         { label: "lanes", value: `${numberValue(summary.deployedLanes)}` },
         { label: "debt", value: `${fmt(numberValue(summary.debt))}` },
       ],
-      recentEvent: attention ? `${attention} lane needs attention` : "Strategy lanes reporting normally",
+      recentEvent:
+        strategyPresence === "live"
+          ? attention
+            ? `${attention} lane needs attention`
+            : "Strategy lanes reporting normally"
+          : strategyPresence === "loading"
+            ? "Waiting for strategy feed"
+            : strategyPresence === "locked"
+              ? "Strategy feed locked for this session"
+              : "Strategy feed unavailable",
     },
     {
       name: "Governance",

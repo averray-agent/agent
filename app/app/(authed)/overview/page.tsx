@@ -74,6 +74,7 @@ export default function OverviewPage() {
   const sessionsBlocked = sessionsPresence === "locked" || sessionsPresence === "down";
   const policiesPresence = feedPresence(policies);
   const policiesBlocked = policiesPresence === "locked" || policiesPresence === "down";
+  const strategyPresence = feedPresence(strategyPositions);
   const liveVitals = useMemo(
     () =>
       buildRoomVitals(
@@ -81,9 +82,17 @@ export default function OverviewPage() {
         sessions.data,
         account.data,
         strategyPositions.data,
-        sessionsPresence
+        sessionsPresence,
+        strategyPresence
       ),
-    [account.data, jobs.data, sessions.data, sessionsPresence, strategyPositions.data]
+    [
+      account.data,
+      jobs.data,
+      sessions.data,
+      sessionsPresence,
+      strategyPresence,
+      strategyPositions.data,
+    ]
   );
   // The Runs-in-motion + Agents-active cards both pull from
   // /admin/sessions. While that request is still in flight on first
@@ -127,7 +136,8 @@ export default function OverviewPage() {
           audit: { presence: feedPresence(audit) },
           disputes: { presence: feedPresence(disputes), openCount: openDisputeCount },
         },
-        sessionsPresence
+        sessionsPresence,
+        strategyPresence
       ),
     [
       activePolicyCount,
@@ -138,6 +148,7 @@ export default function OverviewPage() {
       policiesPresence,
       sessions.data,
       sessionsPresence,
+      strategyPresence,
       strategyPositions.data,
     ]
   );
@@ -263,7 +274,13 @@ export default function OverviewPage() {
         openRuns={hasLiveOverview ? liveJobs.length : 0}
         awaitingSignature={sessionsBlocked ? "—" : hasLiveOverview ? disputedSessions : 0}
         lastReceiptTime={lastReceiptTime}
-        treasuryPosture={liveVitals[3]?.value === "Amber" ? "Amber" : "Green"}
+        treasuryPosture={
+          liveVitals[3]?.value === "Amber"
+            ? "Amber"
+            : liveVitals[3]?.value === "Green"
+              ? "Green"
+              : "Unknown"
+        }
         policiesAppliedToday={policiesBlocked ? "—" : policiesAppliedToday}
       />
       <RoomVitals vitals={vitals} comparedTo={hasLiveOverview ? "live API" : "waiting for live API"} />
