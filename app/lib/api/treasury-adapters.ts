@@ -161,7 +161,8 @@ export function buildBalanceCards(accountPayload: unknown, strategyPayload: unkn
   const debtFill = debt.unit === "DOT" ? pct(debt.value, debt.value + capacity) : 0;
   const debtCap = debt.unit === "DOT"
     ? { label: `Capacity ${fmt(debt.value + capacity)} DOT · headroom ${fmt(capacity)}`, fill: debtFill }
-    : { label: `DOT borrow capacity ${fmt(capacity)} · debt shown in ${debt.unit}`, fill: 0 };
+    : // Non-DOT debt has no DOT-denominated capacity claim to make.
+      { label: `Debt shown in ${debt.unit}`, fill: 0 };
 
   return [
     {
@@ -205,9 +206,11 @@ export function buildStrategyLanes(strategyPayload: unknown): StrategyLane[] {
     return {
       id: text(position.strategyId, `lane-${index + 1}`),
       laneTitle: text(position.strategyId, `Strategy ${index + 1}`),
-      laneMeta: `${text(position.assetSymbol, text(position.asset, "DOT"))} · ${text(position.executionMode, "sync")}`,
+      // Asset ticker only when the payload names one — an unknown asset
+      // must not silently render as DOT (settlement asset here is USDC).
+      laneMeta: `${text(position.assetSymbol, text(position.asset, "asset n/a"))} · ${text(position.executionMode, "sync")}`,
       strategyKind: text(position.riskLabel, text(position.yieldLabel, "strategy")),
-      allocated: `${fmt(routed)} ${text(position.assetSymbol, "DOT")}`,
+      allocated: `${fmt(routed)}${text(position.assetSymbol) ? ` ${text(position.assetSymbol)}` : ""}`,
       coverage: numberValue(position.deploymentShareBps) ? Math.round(numberValue(position.deploymentShareBps) / 100) : routed > 0 ? 100 : 0,
       status,
       statusLabel: text(position.statusLabel, status === "ok" ? "Routed" : "Idle"),
@@ -476,7 +479,15 @@ export function buildLaneCards(
       pillLabel: attention ? "Attention" : "Stable",
       pillTone: attention ? "warn" : "ok",
       metrics: [
-        { label: "locked", value: `${fmt(numberValue(summary.allocated))} DOT` },
+        // Unit comes from the routed positions' actual asset (USDC on this
+        // platform) — never a hardcoded ticker. With nothing routed there
+        // is no meaningful unit, so none is shown.
+        {
+          label: "locked",
+          value: `${fmt(numberValue(summary.allocated))}${
+            strategyAssetUnit(strategyPayload, "") ? ` ${strategyAssetUnit(strategyPayload, "")}` : ""
+          }`,
+        },
         { label: "lanes", value: `${numberValue(summary.deployedLanes)}` },
         { label: "debt", value: `${fmt(numberValue(summary.debt))}` },
       ],
