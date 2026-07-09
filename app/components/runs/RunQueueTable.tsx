@@ -90,7 +90,7 @@ export function RunQueueTable({
           Run queue
         </h3>
         <span className="font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]">
-          {totalCount} open · {assignedToMe} assigned to you · live
+          {totalCount} open · {assignedToMe} assigned to you · {liveStatus}
         </span>
       </header>
 

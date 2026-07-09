@@ -100,11 +100,12 @@ export function LoadedRunView({
     () => buildJobTimeline(timelineRequest.data),
     [timelineRequest.data]
   );
-  // Prefer the admin job feed (carries lifecycle metadata + paused/
-  // archived/stale rows). Fall back to the public feed until the admin
-  // payload arrives so we don't render an empty panel on first paint.
-  const adminPayload = adminJobs.data ? extractAdminJobs(adminJobs.data) : [];
-  const sourceForRows = adminPayload.length ? adminPayload : jobs.data;
+  const adminPresence = feedPresence(adminJobs);
+  // Prefer the admin job feed when it is live because it carries lifecycle
+  // metadata + paused/archived/stale rows. Role-less sessions are expected to
+  // 403 on /admin/jobs, so they intentionally use the public feed instead.
+  const adminPayload = adminPresence === "live" ? extractAdminJobs(adminJobs.data) : [];
+  const sourceForRows = adminPresence === "live" ? adminPayload : jobs.data;
   const liveRows = useMemo(() => buildRunRows(sourceForRows), [sourceForRows]);
   const rows = liveRows;
   const rawJobs = useMemo(() => extractRunJobs(sourceForRows), [sourceForRows]);

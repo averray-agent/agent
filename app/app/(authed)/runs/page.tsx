@@ -25,6 +25,7 @@ import {
 } from "@/components/runs/buildLifecycleStages";
 import { useAdminJobs, useJobs, useJobTimeline, useRecommendations } from "@/lib/api/hooks";
 import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
+import { feedPresence } from "@/lib/api/feed-presence";
 import { buildJobTimeline } from "@/lib/api/job-timeline";
 import {
   buildRecommendationCards,
@@ -32,6 +33,10 @@ import {
   buildRunRows,
   sumReadyStake,
 } from "@/lib/api/run-adapters";
+import {
+  hiddenLifecycleCopy,
+  runsQueueLiveStatus,
+} from "@/lib/api/runs-feed-status";
 import { extractAdminJobs } from "@/lib/api/job-lifecycle";
 
 /**
@@ -125,12 +130,14 @@ function RunsPageInner() {
   const adminJobs = useAdminJobs();
   const recommendations = useRecommendations();
 
-  // Operator app uses /admin/jobs (which carries lifecycle metadata and
-  // includes paused/archived/stale rows). Falls back to public /jobs
-  // until the admin payload arrives so the queue isn't empty on first
-  // hydration.
-  const adminPayload = adminJobs.data ? extractAdminJobs(adminJobs.data) : [];
-  const sourceForRows = adminPayload.length ? adminPayload : jobs.data;
+  const adminPresence = feedPresence(adminJobs);
+  const publicPresence = feedPresence(jobs);
+  const adminPayload = adminPresence === "live" ? extractAdminJobs(adminJobs.data) : [];
+  // Operator sessions use /admin/jobs because it carries lifecycle metadata
+  // and includes paused/archived/stale rows. Role-less sessions are expected
+  // to 403 on /admin/jobs; in that case we render the public feed, but the
+  // queue header and lifecycle toggle explicitly declare the missing metadata.
+  const sourceForRows = adminPresence === "live" ? adminPayload : jobs.data;
   const liveRows = useMemo(() => buildRunRows(sourceForRows), [sourceForRows]);
   const rows = liveRows;
   const filters = useMemo(() => buildRunFilters(rows), [rows]);
@@ -176,6 +183,11 @@ function RunsPageInner() {
   const closedRowCount = rows.filter(
     (r) => r.lifecycle && r.lifecycle.state !== "open"
   ).length;
+  const lifecycleToggle = hiddenLifecycleCopy(
+    adminPresence,
+    closedRowCount,
+    showClosed
+  );
 
   // Lifecycle rail at the page level mirrors the loaded run, so its
   // copy has to follow the selected row's source — otherwise selecting
@@ -260,11 +272,7 @@ function RunsPageInner() {
             };
 
   const assignedToMe = rows.filter((row) => row.worker.isSelf).length;
-  const liveStatus = jobs.error
-    ? "live API unavailable"
-    : jobs.isLoading
-      ? "loading live jobs"
-      : "live API";
+  const liveStatus = runsQueueLiveStatus(adminPresence, publicPresence);
   const freshness = freshnessFromRequests(jobs, adminJobs, recommendations);
 
   return (
@@ -280,20 +288,22 @@ function RunsPageInner() {
         active={activeSource}
         onChange={onSourceChange}
       />
-      {closedRowCount > 0 || showClosed ? (
+      {closedRowCount > 0 || showClosed || lifecycleToggle.blocked ? (
         <div className="flex items-center justify-between rounded-[10px] border border-[var(--avy-line-soft)] bg-[var(--avy-paper)] px-3.5 py-2 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]">
-          <span>
-            {showClosed
-              ? `Showing all jobs including ${closedRowCount} paused/archived/stale.`
-              : `${closedRowCount} paused/archived/stale ${closedRowCount === 1 ? "job is" : "jobs are"} hidden.`}
-          </span>
+          <span>{lifecycleToggle.message}</span>
           <button
             type="button"
+            disabled={lifecycleToggle.blocked}
             onClick={() => setShowClosed((v) => !v)}
-            className="rounded-full border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-2.5 py-1 font-[family-name:var(--font-display)] text-[10.5px] font-extrabold uppercase text-[var(--avy-ink)] transition-colors hover:border-[color:rgba(30,102,66,0.35)] hover:text-[var(--avy-accent)]"
+            title={
+              lifecycleToggle.blocked
+                ? "Requires operator access to /admin/jobs"
+                : undefined
+            }
+            className="rounded-full border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-2.5 py-1 font-[family-name:var(--font-display)] text-[10.5px] font-extrabold uppercase text-[var(--avy-ink)] transition-colors hover:border-[color:rgba(30,102,66,0.35)] hover:text-[var(--avy-accent)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-[var(--avy-line)] disabled:hover:text-[var(--avy-ink)]"
             style={{ letterSpacing: "0.08em" }}
           >
-            {showClosed ? "Hide closed" : "Show closed"}
+            {lifecycleToggle.button}
           </button>
         </div>
       ) : null}

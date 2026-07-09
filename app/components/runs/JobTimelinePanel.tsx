@@ -15,7 +15,7 @@ import {
 } from "@/lib/api/job-timeline";
 import { ExplorerLink } from "@/components/common/ExplorerLink";
 import { useJobTimeline, type JobTimelineFilters } from "@/lib/api/hooks";
-import { ApiError } from "@/lib/api/client";
+import { feedPresence } from "@/lib/api/feed-presence";
 import {
   applyTimelineEventFiltersToParams,
   EMPTY_TIMELINE_EVENT_FILTERS,
@@ -56,15 +56,14 @@ export function JobTimelinePanel({ jobId }: { jobId: string }) {
     [filters]
   );
   const request = useJobTimeline(jobId, apiFilters);
+  const presence = feedPresence(request);
   const data = useMemo(() => buildJobTimeline(request.data), [request.data]);
   const visibleTimeline = useMemo(
     () => filterTimelineEntries(data.timeline, filters),
     [data.timeline, filters]
   );
   const hiddenCount = data.timeline.length - visibleTimeline.length;
-  const unauthenticated =
-    request.error instanceof ApiError &&
-    (request.error.status === 401 || request.error.status === 403);
+  const blocked = presence === "locked" || presence === "down";
 
   // URL is the source of truth for filter state so a refresh / shared
   // link reproduces the filtered view. `replace` rather than `push` so
@@ -104,8 +103,7 @@ export function JobTimelinePanel({ jobId }: { jobId: string }) {
           data={data}
           visibleCount={visibleTimeline.length}
           filtersActive={filtersActive}
-          loading={Boolean(request.isLoading)}
-          unauthenticated={unauthenticated}
+          presence={presence}
         />
       </header>
 
@@ -116,10 +114,9 @@ export function JobTimelinePanel({ jobId }: { jobId: string }) {
       />
 
       <ul className="flex flex-col">
-        {visibleTimeline.length === 0 ? (
+        {blocked || visibleTimeline.length === 0 ? (
           <EmptyRow
-            unauthenticated={unauthenticated}
-            loading={Boolean(request.isLoading)}
+            presence={presence}
             filtersActive={filtersActive}
             onClearFilters={() =>
               handleFilterChange(EMPTY_TIMELINE_EVENT_FILTERS)
@@ -136,7 +133,7 @@ export function JobTimelinePanel({ jobId }: { jobId: string }) {
         )}
       </ul>
 
-      {filtersActive && hiddenCount > 0 ? (
+      {!blocked && filtersActive && hiddenCount > 0 ? (
         <p
           className="m-0 font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]"
           style={{ letterSpacing: 0 }}
@@ -161,26 +158,34 @@ function TimelineSummary({
   data,
   visibleCount,
   filtersActive,
-  loading,
-  unauthenticated,
+  presence,
 }: {
   data: ReturnType<typeof buildJobTimeline>;
   visibleCount: number;
   filtersActive: boolean;
-  loading: boolean;
-  unauthenticated: boolean;
+  presence: ReturnType<typeof feedPresence>;
 }) {
-  if (unauthenticated) {
+  if (presence === "locked") {
     return (
       <span
         className="font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]"
         style={{ letterSpacing: 0 }}
       >
-        sign in to load
+        locked
       </span>
     );
   }
-  if (loading && data.summary.eventCount === 0) {
+  if (presence === "down") {
+    return (
+      <span
+        className="font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]"
+        style={{ letterSpacing: 0 }}
+      >
+        unavailable
+      </span>
+    );
+  }
+  if (presence === "loading" && data.summary.eventCount === 0) {
     return (
       <span
         className="font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]"
@@ -222,13 +227,11 @@ function TimelineSummary({
 }
 
 function EmptyRow({
-  unauthenticated,
-  loading,
+  presence,
   filtersActive,
   onClearFilters,
 }: {
-  unauthenticated: boolean;
-  loading: boolean;
+  presence: ReturnType<typeof feedPresence>;
   filtersActive: boolean;
   onClearFilters: () => void;
 }) {
@@ -238,15 +241,17 @@ function EmptyRow({
         className="m-0 font-[family-name:var(--font-mono)] text-[12px] text-[var(--avy-muted)]"
         style={{ letterSpacing: 0 }}
       >
-        {unauthenticated
-          ? "Sign in with your operator wallet to load the timeline. /admin/jobs/timeline is admin-gated."
-          : loading
+        {presence === "locked"
+          ? "Timeline locked for this session — missing operator role."
+          : presence === "down"
+            ? "Timeline unavailable — /admin/jobs/timeline did not load."
+            : presence === "loading"
             ? "Loading timeline…"
             : filtersActive
               ? "No events match these filters."
               : "No events recorded for this job yet."}
       </p>
-      {!unauthenticated && !loading && filtersActive ? (
+      {presence === "live" && filtersActive ? (
         <button
           type="button"
           onClick={onClearFilters}

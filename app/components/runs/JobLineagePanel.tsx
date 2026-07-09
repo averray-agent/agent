@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useMemo } from "react";
-import { ApiError } from "@/lib/api/client";
 import { useJobTimeline } from "@/lib/api/hooks";
+import { feedPresence } from "@/lib/api/feed-presence";
 import {
   buildJobTimeline,
   type JobTimeline,
@@ -38,13 +38,12 @@ import { cn } from "@/lib/utils/cn";
  */
 export function JobLineagePanel({ jobId }: { jobId: string }) {
   const request = useJobTimeline(jobId);
+  const presence = feedPresence(request);
   const data: JobTimeline = useMemo(
     () => buildJobTimeline(request.data),
     [request.data]
   );
-  const unauthenticated =
-    request.error instanceof ApiError &&
-    (request.error.status === 401 || request.error.status === 403);
+  const blocked = presence === "locked" || presence === "down";
 
   // Roll the lineage shape into a flat "do we have anything to show?"
   // gate. When every relationship is empty, the panel renders a quiet
@@ -82,16 +81,14 @@ export function JobLineagePanel({ jobId }: { jobId: string }) {
         </div>
         <LineageSummaryHint
           data={data}
-          loading={Boolean(request.isLoading)}
-          unauthenticated={unauthenticated}
+          presence={presence}
           empty={empty}
         />
       </header>
 
-      {empty ? (
+      {blocked || empty ? (
         <EmptyState
-          unauthenticated={unauthenticated}
-          loading={Boolean(request.isLoading)}
+          presence={presence}
         />
       ) : (
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
@@ -110,19 +107,20 @@ export function JobLineagePanel({ jobId }: { jobId: string }) {
 
 function LineageSummaryHint({
   data,
-  loading,
-  unauthenticated,
+  presence,
   empty,
 }: {
   data: JobTimeline;
-  loading: boolean;
-  unauthenticated: boolean;
+  presence: ReturnType<typeof feedPresence>;
   empty: boolean;
 }) {
-  if (unauthenticated) {
-    return <Hint>sign in to load</Hint>;
+  if (presence === "locked") {
+    return <Hint>locked</Hint>;
   }
-  if (loading && data.summary.eventCount === 0) {
+  if (presence === "down") {
+    return <Hint>unavailable</Hint>;
+  }
+  if (presence === "loading" && data.summary.eventCount === 0) {
     return <Hint>loading…</Hint>;
   }
   if (empty) return <Hint>no related runs</Hint>;
@@ -153,11 +151,9 @@ function Hint({ children }: { children: React.ReactNode }) {
 }
 
 function EmptyState({
-  unauthenticated,
-  loading,
+  presence,
 }: {
-  unauthenticated: boolean;
-  loading: boolean;
+  presence: ReturnType<typeof feedPresence>;
 }) {
   return (
     <div className="rounded-[8px] border border-dashed border-[var(--avy-line)] bg-[rgba(255,253,247,0.5)] p-4 text-center">
@@ -165,9 +161,11 @@ function EmptyState({
         className="m-0 font-[family-name:var(--font-mono)] text-[12px] text-[var(--avy-muted)]"
         style={{ letterSpacing: 0 }}
       >
-        {unauthenticated
-          ? "Sign in with your operator wallet to load lineage. /admin/jobs/timeline is admin-gated."
-          : loading
+        {presence === "locked"
+          ? "Lineage locked for this session — missing operator role."
+          : presence === "down"
+            ? "Lineage unavailable — /admin/jobs/timeline did not load."
+            : presence === "loading"
             ? "Loading lineage…"
             : "This run isn't part of any lineage. No parent session, no child runs, not a recurring template."}
       </p>
