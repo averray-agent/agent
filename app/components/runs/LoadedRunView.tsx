@@ -55,6 +55,7 @@ import {
 } from "@/lib/api/submission-contract";
 import { runGuardedSubmit } from "@/lib/api/guarded-submit";
 import { buildVerifierOutput } from "@/lib/api/verifier-output";
+import { runsRowsPresence } from "@/lib/api/runs-feed-status";
 
 /**
  * Self-contained detail view for a single run.
@@ -101,11 +102,17 @@ export function LoadedRunView({
     [timelineRequest.data]
   );
   const adminPresence = feedPresence(adminJobs);
+  const publicPresence = feedPresence(jobs);
+  const rowsPresence = runsRowsPresence(adminPresence, publicPresence);
   // Prefer the admin job feed when it is live because it carries lifecycle
   // metadata + paused/archived/stale rows. Role-less sessions are expected to
   // 403 on /admin/jobs, so they intentionally use the public feed instead.
   const adminPayload = adminPresence === "live" ? extractAdminJobs(adminJobs.data) : [];
-  const sourceForRows = adminPresence === "live" ? adminPayload : jobs.data;
+  const sourceForRows = rowsPresence === "live"
+    ? adminPresence === "live"
+      ? adminPayload
+      : jobs.data
+    : [];
   const liveRows = useMemo(() => buildRunRows(sourceForRows), [sourceForRows]);
   const rows = liveRows;
   const rawJobs = useMemo(() => extractRunJobs(sourceForRows), [sourceForRows]);
@@ -221,9 +228,21 @@ export function LoadedRunView({
   }, [loadedRow?.id]);
 
   if (!loadedRow) {
+    const message = !runId
+      ? "No run selected. Return to the queue and choose a live run."
+      : rowsPresence === "loading"
+        ? "Loading live run details…"
+        : rowsPresence === "locked"
+          ? "Run details are locked for this session."
+          : rowsPresence === "down"
+            ? "Live run details are unavailable right now."
+            : `Run ${runId} was not found in the live job feed.`;
     return (
-      <div className="rounded-[10px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] p-5 font-[family-name:var(--font-body)] text-sm text-[var(--avy-muted)] shadow-[var(--shadow-card)]">
-        No live run details available.
+      <div
+        role="status"
+        className="rounded-[10px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] p-5 font-[family-name:var(--font-body)] text-sm text-[var(--avy-muted)] shadow-[var(--shadow-card)]"
+      >
+        {message}
       </div>
     );
   }

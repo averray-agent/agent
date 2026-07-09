@@ -15,6 +15,9 @@ import {
   type ClaimEffectiveState,
   type ClaimSummary,
 } from "@/lib/api/claim-status";
+import { feedPresence } from "@/lib/api/feed-presence";
+
+type FeedPresence = ReturnType<typeof feedPresence>;
 
 export interface RunRow {
   id: string;
@@ -69,7 +72,7 @@ export interface RunQueueTableProps {
   shownCount: number;
   totalCount: number;
   unclaimedStake: string;
-  assignedToMe: number;
+  presence: FeedPresence;
   liveStatus?: string;
 }
 
@@ -80,9 +83,10 @@ export function RunQueueTable({
   shownCount,
   totalCount,
   unclaimedStake,
-  assignedToMe,
-  liveStatus = "ws://verifier.averray",
+  presence,
+  liveStatus = "live API",
 }: RunQueueTableProps) {
+  const isLive = presence === "live";
   return (
     <div className="overflow-hidden rounded-[10px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)]">
       <header className="flex items-baseline justify-between gap-2.5 border-b border-[var(--avy-line-soft)] p-3 px-4">
@@ -90,7 +94,9 @@ export function RunQueueTable({
           Run queue
         </h3>
         <span className="font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]">
-          {totalCount} open · {assignedToMe} assigned to you · {liveStatus}
+          {isLive
+            ? `${totalCount} open · ${liveStatus}`
+            : `Counts unavailable · ${liveStatus}`}
         </span>
       </header>
 
@@ -102,13 +108,21 @@ export function RunQueueTable({
        * pieces of info (title, source, state, stake, age, worker, last
        * event) on every row at ~90px of height, without horizontal scroll.
        */}
-      {rows.length === 0 ? (
+      {!isLive ? (
+        <QueuePresenceNotice presence={presence} />
+      ) : rows.length === 0 ? (
         <div
           className="px-4 py-10 text-center font-[family-name:var(--font-mono)] text-[12px] text-[var(--avy-muted)]"
           style={{ letterSpacing: 0 }}
         >
-          No runs match this filter.{" "}
-          <span className="text-[var(--avy-accent)]">Try a different state.</span>
+          {totalCount === 0 ? (
+            <>The live job feed is genuinely empty. New runs will appear here when posted.</>
+          ) : (
+            <>
+              No runs match this filter.{" "}
+              <span className="text-[var(--avy-accent)]">Try a different state.</span>
+            </>
+          )}
         </div>
       ) : (
         <ul className="divide-y divide-[var(--avy-line-soft)]" role="list">
@@ -124,22 +138,43 @@ export function RunQueueTable({
       )}
 
       <footer className="flex items-center justify-between border-t border-[var(--avy-line-soft)] bg-[#faf8f1] px-4 py-2.5 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]">
-        <span>
-          Showing{" "}
-          <b className="font-semibold text-[var(--avy-ink)]">
-            {shownCount} of {totalCount}
-          </b>{" "}
-          · unclaimed stake{" "}
-          <b className="font-semibold text-[var(--avy-ink)]">{unclaimedStake}</b> ·
-          assigned to you{" "}
-          <b className="font-semibold text-[var(--avy-ink)]">{assignedToMe}</b>
-        </span>
-        <span>
-          Updated <b className="font-semibold text-[var(--avy-ink)]">2s ago</b> ·{" "}
-          {liveStatus} —{" "}
-          <span className="text-[var(--avy-accent)]">●</span> live
-        </span>
+        {isLive ? (
+          <>
+            <span>
+              Showing{" "}
+              <b className="font-semibold text-[var(--avy-ink)]">
+                {shownCount} of {totalCount}
+              </b>{" "}
+              · unclaimed reward{" "}
+              <b className="font-semibold text-[var(--avy-ink)]">{unclaimedStake}</b>
+            </span>
+            <span>
+              {liveStatus} —{" "}
+              <span className="text-[var(--avy-accent)]">●</span> live
+            </span>
+          </>
+        ) : (
+          <span>No queue totals or reward amounts are shown until the job feed is live.</span>
+        )}
       </footer>
+    </div>
+  );
+}
+
+function QueuePresenceNotice({ presence }: { presence: FeedPresence }) {
+  const copy =
+    presence === "loading"
+      ? "Loading live jobs…"
+      : presence === "locked"
+        ? "The job feed is locked for this session. Queue activity and totals cannot be shown."
+        : "The live job feed is unavailable. Queue activity and totals cannot be shown right now.";
+  return (
+    <div
+      role="status"
+      className="px-4 py-10 text-center font-[family-name:var(--font-mono)] text-[12px] text-[var(--avy-muted)]"
+      style={{ letterSpacing: 0 }}
+    >
+      {copy}
     </div>
   );
 }

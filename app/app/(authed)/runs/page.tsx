@@ -24,7 +24,6 @@ import {
   formatDeadline,
 } from "@/components/runs/buildLifecycleStages";
 import { useAdminJobs, useJobs, useJobTimeline, useRecommendations } from "@/lib/api/hooks";
-import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
 import { feedPresence } from "@/lib/api/feed-presence";
 import { buildJobTimeline } from "@/lib/api/job-timeline";
 import {
@@ -35,7 +34,10 @@ import {
 } from "@/lib/api/run-adapters";
 import {
   hiddenLifecycleCopy,
+  recommendationsPresence,
+  runsPageFreshness,
   runsQueueLiveStatus,
+  runsRowsPresence,
 } from "@/lib/api/runs-feed-status";
 import { extractAdminJobs } from "@/lib/api/job-lifecycle";
 
@@ -132,20 +134,29 @@ function RunsPageInner() {
 
   const adminPresence = feedPresence(adminJobs);
   const publicPresence = feedPresence(jobs);
+  const rowsPresence = runsRowsPresence(adminPresence, publicPresence);
+  const recommendationFeedPresence = recommendationsPresence(
+    feedPresence(recommendations),
+    publicPresence
+  );
   const adminPayload = adminPresence === "live" ? extractAdminJobs(adminJobs.data) : [];
   // Operator sessions use /admin/jobs because it carries lifecycle metadata
   // and includes paused/archived/stale rows. Role-less sessions are expected
   // to 403 on /admin/jobs; in that case we render the public feed, but the
   // queue header and lifecycle toggle explicitly declare the missing metadata.
-  const sourceForRows = adminPresence === "live" ? adminPayload : jobs.data;
+  const sourceForRows = rowsPresence === "live"
+    ? adminPresence === "live"
+      ? adminPayload
+      : jobs.data
+    : [];
   const liveRows = useMemo(() => buildRunRows(sourceForRows), [sourceForRows]);
   const rows = liveRows;
   const filters = useMemo(() => buildRunFilters(rows), [rows]);
   const sourceFilters = useMemo(() => buildSourceFilters(rows), [rows]);
   const recommendationCards = useMemo(() => {
-    const liveCards = buildRecommendationCards(recommendations.data, jobs.data);
-    return liveCards;
-  }, [jobs.data, recommendations.data]);
+    if (recommendationFeedPresence !== "live") return [];
+    return buildRecommendationCards(recommendations.data, jobs.data);
+  }, [jobs.data, recommendationFeedPresence, recommendations.data]);
 
   // Honour ?run=<id> deep links on first hydration so a linked run is
   // pre-selected.
@@ -271,24 +282,31 @@ function RunsPageInner() {
               sub: "auto-pays on PR merge + CI green",
             };
 
-  const assignedToMe = rows.filter((row) => row.worker.isSelf).length;
   const liveStatus = runsQueueLiveStatus(adminPresence, publicPresence);
-  const freshness = freshnessFromRequests(jobs, adminJobs, recommendations);
+  const freshness = runsPageFreshness(
+    rowsPresence,
+    adminPresence,
+    recommendationFeedPresence
+  );
 
   return (
     <div className="flex w-full max-w-[1440px] flex-col gap-3.5">
       <RunsTopbar freshness={freshness} />
-      <QueueBar
-        filters={filters}
-        active={activeFilter}
-        onChange={onStateChange}
-      />
-      <SourceFilterBar
-        filters={sourceFilters}
-        active={activeSource}
-        onChange={onSourceChange}
-      />
-      {closedRowCount > 0 || showClosed || lifecycleToggle.blocked ? (
+      {rowsPresence === "live" ? (
+        <>
+          <QueueBar
+            filters={filters}
+            active={activeFilter}
+            onChange={onStateChange}
+          />
+          <SourceFilterBar
+            filters={sourceFilters}
+            active={activeSource}
+            onChange={onSourceChange}
+          />
+        </>
+      ) : null}
+      {rowsPresence === "live" && (closedRowCount > 0 || showClosed || lifecycleToggle.blocked) ? (
         <div className="flex items-center justify-between rounded-[10px] border border-[var(--avy-line-soft)] bg-[var(--avy-paper)] px-3.5 py-2 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]">
           <span>{lifecycleToggle.message}</span>
           <button
@@ -322,7 +340,7 @@ function RunsPageInner() {
           shownCount={visibleRows.length}
           totalCount={rows.length}
           unclaimedStake={sumReadyStake(rows)}
-          assignedToMe={assignedToMe}
+          presence={rowsPresence}
           liveStatus={liveStatus}
         />
         <div className="xl:sticky xl:top-6 xl:max-h-[calc(100vh-3rem)] xl:overflow-y-auto">
@@ -338,29 +356,36 @@ function RunsPageInner() {
             />
           ) : (
             <div className="rounded-[10px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] p-5 font-[family-name:var(--font-body)] text-sm text-[var(--avy-muted)] shadow-[var(--shadow-card)]">
-              No live run selected.
+              {rowsPresence === "loading"
+                ? "Loading live run details…"
+                : rowsPresence === "locked"
+                  ? "Run details are locked for this session."
+                  : rowsPresence === "down"
+                    ? "Live run details are unavailable right now."
+                    : "The live job feed is genuinely empty; there is no run to select."}
             </div>
           )}
         </div>
       </div>
 
-      <LifecycleRail
-        runId={selectedId}
-        contextNote={lifecycleContextNote}
-        stages={buildLifecycleStages({
-          claim: selectedRow?.claim,
-          source: selectedSource,
-          timeline: selectedTimeline.timeline,
-        })}
-        next={lifecycleNext}
-      />
+      {selectedRow ? (
+        <LifecycleRail
+          runId={selectedId}
+          contextNote={lifecycleContextNote}
+          stages={buildLifecycleStages({
+            claim: selectedRow.claim,
+            source: selectedSource,
+            timeline: selectedTimeline.timeline,
+          })}
+          next={lifecycleNext}
+        />
+      ) : null}
 
       <RecommendationRail
         layout="horizontal"
-        workerTier="live"
-        workerScore={recommendations.error ? 0 : recommendationCards.length}
         jobs={recommendationCards}
         totalMatches={recommendationCards.length}
+        presence={recommendationFeedPresence}
       />
     </div>
   );
