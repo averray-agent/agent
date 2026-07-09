@@ -86,6 +86,36 @@ export interface VerifierVerdict {
   scoreLabel: string;
 }
 
+export type VerifierOutputView =
+  | {
+      kind: "terminal";
+      runner: string;
+      elapsed: string;
+      lines: VerifierLine[];
+      verdict: VerifierVerdict;
+      modeNote: string;
+      receiptRef?: string;
+      evidenceHash?: string;
+      chainJobId?: string;
+      completedAt?: string;
+      outcome?: string;
+      reasonCode?: string;
+    }
+  | {
+      kind: "awaiting";
+      runner: string;
+      elapsed: string;
+      lines: VerifierLine[];
+      verdict: VerifierVerdict;
+      modeNote: string;
+    }
+  | {
+      kind: "empty" | "loading" | "locked" | "down";
+      message: string;
+      modeNote: string;
+    };
+type VerifierStatusView = Extract<VerifierOutputView, { message: string }>;
+
 export interface SubmissionContractView extends SubmissionContract {
   schemaContract?: JobSchemaContract | null;
   validation: SubmissionValidationState;
@@ -99,6 +129,7 @@ export interface LoadedRunPanelProps {
   meta: string;
   stake: {
     amount: string;
+    currency: string;
     aux: string;
     breakdown: StakeBreakdown;
   };
@@ -124,13 +155,7 @@ export interface LoadedRunPanelProps {
      */
     disabledReason?: string;
   };
-  verifier: {
-    runner: string;
-    elapsed: string;
-    lines: VerifierLine[];
-    verdict: VerifierVerdict;
-    modeNote: string;
-  };
+  verifier: VerifierOutputView;
   settle: {
     title: string;
     detail: React.ReactNode;
@@ -249,7 +274,7 @@ export function LoadedRunPanel(props: LoadedRunPanelProps) {
               <button
                 type="button"
                 onClick={props.onReceiptPreview}
-                title="Preview the signed receipt draft"
+                title="Preview the verifier receipt"
                 className="inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3 font-[family-name:var(--font-display)] text-[11px] font-bold uppercase text-[var(--avy-ink)] transition-transform hover:-translate-y-px hover:border-[color:rgba(30,102,66,0.24)] hover:text-[var(--avy-accent)]"
                 style={{ letterSpacing: "0.04em" }}
               >
@@ -286,7 +311,7 @@ export function LoadedRunPanel(props: LoadedRunPanelProps) {
                     className="ml-1 font-[family-name:var(--font-mono)] text-[11px] font-medium text-[var(--avy-muted)]"
                     style={{ letterSpacing: 0 }}
                   >
-                    DOT
+                    {props.stake.currency}
                   </span>
                 </div>
                 <p
@@ -462,58 +487,75 @@ export function LoadedRunPanel(props: LoadedRunPanelProps) {
             <BlockLabel right={<span className="lock">{props.verifier.modeNote}</span>}>
               Verifier output
             </BlockLabel>
-            <div className="overflow-hidden rounded-[8px] border border-[color:rgba(30,102,66,0.18)] bg-[#131715] text-[#f5f3ee]">
-              <div
-                className="flex items-center justify-between border-b border-white/5 bg-[#0f1210] px-3 py-1.5 font-[family-name:var(--font-mono)] text-[10.5px] text-[#9ba29c]"
-                style={{ letterSpacing: 0 }}
-              >
-                <span>
-                  {props.verifier.runner.split(" · ").map((part, i) => (
-                    <span key={i}>
-                      {i > 0 ? " · " : null}
-                      {i === 1 ? <b className="text-[#cfe8dc]">{part}</b> : part}
-                    </span>
-                  ))}
-                </span>
-                <span>{props.verifier.elapsed}</span>
-              </div>
-              <div
-                className="px-3.5 py-3 font-[family-name:var(--font-mono)] text-[11.5px] leading-[1.6]"
-                style={{ letterSpacing: 0 }}
-              >
-                {props.verifier.lines.map((line, i) => (
-                  <div
-                    key={i}
-                    className="grid grid-cols-[44px_92px_1fr] gap-2.5"
-                  >
-                    <span className="text-[#6c7a72]">{line.time}</span>
-                    <span
-                      className={cn(
-                        "font-semibold",
-                        line.level === "info" && "text-[#a5c8ef]",
-                        line.level === "ok" && "text-[#9bd7b5]",
-                        line.level === "warn" && "text-[#f4c989]"
-                      )}
-                    >
-                      {line.label}
-                    </span>
-                    <span className="text-[#e7ebe5]">{line.message}</span>
-                  </div>
-                ))}
-              </div>
-              <div
-                className="flex items-center justify-between border-t border-white/5 bg-[color:rgba(30,102,66,0.18)] px-3 py-2 font-[family-name:var(--font-display)] text-[11px] font-extrabold uppercase text-[#d6eadf]"
-                style={{ letterSpacing: "0.12em" }}
-              >
-                <span>● {props.verifier.verdict.status}</span>
-                <span
-                  className="font-[family-name:var(--font-mono)] text-[11.5px] text-[#9bd7b5]"
+            {props.verifier.kind === "terminal" ||
+            props.verifier.kind === "awaiting" ? (
+              <div className="overflow-hidden rounded-[8px] border border-[color:rgba(30,102,66,0.18)] bg-[#131715] text-[#f5f3ee]">
+                <div
+                  className="flex items-center justify-between border-b border-white/5 bg-[#0f1210] px-3 py-1.5 font-[family-name:var(--font-mono)] text-[10.5px] text-[#9ba29c]"
                   style={{ letterSpacing: 0 }}
                 >
-                  {props.verifier.verdict.score} · {props.verifier.verdict.scoreLabel}
-                </span>
+                  <span>
+                    {props.verifier.runner.split(" · ").map((part, i) => (
+                      <span key={i}>
+                        {i > 0 ? " · " : null}
+                        {i === 1 ? <b className="text-[#cfe8dc]">{part}</b> : part}
+                      </span>
+                    ))}
+                  </span>
+                  <span>{props.verifier.elapsed}</span>
+                </div>
+                <div
+                  className="px-3.5 py-3 font-[family-name:var(--font-mono)] text-[11.5px] leading-[1.6]"
+                  style={{ letterSpacing: 0 }}
+                >
+                  {props.verifier.lines.map((line, i) => (
+                    <div
+                      key={i}
+                      className="grid grid-cols-[44px_92px_1fr] gap-2.5"
+                    >
+                      <span className="text-[#6c7a72]">{line.time}</span>
+                      <span
+                        className={cn(
+                          "font-semibold",
+                          line.level === "info" && "text-[#a5c8ef]",
+                          line.level === "ok" && "text-[#9bd7b5]",
+                          line.level === "warn" && "text-[#f4c989]"
+                        )}
+                      >
+                        {line.label}
+                      </span>
+                      <span className="text-[#e7ebe5]">{line.message}</span>
+                    </div>
+                  ))}
+                </div>
+                <div
+                  className="flex items-center justify-between border-t border-white/5 bg-[color:rgba(30,102,66,0.18)] px-3 py-2 font-[family-name:var(--font-display)] text-[11px] font-extrabold uppercase text-[#d6eadf]"
+                  style={{ letterSpacing: "0.12em" }}
+                >
+                  <span>● {props.verifier.verdict.status}</span>
+                  <span
+                    className="font-[family-name:var(--font-mono)] text-[11.5px] text-[#9bd7b5]"
+                    style={{ letterSpacing: 0 }}
+                  >
+                    {props.verifier.verdict.score} · {props.verifier.verdict.scoreLabel}
+                  </span>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div
+                className={cn(
+                  "rounded-[8px] border px-3.5 py-3 font-[family-name:var(--font-mono)] text-[12px] leading-[1.5]",
+                  props.verifier.kind === "locked"
+                    ? "border-[#d3911b] bg-[color:rgba(211,145,27,0.08)] text-[#7a4c00]"
+                    : props.verifier.kind === "down"
+                      ? "border-[#a03a1a] bg-[color:rgba(160,58,26,0.08)] text-[#8c2a17]"
+                      : "border-[var(--avy-line)] bg-white text-[var(--avy-muted)]"
+                )}
+                style={{ letterSpacing: 0 }}
+              >
+                {(props.verifier as VerifierStatusView).message}
+              </div>
+            )}
           </div>
 
           {/* Settle */}

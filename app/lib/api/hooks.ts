@@ -67,6 +67,8 @@ export const useSession = (sessionId: string | null) =>
   useApi(sessionId ? `/session?sessionId=${encodeURIComponent(sessionId)}` : null);
 export const useSessionTimeline = (sessionId: string | null) =>
   useApi(sessionId ? `/session/timeline?sessionId=${encodeURIComponent(sessionId)}` : null);
+export const useVerifierResult = (sessionId: string | null) =>
+  useApi(sessionId ? `/verifier/result?sessionId=${encodeURIComponent(sessionId)}` : null);
 export const useStrategies = () => useApi("/strategies");
 export const useHealth = () => useApi("/health");
 /**

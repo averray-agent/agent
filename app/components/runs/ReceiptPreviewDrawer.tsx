@@ -11,18 +11,18 @@ import type {
 import { cn } from "@/lib/utils/cn";
 
 /**
- * Draft ledger entry that the operator is about to sign when they hit
- * "Mark verified & pay". Everything in this payload is assembled from
- * data already visible in the Loaded-run panel — this drawer is a
- * "print preview" before on-chain settlement, not a new data fetch.
+ * Ledger entry preview for an existing session verifier result. Everything
+ * in this payload is assembled from data already visible in the Loaded-run
+ * panel — this drawer is a "print preview" before any operator action, not a
+ * new data fetch.
  *
  * The explicit purpose: let the operator inspect the split, the
- * verifier verdict, the PR reference, and the receipt ref BEFORE any
- * DOT moves, so a wrong category / wrong split / wrong PR gets caught
- * at the preview step instead of committed to the audit log.
+ * verifier verdict, the source reference, and the receipt ref before a
+ * follow-up action, so a wrong category / wrong split / wrong reference gets
+ * caught at the preview step instead of committed to the audit log.
  */
 export interface ReceiptPreviewDraft {
-  receiptRef: string; // "r_4e133"
+  receiptRef: string;
   runId: string;
   jobMeta: string;
   state: RunState;
@@ -34,7 +34,7 @@ export interface ReceiptPreviewDraft {
   verdict: {
     status: string;
     score: string;
-    confidence: string;
+    detail: string;
   };
   evidenceHash?: string;
   github?: GitHubJobContext;
@@ -508,7 +508,7 @@ export function ReceiptPreviewDrawer({
               className="mt-0.5 font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]"
               style={{ letterSpacing: 0 }}
             >
-              {draft.verdict.score} · {draft.verdict.confidence}
+              {draft.verdict.score} · {draft.verdict.detail}
             </div>
           </div>
           {draft.evidenceHash ? (
@@ -562,11 +562,11 @@ export function ReceiptPreviewDrawer({
           className="m-0 rounded-[6px] border border-[var(--avy-line)] bg-[color:rgba(17,19,21,0.02)] px-3 py-2 font-[family-name:var(--font-mono)] text-[11.5px] leading-[1.55] text-[var(--avy-muted)]"
           style={{ letterSpacing: 0 }}
         >
-          This draft becomes an append-only receipt at the moment{" "}
-          <b className="font-semibold text-[var(--avy-ink)]">Mark verified & pay</b>{" "}
-          is pressed. The payload — receipt ref, run id, stake split, verdict,
-          evidence hash, and signer addresses — is then hashed with sha256 and
-          co-signed into the audit log. Nothing on this page is written yet.
+          This preview becomes an append-only receipt only after an operator
+          settles from the verifier result. The payload — receipt ref, run id,
+          stake split, verdict, evidence hash, and signer addresses — is then
+          hashed with sha256 and co-signed into the audit log. Nothing on this
+          page is written yet.
         </p>
       </DrawerSection>
     </DetailDrawer>
@@ -586,8 +586,8 @@ function DraftBanner() {
         Draft
       </span>
       <span>
-        Unsigned preview. No DOT moves, no audit-log entry, no notifications
-        fire.
+        Unsigned preview. No settlement moves, no audit-log entry, no
+        notifications fire.
       </span>
     </div>
   );
