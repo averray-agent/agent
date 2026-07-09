@@ -291,7 +291,13 @@ export function buildCreditLine(accountPayload: unknown, borrowPayload: unknown)
   };
 }
 
-export function buildRoomVitals(jobsPayload: unknown, sessionsPayload: unknown, accountPayload: unknown, strategyPayload: unknown): KpiData[] {
+export function buildRoomVitals(
+  jobsPayload: unknown,
+  sessionsPayload: unknown,
+  accountPayload: unknown,
+  strategyPayload: unknown,
+  sessionsPresence: FeedPresence = "live"
+): KpiData[] {
   const jobs = asArray(jobsPayload);
   const sessions = activeWorkSessions(jobsPayload, sessionsPayload);
   const account = asRecord(accountPayload);
@@ -305,6 +311,13 @@ export function buildRoomVitals(jobsPayload: unknown, sessionsPayload: unknown, 
   );
   const attentionCount = numberValue(summary.attentionCount);
   const activeAgents = new Set(sessions.map((s) => text(s.wallet)).filter(Boolean)).size;
+  // /admin/sessions can be locked for this session (role-less wallet) or
+  // down. Claims reconstructed from the public /jobs feed still count,
+  // but "no claims observed yet" may only be said when the sessions feed
+  // was actually readable — otherwise the room fabricates quiet.
+  const sessionsBlocked = sessionsPresence === "locked" || sessionsPresence === "down";
+  const sessionsStateLabel =
+    sessionsPresence === "locked" ? "locked for this session" : "unavailable";
 
   return [
     {
@@ -316,8 +329,10 @@ export function buildRoomVitals(jobsPayload: unknown, sessionsPayload: unknown, 
       // (operator-wide, includes external-agent claims). The hint
       // makes that obvious so a reader doesn't think the number is
       // wallet-scoped.
-      delta: "open jobs + operator-wide sessions",
-      deltaTone: "good",
+      delta: sessionsBlocked
+        ? `open jobs only · sessions feed ${sessionsStateLabel}`
+        : "open jobs + operator-wide sessions",
+      deltaTone: sessionsBlocked ? "neutral" : "good",
     },
     {
       label: "Agents active",
@@ -325,8 +340,12 @@ export function buildRoomVitals(jobsPayload: unknown, sessionsPayload: unknown, 
       spark: spark(8),
       sparkColor: "#8a8f88",
       delta: activeAgents
-        ? "distinct wallets · operator-wide"
-        : "no claims observed yet · operator-wide",
+        ? sessionsBlocked
+          ? `from public claims · sessions feed ${sessionsStateLabel}`
+          : "distinct wallets · operator-wide"
+        : sessionsBlocked
+          ? `sessions feed ${sessionsStateLabel} — claims not observable`
+          : "no claims observed yet · operator-wide",
       deltaTone: "neutral",
     },
     { label: "Capital at work", value: fmt(capital.value), unit: capital.unit, spark: spark(20), delta: "strategy + stake", deltaTone: "good" },
@@ -385,7 +404,8 @@ export function buildLaneCards(
   jobsPayload: unknown,
   sessionsPayload: unknown,
   strategyPayload: unknown,
-  governance?: GovernanceLaneInputs
+  governance?: GovernanceLaneInputs,
+  sessionsPresence: FeedPresence = "live"
 ): LaneCardData[] {
   const jobs = asArray(jobsPayload);
   const sessions = activeWorkSessions(jobsPayload, sessionsPayload);
@@ -393,6 +413,8 @@ export function buildLaneCards(
   const disputed = sessions.filter((session) => text(session.status) === "disputed").length;
   const attention = numberValue(summary.attentionCount);
   const latestSessionStatus = text(sessions[0]?.status, "claimed");
+  const sessionsBlockedForLane =
+    sessionsPresence === "locked" || sessionsPresence === "down";
 
   // Governance truth boundary: the lane previously hardcoded
   // `policies: "pending"` and `audit: "live"` and derived "Quiet" from
@@ -433,10 +455,26 @@ export function buildLaneCards(
       pillTone: "ok",
       metrics: [
         { label: "queue", value: `${jobs.length}` },
-        { label: "sessions", value: `${sessions.length}` },
-        { label: "disputed", value: `${disputed}` },
+        {
+          label: "sessions",
+          value: sessionsBlockedForLane
+            ? sessions.length
+              ? `≥${sessions.length}`
+              : metricUnavailable(sessionsPresence)
+            : `${sessions.length}`,
+        },
+        {
+          label: "disputed",
+          value: sessionsBlockedForLane ? metricUnavailable(sessionsPresence) : `${disputed}`,
+        },
       ],
-      recentEvent: sessions[0] ? `Latest session ${latestSessionStatus}` : "No live sessions yet",
+      recentEvent: sessions[0]
+        ? `Latest session ${latestSessionStatus}`
+        : sessionsBlockedForLane
+          ? sessionsPresence === "locked"
+            ? "Sessions feed locked for this session"
+            : "Sessions feed unavailable"
+          : "No live sessions yet",
     },
     {
       name: "Treasury",

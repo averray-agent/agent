@@ -64,9 +64,20 @@ export default function OverviewPage() {
   const providerOps = useProviderOperations();
   const publicProviderOps = usePublicProviderOperations();
 
+  const sessionsPresence = feedPresence(sessions);
+  const sessionsBlocked = sessionsPresence === "locked" || sessionsPresence === "down";
+  const policiesPresence = feedPresence(policies);
+  const policiesBlocked = policiesPresence === "locked" || policiesPresence === "down";
   const liveVitals = useMemo(
-    () => buildRoomVitals(jobs.data, sessions.data, account.data, strategyPositions.data),
-    [account.data, jobs.data, sessions.data, strategyPositions.data]
+    () =>
+      buildRoomVitals(
+        jobs.data,
+        sessions.data,
+        account.data,
+        strategyPositions.data,
+        sessionsPresence
+      ),
+    [account.data, jobs.data, sessions.data, sessionsPresence, strategyPositions.data]
   );
   // The Runs-in-motion + Agents-active cards both pull from
   // /admin/sessions. While that request is still in flight on first
@@ -101,19 +112,26 @@ export default function OverviewPage() {
   );
   const liveLanes = useMemo(
     () =>
-      buildLaneCards(jobs.data, sessions.data, strategyPositions.data, {
-        policies: { presence: feedPresence(policies), activeCount: activePolicyCount },
-        audit: { presence: feedPresence(audit) },
-        disputes: { presence: feedPresence(disputes), openCount: openDisputeCount },
-      }),
+      buildLaneCards(
+        jobs.data,
+        sessions.data,
+        strategyPositions.data,
+        {
+          policies: { presence: policiesPresence, activeCount: activePolicyCount },
+          audit: { presence: feedPresence(audit) },
+          disputes: { presence: feedPresence(disputes), openCount: openDisputeCount },
+        },
+        sessionsPresence
+      ),
     [
       activePolicyCount,
       audit,
       disputes,
       jobs.data,
       openDisputeCount,
-      policies,
+      policiesPresence,
       sessions.data,
+      sessionsPresence,
       strategyPositions.data,
     ]
   );
@@ -223,11 +241,12 @@ export default function OverviewPage() {
         // fallbacks — the previous form (`liveJobs.length || 14`) silently
         // showed the fixture's `14` whenever live data legitimately
         // returned zero rows, masking real "queue is empty" signals.
+        // Locked/down feeds render "—", never a fabricated zero.
         openRuns={hasLiveOverview ? liveJobs.length : 0}
-        awaitingSignature={hasLiveOverview ? disputedSessions : 0}
+        awaitingSignature={sessionsBlocked ? "—" : hasLiveOverview ? disputedSessions : 0}
         lastReceiptTime={lastReceiptTime}
         treasuryPosture={liveVitals[3]?.value === "Amber" ? "Amber" : "Green"}
-        policiesAppliedToday={policiesAppliedToday}
+        policiesAppliedToday={policiesBlocked ? "—" : policiesAppliedToday}
       />
       <RoomVitals vitals={vitals} comparedTo={hasLiveOverview ? "live API" : "waiting for live API"} />
       <JobLifecycleStrip

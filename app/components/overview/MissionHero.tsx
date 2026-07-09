@@ -1,10 +1,21 @@
+export type TreasuryPostureLabel = "Green" | "Amber" | "Red" | "Unknown";
+
 export interface MissionHeroProps {
   openRuns: number;
-  awaitingSignature: number;
+  /** A number when the sessions feed is readable; "—" when locked/down. */
+  awaitingSignature: number | string;
   lastReceiptTime: string;
-  treasuryPosture: "Green" | "Amber" | "Red";
-  policiesAppliedToday: number;
+  treasuryPosture: TreasuryPostureLabel;
+  /** A number when the policies feed is readable; "—" when locked/down. */
+  policiesAppliedToday: number | string;
 }
+
+const POSTURE_COLOR: Record<TreasuryPostureLabel, string> = {
+  Green: "var(--avy-accent)",
+  Amber: "var(--avy-warn)",
+  Red: "var(--avy-warn)",
+  Unknown: "var(--avy-muted)",
+};
 
 export function MissionHero({
   openRuns,
@@ -43,7 +54,7 @@ export function MissionHero({
         </span>
         <span>
           Treasury posture ·{" "}
-          <b className="font-semibold" style={{ color: "var(--avy-accent)" }}>
+          <b className="font-semibold" style={{ color: POSTURE_COLOR[treasuryPosture] }}>
             {treasuryPosture}
           </b>
         </span>
