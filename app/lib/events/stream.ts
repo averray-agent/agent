@@ -75,6 +75,10 @@ export function startEventStream(opts: StreamOptions) {
   const bumpHeartbeat = () => {
     if (heartbeatTimer) clearTimeout(heartbeatTimer);
     heartbeatTimer = setTimeout(() => {
+      // A silent stall is a disconnect: notify like any other error so
+      // status surfaces flip to "reconnecting" instead of staying
+      // "connected" over a dead stream.
+      opts.onError?.(new Event("heartbeat-timeout"));
       source?.close();
       scheduleReconnect();
     }, HEARTBEAT_TIMEOUT_MS);
