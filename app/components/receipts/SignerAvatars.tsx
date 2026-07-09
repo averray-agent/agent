@@ -7,6 +7,8 @@ export interface Signer {
   tone: SignerTone;
   role: string;
   address: string;
+  identified?: boolean;
+  signedAt?: string;
 }
 
 const TONE: Record<SignerTone, string> = {
@@ -39,7 +41,11 @@ export function SignerAvatars({
               i > 0 && "-ml-[7px]"
             )}
             style={{ letterSpacing: 0 }}
-            title={`${s.role} · ${s.address}`}
+            title={
+              s.identified === false
+                ? `${s.role} · identity not yet emitted by /badges`
+                : `${s.role} · ${s.address}`
+            }
           >
             {s.initials}
           </span>
@@ -68,7 +74,11 @@ export function SignerAvatars({
             >
               {s.role}
             </span>
-            <span>{s.address}</span>
+            <span>
+              {s.identified === false
+                ? "identity not yet emitted by /badges"
+                : s.address}
+            </span>
           </span>
         ))}
       </span>

@@ -12,8 +12,9 @@ import {
 export interface SignatureEntry {
   role: string;
   address: string;
-  time: string;
+  time?: string;
   pending?: boolean;
+  identified?: boolean;
 }
 
 export interface LinkedArtifact {
@@ -149,12 +150,12 @@ function SignatureRow({ sig }: { sig: SignatureEntry }) {
       <span
         className={cn(
           "grid h-[22px] w-[22px] place-items-center rounded-full",
-          sig.pending
+          sig.pending || sig.identified === false
             ? "bg-[var(--avy-warn-soft)] text-[var(--avy-warn)]"
             : "bg-[var(--avy-accent-soft)] text-[var(--avy-accent)]"
         )}
       >
-        {sig.pending ? "…" : "✓"}
+        {sig.pending || sig.identified === false ? "…" : "✓"}
       </span>
       <span
         className="font-[family-name:var(--font-display)] text-[9.5px] font-extrabold uppercase text-[var(--avy-muted)]"
@@ -162,9 +163,17 @@ function SignatureRow({ sig }: { sig: SignatureEntry }) {
       >
         {sig.role}
       </span>
-      <span className="text-[12px] text-[var(--avy-ink)]">{sig.address}</span>
+      <span className="text-[12px] text-[var(--avy-ink)]">
+        {sig.identified === false
+          ? "identity not yet emitted by /badges"
+          : sig.address}
+      </span>
       <span className="text-[11px] text-[var(--avy-muted)]">
-        {sig.pending ? "awaiting" : sig.time}
+        {sig.pending
+          ? "awaiting"
+          : sig.identified === false
+            ? ""
+            : sig.time ?? ""}
       </span>
     </div>
   );

@@ -26,6 +26,7 @@ import {
   extractReceiptRows,
   type ReceiptRowWithMeta,
 } from "@/lib/api/receipt-adapters";
+import { COSIGN_TARGET_PCT, coSignKpiState } from "@/lib/api/receipt-kpis";
 import { formatReceiptKindBreakdown } from "@/lib/ui/receipt-metrics";
 import {
   buildManifestEnvelope,
@@ -51,14 +52,6 @@ const KPIS: ReceiptsKpi[] = [
     label: "Co-signed",
     value: "0.0",
     unit: "%",
-    pillRight: (
-      <span
-        className="inline-flex min-h-[22px] items-center rounded-full bg-[var(--avy-accent-soft)] px-2.5 font-[family-name:var(--font-display)] text-[10px] font-extrabold uppercase text-[var(--avy-accent)]"
-        style={{ letterSpacing: "0.08em" }}
-      >
-        within target
-      </span>
-    ),
     meta: "0 of 0 receipts · signer chain present",
     metaTone: "warn",
   },
@@ -113,18 +106,21 @@ const SHAPES: ShapeEntry[] = [
     title: "run-receipt",
     body: "The agent's output for a claimed run. Carries the diff or artifact hash, the verifier's pass/fail verdict, and the policy that was checked.",
     fields: ["run_id", "artifact_hash", "verdict"],
+    emitted: false,
   },
   {
     kind: "settle",
     title: "settle-receipt",
     body: "Stake movement triggered by a verified run. Records the wallet, amount, counterparty, and the run-receipt it settles against.",
     fields: ["amount", "wallet", "origin_receipt"],
+    emitted: false,
   },
   {
     kind: "policy",
     title: "policy-receipt",
     body: "A policy was attached, amended, or retired. The signing operator and the exact policy revision are both captured.",
     fields: ["policy_tag", "revision", "operator"],
+    emitted: false,
   },
   {
     kind: "badge",
@@ -168,10 +164,36 @@ export default function ReceiptsPage() {
     }
     setManifestStatus(`Manifest rejected · ${result.error ?? "Manifest verification failed."}`);
   };
+  const exportReceiptBundle = () => {
+    const payload = buildReceiptManifestPayload(rows);
+    const manifest = buildManifestEnvelope(payload);
+    const bundle = {
+      type: "averray.receipts.bundle.v1",
+      exportedAt: new Date().toISOString(),
+      rows,
+      manifest,
+    };
+    const blob = new Blob([JSON.stringify(bundle, null, 2)], {
+      type: "application/json;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `averray-receipts-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="flex w-full max-w-[1100px] flex-col gap-5">
-      <ReceiptsTopbar freshness={freshness} />
+      <ReceiptsTopbar
+        freshness={freshness}
+        onExportBundle={exportReceiptBundle}
+        onVerifyManifest={verifyReceiptManifest}
+        actionsDisabled={rows.length === 0}
+      />
 
       <header className="flex flex-col gap-1.5">
         <span
@@ -253,8 +275,7 @@ function receiptKpis(rows: ReceiptRowWithMeta[]): ReceiptsKpi[] {
     const parsed = Date.parse(row.issuedAtIso);
     return Number.isFinite(parsed) && now - parsed <= 24 * 60 * 60 * 1000;
   }).length;
-  const coSigned = rows.filter((row) => row.signers.length > 1).length;
-  const coSignedPct = rows.length ? Math.round((coSigned / rows.length) * 1000) / 10 : 0;
+  const coSign = coSignKpiState(rows);
 
   return [
     {
@@ -270,9 +291,14 @@ function receiptKpis(rows: ReceiptRowWithMeta[]): ReceiptsKpi[] {
     },
     {
       ...KPIS[2],
-      value: coSignedPct.toFixed(1),
-      meta: `${coSigned} of ${rows.length} receipts · signer chain present`,
-      metaTone: coSignedPct >= 95 ? "ok" : "warn",
+      value: coSign.value,
+      unit: coSign.unit || undefined,
+      pillRight:
+        coSign.status === "unknown" ? undefined : (
+          <CoSignTargetChip status={coSign.status} />
+        ),
+      meta: coSign.meta,
+      metaTone: coSign.metaTone,
     },
     {
       ...KPIS[3],
@@ -281,6 +307,23 @@ function receiptKpis(rows: ReceiptRowWithMeta[]): ReceiptsKpi[] {
       meta: "timing not emitted by /badges yet",
     },
   ];
+}
+
+function CoSignTargetChip({ status }: { status: "within" | "below" }) {
+  const within = status === "within";
+  return (
+    <span
+      title={`target ${COSIGN_TARGET_PCT}% identified co-sign rate`}
+      className={`inline-flex min-h-[22px] items-center rounded-full px-2.5 font-[family-name:var(--font-display)] text-[10px] font-extrabold uppercase ${
+        within
+          ? "bg-[var(--avy-accent-soft)] text-[var(--avy-accent)]"
+          : "bg-[var(--avy-warn-soft)] text-[var(--avy-warn)]"
+      }`}
+      style={{ letterSpacing: "0.08em" }}
+    >
+      {within ? `target ${COSIGN_TARGET_PCT}% met` : `below target ${COSIGN_TARGET_PCT}%`}
+    </span>
+  );
 }
 
 function receiptDate(value: string): string {
