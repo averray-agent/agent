@@ -39,6 +39,7 @@ export interface DisputeParty {
   address: string;
   initials: string;
   tone: "sage" | "ink" | "clay" | "blue" | "muted";
+  identified?: boolean;
 }
 
 export interface EvidenceRow {
@@ -114,7 +115,9 @@ export interface Dispute {
   opener: DisputeParty;
   respondent: DisputeParty;
   reviewer: DisputeParty;
-  /** DOT. Sum of worker + verifier + treasury portions. */
+  /** Settlement asset symbol, only when emitted by the dispute payload. */
+  asset?: string;
+  /** Sum of worker + verifier + treasury portions. */
   stakeFrozen: number;
   /** Remaining worker payout available to the arbitrator settlement. */
   remainingPayout?: number;
@@ -130,7 +133,9 @@ export interface Dispute {
   stakeBreakdown: StakeBreakdown;
   /** ISO-ish string opened-at used only for the window countdown seed. */
   openedAt: string;
-  /** Seconds allocated for the operator to decide before auto-escalate. */
+  /** Raw resolution timestamp used for real-window aggregate metrics. */
+  resolvedAt?: string;
+  /** Seconds allocated for an authorized verdict before the SLA expires. */
   windowSeconds: number;
   /** Seconds already elapsed when the fixture was seeded. */
   windowElapsed: number;

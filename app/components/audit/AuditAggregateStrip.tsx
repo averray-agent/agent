@@ -1,7 +1,31 @@
 import { cn } from "@/lib/utils/cn";
 import type { AuditEvent } from "./types";
 
-export function AuditAggregateStrip({ events }: { events: AuditEvent[] }) {
+type AuditFeedPresence = "live" | "loading" | "locked" | "down";
+
+export function AuditAggregateStrip({
+  events,
+  presence,
+}: {
+  events: AuditEvent[];
+  presence: AuditFeedPresence;
+}) {
+  if (presence !== "live") {
+    const meta =
+      presence === "locked"
+        ? "audit feed locked for this session (no operator role)"
+        : presence === "down"
+          ? "audit feed unavailable"
+          : "audit feed loading";
+    return (
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {["Events today", "Operator actions", "System events", "Contract events"].map((label) => (
+          <Card key={label} label={label} value="—" meta={meta} />
+        ))}
+      </div>
+    );
+  }
+
   const today = events.filter((e) => e.day === "today").length;
   const operator = events.filter((e) => e.source === "operator").length;
   const system = events.filter((e) => e.source === "system").length;

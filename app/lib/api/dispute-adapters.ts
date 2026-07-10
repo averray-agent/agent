@@ -16,7 +16,7 @@ import {
   verdictToDecision as mapVerdictToDecision,
 } from "./dispute-verdicts";
 
-const DEFAULT_REVIEWER = "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519";
+const ZERO_ADDRESS = /^0x0{40}$/iu;
 
 export function extractDisputeList(data: unknown): Dispute[] {
   const rows = Array.isArray(data)
@@ -37,6 +37,11 @@ export function extractDispute(data: unknown): Dispute | null {
     const dispute = record as unknown as Dispute;
     return {
       ...dispute,
+      asset: dispute.asset ?? assetSymbol(record),
+      opener: party(dispute.opener, "claimant", "blue"),
+      respondent: party(dispute.respondent, "respondent", "clay"),
+      reviewer: party(dispute.reviewer, "reviewer", "sage"),
+      resolvedAt: text(record.resolvedAt, text(record.decidedAt, "")) || undefined,
       arbitration: arbitrationSemantics(record.arbitration, {
         openedAt,
         windowEndsAt: text(record.windowEndsAt, ""),
@@ -69,6 +74,7 @@ export function extractDispute(data: unknown): Dispute | null {
   const status = text(record.status, text(record.state, "open"));
   const verdict = verdictToDecision(record.verdict);
   const release = objectField(record, "release");
+  const resolvedAt = text(release?.releasedAt, text(record.decidedAt, ""));
   const releaseDestination = releaseToDestination(release, verdict);
   const stakeFrozen = number(record.stakedAmount, number(record.stakeFrozen, 0));
   const workerPayout = optionalNumber(record.workerPayout);
@@ -92,8 +98,8 @@ export function extractDispute(data: unknown): Dispute | null {
         decision: verdict,
         destination: releaseDestination,
         rationale: text(record.rationale, text(record.reason, "Resolved by operator verdict.")),
-        at: displayDate(text(release?.releasedAt, text(record.decidedAt, new Date().toISOString()))),
-        signer: party(record.decidedBy ?? release?.releasedBy ?? record.reviewer ?? DEFAULT_REVIEWER, "operator-primary", "sage"),
+        at: resolvedAt ? displayDate(resolvedAt) : "time not emitted",
+        signer: party(record.decidedBy ?? release?.releasedBy ?? record.reviewer, "reviewer", "sage"),
         reasonCode: reasonCode || undefined,
         workerPayout,
         txHash: txHash || undefined,
@@ -126,7 +132,8 @@ export function extractDispute(data: unknown): Dispute | null {
     state: disputeState,
     opener: party(record.claimant, "claimant", "blue"),
     respondent: party(record.respondent, "respondent", "clay"),
-    reviewer: party(record.reviewer ?? DEFAULT_REVIEWER, "operator-primary", "sage"),
+    reviewer: party(record.reviewer, "reviewer", "sage"),
+    asset: assetSymbol(record),
     stakeFrozen,
     workerPayout,
     remainingPayout,
@@ -139,6 +146,7 @@ export function extractDispute(data: unknown): Dispute | null {
     arbitration,
     stakeBreakdown: stakeBreakdown(stakeFrozen),
     openedAt: displayDate(openedAt),
+    resolvedAt: resolvedAt || undefined,
     windowSeconds: effectiveWindowSeconds,
     windowElapsed,
     evidence: evidenceRows(before, after),
@@ -200,21 +208,52 @@ function party(value: unknown, fallbackHandle: string, tone: DisputeParty["tone"
   if (value && typeof value === "object") {
     const record = value as Record<string, unknown>;
     const handle = text(record.handle, fallbackHandle);
-    const address = text(record.address, text(record.wallet, shortAddress(handle)));
+    const address = text(record.address, text(record.wallet, handle.startsWith("0x") ? handle : ""));
+    if (!address || isPlaceholderAddress(address)) return unidentifiedParty();
     return {
       handle,
       address: shortAddress(address),
       initials: text(record.initials, initials(handle)),
       tone: partyTone(record.tone, tone),
+      identified: true,
     };
   }
-  const address = text(value, fallbackHandle);
+  const address = text(value, "");
+  if (!address || isPlaceholderAddress(address)) return unidentifiedParty();
   return {
     handle: address.startsWith("0x") ? shortAddress(address) : address,
-    address: shortAddress(address),
+    address: address.startsWith("0x") ? shortAddress(address) : "",
     initials: initials(address),
     tone,
+    identified: true,
   };
+}
+
+function unidentifiedParty(): DisputeParty {
+  return {
+    handle: "identity not yet emitted",
+    address: "",
+    initials: "…",
+    tone: "muted",
+    identified: false,
+  };
+}
+
+function isPlaceholderAddress(value: string): boolean {
+  return ZERO_ADDRESS.test(value) || /^0x0+(?:…|\.\.\.)0+$/iu.test(value);
+}
+
+function assetSymbol(record: Record<string, unknown>): string | undefined {
+  const evidence = objectField(record, "evidence");
+  const before = objectField(evidence, "before");
+  const symbol = text(
+    record.asset,
+    text(
+      record.assetSymbol,
+      text(record.rewardAsset, text(record.settlementAsset, text(before?.rewardAsset, text(before?.asset, ""))))
+    )
+  );
+  return symbol ? symbol.toUpperCase() : undefined;
 }
 
 function partyTone(value: unknown, fallback: DisputeParty["tone"]): DisputeParty["tone"] {

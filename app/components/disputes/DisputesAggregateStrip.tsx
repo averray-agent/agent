@@ -2,22 +2,27 @@ import { cn } from "@/lib/utils/cn";
 import type { Dispute } from "./types";
 
 export function DisputesAggregateStrip({ disputes }: { disputes: Dispute[] }) {
-  const openCount = disputes.filter((d) => d.state !== "resolved").length;
-  const frozen = disputes
-    .filter((d) => d.state !== "resolved")
-    .reduce((acc, d) => acc + d.stakeFrozen, 0);
-
-  const oldestMinutes = Math.max(
-    ...disputes
-      .filter((d) => d.state !== "resolved")
-      .map((d) => Math.floor(d.windowElapsed / 60)),
-    0
+  const openDisputes = disputes.filter((d) => d.state !== "resolved");
+  const openCount = openDisputes.length;
+  const frozen = openDisputes.reduce((acc, d) => acc + d.stakeFrozen, 0);
+  const frozenAsset = sharedAsset(openDisputes);
+  const oldestOpen = openDisputes.reduce<Dispute | null>(
+    (oldest, dispute) => !oldest || dispute.windowElapsed > oldest.windowElapsed ? dispute : oldest,
+    null
   );
+  const oldestMinutes = oldestOpen ? Math.floor(oldestOpen.windowElapsed / 60) : 0;
+  const pastSla = openDisputes.filter(
+    (dispute) => dispute.windowSeconds > 0 && dispute.windowElapsed >= dispute.windowSeconds
+  ).length;
 
-  // Simple upheld-rate calculation from resolved disputes.
-  const resolved = disputes.filter((d) => d.state === "resolved");
+  const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  const resolved = disputes.filter((d) => {
+    if (d.state !== "resolved" || !d.resolvedAt) return false;
+    const resolvedAt = Date.parse(d.resolvedAt);
+    return Number.isFinite(resolvedAt) && resolvedAt >= cutoff;
+  });
   const upheld = resolved.filter((d) => d.resolution?.decision === "uphold").length;
-  const upheldPct = resolved.length === 0 ? 0 : Math.round((upheld / resolved.length) * 100);
+  const upheldPct = resolved.length === 0 ? null : Math.round((upheld / resolved.length) * 100);
 
   return (
     <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -27,16 +32,18 @@ export function DisputesAggregateStrip({ disputes }: { disputes: Dispute[] }) {
         meta={
           openCount === 0
             ? "queue clear"
+            : pastSla > 0
+              ? `${pastSla} past SLA`
             : openCount > 5
               ? "backlog — triage now"
               : "within SLA"
         }
-        tone={openCount === 0 ? "ok" : openCount > 5 ? "bad" : "warn"}
+        tone={openCount === 0 ? "ok" : pastSla > 0 || openCount > 5 ? "bad" : "warn"}
       />
       <Card
         label="Stake frozen"
         value={`${frozen}`}
-        unit="DOT"
+        unit={frozenAsset}
         meta={`across ${openCount} open · refundable on reject`}
         tone="muted"
       />
@@ -46,21 +53,27 @@ export function DisputesAggregateStrip({ disputes }: { disputes: Dispute[] }) {
         meta={
           oldestMinutes === 0
             ? "queue clear"
-            : oldestMinutes > 30
-              ? "past auto-escalate window"
+            : oldestOpen && oldestOpen.windowElapsed >= oldestOpen.windowSeconds
+              ? "past review window"
               : "inside review window"
         }
-        tone={oldestMinutes === 0 ? "ok" : oldestMinutes > 30 ? "warn" : "muted"}
+        tone={oldestMinutes === 0 ? "ok" : oldestOpen && oldestOpen.windowElapsed >= oldestOpen.windowSeconds ? "warn" : "muted"}
       />
       <Card
         label="Upheld rate 30d"
-        value={`${upheldPct}`}
-        unit="%"
-        meta={`${upheld} of ${resolved.length} resolved · mostly policy-violation`}
-        tone="ok"
+        value={upheldPct === null ? "—" : `${upheldPct}`}
+        unit={upheldPct === null ? undefined : "%"}
+        meta={resolved.length === 0 ? "no resolutions in 30d" : `${upheld} of ${resolved.length} resolved in 30d`}
+        tone={upheldPct === null ? "muted" : "ok"}
       />
     </div>
   );
+}
+
+function sharedAsset(disputes: Dispute[]): string | undefined {
+  if (!disputes.length || disputes.some((dispute) => !dispute.asset)) return undefined;
+  const assets = new Set(disputes.map((dispute) => dispute.asset));
+  return assets.size === 1 ? disputes[0].asset : undefined;
 }
 
 interface CardProps {

@@ -185,6 +185,7 @@ export function DisputeDrawerBody({
       <DrawerSection title="Stake hold">
         <StakeHoldPanel
           total={dispute.stakeFrozen}
+          asset={dispute.asset}
           breakdown={dispute.stakeBreakdown}
           destination={destination}
           onDestinationChange={setDestination}
@@ -238,14 +239,6 @@ export function DisputeDrawerBody({
                 {dispute.reviewer.address}
               </span>
             </div>
-            <button
-              type="button"
-              disabled={resolved || !!committed}
-              className="inline-flex h-9 items-center gap-1.5 rounded-[8px] border border-[color:rgba(167,97,34,0.35)] bg-[var(--avy-warn-soft)] px-3.5 font-[family-name:var(--font-display)] text-[11.5px] font-bold uppercase text-[var(--avy-warn)] transition-transform hover:-translate-y-px hover:border-[color:rgba(167,97,34,0.55)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:translate-y-0"
-              style={{ letterSpacing: "0.04em" }}
-            >
-              Escalate to verifier-2
-            </button>
           </div>
         )}
       </DrawerSection>
@@ -579,7 +572,7 @@ function ResolvedCard({ dispute }: { dispute: Dispute }) {
             <span>
               Worker payout ·{" "}
               <b className="font-semibold text-[var(--avy-ink)]">
-                {formatPayoutAmount(workerPayout)} DOT
+                {formatPayoutAmount(workerPayout)}{dispute.asset ? ` ${dispute.asset}` : ""}
               </b>
             </span>
           ) : null}

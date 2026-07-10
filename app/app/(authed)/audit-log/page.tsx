@@ -10,8 +10,9 @@ import {
 import { AuditTimeline } from "@/components/audit/AuditTimeline";
 import type { AuditActor, AuditCategory, AuditEvent, AuditSource } from "@/components/audit/types";
 import { useAudit } from "@/lib/api/hooks";
-import { ApiError } from "@/lib/api/client";
 import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
+import { feedPresence } from "@/lib/api/feed-presence";
+import { auditEventsToCsv } from "@/lib/ui/audit-export";
 import {
   buildAuditManifestPayload,
   buildManifestEnvelope,
@@ -27,6 +28,7 @@ const DAY_BUCKETS: Record<AuditFilter["day"], (d: string, now?: Date) => boolean
 
 export default function AuditLogPage() {
   const auditRequest = useAudit();
+  const auditPresence = feedPresence(auditRequest);
   const [manifestStatus, setManifestStatus] = useState<{
     tone: "ok" | "bad";
     title: string;
@@ -71,15 +73,14 @@ export default function AuditLogPage() {
   // out the request 401s and we render zero events — but the generic
   // "no events match" copy reads as if the platform itself is quiet.
   // Distinguish the two so the empty state can prompt sign-in.
-  const unauthenticated =
-    auditRequest.error instanceof ApiError &&
-    (auditRequest.error.status === 401 || auditRequest.error.status === 403);
+  const unauthenticated = auditPresence === "locked";
   const filtersApplied =
     filter.source !== "all" ||
     filter.category !== "all" ||
     filter.day !== "all" ||
     filter.q.trim().length > 0;
   const verifyAuditManifest = () => {
+    if (auditPresence !== "live" || events.length === 0) return;
     const payload = buildAuditManifestPayload(events);
     const envelope = buildManifestEnvelope(payload);
     const result = verifyManifestEnvelope(envelope);
@@ -98,10 +99,28 @@ export default function AuditLogPage() {
       detail: result.error ?? "Manifest verification failed.",
     });
   };
+  const exportAuditCsv = () => {
+    if (auditPresence !== "live" || filtered.length === 0) return;
+    const csv = auditEventsToCsv(filtered);
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `averray-audit-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="flex w-full max-w-[1100px] flex-col gap-5">
-      <AuditTopbar freshness={freshness} />
+      <AuditTopbar
+        freshness={freshness}
+        onExportCsv={exportAuditCsv}
+        exportDisabled={auditPresence !== "live" || filtered.length === 0}
+        onVerifyManifest={verifyAuditManifest}
+        verifyDisabled={auditPresence !== "live" || events.length === 0}
+      />
 
       <header className="flex flex-col gap-1.5">
         <span
@@ -120,7 +139,7 @@ export default function AuditLogPage() {
         </p>
       </header>
 
-      <AuditAggregateStrip events={events} />
+      <AuditAggregateStrip events={events} presence={auditPresence} />
       <AuditFilterRail filter={filter} onChange={setFilter} />
       <AuditTimeline
         events={filtered}
@@ -144,7 +163,7 @@ export default function AuditLogPage() {
           </div>
           <button
             type="button"
-            disabled={unauthenticated || events.length === 0}
+            disabled={auditPresence !== "live" || events.length === 0}
             onClick={verifyAuditManifest}
             className="inline-flex h-9 items-center rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3 font-[family-name:var(--font-display)] text-[10.5px] font-extrabold uppercase text-[var(--avy-ink)] transition-transform hover:-translate-y-px hover:border-[color:rgba(30,102,66,0.24)] disabled:cursor-not-allowed disabled:text-[var(--avy-muted)] disabled:opacity-60 disabled:hover:translate-y-0"
             style={{ letterSpacing: "0.08em" }}
@@ -171,10 +190,20 @@ export default function AuditLogPage() {
         className="font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]"
         style={{ letterSpacing: 0 }}
       >
-        Showing <b className="font-semibold text-[var(--avy-ink)]">{filtered.length}</b> of{" "}
-        <b className="font-semibold text-[var(--avy-ink)]">{events.length}</b> events.
-        The manifest verifier hashes event ids, actors, categories, targets, and
-        row hashes from the live audit response.
+        {auditPresence === "live" ? (
+          <>
+            Showing <b className="font-semibold text-[var(--avy-ink)]">{filtered.length}</b> of{" "}
+            <b className="font-semibold text-[var(--avy-ink)]">{events.length}</b> events.
+            The manifest verifier hashes event ids, actors, categories, targets, and
+            row hashes from the live audit response.
+          </>
+        ) : auditPresence === "locked" ? (
+          "Audit feed locked for this session (no operator role)."
+        ) : auditPresence === "down" ? (
+          "Audit feed unavailable."
+        ) : (
+          "Audit feed loading."
+        )}
       </p>
     </div>
   );

@@ -102,7 +102,7 @@ export function DisputesTable({
                         className="font-[family-name:var(--font-mono)] text-[13px] tabular-nums text-[var(--avy-ink)]"
                         style={{ letterSpacing: 0 }}
                       >
-                        {d.stakeFrozen} DOT
+                        {d.stakeFrozen}{d.asset ? ` ${d.asset}` : ""}
                       </span>
                     </Td>
                     <Td>

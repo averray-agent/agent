@@ -40,7 +40,7 @@ export function AuditTimeline({
           style={{ letterSpacing: 0 }}
         >
           {unauthenticated
-            ? "Sign in with your operator wallet to load the audit log. Every claim, submission, and verification on this platform shows up here once you're authenticated."
+            ? "Audit log locked for this session — this wallet lacks the operator role to read /audit."
             : filtersApplied
               ? "No events match these filters. Clear them to see the full log."
               : "No events recorded yet. The log is append-only, so a quiet window means the platform is quiet — not stalled."}

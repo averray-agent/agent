@@ -6,9 +6,12 @@ import { SeverityPill, StatePill, ScopePill } from "./pills";
 import { SignerAvatar, SignerAvatarRow } from "./SignerAvatar";
 import type { Policy } from "./types";
 
+type PolicyFeedPresence = "live" | "loading" | "locked" | "down";
+
 export interface PoliciesTableProps {
   rows: Policy[];
   totalCount: number;
+  presence: PolicyFeedPresence;
   selectedId: string | null;
   onSelect: (p: Policy) => void;
 }
@@ -30,6 +33,7 @@ function relativeTime(iso: string): string {
 export function PoliciesTable({
   rows,
   totalCount,
+  presence,
   selectedId,
   onSelect,
 }: PoliciesTableProps) {
@@ -43,7 +47,13 @@ export function PoliciesTable({
           className="font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]"
           style={{ letterSpacing: 0 }}
         >
-          sorted by last change · newest first · {rows.length} of {totalCount}
+          {presence === "live"
+            ? `sorted by last change · newest first · ${rows.length} of ${totalCount}`
+            : presence === "locked"
+              ? "policy feed locked for this session"
+              : presence === "down"
+                ? "policy feed unavailable"
+                : "policy feed loading"}
         </span>
       </header>
 
@@ -68,7 +78,15 @@ export function PoliciesTable({
                   className="p-8 text-center font-[family-name:var(--font-mono)] text-[13px] text-[var(--avy-muted)]"
                   style={{ letterSpacing: 0 }}
                 >
-                  No policies match these filters.
+                  {presence === "locked"
+                    ? "Policy feed locked for this session — this wallet lacks the operator role to read /policies."
+                    : presence === "down"
+                      ? "Policy feed unavailable — /policies could not be read."
+                      : presence === "loading"
+                        ? "Loading policies."
+                        : totalCount === 0
+                          ? "No policies were emitted by the live feed."
+                          : "No policies match these filters."}
                 </td>
               </tr>
             ) : (
@@ -149,21 +167,17 @@ export function PoliciesTable({
         </table>
       </div>
 
-      <footer
-        className="flex items-center justify-between gap-3 border-t border-[var(--avy-line-soft)] bg-[rgba(250,248,241,0.5)] px-4 py-3 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]"
-        style={{ letterSpacing: 0 }}
-      >
-        <span>
-          Showing <b className="font-semibold text-[var(--avy-ink)]">{rows.length}</b> of{" "}
-          <b className="font-semibold text-[var(--avy-ink)]">{totalCount}</b> policies
-        </span>
-        <button
-          type="button"
-          className="cursor-pointer border-b border-dashed border-[color:rgba(30,102,66,0.4)] pb-px text-[var(--avy-accent)] hover:text-[var(--avy-accent-2)]"
+      {presence === "live" ? (
+        <footer
+          className="flex items-center justify-between gap-3 border-t border-[var(--avy-line-soft)] bg-[rgba(250,248,241,0.5)] px-4 py-3 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]"
+          style={{ letterSpacing: 0 }}
         >
-          Import from /schemas/policies →
-        </button>
-      </footer>
+          <span>
+            Showing <b className="font-semibold text-[var(--avy-ink)]">{rows.length}</b> of{" "}
+            <b className="font-semibold text-[var(--avy-ink)]">{totalCount}</b> policies
+          </span>
+        </footer>
+      ) : null}
     </div>
   );
 }

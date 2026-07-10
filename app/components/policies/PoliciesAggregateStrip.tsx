@@ -1,6 +1,30 @@
 import type { Policy } from "./types";
 
-export function PoliciesAggregateStrip({ policies }: { policies: Policy[] }) {
+type PolicyFeedPresence = "live" | "loading" | "locked" | "down";
+
+export function PoliciesAggregateStrip({
+  policies,
+  presence,
+}: {
+  policies: Policy[];
+  presence: PolicyFeedPresence;
+}) {
+  if (presence !== "live") {
+    const meta =
+      presence === "locked"
+        ? "policy feed locked for this session (no operator role)"
+        : presence === "down"
+          ? "policy feed unavailable"
+          : "policy feed loading";
+    return (
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {["Active policies", "Pending proposals", "Revisions · 30d", "Signer quorum"].map((label) => (
+          <Card key={label} label={label} value="—" meta={meta} />
+        ))}
+      </div>
+    );
+  }
+
   const active = policies.filter((p) => p.state === "Active").length;
   const pending = policies.filter((p) => p.state === "Pending").length;
   const revisions30d = countRevisionsSince(policies, 30);

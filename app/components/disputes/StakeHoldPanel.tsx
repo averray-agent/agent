@@ -14,6 +14,7 @@ import type {
  */
 export function StakeHoldPanel({
   total,
+  asset,
   breakdown,
   destination,
   onDestinationChange,
@@ -21,6 +22,7 @@ export function StakeHoldPanel({
   disabled,
 }: {
   total: number;
+  asset?: string;
   breakdown: StakeBreakdown;
   destination: ReleaseDestination | null;
   onDestinationChange: (d: ReleaseDestination) => void;
@@ -60,9 +62,11 @@ export function StakeHoldPanel({
             style={{ letterSpacing: "-0.01em" }}
           >
             {total}
-            <span className="ml-1 text-[14px] font-medium text-[var(--avy-muted)]">
-              DOT
-            </span>
+            {asset ? (
+              <span className="ml-1 text-[14px] font-medium text-[var(--avy-muted)]">
+                {asset}
+              </span>
+            ) : null}
           </div>
         </div>
         <span
@@ -96,16 +100,19 @@ export function StakeHoldPanel({
             dotClass="bg-[var(--avy-accent)]"
             label="Worker"
             value={breakdown.worker}
+            asset={asset}
           />
           <PortionLegend
             dotClass="bg-[var(--avy-blue)]"
             label="Verifier"
             value={breakdown.verifier}
+            asset={asset}
           />
           <PortionLegend
             dotClass="bg-[var(--avy-warn)]"
             label="Treasury"
             value={breakdown.treasury}
+            asset={asset}
           />
         </div>
       </div>
@@ -161,17 +168,19 @@ function PortionLegend({
   dotClass,
   label,
   value,
+  asset,
 }: {
   dotClass: string;
   label: string;
   value: number;
+  asset?: string;
 }) {
   return (
     <span className="flex items-center gap-1.5 text-[var(--avy-muted)]">
       <span className={cn("h-1.5 w-1.5 rounded-full", dotClass)} />
       <span className="text-[var(--avy-ink)]">{label}</span>
       <span className="ml-auto tabular-nums" style={{ letterSpacing: 0 }}>
-        {value} DOT
+        {value}{asset ? ` ${asset}` : ""}
       </span>
     </span>
   );

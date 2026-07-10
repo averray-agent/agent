@@ -18,11 +18,15 @@ export interface GovernanceChangeEntry {
   afterLabel?: string;
 }
 
+type GovernanceFeedPresence = "live" | "loading" | "locked" | "down";
+
 export function WhatChangedPanel({
   title,
   eyebrow,
   changes,
   emptyHint,
+  presence = "live",
+  blockedHint,
   activeId,
   onSelect,
 }: {
@@ -30,6 +34,8 @@ export function WhatChangedPanel({
   eyebrow: string;
   changes: GovernanceChangeEntry[];
   emptyHint: string;
+  presence?: GovernanceFeedPresence;
+  blockedHint?: string;
   activeId?: string | null;
   onSelect: (change: GovernanceChangeEntry) => void;
 }) {
@@ -51,11 +57,19 @@ export function WhatChangedPanel({
           className="font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--muted)]"
           style={{ letterSpacing: 0 }}
         >
-          {changes.length} tracked
+          {presence === "live" ? changes.length : "—"} tracked
         </span>
       </header>
 
-      {changes.length === 0 ? (
+      {presence !== "live" ? (
+        <p className="m-0 text-[13px] leading-[1.5] text-[var(--muted)]">
+          {presence === "locked"
+            ? blockedHint ?? "Governance feed locked for this session."
+            : presence === "down"
+              ? "Governance change feed unavailable."
+              : "Loading governance changes."}
+        </p>
+      ) : changes.length === 0 ? (
         <p className="m-0 text-[13px] leading-[1.5] text-[var(--muted)]">
           {emptyHint}
         </p>
