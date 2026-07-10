@@ -5,6 +5,7 @@ import { privateKeyToAccount } from "viem/accounts";
 
 import {
   buildAuditManifestPayload,
+  buildPolicyManifestPayload,
   buildSessionManifestPayload,
   buildEvidenceSignatureMessage,
   buildManifestEnvelope,
@@ -140,6 +141,44 @@ test("session audit bundles use a verifiable manifest over the current view", ()
     payload: {
       ...payload,
       entries: [{ ...payload.entries[0], state: "resolved" }],
+    },
+  });
+  assert.equal(tampered.ok, false);
+  assert.match(tampered.error, /Manifest hash mismatch/u);
+});
+
+test("policy bundles use a verifiable manifest over the current view", () => {
+  const payload = buildPolicyManifestPayload([
+    {
+      id: "policy-1",
+      tag: "settle/receipt-before-payout@v1",
+      scope: "settle",
+      severity: "hard-stop",
+      state: "Active",
+      revision: 1,
+      handler: "settlement/receipt_gate.ts",
+      gates: "Receipt required",
+      signersReq: 2,
+      signersTotal: 3,
+      approvals: [
+        { role: "operator", addr: "0x1234", state: "signed", at: "2026-07-10" },
+      ],
+      rule: { v1: "require receipt" },
+      lastChange: { text: "Initial gate", author: "fd2e", at: "2026-07-10" },
+    },
+  ]);
+  const envelope = buildManifestEnvelope(payload);
+  const verified = verifyManifestEnvelope(envelope);
+
+  assert.equal(verified.ok, true);
+  assert.equal(verified.entryCount, 1);
+  assert.equal(verified.manifestType, "averray.policies.manifest.v1");
+
+  const tampered = verifyManifestEnvelope({
+    ...envelope,
+    payload: {
+      ...payload,
+      entries: [{ ...payload.entries[0], state: "Retired" }],
     },
   });
   assert.equal(tampered.ok, false);

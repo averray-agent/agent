@@ -13,7 +13,7 @@ export function PolicyLegend() {
         <Card head="Scope" title="Which surface a policy gates">
           <ul className="grid gap-1 font-[family-name:var(--font-body)] text-[12.5px] text-[var(--avy-muted)]">
             <li><Mono>claim</Mono> — auto-claim gates on run output</li>
-            <li><Mono>settle</Mono> — releasing DOT from vaults</li>
+            <li><Mono>settle</Mono> — releasing USDC from escrow</li>
             <li><Mono>xcm</Mono> — outbound cross-chain messages</li>
             <li><Mono>badge</Mono> — reputation mint &amp; revoke</li>
             <li><Mono>co-sign</Mono> — default signer quorums</li>
@@ -39,13 +39,14 @@ export function PolicyLegend() {
         </Card>
         <Card head="Quorum" title="How many signers are required">
           <ul className="grid gap-1 font-[family-name:var(--font-body)] text-[12.5px] text-[var(--avy-muted)]">
-            <li><b className="font-semibold text-[var(--avy-ink)]">2 of 3</b> — default for claim, xcm fee cap, badge mint</li>
-            <li><b className="font-semibold text-[var(--avy-ink)]">3 of 3</b> — unanimous; required for all hard-stop changes</li>
             <li>
-              Signers are operator wallets listed in <Mono>co-sign/quorum-2-of-3</Mono>.
+              Required and total signer counts are emitted on each policy record.
             </li>
             <li>
-              Proposals without enough signatures stay in <Mono>pending-signers</Mono>. No instant apply.
+              The policy table and drawer show the live quorum and approval state when the policy feed is readable.
+            </li>
+            <li>
+              Proposals without enough signatures stay pending. No instant apply.
             </li>
           </ul>
         </Card>

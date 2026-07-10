@@ -20,10 +20,10 @@ export function DisputesLegend() {
         <Card head="Window" title="How long operators have">
           <p className="m-0 font-[family-name:var(--font-body)] text-[12.5px] leading-snug text-[var(--avy-muted)]">
             Each origin carries its own window from the active policy. The
-            default is <b className="font-semibold text-[var(--avy-ink)]">30
-            minutes</b> — at 90% elapsed the countdown pulses amber, at 100% the
-            dispute auto-escalates to <Mono>verifier-2</Mono>. Request-more
-            pauses the window; ignored evidence requests eventually expire too.
+            response exposes the SLA duration, deadline, expiry state, and
+            remaining seconds. An expired SLA does not invent a new reviewer:
+            a verdict still requires admin or verifier authority, and stake
+            release requires an admin after that verdict is recorded.
           </p>
         </Card>
         <Card head="Slash mechanics" title="Where stake goes on uphold">

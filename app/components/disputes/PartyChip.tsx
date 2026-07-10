@@ -22,6 +22,18 @@ export function PartyChip({
   party: DisputeParty;
   layout?: "row" | "stacked";
 }) {
+  if (party.identified === false) {
+    return (
+      <span
+        className="inline-flex items-center gap-1.5 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]"
+        style={{ letterSpacing: 0 }}
+      >
+        <Avatar party={party} size={layout === "stacked" ? "lg" : "sm"} />
+        identity not yet emitted
+      </span>
+    );
+  }
+
   if (layout === "row") {
     return (
       <span
@@ -33,7 +45,9 @@ export function PartyChip({
           <span className="font-[family-name:var(--font-body)] text-[12.5px] font-semibold text-[var(--avy-ink)]">
             {party.handle}
           </span>
-          <span className="text-[10.5px] text-[var(--avy-muted)]">{party.address}</span>
+          {party.address ? (
+            <span className="text-[10.5px] text-[var(--avy-muted)]">{party.address}</span>
+          ) : null}
         </span>
       </span>
     );
@@ -45,12 +59,14 @@ export function PartyChip({
         <span className="font-[family-name:var(--font-display)] text-[13px] font-bold text-[var(--avy-ink)]">
           {party.handle}
         </span>
-        <span
-          className="font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]"
-          style={{ letterSpacing: 0 }}
-        >
-          {party.address}
-        </span>
+        {party.address ? (
+          <span
+            className="font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]"
+            style={{ letterSpacing: 0 }}
+          >
+            {party.address}
+          </span>
+        ) : null}
       </span>
     </span>
   );

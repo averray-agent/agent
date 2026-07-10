@@ -21,6 +21,12 @@ import type { Policy, PolicyState } from "@/components/policies/types";
 import { usePolicies, usePolicy } from "@/lib/api/hooks";
 import { buildPolicyChangeEntries } from "@/lib/ui/governance-changelog";
 import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
+import { feedPresence } from "@/lib/api/feed-presence";
+import {
+  buildManifestEnvelope,
+  buildPolicyManifestPayload,
+  verifyManifestEnvelope,
+} from "@/lib/ui/evidence-verification";
 
 const STATUS_TO_STATE: Record<Exclude<PoliciesFilter["status"], "all">, PolicyState> = {
   active: "Active",
@@ -31,6 +37,7 @@ const STATUS_TO_STATE: Record<Exclude<PoliciesFilter["status"], "all">, PolicySt
 
 export default function PoliciesPage() {
   const policiesRequest = usePolicies();
+  const policiesPresence = feedPresence(policiesRequest);
   const [filter, setFilter] = useState<PoliciesFilter>({
     scope: "all",
     status: "all",
@@ -76,10 +83,50 @@ export default function PoliciesPage() {
 
   const policyChanges = useMemo(() => buildPolicyChangeEntries(policies), [policies]);
   const freshness = freshnessFromRequests(policiesRequest);
+  const exportPolicyBundle = () => {
+    if (policiesPresence !== "live" || filtered.length === 0) return;
+    const payload = buildPolicyManifestPayload(filtered);
+    const manifest = buildManifestEnvelope(payload);
+    const verification = verifyManifestEnvelope(manifest);
+    if (!verification.ok) return;
+
+    const exportedAt = new Date().toISOString();
+    const bundle = {
+      type: "averray.policies.bundle.v1",
+      exportedAt,
+      scope: {
+        source: "/policies",
+        filters: filter,
+      },
+      manifest,
+      verification: {
+        verified: true,
+        algorithm: "keccak256(canonical-json)",
+        manifestHash: verification.manifestHash,
+        entryCount: verification.entryCount,
+        verifier: "verifyManifestEnvelope",
+      },
+    };
+    const blob = new Blob([JSON.stringify(bundle, null, 2)], {
+      type: "application/json;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `averray-policies-${exportedAt.slice(0, 10)}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="flex w-full max-w-[1100px] flex-col gap-5">
-      <PoliciesTopbar freshness={freshness} />
+      <PoliciesTopbar
+        freshness={freshness}
+        onExportPolicyBundle={exportPolicyBundle}
+        exportDisabled={policiesPresence !== "live" || filtered.length === 0}
+      />
 
       <header className="flex flex-col gap-1.5">
         <span
@@ -96,12 +143,14 @@ export default function PoliciesPage() {
         </p>
       </header>
 
-      <PoliciesAggregateStrip policies={policies} />
+      <PoliciesAggregateStrip policies={policies} presence={policiesPresence} />
       <WhatChangedPanel
         eyebrow="What changed"
         title="Recent policy revisions"
         changes={policyChanges}
         emptyHint="No policy revision with a before/after rule is available yet."
+        presence={policiesPresence}
+        blockedHint="Policy feed locked for this session (no operator role)."
         activeId={
           pickedDiffRev
             ? policyChanges.find(
@@ -120,6 +169,7 @@ export default function PoliciesPage() {
       <PoliciesTable
         rows={filtered}
         totalCount={policies.length}
+        presence={policiesPresence}
         selectedId={pickedId}
         onSelect={(p) => {
           setPickedId(p.id);

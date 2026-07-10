@@ -74,7 +74,10 @@ export default function DisputesPage() {
 
   return (
     <div className="flex w-full max-w-[1100px] flex-col gap-5">
-      <DisputesTopbar freshness={freshness} />
+      <DisputesTopbar
+        freshness={freshness}
+        onOpenQueue={() => setFilter((current) => ({ ...current, state: "open" }))}
+      />
 
       <header className="flex flex-col gap-1.5">
         <span

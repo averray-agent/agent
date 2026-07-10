@@ -8,7 +8,13 @@ import {
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
-export function DisputesTopbar({ freshness }: { freshness?: FreshnessState }) {
+export function DisputesTopbar({
+  freshness,
+  onOpenQueue,
+}: {
+  freshness?: FreshnessState;
+  onOpenQueue: () => void;
+}) {
   const [time, setTime] = useState("");
 
   useEffect(() => {
@@ -48,17 +54,12 @@ export function DisputesTopbar({ freshness }: { freshness?: FreshnessState }) {
         {freshness ? <DataFreshnessPill state={freshness} /> : null}
         <button
           type="button"
+          onClick={onOpenQueue}
+          title="Show open disputes"
           className="inline-flex h-[34px] items-center gap-1.5 rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3.5 font-[family-name:var(--font-display)] text-[11.5px] font-bold uppercase text-[var(--avy-ink)] transition-transform hover:-translate-y-px hover:border-[color:rgba(30,102,66,0.24)]"
           style={{ letterSpacing: "0.04em" }}
         >
           Open queue
-        </button>
-        <button
-          type="button"
-          className="inline-flex h-[34px] items-center gap-1.5 rounded-[8px] border border-[color:rgba(167,97,34,0.35)] bg-[var(--avy-warn-soft)] px-3.5 font-[family-name:var(--font-display)] text-[11.5px] font-bold uppercase text-[var(--avy-warn)] transition-transform hover:-translate-y-px hover:border-[color:rgba(167,97,34,0.55)]"
-          style={{ letterSpacing: "0.04em" }}
-        >
-          Escalate to verifier-2
         </button>
       </div>
     </header>

@@ -8,7 +8,15 @@ import {
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
-export function PoliciesTopbar({ freshness }: { freshness?: FreshnessState }) {
+export function PoliciesTopbar({
+  freshness,
+  onExportPolicyBundle,
+  exportDisabled = false,
+}: {
+  freshness?: FreshnessState;
+  onExportPolicyBundle: () => void;
+  exportDisabled?: boolean;
+}) {
   const [time, setTime] = useState("");
 
   useEffect(() => {
@@ -46,17 +54,13 @@ export function PoliciesTopbar({ freshness }: { freshness?: FreshnessState }) {
         {freshness ? <DataFreshnessPill state={freshness} /> : null}
         <button
           type="button"
-          className="inline-flex h-[34px] items-center gap-1.5 rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3.5 font-[family-name:var(--font-display)] text-[11.5px] font-bold uppercase text-[var(--avy-ink)] transition-transform hover:-translate-y-px hover:border-[color:rgba(30,102,66,0.24)]"
+          onClick={onExportPolicyBundle}
+          disabled={exportDisabled}
+          title={exportDisabled ? "A non-empty live policy view is required before exporting." : "Download a self-verifying JSON bundle of the current policy view."}
+          className="inline-flex h-[34px] items-center gap-1.5 rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3.5 font-[family-name:var(--font-display)] text-[11.5px] font-bold uppercase text-[var(--avy-ink)] transition-transform enabled:hover:-translate-y-px enabled:hover:border-[color:rgba(30,102,66,0.24)] disabled:cursor-not-allowed disabled:opacity-50"
           style={{ letterSpacing: "0.04em" }}
         >
           ⤓ Export policy bundle
-        </button>
-        <button
-          type="button"
-          className="inline-flex h-[34px] items-center gap-1.5 rounded-[8px] bg-[var(--avy-accent)] px-3.5 font-[family-name:var(--font-display)] text-[11.5px] font-bold uppercase text-[var(--fg-invert)] transition-transform hover:-translate-y-px hover:bg-[var(--avy-accent-2)]"
-          style={{ letterSpacing: "0.04em" }}
-        >
-          ＋ Propose new policy
         </button>
       </div>
     </header>

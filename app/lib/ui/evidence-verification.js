@@ -10,6 +10,7 @@ export const RECEIPT_SIGNATURE_ENVELOPE_TYPE = "averray.receipt.signature.v1";
 export const RECEIPT_MANIFEST_TYPE = "averray.receipts.manifest.v1";
 export const AUDIT_MANIFEST_TYPE = "averray.audit.manifest.v1";
 export const SESSION_MANIFEST_TYPE = "averray.sessions.manifest.v1";
+export const POLICY_MANIFEST_TYPE = "averray.policies.manifest.v1";
 export const MANIFEST_ENVELOPE_TYPE = "averray.manifest.v1";
 
 export function canonicalJson(value) {
@@ -217,6 +218,40 @@ export function buildSessionManifestPayload(rows) {
             updatedAt: text(row.timestamps.updatedAt, ""),
           }
         : undefined,
+    })),
+  };
+}
+
+export function buildPolicyManifestPayload(rows) {
+  return {
+    type: POLICY_MANIFEST_TYPE,
+    entries: (Array.isArray(rows) ? rows : []).map((row, index) => ({
+      index,
+      id: text(row?.id, ""),
+      tag: text(row?.tag, ""),
+      scope: text(row?.scope, ""),
+      severity: text(row?.severity, ""),
+      state: text(row?.state, ""),
+      revision: Number.isFinite(row?.revision) ? row.revision : null,
+      handler: text(row?.handler, ""),
+      gates: text(row?.gates, ""),
+      signers: {
+        required: Number.isFinite(row?.signersReq) ? row.signersReq : null,
+        total: Number.isFinite(row?.signersTotal) ? row.signersTotal : null,
+        approvals: (Array.isArray(row?.approvals) ? row.approvals : []).map((approval) => ({
+          role: text(approval?.role, ""),
+          address: text(approval?.addr, ""),
+          state: text(approval?.state, ""),
+          at: text(approval?.at, ""),
+        })),
+      },
+      activeSince: text(row?.activeSince, ""),
+      lastChange: {
+        text: text(row?.lastChange?.text, ""),
+        author: text(row?.lastChange?.author, ""),
+        at: text(row?.lastChange?.at, ""),
+      },
+      rule: row?.rule && typeof row.rule === "object" ? row.rule : {},
     })),
   };
 }

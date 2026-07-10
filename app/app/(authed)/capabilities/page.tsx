@@ -5,7 +5,7 @@ import { mutate } from "swr";
 import { WhatChangedPanel } from "@/components/governance/WhatChangedPanel";
 import { DiffView } from "@/components/policies/DiffView";
 import { useAuthSession, useCapabilityGrants } from "@/lib/api/hooks";
-import { ApiError } from "@/lib/api/client";
+import { feedPresence } from "@/lib/api/feed-presence";
 import {
   buildAuthSession,
   canUseControl,
@@ -38,6 +38,7 @@ const GRANTS_PATH = "/admin/capability-grants?limit=200";
 export default function CapabilitiesPage() {
   const sessionRequest = useAuthSession();
   const grantsRequest = useCapabilityGrants();
+  const grantsPresence = feedPresence(grantsRequest);
   const session = useMemo(() => buildAuthSession(sessionRequest.data), [sessionRequest.data]);
 
   const grants = extractGrants(grantsRequest.data);
@@ -48,9 +49,7 @@ export default function CapabilitiesPage() {
   const grantGate = canUseControl(session, "admin.capabilities.grant");
   const revokeGate = canUseControl(session, "admin.capabilities.revoke");
 
-  const unauthorized =
-    grantsRequest.error instanceof ApiError &&
-    (grantsRequest.error.status === 401 || grantsRequest.error.status === 403);
+  const unauthorized = grantsPresence === "locked";
 
   const [active, revoked] = useMemo(() => {
     const a: CapabilityGrant[] = [];
@@ -108,6 +107,8 @@ export default function CapabilitiesPage() {
         title="Recent capability grant changes"
         changes={capabilityChanges}
         emptyHint="No grant or revoke event has been recorded yet."
+        presence={grantsPresence}
+        blockedHint="Grant feed locked for this session."
         activeId={pickedChange?.id ?? null}
         onSelect={(change) => setPickedChangeId(change.id)}
       />
@@ -120,6 +121,7 @@ export default function CapabilitiesPage() {
         title="Active grants"
         emptyHint="No active grants. Use the form above to issue one."
         grants={active}
+        presence={grantsPresence}
         revokeGate={revokeGate}
         onRevoke={() => mutate(GRANTS_PATH)}
         showRevoke
@@ -129,6 +131,7 @@ export default function CapabilitiesPage() {
         title="Revoked grants"
         emptyHint="No revoked grants on file."
         grants={revoked}
+        presence={grantsPresence}
         revokeGate={revokeGate}
         onRevoke={() => mutate(GRANTS_PATH)}
         showRevoke={false}
@@ -373,6 +376,7 @@ function GrantList({
   title,
   emptyHint,
   grants,
+  presence,
   revokeGate,
   onRevoke,
   showRevoke,
@@ -380,6 +384,7 @@ function GrantList({
   title: string;
   emptyHint: string;
   grants: CapabilityGrant[];
+  presence: "live" | "loading" | "locked" | "down";
   revokeGate: ReturnType<typeof canUseControl>;
   onRevoke: () => void;
   showRevoke: boolean;
@@ -397,11 +402,22 @@ function GrantList({
           className="font-[family-name:var(--font-mono)] text-[11px] text-[var(--muted)]"
           style={{ letterSpacing: 0 }}
         >
-          {grants.length}
+          {presence === "live" ? grants.length : "—"}
         </span>
       </header>
 
-      {grants.length === 0 ? (
+      {presence !== "live" ? (
+        <p
+          className="m-0 font-[family-name:var(--font-body)] text-[13px] text-[var(--muted)]"
+          style={{ letterSpacing: 0 }}
+        >
+          {presence === "locked"
+            ? "Grant feed locked for this session."
+            : presence === "down"
+              ? "Grant feed unavailable."
+              : "Grant feed loading."}
+        </p>
+      ) : grants.length === 0 ? (
         <p
           className="m-0 font-[family-name:var(--font-body)] text-[13px] text-[var(--muted)]"
           style={{ letterSpacing: 0 }}
