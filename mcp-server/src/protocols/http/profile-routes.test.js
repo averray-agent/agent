@@ -207,3 +207,34 @@ test("GET /agents/:wallet builds a public profile with request logger context", 
     call[1].logger === REQUEST_LOGGER
   )));
 });
+
+test("GET /agents and GET /agents/:wallet return the same operator tier", async () => {
+  const reputation = {
+    skill: 100,
+    reliability: 100_000,
+    economic: 100,
+    tier: "pro",
+  };
+  const { response: listResponse, route } = makeHarness({ reputation });
+
+  await route({
+    request: { method: "GET" },
+    response: listResponse,
+    url: new URL("http://localhost/agents"),
+    pathname: "/agents",
+  });
+
+  const detailResponse = {};
+  await route({
+    request: { method: "GET" },
+    response: detailResponse,
+    url: new URL(`http://localhost/agents/${WALLET}`),
+    pathname: `/agents/${WALLET}`,
+    requestLogger: REQUEST_LOGGER,
+  });
+
+  assert.equal(listResponse.body[0].reputationScore, 100_200);
+  assert.equal(listResponse.body[0].tier, "journeyman");
+  assert.equal(detailResponse.body.tier, listResponse.body[0].tier);
+  assert.equal(detailResponse.body.reputation.tier, "pro");
+});
