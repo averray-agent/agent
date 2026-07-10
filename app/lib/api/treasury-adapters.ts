@@ -274,19 +274,24 @@ export function buildLoans(accountPayload: unknown): ActiveLoan[] {
 export function buildCreditLine(accountPayload: unknown, borrowPayload: unknown) {
   const account = asRecord(accountPayload);
   const borrow = asRecord(borrowPayload);
-  const asset = text(borrow.asset, "DOT");
-  const debt = numberValue(asRecord(account.debtOutstanding)[asset]);
-  const borrowCapacity = numberValue(asRecord(borrowPayload).borrowCapacity);
+  const asset = text(borrow.asset);
+  const capacityValue = borrow.borrowCapacity;
+  const capacityAvailable =
+    (typeof capacityValue === "number" ||
+      (typeof capacityValue === "string" && Boolean(capacityValue.trim()))) &&
+    Number.isFinite(Number(capacityValue));
+  const debt = asset ? numberValue(asRecord(account.debtOutstanding)[asset]) : 0;
+  const borrowCapacity = capacityAvailable ? numberValue(capacityValue) : 0;
   const total = debt + borrowCapacity;
   const usedPct = pct(debt, total);
+  const unit = asset ? ` ${asset}` : "";
   return {
+    capacityAvailable,
     capacityUsed: fmt(debt),
-    capacityTotal: `${fmt(total)} ${asset}`,
+    capacityTotal: `${fmt(total)}${unit}`,
     usedPct,
-    headerPct: Math.max(0, 100 - usedPct),
-    headroom: `${fmt(borrowCapacity)} ${asset}`,
-    nextMark: "live",
-    policyCap: "85%",
+    headerPct: total > 0 ? Math.max(0, 100 - usedPct) : 0,
+    headroom: `${fmt(borrowCapacity)}${unit}`,
     loans: buildLoans(accountPayload),
   };
 }

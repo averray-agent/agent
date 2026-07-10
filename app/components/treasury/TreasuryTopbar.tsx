@@ -48,20 +48,6 @@ export function TreasuryTopbar({ freshness }: { freshness?: FreshnessState }) {
 
       <div className="flex items-center gap-2">
         {freshness ? <DataFreshnessPill state={freshness} /> : null}
-        <button
-          type="button"
-          className="inline-flex h-[34px] items-center gap-2 rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3.5 font-[family-name:var(--font-display)] text-xs font-bold uppercase text-[var(--avy-ink)] transition-transform hover:-translate-y-px hover:border-[color:rgba(30,102,66,0.32)]"
-          style={{ letterSpacing: "0.04em" }}
-        >
-          Move capital
-        </button>
-        <button
-          type="button"
-          className="inline-flex h-[34px] items-center gap-2 rounded-[8px] bg-[var(--avy-accent)] px-3.5 font-[family-name:var(--font-display)] text-xs font-bold uppercase text-[var(--fg-invert)] transition-transform hover:-translate-y-px hover:bg-[var(--avy-accent-2)]"
-          style={{ letterSpacing: "0.04em" }}
-        >
-          Propose policy change
-        </button>
       </div>
     </header>
   );

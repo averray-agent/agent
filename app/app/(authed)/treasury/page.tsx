@@ -14,6 +14,7 @@ import {
   useStrategyPositions,
 } from "@/lib/api/hooks";
 import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
+import { feedPresence } from "@/lib/api/feed-presence";
 import {
   buildBalanceCards,
   buildCreditLine,
@@ -24,7 +25,8 @@ import {
 export default function TreasuryPage() {
   const account = useAccount();
   const strategyPositions = useStrategyPositions();
-  const borrowCapacity = useBorrowCapacity("DOT");
+  const borrowCapacity = useBorrowCapacity("USDC");
+  const creditPresence = feedPresence(borrowCapacity);
 
   const liveBalanceCards = useMemo(
     () => buildBalanceCards(account.data, strategyPositions.data),
@@ -49,7 +51,7 @@ export default function TreasuryPage() {
   const positions = livePositions;
   const loans = liveCredit.loans;
 
-  const freshness = freshnessFromRequests(account, strategyPositions);
+  const freshness = freshnessFromRequests(account, strategyPositions, borrowCapacity);
 
   return (
     <div className="flex w-full max-w-[1100px] flex-col gap-5">
@@ -65,13 +67,13 @@ export default function TreasuryPage() {
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <CreditLinePanel
+          presence={creditPresence}
+          capacityAvailable={liveCredit.capacityAvailable}
           capacityUsed={liveCredit.capacityUsed}
           capacityTotal={liveCredit.capacityTotal}
           usedPct={liveCredit.usedPct}
           headerPct={liveCredit.headerPct}
           headroom={liveCredit.headroom}
-          nextMark={liveCredit.nextMark}
-          policyCap={liveCredit.policyCap}
           loans={loans}
         />
         <XcmObserverLane phases={[]} sub="XCM observer not emitted by API yet" />
