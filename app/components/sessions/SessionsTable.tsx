@@ -7,9 +7,12 @@ import { OutcomeRationaleInline } from "@/components/common/OutcomeRationaleInli
 import { SourceBadge } from "@/components/runs/StatePill";
 import type { SessionDetail } from "./types";
 
+type SessionFeedPresence = "live" | "loading" | "locked" | "down";
+
 export interface SessionsTableProps {
   rows: SessionDetail[];
   totalCount: number;
+  presence: SessionFeedPresence;
   selectedId: string | null;
   onSelect: (s: SessionDetail) => void;
 }
@@ -17,6 +20,7 @@ export interface SessionsTableProps {
 export function SessionsTable({
   rows,
   totalCount,
+  presence,
   selectedId,
   onSelect,
 }: SessionsTableProps) {
@@ -30,7 +34,13 @@ export function SessionsTable({
           className="font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]"
           style={{ letterSpacing: 0 }}
         >
-          {rows.length} of {totalCount.toLocaleString()} · newest first
+          {presence === "live"
+            ? `${rows.length} of ${totalCount.toLocaleString()} · newest first`
+            : presence === "locked"
+              ? "session feed locked for this session"
+              : presence === "down"
+                ? "session feed unavailable"
+                : "session feed loading"}
         </span>
       </header>
 
@@ -56,9 +66,15 @@ export function SessionsTable({
                   className="p-8 text-center font-[family-name:var(--font-mono)] text-[13px] text-[var(--avy-muted)]"
                   style={{ letterSpacing: 0 }}
                 >
-                  {totalCount === 0
-                    ? "No worker sessions have been observed yet."
-                    : "No sessions match these filters."}
+                  {presence === "locked"
+                    ? "Session ledger locked for this session — this wallet lacks the operator role to read /admin/sessions."
+                    : presence === "down"
+                      ? "Session ledger unavailable — /admin/sessions could not be read."
+                      : presence === "loading"
+                        ? "Loading the operator-wide session ledger."
+                        : totalCount === 0
+                          ? "No worker sessions have been observed yet."
+                          : "No sessions match these filters."}
                 </td>
               </tr>
             ) : (
@@ -169,22 +185,15 @@ export function SessionsTable({
         </table>
       </div>
 
-      <footer
-        className="flex items-center justify-between gap-3 border-t border-[var(--avy-line-soft)] bg-[rgba(250,248,241,0.5)] px-4 py-3 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]"
-        style={{ letterSpacing: 0 }}
-      >
-        <span>
+      {presence === "live" && totalCount > 0 ? (
+        <footer
+          className="border-t border-[var(--avy-line-soft)] bg-[rgba(250,248,241,0.5)] px-4 py-3 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]"
+          style={{ letterSpacing: 0 }}
+        >
           Showing <b className="font-semibold text-[var(--avy-ink)]">{rows.length}</b> of{" "}
           <b className="font-semibold text-[var(--avy-ink)]">{totalCount.toLocaleString()}</b>
-        </span>
-        <button
-          type="button"
-          disabled
-          className="cursor-not-allowed border-b border-dashed border-[color:rgba(30,102,66,0.25)] pb-px text-[var(--avy-muted)] opacity-70"
-        >
-          load more
-        </button>
-      </footer>
+        </footer>
+      ) : null}
     </div>
   );
 }

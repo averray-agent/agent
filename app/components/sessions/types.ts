@@ -10,21 +10,19 @@ import type { SourceKind } from "@/components/runs/StatePill";
 import type { OutcomeRationale } from "@/lib/ui/outcome-rationale-types";
 
 export type SessionState =
-  | "active"
+  | "claimed"
   | "submitted"
-  | "approved"
-  | "rejected"
   | "disputed"
-  | "slashed"
-  | "settled";
+  | "resolved"
+  | "rejected"
+  | "closed"
+  | "expired"
+  | "timed_out"
+  | "unknown";
 
-export type SessionAsset = "DOT" | "USDC" | "vDOT";
+export type SessionAsset = string;
 
-export type VerifierMode =
-  | "deterministic"
-  | "semantic"
-  | "paired-hash"
-  | "human-llm";
+export type VerifierMode = string;
 
 export type LifecycleStageState = "done" | "current" | "pending";
 

@@ -1,8 +1,11 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { cn } from "@/lib/utils/cn";
-import type { SessionAsset, SessionState, VerifierMode } from "./types";
+import { buildSessionFilterOptions } from "@/lib/ui/session-ledger";
+import type { SessionAsset, SessionDetail, SessionState, VerifierMode } from "./types";
+
+type SessionFeedPresence = "live" | "loading" | "locked" | "down";
 
 export interface SessionsFilter {
   state: SessionState | "all";
@@ -12,25 +15,7 @@ export interface SessionsFilter {
   q: string;
 }
 
-const STATES: (SessionState | "all")[] = [
-  "all",
-  "active",
-  "submitted",
-  "approved",
-  "rejected",
-  "disputed",
-  "slashed",
-  "settled",
-];
-const ASSETS: (SessionAsset | "all")[] = ["all", "DOT", "USDC", "vDOT"];
 const VALUES: SessionsFilter["value"][] = ["all", "lt-10", "10-100", "100-1k", "1k-plus"];
-const VERIFIERS: (VerifierMode | "all")[] = [
-  "all",
-  "deterministic",
-  "semantic",
-  "paired-hash",
-  "human-llm",
-];
 
 const VALUE_LABEL: Record<SessionsFilter["value"], string> = {
   all: "all",
@@ -43,11 +28,16 @@ const VALUE_LABEL: Record<SessionsFilter["value"], string> = {
 export function SessionsFilterRail({
   filter,
   onChange,
+  rows,
+  presence,
 }: {
   filter: SessionsFilter;
   onChange: (next: SessionsFilter) => void;
+  rows: SessionDetail[];
+  presence: SessionFeedPresence;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const options = useMemo(() => buildSessionFilterOptions(rows), [rows]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -66,17 +56,33 @@ export function SessionsFilterRail({
   const set = <K extends keyof SessionsFilter>(k: K, v: SessionsFilter[K]) =>
     onChange({ ...filter, [k]: v });
 
+  if (presence !== "live" || rows.length === 0) {
+    const message =
+      presence === "locked"
+        ? "Session filters unavailable · feed locked for this session."
+        : presence === "down"
+          ? "Session filters unavailable · feed unavailable."
+          : presence === "loading"
+            ? "Session filters loading."
+            : "No session filter values emitted yet.";
+    return (
+      <div className="rounded-[10px] border border-[var(--avy-line)] bg-[var(--avy-paper)] p-3 font-[family-name:var(--font-mono)] text-[12px] text-[var(--avy-muted)] shadow-[var(--shadow-card)] backdrop-blur-[8px]">
+        {message}
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-2.5 rounded-[10px] border border-[var(--avy-line)] bg-[var(--avy-paper)] p-3 shadow-[var(--shadow-card)] backdrop-blur-[8px]">
       <Row label="State">
-        {STATES.map((s) => (
+        {["all", ...options.states].map((s) => (
           <Chip key={s} on={filter.state === s} onClick={() => set("state", s)}>
-            {s}
+            {humanize(s)}
           </Chip>
         ))}
       </Row>
       <Row label="Asset">
-        {ASSETS.map((a) => (
+        {["all", ...options.assets].map((a) => (
           <Chip key={a} on={filter.asset === a} onClick={() => set("asset", a)}>
             {a}
           </Chip>
@@ -90,9 +96,9 @@ export function SessionsFilterRail({
         ))}
       </Row>
       <Row label="Verifier">
-        {VERIFIERS.map((v) => (
+        {["all", ...options.verifiers].map((v) => (
           <Chip key={v} on={filter.verifier === v} onClick={() => set("verifier", v)}>
-            {v}
+            {humanize(v)}
           </Chip>
         ))}
       </Row>
@@ -120,6 +126,10 @@ export function SessionsFilterRail({
       </div>
     </div>
   );
+}
+
+function humanize(value: string): string {
+  return value.replace(/[_-]+/gu, " ");
 }
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {

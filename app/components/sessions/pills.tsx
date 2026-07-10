@@ -2,13 +2,15 @@ import { cn } from "@/lib/utils/cn";
 import type { SessionState, VerifierMode } from "./types";
 
 const STATE: Record<SessionState, { cls: string; label: string; dot: boolean }> = {
-  active: { cls: "bg-[#e6ecf7] text-[var(--avy-blue)]", label: "Active", dot: true },
+  claimed: { cls: "bg-[#e6ecf7] text-[var(--avy-blue)]", label: "Claimed", dot: true },
   submitted: { cls: "bg-[#fff0d8] text-[var(--avy-warn)]", label: "Submitted", dot: true },
-  approved: { cls: "bg-[var(--avy-accent-soft)] text-[var(--avy-accent)]", label: "Approved", dot: true },
-  rejected: { cls: "bg-[#f4ddd5] text-[#a03a1a]", label: "Rejected", dot: true },
   disputed: { cls: "bg-[#f3d2c9] text-[#8c2a17]", label: "Disputed", dot: true },
-  slashed: { cls: "bg-[#1e0f0d] text-[#f3d2c9]", label: "Slashed", dot: true },
-  settled: { cls: "bg-[color:rgba(17,19,21,0.06)] text-[var(--avy-ink)]", label: "Settled", dot: false },
+  resolved: { cls: "bg-[var(--avy-accent-soft)] text-[var(--avy-accent)]", label: "Resolved", dot: false },
+  rejected: { cls: "bg-[#f4ddd5] text-[#a03a1a]", label: "Rejected", dot: false },
+  closed: { cls: "bg-[color:rgba(17,19,21,0.06)] text-[var(--avy-ink)]", label: "Closed", dot: false },
+  expired: { cls: "bg-[#f4ddd5] text-[#a03a1a]", label: "Expired", dot: false },
+  timed_out: { cls: "bg-[#f4ddd5] text-[#a03a1a]", label: "Timed out", dot: false },
+  unknown: { cls: "bg-[color:rgba(17,19,21,0.06)] text-[var(--avy-muted)]", label: "Unknown", dot: false },
 };
 
 export function SessionStatePill({
@@ -34,13 +36,6 @@ export function SessionStatePill({
   );
 }
 
-const VERIFIER_LABEL: Record<VerifierMode, string> = {
-  deterministic: "Deterministic",
-  semantic: "Semantic",
-  "paired-hash": "Paired-hash",
-  "human-llm": "Human+LLM",
-};
-
 export function VerifierModeChip({
   mode,
   className,
@@ -56,7 +51,15 @@ export function VerifierModeChip({
       )}
       style={{ letterSpacing: 0 }}
     >
-      {VERIFIER_LABEL[mode]}
+      {humanizeToken(mode)}
     </span>
   );
+}
+
+function humanizeToken(value: string): string {
+  const normalized = value.trim();
+  if (!normalized) return "Not emitted";
+  return normalized
+    .replace(/[_-]+/gu, " ")
+    .replace(/\b\w/gu, (letter) => letter.toUpperCase());
 }

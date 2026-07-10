@@ -5,6 +5,7 @@ import { privateKeyToAccount } from "viem/accounts";
 
 import {
   buildAuditManifestPayload,
+  buildSessionManifestPayload,
   buildEvidenceSignatureMessage,
   buildManifestEnvelope,
   canonicalJson,
@@ -106,6 +107,39 @@ test("verifyManifestEnvelope verifies an audit manifest fixture and detects tamp
     payload: {
       ...payload,
       entries: [{ ...payload.entries[0], action: "receipt.signature.tampered" }],
+    },
+  });
+  assert.equal(tampered.ok, false);
+  assert.match(tampered.error, /Manifest hash mismatch/u);
+});
+
+test("session audit bundles use a verifiable manifest over the current view", () => {
+  const payload = buildSessionManifestPayload([
+    {
+      id: "session-1",
+      runRef: "job-1",
+      state: "claimed",
+      job: { title: "Review", meta: "job-1" },
+      worker: { handle: "agent-1", address: "0x1234" },
+      escrow: { amount: "0", asset: "USDC" },
+      verifierMode: "benchmark",
+      openedAt: "Jul 10, 06:00 AM",
+      policy: "schema-v1",
+      lastEvent: { text: "Session claimed", meta: "Jul 10" },
+    },
+  ]);
+  const envelope = buildManifestEnvelope(payload);
+  const verified = verifyManifestEnvelope(envelope);
+
+  assert.equal(verified.ok, true);
+  assert.equal(verified.entryCount, 1);
+  assert.equal(verified.manifestType, "averray.sessions.manifest.v1");
+
+  const tampered = verifyManifestEnvelope({
+    ...envelope,
+    payload: {
+      ...payload,
+      entries: [{ ...payload.entries[0], state: "resolved" }],
     },
   });
   assert.equal(tampered.ok, false);

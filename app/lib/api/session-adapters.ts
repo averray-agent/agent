@@ -57,53 +57,47 @@ function initials(value: unknown): string {
 
 function tierLabel(value: unknown): string {
   switch (text(value).toLowerCase()) {
+    case "starter":
+      return "T1";
     case "pro":
       return "T2";
     case "elite":
       return "T3";
     default:
-      return "T1";
+      return "tier n/a";
   }
 }
 
 function asset(value: unknown): SessionAsset {
-  const raw = text(value, "DOT");
-  return raw === "USDC" || raw === "vDOT" ? raw : "DOT";
+  const raw = text(value);
+  return raw ? raw.toUpperCase() : "asset n/a";
 }
 
 function verifierMode(value: unknown): VerifierMode {
-  switch (text(value).toLowerCase()) {
-    case "deterministic":
-      return "deterministic";
-    case "human_fallback":
-      return "human-llm";
-    case "paired-hash":
-      return "paired-hash";
-    default:
-      return "semantic";
-  }
+  return text(value).toLowerCase() || "not emitted";
 }
 
 function state(value: unknown): SessionState {
-  switch (text(value).toLowerCase()) {
+  const raw = text(value).toLowerCase();
+  switch (raw) {
+    case "claimed":
+      return "claimed";
     case "submitted":
       return "submitted";
     case "resolved":
-    case "approved":
-      return "approved";
+      return "resolved";
     case "rejected":
-    case "expired":
-    case "timed_out":
       return "rejected";
     case "disputed":
       return "disputed";
-    case "slashed":
-      return "slashed";
     case "closed":
-    case "settled":
-      return "settled";
+      return "closed";
+    case "expired":
+      return "expired";
+    case "timed_out":
+      return "timed_out";
     default:
-      return "active";
+      return "unknown";
   }
 }
 
@@ -160,46 +154,6 @@ function jobFor(jobs: RawRecord[], jobId: string): RawRecord {
   return jobs.find((job) => text(job.id) === jobId) ?? {};
 }
 
-function sessionKey(session: RawRecord): string {
-  return text(session.sessionId, text(session.id, `${text(session.jobId)}:${text(session.wallet)}`));
-}
-
-function isActiveClaim(job: RawRecord): boolean {
-  const effectiveState = text(job.effectiveState, text(job.claimState, text(job.state))).toLowerCase();
-  if (effectiveState !== "claimed") return false;
-  if (!text(job.claimedBy)) return false;
-  const expiresAt = text(job.claimExpiresAt);
-  return !expiresAt || Number.isNaN(Date.parse(expiresAt)) || Date.parse(expiresAt) > Date.now();
-}
-
-function claimedJobSession(job: RawRecord): RawRecord {
-  const wallet = text(job.claimedBy);
-  const jobId = text(job.id);
-  const reward = asRecord(job.reward);
-  return {
-    sessionId: text(job.sessionId, `${jobId}:${wallet}`),
-    jobId,
-    wallet,
-    status: "claimed",
-    claimedAt: text(job.claimedAt),
-    updatedAt: text(job.claimedAt),
-    claimStake: job.claimStake ?? reward.amount,
-    totalClaimLock: job.totalClaimLock ?? reward.amount,
-  };
-}
-
-function liveSessionRows(sessionPayload: unknown, jobs: RawRecord[]): RawRecord[] {
-  const sessions = asArray(sessionPayload);
-  const seen = new Set(sessions.map(sessionKey).filter(Boolean));
-  const claimed = jobs.filter(isActiveClaim).map(claimedJobSession).filter((session) => {
-    const key = sessionKey(session);
-    if (!key || seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-  return [...sessions, ...claimed];
-}
-
 /**
  * Map a job's source.type onto the operator-app SourceKind enum so the
  * sessions table can render the same SourceBadge already shown on the
@@ -228,17 +182,24 @@ function sourceKindFromJob(job: RawRecord): SourceKind | undefined {
 }
 
 function lifecycle(session: RawRecord) {
-  const status = text(session.status, "claimed");
+  const status = text(session.status).toLowerCase();
   const entries = asArray(session.statusHistory);
-  const order = ["claimed", "submitted", "resolved", "closed"];
-  const currentIndex = Math.max(0, order.indexOf(status));
+  if (!status) return [];
+  const order = ["claimed", "submitted"];
+  if (status !== "claimed" && status !== "submitted") order.push(status);
+  else order.push("resolved");
+  const currentIndex = order.indexOf(status);
 
   return order.map((step, index) => {
     const history = entries.find((entry) => text(entry.to) === step);
     const stageState: LifecycleStageState =
       history || index < currentIndex ? "done" : index === currentIndex ? "current" : "pending";
     return {
-      label: step === "resolved" ? "Verified" : `${step.slice(0, 1).toUpperCase()}${step.slice(1)}`,
+      label: step === "resolved"
+        ? "Verified"
+        : step
+            .replace(/_/gu, " ")
+            .replace(/\b\w/gu, (letter) => letter.toUpperCase()),
       meta: timeLabel(history?.at),
       state: stageState,
       tone: status === "disputed" && index === currentIndex ? "warn" as const : undefined,
@@ -248,19 +209,21 @@ function lifecycle(session: RawRecord) {
 
 export function buildSessionDetails(sessionPayload: unknown, jobsPayload: unknown): SessionDetail[] {
   const jobs = asArray(jobsPayload);
-  return liveSessionRows(sessionPayload, jobs).map((session) => {
+  return asArray(sessionPayload).map((session) => {
     const id = text(session.sessionId, text(session.id, "unknown-session"));
     const jobId = text(session.jobId, "unknown-job");
     const job = jobFor(jobs, jobId);
     const reward = asRecord(job.reward);
-    const rewardAsset = asset(job.rewardAsset ?? reward.asset);
+    const rewardAsset = asset(
+      session.rewardAsset ?? session.asset ?? job.rewardAsset ?? reward.asset
+    );
     const rewardAmount = amount(job.rewardAmount ?? reward.amount ?? session.claimStake);
     const currentState = state(session.status);
     const updatedAt = session.updatedAt ?? session.resolvedAt ?? session.submittedAt ?? session.claimedAt;
     const verification = asRecord(session.verification);
     const policy = text(job.outputSchemaRef, "schema pending");
     const verifierHref = `/session/timeline?sessionId=${encodeURIComponent(id)}`;
-    const disputeHref = currentState === "disputed" || currentState === "slashed"
+    const disputeHref = currentState === "disputed"
       ? `/disputes?sessionId=${encodeURIComponent(id)}`
       : undefined;
     const outcomeRationale = buildSessionOutcomeRationale({
@@ -309,18 +272,23 @@ export function buildSessionDetails(sessionPayload: unknown, jobsPayload: unknow
       },
       state: currentState,
       escrow: { amount: rewardAmount, asset: rewardAsset },
-      verifierMode: verifierMode(job.verifierMode),
+      verifierMode: verifierMode(
+        session.verifierMode ??
+          job.verifierMode ??
+          asRecord(verification.verificationContract).verifierMode ??
+          verification.handler
+      ),
       age: ageLabel(updatedAt),
       lastEvent: {
         text: verification.outcome
           ? `Verifier ${text(verification.outcome)}`
-          : `Session ${text(session.status, "claimed")}`,
+          : `Session ${text(session.status, "status not emitted")}`,
         meta: timeLabel(updatedAt),
-        tone: currentState === "approved" || currentState === "settled"
+        tone: currentState === "resolved"
           ? "accent"
           : currentState === "disputed"
             ? "warn"
-            : currentState === "rejected" || currentState === "slashed"
+            : currentState === "rejected" || currentState === "expired" || currentState === "timed_out"
               ? "bad"
               : "neutral",
       },
@@ -328,7 +296,7 @@ export function buildSessionDetails(sessionPayload: unknown, jobsPayload: unknow
       openedAt: timeLabel(session.claimedAt),
       ...(timestamps ? { timestamps } : {}),
       policy,
-      receipt: currentState === "approved" || currentState === "settled" ? text(session.sessionId) : undefined,
+      receipt: currentState === "resolved" ? text(session.sessionId) : undefined,
       lifecycle: lifecycle(session),
       movements: [
         {
@@ -341,7 +309,7 @@ export function buildSessionDetails(sessionPayload: unknown, jobsPayload: unknow
           tone: "accent",
         },
       ],
-      payouts: currentState === "settled"
+      payouts: currentState === "resolved"
         ? [
             {
               party: shortAddress(session.wallet),
