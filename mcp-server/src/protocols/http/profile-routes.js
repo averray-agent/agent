@@ -220,7 +220,10 @@ export function createProfileRoutes({
         getDisputeReceipts,
         getLineage,
       });
-      respond(response, 200, profile, { "cache-control": "public, max-age=30" });
+      respond(response, 200, {
+        ...profile,
+        tier: profileTierToOperatorTier(profile.reputation),
+      }, { "cache-control": "public, max-age=30" });
       return true;
     }
 
