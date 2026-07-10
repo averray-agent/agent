@@ -9,6 +9,7 @@ import {
 export const RECEIPT_SIGNATURE_ENVELOPE_TYPE = "averray.receipt.signature.v1";
 export const RECEIPT_MANIFEST_TYPE = "averray.receipts.manifest.v1";
 export const AUDIT_MANIFEST_TYPE = "averray.audit.manifest.v1";
+export const SESSION_MANIFEST_TYPE = "averray.sessions.manifest.v1";
 export const MANIFEST_ENVELOPE_TYPE = "averray.manifest.v1";
 
 export function canonicalJson(value) {
@@ -173,6 +174,47 @@ export function buildAuditManifestPayload(events) {
         ? {
             label: text(event.link.label, ""),
             href: text(event.link.href, ""),
+          }
+        : undefined,
+    })),
+  };
+}
+
+export function buildSessionManifestPayload(rows) {
+  return {
+    type: SESSION_MANIFEST_TYPE,
+    entries: (Array.isArray(rows) ? rows : []).map((row, index) => ({
+      index,
+      id: text(row?.id, ""),
+      runRef: text(row?.runRef, ""),
+      source: text(row?.source, ""),
+      state: text(row?.state, ""),
+      job: {
+        title: text(row?.job?.title, ""),
+        meta: text(row?.job?.meta, ""),
+      },
+      worker: {
+        handle: text(row?.worker?.handle, ""),
+        address: text(row?.worker?.address, ""),
+      },
+      escrow: {
+        amount: text(row?.escrow?.amount, ""),
+        asset: text(row?.escrow?.asset, ""),
+      },
+      verifierMode: text(row?.verifierMode, ""),
+      openedAt: text(row?.openedAt, ""),
+      policy: text(row?.policy, ""),
+      receipt: text(row?.receipt, ""),
+      lastEvent: {
+        text: text(row?.lastEvent?.text, ""),
+        meta: text(row?.lastEvent?.meta, ""),
+      },
+      timestamps: row?.timestamps
+        ? {
+            claimedAt: text(row.timestamps.claimedAt, ""),
+            submittedAt: text(row.timestamps.submittedAt, ""),
+            settledAt: text(row.timestamps.settledAt, ""),
+            updatedAt: text(row.timestamps.updatedAt, ""),
           }
         : undefined,
     })),

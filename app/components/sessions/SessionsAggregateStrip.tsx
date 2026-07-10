@@ -1,6 +1,8 @@
 import { cn } from "@/lib/utils/cn";
 import type { SessionDetail } from "./types";
 
+type SessionFeedPresence = "live" | "loading" | "locked" | "down";
+
 /**
  * Top-of-page aggregate cards for the Sessions surface.
  *
@@ -12,17 +14,48 @@ import type { SessionDetail } from "./types";
  * principle as the rest of the operator dashboard: zero stays zero,
  * unknown stays unknown.
  */
-export function SessionsAggregateStrip({ sessions }: { sessions: SessionDetail[] }) {
+export function SessionsAggregateStrip({
+  sessions,
+  presence,
+}: {
+  sessions: SessionDetail[];
+  presence: SessionFeedPresence;
+}) {
+  if (presence !== "live") {
+    const meta =
+      presence === "locked"
+        ? "session feed locked for this session (no operator role)"
+        : presence === "down"
+          ? "session feed unavailable"
+          : "session feed loading";
+    return (
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {[
+          "In flight",
+          "Settled",
+          "Median settle time",
+          "Open anomalies",
+        ].map((label) => (
+          <Card key={label} label={label} value="—" meta={meta} tone="muted" />
+        ))}
+      </div>
+    );
+  }
+
   // Sessions still in flight — claimed or submitted but not yet
   // settled or anomalous. Aliased to "in flight" instead of the old
   // "24h funded" framing, which implied a 24h window we never
   // filtered to.
   const inFlight = sessions.filter(
-    (s) => s.state === "active" || s.state === "submitted"
+    (s) => s.state === "claimed" || s.state === "submitted"
   );
-  const settled = sessions.filter((s) => s.state === "settled");
+  const settled = sessions.filter((s) => s.state === "resolved");
   const anomalies = sessions.filter(
-    (s) => s.state === "disputed" || s.state === "slashed" || s.state === "rejected"
+    (s) =>
+      s.state === "disputed" ||
+      s.state === "rejected" ||
+      s.state === "expired" ||
+      s.state === "timed_out"
   );
 
   // Total escrow currently locked across in-flight rows, grouped by

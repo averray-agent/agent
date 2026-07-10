@@ -21,6 +21,12 @@ import {
 } from "@/lib/api/hooks";
 import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
 import { buildSessionDetails, mergeSessionTimeline } from "@/lib/api/session-adapters";
+import { feedPresence } from "@/lib/api/feed-presence";
+import {
+  buildManifestEnvelope,
+  buildSessionManifestPayload,
+  verifyManifestEnvelope,
+} from "@/lib/ui/evidence-verification";
 import {
   applyTimelineEventFiltersToParams,
   parseTimelineEventFilters,
@@ -65,6 +71,7 @@ function SessionsPageInner() {
 
   const sessionsQuery = useAdminSessions();
   const jobsQuery = useJobs();
+  const sessionsPresence = feedPresence(sessionsQuery);
   const [filter, setFilter] = useState<SessionsFilter>({
     state: "all",
     asset: "all",
@@ -124,10 +131,51 @@ function SessionsPageInner() {
     : pickedBase;
 
   const freshness = freshnessFromRequests(sessionsQuery, jobsQuery);
+  const exportSessionAuditBundle = () => {
+    if (sessionsPresence !== "live") return;
+    const payload = buildSessionManifestPayload(filtered);
+    const manifest = buildManifestEnvelope(payload);
+    const verification = verifyManifestEnvelope(manifest);
+    if (!verification.ok) return;
+
+    const exportedAt = new Date().toISOString();
+    const bundle = {
+      type: "averray.sessions.bundle.v1",
+      exportedAt,
+      scope: {
+        source: "/admin/sessions",
+        view: "operator-wide",
+        filters: filter,
+      },
+      manifest,
+      verification: {
+        verified: true,
+        algorithm: "keccak256(canonical-json)",
+        manifestHash: verification.manifestHash,
+        entryCount: verification.entryCount,
+        verifier: "verifyManifestEnvelope",
+      },
+    };
+    const blob = new Blob([JSON.stringify(bundle, null, 2)], {
+      type: "application/json;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `averray-sessions-${exportedAt.slice(0, 10)}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="flex w-full max-w-[1100px] flex-col gap-5">
-      <SessionsTopbar freshness={freshness} />
+      <SessionsTopbar
+        freshness={freshness}
+        onExportAuditBundle={exportSessionAuditBundle}
+        exportDisabled={sessionsPresence !== "live"}
+      />
 
       {/*
        * Tighter header layout — eyebrow above, h1 + scope pill on one
@@ -165,11 +213,17 @@ function SessionsPageInner() {
         </p>
       </header>
 
-      <SessionsAggregateStrip sessions={sessions} />
-      <SessionsFilterRail filter={filter} onChange={setFilter} />
+      <SessionsAggregateStrip sessions={sessions} presence={sessionsPresence} />
+      <SessionsFilterRail
+        filter={filter}
+        onChange={setFilter}
+        rows={sessions}
+        presence={sessionsPresence}
+      />
       <SessionsTable
         rows={filtered}
         totalCount={sessions.length}
+        presence={sessionsPresence}
         selectedId={pickedId}
         onSelect={(s) => {
           setPickedId(s.id);
