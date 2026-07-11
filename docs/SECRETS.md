@@ -289,6 +289,13 @@ their SHA-256 with `BADGE_RECEIPT_PUBLIC_KEY_FINGERPRINT` (`sha256:<64-hex>`).
 Any mismatch fails startup. Canonical receipt bytes and the detached-JWS
 format are specified in `docs/schemas/agent-badge-v1.md`.
 
+Production also fails startup when the five receipt-signing variables are
+missing. `BADGE_RECEIPT_SIGNING=disabled` is recognized only by the isolated
+HTTP smoke harness (`RUN_HTTP_SMOKE=1`, memory state store, `smoke.test`
+domain) and is deliberately absent from every deploy template. Outside
+production, an unconfigured signer leaves receipts honestly unsigned: the API
+omits `signature` entirely and never emits a placeholder or verification claim.
+
 ### `AUTH_JWT_SECRETS` (HMAC for SIWE sessions today; asymmetric KMS-signed target for mainnet)
 
 **Today**: HMAC-SHA256 secret stored in `AUTH_JWT_SECRETS` (comma-

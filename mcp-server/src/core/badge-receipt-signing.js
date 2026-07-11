@@ -63,6 +63,18 @@ export function canonicalBadgeReceiptBytes(document) {
 }
 
 export function loadBadgeReceiptSigningConfig(env = process.env) {
+  const explicitlyDisabled = env.BADGE_RECEIPT_SIGNING === "disabled";
+  if (explicitlyDisabled) {
+    const isHttpSmokeHarness = env.RUN_HTTP_SMOKE === "1"
+      && env.STATE_STORE_ALLOW_MEMORY === "1"
+      && env.AUTH_DOMAIN === "smoke.test";
+    if (!isHttpSmokeHarness) {
+      throw new ConfigError(
+        "BADGE_RECEIPT_SIGNING=disabled is reserved for the isolated HTTP smoke harness; refusing to disable receipt signing.",
+      );
+    }
+    return null;
+  }
   const names = [
     "AWS_BADGE_RECEIPT_REGION",
     "AWS_BADGE_RECEIPT_KEY_ID",

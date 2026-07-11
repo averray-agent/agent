@@ -177,6 +177,7 @@ test("GET /badges/:sessionId builds public badge metadata", async () => {
   assert.equal(handled, true);
   assert.equal(response.statusCode, 200);
   assert.deepEqual(response.body, BADGE);
+  assert.equal("signature" in response.body, false, "unconfigured test mode must remain honestly unsigned");
   assert.deepEqual(response.body.signers, SIGNERS);
   assert.ok(response.body.signers.every((signer) => signer.at && !/^0x0{40}$/u.test(signer.wallet)));
   assert.deepEqual(calls, [

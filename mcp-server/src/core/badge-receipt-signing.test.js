@@ -134,3 +134,17 @@ test("receipt signing config is optional only outside production", () => {
     (error) => error instanceof ConfigError && /required in production/u.test(error.message),
   );
 });
+
+test("only the explicit isolated HTTP smoke harness can disable receipt signing", () => {
+  assert.throws(
+    () => loadBadgeReceiptSigningConfig({ NODE_ENV: "production", BADGE_RECEIPT_SIGNING: "disabled" }),
+    /reserved for the isolated HTTP smoke harness/u,
+  );
+  assert.equal(loadBadgeReceiptSigningConfig({
+    NODE_ENV: "production",
+    BADGE_RECEIPT_SIGNING: "disabled",
+    RUN_HTTP_SMOKE: "1",
+    STATE_STORE_ALLOW_MEMORY: "1",
+    AUTH_DOMAIN: "smoke.test",
+  }), null);
+});
