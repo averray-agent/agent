@@ -193,6 +193,16 @@ export class MemoryStateStore {
     return cloneJsonRecord(stored);
   }
 
+  async setBadgeDocumentSignature(sessionId, signature) {
+    const existing = this.badgeDocuments.get(sessionId);
+    if (!existing || existing.signature) {
+      return cloneJsonRecord(existing);
+    }
+    const signed = { ...cloneJsonRecord(existing), signature: cloneJsonRecord(signature) };
+    this.badgeDocuments.set(sessionId, signed);
+    return cloneJsonRecord(signed);
+  }
+
   async listSessionsByWallet(wallet, limit = 10, offset = 0) {
     const sessionIds = (this.walletSessions.get(wallet) ?? []).slice(offset, offset + limit);
     return sessionIds.map((sessionId) => this.sessions.get(sessionId)).filter(Boolean);
@@ -580,6 +590,23 @@ export class RedisStateStore {
     const key = this.key("badge", sessionId);
     await this.client.set(key, JSON.stringify(document), { NX: true });
     return this.getBadgeDocument(sessionId);
+  }
+
+  async setBadgeDocumentSignature(sessionId, signature) {
+    await this.connect();
+    const key = this.key("badge", sessionId);
+    const raw = await this.client.eval(
+      `local raw = redis.call('GET', KEYS[1])
+       if not raw then return false end
+       local document = cjson.decode(raw)
+       if document.signature then return raw end
+       document.signature = cjson.decode(ARGV[1])
+       local signed = cjson.encode(document)
+       redis.call('SET', KEYS[1], signed)
+       return signed`,
+      { keys: [key], arguments: [JSON.stringify(signature)] }
+    );
+    return raw ? JSON.parse(raw) : undefined;
   }
 
   async listSessionsByWallet(wallet, limit = 10, offset = 0) {

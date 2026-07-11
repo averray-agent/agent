@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 
 import {
   buildKmsCredentialsProvider,
+  buildRequiredKmsCredentialsProvider,
+  PROFILE_BADGE_RECEIPT_SIGNER,
   PROFILE_BLOCKCHAIN_SIGNER,
   PROFILE_JWT_SIGNER,
   ROLES_ANYWHERE_FLAG_ENV_VAR,
@@ -117,4 +119,14 @@ test("buildKmsCredentialsProvider: exported profile constants match the §5.3 aw
   // make Roles Anywhere silently fall back to default chain.
   assert.equal(PROFILE_BLOCKCHAIN_SIGNER, "averray-signer");
   assert.equal(PROFILE_JWT_SIGNER, "averray-jwt-signer");
+  assert.equal(PROFILE_BADGE_RECEIPT_SIGNER, "averray-badge-receipt-signer");
+});
+
+test("buildRequiredKmsCredentialsProvider never needs the global fallback-chain flag", () => {
+  const provider = buildRequiredKmsCredentialsProvider({ profile: PROFILE_BADGE_RECEIPT_SIGNER });
+  assert.equal(typeof provider, "function");
+  assert.throws(
+    () => buildRequiredKmsCredentialsProvider({ profile: "" }),
+    (error) => error instanceof ConfigError && /dedicated PROFILE/u.test(error.message),
+  );
 });

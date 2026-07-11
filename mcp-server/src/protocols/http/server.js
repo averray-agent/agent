@@ -77,7 +77,8 @@ const {
   trustProxy,
   logger,
   metrics,
-  observability
+  observability,
+  badgeReceiptSigner
 } = await createPlatformRuntime();
 
 // Label the state-store gauge once at boot for Prometheus discovery.
@@ -242,6 +243,7 @@ function deriveBadgeLineage(session, job) {
 }
 
 const listBadgeReceipts = createListBadgeReceipts({
+  badgeReceiptSigner,
   buildBadgeFromSession,
   deriveBadgeLineage,
   publicBaseUrl: process.env.PUBLIC_BASE_URL,
@@ -484,6 +486,7 @@ const handlePolicyRoute = createPolicyRoutes({
 });
 
 const handleBadgeRoute = createBadgeRoutes({
+  badgeReceiptSigner,
   buildBadgeFromSession,
   deriveBadgeLineage,
   listBadgeReceipts,

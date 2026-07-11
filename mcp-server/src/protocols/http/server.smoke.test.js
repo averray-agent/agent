@@ -137,6 +137,7 @@ async function runWithServerEnv(envOverrides, fn) {
 test("http smoke: production money-like routes require a chain backend", { skip: !RUN }, async () => {
   await runWithServerEnv({
     NODE_ENV: "production",
+    BADGE_RECEIPT_SIGNING: "disabled",
     MUTATION_BACKEND: "required"
   }, async (base) => {
     const token = issueToken(ADMIN_WALLET);
@@ -179,6 +180,7 @@ test("http smoke: production money-like routes require a chain backend", { skip:
 test("http smoke: /health separates service liveness from treasury capability", { skip: !RUN }, async () => {
   await runWithServerEnv({
     NODE_ENV: "production",
+    BADGE_RECEIPT_SIGNING: "disabled",
     MUTATION_BACKEND: "required"
   }, async (base) => {
     const response = await fetch(`${base}/health`);
@@ -2055,6 +2057,7 @@ test("http smoke: production /metrics fails closed when token is missing", { ski
   await runWithServerEnv(
     {
       NODE_ENV: "production",
+      BADGE_RECEIPT_SIGNING: "disabled",
       METRICS_BEARER_TOKEN: ""
     },
     async (base) => {

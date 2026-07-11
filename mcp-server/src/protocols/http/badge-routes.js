@@ -1,8 +1,10 @@
 import { ValidationError, normalizeError } from "../../core/errors.js";
 import { buildBadgeSigners } from "../../core/badge-metadata.js";
+import { BADGE_RECEIPT_JWKS_PATH } from "../../core/badge-receipt-signing.js";
 
 export function createListBadgeReceipts({
   buildBadgeFromSession,
+  badgeReceiptSigner,
   deriveBadgeLineage,
   publicBaseUrl,
   posterAddress,
@@ -36,7 +38,8 @@ export function createListBadgeReceipts({
           lineage: deriveBadgeLineage(session, job)
         };
         const rebuiltBadge = buildBadgeFromSession({ session, job, verification, context });
-        const badge = await stateStore.putBadgeDocument?.(session.sessionId, rebuiltBadge) ?? rebuiltBadge;
+        const signedBadge = await signBadgeDocument(rebuiltBadge, badgeReceiptSigner);
+        const badge = await stateStore.putBadgeDocument?.(session.sessionId, signedBadge) ?? signedBadge;
         receipts.push(buildBadgeReceipt(badge, { session, verification, context }));
       } catch {
         // One stale or malformed row must never take down the public listing.
@@ -61,11 +64,18 @@ function buildBadgeReceipt(badge, { session, verification, context } = {}) {
     signers,
     evidenceHash: averray.evidenceHash,
     blockRef: averray.chainJobId,
+    ...(badge.signature ? { signature: badge.signature } : {}),
     badge
   };
 }
 
+async function signBadgeDocument(badge, signer) {
+  if (!signer) return badge;
+  return { ...badge, signature: await signer.signDocument(badge) };
+}
+
 export function createBadgeRoutes({
+  badgeReceiptSigner,
   buildBadgeFromSession,
   deriveBadgeLineage,
   listBadgeReceipts,
@@ -79,6 +89,13 @@ export function createBadgeRoutes({
   verifierService,
 }) {
   return async function handleBadgeRoute({ request, response, url, pathname }) {
+    if (request.method === "GET" && pathname === BADGE_RECEIPT_JWKS_PATH) {
+      respond(response, 200, badgeReceiptSigner?.getJwks?.() ?? { keys: [] }, {
+        "cache-control": "public, max-age=300"
+      });
+      return true;
+    }
+
     if (request.method === "GET" && pathname === "/badges") {
       respond(response, 200, await listBadgeReceipts(parseLimit(url, 100, 500)), {
         "cache-control": "public, max-age=30"
@@ -129,7 +146,8 @@ export function createBadgeRoutes({
             lineage: deriveBadgeLineage(session, job)
           }
         });
-        const badge = await stateStore?.putBadgeDocument?.(sessionId, rebuiltBadge) ?? rebuiltBadge;
+        const signedBadge = await signBadgeDocument(rebuiltBadge, badgeReceiptSigner);
+        const badge = await stateStore?.putBadgeDocument?.(sessionId, signedBadge) ?? signedBadge;
         // Badge JSON is deterministic once a session is resolved.
         respond(response, 200, badge, { "cache-control": "public, max-age=60" });
         return true;

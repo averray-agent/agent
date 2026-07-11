@@ -11,7 +11,17 @@ import { EventBus } from "../core/event-bus.js";
 import { EventListener } from "../blockchain/event-listener.js";
 import { loadAuthConfig } from "../auth/config.js";
 import { validateJwtKmsCredentialAccess } from "../auth/credential-check.js";
-import { buildKmsCredentialsProvider, PROFILE_JWT_SIGNER } from "./aws-credentials.js";
+import {
+  buildKmsCredentialsProvider,
+  buildRequiredKmsCredentialsProvider,
+  PROFILE_BADGE_RECEIPT_SIGNER,
+  PROFILE_JWT_SIGNER,
+} from "./aws-credentials.js";
+import {
+  KmsBadgeReceiptSigner,
+  loadBadgeReceiptSigningConfig,
+} from "../core/badge-receipt-signing.js";
+import { backfillBadgeReceiptSignatures } from "./badge-receipt-backfill.js";
 import { createAuthMiddleware } from "../auth/middleware.js";
 import { createRateLimiter } from "../auth/rate-limit.js";
 import { resolveCapabilities, capabilityMatrix } from "../auth/capabilities.js";
@@ -178,6 +188,30 @@ export async function createPlatformRuntime() {
     authConfig.kmsJwt.logger = logger;
   }
 
+  const badgeReceiptSigningConfig = initStep("load-badge-receipt-signing-config", logger, () =>
+    loadBadgeReceiptSigningConfig(process.env)
+  );
+  let badgeReceiptSigner;
+  if (badgeReceiptSigningConfig) {
+    const credentialsProvider = buildRequiredKmsCredentialsProvider({ profile: PROFILE_BADGE_RECEIPT_SIGNER });
+    badgeReceiptSigner = initStep("init-badge-receipt-signer", logger, () =>
+      new KmsBadgeReceiptSigner(badgeReceiptSigningConfig, { credentialsProvider })
+    );
+    try {
+      const integrity = await badgeReceiptSigner.initialize();
+      logger.info?.(
+        { keyId: integrity.keyId, fingerprint: integrity.fingerprint, kid: badgeReceiptSigningConfig.kid },
+        "badge_receipt_signer.integrity_verified"
+      );
+    } catch (error) {
+      logger.error(
+        { step: "verify-badge-receipt-signer-integrity", err: error instanceof Error ? error : new Error(String(error)) },
+        "bootstrap.init_failed"
+      );
+      throw error;
+    }
+  }
+
   // Phase 5a prep — verify the AWS credential chain can actually reach
   // the JWT KMS key before declaring the backend healthy. Without this
   // a misconfigured credential chain (most common future failure mode:
@@ -268,6 +302,18 @@ export async function createPlatformRuntime() {
     logger,
     () => new PlatformService(jobs, profiles, accounts, reputations, gateway, stateStore, eventBus)
   );
+  platformService.verificationIngestionService.setBadgeReceiptSigner(badgeReceiptSigner);
+  if (badgeReceiptSigner) {
+    try {
+      await backfillBadgeReceiptSignatures({ stateStore, signer: badgeReceiptSigner, logger });
+    } catch (error) {
+      logger.error(
+        { step: "backfill-badge-receipt-signatures", err: error instanceof Error ? error : new Error(String(error)) },
+        "bootstrap.init_failed"
+      );
+      throw error;
+    }
+  }
   const verifierService = initStep(
     "init-verifier-service",
     logger,
@@ -444,7 +490,8 @@ export async function createPlatformRuntime() {
     trustProxy,
     logger,
     metrics,
-    observability
+    observability,
+    badgeReceiptSigner
   };
 }
 

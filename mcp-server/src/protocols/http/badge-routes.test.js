@@ -44,6 +44,7 @@ function makeHarness(overrides = {}) {
   const calls = [];
   const response = {};
   const route = createBadgeRoutes({
+    badgeReceiptSigner: overrides.badgeReceiptSigner,
     buildBadgeFromSession: (input) => {
       calls.push(["buildBadgeFromSession", input]);
       if (overrides.badgeError) {
@@ -114,6 +115,29 @@ test("badge routes ignore unrelated paths", async () => {
   assert.deepEqual(response, {});
 });
 
+test("GET /.well-known/badge-receipt-jwks.json publishes the receipt verification key", async () => {
+  const jwks = { keys: [{ kty: "EC", crv: "P-256", alg: "ES256", use: "sig", kid: "badge-1", x: "x", y: "y" }] };
+  const { calls, response, route } = makeHarness({
+    badgeReceiptSigner: { getJwks: () => jwks }
+  });
+
+  const handled = await route({
+    request: { method: "GET" },
+    response,
+    url: new URL("http://localhost/.well-known/badge-receipt-jwks.json"),
+    pathname: "/.well-known/badge-receipt-jwks.json"
+  });
+
+  assert.equal(handled, true);
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.body, jwks);
+  assert.deepEqual(calls.at(-1), ["respond", {
+    statusCode: 200,
+    body: jwks,
+    headers: { "cache-control": "public, max-age=300" }
+  }]);
+});
+
 test("GET /badges parses limit and returns cached receipts", async () => {
   const { calls, response, route } = makeHarness();
 
@@ -153,6 +177,7 @@ test("GET /badges/:sessionId builds public badge metadata", async () => {
   assert.equal(handled, true);
   assert.equal(response.statusCode, 200);
   assert.deepEqual(response.body, BADGE);
+  assert.equal("signature" in response.body, false, "unconfigured test mode must remain honestly unsigned");
   assert.deepEqual(response.body.signers, SIGNERS);
   assert.ok(response.body.signers.every((signer) => signer.at && !/^0x0{40}$/u.test(signer.wallet)));
   assert.deepEqual(calls, [
@@ -274,7 +299,41 @@ test("GET /badges/:sessionId serves the immutable document after its job is prun
   assert.equal(handled, true);
   assert.equal(response.statusCode, 200);
   assert.deepEqual(response.body, STORED_BADGE);
+  assert.equal("signature" in response.body, false);
   assert.deepEqual(calls.map(([name]) => name), ["getBadgeDocument", "respond"]);
+});
+
+test("GET /badges/:sessionId returns the persisted receipt signature", async () => {
+  const signature = { alg: "ES256", kid: "badge-1", sig: "protected..signature", signedAt: "2026-07-11T00:00:00.000Z" };
+  const signedBadge = { ...STORED_BADGE, signature };
+  const { response, route } = makeHarness({
+    stateStore: { getBadgeDocument: async () => signedBadge }
+  });
+
+  await route({
+    request: { method: "GET" },
+    response,
+    url: new URL("http://localhost/badges/session-pruned"),
+    pathname: "/badges/session-pruned"
+  });
+
+  assert.deepEqual(response.body.signature, signature);
+});
+
+test("listBadgeReceipts exposes a persisted signature on the row and nested document", async () => {
+  const signature = { alg: "ES256", kid: "badge-1", sig: "protected..signature", signedAt: "2026-07-11T00:00:00.000Z" };
+  const signedBadge = { ...STORED_BADGE, signature };
+  const listBadgeReceipts = createListBadgeReceipts({
+    buildBadgeFromSession: () => { throw new Error("must not rebuild"); },
+    deriveBadgeLineage: () => undefined,
+    service: { listRecentSessions: async () => [{ sessionId: "session-pruned", jobId: "job-pruned" }] },
+    stateStore: { getBadgeDocument: async () => signedBadge },
+    verifierService: { getResult: async () => VERIFICATION }
+  });
+
+  const [receipt] = await listBadgeReceipts(100);
+  assert.deepEqual(receipt.signature, signature);
+  assert.deepEqual(receipt.badge.signature, signature);
 });
 
 test("listBadgeReceipts includes a stored badge without looking up its pruned job", async () => {

@@ -80,6 +80,15 @@ test("GET / returns public API metadata without calling provider services", asyn
   assert.equal(response.body.status, "ok");
   assert.equal(response.body.authMode, "strict");
   assert.ok(response.body.endpoints.includes("/agent-tools.json"));
+  assert.ok(response.body.endpoints.includes("/.well-known/badge-receipt-jwks.json"));
+  assert.deepEqual(response.body.receiptVerification, {
+    badgeReceipts: {
+      alg: "ES256",
+      kid: "badge-1",
+      jwksUrl: "https://api.averray.com/.well-known/badge-receipt-jwks.json",
+      canonicalizationDocs: "https://github.com/averray-agent/agent/blob/main/docs/schemas/agent-badge-v1.md#exact-canonicalization-and-signing-bytes"
+    }
+  });
   assert.ok(response.body.endpoints.includes("/status/providers") === false);
   assert.deepEqual(calls, [
     ["respond", { statusCode: 200, body: response.body, headers: {} }],

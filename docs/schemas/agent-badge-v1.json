@@ -39,6 +39,21 @@
         }
       }
     },
+    "signature": {
+      "type": "object",
+      "description": "Optional detached ES256 JWS over the RFC 8785 canonical document with this root-level property removed.",
+      "required": ["alg", "kid", "sig", "signedAt"],
+      "additionalProperties": false,
+      "properties": {
+        "alg": { "const": "ES256" },
+        "kid": { "const": "badge-1" },
+        "sig": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+\\.\\.[A-Za-z0-9_-]+$"
+        },
+        "signedAt": { "type": "string", "format": "date-time" }
+      }
+    },
     "averray": {
       "type": "object",
       "description": "Averray-specific structured data. Consumers that want machine-readable badge content should read this namespace rather than parsing `attributes`.",

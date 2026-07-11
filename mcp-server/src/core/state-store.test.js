@@ -77,6 +77,20 @@ test("MemoryStateStore badge documents are write-once and cloned", async () => {
   assert.equal((await store.getBadgeDocument("session-1")).averray.category, "security");
 });
 
+test("MemoryStateStore upgrades an unsigned badge with one signature only", async () => {
+  const store = new MemoryStateStore();
+  await store.putBadgeDocument("session-sign", { averray: { sessionId: "session-sign", category: "security" } });
+  const first = { alg: "ES256", kid: "badge-1", sig: "first..sig", signedAt: "2026-07-11T00:00:00.000Z" };
+  const replacement = { alg: "ES256", kid: "badge-2", sig: "second..sig", signedAt: "2026-07-12T00:00:00.000Z" };
+
+  await store.setBadgeDocumentSignature("session-sign", first);
+  await store.setBadgeDocumentSignature("session-sign", replacement);
+
+  const stored = await store.getBadgeDocument("session-sign");
+  assert.equal(stored.averray.category, "security");
+  assert.deepEqual(stored.signature, first);
+});
+
 test("MemoryStateStore content blobs round-trip by lowercase hash", async () => {
   const store = new MemoryStateStore();
   const record = {

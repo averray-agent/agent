@@ -35,7 +35,20 @@ test("approved verification persists an immutable badge document at resolution",
     stateStore,
     undefined,
     () => job,
-    { info() {}, warn() {} }
+    { info() {}, warn() {} },
+    {
+      badgeReceiptSigner: {
+        async signDocument(document) {
+          assert.equal(document.averray.sessionId, submitted.sessionId);
+          return {
+            alg: "ES256",
+            kid: "badge-1",
+            sig: "protected..signature",
+            signedAt: "2026-07-09T10:06:00.000Z"
+          };
+        }
+      }
+    }
   );
 
   await service.ingest(submitted.sessionId, {
@@ -48,6 +61,7 @@ test("approved verification persists an immutable badge document at resolution",
   const badge = await stateStore.getBadgeDocument(submitted.sessionId);
   assert.equal(badge.averray.sessionId, submitted.sessionId);
   assert.equal(badge.averray.category, "security");
+  assert.equal(badge.signature.kid, "badge-1");
   assert.deepEqual(badge.averray.reward, { asset: "USDC", amount: "5000000", decimals: 6 });
   assert.equal((await stateStore.getSession(submitted.sessionId)).badgeSnapshot.rewardAsset, "USDC");
 });
