@@ -8,7 +8,7 @@ import { disputeIdForSession } from "../core/dispute-resolution.js";
 import { buildBadgeFromSession, buildBadgeJobSnapshot } from "../core/badge-metadata.js";
 
 export class VerificationIngestionService {
-  constructor(stateStore, eventBus = undefined, getJobDefinition = undefined, logger = undefined) {
+  constructor(stateStore, eventBus = undefined, getJobDefinition = undefined, logger = undefined, options = {}) {
     this.stateStore = stateStore;
     this.eventBus = eventBus;
     this.getJobDefinition = getJobDefinition;
@@ -16,6 +16,11 @@ export class VerificationIngestionService {
     // route. Log under a synthetic principal so autonomous verdict ingestion is
     // auditable (audit B-11). Default to console so it logs even unwired.
     this.logger = logger || console;
+    this.badgeReceiptSigner = options.badgeReceiptSigner;
+  }
+
+  setBadgeReceiptSigner(signer) {
+    this.badgeReceiptSigner = signer;
   }
 
   async ingest(sessionId, verdict) {
@@ -124,12 +129,16 @@ export class VerificationIngestionService {
           verifierAddress: process.env.DEFAULT_VERIFIER_ADDRESS
         }
       });
-      await this.stateStore.putBadgeDocument(session.sessionId, badge);
+      const document = this.badgeReceiptSigner
+        ? { ...badge, signature: await this.badgeReceiptSigner.signDocument(badge) }
+        : badge;
+      await this.stateStore.putBadgeDocument(session.sessionId, document);
     } catch (error) {
       this.logger.warn?.(
         { sessionId: session.sessionId, jobId: session.jobId, error: error?.message },
         "badge_document.persist_failed"
       );
+      if (this.badgeReceiptSigner) throw error;
     }
   }
 

@@ -173,6 +173,7 @@ export function metricPathLabel(pathname) {
     "/auth/verify",
     "/agents",
     "/badges",
+    "/.well-known/badge-receipt-jwks.json",
     "/alerts",
     "/audit",
     "/policies",

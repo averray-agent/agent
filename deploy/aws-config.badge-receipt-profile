@@ -1,0 +1,6 @@
+# Append this profile to the VPS-owned /etc/agent-stack/aws-config. The file
+# is mounted read-only into the backend container as /root/.aws/config and
+# selected explicitly by mcp-server/src/services/aws-credentials.js.
+[profile averray-badge-receipt-signer]
+credential_process = /usr/local/bin/aws_signing_helper credential-process --certificate /etc/agent-stack/roles-anywhere/badge-receipt-signer-cert.pem --private-key /etc/agent-stack/roles-anywhere/badge-receipt-signer-key.pem --trust-anchor-arn arn:aws:rolesanywhere:eu-central-2:079209845430:trust-anchor/810994f5-4a3c-4cc7-ad7b-4745554d1fdd --profile-arn arn:aws:rolesanywhere:eu-central-2:079209845430:profile/4578f0e4-ac9e-4df3-befc-f9e0c935095d --role-arn arn:aws:iam::079209845430:role/averray-badge-receipt-signer-testnet --region eu-central-2
+region = eu-central-2

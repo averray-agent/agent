@@ -33,6 +33,7 @@ const ROOT_ENDPOINTS = [
   "/shares/:token",
   "/badges",
   "/badges/:sessionId",
+  "/.well-known/badge-receipt-jwks.json",
   "/alerts",
   "/audit",
   "/policies",

@@ -8,8 +8,8 @@ import { ConfigError } from "../core/errors.js";
 /**
  * Phase 5a (IAM Roles Anywhere) cutover helper.
  *
- * The backend constructs two KMSClients — one for the blockchain
- * signer (`KmsSigner`) and one for the JWT signer (`KmsJwtSigner`).
+ * The backend constructs separate KMSClients for the blockchain signer,
+ * JWT signer, and badge-receipt signer.
  * Before Phase 5a both relied on the SDK's default credential
  * provider chain, which on the VPS reads `AWS_ACCESS_KEY_ID` /
  * `AWS_SECRET_ACCESS_KEY` env vars (long-lived static IAM keys).
@@ -20,7 +20,7 @@ import { ConfigError } from "../core/errors.js";
  * via `~/.aws/config` `credential_process` directives, but only when
  * the SDK is told to use a specific shared-config profile (otherwise
  * it falls back to env vars). The single Node process needs to address
- * two profiles — one per signer — so we can't just set `AWS_PROFILE`
+ * multiple profiles — one per signer — so we can't just set `AWS_PROFILE`
  * globally.
  *
  * This module returns an SDK-shaped credential provider (the result
@@ -47,6 +47,7 @@ const FLAG_ENV_VAR = "AWS_USE_ROLES_ANYWHERE";
  */
 export const PROFILE_BLOCKCHAIN_SIGNER = "averray-signer";
 export const PROFILE_JWT_SIGNER = "averray-jwt-signer";
+export const PROFILE_BADGE_RECEIPT_SIGNER = "averray-badge-receipt-signer";
 
 /**
  * Return an AWS SDK credentials provider bound to the given shared-
@@ -71,7 +72,21 @@ export function buildKmsCredentialsProvider({ profile, env = process.env } = {})
   if (!profile || typeof profile !== "string" || profile.trim().length === 0) {
     throw new ConfigError(
       `buildKmsCredentialsProvider: profile is required when ${FLAG_ENV_VAR}=true ` +
-        "(use PROFILE_BLOCKCHAIN_SIGNER or PROFILE_JWT_SIGNER from this module).",
+        "(use one of the dedicated PROFILE_*_SIGNER constants from this module).",
+    );
+  }
+  return buildRequiredKmsCredentialsProvider({ profile });
+}
+
+/**
+ * Build a provider that always resolves a named shared-config profile. Use
+ * this for identities, such as badge receipts, that are forbidden from ever
+ * falling through to environment credentials or another default-chain role.
+ */
+export function buildRequiredKmsCredentialsProvider({ profile } = {}) {
+  if (!profile || typeof profile !== "string" || profile.trim().length === 0) {
+    throw new ConfigError(
+      "buildRequiredKmsCredentialsProvider: a dedicated PROFILE_*_SIGNER name is required.",
     );
   }
   return fromIni({ profile });

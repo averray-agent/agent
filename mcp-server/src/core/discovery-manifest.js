@@ -19,6 +19,7 @@ const DISCOVERY_PUBLIC_ENDPOINTS = [
   { path: "/strategies", description: "Registered strategy adapters (yield sources)." },
   { path: "/badges", description: "Recent public badge receipts for completed sessions." },
   { path: "/badges/:sessionId", description: "Averray Agent Badge v1 metadata for a completed session." },
+  { path: "/.well-known/badge-receipt-jwks.json", description: "Public ES256 verification keys for signed badge receipts." },
   { path: "/agents", description: "Recent public agent directory derived from live session and reputation data." },
   { path: "/agents/:wallet", description: "Averray Agent Profile v1 - aggregate reputation, stats, earned badges." },
   { path: "/shares/:token", description: "Public signed read-only snapshot resolver for share URLs." },

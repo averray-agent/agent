@@ -13,6 +13,51 @@ schema specifies what lives at that URI so that:
 
 ---
 
+## Detached receipt signature
+
+Hosted badge documents may carry a root-level `signature` object:
+
+```json
+{
+  "alg": "ES256",
+  "kid": "badge-1",
+  "sig": "<base64url protected header>..<base64url 64-byte R||S>",
+  "signedAt": "2026-07-11T18:00:00.000Z"
+}
+```
+
+`sig` is RFC 7515 compact JWS with a detached payload. Verification keys are
+published at `/.well-known/badge-receipt-jwks.json`. An absent `signature`
+means the stored document is unsigned; consumers must not treat absence as a
+verification failure or invent a signature for legacy data.
+
+### Exact canonicalization and signing bytes
+
+Third parties reproduce the signed bytes as follows:
+
+1. Remove the root-level `signature` property from the badge document.
+2. Serialize the remaining JSON with RFC 8785 JSON Canonicalization Scheme:
+   object keys sorted by UTF-16 code units, array order preserved, JSON string
+   escaping and number serialization, and no whitespace. UTF-8 encode that
+   canonical string. Non-JSON values and non-finite numbers are invalid.
+3. Canonicalize and UTF-8 encode the protected header
+   `{"alg":"ES256","kid":"badge-1","signedAt":"<the signature object's signedAt value>","typ":"averray-badge-receipt+jws"}`
+   using the same rule. Verifiers must require the protected `signedAt` to
+   equal the exposed `signature.signedAt` value.
+4. Form the ASCII JWS signing input
+   `base64url(protected-header) + "." + base64url(canonical-badge-bytes)`.
+5. SHA-256 hash that signing input and verify the ES256 signature from `sig`
+   against the JWKS key whose `kid` is `badge-1`. The compact serialization's
+   middle segment is empty because the payload is detached. The signature
+   segment is the 64-byte JWS `R || S` form, not KMS's DER encoding.
+
+The root-level `signature` object is excluded from the payload to avoid a
+self-reference. Its `signedAt` value is nevertheless integrity-protected by
+the identical value in the protected header. The immutable badge facts are
+the detached signed payload.
+
+---
+
 ## Shape
 
 A badge metadata document is a JSON object with two layers:

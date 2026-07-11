@@ -73,6 +73,7 @@ honest trust-boundary analysis.
 | Indexer env (DB password, RPC URL) | 1Password Business → `Averray/Production/Indexer` vault | Same pattern as backend, with `prod-vps-indexer` service token (scoped to indexer vault only) |
 | Service-account tokens themselves + 1Password recovery + AWS root + Roles Anywhere cert metadata + basic-auth RAW password + pauser seed | 1Password Business → `Averray/Production/Critical` vault | **Human-only.** No runtime service account can read Critical. |
 | Backend signer key | **AWS KMS** secp256k1 key, multi-region (mainnet), IAM Roles Anywhere / OIDC access | ethers.js `AwsKmsSigner` adapter — backend never holds private key bytes; **still holds temporary AWS credentials** (≤1h lifetime) capable of requesting signatures |
+| Badge receipt signer | **Dedicated AWS KMS P-256 key** (`badge-1`) + isolated IAM Roles Anywhere identity | Backend selects shared-config profile `averray-badge-receipt-signer`; no static AWS credentials. Public PEM/fingerprint are rendered from `op://prod-backend/aws-badge-receipt-signer-testnet`. |
 | Operator passwords (basic auth, personal vault items) | 1Password Business → `Averray/Operators` per-user vault | Manual; only used by humans through the 1Password UI |
 | Multisig signer seeds | Three independent humans/devices (existing pattern, see [`MULTISIG_SETUP.md`](MULTISIG_SETUP.md)) | Hardware wallets + sealed-envelope offline backups |
 | Burnable deployer key (one-time per deploy) | Generated fresh; transferred away from the deployer EOA via `transferOwnership()` to the multisig at the end of `deploy_contracts.sh` | Never persisted long-term |
@@ -251,6 +252,42 @@ GitHub App installation token is preferred over any PAT.
 ## Per-secret runbook (when something breaks)
 
 For each secret class, the canonical mint/rotate/revoke flow.
+
+### Badge receipt ES256 signer (`badge-1`)
+
+Badge receipts are signed with the dedicated TestNet key
+`alias/averray-badge-receipt-signer-testnet` in AWS account `079209845430`,
+region `eu-central-2`. Runtime configuration **must pin the full key ARN** in
+`AWS_BADGE_RECEIPT_KEY_ID`; the alias is human-readable inventory only and
+must never be sent to `kms:GetPublicKey` or `kms:Sign`.
+
+The backend obtains one-hour STS credentials through the isolated
+`averray-badge-receipt-signer` shared-config profile. Its
+`credential_process` is recorded in
+`deploy/aws-config.badge-receipt-profile`; it uses the certificate/key files
+at `/etc/agent-stack/roles-anywhere/badge-receipt-signer-{cert,key}.pem`, both
+mode `0400`. No `AWS_*_ACCESS_KEY_*` values exist for this signer.
+
+The current certificate CN is `averray-badge-receipt-signer-vps` and expires
+**2026-10-09**. Rotate it before expiry:
+
+1. Issue a new 90-day client certificate from the approved Roles Anywhere CA
+   with the same CN; never reuse the JWT or blockchain signer certificate.
+2. Store the replacement in the human-only Critical vault and install the
+   certificate/private-key pair on the VPS at mode `0400`.
+3. Run `AWS_PROFILE=averray-badge-receipt-signer aws sts get-caller-identity`
+   and an `ECDSA_SHA_256`/`DIGEST` sign-and-verify check against the pinned key
+   ARN before restarting the backend.
+4. Restart only after the new certificate succeeds, then revoke/delete the
+   superseded client material. The KMS key itself does not rotate with the
+   client certificate.
+
+At boot, the backend calls `kms:GetPublicKey`, requires P-256 +
+`SIGN_VERIFY` + `ECDSA_SHA_256`, compares the resolved full ARN, compares the
+returned SPKI bytes with `BADGE_RECEIPT_PUBLIC_KEY_PEM_BASE64`, and compares
+their SHA-256 with `BADGE_RECEIPT_PUBLIC_KEY_FINGERPRINT` (`sha256:<64-hex>`).
+Any mismatch fails startup. Canonical receipt bytes and the detached-JWS
+format are specified in `docs/schemas/agent-badge-v1.md`.
 
 ### `AUTH_JWT_SECRETS` (HMAC for SIWE sessions today; asymmetric KMS-signed target for mainnet)
 
