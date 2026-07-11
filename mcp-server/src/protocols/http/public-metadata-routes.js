@@ -1,3 +1,5 @@
+import { BADGE_RECEIPT_JWKS_PATH } from "../../core/badge-receipt-signing.js";
+
 const ROOT_ENDPOINTS = [
   "/health",
   "/metrics",
@@ -33,7 +35,7 @@ const ROOT_ENDPOINTS = [
   "/shares/:token",
   "/badges",
   "/badges/:sessionId",
-  "/.well-known/badge-receipt-jwks.json",
+  BADGE_RECEIPT_JWKS_PATH,
   "/alerts",
   "/audit",
   "/policies",
@@ -80,12 +82,25 @@ export function createPublicMetadataRoutes({
   service,
   strategies,
 }) {
+  const normalizedPublicBaseUrl = publicBaseUrl?.trim().replace(/\/+$/u, "");
+  const badgeReceiptJwksUrl = normalizedPublicBaseUrl
+    ? `${normalizedPublicBaseUrl}${BADGE_RECEIPT_JWKS_PATH}`
+    : BADGE_RECEIPT_JWKS_PATH;
+
   return async function handlePublicMetadataRoute({ request, response, pathname }) {
     if (request.method === "GET" && pathname === "/") {
       respond(response, 200, {
         name: "agent-platform",
         status: "ok",
         authMode: authConfig.mode,
+        receiptVerification: {
+          badgeReceipts: {
+            alg: "ES256",
+            kid: "badge-1",
+            jwksUrl: badgeReceiptJwksUrl,
+            canonicalizationDocs: "https://github.com/averray-agent/agent/blob/main/docs/schemas/agent-badge-v1.md#exact-canonicalization-and-signing-bytes"
+          }
+        },
         endpoints: ROOT_ENDPOINTS
       });
       return true;

@@ -288,6 +288,10 @@ returned SPKI bytes with `BADGE_RECEIPT_PUBLIC_KEY_PEM_BASE64`, and compares
 their SHA-256 with `BADGE_RECEIPT_PUBLIC_KEY_FINGERPRINT` (`sha256:<64-hex>`).
 Any mismatch fails startup. Canonical receipt bytes and the detached-JWS
 format are specified in `docs/schemas/agent-badge-v1.md`.
+The stable public key URL is
+`https://api.averray.com/.well-known/badge-receipt-jwks.json`; the root API
+metadata at `https://api.averray.com/` also publishes that URL under
+`receiptVerification.badgeReceipts.jwksUrl` for machine discovery.
 
 Production also fails startup when the five receipt-signing variables are
 missing. `BADGE_RECEIPT_SIGNING=disabled` is recognized only by the isolated
