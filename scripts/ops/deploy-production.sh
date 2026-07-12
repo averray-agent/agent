@@ -1107,7 +1107,12 @@ deploy() {
   fi
 
   local indexer_code_changed=0
-  if should_run indexer "$RUN_INDEXER" '^(indexer/|package(-lock)?\.json|scripts/ops/redeploy-indexer\.sh)'; then
+  # The indexer image installs from indexer/package.json inside indexer/Dockerfile;
+  # it does not copy or consume the root workspace package.json/package-lock.json.
+  # Treating either root file as indexer code caused an app-only dependency change
+  # to restart Ponder and trip schema recovery on 2026-07-12. Changes to the
+  # indexer's own dependency manifest remain covered by the indexer/ prefix.
+  if should_run indexer "$RUN_INDEXER" '^(indexer/|scripts/ops/redeploy-indexer\.sh)'; then
     indexer_code_changed=1
   fi
   if [[ "$indexer_code_changed" == "1" || "${RUNTIME_ENV_CHANGED_INDEXER:-0}" == "1" ]]; then
