@@ -29,6 +29,9 @@ RUN_INDEXER=${RUN_INDEXER:-auto}
 RUN_SITE=${RUN_SITE:-auto}
 RUN_CADDY=${RUN_CADDY:-auto}
 RUN_SMOKE=${RUN_SMOKE:-1}
+# Runtime outcome, not intent: apply_caddy sets this only after a changed
+# configuration is installed and the Caddy restart succeeds.
+CADDY_RESTARTED=0
 SMOKE_CHECK_INDEXER=${SMOKE_CHECK_INDEXER:-auto}
 SMOKE_CHECK_BOOTSTRAP_INSTRUMENTATION=${SMOKE_CHECK_BOOTSTRAP_INSTRUMENTATION:-0}
 SMOKE_CHECK_BOOTSTRAP_SELF_REPORT_SENT=${SMOKE_CHECK_BOOTSTRAP_SELF_REPORT_SENT:-0}
@@ -878,6 +881,7 @@ apply_caddy() {
     --project-directory "$STACK_ROOT" \
     -f "$COMPOSE_FILE" \
     restart caddy
+  CADDY_RESTARTED=1
 }
 
 read_current_indexer_schema() {
@@ -1224,7 +1228,7 @@ deploy() {
     *)
       echo "Applying Caddy config (render → validate → hash-compare → install if changed)"
       apply_caddy
-      run_caddy=1
+      run_caddy="$CADDY_RESTARTED"
       mark_component_deployed caddy
       ;;
   esac
