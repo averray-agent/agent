@@ -35,6 +35,7 @@ export function resolveMetricsAuthConfig(env = process.env) {
 export function createOperationalRoutes({
   authConfig,
   gateway,
+  indexerHealthProbe,
   metrics,
   metricsAuthRequired,
   metricsBearerToken,
@@ -56,11 +57,13 @@ export function createOperationalRoutes({
       // loaded. HTTP status follows `serviceHealth.ok` alone, so a
       // trust-core-only launch still returns 200/"ok" at the liveness layer
       // and surfaces chain/treasury posture via `capabilityHealth`.
-      const [storeHealth, chainHealth, gasHealth, xcmWatcherStatus] = await Promise.all([
+      const [storeHealth, chainHealth, gasHealth, xcmWatcherStatus, indexerProbe] = await Promise.all([
         stateStore.healthCheck?.() ?? { ok: true, backend: stateStore.constructor.name },
         gateway?.healthCheck?.() ?? { ok: false, backend: "blockchain", enabled: false, mode: "disabled" },
         pimlicoClient?.healthCheck?.() ?? { ok: true, backend: "pimlico", enabled: false, mode: "disabled" },
-        service?.xcmSettlementWatcher?.getStatus?.()?.catch?.(() => undefined) ?? undefined
+        service?.xcmSettlementWatcher?.getStatus?.()?.catch?.(() => undefined) ?? undefined,
+        indexerHealthProbe?.().catch(() => ({ ok: false, reason: "indexer_status_unavailable" }))
+          ?? { ok: false, reason: "indexer_status_url_unconfigured" }
       ]);
       const mutationBackendStatus = await getMutationBackendStatus({
         gateway,
@@ -74,9 +77,7 @@ export function createOperationalRoutes({
         blockchainHealth: chainHealth,
         mutationBackendStatus,
         xcmWatcherStatus,
-        // Backend has no direct indexer URL dependency today; the field
-        // resolves to "unavailable" via the helper's default branch.
-        indexerProbe: undefined,
+        indexerProbe,
         gasSponsorHealth: gasHealth
       });
       const productHealth = await getProductHealthSnapshot();
@@ -92,7 +93,8 @@ export function createOperationalRoutes({
         components: {
           stateStore: storeHealth,
           blockchain: chainHealth,
-          gasSponsor: gasHealth
+          gasSponsor: gasHealth,
+          indexer: indexerProbe
         }
       });
       return true;

@@ -7,6 +7,22 @@ import { fileURLToPath } from "node:url";
 const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const REDEPLOY_SCRIPT = join(REPO_ROOT, "scripts/ops/redeploy-indexer.sh");
 
+test("redeploy-indexer emits startup diagnostics before rollback", async () => {
+  const script = await readFile(REDEPLOY_SCRIPT, "utf8");
+  const healthFailure = script.indexOf('if ! wait_for_ok "$HEALTH_URL"');
+  const diagnostics = script.indexOf("dump_indexer_diagnostics", healthFailure);
+  const rollback = script.indexOf("rollback", diagnostics);
+
+  assert.ok(healthFailure > 0, "health failure branch should exist");
+  assert.ok(diagnostics > healthFailure, "failed container logs must be emitted after health failure");
+  assert.ok(rollback > diagnostics, "failed container logs must be emitted before rollback");
+  assert.match(
+    script,
+    /MigrationError/u,
+    "diagnostics must identify Ponder schema ownership/build identity failures"
+  );
+});
+
 // Structural tests for the rollback() function in redeploy-indexer.sh.
 // Mirrors the test pattern in redeploy-backend.test.mjs (#467). The
 // indexer's rollback flow has the same shape as the backend's — git
