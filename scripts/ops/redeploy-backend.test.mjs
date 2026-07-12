@@ -142,3 +142,23 @@ test("redeploy-backend runs the named badge receipt signer preflight before cont
   assert.match(script, /badge-receipt-signer-cert\.pem/u);
   assert.match(script, /badge-receipt-signer-key\.pem/u);
 });
+
+test("redeploy-backend emits bounded failed-container startup logs before rollback", async () => {
+  const script = await readFile(REDEPLOY_SCRIPT, "utf8");
+  const healthFailure = script.lastIndexOf("if ! wait_for_health; then");
+  const emitIdx = script.indexOf("emit_failed_backend_logs", healthFailure);
+  const rollbackIdx = script.indexOf("rollback", healthFailure);
+
+  assert.ok(healthFailure > 0, "backend deploy must have a health failure branch");
+  assert.ok(emitIdx > healthFailure, "health failure must emit startup logs");
+  assert.ok(rollbackIdx > emitIdx, "startup logs must be captured before rollback destroys the failed container");
+  assert.match(script, /BACKEND_LOG_TAIL=\$\{BACKEND_LOG_TAIL:-200\}/u);
+  assert.match(script, /logs --no-color --tail "\$BACKEND_LOG_TAIL" backend/u);
+  assert.match(script, /docker logs --tail "\$BACKEND_LOG_TAIL" agent-backend/u);
+});
+
+test("redeploy-backend rejects an invalid failed-container log tail", async () => {
+  const script = await readFile(REDEPLOY_SCRIPT, "utf8");
+  assert.match(script, /BACKEND_LOG_TAIL must be a positive integer/u);
+  assert.match(script, /\^\[1-9\]\[0-9\]\*\$/u);
+});
