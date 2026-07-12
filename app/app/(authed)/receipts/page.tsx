@@ -34,6 +34,7 @@ import {
   verifyManifestEnvelope,
 } from "@/lib/ui/evidence-verification";
 import { useBadges, useReceiptDetail } from "@/lib/api/hooks";
+import { feedPresence } from "@/lib/api/feed-presence";
 import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
 
 const KPIS: ReceiptsKpi[] = [
@@ -147,10 +148,14 @@ export default function ReceiptsPage() {
   const kpis = useMemo(() => receiptKpis(rows), [rows]);
   const selected = selectedId ? rows.find((r) => r.id === selectedId) ?? null : null;
   const detailRequest = useReceiptDetail(
-    drawerOpen && selected ? selected.sessionId : null,
-    selected?.kind === "run" ? "run" : selected?.kind === "badge" ? "badge" : null
+    drawerOpen && selected?.kind === "badge" ? selected.sessionId : null,
+    selected?.kind === "badge" ? "badge" : null
   );
   const drawerModel = selected ? buildReceiptDrawer(selected, detailRequest.data) : null;
+  const badgesPresence = feedPresence(badgesRequest);
+  const signaturePresence = selected?.kind === "badge"
+    ? feedPresence(detailRequest)
+    : badgesPresence;
 
   const freshness = freshnessFromRequests(badgesRequest);
   const verifyReceiptManifest = () => {
@@ -259,6 +264,8 @@ export default function ReceiptsPage() {
           <ReceiptDrawerBody
             receiptId={selected?.id ?? "unknown-receipt"}
             signatures={drawerModel.signatures}
+            canonicalDocument={drawerModel.canonicalDocument}
+            verificationPresence={signaturePresence}
             evidenceJson={drawerModel.evidenceJson}
             evidenceMeta={drawerModel.evidenceMeta}
             evidenceRawHref={drawerModel.evidenceRawHref}
