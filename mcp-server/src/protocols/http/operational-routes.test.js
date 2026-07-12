@@ -36,6 +36,10 @@ function makeHarness(overrides = {}) {
         return { ok: true, backend: "blockchain", enabled: false, mode: "disabled" };
       }
     },
+    indexerHealthProbe: overrides.indexerHealthProbe ?? (async () => {
+      calls.push(["indexerHealth"]);
+      return { ok: false, reason: "indexer_status_unconfigured" };
+    }),
     metrics: overrides.metrics ?? {
       serialize: () => {
         calls.push(["serializeMetrics"]);
@@ -123,14 +127,68 @@ test("GET /health reports service liveness separately from disabled capabilities
   assert.equal(response.body.rewardBank.decimals, 6);
   assert.equal(response.body.settlement.source, "backend_state_store");
   assert.deepEqual(response.body.components.stateStore, { ok: true, backend: "memory", mode: "memory" });
+  assert.deepEqual(response.body.components.indexer, { ok: false, reason: "indexer_status_unconfigured" });
   assert.ok(response.body.warnings.some((warning) => warning.code === "treasury_mutations_unavailable"));
   assert.deepEqual(calls.map(([name]) => name), [
     "storeHealth",
     "chainHealth",
     "gasHealth",
     "xcmStatus",
+    "indexerHealth",
     "respond"
   ]);
+});
+
+test("GET /health earns synced indexer status only from a fresh checkpoint", async () => {
+  const { response, route } = makeHarness({
+    indexerHealthProbe: async () => ({
+      ok: true,
+      network: "polkadotHubTestnet",
+      blockNumber: 10_901_852,
+      blockTimestamp: Math.floor(Date.now() / 1000),
+      lagBudgetSeconds: 600
+    })
+  });
+
+  await route({
+    request: { method: "GET", headers: {} },
+    response,
+    pathname: "/health"
+  });
+
+  assert.equal(response.body.capabilityHealth.indexer, "synced");
+  assert.equal(response.body.components.indexer.blockNumber, 10_901_852);
+  assert.equal(
+    response.body.warnings.some((warning) => warning.code.startsWith("indexer_")),
+    false
+  );
+});
+
+test("GET /health reports lagging and unavailable indexer probes honestly", async () => {
+  const staleHarness = makeHarness({
+    indexerHealthProbe: async () => ({
+      ok: true,
+      blockNumber: 10,
+      blockTimestamp: Math.floor(Date.now() / 1000) - 601,
+      lagBudgetSeconds: 600
+    })
+  });
+  await staleHarness.route({
+    request: { method: "GET", headers: {} },
+    response: staleHarness.response,
+    pathname: "/health"
+  });
+  assert.equal(staleHarness.response.body.capabilityHealth.indexer, "lagging");
+
+  const downHarness = makeHarness({
+    indexerHealthProbe: async () => ({ ok: false, reason: "indexer_status_http_error" })
+  });
+  await downHarness.route({
+    request: { method: "GET", headers: {} },
+    response: downHarness.response,
+    pathname: "/health"
+  });
+  assert.equal(downHarness.response.body.capabilityHealth.indexer, "unavailable");
 });
 
 test("GET /health degrades when service liveness is not ok", async () => {

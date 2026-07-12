@@ -55,6 +55,7 @@ import { createUsdcLiquidityRoutes } from "./usdc-liquidity-routes.js";
 import { createVerifierRoutes } from "./verifier-routes.js";
 import { createXcmRequestRoutes } from "./xcm-request-routes.js";
 import { makePolicy } from "../../core/builtin-policies.js";
+import { createConfiguredIndexerHealthProbe } from "../../services/indexer-health-probe.js";
 import { createUsdcLiquidityStatusService } from "../../services/usdc-liquidity-status.js";
 
 const {
@@ -89,6 +90,7 @@ metrics.gauge("state_store_backend", "1 when state store backend matches the lab
 
 const { metricsBearerToken, metricsAuthRequired } = resolveMetricsAuthConfig(process.env);
 const { paymentsSendEnabled } = resolvePaymentRouteConfig(process.env);
+const indexerHealthProbe = createConfiguredIndexerHealthProbe(process.env);
 const port = Number(process.env.PORT ?? 8787);
 const readJsonBody = createJsonBodyReader({ maxBytes: httpConfig.maxBodyBytes });
 const resolveCorsHeaders = createCorsHeaderResolver(httpConfig);
@@ -624,6 +626,7 @@ const handlePaymentRoute = createPaymentRoutes({
 const handleOperationalRoute = createOperationalRoutes({
   authConfig,
   gateway,
+  indexerHealthProbe,
   metrics,
   metricsAuthRequired,
   metricsBearerToken,

@@ -215,6 +215,10 @@ tokens minted via `scripts/ops/bootstrap-mainnet-vault.mjs`.
 | `AWS_JWT_KEY_ID` | `op://mainnet-backend/aws-jwt-signer-mainnet/kms-key-id` | see prod-* row | deployer | Mainnet mirror — generated; rotation detail on the matching prod-* row. |
 | `JWT_PUBLIC_KEY_FINGERPRINT` | `op://mainnet-backend/aws-jwt-signer-mainnet/public-key-fingerprint` | see prod-* row | deployer | Mainnet mirror — generated; rotation detail on the matching prod-* row. |
 | `JWT_PUBLIC_KEY_PEM_BASE64` | `op://mainnet-backend/aws-jwt-signer-mainnet/public-key-pem-base64` | see prod-* row | deployer | Mainnet mirror — generated; rotation detail on the matching prod-* row. |
+| `AWS_BADGE_RECEIPT_REGION` | `op://mainnet-backend/aws-badge-receipt-signer-mainnet/aws-region` | see prod-* row | deployer | Mainnet mirror — generated; rotation detail on the matching prod-* row. |
+| `AWS_BADGE_RECEIPT_KEY_ID` | `op://mainnet-backend/aws-badge-receipt-signer-mainnet/kms-key-id` | see prod-* row | deployer | Mainnet mirror — generated; rotation detail on the matching prod-* row. |
+| `BADGE_RECEIPT_PUBLIC_KEY_PEM_BASE64` | `op://mainnet-backend/aws-badge-receipt-signer-mainnet/public-key-pem-base64` | see prod-* row | deployer | Mainnet mirror — generated; rotation detail on the matching prod-* row. |
+| `BADGE_RECEIPT_PUBLIC_KEY_FINGERPRINT` | `op://mainnet-backend/aws-badge-receipt-signer-mainnet/public-key-fingerprint` | see prod-* row | deployer | Mainnet mirror — generated; rotation detail on the matching prod-* row. |
 | `RESEND_API_KEY` | `op://mainnet-backend-external/resend-api-key/password` | see prod-* row | deployer | Mainnet mirror — generated; rotation detail on the matching prod-* row. |
 | `GITHUB_TOKEN` | `op://mainnet-backend-external/github-pat-issue-ingestion/password` | see prod-* row | deployer | Mainnet mirror — generated; rotation detail on the matching prod-* row. |
 | `METRICS_BEARER_TOKEN` | `op://mainnet-backend/metrics-bearer-token/password` | see prod-* row | deployer | Mainnet mirror — generated; rotation detail on the matching prod-* row. |

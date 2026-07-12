@@ -132,9 +132,8 @@ export function resolveServiceHealth({ stateStoreHealth, authConfig }) {
  *   staged; else → unavailable.
  * @param {object} [options.indexerProbe] — optional `{ ok, blockNumber,
  *   blockTimestamp, lagBudgetSeconds }`. When omitted the indexer
- *   capability resolves to `unavailable` with a `reason` field rather
- *   than asserting a state we can't prove. Backend does not currently
- *   hold a direct indexer URL dependency; wiring is a future step.
+ *   capability resolves to `unavailable` rather than asserting a state
+ *   we can't prove.
  * @param {object} [options.gasSponsorHealth] — pimlico.healthCheck()
  *   output. `enabled === true` → enabled, else → disabled.
  */
