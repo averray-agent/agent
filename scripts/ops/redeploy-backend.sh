@@ -18,6 +18,7 @@
 #   HEALTH_URL         URL to poll for readiness (default: https://api.averray.com/health)
 #   HEALTH_TIMEOUT_SEC max seconds to wait for health (default: 120)
 #   HEALTH_INTERVAL_SEC seconds between health polls (default: 5)
+#   BACKEND_LOG_TAIL   failed-container log lines emitted before rollback (default: 200)
 #   SKIP_GIT_UPDATE=1  skip fetch/checkout/pull because caller already pinned the repo
 #   PRE_DEPLOY_SHA     rollback target SHA when SKIP_GIT_UPDATE=1 — supplied by
 #                      deploy-production.sh from the wrapper's pre-pull HEAD so
@@ -34,7 +35,13 @@ BRANCH=${BRANCH:-main}
 HEALTH_URL=${HEALTH_URL:-https://api.averray.com/health}
 HEALTH_TIMEOUT_SEC=${HEALTH_TIMEOUT_SEC:-120}
 HEALTH_INTERVAL_SEC=${HEALTH_INTERVAL_SEC:-5}
+BACKEND_LOG_TAIL=${BACKEND_LOG_TAIL:-200}
 SKIP_GIT_UPDATE=${SKIP_GIT_UPDATE:-0}
+
+if ! [[ "$BACKEND_LOG_TAIL" =~ ^[1-9][0-9]*$ ]]; then
+  echo "BACKEND_LOG_TAIL must be a positive integer; got '$BACKEND_LOG_TAIL'" >&2
+  exit 1
+fi
 
 if [[ ! -d "$APP_ROOT/.git" ]]; then
   echo "Expected repo checkout at $APP_ROOT" >&2
@@ -85,6 +92,19 @@ wait_for_health() {
     sleep "$HEALTH_INTERVAL_SEC"
   done
   return 1
+}
+
+emit_failed_backend_logs() {
+  echo "Backend health gate failed; emitting the last $BACKEND_LOG_TAIL startup log lines before rollback." >&2
+  if ! docker compose \
+    --project-directory "$STACK_ROOT" \
+    -f "$COMPOSE_FILE" \
+    logs --no-color --tail "$BACKEND_LOG_TAIL" backend >&2; then
+    echo "WARNING: docker compose could not read failed backend logs; trying the container name directly." >&2
+    if ! docker logs --tail "$BACKEND_LOG_TAIL" agent-backend >&2; then
+      echo "WARNING: failed backend startup logs were unavailable from compose and agent-backend." >&2
+    fi
+  fi
 }
 
 rollback() {
@@ -191,6 +211,7 @@ compose_up
 
 echo "Waiting for health at $HEALTH_URL (timeout ${HEALTH_TIMEOUT_SEC}s)"
 if ! wait_for_health; then
+  emit_failed_backend_logs
   rollback
 fi
 
