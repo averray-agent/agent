@@ -7,6 +7,10 @@ import type { ReceiptRow } from "@/components/receipts/ReceiptsTable";
 import type { Signer } from "@/components/receipts/SignerAvatars";
 import type { SourceKind } from "@/components/runs/StatePill";
 import { extractReceiptSigners } from "./receipt-signers";
+import {
+  receiptHasSignature,
+  selectCanonicalReceiptDocument,
+} from "@/lib/ui/receipt-signature-verification";
 
 export type ReceiptRowWithMeta = ReceiptRow & {
   sessionId: string;
@@ -17,10 +21,12 @@ export type ReceiptRowWithMeta = ReceiptRow & {
    *  resolvable, so it is surfaced as "Escrow job", never as a block/tx. */
   chainJobId?: string;
   badge?: unknown;
+  listRow?: unknown;
 };
 
 export interface ReceiptDrawerModel {
   signatures: SignatureEntry[];
+  canonicalDocument: Record<string, unknown> | null;
   evidenceJson: string;
   evidenceMeta: string;
   evidenceRawHref: string;
@@ -98,6 +104,7 @@ export function extractReceiptRow(data: unknown): ReceiptRowWithMeta | null {
     evidenceHash: evidenceHash || undefined,
     chainJobId: chainJobId || undefined,
     badge: receiptDocument ?? undefined,
+    listRow: record,
   };
 }
 
@@ -105,11 +112,17 @@ export function buildReceiptDrawer(
   row: ReceiptRowWithMeta,
   detailData: unknown
 ): ReceiptDrawerModel {
-  const detail = detailData && typeof detailData === "object" ? detailData : row.badge;
-  const badge = detail && typeof detail === "object" ? (detail as Record<string, unknown>) : null;
-  const averray = objectField(badge, "averray");
-  const signers = badge ? extractSigners(badge.signers, averray) : row.signers;
-  const raw = badge ?? row.badge ?? {
+  const detailDocument = objectValue(detailData);
+  const embeddedDocument = objectValue(row.badge);
+  const canonicalDocument = selectCanonicalReceiptDocument({
+    kind: row.kind,
+    listRow: row.listRow,
+    detailDocument,
+  });
+  const previewDocument = canonicalDocument ?? embeddedDocument ?? detailDocument;
+  const averray = objectField(previewDocument, "averray");
+  const signers = previewDocument ? extractSigners(previewDocument.signers, averray) : row.signers;
+  const raw = previewDocument ?? {
     sessionId: row.sessionId,
     jobId: row.subject,
     evidenceHash: row.evidenceHash,
@@ -122,6 +135,7 @@ export function buildReceiptDrawer(
   const evidenceJson = `// ${row.kind} receipt JSON — served by ${evidencePath}\n${JSON.stringify(raw, null, 2)}`;
 
   return {
+    canonicalDocument,
     signatures: signers.map((signer) => ({
       role: signer.role,
       address: signer.address,
@@ -130,7 +144,7 @@ export function buildReceiptDrawer(
       identified: signer.identified,
     })),
     evidenceJson,
-    evidenceMeta: `${sizeOf(raw)} · application/json`,
+    evidenceMeta: `${sizeOf(raw)} · ${receiptHasSignature(raw) ? "application/jose+json" : "application/json"}`,
     evidenceRawHref: evidencePath,
     links: [
       { role: "Origin run", ref: text(averray?.jobId, row.subject) },
@@ -143,6 +157,12 @@ export function buildReceiptDrawer(
     ],
     ...(row.source ? { source: receiptSource(row.source) } : {}),
   };
+}
+
+function objectValue(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
 }
 
 /**
@@ -168,6 +188,9 @@ function normalizeUiRow(row: ReceiptRowWithMeta): ReceiptRowWithMeta {
     ...row,
     sessionId: row.sessionId ?? row.subject,
     issuedAtIso: row.issuedAtIso ?? "",
+    listRow: row.listRow ?? (row.kind === "run" && objectValue(row.badge)
+      ? { runReceipt: row.badge }
+      : undefined),
   };
 }
 
