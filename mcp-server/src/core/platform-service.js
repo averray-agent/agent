@@ -125,7 +125,8 @@ export class PlatformService {
       this.stateStore,
       this.eventBus,
       this.getJobDefinition.bind(this),
-      this.logger
+      this.logger,
+      { blockchainGateway: this.blockchainGateway }
     );
   }
 

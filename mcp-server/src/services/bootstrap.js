@@ -303,6 +303,7 @@ export async function createPlatformRuntime() {
     () => new PlatformService(jobs, profiles, accounts, reputations, gateway, stateStore, eventBus)
   );
   platformService.verificationIngestionService.setBadgeReceiptSigner(badgeReceiptSigner);
+  platformService.verificationIngestionService.setPolicyService(policyService);
   if (badgeReceiptSigner) {
     try {
       await backfillBadgeReceiptSignatures({ stateStore, signer: badgeReceiptSigner, logger });

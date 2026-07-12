@@ -57,6 +57,7 @@ export async function runHostedWorkerLoop({
   const rewardAmountInput = parsePositiveDecimalString(env.PRODUCT_PROOF_REWARD_AMOUNT, DEFAULT_REWARD_AMOUNT);
   const rewardAmount = Number(rewardAmountInput);
   const rewardAsset = normalizeAssetSymbol(env.PRODUCT_PROOF_REWARD_ASSET || REQUIRED_ESCROW_ASSET.symbol);
+  const receiptPolicyTag = String(env.PRODUCT_PROOF_RECEIPT_POLICY_TAG ?? "").trim();
   if (rewardAsset !== REQUIRED_ESCROW_ASSET.symbol) {
     throw new Error(
       `Hosted product-proof worker loop requires ${REQUIRED_ESCROW_ASSET.symbol} settlement; got PRODUCT_PROOF_REWARD_ASSET=${rewardAsset}.`
@@ -102,7 +103,8 @@ export async function runHostedWorkerLoop({
     requiresSponsoredGas: true,
     claimTtlSeconds: 3600,
     retryLimit: 1,
-    outputSchemaRef: PRODUCT_PROOF_OUTPUT_SCHEMA_REF
+    outputSchemaRef: PRODUCT_PROOF_OUTPUT_SCHEMA_REF,
+    ...(receiptPolicyTag ? { verification: { receiptPolicyTag } } : {})
   });
   if (created?.id !== jobId) {
     throw new Error(`created job id mismatch: expected ${jobId}, got ${created?.id ?? "missing"}`);
@@ -183,6 +185,14 @@ export async function runHostedWorkerLoop({
   if (badge?.averray?.sessionId !== sessionId || badge?.averray?.jobId !== jobId) {
     throw new Error("badge did not reference the product-proof session and job.");
   }
+  const receiptSigners = Array.isArray(badge?.signers) ? badge.signers : [];
+  if (receiptPolicyTag) {
+    for (const role of ["operator", "verifier"]) {
+      if (!receiptSigners.some((entry) => entry?.role === role && entry?.wallet && entry?.at)) {
+        throw new Error(`co-sign receipt did not include an identified ${role} signer with a timestamp.`);
+      }
+    }
+  }
   if (!Array.isArray(profile?.badges) || !profile.badges.some((entry) => entry.sessionId === sessionId && entry.jobId === jobId)) {
     throw new Error("agent profile did not include the product-proof badge.");
   }
@@ -196,6 +206,8 @@ export async function runHostedWorkerLoop({
     profileUrl,
     verificationOutcome: verification.outcome,
     verificationReasonCode: verification.reasonCode ?? null,
+    receiptPolicyTag: receiptPolicyTag || null,
+    receiptSigners,
     authReadiness,
     settlementReadiness,
     rewardReadiness,
