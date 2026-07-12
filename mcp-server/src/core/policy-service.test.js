@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { PolicyService } from "./policy-service.js";
-import { BUILTIN_POLICIES } from "./builtin-policies.js";
+import { BADGE_RECEIPT_COSIGN_POLICY_TAG, BUILTIN_POLICIES } from "./builtin-policies.js";
 import { MemoryStateStore } from "./state-store.js";
 
 function silentLogger() {
@@ -63,6 +63,14 @@ test("PolicyService — findByTagOrId matches both the tag and the id field", ()
   // unknown
   assert.equal(service.findByTagOrId("does-not-exist"), undefined);
   assert.equal(service.findByTagOrId(undefined), undefined);
+});
+
+test("built-in badge receipt co-sign policy is active and attached to the live proof job", () => {
+  const service = new PolicyService({ seedPolicies: BUILTIN_POLICIES });
+  const policy = service.findByTagOrId(BADGE_RECEIPT_COSIGN_POLICY_TAG);
+  assert.equal(policy?.scope, "co-sign");
+  assert.equal(policy?.state, "Active");
+  assert.ok(policy?.attachedJobs?.some((job) => job.id === "receipt-cosign-live-proof"));
 });
 
 test("PolicyService — every propose() mirrors out to the state-store", async () => {

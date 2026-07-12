@@ -61,7 +61,14 @@ test("runHostedWorkerLoop creates, claims, submits, verifies, and writes evidenc
     },
     async getAgentBadge(id) {
       calls.push(["getAgentBadge", id]);
-      return { averray: { sessionId: id, jobId } };
+      return {
+        averray: { sessionId: id, jobId },
+        signers: [
+          { role: "operator", wallet, at: "2026-01-01T00:00:00.000Z" },
+          { role: "verifier", wallet, at: "2026-01-01T00:05:00.000Z" },
+          { role: "worker", wallet, at: "2026-01-01T00:04:00.000Z" }
+        ]
+      };
     },
     async getAgentProfile(profileWallet) {
       calls.push(["getAgentProfile", profileWallet]);
@@ -76,6 +83,7 @@ test("runHostedWorkerLoop creates, claims, submits, verifies, and writes evidenc
     env: {
       API_BASE_URL: "https://api.example.test/",
       ADMIN_JWT: "token",
+      PRODUCT_PROOF_RECEIPT_POLICY_TAG: "receipt/operator-verifier-cosign@v1",
       PRODUCT_PROOF_EVIDENCE_FILE: evidenceFile
     }
   });
@@ -104,6 +112,9 @@ test("runHostedWorkerLoop creates, claims, submits, verifies, and writes evidenc
   assert.equal(calls[3][1].verifierMode, "benchmark");
   assert.equal(calls[3][1].rewardAsset, "USDC");
   assert.equal(calls[3][1].rewardAmount, 0.1);
+  assert.deepEqual(calls[3][1].verification, {
+    receiptPolicyTag: "receipt/operator-verifier-cosign@v1"
+  });
   assert.equal(calls[6][2].summary, `complete verified output for ${jobId}`);
   assert.deepEqual(calls[7][2], { output: { wrapped_under_submission_output: true } });
   assert.equal(calls[8][2], `product-proof:${jobId}`);
@@ -115,6 +126,8 @@ test("runHostedWorkerLoop creates, claims, submits, verifies, and writes evidenc
   assert.equal(written.jobId, jobId);
   assert.equal(written.sessionId, sessionId);
   assert.equal(written.verificationOutcome, "approved");
+  assert.equal(written.receiptPolicyTag, "receipt/operator-verifier-cosign@v1");
+  assert.deepEqual(written.receiptSigners.map((entry) => entry.role), ["operator", "verifier", "worker"]);
   assert.equal(written.settlementReadiness.settlementReady, true);
   assert.equal(written.rewardReadiness.minBalanceRaw, "70000");
   assert.equal(written.rewardReadiness.rewardRaw, "100000");

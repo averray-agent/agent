@@ -17,10 +17,16 @@ export class VerificationIngestionService {
     // auditable (audit B-11). Default to console so it logs even unwired.
     this.logger = logger || console;
     this.badgeReceiptSigner = options.badgeReceiptSigner;
+    this.blockchainGateway = options.blockchainGateway;
+    this.policyService = options.policyService;
   }
 
   setBadgeReceiptSigner(signer) {
     this.badgeReceiptSigner = signer;
+  }
+
+  setPolicyService(policyService) {
+    this.policyService = policyService;
   }
 
   async ingest(sessionId, verdict) {
@@ -119,15 +125,12 @@ export class VerificationIngestionService {
   async persistBadgeDocument(session, job, verification) {
     if (typeof this.stateStore.putBadgeDocument !== "function") return;
     try {
+      const context = await this.resolveBadgeSignerContext(job);
       const badge = buildBadgeFromSession({
         session,
         job,
         verification,
-        context: {
-          publicBaseUrl: process.env.PUBLIC_BASE_URL,
-          posterAddress: process.env.DEFAULT_POSTER_ADDRESS,
-          verifierAddress: process.env.DEFAULT_VERIFIER_ADDRESS
-        }
+        context
       });
       const document = this.badgeReceiptSigner
         ? { ...badge, signature: await this.badgeReceiptSigner.signDocument(badge) }
@@ -139,6 +142,42 @@ export class VerificationIngestionService {
         "badge_document.persist_failed"
       );
       if (this.badgeReceiptSigner) throw error;
+    }
+  }
+
+  async resolveBadgeSignerContext(job) {
+    const context = { publicBaseUrl: process.env.PUBLIC_BASE_URL };
+    const policyRef = job?.verification?.receiptPolicyTag;
+    if (typeof policyRef !== "string" || !policyRef.trim()) return context;
+
+    const policy = this.policyService?.findByTagOrId?.(policyRef.trim());
+    if (policy?.scope !== "co-sign" || String(policy?.state ?? "").toLowerCase() !== "active") {
+      this.logger.warn?.(
+        { jobId: job?.id, policyRef },
+        "badge_document.co_sign_policy_unavailable"
+      );
+      return context;
+    }
+
+    try {
+      const status = await this.blockchainGateway?.getTreasuryPolicyStatus?.();
+      const roles = status?.roles ?? {};
+      const signerAddress = roles.signerAddress;
+      return {
+        ...context,
+        ...(roles.signerIsSettlementBroker === true && signerAddress
+          ? { posterAddress: signerAddress }
+          : {}),
+        ...(roles.signerIsVerifier === true && signerAddress
+          ? { verifierAddress: signerAddress }
+          : {})
+      };
+    } catch (error) {
+      this.logger.warn?.(
+        { jobId: job?.id, policyRef, error: error?.message },
+        "badge_document.co_sign_identity_unavailable"
+      );
+      return context;
     }
   }
 

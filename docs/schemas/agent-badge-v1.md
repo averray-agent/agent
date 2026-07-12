@@ -31,6 +31,12 @@ published at `/.well-known/badge-receipt-jwks.json`. An absent `signature`
 means the stored document is unsigned; consumers must not treat absence as a
 verification failure or invent a signature for legacy data.
 
+`GET /badges` is an index of receipt summaries. A list row may repeat the
+per-session document's `signature` for discovery, but that detached JWS signs
+the canonical document returned by `GET /badges/:sessionId`—it does **not**
+sign the list-row wrapper. Verifiers must fetch the row's per-session URL and
+canonicalize that document before checking the repeated signature.
+
 ### Exact canonicalization and signing bytes
 
 Third parties reproduce the signed bytes as follows:

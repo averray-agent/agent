@@ -39,6 +39,8 @@ export const OPERATOR_SIGNERS = {
   }
 };
 
+export const BADGE_RECEIPT_COSIGN_POLICY_TAG = "receipt/operator-verifier-cosign@v1";
+
 export function signerApproval(key, state = "signed", at = "2026-04-24 14:08 UTC") {
   const signer = OPERATOR_SIGNERS[key] ?? OPERATOR_SIGNERS.fd2e;
   return {
@@ -104,6 +106,32 @@ export function makePolicy({
 }
 
 export const BUILTIN_POLICIES = [
+  makePolicy({
+    id: "p-receipt-operator-verifier-cosign",
+    tag: BADGE_RECEIPT_COSIGN_POLICY_TAG,
+    scope: "co-sign",
+    scopeLabel: "Co-sign",
+    severity: "gating",
+    state: "Active",
+    revision: 1,
+    activeSince: "2026-07-12",
+    handler: "receipts/operator_verifier_cosign.ts",
+    gates: "Record the live settlement broker and verifier identities on signed badge receipts when both roles are observable.",
+    rooms: ["receipts/*"],
+    attachedJobs: [{ id: "receipt-cosign-live-proof", title: "Receipt co-sign live proof", at: "live" }],
+    lastChange: {
+      text: "Require evidence-backed operator and verifier attribution on co-sign receipt jobs.",
+      author: "fd2e",
+      at: "2026-07-12 00:00 UTC"
+    },
+    rule: {
+      v1: JSON.stringify({
+        kind: "receipt.co_sign",
+        require: { roles: ["operator", "verifier"], identity_source: "live_chain_roles" },
+        on_missing_identity: "omit"
+      }, null, 2)
+    }
+  }),
   makePolicy({
     id: "p-claim-deps-sec-only",
     tag: "claim/deps-sec-only@v4",
