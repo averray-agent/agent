@@ -7,8 +7,10 @@ function positiveNumber(value, fallback) {
 }
 
 export function resolveIndexerHealthProbeConfig(env = process.env) {
+  const statusUrl = env.INDEXER_STATUS_URL?.trim() || undefined;
   return {
-    statusUrl: env.INDEXER_STATUS_URL?.trim() || undefined,
+    statusUrl,
+    detailsUrl: env.INDEXER_DETAILS_URL?.trim() || rootUrlFor(statusUrl),
     timeoutMs: positiveNumber(env.INDEXER_HEALTH_TIMEOUT_MS, DEFAULT_TIMEOUT_MS),
     lagBudgetSeconds: positiveNumber(
       env.INDEXER_LAG_BUDGET_SECONDS,
@@ -19,6 +21,7 @@ export function resolveIndexerHealthProbeConfig(env = process.env) {
 
 export function createIndexerHealthProbe({
   statusUrl,
+  detailsUrl,
   timeoutMs = DEFAULT_TIMEOUT_MS,
   lagBudgetSeconds = DEFAULT_LAG_BUDGET_SECONDS,
   fetchImpl = globalThis.fetch
@@ -58,10 +61,12 @@ export function createIndexerHealthProbe({
       const latest = heads.reduce((current, candidate) => (
         candidate.blockTimestamp > current.blockTimestamp ? candidate : current
       ));
+      const recovery = await readRecoveryDetails(detailsUrl, fetchImpl, timeoutMs);
       return {
         ok: true,
         ...latest,
-        lagBudgetSeconds
+        lagBudgetSeconds,
+        ...(recovery ? { recovery } : {})
       };
     } catch (error) {
       return {
@@ -72,6 +77,32 @@ export function createIndexerHealthProbe({
       };
     }
   };
+}
+
+function rootUrlFor(statusUrl) {
+  if (!statusUrl) return undefined;
+  try {
+    return new URL("/", statusUrl).toString();
+  } catch {
+    return undefined;
+  }
+}
+
+async function readRecoveryDetails(detailsUrl, fetchImpl, timeoutMs) {
+  if (!detailsUrl) return undefined;
+  try {
+    const response = await fetchImpl(detailsUrl, {
+      headers: { accept: "application/json" },
+      signal: AbortSignal.timeout(timeoutMs)
+    });
+    if (!response.ok) return undefined;
+    const payload = await response.json();
+    return payload?.recovery && typeof payload.recovery === "object"
+      ? payload.recovery
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function createConfiguredIndexerHealthProbe(env = process.env, options = {}) {

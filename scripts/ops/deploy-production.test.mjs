@@ -591,6 +591,21 @@ test("indexer schema recovery persists across normal runtime-env renders", async
   );
 });
 
+test("indexer schema self-heal diagnostics persist across runtime-env renders", async () => {
+  const script = await readFile(DEPLOY_SCRIPT, "utf8");
+
+  assert.match(
+    script,
+    /INDEXER_RECOVERY_STATE_FILE=\$\{INDEXER_RECOVERY_STATE_FILE:-"\$DEPLOY_STATE_DIR\/indexer\.recovery\.env"\}/u
+  );
+  assert.match(
+    script,
+    /apply_indexer_database_schema\s+apply_indexer_recovery_metadata/u,
+    "recovery metadata must be restored after the rendered env and schema override"
+  );
+  assert.match(script, /ponder_schema_identity_mismatch/u);
+});
+
 test("deploy wrapper freezes contract surface changes without a manifest update", async () => {
   const { appRoot, stackRoot, fakeBin, stateDir, baseSha, nextSha } = await makeDeployFreezeFixture(
     async (appRoot) => {

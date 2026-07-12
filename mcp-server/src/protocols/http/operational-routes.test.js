@@ -146,7 +146,11 @@ test("GET /health earns synced indexer status only from a fresh checkpoint", asy
       network: "polkadotHubTestnet",
       blockNumber: 10_901_852,
       blockTimestamp: Math.floor(Date.now() / 1000),
-      lagBudgetSeconds: 600
+      lagBudgetSeconds: 600,
+      recovery: {
+        startupError: { code: "ponder_schema_identity_mismatch" },
+        recoveredAt: "2026-07-12T14:34:22Z"
+      }
     })
   });
 
@@ -158,6 +162,10 @@ test("GET /health earns synced indexer status only from a fresh checkpoint", asy
 
   assert.equal(response.body.capabilityHealth.indexer, "synced");
   assert.equal(response.body.components.indexer.blockNumber, 10_901_852);
+  assert.equal(
+    response.body.components.indexer.recovery.startupError.code,
+    "ponder_schema_identity_mismatch"
+  );
   assert.equal(
     response.body.warnings.some((warning) => warning.code.startsWith("indexer_")),
     false

@@ -6,6 +6,7 @@ import schema from "ponder:schema";
 import { decodeCursor, listTerminalXcmOutcomes, normalizeLimit } from "./xcm-outcomes";
 import { cursorForSource, type OutcomeCursorMode } from "./xcm-outcome-cursor";
 import { XcmOutcomePublisherService } from "./xcm-outcome-publisher";
+import { readIndexerRecoveryMetadata } from "./recovery-metadata";
 
 const GRAPHQL_BEARER_TOKEN = process.env.GRAPHQL_BEARER_TOKEN?.trim() || undefined;
 if (!GRAPHQL_BEARER_TOKEN) {
@@ -44,6 +45,7 @@ app.get("/", (c) =>
   c.json({
     status: "ok",
     service: "agent-platform-indexer",
+    recovery: readIndexerRecoveryMetadata(),
     endpoints: ["/graphql", "/xcm/outcomes", "/xcm/outcomes/status"]
   })
 );

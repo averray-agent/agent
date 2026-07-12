@@ -25,7 +25,8 @@ test("indexer probe returns the newest valid checkpoint with its lag budget", as
         older: { block: { number: 10, timestamp: 1_700_000_000 } },
         current: { block: { number: 42, timestamp: 1_700_000_123 } }
       })
-    })
+    }),
+    detailsUrl: undefined
   });
 
   assert.deepEqual(await probe(), {
@@ -35,6 +36,27 @@ test("indexer probe returns the newest valid checkpoint with its lag budget", as
     blockTimestamp: 1_700_000_123,
     lagBudgetSeconds: 321
   });
+});
+
+test("indexer probe carries a prior Ponder startup recovery into health evidence", async () => {
+  const fetchImpl = async (url) => ({
+    ok: true,
+    json: async () => url.endsWith("/status")
+      ? { chain: { block: { number: 42, timestamp: 1_700_000_123 } } }
+      : {
+          recovery: {
+            startupError: { code: "ponder_schema_identity_mismatch" },
+            recoveredAt: "2026-07-12T14:34:22Z"
+          }
+        }
+  });
+  const probe = createIndexerHealthProbe({
+    statusUrl: "http://indexer.test/status",
+    detailsUrl: "http://indexer.test/",
+    fetchImpl
+  });
+
+  assert.equal((await probe()).recovery.startupError.code, "ponder_schema_identity_mismatch");
 });
 
 test("indexer probe never earns ok from malformed checkpoint data", async () => {
@@ -85,6 +107,7 @@ test("indexer probe configuration rejects zero and nonnumeric good-state budgets
     INDEXER_LAG_BUDGET_SECONDS: "not-a-number"
   }), {
     statusUrl: "http://indexer:42069/status",
+    detailsUrl: "http://indexer:42069/",
     timeoutMs: 2_000,
     lagBudgetSeconds: 600
   });

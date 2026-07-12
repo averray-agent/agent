@@ -23,6 +23,50 @@ test("redeploy-indexer emits startup diagnostics before rollback", async () => {
   );
 });
 
+test("redeploy-indexer self-heals only the exact Ponder app-identity mismatch", async () => {
+  const script = await readFile(REDEPLOY_SCRIPT, "utf8");
+
+  assert.ok(
+    script.includes("was previously used by a different Ponder app\\. Drop the schema first, or use a different schema\\."),
+    "self-heal detection must match Ponder's specific app-identity error"
+  );
+  assert.match(
+    script,
+    /mismatch_schema.*configured_schema/u,
+    "the schema named by Ponder must equal the configured DATABASE_SCHEMA"
+  );
+  assert.doesNotMatch(
+    script,
+    /psql[^\n]*(DROP|drop)\s+SCHEMA/u,
+    "self-heal must never execute a schema drop"
+  );
+});
+
+test("redeploy-indexer validates a schema-only backup before selecting a fresh schema", async () => {
+  const script = await readFile(REDEPLOY_SCRIPT, "utf8");
+
+  assert.match(script, /pg_dump[^\n]+--format=custom --schema/u);
+  assert.match(script, /pg_restore --list/u, "the custom archive must be readable before recovery proceeds");
+
+  const fnStart = script.indexOf("\ntry_schema_identity_self_heal() {");
+  const fnEnd = script.indexOf("\n}", fnStart);
+  const fnBody = script.slice(fnStart, fnEnd);
+  const backup = fnBody.indexOf("backup_indexer_schema");
+  const persist = fnBody.indexOf("write_self_heal_state");
+  const restart = fnBody.indexOf("compose_up");
+  assert.ok(backup > 0 && backup < persist, "backup must complete before fresh-schema state is persisted");
+  assert.ok(persist < restart, "fresh-schema state must be persisted before the indexer restarts");
+});
+
+test("redeploy-indexer falls back to rollback for every non-matching startup failure", async () => {
+  const script = await readFile(REDEPLOY_SCRIPT, "utf8");
+  assert.match(
+    script,
+    /if try_schema_identity_self_heal; then[\s\S]*?else\s+rollback\s+fi/u,
+    "generic failures must retain the existing rollback path"
+  );
+});
+
 // Structural tests for the rollback() function in redeploy-indexer.sh.
 // Mirrors the test pattern in redeploy-backend.test.mjs (#467). The
 // indexer's rollback flow has the same shape as the backend's — git

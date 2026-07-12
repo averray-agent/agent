@@ -21,6 +21,7 @@ DEPLOY_OLD_SHA=${DEPLOY_OLD_SHA:-}
 DEPLOY_NEW_SHA=${DEPLOY_NEW_SHA:-}
 DEPLOY_STATE_DIR=${DEPLOY_STATE_DIR:-"$STACK_ROOT/.deploy-state"}
 INDEXER_SCHEMA_STATE_FILE=${INDEXER_SCHEMA_STATE_FILE:-"$DEPLOY_STATE_DIR/indexer.database-schema"}
+INDEXER_RECOVERY_STATE_FILE=${INDEXER_RECOVERY_STATE_FILE:-"$DEPLOY_STATE_DIR/indexer.recovery.env"}
 FRONTEND_TREE_HASH_FILE=${FRONTEND_TREE_HASH_FILE:-"$DEPLOY_STATE_DIR/frontend.built-tree-hash"}
 
 RUN_BACKEND=${RUN_BACKEND:-auto}
@@ -1015,6 +1016,62 @@ apply_indexer_database_schema() {
   fi
 }
 
+apply_indexer_recovery_metadata() {
+  [[ -f "$INDEXER_RECOVERY_STATE_FILE" ]] || return 0
+  [[ -f "$INDEXER_ENV_FILE" ]] || {
+    echo "Missing indexer env file at $INDEXER_ENV_FILE; cannot restore recovery metadata." >&2
+    exit 1
+  }
+
+  local error_code recovered_at previous_schema current_schema backup_file
+  error_code=$(awk -F= '$1=="INDEXER_LAST_STARTUP_ERROR"{print substr($0, index($0,"=")+1)}' "$INDEXER_RECOVERY_STATE_FILE")
+  recovered_at=$(awk -F= '$1=="INDEXER_LAST_RECOVERY_AT"{print substr($0, index($0,"=")+1)}' "$INDEXER_RECOVERY_STATE_FILE")
+  previous_schema=$(awk -F= '$1=="INDEXER_LAST_RECOVERY_FROM_SCHEMA"{print substr($0, index($0,"=")+1)}' "$INDEXER_RECOVERY_STATE_FILE")
+  current_schema=$(awk -F= '$1=="INDEXER_LAST_RECOVERY_TO_SCHEMA"{print substr($0, index($0,"=")+1)}' "$INDEXER_RECOVERY_STATE_FILE")
+  backup_file=$(awk -F= '$1=="INDEXER_LAST_RECOVERY_BACKUP"{print substr($0, index($0,"=")+1)}' "$INDEXER_RECOVERY_STATE_FILE")
+
+  if [[ "$error_code" != "ponder_schema_identity_mismatch" \
+    || ! "$recovered_at" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ \
+    || ! "$backup_file" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+    echo "Invalid indexer recovery metadata in $INDEXER_RECOVERY_STATE_FILE." >&2
+    exit 1
+  fi
+  validate_indexer_schema "$previous_schema"
+  validate_indexer_schema "$current_schema"
+  local persisted_schema
+  persisted_schema=$(read_persisted_indexer_schema)
+  if [[ "$persisted_schema" != "$current_schema" ]]; then
+    echo "Indexer recovery metadata schema ($current_schema) does not match persisted schema ($persisted_schema)." >&2
+    exit 1
+  fi
+
+  local tmp
+  tmp=$(mktemp)
+  trap 'rm -f "$tmp"' RETURN
+  awk '!/^(INDEXER_LAST_STARTUP_ERROR|INDEXER_LAST_RECOVERY_AT|INDEXER_LAST_RECOVERY_FROM_SCHEMA|INDEXER_LAST_RECOVERY_TO_SCHEMA|INDEXER_LAST_RECOVERY_BACKUP)=/' \
+    "$INDEXER_ENV_FILE" > "$tmp"
+  cat "$INDEXER_RECOVERY_STATE_FILE" >> "$tmp"
+
+  local mode owner_group
+  mode=$(stat -c '%a' "$INDEXER_ENV_FILE")
+  owner_group=$(stat -c '%U:%G' "$INDEXER_ENV_FILE")
+  chmod "$mode" "$tmp"
+  case "$INDEXER_ENV_FILE" in
+    /run/agent-stack/*)
+      sudo chown "$owner_group" "$tmp"
+      sudo mv "$tmp" "$INDEXER_ENV_FILE"
+      ;;
+    *)
+      chown "$owner_group" "$tmp" 2>/dev/null || true
+      mv "$tmp" "$INDEXER_ENV_FILE"
+      ;;
+  esac
+  trap - RETURN
+  echo "Restored indexer recovery metadata from $INDEXER_RECOVERY_STATE_FILE."
+  RUN_INDEXER=1
+  RUNTIME_ENV_CHANGED_INDEXER=1
+}
+
 deploy() {
   echo "Production deploy lock acquired: $DEPLOY_LOCK_FILE"
   echo "Updating repo in $APP_ROOT"
@@ -1061,6 +1118,7 @@ deploy() {
   # check-template-matches-manifest.mjs.
   render_runtime_envs
   apply_indexer_database_schema
+  apply_indexer_recovery_metadata
 
   local run_backend=0
   local run_indexer=0

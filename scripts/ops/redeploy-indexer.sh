@@ -31,6 +31,8 @@
 #                         that rollback() doesn't checkout the SAME commit that just
 #                         failed. Falls back to current HEAD if unset.
 #   SKIP_ROLLBACK=1       disable auto-rollback
+#   INDEXER_SCHEMA_SELF_HEAL=0
+#                         disable the exact-match Ponder build-identity recovery
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -48,6 +50,13 @@ INDEXER_LOG_TAIL=${INDEXER_LOG_TAIL:-120}
 WAIT_FOR_READY=${WAIT_FOR_READY:-1}
 ROLLBACK_WAIT_FOR_READY=${ROLLBACK_WAIT_FOR_READY:-0}
 SKIP_GIT_UPDATE=${SKIP_GIT_UPDATE:-0}
+INDEXER_SCHEMA_SELF_HEAL=${INDEXER_SCHEMA_SELF_HEAL:-1}
+INDEXER_ENV_FILE=${INDEXER_ENV_FILE:-/run/agent-stack/indexer.env}
+DEPLOY_STATE_DIR=${DEPLOY_STATE_DIR:-"$STACK_ROOT/.deploy-state"}
+INDEXER_SCHEMA_STATE_FILE=${INDEXER_SCHEMA_STATE_FILE:-"$DEPLOY_STATE_DIR/indexer.database-schema"}
+INDEXER_RECOVERY_STATE_FILE=${INDEXER_RECOVERY_STATE_FILE:-"$DEPLOY_STATE_DIR/indexer.recovery.env"}
+INDEXER_SCHEMA_BACKUP_DIR=${INDEXER_SCHEMA_BACKUP_DIR:-"$STACK_ROOT/backups/postgres"}
+LAST_INDEXER_LOG=""
 
 if [[ ! -d "$APP_ROOT/.git" ]]; then
   echo "Expected repo checkout at $APP_ROOT" >&2
@@ -99,14 +108,13 @@ dump_indexer_diagnostics() {
     ps indexer || true
 
   echo "Indexer diagnostics: last ${INDEXER_LOG_TAIL} indexer log lines"
-  local indexer_log
-  indexer_log=$(
+  LAST_INDEXER_LOG=$(
     docker compose \
       --project-directory "$STACK_ROOT" \
       -f "$COMPOSE_FILE" \
       logs --tail="$INDEXER_LOG_TAIL" indexer 2>&1 || true
   )
-  printf '%s\n' "$indexer_log"
+  printf '%s\n' "$LAST_INDEXER_LOG"
 
   echo "Indexer diagnostics: last ${INDEXER_LOG_TAIL} Caddy log lines"
   docker compose \
@@ -128,7 +136,7 @@ dump_indexer_diagnostics() {
   echo "::group::Indexer fatal-pattern summary"
   local matches
   matches=$(
-    printf '%s\n' "$indexer_log" \
+    printf '%s\n' "$LAST_INDEXER_LOG" \
       | grep -E 'MigrationError|TypeError|uncaughtException|unhandledRejection|FATAL|Cannot find module|ECONNREFUSED.*postgres|postgres.*ECONNREFUSED|start_block.*greater than head' \
       | head -20 \
       || true
@@ -140,6 +148,150 @@ dump_indexer_diagnostics() {
     echo "(no known fatal-startup patterns matched in the last ${INDEXER_LOG_TAIL} indexer log lines)"
   fi
   echo "::endgroup::"
+}
+
+validate_schema_name() {
+  local schema="$1"
+  [[ ${#schema} -le 63 && "$schema" =~ ^[a-z_][a-z0-9_]*$ ]]
+}
+
+configured_indexer_schema() {
+  [[ -f "$INDEXER_ENV_FILE" ]] || return 1
+  awk -F= '/^DATABASE_SCHEMA=/{value=$0; sub(/^[^=]*=/, "", value)} END{print value}' "$INDEXER_ENV_FILE"
+}
+
+identity_mismatch_schema() {
+  printf '%s\n' "$LAST_INDEXER_LOG" \
+    | sed -n 's/.*MigrationError: Schema "\([a-z_][a-z0-9_]*\)" was previously used by a different Ponder app\. Drop the schema first, or use a different schema\..*/\1/p' \
+    | sort -u
+}
+
+backup_indexer_schema() {
+  local schema="$1"
+  local stamp="$2"
+  local backup="$INDEXER_SCHEMA_BACKUP_DIR/indexer-schema-${schema}-${stamp}.dump"
+  local tmp="${backup}.tmp.$$"
+
+  mkdir -p "$INDEXER_SCHEMA_BACKUP_DIR" || return 1
+  [[ ! -e "$backup" ]] || return 1
+  if ! docker compose \
+    --project-directory "$STACK_ROOT" \
+    -f "$COMPOSE_FILE" \
+    exec -T postgres sh -c 'exec pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom --schema="$1"' sh "$schema" \
+    > "$tmp"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  if [[ ! -s "$tmp" ]] || ! docker compose \
+    --project-directory "$STACK_ROOT" \
+    -f "$COMPOSE_FILE" \
+    exec -T postgres pg_restore --list < "$tmp" >/dev/null; then
+    rm -f "$tmp"
+    return 1
+  fi
+  mv "$tmp" "$backup"
+  printf '%s\n' "$backup"
+}
+
+write_self_heal_state() {
+  local previous_schema="$1"
+  local fresh_schema="$2"
+  local recovered_at="$3"
+  local backup_file="$4"
+
+  [[ -f "$INDEXER_ENV_FILE" ]] || return 1
+  validate_schema_name "$previous_schema" || return 1
+  validate_schema_name "$fresh_schema" || return 1
+  [[ "$recovered_at" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || return 1
+  [[ "$(basename "$backup_file")" =~ ^[A-Za-z0-9_.-]+$ ]] || return 1
+  mkdir -p "$DEPLOY_STATE_DIR" || return 1
+
+  local state_tmp="${INDEXER_RECOVERY_STATE_FILE}.tmp.$$"
+  local schema_tmp="${INDEXER_SCHEMA_STATE_FILE}.tmp.$$"
+  {
+    printf 'INDEXER_LAST_STARTUP_ERROR=ponder_schema_identity_mismatch\n'
+    printf 'INDEXER_LAST_RECOVERY_AT=%s\n' "$recovered_at"
+    printf 'INDEXER_LAST_RECOVERY_FROM_SCHEMA=%s\n' "$previous_schema"
+    printf 'INDEXER_LAST_RECOVERY_TO_SCHEMA=%s\n' "$fresh_schema"
+    printf 'INDEXER_LAST_RECOVERY_BACKUP=%s\n' "$(basename "$backup_file")"
+  } > "$state_tmp"
+  printf '%s\n' "$fresh_schema" > "$schema_tmp"
+  mv "$schema_tmp" "$INDEXER_SCHEMA_STATE_FILE"
+  mv "$state_tmp" "$INDEXER_RECOVERY_STATE_FILE"
+
+  local env_tmp
+  env_tmp=$(mktemp)
+  awk '!/^(DATABASE_SCHEMA|INDEXER_LAST_STARTUP_ERROR|INDEXER_LAST_RECOVERY_AT|INDEXER_LAST_RECOVERY_FROM_SCHEMA|INDEXER_LAST_RECOVERY_TO_SCHEMA|INDEXER_LAST_RECOVERY_BACKUP)=/' \
+    "$INDEXER_ENV_FILE" > "$env_tmp"
+  printf 'DATABASE_SCHEMA=%s\n' "$fresh_schema" >> "$env_tmp"
+  cat "$INDEXER_RECOVERY_STATE_FILE" >> "$env_tmp"
+
+  local mode owner_group
+  mode=$(stat -c '%a' "$INDEXER_ENV_FILE")
+  owner_group=$(stat -c '%U:%G' "$INDEXER_ENV_FILE")
+  chmod "$mode" "$env_tmp"
+  sudo chown "$owner_group" "$env_tmp"
+  sudo mv "$env_tmp" "$INDEXER_ENV_FILE"
+
+}
+
+reapply_persisted_self_heal_state() {
+  [[ -f "$INDEXER_RECOVERY_STATE_FILE" && -f "$INDEXER_SCHEMA_STATE_FILE" ]] || return 0
+
+  local previous_schema fresh_schema metadata_schema recovered_at backup_file error_code
+  error_code=$(awk -F= '$1=="INDEXER_LAST_STARTUP_ERROR"{print substr($0, index($0,"=")+1)}' "$INDEXER_RECOVERY_STATE_FILE")
+  recovered_at=$(awk -F= '$1=="INDEXER_LAST_RECOVERY_AT"{print substr($0, index($0,"=")+1)}' "$INDEXER_RECOVERY_STATE_FILE")
+  previous_schema=$(awk -F= '$1=="INDEXER_LAST_RECOVERY_FROM_SCHEMA"{print substr($0, index($0,"=")+1)}' "$INDEXER_RECOVERY_STATE_FILE")
+  metadata_schema=$(awk -F= '$1=="INDEXER_LAST_RECOVERY_TO_SCHEMA"{print substr($0, index($0,"=")+1)}' "$INDEXER_RECOVERY_STATE_FILE")
+  fresh_schema=$(tr -d '[:space:]' < "$INDEXER_SCHEMA_STATE_FILE")
+  backup_file=$(awk -F= '$1=="INDEXER_LAST_RECOVERY_BACKUP"{print substr($0, index($0,"=")+1)}' "$INDEXER_RECOVERY_STATE_FILE")
+
+  [[ "$error_code" == "ponder_schema_identity_mismatch" ]] || return 1
+  validate_schema_name "$previous_schema" || return 1
+  validate_schema_name "$fresh_schema" || return 1
+  [[ "$metadata_schema" == "$fresh_schema" ]] || return 1
+  [[ "$recovered_at" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || return 1
+  [[ "$backup_file" =~ ^[A-Za-z0-9_.-]+$ ]] || return 1
+  write_self_heal_state "$previous_schema" "$fresh_schema" "$recovered_at" "$backup_file"
+}
+
+try_schema_identity_self_heal() {
+  [[ "$INDEXER_SCHEMA_SELF_HEAL" == "1" ]] || return 1
+
+  local configured_schema mismatch_schema mismatch_count
+  configured_schema=$(configured_indexer_schema) || return 1
+  mismatch_schema=$(identity_mismatch_schema)
+  mismatch_count=$(printf '%s\n' "$mismatch_schema" | awk 'NF{count++} END{print count+0}')
+  if [[ "$mismatch_count" != "1" || "$mismatch_schema" != "$configured_schema" ]]; then
+    return 1
+  fi
+  if ! validate_schema_name "$configured_schema"; then
+    echo "Refusing indexer schema self-heal: invalid configured schema name: $configured_schema" >&2
+    return 1
+  fi
+
+  local stamp recovered_at fresh_schema backup_file
+  stamp=$(date -u +%Y%m%dT%H%M%SZ)
+  recovered_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  fresh_schema="agent_indexer_$(date -u +%Y%m%d%H%M%S)"
+  validate_schema_name "$fresh_schema" || return 1
+
+  echo "Exact Ponder build-identity mismatch detected for $configured_schema."
+  echo "Creating schema-only backup before self-heal; the old schema will not be modified or dropped."
+  backup_file=$(backup_indexer_schema "$configured_schema" "$stamp") || {
+    echo "Indexer schema self-heal refused: schema-only backup failed validation." >&2
+    return 1
+  }
+  write_self_heal_state "$configured_schema" "$fresh_schema" "$recovered_at" "$backup_file" || {
+    echo "Indexer schema self-heal refused: could not persist the fresh schema and recovery metadata." >&2
+    return 1
+  }
+
+  echo "Indexer schema self-heal prepared:"
+  echo "  previous_schema=$configured_schema (preserved)"
+  echo "  fresh_schema=$fresh_schema"
+  echo "  backup=$backup_file"
+  compose_up
 }
 
 wait_for_ok() {
@@ -236,6 +388,11 @@ rollback() {
     echo "  This is OK on a not-yet-bootstrapped VPS but suspicious on a deployed one." >&2
   fi
 
+  if ! reapply_persisted_self_heal_state; then
+    echo "Rollback could not restore persisted indexer schema-recovery metadata." >&2
+    exit 1
+  fi
+
   compose_up
   if wait_for_ok "$HEALTH_URL" "$HEALTH_TIMEOUT_SEC" "Health check"; then
     if [[ "$ROLLBACK_WAIT_FOR_READY" == "1" ]]; then
@@ -268,7 +425,15 @@ compose_up
 echo "Waiting for indexer health at $HEALTH_URL (timeout ${HEALTH_TIMEOUT_SEC}s)"
 if ! wait_for_ok "$HEALTH_URL" "$HEALTH_TIMEOUT_SEC" "Health check"; then
   dump_indexer_diagnostics
-  rollback
+  if try_schema_identity_self_heal; then
+    echo "Waiting for indexer health after isolated-schema self-heal."
+    if ! wait_for_ok "$HEALTH_URL" "$HEALTH_TIMEOUT_SEC" "Self-heal health check"; then
+      dump_indexer_diagnostics
+      rollback
+    fi
+  else
+    rollback
+  fi
 fi
 
 if [[ "$HEALTH_STABILITY_SEC" != "0" ]]; then
