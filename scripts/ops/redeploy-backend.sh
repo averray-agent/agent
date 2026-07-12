@@ -46,7 +46,7 @@ if [[ ! -f "$COMPOSE_FILE" ]]; then
   exit 1
 fi
 
-for cmd in git docker curl; do
+for cmd in git docker curl sudo; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "Missing required command: $cmd" >&2
     exit 1
@@ -177,6 +177,14 @@ fi
 
 NEW_SHA=$(git -C "$APP_ROOT" rev-parse HEAD)
 echo "Deploying SHA: $NEW_SHA"
+
+echo "Preflighting dedicated badge receipt signer consumer paths"
+env -u PREFLIGHT_NO_SUDO -u PREFLIGHT_EXPECTED_OWNER_MODE \
+  "$APP_ROOT/scripts/ops/preflight-badge-receipt-signer.sh" \
+  "$APP_ROOT/deploy/aws-config.badge-receipt-profile" \
+  /etc/agent-stack/aws-config \
+  /etc/agent-stack/roles-anywhere/badge-receipt-signer-cert.pem \
+  /etc/agent-stack/roles-anywhere/badge-receipt-signer-key.pem
 
 echo "Rebuilding backend container"
 compose_up

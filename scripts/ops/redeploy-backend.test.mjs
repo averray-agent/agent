@@ -128,3 +128,17 @@ test("redeploy-backend rollback documents the skip path for not-yet-bootstrapped
     "rollback should log when it skips the env re-render (and why)",
   );
 });
+
+test("redeploy-backend runs the named badge receipt signer preflight before container replacement", async () => {
+  const script = await readFile(REDEPLOY_SCRIPT, "utf8");
+  const preflightIdx = script.indexOf("preflight-badge-receipt-signer.sh");
+  const rebuildIdx = script.indexOf('echo "Rebuilding backend container"');
+
+  assert.ok(preflightIdx > 0, "backend deploy must invoke the badge receipt signer preflight");
+  assert.ok(rebuildIdx > preflightIdx, "preflight must run before container replacement");
+  assert.match(script, /env -u PREFLIGHT_NO_SUDO/u, "production must not inherit the test sudo bypass");
+  assert.match(script, /-u PREFLIGHT_EXPECTED_OWNER_MODE/u, "production must require root:root mode 0400");
+  assert.match(script, /\/etc\/agent-stack\/aws-config/u);
+  assert.match(script, /badge-receipt-signer-cert\.pem/u);
+  assert.match(script, /badge-receipt-signer-key\.pem/u);
+});
