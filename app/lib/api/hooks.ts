@@ -55,6 +55,12 @@ export const useAgent = (wallet: string | null) =>
 export const useBadges = () => useApi("/badges");
 export const useBadge = (sessionId: string | null) =>
   useApi(sessionId ? `/badges/${encodeURIComponent(sessionId)}` : null);
+export const useReceiptDetail = (sessionId: string | null, kind: "run" | "badge" | null) =>
+  useApi(
+    sessionId
+      ? `/badges/${encodeURIComponent(sessionId)}${kind === "run" ? "/run" : ""}`
+      : null
+  );
 export const useAlerts = () => useApi("/alerts");
 export const useAudit = () => useApi("/audit");
 export const usePolicies = () => useApi("/policies");

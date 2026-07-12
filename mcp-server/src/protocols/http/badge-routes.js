@@ -18,6 +18,14 @@ export function createListBadgeReceipts({
     const receipts = [];
     for (const session of sessions) {
       try {
+        const storedRunReceipt = await stateStore.getRunReceiptDocument?.(session.sessionId);
+        if (storedRunReceipt) receipts.push(buildRunReceiptRow(storedRunReceipt, { session }));
+      } catch {
+        // Run and badge rows are isolated: one malformed document must not
+        // suppress the other receipt for an approved session.
+      }
+
+      try {
         const storedBadge = await stateStore.getBadgeDocument?.(session.sessionId);
         if (storedBadge) {
           receipts.push(buildBadgeReceipt(storedBadge, { session }));
@@ -69,6 +77,29 @@ function buildBadgeReceipt(badge, { session, verification, context } = {}) {
   };
 }
 
+function buildRunReceiptRow(document, { session } = {}) {
+  const verdict = document.verdict ?? {};
+  const timestamps = document.timestamps ?? {};
+  return {
+    sessionId: document.sessionId ?? session?.sessionId,
+    jobId: document.jobId ?? session?.jobId,
+    worker: document.worker ?? session?.wallet,
+    kind: "run",
+    issuedAt: timestamps.verifiedAt ?? session?.resolvedAt ?? session?.rejectedAt ?? session?.updatedAt,
+    outcome: verdict.outcome,
+    verdict: verdict.outcome,
+    reasonCode: verdict.reasonCode,
+    signers: Array.isArray(document.signers) ? document.signers : [],
+    evidenceHash: verdict.evidenceHash,
+    policy: verdict.policyTags?.[0],
+    policyTags: Array.isArray(verdict.policyTags) ? verdict.policyTags : [],
+    blockRef: document.chainJobId,
+    canonicalUrl: document.canonicalUrl,
+    ...(document.signature ? { signature: document.signature } : {}),
+    runReceipt: document
+  };
+}
+
 async function signBadgeDocument(badge, signer) {
   if (!signer) return badge;
   return { ...badge, signature: await signer.signDocument(badge) };
@@ -100,6 +131,18 @@ export function createBadgeRoutes({
       respond(response, 200, await listBadgeReceipts(parseLimit(url, 100, 500)), {
         "cache-control": "public, max-age=30"
       });
+      return true;
+    }
+
+    if (request.method === "GET" && pathname.startsWith("/badges/") && pathname.endsWith("/run")) {
+      const sessionId = decodeURIComponent(pathname.slice("/badges/".length, -"/run".length));
+      if (!sessionId) throw new ValidationError("sessionId path segment is required.");
+      const storedRunReceipt = await stateStore?.getRunReceiptDocument?.(sessionId);
+      if (!storedRunReceipt) {
+        respond(response, 404, { status: "not_found", kind: "run", sessionId });
+        return true;
+      }
+      respond(response, 200, storedRunReceipt, { "cache-control": "public, max-age=60" });
       return true;
     }
 

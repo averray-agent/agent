@@ -68,6 +68,8 @@ export function extractReceiptRow(data: unknown): ReceiptRowWithMeta | null {
   if (isUiReceiptRow(record)) return normalizeUiRow(record as unknown as ReceiptRowWithMeta);
 
   const badge = objectField(record, "badge");
+  const runReceipt = objectField(record, "runReceipt");
+  const receiptDocument = badge ?? runReceipt;
   const averray = objectField(badge, "averray") ?? objectField(record, "averray");
   const sessionId = text(record.sessionId, text(averray?.sessionId, ""));
   if (!sessionId) return null;
@@ -90,12 +92,12 @@ export function extractReceiptRow(data: unknown): ReceiptRowWithMeta | null {
     subjectSub: subjectSub(record, averray),
     signers,
     policy: policyRef(record, averray),
-    size: sizeOf(badge ?? record),
+    size: sizeOf(receiptDocument ?? record),
     signedAt: displayTime(issuedAtIso),
     issuedAtIso,
     evidenceHash: evidenceHash || undefined,
     chainJobId: chainJobId || undefined,
-    badge: badge ?? undefined,
+    badge: receiptDocument ?? undefined,
   };
 }
 
@@ -114,7 +116,10 @@ export function buildReceiptDrawer(
     chainJobId: row.chainJobId,
     signers: row.signers,
   };
-  const evidenceJson = `// badge JSON — served by /badges/:sessionId\n${JSON.stringify(raw, null, 2)}`;
+  const evidencePath = row.kind === "run"
+    ? `/badges/${encodeURIComponent(row.sessionId)}/run`
+    : `/badges/${encodeURIComponent(row.sessionId)}`;
+  const evidenceJson = `// ${row.kind} receipt JSON — served by ${evidencePath}\n${JSON.stringify(raw, null, 2)}`;
 
   return {
     signatures: signers.map((signer) => ({
@@ -126,7 +131,7 @@ export function buildReceiptDrawer(
     })),
     evidenceJson,
     evidenceMeta: `${sizeOf(raw)} · application/json`,
-    evidenceRawHref: `/badges/${row.sessionId}`,
+    evidenceRawHref: evidencePath,
     links: [
       { role: "Origin run", ref: text(averray?.jobId, row.subject) },
       { role: "Evidence", ref: text(averray?.evidenceHash, row.evidenceHash ?? "not indexed") },

@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/averray-agent/agent/main/docs/schemas/run-receipt-v1.json",
+  "title": "Averray Run Verdict Receipt v1",
+  "type": "object",
+  "required": ["schemaVersion", "kind", "receiptType", "attestation", "sessionId", "jobId", "worker", "verifier", "verdict", "timestamps", "signers"],
+  "properties": {
+    "schemaVersion": { "const": "averray.run-receipt.v1" },
+    "kind": { "const": "run" },
+    "receiptType": { "const": "verification_verdict" },
+    "attestation": { "type": "string" },
+    "sessionId": { "type": "string", "minLength": 1 },
+    "jobId": { "type": "string", "minLength": 1 },
+    "worker": { "$ref": "#/$defs/address" },
+    "chainJobId": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "verifier": {
+      "type": "object",
+      "required": ["handler", "version"],
+      "properties": {
+        "mode": { "type": "string", "minLength": 1 },
+        "handler": { "type": "string", "minLength": 1 },
+        "version": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "verdict": {
+      "type": "object",
+      "required": ["outcome", "reasonCode", "evidenceHash", "policyTags"],
+      "properties": {
+        "outcome": { "enum": ["approved", "rejected"] },
+        "reasonCode": { "type": "string", "minLength": 1 },
+        "evidenceHash": { "type": "string", "pattern": "^0x[0-9a-fA-F]{64}$" },
+        "policyTags": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true }
+      },
+      "additionalProperties": false
+    },
+    "timestamps": {
+      "type": "object",
+      "required": ["claimedAt", "submittedAt", "verifiedAt"],
+      "properties": {
+        "claimedAt": { "type": "string", "format": "date-time" },
+        "submittedAt": { "type": "string", "format": "date-time" },
+        "verifiedAt": { "type": "string", "format": "date-time" }
+      },
+      "additionalProperties": false
+    },
+    "signers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["role", "wallet", "at"],
+        "properties": {
+          "role": { "enum": ["operator", "verifier", "worker"] },
+          "wallet": { "$ref": "#/$defs/address" },
+          "at": { "type": "string", "format": "date-time" },
+          "status": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      }
+    },
+    "canonicalUrl": { "type": "string", "format": "uri" },
+    "signature": { "$ref": "agent-badge-v1.json#/properties/signature" }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "address": { "type": "string", "pattern": "^0x(?!0{40}$)[0-9a-f]{40}$" }
+  }
+}

@@ -919,10 +919,20 @@ test("http smoke: /badges/:sessionId returns schema-compliant JSON for approved 
     assert.match(badge.averray.evidenceHash, /^0x[a-fA-F0-9]{64}$/);
     assert.ok(Array.isArray(badge.attributes) && badge.attributes.length >= 3);
 
+    const runReceiptResponse = await fetch(`${base}/badges/${encodeURIComponent(sessionId)}/run`);
+    assert.equal(runReceiptResponse.status, 200);
+    const runReceipt = await runReceiptResponse.json();
+    assert.equal(runReceipt.kind, "run");
+    assert.equal(runReceipt.verdict.outcome, "approved");
+    assert.equal(runReceipt.sessionId, sessionId);
+
     const listResponse = await fetch(`${base}/badges`);
     assert.equal(listResponse.status, 200);
     const receipts = await listResponse.json();
-    assert.ok(receipts.some((receipt) => receipt.sessionId === sessionId));
+    assert.deepEqual(
+      receipts.filter((receipt) => receipt.sessionId === sessionId).map((receipt) => receipt.kind).sort(),
+      ["badge", "run"]
+    );
   });
 });
 

@@ -77,6 +77,21 @@ test("MemoryStateStore badge documents are write-once and cloned", async () => {
   assert.equal((await store.getBadgeDocument("session-1")).averray.category, "security");
 });
 
+test("MemoryStateStore run receipt documents are write-once and cloned", async () => {
+  const store = new MemoryStateStore();
+  const original = { schemaVersion: "averray.run-receipt.v1", verdict: { outcome: "approved" } };
+  const replacement = { schemaVersion: "averray.run-receipt.v1", verdict: { outcome: "rejected" } };
+
+  await store.putRunReceiptDocument("session-run", original);
+  original.verdict.outcome = "mutated";
+  await store.putRunReceiptDocument("session-run", replacement);
+
+  const loaded = await store.getRunReceiptDocument("session-run");
+  assert.equal(loaded.verdict.outcome, "approved");
+  loaded.verdict.outcome = "changed-after-read";
+  assert.equal((await store.getRunReceiptDocument("session-run")).verdict.outcome, "approved");
+});
+
 test("MemoryStateStore upgrades an unsigned badge with one signature only", async () => {
   const store = new MemoryStateStore();
   await store.putBadgeDocument("session-sign", { averray: { sessionId: "session-sign", category: "security" } });

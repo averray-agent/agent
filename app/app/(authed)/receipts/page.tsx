@@ -33,7 +33,7 @@ import {
   buildReceiptManifestPayload,
   verifyManifestEnvelope,
 } from "@/lib/ui/evidence-verification";
-import { useBadge, useBadges } from "@/lib/api/hooks";
+import { useBadges, useReceiptDetail } from "@/lib/api/hooks";
 import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
 
 const KPIS: ReceiptsKpi[] = [
@@ -106,7 +106,6 @@ const SHAPES: ShapeEntry[] = [
     title: "run-receipt",
     body: "The agent's output for a claimed run. Carries the diff or artifact hash, the verifier's pass/fail verdict, and the policy that was checked.",
     fields: ["run_id", "artifact_hash", "verdict"],
-    emitted: false,
   },
   {
     kind: "settle",
@@ -147,7 +146,10 @@ export default function ReceiptsPage() {
   const rows = liveRows;
   const kpis = useMemo(() => receiptKpis(rows), [rows]);
   const selected = selectedId ? rows.find((r) => r.id === selectedId) ?? null : null;
-  const detailRequest = useBadge(drawerOpen && selected ? selected.sessionId : null);
+  const detailRequest = useReceiptDetail(
+    drawerOpen && selected ? selected.sessionId : null,
+    selected?.kind === "run" ? "run" : selected?.kind === "badge" ? "badge" : null
+  );
   const drawerModel = selected ? buildReceiptDrawer(selected, detailRequest.data) : null;
 
   const freshness = freshnessFromRequests(badgesRequest);
