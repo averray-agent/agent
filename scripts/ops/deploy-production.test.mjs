@@ -122,6 +122,82 @@ test("deploy wrapper retries frontend after an earlier failed indexer deploy", a
   assert.equal((await readFile(join(stateDir, "frontend.last-good"), "utf8")).trim(), indexerFixSha);
 });
 
+test("root workspace lock changes do not restart the independently packaged indexer", async () => {
+  const root = await mkdtemp(join(tmpdir(), "deploy-indexer-gate-"));
+  const appRoot = join(root, "app");
+  const stackRoot = join(root, "stack");
+  const fakeBin = join(root, "bin");
+  const stateDir = join(root, "state");
+  const deployLog = join(root, "deploy.log");
+
+  await mkdir(join(appRoot, "scripts/ops"), { recursive: true });
+  await mkdir(join(appRoot, "indexer"), { recursive: true });
+  await mkdir(stackRoot, { recursive: true });
+  await mkdir(fakeBin, { recursive: true });
+  await writeFile(join(stackRoot, "docker-compose.yml"), "services: {}\n");
+  await copyFile(DEPLOY_SCRIPT, join(appRoot, "scripts/ops/deploy-production.sh"));
+  await chmod(join(appRoot, "scripts/ops/deploy-production.sh"), 0o755);
+  await writeExecutable(join(appRoot, "scripts/ops/redeploy-indexer.sh"), [
+    "#!/usr/bin/env bash",
+    "set -euo pipefail",
+    "echo indexer >> \"$DEPLOY_LOG\""
+  ].join("\n"));
+  for (const command of ["docker", "curl", "npm", "flock", "jq"]) {
+    await writeExecutable(join(fakeBin, command), "#!/usr/bin/env bash\nexit 0\n");
+  }
+
+  git(appRoot, "init");
+  git(appRoot, "config", "user.email", "test@example.com");
+  git(appRoot, "config", "user.name", "Deploy Test");
+  await writeFile(join(appRoot, "package-lock.json"), '{"lockfileVersion":3,"packages":{}}\n');
+  await writeFile(join(appRoot, "indexer/package.json"), '{"name":"indexer","dependencies":{}}\n');
+  git(appRoot, "add", ".");
+  git(appRoot, "commit", "-m", "base");
+  const baseSha = revParse(appRoot, "HEAD");
+
+  await writeFile(
+    join(appRoot, "package-lock.json"),
+    '{"lockfileVersion":3,"packages":{"app/node_modules/canonicalize":{"version":"3.0.0"}}}\n'
+  );
+  git(appRoot, "add", ".");
+  git(appRoot, "commit", "-m", "app dependency");
+  const appDependencySha = revParse(appRoot, "HEAD");
+
+  const env = (oldSha, newSha) => ({
+    PATH: `${fakeBin}:${process.env.PATH}`,
+    STACK_ROOT: stackRoot,
+    COMPOSE_FILE: join(stackRoot, "docker-compose.yml"),
+    DEPLOY_LOCK_FILE: join(root, "deploy.lock"),
+    DEPLOY_STATE_DIR: stateDir,
+    DEPLOY_OLD_SHA: oldSha,
+    DEPLOY_NEW_SHA: newSha,
+    DEPLOY_LOG: deployLog,
+    RUN_BACKEND: "0",
+    RUN_INDEXER: "auto",
+    RUN_FRONTEND: "0",
+    RUN_SITE: "0",
+    RUN_CADDY: "0",
+    RUN_SMOKE: "0"
+  });
+
+  const appOnlyRun = runDeploy(appRoot, env(baseSha, appDependencySha));
+  assert.equal(appOnlyRun.status, 0, appOnlyRun.stderr);
+  assert.match(appOnlyRun.stdout, /Skipping indexer deploy/u);
+  assert.equal(await readFile(deployLog, "utf8").catch(() => ""), "");
+
+  await writeFile(
+    join(appRoot, "indexer/package.json"),
+    '{"name":"indexer","dependencies":{"ponder":"0.16.6"}}\n'
+  );
+  git(appRoot, "add", ".");
+  git(appRoot, "commit", "-m", "indexer dependency");
+  const indexerDependencySha = revParse(appRoot, "HEAD");
+
+  const indexerRun = runDeploy(appRoot, env(appDependencySha, indexerDependencySha));
+  assert.equal(indexerRun.status, 0, indexerRun.stderr);
+  assert.match(await readFile(deployLog, "utf8"), /^indexer$/m);
+});
+
 test("deploy rebuilds and verifies the public site even when no site paths changed", async () => {
   const { appRoot, stackRoot, fakeBin, stateDir, deployLog, baseSha, nextSha } =
     await makeSiteFixture();
