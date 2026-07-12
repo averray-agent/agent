@@ -6,6 +6,7 @@ import { updateFundedJobFromSession } from "../core/funded-jobs.js";
 import { buildVerificationAuditFields } from "../core/verifier-contract.js";
 import { disputeIdForSession } from "../core/dispute-resolution.js";
 import { buildBadgeFromSession, buildBadgeJobSnapshot } from "../core/badge-metadata.js";
+import { buildRunReceipt } from "../core/run-receipt.js";
 
 export class VerificationIngestionService {
   constructor(stateStore, eventBus = undefined, getJobDefinition = undefined, logger = undefined, options = {}) {
@@ -76,6 +77,17 @@ export class VerificationIngestionService {
         verifierConfigVersion: auditFields.verifierConfigVersion
       }
     });
+    const verificationRecord = {
+      ...verdict,
+      ...auditFields,
+      ...(badgeSnapshot ? { badgeSnapshot } : {})
+    };
+    if (status === "resolved" || status === "rejected") {
+      // Persist the signed verdict document before committing the terminal
+      // session transition. If signing or durable storage fails, verification
+      // refuses instead of silently producing a receipt-less final verdict.
+      await this.persistRunReceiptDocument(transitioned, job, verificationRecord);
+    }
     const updatedSession = await this.stateStore.upsertSession(transitioned);
     const fundedJob = await this.stateStore.getFundedJob?.(updatedSession.jobId);
     await this.stateStore.upsertFundedJob?.(updateFundedJobFromSession(fundedJob, {
@@ -83,9 +95,7 @@ export class VerificationIngestionService {
       verification: verdict
     }));
     const storedVerification = await this.stateStore.upsertVerificationResult(updatedSession.sessionId, {
-      ...verdict,
-      ...auditFields,
-      ...(badgeSnapshot ? { badgeSnapshot } : {}),
+      ...verificationRecord,
       session: {
         sessionId: updatedSession.sessionId,
         jobId: updatedSession.jobId,
@@ -125,7 +135,7 @@ export class VerificationIngestionService {
   async persistBadgeDocument(session, job, verification) {
     if (typeof this.stateStore.putBadgeDocument !== "function") return;
     try {
-      const context = await this.resolveBadgeSignerContext(job);
+      const context = await this.resolveReceiptSignerContext(job);
       const badge = buildBadgeFromSession({
         session,
         job,
@@ -145,7 +155,25 @@ export class VerificationIngestionService {
     }
   }
 
-  async resolveBadgeSignerContext(job) {
+  async persistRunReceiptDocument(session, job, verification) {
+    if (typeof this.stateStore.putRunReceiptDocument !== "function") return;
+    try {
+      const context = await this.resolveReceiptSignerContext(job);
+      const receipt = buildRunReceipt({ session, job, verification, context });
+      const document = this.badgeReceiptSigner
+        ? { ...receipt, signature: await this.badgeReceiptSigner.signDocument(receipt) }
+        : receipt;
+      await this.stateStore.putRunReceiptDocument(session.sessionId, document);
+    } catch (error) {
+      this.logger.warn?.(
+        { sessionId: session.sessionId, jobId: session.jobId, error: error?.message },
+        "run_receipt_document.persist_failed"
+      );
+      throw error;
+    }
+  }
+
+  async resolveReceiptSignerContext(job) {
     const context = { publicBaseUrl: process.env.PUBLIC_BASE_URL };
     const policyRef = job?.verification?.receiptPolicyTag;
     if (typeof policyRef !== "string" || !policyRef.trim()) return context;
@@ -179,6 +207,11 @@ export class VerificationIngestionService {
       );
       return context;
     }
+  }
+
+  // Compatibility for focused callers/tests that predate run receipts.
+  async resolveBadgeSignerContext(job) {
+    return this.resolveReceiptSignerContext(job);
   }
 
   resolveJob(session, verdict) {

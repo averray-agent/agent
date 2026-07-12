@@ -197,6 +197,7 @@ export function metricPathLabel(pathname) {
   if (/^\/content\/[^/]+\/publish$/u.test(pathname)) return "/content/:hash/publish";
   if (pathname.startsWith("/content/")) return "/content/:hash";
   if (pathname.startsWith("/policies/")) return "/policies/:tag";
+  if (pathname.startsWith("/badges/") && pathname.endsWith("/run")) return "/badges/:sessionId/run";
   if (pathname.startsWith("/badges/")) return "/badges/:sessionId";
   if (pathname.startsWith("/agents/")) return "/agents/:wallet";
   if (pathname.startsWith("/shares/")) return "/shares/:token";

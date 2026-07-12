@@ -87,6 +87,14 @@ test("GET / returns public API metadata without calling provider services", asyn
       kid: "badge-1",
       jwksUrl: "https://api.averray.com/.well-known/badge-receipt-jwks.json",
       canonicalizationDocs: "https://github.com/averray-agent/agent/blob/main/docs/schemas/agent-badge-v1.md#exact-canonicalization-and-signing-bytes"
+    },
+    runReceipts: {
+      alg: "ES256",
+      kid: "badge-1",
+      jwksUrl: "https://api.averray.com/.well-known/badge-receipt-jwks.json",
+      canonicalPath: "/badges/:sessionId/run",
+      schema: "https://raw.githubusercontent.com/averray-agent/agent/main/docs/schemas/run-receipt-v1.json",
+      canonicalizationDocs: "https://github.com/averray-agent/agent/blob/main/docs/schemas/run-receipt-v1.md#signature-and-canonical-bytes"
     }
   });
   assert.ok(response.body.endpoints.includes("/status/providers") === false);

@@ -58,6 +58,7 @@ export class MemoryStateStore {
     this.recentSessionIds = [];
     this.verificationResults = new Map();
     this.badgeDocuments = new Map();
+    this.runReceiptDocuments = new Map();
     this.claimLocks = new Map();
     this.nonces = new Map();
     this.rateLimits = new Map();
@@ -201,6 +202,18 @@ export class MemoryStateStore {
     const signed = { ...cloneJsonRecord(existing), signature: cloneJsonRecord(signature) };
     this.badgeDocuments.set(sessionId, signed);
     return cloneJsonRecord(signed);
+  }
+
+  async getRunReceiptDocument(sessionId) {
+    return cloneJsonRecord(this.runReceiptDocuments.get(sessionId));
+  }
+
+  async putRunReceiptDocument(sessionId, document) {
+    const existing = this.runReceiptDocuments.get(sessionId);
+    if (existing) return cloneJsonRecord(existing);
+    const stored = cloneJsonRecord(document);
+    this.runReceiptDocuments.set(sessionId, stored);
+    return cloneJsonRecord(stored);
   }
 
   async listSessionsByWallet(wallet, limit = 10, offset = 0) {
@@ -607,6 +620,19 @@ export class RedisStateStore {
       { keys: [key], arguments: [JSON.stringify(signature)] }
     );
     return raw ? JSON.parse(raw) : undefined;
+  }
+
+  async getRunReceiptDocument(sessionId) {
+    await this.connect();
+    const raw = await this.client.get(this.key("run-receipt", sessionId));
+    return raw ? JSON.parse(raw) : undefined;
+  }
+
+  async putRunReceiptDocument(sessionId, document) {
+    await this.connect();
+    const key = this.key("run-receipt", sessionId);
+    await this.client.set(key, JSON.stringify(document), { NX: true });
+    return this.getRunReceiptDocument(sessionId);
   }
 
   async listSessionsByWallet(wallet, limit = 10, offset = 0) {

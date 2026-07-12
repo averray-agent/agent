@@ -35,6 +35,7 @@ const ROOT_ENDPOINTS = [
   "/shares/:token",
   "/badges",
   "/badges/:sessionId",
+  "/badges/:sessionId/run",
   BADGE_RECEIPT_JWKS_PATH,
   "/alerts",
   "/audit",
@@ -99,6 +100,14 @@ export function createPublicMetadataRoutes({
             kid: "badge-1",
             jwksUrl: badgeReceiptJwksUrl,
             canonicalizationDocs: "https://github.com/averray-agent/agent/blob/main/docs/schemas/agent-badge-v1.md#exact-canonicalization-and-signing-bytes"
+          },
+          runReceipts: {
+            alg: "ES256",
+            kid: "badge-1",
+            jwksUrl: badgeReceiptJwksUrl,
+            canonicalPath: "/badges/:sessionId/run",
+            schema: "https://raw.githubusercontent.com/averray-agent/agent/main/docs/schemas/run-receipt-v1.json",
+            canonicalizationDocs: "https://github.com/averray-agent/agent/blob/main/docs/schemas/run-receipt-v1.md#signature-and-canonical-bytes"
           }
         },
         endpoints: ROOT_ENDPOINTS

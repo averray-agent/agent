@@ -39,6 +39,22 @@ const STORED_BADGE = {
   },
   signers: SIGNERS
 };
+const STORED_RUN_RECEIPT = {
+  schemaVersion: "averray.run-receipt.v1",
+  kind: "run",
+  sessionId: "session-pruned",
+  jobId: "job-pruned",
+  worker: "0x3333333333333333333333333333333333333333",
+  verdict: {
+    outcome: "rejected",
+    reasonCode: "BENCHMARK_THRESHOLD_MISSED",
+    evidenceHash: "0xabc",
+    policyTags: []
+  },
+  timestamps: { verifiedAt: "2026-04-16T14:29:00.000Z" },
+  signers: SIGNERS,
+  canonicalUrl: "https://api.averray.com/badges/session-pruned/run"
+};
 
 function makeHarness(overrides = {}) {
   const calls = [];
@@ -320,6 +336,46 @@ test("GET /badges/:sessionId returns the persisted receipt signature", async () 
   assert.deepEqual(response.body.signature, signature);
 });
 
+test("GET /badges/:sessionId/run serves the immutable run receipt after job pruning", async () => {
+  const signature = { alg: "ES256", kid: "badge-1", sig: "protected..signature", signedAt: "2026-07-12T00:00:00.000Z" };
+  const signedRunReceipt = { ...STORED_RUN_RECEIPT, signature };
+  const { calls, response, route } = makeHarness({
+    jobError: new Error("Unknown job"),
+    stateStore: { getRunReceiptDocument: async (sessionId) => {
+      calls.push(["getRunReceiptDocument", sessionId]);
+      return signedRunReceipt;
+    } }
+  });
+
+  const handled = await route({
+    request: { method: "GET" },
+    response,
+    url: new URL("http://localhost/badges/session-pruned/run"),
+    pathname: "/badges/session-pruned/run"
+  });
+
+  assert.equal(handled, true);
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.body, signedRunReceipt);
+  assert.deepEqual(calls.map(([name]) => name), ["getRunReceiptDocument", "respond"]);
+});
+
+test("GET /badges/:sessionId/run returns not_found when no verdict receipt exists", async () => {
+  const { response, route } = makeHarness({
+    stateStore: { getRunReceiptDocument: async () => undefined }
+  });
+
+  await route({
+    request: { method: "GET" },
+    response,
+    url: new URL("http://localhost/badges/never-claimed/run"),
+    pathname: "/badges/never-claimed/run"
+  });
+
+  assert.equal(response.statusCode, 404);
+  assert.deepEqual(response.body, { status: "not_found", kind: "run", sessionId: "never-claimed" });
+});
+
 test("listBadgeReceipts exposes a persisted signature on the row and nested document", async () => {
   const signature = { alg: "ES256", kid: "badge-1", sig: "protected..signature", signedAt: "2026-07-11T00:00:00.000Z" };
   const signedBadge = { ...STORED_BADGE, signature };
@@ -334,6 +390,51 @@ test("listBadgeReceipts exposes a persisted signature on the row and nested docu
   const [receipt] = await listBadgeReceipts(100);
   assert.deepEqual(receipt.signature, signature);
   assert.deepEqual(receipt.badge.signature, signature);
+});
+
+test("listBadgeReceipts emits run and badge rows for an approved session", async () => {
+  const runSignature = { alg: "ES256", kid: "badge-1", sig: "run..signature", signedAt: "2026-07-12T00:00:00.000Z" };
+  const badgeSignature = { alg: "ES256", kid: "badge-1", sig: "badge..signature", signedAt: "2026-07-12T00:00:01.000Z" };
+  const listBadgeReceipts = createListBadgeReceipts({
+    buildBadgeFromSession: () => { throw new Error("must not rebuild"); },
+    deriveBadgeLineage: () => undefined,
+    service: { listRecentSessions: async () => [{ sessionId: "session-pruned", jobId: "job-pruned" }] },
+    stateStore: {
+      getRunReceiptDocument: async () => ({
+        ...STORED_RUN_RECEIPT,
+        verdict: { ...STORED_RUN_RECEIPT.verdict, outcome: "approved", reasonCode: "OK" },
+        signature: runSignature
+      }),
+      getBadgeDocument: async () => ({ ...STORED_BADGE, signature: badgeSignature })
+    },
+    verifierService: { getResult: async () => VERIFICATION }
+  });
+
+  const receipts = await listBadgeReceipts(100);
+  assert.deepEqual(receipts.map((receipt) => receipt.kind), ["run", "badge"]);
+  assert.equal(receipts[0].verdict, "approved");
+  assert.deepEqual(receipts[0].signature, runSignature);
+  assert.deepEqual(receipts[1].signature, badgeSignature);
+});
+
+test("listBadgeReceipts emits only a run row for a rejected session", async () => {
+  const listBadgeReceipts = createListBadgeReceipts({
+    buildBadgeFromSession: () => { throw new NotFoundError("No badge", "badge_not_ready"); },
+    deriveBadgeLineage: () => undefined,
+    service: {
+      listRecentSessions: async () => [{ sessionId: "session-pruned", jobId: "job-pruned", status: "rejected" }],
+      getJobDefinition: () => { throw new Error("Unknown job"); }
+    },
+    stateStore: {
+      getRunReceiptDocument: async () => STORED_RUN_RECEIPT,
+      getBadgeDocument: async () => undefined
+    },
+    verifierService: { getResult: async () => ({ outcome: "rejected" }) }
+  });
+
+  const receipts = await listBadgeReceipts(100);
+  assert.deepEqual(receipts.map((receipt) => receipt.kind), ["run"]);
+  assert.equal(receipts[0].verdict, "rejected");
 });
 
 test("listBadgeReceipts includes a stored badge without looking up its pruned job", async () => {

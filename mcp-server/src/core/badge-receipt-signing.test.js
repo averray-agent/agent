@@ -93,6 +93,47 @@ test("detached ES256 badge signature verifies against the published JWKS and mut
   );
 });
 
+test("run receipt canonical bytes verify against the same published badge-1 JWKS", async () => {
+  const { config, kmsClient } = makeFixture();
+  const signer = new KmsBadgeReceiptSigner(config, {
+    kmsClient,
+    now: () => new Date("2026-07-12T18:00:00.000Z"),
+  });
+  await signer.initialize();
+  const unsigned = {
+    schemaVersion: "averray.run-receipt.v1",
+    kind: "run",
+    sessionId: "session-rejected",
+    jobId: "job-rejected",
+    worker: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    verifier: { mode: "benchmark", handler: "benchmark", version: 1 },
+    verdict: {
+      outcome: "rejected",
+      reasonCode: "BENCHMARK_THRESHOLD_MISSED",
+      evidenceHash: `0x${"1".repeat(64)}`,
+      policyTags: [],
+    },
+    timestamps: {
+      claimedAt: "2026-07-12T17:58:00.000Z",
+      submittedAt: "2026-07-12T17:59:00.000Z",
+      verifiedAt: "2026-07-12T18:00:00.000Z",
+    },
+    signers: [],
+  };
+  const document = { ...unsigned, signature: await signer.signDocument(unsigned) };
+  const jwk = signer.getJwks().keys[0];
+
+  assert.equal(verifyBadgeReceiptSignature(document, jwk), true);
+  assert.equal(
+    verifyBadgeReceiptSignature({
+      ...document,
+      verdict: { ...document.verdict, outcome: "approved" },
+    }, jwk),
+    false,
+  );
+  assert.deepEqual(canonicalBadgeReceiptBytes(document), canonicalBadgeReceiptBytes(unsigned));
+});
+
 test("canonical badge bytes ignore only the root signature and sort object keys", () => {
   const first = { z: 1, nested: { b: true, a: "x" }, signature: { sig: "ignored" }, a: [2, 1] };
   const second = { a: [2, 1], nested: { a: "x", b: true }, z: 1 };
