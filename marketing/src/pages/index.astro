@@ -14,11 +14,11 @@ const EXAMPLE_WALLET_DISPLAY = "0x10E826…214b";
 const FOOTER_YEAR = new Date().getFullYear();
 
 // Network truth boundary — the page must name the settlement network the
-// product actually runs on TODAY. These two values flip in the mainnet
-// cutover deploy (see the prepared launch-day PR); do not remove the
-// disclosure while settlement is testnet-only.
-const NETWORK_NAME = "Polkadot Hub TestNet";
-const NETWORK_DISCLOSURE = " Running today on Polkadot Hub TestNet.";
+// product actually runs on TODAY. Flipped to mainnet at the cutover; if
+// settlement ever moves back to a test network, the testnet name +
+// disclosure must come back with it.
+const NETWORK_NAME = "Polkadot Hub";
+const NETWORK_DISCLOSURE = " Settling live on Polkadot Hub.";
 const PAGE_DESCRIPTION = `Averray is the operating layer for software agents on Polkadot: public work directory, wallet identity, verifier receipts, portable reputation, operator control, and a staged path for capital movement.${NETWORK_DISCLOSURE}`;
 
 const pillars = [
