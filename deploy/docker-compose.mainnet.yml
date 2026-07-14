@@ -1,0 +1,97 @@
+name: agent-mainnet
+
+# Parallel, internal-only mainnet stack for the zero-gap cutover. The live
+# agent-stack project (testnet backend/indexer/Caddy/Postgres/Redis) remains
+# untouched while this project is built and verified.
+services:
+  mainnet-redis:
+    image: redis:7-alpine
+    container_name: agent-mainnet-redis
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    restart: unless-stopped
+    volumes:
+      - /srv/agent-stack-mainnet/redis:/data
+    networks:
+      - mainnet-internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  mainnet-backend:
+    build:
+      context: ..
+      dockerfile: mcp-server/Dockerfile
+    image: agent-mainnet-backend
+    container_name: agent-mainnet-backend
+    init: true
+    restart: unless-stopped
+    env_file:
+      - /run/agent-stack-mainnet/backend.env
+    environment:
+      AWS_USE_ROLES_ANYWHERE: "true"
+      AWS_CONFIG_FILE: /root/.aws/config
+    depends_on:
+      mainnet-redis:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:18787:8787"
+    volumes:
+      - /etc/agent-stack-mainnet/roles-anywhere:/etc/agent-stack/roles-anywhere:ro
+      - /etc/agent-stack-mainnet/aws-config:/root/.aws/config:ro
+      - /usr/local/bin/aws_signing_helper:/usr/local/bin/aws_signing_helper:ro
+      - /etc/ssl/certs/ca-certificates.crt:/etc/ssl/certs/ca-certificates.crt:ro
+    networks:
+      mainnet-internal: {}
+      caddy-testnet:
+        aliases:
+          - mainnet-backend
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:8787/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
+
+  mainnet-indexer:
+    build:
+      context: ..
+      dockerfile: indexer/Dockerfile
+    image: agent-mainnet-indexer
+    container_name: agent-mainnet-indexer
+    init: true
+    restart: unless-stopped
+    env_file:
+      - /run/agent-stack-mainnet/indexer.env
+    ports:
+      - "127.0.0.1:52069:42069"
+    networks:
+      mainnet-internal: {}
+      caddy-testnet:
+        aliases:
+          - mainnet-indexer
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:42069/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
+
+networks:
+  mainnet-internal:
+    name: agent-mainnet-internal
+    internal: true
+  # Caddy and the existing Postgres service are on this live network. Only the
+  # uniquely named mainnet backend/indexer join it; mainnet Redis never does.
+  caddy-testnet:
+    external: true
+    name: agent-stack_default

@@ -51,6 +51,12 @@ test("transformLine: identity literals flip to mainnet", () => {
   assert.equal(transformLine("RPC_URL=https://eth-rpc-testnet.polkadot.io/"), `RPC_URL=${MAINNET_RPC}`);
   assert.equal(transformLine("USDC_LIQUIDITY_CHAIN=testnet"), "USDC_LIQUIDITY_CHAIN=mainnet");
   assert.equal(transformLine("INGESTION_PREFUND_ENABLED=true"), "INGESTION_PREFUND_ENABLED=false");
+  assert.equal(transformLine("REDIS_URL=redis://redis:6379"), "REDIS_URL=redis://mainnet-redis:6379");
+  assert.equal(transformLine("REDIS_NAMESPACE=agent-platform"), "REDIS_NAMESPACE=agent-platform-mainnet");
+  assert.equal(
+    transformLine("INDEXER_STATUS_URL=http://indexer:42069/status"),
+    "INDEXER_STATUS_URL=http://mainnet-indexer:42069/status"
+  );
 });
 
 test("transformLine: removed keys are dropped (returns a non-string)", () => {
@@ -146,6 +152,9 @@ test("generateAll: the real transform yields the mainnet essentials", () => {
   assert.ok(!/^AUTH_JWT_SECRETS=/mu.test(backend), "no HMAC key");
   assert.ok(!/^ARBITRATOR_SIGNER_PRIVATE_KEY=/mu.test(backend), "no arbitrator key");
   assert.ok(!/op:\/\/prod-/u.test(backend), "no prod-* vault refs leak into mainnet");
+  assert.match(backend, /^REDIS_URL=redis:\/\/mainnet-redis:6379$/mu);
+  assert.match(backend, /^REDIS_NAMESPACE=agent-platform-mainnet$/mu);
+  assert.match(backend, /^INDEXER_STATUS_URL=http:\/\/mainnet-indexer:42069\/status$/mu);
   // no testnet RPC anywhere in the rendered mainnet templates
   assert.ok(!files["deploy/indexer.mainnet.env.template"].includes("eth-rpc-testnet.polkadot.io"));
 });

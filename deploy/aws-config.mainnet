@@ -1,0 +1,17 @@
+# Mainnet-only AWS shared config mounted into the parallel backend container at
+# /root/.aws/config. Profile names intentionally match the hard-coded backend
+# constants; isolation comes from the separate host file + cert directory, not
+# from renaming profiles. Never merge these sections into the live network's
+# /etc/agent-stack/aws-config while both stacks run.
+
+[profile averray-signer]
+region = eu-central-2
+credential_process = /usr/local/bin/aws_signing_helper credential-process --certificate /etc/agent-stack/roles-anywhere/signer-cert.pem --private-key /etc/agent-stack/roles-anywhere/signer-key.pem --trust-anchor-arn arn:aws:rolesanywhere:eu-central-2:079209845430:trust-anchor/f7e0a6eb-8d59-4f7f-8adb-ea6ba380b1de --profile-arn arn:aws:rolesanywhere:eu-central-2:079209845430:profile/479211e5-023b-4fe0-8877-75b3204fbbb4 --role-arn arn:aws:iam::079209845430:role/averray-signer-prod-role --region eu-central-2
+
+[profile averray-jwt-signer]
+region = eu-central-2
+credential_process = /usr/local/bin/aws_signing_helper credential-process --certificate /etc/agent-stack/roles-anywhere/jwt-signer-cert.pem --private-key /etc/agent-stack/roles-anywhere/jwt-signer-key.pem --trust-anchor-arn arn:aws:rolesanywhere:eu-central-2:079209845430:trust-anchor/49d5f103-5107-4bcb-bd9c-6e4605f680ef --profile-arn arn:aws:rolesanywhere:eu-central-2:079209845430:profile/f27fdc17-7179-48c1-be4b-c8cd1d2e3602 --role-arn arn:aws:iam::079209845430:role/averray-jwt-signer-prod-role --region eu-central-2
+
+[profile averray-badge-receipt-signer]
+region = eu-central-2
+credential_process = /usr/local/bin/aws_signing_helper credential-process --certificate /etc/agent-stack/roles-anywhere/badge-receipt-signer-cert.pem --private-key /etc/agent-stack/roles-anywhere/badge-receipt-signer-key.pem --trust-anchor-arn arn:aws:rolesanywhere:eu-central-2:079209845430:trust-anchor/eea5b0d1-fb2a-4ffa-9e5c-b577f34c6229 --profile-arn arn:aws:rolesanywhere:eu-central-2:079209845430:profile/7f075fcc-4e64-4c13-b4df-7fee3462058f --role-arn arn:aws:iam::079209845430:role/averray-badge-receipt-signer-prod-role --region eu-central-2

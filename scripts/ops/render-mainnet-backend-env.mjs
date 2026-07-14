@@ -68,6 +68,9 @@ export const LITERAL_OVERRIDES = {
   USDC_LIQUIDITY_CHAIN: "mainnet",
   INGESTION_PREFUND_ENABLED: "false",
   USDC_LIQUIDITY_ACCOUNTS_JSON: "[]",
+  REDIS_URL: "redis://mainnet-redis:6379",
+  REDIS_NAMESPACE: "agent-platform-mainnet",
+  INDEXER_STATUS_URL: "http://mainnet-indexer:42069/status",
 };
 
 // KEY → reason, emitted as a commented `# KEY=  TODO(operator): <reason>` line
