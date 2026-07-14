@@ -18,19 +18,19 @@ const TASK_CONFIG = {
     titlePrefix: "Wikipedia citation repair",
     outputSchemaRef: "schema://jobs/wikipedia-citation-repair-output",
     verifierTerms: ["page_title", "revision_id", "citation_findings", "proposed_changes", "review_notes"],
-    rewardAmount: 4
+    rewardAmount: 0.4
   },
   freshness_check: {
     titlePrefix: "Wikipedia freshness check",
     outputSchemaRef: "schema://jobs/wikipedia-freshness-check-output",
     verifierTerms: ["page_title", "revision_id", "freshness_findings", "recommended_editor_actions", "risk_level"],
-    rewardAmount: 4
+    rewardAmount: 0.4
   },
   infobox_consistency: {
     titlePrefix: "Wikipedia infobox consistency",
     outputSchemaRef: "schema://jobs/wikipedia-infobox-consistency-output",
     verifierTerms: ["page_title", "revision_id", "checked_fields", "proposed_changes", "review_notes"],
-    rewardAmount: 4
+    rewardAmount: 0.4
   }
 };
 

@@ -275,7 +275,7 @@ export function toPlatformJob({ target, advisory, advisories, fixedVersion, scor
     category: "security",
     tier: "starter",
     rewardAsset: DEFAULT_ESCROW_ASSET_SYMBOL,
-    rewardAmount: 3,
+    rewardAmount: 0.3,
     verifierMode: "github_pr",
     verifierMinimumScore: 70,
     requireTestEvidence: true,
