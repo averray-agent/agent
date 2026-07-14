@@ -312,7 +312,7 @@ export function toPlatformJob(target, score = scoreDatasetTarget(target)) {
     category: "data",
     tier: "starter",
     rewardAsset: DEFAULT_ESCROW_ASSET_SYMBOL,
-    rewardAmount: 2,
+    rewardAmount: 0.25,
     verifierMode: "benchmark",
     verifierTerms: ["dataset_url", "resource_url", "checks", "recommended_actions"],
     verifierMinimumMatches: 3,

@@ -171,7 +171,7 @@ export function toPlatformJob(target, score = scoreOpenApiTarget(target)) {
     category: "api",
     tier: "starter",
     rewardAsset: DEFAULT_ESCROW_ASSET_SYMBOL,
-    rewardAmount: 3,
+    rewardAmount: 0.3,
     verifierMode: "benchmark",
     verifierTerms: ["spec_url", "checks", "findings", "recommended_actions"],
     verifierMinimumMatches: 3,

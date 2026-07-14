@@ -156,7 +156,7 @@ export function toPlatformJob(target, score = scoreSpecTarget(target)) {
     category: "docs",
     tier: "starter",
     rewardAsset: DEFAULT_ESCROW_ASSET_SYMBOL,
-    rewardAmount: 3,
+    rewardAmount: 0.3,
     verifierMode: "benchmark",
     verifierTerms: ["source_surface", "drift_findings", "missing_updates", "fix_recommendation"],
     verifierMinimumMatches: 3,

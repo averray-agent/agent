@@ -185,7 +185,7 @@ export function toPlatformJob(issue, score = scoreIssue(issue), {
     category,
     tier: "starter",
     rewardAsset: DEFAULT_ESCROW_ASSET_SYMBOL,
-    rewardAmount: 1,
+    rewardAmount: 0.2,
     verifierMode: "github_pr",
     verifierMinimumScore: 60,
     requireIssueReference: true,
