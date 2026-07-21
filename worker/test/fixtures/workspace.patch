@@ -1,0 +1,14 @@
+diff --git a/src/adapter.js b/src/adapter.js
+index 1111111..2222222 100644
+--- a/src/adapter.js
++++ b/src/adapter.js
+@@ -1 +1 @@
+-export const value = 1;
++export const value = 2;
+diff --git a/test/adapter.test.js b/test/adapter.test.js
+new file mode 100644
+index 0000000..3333333
+--- /dev/null
++++ b/test/adapter.test.js
+@@ -0,0 +1 @@
++assert.equal(value, 2);

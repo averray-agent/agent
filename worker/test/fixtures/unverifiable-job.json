@@ -1,0 +1,18 @@
+{
+  "id": "github:averray-agent/agent#999",
+  "title": "Clarify the operator guide",
+  "agentInstructions": [
+    "Keep the wording concise."
+  ],
+  "acceptanceCriteria": [
+    "The guide is easier to follow."
+  ],
+  "source": {
+    "type": "github_issue",
+    "repo": "averray-agent/agent",
+    "issueNumber": 999,
+    "issueUrl": "https://github.com/averray-agent/agent/issues/999",
+    "body": "The current guide is ambiguous."
+  },
+  "verification": {}
+}

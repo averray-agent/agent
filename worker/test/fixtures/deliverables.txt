@@ -1,0 +1,3 @@
+change_summary artifact://sha256/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+verification_report artifact://sha256/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+workspace_patch artifact://sha256/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
