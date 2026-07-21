@@ -59,7 +59,8 @@ multisig.
 ## 3. Render and preflight the mainnet runtime
 
 Install the three mainnet certificate/key pairs under
-`/etc/agent-stack-mainnet/roles-anywhere` as mode `0400 root:root`, and install
+`/etc/agent-stack-mainnet/roles-anywhere` as mode `0400 root:root` — the same for
+both the certificate and the private key in every pair — and install
 `deploy/aws-config.mainnet` as `/etc/agent-stack-mainnet/aws-config`. Render the
 mainnet backend/indexer templates into `/run/agent-stack-mainnet` using the
 scoped mainnet service-account tokens.
@@ -70,7 +71,9 @@ Run:
 sudo /srv/agent-stack/app/scripts/ops/preflight-mainnet-sidecar.sh
 ```
 
-The preflight checks certificate/key pairing and expiry, exact AWS profiles,
+The preflight checks certificate/key pairing, mode and ownership (`0400
+root:root` for both cert and key; looser modes such as `0600`/`0644` are
+rejected), expiry, exact AWS profiles,
 absence of static AWS credentials, mainnet chain/RPC identity, isolated Redis
 and indexer DNS, completed contract/owner records, unarmed outflow cap, valid
 compose, and health of all five live testnet containers.
