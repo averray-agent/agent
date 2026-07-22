@@ -36,24 +36,29 @@ if [ ! -f "$harness_repo/tests/fixtures/model_scripts/finish.jsonl" ]; then
   exit 2
 fi
 
-if [ -z "$postgres_port" ]; then
-  postgres_port=$(node -e '
-    const net = require("node:net");
-    const server = net.createServer();
-    server.listen(0, "127.0.0.1", () => {
-      process.stdout.write(String(server.address().port));
-      server.close();
-    });
-  ')
+# With no explicit port, let Docker bind an ephemeral host port atomically —
+# a discover-then-bind probe races other processes for the same port.
+if [ -n "$postgres_port" ]; then
+  container_id=$(docker run --rm -d \
+    --name "$container_name" \
+    -p "127.0.0.1:$postgres_port:5432" \
+    -e POSTGRES_PASSWORD=harness \
+    -e POSTGRES_DB=postgres \
+    postgres:18)
+else
+  container_id=$(docker run --rm -d \
+    --name "$container_name" \
+    -p 127.0.0.1::5432 \
+    -e POSTGRES_PASSWORD=harness \
+    -e POSTGRES_DB=postgres \
+    postgres:18)
+  postgres_port=$(docker port "$container_name" 5432/tcp | sed -n 's/.*://p' | head -1)
 fi
-
-container_id=$(docker run --rm -d \
-  --name "$container_name" \
-  -p "127.0.0.1:$postgres_port:5432" \
-  -e POSTGRES_PASSWORD=harness \
-  -e POSTGRES_DB=postgres \
-  postgres:18)
 container_started=true
+if [ -z "$postgres_port" ]; then
+  echo "integration gate: could not determine the Postgres host port" >&2
+  exit 1
+fi
 echo "postgres_container=$container_id"
 echo "postgres_port=$postgres_port"
 
