@@ -9,6 +9,10 @@ The sandbox profile denies all network egress. The caller prepares the local
 checkout before a run. Publishing a PR and sending the resulting evidence are
 separate, approval-gated operations; this module stops at the verified object.
 
+For wiring this into the earn loop (auth → claim → work → PR → submit → settle),
+see [HANDOFF.md](HANDOFF.md) — the worker's I/O contract and exactly where the
+money-rail seam picks up.
+
 ## Emit an intent
 
 ```sh
