@@ -6,6 +6,7 @@ import {
   mapJobToTaskIntent,
   serializeIntent,
   slugifyJobId,
+  supportsBaselineComparison,
 } from "../src/job-adapter.js";
 
 const sampleUrl = new URL("../examples/github-issue-job.json", import.meta.url);
@@ -48,18 +49,13 @@ test("mapJobToTaskIntent produces the verified deterministic structure", async (
     forbidden_paths: [],
     network: "deny",
   });
+  // `npm test` is not baseline-capable (the kernel only baselines pytest), so
+  // the command check must be the one and only deterministic gate.
   assert.deepEqual(intent.spec.acceptance, [
     {
       id: "job-checks",
       type: "command",
       command: "npm test",
-      required: true,
-    },
-    {
-      id: "no-regressions",
-      type: "baseline_comparison",
-      rule: "no_new_failures",
-      baseline_command: "npm test",
       required: true,
     },
   ]);
@@ -100,9 +96,37 @@ test("explicit mapping options override suggested defaults", async () => {
   assert.deepEqual(intent.spec.constraints.forbidden_paths, ["secrets/**"]);
   assert.equal(intent.spec.acceptance[0].command, "node --test test/focused.test.js");
   assert.equal(intent.spec.acceptance[0].working_directory, "worker");
-  assert.equal(intent.spec.acceptance[1].baseline_command, "node --test test/focused.test.js");
+  assert.equal(intent.spec.acceptance.length, 1);
   assert.equal(intent.spec.budgets.tool_calls, 25);
   assert.equal(intent.spec.budgets.model_tokens, 2_000_000);
+});
+
+test("baseline comparison is emitted only for pytest-invoking verify commands", async () => {
+  const job = await fixture(sampleUrl);
+
+  for (const command of ["pytest -q", "pytest-xdist -n 2", "python -m pytest tests/", "python3.12 -m pytest"]) {
+    const { intent } = mapJobToTaskIntent(job, { workspacePath: "/tmp/w", verifyCommand: command });
+    assert.deepEqual(
+      intent.spec.acceptance.map((check) => check.id),
+      ["job-checks", "no-regressions"],
+      command,
+    );
+    assert.equal(intent.spec.acceptance[1].baseline_command, command);
+  }
+
+  for (const command of [
+    "npm test",
+    "node test.js",
+    "make check",
+    "python -m unittest",
+    "python3 -c 'import pytest'",
+    "pytest -q --junitxml=out.xml",
+  ]) {
+    const { intent } = mapJobToTaskIntent(job, { workspacePath: "/tmp/w", verifyCommand: command });
+    assert.deepEqual(intent.spec.acceptance.map((check) => check.id), ["job-checks"], command);
+  }
+
+  assert.equal(supportsBaselineComparison(""), false);
 });
 
 test("unverifiable jobs have empty acceptance and an eligibility warning", async () => {

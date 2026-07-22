@@ -14,7 +14,11 @@ test("emit-intent reads a file and emits deterministic JSON", () => {
   });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stderr, "");
-  assert.equal(JSON.parse(result.stdout).spec.acceptance.length, 2);
+  // npm test is not baseline-capable (kernel baselines pytest only): one check.
+  assert.deepEqual(
+    JSON.parse(result.stdout).spec.acceptance.map((check) => check.id),
+    ["job-checks"],
+  );
 });
 
 test("emit-intent emits unverifiable intent but exits 3", () => {
