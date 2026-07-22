@@ -10,6 +10,7 @@
   "scripts": {
     "test": "node --test",
     "gate:contract": "sh scripts/contract-gate.sh",
-    "gate:integration": "sh scripts/scripted-dry-run.sh"
+    "gate:integration": "sh scripts/scripted-dry-run.sh",
+    "smoke:live": "sh scripts/live-smoke.sh"
   }
 }
