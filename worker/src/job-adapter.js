@@ -24,6 +24,31 @@ function optionPaths(value, name) {
   return value.map(text).filter(Boolean);
 }
 
+// The kernel captures `no_new_failures` baselines only for pytest: it injects
+// `--junitxml` and parses JUnit failure identities, and its contract compiler
+// rejects any other baseline_command (`invalid_baseline_command`). Mirror that
+// predicate (harness verification/checks.py `pytest_arguments`); for every
+// other verify command the command check remains the deterministic gate and no
+// baseline check is emitted — emitting one fails contract compilation.
+export function supportsBaselineComparison(command) {
+  const args = String(command).split(/\s+/).filter(Boolean);
+  if (args.length === 0) {
+    return false;
+  }
+  if (args.some((arg) => arg.startsWith("--junitxml"))) {
+    return false;
+  }
+  const executable = args[0].split("/").pop();
+  if (executable === "pytest" || executable.startsWith("pytest-")) {
+    return true;
+  }
+  return (
+    (executable === "python" || executable === "python3" || executable.startsWith("python3.")) &&
+    args[1] === "-m" &&
+    args[2] === "pytest"
+  );
+}
+
 export function slugifyJobId(value) {
   const slug = text(value)
     .normalize("NFKD")
@@ -97,13 +122,16 @@ export function mapJobToTaskIntent(job, options = {}) {
     if (workingDirectory) {
       commandCheck.working_directory = workingDirectory;
     }
-    acceptance.push(commandCheck, {
-      id: "no-regressions",
-      type: "baseline_comparison",
-      rule: "no_new_failures",
-      baseline_command: verifyCommand,
-      required: true,
-    });
+    acceptance.push(commandCheck);
+    if (supportsBaselineComparison(verifyCommand)) {
+      acceptance.push({
+        id: "no-regressions",
+        type: "baseline_comparison",
+        rule: "no_new_failures",
+        baseline_command: verifyCommand,
+        required: true,
+      });
+    }
   } else {
     warnings.push(
       "No deterministic verify command was provided; acceptance is empty and this job is not eligible for automated submission.",
