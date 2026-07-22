@@ -1,0 +1,44 @@
+{
+  "apiVersion": "harness/v1alpha1",
+  "kind": "TaskIntent",
+  "metadata": {
+    "id": "averray-worker-scripted-dry-run",
+    "labels": {
+      "source_type": "scripted_gate"
+    }
+  },
+  "spec": {
+    "profile": "averray-worker",
+    "objective": "Exercise the Averray worker profile with the deterministic scripted model and make no workspace changes.",
+    "deliverables": [
+      {
+        "type": "verification_report"
+      }
+    ],
+    "context": {
+      "workspace": {
+        "path": "tests/fixtures/environment_workspaces/basic",
+        "revision": "HEAD"
+      }
+    },
+    "constraints": {
+      "allowed_paths": [],
+      "forbidden_paths": [],
+      "network": "deny"
+    },
+    "acceptance": [],
+    "approvals": [],
+    "budgets": {
+      "elapsed": "PT30M",
+      "model_tokens": 2000000,
+      "tool_calls": 400,
+      "max_children": 1,
+      "max_concurrent_children": 1
+    },
+    "learning": {
+      "episode_capture": true,
+      "memory_write": "none",
+      "skill_generation": "ineligible"
+    }
+  }
+}

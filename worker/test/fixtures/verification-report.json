@@ -1,0 +1,25 @@
+{
+  "check_results": [
+    {
+      "id": "job-checks",
+      "type": "command",
+      "required": true,
+      "passed": true,
+      "reason": "command_passed",
+      "detail": "exit 0"
+    },
+    {
+      "id": "no-regressions",
+      "type": "baseline_comparison",
+      "required": true,
+      "passed": true,
+      "reason": "no_new_failures",
+      "detail": "baseline and final checks passed"
+    }
+  ],
+  "passed": true,
+  "verdict": "completed",
+  "required_failed": [],
+  "optional_failed": [],
+  "protected_violations": []
+}

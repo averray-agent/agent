@@ -1,0 +1,26 @@
+name: averray-worker
+version: "1"
+# Isolation is mandatory: public bounty jobs are adversarial input. The image
+# must already exist locally (providers never pull); override with HARNESS_ENV_IMAGE.
+# The docker provider runs every container --network none, making `network: deny` real.
+environment: {provider: docker, image: averray-worker-sandbox:latest}
+egress: {mode: deny_all, allowed_destinations: []}
+# Executor model resolved from env at run time (HARNESS_MODEL_BASE_URL /
+# HARNESS_MODEL_REF / HARNESS_MODEL_API_KEY). NEVER commit a key.
+model:
+  executor: {adapter: openai-compatible, model_ref: null}
+capabilities:
+  - fs.read_file
+  - fs.write_file
+  - fs.list_files
+  - shell.run
+  - git.status
+  - git.diff
+  - artifact.put
+  - artifact.get
+verification:
+  baseline_command: null      # the adapter sets the per-job command via the intent
+  protected_paths: []
+strategies: [direct_execution]
+retention_policy: standard
+memory: {retrieval_budget_tokens: 1024}

@@ -1,0 +1,23 @@
+{
+  "id": "github:averray-agent/agent#741",
+  "title": "Preserve evidence when a verifier retries",
+  "description": "Keep the first verification attempt available when a later retry succeeds.",
+  "agentInstructions": [
+    "Make the smallest implementation change that preserves existing behavior.",
+    "Add regression coverage for the retry path."
+  ],
+  "acceptanceCriteria": [
+    "The original verification evidence remains queryable.",
+    "The focused test suite passes."
+  ],
+  "source": {
+    "type": "github_issue",
+    "repo": "averray-agent/agent",
+    "issueNumber": 741,
+    "issueUrl": "https://github.com/averray-agent/agent/issues/741",
+    "body": "A successful retry currently replaces the evidence from the first attempt."
+  },
+  "verification": {
+    "suggestedCheck": "npm test"
+  }
+}
