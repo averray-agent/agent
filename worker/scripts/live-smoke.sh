@@ -278,11 +278,15 @@ node -e '
   }
 ' "$smoke_root/verification-report.json"
 
-if ! grep -q '^diff --git' "$smoke_root/workspace.patch"; then
-  echo "live smoke: workspace patch is empty" >&2
+# The workspace patch is a unified diff. The local provider emits git format
+# (`diff --git`/`--- a/…`); the docker provider emits plain difflib format
+# (`--- a/…` / `+++ b/…`, no `diff --git`) because the sandbox image need not
+# contain git. Accept either, and require the change to add.js specifically.
+if ! grep -Eq '^(diff --git a/add\.js|--- a/add\.js)' "$smoke_root/workspace.patch"; then
+  echo "live smoke: workspace patch does not change add.js" >&2
   exit 1
 fi
-if grep -E '^diff --git a/test\.js b/test\.js' "$smoke_root/workspace.patch" >/dev/null; then
+if grep -Eq '^(diff --git a/test\.js|(---|\+\+\+) [ab]/test\.js)' "$smoke_root/workspace.patch"; then
   echo "live smoke: patch modified the protected test.js" >&2
   exit 1
 fi

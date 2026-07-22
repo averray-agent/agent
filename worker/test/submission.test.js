@@ -23,6 +23,14 @@ test("filesChangedFromPatch parses and deduplicates git diff headers", async () 
   ]);
 });
 
+test("filesChangedFromPatch parses docker difflib patches (no diff --git header)", () => {
+  // The docker provider renders workspace_patch with difflib, so there is no
+  // `diff --git` line — only the a/…b/ headers.
+  const difflibPatch =
+    "--- a/add.js\n+++ b/add.js\n@@ -1,2 +1,2 @@\n-  return a + b + 1;\n+  return a + b;\n";
+  assert.deepEqual(filesChangedFromPatch(difflibPatch), ["add.js"]);
+});
+
 test("assembleGithubPrSubmission creates truthful verified evidence", async () => {
   const [job, verificationReport, patchText] = await Promise.all([
     jsonFixture(jobUrl),
