@@ -68,7 +68,6 @@ export function assembleGithubPrSubmission({
     tests: passedChecksDescription(verificationReport),
     filesChanged: filesChangedFromPatch(patchText),
     referencesIssue: Boolean(issueNumber || issueUrl),
-    checksPassing: true,
   };
 
   if (issueNumber !== undefined) {
@@ -83,6 +82,9 @@ export function assembleGithubPrSubmission({
   }
   if (ciStatus != null) {
     submission.ciStatus = ciStatus;
+    if (ciStatus === "passing") {
+      submission.checksPassing = true;
+    }
   }
 
   return submission;

@@ -78,6 +78,7 @@ test("assembler remains truthful when a passing report contains no deterministic
   assert.equal(submission.summary, "Resolve averray-agent/agent issue #741");
   assert.equal(submission.tests, "Harness verification passed; no deterministic checks were reported.");
   assert.deepEqual(submission.filesChanged, []);
+  assert.equal("checksPassing" in submission, false);
 });
 
 test("assembler rejects an unknown CI status", async () => {
