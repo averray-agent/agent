@@ -5,18 +5,22 @@
 # read only from the environment, passed only to the harness process, and never
 # printed. Do not add `set -x` to this script.
 #
-# Stage 1 (this script): a trusted, self-created fixture task on the local
-# provider — a tiny repo with an off-by-one bug the model must fix so
-# `node test.js` passes, with test.js broker-protected against tampering.
-# This is deliberately a trusted/dev task: the local provider has no isolation,
-# which is acceptable ONLY because the input is authored right here, not pulled
-# from a public job. Real bounty jobs stay on the docker provider (see README).
+# This runs a trusted, self-created fixture task — a tiny repo with an off-by-one
+# bug the model must fix so `node test.js` passes, with test.js broker-protected
+# against tampering. The provider is selectable:
+#   * default `local` (Stage 1): no isolation — acceptable ONLY because the input
+#     is authored right here, not pulled from a public job.
+#   * `HARNESS_ENV_PROVIDER=docker` + `HARNESS_ENV_IMAGE=...` (Stage 2, via
+#     stage2-smoke.sh): the same fixture inside a --network none container.
+# Real bounty jobs always use the docker provider (see README).
 set -eu
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 worker_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
 harness_repo=${HARNESS_REPO:-"$HOME/repo/agent-harness"}
 harness_bin=${HARNESS_BIN:-"$harness_repo/.venv/bin/harness"}
+env_provider=${HARNESS_ENV_PROVIDER:-local}
+env_image=${HARNESS_ENV_IMAGE:-}
 postgres_port=${AVERRAY_WORKER_POSTGRES_PORT:-}
 container_name="averray-worker-smoke-$$"
 worker_pid=""
@@ -167,7 +171,8 @@ run_harness() {
     env \
       HARNESS_DATABASE_URL="$database_url" \
       HARNESS_PROFILES_ROOT="$worker_root/profiles" \
-      HARNESS_ENV_PROVIDER=local \
+      HARNESS_ENV_PROVIDER="$env_provider" \
+      ${env_image:+HARNESS_ENV_IMAGE="$env_image"} \
       HARNESS_ARTIFACT_ROOT="$artifact_root" \
       "$harness_bin" "$@"
   )
@@ -181,7 +186,8 @@ run_harness validate "$smoke_root/intent.json"
   exec env \
     HARNESS_DATABASE_URL="$database_url" \
     HARNESS_PROFILES_ROOT="$worker_root/profiles" \
-    HARNESS_ENV_PROVIDER=local \
+    HARNESS_ENV_PROVIDER="$env_provider" \
+    ${env_image:+HARNESS_ENV_IMAGE="$env_image"} \
     HARNESS_ARTIFACT_ROOT="$artifact_root" \
     "$harness_bin" worker
 ) > "$worker_log" 2>&1 &
@@ -234,6 +240,16 @@ if ! printf '%s\n' "$status_output" | grep -q '^outcome=completed$'; then
   run_harness run events "$run_id" | tail -25 >&2
   echo "live smoke: worker log tail follows" >&2
   tail -20 "$worker_log" >&2
+  exit 1
+fi
+
+# Self-verify the environment provider actually used (reproduce, don't trust):
+# outcome/egress alone don't distinguish docker from local — only this does.
+environment_provider=$(run_harness run events "$run_id" \
+  | sed -n 's/.*EnvironmentPrepared.*"provider":"\([a-z]*\)".*/\1/p' | head -1)
+echo "environment_provider=$environment_provider"
+if [ "$environment_provider" != "$env_provider" ]; then
+  echo "live smoke: expected environment provider '$env_provider', ran '$environment_provider'" >&2
   exit 1
 fi
 
