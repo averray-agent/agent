@@ -63,15 +63,45 @@ verification report, and change summary in a printed tmp directory. The local
 provider is acceptable here ONLY because the task is authored inside the script;
 it has no isolation.
 
-Stage 2 (manual, after Stage 1 is green): a **real bounty job in Docker**.
-Build a sandbox image containing the target repo's toolchain and load it
-locally, prepare a local clone of the target repo, fetch the job with
-`GET /jobs/definition?jobId=…`, then emit the intent and submit it with:
+## Stage 2 — Docker sandbox (operator-run)
+
+Real bounty jobs are adversarial input, so they must run in an isolated,
+network-denied container, not the local provider. The `averray-worker` profile
+already selects `provider: docker` + `egress: deny_all`; Stage 2 proves that path
+end to end on a real, locally-built image.
+
+The sandbox image is [`sandbox/Dockerfile`](sandbox/Dockerfile) — a login shell,
+`sleep`, git (with `safe.directory`), Node, and pytest, matching the harness
+provider's container contract (`docker run --network none … sleep infinity`, then
+`docker exec … /bin/sh -lc "<cmd>"`). Build + load it locally (providers never
+pull):
 
 ```sh
-export HARNESS_ENV_PROVIDER=docker
-export HARNESS_ENV_IMAGE=<locally-loaded-image>
+docker build -t averray-worker-sandbox:latest worker/sandbox
 ```
 
-Real jobs are adversarial input: Docker + deny egress are mandatory, and the
-claim/submit/PR-open steps remain outside this module entirely.
+Two checks:
+
+```sh
+# Deterministic mechanism gate (no model key): runs the scripted dry-run on the
+# docker provider and asserts the run really used it (environment_provider=docker)
+# over --network none.
+npm run gate:docker
+
+# Real-model smoke: the same trusted off-by-one fixture as Stage 1, but inside the
+# --network none sandbox. Same key hygiene as smoke:live; builds the image if
+# missing and runs an isolation preflight first.
+export HARNESS_MODEL_REF=<executor-model-ref>   # key already exported per above
+npm run smoke:stage2
+```
+
+`smoke:stage2` self-verifies isolation two ways: an independent preflight
+(`docker run --network none <image>` must fail to resolve DNS) and the harness's
+own guarantee — it rejects any run whose container `NetworkMode` is not `none`,
+so a completed docker run is proof. Green ends with `environment_provider=docker`
+and `live_smoke=passed`.
+
+For an actual Averray job, fetch it read-only with `GET /jobs/definition?jobId=…`,
+prepare a local clone of `source.repo` as the workspace, and point the same
+docker path at it. The claim/submit/PR-open steps remain outside this module
+entirely.

@@ -7,13 +7,21 @@ function text(value) {
 export function filesChangedFromPatch(patchText) {
   const files = [];
   const seen = new Set();
-  const pattern = /^diff --git a\/(.+?) b\/(.+)$/gm;
-  let match;
-  while ((match = pattern.exec(text(patchText))) !== null) {
-    const file = match[2].trim();
+  const add = (file) => {
     if (file && !seen.has(file)) {
       seen.add(file);
       files.push(file);
+    }
+  };
+  // Parse unified-diff file headers. The local provider emits git-format patches
+  // (`--- a/X` / `+++ b/X`); the docker provider emits plain difflib patches with
+  // the same `a/`…`b/` headers but no `diff --git` line (its sandbox image is not
+  // required to contain git). Reading both the a/ and b/ headers (deduped) covers
+  // modifications, additions (`--- /dev/null`), and deletions (`+++ /dev/null`).
+  for (const line of text(patchText).split(/\r?\n/)) {
+    const match = /^--- a\/(.+)$/.exec(line) ?? /^\+\+\+ b\/(.+)$/.exec(line);
+    if (match) {
+      add(match[1].replace(/\t.*$/, "").trim());
     }
   }
   return files;

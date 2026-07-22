@@ -11,6 +11,8 @@
     "test": "node --test",
     "gate:contract": "sh scripts/contract-gate.sh",
     "gate:integration": "sh scripts/scripted-dry-run.sh",
-    "smoke:live": "sh scripts/live-smoke.sh"
+    "gate:docker": "HARNESS_ENV_PROVIDER=docker HARNESS_ENV_IMAGE=averray-worker-sandbox:latest sh scripts/scripted-dry-run.sh",
+    "smoke:live": "sh scripts/live-smoke.sh",
+    "smoke:stage2": "sh scripts/stage2-smoke.sh"
   }
 }

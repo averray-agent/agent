@@ -5,6 +5,11 @@ script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 worker_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
 harness_repo=${HARNESS_REPO:-"$HOME/repo/agent-harness"}
 harness_bin=${HARNESS_BIN:-"$harness_repo/.venv/bin/harness"}
+# Provider defaults to local; set HARNESS_ENV_PROVIDER=docker + HARNESS_ENV_IMAGE
+# to exercise the isolated Docker path (Stage 2). The harness rejects the run if
+# the container's NetworkMode is not "none", so a completed docker run proves it.
+env_provider=${HARNESS_ENV_PROVIDER:-local}
+env_image=${HARNESS_ENV_IMAGE:-}
 postgres_port=${AVERRAY_WORKER_POSTGRES_PORT:-}
 container_name="averray-worker-postgres-$$"
 gate_tmp=$(mktemp -d "${TMPDIR:-/tmp}/averray-worker-integration.XXXXXX")
@@ -83,7 +88,8 @@ run_harness() {
     env \
       HARNESS_DATABASE_URL="$database_url" \
       HARNESS_PROFILES_ROOT="$worker_root/profiles" \
-      HARNESS_ENV_PROVIDER=local \
+      HARNESS_ENV_PROVIDER="$env_provider" \
+      ${env_image:+HARNESS_ENV_IMAGE="$env_image"} \
       HARNESS_MODEL_REF=scripted-model \
       HARNESS_MODEL_BASE_URL=http://localhost:11434/v1 \
       HARNESS_TEST_MODEL_SCRIPT="$harness_repo/tests/fixtures/model_scripts/finish.jsonl" \
@@ -99,7 +105,8 @@ run_harness db migrate
   exec env \
     HARNESS_DATABASE_URL="$database_url" \
     HARNESS_PROFILES_ROOT="$worker_root/profiles" \
-    HARNESS_ENV_PROVIDER=local \
+    HARNESS_ENV_PROVIDER="$env_provider" \
+    ${env_image:+HARNESS_ENV_IMAGE="$env_image"} \
     HARNESS_MODEL_REF=scripted-model \
     HARNESS_MODEL_BASE_URL=http://localhost:11434/v1 \
     HARNESS_TEST_MODEL_SCRIPT="$harness_repo/tests/fixtures/model_scripts/finish.jsonl" \
@@ -154,6 +161,16 @@ if ! printf '%s\n' "$status_output" | grep -q '^outcome=completed$'; then
 fi
 if ! printf '%s\n' "$status_output" | grep -q '^egress_policy=deny_all \[\]$'; then
   echo "integration gate: expected egress_policy=deny_all []" >&2
+  exit 1
+fi
+
+# Self-verify which environment provider actually ran (reproduce, don't trust):
+# the EnvironmentPrepared event records the provider the run really used.
+environment_provider=$(run_harness run events "$run_id" \
+  | sed -n 's/.*EnvironmentPrepared.*"provider":"\([a-z]*\)".*/\1/p' | head -1)
+echo "environment_provider=$environment_provider"
+if [ "$environment_provider" != "$env_provider" ]; then
+  echo "integration gate: expected environment provider '$env_provider', ran '$environment_provider'" >&2
   exit 1
 fi
 
