@@ -19,7 +19,11 @@ export async function buildMultisigOwnerRecord({
   threshold = 2,
   signatories,
   ss58Prefix = DEFAULT_SS58_PREFIX,
+  mapAccountMechanism = "extrinsic",
   mapAccountTxHash = null,
+  autoMapVerified = false,
+  accountCreationBlock = null,
+  accountCreationTxHash = null,
   ownershipTransferTxHash = null,
   adminRehearsalTxHash = null,
   verifyDeploymentRun = null,
@@ -42,13 +46,35 @@ export async function buildMultisigOwnerRecord({
 
   const multisigAccountId = createKeyMulti(decodedSignatories, numericThreshold);
   const ownerEnvValue = u8aToHex(keccakAsU8a(multisigAccountId).slice(-20));
+  const mechanism = normalizeMapAccountMechanism(mapAccountMechanism);
   const evidence = {
     mapAccountTxHash: normalizeNullableString(mapAccountTxHash),
     ownershipTransferTxHash: normalizeNullableString(ownershipTransferTxHash),
     adminRehearsalTxHash: normalizeNullableString(adminRehearsalTxHash),
-    verifyDeploymentRun: normalizeNullableString(verifyDeploymentRun)
+    verifyDeploymentRun: normalizeNullableString(verifyDeploymentRun),
+    accountCreationBlock: normalizeNullableString(accountCreationBlock),
+    accountCreationTxHash: normalizeNullableString(accountCreationTxHash)
   };
-  const status = evidence.mapAccountTxHash
+
+  // Under `Config::AutoMap` the runtime maps accounts on creation and
+  // `revive.map_account()` is a documented no-op, so no mapping extrinsic can
+  // ever exist. Refuse to file an unrelated hash (e.g. the funding transfer
+  // that created the account) in the mapping slot -- that would record a
+  // transaction as proof of something it did not do.
+  if (mechanism === "auto_map" && evidence.mapAccountTxHash) {
+    throw new Error(
+      "--map-account-tx is invalid with --map-account-mechanism auto_map: "
+      + "map_account() is a no-op under AutoMap, so no mapping extrinsic exists. "
+      + "Record the on-chain mapping with --auto-map-verified, and pass the account-creating "
+      + "transfer as --account-creation-tx (never as the mapping hash)."
+    );
+  }
+
+  const mapAccountSatisfied = mechanism === "auto_map"
+    ? Boolean(autoMapVerified)
+    : Boolean(evidence.mapAccountTxHash);
+
+  const status = mapAccountSatisfied
     && evidence.ownershipTransferTxHash
     && evidence.adminRehearsalTxHash
     && evidence.verifyDeploymentRun
@@ -56,7 +82,8 @@ export async function buildMultisigOwnerRecord({
     : "draft";
   if (final && status !== "verified") {
     throw new Error(
-      "--final requires --map-account-tx, --ownership-transfer-tx, --admin-rehearsal-tx, and --verify-deployment-run"
+      `--final requires ${mechanism === "auto_map" ? "--auto-map-verified" : "--map-account-tx"}`
+      + ", --ownership-transfer-tx, --admin-rehearsal-tx, and --verify-deployment-run"
     );
   }
 
@@ -79,10 +106,30 @@ export async function buildMultisigOwnerRecord({
       ownerEnvVar: "OWNER"
     },
     mapAccount: {
-      required: true,
-      extrinsic: "pallet_revive.map_account()",
-      status: evidence.mapAccountTxHash ? "recorded" : "pending",
-      txHash: evidence.mapAccountTxHash
+      mechanism,
+      required: mechanism === "extrinsic",
+      extrinsic: mechanism === "extrinsic" ? "pallet_revive.map_account()" : null,
+      status: mapAccountSatisfied
+        ? (mechanism === "auto_map" ? "auto_mapped" : "recorded")
+        : "pending",
+      txHash: evidence.mapAccountTxHash,
+      autoMap: mechanism === "auto_map"
+        ? {
+          note: "Config::AutoMap is enabled on this runtime. revive.map_account() is a "
+            + "documented no-op; accounts are mapped automatically on creation (and unmapped "
+            + "on kill) by AutoMapper. No mapping extrinsic exists or is needed.",
+          accountCreationBlock: evidence.accountCreationBlock,
+          accountCreationTxHash: evidence.accountCreationTxHash,
+          originalAccountVerified: Boolean(autoMapVerified),
+          // The proof is chain state, not a transaction. Anyone can re-check it:
+          verify: {
+            storage: `revive.originalAccount(${ownerEnvValue})`,
+            expect: u8aToHex(multisigAccountId)
+          },
+          operationalWarning: "AutoMapper unmaps an account when it is killed. Keep the "
+            + "multisig funded above the existential deposit for as long as it owns contracts."
+        }
+        : null
     },
     testnetRehearsal: {
       ownershipTransferTxHash: evidence.ownershipTransferTxHash,
@@ -92,12 +139,15 @@ export async function buildMultisigOwnerRecord({
     launchGate: {
       readyForOwnerUse: status === "verified",
       reason: status === "verified"
-        ? "map_account, ownership transfer, verify_deployment, and multisig admin rehearsal are recorded"
-        : "do not use multisig.ownerEnvValue as OWNER until map_account and testnet ownership/admin rehearsals are recorded"
+        ? `account mapping (${mechanism}), ownership transfer, verify_deployment, and multisig admin rehearsal are recorded`
+        : `do not use multisig.ownerEnvValue as OWNER until the account mapping (${mechanism}) and ownership/admin rehearsals are recorded`
     },
     polkadotDocsCheck: {
       source: "https://docs.polkadot.com/smart-contracts/for-eth-devs/accounts/#account-mapping-for-native-polkadot-accounts",
-      note: "Native AccountId32 accounts need pallet_revive.map_account() before Ethereum-compatible smart-contract tooling can safely control them."
+      note: "A native AccountId32 must be mapped before Ethereum-compatible tooling can control it. "
+        + "The address itself is always keccak256(accountId32)[12..32]; mapping stores the reverse "
+        + "lookup and does not change the derived address. Runtimes with Config::AutoMap perform the "
+        + "mapping automatically on account creation, making map_account() a no-op."
     }
   };
 }
@@ -137,6 +187,14 @@ function normalizeNullableString(value) {
   return normalized || null;
 }
 
+export function normalizeMapAccountMechanism(value) {
+  const normalized = String(value ?? "extrinsic").trim();
+  if (normalized !== "extrinsic" && normalized !== "auto_map") {
+    throw new Error(`mapAccountMechanism must be "extrinsic" or "auto_map" (got "${normalized}")`);
+  }
+  return normalized;
+}
+
 function parseArgs(argv) {
   const args = {
     profile: "testnet",
@@ -164,8 +222,20 @@ function parseArgs(argv) {
       case "--signatories":
         args.signatories = next();
         break;
+      case "--map-account-mechanism":
+        args.mapAccountMechanism = next();
+        break;
       case "--map-account-tx":
         args.mapAccountTxHash = next();
+        break;
+      case "--auto-map-verified":
+        args.autoMapVerified = true;
+        break;
+      case "--account-creation-block":
+        args.accountCreationBlock = next();
+        break;
+      case "--account-creation-tx":
+        args.accountCreationTxHash = next();
         break;
       case "--ownership-transfer-tx":
         args.ownershipTransferTxHash = next();
@@ -198,13 +268,27 @@ function usage() {
   node scripts/ops/${basename(fileURLToPath(import.meta.url))} \\
     --signatories <HOT_SS58>,<WARM_SS58>,<COLD_SS58> \\
     [--threshold 2] [--ss58-prefix 0] [--profile testnet] \\
-    [--map-account-tx 0x...] [--ownership-transfer-tx 0x...] \\
+    [--map-account-mechanism extrinsic|auto_map] \\
+    [--map-account-tx 0x...] \\
+    [--auto-map-verified] [--account-creation-block N] [--account-creation-tx 0x...] \\
+    [--ownership-transfer-tx 0x...] \\
     [--admin-rehearsal-tx 0x...] [--verify-deployment-run <url-or-id>] \\
     [--final] [--out deployments/testnet-multisig-owner.json]
 
+Account mapping has two mechanisms:
+  extrinsic  (default) the account called pallet_revive.map_account(); record
+             the extrinsic hash with --map-account-tx.
+  auto_map   the runtime has Config::AutoMap, so map_account() is a no-op and
+             the account was mapped automatically on creation. There is no
+             mapping extrinsic. Confirm on chain that
+             revive.originalAccount(<ownerEnvValue>) == <multisig accountId32>,
+             then pass --auto-map-verified. Use --account-creation-tx for the
+             transfer that created the account -- never as --map-account-tx,
+             which is refused under auto_map.
+
 The output is a public operator record. It does not contain private keys or seeds.
-Use --final only after map_account, ownership transfer, verify_deployment, and
-one multisig admin rehearsal have all completed on Polkadot Hub TestNet.`;
+Use --final only after the account mapping, ownership transfer, verify_deployment,
+and one multisig admin rehearsal have all been recorded.`;
 }
 
 async function main() {
