@@ -37,12 +37,15 @@ hardware-vs-software**: the security floor is identical (all secure-element);
 what differs is how reachable each device is and how far apart the devices and
 their plates live.
 
-> **Chain detail (Codex-owned):** the Ledger app / signing curve the `OWNER`
-> signatories use, and how `pallet_revive.map_account()` binds the **keyless**
-> 2-of-3 multisig account to the H160 `OWNER`, are confirmed by Codex before the
-> ceremony — a wrong owner **bricks the contract**. Do not improvise the curve or
-> the mapping call. (The secp256k1 KMS key in the credentials plan is the
-> *backend* signer, **not** these OWNER signers.)
+> **Chain detail — resolved 2026-07-24.** Use the **Polkadot (Generic)** Ledger
+> app; the legacy parachain-specific apps are deprecated and do not cover Hub.
+> The H160 `OWNER` for the **keyless** 2-of-3 multisig is
+> `keccak256(accountId32)[12..32]` (see §4), and on Polkadot Asset Hub mainnet
+> the mapping is **automatic** — no `map_account()` ceremony. A wrong owner
+> still **bricks the contract**, so verify the address rather than assuming it:
+> `revive.originalAccount(<OWNER>)` must return the multisig's `accountId32`.
+> (The secp256k1 KMS key in the credentials plan is the *backend* signer,
+> **not** these OWNER signers.)
 
 Buy the three Ledgers **sealed, direct from the vendor**; verify genuineness on
 first boot and pin firmware. Initialize each on an offline machine.
@@ -127,8 +130,9 @@ node scripts/ops/prepare-multisig-owner-record.mjs \
 The helper sorts the signers, derives the deterministic pallet-multisig
 SS58/accountId, computes the H160 owner candidate used as `OWNER`, and writes
 a public operator record. It does **not** prove the account is safe to use as a
-contract owner yet — the initial record is `status: "draft"` until the
-`map_account` and testnet rehearsal evidence below are filled in.
+contract owner yet — the initial record is `status: "draft"` until the account
+mapping (§4, by either mechanism) and the ownership/admin rehearsal evidence
+below are filled in.
 
 Do not put seeds or private labels in the record. Signer addresses, transaction
 hashes, workflow run ids, and the mapped owner address are public launch
@@ -147,28 +151,59 @@ different model:
 
 - Ethereum-style 20-byte addresses map into 32-byte accounts through a
   reversible `0xEE` suffix convention.
-- Native 32-byte Polkadot accounts need `pallet_revive.map_account()`
-  for explicit Ethereum compatibility.
-- Unmapped native accounts can fall back to a hashed 20-byte address,
-  but that is not a safe operator assumption for contract ownership.
+- A native 32-byte Polkadot account's EVM address is
+  `keccak256(accountId32)[12..32]` — the whole account is hashed and the
+  last 20 bytes taken, precisely so nothing is truncated away.
+- That derivation is **stateless and unconditional**. Mapping stores the
+  reverse lookup (`revive.originalAccount: H160 -> AccountId32`) so the
+  runtime can recover the native account; it does **not** change the
+  derived address. An account's H160 is the same before and after mapping.
+- A native account must nonetheless be **mapped** before Ethereum-compatible
+  tooling can control it.
 
-Use an address that is explicitly verified to control EVM-side admin
-transactions on Polkadot Hub TestNet first. In practice that means one
-of:
+### Two mapping mechanisms — check which one the runtime uses
 
-- an EVM-native operator / multisig address, or
-- a native Polkadot account that has been intentionally mapped through
-  `pallet_revive.map_account()` and then tested end to end
+| Runtime | What to do |
+|---|---|
+| `Config::AutoMap` **enabled** | Nothing. Accounts are mapped automatically on creation by `AutoMapper`; `revive.map_account()` is a **documented no-op** and `unmap_account` is disabled. Simply funding the multisig creates *and* maps it. |
+| `Config::AutoMap` **disabled** | The account itself must call `revive.map_account()` (for a multisig: via a 2-of-3 `asMulti`). This takes a refundable deposit, released by `unmap_account`. |
 
-Record the verified 20-byte address as your `OWNER` value only after the
-testnet rehearsal succeeds.
+Check the runtime before planning a ceremony — the call documentation states
+the AutoMap behaviour directly:
+
+```bash
+# prints the map_account/unmap_account runtime docs for the connected chain
+node -e "(async()=>{const{ApiPromise,WsProvider}=await import('@polkadot/api');
+const api=await ApiPromise.create({provider:new WsProvider(process.env.WSS)});
+const p=api.runtimeMetadata.asLatest.pallets.find(x=>x.name.toString()==='Revive');
+api.registry.lookup.getSiType(p.calls.unwrap().type).def.asVariant.variants
+ .filter(v=>/map_account/.test(v.name.toString()))
+ .forEach(v=>console.log(v.name.toString(),'->',v.docs.map(d=>d.toString()).join(' ')));
+await api.disconnect();})()"
+```
+
+> **Polkadot Asset Hub mainnet has `AutoMap` enabled** (verified 2026-07-24).
+> No `map_account()` ceremony is required there; do not schedule one, and do
+> not record an unrelated transaction hash as if it were a mapping call.
+
+**Verify the mapping either way** — the proof is chain state, not a receipt:
+
+```bash
+# must return the multisig's accountId32
+revive.originalAccount(<OWNER H160>)
+```
+
+Record the verified 20-byte address as your `OWNER` value only after that
+lookup matches and the ownership rehearsal succeeds.
 
 > **Important**: if the owner address is wrong, the contract is not
 > "partially degraded" — it is effectively frozen out of admin control.
 > Treat owner-address verification as a launch gate, not a clerical step.
 
-After the multisig account has called `pallet_revive.map_account()` on Hub
-TestNet, update the record with the mapping transaction:
+Record the mapping with the mechanism that actually applies.
+
+On a runtime **without** AutoMap, after the multisig has called
+`pallet_revive.map_account()`:
 
 ```bash
 node scripts/ops/prepare-multisig-owner-record.mjs \
@@ -178,6 +213,31 @@ node scripts/ops/prepare-multisig-owner-record.mjs \
   --map-account-tx 0x<tx-hash> \
   --out deployments/testnet-multisig-owner.json
 ```
+
+On a runtime **with** AutoMap there is no mapping extrinsic, so confirm the
+`originalAccount` lookup on chain and record that instead. Pass the transfer
+that created the account as `--account-creation-tx`:
+
+```bash
+node scripts/ops/prepare-multisig-owner-record.mjs \
+  --profile mainnet \
+  --threshold 2 \
+  --signatories <HOT_SS58>,<WARM_SS58>,<COLD_SS58> \
+  --map-account-mechanism auto_map \
+  --auto-map-verified \
+  --account-creation-block <N> \
+  --account-creation-tx 0x<funding-tx-hash> \
+  --out deployments/mainnet-multisig-owner.json
+```
+
+Passing `--map-account-tx` together with `auto_map` is **refused**: no mapping
+extrinsic exists under AutoMap, so any hash filed there would be evidence of a
+call that never happened.
+
+> **Keep the multisig funded.** `AutoMapper` unmaps an account when it is
+> killed, so a balance falling below the existential deposit would unmap an
+> account that owns contracts. Re-funding restores the same H160 (the
+> derivation is deterministic), but avoid the situation.
 
 The record should stay `draft` at this point. It becomes `verified` only after
 ownership transfer, `verify_deployment.sh testnet`, and one owner-only admin
