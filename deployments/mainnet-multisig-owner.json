@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "kind": "averray.multisigOwnerRecord",
+  "status": "draft",
+  "profile": "mainnet",
+  "threshold": 2,
+  "ss58Prefix": 0,
+  "signatories": [
+    {
+      "index": 1,
+      "address": "1mhf9yyYq3ArZAEysQQfWYNe2rgrDP6omrn6xiJBbwKqYZH",
+      "accountId32": "0x2217aa0eee7d3de03f3760165818b225f3bfb5d2694ac6980eedba57f8dde772"
+    },
+    {
+      "index": 2,
+      "address": "121pEreu4kTNBiyG7K32Red672dgMhkra7cLTNwK8ebEYhyv",
+      "accountId32": "0x2cdb40f6605cd3caad90b59816b657ea970c941d8372784faf024dd3c2dbab7e"
+    },
+    {
+      "index": 3,
+      "address": "16UCRMPz5njNdRvAEE3pkEjaqpjX8ayC1gh9yNtk5eGb14oc",
+      "accountId32": "0xf1eb3c605e687b23900616feb6584fe22d3344c9304e106d3da69eeb856b8314"
+    }
+  ],
+  "multisig": {
+    "ss58Address": "14LA8vJD8JeQYMRd5yhiw3hxD7CK5txhfL9GSNPjzLRKc3YK",
+    "accountId32": "0x93511e8deef3e7ec69cc1f18a573176da9870a0fb474ab2e0c18d88a5e74fd47",
+    "ownerEnvValue": "0x01e6eed856e989201f4ff6346e18eab7e46c874c",
+    "ownerEnvVar": "OWNER"
+  },
+  "mapAccount": {
+    "required": true,
+    "extrinsic": "pallet_revive.map_account()",
+    "status": "pending",
+    "txHash": null
+  },
+  "testnetRehearsal": {
+    "ownershipTransferTxHash": null,
+    "adminRehearsalTxHash": null,
+    "verifyDeploymentRun": null
+  },
+  "launchGate": {
+    "readyForOwnerUse": false,
+    "reason": "do not use multisig.ownerEnvValue as OWNER until map_account and testnet ownership/admin rehearsals are recorded"
+  },
+  "polkadotDocsCheck": {
+    "source": "https://docs.polkadot.com/smart-contracts/for-eth-devs/accounts/#account-mapping-for-native-polkadot-accounts",
+    "note": "Native AccountId32 accounts need pallet_revive.map_account() before Ethereum-compatible smart-contract tooling can safely control them."
+  }
+}
