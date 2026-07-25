@@ -216,8 +216,14 @@ test("generateAll: the real transform yields the mainnet essentials", () => {
   assert.match(backend, /^INDEXER_STATUS_URL=http:\/\/mainnet-indexer:42069\/status$/mu);
   assert.match(backend, /^TREASURY_POLICY_ADDRESS=0x226F14252A98BD2eA140271647De20132F09AF20$/mu);
   assert.match(backend, /^AGENT_ACCOUNT_ADDRESS=0xB1350932bf85E7ffd0599E9a3CC7b55718D89E57$/mu);
-  assert.match(backend, /^AUTH_ADMIN_WALLETS=0x01e6eed856e989201f4ff6346e18eab7e46c874c$/mu);
-  assert.match(backend, /^AUTH_VERIFIER_WALLETS=0x5a6836c6D4d293F6E5377E6c28054F4171915813$/mu);
+  assert.match(
+    backend,
+    /^AUTH_ADMIN_WALLETS=0x01e6eed856e989201f4ff6346e18eab7e46c874c,0x9Ab8531FBb0948C542a31298FD61335f30064239$/mu
+  );
+  assert.match(
+    backend,
+    /^AUTH_VERIFIER_WALLETS=0x5a6836c6D4d293F6E5377E6c28054F4171915813,0x9Ab8531FBb0948C542a31298FD61335f30064239$/mu
+  );
   assert.doesNotMatch(
     backend,
     /^\s*#?\s*[A-Z][A-Z0-9_]*=.*TODO\(operator\)/mu
