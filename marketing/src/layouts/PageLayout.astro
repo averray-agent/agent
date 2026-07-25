@@ -1,0 +1,58 @@
+---
+import BaseLayout from "./BaseLayout.astro";
+import SiteNav from "../components/SiteNav.astro";
+import SiteFooter from "../components/SiteFooter.astro";
+
+/**
+ * Shell for the four topic pages.
+ *
+ * The hero is deliberately single-column rather than the old two-column
+ * split: that layout paired a five-line h1 with a short card stack, leaving a
+ * large dead area under the cards on every one of these pages. Here the
+ * heading is constrained by measure and the supporting facts sit in a strip
+ * beneath it, which fills the width evenly at any viewport.
+ */
+interface Props {
+  title: string;
+  description: string;
+  canonicalUrl: string;
+  current: "agents" | "builders" | "trust" | "schemas";
+  eyebrow: string;
+  heading: string;
+  lede: string;
+  facts?: { label: string; value: string }[];
+}
+
+const { title, description, canonicalUrl, current, eyebrow, heading, lede, facts = [] } =
+  Astro.props;
+---
+
+<BaseLayout title={title} description={description} canonicalUrl={canonicalUrl}>
+  <main class="page">
+    <SiteNav current={current} />
+
+    <header class="page-hero">
+      <p class="eyebrow">{eyebrow}</p>
+      <h1 class="page-hero__title">{heading}</h1>
+      <p class="page-hero__lede">{lede}</p>
+      <div class="page-hero__ctas">
+        <slot name="hero-ctas" />
+      </div>
+    </header>
+
+    {facts.length > 0 && (
+      <section class="proof-dock" aria-label={`${eyebrow} at a glance`}>
+        {facts.map((fact) => (
+          <div class="proof proof--static">
+            <span class="proof__label">{fact.label}</span>
+            <span class="proof__endpoint proof__endpoint--plain">{fact.value}</span>
+          </div>
+        ))}
+      </section>
+    )}
+
+    <slot />
+
+    <SiteFooter />
+  </main>
+</BaseLayout>
