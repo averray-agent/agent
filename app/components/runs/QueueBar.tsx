@@ -86,13 +86,15 @@ export function QueueBar({ filters, active, onChange }: QueueBarProps) {
         </span>
       </div>
 
-      <button
-        type="button"
-        className="inline-flex items-center gap-1.5 rounded-[6px] border border-[var(--avy-line)] bg-white px-2.5 py-1 font-[family-name:var(--font-display)] text-[11px] font-bold uppercase text-[var(--avy-ink)]"
+      {/* Not a control. This never had a handler, so it could not change the
+          sort — it is the static label it always was. Rendered as text rather
+          than a button that implies the order can be changed. */}
+      <span
+        className="inline-flex items-center gap-1.5 rounded-[6px] border border-[var(--avy-line)] bg-white px-2.5 py-1 font-[family-name:var(--font-display)] text-[11px] font-bold uppercase text-[var(--avy-muted)]"
         style={{ letterSpacing: "0.06em" }}
       >
-        <span className="font-medium text-[var(--avy-muted)]">Sort</span> Age ↓
-      </button>
+        <span className="font-medium">Sorted by</span> Age ↓
+      </span>
     </div>
   );
 }

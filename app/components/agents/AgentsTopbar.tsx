@@ -41,16 +41,25 @@ export function AgentsTopbar({ freshness }: { freshness?: FreshnessState }) {
           <span>{time || "—"} UTC</span>
         </div>
         {freshness ? <DataFreshnessPill state={freshness} /> : null}
+        {/* Disabled: no roster export exists. The Sessions page has a real
+            audit-bundle export; this would follow that pattern when built. */}
         <button
           type="button"
-          className="inline-flex h-8 items-center gap-1.5 rounded-[8px] border border-[var(--avy-line)] bg-white/60 px-3.5 font-[family-name:var(--font-display)] text-[11.5px] font-bold uppercase text-[var(--avy-ink)] transition-transform hover:-translate-y-px hover:border-[color:rgba(30,102,66,0.22)] hover:bg-white/92"
+          disabled
+          title="Roster export is not wired to a live backend yet."
+          className="inline-flex h-8 cursor-not-allowed items-center gap-1.5 rounded-[8px] border border-[var(--avy-line)] bg-white/60 px-3.5 font-[family-name:var(--font-display)] text-[11.5px] font-bold uppercase text-[var(--avy-ink)] opacity-40"
           style={{ letterSpacing: "0.04em" }}
         >
           ⤓ Export roster
         </button>
+        {/* Disabled to match AgentDirectoryTable, which already renders its own
+            invite control disabled with this exact reason. The two controls
+            said different things about the same missing capability. */}
         <button
           type="button"
-          className="inline-flex h-8 items-center gap-1.5 rounded-[8px] bg-[var(--avy-accent)] px-3.5 font-[family-name:var(--font-display)] text-[11.5px] font-bold uppercase text-[var(--fg-invert)] transition-transform hover:-translate-y-px hover:bg-[var(--avy-accent-2)]"
+          disabled
+          title="Agent invites are not yet wired to a live backend."
+          className="inline-flex h-8 cursor-not-allowed items-center gap-1.5 rounded-[8px] bg-[var(--avy-accent)] px-3.5 font-[family-name:var(--font-display)] text-[11.5px] font-bold uppercase text-[var(--fg-invert)] opacity-40"
           style={{ letterSpacing: "0.04em" }}
         >
           ＋ Invite agent
