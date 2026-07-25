@@ -67,13 +67,13 @@ export function OverviewTopbar({
           </span>
         ) : null}
         {freshness ? <DataFreshnessPill state={freshness} /> : null}
-        <button
-          type="button"
-          className="inline-flex h-[34px] items-center gap-1.5 rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3.5 font-[family-name:var(--font-display)] text-[11.5px] font-bold uppercase text-[var(--avy-ink)] transition-transform hover:-translate-y-px hover:border-[color:rgba(30,102,66,0.24)]"
-          style={{ letterSpacing: "0.04em" }}
-        >
-          Export briefing
-        </button>
+        {/* An "Export briefing" button used to sit here. It came across from
+            the static design handoff with no handler ever attached — enabled,
+            styled as a real control, and inert on click. A control that
+            promises an action it cannot perform is the same class of problem
+            as a surface that overstates its data, so it is gone rather than
+            disabled. If an operator briefing export is wanted, it should be
+            built deliberately alongside the audit-bundle export on Sessions. */}
         <Link
           href="/runs"
           className="inline-flex h-[34px] items-center gap-1.5 rounded-[8px] bg-[var(--avy-accent)] px-3.5 font-[family-name:var(--font-display)] text-[11.5px] font-bold uppercase text-[var(--fg-invert)] transition-transform hover:-translate-y-px hover:bg-[var(--avy-accent-2)]"

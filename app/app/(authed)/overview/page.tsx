@@ -41,6 +41,7 @@ import { buildRecurringRuntimeSummary } from "@/lib/api/recurring-jobs";
 import {
   buildJobLifecycleSummary,
   buildPublicJobLifecycleSummary,
+  countOpenJobs,
   EMPTY_JOB_LIFECYCLE_SUMMARY,
 } from "@/lib/api/job-lifecycle";
 import {
@@ -184,11 +185,28 @@ export default function OverviewPage() {
   );
   const hasAdminLifecycleData = adminLifecycleSummary.total > 0;
   const hasPublicLifecycleData = publicLifecycleSummary.total > 0;
-  const lifecycleSummary = hasAdminLifecycleData
-    ? adminLifecycleSummary
-    : hasPublicLifecycleData
-      ? publicLifecycleSummary
-      : EMPTY_JOB_LIFECYCLE_SUMMARY;
+  const lifecycleSummary = useMemo(() => {
+    if (!hasAdminLifecycleData) {
+      return hasPublicLifecycleData ? publicLifecycleSummary : EMPTY_JOB_LIFECYCLE_SUMMARY;
+    }
+    // /admin/status is authoritative for the buckets it emits, but it reports
+    // neither `blocked` nor `exhausted`. Borrow those from the public feed
+    // when it has rows; otherwise leave them null so the strip says "not
+    // reported" rather than showing a zero that reads as an all-clear.
+    return hasPublicLifecycleData
+      ? {
+          ...adminLifecycleSummary,
+          blocked: publicLifecycleSummary.blocked,
+          blockedReason: publicLifecycleSummary.blockedReason,
+          exhausted: publicLifecycleSummary.exhausted,
+        }
+      : adminLifecycleSummary;
+  }, [
+    adminLifecycleSummary,
+    hasAdminLifecycleData,
+    hasPublicLifecycleData,
+    publicLifecycleSummary,
+  ]);
   const hasLifecycleData = lifecycleSummary.total > 0;
   const lifecycleMeta = hasAdminLifecycleData
     ? "live API · /admin/status"
@@ -276,7 +294,11 @@ export default function OverviewPage() {
         // showed the fixture's `14` whenever live data legitimately
         // returned zero rows, masking real "queue is empty" signals.
         // Locked/down feeds render "—", never a fabricated zero.
-        openRuns={hasLiveOverview ? liveJobs.length : 0}
+        //
+        // `liveJobs.length` here reported the catalog total as open work, so
+        // the hero read "16 open runs" beside a lifecycle strip saying
+        // OPEN 13 — the three exhausted rows were counted as open.
+        openRuns={hasLiveOverview ? countOpenJobs(jobs.data) : 0}
         awaitingSignature={sessionsBlocked ? "—" : hasLiveOverview ? disputedSessions : 0}
         lastReceiptTime={lastReceiptTime}
         treasuryPosture={

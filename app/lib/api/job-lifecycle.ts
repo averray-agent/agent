@@ -42,11 +42,38 @@ export interface JobLifecycle {
 
 export interface JobLifecycleSummary {
   total: number;
+  /** Open work. `claimable` is a subset of this, not a sibling. */
   open: number;
   claimable: number;
   stale: number;
   paused: number;
   archived: number;
+  /**
+   * Recurring reserve spent — the job is dead-ended, not open. Previously
+   * these landed in `total` and no bucket at all, so a strip reading
+   * STALE 0 / PAUSED 0 / ARCHIVED 0 told an operator nothing was stuck while
+   * jobs sat exhausted.
+   */
+  exhausted: number | null;
+  /**
+   * Open work that nobody can pick up — `open` minus `claimable`. Derived
+   * rather than matched on a reason string, so a new blocking reason is
+   * counted the day it ships instead of silently reading as workable.
+   *
+   * This is the number that was missing entirely: ten of sixteen jobs were
+   * waiting on reward funding while the room reported sixteen runs in motion
+   * and a green treasury.
+   *
+   * `null` means the source did not report it — `/admin/status` emits neither
+   * this nor `exhausted`. It must render as unknown, never as a zero the
+   * endpoint never claimed.
+   */
+  blocked: number | null;
+  /**
+   * Dominant `reason` across the blocked rows, verbatim from the API. Shown
+   * so the count names its own cause instead of leaving an operator to guess.
+   */
+  blockedReason?: string;
 }
 
 export const EMPTY_JOB_LIFECYCLE_SUMMARY: JobLifecycleSummary = {
@@ -56,6 +83,8 @@ export const EMPTY_JOB_LIFECYCLE_SUMMARY: JobLifecycleSummary = {
   stale: 0,
   paused: 0,
   archived: 0,
+  exhausted: 0,
+  blocked: 0,
 };
 
 /** Read `jobLifecycle` from either `/admin/status` or `/admin/jobs` payload. */
@@ -71,6 +100,11 @@ export function buildJobLifecycleSummary(payload: unknown): JobLifecycleSummary 
     stale: nonNegInt(slice.stale),
     paused: nonNegInt(slice.paused),
     archived: nonNegInt(slice.archived),
+    // /admin/status emits neither bucket today. They stay null — "not
+    // reported" — so the strip renders unknown rather than a zero that would
+    // read as a clean all-clear.
+    exhausted: slice.exhausted === undefined ? null : nonNegInt(slice.exhausted),
+    blocked: slice.blocked === undefined ? null : nonNegInt(slice.blocked),
   };
 }
 
@@ -80,51 +114,112 @@ export function buildJobLifecycleSummary(payload: unknown): JobLifecycleSummary 
  * operator source, but public jobs are enough to avoid showing an all-zero
  * lifecycle strip while the queue visibly contains open work.
  */
-export function buildPublicJobLifecycleSummary(payload: unknown): JobLifecycleSummary {
-  const jobs = extractJobRows(payload);
-  if (!jobs.length) return EMPTY_JOB_LIFECYCLE_SUMMARY;
+/**
+ * How one `/jobs` row lands in the lifecycle buckets.
+ *
+ * This is the single definition of "open" for the operator surfaces. The
+ * mission hero and the Runs-in-motion vital used to count `jobs.length`
+ * instead, which reported the catalog total as open work — the overview showed
+ * "16 open runs" beside a lifecycle strip reading OPEN 13, because three of
+ * those jobs were exhausted.
+ */
+export interface JobRowClassification {
+  exhausted: boolean;
+  open: boolean;
+  claimable: boolean;
+  stale: boolean;
+  paused: boolean;
+  archived: boolean;
+}
 
-  return jobs.reduce<JobLifecycleSummary>((summary, job) => {
-    const lifecycle = asRecord(job.lifecycle);
-    const status = text(lifecycle?.status) || text(job.status);
-    const state = text(lifecycle?.state) || text(job.state) || status || "open";
-    const effectiveState = text(job.effectiveState);
-    // An exhausted job (recurring reserve spent) is not open work even
-    // when its raw status still reads "open" — counting it inflated the
-    // OPEN bucket past what agents can actually claim.
-    const exhausted =
-      status === "exhausted" || state === "exhausted" || effectiveState === "exhausted";
-    const claimable =
-      !exhausted &&
-      (job.claimable === true ||
-        effectiveState === "claimable" ||
-        (!effectiveState && state === "open"));
+export function classifyJobRow(job: Record<string, unknown>): JobRowClassification {
+  const lifecycle = asRecord(job.lifecycle);
+  const status = text(lifecycle?.status) || text(job.status);
+  const state = text(lifecycle?.state) || text(job.state) || status || "open";
+  const effectiveState = text(job.effectiveState);
+  // An exhausted job (recurring reserve spent) is not open work even
+  // when its raw status still reads "open" — counting it inflated the
+  // OPEN bucket past what agents can actually claim.
+  const exhausted =
+    status === "exhausted" || state === "exhausted" || effectiveState === "exhausted";
 
-    summary.total += 1;
-    if (
+  return {
+    exhausted,
+    open:
       !exhausted &&
       (status === "open" ||
         state === "open" ||
         state === "ready" ||
         state === "claimable" ||
-        effectiveState === "claimable")
-    ) {
+        effectiveState === "claimable"),
+    // Note this is a SUBSET of `open`, not a sibling bucket.
+    claimable:
+      !exhausted &&
+      (job.claimable === true ||
+        effectiveState === "claimable" ||
+        (!effectiveState && state === "open")),
+    stale: state === "stale",
+    paused: status === "paused" || state === "paused",
+    archived: status === "archived" || state === "archived",
+  };
+}
+
+/**
+ * Count of rows that are genuinely open work. Use this anywhere the UI says
+ * "open runs" — never `jobs.length`, which includes exhausted rows.
+ */
+export function countOpenJobs(payload: unknown): number {
+  return extractJobRows(payload).reduce(
+    (count, job) => (classifyJobRow(job).open ? count + 1 : count),
+    0
+  );
+}
+
+export function buildPublicJobLifecycleSummary(payload: unknown): JobLifecycleSummary {
+  const jobs = extractJobRows(payload);
+  if (!jobs.length) return EMPTY_JOB_LIFECYCLE_SUMMARY;
+
+  const blockedReasons = new Map<string, number>();
+
+  // Every bucket here is genuinely counted from rows, so `blocked` and
+  // `exhausted` are real numbers rather than the "not reported" null that
+  // /admin/status yields.
+  type CountedSummary = JobLifecycleSummary & { blocked: number; exhausted: number };
+
+  const summary = jobs.reduce<CountedSummary>((summary, job) => {
+    const { exhausted, open, claimable, stale, paused, archived } = classifyJobRow(job);
+
+    if (open && !claimable) {
+      summary.blocked += 1;
+      const reason = text(job.reason) || text(asRecord(job.claimStatus)?.reason);
+      if (reason) blockedReasons.set(reason, (blockedReasons.get(reason) ?? 0) + 1);
+    }
+
+    summary.total += 1;
+    if (exhausted) {
+      summary.exhausted += 1;
+    }
+    if (open) {
       summary.open += 1;
     }
     if (claimable) {
       summary.claimable += 1;
     }
-    if (state === "stale") {
+    if (stale) {
       summary.stale += 1;
     }
-    if (status === "paused" || state === "paused") {
+    if (paused) {
       summary.paused += 1;
     }
-    if (status === "archived" || state === "archived") {
+    if (archived) {
       summary.archived += 1;
     }
     return summary;
-  }, { ...EMPTY_JOB_LIFECYCLE_SUMMARY });
+  }, { ...EMPTY_JOB_LIFECYCLE_SUMMARY, blocked: 0, exhausted: 0 });
+
+  const dominant = [...blockedReasons.entries()].sort((a, b) => b[1] - a[1])[0];
+  if (dominant) summary.blockedReason = dominant[0];
+  return summary;
 }
 
 /** Pull a single job's lifecycle block off a raw job object. */
