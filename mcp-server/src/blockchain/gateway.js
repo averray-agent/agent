@@ -1142,7 +1142,7 @@ export class BlockchainGateway {
 
   async resolveDispute(jobId, workerPayout, reasonCode, metadataURI = "") {
     return this.withGatewayError("resolveDispute", async () => {
-      this.requireArbitratorSigner("resolveDispute");
+      await this.requireArbitratorSigner("resolveDispute");
       const job = await this.getJob(jobId);
       const asset = this.assetForAddress(job.asset);
       const workerPayoutBase = this.toBaseUnits(workerPayout, asset, "dispute worker payout");
@@ -1817,9 +1817,28 @@ export class BlockchainGateway {
     }
   }
 
-  requireArbitratorSigner(operation) {
+  async requireArbitratorSigner(operation) {
     if (!this.arbitratorSigner) {
-      throw new ConfigError(`${operation} requires ARBITRATOR_SIGNER_PRIVATE_KEY or SIGNER_PRIVATE_KEY`);
+      throw new ConfigError(
+        `${operation} requires an arbitrator signer, but no blockchain signer is configured.`,
+        {
+          operation,
+          reason: "arbitrator_signer_missing"
+        }
+      );
+    }
+
+    const status = await this.getTreasuryPolicyStatus();
+    if (status?.roles?.arbitratorSignerIsArbitrator !== true) {
+      throw new ConfigError(
+        `${operation} refused: the configured arbitrator signer is not the approved on-chain arbitrator. ` +
+          "Arbitration must be completed out-of-band with the registered hardware arbitrator.",
+        {
+          operation,
+          reason: "arbitrator_signer_not_on_chain_arbitrator",
+          arbitratorSignerAddress: status?.roles?.arbitratorSignerAddress
+        }
+      );
     }
   }
 

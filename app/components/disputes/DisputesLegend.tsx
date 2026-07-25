@@ -22,8 +22,10 @@ export function DisputesLegend() {
             Each origin carries its own window from the active policy. The
             response exposes the SLA duration, deadline, expiry state, and
             remaining seconds. An expired SLA does not invent a new reviewer:
-            a verdict still requires admin or verifier authority, and stake
-            release requires an admin after that verdict is recorded.
+            an admin or verifier may review the evidence, but the on-chain
+            verdict requires the registered arbitrator. Mainnet uses an
+            out-of-band hardware signer; stake release requires an admin after
+            that verdict is recorded.
           </p>
         </Card>
         <Card head="Slash mechanics" title="Where stake goes on uphold">

@@ -83,7 +83,50 @@ export function createDisputeRoutes({
     return gateway.openDispute(chainJobId, session.wallet);
   }
 
-  async function buildDisputeFromSession(session) {
+  async function resolveArbitrationExecution() {
+    if (!gateway?.isEnabled?.()) {
+      return {
+        mode: "local_only",
+        backendCanResolve: true,
+        reason: "chain_backend_disabled"
+      };
+    }
+    if (typeof gateway.getTreasuryPolicyStatus !== "function") {
+      return {
+        mode: "unavailable",
+        backendCanResolve: false,
+        reason: "arbitrator_status_unavailable"
+      };
+    }
+
+    try {
+      const status = await gateway.getTreasuryPolicyStatus();
+      const signerAddress = status?.roles?.arbitratorSignerAddress;
+      if (status?.roles?.arbitratorSignerIsArbitrator === true) {
+        return {
+          mode: "backend_signer",
+          backendCanResolve: true,
+          signerAddress
+        };
+      }
+      return {
+        mode: "out_of_band_hardware",
+        backendCanResolve: false,
+        reason: signerAddress
+          ? "backend_signer_not_on_chain_arbitrator"
+          : "backend_arbitrator_signer_missing",
+        signerAddress
+      };
+    } catch {
+      return {
+        mode: "unavailable",
+        backendCanResolve: false,
+        reason: "arbitrator_status_unavailable"
+      };
+    }
+  }
+
+  async function buildDisputeFromSession(session, arbitrationExecution) {
     const id = disputeIdForSession(session.sessionId);
     const [verdictReceipt, releaseReceipt] = await Promise.all([
       stateStore.getMutationReceipt?.("dispute_verdict", id),
@@ -164,18 +207,21 @@ export function createDisputeRoutes({
       totalClaimLock: Number(session.totalClaimLock ?? session.claimStake ?? 0),
       release: releaseReceipt ?? null,
       timeline: timeline.sort((left, right) => String(left.at ?? "").localeCompare(String(right.at ?? "")))
-    });
+    }, arbitrationExecution);
   }
 
-  function withDisputeArbitration(dispute) {
+  function withDisputeArbitration(dispute, execution = dispute?.arbitration?.execution) {
     return {
       ...dispute,
-      arbitration: buildDisputeArbitrationSemantics(dispute)
+      arbitration: buildDisputeArbitrationSemantics(dispute, { execution })
     };
   }
 
   async function listDisputes(limit = 100) {
-    const sessions = await service.listRecentSessions(limit);
+    const [sessions, arbitrationExecution] = await Promise.all([
+      service.listRecentSessions(limit),
+      resolveArbitrationExecution()
+    ]);
     const candidates = await Promise.all(
       sessions.map(async (session) => {
         if (session.status === "disputed") {
@@ -189,7 +235,9 @@ export function createDisputeRoutes({
         return verdictReceipt || releaseReceipt ? session : undefined;
       })
     );
-    return Promise.all(candidates.filter(Boolean).map((session) => buildDisputeFromSession(session)));
+    return Promise.all(
+      candidates.filter(Boolean).map((session) => buildDisputeFromSession(session, arbitrationExecution))
+    );
   }
 
   async function findDispute(id, limit = 250) {
@@ -265,18 +313,32 @@ export function createDisputeRoutes({
         decidedAt,
         publicBaseUrl
       });
+      const chainEnabled = gateway?.isEnabled?.() && typeof gateway.resolveDispute === "function";
+      const alreadyResolvedOnChain = chainEnabled
+        ? await disputeAlreadyResolvedOnChain(gateway, session.chainJobId ?? session.jobId)
+        : false;
+      // Fail before persisting a verdict or opening the on-chain dispute when
+      // the backend cannot prove its signer is the registered arbitrator. The
+      // mainnet hardware arbitrator is intentionally out-of-band. A receipt-
+      // convergence replay for a job already Closed on-chain does not require
+      // a signer and must remain able to repair local state.
+      if (
+        chainEnabled
+        && !alreadyResolvedOnChain
+        && typeof gateway.requireArbitratorSigner === "function"
+      ) {
+        await gateway.requireArbitratorSigner("resolveDispute");
+      }
       await persistContentRecord(reasoning.contentRecord);
-      const chainDisputeReceipt = await ensureChainDisputeOpen(session);
+      const chainDisputeReceipt = alreadyResolvedOnChain
+        ? undefined
+        : await ensureChainDisputeOpen(session);
       // Idempotent settle (MAIN-003). resolveDispute mutates chain state BEFORE
       // the receipt/session writes below; if a prior attempt resolved on-chain
       // but failed to persist, a naive retry re-calls resolveDispute and reverts
       // InvalidState (it only runs from Disputed) — wedging the arbitration. So
       // skip the settle when the dispute is already resolved on-chain and let the
       // receipt + session writes below converge local state.
-      const chainEnabled = gateway?.isEnabled?.() && typeof gateway.resolveDispute === "function";
-      const alreadyResolvedOnChain = chainEnabled
-        ? await disputeAlreadyResolvedOnChain(gateway, session.chainJobId ?? session.jobId)
-        : false;
       const chainReceipt = chainEnabled && !alreadyResolvedOnChain
         ? await gateway.resolveDispute(
             session.chainJobId ?? session.jobId,
@@ -386,7 +448,7 @@ export function createDisputeRoutes({
             data: receipt
           }
         ]
-      });
+      }, dispute.arbitration?.execution);
       await respondWithMutationReceipt(response, idempotency, 200, body);
       return true;
     }
@@ -477,7 +539,7 @@ export function createDisputeRoutes({
             data: receipt
           }
         ]
-      });
+      }, dispute.arbitration?.execution);
       await respondWithMutationReceipt(response, idempotency, 200, body);
       return true;
     }

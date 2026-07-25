@@ -43,6 +43,10 @@ test("dispute surfaces use emitted assets, real resolution timestamps, and hones
   assert.match(adapter, /ZERO_ADDRESS/u);
   assert.match(adapter, /identity not yet emitted/u);
   assert.match(adapter, /assetSymbol\(record\)/u);
+  assert.match(components, /Hardware arbitration required/u);
+  assert.match(components, /registered hardware arbitrator/u);
+  assert.match(components, /extractApiErrorMessage\(error\)/u);
+  assert.doesNotMatch(components, /Sign & commit verdict/u);
 });
 
 test("governance topbar controls are wired or removed", () => {

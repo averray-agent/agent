@@ -7,7 +7,7 @@ import { ExplorerLink } from "@/components/common/ExplorerLink";
 import { OutcomeRationaleInline } from "@/components/common/OutcomeRationaleInline";
 import { decisionToVerdict } from "@/lib/api/dispute-adapters";
 import { releaseAmountForDecision } from "@/lib/api/dispute-verdicts";
-import { swrFetcher } from "@/lib/api/client";
+import { extractApiErrorMessage, swrFetcher } from "@/lib/api/client";
 import { DisputeStatePill, OriginPill } from "./pills";
 import { PartyChip } from "./PartyChip";
 import { WindowCountdown } from "./WindowCountdown";
@@ -38,6 +38,8 @@ export function DisputeDrawerBody({
   );
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const backendVerdictAvailable =
+    !live || dispute.arbitration.execution.backendCanResolve;
 
   // Reset drawer state when navigating between disputes.
   useEffect(() => {
@@ -111,14 +113,17 @@ export function DisputeDrawerBody({
       setCommitted(decision);
       mutate("/disputes");
       mutate(detailKey);
-    } catch {
+    } catch (error) {
       if (verdictCommitted) {
         setCommitted(decision);
         mutate("/disputes");
         mutate(detailKey);
-        setSubmitError("Verdict signed. Stake release still needs admin approval.");
+        setSubmitError("Verdict recorded. Stake release still needs admin approval.");
       } else {
-        setSubmitError("Could not sign this verdict. Check your role and try again.");
+        setSubmitError(
+          extractApiErrorMessage(error) ??
+            "Could not record this verdict. Check the arbitration authority and try again."
+        );
       }
     } finally {
       setSubmitting(false);
@@ -171,7 +176,7 @@ export function DisputeDrawerBody({
       </DrawerSection>
 
       <DrawerSection title="Arbitration">
-        <ArbitrationCard dispute={dispute} />
+        <ArbitrationCard dispute={dispute} live={live} />
       </DrawerSection>
 
       <DrawerSection title="Evidence">
@@ -254,19 +259,35 @@ export function DisputeDrawerBody({
               className="font-[family-name:var(--font-display)] text-[11px] font-extrabold uppercase text-[var(--avy-accent)]"
               style={{ letterSpacing: "0.12em" }}
             >
-              ✓ Signed · awaiting receipt
+              ✓ Verdict recorded · awaiting receipt
             </div>
             <p
               className="mt-1 text-[13px] leading-snug text-[var(--avy-ink)]"
               style={{ letterSpacing: 0 }}
             >
-              Verdict <b>{committed}</b> committed. The receipt will appear in the
+              Verdict <b>{committed}</b> was recorded. The receipt will appear in the
               Activity feed after the next block finalizes (~6s).
             </p>
           </div>
         </DrawerSection>
       ) : (
         <DrawerSection title="Decision">
+          {live && !backendVerdictAvailable ? (
+            <div className="mb-3 rounded-[10px] border border-[color:rgba(167,97,34,0.35)] bg-[var(--avy-warn-soft)] px-4 py-3">
+              <div
+                className="font-[family-name:var(--font-display)] text-[10.5px] font-extrabold uppercase text-[var(--avy-warn)]"
+                style={{ letterSpacing: "0.12em" }}
+              >
+                Hardware arbitration required
+              </div>
+              <p
+                className="m-0 mt-1 text-[13px] leading-snug text-[var(--avy-ink)]"
+                style={{ letterSpacing: 0 }}
+              >
+                {arbitrationBoundaryMessage(dispute.arbitration.execution.mode)}
+              </p>
+            </div>
+          ) : null}
           <DecisionPanel
             decision={decision}
             onDecision={handleDecision}
@@ -276,6 +297,7 @@ export function DisputeDrawerBody({
             onRoleToggle={() => setRoleConfirmed((v) => !v)}
             destination={destination}
             onCommit={handleCommit}
+            disabled={!backendVerdictAvailable}
             busy={submitting}
             error={submitError}
           />
@@ -309,7 +331,7 @@ function PartyBlock({
   );
 }
 
-function ArbitrationCard({ dispute }: { dispute: Dispute }) {
+function ArbitrationCard({ dispute, live }: { dispute: Dispute; live: boolean }) {
   const { arbitration } = dispute;
   const slaStatus = arbitration.sla.expired
     ? "Expired"
@@ -373,6 +395,16 @@ function ArbitrationCard({ dispute }: { dispute: Dispute }) {
           </b>{" "}
           release
         </span>
+        {live ? (
+          <span>
+            Execution ·{" "}
+            <b className="font-semibold text-[var(--avy-ink)]">
+              {dispute.arbitration.execution.backendCanResolve
+                ? "backend signer verified on-chain"
+                : authorityLabel(dispute.arbitration.execution.mode)}
+            </b>
+          </span>
+        ) : null}
       </div>
     </div>
   );
@@ -456,6 +488,13 @@ function releaseReasonLabel(value: string): string {
     release_already_recorded: "Release recorded",
   };
   return labels[value] ?? authorityLabel(value);
+}
+
+function arbitrationBoundaryMessage(mode: string): string {
+  if (mode === "out_of_band_hardware") {
+    return "This backend is not the approved on-chain arbitrator and will not sign or broadcast resolveDispute. Complete the verdict with the registered hardware arbitrator.";
+  }
+  return "The backend cannot prove arbitrator authority right now, so verdict submission is disabled until the on-chain signer check succeeds.";
 }
 
 function formatDuration(seconds: number): string {

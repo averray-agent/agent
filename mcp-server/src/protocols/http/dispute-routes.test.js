@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { AuthorizationError, ValidationError } from "../../core/errors.js";
+import { AuthorizationError, ConfigError, ValidationError } from "../../core/errors.js";
 import { disputeIdForSession } from "../../core/dispute-resolution.js";
 import { createDisputeRoutes } from "./dispute-routes.js";
 
@@ -192,10 +192,45 @@ test("GET /disputes authenticates, parses limit, and returns open and receipt-ba
   assert.equal(response.body[0].respondent, VERIFIER);
   assert.equal(response.body[0].arbitration.release.ready, false);
   assert.equal(response.body[0].arbitration.reasoning.contentType, "arbitrator_reasoning");
+  assert.equal(response.body[0].arbitration.execution.mode, "local_only");
+  assert.equal(response.body[0].arbitration.execution.backendCanResolve, true);
   assert.deepEqual(response.body[0].arbitration.allowedVerdicts, ["upheld", "dismissed", "split", "timeout"]);
   assert.equal(response.body[1].arbitration.release.ready, true);
   assert.ok(calls.some(([name, detail]) => name === "parseLimit" && detail.limit === "7"));
   assert.ok(calls.some(([name]) => name === "authMiddleware"));
+});
+
+test("GET /disputes truthfully marks a wrong backend signer as out-of-band hardware arbitration", async () => {
+  const { response, route } = makeHarness({
+    gateway: {
+      isEnabled: () => true,
+      async getTreasuryPolicyStatus() {
+        return {
+          roles: {
+            arbitratorSignerAddress: VERIFIER,
+            arbitratorSignerIsArbitrator: false
+          }
+        };
+      }
+    }
+  });
+
+  await route({
+    request: { method: "GET" },
+    response,
+    url: new URL("http://localhost/disputes"),
+    pathname: "/disputes",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.body[0].arbitration.execution, {
+    mode: "out_of_band_hardware",
+    backendCanResolve: false,
+    reason: "backend_signer_not_on_chain_arbitrator",
+    signerAddress: VERIFIER
+  });
+  assert.equal(response.body[0].arbitration.authority.review, "admin_or_verifier");
+  assert.equal(response.body[0].arbitration.authority.verdict, "on_chain_arbitrator");
 });
 
 test("GET /disputes/:id rejects nested decoded ids", async () => {
@@ -292,6 +327,9 @@ test("POST /disputes/:id/verdict opens the chain dispute before arbitrator resol
         gatewayCalls.push(["openDispute", jobId, participant]);
         return { txHash: "0xopen", blockNumber: 41, status: 1 };
       },
+      async requireArbitratorSigner() {
+        gatewayCalls.push(["requireArbitratorSigner"]);
+      },
       async resolveDispute(jobId, workerPayout, reasonCode, metadataURI) {
         gatewayCalls.push(["resolveDispute", { jobId, workerPayout, reasonCode, metadataURI }]);
         return { txHash: "0xresolve", blockNumber: 42, status: 1 };
@@ -316,7 +354,10 @@ test("POST /disputes/:id/verdict opens the chain dispute before arbitrator resol
   // The extra getJob before resolveDispute is the MAIN-003 idempotency guard
   // (disputeAlreadyResolvedOnChain) — here the job is not yet Closed, so the
   // settle proceeds normally.
-  assert.deepEqual(gatewayCalls.map(([name]) => name), ["getJob", "getJob", "openDispute", "getJob", "resolveDispute"]);
+  assert.deepEqual(
+    gatewayCalls.map(([name]) => name),
+    ["getJob", "getJob", "requireArbitratorSigner", "getJob", "openDispute", "resolveDispute"]
+  );
   // The chain dispute is brokered on behalf of the worker (the claimant) so the
   // operator signer can open it even when it is not a participant on chain.
   assert.ok(gatewayCalls.some(([name, , participant]) => name === "openDispute" && participant === WORKER));
@@ -325,6 +366,55 @@ test("POST /disputes/:id/verdict opens the chain dispute before arbitrator resol
     && detail.receipt.chainDisputeBlockNumber === 41
     && detail.receipt.blockNumber === 42
     && detail.receipt.txHash === "0xresolve"));
+});
+
+test("POST /disputes/:id/verdict fails before side effects when the backend signer is not the arbitrator", async () => {
+  const id = disputeIdForSession(SESSION.sessionId);
+  const gatewayCalls = [];
+  const gateError = new ConfigError(
+    "resolveDispute refused: the configured arbitrator signer is not the approved on-chain arbitrator.",
+    { reason: "arbitrator_signer_not_on_chain_arbitrator" }
+  );
+  const { calls, route } = makeHarness({
+    auth: { wallet: ADMIN, claims: { roles: ["admin"] } },
+    payload: { verdict: "upheld", rationale: "Human hardware arbitration is required.", idempotencyKey: "idem-hardware-1" },
+    gateway: {
+      isEnabled: () => true,
+      async getTreasuryPolicyStatus() {
+        return {
+          roles: {
+            arbitratorSignerAddress: VERIFIER,
+            arbitratorSignerIsArbitrator: false
+          }
+        };
+      },
+      async getJob(jobId) {
+        gatewayCalls.push(["getJob", jobId]);
+        return { reward: JOB.rewardAmount, released: 0, state: 4 };
+      },
+      async requireArbitratorSigner() {
+        gatewayCalls.push(["requireArbitratorSigner"]);
+        throw gateError;
+      },
+      async openDispute() {
+        gatewayCalls.push(["openDispute"]);
+      },
+      async resolveDispute() {
+        gatewayCalls.push(["resolveDispute"]);
+      }
+    }
+  });
+
+  await assert.rejects(
+    call(route, { method: "POST", path: `/disputes/${id}/verdict` }),
+    (error) => error === gateError
+  );
+
+  assert.ok(gatewayCalls.some(([name]) => name === "requireArbitratorSigner"));
+  assert.ok(!gatewayCalls.some(([name]) => name === "openDispute"));
+  assert.ok(!gatewayCalls.some(([name]) => name === "resolveDispute"));
+  assert.ok(!calls.some(([name]) => name === "persistContentRecord"));
+  assert.ok(!calls.some(([name]) => name === "upsertMutationReceipt"));
 });
 
 test("POST /disputes/:id/verdict converges when the dispute is already resolved on-chain (MAIN-003)", async () => {
@@ -343,6 +433,10 @@ test("POST /disputes/:id/verdict converges when the dispute is already resolved 
       async openDispute(jobId, participant) {
         gatewayCalls.push(["openDispute", jobId, participant]);
         return { txHash: "0xopen", blockNumber: 41, status: 1 };
+      },
+      async requireArbitratorSigner() {
+        gatewayCalls.push(["requireArbitratorSigner"]);
+        throw new Error("a Closed job must converge without requiring a signer");
       },
       async resolveDispute(jobId, workerPayout, reasonCode, metadataURI) {
         gatewayCalls.push(["resolveDispute", { jobId, workerPayout, reasonCode, metadataURI }]);
@@ -365,6 +459,10 @@ test("POST /disputes/:id/verdict converges when the dispute is already resolved 
   // transitions out of `disputed`.
   assert.ok(!gatewayCalls.some(([name]) => name === "resolveDispute"), "resolveDispute must not re-run");
   assert.ok(!gatewayCalls.some(([name]) => name === "openDispute"), "openDispute must not run on a Closed job");
+  assert.ok(
+    !gatewayCalls.some(([name]) => name === "requireArbitratorSigner"),
+    "already-Closed convergence must not require current signer authority"
+  );
   assert.equal(response.body.chainStatus, "confirmed");
   assert.ok(calls.some(([name]) => name === "upsertMutationReceipt"), "verdict receipt is persisted");
   assert.ok(calls.some(([name]) => name === "upsertSession"), "session transition is converged");

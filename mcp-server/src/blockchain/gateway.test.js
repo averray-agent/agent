@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { encodeBytes32String, Interface } from "ethers";
 
 import { BlockchainGateway } from "./gateway.js";
-import { InsufficientLiquidityError, ValidationError } from "../core/errors.js";
+import { ConfigError, InsufficientLiquidityError, ValidationError } from "../core/errors.js";
 import { EXTERNAL_SCHEMA_EIP712_VERSION } from "../core/job-schema-registry.js";
 
 const DOT_ASSET = {
@@ -151,6 +151,12 @@ test("resolveDispute uses the arbitrator signer contract when configured", async
     assert.equal(jobId, "wiki-job");
     return { asset: DOT_ASSET.address };
   };
+  gateway.getTreasuryPolicyStatus = async () => ({
+    roles: {
+      arbitratorSignerAddress: "0x4444444444444444444444444444444444444444",
+      arbitratorSignerIsArbitrator: true
+    }
+  });
 
   const receipt = await gateway.resolveDispute("wiki-job", 0, "DISPUTE_LOST", "https://api.example.test/content/0xabc");
 
@@ -161,6 +167,60 @@ test("resolveDispute uses the arbitrator signer contract when configured", async
     "https://api.example.test/content/0xabc"
   ]]);
   assert.deepEqual(receipt, { txHash: "0xresolve", blockNumber: 8, status: 1 });
+});
+
+test("resolveDispute fails closed when no arbitrator signer exists", async () => {
+  const gateway = new BlockchainGateway({ enabled: false });
+  let resolveCalls = 0;
+  gateway.arbitratorSigner = undefined;
+  gateway.arbitratorEscrowContract = {
+    async resolveDispute() {
+      resolveCalls += 1;
+    }
+  };
+
+  await assert.rejects(
+    gateway.resolveDispute("wiki-job", 0, "DISPUTE_LOST"),
+    (error) => error instanceof ConfigError
+      && error.details?.reason === "arbitrator_signer_missing"
+      && /no blockchain signer is configured/u.test(error.message)
+  );
+  assert.equal(resolveCalls, 0);
+});
+
+test("resolveDispute fails closed when the configured signer is not the on-chain arbitrator", async () => {
+  const gateway = new BlockchainGateway({ enabled: false });
+  let getJobCalls = 0;
+  let resolveCalls = 0;
+  gateway.arbitratorSigner = {
+    async getAddress() {
+      return "0x5555555555555555555555555555555555555555";
+    }
+  };
+  gateway.arbitratorEscrowContract = {
+    async resolveDispute() {
+      resolveCalls += 1;
+    }
+  };
+  gateway.getJob = async () => {
+    getJobCalls += 1;
+    return { asset: DOT_ASSET.address };
+  };
+  gateway.getTreasuryPolicyStatus = async () => ({
+    roles: {
+      arbitratorSignerAddress: "0x5555555555555555555555555555555555555555",
+      arbitratorSignerIsArbitrator: false
+    }
+  });
+
+  await assert.rejects(
+    gateway.resolveDispute("wiki-job", 0, "DISPUTE_LOST"),
+    (error) => error instanceof ConfigError
+      && error.details?.reason === "arbitrator_signer_not_on_chain_arbitrator"
+      && /out-of-band.*hardware arbitrator/u.test(error.message)
+  );
+  assert.equal(getJobCalls, 0);
+  assert.equal(resolveCalls, 0);
 });
 
 test("resolveDispute converts display worker payout to asset base units", async () => {
@@ -195,6 +255,12 @@ test("resolveDispute converts display worker payout to asset base units", async 
     assert.equal(jobId, "wiki-job");
     return { asset: USDC_TRUST_ASSET.address };
   };
+  gateway.getTreasuryPolicyStatus = async () => ({
+    roles: {
+      arbitratorSignerAddress: "0x4444444444444444444444444444444444444444",
+      arbitratorSignerIsArbitrator: true
+    }
+  });
 
   const receipt = await gateway.resolveDispute("wiki-job", 2, "WORKER_WINS", "averray://disputes/dispute-1");
 

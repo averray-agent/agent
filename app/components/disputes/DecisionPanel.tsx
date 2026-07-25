@@ -28,7 +28,7 @@ const DECISIONS: {
     id: "uphold",
     label: "Uphold dispute",
     subtitle: "confirm the contestation",
-    blurb: "Stake slashed per policy. Receipt signed. Badge auto-suspended.",
+    blurb: "Stake slashed per policy after an authorized on-chain verdict. Badge auto-suspended.",
     tone: "accent",
   },
   {
@@ -88,7 +88,7 @@ export function DecisionPanel({
           className="font-[family-name:var(--font-display)] text-[10px] font-extrabold uppercase text-[var(--avy-muted)]"
           style={{ letterSpacing: "0.14em" }}
         >
-          Rationale · signed on commit · min 20 chars
+          Rationale · anchored with the verdict · min 20 chars
         </span>
         <textarea
           disabled={!decision || disabled}
@@ -96,7 +96,7 @@ export function DecisionPanel({
           onChange={(e) => onRationaleChange(e.target.value)}
           placeholder={
             decision
-              ? "Explain the decision in one or two sentences. This text is signed into the receipt."
+              ? "Explain the decision in one or two sentences. Its canonical hash is anchored with the verdict."
               : "Pick a verdict to enable."
           }
           className={cn(
@@ -110,7 +110,7 @@ export function DecisionPanel({
           style={{ letterSpacing: 0 }}
         >
           <span>{rationale.trim().length} / 20 min</span>
-          <span>canonical reasoning hash joins the signed receipt</span>
+          <span>canonical reasoning hash joins the verdict receipt</span>
         </div>
       </label>
 
@@ -131,14 +131,14 @@ export function DecisionPanel({
         />
         <span className="flex flex-col gap-0.5">
           <span className="font-[family-name:var(--font-display)] text-[12.5px] font-bold text-[var(--avy-ink)]">
-            I hold the dispute-resolver role for this scope
+            I am authorized to submit this verdict for review
           </span>
           <span
             className="font-[family-name:var(--font-body)] text-[11.5px] leading-snug text-[var(--avy-muted)]"
             style={{ letterSpacing: 0 }}
           >
-            Required per <Mono>co-sign/policy-change-quorum@v2</Mono>. This
-            claim is signed into the receipt alongside your wallet.
+            This confirms operator-review authority only. On-chain resolution
+            still requires the registered arbitrator signer.
           </span>
         </span>
       </label>
@@ -156,7 +156,7 @@ export function DecisionPanel({
         style={{ letterSpacing: "0.05em" }}
         title={
           committable
-            ? "Sign & commit this verdict to the dispute"
+            ? "Submit this verdict to the dispute resolution path"
             : !decision
               ? "Pick a verdict above"
               : !destinationOk
@@ -166,7 +166,7 @@ export function DecisionPanel({
                   : "Confirm you hold the dispute-resolver role"
         }
       >
-        {busy ? "Signing..." : "Sign & commit verdict"}
+        {busy ? "Submitting..." : "Submit verdict"}
       </button>
       {error ? (
         <p
