@@ -55,35 +55,42 @@
   }
 
   // ---- event row factory -----------------------------------------
-  function addEvent({ topic, tone = "ok", body, wait = 300 }) {
-    return new Promise(resolve => {
-      const row = document.createElement("div");
-      row.className = "ev";
-      const toneClass = tone === "warn" ? "ev__topic--warn" : tone === "info" ? "ev__topic--info" : "";
-      row.innerHTML = `
-        <span class="ev__ts">${fmt(clock)}</span>
-        <div class="ev__body">
-          <span class="ev__topic ${toneClass}">${topic}</span>
-          &nbsp;${body}
-        </div>`;
-      streamEl.appendChild(row);
-      streamEl.scrollTop = streamEl.scrollHeight;
-      trimStream();
-      setTimeout(resolve, reduced ? 60 : wait);
-    });
+  // Rendering is split from the pacing so the opening frame can be painted
+  // synchronously; see seedFrame below.
+  function renderEvent({ topic, tone = "ok", body }) {
+    const row = document.createElement("div");
+    row.className = "ev";
+    const toneClass = tone === "warn" ? "ev__topic--warn" : tone === "info" ? "ev__topic--info" : "";
+    row.innerHTML = `
+      <span class="ev__ts">${fmt(clock)}</span>
+      <div class="ev__body">
+        <span class="ev__topic ${toneClass}">${topic}</span>
+        &nbsp;${body}
+      </div>`;
+    streamEl.appendChild(row);
+    streamEl.scrollTop = streamEl.scrollHeight;
+    trimStream();
+    return row;
   }
 
-  function addReceipt({ runId, job, wallet, cosigner, hash }) {
-    return new Promise(resolve => {
-      const row = document.createElement("div");
-      row.className = "ev";
-      row.innerHTML = `
+  function addEvent({ topic, tone = "ok", body, wait = 300 }) {
+    renderEvent({ topic, tone, body });
+    return new Promise(resolve => setTimeout(resolve, reduced ? 60 : wait));
+  }
+
+  // The run title is deliberately a div, not a heading: these are invented run
+  // IDs, and as <h5> they landed in the document outline directly beneath the
+  // page's h1, skipping three levels.
+  function renderReceipt({ runId, job, wallet, cosigner, hash }) {
+    const row = document.createElement("div");
+    row.className = "ev";
+    row.innerHTML = `
         <span class="ev__ts">${fmt(clock)}</span>
         <div class="ev__body">
           <span class="ev__topic">receipt.signed</span>
           <dl class="receipt">
             <div class="receipt__head">
-              <h5>${runId} · ${job.policy}</h5>
+              <div class="receipt__title">${runId} · ${job.policy}</div>
               <span class="receipt__pill"><span class="lifestep__dot" style="background:#8ee0b4"></span>Verified</span>
             </div>
             <dt>job</dt>        <dd class="ev__hash">${job.id}</dd>
@@ -93,11 +100,15 @@
             <dt>hash</dt>       <dd class="ev__hash">${hash}</dd>
           </dl>
         </div>`;
-      streamEl.appendChild(row);
-      streamEl.scrollTop = streamEl.scrollHeight;
-      trimStream();
-      setTimeout(resolve, reduced ? 80 : 520);
-    });
+    streamEl.appendChild(row);
+    streamEl.scrollTop = streamEl.scrollHeight;
+    trimStream();
+    return row;
+  }
+
+  function addReceipt(opts) {
+    renderReceipt(opts);
+    return new Promise(resolve => setTimeout(resolve, reduced ? 80 : 520));
   }
 
   function trimStream() {
@@ -113,6 +124,42 @@
     return "run-" + (2700 + Math.floor(Math.random() * 80));
   }
 
+  // The panel is the largest thing in the hero, and it used to render as an
+  // empty black rectangle with four em-dashes for the first second — the loop
+  // needs ~7s to fill it. This paints a settled run immediately so the opening
+  // frame reads as a console that is already doing something.
+  function seedFrame() {
+    const job = JOBS[2];
+    const wallet = WALLETS[0];
+    const cosigner = WALLETS[2];
+    setStep("claimed", "done", wallet);
+    setStep("submitted", "done", job.schema);
+    setStep("verified", "done", "3/3 passed");
+    setStep("recorded", "done", "public");
+    renderEvent({
+      topic: "session.output.submitted",
+      tone: "info",
+      body: `<span class="ev__meta">schema</span> <span class="ev__hash">${job.schema}</span> <span class="ev__meta">size</span> <span class="ev__hash">4.1 KB</span>`,
+    });
+    renderEvent({
+      topic: "verifier.checks.passing",
+      tone: "ok",
+      body: `<span class="ev__meta">3/3</span> <span class="ev__hash">schema · signer · co-signer</span>`,
+    });
+    renderReceipt({
+      runId: "run-2748",
+      job,
+      wallet,
+      cosigner,
+      hash: "0xf3b1…6d02",
+    });
+    renderEvent({
+      topic: "record.public.readable",
+      tone: "ok",
+      body: `<span class="ev__meta">surface</span> <span class="ev__hash">/agents/${wallet}</span> <span class="ev__meta">verifier</span> <span class="ev__hash">${cosigner}</span>`,
+    });
+  }
+
   async function cycle() {
     resetRail();
     const job = JOBS[Math.floor(Math.random() * JOBS.length)];
@@ -122,6 +169,10 @@
     const rid = runId();
     const h = shortHash();
 
+    // Populated before the first await, so restarting the loop never leaves the
+    // rail sitting on four em-dashes.
+    setStep("claimed", "active", job.id.slice(0, 22));
+
     // 1. discover / claim
     tickClock(1000);
     await addEvent({
@@ -130,7 +181,6 @@
       body: `<span class="ev__meta">job</span> <span class="ev__hash">${job.id}</span> <span class="ev__meta">wallet</span> <span class="ev__hash">${wallet}</span>`,
       wait: 420,
     });
-    setStep("claimed", "active", job.id.slice(0, 22));
 
     tickClock(2400);
     await addEvent({
@@ -200,11 +250,11 @@
   }
 
   // kick it off
+  seedFrame();
   if (reduced) {
-    // one static pass only
-    cycle();
-  } else {
-    // small initial delay so it feels like it loaded
-    setTimeout(cycle, 400);
+    // The seeded frame is the whole experience here — a settled run, no motion.
+    return;
   }
+  // Hold the seeded frame long enough to be read, then take over with the loop.
+  setTimeout(cycle, 2200);
 })();

@@ -185,12 +185,29 @@ const capital = [
         <span class="nav__brand-mark" aria-hidden="true">A</span>
         Averray
       </a>
-      <div class="nav__links">
+      {/* Hidden until the nav script runs, so a no-JS visit never gets an
+          inert button — it keeps the links visible and wrapping instead. */}
+      <button
+        class="nav__toggle"
+        type="button"
+        aria-expanded="false"
+        aria-controls="nav-links"
+        hidden
+      >
+        <span class="nav__toggle-bars" aria-hidden="true"></span>
+        Menu
+      </button>
+      <div class="nav__links" id="nav-links">
         <a href="#story">Story</a>
         <a href="#features">Features</a>
         <a href="#lifecycle">How it works</a>
         <a href="#receipts">Receipts</a>
-        <a href="#builders">Builders</a>
+        {/* Labelled for the section it actually reaches ("Who it's for — three
+            seats at the same table"), which is not a builders section. As
+            "Builders" it also collided with the footer link to the separate
+            /builders/ page. The id stays as-is so existing deep links keep
+            working. */}
+        <a href="#builders">Who it's for</a>
         <a href="https://averray.com/trust/">Trust</a>
         <a href="https://averray.com/schemas/">Schemas</a>
       </div>
@@ -230,8 +247,14 @@ const capital = [
           <span class="console__tag">Scripted</span>
         </div>
 
+        {/* The rail and the stream are a looping illustration, so they stay out
+            of the accessibility tree: the aside's label already describes what
+            this is, and the notice below states it in visible text. They
+            previously carried aria-live="polite", which made a screen reader
+            announce roughly eleven invented events every seven seconds with no
+            end. */}
         <div class="console__body">
-          <div class="lifecycle" id="lifecycle-rail">
+          <div class="lifecycle" id="lifecycle-rail" aria-hidden="true">
             <div class="lifestep" data-step="claimed">
               <div class="lifestep__label"><span class="lifestep__dot"></span>Claimed</div>
               <div class="lifestep__value">—</div>
@@ -252,7 +275,7 @@ const capital = [
           <p class="console__notice">
             Scripted example. Real records live in the public endpoints below.
           </p>
-          <div class="stream" id="stream" aria-live="polite"></div>
+          <div class="stream" id="stream" aria-hidden="true"></div>
         </div>
       </aside>
     </section>
@@ -427,14 +450,54 @@ const capital = [
       </div>
       <div class="footer__links">
         <a href="https://github.com/averray-agent/agent/tree/main/docs">Docs</a>
-        <a href="https://averray.com/trust/">Status</a>
+        {/* Was "Status" while the nav called the same page "Trust". */}
+        <a href="https://averray.com/trust/">Trust</a>
         <a href="https://averray.com/builders/">Builders</a>
-        <a href="https://x.com/Averray_Agents">X</a>
+        <a href="https://x.com/Averray_Agents" aria-label="Averray on X">X</a>
         <a href="https://github.com/averray-agent/agent">GitHub</a>
       </div>
     </footer>
   </main>
 
   <!-- example hero console — vanilla JS, reduced-motion aware, no framework, no network -->
-  <script is:inline src="/console-stream.js?v=20260708"></script>
+  <script is:inline src="/console-stream.js?v=20260725"></script>
+
+  <!-- Mobile nav disclosure. Inline and tiny so it costs no extra request, and
+       gated on the elements existing so it can never strand the links. -->
+  <script is:inline>
+    (function () {
+      var nav = document.querySelector(".nav");
+      var toggle = nav && nav.querySelector(".nav__toggle");
+      var links = nav && nav.querySelector("#nav-links");
+      if (!nav || !toggle || !links) return;
+
+      // Only now does the collapsed state apply, so a failed script leaves the
+      // links on screen rather than hiding them behind a button that does nothing.
+      nav.classList.add("nav--collapsible");
+      toggle.hidden = false;
+
+      function setOpen(open) {
+        nav.dataset.open = open ? "true" : "false";
+        toggle.setAttribute("aria-expanded", open ? "true" : "false");
+      }
+      setOpen(false);
+
+      toggle.addEventListener("click", function () {
+        setOpen(nav.dataset.open !== "true");
+      });
+
+      // Tapping a destination should dismiss the panel, including same-page
+      // anchors where no navigation event follows.
+      links.addEventListener("click", function (event) {
+        if (event.target.closest("a")) setOpen(false);
+      });
+
+      document.addEventListener("keydown", function (event) {
+        if (event.key === "Escape" && nav.dataset.open === "true") {
+          setOpen(false);
+          toggle.focus();
+        }
+      });
+    })();
+  </script>
 </BaseLayout>

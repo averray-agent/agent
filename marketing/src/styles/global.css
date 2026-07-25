@@ -156,9 +156,13 @@ a:hover { color: var(--avy-ink); }
   padding: 12px 14px 12px 18px;
   border: 1px solid var(--avy-line);
   border-radius: var(--card-radius);
-  background: rgba(255, 255, 255, 0.78);
-  backdrop-filter: blur(14px);
+  /* Opacity alone has to carry legibility: the sticky bar passes over the
+     near-black hero console, and page copy read straight through it when the
+     blur silently no-op'd. Prefixed first, standard last, so a minifier that
+     collapses the two aliases keeps the one every engine understands. */
+  background: rgba(255, 255, 255, 0.94);
   -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
   box-shadow: 0 6px 20px rgba(28, 36, 30, 0.04);
   position: sticky; top: 16px; z-index: 40;
 }
@@ -183,7 +187,83 @@ a:hover { color: var(--avy-ink); }
 }
 .nav__cta:hover { background: #05090e; transform: translateY(-1px); color: var(--fg-invert); }
 
-@media (max-width: 820px) { .nav__links { display: none; } }
+/* The minifier collapses backdrop-filter and its -webkit- alias into whichever
+   was declared last, so the prefixed form can only survive in a rule of its
+   own. Safari below 18 needs it; every other engine matched the standard
+   property above. Purely cosmetic either way — the 0.94 background is what
+   keeps the bar readable. */
+@supports (-webkit-backdrop-filter: blur(14px)) {
+  .nav { -webkit-backdrop-filter: blur(14px); }
+}
+
+/* Mobile nav. The links used to be plain `display: none` below 820px with no
+   toggle of any kind, which stranded /schemas/ with no reachable entry point on
+   a phone. The collapsed state is keyed off `.nav--collapsible`, a class only
+   the nav script adds, so without JS the links stay visible and simply wrap. */
+.nav__toggle {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--avy-line);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.6);
+  color: var(--avy-ink);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.nav__toggle-bars,
+.nav__toggle-bars::before,
+.nav__toggle-bars::after {
+  display: block;
+  width: 16px;
+  height: 2px;
+  border-radius: 2px;
+  background: currentColor;
+}
+.nav__toggle-bars {
+  position: relative;
+}
+.nav__toggle-bars::before,
+.nav__toggle-bars::after {
+  content: "";
+  position: absolute;
+  left: 0;
+}
+.nav__toggle-bars::before { top: -5px; }
+.nav__toggle-bars::after { top: 5px; }
+
+@media (max-width: 820px) {
+  .nav { flex-wrap: wrap; gap: 10px 12px; }
+  .nav__links { gap: 14px 18px; flex-wrap: wrap; font-size: 15px; }
+
+  .nav--collapsible .nav__toggle { display: inline-flex; }
+  .nav--collapsible .nav__links { display: none; }
+  /* Keep brand / toggle / CTA together on the first row in both states, so
+     opening the panel doesn't shunt the toggle across the bar. */
+  .nav--collapsible .nav__cta { order: 2; }
+  .nav--collapsible .nav__links { order: 3; }
+  .nav--collapsible[data-open="true"] .nav__links {
+    display: flex;
+    flex-basis: 100%;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: 4px;
+    padding-top: 10px;
+    border-top: 1px solid var(--avy-line-soft);
+  }
+  /* 44px rows: this is the whole navigation on a phone. */
+  .nav--collapsible[data-open="true"] .nav__links a {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+  }
+}
 
 /* ==========================================
    2. HERO
@@ -384,7 +464,9 @@ a:hover { color: var(--avy-ink); }
   animation: ev-in 320ms var(--ease) forwards;
 }
 @keyframes ev-in { to { opacity: 1; transform: translateY(0); } }
-.ev__ts { color: rgba(245, 243, 238, 0.42); font-size: 11px; }
+/* 0.42 measured 3.81:1 against the console's #101419 at 11px, under the 4.5:1
+   floor for body text. 0.52 clears it at 5.2:1 and still reads as a dim gutter. */
+.ev__ts { color: rgba(245, 243, 238, 0.52); font-size: 11px; }
 .ev__body { color: rgba(245, 243, 238, 0.88); line-height: 1.5; }
 .ev__topic { color: #8ee0b4; font-weight: 500; }
 .ev__topic--warn { color: #f4c989; }
@@ -411,7 +493,7 @@ a:hover { color: var(--avy-ink); }
   margin-bottom: 4px; padding-bottom: 6px;
   border-bottom: 1px dashed rgba(245, 243, 238, 0.10);
 }
-.receipt__head h5 {
+.receipt__title {
   margin: 0; color: #f5f3ee;
   font-family: var(--font-display); font-size: 13px; font-weight: 700;
   letter-spacing: -0.01em;
@@ -585,7 +667,11 @@ section.section { scroll-margin-top: 100px; }
   content: "";
   position: absolute; inset: auto -80px -140px auto;
   width: 420px; height: 420px;
-  background: radial-gradient(circle at 30% 30%, rgba(30, 102, 66, 0.14), transparent 62%);
+  /* The centre sat at 30% 30% and only faded out at 62%, but the left and top
+     edges are just 30% away — so the tint was still half-strength where the
+     box ended, drawing two hard lines across the panel behind "Compound".
+     `closest-side` pins full transparency to the nearest edge instead. */
+  background: radial-gradient(circle closest-side at 50% 50%, rgba(30, 102, 66, 0.14), transparent);
   pointer-events: none;
 }
 .lc-grid {
@@ -881,5 +967,41 @@ section.section { scroll-margin-top: 100px; }
   display: grid; place-items: center;
   font-family: var(--font-display); font-weight: 800; font-size: 11px;
 }
-.footer__links { display: flex; gap: 22px; flex-wrap: wrap; }
+.footer__links { display: flex; gap: 10px 14px; flex-wrap: wrap; }
+/* These rows were 17px tall (the "X" link only 8px wide) while also being the
+   only navigation on a phone. Padding buys the 24px minimum target without
+   changing the typographic rhythm; the negative inline margin keeps the
+   original optical gap. */
+.footer__links a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  min-height: 24px;
+  padding: 4px 8px;
+  margin-inline: -8px;
+}
 .footer__links a:hover { color: var(--avy-ink); }
+
+/* ==========================================
+   REDUCED MOTION
+   The console script already honours this preference, but the stylesheet did
+   not: an infinite pulse on the active lifecycle dot, a per-row entry
+   animation, and smooth scrolling all ran regardless.
+   ========================================== */
+@media (prefers-reduced-motion: reduce) {
+  /* Durations are collapsed rather than cancelled on purpose. `.ev` sits at
+     opacity 0 and is revealed by ev-in's forwards fill, so `animation: none`
+     would leave every console row permanently invisible. */
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+  /* Belt and braces for the row reveal above. */
+  .ev { opacity: 1; transform: none; }
+  html, .stream { scroll-behavior: auto; }
+}

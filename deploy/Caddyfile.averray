@@ -37,13 +37,24 @@
   header Content-Security-Policy "default-src 'none'; frame-ancestors 'none'"
 }
 
+# Canonicalise on the apex.
+# Both hosts previously served the same content with no redirect, so www and
+# apex were live in parallel; every in-page link is already absolute to the
+# apex, which meant following the nav silently moved a visitor between hosts.
+# The canonical/og:url tags have always pointed here, so this only makes the
+# routing agree with what the markup already declares.
+www.averray.com {
+  import security_headers
+  redir https://averray.com{uri} permanent
+}
+
 # Main public site
 # Serves the marketing / trust / schemas-lite surface from the repo's `site/`
 # folder, including robots/sitemap/llms and the discovery manifest. Public
 # agent profiles live on the main domain, with `/agents/:wallet` rewritten to
 # the static profile shell that hydrates itself from
 # https://api.averray.com/agents/:wallet.
-averray.com, www.averray.com {
+averray.com {
   import security_headers
   root * /srv/site
   encode zstd gzip
