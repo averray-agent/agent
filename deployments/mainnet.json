@@ -1,0 +1,37 @@
+{
+  "profile": "mainnet",
+  "rpcUrl": "https://eth-rpc.polkadot.io/",
+  "deployedAt": "2026-07-25T13:18:47Z",
+  "deployer": "0x08406B2bCE5592A534141767ffe4e5B9DC6c22D1",
+  "owner": "0x01e6eed856e989201f4ff6346e18eab7e46c874c",
+  "pauser": "0x9a67271C6e8e9B280FeD4BC8D436422684eFC59f",
+  "verifier": "0x5a6836c6D4d293F6E5377E6c28054F4171915813",
+  "arbitrator": "0x7a246c722E9821D1eF861D01e1Ec43d7852b9707",
+  "treasuryAccount": "0x01e6eed856e989201f4ff6346e18eab7e46c874c",
+  "treasuryReserve": "0x01e6eed856e989201f4ff6346e18eab7e46c874c",
+  "contracts": {
+    "treasuryPolicy": "0x226F14252A98BD2eA140271647De20132F09AF20",
+    "strategyAdapterRegistry": "0x38af424415c1CE033e5Cee01f94551CDb824D404",
+    "agentAccountCore": "0xB1350932bf85E7ffd0599E9a3CC7b55718D89E57",
+    "reputationSbt": "0xA85AF867b5f573176f49F0D6A827F61A5Cee4e37",
+    "discoveryRegistry": "0x47876D138e3a26c485A5f8acbAC7AEcA3c7e6C62",
+    "escrowCore": "0x9cCd1DbBB5C354CC6218e55D3cE924A4d631C035",
+    "xcmWrapper": null,
+    "token": "0x0000053900000000000000000000000001200000"
+  },
+  "parameters": {
+    "dailyOutflowCap": "115792089237316195423570985008687907853269984665640564039457584007913129639935",
+    "borrowCap": "25000000",
+    "minimumCollateralRatioBps": "20000",
+    "defaultClaimStakeBps": "1000",
+    "onboardingWaiverClaimCount": "3",
+    "claimFeeBps": "200",
+    "minClaimFee": "50000",
+    "claimFeeVerifierBps": "7000",
+    "rejectionSkillPenalty": "10",
+    "rejectionReliabilityPenalty": "25",
+    "disputeLossSkillPenalty": "35",
+    "disputeLossReliabilityPenalty": "60"
+  },
+  "strategies": []
+}
