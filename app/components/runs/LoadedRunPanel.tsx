@@ -653,7 +653,7 @@ export function LoadedRunPanel(props: LoadedRunPanelProps) {
               {props.github ? (
                 <>
                   <SmallGhostBtn className="flex-1" notWired="Maintainer notifications are not wired to a live backend yet.">Ping maintainer</SmallGhostBtn>
-                  <SmallGhostBtn notWired="Disputes are raised through the Disputes page — this shortcut is not wired to POST /disputes yet.">Raise dispute</SmallGhostBtn>
+                  <SmallGhostBtn notWired="No route opens a dispute. A session becomes disputed as a verifier outcome; /disputes only resolves existing ones.">Raise dispute</SmallGhostBtn>
                   <SmallGhostBtn notWired="Abandoning a claim is not wired to a live backend yet.">Abandon</SmallGhostBtn>
                 </>
               ) : props.wikipedia ? (
@@ -661,13 +661,13 @@ export function LoadedRunPanel(props: LoadedRunPanelProps) {
                   <SmallGhostBtn className="flex-1" notWired="Reviewer notifications are not wired to a live backend yet.">
                     Ping editor reviewer
                   </SmallGhostBtn>
-                  <SmallGhostBtn notWired="Disputes are raised through the Disputes page — this shortcut is not wired to POST /disputes yet.">Raise dispute</SmallGhostBtn>
+                  <SmallGhostBtn notWired="No route opens a dispute. A session becomes disputed as a verifier outcome; /disputes only resolves existing ones.">Raise dispute</SmallGhostBtn>
                   <SmallGhostBtn notWired="Withdrawing a proposal is not wired to a live backend yet.">Withdraw proposal</SmallGhostBtn>
                 </>
               ) : props.osv ? (
                 <>
                   <SmallGhostBtn className="flex-1" notWired="Maintainer notifications are not wired to a live backend yet.">Ping maintainer</SmallGhostBtn>
-                  <SmallGhostBtn notWired="Disputes are raised through the Disputes page — this shortcut is not wired to POST /disputes yet.">Raise dispute</SmallGhostBtn>
+                  <SmallGhostBtn notWired="No route opens a dispute. A session becomes disputed as a verifier outcome; /disputes only resolves existing ones.">Raise dispute</SmallGhostBtn>
                   <SmallGhostBtn notWired="Skipping an advisory is not wired to a live backend yet.">Skip advisory</SmallGhostBtn>
                 </>
               ) : props.openData ? (
@@ -678,13 +678,13 @@ export function LoadedRunPanel(props: LoadedRunPanelProps) {
                   >
                     Flag stale catalog metadata
                   </SmallGhostBtn>
-                  <SmallGhostBtn notWired="Disputes are raised through the Disputes page — this shortcut is not wired to POST /disputes yet.">Raise dispute</SmallGhostBtn>
+                  <SmallGhostBtn notWired="No route opens a dispute. A session becomes disputed as a verifier outcome; /disputes only resolves existing ones.">Raise dispute</SmallGhostBtn>
                   <SmallGhostBtn notWired="Skipping a dataset is not wired to a live backend yet.">Skip dataset</SmallGhostBtn>
                 </>
               ) : (
                 <>
                   <SmallGhostBtn className="flex-1" notWired="Co-sign requests are not wired to a live backend yet.">Request cosign</SmallGhostBtn>
-                  <SmallGhostBtn notWired="Disputes are raised through the Disputes page — this shortcut is not wired to POST /disputes yet.">Raise dispute</SmallGhostBtn>
+                  <SmallGhostBtn notWired="No route opens a dispute. A session becomes disputed as a verifier outcome; /disputes only resolves existing ones.">Raise dispute</SmallGhostBtn>
                   <SmallGhostBtn notWired="Unwinding is not wired to a live backend yet.">Unwind</SmallGhostBtn>
                 </>
               )}

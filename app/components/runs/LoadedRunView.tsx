@@ -18,7 +18,7 @@ import {
   formatDeadline,
 } from "./buildLifecycleStages";
 import type { RunRow } from "./RunQueueTable";
-import { ApiError, swrFetcher } from "@/lib/api/client";
+import { ApiError, extractApiErrorMessage, swrFetcher } from "@/lib/api/client";
 import {
   useBadge,
   useAdminJobs,
@@ -736,37 +736,6 @@ function validationStateFromError(err: unknown): SubmissionValidationState {
   };
 }
 
-/**
- * Lift the human-friendly verifier message off an ApiError 4xx body so
- * the operator sees `invalid_submission_shape · expectedPath ...`
- * instead of a generic "could not submit" string. Returns undefined for
- * non-API errors so the caller can substitute its own copy.
- */
-function extractApiErrorMessage(err: unknown): string | undefined {
-  if (!(err instanceof ApiError)) return undefined;
-  const body = err.body;
-  if (body && typeof body === "object" && !Array.isArray(body)) {
-    const record = body as Record<string, unknown>;
-    const code = typeof record.code === "string" ? record.code : undefined;
-    const message =
-      typeof record.message === "string" ? record.message : undefined;
-    const expected =
-      typeof record.expectedPath === "string"
-        ? record.expectedPath
-        : typeof (record.details as Record<string, unknown> | undefined)?.expectedPath ===
-            "string"
-          ? ((record.details as Record<string, unknown>).expectedPath as string)
-          : undefined;
-    if (message || code) {
-      const parts = [code, message].filter(
-        (p): p is string => typeof p === "string" && p.length > 0
-      );
-      const combined = parts.join(" · ");
-      return expected ? `${combined} · expected ${expected}` : combined;
-    }
-  }
-  return err.message;
-}
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
