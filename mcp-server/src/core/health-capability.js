@@ -85,8 +85,8 @@ let deploymentManifestCache;
  * Compute `serviceHealth` from process-local liveness signals.
  *
  *   - `stateStoreHealth.ok === true` → state store reachable.
- *   - `authConfig` present + `secrets` non-empty (strict) OR permissive
- *     mode → auth dependencies loaded.
+ *   - `authConfig` present + the active JWT backend configured (strict)
+ *     OR permissive mode → auth dependencies loaded.
  *
  * The `ok` field is the AND of every component; anything false flips
  * the overall HTTP status code to 503 because the API process itself
@@ -94,8 +94,18 @@ let deploymentManifestCache;
  */
 export function resolveServiceHealth({ stateStoreHealth, authConfig }) {
   const stateStoreOk = Boolean(stateStoreHealth?.ok);
+  const jwtBackend = authConfig?.jwtBackend ?? "hmac";
+  const hmacConfigured = Array.isArray(authConfig?.secrets) && authConfig.secrets.length > 0;
+  const kmsConfigured = Boolean(authConfig?.kmsJwt);
+  const strictAuthOk = jwtBackend === "hmac"
+    ? hmacConfigured
+    : jwtBackend === "kms"
+      ? kmsConfigured
+      : jwtBackend === "both"
+        ? hmacConfigured && kmsConfigured
+        : false;
   const authOk = authConfig?.mode === "permissive"
-    || (Array.isArray(authConfig?.secrets) && authConfig.secrets.length > 0);
+    || (authConfig?.mode === "strict" && strictAuthOk);
 
   return {
     ok: stateStoreOk && authOk,
