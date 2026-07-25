@@ -60,10 +60,23 @@ test("buildDisputeArbitrationSemantics exposes SLA, reasoning, verdict, and rele
     windowEndsAt: "2026-05-15T00:00:00.000Z"
   };
   const semantics = buildDisputeArbitrationSemantics(dispute, {
-    now: new Date("2026-05-02T00:00:00.000Z")
+    now: new Date("2026-05-02T00:00:00.000Z"),
+    execution: {
+      mode: "out_of_band_hardware",
+      backendCanResolve: false,
+      reason: "backend_signer_not_on_chain_arbitrator"
+    }
   });
 
   assert.deepEqual(semantics.allowedVerdicts, ["upheld", "dismissed", "split", "timeout"]);
+  assert.equal(semantics.authority.review, "admin_or_verifier");
+  assert.equal(semantics.authority.verdict, "on_chain_arbitrator");
+  assert.deepEqual(semantics.execution, {
+    mode: "out_of_band_hardware",
+    backendCanResolve: false,
+    reason: "backend_signer_not_on_chain_arbitrator",
+    signerAddress: undefined
+  });
   assert.equal(semantics.sla.seconds, ARBITRATOR_SLA_SECONDS);
   assert.equal(semantics.sla.expired, false);
   assert.equal(semantics.sla.secondsRemaining, 13 * 24 * 60 * 60);

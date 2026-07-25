@@ -93,7 +93,17 @@ export function buildDisputeResolution({ verdict, remainingPayout, workerPayout 
   };
 }
 
-export function buildDisputeArbitrationSemantics(dispute = {}, { now = new Date() } = {}) {
+export function buildDisputeArbitrationSemantics(
+  dispute = {},
+  {
+    now = new Date(),
+    execution = {
+      mode: "unavailable",
+      backendCanResolve: false,
+      reason: "arbitrator_status_unavailable"
+    }
+  } = {}
+) {
   const openedAt = typeof dispute.openedAt === "string" ? dispute.openedAt : undefined;
   const windowEndsAt = typeof dispute.windowEndsAt === "string"
     ? dispute.windowEndsAt
@@ -112,8 +122,15 @@ export function buildDisputeArbitrationSemantics(dispute = {}, { now = new Date(
   return {
     version: 1,
     authority: {
-      verdict: "admin_or_verifier",
+      review: "admin_or_verifier",
+      verdict: "on_chain_arbitrator",
       release: "admin"
+    },
+    execution: {
+      mode: execution?.mode ?? "unavailable",
+      backendCanResolve: execution?.backendCanResolve === true,
+      reason: execution?.reason,
+      signerAddress: execution?.signerAddress
     },
     allowedVerdicts: [...DISPUTE_VERDICTS],
     sla: {

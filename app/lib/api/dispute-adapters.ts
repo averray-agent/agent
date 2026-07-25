@@ -357,14 +357,22 @@ function arbitrationSemantics(
 ): DisputeArbitrationSemantics {
   const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
   const authority = objectField(record, "authority") ?? ({} as Record<string, unknown>);
+  const execution = objectField(record, "execution") ?? ({} as Record<string, unknown>);
   const sla = objectField(record, "sla") ?? ({} as Record<string, unknown>);
   const reasoning = objectField(record, "reasoning") ?? ({} as Record<string, unknown>);
   const release = objectField(record, "release") ?? ({} as Record<string, unknown>);
   return {
     allowedVerdicts: stringArray(record.allowedVerdicts, ["upheld", "dismissed", "split", "timeout"]),
     authority: {
-      verdict: text(authority.verdict, "admin_or_verifier"),
+      review: text(authority.review, "admin_or_verifier"),
+      verdict: text(authority.verdict, "on_chain_arbitrator"),
       release: text(authority.release, "admin"),
+    },
+    execution: {
+      mode: text(execution.mode, "unavailable"),
+      backendCanResolve: optionalBoolean(execution.backendCanResolve) ?? false,
+      reason: text(execution.reason, "") || undefined,
+      signerAddress: text(execution.signerAddress, "") || undefined,
     },
     sla: {
       seconds: optionalNumber(sla.seconds) ?? fallback.windowSeconds,

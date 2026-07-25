@@ -67,8 +67,15 @@ export interface DisputeTimelineEvent {
 export interface DisputeArbitrationSemantics {
   allowedVerdicts: string[];
   authority: {
+    review: string;
     verdict: string;
     release: string;
+  };
+  execution: {
+    mode: string;
+    backendCanResolve: boolean;
+    reason?: string;
+    signerAddress?: string;
   };
   sla: {
     seconds: number;

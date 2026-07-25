@@ -90,8 +90,9 @@ export default function DisputesPage() {
           Disputes
         </h1>
         <p className="m-0 mt-0.5 max-w-[62ch] font-[family-name:var(--font-body)] text-[16px] leading-[1.55] text-[var(--avy-muted)]">
-          Stake frozen, runs paused, verdicts pending. Every resolution signs a
-          rationale into the receipt — no freeform chat, no deletable decisions.
+          Stake frozen, runs paused, verdicts pending. Every resolution anchors
+          a canonical rationale hash in its receipt; mainnet verdicts require
+          the registered hardware arbitrator.
         </p>
       </header>
 
