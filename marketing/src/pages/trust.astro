@@ -1,0 +1,294 @@
+---
+import PageLayout from "../layouts/PageLayout.astro";
+import "../styles/global.css";
+
+const EXAMPLE_WALLET_FULL = "0x10E82610BDFb7A4fC0d5E1c2E0694C810434214b";
+
+const facts = [
+  { label: "Deploy verification", value: "On-chain assertions after deploy" },
+  { label: "Multisig", value: "2-of-3 operational setup docs" },
+  { label: "Audit handoff", value: "Single-doc package for reviewers" },
+  { label: "Public data", value: "Schema-backed badge and profile reads" }
+];
+
+const posture = [
+  {
+    num: "01",
+    label: "Runtime",
+    title: "Live health and discovery surfaces are publicly inspectable.",
+    body: "The production API answers an unauthenticated health check, and the discovery manifest states what the system claims to support before anyone authenticates."
+  },
+  {
+    num: "02",
+    label: "Operations",
+    title: "Verification, multisig, and audit handoff are repeatable practice.",
+    body: "Deployment verification, key playbooks, and the reviewer package are written down as procedure rather than reconstructed per release."
+  },
+  {
+    num: "03",
+    label: "Outputs",
+    title: "Public profile and badge documents outlive the app itself.",
+    body: "Identity outputs stay schema-backed and readable from the open web, so a counterparty can check them without an account."
+  }
+];
+
+const controls = [
+  {
+    num: "01",
+    label: "Ops",
+    title: "Verification gate",
+    body: "Deployment verification asserts bytecode, ownership, pauser wiring, verifier/arbitrator/service operators, approved assets, and pause state before promotion."
+  },
+  {
+    num: "02",
+    label: "Keys",
+    title: "Multisig playbooks",
+    body: "Hot / warm / cold key generation, SS58-to-EVM mapping for Polkadot Hub, testnet rehearsal, rotate-pauser, and lost-key recovery are documented."
+  },
+  {
+    num: "03",
+    label: "Reviewability",
+    title: "Audit package",
+    body: "Scope, trust model, adversary model, invariants, known quirks, deployment parameters, and expected deliverables are all gathered in one place."
+  }
+];
+
+const trustModel = [
+  {
+    label: "Public by design",
+    items: [
+      "Discovery manifest and onboarding entrypoints",
+      "Badge metadata and public wallet profiles",
+      "Hosted schema documents and example assets"
+    ]
+  },
+  {
+    label: "Controlled by role",
+    items: [
+      "Poster and verifier actions stay wallet-gated",
+      "Strict SIWE auth in production",
+      "JWT rotation and revocation paths documented"
+    ]
+  },
+  {
+    label: "Verified after change",
+    items: [
+      "Deployment assertions against live contracts",
+      "Ownership and pause controls checked on-chain",
+      "Operational docs prepared for external auditors"
+    ]
+  }
+];
+
+const signals = [
+  {
+    label: "Health",
+    title: "Runtime status is public",
+    body: "The live health endpoint exposes the current service posture, auth mode, and key backend component status for the production API.",
+    links: [{ label: "Open health", href: "https://api.averray.com/health" }]
+  },
+  {
+    label: "Discovery",
+    title: "Agent entrypoints are inspectable",
+    body: "The public manifest and onboarding JSON show what the system claims to support before anyone has to authenticate or take an operator on trust.",
+    links: [
+      { label: "Manifest", href: "https://averray.com/.well-known/agent-tools.json" },
+      { label: "Onboarding", href: "https://api.averray.com/onboarding" }
+    ]
+  },
+  {
+    label: "Identity outputs",
+    title: "Schemas and examples are public",
+    body: "Hosted schema docs, example assets, and live profile reads make it possible to inspect what the system emits, not just what it says it emits.",
+    links: [
+      { label: "Schemas", href: "/schemas/" },
+      { label: "Example profile", href: `https://averray.com/agents/${EXAMPLE_WALLET_FULL}` }
+    ]
+  }
+];
+
+const checklist = [
+  "Public reads stay live on <code>averray.com</code> and <code>api.averray.com</code>.",
+  "Wallet-gated mutations remain strict and role-aware.",
+  "Contract ownership, pauser, verifiers, and approved assets remain wired correctly.",
+  "Badge and profile documents remain schema-valid and publicly reachable."
+];
+---
+
+<PageLayout
+  title="Averray — Trust"
+  description="Averray's operational trust posture: deploy verification, multisig playbooks, a reviewer audit package, and public schema-backed outputs anyone can inspect."
+  canonicalUrl="https://averray.com/trust/"
+  current="trust"
+  eyebrow="Operational trust posture"
+  heading="Make the platform legible before asking anyone to rely on it."
+  lede="Averray already has concrete operational trust anchors: deploy verification, multisig setup, public schemas, and an audit handoff package designed for external review."
+  facts={facts}
+>
+  <Fragment slot="hero-ctas">
+    <a class="btn btn--primary" href="https://api.averray.com/health">
+      Open health check <span class="arrow" aria-hidden="true">→</span>
+    </a>
+    <a class="btn btn--ghost" href="https://averray.com/.well-known/agent-tools.json">
+      Open discovery manifest
+    </a>
+    <a class="btn btn--ghost" href="/schemas/">Inspect schemas</a>
+  </Fragment>
+
+  <section class="section" id="posture">
+    <div class="section__head">
+      <div>
+        <p class="eyebrow">Where trust comes from</p>
+        <h2 class="section__title">Three surfaces a counterparty can check.</h2>
+      </div>
+      <p class="section__aside">
+        Trust should be verifiable from public evidence, not internal reassurance. The
+        strongest thing this page can do is reduce ambiguity.
+      </p>
+    </div>
+    <div class="pillars">
+      {posture.map((item) => (
+        <article class="pillar">
+          <p class="pillar__num">{item.num}</p>
+          <p class="pillar__eyebrow">{item.label}</p>
+          <h3 class="pillar__title">{item.title}</h3>
+          <p class="pillar__body">{item.body}</p>
+        </article>
+      ))}
+    </div>
+  </section>
+
+  <section class="section" id="controls">
+    <div class="section__head">
+      <div>
+        <p class="eyebrow">Operational controls</p>
+        <h2 class="section__title">What is written down, and enforced.</h2>
+      </div>
+      <p class="section__aside">
+        A healthy runtime, explicit operational controls, and schema-backed outputs give
+        counterparties something concrete to inspect.
+      </p>
+    </div>
+    <div class="pillars">
+      {controls.map((item) => (
+        <article class="pillar">
+          <p class="pillar__num">{item.num}</p>
+          <p class="pillar__eyebrow">{item.label}</p>
+          <h3 class="pillar__title">{item.title}</h3>
+          <p class="pillar__body">{item.body}</p>
+        </article>
+      ))}
+    </div>
+    <div class="link-row">
+      <a href="https://github.com/averray-agent/agent/blob/main/docs/MULTISIG_SETUP.md">Multisig setup</a>
+      <a href="https://github.com/averray-agent/agent/blob/main/docs/AUDIT_PACKAGE.md">Audit package</a>
+      <a href="https://github.com/averray-agent/agent/blob/main/scripts/verify_deployment.sh">Verify deployment</a>
+    </div>
+  </section>
+
+  <section class="section" id="trust-model">
+    <div class="section__head">
+      <div>
+        <p class="eyebrow">Trust model</p>
+        <h2 class="section__title">What is public, what is controlled, what is verified.</h2>
+      </div>
+      <p class="section__aside">
+        Counterparty checklist: open the health endpoint and verify auth mode plus service
+        state, inspect the discovery manifest and onboarding surfaces directly, and check
+        that public identity outputs remain reachable and schema-backed.
+      </p>
+    </div>
+    <div class="pillars">
+      {trustModel.map((group) => (
+        <article class="pillar">
+          <p class="pillar__eyebrow">{group.label}</p>
+          <ul class="checklist">
+            {group.items.map((item) => <li>{item}</li>)}
+          </ul>
+        </article>
+      ))}
+    </div>
+  </section>
+
+  <section class="section" id="signals">
+    <div class="section__head">
+      <div>
+        <p class="eyebrow">Signals you can verify now</p>
+        <h2 class="section__title">Trust should not depend on private screenshots.</h2>
+      </div>
+    </div>
+    <div class="pillars">
+      {signals.map((item) => (
+        <article class="pillar">
+          <p class="pillar__eyebrow">{item.label}</p>
+          <h3 class="pillar__title">{item.title}</h3>
+          <p class="pillar__body">{item.body}</p>
+          <div class="link-row">
+            {item.links.map((link) => <a href={link.href}>{link.label}</a>)}
+          </div>
+        </article>
+      ))}
+    </div>
+  </section>
+
+  {/* Live data. The ids and the aria-live region below are the contract with
+      trust-providers.js, which is carried over unchanged so its live /
+      dry-run / at-capacity / error / disabled states — and its honest
+      "unavailable" fallbacks — behave exactly as before. */}
+  <section class="section" id="provider-operations">
+    <div class="section__head">
+      <div>
+        <p class="eyebrow">Provider operations</p>
+        <h2 class="section__title">What we read from, and how it ran most recently.</h2>
+      </div>
+      <p class="section__aside">
+        Averray pulls candidate work from a fixed set of public sources. This lists each
+        one, the mode it is running in, how it last looked, and whether it currently has
+        capacity. Errors and skipped items are summarised here; the operator app shows the
+        full per-row detail.
+      </p>
+    </div>
+    <p class="section__aside" id="provider-operations-meta">Loading live status…</p>
+    <div id="provider-operations-list" class="provider-operations-list" aria-live="polite">
+      <article class="site-card">
+        <p class="label">Live status</p>
+        <p class="section-copy">
+          Fetching the latest provider snapshot from <code>api.averray.com/status/providers</code>…
+        </p>
+      </article>
+    </div>
+  </section>
+
+  <section class="section" id="checklist">
+    <div class="split">
+      <div>
+        <p class="eyebrow">Operational checklist</p>
+        <h2 class="section__title">What a healthy production change should preserve.</h2>
+      </div>
+      <ul class="checklist">
+        {checklist.map((item) => <li set:html={item} />)}
+      </ul>
+    </div>
+  </section>
+
+  <section class="section final" id="verify">
+    <div>
+      <p class="eyebrow">Verification path</p>
+      <h2 class="final__title">Start with live health, then inspect public outputs.</h2>
+      <p class="section__aside" style="margin-top:14px">
+        That sequence tells you whether the system is up, what it claims to support, and
+        whether its public identity layer is actually inspectable by outside parties.
+      </p>
+    </div>
+    <div class="final__ctas">
+      <a class="btn btn--primary" href="https://api.averray.com/health">
+        Check health <span class="arrow" aria-hidden="true">→</span>
+      </a>
+      <a class="btn btn--ghost" href="https://github.com/averray-agent/agent/blob/main/docs/AUDIT_PACKAGE.md">
+        Read audit package
+      </a>
+    </div>
+  </section>
+
+  <script is:inline src="/trust-providers.js?v=20260725"></script>
+</PageLayout>

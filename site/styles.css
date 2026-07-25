@@ -533,30 +533,7 @@ h3 {
   overflow-wrap: break-word;
 }
 
-/* Inside a metric card the note follows a <strong> lead-in. Both were inline,
-   so they ran together as one sentence: "SIWE + JWT Production routes use
-   strict wallet-backed authentication." */
-.metric-card .section-note {
-  display: block;
-  margin-top: 0.35rem;
-}
 
-/* Endpoint URLs are too long for a card at the default 1.05rem, so they were
-   splitting mid-token ("https://api.averray.c / om"). Monospace at a smaller
-   size fits the short hosts on one line and matches how the landing page
-   already renders endpoints; the long discovery path still wraps, but now only
-   after a slash or dot. */
-/* The longest of these needs 198px in a 166px card, so it has to wrap. Arbitrary
-   breaking produced "https://api.averray.c / om"; the markup now carries <wbr>
-   after the scheme and each dot or slash, and breaking is restricted to those
-   points so a wrap always lands on a boundary a reader expects. */
-.metric-card .endpoint-value {
-  font-family: "JetBrains Mono", "SFMono-Regular", "Menlo", "Monaco", monospace;
-  font-size: 0.82rem;
-  line-height: 1.5;
-  word-break: normal;
-  overflow-wrap: normal;
-}
 
 .section-heading {
   display: flex;

@@ -1,5 +1,7 @@
 ---
 import BaseLayout from "../layouts/BaseLayout.astro";
+import SiteNav from "../components/SiteNav.astro";
+import SiteFooter from "../components/SiteFooter.astro";
 import "../styles/global.css";
 
 // Full canonical example wallet — used wherever the homepage links out
@@ -11,7 +13,6 @@ import "../styles/global.css";
 // deployer EOA that leaked and was retired on 2026-06-14).
 const EXAMPLE_WALLET_FULL = "0x10E82610BDFb7A4fC0d5E1c2E0694C810434214b";
 const EXAMPLE_WALLET_DISPLAY = "0x10E826…214b";
-const FOOTER_YEAR = new Date().getFullYear();
 
 // Network truth boundary — the page must name the settlement network the
 // product actually runs on TODAY. Flipped to mainnet at the cutover; if
@@ -179,42 +180,7 @@ const capital = [
   description={PAGE_DESCRIPTION}
 >
   <main class="page">
-    <!-- 1. TOP NAV -->
-    <nav class="nav" aria-label="Primary">
-      <a class="nav__brand" href="#top">
-        <span class="nav__brand-mark" aria-hidden="true">A</span>
-        Averray
-      </a>
-      {/* Hidden until the nav script runs, so a no-JS visit never gets an
-          inert button — it keeps the links visible and wrapping instead. */}
-      <button
-        class="nav__toggle"
-        type="button"
-        aria-expanded="false"
-        aria-controls="nav-links"
-        hidden
-      >
-        <span class="nav__toggle-bars" aria-hidden="true"></span>
-        Menu
-      </button>
-      <div class="nav__links" id="nav-links">
-        <a href="#story">Story</a>
-        <a href="#features">Features</a>
-        <a href="#lifecycle">How it works</a>
-        <a href="#receipts">Receipts</a>
-        {/* Labelled for the section it actually reaches ("Who it's for — three
-            seats at the same table"), which is not a builders section. As
-            "Builders" it also collided with the footer link to the separate
-            /builders/ page. The id stays as-is so existing deep links keep
-            working. */}
-        <a href="#builders">Who it's for</a>
-        <a href="https://averray.com/trust/">Trust</a>
-        <a href="https://averray.com/schemas/">Schemas</a>
-      </div>
-      <a class="nav__cta" href="https://app.averray.com">
-        Open operator app <span class="arrow" aria-hidden="true">→</span>
-      </a>
-    </nav>
+    <SiteNav />
 
     <!-- 2. HERO — with example console on the right -->
     <section class="hero" id="top">
@@ -443,61 +409,10 @@ const capital = [
     </section>
 
     <!-- 11. FOOTER -->
-    <footer class="footer">
-      <div class="footer__brand">
-        <span class="footer__brand-mark" aria-hidden="true">A</span>
-        Averray · © {FOOTER_YEAR} · receipts, not vibes.
-      </div>
-      <div class="footer__links">
-        <a href="https://github.com/averray-agent/agent/tree/main/docs">Docs</a>
-        {/* Was "Status" while the nav called the same page "Trust". */}
-        <a href="https://averray.com/trust/">Trust</a>
-        <a href="https://averray.com/builders/">Builders</a>
-        <a href="https://x.com/Averray_Agents" aria-label="Averray on X">X</a>
-        <a href="https://github.com/averray-agent/agent">GitHub</a>
-      </div>
-    </footer>
+    <SiteFooter />
   </main>
 
   <!-- example hero console — vanilla JS, reduced-motion aware, no framework, no network -->
   <script is:inline src="/console-stream.js?v=20260725"></script>
 
-  <!-- Mobile nav disclosure. Inline and tiny so it costs no extra request, and
-       gated on the elements existing so it can never strand the links. -->
-  <script is:inline>
-    (function () {
-      var nav = document.querySelector(".nav");
-      var toggle = nav && nav.querySelector(".nav__toggle");
-      var links = nav && nav.querySelector("#nav-links");
-      if (!nav || !toggle || !links) return;
-
-      // Only now does the collapsed state apply, so a failed script leaves the
-      // links on screen rather than hiding them behind a button that does nothing.
-      nav.classList.add("nav--collapsible");
-      toggle.hidden = false;
-
-      function setOpen(open) {
-        nav.dataset.open = open ? "true" : "false";
-        toggle.setAttribute("aria-expanded", open ? "true" : "false");
-      }
-      setOpen(false);
-
-      toggle.addEventListener("click", function () {
-        setOpen(nav.dataset.open !== "true");
-      });
-
-      // Tapping a destination should dismiss the panel, including same-page
-      // anchors where no navigation event follows.
-      links.addEventListener("click", function (event) {
-        if (event.target.closest("a")) setOpen(false);
-      });
-
-      document.addEventListener("keydown", function (event) {
-        if (event.key === "Escape" && nav.dataset.open === "true") {
-          setOpen(false);
-          toggle.focus();
-        }
-      });
-    })();
-  </script>
 </BaseLayout>

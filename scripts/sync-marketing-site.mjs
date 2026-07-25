@@ -8,7 +8,20 @@ const repoRoot = path.resolve(__dirname, "..");
 const distDir = path.join(repoRoot, "marketing", "dist");
 const siteDir = path.join(repoRoot, "site");
 
-const generatedEntries = ["index.html", "_astro", "console-stream.js"];
+// Top-level entries owned wholesale by the Astro build. `_astro` is synced as a
+// directory, so stale content-hashed assets get pruned.
+const generatedEntries = ["index.html", "_astro", "console-stream.js", "trust-providers.js"];
+
+// The four topic pages are Astro-generated too, but they live in directories
+// that also hold hand-authored files — schema reference docs, badge SVGs. They
+// are copied file-by-file rather than via syncDirectory, which prunes anything
+// in the target that the source does not have and would delete those.
+const generatedNestedFiles = [
+  "agents/index.html",
+  "builders/index.html",
+  "schemas/index.html",
+  "trust/index.html",
+];
 
 async function ensureDistExists() {
   const entries = await readdir(distDir).catch(() => null);
@@ -63,6 +76,13 @@ await mkdir(siteDir, { recursive: true });
 
 for (const entry of generatedEntries) {
   await syncEntry(entry);
+}
+
+for (const relativePath of generatedNestedFiles) {
+  const source = path.join(distDir, relativePath);
+  const target = path.join(siteDir, relativePath);
+  await mkdir(path.dirname(target), { recursive: true });
+  await cp(source, target, { force: true });
 }
 
 console.log("Synced marketing/dist landing assets into site/ without replacing mounted directories.");
