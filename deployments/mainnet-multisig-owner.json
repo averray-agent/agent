@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "kind": "averray.multisigOwnerRecord",
-  "status": "draft",
+  "status": "verified",
   "profile": "mainnet",
   "threshold": 2,
   "ss58Prefix": 0,
@@ -47,13 +47,13 @@
     }
   },
   "testnetRehearsal": {
-    "ownershipTransferTxHash": null,
-    "adminRehearsalTxHash": null,
-    "verifyDeploymentRun": null
+    "ownershipTransferTxHash": "0xf743968821bd6af685a03c2999e44c231b4ab0e47aa3bda13a0a4c23fc2e03dd",
+    "adminRehearsalTxHash": "0xbf18733f857d0850cf1e81a43378441cae114d989c374fd0dd275edf88b2ae31",
+    "verifyDeploymentRun": "local:verify_deployment.sh-mainnet-require-owner-record-final-2026-07-25T16:42:03Z"
   },
   "launchGate": {
-    "readyForOwnerUse": false,
-    "reason": "do not use multisig.ownerEnvValue as OWNER until the account mapping (auto_map) and ownership/admin rehearsals are recorded"
+    "readyForOwnerUse": true,
+    "reason": "account mapping (auto_map), ownership transfer, verify_deployment, and multisig admin rehearsal are recorded"
   },
   "polkadotDocsCheck": {
     "source": "https://docs.polkadot.com/smart-contracts/for-eth-devs/accounts/#account-mapping-for-native-polkadot-accounts",
