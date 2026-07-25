@@ -516,7 +516,9 @@ above** gets rotated. Use this as the cutover checklist:
 - [ ] Generate fresh deployer EOA key for the one-shot `deploy_contracts.sh`
 - [ ] Set up new multisig signer seeds (separate seeds from testnet — do **not** reuse)
 - [ ] Mint mainnet-only API keys for Pimlico, Sentry, Subscan, RPC provider
-- [ ] Generate fresh `APP_BASIC_AUTH_PASSWORD` (assuming you keep basic-auth gating)
+- ~~Generate fresh `APP_BASIC_AUTH_PASSWORD`~~ — **not needed.** The operator UI is
+      public on mainnet (decided 2026-07-25); no `APP_BASIC_AUTH` item is provisioned.
+      See [`MAINNET_CREDENTIALS_PLAN.md`](./MAINNET_CREDENTIALS_PLAN.md) → "Operator UI is public".
 - [ ] Generate fresh `METRICS_BEARER_TOKEN`
 - [ ] Generate fresh `RESEND_API_KEY`
 - [ ] Verify zero secrets are shared between testnet and mainnet vaults
