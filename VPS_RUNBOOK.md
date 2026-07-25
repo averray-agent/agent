@@ -93,8 +93,23 @@ docker compose logs --tail=100 caddy
 
 ### Protecting `app.averray.com` with browser basic auth
 
-This is the recommended setup while the operator/admin surface is still
-actively evolving in public.
+> **The operator app is public by default.** Production deploys render it with
+> `APP_PUBLIC_SHELL=1`, so there is no browser auth challenge — visitors reach
+> the UI and sign in with a wallet. The steps below apply only when you
+> deliberately re-enable the gate (repository variable `APP_PUBLIC_SHELL=0`).
+>
+> To open an already-gated host immediately, without waiting for a deploy:
+>
+> ```bash
+> cd /srv/agent-stack/app
+> APP_PUBLIC_SHELL=1 ./scripts/ops/render-caddyfile.sh /srv/agent-stack/Caddyfile
+> docker compose -f /srv/agent-stack/docker-compose.yml exec caddy caddy reload --config /etc/caddy/Caddyfile
+> ```
+>
+> The gate only ever covered the static shell — the Caddy matcher excludes
+> `/api/*` and `/index/*`, and `api.averray.com` is a separate public site
+> block — so removing it does not expose anything the API was not already
+> serving under its own strict SIWE auth.
 
 1. Pick a username, for example `operator`.
 2. Pick a strong password and store it in your password manager.

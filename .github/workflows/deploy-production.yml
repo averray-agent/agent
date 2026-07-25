@@ -159,6 +159,17 @@ jobs:
       # Operator action after this PR merges + one green deploy:
       #   gh secret delete VPS_SSH_KEY APP_BASIC_AUTH_USER APP_BASIC_AUTH_PASSWORD_HASH -R averray-agent/agent
       APP_ALLOW_PROTECTED_SHELL: ${{ secrets.APP_ALLOW_PROTECTED_SHELL }}
+      # The operator UI is public: the basic-auth gate was a closed-beta
+      # doorman on the static shell only (the Caddy matcher excludes /api/*
+      # and /index/*, and api.averray.com is separately public), so it never
+      # guarded the backend. Real access control is the API's strict SIWE auth
+      # plus role checks, which are unchanged.
+      #
+      # To re-protect the shell — e.g. the operator-UI gate that
+      # docs/MAINNET_CREDENTIALS_PLAN.md F12 keeps for mainnet — set the repo
+      # variable APP_PUBLIC_SHELL to 0 and make sure
+      # op://prod-ci/app-basic-auth-hash still holds a username + bcrypt hash.
+      APP_PUBLIC_SHELL: ${{ vars.APP_PUBLIC_SHELL || '1' }}
       # ADMIN_JWT (legacy GH secret) removed in PR 2.8b — the deploy
       # now reads $ADMIN_JWT_OP from 1Password
       # (op://prod-smoke/admin-jwt/password) via the fail-closed
@@ -301,33 +312,46 @@ jobs:
             esac
           fi
 
-          # APP_BASIC_AUTH_USER_OP: non-empty string. Usernames have
-          # no fixed shape; non-empty is the only meaningful check.
-          if [ -z "${APP_BASIC_AUTH_USER_OP:-}" ]; then
-            echo "::error::APP_BASIC_AUTH_USER_OP is empty — check op://prod-ci/app-basic-auth-hash/username"
-            fail=true
-          else
-            echo "APP_BASIC_AUTH_USER_OP: non-empty"
-          fi
-
-          # APP_BASIC_AUTH_PASSWORD_HASH_OP: bcrypt shape check ($2a$/$2b$/$2y$).
-          # Semantic correctness (the hash authenticates the right
-          # password) is verified end-to-end by the 401/200 smoke
-          # check on app.averray.com later in this deploy.
-          if [ -z "${APP_BASIC_AUTH_PASSWORD_HASH_OP:-}" ]; then
-            echo "::error::APP_BASIC_AUTH_PASSWORD_HASH_OP is empty — check op://prod-ci/app-basic-auth-hash/credential"
-            fail=true
-          else
-            case "$APP_BASIC_AUTH_PASSWORD_HASH_OP" in
-              \$2a\$*|\$2b\$*|\$2y\$*)
-                echo "APP_BASIC_AUTH_PASSWORD_HASH_OP: bcrypt shape valid"
-                ;;
-              *)
-                echo "::error::APP_BASIC_AUTH_PASSWORD_HASH_OP does not look like a bcrypt hash"
+          # The basic-auth values only gate the static operator shell, and the
+          # shell is public by default (APP_PUBLIC_SHELL). Skip their checks in
+          # that mode rather than failing the deploy over credentials it will
+          # not use — but keep them fail-closed whenever the gate is on, so a
+          # half-configured vault item can still never render an app that
+          # silently accepts everyone.
+          case "${APP_PUBLIC_SHELL:-1}" in
+            1|true|yes)
+              echo "APP_PUBLIC_SHELL enabled — operator shell renders public, skipping basic-auth credential checks"
+              ;;
+            *)
+              # APP_BASIC_AUTH_USER_OP: non-empty string. Usernames have
+              # no fixed shape; non-empty is the only meaningful check.
+              if [ -z "${APP_BASIC_AUTH_USER_OP:-}" ]; then
+                echo "::error::APP_BASIC_AUTH_USER_OP is empty — check op://prod-ci/app-basic-auth-hash/username"
                 fail=true
-                ;;
-            esac
-          fi
+              else
+                echo "APP_BASIC_AUTH_USER_OP: non-empty"
+              fi
+
+              # APP_BASIC_AUTH_PASSWORD_HASH_OP: bcrypt shape check ($2a$/$2b$/$2y$).
+              # Semantic correctness (the hash authenticates the right
+              # password) is verified end-to-end by the 401/200 smoke
+              # check on app.averray.com later in this deploy.
+              if [ -z "${APP_BASIC_AUTH_PASSWORD_HASH_OP:-}" ]; then
+                echo "::error::APP_BASIC_AUTH_PASSWORD_HASH_OP is empty — check op://prod-ci/app-basic-auth-hash/credential"
+                fail=true
+              else
+                case "$APP_BASIC_AUTH_PASSWORD_HASH_OP" in
+                  \$2a\$*|\$2b\$*|\$2y\$*)
+                    echo "APP_BASIC_AUTH_PASSWORD_HASH_OP: bcrypt shape valid"
+                    ;;
+                  *)
+                    echo "::error::APP_BASIC_AUTH_PASSWORD_HASH_OP does not look like a bcrypt hash"
+                    fail=true
+                    ;;
+                esac
+              fi
+              ;;
+          esac
 
           if [ "$fail" = "true" ]; then
             exit 1
@@ -439,9 +463,10 @@ jobs:
           # via deploy/backend.env.template:47; the BOOTSTRAP_SELF_REPORT_*
           # values are template-hardcoded config, not secrets).
           remote_env=$(
-            printf 'APP_BASIC_AUTH_USER=%q APP_BASIC_AUTH_PASSWORD_HASH=%q APP_ALLOW_PROTECTED_SHELL=%q ADMIN_JWT=%q RUN_INDEXER=%q WAIT_FOR_READY=%q HEALTH_STABILITY_SEC=%q INDEXER_LOG_TAIL=%q SMOKE_CHECK_INDEXER=%q BOOTSTRAP_SELF_REPORT_SEND_NOW=%q SMOKE_CHECK_BOOTSTRAP_INSTRUMENTATION=%q SMOKE_CHECK_BOOTSTRAP_SELF_REPORT_SENT=%q SMOKE_CHECK_PRODUCT_PROOF_GATE=%q PRODUCT_PROOF_REQUIRE_WORKER_LOOP=%q PRODUCT_PROOF_REWARD_ASSET=%q INDEXER_DATABASE_SCHEMA=%q INDEXER_FRESH_SCHEMA=%q DEPLOY_ALLOW_CONTRACT_SURFACE_DRIFT=%q ' \
+            printf 'APP_BASIC_AUTH_USER=%q APP_BASIC_AUTH_PASSWORD_HASH=%q APP_PUBLIC_SHELL=%q APP_ALLOW_PROTECTED_SHELL=%q ADMIN_JWT=%q RUN_INDEXER=%q WAIT_FOR_READY=%q HEALTH_STABILITY_SEC=%q INDEXER_LOG_TAIL=%q SMOKE_CHECK_INDEXER=%q BOOTSTRAP_SELF_REPORT_SEND_NOW=%q SMOKE_CHECK_BOOTSTRAP_INSTRUMENTATION=%q SMOKE_CHECK_BOOTSTRAP_SELF_REPORT_SENT=%q SMOKE_CHECK_PRODUCT_PROOF_GATE=%q PRODUCT_PROOF_REQUIRE_WORKER_LOOP=%q PRODUCT_PROOF_REWARD_ASSET=%q INDEXER_DATABASE_SCHEMA=%q INDEXER_FRESH_SCHEMA=%q DEPLOY_ALLOW_CONTRACT_SURFACE_DRIFT=%q ' \
               "$APP_BASIC_AUTH_USER_OP" \
               "$APP_BASIC_AUTH_PASSWORD_HASH_OP" \
+              "$APP_PUBLIC_SHELL" \
               "$APP_ALLOW_PROTECTED_SHELL" \
               "$ADMIN_JWT_OP" \
               "$DEPLOY_RUN_INDEXER" \
