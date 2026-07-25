@@ -237,9 +237,22 @@ gh workflow run deploy-production.yml \
 CHECK_INDEXER=0 ./scripts/ops/check-hosted-stack.sh
 ```
 
-For the GitHub production deploy workflow, set the repository/environment secret
-`APP_ALLOW_PROTECTED_SHELL=1` when `app.averray.com` should return an auth
-challenge instead of the public operator shell.
+`app.averray.com` is **public by default** — the deploy workflow sets
+`APP_PUBLIC_SHELL=1` unless the repository variable `APP_PUBLIC_SHELL` says
+otherwise, so the shell renders with no browser basic-auth gate and anyone can
+reach the operator UI and sign in with a wallet.
+
+That gate was only ever a closed-beta doorman on the static shell: the Caddy
+matcher excludes `/api/*` and `/index/*`, and `api.averray.com` is a separate
+public site block, so it never guarded the backend. Access control is the API's
+own strict SIWE auth plus role checks.
+
+To put the gate back — including the operator-UI gate
+`docs/MAINNET_CREDENTIALS_PLAN.md` F12 keeps for mainnet — set the repository
+variable `APP_PUBLIC_SHELL` to `0` and make sure
+`op://prod-ci/app-basic-auth-hash` still holds a username and bcrypt hash. Then
+set the repository/environment secret `APP_ALLOW_PROTECTED_SHELL=1` so the smoke
+check expects an auth challenge instead of the public operator shell.
 
 ---
 

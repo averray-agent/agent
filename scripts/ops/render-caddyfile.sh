@@ -45,6 +45,10 @@ Rejected env (the script fails if this is set):
 
 Optional env:
   TEMPLATE_PATH                 Override the source template.
+  APP_PUBLIC_SHELL              1/true/yes renders app.averray.com public,
+                                overriding any basic-auth credentials passed
+                                alongside. This is the default for production
+                                deploys; see deploy-production.yml.
 
 If neither APP_BASIC_AUTH_USER nor APP_BASIC_AUTH_PASSWORD_HASH is set,
 the rendered file keeps app.averray.com public.
@@ -70,6 +74,31 @@ require_command() {
 OUTPUT_PATH="$1"
 APP_BASIC_AUTH_USER="${APP_BASIC_AUTH_USER:-}"
 APP_BASIC_AUTH_PASSWORD_HASH="${APP_BASIC_AUTH_PASSWORD_HASH:-}"
+APP_PUBLIC_SHELL="${APP_PUBLIC_SHELL:-0}"
+
+# APP_PUBLIC_SHELL=1 renders app.averray.com without the browser basic-auth
+# gate, so anyone can reach the operator UI and sign in with a wallet.
+#
+# The gate was only ever a closed-beta doorman on the static shell: the matcher
+# below excludes /api/* and /index/*, and api.averray.com is a separate public
+# site block, so the backend was never behind it. Access control for anything
+# that matters is the API's own strict SIWE auth plus role checks.
+#
+# It takes precedence over the credentials rather than erroring when both are
+# supplied, because CI loads the hash from 1Password unconditionally; requiring
+# the vault item to be emptied as well would make "public" depend on two places
+# agreeing.
+case "$APP_PUBLIC_SHELL" in
+  1|true|yes)
+    if [[ -n "$APP_BASIC_AUTH_USER" || -n "$APP_BASIC_AUTH_PASSWORD_HASH" ]]; then
+      echo "APP_PUBLIC_SHELL is set — ignoring the supplied basic-auth credentials and rendering app.averray.com public" >&2
+    fi
+    APP_BASIC_AUTH_USER=""
+    APP_BASIC_AUTH_PASSWORD_HASH=""
+    ;;
+  0|false|no|"") ;;
+  *) fail "Invalid APP_PUBLIC_SHELL: $APP_PUBLIC_SHELL (expected 1/true/yes or 0/false/no)" ;;
+esac
 
 # Hard reject — raw passwords MUST NOT enter this script.
 if [[ -n "${APP_BASIC_AUTH_PASSWORD:-}" ]]; then

@@ -800,17 +800,28 @@ render_runtime_envs() {
 }
 
 apply_caddy() {
-  if [[ -z "${APP_BASIC_AUTH_USER:-}" ]]; then
-    echo "Skipping Caddy render: APP_BASIC_AUTH_USER is not set." >&2
-    echo "Set APP_BASIC_AUTH_USER plus APP_BASIC_AUTH_PASSWORD_HASH to deploy Caddy changes." >&2
-    return 0
-  fi
+  # APP_PUBLIC_SHELL renders app.averray.com without the basic-auth gate, so
+  # the credential guards below must not apply — skipping the render in that
+  # mode would leave the live Caddyfile gated forever, since this is the only
+  # thing that rewrites it. render-caddyfile.sh does the actual omitting.
+  case "${APP_PUBLIC_SHELL:-0}" in
+    1|true|yes)
+      echo "APP_PUBLIC_SHELL is set — rendering Caddy with a public operator shell." >&2
+      ;;
+    *)
+      if [[ -z "${APP_BASIC_AUTH_USER:-}" ]]; then
+        echo "Skipping Caddy render: APP_BASIC_AUTH_USER is not set." >&2
+        echo "Set APP_BASIC_AUTH_USER plus APP_BASIC_AUTH_PASSWORD_HASH to deploy Caddy changes, or APP_PUBLIC_SHELL=1 for a public shell." >&2
+        return 0
+      fi
 
-  if [[ -z "${APP_BASIC_AUTH_PASSWORD_HASH:-}" ]]; then
-    echo "Skipping Caddy render: APP_BASIC_AUTH_PASSWORD_HASH is not set." >&2
-    echo "PR 2.2 removed the raw-password code path; pass the bcrypt hash only." >&2
-    return 0
-  fi
+      if [[ -z "${APP_BASIC_AUTH_PASSWORD_HASH:-}" ]]; then
+        echo "Skipping Caddy render: APP_BASIC_AUTH_PASSWORD_HASH is not set." >&2
+        echo "PR 2.2 removed the raw-password code path; pass the bcrypt hash only." >&2
+        return 0
+      fi
+      ;;
+  esac
 
   # Render the new Caddyfile atomically: write to a tmp file alongside
   # the target, validate via `caddy validate` inside the running caddy
