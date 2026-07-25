@@ -16,6 +16,10 @@ export interface RecommendationRailProps {
    * horizontally so trailing cards don't get silently clipped.
    */
   layout?: "vertical" | "horizontal";
+  /** Claim handler, threaded down to each card's Claim button. */
+  onClaim: (jobId: string) => void;
+  /** Job id currently being claimed, so only that card shows a pending state. */
+  claimingJobId?: string | null;
 }
 
 export function RecommendationRail({
@@ -23,6 +27,8 @@ export function RecommendationRail({
   totalMatches,
   presence,
   layout = "vertical",
+  onClaim,
+  claimingJobId,
 }: RecommendationRailProps) {
   const isHorizontal = layout === "horizontal";
   const isLive = presence === "live";
@@ -73,14 +79,23 @@ export function RecommendationRail({
               key={job.id}
               className="min-w-[260px] grow basis-[280px]"
             >
-              <JobCard job={job} />
+              <JobCard
+                job={job}
+                onClaim={onClaim}
+                claiming={claimingJobId === job.id}
+              />
             </div>
           ))}
         </div>
       ) : (
         <div className="flex flex-col gap-2 p-2.5">
           {jobs.map((job) => (
-            <JobCard key={job.id} job={job} />
+            <JobCard
+              key={job.id}
+              job={job}
+              onClaim={onClaim}
+              claiming={claimingJobId === job.id}
+            />
           ))}
         </div>
       )}

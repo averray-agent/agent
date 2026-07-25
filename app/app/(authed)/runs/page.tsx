@@ -40,6 +40,9 @@ import {
   runsRowsPresence,
 } from "@/lib/api/runs-feed-status";
 import { extractAdminJobs } from "@/lib/api/job-lifecycle";
+import { extractApiErrorMessage, swrFetcher } from "@/lib/api/client";
+import { runClaimJob } from "@/lib/api/claim-job";
+import { mutate } from "swr";
 
 /**
  * Runs — the operator's primary work surface.
@@ -89,6 +92,33 @@ function RunsPageInner() {
   const [activeFilter, setActiveFilter] = useState<QueueFilter>(initialState);
   const [activeSource, setActiveSource] = useState<SourceFilter>(initialSource);
   const [showClosed, setShowClosed] = useState(false);
+  const [claimingJobId, setClaimingJobId] = useState<string | null>(null);
+  const [claimError, setClaimError] = useState<string | null>(null);
+
+  // Claim is the product's primary action. It sends no idempotencyKey on
+  // purpose — the route defaults it to `<wallet>:<jobId>`, so a double-click
+  // replays the same session instead of opening a second claim.
+  const handleClaim = useCallback(async (jobId: string) => {
+    setClaimError(null);
+    setClaimingJobId(jobId);
+    try {
+      await runClaimJob({ jobId, fetcher: swrFetcher });
+      // Refresh both: /jobs so the row leaves the claimable set, /sessions so
+      // the new claim shows up as work in flight.
+      mutate("/jobs");
+      mutate("/sessions");
+    } catch (err) {
+      // Surface the API's own conflict code — retry_limit_exhausted or
+      // idempotency_key_already_used are actionable; a generic failure is not.
+      setClaimError(
+        extractApiErrorMessage(err) ??
+          (err instanceof Error ? err.message : undefined) ??
+          "Could not claim this run."
+      );
+    } finally {
+      setClaimingJobId(null);
+    }
+  }, []);
   const [selectedId, setSelectedId] = useState<string>(runParam ?? "");
 
   // Sync filter state into the URL query string so links are
@@ -381,11 +411,22 @@ function RunsPageInner() {
         />
       ) : null}
 
+      {claimError ? (
+        <p
+          role="alert"
+          className="rounded-[8px] border border-[color:rgba(138,42,31,0.28)] bg-[#f4d5d0] px-3.5 py-2.5 font-[family-name:var(--font-mono)] text-[12px] text-[#8a2a1f]"
+        >
+          {claimError}
+        </p>
+      ) : null}
+
       <RecommendationRail
         layout="horizontal"
         jobs={recommendationCards}
         totalMatches={recommendationCards.length}
         presence={recommendationFeedPresence}
+        onClaim={handleClaim}
+        claimingJobId={claimingJobId}
       />
     </div>
   );

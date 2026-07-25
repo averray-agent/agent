@@ -108,20 +108,37 @@ test("the run-panel action button cannot be rendered unwired", () => {
   }
 });
 
-test("claiming is disabled while no claim mutation exists", () => {
+test("claim posts to /jobs/claim and is gated on claimability", () => {
+  const claim = readFileSync(join(appRoot, "lib/api/claim-job.js"), "utf8");
+  assert.match(claim, /"\/jobs\/claim"/u);
+  assert.match(claim, /method: "POST"/u);
+
   const card = readFileSync(join(appRoot, "components/runs/JobCard.tsx"), "utf8");
-  assert.match(card, /disabled\n/u, "the Claim button must be unconditionally disabled");
-  assert.match(card, /not wired yet/u, "and must say why");
-  // If someone adds a real claim call, this test should be updated with it.
-  const libFiles = walk(join(appRoot, "lib")).concat(
-    readdirSync(join(appRoot, "lib", "api")).map((f) => join(appRoot, "lib", "api", f))
+  assert.match(card, /onClick=\{\(\) => onClaim\(job\.id\)\}/u, "Claim must call the handler");
+  assert.match(
+    card,
+    /disabled=\{claiming \|\| \(job\.claim \? !job\.claim\.claimable : false\)\}/u,
+    "Claim must stay disabled while in flight and when the feed says it is not claimable"
   );
-  const hasClaimCall = libFiles
-    .filter((f) => /\.(ts|tsx|js|mjs)$/u.test(f) && !/\.test\./u.test(f))
-    .some((f) => /["'`]\/jobs\/claim/u.test(readFileSync(f, "utf8")));
-  assert.equal(
-    hasClaimCall,
-    false,
-    "a /jobs/claim call now exists — wire the Claim button to it and update this test"
+});
+
+test("claim relies on the route's implicit idempotency key", () => {
+  const claim = readFileSync(join(appRoot, "lib/api/claim-job.js"), "utf8");
+  // The route defaults the key to `<wallet>:<jobId>`, so a double-click
+  // replays one session. Sending a per-click key here would remove that.
+  assert.doesNotMatch(
+    claim,
+    /idempotencyKey:/u,
+    "sending a per-call idempotencyKey would defeat the route's replay protection"
   );
+  assert.match(claim, /idempotencyKey/u, "and the reasoning must be written down");
+});
+
+test("a failed claim surfaces the API's own message", () => {
+  const page = readFileSync(join(appRoot, "app/(authed)/runs/page.tsx"), "utf8");
+  assert.match(page, /extractApiErrorMessage\(err\)/u);
+  assert.match(page, /role="alert"/u, "the error must be announced, not just logged");
+  // A successful claim has to move the row out of the claimable set.
+  assert.match(page, /mutate\("\/jobs"\)/u);
+  assert.match(page, /mutate\("\/sessions"\)/u);
 });
