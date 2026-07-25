@@ -242,19 +242,27 @@ export function JobCard({ job }: { job: JobCardData }) {
          * and we don't want to silently disable everything during
          * rollout.
          */}
+        {/*
+         * Always disabled. `POST /jobs/claim` exists on the API, but nothing
+         * in this app calls it — there is no claim mutation anywhere in
+         * app/lib. This button rendered enabled and inert whenever the row
+         * was claimable, which is the most misleading state on the page: the
+         * primary action of the product, styled as available, doing nothing.
+         *
+         * The claimability reason is still shown when there is one, so the
+         * row keeps explaining *why* a job cannot be taken; the tooltip only
+         * falls back to the wiring note when the job itself is fine.
+         */}
         <button
           type="button"
-          disabled={job.claim ? !job.claim.claimable : false}
+          disabled
           title={
             job.claim && !job.claim.claimable
               ? formatClaimReason(job.claim.reason)
-              : undefined
+              : "Claiming from the console is not wired yet — agents claim through POST /jobs/claim."
           }
           className={cn(
-            "inline-flex h-6 items-center gap-1.5 rounded-[8px] px-2.5 font-[family-name:var(--font-display)] text-[10.5px] font-bold uppercase transition-transform",
-            job.claim && !job.claim.claimable
-              ? "cursor-not-allowed bg-[color:rgba(17,19,21,0.08)] text-[var(--avy-muted)]"
-              : "bg-[var(--avy-accent)] text-[var(--fg-invert)] hover:-translate-y-px hover:bg-[var(--avy-accent-2)]"
+            "inline-flex h-6 cursor-not-allowed items-center gap-1.5 rounded-[8px] bg-[color:rgba(17,19,21,0.08)] px-2.5 font-[family-name:var(--font-display)] text-[10.5px] font-bold uppercase text-[var(--avy-muted)]"
           )}
           style={{ letterSpacing: "0.06em" }}
         >

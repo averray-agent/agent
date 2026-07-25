@@ -48,25 +48,28 @@ export function RunsTopbar({ freshness }: { freshness?: FreshnessState }) {
 
       <div className="flex items-center justify-self-end gap-2">
         {freshness ? <DataFreshnessPill state={freshness} /> : null}
+        {/* Disabled: no job-creation call exists in this app. The "N" shortcut
+            chip was decorative too — there is no keydown handler anywhere
+            under components/runs, so the key did nothing either. */}
         <button
           type="button"
-          className="inline-flex h-7 items-center gap-2 rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3 font-[family-name:var(--font-display)] text-[11px] font-bold uppercase text-[var(--avy-ink)] transition-all hover:-translate-y-px hover:border-[color:rgba(30,102,66,0.24)] hover:bg-white"
+          disabled
+          title="Creating a job from the console is not wired to a live backend yet."
+          className="inline-flex h-7 cursor-not-allowed items-center gap-2 rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3 font-[family-name:var(--font-display)] text-[11px] font-bold uppercase text-[var(--avy-ink)] opacity-40"
           style={{ letterSpacing: "0.04em" }}
         >
           ＋ New job
-          <span className="rounded-[3px] bg-[color:rgba(17,19,21,0.06)] px-1.5 py-px font-[family-name:var(--font-mono)] text-[10.5px] font-medium text-[var(--avy-muted)]">
-            N
-          </span>
         </button>
+        {/* Disabled: never had a handler. Runs are opened by selecting a row
+            in the queue, which is wired. */}
         <button
           type="button"
-          className="inline-flex h-7 items-center gap-2 rounded-[8px] bg-[var(--avy-accent)] px-3 font-[family-name:var(--font-display)] text-[11px] font-bold uppercase text-[var(--fg-invert)] transition-transform hover:-translate-y-px hover:bg-[var(--avy-accent-2)]"
+          disabled
+          title="Open a run by selecting it in the queue — this shortcut is not wired."
+          className="inline-flex h-7 cursor-not-allowed items-center gap-2 rounded-[8px] bg-[var(--avy-accent)] px-3 font-[family-name:var(--font-display)] text-[11px] font-bold uppercase text-[var(--fg-invert)] opacity-40"
           style={{ letterSpacing: "0.04em" }}
         >
           Open run
-          <span className="rounded-[3px] bg-black/20 px-1.5 py-px font-[family-name:var(--font-mono)] text-[10.5px] font-medium text-white/70">
-            O
-          </span>
         </button>
       </div>
     </header>

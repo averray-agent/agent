@@ -189,20 +189,26 @@ function StatusPill({ status, label }: { status: LaneStatus; label: string }) {
   );
 }
 
-function TinyBtn({
-  children,
-  primary,
-  disabled,
-  title,
-}: {
+/**
+ * Both call sites pass `disabled` with a reason today, so this is honest as
+ * written. The union is here to keep it that way: without an `onClick` there
+ * is no way to render it enabled, so it cannot quietly become a live-looking
+ * control that does nothing — the failure mode this component's sibling in
+ * LoadedRunPanel actually shipped with.
+ */
+type TinyBtnProps = {
   children: React.ReactNode;
   primary?: boolean;
-  disabled?: boolean;
-  title?: string;
-}) {
+} & (
+  | { onClick: () => void; disabled?: boolean; title?: string }
+  | { onClick?: never; disabled: true; title: string }
+);
+
+function TinyBtn({ children, primary, disabled, title, onClick }: TinyBtnProps) {
   return (
     <button
       type="button"
+      onClick={onClick}
       disabled={disabled}
       title={title}
       className={cn(

@@ -630,10 +630,20 @@ export function LoadedRunPanel(props: LoadedRunPanelProps) {
                   {props.settle.detail}
                 </span>
               </div>
+              {/* Settlement is not driven from here. This had no handler, so
+                  it was only honest while `ctaDisabled` happened to be true —
+                  the moment a run became settleable it would have rendered an
+                  enabled money action that did nothing. Forced disabled until
+                  a settle call exists. */}
               <button
                 type="button"
-                disabled={props.settle.ctaDisabled}
-                className="inline-flex h-8 items-center gap-2 rounded-[8px] bg-[var(--avy-accent)] px-3.5 font-[family-name:var(--font-display)] text-xs font-bold uppercase text-[var(--fg-invert)] transition-transform hover:-translate-y-px hover:bg-[var(--avy-accent-2)] disabled:pointer-events-none disabled:opacity-40"
+                disabled
+                title={
+                  props.settle.ctaDisabled
+                    ? undefined
+                    : "Settling from the console is not wired to a live backend yet."
+                }
+                className="inline-flex h-8 cursor-not-allowed items-center gap-2 rounded-[8px] bg-[var(--avy-accent)] px-3.5 font-[family-name:var(--font-display)] text-xs font-bold uppercase text-[var(--fg-invert)] opacity-40"
                 style={{ letterSpacing: "0.04em" }}
               >
                 {props.settle.cta}
@@ -642,37 +652,40 @@ export function LoadedRunPanel(props: LoadedRunPanelProps) {
             <div className="mt-2 flex gap-1.5">
               {props.github ? (
                 <>
-                  <SmallGhostBtn className="flex-1">Ping maintainer</SmallGhostBtn>
-                  <SmallGhostBtn>Raise dispute</SmallGhostBtn>
-                  <SmallGhostBtn>Abandon</SmallGhostBtn>
+                  <SmallGhostBtn className="flex-1" notWired="Maintainer notifications are not wired to a live backend yet.">Ping maintainer</SmallGhostBtn>
+                  <SmallGhostBtn notWired="Disputes are raised through the Disputes page — this shortcut is not wired to POST /disputes yet.">Raise dispute</SmallGhostBtn>
+                  <SmallGhostBtn notWired="Abandoning a claim is not wired to a live backend yet.">Abandon</SmallGhostBtn>
                 </>
               ) : props.wikipedia ? (
                 <>
-                  <SmallGhostBtn className="flex-1">
+                  <SmallGhostBtn className="flex-1" notWired="Reviewer notifications are not wired to a live backend yet.">
                     Ping editor reviewer
                   </SmallGhostBtn>
-                  <SmallGhostBtn>Raise dispute</SmallGhostBtn>
-                  <SmallGhostBtn>Withdraw proposal</SmallGhostBtn>
+                  <SmallGhostBtn notWired="Disputes are raised through the Disputes page — this shortcut is not wired to POST /disputes yet.">Raise dispute</SmallGhostBtn>
+                  <SmallGhostBtn notWired="Withdrawing a proposal is not wired to a live backend yet.">Withdraw proposal</SmallGhostBtn>
                 </>
               ) : props.osv ? (
                 <>
-                  <SmallGhostBtn className="flex-1">Ping maintainer</SmallGhostBtn>
-                  <SmallGhostBtn>Raise dispute</SmallGhostBtn>
-                  <SmallGhostBtn>Skip advisory</SmallGhostBtn>
+                  <SmallGhostBtn className="flex-1" notWired="Maintainer notifications are not wired to a live backend yet.">Ping maintainer</SmallGhostBtn>
+                  <SmallGhostBtn notWired="Disputes are raised through the Disputes page — this shortcut is not wired to POST /disputes yet.">Raise dispute</SmallGhostBtn>
+                  <SmallGhostBtn notWired="Skipping an advisory is not wired to a live backend yet.">Skip advisory</SmallGhostBtn>
                 </>
               ) : props.openData ? (
                 <>
-                  <SmallGhostBtn className="flex-1">
+                  <SmallGhostBtn
+                    className="flex-1"
+                    notWired="Flagging stale catalog metadata is not wired to a live backend yet."
+                  >
                     Flag stale catalog metadata
                   </SmallGhostBtn>
-                  <SmallGhostBtn>Raise dispute</SmallGhostBtn>
-                  <SmallGhostBtn>Skip dataset</SmallGhostBtn>
+                  <SmallGhostBtn notWired="Disputes are raised through the Disputes page — this shortcut is not wired to POST /disputes yet.">Raise dispute</SmallGhostBtn>
+                  <SmallGhostBtn notWired="Skipping a dataset is not wired to a live backend yet.">Skip dataset</SmallGhostBtn>
                 </>
               ) : (
                 <>
-                  <SmallGhostBtn className="flex-1">Request cosign</SmallGhostBtn>
-                  <SmallGhostBtn>Raise dispute</SmallGhostBtn>
-                  <SmallGhostBtn>Unwind</SmallGhostBtn>
+                  <SmallGhostBtn className="flex-1" notWired="Co-sign requests are not wired to a live backend yet.">Request cosign</SmallGhostBtn>
+                  <SmallGhostBtn notWired="Disputes are raised through the Disputes page — this shortcut is not wired to POST /disputes yet.">Raise dispute</SmallGhostBtn>
+                  <SmallGhostBtn notWired="Unwinding is not wired to a live backend yet.">Unwind</SmallGhostBtn>
                 </>
               )}
             </div>
@@ -2354,18 +2367,40 @@ function BreakItem({ label, value }: { label: string; value: string }) {
   );
 }
 
-function SmallGhostBtn({
-  children,
-  className,
-}: {
+/**
+ * A run-panel action button.
+ *
+ * The props are a union on purpose: a caller must supply either an `onClick`
+ * or a `notWired` reason. There is no third option, so this component cannot
+ * render an enabled control that does nothing — which is exactly what every
+ * call site here used to be. The old signature accepted only `children` and
+ * `className`, so roughly fifteen operator actions (Raise dispute, Request
+ * cosign, Abandon, Ping maintainer, …) rendered as live buttons that were
+ * structurally incapable of doing anything.
+ *
+ * `notWired` renders the button disabled with the reason as its tooltip,
+ * matching the pattern already used for agent invites and loan repayment.
+ */
+type SmallGhostBtnProps = {
   children: React.ReactNode;
   className?: string;
-}) {
+} & (
+  | { onClick: () => void; notWired?: never }
+  | { onClick?: never; notWired: string }
+);
+
+function SmallGhostBtn({ children, className, onClick, notWired }: SmallGhostBtnProps) {
   return (
     <button
       type="button"
+      onClick={onClick}
+      disabled={Boolean(notWired)}
+      title={notWired}
       className={cn(
-        "inline-flex h-7 items-center justify-center gap-2 rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3 font-[family-name:var(--font-display)] text-[11px] font-bold uppercase text-[var(--avy-ink)] transition-transform hover:-translate-y-px hover:border-[color:rgba(30,102,66,0.24)] hover:bg-white",
+        "inline-flex h-7 items-center justify-center gap-2 rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3 font-[family-name:var(--font-display)] text-[11px] font-bold uppercase text-[var(--avy-ink)] transition-transform",
+        notWired
+          ? "cursor-not-allowed opacity-40"
+          : "hover:-translate-y-px hover:border-[color:rgba(30,102,66,0.24)] hover:bg-white",
         className
       )}
       style={{ letterSpacing: "0.04em" }}
