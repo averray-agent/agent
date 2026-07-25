@@ -163,4 +163,12 @@ for container in agent-backend agent-indexer agent-caddy agent-postgres agent-re
     || fail "live testnet container is not running: $container"
 done
 
+owner_record_status=$(jq -r '.status // "unknown"' "$OWNER_FILE")
+owner_ready_for_go=$(jq -r '.launchGate.readyForOwnerUse // false' "$OWNER_FILE")
+if [[ "$owner_record_status" == "verified" && "$owner_ready_for_go" == "true" ]]; then
+  echo "owner_go_gate=ready"
+else
+  echo "owner_go_gate=pending (internal sidecar only; ownership/admin rehearsal still required)"
+fi
+
 echo "mainnet sidecar preflight: ok"

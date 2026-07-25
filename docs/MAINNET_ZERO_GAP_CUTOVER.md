@@ -93,6 +93,13 @@ sudo /srv/agent-stack/app/scripts/ops/render-vps-env.sh \
 sudo /srv/agent-stack/app/scripts/ops/preflight-mainnet-sidecar.sh
 ```
 
+The sidecar preflight is an internal-runtime gate, not the public GO gate. It
+may accept a verified AutoMap owner record that is still `status=draft`, but it
+prints `owner_go_gate=pending` until the 2-of-3 ownership/admin rehearsal is
+recorded and `launchGate.readyForOwnerUse=true`. The later release-readiness
+gate must run with `REQUIRE_OWNER_RECORD_FINAL=1` (the default); do not disable
+or waive it for GO.
+
 The preflight checks certificate/key pairing, mode and ownership (`0400
 root:root` for both cert and key; looser modes such as `0600`/`0644` are
 rejected), expiry, exact AWS profiles,

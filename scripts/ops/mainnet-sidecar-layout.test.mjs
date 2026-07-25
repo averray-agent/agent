@@ -61,6 +61,7 @@ test("cutover scripts fail closed on cap, preserve testnet identity, and auto-ro
   assert.match(preflight, /115792089237316195423570985008687907853269984665640564039457584007913129639935/u);
   assert.match(preflight, /\.mapAccount\.status == "auto_mapped"/u);
   assert.match(preflight, /POLKADOT_CHAIN_ID 420420419/u);
+  assert.match(preflight, /owner_go_gate=pending \(internal sidecar only; ownership\/admin rehearsal still required\)/u);
   assert.match(preflight, /BADGE_RECEIPT_SIGNING=disabled/u);
   assert.match(start, /testnet_containers=unchanged/u);
   assert.match(start, /cmp -s "\$testnet_before" "\$testnet_after"/u);
