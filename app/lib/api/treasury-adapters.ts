@@ -5,6 +5,7 @@ import type { BalanceCard } from "@/components/treasury/BalanceSheetStrip";
 import type { PositionCard } from "@/components/treasury/AccountPositionsGrid";
 import type { ActiveLoan } from "@/components/treasury/CreditLinePanel";
 import type { StrategyLane } from "@/components/treasury/StrategyRoutingTable";
+import { countOpenJobs } from "@/lib/api/job-lifecycle";
 
 type RawRecord = Record<string, unknown>;
 
@@ -328,7 +329,10 @@ export function buildRoomVitals(
   return [
     {
       label: "Runs in motion",
-      value: jobs.length || sessions.length,
+      // Counted through the shared classifier rather than `jobs.length`: the
+      // raw array includes exhausted rows, which are not in motion. The card
+      // said 16 while the lifecycle strip beside it said OPEN 13.
+      value: countOpenJobs(jobsPayload) || sessions.length,
       // Both surfaces feed this card: every open job in the catalog
       // plus every active session pulled from /admin/sessions
       // (operator-wide, includes external-agent claims). The hint
