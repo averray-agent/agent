@@ -127,6 +127,14 @@ checkpoints. The env/secrets proof must report
 
 ## 5. Atomic public flip and rollback
 
+Before the public flip:
+
+- land the mainnet-capable Hosted Worker Canary retarget, then set
+  `WORKER_CANARY_PROFILE=mainnet`. The current canary is deliberately
+  testnet-only and rejects a mainnet profile, so changing the environment
+  variable before that implementation lands is not sufficient;
+- land and verify the queued arbitrator fail-closed packet.
+
 Do not run this command until the GO gate is fully green:
 
 ```sh

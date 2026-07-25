@@ -40,6 +40,22 @@ test("resolveServiceHealth — ok in permissive mode without secrets (dev postur
   assert.equal(result.components.auth.ok, true);
 });
 
+test("resolveServiceHealth — ok in strict KMS-only mode without HMAC secrets", () => {
+  const result = resolveServiceHealth({
+    stateStoreHealth: { ok: true, backend: "RedisStateStore", mode: "durable" },
+    authConfig: {
+      mode: "strict",
+      domain: "api.averray.com",
+      chainId: 420420419,
+      jwtBackend: "kms",
+      kmsJwt: { keyId: "arn:aws:kms:eu-central-2:123456789012:key/mrk-test" },
+      secrets: []
+    }
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.components.auth.ok, true);
+});
+
 test("resolveServiceHealth — degraded when state-store unreachable", () => {
   const result = resolveServiceHealth({
     stateStoreHealth: { ok: false, backend: "RedisStateStore", error: "ECONNREFUSED" },
@@ -49,10 +65,32 @@ test("resolveServiceHealth — degraded when state-store unreachable", () => {
   assert.equal(result.components.stateStore.ok, false);
 });
 
-test("resolveServiceHealth — degraded when strict-mode auth has no secrets", () => {
+test("resolveServiceHealth — degraded when strict HMAC auth has no secret", () => {
   const result = resolveServiceHealth({
     stateStoreHealth: { ok: true },
-    authConfig: { mode: "strict", domain: "api.averray.com", chainId: 420420417, secrets: [] }
+    authConfig: {
+      mode: "strict",
+      domain: "api.averray.com",
+      chainId: 420420417,
+      jwtBackend: "hmac",
+      secrets: []
+    }
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.components.auth.ok, false);
+});
+
+test("resolveServiceHealth — degraded when strict KMS auth has no KMS config", () => {
+  const result = resolveServiceHealth({
+    stateStoreHealth: { ok: true },
+    authConfig: {
+      mode: "strict",
+      domain: "api.averray.com",
+      chainId: 420420419,
+      jwtBackend: "kms",
+      kmsJwt: null,
+      secrets: []
+    }
   });
   assert.equal(result.ok, false);
   assert.equal(result.components.auth.ok, false);
