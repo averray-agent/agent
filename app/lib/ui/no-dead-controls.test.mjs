@@ -115,11 +115,23 @@ test("claim posts to /jobs/claim and is gated on claimability", () => {
 
   const card = readFileSync(join(appRoot, "components/runs/JobCard.tsx"), "utf8");
   assert.match(card, /onClick=\{\(\) => onClaim\(job\.id\)\}/u, "Claim must call the handler");
+  // Positive signal only. The earlier `job.claim ? !job.claim.claimable : false`
+  // let a row with no claim contract render enabled — 8 of 14 cards on the live
+  // queue looked available purely because claimability was unknown.
   assert.match(
     card,
-    /disabled=\{claiming \|\| \(job\.claim \? !job\.claim\.claimable : false\)\}/u,
-    "Claim must stay disabled while in flight and when the feed says it is not claimable"
+    /disabled=\{claiming \|\| !job\.claim\?\.claimable\}/u,
+    "Claim must require a positive claimable signal, not merely the absence of a negative one"
   );
+  // Comments stripped: the fix is explained in one that necessarily quotes the
+  // old expression, and that must not read as the expression coming back.
+  const cardCode = card.replace(/\{\/\*[\s\S]*?\*\/\}/gu, "").replace(/\/\*[\s\S]*?\*\//gu, "");
+  assert.doesNotMatch(
+    cardCode,
+    /job\.claim \? !job\.claim\.claimable : false/u,
+    "the unknown-defaults-to-enabled fallback must not come back"
+  );
+  assert.match(card, /Claimability unknown/u, "a row with no claim contract must say so");
 });
 
 test("claim relies on the route's implicit idempotency key", () => {

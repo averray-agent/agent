@@ -252,22 +252,33 @@ export function JobCard({
          * rollout.
          */}
         {/*
-         * Enabled only when the feed says the job is claimable, and while no
-         * request is in flight. The claimability reason stays the tooltip so
-         * a blocked row keeps explaining itself rather than just greying out.
+         * Enabled ONLY on a positive claimable signal.
+         *
+         * This previously read `job.claim ? !job.claim.claimable : false`, so a
+         * row that carried no claim contract fell through to enabled. On the
+         * live queue that was 8 of 14 cards: they looked available because
+         * claimability was *unknown*, not because the job could be taken. That
+         * fallback was harmless while the button did nothing; once it fires a
+         * real mutation, unknown-renders-as-available is the same class of
+         * problem as a surface overstating its data.
+         *
+         * Missing claim data is now its own disabled state with its own
+         * reason, distinct from a job that is genuinely blocked.
          */}
         <button
           type="button"
           onClick={() => onClaim(job.id)}
-          disabled={claiming || (job.claim ? !job.claim.claimable : false)}
+          disabled={claiming || !job.claim?.claimable}
           title={
-            job.claim && !job.claim.claimable
-              ? formatClaimReason(job.claim.reason)
-              : undefined
+            job.claim
+              ? job.claim.claimable
+                ? undefined
+                : formatClaimReason(job.claim.reason)
+              : "Claimability unknown — this row arrived without a claim contract."
           }
           className={cn(
             "inline-flex h-6 items-center gap-1.5 rounded-[8px] px-2.5 font-[family-name:var(--font-display)] text-[10.5px] font-bold uppercase transition-transform",
-            claiming || (job.claim && !job.claim.claimable)
+            claiming || !job.claim?.claimable
               ? "cursor-not-allowed bg-[color:rgba(17,19,21,0.08)] text-[var(--avy-muted)]"
               : "bg-[var(--avy-accent)] text-[var(--fg-invert)] hover:-translate-y-px hover:bg-[var(--avy-accent-2)]"
           )}
