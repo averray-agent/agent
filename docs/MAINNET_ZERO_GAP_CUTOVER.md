@@ -51,10 +51,13 @@ Record the final 2-of-3 mapped owner in
 `deployments/mainnet-multisig-owner.json`, then the deployed addresses and
 ownership/role wiring in `deployments/mainnet.json`.
 
-The launch record must keep `parameters.dailyOutflowCap` equal to string `"0"`.
-The preflight refuses to start the sidecar if the cap is armed, the owner record
-is not a final mapped 2-of-3, or the deployment owner differs from the mapped
-multisig.
+The launch record must keep `parameters.dailyOutflowCap` equal to
+`type(uint256).max`
+(`115792089237316195423570985008687907853269984665640564039457584007913129639935`).
+A finite value self-DoSes settlement under audit-2 H-1, while `0` would reject
+every metered outflow. The preflight requires the exact audited value, a
+verified recorded mapping or verified runtime AutoMap record, and a deployment
+owner matching the mapped multisig.
 
 ## 3. Render and preflight the mainnet runtime
 
@@ -65,18 +68,46 @@ both the certificate and the private key in every pair — and install
 mainnet backend/indexer templates into `/run/agent-stack-mainnet` using the
 scoped mainnet service-account tokens.
 
+For the internal-only sidecar, the manifest deliberately uses the mapped owner
+as `AUTH_ADMIN_WALLETS`. A native multisig cannot complete ordinary SIWE, so
+this is fail-closed rather than an interactive admin login. Before smoke or
+public GO, add the fresh dedicated mainnet SIWE admin from credentials-plan F15;
+do not reuse the pauser or arbitrator hardware EOAs for routine admin auth.
+
 Run:
 
 ```sh
+sudo cp /srv/agent-stack/app/deploy/agent-stack.tmpfiles.conf \
+  /etc/tmpfiles.d/agent-stack.conf
+sudo systemd-tmpfiles --create
+
+sudo /srv/agent-stack/app/scripts/ops/render-vps-env.sh \
+  /srv/agent-stack/app/deploy/backend.mainnet.env.template \
+  /run/agent-stack-mainnet/backend.env \
+  /etc/agent-stack-mainnet/op-backend.env
+sudo /srv/agent-stack/app/scripts/ops/render-vps-env.sh \
+  /srv/agent-stack/app/deploy/indexer.mainnet.env.template \
+  /run/agent-stack-mainnet/indexer.env \
+  /etc/agent-stack-mainnet/op-indexer.env
+
 sudo /srv/agent-stack/app/scripts/ops/preflight-mainnet-sidecar.sh
 ```
+
+The sidecar preflight is an internal-runtime gate, not the public GO gate. It
+may accept a verified AutoMap owner record that is still `status=draft`, but it
+prints `owner_go_gate=pending` until the 2-of-3 ownership/admin rehearsal is
+recorded and `launchGate.readyForOwnerUse=true`. The later release-readiness
+gate must run with `REQUIRE_OWNER_RECORD_FINAL=1` (the default); do not disable
+or waive it for GO.
 
 The preflight checks certificate/key pairing, mode and ownership (`0400
 root:root` for both cert and key; looser modes such as `0600`/`0644` are
 rejected), expiry, exact AWS profiles,
-absence of static AWS credentials, mainnet chain/RPC identity, isolated Redis
-and indexer DNS, completed contract/owner records, unarmed outflow cap, valid
-compose, and health of all five live testnet containers.
+absence of static AWS credentials, mainnet backend and indexer chain/RPC
+identity, exact manifest-derived addresses/start blocks/schema, isolated Redis
+and indexer DNS, completed contract/owner records, the audited unbounded
+outflow-cap posture, valid compose, and health of all five live testnet
+containers.
 
 ## 4. Start and prove mainnet internally
 

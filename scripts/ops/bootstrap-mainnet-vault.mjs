@@ -67,14 +67,14 @@ export const MAINNET_SA_TOKENS = {
     item: "op-token-mainnet-vps-backend",
     account: "averray-mainnet-vps-backend",
     reads: ["mainnet-backend", "mainnet-backend-external", "mainnet-observability"],
-    consumer: { kind: "vps-file", path: "/etc/agent-stack/op-backend.env", var: "OP_SERVICE_ACCOUNT_TOKEN", service: "agent-stack-env-render" },
+    consumer: { kind: "vps-file", path: "/etc/agent-stack-mainnet/op-backend.env", var: "OP_SERVICE_ACCOUNT_TOKEN", service: "mainnet-sidecar-render" },
     description: "Backend VPS op-inject env render.",
   },
   vpsIndexer: {
     item: "op-token-mainnet-vps-indexer",
     account: "averray-mainnet-vps-indexer",
     reads: ["mainnet-indexer"],
-    consumer: { kind: "vps-file", path: "/etc/agent-stack/op-indexer.env", var: "OP_SERVICE_ACCOUNT_TOKEN", service: "agent-stack-env-render" },
+    consumer: { kind: "vps-file", path: "/etc/agent-stack-mainnet/op-indexer.env", var: "OP_SERVICE_ACCOUNT_TOKEN", service: "mainnet-sidecar-render" },
     description: "Indexer VPS op-inject env render.",
   },
   smokeTests: {
@@ -98,7 +98,7 @@ export const MAINNET_REFRESH_RW_TOKEN = {
     account: "averray-mainnet-admin-refresh-rw",
     reads: ["mainnet-backend"],
     writes: ["mainnet-backend"],
-    consumer: { kind: "vps-file", path: "/etc/agent-stack/op-refresh.env", var: "OP_SERVICE_ACCOUNT_TOKEN_REFRESH", service: "agent-stack-refresh-render" },
+    consumer: { kind: "vps-file", path: "/etc/agent-stack-mainnet/op-refresh.env", var: "OP_SERVICE_ACCOUNT_TOKEN_REFRESH", service: "mainnet-sidecar-refresh-render" },
     description: "R+W SA for the <=1h JWT per-consumer refresh-flow (DEC-4). IMMUTABLE scope — mint R+W.",
   },
 };

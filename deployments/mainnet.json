@@ -33,5 +33,27 @@
     "disputeLossSkillPenalty": "35",
     "disputeLossReliabilityPenalty": "60"
   },
+  "deploymentBlocks": {
+    "treasuryPolicy": 18647521,
+    "strategyAdapterRegistry": 18647528,
+    "agentAccountCore": 18647537,
+    "reputationSbt": 18647544,
+    "discoveryRegistry": 18647552,
+    "escrowCore": 18647902
+  },
+  "runtime": {
+    "auth": {
+      "adminWallets": [
+        "0x01e6eed856e989201f4ff6346e18eab7e46c874c"
+      ],
+      "verifierWallets": [
+        "0x5a6836c6D4d293F6E5377E6c28054F4171915813"
+      ]
+    },
+    "indexer": {
+      "database": "averray_mainnet",
+      "schema": "agent_indexer_mainnet_20260725131847"
+    }
+  },
   "strategies": []
 }

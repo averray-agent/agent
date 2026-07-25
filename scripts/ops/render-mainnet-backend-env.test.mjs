@@ -1,8 +1,8 @@
 // Tests for scripts/ops/render-mainnet-backend-env.mjs — the mainnet env-template
 // generator. These pin the delta transform so a future edit can't silently ship a
 // mainnet template that (a) points at a testnet RPC/chainId, (b) keeps the retired
-// HMAC / arbitrator key, (c) drops the SHARE_URL_SECRET, or (d) hardcodes a
-// per-deploy address instead of a TODO(operator) placeholder.
+// HMAC / arbitrator key, (c) drops the SHARE_URL_SECRET, or (d) fails to resolve
+// public runtime values from the committed mainnet deployment manifest.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import {
   MAINNET_RPC,
   MAINNET_CHAIN_ID,
+  buildManifestOverrides,
   repointOpRef,
   transformLine,
   transformTemplate,
@@ -18,6 +19,37 @@ import {
   spliceInventory,
   generateAll,
 } from "./render-mainnet-backend-env.mjs";
+
+const MANIFEST = {
+  profile: "mainnet",
+  owner: "0x1111111111111111111111111111111111111111",
+  verifier: "0x2222222222222222222222222222222222222222",
+  treasuryReserve: "0x3333333333333333333333333333333333333333",
+  contracts: {
+    treasuryPolicy: "0x4444444444444444444444444444444444444444",
+    agentAccountCore: "0x5555555555555555555555555555555555555555",
+    escrowCore: "0x6666666666666666666666666666666666666666",
+    reputationSbt: "0x7777777777777777777777777777777777777777",
+    discoveryRegistry: "0x8888888888888888888888888888888888888888",
+  },
+  deploymentBlocks: {
+    treasuryPolicy: 101,
+    agentAccountCore: 102,
+    reputationSbt: 103,
+    discoveryRegistry: 104,
+    escrowCore: 105,
+  },
+  runtime: {
+    auth: {
+      adminWallets: ["0x1111111111111111111111111111111111111111"],
+      verifierWallets: ["0x2222222222222222222222222222222222222222"],
+    },
+    indexer: {
+      database: "averray_mainnet",
+      schema: "agent_indexer_mainnet_20260725131847",
+    },
+  },
+};
 
 // --- repointOpRef ---------------------------------------------------------
 
@@ -69,6 +101,33 @@ test("transformLine: per-deploy unknowns become commented TODO(operator)", () =>
   const admin = transformLine("AUTH_ADMIN_WALLETS=0x6778F050eAc8313e4dbB176d7BAB44510E833ac8");
   assert.match(admin, /^# AUTH_ADMIN_WALLETS=/u);
   assert.match(admin, /NEVER the testnet hot key nor the leaked 0xFd2E/u);
+});
+
+test("buildManifestOverrides: resolves addresses, auth, blocks, and schema", () => {
+  const overrides = buildManifestOverrides(MANIFEST);
+  assert.equal(overrides.TREASURY_POLICY_ADDRESS, MANIFEST.contracts.treasuryPolicy);
+  assert.equal(overrides.AUTH_ADMIN_WALLETS, MANIFEST.runtime.auth.adminWallets[0]);
+  assert.equal(overrides.AUTH_VERIFIER_WALLETS, MANIFEST.runtime.auth.verifierWallets[0]);
+  assert.equal(overrides.PONDER_START_BLOCK_TREASURY, "101");
+  assert.equal(overrides.PONDER_START_BLOCK_ESCROW, "102", "shared Agent/Escrow scan starts at the earlier deploy");
+  assert.equal(overrides.PONDER_START_BLOCK_REPUTATION, "103");
+  assert.equal(overrides.PONDER_START_BLOCK_REGISTRIES, "104");
+  assert.equal(overrides.DATABASE_SCHEMA, MANIFEST.runtime.indexer.schema);
+});
+
+test("buildManifestOverrides: fails closed on incomplete runtime metadata", () => {
+  assert.throws(
+    () => buildManifestOverrides({ ...MANIFEST, runtime: { ...MANIFEST.runtime, auth: { adminWallets: [] } } }),
+    /runtime\.auth\.adminWallets/u
+  );
+  assert.throws(
+    () =>
+      buildManifestOverrides({
+        ...MANIFEST,
+        deploymentBlocks: { ...MANIFEST.deploymentBlocks, treasuryPolicy: 0 },
+      }),
+    /deploymentBlocks\.treasuryPolicy/u
+  );
 });
 
 test("transformLine: op:// values are repointed; kept keys stay literal", () => {
@@ -155,6 +214,27 @@ test("generateAll: the real transform yields the mainnet essentials", () => {
   assert.match(backend, /^REDIS_URL=redis:\/\/mainnet-redis:6379$/mu);
   assert.match(backend, /^REDIS_NAMESPACE=agent-platform-mainnet$/mu);
   assert.match(backend, /^INDEXER_STATUS_URL=http:\/\/mainnet-indexer:42069\/status$/mu);
+  assert.match(backend, /^TREASURY_POLICY_ADDRESS=0x226F14252A98BD2eA140271647De20132F09AF20$/mu);
+  assert.match(backend, /^AGENT_ACCOUNT_ADDRESS=0xB1350932bf85E7ffd0599E9a3CC7b55718D89E57$/mu);
+  assert.match(backend, /^AUTH_ADMIN_WALLETS=0x01e6eed856e989201f4ff6346e18eab7e46c874c$/mu);
+  assert.match(backend, /^AUTH_VERIFIER_WALLETS=0x5a6836c6D4d293F6E5377E6c28054F4171915813$/mu);
+  assert.doesNotMatch(
+    backend,
+    /^\s*#?\s*[A-Z][A-Z0-9_]*=.*TODO\(operator\)/mu
+  );
+
+  const indexer = files["deploy/indexer.mainnet.env.template"];
+  assert.match(indexer, /^POLKADOT_CHAIN_ID=420420419$/mu);
+  assert.match(indexer, /^POLKADOT_CHAIN_NAME=polkadotHubMainnet$/mu);
+  assert.match(indexer, /^PONDER_START_BLOCK_TREASURY=18647521$/mu);
+  assert.match(indexer, /^PONDER_START_BLOCK_ESCROW=18647537$/mu);
+  assert.match(indexer, /^PONDER_START_BLOCK_REPUTATION=18647544$/mu);
+  assert.match(indexer, /^PONDER_START_BLOCK_REGISTRIES=18647552$/mu);
+  assert.match(indexer, /^DATABASE_SCHEMA=agent_indexer_mainnet_20260725131847$/mu);
+  assert.doesNotMatch(
+    indexer,
+    /^\s*#?\s*[A-Z][A-Z0-9_]*=.*TODO\(operator\)/mu
+  );
   // no testnet RPC anywhere in the rendered mainnet templates
-  assert.ok(!files["deploy/indexer.mainnet.env.template"].includes("eth-rpc-testnet.polkadot.io"));
+  assert.ok(!indexer.includes("eth-rpc-testnet.polkadot.io"));
 });
