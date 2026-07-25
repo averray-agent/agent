@@ -35,7 +35,8 @@
 #   template     Path to a deploy/*.env.template file. Must exist and
 #                contain `op://` references resolvable by the token.
 #   target       Final path of the rendered env file. Must be inside
-#                /run/agent-stack/ (the tmpfs from systemd-tmpfiles).
+#                /run/agent-stack/ or /run/agent-stack-mainnet/ (the
+#                tmpfs runtime directories from systemd-tmpfiles).
 #   token-file   Path to a file containing exactly:
 #                  OP_SERVICE_ACCOUNT_TOKEN=ops_…
 #                Must be mode 0400, owner root. Sourced with `set -a`
@@ -61,8 +62,8 @@ usage() {
 Usage: render-vps-env.sh <template> <target> <token-file>
 
   template     deploy/*.env.template path
-  target       /run/agent-stack/*.env path (must be inside /run/agent-stack)
-  token-file   /etc/agent-stack/op-*.env path (mode 0400, root)
+  target       /run/agent-stack/*.env or /run/agent-stack-mainnet/*.env
+  token-file   /etc/agent-stack*/op-*.env path (mode 0400, root)
 
 See SECRETS_MIGRATION.md Phase 2 PR 2.3 for the full design.
 USAGE
@@ -88,13 +89,14 @@ case "$token_mode" in
   *) fail "token file $token_file has mode $token_mode; require 0400" ;;
 esac
 
-# Target MUST be inside /run/agent-stack to enforce the tmpfs invariant.
+# Target MUST be inside one of the two exact agent-stack runtime directories
+# to enforce the tmpfs invariant.
 # This is a defense against an attacker who can call this script with a
 # different target — they cannot redirect output to a persistent disk
 # location like /tmp or /srv.
 case "$target" in
-  /run/agent-stack/*) : ;;
-  *) fail "target $target is not inside /run/agent-stack; refusing to render" ;;
+  /run/agent-stack/*|/run/agent-stack-mainnet/*) : ;;
+  *) fail "target $target is not inside an allowed agent-stack runtime directory; refusing to render" ;;
 esac
 
 # The runtime dir must exist (set up by systemd-tmpfiles at boot, or
@@ -200,8 +202,8 @@ fi
 # meaningful firebreak in practice.
 #
 # Configurable via RENDER_OUTPUT_OWNER (default: ubuntu:ubuntu).
-# Containing directory /run/agent-stack needs to allow the same user
-# to enter it; tmpfiles.d config in this PR sets 0750 root:ubuntu.
+# The containing runtime directory needs to allow the same user to enter it;
+# deploy/agent-stack.tmpfiles.conf sets both runtime dirs to 0750 root:ubuntu.
 RENDER_OUTPUT_OWNER="${RENDER_OUTPUT_OWNER:-ubuntu:ubuntu}"
 chmod 0400 "$tmp"
 chown "$RENDER_OUTPUT_OWNER" "$tmp" 2>/dev/null || {

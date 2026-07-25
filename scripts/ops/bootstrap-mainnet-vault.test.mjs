@@ -47,6 +47,8 @@ test("the launch four map to the least-privilege scopes from the plan", () => {
   assert.deepEqual(t.ciDeploy.reads, ["mainnet-ci", "mainnet-ci-external"]);
   assert.deepEqual(t.vpsIndexer.reads, ["mainnet-indexer"]);
   assert.deepEqual(t.smokeTests.reads, ["mainnet-smoke"]); // firebreak: smoke reads ONLY smoke
+  assert.equal(t.vpsBackend.consumer.path, "/etc/agent-stack-mainnet/op-backend.env");
+  assert.equal(t.vpsIndexer.consumer.path, "/etc/agent-stack-mainnet/op-indexer.env");
 });
 
 // --- assertScopes: the fail-closed invariants -----------------------------

@@ -57,10 +57,21 @@ test("cutover scripts fail closed on cap, preserve testnet identity, and auto-ro
   const preflight = await readFile(join(ROOT, "scripts", "ops", "preflight-mainnet-sidecar.sh"), "utf8");
   const start = await readFile(join(ROOT, "scripts", "ops", "start-mainnet-sidecar.sh"), "utf8");
   const flip = await readFile(join(ROOT, "scripts", "ops", "flip-caddy-network.sh"), "utf8");
-  assert.match(preflight, /\.parameters\.dailyOutflowCap == "0"/u);
+  assert.match(preflight, /\.parameters\.dailyOutflowCap == \$cap/u);
+  assert.match(preflight, /115792089237316195423570985008687907853269984665640564039457584007913129639935/u);
+  assert.match(preflight, /\.mapAccount\.status == "auto_mapped"/u);
+  assert.match(preflight, /POLKADOT_CHAIN_ID 420420419/u);
   assert.match(preflight, /BADGE_RECEIPT_SIGNING=disabled/u);
   assert.match(start, /testnet_containers=unchanged/u);
   assert.match(start, /cmp -s "\$testnet_before" "\$testnet_after"/u);
   assert.match(flip, /rollback\(\)/u);
   assert.match(flip, /Public health did not report chainId/u);
+});
+
+test("mainnet env renderer and tmpfiles allow only the isolated mainnet runtime path", async () => {
+  const render = await readFile(join(ROOT, "scripts", "ops", "render-vps-env.sh"), "utf8");
+  const tmpfiles = await readFile(join(ROOT, "deploy", "agent-stack.tmpfiles.conf"), "utf8");
+  assert.match(render, /\/run\/agent-stack\/\*\|\/run\/agent-stack-mainnet\/\*/u);
+  assert.match(render, /not inside an allowed agent-stack runtime directory/u);
+  assert.match(tmpfiles, /^d \/run\/agent-stack-mainnet 0750 root ubuntu - -$/mu);
 });
