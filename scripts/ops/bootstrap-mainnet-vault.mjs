@@ -34,16 +34,19 @@ export const ENV = "mainnet";
 
 /**
  * Vault topology. `firebreak: true` means NO service-account token may read it —
- * it holds the SA token items themselves, the basic-auth raw password, and the
- * Roles Anywhere CA private key (human-only). A leaked runtime token must not be
- * able to read its own replacement.
+ * it holds the SA token items themselves and the Roles Anywhere CA private key
+ * (human-only). A leaked runtime token must not be able to read its own
+ * replacement.
+ *
+ * No basic-auth password is provisioned: the operator UI is public on mainnet
+ * (see docs/MAINNET_CREDENTIALS_PLAN.md → "Operator UI is public").
  */
 export const MAINNET_VAULTS = [
-  { name: "mainnet-critical", firebreak: true, holds: "SA token items · basic-auth raw password · Roles Anywhere CA key — human-only" },
+  { name: "mainnet-critical", firebreak: true, holds: "SA token items · Roles Anywhere CA key — human-only" },
   { name: "mainnet-backend", runtimes: ["backend"], holds: "backend runtime secrets (KMS ARNs/regions, JWT public key, metrics/alert)" },
   { name: "mainnet-backend-external", runtimes: ["backend"], holds: "optional external API keys (email, issue-ingestion PAT)" },
   { name: "mainnet-indexer", runtimes: ["indexer"], holds: "indexer DATABASE_URL" },
-  { name: "mainnet-ci", runtimes: ["ci"], holds: "VPS SSH key · app basic-auth hash" },
+  { name: "mainnet-ci", runtimes: ["ci"], holds: "VPS SSH key" },
   { name: "mainnet-ci-external", runtimes: ["ci"], holds: "CI-side external tokens" },
   { name: "mainnet-smoke", runtimes: ["smoke"], holds: "hosted product-proof ADMIN_JWT" },
   { name: "mainnet-observability", runtimes: ["backend"], holds: "observability tier (mirrors prod-observability)" },

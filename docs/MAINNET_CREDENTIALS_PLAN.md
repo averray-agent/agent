@@ -62,7 +62,7 @@ enforced by `check-mainnet-env-secrets-proof.mjs` and recorded in
 | F9 | **IAM Roles Anywhere mainnet CA + 2 client certs + 2 trust anchors + 2 profiles + 2 prod roles** (`averray-signer-prod-role`, `averray-jwt-signer-prod-role`) | CA key human-only (1Password Critical / YubiKey / AWS Private CA — **open decision**); client keys generated ON the VPS, mode 0400 root, never in any SA vault. | New mainnet trust anchors/profiles/roles; testnet ones not reusable. Required so `staticAccessKeysRendered=false`. |
 | F10 | **`VPS_SSH_KEY`** (ED25519) + mainnet VPS host/port/user | Private key in mainnet-ci vault; use gated by the GitHub `production` Environment. | Fresh key, mainnet VPS target. Highest-blast-radius CI secret. |
 | F11 | **`METRICS_BEARER_TOKEN`** | mainnet backend vault (VPS-SA-readable). | Generate fresh; do not reuse testnet. |
-| F12 | **`APP_BASIC_AUTH`** — raw password (human-only) + bcrypt hash (CI-readable) | Split-vault: raw in mainnet-critical, hash in mainnet-ci. | Fresh password; preserve the split-vault invariant (raw NEVER in any SA vault). |
+| F12 | ~~**`APP_BASIC_AUTH`**~~ — **not provisioned for mainnet** | — | **Decision (2026-07-25): the operator UI is public on mainnet.** No mainnet `APP_BASIC_AUTH` item is created. See "Operator UI is public" below. |
 | F13 | **`ADMIN_REFRESH_TOKEN`** (replaces long-lived `ADMIN_JWT`) | mainnet smoke vault (read+write for rotation). | First capture is a manual human SIWE with the fresh mainnet admin wallet; testnet refresh tokens are session-scoped. |
 | F14 | **`DATABASE_URL`** (indexer Postgres password) | mainnet indexer vault; Postgres on the VPS. | Fresh DB credential; two-step rotation (DB then OP item). |
 | F15 | **`AUTH_ADMIN_WALLETS` / `AUTH_VERIFIER_WALLETS`** (login-seed allowlists) | Addresses public; backing keys human/hardware. | Must NOT carry the testnet hot key `0x6778F050…3ac8`; NEVER re-add the leaked `0xFd2EAE…6519`. |
@@ -260,11 +260,39 @@ must be set at creation (irreversible).
 5. **Mainnet vault topology** — **confirmed**: the per-runtime scoped set encoded in
    `scripts/ops/bootstrap-mainnet-vault.mjs` (#731) — `mainnet-critical` firebreak +
    `mainnet-{backend,backend-external,indexer,ci,ci-external,smoke,observability}` + the 4
-   least-privilege SA tokens. **Keep `APP_BASIC_AUTH`** on the operator UI (split-vault: raw
-   in `mainnet-critical`, bcrypt hash in `mainnet-ci`).
+   least-privilege SA tokens. **`APP_BASIC_AUTH` is NOT part of the mainnet set** — see
+   "Operator UI is public" below.
 6. **Optional vendors** — **LEAN: none enabled.** Pimlico/gasSponsor stays disabled (starter
    gas is operator-brokered); Sentry + Subscan off. Baseline `vendorKeys` = Resend + alert
    webhook + GitHub ingestion PAT only.
+
+## Operator UI is public
+
+**Decided 2026-07-25: `app.averray.com` carries no browser auth challenge on
+mainnet.** F12 is not provisioned, and the cutover does not create an
+`APP_BASIC_AUTH` item in any mainnet vault.
+
+This plan previously said to keep the gate. It was reversed deliberately, not
+dropped, and the reasoning is worth recording because "the operator console for
+a live-money system is publicly reachable" reads alarming without it:
+
+- The gate only ever covered the **static shell**. The Caddy matcher is
+  `not path /api/* /index/*`, so the proxy paths the browser actually calls
+  were always excluded.
+- `api.averray.com` is a **separate, public site block** and always has been.
+  An unauthenticated `GET /health` returns 200 today.
+- Access control is therefore unchanged by removing it: the API enforces
+  strict SIWE plus role checks, which is what actually gates every mutation.
+  What basic auth bought was obscurity of the UI, not protection of the data.
+
+So this is a decision about who can *see* the console, not about who can *act*
+in it. Anyone can load the page; nobody can do anything without a wallet the
+backend accepts.
+
+The mechanism was retained rather than deleted (PR #795). Re-enabling is the
+repository variable `APP_PUBLIC_SHELL=0` plus a deploy, and it remains a usable
+lever if the console ever needs closing during an incident — but no mainnet
+credential is provisioned for it, so that would need an item created first.
 
 ## Related
 
