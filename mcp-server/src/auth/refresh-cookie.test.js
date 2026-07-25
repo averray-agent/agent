@@ -15,7 +15,7 @@ import {
   rotateRefreshToken,
 } from "./refresh.js";
 
-import { MemoryStateStore } from "../core/state-store.js";
+import { MemoryStateStore, RedisStateStore } from "../core/state-store.js";
 
 test("parseCookie: finds the named cookie in a single-cookie header", () => {
   assert.equal(parseCookie("refresh_token=abc123", "refresh_token"), "abc123");
@@ -122,6 +122,43 @@ test("makeRefreshStoreAdapter: round-trips an issue → consume → rotate cycle
   // The new record exists in the state-store
   const newDirect = await stateStore.getRefreshRecord(rotated.hash);
   assert.ok(newDirect);
+});
+
+test("makeRefreshStoreAdapter: RedisStateStore keeps each rotation hash in a distinct key", async () => {
+  const records = new Map();
+  const stateStore = new RedisStateStore("redis://unused", "agent-platform-mainnet");
+  stateStore.client = {
+    async get(key) {
+      return records.get(key) ?? null;
+    },
+    async set(key, value) {
+      records.set(key, value);
+    },
+  };
+  stateStore.connectionPromise = Promise.resolve();
+  const adapter = makeRefreshStoreAdapter(stateStore);
+
+  const first = await issueRefreshToken({
+    wallet: "0x1111111111111111111111111111111111111111",
+    role: "admin",
+    store: adapter,
+  });
+  const consumed = await consumeRefreshToken({ rawToken: first.rawToken, store: adapter });
+  const second = await rotateRefreshToken({
+    oldRecord: consumed.record,
+    oldHash: consumed.hash,
+    store: adapter,
+  });
+
+  assert.equal(records.size, 2);
+  assert.ok(records.has(`agent-platform-mainnet:auth:refresh:${first.hash}`));
+  assert.ok(records.has(`agent-platform-mainnet:auth:refresh:${second.hash}`));
+  assert.equal((await stateStore.getRefreshRecord(first.hash)).replacedBy, second.hash);
+  assert.equal((await stateStore.getRefreshRecord(second.hash)).replacedBy, null);
+  assert.equal(
+    (await consumeRefreshToken({ rawToken: second.rawToken, store: adapter })).hash,
+    second.hash,
+  );
 });
 
 test("makeRefreshStoreAdapter: replay detection works end-to-end through the adapter", async () => {

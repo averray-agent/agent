@@ -928,7 +928,7 @@ export class RedisStateStore {
   // Keyspace + payload shape defined in mcp-server/src/auth/refresh.js.
   async getRefreshRecord(hash) {
     await this.connect();
-    const raw = await this.client.get(this.key("auth", "refresh", hash));
+    const raw = await this.client.get(this.key("auth", `refresh:${hash}`));
     if (!raw) return null;
     try {
       return JSON.parse(raw);
@@ -940,7 +940,7 @@ export class RedisStateStore {
   async upsertRefreshRecord(hash, record, ttlSeconds) {
     await this.connect();
     await this.client.set(
-      this.key("auth", "refresh", hash),
+      this.key("auth", `refresh:${hash}`),
       JSON.stringify(record),
       { EX: Math.max(1, Math.ceil(ttlSeconds)) },
     );
