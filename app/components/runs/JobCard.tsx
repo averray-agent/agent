@@ -41,7 +41,16 @@ export interface JobCardData {
   claim?: ClaimSummary;
 }
 
-export function JobCard({ job }: { job: JobCardData }) {
+export function JobCard({
+  job,
+  onClaim,
+  claiming = false,
+}: {
+  job: JobCardData;
+  onClaim: (jobId: string) => void;
+  /** True while this card's claim request is in flight. */
+  claiming?: boolean;
+}) {
   return (
     <article
       className={cn(
@@ -243,30 +252,28 @@ export function JobCard({ job }: { job: JobCardData }) {
          * rollout.
          */}
         {/*
-         * Always disabled. `POST /jobs/claim` exists on the API, but nothing
-         * in this app calls it — there is no claim mutation anywhere in
-         * app/lib. This button rendered enabled and inert whenever the row
-         * was claimable, which is the most misleading state on the page: the
-         * primary action of the product, styled as available, doing nothing.
-         *
-         * The claimability reason is still shown when there is one, so the
-         * row keeps explaining *why* a job cannot be taken; the tooltip only
-         * falls back to the wiring note when the job itself is fine.
+         * Enabled only when the feed says the job is claimable, and while no
+         * request is in flight. The claimability reason stays the tooltip so
+         * a blocked row keeps explaining itself rather than just greying out.
          */}
         <button
           type="button"
-          disabled
+          onClick={() => onClaim(job.id)}
+          disabled={claiming || (job.claim ? !job.claim.claimable : false)}
           title={
             job.claim && !job.claim.claimable
               ? formatClaimReason(job.claim.reason)
-              : "Claiming from the console is not wired yet — agents claim through POST /jobs/claim."
+              : undefined
           }
           className={cn(
-            "inline-flex h-6 cursor-not-allowed items-center gap-1.5 rounded-[8px] bg-[color:rgba(17,19,21,0.08)] px-2.5 font-[family-name:var(--font-display)] text-[10.5px] font-bold uppercase text-[var(--avy-muted)]"
+            "inline-flex h-6 items-center gap-1.5 rounded-[8px] px-2.5 font-[family-name:var(--font-display)] text-[10.5px] font-bold uppercase transition-transform",
+            claiming || (job.claim && !job.claim.claimable)
+              ? "cursor-not-allowed bg-[color:rgba(17,19,21,0.08)] text-[var(--avy-muted)]"
+              : "bg-[var(--avy-accent)] text-[var(--fg-invert)] hover:-translate-y-px hover:bg-[var(--avy-accent-2)]"
           )}
           style={{ letterSpacing: "0.06em" }}
         >
-          Claim
+          {claiming ? "Claiming…" : "Claim"}
         </button>
       </div>
     </article>
