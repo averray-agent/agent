@@ -44,10 +44,12 @@
   "runtime": {
     "auth": {
       "adminWallets": [
-        "0x01e6eed856e989201f4ff6346e18eab7e46c874c"
+        "0x01e6eed856e989201f4ff6346e18eab7e46c874c",
+        "0x9Ab8531FBb0948C542a31298FD61335f30064239"
       ],
       "verifierWallets": [
-        "0x5a6836c6D4d293F6E5377E6c28054F4171915813"
+        "0x5a6836c6D4d293F6E5377E6c28054F4171915813",
+        "0x9Ab8531FBb0948C542a31298FD61335f30064239"
       ]
     },
     "indexer": {
