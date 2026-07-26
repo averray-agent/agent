@@ -1447,3 +1447,9 @@ section.section { scroll-margin-top: 100px; }
 .legal p { font-family: var(--font-body); font-size: 15.5px; line-height: 1.65; color: var(--avy-muted); }
 .legal p strong { color: var(--avy-ink); }
 .legal .checklist li { font-size: 15.5px; line-height: 1.6; }
+
+/* Chain attribution in the footer: the Polkadot mark sits inline with the
+   text links, sized to the type, slightly softened so it reads as
+   attribution rather than a call to action. */
+.footer__chain { display: inline-flex; align-items: center; gap: 7px; }
+.footer__chain img { width: 15px; height: 15px; opacity: 0.85; display: block; }

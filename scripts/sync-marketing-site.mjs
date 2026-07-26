@@ -12,7 +12,7 @@ const siteDir = path.join(repoRoot, "site");
 // directory, so stale content-hashed assets get pruned.
 // `fonts` carries the self-hosted webfonts from marketing/public/fonts —
 // standalone site/ pages (agent.html, schema docs) reference them too.
-const generatedEntries = ["index.html", "_astro", "console-stream.js", "trust-providers.js", "fonts"];
+const generatedEntries = ["index.html", "_astro", "console-stream.js", "trust-providers.js", "fonts", "polkadot-mark.svg"];
 
 // The four topic pages are Astro-generated too, but they live in directories
 // that also hold hand-authored files — schema reference docs, badge SVGs. They
