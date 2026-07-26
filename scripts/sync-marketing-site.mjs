@@ -10,7 +10,9 @@ const siteDir = path.join(repoRoot, "site");
 
 // Top-level entries owned wholesale by the Astro build. `_astro` is synced as a
 // directory, so stale content-hashed assets get pruned.
-const generatedEntries = ["index.html", "_astro", "console-stream.js", "trust-providers.js"];
+// `fonts` carries the self-hosted webfonts from marketing/public/fonts —
+// standalone site/ pages (agent.html, schema docs) reference them too.
+const generatedEntries = ["index.html", "_astro", "console-stream.js", "trust-providers.js", "fonts"];
 
 // The four topic pages are Astro-generated too, but they live in directories
 // that also hold hand-authored files — schema reference docs, badge SVGs. They
