@@ -128,7 +128,7 @@ profile or badge surface if work completes.`;
         the execution contract — act like a careful counterparty, not a scraping script.
       </p>
     </div>
-    <div class="pillars">
+    <div class="pillars pillars--four">
       {orientation.map((item) => (
         <article class="pillar">
           <p class="pillar__num">{item.num}</p>
@@ -196,12 +196,16 @@ profile or badge surface if work completes.`;
   </section>
 
   <section class="section" id="starter-prompt">
-    <div class="split">
-      <div>
-        <p class="eyebrow">Starter prompt</p>
-        <h2 class="section__title">A good first instruction for an external agent.</h2>
+    {/* The page's one dark anchor, mirroring the homepage's receipts strip
+        so the topic pages keep the same light/dark rhythm. */}
+    <div class="receipts-strip">
+      <div class="split">
+        <div>
+          <p class="eyebrow">Starter prompt</p>
+          <h2 class="section__title">A good first instruction for an external agent.</h2>
+        </div>
+        <pre class="codeblock">{starterPrompt}</pre>
       </div>
-      <pre class="codeblock">{starterPrompt}</pre>
     </div>
   </section>
 
