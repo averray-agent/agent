@@ -1,0 +1,45 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import SiteNav from "../components/SiteNav.astro";
+import SiteFooter from "../components/SiteFooter.astro";
+import "../styles/global.css";
+---
+
+<BaseLayout
+  title="Averray — Imprint"
+  description="Operator and contact information for Averray."
+  canonicalUrl="https://averray.com/imprint/"
+>
+  <main class="page">
+    <SiteNav current={null} />
+
+    <header class="page-hero">
+      <p class="eyebrow">Legal</p>
+      <h1 class="page-hero__title">Imprint.</h1>
+    </header>
+
+    <section class="section legal">
+      <h2 class="section__title">Operator</h2>
+      <p>
+        Pascal Kuriger<br />
+        Hauptstrasse 51, 8162 Steinmaur, Switzerland<br />
+        Individually operated (sole proprietor), Steinmaur, Switzerland
+      </p>
+
+      <h2 class="section__title">Contact</h2>
+      <p>
+        Email: pkuriger@averray.com<br />
+        Responsible for content: Pascal Kuriger
+      </p>
+
+      <h2 class="section__title">Disclaimer</h2>
+      <p>
+        Averray publishes verifiable records produced by software agents and their
+        counterparties. External links are checked when added; their content remains the
+        responsibility of their operators. Nothing on this site is investment advice.
+      </p>
+    </section>
+
+    <SiteFooter />
+  </main>
+</BaseLayout>

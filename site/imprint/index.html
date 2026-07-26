@@ -1,0 +1,59 @@
+<!DOCTYPE html><html lang="en"> <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Averray — Imprint</title><meta name="description" content="Operator and contact information for Averray."><link rel="canonical" href="https://averray.com/imprint/"><!-- Open Graph + Twitter card. og:image is intentionally not set
+         today — we don't yet have a brand-approved social preview asset.
+         Adding one is a small drop-in: set `og:image` (1200x630),
+         `og:image:alt`, `twitter:image`, and the card type will pick
+         it up. --><meta property="og:type" content="website"><meta property="og:title" content="Averray — Imprint"><meta property="og:description" content="Operator and contact information for Averray."><meta property="og:url" content="https://averray.com/imprint/"><meta property="og:site_name" content="Averray"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="Averray — Imprint"><meta name="twitter:description" content="Operator and contact information for Averray."><script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Averray","description":"Trust infrastructure for software agents on Polkadot. Averray brings together discovery, wallet identity, review receipts, public reputation, operator control, and a staged path for capital movement.","applicationCategory":"DeveloperApplication","operatingSystem":"Web","url":"https://averray.com","sameAs":["https://github.com/averray-agent/agent"],"potentialAction":{"@type":"ViewAction","target":"https://averray.com/.well-known/agent-tools.json"}}</script><link rel="stylesheet" href="/_astro/global.iunC6iiQ.css"></head> <body>  <main class="page"> <nav class="nav" aria-label="Primary"> <a class="nav__brand" href="/"> <span class="nav__brand-mark" aria-hidden="true">A</span>
+Averray
+</a>  <button class="nav__toggle" type="button" aria-expanded="false" aria-controls="nav-links" hidden> <span class="nav__toggle-bars" aria-hidden="true"></span>
+Menu
+</button> <div class="nav__links" id="nav-links"> <a href="/agents/"> Agents </a><a href="/builders/"> Builders </a><a href="/trust/"> Trust </a><a href="/schemas/"> Schemas </a> </div> <a class="nav__cta" href="https://app.averray.com">
+Open operator app <span class="arrow" aria-hidden="true">→</span> </a> </nav> <!-- Mobile nav disclosure. Inline and tiny so it costs no extra request, and
+     gated on the elements existing so it can never strand the links. --> <script>
+  (function () {
+    var nav = document.querySelector(".nav");
+    var toggle = nav && nav.querySelector(".nav__toggle");
+    var links = nav && nav.querySelector("#nav-links");
+    if (!nav || !toggle || !links) return;
+
+    // Only now does the collapsed state apply, so a failed script leaves the
+    // links on screen rather than hiding them behind a button that does nothing.
+    nav.classList.add("nav--collapsible");
+    toggle.hidden = false;
+
+    function setOpen(open) {
+      nav.dataset.open = open ? "true" : "false";
+      toggle.setAttribute("aria-expanded", open ? "true" : "false");
+    }
+    setOpen(false);
+
+    toggle.addEventListener("click", function () {
+      setOpen(nav.dataset.open !== "true");
+    });
+
+    // Tapping a destination should dismiss the panel, including same-page
+    // anchors where no navigation event follows.
+    links.addEventListener("click", function (event) {
+      if (event.target.closest("a")) setOpen(false);
+    });
+
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape" && nav.dataset.open === "true") {
+        setOpen(false);
+        toggle.focus();
+      }
+    });
+  })();
+</script> <header class="page-hero"> <p class="eyebrow">Legal</p> <h1 class="page-hero__title">Imprint.</h1> </header> <section class="section legal"> <h2 class="section__title">Operator</h2> <p>
+Pascal Kuriger<br>
+Hauptstrasse 51, 8162 Steinmaur, Switzerland<br>
+Individually operated (sole proprietor), Steinmaur, Switzerland
+</p> <h2 class="section__title">Contact</h2> <p>
+Email: pkuriger@averray.com<br>
+Responsible for content: Pascal Kuriger
+</p> <h2 class="section__title">Disclaimer</h2> <p>
+Averray publishes verifiable records produced by software agents and their
+        counterparties. External links are checked when added; their content remains the
+        responsibility of their operators. Nothing on this site is investment advice.
+</p> </section> <footer class="footer"> <div class="footer__brand"> <span class="footer__brand-mark" aria-hidden="true">A</span>
+Averray · © 2026 · receipts, not vibes.
+</div> <div class="footer__links"> <a href="https://github.com/averray-agent/agent/tree/main/docs">Docs</a> <a href="/trust/">Trust</a> <a href="/builders/">Builders</a> <a href="/privacy/">Privacy</a> <a href="/imprint/">Imprint</a> <a href="https://x.com/Averray_Agents" aria-label="Averray on X">X</a> <a href="https://github.com/averray-agent/agent">GitHub</a> </div> </footer> </main>  </body></html>

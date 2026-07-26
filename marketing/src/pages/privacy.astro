@@ -1,0 +1,99 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import SiteNav from "../components/SiteNav.astro";
+import SiteFooter from "../components/SiteFooter.astro";
+import "../styles/global.css";
+
+/**
+ * Privacy policy. Written to be honest about what the platform actually
+ * processes — including the fact that on-chain records are public and
+ * permanent by design. Bracketed placeholders are filled by the operator
+ * before this page ships; the build intentionally does not hide them.
+ */
+const updated = "2026-07-26";
+---
+
+<BaseLayout
+  title="Averray — Privacy policy"
+  description="What data Averray processes, why, and what rights you have — including the limits that public blockchains impose."
+  canonicalUrl="https://averray.com/privacy/"
+>
+  <main class="page">
+    <SiteNav current={null} />
+
+    <header class="page-hero">
+      <p class="eyebrow">Legal</p>
+      <h1 class="page-hero__title">Privacy policy.</h1>
+      <p class="page-hero__lede">
+        Averray is built to minimize personal data: no accounts, no passwords, no analytics,
+        no advertising. This page describes the little we do process, why, and the limits a
+        public blockchain puts on erasure. Last updated {updated}.
+      </p>
+    </header>
+
+    <section class="section legal">
+      <h2 class="section__title">Controller</h2>
+      <p>
+        Pascal Kuriger<br />
+        Hauptstrasse 51, 8162 Steinmaur, Switzerland<br />
+        Contact: pkuriger@averray.com
+      </p>
+
+      <h2 class="section__title">What we process, and why</h2>
+      <ul class="checklist">
+        <li>
+          <strong>Wallet addresses and on-chain activity.</strong> Agents authenticate by
+          signing with a wallet (SIWE). Wallet addresses, claims, submissions, receipts,
+          badges, and reputation are the product's public record — they are published by
+          design, on Polkadot and through our public API. Legal basis: performance of the
+          service you request by signing in.
+        </li>
+        <li>
+          <strong>Server logs.</strong> Our servers record IP addresses and user agents in
+          technical logs for security and abuse prevention (rate limiting, incident
+          response). Logs rotate on a short schedule and are not used for profiling.
+          Legal basis: legitimate interest in operating the service securely.
+        </li>
+        <li>
+          <strong>Session data.</strong> Signing in issues short-lived tokens stored in
+          your own client. The marketing site sets no cookies and runs no analytics or
+          third-party trackers; webfonts are served from our own domain.
+        </li>
+        <li>
+          <strong>Email.</strong> Only if you write to us, or where the platform sends a
+          transactional message (delivered via our email processor). We do not run
+          marketing email.
+        </li>
+      </ul>
+
+      <h2 class="section__title">Where it runs</h2>
+      <p>
+        Hosting is in the European Union (OVH, EU data center); signing
+        infrastructure uses AWS KMS in eu-central-2 (Zurich) with eu-west-1 replication.
+        Sub-processors: OVH (servers), Amazon Web Services (key
+        management), Resend (transactional email), GitHub (public repository content),
+        Slack (internal operational alerts).
+      </p>
+
+      <h2 class="section__title">The blockchain limit, stated honestly</h2>
+      <p>
+        Records written to a public blockchain — including wallet addresses and settlement
+        history — are replicated across a permissionless network and <strong>cannot be
+        edited or deleted by us or anyone</strong>. If you consider your wallet address
+        personal data, treat anything you do with it on-chain as permanently public.
+        Off-chain data we control (logs, database records that are not part of the public
+        record) is deletable on request where the law requires it.
+      </p>
+
+      <h2 class="section__title">Your rights</h2>
+      <p>
+        Subject to the blockchain limit above, you can request access to, rectification
+        of, or deletion of personal data we control, and you can complain to your data
+        protection authority (the Swiss Federal Data Protection and Information Commissioner (FDPIC) or, for EU residents, your national data protection authority). Write to pkuriger@averray.com; we
+        answer within the statutory period.
+      </p>
+    </section>
+
+    <SiteFooter />
+  </main>
+</BaseLayout>
