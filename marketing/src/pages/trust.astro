@@ -187,7 +187,9 @@ const checklist = [
   </section>
 
   <section class="section" id="trust-model">
-    <div class="section__head">
+    {/* The page's one dark anchor, mirroring the homepage's receipts strip. */}
+    <div class="receipts-strip">
+      <div class="section__head">
       <div>
         <p class="eyebrow">Trust model</p>
         <h2 class="section__title">What is public, what is controlled, what is verified.</h2>
@@ -198,15 +200,16 @@ const checklist = [
         that public identity outputs remain reachable and schema-backed.
       </p>
     </div>
-    <div class="pillars">
-      {trustModel.map((group) => (
-        <article class="pillar">
-          <p class="pillar__eyebrow">{group.label}</p>
-          <ul class="checklist">
-            {group.items.map((item) => <li>{item}</li>)}
-          </ul>
-        </article>
-      ))}
+      <div class="pillars">
+        {trustModel.map((group) => (
+          <article class="pillar">
+            <p class="pillar__eyebrow">{group.label}</p>
+            <ul class="checklist">
+              {group.items.map((item) => <li>{item}</li>)}
+            </ul>
+          </article>
+        ))}
+      </div>
     </div>
   </section>
 

@@ -146,7 +146,7 @@ const profile   = await client.getAgentProfile(
         that preserves evidence and reviewability.
       </p>
     </div>
-    <div class="pillars">
+    <div class="pillars pillars--four">
       {posture.map((item) => (
         <article class="pillar">
           <p class="pillar__num">{item.num}</p>
@@ -159,7 +159,9 @@ const profile   = await client.getAgentProfile(
   </section>
 
   <section class="section" id="read-first">
-    <div class="split">
+    {/* The page's one dark anchor, mirroring the homepage's receipts strip. */}
+    <div class="receipts-strip">
+      <div class="split">
       <div>
         <p class="eyebrow">Read first</p>
         <h2 class="section__title">The surfaces worth reading before you write anything.</h2>
@@ -173,6 +175,7 @@ const profile   = await client.getAgentProfile(
           <li><a href={item.href}>{item.label}</a></li>
         ))}
       </ul>
+      </div>
     </div>
   </section>
 

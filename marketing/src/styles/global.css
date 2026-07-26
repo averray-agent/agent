@@ -1325,3 +1325,105 @@ section.section { scroll-margin-top: 100px; }
   align-items: center;
   min-height: 24px;
 }
+
+/* ==========================================
+   9. CROSS-PAGE RHYTHM (topic pages)
+   The homepage alternates cream sections with dark contained panels; the
+   topic pages shipped as flat cream from top to bottom, which made following
+   a nav link feel like landing on a different product. These rules give the
+   topic pages the same rhythm without new components: a full-bleed backdrop
+   band for the sticky nav, balanced grids for four- and two-card sections,
+   a dark-panel context for one anchor section per page, and a two-column
+   hero that fills the dead right half above the fold.
+   ========================================== */
+
+/* Sticky-nav backdrop: scrolled content used to pass visibly through the
+   16px gap above the pill and around its rounded corners, beheading section
+   titles mid-scroll. A page-colored band behind the pill gives content a
+   clean edge to pass under; the bottom fade keeps it from reading as a
+   separate app bar. */
+.nav::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  top: -16px;
+  width: 100vw;
+  height: calc(100% + 28px);
+  background: linear-gradient(180deg, var(--avy-bg) 0%, var(--avy-bg) 76%, transparent 100%);
+  z-index: -1;
+  pointer-events: none;
+}
+
+/* Four cards render as 3 + 1 orphan in the default three-column pillars
+   grid; a 2x2 keeps the row balanced at every width. */
+.pillars--four { grid-template-columns: repeat(2, 1fr); }
+@media (max-width: 560px) { .pillars--four { grid-template-columns: 1fr; } }
+
+/* Two cards in the three-column audiences grid leave a third-column void. */
+.audiences--two { grid-template-columns: repeat(2, 1fr); }
+@media (max-width: 860px) { .audiences--two { grid-template-columns: 1fr; } }
+
+/* Dark-panel context: the homepage's receipts strip, reused as the one dark
+   anchor section each topic page gets. These overrides recolor the shared
+   section vocabulary for a dark background. */
+.receipts-strip .section__title { color: #f5f3ee; }
+.receipts-strip .section__aside { color: rgba(245, 243, 238, 0.68); }
+.receipts-strip .pillar {
+  background: rgba(245, 243, 238, 0.04);
+  border-color: rgba(245, 243, 238, 0.12);
+  box-shadow: none;
+}
+.receipts-strip .pillar:hover {
+  border-color: rgba(155, 215, 181, 0.36);
+  box-shadow: none;
+}
+.receipts-strip .pillar__title { color: #f5f3ee; }
+.receipts-strip .pillar__body { color: rgba(245, 243, 238, 0.62); }
+.receipts-strip .pillar__eyebrow { color: #9bd7b5; }
+.receipts-strip .checklist li { color: rgba(245, 243, 238, 0.72); }
+.receipts-strip .checklist li strong,
+.receipts-strip .checklist li code { color: #f5f3ee; }
+.receipts-strip .link-row a { color: #9bd7b5; }
+.receipts-strip .link-row a:hover { color: #c9ecd9; }
+.receipts-strip .endpoint-list li,
+.receipts-strip .endpoint-list a { color: rgba(245, 243, 238, 0.72); }
+.receipts-strip .endpoint-list a:hover { color: #9bd7b5; }
+.receipts-strip .codeblock {
+  background: rgba(2, 6, 4, 0.55);
+  border-color: rgba(245, 243, 238, 0.14);
+}
+.receipts-strip .aud {
+  background: rgba(245, 243, 238, 0.04);
+  border-color: rgba(245, 243, 238, 0.12);
+}
+.receipts-strip .aud__who { color: #f5f3ee; }
+.receipts-strip .aud__claim { color: rgba(245, 243, 238, 0.62); }
+
+/* Topic-page hero: title/lede/CTAs on the left, the facts stacked as a
+   right rail, so the half-viewport of dead space above the fold closes.
+   Below 1080px the rail returns to the original full-width strip. */
+.hero-band {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 36px;
+  align-items: start;
+}
+.hero-band .proof-dock {
+  margin-top: 52px;
+  grid-template-columns: 1fr;
+}
+@media (max-width: 1080px) {
+  .hero-band { grid-template-columns: 1fr; gap: 0; }
+  .hero-band .proof-dock { margin-top: 28px; grid-template-columns: repeat(4, 1fr); }
+}
+@media (max-width: 960px) {
+  .hero-band .proof-dock { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 560px) {
+  .hero-band .proof-dock { grid-template-columns: 1fr; }
+}
+
+/* The starter prompt is prose-shaped; wrapping beats a horizontal scrollbar
+   inside the dark anchor panel. */
+.receipts-strip .codeblock { white-space: pre-wrap; }

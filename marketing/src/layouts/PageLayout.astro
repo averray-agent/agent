@@ -6,11 +6,13 @@ import SiteFooter from "../components/SiteFooter.astro";
 /**
  * Shell for the four topic pages.
  *
- * The hero is deliberately single-column rather than the old two-column
- * split: that layout paired a five-line h1 with a short card stack, leaving a
- * large dead area under the cards on every one of these pages. Here the
- * heading is constrained by measure and the supporting facts sit in a strip
- * beneath it, which fills the width evenly at any viewport.
+ * The hero pairs the measure-constrained heading with the facts as a
+ * full-height right rail at desktop widths. The original two-column split
+ * failed because a five-line h1 sat beside a short card stack, leaving a
+ * dead area under the cards; the interim single-column fix traded that for
+ * an empty right half above the fold. The rail avoids both: four stacked
+ * facts run the full hero height, and below 1080px they collapse back to
+ * the horizontal strip.
  */
 interface Props {
   title: string;
@@ -31,25 +33,32 @@ const { title, description, canonicalUrl, current, eyebrow, heading, lede, facts
   <main class="page">
     <SiteNav current={current} />
 
-    <header class="page-hero">
-      <p class="eyebrow">{eyebrow}</p>
-      <h1 class="page-hero__title">{heading}</h1>
-      <p class="page-hero__lede">{lede}</p>
-      <div class="page-hero__ctas">
-        <slot name="hero-ctas" />
-      </div>
-    </header>
+    {/* Hero and facts share a band: title/lede/CTAs left, facts as a right
+        rail at desktop widths. The old single-column hero left the right
+        half of the viewport empty above the fold on every topic page; the
+        rail fills it with the same facts that previously sat in a strip
+        below (which is what they collapse back to under 1080px). */}
+    <div class="hero-band">
+      <header class="page-hero">
+        <p class="eyebrow">{eyebrow}</p>
+        <h1 class="page-hero__title">{heading}</h1>
+        <p class="page-hero__lede">{lede}</p>
+        <div class="page-hero__ctas">
+          <slot name="hero-ctas" />
+        </div>
+      </header>
 
-    {facts.length > 0 && (
-      <section class="proof-dock" aria-label={`${eyebrow} at a glance`}>
-        {facts.map((fact) => (
-          <div class="proof proof--static">
-            <span class="proof__label">{fact.label}</span>
-            <span class="proof__endpoint proof__endpoint--plain">{fact.value}</span>
-          </div>
-        ))}
-      </section>
-    )}
+      {facts.length > 0 && (
+        <section class="proof-dock" aria-label={`${eyebrow} at a glance`}>
+          {facts.map((fact) => (
+            <div class="proof proof--static">
+              <span class="proof__label">{fact.label}</span>
+              <span class="proof__endpoint proof__endpoint--plain">{fact.value}</span>
+            </div>
+          ))}
+        </section>
+      )}
+    </div>
 
     <slot />
 

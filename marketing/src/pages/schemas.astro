@@ -110,13 +110,15 @@ const badgeAssets = [
   </section>
 
   <section class="section" id="documents">
-    <div class="section__head">
-      <div>
-        <p class="eyebrow">The documents</p>
-        <h2 class="section__title">Two schemas, one identity story.</h2>
+    {/* The page's one dark anchor, mirroring the homepage's receipts strip. */}
+    <div class="receipts-strip">
+      <div class="section__head">
+        <div>
+          <p class="eyebrow">The documents</p>
+          <h2 class="section__title">Two schemas, one identity story.</h2>
+        </div>
       </div>
-    </div>
-    <div class="audiences">
+      <div class="audiences audiences--two">
       {documents.map((doc) => (
         <article class="aud">
           <p class="pillar__eyebrow">{doc.label}</p>
@@ -127,6 +129,7 @@ const badgeAssets = [
           </div>
         </article>
       ))}
+      </div>
     </div>
   </section>
 
