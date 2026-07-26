@@ -1440,3 +1440,10 @@ section.section { scroll-margin-top: 100px; }
 /* The starter prompt is prose-shaped; wrapping beats a horizontal scrollbar
    inside the dark anchor panel. */
 .receipts-strip .codeblock { white-space: pre-wrap; }
+
+/* Legal pages: plain readable prose on the shared vocabulary. */
+.legal { max-width: 72ch; }
+.legal .section__title { margin-top: 40px; font-size: 22px; }
+.legal p { font-family: var(--font-body); font-size: 15.5px; line-height: 1.65; color: var(--avy-muted); }
+.legal p strong { color: var(--avy-ink); }
+.legal .checklist li { font-size: 15.5px; line-height: 1.6; }

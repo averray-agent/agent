@@ -23,6 +23,8 @@ const generatedNestedFiles = [
   "builders/index.html",
   "schemas/index.html",
   "trust/index.html",
+  "privacy/index.html",
+  "imprint/index.html",
 ];
 
 async function ensureDistExists() {
