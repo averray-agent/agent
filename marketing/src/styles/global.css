@@ -1355,9 +1355,13 @@ section.section { scroll-margin-top: 100px; }
      color shows a seam at some viewport. The translucent wash + blur sample
      the real background, and the mask fades wash and blur together so
      passing text dissolves instead of being cut mid-glyph. */
-  background: rgba(246, 241, 232, 0.82);
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
+  /* The wash must stay light: at 0.82 it read as a solid bar and the blur
+     had nothing visible to show through it. The pill carries its own
+     background, so the band only softens the pass-under zone -- content
+     below should stay clearly visible, just blurred. */
+  background: rgba(246, 241, 232, 0.42);
+  -webkit-backdrop-filter: blur(14px) saturate(1.05);
+  backdrop-filter: blur(14px) saturate(1.05);
   -webkit-mask-image: linear-gradient(180deg, black 55%, transparent 100%);
   mask-image: linear-gradient(180deg, black 55%, transparent 100%);
   z-index: -1;
