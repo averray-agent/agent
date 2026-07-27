@@ -36,6 +36,7 @@ function makeHarness(overrides = {}) {
         return { ok: true, backend: "blockchain", enabled: false, mode: "disabled" };
       }
     },
+    getRewardBankHealth: overrides.getRewardBankHealth,
     indexerHealthProbe: overrides.indexerHealthProbe ?? (async () => {
       calls.push(["indexerHealth"]);
       return { ok: false, reason: "indexer_status_unconfigured" };
@@ -137,6 +138,33 @@ test("GET /health reports service liveness separately from disabled capabilities
     "indexerHealth",
     "respond"
   ]);
+});
+
+test("GET /health reuses the injected reward-bank provider", async () => {
+  let sharedReads = 0;
+  const { response, route } = makeHarness({
+    getRewardBankHealth: async () => {
+      sharedReads += 1;
+      return {
+        asset: "USDC",
+        decimals: 6,
+        liquid: 23.9,
+        liquidRaw: "23900000",
+        readable: true,
+        asOf: "2026-07-27T12:00:00.000Z",
+        source: "agent_account_position"
+      };
+    }
+  });
+
+  await route({
+    request: { method: "GET", headers: {} },
+    response,
+    pathname: "/health"
+  });
+
+  assert.equal(sharedReads, 1);
+  assert.equal(response.body.rewardBank.liquidRaw, "23900000");
 });
 
 test("GET /health earns synced indexer status only from a fresh checkpoint", async () => {

@@ -431,6 +431,28 @@ test("listJobsWithSessions joins active session state onto job rows", async () =
   assert.equal(after[0].claimExpiresAt, new Date(Date.parse(session.claimedAt) + 3600 * 1000).toISOString());
 });
 
+test("listJobsWithSessions reuses one reward-bank reading for lazy-funded catalog jobs", async () => {
+  let reads = 0;
+  const service = makePlatformService({ isEnabled: () => true });
+  service.setRewardBankHealthProvider(async () => {
+    reads += 1;
+    return {
+      asset: "DOT",
+      decimals: 18,
+      liquidRaw: "4000000000000000000",
+      readable: true,
+      asOf: "2026-07-27T12:00:00.000Z"
+    };
+  });
+
+  const rows = await service.listJobsWithSessions();
+
+  assert.equal(reads, 1);
+  assert.equal(rows[0].claimable, false);
+  assert.equal(rows[0].reason, "reward_funding_pending");
+  assert.equal(rows[0].fundingState, "pending");
+});
+
 test("listJobsWithSessions and definition expose expired claim affordances", async () => {
   const service = makePlatformService();
   const session = await service.claimJob(WALLET, "parent-job-001", "http", "expired-claim-test");

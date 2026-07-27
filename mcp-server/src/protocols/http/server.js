@@ -60,6 +60,7 @@ import { createUsdcLiquidityStatusService } from "../../services/usdc-liquidity-
 
 const {
   platformService: service,
+  rewardBankHealthProvider,
   policyService,
   verifierService,
   stateStore,
@@ -626,6 +627,7 @@ const handlePaymentRoute = createPaymentRoutes({
 const handleOperationalRoute = createOperationalRoutes({
   authConfig,
   gateway,
+  getRewardBankHealth: rewardBankHealthProvider,
   indexerHealthProbe,
   metrics,
   metricsAuthRequired,

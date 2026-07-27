@@ -90,11 +90,90 @@ test("ingestion-prefund funded job behaves exactly like a normal open job", () =
   assert.equal(status.effectiveState, "claimable");
 });
 
-test("a job with no funding field is unaffected by the gate (no regression)", () => {
+test("a job with no funding field stays claimable when no chain reward-bank signal is configured", () => {
   const status = summarizeJobClaimState({ job: OPEN_JOB, wallet: WALLET });
   assert.equal(status.claimable, true);
   assert.equal(status.reason, "claimable");
   assert.equal(status.fundingState, undefined);
+});
+
+test("lazy-funded mainnet job is not advertised claimable when the reward bank is below its reward", () => {
+  const status = summarizeJobClaimState({
+    job: { ...OPEN_JOB, rewardAsset: "USDC", rewardAmount: 0.25 },
+    wallet: WALLET,
+    rewardBank: {
+      asset: "USDC",
+      decimals: 6,
+      liquidRaw: "200000",
+      readable: true,
+      asOf: "2026-07-27T12:00:00.000Z"
+    }
+  });
+  assert.equal(status.claimable, false);
+  assert.equal(status.currentWalletCanClaim, false);
+  assert.equal(status.reason, "reward_funding_pending");
+  assert.notEqual(status.effectiveState, "claimable");
+});
+
+test("lazy-funded mainnet job remains claimable when the reward bank covers reward and reserves", () => {
+  const status = summarizeJobClaimState({
+    job: {
+      ...OPEN_JOB,
+      rewardAsset: "USDC",
+      rewardAmount: 0.25,
+      opsReserve: 0.05,
+      contingencyReserve: 0.1
+    },
+    wallet: WALLET,
+    rewardBank: {
+      asset: "USDC",
+      decimals: 6,
+      liquidRaw: "400000",
+      readable: true,
+      asOf: "2026-07-27T12:00:00.000Z"
+    }
+  });
+  assert.equal(status.claimable, true);
+  assert.equal(status.currentWalletCanClaim, true);
+  assert.equal(status.reason, "claimable");
+  assert.equal(status.fundingState, undefined);
+});
+
+test("lazy-funded mainnet job reports unverified when reward-bank evidence is stale", () => {
+  const status = summarizeJobClaimState({
+    job: { ...OPEN_JOB, rewardAsset: "USDC", rewardAmount: 0.25 },
+    wallet: WALLET,
+    rewardBank: {
+      asset: "USDC",
+      decimals: 6,
+      liquidRaw: "23900000",
+      readable: true,
+      stale: true,
+      asOf: "2026-07-27T11:00:00.000Z"
+    }
+  });
+  assert.equal(status.claimable, false);
+  assert.equal(status.currentWalletCanClaim, false);
+  assert.equal(status.reason, "reward_funding_unverified");
+  assert.equal(status.fundingState, "unverified");
+});
+
+test("lazy-funded mainnet job reports unverified when the reward bank is unreadable", () => {
+  const status = summarizeJobClaimState({
+    job: { ...OPEN_JOB, rewardAsset: "USDC", rewardAmount: 0.25 },
+    wallet: WALLET,
+    rewardBank: {
+      asset: "USDC",
+      decimals: 6,
+      liquidRaw: null,
+      readable: false,
+      asOf: "2026-07-27T12:00:00.000Z",
+      error: "position_unreadable"
+    }
+  });
+  assert.equal(status.claimable, false);
+  assert.equal(status.reason, "reward_funding_unverified");
+  assert.equal(status.fundingState, "unverified");
 });
 
 test("the gate is scoped to ingestion_prefund — recurring reserve jobs stay claimable", () => {

@@ -35,6 +35,7 @@ export function resolveMetricsAuthConfig(env = process.env) {
 export function createOperationalRoutes({
   authConfig,
   gateway,
+  getRewardBankHealth,
   indexerHealthProbe,
   metrics,
   metricsAuthRequired,
@@ -47,6 +48,7 @@ export function createOperationalRoutes({
 }) {
   const getProductHealthSnapshot = createProductHealthSnapshotProvider({
     gateway,
+    getRewardBankHealth,
     stateStore
   });
 

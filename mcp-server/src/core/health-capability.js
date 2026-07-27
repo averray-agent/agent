@@ -66,6 +66,8 @@ export const GAS_SPONSOR_STATUS = Object.freeze({
 });
 
 const DEFAULT_PRODUCT_HEALTH_CACHE_MS = 60_000;
+const DEFAULT_REWARD_BANK_REFRESH_MS = 15_000;
+const DEFAULT_REWARD_BANK_MAX_AGE_MS = 60_000;
 const DEFAULT_SETTLEMENT_SESSION_LIMIT = 1_000;
 const DEFAULT_SETTLEMENT_STUCK_AFTER_MS = 30 * 60 * 1000;
 const DEFAULT_REWARD_BANK_DECIMALS = 6;
@@ -279,6 +281,7 @@ export function createProductHealthSnapshotProvider({
   stateStore,
   env = process.env,
   deploymentManifest = undefined,
+  getRewardBankHealth = undefined,
   now = () => new Date(),
   cacheMs = DEFAULT_PRODUCT_HEALTH_CACHE_MS,
   settlementSessionLimit = DEFAULT_SETTLEMENT_SESSION_LIMIT,
@@ -286,6 +289,12 @@ export function createProductHealthSnapshotProvider({
 } = {}) {
   let cached;
   let refreshPromise;
+  const rewardBankHealthProvider = getRewardBankHealth ?? createRewardBankHealthProvider({
+    gateway,
+    env,
+    deploymentManifest,
+    now
+  });
 
   return async function getProductHealthSnapshot() {
     const currentTime = now();
@@ -302,6 +311,7 @@ export function createProductHealthSnapshotProvider({
       stateStore,
       env,
       deploymentManifest,
+      getRewardBankHealth: rewardBankHealthProvider,
       now: currentTime,
       settlementSessionLimit,
       settlementStuckAfterMs
@@ -326,6 +336,7 @@ export async function buildProductHealthSnapshot({
   stateStore,
   env = process.env,
   deploymentManifest = undefined,
+  getRewardBankHealth = undefined,
   now = new Date(),
   settlementSessionLimit = DEFAULT_SETTLEMENT_SESSION_LIMIT,
   settlementStuckAfterMs = DEFAULT_SETTLEMENT_STUCK_AFTER_MS
@@ -333,7 +344,9 @@ export async function buildProductHealthSnapshot({
   const manifest = deploymentManifest ?? loadTestnetDeploymentManifest();
   const addresses = resolveHealthAddresses({ deploymentManifest: manifest, env });
   const [rewardBank, settlement] = await Promise.all([
-    resolveRewardBankHealth({ gateway, addresses, now }),
+    getRewardBankHealth
+      ? getRewardBankHealth()
+      : resolveRewardBankHealth({ gateway, addresses, now }),
     resolveSettlementHealth({
       stateStore,
       now,
@@ -346,6 +359,85 @@ export async function buildProductHealthSnapshot({
     addresses,
     rewardBank,
     settlement
+  };
+}
+
+/**
+ * Shared reward-bank reader for /health and public claimability.
+ *
+ * The refresh window coalesces catalog reads into one chain request. A failed
+ * refresh may reuse a last-known-good reading only while that reading remains
+ * inside maxAgeMs; once it ages out, callers receive an explicit stale,
+ * unreadable result and must stop advertising funding as verified.
+ */
+export function createRewardBankHealthProvider({
+  gateway,
+  env = process.env,
+  deploymentManifest = undefined,
+  now = () => new Date(),
+  refreshMs = DEFAULT_REWARD_BANK_REFRESH_MS,
+  maxAgeMs = DEFAULT_REWARD_BANK_MAX_AGE_MS
+} = {}) {
+  const manifest = deploymentManifest ?? loadTestnetDeploymentManifest();
+  const addresses = resolveHealthAddresses({ deploymentManifest: manifest, env });
+  let cached;
+  let lastKnownGood;
+  let refreshPromise;
+
+  return async function getRewardBankHealth() {
+    const currentTime = now();
+    const nowMs = currentTime.getTime();
+    if (
+      cached
+      && cached.expiresAtMs > nowMs
+      && rewardBankReadingAgeMs(cached.value, nowMs) <= Math.max(0, maxAgeMs)
+    ) {
+      return cached.value;
+    }
+    if (refreshPromise) {
+      return refreshPromise;
+    }
+
+    refreshPromise = resolveRewardBankHealth({ gateway, addresses, now: currentTime })
+      .then((reading) => {
+        let value = reading;
+        if (reading.readable === true) {
+          lastKnownGood = reading;
+        } else if (
+          lastKnownGood
+          && rewardBankReadingAgeMs(lastKnownGood, nowMs) <= Math.max(0, maxAgeMs)
+        ) {
+          value = {
+            ...lastKnownGood,
+            fallback: "last_known_good",
+            refreshAttemptedAt: reading.asOf,
+            refreshError: reading.error ?? "read_failed"
+          };
+        } else {
+          value = {
+            ...reading,
+            stale: true,
+            ...(lastKnownGood?.asOf ? { lastKnownGoodAsOf: lastKnownGood.asOf } : {})
+          };
+        }
+
+        const maxCacheExpiryMs = value.readable === true
+          ? nowMs + Math.max(0, maxAgeMs - rewardBankReadingAgeMs(value, nowMs))
+          : Number.POSITIVE_INFINITY;
+        cached = {
+          expiresAtMs: Math.min(
+            nowMs + Math.max(0, refreshMs),
+            maxCacheExpiryMs
+          ),
+          value
+        };
+        return value;
+      })
+      .finally(() => {
+        refreshPromise = undefined;
+      });
+
+    return refreshPromise;
   };
 }
 
@@ -375,7 +467,7 @@ export function resolveHealthAddresses({
   });
 }
 
-async function resolveRewardBankHealth({ gateway, addresses, now }) {
+export async function resolveRewardBankHealth({ gateway, addresses, now }) {
   const asOf = now.toISOString();
   const fallback = {
     liquid: null,
@@ -426,6 +518,13 @@ async function resolveRewardBankHealth({ gateway, addresses, now }) {
       error: error?.code ?? error?.shortMessage ?? error?.message ?? "read_failed"
     };
   }
+}
+
+function rewardBankReadingAgeMs(reading, nowMs) {
+  const asOfMs = Date.parse(reading?.asOf ?? "");
+  return Number.isFinite(asOfMs)
+    ? Math.max(0, nowMs - asOfMs)
+    : Number.POSITIVE_INFINITY;
 }
 
 async function resolveSettlementHealth({ stateStore, now, limit, stuckAfterMs }) {

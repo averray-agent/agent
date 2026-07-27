@@ -94,6 +94,7 @@ export class PlatformService {
     this.bootstrapSelfReportScheduler = undefined;
     this.submittedJobAutoVerifier = undefined;
     this.firstExternalAgentAlert = undefined;
+    this.rewardBankHealthProvider = undefined;
     // Opt-in: pre-fund auto-ingested job rewards on-chain at ingestion time so a
     // job is genuinely funded before it is advertised claimable. Set in bootstrap
     // from INGESTION_PREFUND_ENABLED. Testnet-only is an operational invariant.
@@ -163,9 +164,43 @@ export class PlatformService {
   async listJobsWithSessions(options = {}) {
     const { wallet, currentWallet, now = new Date(), ...catalogOptions } = options;
     const jobs = this.jobCatalogService.listJobs({ ...catalogOptions, now });
+    const rewardBank = jobs.length > 0
+      ? await this.resolveRewardBankHealthForClaimability(now)
+      : undefined;
     return Promise.all(
-      jobs.map((job) => this.attachClaimState(job, { wallet: currentWallet ?? wallet, now }))
+      jobs.map((job) => this.attachClaimState(job, {
+        wallet: currentWallet ?? wallet,
+        rewardBank,
+        now
+      }))
     );
+  }
+
+  setRewardBankHealthProvider(provider) {
+    this.rewardBankHealthProvider = typeof provider === "function" ? provider : undefined;
+  }
+
+  async resolveRewardBankHealthForClaimability(now = new Date()) {
+    if (
+      !this.blockchainGateway?.isEnabled?.()
+      || typeof this.rewardBankHealthProvider !== "function"
+    ) {
+      return undefined;
+    }
+    try {
+      return await this.rewardBankHealthProvider();
+    } catch (error) {
+      return {
+        liquid: null,
+        liquidRaw: null,
+        decimals: 6,
+        asOf: now.toISOString(),
+        readable: false,
+        stale: true,
+        source: "agent_account_position",
+        error: error?.code ?? error?.message ?? "read_failed"
+      };
+    }
   }
 
   createJob(input) {
@@ -776,7 +811,11 @@ export class PlatformService {
     return this.jobExecutionService.resumeSession(sessionId);
   }
 
-  async attachClaimState(job, { wallet = undefined, now = new Date() } = {}) {
+  async attachClaimState(job, options = {}) {
+    const { wallet = undefined, now = new Date() } = options;
+    const rewardBank = Object.hasOwn(options, "rewardBank")
+      ? options.rewardBank
+      : await this.resolveRewardBankHealthForClaimability(now);
     const session = await this.stateStore.findSessionByJobId?.(job.id);
     const refreshedSession = session
       ? await this.jobExecutionService.materializeExpiredClaim(session, job, now)
@@ -789,6 +828,7 @@ export class PlatformService {
       session: refreshedSession,
       sessions,
       wallet,
+      rewardBank,
       now
     });
     return {
