@@ -1,4 +1,5 @@
 import { DEFAULT_ESCROW_ASSET_SYMBOL, decimalsForAssetSymbol, normalizeAssetSymbol } from "./assets.js";
+import { ExternalServiceError } from "./errors.js";
 import { decimalToBaseUnits, formatBaseUnits } from "./platform-service-helpers.js";
 
 export const DEFAULT_ONBOARDING_WAIVER_CLAIM_COUNT = 3;
@@ -11,6 +12,148 @@ export const DEFAULT_MIN_CLAIM_FEE_BY_ASSET = {
 
 export function countClaimedSessions(sessions = []) {
   return sessions.filter((session) => session?.claimedAt || session?.status).length;
+}
+
+/**
+ * Resolve the economics claimJobFor will charge if this wallet claims now.
+ *
+ * Both the public preflight projection and the claim path's precompute use this
+ * function. In chain mode it distinguishes an existing escrow (whose contract
+ * preview is authoritative) from an unknown escrow (whose claim-time ensureJob
+ * mutation must be simulated locally without calling a reverting preview).
+ */
+export async function resolveClaimEconomicsDecision({
+  wallet,
+  job,
+  blockchainGateway = undefined,
+  getDefaultClaimStakeBps = async () => 500,
+  getClaimEconomicsConfig = async () => ({}),
+  getLocalPriorClaimCount = async () => 0
+} = {}) {
+  const chainMode = Boolean(blockchainGateway?.isEnabled?.());
+  if (!chainMode) {
+    const [priorClaimCount, claimStakeBps, claimEconomicsConfig] = await Promise.all([
+      getLocalPriorClaimCount(),
+      getDefaultClaimStakeBps(),
+      getClaimEconomicsConfig()
+    ]);
+    return {
+      chainMode: false,
+      contractLayout: undefined,
+      escrowExists: false,
+      source: "local",
+      economics: computeClaimEconomics({
+        rewardAmount: job?.rewardAmount,
+        rewardAsset: job?.rewardAsset,
+        priorClaimCount,
+        onboardingWaiverEligible: Boolean(job?.onboardingWaiverEligible),
+        claimStakeBps,
+        ...claimEconomicsConfig
+      })
+    };
+  }
+
+  requireGatewayMethod(blockchainGateway, "getClaimEconomicsDecisionState");
+  const chainState = await blockchainGateway.getClaimEconomicsDecisionState(job?.id);
+  if (!["current", "legacy"].includes(chainState?.contractLayout)
+    || typeof chainState?.exists !== "boolean") {
+    throw claimEconomicsUnavailable(
+      "Chain claim-economics job state is unavailable.",
+      { jobId: job?.id, field: "claimEconomicsDecisionState" }
+    );
+  }
+  const contractLayout = chainState.contractLayout;
+  const escrowExists = chainState.exists;
+
+  if (contractLayout === "legacy") {
+    const [claimStakeBps, claimEconomicsConfig] = await Promise.all([
+      getDefaultClaimStakeBps(),
+      getClaimEconomicsConfig()
+    ]);
+    return {
+      chainMode: true,
+      contractLayout,
+      escrowExists,
+      source: "legacy_local",
+      economics: computeClaimEconomics({
+        rewardAmount: job?.rewardAmount,
+        rewardAsset: job?.rewardAsset,
+        priorClaimCount: 0,
+        onboardingWaiverEligible: false,
+        claimStakeBps,
+        ...claimEconomicsConfig
+      })
+    };
+  }
+
+  if (escrowExists) {
+    requireGatewayMethod(blockchainGateway, "previewClaimEconomics");
+    if (typeof chainState?.onboardingWaiverEligible !== "boolean") {
+      throw claimEconomicsUnavailable(
+        "On-chain onboarding-waiver eligibility is unavailable for the existing escrow.",
+        { jobId: job?.id, field: "onboardingWaiverEligibleJobs" }
+      );
+    }
+
+    const preview = await blockchainGateway.previewClaimEconomics(wallet, job?.id);
+    if (job?.onboardingWaiverEligible === true && chainState.onboardingWaiverEligible === false) {
+      const config = await getClaimEconomicsConfig({ requireWaiverInputs: true });
+      const onboardingWaiverClaimCount = requireNonNegativeInteger(
+        config?.onboardingWaiverClaimCount,
+        "onboardingWaiverClaimCount",
+        job?.id
+      );
+      const claimNumber = requirePositiveInteger(preview?.claimNumber, "claimNumber", job?.id);
+      return {
+        chainMode: true,
+        contractLayout,
+        escrowExists,
+        source: "contract_preview_adjusted_for_sync",
+        economics: claimNumber <= onboardingWaiverClaimCount
+          ? waiveContractPreview(preview)
+          : preview
+      };
+    }
+
+    return {
+      chainMode: true,
+      contractLayout,
+      escrowExists,
+      source: "contract_preview",
+      economics: preview
+    };
+  }
+
+  requireGatewayMethod(blockchainGateway, "getWorkerClaimCount");
+  const requireWaiverInputs = job?.onboardingWaiverEligible === true;
+  const [priorClaimCount, claimStakeBps, claimEconomicsConfig] = await Promise.all([
+    blockchainGateway.getWorkerClaimCount(wallet),
+    getDefaultClaimStakeBps(),
+    getClaimEconomicsConfig({ requireWaiverInputs })
+  ]);
+  requireNonNegativeInteger(priorClaimCount, "workerClaimCount", job?.id);
+  if (requireWaiverInputs) {
+    requireNonNegativeInteger(
+      claimEconomicsConfig?.onboardingWaiverClaimCount,
+      "onboardingWaiverClaimCount",
+      job?.id
+    );
+  }
+
+  return {
+    chainMode: true,
+    contractLayout,
+    escrowExists,
+    source: "current_local_before_ensure",
+    economics: computeClaimEconomics({
+      rewardAmount: job?.rewardAmount,
+      rewardAsset: job?.rewardAsset,
+      priorClaimCount,
+      onboardingWaiverEligible: Boolean(job?.onboardingWaiverEligible),
+      claimStakeBps,
+      ...claimEconomicsConfig
+    })
+  };
 }
 
 export function computeClaimEconomics({
@@ -108,4 +251,59 @@ function applyBpsFloor(baseUnits, bps) {
 function finiteNumber(value, fallback) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
+}
+
+function waiveContractPreview(preview) {
+  return {
+    ...preview,
+    claimStake: 0,
+    claimStakeRaw: "0",
+    claimStakeBps: 0,
+    claimFee: 0,
+    claimFeeRaw: "0",
+    claimFeeBps: 0,
+    claimEconomicsWaived: true,
+    totalClaimLock: 0
+  };
+}
+
+function requireGatewayMethod(gateway, method) {
+  if (typeof gateway?.[method] !== "function") {
+    throw claimEconomicsUnavailable(
+      `Chain claim-economics dependency ${method} is unavailable.`,
+      { field: method }
+    );
+  }
+}
+
+function requireNonNegativeInteger(value, field, jobId) {
+  if (value === undefined || value === null || value === "" || typeof value === "boolean") {
+    throw claimEconomicsUnavailable(
+      `Chain claim-economics field ${field} is unavailable.`,
+      { jobId, field }
+    );
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    throw claimEconomicsUnavailable(
+      `Chain claim-economics field ${field} is unavailable.`,
+      { jobId, field }
+    );
+  }
+  return parsed;
+}
+
+function requirePositiveInteger(value, field, jobId) {
+  const parsed = requireNonNegativeInteger(value, field, jobId);
+  if (parsed === 0) {
+    throw claimEconomicsUnavailable(
+      `Chain claim-economics field ${field} is unavailable.`,
+      { jobId, field }
+    );
+  }
+  return parsed;
+}
+
+function claimEconomicsUnavailable(message, details) {
+  return new ExternalServiceError(message, "claim_economics_unavailable", details);
 }

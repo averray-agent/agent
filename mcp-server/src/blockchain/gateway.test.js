@@ -580,6 +580,33 @@ test("getClaimEconomicsConfig converts chain min fees back to display units", as
   });
 });
 
+test("getClaimEconomicsConfig surfaces a required onboarding-waiver policy read failure", async () => {
+  const gateway = gatewayWithDot();
+  gateway.policyContract = {
+    async claimFeeBps() {
+      return 200n;
+    },
+    async claimFeeVerifierBps() {
+      return 7000n;
+    },
+    async onboardingWaiverClaimCount() {
+      throw new Error("policy RPC unavailable");
+    },
+    async minClaimFeeByAsset() {
+      return 50_000_000_000_000_000n;
+    }
+  };
+
+  await assert.rejects(
+    () => gateway.getClaimEconomicsConfig({ requireWaiverInputs: true }),
+    (error) => {
+      assert.equal(error.code, "blockchain_unavailable");
+      assert.match(error.message, /policy RPC unavailable/u);
+      return true;
+    }
+  );
+});
+
 test("getWorkerClaimCount reads the escrow contract counter", async () => {
   const gateway = gatewayWithDot();
   gateway.escrowContract = {
@@ -593,6 +620,41 @@ test("getWorkerClaimCount reads the escrow contract counter", async () => {
     await gateway.getWorkerClaimCount("0x3333333333333333333333333333333333333333"),
     4
   );
+});
+
+test("getWorkerClaimCount refuses a missing contract selector instead of fabricating zero", async () => {
+  const gateway = gatewayWithDot();
+  gateway.escrowContract = {};
+
+  await assert.rejects(
+    () => gateway.getWorkerClaimCount("0x3333333333333333333333333333333333333333"),
+    (error) => {
+      assert.equal(error.code, "blockchain_unavailable");
+      assert.match(error.message, /workerClaimCount selector is unavailable/u);
+      return true;
+    }
+  );
+});
+
+test("getClaimEconomicsDecisionState exposes current-layout mapping truth for an existing escrow", async () => {
+  const gateway = gatewayWithDot();
+  gateway.readEscrowJob = async () => ({
+    state: 1,
+    contractLayout: "rc1"
+  });
+  gateway.escrowContract = {
+    async onboardingWaiverEligibleJobs(jobId) {
+      assert.equal(jobId, gateway.toJobId("eligible-job"));
+      return true;
+    }
+  };
+
+  assert.deepEqual(await gateway.getClaimEconomicsDecisionState("eligible-job"), {
+    state: 1,
+    exists: true,
+    contractLayout: "current",
+    onboardingWaiverEligible: true
+  });
 });
 
 test("getTreasuryPolicyStatus surfaces settlement readiness roles", async () => {
