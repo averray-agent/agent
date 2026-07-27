@@ -22,7 +22,7 @@ The unbiased-validation ladder (rungs 2–4 of
 | 1.2 | **Harness worker, rung 2**: implement the money-rail seam per `worker/HANDOFF.md` (#790) — SIWE → claim → host-side clone → invoke worker → PR → validate → submit → settle; run one real mainnet job end-to-end | Codex | open |
 | 1.3 | **Blind-agent test, rung 3**: fresh agent session, zero project context, funded wallet, "earn USDC on averray.com from public info only"; log every stall as an onboarding defect; repeat with ≥2 model families. Protocol to be drafted | Claude | open |
 | 1.4 | **Adversarial agent, rung 4** (week one): garbage submissions, claim-spam through the onboarding waiver, prompt injection inside job content; economics must hold (exposure capped by the reward bank) | Claude + Codex | open |
-| 1.5 | Ops sweep: revoke the 2026-06-13 leaked SA via the 1Password web console; source + verify a second mainnet eth-rpc backup for `PRODUCT_HEALTH_RPC_BACKUPS`; CSP for marketing + operator app (possible now that fonts are self-hosted); add "Generated output guard" to required checks | Pascal | open |
+| 1.5 | Ops sweep: revoke the 2026-06-13 leaked SA via the 1Password web console; source + verify a second mainnet eth-rpc backup for `PRODUCT_HEALTH_RPC_BACKUPS`; CSP for marketing + operator app (possible now that fonts are self-hosted); add "Generated output guard" to required checks; mount the Caddy config directory instead of the single file so future cutovers can use atomic rename without leaving the running container on the old inode | Pascal | open |
 | 1.6 | Film and release the launch video (script is true line-for-line; releases with the cutover) | Pascal | open |
 
 ## Horizon 2 — harden & economize (weeks)

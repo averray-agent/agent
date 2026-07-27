@@ -2,6 +2,28 @@
 
 set -euo pipefail
 
+install_caddy_candidate_in_place() {
+  local candidate_path=$1
+  local caddyfile_path=$2
+
+  # Caddy bind-mounts this single file. Replacing the pathname with mv(1)
+  # changes the host inode while the running container stays attached to the
+  # old inode. Copy into the existing file so the mount sees the new bytes.
+  cp "$candidate_path" "$caddyfile_path"
+}
+
+restore_caddy_backup_in_place() {
+  local backup_path=$1
+  local caddyfile_path=$2
+
+  # Preserve the mounted inode on rollback for the same reason as install.
+  cp -p "$backup_path" "$caddyfile_path"
+}
+
+if [[ "${FLIP_CADDY_NETWORK_LIBRARY_ONLY:-0}" == "1" ]]; then
+  return 0 2>/dev/null || exit 0
+fi
+
 TARGET=${1:-}
 if [[ "$TARGET" != "mainnet" && "$TARGET" != "testnet" ]]; then
   echo "Usage: flip-caddy-network.sh <mainnet|testnet>" >&2
@@ -34,24 +56,37 @@ dir=$(dirname "$CADDYFILE")
 timestamp=$(date -u +"%Y%m%d-%H%M%S")
 candidate=$(mktemp "$dir/.Caddyfile.cutover.XXXXXX")
 backup="$dir/Caddyfile.pre-${TARGET}-${timestamp}"
+container_candidate="/tmp/averray-caddy-cutover-${timestamp}-$$"
 cp -p "$CADDYFILE" "$backup"
-trap 'rm -f "$candidate"' EXIT INT TERM
+
+cleanup() {
+  rm -f "$candidate"
+  docker exec "$CADDY_CONTAINER" rm -f "$container_candidate" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT INT TERM
 
 node "$SCRIPT_DIR/render-caddy-cutover.mjs" "$CADDYFILE" "$candidate" "$TARGET"
 chmod --reference="$CADDYFILE" "$candidate"
 chown --reference="$CADDYFILE" "$candidate"
-mv "$candidate" "$CADDYFILE"
+
+# Validate the complete candidate before touching the mounted live file.
+docker cp "$candidate" "$CADDY_CONTAINER:$container_candidate"
+if ! docker exec "$CADDY_CONTAINER" caddy validate --config "$container_candidate" --adapter caddyfile; then
+  echo "Candidate Caddy configuration failed validation; live configuration unchanged" >&2
+  exit 1
+fi
+docker exec "$CADDY_CONTAINER" rm -f "$container_candidate"
+
+# This copy is intentionally in-place (not atomic) because Caddy bind-mounts a
+# single file. The candidate is already validated above, and `caddy reload`
+# validates again while retaining the old running config on failure.
+install_caddy_candidate_in_place "$candidate" "$CADDYFILE"
 
 rollback() {
-  cp -p "$backup" "$CADDYFILE"
+  restore_caddy_backup_in_place "$backup" "$CADDYFILE"
   docker exec "$CADDY_CONTAINER" caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1 || true
 }
 
-if ! docker exec "$CADDY_CONTAINER" caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile; then
-  rollback
-  echo "Candidate Caddy configuration failed validation; original restored" >&2
-  exit 1
-fi
 if ! docker exec "$CADDY_CONTAINER" caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile; then
   rollback
   echo "Caddy reload failed; original restored" >&2
