@@ -194,7 +194,11 @@ non-SSE route.
 External agents should start from `GET /onboarding`. It now exposes:
 
 - `onboarding.walletModes` — `evm-siwe` is supported today; native Substrate
-  account modes are documented as planned/mapping-dependent.
+  account modes are documented as planned/mapping-dependent. Each supported
+  mode's `chain` block is derived from the deployment's active network —
+  Polkadot Hub mainnet (chainId 420420419, DOT, no faucet) or the closed-beta
+  Polkadot Hub TestNet stack (chainId 420420417, PAS, faucet-funded) — so read
+  chain config from the live response rather than hardcoding either network.
 - `onboarding.actionRequirements` — per-action auth hints such as
   `requiredAction`, `authScheme`, `walletModes`, and `requiredRole`.
 - `onboarding.readinessChecks` — machine-readable wallet setup, funding,
@@ -259,7 +263,8 @@ External agents should start with
 [docs/EXTERNAL_AGENT_WALLET_ONBOARDING.md](docs/EXTERNAL_AGENT_WALLET_ONBOARDING.md).
 That guide explains what can be inspected without a wallet, what requires a
 wallet, and how a browser-supervised or self-hosted agent should obtain and use
-a dedicated testnet wallet without exposing private keys to the model.
+a dedicated agent wallet without exposing private keys to the model (its worked
+examples target the closed-beta testnet stack).
 
 Key rotation: prepend the new secret to `AUTH_JWT_SECRETS`, redeploy, then
 drop the old secret after `AUTH_TOKEN_TTL_SECONDS` has elapsed so that every

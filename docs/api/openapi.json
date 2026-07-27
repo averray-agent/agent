@@ -52,6 +52,8 @@
                 },
                 "examples": {
                   "ok": {
+                    "summary": "Healthy deployment on Polkadot Hub mainnet (chainId 420420419)",
+                    "description": "auth.chainId reports the deployment's active network: 420420419 on Polkadot Hub (mainnet, production), 420420417 on Polkadot Hub TestNet (the closed-beta testnet stack).",
                     "value": {
                       "status": "ok",
                       "serviceHealth": {
@@ -70,7 +72,7 @@
                             "ok": true,
                             "mode": "strict",
                             "domain": "api.averray.com",
-                            "chainId": 420420417
+                            "chainId": 420420419
                           }
                         }
                       },
@@ -84,7 +86,7 @@
                       "auth": {
                         "mode": "strict",
                         "domain": "api.averray.com",
-                        "chainId": 420420417
+                        "chainId": 420420419
                       },
                       "components": {
                         "stateStore": {
@@ -230,8 +232,8 @@
                         "requiredRole": "worker",
                         "category": "api",
                         "tier": "starter",
-                        "rewardAsset": "DOT",
-                        "rewardAmount": 3
+                        "rewardAsset": "USDC",
+                        "rewardAmount": 0.3
                       }
                     ]
                   },
@@ -257,8 +259,8 @@
                           "tier": "starter",
                           "stake": null,
                           "reward": {
-                            "asset": "DOT",
-                            "amount": 3
+                            "asset": "USDC",
+                            "amount": 0.4
                           },
                           "createdAt": "2026-04-28T10:00:00.000Z",
                           "summary": "Review the article and return an editor-ready citation repair proposal.",
@@ -920,7 +922,8 @@
                 "type": "string"
               },
               "chainId": {
-                "type": "integer"
+                "type": "integer",
+                "description": "EVM chain id of the deployment's active network — 420420419 = Polkadot Hub (mainnet), 420420417 = Polkadot Hub TestNet (closed-beta testnet stack). Kept in sync with HUB_NETWORKS in mcp-server/src/core/discovery-manifest.js."
               }
             }
           },
