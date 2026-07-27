@@ -7,6 +7,7 @@
   "required": [
     "schemaVersion",
     "wallet",
+    "synthetic",
     "fetchedAt",
     "reputation",
     "stats",
@@ -23,6 +24,10 @@
     "wallet": {
       "$ref": "#/definitions/address",
       "description": "EVM address this profile describes. Always lowercase."
+    },
+    "synthetic": {
+      "type": "boolean",
+      "description": "True when every observed session for this wallet belongs to a worker-canary-* synthetic regression run. Consumers must not count such a profile as external ecosystem participation."
     },
     "fetchedAt": {
       "type": "string",

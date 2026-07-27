@@ -120,9 +120,10 @@ export class AgentPlatformClient {
     return this.request(`/agents/${encodeURIComponent(wallet)}`);
   }
 
-  async listAgents({ limit = undefined } = {}) {
+  async listAgents({ limit = undefined, includeSynthetic = undefined } = {}) {
     const params = new URLSearchParams();
     if (limit !== undefined) params.set("limit", String(limit));
+    if (includeSynthetic !== undefined) params.set("includeSynthetic", String(includeSynthetic));
     return this.request(`/agents${params.size ? `?${params.toString()}` : ""}`);
   }
 

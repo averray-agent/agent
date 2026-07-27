@@ -73,6 +73,10 @@ import {
   SubmittedJobAutoVerifierService,
   loadSubmittedJobAutoVerifierConfig
 } from "./submitted-job-auto-verifier.js";
+import {
+  FirstExternalAgentAlertService,
+  loadFirstExternalAgentAlertConfig
+} from "./first-external-agent-alert.js";
 import { normaliseStrategyAssetConfig } from "./strategy-asset-config.js";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -412,6 +416,12 @@ export async function createPlatformRuntime() {
       logger
     })
   );
+  const firstExternalAgentAlert = initStep("init-first-external-agent-alert", logger, () =>
+    new FirstExternalAgentAlertService(stateStore, eventBus, {
+      ...loadFirstExternalAgentAlertConfig(process.env),
+      logger
+    })
+  );
   platformService.recurringScheduler = recurringScheduler;
   platformService.githubIssueIngestionScheduler = githubIssueIngestionScheduler;
   platformService.wikipediaMaintenanceIngestionScheduler = wikipediaMaintenanceIngestionScheduler;
@@ -425,6 +435,7 @@ export async function createPlatformRuntime() {
   platformService.bootstrapSelfReportScheduler = bootstrapSelfReportScheduler;
   platformService.jobStaleSweeper = jobStaleSweeper;
   platformService.submittedJobAutoVerifier = submittedJobAutoVerifier;
+  platformService.firstExternalAgentAlert = firstExternalAgentAlert;
   // Opt-in (testnet-only operational invariant): escrow auto-ingested job
   // rewards on-chain at ingestion so they are funded before being advertised
   // claimable. Off by default; see deploy/backend.env.template.
@@ -442,6 +453,7 @@ export async function createPlatformRuntime() {
   bootstrapSelfReportScheduler.start();
   jobStaleSweeper.start();
   submittedJobAutoVerifier.start();
+  firstExternalAgentAlert.start();
 
   const authMiddleware = createAuthMiddleware({ authConfig, stateStore, logger });
   const rateLimiter = createRateLimiter({ stateStore, logger });
@@ -478,6 +490,7 @@ export async function createPlatformRuntime() {
     upstreamStatusPoller,
     jobStaleSweeper,
     submittedJobAutoVerifier,
+    firstExternalAgentAlert,
     authConfig,
     authMiddleware,
     authCapabilities: {

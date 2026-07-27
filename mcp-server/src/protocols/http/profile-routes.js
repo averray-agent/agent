@@ -44,6 +44,7 @@ function buildAgentDirectoryRow(profile) {
     }));
   return {
     wallet: profile.wallet,
+    synthetic: profile.synthetic === true,
     handle: handleForWallet(profile.wallet),
     tier: profileTierToOperatorTier(reputation),
     reputationScore:
@@ -149,8 +150,12 @@ export function createProfileRoutes({
     return (sessionId) => lookup.get(sessionId);
   }
 
-  async function buildAgentDirectory(limit = 50) {
-    const sessions = await service.listRecentSessions(limit);
+  async function buildAgentDirectory(limit = 50, { includeSynthetic = false } = {}) {
+    // Canary runs use one fresh wallet per run and can otherwise crowd real
+    // participants out of the recent-session window. Overscan the bounded
+    // store window before filtering so the public limit applies to real rows.
+    const scanLimit = includeSynthetic ? limit : Math.min(Math.max(limit * 5, limit), 250);
+    const sessions = await service.listRecentSessions(scanLimit);
     const wallets = [...new Set(sessions.map((session) => session.wallet).filter(Boolean))];
     const rows = await Promise.all(wallets.map(async (wallet) => {
       const checksummed = safeChecksum(wallet);
@@ -177,17 +182,23 @@ export function createProfileRoutes({
       });
       return buildAgentDirectoryRow(profile);
     }));
-    return rows.sort((left, right) => {
-      if (right.reputationScore !== left.reputationScore) {
-        return right.reputationScore - left.reputationScore;
-      }
-      return String(left.wallet).localeCompare(String(right.wallet));
-    });
+    return rows
+      .filter((row) => includeSynthetic || row.synthetic !== true)
+      .sort((left, right) => {
+        if (right.reputationScore !== left.reputationScore) {
+          return right.reputationScore - left.reputationScore;
+        }
+        return String(left.wallet).localeCompare(String(right.wallet));
+      })
+      .slice(0, limit);
   }
 
   return async function handleProfileRoute({ request, response, url, pathname, requestLogger }) {
     if (request.method === "GET" && pathname === "/agents") {
-      respond(response, 200, await buildAgentDirectory(parseLimit(url, 50, 250)), {
+      const includeSynthetic = url.searchParams.get("includeSynthetic") === "true";
+      respond(response, 200, await buildAgentDirectory(parseLimit(url, 50, 250), {
+        includeSynthetic
+      }), {
         "cache-control": "public, max-age=30"
       });
       return true;

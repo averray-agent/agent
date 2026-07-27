@@ -90,6 +90,7 @@ export interface JobSchemasResponse extends ApiEnvelope {
 
 export interface AgentProfile extends ApiEnvelope {
   wallet: WalletAddress;
+  synthetic?: boolean;
   handle?: string;
   reputation?: number;
   badges?: ApiEnvelope[];
@@ -848,7 +849,7 @@ export class AgentPlatformClient {
   listJobSchemas(): Promise<JobSchemasResponse>;
   getJobSchema(name: string): Promise<JsonObject>;
   getAgentProfile(wallet: WalletAddress): Promise<AgentProfile>;
-  listAgents(options?: { limit?: number }): Promise<AgentListResponse>;
+  listAgents(options?: { limit?: number; includeSynthetic?: boolean }): Promise<AgentListResponse>;
   getAgentBadge(sessionId: SessionId): Promise<BadgeResponse>;
   listBadges(options?: { limit?: number }): Promise<BadgeResponse[] | ApiEnvelope>;
   listAlerts(options?: { limit?: number }): Promise<AlertListResponse>;

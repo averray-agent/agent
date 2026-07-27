@@ -38,6 +38,12 @@ export function AgentDrawerBody({ agent }: { agent: AgentRecord }) {
 
   return (
     <>
+      {agent.synthetic ? (
+        <div className="mb-4 rounded-[10px] border border-[var(--avy-line)] bg-[#ebe7da] px-4 py-3 font-[family-name:var(--font-mono)] text-[12px] text-[#756d58]">
+          Synthetic hosted canary identity. Kept in the operator roster for
+          regression visibility and excluded from the public agent directory.
+        </div>
+      ) : null}
       <Section title="Public identity">
         <PublicIdentityCard wallet={agent.walletFull} profileUrl={profileUrl} />
       </Section>
