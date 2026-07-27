@@ -19,7 +19,7 @@ export function createSessionRoutes({
 
     if (request.method === "GET" && pathname === "/session") {
       const auth = await authMiddleware(request, url);
-      const sessionId = url.searchParams.get("sessionId") ?? "";
+      const sessionId = url.searchParams.get("sessionId") ?? url.searchParams.get("id") ?? "";
       try {
         const session = await ensureSessionOwnership(sessionId, auth.wallet);
         respond(response, 200, session);

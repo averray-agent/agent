@@ -379,6 +379,7 @@ export class JobCatalogService {
       claimFee: claimEconomics.claimFee,
       claimFeeBps: claimEconomics.claimFeeBps,
       claimEconomicsWaived: claimEconomics.claimEconomicsWaived,
+      claimEconomicsWaiverScope: "next_claim_projection",
       claimNumber: claimEconomics.claimNumber,
       totalClaimLock: claimEconomics.totalClaimLock,
       strategyUnwindNeeded: liquid < claimEconomics.totalClaimLock,

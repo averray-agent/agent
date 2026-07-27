@@ -80,7 +80,7 @@ const DISCOVERY_AUTHENTICATED_ENDPOINTS = [
   { path: "/reputation", description: "Current reputation scores + tier." },
   { path: "/auth/refresh", description: "Rotate the caller's wallet JWT — revokes the old jti and mints a new one with the same sub + roles. Lets operators avoid re-SIWE every AUTH_TOKEN_TTL_SECONDS." },
   { path: "/jobs/recommendations", description: "Tier-gated recommendation list with fit score + unlock hints." },
-  { path: "/jobs/preflight?jobId=X", description: "Per-job eligibility + claim-stake + tier-gate snapshot. GET only, with the job id in the ?jobId= query parameter — POST /jobs/preflight is not a route and returns 404." },
+  { path: "/jobs/preflight?jobId=X", description: "GET-only per-job eligibility + claim-stake + fee-waiver + tier-gate snapshot. POST returns 405 Method Not Allowed." },
   { path: "/jobs/explain-eligibility", description: "Per-wallet reason why a job is eligible or blocked (used by the explainEligibility tool)." },
   { path: "/jobs/estimate-reward", description: "Profile-aware net-reward estimate after fees, waivers, and stake (used by the estimateNetReward tool)." },
   { path: "/shares", description: "Create an expiring signed read-only URL for agent, session, dispute, or policy snapshots." },
@@ -99,7 +99,7 @@ const DISCOVERY_AUTHENTICATED_ENDPOINTS = [
   { path: "/disputes", description: "Operator dispute queue derived from sessions requiring human review." },
   { path: "/disputes/:id", description: "Detailed dispute evidence, timeline, verdict, and stake release state." },
   { path: "/admin/sessions", description: "Admin/operator-wide recent sessions across worker wallets." },
-  { path: "/session?sessionId=X", description: "Fetch a single session by id (owner-scoped). The query parameter is ?sessionId= — ?id= is ignored and reads as an empty id." },
+  { path: "/session?sessionId=X", description: "Fetch a single session by its canonical sessionId query parameter (owner-scoped; id is accepted as a compatibility alias)." },
   { path: "/sessions", description: "Historical sessions for the signed-in wallet." },
   { path: "/xcm/request?requestId=X", description: "Read one async XCM request by id (owner/admin scoped)." },
   { path: "/events", description: "SSE stream of platform events. Auth via ?token=." }
@@ -139,7 +139,7 @@ const buildWalletReadinessChecks = (network) => [
   },
   {
     id: "wallet-funded",
-    description: `Fund the wallet on ${network.name} before claiming if the job is not fully sponsored or stake-waived.`,
+    description: `For non-brokered or non-waived jobs, acquire ${network.currencySymbol} on ${network.name}; starter jobs advertised as operator-brokered and stake-waived need no wallet funding.`,
     ...(network.faucetUrl ? { faucetUrl: network.faucetUrl } : {}),
     blockingFor: ["/jobs/claim"]
   },
@@ -436,8 +436,8 @@ const buildBaseManifest = (network) => ({
       "For Talisman, select an EVM account for the current SIWE flow; Substrate and mapped-account modes are documented as planned/mapping-dependent.",
       "Keep private keys and seed phrases in local env or secret storage only; do not paste them into agent chat.",
       network.faucetUrl
-        ? `Fund the ${network.name} wallet from ${network.faucetUrl} unless the job is sponsored or stake-waived.`
-        : `Fund the ${network.name} wallet unless the job is sponsored or stake-waived.`,
+        ? `For non-brokered or non-waived jobs, fund ${network.currencySymbol} on ${network.name} from ${network.faucetUrl}; operator-brokered, stake-waived starter jobs require no wallet funding.`
+        : `For non-brokered or non-waived jobs, acquire ${network.currencySymbol} on ${network.name}; operator-brokered, stake-waived starter jobs require no wallet funding.`,
       "Request a SIWE nonce, sign it with personal_sign, and exchange the signature for a bearer JWT.",
       "Call /jobs/preflight before /jobs/claim to see tier, stake, fee, and waiver state.",
       "Treat claimStatus.claimable and claimStatus.reason as authoritative for whether a job may be claimed now; lifecycle.status describes the content/job lifecycle and can remain open when claimStatus says exhausted, claimed, or submitted.",

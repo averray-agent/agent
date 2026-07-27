@@ -14,7 +14,7 @@ By default it is a dry run and does not mutate platform state.
 
 ```bash
 node examples/claim-and-submit-job/index.mjs \
-  --job-id starter-coding-001
+  --job-id starter-coding-002
 ```
 
 To execute a schema-native job, provide a SIWE bearer token and the exact
@@ -22,8 +22,8 @@ structured object shown in `/jobs/definition.submissionContract`:
 
 ```bash
 AVERRAY_TOKEN="$TOKEN" node examples/claim-and-submit-job/index.mjs \
-  --job-id starter-coding-001 \
-  --idempotency-key starter-coding-001-first-try \
+  --job-id starter-coding-002 \
+  --idempotency-key starter-coding-002-first-try \
   --submission-json '{"summary":"Complete","output":"complete verified output","status":"complete"}' \
   --execute
 ```

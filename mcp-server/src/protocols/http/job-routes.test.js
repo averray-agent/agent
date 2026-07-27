@@ -194,6 +194,19 @@ test("authenticated job advisory routes call platform service with wallet and jo
   ]);
 });
 
+test("POST /jobs/preflight returns 405 with the documented GET contract", async () => {
+  const { calls, response, route } = makeHarness();
+
+  assert.equal(await invoke(route, { method: "POST", path: "/jobs/preflight", response }), true);
+  assert.equal(response.statusCode, 405);
+  assert.equal(response.headers.allow, "GET");
+  assert.deepEqual(response.body, {
+    error: "method_not_allowed",
+    message: "Use GET /jobs/preflight?jobId=X."
+  });
+  assert.deepEqual(calls.filter(([name]) => name !== "respond"), []);
+});
+
 test("GET /jobs/explain-eligibility rejects missing jobId before service call", async () => {
   const { calls, route } = makeHarness();
 

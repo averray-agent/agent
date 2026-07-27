@@ -2080,17 +2080,31 @@ test("http smoke: production /metrics fails closed when token is missing", { ski
 
 test("http smoke: discovery manifest is served at both /agent-tools.json and the RFC 8615 .well-known path", { skip: !RUN }, async () => {
   await runWithServer(async (base) => {
-    const [canonical, wellKnown] = await Promise.all([
+    const [canonical, wellKnown, healthResponse] = await Promise.all([
       fetch(`${base}/agent-tools.json`),
-      fetch(`${base}/.well-known/agent-tools.json`)
+      fetch(`${base}/.well-known/agent-tools.json`),
+      fetch(`${base}/health`)
     ]);
     assert.equal(canonical.status, 200);
     assert.equal(wellKnown.status, 200);
+    assert.equal(healthResponse.status, 200);
     assert.match(canonical.headers.get("content-type") ?? "", /application\/json/);
     assert.match(wellKnown.headers.get("content-type") ?? "", /application\/json/);
-    const [canonicalBody, wellKnownBody] = await Promise.all([canonical.json(), wellKnown.json()]);
+    const [canonicalBody, wellKnownBody, health] = await Promise.all([
+      canonical.json(),
+      wellKnown.json(),
+      healthResponse.json()
+    ]);
     assert.deepEqual(canonicalBody, wellKnownBody, "well-known alias must return the same manifest");
     assert.equal(typeof canonicalBody.name, "string");
     assert.ok(Array.isArray(canonicalBody.protocols));
+    const advertisedChains = canonicalBody.onboarding.walletModes
+      .filter((mode) => mode.chain)
+      .map((mode) => mode.chain.chainId);
+    assert.ok(advertisedChains.length > 0);
+    assert.ok(
+      advertisedChains.every((chainId) => chainId === health.auth.chainId),
+      "served manifest wallet chains must match /health.auth.chainId"
+    );
   });
 });

@@ -142,7 +142,13 @@ test("GET /reputation authenticates and returns wallet reputation", async () => 
 
   assert.equal(handled, true);
   assert.equal(response.statusCode, 200);
-  assert.deepEqual(response.body, { skill: 220, reliability: 30, economic: 10, tier: "pro" });
+  assert.deepEqual(response.body, {
+    skill: 220,
+    reliability: 30,
+    economic: 10,
+    tier: "expert",
+    jobEligibilityTier: "pro"
+  });
   assert.deepEqual(calls.slice(0, 2), [
     ["auth"],
     ["getReputation", WALLET]
