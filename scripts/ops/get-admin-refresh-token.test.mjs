@@ -11,6 +11,7 @@ import {
 
 test("getAdminRefreshToken exchanges refresh cookie and persists the rotated cookie", async () => {
   const calls = [];
+  let persisted = "refresh-old";
   const result = await getAdminRefreshToken({
     env: {
       API_BASE_URL: "https://api.example.test",
@@ -18,10 +19,11 @@ test("getAdminRefreshToken exchanges refresh cookie and persists the rotated coo
     },
     async readSecretImpl(ref) {
       calls.push(["read", ref]);
-      return "refresh-old";
+      return persisted;
     },
     async writeSecretImpl(ref, value) {
       calls.push(["write", ref, value]);
+      persisted = value;
     },
     async fetchImpl(url, options) {
       calls.push(["fetch", url, options.headers.cookie]);
@@ -48,12 +50,15 @@ test("getAdminRefreshToken exchanges refresh cookie and persists the rotated coo
   assert.equal(result.rotatedRefreshTokenPersisted, true);
   assert.deepEqual(calls, [
     ["read", "op://prod-smoke/admin-refresh-token/password"],
+    ["write", "op://prod-smoke/admin-refresh-token/password", "refresh-old"],
+    ["read", "op://prod-smoke/admin-refresh-token/password"],
     ["fetch", "https://api.example.test/auth/refresh", "refresh_token=refresh-old"],
-    ["write", "op://prod-smoke/admin-refresh-token/password", "refresh-new"]
+    ["write", "op://prod-smoke/admin-refresh-token/password", "refresh-new"],
+    ["read", "op://prod-smoke/admin-refresh-token/password"]
   ]);
 });
 
-test("getAdminRefreshToken surfaces refresh replay detection without writing a token", async () => {
+test("getAdminRefreshToken surfaces refresh replay detection after the non-consuming write preflight", async () => {
   const writes = [];
   await assert.rejects(
     getAdminRefreshToken({
@@ -81,7 +86,9 @@ test("getAdminRefreshToken surfaces refresh replay detection without writing a t
       return true;
     }
   );
-  assert.deepEqual(writes, []);
+  assert.deepEqual(writes, [
+    ["op://prod-smoke/admin-refresh-token/password", "refresh-old"]
+  ]);
 });
 
 test("getAdminRefreshToken surfaces expired refresh tokens", async () => {
@@ -106,20 +113,125 @@ test("getAdminRefreshToken surfaces expired refresh tokens", async () => {
 });
 
 test("getAdminRefreshToken fails closed when refresh succeeds but rotated cookie is missing", async () => {
+  let persisted = "refresh-old";
   await assert.rejects(
     getAdminRefreshToken({
       env: { ADMIN_REFRESH_TOKEN_OP: "op://prod-smoke/admin-refresh-token/password" },
       async readSecretImpl() {
-        return "refresh-old";
+        return persisted;
       },
-      async writeSecretImpl() {
-        throw new Error("should not write without a rotated cookie");
+      async writeSecretImpl(_ref, value) {
+        persisted = value;
       },
       async fetchImpl() {
         return jsonResponse(200, { token: "access-token" });
       }
     }),
     /did not return a rotated refresh cookie/u
+  );
+});
+
+test("getAdminRefreshToken proves write access before consuming the current refresh token", async () => {
+  let fetched = false;
+  await assert.rejects(
+    getAdminRefreshToken({
+      env: { ADMIN_REFRESH_TOKEN_OP: "op://mainnet-smoke/admin-refresh-token-worker-canary/password" },
+      async readSecretImpl() {
+        return "refresh-current";
+      },
+      async writeSecretImpl() {
+        throw new Error("1Password write denied");
+      },
+      async fetchImpl() {
+        fetched = true;
+        throw new Error("must not consume without verified write access");
+      }
+    }),
+    /1Password write denied/u
+  );
+  assert.equal(fetched, false);
+});
+
+test("getAdminRefreshToken fails closed when successor persistence fails", async () => {
+  const calls = [];
+  let persisted = "refresh-old";
+  await assert.rejects(
+    getAdminRefreshToken({
+      env: { ADMIN_REFRESH_TOKEN_OP: "op://mainnet-smoke/admin-refresh-token-worker-canary/password" },
+      async readSecretImpl() {
+        calls.push(["read", persisted]);
+        return persisted;
+      },
+      async writeSecretImpl(_ref, value) {
+        calls.push(["write", value]);
+        if (value === "refresh-new") throw new Error("successor write failed");
+        persisted = value;
+      },
+      async fetchImpl() {
+        calls.push(["fetch"]);
+        return jsonResponse(
+          200,
+          { token: "short-lived-access-token" },
+          { "set-cookie": "refresh_token=refresh-new; HttpOnly; Secure; Path=/auth/refresh" }
+        );
+      }
+    }),
+    /successor write failed/u
+  );
+  assert.deepEqual(calls, [
+    ["read", "refresh-old"],
+    ["write", "refresh-old"],
+    ["read", "refresh-old"],
+    ["fetch"],
+    ["write", "refresh-new"]
+  ]);
+});
+
+test("getAdminRefreshToken verifies the persisted successor before returning access", async () => {
+  let persisted = "refresh-old";
+  let successorWritten = false;
+  await assert.rejects(
+    getAdminRefreshToken({
+      env: { ADMIN_REFRESH_TOKEN_OP: "op://mainnet-smoke/admin-refresh-token-worker-canary/password" },
+      async readSecretImpl() {
+        return successorWritten ? "stale-or-mismatched-value" : persisted;
+      },
+      async writeSecretImpl(_ref, value) {
+        if (value === "refresh-new") successorWritten = true;
+        else persisted = value;
+      },
+      async fetchImpl() {
+        return jsonResponse(
+          200,
+          { token: "must-not-be-returned" },
+          { "set-cookie": "refresh_token=refresh-new; HttpOnly; Secure; Path=/auth/refresh" }
+        );
+      }
+    }),
+    /successor persistence verification failed/u
+  );
+});
+
+test("getAdminRefreshToken rejects a response that does not rotate to a distinct successor", async () => {
+  let persisted = "refresh-same";
+  await assert.rejects(
+    getAdminRefreshToken({
+      env: { ADMIN_REFRESH_TOKEN_OP: "op://mainnet-smoke/admin-refresh-token-worker-canary/password" },
+      async readSecretImpl() {
+        return persisted;
+      },
+      async writeSecretImpl(_ref, value) {
+        persisted = value;
+      },
+      async fetchImpl() {
+        return jsonResponse(
+          200,
+          { token: "must-not-be-returned" },
+          { "set-cookie": "refresh_token=refresh-same; HttpOnly; Secure; Path=/auth/refresh" }
+        );
+      }
+    }),
+    /instead of a distinct successor/u
   );
 });
 

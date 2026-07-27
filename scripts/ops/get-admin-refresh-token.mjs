@@ -20,6 +20,19 @@ export async function getAdminRefreshToken({
 
   const apiBaseUrl = stripTrailingSlash(env.API_BASE_URL || DEFAULT_API_BASE_URL);
   const credential = await resolveRefreshCredential({ env, readSecretImpl });
+  if (credential.writeBackRef) {
+    // Prove the workflow can update and read back this item before consuming
+    // the one-time refresh token. A read-only or mis-scoped service account
+    // must fail here, while the current refresh chain is still usable.
+    await persistAndVerifySecret({
+      ref: credential.writeBackRef,
+      value: credential.refreshToken,
+      readSecretImpl,
+      writeSecretImpl,
+      phase: "write-capability preflight"
+    });
+  }
+
   const response = await fetchImpl(`${apiBaseUrl}/auth/refresh`, {
     method: "POST",
     headers: {
@@ -40,15 +53,26 @@ export async function getAdminRefreshToken({
   }
 
   const rotatedRefreshToken = extractRefreshCookie(response.headers);
+  let rotationVerified = false;
   if (credential.writeBackRef) {
     if (!rotatedRefreshToken) {
       throw new Error(
         "POST /auth/refresh succeeded but did not return a rotated refresh cookie; refusing to leave the stored admin refresh token stale."
       );
     }
-    if (rotatedRefreshToken !== credential.refreshToken) {
-      await writeSecretImpl(credential.writeBackRef, rotatedRefreshToken);
+    if (rotatedRefreshToken === credential.refreshToken) {
+      throw new Error(
+        "POST /auth/refresh returned the consumed refresh token instead of a distinct successor; refusing to continue."
+      );
     }
+    await persistAndVerifySecret({
+      ref: credential.writeBackRef,
+      value: rotatedRefreshToken,
+      readSecretImpl,
+      writeSecretImpl,
+      phase: "successor persistence"
+    });
+    rotationVerified = true;
   }
 
   return {
@@ -58,8 +82,28 @@ export async function getAdminRefreshToken({
     roles: Array.isArray(payload?.roles) ? payload.roles : [],
     credentialSource: credential.source,
     writeBackRef: credential.writeBackRef ?? null,
-    rotatedRefreshTokenPersisted: Boolean(credential.writeBackRef && rotatedRefreshToken)
+    rotatedRefreshTokenPersisted: rotationVerified
   };
+}
+
+export async function persistAndVerifySecret({
+  ref,
+  value,
+  readSecretImpl = readOpSecret,
+  writeSecretImpl = writeOpSecret,
+  phase = "refresh-token persistence"
+} = {}) {
+  if (!stringOrEmpty(ref) || !stringOrEmpty(value)) {
+    throw new Error(`${phase} requires a non-empty 1Password reference and value.`);
+  }
+
+  await writeSecretImpl(ref, value);
+  const persisted = stringOrEmpty(await readSecretImpl(ref));
+  if (persisted !== value) {
+    throw new Error(
+      `${phase} verification failed: the value read back from ${ref} did not match; refusing to return an access token.`
+    );
+  }
 }
 
 export async function resolveRefreshCredential({ env = process.env, readSecretImpl = readOpSecret } = {}) {
