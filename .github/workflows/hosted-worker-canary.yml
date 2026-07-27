@@ -11,13 +11,12 @@ name: Hosted Worker Canary
 # them because they all used the pre-minted multi-role ADMIN_JWT and bypassed the
 # SIWE front door.
 #
-# The WORKER stages use a roleless testnet wallet. Scheduled + post-deploy runs
-# mint a fresh EPHEMERAL wallet each time — always within the onboarding waiver,
-# so the loop stays green indefinitely with no stake funding to maintain. Manual
-# dispatches use the dedicated 1Password key (op://prod-backend/canary-worker-testnet)
-# unless allow_ephemeral is set, so the persistent/funded-claim path stays testable
-# on demand. Only the OPERATOR stages (create/fund/verify/cleanup) use the ADMIN_JWT.
-# Testnet-only — the script refuses any other chain.
+# The WORKER stages use a roleless wallet. Scheduled + post-deploy runs mint a
+# fresh EPHEMERAL wallet each time — always within the onboarding waiver, so the
+# loop stays green indefinitely with no stake funding to maintain. Mainnet also
+# requires an ephemeral wallet and refuses the dedicated testnet key. Manual
+# testnet dispatches may still use op://prod-backend/canary-worker-testnet unless
+# allow_ephemeral is set. Only the OPERATOR stages use the ADMIN_JWT.
 
 on:
   # Manual run, with knobs for one-off debugging.
@@ -79,14 +78,16 @@ jobs:
       APP_ALLOW_PROTECTED_SHELL: "1"
       CHECK_INDEXER: "0"
       CHECK_WORKER_CANARY_PROOF: "1"
-      WORKER_CANARY_PROFILE: testnet
+      # Keep the repository variable unset/testnet until the atomic Caddy flip.
+      # The canary validates the selected manifest against the live chain ID.
+      WORKER_CANARY_PROFILE: ${{ vars.WORKER_CANARY_PROFILE || 'testnet' }}
       WORKER_CANARY_EVIDENCE_FILE: artifacts/worker-canary-hosted-${{ github.run_id }}.json
       WORKER_CANARY_REWARD_AMOUNT: ${{ inputs.reward_amount }}
       WORKER_CANARY_VERIFY_MODE: ${{ inputs.verify_mode }}
       WORKER_CANARY_TOKEN_MIN_DAYS: ${{ inputs.token_min_days }}
       # Scheduled + post-deploy runs use a throwaway wallet (always within the
       # onboarding waiver — no stake funding needed); manual dispatch opts in via input.
-      WORKER_CANARY_ALLOW_EPHEMERAL: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_run' || inputs.allow_ephemeral) && '1' || '' }}
+      WORKER_CANARY_ALLOW_EPHEMERAL: ${{ ((vars.WORKER_CANARY_PROFILE || 'testnet') == 'mainnet' || github.event_name == 'schedule' || github.event_name == 'workflow_run' || inputs.allow_ephemeral) && '1' || '' }}
       WORKER_CANARY_KEEP_JOB: ${{ inputs.keep_job && '1' || '' }}
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
@@ -115,7 +116,7 @@ jobs:
       # that didn't opt into allow_ephemeral. Scheduled + post-deploy runs mint an
       # ephemeral wallet and skip this step (and its prod-backend token dependency).
       - name: Load canary worker key from 1Password (fail-closed)
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_ephemeral != true }}
+        if: ${{ (vars.WORKER_CANARY_PROFILE || 'testnet') == 'testnet' && github.event_name == 'workflow_dispatch' && inputs.allow_ephemeral != true }}
         uses: 1password/load-secrets-action@92467eb28f72e8255933372f1e0707c567ce2259 # v4.0.0
         with:
           export-env: true
@@ -137,7 +138,7 @@ jobs:
             *) echo "::error::ADMIN_JWT_OP does not look like a JWT (expected ey<...>.<...>.<...>)"; exit 1 ;;
           esac
 
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.allow_ephemeral }}" != "true" ] && [ -z "${WORKER_CANARY_WORKER_PRIVATE_KEY:-}" ]; then
+          if [ "$WORKER_CANARY_PROFILE" = "testnet" ] && [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.allow_ephemeral }}" != "true" ] && [ -z "${WORKER_CANARY_WORKER_PRIVATE_KEY:-}" ]; then
             echo "::error::WORKER_CANARY_WORKER_PRIVATE_KEY is empty — check op://prod-backend/canary-worker-testnet/private key and OP_SERVICE_ACCOUNT_TOKEN_PROD_BACKEND."
             exit 1
           fi
