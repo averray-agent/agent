@@ -792,8 +792,8 @@ unchanged after this PR merges.
 
 1. **Install `op` CLI on the VPS** (one-time):
    ```bash
-   scp scripts/ops/install-op-vps.sh ubuntu@141.94.121.188:/tmp/
-   ssh ubuntu@141.94.121.188 "sudo bash /tmp/install-op-vps.sh && rm /tmp/install-op-vps.sh"
+   scp scripts/ops/install-op-vps.sh ubuntu@<vps-host>:/tmp/
+   ssh ubuntu@<vps-host> "sudo bash /tmp/install-op-vps.sh && rm /tmp/install-op-vps.sh"
    ```
    Expected: `op --version` prints, no errors.
 
@@ -804,27 +804,27 @@ unchanged after this PR merges.
    BACKEND_TOKEN=$(op read 'op://prod-critical/op-token-prod-vps-backend/credential')
    INDEXER_TOKEN=$(op read 'op://prod-critical/op-token-prod-vps-indexer/credential')
 
-   ssh ubuntu@141.94.121.188 "sudo install -d -m 0755 /etc/agent-stack"
-   ssh ubuntu@141.94.121.188 "sudo tee /etc/agent-stack/op-backend.env >/dev/null" <<< "OP_SERVICE_ACCOUNT_TOKEN=$BACKEND_TOKEN"
-   ssh ubuntu@141.94.121.188 "sudo tee /etc/agent-stack/op-indexer.env >/dev/null" <<< "OP_SERVICE_ACCOUNT_TOKEN=$INDEXER_TOKEN"
-   ssh ubuntu@141.94.121.188 "sudo chmod 0400 /etc/agent-stack/op-*.env && sudo chown root:root /etc/agent-stack/op-*.env"
+   ssh ubuntu@<vps-host> "sudo install -d -m 0755 /etc/agent-stack"
+   ssh ubuntu@<vps-host> "sudo tee /etc/agent-stack/op-backend.env >/dev/null" <<< "OP_SERVICE_ACCOUNT_TOKEN=$BACKEND_TOKEN"
+   ssh ubuntu@<vps-host> "sudo tee /etc/agent-stack/op-indexer.env >/dev/null" <<< "OP_SERVICE_ACCOUNT_TOKEN=$INDEXER_TOKEN"
+   ssh ubuntu@<vps-host> "sudo chmod 0400 /etc/agent-stack/op-*.env && sudo chown root:root /etc/agent-stack/op-*.env"
    unset BACKEND_TOKEN INDEXER_TOKEN
    ```
 
 3. **Install the systemd-tmpfiles snippet**:
    ```bash
-   ssh ubuntu@141.94.121.188 "sudo cp /srv/agent-stack/app/deploy/agent-stack.tmpfiles.conf /etc/tmpfiles.d/agent-stack.conf && sudo systemd-tmpfiles --create"
-   ssh ubuntu@141.94.121.188 "ls -ld /run/agent-stack"   # expect: drwx------ root root
+   ssh ubuntu@<vps-host> "sudo cp /srv/agent-stack/app/deploy/agent-stack.tmpfiles.conf /etc/tmpfiles.d/agent-stack.conf && sudo systemd-tmpfiles --create"
+   ssh ubuntu@<vps-host> "ls -ld /run/agent-stack"   # expect: drwx------ root root
    ```
    (`/srv/agent-stack/app` is the repo checkout on the VPS; adjust if
    different.)
 
 4. **Verify both tokens can read their scoped vaults** (and ONLY those):
    ```bash
-   ssh ubuntu@141.94.121.188 "sudo -E env OP_SERVICE_ACCOUNT_TOKEN=\$(sudo grep -h '^OP_SERVICE_ACCOUNT_TOKEN=' /etc/agent-stack/op-backend.env | cut -d= -f2) op vault list"
+   ssh ubuntu@<vps-host> "sudo -E env OP_SERVICE_ACCOUNT_TOKEN=\$(sudo grep -h '^OP_SERVICE_ACCOUNT_TOKEN=' /etc/agent-stack/op-backend.env | cut -d= -f2) op vault list"
    # expect: prod-backend, prod-backend-external (NOT prod-critical, NOT prod-indexer)
 
-   ssh ubuntu@141.94.121.188 "sudo -E env OP_SERVICE_ACCOUNT_TOKEN=\$(sudo grep -h '^OP_SERVICE_ACCOUNT_TOKEN=' /etc/agent-stack/op-indexer.env | cut -d= -f2) op vault list"
+   ssh ubuntu@<vps-host> "sudo -E env OP_SERVICE_ACCOUNT_TOKEN=\$(sudo grep -h '^OP_SERVICE_ACCOUNT_TOKEN=' /etc/agent-stack/op-indexer.env | cut -d= -f2) op vault list"
    # expect: prod-indexer ONLY
    ```
 
@@ -833,8 +833,8 @@ unchanged after this PR merges.
    ```bash
    # Pull a copy of each live env file to a local tmpdir
    mkdir -p ~/secrets-tmp && chmod 0700 ~/secrets-tmp
-   scp ubuntu@141.94.121.188:/srv/agent-stack/backend.env ~/secrets-tmp/backend.env
-   scp ubuntu@141.94.121.188:/srv/agent-stack/indexer.env ~/secrets-tmp/indexer.env
+   scp ubuntu@<vps-host>:/srv/agent-stack/backend.env ~/secrets-tmp/backend.env
+   scp ubuntu@<vps-host>:/srv/agent-stack/indexer.env ~/secrets-tmp/indexer.env
 
    # Use the helper to fill TODO(operator) lines without touching
    # secret-shaped values:
@@ -871,7 +871,7 @@ unchanged after this PR merges.
 6. **Run `render-vps-env.sh` manually on the VPS** and verify parity
    against the existing `/srv/agent-stack/*.env`:
    ```bash
-   ssh ubuntu@141.94.121.188 "
+   ssh ubuntu@<vps-host> "
      cd /srv/agent-stack/app
      sudo bash scripts/ops/render-vps-env.sh \
        deploy/backend.env.template \
@@ -1089,7 +1089,7 @@ PR 2.6 deletes them after that window.
 Step 1 — back up the live compose file:
 
 ```bash
-ssh ubuntu@141.94.121.188 'sudo cp /srv/agent-stack/docker-compose.yml /srv/agent-stack/docker-compose.yml.pre-pr2.5'
+ssh ubuntu@<vps-host> 'sudo cp /srv/agent-stack/docker-compose.yml /srv/agent-stack/docker-compose.yml.pre-pr2.5'
 ```
 
 Step 2 — audit the compose file for `environment:` keys that would
@@ -1097,7 +1097,7 @@ shadow `env_file:` values (Compose's `environment:` block wins; a
 duplicate there would silently defeat the migration on that variable):
 
 ```bash
-ssh ubuntu@141.94.121.188 'sudo docker compose -f /srv/agent-stack/docker-compose.yml config 2>/dev/null | head -80'
+ssh ubuntu@<vps-host> 'sudo docker compose -f /srv/agent-stack/docker-compose.yml config 2>/dev/null | head -80'
 ```
 
 Look for `environment:` blocks under `agent-backend` or `agent-indexer`
@@ -1108,14 +1108,14 @@ Step 3 — view the current `env_file:` lines so we know exactly what
 to change:
 
 ```bash
-ssh ubuntu@141.94.121.188 'sudo grep -n -B1 -A2 "env_file" /srv/agent-stack/docker-compose.yml'
+ssh ubuntu@<vps-host> 'sudo grep -n -B1 -A2 "env_file" /srv/agent-stack/docker-compose.yml'
 ```
 
 Step 4 — flip the paths. Use `sudo sed -i` with explicit before/after
 strings (NOT a regex match) to minimize blast radius:
 
 ```bash
-ssh ubuntu@141.94.121.188 '
+ssh ubuntu@<vps-host> '
   set -e
   sudo sed -i.bak \
     -e "s|/srv/agent-stack/backend.env|/run/agent-stack/backend.env|g" \
@@ -1143,7 +1143,7 @@ gh workflow run deploy-production.yml -R averray-agent/agent && sleep 5 && gh ru
 Step 6 — verify the backend container is consuming `/run/*.env`:
 
 ```bash
-ssh ubuntu@141.94.121.188 'sudo docker inspect agent-backend --format "{{range .Config.Env}}{{println .}}{{end}}" | grep -E "^(SIGNER_PRIVATE_KEY|AUTH_JWT_SECRETS|DATABASE_URL|GITHUB_TOKEN)=" | head -5'
+ssh ubuntu@<vps-host> 'sudo docker inspect agent-backend --format "{{range .Config.Env}}{{println .}}{{end}}" | grep -E "^(SIGNER_PRIVATE_KEY|AUTH_JWT_SECRETS|DATABASE_URL|GITHUB_TOKEN)=" | head -5'
 ```
 
 Verify each line has the value from `/run/agent-stack/backend.env`
@@ -1153,7 +1153,7 @@ differently now).
 Step 7 — if anything looks wrong, roll back:
 
 ```bash
-ssh ubuntu@141.94.121.188 'sudo cp /srv/agent-stack/docker-compose.yml.pre-pr2.5 /srv/agent-stack/docker-compose.yml'
+ssh ubuntu@<vps-host> 'sudo cp /srv/agent-stack/docker-compose.yml.pre-pr2.5 /srv/agent-stack/docker-compose.yml'
 gh workflow run deploy-production.yml -R averray-agent/agent
 ```
 
@@ -1214,7 +1214,7 @@ the writes closes the format-leak vector permanently.
   on PR 2.6:
 
   ```sh
-  ssh ubuntu@141.94.121.188 'sudo rm /srv/agent-stack/backend.env /srv/agent-stack/indexer.env /srv/agent-stack/docker-compose.yml.pre-pr2.5'
+  ssh ubuntu@<vps-host> 'sudo rm /srv/agent-stack/backend.env /srv/agent-stack/indexer.env /srv/agent-stack/docker-compose.yml.pre-pr2.5'
   ```
 
 - Deleting GitHub Actions secrets that have been replaced by 1Password
@@ -1336,7 +1336,7 @@ After at least 24h of stable deploys on PR 2.5 + PR 2.6 + PR 2.7a
 (the cutover stack):
 
 ```sh
-ssh ubuntu@141.94.121.188 'sudo rm /srv/agent-stack/backend.env /srv/agent-stack/indexer.env /srv/agent-stack/docker-compose.yml.pre-pr2.5'
+ssh ubuntu@<vps-host> 'sudo rm /srv/agent-stack/backend.env /srv/agent-stack/indexer.env /srv/agent-stack/docker-compose.yml.pre-pr2.5'
 ```
 
 Then **reboot test**: confirm `/run/agent-stack` is recreated by

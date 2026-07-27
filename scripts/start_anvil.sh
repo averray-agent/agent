@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-source /Users/pascalkuriger/.zshenv
 
 HOST="${ANVIL_HOST:-127.0.0.1}"
 PORT="${ANVIL_PORT:-8545}"

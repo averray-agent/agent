@@ -4,11 +4,11 @@ This is the recommended **first real job catalog** for Averray.
 
 If you want exact first-wave payloads that can be posted through the admin
 surface now, use
-[docs/READY_TO_POST_JOBS.md](/Users/pascalkuriger/repo/Polkadot/docs/READY_TO_POST_JOBS.md)
+[docs/READY_TO_POST_JOBS.md](/docs/READY_TO_POST_JOBS.md)
 and
-[docs/ready-to-post-jobs.json](/Users/pascalkuriger/repo/Polkadot/docs/ready-to-post-jobs.json).
+[docs/ready-to-post-jobs.json](/docs/ready-to-post-jobs.json).
 To import that bundle through the admin API, use
-[scripts/post_job_bundle.mjs](/Users/pascalkuriger/repo/Polkadot/scripts/post_job_bundle.mjs).
+[scripts/post_job_bundle.mjs](/scripts/post_job_bundle.mjs).
 
 The goal is not to maximize novelty. The goal is to post jobs that are:
 
@@ -21,7 +21,7 @@ If a job cannot be expressed as a clear schema with a reasonably
 defensible verifier, it should not be in the first catalog.
 
 For public non-GitHub sources, start with
-[docs/PUBLIC_JOB_SOURCES.md](/Users/pascalkuriger/repo/Polkadot/docs/PUBLIC_JOB_SOURCES.md).
+[docs/PUBLIC_JOB_SOURCES.md](/docs/PUBLIC_JOB_SOURCES.md).
 Wikipedia is the first expansion source because agents can produce
 reviewable, citation-backed proposals without needing private workspace
 access or direct edit permissions.

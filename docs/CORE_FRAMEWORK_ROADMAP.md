@@ -19,14 +19,14 @@ forward.
 
 It is intentionally grounded in the code that exists today:
 
-- [mcp-server/src/core/platform-service.js](/Users/pascalkuriger/repo/Polkadot/mcp-server/src/core/platform-service.js)
-- [mcp-server/src/core/job-catalog-service.js](/Users/pascalkuriger/repo/Polkadot/mcp-server/src/core/job-catalog-service.js)
-- [mcp-server/src/core/job-execution-service.js](/Users/pascalkuriger/repo/Polkadot/mcp-server/src/core/job-execution-service.js)
-- [mcp-server/src/core/state-store.js](/Users/pascalkuriger/repo/Polkadot/mcp-server/src/core/state-store.js)
-- [mcp-server/src/services/verifier-service.js](/Users/pascalkuriger/repo/Polkadot/mcp-server/src/services/verifier-service.js)
-- [mcp-server/src/services/verifier-handlers.js](/Users/pascalkuriger/repo/Polkadot/mcp-server/src/services/verifier-handlers.js)
-- [docs/patterns/recurring-jobs.md](/Users/pascalkuriger/repo/Polkadot/docs/patterns/recurring-jobs.md)
-- [docs/patterns/sub-job-escrow.md](/Users/pascalkuriger/repo/Polkadot/docs/patterns/sub-job-escrow.md)
+- [mcp-server/src/core/platform-service.js](/mcp-server/src/core/platform-service.js)
+- [mcp-server/src/core/job-catalog-service.js](/mcp-server/src/core/job-catalog-service.js)
+- [mcp-server/src/core/job-execution-service.js](/mcp-server/src/core/job-execution-service.js)
+- [mcp-server/src/core/state-store.js](/mcp-server/src/core/state-store.js)
+- [mcp-server/src/services/verifier-service.js](/mcp-server/src/services/verifier-service.js)
+- [mcp-server/src/services/verifier-handlers.js](/mcp-server/src/services/verifier-handlers.js)
+- [docs/patterns/recurring-jobs.md](/docs/patterns/recurring-jobs.md)
+- [docs/patterns/sub-job-escrow.md](/docs/patterns/sub-job-escrow.md)
 
 The goal is not to add complexity for its own sake. The goal is to make
 jobs, sessions, verification, and operator flows easier to trust, easier to
@@ -89,7 +89,7 @@ Every framework upgrade below should follow these rules:
 ### Why this matters
 
 Today, verifier behavior is concentrated in
-[mcp-server/src/services/verifier-handlers.js](/Users/pascalkuriger/repo/Polkadot/mcp-server/src/services/verifier-handlers.js)
+[mcp-server/src/services/verifier-handlers.js](/mcp-server/src/services/verifier-handlers.js)
 and works for v1, but the contract between:
 
 - posted job
@@ -208,9 +208,9 @@ discipline for custom/off-platform schemas.
 ### Why this matters
 
 Right now session transitions live across
-[mcp-server/src/core/job-execution-service.js](/Users/pascalkuriger/repo/Polkadot/mcp-server/src/core/job-execution-service.js)
+[mcp-server/src/core/job-execution-service.js](/mcp-server/src/core/job-execution-service.js)
 and
-[mcp-server/src/services/verification-ingestion-service.js](/Users/pascalkuriger/repo/Polkadot/mcp-server/src/services/verification-ingestion-service.js).
+[mcp-server/src/services/verification-ingestion-service.js](/mcp-server/src/services/verification-ingestion-service.js).
 That works, but it still behaves more like a set of updates than a strict state
 machine.
 

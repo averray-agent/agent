@@ -88,7 +88,7 @@ Decision:
 
 We now have a working bridge to the official Polkadot docs MCP via:
 
-- [polkadot-docs-bridge.mjs](/Users/pascalkuriger/repo/Polkadot/scripts/mcp/polkadot-docs-bridge.mjs)
+- [polkadot-docs-bridge.mjs](/scripts/mcp/polkadot-docs-bridge.mjs)
 
 Operationally, this matters because:
 
@@ -170,9 +170,9 @@ Work:
 
 Primary files:
 
-- [docs/MULTISIG_SETUP.md](/Users/pascalkuriger/repo/Polkadot/docs/MULTISIG_SETUP.md)
-- [docs/POLKADOT_OFFICIAL_ALIGNMENT.md](/Users/pascalkuriger/repo/Polkadot/docs/POLKADOT_OFFICIAL_ALIGNMENT.md)
-- [scripts/mcp/polkadot-docs-bridge.mjs](/Users/pascalkuriger/repo/Polkadot/scripts/mcp/polkadot-docs-bridge.mjs)
+- [docs/MULTISIG_SETUP.md](/docs/MULTISIG_SETUP.md)
+- [docs/POLKADOT_OFFICIAL_ALIGNMENT.md](/docs/POLKADOT_OFFICIAL_ALIGNMENT.md)
+- [scripts/mcp/polkadot-docs-bridge.mjs](/scripts/mcp/polkadot-docs-bridge.mjs)
 
 Ship gate:
 
@@ -201,11 +201,11 @@ Work:
 
 Primary files:
 
-- [mcp-server/src/core/discovery-manifest.js](/Users/pascalkuriger/repo/Polkadot/mcp-server/src/core/discovery-manifest.js)
-- [mcp-server/src/core/session-state-machine.js](/Users/pascalkuriger/repo/Polkadot/mcp-server/src/core/session-state-machine.js)
-- [mcp-server/src/core/job-schema-registry.js](/Users/pascalkuriger/repo/Polkadot/mcp-server/src/core/job-schema-registry.js)
-- [mcp-server/src/core/job-execution-service.js](/Users/pascalkuriger/repo/Polkadot/mcp-server/src/core/job-execution-service.js)
-- [docs/PHASE1_LAUNCH_PLAN.md](/Users/pascalkuriger/repo/Polkadot/docs/PHASE1_LAUNCH_PLAN.md)
+- [mcp-server/src/core/discovery-manifest.js](/mcp-server/src/core/discovery-manifest.js)
+- [mcp-server/src/core/session-state-machine.js](/mcp-server/src/core/session-state-machine.js)
+- [mcp-server/src/core/job-schema-registry.js](/mcp-server/src/core/job-schema-registry.js)
+- [mcp-server/src/core/job-execution-service.js](/mcp-server/src/core/job-execution-service.js)
+- [docs/PHASE1_LAUNCH_PLAN.md](/docs/PHASE1_LAUNCH_PLAN.md)
 
 Ship gate:
 
@@ -235,11 +235,11 @@ Work:
 
 Likely code/doc surfaces:
 
-- [mcp-server/.env.example](/Users/pascalkuriger/repo/Polkadot/mcp-server/.env.example)
-- [mcp-server/src/services/bootstrap.js](/Users/pascalkuriger/repo/Polkadot/mcp-server/src/services/bootstrap.js)
-- [mcp-server/src/services/strategies-config.test.js](/Users/pascalkuriger/repo/Polkadot/mcp-server/src/services/strategies-config.test.js)
-- [docs/AGENT_BANKING.md](/Users/pascalkuriger/repo/Polkadot/docs/AGENT_BANKING.md)
-- [docs/strategies/vdot.md](/Users/pascalkuriger/repo/Polkadot/docs/strategies/vdot.md)
+- [mcp-server/.env.example](/mcp-server/.env.example)
+- [mcp-server/src/services/bootstrap.js](/mcp-server/src/services/bootstrap.js)
+- [mcp-server/src/services/strategies-config.test.js](/mcp-server/src/services/strategies-config.test.js)
+- [docs/AGENT_BANKING.md](/docs/AGENT_BANKING.md)
+- [docs/strategies/vdot.md](/docs/strategies/vdot.md)
 
 Current status:
 
@@ -282,7 +282,7 @@ Work:
 
 Likely code surfaces:
 
-- [contracts/interfaces/IXcmWrapper.sol](/Users/pascalkuriger/repo/Polkadot/contracts/interfaces/IXcmWrapper.sol)
+- [contracts/interfaces/IXcmWrapper.sol](/contracts/interfaces/IXcmWrapper.sol)
 - `contracts/strategies/`
 - `contracts/AgentAccountCore.sol`
 - `indexer/`
@@ -295,9 +295,9 @@ Implementation rule:
 Current status:
 
 - the first draft of the async transport boundary now exists at
-  [contracts/interfaces/IXcmWrapper.sol](/Users/pascalkuriger/repo/Polkadot/contracts/interfaces/IXcmWrapper.sol)
+  [contracts/interfaces/IXcmWrapper.sol](/contracts/interfaces/IXcmWrapper.sol)
 - a first concrete ledger implementation now exists at
-  [contracts/XcmWrapper.sol](/Users/pascalkuriger/repo/Polkadot/contracts/XcmWrapper.sol)
+  [contracts/XcmWrapper.sol](/contracts/XcmWrapper.sol)
   with:
   - deterministic request IDs
   - payload-hash pinning for idempotent retries
@@ -305,7 +305,7 @@ Current status:
   - operator-gated finalize semantics
   - precompile-backed `weighMessage` support
 - the contract path is covered by
-  [test/XcmWrapper.t.sol](/Users/pascalkuriger/repo/Polkadot/test/XcmWrapper.t.sol)
+  [test/XcmWrapper.t.sol](/test/XcmWrapper.t.sol)
   and passes with `forge test --match-contract XcmWrapperTest --offline`
 - deployment manifests and the Ponder indexer now understand an optional
   `XcmWrapper` contract so request lifecycle events can be indexed in
@@ -343,16 +343,16 @@ Work:
 
 Primary files:
 
-- [contracts/strategies/MockVDotAdapter.sol](/Users/pascalkuriger/repo/Polkadot/contracts/strategies/MockVDotAdapter.sol)
-- [contracts/strategies/XcmVdotAdapter.sol](/Users/pascalkuriger/repo/Polkadot/contracts/strategies/XcmVdotAdapter.sol)
-- [contracts/interfaces/IXcmStrategyAdapter.sol](/Users/pascalkuriger/repo/Polkadot/contracts/interfaces/IXcmStrategyAdapter.sol)
-- [docs/strategies/vdot.md](/Users/pascalkuriger/repo/Polkadot/docs/strategies/vdot.md)
-- [docs/PRODUCTION_CHECKLIST.md](/Users/pascalkuriger/repo/Polkadot/docs/PRODUCTION_CHECKLIST.md)
+- [contracts/strategies/MockVDotAdapter.sol](/contracts/strategies/MockVDotAdapter.sol)
+- [contracts/strategies/XcmVdotAdapter.sol](/contracts/strategies/XcmVdotAdapter.sol)
+- [contracts/interfaces/IXcmStrategyAdapter.sol](/contracts/interfaces/IXcmStrategyAdapter.sol)
+- [docs/strategies/vdot.md](/docs/strategies/vdot.md)
+- [docs/PRODUCTION_CHECKLIST.md](/docs/PRODUCTION_CHECKLIST.md)
 
 Current status:
 
 - the first production-shaped async adapter path now exists at
-  [contracts/strategies/XcmVdotAdapter.sol](/Users/pascalkuriger/repo/Polkadot/contracts/strategies/XcmVdotAdapter.sol)
+  [contracts/strategies/XcmVdotAdapter.sol](/contracts/strategies/XcmVdotAdapter.sol)
   with:
   - `requestDeposit` queuing wrapper-backed deposit requests
   - `requestWithdraw` queuing wrapper-backed withdraw requests
@@ -375,10 +375,10 @@ Current status:
   and shares, while withdrawals require non-zero settled assets before
   user strategy shares can be burned
 - the contract path is covered by
-  [test/XcmVdotAdapter.t.sol](/Users/pascalkuriger/repo/Polkadot/test/XcmVdotAdapter.t.sol)
+  [test/XcmVdotAdapter.t.sol](/test/XcmVdotAdapter.t.sol)
   and passes with `forge test --match-contract XcmVdotAdapterTest --offline`
 - the treasury-core contract seam is now in place and covered by
-  [test/AgentAccountAsyncStrategy.t.sol](/Users/pascalkuriger/repo/Polkadot/test/AgentAccountAsyncStrategy.t.sol),
+  [test/AgentAccountAsyncStrategy.t.sol](/test/AgentAccountAsyncStrategy.t.sol),
   which passes with
   `forge test --match-contract AgentAccountAsyncStrategyTest --offline`
 - the hosted stack now also understands the async lane:
@@ -451,7 +451,7 @@ Current status:
 - the repo now includes `scripts/ops/exercise-async-xcm-request.mjs` and
   `docs/ASYNC_XCM_STAGING.md` as the current-lane rehearsal package
 - the native observer lane now has an implementation-oriented design note at
-  [docs/NATIVE_XCM_OBSERVER.md](/Users/pascalkuriger/repo/Polkadot/docs/NATIVE_XCM_OBSERVER.md)
+  [docs/NATIVE_XCM_OBSERVER.md](/docs/NATIVE_XCM_OBSERVER.md)
   that defines the correlation gate, `native_papi` source-adapter shape,
   evidence model, and Chopsticks/PAPI validation plan
 
@@ -480,9 +480,9 @@ Work:
 
 Primary files:
 
-- [docs/AUDIT_PACKAGE.md](/Users/pascalkuriger/repo/Polkadot/docs/AUDIT_PACKAGE.md)
-- [docs/PRODUCTION_CHECKLIST.md](/Users/pascalkuriger/repo/Polkadot/docs/PRODUCTION_CHECKLIST.md)
-- [docs/INCIDENT_RESPONSE.md](/Users/pascalkuriger/repo/Polkadot/docs/INCIDENT_RESPONSE.md)
+- [docs/AUDIT_PACKAGE.md](/docs/AUDIT_PACKAGE.md)
+- [docs/PRODUCTION_CHECKLIST.md](/docs/PRODUCTION_CHECKLIST.md)
+- [docs/INCIDENT_RESPONSE.md](/docs/INCIDENT_RESPONSE.md)
 
 Ship gate:
 

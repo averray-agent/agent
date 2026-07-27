@@ -28,7 +28,7 @@
  * Usage
  * -----
  *   node scripts/ops/rotate-admin-drain.mjs \
- *     --old-env-file /Users/pascalkuriger/repo/Polkadot/mcp-server/.env.local \
+ *     --old-env-file mcp-server/.env.local \
  *     --new-key-file .keys/new-admin-eoa.txt \
  *     --amount 9339999
  *

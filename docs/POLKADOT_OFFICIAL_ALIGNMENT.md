@@ -6,7 +6,7 @@ product and engineering roadmap.
 The implementation-ready next-step plan that incorporates these findings
 is:
 
-- [docs/POLKADOT_EXECUTION_PLAN.md](/Users/pascalkuriger/repo/Polkadot/docs/POLKADOT_EXECUTION_PLAN.md)
+- [docs/POLKADOT_EXECUTION_PLAN.md](/docs/POLKADOT_EXECUTION_PLAN.md)
 
 It answers a simple question:
 
@@ -142,7 +142,7 @@ Priority: immediate
 
 Primary file:
 
-- [docs/MULTISIG_SETUP.md](/Users/pascalkuriger/repo/Polkadot/docs/MULTISIG_SETUP.md)
+- [docs/MULTISIG_SETUP.md](/docs/MULTISIG_SETUP.md)
 
 ## 2. Define a real Polkadot strategy adapter architecture
 
@@ -156,7 +156,7 @@ Priority: next major treasury milestone
 
 Primary file:
 
-- [docs/strategies/vdot.md](/Users/pascalkuriger/repo/Polkadot/docs/strategies/vdot.md)
+- [docs/strategies/vdot.md](/docs/strategies/vdot.md)
 
 ## 3. Normalize asset metadata in config
 
@@ -170,9 +170,9 @@ Priority: before mainnet treasury
 
 Likely files:
 
-- [mcp-server/.env.example](/Users/pascalkuriger/repo/Polkadot/mcp-server/.env.example)
-- [docs/AGENT_BANKING.md](/Users/pascalkuriger/repo/Polkadot/docs/AGENT_BANKING.md)
-- [docs/strategies/vdot.md](/Users/pascalkuriger/repo/Polkadot/docs/strategies/vdot.md)
+- [mcp-server/.env.example](/mcp-server/.env.example)
+- [docs/AGENT_BANKING.md](/docs/AGENT_BANKING.md)
+- [docs/strategies/vdot.md](/docs/strategies/vdot.md)
 
 ## 4. Stay on REVM while trust-core and treasury semantics mature
 
@@ -201,4 +201,4 @@ That is how we stay both ambitious and honest.
 For the concrete phase-by-phase worklist, ownership, and immediate
 implementation order, see:
 
-- [docs/POLKADOT_EXECUTION_PLAN.md](/Users/pascalkuriger/repo/Polkadot/docs/POLKADOT_EXECUTION_PLAN.md)
+- [docs/POLKADOT_EXECUTION_PLAN.md](/docs/POLKADOT_EXECUTION_PLAN.md)

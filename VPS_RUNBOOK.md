@@ -7,7 +7,7 @@ This runbook captures the production-like setup currently running on the OVH VPS
 - Stack root on server: `/srv/agent-stack`
 - Repo checkout: `/srv/agent-stack/app`
 - Compose file: `/srv/agent-stack/docker-compose.yml`
-- Recommended repo-owned Caddy template: [deploy/Caddyfile.averray](/Users/pascalkuriger/repo/Polkadot/deploy/Caddyfile.averray)
+- Recommended repo-owned Caddy template: [deploy/Caddyfile.averray](/deploy/Caddyfile.averray)
 - Infra services:
   - `agent-postgres`
   - `agent-redis`
@@ -41,14 +41,14 @@ The intended production split is:
 The repo-owned template lives at:
 
 ```text
-/Users/pascalkuriger/repo/Polkadot/deploy/Caddyfile.averray
+deploy/Caddyfile.averray
 ```
 
 To protect only the operator surface with browser basic auth, render the
 live file through:
 
 ```text
-/Users/pascalkuriger/repo/Polkadot/scripts/ops/render-caddyfile.sh
+scripts/ops/render-caddyfile.sh
 ```
 
 On the VPS, the live file should be:
@@ -771,7 +771,7 @@ ALLOW_PAUSED=1 ./scripts/ops/check-release-readiness.sh testnet
 ```
 
 For the human-readable checklist that goes with this command, see
-[docs/PRODUCTION_CHECKLIST.md](/Users/pascalkuriger/repo/Polkadot/docs/PRODUCTION_CHECKLIST.md).
+[docs/PRODUCTION_CHECKLIST.md](/docs/PRODUCTION_CHECKLIST.md).
 
 ## Observability
 
@@ -907,7 +907,7 @@ Fill these in as the signer set grows:
 - External party auth (if any): <TBD>
 
 For the fuller severity matrix, ownership model, and post-incident template,
-see [docs/INCIDENT_RESPONSE.md](/Users/pascalkuriger/repo/Polkadot/docs/INCIDENT_RESPONSE.md).
+see [docs/INCIDENT_RESPONSE.md](/docs/INCIDENT_RESPONSE.md).
 
 ### Commands you'll reach for
 

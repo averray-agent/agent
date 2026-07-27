@@ -11,7 +11,7 @@
  *
  * Usage:
  *   node scripts/ops/rotate-admin-verify-old.mjs \
- *     --env-file /Users/pascalkuriger/repo/Polkadot/mcp-server/.env.local \
+ *     --env-file mcp-server/.env.local \
  *     --expect 0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519
  */
 

@@ -4,8 +4,8 @@ This is the practical signer checklist for Averray's launch multisig.
 
 Use it together with:
 
-- [docs/MULTISIG_DECISION.md](/Users/pascalkuriger/repo/Polkadot/docs/MULTISIG_DECISION.md)
-- [docs/MULTISIG_SETUP.md](/Users/pascalkuriger/repo/Polkadot/docs/MULTISIG_SETUP.md)
+- [docs/MULTISIG_DECISION.md](/docs/MULTISIG_DECISION.md)
+- [docs/MULTISIG_SETUP.md](/docs/MULTISIG_SETUP.md)
 
 ---
 
