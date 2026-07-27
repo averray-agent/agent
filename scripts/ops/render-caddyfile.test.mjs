@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { promisify } from "node:util";
 
+import { buildSelection, writeSelectionAtomic } from "./caddy-network-selection.mjs";
+
 const execFileAsync = promisify(execFile);
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const script = join(repoRoot, "scripts/ops/render-caddyfile.sh");
@@ -15,12 +17,25 @@ const USER = "operator";
 // Shape-valid bcrypt hash; the renderer only checks the $2a$/$2b$/$2y$ prefix.
 const HASH = "$2a$14$C6UzMDM.H6dfI/f/IKcEe.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
-async function render(env) {
+async function render(env, network = "testnet") {
   const dir = await mkdtemp(join(tmpdir(), "render-caddyfile-"));
   const out = join(dir, "Caddyfile");
+  const state = join(dir, "caddy-network-selection.json");
+  writeSelectionAtomic(state, buildSelection({
+    network,
+    previousNetwork: network,
+    selectedAt: "2026-07-27T10:00:00.000Z",
+    selectedBy: "render-test",
+    executionUser: "test",
+    host: "test.invalid",
+    source: "render-caddyfile.test.mjs",
+    sourceRevision: "a".repeat(40),
+    operationId: `render-${network}`,
+    reason: "renderer regression test",
+  }));
   try {
     const result = await execFileAsync(script, [out], {
-      env: { ...process.env, ...env },
+      env: { ...process.env, CADDY_NETWORK_STATE_FILE: state, ...env },
     });
     return { out, dir, contents: await readFile(out, "utf8"), stderr: result.stderr };
   } finally {
@@ -36,6 +51,17 @@ test("omits the basic-auth block when no credentials are supplied", async () => 
   });
   assert.ok(!contents.includes("basic_auth"), "expected no basic_auth directive");
   assert.match(contents, /^app\.averray\.com \{$/m, "operator app block should still render");
+});
+
+test("renders mainnet upstreams from the durable selector even though the template is testnet", async () => {
+  const { contents } = await render({
+    APP_BASIC_AUTH_USER: "",
+    APP_BASIC_AUTH_PASSWORD_HASH: "",
+  }, "mainnet");
+  assert.match(contents, /reverse_proxy mainnet-backend:8787/u);
+  assert.match(contents, /reverse_proxy mainnet-indexer:42069/u);
+  assert.doesNotMatch(contents, /reverse_proxy backend:8787/u);
+  assert.doesNotMatch(contents, /reverse_proxy indexer:42069/u);
 });
 
 test("injects the basic-auth block when both credentials are supplied", async () => {

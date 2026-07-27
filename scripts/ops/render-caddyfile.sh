@@ -45,6 +45,9 @@ Rejected env (the script fails if this is set):
 
 Optional env:
   TEMPLATE_PATH                 Override the source template.
+  CADDY_NETWORK_STATE_FILE      Audited durable network selector. Defaults
+                                beside the output at
+                                .deploy-state/caddy-network-selection.json.
   APP_PUBLIC_SHELL              1/true/yes renders app.averray.com public,
                                 overriding any basic-auth credentials passed
                                 alongside. This is the default for production
@@ -75,6 +78,7 @@ OUTPUT_PATH="$1"
 APP_BASIC_AUTH_USER="${APP_BASIC_AUTH_USER:-}"
 APP_BASIC_AUTH_PASSWORD_HASH="${APP_BASIC_AUTH_PASSWORD_HASH:-}"
 APP_PUBLIC_SHELL="${APP_PUBLIC_SHELL:-0}"
+CADDY_NETWORK_STATE_FILE="${CADDY_NETWORK_STATE_FILE:-$(dirname "$OUTPUT_PATH")/.deploy-state/caddy-network-selection.json}"
 
 # APP_PUBLIC_SHELL=1 renders app.averray.com without the browser basic-auth
 # gate, so anyone can reach the operator UI and sign in with a wallet.
@@ -106,7 +110,11 @@ if [[ -n "${APP_BASIC_AUTH_PASSWORD:-}" ]]; then
 fi
 
 [[ -f "$TEMPLATE_PATH" ]] || fail "Template not found: $TEMPLATE_PATH"
+[[ -f "$CADDY_NETWORK_STATE_FILE" ]] || fail "Caddy network selection not found: $CADDY_NETWORK_STATE_FILE"
 require_command awk
+if ! command -v node >/dev/null 2>&1 && ! command -v docker >/dev/null 2>&1; then
+  fail "Caddy network selection requires node or docker"
+fi
 
 # Basic-auth enabled requires BOTH user and hash. Half-set is an error.
 if [[ -n "$APP_BASIC_AUTH_USER" || -n "$APP_BASIC_AUTH_PASSWORD_HASH" ]]; then
@@ -120,6 +128,7 @@ if [[ -n "$APP_BASIC_AUTH_USER" || -n "$APP_BASIC_AUTH_PASSWORD_HASH" ]]; then
 fi
 
 auth_block_file=""
+routed_template_file=$(mktemp)
 if [[ -n "$APP_BASIC_AUTH_USER" && -n "$APP_BASIC_AUTH_PASSWORD_HASH" ]]; then
   auth_block_file=$(mktemp)
   cat >"$auth_block_file" <<EOF
@@ -137,9 +146,15 @@ cleanup() {
   if [[ -n "$auth_block_file" && -f "$auth_block_file" ]]; then
     rm -f "$auth_block_file"
   fi
+  rm -f "$routed_template_file"
 }
 
 trap cleanup EXIT
+
+STACK_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)" "$SCRIPT_DIR/run-caddy-network-selection.sh" render \
+  --state "$CADDY_NETWORK_STATE_FILE" \
+  --input "$TEMPLATE_PATH" \
+  --output "$routed_template_file"
 
 awk -v auth_block_file="$auth_block_file" '
   /^app\.averray\.com \{/ {
@@ -153,6 +168,6 @@ awk -v auth_block_file="$auth_block_file" '
     next
   }
   { print }
-' "$TEMPLATE_PATH" > "$OUTPUT_PATH"
+' "$routed_template_file" > "$OUTPUT_PATH"
 
 echo "Rendered Caddyfile to $OUTPUT_PATH"

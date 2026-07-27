@@ -22,6 +22,8 @@ DEPLOY_NEW_SHA=${DEPLOY_NEW_SHA:-}
 DEPLOY_STATE_DIR=${DEPLOY_STATE_DIR:-"$STACK_ROOT/.deploy-state"}
 INDEXER_SCHEMA_STATE_FILE=${INDEXER_SCHEMA_STATE_FILE:-"$DEPLOY_STATE_DIR/indexer.database-schema"}
 FRONTEND_TREE_HASH_FILE=${FRONTEND_TREE_HASH_FILE:-"$DEPLOY_STATE_DIR/frontend.built-tree-hash"}
+CADDY_NETWORK_STATE_FILE=${CADDY_NETWORK_STATE_FILE:-"$DEPLOY_STATE_DIR/caddy-network-selection.json"}
+DEPLOY_ACTOR=${DEPLOY_ACTOR:-"deploy-production:${SUDO_USER:-${USER:-unknown}}"}
 
 RUN_BACKEND=${RUN_BACKEND:-auto}
 RUN_FRONTEND=${RUN_FRONTEND:-auto}
@@ -374,6 +376,27 @@ wait_for_backend_health() {
   echo "       Container recreate likely succeeded but bootstrap is failing." >&2
   echo "       Check 'sudo docker logs agent-backend --tail 100' on the VPS." >&2
   return 1
+}
+
+verify_public_caddy_network_selection() {
+  local expected_chain_id
+  expected_chain_id=$(jq -er '.expectedChainId | tostring' "$CADDY_NETWORK_STATE_FILE")
+
+  local health_url="${PUBLIC_API_HEALTH_URL:-https://api.averray.com/health}"
+  local health_json
+  echo "Verifying public API matches durable Caddy selection: chainId $expected_chain_id"
+  if ! health_json=$(curl -fsS --retry 4 --retry-delay 1 --max-time 10 "$health_url"); then
+    echo "ERROR: public API health is unreachable at $health_url." >&2
+    return 1
+  fi
+
+  if ! printf '%s' "$health_json" | jq -e --arg chain "$expected_chain_id" \
+      '[.. | objects | .chainId? // empty | tostring] | index($chain) != null' >/dev/null; then
+    echo "ERROR: public API health does not report the selected chainId $expected_chain_id." >&2
+    return 1
+  fi
+
+  echo "Durable Caddy selection verified publicly: chainId $expected_chain_id"
 }
 
 should_run() {
@@ -823,15 +846,42 @@ apply_caddy() {
       ;;
   esac
 
-  # Render the new Caddyfile atomically: write to a tmp file alongside
-  # the target, validate via `caddy validate` inside the running caddy
-  # container, then move into place. If validate fails, the live
-  # Caddyfile is untouched and the deploy aborts.
+  # Render the new Caddyfile to a temporary candidate, validate it via
+  # `caddy validate` inside the running caddy container, then copy its
+  # contents into the mounted file in place. The single-file bind mount
+  # must keep its inode; replacing the pathname with mv(1) can leave the
+  # running container attached to stale bytes.
   local rendered_tmp
   rendered_tmp=$(mktemp "$STACK_ROOT/Caddyfile.XXXXXX")
   trap 'rm -f "$rendered_tmp"' RETURN
 
-  "$APP_ROOT/scripts/ops/render-caddyfile.sh" "$rendered_tmp"
+  local execution_user
+  execution_user=$(id -un)
+  local deploy_host
+  deploy_host=$(hostname -f 2>/dev/null || hostname)
+  local selection_operation_id="deploy-bootstrap-${NEW_SHA:0:12}-$(date -u +%Y%m%d-%H%M%S)"
+  STACK_ROOT="$STACK_ROOT" "$APP_ROOT/scripts/ops/run-caddy-network-selection.sh" bootstrap \
+    --state "$CADDY_NETWORK_STATE_FILE" \
+    --live-caddy "$STACK_ROOT/Caddyfile" \
+    --selected-by "$DEPLOY_ACTOR" \
+    --execution-user "$execution_user" \
+    --host "$deploy_host" \
+    --source-revision "$NEW_SHA" \
+    --operation-id "$selection_operation_id"
+
+  local selection_status
+  selection_status=$(STACK_ROOT="$STACK_ROOT" "$APP_ROOT/scripts/ops/run-caddy-network-selection.sh" status \
+    --state "$CADDY_NETWORK_STATE_FILE" \
+    --live-caddy "$STACK_ROOT/Caddyfile")
+  printf '%s\n' "$selection_status"
+  if ! printf '%s' "$selection_status" | jq -e '.consistent == true' >/dev/null; then
+    echo "Caddy live route disagrees with the durable network selection; refusing an unguarded route repair." >&2
+    echo "Use flip-caddy-network.sh <mainnet|testnet> so chain assertion and auto-rollback remain active." >&2
+    return 1
+  fi
+
+  CADDY_NETWORK_STATE_FILE="$CADDY_NETWORK_STATE_FILE" \
+    "$APP_ROOT/scripts/ops/render-caddyfile.sh" "$rendered_tmp"
 
   # caddy validate inside the running caddy container. The container's
   # Caddyfile path is /etc/caddy/Caddyfile; we mount the rendered tmp
@@ -881,17 +931,37 @@ apply_caddy() {
 
   local before_label="${before_hash:0:8}"
   [[ -z "$before_hash" ]] && before_label="(none)"
-  echo "Phase 2 PR 2.7d.2: Caddyfile content changed (before=$before_label, after=${after_hash:0:8}) — installing + restarting caddy"
+  echo "Phase 2 PR 2.7d.2: Caddyfile content changed (before=$before_label, after=${after_hash:0:8}) — installing in place + reloading caddy"
 
-  # Atomic install of the validated Caddyfile.
-  chmod 0644 "$rendered_tmp"
-  mv "$rendered_tmp" "$STACK_ROOT/Caddyfile"
+  local live_backup
+  live_backup=$(mktemp "$STACK_ROOT/.Caddyfile.deploy-backup.XXXXXX")
+  cp -p "$STACK_ROOT/Caddyfile" "$live_backup"
+
+  # This copy is intentionally in-place (not atomic) because Caddy bind-mounts
+  # this single file. The candidate is already validated above, and `caddy
+  # reload` validates it again while retaining the old running config on
+  # failure.
+  cp "$rendered_tmp" "$STACK_ROOT/Caddyfile"
+  chmod 0644 "$STACK_ROOT/Caddyfile"
+  rm -f "$rendered_tmp"
   trap - RETURN
 
-  docker compose \
-    --project-directory "$STACK_ROOT" \
-    -f "$COMPOSE_FILE" \
-    restart caddy
+  if ! docker compose \
+      --project-directory "$STACK_ROOT" \
+      -f "$COMPOSE_FILE" \
+      exec -T caddy \
+      caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile; then
+    cp -p "$live_backup" "$STACK_ROOT/Caddyfile"
+    docker compose \
+      --project-directory "$STACK_ROOT" \
+      -f "$COMPOSE_FILE" \
+      exec -T caddy \
+      caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1 || true
+    rm -f "$live_backup"
+    echo "ERROR: Caddy reload rejected the installed file; original bytes restored in place." >&2
+    return 1
+  fi
+  rm -f "$live_backup"
   CADDY_RESTARTED=1
 }
 
@@ -1239,6 +1309,7 @@ deploy() {
     *)
       echo "Applying Caddy config (render → validate → hash-compare → install if changed)"
       apply_caddy
+      verify_public_caddy_network_selection
       run_caddy="$CADDY_RESTARTED"
       mark_component_deployed caddy
       ;;

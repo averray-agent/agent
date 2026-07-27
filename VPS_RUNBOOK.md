@@ -102,7 +102,9 @@ docker compose logs --tail=100 caddy
 >
 > ```bash
 > cd /srv/agent-stack/app
-> APP_PUBLIC_SHELL=1 ./scripts/ops/render-caddyfile.sh /srv/agent-stack/Caddyfile
+> APP_PUBLIC_SHELL=1 \
+> CADDY_NETWORK_STATE_FILE=/srv/agent-stack/.deploy-state/caddy-network-selection.json \
+> ./scripts/ops/render-caddyfile.sh /srv/agent-stack/Caddyfile
 > docker compose -f /srv/agent-stack/docker-compose.yml exec caddy caddy reload --config /etc/caddy/Caddyfile
 > ```
 >
@@ -119,7 +121,8 @@ docker compose logs --tail=100 caddy
 cd /srv/agent-stack/app
 APP_BASIC_AUTH_USER=operator \
 APP_BASIC_AUTH_PASSWORD='replace-with-a-strong-password' \
-./scripts/ops/render-caddyfile.sh /srv/agent-stack/Caddyfile
+CADDY_NETWORK_STATE_FILE=/srv/agent-stack/.deploy-state/caddy-network-selection.json \
+  ./scripts/ops/render-caddyfile.sh /srv/agent-stack/Caddyfile
 ```
 
 4. Restart Caddy:

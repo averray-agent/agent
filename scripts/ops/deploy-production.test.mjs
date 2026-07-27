@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, writeFile, copyFile, chmod } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile, copyFile, chmod, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -220,6 +220,15 @@ test("unchanged Caddy content does not imply an indexer smoke check", async () =
     "set -euo pipefail",
     "cp \"$FAKE_RENDER_SOURCE\" \"$1\""
   ].join("\n"));
+  await writeFile(
+    join(appRoot, "scripts/ops/caddy-network-selection.mjs"),
+    "console.log(JSON.stringify({ ok: true }));\n",
+  );
+  await copyFile(
+    join(REPO_ROOT, "scripts/ops/run-caddy-network-selection.sh"),
+    join(appRoot, "scripts/ops/run-caddy-network-selection.sh"),
+  );
+  await chmod(join(appRoot, "scripts/ops/run-caddy-network-selection.sh"), 0o755);
   await writeExecutable(join(appRoot, "scripts/ops/check-hosted-stack.sh"), [
     "#!/usr/bin/env bash",
     "set -euo pipefail",
@@ -228,6 +237,7 @@ test("unchanged Caddy content does not imply an indexer smoke check", async () =
   await writeExecutable(join(fakeBin, "docker"), [
     "#!/usr/bin/env bash",
     "echo docker \"$*\" >> \"$DEPLOY_LOG\"",
+    "if [[ \"${FAKE_DOCKER_FAIL_RELOAD:-0}\" == \"1\" && \"$*\" == *\"exec -T caddy caddy reload\"* ]]; then exit 1; fi",
     "exit 0"
   ].join("\n"));
   for (const command of ["curl", "npm", "flock", "jq"]) {
@@ -278,12 +288,36 @@ test("unchanged Caddy content does not imply an indexer smoke check", async () =
   const thirdSha = revParse(appRoot, "HEAD");
   await writeFile(renderSource, "changed config\n");
   await writeFile(deployLog, "");
+  const caddyInodeBefore = (await stat(join(stackRoot, "Caddyfile"))).ino;
 
   const changedRun = runDeploy(appRoot, env(nextSha, thirdSha));
   assert.equal(changedRun.status, 0, changedRun.stderr);
   assert.match(changedRun.stdout, /Caddyfile content changed/u);
-  assert.match(await readFile(deployLog, "utf8"), /restart caddy/u);
+  assert.match(await readFile(deployLog, "utf8"), /exec -T caddy caddy reload/u);
   assert.match(await readFile(deployLog, "utf8"), /^check-indexer=1$/m);
+  assert.equal(
+    (await stat(join(stackRoot, "Caddyfile"))).ino,
+    caddyInodeBefore,
+    "normal production deploy must preserve the single-file bind mount inode",
+  );
+  assert.equal(await readFile(join(stackRoot, "Caddyfile"), "utf8"), "changed config\n");
+
+  await writeFile(join(appRoot, "README.md"), "fourth\n");
+  git(appRoot, "add", ".");
+  git(appRoot, "commit", "-m", "fourth");
+  const fourthSha = revParse(appRoot, "HEAD");
+  await writeFile(renderSource, "rejected config\n");
+  await writeFile(deployLog, "");
+  const rollbackInodeBefore = (await stat(join(stackRoot, "Caddyfile"))).ino;
+
+  const rejectedRun = runDeploy(appRoot, {
+    ...env(thirdSha, fourthSha),
+    FAKE_DOCKER_FAIL_RELOAD: "1",
+  });
+  assert.equal(rejectedRun.status, 1);
+  assert.match(rejectedRun.stderr, /original bytes restored in place/u);
+  assert.equal((await stat(join(stackRoot, "Caddyfile"))).ino, rollbackInodeBefore);
+  assert.equal(await readFile(join(stackRoot, "Caddyfile"), "utf8"), "changed config\n");
 });
 
 test("deploy rebuilds and verifies the public site even when no site paths changed", async () => {
@@ -591,6 +625,31 @@ test("indexer schema recovery persists across normal runtime-env renders", async
   );
 });
 
+test("normal Caddy deploys consume the durable external network selector", async () => {
+  const script = await readFile(DEPLOY_SCRIPT, "utf8");
+  assert.match(
+    script,
+    /CADDY_NETWORK_STATE_FILE=\$\{CADDY_NETWORK_STATE_FILE:-"\$DEPLOY_STATE_DIR\/caddy-network-selection\.json"\}/u,
+  );
+  assert.match(script, /run-caddy-network-selection\.sh" bootstrap/u);
+  assert.match(script, /run-caddy-network-selection\.sh" status/u);
+  assert.match(script, /jq -e '\.consistent == true'/u);
+  assert.match(script, /refusing an unguarded route repair/u);
+  assert.match(
+    script,
+    /CADDY_NETWORK_STATE_FILE="\$CADDY_NETWORK_STATE_FILE"\s+\\\s+"\$APP_ROOT\/scripts\/ops\/render-caddyfile\.sh"/u,
+  );
+  assert.match(
+    script,
+    /apply_caddy\s+verify_public_caddy_network_selection/u,
+    "every normal Caddy deploy should verify that the public API still serves the selected chain",
+  );
+  assert.match(script, /Durable Caddy selection verified publicly: chainId \$expected_chain_id/u);
+  assert.doesNotMatch(script, /mv "\$rendered_tmp" "\$STACK_ROOT\/Caddyfile"/u);
+  assert.match(script, /cp "\$rendered_tmp" "\$STACK_ROOT\/Caddyfile"/u);
+  assert.match(script, /cp -p "\$live_backup" "\$STACK_ROOT\/Caddyfile"/u);
+});
+
 test("deploy wrapper freezes contract surface changes without a manifest update", async () => {
   const { appRoot, stackRoot, fakeBin, stateDir, baseSha, nextSha } = await makeDeployFreezeFixture(
     async (appRoot) => {
@@ -707,6 +766,12 @@ test("deploy workflow wires the D-03 contract surface override as manual-only", 
     /"\$DEPLOY_ALLOW_CONTRACT_SURFACE_DRIFT"/u,
     "remote_env must include the evaluated override value"
   );
+});
+
+test("deploy workflow forwards an auditable GitHub actor for one-time selector migration", async () => {
+  const workflow = await readFile(join(REPO_ROOT, ".github/workflows/deploy-production.yml"), "utf8");
+  assert.match(workflow, /DEPLOY_ACTOR=%q/u);
+  assert.match(workflow, /github-actions:\$\{\{ github\.actor \}\}/u);
 });
 
 async function writeExecutable(path, content) {
