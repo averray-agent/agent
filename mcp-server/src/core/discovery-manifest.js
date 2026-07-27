@@ -5,6 +5,38 @@ const DEFAULT_DISCOVERY_URL = "https://averray.com/.well-known/agent-tools.json"
 const DEFAULT_PROFILE_URL = "https://app.averray.com/agents/<wallet>";
 const DEFAULT_OPERATOR_APP_URL = "https://app.averray.com";
 
+// Polkadot Hub networks this deployment can advertise. The active network is
+// selected by the caller's chainId — on the live server that is
+// authConfig.chainId (AUTH_CHAIN_ID), the same value /health reports, SIWE
+// binds, and the startup chain-id guard verifies against the RPC — so the
+// manifest cannot advertise a different chain than auth accepts. Mainnet has
+// no faucet: faucetUrl is a testnet-only key, and network-dependent wording
+// below must render from this table rather than hardcoding either network.
+export const POLKADOT_HUB_MAINNET_CHAIN_ID = 420420419;
+export const POLKADOT_HUB_TESTNET_CHAIN_ID = 420420417;
+
+const HUB_NETWORKS = {
+  [POLKADOT_HUB_MAINNET_CHAIN_ID]: {
+    name: "Polkadot Hub",
+    currencySymbol: "DOT",
+    chainId: POLKADOT_HUB_MAINNET_CHAIN_ID,
+    rpcUrl: "https://eth-rpc.polkadot.io"
+  },
+  [POLKADOT_HUB_TESTNET_CHAIN_ID]: {
+    name: "Polkadot Hub TestNet",
+    currencySymbol: "PAS",
+    chainId: POLKADOT_HUB_TESTNET_CHAIN_ID,
+    rpcUrl: "https://eth-rpc-testnet.polkadot.io",
+    faucetUrl: "https://faucet.polkadot.io/"
+  }
+};
+
+// Unknown/unset chain ids (dev stacks boot with AUTH_CHAIN_ID=0) keep the
+// historical testnet block — never default to advertising mainnet.
+export function resolveHubNetwork(chainId) {
+  return HUB_NETWORKS[Number(chainId)] ?? HUB_NETWORKS[POLKADOT_HUB_TESTNET_CHAIN_ID];
+}
+
 const DISCOVERY_PUBLIC_ENDPOINTS = [
   { path: "/health", description: "Liveness plus serviceHealth/capabilityHealth for state store, blockchain, treasury mutations, XCM observer, indexer, and gas sponsor." },
   { path: "/metrics", description: "Prometheus text-format metrics. Bearer-gated in production via METRICS_BEARER_TOKEN." },
@@ -48,7 +80,7 @@ const DISCOVERY_AUTHENTICATED_ENDPOINTS = [
   { path: "/reputation", description: "Current reputation scores + tier." },
   { path: "/auth/refresh", description: "Rotate the caller's wallet JWT — revokes the old jti and mints a new one with the same sub + roles. Lets operators avoid re-SIWE every AUTH_TOKEN_TTL_SECONDS." },
   { path: "/jobs/recommendations", description: "Tier-gated recommendation list with fit score + unlock hints." },
-  { path: "/jobs/preflight", description: "Per-job eligibility + claim-stake + tier-gate snapshot." },
+  { path: "/jobs/preflight?jobId=X", description: "Per-job eligibility + claim-stake + tier-gate snapshot. GET only, with the job id in the ?jobId= query parameter — POST /jobs/preflight is not a route and returns 404." },
   { path: "/jobs/explain-eligibility", description: "Per-wallet reason why a job is eligible or blocked (used by the explainEligibility tool)." },
   { path: "/jobs/estimate-reward", description: "Profile-aware net-reward estimate after fees, waivers, and stake (used by the estimateNetReward tool)." },
   { path: "/shares", description: "Create an expiring signed read-only URL for agent, session, dispute, or policy snapshots." },
@@ -67,7 +99,7 @@ const DISCOVERY_AUTHENTICATED_ENDPOINTS = [
   { path: "/disputes", description: "Operator dispute queue derived from sessions requiring human review." },
   { path: "/disputes/:id", description: "Detailed dispute evidence, timeline, verdict, and stake release state." },
   { path: "/admin/sessions", description: "Admin/operator-wide recent sessions across worker wallets." },
-  { path: "/session", description: "Fetch a single session by id (owner-scoped)." },
+  { path: "/session?sessionId=X", description: "Fetch a single session by id (owner-scoped). The query parameter is ?sessionId= — ?id= is ignored and reads as an empty id." },
   { path: "/sessions", description: "Historical sessions for the signed-in wallet." },
   { path: "/xcm/request?requestId=X", description: "Read one async XCM request by id (owner/admin scoped)." },
   { path: "/events", description: "SSE stream of platform events. Auth via ?token=." }
@@ -75,7 +107,7 @@ const DISCOVERY_AUTHENTICATED_ENDPOINTS = [
 
 const AUTH_ENTRYPOINTS = ["/auth/nonce", "/auth/verify", "/auth/refresh", "/auth/logout"];
 
-const WALLET_READINESS_CHECKS = [
+const buildWalletReadinessChecks = (network) => [
   {
     id: "select-wallet-mode",
     description: "Choose evm-siwe for protected HTTP actions today; inspect walletModes before using a native or mapped account.",
@@ -107,8 +139,8 @@ const WALLET_READINESS_CHECKS = [
   },
   {
     id: "wallet-funded",
-    description: "Fund the wallet on Polkadot Hub TestNet before claiming if the job is not fully sponsored or stake-waived.",
-    faucetUrl: "https://faucet.polkadot.io/",
+    description: `Fund the wallet on ${network.name} before claiming if the job is not fully sponsored or stake-waived.`,
+    ...(network.faucetUrl ? { faucetUrl: network.faucetUrl } : {}),
     blockingFor: ["/jobs/claim"]
   },
   {
@@ -118,7 +150,7 @@ const WALLET_READINESS_CHECKS = [
   }
 ];
 
-const WALLET_MODES = [
+const buildWalletModes = (network) => [
   {
     id: "evm-siwe",
     status: "supported",
@@ -130,19 +162,15 @@ const WALLET_MODES = [
       accountGuidance:
         "Create or select a dedicated EVM account for the agent. In Talisman, choose an EVM account for today's SIWE flow.",
       talismanGuidance:
-        "A Talisman EVM account can coexist with Substrate accounts. A separate recovery phrase is safest for long-running agents; a derived low-risk testnet account is acceptable only when operators understand the recovery boundary.",
+        network.chainId === POLKADOT_HUB_TESTNET_CHAIN_ID
+          ? "A Talisman EVM account can coexist with Substrate accounts. A separate recovery phrase is safest for long-running agents; a derived low-risk testnet account is acceptable only when operators understand the recovery boundary."
+          : "A Talisman EVM account can coexist with Substrate accounts. A separate recovery phrase is safest for long-running agents.",
       secretHandling:
         "AGENT_WALLET_PRIVATE_KEY style config is for local service configuration or secret managers only; never paste raw keys or seed phrases into chat.",
       payoutGuidance:
         "Auth identity, payout address, and future mapped Hub account may diverge; use the signed-in EVM wallet as the worker identity until native modes are supported."
     },
-    chain: {
-      name: "Polkadot Hub TestNet",
-      currencySymbol: "PAS",
-      chainId: 420420417,
-      rpcUrl: "https://eth-rpc-testnet.polkadot.io",
-      faucetUrl: "https://faucet.polkadot.io/"
-    },
+    chain: { ...network },
     readinessChecks: ["dedicated-agent-account", "private-key-local-only", "siwe-session", "wallet-funded", "preflight-job"],
     notes: [
       "Use this mode for authenticated HTTP actions today.",
@@ -172,13 +200,7 @@ const WALLET_MODES = [
       "3. Work: GET /jobs then POST /jobs/claim then POST /jobs/submit. Eligible starter-tier jobs are operator-brokered — Averray's backend signer submits the on-chain claim and settlement on your behalf and covers the gas, and curated jobs marked onboardingWaiverEligible waive the claim stake — so a fresh unfunded wallet can claim, submit, and earn from zero only when the job advertises that waiver. This brokered sponsorship is independent of the /health gasSponsor (Pimlico ERC-4337 paymaster) capability, which may read 'disabled' without affecting starter-tier earning.",
       "4. Persist the key and JWT; re-run step 2 when the JWT expires."
     ],
-    chain: {
-      name: "Polkadot Hub TestNet",
-      currencySymbol: "PAS",
-      chainId: 420420417,
-      rpcUrl: "https://eth-rpc-testnet.polkadot.io",
-      faucetUrl: "https://faucet.polkadot.io/"
-    },
+    chain: { ...network },
     readinessChecks: ["dedicated-agent-account", "private-key-local-only", "siwe-session", "preflight-job"],
     notes: [
       "Lowest-friction path for autonomous agents: no human, no browser wallet, and no funding for starter-tier jobs.",
@@ -387,7 +409,7 @@ const DISCOVERY_TOOLS = [
   { name: "getXcmRequest", description: "Read the current lifecycle state of one async XCM request." }
 ];
 
-const BASE_MANIFEST = {
+const buildBaseManifest = (network) => ({
   name: "Averray — trusted agent work + identity runtime",
   version: "0.3.1",
   description:
@@ -405,15 +427,17 @@ const BASE_MANIFEST = {
       "poll-verification-status",
       "inspect-earned-badge"
     ],
-    walletModes: WALLET_MODES,
+    walletModes: buildWalletModes(network),
     actionRequirements: HTTP_ACTION_REQUIREMENTS,
-    readinessChecks: WALLET_READINESS_CHECKS,
+    readinessChecks: buildWalletReadinessChecks(network),
     selfServeChecklist: [
       "Read /onboarding and /agent-tools.json before selecting a wallet mode.",
       "Use evm-siwe with a dedicated EVM account for protected HTTP actions today.",
       "For Talisman, select an EVM account for the current SIWE flow; Substrate and mapped-account modes are documented as planned/mapping-dependent.",
       "Keep private keys and seed phrases in local env or secret storage only; do not paste them into agent chat.",
-      "Fund the Polkadot Hub TestNet wallet from https://faucet.polkadot.io/ unless the job is sponsored or stake-waived.",
+      network.faucetUrl
+        ? `Fund the ${network.name} wallet from ${network.faucetUrl} unless the job is sponsored or stake-waived.`
+        : `Fund the ${network.name} wallet unless the job is sponsored or stake-waived.`,
       "Request a SIWE nonce, sign it with personal_sign, and exchange the signature for a bearer JWT.",
       "Call /jobs/preflight before /jobs/claim to see tier, stake, fee, and waiver state.",
       "Treat claimStatus.claimable and claimStatus.reason as authoritative for whether a job may be claimed now; lifecycle.status describes the content/job lifecycle and can remain open when claimStatus says exhausted, claimed, or submitted.",
@@ -469,15 +493,16 @@ const BASE_MANIFEST = {
     note:
       "Mutating and financial actions exist on authenticated HTTP and operator-app surfaces but are intentionally excluded from this directory-safe manifest until the trust, policy, and audit posture are ready for broader distribution."
   }
-};
+});
 
 export function buildDiscoveryManifest({
   baseUrl = DEFAULT_BASE_URL,
   discoveryUrl = DEFAULT_DISCOVERY_URL,
   profile = DEFAULT_PROFILE_URL,
-  operatorAppUrl = DEFAULT_OPERATOR_APP_URL
+  operatorAppUrl = DEFAULT_OPERATOR_APP_URL,
+  chainId = undefined
 } = {}) {
-  const manifest = JSON.parse(JSON.stringify(BASE_MANIFEST));
+  const manifest = JSON.parse(JSON.stringify(buildBaseManifest(resolveHubNetwork(chainId))));
   manifest.baseUrl = baseUrl;
   manifest.discoveryUrl = discoveryUrl;
   manifest.profile = profile;
@@ -493,8 +518,8 @@ export function buildDiscoveryManifest({
   return manifest;
 }
 
-export function buildPlatformCapabilities() {
-  const manifest = buildDiscoveryManifest();
+export function buildPlatformCapabilities({ chainId = undefined } = {}) {
+  const manifest = buildDiscoveryManifest({ chainId });
   return {
     name: manifest.name,
     discoveryUrl: manifest.discoveryUrl,
