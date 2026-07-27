@@ -3,7 +3,7 @@
 This document records the recommended multisig approach for Averray.
 
 It does not replace the full setup walkthrough in
-[docs/MULTISIG_SETUP.md](/Users/pascalkuriger/repo/Polkadot/docs/MULTISIG_SETUP.md).
+[docs/MULTISIG_SETUP.md](/docs/MULTISIG_SETUP.md).
 Instead, it explains **which multisig stack to use and why**.
 
 ---
@@ -138,6 +138,6 @@ In that case:
 
 ## Related docs
 
-- [docs/MULTISIG_SETUP.md](/Users/pascalkuriger/repo/Polkadot/docs/MULTISIG_SETUP.md)
-- [docs/PRODUCTION_CHECKLIST.md](/Users/pascalkuriger/repo/Polkadot/docs/PRODUCTION_CHECKLIST.md)
-- [docs/MAINNET_PARAMETERS.md](/Users/pascalkuriger/repo/Polkadot/docs/MAINNET_PARAMETERS.md)
+- [docs/MULTISIG_SETUP.md](/docs/MULTISIG_SETUP.md)
+- [docs/PRODUCTION_CHECKLIST.md](/docs/PRODUCTION_CHECKLIST.md)
+- [docs/MAINNET_PARAMETERS.md](/docs/MAINNET_PARAMETERS.md)

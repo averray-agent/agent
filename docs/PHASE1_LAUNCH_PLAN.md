@@ -7,7 +7,7 @@ today.
 For the broader Polkadot-specific implementation sequence beyond this
 Phase 1 wedge, use:
 
-- [docs/POLKADOT_EXECUTION_PLAN.md](/Users/pascalkuriger/repo/Polkadot/docs/POLKADOT_EXECUTION_PLAN.md)
+- [docs/POLKADOT_EXECUTION_PLAN.md](/docs/POLKADOT_EXECUTION_PLAN.md)
 
 The guiding decision is simple:
 
@@ -89,10 +89,10 @@ Owner: backend + product
 
 Files:
 
-- [mcp-server/src/core/discovery-manifest.js](/Users/pascalkuriger/repo/Polkadot/mcp-server/src/core/discovery-manifest.js)
-- [discovery/.well-known/agent-tools.json](/Users/pascalkuriger/repo/Polkadot/discovery/.well-known/agent-tools.json)
-- [discovery/agent-tools.json](/Users/pascalkuriger/repo/Polkadot/discovery/agent-tools.json)
-- [site/.well-known/agent-tools.json](/Users/pascalkuriger/repo/Polkadot/site/.well-known/agent-tools.json)
+- [mcp-server/src/core/discovery-manifest.js](/mcp-server/src/core/discovery-manifest.js)
+- [discovery/.well-known/agent-tools.json](/discovery/.well-known/agent-tools.json)
+- [discovery/agent-tools.json](/discovery/agent-tools.json)
+- [site/.well-known/agent-tools.json](/site/.well-known/agent-tools.json)
 
 ## 2. Docs truthfulness
 
@@ -104,9 +104,9 @@ Owner: product + engineering
 
 Files:
 
-- [docs/DISCOVERY.md](/Users/pascalkuriger/repo/Polkadot/docs/DISCOVERY.md)
-- [docs/strategies/vdot.md](/Users/pascalkuriger/repo/Polkadot/docs/strategies/vdot.md)
-- [docs/PRODUCTION_CHECKLIST.md](/Users/pascalkuriger/repo/Polkadot/docs/PRODUCTION_CHECKLIST.md)
+- [docs/DISCOVERY.md](/docs/DISCOVERY.md)
+- [docs/strategies/vdot.md](/docs/strategies/vdot.md)
+- [docs/PRODUCTION_CHECKLIST.md](/docs/PRODUCTION_CHECKLIST.md)
 
 ## 3. Public positioning
 
@@ -118,8 +118,8 @@ Owner: product + marketing
 
 Files:
 
-- [marketing/src/layouts/BaseLayout.astro](/Users/pascalkuriger/repo/Polkadot/marketing/src/layouts/BaseLayout.astro)
-- [marketing/src/pages/index.astro](/Users/pascalkuriger/repo/Polkadot/marketing/src/pages/index.astro)
+- [marketing/src/layouts/BaseLayout.astro](/marketing/src/layouts/BaseLayout.astro)
+- [marketing/src/pages/index.astro](/marketing/src/pages/index.astro)
 
 ## 4. Builder readiness
 
@@ -148,9 +148,9 @@ Owner: ops + product
 
 Blocking docs:
 
-- [docs/AUDIT_PACKAGE.md](/Users/pascalkuriger/repo/Polkadot/docs/AUDIT_PACKAGE.md)
-- [docs/INCIDENT_RESPONSE.md](/Users/pascalkuriger/repo/Polkadot/docs/INCIDENT_RESPONSE.md)
-- [VPS_RUNBOOK.md](/Users/pascalkuriger/repo/Polkadot/VPS_RUNBOOK.md)
+- [docs/AUDIT_PACKAGE.md](/docs/AUDIT_PACKAGE.md)
+- [docs/INCIDENT_RESPONSE.md](/docs/INCIDENT_RESPONSE.md)
+- [VPS_RUNBOOK.md](/VPS_RUNBOOK.md)
 
 ## 6. Polkadot platform fit
 
@@ -166,8 +166,8 @@ Owner: product + contracts + ops
 
 Reference:
 
-- [docs/POLKADOT_OFFICIAL_ALIGNMENT.md](/Users/pascalkuriger/repo/Polkadot/docs/POLKADOT_OFFICIAL_ALIGNMENT.md)
-- [docs/POLKADOT_EXECUTION_PLAN.md](/Users/pascalkuriger/repo/Polkadot/docs/POLKADOT_EXECUTION_PLAN.md)
+- [docs/POLKADOT_OFFICIAL_ALIGNMENT.md](/docs/POLKADOT_OFFICIAL_ALIGNMENT.md)
+- [docs/POLKADOT_EXECUTION_PLAN.md](/docs/POLKADOT_EXECUTION_PLAN.md)
 
 ---
 

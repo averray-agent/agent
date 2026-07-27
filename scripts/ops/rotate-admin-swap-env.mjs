@@ -12,7 +12,7 @@
  *
  * Usage:
  *   node scripts/ops/rotate-admin-swap-env.mjs \
- *     --env-file /Users/pascalkuriger/repo/Polkadot/mcp-server/.env.local \
+ *     --env-file mcp-server/.env.local \
  *     --new-key-file .keys/new-admin-eoa.txt \
  *     --expected-old 0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519 \
  *     --expected-new 0x6778F050eAc8313e4dbB176d7BAB44510E833ac8 \

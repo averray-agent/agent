@@ -11,9 +11,9 @@ Use these jobs first because they are:
 - structured enough to create durable outputs
 
 The matching machine-readable bundle lives at
-[docs/ready-to-post-jobs.json](/Users/pascalkuriger/repo/Polkadot/docs/ready-to-post-jobs.json).
+[docs/ready-to-post-jobs.json](/docs/ready-to-post-jobs.json).
 To post the bundle in one shot, use
-[scripts/post_job_bundle.mjs](/Users/pascalkuriger/repo/Polkadot/scripts/post_job_bundle.mjs).
+[scripts/post_job_bundle.mjs](/scripts/post_job_bundle.mjs).
 
 ---
 
@@ -45,7 +45,7 @@ node scripts/post_job_bundle.mjs --only pr-review-findings-001,release-readiness
 
 What the helper does:
 
-- reads [docs/ready-to-post-jobs.json](/Users/pascalkuriger/repo/Polkadot/docs/ready-to-post-jobs.json)
+- reads [docs/ready-to-post-jobs.json](/docs/ready-to-post-jobs.json)
 - fetches the current job list from `/jobs`
 - skips any job ids that already exist
 - posts only the missing jobs to `/admin/jobs`
