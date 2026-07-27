@@ -293,6 +293,21 @@ test("admin async XCM smoke verifies the watcher lane is publishing, not just co
 
   assert.match(
     script,
+    /OPERATOR_TOKEN=\$\{AVERRAY_TOKEN:-\$ADMIN_JWT\}/u,
+    "short-lived AVERRAY_TOKEN must take precedence over the legacy ADMIN_JWT."
+  );
+  assert.match(
+    script,
+    /authorization: Bearer \$OPERATOR_TOKEN/u,
+    "the admin-status gate must accept the selected short-lived operator token."
+  );
+  assert.match(
+    script,
+    /if \[\[ -n "\$OPERATOR_TOKEN" \]\]; then\s+echo "Checking admin async XCM status"/u,
+    "admin async XCM checks must run for either refresh-minted or legacy operator auth."
+  );
+  assert.match(
+    script,
     /\.xcmSettlementWatcher\.running == true/u,
     "admin async XCM smoke must assert .xcmSettlementWatcher.running == true so a watcher whose start() never ran fails the deploy."
   );

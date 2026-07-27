@@ -68,6 +68,7 @@ APP_ALLOW_PROTECTED_SHELL=${APP_ALLOW_PROTECTED_SHELL:-0}
 APP_PROTECTED_STATUS_CODES=${APP_PROTECTED_STATUS_CODES:-401}
 ADMIN_JWT=${ADMIN_JWT:-}
 AVERRAY_TOKEN=${AVERRAY_TOKEN:-}
+OPERATOR_TOKEN=${AVERRAY_TOKEN:-$ADMIN_JWT}
 admin_status_json=""
 
 require_command() {
@@ -93,7 +94,7 @@ fetch_admin_json() {
   local url="$1"
   curl -fsS --max-time "$TIMEOUT_SEC" \
     -H "accept: application/json" \
-    -H "authorization: Bearer $ADMIN_JWT" \
+    -H "authorization: Bearer $OPERATOR_TOKEN" \
     "$url"
 }
 
@@ -254,7 +255,7 @@ else
   echo "CHECK_INDEXER=$CHECK_INDEXER set; skipping indexer checks."
 fi
 
-if [[ -n "$ADMIN_JWT" ]]; then
+if [[ -n "$OPERATOR_TOKEN" ]]; then
   echo "Checking admin async XCM status"
   admin_status_json="$(fetch_admin_status_once)"
   jq -e '.maintenance.policy.enabled == true' >/dev/null <<<"$admin_status_json"

@@ -16,9 +16,10 @@ at a time** (SIWE roleless-mint 500 · JWT `sub`-casing 401 · claim 409 ·
 `submitWork` revert · `ADMIN_JWT` expiry). Every prior hosted proof used the
 pre-minted multi-role `ADMIN_JWT` and bypassed the SIWE front door, so none of
 them could see those bugs. This canary uses a **roleless** wallet for the worker
-stages and only the `ADMIN_JWT` for the operator stages, so the whole class
-fails loud here — in CI — before it reaches an external agent. See
-`docs/GO_LIVE_PUNCHLIST.md` (P0).
+stages. Testnet retains the legacy `ADMIN_JWT` operator path; mainnet exchanges
+the canary-owned rotating refresh chain for a short-lived access token. The
+whole class therefore fails loud here — in CI — before it reaches an external
+agent. See `docs/GO_LIVE_PUNCHLIST.md` (P0).
 
 ## Stages (each failure names the bug-class it guards)
 
@@ -33,9 +34,9 @@ fails loud here — in CI — before it reaches an external agent. See
 | 7 | Freshness | the long-lived operator `ADMIN_JWT` isn't within N days (default 7) of expiry | #628 `ADMIN_JWT` expiry |
 
 The worker stages (1–4) run on the roleless token; the operator stages
-(create/fund/verify/cleanup) run on the `ADMIN_JWT`. Stages 5 and 7 are
-structured to become **no-ops** once auto-verify and the short-lived
-refresh-token flow land (a short-lived operator token skips the freshness gate;
+(create/fund/verify/cleanup) run on the profile-selected operator credential.
+Stages 5 and 7 are structured to become **no-ops** once auto-verify and the
+short-lived refresh-token flow land (a short-lived operator token skips the freshness gate;
 `WORKER_CANARY_VERIFY_MODE=auto` polls the public verifier result instead of
 operator-triggering).
 
@@ -48,11 +49,20 @@ the public board. It never consumes claim attempts on real board jobs.
 
 ## Safety
 
-- **Testnet-only.** The script loads `deployments/testnet.json`, refuses any
-  profile but `testnet`, and asserts the live `chainId` is `420420417`
-  (Polkadot Hub Paseo). It will not drive a paid loop against mainnet.
+- **Exact profile/chain binding.** The script supports only the checked-in
+  `testnet` and `mainnet` manifests and requires live chain IDs `420420417` and
+  `420420419`, respectively. Mainnet always uses a fresh ephemeral worker and
+  refuses the persistent testnet worker key.
 - **Never the admin JWT for worker stages.** The worker identity is a dedicated,
-  roleless testnet wallet; the `ADMIN_JWT` is used only for the operator stages.
+  roleless wallet; operator credentials are used only for operator stages.
+- **One refresh chain per consumer.** Hosted Worker Canary exclusively owns
+  `op://mainnet-smoke/admin-refresh-token-worker-canary/password`. The internal
+  smoke runner exclusively owns
+  `op://mainnet-smoke/admin-refresh-token/password`. They must never share or
+  copy tokens because refresh replay revokes the chain.
+- **Persist before proceeding.** Mainnet proves the 1Password service account
+  can write/read before consuming, then writes and reads back the distinct
+  successor before exposing the short-lived access token to any hosted check.
 
 ## One-time provisioning (operator)
 
@@ -81,6 +91,20 @@ the public board. It never consumes claim attempts on real board jobs.
 3. **GitHub Actions secrets** the workflow needs:
    - `OP_SERVICE_ACCOUNT_TOKEN_PROD_SMOKE` — reads `op://prod-smoke/admin-jwt/password` (operator `ADMIN_JWT`). Already used by the dispute-verdict proof.
    - `OP_SERVICE_ACCOUNT_TOKEN_PROD_BACKEND` — a least-privilege service account scoped to **read** `op://prod-backend/canary-worker-testnet`.
+   - `OP_SERVICE_ACCOUNT_TOKEN_MAINNET_SMOKE` — mainnet-smoke-only service
+     account with read/write permission, used to rotate only
+     `admin-refresh-token-worker-canary`.
+
+   Seed the canary chain with a separate F15 SIWE login:
+
+   ```sh
+   node scripts/ops/seed-admin-refresh-token.mjs \
+     --item op://mainnet-smoke/admin-refresh-token-worker-canary/password \
+     --admin-key-op 'op://mainnet-critical/admin-eoa-mainnet/credential'
+   ```
+
+   This must not overwrite the internal runner's
+   `op://mainnet-smoke/admin-refresh-token/password` item.
 
 4. **Keep the worker claimable.** A fresh wallet's first
    `onboardingWaiverClaimCount` (3) claims are stake/fee-waived **only when the
@@ -107,6 +131,12 @@ WORKER_CANARY_EVIDENCE_FILE=artifacts/worker-canary.json \
 # One-off with a throwaway wallet (always within the onboarding waiver), no op needed:
 WORKER_CANARY_ALLOW_EPHEMERAL=1 \
 ADMIN_JWT="…" \
+  node scripts/ops/run-worker-canary.mjs
+
+# Mainnet operator path (dedicated rotating canary chain):
+WORKER_CANARY_PROFILE=mainnet \
+WORKER_CANARY_ALLOW_EPHEMERAL=1 \
+ADMIN_REFRESH_TOKEN_OP='op://mainnet-smoke/admin-refresh-token-worker-canary/password' \
   node scripts/ops/run-worker-canary.mjs
 ```
 

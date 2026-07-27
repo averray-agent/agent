@@ -221,15 +221,17 @@ test("selectHostedWorkerLoopAuthPath chooses explicit refresh and legacy branche
 
 test("resolveHostedWorkerLoopAuth exchanges refresh token without running the loop", async () => {
   const calls = [];
+  let persisted = "refresh-old";
   const auth = await resolveHostedWorkerLoopAuth({
     apiBaseUrl: "https://api.example.test",
     env: { ADMIN_REFRESH_TOKEN_OP: "op://prod-smoke/admin-refresh-token/password" },
     async readSecretImpl(ref) {
       calls.push(["read", ref]);
-      return "refresh-old";
+      return persisted;
     },
     async writeSecretImpl(ref, value) {
       calls.push(["write", ref, value]);
+      persisted = value;
     },
     async fetchImpl(url, options) {
       calls.push(["fetch", url, options.headers.cookie]);
@@ -255,8 +257,11 @@ test("resolveHostedWorkerLoopAuth exchanges refresh token without running the lo
   });
   assert.deepEqual(calls, [
     ["read", "op://prod-smoke/admin-refresh-token/password"],
+    ["write", "op://prod-smoke/admin-refresh-token/password", "refresh-old"],
+    ["read", "op://prod-smoke/admin-refresh-token/password"],
     ["fetch", "https://api.example.test/auth/refresh", "refresh_token=refresh-old"],
-    ["write", "op://prod-smoke/admin-refresh-token/password", "refresh-new"]
+    ["write", "op://prod-smoke/admin-refresh-token/password", "refresh-new"],
+    ["read", "op://prod-smoke/admin-refresh-token/password"]
   ]);
 });
 

@@ -16,7 +16,12 @@ name: Hosted Worker Canary
 # loop stays green indefinitely with no stake funding to maintain. Mainnet also
 # requires an ephemeral wallet and refuses the dedicated testnet key. Manual
 # testnet dispatches may still use op://prod-backend/canary-worker-testnet unless
-# allow_ephemeral is set. Only the OPERATOR stages use the ADMIN_JWT.
+# allow_ephemeral is set. Testnet operator stages retain the legacy ADMIN_JWT.
+# Mainnet operator stages use a short-lived access token minted from the
+# canary-owned refresh chain at
+# op://mainnet-smoke/admin-refresh-token-worker-canary/password. That chain is
+# never shared with the internal smoke runner, which owns the separate
+# op://mainnet-smoke/admin-refresh-token/password chain.
 
 on:
   # Manual run, with knobs for one-off debugging.
@@ -102,13 +107,51 @@ jobs:
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
 
-      - name: Load operator ADMIN_JWT from 1Password (fail-closed)
+      - name: Load testnet operator ADMIN_JWT from 1Password (fail-closed)
+        if: ${{ (vars.WORKER_CANARY_PROFILE || 'testnet') != 'mainnet' }}
         uses: 1password/load-secrets-action@92467eb28f72e8255933372f1e0707c567ce2259 # v4.0.0
         with:
           export-env: true
         env:
           OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN_PROD_SMOKE }}
           ADMIN_JWT_OP: op://prod-smoke/admin-jwt/password
+
+      # Mainnet cannot use the testnet-era long-lived admin JWT. The canary has
+      # its own refresh chain so it cannot rotate-collide with the internal
+      # smoke runner. get-admin-refresh-token.mjs proves write/read access
+      # before consuming the current token, then persists and reads back the
+      # successor before it emits the short-lived access token.
+      - name: Install 1Password CLI for mainnet refresh rotation
+        if: ${{ (vars.WORKER_CANARY_PROFILE || 'testnet') == 'mainnet' }}
+        uses: 1password/install-cli-action@a5215d3a7f75c1629216c465ea9ab3ab399c4b71 # v4.0.0
+
+      - name: Mint mainnet canary access token (persist successor first)
+        if: ${{ (vars.WORKER_CANARY_PROFILE || 'testnet') == 'mainnet' }}
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN_MAINNET_SMOKE }}
+          ADMIN_REFRESH_TOKEN_OP: op://mainnet-smoke/admin-refresh-token-worker-canary/password
+          API_BASE_URL: https://api.averray.com
+        run: |
+          set -euo pipefail
+          set +x
+
+          if [ -z "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
+            echo "::error::OP_SERVICE_ACCOUNT_TOKEN_MAINNET_SMOKE is empty; refusing to consume the canary refresh chain."
+            exit 1
+          fi
+
+          token="$(node scripts/ops/get-admin-refresh-token.mjs)"
+          if [ -z "${token:-}" ]; then
+            echo "::error::mainnet canary refresh exchange returned an empty access token."
+            exit 1
+          fi
+          case "$token" in
+            ey*.*.*) echo "mainnet canary access token: JWT shape valid" ;;
+            *) echo "::error::mainnet canary refresh exchange returned a non-JWT value."; exit 1 ;;
+          esac
+
+          echo "::add-mask::$token"
+          printf 'AVERRAY_TOKEN=%s\n' "$token" >> "$GITHUB_ENV"
 
       # The roleless worker key lives in prod-backend (VPS-readable; prod-critical
       # is not). Loaded with a least-privilege service account scoped to
@@ -129,14 +172,25 @@ jobs:
           set -euo pipefail
           set +x
 
-          if [ -z "${ADMIN_JWT_OP:-}" ]; then
-            echo "::error::ADMIN_JWT_OP is empty after load step — check op://prod-smoke/admin-jwt/password and OP_SERVICE_ACCOUNT_TOKEN_PROD_SMOKE."
-            exit 1
+          if [ "$WORKER_CANARY_PROFILE" = "mainnet" ]; then
+            if [ -z "${AVERRAY_TOKEN:-}" ]; then
+              echo "::error::AVERRAY_TOKEN is empty after the mainnet refresh exchange."
+              exit 1
+            fi
+            case "$AVERRAY_TOKEN" in
+              ey*.*.*) echo "AVERRAY_TOKEN: JWT shape valid" ;;
+              *) echo "::error::AVERRAY_TOKEN does not look like a JWT."; exit 1 ;;
+            esac
+          else
+            if [ -z "${ADMIN_JWT_OP:-}" ]; then
+              echo "::error::ADMIN_JWT_OP is empty after load step — check op://prod-smoke/admin-jwt/password and OP_SERVICE_ACCOUNT_TOKEN_PROD_SMOKE."
+              exit 1
+            fi
+            case "$ADMIN_JWT_OP" in
+              ey*.*.*) echo "ADMIN_JWT_OP: JWT shape valid" ;;
+              *) echo "::error::ADMIN_JWT_OP does not look like a JWT (expected ey<...>.<...>.<...>)"; exit 1 ;;
+            esac
           fi
-          case "$ADMIN_JWT_OP" in
-            ey*.*.*) echo "ADMIN_JWT_OP: JWT shape valid" ;;
-            *) echo "::error::ADMIN_JWT_OP does not look like a JWT (expected ey<...>.<...>.<...>)"; exit 1 ;;
-          esac
 
           if [ "$WORKER_CANARY_PROFILE" = "testnet" ] && [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.allow_ephemeral }}" != "true" ] && [ -z "${WORKER_CANARY_WORKER_PRIVATE_KEY:-}" ]; then
             echo "::error::WORKER_CANARY_WORKER_PRIVATE_KEY is empty — check op://prod-backend/canary-worker-testnet/private key and OP_SERVICE_ACCOUNT_TOKEN_PROD_BACKEND."
@@ -148,7 +202,11 @@ jobs:
           set -euo pipefail
           set +x
 
-          ADMIN_JWT="$ADMIN_JWT_OP" ./scripts/ops/check-hosted-stack.sh
+          if [ "$WORKER_CANARY_PROFILE" = "mainnet" ]; then
+            AVERRAY_TOKEN="$AVERRAY_TOKEN" ./scripts/ops/check-hosted-stack.sh
+          else
+            ADMIN_JWT="$ADMIN_JWT_OP" ./scripts/ops/check-hosted-stack.sh
+          fi
 
       - name: Summarize canary evidence
         if: always()
