@@ -2079,7 +2079,7 @@ test("http smoke: production /metrics fails closed when token is missing", { ski
 });
 
 test("http smoke: discovery manifest is served at both /agent-tools.json and the RFC 8615 .well-known path", { skip: !RUN }, async () => {
-  await runWithServer(async (base) => {
+  await runWithServerEnv({ AUTH_CHAIN_ID: "420420419" }, async (base) => {
     const [canonical, wellKnown, healthResponse] = await Promise.all([
       fetch(`${base}/agent-tools.json`),
       fetch(`${base}/.well-known/agent-tools.json`),
