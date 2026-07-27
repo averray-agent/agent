@@ -167,7 +167,10 @@ test("durable selection resolves the deploy compose and services in both directi
       network: "mainnet",
       expectedChainId: 420420419,
       composeFile: join(appRoot, "deploy/docker-compose.mainnet.yml"),
-      projectDirectory: appRoot,
+      // Compose-file directory, not the app root: the mainnet compose has
+      // relative build contexts and the live agent-mainnet project was
+      // created with compose's default project directory (the file's dir).
+      projectDirectory: join(appRoot, "deploy"),
       backendService: "mainnet-backend",
       backendContainer: "agent-mainnet-backend",
       indexerService: "mainnet-indexer",

@@ -774,7 +774,11 @@ test("durable mainnet selection drives the live backend compose target", async (
     backendEnvTarget,
   ] = (await readFile(fixture.deployLog, "utf8")).trim().split("|");
   assert.ok(composeFile.endsWith("/app/deploy/docker-compose.mainnet.yml"));
-  assert.ok(projectDirectory.endsWith("/app"));
+  // Compose-file directory, not the app root: the mainnet compose has
+  // relative build contexts (context: ..) that must resolve to the repo root
+  // exactly as start-mainnet-sidecar.sh's default-project-directory bring-up
+  // resolved them.
+  assert.ok(projectDirectory.endsWith("/app/deploy"));
   assert.equal(backendService, "mainnet-backend");
   assert.equal(backendContainer, "agent-mainnet-backend");
   assert.ok(backendTemplate.endsWith("/app/deploy/backend.mainnet.env.template"));
