@@ -210,6 +210,41 @@ test("expired claim on an unfunded prefund job never re-advertises as claimable"
   assert.equal(status.effectiveState, "expired");
 });
 
+test("expired claim on a lazy-funded mainnet job stays blocked when the reward bank is short", () => {
+  const expiredSession = {
+    sessionId: "job-fund:0xlazy-expired",
+    jobId: "job-fund",
+    wallet: WALLET,
+    status: "claimed",
+    claimedAt: "2026-05-01T10:00:00.000Z",
+    chainClaimExpiresAt: "2026-05-01T10:00:30.000Z"
+  };
+  const status = summarizeJobClaimState({
+    job: {
+      ...OPEN_JOB,
+      rewardAsset: "USDC",
+      rewardAmount: 0.25,
+      claimTtlSeconds: 30
+    },
+    session: expiredSession,
+    sessions: [expiredSession],
+    wallet: WALLET,
+    rewardBank: {
+      asset: "USDC",
+      decimals: 6,
+      liquidRaw: "200000",
+      readable: true,
+      asOf: "2026-07-27T12:00:00.000Z"
+    },
+    now: new Date("2026-05-01T10:01:00.000Z")
+  });
+  assert.equal(status.claimState, "expired");
+  assert.equal(status.claimable, false);
+  assert.equal(status.reason, "reward_funding_pending");
+  assert.equal(status.fundingState, "pending");
+  assert.equal(status.effectiveState, "expired");
+});
+
 test("retry exhaustion takes precedence over funding-pending in the reason", () => {
   const attempts = [
     { sessionId: "job-fund:0x1", status: "expired", claimedAt: "2026-05-01T10:00:00.000Z" },

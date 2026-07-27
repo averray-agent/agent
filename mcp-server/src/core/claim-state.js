@@ -69,14 +69,14 @@ export function summarizeJobClaimState({
   const lazyFundingUnverified = lazyFundingState === "unverified";
   const effectiveFundingState = fundingState
     ?? (lazyFundingPending ? "pending" : lazyFundingUnverified ? "unverified" : undefined);
+  const fundingBlocked = prefundingPending || lazyFundingPending || lazyFundingUnverified;
+  const fundingReason = prefundingPending || lazyFundingPending
+    ? "reward_funding_pending"
+    : lazyFundingUnverified
+      ? "reward_funding_unverified"
+      : undefined;
 
   if (!session) {
-    const fundingBlocked = prefundingPending || lazyFundingPending || lazyFundingUnverified;
-    const fundingReason = prefundingPending || lazyFundingPending
-      ? "reward_funding_pending"
-      : lazyFundingUnverified
-        ? "reward_funding_unverified"
-        : undefined;
     const claimable = lifecycleState === "open" && !retryExhausted && !fundingBlocked;
     const claimState = retryExhausted ? "exhausted" : claimable ? "open" : lifecycleState;
     return compact({
@@ -101,11 +101,7 @@ export function summarizeJobClaimState({
   }
 
   if (expired) {
-    // A lazy-funded job with a prior claim already has an on-chain escrow, so
-    // current reward-bank liquidity is irrelevant when reopening it. The
-    // ingestion-prefund guard remains because that path's explicit metadata is
-    // the source of truth and must retain its existing behavior.
-    const claimable = lifecycleState === "open" && !retryExhausted && !prefundingPending;
+    const claimable = lifecycleState === "open" && !retryExhausted && !fundingBlocked;
     const claimState = retryExhausted ? "exhausted" : "expired";
     return compact({
       claimState,
@@ -113,12 +109,10 @@ export function summarizeJobClaimState({
       effectiveState: claimable ? "claimable" : claimState,
       claimable,
       currentWalletCanClaim: normalizedWallet ? claimable : null,
-      fundingState,
+      fundingState: effectiveFundingState,
       reason: retryExhausted
         ? "retry_limit_exhausted"
-        : prefundingPending
-          ? "reward_funding_pending"
-          : "claim_ttl_expired_reopen_available",
+        : fundingReason ?? "claim_ttl_expired_reopen_available",
       retryLimit,
       claimAttemptCount,
       remainingClaimAttempts,
