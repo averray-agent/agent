@@ -26,9 +26,11 @@
 // it reaches an external agent.
 //
 // SAFETY:
-//   - Refuses to run anywhere but Polkadot Hub TestNet (chainId 420420417).
-//     The worker stages never touch the admin JWT; the worker key is a
-//     dedicated roleless testnet wallet (op://prod-backend/canary-worker-testnet).
+//   - Supports only the checked-in testnet/mainnet deployment profiles and
+//     requires the live RPC chainId to match the selected profile exactly.
+//   - Mainnet always uses a fresh ephemeral worker. It never reads or accepts
+//     the dedicated testnet worker key.
+//   - The worker stages never touch the admin JWT.
 //   - Posts its own disposable, UPFRONT-funded job each run and archives it in a
 //     finally block, so canary jobs never accumulate or pollute the public board
 //     and the loop never depends on the lazy ensureJob path.
@@ -55,9 +57,14 @@ const repoRoot = resolve(here, "..", "..");
 
 const DEFAULT_API_BASE_URL = "https://api.averray.com";
 const DEFAULT_PROFILE = "testnet";
-// The ONLY chain this canary is allowed to drive. Polkadot Hub (Asset Hub
-// Paseo) TestNet. A mainnet manifest or RPC must fail-closed here.
-const EXPECTED_TESTNET_CHAIN_ID = 420420417n;
+const SUPPORTED_CHAIN_IDS = new Map([
+  ["testnet", 420420417n],
+  ["mainnet", 420420419n]
+]);
+const CHAIN_LABELS = new Map([
+  ["testnet", "Polkadot Hub TestNet"],
+  ["mainnet", "Polkadot Hub"]
+]);
 const DEFAULT_REWARD_AMOUNT = "0.1"; // 100_000 base units > USDC minBalance 70_000
 const DEFAULT_TOKEN_MIN_DAYS = 7;
 const DEFAULT_SETTLE_TIMEOUT_MS = 180_000;
@@ -118,10 +125,10 @@ export async function runWorkerCanary({
     operatorPlatform =
       operatorClient ?? new AgentPlatformClient({ baseUrl: config.apiBaseUrl, token: operatorAuth.token, fetchImpl });
 
-    // ── chain-env gate: refuse anything that is not testnet ───────────────
+    // ── chain-env gate: selected profile must match its live chain exactly ─
     const reader = chainReader ?? buildChainReader(config);
     const chainId = await reader.getChainId();
-    assertTestnet({ chainId, profile: config.profile });
+    assertChainEnvironment({ chainId, profile: config.profile });
 
     // ── operator readiness: capabilities + settlement, BEFORE creating a job
     await stage("operatorReadiness", () => assertOperatorReady(operatorPlatform, {
@@ -782,7 +789,7 @@ function parseConfig(env) {
     apiBaseUrl,
     profile,
     rpcUrl: pick(env.WORKER_CANARY_RPC_URL) || deployment.rpcUrl,
-    assetAddress: DEFAULT_ESCROW_ASSET.address,
+    assetAddress: deployment.contracts.token,
     agentAccountAddress: deployment.contracts.agentAccountCore,
     escrowAddress: deployment.contracts.escrowCore,
     rewardAmount,
@@ -800,39 +807,67 @@ function parseConfig(env) {
 }
 
 function loadDeployment(profile) {
-  if (profile !== DEFAULT_PROFILE) {
-    // Hard fail-closed: the canary is a TESTNET-only instrument. A non-testnet
-    // profile must never be loaded, even before we read the live chainId.
+  if (!SUPPORTED_CHAIN_IDS.has(profile)) {
     throw new Error(
-      `Worker canary refuses to run with profile "${profile}". This canary is testnet-only ` +
-        `(${DEFAULT_PROFILE}); it must never drive a paid loop against mainnet.`
+      `Worker canary refuses unsupported profile "${profile}". Supported profiles: ` +
+        `${[...SUPPORTED_CHAIN_IDS.keys()].join(", ")}.`
     );
   }
   const file = resolve(repoRoot, "deployments", `${profile}.json`);
   const deployment = JSON.parse(readFileSync(file, "utf8"));
-  if (deployment.profile !== DEFAULT_PROFILE) {
-    throw new Error(`deployments/${profile}.json declares profile "${deployment.profile}", expected "${DEFAULT_PROFILE}".`);
+  if (deployment.profile !== profile) {
+    throw new Error(`deployments/${profile}.json declares profile "${deployment.profile}", expected "${profile}".`);
   }
-  if (!deployment.rpcUrl || !deployment.contracts?.escrowCore || !deployment.contracts?.agentAccountCore) {
-    throw new Error(`deployments/${profile}.json is missing rpcUrl / escrowCore / agentAccountCore.`);
+  if (
+    !deployment.rpcUrl
+    || !deployment.contracts?.escrowCore
+    || !deployment.contracts?.agentAccountCore
+    || !deployment.contracts?.token
+  ) {
+    throw new Error(`deployments/${profile}.json is missing rpcUrl / token / escrowCore / agentAccountCore.`);
+  }
+  if (deployment.contracts.token.toLowerCase() !== DEFAULT_ESCROW_ASSET.address.toLowerCase()) {
+    throw new Error(
+      `deployments/${profile}.json token ${deployment.contracts.token} does not match ` +
+        `the canary USDC asset ${DEFAULT_ESCROW_ASSET.address}.`
+    );
   }
   return deployment;
 }
 
-function assertTestnet({ chainId, profile }) {
-  if (profile !== DEFAULT_PROFILE) {
-    throw new Error(`Worker canary chain-env gate: profile "${profile}" is not "${DEFAULT_PROFILE}".`);
+function assertChainEnvironment({ chainId, profile }) {
+  const expectedChainId = SUPPORTED_CHAIN_IDS.get(profile);
+  if (expectedChainId === undefined) {
+    throw new Error(`Worker canary chain-env gate: unsupported profile "${profile}".`);
   }
-  if (BigInt(chainId) !== EXPECTED_TESTNET_CHAIN_ID) {
+  if (BigInt(chainId) !== expectedChainId) {
     throw new Error(
-      `Worker canary chain-env gate: live chainId ${chainId} is not Polkadot Hub TestNet ` +
-        `(${EXPECTED_TESTNET_CHAIN_ID}). Refusing to run — this canary must never touch mainnet.`
+      `Worker canary chain-env gate: live chainId ${chainId} does not match ${CHAIN_LABELS.get(profile)} ` +
+        `(${expectedChainId}) for profile "${profile}". Refusing to run.`
     );
   }
 }
 
-async function resolveWorkerWallet({ env, config, readSecretImpl, log }) {
+export async function resolveWorkerWallet({ env, config, readSecretImpl, log }) {
   const explicit = pick(env.WORKER_CANARY_WORKER_PRIVATE_KEY);
+  if (config.profile === "mainnet") {
+    if (explicit) {
+      throw new Error(
+        "Worker canary refuses WORKER_CANARY_WORKER_PRIVATE_KEY on mainnet; " +
+          "mainnet canaries must use a fresh ephemeral wallet."
+      );
+    }
+    if (!enabled(env.WORKER_CANARY_ALLOW_EPHEMERAL)) {
+      throw new Error(
+        "Worker canary requires WORKER_CANARY_ALLOW_EPHEMERAL=1 on mainnet; " +
+          "a persistent testnet worker key must never cross the network boundary."
+      );
+    }
+    const wallet = Wallet.createRandom();
+    config.workerEphemeral = true;
+    log(`Generated ephemeral mainnet canary wallet ${wallet.address}; private key is process-only.`);
+    return wallet;
+  }
   if (explicit) {
     return new Wallet(explicit);
   }

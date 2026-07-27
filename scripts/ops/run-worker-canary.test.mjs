@@ -13,7 +13,8 @@ import {
   runVerifyStage,
   runSettleStage,
   assertOperatorTokenFreshness,
-  assertOperatorReady
+  assertOperatorReady,
+  resolveWorkerWallet
 } from "./run-worker-canary.mjs";
 
 // ── fixtures ──────────────────────────────────────────────────────────────
@@ -233,16 +234,73 @@ test("WORKER_CANARY_KEEP_JOB leaves the job live (no archive)", async () => {
   assert.ok(!archive, "KEEP_JOB must skip archive");
 });
 
-// ── chain-env gate (testnet only) ────────────────────────────────────────────
-test("chain-env gate: refuses a non-testnet chainId", async () => {
+// ── chain-env gate ───────────────────────────────────────────────────────────
+test("chain-env gate: refuses a chainId that does not match the selected profile", async () => {
   await assert.rejects(
     () => runFull({ chainReader: okChainReader({ async getChainId() { return 1n; } }) }),
-    /not Polkadot Hub TestNet|chain-env gate/u
+    /does not match Polkadot Hub TestNet|chain-env gate/u
   );
 });
 
-test("chain-env gate: refuses a non-testnet profile before any chain read", async () => {
-  await assert.rejects(() => runFull({ env: { WORKER_CANARY_PROFILE: "mainnet" } }), /testnet-only/u);
+test("chain-env gate: accepts the checked-in mainnet profile on chainId 420420419", async () => {
+  const evidence = await runFull({
+    env: { WORKER_CANARY_PROFILE: "mainnet" },
+    chainReader: okChainReader({ async getChainId() { return 420420419n; } })
+  });
+  assert.equal(evidence.profile, "mainnet");
+  assert.equal(evidence.chainId, "420420419");
+});
+
+test("chain-env gate: rejects testnet RPC identity for the mainnet profile", async () => {
+  await assert.rejects(
+    () => runFull({
+      env: { WORKER_CANARY_PROFILE: "mainnet" },
+      chainReader: okChainReader()
+    }),
+    /does not match Polkadot Hub.*420420419/u
+  );
+});
+
+test("chain-env gate: refuses an unsupported profile before any chain read", async () => {
+  await assert.rejects(() => runFull({ env: { WORKER_CANARY_PROFILE: "staging" } }), /unsupported profile/u);
+});
+
+test("mainnet worker identity is always fresh and never reads the testnet key", async () => {
+  const config = { profile: "mainnet", workerEphemeral: false };
+  let secretReads = 0;
+  const wallet = await resolveWorkerWallet({
+    env: { WORKER_CANARY_ALLOW_EPHEMERAL: "1" },
+    config,
+    readSecretImpl: async () => {
+      secretReads += 1;
+      throw new Error("must not be called");
+    },
+    log: () => {}
+  });
+  assert.match(wallet.address, /^0x[a-fA-F0-9]{40}$/u);
+  assert.equal(config.workerEphemeral, true);
+  assert.equal(secretReads, 0);
+});
+
+test("mainnet worker identity rejects persistent private keys and missing ephemeral opt-in", async () => {
+  await assert.rejects(
+    () => resolveWorkerWallet({
+      env: { WORKER_CANARY_WORKER_PRIVATE_KEY: `0x${"11".repeat(32)}` },
+      config: { profile: "mainnet", workerEphemeral: false },
+      readSecretImpl: async () => "",
+      log: () => {}
+    }),
+    /refuses WORKER_CANARY_WORKER_PRIVATE_KEY on mainnet/u
+  );
+  await assert.rejects(
+    () => resolveWorkerWallet({
+      env: {},
+      config: { profile: "mainnet", workerEphemeral: false },
+      readSecretImpl: async () => "",
+      log: () => {}
+    }),
+    /requires WORKER_CANARY_ALLOW_EPHEMERAL=1 on mainnet/u
+  );
 });
 
 // ── operator readiness ───────────────────────────────────────────────────────
