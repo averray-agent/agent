@@ -145,12 +145,31 @@ The script checks the target internally, locks cutover operations, renders a
 pure Caddy upstream state, preserves a timestamped Caddyfile, validates, and
 reloads Caddy. It then requires public `/health` to report chain ID `420420419`.
 Any validation, reload, or health failure restores and reloads the prior route.
+Only after that assertion succeeds does it atomically persist the audited
+selection at
+`/srv/agent-stack/.deploy-state/caddy-network-selection.json`. Every later
+production Caddy render validates and reapplies that record, so a normal deploy
+cannot silently return to the repository template's testnet upstreams.
+
+At any time, answer “which network is live, and who selected it?” with:
+
+```sh
+sudo /srv/agent-stack/app/scripts/ops/flip-caddy-network.sh status
+```
+
+The status includes the selected network and expected chain, live Caddy route,
+consistency, UTC selection time, actor, execution user, host, operation ID,
+reason, and source Git revision, followed by the public health chain ID.
 
 Explicit rollback while the testnet stack is retained:
 
 ```sh
 sudo /srv/agent-stack/app/scripts/ops/flip-caddy-network.sh testnet
 ```
+
+That one operation retains the same internal target check, candidate validation,
+reload validation, public chain assertion, auto-rollback, and durable audit
+record update as the mainnet cutover.
 
 Only after the public mainnet health and monitoring window are clean should PR
 #753 be merged and the testnet containers be stopped. Keep the provider VM,
