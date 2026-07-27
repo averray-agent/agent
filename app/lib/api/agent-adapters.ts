@@ -43,6 +43,7 @@ export function extractAgent(data: unknown): AgentRecord | null {
   const stake = stakeFor(record);
   return {
     handle: text(record.handle, handleForWallet(walletFull)),
+    synthetic: record.synthetic === true,
     wallet: shortAddress(walletFull),
     walletFull,
     tier: tierFrom(record.tier, score),

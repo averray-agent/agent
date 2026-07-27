@@ -58,6 +58,7 @@ test("buildAgentProfile returns a schema-shaped document for a known wallet", ()
 
   assert.equal(profile.schemaVersion, AGENT_PROFILE_SCHEMA_VERSION);
   assert.equal(profile.wallet, WALLET.toLowerCase());
+  assert.equal(profile.synthetic, false);
   assert.equal(profile.reputation.tier, "pro");
   assert.equal(profile.stats.totalBadges, 3);
   assert.equal(profile.stats.approvedCount, 3);
@@ -88,6 +89,7 @@ test("buildAgentProfile returns null completionRate when no terminal sessions ex
     getJobDefinition: makeGetJob()
   });
   assert.equal(profile.stats.completionRate, null);
+  assert.equal(profile.synthetic, false);
   assert.equal(profile.stats.totalBadges, 0);
   assert.equal(profile.stats.totalEarned.amount, "0");
   assert.equal(profile.stats.activeSince, null);
@@ -95,6 +97,46 @@ test("buildAgentProfile returns null completionRate when no terminal sessions ex
   assert.deepEqual(profile.stats.preferredCategories, []);
   assert.deepEqual(profile.categoryLevels, {});
   assert.deepEqual(profile.badges, []);
+});
+
+test("buildAgentProfile tags canary-only wallets synthetic until external activity appears", () => {
+  const canarySession = approvedSession({
+    jobId: "worker-canary-1785151678417",
+    sessionId: "canary-1",
+    updatedAt: "2026-07-27T10:00:00Z"
+  });
+  const canaryOnly = buildAgentProfile({
+    wallet: WALLET,
+    reputation: { skill: 100, reliability: 100, economic: 100 },
+    sessions: [canarySession],
+    getJobDefinition: () => ({
+      id: canarySession.jobId,
+      category: "coding",
+      rewardAsset: "USDC",
+      rewardAmount: 0.1
+    })
+  });
+  assert.equal(canaryOnly.synthetic, true);
+
+  const mixed = buildAgentProfile({
+    wallet: WALLET,
+    reputation: { skill: 100, reliability: 100, economic: 100 },
+    sessions: [
+      canarySession,
+      approvedSession({
+        jobId: "external-job-1",
+        sessionId: "external-1",
+        updatedAt: "2026-07-27T11:00:00Z"
+      })
+    ],
+    getJobDefinition: (jobId) => ({
+      id: jobId,
+      category: "coding",
+      rewardAsset: "USDC",
+      rewardAmount: 0.1
+    })
+  });
+  assert.equal(mixed.synthetic, false);
 });
 
 test("buildAgentProfile derives tier from skill when not supplied", () => {

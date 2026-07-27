@@ -9,6 +9,7 @@ import {
   addSecondsIso,
   disputeIdForSession,
 } from "./dispute-resolution.js";
+import { isSyntheticAgentSessions } from "./agent-visibility.js";
 
 /**
  * Build a v1 agent profile document from in-memory platform state.
@@ -63,6 +64,7 @@ export function buildAgentProfile({
   const rep = normaliseReputation(reputation);
   const definitionOf = typeof getJobDefinition === "function" ? getJobDefinition : () => undefined;
   const safeSessions = Array.isArray(sessions) ? sessions : [];
+  const synthetic = isSyntheticAgentSessions(safeSessions);
 
   // Split sessions into approved + rejected + other so the numerator and
   // denominator of completionRate are unambiguous.
@@ -197,6 +199,7 @@ export function buildAgentProfile({
   return {
     schemaVersion: AGENT_PROFILE_SCHEMA_VERSION,
     wallet: normalizedWallet,
+    synthetic,
     fetchedAt: fetchedAt ?? new Date().toISOString(),
     reputation: rep,
     stats: {

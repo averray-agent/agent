@@ -36,6 +36,24 @@ test("builder read helpers call the expected public endpoints", async () => {
   ]);
 });
 
+test("listAgents explicitly opts operator consumers into synthetic canaries", async () => {
+  const calls = [];
+  const client = new AgentPlatformClient({
+    baseUrl: "https://api.example.test",
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      return jsonResponse([]);
+    }
+  });
+
+  await client.listAgents({ limit: 50, includeSynthetic: true });
+
+  assert.equal(
+    calls[0].url,
+    "https://api.example.test/agents?limit=50&includeSynthetic=true"
+  );
+});
+
 test("authenticated helpers send bearer token and compact JSON bodies", async () => {
   const calls = [];
   const client = new AgentPlatformClient({

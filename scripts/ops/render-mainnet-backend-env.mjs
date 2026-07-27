@@ -175,10 +175,16 @@ export function buildManifestOverrides(manifest) {
   };
 }
 
-// Appended to the backend template: the one genuinely-new mainnet secret.
+// Appended to the backend template: mainnet-only runtime posture plus the one
+// genuinely-new mainnet secret.
 export const BACKEND_ADDITIONS = [
   "",
   "# ── Mainnet-only additions (generated) ───────────────────────────────────",
+  "# One-shot launch milestone. Uses the existing operator webhook and persists",
+  "# delivery evidence in the mainnet Redis namespace. Testnet stays disabled.",
+  "ALERT_ENVIRONMENT=mainnet",
+  "FIRST_EXTERNAL_AGENT_ALERT_ENABLED=true",
+  "",
   "# SHARE_URL_SECRET is dedicated on mainnet. On testnet it silently falls back",
   "# to AUTH_JWT_SECRETS[0], but HMAC is retired on mainnet so that fallback is",
   "# gone and share-link signing must fail closed. Enforced by",

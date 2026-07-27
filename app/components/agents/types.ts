@@ -124,6 +124,8 @@ export interface AgentStake {
 
 export interface AgentRecord {
   handle: string;
+  /** Hosted worker-canary identity; excluded from the public directory. */
+  synthetic: boolean;
   wallet: string;
   walletFull: string;
   tier: AgentTier;

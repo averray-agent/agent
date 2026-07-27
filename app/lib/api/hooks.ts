@@ -49,7 +49,9 @@ export const useJobPreflight = (id: string | null) =>
 export const useSessions = () => useApi("/sessions");
 export const useAdminSessions = () =>
   useApi("/admin/sessions?limit=100", { refreshInterval: 15_000 });
-export const useAgents = () => useApi("/agents");
+// The public directory excludes hosted canary identities. The authenticated
+// operator roster opts them back in so regression workers remain observable.
+export const useAgents = () => useApi("/agents?includeSynthetic=true");
 export const useAgent = (wallet: string | null) =>
   useApi(wallet ? `/agents/${encodeURIComponent(wallet)}` : null);
 export const useBadges = () => useApi("/badges");

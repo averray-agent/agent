@@ -93,6 +93,7 @@ export class PlatformService {
     this.upstreamStatusPoller = undefined;
     this.bootstrapSelfReportScheduler = undefined;
     this.submittedJobAutoVerifier = undefined;
+    this.firstExternalAgentAlert = undefined;
     // Opt-in: pre-fund auto-ingested job rewards on-chain at ingestion time so a
     // job is genuinely funded before it is advertised claimable. Set in bootstrap
     // from INGESTION_PREFUND_ENABLED. Testnet-only is an operational invariant.

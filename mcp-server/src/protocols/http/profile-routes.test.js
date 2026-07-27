@@ -168,6 +168,60 @@ test("GET /agents returns a cached public directory", async () => {
   assert.equal(response.body[0].wallet, WALLET);
   assert.equal(response.body[0].handle, "agent-1234-7890");
   assert.equal(response.body[0].tier, "expert");
+  assert.equal(response.body[0].synthetic, false);
+});
+
+test("GET /agents excludes canary-only wallets unless explicitly included", async () => {
+  const canary = sessionFixture({
+    jobId: "worker-canary-1785151678417",
+  });
+  const { response, route } = makeHarness({
+    sessions: [canary],
+    history: [canary],
+  });
+
+  await route({
+    request: { method: "GET" },
+    response,
+    url: new URL("http://localhost/agents"),
+    pathname: "/agents",
+  });
+  assert.deepEqual(response.body, []);
+
+  const operatorResponse = {};
+  await route({
+    request: { method: "GET" },
+    response: operatorResponse,
+    url: new URL("http://localhost/agents?includeSynthetic=true"),
+    pathname: "/agents",
+  });
+  assert.equal(operatorResponse.body.length, 1);
+  assert.equal(operatorResponse.body[0].wallet, WALLET);
+  assert.equal(operatorResponse.body[0].synthetic, true);
+});
+
+test("GET /agents keeps a wallet public after any non-canary session", async () => {
+  const canary = sessionFixture({
+    jobId: "worker-canary-1785151678417",
+  });
+  const external = sessionFixture({
+    sessionId: "external-session",
+    jobId: "external-job-1",
+  });
+  const { response, route } = makeHarness({
+    sessions: [canary, external],
+    history: [canary, external],
+  });
+
+  await route({
+    request: { method: "GET" },
+    response,
+    url: new URL("http://localhost/agents"),
+    pathname: "/agents",
+  });
+
+  assert.equal(response.body.length, 1);
+  assert.equal(response.body[0].synthetic, false);
 });
 
 test("GET /agents/:wallet validates wallet path", async () => {
@@ -200,6 +254,7 @@ test("GET /agents/:wallet builds a public profile with request logger context", 
   assert.equal(handled, true);
   assert.equal(response.statusCode, 200);
   assert.equal(response.body.wallet, OTHER_WALLET);
+  assert.equal(response.body.synthetic, false);
   assert.deepEqual(response.headers, { "cache-control": "public, max-age=30" });
   assert(calls.some((call) => (
     call[0] === "collectSessionHistory" &&

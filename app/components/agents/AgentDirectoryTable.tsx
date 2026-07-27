@@ -133,6 +133,14 @@ export function AgentDirectoryTable({
                       <div className="text-[14px] font-semibold leading-tight text-[var(--avy-ink)]">
                         {a.handle}
                       </div>
+                      {a.synthetic ? (
+                        <span
+                          className="mt-1 inline-flex rounded-full bg-[#ebe7da] px-2 py-0.5 font-[family-name:var(--font-display)] text-[9.5px] font-extrabold uppercase text-[#756d58]"
+                          style={{ letterSpacing: "0.08em" }}
+                        >
+                          Canary · synthetic
+                        </span>
+                      ) : null}
                       <div
                         className="mt-0.5 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]"
                         style={{ letterSpacing: 0 }}
@@ -236,7 +244,7 @@ export function AgentDirectoryTable({
       <footer className="flex items-center justify-between gap-3 border-t border-[var(--avy-line-soft)] bg-[rgba(250,248,241,0.5)] px-4 py-2.5 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]">
         <span>
           Showing <b className="font-semibold text-[var(--avy-ink)]">{rows.length}</b> of{" "}
-          <b className="font-semibold text-[var(--avy-ink)]">{total}</b> · all agents visible
+          <b className="font-semibold text-[var(--avy-ink)]">{total}</b> · includes synthetic canaries
         </span>
         <button
           type="button"
