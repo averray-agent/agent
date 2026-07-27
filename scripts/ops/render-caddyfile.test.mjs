@@ -98,7 +98,7 @@ exec "$FAKE_NODE" "$@"
     await execFileAsync("/bin/bash", [script, out], {
       env: {
         ...process.env,
-        PATH: `/usr/bin:/bin:/usr/sbin:/sbin:${fakeBin}`,
+        PATH: `${fakeBin}:/usr/bin:/bin:/usr/sbin:/sbin`,
         STACK_ROOT: stackRoot,
         FAKE_DOCKER_LOG: dockerLog,
         FAKE_NODE: process.execPath,
