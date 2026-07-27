@@ -27,7 +27,13 @@ DEPLOY_AUTOSTASH=${DEPLOY_AUTOSTASH:-1}
 DEPLOY_OLD_SHA=${DEPLOY_OLD_SHA:-}
 DEPLOY_NEW_SHA=${DEPLOY_NEW_SHA:-}
 DEPLOY_STATE_DIR=${DEPLOY_STATE_DIR:-"$STACK_ROOT/.deploy-state"}
-INDEXER_SCHEMA_STATE_FILE=${INDEXER_SCHEMA_STATE_FILE:-"$DEPLOY_STATE_DIR/indexer.database-schema"}
+# An explicit INDEXER_SCHEMA_STATE_FILE is honored verbatim. The default is
+# per-network and resolved lazily (indexer_schema_state_file) because
+# LIVE_NETWORK is only known after resolve_deploy_target. The pre-cutover
+# unscoped file is testnet-era state: testnet still reads it as a fallback,
+# but it must never leak a testnet schema pin onto the mainnet indexer.
+INDEXER_SCHEMA_STATE_FILE=${INDEXER_SCHEMA_STATE_FILE:-}
+LEGACY_INDEXER_SCHEMA_STATE_FILE="$DEPLOY_STATE_DIR/indexer.database-schema"
 FRONTEND_TREE_HASH_FILE=${FRONTEND_TREE_HASH_FILE:-"$DEPLOY_STATE_DIR/frontend.built-tree-hash"}
 CADDY_NETWORK_STATE_FILE=${CADDY_NETWORK_STATE_FILE:-"$DEPLOY_STATE_DIR/caddy-network-selection.json"}
 DEPLOY_ACTOR=${DEPLOY_ACTOR:-"deploy-production:${SUDO_USER:-${USER:-unknown}}"}
@@ -1091,22 +1097,42 @@ read_current_indexer_schema() {
   fi
 }
 
+indexer_schema_state_file() {
+  if [[ -n "$INDEXER_SCHEMA_STATE_FILE" ]]; then
+    printf '%s\n' "$INDEXER_SCHEMA_STATE_FILE"
+    return
+  fi
+  printf '%s\n' "$DEPLOY_STATE_DIR/indexer.database-schema.$LIVE_NETWORK"
+}
+
 read_persisted_indexer_schema() {
-  if [[ -f "$INDEXER_SCHEMA_STATE_FILE" ]]; then
-    awk 'NF { print; exit }' "$INDEXER_SCHEMA_STATE_FILE" | tr -d '"'
+  local state_file
+  state_file=$(indexer_schema_state_file)
+  if [[ -f "$state_file" ]]; then
+    awk 'NF { print; exit }' "$state_file" | tr -d '"'
+    return
+  fi
+  if [[ -z "$INDEXER_SCHEMA_STATE_FILE" && -f "$LEGACY_INDEXER_SCHEMA_STATE_FILE" ]]; then
+    if [[ "$LIVE_NETWORK" == "testnet" ]]; then
+      awk 'NF { print; exit }' "$LEGACY_INDEXER_SCHEMA_STATE_FILE" | tr -d '"'
+    else
+      echo "Ignoring legacy unscoped indexer schema override at $LEGACY_INDEXER_SCHEMA_STATE_FILE (testnet-era state) for network $LIVE_NETWORK." >&2
+    fi
   fi
 }
 
 write_persisted_indexer_schema() {
   local schema="$1"
+  local state_file
+  state_file=$(indexer_schema_state_file)
   local dir
-  dir=$(dirname "$INDEXER_SCHEMA_STATE_FILE")
+  dir=$(dirname "$state_file")
   mkdir -p "$dir"
 
-  local tmp="${INDEXER_SCHEMA_STATE_FILE}.tmp.$$"
+  local tmp="${state_file}.tmp.$$"
   printf '%s\n' "$schema" > "$tmp"
-  mv "$tmp" "$INDEXER_SCHEMA_STATE_FILE"
-  echo "Persisted indexer DATABASE_SCHEMA override in $INDEXER_SCHEMA_STATE_FILE: $schema"
+  mv "$tmp" "$state_file"
+  echo "Persisted indexer DATABASE_SCHEMA override in $state_file: $schema"
 }
 
 validate_indexer_schema() {
@@ -1138,7 +1164,7 @@ write_indexer_schema() {
   chmod "$mode" "$tmp"
 
   case "$INDEXER_ENV_FILE" in
-    /run/agent-stack/*)
+    /run/agent-stack/*|/run/agent-stack-mainnet/*)
       sudo chown "$owner_group" "$tmp"
       sudo mv "$tmp" "$INDEXER_ENV_FILE"
       ;;

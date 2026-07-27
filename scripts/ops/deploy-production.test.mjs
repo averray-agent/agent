@@ -640,8 +640,23 @@ test("indexer schema recovery persists across normal runtime-env renders", async
   );
   assert.match(
     script,
-    /INDEXER_SCHEMA_STATE_FILE=\$\{INDEXER_SCHEMA_STATE_FILE:-"\$DEPLOY_STATE_DIR\/indexer\.database-schema"\}/u,
-    "schema recovery should have a persistent deploy-state file"
+    /indexer\.database-schema\.\$LIVE_NETWORK/u,
+    "the persisted schema override must be scoped per network — a testnet-era pin must never be reapplied to the mainnet indexer"
+  );
+  assert.match(
+    script,
+    /LEGACY_INDEXER_SCHEMA_STATE_FILE="\$DEPLOY_STATE_DIR\/indexer\.database-schema"/u,
+    "the pre-cutover unscoped state file should remain readable as testnet fallback"
+  );
+  assert.match(
+    script,
+    /Ignoring legacy unscoped indexer schema override/u,
+    "non-testnet networks must loudly skip the legacy unscoped override instead of inheriting it"
+  );
+  assert.match(
+    script,
+    /\/run\/agent-stack\/\*\|\/run\/agent-stack-mainnet\/\*\)/u,
+    "schema writes must use sudo for both network runtime roots (mainnet mv regression, 2026-07-27 deploy failures)"
   );
   assert.match(
     script,
