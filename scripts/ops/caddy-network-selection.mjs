@@ -20,6 +20,44 @@ export const NETWORKS = {
   mainnet: { expectedChainId: 420420419 },
 };
 
+export function resolveDeploymentTarget({ statePath, stackRoot, appRoot } = {}) {
+  const record = readSelection(statePath);
+  const normalizedStackRoot = requiredString(stackRoot, "deployment stackRoot");
+  const normalizedAppRoot = requiredString(appRoot, "deployment appRoot");
+  const shared = {
+    network: record.network,
+    expectedChainId: record.expectedChainId,
+  };
+
+  if (record.network === "mainnet") {
+    return {
+      ...shared,
+      composeFile: join(normalizedAppRoot, "deploy/docker-compose.mainnet.yml"),
+      projectDirectory: normalizedAppRoot,
+      backendService: "mainnet-backend",
+      backendContainer: "agent-mainnet-backend",
+      indexerService: "mainnet-indexer",
+      runtimeRoot: "/run/agent-stack-mainnet",
+      credentialsRoot: "/etc/agent-stack-mainnet",
+      backendTemplate: join(normalizedAppRoot, "deploy/backend.mainnet.env.template"),
+      indexerTemplate: join(normalizedAppRoot, "deploy/indexer.mainnet.env.template"),
+    };
+  }
+
+  return {
+    ...shared,
+    composeFile: join(normalizedStackRoot, "docker-compose.yml"),
+    projectDirectory: normalizedStackRoot,
+    backendService: "backend",
+    backendContainer: "agent-backend",
+    indexerService: "indexer",
+    runtimeRoot: "/run/agent-stack",
+    credentialsRoot: "/etc/agent-stack",
+    backendTemplate: join(normalizedAppRoot, "deploy/backend.env.template"),
+    indexerTemplate: join(normalizedAppRoot, "deploy/indexer.env.template"),
+  };
+}
+
 function requiredString(value, label) {
   const normalized = typeof value === "string" ? value.trim() : "";
   if (!normalized) throw new Error(`${label} must be a non-empty string`);
@@ -235,6 +273,7 @@ function selectionFromArgs(args) {
 function usage() {
   return `Usage:
   caddy-network-selection.mjs status --state <file> --live-caddy <file>
+  caddy-network-selection.mjs deploy-target --state <file> --stack-root <dir> --app-root <dir>
   caddy-network-selection.mjs bootstrap --state <file> --live-caddy <file> --selected-by <actor> --execution-user <user> --host <host> --source-revision <sha> --operation-id <id>
   caddy-network-selection.mjs set --state <file> --network <testnet|mainnet> --previous-network <testnet|mainnet> --selected-at <iso> --selected-by <actor> --execution-user <user> --host <host> --source <source> --source-revision <sha> --operation-id <id> --reason <text>
   caddy-network-selection.mjs render --state <file> --input <Caddyfile> --output <Caddyfile>
@@ -246,6 +285,12 @@ function main() {
   let result;
   if (args.command === "status") {
     result = selectionStatus({ statePath: args.state, liveCaddyPath: args.liveCaddy });
+  } else if (args.command === "deploy-target") {
+    result = resolveDeploymentTarget({
+      statePath: args.state,
+      stackRoot: args.stackRoot,
+      appRoot: args.appRoot,
+    });
   } else if (args.command === "bootstrap") {
     result = bootstrapSelection({
       statePath: args.state,

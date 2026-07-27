@@ -37,6 +37,13 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 APP_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
 STACK_ROOT=${STACK_ROOT:-$(cd "$APP_ROOT/.." && pwd)}
 COMPOSE_FILE=${COMPOSE_FILE:-"$STACK_ROOT/docker-compose.yml"}
+COMPOSE_PROJECT_DIRECTORY=${COMPOSE_PROJECT_DIRECTORY:-"$STACK_ROOT"}
+INDEXER_SERVICE=${INDEXER_SERVICE:-indexer}
+INDEXER_ENV_TEMPLATE=${INDEXER_ENV_TEMPLATE:-"$APP_ROOT/deploy/indexer.env.template"}
+INDEXER_ENV_TARGET=${INDEXER_ENV_TARGET:-/run/agent-stack/indexer.env}
+INDEXER_ENV_TOKEN=${INDEXER_ENV_TOKEN:-/etc/agent-stack/op-indexer.env}
+CADDY_COMPOSE_FILE=${CADDY_COMPOSE_FILE:-"$STACK_ROOT/docker-compose.yml"}
+CADDY_PROJECT_DIRECTORY=${CADDY_PROJECT_DIRECTORY:-"$STACK_ROOT"}
 BRANCH=${BRANCH:-main}
 HEALTH_URL=${HEALTH_URL:-https://index.averray.com/health}
 READY_URL=${READY_URL:-https://index.averray.com/ready}
@@ -86,32 +93,32 @@ fi
 
 compose_up() {
   docker compose \
-    --project-directory "$STACK_ROOT" \
+    --project-directory "$COMPOSE_PROJECT_DIRECTORY" \
     -f "$COMPOSE_FILE" \
-    up -d --build indexer
+    up -d --build "$INDEXER_SERVICE"
 }
 
 dump_indexer_diagnostics() {
   echo "Indexer diagnostics: docker compose ps indexer"
   docker compose \
-    --project-directory "$STACK_ROOT" \
+    --project-directory "$COMPOSE_PROJECT_DIRECTORY" \
     -f "$COMPOSE_FILE" \
-    ps indexer || true
+    ps "$INDEXER_SERVICE" || true
 
   echo "Indexer diagnostics: last ${INDEXER_LOG_TAIL} indexer log lines"
   local indexer_log
   indexer_log=$(
     docker compose \
-      --project-directory "$STACK_ROOT" \
+      --project-directory "$COMPOSE_PROJECT_DIRECTORY" \
       -f "$COMPOSE_FILE" \
-      logs --tail="$INDEXER_LOG_TAIL" indexer 2>&1 || true
+      logs --tail="$INDEXER_LOG_TAIL" "$INDEXER_SERVICE" 2>&1 || true
   )
   printf '%s\n' "$indexer_log"
 
   echo "Indexer diagnostics: last ${INDEXER_LOG_TAIL} Caddy log lines"
   docker compose \
-    --project-directory "$STACK_ROOT" \
-    -f "$COMPOSE_FILE" \
+    --project-directory "$CADDY_PROJECT_DIRECTORY" \
+    -f "$CADDY_COMPOSE_FILE" \
     logs --tail="$INDEXER_LOG_TAIL" caddy || true
 
   # Skim the indexer log for known fatal-startup patterns and surface a one-line
@@ -216,9 +223,9 @@ rollback() {
   # closed for the backend in #467; this PR closes the symmetric gap for
   # the indexer.
   local render_script="$APP_ROOT/scripts/ops/render-vps-env.sh"
-  local template="$APP_ROOT/deploy/indexer.env.template"
-  local target="/run/agent-stack/indexer.env"
-  local token="/etc/agent-stack/op-indexer.env"
+  local template="$INDEXER_ENV_TEMPLATE"
+  local target="$INDEXER_ENV_TARGET"
+  local token="$INDEXER_ENV_TOKEN"
 
   if [[ -x "$render_script" && -f "$template" && -f "$token" ]]; then
     echo "Re-rendering $target from $template @ $PREVIOUS_SHA"

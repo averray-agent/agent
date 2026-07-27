@@ -31,6 +31,15 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 APP_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
 STACK_ROOT=${STACK_ROOT:-$(cd "$APP_ROOT/.." && pwd)}
 COMPOSE_FILE=${COMPOSE_FILE:-"$STACK_ROOT/docker-compose.yml"}
+COMPOSE_PROJECT_DIRECTORY=${COMPOSE_PROJECT_DIRECTORY:-"$STACK_ROOT"}
+BACKEND_SERVICE=${BACKEND_SERVICE:-backend}
+BACKEND_CONTAINER=${BACKEND_CONTAINER:-agent-backend}
+BACKEND_ENV_TEMPLATE=${BACKEND_ENV_TEMPLATE:-"$APP_ROOT/deploy/backend.env.template"}
+BACKEND_ENV_TARGET=${BACKEND_ENV_TARGET:-/run/agent-stack/backend.env}
+BACKEND_ENV_TOKEN=${BACKEND_ENV_TOKEN:-/etc/agent-stack/op-backend.env}
+AWS_CONFIG_PATH=${AWS_CONFIG_PATH:-/etc/agent-stack/aws-config}
+BADGE_RECEIPT_CERT_PATH=${BADGE_RECEIPT_CERT_PATH:-/etc/agent-stack/roles-anywhere/badge-receipt-signer-cert.pem}
+BADGE_RECEIPT_KEY_PATH=${BADGE_RECEIPT_KEY_PATH:-/etc/agent-stack/roles-anywhere/badge-receipt-signer-key.pem}
 BRANCH=${BRANCH:-main}
 HEALTH_URL=${HEALTH_URL:-https://api.averray.com/health}
 HEALTH_TIMEOUT_SEC=${HEALTH_TIMEOUT_SEC:-120}
@@ -53,7 +62,7 @@ if [[ ! -f "$COMPOSE_FILE" ]]; then
   exit 1
 fi
 
-for cmd in git docker curl sudo; do
+for cmd in git docker curl jq sudo; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "Missing required command: $cmd" >&2
     exit 1
@@ -72,37 +81,48 @@ if [[ "$PREVIOUS_SHA" == "$CURRENT_HEAD" && "${SKIP_GIT_UPDATE:-0}" == "1" ]]; t
 fi
 
 compose_up() {
+  local deployed_sha="$1"
   docker compose \
-    --project-directory "$STACK_ROOT" \
+    --project-directory "$COMPOSE_PROJECT_DIRECTORY" \
     -f "$COMPOSE_FILE" \
-    up -d --build backend
+    build --build-arg "DEPLOYED_SHA=$deployed_sha" "$BACKEND_SERVICE"
+  docker compose \
+    --project-directory "$COMPOSE_PROJECT_DIRECTORY" \
+    -f "$COMPOSE_FILE" \
+    up -d --no-build "$BACKEND_SERVICE"
 }
 
 wait_for_health() {
+  local expected_sha="$1"
   local deadline=$(( $(date +%s) + HEALTH_TIMEOUT_SEC ))
   local attempts=0
+  local observed_sha="unavailable"
   while [[ $(date +%s) -lt $deadline ]]; do
     attempts=$(( attempts + 1 ))
-    if curl -fsS --max-time 5 "$HEALTH_URL" >/dev/null 2>&1; then
-      echo "Health check passed after ${attempts} attempt(s)."
-      curl -fsS "$HEALTH_URL" || true
-      echo
-      return 0
+    local health_json
+    if health_json=$(curl -fsS --max-time 5 "$HEALTH_URL" 2>/dev/null); then
+      observed_sha=$(printf '%s' "$health_json" | jq -er '.deployedSha | strings' 2>/dev/null || echo "missing")
+      if [[ "$observed_sha" == "$expected_sha" ]]; then
+        echo "Health and serving-SHA checks passed after ${attempts} attempt(s): deployedSha $observed_sha"
+        printf '%s\n' "$health_json"
+        return 0
+      fi
     fi
     sleep "$HEALTH_INTERVAL_SEC"
   done
+  echo "Backend health did not prove deployedSha $expected_sha (last observed: $observed_sha)." >&2
   return 1
 }
 
 emit_failed_backend_logs() {
   echo "Backend health gate failed; emitting the last $BACKEND_LOG_TAIL startup log lines before rollback." >&2
   if ! docker compose \
-    --project-directory "$STACK_ROOT" \
+    --project-directory "$COMPOSE_PROJECT_DIRECTORY" \
     -f "$COMPOSE_FILE" \
-    logs --no-color --tail "$BACKEND_LOG_TAIL" backend >&2; then
+    logs --no-color --tail "$BACKEND_LOG_TAIL" "$BACKEND_SERVICE" >&2; then
     echo "WARNING: docker compose could not read failed backend logs; trying the container name directly." >&2
-    if ! docker logs --tail "$BACKEND_LOG_TAIL" agent-backend >&2; then
-      echo "WARNING: failed backend startup logs were unavailable from compose and agent-backend." >&2
+    if ! docker logs --tail "$BACKEND_LOG_TAIL" "$BACKEND_CONTAINER" >&2; then
+      echo "WARNING: failed backend startup logs were unavailable from compose and $BACKEND_CONTAINER." >&2
     fi
   fi
 }
@@ -157,9 +177,9 @@ rollback() {
   # the OLD code that read those env vars, but /run/agent-stack/
   # backend.env no longer carried them.
   local render_script="$APP_ROOT/scripts/ops/render-vps-env.sh"
-  local template="$APP_ROOT/deploy/backend.env.template"
-  local target="/run/agent-stack/backend.env"
-  local token="/etc/agent-stack/op-backend.env"
+  local template="$BACKEND_ENV_TEMPLATE"
+  local target="$BACKEND_ENV_TARGET"
+  local token="$BACKEND_ENV_TOKEN"
 
   if [[ -x "$render_script" && -f "$template" && -f "$token" ]]; then
     echo "Re-rendering $target from $template @ $PREVIOUS_SHA"
@@ -177,8 +197,8 @@ rollback() {
     echo "  This is OK on a not-yet-bootstrapped VPS but suspicious on a deployed one." >&2
   fi
 
-  compose_up
-  if wait_for_health; then
+  compose_up "$PREVIOUS_SHA"
+  if wait_for_health "$PREVIOUS_SHA"; then
     echo "Rollback succeeded; service is serving the previous build."
   else
     echo "Rollback failed to restore health. Manual intervention required." >&2
@@ -202,15 +222,15 @@ echo "Preflighting dedicated badge receipt signer consumer paths"
 env -u PREFLIGHT_NO_SUDO -u PREFLIGHT_EXPECTED_OWNER_MODE \
   "$APP_ROOT/scripts/ops/preflight-badge-receipt-signer.sh" \
   "$APP_ROOT/deploy/aws-config.badge-receipt-profile" \
-  /etc/agent-stack/aws-config \
-  /etc/agent-stack/roles-anywhere/badge-receipt-signer-cert.pem \
-  /etc/agent-stack/roles-anywhere/badge-receipt-signer-key.pem
+  "$AWS_CONFIG_PATH" \
+  "$BADGE_RECEIPT_CERT_PATH" \
+  "$BADGE_RECEIPT_KEY_PATH"
 
 echo "Rebuilding backend container"
-compose_up
+compose_up "$NEW_SHA"
 
-echo "Waiting for health at $HEALTH_URL (timeout ${HEALTH_TIMEOUT_SEC}s)"
-if ! wait_for_health; then
+echo "Waiting for health and deployedSha=$NEW_SHA at $HEALTH_URL (timeout ${HEALTH_TIMEOUT_SEC}s)"
+if ! wait_for_health "$NEW_SHA"; then
   emit_failed_backend_logs
   rollback
 fi

@@ -65,6 +65,8 @@ test("cutover scripts fail closed on cap, preserve testnet identity, and auto-ro
   assert.match(preflight, /BADGE_RECEIPT_SIGNING=disabled/u);
   assert.match(start, /testnet_containers=unchanged/u);
   assert.match(start, /cmp -s "\$testnet_before" "\$testnet_after"/u);
+  assert.match(start, /build --build-arg "DEPLOYED_SHA=\$DEPLOYED_SHA" mainnet-backend/u);
+  assert.match(start, /\.deployedSha == \$sha/u);
   assert.match(flip, /rollback\(\)/u);
   assert.match(flip, /Public health did not report chainId/u);
 });

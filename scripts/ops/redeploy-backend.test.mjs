@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const REDEPLOY_SCRIPT = join(REPO_ROOT, "scripts/ops/redeploy-backend.sh");
+const BACKEND_DOCKERFILE = join(REPO_ROOT, "mcp-server/Dockerfile");
 
 // Structural tests for the rollback() function's contract. These are
 // not full integration tests (no docker / sudo / curl stubbing) — they
@@ -51,13 +52,13 @@ test("redeploy-backend rollback re-renders /run/agent-stack/backend.env from the
   );
   assert.match(
     script,
-    /template="\$APP_ROOT\/deploy\/backend\.env\.template"/u,
-    "rollback must use deploy/backend.env.template at the rolled-back SHA",
+    /BACKEND_ENV_TEMPLATE=\$\{BACKEND_ENV_TEMPLATE:-"\$APP_ROOT\/deploy\/backend\.env\.template"\}/u,
+    "testnet remains the default rollback template for a direct component invocation",
   );
   assert.match(
     script,
-    /target="\/run\/agent-stack\/backend\.env"/u,
-    "rollback must re-render to /run/agent-stack/backend.env (the runtime env_file:)",
+    /local template="\$BACKEND_ENV_TEMPLATE"[\s\S]*?local target="\$BACKEND_ENV_TARGET"/u,
+    "rollback must use the selected network's template and runtime env target",
   );
   assert.match(
     script,
@@ -145,7 +146,7 @@ test("redeploy-backend runs the named badge receipt signer preflight before cont
 
 test("redeploy-backend emits bounded failed-container startup logs before rollback", async () => {
   const script = await readFile(REDEPLOY_SCRIPT, "utf8");
-  const healthFailure = script.lastIndexOf("if ! wait_for_health; then");
+  const healthFailure = script.lastIndexOf('if ! wait_for_health "$NEW_SHA"; then');
   const emitIdx = script.indexOf("emit_failed_backend_logs", healthFailure);
   const rollbackIdx = script.indexOf("rollback", healthFailure);
 
@@ -153,8 +154,22 @@ test("redeploy-backend emits bounded failed-container startup logs before rollba
   assert.ok(emitIdx > healthFailure, "health failure must emit startup logs");
   assert.ok(rollbackIdx > emitIdx, "startup logs must be captured before rollback destroys the failed container");
   assert.match(script, /BACKEND_LOG_TAIL=\$\{BACKEND_LOG_TAIL:-200\}/u);
-  assert.match(script, /logs --no-color --tail "\$BACKEND_LOG_TAIL" backend/u);
-  assert.match(script, /docker logs --tail "\$BACKEND_LOG_TAIL" agent-backend/u);
+  assert.match(script, /logs --no-color --tail "\$BACKEND_LOG_TAIL" "\$BACKEND_SERVICE"/u);
+  assert.match(script, /docker logs --tail "\$BACKEND_LOG_TAIL" "\$BACKEND_CONTAINER"/u);
+});
+
+test("redeploy-backend bakes and verifies the exact serving SHA", async () => {
+  const [script, dockerfile] = await Promise.all([
+    readFile(REDEPLOY_SCRIPT, "utf8"),
+    readFile(BACKEND_DOCKERFILE, "utf8"),
+  ]);
+
+  assert.match(dockerfile, /^ARG DEPLOYED_SHA=unknown$/mu);
+  assert.match(dockerfile, /^ENV DEPLOYED_SHA=\$\{DEPLOYED_SHA\}$/mu);
+  assert.match(script, /build --build-arg "DEPLOYED_SHA=\$deployed_sha" "\$BACKEND_SERVICE"/u);
+  assert.match(script, /\.deployedSha \| strings/u);
+  assert.match(script, /wait_for_health "\$NEW_SHA"/u);
+  assert.match(script, /wait_for_health "\$PREVIOUS_SHA"/u);
 });
 
 test("redeploy-backend rejects an invalid failed-container log tail", async () => {
