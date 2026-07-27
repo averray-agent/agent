@@ -128,7 +128,11 @@ if [[ -n "$APP_BASIC_AUTH_USER" || -n "$APP_BASIC_AUTH_PASSWORD_HASH" ]]; then
 fi
 
 auth_block_file=""
-routed_template_file=$(mktemp)
+# Keep the selector intermediate beside the output. On the intentionally
+# node-less production host the selector runs in a container with STACK_ROOT
+# bind-mounted; a host /tmp path is outside that mount and would leave this
+# file empty after the container exits.
+routed_template_file=$(mktemp "$(dirname "$OUTPUT_PATH")/.caddy-routed.XXXXXX")
 if [[ -n "$APP_BASIC_AUTH_USER" && -n "$APP_BASIC_AUTH_PASSWORD_HASH" ]]; then
   auth_block_file=$(mktemp)
   cat >"$auth_block_file" <<EOF

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -62,6 +62,58 @@ test("renders mainnet upstreams from the durable selector even though the templa
   assert.match(contents, /reverse_proxy mainnet-indexer:42069/u);
   assert.doesNotMatch(contents, /reverse_proxy backend:8787/u);
   assert.doesNotMatch(contents, /reverse_proxy indexer:42069/u);
+});
+
+test("node-less host fallback keeps every selector file inside the mounted stack", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "render-fallback-"));
+  const stackRoot = dir;
+  const fakeBin = join(dir, "bin");
+  const out = join(dir, "Caddyfile");
+  const state = join(dir, "caddy-network-selection.json");
+  const dockerLog = join(dir, "docker-args.txt");
+  await mkdir(fakeBin);
+  writeSelectionAtomic(state, buildSelection({
+    network: "mainnet",
+    previousNetwork: "testnet",
+    selectedAt: "2026-07-27T11:00:00.000Z",
+    selectedBy: "fallback-test",
+    executionUser: "test",
+    host: "test.invalid",
+    source: "render-caddyfile.test.mjs",
+    sourceRevision: "b".repeat(40),
+    operationId: "render-fallback-mainnet",
+    reason: "prove the node-less production path",
+  }));
+  await writeFile(join(fakeBin, "docker"), `#!/bin/bash
+set -euo pipefail
+printf '%s\\n' "$@" > "$FAKE_DOCKER_LOG"
+while [[ "$#" -gt 0 && "$1" != "node" ]]; do shift; done
+[[ "$#" -gt 0 ]] || exit 9
+shift
+exec "$FAKE_NODE" "$@"
+`);
+  await chmod(join(fakeBin, "docker"), 0o755);
+
+  try {
+    await execFileAsync("/bin/bash", [script, out], {
+      env: {
+        ...process.env,
+        PATH: `${fakeBin}:/usr/bin:/bin:/usr/sbin:/sbin`,
+        STACK_ROOT: stackRoot,
+        FAKE_DOCKER_LOG: dockerLog,
+        FAKE_NODE: process.execPath,
+        CADDY_NETWORK_STATE_FILE: state,
+        APP_BASIC_AUTH_USER: "",
+        APP_BASIC_AUTH_PASSWORD_HASH: "",
+      },
+    });
+    assert.match(await readFile(out, "utf8"), /reverse_proxy mainnet-backend:8787/u);
+    const args = await readFile(dockerLog, "utf8");
+    assert.match(args, new RegExp(stackRoot.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+    assert.match(args, new RegExp(dir.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test("injects the basic-auth block when both credentials are supplied", async () => {
