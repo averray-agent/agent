@@ -963,6 +963,44 @@ test("getAdminStatus surfaces recurring scheduler anomalies", async () => {
   assert.equal(status.jobStaleSweeper.enabled, false);
 });
 
+test("getAdminStatus exposes durable per-wallet SIWE conversion telemetry", async () => {
+  const stateStore = new MemoryStateStore();
+  await stateStore.recordSiweAuthEvent({
+    wallet: WALLET,
+    event: "nonce_issued",
+    at: "2026-07-28T10:00:00.000Z"
+  });
+  await stateStore.recordSiweAuthEvent({
+    wallet: WALLET,
+    event: "verify_succeeded",
+    at: "2026-07-28T10:01:00.000Z"
+  });
+  const service = makePlatformService(undefined, undefined, stateStore);
+
+  const status = await service.getAdminStatus();
+
+  assert.deepEqual(status.authTelemetry.siwe.totals, {
+    noncesIssued: 1,
+    verifiesSucceeded: 1,
+    verificationGap: 0
+  });
+  assert.equal(status.authTelemetry.siwe.walletCount, 1);
+  assert.equal(status.authTelemetry.siwe.readable, true);
+  assert.deepEqual(
+    status.authTelemetry.siwe.wallets[0],
+    {
+      wallet: WALLET,
+      noncesIssued: 1,
+      verifiesSucceeded: 1,
+      verificationGap: 0,
+      firstSeenAt: "2026-07-28T10:00:00.000Z",
+      lastNonceIssuedAt: "2026-07-28T10:00:00.000Z",
+      lastVerifySucceededAt: "2026-07-28T10:01:00.000Z",
+      lastSeenAt: "2026-07-28T10:01:00.000Z"
+    }
+  );
+});
+
 test("getAdminStatus reports treasury policy failures without failing the status response", async () => {
   const service = makePlatformService({
     config: {

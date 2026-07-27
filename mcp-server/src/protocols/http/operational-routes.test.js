@@ -131,6 +131,22 @@ test("GET /health reports service liveness separately from disabled capabilities
   assert.equal(response.body.rewardBank.readable, false);
   assert.equal(response.body.rewardBank.decimals, 6);
   assert.equal(response.body.settlement.source, "backend_state_store");
+  assert.deepEqual(
+    {
+      claimed24h: response.body.settlement.claimed24h,
+      submitted24h: response.body.settlement.submitted24h,
+      settled24h: response.body.settlement.settled24h,
+      claimedNotSubmitted: response.body.settlement.claimedNotSubmitted,
+      submittedNotSettled: response.body.settlement.submittedNotSettled
+    },
+    {
+      claimed24h: 0,
+      submitted24h: 0,
+      settled24h: 0,
+      claimedNotSubmitted: 0,
+      submittedNotSettled: 0
+    }
+  );
   assert.deepEqual(response.body.components.stateStore, { ok: true, backend: "memory", mode: "memory" });
   assert.deepEqual(response.body.components.indexer, { ok: false, reason: "indexer_status_unconfigured" });
   assert.ok(response.body.warnings.some((warning) => warning.code === "treasury_mutations_unavailable"));

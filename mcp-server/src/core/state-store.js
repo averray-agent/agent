@@ -19,6 +19,7 @@ import {
 } from "./state-store-records.js";
 
 const DEFAULT_EVENT_LOG_RETENTION = 5_000;
+const DEFAULT_SIWE_AUTH_WALLET_RETENTION = 1_000;
 
 const RELEASE_CLAIM_LOCK_SCRIPT = `
 if redis.call("get", KEYS[1]) == ARGV[1] then
@@ -71,6 +72,7 @@ export class MemoryStateStore {
     this.eventLog = [];
     this.accountOverlays = new Map();
     this.policyProposals = new Map();
+    this.siweAuthActivity = new Map();
   }
 
   // ── policy proposals (Package G) ──────────────────────────────────
@@ -272,6 +274,30 @@ export class MemoryStateStore {
     }
     this.nonces.delete(nonce);
     return entry.wallet;
+  }
+
+  async recordSiweAuthEvent({ wallet, event, at = new Date().toISOString() }) {
+    const input = normalizeSiweAuthEvent({ wallet, event, at });
+    const existing = this.siweAuthActivity.get(input.wallet);
+    const updated = applySiweAuthEvent(existing, input);
+    this.siweAuthActivity.set(input.wallet, updated);
+    if (this.siweAuthActivity.size > DEFAULT_SIWE_AUTH_WALLET_RETENTION) {
+      const staleWallets = [...this.siweAuthActivity.values()]
+        .sort((left, right) => String(left.lastSeenAt).localeCompare(String(right.lastSeenAt)))
+        .slice(0, this.siweAuthActivity.size - DEFAULT_SIWE_AUTH_WALLET_RETENTION);
+      for (const stale of staleWallets) {
+        this.siweAuthActivity.delete(stale.wallet);
+      }
+    }
+    return cloneJsonRecord(updated);
+  }
+
+  async listSiweAuthActivity({ limit = 100 } = {}) {
+    const safeLimit = normalizeSiweActivityLimit(limit);
+    return [...this.siweAuthActivity.values()]
+      .sort((left, right) => String(right.lastSeenAt).localeCompare(String(left.lastSeenAt)))
+      .slice(0, safeLimit)
+      .map((record) => cloneJsonRecord(record));
   }
 
   _evictExpiredNonces() {
@@ -702,6 +728,63 @@ export class RedisStateStore {
     return reply ?? undefined;
   }
 
+  async recordSiweAuthEvent({ wallet, event, at = new Date().toISOString() }) {
+    const input = normalizeSiweAuthEvent({ wallet, event, at });
+    await this.connect();
+    const recordKey = this.key("auth", `siwe:${input.wallet}`);
+    const indexKey = this.key("auth", "siwe-wallets");
+    const counterField = input.event === "nonce_issued"
+      ? "noncesIssued"
+      : "verifiesSucceeded";
+    const timestampField = input.event === "nonce_issued"
+      ? "lastNonceIssuedAt"
+      : "lastVerifySucceededAt";
+
+    // The counters are atomic even when one wallet races multiple auth
+    // requests. Timestamps are diagnostic context; the sorted-set score keeps
+    // the admin view ordered by the latest recorded server event.
+    await this.client.hIncrBy(recordKey, counterField, 1);
+    await this.client.hSetNX(recordKey, "firstSeenAt", input.at);
+    await this.client.hSet(recordKey, "wallet", input.wallet);
+    await this.client.hSet(recordKey, timestampField, input.at);
+    await this.client.hSet(recordKey, "lastSeenAt", input.at);
+    await this.client.zAdd(indexKey, {
+      score: Date.parse(input.at),
+      value: input.wallet
+    });
+    const staleWallets = await this.client.zRange(
+      indexKey,
+      0,
+      -(DEFAULT_SIWE_AUTH_WALLET_RETENTION + 1)
+    );
+    if (staleWallets.length > 0) {
+      await this.client.zRem(indexKey, staleWallets);
+      await this.client.del(
+        staleWallets.map((wallet) => this.key("auth", `siwe:${wallet}`))
+      );
+    }
+
+    return normalizeSiweAuthActivityRecord(
+      await this.client.hGetAll(recordKey),
+      input.wallet
+    );
+  }
+
+  async listSiweAuthActivity({ limit = 100 } = {}) {
+    await this.connect();
+    const safeLimit = normalizeSiweActivityLimit(limit);
+    const wallets = await this.client.zRange(
+      this.key("auth", "siwe-wallets"),
+      0,
+      Math.max(0, safeLimit - 1),
+      { REV: true }
+    );
+    return await Promise.all(wallets.map(async (wallet) => normalizeSiweAuthActivityRecord(
+      await this.client.hGetAll(this.key("auth", `siwe:${wallet}`)),
+      wallet
+    )));
+  }
+
   async consumeRateLimit(bucket, key, { limit, windowSeconds }) {
     await this.connect();
     const redisKey = this.key(`rl:${bucket}`, key);
@@ -1016,4 +1099,63 @@ export function createStateStore(env = process.env, { logger = console } = {}) {
 // JSON round-trip is the simplest correct clone for that shape.
 function cloneAccountOverlay(overlay) {
   return cloneJsonRecord(overlay);
+}
+
+const SIWE_AUTH_EVENTS = new Set(["nonce_issued", "verify_succeeded"]);
+
+function normalizeSiweAuthEvent({ wallet, event, at }) {
+  const normalizedWallet = String(wallet ?? "").trim().toLowerCase();
+  if (!/^0x[a-f0-9]{40}$/u.test(normalizedWallet)) {
+    throw new Error("SIWE auth telemetry requires a canonical wallet address.");
+  }
+  if (!SIWE_AUTH_EVENTS.has(event)) {
+    throw new Error(`Unsupported SIWE auth telemetry event: ${event ?? "missing"}`);
+  }
+  const timestamp = new Date(at);
+  if (!Number.isFinite(timestamp.getTime())) {
+    throw new Error("SIWE auth telemetry requires a valid event timestamp.");
+  }
+  return {
+    wallet: normalizedWallet,
+    event,
+    at: timestamp.toISOString()
+  };
+}
+
+function applySiweAuthEvent(existing, input) {
+  const current = normalizeSiweAuthActivityRecord(existing, input.wallet);
+  const noncesIssued = current.noncesIssued + (input.event === "nonce_issued" ? 1 : 0);
+  const verifiesSucceeded = current.verifiesSucceeded + (input.event === "verify_succeeded" ? 1 : 0);
+  return {
+    wallet: input.wallet,
+    noncesIssued,
+    verifiesSucceeded,
+    verificationGap: Math.max(0, noncesIssued - verifiesSucceeded),
+    firstSeenAt: current.firstSeenAt ?? input.at,
+    lastNonceIssuedAt: input.event === "nonce_issued" ? input.at : current.lastNonceIssuedAt,
+    lastVerifySucceededAt: input.event === "verify_succeeded" ? input.at : current.lastVerifySucceededAt,
+    lastSeenAt: input.at
+  };
+}
+
+function normalizeSiweAuthActivityRecord(record, wallet) {
+  const source = record && typeof record === "object" ? record : {};
+  const noncesIssued = Math.max(0, Number(source.noncesIssued) || 0);
+  const verifiesSucceeded = Math.max(0, Number(source.verifiesSucceeded) || 0);
+  return {
+    wallet: String(source.wallet ?? wallet ?? "").toLowerCase(),
+    noncesIssued,
+    verifiesSucceeded,
+    verificationGap: Math.max(0, noncesIssued - verifiesSucceeded),
+    firstSeenAt: source.firstSeenAt ?? null,
+    lastNonceIssuedAt: source.lastNonceIssuedAt ?? null,
+    lastVerifySucceededAt: source.lastVerifySucceededAt ?? null,
+    lastSeenAt: source.lastSeenAt ?? null
+  };
+}
+
+function normalizeSiweActivityLimit(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 100;
+  return Math.min(Math.trunc(parsed), 1000);
 }

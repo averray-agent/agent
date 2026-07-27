@@ -344,12 +344,46 @@ test("buildProductHealthSnapshot reports reward bank and Redis settlement counte
     async listRecentSessions(limit) {
       assert.equal(limit, 1000);
       return [
-        { sessionId: "settled-approved", status: "resolved", resolvedAt: "2026-07-05T11:00:00.000Z" },
-        { sessionId: "settled-rejected", status: "rejected", rejectedAt: "2026-07-05T10:30:00.000Z" },
-        { sessionId: "stuck-submitted", status: "submitted", submittedAt: "2026-07-05T11:20:00.000Z" },
-        { sessionId: "submit-failed", status: "claimed", submitFailedAt: "2026-07-05T11:55:00.000Z" },
-        { sessionId: "receipt-failed", disputeId: "dispute-revert", status: "disputed", updatedAt: "2026-07-05T11:45:00.000Z" },
-        { sessionId: "old-failed", status: "claimed", submitFailedAt: "2026-07-03T11:55:00.000Z" }
+        {
+          sessionId: "settled-approved",
+          status: "resolved",
+          claimedAt: "2026-07-05T10:45:00.000Z",
+          submittedAt: "2026-07-05T10:50:00.000Z",
+          resolvedAt: "2026-07-05T11:00:00.000Z"
+        },
+        {
+          sessionId: "settled-rejected",
+          status: "rejected",
+          claimedAt: "2026-07-05T10:00:00.000Z",
+          submittedAt: "2026-07-05T10:15:00.000Z",
+          rejectedAt: "2026-07-05T10:30:00.000Z"
+        },
+        {
+          sessionId: "stuck-submitted",
+          status: "submitted",
+          claimedAt: "2026-07-05T11:00:00.000Z",
+          submittedAt: "2026-07-05T11:20:00.000Z"
+        },
+        {
+          sessionId: "submit-failed",
+          status: "claimed",
+          claimedAt: "2026-07-05T11:40:00.000Z",
+          submitFailedAt: "2026-07-05T11:55:00.000Z"
+        },
+        {
+          sessionId: "receipt-failed",
+          disputeId: "dispute-revert",
+          status: "disputed",
+          claimedAt: "2026-07-05T11:10:00.000Z",
+          submittedAt: "2026-07-05T11:15:00.000Z",
+          updatedAt: "2026-07-05T11:45:00.000Z"
+        },
+        {
+          sessionId: "old-failed",
+          status: "claimed",
+          claimedAt: "2026-07-03T11:40:00.000Z",
+          submitFailedAt: "2026-07-03T11:55:00.000Z"
+        }
       ];
     },
     async getMutationReceipt(bucket, key) {
@@ -393,7 +427,11 @@ test("buildProductHealthSnapshot reports reward bank and Redis settlement counte
     source: "agent_account_position"
   });
   assert.deepEqual(snapshot.settlement, {
+    claimed24h: 5,
+    submitted24h: 4,
     settled24h: 2,
+    claimedNotSubmitted: 2,
+    submittedNotSettled: 2,
     stuck: 1,
     failed24h: 2,
     asOf: "2026-07-05T12:00:00.000Z",

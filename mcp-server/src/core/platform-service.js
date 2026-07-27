@@ -389,7 +389,8 @@ export class PlatformService {
       jobStaleSweeper,
       submittedJobAutoVerifier,
       recentSessions,
-      hostDiagnostics
+      hostDiagnostics,
+      siweAuthTelemetry
     ] = await Promise.all([
       getTreasuryPolicyStatusSafely(this.blockchainGateway),
       this.jobCatalogService.getRecurringTemplateStatus(),
@@ -532,7 +533,8 @@ export class PlatformService {
         lastRun: undefined
       },
       this.jobExecutionService.listRecentSessions(14),
-      Promise.resolve().then(() => collectHostDiagnostics())
+      Promise.resolve().then(() => collectHostDiagnostics()),
+      resolveSiweAuthTelemetry(this.stateStore)
     ]);
     const [xcmSettlementWatcher, xcmObservationRelay] = await Promise.all([
       getXcmSettlementWatcherStatusSafely(this.xcmSettlementWatcher),
@@ -627,6 +629,9 @@ export class PlatformService {
           }
         : undefined,
       authPolicy: capabilityMatrix(),
+      authTelemetry: {
+        siwe: siweAuthTelemetry
+      },
       anomalies,
       ops: {
         recentSessions: recentSessions.map((session) => ({
@@ -1464,6 +1469,54 @@ export class PlatformService {
     });
     return {
       providerOperations: sanitizeProviderOperations(providerOperations)
+    };
+  }
+}
+
+async function resolveSiweAuthTelemetry(stateStore, { limit = 1000 } = {}) {
+  const asOf = new Date().toISOString();
+  const fallback = {
+    totals: {
+      noncesIssued: 0,
+      verifiesSucceeded: 0,
+      verificationGap: 0
+    },
+    walletCount: 0,
+    wallets: [],
+    walletWindowLimit: limit,
+    windowSaturated: false,
+    asOf,
+    source: "backend_state_store",
+    readable: false
+  };
+  if (typeof stateStore?.listSiweAuthActivity !== "function") {
+    return fallback;
+  }
+  try {
+    const wallets = await stateStore.listSiweAuthActivity({ limit });
+    const records = Array.isArray(wallets) ? wallets : [];
+    const totals = records.reduce(
+      (sum, record) => ({
+        noncesIssued: sum.noncesIssued + (Number(record?.noncesIssued) || 0),
+        verifiesSucceeded: sum.verifiesSucceeded + (Number(record?.verifiesSucceeded) || 0),
+        verificationGap: sum.verificationGap + (Number(record?.verificationGap) || 0)
+      }),
+      { noncesIssued: 0, verifiesSucceeded: 0, verificationGap: 0 }
+    );
+    return {
+      totals,
+      walletCount: records.length,
+      wallets: records,
+      walletWindowLimit: limit,
+      windowSaturated: records.length >= limit,
+      asOf,
+      source: "backend_state_store",
+      readable: true
+    };
+  } catch (error) {
+    return {
+      ...fallback,
+      error: error?.message ?? "read_failed"
     };
   }
 }

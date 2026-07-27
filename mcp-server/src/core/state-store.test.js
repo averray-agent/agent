@@ -54,6 +54,58 @@ test("MemoryStateStore rate limit returns allowed=false past the limit", async (
   assert.equal(third.remaining, 0);
 });
 
+test("MemoryStateStore counts SIWE nonce and verify events per canonical wallet", async () => {
+  const store = new MemoryStateStore();
+  const wallet = "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+  const otherWallet = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+  await store.recordSiweAuthEvent({
+    wallet,
+    event: "nonce_issued",
+    at: "2026-07-28T10:00:00.000Z"
+  });
+  await store.recordSiweAuthEvent({
+    wallet,
+    event: "nonce_issued",
+    at: "2026-07-28T10:01:00.000Z"
+  });
+  await store.recordSiweAuthEvent({
+    wallet,
+    event: "verify_succeeded",
+    at: "2026-07-28T10:02:00.000Z"
+  });
+  await store.recordSiweAuthEvent({
+    wallet: otherWallet,
+    event: "nonce_issued",
+    at: "2026-07-28T10:03:00.000Z"
+  });
+
+  const activity = await store.listSiweAuthActivity({ limit: 10 });
+  assert.deepEqual(activity, [
+    {
+      wallet: otherWallet,
+      noncesIssued: 1,
+      verifiesSucceeded: 0,
+      verificationGap: 1,
+      firstSeenAt: "2026-07-28T10:03:00.000Z",
+      lastNonceIssuedAt: "2026-07-28T10:03:00.000Z",
+      lastVerifySucceededAt: null,
+      lastSeenAt: "2026-07-28T10:03:00.000Z"
+    },
+    {
+      wallet: wallet.toLowerCase(),
+      noncesIssued: 2,
+      verifiesSucceeded: 1,
+      verificationGap: 1,
+      firstSeenAt: "2026-07-28T10:00:00.000Z",
+      lastNonceIssuedAt: "2026-07-28T10:01:00.000Z",
+      lastVerifySucceededAt: "2026-07-28T10:02:00.000Z",
+      lastSeenAt: "2026-07-28T10:02:00.000Z"
+    }
+  ]);
+  assert.equal((await store.listSiweAuthActivity({ limit: 1 })).length, 1);
+});
+
 test("MemoryStateStore mutation receipts round-trip", async () => {
   const store = new MemoryStateStore();
   const receipt = { id: "job-123", status: "created" };
