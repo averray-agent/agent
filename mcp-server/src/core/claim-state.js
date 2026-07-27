@@ -1,5 +1,12 @@
+import { normalizeAssetSymbol } from "./assets.js";
+import { decimalToBaseUnits } from "./platform-service-helpers.js";
+
 const TERMINAL_SESSION_STATUSES = new Set(["resolved", "rejected", "closed", "expired", "timed_out"]);
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+const BANK_INDEPENDENT_FUNDING_SOURCES = new Set([
+  "ingestion_prefund",
+  "recurring_template_reserve"
+]);
 
 export function claimExpiresAt(session, job) {
   if (session?.chainClaimExpiresAt) {
@@ -34,6 +41,7 @@ export function summarizeJobClaimState({
   session = undefined,
   sessions = undefined,
   wallet = undefined,
+  rewardBank = undefined,
   now = new Date()
 } = {}) {
   const lifecycle = job?.lifecycle ?? {};
@@ -49,17 +57,27 @@ export function summarizeJobClaimState({
   const walletMatchesClaim = Boolean(normalizedWallet && claimedBy && normalizedWallet === claimedBy);
   const claimExpiresAtValue = claimExpiresAt(session, job);
   const expired = isExpiredClaim(session, job, now) || session?.status === "expired";
-  // Truth boundary: a job whose reward was scheduled for prefunding at ingestion
-  // but is not yet escrowed on-chain must never be advertised claimable — claiming
-  // it would revert insufficient_liquidity at funding time. Scoped to the
-  // ingestion_prefund funding source so manual/recurring jobs are unaffected.
+  // Preserve the explicit ingestion-prefund truth boundary. Lazy-funded jobs
+  // have no funding metadata and are checked against the shared reward-bank
+  // evidence below; recurring-reserve jobs use their dedicated reserve.
   const fundingState = job?.funding?.source === "ingestion_prefund"
     ? job.funding.state
     : undefined;
-  const fundingPending = fundingState !== undefined && fundingState !== "funded";
+  const prefundingPending = fundingState !== undefined && fundingState !== "funded";
+  const lazyFundingState = resolveLazyRewardFundingState(job, rewardBank);
+  const lazyFundingPending = lazyFundingState === "pending";
+  const lazyFundingUnverified = lazyFundingState === "unverified";
+  const effectiveFundingState = fundingState
+    ?? (lazyFundingPending ? "pending" : lazyFundingUnverified ? "unverified" : undefined);
+  const fundingBlocked = prefundingPending || lazyFundingPending || lazyFundingUnverified;
+  const fundingReason = prefundingPending || lazyFundingPending
+    ? "reward_funding_pending"
+    : lazyFundingUnverified
+      ? "reward_funding_unverified"
+      : undefined;
 
   if (!session) {
-    const claimable = lifecycleState === "open" && !retryExhausted && !fundingPending;
+    const claimable = lifecycleState === "open" && !retryExhausted && !fundingBlocked;
     const claimState = retryExhausted ? "exhausted" : claimable ? "open" : lifecycleState;
     return compact({
       claimState,
@@ -67,12 +85,10 @@ export function summarizeJobClaimState({
       effectiveState: claimable ? "claimable" : claimState,
       claimable,
       currentWalletCanClaim: normalizedWallet ? claimable : null,
-      fundingState,
+      fundingState: effectiveFundingState,
       reason: retryExhausted
         ? "retry_limit_exhausted"
-        : fundingPending
-          ? "reward_funding_pending"
-          : claimable ? "claimable" : `job_${lifecycleState}`,
+        : fundingReason ?? (claimable ? "claimable" : `job_${lifecycleState}`),
       retryLimit,
       claimAttemptCount,
       remainingClaimAttempts,
@@ -85,7 +101,7 @@ export function summarizeJobClaimState({
   }
 
   if (expired) {
-    const claimable = lifecycleState === "open" && !retryExhausted && !fundingPending;
+    const claimable = lifecycleState === "open" && !retryExhausted && !fundingBlocked;
     const claimState = retryExhausted ? "exhausted" : "expired";
     return compact({
       claimState,
@@ -93,12 +109,10 @@ export function summarizeJobClaimState({
       effectiveState: claimable ? "claimable" : claimState,
       claimable,
       currentWalletCanClaim: normalizedWallet ? claimable : null,
-      fundingState,
+      fundingState: effectiveFundingState,
       reason: retryExhausted
         ? "retry_limit_exhausted"
-        : fundingPending
-          ? "reward_funding_pending"
-          : "claim_ttl_expired_reopen_available",
+        : fundingReason ?? "claim_ttl_expired_reopen_available",
       retryLimit,
       claimAttemptCount,
       remainingClaimAttempts,
@@ -149,6 +163,46 @@ export function summarizeJobClaimState({
     claimNumber: session.claimNumber ?? null,
     sessionId: session.sessionId ?? null
   });
+}
+
+function resolveLazyRewardFundingState(job, rewardBank) {
+  const fundingSource = job?.funding?.source;
+  if (BANK_INDEPENDENT_FUNDING_SOURCES.has(fundingSource) || rewardBank === undefined) {
+    return undefined;
+  }
+  if (
+    rewardBank?.readable !== true
+    || rewardBank?.stale === true
+    || typeof rewardBank?.asset !== "string"
+    || !rewardBank.asset.trim()
+    || !Number.isInteger(Number(rewardBank?.decimals))
+  ) {
+    return "unverified";
+  }
+
+  const rewardAsset = normalizeAssetSymbol(job?.rewardAsset);
+  const bankAsset = normalizeAssetSymbol(rewardBank?.asset);
+  if (rewardAsset !== bankAsset) {
+    return "unverified";
+  }
+
+  try {
+    const decimals = Number(rewardBank.decimals);
+    const requiredRaw = [
+      ["rewardAmount", job?.rewardAmount ?? 0],
+      ["opsReserve", job?.opsReserve ?? 0],
+      ["contingencyReserve", job?.contingencyReserve ?? 0]
+    ].reduce(
+      (total, [label, amount]) => total + decimalToBaseUnits(amount, decimals, label),
+      0n
+    );
+    const liquidRaw = /^\d+$/u.test(String(rewardBank?.liquidRaw ?? "").trim())
+      ? BigInt(String(rewardBank.liquidRaw).trim())
+      : decimalToBaseUnits(rewardBank?.liquid, decimals, "reward bank liquid");
+    return liquidRaw >= requiredRaw ? "available" : "pending";
+  } catch {
+    return "unverified";
+  }
 }
 
 export function claimStatusFields(claimStatus) {

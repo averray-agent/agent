@@ -10,6 +10,7 @@ import {
   buildProductHealthSnapshot,
   buildCapabilityWarnings,
   createProductHealthSnapshotProvider,
+  createRewardBankHealthProvider,
   loadDeploymentManifestFromUrl,
   resolveCapabilityHealth,
   resolveHealthAddresses,
@@ -424,4 +425,57 @@ test("createProductHealthSnapshotProvider caches public health recompute", async
   current = new Date("2026-07-05T12:01:01.000Z");
   await provider();
   assert.equal(scans, 2);
+});
+
+test("reward-bank provider uses fresh last-known-good evidence, then fails closed when stale", async () => {
+  let current = new Date("2026-07-27T12:00:00.000Z");
+  let reads = 0;
+  let failReads = false;
+  const provider = createRewardBankHealthProvider({
+    gateway: {
+      isEnabled: () => true,
+      async getTreasuryPolicyStatus() {
+        reads += 1;
+        if (failReads) {
+          throw new Error("RPC unavailable");
+        }
+        return {
+          signerFunding: {
+            account: "0x31ad432dFe083B998c69B6dB88A984ec5207ab7F",
+            assets: [{
+              symbol: "USDC",
+              address: "0x0000053900000000000000000000000001200000",
+              decimals: 6,
+              readable: true,
+              liquid: 23.9,
+              liquidRaw: "23900000"
+            }]
+          }
+        };
+      }
+    },
+    deploymentManifest: TEST_DEPLOYMENT,
+    now: () => current,
+    refreshMs: 1_000,
+    maxAgeMs: 60_000
+  });
+
+  const live = await provider();
+  assert.equal(live.readable, true);
+  assert.equal(reads, 1);
+
+  failReads = true;
+  current = new Date("2026-07-27T12:00:02.000Z");
+  const fallback = await provider();
+  assert.equal(fallback.readable, true);
+  assert.equal(fallback.fallback, "last_known_good");
+  assert.equal(fallback.asOf, "2026-07-27T12:00:00.000Z");
+  assert.equal(reads, 2);
+
+  current = new Date("2026-07-27T12:01:01.000Z");
+  const stale = await provider();
+  assert.equal(stale.readable, false);
+  assert.equal(stale.stale, true);
+  assert.equal(stale.lastKnownGoodAsOf, "2026-07-27T12:00:00.000Z");
+  assert.equal(reads, 3);
 });

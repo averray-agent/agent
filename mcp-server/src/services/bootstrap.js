@@ -83,6 +83,7 @@ import { fileURLToPath } from "node:url";
 import { DEFAULT_ESCROW_ASSET_SYMBOL } from "../core/assets.js";
 import { ConfigError } from "../core/errors.js";
 import { assertMainnetSignerPosture, assertChainIdMatchesRpc } from "./startup-guards.js";
+import { createRewardBankHealthProvider } from "../core/health-capability.js";
 
 const moduleDir = dirname(fileURLToPath(import.meta.url));
 loadLocalEnv(process.cwd(), resolve(moduleDir, "../../"));
@@ -306,6 +307,15 @@ export async function createPlatformRuntime() {
     logger,
     () => new PlatformService(jobs, profiles, accounts, reputations, gateway, stateStore, eventBus)
   );
+  const rewardBankHealthProvider = initStep(
+    "init-reward-bank-health-provider",
+    logger,
+    () => createRewardBankHealthProvider({
+      gateway,
+      env: process.env
+    })
+  );
+  platformService.setRewardBankHealthProvider(rewardBankHealthProvider);
   platformService.verificationIngestionService.setBadgeReceiptSigner(badgeReceiptSigner);
   platformService.verificationIngestionService.setPolicyService(policyService);
   if (badgeReceiptSigner) {
@@ -469,6 +479,7 @@ export async function createPlatformRuntime() {
   }
   return {
     platformService,
+    rewardBankHealthProvider,
     policyService,
     verifierService,
     gateway,

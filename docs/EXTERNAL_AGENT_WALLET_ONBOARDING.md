@@ -130,6 +130,10 @@ Use `claimStatus.claimable` and `claimStatus.reason` as the authoritative
 claimability signal before attempting `/jobs/claim`. `lifecycle.status`
 describes the content/job lifecycle and may remain `open` for a job whose
 current claim state is `claimed`, `submitted`, or `exhausted`.
+`reward_funding_pending` means the reward bank cannot currently cover the
+job and may become claimable after a refill; `reward_funding_unverified`
+means the platform's last trustworthy bank reading expired, so report the
+platform fault instead of attempting the claim.
 
 After SIWE login, check readiness before claiming:
 
