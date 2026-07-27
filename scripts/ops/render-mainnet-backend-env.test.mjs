@@ -41,7 +41,10 @@ const MANIFEST = {
   },
   runtime: {
     auth: {
-      adminWallets: ["0x1111111111111111111111111111111111111111"],
+      adminWallets: [
+        "0x1111111111111111111111111111111111111111",
+        "0x9999999999999999999999999999999999999999",
+      ],
       verifierWallets: ["0x2222222222222222222222222222222222222222"],
     },
     indexer: {
@@ -106,8 +109,8 @@ test("transformLine: per-deploy unknowns become commented TODO(operator)", () =>
 test("buildManifestOverrides: resolves addresses, auth, blocks, and schema", () => {
   const overrides = buildManifestOverrides(MANIFEST);
   assert.equal(overrides.TREASURY_POLICY_ADDRESS, MANIFEST.contracts.treasuryPolicy);
-  assert.equal(overrides.AUTH_ADMIN_WALLETS, MANIFEST.runtime.auth.adminWallets[0]);
-  assert.equal(overrides.AUTH_VERIFIER_WALLETS, MANIFEST.runtime.auth.verifierWallets[0]);
+  assert.equal(overrides.AUTH_ADMIN_WALLETS, MANIFEST.runtime.auth.adminWallets.join(","));
+  assert.equal(overrides.AUTH_VERIFIER_WALLETS, MANIFEST.runtime.auth.verifierWallets.join(","));
   assert.equal(overrides.PONDER_START_BLOCK_TREASURY, "101");
   assert.equal(overrides.PONDER_START_BLOCK_ESCROW, "102", "shared Agent/Escrow scan starts at the earlier deploy");
   assert.equal(overrides.PONDER_START_BLOCK_REPUTATION, "103");
@@ -218,11 +221,16 @@ test("generateAll: the real transform yields the mainnet essentials", () => {
   assert.match(backend, /^AGENT_ACCOUNT_ADDRESS=0xB1350932bf85E7ffd0599E9a3CC7b55718D89E57$/mu);
   assert.match(
     backend,
-    /^AUTH_ADMIN_WALLETS=0x01e6eed856e989201f4ff6346e18eab7e46c874c,0x9Ab8531FBb0948C542a31298FD61335f30064239$/mu
+    /^AUTH_ADMIN_WALLETS=0x01e6eed856e989201f4ff6346e18eab7e46c874c,0x9Ab8531FBb0948C542a31298FD61335f30064239,0xDeD3D610546DF151a6BB3D6ed119c3700ABC2146$/mu
   );
   assert.match(
     backend,
     /^AUTH_VERIFIER_WALLETS=0x5a6836c6D4d293F6E5377E6c28054F4171915813,0x9Ab8531FBb0948C542a31298FD61335f30064239$/mu
+  );
+  assert.doesNotMatch(
+    backend,
+    /^AUTH_VERIFIER_WALLETS=.*0xDeD3D610546DF151a6BB3D6ed119c3700ABC2146.*$/mu,
+    "the human operator wallet must never inherit verifier/settlement authority"
   );
   assert.doesNotMatch(
     backend,
