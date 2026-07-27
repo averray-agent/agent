@@ -344,6 +344,17 @@ test("claimJob stores on-chain claim expiry when blockchain is enabled", async (
   const blockchainGateway = {
     isEnabled: () => true,
     toJobId: (jobId) => `chain:${jobId}`,
+    async getWorkerClaimCount() {
+      return 0;
+    },
+    async getClaimEconomicsDecisionState() {
+      return {
+        state: 0,
+        exists: false,
+        contractLayout: "current",
+        onboardingWaiverEligible: false
+      };
+    },
     async getJob() {
       getJobCalls += 1;
       return getJobCalls === 1
@@ -376,6 +387,25 @@ test("claimJob converges a stranded claim: chain claim mined but local session w
     isEnabled: () => true,
     toJobId: (jobId) => `chain:${jobId}`,
     async getWorkerClaimCount() { return 0; },
+    async getClaimEconomicsDecisionState() {
+      return {
+        state: onChainClaimed ? 2 : 0,
+        exists: onChainClaimed,
+        contractLayout: "current",
+        onboardingWaiverEligible: false
+      };
+    },
+    async previewClaimEconomics() {
+      return {
+        claimStake: 0.3,
+        claimStakeBps: 500,
+        claimFee: 0.12,
+        claimFeeBps: 200,
+        claimEconomicsWaived: false,
+        claimNumber: 1,
+        totalClaimLock: 0.42
+      };
+    },
     async getJob() {
       // Open until the on-chain claim lands, then CLAIMED (state 2) by WALLET.
       return onChainClaimed
@@ -421,6 +451,25 @@ test("claimJob does NOT converge when the chain job is claimed by a different wo
     isEnabled: () => true,
     toJobId: (jobId) => `chain:${jobId}`,
     async getWorkerClaimCount() { return 0; },
+    async getClaimEconomicsDecisionState() {
+      return {
+        state: 2,
+        exists: true,
+        contractLayout: "current",
+        onboardingWaiverEligible: false
+      };
+    },
+    async previewClaimEconomics() {
+      return {
+        claimStake: 0.3,
+        claimStakeBps: 500,
+        claimFee: 0.12,
+        claimFeeBps: 200,
+        claimEconomicsWaived: false,
+        claimNumber: 1,
+        totalClaimLock: 0.42
+      };
+    },
     async getJob() {
       // Already claimed on-chain by someone else.
       return { state: 2, worker: WALLET_2 };
@@ -448,6 +497,14 @@ test("claimJob uses chain worker claim count before ensuring a chain job", async
     async getWorkerClaimCount(wallet) {
       assert.equal(wallet, WALLET);
       return 3;
+    },
+    async getClaimEconomicsDecisionState() {
+      return {
+        state: 0,
+        exists: false,
+        contractLayout: "current",
+        onboardingWaiverEligible: false
+      };
     },
     async getJob() {
       return { state: 0 };
@@ -485,6 +542,76 @@ test("claimJob uses chain worker claim count before ensuring a chain job", async
   assert.equal(claimed.claimNumber, 4);
   assert.equal(claimed.claimEconomicsWaived, false);
   assert.equal(claimed.totalClaimLock, 0.6);
+});
+
+test("claimJob logs an invariant error when the shared prediction differs from contract authority", async () => {
+  const stateStore = new MemoryStateStore();
+  const job = makeJob({ rewardAmount: 5 });
+  const errors = [];
+  let state = 1;
+  let previewCalls = 0;
+  const blockchainGateway = {
+    isEnabled: () => true,
+    toJobId: (jobId) => `chain:${jobId}`,
+    async getClaimEconomicsDecisionState() {
+      return {
+        state,
+        exists: true,
+        contractLayout: "current",
+        onboardingWaiverEligible: false
+      };
+    },
+    async previewClaimEconomics() {
+      previewCalls += 1;
+      const claimStake = previewCalls === 1 ? 0.25 : 0.5;
+      return {
+        claimStake,
+        claimStakeBps: previewCalls === 1 ? 500 : 1000,
+        claimFee: 0.1,
+        claimFeeBps: 200,
+        claimEconomicsWaived: false,
+        claimNumber: 1,
+        totalClaimLock: claimStake + 0.1
+      };
+    },
+    async getJob() {
+      return { state };
+    },
+    async ensureJob() {},
+    async ensureClaimStakeLiquidity() {},
+    async claimJob() {
+      state = 2;
+    }
+  };
+  const service = new JobExecutionService(
+    stateStore,
+    blockchainGateway,
+    () => job,
+    undefined,
+    undefined,
+    async () => 500,
+    () => job,
+    async () => ({}),
+    {
+      logger: {
+        error(...args) {
+          errors.push(args);
+        }
+      }
+    }
+  );
+
+  const claimed = await service.claimJob(WALLET, job.id, "http", "idemp-invariant-probe");
+
+  assert.equal(claimed.claimStake, 0.5);
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0][0].event, "claim_economics_prediction_mismatch");
+  assert.equal(errors[0][0].jobId, job.id);
+  assert.deepEqual(errors[0][0].differences.claimStake, {
+    prediction: 0.25,
+    authoritative: 0.5
+  });
+  assert.equal(errors[0][1], "claim_economics_prediction_mismatch");
 });
 
 test("claimJob reports exhausted retry budget after an expired single-attempt job", async () => {

@@ -395,13 +395,16 @@ export class BlockchainGateway {
     return this.withGatewayError("getDefaultClaimStakeBps", async () => Number(await this.policyContract.defaultClaimStakeBps()));
   }
 
-  async getClaimEconomicsConfig() {
+  async getClaimEconomicsConfig({ requireWaiverInputs = false } = {}) {
     return this.withGatewayError("getClaimEconomicsConfig", async () => {
       const optional = async (promise, fallback) => promise.catch(() => fallback);
+      const onboardingWaiverClaimCountRead = this.policyContract.onboardingWaiverClaimCount();
       const [claimFeeBps, claimFeeVerifierBps, onboardingWaiverClaimCount] = await Promise.all([
         optional(this.policyContract.claimFeeBps(), 0),
         optional(this.policyContract.claimFeeVerifierBps(), 7000),
-        optional(this.policyContract.onboardingWaiverClaimCount(), 0)
+        requireWaiverInputs
+          ? onboardingWaiverClaimCountRead
+          : optional(onboardingWaiverClaimCountRead, 0)
       ]);
       const minClaimFeeByAsset = {};
       await Promise.all((this.config.supportedAssets ?? []).map(async (asset) => {
@@ -423,9 +426,36 @@ export class BlockchainGateway {
   async getWorkerClaimCount(wallet) {
     return this.withGatewayError("getWorkerClaimCount", async () => {
       if (typeof this.escrowContract?.workerClaimCount !== "function") {
-        return 0;
+        throw new Error("EscrowCore.workerClaimCount selector is unavailable");
       }
       return Number(await this.escrowContract.workerClaimCount(wallet));
+    });
+  }
+
+  async getClaimEconomicsDecisionState(jobId) {
+    return this.withGatewayError("getClaimEconomicsDecisionState", async () => {
+      const live = await this.readEscrowJob(jobId);
+      const contractLayout = live.contractLayout === "legacy" ? "legacy" : "current";
+      const exists = Number(live.state) !== 0;
+      if (contractLayout === "legacy" || !exists) {
+        return {
+          state: Number(live.state),
+          exists,
+          contractLayout,
+          onboardingWaiverEligible: false
+        };
+      }
+      if (typeof this.escrowContract?.onboardingWaiverEligibleJobs !== "function") {
+        throw new Error("EscrowCore.onboardingWaiverEligibleJobs selector is unavailable");
+      }
+      return {
+        state: Number(live.state),
+        exists,
+        contractLayout,
+        onboardingWaiverEligible: Boolean(
+          await this.escrowContract.onboardingWaiverEligibleJobs(this.toJobId(jobId))
+        )
+      };
     });
   }
 

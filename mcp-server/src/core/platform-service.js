@@ -45,7 +45,7 @@ import {
   sumSubJobRewards,
   validationPathFromError
 } from "./platform-service-helpers.js";
-import { computeClaimEconomics, countClaimedSessions } from "./claim-economics.js";
+import { countClaimedSessions, resolveClaimEconomicsDecision } from "./claim-economics.js";
 import { claimStatusFields, isTerminalSession, summarizeJobClaimState } from "./claim-state.js";
 import { capabilityMatrix } from "../auth/capabilities.js";
 import { normalizeAssetSymbol } from "./assets.js";
@@ -1249,26 +1249,25 @@ export class PlatformService {
     return 500;
   }
 
-  async getClaimEconomicsConfig() {
+  async getClaimEconomicsConfig(options = undefined) {
     if (this.blockchainGateway?.isEnabled() && typeof this.blockchainGateway.getClaimEconomicsConfig === "function") {
-      return this.blockchainGateway.getClaimEconomicsConfig();
+      return this.blockchainGateway.getClaimEconomicsConfig(options);
     }
     return {};
   }
 
   async getClaimEconomicsPreview(wallet, job) {
-    const priorClaimCount = this.blockchainGateway?.isEnabled()
-      && typeof this.blockchainGateway.getWorkerClaimCount === "function"
-      ? await this.blockchainGateway.getWorkerClaimCount(wallet)
-      : countClaimedSessions(await this.jobExecutionService.collectSessionHistory(wallet));
-    return computeClaimEconomics({
-      rewardAmount: job.rewardAmount,
-      rewardAsset: job.rewardAsset,
-      priorClaimCount,
-      onboardingWaiverEligible: Boolean(job.onboardingWaiverEligible),
-      claimStakeBps: await this.getDefaultClaimStakeBps(),
-      ...(await this.getClaimEconomicsConfig())
+    const decision = await resolveClaimEconomicsDecision({
+      wallet,
+      job,
+      blockchainGateway: this.blockchainGateway,
+      getDefaultClaimStakeBps: this.getDefaultClaimStakeBps.bind(this),
+      getClaimEconomicsConfig: this.getClaimEconomicsConfig.bind(this),
+      getLocalPriorClaimCount: async () => countClaimedSessions(
+        await this.jobExecutionService.collectSessionHistory(wallet)
+      )
     });
+    return decision.economics;
   }
 
   async getReputation(wallet) {

@@ -27,7 +27,7 @@ import {
   parseGithubPullRequestUrl,
   updateFundedJobFromSession
 } from "./funded-jobs.js";
-import { computeClaimEconomics, countClaimedSessions } from "./claim-economics.js";
+import { countClaimedSessions, resolveClaimEconomicsDecision } from "./claim-economics.js";
 import {
   DEFAULT_OPEN_PR_CAP_PER_REPO,
   appendAverrayDisclosureFooter,
@@ -40,6 +40,15 @@ import { buildBadgeJobSnapshot } from "./badge-metadata.js";
 // Disputed=5, Closed=6. Used to reconcile a mined-but-receipt-lost submit.
 const ESCROW_JOB_STATE_CLAIMED = 2;
 const ESCROW_JOB_STATE_SUBMITTED = 3;
+const CLAIM_ECONOMICS_INVARIANT_FIELDS = [
+  "claimStake",
+  "claimStakeBps",
+  "claimFee",
+  "claimFeeBps",
+  "claimEconomicsWaived",
+  "claimNumber",
+  "totalClaimLock"
+];
 
 export class JobExecutionService {
   constructor(
@@ -61,6 +70,7 @@ export class JobExecutionService {
     this.accountMutationService = accountMutationService;
     this.getDefaultClaimStakeBps = getDefaultClaimStakeBps;
     this.getClaimEconomicsConfig = getClaimEconomicsConfig;
+    this.logger = maintainerSurfaceConfig.logger ?? console;
     this.openPrCap = Number.isInteger(maintainerSurfaceConfig.openPrCap) && maintainerSurfaceConfig.openPrCap > 0
       ? maintainerSurfaceConfig.openPrCap
       : DEFAULT_OPEN_PR_CAP_PER_REPO;
@@ -175,19 +185,17 @@ export class JobExecutionService {
         ? this.blockchainGateway.toJobId(jobId)
         : jobId;
       let chainClaimTiming = {};
-      const priorClaimCount = this.blockchainGateway?.isEnabled()
-        && typeof this.blockchainGateway.getWorkerClaimCount === "function"
-        ? await this.blockchainGateway.getWorkerClaimCount(wallet)
-        : countClaimedSessions(await this.collectSessionHistory(wallet));
-      const claimEconomicsConfig = await this.getClaimEconomicsConfig();
-      let claimEconomics = computeClaimEconomics({
-        rewardAmount: job.rewardAmount,
-        rewardAsset: job.rewardAsset,
-        priorClaimCount,
-        onboardingWaiverEligible: Boolean(job.onboardingWaiverEligible),
-        claimStakeBps: await this.getDefaultClaimStakeBps(),
-        ...claimEconomicsConfig
+      const claimEconomicsDecision = await resolveClaimEconomicsDecision({
+        wallet,
+        job,
+        blockchainGateway: this.blockchainGateway,
+        getDefaultClaimStakeBps: this.getDefaultClaimStakeBps,
+        getClaimEconomicsConfig: this.getClaimEconomicsConfig,
+        getLocalPriorClaimCount: async () => countClaimedSessions(
+          await this.collectSessionHistory(wallet)
+        )
       });
+      let claimEconomics = claimEconomicsDecision.economics;
       if (this.blockchainGateway?.isEnabled()) {
         const live = await this.blockchainGateway.getJob(jobId);
         if (live.state !== 0 && live.state !== 1) {
@@ -208,7 +216,21 @@ export class JobExecutionService {
           await this.blockchainGateway.ensureJob(job, jobId, claimEconomics.totalClaimLock);
         }
         if (typeof this.blockchainGateway.previewClaimEconomics === "function") {
-          claimEconomics = await this.blockchainGateway.previewClaimEconomics(wallet, jobId).catch(() => claimEconomics);
+          const predictedClaimEconomics = claimEconomics;
+          const authoritativeClaimEconomics = await this.blockchainGateway.previewClaimEconomics(wallet, jobId)
+            .catch((error) => {
+              if (claimEconomicsDecision.contractLayout === "legacy") {
+                return predictedClaimEconomics;
+              }
+              throw error;
+            });
+          this.logClaimEconomicsPredictionMismatch({
+            wallet,
+            jobId,
+            prediction: predictedClaimEconomics,
+            authoritative: authoritativeClaimEconomics
+          });
+          claimEconomics = authoritativeClaimEconomics;
         }
         await this.blockchainGateway.ensureClaimStakeLiquidity?.(wallet, job.rewardAsset, claimEconomics.totalClaimLock);
         await this.blockchainGateway.claimJob(jobId, wallet);
@@ -260,6 +282,24 @@ export class JobExecutionService {
     this.publishSessionEvent("session.claimed", persisted);
     this.publishClaimFundingEvent(persisted, job, claimEconomics);
     return persisted;
+  }
+
+  logClaimEconomicsPredictionMismatch({ wallet, jobId, prediction, authoritative }) {
+    const differences = claimEconomicsDifferences(prediction, authoritative);
+    if (Object.keys(differences).length === 0) {
+      return;
+    }
+    this.logger.error?.(
+      {
+        event: "claim_economics_prediction_mismatch",
+        wallet,
+        jobId,
+        prediction: summarizeClaimEconomics(prediction),
+        authoritative: summarizeClaimEconomics(authoritative),
+        differences
+      },
+      "claim_economics_prediction_mismatch"
+    );
   }
 
   // MAIN-002 self-heal. When claimJob mines on-chain but the subsequent local
@@ -675,6 +715,26 @@ export class JobExecutionService {
       }
     });
   }
+}
+
+function summarizeClaimEconomics(economics) {
+  return Object.fromEntries(
+    CLAIM_ECONOMICS_INVARIANT_FIELDS.map((field) => [field, economics?.[field]])
+  );
+}
+
+function claimEconomicsDifferences(prediction, authoritative) {
+  return Object.fromEntries(
+    CLAIM_ECONOMICS_INVARIANT_FIELDS
+      .filter((field) => !Object.is(prediction?.[field], authoritative?.[field]))
+      .map((field) => [
+        field,
+        {
+          prediction: prediction?.[field],
+          authoritative: authoritative?.[field]
+        }
+      ])
+  );
 }
 
 export function normalizeSubmitPayloadShape(schemaRef, submissionInput, { registrations = [] } = {}) {
