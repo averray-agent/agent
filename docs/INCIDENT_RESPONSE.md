@@ -107,11 +107,14 @@ ALERT_ENVIRONMENT=production-like
 The v1 alert destination is a Slack Incoming Webhook for the operator channel.
 The `Hosted Observability Proof` workflow does not read `ALERT_WEBHOOK_URL`
 from a GitHub secret: it SSHes to the VPS, runs
-`scripts/ops/collect-observability-proof.sh`, and that script sources the
-rendered `/run/agent-stack/backend.env` before calling
+`scripts/ops/collect-live-observability-proof.sh`, and that wrapper verifies
+the durable live-network selector plus public chain ID before selecting
+`/run/agent-stack/backend.env` (testnet) or
+`/run/agent-stack-mainnet/backend.env` (mainnet). The collector reads only the
+selected render before calling
 `check-hosted-stack-and-alert.sh`. Keep the webhook in the `prod-backend`
-1Password vault so the VPS backend service account can render it from
-`deploy/backend.env.template` at deploy/boot time.
+or `mainnet-backend` 1Password vault so the matching VPS backend service
+account can render it at deploy/boot time.
 
 Operator setup before running the proof:
 
@@ -120,7 +123,7 @@ Operator setup before running the proof:
    channel, pass that exact channel name in the `alert_channel` input.
 2. Create a Slack Incoming Webhook for that channel.
 3. Store the webhook URL at `op://prod-backend/alert-webhook-url/url`.
-4. Redeploy or re-render the VPS backend env so `/run/agent-stack/backend.env`
+4. Redeploy or re-render the selected VPS backend env so its runtime file
    contains `ALERT_WEBHOOK_URL`.
 5. Run the `Hosted Observability Proof` workflow in a separate proof step; it
    sends one deliberate hosted smoke failure and records the channel-visible

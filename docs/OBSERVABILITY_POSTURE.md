@@ -52,8 +52,11 @@ The artifact should cover metrics auth, alert delivery, and Sentry/logging
 posture in one place:
 
 The preferred hosted path is the `Hosted Observability Proof` GitHub Actions
-workflow. It SSHes to the VPS, reads the rendered `/run/agent-stack/backend.env`
-without printing secrets, proves the `/metrics` bearer gate, sends one
+workflow. It SSHes to the VPS, resolves the audited durable Caddy selector,
+verifies the public chain ID still matches it, then reads the selected runtime
+render (`/run/agent-stack/backend.env` for testnet or
+`/run/agent-stack-mainnet/backend.env` for mainnet) without printing secrets.
+It proves the `/metrics` bearer gate, sends one
 deliberate smoke-failure alert through the configured webhook, samples recent
 backend structured logs, validates the sanitized evidence with
 [`check-observability-proof.mjs`](../scripts/ops/check-observability-proof.mjs),

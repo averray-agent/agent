@@ -126,7 +126,7 @@ jobs:
             -o ServerAliveInterval=30 \
             -o ServerAliveCountMax=20 \
             "$VPS_USER@$VPS_HOST" \
-            "sudo env ${remote_env} bash -lc 'cd /srv/agent-stack/app && ./scripts/ops/collect-observability-proof.sh'" \
+            "sudo env ${remote_env} bash -lc 'cd /srv/agent-stack/app && ./scripts/ops/collect-live-observability-proof.sh'" \
             > "$OBSERVABILITY_EVIDENCE_FILE"
 
       - name: Validate saved observability evidence
