@@ -103,6 +103,16 @@ the public board. It never consumes claim attempts on real board jobs.
      --admin-key-op 'op://mainnet-critical/admin-eoa-mainnet/credential'
    ```
 
+   For an out-of-band comparison, use the canonical newline-independent helper:
+
+   ```sh
+   scripts/ops/fingerprint-op-secret.sh \
+     op://mainnet-smoke/admin-refresh-token-worker-canary/password
+   ```
+
+   It hashes the consumed value with `printf '%s'`; do not pipe `op read`
+   directly into `shasum`, because the display newline changes the fingerprint.
+
    This must not overwrite the internal runner's
    `op://mainnet-smoke/admin-refresh-token/password` item.
 

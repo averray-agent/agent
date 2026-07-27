@@ -112,6 +112,23 @@ test("getAdminRefreshToken surfaces expired refresh tokens", async () => {
   );
 });
 
+test("getAdminRefreshToken strips trailing newlines before sending the refresh cookie", async () => {
+  const result = await getAdminRefreshToken({
+    env: {
+      ADMIN_REFRESH_TOKEN_OP: "op://mainnet-smoke/admin-refresh-token-production-deploy/password",
+      ADMIN_REFRESH_TOKEN_WRITE_BACK: "0"
+    },
+    async readSecretImpl() {
+      return "refresh-with-display-newline\n";
+    },
+    async fetchImpl(_url, options) {
+      assert.equal(options.headers.cookie, "refresh_token=refresh-with-display-newline");
+      return jsonResponse(200, { token: "short-lived-access-token" });
+    }
+  });
+  assert.equal(result.accessToken, "short-lived-access-token");
+});
+
 test("getAdminRefreshToken fails closed when refresh succeeds but rotated cookie is missing", async () => {
   let persisted = "refresh-old";
   await assert.rejects(

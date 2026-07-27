@@ -198,7 +198,15 @@ test("hosted observability proof workflow uses VPS runtime env and validates san
   assert.match(workflow, /name: Hosted Observability Proof/u);
   assert.match(workflow, /OP_SERVICE_ACCOUNT_TOKEN_PROD_CI/u);
   assert.match(workflow, /VPS_SSH_KEY_OP: op:\/\/prod-ci\/vps-ssh-key\/private key/u);
-  assert.match(workflow, /cd \/srv\/agent-stack\/app && \.\/scripts\/ops\/collect-observability-proof\.sh/u);
+  assert.match(
+    workflow,
+    /cd \/srv\/agent-stack\/app && \.\/scripts\/ops\/collect-live-observability-proof\.sh/u,
+  );
+  assert.doesNotMatch(
+    workflow,
+    /cd \/srv\/agent-stack\/app && \.\/scripts\/ops\/collect-observability-proof\.sh/u,
+    "the workflow must not silently load the testnet-default backend env after a mainnet cutover",
+  );
   assert.match(workflow, /ALERT_CORRELATION_ID: github-observability-alert-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/u);
   assert.match(workflow, /check-observability-proof\.mjs/u);
   assert.match(workflow, /--max-completed-age-hours "\$MAX_COMPLETED_AGE_HOURS"/u);
