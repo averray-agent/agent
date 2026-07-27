@@ -29,6 +29,7 @@ function makeHarness(overrides = {}) {
   const response = makeResponse();
   const route = createOperationalRoutes({
     authConfig: overrides.authConfig ?? AUTH_CONFIG,
+    deployedSha: overrides.deployedSha,
     gateway: overrides.gateway ?? {
       isEnabled: () => false,
       healthCheck: async () => {
@@ -101,7 +102,9 @@ test("operational routes ignore unrelated paths", async () => {
 });
 
 test("GET /health reports service liveness separately from disabled capabilities", async () => {
-  const { calls, response, route } = makeHarness();
+  const { calls, response, route } = makeHarness({
+    deployedSha: "a".repeat(40)
+  });
 
   const handled = await route({
     request: { method: "GET", headers: {} },
@@ -112,6 +115,7 @@ test("GET /health reports service liveness separately from disabled capabilities
   assert.equal(handled, true);
   assert.equal(response.statusCode, 200);
   assert.equal(response.body.status, "ok");
+  assert.equal(response.body.deployedSha, "a".repeat(40));
   assert.equal(response.body.serviceHealth.ok, true);
   assert.equal(response.body.capabilityHealth.blockchain, "disabled");
   assert.equal(response.body.capabilityHealth.treasuryMutations, "unavailable");

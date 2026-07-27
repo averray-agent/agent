@@ -75,13 +75,13 @@ test("redeploy-indexer rollback re-renders /run/agent-stack/indexer.env from the
   );
   assert.match(
     script,
-    /template="\$APP_ROOT\/deploy\/indexer\.env\.template"/u,
-    "rollback must use deploy/indexer.env.template (not backend.env.template) at the rolled-back SHA",
+    /INDEXER_ENV_TEMPLATE=\$\{INDEXER_ENV_TEMPLATE:-"\$APP_ROOT\/deploy\/indexer\.env\.template"\}/u,
+    "testnet remains the default rollback template for a direct component invocation",
   );
   assert.match(
     script,
-    /target="\/run\/agent-stack\/indexer\.env"/u,
-    "rollback must re-render to /run/agent-stack/indexer.env (the runtime env_file:)",
+    /local template="\$INDEXER_ENV_TEMPLATE"[\s\S]*?local target="\$INDEXER_ENV_TARGET"/u,
+    "rollback must use the selected network's template and runtime env target",
   );
   assert.match(
     script,

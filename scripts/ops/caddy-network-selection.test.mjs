@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
+import * as networkSelection from "./caddy-network-selection.mjs";
 import {
   SCHEMA,
   bootstrapSelection,
@@ -151,4 +152,47 @@ test("guarded flip rendering is available through the host-node fallback tool", 
   assert.equal(result.target, "mainnet");
   assert.equal(result.changed, true);
   assert.match(await readFile(output, "utf8"), /mainnet-backend:8787/u);
+});
+
+test("durable selection resolves the deploy compose and services in both directions", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "caddy-selection-deploy-target-"));
+  const state = join(dir, "selection.json");
+  const stackRoot = join(dir, "stack");
+  const appRoot = join(stackRoot, "app");
+
+  writeSelectionAtomic(state, selection("mainnet", { previousNetwork: "testnet" }));
+  assert.deepEqual(
+    networkSelection.resolveDeploymentTarget({ statePath: state, stackRoot, appRoot }),
+    {
+      network: "mainnet",
+      expectedChainId: 420420419,
+      composeFile: join(appRoot, "deploy/docker-compose.mainnet.yml"),
+      projectDirectory: appRoot,
+      backendService: "mainnet-backend",
+      backendContainer: "agent-mainnet-backend",
+      indexerService: "mainnet-indexer",
+      runtimeRoot: "/run/agent-stack-mainnet",
+      credentialsRoot: "/etc/agent-stack-mainnet",
+      backendTemplate: join(appRoot, "deploy/backend.mainnet.env.template"),
+      indexerTemplate: join(appRoot, "deploy/indexer.mainnet.env.template"),
+    },
+  );
+
+  writeSelectionAtomic(state, selection("testnet", { previousNetwork: "mainnet" }));
+  assert.deepEqual(
+    networkSelection.resolveDeploymentTarget({ statePath: state, stackRoot, appRoot }),
+    {
+      network: "testnet",
+      expectedChainId: 420420417,
+      composeFile: join(stackRoot, "docker-compose.yml"),
+      projectDirectory: stackRoot,
+      backendService: "backend",
+      backendContainer: "agent-backend",
+      indexerService: "indexer",
+      runtimeRoot: "/run/agent-stack",
+      credentialsRoot: "/etc/agent-stack",
+      backendTemplate: join(appRoot, "deploy/backend.env.template"),
+      indexerTemplate: join(appRoot, "deploy/indexer.env.template"),
+    },
+  );
 });

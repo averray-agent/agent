@@ -13,7 +13,14 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 APP_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
 STACK_ROOT=${STACK_ROOT:-$(cd "$APP_ROOT/.." && pwd)}
-COMPOSE_FILE=${COMPOSE_FILE:-"$STACK_ROOT/docker-compose.yml"}
+COMPOSE_FILE_OVERRIDE=${COMPOSE_FILE:-}
+COMPOSE_FILE=""
+COMPOSE_PROJECT_DIRECTORY=""
+BACKEND_SERVICE=""
+BACKEND_CONTAINER=""
+INDEXER_SERVICE=""
+CADDY_COMPOSE_FILE=${CADDY_COMPOSE_FILE:-"$STACK_ROOT/docker-compose.yml"}
+CADDY_PROJECT_DIRECTORY=${CADDY_PROJECT_DIRECTORY:-"$STACK_ROOT"}
 BRANCH=${BRANCH:-main}
 DEPLOY_LOCK_FILE=${DEPLOY_LOCK_FILE:-/tmp/averray-production-deploy.lock}
 DEPLOY_AUTOSTASH=${DEPLOY_AUTOSTASH:-1}
@@ -39,7 +46,7 @@ SMOKE_CHECK_BOOTSTRAP_INSTRUMENTATION=${SMOKE_CHECK_BOOTSTRAP_INSTRUMENTATION:-0
 SMOKE_CHECK_BOOTSTRAP_SELF_REPORT_SENT=${SMOKE_CHECK_BOOTSTRAP_SELF_REPORT_SENT:-0}
 BOOTSTRAP_SELF_REPORT_SEND_NOW=${BOOTSTRAP_SELF_REPORT_SEND_NOW:-0}
 BOOTSTRAP_SELF_REPORT_IDEMPOTENCY_KEY=${BOOTSTRAP_SELF_REPORT_IDEMPOTENCY_KEY:-}
-SMOKE_CHECK_PRODUCT_PROOF_GATE=${SMOKE_CHECK_PRODUCT_PROOF_GATE:-0}
+SMOKE_CHECK_PRODUCT_PROOF_GATE=${SMOKE_CHECK_PRODUCT_PROOF_GATE:-1}
 PRODUCT_PROOF_REQUIRE_WORKER_LOOP=${PRODUCT_PROOF_REQUIRE_WORKER_LOOP:-0}
 # Optional override for the hosted worker-loop's reward asset symbol. Empty
 # string keeps run-hosted-worker-loop.mjs on the canonical v1 USDC settlement
@@ -52,10 +59,11 @@ fi
 PRODUCT_PROOF_NODE_IMAGE=${PRODUCT_PROOF_NODE_IMAGE:-node:22-bookworm-slim}
 INDEXER_DATABASE_SCHEMA=${INDEXER_DATABASE_SCHEMA:-}
 INDEXER_FRESH_SCHEMA=${INDEXER_FRESH_SCHEMA:-0}
-INDEXER_ENV_FILE=${INDEXER_ENV_FILE:-/run/agent-stack/indexer.env}
+INDEXER_ENV_FILE_OVERRIDE=${INDEXER_ENV_FILE:-}
+INDEXER_ENV_FILE=""
 DEPLOY_CONTRACT_COMPAT_FREEZE=${DEPLOY_CONTRACT_COMPAT_FREEZE:-1}
 DEPLOY_ALLOW_CONTRACT_SURFACE_DRIFT=${DEPLOY_ALLOW_CONTRACT_SURFACE_DRIFT:-0}
-DEPLOY_CONTRACT_COMPAT_PROFILE=${DEPLOY_CONTRACT_COMPAT_PROFILE:-testnet}
+DEPLOY_CONTRACT_COMPAT_PROFILE=${DEPLOY_CONTRACT_COMPAT_PROFILE:-}
 # BACKEND_ENV_FILE: removed in PR 2.6 — backend env now rendered to
 # /run/agent-stack/backend.env by render_runtime_envs (1Password →
 # op inject → /run); /srv/agent-stack/backend.env is no longer written.
@@ -84,17 +92,99 @@ if [[ ! -d "$APP_ROOT/.git" ]]; then
   exit 1
 fi
 
-if [[ ! -f "$COMPOSE_FILE" ]]; then
-  echo "Missing docker-compose file at $COMPOSE_FILE" >&2
-  exit 1
-fi
-
 with_lock() {
   flock -n 9 || {
     echo "Another production deploy is already running." >&2
     exit 1
   }
   deploy
+}
+
+resolve_deploy_target() {
+  local selector="$APP_ROOT/scripts/ops/run-caddy-network-selection.sh"
+  local live_caddy="$STACK_ROOT/Caddyfile"
+
+  # Production has carried this durable selector since the mainnet cutover.
+  # Bootstrap is retained only for a host migrating from the pre-selector
+  # layout, and derives from the validated live Caddy route.
+  if [[ ! -f "$CADDY_NETWORK_STATE_FILE" && -x "$selector" && -f "$live_caddy" ]]; then
+    local execution_user deploy_host operation_id
+    execution_user=$(id -un)
+    deploy_host=$(hostname -f 2>/dev/null || hostname)
+    operation_id="deploy-bootstrap-${NEW_SHA:0:12}-$(date -u +%Y%m%d-%H%M%S)"
+    STACK_ROOT="$STACK_ROOT" "$selector" bootstrap \
+      --state "$CADDY_NETWORK_STATE_FILE" \
+      --live-caddy "$live_caddy" \
+      --selected-by "$DEPLOY_ACTOR" \
+      --execution-user "$execution_user" \
+      --host "$deploy_host" \
+      --source-revision "$NEW_SHA" \
+      --operation-id "$operation_id"
+  fi
+
+  if [[ -f "$CADDY_NETWORK_STATE_FILE" && -x "$selector" ]]; then
+    if [[ ! -f "$live_caddy" ]]; then
+      echo "Durable network selection exists but live Caddyfile is missing at $live_caddy." >&2
+      return 1
+    fi
+
+    local status target selected_compose
+    status=$(STACK_ROOT="$STACK_ROOT" "$selector" status \
+      --state "$CADDY_NETWORK_STATE_FILE" \
+      --live-caddy "$live_caddy")
+    if ! printf '%s' "$status" | jq -e '.consistent == true' >/dev/null; then
+      echo "Durable network selection disagrees with the live Caddy route; refusing to choose a deploy target." >&2
+      return 1
+    fi
+
+    target=$(STACK_ROOT="$STACK_ROOT" "$selector" deploy-target \
+      --state "$CADDY_NETWORK_STATE_FILE" \
+      --stack-root "$STACK_ROOT" \
+      --app-root "$APP_ROOT")
+    selected_compose=$(printf '%s' "$target" | jq -er '.composeFile')
+    if [[ -n "$COMPOSE_FILE_OVERRIDE" && "$COMPOSE_FILE_OVERRIDE" != "$selected_compose" ]]; then
+      echo "COMPOSE_FILE override $COMPOSE_FILE_OVERRIDE disagrees with durable network target $selected_compose." >&2
+      return 1
+    fi
+
+    LIVE_NETWORK=$(printf '%s' "$target" | jq -er '.network')
+    COMPOSE_FILE="$selected_compose"
+    COMPOSE_PROJECT_DIRECTORY=$(printf '%s' "$target" | jq -er '.projectDirectory')
+    BACKEND_SERVICE=$(printf '%s' "$target" | jq -er '.backendService')
+    BACKEND_CONTAINER=$(printf '%s' "$target" | jq -er '.backendContainer')
+    INDEXER_SERVICE=$(printf '%s' "$target" | jq -er '.indexerService')
+    RUNTIME_ROOT=$(printf '%s' "$target" | jq -er '.runtimeRoot')
+    CREDENTIALS_ROOT=$(printf '%s' "$target" | jq -er '.credentialsRoot')
+    BACKEND_ENV_TEMPLATE=$(printf '%s' "$target" | jq -er '.backendTemplate')
+    INDEXER_ENV_TEMPLATE=$(printf '%s' "$target" | jq -er '.indexerTemplate')
+  elif [[ -n "$COMPOSE_FILE_OVERRIDE" ]]; then
+    # Isolated regression fixtures and pre-selector development hosts may
+    # provide the legacy testnet compose explicitly. A production host has a
+    # live Caddyfile and selector script, so it takes the fail-closed path
+    # above and cannot use this compatibility branch.
+    LIVE_NETWORK=testnet
+    COMPOSE_FILE="$COMPOSE_FILE_OVERRIDE"
+    COMPOSE_PROJECT_DIRECTORY="$STACK_ROOT"
+    BACKEND_SERVICE=backend
+    BACKEND_CONTAINER=agent-backend
+    INDEXER_SERVICE=indexer
+    RUNTIME_ROOT=/run/agent-stack
+    CREDENTIALS_ROOT=/etc/agent-stack
+    BACKEND_ENV_TEMPLATE="$APP_ROOT/deploy/backend.env.template"
+    INDEXER_ENV_TEMPLATE="$APP_ROOT/deploy/indexer.env.template"
+  else
+    echo "Cannot resolve deploy target: durable network selection is unavailable and COMPOSE_FILE was not explicitly supplied." >&2
+    return 1
+  fi
+
+  if [[ ! -f "$COMPOSE_FILE" ]]; then
+    echo "Missing selected docker-compose file at $COMPOSE_FILE" >&2
+    return 1
+  fi
+  INDEXER_ENV_FILE=${INDEXER_ENV_FILE_OVERRIDE:-"$RUNTIME_ROOT/indexer.env"}
+  DEPLOY_CONTRACT_COMPAT_PROFILE=${DEPLOY_CONTRACT_COMPAT_PROFILE:-"$LIVE_NETWORK"}
+
+  echo "Live deploy target: network=$LIVE_NETWORK compose=$COMPOSE_FILE project=$COMPOSE_PROJECT_DIRECTORY backend=$BACKEND_SERVICE indexer=$INDEXER_SERVICE"
 }
 
 changed_matches() {
@@ -374,7 +464,7 @@ wait_for_backend_health() {
   done
   echo "ERROR: backend /health did not return 200 within ${timeout}s after force-recreate." >&2
   echo "       Container recreate likely succeeded but bootstrap is failing." >&2
-  echo "       Check 'sudo docker logs agent-backend --tail 100' on the VPS." >&2
+  echo "       Check 'sudo docker logs $BACKEND_CONTAINER --tail 100' on the VPS." >&2
   return 1
 }
 
@@ -397,6 +487,28 @@ verify_public_caddy_network_selection() {
   fi
 
   echo "Durable Caddy selection verified publicly: chainId $expected_chain_id"
+}
+
+verify_public_deployed_sha() {
+  local expected_sha="$1"
+  local health_url="${HEALTH_URL:-https://api.averray.com/health}"
+  local health_json actual_sha
+
+  echo "Verifying public backend serves deployedSha $expected_sha"
+  if ! health_json=$(curl -fsS --retry 4 --retry-delay 1 --max-time 10 "$health_url"); then
+    echo "ERROR: cannot fetch public backend health at $health_url for deployedSha verification." >&2
+    return 1
+  fi
+  if ! actual_sha=$(printf '%s' "$health_json" | jq -er '.deployedSha | strings'); then
+    echo "ERROR: public /health does not expose deployedSha; refusing to record this deploy as landed." >&2
+    return 1
+  fi
+  if [[ "$actual_sha" != "$expected_sha" ]]; then
+    echo "ERROR: public /health deployedSha mismatch: expected $expected_sha, got $actual_sha." >&2
+    echo "       The selected container may have started while public traffic still routes to another backend." >&2
+    return 1
+  fi
+  echo "Public backend serving proof passed: deployedSha $actual_sha"
 }
 
 should_run() {
@@ -678,19 +790,19 @@ render_runtime_envs() {
     return 0
   fi
 
-  if [[ ! -f /etc/agent-stack/op-backend.env ]] || [[ ! -f /etc/agent-stack/op-indexer.env ]]; then
-    echo "Phase 2 PR 2.5: /etc/agent-stack/op-*.env not present, skipping render"
+  if [[ ! -f "$CREDENTIALS_ROOT/op-backend.env" ]] || [[ ! -f "$CREDENTIALS_ROOT/op-indexer.env" ]]; then
+    echo "Phase 2 PR 2.5: $CREDENTIALS_ROOT/op-*.env not present, skipping render"
     echo "  (run scripts/ops/install-op-vps.sh and drop the service-account tokens to enable)"
     return 0
   fi
 
-  if [[ ! -d /run/agent-stack ]]; then
-    echo "Phase 2 PR 2.5: /run/agent-stack not present, skipping render"
+  if [[ ! -d "$RUNTIME_ROOT" ]]; then
+    echo "Phase 2 PR 2.5: $RUNTIME_ROOT not present, skipping render"
     echo "  (install /etc/tmpfiles.d/agent-stack.conf and run systemd-tmpfiles --create)"
     return 0
   fi
 
-  echo "Phase 2 PR 2.5: rendering runtime env files via op inject (fail-closed)"
+  echo "Phase 2 PR 2.5: rendering $LIVE_NETWORK runtime env files via op inject (fail-closed)"
 
   # Phase 2 PR 2.7d.1: track per-runtime env-content changes so the
   # caller can force-recreate the container even when no code path
@@ -710,10 +822,18 @@ render_runtime_envs() {
 
   local runtime
   for runtime in backend indexer; do
-    local template="$APP_ROOT/deploy/${runtime}.env.template"
-    local target="/run/agent-stack/${runtime}.env"
-    local token="/etc/agent-stack/op-${runtime}.env"
-    local legacy="$STACK_ROOT/${runtime}.env"
+    local template target token legacy
+    case "$runtime" in
+      backend) template="$BACKEND_ENV_TEMPLATE" ;;
+      indexer) template="$INDEXER_ENV_TEMPLATE" ;;
+    esac
+    target="$RUNTIME_ROOT/${runtime}.env"
+    token="$CREDENTIALS_ROOT/op-${runtime}.env"
+    if [[ "$LIVE_NETWORK" == "mainnet" ]]; then
+      legacy="/srv/agent-stack-mainnet/${runtime}.env"
+    else
+      legacy="$STACK_ROOT/${runtime}.env"
+    fi
 
     if [[ ! -f "$template" ]]; then
       echo "ERROR: Phase 2 PR 2.5: $template missing — cannot render $runtime env" >&2
@@ -729,8 +849,8 @@ render_runtime_envs() {
 
     if ! sudo bash "$render_script" "$template" "$target" "$token"; then
       echo "ERROR: Phase 2 PR 2.5: render of $runtime failed — aborting deploy before container restart" >&2
-      echo "       Containers consume /run/agent-stack/${runtime}.env via compose env_file:; stale or missing env would cause hard-to-diagnose failures downstream." >&2
-      echo "       To roll back: edit /srv/agent-stack/docker-compose.yml to set env_file: back to /srv/agent-stack/${runtime}.env, then redeploy." >&2
+      echo "       Containers consume $RUNTIME_ROOT/${runtime}.env via compose env_file:; stale or missing env would cause hard-to-diagnose failures downstream." >&2
+      echo "       To roll back: inspect $COMPOSE_FILE and restore the selected $LIVE_NETWORK runtime env source before redeploying." >&2
       return 1
     fi
 
@@ -746,7 +866,7 @@ render_runtime_envs() {
     if [[ "$before_hash" != "$after_hash" ]]; then
       local before_label="${before_hash:0:8}"
       [[ -z "$before_hash" ]] && before_label="(none)"
-      echo "Phase 2 PR 2.7d.1: $runtime /run env content changed (before=$before_label, after=${after_hash:0:8}) — will force-recreate"
+      echo "Phase 2 PR 2.7d.1: $LIVE_NETWORK $runtime runtime env content changed (before=$before_label, after=${after_hash:0:8}) — will force-recreate"
       case "$runtime" in
         backend) RUNTIME_ENV_CHANGED_BACKEND=1 ;;
         indexer) RUNTIME_ENV_CHANGED_INDEXER=1 ;;
@@ -890,8 +1010,8 @@ apply_caddy() {
   # deploy before we touch the live config.
   echo "Validating rendered Caddyfile via caddy validate (PR 2.2)..."
   if ! docker compose \
-        --project-directory "$STACK_ROOT" \
-        -f "$COMPOSE_FILE" \
+        --project-directory "$CADDY_PROJECT_DIRECTORY" \
+        -f "$CADDY_COMPOSE_FILE" \
         run --rm \
           -v "$rendered_tmp:/etc/caddy/Caddyfile:ro" \
           --no-deps \
@@ -947,14 +1067,14 @@ apply_caddy() {
   trap - RETURN
 
   if ! docker compose \
-      --project-directory "$STACK_ROOT" \
-      -f "$COMPOSE_FILE" \
+    --project-directory "$CADDY_PROJECT_DIRECTORY" \
+    -f "$CADDY_COMPOSE_FILE" \
       exec -T caddy \
       caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile; then
     cp -p "$live_backup" "$STACK_ROOT/Caddyfile"
     docker compose \
-      --project-directory "$STACK_ROOT" \
-      -f "$COMPOSE_FILE" \
+      --project-directory "$CADDY_PROJECT_DIRECTORY" \
+      -f "$CADDY_COMPOSE_FILE" \
       exec -T caddy \
       caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1 || true
     rm -f "$live_backup"
@@ -1119,6 +1239,7 @@ deploy() {
     NEW_SHA=$(git -C "$APP_ROOT" rev-parse HEAD)
   fi
   echo "Deploy range: $OLD_SHA -> $NEW_SHA"
+  resolve_deploy_target
 
   if [[ "$OLD_SHA" == "$NEW_SHA" ]]; then
     echo "No new commits. Running smoke check only."
@@ -1148,6 +1269,7 @@ deploy() {
   local run_frontend=0
   local run_site=0
   local run_caddy=0
+  local backend_deployed_sha=""
 
   # Phase 2 PR 2.6: the trigger for backend redeploy is now path-based
   # only — we added deploy/backend.env.template and
@@ -1165,17 +1287,31 @@ deploy() {
   # 1Password item → trigger workflow_dispatch → render produces new
   # /run env → hash differs → force-recreate. No SSH+rm dance needed.
   local backend_code_changed=0
-  if should_run backend "$RUN_BACKEND" '^(mcp-server/|sdk/|examples/|docs/schemas/|package(-lock)?\.json|scripts/ops/redeploy-backend\.sh|deploy/backend\.env\.template|deployments/testnet\.json)'; then
+  if should_run backend "$RUN_BACKEND" '^(mcp-server/|sdk/|examples/|docs/schemas/|package(-lock)?\.json|scripts/ops/redeploy-backend\.sh|deploy/backend(\.mainnet)?\.env\.template|deployments/(testnet|mainnet)\.json)'; then
     backend_code_changed=1
   fi
   if [[ "$backend_code_changed" == "1" || "${RUNTIME_ENV_CHANGED_BACKEND:-0}" == "1" ]]; then
     run_backend=1
     if [[ "$backend_code_changed" == "1" ]]; then
       echo "Deploying backend (reason: code path changed)"
-      SKIP_GIT_UPDATE=1 PRE_DEPLOY_SHA="$OLD_SHA" "$APP_ROOT/scripts/ops/redeploy-backend.sh"
+      COMPOSE_FILE="$COMPOSE_FILE" \
+        COMPOSE_PROJECT_DIRECTORY="$COMPOSE_PROJECT_DIRECTORY" \
+        BACKEND_SERVICE="$BACKEND_SERVICE" \
+        BACKEND_CONTAINER="$BACKEND_CONTAINER" \
+        BACKEND_ENV_TEMPLATE="$BACKEND_ENV_TEMPLATE" \
+        BACKEND_ENV_TARGET="$RUNTIME_ROOT/backend.env" \
+        BACKEND_ENV_TOKEN="$CREDENTIALS_ROOT/op-backend.env" \
+        AWS_CONFIG_PATH="$CREDENTIALS_ROOT/aws-config" \
+        BADGE_RECEIPT_CERT_PATH="$CREDENTIALS_ROOT/roles-anywhere/badge-receipt-signer-cert.pem" \
+        BADGE_RECEIPT_KEY_PATH="$CREDENTIALS_ROOT/roles-anywhere/badge-receipt-signer-key.pem" \
+        SKIP_GIT_UPDATE=1 \
+        PRE_DEPLOY_SHA="$OLD_SHA" \
+        "$APP_ROOT/scripts/ops/redeploy-backend.sh"
+      backend_deployed_sha="$NEW_SHA"
     else
-      echo "Deploying backend (reason: /run/agent-stack/backend.env content changed; image unchanged — force-recreating container only)"
-      sudo docker compose --project-directory "$STACK_ROOT" -f "$COMPOSE_FILE" up -d --force-recreate backend
+      echo "Deploying backend (reason: $RUNTIME_ROOT/backend.env content changed; image unchanged — force-recreating $BACKEND_SERVICE only)"
+      sudo docker compose --project-directory "$COMPOSE_PROJECT_DIRECTORY" -f "$COMPOSE_FILE" \
+        up -d --force-recreate "$BACKEND_SERVICE"
       # Don't continue to downstream smoke checks until /health is 200
       # — see wait_for_backend_health() comment for the 2026-05-13 14:30Z
       # incident that motivated this.
@@ -1183,12 +1319,8 @@ deploy() {
         exit 1
       fi
     fi
-    mark_component_deployed backend
   else
     echo "Skipping backend deploy"
-    if [[ "$RUN_BACKEND" == "auto" ]]; then
-      mark_component_deployed backend
-    fi
   fi
 
   local indexer_code_changed=0
@@ -1204,17 +1336,25 @@ deploy() {
     run_indexer=1
     if [[ "$indexer_code_changed" == "1" ]]; then
       echo "Deploying indexer (reason: code path changed)"
-      SKIP_GIT_UPDATE=1 PRE_DEPLOY_SHA="$OLD_SHA" "$APP_ROOT/scripts/ops/redeploy-indexer.sh"
+      COMPOSE_FILE="$COMPOSE_FILE" \
+        COMPOSE_PROJECT_DIRECTORY="$COMPOSE_PROJECT_DIRECTORY" \
+        INDEXER_SERVICE="$INDEXER_SERVICE" \
+        INDEXER_ENV_TEMPLATE="$INDEXER_ENV_TEMPLATE" \
+        INDEXER_ENV_TARGET="$RUNTIME_ROOT/indexer.env" \
+        INDEXER_ENV_TOKEN="$CREDENTIALS_ROOT/op-indexer.env" \
+        CADDY_COMPOSE_FILE="$CADDY_COMPOSE_FILE" \
+        CADDY_PROJECT_DIRECTORY="$CADDY_PROJECT_DIRECTORY" \
+        SKIP_GIT_UPDATE=1 \
+        PRE_DEPLOY_SHA="$OLD_SHA" \
+        "$APP_ROOT/scripts/ops/redeploy-indexer.sh"
     else
-      echo "Deploying indexer (reason: /run/agent-stack/indexer.env content changed; image unchanged — force-recreating container only)"
-      sudo docker compose --project-directory "$STACK_ROOT" -f "$COMPOSE_FILE" up -d --force-recreate indexer
+      echo "Deploying indexer (reason: $RUNTIME_ROOT/indexer.env content changed; image unchanged — force-recreating $INDEXER_SERVICE only)"
+      sudo docker compose --project-directory "$COMPOSE_PROJECT_DIRECTORY" -f "$COMPOSE_FILE" \
+        up -d --force-recreate "$INDEXER_SERVICE"
     fi
     mark_component_deployed indexer
   else
     echo "Skipping indexer deploy"
-    if [[ "$RUN_INDEXER" == "auto" ]]; then
-      mark_component_deployed indexer
-    fi
   fi
 
   # The frontend keeps its path gate — unlike the site (~45s astro build),
@@ -1258,7 +1398,6 @@ deploy() {
     mark_component_deployed frontend
   elif [[ "$RUN_FRONTEND" == "auto" ]]; then
     echo "Skipping operator frontend deploy (frontend/ matches the last recorded build tree hash)"
-    mark_component_deployed frontend
   fi
 
   # 2026-06-28 → 2026-07-08 marketing-staleness incident: the site build
@@ -1311,7 +1450,9 @@ deploy() {
       apply_caddy
       verify_public_caddy_network_selection
       run_caddy="$CADDY_RESTARTED"
-      mark_component_deployed caddy
+      if [[ "$CADDY_RESTARTED" == "1" ]]; then
+        mark_component_deployed caddy
+      fi
       ;;
   esac
 
@@ -1349,6 +1490,13 @@ deploy() {
       "$APP_ROOT/scripts/ops/check-hosted-stack.sh"
   else
     echo "RUN_SMOKE=0 set; skipping hosted smoke check."
+  fi
+
+  local expected_backend_sha
+  expected_backend_sha=${backend_deployed_sha:-$(read_component_sha backend)}
+  verify_public_deployed_sha "$expected_backend_sha"
+  if [[ -n "$backend_deployed_sha" ]]; then
+    mark_component_deployed backend
   fi
 
   echo "Production deploy completed."

@@ -34,6 +34,7 @@ export function resolveMetricsAuthConfig(env = process.env) {
 
 export function createOperationalRoutes({
   authConfig,
+  deployedSha = process.env.DEPLOYED_SHA?.trim() || "unknown",
   gateway,
   getRewardBankHealth,
   indexerHealthProbe,
@@ -86,6 +87,7 @@ export function createOperationalRoutes({
 
       respond(response, serviceHealth.ok ? 200 : 503, {
         status: serviceHealth.ok ? "ok" : "degraded",
+        deployedSha,
         auth: { mode: authConfig.mode, domain: authConfig.domain, chainId: authConfig.chainId },
         serviceHealth,
         capabilityHealth,

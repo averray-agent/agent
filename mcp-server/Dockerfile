@@ -1,5 +1,7 @@
 FROM node:22-bookworm-slim
 
+ARG DEPLOYED_SHA=unknown
+
 # ca-certificates: required by the IAM Roles Anywhere `aws_signing_helper`
 # binary (mounted at /usr/local/bin/aws_signing_helper by docker-compose
 # in Phase 5a). aws_signing_helper is a Go binary that makes HTTPS calls
@@ -32,6 +34,7 @@ COPY mcp-server/src ./src
 
 ENV NODE_ENV=production
 ENV PORT=8787
+ENV DEPLOYED_SHA=${DEPLOYED_SHA}
 
 EXPOSE 8787
 

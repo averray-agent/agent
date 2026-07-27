@@ -8,6 +8,12 @@ COMPOSE_FILE=${COMPOSE_FILE:-"$REPO_ROOT/deploy/docker-compose.mainnet.yml"}
 PROJECT_NAME=${PROJECT_NAME:-agent-mainnet}
 MAINNET_ROOT=${MAINNET_ROOT:-/srv/agent-stack-mainnet}
 HEALTH_TIMEOUT_SECONDS=${HEALTH_TIMEOUT_SECONDS:-240}
+DEPLOYED_SHA=${DEPLOYED_SHA:-$(git -C "$REPO_ROOT" rev-parse HEAD)}
+
+if [[ ! "$DEPLOYED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "DEPLOYED_SHA must be a 40-character lowercase Git SHA; got '$DEPLOYED_SHA'" >&2
+  exit 1
+fi
 
 "$SCRIPT_DIR/preflight-mainnet-sidecar.sh"
 
@@ -21,7 +27,8 @@ for container in agent-backend agent-indexer agent-caddy agent-postgres agent-re
 done
 
 compose=(docker compose --project-name "$PROJECT_NAME" -f "$COMPOSE_FILE")
-"${compose[@]}" build mainnet-backend mainnet-indexer
+"${compose[@]}" build --build-arg "DEPLOYED_SHA=$DEPLOYED_SHA" mainnet-backend
+"${compose[@]}" build mainnet-indexer
 "${compose[@]}" up -d mainnet-redis mainnet-backend mainnet-indexer
 
 deadline=$((SECONDS + HEALTH_TIMEOUT_SECONDS))
@@ -40,6 +47,9 @@ backend_health=$(curl -fsS http://127.0.0.1:18787/health)
 printf '%s' "$backend_health" | jq -e \
   '[.. | objects | .chainId? // empty | tostring] | index("420420419") != null' >/dev/null \
   || { echo "Internal mainnet backend health does not report chainId 420420419" >&2; exit 1; }
+printf '%s' "$backend_health" | jq -e --arg sha "$DEPLOYED_SHA" \
+  '.deployedSha == $sha' >/dev/null \
+  || { echo "Internal mainnet backend health does not report deployedSha $DEPLOYED_SHA" >&2; exit 1; }
 curl -fsS http://127.0.0.1:52069/health >/dev/null
 
 testnet_after=$(mktemp)
