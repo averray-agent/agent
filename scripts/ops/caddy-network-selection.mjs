@@ -33,7 +33,14 @@ export function resolveDeploymentTarget({ statePath, stackRoot, appRoot } = {}) 
     return {
       ...shared,
       composeFile: join(normalizedAppRoot, "deploy/docker-compose.mainnet.yml"),
-      projectDirectory: normalizedAppRoot,
+      // Must be the compose file's own directory: the mainnet compose uses
+      // relative build contexts (context: ..) and was brought up by
+      // start-mainnet-sidecar.sh WITHOUT --project-directory, i.e. with
+      // compose's default (the file's directory). Passing the app root here
+      // shifts the build context to /srv/agent-stack/mcp-server (2026-07-27
+      // deploy failure). Project identity is unaffected: the file pins
+      // name: agent-mainnet.
+      projectDirectory: join(normalizedAppRoot, "deploy"),
       backendService: "mainnet-backend",
       backendContainer: "agent-mainnet-backend",
       indexerService: "mainnet-indexer",
