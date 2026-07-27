@@ -72,6 +72,7 @@ const DEFAULT_SETTLEMENT_SESSION_LIMIT = 1_000;
 const DEFAULT_SETTLEMENT_STUCK_AFTER_MS = 30 * 60 * 1000;
 const DEFAULT_REWARD_BANK_DECIMALS = 6;
 const SETTLED_SESSION_STATUSES = new Set(["resolved", "rejected", "closed"]);
+const SUBMITTED_NOT_SETTLED_SESSION_STATUSES = new Set(["submitted", "disputed"]);
 const EXECUTION_FAILURE_CODES = new Set([
   "blockchain_revert",
   "mutation_receipt_error",
@@ -530,7 +531,11 @@ function rewardBankReadingAgeMs(reading, nowMs) {
 async function resolveSettlementHealth({ stateStore, now, limit, stuckAfterMs }) {
   const asOf = now.toISOString();
   const fallback = {
+    claimed24h: 0,
+    submitted24h: 0,
     settled24h: 0,
+    claimedNotSubmitted: 0,
+    submittedNotSettled: 0,
     stuck: 0,
     failed24h: 0,
     asOf,
@@ -546,14 +551,30 @@ async function resolveSettlementHealth({ stateStore, now, limit, stuckAfterMs })
     const sessions = await stateStore.listRecentSessions(limit);
     const nowMs = now.getTime();
     const cutoffMs = nowMs - 24 * 60 * 60 * 1000;
+    let claimed24h = 0;
+    let submitted24h = 0;
     let settled24h = 0;
+    let claimedNotSubmitted = 0;
+    let submittedNotSettled = 0;
     let stuck = 0;
     let failed24h = 0;
     const seenFailures = new Set();
 
     for (const session of Array.isArray(sessions) ? sessions : []) {
+      if (isTimestampWithinWindow(session?.claimedAt, cutoffMs)) {
+        claimed24h += 1;
+      }
+      if (isTimestampWithinWindow(session?.submittedAt, cutoffMs)) {
+        submitted24h += 1;
+      }
       if (isSettledWithinWindow(session, cutoffMs)) {
         settled24h += 1;
+      }
+      if (session?.status === "claimed" && !session?.submittedAt) {
+        claimedNotSubmitted += 1;
+      }
+      if (SUBMITTED_NOT_SETTLED_SESSION_STATUSES.has(session?.status) && session?.submittedAt) {
+        submittedNotSettled += 1;
       }
       if (isSubmittedStuck(session, nowMs, stuckAfterMs)) {
         stuck += 1;
@@ -587,7 +608,11 @@ async function resolveSettlementHealth({ stateStore, now, limit, stuckAfterMs })
     }
 
     return {
+      claimed24h,
+      submitted24h,
       settled24h,
+      claimedNotSubmitted,
+      submittedNotSettled,
       stuck,
       failed24h,
       asOf,
@@ -679,6 +704,11 @@ function isSettledWithinWindow(session, cutoffMs) {
       ?? session.updatedAt
   );
   return Number.isFinite(settledAt) && settledAt >= cutoffMs;
+}
+
+function isTimestampWithinWindow(value, cutoffMs) {
+  const timestamp = timestampMs(value);
+  return Number.isFinite(timestamp) && timestamp >= cutoffMs;
 }
 
 function isSubmittedStuck(session, nowMs, stuckAfterMs) {

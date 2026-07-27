@@ -95,6 +95,20 @@ export function createAuthRoutes({
     return true;
   }
 
+  async function recordSiweAuthEvent(event) {
+    try {
+      await stateStore.recordSiweAuthEvent?.(event);
+    } catch (error) {
+      // Telemetry must not make an otherwise-valid auth exchange fail. The
+      // state-store warning is still an explicit trace that observability
+      // degraded for this wallet/event.
+      logger?.warn?.(
+        { err: error, wallet: event.wallet, event: event.event },
+        "auth_siwe.telemetry_write_failed"
+      );
+    }
+  }
+
   return async function handleAuthRoute({ request, response, url, pathname }) {
     if (request.method === "POST" && pathname === "/auth/nonce") {
       await enforceLimit("auth_nonce", clientIp(request), rateLimitConfig.authNonce);
@@ -110,6 +124,11 @@ export function createAuthRoutes({
       }
       const issuedAt = new Date().toISOString();
       const expiresAt = new Date(Date.now() + authConfig.nonceTtlSeconds * 1000).toISOString();
+      await recordSiweAuthEvent({
+        wallet: wallet.toLowerCase(),
+        event: "nonce_issued",
+        at: issuedAt
+      });
       return respondHandled(response, 200, {
         wallet,
         nonce,
@@ -199,6 +218,12 @@ export function createAuthRoutes({
           "auth_verify.refresh_issue_failed"
         );
       }
+
+      await recordSiweAuthEvent({
+        wallet,
+        event: "verify_succeeded",
+        at: new Date().toISOString()
+      });
 
       return respondHandled(
         response,

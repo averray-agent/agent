@@ -178,7 +178,12 @@ test("auth routes ignore unrelated paths and methods", async () => {
 test("POST /auth/nonce stores a wallet nonce and returns a SIWE message", async () => {
   const displayWallet = `0x${"A".repeat(40)}`;
   const { calls, response, route } = makeHarness({
-    payload: { wallet: displayWallet }
+    payload: { wallet: displayWallet },
+    stateStore: {
+      recordSiweAuthEvent: async (event) => {
+        calls.push(["recordSiweAuthEvent", event]);
+      }
+    }
   });
 
   assert.equal(await callRoute(route, response, "POST", "/auth/nonce"), true);
@@ -196,6 +201,14 @@ test("POST /auth/nonce stores a wallet nonce and returns a SIWE message", async 
     "storeNonce",
   ]);
   assert.equal(calls.find(([name]) => name === "storeNonce")?.[1].wallet, WALLET);
+  assert.deepEqual(
+    calls.find(([name]) => name === "recordSiweAuthEvent")?.[1],
+    {
+      wallet: WALLET,
+      event: "nonce_issued",
+      at: response.body.issuedAt
+    }
+  );
 });
 
 test("POST /auth/nonce rejects malformed wallet before storing", async () => {
@@ -206,6 +219,21 @@ test("POST /auth/nonce rejects malformed wallet before storing", async () => {
     (error) => error instanceof ValidationError && error.message.includes("wallet must")
   );
   assert.ok(!calls.some(([name]) => name === "storeNonce"));
+});
+
+test("SIWE telemetry failure is logged without breaking authentication", async () => {
+  const { calls, response, route } = makeHarness({
+    payload: { wallet: WALLET },
+    stateStore: {
+      recordSiweAuthEvent: async () => {
+        throw new Error("telemetry store unavailable");
+      }
+    }
+  });
+
+  assert.equal(await callRoute(route, response, "POST", "/auth/nonce"), true);
+  assert.equal(response.statusCode, 200);
+  assert.equal(calls.find(([name]) => name === "logger.warn")?.[1][1], "auth_siwe.telemetry_write_failed");
 });
 
 test("POST /auth/verify issues a token under KMS-only auth with no HMAC signingSecret (MAIN-001)", async () => {
@@ -230,6 +258,11 @@ test("POST /auth/verify consumes nonce, signs token, and issues refresh cookie w
     payload: { message: "siwe", signature: VALID_SIGNATURE },
     refreshStore: true,
     roles: ["admin", "verifier"],
+    stateStore: {
+      recordSiweAuthEvent: async (event) => {
+        calls.push(["recordSiweAuthEvent", event]);
+      }
+    }
   });
 
   assert.equal(await callRoute(route, response, "POST", "/auth/verify"), true);
@@ -250,12 +283,21 @@ test("POST /auth/verify consumes nonce, signs token, and issues refresh cookie w
     "makeRefreshStoreAdapter",
   ]);
   assert.equal(calls.find(([name]) => name === "signToken")?.[1].claims.sub, WALLET);
+  const verifyEvent = calls.find(([name]) => name === "recordSiweAuthEvent")?.[1];
+  assert.equal(verifyEvent.wallet, WALLET);
+  assert.equal(verifyEvent.event, "verify_succeeded");
+  assert.ok(Number.isFinite(Date.parse(verifyEvent.at)));
 });
 
 test("POST /auth/verify rejects nonce wallet mismatch", async () => {
   const { calls, response, route } = makeHarness({
     payload: { message: "siwe", signature: VALID_SIGNATURE },
     consumedWallet: OTHER_WALLET,
+    stateStore: {
+      recordSiweAuthEvent: async (event) => {
+        calls.push(["recordSiweAuthEvent", event]);
+      }
+    }
   });
 
   await assert.rejects(
@@ -263,6 +305,7 @@ test("POST /auth/verify rejects nonce wallet mismatch", async () => {
     (error) => error instanceof AuthenticationError && error.code === "nonce_wallet_mismatch"
   );
   assert.ok(!calls.some(([name]) => name === "signToken"));
+  assert.ok(!calls.some(([name]) => name === "recordSiweAuthEvent"));
 });
 
 test("POST /auth/verify lowercases a checksummed recovered address before minting (regression)", async () => {
