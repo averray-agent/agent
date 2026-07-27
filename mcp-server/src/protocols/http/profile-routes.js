@@ -22,6 +22,14 @@ function profileTierToOperatorTier(reputation = {}) {
   return "apprentice";
 }
 
+function buildPublicReputation(reputation = {}) {
+  return {
+    ...reputation,
+    jobEligibilityTier: reputation.tier ?? "starter",
+    tier: profileTierToOperatorTier(reputation)
+  };
+}
+
 function handleForWallet(wallet) {
   const normalized = String(wallet ?? "").toLowerCase();
   return `agent-${normalized.slice(2, 6)}-${normalized.slice(-4)}`;
@@ -240,7 +248,7 @@ export function createProfileRoutes({
 
     if (request.method === "GET" && pathname === "/reputation") {
       const auth = await authMiddleware(request, url);
-      respond(response, 200, await service.getReputation(auth.wallet));
+      respond(response, 200, buildPublicReputation(await service.getReputation(auth.wallet)));
       return true;
     }
 

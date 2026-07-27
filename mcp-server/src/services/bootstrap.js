@@ -78,9 +78,9 @@ import {
   loadFirstExternalAgentAlertConfig
 } from "./first-external-agent-alert.js";
 import { normaliseStrategyAssetConfig } from "./strategy-asset-config.js";
+import { BOOTSTRAP_JOBS } from "./bootstrap-jobs.js";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DEFAULT_ESCROW_ASSET_SYMBOL } from "../core/assets.js";
 import { ConfigError } from "../core/errors.js";
 import { assertMainnetSignerPosture, assertChainIdMatchesRpc } from "./startup-guards.js";
 import { createRewardBankHealthProvider } from "../core/health-capability.js";
@@ -88,45 +88,7 @@ import { createRewardBankHealthProvider } from "../core/health-capability.js";
 const moduleDir = dirname(fileURLToPath(import.meta.url));
 loadLocalEnv(process.cwd(), resolve(moduleDir, "../../"));
 
-const jobs = [
-  {
-    id: "starter-coding-001",
-    category: "coding",
-    tier: "starter",
-    rewardAsset: DEFAULT_ESCROW_ASSET_SYMBOL,
-    rewardAmount: 5,
-    verifierMode: "benchmark",
-    verifierConfig: {
-      handler: "benchmark",
-      requiredKeywords: ["complete", "verified", "output"],
-      minimumMatches: 2
-    },
-    inputSchemaRef: "schema://jobs/coding-input",
-    outputSchemaRef: "schema://jobs/coding-output",
-    claimTtlSeconds: 3600,
-    retryLimit: 1,
-    requiresSponsoredGas: true,
-    onboardingWaiverEligible: true
-  },
-  {
-    id: "governance-pro-001",
-    category: "governance",
-    tier: "pro",
-    rewardAsset: DEFAULT_ESCROW_ASSET_SYMBOL,
-    rewardAmount: 25,
-    verifierMode: "deterministic",
-    verifierConfig: {
-      handler: "deterministic",
-      expectedOutputs: ["governance-approved-summary", "vote-yes rationale"],
-      matchMode: "contains_all"
-    },
-    inputSchemaRef: "schema://jobs/governance-input",
-    outputSchemaRef: "schema://jobs/governance-output",
-    claimTtlSeconds: 7200,
-    retryLimit: 2,
-    requiresSponsoredGas: false
-  }
-];
+const jobs = BOOTSTRAP_JOBS;
 
 const profiles = new Map([
   ["0xagent", {

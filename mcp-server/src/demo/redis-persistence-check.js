@@ -19,7 +19,7 @@ async function main() {
 
   const firstSession = await runtimeA.platformService.claimJob(
     "0xagent",
-    "starter-coding-001",
+    "starter-coding-002",
     "http",
     `redis-check-${Date.now()}`
   );
@@ -55,4 +55,3 @@ main().catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });
-

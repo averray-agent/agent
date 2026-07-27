@@ -183,7 +183,7 @@ Failed responses throw `AgentPlatformApiError`.
 
 ```js
 try {
-  await client.claimJob("starter-coding-001", "run-001");
+  await client.claimJob("starter-coding-002", "run-001");
 } catch (error) {
   console.error(error.status, error.code, error.details);
 }

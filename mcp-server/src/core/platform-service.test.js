@@ -88,6 +88,19 @@ function makePlatformService(blockchainGateway = undefined, eventBus = undefined
   return new PlatformService(jobs, profiles, accounts, reputations, blockchainGateway, stateStore, eventBus);
 }
 
+test("platform capabilities use the same explicitly selected chain as public health", () => {
+  const service = makePlatformService();
+  const capabilities = service.getPlatformCapabilities({ chainId: 420420419 });
+  const advertisedChains = capabilities.onboarding.walletModes
+    .filter((mode) => mode.chain)
+    .map((mode) => mode.chain);
+
+  assert.ok(advertisedChains.length > 0);
+  assert.ok(advertisedChains.every((chain) => chain.chainId === 420420419));
+  assert.ok(advertisedChains.every((chain) => chain.currencySymbol === "DOT"));
+  assert.ok(advertisedChains.every((chain) => chain.faucetUrl === undefined));
+});
+
 test("createSubJob links the child job to the active parent session", async () => {
   const service = makePlatformService();
   const session = await service.claimJob(WALLET, "parent-job-001", "http", "parent-claim");
@@ -548,6 +561,52 @@ test("preflight uses chain worker claim count for claim economics in blockchain 
   assert.equal(preflight.claimStake, 0.25);
   assert.equal(preflight.claimFee, 0.1);
   assert.equal(preflight.totalClaimLock, 0.35);
+});
+
+test("preflight reports the onboarding waiver that claim will apply for a fresh worker", async () => {
+  const blockchainGateway = {
+    isEnabled() {
+      return true;
+    },
+    async getAccountSummary(wallet) {
+      return {
+        wallet,
+        liquid: { DOT: 0 },
+        reserved: {},
+        strategyAllocated: {},
+        collateralLocked: {},
+        jobStakeLocked: {},
+        debtOutstanding: {}
+      };
+    },
+    async getReputation() {
+      return { skill: 50, reliability: 50, economic: 50 };
+    },
+    async getDefaultClaimStakeBps() {
+      return 1000;
+    },
+    async getClaimEconomicsConfig() {
+      return {
+        claimFeeBps: 200,
+        onboardingWaiverClaimCount: 3,
+        minClaimFeeByAsset: { DOT: 0.05 }
+      };
+    },
+    async getWorkerClaimCount() {
+      return 0;
+    }
+  };
+  const service = makePlatformService(blockchainGateway);
+
+  const preflight = await service.preflightJob(WALLET, "parent-job-001");
+
+  assert.equal(preflight.claimNumber, 1);
+  assert.equal(preflight.claimEconomicsWaived, true);
+  assert.equal(preflight.claimEconomicsWaiverScope, "next_claim_projection");
+  assert.equal(preflight.claimStake, 0);
+  assert.equal(preflight.claimFee, 0);
+  assert.equal(preflight.totalClaimLock, 0);
+  assert.equal(preflight.strategyUnwindNeeded, false);
 });
 
 test("getAccountPosition delegates to blockchain gateway for chain-authoritative liquidity", async () => {

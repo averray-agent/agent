@@ -590,6 +590,8 @@ test("claimJob records onboarding waiver and claim fee economics on sessions", a
   for (let index = 0; index < 3; index++) {
     const session = await service.claimJob(WALLET, `job-${index + 1}`, "http", `idemp-waived-${index}`);
     assert.equal(session.claimEconomicsWaived, true);
+    assert.equal(session.claimEconomicsWaivedAtClaim, true);
+    assert.equal(session.claimEconomicsWaiverScope, "claim_time");
     assert.equal(session.totalClaimLock, 0);
     assert.equal(session.claimNumber, index + 1);
   }

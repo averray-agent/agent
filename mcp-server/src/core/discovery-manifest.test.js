@@ -13,7 +13,9 @@ test("buildDiscoveryManifest returns the full public discovery shape", () => {
     baseUrl: "https://api.example.com",
     discoveryUrl: "https://example.com/.well-known/agent-tools.json",
     profile: "https://app.example.com/agents/<wallet>",
-    operatorAppUrl: "https://app.example.com"
+    operatorAppUrl: "https://app.example.com",
+    chainId: 420420417,
+    rpcUrl: "https://eth-rpc-testnet.polkadot.io"
   });
 
   assert.equal(manifest.version, "0.3.1");
@@ -112,12 +114,12 @@ test("mainnet chainId renders the mainnet chain block on every network-dependent
   const walletFunded = manifest.onboarding.readinessChecks.find((check) => check.id === "wallet-funded");
   assert.equal(
     walletFunded.description,
-    "Fund the wallet on Polkadot Hub before claiming if the job is not fully sponsored or stake-waived."
+    "For non-brokered or non-waived jobs, acquire DOT on Polkadot Hub; starter jobs advertised as operator-brokered and stake-waived need no wallet funding."
   );
   assert.ok(!("faucetUrl" in walletFunded), "mainnet has no faucet — wallet-funded must not carry faucetUrl");
 
   assert.ok(manifest.onboarding.selfServeChecklist.includes(
-    "Fund the Polkadot Hub wallet unless the job is sponsored or stake-waived."
+    "For non-brokered or non-waived jobs, acquire DOT on Polkadot Hub; operator-brokered, stake-waived starter jobs require no wallet funding."
   ));
 
   // Anti-desync guard: nothing in the mainnet manifest may still reference the
@@ -143,7 +145,7 @@ test("testnet chainId and unknown/unset chainIds keep the historical testnet blo
     assert.deepEqual(mode.chain, testnetChain, `${id} must advertise the testnet chain`);
   }
   assert.ok(testnetManifest.onboarding.selfServeChecklist.includes(
-    "Fund the Polkadot Hub TestNet wallet from https://faucet.polkadot.io/ unless the job is sponsored or stake-waived."
+    "For non-brokered or non-waived jobs, fund PAS on Polkadot Hub TestNet from https://faucet.polkadot.io/; operator-brokered, stake-waived starter jobs require no wallet funding."
   ));
   assert.ok(!JSON.stringify(testnetManifest).includes(String(POLKADOT_HUB_MAINNET_CHAIN_ID)));
 
@@ -164,11 +166,11 @@ test("authenticated endpoint docs carry the query-parameter contracts agents tri
   const manifest = buildDiscoveryManifest();
   const preflight = manifest.authenticatedEndpoints.find((entry) => entry.path.startsWith("/jobs/preflight"));
   assert.equal(preflight.path, "/jobs/preflight?jobId=X");
-  assert.ok(preflight.description.includes("GET only"));
-  assert.ok(preflight.description.includes("?jobId="));
+  assert.ok(preflight.description.includes("GET-only"));
+  assert.ok(preflight.description.includes("405"));
   const session = manifest.authenticatedEndpoints.find((entry) => entry.path.startsWith("/session?"));
   assert.equal(session.path, "/session?sessionId=X");
-  assert.ok(session.description.includes("?sessionId="));
+  assert.ok(session.description.includes("compatibility alias"));
 });
 
 test("buildPlatformCapabilities stays aligned with the discovery tool list", () => {

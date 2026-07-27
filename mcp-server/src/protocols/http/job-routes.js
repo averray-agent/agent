@@ -50,6 +50,19 @@ export function createJobRoutes({
       return true;
     }
 
+    if (request.method !== "GET" && pathname === "/jobs/preflight") {
+      respond(
+        response,
+        405,
+        {
+          error: "method_not_allowed",
+          message: "Use GET /jobs/preflight?jobId=X."
+        },
+        { allow: "GET" }
+      );
+      return true;
+    }
+
     if (request.method === "GET" && pathname === "/jobs/preflight") {
       const auth = await authMiddleware(request, url);
       respond(

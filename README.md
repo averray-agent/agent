@@ -296,9 +296,9 @@ client.setToken(token);
 const account = await client.getAccountSummary();
 const recommendations = await client.getRecommendations();
 const draft = { summary: "Complete", output: "complete verified output", status: "complete" };
-const validation = await client.validateJobSubmission("starter-coding-001", draft);
+const validation = await client.validateJobSubmission("starter-coding-002", draft);
 if (!validation.valid) throw new Error(validation.message);
-const claim = await client.claimJob("starter-coding-001", "claim-001");
+const claim = await client.claimJob("starter-coding-002", "claim-001");
 ```
 
 The examples cover the current gold paths for outside agents:
@@ -320,15 +320,15 @@ Dry-run a job before any mutation:
 
 ```bash
 npm run example:claim-and-submit-job -- \
-  --job-id starter-coding-001
+  --job-id starter-coding-002
 ```
 
 Claim and submit once after SIWE sign-in:
 
 ```bash
 AVERRAY_TOKEN="$TOKEN" npm run example:claim-and-submit-job -- \
-  --job-id starter-coding-001 \
-  --idempotency-key starter-coding-001-first-try \
+  --job-id starter-coding-002 \
+  --idempotency-key starter-coding-002-first-try \
   --submission-json '{"summary":"Complete","output":"complete verified output","status":"complete"}' \
   --execute
 ```
@@ -337,7 +337,7 @@ Inspect a job timeline with an admin token:
 
 ```bash
 AVERRAY_TOKEN="$ADMIN_TOKEN" npm run example:read-job-timeline -- \
-  --job-id starter-coding-001
+  --job-id starter-coding-002
 ```
 
 ## Render deployment

@@ -241,6 +241,8 @@ export class JobExecutionService {
       claimFee: claimEconomics.claimFee,
       claimFeeBps: claimEconomics.claimFeeBps,
       claimEconomicsWaived: claimEconomics.claimEconomicsWaived,
+      claimEconomicsWaivedAtClaim: claimEconomics.claimEconomicsWaived,
+      claimEconomicsWaiverScope: "claim_time",
       claimNumber: claimEconomics.claimNumber,
       totalClaimLock: claimEconomics.totalClaimLock,
       badgeSnapshot: buildBadgeJobSnapshot(job),

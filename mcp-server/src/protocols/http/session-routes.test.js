@@ -109,6 +109,24 @@ test("GET /session authenticates, enforces ownership, and returns the session", 
   ]);
 });
 
+test("GET /session accepts id as a compatibility alias for sessionId", async () => {
+  const { calls, response, route } = makeHarness();
+
+  const handled = await route({
+    request: { method: "GET" },
+    response,
+    url: new URL("http://localhost/session?id=session-1"),
+    pathname: "/session",
+  });
+
+  assert.equal(handled, true);
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(calls.slice(0, 2), [
+    ["auth", undefined],
+    ["ensureSessionOwnership", { sessionId: "session-1", wallet: AUTH.wallet }],
+  ]);
+});
+
 test("GET /session preserves not-found response shape", async () => {
   const { response, route } = makeHarness({
     ownershipError: new NotFoundError("Session not found.", "session_not_found")
