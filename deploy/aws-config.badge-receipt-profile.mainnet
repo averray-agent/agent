@@ -1,0 +1,10 @@
+# Mainnet declaration for the dedicated badge-receipt signer profile.
+# scripts/ops/preflight-badge-receipt-signer.sh requires every non-comment
+# line below to exist verbatim in the mounted /etc/agent-stack-mainnet/aws-config.
+# Paths are container paths: docker-compose.mainnet.yml mounts
+# /etc/agent-stack-mainnet/roles-anywhere at /etc/agent-stack/roles-anywhere.
+# Lines must stay byte-identical to the badge block in deploy/aws-config.mainnet
+# (enforced by deploy-production.test.mjs).
+[profile averray-badge-receipt-signer]
+region = eu-central-2
+credential_process = /usr/local/bin/aws_signing_helper credential-process --certificate /etc/agent-stack/roles-anywhere/badge-receipt-signer-cert.pem --private-key /etc/agent-stack/roles-anywhere/badge-receipt-signer-key.pem --trust-anchor-arn arn:aws:rolesanywhere:eu-central-2:079209845430:trust-anchor/eea5b0d1-fb2a-4ffa-9e5c-b577f34c6229 --profile-arn arn:aws:rolesanywhere:eu-central-2:079209845430:profile/7f075fcc-4e64-4c13-b4df-7fee3462058f --role-arn arn:aws:iam::079209845430:role/averray-badge-receipt-signer-prod-role --region eu-central-2
