@@ -122,7 +122,7 @@ export function createPublicMetadataRoutes({
     }
 
     if (request.method === "GET" && pathname === "/onboarding") {
-      respond(response, 200, service.getPlatformCapabilities());
+      respond(response, 200, service.getPlatformCapabilities({ chainId: authConfig?.chainId }));
       return true;
     }
 
@@ -134,7 +134,8 @@ export function createPublicMetadataRoutes({
         response,
         200,
         buildDiscoveryManifest({
-          baseUrl: publicBaseUrl?.trim() || undefined
+          baseUrl: publicBaseUrl?.trim() || undefined,
+          chainId: authConfig?.chainId
         }),
         { "cache-control": "public, max-age=300" }
       );

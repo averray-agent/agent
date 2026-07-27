@@ -17,7 +17,7 @@ function makeHarness(overrides = {}) {
   const calls = [];
   const response = {};
   const route = createPublicMetadataRoutes({
-    authConfig: overrides.authConfig ?? { mode: "strict" },
+    authConfig: overrides.authConfig ?? { mode: "strict", chainId: 420420419 },
     buildDiscoveryManifest: (options) => {
       calls.push(["buildDiscoveryManifest", options]);
       return overrides.discoveryManifest ?? {
@@ -37,8 +37,8 @@ function makeHarness(overrides = {}) {
         calls.push(["getPublicProviderOperations"]);
         return overrides.providerStatus ?? PROVIDER_STATUS;
       },
-      getPlatformCapabilities: () => {
-        calls.push(["getPlatformCapabilities"]);
+      getPlatformCapabilities: (options) => {
+        calls.push(["getPlatformCapabilities", options]);
         return overrides.platformCapabilities ?? PLATFORM_CAPABILITIES;
       }
     },
@@ -133,8 +133,10 @@ test("GET /onboarding returns platform capabilities", async () => {
   assert.equal(handled, true);
   assert.equal(response.statusCode, 200);
   assert.deepEqual(response.body, PLATFORM_CAPABILITIES);
+  // The route must forward the active chain id so /onboarding advertises the
+  // same network as /health and SIWE.
   assert.deepEqual(calls, [
-    ["getPlatformCapabilities"],
+    ["getPlatformCapabilities", { chainId: 420420419 }],
     ["respond", { statusCode: 200, body: PLATFORM_CAPABILITIES, headers: {} }],
   ]);
 });
@@ -157,7 +159,7 @@ test("GET discovery manifest mirrors trim the public base URL and cache the resp
     });
     assert.deepEqual(response.headers, { "cache-control": "public, max-age=300" });
     assert.deepEqual(calls, [
-      ["buildDiscoveryManifest", { baseUrl: "https://api.averray.com" }],
+      ["buildDiscoveryManifest", { baseUrl: "https://api.averray.com", chainId: 420420419 }],
       ["respond", {
         statusCode: 200,
         body: response.body,

@@ -132,8 +132,8 @@ export class PlatformService {
     );
   }
 
-  getPlatformCapabilities() {
-    return buildPlatformCapabilities();
+  getPlatformCapabilities({ chainId = undefined } = {}) {
+    return buildPlatformCapabilities({ chainId });
   }
 
   getSessionStateMachine() {

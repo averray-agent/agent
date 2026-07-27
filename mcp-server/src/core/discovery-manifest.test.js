@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildDiscoveryManifest, buildPlatformCapabilities } from "./discovery-manifest.js";
+import {
+  buildDiscoveryManifest,
+  buildPlatformCapabilities,
+  POLKADOT_HUB_MAINNET_CHAIN_ID,
+  POLKADOT_HUB_TESTNET_CHAIN_ID
+} from "./discovery-manifest.js";
 
 test("buildDiscoveryManifest returns the full public discovery shape", () => {
   const manifest = buildDiscoveryManifest({
@@ -88,6 +93,82 @@ test("buildDiscoveryManifest returns the full public discovery shape", () => {
   assert.ok(manifest.onboarding.actionRequirements.some((entry) => (
     entry.method === "POST" && entry.path === "/jobs/claim" && entry.requiredAction === "wallet_sign_in"
   )));
+});
+
+test("mainnet chainId renders the mainnet chain block on every network-dependent surface", () => {
+  const manifest = buildDiscoveryManifest({ chainId: POLKADOT_HUB_MAINNET_CHAIN_ID });
+  const mainnetChain = {
+    name: "Polkadot Hub",
+    currencySymbol: "DOT",
+    chainId: POLKADOT_HUB_MAINNET_CHAIN_ID,
+    rpcUrl: "https://eth-rpc.polkadot.io"
+  };
+
+  for (const id of ["evm-siwe", "agent-self-custody"]) {
+    const mode = manifest.onboarding.walletModes.find((entry) => entry.id === id);
+    assert.deepEqual(mode.chain, mainnetChain, `${id} must advertise the mainnet chain`);
+  }
+
+  const walletFunded = manifest.onboarding.readinessChecks.find((check) => check.id === "wallet-funded");
+  assert.equal(
+    walletFunded.description,
+    "Fund the wallet on Polkadot Hub before claiming if the job is not fully sponsored or stake-waived."
+  );
+  assert.ok(!("faucetUrl" in walletFunded), "mainnet has no faucet — wallet-funded must not carry faucetUrl");
+
+  assert.ok(manifest.onboarding.selfServeChecklist.includes(
+    "Fund the Polkadot Hub wallet unless the job is sponsored or stake-waived."
+  ));
+
+  // Anti-desync guard: nothing in the mainnet manifest may still reference the
+  // testnet chain, its currency, or a faucet — however the wording evolves.
+  const serialized = JSON.stringify(manifest);
+  assert.ok(!serialized.includes(String(POLKADOT_HUB_TESTNET_CHAIN_ID)));
+  assert.ok(!/testnet/iu.test(serialized));
+  assert.ok(!/faucet/iu.test(serialized));
+  assert.ok(!serialized.includes('"PAS"'));
+});
+
+test("testnet chainId and unknown/unset chainIds keep the historical testnet block", () => {
+  const testnetManifest = buildDiscoveryManifest({ chainId: POLKADOT_HUB_TESTNET_CHAIN_ID });
+  const testnetChain = {
+    name: "Polkadot Hub TestNet",
+    currencySymbol: "PAS",
+    chainId: POLKADOT_HUB_TESTNET_CHAIN_ID,
+    rpcUrl: "https://eth-rpc-testnet.polkadot.io",
+    faucetUrl: "https://faucet.polkadot.io/"
+  };
+  for (const id of ["evm-siwe", "agent-self-custody"]) {
+    const mode = testnetManifest.onboarding.walletModes.find((entry) => entry.id === id);
+    assert.deepEqual(mode.chain, testnetChain, `${id} must advertise the testnet chain`);
+  }
+  assert.ok(testnetManifest.onboarding.selfServeChecklist.includes(
+    "Fund the Polkadot Hub TestNet wallet from https://faucet.polkadot.io/ unless the job is sponsored or stake-waived."
+  ));
+  assert.ok(!JSON.stringify(testnetManifest).includes(String(POLKADOT_HUB_MAINNET_CHAIN_ID)));
+
+  // Dev stacks boot with AUTH_CHAIN_ID=0 — they must never advertise mainnet.
+  assert.deepEqual(buildDiscoveryManifest(), testnetManifest);
+  assert.deepEqual(buildDiscoveryManifest({ chainId: 0 }), testnetManifest);
+  assert.deepEqual(buildDiscoveryManifest({ chainId: 31337 }), testnetManifest);
+});
+
+test("buildPlatformCapabilities forwards the chainId to the manifest build", () => {
+  const capabilities = buildPlatformCapabilities({ chainId: POLKADOT_HUB_MAINNET_CHAIN_ID });
+  const mode = capabilities.onboarding.walletModes.find((entry) => entry.id === "evm-siwe");
+  assert.equal(mode.chain.chainId, POLKADOT_HUB_MAINNET_CHAIN_ID);
+  assert.equal(mode.chain.name, "Polkadot Hub");
+});
+
+test("authenticated endpoint docs carry the query-parameter contracts agents tripped on", () => {
+  const manifest = buildDiscoveryManifest();
+  const preflight = manifest.authenticatedEndpoints.find((entry) => entry.path.startsWith("/jobs/preflight"));
+  assert.equal(preflight.path, "/jobs/preflight?jobId=X");
+  assert.ok(preflight.description.includes("GET only"));
+  assert.ok(preflight.description.includes("?jobId="));
+  const session = manifest.authenticatedEndpoints.find((entry) => entry.path.startsWith("/session?"));
+  assert.equal(session.path, "/session?sessionId=X");
+  assert.ok(session.description.includes("?sessionId="));
 });
 
 test("buildPlatformCapabilities stays aligned with the discovery tool list", () => {

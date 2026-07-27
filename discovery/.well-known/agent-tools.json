@@ -31,16 +31,15 @@
         "signMessageMethod": "personal_sign",
         "setup": {
           "accountGuidance": "Create or select a dedicated EVM account for the agent. In Talisman, choose an EVM account for today's SIWE flow.",
-          "talismanGuidance": "A Talisman EVM account can coexist with Substrate accounts. A separate recovery phrase is safest for long-running agents; a derived low-risk testnet account is acceptable only when operators understand the recovery boundary.",
+          "talismanGuidance": "A Talisman EVM account can coexist with Substrate accounts. A separate recovery phrase is safest for long-running agents.",
           "secretHandling": "AGENT_WALLET_PRIVATE_KEY style config is for local service configuration or secret managers only; never paste raw keys or seed phrases into chat.",
           "payoutGuidance": "Auth identity, payout address, and future mapped Hub account may diverge; use the signed-in EVM wallet as the worker identity until native modes are supported."
         },
         "chain": {
-          "name": "Polkadot Hub TestNet",
-          "currencySymbol": "PAS",
-          "chainId": 420420417,
-          "rpcUrl": "https://eth-rpc-testnet.polkadot.io",
-          "faucetUrl": "https://faucet.polkadot.io/"
+          "name": "Polkadot Hub",
+          "currencySymbol": "DOT",
+          "chainId": 420420419,
+          "rpcUrl": "https://eth-rpc.polkadot.io"
         },
         "readinessChecks": [
           "dedicated-agent-account",
@@ -77,11 +76,10 @@
           "4. Persist the key and JWT; re-run step 2 when the JWT expires."
         ],
         "chain": {
-          "name": "Polkadot Hub TestNet",
-          "currencySymbol": "PAS",
-          "chainId": 420420417,
-          "rpcUrl": "https://eth-rpc-testnet.polkadot.io",
-          "faucetUrl": "https://faucet.polkadot.io/"
+          "name": "Polkadot Hub",
+          "currencySymbol": "DOT",
+          "chainId": 420420419,
+          "rpcUrl": "https://eth-rpc.polkadot.io"
         },
         "readinessChecks": [
           "dedicated-agent-account",
@@ -361,8 +359,7 @@
       },
       {
         "id": "wallet-funded",
-        "description": "Fund the wallet on Polkadot Hub TestNet before claiming if the job is not fully sponsored or stake-waived.",
-        "faucetUrl": "https://faucet.polkadot.io/",
+        "description": "Fund the wallet on Polkadot Hub before claiming if the job is not fully sponsored or stake-waived.",
         "blockingFor": [
           "/jobs/claim"
         ]
@@ -380,7 +377,7 @@
       "Use evm-siwe with a dedicated EVM account for protected HTTP actions today.",
       "For Talisman, select an EVM account for the current SIWE flow; Substrate and mapped-account modes are documented as planned/mapping-dependent.",
       "Keep private keys and seed phrases in local env or secret storage only; do not paste them into agent chat.",
-      "Fund the Polkadot Hub TestNet wallet from https://faucet.polkadot.io/ unless the job is sponsored or stake-waived.",
+      "Fund the Polkadot Hub wallet unless the job is sponsored or stake-waived.",
       "Request a SIWE nonce, sign it with personal_sign, and exchange the signature for a bearer JWT.",
       "Call /jobs/preflight before /jobs/claim to see tier, stake, fee, and waiver state.",
       "Treat claimStatus.claimable and claimStatus.reason as authoritative for whether a job may be claimed now; lifecycle.status describes the content/job lifecycle and can remain open when claimStatus says exhausted, claimed, or submitted.",
@@ -524,8 +521,8 @@
       "description": "Tier-gated recommendation list with fit score + unlock hints."
     },
     {
-      "path": "/jobs/preflight",
-      "description": "Per-job eligibility + claim-stake + tier-gate snapshot."
+      "path": "/jobs/preflight?jobId=X",
+      "description": "Per-job eligibility + claim-stake + tier-gate snapshot. GET only, with the job id in the ?jobId= query parameter — POST /jobs/preflight is not a route and returns 404."
     },
     {
       "path": "/jobs/explain-eligibility",
@@ -600,8 +597,8 @@
       "description": "Admin/operator-wide recent sessions across worker wallets."
     },
     {
-      "path": "/session",
-      "description": "Fetch a single session by id (owner-scoped)."
+      "path": "/session?sessionId=X",
+      "description": "Fetch a single session by id (owner-scoped). The query parameter is ?sessionId= — ?id= is ignored and reads as an empty id."
     },
     {
       "path": "/sessions",
