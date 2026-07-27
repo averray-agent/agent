@@ -40,6 +40,11 @@ BACKEND_ENV_TOKEN=${BACKEND_ENV_TOKEN:-/etc/agent-stack/op-backend.env}
 AWS_CONFIG_PATH=${AWS_CONFIG_PATH:-/etc/agent-stack/aws-config}
 BADGE_RECEIPT_CERT_PATH=${BADGE_RECEIPT_CERT_PATH:-/etc/agent-stack/roles-anywhere/badge-receipt-signer-cert.pem}
 BADGE_RECEIPT_KEY_PATH=${BADGE_RECEIPT_KEY_PATH:-/etc/agent-stack/roles-anywhere/badge-receipt-signer-key.pem}
+# Declaration the preflight compares against the mounted aws-config. The
+# default is the testnet profile; mainnet deploys must pass the mainnet
+# declaration (deploy-production.sh selects it from LIVE_NETWORK) because
+# mainnet has its own Roles Anywhere trust anchor, profile, and role.
+BADGE_RECEIPT_PROFILE_DECLARATION=${BADGE_RECEIPT_PROFILE_DECLARATION:-}
 BRANCH=${BRANCH:-main}
 HEALTH_URL=${HEALTH_URL:-https://api.averray.com/health}
 HEALTH_TIMEOUT_SEC=${HEALTH_TIMEOUT_SEC:-120}
@@ -221,7 +226,7 @@ echo "Deploying SHA: $NEW_SHA"
 echo "Preflighting dedicated badge receipt signer consumer paths"
 env -u PREFLIGHT_NO_SUDO -u PREFLIGHT_EXPECTED_OWNER_MODE \
   "$APP_ROOT/scripts/ops/preflight-badge-receipt-signer.sh" \
-  "$APP_ROOT/deploy/aws-config.badge-receipt-profile" \
+  "${BADGE_RECEIPT_PROFILE_DECLARATION:-$APP_ROOT/deploy/aws-config.badge-receipt-profile}" \
   "$AWS_CONFIG_PATH" \
   "$BADGE_RECEIPT_CERT_PATH" \
   "$BADGE_RECEIPT_KEY_PATH"

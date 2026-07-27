@@ -680,6 +680,50 @@ test("indexer schema recovery persists across normal runtime-env renders", async
   );
 });
 
+test("badge-receipt preflight declaration is per network and byte-matches aws-config.mainnet", async () => {
+  const script = await readFile(DEPLOY_SCRIPT, "utf8");
+  assert.match(
+    script,
+    /badge_profile_declaration="\$APP_ROOT\/deploy\/aws-config\.badge-receipt-profile\.mainnet"/u,
+    "mainnet deploys must preflight against the mainnet badge declaration — the testnet one can never match the mainnet mounted aws-config (2026-07-27 failure)"
+  );
+  assert.match(
+    script,
+    /BADGE_RECEIPT_PROFILE_DECLARATION="\$badge_profile_declaration"/u,
+    "the selected declaration must be passed through to redeploy-backend.sh"
+  );
+
+  const redeploy = await readFile(join(REPO_ROOT, "scripts/ops/redeploy-backend.sh"), "utf8");
+  assert.match(
+    redeploy,
+    /\$\{BADGE_RECEIPT_PROFILE_DECLARATION:-\$APP_ROOT\/deploy\/aws-config\.badge-receipt-profile\}/u,
+    "redeploy-backend must keep the testnet declaration as its standalone default"
+  );
+
+  const mainnetDeclaration = await readFile(
+    join(REPO_ROOT, "deploy/aws-config.badge-receipt-profile.mainnet"),
+    "utf8"
+  );
+  const mainnetAwsConfigLines = (await readFile(join(REPO_ROOT, "deploy/aws-config.mainnet"), "utf8")).split("\n");
+  const declarationLines = mainnetDeclaration
+    .split("\n")
+    .filter((line) => line.trim() !== "" && !line.startsWith("#"));
+  assert.ok(
+    declarationLines.includes("[profile averray-badge-receipt-signer]"),
+    "mainnet declaration must pin the dedicated badge profile"
+  );
+  assert.ok(
+    declarationLines.some((line) => line.includes("averray-badge-receipt-signer-prod-role")),
+    "mainnet declaration must use the mainnet Roles Anywhere role, not the testnet one"
+  );
+  for (const line of declarationLines) {
+    assert.ok(
+      mainnetAwsConfigLines.includes(line),
+      `mainnet badge declaration line must byte-match deploy/aws-config.mainnet (the file the VPS aws-config is installed from): ${line}`
+    );
+  }
+});
+
 test("normal Caddy deploys consume the durable external network selector", async () => {
   const script = await readFile(DEPLOY_SCRIPT, "utf8");
   assert.match(

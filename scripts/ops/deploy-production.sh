@@ -1320,6 +1320,14 @@ deploy() {
     run_backend=1
     if [[ "$backend_code_changed" == "1" ]]; then
       echo "Deploying backend (reason: code path changed)"
+      # The badge-receipt preflight declaration is per network: mainnet has
+      # its own Roles Anywhere trust anchor/profile/role, so checking the
+      # testnet declaration against the mainnet mounted aws-config can never
+      # pass (2026-07-27 deploy failure after the schema-override fix).
+      local badge_profile_declaration="$APP_ROOT/deploy/aws-config.badge-receipt-profile"
+      if [[ "$LIVE_NETWORK" == "mainnet" ]]; then
+        badge_profile_declaration="$APP_ROOT/deploy/aws-config.badge-receipt-profile.mainnet"
+      fi
       COMPOSE_FILE="$COMPOSE_FILE" \
         COMPOSE_PROJECT_DIRECTORY="$COMPOSE_PROJECT_DIRECTORY" \
         BACKEND_SERVICE="$BACKEND_SERVICE" \
@@ -1330,6 +1338,7 @@ deploy() {
         AWS_CONFIG_PATH="$CREDENTIALS_ROOT/aws-config" \
         BADGE_RECEIPT_CERT_PATH="$CREDENTIALS_ROOT/roles-anywhere/badge-receipt-signer-cert.pem" \
         BADGE_RECEIPT_KEY_PATH="$CREDENTIALS_ROOT/roles-anywhere/badge-receipt-signer-key.pem" \
+        BADGE_RECEIPT_PROFILE_DECLARATION="$badge_profile_declaration" \
         SKIP_GIT_UPDATE=1 \
         PRE_DEPLOY_SHA="$OLD_SHA" \
         "$APP_ROOT/scripts/ops/redeploy-backend.sh"
