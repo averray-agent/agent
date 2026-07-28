@@ -10,7 +10,13 @@ import {AgentAccountCore} from "../contracts/AgentAccountCore.sol";
 import {EscrowCore} from "../contracts/EscrowCore.sol";
 import {ReputationSBT} from "../contracts/ReputationSBT.sol";
 
+interface ProtocolFeeVmEvent {
+    function expectEmit(bool checkTopic1, bool checkTopic2, bool checkTopic3, bool checkData, address emitter) external;
+}
+
 contract EscrowProtocolFeeTest is Test {
+    ProtocolFeeVmEvent internal constant vmEvent =
+        ProtocolFeeVmEvent(address(uint160(uint256(keccak256("hevm cheat code")))));
     TreasuryPolicy internal policy;
     StrategyAdapterRegistry internal registry;
     AgentAccountCore internal accounts;
@@ -106,9 +112,11 @@ contract EscrowProtocolFeeTest is Test {
         assertEq(posterLiquid, POSTER_DEPOSIT - 110 ether);
         assertEq(posterReserved, 110 ether);
 
-        vm.expectEmit(true, true, true, true, address(escrow));
+        _submitSingle(jobId);
+        vmEvent.expectEmit(true, true, true, true, address(escrow));
         emit SettlementSplit(jobId, worker, treasury, address(token), 100 ether, 10 ether, 1_000);
-        _approveSingle(jobId);
+        vm.prank(verifier);
+        escrow.resolveSinglePayout(jobId, true, bytes32("OK"), "", REASONING_HASH);
 
         EscrowCore.JobEscrow memory settled = escrow.jobs(jobId);
         (uint256 workerLiquid,,,,,) = accounts.positions(worker, address(token));
@@ -187,15 +195,7 @@ contract EscrowProtocolFeeTest is Test {
 
         vm.prank(poster);
         escrow.createSinglePayoutJobFeeWaived(
-            jobId,
-            address(token),
-            100 ether,
-            0,
-            0,
-            1 days,
-            bytes32("AUTO"),
-            bytes32("STARTER"),
-            SPEC_HASH
+            jobId, address(token), 100 ether, 0, 0, 1 days, bytes32("AUTO"), bytes32("STARTER"), SPEC_HASH
         );
 
         EscrowCore.JobEscrow memory funded = escrow.jobs(jobId);
@@ -214,32 +214,39 @@ contract EscrowProtocolFeeTest is Test {
 
     function testCuratedWaiverRequiresSettlementBroker() public {
         vm.prank(outsider);
-        vm.expectRevert(EscrowCore.Unauthorized.selector);
-        escrow.createSinglePayoutJobFeeWaived(
-            keccak256("fee/unauthorized-waiver"),
-            address(token),
-            100 ether,
-            0,
-            0,
-            1 days,
-            bytes32("AUTO"),
-            bytes32("STARTER"),
-            SPEC_HASH
-        );
+        (bool ok, bytes memory data) = address(escrow)
+            .call(
+                abi.encodeWithSignature(
+                    "createSinglePayoutJobFeeWaived(bytes32,address,uint256,uint256,uint256,uint256,bytes32,bytes32,bytes32)",
+                    keccak256("fee/unauthorized-waiver"),
+                    address(token),
+                    100 ether,
+                    0,
+                    0,
+                    1 days,
+                    bytes32("AUTO"),
+                    bytes32("STARTER"),
+                    SPEC_HASH
+                )
+            );
+        _requireRevertSelector(ok, data, EscrowCore.Unauthorized.selector);
     }
 
     function testProtocolFeeGovernanceUsesPolicyOwnerAndEnforcesCapAndTreasury() public {
         assertEq(escrow.MAX_PROTOCOL_FEE_BPS(), 1_000);
 
         vm.prank(outsider);
-        vm.expectRevert(EscrowCore.Unauthorized.selector);
-        escrow.setProtocolFeeBps(100);
+        (bool unauthorized, bytes memory unauthorizedData) =
+            address(escrow).call(abi.encodeCall(escrow.setProtocolFeeBps, (100)));
+        _requireRevertSelector(unauthorized, unauthorizedData, EscrowCore.Unauthorized.selector);
 
-        vm.expectRevert(EscrowCore.ProtocolFeeTooHigh.selector);
-        escrow.setProtocolFeeBps(1_001);
+        (bool overCap, bytes memory overCapData) =
+            address(escrow).call(abi.encodeCall(escrow.setProtocolFeeBps, (1_001)));
+        _requireRevertSelector(overCap, overCapData, EscrowCore.ProtocolFeeTooHigh.selector);
 
-        vm.expectRevert(EscrowCore.InvalidTreasuryAccount.selector);
-        escrow.setTreasuryAccount(address(0));
+        (bool zeroTreasury, bytes memory zeroTreasuryData) =
+            address(escrow).call(abi.encodeCall(escrow.setTreasuryAccount, (address(0))));
+        _requireRevertSelector(zeroTreasury, zeroTreasuryData, EscrowCore.InvalidTreasuryAccount.selector);
 
         escrow.setProtocolFeeBps(1_000);
         escrow.setTreasuryAccount(nextTreasury);
@@ -260,6 +267,84 @@ contract EscrowProtocolFeeTest is Test {
         assertEq(nextTreasuryLiquid, 10 ether);
     }
 
+    function testMilestonesChargeTheExactCumulativeFeeDespitePerLegRounding() public {
+        escrow.setProtocolFeeBps(1_000);
+        bytes32 jobId = keccak256("fee/milestone-rounding");
+        uint256[] memory milestones = new uint256[](2);
+        milestones[0] = 5;
+        milestones[1] = 6;
+
+        vm.prank(poster);
+        escrow.createMilestoneJob(
+            jobId, address(token), milestones, 0, 0, 1 days, bytes32("AUTO"), bytes32("CODING"), SPEC_HASH
+        );
+
+        vm.prank(worker);
+        escrow.claimJob(jobId);
+        vm.prank(worker);
+        escrow.submitWork(jobId, keccak256("milestone-0"));
+        vm.prank(verifier);
+        escrow.resolveMilestone(jobId, 0, true, bytes32("OK"), "", REASONING_HASH);
+
+        EscrowCore.JobEscrow memory afterFirst = escrow.jobs(jobId);
+        assertEq(afterFirst.released, 5);
+        assertEq(afterFirst.protocolFeeReleased, 0);
+
+        vm.prank(worker);
+        escrow.submitWork(jobId, keccak256("milestone-1"));
+        vm.prank(verifier);
+        escrow.resolveMilestone(jobId, 1, true, bytes32("OK"), "", REASONING_HASH);
+
+        EscrowCore.JobEscrow memory settled = escrow.jobs(jobId);
+        (uint256 treasuryLiquid,,,,,) = accounts.positions(treasury, address(token));
+        assertEq(settled.released, 11);
+        assertEq(settled.protocolFee, 1);
+        assertEq(settled.protocolFeeReleased, 1);
+        assertEq(treasuryLiquid, 1);
+    }
+
+    function testRecurringDerivativeConsumesRewardPlusSnapshottedFeeFromTemplateReserve() public {
+        escrow.setProtocolFeeBps(1_000);
+        bytes32 templateId = keccak256("fee/recurring-template");
+        bytes32 jobId = keccak256("fee/recurring-run");
+
+        vm.prank(poster);
+        accounts.reserveForRecurringTemplate(poster, address(token), templateId, 110 ether);
+
+        vm.prank(poster);
+        escrow.createSinglePayoutJobFromRecurringReserve(
+            EscrowCore.RecurringSinglePayoutJob({
+                jobId: jobId,
+                templateId: templateId,
+                poster: poster,
+                asset: address(token),
+                reward: 100 ether,
+                opsReserve: 0,
+                contingencyReserve: 0,
+                claimTtl: 1 days,
+                verifierMode: bytes32("AUTO"),
+                category: bytes32("CODING"),
+                specHash: SPEC_HASH,
+                schemaHash: bytes32(0),
+                schemaUrl: "",
+                schemaIssuer: address(0),
+                schemaSignature: "",
+                protocolFeeWaived: false
+            })
+        );
+
+        EscrowCore.JobEscrow memory funded = escrow.jobs(jobId);
+        assertEq(funded.protocolFee, 10 ether);
+        assertEq(funded.protocolFeeBps, 1_000);
+        assertEq(accounts.recurringTemplateReserves(poster, address(token), templateId), 0);
+
+        _approveSingle(jobId);
+        (uint256 workerLiquid,,,,,) = accounts.positions(worker, address(token));
+        (uint256 treasuryLiquid,,,,,) = accounts.positions(treasury, address(token));
+        assertEq(workerLiquid, WORKER_DEPOSIT + 100 ether);
+        assertEq(treasuryLiquid, 10 ether);
+    }
+
     function _createSingle(bytes32 jobId, uint256 reward) internal {
         vm.prank(poster);
         escrow.createSinglePayoutJob(
@@ -278,5 +363,10 @@ contract EscrowProtocolFeeTest is Test {
         _submitSingle(jobId);
         vm.prank(verifier);
         escrow.resolveSinglePayout(jobId, true, bytes32("OK"), "", REASONING_HASH);
+    }
+
+    function _requireRevertSelector(bool ok, bytes memory data, bytes4 selector) internal pure {
+        require(!ok, "EXPECTED_REVERT");
+        require(data.length >= 4 && bytes4(data) == selector, "UNEXPECTED_REVERT_SELECTOR");
     }
 }

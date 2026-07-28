@@ -10,21 +10,42 @@ import {
 } from "./redeploy-escrowcore.mjs";
 
 function abiWith(names) {
-  return { abi: names.map((name) => ({ type: "function", name })) };
+  return {
+    abi: [
+      {
+        type: "constructor",
+        inputs: [
+          { name: "policy_", type: "address" },
+          { name: "accounts_", type: "address" },
+          { name: "reputation_", type: "address" },
+          { name: "treasuryAccount_", type: "address" }
+        ]
+      },
+      ...names.map((name) => ({ type: "function", name }))
+    ]
+  };
 }
 
-test("assertArtifactHasBrokeredSelectors passes when every brokered entrypoint is present", () => {
+test("assertArtifactHasBrokeredSelectors passes for the complete v2 fee surface", () => {
   assert.doesNotThrow(() =>
     assertArtifactHasBrokeredSelectors(
-      abiWith(["claimJobFor", "submitWorkFor", "openDisputeFor", "submitWork", "openDispute"])
+      abiWith([
+        "claimJobFor",
+        "submitWorkFor",
+        "openDisputeFor",
+        "previewProtocolFee",
+        "setProtocolFeeBps",
+        "setTreasuryAccount",
+        "createSinglePayoutJobFeeWaived"
+      ])
     )
   );
 });
 
-test("assertArtifactHasBrokeredSelectors throws naming the missing brokered selectors", () => {
+test("assertArtifactHasBrokeredSelectors throws naming missing v2 selectors", () => {
   assert.throws(
     () => assertArtifactHasBrokeredSelectors(abiWith(["claimJobFor"])),
-    /missing operator-brokered selector\(s\): submitWorkFor, openDisputeFor/
+    /missing required EscrowCore-v2 selector\(s\): submitWorkFor, openDisputeFor/
   );
 });
 
@@ -104,15 +125,15 @@ test("loadKeyFromOp rejects refs that aren't op://", () => {
   );
 });
 
-test("setServiceOperator(address,bool) selector encoding is stable", () => {
-  const iface = new Interface(["function setServiceOperator(address account, bool allowed)"]);
-  const data = iface.encodeFunctionData("setServiceOperator", [
+test("setSettlementBroker(address,bool) selector encoding is stable", () => {
+  const iface = new Interface(["function setSettlementBroker(address account, bool allowed)"]);
+  const data = iface.encodeFunctionData("setSettlementBroker", [
     "0xb8fd8A932F69bD5E39700b7cf6D2920aF84d1B27",
     true
   ]);
   assert.equal(
     data,
-    "0xeea03c28000000000000000000000000b8fd8a932f69bd5e39700b7cf6d2920af84d1b270000000000000000000000000000000000000000000000000000000000000001"
+    "0xd77baf73000000000000000000000000b8fd8a932f69bd5e39700b7cf6d2920af84d1b270000000000000000000000000000000000000000000000000000000000000001"
   );
 });
 

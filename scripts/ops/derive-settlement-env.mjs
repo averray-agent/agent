@@ -27,6 +27,9 @@ const contracts = deployment.contracts ?? {};
 const treasuryPolicy = requireAddress(contracts.treasuryPolicy, "contracts.treasuryPolicy");
 const agentAccountCore = requireAddress(contracts.agentAccountCore, "contracts.agentAccountCore");
 const escrowCore = requireAddress(contracts.escrowCore, "contracts.escrowCore");
+const legacyEscrowCore = contracts.legacyEscrowCore
+  ? requireAddress(contracts.legacyEscrowCore, "contracts.legacyEscrowCore")
+  : "";
 const reputationSbt = requireAddress(contracts.reputationSbt, "contracts.reputationSbt");
 const discoveryRegistry = contracts.discoveryRegistry
   ? requireAddress(contracts.discoveryRegistry, "contracts.discoveryRegistry")
@@ -57,6 +60,7 @@ const entries = {
   TREASURY_POLICY_ADDRESS: treasuryPolicy,
   AGENT_ACCOUNT_ADDRESS: agentAccountCore,
   ESCROW_CORE_ADDRESS: escrowCore,
+  LEGACY_ESCROW_CORE_ADDRESS: legacyEscrowCore,
   REPUTATION_SBT_ADDRESS: reputationSbt,
   DISCOVERY_REGISTRY_ADDRESS: discoveryRegistry,
   XCM_WRAPPER_ADDRESS: xcmWrapper,

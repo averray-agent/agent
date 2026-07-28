@@ -16,6 +16,7 @@ silent fallback to pre-existing testnet addresses.
 
 - `TREASURY_POLICY_ADDRESS`
 - `ESCROW_CORE_ADDRESS`
+- `PONDER_LEGACY_ESCROW_CORE_ADDRESS` (optional; v1 drain address)
 - `AGENT_ACCOUNT_ADDRESS`
 - `REPUTATION_SBT_ADDRESS`
 - `DISCOVERY_REGISTRY_ADDRESS`

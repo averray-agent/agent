@@ -124,6 +124,18 @@ test("buildManifestOverrides: resolves addresses, auth, blocks, and schema", () 
   assert.equal(overrides.PONDER_START_BLOCK_REPUTATION, "103");
   assert.equal(overrides.PONDER_START_BLOCK_REGISTRIES, "104");
   assert.equal(overrides.DATABASE_SCHEMA, MANIFEST.runtime.indexer.schema);
+  assert.equal(overrides.LEGACY_ESCROW_CORE_ADDRESS, "");
+  assert.equal(overrides.PONDER_LEGACY_ESCROW_CORE_ADDRESS, "");
+});
+
+test("buildManifestOverrides: projects the v1 drain address into backend and indexer env", () => {
+  const legacyEscrowCore = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const overrides = buildManifestOverrides({
+    ...MANIFEST,
+    contracts: { ...MANIFEST.contracts, legacyEscrowCore }
+  });
+  assert.equal(overrides.LEGACY_ESCROW_CORE_ADDRESS, legacyEscrowCore);
+  assert.equal(overrides.PONDER_LEGACY_ESCROW_CORE_ADDRESS, legacyEscrowCore);
 });
 
 test("buildManifestOverrides: fails closed on incomplete runtime metadata", () => {

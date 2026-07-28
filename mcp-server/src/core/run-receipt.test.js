@@ -29,7 +29,8 @@ function fixture(overrides = {}) {
       reasonCode: outcome === "approved" ? "BENCHMARK_THRESHOLD_MET" : "BENCHMARK_THRESHOLD_MISSED",
       handler: "benchmark",
       handlerVersion: 1,
-      verificationInputHash: `0x${"2".repeat(64)}`
+      verificationInputHash: `0x${"2".repeat(64)}`,
+      ...(overrides.settlement ? { settlement: overrides.settlement } : {})
     },
     context: {
       publicBaseUrl: "https://api.averray.com",
@@ -56,6 +57,33 @@ test("buildRunReceipt captures rejected verdicts with the rejection timestamp", 
   assert.equal(receipt.verdict.outcome, "rejected");
   assert.equal(receipt.timestamps.verifiedAt, "2026-07-12T10:06:00.000Z");
   assert.equal(receipt.signers.find((entry) => entry.role === "verifier").at, receipt.timestamps.verifiedAt);
+});
+
+test("buildRunReceipt signs the exact success-path settlement split", () => {
+  const receipt = fixture({
+    settlement: {
+      worker: WORKER,
+      treasuryAccount: SERVICE_SIGNER,
+      asset: "0xcccccccccccccccccccccccccccccccccccccccc",
+      assetSymbol: "USDC",
+      workerAmount: 1,
+      workerAmountRaw: "1000000",
+      protocolFeeAmount: 0.025,
+      protocolFeeAmountRaw: "25000",
+      protocolFeeBps: 250
+    }
+  });
+  assert.deepEqual(receipt.settlement, {
+    worker: WORKER,
+    treasuryAccount: SERVICE_SIGNER,
+    asset: "0xcccccccccccccccccccccccccccccccccccccccc",
+    assetSymbol: "USDC",
+    workerAmount: "1",
+    workerAmountRaw: "1000000",
+    protocolFeeAmount: "0.025",
+    protocolFeeAmountRaw: "25000",
+    protocolFeeBps: 250
+  });
 });
 
 test("buildRunReceipt refuses pending, expired, and never-claimed states", () => {

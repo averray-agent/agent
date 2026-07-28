@@ -54,7 +54,7 @@ contract Rc1BackboneTest is Test {
         registry = new StrategyAdapterRegistry(policy);
         accounts = new AgentAccountCore(policy, registry);
         reputation = new ReputationSBT(policy);
-        escrow = new EscrowCore(policy, accounts, reputation);
+        escrow = new EscrowCore(policy, accounts, reputation, address(this));
         dot = new MockERC20("Mock DOT", "mDOT");
 
         policy.setApprovedAsset(address(dot), true);

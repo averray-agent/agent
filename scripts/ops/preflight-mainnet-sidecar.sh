@@ -136,6 +136,7 @@ multisig_owner=$(jq -r '.multisig.ownerEnvValue | ascii_downcase' "$OWNER_FILE")
 require_env_value "$BACKEND_ENV" TREASURY_POLICY_ADDRESS "$(jq -r '.contracts.treasuryPolicy' "$DEPLOYMENT_FILE")"
 require_env_value "$BACKEND_ENV" AGENT_ACCOUNT_ADDRESS "$(jq -r '.contracts.agentAccountCore' "$DEPLOYMENT_FILE")"
 require_env_value "$BACKEND_ENV" ESCROW_CORE_ADDRESS "$(jq -r '.contracts.escrowCore' "$DEPLOYMENT_FILE")"
+require_env_value "$BACKEND_ENV" LEGACY_ESCROW_CORE_ADDRESS "$(jq -r '.contracts.legacyEscrowCore // ""' "$DEPLOYMENT_FILE")"
 require_env_value "$BACKEND_ENV" REPUTATION_SBT_ADDRESS "$(jq -r '.contracts.reputationSbt' "$DEPLOYMENT_FILE")"
 require_env_value "$BACKEND_ENV" DISCOVERY_REGISTRY_ADDRESS "$(jq -r '.contracts.discoveryRegistry' "$DEPLOYMENT_FILE")"
 require_env_value "$BACKEND_ENV" AUTH_ADMIN_WALLETS "$(jq -r '.runtime.auth.adminWallets | join(",")' "$DEPLOYMENT_FILE")"
@@ -144,6 +145,7 @@ require_env_value "$BACKEND_ENV" USDC_LIQUIDITY_TREASURY_RESERVE_ACCOUNT "$(jq -
 
 require_env_value "$INDEXER_ENV" PONDER_TREASURY_POLICY_ADDRESS "$(jq -r '.contracts.treasuryPolicy' "$DEPLOYMENT_FILE")"
 require_env_value "$INDEXER_ENV" PONDER_ESCROW_CORE_ADDRESS "$(jq -r '.contracts.escrowCore' "$DEPLOYMENT_FILE")"
+require_env_value "$INDEXER_ENV" PONDER_LEGACY_ESCROW_CORE_ADDRESS "$(jq -r '.contracts.legacyEscrowCore // ""' "$DEPLOYMENT_FILE")"
 require_env_value "$INDEXER_ENV" PONDER_AGENT_ACCOUNT_ADDRESS "$(jq -r '.contracts.agentAccountCore' "$DEPLOYMENT_FILE")"
 require_env_value "$INDEXER_ENV" PONDER_REPUTATION_SBT_ADDRESS "$(jq -r '.contracts.reputationSbt' "$DEPLOYMENT_FILE")"
 require_env_value "$INDEXER_ENV" PONDER_DISCOVERY_REGISTRY_ADDRESS "$(jq -r '.contracts.discoveryRegistry' "$DEPLOYMENT_FILE")"

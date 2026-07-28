@@ -74,9 +74,31 @@ export function buildRunReceipt({ session, job = undefined, verification, contex
       evidenceHash,
       policyTags
     },
+    settlement: normalizeSettlement(verification?.settlement),
     timestamps: { claimedAt, submittedAt, verifiedAt },
     signers: buildBadgeSigners({ session, verification: signerVerification, context }),
     canonicalUrl
+  });
+}
+
+function normalizeSettlement(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const workerAmountRaw = unsignedIntegerString(value.workerAmountRaw);
+  const protocolFeeAmountRaw = unsignedIntegerString(value.protocolFeeAmountRaw);
+  const protocolFeeBps = nonNegativeInteger(value.protocolFeeBps);
+  if (workerAmountRaw === undefined || protocolFeeAmountRaw === undefined || protocolFeeBps === undefined) {
+    return undefined;
+  }
+  return compact({
+    worker: address(value.worker),
+    treasuryAccount: address(value.treasuryAccount),
+    asset: address(value.asset),
+    assetSymbol: firstString(value.assetSymbol),
+    workerAmount: displayAmount(value.workerAmount),
+    workerAmountRaw,
+    protocolFeeAmount: displayAmount(value.protocolFeeAmount),
+    protocolFeeAmountRaw,
+    protocolFeeBps
   });
 }
 
@@ -103,6 +125,27 @@ function positiveInteger(value, label) {
     throw new ValidationError(`Run receipt requires a positive ${label}.`);
   }
   return parsed;
+}
+
+function nonNegativeInteger(value) {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
+function unsignedIntegerString(value) {
+  const normalized = typeof value === "bigint" ? value.toString() : firstString(value);
+  return normalized && /^\d+$/u.test(normalized) ? normalized : undefined;
+}
+
+function displayAmount(value) {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+    return String(value);
+  }
+  return firstString(value);
+}
+
+function address(value) {
+  return typeof value === "string" && ADDRESS_RE.test(value) ? value.toLowerCase() : undefined;
 }
 
 function bytes32(value) {

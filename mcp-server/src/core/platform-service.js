@@ -1302,10 +1302,23 @@ export class PlatformService {
       throw new ValidationError("Recurring templates with finite reserves require a poster wallet.");
     }
     const asset = normalizeAssetSymbol(job.recurringPolicy.reserveAsset ?? job.rewardAsset);
+    const rewardAmount = Number(job.rewardAmount);
+    const maxRuns = Number.isInteger(job.recurringPolicy.maxRuns)
+      ? job.recurringPolicy.maxRuns
+      : Math.floor(reserveAmount / rewardAmount);
+    const feeQuote = (
+      job.onboardingWaiverEligible !== true
+      && this.blockchainGateway?.isEnabled()
+      && typeof this.blockchainGateway.previewProtocolFeeForAsset === "function"
+    )
+      ? await this.blockchainGateway.previewProtocolFeeForAsset(asset, rewardAmount)
+      : undefined;
+    const protocolFeeReserveAmount = Number(feeQuote?.protocolFeeAmount ?? 0) * maxRuns;
+    const totalReserveAmount = reserveAmount + protocolFeeReserveAmount;
     const receipt = await this.accountMutationService.reserveRecurringTemplateFunding(
       wallet,
       asset,
-      reserveAmount,
+      totalReserveAmount,
       job.id
     );
     const reservedAt = new Date().toISOString();
@@ -1316,6 +1329,9 @@ export class PlatformService {
         wallet,
         asset,
         amount: reserveAmount,
+        totalReservedAmount: totalReserveAmount,
+        protocolFeeReserveAmount,
+        protocolFeeBps: Number(feeQuote?.protocolFeeBps ?? 0),
         reservedAt,
         ...(receipt?.amountRaw ? { amountRaw: receipt.amountRaw } : {}),
         ...(receipt?.templateKey ? { templateKey: receipt.templateKey } : {})

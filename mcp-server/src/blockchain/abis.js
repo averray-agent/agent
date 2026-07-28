@@ -39,9 +39,17 @@ export const AGENT_ACCOUNT_ABI = [
 
 export const ESCROW_CORE_ABI = [
   "function accounts() view returns (address)",
+  "function treasuryAccount() view returns (address)",
+  "function protocolFeeBps() view returns (uint16)",
+  "function MAX_PROTOCOL_FEE_BPS() view returns (uint16)",
+  "function previewProtocolFee(uint256 reward) view returns (uint256)",
+  "function setProtocolFeeBps(uint16 newProtocolFeeBps)",
+  "function setTreasuryAccount(address newTreasuryAccount)",
   "function createSinglePayoutJob(bytes32 jobId, address asset, uint256 reward, uint256 opsReserve, uint256 contingencyReserve, uint256 claimTtl, bytes32 verifierMode, bytes32 category, bytes32 specHash)",
+  "function createSinglePayoutJobFeeWaived(bytes32 jobId, address asset, uint256 reward, uint256 opsReserve, uint256 contingencyReserve, uint256 claimTtl, bytes32 verifierMode, bytes32 category, bytes32 specHash)",
+  "function createSinglePayoutJobFeeWaived(bytes32 jobId, address asset, uint256 reward, uint256 opsReserve, uint256 contingencyReserve, uint256 claimTtl, bytes32 verifierMode, bytes32 category, bytes32 specHash, (bytes32 schemaHash, string schemaUrl, address schemaIssuer, bytes schemaSignature) externalSchema)",
   "function createSinglePayoutJob(bytes32 jobId, address asset, uint256 reward, uint256 opsReserve, uint256 contingencyReserve, uint256 claimTtl, bytes32 verifierMode, bytes32 category, bytes32 specHash, (bytes32 schemaHash, string schemaUrl, address schemaIssuer, bytes schemaSignature) externalSchema)",
-  "function createSinglePayoutJobFromRecurringReserve((bytes32 jobId, bytes32 templateId, address poster, address asset, uint256 reward, uint256 opsReserve, uint256 contingencyReserve, uint256 claimTtl, bytes32 verifierMode, bytes32 category, bytes32 specHash, bytes32 schemaHash, string schemaUrl, address schemaIssuer, bytes schemaSignature) params)",
+  "function createSinglePayoutJobFromRecurringReserve((bytes32 jobId, bytes32 templateId, address poster, address asset, uint256 reward, uint256 opsReserve, uint256 contingencyReserve, uint256 claimTtl, bytes32 verifierMode, bytes32 category, bytes32 specHash, bytes32 schemaHash, string schemaUrl, address schemaIssuer, bytes schemaSignature, bool protocolFeeWaived) params)",
   "function jobExternalSchemas(bytes32 jobId) view returns (bytes32 schemaHash, string schemaUrl, address schemaIssuer, bytes schemaSignature)",
   "function claimJob(bytes32 jobId)",
   "function claimJobFor(bytes32 jobId, address worker)",
@@ -62,7 +70,7 @@ export const ESCROW_CORE_ABI = [
   "function resolveDispute(bytes32 jobId, uint256 workerPayout, bytes32 reasonCode, string metadataURI)",
   "function previewClaimEconomics(address worker, bytes32 jobId) view returns (uint256 claimStake, uint16 claimStakeBps, uint256 claimFee, uint16 claimFeeBps, bool waived, uint256 claimNumber)",
   "function workerClaimCount(address worker) view returns (uint256)",
-  "function jobs(bytes32 jobId) view returns ((address poster, address worker, address asset, bytes32 verifierMode, bytes32 category, bytes32 specHash, uint256 reward, uint256 opsReserve, uint256 contingencyReserve, uint256 released, uint256 claimExpiry, uint256 claimStake, uint16 claimStakeBps, uint256 claimFee, uint16 claimFeeBps, bool claimEconomicsWaived, address rejectingVerifier, uint256 rejectedAt, uint256 disputedAt, uint8 payoutMode, uint8 state))",
+  "function jobs(bytes32 jobId) view returns ((address poster, address worker, address asset, bytes32 verifierMode, bytes32 category, bytes32 specHash, uint256 reward, uint256 opsReserve, uint256 contingencyReserve, uint256 released, uint256 claimExpiry, uint256 claimStake, uint16 claimStakeBps, uint256 claimFee, uint16 claimFeeBps, bool claimEconomicsWaived, address rejectingVerifier, uint256 rejectedAt, uint256 disputedAt, uint8 payoutMode, uint8 state, uint256 protocolFee, uint256 protocolFeeReleased, uint16 protocolFeeBps, bool protocolFeeWaived))",
   "event JobFunded(bytes32 indexed jobId, address indexed poster, address indexed asset, uint256 totalReserved, uint8 payoutMode)",
   "event JobCreated(bytes32 indexed jobId, address indexed poster, bytes32 indexed specHash, address asset, uint256 totalReserved, uint8 payoutMode)",
   "event ExternalSchemaRegistered(bytes32 indexed jobId, bytes32 indexed schemaHash, address indexed schemaIssuer, string schemaUrl)",
@@ -70,6 +78,9 @@ export const ESCROW_CORE_ABI = [
   "event JobClaimed(bytes32 indexed jobId, address indexed worker, uint256 claimExpiry, uint256 claimStake)",
   "event ClaimEconomicsLocked(bytes32 indexed jobId, address indexed worker, uint256 claimStake, uint256 claimFee, bool waived, uint256 claimNumber)",
   "event OnboardingWaiverEligibilityUpdated(bytes32 indexed jobId, bool eligible)",
+  "event ProtocolFeeBpsUpdated(uint16 previousProtocolFeeBps, uint16 newProtocolFeeBps)",
+  "event TreasuryAccountUpdated(address indexed previousTreasuryAccount, address indexed newTreasuryAccount)",
+  "event SettlementSplit(bytes32 indexed jobId, address indexed worker, address indexed treasuryAccount, address asset, uint256 workerAmount, uint256 protocolFeeAmount, uint16 protocolFeeBps)",
   "event WorkSubmitted(bytes32 indexed jobId, address indexed worker, bytes32 evidenceHash)",
   "event Submitted(bytes32 indexed jobId, address indexed worker, bytes32 indexed payloadHash)",
   "event JobRejected(bytes32 indexed jobId, bytes32 reasonCode)",
@@ -81,6 +92,15 @@ export const ESCROW_CORE_ABI = [
   "event AutoResolvedOnTimeout(bytes32 indexed jobId, address indexed caller, uint256 workerPayout, bytes32 reasonCode)",
   "event Disclosed(bytes32 indexed hash, address indexed byWallet, uint64 timestamp)",
   "event AutoDisclosed(bytes32 indexed hash, uint64 timestamp)"
+];
+
+export const ESCROW_CORE_V1_DRAIN_ABI = [
+  ...ESCROW_CORE_ABI.filter((entry) =>
+    !entry.startsWith("function jobs(")
+    && !entry.startsWith("function createSinglePayoutJobFromRecurringReserve(")
+  ),
+  "function jobs(bytes32 jobId) view returns ((address poster, address worker, address asset, bytes32 verifierMode, bytes32 category, bytes32 specHash, uint256 reward, uint256 opsReserve, uint256 contingencyReserve, uint256 released, uint256 claimExpiry, uint256 claimStake, uint16 claimStakeBps, uint256 claimFee, uint16 claimFeeBps, bool claimEconomicsWaived, address rejectingVerifier, uint256 rejectedAt, uint256 disputedAt, uint8 payoutMode, uint8 state))",
+  "function createSinglePayoutJobFromRecurringReserve((bytes32 jobId, bytes32 templateId, address poster, address asset, uint256 reward, uint256 opsReserve, uint256 contingencyReserve, uint256 claimTtl, bytes32 verifierMode, bytes32 category, bytes32 specHash, bytes32 schemaHash, string schemaUrl, address schemaIssuer, bytes schemaSignature) params)"
 ];
 
 export const ESCROW_CORE_LEGACY_ABI = [

@@ -138,6 +138,7 @@ export function LoadedRunView({
   const sessionTimeline = useSessionTimeline(selectedSessionId);
   const verifierResult = useVerifierResult(selectedSessionId);
   const badge = useBadge(selectedSessionId);
+  const settlementSplit = extractSettlementSplit(verifierResult.data, session.data);
   const actualVerifierMode = text(selectedJob?.verifierMode);
   const verifierOutput = useMemo<VerifierOutputView>(
     () =>
@@ -394,9 +395,15 @@ export function LoadedRunView({
             ? rewardAux(rewardAssetFor(selectedJob, badge.data), actualVerifierMode)
             : "waiting for live job definition",
           breakdown: {
-            worker: formatAmountWithAsset(loadedRow.stake, rewardAssetFor(selectedJob, badge.data)),
+            worker: formatAmountWithAsset(
+              settlementSplit?.workerAmount ?? loadedRow.stake,
+              settlementSplit?.assetSymbol ?? rewardAssetFor(selectedJob, badge.data)
+            ),
             verifier: formatAmountWithAsset("0", rewardAssetFor(selectedJob, badge.data)),
-            treasury: formatAmountWithAsset("0", rewardAssetFor(selectedJob, badge.data)),
+            treasury: formatAmountWithAsset(
+              settlementSplit?.protocolFeeAmount ?? "0",
+              settlementSplit?.assetSymbol ?? rewardAssetFor(selectedJob, badge.data)
+            ),
           },
         }}
         // When `github` or `wikipedia` is set the panel swaps Evidence
@@ -868,6 +875,28 @@ function rewardAssetFor(
   const badgeAverray = asRecord(asRecord(badgePayload)?.averray);
   const reward = asRecord(badgeAverray?.reward);
   return text(selectedJob?.rewardAsset, text(reward?.asset, ""));
+}
+
+function extractSettlementSplit(...payloads: unknown[]): {
+  workerAmount: string;
+  protocolFeeAmount: string;
+  assetSymbol: string;
+} | null {
+  for (const payload of payloads) {
+    const root = asRecord(payload);
+    const payoutTx = asRecord(root?.payoutTx);
+    const settlement = asRecord(root?.settlement) ?? asRecord(payoutTx?.settlement);
+    const workerAmount = text(settlement?.workerAmount);
+    const protocolFeeAmount = text(settlement?.protocolFeeAmount);
+    if (workerAmount && protocolFeeAmount) {
+      return {
+        workerAmount,
+        protocolFeeAmount,
+        assetSymbol: text(settlement?.assetSymbol)
+      };
+    }
+  }
+  return null;
 }
 
 function rewardAux(asset: string, verifierMode: string): string {

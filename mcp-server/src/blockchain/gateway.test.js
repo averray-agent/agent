@@ -21,6 +21,8 @@ const USDC_TRUST_ASSET = {
 };
 const CREATE_SINGLE_PAYOUT_WITH_SCHEMA =
   "createSinglePayoutJob(bytes32,address,uint256,uint256,uint256,uint256,bytes32,bytes32,bytes32,(bytes32,string,address,bytes))";
+const CREATE_SINGLE_PAYOUT_FEE_WAIVED_WITH_SCHEMA =
+  "createSinglePayoutJobFeeWaived(bytes32,address,uint256,uint256,uint256,uint256,bytes32,bytes32,bytes32,(bytes32,string,address,bytes))";
 
 function gatewayWithDot() {
   return new BlockchainGateway({ enabled: false, supportedAssets: [DOT_ASSET] });
@@ -314,6 +316,82 @@ test("resolveSinglePayout returns the settle/payout tx receipt", async () => {
   assert.ok(events[1].fields.durationMs >= 0);
   assert.equal(JSON.stringify(events).includes("private-key"), false);
   assert.equal(JSON.stringify(events).includes("secret"), false);
+});
+
+test("extractSettlementSplit preserves the exact worker reward and protocol fee", () => {
+  const gateway = new BlockchainGateway({ enabled: false, supportedAssets: [USDC_TRUST_ASSET] });
+  const worker = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const treasuryAccount = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+  const settlement = gateway.extractSettlementSplit(
+    { logs: [{}] },
+    {
+      interface: {
+        parseLog() {
+          return {
+            name: "SettlementSplit",
+            args: {
+              worker,
+              treasuryAccount,
+              asset: USDC_TRUST_ASSET.address,
+              workerAmount: 1_000_000n,
+              protocolFeeAmount: 25_000n,
+              protocolFeeBps: 250
+            }
+          };
+        }
+      }
+    }
+  );
+
+  assert.deepEqual(settlement, {
+    worker,
+    treasuryAccount,
+    asset: USDC_TRUST_ASSET.address,
+    assetSymbol: "USDC",
+    workerAmount: 1,
+    workerAmountRaw: "1000000",
+    protocolFeeAmount: 0.025,
+    protocolFeeAmountRaw: "25000",
+    protocolFeeBps: 250
+  });
+});
+
+test("getProtocolFeeConfig reads the owner-controlled v2 fee state", async () => {
+  const gateway = new BlockchainGateway({ enabled: false });
+  gateway.escrowContract = {
+    async protocolFeeBps() { return 250; },
+    async MAX_PROTOCOL_FEE_BPS() { return 1_000; },
+    async treasuryAccount() { return "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"; }
+  };
+
+  assert.deepEqual(await gateway.getProtocolFeeConfig(), {
+    supported: true,
+    protocolFeeBps: 250,
+    maxProtocolFeeBps: 1_000,
+    treasuryAccount: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  });
+});
+
+test("previewProtocolFeeForAsset quotes the exact reserve increment in asset units", async () => {
+  const gateway = new BlockchainGateway({ enabled: false, supportedAssets: [USDC_TRUST_ASSET] });
+  gateway.escrowContract = {
+    async previewProtocolFee(rewardAmount) {
+      assert.equal(rewardAmount, 1_000_000n);
+      return 25_000n;
+    },
+    async protocolFeeBps() {
+      return 250;
+    }
+  };
+
+  assert.deepEqual(await gateway.previewProtocolFeeForAsset("USDC", 1), {
+    asset: "USDC",
+    rewardAmount: 1,
+    rewardAmountRaw: "1000000",
+    protocolFeeAmount: 0.025,
+    protocolFeeAmountRaw: "25000",
+    protocolFeeBps: 250
+  });
 });
 
 test("handleClaimTimeout reopens the canonical chain job id", async () => {
@@ -2310,7 +2388,8 @@ test("createSinglePayoutJobForJob consumes recurring template reserve when fundi
     schemaHash: `0x${"0".repeat(64)}`,
     schemaUrl: "",
     schemaIssuer: "0x0000000000000000000000000000000000000000",
-    schemaSignature: "0x"
+    schemaSignature: "0x",
+    protocolFeeWaived: false
   }]);
 });
 
@@ -2361,6 +2440,85 @@ test("createSinglePayoutJobForJob forwards registered external schema metadata",
     schemaIssuer,
     schemaSignature
   });
+});
+
+test("fee-waived curated jobs retain their registered external schema", async () => {
+  const gateway = gatewayWithDot();
+  const calls = [];
+  gateway.escrowContract = {
+    [CREATE_SINGLE_PAYOUT_FEE_WAIVED_WITH_SCHEMA]: async (...args) => {
+      calls.push(args);
+      return { async wait() {} };
+    }
+  };
+  const schemaHash = `0x${"3".repeat(64)}`;
+  const schemaIssuer = "0x4444444444444444444444444444444444444444";
+  const registration = {
+    schemaRef: "schema://jobs/curated-output",
+    registrationVersion: EXTERNAL_SCHEMA_EIP712_VERSION,
+    schemaHash,
+    schemaUrl: "https://schemas.example.com/curated-output.json",
+    schemaIssuer,
+    signature: "0x1234"
+  };
+
+  await gateway.createSinglePayoutJobForJob(
+    {
+      onboardingWaiverEligible: true,
+      outputSchemaRef: registration.schemaRef,
+      schemaRegistrations: [registration]
+    },
+    "rc1",
+    gateway.toJobId("curated-output-job"),
+    DOT_ASSET.address,
+    5_000_000_000_000_000_000n,
+    0,
+    0,
+    3600,
+    encodeBytes32String("BENCH"),
+    encodeBytes32String("CURATED"),
+    `0x${"1".repeat(64)}`
+  );
+
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0][9], {
+    schemaHash,
+    schemaUrl: registration.schemaUrl,
+    schemaIssuer,
+    schemaSignature: registration.signature
+  });
+});
+
+test("v1 drain routing sends lifecycle writes to the old EscrowCore", async () => {
+  const legacyEscrowCoreAddress = "0x1111111111111111111111111111111111111111";
+  const gateway = new BlockchainGateway({
+    enabled: false,
+    escrowCoreAddress: "0x2222222222222222222222222222222222222222",
+    legacyEscrowCoreAddress
+  });
+  const calls = [];
+  gateway.signer = { async getAddress() { return "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"; } };
+  gateway.escrowContract = {
+    async claimJob() {
+      throw new Error("v1 job must not be written through v2");
+    }
+  };
+  gateway.drainingEscrowContract = {
+    async claimJobFor(...args) {
+      calls.push(args);
+      return { async wait() { return { blockNumber: 9, status: 1 }; } };
+    }
+  };
+  gateway.readEscrowJob = async () => ({
+    escrowAddress: legacyEscrowCoreAddress,
+    state: 1
+  });
+
+  await gateway.claimJob("draining-v1-job", "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+  assert.deepEqual(calls, [[
+    gateway.toJobId("draining-v1-job"),
+    "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  ]]);
 });
 
 test("createSinglePayoutJobForLayout uses the legacy signature for legacy escrow deployments", async () => {

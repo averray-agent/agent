@@ -265,6 +265,82 @@ test("createAdminJob reserves finite recurring template funding from the poster 
   assert.equal(derivative.funding.amount, 5);
 });
 
+test("createAdminJob reserves the snapshotted success fees for every unwaived recurring run", async () => {
+  const reserveCalls = [];
+  const gateway = {
+    config: { supportedAssets: [] },
+    isEnabled: () => true,
+    async previewProtocolFeeForAsset(asset, rewardAmount) {
+      assert.equal(asset, "DOT");
+      assert.equal(rewardAmount, 5);
+      return { protocolFeeAmount: 0.5, protocolFeeBps: 1_000 };
+    },
+    async reserveRecurringTemplateFunding(wallet, asset, amount, templateId) {
+      reserveCalls.push({ wallet, asset, amount, templateId });
+      return { amountRaw: "11000000000000000000", templateKey: "0xtemplate" };
+    }
+  };
+  const service = makePlatformService(gateway);
+
+  const template = await service.createAdminJob({
+    id: "weekly-fee-bearing-001",
+    category: "coding",
+    tier: "pro",
+    rewardAmount: 5,
+    rewardAsset: "DOT",
+    verifierMode: "benchmark",
+    verifierTerms: ["complete"],
+    verifierMinimumMatches: 1,
+    recurring: true,
+    schedule: { cron: "0 9 * * 1" },
+    recurringPolicy: { reserveAmount: 10, reserveAsset: "DOT", maxRuns: 2 }
+  }, { posterWallet: WALLET });
+
+  assert.deepEqual(reserveCalls, [{
+    wallet: WALLET,
+    asset: "DOT",
+    amount: 11,
+    templateId: "weekly-fee-bearing-001"
+  }]);
+  assert.equal(template.recurringPolicy.funding.amount, 10);
+  assert.equal(template.recurringPolicy.funding.protocolFeeReserveAmount, 1);
+  assert.equal(template.recurringPolicy.funding.totalReservedAmount, 11);
+  assert.equal(template.recurringPolicy.funding.protocolFeeBps, 1_000);
+});
+
+test("createAdminJob does not reserve protocol fees for onboarding-waived recurring runs", async () => {
+  const reserveCalls = [];
+  const gateway = {
+    config: { supportedAssets: [] },
+    isEnabled: () => true,
+    async previewProtocolFeeForAsset() {
+      throw new Error("fee quote must not run for a waived template");
+    },
+    async reserveRecurringTemplateFunding(_wallet, _asset, amount) {
+      reserveCalls.push(amount);
+      return {};
+    }
+  };
+  const service = makePlatformService(gateway);
+
+  await service.createAdminJob({
+    id: "weekly-fee-waived-001",
+    category: "coding",
+    tier: "starter",
+    rewardAmount: 5,
+    rewardAsset: "DOT",
+    verifierMode: "benchmark",
+    verifierTerms: ["complete"],
+    verifierMinimumMatches: 1,
+    onboardingWaiverEligible: true,
+    recurring: true,
+    schedule: { cron: "0 9 * * 1" },
+    recurringPolicy: { reserveAmount: 10, reserveAsset: "DOT", maxRuns: 2 }
+  }, { posterWallet: WALLET });
+
+  assert.deepEqual(reserveCalls, [10]);
+});
+
 test("external-schema admin job posts, claims, and validates against off-platform schema", async () => {
   const schemaHash = hashExternalSchemaContent(EXTERNAL_SCHEMA);
   const jobId = "off-platform-schema-job-001";

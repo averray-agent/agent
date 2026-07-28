@@ -31,6 +31,10 @@ const escrowCoreAddress = requireAddress(
   process.env.PONDER_ESCROW_CORE_ADDRESS ?? process.env.ESCROW_CORE_ADDRESS,
   "ESCROW_CORE_ADDRESS"
 );
+const legacyEscrowCoreAddress = optionalAddress(
+  process.env.PONDER_LEGACY_ESCROW_CORE_ADDRESS ?? process.env.LEGACY_ESCROW_CORE_ADDRESS,
+  "LEGACY_ESCROW_CORE_ADDRESS"
+);
 const agentAccountAddress = requireAddress(
   process.env.PONDER_AGENT_ACCOUNT_ADDRESS ?? process.env.AGENT_ACCOUNT_ADDRESS,
   "AGENT_ACCOUNT_ADDRESS"
@@ -79,7 +83,9 @@ const contracts = {
   EscrowCore: {
     chain: chainName,
     abi: EscrowCoreAbi,
-    address: escrowCoreAddress,
+    address: legacyEscrowCoreAddress
+      ? [escrowCoreAddress, legacyEscrowCoreAddress]
+      : escrowCoreAddress,
     startBlock: escrowStartBlock
   },
   AgentAccountCore: {

@@ -36,7 +36,7 @@
  *   This mirrors the swap-arbitrator-batch path in
  *   rotate-admin-multisig-payload.mjs — one Hot+Ledger round instead of two.
  *
- * Single-leg variant (pass --skip-revoke):
+ * V2 cutover / v1-drain variant (pass --skip-revoke):
  *   multisig.asMulti(
  *     call: utility.batchAll([
  *       revive.call(TreasuryPolicy.setOutflowRecorder(newAgentAccount, true)), // only with --new-agent-account
@@ -49,8 +49,9 @@
  *     ])
  *   )
  *
- *   Use only if you have a reason to leave the stale EscrowCore wired
- *   (e.g. extended cutover window). Not recommended.
+ *   This is required for the protocol-fee v2 cutover while open v1 jobs
+ *   drain. Revoke the old roles in a later, separately reviewed ceremony
+ *   only after both the backend and indexer report no live v1 jobs.
  *
  * Usage
  * -----
@@ -212,7 +213,7 @@ function printUsage() {
       "         [--new-agent-account 0xADDR] # when AAC is redeployed too",
       "         [--old-agent-account 0xADDR] # defaults to current deployments/<profile>.json#contracts.agentAccountCore",
       "         [--old-escrow 0xADDR]   # defaults to current deployments/<profile>.json#contracts.escrowCore",
-      "         [--skip-revoke]         # emit single-call recipe instead of batched",
+      "         [--skip-revoke]         # keep v1 settlement roles during the drain window",
       "         [--profile testnet] \\",
       `         [--ws WSS_URL]          # default ${DEFAULT_WS}; env PASEO_AH_WS overrides`,
       "         [--no-ws]               # skip on-chain hex emission; chain-free recipe only",

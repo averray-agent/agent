@@ -134,6 +134,11 @@ const WRITE_ABI = [
   "function setDailyOutflowCap(uint256 cap)"
 ];
 
+const ESCROW_FEE_WRITE_ABI = [
+  "function setProtocolFeeBps(uint16 protocolFeeBps)",
+  "function setTreasuryAccount(address treasuryAccount)"
+];
+
 const AGENT_ACCOUNT_READ_ABI = [
   "function escrowOperators(address escrowOperator) view returns (bool)",
   "function treasuryAccount() view returns (address)",
@@ -405,6 +410,7 @@ async function main() {
   const provider = new JsonRpcProvider(rpcUrl);
   const policy = new Contract(policyAddress, READ_ABI, provider);
   const agentAccount = new Contract(agentAccountAddress, AGENT_ACCOUNT_READ_ABI, provider);
+  const escrow = new Contract(escrowAddress, ESCROW_CORE_ABI, provider);
   const usdc = new Contract(usdcAddress, ERC20_READ_ABI, provider);
 
   // Resolve the per-target address up front so the bytecode fetches can
@@ -438,6 +444,9 @@ async function main() {
     claimFeeBps,
     claimFeeVerifierBps,
     onboardingWaiverClaimCount,
+    protocolFeeBps,
+    maxProtocolFeeBps,
+    escrowTreasuryAccount,
     signerPosition,
     signerUsdcBalance,
     blockNumber,
@@ -464,6 +473,9 @@ async function main() {
     policy.claimFeeBps(),
     policy.claimFeeVerifierBps(),
     policy.onboardingWaiverClaimCount(),
+    escrow.protocolFeeBps(),
+    escrow.MAX_PROTOCOL_FEE_BPS(),
+    escrow.treasuryAccount(),
     agentAccount.positions(backendSigner, usdcAddress),
     usdc.balanceOf(backendSigner),
     provider.getBlockNumber(),
@@ -533,6 +545,7 @@ async function main() {
     { label: "claimFeeBps",                live: claimFeeBps,                  expected: expectedParameters.claimFeeBps },
     { label: "claimFeeVerifierBps",        live: claimFeeVerifierBps,          expected: expectedParameters.claimFeeVerifierBps },
     { label: "onboardingWaiverClaimCount", live: onboardingWaiverClaimCount,   expected: expectedParameters.onboardingWaiverClaimCount },
+    { label: "protocolFeeBps",             live: protocolFeeBps,               expected: expectedParameters.protocolFeeBps },
     { label: "minClaimFeeByAsset(USDC)",   live: minClaimFeeUsdc,              expected: expectedParameters.minClaimFee }
   ].map((check) => ({
     ...check,
@@ -552,6 +565,8 @@ async function main() {
   console.log(`reputationWriter(escrow)               ${escrowIsReputationWriter ? "✅" : "❌"}  ${escrowIsReputationWriter}  (EscrowCore writes ReputationSBT during settlement)`);
   console.log(`AgentAccountCore.escrowOperators(escrow) ${escrowIsAgentAccountEscrowOperator ? "✅" : "❌"}  ${escrowIsAgentAccountEscrowOperator}`);
   console.log(`AgentAccountCore.treasuryAccount       ${ciEqual(treasuryAccount, expectedTreasuryAccount) ? "✅" : "❌"}  ${treasuryAccount}  (expected ${expectedTreasuryAccount})`);
+  console.log(`EscrowCore.treasuryAccount             ${ciEqual(escrowTreasuryAccount, expectedTreasuryAccount) ? "✅" : "❌"}  ${escrowTreasuryAccount}  (expected ${expectedTreasuryAccount})`);
+  console.log(`EscrowCore.protocolFeeBps              ${protocolFeeBps}  (cap ${maxProtocolFeeBps})`);
   console.log(`outflowRecorder(agentAccount)          ${agentAccountIsOutflowRecorder ? "✅" : "❌"}  ${agentAccountIsOutflowRecorder}  (required for TreasuryPolicy.recordOutflow accounting)`);
   console.log(`arbitrators(${short(expectedArbitrator)})  ${arbitratorIsApproved ? "✅" : "❌"}  ${arbitratorIsApproved}  (required for resolveDispute)`);
   console.log(`approvedAssets(USDC)             ${usdcIsApproved ? "✅" : "❌"}  ${usdcIsApproved}`);
@@ -690,6 +705,29 @@ async function main() {
   }
   if (!ciEqual(treasuryAccount, expectedTreasuryAccount)) {
     fixes.push(buildCall("setTreasuryAccount", [expectedTreasuryAccount], agentAccountAddress));
+  }
+  if (!ciEqual(escrowTreasuryAccount, expectedTreasuryAccount)) {
+    const escrowFeeIface = new Interface(ESCROW_FEE_WRITE_ABI);
+    fixes.push({
+      label: `EscrowCore.setTreasuryAccount(${expectedTreasuryAccount})`,
+      to: escrowAddress,
+      data: escrowFeeIface.encodeFunctionData("setTreasuryAccount", [expectedTreasuryAccount])
+    });
+  }
+  if (expectedParameters.protocolFeeBps !== undefined
+    && String(protocolFeeBps) !== String(expectedParameters.protocolFeeBps)) {
+    const escrowFeeIface = new Interface(ESCROW_FEE_WRITE_ABI);
+    fixes.push({
+      label: `EscrowCore.setProtocolFeeBps(${expectedParameters.protocolFeeBps})`,
+      to: escrowAddress,
+      data: escrowFeeIface.encodeFunctionData("setProtocolFeeBps", [expectedParameters.protocolFeeBps])
+    });
+  }
+  if (Number(maxProtocolFeeBps) !== 1_000) {
+    fixes.push({
+      label: `EscrowCore.MAX_PROTOCOL_FEE_BPS=${maxProtocolFeeBps}; expected immutable cap 1000`,
+      reasonCode: "protocol_fee_cap_mismatch"
+    });
   }
   if (!agentAccountIsOutflowRecorder) {
     // AgentAccountCore meters TreasuryPolicy.recordOutflow under the

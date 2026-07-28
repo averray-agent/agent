@@ -87,6 +87,7 @@ export const TODO_KEYS = {
   TREASURY_POLICY_ADDRESS: "from deployments/mainnet.json (post-ceremony)",
   AGENT_ACCOUNT_ADDRESS: "from deployments/mainnet.json (post-ceremony)",
   ESCROW_CORE_ADDRESS: "from deployments/mainnet.json (post-ceremony)",
+  LEGACY_ESCROW_CORE_ADDRESS: "v1 drain address from deployments/mainnet.json, or empty after drain",
   REPUTATION_SBT_ADDRESS: "from deployments/mainnet.json (post-ceremony)",
   DISCOVERY_REGISTRY_ADDRESS: "from deployments/mainnet.json (post-ceremony)",
   AUTH_ADMIN_WALLETS: "mainnet admin wallet(s) — NEVER the testnet hot key nor the leaked 0xFd2E...6519",
@@ -94,6 +95,7 @@ export const TODO_KEYS = {
   USDC_LIQUIDITY_TREASURY_RESERVE_ACCOUNT: "mainnet treasury reserve account",
   PONDER_TREASURY_POLICY_ADDRESS: "from deployments/mainnet.json (post-ceremony)",
   PONDER_ESCROW_CORE_ADDRESS: "from deployments/mainnet.json (post-ceremony)",
+  PONDER_LEGACY_ESCROW_CORE_ADDRESS: "v1 drain address from deployments/mainnet.json, or empty after drain",
   PONDER_AGENT_ACCOUNT_ADDRESS: "from deployments/mainnet.json (post-ceremony)",
   PONDER_REPUTATION_SBT_ADDRESS: "from deployments/mainnet.json (post-ceremony)",
   PONDER_START_BLOCK_TREASURY: "mainnet deploy block",
@@ -151,6 +153,9 @@ export function buildManifestOverrides(manifest) {
     TREASURY_POLICY_ADDRESS: requireAddress(contracts.treasuryPolicy, "contracts.treasuryPolicy"),
     AGENT_ACCOUNT_ADDRESS: requireAddress(contracts.agentAccountCore, "contracts.agentAccountCore"),
     ESCROW_CORE_ADDRESS: requireAddress(contracts.escrowCore, "contracts.escrowCore"),
+    LEGACY_ESCROW_CORE_ADDRESS: contracts.legacyEscrowCore
+      ? requireAddress(contracts.legacyEscrowCore, "contracts.legacyEscrowCore")
+      : "",
     REPUTATION_SBT_ADDRESS: requireAddress(contracts.reputationSbt, "contracts.reputationSbt"),
     DISCOVERY_REGISTRY_ADDRESS: requireAddress(contracts.discoveryRegistry, "contracts.discoveryRegistry"),
     AUTH_ADMIN_WALLETS: requireWalletList(auth.adminWallets, "runtime.auth.adminWallets"),
@@ -161,6 +166,9 @@ export function buildManifestOverrides(manifest) {
     ),
     PONDER_TREASURY_POLICY_ADDRESS: requireAddress(contracts.treasuryPolicy, "contracts.treasuryPolicy"),
     PONDER_ESCROW_CORE_ADDRESS: requireAddress(contracts.escrowCore, "contracts.escrowCore"),
+    PONDER_LEGACY_ESCROW_CORE_ADDRESS: contracts.legacyEscrowCore
+      ? requireAddress(contracts.legacyEscrowCore, "contracts.legacyEscrowCore")
+      : "",
     PONDER_AGENT_ACCOUNT_ADDRESS: requireAddress(contracts.agentAccountCore, "contracts.agentAccountCore"),
     PONDER_REPUTATION_SBT_ADDRESS: requireAddress(contracts.reputationSbt, "contracts.reputationSbt"),
     PONDER_DISCOVERY_REGISTRY_ADDRESS: requireAddress(
@@ -224,9 +232,8 @@ export function transformLine(line, manifestOverrides = {}) {
   if (REMOVE_KEYS.has(key)) return DROP;
   if (Object.prototype.hasOwnProperty.call(LITERAL_OVERRIDES, key)) return `${key}=${LITERAL_OVERRIDES[key]}`;
   if (Object.prototype.hasOwnProperty.call(TODO_KEYS, key)) {
-    const manifestValue = manifestOverrides[key];
-    return manifestValue
-      ? `${key}=${manifestValue}`
+    return Object.prototype.hasOwnProperty.call(manifestOverrides, key)
+      ? `${key}=${manifestOverrides[key]}`
       : `# ${key}=  TODO(operator): ${TODO_KEYS[key]}`;
   }
   if (value.startsWith("op://")) return `${key}=${repointOpRef(value)}`;
