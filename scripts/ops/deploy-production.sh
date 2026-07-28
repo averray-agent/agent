@@ -289,16 +289,85 @@ component_changed_matches() {
 }
 
 deploy_range_changed_files() {
-  if [[ "$OLD_SHA" == "$NEW_SHA" ]]; then
+  local base="${1:-$OLD_SHA}"
+  if [[ "$base" == "$NEW_SHA" ]]; then
     return 0
   fi
-  git -C "$APP_ROOT" diff --name-only "$OLD_SHA" "$NEW_SHA"
+  git -C "$APP_ROOT" diff --name-only "$base" "$NEW_SHA"
+}
+
+# D-03 sticky freeze marker (2026-07-27, deploy run 30312416198): the checkout
+# fast-forwards even when a deploy FAILS at this gate — the workflow wrapper
+# pre-updates the checkout before invoking us, and the self-pull path pulls
+# before gating. The next merge's OLD_SHA..NEW_SHA range then no longer
+# contains the flagged files, so a range-only gate silently passes while the
+# durable per-component pointers still deploy the flagged change. Persist the
+# refused baseline per contract-compat profile (scoped like the per-network
+# indexer schema state) so every later run re-evaluates the whole undeployed
+# range until the drift pairs with the manifest, is reverted, or an operator
+# dispatch clears it.
+contract_freeze_marker_file() {
+  printf '%s/contract-surface.frozen-at.%s\n' "$DEPLOY_STATE_DIR" "$DEPLOY_CONTRACT_COMPAT_PROFILE"
+}
+
+read_contract_freeze_baseline() {
+  local file
+  file=$(contract_freeze_marker_file)
+  [[ -f "$file" ]] || return 1
+  awk -F= '$1 == "baseline_sha" { print $2; exit }' "$file" | tr -d '[:space:]'
+}
+
+write_contract_freeze_marker() {
+  local baseline="$1"
+  local flagged_sha="$2"
+  local manifest_path="$3"
+  local surface_changes="$4"
+  local file
+  file=$(contract_freeze_marker_file)
+  mkdir -p "$DEPLOY_STATE_DIR"
+  local tmp="${file}.tmp.$$"
+  {
+    echo "# D-03 contract-surface freeze. Deploys for profile ${DEPLOY_CONTRACT_COMPAT_PROFILE}"
+    echo "# stay frozen until ${manifest_path} changes alongside these files, the drift"
+    echo "# is reverted, or a manual dispatch with DEPLOY_ALLOW_CONTRACT_SURFACE_DRIFT=1"
+    echo "# clears this marker after an operator records the compatibility rationale."
+    printf 'baseline_sha=%s\n' "$baseline"
+    printf 'flagged_sha=%s\n' "$flagged_sha"
+    printf 'manifest=%s\n' "$manifest_path"
+    printf 'frozen_at_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    echo "flagged_files:"
+    printf '%s\n' "$surface_changes"
+  } > "$tmp"
+  mv "$tmp" "$file"
+}
+
+clear_contract_freeze_marker() {
+  local reason="$1"
+  local file
+  file=$(contract_freeze_marker_file)
+  [[ -f "$file" ]] || return 0
+  echo "D-03 contract compatibility freeze: clearing persisted freeze marker at $file ($reason). Marker contents:"
+  sed 's/^/  /' "$file"
+  rm -f "$file"
+}
+
+contract_surface_drift_override_set() {
+  case "$DEPLOY_ALLOW_CONTRACT_SURFACE_DRIFT" in
+    1|true|yes) return 0 ;;
+    0|false|no) return 1 ;;
+    *)
+      echo "Invalid DEPLOY_ALLOW_CONTRACT_SURFACE_DRIFT: $DEPLOY_ALLOW_CONTRACT_SURFACE_DRIFT" >&2
+      exit 1
+      ;;
+  esac
 }
 
 enforce_contract_compat_freeze() {
   case "$DEPLOY_CONTRACT_COMPAT_FREEZE" in
     1|true|yes) ;;
     0|false|no)
+      # Skips evaluation for this run only; a persisted freeze marker (if
+      # any) stays in place and re-arms on the next enabled run.
       echo "D-03 contract compatibility freeze disabled by DEPLOY_CONTRACT_COMPAT_FREEZE=$DEPLOY_CONTRACT_COMPAT_FREEZE"
       return 0
       ;;
@@ -308,42 +377,79 @@ enforce_contract_compat_freeze() {
       ;;
   esac
 
-  if [[ "$OLD_SHA" == "$NEW_SHA" ]]; then
+  local manifest_path="deployments/${DEPLOY_CONTRACT_COMPAT_PROFILE}.json"
+  local marker_file
+  marker_file=$(contract_freeze_marker_file)
+
+  local baseline="$OLD_SHA"
+  local sticky=0
+  if [[ -f "$marker_file" ]]; then
+    local recorded=""
+    recorded=$(read_contract_freeze_baseline || true)
+    if [[ -z "$recorded" ]] || ! git -C "$APP_ROOT" cat-file -e "${recorded}^{commit}" >/dev/null 2>&1; then
+      # An unreadable baseline cannot be re-verified; falling back to OLD_SHA
+      # would reopen the exact fast-forward hole the marker exists to close.
+      if contract_surface_drift_override_set; then
+        clear_contract_freeze_marker "baseline '$recorded' is unreadable; cleared by explicit DEPLOY_ALLOW_CONTRACT_SURFACE_DRIFT dispatch"
+      else
+        {
+          echo "D-03 contract compatibility freeze: refusing production deploy."
+          echo
+          echo "The persisted freeze marker at $marker_file has an unreadable baseline ('$recorded'), so the frozen contract-surface range cannot be re-verified."
+          echo "Run a manual dispatch with DEPLOY_ALLOW_CONTRACT_SURFACE_DRIFT=1 to clear it after an operator records the compatibility rationale."
+        } >&2
+        exit 1
+      fi
+    else
+      baseline="$recorded"
+      sticky=1
+      echo "D-03 contract compatibility freeze: enforcing persisted freeze from $marker_file (baseline $baseline)."
+    fi
+  fi
+
+  if [[ "$baseline" == "$NEW_SHA" ]]; then
+    if [[ "$sticky" == "1" ]]; then
+      clear_contract_freeze_marker "checkout is back at the frozen baseline; no undeployed contract-surface drift remains"
+    fi
     return 0
   fi
 
-  local manifest_path="deployments/${DEPLOY_CONTRACT_COMPAT_PROFILE}.json"
   local changed
-  changed=$(deploy_range_changed_files)
+  changed=$(deploy_range_changed_files "$baseline")
 
   local surface_changes
   surface_changes=$(printf '%s\n' "$changed" | grep -E '^(contracts/|mcp-server/src/blockchain/|scripts/ops/redeploy-(agent-account-escrow-stack|escrowcore|escrowcore-wire-multisig)\.mjs|scripts/verify_deployment\.sh)' || true)
   if [[ -z "$surface_changes" ]]; then
+    if [[ "$sticky" == "1" ]]; then
+      clear_contract_freeze_marker "no contract-surface drift remains in $baseline -> $NEW_SHA; the flagged changes were reverted"
+    fi
     return 0
   fi
 
   if printf '%s\n' "$changed" | grep -Fxq "$manifest_path"; then
+    if [[ "$sticky" == "1" ]]; then
+      clear_contract_freeze_marker "contract-surface changes are now paired with $manifest_path in $baseline -> $NEW_SHA"
+    fi
     echo "D-03 contract compatibility freeze: contract-surface changes are paired with $manifest_path; allowing deploy."
     return 0
   fi
 
-  case "$DEPLOY_ALLOW_CONTRACT_SURFACE_DRIFT" in
-    1|true|yes)
-      echo "::warning::D-03 contract compatibility freeze override set; deploying contract-surface/backend changes without a $manifest_path update."
-      printf 'Changed contract-surface files:\n%s\n' "$surface_changes"
-      return 0
-      ;;
-    0|false|no) ;;
-    *)
-      echo "Invalid DEPLOY_ALLOW_CONTRACT_SURFACE_DRIFT: $DEPLOY_ALLOW_CONTRACT_SURFACE_DRIFT" >&2
-      exit 1
-      ;;
-  esac
+  if contract_surface_drift_override_set; then
+    echo "::warning::D-03 contract compatibility freeze override set; deploying contract-surface/backend changes without a $manifest_path update."
+    printf 'Changed contract-surface files:\n%s\n' "$surface_changes"
+    if [[ "$sticky" == "1" ]]; then
+      clear_contract_freeze_marker "explicit DEPLOY_ALLOW_CONTRACT_SURFACE_DRIFT dispatch accepted the drift"
+    fi
+    return 0
+  fi
+
+  write_contract_freeze_marker "$baseline" "$NEW_SHA" "$manifest_path" "$surface_changes"
 
   {
     echo "D-03 contract compatibility freeze: refusing production deploy."
     echo
     echo "This deploy range changes contract/settlement surface files, but $manifest_path did not change."
+    echo "Evaluated range: $baseline -> $NEW_SHA"
     echo "A normal production deploy updates backend/indexer/app containers; it does not deploy or rewire smart contracts."
     echo "Deploying this range can put backend ABI/settlement expectations ahead of the live contracts and red the Hosted Worker Canary."
     echo
@@ -352,6 +458,7 @@ enforce_contract_compat_freeze() {
       [[ -n "$file" ]] && printf '  %s\n' "$file"
     done <<< "$surface_changes"
     echo
+    echo "This refusal is persisted at $marker_file: the checkout advances past refused deploys, so later runs keep evaluating from baseline $baseline until the freeze clears."
     echo "To proceed intentionally, first deploy/rewire contracts and commit the updated $manifest_path, or run a manual dispatch with DEPLOY_ALLOW_CONTRACT_SURFACE_DRIFT=1 after an operator records the compatibility rationale."
   } >&2
   exit 1

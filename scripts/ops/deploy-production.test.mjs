@@ -930,6 +930,141 @@ test("deploy wrapper exposes an explicit contract surface drift override", async
   assert.match(run.stdout, /mcp-server\/src\/blockchain\/abis\.js/u);
 });
 
+// 2026-07-27 (deploy run 30312416198): the VPS checkout fast-forwards even when
+// a deploy fails AT the freeze, so the next merge's own OLD..NEW range no
+// longer contains the flagged files and a range-only gate silently passes.
+// These fixtures drive two consecutive runs to prove the refusal persists.
+function deployFreezeEnv({ stackRoot, fakeBin, appRoot, stateDir }) {
+  return {
+    PATH: `${fakeBin}:${process.env.PATH}`,
+    STACK_ROOT: stackRoot,
+    COMPOSE_FILE: join(stackRoot, "docker-compose.yml"),
+    DEPLOY_LOCK_FILE: join(appRoot, "deploy.lock"),
+    DEPLOY_STATE_DIR: stateDir,
+    RUN_BACKEND: "0",
+    RUN_INDEXER: "0",
+    RUN_FRONTEND: "0",
+    RUN_SITE: "0",
+    RUN_CADDY: "0",
+    RUN_SMOKE: "0"
+  };
+}
+
+async function makeStickyFreezeFixture() {
+  const fixture = await makeDeployFreezeFixture(
+    async (appRoot) => {
+      await mkdir(join(appRoot, "mcp-server/src/blockchain"), { recursive: true });
+      await writeFile(join(appRoot, "mcp-server/src/blockchain/gateway.js"), "export const gateway = 2;\n");
+    },
+    "contract surface change"
+  );
+  const env = deployFreezeEnv(fixture);
+  const markerPath = join(fixture.stateDir, "contract-surface.frozen-at.testnet");
+
+  const firstRun = runDeploy(fixture.appRoot, {
+    ...env,
+    DEPLOY_OLD_SHA: fixture.baseSha,
+    DEPLOY_NEW_SHA: fixture.nextSha
+  });
+  assert.equal(firstRun.status, 1);
+  assert.match(firstRun.stderr, /D-03 contract compatibility freeze: refusing production deploy/u);
+  assert.match(firstRun.stderr, /This refusal is persisted at/u);
+
+  const marker = await readFile(markerPath, "utf8");
+  assert.match(marker, new RegExp(`^baseline_sha=${fixture.baseSha}$`, "mu"));
+  assert.match(marker, new RegExp(`^flagged_sha=${fixture.nextSha}$`, "mu"));
+  assert.match(marker, /^manifest=deployments\/testnet\.json$/mu);
+  assert.match(marker, /^mcp-server\/src\/blockchain\/gateway\.js$/mu);
+
+  return { ...fixture, env, markerPath };
+}
+
+test("deploy wrapper keeps the freeze armed after a refused deploy fast-forwards the checkout", async () => {
+  const { appRoot, env, markerPath, baseSha, nextSha } = await makeStickyFreezeFixture();
+
+  await writeFile(join(appRoot, "README.md"), "unrelated docs change\n");
+  git(appRoot, "add", ".");
+  git(appRoot, "commit", "-m", "docs change");
+  const docsSha = revParse(appRoot, "HEAD");
+
+  const secondRun = runDeploy(appRoot, {
+    ...env,
+    DEPLOY_OLD_SHA: nextSha,
+    DEPLOY_NEW_SHA: docsSha
+  });
+  assert.equal(
+    secondRun.status,
+    1,
+    `the second deploy must stay frozen even though its own range has no contract-surface files\n${secondRun.stdout}\n${secondRun.stderr}`
+  );
+  assert.match(secondRun.stdout, /enforcing persisted freeze from/u);
+  assert.match(secondRun.stderr, /D-03 contract compatibility freeze: refusing production deploy/u);
+  assert.match(secondRun.stderr, new RegExp(`Evaluated range: ${baseSha} -> ${docsSha}`, "u"));
+  assert.match(secondRun.stderr, /mcp-server\/src\/blockchain\/gateway\.js/u);
+  assert.ok(existsSync(markerPath), "the freeze marker must survive the second refusal");
+});
+
+test("deploy wrapper clears the persisted freeze once the deployment manifest pairs with the drift", async () => {
+  const { appRoot, env, markerPath, nextSha } = await makeStickyFreezeFixture();
+
+  await mkdir(join(appRoot, "deployments"), { recursive: true });
+  await writeFile(join(appRoot, "deployments/testnet.json"), '{"contracts":{"agentAccountCore":"0x0000000000000000000000000000000000000002"}}\n');
+  git(appRoot, "add", ".");
+  git(appRoot, "commit", "-m", "repin contracts manifest");
+  const manifestSha = revParse(appRoot, "HEAD");
+
+  const run = runDeploy(appRoot, {
+    ...env,
+    DEPLOY_OLD_SHA: nextSha,
+    DEPLOY_NEW_SHA: manifestSha
+  });
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(run.stdout, /clearing persisted freeze marker/u);
+  assert.match(run.stdout, /now paired with deployments\/testnet\.json/u);
+  assert.match(run.stdout, /contract-surface changes are paired with deployments\/testnet\.json; allowing deploy/u);
+  assert.ok(!existsSync(markerPath), "a manifest-paired deploy must clear the freeze marker");
+});
+
+test("deploy wrapper clears the persisted freeze on an explicit drift override dispatch", async () => {
+  const { appRoot, env, markerPath, nextSha } = await makeStickyFreezeFixture();
+
+  await writeFile(join(appRoot, "README.md"), "unrelated docs change\n");
+  git(appRoot, "add", ".");
+  git(appRoot, "commit", "-m", "docs change");
+  const docsSha = revParse(appRoot, "HEAD");
+
+  const run = runDeploy(appRoot, {
+    ...env,
+    DEPLOY_OLD_SHA: nextSha,
+    DEPLOY_NEW_SHA: docsSha,
+    DEPLOY_ALLOW_CONTRACT_SURFACE_DRIFT: "1"
+  });
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(run.stdout, /D-03 contract compatibility freeze override set/u);
+  assert.match(run.stdout, /clearing persisted freeze marker/u);
+  // The override run's log is the audit record: it must name the drift it accepted.
+  assert.match(run.stdout, /mcp-server\/src\/blockchain\/gateway\.js/u);
+  assert.ok(!existsSync(markerPath), "an explicit override dispatch must clear the freeze marker");
+});
+
+test("deploy wrapper clears the persisted freeze when the flagged drift is reverted", async () => {
+  const { appRoot, env, markerPath, nextSha } = await makeStickyFreezeFixture();
+
+  git(appRoot, "rm", "mcp-server/src/blockchain/gateway.js");
+  git(appRoot, "commit", "-m", "revert contract surface change");
+  const revertSha = revParse(appRoot, "HEAD");
+
+  const run = runDeploy(appRoot, {
+    ...env,
+    DEPLOY_OLD_SHA: nextSha,
+    DEPLOY_NEW_SHA: revertSha
+  });
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(run.stdout, /clearing persisted freeze marker/u);
+  assert.match(run.stdout, /flagged changes were reverted/u);
+  assert.ok(!existsSync(markerPath), "a reverted drift must clear the freeze marker instead of over-blocking");
+});
+
 test("deploy workflow wires the D-03 contract surface override as manual-only", async () => {
   const workflow = await readFile(join(REPO_ROOT, ".github/workflows/deploy-production.yml"), "utf8");
 
