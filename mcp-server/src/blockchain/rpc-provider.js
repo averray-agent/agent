@@ -97,6 +97,20 @@ export function bindSignerToWriteBroadcaster(signer, readProvider, broadcaster) 
   return new PatientWriteSigner(signer.connect(readProvider), readProvider, broadcaster);
 }
 
+export function describeRpcProvider(provider) {
+  try {
+    const rawUrl = provider?._getConnection?.()?.url;
+    if (!rawUrl) {
+      return "unknown";
+    }
+    // Identify the selected endpoint without ever logging credentials, query
+    // strings, or keyed-provider path segments.
+    return new URL(rawUrl).origin;
+  } catch {
+    return "unknown";
+  }
+}
+
 export class WriteRpcBroadcaster {
   #providers;
 

@@ -44,7 +44,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Contract, JsonRpcProvider, Wallet } from "ethers";
+import { Contract, FetchRequest, JsonRpcProvider, Wallet } from "ethers";
 
 import { AgentPlatformClient } from "../../sdk/agent-platform-client.js";
 import { DEFAULT_ESCROW_ASSET } from "../../mcp-server/src/core/assets.js";
@@ -69,6 +69,7 @@ const DEFAULT_REWARD_AMOUNT = "0.1"; // 100_000 base units > USDC minBalance 70_
 const DEFAULT_TOKEN_MIN_DAYS = 7;
 const DEFAULT_SETTLE_TIMEOUT_MS = 180_000;
 const DEFAULT_SETTLE_POLL_MS = 5_000;
+const CANARY_RPC_REQUEST_TIMEOUT_MS = 15_000;
 const DEFAULT_WORKER_KEY_OP = "op://prod-backend/canary-worker-testnet/private key";
 const OUTPUT_SCHEMA_REF = "schema://jobs/product-proof-worker-loop";
 const VERIFIER_TERMS = ["complete", "verified", "output"];
@@ -96,14 +97,31 @@ export async function runWorkerCanary({
   const timings = {};
   const stages = {};
   const txHashes = {};
+  const jobId = config.jobId || `worker-canary-${startedAt}`;
+  const cleanup = { jobArchived: false, jobKept: false };
   let createdJobId = null;
   let archived = false;
   let operatorPlatform = operatorClient ?? null;
+  let operatorAuth = null;
+  let chainId = null;
+  let workerAddress = null;
+  let sessionId = null;
+  let chainJobId = null;
+  let failedError = null;
+  let failureStage = null;
 
   const stage = async (name, fn) => {
     const t0 = now();
     try {
       return await fn();
+    } catch (error) {
+      failureStage = name;
+      stages[name] = {
+        ...(error?.canaryEvidence ?? {}),
+        status: "failed",
+        error: sanitizeEvidenceError(error)
+      };
+      throw error;
     } finally {
       timings[name] = now() - t0;
     }
@@ -111,7 +129,7 @@ export async function runWorkerCanary({
 
   try {
     // ── operator auth (NEVER the worker identity) ─────────────────────────
-    const operatorAuth =
+    operatorAuth =
       injectedOperatorAuth ??
       (operatorClient
         ? { mode: "injected_client", source: "client", token: config.injectedOperatorToken }
@@ -127,7 +145,7 @@ export async function runWorkerCanary({
 
     // ── chain-env gate: selected profile must match its live chain exactly ─
     const reader = chainReader ?? buildChainReader(config);
-    const chainId = await reader.getChainId();
+    chainId = await reader.getChainId();
     assertChainEnvironment({ chainId, profile: config.profile });
 
     // ── operator readiness: capabilities + settlement, BEFORE creating a job
@@ -138,11 +156,10 @@ export async function runWorkerCanary({
 
     // ── worker identity: a fresh, roleless wallet — NOT the admin JWT ─────
     const wallet = injectedWallet ?? (await resolveWorkerWallet({ env, config, readSecretImpl, log }));
-    const workerAddress = wallet.address;
+    workerAddress = wallet.address;
     log(`Worker wallet: ${workerAddress} (roleless${config.workerEphemeral ? ", ephemeral" : ""})`);
 
     // ── create the disposable, UPFRONT-funded benchmark job ───────────────
-    const jobId = config.jobId || `worker-canary-${startedAt}`;
     createdJobId = jobId;
     await stage("createJob", async () => {
       log(`Creating disposable canary job ${jobId} (reward ${config.rewardAmount} USDC, funded upfront)`);
@@ -175,7 +192,7 @@ export async function runWorkerCanary({
       runClaimStage({ authedWorker, jobId, workerAddress, idempotencyKey: `worker-canary:${jobId}`, before })
     );
     stages.claim = claim.summary;
-    const sessionId = claim.sessionId;
+    sessionId = claim.sessionId;
     captureTxHash(txHashes, "claim", claim.raw);
 
     // ── STAGE 4: submit (guards #627 submitWorkFor revert) ────────────────
@@ -186,7 +203,7 @@ export async function runWorkerCanary({
     captureTxHash(txHashes, "submit", submit.raw);
 
     // chainJobId comes from the worker's own session record
-    const chainJobId = await resolveChainJobId({ authedWorker, sessionId, claim, submit });
+    chainJobId = await resolveChainJobId({ authedWorker, sessionId, claim, submit });
 
     // ── STAGE 5: verify (operator path until auto-verify lands) ───────────
     const verify = await stage("verify", () =>
@@ -218,39 +235,32 @@ export async function runWorkerCanary({
     // long-lived operator credential before it silently 401s every smoke.
     stages.tokenFreshness = assertOperatorTokenFreshness({ operatorAuth, minDays: config.tokenMinDays, now });
 
-    const evidence = {
-      proof: "worker-canary",
-      apiBaseUrl: config.apiBaseUrl,
-      profile: config.profile,
-      chainId: chainId.toString(),
-      workerWallet: workerAddress,
-      workerEphemeral: config.workerEphemeral,
-      operatorAuthMode: operatorAuth.mode,
-      jobId,
-      sessionId,
-      chainJobId,
-      reward: { amount: config.rewardAmount, raw: config.rewardRaw.toString(), asset: DEFAULT_ESCROW_ASSET.symbol },
-      stages,
-      txHashes,
-      timings: { ...timings, totalMs: now() - startedAt },
-      cleanup: { jobArchived: false, jobKept: false },
-      checkedAt: new Date(startedAt).toISOString()
-    };
-
     // Archive the disposable job so canary jobs never accumulate (unless the
     // operator asked to keep it). Either way, cleanup is handled — suppress the
     // finally retry.
     const didArchive = await archiveCanaryJob({ operatorPlatform, jobId, config, log });
     archived = true;
-    evidence.cleanup.jobArchived = didArchive;
-    evidence.cleanup.jobKept = !didArchive;
+    cleanup.jobArchived = didArchive;
+    cleanup.jobKept = !didArchive;
     createdJobId = null;
 
-    if (config.evidenceFile) {
-      await mkdir(dirname(config.evidenceFile), { recursive: true });
-      await writeFile(config.evidenceFile, `${JSON.stringify(evidence, null, 2)}\n`, "utf8");
-      log(`Wrote worker-canary evidence to ${config.evidenceFile}`);
-    }
+    const evidence = buildCanaryEvidence({
+      status: "passed",
+      config,
+      startedAt,
+      completedAt: now(),
+      operatorAuth,
+      chainId,
+      workerAddress,
+      jobId,
+      sessionId,
+      chainJobId,
+      stages,
+      txHashes,
+      timings,
+      cleanup
+    });
+    await writeCanaryEvidence({ config, evidence, log });
 
     log(
       `Worker canary PASSED — roleless ${workerAddress} walked SIWE→claim→submit→verify→settle; ` +
@@ -258,15 +268,47 @@ export async function runWorkerCanary({
         `worker credited ${settle.summary.creditedRaw} base units.`
     );
     return evidence;
+  } catch (error) {
+    failedError = error instanceof Error ? error : new Error(String(error));
+    failureStage ??= "setup";
+    throw error;
   } finally {
     // Best-effort cleanup if we created a job but bailed before archiving it.
     if (createdJobId && !archived) {
       try {
-        await archiveCanaryJob({ operatorPlatform, jobId: createdJobId, config, log });
+        const didArchive = await archiveCanaryJob({ operatorPlatform, jobId: createdJobId, config, log });
+        cleanup.jobArchived = didArchive;
+        cleanup.jobKept = !didArchive;
+        archived = true;
         log(`Archived stranded canary job ${createdJobId} during cleanup.`);
       } catch (cleanupError) {
-        log(`WARNING: failed to archive canary job ${createdJobId}: ${cleanupError?.message ?? cleanupError}`);
+        cleanup.error = sanitizeEvidenceError(cleanupError);
+        log(`WARNING: failed to archive canary job ${createdJobId}: ${cleanup.error}`);
       }
+    }
+    if (failedError) {
+      const evidence = buildCanaryEvidence({
+        status: "failed",
+        failure: {
+          stage: failureStage,
+          name: failedError.name || "Error",
+          message: sanitizeEvidenceError(failedError)
+        },
+        config,
+        startedAt,
+        completedAt: now(),
+        operatorAuth,
+        chainId,
+        workerAddress,
+        jobId,
+        sessionId,
+        chainJobId,
+        stages,
+        txHashes,
+        timings,
+        cleanup
+      });
+      await writeCanaryEvidence({ config, evidence, log });
     }
   }
 }
@@ -506,35 +548,84 @@ export async function runSettleStage({
   settleTimeoutMs,
   settlePollMs,
   now,
-  log
+  log,
+  sleepImpl = sleep
 }) {
-  // Wait until either the session resolves or the chain job closes.
-  const deadline = now() + settleTimeoutMs;
-  let job = await reader.readEscrowJob(chainJobId);
-  let session = await safeGetSession(authedWorker, sessionId);
-  while (Number(job.state) !== JOB_STATE.Closed && session?.status !== "resolved" && now() < deadline) {
-    await sleep(settlePollMs);
-    job = await reader.readEscrowJob(chainJobId);
-    session = await safeGetSession(authedWorker, sessionId);
-    log(`Settling… session=${session?.status ?? "?"} jobState=${jobStateName(job.state)}`);
+  // The API session can become `resolved` before the next RPC observation sees
+  // EscrowCore Closed. It is useful context, but never a substitute for the
+  // on-chain release this stage exists to prove.
+  const settleStartedAt = now();
+  const deadline = settleStartedAt + settleTimeoutMs;
+  let pollCount = 0;
+  let job;
+  let session;
+
+  while (true) {
+    pollCount += 1;
+    try {
+      job = await reader.readEscrowJob(chainJobId);
+      session = await authedWorker.getSession(sessionId);
+    } catch (cause) {
+      const elapsedMs = Math.max(0, now() - settleStartedAt);
+      const detail = sanitizeEvidenceError(cause);
+      log(`Settle poll #${pollCount} FAILED after ${elapsedMs}ms: ${detail}`);
+      throw canaryStageError(
+        `Settle stage poll #${pollCount} failed after ${elapsedMs}ms: ${detail}`,
+        {
+          pollCount,
+          elapsedMs,
+          lastJobState: job ? jobStateName(job.state) : null,
+          lastSessionStatus: session?.status ?? null,
+          pollError: detail
+        },
+        cause
+      );
+    }
+
+    const elapsedMs = Math.max(0, now() - settleStartedAt);
+    log(
+      `Settle poll #${pollCount} elapsed=${elapsedMs}ms ` +
+        `session=${session?.status ?? "?"} jobState=${jobStateName(job.state)}`
+    );
+
+    if (Number(job.state) === JOB_STATE.Closed) {
+      break;
+    }
+    if (now() >= deadline) {
+      throw canaryStageError(
+        `Settle stage FAILED: EscrowCore job ${chainJobId} is "${jobStateName(job.state)}", not "Closed", after ` +
+          `${elapsedMs}ms of a ${settleTimeoutMs}ms deadline. The verified job never settled on-chain ` +
+          "(verification approved but no release / payout). This is the settlement-stall class.",
+        {
+          pollCount,
+          elapsedMs,
+          lastJobState: jobStateName(job.state),
+          lastSessionStatus: session?.status ?? null
+        }
+      );
+    }
+
+    await sleepImpl(Math.min(settlePollMs, deadline - now()));
   }
 
-  if (Number(job.state) !== JOB_STATE.Closed) {
-    throw new Error(
-      `Settle stage FAILED: EscrowCore job ${chainJobId} is "${jobStateName(job.state)}", not "Closed", after ` +
-        `${Math.round(settleTimeoutMs / 1000)}s. The verified job never settled on-chain ` +
-        "(verification approved but no release / payout). This is the settlement-stall class."
-    );
-  }
+  const elapsedMs = Math.max(0, now() - settleStartedAt);
+  const settleEvidence = {
+    pollCount,
+    elapsedMs,
+    lastJobState: jobStateName(job.state),
+    lastSessionStatus: session?.status ?? null
+  };
   if (job.releasedRaw !== rewardRaw) {
-    throw new Error(
+    throw canaryStageError(
       `Settle stage FAILED: EscrowCore released ${job.releasedRaw} base units but reward was ${rewardRaw}. ` +
-        "Released amount must equal the full reward on a benchmark approval."
+        "Released amount must equal the full reward on a benchmark approval.",
+      settleEvidence
     );
   }
   if (job.worker && job.worker.toLowerCase() !== workerAddress.toLowerCase()) {
-    throw new Error(
-      `Settle stage: EscrowCore job worker ${job.worker} does not match the canary worker ${workerAddress}.`
+    throw canaryStageError(
+      `Settle stage: EscrowCore job worker ${job.worker} does not match the canary worker ${workerAddress}.`,
+      settleEvidence
     );
   }
 
@@ -547,10 +638,11 @@ export async function runSettleStage({
   const aacLiquidDelta = after.aacLiquidRaw - before.aacLiquidRaw;
   const creditedRaw = eoaDelta + aacLiquidDelta;
   if (creditedRaw < rewardRaw) {
-    throw new Error(
+    throw canaryStageError(
       `Settle stage FAILED: job Closed and released ${rewardRaw} base units, but the worker's balance did not rise ` +
         `by the reward. usdc.balanceOf delta=${eoaDelta}; AAC.positions.liquid delta=${aacLiquidDelta}; ` +
-        `total credited=${creditedRaw}; expected ≥ ${rewardRaw}. The reward settled but never reached the worker.`
+        `total credited=${creditedRaw}; expected ≥ ${rewardRaw}. The reward settled but never reached the worker.`,
+      settleEvidence
     );
   }
 
@@ -563,7 +655,9 @@ export async function runSettleStage({
       eoaDeltaRaw: eoaDelta.toString(),
       aacLiquidDeltaRaw: aacLiquidDelta.toString(),
       creditedRaw: creditedRaw.toString(),
-      creditedTo: eoaDelta >= rewardRaw ? "worker_eoa" : aacLiquidDelta >= rewardRaw ? "aac_liquid" : "split"
+      creditedTo: eoaDelta >= rewardRaw ? "worker_eoa" : aacLiquidDelta >= rewardRaw ? "aac_liquid" : "split",
+      pollCount,
+      elapsedMs
     }
   };
 }
@@ -746,9 +840,67 @@ async function archiveCanaryJob({ operatorPlatform, jobId, config, log }) {
   return true;
 }
 
+function buildCanaryEvidence({
+  status,
+  failure = undefined,
+  config,
+  startedAt,
+  completedAt,
+  operatorAuth,
+  chainId,
+  workerAddress,
+  jobId,
+  sessionId,
+  chainJobId,
+  stages,
+  txHashes,
+  timings,
+  cleanup
+}) {
+  return {
+    proof: "worker-canary",
+    status,
+    ...(failure ? { failure } : {}),
+    apiBaseUrl: config.apiBaseUrl,
+    profile: config.profile,
+    chainId: chainId === null ? null : chainId.toString(),
+    workerWallet: workerAddress,
+    workerEphemeral: config.workerEphemeral,
+    operatorAuthMode: operatorAuth?.mode ?? null,
+    jobId,
+    sessionId,
+    chainJobId,
+    reward: {
+      amount: config.rewardAmount,
+      raw: config.rewardRaw.toString(),
+      asset: DEFAULT_ESCROW_ASSET.symbol
+    },
+    stages,
+    txHashes,
+    timings: { ...timings, totalMs: completedAt - startedAt },
+    cleanup: { ...cleanup },
+    checkedAt: new Date(startedAt).toISOString(),
+    completedAt: new Date(completedAt).toISOString()
+  };
+}
+
+async function writeCanaryEvidence({ config, evidence, log }) {
+  if (!config.evidenceFile) {
+    return;
+  }
+  await mkdir(dirname(config.evidenceFile), { recursive: true });
+  await writeFile(config.evidenceFile, `${JSON.stringify(evidence, null, 2)}\n`, "utf8");
+  log(`Wrote worker-canary ${evidence.status} evidence to ${config.evidenceFile}`);
+}
+
 // ── chain reader (ethers) ─────────────────────────────────────────────────────
 function buildChainReader(config) {
-  const provider = new JsonRpcProvider(config.rpcUrl);
+  // This is a release-gate harness, not the latency-sensitive product health
+  // path. Keep it on one explicit endpoint and allow a normal block-scale read
+  // to finish instead of inheriting the backend's aggressive 750ms read budget.
+  const request = new FetchRequest(config.rpcUrl);
+  request.timeout = CANARY_RPC_REQUEST_TIMEOUT_MS;
+  const provider = new JsonRpcProvider(request);
   const usdc = new Contract(config.assetAddress, ERC20_BALANCE_ABI, provider);
   const aac = new Contract(config.agentAccountAddress, AGENT_ACCOUNT_ABI, provider);
   const escrow = new Contract(config.escrowAddress, ESCROW_CORE_ABI, provider);
@@ -982,6 +1134,18 @@ function describeApiError(error) {
   const message = error?.payload?.message ?? error?.message ?? "";
   const requestId = error?.payload?.requestId ? `; requestId=${error.payload.requestId}` : "";
   return `status=${error?.status ?? "?"}; code=${code || "?"}; message=${message}${requestId}`;
+}
+
+function canaryStageError(message, canaryEvidence, cause = undefined) {
+  const error = cause === undefined ? new Error(message) : new Error(message, { cause });
+  error.canaryEvidence = canaryEvidence;
+  return error;
+}
+
+function sanitizeEvidenceError(error) {
+  return String(error?.message ?? error ?? "unknown error")
+    .replace(/\bBearer\s+\S+/giu, "Bearer [REDACTED]")
+    .replace(/\beyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/gu, "[REDACTED_JWT]");
 }
 
 function isEnsureJobRevert(error) {

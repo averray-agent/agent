@@ -27,7 +27,8 @@ import { applyGasFeeBuffer } from "./fee-buffer.js";
 import {
   bindSignerToWriteBroadcaster,
   createRpcProvider,
-  createWriteRpcBroadcaster
+  createWriteRpcBroadcaster,
+  describeRpcProvider
 } from "./rpc-provider.js";
 import {
   buildKmsCredentialsProvider,
@@ -114,6 +115,7 @@ function canAutoMintAsset(asset) {
 export class BlockchainGateway {
   constructor(config = loadBlockchainConfig(), { logger = undefined } = {}) {
     this.config = config;
+    this.logger = logger;
     if (!config.enabled) {
       this.provider = undefined;
       this.writeBroadcaster = undefined;
@@ -1151,6 +1153,7 @@ export class BlockchainGateway {
   async resolveSinglePayout(jobId, approved, reasonCode, metadataURI, reasoningHash = ZERO_BYTES32) {
     return this.withGatewayError("resolveSinglePayout", async () => {
       this.requireSigner("resolveSinglePayout");
+      const startedAt = Date.now();
       const tx = await this.escrowContract.resolveSinglePayout(
         this.toJobId(jobId),
         approved,
@@ -1158,10 +1161,31 @@ export class BlockchainGateway {
         metadataURI,
         reasoningHash
       );
+      const providerUsed = describeRpcProvider(tx.provider);
+      this.logger?.info?.(
+        {
+          jobId,
+          txHash: tx.hash,
+          providerUsed,
+          submitDurationMs: Date.now() - startedAt
+        },
+        "blockchain.resolve_single_payout.submitted"
+      );
       // Return the settle/payout tx receipt (additive — mirrors openDispute /
       // resolveDispute below) so callers can surface the on-chain payout tx to
       // the worker instead of discarding it. Settlement behavior is unchanged.
       const receipt = await tx.wait();
+      const durationMs = Date.now() - startedAt;
+      this.logger?.info?.(
+        {
+          jobId,
+          txHash: tx.hash,
+          blockNumber: receipt?.blockNumber,
+          durationMs,
+          providerUsed
+        },
+        "blockchain.resolve_single_payout.confirmed"
+      );
       return {
         txHash: tx.hash,
         blockNumber: receipt?.blockNumber,
