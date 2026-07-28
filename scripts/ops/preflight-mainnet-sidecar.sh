@@ -71,7 +71,8 @@ if grep -qi 'testnet' "$AWS_CONFIG"; then
 fi
 
 require_env_value "$BACKEND_ENV" AUTH_CHAIN_ID 420420419
-require_env_value "$BACKEND_ENV" RPC_URL https://eth-rpc.polkadot.io/
+require_env_value "$BACKEND_ENV" RPC_URL https://services.polkadothub-rpc.com/mainnet/
+require_env_value "$BACKEND_ENV" RPC_BACKUP_URLS https://eth-rpc.polkadot.io/
 require_env_value "$BACKEND_ENV" REDIS_URL redis://mainnet-redis:6379
 require_env_value "$BACKEND_ENV" REDIS_NAMESPACE agent-platform-mainnet
 require_env_value "$BACKEND_ENV" INDEXER_STATUS_URL http://mainnet-indexer:42069/status

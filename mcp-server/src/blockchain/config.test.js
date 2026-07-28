@@ -38,6 +38,53 @@ test("loadBlockchainConfig falls back from POLKADOT_RPC_URL to RPC_URL", () => {
   assert.equal(legacy.rpcUrl, "https://legacy.example");
 });
 
+test("loadBlockchainConfig preserves an ordered, deduplicated RPC failover list", () => {
+  const config = loadBlockchainConfig({
+    ...baseEnv,
+    DWELLER_RPC_URL: "https://primary.example",
+    RPC_BACKUP_URLS: [
+      "https://backup-a.example",
+      "https://primary.example",
+      "https://backup-b.example",
+      "https://backup-a.example"
+    ].join(","),
+    RPC_FAILOVER_STALL_MS: "125",
+    RPC_REQUEST_TIMEOUT_MS: "900"
+  });
+
+  assert.equal(config.rpcUrl, "https://primary.example");
+  assert.deepEqual(config.rpcBackupUrls, [
+    "https://backup-a.example",
+    "https://backup-b.example"
+  ]);
+  assert.deepEqual(config.rpcUrls, [
+    "https://primary.example",
+    "https://backup-a.example",
+    "https://backup-b.example"
+  ]);
+  assert.equal(config.rpcFailoverStallMs, 125);
+  assert.equal(config.rpcRequestTimeoutMs, 900);
+});
+
+test("loadBlockchainConfig rejects unsafe RPC failover timing values", () => {
+  assert.throws(
+    () => loadBlockchainConfig({
+      ...baseEnv,
+      RPC_URL: "https://primary.example",
+      RPC_REQUEST_TIMEOUT_MS: "0"
+    }),
+    /RPC_REQUEST_TIMEOUT_MS must be an integer/u
+  );
+  assert.throws(
+    () => loadBlockchainConfig({
+      ...baseEnv,
+      RPC_URL: "https://primary.example",
+      RPC_FAILOVER_STALL_MS: "forever"
+    }),
+    /RPC_FAILOVER_STALL_MS must be an integer/u
+  );
+});
+
 test("loadBlockchainConfig treats missing RPC across all aliases as incomplete config", () => {
   assert.throws(
     () => loadBlockchainConfig(baseEnv),

@@ -8,6 +8,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  MAINNET_BACKEND_RPC,
   MAINNET_RPC,
   MAINNET_CHAIN_ID,
   buildManifestOverrides,
@@ -83,7 +84,14 @@ test("repointOpRef: leaves a non-op value untouched", () => {
 
 test("transformLine: identity literals flip to mainnet", () => {
   assert.equal(transformLine("AUTH_CHAIN_ID=420420417"), `AUTH_CHAIN_ID=${MAINNET_CHAIN_ID}`);
-  assert.equal(transformLine("RPC_URL=https://eth-rpc-testnet.polkadot.io/"), `RPC_URL=${MAINNET_RPC}`);
+  assert.equal(
+    transformLine("RPC_URL=https://services.polkadothub-rpc.com/testnet/"),
+    `RPC_URL=${MAINNET_BACKEND_RPC}`
+  );
+  assert.equal(
+    transformLine("RPC_BACKUP_URLS=https://eth-rpc-testnet.polkadot.io/"),
+    `RPC_BACKUP_URLS=${MAINNET_RPC}`
+  );
   assert.equal(transformLine("USDC_LIQUIDITY_CHAIN=testnet"), "USDC_LIQUIDITY_CHAIN=mainnet");
   assert.equal(transformLine("INGESTION_PREFUND_ENABLED=true"), "INGESTION_PREFUND_ENABLED=false");
   assert.equal(transformLine("REDIS_URL=redis://redis:6379"), "REDIS_URL=redis://mainnet-redis:6379");
@@ -209,7 +217,8 @@ test("generateAll: the real transform yields the mainnet essentials", () => {
   const files = generateAll();
   const backend = files["deploy/backend.mainnet.env.template"];
   assert.match(backend, /AUTH_CHAIN_ID=420420419/u);
-  assert.match(backend, /RPC_URL=https:\/\/eth-rpc\.polkadot\.io\//u);
+  assert.ok(backend.includes(`RPC_URL=${MAINNET_BACKEND_RPC}`));
+  assert.ok(backend.includes(`RPC_BACKUP_URLS=${MAINNET_RPC}`));
   assert.match(backend, /^SHARE_URL_SECRET=op:\/\/mainnet-backend\/share-url-secret\/password$/mu);
   assert.ok(!/^AUTH_JWT_SECRETS=/mu.test(backend), "no HMAC key");
   assert.ok(!/^ARBITRATOR_SIGNER_PRIVATE_KEY=/mu.test(backend), "no arbitrator key");

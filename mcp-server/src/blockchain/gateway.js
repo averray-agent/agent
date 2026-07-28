@@ -1,7 +1,6 @@
 import {
   AbiCoder,
   Contract,
-  JsonRpcProvider,
   Wallet,
   decodeBytes32String,
   encodeBytes32String,
@@ -25,6 +24,7 @@ import {
 import { loadBlockchainConfig } from "./config.js";
 import { KmsSigner } from "./kms-signer.js";
 import { applyGasFeeBuffer } from "./fee-buffer.js";
+import { createRpcProvider } from "./rpc-provider.js";
 import {
   buildKmsCredentialsProvider,
   PROFILE_BLOCKCHAIN_SIGNER,
@@ -122,7 +122,7 @@ export class BlockchainGateway {
       return;
     }
 
-    this.provider = new JsonRpcProvider(config.rpcUrl);
+    this.provider = createRpcProvider(config);
     // Raise the fee ceiling by a small buffer so a Polkadot Hub tx isn't left
     // underpriced when the per-block fee multiplier rises during KMS-sign latency.
     applyGasFeeBuffer(this.provider, config.gasFeeBufferBps, logger);
@@ -203,7 +203,8 @@ export class BlockchainGateway {
         blockNumber,
         signerConfigured: Boolean(this.signer),
         arbitratorSignerConfigured: Boolean(this.arbitratorSigner),
-        xcmWrapperConfigured: this.hasXcmWrapper()
+        xcmWrapperConfigured: this.hasXcmWrapper(),
+        rpcEndpointCount: this.config.rpcUrls?.length ?? 1
       };
     } catch (error) {
       return {
@@ -213,6 +214,7 @@ export class BlockchainGateway {
         signerConfigured: Boolean(this.signer),
         arbitratorSignerConfigured: Boolean(this.arbitratorSigner),
         xcmWrapperConfigured: this.hasXcmWrapper(),
+        rpcEndpointCount: this.config.rpcUrls?.length ?? 1,
         error: this.wrapGatewayError("healthCheck", error).message
       };
     }

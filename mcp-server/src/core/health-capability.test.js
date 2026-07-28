@@ -9,6 +9,7 @@ import {
   XCM_OBSERVER_STATUS,
   buildProductHealthSnapshot,
   buildCapabilityWarnings,
+  createNonBlockingBlockchainHealthProvider,
   createProductHealthSnapshotProvider,
   createRewardBankHealthProvider,
   loadDeploymentManifestFromUrl,
@@ -463,6 +464,49 @@ test("createProductHealthSnapshotProvider caches public health recompute", async
   current = new Date("2026-07-05T12:01:01.000Z");
   await provider();
   assert.equal(scans, 2);
+});
+
+test("non-blocking chain health serves last-known-good with asOf, then marks it stale", async () => {
+  let current = new Date("2026-07-28T08:00:00.000Z");
+  let failReads = false;
+  const provider = createNonBlockingBlockchainHealthProvider({
+    gateway: {
+      isEnabled: () => true,
+      async healthCheck() {
+        return failReads
+          ? { ok: false, enabled: true, error: "rpc_throttled" }
+          : { ok: true, enabled: true, blockNumber: 18_750_000 };
+      }
+    },
+    now: () => current,
+    refreshMs: 1_000,
+    maxAgeMs: 60_000
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const live = provider();
+  assert.equal(live.ok, true);
+  assert.equal(live.blockNumber, 18_750_000);
+  assert.equal(live.asOf, "2026-07-28T08:00:00.000Z");
+
+  failReads = true;
+  current = new Date("2026-07-28T08:00:02.000Z");
+  provider();
+  await new Promise((resolve) => setImmediate(resolve));
+  const fallback = provider();
+  assert.equal(fallback.ok, true);
+  assert.equal(fallback.blockNumber, 18_750_000);
+  assert.equal(fallback.fallback, "last_known_good");
+  assert.equal(fallback.asOf, "2026-07-28T08:00:00.000Z");
+
+  current = new Date("2026-07-28T08:01:01.000Z");
+  provider();
+  await new Promise((resolve) => setImmediate(resolve));
+  const stale = provider();
+  assert.equal(stale.ok, false);
+  assert.equal(stale.stale, true);
+  assert.equal(stale.blockNumber, 18_750_000);
+  assert.equal(stale.asOf, "2026-07-28T08:00:00.000Z");
 });
 
 test("reward-bank provider uses fresh last-known-good evidence, then fails closed when stale", async () => {

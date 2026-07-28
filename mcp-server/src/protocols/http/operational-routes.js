@@ -3,7 +3,10 @@ import { timingSafeEqual } from "node:crypto";
 import { getMutationBackendStatus } from "../../core/mutation-backend.js";
 import {
   buildCapabilityWarnings,
+  createNonBlockingBlockchainHealthProvider,
+  createNonBlockingRewardBankHealthProvider,
   createProductHealthSnapshotProvider,
+  createRewardBankHealthProvider,
   resolveCapabilityHealth,
   resolveServiceHealth
 } from "../../core/health-capability.js";
@@ -47,9 +50,18 @@ export function createOperationalRoutes({
   service,
   stateStore
 }) {
+  const getLiveRewardBankHealth = getRewardBankHealth ?? createRewardBankHealthProvider({
+    gateway
+  });
+  const getCachedRewardBankHealth = createNonBlockingRewardBankHealthProvider({
+    getRewardBankHealth: getLiveRewardBankHealth
+  });
+  const getCachedBlockchainHealth = createNonBlockingBlockchainHealthProvider({
+    gateway
+  });
   const getProductHealthSnapshot = createProductHealthSnapshotProvider({
     gateway,
-    getRewardBankHealth,
+    getRewardBankHealth: getCachedRewardBankHealth,
     stateStore
   });
 
@@ -62,7 +74,7 @@ export function createOperationalRoutes({
       // and surfaces chain/treasury posture via `capabilityHealth`.
       const [storeHealth, chainHealth, gasHealth, xcmWatcherStatus, indexerProbe] = await Promise.all([
         stateStore.healthCheck?.() ?? { ok: true, backend: stateStore.constructor.name },
-        gateway?.healthCheck?.() ?? { ok: false, backend: "blockchain", enabled: false, mode: "disabled" },
+        getCachedBlockchainHealth(),
         pimlicoClient?.healthCheck?.() ?? { ok: true, backend: "pimlico", enabled: false, mode: "disabled" },
         service?.xcmSettlementWatcher?.getStatus?.()?.catch?.(() => undefined) ?? undefined,
         indexerHealthProbe?.().catch(() => ({ ok: false, reason: "indexer_status_unavailable" }))

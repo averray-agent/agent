@@ -66,6 +66,8 @@ export const GAS_SPONSOR_STATUS = Object.freeze({
 });
 
 const DEFAULT_PRODUCT_HEALTH_CACHE_MS = 60_000;
+const DEFAULT_LIVE_HEALTH_REFRESH_MS = 15_000;
+const DEFAULT_LIVE_HEALTH_MAX_AGE_MS = 60_000;
 const DEFAULT_REWARD_BANK_REFRESH_MS = 15_000;
 const DEFAULT_REWARD_BANK_MAX_AGE_MS = 60_000;
 const DEFAULT_SETTLEMENT_SESSION_LIMIT = 1_000;
@@ -300,11 +302,15 @@ export function createProductHealthSnapshotProvider({
   return async function getProductHealthSnapshot() {
     const currentTime = now();
     const nowMs = currentTime.getTime();
+    // Reward-bank health has its own short-TTL cache. Always overlay its latest
+    // non-blocking value so a cold product snapshot cannot pin "unreadable" for
+    // the full settlement/session cache window.
+    const rewardBank = await rewardBankHealthProvider();
     if (cached && cached.expiresAtMs > nowMs) {
-      return cached.value;
+      return { ...cached.value, rewardBank };
     }
     if (refreshPromise) {
-      return refreshPromise;
+      return refreshPromise.then((value) => ({ ...value, rewardBank }));
     }
 
     refreshPromise = buildProductHealthSnapshot({
@@ -312,7 +318,7 @@ export function createProductHealthSnapshotProvider({
       stateStore,
       env,
       deploymentManifest,
-      getRewardBankHealth: rewardBankHealthProvider,
+      getRewardBankHealth: () => rewardBank,
       now: currentTime,
       settlementSessionLimit,
       settlementStuckAfterMs
@@ -330,6 +336,213 @@ export function createProductHealthSnapshotProvider({
 
     return refreshPromise;
   };
+}
+
+/**
+ * Cache a live health read using stale-while-revalidate semantics.
+ *
+ * The getter never awaits `read`: it returns the latest bounded reading and
+ * starts refresh work in the background. Fresh failed reads reuse a
+ * last-known-good value; once maxAgeMs is exceeded the value remains visible
+ * with its original asOf but is marked stale/unreadable so truth consumers do
+ * not mistake old evidence for current proof.
+ */
+function createNonBlockingCachedHealthProvider({
+  read,
+  initialValue,
+  isUsable,
+  now = () => new Date(),
+  refreshMs = DEFAULT_LIVE_HEALTH_REFRESH_MS,
+  maxAgeMs = DEFAULT_LIVE_HEALTH_MAX_AGE_MS
+}) {
+  const initialTime = now();
+  let cached = stampHealthReading(initialValue, initialTime);
+  let lastKnownGood = isUsable(cached) ? cached : undefined;
+  let refreshPromise;
+  let nextRefreshAtMs = 0;
+
+  const getHealth = () => {
+    const currentTime = now();
+    const nowMs = currentTime.getTime();
+    if (!refreshPromise && nowMs >= nextRefreshAtMs) {
+      nextRefreshAtMs = nowMs + Math.max(0, refreshMs);
+      const refreshAttemptedAt = currentTime.toISOString();
+      refreshPromise = Promise.resolve()
+        .then(() => read())
+        .then((value) => {
+          const completedAt = now();
+          const reading = stampHealthReading(value, completedAt);
+          if (isUsable(reading)) {
+            cached = reading;
+            lastKnownGood = reading;
+            return;
+          }
+          if (lastKnownGood) {
+            cached = failedHealthRefreshFallback({
+              lastKnownGood,
+              nowMs: completedAt.getTime(),
+              maxAgeMs,
+              refreshAttemptedAt,
+              refreshError: healthReadingError(reading)
+            });
+            return;
+          }
+          cached = {
+            ...reading,
+            stale: true,
+            ...(lastKnownGood?.asOf ? { lastKnownGoodAsOf: lastKnownGood.asOf } : {})
+          };
+        })
+        .catch((error) => {
+          const completedAt = now();
+          if (lastKnownGood) {
+            cached = failedHealthRefreshFallback({
+              lastKnownGood,
+              nowMs: completedAt.getTime(),
+              maxAgeMs,
+              refreshAttemptedAt,
+              refreshError: error?.code ?? "read_failed"
+            });
+            return;
+          }
+          cached = {
+            ...cached,
+            stale: true,
+            refreshAttemptedAt,
+            refreshError: error?.code ?? "read_failed",
+            ...(lastKnownGood?.asOf ? { lastKnownGoodAsOf: lastKnownGood.asOf } : {})
+          };
+        })
+        .finally(() => {
+          refreshPromise = undefined;
+        });
+    }
+
+    const projected = { ...cached };
+    if (healthReadingAgeMs(projected, nowMs) > Math.max(0, maxAgeMs)) {
+      projected.stale = true;
+      if (Object.hasOwn(projected, "ok")) projected.ok = false;
+      if (Object.hasOwn(projected, "readable")) projected.readable = false;
+      if (lastKnownGood?.asOf) projected.lastKnownGoodAsOf = lastKnownGood.asOf;
+    }
+    if (refreshPromise) projected.refreshing = true;
+    return projected;
+  };
+
+  // Warm once when the route graph is built. This is fire-and-forget: a
+  // blackholed dependency stays in the background, while a fast dependency is
+  // usually cached before the first external health request arrives.
+  getHealth();
+  return getHealth;
+}
+
+export function createNonBlockingBlockchainHealthProvider({
+  gateway,
+  now,
+  refreshMs,
+  maxAgeMs
+} = {}) {
+  const enabled = Boolean(gateway?.isEnabled?.());
+  return createNonBlockingCachedHealthProvider({
+    read: async () => gateway?.healthCheck?.() ?? {
+      ok: false,
+      backend: "blockchain",
+      enabled,
+      error: "health_check_unavailable"
+    },
+    initialValue: enabled
+      ? {
+          ok: false,
+          backend: "blockchain",
+          enabled: true,
+          readable: false,
+          source: "health_cache_cold"
+        }
+      : {
+          ok: true,
+          backend: "blockchain",
+          enabled: false,
+          mode: "disabled",
+          readable: true,
+          source: "configuration"
+        },
+    isUsable: (reading) => reading?.ok === true,
+    now,
+    refreshMs,
+    maxAgeMs
+  });
+}
+
+export function createNonBlockingRewardBankHealthProvider({
+  getRewardBankHealth,
+  now,
+  refreshMs,
+  maxAgeMs
+} = {}) {
+  return createNonBlockingCachedHealthProvider({
+    read: async () => getRewardBankHealth?.() ?? {
+      liquid: null,
+      liquidRaw: null,
+      decimals: DEFAULT_REWARD_BANK_DECIMALS,
+      readable: false,
+      source: "reward_bank_reader_unavailable"
+    },
+    initialValue: {
+      liquid: null,
+      liquidRaw: null,
+      decimals: DEFAULT_REWARD_BANK_DECIMALS,
+      readable: false,
+      source: "health_cache_cold"
+    },
+    isUsable: (reading) => reading?.readable === true && reading?.stale !== true,
+    now,
+    refreshMs,
+    maxAgeMs
+  });
+}
+
+function stampHealthReading(value, at) {
+  const reading = value && typeof value === "object" ? value : {};
+  return {
+    ...reading,
+    asOf: Number.isFinite(Date.parse(reading.asOf ?? ""))
+      ? reading.asOf
+      : at.toISOString()
+  };
+}
+
+function healthReadingAgeMs(reading, nowMs) {
+  const asOfMs = Date.parse(reading?.asOf ?? "");
+  return Number.isFinite(asOfMs)
+    ? Math.max(0, nowMs - asOfMs)
+    : Number.POSITIVE_INFINITY;
+}
+
+function healthReadingError(reading) {
+  return reading?.error ?? (reading?.ok === false ? "health_check_failed" : "read_failed");
+}
+
+function failedHealthRefreshFallback({
+  lastKnownGood,
+  nowMs,
+  maxAgeMs,
+  refreshAttemptedAt,
+  refreshError
+}) {
+  const fallback = {
+    ...lastKnownGood,
+    fallback: "last_known_good",
+    refreshAttemptedAt,
+    refreshError
+  };
+  if (healthReadingAgeMs(lastKnownGood, nowMs) <= Math.max(0, maxAgeMs)) {
+    return fallback;
+  }
+  fallback.stale = true;
+  fallback.lastKnownGoodAsOf = lastKnownGood.asOf;
+  if (Object.hasOwn(fallback, "ok")) fallback.ok = false;
+  if (Object.hasOwn(fallback, "readable")) fallback.readable = false;
+  return fallback;
 }
 
 export async function buildProductHealthSnapshot({

@@ -138,7 +138,9 @@ Loaded by `mcp-server/src/services/bootstrap.js`. Today rendered by
 | `ESCROW_CORE_ADDRESS` | Public contract address | Public |
 | `REPUTATION_SBT_ADDRESS` | Public contract address | Public |
 | `VERIFIER_REGISTRY_ADDRESS` | Public contract address | Public |
-| `RPC_URL` / `POLKADOT_RPC_URL` / `DWELLER_RPC_URL` | Substrate/EVM RPC endpoint | Fallback chain |
+| `RPC_URL` / `POLKADOT_RPC_URL` / `DWELLER_RPC_URL` | Primary EVM JSON-RPC endpoint | First configured alias wins |
+| `RPC_BACKUP_URLS` | Comma-separated EVM JSON-RPC failovers | Ordered after the primary; no secrets required for public endpoints |
+| `RPC_FAILOVER_STALL_MS` / `RPC_REQUEST_TIMEOUT_MS` | Failover launch and hard request bounds | Defaults: 250ms / 750ms |
 
 **External services**:
 | Name | What | Notes |
