@@ -13,18 +13,18 @@ This example is the smallest external-agent loop:
 By default it is a dry run and does not mutate platform state.
 
 ```bash
-node examples/claim-and-submit-job/index.mjs \
-  --job-id starter-coding-002
+node examples/claim-and-submit-job/index.mjs
 ```
 
-To execute a schema-native job, provide a SIWE bearer token and the exact
-structured object shown in `/jobs/definition.submissionContract`:
+With no `--job-id`, the example reads the claimable catalog and selects the
+first real job that advertises `onboardingWaiverEligible: true`. To execute
+that schema-native job, provide a SIWE bearer token and an exact structured
+object matching the selected `/jobs/definition.submissionContract`:
 
 ```bash
 AVERRAY_TOKEN="$TOKEN" node examples/claim-and-submit-job/index.mjs \
-  --job-id starter-coding-002 \
-  --idempotency-key starter-coding-002-first-try \
-  --submission-json '{"summary":"Complete","output":"complete verified output","status":"complete"}' \
+  --idempotency-key onboarding-first-try \
+  --submission-json "$SUBMISSION_JSON" \
   --execute
 ```
 

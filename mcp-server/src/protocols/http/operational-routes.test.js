@@ -237,6 +237,31 @@ test("GET /health p99 stays sub-second when live chain reads are blackholed", as
   assert.ok(p99 < 500, `expected /health p99 < 500ms; observed ${p99.toFixed(1)}ms`);
 });
 
+test("GET /health exposes and warns on an empty onboarding waiver inventory", async () => {
+  const { response, route } = makeHarness({
+    service: {
+      xcmSettlementWatcher: {
+        getStatus: async () => ({ enabled: true, running: true, pendingCount: 0 })
+      },
+      listJobs: () => [],
+      attachClaimState: async (job) => job
+    }
+  });
+
+  await route({
+    request: { method: "GET", headers: {} },
+    response,
+    pathname: "/health"
+  });
+
+  assert.equal(response.body.onboarding.status, "warning");
+  assert.equal(response.body.onboarding.waiverEligibleClaimableJobs, 0);
+  assert.equal(response.body.onboarding.minimumWaiverEligibleClaimableJobs, 2);
+  assert.ok(response.body.warnings.some((warning) => (
+    warning.code === "onboarding_waiver_inventory_empty"
+  )));
+});
+
 test("GET /health earns synced indexer status only from a fresh checkpoint", async () => {
   const { response, route } = makeHarness({
     indexerHealthProbe: async () => ({

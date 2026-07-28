@@ -16,10 +16,27 @@ async function main() {
 
   const runtimeA = await createPlatformRuntime();
   const runtimeB = await createPlatformRuntime();
+  const jobId = `redis-persistence-check-${Date.now()}`;
+  runtimeA.platformService.createJob({
+    id: jobId,
+    category: "coding",
+    tier: "starter",
+    rewardAmount: 0.1,
+    rewardAsset: "USDC",
+    verifierMode: "benchmark",
+    verifierTerms: ["complete", "verified", "output"],
+    verifierMinimumMatches: 2,
+    inputSchemaRef: "schema://jobs/coding-input",
+    outputSchemaRef: "schema://jobs/coding-output",
+    claimTtlSeconds: 3600,
+    retryLimit: 1,
+    requiresSponsoredGas: true,
+    source: { type: "redis_persistence_check" }
+  });
 
   const firstSession = await runtimeA.platformService.claimJob(
     "0xagent",
-    "starter-coding-002",
+    jobId,
     "http",
     `redis-check-${Date.now()}`
   );

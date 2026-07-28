@@ -92,6 +92,8 @@ test("buildDiscoveryManifest returns the full public discovery shape", () => {
     check.id === "wallet-funded" && check.faucetUrl === "https://faucet.polkadot.io/"
   )));
   assert.ok(manifest.onboarding.selfServeChecklist.some((entry) => entry.includes("do not paste")));
+  assert.ok(manifest.onboarding.starterFlow.includes("select-first-waiver-eligible-claimable-job"));
+  assert.equal(manifest.onboarding.starterFlow.includes("claim-starter-job"), false);
   assert.ok(manifest.onboarding.actionRequirements.some((entry) => (
     entry.method === "POST" && entry.path === "/jobs/claim" && entry.requiredAction === "wallet_sign_in"
   )));

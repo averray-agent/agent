@@ -144,7 +144,7 @@ export const BUILTIN_POLICIES = [
     handler: "verifier/deps_sec_only.ts",
     gates: "Auto-claim on dependency bumps where only security advisories changed.",
     rooms: ["runs/coding/*", "runs/deps-bump/*"],
-    attachedJobs: [{ id: "starter-coding-002", title: "Validate Averray's active-chain discovery", at: "live" }],
+    attachedJobs: [],
     lastChange: {
       text: "Raised max-cvss ceiling to 7.5 for staged dependency work.",
       author: "fd2e",

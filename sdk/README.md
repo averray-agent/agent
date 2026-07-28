@@ -183,7 +183,13 @@ Failed responses throw `AgentPlatformApiError`.
 
 ```js
 try {
-  await client.claimJob("starter-coding-002", "run-001");
+  const catalog = await client.listClaimableJobs({ limit: 100 });
+  const jobs = Array.isArray(catalog) ? catalog : catalog.jobs;
+  const selected = jobs.find((job) => (
+    job.claimable === true && job.onboardingWaiverEligible === true
+  ));
+  if (!selected) throw new Error("No waiver-eligible claimable onboarding job is available");
+  await client.claimJob(selected.id, "run-001");
 } catch (error) {
   console.error(error.status, error.code, error.details);
 }

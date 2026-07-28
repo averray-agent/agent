@@ -32,8 +32,8 @@ export const BOOTSTRAP_JOBS = [
     tier: "starter",
     rewardAsset: DEFAULT_ESCROW_ASSET_SYMBOL,
     rewardAmount: 0.2,
-    title: "Validate Averray's active-chain discovery",
-    description: "Compare Averray's public discovery manifest with its health endpoint and submit a structured verification report.",
+    title: "Validate Averray's active-chain discovery (retired)",
+    description: "Historical discovery-validation demo retained for completed-session and badge lookups; its on-chain escrow is permanently Closed.",
     input: {
       task: "Fetch /agent-tools.json and /health from the public Averray API, compare every advertised wallet-mode chain id with health.auth.chainId, and report whether they agree.",
       acceptanceCriteria: [
@@ -63,7 +63,11 @@ export const BOOTSTRAP_JOBS = [
     claimTtlSeconds: 3600,
     retryLimit: 1,
     requiresSponsoredGas: true,
-    onboardingWaiverEligible: true
+    onboardingWaiverEligible: true,
+    lifecycle: {
+      status: "archived",
+      reason: "Retired after its one-time mainnet escrow reached Closed; job ids are never reused."
+    }
   },
   {
     id: "governance-pro-001",

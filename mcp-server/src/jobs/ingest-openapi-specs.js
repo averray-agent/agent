@@ -180,6 +180,7 @@ export function toPlatformJob(target, score = scoreOpenApiTarget(target)) {
     claimTtlSeconds: 7200,
     retryLimit: 1,
     requiresSponsoredGas: true,
+    onboardingWaiverEligible: true,
     source: {
       type: "openapi_spec",
       provider,

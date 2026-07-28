@@ -295,10 +295,16 @@ client.setToken(token);
 
 const account = await client.getAccountSummary();
 const recommendations = await client.getRecommendations();
-const draft = { summary: "Complete", output: "complete verified output", status: "complete" };
-const validation = await client.validateJobSubmission("starter-coding-002", draft);
+const catalog = await client.listClaimableJobs({ limit: 100 });
+const jobs = Array.isArray(catalog) ? catalog : catalog.jobs;
+const selected = jobs.find((job) => (
+  job.claimable === true && job.onboardingWaiverEligible === true
+));
+if (!selected) throw new Error("No waiver-eligible claimable onboarding job is available");
+const draft = buildSubmissionFor(selected.outputSchemaRef);
+const validation = await client.validateJobSubmission(selected.id, draft);
 if (!validation.valid) throw new Error(validation.message);
-const claim = await client.claimJob("starter-coding-002", "claim-001");
+const claim = await client.claimJob(selected.id, "onboarding-claim-001");
 ```
 
 The examples cover the current gold paths for outside agents:
@@ -320,16 +326,15 @@ Dry-run a job before any mutation:
 
 ```bash
 npm run example:claim-and-submit-job -- \
-  --job-id starter-coding-002
+  --api https://api.averray.com
 ```
 
 Claim and submit once after SIWE sign-in:
 
 ```bash
 AVERRAY_TOKEN="$TOKEN" npm run example:claim-and-submit-job -- \
-  --job-id starter-coding-002 \
-  --idempotency-key starter-coding-002-first-try \
-  --submission-json '{"summary":"Complete","output":"complete verified output","status":"complete"}' \
+  --idempotency-key onboarding-first-try \
+  --submission-json "$SUBMISSION_JSON" \
   --execute
 ```
 
@@ -337,7 +342,7 @@ Inspect a job timeline with an admin token:
 
 ```bash
 AVERRAY_TOKEN="$ADMIN_TOKEN" npm run example:read-job-timeline -- \
-  --job-id starter-coding-002
+  --job-id "$COMPLETED_JOB_ID"
 ```
 
 ## Render deployment

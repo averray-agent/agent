@@ -165,6 +165,7 @@ export function toPlatformJob(target, score = scoreSpecTarget(target)) {
     claimTtlSeconds: 7200,
     retryLimit: 1,
     requiresSponsoredGas: true,
+    onboardingWaiverEligible: true,
     source: {
       type: "standards_spec",
       provider,

@@ -56,6 +56,7 @@ export class WikipediaMaintenanceIngestionScheduler {
 
   async getStatus() {
     const inventory = await this.inventorySnapshot();
+    const waiverEligibleClaimableJobs = countWaiverEligibleClaimableJobs(inventory);
     return {
       enabled: this.enabled,
       running: this.running,
@@ -69,6 +70,8 @@ export class WikipediaMaintenanceIngestionScheduler {
       minClaimableJobs: this.minClaimableJobs,
       currentOpenJobs: inventory.claimableCount,
       currentClaimableJobs: inventory.claimableCount,
+      minimumWaiverEligibleClaimableJobs: this.minClaimableJobs,
+      currentWaiverEligibleClaimableJobs: waiverEligibleClaimableJobs,
       lastRun: this.lastRun
     };
   }
@@ -77,11 +80,13 @@ export class WikipediaMaintenanceIngestionScheduler {
     const startedAt = now.toISOString();
     const inventory = await this.inventorySnapshot(now);
     const claimableWikipediaJobs = inventory.claimableCount;
+    const waiverEligibleClaimableJobs = countWaiverEligibleClaimableJobs(inventory);
     const summary = {
       startedAt,
       finishedAt: undefined,
       dryRun: this.dryRun,
       claimableWikipediaJobs,
+      waiverEligibleClaimableJobs,
       minClaimableJobs: this.minClaimableJobs,
       activeSourceCount: inventory.activeSourceKeys.size,
       candidateCount: 0,
@@ -95,7 +100,7 @@ export class WikipediaMaintenanceIngestionScheduler {
       return this.finishRun(summary);
     }
     const remaining = desiredInventoryCreates({
-      claimableCount: claimableWikipediaJobs,
+      claimableCount: waiverEligibleClaimableJobs,
       minClaimableJobs: this.minClaimableJobs,
       maxJobsPerRun: this.maxJobsPerRun,
       maxOpenJobs: this.maxOpenJobs,
@@ -107,6 +112,7 @@ export class WikipediaMaintenanceIngestionScheduler {
           ? "max_open_jobs_reached"
           : "minimum_claimable_satisfied",
         claimableWikipediaJobs,
+        waiverEligibleClaimableJobs,
         minClaimableJobs: this.minClaimableJobs,
         maxOpenJobs: this.maxOpenJobs
       });
@@ -118,6 +124,7 @@ export class WikipediaMaintenanceIngestionScheduler {
       category: "wikipedia",
       tier: "starter",
       claimableWikipediaJobs,
+      waiverEligibleClaimableJobs,
       minClaimableJobs: this.minClaimableJobs,
       desiredCreateCount: remaining
     }, "inventory.replenish.wikipedia");
@@ -162,6 +169,7 @@ export class WikipediaMaintenanceIngestionScheduler {
             source: replenishedJob.source,
             reason: "inventory_replenishment",
             claimableBefore: claimableWikipediaJobs,
+            waiverEligibleClaimableBefore: waiverEligibleClaimableJobs,
             minClaimableJobs: this.minClaimableJobs
           }
         });
@@ -211,6 +219,12 @@ export class WikipediaMaintenanceIngestionScheduler {
         .filter(Boolean)
     );
   }
+}
+
+function countWaiverEligibleClaimableJobs(inventory) {
+  return inventory.claimableJobs.filter((job) => (
+    job.onboardingWaiverEligible === true
+  )).length;
 }
 
 export function loadWikipediaMaintenanceIngestionConfig(env = process.env) {

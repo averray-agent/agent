@@ -94,6 +94,7 @@ test("WikipediaMaintenanceIngestionScheduler creates jobs when dryRun is false",
   assert.equal(summary.createdCount, 1);
   assert.equal(platform.listJobs().length, 1);
   assert.equal(platform.listJobs()[0].source.type, "wikipedia_article");
+  assert.equal(platform.listJobs()[0].onboardingWaiverEligible, true);
 });
 
 test("WikipediaMaintenanceIngestionScheduler dedupes by article revision", async () => {
@@ -333,6 +334,7 @@ function claimableWikipediaJob(id, pageId) {
     tier: "starter",
     claimable: true,
     effectiveState: "claimable",
+    onboardingWaiverEligible: true,
     source: {
       type: "wikipedia_article",
       language: "en",

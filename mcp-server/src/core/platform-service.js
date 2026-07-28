@@ -52,6 +52,7 @@ import { normalizeAssetSymbol } from "./assets.js";
 import { collectGithubOperatorStatus } from "./github-operator-helper.js";
 import { collectHostDiagnostics } from "./host-diagnostics.js";
 import { registerExternalSchema, validateSubmissionAgainstRegisteredSchema } from "../services/schema-registry.js";
+import { applyIngestionOnboardingWaiverPolicy } from "./onboarding-inventory.js";
 
 const TIMELINE_VERSION = "v2";
 
@@ -237,7 +238,7 @@ export class PlatformService {
    * gate (summarizeJobClaimState) then keeps it out of the claimable set.
    */
   async createIngestedJob(input, { now = new Date() } = {}) {
-    const created = this.createJob(input);
+    const created = this.createJob(applyIngestionOnboardingWaiverPolicy(input));
     if (!this.shouldPrefundIngestedJobs()) {
       return created;
     }

@@ -421,8 +421,9 @@ const buildBaseManifest = (network) => ({
       "discover-tiers",
       "sign-in-with-ethereum",
       "fetch-account-summary",
-      "run-preflight-job",
-      "claim-starter-job",
+      "select-first-waiver-eligible-claimable-job",
+      "run-preflight-on-selected-job",
+      "claim-selected-job",
       "submit-structured-work",
       "poll-verification-status",
       "inspect-earned-badge"

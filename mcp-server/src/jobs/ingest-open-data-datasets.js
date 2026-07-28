@@ -321,6 +321,7 @@ export function toPlatformJob(target, score = scoreDatasetTarget(target)) {
     claimTtlSeconds: 7200,
     retryLimit: 1,
     requiresSponsoredGas: true,
+    onboardingWaiverEligible: true,
     source: {
       type: "open_data_dataset",
       provider: DEFAULT_PROVIDER,

@@ -190,6 +190,7 @@ test("toPlatformJob creates a benchmark open-data audit job", () => {
   assert.equal(job.category, "data");
   assert.equal(job.tier, "starter");
   assert.equal(job.rewardAsset, "USDC");
+  assert.equal(job.onboardingWaiverEligible, true);
   assert.equal(job.verifierMode, "benchmark");
   assert.equal(job.inputSchemaRef, "schema://jobs/open-data-quality-audit-input");
   assert.equal(job.outputSchemaRef, "schema://jobs/open-data-quality-audit-output");

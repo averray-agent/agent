@@ -195,6 +195,7 @@ export function toPlatformJob(issue, score = scoreIssue(issue), {
     claimTtlSeconds: 7200,
     retryLimit: 1,
     requiresSponsoredGas: true,
+    onboardingWaiverEligible: true,
     source: {
       type: "github_issue",
       repo,
