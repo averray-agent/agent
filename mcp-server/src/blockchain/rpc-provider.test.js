@@ -159,6 +159,8 @@ test("write broadcaster waits through a two-second send response and settles on 
     const transaction = await broadcaster.broadcastTransaction(signedTransaction);
     assert.equal(transaction.hash, expectedHash);
     assert.equal(describeRpcProvider(transaction.provider), serverUrl(rpc));
+    assert.equal(broadcaster.takeProviderUsed(expectedHash), serverUrl(rpc));
+    assert.equal(broadcaster.takeProviderUsed(expectedHash), undefined);
     assert.equal((await transaction.wait()).status, 1);
     assert.equal(sendAttempts, 1);
   } finally {
@@ -171,6 +173,7 @@ test("write failover returns a transaction already visible on the next endpoint 
   const signedTransaction = await signedTestTransaction();
   const expectedHash = keccak256(signedTransaction);
   const primary = fakeWriteProvider({
+    url: "https://primary.example.test/v1/key",
     broadcastError: Object.assign(new Error("request timeout"), { code: "TIMEOUT" })
   });
   const knownTransaction = {
@@ -179,13 +182,17 @@ test("write failover returns a transaction already visible on the next endpoint 
       return { status: 1 };
     }
   };
-  const backup = fakeWriteProvider({ knownTransaction });
+  const backup = fakeWriteProvider({
+    url: "https://backup.example.test/private/path?key=secret",
+    knownTransaction
+  });
   const broadcaster = new WriteRpcBroadcaster([primary, backup]);
 
   assert.equal(
     await broadcaster.broadcastTransaction(signedTransaction),
     knownTransaction
   );
+  assert.equal(broadcaster.takeProviderUsed(expectedHash), "https://backup.example.test");
   assert.equal(primary.broadcastCalls, 1);
   assert.equal(backup.broadcastCalls, 0);
 });
@@ -278,6 +285,7 @@ function signedTestTransaction() {
 }
 
 function fakeWriteProvider({
+  url = "https://rpc.example.test",
   broadcastError,
   knownTransaction = null,
   receipt = null,
@@ -286,6 +294,9 @@ function fakeWriteProvider({
 } = {}) {
   return {
     broadcastCalls: 0,
+    _getConnection() {
+      return { url };
+    },
     async broadcastTransaction() {
       this.broadcastCalls += 1;
       if (broadcastError) {
