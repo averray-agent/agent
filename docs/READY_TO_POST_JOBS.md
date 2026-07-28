@@ -396,11 +396,13 @@ Review `osvIngestion.lastRun` in `/admin/status`, then switch
 The generated jobs use:
 
 - `schema://jobs/dependency-remediation-input`
-- `schema://jobs/dependency-remediation-output`
+- `schema://jobs/coding-output`
 
-Only post jobs when OSV reports a fixed version. The worker should open a
-focused PR that bumps the dependency, updates lockfiles, references the
-OSV/GHSA/CVE identifiers, and includes test or install evidence.
+Only post jobs when OSV reports a fixed version. The worker audits and reports
+the smallest safe dependency bump, affected manifests and lockfiles, advisory
+identifiers, and the tests or install checks that should validate it. Until the
+delivery loop exists, the worker must not modify the upstream repository or
+open a pull request.
 
 ---
 

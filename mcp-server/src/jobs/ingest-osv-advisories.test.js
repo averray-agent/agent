@@ -146,7 +146,7 @@ test("scoreAdvisory prefers fixed CVE-backed advisories", () => {
   assert.ok(scoreAdvisory(ADVISORY, { fixedVersion: "1.2.3" }) >= 85);
 });
 
-test("toPlatformJob creates a PR-shaped dependency remediation job", () => {
+test("toPlatformJob creates a report-shaped dependency advisory audit job", () => {
   const job = toPlatformJob({ target: TARGET, advisory: ADVISORY, fixedVersion: "1.2.3", score: 92 });
 
   assert.equal(job.id, "osv-npm-example-app-minimist-0-0-8-ghsa-vh95-rmgr-6w4m");
@@ -154,9 +154,9 @@ test("toPlatformJob creates a PR-shaped dependency remediation job", () => {
   assert.equal(job.tier, "starter");
   assert.equal(job.rewardAsset, "USDC");
   assert.equal(job.onboardingWaiverEligible, true);
-  assert.equal(job.verifierMode, "github_pr");
+  assert.equal(job.verifierMode, "benchmark");
   assert.equal(job.inputSchemaRef, "schema://jobs/dependency-remediation-input");
-  assert.equal(job.outputSchemaRef, "schema://jobs/dependency-remediation-output");
+  assert.equal(job.outputSchemaRef, "schema://jobs/coding-output");
   assert.equal(job.source.type, "osv_advisory");
   assert.equal(job.source.provider, "osv");
   assert.equal(job.source.packageName, "minimist");
@@ -233,7 +233,7 @@ test("ingestOsvAdvisories groups advisories by package target", async () => {
 
   assert.equal(payload.count, 1);
   assert.equal(payload.jobs[0].id, "osv-npm-example-app-minimist-0-0-8");
-  assert.equal(payload.jobs[0].title, "Remediate minimist advisories");
+  assert.equal(payload.jobs[0].title, "Audit and report on minimist dependency advisories");
   assert.equal(payload.jobs[0].source.fixedVersion, "1.19.13");
   assert.equal(payload.jobs[0].source.advisories.length, 2);
   assert.deepEqual(payload.jobs[0].source.advisoryIds.sort(), [

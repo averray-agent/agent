@@ -13,6 +13,7 @@ import {
 import {
   DEFAULT_STALE_AFTER_MS,
   VALID_JOB_LIFECYCLE_STATUSES,
+  assertActiveCatalogTitleTruthBoundary,
   effectiveJobType,
   effectiveRequiredRole,
   normaliseLifecycle,
@@ -67,6 +68,7 @@ export class JobCatalogService {
     this.getClaimEconomics = getClaimEconomics;
     this.parentSessionIndex = new Map();
     for (const job of this.jobs) {
+      assertActiveCatalogTitleTruthBoundary(job?.title, job?.lifecycle);
       this.indexJob(job);
     }
   }
@@ -155,6 +157,7 @@ export class JobCatalogService {
       ? patch.status.trim().toLowerCase()
       : undefined;
     const status = this.resolveLifecycleStatus({ action, requestedStatus, currentStatus: current.status });
+    assertActiveCatalogTitleTruthBoundary(job?.title, { status });
     const timestamp = updatedAt.toISOString();
     const lifecycle = {
       ...current,

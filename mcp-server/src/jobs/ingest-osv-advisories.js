@@ -4,11 +4,11 @@ import { pathToFileURL } from "node:url";
 import { DEFAULT_ESCROW_ASSET_SYMBOL } from "../core/assets.js";
 
 /**
- * Ingest OSV package advisories into dependency remediation jobs.
+ * Ingest OSV package advisories into dependency audit-and-report jobs.
  *
  * The v1 provider is intentionally allowlist-driven: operators provide npm
  * package/version/repo targets, OSV supplies the advisory facts, and Averray
- * emits PR-shaped remediation jobs only when a fixed version is discoverable.
+ * emits report-shaped audit jobs only when a fixed version is discoverable.
  *
  * Example:
  *   AGENT_ADMIN_TOKEN=... npm run ingest:osv-advisories -- \
@@ -258,8 +258,8 @@ export function toPlatformJob({ target, advisory, advisories, fixedVersion, scor
   const isGrouped = advisoryEntries.length > 1;
   const advisoryLabel = advisoryIds.length ? advisoryIds.join(", ") : primaryAdvisoryId;
   const title = isGrouped
-    ? `Remediate ${target.name} advisories`
-    : `Remediate ${primaryAdvisoryId} in ${target.name}`;
+    ? `Audit and report on ${target.name} dependency advisories`
+    : `Audit and report on ${primaryAdvisoryId} in ${target.name}`;
   const id = (isGrouped
     ? `osv-npm-${slugify(repo ?? "repo")}-${slugify(target.name)}-${slugify(target.version)}`
     : `osv-npm-${slugify(repo ?? "repo")}-${slugify(target.name)}-${slugify(target.version)}-${slugify(primaryAdvisoryId)}`
@@ -269,18 +269,18 @@ export function toPlatformJob({ target, advisory, advisories, fixedVersion, scor
     id,
     title,
     description:
-      `Update npm package ${target.name} from vulnerable version ${target.version} to ${effectiveFixedVersion} or a newer safe release. ${isGrouped ? "Advisories" : "Advisory"}: ${advisoryLabel}.`,
-    jobType: "work",
+      `Audit npm package ${target.name} at vulnerable version ${target.version} and report the smallest safe upgrade from ${effectiveFixedVersion}. ${isGrouped ? "Advisories" : "Advisory"}: ${advisoryLabel}.`,
+    jobType: "review",
     requiredRole: "worker",
     category: "security",
     tier: "starter",
     rewardAsset: DEFAULT_ESCROW_ASSET_SYMBOL,
     rewardAmount: 0.3,
-    verifierMode: "github_pr",
-    verifierMinimumScore: 70,
-    requireTestEvidence: true,
+    verifierMode: "benchmark",
+    verifierTerms: ["summary", "output", "status"],
+    verifierMinimumMatches: 3,
     inputSchemaRef: "schema://jobs/dependency-remediation-input",
-    outputSchemaRef: "schema://jobs/dependency-remediation-output",
+    outputSchemaRef: "schema://jobs/coding-output",
     claimTtlSeconds: 7200,
     retryLimit: 1,
     requiresSponsoredGas: true,
@@ -318,26 +318,26 @@ export function toPlatformJob({ target, advisory, advisories, fixedVersion, scor
       discoveryApi: "https://api.osv.dev/v1/querybatch"
     },
     acceptanceCriteria: [
-      `Update ${target.name} in ${manifestPath} so ${target.version} is no longer selected.`,
-      `Use ${effectiveFixedVersion} or a newer non-vulnerable version when compatible.`,
-      "Update the lockfile when the ecosystem uses one.",
-      "Run the relevant package manager install/check/test commands, or explain why a command cannot be run.",
-      "Open a focused pull request that references the OSV advisory/advisories and any CVE/GHSA aliases."
+      `Audit every occurrence of ${target.name}@${target.version} in ${manifestPath} and related lockfiles.`,
+      `Report whether ${effectiveFixedVersion} or a newer non-vulnerable version is the smallest compatible upgrade.`,
+      "Describe the manifest and lockfile changes that would be required.",
+      "Report the relevant package-manager install, check, and test commands that should validate the recommendation.",
+      "Cite the OSV advisory/advisories and any CVE/GHSA aliases without modifying the upstream repository."
     ],
     estimatedDifficulty: estimateDifficulty(effectiveScore),
     agentInstructions: [
-      ...(repo ? [`Work in https://github.com/${repo}.`] : ["Use the repository supplied by the operator before making changes."]),
+      ...(repo ? [`Audit the public repository at https://github.com/${repo}.`] : ["Audit the repository supplied by the operator."]),
       `Review OSV ${isGrouped ? "advisories" : "advisory"} ${advisoryLabel}${aliases.length ? ` (${aliases.join(", ")})` : ""}.`,
       `Find every occurrence of ${target.name}@${target.version} in ${manifestPath} and related lockfiles.`,
-      "Prefer the smallest safe dependency bump that satisfies every advisory.",
-      "Run tests or at least dependency installation/lockfile validation before submitting.",
-      "Submit structured evidence with prUrl, packageName, vulnerableVersion, fixedVersion, advisoryIds, tests, and notes."
+      "Recommend the smallest safe dependency bump that satisfies every advisory.",
+      "Report the tests or dependency installation and lockfile validation that should be run.",
+      "Do not modify the upstream repository or open a pull request; submit the audit report to Averray with summary, output, and status fields."
     ],
     verification: {
-      method: "github_pr",
-      suggestedCheck: "dependency_no_longer_vulnerable",
-      evidenceSchemaRef: "schema://jobs/dependency-remediation-output",
-      signals: ["pr_opened", "advisory_referenced", "dependency_updated", "lockfile_updated", "tests_submitted", "ci_passed"]
+      method: "benchmark",
+      suggestedCheck: "dependency_advisory_audit_report_complete",
+      evidenceSchemaRef: "schema://jobs/coding-output",
+      signals: ["advisory_referenced", "safe_version_reported", "change_plan_reported", "validation_plan_reported"]
     }
   };
 }

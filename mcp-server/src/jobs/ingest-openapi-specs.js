@@ -163,7 +163,7 @@ export function toPlatformJob(target, score = scoreOpenApiTarget(target)) {
 
   return {
     id,
-    title: `Audit OpenAPI quality: ${apiTitle}`,
+    title: `Audit and report on OpenAPI quality: ${apiTitle}`,
     description:
       `Validate the public OpenAPI document "${apiTitle}" and compare it with "${localSurface}" for broken examples, missing descriptions, schema drift, and endpoint documentation gaps.`,
     jobType: "review",
