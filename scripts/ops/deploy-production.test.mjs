@@ -1004,6 +1004,23 @@ test("deploy wrapper keeps the freeze armed after a refused deploy fast-forwards
   assert.ok(existsSync(markerPath), "the freeze marker must survive the second refusal");
 });
 
+test("deploy wrapper refuses a frozen no-new-commits rerun instead of taking the OLD==NEW fast path", async () => {
+  const { appRoot, env, markerPath, nextSha } = await makeStickyFreezeFixture();
+
+  // Same-sha re-dispatch of the refused deploy: the pre-marker gate returned
+  // early on OLD==NEW, but component pointers still trail the flagged files,
+  // so an auto-routed rerun would deploy them with the gate skipped.
+  const rerun = runDeploy(appRoot, {
+    ...env,
+    DEPLOY_OLD_SHA: nextSha,
+    DEPLOY_NEW_SHA: nextSha
+  });
+  assert.equal(rerun.status, 1, `a no-new-commits rerun must stay frozen\n${rerun.stdout}\n${rerun.stderr}`);
+  assert.match(rerun.stdout, /enforcing persisted freeze from/u);
+  assert.match(rerun.stderr, /D-03 contract compatibility freeze: refusing production deploy/u);
+  assert.ok(existsSync(markerPath), "the freeze marker must survive the rerun refusal");
+});
+
 test("deploy wrapper clears the persisted freeze once the deployment manifest pairs with the drift", async () => {
   const { appRoot, env, markerPath, nextSha } = await makeStickyFreezeFixture();
 
