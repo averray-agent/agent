@@ -215,6 +215,62 @@ export class PlatformService {
     }
   }
 
+  createExternalJobProjection(draft, confirmation) {
+    const existing = this.jobs.find((job) => job.id === draft?.jobId);
+    if (existing) {
+      if (
+        existing?.source?.type === "external"
+        && String(existing?.poster?.wallet ?? "").toLowerCase()
+          === String(draft?.wallet ?? "").toLowerCase()
+      ) {
+        return existing;
+      }
+      throw new ConflictError(
+        `Job already exists outside the external projection: ${draft?.jobId}`,
+        "external_job_projection_conflict"
+      );
+    }
+
+    const poster = {
+      wallet: String(draft.wallet).toLowerCase(),
+      fundedAt: confirmation.fundedAt,
+      txHash: confirmation.txHash,
+      blockNumber: String(confirmation.blockNumber)
+    };
+    const declaredSource = draft.definition?.source;
+    const created = this.createJob({
+      ...draft.definition,
+      id: draft.jobId,
+      source: {
+        type: "external",
+        poster,
+        ...(declaredSource ? { declared: declaredSource } : {})
+      },
+      lifecycle: {
+        status: "open",
+        createdAt: confirmation.fundedAt,
+        updatedAt: confirmation.fundedAt
+      }
+    });
+
+    created.poster = poster;
+    created.funding = {
+      source: "external_escrow",
+      state: "funded",
+      asset: created.rewardAsset,
+      amount: created.rewardAmount,
+      fundedAt: confirmation.fundedAt,
+      txHash: confirmation.txHash,
+      blockNumber: String(confirmation.blockNumber)
+    };
+    created.opsReserve = Number(draft.definition?.opsReserve ?? 0);
+    created.contingencyReserve = Number(draft.definition?.contingencyReserve ?? 0);
+    if (draft.definition?.input !== undefined) {
+      created.input = JSON.parse(JSON.stringify(draft.definition.input));
+    }
+    return created;
+  }
+
   async createAdminJob(input, { posterWallet = undefined } = {}) {
     const jobInput = await this.withRegisteredExternalSchema(input);
     const created = this.createJob(jobInput);

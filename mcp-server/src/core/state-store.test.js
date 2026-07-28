@@ -274,7 +274,8 @@ test("MemoryStateStore persists external drafts, monotonic wallet nonces, and de
     jobId: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     definition: { rewardAmount: "1.0" },
     createdAt: "2026-07-28T00:00:00.000Z",
-    expiresAt: "2026-07-31T00:00:00.000Z"
+    expiresAt: "2026-07-31T00:00:00.000Z",
+    status: "awaiting_funding"
   };
 
   assert.equal(firstNonce, "1");
@@ -284,10 +285,27 @@ test("MemoryStateStore persists external drafts, monotonic wallet nonces, and de
     activeAfter: "2026-07-25T00:00:00.000Z"
   }), true);
   assert.deepEqual(await store.getExternalJobDraft("draft-1"), draft);
+  assert.deepEqual(await store.getExternalJobDraftByJobId(draft.jobId), draft);
+  assert.deepEqual(await store.listExternalJobDrafts({ status: "awaiting_funding" }), [draft]);
   assert.equal(await store.createExternalJobDraft({ ...draft, draftId: "draft-2" }, {
     maxOpenDrafts: 1,
     activeAfter: "2026-07-25T00:00:00.000Z"
   }), false);
+
+  const live = await store.updateExternalJobDraft("draft-1", {
+    status: "live",
+    fundedAt: "2026-07-28T01:00:00.000Z"
+  });
+  assert.equal(live.status, "live");
+  assert.deepEqual(await store.listExternalJobDrafts({ status: "live" }), [live]);
+  assert.equal(await store.createExternalJobDraft({
+    ...draft,
+    draftId: "draft-2",
+    jobId: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  }, {
+    maxOpenDrafts: 1,
+    activeAfter: "2026-07-25T00:00:00.000Z"
+  }), true, "live drafts no longer consume the awaiting-funding cap");
 
   await store.appendExternalPostingDemandSignal({
     id: "signal-1",

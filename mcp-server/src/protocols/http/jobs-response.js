@@ -4,6 +4,7 @@ const DEFAULT_AGENT_LIMIT = 25;
 const MAX_AGENT_LIMIT = 100;
 
 const SOURCE_LABELS = new Map([
+  ["external", "external"],
   ["github_issue", "github"],
   ["open_data_dataset", "open_data"],
   ["openapi_spec", "openapi"],
@@ -13,6 +14,7 @@ const SOURCE_LABELS = new Map([
 ]);
 
 const SOURCE_ALIASES = new Map([
+  ["external", "external"],
   ["wiki", "wikipedia"],
   ["wikipedia_article", "wikipedia"],
   ["open_data", "open_data"],
@@ -125,6 +127,9 @@ function toCompactJobRow(job) {
     createdAt: lifecycle.createdAt ?? null,
     summary: summarizeJob(job),
     definitionUrl: `/jobs/definition?jobId=${encodeURIComponent(job.id)}`,
+    ...(job?.source?.type === "external" && job.source.poster
+      ? { poster: job.source.poster }
+      : {}),
     ...(sourceDetails ? { sourceDetails } : {})
   };
 }
@@ -138,6 +143,17 @@ function effectiveJobState(job) {
 }
 
 function compactSourceDetails(job) {
+  if (job?.source?.type === "external") {
+    const poster = job.source.poster ?? job.poster;
+    return poster
+      ? {
+          wallet: poster.wallet ?? null,
+          fundedAt: poster.fundedAt ?? null,
+          txHash: poster.txHash ?? null,
+          blockNumber: poster.blockNumber ?? null
+        }
+      : undefined;
+  }
   if (job?.source?.type !== "wikipedia_article") {
     return undefined;
   }
