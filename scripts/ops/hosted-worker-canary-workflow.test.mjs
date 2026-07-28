@@ -36,3 +36,16 @@ test("mainnet canary owns a dedicated refresh chain and preserves testnet auth",
     "workflow must document that the internal smoke runner owns a different refresh chain"
   );
 });
+
+test("canary workflow fails closed on missing evidence and summarizes timed settlement", async () => {
+  const workflow = await readFile(workflowPath, "utf8");
+
+  assert.match(
+    workflow,
+    /No worker-canary evidence file was produced\.[\s\S]{0,180}exit 1/u,
+    "a missing failure artifact must fail the evidence step"
+  );
+  assert.match(workflow, /settle_polls=.*\.stages\.settle\.pollCount/u);
+  assert.match(workflow, /settle_ms=.*\.stages\.settle\.elapsedMs/u);
+  assert.match(workflow, /if-no-files-found: error/u);
+});

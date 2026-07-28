@@ -271,7 +271,11 @@ test("resolveDispute converts display worker payout to asset base units", async 
 });
 
 test("resolveSinglePayout returns the settle/payout tx receipt", async () => {
-  const gateway = new BlockchainGateway({ enabled: false });
+  const events = [];
+  const gateway = new BlockchainGateway(
+    { enabled: false },
+    { logger: { info(fields, event) { events.push({ fields, event }); } } }
+  );
   const calls = [];
   gateway.signer = {};
   gateway.escrowContract = {
@@ -279,6 +283,11 @@ test("resolveSinglePayout returns the settle/payout tx receipt", async () => {
       calls.push(args);
       return {
         hash: "0xpayout",
+        provider: {
+          _getConnection() {
+            return { url: "https://rpc.example.test/v1/private-key?token=secret" };
+          }
+        },
         async wait() {
           return { blockNumber: 99, status: 1 };
         }
@@ -290,6 +299,21 @@ test("resolveSinglePayout returns the settle/payout tx receipt", async () => {
 
   assert.equal(calls.length, 1);
   assert.deepEqual(receipt, { txHash: "0xpayout", blockNumber: 99, status: 1 });
+  assert.deepEqual(events.map(({ event }) => event), [
+    "blockchain.resolve_single_payout.submitted",
+    "blockchain.resolve_single_payout.confirmed"
+  ]);
+  assert.deepEqual(events[1].fields, {
+    jobId: "wiki-job",
+    txHash: "0xpayout",
+    blockNumber: 99,
+    durationMs: events[1].fields.durationMs,
+    providerUsed: "https://rpc.example.test"
+  });
+  assert.equal(typeof events[1].fields.durationMs, "number");
+  assert.ok(events[1].fields.durationMs >= 0);
+  assert.equal(JSON.stringify(events).includes("private-key"), false);
+  assert.equal(JSON.stringify(events).includes("secret"), false);
 });
 
 test("handleClaimTimeout reopens the canonical chain job id", async () => {

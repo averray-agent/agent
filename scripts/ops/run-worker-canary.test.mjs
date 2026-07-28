@@ -210,21 +210,40 @@ test("evidence file is written and sanitized (no tokens or keys)", async () => {
   const evidenceFile = join(dir, "evidence.json");
   await runFull({ env: { WORKER_CANARY_EVIDENCE_FILE: evidenceFile } });
   const doc = JSON.parse(await readFile(evidenceFile, "utf8"));
+  assert.equal(doc.status, "passed");
   assert.equal(doc.jobId, JOB_ID);
   const serialized = JSON.stringify(doc);
   assert.ok(!/eyJ|private|signature|Bearer/u.test(serialized), "evidence must not leak tokens/keys");
 });
 
-test("a mid-loop failure still archives the disposable job (cleanup finally)", async () => {
+test("a mid-loop failure archives the job and still writes sanitized stage evidence", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "worker-canary-failed-"));
+  const evidenceFile = join(dir, "evidence.json");
   const operatorClient = okOperatorClient();
   const workerClient = okWorkerClient({
     async submitWork() {
-      throw new Error("boom mid-loop");
+      throw new Error("boom mid-loop Bearer eyJsecret.payload.sig");
     }
   });
-  await assert.rejects(() => runFull({ operatorClient, workerClient }), /boom mid-loop/u);
+  await assert.rejects(
+    () => runFull({
+      operatorClient,
+      workerClient,
+      env: { WORKER_CANARY_EVIDENCE_FILE: evidenceFile }
+    }),
+    /boom mid-loop/u
+  );
   const archive = operatorClient.calls.find(([n, path]) => n === "request" && path === "/admin/jobs/lifecycle");
   assert.ok(archive, "stranded canary job must still be archived on failure");
+
+  const doc = JSON.parse(await readFile(evidenceFile, "utf8"));
+  assert.equal(doc.status, "failed");
+  assert.equal(doc.failure.stage, "submit");
+  assert.match(doc.failure.message, /boom mid-loop/u);
+  assert.equal(doc.cleanup.jobArchived, true);
+  assert.equal(doc.stages.submit.status, "failed");
+  assert.equal(typeof doc.timings.submit, "number");
+  assert.ok(!JSON.stringify(doc).includes("eyJsecret"), "failure evidence must redact bearer tokens");
 });
 
 test("WORKER_CANARY_KEEP_JOB leaves the job live (no archive)", async () => {
@@ -588,6 +607,69 @@ test("stage 6 settle: a job that never closes fails loud", async () => {
     async snapshotWorker() { return { usdcRaw: 0n, aacLiquidRaw: 0n }; }
   };
   await assert.rejects(() => runSettleStage(settleArgs({ reader })), /not "Closed"|settlement-stall/u);
+});
+
+test("stage 6 settle: API resolved never ends polling before the chain job is Closed", async () => {
+  let reads = 0;
+  let clock = 1_000;
+  const logs = [];
+  const reader = {
+    async readEscrowJob() {
+      reads += 1;
+      return reads === 1
+        ? { state: 3, releasedRaw: 0n, rewardRaw: REWARD_RAW, worker: WORKER }
+        : { state: 6, releasedRaw: REWARD_RAW, rewardRaw: REWARD_RAW, worker: WORKER };
+    },
+    async snapshotWorker() { return { usdcRaw: REWARD_RAW, aacLiquidRaw: 0n }; }
+  };
+  const out = await runSettleStage(settleArgs({
+    reader,
+    settleTimeoutMs: 180_000,
+    settlePollMs: 5_000,
+    now: () => clock,
+    sleepImpl: async (ms) => { clock += ms; },
+    log: (message) => logs.push(message)
+  }));
+
+  assert.equal(reads, 2, "resolved API state must not substitute for on-chain Closed");
+  assert.equal(out.summary.pollCount, 2);
+  assert.equal(out.summary.elapsedMs, 5_000);
+  assert.match(logs[0], /poll #1.*elapsed=0ms.*session=resolved.*jobState=Submitted/u);
+  assert.match(logs[1], /poll #2.*elapsed=5000ms.*jobState=Closed/u);
+});
+
+test("stage 6 settle: a poll read exception reports the error and real elapsed time", async () => {
+  let reads = 0;
+  let clock = 10_000;
+  const logs = [];
+  const reader = {
+    async readEscrowJob() {
+      reads += 1;
+      if (reads === 2) {
+        throw new Error("eth_call failed: HTTP 429");
+      }
+      return { state: 3, releasedRaw: 0n, rewardRaw: REWARD_RAW, worker: WORKER };
+    },
+    async snapshotWorker() { return { usdcRaw: 0n, aacLiquidRaw: 0n }; }
+  };
+  await assert.rejects(
+    () => runSettleStage(settleArgs({
+      reader,
+      settleTimeoutMs: 180_000,
+      settlePollMs: 5_000,
+      now: () => clock,
+      sleepImpl: async (ms) => { clock += ms; },
+      log: (message) => logs.push(message)
+    })),
+    (error) => {
+      assert.match(error.message, /poll #2 failed after 5000ms.*HTTP 429/u);
+      assert.doesNotMatch(error.message, /after 180s/u);
+      assert.equal(error.canaryEvidence.pollCount, 2);
+      assert.equal(error.canaryEvidence.elapsedMs, 5_000);
+      return true;
+    }
+  );
+  assert.match(logs.at(-1), /poll #2 FAILED after 5000ms.*HTTP 429/u);
 });
 
 test("stage 6 settle: released != reward fails", async () => {
