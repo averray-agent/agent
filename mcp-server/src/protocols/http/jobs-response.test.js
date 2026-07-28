@@ -6,7 +6,7 @@ import { buildPublicJobsResponse } from "./jobs-response.js";
 const JOBS = [
   {
     id: "wiki-en-123-citation-repair-example",
-    title: "Repair Wikipedia citations: Example",
+    title: "Audit and report on Wikipedia citations: Example",
     description: "Review the article and return an editor-ready citation repair proposal.",
     category: "wikipedia",
     jobType: "review",
@@ -35,7 +35,7 @@ const JOBS = [
   },
   {
     id: "openapi-averray-http-api",
-    title: "Audit OpenAPI quality: Averray HTTP API",
+    title: "Audit and report on OpenAPI quality: Averray HTTP API",
     description: "Validate the public OpenAPI document.",
     category: "api",
     jobType: "review",

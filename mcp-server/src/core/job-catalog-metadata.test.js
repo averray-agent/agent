@@ -62,7 +62,7 @@ test("createJob preserves autonomous work metadata", () => {
   const service = makeService();
   const job = service.createJob({
     ...BASE_JOB,
-    title: "Add parser regression tests",
+    title: "Audit and report on parser regression coverage",
     description: "GitHub issue context goes here.",
     jobType: "review",
     requiredRole: "reviewer",
@@ -74,21 +74,21 @@ test("createJob preserves autonomous work metadata", () => {
       labels: ["good first issue", "tests"],
       score: 88
     },
-    acceptanceCriteria: ["Open a focused PR", "Relevant tests pass"],
+    acceptanceCriteria: ["Describe a focused proposed change", "Report the relevant tests"],
     estimatedDifficulty: "starter",
-    agentInstructions: ["Keep the patch narrow."],
+    agentInstructions: ["Keep the recommendation narrow."],
     verification: {
-      method: "github_pr",
-      signals: ["pr_opened", "ci_passed", "merged"]
+      method: "benchmark",
+      signals: ["issue_reviewed", "proposed_change_reported", "validation_plan_reported"]
     }
   });
 
-  assert.equal(job.title, "Add parser regression tests");
+  assert.equal(job.title, "Audit and report on parser regression coverage");
   assert.equal(job.jobType, "review");
   assert.equal(job.requiredRole, "reviewer");
   assert.equal(job.source.repo, "example/project");
-  assert.deepEqual(job.acceptanceCriteria, ["Open a focused PR", "Relevant tests pass"]);
-  assert.equal(job.verification.method, "github_pr");
+  assert.deepEqual(job.acceptanceCriteria, ["Describe a focused proposed change", "Report the relevant tests"]);
+  assert.equal(job.verification.method, "benchmark");
 });
 
 test("jobs default to worker work when role fields are omitted", () => {
@@ -198,7 +198,7 @@ test("public Wikipedia definitions include direct agent affordances", () => {
   service.createJob({
     ...BASE_JOB,
     id: "wiki-en-123-citation-repair-example",
-    title: "Wikipedia citation repair: Example article",
+    title: "Audit and report on Wikipedia citations: Example article",
     category: "wikipedia",
     jobType: "review",
     outputSchemaRef: "schema://jobs/wikipedia-citation-repair-output",

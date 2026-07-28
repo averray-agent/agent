@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import { ValidationError } from "./errors.js";
 import {
+  activeCatalogTitlePromisesUpstreamSideEffect,
   buildVerifierConfig,
   normalizeJobId,
   normalizeJobInput,
@@ -65,6 +66,23 @@ test("normalizeJobInput returns the canonical job record shape", () => {
   });
   assert.equal(job.lifecycle.createdAt, "2026-05-01T12:00:00.000Z");
   assert.equal(job.lifecycle.staleAt, "2026-05-15T12:00:00.000Z");
+});
+
+test("active catalog titles cannot promise upstream side effects before delivery exists", () => {
+  assert.equal(activeCatalogTitlePromisesUpstreamSideEffect("Fix status badge"), true);
+  assert.equal(
+    activeCatalogTitlePromisesUpstreamSideEffect("Audit and report on GitHub issue: Fix status badge"),
+    false
+  );
+  assert.throws(
+    () => normalizeJobInput({ ...BASE_JOB, title: "Fix status badge" }),
+    (err) => err instanceof ValidationError && /Audit and report on/.test(err.message)
+  );
+  assert.doesNotThrow(() => normalizeJobInput({
+    ...BASE_JOB,
+    title: "Fix status badge (historical)",
+    lifecycle: { status: "archived" }
+  }));
 });
 
 test("normalizeJobInput preserves recurring schedule and finite reserve policy", () => {

@@ -148,7 +148,7 @@ export function toPlatformJob(target, score = scoreSpecTarget(target)) {
 
   return {
     id,
-    title: `Audit standards freshness: ${specTitle}`,
+    title: `Audit and report on standards freshness: ${specTitle}`,
     description:
       `Compare the local surface "${localSurface}" against the canonical ${provider} specification "${specTitle}" and report any drift or missing updates.`,
     jobType: "review",

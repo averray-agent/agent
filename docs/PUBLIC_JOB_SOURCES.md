@@ -132,12 +132,13 @@ After Wikipedia, use the same pattern for:
      resources do not crowd out new datasets in later runs.
 
 3. **OSV/NVD advisories**
-   - package-to-CVE mapping, remediation summaries
+   - package-to-CVE mapping, dependency audit reports
    - structured impact notes
    - v1 ingestion is npm-only:
      `POST /admin/jobs/ingest/osv` accepts package/version/repo targets,
-     queries OSV, and emits dependency remediation PR jobs when a fixed version
-     exists. CVE aliases link to NVD for operator review.
+     queries OSV, and emits audit-and-report jobs when a fixed version exists.
+     These jobs stop at an Averray report and do not modify upstream repositories
+     or open pull requests. CVE aliases link to NVD for operator review.
      It can also discover package targets from configured GitHub npm lockfiles
      when explicit package targets are not set.
    - Admin callers can include `idempotencyKey` for exact retry replay and

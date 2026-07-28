@@ -3,7 +3,6 @@
 import { pathToFileURL } from "node:url";
 import {
   DEFAULT_OPEN_PR_CAP_PER_REPO,
-  buildAverrayDisclosureFooter,
   evaluateMaintainerSurfaceForIssue,
   repoFromIssue
 } from "../core/maintainer-surface-policy.js";
@@ -168,30 +167,29 @@ export function toPlatformJob(issue, score = scoreIssue(issue), {
   const repo = repoFullName(issue);
   const issueNumber = Number(issue.number);
   const issueUrl = String(issue.html_url ?? `https://github.com/${repo}/issues/${issueNumber}`);
-  const title = String(issue.title ?? `GitHub issue #${issueNumber}`).trim();
+  const issueTitle = String(issue.title ?? `GitHub issue #${issueNumber}`).trim();
   const body = String(issue.body ?? "").trim();
   const category = inferCategory(issue);
-  const verificationMethod = suggestVerificationMethod(issue);
-  const slug = slugify(title).slice(0, 48);
+  const slug = slugify(issueTitle).slice(0, 48);
   const id = `oss-${slugify(repo)}-${issueNumber}-${slug}`.slice(0, 120);
-  const acceptanceCriteria = buildAcceptanceCriteria({ category, repo, issueNumber, verificationMethod });
+  const acceptanceCriteria = buildAcceptanceCriteria({ category, repo, issueNumber });
 
   return {
     id,
-    title,
-    description: summariseIssueBody(body),
-    jobType: "work",
+    title: `Audit and report on GitHub issue: ${issueTitle}`,
+    description:
+      `Audit ${repo} issue #${issueNumber} and return a focused implementation report. Upstream issue context: ${summariseIssueBody(body)}`,
+    jobType: "review",
     requiredRole: "worker",
     category,
     tier: "starter",
     rewardAsset: DEFAULT_ESCROW_ASSET_SYMBOL,
     rewardAmount: 0.2,
-    verifierMode: "github_pr",
-    verifierMinimumScore: 60,
-    requireIssueReference: true,
-    requireTestEvidence: true,
+    verifierMode: "benchmark",
+    verifierTerms: ["summary", "output", "status"],
+    verifierMinimumMatches: 3,
     inputSchemaRef: "schema://jobs/coding-input",
-    outputSchemaRef: "schema://jobs/github-pr-evidence-output",
+    outputSchemaRef: "schema://jobs/coding-output",
     claimTtlSeconds: 7200,
     retryLimit: 1,
     requiresSponsoredGas: true,
@@ -216,18 +214,17 @@ export function toPlatformJob(issue, score = scoreIssue(issue), {
     acceptanceCriteria,
     estimatedDifficulty: estimateDifficulty(score),
     agentInstructions: [
-      `Read ${issueUrl} before changing code.`,
-      "Keep the patch minimal and focused on the issue.",
-      "Run the relevant tests or docs build before submitting.",
-      "Append the Averray disclosure footer to the PR body before opening it.",
-      "Submit structured evidence with prUrl, summary, tests, and notes when work is ready."
+      `Read ${issueUrl} and audit the reported behavior against the linked repository.`,
+      "Describe the smallest focused change that would address the issue.",
+      "Report the relevant tests or docs build that should validate the proposed change.",
+      "Do not modify the upstream repository or open a pull request; submit the audit report to Averray only.",
+      "Submit the report with summary, output, and status fields."
     ],
-    disclosureFooterTemplate: buildAverrayDisclosureFooter(),
     verification: {
-      method: "github_pr",
-      suggestedCheck: verificationMethod,
-      signals: ["attempted", "pr_opened", "issue_referenced", "tests_submitted", "ci_passed", "maintainer_approved", "merged"],
-      evidenceSchemaRef: "schema://jobs/github-pr-evidence-output"
+      method: "benchmark",
+      suggestedCheck: "github_issue_audit_report_complete",
+      signals: ["issue_reviewed", "proposed_change_reported", "validation_plan_reported"],
+      evidenceSchemaRef: "schema://jobs/coding-output"
     }
   };
 }
@@ -289,28 +286,17 @@ function inferCategory(issue) {
   return "coding";
 }
 
-function suggestVerificationMethod(issue) {
-  const title = String(issue.title ?? "").toLowerCase();
-  const labels = labelNames(issue);
-  if (labels.has("documentation") || labels.has("docs") || /\b(doc|docs|documentation|readme|example|typo)\b/u.test(title)) {
-    return "docs_build_or_review";
-  }
-  if (labels.has("test") || labels.has("tests") || /\b(test|tests|coverage)\b/u.test(title)) {
-    return "tests_pass";
-  }
-  return "pr_review";
-}
-
-function buildAcceptanceCriteria({ category, repo, issueNumber, verificationMethod }) {
+function buildAcceptanceCriteria({ category, repo, issueNumber }) {
   return [
-    `Open or prepare a focused patch for ${repo} issue #${issueNumber}.`,
-    "Reference the GitHub issue in the submission evidence.",
-    verificationMethod === "docs_build_or_review"
-      ? "Run the docs build or explain why no docs build is available."
-      : "Run the relevant tests or explain why they cannot be run.",
+    `Audit ${repo} issue #${issueNumber} and cite the issue in the report.`,
+    "Describe a focused proposed change without modifying the upstream repository.",
+    category === "docs"
+      ? "Report the docs build or review steps that should validate the proposed change."
+      : "Report the relevant tests that should validate the proposed change.",
     category === "testing"
-      ? "Include a regression test or coverage improvement where practical."
-      : "Keep unrelated refactors out of the patch."
+      ? "Describe a regression test or coverage improvement where practical."
+      : "Keep unrelated refactors out of the recommendation.",
+    "Submit the audit report to Averray; do not open a pull request."
   ];
 }
 

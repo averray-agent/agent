@@ -45,8 +45,8 @@ test("toPlatformJob preserves GitHub issue context as job metadata", () => {
   const job = toPlatformJob(GOOD_ISSUE, 92);
 
   assert.equal(job.id, "oss-example-project-42-add-tests-for-parser-validation-error");
-  assert.equal(job.title, GOOD_ISSUE.title);
-  assert.equal(job.jobType, "work");
+  assert.equal(job.title, `Audit and report on GitHub issue: ${GOOD_ISSUE.title}`);
+  assert.equal(job.jobType, "review");
   assert.equal(job.requiredRole, "worker");
   assert.equal(job.category, "testing");
   assert.equal(job.rewardAsset, "USDC");
@@ -57,19 +57,14 @@ test("toPlatformJob preserves GitHub issue context as job metadata", () => {
   assert.equal(job.source.score, 92);
   assert.ok(job.acceptanceCriteria.some((entry) => entry.includes("issue #42")));
   assert.ok(job.agentInstructions.some((entry) => entry.includes(GOOD_ISSUE.html_url)));
-  assert.equal(job.verifierMode, "github_pr");
-  assert.equal(job.outputSchemaRef, "schema://jobs/github-pr-evidence-output");
-  assert.ok(job.agentInstructions.some((entry) => entry.includes("Averray disclosure footer")));
-  assert.ok(job.disclosureFooterTemplate.includes("Averray platform"));
+  assert.equal(job.verifierMode, "benchmark");
+  assert.equal(job.outputSchemaRef, "schema://jobs/coding-output");
+  assert.ok(job.agentInstructions.some((entry) => entry.includes("Do not modify the upstream repository")));
   assert.equal(job.source.maintainerPolicy.openPrCap, 3);
   assert.deepEqual(job.verification.signals, [
-    "attempted",
-    "pr_opened",
-    "issue_referenced",
-    "tests_submitted",
-    "ci_passed",
-    "maintainer_approved",
-    "merged"
+    "issue_reviewed",
+    "proposed_change_reported",
+    "validation_plan_reported"
   ]);
 });
 
@@ -172,5 +167,5 @@ test("ingestGithubIssues returns dry-run shaped jobs and filters pull requests",
   assert.equal(payload.count, 1);
   assert.equal(payload.jobs.length, 1);
   assert.equal(payload.jobs[0].source.issueNumber, 42);
-  assert.equal(payload.jobs[0].verification.method, "github_pr");
+  assert.equal(payload.jobs[0].verification.method, "benchmark");
 });

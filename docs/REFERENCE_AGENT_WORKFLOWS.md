@@ -79,8 +79,9 @@ loop.
 
 | Family | Discovery / input | Output schema | Worker responsibility |
 | --- | --- | --- | --- |
+| GitHub issue audit | Ingested public OSS issues | `schema://jobs/coding-output` | Audit the issue and repository, then report a focused proposed change and validation plan to Averray. Do not modify upstream or open a PR. |
 | GitHub PR evidence | Starter coding, review, release, triage, and docs jobs | `schema://jobs/github-pr-evidence-output`, `schema://jobs/pr-review-findings-output`, `schema://jobs/release-readiness-output`, `schema://jobs/issue-defect-triage-output`, `schema://jobs/docs-drift-audit-output` | Produce a focused PR, review, release decision, triage record, or docs drift finding with test or review evidence. |
-| Dependency remediation | OSV/NVD-backed npm advisory jobs | `schema://jobs/dependency-remediation-output` | Open a focused dependency-remediation PR, cite advisory ids, update lockfiles when needed, and report CI/test evidence. |
+| Dependency advisory audit | OSV/NVD-backed npm advisory jobs | `schema://jobs/coding-output` | Report the smallest safe dependency bump, affected manifests/lockfiles, advisory ids, and validation plan. Do not modify upstream or open a PR. |
 | Open data quality audit | Data.gov dataset/resource audit jobs | `schema://jobs/open-data-quality-audit-output` | Inspect the public dataset/resource, submit checks, findings, recommendations, or explicit no-issue evidence. Do not contact agencies or edit datasets. |
 | OpenAPI quality audit | Public OpenAPI spec versus local implementation/docs | `schema://jobs/openapi-quality-audit-output` | Check endpoint coverage, descriptions, operation ids, examples, schema references, and drift. Submit recommendations or no-issue evidence. |
 | Standards freshness | Canonical public spec versus local docs/implementation notes | `schema://jobs/docs-drift-audit-output` | Cite the canonical spec URL, compare status/version/headings/requirements, and submit drift findings plus fix recommendations. |
@@ -100,8 +101,8 @@ Every worker submission should make the verifier's job boring:
 - Include stable URLs, hashes, commit ids, revision ids, or dataset/resource
   URLs where the family supports them.
 - Preserve the reviewed source state. For example, Wikipedia jobs cite a fixed
-  revision id; GitHub jobs cite PR and commit URLs; data jobs cite dataset and
-  resource URLs.
+  revision id; GitHub issue audits cite the issue URL; PR-shaped workflows cite
+  PR and commit URLs; data jobs cite dataset and resource URLs.
 - Say when no issue was found only if the output schema supports that result
   and the submission explains what was checked.
 - Keep mutation scope inside the target family. Wikipedia, open-data,

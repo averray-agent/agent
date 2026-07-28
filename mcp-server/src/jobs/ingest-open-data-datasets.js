@@ -299,7 +299,7 @@ export function openDataResourceKey(value) {
 
 export function toPlatformJob(target, score = scoreDatasetTarget(target)) {
   const format = normalizeFormat(target.resourceFormat) || "UNKNOWN";
-  const title = `Audit open-data resource: ${target.datasetTitle}`;
+  const title = `Audit and report on open-data resource: ${target.datasetTitle}`;
   const id = `open-data-datagov-${slugify(target.datasetId || target.datasetTitle)}-${slugify(target.resourceId || target.resourceTitle || format)}`.slice(0, 120);
 
   return {

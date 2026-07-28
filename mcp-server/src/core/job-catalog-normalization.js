@@ -12,6 +12,9 @@ export const VALID_AGENT_ROLES = new Set(["worker", "curator", "reviewer", "publ
 export const VALID_JOB_LIFECYCLE_STATUSES = new Set(["open", "paused", "archived"]);
 export const DEFAULT_STALE_AFTER_MS = 14 * 24 * 60 * 60 * 1000;
 
+const UPSTREAM_SIDE_EFFECT_TITLE_PATTERN =
+  /^(?:add|close|comment|deliver|deploy|edit|fix|implement|merge|migrate|open|patch|publish|remove|remediate|repair|replace|resolve|send|submit|update|upgrade)\b/iu;
+
 const DEFAULT_ROLE_BY_JOB_TYPE = {
   work: "worker",
   curation: "curator",
@@ -85,6 +88,7 @@ export function normalizeJobInput(input) {
   const delegationPolicy = normaliseDelegationPolicy(input?.delegationPolicy, { rewardAmount, rewardAsset });
   const lineage = normalisePlainObject(input?.lineage, "lineage");
   const lifecycle = normaliseLifecycle(input?.lifecycle, { disableStale: recurring });
+  assertActiveCatalogTitleTruthBoundary(title, lifecycle);
   const recurringPolicy = normaliseRecurringPolicy(input?.recurringPolicy, {
     recurring,
     rewardAmount,
@@ -124,6 +128,21 @@ export function normalizeJobInput(input) {
     ...(schedule ? { schedule } : {}),
     ...(recurringPolicy ? { recurringPolicy } : {})
   };
+}
+
+export function activeCatalogTitlePromisesUpstreamSideEffect(title) {
+  return UPSTREAM_SIDE_EFFECT_TITLE_PATTERN.test(String(title ?? "").trim());
+}
+
+export function assertActiveCatalogTitleTruthBoundary(title, lifecycle = { status: "open" }) {
+  if (!title || lifecycle?.status !== "open") {
+    return;
+  }
+  if (activeCatalogTitlePromisesUpstreamSideEffect(title)) {
+    throw new ValidationError(
+      `Active catalog title promises an upstream side effect before delivery exists: "${title}". Describe the job as "Audit and report on …".`
+    );
+  }
 }
 
 export function buildVerifierConfig(verifierMode, input) {

@@ -15,19 +15,19 @@ export const DEFAULT_CATEGORIES = [
 
 const TASK_CONFIG = {
   citation_repair: {
-    titlePrefix: "Wikipedia citation repair",
+    titlePrefix: "Audit and report on Wikipedia citations",
     outputSchemaRef: "schema://jobs/wikipedia-citation-repair-output",
     verifierTerms: ["page_title", "revision_id", "citation_findings", "proposed_changes", "review_notes"],
     rewardAmount: 0.4
   },
   freshness_check: {
-    titlePrefix: "Wikipedia freshness check",
+    titlePrefix: "Audit and report on Wikipedia freshness",
     outputSchemaRef: "schema://jobs/wikipedia-freshness-check-output",
     verifierTerms: ["page_title", "revision_id", "freshness_findings", "recommended_editor_actions", "risk_level"],
     rewardAmount: 0.4
   },
   infobox_consistency: {
-    titlePrefix: "Wikipedia infobox consistency",
+    titlePrefix: "Audit and report on Wikipedia infobox consistency",
     outputSchemaRef: "schema://jobs/wikipedia-infobox-consistency-output",
     verifierTerms: ["page_title", "revision_id", "checked_fields", "proposed_changes", "review_notes"],
     rewardAmount: 0.4
@@ -257,7 +257,7 @@ export function toPlatformJob(article, score = scoreArticle(article)) {
     agentInstructions: [
       `Review the fixed revision at ${pinnedRevisionUrl}.`,
       "Do not edit Wikipedia directly from the agent account.",
-      "Submit the correction or review notes back to Averray as structured evidence.",
+      "Submit the audit report and proposed changes back to Averray as structured evidence.",
       "Any later public Wikipedia communication must come from Averray or an approved Averray editor/bot account, with required disclosures.",
       "Include source URLs and enough context for a human editor to verify the proposal."
     ],

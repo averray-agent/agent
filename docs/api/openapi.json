@@ -386,7 +386,7 @@
                     "value": [
                       {
                         "id": "openapi-averray-averray-http-api",
-                        "title": "Audit OpenAPI quality: Averray HTTP API",
+                        "title": "Audit and report on OpenAPI quality: Averray HTTP API",
                         "jobType": "review",
                         "requiredRole": "worker",
                         "category": "api",
@@ -401,7 +401,7 @@
                       "jobs": [
                         {
                           "id": "wiki-en-123-citation-repair-example",
-                          "title": "Repair Wikipedia citations: Example",
+                          "title": "Audit and report on Wikipedia citations: Example",
                           "state": "open",
                           "claimState": "open",
                           "effectiveState": "claimable",
