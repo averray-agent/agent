@@ -11,6 +11,7 @@ const DEFAULT_RPC_FAILOVER_STALL_MS = 250;
 const DEFAULT_RPC_REQUEST_TIMEOUT_MS = 750;
 const DEFAULT_RPC_WRITE_REQUEST_TIMEOUT_MS = 15_000;
 const MINIMUM_RPC_WRITE_REQUEST_TIMEOUT_MS = 15_000;
+const RPC_PROVIDER_LABEL = Symbol("averray.rpcProviderLabel");
 const RETRYABLE_BROADCAST_ERROR_CODES = new Set([
   "NETWORK_ERROR",
   "SERVER_ERROR",
@@ -31,11 +32,9 @@ export function createRpcProvider(config) {
     config?.rpcRequestTimeoutMs,
     DEFAULT_RPC_REQUEST_TIMEOUT_MS
   );
-  const providers = urls.map((url) => {
-    const request = new FetchRequest(url);
-    request.timeout = requestTimeoutMs;
-    return new JsonRpcProvider(request);
-  });
+  const providers = urls.map((url) =>
+    createLabeledJsonRpcProvider(url, requestTimeoutMs)
+  );
   if (providers.length === 1) {
     return providers[0];
   }
@@ -76,11 +75,9 @@ export function createWriteRpcBroadcaster(config) {
       `RPC write request timeout must be at least ${MINIMUM_RPC_WRITE_REQUEST_TIMEOUT_MS}ms.`
     );
   }
-  const providers = normalizeRpcUrls(config).map((url) => {
-    const request = new FetchRequest(url);
-    request.timeout = requestTimeoutMs;
-    return new JsonRpcProvider(request);
-  });
+  const providers = normalizeRpcUrls(config).map((url) =>
+    createLabeledJsonRpcProvider(url, requestTimeoutMs)
+  );
   return new WriteRpcBroadcaster(providers);
 }
 
@@ -99,6 +96,9 @@ export function bindSignerToWriteBroadcaster(signer, readProvider, broadcaster) 
 
 export function describeRpcProvider(provider) {
   try {
+    if (provider?.[RPC_PROVIDER_LABEL]) {
+      return provider[RPC_PROVIDER_LABEL];
+    }
     const rawUrl = provider?._getConnection?.()?.url;
     if (!rawUrl) {
       return "unknown";
@@ -106,6 +106,25 @@ export function describeRpcProvider(provider) {
     // Identify the selected endpoint without ever logging credentials, query
     // strings, or keyed-provider path segments.
     return new URL(rawUrl).origin;
+  } catch {
+    return "unknown";
+  }
+}
+
+function createLabeledJsonRpcProvider(url, requestTimeoutMs) {
+  const request = new FetchRequest(url);
+  request.timeout = requestTimeoutMs;
+  const provider = new JsonRpcProvider(request);
+  Object.defineProperty(provider, RPC_PROVIDER_LABEL, {
+    value: safeRpcOrigin(url),
+    enumerable: false
+  });
+  return provider;
+}
+
+function safeRpcOrigin(url) {
+  try {
+    return new URL(url).origin;
   } catch {
     return "unknown";
   }
