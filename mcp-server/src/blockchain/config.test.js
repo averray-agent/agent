@@ -22,6 +22,8 @@ test("loadBlockchainConfig prefers DWELLER_RPC_URL", () => {
 
   assert.equal(config.enabled, true);
   assert.equal(config.rpcUrl, "https://dweller.example");
+  assert.equal(config.rpcRequestTimeoutMs, 750);
+  assert.equal(config.rpcWriteRequestTimeoutMs, 15_000);
 });
 
 test("loadBlockchainConfig falls back from POLKADOT_RPC_URL to RPC_URL", () => {
@@ -49,7 +51,8 @@ test("loadBlockchainConfig preserves an ordered, deduplicated RPC failover list"
       "https://backup-a.example"
     ].join(","),
     RPC_FAILOVER_STALL_MS: "125",
-    RPC_REQUEST_TIMEOUT_MS: "900"
+    RPC_REQUEST_TIMEOUT_MS: "900",
+    RPC_WRITE_REQUEST_TIMEOUT_MS: "20000"
   });
 
   assert.equal(config.rpcUrl, "https://primary.example");
@@ -64,6 +67,7 @@ test("loadBlockchainConfig preserves an ordered, deduplicated RPC failover list"
   ]);
   assert.equal(config.rpcFailoverStallMs, 125);
   assert.equal(config.rpcRequestTimeoutMs, 900);
+  assert.equal(config.rpcWriteRequestTimeoutMs, 20_000);
 });
 
 test("loadBlockchainConfig rejects unsafe RPC failover timing values", () => {
@@ -82,6 +86,14 @@ test("loadBlockchainConfig rejects unsafe RPC failover timing values", () => {
       RPC_FAILOVER_STALL_MS: "forever"
     }),
     /RPC_FAILOVER_STALL_MS must be an integer/u
+  );
+  assert.throws(
+    () => loadBlockchainConfig({
+      ...baseEnv,
+      RPC_URL: "https://primary.example",
+      RPC_WRITE_REQUEST_TIMEOUT_MS: "14999"
+    }),
+    /RPC_WRITE_REQUEST_TIMEOUT_MS must be an integer/u
   );
 });
 

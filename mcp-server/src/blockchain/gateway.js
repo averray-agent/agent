@@ -24,7 +24,11 @@ import {
 import { loadBlockchainConfig } from "./config.js";
 import { KmsSigner } from "./kms-signer.js";
 import { applyGasFeeBuffer } from "./fee-buffer.js";
-import { createRpcProvider } from "./rpc-provider.js";
+import {
+  bindSignerToWriteBroadcaster,
+  createRpcProvider,
+  createWriteRpcBroadcaster
+} from "./rpc-provider.js";
 import {
   buildKmsCredentialsProvider,
   PROFILE_BLOCKCHAIN_SIGNER,
@@ -112,6 +116,7 @@ export class BlockchainGateway {
     this.config = config;
     if (!config.enabled) {
       this.provider = undefined;
+      this.writeBroadcaster = undefined;
       this.signer = undefined;
       this.policyContract = undefined;
       this.accountContract = undefined;
@@ -123,12 +128,22 @@ export class BlockchainGateway {
     }
 
     this.provider = createRpcProvider(config);
+    this.writeBroadcaster = createWriteRpcBroadcaster(config);
     // Raise the fee ceiling by a small buffer so a Polkadot Hub tx isn't left
     // underpriced when the per-block fee multiplier rises during KMS-sign latency.
     applyGasFeeBuffer(this.provider, config.gasFeeBufferBps, logger);
-    this.signer = createSigner(config, this.provider, { logger });
+    const baseSigner = createSigner(config, this.provider, { logger });
+    this.signer = bindSignerToWriteBroadcaster(
+      baseSigner,
+      this.provider,
+      this.writeBroadcaster
+    );
     this.arbitratorSigner = config.arbitratorSignerPrivateKey
-      ? new Wallet(config.arbitratorSignerPrivateKey, this.provider)
+      ? bindSignerToWriteBroadcaster(
+          new Wallet(config.arbitratorSignerPrivateKey, this.provider),
+          this.provider,
+          this.writeBroadcaster
+        )
       : this.signer;
     this.accountContract = new Contract(
       config.agentAccountAddress,

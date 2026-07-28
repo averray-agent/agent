@@ -5,6 +5,7 @@ import { derivePolkadotHubAssetAddress } from "../services/strategy-asset-config
 const DEFAULT_GAS_FEE_BUFFER_BPS = 2000;
 const DEFAULT_RPC_FAILOVER_STALL_MS = 250;
 const DEFAULT_RPC_REQUEST_TIMEOUT_MS = 750;
+const DEFAULT_RPC_WRITE_REQUEST_TIMEOUT_MS = 15_000;
 
 function parseLegacyAssets(rawAssets) {
   if (!rawAssets) {
@@ -261,6 +262,12 @@ export function loadBlockchainConfig(env = process.env) {
       "RPC_REQUEST_TIMEOUT_MS",
       DEFAULT_RPC_REQUEST_TIMEOUT_MS,
       { minimum: 100, maximum: 30_000 }
+    ),
+    rpcWriteRequestTimeoutMs: resolveBoundedMilliseconds(
+      env.RPC_WRITE_REQUEST_TIMEOUT_MS,
+      "RPC_WRITE_REQUEST_TIMEOUT_MS",
+      DEFAULT_RPC_WRITE_REQUEST_TIMEOUT_MS,
+      { minimum: 15_000, maximum: 120_000 }
     ),
     signerBackend,
     signerPrivateKey: env.SIGNER_PRIVATE_KEY ?? "",
