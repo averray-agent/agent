@@ -84,6 +84,14 @@ import { fileURLToPath } from "node:url";
 import { ConfigError } from "../core/errors.js";
 import { assertMainnetSignerPosture, assertChainIdMatchesRpc } from "./startup-guards.js";
 import { createRewardBankHealthProvider } from "../core/health-capability.js";
+import {
+  ExternalPostingService,
+  resolveExternalPostingConfig
+} from "../core/external-posting-service.js";
+import {
+  ExternalPostingWatcherService,
+  resolveExternalPostingWatcherConfig
+} from "./external-posting-watcher.js";
 
 const moduleDir = dirname(fileURLToPath(import.meta.url));
 loadLocalEnv(process.cwd(), resolve(moduleDir, "../../"));
@@ -296,6 +304,26 @@ export async function createPlatformRuntime() {
     logger,
     () => new VerifierService(platformService, stateStore, gateway)
   );
+  const externalPostingService = initStep("init-external-posting-service", logger, () =>
+    new ExternalPostingService({
+      stateStore,
+      platformService,
+      config: resolveExternalPostingConfig(process.env),
+      logger,
+      eventBus
+    })
+  );
+  const externalPostingWatcher = initStep("init-external-posting-watcher", logger, () =>
+    new ExternalPostingWatcherService(
+      externalPostingService,
+      stateStore,
+      eventBus,
+      {
+        ...resolveExternalPostingWatcherConfig(process.env),
+        logger
+      }
+    )
+  );
   const eventListener = initStep("init-event-listener", logger, () =>
     gateway.isEnabled() ? new EventListener(gateway, eventBus, stateStore) : undefined
   );
@@ -402,6 +430,7 @@ export async function createPlatformRuntime() {
   platformService.standardsSpecIngestionScheduler = standardsSpecIngestionScheduler;
   platformService.openApiSpecIngestionScheduler = openApiSpecIngestionScheduler;
   platformService.xcmSettlementWatcher = xcmSettlementWatcher;
+  platformService.externalPostingWatcher = externalPostingWatcher;
   platformService.xcmObservationRelay = xcmObservationRelay;
   platformService.upstreamStatusPoller = upstreamStatusPoller;
   platformService.bootstrapSelfReportScheduler = bootstrapSelfReportScheduler;
@@ -420,6 +449,7 @@ export async function createPlatformRuntime() {
   standardsSpecIngestionScheduler.start();
   openApiSpecIngestionScheduler.start();
   xcmSettlementWatcher.start();
+  externalPostingWatcher.start();
   xcmObservationRelay.start();
   upstreamStatusPoller.start();
   bootstrapSelfReportScheduler.start();
@@ -444,6 +474,8 @@ export async function createPlatformRuntime() {
     rewardBankHealthProvider,
     policyService,
     verifierService,
+    externalPostingService,
+    externalPostingWatcher,
     gateway,
     mutationBackendConfig,
     pimlicoClient,

@@ -47,6 +47,8 @@ function makeHarness(overrides = {}) {
   const route = createOperationalRoutes({
     authConfig: overrides.authConfig ?? AUTH_CONFIG,
     deployedSha: overrides.deployedSha,
+    externalPostingMode: overrides.externalPostingMode,
+    externalPostingWatcher: overrides.externalPostingWatcher,
     gateway: overrides.gateway ?? {
       isEnabled: () => false,
       healthCheck: async () => {
@@ -139,6 +141,8 @@ test("GET /health reports service liveness separately from disabled capabilities
   assert.equal(response.body.capabilityHealth.xcmObserver, "staged");
   assert.equal(response.body.capabilityHealth.indexer, "unavailable");
   assert.equal(response.body.capabilityHealth.gasSponsor, "disabled");
+  assert.equal(response.body.capabilityHealth.externalPosting, "disabled");
+  assert.equal(response.body.capabilityHealth.externalPostingWatcherLagSeconds, null);
   assert.equal(response.body.addresses.token, "0x0000053900000000000000000000000001200000");
   assert.equal(response.body.addresses.agentAccountCore, "0x510918E24DEbcA163F306923CA234319e72b22d5");
   assert.equal(response.body.addresses.escrowCore, "0xfE841c2dc58E4389b1AB59E3e42F9EB12A694Bea");
@@ -175,6 +179,36 @@ test("GET /health reports service liveness separately from disabled capabilities
     "storeHealth",
     "xcmStatus",
   ].sort());
+});
+
+test("GET /health exposes watcher lag and stages open external posting while the indexer is stale", async () => {
+  const { response, route } = makeHarness({
+    externalPostingMode: "open",
+    externalPostingWatcher: {
+      async getStatus() {
+        return {
+          enabled: true,
+          running: true,
+          current: false,
+          lagSeconds: 3_600,
+          lagBudgetSeconds: 600,
+          finalizedBlockNumber: "1234",
+          finalizedBlockTimestamp: "2026-07-28T10:00:00.000Z"
+        };
+      }
+    }
+  });
+
+  await route({
+    request: { method: "GET", headers: {} },
+    response,
+    pathname: "/health"
+  });
+
+  assert.equal(response.body.capabilityHealth.externalPosting, "staged");
+  assert.equal(response.body.capabilityHealth.externalPostingWatcherLagSeconds, 3_600);
+  assert.equal(response.body.components.externalPostingWatcher.current, false);
+  assert.ok(response.body.warnings.some((warning) => warning.code === "external_posting_staged"));
 });
 
 test("GET /health reuses the injected reward-bank provider", async () => {

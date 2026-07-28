@@ -6,6 +6,7 @@ export function createJobRoutes({
   authMiddleware,
   enforceLimit,
   ensureSessionOwnership,
+  externalPostingService,
   rateLimitConfig,
   readJsonBody,
   respond,
@@ -16,7 +17,10 @@ export function createJobRoutes({
       const jobs = await service.listJobsWithSessions({
         wallet: url.searchParams.get("wallet") ?? undefined
       });
-      respond(response, 200, buildPublicJobsResponse(jobs, url.searchParams));
+      const projected = externalPostingService?.filterExternalCatalogProjection
+        ? await externalPostingService.filterExternalCatalogProjection(jobs)
+        : jobs;
+      respond(response, 200, buildPublicJobsResponse(projected, url.searchParams));
       return true;
     }
 

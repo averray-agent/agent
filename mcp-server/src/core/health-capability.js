@@ -66,6 +66,12 @@ export const GAS_SPONSOR_STATUS = Object.freeze({
   DISABLED: "disabled"
 });
 
+export const EXTERNAL_POSTING_STATUS = Object.freeze({
+  ENABLED: "enabled",
+  STAGED: "staged",
+  DISABLED: "disabled"
+});
+
 const DEFAULT_PRODUCT_HEALTH_CACHE_MS = 60_000;
 const DEFAULT_LIVE_HEALTH_REFRESH_MS = 15_000;
 const DEFAULT_LIVE_HEALTH_MAX_AGE_MS = 60_000;
@@ -158,14 +164,25 @@ export function resolveCapabilityHealth({
   mutationBackendStatus,
   xcmWatcherStatus,
   indexerProbe,
-  gasSponsorHealth
+  gasSponsorHealth,
+  externalPostingMode = "closed",
+  externalPostingWatcherStatus
 }) {
   return {
     blockchain: resolveBlockchainStatus(blockchainHealth),
     treasuryMutations: resolveTreasuryStatus(mutationBackendStatus),
     xcmObserver: resolveXcmObserverStatus(xcmWatcherStatus),
     indexer: resolveIndexerStatus(indexerProbe),
-    gasSponsor: resolveGasSponsorStatus(gasSponsorHealth)
+    gasSponsor: resolveGasSponsorStatus(gasSponsorHealth),
+    externalPosting: resolveExternalPostingStatus(
+      externalPostingMode,
+      externalPostingWatcherStatus
+    ),
+    externalPostingWatcherLagSeconds: Number.isFinite(
+      externalPostingWatcherStatus?.lagSeconds
+    )
+      ? Number(externalPostingWatcherStatus.lagSeconds)
+      : null
   };
 }
 
@@ -216,6 +233,16 @@ function resolveGasSponsorStatus(health) {
   return health?.enabled === true
     ? GAS_SPONSOR_STATUS.ENABLED
     : GAS_SPONSOR_STATUS.DISABLED;
+}
+
+function resolveExternalPostingStatus(mode, watcherStatus) {
+  const normalizedMode = String(mode ?? "closed").trim().toLowerCase();
+  if (normalizedMode === "closed") {
+    return EXTERNAL_POSTING_STATUS.DISABLED;
+  }
+  return watcherStatus?.current === true
+    ? EXTERNAL_POSTING_STATUS.ENABLED
+    : EXTERNAL_POSTING_STATUS.STAGED;
 }
 
 /**
@@ -274,6 +301,14 @@ export function buildCapabilityWarnings(capabilityHealth) {
       code: `gas_sponsor_${capabilityHealth.gasSponsor}`,
       severity: "warning",
       message: `Gas sponsor capability is ${capabilityHealth.gasSponsor}.`
+    });
+  }
+
+  if (capabilityHealth.externalPosting === EXTERNAL_POSTING_STATUS.STAGED) {
+    warnings.push({
+      code: "external_posting_staged",
+      severity: "warning",
+      message: "External posting is staged because its finalized-event watcher is not current."
     });
   }
 

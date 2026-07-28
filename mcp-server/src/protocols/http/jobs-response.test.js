@@ -5,6 +5,30 @@ import { buildPublicJobsResponse } from "./jobs-response.js";
 
 const JOBS = [
   {
+    id: `0x${"ab".repeat(32)}`,
+    title: "External coding audit",
+    description: "Audit and report on the target repository.",
+    category: "coding",
+    jobType: "work",
+    tier: "starter",
+    rewardAsset: "USDC",
+    rewardAmount: 1,
+    lifecycle: {
+      status: "open",
+      state: "open",
+      createdAt: "2026-07-28T10:00:00.000Z"
+    },
+    source: {
+      type: "external",
+      poster: {
+        wallet: "0x1111111111111111111111111111111111111111",
+        fundedAt: "2026-07-28T10:00:00.000Z",
+        txHash: `0x${"cd".repeat(32)}`,
+        blockNumber: "1234"
+      }
+    }
+  },
+  {
     id: "wiki-en-123-citation-repair-example",
     title: "Repair Wikipedia citations: Example",
     description: "Review the article and return an editor-ready citation repair proposal.",
@@ -58,6 +82,23 @@ test("public jobs response keeps bare array for legacy callers", () => {
   const response = buildPublicJobsResponse(JOBS, new URLSearchParams());
 
   assert.equal(response, JOBS);
+});
+
+test("source=external exposes only external rows with poster funding provenance", () => {
+  const response = buildPublicJobsResponse(
+    JOBS,
+    new URLSearchParams("source=external")
+  );
+
+  assert.equal(response.total, 1);
+  assert.equal(response.jobs[0].source, "external");
+  assert.deepEqual(response.jobs[0].poster, JOBS[0].source.poster);
+  assert.deepEqual(response.jobs[0].sourceDetails, {
+    wallet: "0x1111111111111111111111111111111111111111",
+    fundedAt: "2026-07-28T10:00:00.000Z",
+    txHash: `0x${"cd".repeat(32)}`,
+    blockNumber: "1234"
+  });
 });
 
 test("public jobs response filters and compacts agent-friendly queries", () => {

@@ -39,6 +39,8 @@ export function resolveMetricsAuthConfig(env = process.env) {
 export function createOperationalRoutes({
   authConfig,
   deployedSha = process.env.DEPLOYED_SHA?.trim() || "unknown",
+  externalPostingMode = "closed",
+  externalPostingWatcher,
   gateway,
   getRewardBankHealth,
   indexerHealthProbe,
@@ -74,13 +76,21 @@ export function createOperationalRoutes({
       // loaded. HTTP status follows `serviceHealth.ok` alone, so a
       // trust-core-only launch still returns 200/"ok" at the liveness layer
       // and surfaces chain/treasury posture via `capabilityHealth`.
-      const [storeHealth, chainHealth, gasHealth, xcmWatcherStatus, indexerProbe] = await Promise.all([
+      const [
+        storeHealth,
+        chainHealth,
+        gasHealth,
+        xcmWatcherStatus,
+        indexerProbe,
+        externalPostingWatcherStatus
+      ] = await Promise.all([
         stateStore.healthCheck?.() ?? { ok: true, backend: stateStore.constructor.name },
         getCachedBlockchainHealth(),
         pimlicoClient?.healthCheck?.() ?? { ok: true, backend: "pimlico", enabled: false, mode: "disabled" },
         service?.xcmSettlementWatcher?.getStatus?.()?.catch?.(() => undefined) ?? undefined,
         indexerHealthProbe?.().catch(() => ({ ok: false, reason: "indexer_status_unavailable" }))
-          ?? { ok: false, reason: "indexer_status_url_unconfigured" }
+          ?? { ok: false, reason: "indexer_status_url_unconfigured" },
+        externalPostingWatcher?.getStatus?.()?.catch?.(() => undefined) ?? undefined
       ]);
       const mutationBackendStatus = await getMutationBackendStatus({
         gateway,
@@ -95,7 +105,9 @@ export function createOperationalRoutes({
         mutationBackendStatus,
         xcmWatcherStatus,
         indexerProbe,
-        gasSponsorHealth: gasHealth
+        gasSponsorHealth: gasHealth,
+        externalPostingMode,
+        externalPostingWatcherStatus
       });
       const productHealth = await getProductHealthSnapshot();
 
@@ -115,7 +127,8 @@ export function createOperationalRoutes({
           stateStore: storeHealth,
           blockchain: chainHealth,
           gasSponsor: gasHealth,
-          indexer: indexerProbe
+          indexer: indexerProbe,
+          externalPostingWatcher: externalPostingWatcherStatus
         }
       });
       return true;

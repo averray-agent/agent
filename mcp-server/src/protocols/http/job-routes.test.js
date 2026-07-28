@@ -70,6 +70,7 @@ function makeHarness(overrides = {}) {
       calls.push(["ensureSessionOwnership", { sessionId, wallet }]);
       return overrides.session ?? { sessionId, wallet };
     },
+    externalPostingService: overrides.externalPostingService,
     rateLimitConfig: { adminJobs: { max: 1, windowMs: 1000 } },
     readJsonBody: async () => {
       calls.push(["readJsonBody"]);
@@ -130,6 +131,37 @@ test("GET /jobs lists live session-joined jobs and preserves response builder sh
     ["respond", { statusCode: 200, body: response.body, headers: {} }],
   ]);
   assert.deepEqual(response.body, [{ id: "job-1", title: "Job 1", lifecycle: { state: "open" }, category: "coding" }]);
+});
+
+test("GET /jobs applies the external projection boundary before source filtering", async () => {
+  const external = {
+    id: "external-1",
+    title: "External",
+    category: "coding",
+    source: { type: "external" },
+    lifecycle: { state: "open" }
+  };
+  const curated = {
+    id: "curated-1",
+    title: "Curated",
+    category: "coding",
+    lifecycle: { state: "open" }
+  };
+  const { response, route } = makeHarness({
+    jobs: [external, curated],
+    externalPostingService: {
+      async filterExternalCatalogProjection(jobs) {
+        return jobs.filter((job) => job.id !== "external-1");
+      }
+    }
+  });
+
+  assert.equal(await invoke(route, {
+    path: "/jobs?source=external",
+    response
+  }), true);
+  assert.equal(response.body.total, 0);
+  assert.deepEqual(response.body.jobs, []);
 });
 
 test("GET /jobs/tiers returns cached tier requirements", async () => {

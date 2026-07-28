@@ -19,7 +19,8 @@ import {
 } from "./errors.js";
 import { decimalToBaseUnits } from "./platform-service-helpers.js";
 
-export const EXTERNAL_DRAFT_FUNDING_NOTE = "funding detection ships with the watcher";
+export const EXTERNAL_DRAFT_FUNDING_NOTE =
+  "Awaiting a matching finalized escrow creation from the platform indexer.";
 export const EXTERNAL_POSTING_MODES = new Set(["closed", "allowlist", "open"]);
 export const CREATE_SINGLE_PAYOUT_SIGNATURE =
   "createSinglePayoutJob(bytes32,address,uint256,uint256,uint256,uint256,bytes32,bytes32,bytes32)";
@@ -142,15 +143,21 @@ export function rebuildExternalDraftArtifacts(draft, config) {
 export class ExternalPostingService {
   constructor({
     stateStore,
+    platformService = undefined,
     config = resolveExternalPostingConfig(),
-    now = () => new Date()
+    now = () => new Date(),
+    logger = console,
+    eventBus = undefined
   } = {}) {
     if (!stateStore) {
       throw new ConfigError("ExternalPostingService requires a state store.");
     }
     this.stateStore = stateStore;
+    this.platformService = platformService;
     this.config = config;
     this.now = now;
+    this.logger = logger;
+    this.eventBus = eventBus;
   }
 
   async createDraft(walletInput, payload) {
@@ -222,7 +229,8 @@ export class ExternalPostingService {
       definition,
       ...artifacts,
       createdAt,
-      expiresAt
+      expiresAt,
+      status: "awaiting_funding"
     };
     const stored = await this.stateStore.createExternalJobDraft(draft, {
       maxOpenDrafts: this.config.maxOpenDrafts,
@@ -289,10 +297,153 @@ export class ExternalPostingService {
     };
   }
 
+  async reconcileFinalizedCreation(observationInput) {
+    const observation = normalizeFinalizedCreation(observationInput);
+    const draft = await this.stateStore.getExternalJobDraftByJobId?.(observation.jobId);
+    if (!draft) {
+      this.logger.warn?.(
+        {
+          event: "external_posting_unknown_job_observed",
+          jobId: observation.jobId,
+          poster: observation.poster,
+          txHash: observation.txHash,
+          blockNumber: observation.blockNumber
+        },
+        "external_posting.unknown_job_observed"
+      );
+      this.publishReconciliationEvent("unknown", observation);
+      return { outcome: "unknown", jobId: observation.jobId, projected: false };
+    }
+
+    if (draft.status === "mismatch") {
+      return {
+        outcome: "mismatch",
+        jobId: draft.jobId,
+        field: draft.mismatchField,
+        projected: false,
+        permanent: true
+      };
+    }
+    if (draft.status === "expired") {
+      return {
+        outcome: "expired",
+        jobId: draft.jobId,
+        projected: false,
+        permanent: true
+      };
+    }
+    if (draft.status === "live") {
+      return this.projectConfirmedDraft(draft);
+    }
+
+    const mismatchField = firstCreationMismatch(draft, observation);
+    if (mismatchField) {
+      const updated = await this.stateStore.updateExternalJobDraft?.(draft.draftId, {
+        status: "mismatch",
+        mismatchField,
+        mismatchObservedAt: this.currentTime().toISOString(),
+        mismatchObservation: observation
+      }) ?? {
+        ...draft,
+        status: "mismatch",
+        mismatchField,
+        mismatchObservation: observation
+      };
+      this.publishReconciliationEvent("mismatch", observation, { field: mismatchField });
+      return {
+        outcome: "mismatch",
+        jobId: updated.jobId,
+        field: mismatchField,
+        projected: false,
+        permanent: true
+      };
+    }
+
+    if (Date.parse(observation.fundedAt) > Date.parse(draft.expiresAt)) {
+      await this.stateStore.updateExternalJobDraft?.(draft.draftId, {
+        status: "expired",
+        fundedAfterExpiry: observation
+      });
+      this.publishReconciliationEvent("expired", observation, {
+        reason: "funded_after_expiry"
+      });
+      return {
+        outcome: "expired",
+        jobId: draft.jobId,
+        projected: false,
+        permanent: true,
+        reason: "funded_after_expiry"
+      };
+    }
+
+    const confirmation = {
+      fundedAt: observation.fundedAt,
+      txHash: observation.txHash,
+      blockNumber: observation.blockNumber
+    };
+    const updated = await this.stateStore.updateExternalJobDraft?.(draft.draftId, {
+      status: "live",
+      fundedAt: confirmation.fundedAt,
+      fundingTxHash: confirmation.txHash,
+      fundingBlockNumber: confirmation.blockNumber,
+      confirmation
+    }) ?? {
+      ...draft,
+      status: "live",
+      fundedAt: confirmation.fundedAt,
+      fundingTxHash: confirmation.txHash,
+      fundingBlockNumber: confirmation.blockNumber,
+      confirmation
+    };
+    this.publishReconciliationEvent("live", observation);
+    return this.projectConfirmedDraft(updated);
+  }
+
+  async hydrateConfirmedProjections() {
+    const drafts = await this.stateStore.listExternalJobDrafts?.({
+      status: "live",
+      limit: 10_000
+    }) ?? [];
+    const results = [];
+    for (const draft of drafts) {
+      results.push(await this.projectConfirmedDraft(draft));
+    }
+    return results;
+  }
+
+  async projectConfirmedDraft(draft) {
+    if (await this.stateStore.isExternalJobDelisted(draft.jobId)) {
+      return {
+        outcome: "live",
+        jobId: draft.jobId,
+        projected: false,
+        reason: "delisted"
+      };
+    }
+    const confirmation = draft.confirmation ?? {
+      fundedAt: draft.fundedAt,
+      txHash: draft.fundingTxHash,
+      blockNumber: draft.fundingBlockNumber
+    };
+    await this.platformService?.createExternalJobProjection?.(draft, confirmation);
+    return {
+      outcome: "live",
+      jobId: draft.jobId,
+      projected: Boolean(this.platformService?.createExternalJobProjection),
+      fundedAt: confirmation.fundedAt,
+      txHash: confirmation.txHash,
+      blockNumber: confirmation.blockNumber
+    };
+  }
+
   async filterExternalCatalogProjection(jobs = []) {
     const visibility = await Promise.all(jobs.map(async (job) => {
       if (job?.source !== "external" && job?.source?.type !== "external") {
         return true;
+      }
+      const draft = await this.stateStore.getExternalJobDraftByJobId?.(job?.id);
+      if (!isWatcherConfirmedDraft(draft)) {
+        return false;
       }
       return !(await this.stateStore.isExternalJobDelisted(job?.id));
     }));
@@ -316,6 +467,26 @@ export class ExternalPostingService {
       schema: signal.schema,
       decision: signal.decision,
       attemptedAt: signal.attemptedAt
+    });
+  }
+
+  publishReconciliationEvent(outcome, observation, extra = {}) {
+    this.eventBus?.publish?.({
+      id: `external-posting-reconciled-${observation.jobId}-${Date.now()}`,
+      topic: `external_posting.${outcome}`,
+      wallet: observation.poster,
+      wallets: [observation.poster],
+      jobId: observation.jobId,
+      correlationId: observation.jobId,
+      timestamp: this.currentTime().toISOString(),
+      data: {
+        jobId: observation.jobId,
+        poster: observation.poster,
+        txHash: observation.txHash,
+        blockNumber: observation.blockNumber,
+        fundedAt: observation.fundedAt,
+        ...extra
+      }
     });
   }
 }
@@ -465,7 +636,37 @@ function assertStoredDraftDeterminism(draft, config) {
 }
 
 function presentDraft(draft, now) {
-  const expired = now.getTime() >= Date.parse(draft.expiresAt);
+  if (draft.status === "live") {
+    return {
+      draftId: draft.draftId,
+      jobId: draft.jobId,
+      specHash: draft.specHash,
+      definition: cloneJsonObject(draft.definition),
+      calldata: cloneJsonObject(draft.calldata),
+      createdAt: draft.createdAt,
+      expiresAt: draft.expiresAt,
+      status: "live",
+      fundedAt: draft.fundedAt,
+      txHash: draft.fundingTxHash,
+      blockNumber: draft.fundingBlockNumber
+    };
+  }
+  if (draft.status === "mismatch") {
+    return {
+      draftId: draft.draftId,
+      jobId: draft.jobId,
+      specHash: draft.specHash,
+      definition: cloneJsonObject(draft.definition),
+      calldata: cloneJsonObject(draft.calldata),
+      createdAt: draft.createdAt,
+      expiresAt: draft.expiresAt,
+      status: `mismatch(${draft.mismatchField})`,
+      mismatchField: draft.mismatchField,
+      permanent: true
+    };
+  }
+  const expired = draft.status === "expired"
+    || now.getTime() >= Date.parse(draft.expiresAt);
   return {
     draftId: draft.draftId,
     jobId: draft.jobId,
@@ -477,6 +678,82 @@ function presentDraft(draft, now) {
     status: expired ? "expired" : "awaiting_funding",
     ...(!expired ? { note: EXTERNAL_DRAFT_FUNDING_NOTE } : {})
   };
+}
+
+function normalizeFinalizedCreation(value) {
+  const source = requirePlainObject(value, "observation");
+  if (source.finalized !== true) {
+    throw new ValidationError("External job creation observation must be finalized.");
+  }
+  return {
+    jobId: normalizeBytes32(source.jobId, "jobId"),
+    specHash: normalizeBytes32(source.specHash, "specHash"),
+    poster: normalizeWallet(source.poster),
+    asset: normalizeAddress(source.asset, "asset"),
+    reward: normalizeUint(source.reward, "reward"),
+    opsReserve: normalizeUint(source.opsReserve, "opsReserve"),
+    contingencyReserve: normalizeUint(source.contingencyReserve, "contingencyReserve"),
+    fundedAt: normalizeIso(source.fundedAt, "fundedAt"),
+    txHash: normalizeBytes32(source.txHash, "txHash"),
+    blockNumber: normalizeUint(source.blockNumber, "blockNumber"),
+    finalized: true
+  };
+}
+
+function firstCreationMismatch(draft, observation) {
+  const args = Array.isArray(draft?.calldata?.args) ? draft.calldata.args : [];
+  const expected = {
+    specHash: String(args[8] ?? draft?.specHash ?? "").toLowerCase(),
+    poster: String(draft?.wallet ?? "").toLowerCase(),
+    asset: String(args[1] ?? "").toLowerCase(),
+    reward: String(args[2] ?? ""),
+    opsReserve: String(args[3] ?? ""),
+    contingencyReserve: String(args[4] ?? "")
+  };
+  for (const field of [
+    "specHash",
+    "poster",
+    "asset",
+    "reward",
+    "opsReserve",
+    "contingencyReserve"
+  ]) {
+    if (expected[field] !== observation[field]) {
+      return field;
+    }
+  }
+  return undefined;
+}
+
+function isWatcherConfirmedDraft(draft) {
+  const confirmation = draft?.confirmation;
+  return draft?.status === "live"
+    && Boolean(confirmation?.fundedAt)
+    && Boolean(confirmation?.txHash)
+    && Boolean(confirmation?.blockNumber);
+}
+
+function normalizeAddress(raw, label) {
+  if (!isAddress(String(raw ?? ""))) {
+    throw new ValidationError(`${label} must be an EVM address.`);
+  }
+  return getAddress(String(raw)).toLowerCase();
+}
+
+function normalizeUint(raw, label) {
+  const value = String(raw ?? "").trim();
+  if (!/^\d+$/u.test(value)) {
+    throw new ValidationError(`${label} must be an exact unsigned integer.`);
+  }
+  return BigInt(value).toString();
+}
+
+function normalizeIso(raw, label) {
+  const parsed = Date.parse(raw);
+  if (!Number.isFinite(parsed)) {
+    throw new ValidationError(`${label} must be an ISO-8601 timestamp.`);
+  }
+  return new Date(parsed).toISOString();
 }
 
 function extractDefinitionCandidate(payload) {

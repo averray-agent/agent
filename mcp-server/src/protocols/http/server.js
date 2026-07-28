@@ -13,10 +13,6 @@ import { buildAgentProfile } from "../../core/agent-profile.js";
 import { buildBadgeFromSession } from "../../core/badge-metadata.js";
 import { buildDiscoveryManifest } from "../../core/discovery-manifest.js";
 import {
-  ExternalPostingService,
-  resolveExternalPostingConfig
-} from "../../core/external-posting-service.js";
-import {
   getPublicBuiltinJobSchemaByName,
   listBuiltinJobSchemas,
   schemaRefToJobSchemaPath
@@ -68,6 +64,8 @@ const {
   rewardBankHealthProvider,
   policyService,
   verifierService,
+  externalPostingService,
+  externalPostingWatcher,
   stateStore,
   contentRecoveryLog,
   gateway,
@@ -97,10 +95,6 @@ metrics.gauge("state_store_backend", "1 when state store backend matches the lab
 const { metricsBearerToken, metricsAuthRequired } = resolveMetricsAuthConfig(process.env);
 const { paymentsSendEnabled } = resolvePaymentRouteConfig(process.env);
 const indexerHealthProbe = createConfiguredIndexerHealthProbe(process.env);
-const externalPostingService = new ExternalPostingService({
-  stateStore,
-  config: resolveExternalPostingConfig(process.env)
-});
 const port = Number(process.env.PORT ?? 8787);
 const readJsonBody = createJsonBodyReader({ maxBytes: httpConfig.maxBodyBytes });
 const resolveCorsHeaders = createCorsHeaderResolver(httpConfig);
@@ -477,6 +471,7 @@ const handleJobRoute = createJobRoutes({
   readJsonBody,
   respond,
   service,
+  externalPostingService,
 });
 
 const handleExternalJobRoute = createExternalJobRoutes({
@@ -644,6 +639,8 @@ const handlePaymentRoute = createPaymentRoutes({
 
 const handleOperationalRoute = createOperationalRoutes({
   authConfig,
+  externalPostingMode: externalPostingService.config.mode,
+  externalPostingWatcher,
   gateway,
   getRewardBankHealth: rewardBankHealthProvider,
   indexerHealthProbe,

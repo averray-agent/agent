@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   BLOCKCHAIN_STATUS,
+  EXTERNAL_POSTING_STATUS,
   GAS_SPONSOR_STATUS,
   INDEXER_STATUS,
   TREASURY_MUTATIONS_STATUS,
@@ -217,6 +218,29 @@ test("resolveCapabilityHealth — blockchain: disabled when health probe omitted
   assert.equal(result.blockchain, BLOCKCHAIN_STATUS.DISABLED);
   assert.equal(result.treasuryMutations, TREASURY_MUTATIONS_STATUS.UNAVAILABLE);
   assert.equal(result.gasSponsor, GAS_SPONSOR_STATUS.DISABLED);
+});
+
+test("resolveCapabilityHealth — external posting is disabled closed, staged when stale, and enabled only when current", () => {
+  const closed = resolveCapabilityHealth({
+    externalPostingMode: "closed",
+    externalPostingWatcherStatus: { current: true, lagSeconds: 5 }
+  });
+  assert.equal(closed.externalPosting, EXTERNAL_POSTING_STATUS.DISABLED);
+  assert.equal(closed.externalPostingWatcherLagSeconds, 5);
+
+  const staged = resolveCapabilityHealth({
+    externalPostingMode: "open",
+    externalPostingWatcherStatus: { current: false, lagSeconds: 3_600 }
+  });
+  assert.equal(staged.externalPosting, EXTERNAL_POSTING_STATUS.STAGED);
+  assert.equal(staged.externalPostingWatcherLagSeconds, 3_600);
+
+  const enabled = resolveCapabilityHealth({
+    externalPostingMode: "allowlist",
+    externalPostingWatcherStatus: { current: true, lagSeconds: 30 }
+  });
+  assert.equal(enabled.externalPosting, EXTERNAL_POSTING_STATUS.ENABLED);
+  assert.equal(enabled.externalPostingWatcherLagSeconds, 30);
 });
 
 // ─── buildCapabilityWarnings ─────────────────────────────────────────

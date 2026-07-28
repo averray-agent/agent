@@ -6,6 +6,11 @@ import schema from "ponder:schema";
 import { decodeCursor, listTerminalXcmOutcomes, normalizeLimit } from "./xcm-outcomes";
 import { cursorForSource, type OutcomeCursorMode } from "./xcm-outcome-cursor";
 import { XcmOutcomePublisherService } from "./xcm-outcome-publisher";
+import {
+  decodeExternalJobCreationCursor,
+  listFinalizedExternalJobCreations,
+  normalizeExternalJobCreationLimit
+} from "./external-job-creations";
 
 const GRAPHQL_BEARER_TOKEN = process.env.GRAPHQL_BEARER_TOKEN?.trim() || undefined;
 if (!GRAPHQL_BEARER_TOKEN) {
@@ -44,9 +49,20 @@ app.get("/", (c) =>
   c.json({
     status: "ok",
     service: "agent-platform-indexer",
-    endpoints: ["/graphql", "/xcm/outcomes", "/xcm/outcomes/status"]
+    endpoints: [
+      "/graphql",
+      "/escrow/job-creations",
+      "/xcm/outcomes",
+      "/xcm/outcomes/status"
+    ]
   })
 );
+
+app.get("/escrow/job-creations", async (c) => {
+  const limit = normalizeExternalJobCreationLimit(c.req.query("limit"));
+  const cursor = decodeExternalJobCreationCursor(c.req.query("cursor"));
+  return c.json(await listFinalizedExternalJobCreations({ cursor, limit }));
+});
 
 app.get("/xcm/outcomes", async (c) => {
   const limit = normalizeLimit(c.req.query("limit"));
