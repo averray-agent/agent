@@ -1,6 +1,6 @@
 {
   "profile": "testnet",
-  "rpcUrl": "https://eth-rpc-testnet.polkadot.io/",
+  "rpcUrl": "https://services.polkadothub-rpc.com/testnet/",
   "deployedAt": "2026-07-07T09:55:54Z",
   "deployer": "0x6778F050eAc8313e4dbB176d7BAB44510E833ac8",
   "owner": "0x1f8c4da4aaac79916350f1fabf1221309591b6f9",
