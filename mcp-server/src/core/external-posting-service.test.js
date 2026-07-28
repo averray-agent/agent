@@ -95,6 +95,27 @@ test("external posting mode defaults closed and open mode admits every SIWE wall
   assert.equal((await service.createDraft(OTHER_POSTER, { definition: definition() })).status, "awaiting_funding");
 });
 
+test("optional allowlist mode admits only configured wallets without changing the closed default", async () => {
+  const store = new MemoryStateStore();
+  const service = new ExternalPostingService({
+    stateStore: store,
+    config: config({
+      EXTERNAL_POSTING_MODE: "allowlist",
+      EXTERNAL_POSTING_ALLOWLIST: POSTER
+    })
+  });
+
+  assert.equal((await service.createDraft(POSTER, { definition: definition() })).status, "awaiting_funding");
+  await assert.rejects(
+    service.createDraft(OTHER_POSTER, { definition: definition() }),
+    (error) => error instanceof AuthorizationError && error.code === "external_poster_not_allowed"
+  );
+  assert.deepEqual(
+    (await store.listExternalPostingDemandSignals()).map((entry) => entry.decision),
+    ["accepted", "allowlist_rejected"]
+  );
+});
+
 test("stored definition deterministically rebuilds jobId, specHash, and calldata byte-for-byte", async () => {
   const { service, store } = makeService();
   const created = await service.createDraft(POSTER, {
@@ -106,6 +127,16 @@ test("stored definition deterministically rebuilds jobId, specHash, and calldata
   const stored = await store.getExternalJobDraft(created.draftId);
   const rebuilt = rebuildExternalDraftArtifacts(stored, config());
 
+  assert.equal(
+    created.jobId,
+    "0xef162a2581b2c288d39230945c5a32ee1d1da49ef73f9d0451347e3ab4b36065",
+    "the wallet + nonce canonical string is a versioned compatibility contract"
+  );
+  assert.equal(
+    created.specHash,
+    "0x50d1eec9719d1fd1cb474121d6d2dfad1aee53167f2980c950b8d5cb5a5835d3",
+    "RFC 8785 canonicalization drift must fail this compatibility vector"
+  );
   assert.equal(rebuilt.jobId, created.jobId);
   assert.equal(rebuilt.specHash, created.specHash);
   assert.deepEqual(rebuilt.calldata, created.calldata);
@@ -140,11 +171,20 @@ test("reward floor rejects 0.99, accepts 1.0, and persists both demand signals",
   assert.deepEqual(
     (await store.listExternalPostingDemandSignals()).map((entry) => ({
       decision: entry.decision,
-      requestedReward: entry.requestedReward
+      requestedReward: entry.requestedReward,
+      schema: entry.schema
     })),
     [
-      { decision: "floor_rejected", requestedReward: "0.99" },
-      { decision: "accepted", requestedReward: "1.0" }
+      {
+        decision: "floor_rejected",
+        requestedReward: "0.99",
+        schema: "schema://jobs/coding-output"
+      },
+      {
+        decision: "accepted",
+        requestedReward: "1.0",
+        schema: "schema://jobs/coding-output"
+      }
     ]
   );
 });
@@ -254,10 +294,15 @@ test("admin delist only removes future catalog projection and leaves on-chain st
   });
   const catalogProjection = [
     { id: onChainJob.jobId, source: "external" },
+    { id: `${onChainJob.jobId.slice(0, -1)}b`, source: { type: "external" } },
     { id: "curated-1", source: "ingested" }
   ];
 
   await service.delistExternalJob(onChainJob.jobId, {
+    adminWallet: OTHER_POSTER,
+    reason: "operator safety backstop"
+  });
+  await service.delistExternalJob(`${onChainJob.jobId.slice(0, -1)}b`, {
     adminWallet: OTHER_POSTER,
     reason: "operator safety backstop"
   });

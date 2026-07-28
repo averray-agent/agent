@@ -13,6 +13,10 @@ import { buildAgentProfile } from "../../core/agent-profile.js";
 import { buildBadgeFromSession } from "../../core/badge-metadata.js";
 import { buildDiscoveryManifest } from "../../core/discovery-manifest.js";
 import {
+  ExternalPostingService,
+  resolveExternalPostingConfig
+} from "../../core/external-posting-service.js";
+import {
   getPublicBuiltinJobSchemaByName,
   listBuiltinJobSchemas,
   schemaRefToJobSchemaPath
@@ -30,6 +34,7 @@ import { createBadgeRoutes, createListBadgeReceipts } from "./badge-routes.js";
 import { createContentRoutes } from "./content-routes.js";
 import { createDisputeRoutes } from "./dispute-routes.js";
 import { createEventRoutes } from "./event-routes.js";
+import { createExternalJobRoutes } from "./external-job-routes.js";
 import { createGasRoutes } from "./gas-routes.js";
 import {
   createCorsHeaderResolver,
@@ -92,6 +97,10 @@ metrics.gauge("state_store_backend", "1 when state store backend matches the lab
 const { metricsBearerToken, metricsAuthRequired } = resolveMetricsAuthConfig(process.env);
 const { paymentsSendEnabled } = resolvePaymentRouteConfig(process.env);
 const indexerHealthProbe = createConfiguredIndexerHealthProbe(process.env);
+const externalPostingService = new ExternalPostingService({
+  stateStore,
+  config: resolveExternalPostingConfig(process.env)
+});
 const port = Number(process.env.PORT ?? 8787);
 const readJsonBody = createJsonBodyReader({ maxBytes: httpConfig.maxBodyBytes });
 const resolveCorsHeaders = createCorsHeaderResolver(httpConfig);
@@ -470,6 +479,15 @@ const handleJobRoute = createJobRoutes({
   service,
 });
 
+const handleExternalJobRoute = createExternalJobRoutes({
+  authMiddleware,
+  enforceLimit,
+  externalPostingService,
+  rateLimitConfig,
+  readJsonBody,
+  respond,
+});
+
 const handleSchemaRoute = createSchemaRoutes({
   getPublicBuiltinJobSchemaByName,
   listBuiltinJobSchemas,
@@ -689,6 +707,10 @@ const server = createServer(async (request, response) => {
     }
 
     if (await handleOperationalRoute({ request, response, pathname })) {
+      return;
+    }
+
+    if (await handleExternalJobRoute({ request, response, url, pathname })) {
       return;
     }
 

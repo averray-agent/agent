@@ -81,6 +81,7 @@ test("GET / returns public API metadata without calling provider services", asyn
   assert.equal(response.body.authMode, "strict");
   assert.ok(response.body.endpoints.includes("/agent-tools.json"));
   assert.ok(response.body.endpoints.includes("/.well-known/badge-receipt-jwks.json"));
+  assert.ok(response.body.endpoints.every((endpoint) => !endpoint.includes("/jobs/draft")));
   assert.deepEqual(response.body.receiptVerification, {
     badgeReceipts: {
       alg: "ES256",

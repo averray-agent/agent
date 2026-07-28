@@ -1,0 +1,638 @@
+import { randomUUID } from "node:crypto";
+
+import { getAddress, id, isAddress } from "ethers";
+
+import { DEFAULT_ESCROW_ASSET } from "./assets.js";
+import { canonicalizeContent, hashCanonicalContent } from "./canonical-content.js";
+import { normalizeJobInput } from "./job-catalog-normalization.js";
+import {
+  getBuiltinJobSchema,
+  isBuiltinJobSchemaRef,
+  validateAgainstSchema
+} from "./job-schema-registry.js";
+import {
+  AuthorizationError,
+  ConfigError,
+  ConflictError,
+  NotFoundError,
+  ValidationError
+} from "./errors.js";
+import { decimalToBaseUnits } from "./platform-service-helpers.js";
+
+export const EXTERNAL_DRAFT_FUNDING_NOTE = "funding detection ships with the watcher";
+export const EXTERNAL_POSTING_MODES = new Set(["closed", "allowlist", "open"]);
+export const CREATE_SINGLE_PAYOUT_SIGNATURE =
+  "createSinglePayoutJob(bytes32,address,uint256,uint256,uint256,uint256,bytes32,bytes32,bytes32)";
+
+const DEFAULT_MIN_REWARD_USDC = "1";
+const DEFAULT_DRAFT_TTL_HOURS = 72;
+const DEFAULT_MAX_OPEN_DRAFTS = 10;
+const USDC_DECIMALS = 6;
+
+class ExternalPostingValidationError extends ValidationError {
+  constructor(message, code, details = undefined) {
+    super(message, details);
+    this.name = "ExternalPostingValidationError";
+    this.code = code;
+  }
+}
+
+export function resolveExternalPostingConfig(env = process.env) {
+  const mode = String(env.EXTERNAL_POSTING_MODE ?? "closed").trim().toLowerCase() || "closed";
+  if (!EXTERNAL_POSTING_MODES.has(mode)) {
+    throw new ConfigError(
+      "EXTERNAL_POSTING_MODE must be one of closed, allowlist, or open."
+    );
+  }
+
+  const allowlist = parseWalletAllowlist(env.EXTERNAL_POSTING_ALLOWLIST);
+  const minRewardUsdc = String(
+    env.EXTERNAL_POSTING_MIN_REWARD_USDC ?? DEFAULT_MIN_REWARD_USDC
+  ).trim();
+  let minRewardRaw;
+  try {
+    minRewardRaw = decimalToBaseUnits(
+      minRewardUsdc,
+      USDC_DECIMALS,
+      "EXTERNAL_POSTING_MIN_REWARD_USDC"
+    );
+  } catch (error) {
+    throw new ConfigError(error.message);
+  }
+  if (minRewardRaw <= 0n) {
+    throw new ConfigError("EXTERNAL_POSTING_MIN_REWARD_USDC must be greater than zero.");
+  }
+
+  const draftTtlHours = parsePositiveInteger(
+    env.EXTERNAL_POSTING_DRAFT_TTL_HOURS,
+    DEFAULT_DRAFT_TTL_HOURS,
+    "EXTERNAL_POSTING_DRAFT_TTL_HOURS"
+  );
+  const maxOpenDrafts = parsePositiveInteger(
+    env.EXTERNAL_POSTING_MAX_OPEN_DRAFTS,
+    DEFAULT_MAX_OPEN_DRAFTS,
+    "EXTERNAL_POSTING_MAX_OPEN_DRAFTS"
+  );
+  const usdcAsset = resolveUsdcAsset(
+    env.SUPPORTED_ASSETS_JSON,
+    env.SUPPORTED_ASSETS,
+    { required: mode !== "closed" }
+  );
+  const escrowCoreAddress = normalizeOptionalAddress(
+    env.ESCROW_CORE_ADDRESS,
+    "ESCROW_CORE_ADDRESS"
+  );
+  if (mode !== "closed" && !escrowCoreAddress) {
+    throw new ConfigError(
+      "ESCROW_CORE_ADDRESS is required when external posting is not closed."
+    );
+  }
+
+  return Object.freeze({
+    mode,
+    allowlist,
+    minRewardUsdc,
+    minRewardRaw,
+    draftTtlHours,
+    maxOpenDrafts,
+    escrowCoreAddress,
+    usdcAsset
+  });
+}
+
+export function buildExternalJobIdCanonicalString(wallet, nonce) {
+  return canonicalizeContent({
+    domain: "averray.external-job.v1",
+    nonce: String(nonce),
+    poster: normalizeWallet(wallet)
+  });
+}
+
+export function rebuildExternalDraftArtifacts(draft, config) {
+  const wallet = normalizeWallet(draft?.wallet);
+  const nonce = requireNonce(draft?.nonce);
+  const definition = requirePlainObject(draft?.definition, "definition");
+  const jobId = id(buildExternalJobIdCanonicalString(wallet, nonce));
+  const specHash = hashCanonicalContent(definition);
+  const terms = resolveOnChainTerms(definition, config);
+  return {
+    jobId,
+    specHash,
+    calldata: {
+      to: requireEscrowCoreAddress(config),
+      function: CREATE_SINGLE_PAYOUT_SIGNATURE,
+      args: [
+        jobId,
+        config.usdcAsset.address,
+        terms.rewardRaw.toString(),
+        terms.opsReserveRaw.toString(),
+        terms.contingencyReserveRaw.toString(),
+        String(terms.claimTtlSeconds),
+        id(terms.verifierMode),
+        id(terms.category),
+        specHash
+      ],
+      value: "0",
+      valueSemantics:
+        "Send no native token. EscrowCore reserves reward, ops reserve, and contingency reserve from the caller's own AgentAccountCore USDC position."
+    }
+  };
+}
+
+export class ExternalPostingService {
+  constructor({
+    stateStore,
+    config = resolveExternalPostingConfig(),
+    now = () => new Date()
+  } = {}) {
+    if (!stateStore) {
+      throw new ConfigError("ExternalPostingService requires a state store.");
+    }
+    this.stateStore = stateStore;
+    this.config = config;
+    this.now = now;
+  }
+
+  async createDraft(walletInput, payload) {
+    const wallet = normalizeWallet(walletInput);
+    const candidate = extractDefinitionCandidate(payload);
+    const demand = extractDemandSignalFields(candidate);
+    const now = this.currentTime();
+
+    if (this.config.mode === "closed") {
+      await this.recordDemandSignal({
+        wallet,
+        ...demand,
+        decision: "mode_closed",
+        attemptedAt: now.toISOString()
+      });
+      throw new AuthorizationError(
+        "External posting is closed.",
+        "external_posting_closed"
+      );
+    }
+    if (this.config.mode === "allowlist" && !this.config.allowlist.has(wallet)) {
+      await this.recordDemandSignal({
+        wallet,
+        ...demand,
+        decision: "allowlist_rejected",
+        attemptedAt: now.toISOString()
+      });
+      throw new AuthorizationError(
+        "Wallet is not enabled for external posting.",
+        "external_poster_not_allowed"
+      );
+    }
+
+    let definition;
+    try {
+      definition = validateExternalJobDefinition(candidate, this.config);
+    } catch (error) {
+      await this.recordDemandSignal({
+        wallet,
+        ...demand,
+        decision: error?.code === "external_reward_below_floor"
+          ? "floor_rejected"
+          : error?.code === "external_schema_not_supported"
+            ? "schema_rejected"
+            : "validation_rejected",
+        attemptedAt: now.toISOString()
+      });
+      throw error;
+    }
+
+    const nonce = await this.stateStore.nextExternalDraftNonce(wallet);
+    const draftId = id(canonicalizeContent({
+      domain: "averray.external-draft.v1",
+      nonce,
+      poster: wallet
+    }));
+    const createdAt = now.toISOString();
+    const expiresAt = new Date(
+      now.getTime() + (this.config.draftTtlHours * 60 * 60 * 1000)
+    ).toISOString();
+    const artifacts = rebuildExternalDraftArtifacts(
+      { wallet, nonce, definition },
+      this.config
+    );
+    const draft = {
+      draftId,
+      wallet,
+      nonce,
+      definition,
+      ...artifacts,
+      createdAt,
+      expiresAt
+    };
+    const stored = await this.stateStore.createExternalJobDraft(draft, {
+      maxOpenDrafts: this.config.maxOpenDrafts,
+      activeAfter: createdAt
+    });
+    if (!stored) {
+      await this.recordDemandSignal({
+        wallet,
+        ...demand,
+        decision: "cap_rejected",
+        attemptedAt: createdAt
+      });
+      throw new ConflictError(
+        `Wallet already has ${this.config.maxOpenDrafts} open external drafts.`,
+        "external_draft_cap_reached",
+        { maxOpenDrafts: this.config.maxOpenDrafts }
+      );
+    }
+
+    await this.recordDemandSignal({
+      wallet,
+      ...demand,
+      decision: "accepted",
+      attemptedAt: createdAt
+    });
+    return presentDraft(draft, now);
+  }
+
+  async getDraft(walletInput, draftId) {
+    const wallet = normalizeWallet(walletInput);
+    const draft = await this.stateStore.getExternalJobDraft(String(draftId ?? ""));
+    if (!draft) {
+      throw new NotFoundError("External job draft not found.", "external_draft_not_found");
+    }
+    if (normalizeWallet(draft.wallet) !== wallet) {
+      throw new AuthorizationError(
+        "External job draft does not belong to the authenticated wallet.",
+        "external_draft_not_owned"
+      );
+    }
+    assertStoredDraftDeterminism(draft, this.config);
+    return presentDraft(draft, this.currentTime());
+  }
+
+  async delistExternalJob(jobIdInput, {
+    adminWallet,
+    reason = "operator backstop"
+  } = {}) {
+    const jobId = normalizeBytes32(jobIdInput, "jobId");
+    const record = {
+      jobId,
+      adminWallet: normalizeWallet(adminWallet),
+      reason: String(reason ?? "").trim() || "operator backstop",
+      delistedAt: this.currentTime().toISOString()
+    };
+    await this.stateStore.upsertExternalJobDelisting(record);
+    return {
+      jobId,
+      delisted: true,
+      catalogProjectionRemoved: true,
+      onChainEscrowTouched: false,
+      reason: record.reason,
+      delistedAt: record.delistedAt
+    };
+  }
+
+  async filterExternalCatalogProjection(jobs = []) {
+    const visibility = await Promise.all(jobs.map(async (job) => {
+      if (job?.source !== "external" && job?.source?.type !== "external") {
+        return true;
+      }
+      return !(await this.stateStore.isExternalJobDelisted(job?.id));
+    }));
+    return jobs.filter((_job, index) => visibility[index]);
+  }
+
+  currentTime() {
+    const value = this.now();
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      throw new ConfigError("ExternalPostingService clock returned an invalid date.");
+    }
+    return date;
+  }
+
+  async recordDemandSignal(signal) {
+    return this.stateStore.appendExternalPostingDemandSignal({
+      id: randomUUID(),
+      wallet: signal.wallet,
+      requestedReward: signal.requestedReward,
+      schema: signal.schema,
+      decision: signal.decision,
+      attemptedAt: signal.attemptedAt
+    });
+  }
+}
+
+function validateExternalJobDefinition(candidate, config) {
+  const definition = cloneJsonObject(requirePlainObject(candidate, "definition"));
+  if ("id" in definition) {
+    throw new ValidationError("definition.id is derived by the platform and must be omitted.");
+  }
+  if (
+    definition.externalSchema !== undefined
+    || definition.schemaRegistrations !== undefined
+    || definition.schemaTrustPolicy !== undefined
+  ) {
+    throw externalValidationError(
+      "External drafts only support platform-verified built-in schemas.",
+      "external_schema_not_supported"
+    );
+  }
+  if (
+    definition.recurring === true
+    || definition.recurringPolicy !== undefined
+    || definition.schedule !== undefined
+    || definition.milestones !== undefined
+    || (definition.payoutMode !== undefined && definition.payoutMode !== "single")
+  ) {
+    throw externalValidationError(
+      "External posting stage 1 only supports single-payout, non-recurring jobs.",
+      "external_payout_mode_not_supported"
+    );
+  }
+
+  const rewardAsset = String(definition.rewardAsset ?? "USDC").trim().toUpperCase();
+  if (rewardAsset !== "USDC") {
+    throw externalValidationError(
+      "External posting stage 1 only supports USDC rewards.",
+      "external_reward_asset_not_supported"
+    );
+  }
+  definition.rewardAsset = "USDC";
+
+  let rewardRaw;
+  try {
+    rewardRaw = decimalToBaseUnits(
+      definition.rewardAmount,
+      config.usdcAsset.decimals,
+      "rewardAmount"
+    );
+  } catch (error) {
+    throw new ValidationError(error.message);
+  }
+  if (rewardRaw < config.minRewardRaw) {
+    throw externalValidationError(
+      `External job reward must be at least ${config.minRewardUsdc} USDC.`,
+      "external_reward_below_floor",
+      {
+        minimumRewardUsdc: config.minRewardUsdc,
+        requestedReward: String(definition.rewardAmount ?? "")
+      }
+    );
+  }
+
+  const inputSchemaRef = String(
+    definition.inputSchemaRef ?? `schema://jobs/${definition.category}-input`
+  ).trim();
+  const outputSchemaRef = String(
+    definition.outputSchemaRef ?? `schema://jobs/${definition.category}-output`
+  ).trim();
+  if (!isBuiltinJobSchemaRef(inputSchemaRef) || !isBuiltinJobSchemaRef(outputSchemaRef)) {
+    throw externalValidationError(
+      "External drafts require platform-supported input and output schemas.",
+      "external_schema_not_supported",
+      { inputSchemaRef, outputSchemaRef }
+    );
+  }
+  definition.inputSchemaRef = inputSchemaRef;
+  definition.outputSchemaRef = outputSchemaRef;
+
+  try {
+    normalizeJobInput({ ...definition, id: "external-draft-validation" });
+    if (definition.input !== undefined) {
+      validateAgainstSchema(
+        definition.input,
+        getBuiltinJobSchema(inputSchemaRef),
+        "definition.input"
+      );
+    }
+  } catch (error) {
+    if (/schema/iu.test(error?.message ?? "")) {
+      throw externalValidationError(
+        error.message,
+        "external_schema_not_supported",
+        { inputSchemaRef, outputSchemaRef }
+      );
+    }
+    throw error;
+  }
+  resolveOnChainTerms(definition, config);
+  return definition;
+}
+
+function resolveOnChainTerms(definition, config) {
+  const rewardRaw = decimalToBaseUnits(
+    definition?.rewardAmount,
+    config.usdcAsset.decimals,
+    "rewardAmount"
+  );
+  const opsReserveRaw = decimalToBaseUnits(
+    definition?.opsReserve ?? "0",
+    config.usdcAsset.decimals,
+    "opsReserve"
+  );
+  const contingencyReserveRaw = decimalToBaseUnits(
+    definition?.contingencyReserve ?? "0",
+    config.usdcAsset.decimals,
+    "contingencyReserve"
+  );
+  const claimTtlSeconds = Number(definition?.claimTtlSeconds ?? 3600);
+  if (!Number.isInteger(claimTtlSeconds) || claimTtlSeconds < 60) {
+    throw new ValidationError("claimTtlSeconds must be an integer of at least 60.");
+  }
+  const verifierMode = String(definition?.verifierMode ?? "").trim().toLowerCase();
+  const category = String(definition?.category ?? "").trim().toLowerCase();
+  return {
+    rewardRaw,
+    opsReserveRaw,
+    contingencyReserveRaw,
+    claimTtlSeconds,
+    verifierMode,
+    category
+  };
+}
+
+function assertStoredDraftDeterminism(draft, config) {
+  const rebuilt = rebuildExternalDraftArtifacts(draft, config);
+  if (
+    rebuilt.jobId !== draft.jobId
+    || rebuilt.specHash !== draft.specHash
+    || canonicalizeContent(rebuilt.calldata) !== canonicalizeContent(draft.calldata)
+  ) {
+    throw new ConflictError(
+      "Stored external draft failed its deterministic integrity check.",
+      "external_draft_integrity_mismatch",
+      { draftId: draft.draftId }
+    );
+  }
+}
+
+function presentDraft(draft, now) {
+  const expired = now.getTime() >= Date.parse(draft.expiresAt);
+  return {
+    draftId: draft.draftId,
+    jobId: draft.jobId,
+    specHash: draft.specHash,
+    definition: cloneJsonObject(draft.definition),
+    calldata: cloneJsonObject(draft.calldata),
+    createdAt: draft.createdAt,
+    expiresAt: draft.expiresAt,
+    status: expired ? "expired" : "awaiting_funding",
+    ...(!expired ? { note: EXTERNAL_DRAFT_FUNDING_NOTE } : {})
+  };
+}
+
+function extractDefinitionCandidate(payload) {
+  if (payload && typeof payload === "object" && !Array.isArray(payload) && "definition" in payload) {
+    return payload.definition;
+  }
+  return payload;
+}
+
+function extractDemandSignalFields(candidate) {
+  const object = candidate && typeof candidate === "object" && !Array.isArray(candidate)
+    ? candidate
+    : {};
+  const reward = object.rewardAmount;
+  const category = typeof object.category === "string"
+    ? object.category.trim().toLowerCase()
+    : "";
+  return {
+    requestedReward: reward === undefined || reward === null
+      ? null
+      : typeof reward === "string" || typeof reward === "number"
+        ? reward
+        : String(reward),
+    schema: typeof object.outputSchemaRef === "string"
+      ? object.outputSchemaRef
+      : category
+        ? `schema://jobs/${category}-output`
+        : null
+  };
+}
+
+function resolveUsdcAsset(rawAssets, rawLegacyAssets, { required } = {}) {
+  let assets = [];
+  if (typeof rawAssets === "string" && rawAssets.trim()) {
+    try {
+      assets = JSON.parse(rawAssets);
+    } catch {
+      throw new ConfigError("SUPPORTED_ASSETS_JSON must be valid JSON.");
+    }
+    if (!Array.isArray(assets)) {
+      throw new ConfigError("SUPPORTED_ASSETS_JSON must decode to an array.");
+    }
+  } else if (typeof rawLegacyAssets === "string" && rawLegacyAssets.trim()) {
+    assets = rawLegacyAssets
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+      .map((entry) => {
+        const separator = entry.indexOf(":");
+        if (separator < 1) {
+          throw new ConfigError("SUPPORTED_ASSETS entries must use SYMBOL:address.");
+        }
+        return {
+          symbol: entry.slice(0, separator),
+          address: entry.slice(separator + 1),
+          decimals: USDC_DECIMALS
+        };
+      });
+  }
+  const selected = assets.find((entry) =>
+    String(entry?.symbol ?? "").trim().toUpperCase() === "USDC"
+  );
+  if (required && assets.length > 0 && !selected) {
+    throw new ConfigError("USDC must be present in supported assets for external posting.");
+  }
+  const resolved = selected ?? DEFAULT_ESCROW_ASSET;
+  const address = normalizeOptionalAddress(resolved.address, "USDC asset address");
+  if (!address) {
+    throw new ConfigError("USDC asset address is required for external posting.");
+  }
+  const decimals = Number(resolved.decimals ?? USDC_DECIMALS);
+  if (decimals !== USDC_DECIMALS) {
+    throw new ConfigError("External posting requires a 6-decimal USDC asset.");
+  }
+  return Object.freeze({ symbol: "USDC", address, decimals });
+}
+
+function parseWalletAllowlist(raw) {
+  const entries = String(raw ?? "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  const wallets = new Set();
+  for (const entry of entries) {
+    if (!isAddress(entry)) {
+      throw new ConfigError("EXTERNAL_POSTING_ALLOWLIST must contain EVM wallet addresses.");
+    }
+    wallets.add(getAddress(entry).toLowerCase());
+  }
+  return wallets;
+}
+
+function parsePositiveInteger(raw, fallback, label) {
+  if (raw === undefined || raw === null || String(raw).trim() === "") {
+    return fallback;
+  }
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new ConfigError(`${label} must be a positive integer.`);
+  }
+  return value;
+}
+
+function requireEscrowCoreAddress(config) {
+  if (!config?.escrowCoreAddress) {
+    throw new ConfigError(
+      "ESCROW_CORE_ADDRESS is required to create an external job draft calldata template."
+    );
+  }
+  return config.escrowCoreAddress;
+}
+
+function normalizeOptionalAddress(raw, label) {
+  if (raw === undefined || raw === null || String(raw).trim() === "") {
+    return "";
+  }
+  if (!isAddress(String(raw).trim())) {
+    throw new ConfigError(`${label} must be an EVM address.`);
+  }
+  return getAddress(String(raw).trim());
+}
+
+function normalizeWallet(raw) {
+  if (!isAddress(String(raw ?? ""))) {
+    throw new ValidationError("Authenticated wallet must be an EVM address.");
+  }
+  return getAddress(String(raw)).toLowerCase();
+}
+
+function normalizeBytes32(raw, label) {
+  const value = String(raw ?? "").trim().toLowerCase();
+  if (!/^0x[a-f0-9]{64}$/u.test(value)) {
+    throw new ValidationError(`${label} must be a 32-byte hex value.`);
+  }
+  return value;
+}
+
+function requireNonce(raw) {
+  const value = String(raw ?? "").trim();
+  if (!/^[1-9]\d*$/u.test(value)) {
+    throw new ValidationError("draft nonce must be a positive integer string.");
+  }
+  return value;
+}
+
+function requirePlainObject(value, field) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new ValidationError(`${field} must be a JSON object.`);
+  }
+  return value;
+}
+
+function cloneJsonObject(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function externalValidationError(message, code, details = undefined) {
+  return new ExternalPostingValidationError(message, code, details);
+}

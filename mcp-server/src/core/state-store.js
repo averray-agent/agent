@@ -48,6 +48,19 @@ local ttl = redis.call("pttl", KEYS[1])
 return {current, ttl}
 `;
 
+const CREATE_EXTERNAL_DRAFT_SCRIPT = `
+redis.call("zremrangebyscore", KEYS[1], "-inf", ARGV[1])
+if redis.call("zcard", KEYS[1]) >= tonumber(ARGV[2]) then
+  return 0
+end
+if redis.call("exists", KEYS[2]) == 1 then
+  return 0
+end
+redis.call("set", KEYS[2], ARGV[3])
+redis.call("zadd", KEYS[1], ARGV[4], ARGV[5])
+return 1
+`;
+
 export class MemoryStateStore {
   constructor() {
     this.sessions = new Map();
@@ -73,6 +86,10 @@ export class MemoryStateStore {
     this.accountOverlays = new Map();
     this.policyProposals = new Map();
     this.siweAuthActivity = new Map();
+    this.externalDraftNonces = new Map();
+    this.externalJobDrafts = new Map();
+    this.externalPostingDemandSignals = [];
+    this.externalJobDelistings = new Map();
   }
 
   // ── policy proposals (Package G) ──────────────────────────────────
@@ -360,6 +377,61 @@ export class MemoryStateStore {
 
   async listFundedJobs({ limit = 100, offset = 0, finalOnly = false } = {}) {
     return listFundedJobRecords(this.fundedJobs.values(), { limit, offset, finalOnly });
+  }
+
+  async nextExternalDraftNonce(wallet) {
+    const key = String(wallet ?? "").toLowerCase();
+    const nonce = (this.externalDraftNonces.get(key) ?? 0n) + 1n;
+    this.externalDraftNonces.set(key, nonce);
+    return nonce.toString();
+  }
+
+  async createExternalJobDraft(record, { maxOpenDrafts, activeAfter } = {}) {
+    const wallet = String(record?.wallet ?? "").toLowerCase();
+    const activeAtMs = Date.parse(activeAfter ?? new Date().toISOString());
+    const openCount = [...this.externalJobDrafts.values()].filter((entry) =>
+      String(entry?.wallet ?? "").toLowerCase() === wallet
+      && Date.parse(entry?.expiresAt ?? "") > activeAtMs
+    ).length;
+    if (openCount >= Number(maxOpenDrafts)) {
+      return false;
+    }
+    if (this.externalJobDrafts.has(String(record?.draftId ?? ""))) {
+      return false;
+    }
+    this.externalJobDrafts.set(String(record.draftId), cloneJsonRecord(record));
+    return true;
+  }
+
+  async getExternalJobDraft(draftId) {
+    return cloneJsonRecord(this.externalJobDrafts.get(String(draftId ?? "")));
+  }
+
+  async appendExternalPostingDemandSignal(signal) {
+    const stored = cloneJsonRecord(signal);
+    this.externalPostingDemandSignals.push(stored);
+    return cloneJsonRecord(stored);
+  }
+
+  async listExternalPostingDemandSignals({ limit = 10_000, offset = 0 } = {}) {
+    return this.externalPostingDemandSignals
+      .slice(offset, offset + limit)
+      .map((entry) => cloneJsonRecord(entry));
+  }
+
+  async upsertExternalJobDelisting(record) {
+    const jobId = normalizeExternalJobId(record?.jobId);
+    const stored = cloneJsonRecord({ ...record, jobId });
+    this.externalJobDelistings.set(jobId, stored);
+    return cloneJsonRecord(stored);
+  }
+
+  async getExternalJobDelisting(jobId) {
+    return cloneJsonRecord(this.externalJobDelistings.get(normalizeExternalJobId(jobId)));
+  }
+
+  async isExternalJobDelisted(jobId) {
+    return this.externalJobDelistings.has(normalizeExternalJobId(jobId));
   }
 
   async getXcmObservation(requestId) {
@@ -856,6 +928,96 @@ export class RedisStateStore {
     return filterFinalFundedJobRecords(records.filter(Boolean), finalOnly);
   }
 
+  async nextExternalDraftNonce(wallet) {
+    await this.connect();
+    const nonce = await this.client.incr(this.key(
+      "external-draft-nonce",
+      String(wallet ?? "").toLowerCase()
+    ));
+    return String(nonce);
+  }
+
+  async createExternalJobDraft(record, { maxOpenDrafts, activeAfter } = {}) {
+    await this.connect();
+    const wallet = String(record?.wallet ?? "").toLowerCase();
+    const draftId = String(record?.draftId ?? "");
+    const activeAtMs = timestampScore(activeAfter ?? new Date().toISOString());
+    const expiresAtMs = timestampScore(record?.expiresAt ?? "");
+    const result = await this.client.eval(CREATE_EXTERNAL_DRAFT_SCRIPT, {
+      keys: [
+        this.key("external-drafts-wallet", wallet),
+        this.key("external-draft", draftId)
+      ],
+      arguments: [
+        String(activeAtMs),
+        String(maxOpenDrafts),
+        JSON.stringify(record),
+        String(expiresAtMs),
+        draftId
+      ]
+    });
+    return Number(result) === 1;
+  }
+
+  async getExternalJobDraft(draftId) {
+    await this.connect();
+    const raw = await this.client.get(this.key("external-draft", String(draftId ?? "")));
+    return raw ? JSON.parse(raw) : undefined;
+  }
+
+  async appendExternalPostingDemandSignal(signal) {
+    await this.connect();
+    const id = String(signal?.id ?? "");
+    await this.client.set(
+      this.key("external-posting-demand", id),
+      JSON.stringify(signal)
+    );
+    await this.client.zAdd(this.key("external-posting-demand", "all"), {
+      score: timestampScore(signal?.attemptedAt ?? ""),
+      value: id
+    });
+    return signal;
+  }
+
+  async listExternalPostingDemandSignals({ limit = 10_000, offset = 0 } = {}) {
+    await this.connect();
+    const { start, stop } = redisRangeFromLimitOffset(limit, offset);
+    const ids = await this.client.zRange(
+      this.key("external-posting-demand", "all"),
+      start,
+      stop
+    );
+    const records = await Promise.all(ids.map(async (id) => {
+      const raw = await this.client.get(this.key("external-posting-demand", id));
+      return raw ? JSON.parse(raw) : undefined;
+    }));
+    return records.filter(Boolean);
+  }
+
+  async upsertExternalJobDelisting(record) {
+    await this.connect();
+    const jobId = normalizeExternalJobId(record?.jobId);
+    const stored = { ...record, jobId };
+    await this.client.set(
+      this.key("external-job-delisting", jobId),
+      JSON.stringify(stored)
+    );
+    return stored;
+  }
+
+  async getExternalJobDelisting(jobId) {
+    await this.connect();
+    const raw = await this.client.get(this.key(
+      "external-job-delisting",
+      normalizeExternalJobId(jobId)
+    ));
+    return raw ? JSON.parse(raw) : undefined;
+  }
+
+  async isExternalJobDelisted(jobId) {
+    return Boolean(await this.getExternalJobDelisting(jobId));
+  }
+
   async getXcmObservation(requestId) {
     await this.connect();
     const raw = await this.client.get(this.key("xcm-observation", requestId));
@@ -1099,6 +1261,10 @@ export function createStateStore(env = process.env, { logger = console } = {}) {
 // JSON round-trip is the simplest correct clone for that shape.
 function cloneAccountOverlay(overlay) {
   return cloneJsonRecord(overlay);
+}
+
+function normalizeExternalJobId(jobId) {
+  return String(jobId ?? "").trim().toLowerCase();
 }
 
 const SIWE_AUTH_EVENTS = new Set(["nonce_issued", "verify_succeeded"]);

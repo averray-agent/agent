@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { AuthorizationError } from "../../core/errors.js";
+import { AuthenticationError, AuthorizationError } from "../../core/errors.js";
 import { createExternalJobRoutes } from "./external-job-routes.js";
 
 const POSTER = "0x1111111111111111111111111111111111111111";
@@ -15,6 +15,12 @@ function makeHarness(overrides = {}) {
   const route = createExternalJobRoutes({
     authMiddleware: async (_request, _url, options) => {
       calls.push(["authMiddleware", options]);
+      if (overrides.serviceToken && options?.requireRole !== "admin") {
+        return {
+          wallet: POSTER,
+          claims: { tokenKind: "service", serviceToken: true }
+        };
+      }
       return options?.requireRole === "admin"
         ? { wallet: ADMIN, claims: { roles: ["admin"] } }
         : { wallet: POSTER, claims: { roles: [] } };
@@ -102,6 +108,14 @@ test("GET /jobs/draft/:id rejects a different wallet", async () => {
   await assert.rejects(
     invoke(route, { path: `/jobs/draft/${DRAFT_ID}` }),
     (error) => error instanceof AuthorizationError && error.code === "external_draft_not_owned"
+  );
+});
+
+test("draft routes reject service tokens because the poster must prove wallet control via SIWE", async () => {
+  const { route } = makeHarness({ serviceToken: true });
+  await assert.rejects(
+    invoke(route, { method: "POST", path: "/jobs/draft" }),
+    (error) => error instanceof AuthenticationError && error.code === "external_posting_siwe_required"
   );
 });
 
