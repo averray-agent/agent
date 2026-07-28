@@ -54,7 +54,7 @@ contract ExternalSchemaRegistrationTest is Test {
         registry = new StrategyAdapterRegistry(policy);
         accounts = new AgentAccountCore(policy, registry);
         reputation = new ReputationSBT(policy);
-        escrow = new EscrowCore(policy, accounts, reputation);
+        escrow = new EscrowCore(policy, accounts, reputation, address(this));
         dot = new MockERC20("Mock DOT", "mDOT");
         policy.setApprovedAsset(address(dot), true);
         policy.setSettlementBroker(address(escrow), true);
@@ -136,7 +136,7 @@ contract ExternalSchemaRegistrationTest is Test {
         policy.setTrustedSchemaIssuer(issuer, true);
         bytes32 jobId = keccak256("job/external-schema/replay-contract");
         bytes memory signature = signExternalSchema(escrow, jobId, ISSUER_KEY);
-        EscrowCore otherEscrow = new EscrowCore(policy, accounts, reputation);
+        EscrowCore otherEscrow = new EscrowCore(policy, accounts, reputation, address(this));
         policy.setSettlementBroker(address(otherEscrow), true);
         policy.setReputationWriter(address(otherEscrow), true);
         accounts.setEscrowOperator(address(otherEscrow), true);
@@ -191,7 +191,8 @@ contract ExternalSchemaRegistrationTest is Test {
                 schemaHash: SCHEMA_HASH,
                 schemaUrl: SCHEMA_URL,
                 schemaIssuer: issuer,
-                schemaSignature: signature
+                schemaSignature: signature,
+                protocolFeeWaived: false
             })
         );
 

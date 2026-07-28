@@ -19,9 +19,10 @@
  *                EOA (deployments.deployer). One transaction.
  *
  *   2. wire      AgentAccountCore.setEscrowOperator(new, true) plus
- *                TreasuryPolicy.setServiceOperator(new, true) — and
- *                (recommended) revoke both old roles batched in
- *                utility.batchAll. The owner is the H160 of the SS58 2-of-3
+ *                TreasuryPolicy settlementBroker/reputationWriter roles.
+ *                Keep the old roles while v1 jobs drain; revoke them only
+ *                after the drain catalog is empty. The owner is the H160 of
+ *                the SS58 2-of-3
  *                multisig 12nHTKYf… — no private key. Generate the Apps
  *                recipe via:
  *                  scripts/ops/redeploy-escrowcore-wire-multisig.mjs
@@ -91,8 +92,10 @@ const repoRoot = resolve(here, "..", "..");
 
 const TREASURY_POLICY_ABI = [
   "function owner() view returns (address)",
-  "function serviceOperators(address) view returns (bool)",
-  "function setServiceOperator(address account, bool allowed)"
+  "function settlementBroker(address) view returns (bool)",
+  "function reputationWriter(address) view returns (bool)",
+  "function setSettlementBroker(address account, bool allowed)",
+  "function setReputationWriter(address account, bool allowed)"
 ];
 
 const AGENT_ACCOUNT_READ_ABI = [
@@ -117,6 +120,15 @@ const ESCROW_TAIL_SCAN_ABI = [
   "event DisputeResolved(bytes32 indexed jobId,address indexed arbitrator,uint256 workerPayout,bytes32 reasonCode,string metadataURI)",
   "event AutoResolvedOnTimeout(bytes32 indexed jobId,address indexed caller,uint256 workerPayout,bytes32 reasonCode)",
   "event JobClosed(bytes32 indexed jobId,address indexed worker,uint256 releasedAmount)"
+];
+
+const ESCROW_V2_READ_ABI = [
+  "function policy() view returns (address)",
+  "function accounts() view returns (address)",
+  "function reputation() view returns (address)",
+  "function treasuryAccount() view returns (address)",
+  "function protocolFeeBps() view returns (uint16)",
+  "function MAX_PROTOCOL_FEE_BPS() view returns (uint16)"
 ];
 
 const PHASES = new Set(["deploy", "finalize", "all"]);
@@ -263,7 +275,15 @@ async function loadDeployments(profile) {
 // participant. Every redeploy MUST ship an artifact that defines all of them,
 // or the deployed-bytecode-selector audit fails and the worker loop reverts
 // Unauthorized (claimJobFor #357/#525, submitWorkFor/openDisputeFor this PR).
-const REQUIRED_BROKERED_FNS = ["claimJobFor", "submitWorkFor", "openDisputeFor"];
+const REQUIRED_ESCROW_V2_FNS = [
+  "claimJobFor",
+  "submitWorkFor",
+  "openDisputeFor",
+  "previewProtocolFee",
+  "setProtocolFeeBps",
+  "setTreasuryAccount",
+  "createSinglePayoutJobFeeWaived"
+];
 
 async function loadEscrowArtifact() {
   const path = resolve(repoRoot, "out", "EscrowCore.sol", "EscrowCore.json");
@@ -281,18 +301,24 @@ async function loadEscrowArtifact() {
 }
 
 function summarizeBrokeredSelectors(artifact) {
-  return REQUIRED_BROKERED_FNS
+  return REQUIRED_ESCROW_V2_FNS
     .map((name) => `${name}=${artifact.abi.some((f) => f.name === name)}`)
     .join(" ");
 }
 
 export function assertArtifactHasBrokeredSelectors(artifact) {
-  const missing = REQUIRED_BROKERED_FNS.filter((name) => !artifact.abi.some((f) => f.name === name));
+  const missing = REQUIRED_ESCROW_V2_FNS.filter((name) => !artifact.abi.some((f) => f.name === name));
   if (missing.length) {
     throw new Error(
-      `Build artifact is missing operator-brokered selector(s): ${missing.join(", ")}. ` +
-      "Run `forge build` on a source tree that defines them before redeploying " +
-      "(else the new EscrowCore would reproduce the Unauthorized worker-loop blocker)."
+      `Build artifact is missing required EscrowCore-v2 selector(s): ${missing.join(", ")}. ` +
+      "Run `forge build` on the protocol-fee source before redeploying."
+    );
+  }
+  const constructor = artifact.abi.find((entry) => entry.type === "constructor");
+  if (constructor?.inputs?.length !== 4) {
+    throw new Error(
+      `Build artifact has ${constructor?.inputs?.length ?? 0} EscrowCore constructor inputs; ` +
+      "v2 requires policy, accounts, reputation, treasuryAccount."
     );
   }
 }
@@ -327,11 +353,13 @@ async function planDeploy({ provider, manifest, artifact }) {
   const treasury = manifest.contracts.treasuryPolicy;
   const accounts = manifest.contracts.agentAccountCore;
   const reputation = manifest.contracts.reputationSbt;
+  const treasuryAccount = manifest.treasuryAccount ?? manifest.treasuryReserve;
   assertAddress("contracts.treasuryPolicy", treasury);
   assertAddress("contracts.agentAccountCore", accounts);
   assertAddress("contracts.reputationSbt", reputation);
+  assertAddress("treasuryAccount", treasuryAccount);
 
-  const constructorArgs = [treasury, accounts, reputation];
+  const constructorArgs = [treasury, accounts, reputation, treasuryAccount];
   const factory = new ContractFactory(artifact.abi, artifact.bytecode, undefined);
   const deployTx = await factory.getDeployTransaction(...constructorArgs);
 
@@ -354,12 +382,13 @@ async function planDeploy({ provider, manifest, artifact }) {
 async function readWiringState({ provider, manifest }) {
   const treasury = new Contract(manifest.contracts.treasuryPolicy, TREASURY_POLICY_ABI, provider);
   const accounts = new Contract(manifest.contracts.agentAccountCore, AGENT_ACCOUNT_READ_ABI, provider);
-  const [owner, oldIsOperator, oldIsEscrowOperator] = await Promise.all([
+  const [owner, oldIsSettlementBroker, oldIsReputationWriter, oldIsEscrowOperator] = await Promise.all([
     treasury.owner(),
-    treasury.serviceOperators(manifest.contracts.escrowCore),
+    treasury.settlementBroker(manifest.contracts.escrowCore),
+    treasury.reputationWriter(manifest.contracts.escrowCore),
     accounts.escrowOperators(manifest.contracts.escrowCore)
   ]);
-  return { owner, oldIsOperator, oldIsEscrowOperator };
+  return { owner, oldIsSettlementBroker, oldIsReputationWriter, oldIsEscrowOperator };
 }
 
 function assertPositiveInteger(label, value) {
@@ -627,33 +656,31 @@ function printWireOverview({ manifest, wiringState, predictedNewEscrow }) {
   const policyIface = new Interface(TREASURY_POLICY_ABI);
   const accountIface = new Interface(AGENT_ACCOUNT_READ_ABI);
   const approveAccountData = accountIface.encodeFunctionData("setEscrowOperator", [placeholder, true]);
-  const approvePolicyData = policyIface.encodeFunctionData("setServiceOperator", [placeholder, true]);
-  const revokeAccountData = accountIface.encodeFunctionData("setEscrowOperator", [manifest.contracts.escrowCore, false]);
-  const revokePolicyData = policyIface.encodeFunctionData("setServiceOperator", [manifest.contracts.escrowCore, false]);
+  const approveSettlementData = policyIface.encodeFunctionData("setSettlementBroker", [placeholder, true]);
+  const approveReputationData = policyIface.encodeFunctionData("setReputationWriter", [placeholder, true]);
 
   console.log(`\n## Phase 2: wire (multisig.asMulti via Apps, NOT this script)`);
   console.log(`  owner is the H160 of SS58 multisig — no private key. Generate the recipe with:`);
   console.log(`    node scripts/ops/redeploy-escrowcore-wire-multisig.mjs \\`);
-  console.log(`      --new-escrow ${placeholder} --signer hot`);
+  console.log(`      --new-escrow ${placeholder} --signer hot --skip-revoke`);
   console.log(`  then sign in polkadot-js-apps, record {height, index}, run again with --signer ledger.`);
   console.log("");
   console.log(`  Inner EVM calldata that the recipe will wrap (for review):`);
   console.log(`    [1] AgentAccountCore.setEscrowOperator(${placeholder}, true)`);
   console.log(`        to:   ${manifest.contracts.agentAccountCore}`);
   console.log(`        data: ${approveAccountData}`);
-  console.log(`    [2] TreasuryPolicy.setServiceOperator(${placeholder}, true)`);
+  console.log(`    [2] TreasuryPolicy.setSettlementBroker(${placeholder}, true)`);
   console.log(`        to:   ${manifest.contracts.treasuryPolicy}`);
-  console.log(`        data: ${approvePolicyData}`);
-  console.log(`    [3] AgentAccountCore.setEscrowOperator(${manifest.contracts.escrowCore}, false)`);
-  console.log(`        to:   ${manifest.contracts.agentAccountCore}`);
-  console.log(`        data: ${revokeAccountData}`);
-  console.log(`    [4] TreasuryPolicy.setServiceOperator(${manifest.contracts.escrowCore}, false)`);
+  console.log(`        data: ${approveSettlementData}`);
+  console.log(`    [3] TreasuryPolicy.setReputationWriter(${placeholder}, true)`);
   console.log(`        to:   ${manifest.contracts.treasuryPolicy}`);
-  console.log(`        data: ${revokePolicyData}`);
+  console.log(`        data: ${approveReputationData}`);
+  console.log(`    Old Escrow roles remain enabled until all v1 jobs have drained.`);
   console.log("");
   console.log(`  Owner (multisig SS58):           12nHTKYfV64pnxsVRB6Cjn6kQPPH64Ehnr8zgqZxvfa8hJvQ`);
   console.log(`  Owner (H160 onchain):            ${wiringState.owner}`);
-  console.log(`  Old policy operator currently:   ${wiringState.oldIsOperator}`);
+  console.log(`  Old settlement broker now:       ${wiringState.oldIsSettlementBroker}`);
+  console.log(`  Old reputation writer now:       ${wiringState.oldIsReputationWriter}`);
   console.log(`  Old AAC escrow operator now:     ${wiringState.oldIsEscrowOperator}`);
 }
 
@@ -663,13 +690,35 @@ function printFinalizeOverview() {
   console.log(`    node scripts/ops/redeploy-escrowcore.mjs --phase finalize \\`);
   console.log(`      --new-escrow 0xNEW \\`);
   console.log(`      --deploy-tx 0xDEPLOY \\`);
-  console.log(`      --multisig-exec-tx 0xEXEC --commit`);
+  console.log(`      --multisig-exec-tx 0xEXEC --skip-revoke --commit`);
   console.log(`  This re-reads on-chain state to confirm the swap, then updates`);
   console.log(`  deployments/<profile>.json and runs audit-launch-readiness.`);
 }
 
-async function updateManifest({ deploymentsPath, manifest, newEscrow, deployTx, multisigExecTx, skipRevoke }) {
+async function updateManifest({
+  deploymentsPath,
+  manifest,
+  oldEscrow,
+  newEscrow,
+  deployBlock,
+  deployTx,
+  multisigExecTx,
+  skipRevoke
+}) {
   manifest.contracts.escrowCore = newEscrow;
+  if (skipRevoke) {
+    manifest.contracts.legacyEscrowCore = oldEscrow;
+  } else {
+    delete manifest.contracts.legacyEscrowCore;
+  }
+  manifest.parameters = {
+    ...(manifest.parameters ?? {}),
+    protocolFeeBps: "0"
+  };
+  manifest.deploymentBlocks = {
+    ...(manifest.deploymentBlocks ?? {}),
+    escrowCore: deployBlock
+  };
   manifest.escrowRedeployedAt = new Date().toISOString();
   manifest.escrowRedeployTxHashes = {
     deploy: deployTx,
@@ -699,7 +748,13 @@ export function rewriteEscrowAddressInTemplate(text, newEscrow) {
   return { changed: true, text: next, previousValue: match[2].trim() };
 }
 
-async function syncEnvTemplate({ templatePath, newEscrow, dryRun }) {
+function rewriteEnvValue(text, key, value) {
+  const re = new RegExp(`^(${key}=)(.*)$`, "m");
+  if (!re.test(text)) return text;
+  return text.replace(re, `$1${value}`);
+}
+
+async function syncEnvTemplate({ templatePath, newEscrow, oldEscrow, keepV1Drain, dryRun }) {
   let text;
   try {
     text = await readFile(templatePath, "utf8");
@@ -708,8 +763,12 @@ async function syncEnvTemplate({ templatePath, newEscrow, dryRun }) {
     throw error;
   }
   const result = rewriteEscrowAddressInTemplate(text, newEscrow);
-  if (!result.changed) return { skipped: true, reason: result.reason };
-  if (!dryRun) await writeFile(templatePath, result.text, "utf8");
+  let next = result.changed ? result.text : text;
+  next = rewriteEnvValue(next, "PONDER_ESCROW_CORE_ADDRESS", newEscrow);
+  next = rewriteEnvValue(next, "LEGACY_ESCROW_CORE_ADDRESS", keepV1Drain ? oldEscrow : "");
+  next = rewriteEnvValue(next, "PONDER_LEGACY_ESCROW_CORE_ADDRESS", keepV1Drain ? oldEscrow : "");
+  if (next === text) return { skipped: true, reason: result.reason ?? "already up to date" };
+  if (!dryRun) await writeFile(templatePath, next, "utf8");
   return { changed: true, previousValue: result.previousValue };
 }
 
@@ -738,35 +797,61 @@ async function runFinalize({ args, deploymentsPath, manifest, provider, wiringSt
   // 1. Read-only verification.
   const treasury = new Contract(manifest.contracts.treasuryPolicy, TREASURY_POLICY_ABI, provider);
   const accounts = new Contract(manifest.contracts.agentAccountCore, AGENT_ACCOUNT_READ_ABI, provider);
-  const [newIsOperator, oldIsOperator, newIsEscrowOperator, oldIsEscrowOperator, newCode] = await Promise.all([
-    treasury.serviceOperators(newEscrow),
-    treasury.serviceOperators(oldEscrow),
+  const escrowV2 = new Contract(newEscrow, ESCROW_V2_READ_ABI, provider);
+  const [
+    newIsSettlementBroker,
+    oldIsSettlementBroker,
+    newIsReputationWriter,
+    oldIsReputationWriter,
+    newIsEscrowOperator,
+    oldIsEscrowOperator,
+    newCode,
+    boundPolicy,
+    boundAccounts,
+    boundReputation,
+    protocolFeeBps,
+    maxProtocolFeeBps,
+    treasuryAccount,
+    deployReceipt
+  ] = await Promise.all([
+    treasury.settlementBroker(newEscrow),
+    treasury.settlementBroker(oldEscrow),
+    treasury.reputationWriter(newEscrow),
+    treasury.reputationWriter(oldEscrow),
     accounts.escrowOperators(newEscrow),
     accounts.escrowOperators(oldEscrow),
-    provider.getCode(newEscrow)
+    provider.getCode(newEscrow),
+    escrowV2.policy(),
+    escrowV2.accounts(),
+    escrowV2.reputation(),
+    escrowV2.protocolFeeBps(),
+    escrowV2.MAX_PROTOCOL_FEE_BPS(),
+    escrowV2.treasuryAccount(),
+    provider.getTransactionReceipt(args.deployTx)
   ]);
   console.log("");
-  console.log(`  serviceOperators[newEscrow]:             ${newIsOperator}  (expected: true)`);
-  console.log(`  serviceOperators[oldEscrow]:             ${oldIsOperator}  (expected: false unless --skip-revoke)`);
+  console.log(`  settlementBroker[newEscrow]:             ${newIsSettlementBroker}  (expected: true)`);
+  console.log(`  reputationWriter[newEscrow]:             ${newIsReputationWriter}  (expected: true)`);
+  console.log(`  settlementBroker[oldEscrow]:             ${oldIsSettlementBroker}  (expected: --skip-revoke)`);
+  console.log(`  reputationWriter[oldEscrow]:             ${oldIsReputationWriter}  (expected: --skip-revoke)`);
   console.log(`  AgentAccountCore.escrowOperators[new]:   ${newIsEscrowOperator}  (expected: true)`);
-  console.log(`  AgentAccountCore.escrowOperators[old]:   ${oldIsEscrowOperator}  (expected: false unless --skip-revoke)`);
+  console.log(`  AgentAccountCore.escrowOperators[old]:   ${oldIsEscrowOperator}  (expected: --skip-revoke)`);
+  console.log(`  protocolFeeBps:                          ${protocolFeeBps}  (expected: 0)`);
+  console.log(`  MAX_PROTOCOL_FEE_BPS:                    ${maxProtocolFeeBps}  (expected: 1000)`);
+  console.log(`  treasuryAccount:                         ${treasuryAccount}`);
   console.log(`  newEscrow code size:                     ${newCode === "0x" ? 0 : (newCode.length - 2) / 2} bytes`);
 
-  if (!newIsOperator) {
-    throw new Error(
-      `On-chain check failed: serviceOperators[${newEscrow}] is false. ` +
-      `The multisig swap has not landed yet — re-run finalize after multisig.MultisigExecuted fires.`
-    );
-  }
+  if (!newIsSettlementBroker) throw new Error(`TreasuryPolicy.settlementBroker[${newEscrow}] is false.`);
+  if (!newIsReputationWriter) throw new Error(`TreasuryPolicy.reputationWriter[${newEscrow}] is false.`);
   if (!newIsEscrowOperator) {
     throw new Error(
       `On-chain check failed: AgentAccountCore.escrowOperators[${newEscrow}] is false. ` +
       `The multisig swap has not granted the escrow-only ledger role yet.`
     );
   }
-  if (!args.skipRevoke && oldIsOperator) {
+  if (!args.skipRevoke && (oldIsSettlementBroker || oldIsReputationWriter)) {
     throw new Error(
-      `On-chain check failed: serviceOperators[${oldEscrow}] is still true. ` +
+      `On-chain check failed: TreasuryPolicy roles for ${oldEscrow} are still enabled. ` +
       `Either run revoke-old via the multisig (re-run the wire recipe without --skip-revoke) ` +
       `or pass --skip-revoke here to acknowledge.`
     );
@@ -781,6 +866,27 @@ async function runFinalize({ args, deploymentsPath, manifest, provider, wiringSt
   if (newCode === "0x") {
     throw new Error(`No code at ${newEscrow}. Deploy did not land or address is wrong.`);
   }
+  if (!deployReceipt || Number(deployReceipt.status) !== 1) {
+    throw new Error(`Deploy transaction ${args.deployTx} is missing or unsuccessful.`);
+  }
+  if (deployReceipt.contractAddress?.toLowerCase() !== newEscrow.toLowerCase()) {
+    throw new Error(`Deploy transaction created ${deployReceipt.contractAddress}, not ${newEscrow}.`);
+  }
+  if (boundPolicy.toLowerCase() !== manifest.contracts.treasuryPolicy.toLowerCase()
+    || boundAccounts.toLowerCase() !== manifest.contracts.agentAccountCore.toLowerCase()
+    || boundReputation.toLowerCase() !== manifest.contracts.reputationSbt.toLowerCase()) {
+    throw new Error("EscrowCore-v2 immutable constructor bindings do not match the deployment manifest.");
+  }
+  const expectedTreasuryAccount = manifest.treasuryAccount ?? manifest.treasuryReserve;
+  if (treasuryAccount.toLowerCase() !== expectedTreasuryAccount.toLowerCase()) {
+    throw new Error(`EscrowCore.treasuryAccount()=${treasuryAccount}; expected ${expectedTreasuryAccount}.`);
+  }
+  if (Number(protocolFeeBps) !== 0 || Number(maxProtocolFeeBps) !== 1_000) {
+    throw new Error("EscrowCore-v2 must finalize with protocolFeeBps=0 and MAX_PROTOCOL_FEE_BPS=1000.");
+  }
+  if (args.skipRevoke && (!oldIsSettlementBroker || !oldIsReputationWriter || !oldIsEscrowOperator)) {
+    throw new Error("v1 drain requested, but the old EscrowCore no longer has every role needed to settle open jobs.");
+  }
 
   // 2. Manifest update.
   if (args.skipManifestUpdate) {
@@ -789,7 +895,9 @@ async function runFinalize({ args, deploymentsPath, manifest, provider, wiringSt
     await updateManifest({
       deploymentsPath,
       manifest,
+      oldEscrow,
       newEscrow,
+      deployBlock: Number(deployReceipt.blockNumber),
       deployTx: args.deployTx,
       multisigExecTx: args.multisigExecTx,
       skipRevoke: args.skipRevoke
@@ -800,12 +908,19 @@ async function runFinalize({ args, deploymentsPath, manifest, provider, wiringSt
     // truth at deploy time; check-template-matches-manifest.mjs is the CI
     // guard. Keep the template in sync with the new escrow address or that
     // lint will fail on the next push.
-    const templatePath = resolve(repoRoot, "deploy", "backend.env.template");
-    const tplResult = await syncEnvTemplate({ templatePath, newEscrow, dryRun: false });
-    if (tplResult.changed) {
-      console.log(`  Wrote ${templatePath}#ESCROW_CORE_ADDRESS = ${newEscrow}  (was ${tplResult.previousValue})`);
-    } else {
-      console.log(`  ${templatePath}: no change needed (${tplResult.reason})`);
+    const templateNames = args.profile === "mainnet"
+      ? ["backend.mainnet.env.template", "indexer.mainnet.env.template"]
+      : ["backend.env.template", "indexer.env.template"];
+    for (const templateName of templateNames) {
+      const templatePath = resolve(repoRoot, "deploy", templateName);
+      const tplResult = await syncEnvTemplate({
+        templatePath,
+        newEscrow,
+        oldEscrow,
+        keepV1Drain: args.skipRevoke,
+        dryRun: false
+      });
+      console.log(`  ${templatePath}: ${tplResult.changed ? "updated current + drain addresses" : tplResult.reason}`);
     }
   } else {
     console.log(`\n  Manifest update planned (dry-run): would write contracts.escrowCore = ${newEscrow}`);
@@ -837,10 +952,14 @@ async function runFinalize({ args, deploymentsPath, manifest, provider, wiringSt
       revokeOld: args.skipRevoke ? null : "batched-in-multisig-exec"
     },
     onchainAfter: {
-      newEscrowIsOperator: newIsOperator,
-      oldEscrowIsOperator: oldIsOperator,
+      newEscrowIsSettlementBroker: newIsSettlementBroker,
+      oldEscrowIsSettlementBroker: oldIsSettlementBroker,
+      newEscrowIsReputationWriter: newIsReputationWriter,
+      oldEscrowIsReputationWriter: oldIsReputationWriter,
       newEscrowIsAgentAccountEscrowOperator: newIsEscrowOperator,
       oldEscrowIsAgentAccountEscrowOperator: oldIsEscrowOperator,
+      protocolFeeBps: Number(protocolFeeBps),
+      treasuryAccount,
       newEscrowCodeBytes: newCode === "0x" ? 0 : (newCode.length - 2) / 2
     },
     auditExitCode
@@ -875,7 +994,8 @@ async function main() {
   console.log(`old escrow:            ${manifest.contracts.escrowCore}`);
   console.log(`treasury:              ${manifest.contracts.treasuryPolicy}`);
   console.log(`treasury.owner():      ${wiringState.owner} (multisig 12nHTKYf… H160 mapping)`);
-  console.log(`old policy operator?:  ${wiringState.oldIsOperator}`);
+  console.log(`old settlement broker? ${wiringState.oldIsSettlementBroker}`);
+  console.log(`old reputation writer? ${wiringState.oldIsReputationWriter}`);
   console.log(`old AAC escrow op?:    ${wiringState.oldIsEscrowOperator}`);
   console.log(`deployer (manifest):   ${manifest.deployer}`);
   console.log(`phase:                 ${args.phase}`);

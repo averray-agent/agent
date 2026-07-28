@@ -15,6 +15,7 @@ import {
   ERC20_MOCK_ABI,
   ESCROW_CORE_ABI,
   ESCROW_CORE_LEGACY_ABI,
+  ESCROW_CORE_V1_DRAIN_ABI,
   REPUTATION_SBT_ABI,
   STRATEGY_ADAPTER_ABI,
   TREASURY_POLICY_ABI,
@@ -65,6 +66,8 @@ const EMPTY_EXTERNAL_SCHEMA = {
 };
 const CREATE_SINGLE_PAYOUT_WITH_SCHEMA =
   "createSinglePayoutJob(bytes32,address,uint256,uint256,uint256,uint256,bytes32,bytes32,bytes32,(bytes32,string,address,bytes))";
+const CREATE_SINGLE_PAYOUT_FEE_WAIVED_WITH_SCHEMA =
+  "createSinglePayoutJobFeeWaived(bytes32,address,uint256,uint256,uint256,uint256,bytes32,bytes32,bytes32,(bytes32,string,address,bytes))";
 
 function summarizeSupportedAssets(assets = []) {
   return assets.map(summarizeSupportedAsset);
@@ -124,6 +127,8 @@ export class BlockchainGateway {
       this.accountContract = undefined;
       this.escrowContract = undefined;
       this.legacyEscrowContract = undefined;
+      this.drainingEscrowContract = undefined;
+      this.arbitratorDrainingEscrowContract = undefined;
       this.reputationContract = undefined;
       this.xcmWrapperContract = undefined;
       return;
@@ -172,6 +177,20 @@ export class BlockchainGateway {
       ESCROW_CORE_LEGACY_ABI,
       this.signer ?? this.provider
     );
+    this.drainingEscrowContract = config.legacyEscrowCoreAddress
+      ? new Contract(
+          config.legacyEscrowCoreAddress,
+          ESCROW_CORE_V1_DRAIN_ABI,
+          this.signer ?? this.provider
+        )
+      : undefined;
+    this.arbitratorDrainingEscrowContract = config.legacyEscrowCoreAddress
+      ? new Contract(
+          config.legacyEscrowCoreAddress,
+          ESCROW_CORE_V1_DRAIN_ABI,
+          this.arbitratorSigner ?? this.provider
+        )
+      : undefined;
     this.reputationContract = new Contract(
       config.reputationSbtAddress,
       REPUTATION_SBT_ABI,
@@ -285,10 +304,9 @@ export class BlockchainGateway {
 
   // Reads the worker's raw ERC-20 wallet (EOA) balance per supported asset.
   // This is DISTINCT from getAccountSummary's `liquid`, which is the
-  // AgentAccountCore position. A settled job reward lands in the worker's EOA,
-  // not their AAC position — so it shows up here but NOT in `liquid` until the
-  // worker deposits it. Callers must keep the two separate: EOA funds are
-  // paid-out, not yet stakeable in-platform.
+  // AgentAccountCore position. Settled worker rewards and protocol fees land
+  // in ordinary AAC positions; they appear in `liquid` (or reduce debt), not
+  // in this raw EOA balance until the account owner withdraws.
   async getWalletTokenBalances(wallet) {
     return this.withGatewayError("getWalletTokenBalances", async () => {
       const walletBalance = {};
@@ -442,6 +460,59 @@ export class BlockchainGateway {
     });
   }
 
+  async getProtocolFeeConfig() {
+    return this.withGatewayError("getProtocolFeeConfig", async () => {
+      if (typeof this.escrowContract?.protocolFeeBps !== "function") {
+        return {
+          supported: false,
+          protocolFeeBps: 0,
+          maxProtocolFeeBps: 0,
+          treasuryAccount: undefined
+        };
+      }
+      const [protocolFeeBps, maxProtocolFeeBps, treasuryAccount] = await Promise.all([
+        this.escrowContract.protocolFeeBps(),
+        this.escrowContract.MAX_PROTOCOL_FEE_BPS(),
+        this.escrowContract.treasuryAccount()
+      ]);
+      return {
+        supported: true,
+        protocolFeeBps: Number(protocolFeeBps),
+        maxProtocolFeeBps: Number(maxProtocolFeeBps),
+        treasuryAccount
+      };
+    });
+  }
+
+  async previewProtocolFeeForAsset(assetSymbol, rewardAmount) {
+    return this.withGatewayError("previewProtocolFeeForAsset", async () => {
+      const asset = this.requireAsset(assetSymbol);
+      const rewardAmountRaw = this.toBaseUnits(rewardAmount, asset, "job reward");
+      if (typeof this.escrowContract?.previewProtocolFee !== "function") {
+        return {
+          asset: asset.symbol,
+          rewardAmount: this.toDisplayUnits(rewardAmountRaw, asset),
+          rewardAmountRaw: rewardAmountRaw.toString(),
+          protocolFeeAmount: 0,
+          protocolFeeAmountRaw: "0",
+          protocolFeeBps: 0
+        };
+      }
+      const [protocolFeeAmountRaw, protocolFeeBps] = await Promise.all([
+        this.escrowContract.previewProtocolFee(rewardAmountRaw),
+        this.escrowContract.protocolFeeBps()
+      ]);
+      return {
+        asset: asset.symbol,
+        rewardAmount: this.toDisplayUnits(rewardAmountRaw, asset),
+        rewardAmountRaw: rewardAmountRaw.toString(),
+        protocolFeeAmount: this.toDisplayUnits(protocolFeeAmountRaw, asset),
+        protocolFeeAmountRaw: protocolFeeAmountRaw.toString(),
+        protocolFeeBps: Number(protocolFeeBps)
+      };
+    });
+  }
+
   async getWorkerClaimCount(wallet) {
     return this.withGatewayError("getWorkerClaimCount", async () => {
       if (typeof this.escrowContract?.workerClaimCount !== "function") {
@@ -455,6 +526,7 @@ export class BlockchainGateway {
     return this.withGatewayError("getClaimEconomicsDecisionState", async () => {
       const live = await this.readEscrowJob(jobId);
       const contractLayout = live.contractLayout === "legacy" ? "legacy" : "current";
+      const escrowContract = this.escrowContractForLiveJob(live);
       const exists = Number(live.state) !== 0;
       if (contractLayout === "legacy" || !exists) {
         return {
@@ -464,7 +536,7 @@ export class BlockchainGateway {
           onboardingWaiverEligible: false
         };
       }
-      if (typeof this.escrowContract?.onboardingWaiverEligibleJobs !== "function") {
+      if (typeof escrowContract?.onboardingWaiverEligibleJobs !== "function") {
         throw new Error("EscrowCore.onboardingWaiverEligibleJobs selector is unavailable");
       }
       return {
@@ -472,7 +544,7 @@ export class BlockchainGateway {
         exists,
         contractLayout,
         onboardingWaiverEligible: Boolean(
-          await this.escrowContract.onboardingWaiverEligibleJobs(this.toJobId(jobId))
+          await escrowContract.onboardingWaiverEligibleJobs(this.toJobId(jobId))
         )
       };
     });
@@ -998,10 +1070,11 @@ export class BlockchainGateway {
     return this.withGatewayError("claimJob", async () => {
       this.requireSigner("claimJob");
       const chainJobId = this.toJobId(jobId);
+      const escrowContract = await this.escrowContractForJob(jobId);
       const signerAddress = await this.signer.getAddress();
       const tx = wallet && wallet.toLowerCase() !== signerAddress.toLowerCase()
-        ? await this.escrowContract.claimJobFor(chainJobId, wallet)
-        : await this.escrowContract.claimJob(chainJobId);
+        ? await escrowContract.claimJobFor(chainJobId, wallet)
+        : await escrowContract.claimJob(chainJobId);
       await tx.wait();
     });
   }
@@ -1009,15 +1082,17 @@ export class BlockchainGateway {
   async handleClaimTimeout(jobId) {
     return this.withGatewayError("handleClaimTimeout", async () => {
       this.requireSigner("handleClaimTimeout");
-      const tx = await this.escrowContract.handleClaimTimeout(this.toJobId(jobId));
+      const escrowContract = await this.escrowContractForJob(jobId);
+      const tx = await escrowContract.handleClaimTimeout(this.toJobId(jobId));
       await tx.wait();
     });
   }
 
   async previewClaimEconomics(wallet, jobId) {
     return this.withGatewayError("previewClaimEconomics", async () => {
-      const economics = await this.escrowContract.previewClaimEconomics(wallet, this.toJobId(jobId));
       const live = await this.readEscrowJob(jobId);
+      const escrowContract = this.escrowContractForLiveJob(live);
+      const economics = await escrowContract.previewClaimEconomics(wallet, this.toJobId(jobId));
       const asset = this.assetForAddress(live.asset);
       const claimStake = this.toDisplayUnits(economics.claimStake, asset);
       const claimFee = this.toDisplayUnits(economics.claimFee, asset);
@@ -1041,14 +1116,25 @@ export class BlockchainGateway {
       const asset = this.requireAsset(job.rewardAsset);
       const live = await this.readEscrowJob(instanceJobId);
       if (live.state !== 0) {
-        await this.ensureOnboardingWaiverEligibility(this.toJobId(instanceJobId), job, live.contractLayout);
+        await this.ensureOnboardingWaiverEligibility(
+          this.toJobId(instanceJobId),
+          job,
+          live.contractLayout,
+          live.escrowAddress
+        );
         return this.publicEscrowJob(live);
       }
 
       const rewardAmount = this.toBaseUnits(job.rewardAmount ?? 0, asset, "job reward");
       const claimStake = this.toBaseUnits(claimStakeAmount ?? 0, asset, "claim lock amount");
       const usesRecurringTemplateReserve = this.usesRecurringTemplateReserve(job);
-      const totalRequired = usesRecurringTemplateReserve ? rewardAmount : rewardAmount + claimStake;
+      const protocolFeeWaived = job?.onboardingWaiverEligible === true;
+      const protocolFee = protocolFeeWaived || typeof this.escrowContract?.previewProtocolFee !== "function"
+        ? 0n
+        : BigInt(await this.escrowContract.previewProtocolFee(rewardAmount));
+      const totalRequired = usesRecurringTemplateReserve
+        ? rewardAmount + protocolFee
+        : rewardAmount + protocolFee + claimStake;
       if (totalRequired <= 0n) {
         throw new ValidationError(`Job ${job.id} has no fundable reward`);
       }
@@ -1097,17 +1183,23 @@ export class BlockchainGateway {
     });
   }
 
-  async ensureOnboardingWaiverEligibility(chainJobId, job, contractLayout = "current") {
+  async ensureOnboardingWaiverEligibility(
+    chainJobId,
+    job,
+    contractLayout = "current",
+    escrowAddress = this.config.escrowCoreAddress
+  ) {
     if (contractLayout === "legacy" || job?.onboardingWaiverEligible !== true) {
       return;
     }
-    if (typeof this.escrowContract.onboardingWaiverEligibleJobs !== "function"
-      || typeof this.escrowContract.setOnboardingWaiverEligible !== "function") {
+    const escrowContract = this.escrowContractForLiveJob({ escrowAddress });
+    if (typeof escrowContract.onboardingWaiverEligibleJobs !== "function"
+      || typeof escrowContract.setOnboardingWaiverEligible !== "function") {
       return;
     }
     let current = false;
     try {
-      current = await this.escrowContract.onboardingWaiverEligibleJobs(chainJobId);
+      current = await escrowContract.onboardingWaiverEligibleJobs(chainJobId);
     } catch (error) {
       if (this.isMissingOptionalContractSelector(error)) {
         return;
@@ -1119,7 +1211,7 @@ export class BlockchainGateway {
     }
     let tx;
     try {
-      tx = await this.escrowContract.setOnboardingWaiverEligible(chainJobId, true);
+      tx = await escrowContract.setOnboardingWaiverEligible(chainJobId, true);
     } catch (error) {
       if (this.isMissingOptionalContractSelector(error)) {
         return;
@@ -1139,13 +1231,14 @@ export class BlockchainGateway {
     return this.withGatewayError("submitWork", async () => {
       this.requireSigner("submitWork");
       const chainJobId = this.toJobId(jobId);
+      const escrowContract = await this.escrowContractForJob(jobId);
       const evidenceHash = typeof evidence === "string" && /^0x[a-fA-F0-9]{64}$/u.test(evidence)
         ? evidence
         : hashCanonicalContent(evidence);
       const signerAddress = worker ? await this.signer.getAddress() : undefined;
       const tx = worker && worker.toLowerCase() !== signerAddress.toLowerCase()
-        ? await this.escrowContract.submitWorkFor(chainJobId, worker, evidenceHash)
-        : await this.escrowContract.submitWork(chainJobId, evidenceHash);
+        ? await escrowContract.submitWorkFor(chainJobId, worker, evidenceHash)
+        : await escrowContract.submitWork(chainJobId, evidenceHash);
       await tx.wait();
     });
   }
@@ -1154,7 +1247,8 @@ export class BlockchainGateway {
     return this.withGatewayError("resolveSinglePayout", async () => {
       this.requireSigner("resolveSinglePayout");
       const startedAt = Date.now();
-      const tx = await this.escrowContract.resolveSinglePayout(
+      const escrowContract = await this.escrowContractForJob(jobId);
+      const tx = await escrowContract.resolveSinglePayout(
         this.toJobId(jobId),
         approved,
         this.toReasonCode(reasonCode),
@@ -1179,6 +1273,7 @@ export class BlockchainGateway {
       // resolveDispute below) so callers can surface the on-chain payout tx to
       // the worker instead of discarding it. Settlement behavior is unchanged.
       const receipt = await tx.wait();
+      const settlement = this.extractSettlementSplit(receipt, escrowContract);
       const durationMs = Date.now() - startedAt;
       this.logger?.info?.(
         {
@@ -1193,7 +1288,8 @@ export class BlockchainGateway {
       return {
         txHash: tx.hash,
         blockNumber: receipt?.blockNumber,
-        status: Number(receipt?.status ?? 0)
+        status: Number(receipt?.status ?? 0),
+        ...(settlement ? { settlement } : {})
       };
     });
   }
@@ -1202,10 +1298,11 @@ export class BlockchainGateway {
     return this.withGatewayError("openDispute", async () => {
       this.requireSigner("openDispute");
       const chainJobId = this.toJobId(jobId);
+      const escrowContract = await this.escrowContractForJob(jobId);
       const signerAddress = participant ? await this.signer.getAddress() : undefined;
       const tx = participant && participant.toLowerCase() !== signerAddress.toLowerCase()
-        ? await this.escrowContract.openDisputeFor(chainJobId, participant)
-        : await this.escrowContract.openDispute(chainJobId);
+        ? await escrowContract.openDisputeFor(chainJobId, participant)
+        : await escrowContract.openDispute(chainJobId);
       const receipt = await tx.wait();
       return {
         txHash: tx.hash,
@@ -1219,19 +1316,22 @@ export class BlockchainGateway {
     return this.withGatewayError("resolveDispute", async () => {
       await this.requireArbitratorSigner("resolveDispute");
       const job = await this.getJob(jobId);
+      const escrowContract = this.escrowContractForLiveJob(job, { arbitrator: true });
       const asset = this.assetForAddress(job.asset);
       const workerPayoutBase = this.toBaseUnits(workerPayout, asset, "dispute worker payout");
-      const tx = await this.arbitratorEscrowContract.resolveDispute(
+      const tx = await escrowContract.resolveDispute(
         this.toJobId(jobId),
         workerPayoutBase,
         this.toDisputeReasonCode(reasonCode),
         metadataURI
       );
       const receipt = await tx.wait();
+      const settlement = this.extractSettlementSplit(receipt, escrowContract);
       return {
         txHash: tx.hash,
         blockNumber: receipt?.blockNumber,
-        status: Number(receipt?.status ?? 0)
+        status: Number(receipt?.status ?? 0),
+        ...(settlement ? { settlement } : {})
       };
     });
   }
@@ -1281,20 +1381,38 @@ export class BlockchainGateway {
 
   async readEscrowJob(jobId) {
     const normalizedJobId = this.toJobId(jobId);
+    let primary;
     try {
-      return this.normalizeEscrowJob(await this.escrowContract.jobs(normalizedJobId), "rc1");
+      primary = this.normalizeEscrowJob(
+        await this.escrowContract.jobs(normalizedJobId),
+        "rc1",
+        this.config.escrowCoreAddress
+      );
     } catch (error) {
       if (!this.isEscrowJobDecodeError(error) || !this.legacyEscrowContract) {
         throw error;
       }
-      return this.normalizeEscrowJob(await this.legacyEscrowContract.jobs(normalizedJobId), "legacy");
+      primary = this.normalizeEscrowJob(
+        await this.legacyEscrowContract.jobs(normalizedJobId),
+        "legacy",
+        this.config.escrowCoreAddress
+      );
     }
+    if (Number(primary.state) !== 0 || !this.drainingEscrowContract) return primary;
+
+    const draining = this.normalizeEscrowJob(
+      await this.drainingEscrowContract.jobs(normalizedJobId),
+      "v1-drain",
+      this.config.legacyEscrowCoreAddress
+    );
+    return Number(draining.state) === 0 ? primary : draining;
   }
 
-  normalizeEscrowJob(job, contractLayout) {
+  normalizeEscrowJob(job, contractLayout, escrowAddress = this.config.escrowCoreAddress) {
     const asset = this.assetForAddress(job.asset);
     return {
       contractLayout,
+      escrowAddress,
       poster: job.poster,
       worker: job.worker,
       asset: job.asset,
@@ -1314,13 +1432,38 @@ export class BlockchainGateway {
       state: Number(job.state),
       claimExpiry: Number(job.claimExpiry),
       rejectedAt: Number(job.rejectedAt ?? 0),
-      disputedAt: Number(job.disputedAt ?? 0)
+      disputedAt: Number(job.disputedAt ?? 0),
+      protocolFee: this.toDisplayUnits(job.protocolFee ?? 0, asset),
+      protocolFeeRaw: job.protocolFee?.toString?.() ?? "0",
+      protocolFeeReleased: this.toDisplayUnits(job.protocolFeeReleased ?? 0, asset),
+      protocolFeeReleasedRaw: job.protocolFeeReleased?.toString?.() ?? "0",
+      protocolFeeBps: Number(job.protocolFeeBps ?? 0),
+      protocolFeeWaived: Boolean(job.protocolFeeWaived ?? false)
     };
   }
 
   publicEscrowJob(job) {
     const { contractLayout: _contractLayout, ...publicJob } = job;
     return publicJob;
+  }
+
+  async escrowContractForJob(jobId, options = {}) {
+    if (!this.config.legacyEscrowCoreAddress) {
+      return options.arbitrator ? this.arbitratorEscrowContract : this.escrowContract;
+    }
+    return this.escrowContractForLiveJob(await this.readEscrowJob(jobId), options);
+  }
+
+  escrowContractForLiveJob(job, { arbitrator = false } = {}) {
+    if (
+      this.config.legacyEscrowCoreAddress
+      && job?.escrowAddress?.toLowerCase?.() === this.config.legacyEscrowCoreAddress.toLowerCase()
+    ) {
+      return arbitrator
+        ? this.arbitratorDrainingEscrowContract
+        : this.drainingEscrowContract;
+    }
+    return arbitrator ? this.arbitratorEscrowContract : this.escrowContract;
   }
 
   async createSinglePayoutJobForLayout(
@@ -1334,7 +1477,8 @@ export class BlockchainGateway {
     verifierMode,
     category,
     specHash,
-    externalSchema = EMPTY_EXTERNAL_SCHEMA
+    externalSchema = EMPTY_EXTERNAL_SCHEMA,
+    protocolFeeWaived = false
   ) {
     if (contractLayout === "legacy") {
       return this.legacyEscrowContract.createSinglePayoutJob(
@@ -1346,6 +1490,33 @@ export class BlockchainGateway {
         claimTtl,
         verifierMode,
         category
+      );
+    }
+    if (protocolFeeWaived) {
+      if (this.hasExternalSchemaMetadata(externalSchema)) {
+        return this.escrowContract[CREATE_SINGLE_PAYOUT_FEE_WAIVED_WITH_SCHEMA](
+          jobId,
+          assetAddress,
+          reward,
+          opsReserve,
+          contingencyReserve,
+          claimTtl,
+          verifierMode,
+          category,
+          specHash,
+          externalSchema
+        );
+      }
+      return this.escrowContract.createSinglePayoutJobFeeWaived(
+        jobId,
+        assetAddress,
+        reward,
+        opsReserve,
+        contingencyReserve,
+        claimTtl,
+        verifierMode,
+        category,
+        specHash
       );
     }
     if (this.hasExternalSchemaMetadata(externalSchema)) {
@@ -1408,7 +1579,8 @@ export class BlockchainGateway {
         verifierMode,
         category,
         specHash,
-        ...externalSchema
+        ...externalSchema,
+        protocolFeeWaived: job?.onboardingWaiverEligible === true
       });
     }
     return this.createSinglePayoutJobForLayout(
@@ -1422,8 +1594,34 @@ export class BlockchainGateway {
       verifierMode,
       category,
       specHash,
-      externalSchema
+      externalSchema,
+      job?.onboardingWaiverEligible === true
     );
+  }
+
+  extractSettlementSplit(receipt, contract = this.escrowContract) {
+    for (const log of receipt?.logs ?? []) {
+      let parsed;
+      try {
+        parsed = contract?.interface?.parseLog?.(log);
+      } catch {
+        continue;
+      }
+      if (parsed?.name !== "SettlementSplit") continue;
+      const asset = this.assetForAddress(parsed.args.asset);
+      return {
+        worker: parsed.args.worker,
+        treasuryAccount: parsed.args.treasuryAccount,
+        asset: parsed.args.asset,
+        assetSymbol: asset.symbol,
+        workerAmount: this.toDisplayUnits(parsed.args.workerAmount, asset),
+        workerAmountRaw: parsed.args.workerAmount.toString(),
+        protocolFeeAmount: this.toDisplayUnits(parsed.args.protocolFeeAmount, asset),
+        protocolFeeAmountRaw: parsed.args.protocolFeeAmount.toString(),
+        protocolFeeBps: Number(parsed.args.protocolFeeBps)
+      };
+    }
+    return undefined;
   }
 
   externalSchemaMetadataForJob(job) {

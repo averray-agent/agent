@@ -3,7 +3,12 @@ import { decodeFunctionResult, encodeFunctionData, hexToString } from "viem";
 import { ponder } from "ponder:registry";
 import schema from "ponder:schema";
 
-import { EscrowCoreAbi, EscrowCoreLegacyJobsAbi, EscrowCoreOldLegacyJobsAbi } from "../abis/contractsAbi";
+import {
+  EscrowCoreAbi,
+  EscrowCoreLegacyJobsAbi,
+  EscrowCoreOldLegacyJobsAbi,
+  EscrowCoreV1JobsAbi
+} from "../abis/contractsAbi";
 
 const payoutModeLabels = ["single", "milestone"] as const;
 const jobStateLabels = ["none", "open", "claimed", "submitted", "rejected", "disputed", "closed"] as const;
@@ -50,8 +55,13 @@ const currentJobFields = [
   "rejectedAt",
   "disputedAt",
   "payoutMode",
-  "state"
+  "state",
+  "protocolFee",
+  "protocolFeeReleased",
+  "protocolFeeBps",
+  "protocolFeeWaived"
 ] as const;
+const v1JobFields = currentJobFields.slice(0, 21);
 const legacyJobFields = [
   "poster",
   "worker",
@@ -126,7 +136,11 @@ const syncJob = async ({
     rejectedAt,
     disputedAt,
     payoutMode,
-    state
+    state,
+    protocolFee,
+    protocolFeeReleased,
+    protocolFeeBps,
+    protocolFeeWaived
   ] = live;
 
   await context.db
@@ -158,6 +172,10 @@ const syncJob = async ({
       payoutModeLabel: payoutModeLabels[payoutMode] ?? "unknown",
       state,
       stateLabel: jobStateLabels[state] ?? "unknown",
+      protocolFee,
+      protocolFeeReleased,
+      protocolFeeBps,
+      protocolFeeWaived,
       createdAtBlock: event.block.number,
       createdAtTimestamp: event.block.timestamp,
       updatedAtBlock: event.block.number,
@@ -181,6 +199,10 @@ const syncJob = async ({
       payoutModeLabel: row.payoutModeLabel,
       state: row.state,
       stateLabel: row.stateLabel,
+      protocolFee: row.protocolFee,
+      protocolFeeReleased: row.protocolFeeReleased,
+      protocolFeeBps: row.protocolFeeBps,
+      protocolFeeWaived: row.protocolFeeWaived,
       updatedAtBlock: row.updatedAtBlock,
       updatedAtTimestamp: row.updatedAtTimestamp,
       lastTxHash: row.lastTxHash
@@ -216,7 +238,7 @@ const readLiveJob = async ({
 const decodeLiveJob = (data: `0x${string}`) => {
   const byteLength = hexByteLength(data);
 
-  if (byteLength >= 672) {
+  if (byteLength >= 800) {
     return tupleValues(
       decodeFunctionResult({
         abi: EscrowCoreAbi,
@@ -225,6 +247,15 @@ const decodeLiveJob = (data: `0x${string}`) => {
       }) as any,
       currentJobFields
     );
+  }
+
+  if (byteLength >= 672) {
+    const v1 = decodeFunctionResult({
+      abi: EscrowCoreV1JobsAbi,
+      functionName: "jobs",
+      data
+    }) as any;
+    return [...tupleValues(v1, v1JobFields), 0n, 0n, 0, false] as const;
   }
 
   if (byteLength >= 544) {
@@ -309,7 +340,11 @@ const normalizeLegacyJob = (legacy: any) => {
     rejectedAt,
     disputedAt,
     payoutMode,
-    state
+    state,
+    0n,
+    0n,
+    0,
+    false
   ] as const;
 };
 
@@ -351,7 +386,11 @@ const normalizeOldLegacyJob = (oldLegacy: any) => {
     0n,
     0n,
     payoutMode,
-    state
+    state,
+    0n,
+    0n,
+    0,
+    false
   ] as const;
 };
 
@@ -582,6 +621,23 @@ ponder.on("EscrowCore:JobClosed", async ({ event, context }) => {
       timestamp: event.block.timestamp
     });
   }
+});
+
+ponder.on("EscrowCore:SettlementSplit", async ({ event, context }) => {
+  await syncJob({ context, event, jobId: event.args.jobId });
+  await context.db.insert(schema.settlementSplit).values({
+    id: toEventId(event.transaction.hash, event.log.logIndex),
+    jobId: event.args.jobId,
+    worker: event.args.worker,
+    treasuryAccount: event.args.treasuryAccount,
+    asset: event.args.asset,
+    workerAmount: event.args.workerAmount,
+    protocolFeeAmount: event.args.protocolFeeAmount,
+    protocolFeeBps: event.args.protocolFeeBps,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp
+  });
 });
 
 ponder.on("ReputationSBT:BadgeMinted", async ({ event, context }) => {

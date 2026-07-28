@@ -135,7 +135,7 @@ export function rebuildExternalDraftArtifacts(draft, config) {
       ],
       value: "0",
       valueSemantics:
-        "Send no native token. EscrowCore reserves reward, ops reserve, and contingency reserve from the caller's own AgentAccountCore USDC position."
+        "Send no native token. EscrowCore snapshots its current protocolFeeBps and reserves that poster-side fee on top of reward, ops reserve, and contingency reserve from the caller's own AgentAccountCore USDC position."
     }
   };
 }

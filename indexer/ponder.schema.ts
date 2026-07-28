@@ -27,6 +27,10 @@ export const job = onchainTable("job", (p) => ({
   payoutModeLabel: p.text().notNull(),
   state: p.integer().notNull(),
   stateLabel: p.text().notNull(),
+  protocolFee: p.bigint().notNull(),
+  protocolFeeReleased: p.bigint().notNull(),
+  protocolFeeBps: p.integer().notNull(),
+  protocolFeeWaived: p.boolean().notNull(),
   createdAtBlock: p.bigint().notNull(),
   createdAtTimestamp: p.bigint().notNull(),
   updatedAtBlock: p.bigint().notNull(),
@@ -59,6 +63,20 @@ export const payout = onchainTable("payout", (p) => ({
   asset: p.hex().notNull(),
   amount: p.bigint().notNull(),
   recipient: p.hex().notNull(),
+  txHash: p.hex().notNull(),
+  blockNumber: p.bigint().notNull(),
+  timestamp: p.bigint().notNull()
+}));
+
+export const settlementSplit = onchainTable("settlement_split", (p) => ({
+  id: p.text().primaryKey(),
+  jobId: p.text().notNull(),
+  worker: p.hex().notNull(),
+  treasuryAccount: p.hex().notNull(),
+  asset: p.hex().notNull(),
+  workerAmount: p.bigint().notNull(),
+  protocolFeeAmount: p.bigint().notNull(),
+  protocolFeeBps: p.integer().notNull(),
   txHash: p.hex().notNull(),
   blockNumber: p.bigint().notNull(),
   timestamp: p.bigint().notNull()

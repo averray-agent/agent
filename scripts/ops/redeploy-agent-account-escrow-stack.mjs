@@ -65,7 +65,9 @@ const AGENT_ACCOUNT_READ_ABI = [
 ];
 
 const ESCROW_READ_ABI = [
-  "function accounts() view returns (address)"
+  "function accounts() view returns (address)",
+  "function treasuryAccount() view returns (address)",
+  "function protocolFeeBps() view returns (uint16)"
 ];
 
 const REQUIRED_AGENT_ACCOUNT_FNS = [
@@ -284,17 +286,19 @@ async function planDeployStack({ provider, manifest, accountArtifact, escrowArti
   const treasury = manifest.contracts.treasuryPolicy;
   const strategyRegistry = manifest.contracts.strategyAdapterRegistry;
   const reputation = manifest.contracts.reputationSbt;
+  const treasuryAccount = manifest.treasuryAccount ?? manifest.treasuryReserve;
   const deployer = manifest.deployer;
   assertAddress("contracts.treasuryPolicy", treasury);
   assertAddress("contracts.strategyAdapterRegistry", strategyRegistry);
   assertAddress("contracts.reputationSbt", reputation);
+  assertAddress("treasuryAccount", treasuryAccount);
   assertAddress("deployments.deployer", deployer);
 
   const nonce = await provider.getTransactionCount(deployer);
   const predictedAgentAccount = getCreateAddress({ from: deployer, nonce });
   const predictedEscrow = getCreateAddress({ from: deployer, nonce: nonce + 1 });
   const accountConstructorArgs = [treasury, strategyRegistry];
-  const escrowConstructorArgs = [treasury, predictedAgentAccount, reputation];
+  const escrowConstructorArgs = [treasury, predictedAgentAccount, reputation, treasuryAccount];
   const accountFactory = new ContractFactory(accountArtifact.abi, accountArtifact.bytecode, undefined);
   const escrowFactory = new ContractFactory(escrowArtifact.abi, escrowArtifact.bytecode, undefined);
   const accountDeployTx = await accountFactory.getDeployTransaction(...accountConstructorArgs);
@@ -493,6 +497,8 @@ async function runFinalize({ args, deploymentsPath, manifest, provider }) {
     newEscrowCode,
     domainSeparator,
     escrowAccounts,
+    escrowTreasuryAccount,
+    escrowProtocolFeeBps,
     newAgentIsOutflowRecorder,
     newEscrowIsSettlementBroker,
     newEscrowIsReputationWriter,
@@ -511,6 +517,8 @@ async function runFinalize({ args, deploymentsPath, manifest, provider }) {
     provider.getCode(args.newEscrow),
     newAccount.domainSeparator(),
     newEscrow.accounts(),
+    newEscrow.treasuryAccount(),
+    newEscrow.protocolFeeBps(),
     treasury.outflowRecorder(args.newAgentAccount),
     treasury.settlementBroker(args.newEscrow),
     treasury.reputationWriter(args.newEscrow),
@@ -536,6 +544,8 @@ async function runFinalize({ args, deploymentsPath, manifest, provider }) {
   console.log(`  new Escrow code bytes:                  ${newEscrowCode === "0x" ? 0 : (newEscrowCode.length - 2) / 2}`);
   console.log(`  AgentAccountCore.domainSeparator():     ${domainSeparator}`);
   console.log(`  EscrowCore.accounts():                  ${escrowAccounts}`);
+  console.log(`  EscrowCore.treasuryAccount():           ${escrowTreasuryAccount}`);
+  console.log(`  EscrowCore.protocolFeeBps():            ${escrowProtocolFeeBps} (expected 0)`);
   console.log(`  outflowRecorder[new AAC]:               ${newAgentIsOutflowRecorder}`);
   console.log(`  settlementBroker[new Escrow]:           ${newEscrowIsSettlementBroker}`);
   console.log(`  reputationWriter[new Escrow]:           ${newEscrowIsReputationWriter}`);
@@ -554,6 +564,12 @@ async function runFinalize({ args, deploymentsPath, manifest, provider }) {
   if (newEscrowCode === "0x") throw new Error(`No code at new EscrowCore ${args.newEscrow}.`);
   if (!ciEqual(escrowAccounts, args.newAgentAccount)) {
     throw new Error(`EscrowCore.accounts()=${escrowAccounts} does not match new AgentAccountCore ${args.newAgentAccount}.`);
+  }
+  if (!ciEqual(escrowTreasuryAccount, manifest.treasuryAccount ?? manifest.treasuryReserve)) {
+    throw new Error("EscrowCore.treasuryAccount() does not match the deployment manifest.");
+  }
+  if (Number(escrowProtocolFeeBps) !== 0) {
+    throw new Error("Fresh EscrowCore.protocolFeeBps() must remain zero through cutover.");
   }
   if (!newAgentIsOutflowRecorder) throw new Error("TreasuryPolicy.outflowRecorder(new AgentAccountCore) is false.");
   if (!newEscrowIsSettlementBroker) throw new Error("TreasuryPolicy.settlementBroker(new EscrowCore) is false.");

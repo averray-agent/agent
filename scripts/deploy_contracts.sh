@@ -227,7 +227,7 @@ echo "ReputationSBT:           $REPUTATION_SBT"
 DISCOVERY_REGISTRY="$(extract_address "$(forge_deploy contracts/DiscoveryRegistry.sol:DiscoveryRegistry --constructor-args "$DEPLOYER_ADDRESS")")"
 echo "DiscoveryRegistry:       $DISCOVERY_REGISTRY"
 
-ESCROW_CORE="$(extract_address "$(forge_deploy contracts/EscrowCore.sol:EscrowCore --constructor-args "$TREASURY_POLICY" "$AGENT_ACCOUNT" "$REPUTATION_SBT")")"
+ESCROW_CORE="$(extract_address "$(forge_deploy contracts/EscrowCore.sol:EscrowCore --constructor-args "$TREASURY_POLICY" "$AGENT_ACCOUNT" "$REPUTATION_SBT" "$TREASURY_ACCOUNT_ADDRESS")")"
 echo "EscrowCore:              $ESCROW_CORE"
 
 XCM_WRAPPER=""
@@ -386,6 +386,7 @@ cat > "$manifest_path" <<JSON
     "claimFeeBps": "$CLAIM_FEE_BPS",
     "minClaimFee": "$MIN_CLAIM_FEE",
     "claimFeeVerifierBps": "$CLAIM_FEE_VERIFIER_BPS",
+    "protocolFeeBps": "0",
     "rejectionSkillPenalty": "$REJECTION_SKILL_PENALTY",
     "rejectionReliabilityPenalty": "$REJECTION_RELIABILITY_PENALTY",
     "disputeLossSkillPenalty": "$DISPUTE_LOSS_SKILL_PENALTY",

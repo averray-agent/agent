@@ -16,8 +16,8 @@ interface VmEvent {
 }
 
 contract EscrowCoreHarness is EscrowCore {
-    constructor(TreasuryPolicy policy_, AgentAccountCore accounts_, ReputationSBT reputation_)
-        EscrowCore(policy_, accounts_, reputation_)
+    constructor(TreasuryPolicy policy_, AgentAccountCore accounts_, ReputationSBT reputation_, address treasuryAccount_)
+        EscrowCore(policy_, accounts_, reputation_, treasuryAccount_)
     {}
 
     function restoreTimedOutClaimSlotForTest(address worker) external {
@@ -58,7 +58,7 @@ contract AgentPlatformTest is Test {
         registry = new StrategyAdapterRegistry(policy);
         accounts = new AgentAccountCore(policy, registry);
         reputation = new ReputationSBT(policy);
-        escrow = new EscrowCoreHarness(policy, accounts, reputation);
+        escrow = new EscrowCoreHarness(policy, accounts, reputation, treasury);
         dot = new MockERC20("Mock DOT", "mDOT");
 
         policy.setApprovedAsset(address(dot), true);
@@ -464,7 +464,8 @@ contract AgentPlatformTest is Test {
                 schemaHash: bytes32(0),
                 schemaUrl: "",
                 schemaIssuer: address(0),
-                schemaSignature: hex""
+                schemaSignature: hex"",
+                protocolFeeWaived: false
             })
         );
 
@@ -511,7 +512,8 @@ contract AgentPlatformTest is Test {
                 schemaHash: bytes32(0),
                 schemaUrl: "",
                 schemaIssuer: address(0),
-                schemaSignature: hex""
+                schemaSignature: hex"",
+                protocolFeeWaived: false
             })
         );
 

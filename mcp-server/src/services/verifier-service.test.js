@@ -854,7 +854,18 @@ test("verifySubmission surfaces the on-chain payout tx on the result and the ses
     }
   };
 
-  const payoutReceipt = { txHash: "0xpayouttx", blockNumber: 4242, status: 1 };
+  const settlement = {
+    worker: submitted.wallet,
+    treasuryAccount: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    asset: "0xcccccccccccccccccccccccccccccccccccccccc",
+    assetSymbol: "USDC",
+    workerAmount: 1,
+    workerAmountRaw: "1000000",
+    protocolFeeAmount: 0.025,
+    protocolFeeAmountRaw: "25000",
+    protocolFeeBps: 250
+  };
+  const payoutReceipt = { txHash: "0xpayouttx", blockNumber: 4242, status: 1, settlement };
   const blockchainGateway = {
     isEnabled: () => true,
     resolveSinglePayout: async () => payoutReceipt
@@ -870,6 +881,8 @@ test("verifySubmission surfaces the on-chain payout tx on the result and the ses
   // ...and persisted on the session record (so /session shows it too).
   const stored = await stateStore.getSession(submitted.sessionId);
   assert.deepEqual(stored.payoutTx, payoutReceipt);
+  const verification = await stateStore.getVerificationResult(submitted.sessionId);
+  assert.deepEqual(verification.settlement, settlement);
 });
 
 function makeIdempotencyHarness(onChainState) {

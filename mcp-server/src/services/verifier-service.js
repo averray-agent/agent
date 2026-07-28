@@ -61,7 +61,10 @@ export class VerifierService {
       );
     }
 
-    const updatedSession = await this.platformService.ingestVerification(sessionId, verdict);
+    const persistedVerdict = payoutTx?.settlement
+      ? { ...verdict, settlement: payoutTx.settlement }
+      : verdict;
+    const updatedSession = await this.platformService.ingestVerification(sessionId, persistedVerdict);
     // Surface the on-chain settle/payout tx (when settled here) so the worker can
     // see the actual payout — both via /session (stamped on the session record)
     // and /verifier/result (on the verification result) — instead of it being
@@ -71,11 +74,11 @@ export class VerifierService {
       settledSession = await this.stateStore.upsertSession({ ...settledSession, payoutTx });
     }
     const result = {
-      ...verdict,
+      ...persistedVerdict,
       sessionId,
       metadataURI,
       ...(payoutTx ? { payoutTx } : {}),
-      ...buildVerificationAuditFields(job, { verdict, verificationInput: validatedVerificationInput }),
+      ...buildVerificationAuditFields(job, { verdict: persistedVerdict, verificationInput: validatedVerificationInput }),
       session: settledSession
     };
 

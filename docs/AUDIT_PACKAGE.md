@@ -138,6 +138,12 @@ capped launch; `L-1` (finite-cap arming) and `L-12` (lending) are deferred by de
   correlate (BigInt precision + the M-5 ratio preflight): #730. **Enablement gate:** a real
   staging-xcm-encoder differential + one live testnet `queueRequest` dispatch before XCM is enabled.
 - Backend M-4 ABI realignment (#722), gas-fee buffer + ED-safe funding (#725).
+- **EscrowCore v2 protocol fee (pending solo-auditor delta re-verify)** — poster-side,
+  success-only fee reserved on top of reward; worker reward remains whole. The new EscrowCore
+  defaults to 0 bps, caps governance at 1000 bps, settles the treasury leg into its ordinary
+  AAC position, emits a signed-receipt `SettlementSplit`, and leaves AgentAccountCore
+  unchanged. Migration and mainnet dogfood gates:
+  [`docs/ESCROWCORE_V2_PROTOCOL_FEE_MIGRATION.md`](./ESCROWCORE_V2_PROTOCOL_FEE_MIGRATION.md).
 
 **Money-path Critical (MAIN-006, `sendToAgentFor`) — closed by #688:** the transfer relay now
 requires a per-user **EIP-712** authorization (signature = authorization → kills the

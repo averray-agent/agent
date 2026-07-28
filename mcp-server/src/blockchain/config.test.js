@@ -40,6 +40,23 @@ test("loadBlockchainConfig falls back from POLKADOT_RPC_URL to RPC_URL", () => {
   assert.equal(legacy.rpcUrl, "https://legacy.example");
 });
 
+test("loadBlockchainConfig accepts an optional v1 drain EscrowCore address", () => {
+  const config = loadBlockchainConfig({
+    ...baseEnv,
+    RPC_URL: "https://legacy.example",
+    LEGACY_ESCROW_CORE_ADDRESS: "0x6666666666666666666666666666666666666666"
+  });
+  assert.equal(config.legacyEscrowCoreAddress, "0x6666666666666666666666666666666666666666");
+  assert.throws(
+    () => loadBlockchainConfig({
+      ...baseEnv,
+      RPC_URL: "https://legacy.example",
+      LEGACY_ESCROW_CORE_ADDRESS: "not-an-address"
+    }),
+    /LEGACY_ESCROW_CORE_ADDRESS/u
+  );
+});
+
 test("loadBlockchainConfig preserves an ordered, deduplicated RPC failover list", () => {
   const config = loadBlockchainConfig({
     ...baseEnv,

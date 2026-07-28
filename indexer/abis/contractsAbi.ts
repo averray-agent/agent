@@ -14,8 +14,13 @@ export const EscrowCoreAbi = parseAbi([
   "event DisputeResolved(bytes32 indexed jobId, address indexed arbitrator, uint256 workerPayout, bytes32 reasonCode, string metadataURI)",
   "event AutoResolvedOnTimeout(bytes32 indexed jobId, address indexed caller, uint256 workerPayout, bytes32 reasonCode)",
   "event JobClosed(bytes32 indexed jobId, address indexed worker, uint256 releasedAmount)",
+  "event SettlementSplit(bytes32 indexed jobId, address indexed worker, address indexed treasuryAccount, address asset, uint256 workerAmount, uint256 protocolFeeAmount, uint16 protocolFeeBps)",
   "event Disclosed(bytes32 indexed hash, address indexed byWallet, uint64 timestamp)",
   "event AutoDisclosed(bytes32 indexed hash, uint64 timestamp)",
+  "function jobs(bytes32 jobId) view returns ((address poster, address worker, address asset, bytes32 verifierMode, bytes32 category, bytes32 specHash, uint256 reward, uint256 opsReserve, uint256 contingencyReserve, uint256 released, uint256 claimExpiry, uint256 claimStake, uint16 claimStakeBps, uint256 claimFee, uint16 claimFeeBps, bool claimEconomicsWaived, address rejectingVerifier, uint256 rejectedAt, uint256 disputedAt, uint8 payoutMode, uint8 state, uint256 protocolFee, uint256 protocolFeeReleased, uint16 protocolFeeBps, bool protocolFeeWaived))"
+]);
+
+export const EscrowCoreV1JobsAbi = parseAbi([
   "function jobs(bytes32 jobId) view returns ((address poster, address worker, address asset, bytes32 verifierMode, bytes32 category, bytes32 specHash, uint256 reward, uint256 opsReserve, uint256 contingencyReserve, uint256 released, uint256 claimExpiry, uint256 claimStake, uint16 claimStakeBps, uint256 claimFee, uint16 claimFeeBps, bool claimEconomicsWaived, address rejectingVerifier, uint256 rejectedAt, uint256 disputedAt, uint8 payoutMode, uint8 state))"
 ]);
 
