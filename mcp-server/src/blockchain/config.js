@@ -3,6 +3,8 @@ import { knownAssetMinBalanceRaw } from "../core/assets.js";
 import { derivePolkadotHubAssetAddress } from "../services/strategy-asset-config.js";
 
 const DEFAULT_GAS_FEE_BUFFER_BPS = 2000;
+const DEFAULT_RPC_FAILOVER_STALL_MS = 250;
+const DEFAULT_RPC_REQUEST_TIMEOUT_MS = 750;
 
 function parseLegacyAssets(rawAssets) {
   if (!rawAssets) {
@@ -175,6 +177,7 @@ function normalizeOptionalXcmLocation(raw, idx) {
 
 export function loadBlockchainConfig(env = process.env) {
   const rpcUrl = resolveRpcUrl(env);
+  const rpcBackupUrls = resolveRpcBackupUrls(env, rpcUrl);
   const assetConfigPresent = Boolean(env.SUPPORTED_ASSETS_JSON || env.SUPPORTED_ASSETS);
 
   // Phase 3 (per docs/SECRETS_MIGRATION.md §"Phase 3 — AWS KMS for the
@@ -245,6 +248,20 @@ export function loadBlockchainConfig(env = process.env) {
   return {
     enabled,
     rpcUrl,
+    rpcBackupUrls,
+    rpcUrls: [rpcUrl, ...rpcBackupUrls].filter(Boolean),
+    rpcFailoverStallMs: resolveBoundedMilliseconds(
+      env.RPC_FAILOVER_STALL_MS,
+      "RPC_FAILOVER_STALL_MS",
+      DEFAULT_RPC_FAILOVER_STALL_MS,
+      { minimum: 10, maximum: 10_000 }
+    ),
+    rpcRequestTimeoutMs: resolveBoundedMilliseconds(
+      env.RPC_REQUEST_TIMEOUT_MS,
+      "RPC_REQUEST_TIMEOUT_MS",
+      DEFAULT_RPC_REQUEST_TIMEOUT_MS,
+      { minimum: 100, maximum: 30_000 }
+    ),
     signerBackend,
     signerPrivateKey: env.SIGNER_PRIVATE_KEY ?? "",
     arbitratorSignerPrivateKey: env.ARBITRATOR_SIGNER_PRIVATE_KEY ?? "",
@@ -277,6 +294,29 @@ function resolveGasFeeBufferBps(env = process.env) {
 
 function resolveRpcUrl(env = process.env) {
   return env.DWELLER_RPC_URL?.trim() || env.POLKADOT_RPC_URL?.trim() || env.RPC_URL?.trim() || "";
+}
+
+function resolveRpcBackupUrls(env = process.env, primaryUrl = "") {
+  const seen = new Set(primaryUrl ? [primaryUrl] : []);
+  return String(env.RPC_BACKUP_URLS ?? "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => {
+      if (!entry || seen.has(entry)) return false;
+      seen.add(entry);
+      return true;
+    });
+}
+
+function resolveBoundedMilliseconds(raw, label, fallback, { minimum, maximum }) {
+  if (raw === undefined || raw === null || String(raw).trim() === "") {
+    return fallback;
+  }
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < minimum || value > maximum) {
+    throw new ConfigError(`${label} must be an integer in [${minimum}, ${maximum}] milliseconds.`);
+  }
+  return value;
 }
 
 function normalizeOptionalAddress(raw, label) {

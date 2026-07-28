@@ -24,6 +24,23 @@ function makeResponse() {
   };
 }
 
+async function withTimeout(promise, timeoutMs) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`operation exceeded ${timeoutMs}ms`)),
+          timeoutMs
+        );
+      })
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function makeHarness(overrides = {}) {
   const calls = [];
   const response = makeResponse();
@@ -97,7 +114,7 @@ test("operational routes ignore unrelated paths", async () => {
   });
 
   assert.equal(handled, false);
-  assert.deepEqual(calls, []);
+  assert.deepEqual(calls, [["chainHealth"]]);
   assert.equal(response.statusCode, undefined);
 });
 
@@ -150,14 +167,14 @@ test("GET /health reports service liveness separately from disabled capabilities
   assert.deepEqual(response.body.components.stateStore, { ok: true, backend: "memory", mode: "memory" });
   assert.deepEqual(response.body.components.indexer, { ok: false, reason: "indexer_status_unconfigured" });
   assert.ok(response.body.warnings.some((warning) => warning.code === "treasury_mutations_unavailable"));
-  assert.deepEqual(calls.map(([name]) => name), [
-    "storeHealth",
+  assert.deepEqual(calls.map(([name]) => name).sort(), [
     "chainHealth",
     "gasHealth",
-    "xcmStatus",
     "indexerHealth",
-    "respond"
-  ]);
+    "respond",
+    "storeHealth",
+    "xcmStatus",
+  ].sort());
 });
 
 test("GET /health reuses the injected reward-bank provider", async () => {
@@ -185,6 +202,39 @@ test("GET /health reuses the injected reward-bank provider", async () => {
 
   assert.equal(sharedReads, 1);
   assert.equal(response.body.rewardBank.liquidRaw, "23900000");
+});
+
+test("GET /health p99 stays sub-second when live chain reads are blackholed", async () => {
+  const blackhole = new Promise(() => {});
+  const { route } = makeHarness({
+    gateway: {
+      isEnabled: () => true,
+      healthCheck: async () => blackhole,
+      getTreasuryPolicyStatus: async () => blackhole
+    }
+  });
+
+  const durations = await Promise.all(
+    Array.from({ length: 100 }, async () => {
+      const response = makeResponse();
+      const startedAt = performance.now();
+      await withTimeout(
+        route({
+          request: { method: "GET", headers: {} },
+          response,
+          pathname: "/health"
+        }),
+        1_000
+      );
+      assert.equal(response.statusCode, 200);
+      assert.ok(Number.isFinite(Date.parse(response.body.components.blockchain.asOf)));
+      assert.ok(Number.isFinite(Date.parse(response.body.rewardBank.asOf)));
+      return performance.now() - startedAt;
+    })
+  );
+  const p99 = durations.sort((left, right) => left - right)[98];
+
+  assert.ok(p99 < 500, `expected /health p99 < 500ms; observed ${p99.toFixed(1)}ms`);
 });
 
 test("GET /health earns synced indexer status only from a fresh checkpoint", async () => {
@@ -274,7 +324,7 @@ test("GET /metrics emits Prometheus text with CORS and request id headers", asyn
   assert.equal(response.headers["access-control-allow-origin"], "https://app.averray.test");
   assert.equal(response.headers["x-request-id"], "req-test");
   assert.match(response.body, /# HELP http_requests_total/);
-  assert.deepEqual(calls, [["serializeMetrics"]]);
+  assert.deepEqual(calls, [["serializeMetrics"], ["chainHealth"]]);
 });
 
 test("GET /metrics fails closed when auth is required but no token is configured", async () => {

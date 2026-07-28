@@ -16,7 +16,8 @@
  * later on the VPS via `op inject` once the mainnet-* vault items exist.
  *
  * The delta rules (documented, so a reviewer can audit the diff):
- *   • identity literals → mainnet: AUTH_CHAIN_ID=420420419, RPC endpoints → eth-rpc.polkadot.io
+ *   • identity literals → mainnet: AUTH_CHAIN_ID=420420419, backend RPC primary
+ *     → the official services.polkadothub-rpc.com endpoint, legacy endpoint as failover
  *   • every op://prod-* → op://mainnet-* (and the "-testnet" item slug → "-mainnet")
  *   • REMOVE (not blank): AUTH_JWT_SECRETS (HMAC retired), ARBITRATOR_SIGNER_PRIVATE_KEY
  *     (arbitrator is keyless on mainnet — the 3 coupled backend edits are Codex-owned)
@@ -42,6 +43,7 @@ export const REPO_ROOT = join(__dirname, "..", "..");
 
 export const MAINNET_RPC = "https://eth-rpc.polkadot.io/";
 export const TESTNET_RPC = "https://eth-rpc-testnet.polkadot.io/";
+export const MAINNET_BACKEND_RPC = "https://services.polkadothub-rpc.com/mainnet/";
 export const MAINNET_CHAIN_ID = "420420419";
 export const TESTNET_CHAIN_ID = "420420417";
 
@@ -63,9 +65,12 @@ export const REMOVE_KEYS = new Set(["AUTH_JWT_SECRETS", "ARBITRATOR_SIGNER_PRIVA
 // KEY → literal mainnet value.
 export const LITERAL_OVERRIDES = {
   AUTH_CHAIN_ID: MAINNET_CHAIN_ID,
-  RPC_URL: MAINNET_RPC,
-  DWELLER_RPC_URL: MAINNET_RPC,
-  POLKADOT_RPC_URL: MAINNET_RPC,
+  RPC_URL: MAINNET_BACKEND_RPC,
+  DWELLER_RPC_URL: MAINNET_BACKEND_RPC,
+  POLKADOT_RPC_URL: MAINNET_BACKEND_RPC,
+  RPC_BACKUP_URLS: MAINNET_RPC,
+  RPC_FAILOVER_STALL_MS: "250",
+  RPC_REQUEST_TIMEOUT_MS: "750",
   USDC_LIQUIDITY_CHAIN: "mainnet",
   INGESTION_PREFUND_ENABLED: "false",
   USDC_LIQUIDITY_ACCOUNTS_JSON: "[]",
