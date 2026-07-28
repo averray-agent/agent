@@ -6,6 +6,7 @@ import { PlatformService } from "./platform-service.js";
 import { EventBus } from "./event-bus.js";
 import { InsufficientLiquidityError } from "./errors.js";
 import { MemoryStateStore } from "./state-store.js";
+import { BOOTSTRAP_JOBS } from "../services/bootstrap-jobs.js";
 import {
   buildExternalSchemaRegistrationTypedData,
   hashExternalSchemaContent
@@ -1648,7 +1649,53 @@ test("createIngestedJob does not prefund when the flag is off (no funding stamp)
   // prefundIngestedJobs defaults to false
   const created = await service.createIngestedJob(INGEST_JOB_INPUT);
   assert.equal(created.funding, undefined);
+  assert.equal(created.onboardingWaiverEligible, true);
   assert.equal(gateway.calls.length, 0);
+});
+
+test("fresh wallets retain a real waiver-eligible claimable path after demo retirement", async () => {
+  const service = new PlatformService(
+    BOOTSTRAP_JOBS.map((job) => structuredClone(job)),
+    new Map(),
+    new Map(),
+    new Map(),
+    { isEnabled: () => false },
+    new MemoryStateStore()
+  );
+  await service.createIngestedJob({
+    ...INGEST_JOB_INPUT,
+    id: "open-data-real-starter-001",
+    rewardAmount: 0.25
+  });
+
+  const jobs = await service.listJobsWithSessions({
+    wallet: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  });
+  const eligible = jobs.filter((job) => (
+    job.source?.type === "open_data_dataset"
+    && job.onboardingWaiverEligible === true
+    && job.claimable === true
+  ));
+
+  assert.ok(eligible.length >= 1);
+  assert.equal(jobs.some((job) => job.id === "starter-coding-002"), false);
+});
+
+test("ingestion waiver policy is source-scoped and starter-only", async () => {
+  const service = makePlatformService();
+  const unknown = await service.createIngestedJob({
+    ...INGEST_JOB_INPUT,
+    id: "unknown-source-starter",
+    source: { type: "operator_upload" }
+  });
+  const pro = await service.createIngestedJob({
+    ...INGEST_JOB_INPUT,
+    id: "open-data-pro",
+    tier: "pro"
+  });
+
+  assert.equal(unknown.onboardingWaiverEligible, undefined);
+  assert.equal(pro.onboardingWaiverEligible, undefined);
 });
 
 test("createIngestedJob does not prefund when the gateway is disabled", async () => {

@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 
 import { disputeIdForSession } from "./dispute-resolution.js";
+import { resolveOnboardingInventoryHealth } from "./onboarding-inventory.js";
 
 /**
  * /health truth split — Package B (P1.1b) close.
@@ -281,6 +282,7 @@ export function buildCapabilityWarnings(capabilityHealth) {
 
 export function createProductHealthSnapshotProvider({
   gateway,
+  service,
   stateStore,
   env = process.env,
   deploymentManifest = undefined,
@@ -315,6 +317,7 @@ export function createProductHealthSnapshotProvider({
 
     refreshPromise = buildProductHealthSnapshot({
       gateway,
+      service,
       stateStore,
       env,
       deploymentManifest,
@@ -547,6 +550,7 @@ function failedHealthRefreshFallback({
 
 export async function buildProductHealthSnapshot({
   gateway,
+  service,
   stateStore,
   env = process.env,
   deploymentManifest = undefined,
@@ -568,11 +572,17 @@ export async function buildProductHealthSnapshot({
       stuckAfterMs: settlementStuckAfterMs
     })
   ]);
+  const onboarding = await resolveOnboardingInventoryHealth({
+    service,
+    rewardBank,
+    now
+  });
 
   return {
     addresses,
     rewardBank,
-    settlement
+    settlement,
+    ...(onboarding ? { onboarding } : {})
   };
 }
 

@@ -17,6 +17,10 @@ import {
   resolveHealthAddresses,
   resolveServiceHealth
 } from "./health-capability.js";
+import {
+  buildOnboardingInventoryWarnings,
+  resolveOnboardingInventoryHealth
+} from "./onboarding-inventory.js";
 
 // ─── resolveServiceHealth ────────────────────────────────────────────
 
@@ -439,6 +443,52 @@ test("buildProductHealthSnapshot reports reward bank and Redis settlement counte
     source: "backend_state_store",
     readable: true
   });
+});
+
+test("onboarding inventory health warns when no real waiver-eligible claimable jobs exist", async () => {
+  const now = new Date("2026-07-28T08:00:00.000Z");
+  const health = await resolveOnboardingInventoryHealth({
+    now,
+    rewardBank: { readable: true, liquidRaw: "18500000", decimals: 6 },
+    service: {
+      listJobs: () => [{
+        id: "governance-pro-001",
+        tier: "pro",
+        onboardingWaiverEligible: false
+      }],
+      attachClaimState: async (job) => ({ ...job, claimable: false })
+    }
+  });
+
+  assert.deepEqual(health, {
+    status: "warning",
+    reason: "onboarding_waiver_inventory_empty",
+    waiverEligibleClaimableJobs: 0,
+    minimumWaiverEligibleClaimableJobs: 2,
+    asOf: now.toISOString(),
+    source: "job_catalog",
+    readable: true
+  });
+  assert.equal(buildOnboardingInventoryWarnings(health)[0].code, "onboarding_waiver_inventory_empty");
+});
+
+test("onboarding inventory health is ready only with two real eligible claimable jobs", async () => {
+  const jobs = [1, 2].map((index) => ({
+    id: `wiki-real-${index}`,
+    tier: "starter",
+    source: { type: "wikipedia_article" },
+    onboardingWaiverEligible: true
+  }));
+  const health = await resolveOnboardingInventoryHealth({
+    service: {
+      listJobs: () => jobs,
+      attachClaimState: async (job) => ({ ...job, claimable: true })
+    }
+  });
+
+  assert.equal(health.status, "ready");
+  assert.equal(health.waiverEligibleClaimableJobs, 2);
+  assert.deepEqual(buildOnboardingInventoryWarnings(health), []);
 });
 
 test("createProductHealthSnapshotProvider caches public health recompute", async () => {

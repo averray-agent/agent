@@ -153,6 +153,7 @@ test("toPlatformJob creates a PR-shaped dependency remediation job", () => {
   assert.equal(job.category, "security");
   assert.equal(job.tier, "starter");
   assert.equal(job.rewardAsset, "USDC");
+  assert.equal(job.onboardingWaiverEligible, true);
   assert.equal(job.verifierMode, "github_pr");
   assert.equal(job.inputSchemaRef, "schema://jobs/dependency-remediation-input");
   assert.equal(job.outputSchemaRef, "schema://jobs/dependency-remediation-output");

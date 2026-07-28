@@ -38,9 +38,6 @@ export async function runClaimAndSubmit({
   execute = false,
   fetchImpl = fetch
 } = {}) {
-  if (!jobId) {
-    throw new Error("jobId is required.");
-  }
   if (execute && !token) {
     throw new Error("AVERRAY_TOKEN or --token is required when --execute is set.");
   }
@@ -49,10 +46,11 @@ export async function runClaimAndSubmit({
   }
 
   const client = new AgentPlatformClient({ baseUrl: apiUrl, token, fetchImpl });
+  const selectedJobId = jobId ?? await selectFirstWaiverEligibleClaimableJob(client);
   const [onboarding, definition, preflight] = await Promise.all([
     client.getOnboarding(),
-    client.getJobDefinition(jobId),
-    token ? client.preflightJob(jobId) : Promise.resolve(undefined)
+    client.getJobDefinition(selectedJobId),
+    token ? client.preflightJob(selectedJobId) : Promise.resolve(undefined)
   ]);
   const expectedSchemaRef = resolveExpectedSubmissionSchemaRef(definition, preflight);
   const readiness = buildReadinessSummary({
@@ -66,7 +64,7 @@ export async function runClaimAndSubmit({
   if (!execute) {
     return {
       apiUrl: client.baseUrl,
-      jobId,
+      jobId: selectedJobId,
       mode: "dry_run",
       readiness,
       nextStep: token
@@ -78,7 +76,7 @@ export async function runClaimAndSubmit({
   if (!readiness.canAttemptClaim) {
     return {
       apiUrl: client.baseUrl,
-      jobId,
+      jobId: selectedJobId,
       mode: "blocked",
       readiness,
       validation: null,
@@ -90,7 +88,7 @@ export async function runClaimAndSubmit({
   const draftSubmission = submission ?? evidence;
   let validationReadiness;
   try {
-    validationReadiness = await client.assertSchemaNativeSubmissionReady(jobId, draftSubmission, {
+    validationReadiness = await client.assertSchemaNativeSubmissionReady(selectedJobId, draftSubmission, {
       expectedSchemaRef
     });
   } catch (error) {
@@ -99,7 +97,7 @@ export async function runClaimAndSubmit({
     }
     return {
       apiUrl: client.baseUrl,
-      jobId,
+      jobId: selectedJobId,
       mode: "blocked",
       readiness,
       validation: error.validation ?? null,
@@ -109,7 +107,7 @@ export async function runClaimAndSubmit({
     };
   }
 
-  const claim = await client.claimJob(jobId, idempotencyKey);
+  const claim = await client.claimJob(selectedJobId, idempotencyKey);
   const sessionId = claim?.sessionId;
   if (!sessionId) {
     throw new Error("claim response did not include sessionId.");
@@ -120,7 +118,7 @@ export async function runClaimAndSubmit({
 
   return {
     apiUrl: client.baseUrl,
-    jobId,
+    jobId: selectedJobId,
     mode: "executed",
     readiness,
     claim: {
@@ -137,6 +135,22 @@ export async function runClaimAndSubmit({
     },
     timeline: summarizeTimeline(timeline)
   };
+}
+
+export async function selectFirstWaiverEligibleClaimableJob(client) {
+  const response = await client.listClaimableJobs({ limit: 100 });
+  const jobs = Array.isArray(response) ? response : response?.jobs ?? [];
+  const selected = jobs.find((job) => (
+    job?.claimable === true
+    && job?.onboardingWaiverEligible === true
+    && typeof (job?.sourceType ?? job?.source?.type) === "string"
+  ));
+  if (!selected?.id) {
+    throw new Error(
+      "No waiver-eligible claimable onboarding job is available; check /health.onboarding before retrying."
+    );
+  }
+  return selected.id;
 }
 
 export function buildReadinessSummary({ onboarding, definition, preflight, tokenPresent, expectedSchemaRef = undefined }) {
@@ -219,15 +233,16 @@ export function parseArgs(argv) {
 }
 
 function printHelp() {
-  console.log(`Usage: node examples/claim-and-submit-job/index.mjs --job-id <id> [options]
+  console.log(`Usage: node examples/claim-and-submit-job/index.mjs [--job-id <id>] [options]
 
 Dry-run mode reads onboarding, definition, and preflight without mutating.
+Without --job-id, the example selects the first waiver-eligible claimable real job.
 Add --execute to claim once and submit once.
 
 Options:
   --api <url>                API base URL. Defaults to https://api.averray.com.
   --token <jwt>              Bearer token. Or set AVERRAY_TOKEN.
-  --job-id <id>              Job id to inspect or execute.
+  --job-id <id>              Optional explicit job id to inspect or execute.
   --idempotency-key <key>    Claim idempotency key.
   --evidence <text>          Plain-text evidence for /jobs/submit.
   --submission-json <json>   Structured submission object for /jobs/submit.

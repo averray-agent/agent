@@ -33,6 +33,8 @@ test("buildProviderOperations projects scheduler statuses into provider rows", (
       dryRun: false,
       categoryCount: 9,
       minClaimableJobs: 2,
+      minimumWaiverEligibleClaimableJobs: 2,
+      currentWaiverEligibleClaimableJobs: 1,
       currentClaimableJobs: 0,
       maxOpenJobs: 5,
       currentOpenJobs: 5
@@ -80,6 +82,8 @@ test("buildProviderOperations projects scheduler statuses into provider rows", (
   assert.equal(operations.wikipedia.mode, "live");
   assert.equal(operations.wikipedia.health, "at_capacity");
   assert.equal(operations.wikipedia.minClaimableJobs, 2);
+  assert.equal(operations.wikipedia.minimumWaiverEligibleClaimableJobs, 2);
+  assert.equal(operations.wikipedia.currentWaiverEligibleClaimableJobs, 1);
   assert.equal(operations.wikipedia.currentClaimableJobs, 0);
 
   assert.equal(operations.openData.health, "healthy");

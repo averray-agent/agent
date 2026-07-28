@@ -10,6 +10,7 @@ import {
   resolveCapabilityHealth,
   resolveServiceHealth
 } from "../../core/health-capability.js";
+import { buildOnboardingInventoryWarnings } from "../../core/onboarding-inventory.js";
 
 function bearerTokenMatches(header, expectedToken) {
   const prefix = "Bearer ";
@@ -61,6 +62,7 @@ export function createOperationalRoutes({
   });
   const getProductHealthSnapshot = createProductHealthSnapshotProvider({
     gateway,
+    service,
     getRewardBankHealth: getCachedRewardBankHealth,
     stateStore
   });
@@ -105,7 +107,10 @@ export function createOperationalRoutes({
         capabilityHealth,
         ...productHealth,
         // Structured, codeable warnings derived from capabilityHealth.
-        warnings: buildCapabilityWarnings(capabilityHealth),
+        warnings: [
+          ...buildCapabilityWarnings(capabilityHealth),
+          ...buildOnboardingInventoryWarnings(productHealth.onboarding)
+        ],
         components: {
           stateStore: storeHealth,
           blockchain: chainHealth,

@@ -79,6 +79,20 @@ function buildProviderOperationStatus({ label, status, targetCountField }) {
     ...(status.currentClaimableJobs !== undefined
       ? { currentClaimableJobs: toNonNegativeInteger(status.currentClaimableJobs) }
       : {}),
+    ...(status.minimumWaiverEligibleClaimableJobs !== undefined
+      ? {
+          minimumWaiverEligibleClaimableJobs: toNonNegativeInteger(
+            status.minimumWaiverEligibleClaimableJobs
+          )
+        }
+      : {}),
+    ...(status.currentWaiverEligibleClaimableJobs !== undefined
+      ? {
+          currentWaiverEligibleClaimableJobs: toNonNegativeInteger(
+            status.currentWaiverEligibleClaimableJobs
+          )
+        }
+      : {}),
     targetCount: toNonNegativeInteger(status[targetCountField]),
     ...(queryCount !== undefined ? { queryCount } : {}),
     ...(nextQuery ? { nextQuery } : {}),

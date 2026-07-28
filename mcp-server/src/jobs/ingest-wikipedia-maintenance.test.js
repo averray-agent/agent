@@ -30,6 +30,7 @@ test("toPlatformJob produces an Averray-attributed Wikipedia proposal job", () =
   assert.equal(job.category, "wikipedia");
   assert.equal(job.jobType, "review");
   assert.equal(job.rewardAsset, "USDC");
+  assert.equal(job.onboardingWaiverEligible, true);
   assert.equal(job.source.type, "wikipedia_article");
   assert.equal(job.source.lang, "en");
   assert.equal(job.source.articleUrl, "https://en.wikipedia.org/wiki/Example_article");

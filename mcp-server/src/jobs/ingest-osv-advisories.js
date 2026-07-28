@@ -284,6 +284,7 @@ export function toPlatformJob({ target, advisory, advisories, fixedVersion, scor
     claimTtlSeconds: 7200,
     retryLimit: 1,
     requiresSponsoredGas: true,
+    onboardingWaiverEligible: true,
     source: {
       type: "osv_advisory",
       provider: "osv",

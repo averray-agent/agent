@@ -50,6 +50,7 @@ test("toPlatformJob preserves GitHub issue context as job metadata", () => {
   assert.equal(job.requiredRole, "worker");
   assert.equal(job.category, "testing");
   assert.equal(job.rewardAsset, "USDC");
+  assert.equal(job.onboardingWaiverEligible, true);
   assert.equal(job.source.type, "github_issue");
   assert.equal(job.source.repo, "example/project");
   assert.equal(job.source.issueNumber, 42);

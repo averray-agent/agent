@@ -73,6 +73,19 @@ test("runClaimAndSubmit dry-run avoids claim and submit mutations", async () => 
   ]);
 });
 
+test("runClaimAndSubmit selects the first waiver-eligible claimable real job when no id is supplied", async () => {
+  const calls = [];
+  const summary = await runClaimAndSubmit({
+    apiUrl: "https://api.example",
+    token: "token",
+    fetchImpl: fakeFetch(calls)
+  });
+
+  assert.equal(summary.jobId, "job-1");
+  assert.equal(calls[0], "https://api.example/jobs?state=claimable&format=compact&limit=100");
+  assert.ok(calls.includes("https://api.example/jobs/definition?jobId=job-1"));
+});
+
 test("runClaimAndSubmit executes claim, submit, and timeline reads when requested", async () => {
   const calls = [];
   const submission = { result: "complete" };
@@ -160,6 +173,26 @@ function fakeFetch(calls, {
 } = {}) {
   return async (url, options = {}) => {
     calls.push(String(url));
+    if (String(url).includes("/jobs?")) {
+      return jsonResponse({
+        jobs: [
+          {
+            id: "job-with-stake",
+            source: "open_data",
+            sourceType: "open_data_dataset",
+            claimable: true,
+            onboardingWaiverEligible: false
+          },
+          {
+            id: "job-1",
+            source: "wikipedia",
+            sourceType: "wikipedia_article",
+            claimable: true,
+            onboardingWaiverEligible: true
+          }
+        ]
+      });
+    }
     if (String(url).endsWith("/onboarding")) {
       return jsonResponse({ onboarding: { entrypoint: "/onboarding" } });
     }

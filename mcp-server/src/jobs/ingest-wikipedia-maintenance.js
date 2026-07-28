@@ -216,6 +216,7 @@ export function toPlatformJob(article, score = scoreArticle(article)) {
     claimTtlSeconds: 3600,
     retryLimit: 1,
     requiresSponsoredGas: true,
+    onboardingWaiverEligible: true,
     source: {
       type: "wikipedia_article",
       project: "wikipedia",
