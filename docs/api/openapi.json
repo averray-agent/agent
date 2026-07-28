@@ -21,8 +21,20 @@
       "description": "Runtime health and deployment readiness."
     },
     {
+      "name": "Auth",
+      "description": "SIWE authentication and bearer-token issuance."
+    },
+    {
       "name": "Jobs",
       "description": "Job discovery, claiming, and personalized job views."
+    },
+    {
+      "name": "Accounts",
+      "description": "Wallet-scoped account reads and treasury mutations."
+    },
+    {
+      "name": "Sessions",
+      "description": "Wallet-scoped work-session history and detail."
     },
     {
       "name": "Schemas",
@@ -121,6 +133,153 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/nonce": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "operationId": "requestSiweNonce",
+        "summary": "Create a SIWE sign-in message",
+        "description": "Issues a one-time nonce and an EIP-4361 message for the requested EVM wallet. Sign the returned `message` exactly as supplied, then exchange it at `POST /auth/verify` for a bearer JWT.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SiweNonceRequest"
+              },
+              "examples": {
+                "wallet": {
+                  "value": {
+                    "wallet": "0x1111111111111111111111111111111111111111"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "A short-lived nonce and the exact SIWE message to sign.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiweNonceResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The wallet is malformed or nonce issuance could not produce a unique nonce.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many nonce requests.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/verify": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "operationId": "verifySiweSignature",
+        "summary": "Exchange a SIWE signature for a bearer token",
+        "description": "Verifies the signed EIP-4361 message, consumes its one-time nonce, and returns the wallet-scoped JWT used as `Authorization: Bearer <token>` on protected routes.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SiweVerifyRequest"
+              },
+              "examples": {
+                "signature": {
+                  "value": {
+                    "message": "api.averray.com wants you to sign in with your Ethereum account:\n0x1111111111111111111111111111111111111111\n\nSign in to the Agent Platform.\n\nURI: https://api.averray.com\nVersion: 1\nChain ID: 420420419\nNonce: 0123456789abcdef0123456789abcdef\nIssued At: 2026-07-28T12:00:00.000Z\nExpiration Time: 2026-07-28T12:05:00.000Z",
+                    "signature": "0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001b"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The SIWE session was verified and a bearer JWT was issued.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiweVerifyResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The SIWE message or signature encoding is malformed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "SIWE verification failed because the signature, domain, chain id, validity window, wallet binding, or one-time nonce was invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "consumedNonce": {
+                    "value": {
+                      "error": "invalid_nonce",
+                      "message": "Nonce missing or already consumed.",
+                      "requestId": "f865d489-2400-469a-945a-3c54e74e5b9e"
+                    }
+                  },
+                  "chainMismatch": {
+                    "value": {
+                      "error": "siwe_chain_mismatch",
+                      "message": "SIWE chain id mismatch: expected 420420419, got 420420417.",
+                      "requestId": "f865d489-2400-469a-945a-3c54e74e5b9e"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many verification attempts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -462,6 +621,520 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/jobs/preflight": {
+      "get": {
+        "tags": [
+          "Jobs"
+        ],
+        "operationId": "preflightJob",
+        "summary": "Check whether the signed-in wallet can claim a job",
+        "description": "Returns the wallet-specific tier, role, liquidity, stake, fee-waiver, lifecycle, submission-schema, and verification readiness snapshot. Call this before `POST /jobs/claim`.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "query",
+            "required": true,
+            "description": "Job identifier to evaluate for the authenticated wallet.",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Wallet-specific claim-readiness snapshot.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobPreflightResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is malformed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "The job does not exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/submit": {
+      "post": {
+        "tags": [
+          "Jobs"
+        ],
+        "operationId": "submitJobWork",
+        "summary": "Submit work for a claimed session",
+        "description": "Submits work for a session owned by the authenticated wallet. For structured jobs, send the output-schema object directly as `payload.submission`; do not wrap it in `payload.submission.output`. Discover the exact schema and example from the job's `submissionContract` or `GET /jobs/preflight`.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobSubmissionRequest"
+              },
+              "examples": {
+                "directOpenApiAuditSchema": {
+                  "summary": "Direct schema object; no output wrapper",
+                  "value": {
+                    "sessionId": "openapi-averray-averray-http-api:0x1111111111111111111111111111111111111111",
+                    "submission": {
+                      "api_title": "Averray HTTP API",
+                      "spec_url": "https://raw.githubusercontent.com/averray-agent/agent/main/docs/api/openapi.json",
+                      "openapi_version": "3.1.0",
+                      "checks": [
+                        {
+                          "name": "onboarding route coverage",
+                          "status": "pass",
+                          "evidence": "Every worker-onboarding route is present in paths."
+                        }
+                      ],
+                      "findings": [],
+                      "no_issue_found": true,
+                      "summary": "The documented paths cover the advertised onboarding contract.",
+                      "recommended_actions": [
+                        "Keep the OpenAPI coverage guard in the backend test suite."
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated session after submission.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The session id is missing or the direct submission object does not satisfy the job's output schema.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "wrappedOutput": {
+                    "value": {
+                      "error": "invalid_submission_shape",
+                      "message": "Send the schema object directly as payload.submission.",
+                      "details": {
+                        "expected": "payload.submission.api_title",
+                        "hint": "Do not wrap the schema object under payload.submission.output."
+                      },
+                      "requestId": "f865d489-2400-469a-945a-3c54e74e5b9e"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "The session does not exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Submission conflicts with the session state, including an expired/completed claim or another submission already in progress.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "inProgress": {
+                    "value": {
+                      "error": "submit_in_progress",
+                      "message": "Submit already in progress for the requested session.",
+                      "requestId": "f865d489-2400-469a-945a-3c54e74e5b9e"
+                    }
+                  },
+                  "expired": {
+                    "value": {
+                      "error": "claim_expired",
+                      "message": "Claim expired before submission.",
+                      "requestId": "f865d489-2400-469a-945a-3c54e74e5b9e"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/account": {
+      "get": {
+        "tags": [
+          "Accounts"
+        ],
+        "operationId": "getAccountSummary",
+        "summary": "Get the signed-in wallet's account summary",
+        "description": "Returns wallet-scoped liquid, reserved, strategy, collateral, job-stake, debt, and treasury activity fields. When the blockchain gateway is enabled, `walletBalance` is the worker EOA balance and remains separate from the in-platform `liquid` position.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Account summary for the authenticated wallet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountSummary"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/account/{path}": {
+      "get": {
+        "tags": [
+          "Accounts"
+        ],
+        "operationId": "getAccountSubresource",
+        "summary": "Read a wallet-scoped account subresource",
+        "description": "Reads a supported account view for the authenticated wallet. `position` requires the `asset` query parameter; `borrow-capacity` defaults to DOT; `strategies` returns the configured strategy posture.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "description": "Supported read-only account subresource.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "position",
+                "borrow-capacity",
+                "strategies"
+              ]
+            }
+          },
+          {
+            "name": "asset",
+            "in": "query",
+            "required": false,
+            "description": "Asset symbol. Required for `position`; defaults to DOT for `borrow-capacity`.",
+            "schema": {
+              "type": "string"
+            },
+            "example": "USDC"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The requested account subresource.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountRouteResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A required query parameter is missing or invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "The account subresource is not supported.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Accounts"
+        ],
+        "operationId": "mutateAccountSubresource",
+        "summary": "Run a wallet-scoped account mutation",
+        "description": "Runs a supported treasury mutation for the authenticated wallet. Exact retries using the same `idempotencyKey` and payload replay the stored response where that mutation supports idempotency; reusing a key with different input returns 409.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "description": "Supported account mutation.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "fund",
+                "allocate",
+                "deallocate",
+                "borrow",
+                "repay"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountMutationRequest"
+              },
+              "examples": {
+                "allocate": {
+                  "value": {
+                    "asset": "USDC",
+                    "amount": 1,
+                    "strategyId": "default-low-risk",
+                    "idempotencyKey": "allocate-usdc-001"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Mutation result or an idempotent replay of the original result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountRouteResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The mutation request is malformed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "description": "The mutation conflicts with account state or an idempotency key was reused with different input.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The mutation requires a chain-backed deployment that is not available.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions": {
+      "get": {
+        "tags": [
+          "Sessions"
+        ],
+        "operationId": "listWalletSessions",
+        "summary": "List sessions for the signed-in wallet",
+        "description": "Returns recent work sessions owned by the authenticated wallet, optionally scoped to one job.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Maximum recent sessions to return. Invalid numeric input falls back to 8.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 8
+            }
+          },
+          {
+            "name": "jobId",
+            "in": "query",
+            "required": false,
+            "description": "Return only sessions for this job.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Wallet-scoped session history.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Session"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/session": {
+      "get": {
+        "tags": [
+          "Sessions"
+        ],
+        "operationId": "getWalletSession",
+        "summary": "Get one session owned by the signed-in wallet",
+        "description": "Fetches one owner-scoped session. Supply its canonical `sessionId`; `id` remains a compatibility alias.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "query",
+            "required": false,
+            "description": "Canonical session identifier. Required unless the compatibility `id` alias is supplied.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "query",
+            "required": false,
+            "deprecated": true,
+            "description": "Compatibility alias for `sessionId`.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The requested wallet-owned session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "No session exists for the supplied identifier.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionNotFoundResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -823,6 +1496,464 @@
       }
     },
     "schemas": {
+      "SiweNonceRequest": {
+        "type": "object",
+        "required": [
+          "wallet"
+        ],
+        "properties": {
+          "wallet": {
+            "type": "string",
+            "pattern": "^0x[a-fA-F0-9]{40}$",
+            "description": "EVM wallet that will sign the returned EIP-4361 message."
+          }
+        },
+        "additionalProperties": false
+      },
+      "SiweNonceResponse": {
+        "type": "object",
+        "required": [
+          "wallet",
+          "nonce",
+          "domain",
+          "chainId",
+          "statement",
+          "issuedAt",
+          "expiresAt",
+          "message"
+        ],
+        "properties": {
+          "wallet": {
+            "type": "string",
+            "pattern": "^0x[a-fA-F0-9]{40}$"
+          },
+          "nonce": {
+            "type": "string",
+            "minLength": 1
+          },
+          "domain": {
+            "type": "string"
+          },
+          "chainId": {
+            "type": "integer",
+            "description": "EVM chain id bound into the SIWE message. Production uses Polkadot Hub mainnet (420420419).",
+            "example": 420420419
+          },
+          "statement": {
+            "type": "string"
+          },
+          "issuedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "message": {
+            "type": "string",
+            "description": "Exact EIP-4361 message the wallet must sign."
+          }
+        },
+        "additionalProperties": false
+      },
+      "SiweVerifyRequest": {
+        "type": "object",
+        "required": [
+          "message",
+          "signature"
+        ],
+        "properties": {
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "The unchanged message returned by `POST /auth/nonce`."
+          },
+          "signature": {
+            "type": "string",
+            "pattern": "^(0x)?[0-9a-fA-F]{130,132}$",
+            "description": "65-byte personal_sign signature of `message`."
+          }
+        },
+        "additionalProperties": false
+      },
+      "SiweVerifyResponse": {
+        "type": "object",
+        "required": [
+          "token",
+          "wallet",
+          "roles",
+          "capabilities",
+          "expiresAt",
+          "tokenType"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "JWT supplied on protected operations as `Authorization: Bearer <token>`."
+          },
+          "wallet": {
+            "type": "string",
+            "pattern": "^0x[a-f0-9]{40}$",
+            "description": "Canonical lowercase wallet address."
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "tokenType": {
+            "type": "string",
+            "const": "Bearer"
+          }
+        },
+        "additionalProperties": true
+      },
+      "JobPreflightResponse": {
+        "type": "object",
+        "required": [
+          "wallet",
+          "jobId",
+          "eligible",
+          "claimStake",
+          "claimFee",
+          "totalClaimLock",
+          "strategyUnwindNeeded",
+          "failureStates"
+        ],
+        "properties": {
+          "wallet": {
+            "type": "string",
+            "pattern": "^0x[a-fA-F0-9]{40}$"
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "eligible": {
+            "type": "boolean"
+          },
+          "netReward": {
+            "type": "number"
+          },
+          "availableLiquidity": {
+            "type": "number"
+          },
+          "claimStake": {
+            "type": "number"
+          },
+          "claimStakeBps": {
+            "type": "integer"
+          },
+          "claimFee": {
+            "type": "number"
+          },
+          "claimFeeBps": {
+            "type": "integer"
+          },
+          "claimEconomicsWaived": {
+            "type": "boolean"
+          },
+          "claimEconomicsWaiverScope": {
+            "type": "string"
+          },
+          "claimNumber": {
+            "type": "integer"
+          },
+          "totalClaimLock": {
+            "type": "number"
+          },
+          "strategyUnwindNeeded": {
+            "type": "boolean"
+          },
+          "requiredOutputSchema": {
+            "type": "string",
+            "description": "Schema reference that validates `payload.submission`."
+          },
+          "submissionContract": {
+            "$ref": "#/components/schemas/SubmissionContract"
+          },
+          "verificationContract": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "verifierMode": {
+            "type": "string"
+          },
+          "verifierConfig": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "tier": {
+            "type": "string"
+          },
+          "lifecycle": {
+            "$ref": "#/components/schemas/JobLifecycle"
+          },
+          "tierGate": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "jobType": {
+            "type": "string"
+          },
+          "requiredRole": {
+            "type": "string"
+          },
+          "roleGate": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "failureStates": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": true
+      },
+      "SubmissionContract": {
+        "type": "object",
+        "required": [
+          "endpoint",
+          "validationEndpoint",
+          "submissionShape",
+          "structuredSubmissionRequired",
+          "schemaValidates",
+          "doNotWrapInOutput",
+          "outputSchemaRef",
+          "submitPayloadExample"
+        ],
+        "properties": {
+          "endpoint": {
+            "type": "string",
+            "const": "POST /jobs/submit"
+          },
+          "validationEndpoint": {
+            "type": "string",
+            "const": "POST /jobs/validate-submission"
+          },
+          "submissionShape": {
+            "type": "string",
+            "const": "direct_schema_object"
+          },
+          "structuredSubmissionRequired": {
+            "type": "boolean",
+            "const": true
+          },
+          "schemaValidates": {
+            "type": "string",
+            "const": "payload.submission"
+          },
+          "doNotWrapInOutput": {
+            "type": "boolean",
+            "const": true
+          },
+          "compatibilityAliases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "outputSchemaRef": {
+            "type": "string"
+          },
+          "outputSchemaUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "submitPayloadExample": {
+            "$ref": "#/components/schemas/JobSubmissionRequest"
+          },
+          "invalidWrappedOutputHint": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "JobSubmissionRequest": {
+        "type": "object",
+        "required": [
+          "sessionId",
+          "submission"
+        ],
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "submission": {
+            "type": "object",
+            "description": "The job's output-schema object directly. This object is validated against the claimed job's `outputSchemaRef`; do not add an `output` wrapper.",
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "AccountSummary": {
+        "type": "object",
+        "required": [
+          "wallet",
+          "liquid",
+          "reserved",
+          "strategyAllocated",
+          "collateralLocked",
+          "jobStakeLocked",
+          "debtOutstanding"
+        ],
+        "properties": {
+          "wallet": {
+            "type": "string",
+            "pattern": "^0x[a-fA-F0-9]{40}$"
+          },
+          "liquid": {
+            "$ref": "#/components/schemas/AssetAmountMap"
+          },
+          "walletBalance": {
+            "$ref": "#/components/schemas/AssetAmountMap"
+          },
+          "reserved": {
+            "$ref": "#/components/schemas/AssetAmountMap"
+          },
+          "strategyAllocated": {
+            "$ref": "#/components/schemas/AssetAmountMap"
+          },
+          "strategyShares": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "strategyActivity": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "strategyAccounting": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "treasuryTimeline": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "collateralLocked": {
+            "$ref": "#/components/schemas/AssetAmountMap"
+          },
+          "jobStakeLocked": {
+            "$ref": "#/components/schemas/AssetAmountMap"
+          },
+          "debtOutstanding": {
+            "$ref": "#/components/schemas/AssetAmountMap"
+          },
+          "raw": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": true
+      },
+      "AssetAmountMap": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "number"
+        },
+        "example": {
+          "USDC": 2
+        }
+      },
+      "AccountMutationRequest": {
+        "type": "object",
+        "properties": {
+          "asset": {
+            "type": "string",
+            "default": "DOT"
+          },
+          "amount": {
+            "type": "number"
+          },
+          "strategyId": {
+            "type": "string",
+            "default": "default-low-risk"
+          },
+          "idempotencyKey": {
+            "type": "string"
+          },
+          "recipient": {
+            "type": "string"
+          },
+          "requestedShares": {
+            "type": "number"
+          },
+          "shares": {
+            "type": "number",
+            "description": "Compatibility alias for `requestedShares`."
+          },
+          "maxWeight": {
+            "type": "object",
+            "properties": {
+              "refTime": {
+                "oneOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ]
+              },
+              "proofSize": {
+                "oneOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "AccountRouteResponse": {
+        "type": "object",
+        "description": "Route-specific account read or mutation result.",
+        "additionalProperties": true
+      },
+      "SessionNotFoundResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "sessionId"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "not_found"
+          },
+          "sessionId": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
       "HealthResponse": {
         "type": "object",
         "required": [
@@ -1913,8 +3044,15 @@
           "status": {
             "type": "string"
           },
+          "code": {
+            "type": "string",
+            "description": "Compatibility error-code field used by a small number of conflict responses."
+          },
           "message": {
             "type": "string"
+          },
+          "details": {
+            "description": "Optional structured context for validation, authentication, or conflict failures."
           },
           "requestId": {
             "type": "string"
