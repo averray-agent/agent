@@ -29,6 +29,8 @@ class FakeApiError extends Error {
     super(payload?.message ?? `api error ${status}`);
     this.status = status;
     this.payload = payload;
+    this.code = payload?.code;
+    this.details = payload?.details;
   }
 }
 
@@ -584,6 +586,67 @@ test("stage 5 verify: auto mode passes when the public result is approved (no-op
   const out = await runVerifyStage({ operatorPlatform: {}, authedWorker, sessionId: "s", mode: "auto" });
   assert.equal(out.summary.mode, "auto");
   assert.equal(out.summary.outcome, "approved");
+});
+
+test("stage 5 verify: reconciles an exact operator-vs-auto-verifier resolved-session race", async () => {
+  const operatorPlatform = {
+    async runVerifier() {
+      throw new FakeApiError(409, {
+        code: "invalid_session_transition",
+        message: "Session s cannot receive verification while resolved.",
+        details: { currentStatus: "resolved" }
+      });
+    }
+  };
+  const authedWorker = {
+    async getVerifierResult() {
+      return { outcome: "approved", reasonCode: "benchmark_pass" };
+    }
+  };
+
+  const out = await runVerifyStage({ operatorPlatform, authedWorker, sessionId: "s", mode: "operator" });
+
+  assert.equal(out.summary.mode, "operator_race_reconciled");
+  assert.equal(out.summary.outcome, "approved");
+  assert.equal(out.summary.reasonCode, "benchmark_pass");
+});
+
+test("stage 5 verify: resolved-session race still fails closed without an approved public result", async () => {
+  const operatorPlatform = {
+    async runVerifier() {
+      throw new FakeApiError(409, {
+        code: "invalid_session_transition",
+        details: { currentStatus: "resolved" }
+      });
+    }
+  };
+  const authedWorker = {
+    async getVerifierResult() {
+      return { outcome: "rejected", reasonCode: "keyword_miss" };
+    }
+  };
+
+  await assert.rejects(
+    () => runVerifyStage({ operatorPlatform, authedWorker, sessionId: "s", mode: "operator" }),
+    /not approved/u
+  );
+});
+
+test("stage 5 verify: unrelated conflicts are never reconciled", async () => {
+  const error = new FakeApiError(409, {
+    code: "invalid_session_transition",
+    details: { currentStatus: "expired" }
+  });
+  const operatorPlatform = {
+    async runVerifier() {
+      throw error;
+    }
+  };
+
+  await assert.rejects(
+    () => runVerifyStage({ operatorPlatform, authedWorker: {}, sessionId: "s", mode: "operator" }),
+    (caught) => caught === error
+  );
 });
 
 // ── STAGE 6: settle ──────────────────────────────────────────────────────────

@@ -8,6 +8,7 @@ import {
   bindSignerToWriteBroadcaster,
   createRpcProvider,
   createWriteRpcBroadcaster,
+  describeRpcProvider,
   WriteRpcBroadcaster
 } from "./rpc-provider.js";
 
@@ -157,6 +158,7 @@ test("write broadcaster waits through a two-second send response and settles on 
   try {
     const transaction = await broadcaster.broadcastTransaction(signedTransaction);
     assert.equal(transaction.hash, expectedHash);
+    assert.equal(describeRpcProvider(transaction.provider), serverUrl(rpc));
     assert.equal((await transaction.wait()).status, 1);
     assert.equal(sendAttempts, 1);
   } finally {

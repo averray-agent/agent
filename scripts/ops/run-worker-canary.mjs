@@ -522,7 +522,35 @@ export async function runVerifyStage({ operatorPlatform, authedWorker, sessionId
     return { raw: result, summary: { mode: "auto", outcome: "approved", reasonCode: result?.reasonCode ?? null } };
   }
 
-  const verification = await operatorPlatform.runVerifier(sessionId);
+  let verification;
+  try {
+    verification = await operatorPlatform.runVerifier(sessionId);
+  } catch (error) {
+    // Production also has a submitted-job auto-verifier. It can resolve the
+    // session after this canary submits but before the explicit operator call
+    // reaches /verifier/run. Reconcile only that exact terminal-state race,
+    // and only when the independently readable verdict is approved. Every
+    // other operator error remains a hard failure.
+    if (!isResolvedVerificationRace(error)) {
+      throw error;
+    }
+    const result = await authedWorker.getVerifierResult(sessionId);
+    const outcome = result?.outcome ?? result?.verification?.status;
+    if (outcome !== "approved" && outcome !== "passed") {
+      throw new Error(
+        `Verify stage FAILED: operator /verifier/run lost a resolved-session race, but the public result was ` +
+          `"${outcome ?? "missing"}", not approved.`
+      );
+    }
+    return {
+      raw: result,
+      summary: {
+        mode: "operator_race_reconciled",
+        outcome: "approved",
+        reasonCode: result?.reasonCode ?? null
+      }
+    };
+  }
   const outcome = verification?.outcome ?? verification?.status;
   if (outcome !== "approved") {
     throw new Error(
@@ -534,6 +562,14 @@ export async function runVerifyStage({ operatorPlatform, authedWorker, sessionId
     raw: verification,
     summary: { mode: "operator", outcome, reasonCode: verification?.reasonCode ?? null }
   };
+}
+
+function isResolvedVerificationRace(error) {
+  return (
+    error?.status === 409 &&
+    error?.code === "invalid_session_transition" &&
+    error?.details?.currentStatus === "resolved"
+  );
 }
 
 // ── STAGE 6: settle ─────────────────────────────────────────────────────────
