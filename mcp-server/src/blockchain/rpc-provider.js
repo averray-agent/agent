@@ -1,11 +1,21 @@
 import {
+  AbstractSigner,
   FallbackProvider,
   FetchRequest,
-  JsonRpcProvider
+  JsonRpcProvider,
+  Transaction,
+  TransactionResponse
 } from "ethers";
 
 const DEFAULT_RPC_FAILOVER_STALL_MS = 250;
 const DEFAULT_RPC_REQUEST_TIMEOUT_MS = 750;
+const DEFAULT_RPC_WRITE_REQUEST_TIMEOUT_MS = 15_000;
+const MINIMUM_RPC_WRITE_REQUEST_TIMEOUT_MS = 15_000;
+const RETRYABLE_BROADCAST_ERROR_CODES = new Set([
+  "NETWORK_ERROR",
+  "SERVER_ERROR",
+  "TIMEOUT"
+]);
 
 /**
  * Build the backend's shared provider with an ordered primary/failover set.
@@ -44,6 +54,221 @@ export function createRpcProvider(config) {
     undefined,
     { quorum: 1 }
   );
+}
+
+/**
+ * Build the mutation transport separately from the read provider.
+ *
+ * Each endpoint is an independent JsonRpcProvider with a patient request
+ * timeout. Broadcasts are attempted serially, never through FallbackProvider:
+ * before moving to another endpoint, WriteRpcBroadcaster proves that the
+ * signed transaction is not already visible and that its nonce is still
+ * available. The same signed bytes (and therefore the same hash and nonce)
+ * are reused for every attempt.
+ */
+export function createWriteRpcBroadcaster(config) {
+  const requestTimeoutMs = positiveInteger(
+    config?.rpcWriteRequestTimeoutMs,
+    DEFAULT_RPC_WRITE_REQUEST_TIMEOUT_MS
+  );
+  if (requestTimeoutMs < MINIMUM_RPC_WRITE_REQUEST_TIMEOUT_MS) {
+    throw new Error(
+      `RPC write request timeout must be at least ${MINIMUM_RPC_WRITE_REQUEST_TIMEOUT_MS}ms.`
+    );
+  }
+  const providers = normalizeRpcUrls(config).map((url) => {
+    const request = new FetchRequest(url);
+    request.timeout = requestTimeoutMs;
+    return new JsonRpcProvider(request);
+  });
+  return new WriteRpcBroadcaster(providers);
+}
+
+/**
+ * Keep signer reads (nonce, fee data, gas estimation) on the aggressive read
+ * provider while routing only the signed broadcast through the patient write
+ * transport. TransactionResponse.wait() remains pinned to the write endpoint
+ * that accepted or already knew the transaction.
+ */
+export function bindSignerToWriteBroadcaster(signer, readProvider, broadcaster) {
+  if (!signer) {
+    return undefined;
+  }
+  return new PatientWriteSigner(signer.connect(readProvider), readProvider, broadcaster);
+}
+
+export class WriteRpcBroadcaster {
+  #providers;
+
+  constructor(providers) {
+    if (!Array.isArray(providers) || providers.length === 0) {
+      throw new Error("WriteRpcBroadcaster requires at least one RPC provider.");
+    }
+    this.#providers = providers;
+  }
+
+  async broadcastTransaction(signedTransaction) {
+    const transaction = Transaction.from(signedTransaction);
+    if (!transaction.hash || !transaction.from) {
+      throw new Error("Write broadcast requires a signed transaction with hash and sender.");
+    }
+
+    let lastError;
+    for (let index = 0; index < this.#providers.length; index += 1) {
+      const provider = this.#providers[index];
+      if (index > 0) {
+        const state = await inspectTransactionState(provider, transaction);
+        const recovered = recoverKnownTransaction(state, transaction, provider);
+        if (recovered) {
+          return recovered;
+        }
+        assertNonceAvailable(state, transaction);
+      }
+
+      try {
+        return await provider.broadcastTransaction(signedTransaction);
+      } catch (error) {
+        if (!isRetryableBroadcastError(error)) {
+          throw error;
+        }
+        lastError = error;
+        const state = await inspectTransactionState(provider, transaction)
+          .catch(() => undefined);
+        if (state) {
+          const recovered = recoverKnownTransaction(state, transaction, provider);
+          if (recovered) {
+            return recovered;
+          }
+          assertNonceAvailable(state, transaction);
+        }
+      }
+    }
+    throw lastError ?? new Error(`Unable to broadcast transaction ${transaction.hash}.`);
+  }
+
+  async destroy() {
+    await Promise.all(this.#providers.map((provider) => provider.destroy?.()));
+  }
+}
+
+class PatientWriteSigner extends AbstractSigner {
+  #signer;
+  #broadcaster;
+
+  constructor(signer, readProvider, broadcaster) {
+    super(readProvider);
+    this.#signer = signer;
+    this.#broadcaster = broadcaster;
+  }
+
+  connect(provider) {
+    return new PatientWriteSigner(
+      this.#signer.connect(provider),
+      provider,
+      this.#broadcaster
+    );
+  }
+
+  getAddress() {
+    return this.#signer.getAddress();
+  }
+
+  signTransaction(transaction) {
+    return this.#signer.signTransaction(transaction);
+  }
+
+  signMessage(message) {
+    return this.#signer.signMessage(message);
+  }
+
+  signTypedData(domain, types, value) {
+    return this.#signer.signTypedData(domain, types, value);
+  }
+
+  async sendTransaction(transaction) {
+    const populated = await this.populateTransaction(transaction);
+    delete populated.from;
+    const signedTransaction = await this.signTransaction(Transaction.from(populated));
+    return this.#broadcaster.broadcastTransaction(signedTransaction);
+  }
+}
+
+async function inspectTransactionState(provider, transaction) {
+  const knownTransaction = await provider.getTransaction(transaction.hash);
+  if (knownTransaction) {
+    return { knownTransaction };
+  }
+  const receipt = await provider.getTransactionReceipt(transaction.hash);
+  if (receipt) {
+    return { receipt };
+  }
+  const [pendingNonce, latestNonce] = await Promise.all([
+    provider.getTransactionCount(transaction.from, "pending"),
+    provider.getTransactionCount(transaction.from, "latest")
+  ]);
+  return { pendingNonce, latestNonce };
+}
+
+function recoverKnownTransaction(state, transaction, provider) {
+  if (state.knownTransaction) {
+    return state.knownTransaction;
+  }
+  if (!state.receipt) {
+    return undefined;
+  }
+  return new TransactionResponse({
+    hash: transaction.hash,
+    from: transaction.from,
+    to: transaction.to,
+    nonce: transaction.nonce,
+    gasLimit: transaction.gasLimit,
+    gasPrice: transaction.gasPrice,
+    maxPriorityFeePerGas: transaction.maxPriorityFeePerGas,
+    maxFeePerGas: transaction.maxFeePerGas,
+    maxFeePerBlobGas: transaction.maxFeePerBlobGas,
+    data: transaction.data,
+    value: transaction.value,
+    chainId: transaction.chainId,
+    signature: transaction.signature,
+    accessList: transaction.accessList,
+    blobVersionedHashes: transaction.blobVersionedHashes,
+    authorizationList: transaction.authorizationList,
+    type: transaction.type,
+    blockNumber: state.receipt.blockNumber,
+    blockHash: state.receipt.blockHash,
+    index: state.receipt.index
+  }, provider);
+}
+
+function assertNonceAvailable(state, transaction) {
+  const pendingNonce = BigInt(state.pendingNonce ?? 0);
+  const latestNonce = BigInt(state.latestNonce ?? 0);
+  const nextNonce = pendingNonce > latestNonce ? pendingNonce : latestNonce;
+  if (nextNonce <= BigInt(transaction.nonce)) {
+    return;
+  }
+  const error = new Error(
+    `Refusing to rebroadcast transaction ${transaction.hash}: sender nonce ` +
+      `${transaction.nonce} is already pending or mined, but the signed hash is not visible.`
+  );
+  error.code = "TRANSACTION_NONCE_AMBIGUOUS";
+  error.transactionHash = transaction.hash;
+  error.transactionNonce = transaction.nonce;
+  throw error;
+}
+
+function isRetryableBroadcastError(error) {
+  if (RETRYABLE_BROADCAST_ERROR_CODES.has(error?.code)) {
+    return true;
+  }
+  const message = String(error?.message ?? "").toLowerCase();
+  return [
+    "fetch failed",
+    "network",
+    "socket",
+    "timed out",
+    "timeout"
+  ].some((fragment) => message.includes(fragment));
 }
 
 function normalizeRpcUrls(config) {
