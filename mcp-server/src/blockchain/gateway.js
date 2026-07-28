@@ -1161,7 +1161,11 @@ export class BlockchainGateway {
         metadataURI,
         reasoningHash
       );
-      const providerUsed = describeRpcProvider(tx.provider);
+      // Ethers wraps the runner's TransactionResponse in a
+      // ContractTransactionResponse and may replace/drop its provider metadata.
+      // Resolve the write endpoint by tx hash from the broadcaster first.
+      const providerUsed = this.writeBroadcaster?.takeProviderUsed?.(tx.hash)
+        ?? describeRpcProvider(tx.provider);
       this.logger?.info?.(
         {
           jobId,

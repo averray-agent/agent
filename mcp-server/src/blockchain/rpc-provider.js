@@ -11,6 +11,7 @@ const DEFAULT_RPC_FAILOVER_STALL_MS = 250;
 const DEFAULT_RPC_REQUEST_TIMEOUT_MS = 750;
 const DEFAULT_RPC_WRITE_REQUEST_TIMEOUT_MS = 15_000;
 const MINIMUM_RPC_WRITE_REQUEST_TIMEOUT_MS = 15_000;
+const MAX_PROVIDER_HISTORY = 256;
 const RPC_PROVIDER_LABEL = Symbol("averray.rpcProviderLabel");
 const RETRYABLE_BROADCAST_ERROR_CODES = new Set([
   "NETWORK_ERROR",
@@ -132,6 +133,7 @@ function safeRpcOrigin(url) {
 
 export class WriteRpcBroadcaster {
   #providers;
+  #providerByTransactionHash = new Map();
 
   constructor(providers) {
     if (!Array.isArray(providers) || providers.length === 0) {
@@ -153,13 +155,14 @@ export class WriteRpcBroadcaster {
         const state = await inspectTransactionState(provider, transaction);
         const recovered = recoverKnownTransaction(state, transaction, provider);
         if (recovered) {
-          return recovered;
+          return this.#recordProvider(recovered, provider, transaction.hash);
         }
         assertNonceAvailable(state, transaction);
       }
 
       try {
-        return await provider.broadcastTransaction(signedTransaction);
+        const response = await provider.broadcastTransaction(signedTransaction);
+        return this.#recordProvider(response, provider, transaction.hash);
       } catch (error) {
         if (!isRetryableBroadcastError(error)) {
           throw error;
@@ -170,7 +173,7 @@ export class WriteRpcBroadcaster {
         if (state) {
           const recovered = recoverKnownTransaction(state, transaction, provider);
           if (recovered) {
-            return recovered;
+            return this.#recordProvider(recovered, provider, transaction.hash);
           }
           assertNonceAvailable(state, transaction);
         }
@@ -179,9 +182,39 @@ export class WriteRpcBroadcaster {
     throw lastError ?? new Error(`Unable to broadcast transaction ${transaction.hash}.`);
   }
 
+  takeProviderUsed(transactionHash) {
+    const key = normalizeTransactionHash(transactionHash);
+    if (!key) {
+      return undefined;
+    }
+    const providerUsed = this.#providerByTransactionHash.get(key);
+    this.#providerByTransactionHash.delete(key);
+    return providerUsed;
+  }
+
+  #recordProvider(response, provider, transactionHash) {
+    const key = normalizeTransactionHash(transactionHash);
+    if (key) {
+      this.#providerByTransactionHash.delete(key);
+      this.#providerByTransactionHash.set(key, describeRpcProvider(provider));
+      while (this.#providerByTransactionHash.size > MAX_PROVIDER_HISTORY) {
+        const oldest = this.#providerByTransactionHash.keys().next().value;
+        this.#providerByTransactionHash.delete(oldest);
+      }
+    }
+    return response;
+  }
+
   async destroy() {
+    this.#providerByTransactionHash.clear();
     await Promise.all(this.#providers.map((provider) => provider.destroy?.()));
   }
+}
+
+function normalizeTransactionHash(value) {
+  return typeof value === "string" && value.length > 0
+    ? value.toLowerCase()
+    : undefined;
 }
 
 class PatientWriteSigner extends AbstractSigner {

@@ -278,6 +278,12 @@ test("resolveSinglePayout returns the settle/payout tx receipt", async () => {
   );
   const calls = [];
   gateway.signer = {};
+  gateway.writeBroadcaster = {
+    takeProviderUsed(txHash) {
+      assert.equal(txHash, "0xpayout");
+      return "https://write-rpc.example.test";
+    }
+  };
   gateway.escrowContract = {
     async resolveSinglePayout(...args) {
       calls.push(args);
@@ -308,7 +314,7 @@ test("resolveSinglePayout returns the settle/payout tx receipt", async () => {
     txHash: "0xpayout",
     blockNumber: 99,
     durationMs: events[1].fields.durationMs,
-    providerUsed: "https://rpc.example.test"
+    providerUsed: "https://write-rpc.example.test"
   });
   assert.equal(typeof events[1].fields.durationMs, "number");
   assert.ok(events[1].fields.durationMs >= 0);
