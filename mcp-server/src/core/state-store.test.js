@@ -262,6 +262,63 @@ test("MemoryStateStore event log survives buffer-sized reads and filters by sour
   assert.deepEqual(afterCursor.events.map((event) => event.id), ["event-2"]);
 });
 
+test("MemoryStateStore persists external drafts, monotonic wallet nonces, and demand signals privately", async () => {
+  const store = new MemoryStateStore();
+  const wallet = "0x1111111111111111111111111111111111111111";
+  const firstNonce = await store.nextExternalDraftNonce(wallet);
+  const secondNonce = await store.nextExternalDraftNonce(wallet);
+  const draft = {
+    draftId: "draft-1",
+    wallet,
+    nonce: firstNonce,
+    jobId: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    definition: { rewardAmount: "1.0" },
+    createdAt: "2026-07-28T00:00:00.000Z",
+    expiresAt: "2026-07-31T00:00:00.000Z"
+  };
+
+  assert.equal(firstNonce, "1");
+  assert.equal(secondNonce, "2");
+  assert.equal(await store.createExternalJobDraft(draft, {
+    maxOpenDrafts: 1,
+    activeAfter: "2026-07-25T00:00:00.000Z"
+  }), true);
+  assert.deepEqual(await store.getExternalJobDraft("draft-1"), draft);
+  assert.equal(await store.createExternalJobDraft({ ...draft, draftId: "draft-2" }, {
+    maxOpenDrafts: 1,
+    activeAfter: "2026-07-25T00:00:00.000Z"
+  }), false);
+
+  await store.appendExternalPostingDemandSignal({
+    id: "signal-1",
+    wallet,
+    requestedReward: "0.99",
+    schema: "schema://jobs/coding-output",
+    decision: "floor_rejected",
+    attemptedAt: "2026-07-28T00:00:00.000Z"
+  });
+  assert.deepEqual(
+    (await store.listExternalPostingDemandSignals()).map((entry) => entry.decision),
+    ["floor_rejected"]
+  );
+});
+
+test("MemoryStateStore external delisting is idempotent projection state", async () => {
+  const store = new MemoryStateStore();
+  const jobId = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const record = {
+    jobId,
+    adminWallet: "0x2222222222222222222222222222222222222222",
+    reason: "operator backstop",
+    delistedAt: "2026-07-28T00:00:00.000Z"
+  };
+
+  await store.upsertExternalJobDelisting(record);
+  assert.deepEqual(await store.getExternalJobDelisting(jobId), record);
+  assert.equal(await store.isExternalJobDelisted(jobId), true);
+  assert.equal(await store.isExternalJobDelisted("curated-1"), false);
+});
+
 test("MemoryStateStore service state round-trips and merges", async () => {
   const store = new MemoryStateStore();
   await store.upsertServiceState("xcm-observer", {
