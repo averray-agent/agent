@@ -126,7 +126,9 @@ export class BlockchainGateway {
       this.policyContract = undefined;
       this.accountContract = undefined;
       this.escrowContract = undefined;
+      this.v1EscrowContract = undefined;
       this.legacyEscrowContract = undefined;
+      this.primaryEscrowContractLayout = undefined;
       this.drainingEscrowContract = undefined;
       this.arbitratorDrainingEscrowContract = undefined;
       this.reputationContract = undefined;
@@ -172,11 +174,20 @@ export class BlockchainGateway {
       ESCROW_CORE_ABI,
       this.arbitratorSigner ?? this.provider
     );
+    // Until the v2 ceremony updates the manifest, the primary address still
+    // serves EscrowCore v1. Keep its exact ABI available so a v2 tuple decode
+    // failure does not fall through to the pre-waiver legacy semantics.
+    this.v1EscrowContract = new Contract(
+      config.escrowCoreAddress,
+      ESCROW_CORE_V1_DRAIN_ABI,
+      this.signer ?? this.provider
+    );
     this.legacyEscrowContract = new Contract(
       config.escrowCoreAddress,
       ESCROW_CORE_LEGACY_ABI,
       this.signer ?? this.provider
     );
+    this.primaryEscrowContractLayout = undefined;
     this.drainingEscrowContract = config.legacyEscrowCoreAddress
       ? new Contract(
           config.legacyEscrowCoreAddress,
@@ -1129,7 +1140,11 @@ export class BlockchainGateway {
       const claimStake = this.toBaseUnits(claimStakeAmount ?? 0, asset, "claim lock amount");
       const usesRecurringTemplateReserve = this.usesRecurringTemplateReserve(job);
       const protocolFeeWaived = job?.onboardingWaiverEligible === true;
-      const protocolFee = protocolFeeWaived || typeof this.escrowContract?.previewProtocolFee !== "function"
+      const protocolFee = (
+        protocolFeeWaived
+        || live.contractLayout !== "rc1"
+        || typeof this.escrowContract?.previewProtocolFee !== "function"
+      )
         ? 0n
         : BigInt(await this.escrowContract.previewProtocolFee(rewardAmount));
       const totalRequired = usesRecurringTemplateReserve
@@ -1178,7 +1193,12 @@ export class BlockchainGateway {
         specHash
       );
       await createTx.wait();
-      await this.ensureOnboardingWaiverEligibility(this.toJobId(instanceJobId), job, live.contractLayout);
+      await this.ensureOnboardingWaiverEligibility(
+        this.toJobId(instanceJobId),
+        job,
+        live.contractLayout,
+        live.escrowAddress
+      );
       return this.getJob(instanceJobId);
     });
   }
@@ -1192,7 +1212,7 @@ export class BlockchainGateway {
     if (contractLayout === "legacy" || job?.onboardingWaiverEligible !== true) {
       return;
     }
-    const escrowContract = this.escrowContractForLiveJob({ escrowAddress });
+    const escrowContract = this.escrowContractForLiveJob({ contractLayout, escrowAddress });
     if (typeof escrowContract.onboardingWaiverEligibleJobs !== "function"
       || typeof escrowContract.setOnboardingWaiverEligible !== "function") {
       return;
@@ -1382,21 +1402,60 @@ export class BlockchainGateway {
   async readEscrowJob(jobId) {
     const normalizedJobId = this.toJobId(jobId);
     let primary;
-    try {
+    if (this.primaryEscrowContractLayout === "v1") {
       primary = this.normalizeEscrowJob(
-        await this.escrowContract.jobs(normalizedJobId),
-        "rc1",
+        await this.v1EscrowContract.jobs(normalizedJobId),
+        "v1",
         this.config.escrowCoreAddress
       );
-    } catch (error) {
-      if (!this.isEscrowJobDecodeError(error) || !this.legacyEscrowContract) {
-        throw error;
-      }
+    } else if (this.primaryEscrowContractLayout === "legacy") {
       primary = this.normalizeEscrowJob(
         await this.legacyEscrowContract.jobs(normalizedJobId),
         "legacy",
         this.config.escrowCoreAddress
       );
+    } else {
+      try {
+        primary = this.normalizeEscrowJob(
+          await this.escrowContract.jobs(normalizedJobId),
+          "rc1",
+          this.config.escrowCoreAddress
+        );
+        this.primaryEscrowContractLayout = "rc1";
+      } catch (error) {
+        if (!this.isEscrowJobDecodeError(error)) {
+          throw error;
+        }
+        if (this.v1EscrowContract) {
+          try {
+            primary = this.normalizeEscrowJob(
+              await this.v1EscrowContract.jobs(normalizedJobId),
+              "v1",
+              this.config.escrowCoreAddress
+            );
+            this.primaryEscrowContractLayout = "v1";
+          } catch (v1Error) {
+            if (!this.isEscrowJobDecodeError(v1Error) || !this.legacyEscrowContract) {
+              throw v1Error;
+            }
+            primary = this.normalizeEscrowJob(
+              await this.legacyEscrowContract.jobs(normalizedJobId),
+              "legacy",
+              this.config.escrowCoreAddress
+            );
+            this.primaryEscrowContractLayout = "legacy";
+          }
+        } else if (this.legacyEscrowContract) {
+          primary = this.normalizeEscrowJob(
+            await this.legacyEscrowContract.jobs(normalizedJobId),
+            "legacy",
+            this.config.escrowCoreAddress
+          );
+          this.primaryEscrowContractLayout = "legacy";
+        } else {
+          throw error;
+        }
+      }
     }
     if (Number(primary.state) !== 0 || !this.drainingEscrowContract) return primary;
 
@@ -1463,6 +1522,9 @@ export class BlockchainGateway {
         ? this.arbitratorDrainingEscrowContract
         : this.drainingEscrowContract;
     }
+    if (job?.contractLayout === "v1") {
+      return arbitrator ? this.arbitratorEscrowContract : this.v1EscrowContract;
+    }
     return arbitrator ? this.arbitratorEscrowContract : this.escrowContract;
   }
 
@@ -1490,6 +1552,33 @@ export class BlockchainGateway {
         claimTtl,
         verifierMode,
         category
+      );
+    }
+    if (contractLayout === "v1") {
+      if (this.hasExternalSchemaMetadata(externalSchema)) {
+        return this.v1EscrowContract[CREATE_SINGLE_PAYOUT_WITH_SCHEMA](
+          jobId,
+          assetAddress,
+          reward,
+          opsReserve,
+          contingencyReserve,
+          claimTtl,
+          verifierMode,
+          category,
+          specHash,
+          externalSchema
+        );
+      }
+      return this.v1EscrowContract.createSinglePayoutJob(
+        jobId,
+        assetAddress,
+        reward,
+        opsReserve,
+        contingencyReserve,
+        claimTtl,
+        verifierMode,
+        category,
+        specHash
       );
     }
     if (protocolFeeWaived) {
@@ -1567,7 +1656,7 @@ export class BlockchainGateway {
       && funding?.wallet
       && funding?.templateId
     ) {
-      return this.escrowContract.createSinglePayoutJobFromRecurringReserve({
+      const params = {
         jobId,
         templateId: this.toJobId(funding.templateId),
         poster: funding.wallet,
@@ -1580,8 +1669,14 @@ export class BlockchainGateway {
         category,
         specHash,
         ...externalSchema,
-        protocolFeeWaived: job?.onboardingWaiverEligible === true
-      });
+        ...(contractLayout === "v1"
+          ? {}
+          : { protocolFeeWaived: job?.onboardingWaiverEligible === true })
+      };
+      const escrowContract = contractLayout === "v1"
+        ? this.v1EscrowContract
+        : this.escrowContract;
+      return escrowContract.createSinglePayoutJobFromRecurringReserve(params);
     }
     return this.createSinglePayoutJobForLayout(
       contractLayout,

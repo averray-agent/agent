@@ -83,7 +83,7 @@ function okOperatorClient(overrides = {}) {
     },
     async createJob(payload) {
       calls.push(["createJob", payload]);
-      return { id: payload.id };
+      return { ...payload };
     },
     async runVerifier(sessionId) {
       calls.push(["runVerifier", sessionId]);
@@ -205,6 +205,28 @@ test("full canary loop walks SIWE→claim→submit→verify→settle and asserts
   assert.ok(archive, "expected an /admin/jobs/lifecycle archive call");
   assert.equal(archive[2].action, "archive");
   assert.equal(archive[2].jobId, JOB_ID);
+});
+
+test("canary refuses a created job whose persisted shape lost onboarding waiver eligibility", async () => {
+  const operatorClient = okOperatorClient({
+    async createJob(payload) {
+      operatorClient.calls.push(["createJob", payload]);
+      const { onboardingWaiverEligible: _missing, ...persisted } = payload;
+      return persisted;
+    }
+  });
+
+  await assert.rejects(
+    () => runFull({ operatorClient }),
+    /created canary job .* onboardingWaiverEligible=true/u
+  );
+
+  const [createCall] = operatorClient.calls.filter(([name]) => name === "createJob");
+  assert.equal(
+    createCall[1].onboardingWaiverEligible,
+    true,
+    "the canary request itself must explicitly opt into the fresh-wallet waiver"
+  );
 });
 
 test("evidence file is written and sanitized (no tokens or keys)", async () => {
