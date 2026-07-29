@@ -48,7 +48,7 @@ on:
         required: false
         type: string
       indexer_fresh_schema:
-        description: Auto-mint a timestamped DATABASE_SCHEMA for one-shot recovery (convenience over indexer_database_schema).
+        description: Force a fresh DATABASE_SCHEMA; normal indexer app-identity changes now rotate automatically.
         required: false
         default: "0"
         type: choice

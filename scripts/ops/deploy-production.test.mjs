@@ -26,6 +26,7 @@ test("deploy wrapper retries frontend after an earlier failed indexer deploy", a
   const fakeBin = join(root, "bin");
   const stateDir = join(root, "state");
   const deployLog = join(root, "deploy.log");
+  const indexerEnv = join(root, "indexer.env");
 
   await mkdir(join(appRoot, "scripts/ops"), { recursive: true });
   await mkdir(join(appRoot, "app"), { recursive: true });
@@ -33,6 +34,7 @@ test("deploy wrapper retries frontend after an earlier failed indexer deploy", a
   await mkdir(stackRoot, { recursive: true });
   await mkdir(fakeBin, { recursive: true });
   await writeFile(join(stackRoot, "docker-compose.yml"), "services: {}\n");
+  await writeFile(indexerEnv, "DATABASE_SCHEMA=agent_indexer_existing\n");
   await copyFile(DEPLOY_SCRIPT, join(appRoot, "scripts/ops/deploy-production.sh"));
   await chmod(join(appRoot, "scripts/ops/deploy-production.sh"), 0o755);
 
@@ -89,6 +91,7 @@ test("deploy wrapper retries frontend after an earlier failed indexer deploy", a
     COMPOSE_FILE: join(stackRoot, "docker-compose.yml"),
     DEPLOY_LOCK_FILE: join(root, "deploy.lock"),
     DEPLOY_STATE_DIR: stateDir,
+    INDEXER_ENV_FILE: indexerEnv,
     DEPLOY_OLD_SHA: baseSha,
     DEPLOY_NEW_SHA: frontendSha,
     DEPLOY_LOG: deployLog,
@@ -102,6 +105,16 @@ test("deploy wrapper retries frontend after an earlier failed indexer deploy", a
   assert.match(await readFile(deployLog, "utf8"), /^indexer$/m);
   assert.doesNotMatch(await readFile(deployLog, "utf8"), /^frontend$/m);
   assert.equal((await readFile(join(stateDir, "frontend.last-good"), "utf8")).trim(), baseSha);
+  assert.equal(
+    existsSync(join(stateDir, "indexer.database-schema.testnet")),
+    false,
+    "a failed indexer deploy must not persist the candidate schema as last-good"
+  );
+  assert.equal(
+    existsSync(join(stateDir, "indexer.app-identity.testnet")),
+    false,
+    "a failed indexer deploy must not persist the candidate identity as last-good"
+  );
 
   await writeFile(join(appRoot, "indexer/fix.ts"), "export const fixed = true;\n");
   git(appRoot, "add", ".");
@@ -136,18 +149,20 @@ test("root workspace lock changes do not restart the independently packaged inde
   const fakeBin = join(root, "bin");
   const stateDir = join(root, "state");
   const deployLog = join(root, "deploy.log");
+  const indexerEnv = join(root, "indexer.env");
 
   await mkdir(join(appRoot, "scripts/ops"), { recursive: true });
   await mkdir(join(appRoot, "indexer"), { recursive: true });
   await mkdir(stackRoot, { recursive: true });
   await mkdir(fakeBin, { recursive: true });
   await writeFile(join(stackRoot, "docker-compose.yml"), "services: {}\n");
+  await writeFile(indexerEnv, "DATABASE_SCHEMA=agent_indexer_existing\n");
   await copyFile(DEPLOY_SCRIPT, join(appRoot, "scripts/ops/deploy-production.sh"));
   await chmod(join(appRoot, "scripts/ops/deploy-production.sh"), 0o755);
   await writeExecutable(join(appRoot, "scripts/ops/redeploy-indexer.sh"), [
     "#!/usr/bin/env bash",
     "set -euo pipefail",
-    "echo indexer >> \"$DEPLOY_LOG\""
+    "printf 'indexer wait=%s stability=%s build=%s rollback=%s\\n' \"$WAIT_FOR_READY\" \"$HEALTH_STABILITY_SEC\" \"$INDEXER_BUILD_IMAGE\" \"$ROLLBACK_INDEXER_SCHEMA\" >> \"$DEPLOY_LOG\""
   ].join("\n"));
   for (const command of ["docker", "npm", "flock"]) {
     await writeExecutable(join(fakeBin, command), "#!/usr/bin/env bash\nexit 0\n");
@@ -177,6 +192,7 @@ test("root workspace lock changes do not restart the independently packaged inde
     COMPOSE_FILE: join(stackRoot, "docker-compose.yml"),
     DEPLOY_LOCK_FILE: join(root, "deploy.lock"),
     DEPLOY_STATE_DIR: stateDir,
+    INDEXER_ENV_FILE: indexerEnv,
     DEPLOY_OLD_SHA: oldSha,
     DEPLOY_NEW_SHA: newSha,
     DEPLOY_LOG: deployLog,
@@ -203,7 +219,38 @@ test("root workspace lock changes do not restart the independently packaged inde
 
   const indexerRun = runDeploy(appRoot, env(appDependencySha, indexerDependencySha));
   assert.equal(indexerRun.status, 0, indexerRun.stderr);
-  assert.match(await readFile(deployLog, "utf8"), /^indexer$/m);
+  assert.match(
+    indexerRun.stderr,
+    /INDEXER HISTORICAL RE-SYNC STARTING/u,
+    "an app-identity change must make its historical replay window conspicuous"
+  );
+  assert.match(
+    await readFile(deployLog, "utf8"),
+    /^indexer wait=0 stability=15 build=1 rollback=agent_indexer_existing$/m,
+    "a fresh schema gates on a stability window, rebuilds the changed image, and carries the exact rollback schema"
+  );
+  const selectedSchema = (await readFile(indexerEnv, "utf8"))
+    .match(/^DATABASE_SCHEMA=(.+)$/mu)?.[1];
+  assert.match(
+    selectedSchema,
+    /^agent_indexer_testnet_\d{14}_[0-9a-f]{8}$/u,
+    "the normal flow should mint a unique network-scoped schema before recreating the changed app"
+  );
+  assert.notEqual(selectedSchema, "agent_indexer_existing");
+  assert.equal(
+    (await readFile(join(stateDir, "indexer.database-schema.testnet"), "utf8")).trim(),
+    selectedSchema,
+    "the healthy replacement should become the persisted schema"
+  );
+  assert.equal(
+    (await readFile(join(stateDir, "indexer.app-identity.testnet"), "utf8")).trim(),
+    revParse(appRoot, `${indexerDependencySha}:indexer`),
+    "the schema owner should be the exact deployed indexer tree"
+  );
+  const resync = await readFile(join(stateDir, "indexer.resync.testnet"), "utf8");
+  assert.match(resync, /^initial_status=staged$/mu);
+  assert.match(resync, /^reason=app_identity_changed$/mu);
+  assert.match(resync, /^honest_degradation_signal=externalPostingWatcherLagSeconds$/mu);
 });
 
 test("unchanged Caddy content does not imply an indexer smoke check", async () => {
@@ -660,17 +707,18 @@ test("indexer schema recovery persists across normal runtime-env renders", async
   );
   assert.match(
     script,
-    /write_persisted_indexer_schema "\$target_schema"/u,
-    "explicit or fresh schema overrides should persist for the next normal deploy"
+    /commit_indexer_schema_ownership[\s\S]*?write_persisted_indexer_schema "\$INDEXER_TARGET_SCHEMA"/u,
+    "schema ownership should persist only through the post-health commit step"
   );
   assert.match(
     script,
     /Reapplying persisted indexer DATABASE_SCHEMA override/u,
     "normal deploys should reapply a persisted schema override after rendering the template"
   );
-  assert.match(
-    script,
-    /render_runtime_envs\s+apply_indexer_database_schema/u,
+  const renderIndex = script.indexOf("  render_runtime_envs");
+  const applyIndex = script.indexOf('    apply_indexer_database_schema "$indexer_code_changed"', renderIndex);
+  assert.ok(
+    renderIndex > -1 && applyIndex > renderIndex,
     "schema override must run after op inject renders /run env files"
   );
   assert.match(

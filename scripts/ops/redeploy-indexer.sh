@@ -31,6 +31,15 @@
 #                         that rollback() doesn't checkout the SAME commit that just
 #                         failed. Falls back to current HEAD if unset.
 #   SKIP_ROLLBACK=1       disable auto-rollback
+#   INDEXER_BUILD_IMAGE=0 force-recreate the current image without rebuilding
+#   INDEXER_SCHEMA_LOCK_FILE
+#                         non-blocking schema-claim lock used by direct calls
+#   INDEXER_SCHEMA_LOCK_HELD=1
+#                         wrapper already holds INDEXER_SCHEMA_LOCK_FILE
+#   INDEXER_SCHEMA_PREFLIGHTED=1
+#                         deploy-production.sh selected/validated ownership
+#   ROLLBACK_INDEXER_SCHEMA
+#                         exact last-good schema restored before rollback boot
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -55,6 +64,11 @@ INDEXER_LOG_TAIL=${INDEXER_LOG_TAIL:-120}
 WAIT_FOR_READY=${WAIT_FOR_READY:-1}
 ROLLBACK_WAIT_FOR_READY=${ROLLBACK_WAIT_FOR_READY:-0}
 SKIP_GIT_UPDATE=${SKIP_GIT_UPDATE:-0}
+INDEXER_BUILD_IMAGE=${INDEXER_BUILD_IMAGE:-1}
+INDEXER_SCHEMA_LOCK_FILE=${INDEXER_SCHEMA_LOCK_FILE:-/tmp/averray-indexer-schema.lock}
+INDEXER_SCHEMA_LOCK_HELD=${INDEXER_SCHEMA_LOCK_HELD:-0}
+INDEXER_SCHEMA_PREFLIGHTED=${INDEXER_SCHEMA_PREFLIGHTED:-0}
+ROLLBACK_INDEXER_SCHEMA=${ROLLBACK_INDEXER_SCHEMA:-}
 
 if [[ ! -d "$APP_ROOT/.git" ]]; then
   echo "Expected repo checkout at $APP_ROOT" >&2
@@ -73,12 +87,30 @@ for numeric_var in HEALTH_TIMEOUT_SEC HEALTH_STABILITY_SEC READY_TIMEOUT_SEC POL
   fi
 done
 
-for cmd in git docker curl; do
+for cmd in git docker curl flock; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "Missing required command: $cmd" >&2
     exit 1
   fi
 done
+
+if [[ "$INDEXER_SCHEMA_LOCK_HELD" != "1" ]]; then
+  exec 8>"$INDEXER_SCHEMA_LOCK_FILE"
+  if ! flock -n 8; then
+    echo "Another indexer deployment owns the schema claim lock ($INDEXER_SCHEMA_LOCK_FILE)." >&2
+    echo "Rejecting this deploy before the running container can change; retry after the active indexer deploy finishes." >&2
+    exit 1
+  fi
+  echo "Indexer schema claim lock acquired: $INDEXER_SCHEMA_LOCK_FILE"
+else
+  echo "Indexer schema claim lock inherited from deploy-production.sh: $INDEXER_SCHEMA_LOCK_FILE"
+fi
+
+if [[ "$INDEXER_SCHEMA_PREFLIGHTED" != "1" ]]; then
+  echo "Indexer schema ownership was not preflighted; refusing before container recreation." >&2
+  echo "Run scripts/ops/deploy-production.sh with RUN_INDEXER=1 so the incoming app identity is checked and a fresh schema is selected when required." >&2
+  exit 1
+fi
 
 # When the wrapper has already pulled origin/main, `git rev-parse HEAD` is the
 # NEW SHA, not the pre-deploy one — making rollback a structural no-op. The
@@ -92,10 +124,55 @@ if [[ "$PREVIOUS_SHA" == "$CURRENT_HEAD" && "${SKIP_GIT_UPDATE:-0}" == "1" ]]; t
 fi
 
 compose_up() {
-  docker compose \
-    --project-directory "$COMPOSE_PROJECT_DIRECTORY" \
-    -f "$COMPOSE_FILE" \
-    up -d --build "$INDEXER_SERVICE"
+  if [[ "$INDEXER_BUILD_IMAGE" == "1" ]]; then
+    docker compose \
+      --project-directory "$COMPOSE_PROJECT_DIRECTORY" \
+      -f "$COMPOSE_FILE" \
+      up -d --build "$INDEXER_SERVICE"
+  else
+    docker compose \
+      --project-directory "$COMPOSE_PROJECT_DIRECTORY" \
+      -f "$COMPOSE_FILE" \
+      up -d --force-recreate "$INDEXER_SERVICE"
+  fi
+}
+
+restore_indexer_schema() {
+  local schema="$1"
+  local target="$INDEXER_ENV_TARGET"
+  if [[ -z "$schema" ]]; then
+    return 0
+  fi
+  if [[ ! -f "$target" ]]; then
+    echo "Cannot restore last-good DATABASE_SCHEMA=$schema: missing env target $target." >&2
+    return 1
+  fi
+
+  local tmp
+  tmp=$(mktemp)
+  trap 'rm -f "$tmp"' RETURN
+  awk '!/^DATABASE_SCHEMA=/' "$target" > "$tmp"
+  printf 'DATABASE_SCHEMA=%s\n' "$schema" >> "$tmp"
+  local mode owner_group
+  if mode=$(stat -c '%a' "$target" 2>/dev/null); then
+    owner_group=$(stat -c '%U:%G' "$target")
+  else
+    mode=$(stat -f '%Lp' "$target")
+    owner_group=$(stat -f '%Su:%Sg' "$target")
+  fi
+  chmod "$mode" "$tmp"
+  case "$target" in
+    /run/agent-stack/*|/run/agent-stack-mainnet/*)
+      sudo chown "$owner_group" "$tmp"
+      sudo mv "$tmp" "$target"
+      ;;
+    *)
+      chown "$owner_group" "$tmp" 2>/dev/null || true
+      mv "$tmp" "$target"
+      ;;
+  esac
+  trap - RETURN
+  echo "Rollback restored last-good DATABASE_SCHEMA in $target: $schema"
 }
 
 dump_indexer_diagnostics() {
@@ -183,35 +260,37 @@ rollback() {
   local now_head
   now_head=$(git -C "$APP_ROOT" rev-parse HEAD)
   if [[ "$PREVIOUS_SHA" == "$now_head" ]]; then
-    # Nothing earlier to roll back to — checking out the same SHA and rebuilding
-    # would just waste another 120s health-wait on the same broken code. Bail
-    # explicitly so the operator sees the right next step.
-    echo "No usable rollback target: PREVIOUS_SHA ($PREVIOUS_SHA) matches current HEAD." >&2
-    echo "Leaving the unhealthy indexer in place for inspection. Manual intervention required." >&2
-    exit 1
-  fi
+    if [[ -z "$ROLLBACK_INDEXER_SCHEMA" ]]; then
+      # Nothing earlier to roll back to — checking out the same SHA and
+      # rebuilding would just repeat the same broken deploy.
+      echo "No usable rollback target: PREVIOUS_SHA ($PREVIOUS_SHA) matches current HEAD and no prior schema was supplied." >&2
+      echo "Leaving the unhealthy indexer in place for inspection. Manual intervention required." >&2
+      exit 1
+    fi
+    echo "Indexer gate failed; performing schema-only rollback on $PREVIOUS_SHA." >&2
+  else
+    echo "Indexer gate failed; rolling back to $PREVIOUS_SHA" >&2
+    if ! git -C "$APP_ROOT" checkout --quiet "$PREVIOUS_SHA"; then
+      echo "Rollback: git checkout $PREVIOUS_SHA failed. Working tree may be dirty or the SHA may be unreachable." >&2
+      echo "Manual intervention required: inspect $APP_ROOT for uncommitted changes or fetch the missing commit." >&2
+      exit 1
+    fi
 
-  echo "Indexer gate failed; rolling back to $PREVIOUS_SHA" >&2
-  if ! git -C "$APP_ROOT" checkout --quiet "$PREVIOUS_SHA"; then
-    echo "Rollback: git checkout $PREVIOUS_SHA failed. Working tree may be dirty or the SHA may be unreachable." >&2
-    echo "Manual intervention required: inspect $APP_ROOT for uncommitted changes or fetch the missing commit." >&2
-    exit 1
+    # Verify the checkout actually moved HEAD. Mirrors the guard added to
+    # redeploy-backend.sh::rollback in #467 after the Phase 5a Stage 2C-3
+    # outage post-mortem (2026-05-21) showed `git rev-parse HEAD` still
+    # pointing at the failed-deploy SHA after the backend rollback claimed
+    # to have run. The indexer has the same shape of rollback flow, so it
+    # gets the same shape of guard.
+    local checked_out_head
+    checked_out_head=$(git -C "$APP_ROOT" rev-parse HEAD)
+    if [[ "$checked_out_head" != "$PREVIOUS_SHA" ]]; then
+      echo "Rollback checkout did NOT move HEAD: expected $PREVIOUS_SHA, got $checked_out_head." >&2
+      echo "Manual intervention required: the working tree is still at the failed-deploy SHA." >&2
+      exit 1
+    fi
+    echo "Working tree restored to $PREVIOUS_SHA"
   fi
-
-  # Verify the checkout actually moved HEAD. Mirrors the guard added to
-  # redeploy-backend.sh::rollback in #467 after the Phase 5a Stage 2C-3
-  # outage post-mortem (2026-05-21) showed `git rev-parse HEAD` still
-  # pointing at the failed-deploy SHA after the backend rollback claimed
-  # to have run. The indexer has the same shape of rollback flow, so it
-  # gets the same shape of guard.
-  local checked_out_head
-  checked_out_head=$(git -C "$APP_ROOT" rev-parse HEAD)
-  if [[ "$checked_out_head" != "$PREVIOUS_SHA" ]]; then
-    echo "Rollback checkout did NOT move HEAD: expected $PREVIOUS_SHA, got $checked_out_head." >&2
-    echo "Manual intervention required: the working tree is still at the failed-deploy SHA." >&2
-    exit 1
-  fi
-  echo "Working tree restored to $PREVIOUS_SHA"
 
   # Re-render /run/agent-stack/indexer.env from the rolled-back template.
   # Without this step the rendered env on disk still reflects the FAILED
@@ -241,6 +320,15 @@ rollback() {
     # deploy-production.sh::render_runtime_envs.
     echo "Rollback skipping env re-render: render-vps-env.sh ($render_script), template ($template), or op token ($token) not present." >&2
     echo "  This is OK on a not-yet-bootstrapped VPS but suspicious on a deployed one." >&2
+  fi
+
+  # The rendered template may contain the frozen pre-recovery schema. The
+  # wrapper passes the exact last-good runtime schema so rollback restores the
+  # Ponder owner that actually served before this attempt, not whatever happens
+  # to be committed in the old template.
+  if ! restore_indexer_schema "$ROLLBACK_INDEXER_SCHEMA"; then
+    echo "Rollback could not restore the last-good indexer schema; refusing to recreate into a known ownership mismatch." >&2
+    exit 1
   fi
 
   compose_up

@@ -31,7 +31,7 @@ The unbiased-validation ladder (rungs 2–4 of
 |---|------|-------|--------|
 | 2.1 | **JWT TTL ≤1h**: replace the hand-minted 30-day admin JWT with automated refresh-flow rotation (groundwork: #672 helper, per-consumer refresh pattern; the #808 Redis-key fix removed the latent rotation bug) | Codex | open |
 | 2.2 | **Demand-adaptive reward pricing**: replace static per-source amounts (#778) with pricing by job value and live claim demand; back off to zero when nothing is being claimed. The reward bank stays the hard cap | Codex (design w/ Claude) | open |
-| 2.3 | Indexer recovery: resolve the Ponder schema-ownership conflict behind the 502, then expose the public indexer surface | Codex | open |
+| 2.3 | Indexer recovery: pre-swap app-identity ownership checks, deliberate fresh-schema rotation, serialized claims, staged re-sync evidence, and manual stale-schema cleanup; then expose the public indexer surface | Codex | in progress |
 | 2.4 | Treasury withdrawal convenience: when accrued fees justify it, `setTreasuryAccount` to an EVM-accessible treasury (owner multisig signs once); until then fees accrue safely under 2-of-3 | Pascal | deferred until fees accrue |
 | 2.5 | Tier-vocabulary consolidation across list/drawer/backend (noted at #765) | Codex | open |
 | 2.6 | Secrets calendar hygiene: RA certs renew 2026-10-12, GitHub PAT 2026-10-13, SA tokens ~2026-09-11 — batch the October renewals | Pascal | scheduled |
