@@ -9,6 +9,8 @@ import {
   resolveDeployPredictionDeployer,
   assertMainnetPhaseOneDeployerBalance,
   MAINNET_MIN_ESCROW_DEPLOYER_BALANCE_WEI,
+  formatCeremonyBroadcastError,
+  runCeremonyBroadcastSafely,
   verifyExpectedDeployerAndBroadcast,
   applyEscrowRedeployManifest,
   rewriteEscrowAddressInTemplate,
@@ -123,6 +125,109 @@ test("mainnet Phase 1 balance preflight accepts exactly 2 DOT", async () => {
   });
   assert.equal(result.balanceWei, 2_000_000_000_000_000_000n);
   assert.equal(result.minimumWei, 2_000_000_000_000_000_000n);
+});
+
+test("ceremony broadcast maps Substrate 1010 without exposing the signed transaction", () => {
+  const signedTransaction = "0x" + "ab".repeat(24_000);
+  const formatted = formatCeremonyBroadcastError(
+    Object.assign(new Error("could not coalesce error"), {
+      code: "UNKNOWN_ERROR",
+      info: {
+        error: {
+          code: 1010,
+          message: "Invalid Transaction"
+        },
+        payload: {
+          method: "eth_sendRawTransaction",
+          params: [signedTransaction]
+        }
+      }
+    })
+  );
+
+  assert.match(
+    formatted,
+    /Substrate pool error 1010: transaction invalid, most likely insufficient balance for fee\+deposit/u
+  );
+  assert.match(formatted, /at least 2\.0 DOT/u);
+  assert.match(formatted, /Raw signed transaction and RPC payload suppressed/u);
+  assert.ok(formatted.length < 1_000);
+  assert.doesNotMatch(formatted, /abababababababab/u);
+  assert.doesNotMatch(formatted, /eth_sendRawTransaction/u);
+});
+
+test("ceremony broadcast maps serialized Substrate 1012 to the pool cooldown remedy", () => {
+  const signedTransaction = "0x" + "cd".repeat(24_000);
+  const formatted = formatCeremonyBroadcastError({
+    code: "UNKNOWN_ERROR",
+    error: {
+      body: JSON.stringify({
+        error: {
+          code: 1012,
+          message: "Transaction is temporarily banned"
+        },
+        params: [signedTransaction]
+      })
+    }
+  });
+
+  assert.match(
+    formatted,
+    /Substrate pool error 1012: this exact transaction was recently rejected and is pool-banned for ~30 min; fix the cause and retry after the cooldown/u
+  );
+  assert.match(formatted, /Raw signed transaction and RPC payload suppressed/u);
+  assert.ok(formatted.length < 1_000);
+  assert.doesNotMatch(formatted, /cdcdcdcdcdcdcdcd/u);
+});
+
+test("unknown ceremony broadcast errors retain a short reason but suppress RPC payloads", () => {
+  const signedTransaction = "0x" + "ef".repeat(24_000);
+  const formatted = formatCeremonyBroadcastError({
+    code: "UNKNOWN_ERROR",
+    shortMessage: "upstream connection reset while broadcasting",
+    payload: {
+      method: "eth_sendRawTransaction",
+      params: [signedTransaction]
+    }
+  });
+
+  assert.match(formatted, /UNKNOWN_ERROR/u);
+  assert.match(formatted, /upstream connection reset while broadcasting/u);
+  assert.match(formatted, /Raw signed transaction and RPC payload suppressed/u);
+  assert.ok(formatted.length < 1_000);
+  assert.doesNotMatch(formatted, /efefefefefefefef/u);
+  assert.doesNotMatch(formatted, /eth_sendRawTransaction/u);
+});
+
+test("ceremony broadcast boundary rethrows only the sanitized error", async () => {
+  const signedTransaction = "0x" + "12".repeat(24_000);
+  const rawError = Object.assign(new Error("could not coalesce error"), {
+    code: "UNKNOWN_ERROR",
+    info: {
+      error: {
+        code: 1012,
+        message: "Transaction is temporarily banned"
+      },
+      payload: {
+        method: "eth_sendRawTransaction",
+        params: [signedTransaction]
+      }
+    }
+  });
+
+  await assert.rejects(
+    runCeremonyBroadcastSafely(async () => {
+      throw rawError;
+    }),
+    (error) => {
+      assert.notEqual(error, rawError);
+      assert.equal(error.cause, undefined);
+      assert.match(error.message, /Substrate pool error 1012/u);
+      assert.doesNotMatch(error.message, /1212121212121212/u);
+      assert.doesNotMatch(error.stack, /1212121212121212/u);
+      return true;
+    }
+  );
 });
 
 test("mismatched expected deployer aborts before broadcast", async () => {
