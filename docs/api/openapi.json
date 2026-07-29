@@ -1642,7 +1642,12 @@
             "type": "string"
           },
           "eligible": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "True only when the job is claimable for this wallet and its liquid position covers the projected claim lock."
+          },
+          "catalogEligible": {
+            "type": "boolean",
+            "description": "Whether lifecycle, tier, role, and verifier gates pass before wallet claim-funding is considered."
           },
           "netReward": {
             "type": "number"
@@ -1673,6 +1678,23 @@
           },
           "totalClaimLock": {
             "type": "number"
+          },
+          "claimFundingAsset": {
+            "type": "string",
+            "description": "Settlement asset used by the liquidity and shortfall fields."
+          },
+          "claimFundingSufficient": {
+            "type": "boolean",
+            "description": "Whether availableLiquidity covers totalClaimLock."
+          },
+          "claimFundingShortfall": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Additional liquid balance required to cover totalClaimLock."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Machine-readable claimability reason; insufficient_liquidity when the otherwise-claimable job exceeds this wallet's liquid balance."
           },
           "strategyUnwindNeeded": {
             "type": "boolean"

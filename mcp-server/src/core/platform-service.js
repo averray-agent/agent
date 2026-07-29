@@ -836,15 +836,17 @@ export class PlatformService {
       this.jobCatalogService.preflightJob(wallet, jobId),
       this.getPublicJobDefinition(jobId, { wallet })
     ]);
+    const claimStateEligible = job.claimable === true && job.currentWalletCanClaim !== false;
+    const fundingBlocked = claimStateEligible && preflight.claimFundingSufficient === false;
     return {
       ...preflight,
-      catalogEligible: preflight.eligible,
-      eligible: preflight.eligible && job.claimable === true && job.currentWalletCanClaim !== false,
+      catalogEligible: preflight.catalogEligible ?? preflight.eligible,
+      eligible: preflight.eligible && claimStateEligible,
       claimStatus: job.claimStatus,
       claimState: job.claimState,
       claimable: job.claimable,
       currentWalletCanClaim: job.currentWalletCanClaim,
-      reason: job.reason,
+      reason: fundingBlocked ? preflight.reason : job.reason,
       claimedBy: job.claimedBy,
       claimedAt: job.claimedAt,
       claimExpiresAt: job.claimExpiresAt,
