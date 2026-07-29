@@ -6,7 +6,10 @@ import {
 export const POLKADOT_HUB_MAINNET_CHAIN_ID = 420420419;
 export const POLKADOT_HUB_TESTNET_CHAIN_ID = 420420417;
 export const CEREMONY_RPC_PREFLIGHT_TIMEOUT_MS = 3_000;
-export const CEREMONY_RPC_READ_TIMEOUT_MS = 750;
+// Ceremony reads include wide eth_getLogs ranges and contract-state audits.
+// They are deliberately independent from the backend health probe's
+// sub-second read budget: a migration safety scan must favor completeness.
+export const CEREMONY_RPC_READ_TIMEOUT_MS = 15_000;
 export const CEREMONY_RPC_FAILOVER_STALL_MS = 250;
 export const CEREMONY_RPC_WRITE_TIMEOUT_MS = 15_000;
 
@@ -32,7 +35,12 @@ function configuredRpcUrls(manifest) {
 
 export function safeCeremonyRpcLabel(url) {
   try {
-    return new URL(url).origin;
+    const parsed = new URL(url);
+    parsed.username = "";
+    parsed.password = "";
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.href;
   } catch {
     return "invalid RPC URL";
   }
