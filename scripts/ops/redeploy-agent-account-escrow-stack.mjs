@@ -20,7 +20,6 @@
  */
 
 import {
-  JsonRpcProvider,
   Wallet,
   Contract,
   ContractFactory,
@@ -30,6 +29,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { spawn } from "node:child_process";
+import { bindSignerToWriteBroadcaster } from "../../mcp-server/src/blockchain/rpc-provider.js";
 
 import {
   loadKeyFromOp,
@@ -37,6 +37,10 @@ import {
   findUnsettledOldEscrowBalances,
   evaluateOrphanedBalancePreflight
 } from "./redeploy-escrowcore.mjs";
+import {
+  createCeremonyRpcContext,
+  printCeremonyRpcPreflight
+} from "./ceremony-rpc.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..", "..");
@@ -329,7 +333,13 @@ function printDeployPlan(plan) {
   console.log("  Prediction assumes no other tx from the deployer lands between dry-run and commit.");
 }
 
-async function commitDeployStack({ wallet, manifest, accountArtifact, escrowArtifact }) {
+async function commitDeployStack({
+  wallet,
+  manifest,
+  accountArtifact,
+  escrowArtifact,
+  writeBroadcaster
+}) {
   const accountFactory = new ContractFactory(accountArtifact.abi, accountArtifact.bytecode, wallet);
   const escrowFactory = new ContractFactory(escrowArtifact.abi, escrowArtifact.bytecode, wallet);
   const accountArgs = [manifest.contracts.treasuryPolicy, manifest.contracts.strategyAdapterRegistry];
@@ -341,6 +351,8 @@ async function commitDeployStack({ wallet, manifest, accountArtifact, escrowArti
   await account.waitForDeployment();
   const newAgentAccount = await account.getAddress();
   const accountReceipt = await accountTx.wait();
+  const accountProviderUsed =
+    writeBroadcaster?.takeProviderUsed(accountTx.hash) ?? "unknown";
   console.log(`  deployed: ${newAgentAccount}`);
 
   const escrowArgs = [manifest.contracts.treasuryPolicy, newAgentAccount, manifest.contracts.reputationSbt];
@@ -351,6 +363,8 @@ async function commitDeployStack({ wallet, manifest, accountArtifact, escrowArti
   await escrow.waitForDeployment();
   const newEscrow = await escrow.getAddress();
   const escrowReceipt = await escrowTx.wait();
+  const escrowProviderUsed =
+    writeBroadcaster?.takeProviderUsed(escrowTx.hash) ?? "unknown";
   console.log(`  deployed: ${newEscrow}`);
 
   return {
@@ -359,7 +373,9 @@ async function commitDeployStack({ wallet, manifest, accountArtifact, escrowArti
     agentAccountDeployTx: accountTx.hash,
     escrowDeployTx: escrowTx.hash,
     accountBlockNumber: accountReceipt?.blockNumber ?? null,
-    escrowBlockNumber: escrowReceipt?.blockNumber ?? null
+    escrowBlockNumber: escrowReceipt?.blockNumber ?? null,
+    accountProviderUsed,
+    escrowProviderUsed
   };
 }
 
@@ -667,12 +683,17 @@ async function main() {
   }
 
   const { path: deploymentsPath, manifest } = await loadDeployments(args.profile);
-  const provider = new JsonRpcProvider(manifest.rpcUrl);
+  const rpc = await createCeremonyRpcContext({
+    manifest,
+    phase: args.phase,
+    write: args.phase === "deploy" && !args.dryRun
+  });
+  const { provider, writeBroadcaster } = rpc;
 
   console.log("# redeploy-agent-account-escrow-stack");
   console.log(`profile:             ${args.profile}`);
   console.log(`manifest:            ${deploymentsPath}`);
-  console.log(`rpc:                 ${manifest.rpcUrl}`);
+  printCeremonyRpcPreflight(rpc, (line) => console.log(line));
   console.log(`old AgentAccountCore:${manifest.contracts.agentAccountCore}`);
   console.log(`old EscrowCore:      ${manifest.contracts.escrowCore}`);
   console.log(`treasury:            ${manifest.contracts.treasuryPolicy}`);
@@ -708,26 +729,46 @@ async function main() {
   if (args.phase === "deploy") {
     if (!args.dryRun) {
       const key = resolveSignerKey(args);
-      const wallet = new Wallet(key, provider);
-      console.log("\n## Signer verification");
-      console.log(`  derived address: ${wallet.address}`);
-      console.log(`  manifest.deployer: ${manifest.deployer}`);
-      if (!ciEqual(wallet.address, manifest.deployer)) {
-        console.error(`Signer ${wallet.address} does not match manifest.deployer ${manifest.deployer}. Aborting.`);
-        process.exitCode = 2;
+      const wallet = bindSignerToWriteBroadcaster(
+        new Wallet(key),
+        provider,
+        writeBroadcaster
+      );
+      try {
+        const walletAddress = await wallet.getAddress();
+        console.log("\n## Signer verification");
+        console.log(`  derived address: ${walletAddress}`);
+        console.log(`  manifest.deployer: ${manifest.deployer}`);
+        if (!ciEqual(walletAddress, manifest.deployer)) {
+          console.error(`Signer ${walletAddress} does not match manifest.deployer ${manifest.deployer}. Aborting.`);
+          process.exitCode = 2;
+          return;
+        }
+        const result = await commitDeployStack({
+          wallet,
+          manifest,
+          accountArtifact,
+          escrowArtifact,
+          writeBroadcaster
+        });
+        console.log("\n## Deploy result");
+        console.log(JSON.stringify({
+          phase: "deploy",
+          profile: args.profile,
+          deployer: walletAddress,
+          ...result
+        }, null, 2));
+        console.log("\nNext: generate the multisig recipe:");
+        console.log("  node scripts/ops/redeploy-escrowcore-wire-multisig.mjs \\");
+        console.log(`    --new-agent-account ${result.newAgentAccount} \\`);
+        console.log(`    --new-escrow ${result.newEscrow} --signer hot${recommendSkipRevoke ? " --skip-revoke" : ""}`);
+        if (recommendSkipRevoke) {
+          console.log("  (--skip-revoke recommended until old AAC reserved balances are reconciled.)");
+        }
         return;
+      } finally {
+        await writeBroadcaster.destroy();
       }
-      const result = await commitDeployStack({ wallet, manifest, accountArtifact, escrowArtifact });
-      console.log("\n## Deploy result");
-      console.log(JSON.stringify({ phase: "deploy", profile: args.profile, deployer: wallet.address, ...result }, null, 2));
-      console.log("\nNext: generate the multisig recipe:");
-      console.log("  node scripts/ops/redeploy-escrowcore-wire-multisig.mjs \\");
-      console.log(`    --new-agent-account ${result.newAgentAccount} \\`);
-      console.log(`    --new-escrow ${result.newEscrow} --signer hot${recommendSkipRevoke ? " --skip-revoke" : ""}`);
-      if (recommendSkipRevoke) {
-        console.log("  (--skip-revoke recommended until old AAC reserved balances are reconciled.)");
-      }
-      return;
     }
     console.log("\nDry-run only. Re-run with --phase deploy --commit + deployer key to send.");
     return;
