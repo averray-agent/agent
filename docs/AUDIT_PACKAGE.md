@@ -35,8 +35,10 @@ mainnet real funds.
   accepted for a capped launch. **The remaining gate is now the deploy/ops ceremony only** —
   deploy-from-audited-artifact → owner→2-of-3 multisig → split-roles + `setTreasuryAccount` sink →
   keep the finite `dailyOutflowCap` un-armed → mainnet USDC/env/secrets/smoke/incident-response
-  proofs → XCM stays disabled. No contract has been deployed to a production chain yet (fixes are
-  Foundry/CI-green; the 2026-07-07 V2 testnet cutover was a rehearsal).
+  proofs → XCM stays disabled. The six-contract mainnet suite deployed on 2026-07-25 is now
+  source-reproduced at `ccaa111` (#739), including the earlier audit fixes; masked bytecode,
+  ABI, and raw-chain hashes are recorded in
+  [`docs/MAINNET_CONTRACT_PROVENANCE.md`](./MAINNET_CONTRACT_PROVENANCE.md).
 - Native XCM/vDOT/yield is deferred: the adapters/wrapper are audited but XCM
   settlement stays **disabled** for mainnet until native observer correlation is live
   (unless explicitly added to a separate engagement).
@@ -67,10 +69,14 @@ auditor to review a moving target.
 ## Pre-Audit Review & Static Baseline
 
 An internal multi-agent security pass on 2026-06-25 found 8 findings (1 Critical, 2 High,
-3 Medium, 2 Low). **All contract findings are remediated in code** (PRs #688–#695) but are
-**not yet deployed** — the live testnet still runs the pre-fix contracts. These fixes must
-land in the frozen audit artifact and be **independently verified by this engagement**; they
-are not a substitute for it. The full finding table and disposition is in
+3 Medium, 2 Low). **All contract findings are remediated in code** (PRs #688–#695).
+The 2026-07-29 provenance pass corrects the former pre-fix-live-chain assumption: mainnet
+AgentAccountCore and the rest of the six-contract suite reproduce from `ccaa111` (#739), so
+the #688–#692 Solidity remediations are deployed. The full masked-bytecode evidence and the
+single unshipped Solidity delta (#850, EscrowCore v2) are in
+[`docs/MAINNET_CONTRACT_PROVENANCE.md`](./MAINNET_CONTRACT_PROVENANCE.md). These fixes still
+require the audit treatment recorded here; deployment is not a substitute for review. The
+full finding table and disposition is in
 [`docs/LAUNCH_CRITICAL_PATH.md`](./LAUNCH_CRITICAL_PATH.md).
 
 Remediated — please **verify, do not assume** (this is fresh, unaudited code and new attack
@@ -112,7 +118,8 @@ C-18→L-3, C-13→M-6, C-17→M-2, C-09→L-5), and per-item disposition are in
 
 **Every audit-2 High + Medium is remediated in code and MERGED to `main`** (both Highs H-1/H-2,
 all eight Mediums M-1…M-8, plus Lows L-2/L-3/L-6/L-7/L-8/L-9 and Info I-5) — **re-verified
-2026-07-08 (CONDITIONAL PASS)**; not yet deployed to a production chain. The remaining
+2026-07-08 (CONDITIONAL PASS)** and source-reproduced in the 2026-07-25 mainnet deployment.
+The remaining
 Lows `L-4/L-5/L-10/L-11/L-13/L-14/L-15` + Info `I-4` are **open, acceptable deferrals** for a
 capped launch; `L-1` (finite-cap arming) and `L-12` (lending) are deferred by decision:
 
@@ -148,9 +155,10 @@ capped launch; `L-1` (finite-cap arming) and `L-12` (lending) are deferred by de
 **Money-path Critical (MAIN-006, `sendToAgentFor`) — closed by #688:** the transfer relay now
 requires a per-user **EIP-712** authorization (signature = authorization → kills the
 operator-drain; `(from, nonce)` replay guard → kills the double-debit), preserving the
-brokered/gas-sponsored model. Merged. Residual before live use: **deploy the artifact**, have
-payment clients sign the `SendToAgent` payload, and (optional defensive belt) gate
-`POST /payments/send` behind a `paymentsSendEnabled` flag (default off) until deployed.
+brokered/gas-sponsored model. Merged. The artifact is now provenance-confirmed on mainnet;
+residual before live use is to have payment clients sign the `SendToAgent` payload and keep
+the defensive `POST /payments/send` `paymentsSendEnabled` gate closed until that client flow
+is ready.
 
 ## Audit Outcomes Required
 

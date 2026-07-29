@@ -3,6 +3,7 @@
 # Verify an on-chain deployment matches the manifest written by
 # scripts/deploy_contracts.sh. Run this right after every deploy to confirm
 # that:
+#   - deployed runtime SHA-256 values match contractProvenance when present
 #   - each contract address responds to a known function selector
 #   - TreasuryPolicy.owner() matches the expected owner (multisig on prod)
 #   - optional deployments/<profile>-multisig-owner.json matches owner
@@ -74,6 +75,15 @@ DISCOVERY_REGISTRY="$(echo "$manifest" | jq -r '.contracts.discoveryRegistry')"
 ESCROW_CORE="$(echo "$manifest" | jq -r '.contracts.escrowCore')"
 XCM_WRAPPER="$(echo "$manifest" | jq -r '.contracts.xcmWrapper // empty')"
 TOKEN_ADDRESS="$(echo "$manifest" | jq -r '.contracts.token')"
+
+if [[ "$(echo "$manifest" | jq -r '.contractProvenance // empty')" != "" ]]; then
+  require_command node
+  echo "Checking manifest contract provenance before role/wiring verification:"
+  node "$repo_root/scripts/ops/check-contract-provenance.mjs" \
+    --profile "$PROFILE" \
+    --rpc "$RPC_URL"
+  echo ""
+fi
 
 fail=0
 check() {

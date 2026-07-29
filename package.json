@@ -22,6 +22,7 @@
     "publish:discovery-manifest": "node scripts/ops/publish-discovery-manifest.mjs",
     "sync:discovery-manifest": "node scripts/ops/sync-discovery-manifest.mjs",
     "check:discovery-manifest": "node scripts/ops/sync-discovery-manifest.mjs --check",
+    "check:contract-provenance": "node scripts/ops/check-contract-provenance.mjs --profile mainnet",
     "sync:job-schemas": "node scripts/ops/sync-job-schemas.mjs",
     "check:job-schemas": "node scripts/ops/sync-job-schemas.mjs --check",
     "check:generated-output": "node scripts/ops/check-generated-output-clean.mjs",
