@@ -54,8 +54,13 @@ the contract merge gate.
 Keep `EXTERNAL_POSTING_MODE=closed` throughout this sequence.
 
 1. Verify the deploy signer `0x9Ab8531FBb0948C542a31298FD61335f30064239`
-   holds at least 1 DOT on Polkadot Hub before starting. Deployment consumes native gas and
-   storage deposits; the first ceremony attempt found this signer at nonce 0 with zero DOT.
+   holds at least 2 DOT on Polkadot Hub before starting. The Phase 1 script checks this
+   balance explicitly before scanning, loading the artifact, or reading the key. The v1
+   EscrowCore deployment (tx `0x3b375d29…`, block 18,647,902) consumed 1.121 DOT in fees for
+   a comparably sized contract; v2's creation payload is 23,935 bytes with a 1,442,046 gas
+   limit. A 0.99 DOT signer is rejected by the node as Substrate 1010
+   `Invalid Transaction`, which ethers otherwise surfaces as the opaque
+   `could not coalesce error`.
    This is the persistent `admin-eoa-mainnet`, selected explicitly for the v2 CREATE.
    `deployments/mainnet.json#deployer` is the retired one-shot F4 deployer that created v1;
    it is historical evidence, not authorization. A fresh burnable key was considered and

@@ -96,6 +96,8 @@ import {
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..", "..");
 
+export const MAINNET_MIN_ESCROW_DEPLOYER_BALANCE_WEI = 2_000_000_000_000_000_000n;
+
 const TREASURY_POLICY_ABI = [
   "function owner() view returns (address)",
   "function settlementBroker(address) view returns (bool)",
@@ -365,6 +367,38 @@ function assertAddress(label, value) {
   if (!/^0x[a-fA-F0-9]{40}$/u.test(value)) {
     throw new Error(`${label} is not a valid address: ${value}`);
   }
+}
+
+export async function assertMainnetPhaseOneDeployerBalance({
+  provider,
+  deployer,
+  minimumWei = MAINNET_MIN_ESCROW_DEPLOYER_BALANCE_WEI
+}) {
+  assertAddress("Phase 1 deployer", deployer);
+  let balanceWei;
+  try {
+    balanceWei = BigInt(await provider.getBalance(deployer));
+  } catch (error) {
+    throw new Error(
+      `Phase 1 deployer balance preflight could not read ${deployer}: ` +
+      `${error?.shortMessage ?? error?.message ?? error}`,
+      { cause: error }
+    );
+  }
+  if (balanceWei < minimumWei) {
+    throw new Error(
+      `Phase 1 deployer balance preflight failed: ${deployer} has ` +
+      `${formatUnits(balanceWei, 18)} DOT; requires at least ` +
+      `${formatUnits(minimumWei, 18)} DOT before CREATE. ` +
+      `Below-floor balances can be rejected by Polkadot Hub as Substrate 1010 ` +
+      `"Invalid Transaction", which ethers may surface as "could not coalesce error".`
+    );
+  }
+  return {
+    deployer,
+    balanceWei,
+    minimumWei
+  };
 }
 
 function assertTxHash(label, value) {
@@ -1269,12 +1303,29 @@ async function main() {
     write: args.phase === "deploy" && !args.dryRun
   });
   const { provider, writeBroadcaster } = rpc;
-  const wiringState = await readWiringState({ provider, manifest });
 
   console.log(`# redeploy-escrowcore`);
   console.log(`profile:               ${args.profile}`);
   console.log(`manifest:              ${deploymentsPath}`);
   printCeremonyRpcPreflight(rpc, (line) => console.log(line));
+  const shouldCheckMainnetDeployerBalance =
+    args.profile === "mainnet" &&
+    (args.phase === "deploy" || (args.phase === "all" && args.expectedDeployer));
+  if (shouldCheckMainnetDeployerBalance) {
+    const balancePreflight = await assertMainnetPhaseOneDeployerBalance({
+      provider,
+      deployer: deployPrediction.address
+    });
+    console.log(
+      `deployer balance:      ${formatUnits(balancePreflight.balanceWei, 18)} DOT ` +
+      `(required >= ${formatUnits(balancePreflight.minimumWei, 18)} DOT) ✓`
+    );
+  } else if (args.profile === "mainnet" && args.phase === "all") {
+    console.warn(
+      "deployer balance:      not checked in overview without --expected-deployer"
+    );
+  }
+  const wiringState = await readWiringState({ provider, manifest });
   console.log(`old escrow:            ${manifest.contracts.escrowCore}`);
   console.log(`treasury:              ${manifest.contracts.treasuryPolicy}`);
   console.log(`treasury.owner():      ${wiringState.owner} (multisig 12nHTKYf… H160 mapping)`);

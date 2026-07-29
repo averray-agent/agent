@@ -7,6 +7,8 @@ import {
   loadKeyFromOp,
   planDeploy,
   resolveDeployPredictionDeployer,
+  assertMainnetPhaseOneDeployerBalance,
+  MAINNET_MIN_ESCROW_DEPLOYER_BALANCE_WEI,
   verifyExpectedDeployerAndBroadcast,
   applyEscrowRedeployManifest,
   rewriteEscrowAddressInTemplate,
@@ -91,6 +93,36 @@ test("commit requires an explicit expected deployer instead of authorizing from 
     }),
     /--expected-deployer is required for --commit/u
   );
+});
+
+test("mainnet Phase 1 balance preflight rejects 0.99 DOT with an explicit 2 DOT remedy", async () => {
+  const deployer = "0x9Ab8531FBb0948C542a31298FD61335f30064239";
+  await assert.rejects(
+    assertMainnetPhaseOneDeployerBalance({
+      provider: {
+        async getBalance(address) {
+          assert.equal(address, deployer);
+          return 990_000_000_000_000_000n;
+        }
+      },
+      deployer
+    }),
+    /Phase 1 deployer balance preflight failed: .* has 0\.99 DOT; requires at least 2\.0 DOT.*Substrate 1010 "Invalid Transaction"/u
+  );
+});
+
+test("mainnet Phase 1 balance preflight accepts exactly 2 DOT", async () => {
+  const deployer = "0x9Ab8531FBb0948C542a31298FD61335f30064239";
+  const result = await assertMainnetPhaseOneDeployerBalance({
+    provider: {
+      async getBalance() {
+        return MAINNET_MIN_ESCROW_DEPLOYER_BALANCE_WEI;
+      }
+    },
+    deployer
+  });
+  assert.equal(result.balanceWei, 2_000_000_000_000_000_000n);
+  assert.equal(result.minimumWei, 2_000_000_000_000_000_000n);
 });
 
 test("mismatched expected deployer aborts before broadcast", async () => {
