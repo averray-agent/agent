@@ -7,6 +7,7 @@ import {
   loadKeyFromOp,
   rewriteEscrowAddressInTemplate,
   collectOldEscrowJobIds,
+  resolveOrphanScanFromBlock,
   evaluateOrphanedBalancePreflight,
   assertArtifactHasBrokeredSelectors,
   ESCROW_TAIL_SCAN_ABI
@@ -58,6 +59,7 @@ test("parseArgs defaults to dry-run + phase=all + profile=testnet", () => {
   assert.equal(args.phase, "all");
   assert.equal(args.profile, "testnet");
   assert.equal(args.signerSecretRef, undefined);
+  assert.equal(args.orphanScanFromBlock, undefined);
 });
 
 test("parseArgs accepts --commit + --phase deploy", () => {
@@ -105,12 +107,85 @@ test("parseArgs collects orphaned balance acknowledgement flags", () => {
   const args = parseArgs([
     "--phase", "deploy",
     "--acknowledge-orphaned-balances",
-    "--orphan-scan-from-block", "8800000",
+    "--from-block", "8800000",
     "--orphan-scan-chunk-size", "5000"
   ]);
   assert.equal(args.acknowledgeOrphanedBalances, true);
   assert.equal(args.orphanScanFromBlock, 8_800_000);
   assert.equal(args.orphanScanChunkSize, 5_000);
+});
+
+test("orphan scan defaults to the manifest deployment block and accepts an explicit override", () => {
+  const manifest = {
+    deploymentBlocks: {
+      escrowCore: 18_647_902
+    }
+  };
+  assert.deepEqual(
+    resolveOrphanScanFromBlock({ manifest }),
+    {
+      fromBlock: 18_647_902,
+      source: "deploymentBlocks.escrowCore"
+    }
+  );
+  assert.deepEqual(
+    resolveOrphanScanFromBlock({ manifest, fromBlock: 18_700_000 }),
+    {
+      fromBlock: 18_700_000,
+      source: "--from-block"
+    }
+  );
+});
+
+test("orphan scan refuses a genesis fallback when the deployment block is missing", () => {
+  assert.throws(
+    () => resolveOrphanScanFromBlock({ manifest: { deploymentBlocks: {} } }),
+    /Missing deployments manifest deploymentBlocks\.escrowCore.*pass --from-block explicitly.*refusing to scan from genesis/u
+  );
+});
+
+test("collectOldEscrowJobIds reports progress and anchors timeout failures to blocks", async () => {
+  const progress = [];
+  const timeout = Object.assign(
+    new Error('request timed out (operation="request.send")'),
+    { code: "TIMEOUT" }
+  );
+  const provider = {
+    async getBlockNumber() {
+      return 160;
+    },
+    async getLogs({ fromBlock }) {
+      if (fromBlock === 120) throw timeout;
+      return [];
+    }
+  };
+
+  await assert.rejects(
+    collectOldEscrowJobIds({
+      provider,
+      escrowAddress: "0x9cCd1DbB0000000000000000000000000000C035",
+      fromBlock: 100,
+      toBlock: 160,
+      chunkSize: 20,
+      onProgress(entry) {
+        progress.push(entry);
+      }
+    }),
+    /Escrow orphan scan timed out at block 120 of 160.*chunk 2\/4.*blocks 120-139/u
+  );
+
+  assert.deepEqual(
+    progress.map(({ chunkIndex, totalChunks, fromBlock, toBlock }) => ({
+      chunkIndex,
+      totalChunks,
+      fromBlock,
+      toBlock
+    })),
+    [
+      { chunkIndex: 1, totalChunks: 4, fromBlock: 100, toBlock: 119 },
+      { chunkIndex: 2, totalChunks: 4, fromBlock: 120, toBlock: 139 }
+    ]
+  );
 });
 
 test("loadKeyFromOp rejects refs that aren't op://", () => {

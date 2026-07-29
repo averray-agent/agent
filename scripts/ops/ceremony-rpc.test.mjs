@@ -3,10 +3,12 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 import {
+  CEREMONY_RPC_READ_TIMEOUT_MS,
   CEREMONY_RPC_WRITE_TIMEOUT_MS,
   POLKADOT_HUB_MAINNET_CHAIN_ID,
   createCeremonyRpcContext,
-  preflightCeremonyRpc
+  preflightCeremonyRpc,
+  safeCeremonyRpcLabel
 } from "./ceremony-rpc.mjs";
 
 const PRIMARY = "https://primary.example/rpc";
@@ -39,6 +41,37 @@ test("mainnet manifest promotes the official RPC and retains the demoted endpoin
     manifest.rpcBackupUrls,
     ["https://eth-rpc.polkadot.io/"]
   );
+  assert.equal(manifest.deploymentBlocks.escrowCore, 18_647_902);
+});
+
+test("ceremony reads use a patient timeout and labels preserve the endpoint path", () => {
+  assert.ok(
+    CEREMONY_RPC_READ_TIMEOUT_MS >= 15_000,
+    "ceremony getLogs reads must not inherit the sub-second health-probe budget"
+  );
+  assert.equal(
+    safeCeremonyRpcLabel("https://services.polkadothub-rpc.com/mainnet/"),
+    "https://services.polkadothub-rpc.com/mainnet/"
+  );
+  assert.equal(
+    safeCeremonyRpcLabel("https://user:password@example.com/rpc?apiKey=secret#fragment"),
+    "https://example.com/rpc",
+    "full endpoint paths must remain visible without leaking credentials or query secrets"
+  );
+});
+
+test("testnet manifest records deployment blocks for every deployed contract", async () => {
+  const manifest = JSON.parse(
+    await readFile(new URL("../../deployments/testnet.json", import.meta.url), "utf8")
+  );
+  assert.deepEqual(manifest.deploymentBlocks, {
+    treasuryPolicy: 10_689_344,
+    strategyAdapterRegistry: 10_689_346,
+    agentAccountCore: 10_689_347,
+    reputationSbt: 10_689_348,
+    discoveryRegistry: 10_689_350,
+    escrowCore: 10_689_352
+  });
 });
 
 test("preflight keeps a healthy manifest primary first", async () => {
@@ -69,7 +102,7 @@ test("preflight does not let a backup mask a primary returning 404", async () =>
         return response({ status: 404 });
       }
     }),
-    /https:\/\/primary\.example: HTTP 404 Not Found/u
+    /https:\/\/primary\.example\/rpc: HTTP 404 Not Found/u
   );
   assert.deepEqual(requested, [PRIMARY]);
 });
@@ -93,7 +126,7 @@ test("404 preflight aborts before read or write transports are constructed", asy
     }),
     (error) => {
       assert.match(error.message, /failed before phase deploy/u);
-      assert.match(error.message, /https:\/\/primary\.example: HTTP 404 Not Found/u);
+      assert.match(error.message, /https:\/\/primary\.example\/rpc: HTTP 404 Not Found/u);
       assert.match(error.message, /Refusing to continue before provider creation, secret access, or transaction broadcast/u);
       return true;
     }

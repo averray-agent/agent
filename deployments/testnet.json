@@ -33,5 +33,13 @@
     "disputeLossSkillPenalty": "35",
     "disputeLossReliabilityPenalty": "60"
   },
+  "deploymentBlocks": {
+    "treasuryPolicy": 10689344,
+    "strategyAdapterRegistry": 10689346,
+    "agentAccountCore": 10689347,
+    "reputationSbt": 10689348,
+    "discoveryRegistry": 10689350,
+    "escrowCore": 10689352
+  },
   "strategies": []
 }

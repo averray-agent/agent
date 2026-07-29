@@ -208,7 +208,7 @@ export function parseArgs(argv) {
     skipManifestUpdate: false,
     skipAuditRerun: false,
     acknowledgeOrphanedBalances: false,
-    orphanScanFromBlock: 0,
+    orphanScanFromBlock: undefined,
     orphanScanChunkSize: DEFAULT_ORPHAN_SCAN_CHUNK_SIZE
   };
   for (let i = 0; i < argv.length; i += 1) {
@@ -225,7 +225,9 @@ export function parseArgs(argv) {
     else if (arg === "--skip-manifest-update") args.skipManifestUpdate = true;
     else if (arg === "--skip-audit-rerun") args.skipAuditRerun = true;
     else if (arg === "--acknowledge-orphaned-balances") args.acknowledgeOrphanedBalances = true;
-    else if (arg === "--orphan-scan-from-block") args.orphanScanFromBlock = Number(argv[++i]);
+    else if (arg === "--from-block" || arg === "--orphan-scan-from-block") {
+      args.orphanScanFromBlock = Number(argv[++i]);
+    }
     else if (arg === "--orphan-scan-chunk-size") args.orphanScanChunkSize = Number(argv[++i]);
     else if (arg === "--help" || arg === "-h") args.help = true;
   }
@@ -253,9 +255,12 @@ function printUsage() {
       "                            AAC reserved/jobStakeLocked balances. This means",
       "                            those balances may become orphaned after Phase 2",
       "                            revokes the old EscrowCore service-operator role.",
-      "  --orphan-scan-from-block <n>",
+      "  --from-block <n>",
       "                            First block to scan for old EscrowCore job events",
-      "                            (default: 0).",
+      "                            (default: deployments/<profile>.json",
+      "                            #deploymentBlocks.escrowCore).",
+      "  --orphan-scan-from-block <n>",
+      "                            Backwards-compatible alias for --from-block.",
       "  --orphan-scan-chunk-size <n>",
       `                            getLogs chunk size (default: ${DEFAULT_ORPHAN_SCAN_CHUNK_SIZE}).`,
       "",
@@ -472,22 +477,113 @@ function getNamedArg(args, name) {
   }
 }
 
-export async function collectOldEscrowJobIds({ provider, escrowAddress, fromBlock = 0, toBlock, chunkSize = DEFAULT_ORPHAN_SCAN_CHUNK_SIZE }) {
+function isTimeoutError(error) {
+  const candidates = [
+    error,
+    error?.cause,
+    error?.info?.error
+  ].filter(Boolean);
+  return candidates.some((candidate) => {
+    const code = String(candidate?.code ?? "").toUpperCase();
+    const message = [
+      candidate?.message,
+      candidate?.shortMessage,
+      candidate?.reason,
+      candidate?.operation
+    ].filter(Boolean).join(" ");
+    return code === "TIMEOUT" || /\btime(?:d)?\s*out\b|\bTIMEOUT\b/iu.test(message);
+  });
+}
+
+function scanFailureMessage({ error, fromBlock, toBlock, latest, chunkIndex, totalChunks }) {
+  const prefix = isTimeoutError(error)
+    ? "Escrow orphan scan timed out"
+    : "Escrow orphan scan failed";
+  const detail = String(error?.shortMessage ?? error?.message ?? error);
+  return (
+    `${prefix} at block ${fromBlock} of ${latest} ` +
+    `(chunk ${chunkIndex}/${totalChunks}, blocks ${fromBlock}-${toBlock}). ` +
+    `${detail}`
+  );
+}
+
+export function resolveOrphanScanFromBlock({ manifest, fromBlock }) {
+  if (fromBlock !== undefined && fromBlock !== null) {
+    assertPositiveInteger("fromBlock", fromBlock);
+    return {
+      fromBlock,
+      source: "--from-block"
+    };
+  }
+  const manifestBlock = Number(manifest?.deploymentBlocks?.escrowCore);
+  if (!Number.isSafeInteger(manifestBlock) || manifestBlock < 1) {
+    throw new Error(
+      "Missing deployments manifest deploymentBlocks.escrowCore. " +
+      "Record the EscrowCore deployment block or pass --from-block explicitly; " +
+      "refusing to scan from genesis."
+    );
+  }
+  return {
+    fromBlock: manifestBlock,
+    source: "deploymentBlocks.escrowCore"
+  };
+}
+
+export async function collectOldEscrowJobIds({
+  provider,
+  escrowAddress,
+  fromBlock,
+  toBlock,
+  chunkSize = DEFAULT_ORPHAN_SCAN_CHUNK_SIZE,
+  onProgress
+}) {
   assertPositiveInteger("fromBlock", fromBlock);
   assertPositiveInteger("chunkSize", chunkSize);
   if (chunkSize === 0) throw new Error("chunkSize must be greater than 0.");
   const latest = toBlock ?? await provider.getBlockNumber();
   assertPositiveInteger("toBlock", latest);
+  if (fromBlock > latest) {
+    throw new Error(`fromBlock ${fromBlock} exceeds current chain head ${latest}.`);
+  }
 
   const iface = new Interface(ESCROW_TAIL_SCAN_ABI);
   const jobIds = new Set();
   let scannedLogCount = 0;
   let unmatchedLogCount = 0;
   const unmatchedTopics = new Map();
+  const totalChunks = Math.ceil((latest - fromBlock + 1) / chunkSize);
+  let chunkIndex = 0;
 
   for (let from = fromBlock; from <= latest; from += chunkSize) {
+    chunkIndex += 1;
     const to = Math.min(latest, from + chunkSize - 1);
-    const logs = await provider.getLogs({ address: escrowAddress, fromBlock: from, toBlock: to });
+    onProgress?.({
+      chunkIndex,
+      totalChunks,
+      fromBlock: from,
+      toBlock: to,
+      latestBlock: latest
+    });
+    let logs;
+    try {
+      logs = await provider.getLogs({
+        address: escrowAddress,
+        fromBlock: from,
+        toBlock: to
+      });
+    } catch (error) {
+      throw new Error(
+        scanFailureMessage({
+          error,
+          fromBlock: from,
+          toBlock: to,
+          latest,
+          chunkIndex,
+          totalChunks
+        }),
+        { cause: error }
+      );
+    }
     scannedLogCount += logs.length;
     for (const log of logs) {
       let parsed;
@@ -520,13 +616,26 @@ export async function collectOldEscrowJobIds({ provider, escrowAddress, fromBloc
   };
 }
 
-export async function findUnsettledOldEscrowBalances({ provider, manifest, fromBlock = 0, chunkSize = DEFAULT_ORPHAN_SCAN_CHUNK_SIZE }) {
+export async function findUnsettledOldEscrowBalances({
+  provider,
+  manifest,
+  fromBlock,
+  chunkSize = DEFAULT_ORPHAN_SCAN_CHUNK_SIZE,
+  onProgress
+}) {
   const oldEscrow = manifest.contracts.escrowCore;
   const accountCore = manifest.contracts.agentAccountCore;
   assertAddress("contracts.escrowCore", oldEscrow);
   assertAddress("contracts.agentAccountCore", accountCore);
+  const scanStart = resolveOrphanScanFromBlock({ manifest, fromBlock });
 
-  const scan = await collectOldEscrowJobIds({ provider, escrowAddress: oldEscrow, fromBlock, chunkSize });
+  const scan = await collectOldEscrowJobIds({
+    provider,
+    escrowAddress: oldEscrow,
+    fromBlock: scanStart.fromBlock,
+    chunkSize,
+    onProgress
+  });
   const escrow = new Contract(oldEscrow, ESCROW_TAIL_SCAN_ABI, provider);
   const accounts = new Contract(accountCore, AGENT_ACCOUNT_READ_ABI, provider);
   const findings = [];
@@ -567,6 +676,7 @@ export async function findUnsettledOldEscrowBalances({ provider, manifest, fromB
     agentAccountCore: accountCore,
     scan: {
       fromBlock: scan.fromBlock,
+      fromBlockSource: scanStart.source,
       toBlock: scan.toBlock,
       chunkSize: scan.chunkSize,
       scannedLogCount: scan.scannedLogCount,
@@ -645,8 +755,16 @@ async function runOrphanedBalancePreflight({ args, provider, manifest }) {
     provider,
     manifest,
     fromBlock: args.orphanScanFromBlock,
-    chunkSize: args.orphanScanChunkSize
+    chunkSize: args.orphanScanChunkSize,
+    onProgress: ({ chunkIndex, totalChunks, fromBlock, toBlock }) => {
+      console.log(
+        `orphan scan:           chunk ${chunkIndex}/${totalChunks}, blocks ${fromBlock}-${toBlock}`
+      );
+    }
   });
+  console.log(
+    `orphan scan anchor:    ${report.scan.fromBlock} (${report.scan.fromBlockSource})`
+  );
   const decision = evaluateOrphanedBalancePreflight(report, {
     acknowledge: args.acknowledgeOrphanedBalances
   });

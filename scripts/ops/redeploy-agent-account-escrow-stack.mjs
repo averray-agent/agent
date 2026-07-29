@@ -116,7 +116,7 @@ export function parseArgs(argv) {
     skipManifestUpdate: false,
     skipAuditRerun: false,
     acknowledgeOrphanedBalances: false,
-    orphanScanFromBlock: 0,
+    orphanScanFromBlock: undefined,
     orphanScanChunkSize: DEFAULT_ORPHAN_SCAN_CHUNK_SIZE
   };
   for (let i = 0; i < argv.length; i += 1) {
@@ -135,7 +135,9 @@ export function parseArgs(argv) {
     else if (arg === "--skip-manifest-update") args.skipManifestUpdate = true;
     else if (arg === "--skip-audit-rerun") args.skipAuditRerun = true;
     else if (arg === "--acknowledge-orphaned-balances") args.acknowledgeOrphanedBalances = true;
-    else if (arg === "--orphan-scan-from-block") args.orphanScanFromBlock = Number(argv[++i]);
+    else if (arg === "--from-block" || arg === "--orphan-scan-from-block") {
+      args.orphanScanFromBlock = Number(argv[++i]);
+    }
     else if (arg === "--orphan-scan-chunk-size") args.orphanScanChunkSize = Number(argv[++i]);
     else if (arg === "--help" || arg === "-h") args.help = true;
   }
@@ -171,7 +173,8 @@ function printUsage() {
     "",
     "Old-stack reserve safety:",
     "  --acknowledge-orphaned-balances",
-    "  --orphan-scan-from-block <n>",
+    "  --from-block <n>                 override manifest deploymentBlocks.escrowCore",
+    "  --orphan-scan-from-block <n>     backwards-compatible alias for --from-block",
     `  --orphan-scan-chunk-size <n>    default ${DEFAULT_ORPHAN_SCAN_CHUNK_SIZE}`
   ].join("\n"));
 }
@@ -384,8 +387,16 @@ async function runOldStackReservePreflight({ args, provider, manifest }) {
     provider,
     manifest,
     fromBlock: args.orphanScanFromBlock,
-    chunkSize: args.orphanScanChunkSize
+    chunkSize: args.orphanScanChunkSize,
+    onProgress: ({ chunkIndex, totalChunks, fromBlock, toBlock }) => {
+      console.log(
+        `orphan scan: chunk ${chunkIndex}/${totalChunks}, blocks ${fromBlock}-${toBlock}`
+      );
+    }
   });
+  console.log(
+    `orphan scan anchor: ${report.scan.fromBlock} (${report.scan.fromBlockSource})`
+  );
   const decision = evaluateOrphanedBalancePreflight(report, {
     acknowledge: args.acknowledgeOrphanedBalances
   });

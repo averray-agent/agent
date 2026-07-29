@@ -19,6 +19,7 @@ test("parseArgs defaults to testnet all dry-run", () => {
   assert.equal(args.profile, "testnet");
   assert.equal(args.phase, "all");
   assert.equal(args.dryRun, true);
+  assert.equal(args.orphanScanFromBlock, undefined);
 });
 
 test("parseArgs reads deploy key and old-balance guard flags", () => {
@@ -27,7 +28,7 @@ test("parseArgs reads deploy key and old-balance guard flags", () => {
     "--commit",
     "--signer-secret-ref", "op://prod-critical/admin-eoa-testnet/private key",
     "--acknowledge-orphaned-balances",
-    "--orphan-scan-from-block", "8800000",
+    "--from-block", "8800000",
     "--orphan-scan-chunk-size", "5000"
   ]);
   assert.equal(args.phase, "deploy");

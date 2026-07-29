@@ -57,8 +57,12 @@ Keep `EXTERNAL_POSTING_MODE=closed` throughout this sequence.
    holds at least 1 DOT on Polkadot Hub before starting. Deployment consumes native gas and
    storage deposits; the first ceremony attempt found this signer at nonce 0 with zero DOT.
 2. Build the audited commit and archive its EscrowCore artifact/hash.
-3. Run the redeploy preflight. Existing v1 balances are expected; inspect and archive the
-   report before acknowledging that they will drain rather than migrate.
+3. Run the redeploy preflight. The orphan scan starts at
+   `deployments/mainnet.json#deploymentBlocks.escrowCore`, prints every
+   `chunk n/N, blocks x-y` before requesting it, and never silently scans from genesis.
+   `--from-block <n>` is the explicit recovery override if the recorded deployment block
+   must be superseded. Existing v1 balances are expected; inspect and archive the report
+   before acknowledging that they will drain rather than migrate.
 4. Deploy v2 with constructor arguments
    `(TreasuryPolicy, AgentAccountCore, ReputationSBT, treasuryAccount)`. The helper refuses
    artifacts without the v2 selectors/four-argument constructor:
