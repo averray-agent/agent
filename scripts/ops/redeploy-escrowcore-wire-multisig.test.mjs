@@ -8,7 +8,10 @@ import {
   buildOnchainPayload,
   resolveProfileSigner,
   assertOwnerRecordAuthority,
-  resolveWs,
+  resolveSubstrateEndpoint,
+  buildPolkadotAppsExtrinsicsUrl,
+  assertSubstrateProfileEncoding,
+  SUBSTRATE_PROFILE_CONFIG,
   verifyEvmCalldataEmbedded,
   UTILITY_BATCH_ALL_CALL_INDEX
 } from "./redeploy-escrowcore-wire-multisig.mjs";
@@ -187,6 +190,25 @@ test("testnet profile resolution preserves the former hardcoded roster and order
       ]
     }
   );
+});
+
+test("signatory sorting normalizes accountId32 case before byte-order comparison", () => {
+  const mixedCaseRecord = {
+    profile: "testnet",
+    status: "verified",
+    threshold: 2,
+    signatories: [
+      { label: "b", address: "B", accountId32: "0xB0" },
+      { label: "a", address: "A", accountId32: "0xa0" },
+      { label: "c", address: "C", accountId32: "0xC0" }
+    ]
+  };
+  const resolved = resolveProfileSigner({
+    ownerRecord: mixedCaseRecord,
+    profile: "testnet",
+    signerLabel: "b"
+  });
+  assert.deepEqual(resolved.otherSignatories, ["A", "C"]);
 });
 
 test("parseArgs reads fresh AgentAccountCore overrides", () => {
@@ -379,22 +401,122 @@ test("parseArgs reads --ws / --no-ws", () => {
   assert.equal(b.noWs, true);
 });
 
-test("resolveWs prefers --ws over env, env over default, --no-ws returns null", () => {
-  const prevEnv = process.env.PASEO_AH_WS;
-  try {
-    process.env.PASEO_AH_WS = "wss://env-endpoint.example";
-    assert.equal(resolveWs({ ws: "wss://cli.example", noWs: false }), "wss://cli.example");
-    assert.equal(resolveWs({ noWs: false }), "wss://env-endpoint.example");
-    assert.equal(resolveWs({ noWs: true }), null);
-    delete process.env.PASEO_AH_WS;
-    assert.equal(resolveWs({ noWs: false }), "wss://sys.ibp.network/asset-hub-paseo");
-  } finally {
-    if (prevEnv === undefined) delete process.env.PASEO_AH_WS;
-    else process.env.PASEO_AH_WS = prevEnv;
-  }
+test("mainnet profile resolves and emits only a Polkadot Asset Hub endpoint", () => {
+  const wsUrl = resolveSubstrateEndpoint({ profile: "mainnet" }, {});
+  assert.equal(wsUrl, "wss://polkadot-asset-hub-rpc.polkadot.io");
+  assert.doesNotMatch(wsUrl, /paseo/iu);
+
+  const appsUrl = buildPolkadotAppsExtrinsicsUrl(wsUrl);
+  assert.equal(
+    appsUrl,
+    "https://polkadot.js.org/apps/?rpc=wss%3A%2F%2Fpolkadot-asset-hub-rpc.polkadot.io#/extrinsics"
+  );
+  assert.doesNotMatch(appsUrl, /paseo/iu);
 });
 
-test("UTILITY_BATCH_ALL_CALL_INDEX is the Asset Hub Paseo runtime prefix", () => {
+test("Substrate endpoint resolution is profile-bound with no cross-profile fallback", () => {
+  assert.equal(
+    resolveSubstrateEndpoint(
+      { profile: "mainnet" },
+      {
+        POLKADOT_AH_WS: "wss://mainnet.example",
+        PASEO_AH_WS: "wss://must-not-be-used.example/paseo"
+      }
+    ),
+    "wss://mainnet.example"
+  );
+  assert.equal(
+    resolveSubstrateEndpoint(
+      { profile: "testnet" },
+      {
+        POLKADOT_AH_WS: "wss://must-not-be-used.example/mainnet",
+        PASEO_AH_WS: "wss://testnet.example"
+      }
+    ),
+    "wss://testnet.example"
+  );
+  assert.throws(
+    () => resolveSubstrateEndpoint({ profile: "staging" }, {}),
+    /No Substrate endpoint is defined for profile "staging"/u
+  );
+  assert.equal(
+    resolveSubstrateEndpoint(
+      { profile: "mainnet", noWs: true },
+      { POLKADOT_AH_WS: "wss://unverified.example" }
+    ),
+    "wss://polkadot-asset-hub-rpc.polkadot.io"
+  );
+  assert.throws(
+    () =>
+      resolveSubstrateEndpoint(
+        { profile: "mainnet", noWs: true, ws: "wss://unverified.example" },
+        {}
+      ),
+    /--ws cannot be combined with --no-ws/u
+  );
+});
+
+function fakeSubstrateApi({
+  profile,
+  chainName,
+  genesisHash,
+  reviveIndex
+}) {
+  const config = SUBSTRATE_PROFILE_CONFIG[profile];
+  return {
+    genesisHash: {
+      toHex: () => genesisHash ?? config.genesisHash
+    },
+    rpc: {
+      system: {
+        chain: async () => ({
+          toString: () => chainName ?? config.chainName
+        })
+      }
+    },
+    runtimeMetadata: {
+      asLatest: {
+        pallets: [
+          {
+            name: { toString: () => "Revive" },
+            index: { toNumber: () => reviveIndex ?? config.revivePalletIndex }
+          }
+        ]
+      }
+    }
+  };
+}
+
+test("Paseo-encoded revive calls are rejected for the mainnet profile", async () => {
+  await assert.rejects(
+    () =>
+      assertSubstrateProfileEncoding({
+        api: fakeSubstrateApi({ profile: "mainnet" }),
+        profile: "mainnet",
+        reviveCallHexes: ["0x64deadbeef"]
+      }),
+    /encoded revive\.call uses pallet index 100 \(0x64\).*mainnet metadata uses 90 \(0x5a\)/u
+  );
+});
+
+test("Substrate profile guard rejects a Paseo connection for mainnet", async () => {
+  await assert.rejects(
+    () =>
+      assertSubstrateProfileEncoding({
+        api: fakeSubstrateApi({
+          profile: "mainnet",
+          chainName: "Paseo Asset Hub",
+          genesisHash: SUBSTRATE_PROFILE_CONFIG.testnet.genesisHash,
+          reviveIndex: 100
+        }),
+        profile: "mainnet",
+        reviveCallHexes: ["0x64deadbeef"]
+      }),
+    /connected genesis .* does not match mainnet Polkadot Asset Hub/u
+  );
+});
+
+test("UTILITY_BATCH_ALL_CALL_INDEX is the current Asset Hub runtime prefix", () => {
   // pallet_utility (40 = 0x28) + batchAll call (2 = 0x02). If a runtime
   // upgrade reshuffles pallet indexes, this constant — and the on-chain
   // hex emitter that checks against it — needs to be updated.
