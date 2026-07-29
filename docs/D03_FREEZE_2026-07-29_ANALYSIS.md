@@ -1,9 +1,36 @@
-# D-03 contract-surface freeze, 2026-07-29 — analysis and override record
+# D-03 contract-surface freeze, 2026-07-29 — historical analysis and override record
 
-> **The deploy lane is not broken. The D-03 gate is holding it, correctly.**
+> **Historical incident record:** the path-based gate held the lane as it was
+> implemented, but later review showed that its matcher was semantically
+> over-broad. The two-tier runtime-provenance gate supersedes that matcher.
+>
 > This document is the compatibility rationale the override asks an operator to
 > record. It presents evidence; it does **not** grant the override. Sign-off is
 > the operator's, with chain/settlement review.
+
+## Follow-on resolution
+
+The old path list no longer decides whether to persist a freeze:
+
+- Tier 1 can write the sticky marker only when `contracts/**` changed, the
+  selected deployment manifest did not change in the evaluated range, and a
+  currently deployed contract's candidate runtime differs after masking the
+  compiler-declared immutable slots.
+- Tier 2 runs the live `check-contract-provenance.mjs` guard on every enabled
+  deploy. A real chain/manifest hash mismatch fails without writing a marker;
+  unreadable manifests and unreachable RPCs fail closed.
+- Known-unshipped runtime changes are exact masked hashes with explicit reasons
+  in the deployment manifest. The EscrowCore v2 `#850` runtime is the first
+  pinned entry; later Escrow changes do not inherit that exception.
+
+Both selectable deployment profiles carry provenance. Testnet's six live
+runtimes independently reproduce from the same `ccaa111` contract tree as
+mainnet, with zero differences outside compiler-declared immutable slots. This
+keeps the one-operation testnet rollback path protected rather than making it
+fail solely because its manifest lacks hashes.
+
+The original matcher and incident details below remain for audit history. They
+are not the current deploy decision rule.
 
 ## State
 

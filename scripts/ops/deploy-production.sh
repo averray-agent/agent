@@ -317,8 +317,9 @@ deploy_range_changed_files() {
 # durable per-component pointers still deploy the flagged change. Persist the
 # refused baseline per contract-compat profile (scoped like the per-network
 # indexer schema state) so every later run re-evaluates the whole undeployed
-# range until the drift pairs with the manifest, is reverted, or an operator
-# dispatch clears it.
+# range until the compiled runtime matches deployed provenance, the manifest
+# pairs with it, the source change is reverted, or an operator dispatch clears
+# it. Tier 2 live chain verification never writes this marker.
 contract_freeze_marker_file() {
   printf '%s/contract-surface.frozen-at.%s\n' "$DEPLOY_STATE_DIR" "$DEPLOY_CONTRACT_COMPAT_PROFILE"
 }
@@ -375,6 +376,89 @@ contract_surface_drift_override_set() {
   esac
 }
 
+verify_live_contract_provenance() {
+  local checker="$APP_ROOT/scripts/ops/check-contract-provenance.mjs"
+  if [[ ! -r "$checker" ]]; then
+    echo "D-03 Tier 2: contract provenance checker is unreadable at $checker; refusing production deploy." >&2
+    return 1
+  fi
+
+  local output=""
+  local status=0
+  set +e
+  output=$(node "$checker" --profile "$DEPLOY_CONTRACT_COMPAT_PROFILE" 2>&1)
+  status=$?
+  set -e
+
+  if [[ "$status" == "0" ]]; then
+    printf '%s\n' "$output"
+    echo "D-03 Tier 2: live chain runtime matches deployments/${DEPLOY_CONTRACT_COMPAT_PROFILE}.json provenance."
+    return 0
+  fi
+
+  if [[ "$status" == "1" ]]; then
+    if contract_surface_drift_override_set; then
+      {
+        echo "::warning::D-03 Tier 2 override set; live chain runtime does not match the deployment manifest."
+        printf '%s\n' "$output"
+      } >&2
+      return 0
+    fi
+    {
+      echo "D-03 Tier 2: live chain runtime does not match deployments/${DEPLOY_CONTRACT_COMPAT_PROFILE}.json provenance; refusing production deploy."
+      printf '%s\n' "$output"
+    } >&2
+    return 1
+  fi
+
+  # Exit 2 is the provenance checker's usage/config/RPC class. Unknown
+  # statuses are treated the same way. An override may accept known semantic
+  # drift, but it must never turn an unreadable manifest or unreachable RPC
+  # into a pass.
+  {
+    echo "D-03 Tier 2: could not verify live contract provenance (checker exit $status); refusing production deploy."
+    printf '%s\n' "$output"
+  } >&2
+  return 1
+}
+
+check_compiled_contract_provenance() {
+  local source_checker="$APP_ROOT/scripts/ops/check-contract-source-drift.mjs"
+  if [[ ! -r "$source_checker" ]]; then
+    echo "D-03 Tier 1: compiled-runtime checker is unreadable at $source_checker; refusing production deploy." >&2
+    return 2
+  fi
+  require_command forge
+
+  local build_root
+  build_root=$(mktemp -d "${TMPDIR:-/tmp}/averray-contract-source.XXXXXX")
+  local artifacts="$build_root/out"
+  local cache="$build_root/cache"
+
+  if ! forge build \
+    --root "$APP_ROOT" \
+    --out "$artifacts" \
+    --cache-path "$cache" \
+    --skip test; then
+    rm -rf -- "$build_root"
+    echo "D-03 Tier 1: candidate contract build failed; refusing production deploy without writing a sticky drift marker." >&2
+    return 2
+  fi
+
+  local output=""
+  local status=0
+  set +e
+  output=$(node "$source_checker" \
+    --profile "$DEPLOY_CONTRACT_COMPAT_PROFILE" \
+    --artifacts "$artifacts" 2>&1)
+  status=$?
+  set -e
+  rm -rf -- "$build_root"
+
+  printf '%s\n' "$output"
+  return "$status"
+}
+
 enforce_contract_compat_freeze() {
   case "$DEPLOY_CONTRACT_COMPAT_FREEZE" in
     1|true|yes) ;;
@@ -420,22 +504,24 @@ enforce_contract_compat_freeze() {
     fi
   fi
 
-  if [[ "$baseline" == "$NEW_SHA" ]]; then
-    if [[ "$sticky" == "1" ]]; then
-      clear_contract_freeze_marker "checkout is back at the frozen baseline; no undeployed contract-surface drift remains"
-    fi
-    return 0
+  # Tier 2 is deliberately unconditional. Besides verifying every path that
+  # the old heuristic matched, this catches out-of-band chain drift on a
+  # same-SHA re-dispatch. A real hash mismatch can use the explicit drift
+  # override; config, manifest, and RPC failures always fail closed.
+  if ! verify_live_contract_provenance; then
+    exit 1
   fi
 
   local changed
   changed=$(deploy_range_changed_files "$baseline")
 
-  local surface_changes
-  surface_changes=$(printf '%s\n' "$changed" | grep -E '^(contracts/|mcp-server/src/blockchain/|scripts/ops/redeploy-(agent-account-escrow-stack|escrowcore|escrowcore-wire-multisig)\.mjs|scripts/verify_deployment\.sh)' || true)
-  if [[ -z "$surface_changes" ]]; then
+  local contract_changes
+  contract_changes=$(printf '%s\n' "$changed" | grep -E '^contracts/' || true)
+  if [[ -z "$contract_changes" ]]; then
     if [[ "$sticky" == "1" ]]; then
-      clear_contract_freeze_marker "no contract-surface drift remains in $baseline -> $NEW_SHA; the flagged changes were reverted"
+      clear_contract_freeze_marker "no contract source changes remain in $baseline -> $NEW_SHA; the old marker was heuristic-only or the source drift was reverted"
     fi
+    echo "D-03 Tier 1: no contract source changes; no sticky freeze."
     return 0
   fi
 
@@ -443,36 +529,58 @@ enforce_contract_compat_freeze() {
     if [[ "$sticky" == "1" ]]; then
       clear_contract_freeze_marker "contract-surface changes are now paired with $manifest_path in $baseline -> $NEW_SHA"
     fi
-    echo "D-03 contract compatibility freeze: contract-surface changes are paired with $manifest_path; allowing deploy."
+    echo "D-03 Tier 1: contract source changes are paired with $manifest_path; no sticky freeze."
     return 0
   fi
 
+  local source_status=0
+  if check_compiled_contract_provenance; then
+    source_status=0
+  else
+    source_status=$?
+  fi
+
+  if [[ "$source_status" == "0" ]]; then
+    if [[ "$sticky" == "1" ]]; then
+      clear_contract_freeze_marker "compiled runtimes match deployed provenance or an exact known-unshipped manifest entry"
+    fi
+    echo "D-03 Tier 1: compiled runtimes match deployed provenance or an exact known-unshipped manifest entry; no sticky freeze."
+    return 0
+  fi
+
+  if [[ "$source_status" != "1" ]]; then
+    # Build/config/checker failures are uncertainty, not proof of semantic
+    # drift. Fail closed, but do not create a sticky marker whose stated cause
+    # would be false.
+    exit 1
+  fi
+
   if contract_surface_drift_override_set; then
-    echo "::warning::D-03 contract compatibility freeze override set; deploying contract-surface/backend changes without a $manifest_path update."
-    printf 'Changed contract-surface files:\n%s\n' "$surface_changes"
+    echo "::warning::D-03 contract compatibility freeze override set; deploying changed contract runtime without a $manifest_path update."
+    printf 'Changed contract source files:\n%s\n' "$contract_changes"
     if [[ "$sticky" == "1" ]]; then
       clear_contract_freeze_marker "explicit DEPLOY_ALLOW_CONTRACT_SURFACE_DRIFT dispatch accepted the drift"
     fi
     return 0
   fi
 
-  write_contract_freeze_marker "$baseline" "$NEW_SHA" "$manifest_path" "$surface_changes"
+  write_contract_freeze_marker "$baseline" "$NEW_SHA" "$manifest_path" "$contract_changes"
 
   {
     echo "D-03 contract compatibility freeze: refusing production deploy."
     echo
-    echo "This deploy range changes contract/settlement surface files, but $manifest_path did not change."
+    echo "This deploy range changes contract source, its immutable-masked compiled runtime differs from deployed provenance, and $manifest_path did not change."
     echo "Evaluated range: $baseline -> $NEW_SHA"
     echo "A normal production deploy updates backend/indexer/app containers; it does not deploy or rewire smart contracts."
     echo "Deploying this range can put backend ABI/settlement expectations ahead of the live contracts and red the Hosted Worker Canary."
     echo
-    echo "Changed contract-surface files:"
+    echo "Changed contract source files:"
     while IFS= read -r file; do
       [[ -n "$file" ]] && printf '  %s\n' "$file"
-    done <<< "$surface_changes"
+    done <<< "$contract_changes"
     echo
     echo "This refusal is persisted at $marker_file: the checkout advances past refused deploys, so later runs keep evaluating from baseline $baseline until the freeze clears."
-    echo "To proceed intentionally, first deploy/rewire contracts and commit the updated $manifest_path, or run a manual dispatch with DEPLOY_ALLOW_CONTRACT_SURFACE_DRIFT=1 after an operator records the compatibility rationale."
+    echo "To proceed intentionally, first deploy/rewire contracts and commit the updated $manifest_path, add an exact known-unshipped runtime hash plus reason to the manifest, or run a manual dispatch with DEPLOY_ALLOW_CONTRACT_SURFACE_DRIFT=1 after an operator records the compatibility rationale."
   } >&2
   exit 1
 }
