@@ -56,6 +56,11 @@ Keep `EXTERNAL_POSTING_MODE=closed` throughout this sequence.
 1. Verify the deploy signer `0x9Ab8531FBb0948C542a31298FD61335f30064239`
    holds at least 1 DOT on Polkadot Hub before starting. Deployment consumes native gas and
    storage deposits; the first ceremony attempt found this signer at nonce 0 with zero DOT.
+   This is the persistent `admin-eoa-mainnet`, selected explicitly for the v2 CREATE.
+   `deployments/mainnet.json#deployer` is the retired one-shot F4 deployer that created v1;
+   it is historical evidence, not authorization. A fresh burnable key was considered and
+   rejected because EscrowCore is not Ownable: every privileged path gates on
+   `TreasuryPolicy.owner()` (the 2-of-3 multisig), so the CREATE sender retains no authority.
 2. Build the audited commit and archive its EscrowCore artifact/hash.
 3. Run the redeploy preflight. The orphan scan starts at
    `deployments/mainnet.json#deploymentBlocks.escrowCore`, prints every
@@ -71,6 +76,7 @@ Keep `EXTERNAL_POSTING_MODE=closed` throughout this sequence.
    node scripts/ops/redeploy-escrowcore.mjs \
      --profile mainnet \
      --phase deploy \
+     --expected-deployer 0x9Ab8531FBb0948C542a31298FD61335f30064239 \
      --acknowledge-orphaned-balances \
      --commit \
      --signer-secret-ref 'op://mainnet-critical/admin-eoa-mainnet/credential'
@@ -106,8 +112,11 @@ Keep `EXTERNAL_POSTING_MODE=closed` throughout this sequence.
    Finalization fails unless constructor bindings match, `protocolFeeBps == 0`, the cap is
    1000, the treasury destination matches the manifest, and both v1 and v2 retain the roles
    required for the drain. It writes the v2 address, deploy block, zero fee, and
-   `contracts.legacyEscrowCore` to `deployments/mainnet.json`, then projects the current and
-   drain addresses into backend/indexer env templates. Commit that manifest cutover; do not
+   `contracts.legacyEscrowCore` to `deployments/mainnet.json`. It preserves the v1
+   `deployer` and `deploymentBlocks.escrowCore` records, and records the receipt-backed v2
+   values separately as `deployers.escrowCoreV2` and
+   `deploymentBlocks.escrowCoreV2`. It then projects the current and drain addresses into
+   backend/indexer env templates. Commit that manifest cutover; do not
    use a runtime address override.
 
 7. Deploy backend and indexer from the manifest cutover. New catalog jobs are created only on
