@@ -15,8 +15,8 @@
  *
  * Flow
  * ----
- *   1. deploy    EVM CREATE of a fresh EscrowCore, signed by the deployer
- *                EOA (deployments.deployer). One transaction.
+ *   1. deploy    EVM CREATE of a fresh EscrowCore, signed by the explicit
+ *                --expected-deployer EOA. One transaction.
  *
  *   2. wire      AgentAccountCore.setEscrowOperator(new, true) plus
  *                TreasuryPolicy settlementBroker/reputationWriter roles.
@@ -48,8 +48,9 @@
  *     - Authenticated session (eval $(op signin)) before running
  *
  *   The script derives the address from the loaded key and prints ONLY the
- *   derived address (never the key). If it doesn't match
- *   deployments.<profile>.json#deployer, broadcast is aborted.
+ *   derived address (never the key). If it doesn't match the required
+ *   --expected-deployer, broadcast is aborted. The top-level manifest
+ *   `deployer` remains historical evidence and is never authorization.
  *
  *   PRIVATE_KEY env var is supported as a CI-only fallback when no
  *   --signer-secret-ref is given; it is not recommended for interactive use.
@@ -61,6 +62,7 @@
  *
  *   # Step 1 — deploy (EVM, deployer key from 1Password):
  *   node scripts/ops/redeploy-escrowcore.mjs --phase deploy --commit \
+ *     --expected-deployer 0xEXPECTED \
  *     --signer-secret-ref 'op://prod-critical/admin-eoa-testnet/private key'
  *
  *   # Step 2 — wire (multisig recipe; see separate script).
@@ -203,6 +205,7 @@ export function parseArgs(argv) {
     newEscrow: undefined,
     deployTx: undefined,
     multisigExecTx: undefined,
+    expectedDeployer: undefined,
     signerSecretRef: undefined,
     skipRevoke: false,
     skipManifestUpdate: false,
@@ -220,6 +223,7 @@ export function parseArgs(argv) {
     else if (arg === "--new-escrow") args.newEscrow = argv[++i];
     else if (arg === "--deploy-tx") args.deployTx = argv[++i];
     else if (arg === "--multisig-exec-tx") args.multisigExecTx = argv[++i];
+    else if (arg === "--expected-deployer") args.expectedDeployer = argv[++i];
     else if (arg === "--signer-secret-ref") args.signerSecretRef = argv[++i];
     else if (arg === "--skip-revoke") args.skipRevoke = true;
     else if (arg === "--skip-manifest-update") args.skipManifestUpdate = true;
@@ -265,6 +269,10 @@ function printUsage() {
       `                            getLogs chunk size (default: ${DEFAULT_ORPHAN_SCAN_CHUNK_SIZE}).`,
       "",
       "Phase 1 (deploy) options:",
+      "  --expected-deployer <addr>",
+      "                            EOA used for nonce/address prediction and signer",
+      "                            verification. Required with --commit; pass it in",
+      "                            dry-runs for an actionable CREATE prediction.",
       "  --signer-secret-ref <ref> 1Password secret reference, e.g.",
       "                            'op://prod-critical/admin-eoa-testnet/private key'.",
       "                            Script spawns `op read` itself; secret never enters the shell.",
@@ -365,7 +373,32 @@ function assertTxHash(label, value) {
   }
 }
 
-async function planDeploy({ provider, manifest, artifact }) {
+export function resolveDeployPredictionDeployer({
+  expectedDeployer,
+  historicalDeployer,
+  commit
+}) {
+  if (expectedDeployer !== undefined && expectedDeployer !== null && expectedDeployer !== "") {
+    assertAddress("--expected-deployer", expectedDeployer);
+    return {
+      address: expectedDeployer,
+      source: "--expected-deployer"
+    };
+  }
+  if (commit) {
+    throw new Error(
+      "--expected-deployer is required for --commit. " +
+      "manifest.deployer is historical deployment evidence, not authorization."
+    );
+  }
+  assertAddress("historical manifest.deployer", historicalDeployer);
+  return {
+    address: historicalDeployer,
+    source: "manifest.deployer (historical dry-run fallback)"
+  };
+}
+
+export async function planDeploy({ provider, manifest, artifact, deployer }) {
   const treasury = manifest.contracts.treasuryPolicy;
   const accounts = manifest.contracts.agentAccountCore;
   const reputation = manifest.contracts.reputationSbt;
@@ -379,9 +412,8 @@ async function planDeploy({ provider, manifest, artifact }) {
   const factory = new ContractFactory(artifact.abi, artifact.bytecode, undefined);
   const deployTx = await factory.getDeployTransaction(...constructorArgs);
 
-  const deployer = manifest.deployer;
-  assertAddress("deployments.deployer", deployer);
-  const nonce = await provider.getTransactionCount(deployer);
+  assertAddress("CREATE prediction deployer", deployer);
+  const nonce = await provider.getTransactionCount(deployer, "pending");
   const predicted = getCreateAddress({ from: deployer, nonce });
 
   return {
@@ -393,6 +425,40 @@ async function planDeploy({ provider, manifest, artifact }) {
     creationDataPrefix: deployTx.data.slice(0, 22) + "…",
     deployTx
   };
+}
+
+export async function verifyExpectedDeployerAndBroadcast({
+  expectedDeployer,
+  derivedSigner,
+  predictionDeployer,
+  predictedAddress,
+  broadcast
+}) {
+  assertAddress("--expected-deployer", expectedDeployer);
+  assertAddress("derived signer", derivedSigner);
+  assertAddress("CREATE prediction deployer", predictionDeployer);
+  assertAddress("predicted CREATE address", predictedAddress);
+  if (derivedSigner.toLowerCase() !== expectedDeployer.toLowerCase()) {
+    throw new Error(
+      `The derived signer ${derivedSigner} does not match --expected-deployer ${expectedDeployer}; ` +
+      "refusing to broadcast."
+    );
+  }
+  if (predictionDeployer.toLowerCase() !== expectedDeployer.toLowerCase()) {
+    throw new Error(
+      `CREATE prediction used ${predictionDeployer}, not --expected-deployer ${expectedDeployer}; ` +
+      "refusing to broadcast."
+    );
+  }
+
+  const result = await broadcast();
+  assertAddress("deployed contract address", result?.newAddress);
+  if (result.newAddress.toLowerCase() !== predictedAddress.toLowerCase()) {
+    throw new Error(
+      `Deployment landed at ${result.newAddress}, not reviewed CREATE prediction ${predictedAddress}.`
+    );
+  }
+  return result;
 }
 
 async function readWiringState({ provider, manifest }) {
@@ -515,17 +581,20 @@ export function resolveOrphanScanFromBlock({ manifest, fromBlock }) {
       source: "--from-block"
     };
   }
-  const manifestBlock = Number(manifest?.deploymentBlocks?.escrowCore);
+  const manifestBlockKey = manifest?.deploymentBlocks?.escrowCoreV2 !== undefined
+    ? "escrowCoreV2"
+    : "escrowCore";
+  const manifestBlock = Number(manifest?.deploymentBlocks?.[manifestBlockKey]);
   if (!Number.isSafeInteger(manifestBlock) || manifestBlock < 1) {
     throw new Error(
-      "Missing deployments manifest deploymentBlocks.escrowCore. " +
+      "Missing deployments manifest deploymentBlocks.escrowCore or escrowCoreV2. " +
       "Record the EscrowCore deployment block or pass --from-block explicitly; " +
       "refusing to scan from genesis."
     );
   }
   return {
     fromBlock: manifestBlock,
-    source: "deploymentBlocks.escrowCore"
+    source: `deploymentBlocks.${manifestBlockKey}`
   };
 }
 
@@ -789,7 +858,9 @@ function runAudit(profile) {
 async function commitDeploy({ wallet, plan, artifact, writeBroadcaster }) {
   const factory = new ContractFactory(artifact.abi, artifact.bytecode, wallet);
   console.log(`\nSending deploy tx…`);
-  const contract = await factory.deploy(...plan.constructorArgs);
+  const contract = await factory.deploy(...plan.constructorArgs, {
+    nonce: plan.nonce
+  });
   const tx = contract.deploymentTransaction();
   console.log(`  tx:        ${tx?.hash}`);
   await contract.waitForDeployment();
@@ -806,14 +877,14 @@ async function commitDeploy({ wallet, plan, artifact, writeBroadcaster }) {
 
 function printDeployPlan(plan) {
   console.log(`\n## Phase 1: deploy (EVM CREATE, deployer EOA)`);
-  console.log(`  signer:        deployer ${plan.deployer}`);
+  console.log(`  CREATE sender: ${plan.deployer}`);
   console.log(`  signer nonce:  ${plan.nonce}`);
   console.log(`  to:            (CREATE — no recipient)`);
   console.log(`  data length:   ${plan.creationDataLength} bytes (bytecode + abi.encode(constructor args))`);
   console.log(`  data prefix:   ${plan.creationDataPrefix}`);
   console.log(`  constructor:   EscrowCore(${plan.constructorArgs.join(", ")})`);
   console.log(`  predicted addr: ${plan.predicted}`);
-  console.log(`  (prediction assumes no other tx from the deployer lands between dry-run and commit.)`);
+  console.log(`  (commit pins this nonce; a conflicting pending tx fails instead of changing the address.)`);
 }
 
 function printWireOverview({ manifest, wiringState, predictedNewEscrow }) {
@@ -860,16 +931,18 @@ function printFinalizeOverview() {
   console.log(`  deployments/<profile>.json and runs audit-launch-readiness.`);
 }
 
-async function updateManifest({
-  deploymentsPath,
+export function applyEscrowRedeployManifest({
   manifest,
   oldEscrow,
   newEscrow,
+  deployer,
   deployBlock,
   deployTx,
   multisigExecTx,
-  skipRevoke
+  skipRevoke,
+  redeployedAt = new Date().toISOString()
 }) {
+  assertAddress("v2 deployer", deployer);
   manifest.contracts.escrowCore = newEscrow;
   if (skipRevoke) {
     manifest.contracts.legacyEscrowCore = oldEscrow;
@@ -880,16 +953,44 @@ async function updateManifest({
     ...(manifest.parameters ?? {}),
     protocolFeeBps: "0"
   };
+  manifest.deployers = {
+    ...(manifest.deployers ?? {}),
+    escrowCoreV2: deployer
+  };
   manifest.deploymentBlocks = {
     ...(manifest.deploymentBlocks ?? {}),
-    escrowCore: deployBlock
+    escrowCoreV2: deployBlock
   };
-  manifest.escrowRedeployedAt = new Date().toISOString();
+  manifest.escrowRedeployedAt = redeployedAt;
   manifest.escrowRedeployTxHashes = {
     deploy: deployTx,
     multisigExec: multisigExecTx,
     revokeOld: skipRevoke ? null : "batched-in-multisig-exec"
   };
+  return manifest;
+}
+
+async function updateManifest({
+  deploymentsPath,
+  manifest,
+  oldEscrow,
+  newEscrow,
+  deployer,
+  deployBlock,
+  deployTx,
+  multisigExecTx,
+  skipRevoke
+}) {
+  applyEscrowRedeployManifest({
+    manifest,
+    oldEscrow,
+    newEscrow,
+    deployer,
+    deployBlock,
+    deployTx,
+    multisigExecTx,
+    skipRevoke
+  });
   const text = JSON.stringify(manifest, null, 2) + "\n";
   await writeFile(deploymentsPath, text, "utf8");
 }
@@ -1034,6 +1135,8 @@ async function runFinalize({ args, deploymentsPath, manifest, provider, wiringSt
   if (!deployReceipt || Number(deployReceipt.status) !== 1) {
     throw new Error(`Deploy transaction ${args.deployTx} is missing or unsuccessful.`);
   }
+  assertAddress("deploy transaction sender", deployReceipt.from);
+  const actualV2Deployer = deployReceipt.from;
   if (deployReceipt.contractAddress?.toLowerCase() !== newEscrow.toLowerCase()) {
     throw new Error(`Deploy transaction created ${deployReceipt.contractAddress}, not ${newEscrow}.`);
   }
@@ -1062,12 +1165,15 @@ async function runFinalize({ args, deploymentsPath, manifest, provider, wiringSt
       manifest,
       oldEscrow,
       newEscrow,
+      deployer: actualV2Deployer,
       deployBlock: Number(deployReceipt.blockNumber),
       deployTx: args.deployTx,
       multisigExecTx: args.multisigExecTx,
       skipRevoke: args.skipRevoke
     });
     console.log(`\n  Wrote ${deploymentsPath}#contracts.escrowCore = ${newEscrow}`);
+    console.log(`  Recorded deployers.escrowCoreV2 = ${actualV2Deployer}`);
+    console.log(`  Recorded deploymentBlocks.escrowCoreV2 = ${Number(deployReceipt.blockNumber)}`);
 
     // Phase 2 PR 2.6 made deploy/backend.env.template the single source of
     // truth at deploy time; check-template-matches-manifest.mjs is the CI
@@ -1111,6 +1217,7 @@ async function runFinalize({ args, deploymentsPath, manifest, provider, wiringSt
     profile: args.profile,
     newEscrow,
     oldEscrow,
+    deployer: actualV2Deployer,
     txHashes: {
       deploy: args.deployTx,
       multisigExec: args.multisigExecTx,
@@ -1149,6 +1256,13 @@ async function main() {
   }
 
   const { path: deploymentsPath, manifest } = await loadDeployments(args.profile);
+  const deployPrediction = args.phase === "finalize"
+    ? null
+    : resolveDeployPredictionDeployer({
+        expectedDeployer: args.expectedDeployer,
+        historicalDeployer: manifest.deployer,
+        commit: args.phase === "deploy" && !args.dryRun
+      });
   const rpc = await createCeremonyRpcContext({
     manifest,
     phase: args.phase,
@@ -1167,7 +1281,7 @@ async function main() {
   console.log(`old settlement broker? ${wiringState.oldIsSettlementBroker}`);
   console.log(`old reputation writer? ${wiringState.oldIsReputationWriter}`);
   console.log(`old AAC escrow op?:    ${wiringState.oldIsEscrowOperator}`);
-  console.log(`deployer (manifest):   ${manifest.deployer}`);
+  console.log(`historical v1 deployer: ${manifest.deployer}`);
   console.log(`phase:                 ${args.phase}`);
   console.log(`mode:                  ${args.dryRun ? "dry-run" : "commit"}`);
 
@@ -1185,7 +1299,18 @@ async function main() {
     assertArtifactHasBrokeredSelectors(artifact);
     console.log(`build runtime size:    ${(artifact.bytecode.length - 2) / 2} bytes creation`);
     console.log(`artifact brokered selectors: ${summarizeBrokeredSelectors(artifact)}`);
-    const plan = await planDeploy({ provider, manifest, artifact });
+    if (deployPrediction.source !== "--expected-deployer") {
+      console.warn(
+        "warning: dry-run prediction uses historical manifest.deployer; " +
+        "pass --expected-deployer for the actionable ceremony address."
+      );
+    }
+    const plan = await planDeploy({
+      provider,
+      manifest,
+      artifact,
+      deployer: deployPrediction.address
+    });
     printDeployPlan(plan);
 
     if (!args.dryRun) {
@@ -1199,18 +1324,22 @@ async function main() {
         const walletAddress = await wallet.getAddress();
         console.log(`\n## Signer verification`);
         console.log(`  derived address: ${walletAddress}`);
-        console.log(`  manifest.deployer: ${plan.deployer}`);
-        if (walletAddress.toLowerCase() !== plan.deployer.toLowerCase()) {
-          console.error(`\nSigner ${walletAddress} does not match manifest.deployer ${plan.deployer}. Aborting.`);
-          process.exitCode = 2;
-          return;
-        }
-        console.log(`  ✓ match — broadcasting`);
-        const result = await commitDeploy({
-          wallet,
-          plan,
-          artifact,
-          writeBroadcaster
+        console.log(`  expected deployer: ${args.expectedDeployer}`);
+        console.log(`  prediction sender: ${plan.deployer}`);
+        const result = await verifyExpectedDeployerAndBroadcast({
+          expectedDeployer: args.expectedDeployer,
+          derivedSigner: walletAddress,
+          predictionDeployer: plan.deployer,
+          predictedAddress: plan.predicted,
+          broadcast: async () => {
+            console.log(`  ✓ signer and CREATE prediction match — broadcasting`);
+            return commitDeploy({
+              wallet,
+              plan,
+              artifact,
+              writeBroadcaster
+            });
+          }
         });
         console.log("");
         console.log(JSON.stringify({
@@ -1232,7 +1361,9 @@ async function main() {
         await writeBroadcaster.destroy();
       }
     }
-    console.log("\nDry-run only. Re-run with --commit + deployer key to send.");
+    console.log(
+      "\nDry-run only. Re-run with --commit + --expected-deployer + deployer key to send."
+    );
     return;
   }
 
@@ -1248,7 +1379,18 @@ async function main() {
     assertArtifactHasBrokeredSelectors(artifact);
     console.log(`build runtime size:    ${(artifact.bytecode.length - 2) / 2} bytes creation`);
     console.log(`artifact brokered selectors: ${summarizeBrokeredSelectors(artifact)}`);
-    const plan = await planDeploy({ provider, manifest, artifact });
+    if (deployPrediction.source !== "--expected-deployer") {
+      console.warn(
+        "warning: dry-run prediction uses historical manifest.deployer; " +
+        "pass --expected-deployer for the actionable ceremony address."
+      );
+    }
+    const plan = await planDeploy({
+      provider,
+      manifest,
+      artifact,
+      deployer: deployPrediction.address
+    });
     printDeployPlan(plan);
     printWireOverview({ manifest, wiringState, predictedNewEscrow: plan.predicted });
     printFinalizeOverview();

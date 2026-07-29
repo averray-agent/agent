@@ -1,10 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { Interface } from "ethers";
+import { getCreateAddress, Interface } from "ethers";
 import {
   parseArgs,
   loadKeyFromOp,
+  planDeploy,
+  resolveDeployPredictionDeployer,
+  verifyExpectedDeployerAndBroadcast,
+  applyEscrowRedeployManifest,
   rewriteEscrowAddressInTemplate,
   collectOldEscrowJobIds,
   resolveOrphanScanFromBlock,
@@ -71,9 +75,141 @@ test("parseArgs accepts --commit + --phase deploy", () => {
 test("parseArgs reads --signer-secret-ref including embedded spaces", () => {
   const args = parseArgs([
     "--phase", "deploy", "--commit",
+    "--expected-deployer", "0x9Ab8531FBb0948C542a31298FD61335f30064239",
     "--signer-secret-ref", "op://prod-critical/admin-eoa-testnet/private key"
   ]);
+  assert.equal(args.expectedDeployer, "0x9Ab8531FBb0948C542a31298FD61335f30064239");
   assert.equal(args.signerSecretRef, "op://prod-critical/admin-eoa-testnet/private key");
+});
+
+test("commit requires an explicit expected deployer instead of authorizing from manifest history", () => {
+  assert.throws(
+    () => resolveDeployPredictionDeployer({
+      expectedDeployer: undefined,
+      historicalDeployer: "0x08406B2bCE5592A534141767ffe4e5B9DC6c22D1",
+      commit: true
+    }),
+    /--expected-deployer is required for --commit/u
+  );
+});
+
+test("mismatched expected deployer aborts before broadcast", async () => {
+  const expectedDeployer = "0x9Ab8531FBb0948C542a31298FD61335f30064239";
+  const derivedSigner = "0x08406B2bCE5592A534141767ffe4e5B9DC6c22D1";
+  const predictedAddress = getCreateAddress({ from: expectedDeployer, nonce: 7 });
+  let broadcastCalls = 0;
+
+  await assert.rejects(
+    verifyExpectedDeployerAndBroadcast({
+      expectedDeployer,
+      derivedSigner,
+      predictionDeployer: expectedDeployer,
+      predictedAddress,
+      async broadcast() {
+        broadcastCalls += 1;
+        return { newAddress: predictedAddress };
+      }
+    }),
+    /derived signer .* does not match --expected-deployer/u
+  );
+  assert.equal(broadcastCalls, 0);
+});
+
+test("CREATE prediction sender must also match the explicit expected deployer", async () => {
+  const expectedDeployer = "0x9Ab8531FBb0948C542a31298FD61335f30064239";
+  const historicalDeployer = "0x08406B2bCE5592A534141767ffe4e5B9DC6c22D1";
+  let broadcastCalls = 0;
+
+  await assert.rejects(
+    verifyExpectedDeployerAndBroadcast({
+      expectedDeployer,
+      derivedSigner: expectedDeployer,
+      predictionDeployer: historicalDeployer,
+      predictedAddress: getCreateAddress({ from: historicalDeployer, nonce: 33 }),
+      async broadcast() {
+        broadcastCalls += 1;
+        return { newAddress: "0x0000000000000000000000000000000000000001" };
+      }
+    }),
+    /CREATE prediction used .* not --expected-deployer .* refusing to broadcast/u
+  );
+  assert.equal(broadcastCalls, 0);
+});
+
+test("matching expected deployer drives CREATE prediction and deployed-address verification", async () => {
+  const expectedDeployer = "0x9Ab8531FBb0948C542a31298FD61335f30064239";
+  const nonce = 7;
+  const manifest = {
+    contracts: {
+      treasuryPolicy: "0x226F14252A98BD2eA140271647De20132F09AF20",
+      agentAccountCore: "0xB1350932bf85E7ffd0599E9a3CC7b55718D89E57",
+      reputationSbt: "0xA85AF867b5f573176f49F0D6A827F61A5Cee4e37"
+    },
+    treasuryAccount: "0x01e6eed856e989201f4ff6346e18eab7e46c874c"
+  };
+  const artifact = {
+    ...abiWith([]),
+    bytecode: "0x60006000f3"
+  };
+  const nonceReads = [];
+  const plan = await planDeploy({
+    provider: {
+      async getTransactionCount(address, blockTag) {
+        nonceReads.push({ address, blockTag });
+        return nonce;
+      }
+    },
+    manifest,
+    artifact,
+    deployer: expectedDeployer
+  });
+  const expectedAddress = getCreateAddress({ from: expectedDeployer, nonce });
+  assert.equal(plan.predicted, expectedAddress);
+  assert.deepEqual(nonceReads, [{ address: expectedDeployer, blockTag: "pending" }]);
+
+  let broadcastCalls = 0;
+  const result = await verifyExpectedDeployerAndBroadcast({
+    expectedDeployer,
+    derivedSigner: expectedDeployer,
+    predictionDeployer: plan.deployer,
+    predictedAddress: plan.predicted,
+    async broadcast() {
+      broadcastCalls += 1;
+      return { newAddress: expectedAddress };
+    }
+  });
+  assert.equal(broadcastCalls, 1);
+  assert.equal(result.newAddress, expectedAddress);
+});
+
+test("v2 finalize metadata preserves historical v1 deployer and block", () => {
+  const v1Deployer = "0x08406B2bCE5592A534141767ffe4e5B9DC6c22D1";
+  const v2Deployer = "0x9Ab8531FBb0948C542a31298FD61335f30064239";
+  const manifest = {
+    deployer: v1Deployer,
+    contracts: {
+      escrowCore: "0x9cCd1DbBB5C354CC6218e55D3cE924A4d631C035"
+    },
+    deploymentBlocks: {
+      escrowCore: 18_647_902
+    }
+  };
+  applyEscrowRedeployManifest({
+    manifest,
+    oldEscrow: manifest.contracts.escrowCore,
+    newEscrow: "0xAcC2CAc2E814F243dbFEAE1B99BcfE1A1A7846Ed",
+    deployer: v2Deployer,
+    deployBlock: 18_806_500,
+    deployTx: "0x" + "11".repeat(32),
+    multisigExecTx: "0x" + "22".repeat(32),
+    skipRevoke: true,
+    redeployedAt: "2026-07-29T12:00:00.000Z"
+  });
+
+  assert.equal(manifest.deployer, v1Deployer);
+  assert.equal(manifest.deployers.escrowCoreV2, v2Deployer);
+  assert.equal(manifest.deploymentBlocks.escrowCore, 18_647_902);
+  assert.equal(manifest.deploymentBlocks.escrowCoreV2, 18_806_500);
 });
 
 test("parseArgs collects finalize-phase tx hashes", () => {
@@ -133,6 +269,20 @@ test("orphan scan defaults to the manifest deployment block and accepts an expli
     {
       fromBlock: 18_700_000,
       source: "--from-block"
+    }
+  );
+  assert.deepEqual(
+    resolveOrphanScanFromBlock({
+      manifest: {
+        deploymentBlocks: {
+          escrowCore: 18_647_902,
+          escrowCoreV2: 18_806_500
+        }
+      }
+    }),
+    {
+      fromBlock: 18_806_500,
+      source: "deploymentBlocks.escrowCoreV2"
     }
   );
 });
