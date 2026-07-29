@@ -73,7 +73,6 @@
  */
 
 import {
-  JsonRpcProvider,
   Wallet,
   Contract,
   ContractFactory,
@@ -86,6 +85,11 @@ import { readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
+import { bindSignerToWriteBroadcaster } from "../../mcp-server/src/blockchain/rpc-provider.js";
+import {
+  createCeremonyRpcContext,
+  printCeremonyRpcPreflight
+} from "./ceremony-rpc.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..", "..");
@@ -664,7 +668,7 @@ function runAudit(profile) {
   });
 }
 
-async function commitDeploy({ wallet, plan, artifact }) {
+async function commitDeploy({ wallet, plan, artifact, writeBroadcaster }) {
   const factory = new ContractFactory(artifact.abi, artifact.bytecode, wallet);
   console.log(`\nSending deploy tx…`);
   const contract = await factory.deploy(...plan.constructorArgs);
@@ -674,7 +678,12 @@ async function commitDeploy({ wallet, plan, artifact }) {
   const newAddress = await contract.getAddress();
   console.log(`  deployed:  ${newAddress}`);
   const receipt = await tx.wait();
-  return { newAddress, txHash: tx.hash, blockNumber: receipt?.blockNumber ?? null };
+  return {
+    newAddress,
+    txHash: tx.hash,
+    blockNumber: receipt?.blockNumber ?? null,
+    providerUsed: writeBroadcaster?.takeProviderUsed(tx.hash) ?? "unknown"
+  };
 }
 
 function printDeployPlan(plan) {
@@ -1022,13 +1031,18 @@ async function main() {
   }
 
   const { path: deploymentsPath, manifest } = await loadDeployments(args.profile);
-  const provider = new JsonRpcProvider(manifest.rpcUrl);
+  const rpc = await createCeremonyRpcContext({
+    manifest,
+    phase: args.phase,
+    write: args.phase === "deploy" && !args.dryRun
+  });
+  const { provider, writeBroadcaster } = rpc;
   const wiringState = await readWiringState({ provider, manifest });
 
   console.log(`# redeploy-escrowcore`);
   console.log(`profile:               ${args.profile}`);
   console.log(`manifest:              ${deploymentsPath}`);
-  console.log(`rpc:                   ${manifest.rpcUrl}`);
+  printCeremonyRpcPreflight(rpc, (line) => console.log(line));
   console.log(`old escrow:            ${manifest.contracts.escrowCore}`);
   console.log(`treasury:              ${manifest.contracts.treasuryPolicy}`);
   console.log(`treasury.owner():      ${wiringState.owner} (multisig 12nHTKYf… H160 mapping)`);
@@ -1058,32 +1072,47 @@ async function main() {
 
     if (!args.dryRun) {
       const key = resolveSignerKey(args);
-      const wallet = new Wallet(key, provider);
-      console.log(`\n## Signer verification`);
-      console.log(`  derived address: ${wallet.address}`);
-      console.log(`  manifest.deployer: ${plan.deployer}`);
-      if (wallet.address.toLowerCase() !== plan.deployer.toLowerCase()) {
-        console.error(`\nSigner ${wallet.address} does not match manifest.deployer ${plan.deployer}. Aborting.`);
-        process.exitCode = 2;
+      const wallet = bindSignerToWriteBroadcaster(
+        new Wallet(key),
+        provider,
+        writeBroadcaster
+      );
+      try {
+        const walletAddress = await wallet.getAddress();
+        console.log(`\n## Signer verification`);
+        console.log(`  derived address: ${walletAddress}`);
+        console.log(`  manifest.deployer: ${plan.deployer}`);
+        if (walletAddress.toLowerCase() !== plan.deployer.toLowerCase()) {
+          console.error(`\nSigner ${walletAddress} does not match manifest.deployer ${plan.deployer}. Aborting.`);
+          process.exitCode = 2;
+          return;
+        }
+        console.log(`  ✓ match — broadcasting`);
+        const result = await commitDeploy({
+          wallet,
+          plan,
+          artifact,
+          writeBroadcaster
+        });
+        console.log("");
+        console.log(JSON.stringify({
+          phase: "deploy",
+          profile: args.profile,
+          txHash: result.txHash,
+          blockNumber: result.blockNumber,
+          providerUsed: result.providerUsed,
+          newEscrow: result.newAddress,
+          deployer: walletAddress,
+          constructorArgs: plan.constructorArgs
+        }, null, 2));
+        console.log("");
+        console.log("Next: generate the multisig wire recipe:");
+        console.log(`  node scripts/ops/redeploy-escrowcore-wire-multisig.mjs \\`);
+        console.log(`    --new-escrow ${result.newAddress} --signer hot`);
         return;
+      } finally {
+        await writeBroadcaster.destroy();
       }
-      console.log(`  ✓ match — broadcasting`);
-      const result = await commitDeploy({ wallet, plan, artifact });
-      console.log("");
-      console.log(JSON.stringify({
-        phase: "deploy",
-        profile: args.profile,
-        txHash: result.txHash,
-        blockNumber: result.blockNumber,
-        newEscrow: result.newAddress,
-        deployer: wallet.address,
-        constructorArgs: plan.constructorArgs
-      }, null, 2));
-      console.log("");
-      console.log("Next: generate the multisig wire recipe:");
-      console.log(`  node scripts/ops/redeploy-escrowcore-wire-multisig.mjs \\`);
-      console.log(`    --new-escrow ${result.newAddress} --signer hot`);
-      return;
     }
     console.log("\nDry-run only. Re-run with --commit + deployer key to send.");
     return;

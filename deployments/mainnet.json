@@ -1,6 +1,9 @@
 {
   "profile": "mainnet",
-  "rpcUrl": "https://eth-rpc.polkadot.io/",
+  "rpcUrl": "https://services.polkadothub-rpc.com/mainnet/",
+  "rpcBackupUrls": [
+    "https://eth-rpc.polkadot.io/"
+  ],
   "deployedAt": "2026-07-25T13:18:47Z",
   "deployer": "0x08406B2bCE5592A534141767ffe4e5B9DC6c22D1",
   "owner": "0x01e6eed856e989201f4ff6346e18eab7e46c874c",
