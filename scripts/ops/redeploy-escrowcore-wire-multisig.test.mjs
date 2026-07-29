@@ -85,7 +85,7 @@ test("profile signer resolution rejects aliases from the other network", () => {
   });
   assert.equal(
     mainnetLedger.me.address,
-    "1mhf9yyYq3ArZAEysQQfWYNe2rgrDP6omrn6xiJBbwKqYZH"
+    "16UCRMPz5njNdRvAEE3pkEjaqpjX8ayC1gh9yNtk5eGb14oc"
   );
   assert.throws(
     () =>
@@ -94,7 +94,7 @@ test("profile signer resolution rejects aliases from the other network", () => {
         profile: "mainnet",
         signerLabel: "hot"
       }),
-    /--signer hot is not defined for profile mainnet.*ledger, vault, nova/u
+    /--signer hot is not defined for profile mainnet.*vault, nova, ledger/u
   );
 
   const testnetHot = resolveProfileSigner({
