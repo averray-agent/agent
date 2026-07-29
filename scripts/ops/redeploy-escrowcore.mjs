@@ -96,6 +96,10 @@ import {
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..", "..");
 
+export const MAINNET_MIN_ESCROW_DEPLOYER_BALANCE_WEI = 2_000_000_000_000_000_000n;
+const MAX_SAFE_BROADCAST_DETAIL_LENGTH = 280;
+const RAW_SIGNED_TRANSACTION_RE = /0x[a-fA-F0-9]{128,}/gu;
+
 const TREASURY_POLICY_ABI = [
   "function owner() view returns (address)",
   "function settlementBroker(address) view returns (bool)",
@@ -364,6 +368,145 @@ function resolveSignerKey(args) {
 function assertAddress(label, value) {
   if (!/^0x[a-fA-F0-9]{40}$/u.test(value)) {
     throw new Error(`${label} is not a valid address: ${value}`);
+  }
+}
+
+export async function assertMainnetPhaseOneDeployerBalance({
+  provider,
+  deployer,
+  minimumWei = MAINNET_MIN_ESCROW_DEPLOYER_BALANCE_WEI
+}) {
+  assertAddress("Phase 1 deployer", deployer);
+  let balanceWei;
+  try {
+    balanceWei = BigInt(await provider.getBalance(deployer));
+  } catch (error) {
+    throw new Error(
+      `Phase 1 deployer balance preflight could not read ${deployer}: ` +
+      `${error?.shortMessage ?? error?.message ?? error}`,
+      { cause: error }
+    );
+  }
+  if (balanceWei < minimumWei) {
+    throw new Error(
+      `Phase 1 deployer balance preflight failed: ${deployer} has ` +
+      `${formatUnits(balanceWei, 18)} DOT; requires at least ` +
+      `${formatUnits(minimumWei, 18)} DOT before CREATE. ` +
+      `Below-floor balances can be rejected by Polkadot Hub as Substrate 1010 ` +
+      `"Invalid Transaction", which ethers may surface as "could not coalesce error".`
+    );
+  }
+  return {
+    deployer,
+    balanceWei,
+    minimumWei
+  };
+}
+
+function extractSubstratePoolCode(error) {
+  const seen = new Set();
+  const visit = (value, depth = 0) => {
+    if (value === null || value === undefined || depth > 6) return undefined;
+    if (typeof value === "number" || typeof value === "bigint") {
+      const code = Number(value);
+      return code === 1010 || code === 1012 ? code : undefined;
+    }
+    if (typeof value === "string") {
+      const match =
+        value.match(/["']code["']\s*:\s*["']?(1010|1012)\b/u) ??
+        value.match(/\b(?:Substrate(?: pool)?(?: error)?|error code)\s*[:#]?\s*(1010|1012)\b/iu);
+      return match ? Number(match[1]) : undefined;
+    }
+    if (typeof value !== "object" || seen.has(value)) return undefined;
+    seen.add(value);
+
+    const direct = visit(value.code, depth + 1);
+    if (direct) return direct;
+    // Deliberately do not traverse payload/params: those may contain the
+    // 24 KB signed transaction and can produce false code matches in hex.
+    for (const key of [
+      "error",
+      "info",
+      "cause",
+      "response",
+      "body",
+      "data",
+      "message",
+      "shortMessage"
+    ]) {
+      const code = visit(value[key], depth + 1);
+      if (code) return code;
+    }
+    return undefined;
+  };
+  return visit(error);
+}
+
+function safeBroadcastDetail(error) {
+  const candidates = [
+    error?.shortMessage,
+    error?.reason,
+    error?.error?.shortMessage,
+    error?.info?.error?.message,
+    error?.error?.message,
+    error?.message
+  ];
+  const raw = candidates.find((candidate) =>
+    typeof candidate === "string" && candidate.trim().length > 0
+  );
+  if (!raw) return "unknown RPC broadcast failure";
+
+  let detail = raw
+    .replace(RAW_SIGNED_TRANSACTION_RE, "<signed transaction suppressed>")
+    .replace(/\s+/gu, " ")
+    .trim();
+  if (/^could not coalesce error\b/iu.test(detail)) {
+    detail = "could not coalesce RPC error";
+  } else {
+    detail = detail
+      .replace(/\bpayload\s*=\s*.*$/iu, "RPC payload suppressed")
+      .slice(0, MAX_SAFE_BROADCAST_DETAIL_LENGTH);
+  }
+  return detail || "unknown RPC broadcast failure";
+}
+
+export function formatCeremonyBroadcastError(error) {
+  const poolCode = extractSubstratePoolCode(error);
+  const suppression = "Raw signed transaction and RPC payload suppressed.";
+  if (poolCode === 1010) {
+    return (
+      "Ceremony deploy broadcast failed — Substrate pool error 1010: " +
+      "transaction invalid, most likely insufficient balance for fee+deposit. " +
+      "Confirm the deployer still holds at least 2.0 DOT and rerun the preflight before signing. " +
+      suppression
+    );
+  }
+  if (poolCode === 1012) {
+    return (
+      "Ceremony deploy broadcast failed — Substrate pool error 1012: " +
+      "this exact transaction was recently rejected and is pool-banned for ~30 min; " +
+      "fix the cause and retry after the cooldown. " +
+      suppression
+    );
+  }
+
+  const code =
+    typeof error?.code === "string" || typeof error?.code === "number"
+      ? ` (${String(error.code).slice(0, 48)})`
+      : "";
+  return (
+    `Ceremony deploy broadcast failed${code}: ${safeBroadcastDetail(error)}. ` +
+    suppression
+  );
+}
+
+export async function runCeremonyBroadcastSafely(broadcast) {
+  try {
+    return await broadcast();
+  } catch (error) {
+    // Never retain the raw ethers error as `cause`: its stack/inspection path
+    // includes payload.params[0], which is the full signed CREATE transaction.
+    throw new Error(formatCeremonyBroadcastError(error));
   }
 }
 
@@ -856,23 +999,25 @@ function runAudit(profile) {
 }
 
 async function commitDeploy({ wallet, plan, artifact, writeBroadcaster }) {
-  const factory = new ContractFactory(artifact.abi, artifact.bytecode, wallet);
-  console.log(`\nSending deploy tx…`);
-  const contract = await factory.deploy(...plan.constructorArgs, {
-    nonce: plan.nonce
+  return runCeremonyBroadcastSafely(async () => {
+    const factory = new ContractFactory(artifact.abi, artifact.bytecode, wallet);
+    console.log(`\nSending deploy tx…`);
+    const contract = await factory.deploy(...plan.constructorArgs, {
+      nonce: plan.nonce
+    });
+    const tx = contract.deploymentTransaction();
+    console.log(`  tx:        ${tx?.hash}`);
+    await contract.waitForDeployment();
+    const newAddress = await contract.getAddress();
+    console.log(`  deployed:  ${newAddress}`);
+    const receipt = await tx.wait();
+    return {
+      newAddress,
+      txHash: tx.hash,
+      blockNumber: receipt?.blockNumber ?? null,
+      providerUsed: writeBroadcaster?.takeProviderUsed(tx.hash) ?? "unknown"
+    };
   });
-  const tx = contract.deploymentTransaction();
-  console.log(`  tx:        ${tx?.hash}`);
-  await contract.waitForDeployment();
-  const newAddress = await contract.getAddress();
-  console.log(`  deployed:  ${newAddress}`);
-  const receipt = await tx.wait();
-  return {
-    newAddress,
-    txHash: tx.hash,
-    blockNumber: receipt?.blockNumber ?? null,
-    providerUsed: writeBroadcaster?.takeProviderUsed(tx.hash) ?? "unknown"
-  };
 }
 
 function printDeployPlan(plan) {
@@ -1269,12 +1414,29 @@ async function main() {
     write: args.phase === "deploy" && !args.dryRun
   });
   const { provider, writeBroadcaster } = rpc;
-  const wiringState = await readWiringState({ provider, manifest });
 
   console.log(`# redeploy-escrowcore`);
   console.log(`profile:               ${args.profile}`);
   console.log(`manifest:              ${deploymentsPath}`);
   printCeremonyRpcPreflight(rpc, (line) => console.log(line));
+  const shouldCheckMainnetDeployerBalance =
+    args.profile === "mainnet" &&
+    (args.phase === "deploy" || (args.phase === "all" && args.expectedDeployer));
+  if (shouldCheckMainnetDeployerBalance) {
+    const balancePreflight = await assertMainnetPhaseOneDeployerBalance({
+      provider,
+      deployer: deployPrediction.address
+    });
+    console.log(
+      `deployer balance:      ${formatUnits(balancePreflight.balanceWei, 18)} DOT ` +
+      `(required >= ${formatUnits(balancePreflight.minimumWei, 18)} DOT) ✓`
+    );
+  } else if (args.profile === "mainnet" && args.phase === "all") {
+    console.warn(
+      "deployer balance:      not checked in overview without --expected-deployer"
+    );
+  }
+  const wiringState = await readWiringState({ provider, manifest });
   console.log(`old escrow:            ${manifest.contracts.escrowCore}`);
   console.log(`treasury:              ${manifest.contracts.treasuryPolicy}`);
   console.log(`treasury.owner():      ${wiringState.owner} (multisig 12nHTKYf… H160 mapping)`);
