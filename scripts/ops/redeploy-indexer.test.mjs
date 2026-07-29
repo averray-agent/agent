@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -150,3 +153,72 @@ test("redeploy-indexer rollback documents the skip path for not-yet-bootstrapped
     "rollback should log when it skips the env re-render (and why)",
   );
 });
+
+test("a second indexer deploy is rejected before it can race the schema claim", async () => {
+  const root = await mkdtemp(join(tmpdir(), "redeploy-indexer-lock-"));
+  const appRoot = join(root, "app");
+  const fakeBin = join(root, "bin");
+  const composeFile = join(root, "docker-compose.yml");
+  const dockerCalled = join(root, "docker-called");
+  const scriptPath = join(appRoot, "scripts/ops/redeploy-indexer.sh");
+
+  await mkdir(join(appRoot, "scripts/ops"), { recursive: true });
+  await mkdir(join(appRoot, ".git"), { recursive: true });
+  await mkdir(fakeBin, { recursive: true });
+  await writeFile(composeFile, "services: {}\n");
+  await writeFile(scriptPath, await readFile(REDEPLOY_SCRIPT));
+  await chmod(scriptPath, 0o755);
+  for (const command of ["git", "curl"]) {
+    await writeExecutable(join(fakeBin, command), "#!/usr/bin/env bash\nexit 0\n");
+  }
+  await writeExecutable(
+    join(fakeBin, "docker"),
+    `#!/usr/bin/env bash\ntouch "${dockerCalled}"\nexit 0\n`
+  );
+  // Simulates flock -n observing an already-held descriptor. The production
+  // host uses util-linux flock; this fixture only controls that one result so
+  // the rejection path is deterministic on macOS CI/developer machines too.
+  await writeExecutable(join(fakeBin, "flock"), "#!/usr/bin/env bash\nexit 1\n");
+
+  const result = spawnSync("bash", [scriptPath], {
+    cwd: appRoot,
+    env: {
+      ...process.env,
+      PATH: `${fakeBin}:${process.env.PATH}`,
+      STACK_ROOT: root,
+      COMPOSE_FILE: composeFile,
+      INDEXER_SCHEMA_LOCK_FILE: join(root, "indexer.lock")
+    },
+    encoding: "utf8"
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Another indexer deployment owns the schema claim lock/u);
+  assert.equal(
+    existsSync(dockerCalled),
+    false,
+    "lock contention must be rejected before docker can recreate the indexer"
+  );
+});
+
+test("rollback restores the exact last-good schema before recreating the indexer", async () => {
+  const script = await readFile(REDEPLOY_SCRIPT, "utf8");
+  const rollbackStart = script.indexOf("\nrollback() {");
+  const rollbackEnd = script.indexOf("\n}", rollbackStart);
+  const rollbackBody = script.slice(rollbackStart, rollbackEnd);
+  const restoreIndex = rollbackBody.indexOf('restore_indexer_schema "$ROLLBACK_INDEXER_SCHEMA"');
+  const composeIndex = rollbackBody.lastIndexOf("compose_up");
+
+  assert.ok(restoreIndex > 0, "rollback should restore ROLLBACK_INDEXER_SCHEMA");
+  assert.ok(composeIndex > restoreIndex, "schema restoration must happen before container recreation");
+  assert.match(
+    script,
+    /performing schema-only rollback/u,
+    "an env-only schema failure should recover even when PREVIOUS_SHA equals current HEAD"
+  );
+});
+
+async function writeExecutable(path, content) {
+  await writeFile(path, `${content}\n`);
+  await chmod(path, 0o755);
+}

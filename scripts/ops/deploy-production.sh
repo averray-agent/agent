@@ -34,6 +34,9 @@ DEPLOY_STATE_DIR=${DEPLOY_STATE_DIR:-"$STACK_ROOT/.deploy-state"}
 # but it must never leak a testnet schema pin onto the mainnet indexer.
 INDEXER_SCHEMA_STATE_FILE=${INDEXER_SCHEMA_STATE_FILE:-}
 LEGACY_INDEXER_SCHEMA_STATE_FILE="$DEPLOY_STATE_DIR/indexer.database-schema"
+INDEXER_IDENTITY_STATE_FILE=${INDEXER_IDENTITY_STATE_FILE:-}
+INDEXER_RESYNC_STATE_FILE=${INDEXER_RESYNC_STATE_FILE:-}
+INDEXER_SCHEMA_LOCK_FILE=${INDEXER_SCHEMA_LOCK_FILE:-}
 FRONTEND_TREE_HASH_FILE=${FRONTEND_TREE_HASH_FILE:-"$DEPLOY_STATE_DIR/frontend.built-tree-hash"}
 CADDY_NETWORK_STATE_FILE=${CADDY_NETWORK_STATE_FILE:-"$DEPLOY_STATE_DIR/caddy-network-selection.json"}
 DEPLOY_ACTOR=${DEPLOY_ACTOR:-"deploy-production:${SUDO_USER:-${USER:-unknown}}"}
@@ -65,8 +68,18 @@ fi
 PRODUCT_PROOF_NODE_IMAGE=${PRODUCT_PROOF_NODE_IMAGE:-node:22-bookworm-slim}
 INDEXER_DATABASE_SCHEMA=${INDEXER_DATABASE_SCHEMA:-}
 INDEXER_FRESH_SCHEMA=${INDEXER_FRESH_SCHEMA:-0}
+WAIT_FOR_READY=${WAIT_FOR_READY:-1}
+HEALTH_STABILITY_SEC=${HEALTH_STABILITY_SEC:-0}
 INDEXER_ENV_FILE_OVERRIDE=${INDEXER_ENV_FILE:-}
 INDEXER_ENV_FILE=""
+INDEXER_SCHEMA_LOCK_ACQUIRED=0
+INDEXER_SCHEMA_ROTATED=0
+INDEXER_SCHEMA_ROTATION_REASON=""
+INDEXER_PREVIOUS_SCHEMA=""
+INDEXER_TARGET_SCHEMA=""
+INDEXER_PREVIOUS_IDENTITY=""
+INDEXER_TARGET_IDENTITY=""
+INDEXER_OWNERSHIP_STATE_PENDING=0
 DEPLOY_CONTRACT_COMPAT_FREEZE=${DEPLOY_CONTRACT_COMPAT_FREEZE:-1}
 DEPLOY_ALLOW_CONTRACT_SURFACE_DRIFT=${DEPLOY_ALLOW_CONTRACT_SURFACE_DRIFT:-0}
 DEPLOY_CONTRACT_COMPAT_PROFILE=${DEPLOY_CONTRACT_COMPAT_PROFILE:-}
@@ -1228,18 +1241,102 @@ read_persisted_indexer_schema() {
   fi
 }
 
+indexer_identity_state_file() {
+  if [[ -n "$INDEXER_IDENTITY_STATE_FILE" ]]; then
+    printf '%s\n' "$INDEXER_IDENTITY_STATE_FILE"
+    return
+  fi
+  printf '%s\n' "$DEPLOY_STATE_DIR/indexer.app-identity.$LIVE_NETWORK"
+}
+
+indexer_resync_state_file() {
+  if [[ -n "$INDEXER_RESYNC_STATE_FILE" ]]; then
+    printf '%s\n' "$INDEXER_RESYNC_STATE_FILE"
+    return
+  fi
+  printf '%s\n' "$DEPLOY_STATE_DIR/indexer.resync.$LIVE_NETWORK"
+}
+
+read_persisted_indexer_identity() {
+  local state_file
+  state_file=$(indexer_identity_state_file)
+  if [[ -f "$state_file" ]]; then
+    awk 'NF { print; exit }' "$state_file" | tr -d '"[:space:]'
+  fi
+}
+
+write_atomic_state_value() {
+  local state_file="$1"
+  local value="$2"
+  local dir
+  dir=$(dirname "$state_file")
+  mkdir -p "$dir"
+  local tmp="${state_file}.tmp.$$"
+  printf '%s\n' "$value" > "$tmp"
+  mv "$tmp" "$state_file"
+}
+
 write_persisted_indexer_schema() {
   local schema="$1"
   local state_file
   state_file=$(indexer_schema_state_file)
-  local dir
-  dir=$(dirname "$state_file")
-  mkdir -p "$dir"
-
-  local tmp="${state_file}.tmp.$$"
-  printf '%s\n' "$schema" > "$tmp"
-  mv "$tmp" "$state_file"
+  write_atomic_state_value "$state_file" "$schema"
   echo "Persisted indexer DATABASE_SCHEMA override in $state_file: $schema"
+}
+
+write_persisted_indexer_identity() {
+  local identity="$1"
+  local state_file
+  state_file=$(indexer_identity_state_file)
+  write_atomic_state_value "$state_file" "$identity"
+  echo "Persisted indexer app identity in $state_file: $identity"
+}
+
+indexer_tree_identity() {
+  local revision="$1"
+  git -C "$APP_ROOT" rev-parse "${revision}:indexer" 2>/dev/null
+}
+
+mint_indexer_schema() {
+  local identity="$1"
+  local nonce
+  nonce=$(
+    printf '%s' "${LIVE_NETWORK}:$(date -u +%Y%m%d%H%M%S%N):$$:${identity}" \
+      | git hash-object --stdin \
+      | cut -c1-8
+  )
+  printf 'agent_indexer_%s_%s_%s\n' \
+    "$LIVE_NETWORK" \
+    "$(date -u +%Y%m%d%H%M%S)" \
+    "$nonce"
+}
+
+acquire_indexer_schema_lock() {
+  if [[ "$INDEXER_SCHEMA_LOCK_ACQUIRED" == "1" ]]; then
+    return
+  fi
+  if [[ -z "$INDEXER_SCHEMA_LOCK_FILE" ]]; then
+    # One host-level lock serializes claims across both retained stacks. Ponder
+    # shares the same Postgres service, so network-specific lock files would
+    # still allow two schema migrations to race inside that database.
+    INDEXER_SCHEMA_LOCK_FILE="/tmp/averray-indexer-schema.lock"
+  fi
+  exec 8>"$INDEXER_SCHEMA_LOCK_FILE"
+  if ! flock -n 8; then
+    echo "Another indexer deploy currently owns the $LIVE_NETWORK schema claim lock ($INDEXER_SCHEMA_LOCK_FILE)." >&2
+    echo "Rejecting this indexer step before DATABASE_SCHEMA or the running container can change; retry after the active deploy finishes." >&2
+    exit 1
+  fi
+  INDEXER_SCHEMA_LOCK_ACQUIRED=1
+  echo "Indexer schema claim lock acquired: $INDEXER_SCHEMA_LOCK_FILE"
+}
+
+release_indexer_schema_lock() {
+  if [[ "$INDEXER_SCHEMA_LOCK_ACQUIRED" == "1" ]]; then
+    exec 8>&-
+    INDEXER_SCHEMA_LOCK_ACQUIRED=0
+    echo "Indexer schema claim lock released."
+  fi
 }
 
 validate_indexer_schema() {
@@ -1266,8 +1363,12 @@ write_indexer_schema() {
   printf 'DATABASE_SCHEMA=%s\n' "$schema" >> "$tmp"
 
   local mode owner_group
-  mode=$(stat -c '%a' "$INDEXER_ENV_FILE")
-  owner_group=$(stat -c '%U:%G' "$INDEXER_ENV_FILE")
+  if mode=$(stat -c '%a' "$INDEXER_ENV_FILE" 2>/dev/null); then
+    owner_group=$(stat -c '%U:%G' "$INDEXER_ENV_FILE")
+  else
+    mode=$(stat -f '%Lp' "$INDEXER_ENV_FILE")
+    owner_group=$(stat -f '%Su:%Sg' "$INDEXER_ENV_FILE")
+  fi
   chmod "$mode" "$tmp"
 
   case "$INDEXER_ENV_FILE" in
@@ -1288,6 +1389,7 @@ write_indexer_schema() {
 }
 
 apply_indexer_database_schema() {
+  local indexer_deploy_requested="${1:-0}"
   local current_schema=""
   current_schema=$(read_current_indexer_schema)
   if [[ -n "$current_schema" ]]; then
@@ -1311,29 +1413,91 @@ apply_indexer_database_schema() {
     exit 1
   fi
 
+  local persisted_schema=""
+  persisted_schema=$(read_persisted_indexer_schema)
+  if [[ -n "$persisted_schema" ]]; then
+    validate_indexer_schema "$persisted_schema"
+  fi
+
+  local candidate_identity=""
+  candidate_identity=$(indexer_tree_identity "$NEW_SHA") || {
+    echo "Cannot compute the incoming indexer app identity from $NEW_SHA:indexer; refusing schema selection before container recreation." >&2
+    exit 1
+  }
+  local persisted_identity=""
+  persisted_identity=$(read_persisted_indexer_identity)
+  local deployed_identity=""
+  local deployed_sha=""
+  deployed_sha=$(read_component_sha indexer)
+  deployed_identity=$(indexer_tree_identity "$deployed_sha" || true)
+
+  # Hosts predating the ownership record can safely bootstrap only when the
+  # incoming indexer tree is byte-identical to the last successfully deployed
+  # indexer tree. Any other unknown/mismatched identity rotates rather than
+  # gambling on Ponder accepting the old schema at container start.
+  local previous_identity="$persisted_identity"
+  if [[ -z "$previous_identity" && -n "$deployed_identity" && "$deployed_identity" == "$candidate_identity" ]]; then
+    previous_identity="$deployed_identity"
+    echo "Bootstrapping indexer app identity from last-good deploy $deployed_sha: $previous_identity"
+  fi
+
+  local identity_changed=0
+  if [[ "$indexer_deploy_requested" == "1" && "$candidate_identity" != "$previous_identity" ]]; then
+    identity_changed=1
+    if [[ -n "$previous_identity" ]]; then
+      echo "Pre-swap schema ownership check: incoming indexer identity $candidate_identity differs from owner $previous_identity."
+    else
+      echo "Pre-swap schema ownership check: the current schema has no trustworthy owner identity for incoming $candidate_identity."
+    fi
+  else
+    echo "Pre-swap schema ownership check: incoming identity $candidate_identity matches the last-good owner."
+  fi
+
   local target_schema=""
-  local persist_schema=0
   if [[ -n "$INDEXER_DATABASE_SCHEMA" ]]; then
     validate_indexer_schema "$INDEXER_DATABASE_SCHEMA"
     target_schema="$INDEXER_DATABASE_SCHEMA"
-    persist_schema=1
     echo "Operator pinned indexer DATABASE_SCHEMA: $target_schema"
+    if [[ "$identity_changed" == "1" && ( "$target_schema" == "$current_schema" || "$target_schema" == "$persisted_schema" ) ]]; then
+      echo "Indexer app identity changed, but explicit DATABASE_SCHEMA $target_schema is still owned by the previous app." >&2
+      echo "Choose a never-used schema or omit INDEXER_DATABASE_SCHEMA to let the deploy rotate automatically. Refusing before container recreation." >&2
+      exit 1
+    fi
+    if [[ "$identity_changed" == "1" ]]; then
+      INDEXER_SCHEMA_ROTATED=1
+      INDEXER_SCHEMA_ROTATION_REASON="operator_schema_for_app_identity_change"
+    fi
   elif [[ "$INDEXER_FRESH_SCHEMA" == "1" ]]; then
-    target_schema="agent_indexer_$(date -u +%Y%m%d%H%M%S)"
+    target_schema=$(mint_indexer_schema "$candidate_identity")
     validate_indexer_schema "$target_schema"
-    persist_schema=1
+    INDEXER_SCHEMA_ROTATED=1
+    INDEXER_SCHEMA_ROTATION_REASON="operator_requested_fresh_schema"
     echo "INDEXER_FRESH_SCHEMA=1 — minting fresh DATABASE_SCHEMA: $target_schema"
+  elif [[ "$identity_changed" == "1" ]]; then
+    target_schema=$(mint_indexer_schema "$candidate_identity")
+    validate_indexer_schema "$target_schema"
+    INDEXER_SCHEMA_ROTATED=1
+    INDEXER_SCHEMA_ROTATION_REASON="app_identity_changed"
+    echo "::warning::Indexer app identity changed; automatically rotating DATABASE_SCHEMA before container recreation: ${current_schema:-${persisted_schema:-<default>}} -> $target_schema"
   else
-    local persisted_schema=""
-    persisted_schema=$(read_persisted_indexer_schema)
     if [[ -n "$persisted_schema" ]]; then
-      validate_indexer_schema "$persisted_schema"
       target_schema="$persisted_schema"
       echo "Reapplying persisted indexer DATABASE_SCHEMA override: $target_schema"
+    elif [[ -n "$current_schema" ]]; then
+      target_schema="$current_schema"
     else
       return 0
     fi
   fi
+
+  # The rendered env may have just reset DATABASE_SCHEMA to the committed
+  # template. The persisted value is the schema the running container actually
+  # claimed, so it is the rollback source of truth when one exists.
+  INDEXER_PREVIOUS_SCHEMA="${persisted_schema:-$current_schema}"
+  INDEXER_TARGET_SCHEMA="$target_schema"
+  INDEXER_PREVIOUS_IDENTITY="$previous_identity"
+  INDEXER_TARGET_IDENTITY="$candidate_identity"
+  INDEXER_OWNERSHIP_STATE_PENDING=1
 
   if [[ -n "$current_schema" && "$current_schema" == "$target_schema" ]]; then
     echo "Indexer DATABASE_SCHEMA already current: $target_schema"
@@ -1344,8 +1508,45 @@ apply_indexer_database_schema() {
     write_indexer_schema "$target_schema"
   fi
 
-  if [[ "$persist_schema" == "1" ]]; then
-    write_persisted_indexer_schema "$target_schema"
+  if [[ "$INDEXER_SCHEMA_ROTATED" == "1" ]]; then
+    {
+      echo "::warning::INDEXER HISTORICAL RE-SYNC STARTING"
+      echo "::warning::network=$LIVE_NETWORK previous_schema=${INDEXER_PREVIOUS_SCHEMA:-<default>} new_schema=$INDEXER_TARGET_SCHEMA"
+      echo "::warning::reason=$INDEXER_SCHEMA_ROTATION_REASON old_identity=${INDEXER_PREVIOUS_IDENTITY:-unknown} new_identity=$INDEXER_TARGET_IDENTITY"
+      echo "::warning::The indexer will be live but staged while it replays from its configured start block. externalPostingWatcherLagSeconds must remain visible until catch-up."
+    } >&2
+  fi
+}
+
+commit_indexer_schema_ownership() {
+  if [[ "$INDEXER_OWNERSHIP_STATE_PENDING" != "1" ]]; then
+    return
+  fi
+  write_persisted_indexer_schema "$INDEXER_TARGET_SCHEMA"
+  write_persisted_indexer_identity "$INDEXER_TARGET_IDENTITY"
+
+  if [[ "$INDEXER_SCHEMA_ROTATED" == "1" ]]; then
+    local state_file
+    state_file=$(indexer_resync_state_file)
+    local dir
+    dir=$(dirname "$state_file")
+    mkdir -p "$dir"
+    local tmp="${state_file}.tmp.$$"
+    {
+      printf 'initial_status=staged\n'
+      printf 'network=%s\n' "$LIVE_NETWORK"
+      printf 'schema=%s\n' "$INDEXER_TARGET_SCHEMA"
+      printf 'previous_schema=%s\n' "${INDEXER_PREVIOUS_SCHEMA:-unknown}"
+      printf 'identity=%s\n' "$INDEXER_TARGET_IDENTITY"
+      printf 'previous_identity=%s\n' "${INDEXER_PREVIOUS_IDENTITY:-unknown}"
+      printf 'reason=%s\n' "$INDEXER_SCHEMA_ROTATION_REASON"
+      printf 'source_sha=%s\n' "$NEW_SHA"
+      printf 'selected_by=%s\n' "$DEPLOY_ACTOR"
+      printf 'started_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      printf 'honest_degradation_signal=externalPostingWatcherLagSeconds\n'
+    } > "$tmp"
+    mv "$tmp" "$state_file"
+    echo "::warning::Indexer re-sync record written to $state_file (initial_status=staged)."
   fi
 }
 
@@ -1394,15 +1595,31 @@ deploy() {
   # they wrote are now in deploy/backend.env.template (verified
   # byte-for-byte) and CI enforces drift via
   # check-template-matches-manifest.mjs.
-  render_runtime_envs
-  apply_indexer_database_schema
-
   local run_backend=0
   local run_indexer=0
   local run_frontend=0
   local run_site=0
   local run_caddy=0
   local backend_deployed_sha=""
+  local indexer_code_changed=0
+
+  # Resolve the indexer path gate before schema selection. Ponder ties a
+  # DATABASE_SCHEMA to a build identity, so an incoming indexer tree must be
+  # compared with the last-good owner before anything recreates the container.
+  # A forced RUN_INDEXER=1 is intentionally treated as a deploy request; an
+  # explicit RUN_INDEXER=0 leaves both the running indexer and schema untouched.
+  if should_run indexer "$RUN_INDEXER" '^(indexer/|scripts/ops/redeploy-indexer\.sh)'; then
+    indexer_code_changed=1
+  fi
+
+  render_runtime_envs
+  if [[ "$indexer_code_changed" == "1" \
+    || "${RUNTIME_ENV_CHANGED_INDEXER:-0}" == "1" \
+    || -n "$INDEXER_DATABASE_SCHEMA" \
+    || "$INDEXER_FRESH_SCHEMA" != "0" ]]; then
+    acquire_indexer_schema_lock
+    apply_indexer_database_schema "$indexer_code_changed"
+  fi
 
   # Phase 2 PR 2.6: the trigger for backend redeploy is now path-based
   # only — we added deploy/backend.env.template and
@@ -1465,38 +1682,55 @@ deploy() {
     echo "Skipping backend deploy"
   fi
 
-  local indexer_code_changed=0
   # The indexer image installs from indexer/package.json inside indexer/Dockerfile;
   # it does not copy or consume the root workspace package.json/package-lock.json.
   # Treating either root file as indexer code caused an app-only dependency change
   # to restart Ponder and trip schema recovery on 2026-07-12. Changes to the
   # indexer's own dependency manifest remain covered by the indexer/ prefix.
-  if should_run indexer "$RUN_INDEXER" '^(indexer/|scripts/ops/redeploy-indexer\.sh)'; then
-    indexer_code_changed=1
-  fi
   if [[ "$indexer_code_changed" == "1" || "${RUNTIME_ENV_CHANGED_INDEXER:-0}" == "1" ]]; then
     run_indexer=1
+    local indexer_build_image=0
+    local indexer_previous_sha="$NEW_SHA"
+    local indexer_wait_for_ready="$WAIT_FOR_READY"
+    local indexer_health_stability="$HEALTH_STABILITY_SEC"
     if [[ "$indexer_code_changed" == "1" ]]; then
+      indexer_build_image=1
+      indexer_previous_sha="$OLD_SHA"
       echo "Deploying indexer (reason: code path changed)"
-      COMPOSE_FILE="$COMPOSE_FILE" \
-        COMPOSE_PROJECT_DIRECTORY="$COMPOSE_PROJECT_DIRECTORY" \
-        INDEXER_SERVICE="$INDEXER_SERVICE" \
-        INDEXER_ENV_TEMPLATE="$INDEXER_ENV_TEMPLATE" \
-        INDEXER_ENV_TARGET="$RUNTIME_ROOT/indexer.env" \
-        INDEXER_ENV_TOKEN="$CREDENTIALS_ROOT/op-indexer.env" \
-        CADDY_COMPOSE_FILE="$CADDY_COMPOSE_FILE" \
-        CADDY_PROJECT_DIRECTORY="$CADDY_PROJECT_DIRECTORY" \
-        SKIP_GIT_UPDATE=1 \
-        PRE_DEPLOY_SHA="$OLD_SHA" \
-        "$APP_ROOT/scripts/ops/redeploy-indexer.sh"
     else
-      echo "Deploying indexer (reason: $RUNTIME_ROOT/indexer.env content changed; image unchanged — force-recreating $INDEXER_SERVICE only)"
-      sudo docker compose --project-directory "$COMPOSE_PROJECT_DIRECTORY" -f "$COMPOSE_FILE" \
-        up -d --force-recreate "$INDEXER_SERVICE"
+      echo "Deploying indexer (reason: $RUNTIME_ROOT/indexer.env content changed; image unchanged)"
     fi
+    if [[ "$INDEXER_SCHEMA_ROTATED" == "1" ]]; then
+      indexer_wait_for_ready=0
+      if [[ ! "$indexer_health_stability" =~ ^[0-9]+$ ]] || (( indexer_health_stability < 15 )); then
+        indexer_health_stability=15
+      fi
+      echo "::warning::Fresh indexer schema selected; gating on stable /health and leaving /ready staged during the historical re-sync."
+    fi
+    COMPOSE_FILE="$COMPOSE_FILE" \
+      COMPOSE_PROJECT_DIRECTORY="$COMPOSE_PROJECT_DIRECTORY" \
+      INDEXER_SERVICE="$INDEXER_SERVICE" \
+      INDEXER_ENV_TEMPLATE="$INDEXER_ENV_TEMPLATE" \
+      INDEXER_ENV_TARGET="$RUNTIME_ROOT/indexer.env" \
+      INDEXER_ENV_TOKEN="$CREDENTIALS_ROOT/op-indexer.env" \
+      CADDY_COMPOSE_FILE="$CADDY_COMPOSE_FILE" \
+      CADDY_PROJECT_DIRECTORY="$CADDY_PROJECT_DIRECTORY" \
+      INDEXER_BUILD_IMAGE="$indexer_build_image" \
+      INDEXER_SCHEMA_PREFLIGHTED=1 \
+      INDEXER_SCHEMA_LOCK_HELD=1 \
+      INDEXER_SCHEMA_LOCK_FILE="$INDEXER_SCHEMA_LOCK_FILE" \
+      ROLLBACK_INDEXER_SCHEMA="$INDEXER_PREVIOUS_SCHEMA" \
+      WAIT_FOR_READY="$indexer_wait_for_ready" \
+      HEALTH_STABILITY_SEC="$indexer_health_stability" \
+      SKIP_GIT_UPDATE=1 \
+      PRE_DEPLOY_SHA="$indexer_previous_sha" \
+      "$APP_ROOT/scripts/ops/redeploy-indexer.sh"
+    commit_indexer_schema_ownership
     mark_component_deployed indexer
+    release_indexer_schema_lock
   else
     echo "Skipping indexer deploy"
+    release_indexer_schema_lock
   fi
 
   # The frontend keeps its path gate — unlike the site (~45s astro build),
