@@ -53,10 +53,13 @@ the contract merge gate.
 
 Keep `EXTERNAL_POSTING_MODE=closed` throughout this sequence.
 
-1. Build the audited commit and archive its EscrowCore artifact/hash.
-2. Run the redeploy preflight. Existing v1 balances are expected; inspect and archive the
+1. Verify the deploy signer `0x9Ab8531FBb0948C542a31298FD61335f30064239`
+   holds at least 1 DOT on Polkadot Hub before starting. Deployment consumes native gas and
+   storage deposits; the first ceremony attempt found this signer at nonce 0 with zero DOT.
+2. Build the audited commit and archive its EscrowCore artifact/hash.
+3. Run the redeploy preflight. Existing v1 balances are expected; inspect and archive the
    report before acknowledging that they will drain rather than migrate.
-3. Deploy v2 with constructor arguments
+4. Deploy v2 with constructor arguments
    `(TreasuryPolicy, AgentAccountCore, ReputationSBT, treasuryAccount)`. The helper refuses
    artifacts without the v2 selectors/four-argument constructor:
 
@@ -66,10 +69,10 @@ Keep `EXTERNAL_POSTING_MODE=closed` throughout this sequence.
      --phase deploy \
      --acknowledge-orphaned-balances \
      --commit \
-     --signer-secret-ref 'op://mainnet-critical/admin-eoa-mainnet/private key'
+     --signer-secret-ref 'op://mainnet-critical/admin-eoa-mainnet/credential'
    ```
 
-4. Generate and execute the owner-multisig wiring batch with `--skip-revoke`:
+5. Generate and execute the owner-multisig wiring batch with `--skip-revoke`:
 
    ```sh
    node scripts/ops/redeploy-escrowcore-wire-multisig.mjs \
@@ -83,7 +86,7 @@ Keep `EXTERNAL_POSTING_MODE=closed` throughout this sequence.
    must retain `settlementBroker`, `reputationWriter`, and AAC `escrowOperator` until every
    open v1 job has reached a terminal state.
 
-5. Finalize with the same drain decision:
+6. Finalize with the same drain decision:
 
    ```sh
    node scripts/ops/redeploy-escrowcore.mjs \
@@ -103,10 +106,10 @@ Keep `EXTERNAL_POSTING_MODE=closed` throughout this sequence.
    drain addresses into backend/indexer env templates. Commit that manifest cutover; do not
    use a runtime address override.
 
-6. Deploy backend and indexer from the manifest cutover. New catalog jobs are created only on
+7. Deploy backend and indexer from the manifest cutover. New catalog jobs are created only on
    v2. Existing v1 jobs remain address-routed to v1. Re-run launch readiness and the
    solo-auditor delta.
-7. After the v1 live-job count reaches zero, execute a separately reviewed revoke ceremony,
+8. After the v1 live-job count reaches zero, execute a separately reviewed revoke ceremony,
    remove `contracts.legacyEscrowCore`, clear both legacy env variables, and re-run the audit.
 
 ## Mainnet dogfood

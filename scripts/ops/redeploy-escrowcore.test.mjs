@@ -1,12 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { Interface } from "ethers";
 import {
   parseArgs,
   loadKeyFromOp,
   rewriteEscrowAddressInTemplate,
+  collectOldEscrowJobIds,
   evaluateOrphanedBalancePreflight,
-  assertArtifactHasBrokeredSelectors
+  assertArtifactHasBrokeredSelectors,
+  ESCROW_TAIL_SCAN_ABI
 } from "./redeploy-escrowcore.mjs";
 
 function abiWith(names) {
@@ -177,6 +180,8 @@ function syntheticPreflightReport(findings) {
       toBlock: 9_300_000,
       chunkSize: 25_000,
       scannedLogCount: 58,
+      unmatchedLogCount: 0,
+      unmatchedTopics: [],
       scannedJobCount: 9
     },
     findings
@@ -239,6 +244,80 @@ test("evaluateOrphanedBalancePreflight passes clean synthetic escrow state", () 
   assert.equal(decision.ok, true);
   assert.equal(decision.acknowledged, false);
   assert.match(decision.message, /No unsettled old EscrowCore jobs/u);
+  assert.match(decision.message, /covered all 58 old EscrowCore event log/u);
+});
+
+test("collectOldEscrowJobIds skips and counts an unknown topic instead of crashing", async () => {
+  const unknownTopic0 = "0x" + "ab".repeat(32);
+  const provider = {
+    async getBlockNumber() {
+      return 12;
+    },
+    async getLogs() {
+      return [{
+        address: "0x9cCd1DbB0000000000000000000000000000C035",
+        blockNumber: 10,
+        data: "0x",
+        topics: [unknownTopic0],
+        transactionHash: "0x" + "11".repeat(32),
+        transactionIndex: 0,
+        blockHash: "0x" + "22".repeat(32),
+        logIndex: 0,
+        removed: false
+      }];
+    }
+  };
+
+  const result = await collectOldEscrowJobIds({
+    provider,
+    escrowAddress: "0x9cCd1DbB0000000000000000000000000000C035",
+    fromBlock: 10,
+    toBlock: 12,
+    chunkSize: 10
+  });
+
+  assert.equal(result.scannedLogCount, 1);
+  assert.equal(result.unmatchedLogCount, 1);
+  assert.deepEqual(result.unmatchedTopics, [{ topic0: unknownTopic0, count: 1 }]);
+  assert.deepEqual(result.jobIds, []);
+
+  const decision = evaluateOrphanedBalancePreflight({
+    ...syntheticPreflightReport([]),
+    scan: {
+      ...syntheticPreflightReport([]).scan,
+      scannedLogCount: 1,
+      unmatchedLogCount: 1,
+      unmatchedTopics: result.unmatchedTopics
+    }
+  });
+  assert.equal(decision.unmatchedLogCount, 1);
+  assert.match(decision.message, /WARNING: 1 old EscrowCore event log\(s\) are not covered/u);
+  assert.match(decision.message, new RegExp(unknownTopic0, "u"));
+});
+
+test("tail-scan ABI covers every event declared by the current EscrowCore source", () => {
+  const escrowSource = readFileSync(
+    new URL("../../contracts/EscrowCore.sol", import.meta.url),
+    "utf8"
+  );
+  const sourceEventNames = [
+    ...escrowSource.matchAll(/\bevent\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/gu)
+  ].map((match) => match[1]);
+  const scanInterface = new Interface(ESCROW_TAIL_SCAN_ABI);
+  const eventNames = new Set(
+    scanInterface.fragments
+      .filter((fragment) => fragment.type === "event")
+      .map((fragment) => fragment.name)
+  );
+  assert.deepEqual(
+    [...eventNames].sort(),
+    [...new Set(sourceEventNames)].sort()
+  );
+  assert.equal(
+    scanInterface.getEvent("OnboardingWaiverEligibilityUpdated").topicHash,
+    "0x315d0d53327cca8ef25cfa00536a09a8608f7c6419c757c15e40d87df8613649",
+    "the previously unmatched live topic must now decode"
+  );
 });
 
 test("evaluateOrphanedBalancePreflight aborts on synthetic stuck balances", () => {
