@@ -754,6 +754,38 @@ test("preflight uses chain worker claim count for claim economics in blockchain 
   assert.equal(preflight.totalClaimLock, 0.35);
 });
 
+test("preflight rejects a zero-balance wallet when a non-waived claim lock is required", async () => {
+  const service = makePlatformService();
+  service.jobs[0].onboardingWaiverEligible = false;
+  service.accounts.get(WALLET).liquid.DOT = 0;
+
+  const preflight = await service.preflightJob(WALLET, "parent-job-001");
+
+  assert.equal(preflight.catalogEligible, true);
+  assert.equal(preflight.claimable, true);
+  assert.equal(preflight.claimEconomicsWaived, false);
+  assert.equal(preflight.availableLiquidity, 0);
+  assert.equal(preflight.totalClaimLock, 0.35);
+  assert.equal(preflight.claimFundingAsset, "DOT");
+  assert.equal(preflight.claimFundingShortfall, 0.35);
+  assert.equal(preflight.eligible, false);
+  assert.equal(preflight.reason, "insufficient_liquidity");
+});
+
+test("preflight remains eligible when wallet liquidity exactly covers the non-waived claim lock", async () => {
+  const service = makePlatformService();
+  service.jobs[0].onboardingWaiverEligible = false;
+  service.accounts.get(WALLET).liquid.DOT = 0.35;
+
+  const preflight = await service.preflightJob(WALLET, "parent-job-001");
+
+  assert.equal(preflight.totalClaimLock, 0.35);
+  assert.equal(preflight.claimFundingSufficient, true);
+  assert.equal(preflight.claimFundingShortfall, 0);
+  assert.equal(preflight.eligible, true);
+  assert.equal(preflight.reason, "claimable");
+});
+
 test("preflight and claim both waive a fresh wallet after the guaranteed eligibility sync", async () => {
   const service = makePlatformService(makeClaimEconomicsGateway({
     onboardingWaiverEligible: false,
@@ -770,6 +802,9 @@ test("preflight and claim both waive a fresh wallet after the guaranteed eligibi
   assert.equal(preflight.claimStake, 0);
   assert.equal(preflight.claimFee, 0);
   assert.equal(preflight.totalClaimLock, 0);
+  assert.equal(preflight.claimFundingSufficient, true);
+  assert.equal(preflight.claimFundingShortfall, 0);
+  assert.equal(preflight.eligible, true);
   assert.equal(preflight.strategyUnwindNeeded, false);
   assert.equal(claimed.claimEconomicsWaived, preflight.claimEconomicsWaived);
   assert.equal(claimed.claimStake, preflight.claimStake);

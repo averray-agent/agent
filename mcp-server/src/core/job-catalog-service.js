@@ -365,7 +365,13 @@ export class JobCatalogService {
     const claimStakeBps = await this.getDefaultClaimStakeBps();
     const claimEconomics = await this.resolveClaimEconomics(wallet, job, claimStakeBps);
     const lifecycle = this.buildLifecycle(job);
-    const eligible = this.isClaimableJob(job) && this.isEligible(job, profile, reputation);
+    const catalogEligible = this.isClaimableJob(job) && this.isEligible(job, profile, reputation);
+    const claimFunding = summarizeClaimFunding({
+      asset: job.rewardAsset,
+      available: liquid,
+      required: claimEconomics.totalClaimLock
+    });
+    const eligible = catalogEligible && claimFunding.sufficient;
     const tierGate = summarizeTierGate(job.tier, reputation);
     const jobType = effectiveJobType(job);
     const requiredRole = effectiveRequiredRole(job);
@@ -374,6 +380,7 @@ export class JobCatalogService {
     return {
       wallet,
       jobId,
+      catalogEligible,
       eligible,
       netReward: await this.estimateNetReward(wallet, jobId),
       availableLiquidity: liquid,
@@ -385,7 +392,11 @@ export class JobCatalogService {
       claimEconomicsWaiverScope: "next_claim_projection",
       claimNumber: claimEconomics.claimNumber,
       totalClaimLock: claimEconomics.totalClaimLock,
-      strategyUnwindNeeded: liquid < claimEconomics.totalClaimLock,
+      claimFundingAsset: job.rewardAsset,
+      claimFundingSufficient: claimFunding.sufficient,
+      claimFundingShortfall: claimFunding.shortfall,
+      reason: claimFunding.sufficient ? undefined : "insufficient_liquidity",
+      strategyUnwindNeeded: !claimFunding.sufficient,
       requiredOutputSchema: job.outputSchemaRef,
       submissionContract: buildSubmissionContract(job),
       verificationContract: buildVerificationContract(job),
@@ -689,6 +700,27 @@ export class JobCatalogService {
 
   normalizeId(value) {
     return normalizeJobId(value);
+  }
+}
+
+function summarizeClaimFunding({ asset, available, required }) {
+  const availableAmount = Math.max(Number(available) || 0, 0);
+  const requiredAmount = Math.max(Number(required) || 0, 0);
+  try {
+    const decimals = decimalsForAssetSymbol(asset);
+    const availableRaw = decimalToBaseUnits(availableAmount, decimals, "available claim liquidity");
+    const requiredRaw = decimalToBaseUnits(requiredAmount, decimals, "required claim liquidity");
+    const shortfallRaw = requiredRaw > availableRaw ? requiredRaw - availableRaw : 0n;
+    return {
+      sufficient: shortfallRaw === 0n,
+      shortfall: Number(formatBaseUnits(shortfallRaw, decimals))
+    };
+  } catch {
+    const shortfall = Math.max(requiredAmount - availableAmount, 0);
+    return {
+      sufficient: shortfall === 0,
+      shortfall
+    };
   }
 }
 
