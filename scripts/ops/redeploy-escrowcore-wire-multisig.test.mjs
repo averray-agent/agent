@@ -1,10 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { Interface } from "ethers";
 import {
   parseArgs,
   buildInnerCalls,
   buildOnchainPayload,
+  resolveProfileSigner,
+  assertOwnerRecordAuthority,
   resolveWs,
   verifyEvmCalldataEmbedded,
   UTILITY_BATCH_ALL_CALL_INDEX
@@ -28,6 +31,18 @@ const TREASURY_POLICY = "0x648Cc5fdE94435992296C4e5ac642d18bB64c12B";
 const AGENT_ACCOUNT = "0x71B111d8c9DF84Be26cb9067D27dAd7A2d5E7e08";
 const NEW_AGENT_ACCOUNT = "0xbd9c2d9336a91415287bb032ec34e8b80a1f38a0";
 const BACKEND_SIGNER = "0x31ad432dFe083B998c69B6dB88A984ec5207ab7F";
+const MAINNET_OWNER_RECORD = JSON.parse(
+  readFileSync(
+    new URL("../../deployments/mainnet-multisig-owner.json", import.meta.url),
+    "utf8"
+  )
+);
+const TESTNET_OWNER_RECORD = JSON.parse(
+  readFileSync(
+    new URL("../../deployments/testnet-multisig-owner.json", import.meta.url),
+    "utf8"
+  )
+);
 
 test("parseArgs defaults profile=testnet, skipRevoke=false", () => {
   const args = parseArgs([]);
@@ -57,6 +72,121 @@ test("parseArgs reads --skip-revoke + --old-escrow override", () => {
   ]);
   assert.equal(args.oldEscrow, OLD);
   assert.equal(args.skipRevoke, true);
+});
+
+test("profile signer resolution rejects aliases from the other network", () => {
+  const mainnetLedger = resolveProfileSigner({
+    ownerRecord: MAINNET_OWNER_RECORD,
+    profile: "mainnet",
+    signerLabel: "ledger"
+  });
+  assert.equal(
+    mainnetLedger.me.address,
+    "1mhf9yyYq3ArZAEysQQfWYNe2rgrDP6omrn6xiJBbwKqYZH"
+  );
+  assert.throws(
+    () =>
+      resolveProfileSigner({
+        ownerRecord: MAINNET_OWNER_RECORD,
+        profile: "mainnet",
+        signerLabel: "hot"
+      }),
+    /--signer hot is not defined for profile mainnet.*ledger, vault, nova/u
+  );
+
+  const testnetHot = resolveProfileSigner({
+    ownerRecord: TESTNET_OWNER_RECORD,
+    profile: "testnet",
+    signerLabel: "hot"
+  });
+  assert.equal(
+    testnetHot.me.address,
+    "14ruuTeh5cXMTr9SLNuLt1NiroQZgt5ZQnwYrhg7K5LHiXQb"
+  );
+  assert.throws(
+    () =>
+      resolveProfileSigner({
+        ownerRecord: TESTNET_OWNER_RECORD,
+        profile: "testnet",
+        signerLabel: "nova"
+      }),
+    /--signer nova is not defined for profile testnet.*vault, ledger, hot/u
+  );
+  assert.throws(
+    () =>
+      resolveProfileSigner({
+        ownerRecord: TESTNET_OWNER_RECORD,
+        profile: "mainnet",
+        signerLabel: "ledger"
+      }),
+    /Owner record profile "testnet" does not match requested profile "mainnet"/u
+  );
+});
+
+test("mainnet owner record derives the live TreasuryPolicy owner", () => {
+  const result = assertOwnerRecordAuthority({
+    ownerRecord: MAINNET_OWNER_RECORD,
+    livePolicyOwner: "0x01e6eed856e989201f4ff6346e18eab7e46c874c"
+  });
+  assert.equal(
+    result.derivedAccountId32,
+    "0x93511e8deef3e7ec69cc1f18a573176da9870a0fb474ab2e0c18d88a5e74fd47"
+  );
+  assert.equal(
+    result.derivedOwner,
+    "0x01E6eed856e989201F4FF6346E18EAb7e46C874C"
+  );
+});
+
+test("owner authority derivation fails closed on a tampered roster", () => {
+  const tampered = structuredClone(MAINNET_OWNER_RECORD);
+  tampered.signatories[0].address =
+    "13pav6xpfdapyCAqfRhWZXxUnqDhjrF92dJr3FBwVfBKUKSM";
+  tampered.signatories[0].accountId32 =
+    "0x7cc32bbee82258e9302721a93de10cc95bd1def2af0762223ee22dbb18f1da67";
+
+  assert.throws(
+    () =>
+      assertOwnerRecordAuthority({
+        ownerRecord: tampered,
+        livePolicyOwner: "0x01e6eed856e989201f4ff6346e18eab7e46c874c"
+      }),
+    /derived multisig AccountId32 .* does not match verified owner record/u
+  );
+});
+
+test("owner authority derivation fails closed when the live policy has another owner", () => {
+  assert.throws(
+    () =>
+      assertOwnerRecordAuthority({
+        ownerRecord: MAINNET_OWNER_RECORD,
+        livePolicyOwner: "0x1f8c4da4aaac79916350f1fabf1221309591b6f9"
+      }),
+    /derived H160 .* does not match live TreasuryPolicy\.owner\(\)/u
+  );
+});
+
+test("testnet profile resolution preserves the former hardcoded roster and ordering", () => {
+  const resolved = resolveProfileSigner({
+    ownerRecord: TESTNET_OWNER_RECORD,
+    profile: "testnet",
+    signerLabel: "ledger"
+  });
+  assert.deepEqual(
+    {
+      label: resolved.me.label,
+      address: resolved.me.address,
+      otherSignatories: resolved.otherSignatories
+    },
+    {
+      label: "ledger",
+      address: "148tqwhGxeCva7ZX8RwvaLjCS7HvDJJaSbxfTUwE9Zyc5Xtm",
+      otherSignatories: [
+        "13pav6xpfdapyCAqfRhWZXxUnqDhjrF92dJr3FBwVfBKUKSM",
+        "14ruuTeh5cXMTr9SLNuLt1NiroQZgt5ZQnwYrhg7K5LHiXQb"
+      ]
+    }
+  );
 });
 
 test("parseArgs reads fresh AgentAccountCore overrides", () => {

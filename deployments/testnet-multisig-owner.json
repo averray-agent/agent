@@ -8,16 +8,19 @@
   "signatories": [
     {
       "index": 1,
+      "label": "vault",
       "address": "13pav6xpfdapyCAqfRhWZXxUnqDhjrF92dJr3FBwVfBKUKSM",
       "accountId32": "0x7cc32bbee82258e9302721a93de10cc95bd1def2af0762223ee22dbb18f1da67"
     },
     {
       "index": 2,
+      "label": "ledger",
       "address": "148tqwhGxeCva7ZX8RwvaLjCS7HvDJJaSbxfTUwE9Zyc5Xtm",
       "accountId32": "0x8ab9f0ac44ca825a1111b5b0233fccd2f16560293aae7bb7f438802582433b63"
     },
     {
       "index": 3,
+      "label": "hot",
       "address": "14ruuTeh5cXMTr9SLNuLt1NiroQZgt5ZQnwYrhg7K5LHiXQb",
       "accountId32": "0xaac5d1481fc3a294d1a1ce333e1bcfde364d625adf0a98ca855940ca7a3d156c"
     }

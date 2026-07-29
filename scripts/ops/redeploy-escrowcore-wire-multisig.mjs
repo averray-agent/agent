@@ -9,9 +9,10 @@
  * as the outflow recorder and targets setEscrowOperator on that fresh AAC.
  *
  * Why a recipe and not an EVM commit:
- *   TreasuryPolicy.owner() is the H160 mapping of the SS58 2-of-3 multisig
- *   12nHTKYfV64pnxsVRB6Cjn6kQPPH64Ehnr8zgqZxvfa8hJvQ. There is no private
- *   key for it — role mutations must go through pallet_multisig.asMulti.
+ *   TreasuryPolicy.owner() is the H160 mapping of the profile's SS58 2-of-3
+ *   multisig recorded in deployments/<profile>-multisig-owner.json. There is
+ *   no private key for it — role mutations must go through
+ *   pallet_multisig.asMulti.
  *
  * Default flow (batched, one multisig round):
  *   multisig.asMulti(
@@ -34,7 +35,7 @@
  *   )
  *
  *   This mirrors the swap-arbitrator-batch path in
- *   rotate-admin-multisig-payload.mjs — one Hot+Ledger round instead of two.
+ *   rotate-admin-multisig-payload.mjs — one 2-of-3 hardware round.
  *
  * V2 cutover / v1-drain variant (pass --skip-revoke):
  *   multisig.asMulti(
@@ -55,43 +56,43 @@
  *
  * Usage
  * -----
- *   # First leg (Hot Wallet, no timepoint):
+ *   # First leg (profile signer, no timepoint):
  *   node scripts/ops/redeploy-escrowcore-wire-multisig.mjs \
- *     --new-escrow 0xNEW --new-agent-account 0xNEW_AAC --signer hot
+ *     --new-escrow 0xNEW --new-agent-account 0xNEW_AAC --signer LABEL
  *
- *   # Second leg (Ledger, with timepoint from first leg's
+ *   # Second leg (another profile signer, with timepoint from first leg's
  *   # multisig.NewMultisig event):
  *   node scripts/ops/redeploy-escrowcore-wire-multisig.mjs \
- *     --new-escrow 0xNEW --new-agent-account 0xNEW_AAC --signer ledger \
+ *     --new-escrow 0xNEW --new-agent-account 0xNEW_AAC --signer OTHER_LABEL \
  *     --timepoint-height H --timepoint-index I
  *
  * This script does not touch Substrate keys. The actual signing happens
  * in polkadot-js-apps via the browser extension / Ledger.
  */
 
-import { Interface, getAddress } from "ethers";
+import { Contract, Interface, getAddress, hexlify, keccak256 } from "ethers";
+import { createKeyMulti, decodeAddress } from "@polkadot/util-crypto";
 import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadDeployments, isAddress } from "./rotate-admin-lib.mjs";
+import {
+  createCeremonyRpcContext,
+  printCeremonyRpcPreflight
+} from "./ceremony-rpc.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..", "..");
 
 const DEFAULT_WS = "wss://sys.ibp.network/asset-hub-paseo";
 
-// Asset Hub Paseo runtime: pallet_utility is index 0x28, batchAll is call 0x02.
-// Every successful encoding of utility.batchAll([...]) starts with these two
-// bytes. The on-chain hex test pins this so a runtime reshuffle gets caught.
+// Current Asset Hub runtimes: pallet_utility is index 0x28, batchAll is call
+// 0x02. Every successful encoding of utility.batchAll([...]) starts with these
+// two bytes. The on-chain hex test pins this so a runtime reshuffle gets caught.
 export const UTILITY_BATCH_ALL_CALL_INDEX = "0x2802";
 
-const SIGNER_ALIASES = {
-  vault: { label: "Polkadot Vault", ss58: "13pav6xpfdapyCAqfRhWZXxUnqDhjrF92dJr3FBwVfBKUKSM" },
-  ledger: { label: "Ledger Account", ss58: "148tqwhGxeCva7ZX8RwvaLjCS7HvDJJaSbxfTUwE9Zyc5Xtm" },
-  hot: { label: "Hot Wallet", ss58: "14ruuTeh5cXMTr9SLNuLt1NiroQZgt5ZQnwYrhg7K5LHiXQb" }
-};
-
 const TREASURY_POLICY_ABI = [
+  "function owner() view returns (address)",
   "function setSettlementBroker(address account, bool allowed)",
   "function setAgentTransferBroker(address account, bool allowed)",
   "function setReputationWriter(address account, bool allowed)",
@@ -127,6 +128,111 @@ export function resolveWs(args) {
   if (args.ws) return args.ws;
   const envWs = String(process.env.PASEO_AH_WS ?? "").trim();
   return envWs || DEFAULT_WS;
+}
+
+function assertOwnerRecordShape(ownerRecord, profile) {
+  if (ownerRecord?.profile !== profile) {
+    throw new Error(
+      `Owner record profile ${JSON.stringify(ownerRecord?.profile)} does not match requested profile ${JSON.stringify(profile)}.`
+    );
+  }
+  if (ownerRecord?.status !== "verified") {
+    throw new Error(
+      `deployments/${profile}-multisig-owner.json must have status=verified before emitting a multisig recipe.`
+    );
+  }
+  if (!Number.isInteger(ownerRecord?.threshold) || ownerRecord.threshold < 2) {
+    throw new Error(
+      `deployments/${profile}-multisig-owner.json has an invalid threshold.`
+    );
+  }
+  if (!Array.isArray(ownerRecord?.signatories) || ownerRecord.signatories.length < ownerRecord.threshold) {
+    throw new Error(
+      `deployments/${profile}-multisig-owner.json has too few signatories for threshold ${ownerRecord.threshold}.`
+    );
+  }
+  const labels = ownerRecord.signatories.map((entry) => String(entry?.label ?? "").trim());
+  if (labels.some((label) => !/^[a-z][a-z0-9_-]*$/u.test(label))) {
+    throw new Error(
+      `deployments/${profile}-multisig-owner.json must give every signatory a lowercase label.`
+    );
+  }
+  if (new Set(labels).size !== labels.length) {
+    throw new Error(
+      `deployments/${profile}-multisig-owner.json contains duplicate signatory labels.`
+    );
+  }
+}
+
+export function resolveProfileSigner({ ownerRecord, profile, signerLabel }) {
+  assertOwnerRecordShape(ownerRecord, profile);
+  const requested = String(signerLabel ?? "").trim();
+  const available = ownerRecord.signatories.map((entry) => entry.label);
+  const me = ownerRecord.signatories.find((entry) => entry.label === requested);
+  if (!me) {
+    throw new Error(
+      `--signer ${requested || "<missing>"} is not defined for profile ${profile}; ` +
+      `available labels: ${available.join(", ")}.`
+    );
+  }
+
+  const signersSorted = [...ownerRecord.signatories].sort((a, b) =>
+    String(a.accountId32).localeCompare(String(b.accountId32))
+  );
+  return {
+    me,
+    available,
+    otherSignatories: signersSorted
+      .filter((entry) => entry.accountId32 !== me.accountId32)
+      .map((entry) => entry.address)
+  };
+}
+
+export function assertOwnerRecordAuthority({ ownerRecord, livePolicyOwner }) {
+  const profile = ownerRecord?.profile ?? "unknown";
+  assertOwnerRecordShape(ownerRecord, profile);
+
+  const decodedSignatories = ownerRecord.signatories.map((entry) => {
+    const decoded = decodeAddress(entry.address);
+    const decodedHex = hexlify(decoded).toLowerCase();
+    if (decodedHex !== String(entry.accountId32).toLowerCase()) {
+      throw new Error(
+        `Owner authority self-check failed: ${entry.label} address decodes to ` +
+        `${decodedHex}, not record accountId32 ${entry.accountId32}.`
+      );
+    }
+    return decoded;
+  });
+  const derivedAccountId32 = hexlify(
+    createKeyMulti(decodedSignatories, ownerRecord.threshold)
+  );
+  if (
+    derivedAccountId32.toLowerCase() !==
+    String(ownerRecord?.multisig?.accountId32 ?? "").toLowerCase()
+  ) {
+    throw new Error(
+      `Owner authority self-check failed: derived multisig AccountId32 ` +
+      `${derivedAccountId32} does not match verified owner record ` +
+      `${ownerRecord?.multisig?.accountId32 ?? "<missing>"}.`
+    );
+  }
+
+  const derivedOwner = getAddress(`0x${keccak256(derivedAccountId32).slice(-40)}`);
+  const recordedOwner = getAddress(ownerRecord.multisig.ownerEnvValue);
+  const onchainOwner = getAddress(livePolicyOwner);
+  if (derivedOwner !== recordedOwner) {
+    throw new Error(
+      `Owner authority self-check failed: derived H160 ${derivedOwner} does not ` +
+      `match owner record ${recordedOwner}.`
+    );
+  }
+  if (derivedOwner !== onchainOwner) {
+    throw new Error(
+      `Owner authority self-check failed: derived H160 ${derivedOwner} does not ` +
+      `match live TreasuryPolicy.owner() ${onchainOwner}.`
+    );
+  }
+  return { derivedAccountId32, derivedOwner, livePolicyOwner: onchainOwner };
 }
 
 /**
@@ -208,7 +314,7 @@ function printUsage() {
     [
       "Usage: node scripts/ops/redeploy-escrowcore-wire-multisig.mjs \\",
       "         --new-escrow 0xADDR \\",
-      "         --signer hot|ledger|vault \\",
+      "         --signer LABEL  # from deployments/<profile>-multisig-owner.json \\",
       "         [--timepoint-height N --timepoint-index M] \\",
       "         [--new-agent-account 0xADDR] # when AAC is redeployed too",
       "         [--old-agent-account 0xADDR] # defaults to current deployments/<profile>.json#contracts.agentAccountCore",
@@ -315,8 +421,8 @@ async function main() {
     process.exitCode = 1;
     return;
   }
-  if (!args.signer || !SIGNER_ALIASES[args.signer]) {
-    console.error(`--signer must be one of: ${Object.keys(SIGNER_ALIASES).join(", ")}`);
+  if (!args.signer) {
+    console.error("--signer LABEL is required.");
     process.exitCode = 1;
     return;
   }
@@ -344,21 +450,31 @@ async function main() {
     return;
   }
 
-  // Pick signer + sorted otherSignatories (canonical AccountId32 byte order).
-  const signersSorted = [...ownerRecord.signatories].sort((a, b) =>
-    a.accountId32.localeCompare(b.accountId32)
-  );
-  const me = signersSorted.find((s) => s.address === SIGNER_ALIASES[args.signer].ss58);
-  if (!me) {
-    console.error(
-      `--signer ${args.signer} (${SIGNER_ALIASES[args.signer].ss58}) is not in deployments/${args.profile}-multisig-owner.json signatories.`
-    );
-    process.exitCode = 2;
-    return;
+  // Resolve the selected device only from this profile's verified owner
+  // record. There is deliberately no cross-profile alias fallback.
+  const signer = resolveProfileSigner({
+    ownerRecord,
+    profile: args.profile,
+    signerLabel: args.signer
+  });
+  const { me, otherSignatories } = signer;
+
+  // Prove the selected profile's complete roster controls the live policy
+  // before emitting any recipe or calldata. This catches stale aliases,
+  // tampered records, wrong-chain RPCs, and owner drift at one boundary.
+  const authorityRpc = await createCeremonyRpcContext({
+    manifest: deployments,
+    phase: "multisig-wire-owner-check",
+    write: false
+  });
+  let authority;
+  try {
+    const policy = new Contract(treasuryPolicy, TREASURY_POLICY_ABI, authorityRpc.provider);
+    const livePolicyOwner = await policy.owner();
+    authority = assertOwnerRecordAuthority({ ownerRecord, livePolicyOwner });
+  } finally {
+    await authorityRpc.provider.destroy?.();
   }
-  const otherSignatories = signersSorted
-    .filter((s) => s.accountId32 !== me.accountId32)
-    .map((s) => s.address);
 
   // Optional timepoint for second leg.
   const timepoint = args.tpHeight !== undefined
@@ -402,8 +518,11 @@ async function main() {
   console.log(`owner multisig (SS58):   ${ownerRecord.multisig.ss58Address}`);
   console.log(`owner multisig (H160):   ${ownerRecord.multisig.ownerEnvValue}`);
   console.log(`threshold:               ${ownerRecord.threshold}`);
-  console.log(`signing as:              ${SIGNER_ALIASES[args.signer].label} (${me.address})`);
+  console.log(`signing as:              ${me.label} (${me.address})`);
   console.log(`leg:                     ${timepoint ? `countersign (timepoint ${timepoint.height}/${timepoint.index})` : "initiate (timepoint None)"}`);
+  console.log(`derived owner account:   ${authority.derivedAccountId32} ✓`);
+  console.log(`derived/live owner H160: ${authority.derivedOwner} ✓`);
+  printCeremonyRpcPreflight(authorityRpc, (line) => console.log(line));
   console.log("");
 
   console.log("## Inner EVM calldata:");
@@ -448,7 +567,7 @@ async function main() {
 
   console.log("## polkadot-js-apps recipe");
   console.log("  1. Open https://polkadot.js.org/apps/?rpc=wss%3A%2F%2Fasset-hub-paseo-rpc.n.dwellir.com#/extrinsics");
-  console.log(`  2. Selected account: ${SIGNER_ALIASES[args.signer].label} (${me.address})`);
+  console.log(`  2. Selected account: ${me.label} (${me.address})`);
   console.log("     — sign via browser extension (polkadot{.js}, Talisman, SubWallet) or Ledger USB.");
   console.log("  3. submit extrinsic: multisig > asMulti(threshold, otherSignatories, maybeTimepoint, call, maxWeight)");
   console.log(`  4. threshold: ${ownerRecord.threshold}`);
@@ -483,8 +602,12 @@ async function main() {
   console.log("  9. Submit Transaction → sign with browser extension / Ledger.");
   if (!timepoint) {
     console.log(" 10. Find the resulting `multisig.NewMultisig` event; record the block height + extrinsic index.");
-    console.log("     Re-run this script with --signer ledger --timepoint-height <H> --timepoint-index <I>");
-    console.log("     to generate the Ledger countersign recipe.");
+    const countersigners = ownerRecord.signatories
+      .filter((entry) => entry.accountId32 !== me.accountId32)
+      .map((entry) => entry.label)
+      .join("|");
+    console.log(`     Re-run this script with --signer <${countersigners}> --timepoint-height <H> --timepoint-index <I>`);
+    console.log("     to generate the countersign recipe for the selected second device.");
   } else {
     console.log(" 10. Find the resulting `multisig.MultisigExecuted` event; record the call hash + block.");
     console.log("     Then run:");
