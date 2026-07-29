@@ -163,10 +163,13 @@ export async function runWorkerCanary({
     createdJobId = jobId;
     await stage("createJob", async () => {
       log(`Creating disposable canary job ${jobId} (reward ${config.rewardAmount} USDC, funded upfront)`);
-      const created = await operatorPlatform.createJob(buildCanaryJob({ jobId, rewardAmount: config.rewardAmount }));
+      const canaryJob = buildCanaryJob({ jobId, rewardAmount: config.rewardAmount });
+      assertCanaryJobWaiverEligibility(canaryJob, "requested");
+      const created = await operatorPlatform.createJob(canaryJob);
       if (created?.id !== jobId) {
         throw new Error(`created canary job id mismatch: expected ${jobId}, got ${created?.id ?? "missing"}`);
       }
+      assertCanaryJobWaiverEligibility(created, "created");
     });
 
     // ── snapshot worker on-chain balances BEFORE the payout ───────────────
@@ -829,7 +832,7 @@ export async function assertOperatorReady(operatorPlatform, { rewardRaw = undefi
 }
 
 // ── disposable job + submission shape ─────────────────────────────────────────
-function buildCanaryJob({ jobId, rewardAmount }) {
+export function buildCanaryJob({ jobId, rewardAmount }) {
   return {
     id: jobId,
     title: "External-worker CI canary (disposable, proof-only)",
@@ -846,6 +849,15 @@ function buildCanaryJob({ jobId, rewardAmount }) {
     retryLimit: 1,
     outputSchemaRef: OUTPUT_SCHEMA_REF
   };
+}
+
+export function assertCanaryJobWaiverEligibility(job, source = "created") {
+  if (job?.onboardingWaiverEligible !== true) {
+    throw new Error(
+      `${source} canary job ${job?.id ?? "missing"} must persist onboardingWaiverEligible=true ` +
+        "so the roleless, zero-balance worker exercises the fresh-wallet onboarding path."
+    );
+  }
 }
 
 function buildCanarySubmission({ jobId, timestamp }) {

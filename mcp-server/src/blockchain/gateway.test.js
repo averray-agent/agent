@@ -765,6 +765,84 @@ test("getClaimEconomicsDecisionState exposes current-layout mapping truth for an
   });
 });
 
+test("getClaimEconomicsDecisionState treats the live v1 layout as waiver-capable", async () => {
+  const gateway = gatewayWithDot();
+  gateway.readEscrowJob = async () => ({
+    state: 1,
+    contractLayout: "v1"
+  });
+  gateway.v1EscrowContract = {
+    async onboardingWaiverEligibleJobs(jobId) {
+      assert.equal(jobId, gateway.toJobId("eligible-v1-job"));
+      return true;
+    }
+  };
+
+  assert.deepEqual(await gateway.getClaimEconomicsDecisionState("eligible-v1-job"), {
+    state: 1,
+    exists: true,
+    contractLayout: "current",
+    onboardingWaiverEligible: true
+  });
+});
+
+test("readEscrowJob detects v1 before the pre-waiver legacy layout", async () => {
+  const gateway = gatewayWithDot();
+  const decodeError = Object.assign(new Error("could not decode result data"), { code: "BAD_DATA" });
+  let v2Reads = 0;
+  let v1Reads = 0;
+  let legacyReads = 0;
+  gateway.escrowContract = {
+    async jobs() {
+      v2Reads += 1;
+      throw decodeError;
+    }
+  };
+  gateway.v1EscrowContract = {
+    async jobs() {
+      v1Reads += 1;
+      return {
+        poster: "0x0000000000000000000000000000000000000000",
+        worker: "0x0000000000000000000000000000000000000000",
+        asset: DOT_ASSET.address,
+        verifierMode: encodeBytes32String("BENCH"),
+        category: encodeBytes32String("CODING"),
+        specHash: `0x${"0".repeat(64)}`,
+        reward: 0n,
+        opsReserve: 0n,
+        contingencyReserve: 0n,
+        released: 0n,
+        claimExpiry: 0n,
+        claimStake: 0n,
+        claimStakeBps: 0n,
+        claimFee: 0n,
+        claimFeeBps: 0n,
+        claimEconomicsWaived: false,
+        rejectingVerifier: "0x0000000000000000000000000000000000000000",
+        rejectedAt: 0n,
+        disputedAt: 0n,
+        payoutMode: 0n,
+        state: 0n
+      };
+    }
+  };
+  gateway.legacyEscrowContract = {
+    async jobs() {
+      legacyReads += 1;
+      throw new Error("v1 must not be downgraded to pre-waiver legacy");
+    }
+  };
+
+  const live = await gateway.readEscrowJob("worker-canary-v1");
+  await gateway.readEscrowJob("worker-canary-v1-second-read");
+
+  assert.equal(live.contractLayout, "v1");
+  assert.equal(live.state, 0);
+  assert.equal(v2Reads, 1, "the detected v1 layout should be cached after the first read");
+  assert.equal(v1Reads, 2);
+  assert.equal(legacyReads, 0);
+});
+
 test("getTreasuryPolicyStatus surfaces settlement readiness roles", async () => {
   const gateway = new BlockchainGateway({
     enabled: true,
@@ -2493,6 +2571,39 @@ test("fee-waived curated jobs retain their registered external schema", async ()
     schemaIssuer,
     schemaSignature: registration.signature
   });
+});
+
+test("fee-waived canary jobs use the v1 creation path while v1 remains live", async () => {
+  const gateway = gatewayWithDot();
+  const calls = [];
+  gateway.v1EscrowContract = {
+    async createSinglePayoutJob(...args) {
+      calls.push(args);
+      return { async wait() {} };
+    }
+  };
+  gateway.escrowContract = {
+    async createSinglePayoutJobFeeWaived() {
+      throw new Error("v2 fee-waived creation must not be broadcast to EscrowCore v1");
+    }
+  };
+
+  await gateway.createSinglePayoutJobForJob(
+    { onboardingWaiverEligible: true },
+    "v1",
+    gateway.toJobId("worker-canary-v1"),
+    DOT_ASSET.address,
+    100_000_000_000_000_000n,
+    0,
+    0,
+    3600,
+    encodeBytes32String("BENCH"),
+    encodeBytes32String("CODING"),
+    `0x${"1".repeat(64)}`
+  );
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].length, 9);
 });
 
 test("v1 drain routing sends lifecycle writes to the old EscrowCore", async () => {
