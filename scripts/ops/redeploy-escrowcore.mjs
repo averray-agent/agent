@@ -104,13 +104,18 @@ const AGENT_ACCOUNT_READ_ABI = [
   "function positions(address account, address asset) view returns (uint256 liquid,uint256 reserved,uint256 strategyAllocated,uint256 collateralLocked,uint256 jobStakeLocked,uint256 debtOutstanding)"
 ];
 
-const ESCROW_TAIL_SCAN_ABI = [
+export const ESCROW_TAIL_SCAN_ABI = [
   "function jobs(bytes32 jobId) view returns (address poster,address worker,address asset,bytes32 verifierMode,bytes32 category,bytes32 specHash,uint256 reward,uint256 opsReserve,uint256 contingencyReserve,uint256 released,uint256 claimExpiry,uint256 claimStake,uint16 claimStakeBps,uint256 claimFee,uint16 claimFeeBps,bool claimEconomicsWaived,address rejectingVerifier,uint256 rejectedAt,uint256 disputedAt,uint8 payoutMode,uint8 state)",
   "event JobCreated(bytes32 indexed jobId,address indexed poster,bytes32 indexed specHash,address asset,uint256 totalReserved,uint8 payoutMode)",
   "event JobFunded(bytes32 indexed jobId,address indexed poster,address indexed asset,uint256 totalReserved,uint8 payoutMode)",
+  "event ExternalSchemaRegistered(bytes32 indexed jobId,bytes32 indexed schemaHash,address indexed schemaIssuer,string schemaUrl)",
   "event RecurringJobFundedFromTemplate(bytes32 indexed jobId,bytes32 indexed templateId,address indexed poster,address asset,uint256 totalReserved)",
   "event JobClaimed(bytes32 indexed jobId,address indexed worker,uint256 claimExpiry,uint256 claimStake)",
   "event ClaimEconomicsLocked(bytes32 indexed jobId,address indexed worker,uint256 claimStake,uint256 claimFee,bool waived,uint256 claimNumber)",
+  "event OnboardingWaiverEligibilityUpdated(bytes32 indexed jobId,bool eligible)",
+  "event ProtocolFeeBpsUpdated(uint16 previousProtocolFeeBps,uint16 newProtocolFeeBps)",
+  "event TreasuryAccountUpdated(address indexed previousTreasuryAccount,address indexed newTreasuryAccount)",
+  "event SettlementSplit(bytes32 indexed jobId,address indexed worker,address indexed treasuryAccount,address asset,uint256 workerAmount,uint256 protocolFeeAmount,uint16 protocolFeeBps)",
   "event WorkSubmitted(bytes32 indexed jobId,address indexed worker,bytes32 evidenceHash)",
   "event Submitted(bytes32 indexed jobId,address indexed worker,bytes32 indexed payloadHash)",
   "event JobReopened(bytes32 indexed jobId)",
@@ -119,7 +124,9 @@ const ESCROW_TAIL_SCAN_ABI = [
   "event DisputeOpened(bytes32 indexed jobId,address indexed opener,uint256 disputedAt)",
   "event DisputeResolved(bytes32 indexed jobId,address indexed arbitrator,uint256 workerPayout,bytes32 reasonCode,string metadataURI)",
   "event AutoResolvedOnTimeout(bytes32 indexed jobId,address indexed caller,uint256 workerPayout,bytes32 reasonCode)",
-  "event JobClosed(bytes32 indexed jobId,address indexed worker,uint256 releasedAmount)"
+  "event JobClosed(bytes32 indexed jobId,address indexed worker,uint256 releasedAmount)",
+  "event Disclosed(bytes32 indexed hash,address indexed byWallet,uint64 timestamp)",
+  "event AutoDisclosed(bytes32 indexed hash,uint64 timestamp)"
 ];
 
 const ESCROW_V2_READ_ABI = [
@@ -471,6 +478,8 @@ export async function collectOldEscrowJobIds({ provider, escrowAddress, fromBloc
   const iface = new Interface(ESCROW_TAIL_SCAN_ABI);
   const jobIds = new Set();
   let scannedLogCount = 0;
+  let unmatchedLogCount = 0;
+  const unmatchedTopics = new Map();
 
   for (let from = fromBlock; from <= latest; from += chunkSize) {
     const to = Math.min(latest, from + chunkSize - 1);
@@ -481,6 +490,12 @@ export async function collectOldEscrowJobIds({ provider, escrowAddress, fromBloc
       try {
         parsed = iface.parseLog(log);
       } catch {
+        parsed = null;
+      }
+      if (!parsed) {
+        unmatchedLogCount += 1;
+        const topic0 = log.topics?.[0] ?? "(missing topic0)";
+        unmatchedTopics.set(topic0, (unmatchedTopics.get(topic0) ?? 0) + 1);
         continue;
       }
       const jobId = getNamedArg(parsed.args, "jobId");
@@ -493,6 +508,10 @@ export async function collectOldEscrowJobIds({ provider, escrowAddress, fromBloc
     toBlock: latest,
     chunkSize,
     scannedLogCount,
+    unmatchedLogCount,
+    unmatchedTopics: [...unmatchedTopics.entries()]
+      .map(([topic0, count]) => ({ topic0, count }))
+      .sort((a, b) => a.topic0.localeCompare(b.topic0)),
     jobIds: [...jobIds].sort()
   };
 }
@@ -547,6 +566,8 @@ export async function findUnsettledOldEscrowBalances({ provider, manifest, fromB
       toBlock: scan.toBlock,
       chunkSize: scan.chunkSize,
       scannedLogCount: scan.scannedLogCount,
+      unmatchedLogCount: scan.unmatchedLogCount,
+      unmatchedTopics: scan.unmatchedTopics,
       scannedJobCount: scan.jobIds.length
     },
     findings
@@ -569,16 +590,32 @@ function formatOrphanedBalanceFinding(finding) {
 }
 
 export function evaluateOrphanedBalancePreflight(report, { acknowledge = false } = {}) {
+  const unmatchedLogCount = Number(report.scan.unmatchedLogCount ?? 0);
+  const decodedLogCount = Math.max(0, report.scan.scannedLogCount - unmatchedLogCount);
+  const coverage = unmatchedLogCount === 0
+    ? `Scan ABI covered all ${report.scan.scannedLogCount} old EscrowCore event log(s).`
+    : [
+        `WARNING: ${unmatchedLogCount} old EscrowCore event log(s) are not covered by the scan ABI (${decodedLogCount}/${report.scan.scannedLogCount} decoded).`,
+        ...((report.scan.unmatchedTopics ?? []).map(
+          ({ topic0, count }) => `  unmatched topic0 ${topic0}: ${count} log(s)`
+        ))
+      ].join("\n");
+
   if (!report.findings.length) {
     return {
       ok: true,
       acknowledged: false,
-      message: `No unsettled old EscrowCore jobs with non-zero AAC reserved/jobStakeLocked tails found across ${report.scan.scannedJobCount} scanned job(s).`
+      unmatchedLogCount,
+      message: [
+        coverage,
+        `No unsettled old EscrowCore jobs with non-zero AAC reserved/jobStakeLocked tails found across ${report.scan.scannedJobCount} scanned job(s).`
+      ].join("\n")
     };
   }
 
   const body = report.findings.map(formatOrphanedBalanceFinding).join("\n");
   const message = [
+    coverage,
     `${report.findings.length} unsettled old EscrowCore job(s) still touch AAC reserved/jobStakeLocked balances.`,
     `Retiring ${report.oldEscrow} from AgentAccountCore.escrowOperators can orphan those balances because normal escrow release paths must call escrow-only AgentAccountCore mutation functions.`,
     "",
@@ -589,6 +626,7 @@ export function evaluateOrphanedBalancePreflight(report, { acknowledge = false }
     return {
       ok: true,
       acknowledged: true,
+      unmatchedLogCount,
       message: `${message}\n\nAcknowledged via --acknowledge-orphaned-balances; continuing.`
     };
   }
@@ -608,7 +646,7 @@ async function runOrphanedBalancePreflight({ args, provider, manifest }) {
   const decision = evaluateOrphanedBalancePreflight(report, {
     acknowledge: args.acknowledgeOrphanedBalances
   });
-  const log = decision.acknowledged ? console.warn : console.log;
+  const log = decision.acknowledged || decision.unmatchedLogCount > 0 ? console.warn : console.log;
   log(`\n## Pre-Phase-2 orphaned balance check`);
   log(decision.message);
   return { report, decision };
