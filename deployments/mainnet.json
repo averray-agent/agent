@@ -22,6 +22,44 @@
     "xcmWrapper": null,
     "token": "0x0000053900000000000000000000000001200000"
   },
+  "contractProvenance": {
+    "0x226F14252A98BD2eA140271647De20132F09AF20": {
+      "sourceCommit": "ccaa11124f0bda8e03819ead0798356131ed8c0f",
+      "abiHash": "sha256:c99049e4add133b60babc355ca5bfb42e3e7807c13c5d66b59ebde9bf8e46822",
+      "runtimeCodeHash": "sha256:7f402ba040b04fc6f413d0b0105e288d97373413b9fb2aa871c5946eea8f441b",
+      "verifiedAt": "2026-07-29T19:40:33.000Z"
+    },
+    "0x38af424415c1CE033e5Cee01f94551CDb824D404": {
+      "sourceCommit": "ccaa11124f0bda8e03819ead0798356131ed8c0f",
+      "abiHash": "sha256:f2d0cc926387a757249688e5e315d2755f9de44cbda85668c74ae30f9ddd9846",
+      "runtimeCodeHash": "sha256:7c2b6bb6b43889db08b5dfd23427d28aec2b7156e38c90d5d53002675b402df9",
+      "verifiedAt": "2026-07-29T19:40:33.000Z"
+    },
+    "0xB1350932bf85E7ffd0599E9a3CC7b55718D89E57": {
+      "sourceCommit": "ccaa11124f0bda8e03819ead0798356131ed8c0f",
+      "abiHash": "sha256:795e3e55cafb8134765b5afbb7bef6817b9213c51fb34612ba4801620739a7e5",
+      "runtimeCodeHash": "sha256:4b97dd8c42dfef86020a2b89e768048f99a301647965c64a7281ae8c889a00eb",
+      "verifiedAt": "2026-07-29T19:40:33.000Z"
+    },
+    "0xA85AF867b5f573176f49F0D6A827F61A5Cee4e37": {
+      "sourceCommit": "ccaa11124f0bda8e03819ead0798356131ed8c0f",
+      "abiHash": "sha256:29b6eb596741a1dea957da2c48c1a26e56aeeac5c9a732eae04c64dbab1a0192",
+      "runtimeCodeHash": "sha256:c65295d2a8297e1512deeb51258206097e8d9a2843f1cf5d3aea0a7d83b5e493",
+      "verifiedAt": "2026-07-29T19:40:33.000Z"
+    },
+    "0x47876D138e3a26c485A5f8acbAC7AEcA3c7e6C62": {
+      "sourceCommit": "ccaa11124f0bda8e03819ead0798356131ed8c0f",
+      "abiHash": "sha256:4b789cb848e8ea13efc37fdef88a4e0ba85de14366c1e3a1c55fb44d54c1dd99",
+      "runtimeCodeHash": "sha256:634fcc8b29ca8fea61a43d8f1a01f7fd5a973bd4a423a32041cca65f5cf2ea08",
+      "verifiedAt": "2026-07-29T19:40:33.000Z"
+    },
+    "0x9cCd1DbBB5C354CC6218e55D3cE924A4d631C035": {
+      "sourceCommit": "ccaa11124f0bda8e03819ead0798356131ed8c0f",
+      "abiHash": "sha256:af896ebc7901695956984d3382e155239de097a40684531a82e8b71a30a208c7",
+      "runtimeCodeHash": "sha256:f4790b2c80c423aa9c8c4fe55033891b68d7aff6891905f243051e21b1722535",
+      "verifiedAt": "2026-07-29T19:40:33.000Z"
+    }
+  },
   "parameters": {
     "dailyOutflowCap": "115792089237316195423570985008687907853269984665640564039457584007913129639935",
     "borrowCap": "25000000",
