@@ -9,9 +9,10 @@
  * as the outflow recorder and targets setEscrowOperator on that fresh AAC.
  *
  * Why a recipe and not an EVM commit:
- *   TreasuryPolicy.owner() is the H160 mapping of the SS58 2-of-3 multisig
- *   12nHTKYfV64pnxsVRB6Cjn6kQPPH64Ehnr8zgqZxvfa8hJvQ. There is no private
- *   key for it — role mutations must go through pallet_multisig.asMulti.
+ *   TreasuryPolicy.owner() is the H160 mapping of the profile's SS58 2-of-3
+ *   multisig recorded in deployments/<profile>-multisig-owner.json. There is
+ *   no private key for it — role mutations must go through
+ *   pallet_multisig.asMulti.
  *
  * Default flow (batched, one multisig round):
  *   multisig.asMulti(
@@ -34,7 +35,7 @@
  *   )
  *
  *   This mirrors the swap-arbitrator-batch path in
- *   rotate-admin-multisig-payload.mjs — one Hot+Ledger round instead of two.
+ *   rotate-admin-multisig-payload.mjs — one 2-of-3 hardware round.
  *
  * V2 cutover / v1-drain variant (pass --skip-revoke):
  *   multisig.asMulti(
@@ -55,43 +56,58 @@
  *
  * Usage
  * -----
- *   # First leg (Hot Wallet, no timepoint):
+ *   # First leg (profile signer, no timepoint):
  *   node scripts/ops/redeploy-escrowcore-wire-multisig.mjs \
- *     --new-escrow 0xNEW --new-agent-account 0xNEW_AAC --signer hot
+ *     --new-escrow 0xNEW --new-agent-account 0xNEW_AAC --signer LABEL
  *
- *   # Second leg (Ledger, with timepoint from first leg's
+ *   # Second leg (another profile signer, with timepoint from first leg's
  *   # multisig.NewMultisig event):
  *   node scripts/ops/redeploy-escrowcore-wire-multisig.mjs \
- *     --new-escrow 0xNEW --new-agent-account 0xNEW_AAC --signer ledger \
+ *     --new-escrow 0xNEW --new-agent-account 0xNEW_AAC --signer OTHER_LABEL \
  *     --timepoint-height H --timepoint-index I
  *
  * This script does not touch Substrate keys. The actual signing happens
  * in polkadot-js-apps via the browser extension / Ledger.
  */
 
-import { Interface, getAddress } from "ethers";
+import { Contract, Interface, getAddress, hexlify, keccak256 } from "ethers";
+import { createKeyMulti, decodeAddress } from "@polkadot/util-crypto";
 import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadDeployments, isAddress } from "./rotate-admin-lib.mjs";
+import {
+  createCeremonyRpcContext,
+  printCeremonyRpcPreflight
+} from "./ceremony-rpc.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..", "..");
 
-const DEFAULT_WS = "wss://sys.ibp.network/asset-hub-paseo";
+export const SUBSTRATE_PROFILE_CONFIG = Object.freeze({
+  mainnet: Object.freeze({
+    chainName: "Polkadot Asset Hub",
+    genesisHash: "0x68d56f15f85d3136970ec16946040bc1752654e906147f7e43e9d539d7c3de2f",
+    revivePalletIndex: 90,
+    wsEnv: "POLKADOT_AH_WS",
+    defaultWs: "wss://polkadot-asset-hub-rpc.polkadot.io"
+  }),
+  testnet: Object.freeze({
+    chainName: "Paseo Asset Hub",
+    genesisHash: "0xd6eec26135305a8ad257a20d003357284c8aa03d0bdb2b357ab0a22371e11ef2",
+    revivePalletIndex: 100,
+    wsEnv: "PASEO_AH_WS",
+    defaultWs: "wss://asset-hub-paseo-rpc.n.dwellir.com"
+  })
+});
 
-// Asset Hub Paseo runtime: pallet_utility is index 0x28, batchAll is call 0x02.
-// Every successful encoding of utility.batchAll([...]) starts with these two
-// bytes. The on-chain hex test pins this so a runtime reshuffle gets caught.
+// Current Asset Hub runtimes: pallet_utility is index 0x28, batchAll is call
+// 0x02. Every successful encoding of utility.batchAll([...]) starts with these
+// two bytes. The on-chain hex test pins this so a runtime reshuffle gets caught.
 export const UTILITY_BATCH_ALL_CALL_INDEX = "0x2802";
 
-const SIGNER_ALIASES = {
-  vault: { label: "Polkadot Vault", ss58: "13pav6xpfdapyCAqfRhWZXxUnqDhjrF92dJr3FBwVfBKUKSM" },
-  ledger: { label: "Ledger Account", ss58: "148tqwhGxeCva7ZX8RwvaLjCS7HvDJJaSbxfTUwE9Zyc5Xtm" },
-  hot: { label: "Hot Wallet", ss58: "14ruuTeh5cXMTr9SLNuLt1NiroQZgt5ZQnwYrhg7K5LHiXQb" }
-};
-
 const TREASURY_POLICY_ABI = [
+  "function owner() view returns (address)",
   "function setSettlementBroker(address account, bool allowed)",
   "function setAgentTransferBroker(address account, bool allowed)",
   "function setReputationWriter(address account, bool allowed)",
@@ -122,11 +138,221 @@ export function parseArgs(argv) {
   return args;
 }
 
-export function resolveWs(args) {
-  if (args.noWs) return null;
-  if (args.ws) return args.ws;
-  const envWs = String(process.env.PASEO_AH_WS ?? "").trim();
-  return envWs || DEFAULT_WS;
+function substrateProfileConfig(profile) {
+  const config = SUBSTRATE_PROFILE_CONFIG[profile];
+  if (!config) {
+    throw new Error(
+      `No Substrate endpoint is defined for profile ${JSON.stringify(profile)}; ` +
+        `expected one of: ${Object.keys(SUBSTRATE_PROFILE_CONFIG).join(", ")}.`
+    );
+  }
+  return config;
+}
+
+export function resolveSubstrateEndpoint(args, env = process.env) {
+  const config = substrateProfileConfig(args.profile);
+  if (args.noWs && args.ws) {
+    throw new Error(
+      "--ws cannot be combined with --no-ws because the endpoint identity cannot be verified."
+    );
+  }
+  const configured = args.noWs
+    ? config.defaultWs
+    : String(args.ws ?? env[config.wsEnv] ?? config.defaultWs).trim();
+  if (!configured) {
+    throw new Error(
+      `No Substrate endpoint resolved for profile ${args.profile}; pass --ws or set ${config.wsEnv}.`
+    );
+  }
+  let parsed;
+  try {
+    parsed = new URL(configured);
+  } catch {
+    throw new Error(
+      `Invalid Substrate endpoint for profile ${args.profile}: ${JSON.stringify(configured)}.`
+    );
+  }
+  if (parsed.protocol !== "ws:" && parsed.protocol !== "wss:") {
+    throw new Error(
+      `Substrate endpoint for profile ${args.profile} must use ws:// or wss://, not ${parsed.protocol}.`
+    );
+  }
+  return configured;
+}
+
+export function buildPolkadotAppsExtrinsicsUrl(wsUrl) {
+  return `https://polkadot.js.org/apps/?rpc=${encodeURIComponent(wsUrl)}#/extrinsics`;
+}
+
+function palletIndexToNumber(index) {
+  if (typeof index?.toNumber === "function") return index.toNumber();
+  const parsed = Number(index?.toString?.() ?? index);
+  return Number.isInteger(parsed) ? parsed : Number.NaN;
+}
+
+export async function assertSubstrateProfileEncoding({
+  api,
+  profile,
+  reviveCallHexes
+}) {
+  const config = substrateProfileConfig(profile);
+  const chainName = String(await api.rpc.system.chain());
+  const genesisHash = String(api.genesisHash.toHex()).toLowerCase();
+  if (genesisHash !== config.genesisHash) {
+    throw new Error(
+      `Substrate profile self-check failed: connected genesis ${genesisHash} ` +
+        `(${chainName}) does not match ${profile} ${config.chainName} ` +
+        `(${config.genesisHash}).`
+    );
+  }
+
+  const revivePallet = api.runtimeMetadata.asLatest.pallets.find(
+    (pallet) => String(pallet.name).toLowerCase() === "revive"
+  );
+  if (!revivePallet) {
+    throw new Error(
+      `Substrate profile self-check failed: revive pallet is absent from ${profile} metadata.`
+    );
+  }
+  const metadataIndex = palletIndexToNumber(revivePallet.index);
+  if (metadataIndex !== config.revivePalletIndex) {
+    throw new Error(
+      `Substrate profile self-check failed: ${profile} metadata uses revive pallet index ` +
+        `${metadataIndex}; expected ${config.revivePalletIndex}.`
+    );
+  }
+
+  for (const [position, callHex] of reviveCallHexes.entries()) {
+    if (!/^0x[0-9a-f]{2}/iu.test(callHex)) {
+      throw new Error(
+        `Substrate profile self-check failed: revive.call[${position + 1}] has invalid SCALE hex.`
+      );
+    }
+    const encodedIndex = Number.parseInt(callHex.slice(2, 4), 16);
+    if (encodedIndex !== metadataIndex) {
+      throw new Error(
+        `Substrate profile self-check failed: encoded revive.call uses pallet index ` +
+          `${encodedIndex} (0x${encodedIndex.toString(16).padStart(2, "0")}), but ` +
+          `${profile} metadata uses ${metadataIndex} ` +
+          `(0x${metadataIndex.toString(16).padStart(2, "0")}).`
+      );
+    }
+  }
+
+  return {
+    chainName,
+    genesisHash,
+    revivePalletIndex: metadataIndex
+  };
+}
+
+function assertOwnerRecordShape(ownerRecord, profile) {
+  if (ownerRecord?.profile !== profile) {
+    throw new Error(
+      `Owner record profile ${JSON.stringify(ownerRecord?.profile)} does not match requested profile ${JSON.stringify(profile)}.`
+    );
+  }
+  if (ownerRecord?.status !== "verified") {
+    throw new Error(
+      `deployments/${profile}-multisig-owner.json must have status=verified before emitting a multisig recipe.`
+    );
+  }
+  if (!Number.isInteger(ownerRecord?.threshold) || ownerRecord.threshold < 2) {
+    throw new Error(
+      `deployments/${profile}-multisig-owner.json has an invalid threshold.`
+    );
+  }
+  if (!Array.isArray(ownerRecord?.signatories) || ownerRecord.signatories.length < ownerRecord.threshold) {
+    throw new Error(
+      `deployments/${profile}-multisig-owner.json has too few signatories for threshold ${ownerRecord.threshold}.`
+    );
+  }
+  const labels = ownerRecord.signatories.map((entry) => String(entry?.label ?? "").trim());
+  if (labels.some((label) => !/^[a-z][a-z0-9_-]*$/u.test(label))) {
+    throw new Error(
+      `deployments/${profile}-multisig-owner.json must give every signatory a lowercase label.`
+    );
+  }
+  if (new Set(labels).size !== labels.length) {
+    throw new Error(
+      `deployments/${profile}-multisig-owner.json contains duplicate signatory labels.`
+    );
+  }
+}
+
+export function resolveProfileSigner({ ownerRecord, profile, signerLabel }) {
+  assertOwnerRecordShape(ownerRecord, profile);
+  const requested = String(signerLabel ?? "").trim();
+  const available = ownerRecord.signatories.map((entry) => entry.label);
+  const me = ownerRecord.signatories.find((entry) => entry.label === requested);
+  if (!me) {
+    throw new Error(
+      `--signer ${requested || "<missing>"} is not defined for profile ${profile}; ` +
+      `available labels: ${available.join(", ")}.`
+    );
+  }
+
+  const accountIdSortKey = (entry) => String(entry.accountId32).toLowerCase();
+  const signersSorted = [...ownerRecord.signatories].sort((a, b) => {
+    const left = accountIdSortKey(a);
+    const right = accountIdSortKey(b);
+    return left < right ? -1 : left > right ? 1 : 0;
+  });
+  const selectedAccountId = accountIdSortKey(me);
+  return {
+    me,
+    available,
+    otherSignatories: signersSorted
+      .filter((entry) => accountIdSortKey(entry) !== selectedAccountId)
+      .map((entry) => entry.address)
+  };
+}
+
+export function assertOwnerRecordAuthority({ ownerRecord, livePolicyOwner }) {
+  const profile = ownerRecord?.profile ?? "unknown";
+  assertOwnerRecordShape(ownerRecord, profile);
+
+  const decodedSignatories = ownerRecord.signatories.map((entry) => {
+    const decoded = decodeAddress(entry.address);
+    const decodedHex = hexlify(decoded).toLowerCase();
+    if (decodedHex !== String(entry.accountId32).toLowerCase()) {
+      throw new Error(
+        `Owner authority self-check failed: ${entry.label} address decodes to ` +
+        `${decodedHex}, not record accountId32 ${entry.accountId32}.`
+      );
+    }
+    return decoded;
+  });
+  const derivedAccountId32 = hexlify(
+    createKeyMulti(decodedSignatories, ownerRecord.threshold)
+  );
+  if (
+    derivedAccountId32.toLowerCase() !==
+    String(ownerRecord?.multisig?.accountId32 ?? "").toLowerCase()
+  ) {
+    throw new Error(
+      `Owner authority self-check failed: derived multisig AccountId32 ` +
+      `${derivedAccountId32} does not match verified owner record ` +
+      `${ownerRecord?.multisig?.accountId32 ?? "<missing>"}.`
+    );
+  }
+
+  const derivedOwner = getAddress(`0x${keccak256(derivedAccountId32).slice(-40)}`);
+  const recordedOwner = getAddress(ownerRecord.multisig.ownerEnvValue);
+  const onchainOwner = getAddress(livePolicyOwner);
+  if (derivedOwner !== recordedOwner) {
+    throw new Error(
+      `Owner authority self-check failed: derived H160 ${derivedOwner} does not ` +
+      `match owner record ${recordedOwner}.`
+    );
+  }
+  if (derivedOwner !== onchainOwner) {
+    throw new Error(
+      `Owner authority self-check failed: derived H160 ${derivedOwner} does not ` +
+      `match live TreasuryPolicy.owner() ${onchainOwner}.`
+    );
+  }
+  return { derivedAccountId32, derivedOwner, livePolicyOwner: onchainOwner };
 }
 
 /**
@@ -208,15 +434,16 @@ function printUsage() {
     [
       "Usage: node scripts/ops/redeploy-escrowcore-wire-multisig.mjs \\",
       "         --new-escrow 0xADDR \\",
-      "         --signer hot|ledger|vault \\",
+      "         --signer LABEL  # from deployments/<profile>-multisig-owner.json \\",
       "         [--timepoint-height N --timepoint-index M] \\",
       "         [--new-agent-account 0xADDR] # when AAC is redeployed too",
       "         [--old-agent-account 0xADDR] # defaults to current deployments/<profile>.json#contracts.agentAccountCore",
       "         [--old-escrow 0xADDR]   # defaults to current deployments/<profile>.json#contracts.escrowCore",
       "         [--skip-revoke]         # keep v1 settlement roles during the drain window",
       "         [--profile testnet] \\",
-      `         [--ws WSS_URL]          # default ${DEFAULT_WS}; env PASEO_AH_WS overrides`,
-      "         [--no-ws]               # skip on-chain hex emission; chain-free recipe only",
+      "         [--ws WSS_URL]          # optional profile-bound override",
+      "                                  # mainnet: POLKADOT_AH_WS; testnet: PASEO_AH_WS",
+      "         [--no-ws]               # use the pinned profile endpoint in Apps, but skip SCALE emission",
       "",
       "First leg (initiate): omit --timepoint-*; maybeTimepoint is None.",
       "Second leg (countersign): pass --timepoint-height and --timepoint-index",
@@ -315,8 +542,8 @@ async function main() {
     process.exitCode = 1;
     return;
   }
-  if (!args.signer || !SIGNER_ALIASES[args.signer]) {
-    console.error(`--signer must be one of: ${Object.keys(SIGNER_ALIASES).join(", ")}`);
+  if (!args.signer) {
+    console.error("--signer LABEL is required.");
     process.exitCode = 1;
     return;
   }
@@ -344,21 +571,33 @@ async function main() {
     return;
   }
 
-  // Pick signer + sorted otherSignatories (canonical AccountId32 byte order).
-  const signersSorted = [...ownerRecord.signatories].sort((a, b) =>
-    a.accountId32.localeCompare(b.accountId32)
-  );
-  const me = signersSorted.find((s) => s.address === SIGNER_ALIASES[args.signer].ss58);
-  if (!me) {
-    console.error(
-      `--signer ${args.signer} (${SIGNER_ALIASES[args.signer].ss58}) is not in deployments/${args.profile}-multisig-owner.json signatories.`
-    );
-    process.exitCode = 2;
-    return;
+  // Resolve the selected device only from this profile's verified owner
+  // record. There is deliberately no cross-profile alias fallback.
+  const signer = resolveProfileSigner({
+    ownerRecord,
+    profile: args.profile,
+    signerLabel: args.signer
+  });
+  const { me, otherSignatories } = signer;
+
+  // Prove the selected profile's complete roster controls the live policy
+  // before emitting any recipe or calldata. This catches stale aliases,
+  // tampered records, wrong-chain RPCs, and owner drift at one boundary.
+  const authorityRpc = await createCeremonyRpcContext({
+    manifest: deployments,
+    phase: "multisig-wire-owner-check",
+    write: false
+  });
+  let authority;
+  const authorityPreflightLines = [];
+  try {
+    const policy = new Contract(treasuryPolicy, TREASURY_POLICY_ABI, authorityRpc.provider);
+    const livePolicyOwner = await policy.owner();
+    authority = assertOwnerRecordAuthority({ ownerRecord, livePolicyOwner });
+    printCeremonyRpcPreflight(authorityRpc, (line) => authorityPreflightLines.push(line));
+  } finally {
+    await authorityRpc.provider.destroy?.();
   }
-  const otherSignatories = signersSorted
-    .filter((s) => s.accountId32 !== me.accountId32)
-    .map((s) => s.address);
 
   // Optional timepoint for second leg.
   const timepoint = args.tpHeight !== undefined
@@ -389,6 +628,53 @@ async function main() {
   const maxWeightRefTime = 4_500_000_000 * innerCalls.length;
   const maxWeightProofSize = 150_000 * innerCalls.length;
 
+  // The Apps link and SCALE encoder share one profile-bound endpoint. Unless
+  // --no-ws was explicitly requested, validate the connected chain, runtime
+  // metadata, and encoded revive pallet byte before printing any recipe.
+  const wsUrl = resolveSubstrateEndpoint(args);
+  const appsExtrinsicsUrl = buildPolkadotAppsExtrinsicsUrl(wsUrl);
+  let payload = null;
+  let substrateAuthority = null;
+  if (!args.noWs) {
+    let api;
+    try {
+      const [{ ApiPromise, WsProvider }, utilCrypto] = await Promise.all([
+        import("@polkadot/api"),
+        import("@polkadot/util-crypto")
+      ]);
+      const provider = new WsProvider(wsUrl);
+      api = await ApiPromise.create({ provider, noInitWarn: true, throwOnConnect: true });
+      payload = await buildOnchainPayload({
+        api,
+        blake2AsHex: utilCrypto.blake2AsHex,
+        innerCalls,
+        reviveRefTime,
+        reviveProofSize,
+        storageDepositLimit,
+        threshold: ownerRecord.threshold,
+        otherSignatories,
+        timepoint,
+        maxWeightRefTime,
+        maxWeightProofSize
+      });
+      substrateAuthority = await assertSubstrateProfileEncoding({
+        api,
+        profile: args.profile,
+        reviveCallHexes: payload.reviveCallHexes
+      });
+    } catch (error) {
+      throw new Error(
+        `Substrate pre-emit self-check failed for profile ${args.profile} at ${wsUrl}: ` +
+          `${error?.message ?? error}. Refusing to emit a signing recipe. ` +
+          "Fix the endpoint or pass --no-ws to request the pinned profile-only Apps recipe."
+      );
+    } finally {
+      if (api) {
+        try { await api.disconnect(); } catch { /* best effort */ }
+      }
+    }
+  }
+
   console.log("# redeploy-escrowcore-wire-multisig");
   console.log(`profile:                 ${args.profile}`);
   console.log(`new EscrowCore:          ${newEscrow}`);
@@ -402,8 +688,20 @@ async function main() {
   console.log(`owner multisig (SS58):   ${ownerRecord.multisig.ss58Address}`);
   console.log(`owner multisig (H160):   ${ownerRecord.multisig.ownerEnvValue}`);
   console.log(`threshold:               ${ownerRecord.threshold}`);
-  console.log(`signing as:              ${SIGNER_ALIASES[args.signer].label} (${me.address})`);
+  console.log(`signing as:              ${me.label} (${me.address})`);
   console.log(`leg:                     ${timepoint ? `countersign (timepoint ${timepoint.height}/${timepoint.index})` : "initiate (timepoint None)"}`);
+  console.log(`derived owner account:   ${authority.derivedAccountId32} ✓`);
+  console.log(`derived/live owner H160: ${authority.derivedOwner} ✓`);
+  authorityPreflightLines.forEach((line) => console.log(line));
+  console.log(`substrate endpoint:      ${wsUrl}`);
+  if (substrateAuthority) {
+    console.log(
+      `substrate preflight:   ${substrateAuthority.chainName}, revive pallet ` +
+        `${substrateAuthority.revivePalletIndex} ✓`
+    );
+  } else {
+    console.log("substrate preflight:   skipped by explicit --no-ws");
+  }
   console.log("");
 
   console.log("## Inner EVM calldata:");
@@ -447,8 +745,8 @@ async function main() {
   console.log("");
 
   console.log("## polkadot-js-apps recipe");
-  console.log("  1. Open https://polkadot.js.org/apps/?rpc=wss%3A%2F%2Fasset-hub-paseo-rpc.n.dwellir.com#/extrinsics");
-  console.log(`  2. Selected account: ${SIGNER_ALIASES[args.signer].label} (${me.address})`);
+  console.log(`  1. Open ${appsExtrinsicsUrl}`);
+  console.log(`  2. Selected account: ${me.label} (${me.address})`);
   console.log("     — sign via browser extension (polkadot{.js}, Talisman, SubWallet) or Ledger USB.");
   console.log("  3. submit extrinsic: multisig > asMulti(threshold, otherSignatories, maybeTimepoint, call, maxWeight)");
   console.log(`  4. threshold: ${ownerRecord.threshold}`);
@@ -483,8 +781,16 @@ async function main() {
   console.log("  9. Submit Transaction → sign with browser extension / Ledger.");
   if (!timepoint) {
     console.log(" 10. Find the resulting `multisig.NewMultisig` event; record the block height + extrinsic index.");
-    console.log("     Re-run this script with --signer ledger --timepoint-height <H> --timepoint-index <I>");
-    console.log("     to generate the Ledger countersign recipe.");
+    const countersigners = ownerRecord.signatories
+      .filter(
+        (entry) =>
+          String(entry.accountId32).toLowerCase() !==
+          String(me.accountId32).toLowerCase()
+      )
+      .map((entry) => entry.label)
+      .join("|");
+    console.log(`     Re-run this script with --signer <${countersigners}> --timepoint-height <H> --timepoint-index <I>`);
+    console.log("     to generate the countersign recipe for the selected second device.");
   } else {
     console.log(" 10. Find the resulting `multisig.MultisigExecuted` event; record the call hash + block.");
     console.log("     Then run:");
@@ -493,106 +799,65 @@ async function main() {
     console.log("         --deploy-tx 0xDEPLOY_TX --multisig-exec-tx 0xEXEC_TX --commit");
   }
 
-  // ----- On-chain hex emission (optional, requires Paseo AH WS reachability) -----
-  const wsUrl = resolveWs(args);
-  if (!wsUrl) {
+  // ----- Profile-verified SCALE emission -----
+  if (!payload) {
     console.log("");
     console.log("## Inner call hex");
     console.log("  --no-ws was passed; on-chain SCALE encoding skipped.");
-    console.log("  The chain-free recipe above is sufficient to construct the call in Apps.");
+    console.log(
+      `  The Apps recipe remains pinned to ${substrateProfileConfig(args.profile).chainName}.`
+    );
     return;
   }
 
   console.log("");
-  console.log(`## Connecting to ${wsUrl} to SCALE-encode the inner call…`);
-  let api;
-  let blake2AsHex;
-  try {
-    const [{ ApiPromise, WsProvider }, utilCrypto] = await Promise.all([
-      import("@polkadot/api"),
-      import("@polkadot/util-crypto")
-    ]);
-    blake2AsHex = utilCrypto.blake2AsHex;
-    const provider = new WsProvider(wsUrl);
-    api = await ApiPromise.create({ provider, noInitWarn: true, throwOnConnect: true });
-  } catch (error) {
+  console.log("## Inner call hex (paste into Apps multisig pending → 'call data for final approval')");
+  if (payload.isBatch) {
+    payload.reviveCallHexes.forEach((hex, i) => {
+      console.log(`  revive.call[${i + 1}] hex: ${hex}`);
+    });
     console.log("");
-    console.log("## Inner call hex");
-    console.log(`  WS connect to ${wsUrl} failed: ${error?.message ?? error}`);
-    console.log("  Falling back to chain-free recipe above. To skip this attempt, pass --no-ws.");
-    console.log("  To retry with a different endpoint: --ws wss://... or PASEO_AH_WS=wss://...");
-    if (api) {
-      try { await api.disconnect(); } catch { /* best effort */ }
+    console.log(`  utility.batchAll hex:  ${payload.outerCallHex}`);
+  } else {
+    console.log(`  revive.call hex:       ${payload.outerCallHex}`);
+  }
+  console.log(`  length:                ${(payload.outerCallHex.length - 2) / 2} bytes`);
+  console.log(`  blake2 call hash:      ${payload.outerCallHash}`);
+  console.log("    ↑ this is the call_hash that will appear in the multisig.NewMultisig event,");
+  console.log("      and the storage key for the pending multisig entry. Verify it matches what");
+  console.log("      polkadot-js-apps shows under 'Multisig' → 'pending approvals' before the");
+  console.log("      second-leg signer countersigns.");
+
+  if (payload.isBatch) {
+    const expectedPrefix = UTILITY_BATCH_ALL_CALL_INDEX;
+    const actualPrefix = payload.outerCallHex.slice(0, expectedPrefix.length).toLowerCase();
+    const prefixOk = actualPrefix === expectedPrefix.toLowerCase();
+    console.log("");
+    console.log(`  call index check:      ${prefixOk ? "✓" : "✗"} ${actualPrefix} (expected ${expectedPrefix} for utility.batchAll)`);
+    if (!prefixOk) {
+      console.log("    ↑ runtime metadata may have moved utility.batchAll — do NOT submit until investigated.");
     }
-    return;
   }
 
-  try {
-    const payload = await buildOnchainPayload({
-      api,
-      blake2AsHex,
-      innerCalls,
-      reviveRefTime,
-      reviveProofSize,
-      storageDepositLimit,
-      threshold: ownerRecord.threshold,
-      otherSignatories,
-      timepoint,
-      maxWeightRefTime,
-      maxWeightProofSize
-    });
-
-    console.log("");
-    console.log("## Inner call hex (paste into Apps multisig pending → 'call data for final approval')");
-    if (payload.isBatch) {
-      payload.reviveCallHexes.forEach((hex, i) => {
-        console.log(`  revive.call[${i + 1}] hex: ${hex}`);
-      });
-      console.log("");
-      console.log(`  utility.batchAll hex:  ${payload.outerCallHex}`);
-    } else {
-      console.log(`  revive.call hex:       ${payload.outerCallHex}`);
-    }
-    console.log(`  length:                ${(payload.outerCallHex.length - 2) / 2} bytes`);
-    console.log(`  blake2 call hash:      ${payload.outerCallHash}`);
-    console.log("    ↑ this is the call_hash that will appear in the multisig.NewMultisig event,");
-    console.log("      and the storage key for the pending multisig entry. Verify it matches what");
-    console.log("      polkadot-js-apps shows under 'Multisig' → 'pending approvals' before the");
-    console.log("      second-leg signer countersigns.");
-
-    if (payload.isBatch) {
-      const expectedPrefix = UTILITY_BATCH_ALL_CALL_INDEX;
-      const actualPrefix = payload.outerCallHex.slice(0, expectedPrefix.length).toLowerCase();
-      const prefixOk = actualPrefix === expectedPrefix.toLowerCase();
-      console.log("");
-      console.log(`  call index check:      ${prefixOk ? "✓" : "✗"} ${actualPrefix} (expected ${expectedPrefix} for utility.batchAll)`);
-      if (!prefixOk) {
-        console.log("    ↑ runtime metadata may have moved utility.batchAll — do NOT submit until investigated.");
-      }
-    }
-
-    console.log("");
-    console.log("## Cross-check: inner EVM calldata embedded in SCALE blob");
-    const embedChecks = verifyEvmCalldataEmbedded({ outerCallHex: payload.outerCallHex, innerCalls });
-    embedChecks.forEach((c, i) => {
-      console.log(`  [${i + 1}] ${c.embedded ? "✓ embedded" : "✗ MISSING"} — ${c.label}`);
-    });
-    const anyMissing = embedChecks.some((c) => !c.embedded);
-    if (anyMissing) {
-      console.log("    ↑ At least one inner EVM calldata is NOT present inside the SCALE call hex.");
-      console.log("      The chain-free recipe and the on-chain encoding have drifted — do NOT submit.");
-      process.exitCode = 4;
-    } else {
-      console.log("  → on-chain hash above corresponds to exactly the EVM calldata printed earlier.");
-    }
-
-    console.log("");
-    console.log("## First-leg shortcut (paste-and-submit asMulti)");
-    console.log(`  asMulti hex:           ${payload.asMultiHex}`);
-    console.log("  Apps → Developer → Extrinsics → Decode tab → paste this → review → Submission.");
-  } finally {
-    try { await api.disconnect(); } catch { /* best effort */ }
+  console.log("");
+  console.log("## Cross-check: inner EVM calldata embedded in SCALE blob");
+  const embedChecks = verifyEvmCalldataEmbedded({ outerCallHex: payload.outerCallHex, innerCalls });
+  embedChecks.forEach((c, i) => {
+    console.log(`  [${i + 1}] ${c.embedded ? "✓ embedded" : "✗ MISSING"} — ${c.label}`);
+  });
+  const anyMissing = embedChecks.some((c) => !c.embedded);
+  if (anyMissing) {
+    console.log("    ↑ At least one inner EVM calldata is NOT present inside the SCALE call hex.");
+    console.log("      The chain-free recipe and the on-chain encoding have drifted — do NOT submit.");
+    process.exitCode = 4;
+  } else {
+    console.log("  → on-chain hash above corresponds to exactly the EVM calldata printed earlier.");
   }
+
+  console.log("");
+  console.log("## First-leg shortcut (paste-and-submit asMulti)");
+  console.log(`  asMulti hex:           ${payload.asMultiHex}`);
+  console.log("  Apps → Developer → Extrinsics → Decode tab → paste this → review → Submission.");
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

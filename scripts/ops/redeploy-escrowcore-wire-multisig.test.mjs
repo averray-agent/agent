@@ -1,11 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { Interface } from "ethers";
 import {
   parseArgs,
   buildInnerCalls,
   buildOnchainPayload,
-  resolveWs,
+  resolveProfileSigner,
+  assertOwnerRecordAuthority,
+  resolveSubstrateEndpoint,
+  buildPolkadotAppsExtrinsicsUrl,
+  assertSubstrateProfileEncoding,
+  SUBSTRATE_PROFILE_CONFIG,
   verifyEvmCalldataEmbedded,
   UTILITY_BATCH_ALL_CALL_INDEX
 } from "./redeploy-escrowcore-wire-multisig.mjs";
@@ -28,6 +34,18 @@ const TREASURY_POLICY = "0x648Cc5fdE94435992296C4e5ac642d18bB64c12B";
 const AGENT_ACCOUNT = "0x71B111d8c9DF84Be26cb9067D27dAd7A2d5E7e08";
 const NEW_AGENT_ACCOUNT = "0xbd9c2d9336a91415287bb032ec34e8b80a1f38a0";
 const BACKEND_SIGNER = "0x31ad432dFe083B998c69B6dB88A984ec5207ab7F";
+const MAINNET_OWNER_RECORD = JSON.parse(
+  readFileSync(
+    new URL("../../deployments/mainnet-multisig-owner.json", import.meta.url),
+    "utf8"
+  )
+);
+const TESTNET_OWNER_RECORD = JSON.parse(
+  readFileSync(
+    new URL("../../deployments/testnet-multisig-owner.json", import.meta.url),
+    "utf8"
+  )
+);
 
 test("parseArgs defaults profile=testnet, skipRevoke=false", () => {
   const args = parseArgs([]);
@@ -57,6 +75,140 @@ test("parseArgs reads --skip-revoke + --old-escrow override", () => {
   ]);
   assert.equal(args.oldEscrow, OLD);
   assert.equal(args.skipRevoke, true);
+});
+
+test("profile signer resolution rejects aliases from the other network", () => {
+  const mainnetLedger = resolveProfileSigner({
+    ownerRecord: MAINNET_OWNER_RECORD,
+    profile: "mainnet",
+    signerLabel: "ledger"
+  });
+  assert.equal(
+    mainnetLedger.me.address,
+    "1mhf9yyYq3ArZAEysQQfWYNe2rgrDP6omrn6xiJBbwKqYZH"
+  );
+  assert.throws(
+    () =>
+      resolveProfileSigner({
+        ownerRecord: MAINNET_OWNER_RECORD,
+        profile: "mainnet",
+        signerLabel: "hot"
+      }),
+    /--signer hot is not defined for profile mainnet.*ledger, vault, nova/u
+  );
+
+  const testnetHot = resolveProfileSigner({
+    ownerRecord: TESTNET_OWNER_RECORD,
+    profile: "testnet",
+    signerLabel: "hot"
+  });
+  assert.equal(
+    testnetHot.me.address,
+    "14ruuTeh5cXMTr9SLNuLt1NiroQZgt5ZQnwYrhg7K5LHiXQb"
+  );
+  assert.throws(
+    () =>
+      resolveProfileSigner({
+        ownerRecord: TESTNET_OWNER_RECORD,
+        profile: "testnet",
+        signerLabel: "nova"
+      }),
+    /--signer nova is not defined for profile testnet.*vault, ledger, hot/u
+  );
+  assert.throws(
+    () =>
+      resolveProfileSigner({
+        ownerRecord: TESTNET_OWNER_RECORD,
+        profile: "mainnet",
+        signerLabel: "ledger"
+      }),
+    /Owner record profile "testnet" does not match requested profile "mainnet"/u
+  );
+});
+
+test("mainnet owner record derives the live TreasuryPolicy owner", () => {
+  const result = assertOwnerRecordAuthority({
+    ownerRecord: MAINNET_OWNER_RECORD,
+    livePolicyOwner: "0x01e6eed856e989201f4ff6346e18eab7e46c874c"
+  });
+  assert.equal(
+    result.derivedAccountId32,
+    "0x93511e8deef3e7ec69cc1f18a573176da9870a0fb474ab2e0c18d88a5e74fd47"
+  );
+  assert.equal(
+    result.derivedOwner,
+    "0x01E6eed856e989201F4FF6346E18EAb7e46C874C"
+  );
+});
+
+test("owner authority derivation fails closed on a tampered roster", () => {
+  const tampered = structuredClone(MAINNET_OWNER_RECORD);
+  tampered.signatories[0].address =
+    "13pav6xpfdapyCAqfRhWZXxUnqDhjrF92dJr3FBwVfBKUKSM";
+  tampered.signatories[0].accountId32 =
+    "0x7cc32bbee82258e9302721a93de10cc95bd1def2af0762223ee22dbb18f1da67";
+
+  assert.throws(
+    () =>
+      assertOwnerRecordAuthority({
+        ownerRecord: tampered,
+        livePolicyOwner: "0x01e6eed856e989201f4ff6346e18eab7e46c874c"
+      }),
+    /derived multisig AccountId32 .* does not match verified owner record/u
+  );
+});
+
+test("owner authority derivation fails closed when the live policy has another owner", () => {
+  assert.throws(
+    () =>
+      assertOwnerRecordAuthority({
+        ownerRecord: MAINNET_OWNER_RECORD,
+        livePolicyOwner: "0x1f8c4da4aaac79916350f1fabf1221309591b6f9"
+      }),
+    /derived H160 .* does not match live TreasuryPolicy\.owner\(\)/u
+  );
+});
+
+test("testnet profile resolution preserves the former hardcoded roster and ordering", () => {
+  const resolved = resolveProfileSigner({
+    ownerRecord: TESTNET_OWNER_RECORD,
+    profile: "testnet",
+    signerLabel: "ledger"
+  });
+  assert.deepEqual(
+    {
+      label: resolved.me.label,
+      address: resolved.me.address,
+      otherSignatories: resolved.otherSignatories
+    },
+    {
+      label: "ledger",
+      address: "148tqwhGxeCva7ZX8RwvaLjCS7HvDJJaSbxfTUwE9Zyc5Xtm",
+      otherSignatories: [
+        "13pav6xpfdapyCAqfRhWZXxUnqDhjrF92dJr3FBwVfBKUKSM",
+        "14ruuTeh5cXMTr9SLNuLt1NiroQZgt5ZQnwYrhg7K5LHiXQb"
+      ]
+    }
+  );
+});
+
+test("signatory sorting normalizes accountId32 case before byte-order comparison", () => {
+  const mixedCaseRecord = {
+    profile: "testnet",
+    status: "verified",
+    threshold: 2,
+    signatories: [
+      { label: "b", address: "B", accountId32: "0xB0" },
+      { label: "a", address: "A", accountId32: "0xa0" },
+      { label: "c", address: "C", accountId32: "0xC0" }
+    ]
+  };
+  const resolved = resolveProfileSigner({
+    ownerRecord: mixedCaseRecord,
+    profile: "testnet",
+    signerLabel: "b"
+  });
+  assert.deepEqual(resolved.otherSignatories, ["A", "C"]);
 });
 
 test("parseArgs reads fresh AgentAccountCore overrides", () => {
@@ -249,22 +401,122 @@ test("parseArgs reads --ws / --no-ws", () => {
   assert.equal(b.noWs, true);
 });
 
-test("resolveWs prefers --ws over env, env over default, --no-ws returns null", () => {
-  const prevEnv = process.env.PASEO_AH_WS;
-  try {
-    process.env.PASEO_AH_WS = "wss://env-endpoint.example";
-    assert.equal(resolveWs({ ws: "wss://cli.example", noWs: false }), "wss://cli.example");
-    assert.equal(resolveWs({ noWs: false }), "wss://env-endpoint.example");
-    assert.equal(resolveWs({ noWs: true }), null);
-    delete process.env.PASEO_AH_WS;
-    assert.equal(resolveWs({ noWs: false }), "wss://sys.ibp.network/asset-hub-paseo");
-  } finally {
-    if (prevEnv === undefined) delete process.env.PASEO_AH_WS;
-    else process.env.PASEO_AH_WS = prevEnv;
-  }
+test("mainnet profile resolves and emits only a Polkadot Asset Hub endpoint", () => {
+  const wsUrl = resolveSubstrateEndpoint({ profile: "mainnet" }, {});
+  assert.equal(wsUrl, "wss://polkadot-asset-hub-rpc.polkadot.io");
+  assert.doesNotMatch(wsUrl, /paseo/iu);
+
+  const appsUrl = buildPolkadotAppsExtrinsicsUrl(wsUrl);
+  assert.equal(
+    appsUrl,
+    "https://polkadot.js.org/apps/?rpc=wss%3A%2F%2Fpolkadot-asset-hub-rpc.polkadot.io#/extrinsics"
+  );
+  assert.doesNotMatch(appsUrl, /paseo/iu);
 });
 
-test("UTILITY_BATCH_ALL_CALL_INDEX is the Asset Hub Paseo runtime prefix", () => {
+test("Substrate endpoint resolution is profile-bound with no cross-profile fallback", () => {
+  assert.equal(
+    resolveSubstrateEndpoint(
+      { profile: "mainnet" },
+      {
+        POLKADOT_AH_WS: "wss://mainnet.example",
+        PASEO_AH_WS: "wss://must-not-be-used.example/paseo"
+      }
+    ),
+    "wss://mainnet.example"
+  );
+  assert.equal(
+    resolveSubstrateEndpoint(
+      { profile: "testnet" },
+      {
+        POLKADOT_AH_WS: "wss://must-not-be-used.example/mainnet",
+        PASEO_AH_WS: "wss://testnet.example"
+      }
+    ),
+    "wss://testnet.example"
+  );
+  assert.throws(
+    () => resolveSubstrateEndpoint({ profile: "staging" }, {}),
+    /No Substrate endpoint is defined for profile "staging"/u
+  );
+  assert.equal(
+    resolveSubstrateEndpoint(
+      { profile: "mainnet", noWs: true },
+      { POLKADOT_AH_WS: "wss://unverified.example" }
+    ),
+    "wss://polkadot-asset-hub-rpc.polkadot.io"
+  );
+  assert.throws(
+    () =>
+      resolveSubstrateEndpoint(
+        { profile: "mainnet", noWs: true, ws: "wss://unverified.example" },
+        {}
+      ),
+    /--ws cannot be combined with --no-ws/u
+  );
+});
+
+function fakeSubstrateApi({
+  profile,
+  chainName,
+  genesisHash,
+  reviveIndex
+}) {
+  const config = SUBSTRATE_PROFILE_CONFIG[profile];
+  return {
+    genesisHash: {
+      toHex: () => genesisHash ?? config.genesisHash
+    },
+    rpc: {
+      system: {
+        chain: async () => ({
+          toString: () => chainName ?? config.chainName
+        })
+      }
+    },
+    runtimeMetadata: {
+      asLatest: {
+        pallets: [
+          {
+            name: { toString: () => "Revive" },
+            index: { toNumber: () => reviveIndex ?? config.revivePalletIndex }
+          }
+        ]
+      }
+    }
+  };
+}
+
+test("Paseo-encoded revive calls are rejected for the mainnet profile", async () => {
+  await assert.rejects(
+    () =>
+      assertSubstrateProfileEncoding({
+        api: fakeSubstrateApi({ profile: "mainnet" }),
+        profile: "mainnet",
+        reviveCallHexes: ["0x64deadbeef"]
+      }),
+    /encoded revive\.call uses pallet index 100 \(0x64\).*mainnet metadata uses 90 \(0x5a\)/u
+  );
+});
+
+test("Substrate profile guard rejects a Paseo connection for mainnet", async () => {
+  await assert.rejects(
+    () =>
+      assertSubstrateProfileEncoding({
+        api: fakeSubstrateApi({
+          profile: "mainnet",
+          chainName: "Paseo Asset Hub",
+          genesisHash: SUBSTRATE_PROFILE_CONFIG.testnet.genesisHash,
+          reviveIndex: 100
+        }),
+        profile: "mainnet",
+        reviveCallHexes: ["0x64deadbeef"]
+      }),
+    /connected genesis .* does not match mainnet Polkadot Asset Hub/u
+  );
+});
+
+test("UTILITY_BATCH_ALL_CALL_INDEX is the current Asset Hub runtime prefix", () => {
   // pallet_utility (40 = 0x28) + batchAll call (2 = 0x02). If a runtime
   // upgrade reshuffles pallet indexes, this constant — and the on-chain
   // hex emitter that checks against it — needs to be updated.
