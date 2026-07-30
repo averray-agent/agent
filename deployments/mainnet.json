@@ -18,9 +18,10 @@
     "agentAccountCore": "0xB1350932bf85E7ffd0599E9a3CC7b55718D89E57",
     "reputationSbt": "0xA85AF867b5f573176f49F0D6A827F61A5Cee4e37",
     "discoveryRegistry": "0x47876D138e3a26c485A5f8acbAC7AEcA3c7e6C62",
-    "escrowCore": "0x9cCd1DbBB5C354CC6218e55D3cE924A4d631C035",
+    "escrowCore": "0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC",
     "xcmWrapper": null,
-    "token": "0x0000053900000000000000000000000001200000"
+    "token": "0x0000053900000000000000000000000001200000",
+    "legacyEscrowCore": "0x9cCd1DbBB5C354CC6218e55D3cE924A4d631C035"
   },
   "contractProvenance": {
     "0x226F14252A98BD2eA140271647De20132F09AF20": {
@@ -58,16 +59,13 @@
       "abiHash": "sha256:af896ebc7901695956984d3382e155239de097a40684531a82e8b71a30a208c7",
       "runtimeCodeHash": "sha256:f4790b2c80c423aa9c8c4fe55033891b68d7aff6891905f243051e21b1722535",
       "verifiedAt": "2026-07-29T19:40:33.000Z"
+    },
+    "0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC": {
+      "sourceCommit": "775a826b0a33d0ec04dd19f0455e69402dc9bbcd",
+      "abiHash": "sha256:f3b2f31a958402e0139217264dc356406130cbea402094d54bbd9f93343d5165",
+      "runtimeCodeHash": "sha256:bc0d1cfe6fa46a5a3c5b0954c575ba1c78ecd1a48cf48dd83fb19d239aaa7b37",
+      "verifiedAt": "2026-07-30T10:05:34.288Z"
     }
-  },
-  "knownUnshippedContractChanges": {
-    "escrowCore": [
-      {
-        "sourceCommit": "775a826b0a33d0ec04dd19f0455e69402dc9bbcd",
-        "maskedRuntimeCodeHash": "sha256:64ec86a04369cbbd49a30e0dcf04cf785707a78fcd42f87c0c692f77a7372788",
-        "reason": "EscrowCore v2 success-path protocol fees (#850) are deliberately undeployed pending external audit, migration, dual-address drain, and dogfood proof."
-      }
-    ]
   },
   "parameters": {
     "dailyOutflowCap": "115792089237316195423570985008687907853269984665640564039457584007913129639935",
@@ -81,7 +79,8 @@
     "rejectionSkillPenalty": "10",
     "rejectionReliabilityPenalty": "25",
     "disputeLossSkillPenalty": "35",
-    "disputeLossReliabilityPenalty": "60"
+    "disputeLossReliabilityPenalty": "60",
+    "protocolFeeBps": "0"
   },
   "deploymentBlocks": {
     "treasuryPolicy": 18647521,
@@ -89,7 +88,8 @@
     "agentAccountCore": 18647537,
     "reputationSbt": 18647544,
     "discoveryRegistry": 18647552,
-    "escrowCore": 18647902
+    "escrowCore": 18647902,
+    "escrowCoreV2": 18809168
   },
   "runtime": {
     "auth": {
@@ -108,5 +108,14 @@
       "schema": "agent_indexer_mainnet_20260725131847"
     }
   },
-  "strategies": []
+  "strategies": [],
+  "deployers": {
+    "escrowCoreV2": "0x9Ab8531FBb0948C542a31298FD61335f30064239"
+  },
+  "escrowRedeployedAt": "2026-07-30T10:01:56.005Z",
+  "escrowRedeployTxHashes": {
+    "deploy": "0xc4d6d442824bec61f8ca99646022b66776af88406a56f8c3da67e338610d132b",
+    "multisigExec": "0xcc0a70c1031ae2540d79c61e7be9f463ecdb56b8d84af05e570ff9db41ac9b2c",
+    "revokeOld": null
+  }
 }

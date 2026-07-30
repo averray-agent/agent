@@ -21,6 +21,7 @@ import assert from "node:assert/strict";
 
 import {
   parseArgs,
+  resolveExpectedChainId,
   resolveRewardRaw,
   computeRequiredClaimAmount,
   formatUsdc,
@@ -56,6 +57,18 @@ test("parseArgs: --min-reward captures the raw base-unit string", () => {
 test("parseArgs: ignores unknown flags rather than throwing", () => {
   const args = parseArgs(["--unknown", "value", "--profile", "testnet"]);
   assert.equal(args.profile, "testnet");
+});
+
+test("resolveExpectedChainId: resolves each deployment profile independently", () => {
+  assert.equal(resolveExpectedChainId("testnet"), 420420417);
+  assert.equal(resolveExpectedChainId("mainnet"), 420420419);
+});
+
+test("resolveExpectedChainId: rejects an unconfigured profile", () => {
+  assert.throws(
+    () => resolveExpectedChainId("staging"),
+    /No expected chain ID configured/u
+  );
 });
 
 // --- resolveRewardRaw -----------------------------------------------------
