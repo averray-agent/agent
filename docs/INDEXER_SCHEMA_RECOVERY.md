@@ -12,7 +12,9 @@ entrypoint. It:
 
 1. Holds the production deploy lock and the host-wide
    `/tmp/averray-indexer-schema.lock`.
-2. Computes the incoming app identity from the committed `indexer/` Git tree.
+2. Computes the incoming app identity from the committed `indexer/` Git tree
+   **and** the selected network's committed `POLKADOT_*`/`PONDER_*` contract
+   configuration.
 3. Compares it with the identity that last deployed successfully.
 4. Reuses the persisted schema when the identity matches.
 5. Mints a unique, network-scoped schema when the identity changed, then
@@ -22,10 +24,16 @@ entrypoint. It:
 7. Persists the new schema and owner identity only after the health gate
    succeeds.
 
+The comparison runs on every normal deploy, not only when the current Git range
+contains an indexer change. This is deliberate: a failed deploy may already
+have fast-forwarded the checkout and rendered new contract addresses before it
+stopped, so range-only detection would miss the mismatch on retry.
+
 The state files are outside the checkout under `$DEPLOY_STATE_DIR`:
 
 - `indexer.database-schema.<network>` — last-good schema
-- `indexer.app-identity.<network>` — Git tree that owns it
+- `indexer.app-identity.<network>` — composite source/config identity that owns
+  it
 - `indexer.resync.<network>` — auditable re-sync-start record, including the
   initial staged status, source SHA, actor, reason, previous schema, and start
   time. It is historical evidence, not the current catch-up signal.
@@ -50,14 +58,32 @@ recorded as last-good.
 
 ## Explicit recovery controls
 
-Normal app-identity changes rotate automatically. The workflow inputs remain
-available for an operator-directed recovery:
+Normal source or indexed-contract configuration changes rotate automatically.
+The workflow inputs remain available for an operator-directed recovery:
 
 - `indexer_fresh_schema=1` mints a never-used schema.
 - `indexer_database_schema=<name>` selects an explicit never-used schema.
 
 The deploy refuses an explicit schema that is already associated with the
 previous app when the identity changed.
+
+For an operator-directed historical replay while `/ready` is intentionally
+staged, use:
+
+```sh
+gh workflow run deploy-production.yml -R averray-agent/agent \
+  -f run_indexer=1 \
+  -f indexer_fresh_schema=1 \
+  -f wait_for_ready=0 \
+  -f health_stability_sec=15 \
+  -f smoke_check_indexer=0
+```
+
+The durable production network selector chooses mainnet; this workflow has no
+profile input. `smoke_check_indexer=0` suppresses only the later global
+`/ready` smoke during replay. The indexer replacement itself still must hold
+stable `/health` for 15 seconds, and the re-sync record plus
+`externalPostingWatcherLagSeconds` remain visible.
 
 ## Retiring stale schemas
 

@@ -1464,6 +1464,36 @@ indexer_tree_identity() {
   git -C "$APP_ROOT" rev-parse "${revision}:indexer" 2>/dev/null
 }
 
+indexer_ponder_config_identity() {
+  local revision="$1"
+  local template_path="${INDEXER_ENV_TEMPLATE#$APP_ROOT/}"
+  local template=""
+  template=$(git -C "$APP_ROOT" show "${revision}:${template_path}" 2>/dev/null) || return 1
+
+  # Ponder's schema ownership depends on the resolved app configuration, not
+  # just the indexer source tree. Hash only committed, non-secret Ponder/chain
+  # inputs; DATABASE_SCHEMA is deliberately excluded because it is the value
+  # this identity selects.
+  local config=""
+  config=$(
+    printf '%s\n' "$template" \
+      | awk -F= '$1 == "POLKADOT_CHAIN_ID" || $1 == "POLKADOT_CHAIN_NAME" || $1 ~ /^PONDER_[A-Z0-9_]+$/ { print }' \
+      | LC_ALL=C sort
+  )
+  [[ -n "$config" ]] || return 1
+  printf '%s\n' "$config" | git -C "$APP_ROOT" hash-object --stdin
+}
+
+indexer_app_identity() {
+  local revision="$1"
+  local tree_identity=""
+  local config_identity=""
+  tree_identity=$(indexer_tree_identity "$revision") || return 1
+  config_identity=$(indexer_ponder_config_identity "$revision") || return 1
+  printf 'indexer_tree=%s\nponder_config=%s\n' "$tree_identity" "$config_identity" \
+    | git -C "$APP_ROOT" hash-object --stdin
+}
+
 mint_indexer_schema() {
   local identity="$1"
   local nonce
@@ -1586,31 +1616,55 @@ apply_indexer_database_schema() {
     validate_indexer_schema "$persisted_schema"
   fi
 
+  local candidate_tree_identity=""
+  candidate_tree_identity=$(indexer_tree_identity "$NEW_SHA") || {
+    echo "Cannot compute the incoming indexer source identity from $NEW_SHA:indexer; refusing schema selection before container recreation." >&2
+    exit 1
+  }
   local candidate_identity=""
-  candidate_identity=$(indexer_tree_identity "$NEW_SHA") || {
-    echo "Cannot compute the incoming indexer app identity from $NEW_SHA:indexer; refusing schema selection before container recreation." >&2
+  candidate_identity=$(indexer_app_identity "$NEW_SHA") || {
+    echo "Cannot compute the incoming indexer app/config identity from $NEW_SHA:indexer and $INDEXER_ENV_TEMPLATE; refusing schema selection before container recreation." >&2
     exit 1
   }
   local persisted_identity=""
   persisted_identity=$(read_persisted_indexer_identity)
   local deployed_identity=""
+  local deployed_tree_identity=""
   local deployed_sha=""
   deployed_sha=$(read_component_sha indexer)
-  deployed_identity=$(indexer_tree_identity "$deployed_sha" || true)
+  deployed_tree_identity=$(indexer_tree_identity "$deployed_sha" || true)
+  deployed_identity=$(indexer_app_identity "$deployed_sha" || true)
 
-  # Hosts predating the ownership record can safely bootstrap only when the
-  # incoming indexer tree is byte-identical to the last successfully deployed
-  # indexer tree. Any other unknown/mismatched identity rotates rather than
-  # gambling on Ponder accepting the old schema at container start.
+  # #833 originally persisted only the indexer Git tree. Upgrade that legacy
+  # value in memory using the last-good deploy SHA so a host that already
+  # recovered onto the current config does not rotate twice. When the config
+  # changed since the last-good SHA, the composite identities differ and the
+  # normal path below rotates before Ponder starts.
   local previous_identity="$persisted_identity"
+  if [[ -n "$previous_identity" \
+    && -n "$deployed_tree_identity" \
+    && "$previous_identity" == "$deployed_tree_identity" \
+    && -n "$deployed_identity" ]]; then
+    previous_identity="$deployed_identity"
+    echo "Upgrading legacy tree-only indexer owner identity from last-good deploy $deployed_sha: $previous_identity"
+  fi
+
+  # Hosts predating any ownership record can safely bootstrap only when the
+  # incoming composite identity is byte-identical to the last successfully
+  # deployed app/config identity. Any other unknown/mismatched identity rotates
+  # rather than gambling on Ponder accepting the old schema at container start.
   if [[ -z "$previous_identity" && -n "$deployed_identity" && "$deployed_identity" == "$candidate_identity" ]]; then
     previous_identity="$deployed_identity"
     echo "Bootstrapping indexer app identity from last-good deploy $deployed_sha: $previous_identity"
   fi
 
   local identity_changed=0
+  local identity_change_reason="app_identity_changed"
   if [[ "$indexer_deploy_requested" == "1" && "$candidate_identity" != "$previous_identity" ]]; then
     identity_changed=1
+    if [[ -n "$deployed_tree_identity" && "$candidate_tree_identity" == "$deployed_tree_identity" ]]; then
+      identity_change_reason="ponder_config_changed"
+    fi
     if [[ -n "$previous_identity" ]]; then
       echo "Pre-swap schema ownership check: incoming indexer identity $candidate_identity differs from owner $previous_identity."
     else
@@ -1644,8 +1698,8 @@ apply_indexer_database_schema() {
     target_schema=$(mint_indexer_schema "$candidate_identity")
     validate_indexer_schema "$target_schema"
     INDEXER_SCHEMA_ROTATED=1
-    INDEXER_SCHEMA_ROTATION_REASON="app_identity_changed"
-    echo "::warning::Indexer app identity changed; automatically rotating DATABASE_SCHEMA before container recreation: ${current_schema:-${persisted_schema:-<default>}} -> $target_schema"
+    INDEXER_SCHEMA_ROTATION_REASON="$identity_change_reason"
+    echo "::warning::Indexer app/config identity changed; automatically rotating DATABASE_SCHEMA before container recreation: ${current_schema:-${persisted_schema:-<default>}} -> $target_schema"
   else
     if [[ -n "$persisted_schema" ]]; then
       target_schema="$persisted_schema"
@@ -1769,23 +1823,36 @@ deploy() {
   local run_caddy=0
   local backend_deployed_sha=""
   local indexer_code_changed=0
+  local indexer_config_changed=0
+  local indexer_schema_check_requested=1
 
   # Resolve the indexer path gate before schema selection. Ponder ties a
-  # DATABASE_SCHEMA to a build identity, so an incoming indexer tree must be
-  # compared with the last-good owner before anything recreates the container.
+  # DATABASE_SCHEMA to a build + contract-config identity, so incoming indexer
+  # source and Ponder env changes must be compared with the last-good owner
+  # before anything recreates the container. The comparison is unconditional
+  # on normal deploys: a prior failed deploy may already have fast-forwarded
+  # the checkout and rendered the new env, so the current OLD..NEW range alone
+  # is not authoritative.
   # A forced RUN_INDEXER=1 is intentionally treated as a deploy request; an
   # explicit RUN_INDEXER=0 leaves both the running indexer and schema untouched.
   if should_run indexer "$RUN_INDEXER" '^(indexer/|scripts/ops/redeploy-indexer\.sh)'; then
     indexer_code_changed=1
   fi
+  case "$RUN_INDEXER" in
+    0|false|no) indexer_schema_check_requested=0 ;;
+    *)
+      if changed_matches '^deploy/indexer(\.mainnet)?\.env\.template$'; then
+        indexer_config_changed=1
+      fi
+      ;;
+  esac
 
   render_runtime_envs
-  if [[ "$indexer_code_changed" == "1" \
-    || "${RUNTIME_ENV_CHANGED_INDEXER:-0}" == "1" \
+  if [[ "$indexer_schema_check_requested" == "1" \
     || -n "$INDEXER_DATABASE_SCHEMA" \
     || "$INDEXER_FRESH_SCHEMA" != "0" ]]; then
     acquire_indexer_schema_lock
-    apply_indexer_database_schema "$indexer_code_changed"
+    apply_indexer_database_schema 1
   fi
 
   # Phase 2 PR 2.6: the trigger for backend redeploy is now path-based
@@ -1854,7 +1921,9 @@ deploy() {
   # Treating either root file as indexer code caused an app-only dependency change
   # to restart Ponder and trip schema recovery on 2026-07-12. Changes to the
   # indexer's own dependency manifest remain covered by the indexer/ prefix.
-  if [[ "$indexer_code_changed" == "1" || "${RUNTIME_ENV_CHANGED_INDEXER:-0}" == "1" ]]; then
+  if [[ "$indexer_code_changed" == "1" \
+    || "$indexer_config_changed" == "1" \
+    || "${RUNTIME_ENV_CHANGED_INDEXER:-0}" == "1" ]]; then
     run_indexer=1
     local indexer_build_image=0
     local indexer_previous_sha="$NEW_SHA"
@@ -1864,6 +1933,8 @@ deploy() {
       indexer_build_image=1
       indexer_previous_sha="$OLD_SHA"
       echo "Deploying indexer (reason: code path changed)"
+    elif [[ "$indexer_config_changed" == "1" ]]; then
+      echo "Deploying indexer (reason: committed Ponder config changed; image unchanged)"
     else
       echo "Deploying indexer (reason: $RUNTIME_ROOT/indexer.env content changed; image unchanged)"
     fi
