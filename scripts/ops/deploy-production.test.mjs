@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, writeFile, copyFile, chmod, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
@@ -885,7 +885,7 @@ test("deploy exits non-zero when public health serves a different deployedSha", 
   );
 });
 
-test("deploy wrapper freezes contract surface changes without a manifest update", async () => {
+test("deploy wrapper freezes a real compiled contract-runtime change without a manifest update", async () => {
   const { appRoot, stackRoot, fakeBin, stateDir, baseSha, nextSha } = await makeDeployFreezeFixture(
     async (appRoot) => {
       await mkdir(join(appRoot, "contracts"), { recursive: true });
@@ -902,6 +902,8 @@ test("deploy wrapper freezes contract surface changes without a manifest update"
     DEPLOY_STATE_DIR: stateDir,
     DEPLOY_OLD_SHA: baseSha,
     DEPLOY_NEW_SHA: nextSha,
+    DEPLOY_CONTRACT_COMPAT_FREEZE: "1",
+    FAKE_CONTRACT_SOURCE_STATUS: "1",
     RUN_BACKEND: "0",
     RUN_INDEXER: "0",
     RUN_FRONTEND: "0",
@@ -913,10 +915,37 @@ test("deploy wrapper freezes contract surface changes without a manifest update"
   assert.equal(run.status, 1);
   assert.match(run.stderr, /D-03 contract compatibility freeze: refusing production deploy/u);
   assert.match(run.stderr, /contracts\/AgentAccountCore\.sol/u);
+  assert.match(run.stderr, /immutable-masked compiled runtime differs from deployed provenance/u);
   assert.match(run.stderr, /deployments\/testnet\.json did not change/u);
 });
 
-test("deploy wrapper allows contract surface changes when the deployment manifest moves with them", async () => {
+test("deploy wrapper does not freeze a contract source edit whose compiled runtime still matches", async () => {
+  const fixture = await makeDeployFreezeFixture(
+    async (appRoot) => {
+      await mkdir(join(appRoot, "contracts"), { recursive: true });
+      await writeFile(
+        join(appRoot, "contracts/AgentAccountCore.sol"),
+        "// comment-only source edit; fake semantic checker reports identical runtime\n"
+      );
+    },
+    "contract comment change"
+  );
+
+  const run = runDeploy(fixture.appRoot, {
+    ...deployFreezeEnv(fixture),
+    DEPLOY_OLD_SHA: fixture.baseSha,
+    DEPLOY_NEW_SHA: fixture.nextSha,
+  });
+
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(run.stdout, /compiled runtimes match deployed provenance/u);
+  assert.equal(
+    existsSync(join(fixture.stateDir, "contract-surface.frozen-at.testnet")),
+    false
+  );
+});
+
+test("deploy wrapper does not freeze contract source changes when the deployment manifest moves with them", async () => {
   const { appRoot, stackRoot, fakeBin, stateDir, baseSha, nextSha } = await makeDeployFreezeFixture(
     async (appRoot) => {
       await mkdir(join(appRoot, "contracts"), { recursive: true });
@@ -935,6 +964,7 @@ test("deploy wrapper allows contract surface changes when the deployment manifes
     DEPLOY_STATE_DIR: stateDir,
     DEPLOY_OLD_SHA: baseSha,
     DEPLOY_NEW_SHA: nextSha,
+    DEPLOY_CONTRACT_COMPAT_FREEZE: "1",
     RUN_BACKEND: "0",
     RUN_INDEXER: "0",
     RUN_FRONTEND: "0",
@@ -944,16 +974,87 @@ test("deploy wrapper allows contract surface changes when the deployment manifes
   });
 
   assert.equal(run.status, 0, run.stderr);
-  assert.match(run.stdout, /contract-surface changes are paired with deployments\/testnet\.json; allowing deploy/u);
+  assert.match(run.stdout, /contract source changes are paired with deployments\/testnet\.json; no sticky freeze/u);
 });
+
+const HISTORICAL_D03_FALSE_POSITIVES = [
+  {
+    pr: "#859",
+    files: [
+      "deployments/mainnet-multisig-owner.json",
+      "deployments/testnet-multisig-owner.json",
+      "scripts/ops/redeploy-escrowcore-wire-multisig.mjs",
+      "scripts/ops/redeploy-escrowcore-wire-multisig.test.mjs",
+    ],
+  },
+  {
+    pr: "#842",
+    files: [
+      "deploy/backend.env.template",
+      "deploy/backend.mainnet.env.template",
+      "docs/SECRETS.md",
+      "mcp-server/src/blockchain/config.js",
+      "mcp-server/src/blockchain/config.test.js",
+      "mcp-server/src/blockchain/gateway.js",
+      "mcp-server/src/blockchain/rpc-provider.js",
+      "mcp-server/src/blockchain/rpc-provider.test.js",
+      "scripts/ops/render-mainnet-backend-env.mjs",
+      "scripts/ops/render-mainnet-backend-env.test.mjs",
+      "scripts/write_server_env.sh",
+    ],
+  },
+  {
+    pr: "#837",
+    files: [
+      "docs/PREFLIGHT_WAIVER_PARITY_HANDBACK.md",
+      "mcp-server/src/blockchain/gateway.js",
+      "mcp-server/src/blockchain/gateway.test.js",
+      "mcp-server/src/core/claim-economics.js",
+      "mcp-server/src/core/job-execution-service.js",
+      "mcp-server/src/core/job-execution-service.test.js",
+      "mcp-server/src/core/platform-service.js",
+      "mcp-server/src/core/platform-service.test.js",
+    ],
+  },
+];
+
+for (const historical of HISTORICAL_D03_FALSE_POSITIVES) {
+  test(`deploy wrapper verifies but does not freeze historical false positive ${historical.pr}`, async () => {
+    const fixture = await makeDeployFreezeFixture(
+      async (appRoot) => {
+        for (const file of historical.files) {
+          const path = join(appRoot, file);
+          await mkdir(dirname(path), { recursive: true });
+          await writeFile(path, `fixture for ${historical.pr}: ${file}\n`);
+        }
+      },
+      `${historical.pr} historical file set`
+    );
+
+    const run = runDeploy(fixture.appRoot, {
+      ...deployFreezeEnv(fixture),
+      DEPLOY_OLD_SHA: fixture.baseSha,
+      DEPLOY_NEW_SHA: fixture.nextSha,
+    });
+
+    assert.equal(run.status, 0, run.stderr);
+    assert.match(run.stdout, /D-03 Tier 2: live chain runtime matches/u);
+    assert.match(run.stdout, /D-03 Tier 1: no contract source changes; no sticky freeze/u);
+    assert.equal(
+      existsSync(join(fixture.stateDir, "contract-surface.frozen-at.testnet")),
+      false,
+      `${historical.pr} must not create a sticky marker`
+    );
+  });
+}
 
 test("deploy wrapper exposes an explicit contract surface drift override", async () => {
   const { appRoot, stackRoot, fakeBin, stateDir, baseSha, nextSha } = await makeDeployFreezeFixture(
     async (appRoot) => {
-      await mkdir(join(appRoot, "mcp-server/src/blockchain"), { recursive: true });
-      await writeFile(join(appRoot, "mcp-server/src/blockchain/abis.js"), "export const ABI = [];\n");
+      await mkdir(join(appRoot, "contracts"), { recursive: true });
+      await writeFile(join(appRoot, "contracts/AgentAccountCore.sol"), "contract AgentAccountCore { uint256 changed; }\n");
     },
-    "backend contract abi change"
+    "contract runtime change"
   );
 
   const run = runDeploy(appRoot, {
@@ -964,7 +1065,9 @@ test("deploy wrapper exposes an explicit contract surface drift override", async
     DEPLOY_STATE_DIR: stateDir,
     DEPLOY_OLD_SHA: baseSha,
     DEPLOY_NEW_SHA: nextSha,
+    DEPLOY_CONTRACT_COMPAT_FREEZE: "1",
     DEPLOY_ALLOW_CONTRACT_SURFACE_DRIFT: "1",
+    FAKE_CONTRACT_SOURCE_STATUS: "1",
     RUN_BACKEND: "0",
     RUN_INDEXER: "0",
     RUN_FRONTEND: "0",
@@ -975,7 +1078,74 @@ test("deploy wrapper exposes an explicit contract surface drift override", async
 
   assert.equal(run.status, 0, run.stderr);
   assert.match(run.stdout, /D-03 contract compatibility freeze override set/u);
-  assert.match(run.stdout, /mcp-server\/src\/blockchain\/abis\.js/u);
+  assert.match(run.stdout, /contracts\/AgentAccountCore\.sol/u);
+});
+
+test("deploy wrapper fails Tier 2 on chain-manifest drift even with zero changed files", async () => {
+  const fixture = await makeDeployFreezeFixture(
+    async (appRoot) => {
+      await writeFile(join(appRoot, "README.md"), "unchanged runtime fixture\n");
+    },
+    "non-contract change"
+  );
+
+  const run = runDeploy(fixture.appRoot, {
+    ...deployFreezeEnv(fixture),
+    DEPLOY_OLD_SHA: fixture.nextSha,
+    DEPLOY_NEW_SHA: fixture.nextSha,
+    FAKE_CONTRACT_LIVE_STATUS: "1",
+  });
+
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /D-03 Tier 2: live chain runtime does not match/u);
+  assert.equal(
+    existsSync(join(fixture.stateDir, "contract-surface.frozen-at.testnet")),
+    false,
+    "Tier 2 mismatch must fail without creating a sticky marker"
+  );
+});
+
+test("deploy wrapper fails closed on an unreachable provenance RPC even when drift override is set", async () => {
+  const fixture = await makeDeployFreezeFixture(
+    async (appRoot) => {
+      await writeFile(join(appRoot, "README.md"), "rpc failure fixture\n");
+    },
+    "non-contract change"
+  );
+
+  const run = runDeploy(fixture.appRoot, {
+    ...deployFreezeEnv(fixture),
+    DEPLOY_OLD_SHA: fixture.baseSha,
+    DEPLOY_NEW_SHA: fixture.nextSha,
+    DEPLOY_ALLOW_CONTRACT_SURFACE_DRIFT: "1",
+    FAKE_CONTRACT_LIVE_STATUS: "2",
+  });
+
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /could not verify live contract provenance/u);
+  assert.match(run.stderr, /unreachable RPC/u);
+  assert.doesNotMatch(run.stderr, /Tier 2 override set/u);
+});
+
+test("deploy wrapper fails closed on an unreadable deployment manifest", async () => {
+  const fixture = await makeDeployFreezeFixture(
+    async (appRoot) => {
+      await writeFile(join(appRoot, "README.md"), "manifest failure fixture\n");
+    },
+    "non-contract change"
+  );
+
+  const run = runDeploy(fixture.appRoot, {
+    ...deployFreezeEnv(fixture),
+    DEPLOY_OLD_SHA: fixture.baseSha,
+    DEPLOY_NEW_SHA: fixture.nextSha,
+    FAKE_CONTRACT_LIVE_STATUS: "2",
+    FAKE_CONTRACT_LIVE_ERROR: "fake live provenance: unreadable deployment manifest",
+  });
+
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /could not verify live contract provenance/u);
+  assert.match(run.stderr, /unreadable deployment manifest/u);
 });
 
 // 2026-07-27 (deploy run 30312416198): the VPS checkout fast-forwards even when
@@ -989,6 +1159,7 @@ function deployFreezeEnv({ stackRoot, fakeBin, appRoot, stateDir }) {
     COMPOSE_FILE: join(stackRoot, "docker-compose.yml"),
     DEPLOY_LOCK_FILE: join(appRoot, "deploy.lock"),
     DEPLOY_STATE_DIR: stateDir,
+    DEPLOY_CONTRACT_COMPAT_FREEZE: "1",
     RUN_BACKEND: "0",
     RUN_INDEXER: "0",
     RUN_FRONTEND: "0",
@@ -1001,12 +1172,15 @@ function deployFreezeEnv({ stackRoot, fakeBin, appRoot, stateDir }) {
 async function makeStickyFreezeFixture() {
   const fixture = await makeDeployFreezeFixture(
     async (appRoot) => {
-      await mkdir(join(appRoot, "mcp-server/src/blockchain"), { recursive: true });
-      await writeFile(join(appRoot, "mcp-server/src/blockchain/gateway.js"), "export const gateway = 2;\n");
+      await mkdir(join(appRoot, "contracts"), { recursive: true });
+      await writeFile(join(appRoot, "contracts/AgentAccountCore.sol"), "contract AgentAccountCore { uint256 changed; }\n");
     },
-    "contract surface change"
+    "contract runtime change"
   );
-  const env = deployFreezeEnv(fixture);
+  const env = {
+    ...deployFreezeEnv(fixture),
+    FAKE_CONTRACT_SOURCE_STATUS: "1",
+  };
   const markerPath = join(fixture.stateDir, "contract-surface.frozen-at.testnet");
 
   const firstRun = runDeploy(fixture.appRoot, {
@@ -1022,7 +1196,7 @@ async function makeStickyFreezeFixture() {
   assert.match(marker, new RegExp(`^baseline_sha=${fixture.baseSha}$`, "mu"));
   assert.match(marker, new RegExp(`^flagged_sha=${fixture.nextSha}$`, "mu"));
   assert.match(marker, /^manifest=deployments\/testnet\.json$/mu);
-  assert.match(marker, /^mcp-server\/src\/blockchain\/gateway\.js$/mu);
+  assert.match(marker, /^contracts\/AgentAccountCore\.sol$/mu);
 
   return { ...fixture, env, markerPath };
 }
@@ -1048,7 +1222,7 @@ test("deploy wrapper keeps the freeze armed after a refused deploy fast-forwards
   assert.match(secondRun.stdout, /enforcing persisted freeze from/u);
   assert.match(secondRun.stderr, /D-03 contract compatibility freeze: refusing production deploy/u);
   assert.match(secondRun.stderr, new RegExp(`Evaluated range: ${baseSha} -> ${docsSha}`, "u"));
-  assert.match(secondRun.stderr, /mcp-server\/src\/blockchain\/gateway\.js/u);
+  assert.match(secondRun.stderr, /contracts\/AgentAccountCore\.sol/u);
   assert.ok(existsSync(markerPath), "the freeze marker must survive the second refusal");
 });
 
@@ -1086,7 +1260,7 @@ test("deploy wrapper clears the persisted freeze once the deployment manifest pa
   assert.equal(run.status, 0, run.stderr);
   assert.match(run.stdout, /clearing persisted freeze marker/u);
   assert.match(run.stdout, /now paired with deployments\/testnet\.json/u);
-  assert.match(run.stdout, /contract-surface changes are paired with deployments\/testnet\.json; allowing deploy/u);
+  assert.match(run.stdout, /contract source changes are paired with deployments\/testnet\.json; no sticky freeze/u);
   assert.ok(!existsSync(markerPath), "a manifest-paired deploy must clear the freeze marker");
 });
 
@@ -1108,14 +1282,14 @@ test("deploy wrapper clears the persisted freeze on an explicit drift override d
   assert.match(run.stdout, /D-03 contract compatibility freeze override set/u);
   assert.match(run.stdout, /clearing persisted freeze marker/u);
   // The override run's log is the audit record: it must name the drift it accepted.
-  assert.match(run.stdout, /mcp-server\/src\/blockchain\/gateway\.js/u);
+  assert.match(run.stdout, /contracts\/AgentAccountCore\.sol/u);
   assert.ok(!existsSync(markerPath), "an explicit override dispatch must clear the freeze marker");
 });
 
 test("deploy wrapper clears the persisted freeze when the flagged drift is reverted", async () => {
   const { appRoot, env, markerPath, nextSha } = await makeStickyFreezeFixture();
 
-  git(appRoot, "rm", "mcp-server/src/blockchain/gateway.js");
+  git(appRoot, "rm", "contracts/AgentAccountCore.sol");
   git(appRoot, "commit", "-m", "revert contract surface change");
   const revertSha = revParse(appRoot, "HEAD");
 
@@ -1126,7 +1300,7 @@ test("deploy wrapper clears the persisted freeze when the flagged drift is rever
   });
   assert.equal(run.status, 0, run.stderr);
   assert.match(run.stdout, /clearing persisted freeze marker/u);
-  assert.match(run.stdout, /flagged changes were reverted/u);
+  assert.match(run.stdout, /old marker was heuristic-only or the source drift was reverted/u);
   assert.ok(!existsSync(markerPath), "a reverted drift must clear the freeze marker instead of over-blocking");
 });
 
@@ -1303,13 +1477,38 @@ async function makeDeployFreezeFixture(applyChange, message) {
   const stateDir = join(root, "state");
 
   await mkdir(join(appRoot, "scripts/ops"), { recursive: true });
+  await mkdir(join(appRoot, "deployments"), { recursive: true });
   await mkdir(stackRoot, { recursive: true });
   await mkdir(fakeBin, { recursive: true });
   await writeFile(join(stackRoot, "docker-compose.yml"), "services: {}\n");
   await copyFile(DEPLOY_SCRIPT, join(appRoot, "scripts/ops/deploy-production.sh"));
   await chmod(join(appRoot, "scripts/ops/deploy-production.sh"), 0o755);
+  await writeFile(
+    join(appRoot, "scripts/ops/check-contract-provenance.mjs"),
+    [
+      "const status = Number(process.env.FAKE_CONTRACT_LIVE_STATUS ?? '0');",
+      "if (status === 0) console.log('fake live provenance: match');",
+      "else if (status === 1) console.error('fake live provenance: runtime hash mismatch');",
+      "else console.error(process.env.FAKE_CONTRACT_LIVE_ERROR ?? 'fake live provenance: unreachable RPC');",
+      "process.exitCode = status;",
+    ].join("\n")
+  );
+  await writeFile(
+    join(appRoot, "scripts/ops/check-contract-source-drift.mjs"),
+    [
+      "const status = Number(process.env.FAKE_CONTRACT_SOURCE_STATUS ?? '0');",
+      "if (status === 0) console.log('fake compiled provenance: match or allowlisted');",
+      "else if (status === 1) console.error('fake compiled provenance: unallowlisted runtime drift');",
+      "else console.error('fake compiled provenance: unreadable manifest or artifacts');",
+      "process.exitCode = status;",
+    ].join("\n")
+  );
+  await writeFile(
+    join(appRoot, "deployments/testnet.json"),
+    '{"profile":"testnet","contracts":{},"contractProvenance":{},"knownUnshippedContractChanges":{}}\n'
+  );
 
-  for (const command of ["docker", "npm", "flock"]) {
+  for (const command of ["docker", "npm", "flock", "forge"]) {
     await writeExecutable(join(fakeBin, command), "#!/usr/bin/env bash\nexit 0\n");
   }
   await writeFakeHealthCurl(join(fakeBin, "curl"));
@@ -1534,6 +1733,9 @@ function runDeploy(cwd, env) {
     cwd,
     env: {
       ...process.env,
+      // Generic deploy fixtures isolate unrelated routing behavior and do not
+      // carry a chain manifest/checker. D-03 fixtures explicitly re-enable it.
+      DEPLOY_CONTRACT_COMPAT_FREEZE: "0",
       ...env,
       FAKE_HEALTH_SHA: fakeHealthSha
     },

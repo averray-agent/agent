@@ -60,6 +60,15 @@
       "verifiedAt": "2026-07-29T19:40:33.000Z"
     }
   },
+  "knownUnshippedContractChanges": {
+    "escrowCore": [
+      {
+        "sourceCommit": "775a826b0a33d0ec04dd19f0455e69402dc9bbcd",
+        "maskedRuntimeCodeHash": "sha256:64ec86a04369cbbd49a30e0dcf04cf785707a78fcd42f87c0c692f77a7372788",
+        "reason": "EscrowCore v2 success-path protocol fees (#850) are deliberately undeployed pending external audit, migration, dual-address drain, and dogfood proof."
+      }
+    ]
+  },
   "parameters": {
     "dailyOutflowCap": "115792089237316195423570985008687907853269984665640564039457584007913129639935",
     "borrowCap": "25000000",

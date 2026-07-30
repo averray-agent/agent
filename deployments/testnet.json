@@ -19,6 +19,53 @@
     "xcmWrapper": null,
     "token": "0x0000053900000000000000000000000001200000"
   },
+  "contractProvenance": {
+    "0xE0b8170137f03F90d681451a97C68A9EAf85e4A7": {
+      "sourceCommit": "ccaa11124f0bda8e03819ead0798356131ed8c0f",
+      "abiHash": "sha256:c99049e4add133b60babc355ca5bfb42e3e7807c13c5d66b59ebde9bf8e46822",
+      "runtimeCodeHash": "sha256:7f402ba040b04fc6f413d0b0105e288d97373413b9fb2aa871c5946eea8f441b",
+      "verifiedAt": "2026-07-29T21:31:14.000Z"
+    },
+    "0x892E88839933026b76934b0284b229437dD97189": {
+      "sourceCommit": "ccaa11124f0bda8e03819ead0798356131ed8c0f",
+      "abiHash": "sha256:f2d0cc926387a757249688e5e315d2755f9de44cbda85668c74ae30f9ddd9846",
+      "runtimeCodeHash": "sha256:c2af3fc5fc440f377d6f5d7ce11566ba9cc9da015038f020c713c6b7e4124e58",
+      "verifiedAt": "2026-07-29T21:31:14.000Z"
+    },
+    "0x510918E24DEbcA163F306923CA234319e72b22d5": {
+      "sourceCommit": "ccaa11124f0bda8e03819ead0798356131ed8c0f",
+      "abiHash": "sha256:795e3e55cafb8134765b5afbb7bef6817b9213c51fb34612ba4801620739a7e5",
+      "runtimeCodeHash": "sha256:6d6f31651a9cc99b5f6670e3eba312e62c0068391f5acea8002bb905faefeb66",
+      "verifiedAt": "2026-07-29T21:31:14.000Z"
+    },
+    "0x307bAEa6A05b7136fd94252cB9B6331Ab724C63B": {
+      "sourceCommit": "ccaa11124f0bda8e03819ead0798356131ed8c0f",
+      "abiHash": "sha256:29b6eb596741a1dea957da2c48c1a26e56aeeac5c9a732eae04c64dbab1a0192",
+      "runtimeCodeHash": "sha256:5a704afefd07ec4f05f9609d78615d1f96a64e1df90a6bacfc33cca0ab310b53",
+      "verifiedAt": "2026-07-29T21:31:14.000Z"
+    },
+    "0xef1EC161DFce8bCaf2Be6270286706ae123444Bc": {
+      "sourceCommit": "ccaa11124f0bda8e03819ead0798356131ed8c0f",
+      "abiHash": "sha256:4b789cb848e8ea13efc37fdef88a4e0ba85de14366c1e3a1c55fb44d54c1dd99",
+      "runtimeCodeHash": "sha256:634fcc8b29ca8fea61a43d8f1a01f7fd5a973bd4a423a32041cca65f5cf2ea08",
+      "verifiedAt": "2026-07-29T21:31:14.000Z"
+    },
+    "0xfE841c2dc58E4389b1AB59E3e42F9EB12A694Bea": {
+      "sourceCommit": "ccaa11124f0bda8e03819ead0798356131ed8c0f",
+      "abiHash": "sha256:af896ebc7901695956984d3382e155239de097a40684531a82e8b71a30a208c7",
+      "runtimeCodeHash": "sha256:7f80a741602b6233350e62b5abb6c5398881bcef7d3c7ee4d68df76309135e9f",
+      "verifiedAt": "2026-07-29T21:31:14.000Z"
+    }
+  },
+  "knownUnshippedContractChanges": {
+    "escrowCore": [
+      {
+        "sourceCommit": "775a826b0a33d0ec04dd19f0455e69402dc9bbcd",
+        "maskedRuntimeCodeHash": "sha256:64ec86a04369cbbd49a30e0dcf04cf785707a78fcd42f87c0c692f77a7372788",
+        "reason": "EscrowCore v2 success-path protocol fees (#850) are deliberately undeployed pending external audit, migration, dual-address drain, and dogfood proof."
+      }
+    ]
+  },
   "parameters": {
     "dailyOutflowCap": "250000000",
     "borrowCap": "25000000",
