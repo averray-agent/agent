@@ -172,29 +172,42 @@ test("known-unshipped entries require an explicit non-empty reason", () => {
   );
 });
 
-for (const profile of ["mainnet", "testnet"]) {
-  test(`${profile} pins EscrowCore v2 to one masked runtime and an explicit reason`, () => {
-    const manifest = JSON.parse(
-      readFileSync(
-        new URL(`../../deployments/${profile}.json`, import.meta.url),
-        "utf8"
-      )
-    );
-    const contracts = validateProvenanceManifest(manifest);
-    const allowlist = validateKnownUnshippedContractChanges(
-      manifest,
-      contracts
-    );
+test("mainnet records deployed EscrowCore v2 and removes its unshipped allowlist", () => {
+  const manifest = JSON.parse(
+    readFileSync(
+      new URL("../../deployments/mainnet.json", import.meta.url),
+      "utf8"
+    )
+  );
+  const contracts = validateProvenanceManifest(manifest);
+  const allowlist = validateKnownUnshippedContractChanges(manifest, contracts);
 
-    assert.equal(contracts.length, 6);
-    assert.deepEqual(allowlist.get("escrowCore"), [
-      {
-        sourceCommit: "775a826b0a33d0ec04dd19f0455e69402dc9bbcd",
-        maskedRuntimeCodeHash:
-          "sha256:64ec86a04369cbbd49a30e0dcf04cf785707a78fcd42f87c0c692f77a7372788",
-        reason:
-          "EscrowCore v2 success-path protocol fees (#850) are deliberately undeployed pending external audit, migration, dual-address drain, and dogfood proof.",
-      },
-    ]);
-  });
-}
+  assert.equal(contracts.length, 7);
+  assert.equal(allowlist.has("escrowCore"), false);
+  assert.equal(
+    contracts.find((contract) => contract.name === "escrowCore")?.address,
+    "0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC"
+  );
+});
+
+test("testnet pins EscrowCore v2 to one masked runtime and an explicit reason", () => {
+  const manifest = JSON.parse(
+    readFileSync(
+      new URL("../../deployments/testnet.json", import.meta.url),
+      "utf8"
+    )
+  );
+  const contracts = validateProvenanceManifest(manifest);
+  const allowlist = validateKnownUnshippedContractChanges(manifest, contracts);
+
+  assert.equal(contracts.length, 6);
+  assert.deepEqual(allowlist.get("escrowCore"), [
+    {
+      sourceCommit: "775a826b0a33d0ec04dd19f0455e69402dc9bbcd",
+      maskedRuntimeCodeHash:
+        "sha256:64ec86a04369cbbd49a30e0dcf04cf785707a78fcd42f87c0c692f77a7372788",
+      reason:
+        "EscrowCore v2 success-path protocol fees (#850) are deliberately undeployed pending external audit, migration, dual-address drain, and dogfood proof.",
+    },
+  ]);
+});

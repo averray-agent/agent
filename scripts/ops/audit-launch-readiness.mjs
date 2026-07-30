@@ -157,7 +157,18 @@ const ERC20_READ_ABI = [
   "function balanceOf(address) view returns (uint256)"
 ];
 
-const EXPECTED_CHAIN_ID = 420420417; // Polkadot Hub TestNet
+const EXPECTED_CHAIN_IDS = Object.freeze({
+  testnet: 420420417,
+  mainnet: 420420419
+});
+
+export function resolveExpectedChainId(profile) {
+  const chainId = EXPECTED_CHAIN_IDS[profile];
+  if (chainId === undefined) {
+    throw new Error(`No expected chain ID configured for deployment profile ${JSON.stringify(profile)}.`);
+  }
+  return chainId;
+}
 
 // USDC base unit scale on Hub TestNet (6 decimals, asset id 1337 / Trust-Backed).
 const USDC_DECIMALS_SCALE = 1_000_000n;
@@ -378,6 +389,7 @@ async function main() {
   const deployments = JSON.parse(
     await readFile(resolve(repoRoot, "deployments", `${args.profile}.json`), "utf8")
   );
+  const expectedChainId = resolveExpectedChainId(deployments.profile ?? args.profile);
 
   const rpcUrl = deployments.rpcUrl;
   const policyAddress = deployments.contracts.treasuryPolicy;
@@ -532,7 +544,7 @@ async function main() {
     : undefined;
 
   // Drift check: confirm we're talking to the chain we expected.
-  const chainOk = chainId === EXPECTED_CHAIN_ID;
+  const chainOk = chainId === expectedChainId;
 
   // Drift check: every numeric parameter from deployments/testnet.json
   // should match what's actually on-chain. A silent drift here (e.g.,
@@ -554,7 +566,7 @@ async function main() {
 
   console.log(`## Live state`);
   console.log(`block:         ${blockNumber}`);
-  console.log(`chainId:       ${chainId}  ${chainOk ? "✅" : `❌ expected ${EXPECTED_CHAIN_ID}`}`);
+  console.log(`chainId:       ${chainId}  ${chainOk ? "✅" : `❌ expected ${expectedChainId}`}`);
   console.log(`owner:         ${owner}  ${ciEqual(owner, expectedOwner) ? "✅" : `⚠ expected ${expectedOwner}`}`);
   console.log(`pauser:        ${pauser}  ${ciEqual(pauser, expectedPauser) ? "✅" : `⚠ expected ${expectedPauser}`}`);
   console.log(`paused:        ${paused}  ${paused ? "❌" : "✅"}`);
@@ -666,7 +678,7 @@ async function main() {
   }
   if (!chainOk) {
     fixes.push({
-      label: `RPC chainId drift — connected to ${chainId}, expected ${EXPECTED_CHAIN_ID}`,
+      label: `RPC chainId drift — connected to ${chainId}, expected ${expectedChainId}`,
       reasonCode: "chain_id_drift"
     });
   }

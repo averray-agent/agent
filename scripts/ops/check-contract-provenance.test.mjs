@@ -202,7 +202,15 @@ test("mainnet manifest covers every deployed source-controlled contract address"
       "reputationSbt",
       "discoveryRegistry",
       "escrowCore",
+      "legacyEscrowCore",
     ]
   );
-  assert.equal(new Set(contracts.map((contract) => contract.provenance.sourceCommit)).size, 1);
+  assert.equal(
+    contracts.find((contract) => contract.name === "escrowCore")?.provenance.sourceCommit,
+    "775a826b0a33d0ec04dd19f0455e69402dc9bbcd"
+  );
+  assert.equal(
+    contracts.find((contract) => contract.name === "legacyEscrowCore")?.provenance.sourceCommit,
+    "ccaa11124f0bda8e03819ead0798356131ed8c0f"
+  );
 });
