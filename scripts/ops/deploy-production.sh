@@ -66,6 +66,9 @@ if [[ "$PRODUCT_PROOF_EVIDENCE_FILE" != /* ]]; then
   PRODUCT_PROOF_EVIDENCE_FILE="$APP_ROOT/$PRODUCT_PROOF_EVIDENCE_FILE"
 fi
 PRODUCT_PROOF_NODE_IMAGE=${PRODUCT_PROOF_NODE_IMAGE:-node:22-bookworm-slim}
+# D-03 provenance checks run in the same Node toolchain image as product
+# proof. The production host intentionally has no Node.js installation.
+CONTRACT_PROVENANCE_NODE_IMAGE=${CONTRACT_PROVENANCE_NODE_IMAGE:-$PRODUCT_PROOF_NODE_IMAGE}
 INDEXER_DATABASE_SCHEMA=${INDEXER_DATABASE_SCHEMA:-}
 INDEXER_FRESH_SCHEMA=${INDEXER_FRESH_SCHEMA:-0}
 WAIT_FOR_READY=${WAIT_FOR_READY:-1}
@@ -376,17 +379,63 @@ contract_surface_drift_override_set() {
   esac
 }
 
+preflight_contract_provenance_runtime() {
+  local output=""
+  local status=0
+  set +e
+  output=$(docker run --rm "$CONTRACT_PROVENANCE_NODE_IMAGE" node --version 2>&1)
+  status=$?
+  set -e
+
+  if [[ "$status" != "0" ]]; then
+    {
+      echo "D-03 Tier 2 environment error: containerized Node runtime '$CONTRACT_PROVENANCE_NODE_IMAGE' is not runnable (exit $status); provenance checker did not run."
+      printf '%s\n' "$output"
+      echo "Refusing production deploy. Restore the deploy toolchain image/runtime; do not treat this as contract drift or skip the gate."
+    } >&2
+    return 127
+  fi
+
+  echo "D-03 Tier 2 runtime: using containerized Node $output from $CONTRACT_PROVENANCE_NODE_IMAGE (host node is not required)."
+}
+
+run_contract_provenance_checker() {
+  local checker="$1"
+  local artifacts_mount="$2"
+  shift 2
+
+  local relative_checker="${checker#$APP_ROOT/}"
+  local docker_args=(
+    run --rm
+    -v "$APP_ROOT:/workspace:ro"
+    -w /workspace
+  )
+  if [[ -n "$artifacts_mount" ]]; then
+    docker_args+=(-v "$artifacts_mount:$artifacts_mount:ro")
+  fi
+
+  docker "${docker_args[@]}" \
+    "$CONTRACT_PROVENANCE_NODE_IMAGE" \
+    node "$relative_checker" "$@"
+}
+
 verify_live_contract_provenance() {
   local checker="$APP_ROOT/scripts/ops/check-contract-provenance.mjs"
   if [[ ! -r "$checker" ]]; then
     echo "D-03 Tier 2: contract provenance checker is unreadable at $checker; refusing production deploy." >&2
     return 1
   fi
+  if ! preflight_contract_provenance_runtime; then
+    return 1
+  fi
 
   local output=""
   local status=0
   set +e
-  output=$(node "$checker" --profile "$DEPLOY_CONTRACT_COMPAT_PROFILE" 2>&1)
+  output=$(run_contract_provenance_checker \
+    "$checker" \
+    "" \
+    --profile "$DEPLOY_CONTRACT_COMPAT_PROFILE" 2>&1)
   status=$?
   set -e
 
@@ -411,10 +460,18 @@ verify_live_contract_provenance() {
     return 1
   fi
 
-  # Exit 2 is the provenance checker's usage/config/RPC class. Unknown
-  # statuses are treated the same way. An override may accept known semantic
-  # drift, but it must never turn an unreadable manifest or unreachable RPC
-  # into a pass.
+  if [[ "$status" != "2" ]]; then
+    {
+      echo "D-03 Tier 2 environment error: provenance checker runtime failed (exit $status); checker did not return a drift or config/RPC verdict."
+      printf '%s\n' "$output"
+      echo "Refusing production deploy. Restore the containerized Node/checker runtime; do not skip the gate."
+    } >&2
+    return 1
+  fi
+
+  # Exit 2 is the provenance checker's usage/config/RPC class. An override may
+  # accept known semantic drift, but it must never turn an unreadable manifest
+  # or unreachable RPC into a pass.
   {
     echo "D-03 Tier 2: could not verify live contract provenance (checker exit $status); refusing production deploy."
     printf '%s\n' "$output"
@@ -448,7 +505,9 @@ check_compiled_contract_provenance() {
   local output=""
   local status=0
   set +e
-  output=$(node "$source_checker" \
+  output=$(run_contract_provenance_checker \
+    "$source_checker" \
+    "$artifacts" \
     --profile "$DEPLOY_CONTRACT_COMPAT_PROFILE" \
     --artifacts "$artifacts" 2>&1)
   status=$?
