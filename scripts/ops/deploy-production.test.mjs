@@ -1105,6 +1105,54 @@ test("deploy wrapper fails Tier 2 on chain-manifest drift even with zero changed
   );
 });
 
+test("deploy wrapper runs Tier 2 in the containerized Node toolchain when host node is absent", async () => {
+  const fixture = await makeDeployFreezeFixture(
+    async (appRoot) => {
+      await writeFile(join(appRoot, "README.md"), "container runtime fixture\n");
+    },
+    "non-contract change"
+  );
+  const dockerLog = join(fixture.appRoot, "docker.log");
+
+  const run = runDeploy(fixture.appRoot, {
+    ...deployFreezeEnv(fixture),
+    PATH: `${fixture.fakeBin}:/usr/bin:/bin:/usr/sbin:/sbin`,
+    DEPLOY_OLD_SHA: fixture.baseSha,
+    DEPLOY_NEW_SHA: fixture.nextSha,
+    FAKE_DOCKER_LOG: dockerLog,
+  });
+
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(run.stdout, /using containerized Node v22\.0\.0/u);
+  assert.match(run.stdout, /host node is not required/u);
+  const invocations = await readFile(dockerLog, "utf8");
+  assert.match(invocations, /node --version/u);
+  assert.match(invocations, /node scripts\/ops\/check-contract-provenance\.mjs --profile testnet/u);
+});
+
+test("deploy wrapper reports a missing containerized Node runtime as an environment error", async () => {
+  const fixture = await makeDeployFreezeFixture(
+    async (appRoot) => {
+      await writeFile(join(appRoot, "README.md"), "missing node runtime fixture\n");
+    },
+    "non-contract change"
+  );
+
+  const run = runDeploy(fixture.appRoot, {
+    ...deployFreezeEnv(fixture),
+    PATH: `${fixture.fakeBin}:/usr/bin:/bin:/usr/sbin:/sbin`,
+    DEPLOY_OLD_SHA: fixture.baseSha,
+    DEPLOY_NEW_SHA: fixture.nextSha,
+    FAKE_PROVENANCE_NODE_PREFLIGHT_STATUS: "127",
+  });
+
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /D-03 Tier 2 environment error/u);
+  assert.match(run.stderr, /not runnable \(exit 127\)/u);
+  assert.match(run.stderr, /provenance checker did not run/u);
+  assert.doesNotMatch(run.stderr, /live chain runtime does not match/u);
+});
+
 test("deploy wrapper fails closed on an unreachable provenance RPC even when drift override is set", async () => {
   const fixture = await makeDeployFreezeFixture(
     async (appRoot) => {
@@ -1508,9 +1556,34 @@ async function makeDeployFreezeFixture(applyChange, message) {
     '{"profile":"testnet","contracts":{},"contractProvenance":{},"knownUnshippedContractChanges":{}}\n'
   );
 
-  for (const command of ["docker", "npm", "flock", "forge"]) {
+  for (const command of ["npm", "flock", "forge"]) {
     await writeExecutable(join(fakeBin, command), "#!/usr/bin/env bash\nexit 0\n");
   }
+  await writeExecutable(join(fakeBin, "docker"), [
+    "#!/usr/bin/env bash",
+    "if [[ -n \"${FAKE_DOCKER_LOG:-}\" ]]; then printf '%s\\n' \"$*\" >> \"$FAKE_DOCKER_LOG\"; fi",
+    "if [[ \"$*\" == *\"node --version\"* ]]; then",
+    "  status=\"${FAKE_PROVENANCE_NODE_PREFLIGHT_STATUS:-0}\"",
+    "  if [[ \"$status\" != \"0\" ]]; then echo 'node: command not found' >&2; exit \"$status\"; fi",
+    "  echo 'v22.0.0'",
+    "  exit 0",
+    "fi",
+    "if [[ \"$*\" == *\"check-contract-provenance.mjs\"* ]]; then",
+    "  status=\"${FAKE_CONTRACT_LIVE_STATUS:-0}\"",
+    "  if [[ \"$status\" == \"0\" ]]; then echo 'fake live provenance: match';",
+    "  elif [[ \"$status\" == \"1\" ]]; then echo 'fake live provenance: runtime hash mismatch' >&2;",
+    "  else echo \"${FAKE_CONTRACT_LIVE_ERROR:-fake live provenance: unreachable RPC}\" >&2; fi",
+    "  exit \"$status\"",
+    "fi",
+    "if [[ \"$*\" == *\"check-contract-source-drift.mjs\"* ]]; then",
+    "  status=\"${FAKE_CONTRACT_SOURCE_STATUS:-0}\"",
+    "  if [[ \"$status\" == \"0\" ]]; then echo 'fake compiled provenance: match or allowlisted';",
+    "  elif [[ \"$status\" == \"1\" ]]; then echo 'fake compiled provenance: unallowlisted runtime drift' >&2;",
+    "  else echo 'fake compiled provenance: unreadable manifest or artifacts' >&2; fi",
+    "  exit \"$status\"",
+    "fi",
+    "exit 0",
+  ].join("\n"));
   await writeFakeHealthCurl(join(fakeBin, "curl"));
 
   git(appRoot, "init");
