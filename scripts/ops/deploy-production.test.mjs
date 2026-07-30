@@ -31,6 +31,7 @@ test("deploy wrapper retries frontend after an earlier failed indexer deploy", a
   await mkdir(join(appRoot, "scripts/ops"), { recursive: true });
   await mkdir(join(appRoot, "app"), { recursive: true });
   await mkdir(join(appRoot, "indexer"), { recursive: true });
+  await mkdir(join(appRoot, "deploy"), { recursive: true });
   await mkdir(stackRoot, { recursive: true });
   await mkdir(fakeBin, { recursive: true });
   await writeFile(join(stackRoot, "docker-compose.yml"), "services: {}\n");
@@ -76,6 +77,16 @@ test("deploy wrapper retries frontend after an earlier failed indexer deploy", a
   await writeFile(join(appRoot, "README.md"), "base\n");
   await writeFile(join(appRoot, "app/README.md"), "base app\n");
   await writeFile(join(appRoot, "indexer/README.md"), "base indexer\n");
+  await writeFile(
+    join(appRoot, "deploy/indexer.env.template"),
+    [
+      "POLKADOT_CHAIN_ID=420420417",
+      "POLKADOT_CHAIN_NAME=polkadotHubTestnet",
+      "PONDER_ESCROW_CORE_ADDRESS=0x1111111111111111111111111111111111111111",
+      "DATABASE_SCHEMA=agent_indexer_existing",
+      "",
+    ].join("\n")
+  );
   git(appRoot, "add", ".");
   git(appRoot, "commit", "-m", "base");
   const baseSha = revParse(appRoot, "HEAD");
@@ -142,7 +153,7 @@ test("deploy wrapper retries frontend after an earlier failed indexer deploy", a
   assert.equal((await readFile(join(stateDir, "frontend.last-good"), "utf8")).trim(), indexerFixSha);
 });
 
-test("root workspace lock changes do not restart the independently packaged indexer", async () => {
+test("indexer source or contract-config changes rotate schema while root lock changes do not", async () => {
   const root = await mkdtemp(join(tmpdir(), "deploy-indexer-gate-"));
   const appRoot = join(root, "app");
   const stackRoot = join(root, "stack");
@@ -153,6 +164,7 @@ test("root workspace lock changes do not restart the independently packaged inde
 
   await mkdir(join(appRoot, "scripts/ops"), { recursive: true });
   await mkdir(join(appRoot, "indexer"), { recursive: true });
+  await mkdir(join(appRoot, "deploy"), { recursive: true });
   await mkdir(stackRoot, { recursive: true });
   await mkdir(fakeBin, { recursive: true });
   await writeFile(join(stackRoot, "docker-compose.yml"), "services: {}\n");
@@ -174,6 +186,17 @@ test("root workspace lock changes do not restart the independently packaged inde
   git(appRoot, "config", "user.name", "Deploy Test");
   await writeFile(join(appRoot, "package-lock.json"), '{"lockfileVersion":3,"packages":{}}\n');
   await writeFile(join(appRoot, "indexer/package.json"), '{"name":"indexer","dependencies":{}}\n');
+  await writeFile(
+    join(appRoot, "deploy/indexer.env.template"),
+    [
+      "POLKADOT_CHAIN_ID=420420417",
+      "POLKADOT_CHAIN_NAME=polkadotHubTestnet",
+      "PONDER_ESCROW_CORE_ADDRESS=0x1111111111111111111111111111111111111111",
+      "PONDER_START_BLOCK_ESCROW=100",
+      "DATABASE_SCHEMA=agent_indexer_existing",
+      "",
+    ].join("\n")
+  );
   git(appRoot, "add", ".");
   git(appRoot, "commit", "-m", "base");
   const baseSha = revParse(appRoot, "HEAD");
@@ -242,15 +265,87 @@ test("root workspace lock changes do not restart the independently packaged inde
     selectedSchema,
     "the healthy replacement should become the persisted schema"
   );
-  assert.equal(
-    (await readFile(join(stateDir, "indexer.app-identity.testnet"), "utf8")).trim(),
-    revParse(appRoot, `${indexerDependencySha}:indexer`),
-    "the schema owner should be the exact deployed indexer tree"
+  const sourceTreeIdentity = revParse(appRoot, `${indexerDependencySha}:indexer`);
+  const persistedAppIdentity = (
+    await readFile(join(stateDir, "indexer.app-identity.testnet"), "utf8")
+  ).trim();
+  assert.match(persistedAppIdentity, /^[0-9a-f]{40}$/u);
+  assert.notEqual(
+    persistedAppIdentity,
+    sourceTreeIdentity,
+    "the schema owner must bind both the source tree and committed Ponder config"
   );
   const resync = await readFile(join(stateDir, "indexer.resync.testnet"), "utf8");
   assert.match(resync, /^initial_status=staged$/mu);
   assert.match(resync, /^reason=app_identity_changed$/mu);
   assert.match(resync, /^honest_degradation_signal=externalPostingWatcherLagSeconds$/mu);
+
+  await writeFile(
+    join(appRoot, "deploy/indexer.env.template"),
+    [
+      "POLKADOT_CHAIN_ID=420420417",
+      "POLKADOT_CHAIN_NAME=polkadotHubTestnet",
+      "PONDER_ESCROW_CORE_ADDRESS=0x2222222222222222222222222222222222222222",
+      "PONDER_START_BLOCK_ESCROW=200",
+      "DATABASE_SCHEMA=agent_indexer_existing",
+      "",
+    ].join("\n")
+  );
+  git(appRoot, "add", ".");
+  git(appRoot, "commit", "-m", "change indexed contract");
+  const configChangeSha = revParse(appRoot, "HEAD");
+  await writeFile(deployLog, "");
+
+  // Reproduce the production failure shape: the checkout already
+  // fast-forwarded to the config change before Ponder rejected its old schema,
+  // so the retry's current Git range contains no template diff.
+  const configRun = runDeploy(appRoot, env(configChangeSha, configChangeSha));
+  assert.equal(configRun.status, 0, configRun.stderr);
+  assert.match(
+    configRun.stderr,
+    /INDEXER HISTORICAL RE-SYNC STARTING/u,
+    "an indexed-contract address change must select a fresh schema before Ponder starts"
+  );
+  assert.match(
+    configRun.stdout,
+    /indexer\.env content changed; image unchanged/u,
+    "a range-empty retry must still rotate and recreate without rebuilding the unchanged indexer image"
+  );
+  assert.match(
+    await readFile(deployLog, "utf8"),
+    new RegExp(`^indexer wait=0 stability=15 build=0 rollback=${selectedSchema}$`, "mu")
+  );
+  const configSchema = (await readFile(indexerEnv, "utf8"))
+    .match(/^DATABASE_SCHEMA=(.+)$/mu)?.[1];
+  assert.match(configSchema, /^agent_indexer_testnet_\d{14}_[0-9a-f]{8}$/u);
+  assert.notEqual(configSchema, selectedSchema);
+  const configResync = await readFile(join(stateDir, "indexer.resync.testnet"), "utf8");
+  assert.match(configResync, /^reason=ponder_config_changed$/mu);
+
+  // #833 persisted only the indexer tree. A host that completed the explicit
+  // fresh-schema recovery before this fix lands will still carry that legacy
+  // value. Upgrade it from the last-good SHA without rotating the healthy
+  // just-recovered schema a second time.
+  const configTreeIdentity = revParse(appRoot, `${configChangeSha}:indexer`);
+  await writeFile(join(stateDir, "indexer.app-identity.testnet"), `${configTreeIdentity}\n`);
+  await writeFile(deployLog, "");
+  const legacyStateRun = runDeploy(appRoot, {
+    ...env(configChangeSha, configChangeSha),
+    RUN_INDEXER: "1",
+  });
+  assert.equal(legacyStateRun.status, 0, legacyStateRun.stderr);
+  assert.match(legacyStateRun.stdout, /Upgrading legacy tree-only indexer owner identity/u);
+  assert.doesNotMatch(legacyStateRun.stderr, /INDEXER HISTORICAL RE-SYNC STARTING/u);
+  assert.equal(
+    (await readFile(indexerEnv, "utf8")).match(/^DATABASE_SCHEMA=(.+)$/mu)?.[1],
+    configSchema,
+    "legacy state migration must retain the already-recovered schema"
+  );
+  assert.notEqual(
+    (await readFile(join(stateDir, "indexer.app-identity.testnet"), "utf8")).trim(),
+    configTreeIdentity,
+    "the successful deploy should persist the composite identity"
+  );
 });
 
 test("unchanged Caddy content does not imply an indexer smoke check", async () => {
@@ -716,7 +811,7 @@ test("indexer schema recovery persists across normal runtime-env renders", async
     "normal deploys should reapply a persisted schema override after rendering the template"
   );
   const renderIndex = script.indexOf("  render_runtime_envs");
-  const applyIndex = script.indexOf('    apply_indexer_database_schema "$indexer_code_changed"', renderIndex);
+  const applyIndex = script.indexOf("    apply_indexer_database_schema 1", renderIndex);
   assert.ok(
     renderIndex > -1 && applyIndex > renderIndex,
     "schema override must run after op inject renders /run env files"
