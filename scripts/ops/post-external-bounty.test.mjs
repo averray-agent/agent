@@ -34,6 +34,7 @@ const MANIFEST = {
     agentAccountCore: AAC
   }
 };
+const REWARD_DEFINITION = { rewardAmount: "1" };
 
 function makeDraft(overrides = {}) {
   return {
@@ -153,8 +154,12 @@ test("funding math fails closed when the live fee or preview differs", () => {
   );
 });
 
-test("draft calldata validates against manifest v2 and decodes the non-waived call", () => {
-  const result = validateAndEncodeDraftCalldata({ draft: makeDraft(), manifest: MANIFEST });
+test("draft calldata validates against manifest v2, committed reward, and the non-waived call", () => {
+  const result = validateAndEncodeDraftCalldata({
+    draft: makeDraft(),
+    manifest: MANIFEST,
+    definition: REWARD_DEFINITION
+  });
   assert.equal(result.to, ESCROW);
   assert.equal(result.token, TOKEN);
   assert.equal(result.decoded.jobId, JOB_ID);
@@ -175,16 +180,40 @@ test("fee-waived or wrong-contract draft calldata is refused", () => {
           function: "createSinglePayoutJobFeeWaived(bytes32,address,uint256,uint256,uint256,uint256,bytes32,bytes32,bytes32)"
         }
       }),
-      manifest: MANIFEST
+      manifest: MANIFEST,
+      definition: REWARD_DEFINITION
     }),
     /expected the non-waived/u
   );
   assert.throws(
     () => validateAndEncodeDraftCalldata({
       draft: makeDraft({ calldata: { ...makeDraft().calldata, to: AAC } }),
-      manifest: MANIFEST
+      manifest: MANIFEST,
+      definition: REWARD_DEFINITION
     }),
     /manifest EscrowCore/u
+  );
+});
+
+test("draft calldata reward must equal the committed definition rewardAmount", () => {
+  const draft = makeDraft({
+    calldata: {
+      ...makeDraft().calldata,
+      args: [
+        ...makeDraft().calldata.args.slice(0, 2),
+        "999999",
+        ...makeDraft().calldata.args.slice(3)
+      ]
+    }
+  });
+
+  assert.throws(
+    () => validateAndEncodeDraftCalldata({
+      draft,
+      manifest: MANIFEST,
+      definition: REWARD_DEFINITION
+    }),
+    /committed definition\.rewardAmount "1" requires 1000000.*Refusing reward drift/u
   );
 });
 

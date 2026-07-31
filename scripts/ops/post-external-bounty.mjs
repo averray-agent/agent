@@ -10,7 +10,8 @@ import {
   Wallet,
   formatUnits,
   getAddress,
-  isAddress
+  isAddress,
+  parseUnits
 } from "ethers";
 
 import { bindSignerToWriteBroadcaster } from "../../mcp-server/src/blockchain/rpc-provider.js";
@@ -242,7 +243,7 @@ export function buildFundingMath({
   });
 }
 
-export function validateAndEncodeDraftCalldata({ draft, manifest }) {
+export function validateAndEncodeDraftCalldata({ draft, manifest, definition }) {
   if (!draft || typeof draft !== "object") throw new Error("Draft response is missing.");
   if (!BYTES32_RE.test(String(draft.draftId ?? ""))) throw new Error("Draft response has no valid draftId.");
   if (!BYTES32_RE.test(String(draft.jobId ?? ""))) throw new Error("Draft response has no valid jobId.");
@@ -273,6 +274,18 @@ export function validateAndEncodeDraftCalldata({ draft, manifest }) {
   }
   const encoded = CREATE_INTERFACE.encodeFunctionData(CREATE_SINGLE_PAYOUT_SIGNATURE, calldata.args);
   const decoded = CREATE_INTERFACE.decodeFunctionData(CREATE_SINGLE_PAYOUT_SIGNATURE, encoded);
+  let expectedRewardRaw;
+  try {
+    expectedRewardRaw = parseUnits(String(definition?.rewardAmount ?? ""), USDC_DECIMALS);
+  } catch {
+    throw new Error("definition.rewardAmount must be an exact USDC decimal amount.");
+  }
+  if (decoded[2] !== expectedRewardRaw) {
+    throw new Error(
+      `Draft calldata reward is ${decoded[2]} raw USDC, but committed definition.rewardAmount ` +
+      `${JSON.stringify(definition.rewardAmount)} requires ${expectedRewardRaw}. Refusing reward drift.`
+    );
+  }
   return {
     to: escrow,
     token,
@@ -358,8 +371,8 @@ export function assertDefinitionMatchesDraft(definition, draft) {
   return localSpecHash;
 }
 
-export async function inspectFundingState({ manifest, provider, poster, draft }) {
-  const calldata = validateAndEncodeDraftCalldata({ draft, manifest });
+export async function inspectFundingState({ manifest, provider, poster, draft, definition }) {
+  const calldata = validateAndEncodeDraftCalldata({ draft, manifest, definition });
   const escrow = new Contract(calldata.to, ESCROW_ABI, provider);
   const agentAccountAddress = requireManifestAddress(manifest, "agentAccountCore");
   const agentAccount = new Contract(agentAccountAddress, AGENT_ACCOUNT_ABI, provider);
@@ -595,7 +608,7 @@ export async function runPosterBounty(args, dependencies = {}) {
       throw new Error(`Draft lookup returned ${draft.draftId}; expected ${args.draftId}.`);
     }
     assertDefinitionMatchesDraft(definition, draft);
-    const plan = await inspect({ manifest, provider: rpc.provider, poster, draft });
+    const plan = await inspect({ manifest, provider: rpc.provider, poster, draft, definition });
     printDryRunPlan({ draft, plan, log });
 
     if (!args.execute) {
