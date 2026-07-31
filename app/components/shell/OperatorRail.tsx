@@ -36,6 +36,8 @@ interface NavItem {
   label: string;
   icon: typeof LayoutDashboard;
   count?: number | string;
+  /** Only rendered when the signed-in wallet holds this role. */
+  requiresRole?: string;
 }
 
 interface NavGroup {
@@ -57,6 +59,9 @@ const NAV_GROUPS: NavGroup[] = [
     label: "Capital",
     items: [
       { href: "/treasury", label: "Treasury", icon: Coins },
+      // Platform earnings (protocol-fee treasury) — a different account from
+      // the signed-in wallet's Treasury above; admin surface by design.
+      { href: "/revenue", label: "Revenue", icon: Coins, requiresRole: "admin" },
       { href: "/sessions", label: "Sessions", icon: History },
     ],
   },
@@ -113,7 +118,9 @@ export function OperatorRail() {
             <p className="px-1 pb-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--muted)]">
               {group.label}
             </p>
-            {group.items.map((item) => {
+            {group.items
+              .filter((item) => !item.requiresRole || auth.roles.includes(item.requiresRole))
+              .map((item) => {
               const active =
                 pathname === item.href || pathname?.startsWith(`${item.href}/`);
               const Icon = item.icon;
