@@ -2,6 +2,14 @@
 
 Updated: 2026-04-22
 
+> **⚠️ SUPERSEDED post-launch (2026-07-31).** This was the *pre-launch* build
+> plan — Phases 0–5, ending at "Audit and mainnet gate." Averray is now live on
+> mainnet (chainId 420420419) and earning, so this plan is **historical**. For
+> what to build next, use [`POST_V1_ROADMAP.md`](POST_V1_ROADMAP.md) (the live
+> board, organized by the six [`AGENT_BANKING.md`](AGENT_BANKING.md) pillars).
+> Kept for the design rationale in "What we learned" (REVM, XCM-heavy treasury,
+> asset config, multisig mapping) — still accurate and worth referencing.
+
 This is the canonical implementation plan for making Averray the best
 product we can ship on Polkadot Hub without over-promising what is not
 production-ready yet.
