@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils/cn";
 import { useAuth } from "@/lib/auth/use-auth";
 import { signOut } from "@/lib/auth/siwe";
 import { shortAddress } from "@/lib/format";
+import { ChainTicker } from "@/components/shell/ChainTicker";
 import { Button } from "@/components/ui/button";
 import {
   useAdminSessions,
@@ -149,6 +150,7 @@ export function OperatorRail() {
       </nav>
 
       <footer className="flex flex-col gap-2 border-t border-[var(--line)] pt-4">
+        <ChainTicker />
         <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--muted)]">
           {auth.authenticated ? "Signed in" : "Operator state"}
         </p>
