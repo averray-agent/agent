@@ -5,6 +5,7 @@ import { PosterTopbar } from "@/components/poster/PosterTopbar";
 import { PosterModeBanner } from "@/components/poster/PosterModeBanner";
 import { PosterJobsTable } from "@/components/poster/PosterJobsTable";
 import { DraftLookupPanel } from "@/components/poster/DraftLookupPanel";
+import { NewBountyPanel } from "@/components/poster/NewBountyPanel";
 import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
 import { useExternalJobs, usePosterOnboarding } from "@/lib/api/hooks";
 import { buildPosterJobsView } from "@/lib/api/poster-adapters";
@@ -54,6 +55,16 @@ export default function PosterPage() {
         onboarding={onboardingRequest.data}
         unavailable={Boolean(onboardingRequest.error) && !onboardingRequest.data}
       />
+
+      <section className="flex flex-col gap-2.5">
+        <h2
+          className="font-[family-name:var(--font-display)] text-[12px] font-extrabold uppercase text-[var(--avy-ink)]"
+          style={{ letterSpacing: "0.1em" }}
+        >
+          New bounty
+        </h2>
+        <NewBountyPanel onboarding={onboardingRequest.data} wallet={wallet} />
+      </section>
 
       <section className="flex flex-col gap-2.5">
         <h2
