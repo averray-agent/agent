@@ -443,32 +443,50 @@ export class BlockchainGateway {
     return this.withGatewayError("getDefaultClaimStakeBps", async () => Number(await this.policyContract.defaultClaimStakeBps()));
   }
 
-  async getClaimEconomicsConfig({ requireWaiverInputs = false } = {}) {
+  async getClaimEconomicsConfig({
+    requireWaiverInputs = false,
+    requireBondInputs = false
+  } = {}) {
     return this.withGatewayError("getClaimEconomicsConfig", async () => {
       const optional = async (promise, fallback) => promise.catch(() => fallback);
       const onboardingWaiverClaimCountRead = this.policyContract.onboardingWaiverClaimCount();
       const [claimFeeBps, claimFeeVerifierBps, onboardingWaiverClaimCount] = await Promise.all([
-        optional(this.policyContract.claimFeeBps(), 0),
+        requireBondInputs
+          ? this.policyContract.claimFeeBps()
+          : optional(this.policyContract.claimFeeBps(), 0),
         optional(this.policyContract.claimFeeVerifierBps(), 7000),
         requireWaiverInputs
           ? onboardingWaiverClaimCountRead
           : optional(onboardingWaiverClaimCountRead, 0)
       ]);
       const minClaimFeeByAsset = {};
+      const minClaimFeeRawByAsset = {};
       await Promise.all((this.config.supportedAssets ?? []).map(async (asset) => {
         const symbol = asset.symbol ?? this.resolveAssetSymbol(asset.address);
+        const rawMinimum = requireBondInputs
+          ? await this.policyContract.minClaimFeeByAsset(asset.address)
+          : await optional(this.policyContract.minClaimFeeByAsset(asset.address), 0);
         minClaimFeeByAsset[symbol] = this.toDisplayUnits(
-          await optional(this.policyContract.minClaimFeeByAsset(asset.address), 0),
+          rawMinimum,
           asset
         );
+        minClaimFeeRawByAsset[symbol] = this.toRawString(rawMinimum);
       }));
       return {
         claimFeeBps: Number(claimFeeBps),
         claimFeeVerifierBps: Number(claimFeeVerifierBps),
         onboardingWaiverClaimCount: Number(onboardingWaiverClaimCount),
-        minClaimFeeByAsset
+        minClaimFeeByAsset,
+        minClaimFeeRawByAsset
       };
     });
+  }
+
+  async getDisputeWindowSeconds() {
+    return this.withGatewayError(
+      "getDisputeWindowSeconds",
+      async () => Number(await this.escrowContract.DISPUTE_WINDOW())
+    );
   }
 
   async getProtocolFeeConfig() {

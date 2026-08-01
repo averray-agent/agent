@@ -7,6 +7,7 @@ DISCOVERY_URL=${DISCOVERY_URL:-https://averray.com/.well-known/agent-tools.json}
 APP_URL=${APP_URL:-https://app.averray.com/}
 API_HEALTH_URL=${API_HEALTH_URL:-https://api.averray.com/health}
 API_ONBOARDING_URL=${API_ONBOARDING_URL:-https://api.averray.com/onboarding}
+API_POSTER_ONBOARDING_URL=${API_POSTER_ONBOARDING_URL:-https://api.averray.com/poster/onboarding}
 API_ADMIN_STATUS_URL=${API_ADMIN_STATUS_URL:-https://api.averray.com/admin/status}
 API_METRICS_URL=${API_METRICS_URL:-https://api.averray.com/metrics}
 INDEXER_URL=${INDEXER_URL:-https://index.averray.com/}
@@ -197,6 +198,8 @@ echo "Checking discovery manifest"
 discovery_json="$(fetch "$DISCOVERY_URL")"
 jq -e '.discoveryUrl == "https://averray.com/.well-known/agent-tools.json"' >/dev/null <<<"$discovery_json"
 jq -e '.baseUrl == "https://api.averray.com"' >/dev/null <<<"$discovery_json"
+jq -e '.publicEndpoints | any(.path == "/poster/onboarding")' >/dev/null <<<"$discovery_json"
+jq -e '.onboarding.posterEntrypoint == "https://api.averray.com/poster/onboarding"' >/dev/null <<<"$discovery_json"
 
 echo "Checking operator app shell"
 check_operator_app_shell
@@ -210,6 +213,49 @@ echo "Checking onboarding contract"
 onboarding_json="$(fetch "$API_ONBOARDING_URL")"
 jq -e '.name | length > 0' >/dev/null <<<"$onboarding_json"
 jq -e '.protocols | index("http") != null' >/dev/null <<<"$onboarding_json"
+
+echo "Checking poster onboarding live facts"
+poster_onboarding_json="$(fetch "$API_POSTER_ONBOARDING_URL")"
+jq -e '
+  (.mode == "closed" or .mode == "allowlist" or .mode == "open") and
+  (.economics.feeSemantics == "poster_additive") and
+  (.economics.protocolFeeBps | type) == "number" and
+  (.economics.minRewardUsdc | tonumber) > 0 and
+  (.economics.draftTtlHours | type) == "number" and
+  (.economics.maxOpenDrafts | type) == "number" and
+  (.workerFacts.claimBond.available == true) and
+  (.workerFacts.claimBond.stakeBps | type) == "number" and
+  (.workerFacts.claimBond.feeBps | type) == "number" and
+  (.workerFacts.claimBond.minFeeRaw | test("^[0-9]+$")) and
+  (.workerFacts.disputeWindow.available == true) and
+  (.workerFacts.disputeWindow.seconds | type) == "number" and
+  (.liveReads.protocolFeeBps.status == "available") and
+  (.liveReads.claimBond.status == "available") and
+  (.liveReads.disputeWindow.status == "available")
+' >/dev/null <<<"$poster_onboarding_json"
+jq -e -n \
+  --argjson poster "$poster_onboarding_json" \
+  --argjson health "$api_health_json" '
+    ($poster.chainId == $health.auth.chainId) and
+    (($poster.escrowCore | ascii_downcase) == ($health.addresses.escrowCore | ascii_downcase)) and
+    (($poster.agentAccountCore | ascii_downcase) == ($health.addresses.agentAccountCore | ascii_downcase)) and
+    (($poster.token.address | ascii_downcase) == ($health.addresses.token | ascii_downcase))
+  ' >/dev/null
+jq -e '
+  .externalBounties.posterOnboarding == "/poster/onboarding" and
+  .externalBounties.claimBond.available == true and
+  .externalBounties.disputeWindow.available == true
+' >/dev/null <<<"$onboarding_json"
+
+if [[ -n "$OPERATOR_TOKEN" ]]; then
+  admin_status_json="$(fetch_admin_status_once)"
+  jq -e -n \
+    --argjson poster "$poster_onboarding_json" \
+    --argjson operational "$admin_status_json" '
+      ($poster.workerFacts.claimBond.stakeBps == $operational.maintenance.policy.risk.defaultClaimStakeBps) and
+      ($poster.workerFacts.claimBond.feeBps == $operational.maintenance.policy.risk.claimFeeBps)
+    ' >/dev/null
+fi
 
 if enabled "$CHECK_METRICS_AUTH"; then
   if [[ -z "$METRICS_BEARER_TOKEN" ]]; then

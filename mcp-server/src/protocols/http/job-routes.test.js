@@ -71,6 +71,7 @@ function makeHarness(overrides = {}) {
       return overrides.session ?? { sessionId, wallet };
     },
     externalPostingService: overrides.externalPostingService,
+    posterOnboardingService: overrides.posterOnboardingService,
     rateLimitConfig: { adminJobs: { max: 1, windowMs: 1000 } },
     readJsonBody: async () => {
       calls.push(["readJsonBody"]);
@@ -162,6 +163,51 @@ test("GET /jobs applies the external projection boundary before source filtering
   }), true);
   assert.equal(response.body.total, 0);
   assert.deepEqual(response.body.jobs, []);
+});
+
+test("GET /jobs carries the live external claim-bond estimate in full and compact rows", async () => {
+  const external = {
+    id: "external-1",
+    title: "External",
+    rewardAmount: 1,
+    rewardAsset: "USDC",
+    category: "coding",
+    source: { type: "external", poster: { wallet: WALLET } },
+    lifecycle: { state: "open" }
+  };
+  const claimBond = {
+    available: true,
+    stakeRaw: "100000",
+    stakeBps: 1000,
+    feeRaw: "50000",
+    feeBps: 500
+  };
+  const { response, route } = makeHarness({
+    jobs: [external],
+    externalPostingService: {
+      async filterExternalCatalogProjection(jobs) {
+        return jobs;
+      }
+    },
+    posterOnboardingService: {
+      async enrichExternalCatalogRows(jobs) {
+        return jobs.map((job) => ({ ...job, claimBond }));
+      }
+    }
+  });
+
+  assert.equal(await invoke(route, { path: "/jobs", response }), true);
+  assert.deepEqual(response.body[0].claimBond, claimBond);
+  assert.equal(response.body[0].source.poster.wallet, WALLET);
+
+  const compactResponse = {};
+  assert.equal(await invoke(route, {
+    path: "/jobs?source=external",
+    response: compactResponse
+  }), true);
+  assert.deepEqual(compactResponse.body.jobs[0].claimBond, claimBond);
+  assert.equal(compactResponse.body.jobs[0].source, "external");
+  assert.equal(compactResponse.body.jobs[0].poster.wallet, WALLET);
 });
 
 test("GET /jobs/tiers returns cached tier requirements", async () => {

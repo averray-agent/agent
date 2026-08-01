@@ -684,8 +684,43 @@ test("getClaimEconomicsConfig converts chain min fees back to display units", as
     claimFeeBps: 200,
     claimFeeVerifierBps: 7000,
     onboardingWaiverClaimCount: 3,
-    minClaimFeeByAsset: { DOT: 0.05 }
+    minClaimFeeByAsset: { DOT: 0.05 },
+    minClaimFeeRawByAsset: { DOT: "50000000000000000" }
   });
+});
+
+test("getClaimEconomicsConfig fails closed when an exact bond input is unreadable", async () => {
+  const gateway = gatewayWithDot();
+  gateway.policyContract = {
+    async claimFeeBps() {
+      throw new Error("policy RPC unavailable");
+    },
+    async claimFeeVerifierBps() {
+      return 7000n;
+    },
+    async onboardingWaiverClaimCount() {
+      return 3n;
+    },
+    async minClaimFeeByAsset() {
+      return 50_000_000_000_000_000n;
+    }
+  };
+
+  await assert.rejects(
+    () => gateway.getClaimEconomicsConfig({ requireBondInputs: true }),
+    /policy RPC unavailable/u
+  );
+});
+
+test("getDisputeWindowSeconds reads the live EscrowCore constant", async () => {
+  const gateway = new BlockchainGateway({ enabled: false });
+  gateway.escrowContract = {
+    async DISPUTE_WINDOW() {
+      return 123_456n;
+    }
+  };
+
+  assert.equal(await gateway.getDisputeWindowSeconds(), 123_456);
 });
 
 test("getClaimEconomicsConfig surfaces a required onboarding-waiver policy read failure", async () => {

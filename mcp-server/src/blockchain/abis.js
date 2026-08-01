@@ -40,6 +40,7 @@ export const AGENT_ACCOUNT_ABI = [
 export const ESCROW_CORE_ABI = [
   "function accounts() view returns (address)",
   "function treasuryAccount() view returns (address)",
+  "function DISPUTE_WINDOW() view returns (uint256)",
   "function protocolFeeBps() view returns (uint16)",
   "function MAX_PROTOCOL_FEE_BPS() view returns (uint16)",
   "function previewProtocolFee(uint256 reward) view returns (uint256)",

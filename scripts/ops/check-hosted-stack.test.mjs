@@ -7,6 +7,20 @@ import { fileURLToPath } from "node:url";
 const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const CHECK_SCRIPT = join(REPO_ROOT, "scripts/ops/check-hosted-stack.sh");
 
+test("hosted smoke cross-checks poster onboarding against operational and chain-backed health", async () => {
+  const script = await readFile(CHECK_SCRIPT, "utf8");
+
+  assert.match(script, /API_POSTER_ONBOARDING_URL=/u);
+  assert.match(script, /\.onboarding\.posterEntrypoint == "https:\/\/api\.averray\.com\/poster\/onboarding"/u);
+  assert.match(script, /\.liveReads\.protocolFeeBps\.status == "available"/u);
+  assert.match(script, /\.liveReads\.claimBond\.status == "available"/u);
+  assert.match(script, /\.liveReads\.disputeWindow\.status == "available"/u);
+  assert.match(script, /\$poster\.chainId == \$health\.auth\.chainId/u);
+  assert.match(script, /\$poster\.escrowCore \| ascii_downcase/u);
+  assert.match(script, /\$poster\.workerFacts\.claimBond\.stakeBps == \$operational\.maintenance\.policy\.risk\.defaultClaimStakeBps/u);
+  assert.match(script, /\$poster\.workerFacts\.claimBond\.feeBps == \$operational\.maintenance\.policy\.risk\.claimFeeBps/u);
+});
+
 test("docker product-proof gate can read hosted worker-loop evidence", async () => {
   const script = await readFile(CHECK_SCRIPT, "utf8");
 

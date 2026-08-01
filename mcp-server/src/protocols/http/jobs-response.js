@@ -130,6 +130,9 @@ function toCompactJobRow(job) {
     ...(job?.source?.type === "external" && job.source.poster
       ? { poster: job.source.poster }
       : {}),
+    ...((job?.source === "external" || job?.source?.type === "external") && job.claimBond
+      ? { claimBond: job.claimBond }
+      : {}),
     ...(sourceDetails ? { sourceDetails } : {})
   };
 }
