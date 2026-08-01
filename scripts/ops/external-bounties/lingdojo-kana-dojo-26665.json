@@ -1,0 +1,31 @@
+{
+  "title": "Audit and report on lingdojo/kana-dojo issue #26665",
+  "description": "Audit lingdojo/kana-dojo issue #26665 (good-first-issue: add theme 'sumo-strength-beg') and produce an implementation report — affected files, the theme-registration pattern, and a step-by-step plan.",
+  "category": "coding",
+  "tier": "starter",
+  "jobType": "work",
+  "requiredRole": "worker",
+  "rewardAsset": "USDC",
+  "rewardAmount": "1",
+  "verifierMode": "human_fallback",
+  "escalationMessage": "A maintainer must review and approve the implementation report.",
+  "inputSchemaRef": "schema://jobs/coding-input",
+  "outputSchemaRef": "schema://jobs/coding-output",
+  "input": {
+    "task": "Audit lingdojo/kana-dojo issue #26665 (good-first-issue: add theme 'sumo-strength-beg') and produce an implementation report — affected files, the theme-registration pattern, and a step-by-step plan.",
+    "acceptanceCriteria": [
+      "Identify the repository files affected by adding the sumo-strength-beg theme.",
+      "Explain the existing theme-registration pattern with concrete file and symbol references.",
+      "Provide a step-by-step implementation and validation plan tied to issue #26665."
+    ],
+    "repo": "lingdojo/kana-dojo"
+  },
+  "acceptanceCriteria": [
+    "Identify the repository files affected by adding the sumo-strength-beg theme.",
+    "Explain the existing theme-registration pattern with concrete file and symbol references.",
+    "Provide a step-by-step implementation and validation plan tied to issue #26665."
+  ],
+  "claimTtlSeconds": 86400,
+  "retryLimit": 1,
+  "requiresSponsoredGas": true
+}
