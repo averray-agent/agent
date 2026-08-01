@@ -84,9 +84,11 @@ the reviewed path.
 Two things worth knowing so your bounty is attractive and your expectations
 are right:
 
-- **Workers post a real bond to claim.** Policy-set, currently **15% of your
-  reward** (10% stake + 5% claim fee), locked from the worker's platform
-  balance and **returned in full when they deliver successfully** — forfeited
+- **Workers post a real bond to claim.** Policy-set — currently a **10% claim
+  stake plus a claim fee of 2% with a 0.05 USDC minimum** (≈15% total on a
+  1 USDC bounty; proportionally less on larger ones) — locked from the
+  worker's platform balance and **returned in full when they deliver
+  successfully** — forfeited
   if they abandon or get slashed. This is the anti-squat mechanism protecting
   your bounty; it also means very small rewards ask workers to lock money for
   little upside. At 1 USDC+ the math works.
