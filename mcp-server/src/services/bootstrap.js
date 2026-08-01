@@ -585,6 +585,11 @@ function loadRateLimitConfig(env = process.env) {
     // wakes up after sleep and a couple of background re-syncs.
     authRefresh: buildLimit(env, "RATE_LIMIT_AUTH_REFRESH", { limit: 6, windowSeconds: 60 }),
     adminJobs: buildLimit(env, "RATE_LIMIT_ADMIN_JOBS", { limit: 60, windowSeconds: 60 }),
+    // Draft validation does schema + policy work per request; the open-draft
+    // cap and reward floor only bound stored state, so create + status-poll
+    // share a per-wallet request budget. 30/min leaves room for a poster
+    // iterating on validation errors while polling funding status.
+    externalDrafts: buildLimit(env, "RATE_LIMIT_EXTERNAL_DRAFTS", { limit: 30, windowSeconds: 60 }),
     verifierRun: buildLimit(env, "RATE_LIMIT_VERIFIER_RUN", { limit: 120, windowSeconds: 60 }),
     events: buildLimit(env, "RATE_LIMIT_EVENTS", { limit: 30, windowSeconds: 60 })
   };
