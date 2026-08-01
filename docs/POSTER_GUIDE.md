@@ -34,6 +34,12 @@ it cannot change under you after you fund.
 > poster-side cancel for a job nobody claims.** Unfunded drafts are safe —
 > they expire after 72h with no funds moved — but a funded job is a
 > commitment. Size your first bounty accordingly.
+>
+> If a job of yours does get stuck unclaimed, ask the operator: escrowed
+> funds can be **rescued back to you on request** through an on-chain
+> procedure taking about 7 days — it can only ever refund you, the recorded
+> poster. A self-serve instant cancel is planned for the next contract
+> upgrade.
 
 ## 2. What you need
 
