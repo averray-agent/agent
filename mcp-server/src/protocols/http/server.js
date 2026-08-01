@@ -47,6 +47,7 @@ import { createOperationalRoutes, resolveMetricsAuthConfig } from "./operational
 import { createOperatorActivityFeed } from "./operator-activity-feed.js";
 import { createPaymentRoutes, resolvePaymentRouteConfig } from "./payment-routes.js";
 import { createPolicyRoutes } from "./policy-routes.js";
+import { createPosterReviewRoutes } from "./poster-review-routes.js";
 import { createProfileRoutes } from "./profile-routes.js";
 import { createPublicMetadataRoutes } from "./public-metadata-routes.js";
 import { createSchemaRoutes } from "./schema-routes.js";
@@ -67,6 +68,7 @@ const {
   verifierService,
   externalPostingService,
   externalPostingWatcher,
+  posterReviewService,
   stateStore,
   contentRecoveryLog,
   gateway,
@@ -493,6 +495,15 @@ const handleExternalJobRoute = createExternalJobRoutes({
   respond,
 });
 
+const handlePosterReviewRoute = createPosterReviewRoutes({
+  authMiddleware,
+  enforceLimit,
+  posterReviewService,
+  rateLimitConfig,
+  readJsonBody,
+  respond,
+});
+
 const handleSchemaRoute = createSchemaRoutes({
   getPublicBuiltinJobSchemaByName,
   listBuiltinJobSchemas,
@@ -719,6 +730,10 @@ const server = createServer(async (request, response) => {
     }
 
     if (await handleExternalJobRoute({ request, response, url, pathname })) {
+      return;
+    }
+
+    if (await handlePosterReviewRoute({ request, response, url, pathname })) {
       return;
     }
 

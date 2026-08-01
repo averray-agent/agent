@@ -61,6 +61,66 @@ export class VerifierService {
       );
     }
 
+    return this.persistBrokeredDecision({
+      session,
+      job,
+      verdict,
+      verificationInput: validatedVerificationInput,
+      metadataURI,
+      payoutTx
+    });
+  }
+
+  /**
+   * Persist a decision whose chain mutation was authorized by an existing
+   * broker path rather than by a verifier handler. Poster review uses this
+   * after resolveSinglePayout (or the reject+openDispute escalation pair) so
+   * badges, run receipts, funded-job state, and verification results converge
+   * through the same ingestion machinery as /verifier/run.
+   */
+  async ingestBrokeredDecision({
+    sessionId,
+    outcome,
+    reasonCode,
+    metadataURI,
+    reasoningHash,
+    payoutTx = undefined,
+    details = undefined,
+    handler = "poster_review",
+    handlerVersion = "v1"
+  }) {
+    const session = await this.platformService.resumeSession(sessionId);
+    assertSessionCanReceiveVerification(session, { reason: "brokered_review_decision" });
+    const job = this.platformService.getJobDefinition(session.jobId);
+    const verificationInput = this.resolveVerificationInput(session);
+    const verdict = {
+      handler,
+      handlerVersion,
+      outcome,
+      reasonCode,
+      reasoningHash,
+      details,
+      verificationInput
+    };
+    return this.persistBrokeredDecision({
+      session,
+      job,
+      verdict,
+      verificationInput,
+      metadataURI,
+      payoutTx
+    });
+  }
+
+  async persistBrokeredDecision({
+    session,
+    job,
+    verdict,
+    verificationInput,
+    metadataURI,
+    payoutTx
+  }) {
+    const sessionId = session.sessionId;
     const persistedVerdict = payoutTx?.settlement
       ? { ...verdict, settlement: payoutTx.settlement }
       : verdict;
@@ -78,7 +138,7 @@ export class VerifierService {
       sessionId,
       metadataURI,
       ...(payoutTx ? { payoutTx } : {}),
-      ...buildVerificationAuditFields(job, { verdict: persistedVerdict, verificationInput: validatedVerificationInput }),
+      ...buildVerificationAuditFields(job, { verdict: persistedVerdict, verificationInput }),
       session: settledSession
     };
 

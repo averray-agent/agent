@@ -88,10 +88,15 @@ import {
   ExternalPostingService,
   resolveExternalPostingConfig
 } from "../core/external-posting-service.js";
+import { PosterReviewService } from "../core/poster-review-service.js";
 import {
   ExternalPostingWatcherService,
   resolveExternalPostingWatcherConfig
 } from "./external-posting-watcher.js";
+import {
+  ExternalPosterReviewEscalatorService,
+  loadExternalPosterReviewEscalatorConfig
+} from "./external-poster-review-escalator.js";
 
 const moduleDir = dirname(fileURLToPath(import.meta.url));
 loadLocalEnv(process.cwd(), resolve(moduleDir, "../../"));
@@ -304,13 +309,29 @@ export async function createPlatformRuntime() {
     logger,
     () => new VerifierService(platformService, stateStore, gateway)
   );
+  const externalPostingConfig = initStep(
+    "load-external-posting-config",
+    logger,
+    () => resolveExternalPostingConfig(process.env)
+  );
   const externalPostingService = initStep("init-external-posting-service", logger, () =>
     new ExternalPostingService({
       stateStore,
       platformService,
-      config: resolveExternalPostingConfig(process.env),
+      config: externalPostingConfig,
       logger,
       eventBus
+    })
+  );
+  const posterReviewService = initStep("init-poster-review-service", logger, () =>
+    new PosterReviewService({
+      platformService,
+      stateStore,
+      gateway,
+      verifierService,
+      eventBus,
+      config: externalPostingConfig,
+      logger
     })
   );
   const externalPostingWatcher = initStep("init-external-posting-watcher", logger, () =>
@@ -416,6 +437,20 @@ export async function createPlatformRuntime() {
       logger
     })
   );
+  const externalPosterReviewEscalator = initStep("init-external-poster-review-escalator", logger, () =>
+    new ExternalPosterReviewEscalatorService(
+      platformService,
+      stateStore,
+      posterReviewService,
+      eventBus,
+      {
+        ...loadExternalPosterReviewEscalatorConfig(process.env, {
+          gatewayEnabled: gateway.isEnabled()
+        }),
+        logger
+      }
+    )
+  );
   const firstExternalAgentAlert = initStep("init-first-external-agent-alert", logger, () =>
     new FirstExternalAgentAlertService(stateStore, eventBus, {
       ...loadFirstExternalAgentAlertConfig(process.env),
@@ -436,6 +471,7 @@ export async function createPlatformRuntime() {
   platformService.bootstrapSelfReportScheduler = bootstrapSelfReportScheduler;
   platformService.jobStaleSweeper = jobStaleSweeper;
   platformService.submittedJobAutoVerifier = submittedJobAutoVerifier;
+  platformService.externalPosterReviewEscalator = externalPosterReviewEscalator;
   platformService.firstExternalAgentAlert = firstExternalAgentAlert;
   // Opt-in (testnet-only operational invariant): escrow auto-ingested job
   // rewards on-chain at ingestion so they are funded before being advertised
@@ -455,6 +491,7 @@ export async function createPlatformRuntime() {
   bootstrapSelfReportScheduler.start();
   jobStaleSweeper.start();
   submittedJobAutoVerifier.start();
+  externalPosterReviewEscalator.start();
   firstExternalAgentAlert.start();
 
   const authMiddleware = createAuthMiddleware({ authConfig, stateStore, logger });
@@ -476,6 +513,8 @@ export async function createPlatformRuntime() {
     verifierService,
     externalPostingService,
     externalPostingWatcher,
+    posterReviewService,
+    externalPosterReviewEscalator,
     gateway,
     mutationBackendConfig,
     pimlicoClient,
@@ -590,6 +629,9 @@ function loadRateLimitConfig(env = process.env) {
     // share a per-wallet request budget. 30/min leaves room for a poster
     // iterating on validation errors while polling funding status.
     externalDrafts: buildLimit(env, "RATE_LIMIT_EXTERNAL_DRAFTS", { limit: 30, windowSeconds: 60 }),
+    // Submission reads and decisions share a separate per-wallet budget so a
+    // noisy review UI cannot exhaust the poster's draft-creation allowance.
+    externalReviews: buildLimit(env, "RATE_LIMIT_EXTERNAL_REVIEWS", { limit: 30, windowSeconds: 60 }),
     verifierRun: buildLimit(env, "RATE_LIMIT_VERIFIER_RUN", { limit: 120, windowSeconds: 60 }),
     events: buildLimit(env, "RATE_LIMIT_EVENTS", { limit: 30, windowSeconds: 60 })
   };

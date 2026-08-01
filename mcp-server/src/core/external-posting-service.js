@@ -28,6 +28,7 @@ export const CREATE_SINGLE_PAYOUT_SIGNATURE =
 const DEFAULT_MIN_REWARD_USDC = "1";
 const DEFAULT_DRAFT_TTL_HOURS = 72;
 const DEFAULT_MAX_OPEN_DRAFTS = 10;
+export const DEFAULT_POSTER_REVIEW_WINDOW_HOURS = 7 * 24;
 const USDC_DECIMALS = 6;
 
 class ExternalPostingValidationError extends ValidationError {
@@ -74,6 +75,11 @@ export function resolveExternalPostingConfig(env = process.env) {
     DEFAULT_MAX_OPEN_DRAFTS,
     "EXTERNAL_POSTING_MAX_OPEN_DRAFTS"
   );
+  const reviewWindowHours = parsePositiveInteger(
+    env.EXTERNAL_POSTING_REVIEW_WINDOW_HOURS,
+    DEFAULT_POSTER_REVIEW_WINDOW_HOURS,
+    "EXTERNAL_POSTING_REVIEW_WINDOW_HOURS"
+  );
   const usdcAsset = resolveUsdcAsset(
     env.SUPPORTED_ASSETS_JSON,
     env.SUPPORTED_ASSETS,
@@ -96,6 +102,7 @@ export function resolveExternalPostingConfig(env = process.env) {
     minRewardRaw,
     draftTtlHours,
     maxOpenDrafts,
+    reviewWindowHours,
     escrowCoreAddress,
     usdcAsset
   });
