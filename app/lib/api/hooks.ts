@@ -160,3 +160,22 @@ export const useSessionStateMachine = () => useApi("/session/state-machine");
  */
 export const useCapabilityGrants = () =>
   useApi("/admin/capability-grants?limit=200", { refreshInterval: 15_000 });
+
+/**
+ * Public poster-door facts (mode, live economics, cancellation promise) —
+ * the machine surface from the poster-door packet. The lens renders these
+ * values verbatim; it never restates economics from constants.
+ */
+export const usePosterOnboarding = () => useApi("/poster/onboarding");
+
+/**
+ * External catalog rows (the poster lens filters to the signed-in wallet
+ * client-side; the recorded on-chain poster on each row is the truth).
+ * Polls every 15s like the other list surfaces.
+ */
+export const useExternalJobs = () =>
+  useApi("/jobs?source=external&limit=100", { refreshInterval: 15_000 });
+
+/** Poster-owned draft lookup; `null` id skips the fetch. */
+export const useExternalDraft = (draftId: string | null) =>
+  useApi(draftId ? `/jobs/draft/${encodeURIComponent(draftId)}` : null);
