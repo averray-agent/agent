@@ -4,7 +4,16 @@ import { useMemo, useState } from "react";
 import { FundingFlow } from "@/components/poster/FundingFlow";
 import { ApiError } from "@/lib/api/client";
 import { buildDefinition, postDraft, type DraftFormInput } from "@/lib/api/poster-post";
-import { parseUsdcToRaw } from "@/lib/wallet/funding";
+import { estimateWorkerBondRaw } from "@/lib/api/poster-adapters";
+import {
+  fetchIssue,
+  parseIssueUrl,
+  seedTemplate,
+  type DeliverableKind,
+  type IssueLookup,
+  type ParsedIssueUrl,
+} from "@/lib/github/issue";
+import { formatRawUsdc, parseUsdcToRaw } from "@/lib/wallet/funding";
 import { cn } from "@/lib/utils/cn";
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -17,11 +26,43 @@ const FIELD =
   "rounded-[8px] border border-[var(--avy-line)] bg-white/70 px-3 py-2 font-[family-name:var(--font-body)] text-[13px] text-[var(--avy-ink)] outline-none focus:border-[var(--avy-accent)]";
 const LABEL =
   "font-[family-name:var(--font-display)] text-[10px] font-extrabold uppercase text-[var(--avy-muted)]";
+const MONO = "font-[family-name:var(--font-mono)]";
+
+function StepHeading({ step, title, done }: { step: number; title: string; done: boolean }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span
+        className={cn(
+          "flex h-5 w-5 items-center justify-center rounded-full border font-[family-name:var(--font-display)] text-[10px] font-extrabold",
+          done
+            ? "border-[rgba(30,102,66,0.4)] bg-[rgba(30,102,66,0.1)] text-[#1e6642]"
+            : "border-[var(--avy-line)] bg-[#faf8f1] text-[var(--avy-ink)]"
+        )}
+      >
+        {done ? "✓" : step}
+      </span>
+      <span className={LABEL} style={{ letterSpacing: "0.1em" }}>
+        {title}
+      </span>
+    </div>
+  );
+}
+
+function primaryButton(enabled: boolean) {
+  return cn(
+    "rounded-[8px] border px-3.5 py-2 font-[family-name:var(--font-display)] text-[11px] font-extrabold uppercase",
+    enabled
+      ? "border-[var(--avy-accent)] bg-[var(--avy-accent-soft)] text-[var(--avy-accent)]"
+      : "border-[var(--avy-line)] bg-[#faf8f1] text-[var(--avy-muted)]"
+  );
+}
 
 /**
- * C2: draft form → server-issued calldata → wallet signing. The form only
- * collects the poster's inputs; every derived value (specHash, jobId,
- * calldata, fee) comes from the server and chain, gated in FundingFlow.
+ * The issue-anchored posting wizard. Every bounty starts from a verified
+ * public GitHub issue — the URL is the input; repo, title, task, and
+ * acceptance criteria derive from it (editable). Economics render live
+ * from /poster/onboarding BEFORE anything is created, including what the
+ * worker must lock. The final step shows exactly what a worker will see.
  */
 export function NewBountyPanel({
   onboarding,
@@ -30,50 +71,87 @@ export function NewBountyPanel({
   onboarding: unknown;
   wallet: string | null;
 }) {
-  const [open, setOpen] = useState(false);
+  // Step 1 — issue anchor
+  const [url, setUrl] = useState("");
+  const [checking, setChecking] = useState(false);
+  const [parsed, setParsed] = useState<ParsedIssueUrl | null>(null);
+  const [lookup, setLookup] = useState<IssueLookup | null>(null);
+  // Step 2 — deliverable
+  const [kind, setKind] = useState<DeliverableKind | null>(null);
   const [task, setTask] = useState("");
-  const [repo, setRepo] = useState("");
-  const [title, setTitle] = useState("");
   const [criteria, setCriteria] = useState("");
+  const [title, setTitle] = useState("");
+  // Step 3 — reward
   const [reward, setReward] = useState("");
+  // Step 4 — draft + funding
   const [submitting, setSubmitting] = useState(false);
   const [draft, setDraft] = useState<unknown>(null);
   const [submittedRewardRaw, setSubmittedRewardRaw] = useState<bigint | null>(null);
-  const [error, setError] = useState<{ status: number | null; message: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const onboardingRecord = asRecord(onboarding);
   const economics = asRecord(onboardingRecord.economics);
+  const workerFacts = asRecord(onboardingRecord.workerFacts);
+  const feeBps =
+    typeof economics.protocolFeeBps === "number"
+      ? economics.protocolFeeBps
+      : typeof asRecord(economics.protocolFeeBps).value === "number"
+        ? (asRecord(economics.protocolFeeBps).value as number)
+        : null;
   const minReward =
     typeof economics.minRewardUsdc === "string" || typeof economics.minRewardUsdc === "number"
       ? String(economics.minRewardUsdc)
       : null;
   const minRewardRaw = minReward ? parseUsdcToRaw(minReward) : null;
 
+  const issueVerified = lookup?.ok === true && !lookup.isPullRequest;
   const rewardRaw = useMemo(() => parseUsdcToRaw(reward), [reward]);
+  const rewardOk = rewardRaw !== null && (minRewardRaw === null || rewardRaw >= minRewardRaw);
+  const reserveRaw =
+    rewardRaw !== null && feeBps !== null ? rewardRaw + (rewardRaw * BigInt(feeBps)) / 10_000n : null;
+  const bondRaw =
+    rewardRaw !== null ? estimateWorkerBondRaw(rewardRaw, workerFacts.claimBond) : null;
   const criteriaList = useMemo(
-    () =>
-      criteria
-        .split("\n")
-        .map((line) => line.trim())
-        .filter(Boolean),
+    () => criteria.split("\n").map((line) => line.trim()).filter(Boolean),
     [criteria]
   );
-  const formValid =
-    task.trim().length >= 10 &&
-    repo.trim().length >= 3 &&
-    criteriaList.length >= 1 &&
-    rewardRaw !== null &&
-    (minRewardRaw === null || rewardRaw >= minRewardRaw);
+  const contentOk = task.trim().length >= 10 && criteriaList.length >= 1;
+
+  async function verifyIssue() {
+    const next = parseIssueUrl(url);
+    setParsed(next);
+    setLookup(null);
+    setKind(null);
+    if (!next) return;
+    setChecking(true);
+    const result = await fetchIssue(next);
+    setLookup(result);
+    setChecking(false);
+  }
+
+  function chooseKind(next: DeliverableKind) {
+    if (!parsed || !lookup?.ok) return;
+    setKind(next);
+    const seeded = seedTemplate(next, {
+      owner: parsed.owner,
+      repo: parsed.repo,
+      number: parsed.number,
+      title: lookup.title,
+    });
+    setTask(seeded.task);
+    setCriteria(seeded.criteria.join("\n"));
+    setTitle(seeded.title);
+  }
 
   async function submit() {
-    if (!formValid || rewardRaw === null) return;
+    if (!parsed || !issueVerified || !contentOk || !rewardOk || rewardRaw === null) return;
     setSubmitting(true);
     setError(null);
     try {
       const input: DraftFormInput = {
         title,
         task,
-        repo,
+        repo: `${parsed.owner}/${parsed.repo}`,
         acceptanceCriteria: criteriaList,
         rewardUsdc: reward.trim(),
       };
@@ -81,16 +159,12 @@ export function NewBountyPanel({
       setDraft(response);
       setSubmittedRewardRaw(rewardRaw);
     } catch (err) {
-      if (err instanceof ApiError) {
-        setError({
-          status: err.status,
-          message:
-            err.status === 403
-              ? "This wallet is not on the posting allowlist — enrollment is the door's honest gate. Contact the operator to enroll, then retry."
-              : err.message,
-        });
+      if (err instanceof ApiError && err.status === 403) {
+        setError(
+          "This wallet is not on the posting allowlist — enrollment is the door's honest gate. Contact the operator to enroll, then retry."
+        );
       } else {
-        setError({ status: null, message: err instanceof Error ? err.message : String(err) });
+        setError(err instanceof Error ? err.message : String(err));
       }
     } finally {
       setSubmitting(false);
@@ -100,7 +174,7 @@ export function NewBountyPanel({
   if (!wallet) {
     return (
       <p className="font-[family-name:var(--font-body)] text-[13px] text-[var(--avy-muted)]">
-        Sign in with your poster wallet to create a draft.
+        Sign in with your poster wallet to create a bounty.
       </p>
     );
   }
@@ -111,9 +185,9 @@ export function NewBountyPanel({
       <div className="flex flex-col gap-3 rounded-[10px] border border-[var(--avy-line)] bg-[var(--avy-paper)] p-4 shadow-[var(--shadow-card)]">
         <div className="flex flex-col gap-0.5">
           <span className={LABEL} style={{ letterSpacing: "0.1em" }}>
-            Draft created
+            Draft created — no funds have moved yet
           </span>
-          <span className="break-all font-[family-name:var(--font-mono)] text-[12px] text-[var(--avy-ink)]">
+          <span className={cn("break-all text-[12px] text-[var(--avy-ink)]", MONO)}>
             {String(draftRecord.draftId ?? "")}
           </span>
         </div>
@@ -128,81 +202,208 @@ export function NewBountyPanel({
   }
 
   return (
-    <div className="flex flex-col gap-3 rounded-[10px] border border-[var(--avy-line)] bg-[var(--avy-paper)] p-4 shadow-[var(--shadow-card)]">
-      {!open ? (
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          className="self-start rounded-[8px] border border-[var(--avy-accent)] bg-[var(--avy-accent-soft)] px-3.5 py-2 font-[family-name:var(--font-display)] text-[11px] font-extrabold uppercase text-[var(--avy-accent)]"
-          style={{ letterSpacing: "0.1em" }}
-        >
-          New bounty draft
-        </button>
-      ) : (
-        <form
-          className="flex flex-col gap-3"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void submit();
-          }}
-        >
-          <div className="flex flex-col gap-1">
-            <label className={LABEL} style={{ letterSpacing: "0.1em" }}>
-              Task (what the worker delivers)
-            </label>
-            <textarea value={task} onChange={(e) => setTask(e.target.value)} rows={3} className={FIELD} />
+    <div className="flex flex-col gap-4 rounded-[10px] border border-[var(--avy-line)] bg-[var(--avy-paper)] p-4 shadow-[var(--shadow-card)]">
+      {/* Step 1 — anchor to a real issue */}
+      <div className="flex flex-col gap-2">
+        <StepHeading step={1} title="Anchor: your GitHub issue" done={issueVerified} />
+        <p className="font-[family-name:var(--font-body)] text-[11.5px] text-[var(--avy-muted)]">
+          Every bounty funds work on a real, public GitHub issue. Paste its
+          URL — the repository, title, and a work template derive from it.
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            value={url}
+            onChange={(event) => setUrl(event.target.value)}
+            placeholder="https://github.com/owner/repo/issues/123"
+            spellCheck={false}
+            className={cn(FIELD, MONO, "min-w-[320px] flex-1 text-[12px]")}
+          />
+          <button
+            type="button"
+            onClick={() => void verifyIssue()}
+            disabled={checking || url.trim() === ""}
+            className={primaryButton(!checking && url.trim() !== "")}
+            style={{ letterSpacing: "0.1em" }}
+          >
+            {checking ? "Checking…" : "Verify issue"}
+          </button>
+        </div>
+        {url.trim() !== "" && parsed === null && !checking ? (
+          <p className="text-[12px] text-[var(--avy-warn)]">
+            That is not a GitHub issue URL (expected github.com/owner/repo/issues/number).
+          </p>
+        ) : null}
+        {lookup && !lookup.ok ? (
+          <p className="text-[12px] text-[#b22222]">
+            {lookup.reason === "not_found"
+              ? "Issue not found — check the URL; private repositories can't be bountied (workers need public access)."
+              : lookup.reason === "rate_limited"
+                ? "GitHub rate-limited the check from this network — wait a minute and retry. The bounty flow only proceeds from a verified issue."
+                : "Couldn't reach GitHub to verify — check your connection and retry."}
+          </p>
+        ) : null}
+        {lookup?.ok && lookup.isPullRequest ? (
+          <p className="text-[12px] text-[#b22222]">
+            That link is a pull request, not an issue — bounties anchor to issues.
+          </p>
+        ) : null}
+        {issueVerified && parsed && lookup?.ok ? (
+          <p className="text-[12.5px] text-[var(--avy-ink)]">
+            <span className="font-semibold text-[#1e6642]">✓ Verified:</span>{" "}
+            <span className={MONO}>
+              {parsed.owner}/{parsed.repo}#{parsed.number}
+            </span>{" "}
+            — “{lookup.title}”
+            {lookup.state === "closed" ? (
+              <span className="text-[var(--avy-warn)]"> (issue is CLOSED — fund it only if you mean to)</span>
+            ) : null}
+          </p>
+        ) : null}
+      </div>
+
+      {/* Step 2 — deliverable template */}
+      {issueVerified ? (
+        <div className="flex flex-col gap-2">
+          <StepHeading step={2} title="Deliverable: what the worker produces" done={kind !== null} />
+          <div className="flex flex-wrap gap-2">
+            {(
+              [
+                [
+                  "report",
+                  "Audit & implementation report",
+                  "The worker investigates your issue and delivers a grounded report: affected files, existing patterns, a step-by-step plan. The shape the platform has settled end-to-end.",
+                ],
+                [
+                  "pr",
+                  "Fix with a pull request",
+                  "The worker opens a PR against your repository that resolves the issue. You review the PR itself before approving payout.",
+                ],
+              ] as Array<[DeliverableKind, string, string]>
+            ).map(([value, heading, blurb]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => chooseKind(value)}
+                className={cn(
+                  "flex max-w-[320px] flex-1 flex-col gap-1 rounded-[8px] border p-3 text-left",
+                  kind === value
+                    ? "border-[var(--avy-accent)] bg-[var(--avy-accent-soft)]"
+                    : "border-[var(--avy-line)] bg-white/60 hover:border-[var(--avy-accent)]"
+                )}
+              >
+                <span className="font-[family-name:var(--font-display)] text-[12px] font-extrabold text-[var(--avy-ink)]">
+                  {heading}
+                </span>
+                <span className="font-[family-name:var(--font-body)] text-[11.5px] leading-snug text-[var(--avy-muted)]">
+                  {blurb}
+                </span>
+              </button>
+            ))}
           </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="flex flex-col gap-1">
-              <label className={LABEL} style={{ letterSpacing: "0.1em" }}>
-                Repository (owner/name)
-              </label>
-              <input value={repo} onChange={(e) => setRepo(e.target.value)} className={FIELD} spellCheck={false} />
+          {kind !== null ? (
+            <div className="flex flex-col gap-2 pt-1">
+              <div className="flex flex-col gap-1">
+                <label className={LABEL} style={{ letterSpacing: "0.1em" }}>
+                  Task — seeded from your issue, edit freely
+                </label>
+                <textarea value={task} onChange={(e) => setTask(e.target.value)} rows={3} className={FIELD} />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className={LABEL} style={{ letterSpacing: "0.1em" }}>
+                  Acceptance criteria — one per line; you approve against exactly these
+                </label>
+                <textarea value={criteria} onChange={(e) => setCriteria(e.target.value)} rows={3} className={FIELD} />
+              </div>
             </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* Step 3 — reward with live economics */}
+      {issueVerified && kind !== null ? (
+        <div className="flex flex-col gap-2">
+          <StepHeading step={3} title="Reward & the honest economics" done={rewardOk} />
+          <div className="flex flex-wrap items-start gap-4">
             <div className="flex flex-col gap-1">
               <label className={LABEL} style={{ letterSpacing: "0.1em" }}>
                 Reward (USDC{minReward ? `, ≥ ${minReward}` : ""})
               </label>
-              <input value={reward} onChange={(e) => setReward(e.target.value)} className={FIELD} inputMode="decimal" spellCheck={false} />
+              <input
+                value={reward}
+                onChange={(e) => setReward(e.target.value)}
+                className={cn(FIELD, "w-[140px]")}
+                inputMode="decimal"
+                spellCheck={false}
+              />
             </div>
+            {rewardRaw !== null && rewardOk ? (
+              <dl className={cn("grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 pt-1 text-[12px]", MONO)}>
+                <dt className="text-[var(--avy-muted)]">worker receives</dt>
+                <dd>{formatRawUsdc(rewardRaw)} USDC — the full reward</dd>
+                <dt className="text-[var(--avy-muted)]">you reserve</dt>
+                <dd className="font-semibold">
+                  {reserveRaw !== null ? `${formatRawUsdc(reserveRaw)} USDC` : "—"}
+                  {feeBps !== null ? ` (reward + ${feeBps} bps platform fee on top)` : ""}
+                </dd>
+                <dt className="text-[var(--avy-muted)]">worker locks to claim</dt>
+                <dd>
+                  {bondRaw !== null
+                    ? `≈ ${formatRawUsdc(bondRaw)} USDC — returned in full on delivery`
+                    : "live bond inputs unavailable"}
+                </dd>
+              </dl>
+            ) : reward.trim() !== "" ? (
+              <p className="pt-1 text-[12px] text-[var(--avy-warn)]">
+                Enter an exact USDC amount{minReward ? ` of at least ${minReward}` : ""} (max 6 decimals).
+              </p>
+            ) : null}
           </div>
-          <div className="flex flex-col gap-1">
-            <label className={LABEL} style={{ letterSpacing: "0.1em" }}>
-              Acceptance criteria (one per line — you approve against exactly these)
-            </label>
-            <textarea value={criteria} onChange={(e) => setCriteria(e.target.value)} rows={3} className={FIELD} />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className={LABEL} style={{ letterSpacing: "0.1em" }}>
-              Title (optional)
-            </label>
-            <input value={title} onChange={(e) => setTitle(e.target.value)} className={FIELD} />
+          <p className="font-[family-name:var(--font-body)] text-[11.5px] text-[var(--avy-muted)]">
+            Estimates from the live platform config; the exact figures are
+            re-read on-chain before you sign anything. Funds stay escrowed
+            until the job resolves — there is no self-serve cancel.
+          </p>
+        </div>
+      ) : null}
+
+      {/* Step 4 — review as the worker sees it */}
+      {issueVerified && kind !== null && rewardOk && contentOk && parsed ? (
+        <div className="flex flex-col gap-2">
+          <StepHeading step={4} title="Review — exactly what a worker sees" done={false} />
+          <div className="flex flex-col gap-1.5 rounded-[8px] border border-[var(--avy-line-soft)] bg-[#faf8f1] p-3">
+            <span className="font-[family-name:var(--font-body)] text-[13px] font-semibold text-[var(--avy-ink)]">
+              {title || `${parsed.owner}/${parsed.repo}#${parsed.number}`}
+            </span>
+            <span className={cn("text-[11.5px] text-[var(--avy-muted)]", MONO)}>
+              repo {parsed.owner}/{parsed.repo} · reward {reward} USDC · human review by you · claim TTL 24h
+            </span>
+            <p className="font-[family-name:var(--font-body)] text-[12.5px] text-[var(--avy-ink)]">{task}</p>
+            <ul className="list-disc pl-5">
+              {criteriaList.map((item) => (
+                <li key={item} className="font-[family-name:var(--font-body)] text-[12px] text-[var(--avy-ink)]">
+                  {item}
+                </li>
+              ))}
+            </ul>
           </div>
           <div className="flex items-center gap-3">
             <button
-              type="submit"
-              disabled={!formValid || submitting}
-              className={cn(
-                "rounded-[8px] border px-3.5 py-2 font-[family-name:var(--font-display)] text-[11px] font-extrabold uppercase",
-                formValid && !submitting
-                  ? "border-[var(--avy-accent)] bg-[var(--avy-accent-soft)] text-[var(--avy-accent)]"
-                  : "border-[var(--avy-line)] bg-[#faf8f1] text-[var(--avy-muted)]"
-              )}
+              type="button"
+              onClick={() => void submit()}
+              disabled={submitting}
+              className={primaryButton(!submitting)}
               style={{ letterSpacing: "0.1em" }}
             >
               {submitting ? "Creating draft…" : "Create draft (no funds move)"}
             </button>
             <span className="font-[family-name:var(--font-body)] text-[11.5px] text-[var(--avy-muted)]">
-              Verifier: human review (you approve) · claim TTL 24h · schema coding-input
+              Next: the platform issues the exact funding transactions and your wallet signs them.
             </span>
           </div>
-          {error ? (
-            <p className="text-[12.5px] text-[#b22222]">
-              {error.message}
-            </p>
-          ) : null}
-        </form>
-      )}
+        </div>
+      ) : null}
+
+      {error ? <p className="break-all text-[12.5px] text-[#b22222]">{error}</p> : null}
     </div>
   );
 }
