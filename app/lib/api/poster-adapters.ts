@@ -6,6 +6,8 @@ export type StateTone = "ok" | "neutral" | "warn" | "muted" | "bad";
 export interface PosterJobRow {
   id: string;
   title: string;
+  /** Raw effective/claim state as the API reports it (lowercased). */
+  state: string;
   stateLabel: string;
   stateTone: StateTone;
   rewardLabel: string | null;
@@ -73,6 +75,7 @@ function toRow(rawJob: unknown): PosterJobRow | null {
   return {
     id,
     title: text(job.title) ?? id,
+    state: (text(job.effectiveState) ?? text(job.state) ?? "unknown").toLowerCase(),
     stateLabel: chip.label,
     stateTone: chip.tone,
     rewardLabel: rewardAmount ? `${rewardAmount} ${text(reward.asset) ?? ""}`.trim() : null,
