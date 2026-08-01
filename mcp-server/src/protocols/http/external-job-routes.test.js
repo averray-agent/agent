@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { AuthenticationError, AuthorizationError } from "../../core/errors.js";
+import { AuthenticationError, AuthorizationError, RateLimitError } from "../../core/errors.js";
 import { createExternalJobRoutes } from "./external-job-routes.js";
 
 const POSTER = "0x1111111111111111111111111111111111111111";
@@ -27,6 +27,9 @@ function makeHarness(overrides = {}) {
     },
     enforceLimit: async (bucket, key, limits) => {
       calls.push(["enforceLimit", { bucket, key, limits }]);
+      if (overrides.rateLimited) {
+        throw new RateLimitError("Rate limit exceeded.", { bucket });
+      }
     },
     externalPostingService: {
       createDraft: async (wallet, payload) => {
@@ -55,7 +58,10 @@ function makeHarness(overrides = {}) {
         return { jobId, delisted: true };
       }
     },
-    rateLimitConfig: { adminJobs: { limit: 60, windowSeconds: 60 } },
+    rateLimitConfig: {
+      adminJobs: { limit: 60, windowSeconds: 60 },
+      externalDrafts: { limit: 30, windowSeconds: 60 }
+    },
     readJsonBody: async () => {
       calls.push(["readJsonBody"]);
       return overrides.payload ?? { definition: { rewardAmount: "1.0" } };
@@ -85,6 +91,11 @@ test("POST /jobs/draft authenticates any SIWE wallet and returns the signing tem
   assert.equal(response.body.draftId, DRAFT_ID);
   assert.deepEqual(calls.filter(([name]) => name !== "respond"), [
     ["authMiddleware", undefined],
+    ["enforceLimit", {
+      bucket: "external_drafts",
+      key: POSTER,
+      limits: { limit: 30, windowSeconds: 60 }
+    }],
     ["readJsonBody"],
     ["createDraft", { wallet: POSTER, payload: { definition: { rewardAmount: "1.0" } } }]
   ]);
@@ -99,6 +110,11 @@ test("GET /jobs/draft/:id is poster-owned and stays honest before the watcher sh
   assert.equal(response.body.note, "funding detection ships with the watcher");
   assert.deepEqual(calls.filter(([name]) => name !== "respond"), [
     ["authMiddleware", undefined],
+    ["enforceLimit", {
+      bucket: "external_drafts",
+      key: POSTER,
+      limits: { limit: 30, windowSeconds: 60 }
+    }],
     ["getDraft", { wallet: POSTER, draftId: DRAFT_ID }]
   ]);
 });
@@ -117,6 +133,26 @@ test("draft routes reject service tokens because the poster must prove wallet co
     invoke(route, { method: "POST", path: "/jobs/draft" }),
     (error) => error instanceof AuthenticationError && error.code === "external_posting_siwe_required"
   );
+});
+
+test("draft routes rate-limit per wallet before doing any draft work", async () => {
+  for (const attempt of [
+    { method: "POST", path: "/jobs/draft" },
+    { method: "GET", path: `/jobs/draft/${DRAFT_ID}` }
+  ]) {
+    const { calls, route } = makeHarness({ rateLimited: true });
+    await assert.rejects(
+      invoke(route, attempt),
+      (error) => error instanceof RateLimitError && error.code === "rate_limited"
+    );
+    const names = calls.map(([name]) => name);
+    assert.ok(names.includes("enforceLimit"), `${attempt.path} must consult the limiter`);
+    assert.deepEqual(
+      names.filter((name) => ["readJsonBody", "createDraft", "getDraft"].includes(name)),
+      [],
+      `${attempt.path} must not reach body parsing or the posting service once limited`
+    );
+  }
 });
 
 test("POST /admin/jobs/external/:id/delist requires admin auth and records projection-only delist", async () => {

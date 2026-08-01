@@ -17,6 +17,11 @@ export function createExternalJobRoutes({
     if (request.method === "POST" && pathname === "/jobs/draft") {
       const auth = await authMiddleware(request, url);
       requireSiweWalletSession(auth);
+      await enforceLimit(
+        "external_drafts",
+        auth.wallet,
+        rateLimitConfig.externalDrafts
+      );
       const payload = await readJsonBody(request);
       respond(
         response,
@@ -30,6 +35,11 @@ export function createExternalJobRoutes({
     if (request.method === "GET" && draftMatch) {
       const auth = await authMiddleware(request, url);
       requireSiweWalletSession(auth);
+      await enforceLimit(
+        "external_drafts",
+        auth.wallet,
+        rateLimitConfig.externalDrafts
+      );
       respond(
         response,
         200,
