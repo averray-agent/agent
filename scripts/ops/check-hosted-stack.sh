@@ -236,9 +236,11 @@ jq -e '
   (.liveReads.claimBond.status == "available") and
   (.liveReads.disputeWindow.status == "available")
 ' >/dev/null <<<"$poster_onboarding_json"
-jq -e -n \
-  --argjson poster "$poster_onboarding_json" \
-  --argjson health "$api_health_json" '
+# Feed both documents via stdin (-s slurps them into an array): --argjson puts
+# the whole JSON into execve argv, and a large /health payload can blow past
+# ARG_MAX ("jq: Argument list too long", exit 126 — hit live 2026-08-01).
+printf '%s\n%s\n' "$poster_onboarding_json" "$api_health_json" | jq -e -s '
+    .[0] as $poster | .[1] as $health |
     ($poster.chainId == $health.auth.chainId) and
     (($poster.escrowCore | ascii_downcase) == ($health.addresses.escrowCore | ascii_downcase)) and
     (($poster.agentAccountCore | ascii_downcase) == ($health.addresses.agentAccountCore | ascii_downcase)) and
@@ -255,9 +257,9 @@ jq -e '
 
 if [[ -n "$OPERATOR_TOKEN" ]]; then
   admin_status_json="$(fetch_admin_status_once)"
-  jq -e -n \
-    --argjson poster "$poster_onboarding_json" \
-    --argjson operational "$admin_status_json" '
+  # /admin/status is the largest payload in this script — never via argv (see above).
+  printf '%s\n%s\n' "$poster_onboarding_json" "$admin_status_json" | jq -e -s '
+      .[0] as $poster | .[1] as $operational |
       ($poster.workerFacts.claimBond.stakeBps == $operational.maintenance.policy.risk.defaultClaimStakeBps) and
       ($poster.workerFacts.claimBond.feeBps == $operational.maintenance.policy.risk.claimFeeBps)
     ' >/dev/null
