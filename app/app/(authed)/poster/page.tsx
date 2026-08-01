@@ -6,6 +6,7 @@ import { PosterModeBanner } from "@/components/poster/PosterModeBanner";
 import { PosterJobsTable } from "@/components/poster/PosterJobsTable";
 import { DraftLookupPanel } from "@/components/poster/DraftLookupPanel";
 import { NewBountyPanel } from "@/components/poster/NewBountyPanel";
+import { ReviewQueue } from "@/components/poster/ReviewQueue";
 import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
 import { useExternalJobs, usePosterOnboarding } from "@/lib/api/hooks";
 import { buildPosterJobsView } from "@/lib/api/poster-adapters";
@@ -55,6 +56,8 @@ export default function PosterPage() {
         onboarding={onboardingRequest.data}
         unavailable={Boolean(onboardingRequest.error) && !onboardingRequest.data}
       />
+
+      <ReviewQueue rows={view.mine.filter((row) => row.state === "submitted")} />
 
       <section className="flex flex-col gap-2.5">
         <h2
