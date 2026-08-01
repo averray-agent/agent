@@ -39,6 +39,18 @@ export function buildRunReceipt({ session, job = undefined, verification, contex
     job?.verifierMode
   );
   if (!handler) throw new ValidationError("Run receipt requires the verifier handler.");
+  const decidingWallet = address(
+    verification?.details?.decidingWallet ?? verification?.verifier
+  );
+  const rationaleHash = handler === "poster_review"
+    ? bytes32(verification?.details?.rationaleHash ?? verification?.reasoningHash)
+    : undefined;
+  if (handler === "poster_review" && !decidingWallet) {
+    throw new ValidationError("Poster-review run receipt requires the deciding wallet.");
+  }
+  if (handler === "poster_review" && !rationaleHash) {
+    throw new ValidationError("Poster-review run receipt requires the rationale hash.");
+  }
   const reasonCode = firstString(verification?.reasonCode);
   if (!reasonCode) throw new ValidationError("Run receipt requires the verifier reasonCode.");
   const handlerVersion = positiveInteger(
@@ -66,14 +78,16 @@ export function buildRunReceipt({ session, job = undefined, verification, contex
     verifier: compact({
       mode: firstString(verification?.verificationContract?.verifierMode, job?.verifierMode),
       handler,
-      version: handlerVersion
+      version: handlerVersion,
+      wallet: decidingWallet
     }),
-    verdict: {
+    verdict: compact({
       outcome,
       reasonCode,
       evidenceHash,
-      policyTags
-    },
+      policyTags,
+      rationaleHash
+    }),
     settlement: normalizeSettlement(verification?.settlement),
     timestamps: { claimedAt, submittedAt, verifiedAt },
     signers: buildBadgeSigners({ session, verification: signerVerification, context }),
