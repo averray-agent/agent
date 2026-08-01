@@ -30,7 +30,8 @@ function fixture(overrides = {}) {
       handler: "benchmark",
       handlerVersion: 1,
       verificationInputHash: `0x${"2".repeat(64)}`,
-      ...(overrides.settlement ? { settlement: overrides.settlement } : {})
+      ...(overrides.settlement ? { settlement: overrides.settlement } : {}),
+      ...(overrides.verification ?? {})
     },
     context: {
       publicBaseUrl: "https://api.averray.com",
@@ -58,6 +59,31 @@ test("buildRunReceipt captures rejected verdicts with the rejection timestamp", 
   assert.equal(receipt.timestamps.verifiedAt, "2026-07-12T10:06:00.000Z");
   assert.equal(receipt.signers.find((entry) => entry.role === "verifier").at, receipt.timestamps.verifiedAt);
 });
+
+for (const outcome of ["approved", "rejected"]) {
+  test(`buildRunReceipt binds a ${outcome} poster-review verdict to its wallet and rationale`, () => {
+    const rationaleHash = `0x${"3".repeat(64)}`;
+    const receipt = fixture({
+      outcome,
+      verification: {
+        handler: "poster_review",
+        handlerVersion: 1,
+        reasonCode: outcome === "approved" ? "POSTER_APPROVED" : "POSTER_REJECTED",
+        reasoningHash: rationaleHash,
+        verifier: SERVICE_SIGNER,
+        details: {
+          decidingWallet: SERVICE_SIGNER,
+          rationaleHash
+        }
+      }
+    });
+    assert.equal(receipt.verifier.handler, "poster_review");
+    assert.equal(receipt.verifier.version, 1);
+    assert.equal(receipt.verifier.wallet, SERVICE_SIGNER);
+    assert.equal(receipt.verdict.outcome, outcome);
+    assert.equal(receipt.verdict.rationaleHash, rationaleHash);
+  });
+}
 
 test("buildRunReceipt signs the exact success-path settlement split", () => {
   const receipt = fixture({

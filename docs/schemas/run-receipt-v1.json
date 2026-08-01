@@ -19,7 +19,8 @@
       "properties": {
         "mode": { "type": "string", "minLength": 1 },
         "handler": { "type": "string", "minLength": 1 },
-        "version": { "type": "integer", "minimum": 1 }
+        "version": { "type": "integer", "minimum": 1 },
+        "wallet": { "$ref": "#/$defs/address" }
       },
       "additionalProperties": false
     },
@@ -30,7 +31,8 @@
         "outcome": { "enum": ["approved", "rejected"] },
         "reasonCode": { "type": "string", "minLength": 1 },
         "evidenceHash": { "type": "string", "pattern": "^0x[0-9a-fA-F]{64}$" },
-        "policyTags": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true }
+        "policyTags": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+        "rationaleHash": { "type": "string", "pattern": "^0x[0-9a-fA-F]{64}$" }
       },
       "additionalProperties": false
     },

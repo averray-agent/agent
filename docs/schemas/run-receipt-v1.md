@@ -24,6 +24,9 @@ verification verdict, not evidence that a job existed or expired.
 `verdict.evidenceHash` is the canonical hash of the exact verification input
 (the submitted artifact/diff payload). `verdict.policyTags` contains only tags
 actually attached to the job; an empty array means no policy tag was emitted.
+For a poster-review verdict, `verifier.wallet` records the deciding poster or
+admin wallet and `verdict.rationaleHash` binds the signed receipt to the durable
+review rationale without disclosing that rationale.
 Signer entries reuse the badge receipt's honest-omission rule: a role appears
 only when a real non-zero wallet and a real timestamp are both available.
 

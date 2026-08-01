@@ -211,28 +211,35 @@ export class PosterReviewService {
       await this.storeDecisionReceipt(context.submissionIdentity, chainConfirmed);
       recordedReceipt = chainConfirmed;
       live = await this.requireLiveJob(context.chainJobId);
+    } else if (Number(live.state) === expectedFinalState) {
+      this.assertRecordedChainConfirmation(context, recordedReceipt, { approved });
     }
 
     if (Number(live.state) !== expectedFinalState) {
       throw this.stateChangedError(context, live, recordedReceipt.decision);
     }
 
-    const result = await this.convergeLocalDecision(context, {
+    const decision = {
       outcome: approved ? "approved" : "rejected",
       reasonCode: recordedReceipt.reasonCode,
       rationaleHash: recordedReceipt.rationaleHash,
       metadataURI: recordedReceipt.metadataURI,
-      payoutTx
-    });
+      payoutTx,
+      decidedBy: recordedReceipt.decidedBy,
+      authority: recordedReceipt.authority,
+      recordedDecision: recordedReceipt.decision
+    };
 
     if (approved) {
-      const settlement = payoutTx?.settlement ?? result?.payoutTx?.settlement;
+      const settlement = payoutTx?.settlement;
       this.assertSettlementBoundToEscrow(
         context,
         live,
         settlement,
-        protocolFeeConfig?.treasuryAccount
+        protocolFeeConfig?.treasuryAccount,
+        recordedReceipt
       );
+      const result = await this.convergeLocalDecision(context, decision);
       return {
         ...recordedReceipt,
         status: "settled",
@@ -242,6 +249,7 @@ export class PosterReviewService {
       };
     }
 
+    const result = await this.convergeLocalDecision(context, decision);
     const disputeWindowSeconds = await this.gateway.getDisputeWindowSeconds();
     const rejectedAt = Number(live.rejectedAt ?? 0);
     if (!Number.isInteger(rejectedAt) || rejectedAt <= 0) {
@@ -312,7 +320,10 @@ export class PosterReviewService {
       reasonCode: recordedReceipt.reasonCode,
       rationaleHash: recordedReceipt.rationaleHash,
       metadataURI: recordedReceipt.metadataURI,
-      payoutTx: rejectionTx
+      payoutTx: rejectionTx,
+      decidedBy: recordedReceipt.decidedBy,
+      authority: recordedReceipt.authority,
+      recordedDecision: recordedReceipt.decision
     });
     return {
       ...recordedReceipt,
@@ -354,8 +365,11 @@ export class PosterReviewService {
       reasoningHash: decision.rationaleHash,
       payoutTx: decision.payoutTx,
       details: {
-        authority: "external_poster_review",
-        submissionIdentity: context.submissionIdentity
+        authority: decision.authority ?? "external_poster_review",
+        submissionIdentity: context.submissionIdentity,
+        decision: decision.recordedDecision,
+        decidingWallet: decision.decidedBy,
+        rationaleHash: decision.rationaleHash
       }
     });
   }
@@ -511,7 +525,31 @@ export class PosterReviewService {
     }
   }
 
-  assertSettlementBoundToEscrow(context, live, settlement, treasuryAccount) {
+  assertRecordedChainConfirmation(context, recordedReceipt, { approved }) {
+    const payoutTx = recordedReceipt?.payoutTx;
+    const confirmed = recordedReceipt?.status === "chain_confirmed"
+      && typeof payoutTx?.txHash === "string"
+      && payoutTx.txHash.trim().length > 0
+      && Number.isInteger(Number(payoutTx?.blockNumber))
+      && Number(payoutTx.blockNumber) > 0
+      && Number(payoutTx?.status) === 1
+      && (!approved || payoutTx?.settlement);
+    if (!confirmed) {
+      throw new ConflictError(
+        "Live escrow is already final, but this review has no durable proof that its broker action landed.",
+        "poster_review_foreign_final_state",
+        {
+          jobId: context.job.id,
+          chainJobId: context.chainJobId,
+          decision: recordedReceipt?.decision,
+          receiptStatus: recordedReceipt?.status,
+          liveState: approved ? ESCROW_JOB_STATE_CLOSED : ESCROW_JOB_STATE_REJECTED
+        }
+      );
+    }
+  }
+
+  assertSettlementBoundToEscrow(context, live, settlement, treasuryAccount, recordedReceipt) {
     if (!settlement) {
       throw new ConflictError(
         "Approved poster review did not return a SettlementSplit receipt.",
@@ -519,19 +557,26 @@ export class PosterReviewService {
         { jobId: context.job.id, chainJobId: context.chainJobId }
       );
     }
-    const expectedFeeRaw = (
-      BigInt(context.liveJob.protocolFeeRaw) - BigInt(context.liveJob.protocolFeeReleasedRaw)
-    ).toString();
+    // A retry after the broker transaction landed sees an already-Closed live
+    // job, whose released counters equal the full payout. Bind the receipt to
+    // the durable pre-action snapshot rather than recomputing an expected zero.
+    const snapshot = recordedReceipt?.escrowSnapshot ?? {};
+    const rewardRaw = snapshot.rewardRaw ?? context.liveJob.rewardRaw;
+    const releasedRaw = snapshot.releasedRaw ?? context.liveJob.releasedRaw;
+    const protocolFeeRaw = snapshot.protocolFeeRaw ?? context.liveJob.protocolFeeRaw;
+    const protocolFeeReleasedRaw = snapshot.protocolFeeReleasedRaw
+      ?? context.liveJob.protocolFeeReleasedRaw;
+    const expectedFeeRaw = (BigInt(protocolFeeRaw) - BigInt(protocolFeeReleasedRaw)).toString();
     const checks = {
-      worker: [normalizeOptionalWallet(settlement.worker), normalizeOptionalWallet(context.liveJob.worker)],
+      worker: [normalizeOptionalWallet(settlement.worker), normalizeOptionalWallet(recordedReceipt?.worker ?? context.liveJob.worker)],
       treasuryAccount: [normalizeOptionalWallet(settlement.treasuryAccount), normalizeOptionalWallet(treasuryAccount)],
-      asset: [normalizeOptionalWallet(settlement.asset), normalizeOptionalWallet(context.liveJob.asset)],
+      asset: [normalizeOptionalWallet(settlement.asset), normalizeOptionalWallet(snapshot.asset ?? context.liveJob.asset)],
       workerAmountRaw: [
         String(settlement.workerAmountRaw),
-        (BigInt(context.liveJob.rewardRaw) - BigInt(context.liveJob.releasedRaw)).toString()
+        (BigInt(rewardRaw) - BigInt(releasedRaw)).toString()
       ],
       protocolFeeAmountRaw: [String(settlement.protocolFeeAmountRaw), expectedFeeRaw],
-      protocolFeeBps: [Number(settlement.protocolFeeBps), Number(context.liveJob.protocolFeeBps)]
+      protocolFeeBps: [Number(settlement.protocolFeeBps), Number(snapshot.protocolFeeBps ?? context.liveJob.protocolFeeBps)]
     };
     for (const [field, [actual, expected]] of Object.entries(checks)) {
       if (actual !== expected) {
@@ -578,7 +623,9 @@ export class PosterReviewService {
         rewardRaw: String(context.liveJob.rewardRaw),
         releasedRaw: String(context.liveJob.releasedRaw),
         protocolFeeRaw: String(context.liveJob.protocolFeeRaw),
-        protocolFeeReleasedRaw: String(context.liveJob.protocolFeeReleasedRaw)
+        protocolFeeReleasedRaw: String(context.liveJob.protocolFeeReleasedRaw),
+        asset: context.liveJob.asset,
+        protocolFeeBps: Number(context.liveJob.protocolFeeBps)
       },
       status: "recorded"
     };

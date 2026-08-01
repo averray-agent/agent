@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { MemoryStateStore } from "./state-store.js";
+import { VerificationIngestionService } from "../services/verification-ingestion-service.js";
+import { VerifierService } from "../services/verifier-service.js";
 import {
   PosterReviewService,
   POSTER_REVIEW_REASON_CODES
@@ -21,7 +23,9 @@ const SUBMITTED_AT = "2026-08-01T10:00:00.000Z";
 async function makeHarness({
   sessionStatus = "submitted",
   liveState = 3,
-  now = "2026-08-01T11:00:00.000Z"
+  now = "2026-08-01T11:00:00.000Z",
+  canonicalReceipts = false,
+  badgeReceiptSigner = undefined
 } = {}) {
   const calls = [];
   const stateStore = new MemoryStateStore();
@@ -36,6 +40,7 @@ async function makeHarness({
       summary: "Implementation report",
       report: "Affected files, registration pattern, and validation plan."
     },
+    claimedAt: "2026-08-01T09:55:00.000Z",
     submittedAt: SUBMITTED_AT,
     protocolHistory: ["http"],
     statusHistory: []
@@ -47,6 +52,7 @@ async function makeHarness({
     category: "coding",
     rewardAmount: 1,
     rewardAsset: "USDC",
+    verifierMode: "human_fallback",
     outputSchemaRef: "schema://jobs/coding-output",
     source: { type: "external", poster: { wallet: POSTER } },
     poster: { wallet: POSTER }
@@ -86,6 +92,7 @@ async function makeHarness({
         liveJob = {
           ...liveJob,
           state: 6,
+          releasedRaw: "1000000",
           protocolFeeReleasedRaw: "50000"
         };
       } else {
@@ -144,11 +151,27 @@ async function makeHarness({
       return result;
     }
   };
+  let canonicalIngestion;
+  if (canonicalReceipts) {
+    platformService.ingestVerification = (sessionId, verdict) => (
+      canonicalIngestion.ingest(sessionId, verdict)
+    );
+    canonicalIngestion = new VerificationIngestionService(
+      stateStore,
+      undefined,
+      () => job,
+      { info() {}, warn() {} },
+      { badgeReceiptSigner }
+    );
+  }
+  const decisionVerifierService = canonicalReceipts
+    ? new VerifierService(platformService, stateStore, gateway)
+    : verifierService;
   const service = new PosterReviewService({
     platformService,
     stateStore,
     gateway,
-    verifierService,
+    verifierService: decisionVerifierService,
     config: {
       reviewWindowHours: 168,
       escrowCoreAddress: ESCROW
@@ -162,7 +185,8 @@ async function makeHarness({
     job,
     service,
     stateStore,
-    getLiveJob: () => ({ ...liveJob })
+    getLiveJob: () => ({ ...liveJob }),
+    setLiveJob: (value) => { liveJob = { ...liveJob, ...value }; }
   };
 }
 
@@ -266,6 +290,80 @@ test("idempotency: an interrupted recorded decision resumes only the same broker
   });
   assert.equal(receipt.status, "settled");
   assert.equal(receipt.decision, "approve");
+});
+
+test("idempotency: a chain-confirmed approval resumes signed receipt persistence without re-settling", async () => {
+  let failReceiptSigning = true;
+  const signer = {
+    async signDocument() {
+      if (failReceiptSigning) throw new Error("simulated signed-receipt interruption");
+      return {
+        alg: "ES256",
+        kid: "badge-1",
+        sig: "protected..signature",
+        signedAt: "2026-08-01T11:00:00.000Z"
+      };
+    }
+  };
+  const { calls, service, stateStore } = await makeHarness({
+    canonicalReceipts: true,
+    badgeReceiptSigner: signer
+  });
+
+  await assert.rejects(
+    service.reviewSubmission(JOB_ID, {
+      wallet: POSTER,
+      verdict: "approve",
+      reason: "The submission meets every acceptance criterion."
+    }),
+    /simulated signed-receipt interruption/u
+  );
+  assert.equal((await stateStore.getSession("session-external-1")).status, "submitted");
+  assert.equal(calls.filter(([name]) => name === "resolveSinglePayout").length, 1);
+
+  failReceiptSigning = false;
+  const receipt = await service.reviewSubmission(JOB_ID, {
+    wallet: POSTER,
+    verdict: "approve",
+    reason: "The submission meets every acceptance criterion."
+  });
+  const runReceipt = await stateStore.getRunReceiptDocument("session-external-1");
+
+  assert.equal(receipt.status, "settled");
+  assert.equal(receipt.payoutTx.txHash, "0xapprove");
+  assert.equal(calls.filter(([name]) => name === "resolveSinglePayout").length, 1);
+  assert.equal((await stateStore.getSession("session-external-1")).status, "resolved");
+  assert.equal(runReceipt.verifier.handler, "poster_review");
+  assert.equal(runReceipt.verifier.version, 1);
+  assert.equal(runReceipt.verifier.wallet, POSTER);
+  assert.equal(runReceipt.verdict.outcome, "approved");
+  assert.equal(runReceipt.verdict.rationaleHash, receipt.rationaleHash);
+  assert.equal(runReceipt.signature.kid, "badge-1");
+});
+
+test("convergence refuses a foreign final state without our chain-confirmed receipt", async () => {
+  const { calls, gateway, service, setLiveJob } = await makeHarness();
+  const settle = gateway.resolveSinglePayout;
+  gateway.resolveSinglePayout = async () => {
+    calls.push(["resolveSinglePayout", { interrupted: true }]);
+    throw new Error("broker did not broadcast");
+  };
+  await assert.rejects(
+    service.reviewSubmission(JOB_ID, { wallet: POSTER, verdict: "approve" }),
+    /broker did not broadcast/u
+  );
+
+  gateway.resolveSinglePayout = settle;
+  setLiveJob({
+    state: 6,
+    releasedRaw: "1000000",
+    protocolFeeReleasedRaw: "50000"
+  });
+  await assert.rejects(
+    service.reviewSubmission(JOB_ID, { wallet: POSTER, verdict: "approve" }),
+    (error) => error?.code === "poster_review_foreign_final_state"
+  );
+  assert.equal(calls.filter(([name]) => name === "resolveSinglePayout").length, 1);
 });
 
 test("race matrix: a durable poster decision beats a simultaneous timeout escalation", async () => {

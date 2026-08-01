@@ -16,6 +16,9 @@ import { normalizeSubmitPayloadShape, validateSubmissionContract } from "../core
 const ESCROW_JOB_STATE_REJECTED = 4;
 const ESCROW_JOB_STATE_CLOSED = 6;
 
+export const POSTER_REVIEW_HANDLER = "poster_review";
+export const POSTER_REVIEW_HANDLER_VERSION = 1;
+
 export class VerifierService {
   constructor(platformService, stateStore, blockchainGateway = undefined, registry = new VerifierRegistry()) {
     this.platformService = platformService;
@@ -86,8 +89,8 @@ export class VerifierService {
     reasoningHash,
     payoutTx = undefined,
     details = undefined,
-    handler = "poster_review",
-    handlerVersion = "v1"
+    handler = POSTER_REVIEW_HANDLER,
+    handlerVersion = POSTER_REVIEW_HANDLER_VERSION
   }) {
     const session = await this.platformService.resumeSession(sessionId);
     assertSessionCanReceiveVerification(session, { reason: "brokered_review_decision" });
@@ -99,6 +102,7 @@ export class VerifierService {
       outcome,
       reasonCode,
       reasoningHash,
+      ...(details?.decidingWallet ? { verifier: details.decidingWallet } : {}),
       details,
       verificationInput
     };
