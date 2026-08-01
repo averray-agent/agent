@@ -41,6 +41,7 @@ const DISCOVERY_PUBLIC_ENDPOINTS = [
   { path: "/health", description: "Liveness plus serviceHealth/capabilityHealth for state store, blockchain, treasury mutations, XCM observer, indexer, and gas sponsor." },
   { path: "/metrics", description: "Prometheus text-format metrics. Bearer-gated in production via METRICS_BEARER_TOKEN." },
   { path: "/onboarding", description: "Canonical platform capabilities + tool list." },
+  { path: "/poster/onboarding", description: "Live machine-readable external-bounty posting rail, economics, verifier modes, and worker bond facts." },
   { path: "/jobs", description: "Public job catalog (no auth)." },
   { path: "/jobs/definition?jobId=X", description: "Canonical job definition by id." },
   { path: "/jobs/validate-submission", description: "Read-only draft validation against a job's output schema." },
@@ -515,6 +516,7 @@ export function buildDiscoveryManifest({
   manifest.schemas.jobSchemasIndex = `${baseUrl}/schemas/jobs`;
   manifest.schemas.jobSchemaPathTemplate = `${baseUrl}/schemas/jobs/<name>.json`;
   manifest.onboarding.entrypoint = `${baseUrl}/onboarding`;
+  manifest.onboarding.posterEntrypoint = `${baseUrl}/poster/onboarding`;
   manifest.health = `${baseUrl}/health`;
   return manifest;
 }

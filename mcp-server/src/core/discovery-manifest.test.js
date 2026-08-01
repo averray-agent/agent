@@ -28,8 +28,10 @@ test("buildDiscoveryManifest returns the full public discovery shape", () => {
     mcp: "https://api.example.com/onboarding"
   });
   assert.equal(manifest.onboarding.entrypoint, "https://api.example.com/onboarding");
+  assert.equal(manifest.onboarding.posterEntrypoint, "https://api.example.com/poster/onboarding");
   assert.equal(manifest.health, "https://api.example.com/health");
   assert.ok(Array.isArray(manifest.publicEndpoints));
+  assert.ok(manifest.publicEndpoints.some((entry) => entry.path === "/poster/onboarding"));
   assert.ok(Array.isArray(manifest.authenticatedEndpoints));
   assert.ok(Array.isArray(manifest.tools));
   assert.ok(manifest.authenticatedEndpoints.some((entry) => entry.path === "/account/position"));

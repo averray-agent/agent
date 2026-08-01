@@ -12,6 +12,14 @@ const PLATFORM_CAPABILITIES = {
   version: "v1",
   onboarding: { walletModes: [{ id: "siwe" }] }
 };
+const EXTERNAL_BOUNTIES = {
+  mode: "allowlist",
+  posterOnboarding: "/poster/onboarding"
+};
+const POSTER_ONBOARDING = {
+  version: "poster-onboarding-v1",
+  mode: "allowlist"
+};
 
 function makeHarness(overrides = {}) {
   const calls = [];
@@ -26,6 +34,16 @@ function makeHarness(overrides = {}) {
       };
     },
     publicBaseUrl: overrides.publicBaseUrl ?? " https://api.averray.com ",
+    posterOnboardingService: {
+      getExternalBountiesOnboarding: async () => {
+        calls.push(["getExternalBountiesOnboarding"]);
+        return overrides.externalBounties ?? EXTERNAL_BOUNTIES;
+      },
+      getPosterOnboarding: async () => {
+        calls.push(["getPosterOnboarding"]);
+        return overrides.posterOnboarding ?? POSTER_ONBOARDING;
+      }
+    },
     respond: (res, statusCode, body, headers = {}) => {
       calls.push(["respond", { statusCode, body, headers }]);
       res.statusCode = statusCode;
@@ -80,6 +98,7 @@ test("GET / returns public API metadata without calling provider services", asyn
   assert.equal(response.body.status, "ok");
   assert.equal(response.body.authMode, "strict");
   assert.ok(response.body.endpoints.includes("/agent-tools.json"));
+  assert.ok(response.body.endpoints.includes("/poster/onboarding"));
   assert.ok(response.body.endpoints.includes("/.well-known/badge-receipt-jwks.json"));
   assert.ok(response.body.endpoints.every((endpoint) => !endpoint.includes("/jobs/draft")));
   assert.deepEqual(response.body.receiptVerification, {
@@ -122,7 +141,7 @@ test("GET /status/providers returns sanitized provider operations", async () => 
   ]);
 });
 
-test("GET /onboarding returns platform capabilities", async () => {
+test("GET /onboarding returns platform capabilities with live external-bounty facts", async () => {
   const { calls, response, route } = makeHarness();
 
   const handled = await route({
@@ -133,12 +152,43 @@ test("GET /onboarding returns platform capabilities", async () => {
 
   assert.equal(handled, true);
   assert.equal(response.statusCode, 200);
-  assert.deepEqual(response.body, PLATFORM_CAPABILITIES);
+  assert.deepEqual(response.body, {
+    ...PLATFORM_CAPABILITIES,
+    externalBounties: EXTERNAL_BOUNTIES
+  });
+  assert.deepEqual(response.headers, { "cache-control": "public, max-age=30" });
   // The route must forward the active chain id so /onboarding advertises the
   // same network as /health and SIWE.
   assert.deepEqual(calls, [
     ["getPlatformCapabilities", { chainId: 420420419 }],
-    ["respond", { statusCode: 200, body: PLATFORM_CAPABILITIES, headers: {} }],
+    ["getExternalBountiesOnboarding"],
+    ["respond", {
+      statusCode: 200,
+      body: response.body,
+      headers: { "cache-control": "public, max-age=30" }
+    }],
+  ]);
+});
+
+test("GET /poster/onboarding is public and short-cacheable", async () => {
+  const { calls, response, route } = makeHarness();
+
+  assert.equal(await route({
+    request: { method: "GET" },
+    response,
+    pathname: "/poster/onboarding"
+  }), true);
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.body, POSTER_ONBOARDING);
+  assert.deepEqual(response.headers, { "cache-control": "public, max-age=30" });
+  assert.deepEqual(calls, [
+    ["getPosterOnboarding"],
+    ["respond", {
+      statusCode: 200,
+      body: POSTER_ONBOARDING,
+      headers: { "cache-control": "public, max-age=30" }
+    }]
   ]);
 });
 

@@ -5,6 +5,7 @@ const ROOT_ENDPOINTS = [
   "/metrics",
   "/agent-tools.json",
   "/onboarding",
+  "/poster/onboarding",
   "/auth/nonce",
   "/auth/verify",
   "/auth/refresh",
@@ -79,6 +80,7 @@ export function createPublicMetadataRoutes({
   authConfig,
   buildDiscoveryManifest,
   publicBaseUrl,
+  posterOnboardingService,
   respond,
   service,
   strategies,
@@ -122,7 +124,25 @@ export function createPublicMetadataRoutes({
     }
 
     if (request.method === "GET" && pathname === "/onboarding") {
-      respond(response, 200, service.getPlatformCapabilities({ chainId: authConfig?.chainId }));
+      respond(
+        response,
+        200,
+        {
+          ...service.getPlatformCapabilities({ chainId: authConfig?.chainId }),
+          externalBounties: await posterOnboardingService.getExternalBountiesOnboarding()
+        },
+        { "cache-control": "public, max-age=30" }
+      );
+      return true;
+    }
+
+    if (request.method === "GET" && pathname === "/poster/onboarding") {
+      respond(
+        response,
+        200,
+        await posterOnboardingService.getPosterOnboarding(),
+        { "cache-control": "public, max-age=30" }
+      );
       return true;
     }
 

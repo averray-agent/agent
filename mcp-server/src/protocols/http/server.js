@@ -56,6 +56,7 @@ import { createUsdcLiquidityRoutes } from "./usdc-liquidity-routes.js";
 import { createVerifierRoutes } from "./verifier-routes.js";
 import { createXcmRequestRoutes } from "./xcm-request-routes.js";
 import { makePolicy } from "../../core/builtin-policies.js";
+import { createPosterOnboardingService } from "../../core/poster-onboarding.js";
 import { createConfiguredIndexerHealthProbe } from "../../services/indexer-health-probe.js";
 import { createUsdcLiquidityStatusService } from "../../services/usdc-liquidity-status.js";
 
@@ -91,6 +92,14 @@ metrics.gauge("state_store_backend", "1 when state store backend matches the lab
   { backend: stateStore.constructor.name },
   1
 );
+
+const posterOnboardingService = createPosterOnboardingService({
+  authConfig,
+  externalPostingService,
+  gateway,
+  verifierService,
+  publicBaseUrl: process.env.PUBLIC_BASE_URL
+});
 
 const { metricsBearerToken, metricsAuthRequired } = resolveMetricsAuthConfig(process.env);
 const { paymentsSendEnabled } = resolvePaymentRouteConfig(process.env);
@@ -472,6 +481,7 @@ const handleJobRoute = createJobRoutes({
   respond,
   service,
   externalPostingService,
+  posterOnboardingService,
 });
 
 const handleExternalJobRoute = createExternalJobRoutes({
@@ -576,6 +586,7 @@ const handleEventRoute = createEventRoutes({
 const handlePublicMetadataRoute = createPublicMetadataRoutes({
   authConfig,
   buildDiscoveryManifest,
+  posterOnboardingService,
   publicBaseUrl: process.env.PUBLIC_BASE_URL,
   respond,
   service,

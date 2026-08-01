@@ -7,6 +7,7 @@ export function createJobRoutes({
   enforceLimit,
   ensureSessionOwnership,
   externalPostingService,
+  posterOnboardingService,
   rateLimitConfig,
   readJsonBody,
   respond,
@@ -20,7 +21,10 @@ export function createJobRoutes({
       const projected = externalPostingService?.filterExternalCatalogProjection
         ? await externalPostingService.filterExternalCatalogProjection(jobs)
         : jobs;
-      respond(response, 200, buildPublicJobsResponse(projected, url.searchParams));
+      const enriched = posterOnboardingService?.enrichExternalCatalogRows
+        ? await posterOnboardingService.enrichExternalCatalogRows(projected)
+        : projected;
+      respond(response, 200, buildPublicJobsResponse(enriched, url.searchParams));
       return true;
     }
 
