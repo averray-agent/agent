@@ -15,6 +15,9 @@ test("hosted smoke cross-checks poster onboarding against operational and chain-
   assert.match(script, /\.liveReads\.protocolFeeBps\.status == "available"/u);
   assert.match(script, /\.liveReads\.claimBond\.status == "available"/u);
   assert.match(script, /\.liveReads\.disputeWindow\.status == "available"/u);
+  assert.match(script, /\.cancellation\.selfServeCancel == false/u);
+  assert.match(script, /operator-mediated on request, ~7 days, refunds only ever to the recorded poster/u);
+  assert.match(script, /cancelOpenJob, next EscrowCore deployment window/u);
   assert.match(script, /\$poster\.chainId == \$health\.auth\.chainId/u);
   assert.match(script, /\$poster\.escrowCore \| ascii_downcase/u);
   assert.match(script, /\$poster\.workerFacts\.claimBond\.stakeBps == \$operational\.maintenance\.policy\.risk\.defaultClaimStakeBps/u);

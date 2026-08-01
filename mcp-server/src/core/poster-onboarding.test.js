@@ -105,6 +105,11 @@ test("poster onboarding is a clean-room machine recipe backed by non-default liv
   assert.equal(payload.workerFacts.disputeWindow.seconds, 123_456);
   assert.equal(payload.workerFacts.preflight.path, "/jobs/preflight?jobId=X");
   assert.equal(payload.workerFacts.selfDeposit.routeAvailable, false);
+  assert.deepEqual(payload.cancellation, {
+    selfServeCancel: false,
+    rescue: "operator-mediated on request, ~7 days, refunds only ever to the recorded poster",
+    plannedSelfServeCancel: "cancelOpenJob, next EscrowCore deployment window"
+  });
   assert.deepEqual(payload.flow.map((step) => step.id), [
     "siwe",
     "draft",
@@ -136,6 +141,11 @@ test("external onboarding and catalog claim bonds reuse live facts without stati
   assert.equal(externalBounties.claimBond.stakeBps, 654);
   assert.equal(externalBounties.claimBond.feeBps, 87);
   assert.equal(externalBounties.disputeWindow.seconds, 123_456);
+  assert.deepEqual(externalBounties.cancellation, {
+    selfServeCancel: false,
+    rescue: "operator-mediated on request, ~7 days, refunds only ever to the recorded poster",
+    plannedSelfServeCancel: "cancelOpenJob, next EscrowCore deployment window"
+  });
 
   const [external, curated] = await service.enrichExternalCatalogRows([
     {

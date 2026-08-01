@@ -179,6 +179,7 @@ async function buildSnapshot({
     flow: buildPostingFlow({ publicBaseUrl }),
     verification: buildVerification(verificationModes),
     workerFacts,
+    cancellation: buildCancellation(),
     docs: {
       guide: GUIDE_URL,
       workedExample: DOGFOOD_EVIDENCE_URL
@@ -365,6 +366,7 @@ function externalBountiesFromSnapshot(snapshot) {
     preflight: snapshot.workerFacts.preflight,
     selfDeposit: snapshot.workerFacts.selfDeposit,
     disputeWindow: snapshot.workerFacts.disputeWindow,
+    cancellation: snapshot.cancellation,
     humanFallback: humanFallback ?? {
       id: "human_fallback",
       available: false,
@@ -374,6 +376,14 @@ function externalBountiesFromSnapshot(snapshot) {
       claimBond: snapshot.liveReads.claimBond,
       disputeWindow: snapshot.liveReads.disputeWindow
     }
+  };
+}
+
+function buildCancellation() {
+  return {
+    selfServeCancel: false,
+    rescue: "operator-mediated on request, ~7 days, refunds only ever to the recorded poster",
+    plannedSelfServeCancel: "cancelOpenJob, next EscrowCore deployment window"
   };
 }
 

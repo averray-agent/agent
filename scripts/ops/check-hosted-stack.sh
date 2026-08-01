@@ -223,6 +223,9 @@ jq -e '
   (.economics.minRewardUsdc | tonumber) > 0 and
   (.economics.draftTtlHours | type) == "number" and
   (.economics.maxOpenDrafts | type) == "number" and
+  (.cancellation.selfServeCancel == false) and
+  (.cancellation.rescue == "operator-mediated on request, ~7 days, refunds only ever to the recorded poster") and
+  (.cancellation.plannedSelfServeCancel == "cancelOpenJob, next EscrowCore deployment window") and
   (.workerFacts.claimBond.available == true) and
   (.workerFacts.claimBond.stakeBps | type) == "number" and
   (.workerFacts.claimBond.feeBps | type) == "number" and
@@ -243,6 +246,9 @@ jq -e -n \
   ' >/dev/null
 jq -e '
   .externalBounties.posterOnboarding == "/poster/onboarding" and
+  (.externalBounties.cancellation.selfServeCancel == false) and
+  (.externalBounties.cancellation.rescue == "operator-mediated on request, ~7 days, refunds only ever to the recorded poster") and
+  (.externalBounties.cancellation.plannedSelfServeCancel == "cancelOpenJob, next EscrowCore deployment window") and
   .externalBounties.claimBond.available == true and
   .externalBounties.disputeWindow.available == true
 ' >/dev/null <<<"$onboarding_json"
