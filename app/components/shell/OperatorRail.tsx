@@ -10,6 +10,7 @@ import {
   History,
   KeyRound,
   LayoutDashboard,
+  Megaphone,
   ScrollText,
   ShieldCheck,
   Users,
@@ -57,6 +58,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: "Capital",
     items: [
       { href: "/treasury", label: "Treasury", icon: Coins },
+      { href: "/poster", label: "Posting", icon: Megaphone },
       { href: "/sessions", label: "Sessions", icon: History },
     ],
   },
