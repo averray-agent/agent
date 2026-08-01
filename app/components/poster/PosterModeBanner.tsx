@@ -68,9 +68,10 @@ export function PosterModeBanner({
         ) : null}
       </div>
       <p className="font-[family-name:var(--font-body)] text-[13px] leading-relaxed text-[var(--avy-ink)]">
-        {enrollment} This page is <strong>read-only</strong>: it shows jobs this
-        wallet has posted and lets you look up a draft. Posting from the app is
-        a later rung — today enrolled posters use the posting tool
+        {enrollment} Enrolled wallets can post below — the draft is created
+        first (no funds move), then your connected wallet signs the funding
+        transactions the platform itself issues. Non-enrolled drafts are
+        refused at submission; that refusal is the enrollment truth
         {guideUrl ? (
           <>
             {" "}
