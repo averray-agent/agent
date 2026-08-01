@@ -960,3 +960,37 @@ test("verifySubmission still settles when the on-chain job is genuinely unsettle
   assert.equal(result.outcome, "approved");
   assert.deepEqual(result.payoutTx, { txHash: "0xpayout", blockNumber: 1, status: 1 });
 });
+
+test("ingestBrokeredDecision sends poster approval through canonical verification persistence", async () => {
+  const h = makeIdempotencyHarness(6);
+  const submitted = transitionSession(h.claimed, "submitted", { reason: "work_submitted" });
+  await h.stateStore.upsertSession(submitted);
+  const service = new VerifierService(h.platformService, h.stateStore, h.blockchainGateway);
+  const payoutTx = {
+    txHash: "0xposterreview",
+    blockNumber: 55,
+    status: 1,
+    settlement: {
+      worker: submitted.wallet,
+      workerAmountRaw: "1000000",
+      protocolFeeAmountRaw: "50000"
+    }
+  };
+
+  const result = await service.ingestBrokeredDecision({
+    sessionId: submitted.sessionId,
+    outcome: "approved",
+    reasonCode: "POSTER_APPROVED",
+    metadataURI: "urn:averray:poster-review:0xabc",
+    reasoningHash: `0x${"a".repeat(64)}`,
+    payoutTx,
+    details: { authority: "external_poster_review" }
+  });
+
+  assert.equal(result.handler, "poster_review");
+  assert.equal(result.outcome, "approved");
+  assert.equal(result.reasonCode, "POSTER_APPROVED");
+  assert.deepEqual(result.payoutTx, payoutTx);
+  assert.deepEqual(result.settlement, payoutTx.settlement);
+  assert.equal((await h.stateStore.getSession(submitted.sessionId)).status, "resolved");
+});

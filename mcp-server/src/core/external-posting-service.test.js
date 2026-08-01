@@ -95,6 +95,11 @@ test("external posting mode defaults closed and open mode admits every SIWE wall
   assert.equal((await service.createDraft(OTHER_POSTER, { definition: definition() })).status, "awaiting_funding");
 });
 
+test("external posting config exposes a live poster-review window with a seven-day default", () => {
+  assert.equal(config().reviewWindowHours, 168);
+  assert.equal(config({ EXTERNAL_POSTING_REVIEW_WINDOW_HOURS: "48" }).reviewWindowHours, 48);
+});
+
 test("optional allowlist mode admits only configured wallets without changing the closed default", async () => {
   const store = new MemoryStateStore();
   const service = new ExternalPostingService({
