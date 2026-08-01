@@ -102,6 +102,27 @@ export function buildPosterJobsView(payload: unknown, wallet: string | null): Po
   };
 }
 
+/**
+ * Worker-bond estimate from the live /poster/onboarding claimBond facts
+ * (stake bps + fee bps with a raw minimum). Display-only — the per-wallet
+ * truth stays the preflight endpoint; returns null when live inputs are
+ * missing rather than guessing.
+ */
+export function estimateWorkerBondRaw(rewardRaw: bigint, claimBond: unknown): bigint | null {
+  const bond = asRecord(claimBond);
+  if (bond.available !== true) return null;
+  const stakeBps = typeof bond.stakeBps === "number" ? BigInt(bond.stakeBps) : null;
+  const feeBps = typeof bond.feeBps === "number" ? BigInt(bond.feeBps) : null;
+  const minFeeRaw =
+    typeof bond.minFeeRaw === "string" && /^\d+$/u.test(bond.minFeeRaw)
+      ? BigInt(bond.minFeeRaw)
+      : 0n;
+  if (stakeBps === null || feeBps === null) return null;
+  const stake = (rewardRaw * stakeBps) / 10_000n;
+  const fee = (rewardRaw * feeBps) / 10_000n;
+  return stake + (fee > minFeeRaw ? fee : minFeeRaw);
+}
+
 export interface DraftView {
   status: string;
   statusTone: StateTone;
