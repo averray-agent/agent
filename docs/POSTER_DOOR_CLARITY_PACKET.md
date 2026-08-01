@@ -29,7 +29,7 @@ pricing disclosure, not revenue reporting — it belongs here.)
 | T6 | **`DISPUTE_WINDOW` = 7 days from rejection.** An unopened dispute lets anyone `finalizeRejectedJob`, which slashes the worker's bond. Workers must be told to open the dispute promptly. | We raced this window |
 | T7 | **Drafts bind by `specHash`** (canonical-content hash of the definition); funding calldata must carry it exactly; unfunded drafts expire harmlessly at TTL. **Funded-but-unmatched money is NOT self-serve refundable** — the watcher flags the mismatch but the chain provides no poster refund; recovery is the operator rescue path (~7 days, `docs/POSTER_CANCEL_RECLAIM_DESIGN.md`). | Watcher matched in ~162s; refund claim corrected per PR #877 |
 | T8 | **Mode honesty**: the door is `closed`/`allowlist`/`open`. Surfaces must state the live mode and, in allowlist mode, that posting requires enrollment — never render a dead "post" affordance. | Pascal signed in and found nothing to click |
-| T9 | **EscrowCore v2 has no poster cancel** — an Open job escrows reward + fee until a worker resolves it or the operator runs the rescue procedure (tombstone → 7-day window → `finalizeRejectedJob` refund; design + runbook in `docs/POSTER_CANCEL_RECLAIM_DESIGN.md`). Deliverables A and B must disclose this per that doc's §6; exact public wording awaits decision ⑤ there. | Full external-surface enumeration while drafting the guide; design PR #877 |
+| T9 | **EscrowCore v2 has no poster cancel** — an Open job escrows reward + fee until a worker resolves it or the operator runs the rescue procedure (tombstone → 7-day window → `finalizeRejectedJob` refund; design + runbook in `docs/POSTER_CANCEL_RECLAIM_DESIGN.md`). Deliverables A and B must disclose this per that doc's §6 — **decided 2026-08-01: the rescue promise is public** (payload + guide). | Full external-surface enumeration while drafting the guide; design PR #877 |
 
 Truth-boundary rule for every deliverable: **read live config/chain values
 (fee bps, bond bps, min reward, TTL, mode) — never hardcode them.** If a value
@@ -65,6 +65,11 @@ must propagate faster).
   posters know what "approve" means operationally.
 - `workerFacts`: the bond truths (T2/T3/T6) so a poster understands what their
   workers face — bond bps (live), preflight endpoint, dispute window.
+- `cancellation` (T9, wording per `POSTER_CANCEL_RECLAIM_DESIGN.md` §6):
+  `selfServeCancel: false`, the operator rescue promise (on request,
+  ~7 days, refunds only ever to the recorded poster), and
+  `plannedSelfServeCancel` noting the v3 `cancelOpenJob` banked for the next
+  deployment window.
 - `docs`: URL of the human guide (Deliverable B) + the PR #874 evidence trail as
   the worked example.
 
