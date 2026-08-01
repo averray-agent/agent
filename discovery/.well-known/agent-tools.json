@@ -384,7 +384,8 @@
       "Treat claimStatus.claimable and claimStatus.reason as authoritative for whether a job may be claimed now; lifecycle.status describes the content/job lifecycle and can remain open when claimStatus says exhausted, claimed, or submitted.",
       "When claimStatus.reason is reward_funding_pending, retry after a platform refill or choose another job. When it is reward_funding_unverified, report a platform fault instead of attempting the claim."
     ],
-    "entrypoint": "https://api.averray.com/onboarding"
+    "entrypoint": "https://api.averray.com/onboarding",
+    "posterEntrypoint": "https://api.averray.com/poster/onboarding"
   },
   "auth": {
     "scheme": "SIWE + JWT (ES256)",
@@ -426,6 +427,10 @@
     {
       "path": "/onboarding",
       "description": "Canonical platform capabilities + tool list."
+    },
+    {
+      "path": "/poster/onboarding",
+      "description": "Live machine-readable external-bounty posting rail, economics, verifier modes, and worker bond facts."
     },
     {
       "path": "/jobs",
