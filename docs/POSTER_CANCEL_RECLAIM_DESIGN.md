@@ -197,6 +197,14 @@ the janitor wallet; ③ approve waiver-flag use for rescues (vs. eating non-waiv
 noise); ④ 1h floor + any-Open scope for the v3 delta; ⑤ whether the ~7d rescue promise goes
 in the public onboarding payload or stays in the human guide only.
 
+**DECIDED 2026-08-01 (Pascal):** ① **confirmed** — (c)+(b) now, (a) banked to the next
+EscrowCore deployment window. ② janitor = **a fresh dedicated EOA** (vault as
+`averray-janitor`, used for nothing else; create it when the first rescue is needed).
+③ **waiver-flag use approved** for labeled rescues. ④ v3 delta = **any-Open scope +
+1-hour minimum-open floor**. ⑤ the ~7-day rescue promise is **public** — in the
+`/poster/onboarding` payload AND the human guide (poster-door packet T9 + Deliverable A
+`cancellation` object carry it).
+
 ## 5. Watcher/catalog coordination
 
 The chain is truth; the catalog is a projection (`EXTERNAL_JOB_POSTING_DESIGN.md` §2). Cancel
