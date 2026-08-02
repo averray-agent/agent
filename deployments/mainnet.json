@@ -62,6 +62,7 @@
     },
     "0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC": {
       "sourceCommit": "775a826b0a33d0ec04dd19f0455e69402dc9bbcd",
+      "interfaceArtifact": "deployments/interfaces/mainnet-escrow-core-v2.json",
       "abiHash": "sha256:f3b2f31a958402e0139217264dc356406130cbea402094d54bbd9f93343d5165",
       "runtimeCodeHash": "sha256:bc0d1cfe6fa46a5a3c5b0954c575ba1c78ecd1a48cf48dd83fb19d239aaa7b37",
       "verifiedAt": "2026-07-30T10:05:34.288Z"
