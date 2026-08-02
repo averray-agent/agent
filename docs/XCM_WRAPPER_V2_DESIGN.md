@@ -25,11 +25,16 @@ borrowing, leverage, and deployment are out of scope.
 4. The wrapper is the Asset Hub XCM origin for every leg. The local funding leg
    is executed by the wrapper; remote legs are sent by the wrapper. No EOA fronts
    capital or acts from a second remote identity.
-5. Deposit capital moves AAC → adapter → wrapper → XCM. The wrapper pulls the
-   adapter's recorded allocation in the same transaction that executes the
-   funding message. If local XCM execution reverts, the pull reverts too.
-6. `_validateSettlementBounds` is retained byte-for-byte. Destination-state
-   balance deltas remain settlement truth; XCM completion alone is never enough.
+5. Deposit capital moves AAC → adapter → wrapper → XCM. The adapter is deployed
+   with the live AgentAccountCore as an immutable requester and rejects every
+   other caller, including a backend EOA that still holds `strategySettler`.
+   The wrapper pulls the adapter's recorded allocation in the same transaction
+   that executes the funding message. If local XCM execution reverts, the pull
+   reverts too.
+6. `_validateSettlementBounds` retains its observer-delta boundary and adds a
+   symmetric 1:1 withdraw check: both returned assets and retired shares are
+   capped by `context.shares`. Destination-state balance deltas remain
+   settlement truth; XCM completion alone is never enough.
 
 ## Contract boundary
 
@@ -65,14 +70,33 @@ canonical destination and invoke `send(bytes,bytes)`. A caller cannot select
 ### Adapter and custody handshake
 
 Each enabled `strategyId` is owner-bound to one async custody adapter. The
-adapter stages the AAC allocation and exposes a request-scoped pull function
-callable only by its configured wrapper. Before any first leg, the wrapper reads
-the adapter request and checks the full tuple used by `previewRequestId`:
+adapter constructor also binds the deployed AgentAccountCore as its immutable
+requester. `requestDeposit` and `requestWithdraw` reject every other caller;
+granting an EOA `strategySettler` lets it invoke the AAC's account-bound broker
+entry point but never lets the adapter pull from that EOA's wallet. The AAC
+first debits the recorded account's `positions.liquid`, approves the exact
+amount from its own USDC custody, and then calls the adapter. The adapter's
+`transferFrom` source and recorded `requester` are therefore always the AAC.
+
+The adapter stages that AAC allocation and exposes a request-scoped pull
+function callable only by its configured wrapper. Before any first leg, the
+wrapper reads the adapter request and checks the full tuple used by
+`previewRequestId`:
 
 - strategy id and request kind;
 - account, local asset, and recipient;
 - requested assets/shares and nonce;
 - pending, unsettled state.
+
+This staging path exists in the frozen mainnet AgentAccountCore artifact, not
+only in new wrapper code: `requestStrategyDeposit` debits the selected account's
+AAC liquid balance, approves the selected adapter from AAC custody, and calls
+`requestDeposit` from the AAC contract. Activation binds the adapter constructor
+to `deployments/mainnet.json.contracts.agentAccountCore` and verifies that exact
+address before role wiring. The contract test executes this complete AAC method
+and asserts the adapter's recorded requester, AAC token debit, zero adapter
+balance, and wrapper receipt; its negative twin grants an EOA `strategySettler`,
+funds and approves that EOA, and still requires the adapter to reject it.
 
 For `DepositFunding`, the wrapper asks that adapter to release exactly
 `context.assets` to the wrapper, verifies the wrapper's token balance delta, and
@@ -105,6 +129,14 @@ ledger state/events, not a new observer status or wrapper queue/finalize
 selector. No code may credit the original liquid amount merely because a remote
 observation timed out. The deployment runbook must document this recovery state
 before capital larger than dust is allowed.
+
+A failed withdrawal uses the same recovery discipline. Its context deliberately
+stores `assets = 0`, so the wrapper's owner-only release cap is kind-aware:
+deposit recovery is capped by `context.assets`, while withdrawal recovery is
+capped by `context.shares` in this 1:1 USDC/aUSDC lane. Returned USDC moves
+wrapper → adapter → immutable AAC requester. Each recovered unit retires one
+adapter share and one account strategy share before becoming AAC liquid; partial
+recovery leaves an explicit outstanding counter, and full recovery clears it.
 
 ### Residual operating float
 
@@ -205,8 +237,9 @@ problems and both are mandatory:
   reviewed four-shape grammar or redirect value.
 - `XcmBalanceObserverService` proves destination-state balance movement and
   supplies the actual delta.
-- the unchanged `_validateSettlementBounds` caps that delta before a terminal
-  record or ledger credit.
+- `_validateSettlementBounds` caps that delta before a terminal record or
+  ledger credit, including the symmetric withdraw-assets ≤ requested-shares
+  defense in depth.
 
 Dry-run evidence is never accepted as settlement evidence. XCM `complete`
 without the expected event is a dispatch refusal; a dispatched message without
@@ -232,15 +265,17 @@ The implementation test gate includes:
 4. mutation tests for every fixed/bound field and for unexpected instructions,
    nested bytes, trailing bytes, wrong phase, conflicting replay, and a fifth
    message;
-5. custody tests proving AAC/adapter capital is pulled exactly once, local
-   execute failure rolls the pull back, an EOA never fronts funds, returned
-   withdrawal assets reach the adapter before ledger credit, and a remote
-   timeout enters the recovery bucket without creating fake liquid;
+5. custody tests proving the deployed AAC interface is the immutable requester,
+   AAC/adapter capital is pulled exactly once, a bare EOA strategy settler is
+   rejected even when it has tokens and allowance, local execute failure rolls
+   the pull back, returned withdrawal assets reach the adapter before ledger
+   credit, and remote deposit/withdraw failures enter request-scoped recovery
+   without creating fake liquid or leaving retired shares live;
 6. role tests for owner/operator/adapter/arbitrary caller, local and global
    pause behavior, operator rotation with an in-flight request, and the absence
    of an arbitrary token/XCM escape hatch;
-7. settlement tests that run the existing bound suite unchanged and prove
-   idempotent terminal replay; and
+7. settlement tests that preserve the existing bounds, add the symmetric
+   withdraw-assets cap, and prove idempotent terminal replay; and
 8. a full four-leg accounting replay: fund → 22→1003 → 1003→22 → home,
    using pinned v2 payload bytes while retaining the rehearsal fixture as
    provenance for the observer-facing request and actual-delta values.

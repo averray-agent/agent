@@ -556,6 +556,15 @@ contract AgentAccountCore is ReentrancyGuard {
                 } else {
                     policy.recordOutflow(request.account, settledAssets);
                 }
+            } else if (_requiresRemoteRecovery(request.adapter, requestId)) {
+                // Hydration's phase-1 lane is 1:1 USDC/aUSDC. A failed
+                // withdraw after the remote sell therefore recovers assets
+                // against the same number of strategy shares.
+                strategyRecoveryAssets[request.account][request.asset] += request.requestedShares;
+                strategyRequestRecoveryOutstanding[requestId] = request.requestedShares;
+                emit StrategyRecoveryRequired(
+                    request.account, request.strategyId, requestId, request.asset, request.requestedShares
+                );
             }
         } else {
             revert InvalidStrategyRequest();
@@ -592,6 +601,12 @@ contract AgentAccountCore is ReentrancyGuard {
                 || recoveredAssets == 0 || recoveredAssets > outstanding
         ) revert InvalidStrategyRequest();
 
+        if (request.kind == IXcmWrapper.RequestKind.Withdraw) {
+            uint256 accountShares = strategyShares[request.account][request.strategyId];
+            if (accountShares < recoveredAssets) revert InsufficientLiquidity();
+            strategyShares[request.account][request.strategyId] = accountShares - recoveredAssets;
+        }
+
         uint256 beforeBalance = _assetBalance(request.asset);
         IXcmV2CustodyAdapter(request.adapter).releaseRecoveredAssets(requestId, address(this), recoveredAssets);
         if (_assetBalance(request.asset) - beforeBalance != recoveredAssets) revert InvalidSettlement();
@@ -599,6 +614,7 @@ contract AgentAccountCore is ReentrancyGuard {
         strategyRequestRecoveryOutstanding[requestId] = outstanding - recoveredAssets;
         strategyRecoveryAssets[request.account][request.asset] -= recoveredAssets;
         positions[request.account][request.asset].liquid += recoveredAssets;
+        _syncStrategyAllocation(request.account, request.asset, request.strategyId, request.adapter);
         emit StrategyRecoveryCompleted(
             request.account,
             request.strategyId,

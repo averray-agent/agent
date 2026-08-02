@@ -331,9 +331,12 @@ contract XcmWrapperV2 is IXcmWrapper, ReentrancyGuard {
     function releaseRecoveredAssetsToAdapter(bytes32 requestId, uint256 assets) external onlyOwner nonReentrant {
         RequestRecord storage record = requests[requestId];
         if (record.context.account == address(0)) revert UnknownRequest();
+        uint256 recoveryCap = record.context.kind == RequestKind.Deposit
+            ? record.context.assets
+            : record.context.kind == RequestKind.Withdraw ? record.context.shares : 0;
         if (
             !dispatchPaused || (record.status != RequestStatus.Failed && record.status != RequestStatus.Cancelled)
-                || assets == 0 || requestRecoveryReleased[requestId] + assets > record.context.assets
+                || assets == 0 || requestRecoveryReleased[requestId] + assets > recoveryCap
         ) revert InvalidStatus();
         address adapter = requestAdapter[requestId];
         if (_balanceOf(record.context.asset, address(this)) < assets) revert CustodyMismatch();
@@ -359,7 +362,7 @@ contract XcmWrapperV2 is IXcmWrapper, ReentrancyGuard {
         }
 
         if (context.kind == RequestKind.Withdraw) {
-            if (settledShares > context.shares) revert InvalidSettlement();
+            if (settledShares > context.shares || settledAssets > context.shares) revert InvalidSettlement();
             return;
         }
 
@@ -582,26 +585,37 @@ contract XcmWrapperV2 is IXcmWrapper, ReentrancyGuard {
 
     function _decodeCompact(bytes calldata data, uint256 cursor) internal pure returns (uint256 value, uint256 next) {
         if (cursor >= data.length) revert XcmContextMismatch();
+        uint256 start = cursor;
         uint8 first = uint8(data[cursor]);
         uint8 mode = first & 3;
-        if (mode == 0) return (first >> 2, cursor + 1);
-        if (mode == 1) {
+        if (mode == 0) {
+            value = first >> 2;
+            next = cursor + 1;
+        } else if (mode == 1) {
             if (cursor + 2 > data.length) revert XcmContextMismatch();
             uint16 raw = uint16(first) | (uint16(uint8(data[cursor + 1])) << 8);
-            return (raw >> 2, cursor + 2);
-        }
-        if (mode == 2) {
+            value = raw >> 2;
+            next = cursor + 2;
+        } else if (mode == 2) {
             if (cursor + 4 > data.length) revert XcmContextMismatch();
             uint32 raw = uint32(first) | (uint32(uint8(data[cursor + 1])) << 8)
                 | (uint32(uint8(data[cursor + 2])) << 16) | (uint32(uint8(data[cursor + 3])) << 24);
-            return (raw >> 2, cursor + 4);
+            value = raw >> 2;
+            next = cursor + 4;
+        } else {
+            uint256 length = (first >> 2) + 4;
+            if (length > 32 || cursor + 1 + length > data.length) revert XcmContextMismatch();
+            for (uint256 i = 0; i < length; i++) {
+                value |= uint256(uint8(data[cursor + 1 + i])) << (8 * i);
+            }
+            next = cursor + 1 + length;
         }
-        uint256 length = (first >> 2) + 4;
-        if (length > 32 || cursor + 1 + length > data.length) revert XcmContextMismatch();
-        for (uint256 i = 0; i < length; i++) {
-            value |= uint256(uint8(data[cursor + 1 + i])) << (8 * i);
+
+        bytes memory canonical = _compact(value);
+        if (canonical.length != next - start) revert XcmContextMismatch();
+        for (uint256 i = 0; i < canonical.length; i++) {
+            if (data[start + i] != canonical[i]) revert XcmContextMismatch();
         }
-        return (value, cursor + 1 + length);
     }
 
     function _compact(uint256 value) internal pure returns (bytes memory encoded) {

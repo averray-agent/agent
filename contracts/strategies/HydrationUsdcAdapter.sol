@@ -15,6 +15,7 @@ contract HydrationUsdcAdapter is IXcmV2CustodyAdapter, ReentrancyGuard {
     address public immutable override asset;
     bytes32 public immutable override strategyId;
     IXcmWrapper public immutable xcmWrapper;
+    address public immutable agentAccountCore;
 
     uint256 public override totalShares;
     uint256 public override totalAssets;
@@ -58,15 +59,28 @@ contract HydrationUsdcAdapter is IXcmV2CustodyAdapter, ReentrancyGuard {
     error InsufficientLiquidity();
     error AlreadySettled();
 
-    constructor(TreasuryPolicy policy_, address asset_, bytes32 strategyId_, IXcmWrapper wrapper_) {
+    constructor(
+        TreasuryPolicy policy_,
+        address asset_,
+        bytes32 strategyId_,
+        IXcmWrapper wrapper_,
+        address agentAccountCore_
+    ) {
+        if (agentAccountCore_ == address(0)) revert InvalidRequest();
         policy = policy_;
         asset = asset_;
         strategyId = strategyId_;
         xcmWrapper = wrapper_;
+        agentAccountCore = agentAccountCore_;
     }
 
     modifier onlyOperator() {
         if (!policy.strategySettler(msg.sender)) revert Unauthorized();
+        _;
+    }
+
+    modifier onlyAgentAccountCore() {
+        if (msg.sender != agentAccountCore) revert Unauthorized();
         _;
     }
 
@@ -82,7 +96,7 @@ contract HydrationUsdcAdapter is IXcmV2CustodyAdapter, ReentrancyGuard {
         bytes calldata message,
         IXcmWrapper.Weight calldata maxWeight,
         uint64 nonce
-    ) external override nonReentrant whenNotPaused onlyOperator returns (bytes32 requestId) {
+    ) external override nonReentrant whenNotPaused onlyAgentAccountCore returns (bytes32 requestId) {
         if (assets == 0 || account == address(0)) revert InvalidRequest();
         IXcmWrapper.RequestContext memory context = IXcmWrapper.RequestContext({
             strategyId: strategyId,
@@ -126,7 +140,7 @@ contract HydrationUsdcAdapter is IXcmV2CustodyAdapter, ReentrancyGuard {
         bytes calldata message,
         IXcmWrapper.Weight calldata maxWeight,
         uint64 nonce
-    ) external override nonReentrant whenNotPaused onlyOperator returns (bytes32 requestId) {
+    ) external override nonReentrant whenNotPaused onlyAgentAccountCore returns (bytes32 requestId) {
         if (shares == 0 || account == address(0) || recipient == address(0)) revert InvalidRequest();
         if (totalShares < pendingWithdrawalShares + shares) revert InsufficientLiquidity();
         IXcmWrapper.RequestContext memory context = IXcmWrapper.RequestContext({
@@ -226,6 +240,14 @@ contract HydrationUsdcAdapter is IXcmV2CustodyAdapter, ReentrancyGuard {
                 totalShares -= request.requestedShares;
                 totalAssets -= redeemedAssets;
                 SafeTransfer.safeTransfer(asset, request.recipient, settledAssets);
+            } else {
+                // The sell leg has already left the wrapper before an adapter
+                // withdraw request exists. A failed home leg can therefore
+                // leave 1:1 USDC principal remote; never strand that recovery
+                // behind a zero `requestedAssets` value.
+                requiresRemoteRecovery[requestId] = true;
+                recoveryAssetsOutstanding[requestId] = request.requestedShares;
+                emit RemoteRecoveryRequired(requestId, request.requestedShares);
             }
         }
 
@@ -243,6 +265,11 @@ contract HydrationUsdcAdapter is IXcmV2CustodyAdapter, ReentrancyGuard {
         if (msg.sender != request.requester || recipient != request.requester) revert Unauthorized();
         if (!requiresRemoteRecovery[requestId] || assets == 0 || assets > recoveryAssetsOutstanding[requestId]) {
             revert InvalidRequest();
+        }
+        if (request.kind == IXcmWrapper.RequestKind.Withdraw) {
+            if (assets > totalShares || assets > totalAssets) revert InsufficientLiquidity();
+            totalShares -= assets;
+            totalAssets -= assets;
         }
         recoveryAssetsOutstanding[requestId] -= assets;
         if (recoveryAssetsOutstanding[requestId] == 0) requiresRemoteRecovery[requestId] = false;

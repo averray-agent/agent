@@ -7,6 +7,7 @@ import {AgentAccountCore} from "../contracts/AgentAccountCore.sol";
 import {MockERC20} from "../contracts/mocks/MockERC20.sol";
 import {StrategyAdapterRegistry} from "../contracts/StrategyAdapterRegistry.sol";
 import {TreasuryPolicy} from "../contracts/TreasuryPolicy.sol";
+import {IXcmStrategyAdapter} from "../contracts/interfaces/IXcmStrategyAdapter.sol";
 import {IXcmWrapper} from "../contracts/interfaces/IXcmWrapper.sol";
 import {HydrationUsdcAdapter} from "../contracts/strategies/HydrationUsdcAdapter.sol";
 import {XcmWrapperV2} from "../contracts/XcmWrapperV2.sol";
@@ -54,12 +55,48 @@ contract MockXcmPrecompileV2 {
     }
 }
 
+contract MockAgentAccountCoreV2 {
+    function approveAdapter(MockERC20 asset, HydrationUsdcAdapter adapter) external {
+        asset.approve(address(adapter), type(uint256).max);
+    }
+
+    function requestDeposit(
+        HydrationUsdcAdapter adapter,
+        address account,
+        uint256 assets,
+        bytes calldata destination,
+        bytes calldata message,
+        IXcmWrapper.Weight calldata maxWeight,
+        uint64 nonce
+    ) external returns (bytes32 requestId) {
+        return adapter.requestDeposit(account, assets, destination, message, maxWeight, nonce);
+    }
+
+    function requestWithdraw(
+        HydrationUsdcAdapter adapter,
+        address account,
+        uint256 shares,
+        address recipient,
+        bytes calldata destination,
+        bytes calldata message,
+        IXcmWrapper.Weight calldata maxWeight,
+        uint64 nonce
+    ) external returns (bytes32 requestId) {
+        return adapter.requestWithdraw(account, shares, recipient, destination, message, maxWeight, nonce);
+    }
+
+    function releaseRecoveredAssets(HydrationUsdcAdapter adapter, bytes32 requestId, uint256 assets) external {
+        adapter.releaseRecoveredAssets(requestId, address(this), assets);
+    }
+}
+
 abstract contract XcmWrapperV2Fixture is Test {
     TreasuryPolicy internal policy;
     MockXcmPrecompileV2 internal precompile;
     XcmWrapperV2 internal wrapper;
     HydrationUsdcAdapter internal adapter;
     MockERC20 internal asset;
+    MockAgentAccountCoreV2 internal mockAccounts;
 
     address internal constant ACCOUNT = 0x089a0A57D001bACb8473161e007F0bAbC1768CeE;
     address internal constant RECIPIENT = 0x7E071d5E9Fbe0c528EAcDe83B4662b77A041EFb9;
@@ -79,20 +116,21 @@ abstract contract XcmWrapperV2Fixture is Test {
 
         asset = new MockERC20("USDC", "USDC");
         wrapper = new XcmWrapperV2(policy, address(precompile));
-        adapter = new HydrationUsdcAdapter(policy, address(asset), STRATEGY_ID, wrapper);
+        mockAccounts = new MockAgentAccountCoreV2();
+        adapter = new HydrationUsdcAdapter(policy, address(asset), STRATEGY_ID, wrapper, address(mockAccounts));
 
         precompile.setAsset(address(asset));
         policy.setPauser(PAUSER);
         policy.setStrategySettler(OPERATOR, true);
         policy.setStrategySettler(OPERATOR_TWO, true);
+        policy.setStrategySettler(address(mockAccounts), true);
         wrapper.setOperator(OPERATOR);
         wrapper.setStrategyAdapter(STRATEGY_ID, address(adapter));
         wrapper.setHydrationAccountId32(HYDRATION_ACCOUNT);
         wrapper.setDispatchPaused(false);
 
-        asset.mint(OPERATOR, 1_000_000);
-        vm.prank(OPERATOR);
-        asset.approve(address(adapter), type(uint256).max);
+        asset.mint(address(mockAccounts), 1_000_000);
+        mockAccounts.approveAdapter(asset, adapter);
     }
 
     function _depositContext(uint256 amount, uint64 nonce) internal view returns (IXcmWrapper.RequestContext memory) {
@@ -142,11 +180,21 @@ abstract contract XcmWrapperV2Fixture is Test {
         pure
         returns (bytes memory)
     {
+        return _sellMessageWithCompacts(withdraw, _compact(fee), _compact(fee), amount, requestId);
+    }
+
+    function _sellMessageWithCompacts(
+        bool withdraw,
+        bytes memory firstFee,
+        bytes memory repeatedFee,
+        uint256 amount,
+        bytes32 requestId
+    ) internal pure returns (bytes memory) {
         return abi.encodePacked(
             hex"05180004010300a10f043205e51400",
-            _compact(fee),
+            firstFee,
             hex"13010300a10f043205e51400",
-            _compact(fee),
+            repeatedFee,
             hex"000601010700c817a80482841e00d04300",
             withdraw ? hex"eb03000016000000" : hex"16000000eb030000",
             _leU128(amount),
@@ -159,13 +207,22 @@ abstract contract XcmWrapperV2Fixture is Test {
     }
 
     function _homeMessage(uint256 amount, uint256 fee, bytes32 requestId) internal view returns (bytes memory) {
+        return _homeMessageWithCompacts(_compact(amount), _compact(amount), _compact(fee), requestId);
+    }
+
+    function _homeMessageWithCompacts(
+        bytes memory outerAmount,
+        bytes memory repeatedAmount,
+        bytes memory nestedFee,
+        bytes32 requestId
+    ) internal view returns (bytes memory) {
         return abi.encodePacked(
             hex"05140004010300a10f043205e51400",
-            _compact(amount),
+            outerAmount,
             hex"13010300a10f043205e51400",
-            _compact(amount),
+            repeatedAmount,
             hex"001410010204010100a10f08130002043205e51400",
-            _compact(fee),
+            nestedFee,
             hex"000d01020400010100",
             _wrapperAccountId32(),
             hex"2c",
@@ -192,6 +249,17 @@ abstract contract XcmWrapperV2Fixture is Test {
         revert("FIXTURE_AMOUNT_TOO_LARGE");
     }
 
+    function _nonCanonicalMode3Compact(uint256 value) internal pure returns (bytes memory) {
+        require(value < 1 << 32, "FIXTURE_AMOUNT_TOO_LARGE");
+        return abi.encodePacked(
+            hex"03",
+            bytes1(uint8(value)),
+            bytes1(uint8(value >> 8)),
+            bytes1(uint8(value >> 16)),
+            bytes1(uint8(value >> 24))
+        );
+    }
+
     function _leU128(uint256 value) internal pure returns (bytes memory encoded) {
         encoded = new bytes(16);
         for (uint256 i = 0; i < 16; i++) {
@@ -202,6 +270,30 @@ abstract contract XcmWrapperV2Fixture is Test {
     function _discardWrapperBalance(uint256 amount) internal {
         vm.prank(address(wrapper));
         asset.transfer(SINK, amount);
+    }
+
+    function _requestDeposit(uint256 assets, bytes memory message, uint64 nonce) internal returns (bytes32) {
+        vm.prank(OPERATOR);
+        return mockAccounts.requestDeposit(adapter, ACCOUNT, assets, LOCAL_DESTINATION, message, WEIGHT, nonce);
+    }
+
+    function _requestWithdraw(uint256 shares, bytes memory message, uint64 nonce) internal returns (bytes32) {
+        vm.prank(OPERATOR);
+        return mockAccounts.requestWithdraw(
+            adapter, ACCOUNT, shares, RECIPIENT, HYDRATION_DESTINATION, message, WEIGHT, nonce
+        );
+    }
+
+    function _assertWithdrawRequestReverts(bytes memory message, uint64 nonce, bytes4 selector) internal {
+        vm.prank(OPERATOR);
+        (bool ok, bytes memory data) = address(mockAccounts)
+            .call(
+                abi.encodeCall(
+                    mockAccounts.requestWithdraw,
+                    (adapter, ACCOUNT, 100_000, RECIPIENT, HYDRATION_DESTINATION, message, WEIGHT, nonce)
+                )
+            );
+        _assertCustomError(ok, data, selector);
     }
 
     function _assertQueueReverts(
@@ -229,14 +321,26 @@ abstract contract XcmWrapperV2Fixture is Test {
 }
 
 contract XcmWrapperV2Test is XcmWrapperV2Fixture {
+    function _seedStrategyShares(uint64 nonce) internal {
+        IXcmWrapper.RequestContext memory deposit = _depositContext(150_000, nonce);
+        bytes32 requestId = wrapper.previewRequestId(deposit);
+        _requestDeposit(150_000, _fundMessage(150_000, requestId), nonce);
+        _discardWrapperBalance(150_000);
+        vm.prank(OPERATOR);
+        wrapper.queueRequest(deposit, HYDRATION_DESTINATION, _sellMessage(false, 30_000, 100_000, requestId), WEIGHT);
+        vm.prank(OPERATOR);
+        adapter.settleRequest(
+            requestId, IXcmWrapper.RequestStatus.Succeeded, 100_000, 100_000, bytes32("REMOTE"), bytes32(0)
+        );
+    }
+
     function testPinnedV2FourLegFixtureAndAccountingReplay() public {
         IXcmWrapper.RequestContext memory deposit = _depositContext(150_000, 1);
         bytes32 depositId = wrapper.previewRequestId(deposit);
         bytes memory funding = _fundMessage(150_000, depositId);
         bytes memory supply = _sellMessage(false, 30_000, 100_000, depositId);
 
-        vm.prank(OPERATOR);
-        bytes32 queued = adapter.requestDeposit(ACCOUNT, 150_000, LOCAL_DESTINATION, funding, WEIGHT, 1);
+        bytes32 queued = _requestDeposit(150_000, funding, 1);
         require(queued == depositId, "DEPOSIT_REQUEST_ID");
         assertEq(precompile.executeCount(), 1);
         assertEq(precompile.callerAssetBalanceDuringExecute(), 150_000);
@@ -261,8 +365,7 @@ contract XcmWrapperV2Test is XcmWrapperV2Fixture {
         bytes memory redeem = _sellMessage(true, 28_000, 100_000, withdrawId);
         bytes memory home = _homeMessage(100_000, 100_000, withdrawId);
 
-        vm.prank(OPERATOR);
-        adapter.requestWithdraw(ACCOUNT, 100_000, RECIPIENT, HYDRATION_DESTINATION, redeem, WEIGHT, 2);
+        _requestWithdraw(100_000, redeem, 2);
         vm.prank(OPERATOR);
         wrapper.queueRequest(withdraw, HYDRATION_DESTINATION, home, WEIGHT);
         assertEq(precompile.sendCount(), 3);
@@ -302,10 +405,8 @@ contract XcmWrapperV2Test is XcmWrapperV2Fixture {
         bytes memory funding = _fundMessage(150_000, requestId);
         bytes memory supply = _sellMessage(false, 30_000, 100_000, requestId);
 
-        vm.prank(OPERATOR);
-        adapter.requestDeposit(ACCOUNT, 150_000, LOCAL_DESTINATION, funding, WEIGHT, 10);
-        vm.prank(OPERATOR);
-        adapter.requestDeposit(ACCOUNT, 150_000, LOCAL_DESTINATION, funding, WEIGHT, 10);
+        _requestDeposit(150_000, funding, 10);
+        _requestDeposit(150_000, funding, 10);
         assertEq(precompile.executeCount(), 1);
 
         _discardWrapperBalance(150_000);
@@ -333,29 +434,43 @@ contract XcmWrapperV2Test is XcmWrapperV2Fixture {
         wrongAccount[wrongAccount.length - 65] ^= bytes1(uint8(1));
 
         vm.prank(OPERATOR);
-        (bool ok, bytes memory data) = address(adapter)
+        (bool ok, bytes memory data) = address(mockAccounts)
             .call(
-                abi.encodeCall(adapter.requestDeposit, (ACCOUNT, 150_000, LOCAL_DESTINATION, wrongAccount, WEIGHT, 11))
+                abi.encodeCall(
+                    mockAccounts.requestDeposit,
+                    (adapter, ACCOUNT, 150_000, LOCAL_DESTINATION, wrongAccount, WEIGHT, 11)
+                )
             );
         _assertCustomError(ok, data, XcmWrapperV2.XcmContextMismatch.selector);
 
         bytes memory wrongTopic = _fundMessage(150_000, requestId);
         wrongTopic[wrongTopic.length - 1] ^= bytes1(uint8(1));
         vm.prank(OPERATOR);
-        (ok, data) = address(adapter)
-            .call(abi.encodeCall(adapter.requestDeposit, (ACCOUNT, 150_000, LOCAL_DESTINATION, wrongTopic, WEIGHT, 11)));
+        (ok, data) = address(mockAccounts)
+            .call(
+                abi.encodeCall(
+                    mockAccounts.requestDeposit, (adapter, ACCOUNT, 150_000, LOCAL_DESTINATION, wrongTopic, WEIGHT, 11)
+                )
+            );
         _assertCustomError(ok, data, XcmWrapperV2.XcmContextMismatch.selector);
 
         bytes memory trailing = abi.encodePacked(_fundMessage(150_000, requestId), hex"00");
         vm.prank(OPERATOR);
-        (ok, data) = address(adapter)
-            .call(abi.encodeCall(adapter.requestDeposit, (ACCOUNT, 150_000, LOCAL_DESTINATION, trailing, WEIGHT, 11)));
+        (ok, data) = address(mockAccounts)
+            .call(
+                abi.encodeCall(
+                    mockAccounts.requestDeposit, (adapter, ACCOUNT, 150_000, LOCAL_DESTINATION, trailing, WEIGHT, 11)
+                )
+            );
         _assertCustomError(ok, data, XcmWrapperV2.XcmContextMismatch.selector);
 
         vm.prank(OPERATOR);
-        (ok, data) = address(adapter)
+        (ok, data) = address(mockAccounts)
             .call(
-                abi.encodeCall(adapter.requestDeposit, (ACCOUNT, 150_000, LOCAL_DESTINATION, hex"0504002c", WEIGHT, 11))
+                abi.encodeCall(
+                    mockAccounts.requestDeposit,
+                    (adapter, ACCOUNT, 150_000, LOCAL_DESTINATION, hex"0504002c", WEIGHT, 11)
+                )
             );
         _assertCustomError(ok, data, XcmWrapperV2.XcmContextMismatch.selector);
     }
@@ -363,8 +478,7 @@ contract XcmWrapperV2Test is XcmWrapperV2Fixture {
     function testDepositSellRejectsRouterDirectionBudgetDestinationAndInstructionMutations() public {
         IXcmWrapper.RequestContext memory context = _depositContext(150_000, 16);
         bytes32 requestId = wrapper.previewRequestId(context);
-        vm.prank(OPERATOR);
-        adapter.requestDeposit(ACCOUNT, 150_000, LOCAL_DESTINATION, _fundMessage(150_000, requestId), WEIGHT, 16);
+        _requestDeposit(150_000, _fundMessage(150_000, requestId), 16);
         _discardWrapperBalance(150_000);
 
         _assertQueueReverts(
@@ -402,11 +516,84 @@ contract XcmWrapperV2Test is XcmWrapperV2Fixture {
         );
     }
 
+    function testDepositSellRejectsNonCanonicalCompactFeeFields() public {
+        IXcmWrapper.RequestContext memory context = _depositContext(150_000, 19);
+        bytes32 requestId = wrapper.previewRequestId(context);
+        _requestDeposit(150_000, _fundMessage(150_000, requestId), 19);
+        _discardWrapperBalance(150_000);
+
+        bytes memory canonicalFee = _compact(30_000);
+        bytes memory nonCanonicalFee = _nonCanonicalMode3Compact(30_000);
+        _assertQueueReverts(
+            context,
+            HYDRATION_DESTINATION,
+            _sellMessageWithCompacts(false, nonCanonicalFee, canonicalFee, 100_000, requestId),
+            XcmWrapperV2.XcmContextMismatch.selector,
+            OPERATOR
+        );
+        _assertQueueReverts(
+            context,
+            HYDRATION_DESTINATION,
+            _sellMessageWithCompacts(false, canonicalFee, nonCanonicalFee, 100_000, requestId),
+            XcmWrapperV2.XcmContextMismatch.selector,
+            OPERATOR
+        );
+    }
+
+    function testWithdrawSellRejectsNonCanonicalCompactFeeFields() public {
+        _seedStrategyShares(20);
+        IXcmWrapper.RequestContext memory context = _withdrawContext(100_000, 21);
+        bytes32 requestId = wrapper.previewRequestId(context);
+        bytes memory canonicalFee = _compact(28_000);
+        bytes memory nonCanonicalFee = _nonCanonicalMode3Compact(28_000);
+
+        _assertWithdrawRequestReverts(
+            _sellMessageWithCompacts(true, nonCanonicalFee, canonicalFee, 100_000, requestId),
+            21,
+            XcmWrapperV2.XcmContextMismatch.selector
+        );
+        _assertWithdrawRequestReverts(
+            _sellMessageWithCompacts(true, canonicalFee, nonCanonicalFee, 100_000, requestId),
+            21,
+            XcmWrapperV2.XcmContextMismatch.selector
+        );
+    }
+
+    function testWithdrawHomeRejectsNonCanonicalCompactAmountAndFeeFields() public {
+        _seedStrategyShares(22);
+        IXcmWrapper.RequestContext memory context = _withdrawContext(100_000, 23);
+        bytes32 requestId = wrapper.previewRequestId(context);
+        _requestWithdraw(100_000, _sellMessage(true, 28_000, 100_000, requestId), 23);
+
+        bytes memory canonical = _compact(100_000);
+        bytes memory nonCanonical = _nonCanonicalMode3Compact(100_000);
+        _assertQueueReverts(
+            context,
+            HYDRATION_DESTINATION,
+            _homeMessageWithCompacts(nonCanonical, canonical, canonical, requestId),
+            XcmWrapperV2.XcmContextMismatch.selector,
+            OPERATOR
+        );
+        _assertQueueReverts(
+            context,
+            HYDRATION_DESTINATION,
+            _homeMessageWithCompacts(canonical, nonCanonical, canonical, requestId),
+            XcmWrapperV2.XcmContextMismatch.selector,
+            OPERATOR
+        );
+        _assertQueueReverts(
+            context,
+            HYDRATION_DESTINATION,
+            _homeMessageWithCompacts(canonical, canonical, nonCanonical, requestId),
+            XcmWrapperV2.XcmContextMismatch.selector,
+            OPERATOR
+        );
+    }
+
     function testWithdrawHomeRejectsBeneficiaryAmountParaAndNestedInstructionMutations() public {
         IXcmWrapper.RequestContext memory deposit = _depositContext(150_000, 17);
         bytes32 depositId = wrapper.previewRequestId(deposit);
-        vm.prank(OPERATOR);
-        adapter.requestDeposit(ACCOUNT, 150_000, LOCAL_DESTINATION, _fundMessage(150_000, depositId), WEIGHT, 17);
+        _requestDeposit(150_000, _fundMessage(150_000, depositId), 17);
         _discardWrapperBalance(150_000);
         vm.prank(OPERATOR);
         wrapper.queueRequest(deposit, HYDRATION_DESTINATION, _sellMessage(false, 30_000, 100_000, depositId), WEIGHT);
@@ -417,16 +604,7 @@ contract XcmWrapperV2Test is XcmWrapperV2Fixture {
 
         IXcmWrapper.RequestContext memory context = _withdrawContext(100_000, 18);
         bytes32 requestId = wrapper.previewRequestId(context);
-        vm.prank(OPERATOR);
-        adapter.requestWithdraw(
-            ACCOUNT,
-            100_000,
-            RECIPIENT,
-            HYDRATION_DESTINATION,
-            _sellMessage(true, 28_000, 100_000, requestId),
-            WEIGHT,
-            18
-        );
+        _requestWithdraw(100_000, _sellMessage(true, 28_000, 100_000, requestId), 18);
 
         _assertQueueReverts(
             context,
@@ -479,19 +657,42 @@ contract XcmWrapperV2Test is XcmWrapperV2Fixture {
         precompile.setFailExecute(true);
 
         vm.prank(OPERATOR);
-        (bool ok, bytes memory data) = address(adapter)
+        (bool ok, bytes memory data) = address(mockAccounts)
             .call(
                 abi.encodeCall(
-                    adapter.requestDeposit,
-                    (ACCOUNT, 150_000, LOCAL_DESTINATION, _fundMessage(150_000, requestId), WEIGHT, 13)
+                    mockAccounts.requestDeposit,
+                    (adapter, ACCOUNT, 150_000, LOCAL_DESTINATION, _fundMessage(150_000, requestId), WEIGHT, 13)
                 )
             );
         _assertCustomError(ok, data, XcmWrapperV2.XcmDispatchFailed.selector);
 
-        assertEq(asset.balanceOf(OPERATOR), 1_000_000);
+        assertEq(asset.balanceOf(address(mockAccounts)), 1_000_000);
         assertEq(asset.balanceOf(address(adapter)), 0);
         assertEq(asset.balanceOf(address(wrapper)), 0);
         assertEq(uint256(wrapper.getRequest(requestId).status), uint256(IXcmWrapper.RequestStatus.Unknown));
+    }
+
+    function testBareEoaStrategySettlerCannotStageOwnWalletCapital() public {
+        uint256 amount = 150_000;
+        IXcmWrapper.RequestContext memory context = _depositContext(amount, 24);
+        bytes32 requestId = wrapper.previewRequestId(context);
+        asset.mint(OPERATOR, amount);
+        vm.startPrank(OPERATOR);
+        asset.approve(address(adapter), amount);
+        (bool ok, bytes memory data) = address(adapter)
+            .call(
+                abi.encodeCall(
+                    adapter.requestDeposit,
+                    (ACCOUNT, amount, LOCAL_DESTINATION, _fundMessage(amount, requestId), WEIGHT, 24)
+                )
+            );
+        vm.stopPrank();
+
+        _assertCustomError(ok, data, HydrationUsdcAdapter.Unauthorized.selector);
+        require(policy.strategySettler(OPERATOR), "EOA_NOT_STRATEGY_SETTLER");
+        assertEq(asset.balanceOf(OPERATOR), amount);
+        assertEq(asset.balanceOf(address(adapter)), 0);
+        assertEq(precompile.executeCount(), 0);
     }
 
     function testOwnerPauserOperatorRotationAndGlobalPauseBoundaries() public {
@@ -512,8 +713,7 @@ contract XcmWrapperV2Test is XcmWrapperV2Fixture {
         _assertCustomError(ok, data, XcmWrapperV2.Unauthorized.selector);
         wrapper.setDispatchPaused(false);
 
-        vm.prank(OPERATOR);
-        adapter.requestDeposit(ACCOUNT, 150_000, LOCAL_DESTINATION, _fundMessage(150_000, requestId), WEIGHT, 14);
+        _requestDeposit(150_000, _fundMessage(150_000, requestId), 14);
         _discardWrapperBalance(150_000);
 
         wrapper.setDispatchPaused(true);
@@ -565,8 +765,7 @@ contract XcmWrapperV2Test is XcmWrapperV2Fixture {
     function testSettlementBoundsAndTerminalReplayRemainIdempotent() public {
         IXcmWrapper.RequestContext memory context = _depositContext(150_000, 15);
         bytes32 requestId = wrapper.previewRequestId(context);
-        vm.prank(OPERATOR);
-        adapter.requestDeposit(ACCOUNT, 150_000, LOCAL_DESTINATION, _fundMessage(150_000, requestId), WEIGHT, 15);
+        _requestDeposit(150_000, _fundMessage(150_000, requestId), 15);
         _discardWrapperBalance(150_000);
         vm.prank(OPERATOR);
         wrapper.queueRequest(context, HYDRATION_DESTINATION, _sellMessage(false, 30_000, 100_000, requestId), WEIGHT);
@@ -589,6 +788,65 @@ contract XcmWrapperV2Test is XcmWrapperV2Fixture {
         wrapper.finalizeRequest(
             requestId, IXcmWrapper.RequestStatus.Succeeded, 100_000, 100_000, bytes32("REMOTE"), bytes32(0)
         );
+    }
+
+    function testWithdrawSettlementAssetsCannotExceedRequestedShares() public {
+        _seedStrategyShares(25);
+        IXcmWrapper.RequestContext memory context = _withdrawContext(100_000, 26);
+        bytes32 requestId = wrapper.previewRequestId(context);
+        _requestWithdraw(100_000, _sellMessage(true, 28_000, 100_000, requestId), 26);
+        vm.prank(OPERATOR);
+        wrapper.queueRequest(context, HYDRATION_DESTINATION, _homeMessage(100_000, 100_000, requestId), WEIGHT);
+
+        vm.prank(address(adapter));
+        (bool ok, bytes memory data) = address(wrapper)
+            .call(
+                abi.encodeCall(
+                    wrapper.finalizeRequest,
+                    (requestId, IXcmWrapper.RequestStatus.Succeeded, 100_001, 100_000, bytes32("REMOTE"), bytes32(0))
+                )
+            );
+        _assertCustomError(ok, data, XcmWrapperV2.InvalidSettlement.selector);
+    }
+
+    function testWithdrawHomeFailureRecoveryReturnsFullAmountAndClearsOutstanding() public {
+        _seedStrategyShares(27);
+        IXcmWrapper.RequestContext memory context = _withdrawContext(100_000, 28);
+        bytes32 requestId = wrapper.previewRequestId(context);
+        _requestWithdraw(100_000, _sellMessage(true, 28_000, 100_000, requestId), 28);
+        assertEq(wrapper.requestDispatchBitmap(requestId), 4);
+
+        precompile.setFailSend(true);
+        _assertQueueReverts(
+            context,
+            HYDRATION_DESTINATION,
+            _homeMessage(100_000, 100_000, requestId),
+            XcmWrapperV2.XcmDispatchFailed.selector,
+            OPERATOR
+        );
+        precompile.setFailSend(false);
+
+        vm.prank(OPERATOR);
+        adapter.settleRequest(
+            requestId, IXcmWrapper.RequestStatus.Failed, 0, 0, bytes32("HOME_FAILED"), bytes32("NO_RETURN")
+        );
+        assertEq(uint256(wrapper.getRequest(requestId).status), uint256(IXcmWrapper.RequestStatus.Failed));
+        require(adapter.requiresRemoteRecovery(requestId), "WITHDRAW_RECOVERY_NOT_REQUIRED");
+        assertEq(adapter.recoveryAssetsOutstanding(requestId), 100_000);
+
+        uint256 requesterBefore = asset.balanceOf(address(mockAccounts));
+        asset.mint(address(wrapper), 100_000); // owner recovery XCM arrival
+        wrapper.setDispatchPaused(true);
+        wrapper.releaseRecoveredAssetsToAdapter(requestId, 100_000);
+        assertEq(wrapper.requestRecoveryReleased(requestId), 100_000);
+        assertEq(asset.balanceOf(address(adapter)), 100_000);
+
+        mockAccounts.releaseRecoveredAssets(adapter, requestId, 100_000);
+        assertEq(asset.balanceOf(address(mockAccounts)) - requesterBefore, 100_000);
+        assertEq(adapter.recoveryAssetsOutstanding(requestId), 0);
+        require(!adapter.requiresRemoteRecovery(requestId), "WITHDRAW_RECOVERY_NOT_CLEARED");
+        assertEq(adapter.totalAssets(), 0);
+        assertEq(adapter.totalShares(), 0);
     }
 }
 
@@ -614,7 +872,7 @@ contract XcmWrapperV2RecoveryAccountingTest is Test {
         asset = new MockERC20("USDC", "USDC");
         precompile = new MockXcmPrecompileV2();
         wrapper = new XcmWrapperV2(policy, address(precompile));
-        adapter = new HydrationUsdcAdapter(policy, address(asset), STRATEGY_ID, wrapper);
+        adapter = new HydrationUsdcAdapter(policy, address(asset), STRATEGY_ID, wrapper, address(accounts));
 
         precompile.setAsset(address(asset));
         policy.setApprovedAsset(address(asset), true);
@@ -634,7 +892,7 @@ contract XcmWrapperV2RecoveryAccountingTest is Test {
         vm.stopPrank();
     }
 
-    function testRemoteTimeoutEntersRecoveryBucketAndOnlyReturnedAssetsRestoreLiquid() public {
+    function testAgentAccountCoreStagesCustodyAndRemoteTimeoutOnlyRestoresReturnedAssets() public {
         uint256 amount = 150_000;
         uint64 nonce = 1;
         bytes32 requestId = keccak256(
@@ -654,6 +912,12 @@ contract XcmWrapperV2RecoveryAccountingTest is Test {
                 nonce: nonce
             })
         );
+
+        IXcmStrategyAdapter.AdapterRequest memory staged = adapter.getAdapterRequest(requestId);
+        assertEq(staged.requester, address(accounts));
+        assertEq(asset.balanceOf(address(accounts)), 850_000);
+        assertEq(asset.balanceOf(address(adapter)), 0);
+        assertEq(asset.balanceOf(address(wrapper)), amount);
 
         vm.prank(address(wrapper));
         asset.transfer(SINK, amount);
