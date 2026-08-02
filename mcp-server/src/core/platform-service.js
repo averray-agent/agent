@@ -39,6 +39,7 @@ import {
   decimalToBaseUnits,
   formatBaseUnits,
   getTreasuryPolicyStatusSafely,
+  getXcmBalanceObserverStatusSafely,
   getXcmObservationRelayStatusSafely,
   getXcmSettlementWatcherStatusSafely,
   minBalanceRawForAsset,
@@ -94,6 +95,7 @@ export class PlatformService {
     this.openApiSpecIngestionScheduler = undefined;
     this.jobStaleSweeper = undefined;
     this.xcmSettlementWatcher = undefined;
+    this.xcmBalanceObserver = undefined;
     this.xcmObservationRelay = undefined;
     this.upstreamStatusPoller = undefined;
     this.bootstrapSelfReportScheduler = undefined;
@@ -597,9 +599,10 @@ export class PlatformService {
       Promise.resolve().then(() => collectHostDiagnostics()),
       resolveSiweAuthTelemetry(this.stateStore)
     ]);
-    const [xcmSettlementWatcher, xcmObservationRelay] = await Promise.all([
+    const [xcmSettlementWatcher, xcmObservationRelay, xcmBalanceObserver] = await Promise.all([
       getXcmSettlementWatcherStatusSafely(this.xcmSettlementWatcher),
-      getXcmObservationRelayStatusSafely(this.xcmObservationRelay)
+      getXcmObservationRelayStatusSafely(this.xcmObservationRelay),
+      getXcmBalanceObserverStatusSafely(this.xcmBalanceObserver)
     ]);
     const recentEvents = this.eventBus?.replay?.({}, undefined)?.events ?? [];
     const activeStatuses = new Set(["claimed", "submitted", "disputed", "rejected"]);
@@ -660,6 +663,35 @@ export class PlatformService {
         code: "xcm_observation_relay_status_unavailable",
         message: "XCM observation relay status is unavailable.",
         details: xcmObservationRelay.error
+      });
+    }
+    if (xcmBalanceObserver?.error) {
+      anomalies.push({
+        severity: "medium",
+        code: "xcm_balance_observer_status_unavailable",
+        message: "XCM venue balance observer status is unavailable.",
+        details: xcmBalanceObserver.error
+      });
+    }
+    if (xcmBalanceObserver?.readErrorCount > 0) {
+      anomalies.push({
+        severity: "medium",
+        code: "xcm_balance_observation_read_failed",
+        message: `${xcmBalanceObserver.readErrorCount} XCM balance observation(s) have unknown/stale venue state.`,
+        details: {
+          pending: xcmBalanceObserver.pending?.filter((item) => item.lastError)
+        }
+      });
+    }
+    if (xcmBalanceObserver?.overdueCount > 0) {
+      anomalies.push({
+        severity: "high",
+        code: "xcm_balance_observation_overdue",
+        message: `${xcmBalanceObserver.overdueCount} XCM balance observation(s) exceeded their deadline.`,
+        details: {
+          oldestPendingAgeMs: xcmBalanceObserver.oldestPendingAgeMs,
+          pending: xcmBalanceObserver.pending
+        }
       });
     }
     for (const template of scheduler.templates ?? []) {
@@ -740,7 +772,8 @@ export class PlatformService {
       upstreamStatus,
       bootstrapSelfReport,
       xcmSettlementWatcher,
-      xcmObservationRelay
+      xcmObservationRelay,
+      xcmBalanceObserver
     };
   }
 

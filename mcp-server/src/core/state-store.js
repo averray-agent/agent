@@ -80,6 +80,7 @@ export class MemoryStateStore {
     this.rateLimits = new Map();
     this.mutationReceipts = new Map();
     this.xcmObservations = new Map();
+    this.xcmBalanceWatches = new Map();
     this.serviceStates = new Map();
     this.content = new Map();
     this.fundedJobs = new Map();
@@ -509,6 +510,27 @@ export class MemoryStateStore {
     if (!updated) return undefined;
     this.xcmObservations.set(requestId, updated);
     return updated;
+  }
+
+  async getXcmBalanceWatch(requestId) {
+    return cloneJsonRecord(this.xcmBalanceWatches.get(String(requestId ?? "").toLowerCase()));
+  }
+
+  async upsertXcmBalanceWatch(watch) {
+    const requestId = String(watch?.requestId ?? "").toLowerCase();
+    const existing = this.xcmBalanceWatches.get(requestId) ?? {};
+    const stored = cloneJsonRecord({ ...existing, ...watch, requestId });
+    this.xcmBalanceWatches.set(requestId, stored);
+    return cloneJsonRecord(stored);
+  }
+
+  async listPendingXcmBalanceWatches(limit = 50) {
+    return sliceWindow([...this.xcmBalanceWatches.values()]
+      .filter((entry) => entry.status === "pending")
+      .sort((left, right) => String(left.startedAt ?? "").localeCompare(String(right.startedAt ?? ""))), {
+      limit,
+      offset: 0
+    }).map((entry) => cloneJsonRecord(entry));
   }
 
   async getServiceState(scope) {
@@ -1171,6 +1193,38 @@ export class RedisStateStore {
       value: requestId
     });
     return updated;
+  }
+
+  async getXcmBalanceWatch(requestId) {
+    await this.connect();
+    const normalized = String(requestId ?? "").toLowerCase();
+    const raw = await this.client.get(this.key("xcm-balance-watch", normalized));
+    return raw ? JSON.parse(raw) : undefined;
+  }
+
+  async upsertXcmBalanceWatch(watch) {
+    await this.connect();
+    const requestId = String(watch?.requestId ?? "").toLowerCase();
+    const existing = await this.getXcmBalanceWatch(requestId);
+    const stored = { ...(existing ?? {}), ...watch, requestId };
+    await this.client.set(this.key("xcm-balance-watch", requestId), JSON.stringify(stored));
+    if (stored.status === "pending") {
+      await this.client.zAdd(this.key("xcm-balance-watches", "pending"), {
+        score: timestampScore(stored.startedAt),
+        value: requestId
+      });
+    } else {
+      await this.client.zRem(this.key("xcm-balance-watches", "pending"), requestId);
+    }
+    return stored;
+  }
+
+  async listPendingXcmBalanceWatches(limit = 50) {
+    await this.connect();
+    const { stop } = redisRangeFromLimitOffset(limit, 0);
+    const requestIds = await this.client.zRange(this.key("xcm-balance-watches", "pending"), 0, stop);
+    const records = await Promise.all(requestIds.map((requestId) => this.getXcmBalanceWatch(requestId)));
+    return records.filter((entry) => entry?.status === "pending");
   }
 
   async getServiceState(scope) {
