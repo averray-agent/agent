@@ -9,7 +9,7 @@ const VERIFICATION_DISCLOSURES = Object.freeze({
     outputSchemaRef: "schema://jobs/github-pr-evidence-output",
     label: "Automated live GitHub PR gate",
     summary:
-      "Averray checks the public PR against the selected repository and issue, live CI/check state, and submitted test evidence. If GitHub is unreachable, rate-limited, private, partially unreadable, or the score is ambiguous, settlement escalates to human review and never auto-approves."
+      "Averray checks the public PR against the selected repository and issue, binds its Averray disclosure footer to the actual claimant wallet or claim session, and re-derives live CI/check state and test evidence. A readable missing or mismatched claimant binding is rejected. If GitHub or the PR body is unreachable, rate-limited, private, partially unreadable, or the score is ambiguous, settlement escalates to human review and never auto-approves."
   }),
   report: Object.freeze({
     verifierMode: "human_fallback",
@@ -44,6 +44,7 @@ export function buildPosterDefinition(input) {
     rewardAsset: "USDC",
     rewardAmount: input.rewardUsdc.trim(),
     verifierMode: disclosure.verifierMode,
+    ...(input.deliverableKind === "pr" ? { requireClaimantBinding: true } : {}),
     escalationMessage:
       input.deliverableKind === "pr"
         ? "Live GitHub verification could not make a confident decision; escalate to human review."
@@ -62,6 +63,14 @@ export function buildPosterDefinition(input) {
       repo
     },
     acceptanceCriteria: input.acceptanceCriteria,
+    ...(input.deliverableKind === "pr"
+      ? {
+          agentInstructions: [
+            "Append the standard Averray disclosure footer to the public pull request body.",
+            "Bind the footer to this claim with at least one exact labelled line: `Agent identity: <claimant EVM wallet>` or `Claim session:  <claim session id>`. Use the wallet/session returned by the claim; another worker's footer is rejected."
+          ]
+        }
+      : {}),
     claimTtlSeconds: 86_400,
     retryLimit: 1,
     requiresSponsoredGas: true

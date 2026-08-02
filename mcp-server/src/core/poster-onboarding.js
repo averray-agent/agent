@@ -349,7 +349,7 @@ function buildVerification(modes) {
         verifierMode: "github_pr",
         gate: "automated_live_github",
         disclosure:
-          "Checks the public PR against the selected repository and issue, live CI/check state, and submitted test evidence. Unreachable, rate-limited, private, partially unreadable, or ambiguous GitHub evidence escalates to human review and never auto-approves."
+          "Checks the public PR against the selected repository and issue, requires its Averray disclosure footer to match the actual claimant wallet or claim session, and re-derives live CI/check state and submitted test evidence. A readable missing or mismatched claimant binding is rejected; unreadable or ambiguous GitHub evidence escalates to human review and never auto-approves."
       },
       audit_and_implementation_report: {
         verifierMode: "human_fallback",
@@ -383,9 +383,25 @@ function buildVerification(modes) {
             "public pull request exists",
             "pull request repository matches the job issue repository",
             "pull request references the selected issue",
+            "Averray disclosure footer identifies the actual claimant wallet or claim session",
             "live merge and CI/check state",
             "submitted test evidence"
           ],
+          claimantBinding: {
+            required: true,
+            acceptedIdentifiers: ["claimant_wallet", "claim_session_id"],
+            footerFormat: {
+              header: [
+                "This contribution was prepared by an autonomous agent operating on the",
+                "Averray platform."
+              ],
+              walletLine: "Agent identity: <claimant EVM wallet>",
+              sessionLine: "Claim session:  <claim session id>",
+              matchRule: "Include at least one claimant line; its value must exactly match the wallet or session returned by the claim."
+            },
+            readableMismatch: "rejected",
+            unreadableBody: "human_fallback"
+          },
           success: "Automatically approves only when the live GitHub evidence reaches the configured score without required blockers.",
           failureMode: "human_fallback",
           failureBehavior:

@@ -62,6 +62,7 @@ export class VerificationIngestionService {
         outcome: verdict.outcome,
         reasonCode: verdict.reasonCode,
         handler: verdict.handler,
+        ...(verdict.escalatedFrom ? { escalatedFrom: verdict.escalatedFrom } : {}),
         handlerVersion: auditFields.handlerVersion ?? verdict.handlerVersion,
         verifierPolicyVersion: auditFields.verifierPolicyVersion,
         verifierConfigVersion: auditFields.verifierConfigVersion
@@ -72,6 +73,7 @@ export class VerificationIngestionService {
         outcome: verdict.outcome,
         reasonCode: verdict.reasonCode,
         handler: verdict.handler,
+        ...(verdict.escalatedFrom ? { escalatedFrom: verdict.escalatedFrom } : {}),
         handlerVersion: auditFields.handlerVersion ?? verdict.handlerVersion,
         verifierPolicyVersion: auditFields.verifierPolicyVersion,
         verifierConfigVersion: auditFields.verifierConfigVersion
@@ -123,6 +125,7 @@ export class VerificationIngestionService {
         reasonCode: verdict.reasonCode,
         status,
         handler: verdict.handler,
+        escalatedFrom: verdict.escalatedFrom,
         handlerVersion: auditFields.handlerVersion ?? verdict.handlerVersion,
         verifierPolicyVersion: auditFields.verifierPolicyVersion,
         verifierConfigVersion: auditFields.verifierConfigVersion
@@ -255,6 +258,7 @@ export class VerificationIngestionService {
         outcome: verdict.outcome,
         reasonCode: verdict.reasonCode,
         handler: verdict.handler,
+        escalatedFrom: verdict.escalatedFrom,
         handlerVersion: auditFields.handlerVersion ?? verdict.handlerVersion,
         verifierPolicyVersion: auditFields.verifierPolicyVersion,
         verifierConfigVersion: auditFields.verifierConfigVersion,

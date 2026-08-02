@@ -93,6 +93,7 @@ export function buildVerificationTimelineEntry(session, verificationOverride = u
       outcome: verification.outcome,
       reasonCode: verification.reasonCode,
       handler: verification.handler,
+      escalatedFrom: verification.escalatedFrom,
       handlerVersion: verification.handlerVersion,
       verifierPolicyVersion: verification.verifierPolicyVersion,
       verifierConfigVersion: verification.verifierConfigVersion
