@@ -5,6 +5,14 @@ borrow cap conservative and flat. This document describes how to migrate the
 credit primitive toward Hydration money-market borrowing after the yield lanes
 and liquidation assumptions are proven.
 
+> **⚠ ECONOMICS CHECK 2026-08-02 — the borrow loop this plan describes currently carries
+> NEGATIVE.** Measured in the yield-venue research (`docs/BANK_YIELD_WORKSHOP.md`, PR #893):
+> DOT staking nets ~**2.5%** while USDC borrow on Hydration costs ~**4.64%** — roughly
+> **−2.1%/yr** to run the loop. Nothing structural is wrong with the migration design below,
+> but **do not implement it on the assumption that leverage is accretive** until the spread
+> is re-measured and positive. Related: `docs/BANK_PHASE1_BUILD_PACKET.md` explicitly makes
+> borrow/leverage a non-goal for phase 1.
+
 ---
 
 ## Why migrate
