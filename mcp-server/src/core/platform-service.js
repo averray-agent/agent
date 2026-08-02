@@ -1,6 +1,6 @@
 import { createStateStore } from "./state-store.js";
 import { AccountMutationService } from "./account-mutation-service.js";
-import { JobCatalogService } from "./job-catalog-service.js";
+import { JobCatalogService, explainEligibilityFromPreflight } from "./job-catalog-service.js";
 import {
   JobExecutionService,
   normalizeSubmitPayloadShape,
@@ -883,7 +883,7 @@ export class PlatformService {
   }
 
   async explainEligibility(wallet, jobId) {
-    return this.jobCatalogService.explainEligibility(wallet, jobId);
+    return explainEligibilityFromPreflight(await this.preflightJob(wallet, jobId));
   }
 
   async estimateNetReward(wallet, jobId) {

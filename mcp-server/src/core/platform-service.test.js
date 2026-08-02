@@ -812,6 +812,29 @@ test("preflight remains eligible when wallet liquidity exactly covers the non-wa
   assert.equal(preflight.reason, "claimable");
 });
 
+for (const scenario of [
+  { name: "waived zero-liquidity", waiverEligible: true, liquidity: 0, expectedEligible: true },
+  { name: "waived funded", waiverEligible: true, liquidity: 10, expectedEligible: true },
+  { name: "non-waived insufficient-liquidity", waiverEligible: false, liquidity: 0, expectedEligible: false },
+  { name: "non-waived sufficient-liquidity", waiverEligible: false, liquidity: 10, expectedEligible: true }
+]) {
+  test(`preflight and explain-eligibility agree for ${scenario.name}`, async () => {
+    const service = makePlatformService();
+    service.jobs[0].onboardingWaiverEligible = scenario.waiverEligible;
+    service.accounts.get(WALLET).liquid.DOT = scenario.liquidity;
+
+    const preflight = await service.preflightJob(WALLET, "parent-job-001");
+    const explanation = await service.explainEligibility(WALLET, "parent-job-001");
+
+    assert.equal(preflight.eligible, scenario.expectedEligible);
+    assert.equal(explanation.eligible, preflight.eligible);
+    assert.equal(explanation.reason, preflight.reason);
+    assert.equal(explanation.claimFundingSufficient, preflight.claimFundingSufficient);
+    assert.equal(explanation.claimFundingShortfall, preflight.claimFundingShortfall);
+    assert.equal(explanation.claimEconomicsWaived, preflight.claimEconomicsWaived);
+  });
+}
+
 test("preflight and claim both waive a fresh wallet after the guaranteed eligibility sync", async () => {
   const service = makePlatformService(makeClaimEconomicsGateway({
     onboardingWaiverEligible: false,

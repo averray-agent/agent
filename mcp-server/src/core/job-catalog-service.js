@@ -408,6 +408,10 @@ export class JobCatalogService {
       jobType,
       requiredRole,
       roleGate,
+      preferredCategory: profile.preferredCategories.includes(job.category),
+      supportsVerifier: profile.verifierCompatibility.includes(job.verifierMode),
+      reputationTier: reputation.tier,
+      verifierHandler: job.verifierConfig.handler,
       failureStates: [
         "verifier_timeout",
         "submission_rejected",
@@ -419,30 +423,7 @@ export class JobCatalogService {
   }
 
   async explainEligibility(wallet, jobId) {
-    const job = this.requireJob(jobId);
-    const profile = this.requireProfile(wallet);
-    const reputation = await this.getReputation(wallet);
-    const tierGate = summarizeTierGate(job.tier, reputation);
-    const jobType = effectiveJobType(job);
-    const requiredRole = effectiveRequiredRole(job);
-    const roleGate = summarizeRoleGate(requiredRole, reputation);
-    const lifecycle = this.buildLifecycle(job);
-
-    return {
-      jobId,
-      wallet,
-      tier: job.tier,
-      lifecycle,
-      tierGate,
-      jobType,
-      requiredRole,
-      roleGate,
-      preferredCategory: profile.preferredCategories.includes(job.category),
-      supportsVerifier: profile.verifierCompatibility.includes(job.verifierMode),
-      reputationTier: reputation.tier,
-      verifierHandler: job.verifierConfig.handler,
-      eligible: this.isClaimableJob(job) && this.isEligible(job, profile, reputation)
-    };
+    return explainEligibilityFromPreflight(await this.preflightJob(wallet, jobId));
   }
 
   /**
@@ -701,6 +682,33 @@ export class JobCatalogService {
   normalizeId(value) {
     return normalizeJobId(value);
   }
+}
+
+export function explainEligibilityFromPreflight(preflight) {
+  return {
+    jobId: preflight.jobId,
+    wallet: preflight.wallet,
+    tier: preflight.tier,
+    lifecycle: preflight.lifecycle,
+    tierGate: preflight.tierGate,
+    jobType: preflight.jobType,
+    requiredRole: preflight.requiredRole,
+    roleGate: preflight.roleGate,
+    preferredCategory: preflight.preferredCategory,
+    supportsVerifier: preflight.supportsVerifier,
+    reputationTier: preflight.reputationTier,
+    verifierHandler: preflight.verifierHandler,
+    eligible: preflight.eligible,
+    reason: preflight.reason,
+    claimable: preflight.claimable,
+    currentWalletCanClaim: preflight.currentWalletCanClaim,
+    claimFundingAsset: preflight.claimFundingAsset,
+    availableLiquidity: preflight.availableLiquidity,
+    totalClaimLock: preflight.totalClaimLock,
+    claimFundingSufficient: preflight.claimFundingSufficient,
+    claimFundingShortfall: preflight.claimFundingShortfall,
+    claimEconomicsWaived: preflight.claimEconomicsWaived
+  };
 }
 
 function summarizeClaimFunding({ asset, available, required }) {
