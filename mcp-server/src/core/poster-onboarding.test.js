@@ -189,6 +189,65 @@ test("poster onboarding is a clean-room machine recipe backed by non-default liv
   });
 });
 
+test("worker onboarding documents self-deposit, mock fund limits, direct withdrawal, validation, and TTL truth", async () => {
+  const payload = await makeService().getWorkerDoorOnboarding();
+
+  assert.equal(payload.preflight.path, "/jobs/preflight?jobId=X");
+  assert.equal(
+    payload.selfDeposit.requiredClaimLockRawFormula,
+    "parseUnits(preflight.totalClaimLock, token.decimals)"
+  );
+  assert.equal(
+    payload.selfDeposit.depositAmountRawFormula,
+    "max(requiredClaimLockRaw - positions(worker, token).liquid, 0)"
+  );
+  assert.deepEqual(payload.selfDeposit.positionRead, {
+    contract: "AgentAccountCore",
+    address: ACCOUNTS,
+    abiFragment:
+      "function positions(address account, address asset) view returns (uint256 liquid, uint256 reserved, uint256 strategyAllocated, uint256 collateralLocked, uint256 jobStakeLocked, uint256 debtOutstanding)",
+    args: ["<worker EVM address>", TOKEN],
+    resultField: "liquid"
+  });
+  assert.deepEqual(payload.selfDeposit.writes, [
+    {
+      contract: "token",
+      address: TOKEN,
+      abiFragment: "function approve(address spender, uint256 amount) returns (bool)",
+      method: "approve",
+      args: [ACCOUNTS, "<depositAmountRaw>"],
+      skipWhen: "depositAmountRaw == 0"
+    },
+    {
+      contract: "AgentAccountCore",
+      address: ACCOUNTS,
+      abiFragment: "function deposit(address asset, uint256 amount)",
+      method: "deposit",
+      args: [TOKEN, "<depositAmountRaw>"],
+      skipWhen: "depositAmountRaw == 0"
+    }
+  ]);
+  assert.equal(payload.accountFund.path, "/account/fund");
+  assert.equal(payload.accountFund.generalWorkerFundingPath, false);
+  assert.match(payload.accountFund.mainnetConstraint, /not auto-mintable/u);
+  assert.deepEqual(payload.withdrawal.onChain, {
+    available: true,
+    contract: "AgentAccountCore",
+    address: ACCOUNTS,
+    abiFragment: "function withdraw(address asset, uint256 amount)",
+    args: [TOKEN, "<amountRaw>"],
+    value: "0",
+    recipient: "msg.sender (the worker wallet)",
+    requiresWorkerGas: true
+  });
+  assert.equal(payload.withdrawal.httpRouteAvailable, false);
+  assert.equal(payload.submissionValidation.path, "/jobs/validate-submission");
+  assert.equal(payload.submissionValidation.requiresAuth, false);
+  assert.equal(payload.submissionValidation.when, "before_claim_or_submit");
+  assert.equal(payload.claimTtl.source, "job_definition");
+  assert.match(payload.claimTtl.policy, /do not infer task duration/u);
+});
+
 test("external onboarding and catalog claim bonds reuse live facts without static fee or bond constants", async () => {
   const service = makeService({
     stakeBps: 654,

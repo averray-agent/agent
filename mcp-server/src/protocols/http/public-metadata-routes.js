@@ -124,12 +124,17 @@ export function createPublicMetadataRoutes({
     }
 
     if (request.method === "GET" && pathname === "/onboarding") {
+      const [workerDoor, externalBounties] = await Promise.all([
+        posterOnboardingService.getWorkerDoorOnboarding(),
+        posterOnboardingService.getExternalBountiesOnboarding()
+      ]);
       respond(
         response,
         200,
         {
           ...service.getPlatformCapabilities({ chainId: authConfig?.chainId }),
-          externalBounties: await posterOnboardingService.getExternalBountiesOnboarding()
+          workerDoor,
+          externalBounties
         },
         { "cache-control": "public, max-age=30" }
       );
