@@ -33,7 +33,10 @@ where DOT's price stops mattering to us.
 
 ## The three moves, sequenced by precondition
 
-### Move 1 — fee→DOT harvest (a policy, buildable ~now)
+### Move 1 — fee→DOT harvest (a policy, buildable ~now) — **ADOPTED 2026-08-02**
+**Decision (Pascal): adopt now.** The harvest is standing policy from today; mechanics and
+the ops surface follow. Everything below is the agreed shape.
+
 A standing rule: a fixed slice of accrued protocol fees converts USDC→DOT (via the live
 Asset-Conversion precompile) and joins a staked pool. **The endowment is harvested, not
 funded** — no "when do we have $2.4k" capital decision; the pool grows with usage. Composes
