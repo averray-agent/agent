@@ -25,16 +25,34 @@ borrowing, leverage, and deployment are out of scope.
 4. The wrapper is the Asset Hub XCM origin for every leg. The local funding leg
    is executed by the wrapper; remote legs are sent by the wrapper. No EOA fronts
    capital or acts from a second remote identity.
-5. Deposit capital moves AAC → adapter → wrapper → XCM. The adapter is deployed
-   with the live AgentAccountCore as an immutable requester and rejects every
-   other caller, including a backend EOA that still holds `strategySettler`.
-   The wrapper pulls the adapter's recorded allocation in the same transaction
-   that executes the funding message. If local XCM execution reverts, the pull
-   reverts too.
+5. Phase-1 capital moves treasury staging authority → adapter → wrapper → XCM.
+   Only `TreasuryPolicy.owner()` can stage that treasury context. The wrapper
+   pulls the adapter's recorded allocation in the same transaction that executes
+   the funding message. If local XCM execution reverts, the pull reverts too.
 6. `_validateSettlementBounds` retains its observer-delta boundary and adds a
    symmetric 1:1 withdraw check: both returned assets and retired shares are
    capped by `context.shares`. Destination-state balance deltas remain
    settlement truth; XCM completion alone is never enough.
+
+## Phase-1 treasury staging
+
+Phase 1 does not call or modify the deployed AgentAccountCore. The treasury
+multisig uses the adapter's explicit owner-only `stageTreasuryDeposit` and
+`stageTreasuryWithdraw` entry points. Each call names a nonzero treasury context,
+but capital custody and recovery authority are bound to the caller captured at
+staging time: deposit USDC is pulled from `TreasuryPolicy.owner()`, successful
+withdrawals return only to that same staging authority, and
+`releaseRecoveredAssets` accepts only that authority and recipient. The backend
+operator may dispatch the already-staged second leg and finalize observed deltas;
+it cannot stage capital, become the requester, or redirect a return. An owner
+rotation cannot rebind an existing request: an exact replay from any authority
+other than the recorded requester reverts.
+
+The adapter retains an immutable AgentAccountCore binding and its existing
+`requestDeposit`/`requestWithdraw` interface for phase 2, but those methods and
+all AAC-successor recovery accounting are outside phase 1. The parked branch
+`codex/aac-successor-recovery-phase2` carries that successor work for the next
+EscrowCore-family deployment window with MAIN-006 and `cancelOpenJob` v3.
 
 ## Contract boundary
 
@@ -69,34 +87,23 @@ canonical destination and invoke `send(bytes,bytes)`. A caller cannot select
 
 ### Adapter and custody handshake
 
-Each enabled `strategyId` is owner-bound to one async custody adapter. The
-adapter constructor also binds the deployed AgentAccountCore as its immutable
-requester. `requestDeposit` and `requestWithdraw` reject every other caller;
-granting an EOA `strategySettler` lets it invoke the AAC's account-bound broker
-entry point but never lets the adapter pull from that EOA's wallet. The AAC
-first debits the recorded account's `positions.liquid`, approves the exact
-amount from its own USDC custody, and then calls the adapter. The adapter's
-`transferFrom` source and recorded `requester` are therefore always the AAC.
-
-The adapter stages that AAC allocation and exposes a request-scoped pull
-function callable only by its configured wrapper. Before any first leg, the
-wrapper reads the adapter request and checks the full tuple used by
-`previewRequestId`:
+Each enabled `strategyId` is owner-bound to one async custody adapter. In phase
+1, the owner-only treasury entry point transfers USDC from the staging authority
+into the adapter and records that authority as `requester`; withdrawals record
+the same authority as their only recipient. The adapter then exposes a
+request-scoped pull function callable only by its configured wrapper. Before any
+first leg, the wrapper reads the adapter request and checks the full tuple used
+by `previewRequestId`:
 
 - strategy id and request kind;
 - account, local asset, and recipient;
 - requested assets/shares and nonce;
 - pending, unsettled state.
 
-This staging path exists in the frozen mainnet AgentAccountCore artifact, not
-only in new wrapper code: `requestStrategyDeposit` debits the selected account's
-AAC liquid balance, approves the selected adapter from AAC custody, and calls
-`requestDeposit` from the AAC contract. Activation binds the adapter constructor
-to `deployments/mainnet.json.contracts.agentAccountCore` and verifies that exact
-address before role wiring. The contract test executes this complete AAC method
-and asserts the adapter's recorded requester, AAC token debit, zero adapter
-balance, and wrapper receipt; its negative twin grants an EOA `strategySettler`,
-funds and approves that EOA, and still requires the adapter to reject it.
+For phase 2, the adapter constructor also binds the deployed AgentAccountCore as
+its immutable requester. `requestDeposit` and `requestWithdraw` reject every
+other caller, including a funded EOA `strategySettler`. That future path is
+tested and packaged with the AAC successor rather than this phase-1 PR.
 
 For `DepositFunding`, the wrapper asks that adapter to release exactly
 `context.assets` to the wrapper, verifies the wrapper's token balance delta, and
@@ -104,39 +111,33 @@ then calls XCM `execute` in the same EVM transaction. The adapter cannot dispatc
 XCM, and the operator cannot pull an allocation that the adapter did not record.
 The wrapper has no general token-withdraw function.
 
-The adapter's request-staging entry point no longer dispatches the first XCM
-message itself. The backend's already-gated `queueRequest` callback calls the
-wrapper after AAC/adapter staging; the follow-up callback calls the same wrapper
+The adapter staging entry point dispatches the first XCM message atomically with
+its custody pull. The backend's already-gated callback calls the same wrapper
 selector for leg two. This is activation wiring, not an observer redesign.
 
 On a successful withdrawal, returned USDC is deliberately addressed to the
-wrapper on Asset Hub. During the existing nested
-`AAC.settleStrategyRequest → adapter.settleRequest → wrapper.finalizeRequest`
-path, the wrapper transfers exactly `settledAssets` to the associated adapter
-before latching `Succeeded`; the adapter can then complete its existing transfer
-and ledger update atomically. A zero or insufficient local wrapper balance
-reverts instead of issuing an unbacked ledger credit.
+wrapper on Asset Hub. During `adapter.settleRequest → wrapper.finalizeRequest`,
+the wrapper transfers exactly `settledAssets` to the associated adapter before
+latching `Succeeded`; the adapter then transfers only that amount to the recorded
+treasury staging authority. A zero or insufficient local wrapper balance reverts
+instead of issuing an unbacked accounting credit.
 
 Once a deposit funding leg has executed, its capital is remote. A timeout cannot
-truthfully restore AAC liquid. The existing `finalizeRequest(..., Failed, 0, 0,
-...)` call still marks the wrapper request terminal, but the nested adapter/AAC
-failure path must distinguish local-refundable from remote-recovery-required.
-For the latter it moves the requested amount from `pendingStrategyAssets` into
-an explicit recovery bucket and does **not** credit `positions.liquid` or attempt
-an unfunded adapter transfer. A request-scoped recovery call later credits only
-the amount actually returned to Asset Hub and records any shortfall. This adds
-ledger state/events, not a new observer status or wrapper queue/finalize
-selector. No code may credit the original liquid amount merely because a remote
-observation timed out. The deployment runbook must document this recovery state
-before capital larger than dust is allowed.
+truthfully refund it. `finalizeRequest(..., Failed, 0, 0, ...)` marks both wrapper
+and adapter terminal and creates an explicit adapter recovery outstanding amount;
+it never fabricates a local balance. If funding never left the adapter, failure
+returns it directly to the staging authority. Otherwise an owner-operated XCM
+returns observed assets to the wrapper, the paused wrapper releases only the
+request-capped amount to the adapter, and the original staging authority releases
+only that amount to itself. Partial recovery remains visible.
 
 A failed withdrawal uses the same recovery discipline. Its context deliberately
 stores `assets = 0`, so the wrapper's owner-only release cap is kind-aware:
 deposit recovery is capped by `context.assets`, while withdrawal recovery is
 capped by `context.shares` in this 1:1 USDC/aUSDC lane. Returned USDC moves
-wrapper → adapter → immutable AAC requester. Each recovered unit retires one
-adapter share and one account strategy share before becoming AAC liquid; partial
-recovery leaves an explicit outstanding counter, and full recovery clears it.
+wrapper → adapter → recorded treasury staging authority. Each recovered unit
+retires one adapter share before being returned; partial recovery leaves an
+explicit outstanding counter, and full recovery clears it.
 
 ### Residual operating float
 
@@ -156,10 +157,10 @@ independent float.
 
 The observer publishes the converted account's asset-22 balance, configured
 float target, attributable in-flight amount, residual float, read endpoint, and
-`asOf`. AAC/adapter accounting records request principal separately from a
+`asOf`. Adapter accounting records request principal separately from a
 treasury-only `remoteOperatingFloat` bucket. Neither the float nor an unexplained
-positive delta mints strategy shares or becomes `positions.liquid`; the common
-health surface must show low, target, excess, and stale/unknown states honestly.
+positive delta mints adapter shares or becomes withdrawable; the common health
+surface must show low, target, excess, and stale/unknown states honestly.
 
 Recovery is owner-mediated and only while dispatch is paused and no request is
 using the float. It uses the same allowlisted `WithdrawHome` structure with the
@@ -247,9 +248,9 @@ the expected balance delta is a failure/recovery incident.
 
 ## Implementation and test gate
 
-The implementation is split across `XcmWrapperV2`, `HydrationUsdcAdapter`, the
-request-scoped `IXcmV2CustodyAdapter` handshake, and the narrow recovery bucket
-in `AgentAccountCore`. The exact contract-test bytes are committed in
+The implementation is split across `XcmWrapperV2`, `HydrationUsdcAdapter`, and
+the request-scoped `IXcmV2CustodyAdapter` handshake. The deployed
+`AgentAccountCore` is byte-for-byte untouched. The exact contract-test bytes are committed in
 `test/fixtures/xcm-wrapper-v2.json`; their message hashes are asserted by the
 four-leg replay, while `hydration-bank-round-trip.json` remains the historical
 rehearsal provenance.
@@ -258,19 +259,18 @@ The implementation test gate includes:
 
 1. the precompile `execute` entry point, two-leg request storage/state machine,
    strict four-shape decoder, role/pause controls, and request-scoped custody;
-2. the narrow adapter staging/pull/return changes needed for AAC custody
-   continuity, without changing the wrapper's queue/finalize selectors;
+2. the owner-only treasury staging/pull/return path, without changing the
+   wrapper's queue/finalize selectors;
 3. fixture tests replaying all four exact v2 messages and asserting the
    correct `execute`/`send` call, phase, destination, and hashes;
 4. mutation tests for every fixed/bound field and for unexpected instructions,
    nested bytes, trailing bytes, wrong phase, conflicting replay, and a fifth
    message;
-5. custody tests proving the deployed AAC interface is the immutable requester,
-   AAC/adapter capital is pulled exactly once, a bare EOA strategy settler is
-   rejected even when it has tokens and allowance, local execute failure rolls
-   the pull back, returned withdrawal assets reach the adapter before ledger
-   credit, and remote deposit/withdraw failures enter request-scoped recovery
-   without creating fake liquid or leaving retired shares live;
+5. custody tests proving treasury capital is pulled exactly once, a backend EOA
+   strategy settler cannot stage or front funds, local execute failure rolls the
+   pull back, returned withdrawal assets reach the recorded staging authority,
+   and remote deposit/withdraw failures remain request-scoped without fake
+   balances or live retired shares;
 6. role tests for owner/operator/adapter/arbitrary caller, local and global
    pause behavior, operator rotation with an in-flight request, and the absence
    of an arbitrary token/XCM escape hatch;
@@ -288,8 +288,9 @@ exact SCALE blobs and mutated derivatives.
 
 Deployment is a separate, multisig-gated packet. Its ordered plan is:
 
-1. deploy the wrapper locally paused, with TreasuryPolicy, USDC, Hydration/Aave
-   constants, adapter binding, and backend operator reviewed;
+1. deploy the adapter and wrapper locally paused, with TreasuryPolicy, USDC,
+   immutable future AAC binding, Hydration/Aave constants, strategy binding,
+   and backend operator reviewed;
 2. construct the deployed wrapper's Asset Hub origin location and re-read
    Hydration `LocationToAccountApi.convert_location` for that exact origin;
 3. compare the read through an independent endpoint, record the returned
@@ -298,8 +299,9 @@ Deployment is a separate, multisig-gated packet. Its ordered plan is:
    ERC-20 target at Hydration's chain-specific `truncate20(AccountId32)`;
 5. dry-run all four exact wrapper-origin messages and assert the expected
    forwarded-XCM and `Broadcast.Swapped{AAVE}` evidence;
-6. run one complete capped dust cycle through the wrapper itself, confirming
-   adapter/wrapper custody and all four destination-state deltas between legs;
+6. approve the adapter from the treasury staging authority and run one complete
+   capped dust cycle through its owner-only staging path, confirming
+   authority/adapter/wrapper custody and all four destination-state deltas;
 7. confirm the returned Asset Hub balance and ledger arithmetic, exercise the
    pause switch, and only then consider enabling a non-dust treasury limit.
 

@@ -3,9 +3,7 @@ pragma solidity ^0.8.24;
 
 import "forge-std/Test.sol";
 
-import {AgentAccountCore} from "../contracts/AgentAccountCore.sol";
 import {MockERC20} from "../contracts/mocks/MockERC20.sol";
-import {StrategyAdapterRegistry} from "../contracts/StrategyAdapterRegistry.sol";
 import {TreasuryPolicy} from "../contracts/TreasuryPolicy.sol";
 import {IXcmStrategyAdapter} from "../contracts/interfaces/IXcmStrategyAdapter.sol";
 import {IXcmWrapper} from "../contracts/interfaces/IXcmWrapper.sol";
@@ -55,48 +53,12 @@ contract MockXcmPrecompileV2 {
     }
 }
 
-contract MockAgentAccountCoreV2 {
-    function approveAdapter(MockERC20 asset, HydrationUsdcAdapter adapter) external {
-        asset.approve(address(adapter), type(uint256).max);
-    }
-
-    function requestDeposit(
-        HydrationUsdcAdapter adapter,
-        address account,
-        uint256 assets,
-        bytes calldata destination,
-        bytes calldata message,
-        IXcmWrapper.Weight calldata maxWeight,
-        uint64 nonce
-    ) external returns (bytes32 requestId) {
-        return adapter.requestDeposit(account, assets, destination, message, maxWeight, nonce);
-    }
-
-    function requestWithdraw(
-        HydrationUsdcAdapter adapter,
-        address account,
-        uint256 shares,
-        address recipient,
-        bytes calldata destination,
-        bytes calldata message,
-        IXcmWrapper.Weight calldata maxWeight,
-        uint64 nonce
-    ) external returns (bytes32 requestId) {
-        return adapter.requestWithdraw(account, shares, recipient, destination, message, maxWeight, nonce);
-    }
-
-    function releaseRecoveredAssets(HydrationUsdcAdapter adapter, bytes32 requestId, uint256 assets) external {
-        adapter.releaseRecoveredAssets(requestId, address(this), assets);
-    }
-}
-
 abstract contract XcmWrapperV2Fixture is Test {
     TreasuryPolicy internal policy;
     MockXcmPrecompileV2 internal precompile;
     XcmWrapperV2 internal wrapper;
     HydrationUsdcAdapter internal adapter;
     MockERC20 internal asset;
-    MockAgentAccountCoreV2 internal mockAccounts;
 
     address internal constant ACCOUNT = 0x089a0A57D001bACb8473161e007F0bAbC1768CeE;
     address internal constant RECIPIENT = 0x7E071d5E9Fbe0c528EAcDe83B4662b77A041EFb9;
@@ -104,6 +66,7 @@ abstract contract XcmWrapperV2Fixture is Test {
     address internal constant OPERATOR_TWO = address(0xB0C);
     address internal constant PAUSER = address(0xFA05E);
     address internal constant SINK = address(0xDEAD);
+    address internal constant FUTURE_AGENT_ACCOUNT_CORE = address(0xAAC);
     bytes32 internal constant STRATEGY_ID = bytes32("HYDRATION_USDC_V1");
     bytes32 internal constant HYDRATION_ACCOUNT = 0x51845ee08e8949d64f0016be27942ce7b6d21df02c3b00104a290ca4e749fc55;
     bytes internal constant LOCAL_DESTINATION = hex"050000";
@@ -116,21 +79,22 @@ abstract contract XcmWrapperV2Fixture is Test {
 
         asset = new MockERC20("USDC", "USDC");
         wrapper = new XcmWrapperV2(policy, address(precompile));
-        mockAccounts = new MockAgentAccountCoreV2();
-        adapter = new HydrationUsdcAdapter(policy, address(asset), STRATEGY_ID, wrapper, address(mockAccounts));
+        adapter = new HydrationUsdcAdapter(policy, address(asset), STRATEGY_ID, wrapper, FUTURE_AGENT_ACCOUNT_CORE);
 
         precompile.setAsset(address(asset));
         policy.setPauser(PAUSER);
         policy.setStrategySettler(OPERATOR, true);
         policy.setStrategySettler(OPERATOR_TWO, true);
-        policy.setStrategySettler(address(mockAccounts), true);
         wrapper.setOperator(OPERATOR);
         wrapper.setStrategyAdapter(STRATEGY_ID, address(adapter));
         wrapper.setHydrationAccountId32(HYDRATION_ACCOUNT);
         wrapper.setDispatchPaused(false);
 
-        asset.mint(address(mockAccounts), 1_000_000);
-        mockAccounts.approveAdapter(asset, adapter);
+        policy.transferOwnership(RECIPIENT);
+
+        asset.mint(RECIPIENT, 1_000_000);
+        vm.prank(RECIPIENT);
+        asset.approve(address(adapter), type(uint256).max);
     }
 
     function _depositContext(uint256 amount, uint64 nonce) internal view returns (IXcmWrapper.RequestContext memory) {
@@ -273,24 +237,32 @@ abstract contract XcmWrapperV2Fixture is Test {
     }
 
     function _requestDeposit(uint256 assets, bytes memory message, uint64 nonce) internal returns (bytes32) {
-        vm.prank(OPERATOR);
-        return mockAccounts.requestDeposit(adapter, ACCOUNT, assets, LOCAL_DESTINATION, message, WEIGHT, nonce);
+        vm.prank(RECIPIENT);
+        return adapter.stageTreasuryDeposit(ACCOUNT, assets, LOCAL_DESTINATION, message, WEIGHT, nonce);
     }
 
     function _requestWithdraw(uint256 shares, bytes memory message, uint64 nonce) internal returns (bytes32) {
-        vm.prank(OPERATOR);
-        return mockAccounts.requestWithdraw(
-            adapter, ACCOUNT, shares, RECIPIENT, HYDRATION_DESTINATION, message, WEIGHT, nonce
-        );
+        vm.prank(RECIPIENT);
+        return adapter.stageTreasuryWithdraw(ACCOUNT, shares, HYDRATION_DESTINATION, message, WEIGHT, nonce);
     }
 
     function _assertWithdrawRequestReverts(bytes memory message, uint64 nonce, bytes4 selector) internal {
-        vm.prank(OPERATOR);
-        (bool ok, bytes memory data) = address(mockAccounts)
+        vm.prank(RECIPIENT);
+        (bool ok, bytes memory data) = address(adapter)
             .call(
                 abi.encodeCall(
-                    mockAccounts.requestWithdraw,
-                    (adapter, ACCOUNT, 100_000, RECIPIENT, HYDRATION_DESTINATION, message, WEIGHT, nonce)
+                    adapter.stageTreasuryWithdraw, (ACCOUNT, 100_000, HYDRATION_DESTINATION, message, WEIGHT, nonce)
+                )
+            );
+        _assertCustomError(ok, data, selector);
+    }
+
+    function _assertTreasuryDepositReverts(bytes memory message, uint64 nonce, bytes4 selector) internal {
+        vm.prank(RECIPIENT);
+        (bool ok, bytes memory data) = address(adapter)
+            .call(
+                abi.encodeCall(
+                    adapter.stageTreasuryDeposit, (ACCOUNT, 150_000, LOCAL_DESTINATION, message, WEIGHT, nonce)
                 )
             );
         _assertCustomError(ok, data, selector);
@@ -335,6 +307,7 @@ contract XcmWrapperV2Test is XcmWrapperV2Fixture {
     }
 
     function testPinnedV2FourLegFixtureAndAccountingReplay() public {
+        uint256 treasuryBefore = asset.balanceOf(RECIPIENT);
         IXcmWrapper.RequestContext memory deposit = _depositContext(150_000, 1);
         bytes32 depositId = wrapper.previewRequestId(deposit);
         bytes memory funding = _fundMessage(150_000, depositId);
@@ -376,7 +349,7 @@ contract XcmWrapperV2Test is XcmWrapperV2Fixture {
         adapter.settleRequest(
             withdrawId, IXcmWrapper.RequestStatus.Succeeded, 75_000, 100_000, bytes32("USDC_RETURN"), bytes32(0)
         );
-        assertEq(asset.balanceOf(RECIPIENT), 75_000);
+        assertEq(asset.balanceOf(RECIPIENT), treasuryBefore - 150_000 + 75_000);
         assertEq(asset.balanceOf(address(adapter)), 0);
         assertEq(adapter.totalAssets(), 0);
         assertEq(adapter.totalShares(), 0);
@@ -397,6 +370,70 @@ contract XcmWrapperV2Test is XcmWrapperV2Fixture {
         require(
             keccak256(home) == 0x992ab51d651bf3ac3cf31202ceb489da6b0bb6dadd0c1be2e1180b4d7c8fcf9d, "HOME_FIXTURE_DRIFT"
         );
+    }
+
+    function testTreasuryStagingBindsRequesterAndPullsOwnerFunds() public {
+        uint256 amount = 150_000;
+        IXcmWrapper.RequestContext memory context = _depositContext(amount, 29);
+        bytes32 requestId = wrapper.previewRequestId(context);
+        uint256 ownerBefore = asset.balanceOf(RECIPIENT);
+
+        bytes32 queued = _requestDeposit(amount, _fundMessage(amount, requestId), 29);
+
+        IXcmStrategyAdapter.AdapterRequest memory staged = adapter.getAdapterRequest(requestId);
+        require(queued == requestId, "TREASURY_REQUEST_ID");
+        assertEq(staged.account, ACCOUNT);
+        assertEq(staged.requester, RECIPIENT);
+        assertEq(staged.recipient, ACCOUNT);
+        assertEq(staged.requestedAssets, amount);
+        assertEq(asset.balanceOf(RECIPIENT), ownerBefore - amount);
+        assertEq(asset.balanceOf(address(adapter)), 0);
+        assertEq(asset.balanceOf(address(wrapper)), amount);
+        assertEq(precompile.executeCount(), 1);
+    }
+
+    function testNonOwnerCannotUseTreasuryStagingPath() public {
+        uint256 amount = 150_000;
+        IXcmWrapper.RequestContext memory context = _depositContext(amount, 30);
+        bytes32 requestId = wrapper.previewRequestId(context);
+        asset.mint(OPERATOR, amount);
+        vm.startPrank(OPERATOR);
+        asset.approve(address(adapter), amount);
+        (bool ok, bytes memory data) = address(adapter)
+            .call(
+                abi.encodeCall(
+                    adapter.stageTreasuryDeposit,
+                    (ACCOUNT, amount, LOCAL_DESTINATION, _fundMessage(amount, requestId), WEIGHT, 30)
+                )
+            );
+        vm.stopPrank();
+
+        _assertCustomError(ok, data, HydrationUsdcAdapter.Unauthorized.selector);
+        require(policy.strategySettler(OPERATOR), "CALLER_NOT_CONFIGURED_OPERATOR");
+        assertEq(asset.balanceOf(OPERATOR), amount);
+        assertEq(asset.balanceOf(address(adapter)), 0);
+        assertEq(precompile.executeCount(), 0);
+    }
+
+    function testTreasuryRequestReplayCannotRebindStagingAuthority() public {
+        uint256 amount = 150_000;
+        IXcmWrapper.RequestContext memory context = _depositContext(amount, 31);
+        bytes32 requestId = wrapper.previewRequestId(context);
+        bytes memory funding = _fundMessage(amount, requestId);
+        _requestDeposit(amount, funding, 31);
+
+        vm.prank(RECIPIENT);
+        policy.transferOwnership(OPERATOR_TWO);
+        vm.prank(OPERATOR_TWO);
+        (bool ok, bytes memory data) = address(adapter)
+            .call(
+                abi.encodeCall(adapter.stageTreasuryDeposit, (ACCOUNT, amount, LOCAL_DESTINATION, funding, WEIGHT, 31))
+            );
+
+        _assertCustomError(ok, data, HydrationUsdcAdapter.Unauthorized.selector);
+        IXcmStrategyAdapter.AdapterRequest memory staged = adapter.getAdapterRequest(requestId);
+        assertEq(staged.requester, RECIPIENT);
+        assertEq(precompile.executeCount(), 1);
     }
 
     function testExactLegReplayIsIdempotentAndConflictingReplayReverts() public {
@@ -433,46 +470,15 @@ contract XcmWrapperV2Test is XcmWrapperV2Fixture {
         bytes memory wrongAccount = _fundMessage(150_000, requestId);
         wrongAccount[wrongAccount.length - 65] ^= bytes1(uint8(1));
 
-        vm.prank(OPERATOR);
-        (bool ok, bytes memory data) = address(mockAccounts)
-            .call(
-                abi.encodeCall(
-                    mockAccounts.requestDeposit,
-                    (adapter, ACCOUNT, 150_000, LOCAL_DESTINATION, wrongAccount, WEIGHT, 11)
-                )
-            );
-        _assertCustomError(ok, data, XcmWrapperV2.XcmContextMismatch.selector);
+        _assertTreasuryDepositReverts(wrongAccount, 11, XcmWrapperV2.XcmContextMismatch.selector);
 
         bytes memory wrongTopic = _fundMessage(150_000, requestId);
         wrongTopic[wrongTopic.length - 1] ^= bytes1(uint8(1));
-        vm.prank(OPERATOR);
-        (ok, data) = address(mockAccounts)
-            .call(
-                abi.encodeCall(
-                    mockAccounts.requestDeposit, (adapter, ACCOUNT, 150_000, LOCAL_DESTINATION, wrongTopic, WEIGHT, 11)
-                )
-            );
-        _assertCustomError(ok, data, XcmWrapperV2.XcmContextMismatch.selector);
+        _assertTreasuryDepositReverts(wrongTopic, 11, XcmWrapperV2.XcmContextMismatch.selector);
 
         bytes memory trailing = abi.encodePacked(_fundMessage(150_000, requestId), hex"00");
-        vm.prank(OPERATOR);
-        (ok, data) = address(mockAccounts)
-            .call(
-                abi.encodeCall(
-                    mockAccounts.requestDeposit, (adapter, ACCOUNT, 150_000, LOCAL_DESTINATION, trailing, WEIGHT, 11)
-                )
-            );
-        _assertCustomError(ok, data, XcmWrapperV2.XcmContextMismatch.selector);
-
-        vm.prank(OPERATOR);
-        (ok, data) = address(mockAccounts)
-            .call(
-                abi.encodeCall(
-                    mockAccounts.requestDeposit,
-                    (adapter, ACCOUNT, 150_000, LOCAL_DESTINATION, hex"0504002c", WEIGHT, 11)
-                )
-            );
-        _assertCustomError(ok, data, XcmWrapperV2.XcmContextMismatch.selector);
+        _assertTreasuryDepositReverts(trailing, 11, XcmWrapperV2.XcmContextMismatch.selector);
+        _assertTreasuryDepositReverts(hex"0504002c", 11, XcmWrapperV2.XcmContextMismatch.selector);
     }
 
     function testDepositSellRejectsRouterDirectionBudgetDestinationAndInstructionMutations() public {
@@ -656,17 +662,17 @@ contract XcmWrapperV2Test is XcmWrapperV2Fixture {
         bytes32 requestId = wrapper.previewRequestId(context);
         precompile.setFailExecute(true);
 
-        vm.prank(OPERATOR);
-        (bool ok, bytes memory data) = address(mockAccounts)
+        vm.prank(RECIPIENT);
+        (bool ok, bytes memory data) = address(adapter)
             .call(
                 abi.encodeCall(
-                    mockAccounts.requestDeposit,
-                    (adapter, ACCOUNT, 150_000, LOCAL_DESTINATION, _fundMessage(150_000, requestId), WEIGHT, 13)
+                    adapter.stageTreasuryDeposit,
+                    (ACCOUNT, 150_000, LOCAL_DESTINATION, _fundMessage(150_000, requestId), WEIGHT, 13)
                 )
             );
         _assertCustomError(ok, data, XcmWrapperV2.XcmDispatchFailed.selector);
 
-        assertEq(asset.balanceOf(address(mockAccounts)), 1_000_000);
+        assertEq(asset.balanceOf(RECIPIENT), 1_000_000);
         assertEq(asset.balanceOf(address(adapter)), 0);
         assertEq(asset.balanceOf(address(wrapper)), 0);
         assertEq(uint256(wrapper.getRequest(requestId).status), uint256(IXcmWrapper.RequestStatus.Unknown));
@@ -711,14 +717,17 @@ contract XcmWrapperV2Test is XcmWrapperV2Fixture {
         vm.prank(PAUSER);
         (bool ok, bytes memory data) = address(wrapper).call(abi.encodeCall(wrapper.setDispatchPaused, (false)));
         _assertCustomError(ok, data, XcmWrapperV2.Unauthorized.selector);
+        vm.prank(RECIPIENT);
         wrapper.setDispatchPaused(false);
 
         _requestDeposit(150_000, _fundMessage(150_000, requestId), 14);
         _discardWrapperBalance(150_000);
 
+        vm.startPrank(RECIPIENT);
         wrapper.setDispatchPaused(true);
         wrapper.setOperator(OPERATOR_TWO);
         wrapper.setDispatchPaused(false);
+        vm.stopPrank();
 
         vm.prank(OPERATOR_TWO);
         (ok, data) = address(wrapper)
@@ -732,6 +741,7 @@ contract XcmWrapperV2Test is XcmWrapperV2Fixture {
         vm.prank(OPERATOR);
         wrapper.queueRequest(context, HYDRATION_DESTINATION, _sellMessage(false, 30_000, 100_000, requestId), WEIGHT);
 
+        vm.prank(RECIPIENT);
         policy.setPaused(true);
         vm.prank(OPERATOR);
         (ok, data) = address(adapter)
@@ -834,139 +844,21 @@ contract XcmWrapperV2Test is XcmWrapperV2Fixture {
         require(adapter.requiresRemoteRecovery(requestId), "WITHDRAW_RECOVERY_NOT_REQUIRED");
         assertEq(adapter.recoveryAssetsOutstanding(requestId), 100_000);
 
-        uint256 requesterBefore = asset.balanceOf(address(mockAccounts));
+        uint256 requesterBefore = asset.balanceOf(RECIPIENT);
         asset.mint(address(wrapper), 100_000); // owner recovery XCM arrival
+        vm.startPrank(RECIPIENT);
         wrapper.setDispatchPaused(true);
         wrapper.releaseRecoveredAssetsToAdapter(requestId, 100_000);
+        vm.stopPrank();
         assertEq(wrapper.requestRecoveryReleased(requestId), 100_000);
         assertEq(asset.balanceOf(address(adapter)), 100_000);
 
-        mockAccounts.releaseRecoveredAssets(adapter, requestId, 100_000);
-        assertEq(asset.balanceOf(address(mockAccounts)) - requesterBefore, 100_000);
+        vm.prank(RECIPIENT);
+        adapter.releaseRecoveredAssets(requestId, RECIPIENT, 100_000);
+        assertEq(asset.balanceOf(RECIPIENT) - requesterBefore, 100_000);
         assertEq(adapter.recoveryAssetsOutstanding(requestId), 0);
         require(!adapter.requiresRemoteRecovery(requestId), "WITHDRAW_RECOVERY_NOT_CLEARED");
         assertEq(adapter.totalAssets(), 0);
         assertEq(adapter.totalShares(), 0);
-    }
-}
-
-contract XcmWrapperV2RecoveryAccountingTest is Test {
-    TreasuryPolicy internal policy;
-    StrategyAdapterRegistry internal registry;
-    AgentAccountCore internal accounts;
-    MockXcmPrecompileV2 internal precompile;
-    XcmWrapperV2 internal wrapper;
-    HydrationUsdcAdapter internal adapter;
-    MockERC20 internal asset;
-
-    address internal constant WORKER = address(0xA11CE);
-    address internal constant SINK = address(0xDEAD);
-    bytes32 internal constant STRATEGY_ID = bytes32("HYDRATION_USDC_V1");
-    bytes32 internal constant REMOTE = 0x51845ee08e8949d64f0016be27942ce7b6d21df02c3b00104a290ca4e749fc55;
-    IXcmWrapper.Weight internal WEIGHT = IXcmWrapper.Weight({refTime: 4_000_000_000, proofSize: 100_000});
-
-    function setUp() public {
-        policy = new TreasuryPolicy();
-        registry = new StrategyAdapterRegistry(policy);
-        accounts = new AgentAccountCore(policy, registry);
-        asset = new MockERC20("USDC", "USDC");
-        precompile = new MockXcmPrecompileV2();
-        wrapper = new XcmWrapperV2(policy, address(precompile));
-        adapter = new HydrationUsdcAdapter(policy, address(asset), STRATEGY_ID, wrapper, address(accounts));
-
-        precompile.setAsset(address(asset));
-        policy.setApprovedAsset(address(asset), true);
-        policy.setApprovedStrategy(address(adapter), true);
-        policy.setStrategySettler(address(this), true);
-        policy.setStrategySettler(address(accounts), true);
-        registry.registerStrategy(address(adapter));
-        wrapper.setOperator(address(this));
-        wrapper.setStrategyAdapter(STRATEGY_ID, address(adapter));
-        wrapper.setHydrationAccountId32(REMOTE);
-        wrapper.setDispatchPaused(false);
-
-        asset.mint(WORKER, 1_000_000);
-        vm.startPrank(WORKER);
-        asset.approve(address(accounts), type(uint256).max);
-        accounts.deposit(address(asset), 1_000_000);
-        vm.stopPrank();
-    }
-
-    function testAgentAccountCoreStagesCustodyAndRemoteTimeoutOnlyRestoresReturnedAssets() public {
-        uint256 amount = 150_000;
-        uint64 nonce = 1;
-        bytes32 requestId = keccak256(
-            abi.encode(STRATEGY_ID, IXcmWrapper.RequestKind.Deposit, WORKER, address(asset), WORKER, amount, 0, nonce)
-        );
-        bytes memory funding = _fundMessage(amount, requestId);
-
-        vm.prank(WORKER);
-        accounts.requestStrategyDeposit(
-            WORKER,
-            AgentAccountCore.StrategyDepositRequestParams({
-                strategyId: STRATEGY_ID,
-                amount: amount,
-                destination: hex"050000",
-                message: funding,
-                maxWeight: WEIGHT,
-                nonce: nonce
-            })
-        );
-
-        IXcmStrategyAdapter.AdapterRequest memory staged = adapter.getAdapterRequest(requestId);
-        assertEq(staged.requester, address(accounts));
-        assertEq(asset.balanceOf(address(accounts)), 850_000);
-        assertEq(asset.balanceOf(address(adapter)), 0);
-        assertEq(asset.balanceOf(address(wrapper)), amount);
-
-        vm.prank(address(wrapper));
-        asset.transfer(SINK, amount);
-        accounts.settleStrategyRequest(
-            requestId, IXcmWrapper.RequestStatus.Failed, 0, 0, bytes32("TIMEOUT"), bytes32("NO_DELTA")
-        );
-
-        (uint256 liquid,,,,,) = accounts.positions(WORKER, address(asset));
-        assertEq(liquid, 850_000);
-        assertEq(accounts.pendingStrategyAssets(WORKER, address(asset)), 0);
-        assertEq(accounts.strategyRecoveryAssets(WORKER, address(asset)), amount);
-        assertEq(accounts.strategyRequestRecoveryOutstanding(requestId), amount);
-
-        asset.mint(address(wrapper), 50_000);
-        wrapper.setDispatchPaused(true);
-        wrapper.releaseRecoveredAssetsToAdapter(requestId, 50_000);
-        accounts.completeStrategyRecovery(requestId, 50_000);
-
-        (liquid,,,,,) = accounts.positions(WORKER, address(asset));
-        assertEq(liquid, 900_000);
-        assertEq(accounts.strategyRecoveryAssets(WORKER, address(asset)), 100_000);
-        assertEq(accounts.strategyRequestRecoveryOutstanding(requestId), 100_000);
-    }
-
-    function _fundMessage(uint256 amount, bytes32 requestId) internal pure returns (bytes memory) {
-        bytes memory encoded = _compact(amount);
-        return abi.encodePacked(
-            hex"051000040002043205e51400",
-            encoded,
-            hex"2b010e00040002043205e51400",
-            encoded,
-            hex"010100c91f0813010300a10f043205e51400",
-            encoded,
-            hex"000d01020400010100",
-            REMOTE,
-            hex"2c",
-            requestId
-        );
-    }
-
-    function _compact(uint256 value) internal pure returns (bytes memory) {
-        if (value < 64) return abi.encodePacked(bytes1(uint8(value << 2)));
-        if (value < 16_384) {
-            uint16 raw16 = uint16((value << 2) | 1);
-            return abi.encodePacked(bytes1(uint8(raw16)), bytes1(uint8(raw16 >> 8)));
-        }
-        uint32 raw32 = uint32((value << 2) | 2);
-        return abi.encodePacked(
-            bytes1(uint8(raw32)), bytes1(uint8(raw32 >> 8)), bytes1(uint8(raw32 >> 16)), bytes1(uint8(raw32 >> 24))
-        );
     }
 }

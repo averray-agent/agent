@@ -47,6 +47,13 @@ contract HydrationUsdcAdapter is IXcmV2CustodyAdapter, ReentrancyGuard {
     event RecoveredAssetsReleased(
         bytes32 indexed requestId, address indexed recipient, uint256 assets, uint256 remaining
     );
+    event TreasuryRequestStaged(
+        bytes32 indexed requestId,
+        IXcmWrapper.RequestKind indexed kind,
+        address indexed stagingAuthority,
+        address treasuryContext,
+        uint256 amount
+    );
     event RemoteOperatingFloatObserved(uint256 assets, uint64 asOf, bytes32 indexed remoteRef);
 
     error Unauthorized();
@@ -84,6 +91,11 @@ contract HydrationUsdcAdapter is IXcmV2CustodyAdapter, ReentrancyGuard {
         _;
     }
 
+    modifier onlyOwner() {
+        if (msg.sender != policy.owner()) revert Unauthorized();
+        _;
+    }
+
     modifier whenNotPaused() {
         if (policy.paused()) revert ProtocolPaused();
         _;
@@ -97,6 +109,33 @@ contract HydrationUsdcAdapter is IXcmV2CustodyAdapter, ReentrancyGuard {
         IXcmWrapper.Weight calldata maxWeight,
         uint64 nonce
     ) external override nonReentrant whenNotPaused onlyAgentAccountCore returns (bytes32 requestId) {
+        return _stageDeposit(msg.sender, account, assets, destination, message, maxWeight, nonce);
+    }
+
+    /**
+     * @notice Phase-1 owner path. Capital is pulled from and recovery remains
+     * bound to the treasury authority that staged this request.
+     */
+    function stageTreasuryDeposit(
+        address treasuryContext,
+        uint256 assets,
+        bytes calldata destination,
+        bytes calldata message,
+        IXcmWrapper.Weight calldata maxWeight,
+        uint64 nonce
+    ) external nonReentrant whenNotPaused onlyOwner returns (bytes32 requestId) {
+        return _stageDeposit(msg.sender, treasuryContext, assets, destination, message, maxWeight, nonce);
+    }
+
+    function _stageDeposit(
+        address requester,
+        address account,
+        uint256 assets,
+        bytes calldata destination,
+        bytes calldata message,
+        IXcmWrapper.Weight calldata maxWeight,
+        uint64 nonce
+    ) internal returns (bytes32 requestId) {
         if (assets == 0 || account == address(0)) revert InvalidRequest();
         IXcmWrapper.RequestContext memory context = IXcmWrapper.RequestContext({
             strategyId: strategyId,
@@ -111,13 +150,13 @@ contract HydrationUsdcAdapter is IXcmV2CustodyAdapter, ReentrancyGuard {
         requestId = xcmWrapper.previewRequestId(context);
         AdapterRequest storage request = requests[requestId];
         if (request.requester == address(0)) {
-            SafeTransfer.safeTransferFrom(asset, msg.sender, address(this), assets);
+            SafeTransfer.safeTransferFrom(asset, requester, address(this), assets);
             pendingDepositAssets += assets;
             requests[requestId] = AdapterRequest({
                 kind: IXcmWrapper.RequestKind.Deposit,
                 status: IXcmWrapper.RequestStatus.Pending,
                 account: account,
-                requester: msg.sender,
+                requester: requester,
                 recipient: account,
                 requestedAssets: assets,
                 requestedShares: 0,
@@ -128,6 +167,11 @@ contract HydrationUsdcAdapter is IXcmV2CustodyAdapter, ReentrancyGuard {
                 settled: false
             });
             emit DepositRequested(requestId, account, assets, nonce);
+            if (requester != agentAccountCore) {
+                emit TreasuryRequestStaged(requestId, IXcmWrapper.RequestKind.Deposit, requester, account, assets);
+            }
+        } else if (request.requester != requester) {
+            revert Unauthorized();
         }
         xcmWrapper.queueRequest(context, destination, message, maxWeight);
     }
@@ -141,7 +185,37 @@ contract HydrationUsdcAdapter is IXcmV2CustodyAdapter, ReentrancyGuard {
         IXcmWrapper.Weight calldata maxWeight,
         uint64 nonce
     ) external override nonReentrant whenNotPaused onlyAgentAccountCore returns (bytes32 requestId) {
-        if (shares == 0 || account == address(0) || recipient == address(0)) revert InvalidRequest();
+        return _stageWithdraw(msg.sender, account, shares, recipient, destination, message, maxWeight, nonce);
+    }
+
+    /**
+     * @notice Phase-1 owner path. Successful and recovered USDC can return
+     * only to the authority captured by this staging transaction.
+     */
+    function stageTreasuryWithdraw(
+        address treasuryContext,
+        uint256 shares,
+        bytes calldata destination,
+        bytes calldata message,
+        IXcmWrapper.Weight calldata maxWeight,
+        uint64 nonce
+    ) external nonReentrant whenNotPaused onlyOwner returns (bytes32 requestId) {
+        return _stageWithdraw(msg.sender, treasuryContext, shares, msg.sender, destination, message, maxWeight, nonce);
+    }
+
+    function _stageWithdraw(
+        address requester,
+        address account,
+        uint256 shares,
+        address recipient,
+        bytes calldata destination,
+        bytes calldata message,
+        IXcmWrapper.Weight calldata maxWeight,
+        uint64 nonce
+    ) internal returns (bytes32 requestId) {
+        if (shares == 0 || account == address(0) || recipient == address(0)) {
+            revert InvalidRequest();
+        }
         if (totalShares < pendingWithdrawalShares + shares) revert InsufficientLiquidity();
         IXcmWrapper.RequestContext memory context = IXcmWrapper.RequestContext({
             strategyId: strategyId,
@@ -161,7 +235,7 @@ contract HydrationUsdcAdapter is IXcmV2CustodyAdapter, ReentrancyGuard {
                 kind: IXcmWrapper.RequestKind.Withdraw,
                 status: IXcmWrapper.RequestStatus.Pending,
                 account: account,
-                requester: msg.sender,
+                requester: requester,
                 recipient: recipient,
                 requestedAssets: 0,
                 requestedShares: shares,
@@ -172,6 +246,11 @@ contract HydrationUsdcAdapter is IXcmV2CustodyAdapter, ReentrancyGuard {
                 settled: false
             });
             emit WithdrawRequested(requestId, account, recipient, shares, nonce);
+            if (requester != agentAccountCore) {
+                emit TreasuryRequestStaged(requestId, IXcmWrapper.RequestKind.Withdraw, requester, account, shares);
+            }
+        } else if (request.requester != requester) {
+            revert Unauthorized();
         }
         xcmWrapper.queueRequest(context, destination, message, maxWeight);
     }
