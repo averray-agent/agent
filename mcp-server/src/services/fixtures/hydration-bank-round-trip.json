@@ -1,0 +1,70 @@
+{
+  "chain": "Polkadot Asset Hub -> Hydration -> Polkadot Asset Hub",
+  "convertedAccount": "0xaf39ad769a03cb535d9799e49459b033c1fab84ee23ffe5d0852f8d82f02a71e",
+  "convertedH160": "0xaf39ad769a03cb535d9799e49459b033c1fab84e",
+  "asset22Endpoint": "wss://hydration-rpc.n.dwellir.com",
+  "aUsdcEndpoint": "https://rpc.hydradx.cloud",
+  "aUsdcContract": "0x2ec4884088d84e5c2970a034732e5209b0acfa93",
+  "transactions": [
+    {
+      "label": "fund_converted_origin",
+      "txHash": "0xb46b4d9ce5c973e79bba31cb8ed82ec4337af43df7d38a5a973c82c87c920ca3",
+      "blockNumber": 18975516,
+      "target": "asset22",
+      "direction": "increase",
+      "beforeRaw": "0",
+      "afterRaw": "149380",
+      "actualDeltaRaw": "149380",
+      "dryRun": {
+        "forwardedParaId": 2034,
+        "event": "Tokens.Deposited"
+      }
+    },
+    {
+      "label": "router_sell_22_to_1003",
+      "txHash": "0x2957ba1380cb95eb6d8ebc43993f43ce724bec4662ed0417a9679ad1dc8277e5",
+      "blockNumber": 18975699,
+      "target": "aUsdc",
+      "direction": "increase",
+      "beforeRaw": "0",
+      "afterRaw": "100000",
+      "actualDeltaRaw": "100000",
+      "dryRun": {
+        "event": "Broadcast.Swapped",
+        "fillerType": "AAVE",
+        "assetIn": 22,
+        "assetOut": 1003
+      }
+    },
+    {
+      "label": "router_sell_1003_to_22",
+      "txHash": "0x2a699c209cc38ddc29702ca59e3034956216c570b8d1e040c0f314a2b1c885ca",
+      "blockNumber": 18976308,
+      "target": "aUsdc",
+      "direction": "decrease",
+      "beforeRaw": "100000",
+      "afterRaw": "0",
+      "actualDeltaRaw": "100000",
+      "dryRun": {
+        "event": "Broadcast.Swapped",
+        "fillerType": "AAVE",
+        "assetIn": 1003,
+        "assetOut": 22
+      }
+    },
+    {
+      "label": "reserve_transfer_home",
+      "txHash": "0x971bd7a20463271b8408620829075622769b5c71c4256caae2a288fc3f202284",
+      "blockNumber": 18976462,
+      "target": "asset22",
+      "direction": "decrease",
+      "beforeRaw": "107113",
+      "afterRaw": "0",
+      "actualDeltaRaw": "107113",
+      "dryRun": {
+        "forwardedParaId": 1000,
+        "event": "Assets.Deposited"
+      }
+    }
+  ]
+}

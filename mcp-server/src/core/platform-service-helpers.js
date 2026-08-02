@@ -47,6 +47,16 @@ export const DEFAULT_XCM_OBSERVATION_RELAY_STATUS = {
   updatedAt: undefined
 };
 
+export const DEFAULT_XCM_BALANCE_OBSERVER_STATUS = {
+  enabled: false,
+  running: false,
+  polling: false,
+  pendingCount: 0,
+  overdueCount: 0,
+  oldestPendingAgeMs: 0,
+  pending: []
+};
+
 export function sumSubJobRewards(jobs, asset) {
   const normalizedAsset = normalizeAssetSymbol(asset);
   return jobs
@@ -146,6 +156,20 @@ export async function getXcmObservationRelayStatusSafely(xcmObservationRelay) {
       batchSize: xcmObservationRelay.batchSize ?? 0,
       pollIntervalMs: xcmObservationRelay.pollIntervalMs ?? 0,
       error: normalizeStatusReadError(error, "xcm_observation_relay_status_error")
+    };
+  }
+}
+
+export async function getXcmBalanceObserverStatusSafely(observer) {
+  if (!observer?.getStatus) return { ...DEFAULT_XCM_BALANCE_OBSERVER_STATUS };
+  try {
+    return await observer.getStatus();
+  } catch (error) {
+    return {
+      ...DEFAULT_XCM_BALANCE_OBSERVER_STATUS,
+      enabled: Boolean(observer.enabled),
+      running: Boolean(observer.running),
+      error: normalizeStatusReadError(error, "xcm_balance_observer_status_error")
     };
   }
 }

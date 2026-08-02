@@ -57,6 +57,8 @@ import {
 } from "./openapi-spec-ingestion-scheduler.js";
 import { XcmSettlementWatcherService } from "./xcm-settlement-watcher.js";
 import { XcmObservationRelayService } from "./xcm-observation-relay.js";
+import { VenueBalanceReader } from "./venue-balance-reader.js";
+import { XcmBalanceObserverService } from "./xcm-balance-observer.js";
 import {
   UpstreamStatusPollerService,
   loadUpstreamStatusPollerConfig
@@ -400,6 +402,24 @@ export async function createPlatformRuntime() {
       logger
     })
   );
+  const venueBalanceReader = initStep("init-venue-balance-reader", logger, () => new VenueBalanceReader());
+  const bankXcmFlowRequested = parseBooleanEnv(process.env.BANK_XCM_FLOW_ENABLED);
+  const xcmBalanceObserver = initStep("init-xcm-balance-observer", logger, () =>
+    new XcmBalanceObserverService(
+      stateStore,
+      venueBalanceReader,
+      xcmSettlementWatcher,
+      eventBus,
+      {
+        // Phase 1 remains staged until the gate-4 XcmWrapper ceremony. A
+        // config flag alone can never activate writes against a null wrapper.
+        enabled: bankXcmFlowRequested && gateway.hasXcmWrapper(),
+        pollIntervalMs: parsePositiveInt(process.env.BANK_XCM_OBSERVER_POLL_MS, 15_000),
+        defaultTimeoutMs: parsePositiveInt(process.env.BANK_XCM_OBSERVER_TIMEOUT_MS, 15 * 60_000),
+        logger
+      }
+    )
+  );
   const xcmObservationRelay = initStep("init-xcm-observation-relay", logger, () =>
     new XcmObservationRelayService(platformService, stateStore, eventBus, {
       enabled: process.env.XCM_OBSERVER_ENABLED === undefined
@@ -465,6 +485,7 @@ export async function createPlatformRuntime() {
   platformService.standardsSpecIngestionScheduler = standardsSpecIngestionScheduler;
   platformService.openApiSpecIngestionScheduler = openApiSpecIngestionScheduler;
   platformService.xcmSettlementWatcher = xcmSettlementWatcher;
+  platformService.xcmBalanceObserver = xcmBalanceObserver;
   platformService.externalPostingWatcher = externalPostingWatcher;
   platformService.xcmObservationRelay = xcmObservationRelay;
   platformService.upstreamStatusPoller = upstreamStatusPoller;
@@ -485,6 +506,7 @@ export async function createPlatformRuntime() {
   standardsSpecIngestionScheduler.start();
   openApiSpecIngestionScheduler.start();
   xcmSettlementWatcher.start();
+  xcmBalanceObserver.start();
   externalPostingWatcher.start();
   xcmObservationRelay.start();
   upstreamStatusPoller.start();
@@ -530,6 +552,8 @@ export async function createPlatformRuntime() {
     standardsSpecIngestionScheduler,
     openApiSpecIngestionScheduler,
     xcmSettlementWatcher,
+    xcmBalanceObserver,
+    venueBalanceReader,
     xcmObservationRelay,
     upstreamStatusPoller,
     jobStaleSweeper,
