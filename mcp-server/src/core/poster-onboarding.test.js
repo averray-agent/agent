@@ -83,6 +83,7 @@ test("poster onboarding is a clean-room machine recipe backed by non-default liv
   assert.deepEqual(payload.token, { symbol: "USDC", address: TOKEN, decimals: 6 });
   assert.deepEqual(payload.economics, {
     protocolFeeBps: 321,
+    feeRecipient: POSTER,
     feeSemantics: "poster_additive",
     feeExplanation:
       "The poster reserves the full worker reward plus the protocol fee; the worker receives the full advertised reward.",
@@ -91,7 +92,10 @@ test("poster onboarding is a clean-room machine recipe backed by non-default liv
     minRewardUsdc: "1.25",
     draftTtlHours: 19,
     maxOpenDrafts: 7,
-    availability: { protocolFeeBps: { status: "available" } }
+    availability: {
+      protocolFeeBps: { status: "available" },
+      feeRecipient: { status: "available" }
+    }
   });
   assert.deepEqual(payload.workerFacts.claimBond, {
     available: true,
@@ -103,6 +107,22 @@ test("poster onboarding is a clean-room machine recipe backed by non-default liv
       "Stake plus claim fee is locked from the worker's AgentAccountCore liquid balance at claim, returned in full on successful resolution, and forfeitable on slash."
   });
   assert.equal(payload.workerFacts.disputeWindow.seconds, 123_456);
+  assert.deepEqual(payload.workerFacts.disputeWindow.remedy, {
+    action: "Open the dispute from the recorded worker wallet before the dispute window ends.",
+    onChain: {
+      available: true,
+      contract: "EscrowCore",
+      address: ESCROW,
+      abiFragment: "function openDispute(bytes32 jobId)",
+      signature: "openDispute(bytes32 jobId)",
+      args: ["<jobId>"],
+      value: "0"
+    },
+    brokeredPath: {
+      available: false,
+      reason: "no_worker_reachable_brokered_open_dispute_route"
+    }
+  });
   assert.equal(payload.workerFacts.preflight.path, "/jobs/preflight?jobId=X");
   assert.equal(payload.workerFacts.selfDeposit.routeAvailable, false);
   assert.deepEqual(payload.cancellation, {
@@ -118,6 +138,43 @@ test("poster onboarding is a clean-room machine recipe backed by non-default liv
     "delist",
     "schema-discovery"
   ]);
+  const funding = payload.flow.find((step) => step.id === "fund");
+  assert.equal(
+    funding.posterReservedRawFormula,
+    "rewardRaw + opsReserveRaw + contingencyReserveRaw + floor(rewardRaw * economics.protocolFeeBps / 10000)"
+  );
+  assert.equal(
+    funding.depositAmountFormula,
+    "max(posterReservedRaw - positions(poster, token).liquid, 0)"
+  );
+  assert.deepEqual(funding.positionRead, {
+    contract: "agentAccountCore",
+    contractName: "AgentAccountCore",
+    address: ACCOUNTS,
+    abiFragment:
+      "function positions(address account, address asset) view returns (uint256 liquid, uint256 reserved, uint256 strategyAllocated, uint256 collateralLocked, uint256 jobStakeLocked, uint256 debtOutstanding)",
+    args: ["<poster EVM address>", TOKEN],
+    resultField: "liquid"
+  });
+  assert.deepEqual(funding.writes[0], {
+    contract: "token",
+    address: TOKEN,
+    abiFragment: "function approve(address spender, uint256 amount) returns (bool)",
+    method: "approve",
+    spender: "agentAccountCore",
+    args: [ACCOUNTS, "<depositAmountRaw>"],
+    skipWhen: "depositAmountRaw == 0"
+  });
+  assert.deepEqual(funding.writes[1], {
+    contract: "agentAccountCore",
+    contractName: "AgentAccountCore",
+    address: ACCOUNTS,
+    abiFragment: "function deposit(address asset, uint256 amount)",
+    method: "deposit",
+    asset: "token",
+    args: [TOKEN, "<depositAmountRaw>"],
+    skipWhen: "depositAmountRaw == 0"
+  });
   const human = payload.verification.modes.find((mode) => mode.id === "human_fallback");
   assert.equal(human.reviewPath, "dispute_arbitration");
   assert.match(human.verdicts.dismissed, /^Approve:/u);
@@ -126,6 +183,7 @@ test("poster onboarding is a clean-room machine recipe backed by non-default liv
   assert.deepEqual(payload.liveReads, {
     asOf: "2026-08-01T08:00:00.000Z",
     protocolFeeBps: { status: "available" },
+    feeRecipient: { status: "available" },
     claimBond: { status: "available" },
     disputeWindow: { status: "available" }
   });
@@ -141,6 +199,12 @@ test("external onboarding and catalog claim bonds reuse live facts without stati
   assert.equal(externalBounties.claimBond.stakeBps, 654);
   assert.equal(externalBounties.claimBond.feeBps, 87);
   assert.equal(externalBounties.disputeWindow.seconds, 123_456);
+  assert.equal(
+    externalBounties.disputeWindow.remedy.onChain.signature,
+    "openDispute(bytes32 jobId)"
+  );
+  assert.equal(externalBounties.disputeWindow.remedy.onChain.address, ESCROW);
+  assert.equal(externalBounties.disputeWindow.remedy.brokeredPath.available, false);
   assert.deepEqual(externalBounties.cancellation, {
     selfServeCancel: false,
     rescue: "operator-mediated on request, ~7 days, refunds only ever to the recorded poster",
@@ -191,10 +255,13 @@ test("failed live reads omit confident values and leave honest unavailable marke
   const payload = await service.getPosterOnboarding();
 
   assert.equal("protocolFeeBps" in payload.economics, false);
+  assert.equal("feeRecipient" in payload.economics, false);
   assert.equal(payload.economics.availability.protocolFeeBps.status, "unavailable");
+  assert.equal(payload.economics.availability.feeRecipient.status, "unavailable");
   assert.deepEqual(payload.workerFacts.claimBond.available, false);
   assert.deepEqual(payload.workerFacts.disputeWindow.available, false);
   assert.equal(payload.liveReads.claimBond.status, "unavailable");
+  assert.equal(payload.liveReads.feeRecipient.status, "unavailable");
 
   const [external] = await service.enrichExternalCatalogRows([
     { id: "external-live-1", source: "external", rewardAmount: "1" }
@@ -203,5 +270,26 @@ test("failed live reads omit confident values and leave honest unavailable marke
     available: false,
     reason: "live_chain_read_failed",
     preflight: "/jobs/preflight?jobId=external-live-1"
+  });
+});
+
+test("invalid treasury reads omit only the fee recipient and keep independent fee truth", async () => {
+  const payload = await makeService({
+    gatewayOverrides: {
+      getProtocolFeeConfig: async () => ({
+        supported: true,
+        protocolFeeBps: 321,
+        maxProtocolFeeBps: 999,
+        treasuryAccount: "not-an-address"
+      })
+    }
+  }).getPosterOnboarding();
+
+  assert.equal(payload.economics.protocolFeeBps, 321);
+  assert.equal("feeRecipient" in payload.economics, false);
+  assert.deepEqual(payload.economics.availability.protocolFeeBps, { status: "available" });
+  assert.deepEqual(payload.economics.availability.feeRecipient, {
+    status: "unavailable",
+    reason: "live_fee_recipient_invalid"
   });
 });
