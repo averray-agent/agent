@@ -106,13 +106,50 @@ selector. No code may credit the original liquid amount merely because a remote
 observation timed out. The deployment runbook must document this recovery state
 before capital larger than dust is allowed.
 
+### Residual operating float
+
+The converted Hydration account deliberately retains a small asset-22 operating
+float for remote execution. It is persistent treasury working capital, not yield,
+not an agent balance, and not part of a request's settled principal. The target
+is an owner-reviewed runtime configuration derived from fresh dry-run fee quotes;
+it is not hardcoded into the payload parser.
+
+The rehearsal demonstrates why this must be explicit: leg C returned 107,113
+raw asset 22 after redeeming 100,000 aUSDC shares. Treating the entire 107,113 as
+the withdrawal would mix 7,113 of residual fee capital into the request's
+principal. In v2, `WithdrawHome` returns at most the request principal and leaves
+the configured operating float at the converted account. A later request tops
+up only the measured shortfall below that target rather than funding a second
+independent float.
+
+The observer publishes the converted account's asset-22 balance, configured
+float target, attributable in-flight amount, residual float, read endpoint, and
+`asOf`. AAC/adapter accounting records request principal separately from a
+treasury-only `remoteOperatingFloat` bucket. Neither the float nor an unexplained
+positive delta mints strategy shares or becomes `positions.liquid`; the common
+health surface must show low, target, excess, and stale/unknown states honestly.
+
+Recovery is owner-mediated and only while dispatch is paused and no request is
+using the float. It uses the same allowlisted `WithdrawHome` structure with the
+Asset Hub wrapper as beneficiary, a distinct recorded recovery request, and
+balance-delta confirmation. The wrapper then credits only the observed returned
+amount to the treasury account. The backend operator cannot redirect, silently
+sweep, or relabel the float as a request settlement.
+
 ## Payload allowlist v2
 
 `_validateXcmPayload` becomes a strict structural decoder, not a collection of
-permitted opcodes. It accepts exactly the four SCALE/XCM V5 fixture shapes that
-passed the 2026-08-02 round trip. The implementation will commit the exact
-fixture bytes alongside the already-recorded transaction and balance-delta
-evidence in `hydration-bank-round-trip.json`.
+permitted opcodes. The v2 allowlist is precisely the four rehearsal message
+shapes, amended only with `SetTopic(requestId)` and wrapper-owned beneficiaries
+in place of the rehearsal EOA beneficiaries. Those are new v2 bytes, not a claim
+that the rehearsal payloads themselves already had the final wrapper shape.
+Ceremony step 5 re-proves all four exact v2 messages through DryRunApi before any
+wrapper-origin signature or dispatch.
+
+The implementation commits and pins the exact v2 SCALE bytes used by contract
+tests. `hydration-bank-round-trip.json` remains immutable provenance for the
+rehearsal transactions, events, and balance deltas; it is not relabelled as a v2
+payload fixture.
 
 All four shapes require canonical SCALE encodings, the fixture instruction
 order and counts, no unparsed or trailing bytes, and a final declared
@@ -183,7 +220,7 @@ After this design is approved, the implementation PR must include:
    strict four-shape decoder, role/pause controls, and request-scoped custody;
 2. the narrow adapter staging/pull/return changes needed for AAC custody
    continuity, without changing the wrapper's queue/finalize selectors;
-3. fixture tests replaying all four exact round-trip messages and asserting the
+3. fixture tests replaying all four exact v2 messages and asserting the
    correct `execute`/`send` call, phase, destination, and hashes;
 4. mutation tests for every fixed/bound field and for unexpected instructions,
    nested bytes, trailing bytes, wrong phase, conflicting replay, and a fifth
@@ -197,10 +234,11 @@ After this design is approved, the implementation PR must include:
    of an arbitrary token/XCM escape hatch;
 7. settlement tests that run the existing bound suite unchanged and prove
    idempotent terminal replay; and
-8. a full four-fixture accounting replay: fund → 22→1003 → 1003→22 → home,
-   including the observer-facing request id and actual-delta values.
+8. a full four-leg accounting replay: fund → 22→1003 → 1003→22 → home,
+   using pinned v2 payload bytes while retaining the rehearsal fixture as
+   provenance for the observer-facing request and actual-delta values.
 
-No test may replace fixture bytes with a hand-waved mock shape. Mocks may stand
+No test may replace v2 bytes with a hand-waved mock shape. Mocks may stand
 in for the precompile and adapter side effects, but the decoder receives the
 exact SCALE blobs and mutated derivatives.
 
