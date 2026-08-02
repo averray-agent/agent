@@ -89,10 +89,21 @@ Requirements:
 
 ## 6. Ordered gates — each blocks the next
 
-1. **Address-derivation dust test (FIRST, blocks everything).** That our Asset Hub account
-   maps to Hydration as `h160 ++ 0xEE×12` is the one link the verification reasoned from
-   source rather than observed. **Send dust, confirm receipt at the derived account, and
-   only then move real value** — getting this wrong sends funds to an unrecoverable account.
+1. **Address-derivation dust test — ✅ PROVEN 2026-08-02.** Tx
+   `0xed380936f89fcd2ea168c7133b51ca5383e01279897a042f86dd711b9cd58042` (Asset Hub block
+   18,974,353) reserve-transferred 100,621 raw USDC; **exactly 100,000 raw asset 22 arrived
+   at the derived account** (`h160 ‖ 0xEE×12`, SS58 `1CH9GprqPA6ZXjLCP39ZHd8XZf7VxzBLBvWpK2HqZs7PwC7`),
+   double-verified on independent endpoints/tooling (dwellir + `rpc.hydradx.cloud`
+   via @polkadot/api). The DryRunApi prediction (`Tokens.Deposited(22, 100000)`) matched
+   observation exactly — the dry-run preflight is a trustworthy instrument, and it stays
+   mandatory before every signed message. Two operational facts learned on the way: the
+   official Asset Hub WSS 1006-flakes (use `asset-hub-polkadot-rpc.n.dwellir.com` or the
+   official HTTPS transport for one-shot calls), and AH-side delivery fees are JIT-paid in
+   DOT by the EVM sender (~0.033 DOT/message), not drawn from the transferred USDC. The
+   100,000 raw remains at the derived account as the working dust for gates 2–3.
+   *(Original gate text follows.)* That our Asset Hub account That our Asset Hub account
+   maps to Hydration as `h160 ++ 0xEE×12` was the one link reasoned from source rather than
+   observed — now observed.
 2. **Pre-capital gate**: direct Hydration read confirming the money market accepts asset 22,
    plus its live rate and withdrawable depth (the workshop's §5 item that Claude could not
    verify from Asset Hub RPC).
