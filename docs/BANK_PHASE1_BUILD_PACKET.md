@@ -142,7 +142,23 @@ Requirements:
 2. **Pre-capital gate**: direct Hydration read confirming the money market accepts asset 22,
    plus its live rate and withdrawable depth (the workshop's §5 item that Claude could not
    verify from Asset Hub RPC).
-3. **Round-trip on dust**: deposit → observed → withdraw → back on Asset Hub, all through
+3. **Round-trip on dust — ✅ COMPLETE 2026-08-02, double-verified.** Full lifecycle
+   executed and independently confirmed on both chains: fund (149,380 to the converted
+   account) → deposit (leg A: 100,000 → 100,000 aUSDC, `Swapped` AAVE) → withdraw (leg B:
+   tx `0x2a699c20…` block 18,976,308, aUSDC → 0, asset 22 +100,000 −21,350 fee) → home
+   (leg C: tx `0x971bd7a2…` block 18,976,462, 105,711 landed at the source; remote fees
+   1,402). Source closed at **785,090 raw**; converted account **0**; arithmetic exact at
+   every step.
+   **Measured cycle economics (replaces the pre-measurement estimate):** one full
+   fund→deposit→withdraw→home cycle costs **44,289 raw USDC in venue/remote fees +
+   ~0.134 DOT in AH-side fees ≈ $0.15 total**. At the live 2.07% supply APR, ~$7.25 of
+   position-year covers one cycle — i.e. a 100 USDC position pays for a full cycle in
+   under a month of yield. The earlier "~5,000 USDC minimum sensible" was estimate-based
+   and is superseded; the economics floor is ~100× lower than assumed. (APY dilutes with
+   inflows and observer/ops cost is uncounted — the rehearsal framing stands.)
+   **Total program cost, all three lessons plus the full cycle: 164,910 raw USDC +
+   0.166 DOT ≈ $0.30.**
+   *(Original gate text follows.)* Round-trip on dust: deposit → observed → withdraw → back on Asset Hub, all through
    `queueRequest`/`finalizeRequest`.
 4. **XcmWrapper deployment ceremony** (multisig, same pattern as the EscrowCore v2 cutover)
    — only after 1–3 pass on a test path.
