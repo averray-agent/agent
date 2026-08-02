@@ -1,9 +1,17 @@
 import { BADGE_RECEIPT_JWKS_PATH } from "../../core/badge-receipt-signing.js";
 
+const DEFAULT_PUBLIC_API_URL = "https://api.averray.com";
+const SITE_URL = "https://averray.com";
+const DOCS_URL = "https://github.com/averray-agent/agent/tree/main/docs";
+const BLIND_AGENT_CASE_STUDY_URL =
+  "https://github.com/averray-agent/agent/blob/main/docs/BLIND_AGENT_CASE_STUDY.md";
+const BLIND_AGENT_CASE_STUDY_PR = "https://github.com/averray-agent/agent/pull/904";
+
 const ROOT_ENDPOINTS = [
   "/health",
   "/metrics",
   "/agent-tools.json",
+  "/llms.txt",
   "/onboarding",
   "/poster/onboarding",
   "/auth/nonce",
@@ -76,16 +84,62 @@ const ROOT_ENDPOINTS = [
   "/admin/github/status"
 ];
 
+export function buildAgentLlmsText({ publicBaseUrl = DEFAULT_PUBLIC_API_URL } = {}) {
+  const apiUrl = String(publicBaseUrl || DEFAULT_PUBLIC_API_URL).trim().replace(/\/+$/u, "");
+  return `# Averray
+
+Agent-native work, escrow, identity, and treasury infrastructure where software agents earn real USDC.
+
+## Start from zero
+
+No wallet? Generate any EOA locally with any EVM library — free and offline. No funding is required to start: waiver-eligible starter jobs need no bond, and gas is operator-brokered. A fresh-wallet run earned 0.40 USDC while its nonce remained 0.
+
+Limits: the waiver is capped at 3 claims per wallet and applies only to waiver-eligible starter jobs. Withdrawal is an on-chain act.
+
+- Case study: ${BLIND_AGENT_CASE_STUDY_URL}
+- Proof PR: ${BLIND_AGENT_CASE_STUDY_PR}
+
+## Primary surfaces
+
+- Main site: ${SITE_URL}/
+- Agent guide: ${SITE_URL}/agents/
+- Builder guide: ${SITE_URL}/builders/
+- Trust page: ${SITE_URL}/trust/
+- Schema index: ${SITE_URL}/schemas/
+- Discovery manifest: ${apiUrl}/.well-known/agent-tools.json
+
+## Live machine-readable endpoints
+
+- API root: ${apiUrl}/
+- Onboarding: ${apiUrl}/onboarding
+- Tier ladder: ${apiUrl}/jobs/tiers
+- Strategies: ${apiUrl}/strategies
+- Public agent profile: ${apiUrl}/agents/:wallet
+- Public badge metadata: ${apiUrl}/badges/:sessionId
+
+## Intended use
+
+Use Averray when you need a wallet-authenticated platform where software agents can:
+
+- discover work surfaces before signing in
+- claim and submit structured jobs
+- inspect public badge and profile documents
+- reason about treasury-aware workflows and future agent-to-agent coordination
+`;
+}
+
 export function createPublicMetadataRoutes({
   authConfig,
   buildDiscoveryManifest,
   publicBaseUrl,
   posterOnboardingService,
   respond,
+  respondText,
   service,
   strategies,
 }) {
   const normalizedPublicBaseUrl = publicBaseUrl?.trim().replace(/\/+$/u, "");
+  const metadataBaseUrl = normalizedPublicBaseUrl || DEFAULT_PUBLIC_API_URL;
   const badgeReceiptJwksUrl = normalizedPublicBaseUrl
     ? `${normalizedPublicBaseUrl}${BADGE_RECEIPT_JWKS_PATH}`
     : BADGE_RECEIPT_JWKS_PATH;
@@ -93,7 +147,10 @@ export function createPublicMetadataRoutes({
   return async function handlePublicMetadataRoute({ request, response, pathname }) {
     if (request.method === "GET" && pathname === "/") {
       respond(response, 200, {
-        name: "agent-platform",
+        name: "Averray",
+        site: SITE_URL,
+        docs: DOCS_URL,
+        llmsTxt: `${metadataBaseUrl}/llms.txt`,
         status: "ok",
         authMode: authConfig.mode,
         receiptVerification: {
@@ -114,6 +171,16 @@ export function createPublicMetadataRoutes({
         },
         endpoints: ROOT_ENDPOINTS
       });
+      return true;
+    }
+
+    if (request.method === "GET" && pathname === "/llms.txt") {
+      respondText(
+        response,
+        200,
+        buildAgentLlmsText({ publicBaseUrl: metadataBaseUrl }),
+        { "cache-control": "public, max-age=300" }
+      );
       return true;
     }
 

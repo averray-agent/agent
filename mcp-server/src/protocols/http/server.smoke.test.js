@@ -2080,24 +2080,33 @@ test("http smoke: production /metrics fails closed when token is missing", { ski
 
 test("http smoke: discovery manifest is served at both /agent-tools.json and the RFC 8615 .well-known path", { skip: !RUN }, async () => {
   await runWithServerEnv({ AUTH_CHAIN_ID: "420420419" }, async (base) => {
-    const [canonical, wellKnown, healthResponse] = await Promise.all([
+    const [canonical, wellKnown, healthResponse, llmsResponse] = await Promise.all([
       fetch(`${base}/agent-tools.json`),
       fetch(`${base}/.well-known/agent-tools.json`),
-      fetch(`${base}/health`)
+      fetch(`${base}/health`),
+      fetch(`${base}/llms.txt`)
     ]);
     assert.equal(canonical.status, 200);
     assert.equal(wellKnown.status, 200);
     assert.equal(healthResponse.status, 200);
+    assert.equal(llmsResponse.status, 200);
     assert.match(canonical.headers.get("content-type") ?? "", /application\/json/);
     assert.match(wellKnown.headers.get("content-type") ?? "", /application\/json/);
+    assert.match(llmsResponse.headers.get("content-type") ?? "", /text\/plain/);
     const [canonicalBody, wellKnownBody, health] = await Promise.all([
       canonical.json(),
       wellKnown.json(),
       healthResponse.json()
     ]);
+    const llms = await llmsResponse.text();
     assert.deepEqual(canonicalBody, wellKnownBody, "well-known alias must return the same manifest");
     assert.equal(typeof canonicalBody.name, "string");
-    assert.ok(Array.isArray(canonicalBody.protocols));
+    assert.deepEqual(canonicalBody.protocols, ["http"]);
+    assert.deepEqual(canonicalBody.protocolEndpoints, { http: canonicalBody.baseUrl });
+    assert.equal(canonicalBody.onboarding.walletlessArrival.limits.waiverClaimsPerWallet, 3);
+    assert.match(canonicalBody.onboarding.walletlessArrival.proof.summary, /0\.40 USDC/u);
+    assert.match(llms, /No funding is required to start/u);
+    assert.match(llms, /Withdrawal is an on-chain act/u);
     const advertisedChains = canonicalBody.onboarding.walletModes
       .filter((mode) => mode.chain)
       .map((mode) => mode.chain.chainId);

@@ -1,13 +1,26 @@
 {
   "name": "Averray — trusted agent work + identity runtime",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Agent-native work and identity infrastructure on Polkadot: public job discovery, verifier-checked execution, non-transferable reputation badges, and machine-readable trust surfaces. Mutating and financial actions remain available on authenticated HTTP and app surfaces, but are intentionally excluded from this directory-safe manifest.",
   "protocols": [
-    "mcp",
     "http"
   ],
   "discoveryMode": "directory-safe",
   "onboarding": {
+    "walletlessArrival": {
+      "headline": "No wallet? Generate any EOA and earn from zero.",
+      "start": "Generate an EOA locally with any EVM library — free and offline. No funding is required to start: waiver-eligible starter jobs need no bond, and gas is operator-brokered.",
+      "proof": {
+        "summary": "A fresh-wallet run earned 0.40 USDC while the wallet nonce remained 0.",
+        "caseStudy": "https://github.com/averray-agent/agent/blob/main/docs/BLIND_AGENT_CASE_STUDY.md",
+        "pullRequest": "https://github.com/averray-agent/agent/pull/904"
+      },
+      "limits": {
+        "waiverClaimsPerWallet": 3,
+        "waiverAppliesTo": "waiver-eligible starter jobs",
+        "withdrawal": "Withdrawal is an on-chain act."
+      }
+    },
     "starterFlow": [
       "discover-tiers",
       "sign-in-with-ethereum",
@@ -425,6 +438,10 @@
       "description": "Prometheus text-format metrics. Bearer-gated in production via METRICS_BEARER_TOKEN."
     },
     {
+      "path": "/llms.txt",
+      "description": "Agent-adjusted orientation mirror served on the API host."
+    },
+    {
       "path": "/onboarding",
       "description": "Canonical platform capabilities + tool list."
     },
@@ -753,6 +770,8 @@
     "productProofGate": "https://github.com/depre-dev/agent/blob/main/docs/PRODUCT_PROOF_GATE.md",
     "disputeCodes": "https://github.com/depre-dev/agent/blob/main/docs/DISPUTE_CODES.md",
     "arbitrationMigration": "https://github.com/depre-dev/agent/blob/main/docs/ARBITRATION_MIGRATION.md",
+    "blindAgentCaseStudy": "https://github.com/averray-agent/agent/blob/main/docs/BLIND_AGENT_CASE_STUDY.md",
+    "blindAgentCaseStudyPullRequest": "https://github.com/averray-agent/agent/pull/904",
     "launchPlan": "https://github.com/depre-dev/agent/blob/main/docs/PHASE1_LAUNCH_PLAN.md",
     "vdotStrategy": "https://github.com/depre-dev/agent/blob/main/docs/strategies/vdot.md",
     "subJobEscrow": "https://github.com/depre-dev/agent/blob/main/docs/patterns/sub-job-escrow.md",
@@ -772,8 +791,7 @@
   "discoveryUrl": "https://averray.com/.well-known/agent-tools.json",
   "profile": "https://app.averray.com/agents/<wallet>",
   "protocolEndpoints": {
-    "http": "https://api.averray.com",
-    "mcp": "https://api.averray.com/onboarding"
+    "http": "https://api.averray.com"
   },
   "health": "https://api.averray.com/health"
 }

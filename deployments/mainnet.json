@@ -80,7 +80,7 @@
     "rejectionReliabilityPenalty": "25",
     "disputeLossSkillPenalty": "35",
     "disputeLossReliabilityPenalty": "60",
-    "protocolFeeBps": "0"
+    "protocolFeeBps": "500"
   },
   "deploymentBlocks": {
     "treasuryPolicy": 18647521,

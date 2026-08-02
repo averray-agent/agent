@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
   buildDiscoveryManifest,
@@ -18,14 +19,13 @@ test("buildDiscoveryManifest returns the full public discovery shape", () => {
     rpcUrl: "https://eth-rpc-testnet.polkadot.io"
   });
 
-  assert.equal(manifest.version, "0.3.1");
+  assert.equal(manifest.version, "0.4.0");
   assert.equal(manifest.discoveryMode, "directory-safe");
   assert.equal(manifest.baseUrl, "https://api.example.com");
   assert.equal(manifest.discoveryUrl, "https://example.com/.well-known/agent-tools.json");
   assert.equal(manifest.profile, "https://app.example.com/agents/<wallet>");
   assert.deepEqual(manifest.protocolEndpoints, {
-    http: "https://api.example.com",
-    mcp: "https://api.example.com/onboarding"
+    http: "https://api.example.com"
   });
   assert.equal(manifest.onboarding.entrypoint, "https://api.example.com/onboarding");
   assert.equal(manifest.onboarding.posterEntrypoint, "https://api.example.com/poster/onboarding");
@@ -99,6 +99,54 @@ test("buildDiscoveryManifest returns the full public discovery shape", () => {
   assert.ok(manifest.onboarding.actionRequirements.some((entry) => (
     entry.method === "POST" && entry.path === "/jobs/claim" && entry.requiredAction === "wallet_sign_in"
   )));
+});
+
+test("A1 manifest payload: walletless arrival states the perk, proof, and limits in one block", () => {
+  const manifest = buildDiscoveryManifest({ chainId: POLKADOT_HUB_MAINNET_CHAIN_ID });
+  const arrival = manifest.onboarding.walletlessArrival;
+
+  assert.match(arrival.headline, /earn from zero/u);
+  assert.match(arrival.start, /Generate an EOA/u);
+  assert.match(arrival.start, /free and offline/u);
+  assert.match(arrival.start, /No funding is required to start/u);
+  assert.match(arrival.start, /waiver-eligible starter jobs need no bond/u);
+  assert.match(arrival.start, /gas is operator-brokered/u);
+  assert.match(arrival.proof.summary, /0\.40 USDC/u);
+  assert.match(arrival.proof.summary, /nonce remained 0/u);
+  assert.equal(
+    arrival.proof.caseStudy,
+    "https://github.com/averray-agent/agent/blob/main/docs/BLIND_AGENT_CASE_STUDY.md"
+  );
+  assert.equal(arrival.proof.pullRequest, "https://github.com/averray-agent/agent/pull/904");
+  assert.deepEqual(arrival.limits, {
+    waiverClaimsPerWallet: 3,
+    waiverAppliesTo: "waiver-eligible starter jobs",
+    withdrawal: "Withdrawal is an on-chain act."
+  });
+
+  assert.deepEqual(
+    buildPlatformCapabilities({ chainId: POLKADOT_HUB_MAINNET_CHAIN_ID }).onboarding.walletlessArrival,
+    arrival,
+    "/onboarding and the discovery manifest must share the same walletless-arrival block"
+  );
+});
+
+test("A4 manifest honesty: discovery is HTTP-only and mainnet pins the live 500 bps fee", () => {
+  const manifest = buildDiscoveryManifest({ chainId: POLKADOT_HUB_MAINNET_CHAIN_ID });
+  const deployment = JSON.parse(readFileSync(
+    new URL("../../../deployments/mainnet.json", import.meta.url),
+    "utf8"
+  ));
+
+  assert.equal(manifest.version, "0.4.0");
+  assert.deepEqual(manifest.protocols, ["http"]);
+  assert.deepEqual(manifest.protocolEndpoints, { http: "https://api.averray.com" });
+  assert.equal("mcp" in manifest.protocolEndpoints, false);
+  assert.equal(
+    deployment.contracts.escrowCore,
+    "0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC"
+  );
+  assert.equal(deployment.parameters.protocolFeeBps, "500");
 });
 
 test("mainnet chainId renders the mainnet chain block on every network-dependent surface", () => {
@@ -186,6 +234,7 @@ test("buildPlatformCapabilities stays aligned with the discovery tool list", () 
   assert.equal(capabilities.discoveryMode, manifest.discoveryMode);
   assert.deepEqual(capabilities.protocols, manifest.protocols);
   assert.deepEqual(capabilities.onboarding, {
+    walletlessArrival: manifest.onboarding.walletlessArrival,
     starterFlow: manifest.onboarding.starterFlow,
     walletModes: manifest.onboarding.walletModes,
     actionRequirements: manifest.onboarding.actionRequirements,

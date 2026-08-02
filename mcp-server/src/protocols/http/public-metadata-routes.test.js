@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 import { createPublicMetadataRoutes } from "./public-metadata-routes.js";
 
 const STRATEGIES = [
@@ -8,9 +9,26 @@ const STRATEGIES = [
 const PROVIDER_STATUS = {
   github: { ok: true, lastRun: { status: "success" } }
 };
+const WALLETLESS_ARRIVAL = {
+  headline: "No wallet? Generate any EOA and earn from zero.",
+  start: "Generate an EOA locally — free and offline. No funding is required to start.",
+  proof: {
+    summary: "A fresh-wallet run earned 0.40 USDC while the wallet nonce remained 0.",
+    caseStudy: "https://github.com/averray-agent/agent/blob/main/docs/BLIND_AGENT_CASE_STUDY.md",
+    pullRequest: "https://github.com/averray-agent/agent/pull/904"
+  },
+  limits: {
+    waiverClaimsPerWallet: 3,
+    waiverAppliesTo: "waiver-eligible starter jobs",
+    withdrawal: "Withdrawal is an on-chain act."
+  }
+};
 const PLATFORM_CAPABILITIES = {
   version: "v1",
-  onboarding: { walletModes: [{ id: "siwe" }] }
+  onboarding: {
+    walletlessArrival: WALLETLESS_ARRIVAL,
+    walletModes: [{ id: "siwe" }]
+  }
 };
 const EXTERNAL_BOUNTIES = {
   mode: "allowlist",
@@ -58,6 +76,12 @@ function makeHarness(overrides = {}) {
       res.body = body;
       res.headers = headers;
     },
+    respondText: (res, statusCode, body, headers = {}) => {
+      calls.push(["respondText", { statusCode, body, headers }]);
+      res.statusCode = statusCode;
+      res.body = body;
+      res.headers = { "content-type": "text/plain; charset=utf-8", ...headers };
+    },
     service: {
       getPublicProviderOperations: async () => {
         calls.push(["getPublicProviderOperations"]);
@@ -91,7 +115,7 @@ test("public metadata routes ignore unrelated paths and methods", async () => {
   assert.deepEqual(response, {});
 });
 
-test("GET / returns public API metadata without calling provider services", async () => {
+test("A2 arrival payload: GET / identifies Averray and points to site, docs, and API llms.txt", async () => {
   const { calls, response, route } = makeHarness();
 
   const handled = await route({
@@ -102,11 +126,15 @@ test("GET / returns public API metadata without calling provider services", asyn
 
   assert.equal(handled, true);
   assert.equal(response.statusCode, 200);
-  assert.equal(response.body.name, "agent-platform");
+  assert.equal(response.body.name, "Averray");
+  assert.equal(response.body.site, "https://averray.com");
+  assert.equal(response.body.docs, "https://github.com/averray-agent/agent/tree/main/docs");
+  assert.equal(response.body.llmsTxt, "https://api.averray.com/llms.txt");
   assert.equal(response.body.status, "ok");
   assert.equal(response.body.authMode, "strict");
   assert.ok(response.body.endpoints.includes("/agent-tools.json"));
   assert.ok(response.body.endpoints.includes("/poster/onboarding"));
+  assert.ok(response.body.endpoints.includes("/llms.txt"));
   assert.ok(response.body.endpoints.includes("/.well-known/badge-receipt-jwks.json"));
   assert.ok(response.body.endpoints.every((endpoint) => !endpoint.includes("/jobs/draft")));
   assert.deepEqual(response.body.receiptVerification, {
@@ -149,7 +177,7 @@ test("GET /status/providers returns sanitized provider operations", async () => 
   ]);
 });
 
-test("GET /onboarding returns platform capabilities with live external-bounty facts", async () => {
+test("A1 arrival payload: GET /onboarding keeps earn-from-zero proof and limits together", async () => {
   const { calls, response, route } = makeHarness();
 
   const handled = await route({
@@ -165,6 +193,15 @@ test("GET /onboarding returns platform capabilities with live external-bounty fa
     workerDoor: WORKER_DOOR,
     externalBounties: EXTERNAL_BOUNTIES
   });
+  assert.match(response.body.onboarding.walletlessArrival.headline, /earn from zero/u);
+  assert.match(response.body.onboarding.walletlessArrival.proof.summary, /0\.40 USDC/u);
+  assert.match(response.body.onboarding.walletlessArrival.proof.summary, /nonce remained 0/u);
+  assert.equal(response.body.onboarding.walletlessArrival.limits.waiverClaimsPerWallet, 3);
+  assert.equal(
+    response.body.onboarding.walletlessArrival.limits.waiverAppliesTo,
+    "waiver-eligible starter jobs"
+  );
+  assert.match(response.body.onboarding.walletlessArrival.limits.withdrawal, /on-chain act/u);
   assert.deepEqual(response.headers, { "cache-control": "public, max-age=30" });
   // The route must forward the active chain id so /onboarding advertises the
   // same network as /health and SIWE.
@@ -178,6 +215,42 @@ test("GET /onboarding returns platform capabilities with live external-bounty fa
       headers: { "cache-control": "public, max-age=30" }
     }],
   ]);
+});
+
+test("A3 arrival payload: GET /llms.txt serves the agent-adjusted API-host mirror", async () => {
+  const { calls, response, route } = makeHarness();
+  const siteLlms = readFileSync(new URL("../../../../site/llms.txt", import.meta.url), "utf8");
+
+  assert.equal(await route({
+    request: { method: "GET" },
+    response,
+    pathname: "/llms.txt"
+  }), true);
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.headers["content-type"], "text/plain; charset=utf-8");
+  assert.equal(response.headers["cache-control"], "public, max-age=300");
+  assert.match(response.body, /^# Averray/mu);
+  assert.match(response.body, /earn real USDC/u);
+  assert.match(response.body, /No funding is required to start/u);
+  assert.match(response.body, /waiver is capped at 3 claims per wallet/u);
+  assert.match(response.body, /Withdrawal is an on-chain act/u);
+  assert.match(response.body, /docs\/BLIND_AGENT_CASE_STUDY\.md/u);
+  assert.match(response.body, /https:\/\/api\.averray\.com\/onboarding/u);
+  for (const sharedFact of [
+    "earn real USDC",
+    "No funding is required to start",
+    "waiver is capped at 3 claims per wallet",
+    "Withdrawal is an on-chain act"
+  ]) {
+    assert.match(siteLlms, new RegExp(sharedFact, "u"));
+    assert.match(response.body, new RegExp(sharedFact, "u"));
+  }
+  assert.deepEqual(calls, [["respondText", {
+    statusCode: 200,
+    body: response.body,
+    headers: { "cache-control": "public, max-age=300" }
+  }]]);
 });
 
 test("GET /poster/onboarding is public and short-cacheable", async () => {
