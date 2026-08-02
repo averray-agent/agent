@@ -128,7 +128,7 @@ export function createAccountRoutes({
         200,
         {
           strategies,
-          docs: "https://github.com/depre-dev/agent/blob/main/docs/strategies/vdot.md"
+          docs: "https://github.com/averray-agent/agent/blob/main/docs/strategies/vdot.md"
         },
         { "cache-control": "public, max-age=300" }
       );

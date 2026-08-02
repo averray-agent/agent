@@ -68,7 +68,7 @@ test("GET /schemas/jobs lists public built-in job schemas with paths", async () 
       },
     ],
     count: 1,
-    docs: "https://github.com/depre-dev/agent/tree/main/docs/schemas/jobs",
+    docs: "https://github.com/averray-agent/agent/tree/main/docs/schemas/jobs",
   });
   assert.deepEqual(calls, [
     ["listBuiltinJobSchemas"],

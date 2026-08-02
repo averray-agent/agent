@@ -186,7 +186,7 @@ on day one — the manifest data is strictly additive.
   "operatingSystem": "Web",
   "url": "https://averray.com",
   "sameAs": [
-    "https://github.com/depre-dev/agent"
+    "https://github.com/averray-agent/agent"
   ],
   "potentialAction": {
     "@type": "ViewAction",

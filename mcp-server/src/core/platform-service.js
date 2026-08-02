@@ -719,9 +719,9 @@ export class PlatformService {
       maintenance: {
         policy,
         release: {
-          checklistDoc: "https://github.com/depre-dev/agent/blob/main/docs/PRODUCTION_CHECKLIST.md",
-          incidentDoc: "https://github.com/depre-dev/agent/blob/main/docs/INCIDENT_RESPONSE.md",
-          multisigDoc: "https://github.com/depre-dev/agent/blob/main/docs/MULTISIG_SETUP.md"
+          checklistDoc: "https://github.com/averray-agent/agent/blob/main/docs/PRODUCTION_CHECKLIST.md",
+          incidentDoc: "https://github.com/averray-agent/agent/blob/main/docs/INCIDENT_RESPONSE.md",
+          multisigDoc: "https://github.com/averray-agent/agent/blob/main/docs/MULTISIG_SETUP.md"
         }
       },
       recurring: recurring,
