@@ -198,7 +198,7 @@ test("toPlatformJob creates a benchmark open-data audit job", () => {
   assert.equal(job.source.provider, "data.gov");
   assert.equal(job.source.resourceFormat, "CSV");
   assert.ok(job.acceptanceCriteria.some((entry) => entry.includes("no_issue_found")));
-  assert.ok(job.verifierTerms.includes("recommended_actions"));
+  assert.deepEqual(job.verifierTerms, [TARGET.datasetTitle, TARGET.datasetUrl, TARGET.resourceUrl, "CSV"]);
 });
 
 test("searchDataGovDatasets queries the Data.gov CKAN API", async () => {

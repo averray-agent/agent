@@ -1,7 +1,9 @@
 import { extractSubmissionText } from "../core/submission.js";
 import { hasAverrayDisclosureFooter } from "../core/maintainer-surface-policy.js";
+import { getJobSchema } from "../core/job-schema-registry.js";
 
 const HANDLER_VERSION = 1;
+const BENCHMARK_HANDLER_VERSION = 2;
 
 function normalizeEvidence(input) {
   return extractSubmissionText(input).trim().toLowerCase();
@@ -23,20 +25,38 @@ function structuredEvidence(input) {
 function createBenchmarkHandler() {
   return {
     id: "benchmark",
-    version: HANDLER_VERSION,
+    version: BENCHMARK_HANDLER_VERSION,
     evaluate(job, evidence) {
       const normalized = normalizeEvidence(evidence);
-      const matched = job.verifierConfig.requiredKeywords.filter((keyword) => normalized.includes(keyword.toLowerCase()));
+      const outputSchema = getJobSchema(job.outputSchemaRef, { registrations: job.schemaRegistrations });
+      const schemaFields = new Set(
+        Object.keys(outputSchema?.properties ?? {}).map((field) => field.toLowerCase())
+      );
+      const substantiveKeywords = job.verifierConfig.requiredKeywords.filter(
+        (keyword) => !schemaFields.has(keyword.toLowerCase())
+      );
+      if (substantiveKeywords.length < job.verifierConfig.minimumMatches) {
+        return {
+          jobId: job.id,
+          handler: "benchmark",
+          handlerVersion: BENCHMARK_HANDLER_VERSION,
+          outcome: "rejected",
+          score: 0,
+          reasonCode: "BENCHMARK_CONFIG_UNSAFE",
+          detail: "Benchmark configuration does not contain enough substantive keywords beyond output-schema field names."
+        };
+      }
+      const matched = substantiveKeywords.filter((keyword) => normalized.includes(keyword.toLowerCase()));
       const approved = matched.length >= job.verifierConfig.minimumMatches;
 
       return {
         jobId: job.id,
         handler: "benchmark",
-        handlerVersion: HANDLER_VERSION,
+        handlerVersion: BENCHMARK_HANDLER_VERSION,
         outcome: approved ? "approved" : "rejected",
-        score: Math.round((matched.length / Math.max(job.verifierConfig.requiredKeywords.length, 1)) * 100),
+        score: Math.round((matched.length / substantiveKeywords.length) * 100),
         reasonCode: approved ? "BENCHMARK_THRESHOLD_MET" : "BENCHMARK_THRESHOLD_MISSED",
-        detail: `Matched ${matched.length}/${job.verifierConfig.requiredKeywords.length} required keywords.`
+        detail: `Matched ${matched.length}/${substantiveKeywords.length} substantive required keywords.`
       };
     }
   };

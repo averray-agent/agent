@@ -2,6 +2,7 @@
 
 import { pathToFileURL } from "node:url";
 import { DEFAULT_ESCROW_ASSET_SYMBOL } from "../core/assets.js";
+import { substantiveVerifierTerms } from "./substantive-verifier-terms.js";
 
 /**
  * Ingest OpenAPI quality audit jobs.
@@ -173,8 +174,8 @@ export function toPlatformJob(target, score = scoreOpenApiTarget(target)) {
     rewardAsset: DEFAULT_ESCROW_ASSET_SYMBOL,
     rewardAmount: 0.3,
     verifierMode: "benchmark",
-    verifierTerms: ["spec_url", "checks", "findings", "recommended_actions"],
-    verifierMinimumMatches: 3,
+    verifierTerms: substantiveVerifierTerms(apiTitle, target.specUrl, localSurface, target.openapiVersion),
+    verifierMinimumMatches: 2,
     inputSchemaRef: "schema://jobs/openapi-quality-audit-input",
     outputSchemaRef: "schema://jobs/openapi-quality-audit-output",
     claimTtlSeconds: 7200,

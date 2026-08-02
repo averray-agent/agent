@@ -95,7 +95,7 @@ test("toPlatformJob creates standards freshness audit job", async () => {
   assert.equal(job.source.type, "standards_spec");
   assert.equal(job.source.provider, "w3c");
   assert.equal(job.source.localSurface, "docs/RC1_WORKING_SPEC.md");
-  assert.ok(job.verifierTerms.includes("fix_recommendation"));
+  assert.deepEqual(job.verifierTerms, [SPEC.specTitle, SPEC.specUrl, SPEC.localSurface, SPEC.currentVersion]);
 });
 
 test("standardsSpecKey dedupes by provider, URL, and local surface", () => {

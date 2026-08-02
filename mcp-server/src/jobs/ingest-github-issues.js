@@ -7,6 +7,7 @@ import {
   repoFromIssue
 } from "../core/maintainer-surface-policy.js";
 import { DEFAULT_ESCROW_ASSET_SYMBOL } from "../core/assets.js";
+import { substantiveVerifierTerms } from "./substantive-verifier-terms.js";
 
 /**
  * Ingest agent-suitable GitHub issues into the Agent Platform job catalog.
@@ -186,8 +187,8 @@ export function toPlatformJob(issue, score = scoreIssue(issue), {
     rewardAsset: DEFAULT_ESCROW_ASSET_SYMBOL,
     rewardAmount: 0.2,
     verifierMode: "benchmark",
-    verifierTerms: ["summary", "output", "status"],
-    verifierMinimumMatches: 3,
+    verifierTerms: substantiveVerifierTerms(repo, `#${issueNumber}`, issueTitle, issueUrl),
+    verifierMinimumMatches: 2,
     inputSchemaRef: "schema://jobs/coding-input",
     outputSchemaRef: "schema://jobs/coding-output",
     claimTtlSeconds: 7200,

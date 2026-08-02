@@ -2,6 +2,7 @@
 
 import { pathToFileURL } from "node:url";
 import { DEFAULT_ESCROW_ASSET_SYMBOL } from "../core/assets.js";
+import { substantiveVerifierTerms } from "./substantive-verifier-terms.js";
 
 /**
  * Ingest OSV package advisories into dependency audit-and-report jobs.
@@ -277,7 +278,7 @@ export function toPlatformJob({ target, advisory, advisories, fixedVersion, scor
     rewardAsset: DEFAULT_ESCROW_ASSET_SYMBOL,
     rewardAmount: 0.3,
     verifierMode: "benchmark",
-    verifierTerms: ["summary", "output", "status"],
+    verifierTerms: substantiveVerifierTerms(target.name, target.version, effectiveFixedVersion, advisoryIds),
     verifierMinimumMatches: 3,
     inputSchemaRef: "schema://jobs/dependency-remediation-input",
     outputSchemaRef: "schema://jobs/coding-output",
