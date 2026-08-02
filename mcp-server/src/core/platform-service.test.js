@@ -772,6 +772,32 @@ test("preflight rejects a zero-balance wallet when a non-waived claim lock is re
   assert.equal(preflight.reason, "insufficient_liquidity");
 });
 
+test("preflight refuses a delisted external job with an explicit claim reason", async () => {
+  const stateStore = new MemoryStateStore();
+  const service = makePlatformService(undefined, undefined, stateStore);
+  const externalJobId = `0x${"d".repeat(64)}`;
+  service.jobs[0].id = externalJobId;
+  service.jobs[0].source = { type: "external" };
+  await stateStore.upsertExternalJobDelisting({
+    jobId: externalJobId,
+    adminWallet: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    reason: "operator rescue requested",
+    delistedAt: "2026-08-01T12:00:00.000Z"
+  });
+
+  const preflight = await service.preflightJob(WALLET, externalJobId);
+
+  assert.equal(preflight.catalogEligible, false);
+  assert.equal(preflight.eligible, false);
+  assert.equal(preflight.claimable, false);
+  assert.equal(preflight.currentWalletCanClaim, false);
+  assert.equal(preflight.reason, "external_job_delisted");
+  assert.equal(preflight.delisted, true);
+  assert.equal(preflight.delistedAt, "2026-08-01T12:00:00.000Z");
+  assert.equal(preflight.delistReason, "operator rescue requested");
+  assert.ok(preflight.failureStates.includes("external_job_delisted"));
+});
+
 test("preflight remains eligible when wallet liquidity exactly covers the non-waived claim lock", async () => {
   const service = makePlatformService();
   service.jobs[0].onboardingWaiverEligible = false;
