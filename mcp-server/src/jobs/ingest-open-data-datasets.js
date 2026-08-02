@@ -2,6 +2,7 @@
 
 import { pathToFileURL } from "node:url";
 import { DEFAULT_ESCROW_ASSET_SYMBOL } from "../core/assets.js";
+import { substantiveVerifierTerms } from "./substantive-verifier-terms.js";
 
 /**
  * Ingest public open-data dataset/resource quality-audit jobs.
@@ -314,8 +315,13 @@ export function toPlatformJob(target, score = scoreDatasetTarget(target)) {
     rewardAsset: DEFAULT_ESCROW_ASSET_SYMBOL,
     rewardAmount: 0.25,
     verifierMode: "benchmark",
-    verifierTerms: ["dataset_url", "resource_url", "checks", "recommended_actions"],
-    verifierMinimumMatches: 3,
+    verifierTerms: substantiveVerifierTerms(
+      target.datasetTitle,
+      target.datasetUrl,
+      target.resourceUrl,
+      format
+    ),
+    verifierMinimumMatches: 2,
     inputSchemaRef: "schema://jobs/open-data-quality-audit-input",
     outputSchemaRef: "schema://jobs/open-data-quality-audit-output",
     claimTtlSeconds: 7200,

@@ -2,6 +2,7 @@
 
 import { pathToFileURL } from "node:url";
 import { DEFAULT_ESCROW_ASSET_SYMBOL } from "../core/assets.js";
+import { substantiveVerifierTerms } from "./substantive-verifier-terms.js";
 
 /**
  * Ingest standards/spec freshness audit jobs.
@@ -158,8 +159,8 @@ export function toPlatformJob(target, score = scoreSpecTarget(target)) {
     rewardAsset: DEFAULT_ESCROW_ASSET_SYMBOL,
     rewardAmount: 0.3,
     verifierMode: "benchmark",
-    verifierTerms: ["source_surface", "drift_findings", "missing_updates", "fix_recommendation"],
-    verifierMinimumMatches: 3,
+    verifierTerms: substantiveVerifierTerms(specTitle, target.specUrl, localSurface, target.currentVersion),
+    verifierMinimumMatches: 2,
     inputSchemaRef: "schema://jobs/docs-input",
     outputSchemaRef: "schema://jobs/docs-drift-audit-output",
     claimTtlSeconds: 7200,

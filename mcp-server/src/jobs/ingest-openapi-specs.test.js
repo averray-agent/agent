@@ -138,7 +138,7 @@ test("toPlatformJob creates OpenAPI quality audit job", async () => {
   assert.equal(job.outputSchemaRef, "schema://jobs/openapi-quality-audit-output");
   assert.equal(job.source.type, "openapi_spec");
   assert.equal(job.source.operationCount, 2);
-  assert.ok(job.verifierTerms.includes("recommended_actions"));
+  assert.deepEqual(job.verifierTerms, [SPEC.apiTitle, SPEC.specUrl, SPEC.localSurface, "3.1.0"]);
 });
 
 test("openApiSpecKey dedupes by provider, URL, and local surface", () => {

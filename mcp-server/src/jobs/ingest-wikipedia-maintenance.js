@@ -3,6 +3,7 @@
 import { pathToFileURL } from "node:url";
 import { schemaRefToJobSchemaPath } from "../core/job-schema-registry.js";
 import { DEFAULT_ESCROW_ASSET_SYMBOL } from "../core/assets.js";
+import { substantiveVerifierTerms } from "./substantive-verifier-terms.js";
 
 export const DEFAULT_LANGUAGE = "en";
 export const DEFAULT_BASE_URL = "http://localhost:8787";
@@ -17,19 +18,16 @@ const TASK_CONFIG = {
   citation_repair: {
     titlePrefix: "Audit and report on Wikipedia citations",
     outputSchemaRef: "schema://jobs/wikipedia-citation-repair-output",
-    verifierTerms: ["page_title", "revision_id", "citation_findings", "proposed_changes", "review_notes"],
     rewardAmount: 0.4
   },
   freshness_check: {
     titlePrefix: "Audit and report on Wikipedia freshness",
     outputSchemaRef: "schema://jobs/wikipedia-freshness-check-output",
-    verifierTerms: ["page_title", "revision_id", "freshness_findings", "recommended_editor_actions", "risk_level"],
     rewardAmount: 0.4
   },
   infobox_consistency: {
     titlePrefix: "Audit and report on Wikipedia infobox consistency",
     outputSchemaRef: "schema://jobs/wikipedia-infobox-consistency-output",
-    verifierTerms: ["page_title", "revision_id", "checked_fields", "proposed_changes", "review_notes"],
     rewardAmount: 0.4
   }
 };
@@ -209,8 +207,8 @@ export function toPlatformJob(article, score = scoreArticle(article)) {
     rewardAsset: DEFAULT_ESCROW_ASSET_SYMBOL,
     rewardAmount: task.rewardAmount,
     verifierMode: "benchmark",
-    verifierTerms: task.verifierTerms,
-    verifierMinimumMatches: 4,
+    verifierTerms: substantiveVerifierTerms(article.title, article.revisionId, pinnedRevisionUrl),
+    verifierMinimumMatches: 2,
     inputSchemaRef: "schema://jobs/wikipedia-maintenance-input",
     outputSchemaRef: task.outputSchemaRef,
     claimTtlSeconds: 3600,

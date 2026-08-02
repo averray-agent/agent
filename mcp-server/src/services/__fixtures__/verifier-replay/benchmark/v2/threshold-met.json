@@ -1,6 +1,6 @@
 {
   "handler": "benchmark",
-  "handlerVersion": 1,
+  "handlerVersion": 2,
   "evidenceSchemaRef": "schema://jobs/benchmark-narrative-output",
   "job": {
     "id": "benchmark-narrative-001",
