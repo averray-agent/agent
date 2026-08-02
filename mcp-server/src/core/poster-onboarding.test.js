@@ -179,6 +179,38 @@ test("poster onboarding is a clean-room machine recipe backed by non-default liv
   assert.equal(human.reviewPath, "dispute_arbitration");
   assert.match(human.verdicts.dismissed, /^Approve:/u);
   assert.match(human.verdicts.upheld, /^Reject:/u);
+  assert.deepEqual(payload.verification.templateRouting.fix_with_pull_request, {
+    verifierMode: "github_pr",
+    gate: "automated_live_github",
+    disclosure:
+      "Checks the public PR against the selected repository and issue, requires its Averray disclosure footer to match the actual claimant wallet or claim session, and re-derives live CI/check state and submitted test evidence. A readable missing or mismatched claimant binding is rejected; unreadable or ambiguous GitHub evidence escalates to human review and never auto-approves."
+  });
+  assert.deepEqual(payload.verification.templateRouting.audit_and_implementation_report, {
+    verifierMode: "human_fallback",
+    gate: "human_review",
+    disclosure:
+      "Open-ended audit reports require a human decision and are not auto-approved by the GitHub PR verifier."
+  });
+  const githubPr = payload.verification.modes.find((mode) => mode.id === "github_pr");
+  assert.equal(githubPr.gate, "automated_live_github");
+  assert.ok(githubPr.checks.includes("Averray disclosure footer identifies the actual claimant wallet or claim session"));
+  assert.deepEqual(githubPr.claimantBinding, {
+    required: true,
+    acceptedIdentifiers: ["claimant_wallet", "claim_session_id"],
+    footerFormat: {
+      header: [
+        "This contribution was prepared by an autonomous agent operating on the",
+        "Averray platform."
+      ],
+      walletLine: "Agent identity: <claimant EVM wallet>",
+      sessionLine: "Claim session:  <claim session id>",
+      matchRule: "Include at least one claimant line; its value must exactly match the wallet or session returned by the claim."
+    },
+    readableMismatch: "rejected",
+    unreadableBody: "human_fallback"
+  });
+  assert.equal(githubPr.failureMode, "human_fallback");
+  assert.match(githubPr.failureBehavior, /never auto-approves/iu);
   assert.equal(payload.docs.workedExample, "https://github.com/averray-agent/agent/pull/874");
   assert.deepEqual(payload.liveReads, {
     asOf: "2026-08-01T08:00:00.000Z",

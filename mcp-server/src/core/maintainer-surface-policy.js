@@ -149,13 +149,15 @@ export async function evaluateMaintainerSurfaceForIssue(issue, {
 export function buildAverrayDisclosureFooter({
   agentWallet = "0x...",
   jobSpecUrl = "https://api.averray.com/jobs/{id}",
-  submissionHash = "0x{hash}"
+  submissionHash = "0x{hash}",
+  claimSessionId = undefined
 } = {}) {
   return [
     "This contribution was prepared by an autonomous agent operating on the",
     "Averray platform.",
     "",
     `Agent identity: ${agentWallet}`,
+    ...(claimSessionId ? [`Claim session:  ${claimSessionId}`] : []),
     `Job spec:       ${jobSpecUrl}`,
     `Submission:     ${submissionHash}`,
     "",
@@ -169,10 +171,65 @@ export function hasAverrayDisclosureFooter(text) {
   return String(text ?? "").includes(FOOTER_HEADER) && String(text ?? "").includes("Averray platform.");
 }
 
+/**
+ * Bind a readable PR disclosure to the worker who actually claimed the job.
+ * Wallet and session are alternative public identifiers: either exact match
+ * is sufficient, but a generic footer (0x...) is not. This deliberately reads
+ * only labelled footer lines so an unrelated address elsewhere in the PR body
+ * cannot satisfy the gate.
+ */
+export function inspectAverrayClaimantBinding(text, {
+  claimantWallet = undefined,
+  claimSessionId = undefined
+} = {}) {
+  const value = String(text ?? "");
+  const disclosedWallet = value.match(/^\s*Agent identity:\s*(0x[a-f0-9]{40})\s*$/imu)?.[1] ?? null;
+  const disclosedSessionId = value.match(/^\s*Claim session:\s*(\S+)\s*$/imu)?.[1] ?? null;
+  const expectedWallet = normalizeEvmAddress(claimantWallet);
+  const expectedSessionId = typeof claimSessionId === "string" && claimSessionId.trim()
+    ? claimSessionId.trim()
+    : null;
+  const walletMatches = Boolean(
+    expectedWallet
+    && disclosedWallet
+    && normalizeEvmAddress(disclosedWallet) === expectedWallet
+  );
+  const sessionMatches = Boolean(
+    expectedSessionId
+    && disclosedSessionId
+    && disclosedSessionId === expectedSessionId
+  );
+  const expectedBindingAvailable = Boolean(expectedWallet || expectedSessionId);
+  const disclosedBindingAvailable = Boolean(disclosedWallet || disclosedSessionId);
+  const footerPresent = hasAverrayDisclosureFooter(value);
+
+  return {
+    status: !expectedBindingAvailable
+      ? "claimant_context_missing"
+      : !footerPresent
+        ? "missing"
+        : walletMatches || sessionMatches
+          ? "matched"
+          : disclosedBindingAvailable
+            ? "mismatched"
+            : "missing",
+    disclosedWallet,
+    disclosedSessionId,
+    footerPresent,
+    walletMatches,
+    sessionMatches
+  };
+}
+
 export function appendAverrayDisclosureFooter(body, footerOptions = {}) {
   const value = String(body ?? "").trimEnd();
   if (hasAverrayDisclosureFooter(value)) return value;
   return `${value}${value ? "\n\n" : ""}${buildAverrayDisclosureFooter(footerOptions)}`;
+}
+
+function normalizeEvmAddress(value) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return /^0x[a-f0-9]{40}$/u.test(normalized) ? normalized : null;
 }
 
 export async function countOpenGithubPullRequestsForRepo(stateStore, repo, { limit = 10_000 } = {}) {

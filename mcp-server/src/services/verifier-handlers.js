@@ -1,5 +1,8 @@
 import { extractSubmissionText } from "../core/submission.js";
-import { hasAverrayDisclosureFooter } from "../core/maintainer-surface-policy.js";
+import {
+  hasAverrayDisclosureFooter,
+  inspectAverrayClaimantBinding
+} from "../core/maintainer-surface-policy.js";
 import { getJobSchema } from "../core/job-schema-registry.js";
 
 const HANDLER_VERSION = 1;
@@ -110,22 +113,24 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
   return {
     id: "github_pr",
     version: HANDLER_VERSION,
-    async evaluate(job, evidence) {
+    async evaluate(job, evidence, verificationContext = {}) {
       const normalized = normalizeEvidence(evidence);
       const structured = structuredEvidence(evidence);
       const prUrl = firstNonEmptyString(structured.prUrl, structured.pullRequestUrl, findGithubPullRequestUrl(normalized));
       const parsedPr = parseGithubPullRequestUrl(prUrl);
-      const expectedRepo = normalizeRepo(job.source?.repo);
-      const expectedIssueNumber = Number(job.source?.issueNumber);
+      const githubSource = githubSourceForJob(job);
+      const expectedRepo = normalizeRepo(githubSource?.repo);
+      const expectedIssueNumber = Number(githubSource?.issueNumber);
       const issueReferenceRequired = job.verifierConfig?.requireIssueReference !== false;
       const testEvidenceRequired = job.verifierConfig?.requireTestEvidence !== false;
       const acceptMergedAsApproved = job.verifierConfig?.acceptMergedAsApproved !== false;
-      const disclosureRequired = job.source?.maintainerPolicy?.disclosureRequired === true;
+      const claimantBindingRequired = job.verifierConfig?.requireClaimantBinding === true;
+      const disclosureRequired = githubSource?.maintainerPolicy?.disclosureRequired === true;
       const submittedIssueReferenced = referencesIssue({
         structured,
         normalized,
         issueNumber: expectedIssueNumber,
-        issueUrl: job.source?.issueUrl
+        issueUrl: githubSource?.issueUrl
       });
       const submittedTestEvidence = hasTestEvidence(structured, normalized);
       const submittedChecksPassing = structured.checksPassing === true || structured.ciStatus === "passing";
@@ -137,19 +142,26 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
         ? await fetchGithubPullRequestSnapshot({
             parsedPr,
             issueNumber: expectedIssueNumber,
-            issueUrl: job.source?.issueUrl,
+            issueUrl: githubSource?.issueUrl,
             fetchImpl,
             githubToken,
-            githubApiBaseUrl
+            githubApiBaseUrl,
+            claimantWallet: verificationContext.claimantWallet,
+            claimSessionId: verificationContext.claimSessionId
           })
         : {
             status: parsedPr ? "skipped" : "not_applicable",
             reason: parsedPr ? "github_token_not_configured" : "invalid_or_missing_pr_url"
           };
       const githubVerified = githubLookup.status === "verified";
+      const claimantBinding = githubVerified
+        ? githubLookup.claimantBinding
+        : { status: "unavailable" };
+      const claimantBindingObservable = githubVerified && githubLookup.prBodyReadable === true;
+      const claimantBindingMatches = claimantBinding?.status === "matched";
 
       const repoMatches = Boolean(parsedPr && expectedRepo && parsedPr.repo === expectedRepo);
-      const issueReferenced = githubVerified ? (githubLookup.issueReferenced || submittedIssueReferenced) : submittedIssueReferenced;
+      const issueReferenced = githubVerified ? githubLookup.issueReferenced : submittedIssueReferenced;
       const checksPassing = githubVerified ? githubLookup.checksPassing : submittedChecksPassing;
       const reviewApproved = githubVerified ? githubLookup.reviewApproved : submittedReviewApproved;
       const merged = githubVerified ? githubLookup.merged : submittedMerged;
@@ -170,7 +182,8 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
         checksPassing,
         reviewApproved,
         merged,
-        disclosureFooterPresent: !disclosureRequired || !disclosureFooterObservable || disclosureFooterPresent
+        disclosureFooterPresent: !disclosureRequired || !disclosureFooterObservable || disclosureFooterPresent,
+        claimantBinding: !claimantBindingRequired || claimantBindingMatches
       };
       const signals = {
         attempted: true,
@@ -187,11 +200,66 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
       const blockers = [];
 
       if (!checks.prUrlValid) blockers.push("valid GitHub pull request URL");
-      if (!repoMatches) blockers.push(`PR repo must match ${job.source?.repo ?? "the source repo"}`);
+      if (!repoMatches) blockers.push(`PR repo must match ${githubSource?.repo ?? "the source repo"}`);
       if (issueReferenceRequired && !issueReferenced) blockers.push(`submission must reference issue #${expectedIssueNumber}`);
       if (testEvidenceRequired && !testEvidenceSubmitted && !mergedAccepted) blockers.push("test or docs-build evidence");
       if (disclosureRequired && disclosureFooterObservable && !disclosureFooterPresent) {
         blockers.push("Averray disclosure footer");
+      }
+      if (
+        claimantBindingRequired
+        && claimantBindingObservable
+        && ["missing", "mismatched"].includes(claimantBinding?.status)
+      ) {
+        blockers.push(claimantBinding.status === "mismatched"
+          ? "Averray disclosure claimant must match the actual claimant wallet or claim session"
+          : "Averray disclosure must identify the actual claimant wallet or claim session");
+      }
+
+      const githubEvidenceUnavailable = githubLookup.status !== "verified";
+      const githubEvidencePartial = Object.values(githubLookup.partial ?? {}).includes("unavailable");
+      const claimantBindingUnverified = claimantBindingRequired
+        && (!claimantBindingObservable || claimantBinding?.status === "claimant_context_missing");
+      const scoreAmbiguous = score < minimumScore && blockers.length === 0;
+      const definiteClaimantFailure = claimantBindingRequired
+        && claimantBindingObservable
+        && ["missing", "mismatched"].includes(claimantBinding?.status);
+      const definiteInputFailure = !checks.prUrlValid || !repoMatches || definiteClaimantFailure;
+
+      // A malformed or cross-repository submission is directly observable and
+      // remains a rejection. Every inability to re-derive the PR against live
+      // GitHub is different: it must enter human review, never reuse submitted
+      // claims as sufficient evidence for an automatic payout.
+      if (!definiteInputFailure && (
+        githubEvidenceUnavailable
+        || githubEvidencePartial
+        || claimantBindingUnverified
+        || scoreAmbiguous
+      )) {
+        return githubPrHumanReviewEscalation({
+          job,
+          score,
+          githubLookup,
+          checks,
+          signals,
+          evidence: {
+            prUrl: prUrl || null,
+            repo: parsedPr?.repo ?? null,
+            pullNumber: parsedPr?.pullNumber ?? null,
+            expectedRepo: expectedRepo || null,
+            expectedIssueNumber: Number.isFinite(expectedIssueNumber) ? expectedIssueNumber : null,
+            disclosureRequired,
+            claimantBindingRequired,
+            claimantBindingStatus: claimantBinding?.status ?? "unavailable"
+          },
+          reason: githubEvidenceUnavailable
+            ? githubLookup.reason ?? "github_lookup_unavailable"
+            : githubEvidencePartial
+              ? "github_lookup_partial"
+              : claimantBindingUnverified
+                ? `github_pr_body_claimant_binding_${claimantBinding?.status ?? "unavailable"}`
+                : "github_score_ambiguous"
+        });
       }
 
       const approved = score >= minimumScore && blockers.length === 0;
@@ -211,7 +279,9 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
           pullNumber: parsedPr?.pullNumber ?? null,
           expectedRepo: expectedRepo || null,
           expectedIssueNumber: Number.isFinite(expectedIssueNumber) ? expectedIssueNumber : null,
-          disclosureRequired
+          disclosureRequired,
+          claimantBindingRequired,
+          claimantBindingStatus: claimantBinding?.status ?? "not_required"
         },
         githubLookup,
         checks,
@@ -250,14 +320,58 @@ export class VerifierRegistry {
     }));
   }
 
-  async evaluate(job, evidence) {
+  async evaluate(job, evidence, verificationContext = {}) {
     const handlerId = job.verifierConfig.handler;
     const handler = this.handlers.get(handlerId);
     if (!handler) {
       throw new Error(`No verifier handler registered for ${handlerId}`);
     }
-    return handler.evaluate(job, evidence);
+    return handler.evaluate(job, evidence, verificationContext);
   }
+}
+
+function githubPrHumanReviewEscalation({
+  job,
+  score,
+  githubLookup,
+  checks,
+  signals,
+  evidence,
+  reason
+}) {
+  return {
+    jobId: job.id,
+    handler: "human_fallback",
+    handlerVersion: HANDLER_VERSION,
+    escalatedFrom: "github_pr",
+    outcome: "disputed",
+    score,
+    reasonCode: "HUMAN_REVIEW_REQUIRED",
+    detail: `Live GitHub verification could not make a confident decision (${reason}); human review is required and the submission was not auto-approved.`,
+    evidence,
+    githubLookup,
+    checks,
+    signals,
+    reputationSignals: {
+      category: job.category,
+      attempted: 1,
+      prOpened: signals.prOpened ? 1 : 0,
+      checksPassed: signals.checksPassed ? 1 : 0,
+      maintainerApproved: signals.maintainerApproved ? 1 : 0,
+      merged: signals.merged ? 1 : 0
+    }
+  };
+}
+
+function githubSourceForJob(job) {
+  const source = job?.source;
+  if (!source || typeof source !== "object" || Array.isArray(source)) {
+    return {};
+  }
+  const declared = source.declared;
+  return declared && typeof declared === "object" && !Array.isArray(declared)
+    ? { ...declared, ...source }
+    : source;
 }
 
 function firstNonEmptyString(...values) {
@@ -287,7 +401,9 @@ async function fetchGithubPullRequestSnapshot({
   issueUrl,
   fetchImpl,
   githubToken,
-  githubApiBaseUrl
+  githubApiBaseUrl,
+  claimantWallet,
+  claimSessionId
 }) {
   const baseUrl = String(githubApiBaseUrl ?? "https://api.github.com").replace(/\/+$/u, "");
   const repoPath = `${encodeURIComponent(parsedPr.owner)}/${encodeURIComponent(parsedPr.name)}`;
@@ -303,6 +419,12 @@ async function fetchGithubPullRequestSnapshot({
     const pr = await fetchGithubJson(fetchImpl, `${baseUrl}/repos/${repoPath}/pulls/${parsedPr.pullNumber}`, { headers });
     const headSha = typeof pr?.head?.sha === "string" ? pr.head.sha : "";
     const title = typeof pr?.title === "string" ? pr.title : "";
+    const prBodyReadable = Boolean(
+      pr
+      && typeof pr === "object"
+      && Object.hasOwn(pr, "body")
+      && (typeof pr.body === "string" || pr.body === null)
+    );
     const body = typeof pr?.body === "string" ? pr.body : "";
     const htmlUrl = typeof pr?.html_url === "string" ? pr.html_url : "";
     const prText = `${title}\n${body}\n${htmlUrl}`.toLowerCase();
@@ -340,6 +462,10 @@ async function fetchGithubPullRequestSnapshot({
       reviewApproved: reviewSummary.reviewApproved,
       reviewState: reviewSummary.reviewState,
       disclosureFooterPresent: hasAverrayDisclosureFooter(body),
+      prBodyReadable,
+      claimantBinding: prBodyReadable
+        ? inspectAverrayClaimantBinding(body, { claimantWallet, claimSessionId })
+        : { status: "unavailable", disclosedWallet: null, disclosedSessionId: null },
       partial: {
         status: statusResult?.status === "rejected" ? "unavailable" : "available",
         checkRuns: checkRunsResult?.status === "rejected" ? "unavailable" : "available",

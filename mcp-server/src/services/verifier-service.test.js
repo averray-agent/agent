@@ -120,6 +120,52 @@ test("verifySubmission persists verification input and supports replay", async (
   assert.deepEqual(replay.verifierConfigSnapshot.expectedOutputs, ["release_id", "checks_passed", "go_no_go"]);
 });
 
+test("verifySubmission passes the actual claimant wallet and claim session to the verifier", async () => {
+  const stateStore = new MemoryStateStore();
+  const claimantWallet = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const submitted = transitionSession({
+    sessionId: "external-pr-session-1",
+    wallet: claimantWallet,
+    jobId: "external-pr-job-1",
+    submission: normalizeSubmission({
+      prUrl: "https://github.com/example/project/pull/77",
+      summary: "Fixes #42.",
+      tests: "npm test passed"
+    })
+  }, "claimed", { reason: "job_claimed" });
+  await stateStore.upsertSession(transitionSession(submitted, "submitted", { reason: "work_submitted" }));
+
+  let receivedContext;
+  const platformService = {
+    resumeSession: (sessionId) => stateStore.getSession(sessionId),
+    getJobDefinition: () => ({
+      id: "external-pr-job-1",
+      verifierMode: "github_pr",
+      verifierConfig: { version: 1, handler: "github_pr", requireClaimantBinding: true }
+    }),
+    ingestVerification: async (sessionId) => stateStore.getSession(sessionId)
+  };
+  const service = new VerifierService(platformService, stateStore, undefined, {
+    async evaluate(_job, _evidence, context) {
+      receivedContext = context;
+      return {
+        handler: "github_pr",
+        handlerVersion: 1,
+        outcome: "rejected",
+        reasonCode: "GITHUB_PR_EVIDENCE_INCOMPLETE"
+      };
+    },
+    listHandlers: () => ["github_pr"]
+  });
+
+  await service.verifySubmission({ sessionId: "external-pr-session-1" });
+
+  assert.deepEqual(receivedContext, {
+    claimantWallet,
+    claimSessionId: "external-pr-session-1"
+  });
+});
+
 test("verifySubmission rejects non-verifiable sessions before handler or chain side effects", async () => {
   const stateStore = new MemoryStateStore();
   const claimed = transitionSession({
@@ -229,7 +275,10 @@ test("verifySubmission validates built-in schema-native input before handler or 
 });
 
 test("github_pr verifier scores structured PR evidence and exposes reputation signals", async () => {
-  const registry = new VerifierRegistry();
+  const registry = new VerifierRegistry({
+    githubToken: "github_pat_test",
+    fetchImpl: liveGithubPrFetch()
+  });
   const job = {
     id: "oss-example-project-42-add-tests",
     category: "testing",
@@ -361,6 +410,122 @@ test("github_pr verifier enriches PR evidence from GitHub when token is configur
   assert.ok(calls.some((url) => url.endsWith("/commits/abc123/check-runs")));
 });
 
+test("github_pr lookup failures escalate to human review rather than approving submitted claims", async () => {
+  const job = {
+    id: "external-example-project-42",
+    category: "coding",
+    source: {
+      type: "external",
+      declared: {
+        type: "github_issue",
+        repo: "example/project",
+        issueNumber: 42,
+        issueUrl: "https://github.com/example/project/issues/42"
+      }
+    },
+    verifierConfig: {
+      version: 1,
+      handler: "github_pr",
+      minimumScore: 60,
+      requireIssueReference: true,
+      requireTestEvidence: true
+    }
+  };
+
+  const evidence = normalizeSubmission({
+    prUrl: "https://github.com/example/project/pull/77",
+    summary: "Claims to fix #42.",
+    tests: "npm test passed",
+    issueNumber: 42,
+    checksPassing: true,
+    merged: true
+  });
+  const cases = [
+    {
+      name: "credentials unavailable",
+      githubToken: "",
+      fetchImpl: liveGithubPrFetch()
+    },
+    {
+      name: "rate limited",
+      fetchImpl: async () => ({ ok: false, status: 429, async json() { return {}; } })
+    },
+    {
+      name: "private or inaccessible repository",
+      fetchImpl: async () => ({ ok: false, status: 404, async json() { return {}; } })
+    },
+    {
+      name: "network unavailable",
+      fetchImpl: async () => { throw new Error("network_down"); }
+    },
+    {
+      name: "partially unreadable",
+      fetchImpl: async (url) => {
+        if (url.endsWith("/pulls/77")) {
+          return jsonResponse({
+            html_url: "https://github.com/example/project/pull/77",
+            title: "Fix parser validation",
+            body: "Closes #42",
+            state: "open",
+            merged: false,
+            head: { sha: "abc123" }
+          });
+        }
+        throw new Error("secondary_lookup_failed");
+      }
+    }
+  ];
+
+  for (const scenario of cases) {
+    const verdict = await new VerifierRegistry({
+      githubToken: scenario.githubToken ?? "github_pat_test",
+      fetchImpl: scenario.fetchImpl
+    }).evaluate(job, evidence);
+
+    assert.equal(verdict.outcome, "disputed", scenario.name);
+    assert.equal(verdict.handler, "human_fallback", scenario.name);
+    assert.equal(verdict.escalatedFrom, "github_pr", scenario.name);
+    assert.equal(verdict.reasonCode, "HUMAN_REVIEW_REQUIRED", scenario.name);
+    assert.match(verdict.detail, /not auto-approved/iu, scenario.name);
+  }
+});
+
+test("github_pr ambiguous live score escalates to human review", async () => {
+  const registry = new VerifierRegistry({
+    githubToken: "github_pat_test",
+    fetchImpl: liveGithubPrFetch()
+  });
+  const verdict = await registry.evaluate({
+    id: "external-example-project-42",
+    category: "coding",
+    source: {
+      type: "external",
+      declared: {
+        type: "github_issue",
+        repo: "example/project",
+        issueNumber: 42,
+        issueUrl: "https://github.com/example/project/issues/42"
+      }
+    },
+    verifierConfig: {
+      version: 1,
+      handler: "github_pr",
+      minimumScore: 100,
+      requireIssueReference: true,
+      requireTestEvidence: true
+    }
+  }, normalizeSubmission({
+    prUrl: "https://github.com/example/project/pull/77",
+    summary: "Fixes #42.",
+    tests: "npm test passed"
+  }));
+
+  assert.equal(verdict.githubLookup.status, "verified");
+  assert.equal(verdict.outcome, "disputed");
+  assert.equal(verdict.handler, "human_fallback");
+  assert.match(verdict.detail, /github_score_ambiguous/u);
+});
+
 test("github_pr verifier rejects observable PR bodies missing required disclosure footer", async () => {
   const registry = new VerifierRegistry({
     githubToken: "github_pat_test",
@@ -409,7 +574,12 @@ test("github_pr verifier rejects observable PR bodies missing required disclosur
 });
 
 test("github_pr verifier accepts required disclosure footer when observed", async () => {
-  const registry = new VerifierRegistry();
+  const registry = new VerifierRegistry({
+    githubToken: "github_pat_test",
+    fetchImpl: liveGithubPrFetch({
+      body: `Closes #42\n\n${buildAverrayDisclosureFooter()}`
+    })
+  });
   const job = {
     id: "oss-example-project-42-add-tests",
     category: "testing",
@@ -439,6 +609,141 @@ test("github_pr verifier accepts required disclosure footer when observed", asyn
   assert.equal(verdict.outcome, "approved");
   assert.equal(verdict.checks.disclosureFooterPresent, true);
 });
+
+test("github_pr wizard gate accepts a live PR body bound to the actual claimant", async () => {
+  const claimantWallet = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const registry = new VerifierRegistry({
+    githubToken: "github_pat_test",
+    fetchImpl: liveGithubPrFetch({
+      body: `Closes #42\n\n${buildAverrayDisclosureFooter({ agentWallet: claimantWallet })}`
+    })
+  });
+  const verdict = await registry.evaluate(githubPrWizardJob(), normalizeSubmission({
+    prUrl: "https://github.com/example/project/pull/77",
+    summary: "Adds regression coverage for #42.",
+    tests: "npm test passed"
+  }), { claimantWallet, claimSessionId: "external-pr-session-1" });
+
+  assert.equal(verdict.outcome, "approved");
+  assert.equal(verdict.checks.claimantBinding, true);
+  assert.equal(verdict.githubLookup.claimantBinding.status, "matched");
+});
+
+test("github_pr wizard gate rejects a claimant submitting someone else's merged PR", async () => {
+  const claimantWallet = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const otherWorker = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+  const registry = new VerifierRegistry({
+    githubToken: "github_pat_test",
+    fetchImpl: liveGithubPrFetch({
+      body: `Closes #42\n\n${buildAverrayDisclosureFooter({ agentWallet: otherWorker })}`,
+      merged: true
+    })
+  });
+  const verdict = await registry.evaluate(githubPrWizardJob(), normalizeSubmission({
+    prUrl: "https://github.com/example/project/pull/77",
+    summary: "Submits an already merged PR for #42.",
+    tests: "npm test passed"
+  }), { claimantWallet, claimSessionId: "external-pr-session-claimant" });
+
+  assert.equal(verdict.githubLookup.merged, true);
+  assert.equal(verdict.githubLookup.claimantBinding.status, "mismatched");
+  assert.equal(verdict.checks.claimantBinding, false);
+  assert.equal(verdict.outcome, "rejected");
+  assert.match(verdict.detail, /claimant must match the actual claimant/iu);
+});
+
+test("github_pr wizard gate rejects a claimant line outside the Averray disclosure footer", async () => {
+  const claimantWallet = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const registry = new VerifierRegistry({
+    githubToken: "github_pat_test",
+    fetchImpl: liveGithubPrFetch({
+      body: `Closes #42\n\nAgent identity: ${claimantWallet}`,
+      merged: true
+    })
+  });
+  const verdict = await registry.evaluate(githubPrWizardJob(), normalizeSubmission({
+    prUrl: "https://github.com/example/project/pull/77",
+    summary: "Submits a merged PR for #42.",
+    tests: "npm test passed"
+  }), { claimantWallet, claimSessionId: "external-pr-session-claimant" });
+
+  assert.equal(verdict.githubLookup.claimantBinding.status, "missing");
+  assert.equal(verdict.githubLookup.claimantBinding.footerPresent, false);
+  assert.equal(verdict.outcome, "rejected");
+  assert.match(verdict.detail, /disclosure must identify the actual claimant/iu);
+});
+
+test("github_pr wizard gate escalates an unreadable live PR body to human review", async () => {
+  const claimantWallet = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const registry = new VerifierRegistry({
+    githubToken: "github_pat_test",
+    fetchImpl: liveGithubPrFetch({ bodyReadable: false })
+  });
+  const verdict = await registry.evaluate(githubPrWizardJob(), normalizeSubmission({
+    prUrl: "https://github.com/example/project/pull/77",
+    summary: "Adds regression coverage for #42.",
+    tests: "npm test passed"
+  }), { claimantWallet, claimSessionId: "external-pr-session-1" });
+
+  assert.equal(verdict.outcome, "disputed");
+  assert.equal(verdict.handler, "human_fallback");
+  assert.equal(verdict.escalatedFrom, "github_pr");
+  assert.equal(verdict.githubLookup.prBodyReadable, false);
+  assert.equal(verdict.githubLookup.claimantBinding.status, "unavailable");
+});
+
+function githubPrWizardJob() {
+  return {
+    id: "external-example-project-42",
+    category: "coding",
+    source: {
+      type: "external",
+      declared: {
+        type: "github_issue",
+        repo: "example/project",
+        issueNumber: 42,
+        issueUrl: "https://github.com/example/project/issues/42"
+      }
+    },
+    verifierConfig: {
+      version: 1,
+      handler: "github_pr",
+      minimumScore: 60,
+      requireIssueReference: true,
+      requireTestEvidence: true,
+      acceptMergedAsApproved: true,
+      requireClaimantBinding: true
+    }
+  };
+}
+
+function liveGithubPrFetch({ body = "Closes #42", bodyReadable = true, merged = false } = {}) {
+  return async (url) => {
+    if (url.endsWith("/pulls/77")) {
+      const pullRequest = {
+        html_url: "https://github.com/example/project/pull/77",
+        title: "Fix parser validation for #42",
+        state: "open",
+        merged,
+        head: { sha: "abc123" }
+      };
+      if (bodyReadable) pullRequest.body = body;
+      return jsonResponse(pullRequest);
+    }
+    if (url.endsWith("/commits/abc123/status")) {
+      return jsonResponse({ state: "success" });
+    }
+    if (url.endsWith("/commits/abc123/check-runs")) {
+      return jsonResponse({
+        check_runs: [{ status: "completed", conclusion: "success" }]
+      });
+    }
+    if (url.endsWith("/pulls/77/reviews")) {
+      return jsonResponse([{ state: "APPROVED", user: { login: "maintainer" } }]);
+    }
+    return { ok: false, status: 404, async json() { return {}; } };
+  };
+}
 
 function jsonResponse(payload) {
   return {
@@ -519,8 +824,11 @@ test("every registered verifier handler has replay fixtures for its current hand
 for (const handlerId of listFixtureHandlerIds()) {
   for (const { name, version, fixture } of loadFixturesForHandler(handlerId)) {
     test(`handler-versioned replay fixture remains stable under current handler: ${name}`, async () => {
-      // Force the github_pr handler down its tokenless path so replay does not depend on a live GitHub fetch.
-      const registry = new VerifierRegistry({ githubToken: "" });
+      // A github_pr result is reproducible only with a live-derived snapshot;
+      // submitted claims alone are deliberately insufficient for approval.
+      const registry = fixture.handler === "github_pr"
+        ? new VerifierRegistry({ githubToken: "github_pat_test", fetchImpl: liveGithubPrFetch() })
+        : new VerifierRegistry({ githubToken: "" });
       const verdict = await registry.evaluate(fixture.job, fixture.verificationInput);
       assert.equal(verdict.handler, fixture.handler);
       assert.equal(

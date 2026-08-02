@@ -7,6 +7,7 @@ import {
   countOpenGithubPullRequestsForRepo,
   evaluateMaintainerSurfaceForIssue,
   hasAverrayDisclosureFooter,
+  inspectAverrayClaimantBinding,
   isRepoDenied,
   scanPolicyText
 } from "./maintainer-surface-policy.js";
@@ -55,6 +56,34 @@ test("Averray disclosure footer helper is idempotent", () => {
   });
   assert.equal(hasAverrayDisclosureFooter(footer), true);
   assert.equal(appendAverrayDisclosureFooter(footer, { agentWallet: "0xdef" }), footer);
+});
+
+test("Averray disclosure claimant binding matches only the labelled claimant wallet or claim session", () => {
+  const claimantWallet = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const footer = buildAverrayDisclosureFooter({
+    agentWallet: claimantWallet,
+    claimSessionId: "session-claimant-1"
+  });
+
+  assert.equal(inspectAverrayClaimantBinding(footer, { claimantWallet }).status, "matched");
+  assert.equal(
+    inspectAverrayClaimantBinding(footer, { claimSessionId: "session-claimant-1" }).status,
+    "matched"
+  );
+  assert.equal(
+    inspectAverrayClaimantBinding(
+      `Unrelated mention ${claimantWallet}\n\n${buildAverrayDisclosureFooter({
+        agentWallet: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      })}`,
+      { claimantWallet }
+    ).status,
+    "mismatched"
+  );
+  assert.equal(
+    inspectAverrayClaimantBinding(`Agent identity: ${claimantWallet}`, { claimantWallet }).status,
+    "missing"
+  );
+  assert.equal(inspectAverrayClaimantBinding(buildAverrayDisclosureFooter(), { claimantWallet }).status, "missing");
 });
 
 test("counts active GitHub pull requests for a repo from funded jobs", async () => {

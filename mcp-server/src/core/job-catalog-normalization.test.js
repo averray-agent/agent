@@ -129,6 +129,10 @@ test("buildVerifierConfig supports deterministic, github_pr, and human fallback 
       acceptMergedAsApproved: true
     }
   );
+  assert.equal(
+    buildVerifierConfig("github_pr", { requireClaimantBinding: true }).requireClaimantBinding,
+    true
+  );
   assert.deepEqual(
     buildVerifierConfig("human_fallback", { escalationMessage: "Please review.", autoApprove: true }),
     {

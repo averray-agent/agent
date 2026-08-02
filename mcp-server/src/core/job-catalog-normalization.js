@@ -193,7 +193,8 @@ export function buildVerifierConfig(verifierMode, input) {
       minimumScore,
       requireIssueReference: input?.requireIssueReference !== false,
       requireTestEvidence: input?.requireTestEvidence !== false,
-      acceptMergedAsApproved: input?.acceptMergedAsApproved !== false
+      acceptMergedAsApproved: input?.acceptMergedAsApproved !== false,
+      ...(input?.requireClaimantBinding === true ? { requireClaimantBinding: true } : {})
     };
   }
 

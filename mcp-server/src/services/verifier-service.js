@@ -34,7 +34,11 @@ export class VerifierService {
     const chainJobId = session.chainJobId ?? session.jobId;
     const verificationInput = this.resolveVerificationInput(session, evidence);
     const validatedVerificationInput = this.validateVerificationInput(job, verificationInput);
-    const verdict = await this.registry.evaluate(job, validatedVerificationInput);
+    const verdict = await this.registry.evaluate(
+      job,
+      validatedVerificationInput,
+      verificationClaimantContext(session)
+    );
     const reasoningHash = hashCanonicalContent({
       handler: verdict.handler,
       handlerVersion: verdict.handlerVersion,
@@ -173,7 +177,11 @@ export class VerifierService {
     const verificationInput = existing?.verificationInput ?? this.resolveVerificationInput(session);
     const replayJob = jobWithVerifierConfigSnapshot(job, existing?.verifierConfigSnapshot);
     const validatedVerificationInput = this.validateVerificationInput(replayJob, verificationInput);
-    const verdict = await this.registry.evaluate(replayJob, validatedVerificationInput);
+    const verdict = await this.registry.evaluate(
+      replayJob,
+      validatedVerificationInput,
+      verificationClaimantContext(session)
+    );
     const auditFields = buildVerificationAuditFields(replayJob, { verdict, verificationInput: validatedVerificationInput });
     const replayResult = {
       ...verdict,
@@ -345,4 +353,11 @@ function isNormalizedSubmission(input) {
     return true;
   }
   return input.kind === "text" && typeof input.evidenceText === "string";
+}
+
+function verificationClaimantContext(session) {
+  return {
+    claimantWallet: session?.wallet,
+    claimSessionId: session?.sessionId
+  };
 }

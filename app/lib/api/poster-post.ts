@@ -1,5 +1,6 @@
 import { ApiError } from "@/lib/api/client";
 import { getStoredToken } from "@/lib/auth/token-store";
+import { buildPosterDefinition } from "@/lib/api/poster-definition";
 
 /**
  * POST /jobs/draft with the same canonical definition the posting tool
@@ -9,37 +10,18 @@ import { getStoredToken } from "@/lib/auth/token-store";
  */
 
 export interface DraftFormInput {
+  deliverableKind: "report" | "pr";
   title: string;
   task: string;
   repo: string;
+  issueNumber: number;
+  issueUrl: string;
   acceptanceCriteria: string[];
   rewardUsdc: string;
 }
 
 export function buildDefinition(input: DraftFormInput): Record<string, unknown> {
-  return {
-    title: input.title.trim() || `Audit and report on ${input.repo.trim()}`,
-    description: input.task.trim(),
-    category: "coding",
-    tier: "starter",
-    jobType: "work",
-    requiredRole: "worker",
-    rewardAsset: "USDC",
-    rewardAmount: input.rewardUsdc.trim(),
-    verifierMode: "human_fallback",
-    escalationMessage: "The poster must review and approve the submission.",
-    inputSchemaRef: "schema://jobs/coding-input",
-    outputSchemaRef: "schema://jobs/coding-output",
-    input: {
-      task: input.task.trim(),
-      acceptanceCriteria: input.acceptanceCriteria,
-      repo: input.repo.trim(),
-    },
-    acceptanceCriteria: input.acceptanceCriteria,
-    claimTtlSeconds: 86_400,
-    retryLimit: 1,
-    requiresSponsoredGas: true,
-  };
+  return buildPosterDefinition(input);
 }
 
 function resolveBaseUrl(): string {

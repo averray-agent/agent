@@ -200,6 +200,33 @@ test("GET /disputes authenticates, parses limit, and returns open and receipt-ba
   assert.ok(calls.some(([name]) => name === "authMiddleware"));
 });
 
+test("GET /disputes exposes github_pr to human_fallback escalation provenance", async () => {
+  const escalatedSession = {
+    ...SESSION,
+    verification: undefined,
+    verificationSummary: {
+      outcome: "disputed",
+      reasonCode: "HUMAN_REVIEW_REQUIRED",
+      handler: "human_fallback",
+      handlerVersion: 1,
+      escalatedFrom: "github_pr"
+    }
+  };
+  const { response, route } = makeHarness({ sessions: [escalatedSession] });
+
+  await route({
+    request: { method: "GET" },
+    response,
+    url: new URL("http://localhost/disputes"),
+    pathname: "/disputes",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body[0].evidence.after.verification.handler, "human_fallback");
+  assert.equal(response.body[0].evidence.after.verification.escalatedFrom, "github_pr");
+  assert.equal(response.body[0].evidence.after.verification.reasonCode, "HUMAN_REVIEW_REQUIRED");
+});
+
 test("GET /disputes truthfully marks a wrong backend signer as out-of-band hardware arbitration", async () => {
   const { response, route } = makeHarness({
     gateway: {

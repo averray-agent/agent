@@ -6,6 +6,55 @@ import { transitionSession } from "../core/session-state-machine.js";
 import { BADGE_RECEIPT_COSIGN_POLICY_TAG } from "../core/builtin-policies.js";
 import { VerificationIngestionService } from "./verification-ingestion-service.js";
 
+test("github_pr human fallback preserves escalation provenance on the disputed session and event", async () => {
+  const stateStore = new MemoryStateStore();
+  const events = [];
+  const claimed = transitionSession({
+    sessionId: "session-github-pr-escalation",
+    wallet: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    jobId: "external-github-pr-job",
+    submission: { prUrl: "https://github.com/example/project/pull/77" }
+  }, "claimed", { reason: "job_claimed" });
+  const submitted = transitionSession(claimed, "submitted", { reason: "work_submitted" });
+  await stateStore.upsertSession(submitted);
+  const service = new VerificationIngestionService(
+    stateStore,
+    { publish: (event) => events.push(event) },
+    () => ({
+      id: "external-github-pr-job",
+      verifierMode: "github_pr",
+      verifierConfig: { handler: "github_pr", version: 1 }
+    }),
+    { info() {}, warn() {} }
+  );
+
+  await service.ingest(submitted.sessionId, {
+    handler: "human_fallback",
+    handlerVersion: 1,
+    escalatedFrom: "github_pr",
+    outcome: "disputed",
+    reasonCode: "HUMAN_REVIEW_REQUIRED"
+  });
+
+  const session = await stateStore.getSession(submitted.sessionId);
+  const result = await stateStore.getVerificationResult(submitted.sessionId);
+  const disputeEvent = events.find((event) => event.topic === "dispute.opened");
+  assert.equal(session.status, "disputed");
+  assert.deepEqual(session.verificationSummary, {
+    outcome: "disputed",
+    reasonCode: "HUMAN_REVIEW_REQUIRED",
+    handler: "human_fallback",
+    escalatedFrom: "github_pr",
+    handlerVersion: 1,
+    verifierPolicyVersion: 1,
+    verifierConfigVersion: 1
+  });
+  assert.equal(result.handler, "human_fallback");
+  assert.equal(result.escalatedFrom, "github_pr");
+  assert.equal(disputeEvent.data.handler, "human_fallback");
+  assert.equal(disputeEvent.data.escalatedFrom, "github_pr");
+});
+
 test("approved verification persists an immutable badge document at resolution", async () => {
   const stateStore = new MemoryStateStore();
   const claimed = transitionSession({
