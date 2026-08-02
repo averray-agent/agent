@@ -10,7 +10,8 @@ import {
   parseEventFilters,
   parseLimit,
   parsePositiveInteger,
-  respond
+  respond,
+  respondText
 } from "./http-helpers.js";
 
 function readableBody(body) {
@@ -84,6 +85,7 @@ test("createCorsHeaderResolver only emits headers for allowed origins", () => {
 
 test("metricPathLabel keeps known routes and buckets dynamic routes", () => {
   assert.equal(metricPathLabel("/jobs"), "/jobs");
+  assert.equal(metricPathLabel("/llms.txt"), "/llms.txt");
   assert.equal(metricPathLabel("/disputes/dispute-1/verdict"), "/disputes/:id/verdict");
   assert.equal(metricPathLabel("/content/0xabc/publish"), "/content/:hash/publish");
   assert.equal(metricPathLabel("/agents/0xabc"), "/agents/:wallet");
@@ -110,4 +112,26 @@ test("respond adds JSON, CORS, and request id headers", () => {
   assert.equal(response.headers["x-request-id"], "req-123");
   assert.equal(response.headers["access-control-allow-origin"], "https://app.averray.com");
   assert.deepEqual(JSON.parse(response.body), { ok: true });
+});
+
+test("respondText sends plain UTF-8 text with CORS and request id headers", () => {
+  const response = {
+    _requestId: "req-llms",
+    _corsHeaders: { "access-control-allow-origin": "https://averray.com" },
+    writeHead(statusCode, headers) {
+      this.statusCode = statusCode;
+      this.headers = headers;
+    },
+    end(body) {
+      this.body = body;
+    }
+  };
+
+  respondText(response, 200, "# Averray\n");
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.headers["content-type"], "text/plain; charset=utf-8");
+  assert.equal(response.headers["x-request-id"], "req-llms");
+  assert.equal(response.headers["access-control-allow-origin"], "https://averray.com");
+  assert.equal(response.body, "# Averray\n");
 });

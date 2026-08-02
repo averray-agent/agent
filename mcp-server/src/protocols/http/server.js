@@ -39,7 +39,8 @@ import {
   parseEventFilters,
   parseLimit,
   parsePositiveInteger,
-  respond
+  respond,
+  respondText
 } from "./http-helpers.js";
 import { createIdempotentMutationHelpers } from "./idempotent-mutations.js";
 import { createJobRoutes } from "./job-routes.js";
@@ -600,6 +601,7 @@ const handlePublicMetadataRoute = createPublicMetadataRoutes({
   posterOnboardingService,
   publicBaseUrl: process.env.PUBLIC_BASE_URL,
   respond,
+  respondText,
   service,
   strategies,
 });

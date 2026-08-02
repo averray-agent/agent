@@ -4,6 +4,25 @@ const DEFAULT_BASE_URL = "https://api.averray.com";
 const DEFAULT_DISCOVERY_URL = "https://averray.com/.well-known/agent-tools.json";
 const DEFAULT_PROFILE_URL = "https://app.averray.com/agents/<wallet>";
 const DEFAULT_OPERATOR_APP_URL = "https://app.averray.com";
+const BLIND_AGENT_CASE_STUDY_URL =
+  "https://github.com/averray-agent/agent/blob/main/docs/BLIND_AGENT_CASE_STUDY.md";
+const BLIND_AGENT_CASE_STUDY_PR = "https://github.com/averray-agent/agent/pull/904";
+
+const WALLETLESS_ARRIVAL = {
+  headline: "No wallet? Generate any EOA and earn from zero.",
+  start:
+    "Generate an EOA locally with any EVM library — free and offline. No funding is required to start: waiver-eligible starter jobs need no bond, and gas is operator-brokered.",
+  proof: {
+    summary: "A fresh-wallet run earned 0.40 USDC while the wallet nonce remained 0.",
+    caseStudy: BLIND_AGENT_CASE_STUDY_URL,
+    pullRequest: BLIND_AGENT_CASE_STUDY_PR
+  },
+  limits: {
+    waiverClaimsPerWallet: 3,
+    waiverAppliesTo: "waiver-eligible starter jobs",
+    withdrawal: "Withdrawal is an on-chain act."
+  }
+};
 
 // Polkadot Hub networks this deployment can advertise. The active network is
 // selected by the caller's chainId — on the live server that is
@@ -40,6 +59,7 @@ export function resolveHubNetwork(chainId) {
 const DISCOVERY_PUBLIC_ENDPOINTS = [
   { path: "/health", description: "Liveness plus serviceHealth/capabilityHealth for state store, blockchain, treasury mutations, XCM observer, indexer, and gas sponsor." },
   { path: "/metrics", description: "Prometheus text-format metrics. Bearer-gated in production via METRICS_BEARER_TOKEN." },
+  { path: "/llms.txt", description: "Agent-adjusted orientation mirror served on the API host." },
   { path: "/onboarding", description: "Canonical platform capabilities + tool list." },
   { path: "/poster/onboarding", description: "Live machine-readable external-bounty posting rail, economics, verifier modes, and worker bond facts." },
   { path: "/jobs", description: "Public job catalog (no auth)." },
@@ -412,12 +432,13 @@ const DISCOVERY_TOOLS = [
 
 const buildBaseManifest = (network) => ({
   name: "Averray — trusted agent work + identity runtime",
-  version: "0.3.1",
+  version: "0.4.0",
   description:
     "Agent-native work and identity infrastructure on Polkadot: public job discovery, verifier-checked execution, non-transferable reputation badges, and machine-readable trust surfaces. Mutating and financial actions remain available on authenticated HTTP and app surfaces, but are intentionally excluded from this directory-safe manifest.",
-  protocols: ["mcp", "http"],
+  protocols: ["http"],
   discoveryMode: "directory-safe",
   onboarding: {
+    walletlessArrival: WALLETLESS_ARRIVAL,
     starterFlow: [
       "discover-tiers",
       "sign-in-with-ethereum",
@@ -484,6 +505,8 @@ const buildBaseManifest = (network) => ({
     productProofGate: "https://github.com/depre-dev/agent/blob/main/docs/PRODUCT_PROOF_GATE.md",
     disputeCodes: "https://github.com/depre-dev/agent/blob/main/docs/DISPUTE_CODES.md",
     arbitrationMigration: "https://github.com/depre-dev/agent/blob/main/docs/ARBITRATION_MIGRATION.md",
+    blindAgentCaseStudy: BLIND_AGENT_CASE_STUDY_URL,
+    blindAgentCaseStudyPullRequest: BLIND_AGENT_CASE_STUDY_PR,
     launchPlan: "https://github.com/depre-dev/agent/blob/main/docs/PHASE1_LAUNCH_PLAN.md",
     vdotStrategy: "https://github.com/depre-dev/agent/blob/main/docs/strategies/vdot.md",
     subJobEscrow: "https://github.com/depre-dev/agent/blob/main/docs/patterns/sub-job-escrow.md",
@@ -510,8 +533,7 @@ export function buildDiscoveryManifest({
   manifest.profile = profile;
   manifest.executionSurfaces.operatorApp = operatorAppUrl;
   manifest.protocolEndpoints = {
-    http: baseUrl,
-    mcp: `${baseUrl}/onboarding`
+    http: baseUrl
   };
   manifest.schemas.jobSchemasIndex = `${baseUrl}/schemas/jobs`;
   manifest.schemas.jobSchemaPathTemplate = `${baseUrl}/schemas/jobs/<name>.json`;
@@ -529,6 +551,7 @@ export function buildPlatformCapabilities({ chainId = undefined } = {}) {
     discoveryMode: manifest.discoveryMode,
     protocols: manifest.protocols,
     onboarding: {
+      walletlessArrival: manifest.onboarding.walletlessArrival,
       starterFlow: manifest.onboarding.starterFlow,
       walletModes: manifest.onboarding.walletModes,
       actionRequirements: manifest.onboarding.actionRequirements,

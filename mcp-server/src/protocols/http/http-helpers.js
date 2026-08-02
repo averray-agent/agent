@@ -1,16 +1,27 @@
 import { ValidationError } from "../../core/errors.js";
 
 export function respond(response, statusCode, payload, extraHeaders = {}) {
+  const headers = buildResponseHeaders(response, "application/json", extraHeaders);
+  response.writeHead(statusCode, headers);
+  response.end(JSON.stringify(payload, null, 2));
+}
+
+export function respondText(response, statusCode, payload, extraHeaders = {}) {
+  const headers = buildResponseHeaders(response, "text/plain; charset=utf-8", extraHeaders);
+  response.writeHead(statusCode, headers);
+  response.end(String(payload));
+}
+
+function buildResponseHeaders(response, contentType, extraHeaders) {
   const headers = {
-    "content-type": "application/json",
+    "content-type": contentType,
     ...(response._corsHeaders ?? {}),
     ...extraHeaders
   };
   if (response._requestId && !headers["x-request-id"]) {
     headers["x-request-id"] = response._requestId;
   }
-  response.writeHead(statusCode, headers);
-  response.end(JSON.stringify(payload, null, 2));
+  return headers;
 }
 
 export function createJsonBodyReader({ maxBytes }) {
@@ -126,6 +137,7 @@ export function metricPathLabel(pathname) {
     "/metrics",
     "/agent-tools.json",
     "/.well-known/agent-tools.json",
+    "/llms.txt",
     "/onboarding",
     "/jobs",
     "/jobs/definition",
