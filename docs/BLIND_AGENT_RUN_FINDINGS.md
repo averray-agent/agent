@@ -77,15 +77,23 @@ current auto-verify gate is a no-op.** Routed to Codex as PR 1 of the follow-up 
    the bond → claim money path, for the same reason. Testing that requires a non-Claude or
    purpose-built worker.
 
-## 5. Open question this run surfaced (no owner yet)
+## 5. Open question this run surfaced — **now answered**
 
 The ingested "audit and report" jobs produce reports — **and nothing consumes them.** This
 run produced a genuinely useful citation audit (including the usurped-domain finding) that
-was paid for out of the reward bank and then sat. If the outputs are never applied, the
-ingestion pipeline is buying supply-side liquidity rather than value, which is a
-defensible choice but should be a *stated* one. Related: the reward bank as an acquisition
-subsidy, and whether it would do more good funding demand-side work
-(`docs/POST_V1_ROADMAP.md`, and the supply/demand notes).
+was paid for out of the reward bank and then sat.
+
+**Stance (Pascal, 2026-08-02): this is supply-side liquidity, and we say so.** These jobs
+exist to give agents work and keep the board alive — a deliberate acquisition spend from the
+reward bank — **not** to produce artefacts anyone downstream consumes. Recording it makes
+the choice honest rather than accidental, and it sets the bar for any future claim about
+their value: we must never describe ingested report output as delivered value to a customer,
+because there is no customer. If that changes (outputs surfaced publicly, fixes pushed
+upstream), this note changes with it.
+
+Consequence to keep in view: since the spend buys liquidity rather than value, it competes
+directly with demand-side subsidy for the same reward-bank budget — see
+`project_supply_demand_competition` (levers #3/#5) and the flywheel note's Move 2.
 
 ## 6. The pattern across both agents
 
