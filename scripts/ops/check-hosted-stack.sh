@@ -217,9 +217,12 @@ jq -e '.protocols | index("http") != null' >/dev/null <<<"$onboarding_json"
 echo "Checking poster onboarding live facts"
 poster_onboarding_json="$(fetch "$API_POSTER_ONBOARDING_URL")"
 jq -e '
+  . as $poster |
+  ([.flow[] | select(.id == "fund")][0]) as $fund |
   (.mode == "closed" or .mode == "allowlist" or .mode == "open") and
   (.economics.feeSemantics == "poster_additive") and
   (.economics.protocolFeeBps | type) == "number" and
+  ((.economics.feeRecipient | ascii_downcase) | test("^0x[0-9a-f]{40}$")) and
   (.economics.minRewardUsdc | tonumber) > 0 and
   (.economics.draftTtlHours | type) == "number" and
   (.economics.maxOpenDrafts | type) == "number" and
@@ -232,7 +235,24 @@ jq -e '
   (.workerFacts.claimBond.minFeeRaw | test("^[0-9]+$")) and
   (.workerFacts.disputeWindow.available == true) and
   (.workerFacts.disputeWindow.seconds | type) == "number" and
+  (.workerFacts.disputeWindow.remedy.onChain.available == true) and
+  (.workerFacts.disputeWindow.remedy.onChain.abiFragment == "function openDispute(bytes32 jobId)") and
+  ((.workerFacts.disputeWindow.remedy.onChain.address | ascii_downcase) == (.escrowCore | ascii_downcase)) and
+  (.workerFacts.disputeWindow.remedy.brokeredPath.available == false) and
+  (.workerFacts.disputeWindow.remedy.brokeredPath.reason == "no_worker_reachable_brokered_open_dispute_route") and
+  ($fund.posterReservedRawFormula == "rewardRaw + opsReserveRaw + contingencyReserveRaw + floor(rewardRaw * economics.protocolFeeBps / 10000)") and
+  ($fund.depositAmountFormula == "max(posterReservedRaw - positions(poster, token).liquid, 0)") and
+  (($fund.positionRead.address | ascii_downcase) == ($poster.agentAccountCore | ascii_downcase)) and
+  (any($fund.writes[];
+    (.abiFragment == "function approve(address spender, uint256 amount) returns (bool)") and
+    ((.address | ascii_downcase) == ($poster.token.address | ascii_downcase)) and
+    ((.args[0] | ascii_downcase) == ($poster.agentAccountCore | ascii_downcase)))) and
+  (any($fund.writes[];
+    (.abiFragment == "function deposit(address asset, uint256 amount)") and
+    ((.address | ascii_downcase) == ($poster.agentAccountCore | ascii_downcase)) and
+    ((.args[0] | ascii_downcase) == ($poster.token.address | ascii_downcase)))) and
   (.liveReads.protocolFeeBps.status == "available") and
+  (.liveReads.feeRecipient.status == "available") and
   (.liveReads.claimBond.status == "available") and
   (.liveReads.disputeWindow.status == "available")
 ' >/dev/null <<<"$poster_onboarding_json"
@@ -252,7 +272,10 @@ jq -e '
   (.externalBounties.cancellation.rescue == "operator-mediated on request, ~7 days, refunds only ever to the recorded poster") and
   (.externalBounties.cancellation.plannedSelfServeCancel == "cancelOpenJob, next EscrowCore deployment window") and
   .externalBounties.claimBond.available == true and
-  .externalBounties.disputeWindow.available == true
+  .externalBounties.disputeWindow.available == true and
+  .externalBounties.disputeWindow.remedy.onChain.available == true and
+  (.externalBounties.disputeWindow.remedy.onChain.abiFragment == "function openDispute(bytes32 jobId)") and
+  (.externalBounties.disputeWindow.remedy.brokeredPath.reason == "no_worker_reachable_brokered_open_dispute_route")
 ' >/dev/null <<<"$onboarding_json"
 
 if [[ -n "$OPERATOR_TOKEN" ]]; then

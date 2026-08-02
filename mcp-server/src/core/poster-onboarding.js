@@ -1,9 +1,17 @@
+import { getAddress, isAddress } from "ethers";
+
 import { decimalToBaseUnits } from "./platform-service-helpers.js";
 
 const POSTER_ONBOARDING_CACHE_MS = 30_000;
 const BPS_DENOMINATOR = 10_000n;
 const GUIDE_URL = "https://github.com/averray-agent/agent/blob/main/docs/POSTER_GUIDE.md";
 const DOGFOOD_EVIDENCE_URL = "https://github.com/averray-agent/agent/pull/874";
+const ERC20_APPROVE_ABI = "function approve(address spender, uint256 amount) returns (bool)";
+const AGENT_ACCOUNT_DEPOSIT_ABI = "function deposit(address asset, uint256 amount)";
+const AGENT_ACCOUNT_POSITIONS_ABI =
+  "function positions(address account, address asset) view returns (uint256 liquid, uint256 reserved, uint256 strategyAllocated, uint256 collateralLocked, uint256 jobStakeLocked, uint256 debtOutstanding)";
+const OPEN_DISPUTE_ABI = "function openDispute(bytes32 jobId)";
+const OPEN_DISPUTE_SIGNATURE = "openDispute(bytes32 jobId)";
 
 export function createPosterOnboardingService({
   authConfig,
@@ -119,6 +127,7 @@ async function buildSnapshot({
       unavailableReason
     )
   ]);
+  const feeRecipientRead = projectFeeRecipientRead(protocolFeeRead);
 
   if (protocolFeeRead.available) {
     if (protocolFeeRead.value?.supported !== true) {
@@ -140,6 +149,7 @@ async function buildSnapshot({
   const liveReads = {
     asOf,
     protocolFeeBps: liveReadStatus(protocolFeeRead),
+    feeRecipient: liveReadStatus(feeRecipientRead),
     claimBond: liveReadStatus(claimBondRead),
     disputeWindow: liveReadStatus(disputeWindowRead)
   };
@@ -149,6 +159,7 @@ async function buildSnapshot({
     claimBondRead,
     disputeWindowRead,
     token,
+    escrowCore: config.escrowCoreAddress,
     publicBaseUrl
   });
 
@@ -164,6 +175,9 @@ async function buildSnapshot({
       ...(protocolFeeRead.available
         ? { protocolFeeBps: Number(protocolFeeRead.value.protocolFeeBps) }
         : {}),
+      ...(feeRecipientRead.available
+        ? { feeRecipient: feeRecipientRead.value }
+        : {}),
       feeSemantics: "poster_additive",
       feeExplanation:
         "The poster reserves the full worker reward plus the protocol fee; the worker receives the full advertised reward.",
@@ -173,10 +187,16 @@ async function buildSnapshot({
       draftTtlHours: config.draftTtlHours,
       maxOpenDrafts: config.maxOpenDrafts,
       availability: {
-        protocolFeeBps: liveReads.protocolFeeBps
+        protocolFeeBps: liveReads.protocolFeeBps,
+        feeRecipient: liveReads.feeRecipient
       }
     },
-    flow: buildPostingFlow({ publicBaseUrl }),
+    flow: buildPostingFlow({
+      publicBaseUrl,
+      token,
+      agentAccountCore: gateway?.config?.agentAccountAddress,
+      escrowCore: config.escrowCoreAddress
+    }),
     verification: buildVerification(verificationModes),
     workerFacts,
     cancellation: buildCancellation(),
@@ -188,7 +208,7 @@ async function buildSnapshot({
   };
 }
 
-function buildPostingFlow({ publicBaseUrl }) {
+function buildPostingFlow({ publicBaseUrl, token, agentAccountCore, escrowCore }) {
   return [
     {
       id: "siwe",
@@ -241,11 +261,41 @@ function buildPostingFlow({ publicBaseUrl }) {
       id: "fund",
       action:
         "Fund from the poster wallet: approve the token to AgentAccountCore, deposit enough AAC liquid, then submit the returned non-waived createSinglePayoutJob calldata unchanged.",
+      posterReservedRawFormula:
+        "rewardRaw + opsReserveRaw + contingencyReserveRaw + floor(rewardRaw * economics.protocolFeeBps / 10000)",
+      depositAmountFormula:
+        "max(posterReservedRaw - positions(poster, token).liquid, 0)",
+      positionRead: {
+        contract: "agentAccountCore",
+        contractName: "AgentAccountCore",
+        ...(agentAccountCore ? { address: agentAccountCore } : {}),
+        abiFragment: AGENT_ACCOUNT_POSITIONS_ABI,
+        args: ["<poster EVM address>", token?.address ?? "<token address>"],
+        resultField: "liquid"
+      },
       writes: [
-        { contract: "token", method: "approve", spender: "agentAccountCore" },
-        { contract: "agentAccountCore", method: "deposit", asset: "token" },
+        {
+          contract: "token",
+          ...(token?.address ? { address: token.address } : {}),
+          abiFragment: ERC20_APPROVE_ABI,
+          method: "approve",
+          spender: "agentAccountCore",
+          args: [agentAccountCore ?? "<AgentAccountCore address>", "<depositAmountRaw>"],
+          skipWhen: "depositAmountRaw == 0"
+        },
+        {
+          contract: "agentAccountCore",
+          contractName: "AgentAccountCore",
+          ...(agentAccountCore ? { address: agentAccountCore } : {}),
+          abiFragment: AGENT_ACCOUNT_DEPOSIT_ABI,
+          method: "deposit",
+          asset: "token",
+          args: [token?.address ?? "<token address>", "<depositAmountRaw>"],
+          skipWhen: "depositAmountRaw == 0"
+        },
         {
           contract: "escrowCore",
+          ...(escrowCore ? { address: escrowCore } : {}),
           method: "createSinglePayoutJob",
           calldataSource: "the draft response calldata",
           value: "0",
@@ -306,18 +356,27 @@ function buildVerification(modes) {
   };
 }
 
-function buildWorkerFacts({ claimBondRead, disputeWindowRead, token, publicBaseUrl }) {
+function buildWorkerFacts({
+  claimBondRead,
+  disputeWindowRead,
+  token,
+  escrowCore,
+  publicBaseUrl
+}) {
+  const remedy = buildWorkerDisputeRemedy(escrowCore);
   const disputeWindow = disputeWindowRead.available
     ? {
         available: true,
         seconds: Number(disputeWindowRead.value),
         duration: formatDuration(Number(disputeWindowRead.value)),
         warning:
-          "For a rejected human-review submission, the worker must open a dispute before this live on-chain window ends or the rejection can be finalized and the bond slashed."
+          "For a rejected human-review submission, the worker must open a dispute before this live on-chain window ends or the rejection can be finalized and the bond slashed.",
+        remedy
       }
     : {
         available: false,
-        reason: disputeWindowRead.reason
+        reason: disputeWindowRead.reason,
+        remedy
       };
   const claimBond = claimBondRead.available
     ? {
@@ -351,6 +410,32 @@ function buildWorkerFacts({ claimBondRead, disputeWindowRead, token, publicBaseU
         "AgentAccountCore has no depositFor path: the worker must approve the token and self-deposit into AgentAccountCore, paying that deposit transaction's gas. A brokered claim does not broker the deposit."
     },
     disputeWindow
+  };
+}
+
+function buildWorkerDisputeRemedy(escrowCore) {
+  return {
+    action: "Open the dispute from the recorded worker wallet before the dispute window ends.",
+    onChain: escrowCore
+      ? {
+          available: true,
+          contract: "EscrowCore",
+          address: escrowCore,
+          abiFragment: OPEN_DISPUTE_ABI,
+          signature: OPEN_DISPUTE_SIGNATURE,
+          args: ["<jobId>"],
+          value: "0"
+        }
+      : {
+          available: false,
+          reason: "escrow_core_unavailable",
+          abiFragment: OPEN_DISPUTE_ABI,
+          signature: OPEN_DISPUTE_SIGNATURE
+        },
+    brokeredPath: {
+      available: false,
+      reason: "no_worker_reachable_brokered_open_dispute_route"
+    }
   };
 }
 
@@ -445,6 +530,29 @@ async function readLiveFact(read, fallbackReason) {
       error: error?.code ?? error?.message ?? "read_failed"
     };
   }
+}
+
+function projectFeeRecipientRead(protocolFeeRead) {
+  if (!protocolFeeRead.available) {
+    return { ...protocolFeeRead };
+  }
+  if (protocolFeeRead.value?.supported !== true) {
+    return {
+      available: false,
+      reason: "protocol_fee_read_not_supported"
+    };
+  }
+  const treasuryAccount = protocolFeeRead.value?.treasuryAccount;
+  if (typeof treasuryAccount !== "string" || !isAddress(treasuryAccount)) {
+    return {
+      available: false,
+      reason: "live_fee_recipient_invalid"
+    };
+  }
+  return {
+    available: true,
+    value: getAddress(treasuryAccount)
+  };
 }
 
 function liveReadStatus(read) {

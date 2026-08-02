@@ -13,6 +13,7 @@ test("hosted smoke cross-checks poster onboarding against operational and chain-
   assert.match(script, /API_POSTER_ONBOARDING_URL=/u);
   assert.match(script, /\.onboarding\.posterEntrypoint == "https:\/\/api\.averray\.com\/poster\/onboarding"/u);
   assert.match(script, /\.liveReads\.protocolFeeBps\.status == "available"/u);
+  assert.match(script, /\.liveReads\.feeRecipient\.status == "available"/u);
   assert.match(script, /\.liveReads\.claimBond\.status == "available"/u);
   assert.match(script, /\.liveReads\.disputeWindow\.status == "available"/u);
   assert.match(script, /\.cancellation\.selfServeCancel == false/u);
@@ -20,6 +21,12 @@ test("hosted smoke cross-checks poster onboarding against operational and chain-
   assert.match(script, /cancelOpenJob, next EscrowCore deployment window/u);
   assert.match(script, /\$poster\.chainId == \$health\.auth\.chainId/u);
   assert.match(script, /\$poster\.escrowCore \| ascii_downcase/u);
+  assert.match(script, /\.economics\.feeRecipient \| ascii_downcase/u);
+  assert.match(script, /function openDispute\(bytes32 jobId\)/u);
+  assert.match(script, /no_worker_reachable_brokered_open_dispute_route/u);
+  assert.match(script, /function approve\(address spender, uint256 amount\) returns \(bool\)/u);
+  assert.match(script, /function deposit\(address asset, uint256 amount\)/u);
+  assert.match(script, /max\(posterReservedRaw - positions\(poster, token\)\.liquid, 0\)/u);
   assert.match(script, /\$poster\.workerFacts\.claimBond\.stakeBps == \$operational\.maintenance\.policy\.risk\.defaultClaimStakeBps/u);
   assert.match(script, /\$poster\.workerFacts\.claimBond\.feeBps == \$operational\.maintenance\.policy\.risk\.claimFeeBps/u);
 });
