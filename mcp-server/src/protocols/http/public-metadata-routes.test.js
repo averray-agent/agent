@@ -316,7 +316,7 @@ test("GET /strategies returns configured strategy metadata with public cache hea
   assert.equal(response.statusCode, 200);
   assert.deepEqual(response.body, {
     strategies: STRATEGIES,
-    docs: "https://github.com/depre-dev/agent/blob/main/docs/strategies/vdot.md"
+    docs: "https://github.com/averray-agent/agent/blob/main/docs/strategies/vdot.md"
   });
   assert.deepEqual(response.headers, { "cache-control": "public, max-age=300" });
   assert.deepEqual(calls, [
