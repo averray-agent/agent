@@ -52,8 +52,8 @@ already exist. **The seam is built; it has never been wired to a real venue.**
 
 Flow per deposit:
 1. Treasury allocation records intent → `XcmWrapper.queueRequest` (kind `Deposit`) → Pending.
-2. **Message 1**: reserve-transfer USDC (asset 1337) Asset Hub → Hydration, to our account
-   there.
+2. **Message 1**: reserve-transfer USDC (asset 1337) Asset Hub → Hydration, **beneficiary =
+   the CONVERTED ORIGIN ACCOUNT** (see gate #1b) — never the EE-image.
 3. **Message 2**: `Transact` dispatching `Router.sell(22 → 1003)`. (Separate message —
    `ClearOrigin`.)
 4. Observer confirms (§4) → `finalizeRequest(Succeeded, settledAssets, …)` → ledger credits.
@@ -89,10 +89,38 @@ Requirements:
 
 ## 6. Ordered gates — each blocks the next
 
-1. **Address-derivation dust test (FIRST, blocks everything).** That our Asset Hub account
-   maps to Hydration as `h160 ++ 0xEE×12` is the one link the verification reasoned from
-   source rather than observed. **Send dust, confirm receipt at the derived account, and
-   only then move real value** — getting this wrong sends funds to an unrecoverable account.
+1. **Address-derivation dust test — ✅ PROVEN 2026-08-02.** Tx
+   `0xed380936f89fcd2ea168c7133b51ca5383e01279897a042f86dd711b9cd58042` (Asset Hub block
+   18,974,353) reserve-transferred 100,621 raw USDC; **exactly 100,000 raw asset 22 arrived
+   at the derived account** (`h160 ‖ 0xEE×12`, SS58 `1CH9GprqPA6ZXjLCP39ZHd8XZf7VxzBLBvWpK2HqZs7PwC7`),
+   double-verified on independent endpoints/tooling (dwellir + `rpc.hydradx.cloud`
+   via @polkadot/api). The DryRunApi prediction (`Tokens.Deposited(22, 100000)`) matched
+   observation exactly — the dry-run preflight is a trustworthy instrument, and it stays
+   mandatory before every signed message. Two operational facts learned on the way: the
+   official Asset Hub WSS 1006-flakes (use `asset-hub-polkadot-rpc.n.dwellir.com` or the
+   official HTTPS transport for one-shot calls), and AH-side delivery fees are JIT-paid in
+   DOT by the EVM sender (~0.033 DOT/message), not drawn from the transferred USDC. The
+   100,000 raw remains at the derived account as the working dust for gates 2–3.
+   *(Original gate text follows.)* That our Asset Hub account That our Asset Hub account
+   maps to Hydration as `h160 ++ 0xEE×12` was the one link reasoned from source rather than
+   observed — now observed.
+1b. **Operating identity — ✅ PROVEN 2026-08-02 (runtime read + failed dry-run).** The
+   remote-account model is TWO mappings, and gate #1 proved only the first:
+   - **Deposit image**: beneficiary `AccountId32(h160 ‖ 0xEE×12)` lands at that literal
+     local account (gate #1's proof) — but that account has **no local key and no standard
+     origin converts to it**: a custody dead-end on remote chains.
+   - **Operating identity**: our descended origin `{parents:1, X2[Parachain(1000),
+     AccountId32(EE-image)]}` converts, per Hydration's own `LocationToAccountApi`, to
+     **`0xaf39ad769a03cb535d9799e49459b033c1fab84ee23ffe5d0852f8d82f02a71e`** — the only
+     account XCM `WithdrawAsset`/`Transact` can actually spend from. (Discovered when leg A's
+     mandatory dry-run failed `FailedToTransactAsset` at `WithdrawAsset` — the dry-run gate
+     catching a design error for free, again.)
+   - **RULE: all remote working funds are deposited to the converted origin account.** The
+     EE-image is display-equivalence only, never a remote custody target. The observer (§4)
+     watches the converted account for both asset 22 and aToken 1003.
+   - The first 100,000 raw at the EE-image: one read-only `AliasOrigin` probe (expected to
+     fail), then written off — ~$0.10 as the price of discovering the identity split with
+     dust instead of treasury capital.
 2. **Pre-capital gate**: direct Hydration read confirming the money market accepts asset 22,
    plus its live rate and withdrawable depth (the workshop's §5 item that Claude could not
    verify from Asset Hub RPC).
@@ -114,6 +142,10 @@ Requirements:
   the Spearbit/Cantina review. Note it; do not overstate the venue's audit status.
 - **Governance** — Hydration's money market is under Hydration OpenGov; parameters can change
   without us.
+- **Converter stability** — the operating identity is `HashedDescription` of our origin
+  location, a runtime-configuration output. Re-read `LocationToAccountApi.convert_location`
+  before each funding epoch; a changed result is a stop-the-world event, not a re-derivation
+  exercise.
 
 ## 8. Lanes
 
