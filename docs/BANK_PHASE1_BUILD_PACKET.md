@@ -62,6 +62,16 @@ queue/finalize.
 
 ## 4. The observer — the actual build
 
+> **Ledger correction (2026-08-02, leg A observed + registry-verified):** Hydration's
+> **asset 1003 (aUSDC) is `assetType: Erc20`** — its ledger is the aToken **ERC-20 contract
+> on Hydration's EVM**, not `Tokens.accounts`. After a successful `Router.sell(22 → 1003)`,
+> `Tokens.accounts(account, 1003)` reads **0 by design**; the position lives at
+> `balanceOf(truncate20(accountId32))` on the aToken contract (Hydration maps AccountId32 →
+> H160 by first-20-bytes truncation — chain-specific, verified live; do NOT reuse this rule
+> on other chains). **The observer therefore reads: asset 22 via `Tokens.accounts`, the
+> aToken via the EVM ERC-20 ledger.** The rule below stands — only the source of state for
+> the aToken changed.
+
 **Assert on destination state, never on XCM success.** The verification demonstrated an XCM
 returning `complete` while the inner call did nothing — an observer keyed on XCM outcome
 would report healthy over idle capital. The observer MUST read
@@ -104,6 +114,14 @@ Requirements:
    *(Original gate text follows.)* That our Asset Hub account That our Asset Hub account
    maps to Hydration as `h160 ++ 0xEE×12` was the one link reasoned from source rather than
    observed — now observed.
+1c. **aToken ledger — ✅ OBSERVED 2026-08-02 (leg A executed).** Re-fund
+   (tx `0xb46b4d9c…`, 149,380 raw arrived at the converted account) and leg A
+   (tx `0x2957ba13…`, AH block 18,975,699) succeeded: `Swapped` fillerType AAVE,
+   100,000 asset 22 in → **100,000 aUSDC out, held on the EVM ledger** at the truncated
+   H160 of the converted account (`0xaf39ad76…b84e`); execution fee 20,917 raw. The
+   `AliasOrigin` recovery probe for the EE-stranded 100,000 was rejected by Hydration's
+   barrier → that amount is formally **written off** (~$0.10). Cumulative cost of every
+   lesson so far (wrong-message dust, EE write-off, all fees): **under $0.40**.
 1b. **Operating identity — ✅ PROVEN 2026-08-02 (runtime read + failed dry-run).** The
    remote-account model is TWO mappings, and gate #1 proved only the first:
    - **Deposit image**: beneficiary `AccountId32(h160 ‖ 0xEE×12)` lands at that literal
@@ -124,7 +142,23 @@ Requirements:
 2. **Pre-capital gate**: direct Hydration read confirming the money market accepts asset 22,
    plus its live rate and withdrawable depth (the workshop's §5 item that Claude could not
    verify from Asset Hub RPC).
-3. **Round-trip on dust**: deposit → observed → withdraw → back on Asset Hub, all through
+3. **Round-trip on dust — ✅ COMPLETE 2026-08-02, double-verified.** Full lifecycle
+   executed and independently confirmed on both chains: fund (149,380 to the converted
+   account) → deposit (leg A: 100,000 → 100,000 aUSDC, `Swapped` AAVE) → withdraw (leg B:
+   tx `0x2a699c20…` block 18,976,308, aUSDC → 0, asset 22 +100,000 −21,350 fee) → home
+   (leg C: tx `0x971bd7a2…` block 18,976,462, 105,711 landed at the source; remote fees
+   1,402). Source closed at **785,090 raw**; converted account **0**; arithmetic exact at
+   every step.
+   **Measured cycle economics (replaces the pre-measurement estimate):** one full
+   fund→deposit→withdraw→home cycle costs **44,289 raw USDC in venue/remote fees +
+   ~0.134 DOT in AH-side fees ≈ $0.15 total**. At the live 2.07% supply APR, ~$7.25 of
+   position-year covers one cycle — i.e. a 100 USDC position pays for a full cycle in
+   under a month of yield. The earlier "~5,000 USDC minimum sensible" was estimate-based
+   and is superseded; the economics floor is ~100× lower than assumed. (APY dilutes with
+   inflows and observer/ops cost is uncounted — the rehearsal framing stands.)
+   **Total program cost, all three lessons plus the full cycle: 164,910 raw USDC +
+   0.166 DOT ≈ $0.30.**
+   *(Original gate text follows.)* Round-trip on dust: deposit → observed → withdraw → back on Asset Hub, all through
    `queueRequest`/`finalizeRequest`.
 4. **XcmWrapper deployment ceremony** (multisig, same pattern as the EscrowCore v2 cutover)
    — only after 1–3 pass on a test path.
