@@ -25,6 +25,7 @@ Unknown codes are valid on-chain, but indexers and UI should normalize them to
 | `DISPUTE_OVERTURNED` | Arbitrator overturned the verifier; worker wins dispute. | Full remaining payout | Claim stake returned. | Convention; not contract-restricted. |
 | `DISPUTE_PARTIAL` | Arbitrator awarded a partial outcome. | Partial payout | Claim stake returned under current `resolveDispute` behavior when payout is greater than zero. | Convention; use sparingly and document rationale in `metadataURI`. |
 | `ARB_TIMEOUT` | Arbitration SLA missed; dispute auto-resolved in worker's favor. | Full remaining payout | Claim stake returned. | Convention for `autoResolveOnTimeout`. |
+| `OPERATOR_RESCUE` | Labeled tombstone rejection used only to refund an unclaimed Open job through the operator rescue runbook. | `0` | Must use the approved onboarding waiver; no economic slash. | Paired with the canonical `OPERATOR_RESCUE_TOMBSTONE` evidence hash. |
 | `MUTUAL_RELEASE` | Parties agreed to close or release without ordinary dispute loss. | Negotiated | Depends on settlement path. | Convention; expected to remain off-chain until a dedicated path exists. |
 
 ## Current Contract Behavior
