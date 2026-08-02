@@ -530,6 +530,13 @@ test("deploy rebuilds and verifies the public site even when no site paths chang
   assert.match(await readFile(deployLog, "utf8"), /run build:site/u);
   assert.match(run.stdout, /Served .*\/ matches built site\/index\.html/u);
   assert.match(run.stdout, /Served .*\/console-stream\.js matches built site\/console-stream\.js/u);
+  assert.deepEqual(parseDeployResult(run.stdout), {
+    schemaVersion: 1,
+    changed: false,
+    oldSha: baseSha,
+    newSha: nextSha,
+    components: [],
+  });
   assert.equal((await readFile(join(stateDir, "site.last-good"), "utf8")).trim(), nextSha);
 });
 
@@ -938,6 +945,13 @@ test("a skipped backend keeps its pointer so the next automatic run deploys it",
     RUN_BACKEND: "auto",
   });
   assert.equal(skipped.status, 0, skipped.stderr);
+  assert.deepEqual(parseDeployResult(skipped.stdout), {
+    schemaVersion: 1,
+    changed: false,
+    oldSha: fixture.baseSha,
+    newSha: fixture.docsSha,
+    components: [],
+  });
   assert.equal(
     (await readFile(join(fixture.stateDir, "backend.last-good"), "utf8")).trim(),
     fixture.baseSha,
@@ -953,6 +967,13 @@ test("a skipped backend keeps its pointer so the next automatic run deploys it",
     RUN_BACKEND: "auto",
   });
   assert.equal(deployed.status, 0, deployed.stderr);
+  assert.deepEqual(parseDeployResult(deployed.stdout), {
+    schemaVersion: 1,
+    changed: true,
+    oldSha: fixture.docsSha,
+    newSha: fixture.backendSha,
+    components: ["backend"],
+  });
   assert.match(await readFile(fixture.deployLog, "utf8"), /^backend$/mu);
   assert.equal(
     (await readFile(join(fixture.stateDir, "backend.last-good"), "utf8")).trim(),
@@ -1909,4 +1930,12 @@ function runDeploy(cwd, env) {
     },
     encoding: "utf8"
   });
+}
+
+function parseDeployResult(stdout) {
+  const line = stdout
+    .split("\n")
+    .find((candidate) => candidate.startsWith("AVERRAY_DEPLOY_RESULT="));
+  assert.ok(line, "successful deploy must emit an AVERRAY_DEPLOY_RESULT record");
+  return JSON.parse(line.slice("AVERRAY_DEPLOY_RESULT=".length));
 }

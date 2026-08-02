@@ -51,3 +51,24 @@ test("production deploy selects smoke auth from the durable live network", async
     "deploy must pass the selected token class explicitly"
   );
 });
+
+test("production deploy exposes and uploads its running-system change result", async () => {
+  const workflow = await readFile(workflowPath, "utf8");
+
+  assert.match(workflow, /outputs:\s+deployed: \$\{\{ steps\.deploy_production\.outputs\.changed \}\}\s+new_sha: \$\{\{ steps\.deploy_production\.outputs\.new_sha \}\}/u);
+  assert.match(
+    workflow,
+    /id: deploy_production[\s\S]{0,7000}grep -E '\^AVERRAY_DEPLOY_RESULT='/u,
+    "workflow must capture the deploy script's runtime outcome rather than infer from changed paths",
+  );
+  assert.match(
+    workflow,
+    /Deploy completed without an AVERRAY_DEPLOY_RESULT record; refusing to guess/u,
+    "missing runtime outcome must fail closed",
+  );
+  assert.match(
+    workflow,
+    /name: Upload production deployment result[\s\S]{0,260}name: production-deploy-result/u,
+    "workflow_run consumers need a durable bridge because job outputs are not in that event payload",
+  );
+});

@@ -875,6 +875,28 @@ build_site() {
     sh -lc "npm ci && npm run build:site"
 }
 
+# Hash the bytes Caddy can serve, not the fact that the site build command ran.
+# The site is rebuilt on every deploy to repair stale generated output, but a
+# byte-identical rebuild is not a running-system change and must not trigger a
+# paid worker canary.
+site_content_hash() {
+  local site_root="$APP_ROOT/site"
+  if [[ ! -d "$site_root" ]]; then
+    printf 'missing\n'
+    return
+  fi
+
+  (
+    cd "$site_root"
+    find . -type f -print \
+      | LC_ALL=C sort \
+      | while IFS= read -r relative; do
+          printf 'path=%s\n' "$relative"
+          sha256sum "$relative"
+        done
+  ) | sha256sum | awk '{print $1}'
+}
+
 # 2026-06-28 → 2026-07-08 marketing-staleness incident: verify that the
 # public homepage Caddy actually serves is byte-identical to the build
 # just synced into $APP_ROOT/site. Caddy serves site/ from the checkout
@@ -1822,6 +1844,7 @@ deploy() {
   local run_site=0
   local run_caddy=0
   local backend_deployed_sha=""
+  local deployed_components=()
   local indexer_code_changed=0
   local indexer_config_changed=0
   local indexer_schema_check_requested=1
@@ -1876,6 +1899,7 @@ deploy() {
   fi
   if [[ "$backend_code_changed" == "1" || "${RUNTIME_ENV_CHANGED_BACKEND:-0}" == "1" ]]; then
     run_backend=1
+    deployed_components+=(backend)
     if [[ "$backend_code_changed" == "1" ]]; then
       echo "Deploying backend (reason: code path changed)"
       # The badge-receipt preflight declaration is per network: mainnet has
@@ -1925,6 +1949,7 @@ deploy() {
     || "$indexer_config_changed" == "1" \
     || "${RUNTIME_ENV_CHANGED_INDEXER:-0}" == "1" ]]; then
     run_indexer=1
+    deployed_components+=(indexer)
     local indexer_build_image=0
     local indexer_previous_sha="$NEW_SHA"
     local indexer_wait_for_ready="$WAIT_FOR_READY"
@@ -2006,6 +2031,7 @@ deploy() {
 
   if [[ -n "$frontend_reason" ]]; then
     run_frontend=1
+    deployed_components+=(frontend)
     echo "Deploying operator frontend (reason: $frontend_reason)"
     SKIP_GIT_UPDATE=1 PRE_DEPLOY_SHA="$OLD_SHA" "$APP_ROOT/scripts/ops/redeploy-frontend.sh"
     record_frontend_tree_hash
@@ -2035,7 +2061,16 @@ deploy() {
     1|true|yes|auto)
       run_site=1
       echo "Building public site (always rebuilt; path gate removed after the 2026-06-28 stash regression)"
+      local site_hash_before site_hash_after
+      site_hash_before=$(site_content_hash)
       build_site
+      site_hash_after=$(site_content_hash)
+      if [[ "$site_hash_before" != "$site_hash_after" ]]; then
+        deployed_components+=(site)
+        echo "Public site output changed (${site_hash_before:0:8} -> ${site_hash_after:0:8})."
+      else
+        echo "Public site rebuild was byte-identical (${site_hash_after:0:8}); not a running-system change."
+      fi
       mark_component_deployed site
       ;;
     *)
@@ -2065,6 +2100,7 @@ deploy() {
       verify_public_caddy_network_selection
       run_caddy="$CADDY_RESTARTED"
       if [[ "$CADDY_RESTARTED" == "1" ]]; then
+        deployed_components+=(caddy)
         mark_component_deployed caddy
       fi
       ;;
@@ -2113,7 +2149,31 @@ deploy() {
     mark_component_deployed backend
   fi
 
+  emit_deploy_result "$OLD_SHA" "$NEW_SHA" ${deployed_components[@]+"${deployed_components[@]}"}
   echo "Production deploy completed."
+}
+
+emit_deploy_result() {
+  local old_sha="$1"
+  local new_sha="$2"
+  shift 2
+
+  local changed=false
+  if (( $# > 0 )); then
+    changed=true
+  fi
+
+  local components_json="["
+  local separator=""
+  local component
+  for component in "$@"; do
+    components_json+="${separator}\"${component}\""
+    separator=","
+  done
+  components_json+="]"
+
+  printf 'AVERRAY_DEPLOY_RESULT={"schemaVersion":1,"changed":%s,"oldSha":"%s","newSha":"%s","components":%s}\n' \
+    "$changed" "$old_sha" "$new_sha" "$components_json"
 }
 
 resolve_smoke_check_indexer() {
