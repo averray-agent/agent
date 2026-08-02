@@ -10,6 +10,7 @@ import {
   resolveExternalPostingConfig
 } from "./external-posting-service.js";
 import { AuthorizationError, ValidationError } from "./errors.js";
+import { JobExecutionService } from "./job-execution-service.js";
 import { MemoryStateStore } from "./state-store.js";
 import { createJobRoutes } from "../protocols/http/job-routes.js";
 
@@ -17,6 +18,7 @@ const POSTER = "0x1111111111111111111111111111111111111111";
 const OTHER_POSTER = "0x2222222222222222222222222222222222222222";
 const ESCROW = "0x3333333333333333333333333333333333333333";
 const USDC = "0x0000053900000000000000000000000001200000";
+const EXTERNAL_JOB_ID = `0x${"a".repeat(64)}`;
 
 function definition(overrides = {}) {
   return {
@@ -194,6 +196,20 @@ test("reward floor rejects 0.99, accepts 1.0, and persists both demand signals",
   );
 });
 
+test("draft creation rejects a zero claim TTL with a named external-door error", async () => {
+  const { service } = makeService();
+
+  await assert.rejects(
+    service.createDraft(POSTER, {
+      definition: definition({ claimTtlSeconds: 0 })
+    }),
+    (error) => error instanceof ValidationError
+      && error.code === "external_claim_ttl_invalid"
+      && error.details?.minimumClaimTtlSeconds === 60
+      && error.details?.requestedClaimTtlSeconds === 0
+  );
+});
+
 test("unknown or poster-supplied schemas are rejected and logged", async () => {
   const { service, store } = makeService();
 
@@ -233,6 +249,36 @@ test("a 73-hour-old draft stays expired even if a later reader has a longer conf
   assert.equal(expired.status, "expired");
   assert.equal(expired.expiresAt, "2026-07-23T00:00:00.000Z");
   assert.equal(expired.note, undefined);
+});
+
+test("poster draft status reports a live job as delisted after the catalog backstop", async () => {
+  const { service } = makeService();
+  const created = await service.createDraft(POSTER, { definition: definition() });
+  await service.reconcileFinalizedCreation({
+    jobId: created.jobId,
+    specHash: created.specHash,
+    poster: POSTER,
+    asset: USDC,
+    reward: "1000000",
+    opsReserve: "0",
+    contingencyReserve: "0",
+    fundedAt: "2026-07-28T12:01:00.000Z",
+    txHash: `0x${"f".repeat(64)}`,
+    blockNumber: "123",
+    finalized: true
+  });
+  await service.delistExternalJob(created.jobId, {
+    adminWallet: OTHER_POSTER,
+    reason: "operator rescue requested"
+  });
+
+  const draft = await service.getDraft(POSTER, created.draftId);
+  assert.equal(draft.status, "delisted");
+  assert.equal(draft.delisted, true);
+  assert.equal(draft.previousStatus, "live");
+  assert.equal(draft.delistReason, "operator rescue requested");
+  assert.equal(draft.delistedAt, "2026-07-28T12:00:00.000Z");
+  assert.equal(draft.txHash, `0x${"f".repeat(64)}`);
 });
 
 test("open drafts are capped per wallet while expired drafts no longer count", async () => {
@@ -323,4 +369,116 @@ test("admin delist only removes future catalog projection and leaves on-chain st
     [{ id: "curated-1", source: "ingested" }]
   );
   assert.equal((await store.getExternalJobDelisting(onChainJob.jobId)).reason, "operator safety backstop");
+});
+
+test("delist cannot slip through while an external claim holds the shared lifecycle lane", async () => {
+  const store = new MemoryStateStore();
+  const externalPosting = new ExternalPostingService({ stateStore: store, config: config() });
+  const job = {
+    ...definition(),
+    id: EXTERNAL_JOB_ID,
+    source: { type: "external", poster: { wallet: POSTER } },
+    onboardingWaiverEligible: false
+  };
+  let liveState = 1;
+  let enterClaim;
+  let releaseClaim;
+  const claimEntered = new Promise((resolve) => { enterClaim = resolve; });
+  const claimGate = new Promise((resolve) => { releaseClaim = resolve; });
+  const gateway = {
+    isEnabled: () => true,
+    toJobId: (value) => value,
+    getJob: async () => ({ state: liveState }),
+    getDefaultClaimStakeBps: async () => 1_000,
+    getClaimEconomicsConfig: async () => ({ onboardingWaiverClaimCount: 0 }),
+    getWorkerClaimCount: async () => 0,
+    getClaimEconomicsDecisionState: async () => ({
+      state: liveState,
+      exists: true,
+      contractLayout: "current",
+      onboardingWaiverEligible: false
+    }),
+    previewClaimEconomics: async () => ({
+      claimStake: 0,
+      claimStakeBps: 0,
+      claimFee: 0,
+      claimFeeBps: 0,
+      claimEconomicsWaived: false,
+      claimNumber: 1,
+      totalClaimLock: 0
+    }),
+    ensureClaimStakeLiquidity: async () => {},
+    claimJob: async () => {
+      enterClaim();
+      await claimGate;
+      liveState = 2;
+    }
+  };
+  const execution = new JobExecutionService(store, gateway, () => job);
+  const claimPromise = execution.claimJob(OTHER_POSTER, job.id, "http", "claim-wins-race");
+  await claimEntered;
+
+  const delistAttempt = await externalPosting.delistExternalJob(job.id, {
+    adminWallet: POSTER,
+    reason: "race probe"
+  }).then(
+    (value) => ({ value }),
+    (error) => ({ error })
+  );
+  releaseClaim();
+  const claimed = await claimPromise;
+
+  assert.equal(delistAttempt.value, undefined);
+  assert.equal(delistAttempt.error?.code, "external_job_transition_in_progress");
+  assert.equal(await store.isExternalJobDelisted(job.id), false);
+  assert.equal(claimed.status, "claimed");
+});
+
+test("claim cannot slip through while delist holds the shared lifecycle lane", async () => {
+  let enterDelist;
+  let releaseDelist;
+  const delistEntered = new Promise((resolve) => { enterDelist = resolve; });
+  const delistGate = new Promise((resolve) => { releaseDelist = resolve; });
+  class BlockingDelistStore extends MemoryStateStore {
+    async upsertExternalJobDelisting(record) {
+      enterDelist();
+      await delistGate;
+      return super.upsertExternalJobDelisting(record);
+    }
+  }
+  const store = new BlockingDelistStore();
+  const externalPosting = new ExternalPostingService({ stateStore: store, config: config() });
+  const job = {
+    ...definition(),
+    id: EXTERNAL_JOB_ID,
+    source: { type: "external", poster: { wallet: POSTER } },
+    onboardingWaiverEligible: true
+  };
+  const execution = new JobExecutionService(store, undefined, () => job);
+  const delistPromise = externalPosting.delistExternalJob(job.id, {
+    adminWallet: OTHER_POSTER,
+    reason: "operator rescue requested"
+  });
+  await delistEntered;
+
+  const racedClaim = await execution.claimJob(
+    OTHER_POSTER,
+    job.id,
+    "http",
+    "delist-wins-race"
+  ).then(
+    (value) => ({ value }),
+    (error) => ({ error })
+  );
+  releaseDelist();
+  await delistPromise;
+
+  assert.equal(racedClaim.value, undefined);
+  assert.equal(racedClaim.error?.code, "external_job_transition_in_progress");
+  await assert.rejects(
+    execution.claimJob(OTHER_POSTER, job.id, "http", "delisted-after-race"),
+    (error) => error.code === "external_job_delisted"
+      && error.details?.jobId === job.id
+      && error.details?.delistReason === "operator rescue requested"
+  );
 });

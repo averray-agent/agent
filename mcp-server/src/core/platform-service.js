@@ -53,6 +53,10 @@ import { collectGithubOperatorStatus } from "./github-operator-helper.js";
 import { collectHostDiagnostics } from "./host-diagnostics.js";
 import { registerExternalSchema, validateSubmissionAgainstRegisteredSchema } from "../services/schema-registry.js";
 import { applyIngestionOnboardingWaiverPolicy } from "./onboarding-inventory.js";
+import {
+  EXTERNAL_JOB_DELISTED_REASON,
+  isExternalJob
+} from "./external-job-lifecycle.js";
 
 const TIMELINE_VERSION = "v2";
 
@@ -838,7 +842,7 @@ export class PlatformService {
     ]);
     const claimStateEligible = job.claimable === true && job.currentWalletCanClaim !== false;
     const fundingBlocked = claimStateEligible && preflight.claimFundingSufficient === false;
-    return {
+    const result = {
       ...preflight,
       catalogEligible: preflight.catalogEligible ?? preflight.eligible,
       eligible: preflight.eligible && claimStateEligible,
@@ -852,6 +856,29 @@ export class PlatformService {
       claimExpiresAt: job.claimExpiresAt,
       retryLimit: job.retryLimit,
       sessionId: job.sessionId
+    };
+    const delisting = isExternalJob(job)
+      ? await this.stateStore.getExternalJobDelisting?.(jobId)
+      : undefined;
+    if (!delisting) {
+      return result;
+    }
+    return {
+      ...result,
+      catalogEligible: false,
+      eligible: false,
+      claimable: false,
+      currentWalletCanClaim: false,
+      reason: EXTERNAL_JOB_DELISTED_REASON,
+      delisted: true,
+      delistedAt: delisting.delistedAt,
+      delistReason: delisting.reason,
+      failureStates: [
+        ...new Set([
+          ...(Array.isArray(preflight.failureStates) ? preflight.failureStates : []),
+          EXTERNAL_JOB_DELISTED_REASON
+        ])
+      ]
     };
   }
 

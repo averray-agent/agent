@@ -35,6 +35,13 @@ import {
 } from "./maintainer-surface-policy.js";
 import { claimExpiresAt, countClaimAttempts, isExpiredClaim, isTerminalSession } from "./claim-state.js";
 import { buildBadgeJobSnapshot } from "./badge-metadata.js";
+import {
+  EXTERNAL_JOB_DELISTED_REASON,
+  EXTERNAL_JOB_LIFECYCLE_LOCK_TTL_SECONDS,
+  EXTERNAL_JOB_TRANSITION_REASON,
+  externalJobLifecycleLockId,
+  isExternalJob
+} from "./external-job-lifecycle.js";
 
 // EscrowCore JobState enum: None=0, Open=1, Claimed=2, Submitted=3, Rejected=4,
 // Disputed=5, Closed=6. Used to reconcile a mined-but-receipt-lost submit.
@@ -92,6 +99,54 @@ export class JobExecutionService {
     }
 
     const job = this.getClaimableJobDefinition(jobId);
+    if (isExternalJob(job)) {
+      return this.claimExternalJob(wallet, jobId, protocol, idempotencyKey, job);
+    }
+    return this.claimJobAfterLifecycleGate(wallet, jobId, protocol, idempotencyKey, job);
+  }
+
+  async claimExternalJob(wallet, jobId, protocol, idempotencyKey, job) {
+    const lockId = externalJobLifecycleLockId(jobId);
+    const lockOwner = randomUUID();
+    const lockAcquired = await this.stateStore.acquireClaimLock?.(
+      lockId,
+      lockOwner,
+      EXTERNAL_JOB_LIFECYCLE_LOCK_TTL_SECONDS
+    );
+    if (lockAcquired === false) {
+      throw new ConflictError(
+        `External job ${jobId} has another lifecycle transition in progress.`,
+        EXTERNAL_JOB_TRANSITION_REASON,
+        { jobId, operation: "claim" }
+      );
+    }
+
+    try {
+      const delisting = await this.stateStore.getExternalJobDelisting?.(jobId);
+      if (delisting) {
+        throw new ConflictError(
+          `External job ${jobId} was delisted and cannot be claimed.`,
+          EXTERNAL_JOB_DELISTED_REASON,
+          {
+            jobId,
+            delistedAt: delisting.delistedAt,
+            delistReason: delisting.reason
+          }
+        );
+      }
+      return await this.claimJobAfterLifecycleGate(
+        wallet,
+        jobId,
+        protocol,
+        idempotencyKey,
+        job
+      );
+    } finally {
+      await this.stateStore.releaseClaimLock?.(lockId, lockOwner);
+    }
+  }
+
+  async claimJobAfterLifecycleGate(wallet, jobId, protocol, idempotencyKey, job) {
     const activeJobSession = await this.stateStore.findSessionByJobId(jobId);
     const refreshedActiveJobSession = activeJobSession
       ? await this.materializeExpiredClaim(activeJobSession, job)

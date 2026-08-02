@@ -18,6 +18,11 @@ import {
   ValidationError
 } from "./errors.js";
 import { decimalToBaseUnits } from "./platform-service-helpers.js";
+import {
+  EXTERNAL_JOB_LIFECYCLE_LOCK_TTL_SECONDS,
+  EXTERNAL_JOB_TRANSITION_REASON,
+  externalJobLifecycleLockId
+} from "./external-job-lifecycle.js";
 
 export const EXTERNAL_DRAFT_FUNDING_NOTE =
   "Awaiting a matching finalized escrow creation from the platform indexer.";
@@ -29,6 +34,7 @@ const DEFAULT_MIN_REWARD_USDC = "1";
 const DEFAULT_DRAFT_TTL_HOURS = 72;
 const DEFAULT_MAX_OPEN_DRAFTS = 10;
 export const DEFAULT_POSTER_REVIEW_WINDOW_HOURS = 7 * 24;
+export const MIN_EXTERNAL_CLAIM_TTL_SECONDS = 60;
 const USDC_DECIMALS = 6;
 
 class ExternalPostingValidationError extends ValidationError {
@@ -279,7 +285,8 @@ export class ExternalPostingService {
       );
     }
     assertStoredDraftDeterminism(draft, this.config);
-    return presentDraft(draft, this.currentTime());
+    const delisting = await this.stateStore.getExternalJobDelisting?.(draft.jobId);
+    return presentDraft(draft, this.currentTime(), delisting);
   }
 
   async delistExternalJob(jobIdInput, {
@@ -293,15 +300,34 @@ export class ExternalPostingService {
       reason: String(reason ?? "").trim() || "operator backstop",
       delistedAt: this.currentTime().toISOString()
     };
-    await this.stateStore.upsertExternalJobDelisting(record);
-    return {
-      jobId,
-      delisted: true,
-      catalogProjectionRemoved: true,
-      onChainEscrowTouched: false,
-      reason: record.reason,
-      delistedAt: record.delistedAt
-    };
+    const lockId = externalJobLifecycleLockId(jobId);
+    const lockOwner = randomUUID();
+    const lockAcquired = await this.stateStore.acquireClaimLock?.(
+      lockId,
+      lockOwner,
+      EXTERNAL_JOB_LIFECYCLE_LOCK_TTL_SECONDS
+    );
+    if (lockAcquired === false) {
+      throw new ConflictError(
+        `External job ${jobId} has another lifecycle transition in progress.`,
+        EXTERNAL_JOB_TRANSITION_REASON,
+        { jobId, operation: "delist" }
+      );
+    }
+
+    try {
+      await this.stateStore.upsertExternalJobDelisting(record);
+      return {
+        jobId,
+        delisted: true,
+        catalogProjectionRemoved: true,
+        onChainEscrowTouched: false,
+        reason: record.reason,
+        delistedAt: record.delistedAt
+      };
+    } finally {
+      await this.stateStore.releaseClaimLock?.(lockId, lockOwner);
+    }
   }
 
   async reconcileFinalizedCreation(observationInput) {
@@ -571,6 +597,7 @@ function validateExternalJobDefinition(candidate, config) {
   }
   definition.inputSchemaRef = inputSchemaRef;
   definition.outputSchemaRef = outputSchemaRef;
+  resolveExternalClaimTtlSeconds(definition);
 
   try {
     normalizeJobInput({ ...definition, id: "external-draft-validation" });
@@ -611,10 +638,7 @@ function resolveOnChainTerms(definition, config) {
     config.usdcAsset.decimals,
     "contingencyReserve"
   );
-  const claimTtlSeconds = Number(definition?.claimTtlSeconds ?? 3600);
-  if (!Number.isInteger(claimTtlSeconds) || claimTtlSeconds < 60) {
-    throw new ValidationError("claimTtlSeconds must be an integer of at least 60.");
-  }
+  const claimTtlSeconds = resolveExternalClaimTtlSeconds(definition);
   const verifierMode = String(definition?.verifierMode ?? "").trim().toLowerCase();
   const category = String(definition?.category ?? "").trim().toLowerCase();
   return {
@@ -642,7 +666,18 @@ function assertStoredDraftDeterminism(draft, config) {
   }
 }
 
-function presentDraft(draft, now) {
+function presentDraft(draft, now, delisting = undefined) {
+  if (delisting) {
+    const prior = presentDraft(draft, now);
+    return {
+      ...prior,
+      status: "delisted",
+      delisted: true,
+      previousStatus: prior.status,
+      delistedAt: delisting.delistedAt,
+      delistReason: delisting.reason
+    };
+  }
   if (draft.status === "live") {
     return {
       draftId: draft.draftId,
@@ -685,6 +720,27 @@ function presentDraft(draft, now) {
     status: expired ? "expired" : "awaiting_funding",
     ...(!expired ? { note: EXTERNAL_DRAFT_FUNDING_NOTE } : {})
   };
+}
+
+function resolveExternalClaimTtlSeconds(definition) {
+  const requested = definition?.claimTtlSeconds ?? 3600;
+  const claimTtlSeconds = Number(requested);
+  if (
+    !Number.isInteger(claimTtlSeconds)
+    || claimTtlSeconds < MIN_EXTERNAL_CLAIM_TTL_SECONDS
+  ) {
+    throw externalValidationError(
+      `claimTtlSeconds must be an integer of at least ${MIN_EXTERNAL_CLAIM_TTL_SECONDS}.`,
+      "external_claim_ttl_invalid",
+      {
+        minimumClaimTtlSeconds: MIN_EXTERNAL_CLAIM_TTL_SECONDS,
+        requestedClaimTtlSeconds: Number.isFinite(claimTtlSeconds)
+          ? claimTtlSeconds
+          : String(requested ?? "")
+      }
+    );
+  }
+  return claimTtlSeconds;
 }
 
 function normalizeFinalizedCreation(value) {
