@@ -8,6 +8,7 @@ const GUIDE_URL = "https://github.com/averray-agent/agent/blob/main/docs/POSTER_
 const DOGFOOD_EVIDENCE_URL = "https://github.com/averray-agent/agent/pull/874";
 const ERC20_APPROVE_ABI = "function approve(address spender, uint256 amount) returns (bool)";
 const AGENT_ACCOUNT_DEPOSIT_ABI = "function deposit(address asset, uint256 amount)";
+const AGENT_ACCOUNT_WITHDRAW_ABI = "function withdraw(address asset, uint256 amount)";
 const AGENT_ACCOUNT_POSITIONS_ABI =
   "function positions(address account, address asset) view returns (uint256 liquid, uint256 reserved, uint256 strategyAllocated, uint256 collateralLocked, uint256 jobStakeLocked, uint256 debtOutstanding)";
 const OPEN_DISPUTE_ABI = "function openDispute(bytes32 jobId)";
@@ -64,6 +65,10 @@ export function createPosterOnboardingService({
 
     async getExternalBountiesOnboarding() {
       return externalBountiesFromSnapshot(await getSnapshot());
+    },
+
+    async getWorkerDoorOnboarding() {
+      return workerDoorFromSnapshot(await getSnapshot());
     },
 
     async enrichExternalCatalogRows(jobs = []) {
@@ -160,6 +165,7 @@ async function buildSnapshot({
     disputeWindowRead,
     token,
     escrowCore: config.escrowCoreAddress,
+    agentAccountCore: gateway?.config?.agentAccountAddress,
     publicBaseUrl
   });
 
@@ -361,6 +367,7 @@ function buildWorkerFacts({
   disputeWindowRead,
   token,
   escrowCore,
+  agentAccountCore,
   publicBaseUrl
 }) {
   const remedy = buildWorkerDisputeRemedy(escrowCore);
@@ -392,6 +399,15 @@ function buildWorkerFacts({
         available: false,
         reason: claimBondRead.reason
       };
+  const tokenAddress = token?.address ?? "<token address>";
+  const accountAddress = agentAccountCore ?? "<AgentAccountCore address>";
+  const positionRead = {
+    contract: "AgentAccountCore",
+    ...(agentAccountCore ? { address: agentAccountCore } : {}),
+    abiFragment: AGENT_ACCOUNT_POSITIONS_ABI,
+    args: ["<worker EVM address>", tokenAddress],
+    resultField: "liquid"
+  };
 
   return {
     claimBond,
@@ -407,7 +423,67 @@ function buildWorkerFacts({
       requiredWhenLiquidIsShort: true,
       routeAvailable: false,
       explanation:
-        "AgentAccountCore has no depositFor path: the worker must approve the token and self-deposit into AgentAccountCore, paying that deposit transaction's gas. A brokered claim does not broker the deposit."
+        "AgentAccountCore has no depositFor path: the worker must approve the token and self-deposit into AgentAccountCore, paying that deposit transaction's gas. A brokered claim does not broker the deposit.",
+      requiredClaimLockRawFormula: "parseUnits(preflight.totalClaimLock, token.decimals)",
+      depositAmountRawFormula:
+        "max(requiredClaimLockRaw - positions(worker, token).liquid, 0)",
+      positionRead,
+      writes: [
+        {
+          contract: "token",
+          ...(token?.address ? { address: token.address } : {}),
+          abiFragment: ERC20_APPROVE_ABI,
+          method: "approve",
+          args: [accountAddress, "<depositAmountRaw>"],
+          skipWhen: "depositAmountRaw == 0"
+        },
+        {
+          contract: "AgentAccountCore",
+          ...(agentAccountCore ? { address: agentAccountCore } : {}),
+          abiFragment: AGENT_ACCOUNT_DEPOSIT_ABI,
+          method: "deposit",
+          args: [tokenAddress, "<depositAmountRaw>"],
+          skipWhen: "depositAmountRaw == 0"
+        }
+      ]
+    },
+    accountFund: {
+      method: "POST",
+      path: "/account/fund",
+      generalWorkerFundingPath: false,
+      purpose:
+        "Development/test convenience only: in chain mode it is restricted to the configured backend signer and auto-mintable mock assets.",
+      mainnetConstraint:
+        "Mainnet USDC is not auto-mintable, so workers must use the self-deposit transactions above. Route capability does not imply that an arbitrary wallet or asset can be funded."
+    },
+    withdrawal: {
+      httpRouteAvailable: false,
+      explanation:
+        "Withdraw directly from the worker wallet on-chain. Only liquid AAC balance is withdrawable; reserved reward funding, collateral, strategy allocations, job stake, and debt constraints remain enforced by AgentAccountCore.",
+      onChain: {
+        available: Boolean(agentAccountCore && token?.address),
+        contract: "AgentAccountCore",
+        ...(agentAccountCore ? { address: agentAccountCore } : {}),
+        abiFragment: AGENT_ACCOUNT_WITHDRAW_ABI,
+        args: [tokenAddress, "<amountRaw>"],
+        value: "0",
+        recipient: "msg.sender (the worker wallet)",
+        requiresWorkerGas: true
+      }
+    },
+    submissionValidation: {
+      when: "before_claim_or_submit",
+      method: "POST",
+      path: "/jobs/validate-submission",
+      requiresAuth: false,
+      body: { jobId: "<jobId>", submission: "<candidate schema object>" },
+      effect: "Read-only schema validation; it neither claims the job nor stores the submission."
+    },
+    claimTtl: {
+      source: "job_definition",
+      inspect: "GET /jobs/definition?jobId=X -> claimTtlSeconds",
+      policy:
+        "Curated ingestion owns a source-specific TTL; external posters may request a longer TTL. Tier/category do not infer task duration because task complexity is not reliably derivable from those labels."
     },
     disputeWindow
   };
@@ -457,6 +533,23 @@ function externalBountiesFromSnapshot(snapshot) {
       available: false,
       reason: "verifier_mode_not_configured"
     },
+    liveReads: {
+      claimBond: snapshot.liveReads.claimBond,
+      disputeWindow: snapshot.liveReads.disputeWindow
+    }
+  };
+}
+
+function workerDoorFromSnapshot(snapshot) {
+  return {
+    claimBond: snapshot.workerFacts.claimBond,
+    preflight: snapshot.workerFacts.preflight,
+    selfDeposit: snapshot.workerFacts.selfDeposit,
+    accountFund: snapshot.workerFacts.accountFund,
+    withdrawal: snapshot.workerFacts.withdrawal,
+    submissionValidation: snapshot.workerFacts.submissionValidation,
+    claimTtl: snapshot.workerFacts.claimTtl,
+    disputeWindow: snapshot.workerFacts.disputeWindow,
     liveReads: {
       claimBond: snapshot.liveReads.claimBond,
       disputeWindow: snapshot.liveReads.disputeWindow

@@ -723,6 +723,11 @@ function presentDraft(draft, now, delisting = undefined) {
 }
 
 function resolveExternalClaimTtlSeconds(definition) {
+  // External work uses the poster's explicit claim window rather than deriving
+  // duration from tier/category: those labels describe access and task shape,
+  // not how long an arbitrary repository task needs. Curated ingesters own
+  // their source-specific TTLs; an external poster can deliberately choose a
+  // longer window (and the positive floor below prevents zero-TTL lockups).
   const requested = definition?.claimTtlSeconds ?? 3600;
   const claimTtlSeconds = Number(requested);
   if (

@@ -16,6 +16,10 @@ const EXTERNAL_BOUNTIES = {
   mode: "allowlist",
   posterOnboarding: "/poster/onboarding"
 };
+const WORKER_DOOR = {
+  selfDeposit: { routeAvailable: false },
+  withdrawal: { httpRouteAvailable: false }
+};
 const POSTER_ONBOARDING = {
   version: "poster-onboarding-v1",
   mode: "allowlist"
@@ -35,6 +39,10 @@ function makeHarness(overrides = {}) {
     },
     publicBaseUrl: overrides.publicBaseUrl ?? " https://api.averray.com ",
     posterOnboardingService: {
+      getWorkerDoorOnboarding: async () => {
+        calls.push(["getWorkerDoorOnboarding"]);
+        return overrides.workerDoor ?? WORKER_DOOR;
+      },
       getExternalBountiesOnboarding: async () => {
         calls.push(["getExternalBountiesOnboarding"]);
         return overrides.externalBounties ?? EXTERNAL_BOUNTIES;
@@ -154,14 +162,16 @@ test("GET /onboarding returns platform capabilities with live external-bounty fa
   assert.equal(response.statusCode, 200);
   assert.deepEqual(response.body, {
     ...PLATFORM_CAPABILITIES,
+    workerDoor: WORKER_DOOR,
     externalBounties: EXTERNAL_BOUNTIES
   });
   assert.deepEqual(response.headers, { "cache-control": "public, max-age=30" });
   // The route must forward the active chain id so /onboarding advertises the
   // same network as /health and SIWE.
   assert.deepEqual(calls, [
-    ["getPlatformCapabilities", { chainId: 420420419 }],
+    ["getWorkerDoorOnboarding"],
     ["getExternalBountiesOnboarding"],
+    ["getPlatformCapabilities", { chainId: 420420419 }],
     ["respond", {
       statusCode: 200,
       body: response.body,
