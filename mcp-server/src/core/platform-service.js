@@ -673,6 +673,16 @@ export class PlatformService {
         details: xcmBalanceObserver.error
       });
     }
+    if (xcmBalanceObserver?.readErrorCount > 0) {
+      anomalies.push({
+        severity: "medium",
+        code: "xcm_balance_observation_read_failed",
+        message: `${xcmBalanceObserver.readErrorCount} XCM balance observation(s) have unknown/stale venue state.`,
+        details: {
+          pending: xcmBalanceObserver.pending?.filter((item) => item.lastError)
+        }
+      });
+    }
     if (xcmBalanceObserver?.overdueCount > 0) {
       anomalies.push({
         severity: "high",

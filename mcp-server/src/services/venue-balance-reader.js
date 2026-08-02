@@ -1,4 +1,3 @@
-import { ApiPromise, HttpProvider, WsProvider } from "@polkadot/api";
 import { Contract, JsonRpcProvider } from "ethers";
 
 import { ValidationError } from "../core/errors.js";
@@ -15,7 +14,12 @@ const ERC20_BALANCE_ABI = ["function balanceOf(address account) view returns (ui
  * storage family produced a truthful-looking zero during the gate-3 rehearsal.
  */
 export class VenueBalanceReader {
-  constructor({ substrateApiFactory = createSubstrateApi, evmProviderFactory = createEvmProvider } = {}) {
+  constructor({
+    polkadotApiLoader = loadPolkadotApi,
+    substrateApiFactory = createSubstrateApi,
+    evmProviderFactory = createEvmProvider
+  } = {}) {
+    this.polkadotApiLoader = polkadotApiLoader;
     this.substrateApiFactory = substrateApiFactory;
     this.evmProviderFactory = evmProviderFactory;
     this.substrateApis = new Map();
@@ -47,7 +51,11 @@ export class VenueBalanceReader {
   async getSubstrateApi(endpoint) {
     let pending = this.substrateApis.get(endpoint);
     if (!pending) {
-      pending = Promise.resolve(this.substrateApiFactory(endpoint));
+      // Keep this dependency outside backend startup. A rejected import stays
+      // attached to the read promise so the observer records the exact error,
+      // retries it as a visible Pending, and eventually emits Failed.
+      pending = this.polkadotApiLoader()
+        .then((polkadotApi) => this.substrateApiFactory(endpoint, polkadotApi));
       this.substrateApis.set(endpoint, pending);
     }
     return pending;
@@ -122,7 +130,11 @@ export function normalizeVenueBalanceTarget(target = {}) {
   throw new ValidationError('balance target ledger must be "substrate_tokens" or "erc20".');
 }
 
-function createSubstrateApi(endpoint) {
+function loadPolkadotApi() {
+  return import("@polkadot/api");
+}
+
+function createSubstrateApi(endpoint, { ApiPromise, HttpProvider, WsProvider }) {
   const provider = endpoint.startsWith("http")
     ? new HttpProvider(endpoint)
     : new WsProvider(endpoint, 5_000);

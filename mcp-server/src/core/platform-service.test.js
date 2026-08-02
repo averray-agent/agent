@@ -1725,6 +1725,32 @@ test("getAdminStatus surfaces XCM observation relay status", async () => {
   assert.equal(status.xcmObservationRelay.cursor, "cursor-1");
 });
 
+test("getAdminStatus alarms when a venue balance read is unknown/stale", async () => {
+  const service = makePlatformService();
+  service.xcmBalanceObserver = {
+    async getStatus() {
+      return {
+        enabled: true,
+        running: true,
+        polling: false,
+        pendingCount: 1,
+        readErrorCount: 1,
+        overdueCount: 0,
+        oldestPendingAgeMs: 1_000,
+        pending: [{
+          requestId: `0x${"11".repeat(32)}`,
+          observationState: "unknown_stale",
+          lastError: "Cannot find package @polkadot/api"
+        }]
+      };
+    }
+  };
+
+  const status = await service.getAdminStatus();
+  assert.equal(status.xcmBalanceObserver.readErrorCount, 1);
+  assert.ok(status.anomalies.some((entry) => entry.code === "xcm_balance_observation_read_failed"));
+});
+
 test("getAdminStatus reports XCM status read failures without failing the response", async () => {
   const service = makePlatformService();
   service.xcmSettlementWatcher = {

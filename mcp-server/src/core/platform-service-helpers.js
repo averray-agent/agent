@@ -52,6 +52,7 @@ export const DEFAULT_XCM_BALANCE_OBSERVER_STATUS = {
   running: false,
   polling: false,
   pendingCount: 0,
+  readErrorCount: 0,
   overdueCount: 0,
   oldestPendingAgeMs: 0,
   pending: []

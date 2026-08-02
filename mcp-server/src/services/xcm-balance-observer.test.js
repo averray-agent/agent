@@ -5,7 +5,7 @@ import { readFile } from "node:fs/promises";
 import { MemoryStateStore } from "../core/state-store.js";
 import { XcmSettlementWatcherService } from "./xcm-settlement-watcher.js";
 import { XcmBalanceObserverService } from "./xcm-balance-observer.js";
-import { normalizeVenueBalanceTarget } from "./venue-balance-reader.js";
+import { VenueBalanceReader, normalizeVenueBalanceTarget } from "./venue-balance-reader.js";
 
 const REQUEST_ID = `0x${"11".repeat(32)}`;
 const ACCOUNT = "0xaf39ad769a03cb535d9799e49459b033c1fab84ee23ffe5d0852f8d82f02a71e";
@@ -35,6 +35,32 @@ test("VenueBalanceReader target binds Hydration aUSDC to truncate20(AccountId32)
   const normalized = normalizeVenueBalanceTarget(targetFor("aUsdc"));
   assert.equal(normalized.evmAccount, fixture.convertedH160);
   assert.equal(normalized.contract, fixture.aUsdcContract);
+});
+
+test("enabled Substrate read dynamically loads @polkadot/api before querying Tokens.accounts", async () => {
+  let loadedModule;
+  const reader = new VenueBalanceReader({
+    async substrateApiFactory(_endpoint, polkadotApi) {
+      loadedModule = polkadotApi;
+      return {
+        query: {
+          tokens: {
+            async accounts(account, assetId) {
+              assert.equal(account, ACCOUNT);
+              assert.equal(assetId, 22);
+              return { toJSON: () => ({ free: "149380" }) };
+            }
+          }
+        },
+        async disconnect() {}
+      };
+    }
+  });
+
+  const reading = await reader.read(targetFor("asset22"));
+  assert.equal(typeof loadedModule.ApiPromise.create, "function");
+  assert.equal(reading.raw, 149_380n);
+  await reader.close();
 });
 
 test("round-trip fixtures replay all four destination-ledger balance deltas", async () => {
@@ -142,6 +168,42 @@ test("observer timeout records Failed instead of leaving a silent Pending", asyn
   assert.equal(outcomes[0].status, "failed");
   assert.equal((await store.getXcmBalanceWatch(REQUEST_ID)).status, "failed");
   assert.equal((await observer.getStatus()).pendingCount, 0);
+});
+
+test("dynamic import failure stays visible and times out as Failed", async () => {
+  const store = new MemoryStateStore();
+  const outcomes = [];
+  let now = Date.parse("2026-08-02T12:00:00.000Z");
+  const reader = new VenueBalanceReader({
+    async polkadotApiLoader() {
+      throw new Error("Cannot find package @polkadot/api");
+    }
+  });
+  const observer = new XcmBalanceObserverService(
+    store,
+    reader,
+    { async observeOutcome(_requestId, outcome) { outcomes.push(outcome); } },
+    undefined,
+    { enabled: true, defaultTimeoutMs: 1_000, now: () => now }
+  );
+  await observer.register({
+    requestId: REQUEST_ID,
+    target: targetFor("asset22"),
+    direction: "increase",
+    baselineRaw: "0"
+  });
+
+  await observer.pollOnce();
+  const pendingStatus = await observer.getStatus();
+  assert.equal(pendingStatus.pendingCount, 1);
+  assert.equal(pendingStatus.readErrorCount, 1);
+  assert.equal(pendingStatus.pending[0].observationState, "unknown_stale");
+  assert.match(pendingStatus.pending[0].lastError, /Cannot find package @polkadot\/api/u);
+
+  now += 1_001;
+  await observer.pollOnce();
+  assert.equal(outcomes[0].status, "failed");
+  assert.equal((await store.getXcmBalanceWatch(REQUEST_ID)).status, "failed");
 });
 
 test("terminal watch registration and polling are idempotent", async () => {

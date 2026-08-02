@@ -195,6 +195,7 @@ export class XcmBalanceObserverService {
       running: this.running,
       polling: Boolean(this.pollPromise),
       pendingCount: pending.length,
+      readErrorCount: pending.filter((item) => Boolean(item.lastError)).length,
       overdueCount: pending.filter((item) => nowMs >= Date.parse(item.deadlineAt ?? "")).length,
       oldestPendingAgeMs: Number.isFinite(oldestStartedMs) ? Math.max(nowMs - oldestStartedMs, 0) : 0,
       pending: pending.slice(0, 10).map((item) => ({
@@ -207,7 +208,8 @@ export class XcmBalanceObserverService {
         startedAt: item.startedAt,
         deadlineAt: item.deadlineAt,
         lastReadAt: item.lastReadAt,
-        lastError: item.lastError
+        lastError: item.lastError,
+        observationState: item.lastError ? "unknown_stale" : "pending"
       }))
     };
   }
