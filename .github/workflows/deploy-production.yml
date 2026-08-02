@@ -139,6 +139,9 @@ jobs:
     name: Deploy VPS production
     runs-on: ubuntu-latest
     environment: production
+    outputs:
+      deployed: ${{ steps.deploy_production.outputs.changed }}
+      new_sha: ${{ steps.deploy_production.outputs.new_sha }}
     permissions:
       contents: read
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
@@ -492,7 +495,10 @@ jobs:
           printf 'AVERRAY_TOKEN=%s\n' "$token" >> "$GITHUB_ENV"
 
       - name: Deploy production
+        id: deploy_production
         run: |
+          set -euo pipefail
+
           # APP_BASIC_AUTH_PASSWORD (raw) is intentionally NOT in this
           # heredoc anymore — render-caddyfile.sh on the VPS now requires
           # the HASH and rejects the raw value (PR 2.2). The plaintext
@@ -582,7 +588,7 @@ jobs:
             -o ServerAliveInterval=30 \
             -o ServerAliveCountMax=120 \
             "$VPS_USER@$VPS_HOST" \
-            "${remote_env} bash -s" <<'REMOTE'
+            "${remote_env} bash -s" <<'REMOTE' | tee deploy-production.log
           set -e
           cd /srv/agent-stack/app
 
@@ -603,6 +609,44 @@ jobs:
 
           DEPLOY_OLD_SHA="$old_sha" DEPLOY_NEW_SHA="$new_sha" ./scripts/ops/deploy-production.sh
           REMOTE
+
+          result_line="$(grep -E '^AVERRAY_DEPLOY_RESULT=' deploy-production.log | tail -1 || true)"
+          if [ -z "$result_line" ]; then
+            echo "::error::Deploy completed without an AVERRAY_DEPLOY_RESULT record; refusing to guess whether the running system changed."
+            exit 1
+          fi
+
+          result_json="${result_line#AVERRAY_DEPLOY_RESULT=}"
+          printf '%s\n' "$result_json" > production-deploy-result.json
+          jq -e '
+            .schemaVersion == 1 and
+            (.changed | type == "boolean") and
+            (.oldSha | test("^[0-9a-f]{40}$")) and
+            (.newSha | test("^[0-9a-f]{40}$")) and
+            (.components | type == "array")
+          ' production-deploy-result.json >/dev/null
+
+          changed="$(jq -r '.changed' production-deploy-result.json)"
+          new_sha="$(jq -r '.newSha' production-deploy-result.json)"
+          components="$(jq -r '.components | if length == 0 then "none" else join(", ") end' production-deploy-result.json)"
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+          echo "new_sha=$new_sha" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## Production Deployment Result"
+            echo
+            echo "- Running system changed: \`$changed\`"
+            echo "- New SHA: \`$new_sha\`"
+            echo "- Changed components: \`$components\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload production deployment result
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: production-deploy-result
+          path: production-deploy-result.json
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Ask Hermes for post-deploy testbed verification
         id: hermes_post_deploy

@@ -58,13 +58,16 @@ on:
   # Daily evidence lane — catches the blocker class before an external agent does.
   schedule:
     - cron: "37 6 * * *"
-  # Post-deploy gate — re-walk the whole loop right after every production deploy.
+  # Post-deploy gate — re-walk the loop only when production changed, and only
+  # once per deployed SHA. The daily heartbeat above deliberately bypasses the
+  # debounce.
   workflow_run:
     workflows: ["Deploy Production"]
     branches: [main]
     types: [completed]
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -76,8 +79,6 @@ jobs:
     name: Run hosted external-worker canary
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # Skip the post-deploy run when the deploy itself failed.
-    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     environment: production
     env:
       APP_ALLOW_PROTECTED_SHELL: "1"
@@ -97,7 +98,110 @@ jobs:
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
+      - name: Resolve deployed SHA and production-change result
+        id: canary_target
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TRIGGER_EVENT_NAME: ${{ github.event_name }}
+          TRIGGER_WORKFLOW_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          TRIGGER_WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+          TRIGGER_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          deploy_changed=true
+          deployed_sha=""
+          if [ "$TRIGGER_EVENT_NAME" = "workflow_run" ]; then
+            deployed_sha="$TRIGGER_HEAD_SHA"
+            deploy_changed=false
+            if [ "$TRIGGER_WORKFLOW_CONCLUSION" = "success" ]; then
+              mkdir -p artifacts/deploy-result
+              if ! gh run download "$TRIGGER_WORKFLOW_RUN_ID" \
+                --repo "$GITHUB_REPOSITORY" \
+                --name production-deploy-result \
+                --dir artifacts/deploy-result; then
+                {
+                  echo "## Hosted Worker Canary"
+                  echo
+                  echo "> [!ERROR]"
+                  echo "> Deploy Production succeeded, but its production-deploy-result artifact could not be read. Refusing to guess whether a paid canary is required."
+                } >> "$GITHUB_STEP_SUMMARY"
+                exit 1
+              fi
+
+              result_file=artifacts/deploy-result/production-deploy-result.json
+              jq -e '
+                .schemaVersion == 1 and
+                (.changed | type == "boolean") and
+                (.newSha | test("^[0-9a-f]{40}$")) and
+                (.components | type == "array")
+              ' "$result_file" >/dev/null
+              deploy_changed="$(jq -r '.changed' "$result_file")"
+              deployed_sha="$(jq -r '.newSha' "$result_file")"
+            fi
+          else
+            deployed_sha="$(curl -fsS --retry 4 --retry-delay 1 --max-time 10 https://api.averray.com/health | jq -er '.deployedSha')"
+          fi
+
+          if [[ ! "$deployed_sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Worker canary target is not a full lowercase deployed SHA: ${deployed_sha:-missing}"
+            exit 1
+          fi
+
+          echo "deploy_changed=$deploy_changed" >> "$GITHUB_OUTPUT"
+          echo "deployed_sha=$deployed_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Check for a prior green canary on this SHA
+        id: green_marker
+        if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && steps.canary_target.outputs.deploy_changed == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOYED_SHA: ${{ steps.canary_target.outputs.deployed_sha }}
+        run: |
+          set -euo pipefail
+
+          artifact_name="hosted-worker-canary-green-${DEPLOYED_SHA}"
+          artifacts_json="$(gh api --method GET "/repos/${GITHUB_REPOSITORY}/actions/artifacts" \
+            -f name="$artifact_name" \
+            -f per_page=100)"
+          count="$(printf '%s' "$artifacts_json" \
+            | jq --arg name "$artifact_name" '[.artifacts[] | select(.expired == false and .name == $name)] | length')"
+          if [ "$count" -gt 0 ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Decide whether to spend lifecycle gas
+        id: trigger_decision
+        env:
+          WORKER_CANARY_EVENT_NAME: ${{ github.event_name }}
+          WORKER_CANARY_WORKFLOW_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          WORKER_CANARY_DEPLOY_CHANGED: ${{ steps.canary_target.outputs.deploy_changed }}
+          WORKER_CANARY_DEPLOYED_SHA: ${{ steps.canary_target.outputs.deployed_sha }}
+          WORKER_CANARY_GREEN_EXISTS: ${{ steps.green_marker.outputs.exists || 'false' }}
+        run: node scripts/ops/decide-worker-canary-trigger.mjs
+
+      - name: Summarize skipped canary
+        if: ${{ steps.trigger_decision.outputs.should_run != 'true' }}
+        env:
+          SKIP_REASON: ${{ steps.trigger_decision.outputs.reason }}
+          SKIP_SUMMARY: ${{ steps.trigger_decision.outputs.summary }}
+          DEPLOYED_SHA: ${{ steps.trigger_decision.outputs.deployed_sha }}
+          DEPLOY_CHANGED: ${{ steps.canary_target.outputs.deploy_changed }}
+        run: |
+          {
+            echo "## Hosted Worker Canary — skipped"
+            echo
+            echo "- Reason: \`$SKIP_REASON\`"
+            echo "- Detail: $SKIP_SUMMARY"
+            echo "- Deployed SHA: \`$DEPLOYED_SHA\`"
+            echo "- Deploy changed the running system: \`$DEPLOY_CHANGED\`"
+            echo "- Gas-spending lifecycle steps executed: \`false\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        if: ${{ steps.trigger_decision.outputs.should_run == 'true' }}
         with:
           node-version: "22"
           cache: npm
@@ -105,10 +209,11 @@ jobs:
       # The canary signs the SIWE message and reads on-chain settlement state
       # with `ethers` (a prod dependency of mcp-server), so it needs node_modules.
       - name: Install dependencies
+        if: ${{ steps.trigger_decision.outputs.should_run == 'true' }}
         run: npm ci --no-audit --no-fund
 
       - name: Load testnet operator ADMIN_JWT from 1Password (fail-closed)
-        if: ${{ (vars.WORKER_CANARY_PROFILE || 'testnet') != 'mainnet' }}
+        if: ${{ steps.trigger_decision.outputs.should_run == 'true' && (vars.WORKER_CANARY_PROFILE || 'testnet') != 'mainnet' }}
         uses: 1password/load-secrets-action@92467eb28f72e8255933372f1e0707c567ce2259 # v4.0.0
         with:
           export-env: true
@@ -122,11 +227,11 @@ jobs:
       # before consuming the current token, then persists and reads back the
       # successor before it emits the short-lived access token.
       - name: Install 1Password CLI for mainnet refresh rotation
-        if: ${{ (vars.WORKER_CANARY_PROFILE || 'testnet') == 'mainnet' }}
+        if: ${{ steps.trigger_decision.outputs.should_run == 'true' && (vars.WORKER_CANARY_PROFILE || 'testnet') == 'mainnet' }}
         uses: 1password/install-cli-action@a5215d3a7f75c1629216c465ea9ab3ab399c4b71 # v4.0.0
 
       - name: Mint mainnet canary access token (persist successor first)
-        if: ${{ (vars.WORKER_CANARY_PROFILE || 'testnet') == 'mainnet' }}
+        if: ${{ steps.trigger_decision.outputs.should_run == 'true' && (vars.WORKER_CANARY_PROFILE || 'testnet') == 'mainnet' }}
         env:
           OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN_MAINNET_SMOKE }}
           ADMIN_REFRESH_TOKEN_OP: op://mainnet-smoke/admin-refresh-token-worker-canary/password
@@ -159,7 +264,7 @@ jobs:
       # that didn't opt into allow_ephemeral. Scheduled + post-deploy runs mint an
       # ephemeral wallet and skip this step (and its prod-backend token dependency).
       - name: Load canary worker key from 1Password (fail-closed)
-        if: ${{ (vars.WORKER_CANARY_PROFILE || 'testnet') == 'testnet' && github.event_name == 'workflow_dispatch' && inputs.allow_ephemeral != true }}
+        if: ${{ steps.trigger_decision.outputs.should_run == 'true' && (vars.WORKER_CANARY_PROFILE || 'testnet') == 'testnet' && github.event_name == 'workflow_dispatch' && inputs.allow_ephemeral != true }}
         uses: 1password/load-secrets-action@92467eb28f72e8255933372f1e0707c567ce2259 # v4.0.0
         with:
           export-env: true
@@ -168,6 +273,7 @@ jobs:
           WORKER_CANARY_WORKER_PRIVATE_KEY: op://prod-backend/canary-worker-testnet/private key
 
       - name: Verify operator credential loaded and shape-valid
+        if: ${{ steps.trigger_decision.outputs.should_run == 'true' }}
         run: |
           set -euo pipefail
           set +x
@@ -198,6 +304,7 @@ jobs:
           fi
 
       - name: Run hosted worker canary
+        if: ${{ steps.trigger_decision.outputs.should_run == 'true' }}
         run: |
           set -euo pipefail
           set +x
@@ -209,7 +316,7 @@ jobs:
           fi
 
       - name: Summarize canary evidence
-        if: always()
+        if: ${{ always() && steps.trigger_decision.outputs.should_run == 'true' }}
         run: |
           set -euo pipefail
 
@@ -258,10 +365,31 @@ jobs:
           fi
 
       - name: Upload sanitized worker-canary evidence
-        if: always()
+        if: ${{ always() && steps.trigger_decision.outputs.should_run == 'true' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: hosted-worker-canary-${{ github.run_id }}
           path: ${{ env.WORKER_CANARY_EVIDENCE_FILE }}
           if-no-files-found: error
           retention-days: 90
+
+      - name: Write green SHA debounce marker
+        if: ${{ success() && steps.trigger_decision.outputs.should_run == 'true' }}
+        env:
+          DEPLOYED_SHA: ${{ steps.trigger_decision.outputs.deployed_sha }}
+        run: |
+          jq -n \
+            --arg deployedSha "$DEPLOYED_SHA" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg verifiedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{schemaVersion: 1, status: "passed", deployedSha: $deployedSha, runId: $runId, verifiedAt: $verifiedAt}' \
+            > artifacts/worker-canary-green.json
+
+      - name: Upload green SHA debounce marker
+        if: ${{ success() && steps.trigger_decision.outputs.should_run == 'true' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: hosted-worker-canary-green-${{ steps.trigger_decision.outputs.deployed_sha }}
+          path: artifacts/worker-canary-green.json
+          if-no-files-found: error
+          retention-days: 2
