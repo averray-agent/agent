@@ -30,22 +30,37 @@ export interface SubmissionView {
 }
 
 /** Shape the submission payload without inventing fields. */
+/** First https URL inside a text blob, for linking string-form deliverables. */
+function firstUrl(value: string | null): string | null {
+  if (!value) return null;
+  const match = /https:\/\/[^\s"'<>)\]]+/u.exec(value);
+  // Sentence punctuation glued to a URL is prose, not path.
+  return match ? match[0].replace(/[.,;:!?]+$/u, "") : null;
+}
+
 export function buildSubmissionView(payload: unknown): SubmissionView {
   const record = asRecord(payload);
   const review = asRecord(record.review);
   const deliverable = asRecord(record.deliverable);
+  // The live coding-output schema allows `output` to be a plain string (the
+  // #625 dogfood submitted exactly that, PR URL inside) as well as an object.
+  const outputString = text(deliverable.output);
   const output = asRecord(deliverable.output);
   const deliverableUrl =
     text(output.prUrl) ??
     text(deliverable.prUrl) ??
     text(output.url) ??
+    firstUrl(outputString) ??
+    firstUrl(text(deliverable.summary)) ??
     null;
+  const textParts = [
+    text(deliverable.summary),
+    outputString ?? text(output.summary) ?? text(output.report),
+  ].filter((part): part is string => part !== null);
   const deliverableText =
-    text(output.summary) ??
-    text(output.report) ??
-    text(deliverable.summary) ??
-    (deliverableUrl ? null : text(deliverable.evidence)) ??
-    null;
+    textParts.length > 0
+      ? [...new Set(textParts)].join("\n\n")
+      : (deliverableUrl ? null : text(deliverable.evidence)) ?? null;
   return {
     worker: text(record.worker),
     submittedAt: text(record.submittedAt),
