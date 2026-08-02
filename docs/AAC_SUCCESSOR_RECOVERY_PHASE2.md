@@ -1,0 +1,3 @@
+# AAC-successor recovery accounting — phase 2 packet note
+
+The `AgentAccountCore` recovery-bucket implementation and its integrated AAC custody/recovery tests are parked on `codex/aac-successor-recovery-phase2`, outside the adapter-staged Bank phase 1. This is **AAC-successor recovery accounting, phase 2, and rides the next EscrowCore-family deploy window with MAIN-006 and `cancelOpenJob` v3**; that packet must include state-migration/provenance review, the paired manifest update, and a new deployment ceremony before any live path may depend on `completeStrategyRecovery` or the successor-only recovery mappings.
