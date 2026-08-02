@@ -13,10 +13,21 @@ Agent accounts carry an on-platform balance sheet with a dedicated
 registered strategy adapter to earn yield while they're idle —
 Pillar 2 of [docs/AGENT_BANKING.md](../AGENT_BANKING.md).
 
-The vDOT adapter is the canonical first strategy: take DOT, stake it via
+> **⚠ SUPERSEDED 2026-08-02 — vDOT is no longer the planned first strategy.**
+> The yield-venue research (`docs/BANK_YIELD_WORKSHOP.md`, PR #893) found vDOT's rails
+> **built and empty**: ~**4.48%** actual (not the 5–6% below, and not the 15–18% Bifrost's
+> own app page still advertises), TVL down ~89% in 11 months, and only **40.8 vDOT** in
+> existence on Asset Hub. Phase 1 is instead **Hydration money-market USDC supply**
+> (`docs/BANK_PHASE1_BUILD_PACKET.md`) — FX-clean, real asset 1337, no bridge.
+> Two further corrections to the text below: **nominator unbonding is now ~2 days, not 28**
+> (OpenGov ref #1910, 2026-07-06), and **nominators are no longer slashable at all** — so
+> any risk framing here that leans on slashing or a 28-day exit is out of date.
+> Kept for the adapter design and the truth-boundary rules, which still stand.
+
+The vDOT adapter was the canonical first strategy: take DOT, stake it via
 Bifrost's liquid-staking primitive, and account for the live vDOT/DOT rate when
-the agent withdraws. The current planning reference is roughly 5-6% base APR,
-but Averray must not display APY or book yield until the rate is sourced from
+the agent withdraws. The planning reference below (~5-6% base APR) is **stale — see the
+note above**; Averray must not display APY or book yield until the rate is sourced from
 validated Bifrost/runtime/observer data.
 
 The next planned portfolio candidate is Hydration GDOT, documented in
