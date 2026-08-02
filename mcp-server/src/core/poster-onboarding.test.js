@@ -179,6 +179,22 @@ test("poster onboarding is a clean-room machine recipe backed by non-default liv
   assert.equal(human.reviewPath, "dispute_arbitration");
   assert.match(human.verdicts.dismissed, /^Approve:/u);
   assert.match(human.verdicts.upheld, /^Reject:/u);
+  assert.deepEqual(payload.verification.templateRouting.fix_with_pull_request, {
+    verifierMode: "github_pr",
+    gate: "automated_live_github",
+    disclosure:
+      "Checks the public PR against the selected repository and issue, live CI/check state, and submitted test evidence. Unreachable, rate-limited, private, partially unreadable, or ambiguous GitHub evidence escalates to human review and never auto-approves."
+  });
+  assert.deepEqual(payload.verification.templateRouting.audit_and_implementation_report, {
+    verifierMode: "human_fallback",
+    gate: "human_review",
+    disclosure:
+      "Open-ended audit reports require a human decision and are not auto-approved by the GitHub PR verifier."
+  });
+  const githubPr = payload.verification.modes.find((mode) => mode.id === "github_pr");
+  assert.equal(githubPr.gate, "automated_live_github");
+  assert.equal(githubPr.failureMode, "human_fallback");
+  assert.match(githubPr.failureBehavior, /never auto-approves/iu);
   assert.equal(payload.docs.workedExample, "https://github.com/averray-agent/agent/pull/874");
   assert.deepEqual(payload.liveReads, {
     asOf: "2026-08-01T08:00:00.000Z",

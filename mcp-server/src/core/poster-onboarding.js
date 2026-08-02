@@ -344,9 +344,25 @@ function buildPostingFlow({ publicBaseUrl, token, agentAccountCore, escrowCore }
 function buildVerification(modes) {
   const normalized = [...new Set(modes.map((mode) => String(mode).trim()).filter(Boolean))];
   return {
-    modes: normalized.map((id) => id === "human_fallback"
-      ? {
+    templateRouting: {
+      fix_with_pull_request: {
+        verifierMode: "github_pr",
+        gate: "automated_live_github",
+        disclosure:
+          "Checks the public PR against the selected repository and issue, live CI/check state, and submitted test evidence. Unreachable, rate-limited, private, partially unreadable, or ambiguous GitHub evidence escalates to human review and never auto-approves."
+      },
+      audit_and_implementation_report: {
+        verifierMode: "human_fallback",
+        gate: "human_review",
+        disclosure:
+          "Open-ended audit reports require a human decision and are not auto-approved by the GitHub PR verifier."
+      }
+    },
+    modes: normalized.map((id) => {
+      if (id === "human_fallback") {
+        return {
           id,
+          gate: "human_review",
           reviewPath: "dispute_arbitration",
           expectedVerifierOutcome: {
             outcome: "disputed",
@@ -357,8 +373,27 @@ function buildVerification(modes) {
             upheld: "Reject: uphold the rejection and slash the worker bond.",
             split: "Resolve with a partial worker payout chosen by the arbitrator."
           }
-        }
-      : { id })
+        };
+      }
+      if (id === "github_pr") {
+        return {
+          id,
+          gate: "automated_live_github",
+          checks: [
+            "public pull request exists",
+            "pull request repository matches the job issue repository",
+            "pull request references the selected issue",
+            "live merge and CI/check state",
+            "submitted test evidence"
+          ],
+          success: "Automatically approves only when the live GitHub evidence reaches the configured score without required blockers.",
+          failureMode: "human_fallback",
+          failureBehavior:
+            "GitHub unreachable, rate-limited, private, partially unreadable, or an ambiguous score enters human review and never auto-approves."
+        };
+      }
+      return { id };
+    })
   };
 }
 

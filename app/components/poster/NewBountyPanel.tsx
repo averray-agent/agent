@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { FundingFlow } from "@/components/poster/FundingFlow";
 import { ApiError } from "@/lib/api/client";
 import { buildDefinition, postDraft, type DraftFormInput } from "@/lib/api/poster-post";
+import { verifierDisclosureForDeliverable } from "@/lib/api/poster-definition";
 import { estimateWorkerBondRaw } from "@/lib/api/poster-adapters";
 import {
   fetchIssue,
@@ -144,14 +145,17 @@ export function NewBountyPanel({
   }
 
   async function submit() {
-    if (!parsed || !issueVerified || !contentOk || !rewardOk || rewardRaw === null) return;
+    if (!parsed || !kind || !issueVerified || !contentOk || !rewardOk || rewardRaw === null) return;
     setSubmitting(true);
     setError(null);
     try {
       const input: DraftFormInput = {
+        deliverableKind: kind,
         title,
         task,
         repo: `${parsed.owner}/${parsed.repo}`,
+        issueNumber: parsed.number,
+        issueUrl: parsed.canonicalUrl,
         acceptanceCriteria: criteriaList,
         rewardUsdc: reward.trim(),
       };
@@ -271,12 +275,12 @@ export function NewBountyPanel({
                 [
                   "report",
                   "Audit & implementation report",
-                  "The worker investigates your issue and delivers a grounded report: affected files, existing patterns, a step-by-step plan. The shape the platform has settled end-to-end.",
+                  verifierDisclosureForDeliverable("report").summary,
                 ],
                 [
                   "pr",
                   "Fix with a pull request",
-                  "The worker opens a PR against your repository that resolves the issue. You review the PR itself before approving payout.",
+                  verifierDisclosureForDeliverable("pr").summary,
                 ],
               ] as Array<[DeliverableKind, string, string]>
             ).map(([value, heading, blurb]) => (
@@ -302,6 +306,14 @@ export function NewBountyPanel({
           </div>
           {kind !== null ? (
             <div className="flex flex-col gap-2 pt-1">
+              <div className="rounded-[8px] border border-[var(--avy-line-soft)] bg-[#faf8f1] px-3 py-2">
+                <span className={cn(LABEL, "block")} style={{ letterSpacing: "0.1em" }}>
+                  Verification gate · {verifierDisclosureForDeliverable(kind).label}
+                </span>
+                <p className="mt-1 font-[family-name:var(--font-body)] text-[11.5px] leading-snug text-[var(--avy-muted)]">
+                  {verifierDisclosureForDeliverable(kind).summary}
+                </p>
+              </div>
               <div className="flex flex-col gap-1">
                 <label className={LABEL} style={{ letterSpacing: "0.1em" }}>
                   Task — seeded from your issue, edit freely
@@ -375,7 +387,7 @@ export function NewBountyPanel({
               {title || `${parsed.owner}/${parsed.repo}#${parsed.number}`}
             </span>
             <span className={cn("text-[11.5px] text-[var(--avy-muted)]", MONO)}>
-              repo {parsed.owner}/{parsed.repo} · reward {reward} USDC · human review by you · claim TTL 24h
+              repo {parsed.owner}/{parsed.repo} · reward {reward} USDC · {verifierDisclosureForDeliverable(kind).label} · claim TTL 24h
             </span>
             <p className="font-[family-name:var(--font-body)] text-[12.5px] text-[var(--avy-ink)]">{task}</p>
             <ul className="list-disc pl-5">

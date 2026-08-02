@@ -115,17 +115,18 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
       const structured = structuredEvidence(evidence);
       const prUrl = firstNonEmptyString(structured.prUrl, structured.pullRequestUrl, findGithubPullRequestUrl(normalized));
       const parsedPr = parseGithubPullRequestUrl(prUrl);
-      const expectedRepo = normalizeRepo(job.source?.repo);
-      const expectedIssueNumber = Number(job.source?.issueNumber);
+      const githubSource = githubSourceForJob(job);
+      const expectedRepo = normalizeRepo(githubSource?.repo);
+      const expectedIssueNumber = Number(githubSource?.issueNumber);
       const issueReferenceRequired = job.verifierConfig?.requireIssueReference !== false;
       const testEvidenceRequired = job.verifierConfig?.requireTestEvidence !== false;
       const acceptMergedAsApproved = job.verifierConfig?.acceptMergedAsApproved !== false;
-      const disclosureRequired = job.source?.maintainerPolicy?.disclosureRequired === true;
+      const disclosureRequired = githubSource?.maintainerPolicy?.disclosureRequired === true;
       const submittedIssueReferenced = referencesIssue({
         structured,
         normalized,
         issueNumber: expectedIssueNumber,
-        issueUrl: job.source?.issueUrl
+        issueUrl: githubSource?.issueUrl
       });
       const submittedTestEvidence = hasTestEvidence(structured, normalized);
       const submittedChecksPassing = structured.checksPassing === true || structured.ciStatus === "passing";
@@ -137,7 +138,7 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
         ? await fetchGithubPullRequestSnapshot({
             parsedPr,
             issueNumber: expectedIssueNumber,
-            issueUrl: job.source?.issueUrl,
+            issueUrl: githubSource?.issueUrl,
             fetchImpl,
             githubToken,
             githubApiBaseUrl
@@ -149,7 +150,7 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
       const githubVerified = githubLookup.status === "verified";
 
       const repoMatches = Boolean(parsedPr && expectedRepo && parsedPr.repo === expectedRepo);
-      const issueReferenced = githubVerified ? (githubLookup.issueReferenced || submittedIssueReferenced) : submittedIssueReferenced;
+      const issueReferenced = githubVerified ? githubLookup.issueReferenced : submittedIssueReferenced;
       const checksPassing = githubVerified ? githubLookup.checksPassing : submittedChecksPassing;
       const reviewApproved = githubVerified ? githubLookup.reviewApproved : submittedReviewApproved;
       const merged = githubVerified ? githubLookup.merged : submittedMerged;
@@ -187,11 +188,43 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
       const blockers = [];
 
       if (!checks.prUrlValid) blockers.push("valid GitHub pull request URL");
-      if (!repoMatches) blockers.push(`PR repo must match ${job.source?.repo ?? "the source repo"}`);
+      if (!repoMatches) blockers.push(`PR repo must match ${githubSource?.repo ?? "the source repo"}`);
       if (issueReferenceRequired && !issueReferenced) blockers.push(`submission must reference issue #${expectedIssueNumber}`);
       if (testEvidenceRequired && !testEvidenceSubmitted && !mergedAccepted) blockers.push("test or docs-build evidence");
       if (disclosureRequired && disclosureFooterObservable && !disclosureFooterPresent) {
         blockers.push("Averray disclosure footer");
+      }
+
+      const githubEvidenceUnavailable = githubLookup.status !== "verified";
+      const githubEvidencePartial = Object.values(githubLookup.partial ?? {}).includes("unavailable");
+      const scoreAmbiguous = score < minimumScore && blockers.length === 0;
+      const definiteInputFailure = !checks.prUrlValid || !repoMatches;
+
+      // A malformed or cross-repository submission is directly observable and
+      // remains a rejection. Every inability to re-derive the PR against live
+      // GitHub is different: it must enter human review, never reuse submitted
+      // claims as sufficient evidence for an automatic payout.
+      if (!definiteInputFailure && (githubEvidenceUnavailable || githubEvidencePartial || scoreAmbiguous)) {
+        return githubPrHumanReviewEscalation({
+          job,
+          score,
+          githubLookup,
+          checks,
+          signals,
+          evidence: {
+            prUrl: prUrl || null,
+            repo: parsedPr?.repo ?? null,
+            pullNumber: parsedPr?.pullNumber ?? null,
+            expectedRepo: expectedRepo || null,
+            expectedIssueNumber: Number.isFinite(expectedIssueNumber) ? expectedIssueNumber : null,
+            disclosureRequired
+          },
+          reason: githubEvidenceUnavailable
+            ? githubLookup.reason ?? "github_lookup_unavailable"
+            : githubEvidencePartial
+              ? "github_lookup_partial"
+              : "github_score_ambiguous"
+        });
       }
 
       const approved = score >= minimumScore && blockers.length === 0;
@@ -258,6 +291,50 @@ export class VerifierRegistry {
     }
     return handler.evaluate(job, evidence);
   }
+}
+
+function githubPrHumanReviewEscalation({
+  job,
+  score,
+  githubLookup,
+  checks,
+  signals,
+  evidence,
+  reason
+}) {
+  return {
+    jobId: job.id,
+    handler: "human_fallback",
+    handlerVersion: HANDLER_VERSION,
+    escalatedFrom: "github_pr",
+    outcome: "disputed",
+    score,
+    reasonCode: "HUMAN_REVIEW_REQUIRED",
+    detail: `Live GitHub verification could not make a confident decision (${reason}); human review is required and the submission was not auto-approved.`,
+    evidence,
+    githubLookup,
+    checks,
+    signals,
+    reputationSignals: {
+      category: job.category,
+      attempted: 1,
+      prOpened: signals.prOpened ? 1 : 0,
+      checksPassed: signals.checksPassed ? 1 : 0,
+      maintainerApproved: signals.maintainerApproved ? 1 : 0,
+      merged: signals.merged ? 1 : 0
+    }
+  };
+}
+
+function githubSourceForJob(job) {
+  const source = job?.source;
+  if (!source || typeof source !== "object" || Array.isArray(source)) {
+    return {};
+  }
+  const declared = source.declared;
+  return declared && typeof declared === "object" && !Array.isArray(declared)
+    ? { ...declared, ...source }
+    : source;
 }
 
 function firstNonEmptyString(...values) {
