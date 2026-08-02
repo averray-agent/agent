@@ -1,6 +1,6 @@
 # XcmWrapper v2 — Hydration USDC two-phase custody design
 
-Status: **design gate; no implementation or deployment**.
+Status: **design approved; implementation included in PR #911; no deployment**.
 
 This is the contract decision required by `BANK_PHASE1_BUILD_PACKET.md` gate 4.
 It closes the four activation blockers recorded in
@@ -214,7 +214,14 @@ the expected balance delta is a failure/recovery incident.
 
 ## Implementation and test gate
 
-After this design is approved, the implementation PR must include:
+The implementation is split across `XcmWrapperV2`, `HydrationUsdcAdapter`, the
+request-scoped `IXcmV2CustodyAdapter` handshake, and the narrow recovery bucket
+in `AgentAccountCore`. The exact contract-test bytes are committed in
+`test/fixtures/xcm-wrapper-v2.json`; their message hashes are asserted by the
+four-leg replay, while `hydration-bank-round-trip.json` remains the historical
+rehearsal provenance.
+
+The implementation test gate includes:
 
 1. the precompile `execute` entry point, two-leg request storage/state machine,
    strict four-shape decoder, role/pause controls, and request-scoped custody;

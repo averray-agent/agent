@@ -5,6 +5,7 @@ import {TreasuryPolicy} from "./TreasuryPolicy.sol";
 import {StrategyAdapterRegistry} from "./StrategyAdapterRegistry.sol";
 import {IStrategyAdapter} from "./interfaces/IStrategyAdapter.sol";
 import {IXcmStrategyAdapter} from "./interfaces/IXcmStrategyAdapter.sol";
+import {IXcmV2CustodyAdapter} from "./interfaces/IXcmV2CustodyAdapter.sol";
 import {IXcmWrapper} from "./interfaces/IXcmWrapper.sol";
 import {ReentrancyGuard} from "./lib/ReentrancyGuard.sol";
 import {SafeTransfer} from "./lib/SafeTransfer.sol";
@@ -73,6 +74,8 @@ contract AgentAccountCore is ReentrancyGuard {
     mapping(bytes32 => StrategyRequest) public strategyRequests;
     mapping(address => mapping(address => uint256)) public pendingStrategyAssets;
     mapping(address => mapping(bytes32 => uint256)) public pendingStrategyWithdrawalShares;
+    mapping(address => mapping(address => uint256)) public strategyRecoveryAssets;
+    mapping(bytes32 => uint256) public strategyRequestRecoveryOutstanding;
     mapping(address => mapping(address => mapping(bytes32 => uint256))) public recurringTemplateReserves;
     mapping(address => mapping(uint256 => bool)) public sendToAgentAuthorizationUsed;
     mapping(address => bool) public escrowOperators;
@@ -112,6 +115,17 @@ contract AgentAccountCore is ReentrancyGuard {
         uint256 settledAssets,
         uint256 settledShares,
         address recipient
+    );
+    event StrategyRecoveryRequired(
+        address indexed account, bytes32 indexed strategyId, bytes32 indexed requestId, address asset, uint256 assets
+    );
+    event StrategyRecoveryCompleted(
+        address indexed account,
+        bytes32 indexed strategyId,
+        bytes32 indexed requestId,
+        address asset,
+        uint256 recoveredAssets,
+        uint256 remainingAssets
     );
     event CollateralLocked(address indexed account, address indexed asset, uint256 amount);
     event CollateralUnlocked(address indexed account, address indexed asset, uint256 amount);
@@ -522,6 +536,12 @@ contract AgentAccountCore is ReentrancyGuard {
             pendingStrategyAssets[request.account][request.asset] -= request.requestedAssets;
             if (status == IXcmWrapper.RequestStatus.Succeeded) {
                 strategyShares[request.account][request.strategyId] += settledShares;
+            } else if (_requiresRemoteRecovery(request.adapter, requestId)) {
+                strategyRecoveryAssets[request.account][request.asset] += request.requestedAssets;
+                strategyRequestRecoveryOutstanding[requestId] = request.requestedAssets;
+                emit StrategyRecoveryRequired(
+                    request.account, request.strategyId, requestId, request.asset, request.requestedAssets
+                );
             } else {
                 positions[request.account][request.asset].liquid += request.requestedAssets;
             }
@@ -551,6 +571,41 @@ contract AgentAccountCore is ReentrancyGuard {
         _syncStrategyAllocation(request.account, request.asset, request.strategyId, request.adapter);
         emit StrategyRequestSettled(
             request.account, request.strategyId, requestId, status, settledAssets, settledShares, request.recipient
+        );
+    }
+
+    /**
+     * @notice Credit only assets actually returned from a failed remote
+     * strategy request. The request account and asset remain immutable.
+     */
+    function completeStrategyRecovery(bytes32 requestId, uint256 recoveredAssets)
+        external
+        nonReentrant
+        onlyStrategySettler
+    {
+        StrategyRequest storage request = strategyRequests[requestId];
+        uint256 outstanding = strategyRequestRecoveryOutstanding[requestId];
+        if (
+            request.account == address(0) || !request.settled
+                || (request.status != IXcmWrapper.RequestStatus.Failed
+                    && request.status != IXcmWrapper.RequestStatus.Cancelled) || outstanding == 0
+                || recoveredAssets == 0 || recoveredAssets > outstanding
+        ) revert InvalidStrategyRequest();
+
+        uint256 beforeBalance = _assetBalance(request.asset);
+        IXcmV2CustodyAdapter(request.adapter).releaseRecoveredAssets(requestId, address(this), recoveredAssets);
+        if (_assetBalance(request.asset) - beforeBalance != recoveredAssets) revert InvalidSettlement();
+
+        strategyRequestRecoveryOutstanding[requestId] = outstanding - recoveredAssets;
+        strategyRecoveryAssets[request.account][request.asset] -= recoveredAssets;
+        positions[request.account][request.asset].liquid += recoveredAssets;
+        emit StrategyRecoveryCompleted(
+            request.account,
+            request.strategyId,
+            requestId,
+            request.asset,
+            recoveredAssets,
+            outstanding - recoveredAssets
         );
     }
 
@@ -946,6 +1001,18 @@ contract AgentAccountCore is ReentrancyGuard {
     function _supportsAsyncStrategyAdapter(address adapter) internal view returns (bool) {
         (bool ok,) = adapter.staticcall(abi.encodeWithSelector(IXcmStrategyAdapter.pendingDepositAssets.selector));
         return ok;
+    }
+
+    function _requiresRemoteRecovery(address adapter, bytes32 requestId) internal view returns (bool required) {
+        (bool ok, bytes memory data) =
+            adapter.staticcall(abi.encodeCall(IXcmV2CustodyAdapter.requiresRemoteRecovery, (requestId)));
+        return ok && data.length == 32 && abi.decode(data, (bool));
+    }
+
+    function _assetBalance(address asset) internal view returns (uint256 balance) {
+        (bool ok, bytes memory data) = asset.staticcall(abi.encodeWithSelector(0x70a08231, address(this)));
+        if (!ok || data.length != 32) revert InvalidSettlement();
+        balance = abi.decode(data, (uint256));
     }
 
     function _previewStrategyRequestId(
