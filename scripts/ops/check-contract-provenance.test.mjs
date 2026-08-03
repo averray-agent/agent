@@ -202,7 +202,9 @@ test("mainnet manifest covers every deployed source-controlled contract address"
       "reputationSbt",
       "discoveryRegistry",
       "escrowCore",
+      "xcmWrapper",
       "legacyEscrowCore",
+      "hydrationUsdcAdapter",
     ]
   );
   assert.equal(
@@ -213,4 +215,10 @@ test("mainnet manifest covers every deployed source-controlled contract address"
     contracts.find((contract) => contract.name === "legacyEscrowCore")?.provenance.sourceCommit,
     "ccaa11124f0bda8e03819ead0798356131ed8c0f"
   );
+  for (const name of ["xcmWrapper", "hydrationUsdcAdapter"]) {
+    assert.equal(
+      contracts.find((contract) => contract.name === name)?.provenance.sourceCommit,
+      "89235c20498efcf659b41de8821bd4e14baecfc7"
+    );
+  }
 });

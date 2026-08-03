@@ -182,7 +182,7 @@ test("mainnet records deployed EscrowCore v2 and pins the legacy v1 source diver
   const contracts = validateProvenanceManifest(manifest);
   const allowlist = validateKnownUnshippedContractChanges(manifest, contracts);
 
-  assert.equal(contracts.length, 7);
+  assert.equal(contracts.length, 9);
   assert.equal(allowlist.has("escrowCore"), false);
   assert.equal(
     contracts.find((contract) => contract.name === "escrowCore")?.address,
