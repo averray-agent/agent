@@ -362,7 +362,8 @@ contract XcmWrapperV2 is IXcmWrapper, ReentrancyGuard {
         if (keccak256(destination) != keccak256(HYDRATION_DESTINATION)) revert XcmContextMismatch();
 
         recoveryId = previewRecoveryHomeId(amount, nonce);
-        _decodeHomeParameters(message, amount, recoveryId);
+        uint256 nestedFee = _decodeHomeParameters(message, amount, recoveryId);
+        if (nestedFee == 0 || nestedFee > amount) revert XcmContextMismatch();
 
         LegRecord storage prior = recoveryHomeLegs[recoveryId];
         bytes32 destinationHash = keccak256(destination);

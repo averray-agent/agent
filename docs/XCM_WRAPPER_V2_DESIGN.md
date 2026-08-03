@@ -116,7 +116,17 @@ and strict-decodes the reserve-withdraw message. The amount is parameterized;
 the beneficiary is not—it must be `wrapper H160 || 0xEE × 12` on Asset Hub—and
 the final `SetTopic` must equal the derived recovery id. Exact replay is a no-op;
 same-id/different-message replay reverts. The backend operator cannot call this
-path or redirect its result.
+path or redirect its result. The nested remote execution fee must be positive
+and no greater than the recovered amount.
+
+Recovery is scoped to funds associated with an existing wrapper request. After
+the reserve-withdraw lands at the wrapper's Asset Hub image, the only custody
+exit is `releaseRecoveredAssetsToAdapter(requestId, assets)`: it requires that
+request to be `Failed` or `Cancelled` and caps cumulative release at the
+request's recorded deposit assets or withdraw shares. Funds recovered without
+a matching request would remain at the wrapper with no general sweep path. That
+constraint is intentional; operators must bind every recovery to a failed or
+cancelled request rather than creating unaccounted wrapper float.
 
 ### Adapter and custody handshake
 

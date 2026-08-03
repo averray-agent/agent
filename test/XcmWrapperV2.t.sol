@@ -826,6 +826,40 @@ contract XcmWrapperV2Test is XcmWrapperV2Fixture {
         );
     }
 
+    function testRecoveryHomeRejectsZeroNestedFee() public {
+        uint256 amount = 120_000;
+        uint64 nonce = 4;
+        bytes32 recoveryId = _recoveryId(amount, nonce);
+        vm.prank(RECIPIENT);
+        wrapper.setDispatchPaused(true);
+
+        _assertRecoveryReverts(
+            amount,
+            nonce,
+            HYDRATION_DESTINATION,
+            _homeMessage(amount, 0, recoveryId),
+            XcmWrapperV2.XcmContextMismatch.selector,
+            RECIPIENT
+        );
+    }
+
+    function testRecoveryHomeRejectsNestedFeeAboveAmount() public {
+        uint256 amount = 120_000;
+        uint64 nonce = 5;
+        bytes32 recoveryId = _recoveryId(amount, nonce);
+        vm.prank(RECIPIENT);
+        wrapper.setDispatchPaused(true);
+
+        _assertRecoveryReverts(
+            amount,
+            nonce,
+            HYDRATION_DESTINATION,
+            _homeMessage(amount, amount + 1, recoveryId),
+            XcmWrapperV2.XcmContextMismatch.selector,
+            RECIPIENT
+        );
+    }
+
     function testBareEoaStrategySettlerCannotStageOwnWalletCapital() public {
         uint256 amount = 150_000;
         IXcmWrapper.RequestContext memory context = _depositContext(amount, 24);
