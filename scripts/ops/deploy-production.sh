@@ -92,6 +92,7 @@ INDEXER_TARGET_IDENTITY=""
 INDEXER_OWNERSHIP_STATE_PENDING=0
 DEPLOY_CONTRACT_COMPAT_FREEZE=${DEPLOY_CONTRACT_COMPAT_FREEZE:-1}
 DEPLOY_ALLOW_CONTRACT_SURFACE_DRIFT=${DEPLOY_ALLOW_CONTRACT_SURFACE_DRIFT:-0}
+DEPLOY_VERIFY_CONTRACT_SOURCE=${DEPLOY_VERIFY_CONTRACT_SOURCE:-0}
 DEPLOY_CONTRACT_COMPAT_PROFILE=${DEPLOY_CONTRACT_COMPAT_PROFILE:-}
 # BACKEND_ENV_FILE: removed in PR 2.6 — backend env now rendered to
 # /run/agent-stack/backend.env by render_runtime_envs (1Password →
@@ -620,6 +621,23 @@ enforce_contract_compat_freeze() {
     exit 1
   fi
 
+  local source_check_passed=0
+  case "$DEPLOY_VERIFY_CONTRACT_SOURCE" in
+    1|true|yes)
+      echo "D-03 Tier 3: manual verification requested; running the candidate build and immutable-masked comparison regardless of changed paths."
+      if ! check_compiled_contract_provenance; then
+        echo "D-03 Tier 3: manual verification failed; refusing production deploy." >&2
+        exit 1
+      fi
+      source_check_passed=1
+      ;;
+    0|false|no) ;;
+    *)
+      echo "Invalid DEPLOY_VERIFY_CONTRACT_SOURCE: $DEPLOY_VERIFY_CONTRACT_SOURCE" >&2
+      exit 1
+      ;;
+  esac
+
   local changed
   changed=$(deploy_range_changed_files "$baseline")
 
@@ -642,7 +660,9 @@ enforce_contract_compat_freeze() {
   fi
 
   local source_status=0
-  if check_compiled_contract_provenance; then
+  if [[ "$source_check_passed" == "1" ]]; then
+    source_status=0
+  elif check_compiled_contract_provenance; then
     source_status=0
   else
     source_status=$?

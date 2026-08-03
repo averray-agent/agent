@@ -1284,6 +1284,78 @@ test("deploy wrapper runs Tier 3 in the digest-pinned Foundry container when hos
   assert.match(invocations, /node scripts\/ops\/check-contract-source-drift\.mjs --profile testnet --artifacts/u);
 });
 
+test("deploy wrapper can force the fail-closed Tier 3 comparison without contract path changes", async () => {
+  const fixture = await makeDeployFreezeFixture(
+    async (appRoot) => {
+      await writeFile(join(appRoot, "README.md"), "manual Tier 3 proof fixture\n");
+    },
+    "non-contract change"
+  );
+  const dockerLog = join(fixture.appRoot, "docker.log");
+
+  const run = runDeploy(fixture.appRoot, {
+    ...deployFreezeEnv(fixture),
+    DEPLOY_OLD_SHA: fixture.baseSha,
+    DEPLOY_NEW_SHA: fixture.nextSha,
+    DEPLOY_VERIFY_CONTRACT_SOURCE: "1",
+    FAKE_DOCKER_LOG: dockerLog,
+  });
+
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(run.stdout, /D-03 Tier 3: manual verification requested/u);
+  assert.match(run.stdout, /D-03 Tier 3: candidate build and immutable-masked provenance comparison passed/u);
+  assert.match(run.stdout, /D-03 Tier 1: no contract source changes/u);
+  const invocations = await readFile(dockerLog, "utf8");
+  assert.match(invocations, /--entrypoint forge .* build --root \/workspace/u);
+  assert.match(invocations, /check-contract-source-drift\.mjs/u);
+});
+
+test("deploy wrapper rejects an invalid manual Tier 3 verification value", async () => {
+  const fixture = await makeDeployFreezeFixture(
+    async (appRoot) => {
+      await writeFile(join(appRoot, "README.md"), "invalid manual Tier 3 fixture\n");
+    },
+    "non-contract change"
+  );
+
+  const run = runDeploy(fixture.appRoot, {
+    ...deployFreezeEnv(fixture),
+    DEPLOY_OLD_SHA: fixture.baseSha,
+    DEPLOY_NEW_SHA: fixture.nextSha,
+    DEPLOY_VERIFY_CONTRACT_SOURCE: "sometimes",
+  });
+
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /Invalid DEPLOY_VERIFY_CONTRACT_SOURCE: sometimes/u);
+  assert.doesNotMatch(run.stdout, /immutable-masked provenance comparison passed/u);
+});
+
+test("deploy wrapper fails a forced Tier 3 proof on a real compiled-runtime mismatch", async () => {
+  const fixture = await makeDeployFreezeFixture(
+    async (appRoot) => {
+      await writeFile(join(appRoot, "README.md"), "forced Tier 3 mismatch fixture\n");
+    },
+    "non-contract change"
+  );
+
+  const run = runDeploy(fixture.appRoot, {
+    ...deployFreezeEnv(fixture),
+    DEPLOY_OLD_SHA: fixture.baseSha,
+    DEPLOY_NEW_SHA: fixture.nextSha,
+    DEPLOY_VERIFY_CONTRACT_SOURCE: "1",
+    FAKE_CONTRACT_SOURCE_STATUS: "1",
+  });
+
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /D-03 Tier 3: manual verification failed; refusing production deploy/u);
+  assert.doesNotMatch(run.stdout, /immutable-masked provenance comparison passed/u);
+  assert.equal(
+    existsSync(join(fixture.stateDir, "contract-surface.frozen-at.testnet")),
+    false,
+    "a proof-only mismatch must fail closed without claiming a contracts-path sticky freeze"
+  );
+});
+
 test("deploy wrapper fails closed when the digest-pinned Tier 3 Foundry runtime is unavailable", async () => {
   const fixture = await makeDeployFreezeFixture(
     async (appRoot) => {
@@ -1561,7 +1633,7 @@ test("deploy wrapper clears the persisted freeze when the flagged drift is rever
   assert.ok(!existsSync(markerPath), "a reverted drift must clear the freeze marker instead of over-blocking");
 });
 
-test("deploy workflow wires the D-03 contract surface override as manual-only", async () => {
+test("deploy workflow wires the D-03 contract controls as manual-only", async () => {
   const workflow = await readFile(join(REPO_ROOT, ".github/workflows/deploy-production.yml"), "utf8");
 
   assert.match(
@@ -1583,6 +1655,26 @@ test("deploy workflow wires the D-03 contract surface override as manual-only", 
     workflow,
     /"\$DEPLOY_ALLOW_CONTRACT_SURFACE_DRIFT"/u,
     "remote_env must include the evaluated override value"
+  );
+  assert.match(
+    workflow,
+    /verify_contract_source:/u,
+    "workflow_dispatch should expose a named fail-closed Tier 3 proof input"
+  );
+  assert.match(
+    workflow,
+    /DEPLOY_VERIFY_CONTRACT_SOURCE:\s*\$\{\{\s*github\.event_name\s*==\s*'workflow_dispatch'\s*&&\s*inputs\.verify_contract_source\s*\|\|\s*'0'\s*\}\}/u,
+    "automatic workflow_run deploys must not force the extra Tier 3 proof build"
+  );
+  assert.match(
+    workflow,
+    /DEPLOY_VERIFY_CONTRACT_SOURCE=%q DEPLOY_ACTOR=%q/u,
+    "the manual Tier 3 proof input must be forwarded through the SSH remote_env wrapper"
+  );
+  assert.match(
+    workflow,
+    /"\$DEPLOY_VERIFY_CONTRACT_SOURCE"/u,
+    "remote_env must include the evaluated Tier 3 proof value"
   );
 });
 
