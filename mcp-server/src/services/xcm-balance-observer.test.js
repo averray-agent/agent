@@ -61,6 +61,18 @@ test("SS58 Hydration account normalizes to the proven AccountId32 and truncate20
   assert.equal(position.evmAccount, "0x98f0033e26aa4ecf2899e6d09237d40d29fcb68e");
 });
 
+test("SS58 AccountId32 normalization rejects an invalid checksum", () => {
+  assert.throws(
+    () => normalizeVenueBalanceTarget({
+      ledger: "substrate_tokens",
+      endpoint: HYD_SUBSTRATE,
+      account: `${MAINNET_ACCOUNT_SS58.slice(0, -1)}a`,
+      assetId: 22
+    }),
+    /must be a 32-byte AccountId or SS58 address/u
+  );
+});
+
 test("enabled Substrate read dynamically loads @polkadot/api before querying Tokens.accounts", async () => {
   let loadedModule;
   const reader = new VenueBalanceReader({

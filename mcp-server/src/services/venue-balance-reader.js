@@ -1,4 +1,6 @@
-import { decodeAddress } from "@polkadot/util-crypto";
+import { createHash } from "node:crypto";
+
+import { base58 } from "@scure/base";
 import { Contract, JsonRpcProvider } from "ethers";
 
 import { ValidationError } from "../core/errors.js";
@@ -7,6 +9,7 @@ const ACCOUNT_ID32_RE = /^0x[a-fA-F0-9]{64}$/u;
 const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/u;
 const SS58_RE = /^[1-9A-HJ-NP-Za-km-z]{32,64}$/u;
 const ERC20_BALANCE_ABI = ["function balanceOf(address account) view returns (uint256)"];
+const SS58_HASH_PREFIX = Buffer.from("SS58PRE");
 
 /**
  * Reads a raw balance from a venue-defined (endpoint, account, asset) triple.
@@ -167,15 +170,34 @@ function normalizeAccountId32(raw, message) {
   if (ACCOUNT_ID32_RE.test(account)) return account.toLowerCase();
   if (SS58_RE.test(account)) {
     try {
-      const decoded = decodeAddress(account);
-      if (decoded.length === 32) {
-        return `0x${Buffer.from(decoded).toString("hex")}`;
-      }
+      return `0x${Buffer.from(decodeSs58AccountId32(account)).toString("hex")}`;
     } catch {
       // Fall through to the ledger-specific validation error below.
     }
   }
   throw new ValidationError(message);
+}
+
+function decodeSs58AccountId32(account) {
+  const decoded = base58.decode(account);
+  const prefixLength = (decoded[0] & 0b0100_0000) === 0 ? 1 : 2;
+  const payloadEnd = decoded.length - 2;
+  if (
+    decoded.length !== prefixLength + 32 + 2
+    || (decoded[0] & 0b1000_0000) !== 0
+    || decoded[0] === 46
+    || decoded[0] === 47
+  ) {
+    throw new Error("invalid SS58 AccountId32 length or prefix");
+  }
+  const checksum = createHash("blake2b512")
+    .update(SS58_HASH_PREFIX)
+    .update(decoded.subarray(0, payloadEnd))
+    .digest();
+  if (decoded[payloadEnd] !== checksum[0] || decoded[payloadEnd + 1] !== checksum[1]) {
+    throw new Error("invalid SS58 checksum");
+  }
+  return decoded.subarray(prefixLength, payloadEnd);
 }
 
 function loadPolkadotApi() {
