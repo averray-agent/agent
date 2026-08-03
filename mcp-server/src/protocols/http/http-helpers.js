@@ -139,6 +139,7 @@ export function metricPathLabel(pathname) {
     "/.well-known/agent-tools.json",
     "/llms.txt",
     "/onboarding",
+    "/monitor/bank-feed",
     "/jobs",
     "/jobs/definition",
     "/jobs/recommendations",

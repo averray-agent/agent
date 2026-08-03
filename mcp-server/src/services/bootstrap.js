@@ -60,6 +60,10 @@ import { XcmObservationRelayService } from "./xcm-observation-relay.js";
 import { VenueBalanceReader } from "./venue-balance-reader.js";
 import { XcmBalanceObserverService } from "./xcm-balance-observer.js";
 import {
+  BankLaneFeedService,
+  loadBankLaneFeedConfig
+} from "./bank-lane-feed.js";
+import {
   UpstreamStatusPollerService,
   loadUpstreamStatusPollerConfig
 } from "./upstream-status-poller.js";
@@ -403,6 +407,13 @@ export async function createPlatformRuntime() {
     })
   );
   const venueBalanceReader = initStep("init-venue-balance-reader", logger, () => new VenueBalanceReader());
+  const bankLaneFeed = initStep("init-bank-lane-feed", logger, () =>
+    new BankLaneFeedService(
+      stateStore,
+      venueBalanceReader,
+      loadBankLaneFeedConfig(process.env)
+    )
+  );
   const bankXcmFlowRequested = parseBooleanEnv(process.env.BANK_XCM_FLOW_ENABLED);
   const xcmBalanceObserver = initStep("init-xcm-balance-observer", logger, () =>
     new XcmBalanceObserverService(
@@ -416,6 +427,7 @@ export async function createPlatformRuntime() {
         enabled: bankXcmFlowRequested && gateway.hasXcmWrapper(),
         pollIntervalMs: parsePositiveInt(process.env.BANK_XCM_OBSERVER_POLL_MS, 15_000),
         defaultTimeoutMs: parsePositiveInt(process.env.BANK_XCM_OBSERVER_TIMEOUT_MS, 15 * 60_000),
+        bankLaneFeed,
         logger
       }
     )
@@ -553,6 +565,7 @@ export async function createPlatformRuntime() {
     openApiSpecIngestionScheduler,
     xcmSettlementWatcher,
     xcmBalanceObserver,
+    bankLaneFeed,
     venueBalanceReader,
     xcmObservationRelay,
     upstreamStatusPoller,

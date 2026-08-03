@@ -4,6 +4,7 @@ import { ValidationError } from "../core/errors.js";
 
 const ACCOUNT_ID32_RE = /^0x[a-fA-F0-9]{64}$/u;
 const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/u;
+const SS58_RE = /^[1-9A-HJ-NP-Za-km-z]{32,64}$/u;
 const ERC20_BALANCE_ABI = ["function balanceOf(address account) view returns (uint256)"];
 
 /**
@@ -34,6 +35,17 @@ export class VenueBalanceReader {
       const json = record?.toJSON?.() ?? record;
       return {
         raw: BigInt(json?.free ?? 0),
+        asOf: new Date().toISOString(),
+        target: normalized
+      };
+    }
+
+    if (normalized.ledger === "substrate_system") {
+      const api = await this.getSubstrateApi(normalized.endpoint);
+      const record = await api.query.system.account(normalized.account);
+      const json = record?.toJSON?.() ?? record;
+      return {
+        raw: BigInt(json?.data?.free ?? json?.free ?? 0),
         asOf: new Date().toISOString(),
         target: normalized
       };
@@ -97,6 +109,20 @@ export function normalizeVenueBalanceTarget(target = {}) {
     };
   }
 
+  if (ledger === "substrate_system") {
+    const account = String(target.account ?? "");
+    if (!ACCOUNT_ID32_RE.test(account) && !SS58_RE.test(account)) {
+      throw new ValidationError(
+        "substrate_system target.account must be a 32-byte AccountId or SS58 address."
+      );
+    }
+    return {
+      ledger,
+      endpoint,
+      account: ACCOUNT_ID32_RE.test(account) ? account.toLowerCase() : account
+    };
+  }
+
   if (ledger === "erc20") {
     if (!ADDRESS_RE.test(String(target.contract ?? target.asset ?? ""))) {
       throw new ValidationError("erc20 target.contract must be a 20-byte address.");
@@ -127,7 +153,9 @@ export function normalizeVenueBalanceTarget(target = {}) {
     };
   }
 
-  throw new ValidationError('balance target ledger must be "substrate_tokens" or "erc20".');
+  throw new ValidationError(
+    'balance target ledger must be "substrate_tokens", "substrate_system", or "erc20".'
+  );
 }
 
 function loadPolkadotApi() {

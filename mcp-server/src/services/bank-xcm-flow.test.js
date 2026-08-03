@@ -65,7 +65,13 @@ test("two-message bank flow queues then dispatches only after both exact dry-run
     enabled: true,
     hasWrapper: () => true,
     balanceObserver: {
-      async register(input) { order.push("watch"); return { ...input, baselineRaw: "0", deadlineAt: "later" }; }
+      async register(input) {
+        assert.equal(input.kind, "deposit");
+        assert.equal(input.phase, "registered");
+        order.push("watch");
+        return { ...input, baselineRaw: "0", deadlineAt: "later" };
+      },
+      async setRequestPhase(_requestId, phase) { order.push(`phase:${phase}`); }
     },
     dryRunGuard: guard
   });
@@ -86,7 +92,16 @@ test("two-message bank flow queues then dispatches only after both exact dry-run
     async dispatchFollowUp() { order.push("followup"); return { txHash: "0xfollowup" }; }
   });
 
-  assert.deepEqual(order, ["watch", "dry:fund", "queue", "ready", "dry:sell", "followup"]);
+  assert.deepEqual(order, [
+    "watch",
+    "dry:fund",
+    "queue",
+    "phase:leg1-dispatched",
+    "ready",
+    "dry:sell",
+    "followup",
+    "phase:leg2-dispatched"
+  ]);
   assert.equal(result.status, "pending_observation");
 });
 

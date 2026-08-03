@@ -21,6 +21,7 @@ export class XcmBalanceObserverService {
       enabled = false,
       pollIntervalMs = 15_000,
       defaultTimeoutMs = 15 * 60_000,
+      bankLaneFeed = undefined,
       now = () => Date.now(),
       logger = console
     } = {}
@@ -32,6 +33,7 @@ export class XcmBalanceObserverService {
     this.enabled = enabled;
     this.pollIntervalMs = pollIntervalMs;
     this.defaultTimeoutMs = defaultTimeoutMs;
+    this.bankLaneFeed = bankLaneFeed;
     this.now = now;
     this.logger = logger;
     this.running = false;
@@ -40,7 +42,7 @@ export class XcmBalanceObserverService {
   }
 
   start() {
-    if (!this.enabled || this.running) return;
+    if ((!this.enabled && !this.bankLaneFeed?.enabled) || this.running) return;
     this.running = true;
     void this.schedule();
   }
@@ -74,6 +76,8 @@ export class XcmBalanceObserverService {
       currentRaw: reading.raw.toString(),
       deltaRaw: "0",
       settlement: normalizeSettlementMapping(input.settlement),
+      kind: normalizeRequestKind(input.kind, input.direction),
+      phase: normalizeRequestPhase(input.phase ?? "registered"),
       requestedAssetsRaw: normalizeRaw(input.requestedAssetsRaw ?? 0, "requestedAssetsRaw").toString(),
       requestedSharesRaw: normalizeRaw(input.requestedSharesRaw ?? 0, "requestedSharesRaw").toString(),
       startedAt: new Date(startedAtMs).toISOString(),
@@ -96,6 +100,20 @@ export class XcmBalanceObserverService {
   }
 
   async pollBatch(limit) {
+    const tasks = [];
+    let watchTaskIndex = -1;
+    if (this.enabled) {
+      watchTaskIndex = tasks.length;
+      tasks.push(this.pollPendingWatches(limit));
+    }
+    if (this.bankLaneFeed?.enabled) {
+      tasks.push(this.bankLaneFeed.pollOnce());
+    }
+    const results = await Promise.all(tasks);
+    return watchTaskIndex < 0 ? [] : results[watchTaskIndex];
+  }
+
+  async pollPendingWatches(limit) {
     const pending = await this.stateStore.listPendingXcmBalanceWatches?.(limit) ?? [];
     const results = [];
     for (const watch of pending) {
@@ -119,6 +137,7 @@ export class XcmBalanceObserverService {
         deltaRaw: positiveDelta.toString(),
         lastReadAt: reading.asOf,
         attemptCount: Number(watch.attemptCount ?? 0) + 1,
+        phase: positiveDelta > 0n ? "pending-finalize" : watch.phase,
         lastError: undefined
       });
       if (positiveDelta > 0n) {
@@ -156,6 +175,7 @@ export class XcmBalanceObserverService {
     const terminal = await this.stateStore.upsertXcmBalanceWatch({
       ...watch,
       status: "succeeded",
+      phase: "terminal",
       outcome,
       completedAt: outcome.observedAt
     });
@@ -176,6 +196,7 @@ export class XcmBalanceObserverService {
     const terminal = await this.stateStore.upsertXcmBalanceWatch({
       ...watch,
       status: "failed",
+      phase: "terminal",
       outcome,
       completedAt: outcome.observedAt
     });
@@ -192,6 +213,7 @@ export class XcmBalanceObserverService {
     }, Number.POSITIVE_INFINITY);
     return {
       enabled: this.enabled,
+      bankLaneFeedEnabled: Boolean(this.bankLaneFeed?.enabled),
       running: this.running,
       polling: Boolean(this.pollPromise),
       pendingCount: pending.length,
@@ -212,6 +234,16 @@ export class XcmBalanceObserverService {
         observationState: item.lastError ? "unknown_stale" : "pending"
       }))
     };
+  }
+
+  async setRequestPhase(requestId, phase) {
+    const normalizedId = normalizeRequestId(requestId);
+    const watch = await this.stateStore.getXcmBalanceWatch?.(normalizedId);
+    if (!watch || watch.status !== "pending") return watch;
+    return this.stateStore.upsertXcmBalanceWatch({
+      ...watch,
+      phase: normalizeRequestPhase(phase)
+    });
   }
 
   publish(topic, watch) {
@@ -240,7 +272,7 @@ export class XcmBalanceObserverService {
   }
 
   async schedule() {
-    if (!this.enabled || !this.running) return;
+    if ((!this.enabled && !this.bankLaneFeed?.enabled) || !this.running) return;
     try {
       await this.pollOnce();
     } catch (error) {
@@ -273,6 +305,18 @@ function normalizeDirection(raw) {
   if (value !== "increase" && value !== "decrease") {
     throw new ValidationError('balance watch direction must be "increase" or "decrease".');
   }
+  return value;
+}
+
+function normalizeRequestKind(raw, direction) {
+  const value = String(raw ?? "").trim();
+  if (value) return value;
+  return String(direction ?? "").toLowerCase() === "decrease" ? "withdraw" : "deposit";
+}
+
+function normalizeRequestPhase(raw) {
+  const value = String(raw ?? "").trim();
+  if (!value) throw new ValidationError("balance watch phase must be a non-empty string.");
   return value;
 }
 
