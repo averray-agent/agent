@@ -1,0 +1,111 @@
+# External uptime watchdog.
+#
+# Runs on GitHub's infrastructure, NOT the VPS. That is the whole point: on
+# 2026-08-03 the host became unreachable (no ICMP, 443 and 22 both dead) and
+# nothing told the operator, because Hermes — the board that reports platform
+# health — runs on the machine it reports about. A monitor that shares a
+# failure domain with its subject cannot report that subject's failure.
+#
+# It checks only PUBLIC surfaces, so it needs no credentials and cannot be
+# blocked by a credential outage. It opens ONE issue per incident (dedup by
+# title), comments on continued failure, and closes it on recovery.
+name: External uptime watchdog
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: external-uptime-watchdog
+  cancel-in-progress: false
+
+env:
+  ISSUE_TITLE: "Platform unreachable — external watchdog"
+
+jobs:
+  probe:
+    name: Probe public surfaces
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check public endpoints
+        id: probe
+        run: |
+          set -uo pipefail
+          fail=""
+          detail=""
+          check() {
+            local name="$1" url="$2" expect="$3"
+            local code
+            # Three attempts before calling it down: a single timeout is noise,
+            # three in a row is an outage. Never let a flake open an issue.
+            for attempt in 1 2 3; do
+              # curl already prints 000 on a connection failure; a `|| echo 000`
+              # fallback would concatenate into a confusing 000000 in the report.
+              code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 "$url" 2>/dev/null)" || true
+              code="${code:-000}"
+              if [ "$code" = "$expect" ]; then
+                echo "  ok   $name ($code)"
+                return 0
+              fi
+              sleep 10
+            done
+            echo "  FAIL $name (last code $code, 3 attempts)"
+            fail="yes"
+            detail="${detail}- \`${name}\` → \`${url}\` last HTTP \`${code}\` after 3 attempts"$'\n'
+            return 0
+          }
+
+          check "api"  "https://api.averray.com/health" 200
+          check "app"  "https://app.averray.com"        200
+          check "site" "https://averray.com"            200
+
+          {
+            echo "failing=${fail:-no}"
+            echo "detail<<EOF"
+            printf '%s' "$detail"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Open or update the incident issue
+        if: steps.probe.outputs.failing == 'yes'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DETAIL: ${{ steps.probe.outputs.detail }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
+            --search "\"$ISSUE_TITLE\" in:title" --json number --jq '.[0].number // empty')"
+          body="$(printf 'Public surfaces did not respond from GitHub-hosted runners (off-VPS).\n\n%s\nRun: %s\n\nThe VPS hosts the API, operator app, site, and Hermes — so an unreachable host means the internal board cannot report this. Check the OVH panel for server state and their status page for a regional incident.\n' "$DETAIL" "$RUN_URL")"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$ISSUE_TITLE" --body "$body"
+          fi
+
+      - name: Close the incident issue on recovery
+        if: steps.probe.outputs.failing == 'no'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
+            --search "\"$ISSUE_TITLE\" in:title" --json number --jq '.[0].number // empty')"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" \
+              --body "All public surfaces responding again. Recovery observed at $RUN_URL"
+            gh issue close "$existing" --repo "$GITHUB_REPOSITORY"
+          fi
+
+      - name: Fail the run when the platform is unreachable
+        if: steps.probe.outputs.failing == 'yes'
+        run: |
+          echo "::error::Platform unreachable from off-VPS runners — see the incident issue."
+          exit 1
