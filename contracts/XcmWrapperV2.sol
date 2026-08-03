@@ -19,7 +19,10 @@ interface IXcmPrecompileV2 {
  * @notice Two-leg, request-scoped transport for the Hydration USDC supply lane.
  *
  * This is intentionally not a generic XCM executor. A request may dispatch only
- * the four reviewed message grammars: fund, supply, redeem, and return home.
+ * the four request message grammars: fund, supply, redeem, and return home.
+ * A fifth owner-only recovery-home grammar can return otherwise stranded
+ * Hydration asset-22 to this wrapper's fixed Asset-Hub image while locally
+ * paused; it cannot redirect funds to an arbitrary beneficiary.
  */
 contract XcmWrapperV2 is IXcmWrapper, ReentrancyGuard {
     using SafeTransfer for address;
@@ -51,6 +54,7 @@ contract XcmWrapperV2 is IXcmWrapper, ReentrancyGuard {
     address public constant DEFAULT_XCM_PRECOMPILE = 0x00000000000000000000000000000000000a0000;
     bytes internal constant LOCAL_HERE_DESTINATION = hex"050000";
     bytes internal constant HYDRATION_DESTINATION = hex"05010100c91f";
+    bytes32 internal constant RECOVERY_HOME_DOMAIN = bytes32("HYDRATION_USDC_RECOVERY_V1");
 
     TreasuryPolicy public immutable policy;
     address public immutable override xcmPrecompile;
@@ -68,6 +72,7 @@ contract XcmWrapperV2 is IXcmWrapper, ReentrancyGuard {
     mapping(bytes32 => uint8) public requestDispatchBitmap;
     mapping(bytes32 => uint256) public requestRecoveryReleased;
     mapping(bytes32 => mapping(uint8 => LegRecord)) internal requestLegs;
+    mapping(bytes32 => LegRecord) internal recoveryHomeLegs;
 
     event OperatorUpdated(address indexed previousOperator, address indexed newOperator);
     event StrategyAdapterUpdated(
@@ -83,6 +88,9 @@ contract XcmWrapperV2 is IXcmWrapper, ReentrancyGuard {
         bytes32 messageHash
     );
     event RecoveredAssetsReleased(bytes32 indexed requestId, address indexed adapter, uint256 assets);
+    event RecoveryHomeDispatched(
+        bytes32 indexed recoveryId, uint256 amount, uint64 nonce, bytes32 destinationHash, bytes32 messageHash
+    );
 
     error Unauthorized();
     error ProtocolPaused();
@@ -203,8 +211,6 @@ contract XcmWrapperV2 is IXcmWrapper, ReentrancyGuard {
             if (requestOperator[plan.requestId] != msg.sender) revert Unauthorized();
         }
 
-        _requireWeighable(message);
-
         if (plan.newRequest) {
             requests[plan.requestId] = RequestRecord({
                 context: RequestContext({
@@ -233,6 +239,11 @@ contract XcmWrapperV2 is IXcmWrapper, ReentrancyGuard {
         }
 
         if (plan.leg == DispatchLeg.DepositFunding) {
+            // `execute` runs this message in the Asset-Hub runtime, so the
+            // local precompile must be able to weigh it before custody moves.
+            // Remote `send` messages contain Hydration pallet indices and are
+            // intentionally not locally weighable on Asset Hub.
+            _requireWeighable(message);
             uint256 beforeBalance = _balanceOf(context.asset, address(this));
             IXcmV2CustodyAdapter(plan.adapter).releaseAssetsToWrapper(plan.requestId, context.assets);
             if (_balanceOf(context.asset, address(this)) - beforeBalance != context.assets) revert CustodyMismatch();
@@ -322,6 +333,56 @@ contract XcmWrapperV2 is IXcmWrapper, ReentrancyGuard {
 
     function getRequestLeg(bytes32 requestId, DispatchLeg leg) external view returns (LegRecord memory) {
         return requestLegs[requestId][uint8(leg)];
+    }
+
+    /**
+     * @notice Derive the topic/id for an owner-operated recovery-home message.
+     * @dev The destination account is not an input: strict payload decoding
+     *      always binds the beneficiary to this wrapper's Asset-Hub image.
+     */
+    function previewRecoveryHomeId(uint256 amount, uint64 nonce) public view returns (bytes32 recoveryId) {
+        return keccak256(abi.encode(RECOVERY_HOME_DOMAIN, address(this), hydrationAccountId32, amount, nonce));
+    }
+
+    /**
+     * @notice Send one strictly encoded reserve-withdraw message that returns
+     *         Hydration asset-22 to this wrapper's fixed Asset-Hub image.
+     * @dev Recovery is deliberately owner-only and available only while local
+     *      dispatch is paused. `_sendXcm` is the liveness/atomicity boundary;
+     *      the remote Hydration message must not be weighed by Asset Hub.
+     */
+    function dispatchRecoveryHome(uint256 amount, uint64 nonce, bytes calldata destination, bytes calldata message)
+        external
+        onlyOwner
+        nonReentrant
+        returns (bytes32 recoveryId)
+    {
+        if (!dispatchPaused) revert InvalidStatus();
+        if (amount == 0 || nonce == 0 || hydrationAccountId32 == bytes32(0)) revert InvalidRequest();
+        if (keccak256(destination) != keccak256(HYDRATION_DESTINATION)) revert XcmContextMismatch();
+
+        recoveryId = previewRecoveryHomeId(amount, nonce);
+        _decodeHomeParameters(message, amount, recoveryId);
+
+        LegRecord storage prior = recoveryHomeLegs[recoveryId];
+        bytes32 destinationHash = keccak256(destination);
+        bytes32 messageHash = keccak256(message);
+        if (prior.dispatched) {
+            if (prior.destinationHash != destinationHash || prior.messageHash != messageHash) {
+                revert PayloadMismatch();
+            }
+            return recoveryId;
+        }
+
+        _sendXcm(destination, message);
+        prior.destinationHash = destinationHash;
+        prior.messageHash = messageHash;
+        prior.dispatched = true;
+        emit RecoveryHomeDispatched(recoveryId, amount, nonce, destinationHash, messageHash);
+    }
+
+    function getRecoveryHomeLeg(bytes32 recoveryId) external view returns (LegRecord memory) {
+        return recoveryHomeLegs[recoveryId];
     }
 
     /**

@@ -48,7 +48,7 @@ const ADAPTER_ARTIFACT = resolve(repoRoot, "out/HydrationUsdcAdapter.sol/Hydrati
 const DEFAULT_EXPECTED_DEPLOYER = "0x9Ab8531FBb0948C542a31298FD61335f30064239";
 
 export function parseArgs(argv) {
-  const args = { profile: "mainnet", commit: false };
+  const args = { profile: "mainnet", commit: false, replaceExisting: false };
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
     if (token === "--profile") args.profile = argv[++index];
@@ -56,6 +56,7 @@ export function parseArgs(argv) {
     else if (token === "--signer-secret-ref") args.signerSecretRef = argv[++index];
     else if (token === "--source-commit") args.sourceCommit = argv[++index];
     else if (token === "--bundle-out") args.bundleOut = argv[++index];
+    else if (token === "--replace-existing") args.replaceExisting = true;
     else if (token === "--commit") args.commit = true;
     else if (token === "--help" || token === "-h") args.help = true;
     else throw new Error(`Unknown argument: ${token}`);
@@ -69,6 +70,7 @@ function usage() {
     "  forge build --skip test",
     "  node scripts/ops/deploy-bank-xcm-v2.mjs --profile mainnet \\",
     `    --expected-deployer ${DEFAULT_EXPECTED_DEPLOYER} [--bundle-out /tmp/bank-xcm-v2-plan.json]`,
+    "    [--replace-existing]  # required for the reviewed v2.1 replacement",
     "",
     "Commit (Pascal-authorized ceremony only): add --commit and",
     "  --signer-secret-ref op://... --source-commit <full-40-char-commit>",
@@ -81,10 +83,14 @@ function currentCommit() {
   return execFileSync("git", ["rev-parse", "HEAD"], { cwd: repoRoot, encoding: "utf8" }).trim();
 }
 
-function validateManifest(manifest) {
+function validateManifest(manifest, replaceExisting) {
   if (manifest.profile !== "mainnet") throw new Error("deployments/mainnet.json profile mismatch.");
-  if (manifest.contracts?.xcmWrapper !== null) {
+  const hasExisting = manifest.contracts?.xcmWrapper !== null && manifest.contracts?.xcmWrapper !== undefined;
+  if (hasExisting && !replaceExisting) {
     throw new Error(`manifest contracts.xcmWrapper is already ${manifest.contracts?.xcmWrapper}; refusing a duplicate deployment plan.`);
+  }
+  if (replaceExisting && (!hasExisting || !isAddress(manifest.contracts?.hydrationUsdcAdapter))) {
+    throw new Error("--replace-existing requires a recorded live wrapper and adapter pair.");
   }
   for (const [label, value] of Object.entries({
     treasuryPolicy: manifest.contracts?.treasuryPolicy,
@@ -97,8 +103,8 @@ function validateManifest(manifest) {
   }
 }
 
-export async function buildDeploymentPlan({ manifest, provider, deployer, wrapperArtifact, adapterArtifact }) {
-  validateManifest(manifest);
+export async function buildDeploymentPlan({ manifest, provider, deployer, wrapperArtifact, adapterArtifact, replaceExisting = false }) {
+  validateManifest(manifest, replaceExisting);
   const expectedDeployer = getAddress(deployer);
   const nonce = await provider.getTransactionCount(expectedDeployer, "pending");
   const wrapperAddress = getCreateAddress({ from: expectedDeployer, nonce });
@@ -127,6 +133,11 @@ export async function buildDeploymentPlan({ manifest, provider, deployer, wrappe
     chainId: BANK_XCM_V2.chainId,
     deployer: expectedDeployer,
     pendingNonce: nonce,
+    replacement: replaceExisting ? {
+      wrapper: getAddress(manifest.contracts.xcmWrapper),
+      adapter: getAddress(manifest.contracts.hydrationUsdcAdapter),
+      reason: "v2.1: remote send legs must not require Asset-Hub-local XCM weighing"
+    } : null,
     constants: {
       treasuryPolicy: getAddress(manifest.contracts.treasuryPolicy),
       owner: getAddress(manifest.owner),
@@ -180,11 +191,16 @@ export async function buildDeploymentPlan({ manifest, provider, deployer, wrappe
 }
 
 function printPlan(plan, sourceCommit) {
-  console.log("# bank-xcm-v2 deploy ceremony (NO CONFIGURATION)");
+  console.log(`# bank-xcm-v2${plan.replacement ? ".1 replacement" : ""} deploy ceremony (NO CONFIGURATION)`);
   console.log(`profile / chainId:       ${plan.profile} / ${plan.chainId}`);
   console.log(`source commit:           ${sourceCommit}`);
   console.log(`deployer:                ${plan.deployer}`);
   console.log(`pending nonce:           ${plan.pendingNonce}`);
+  if (plan.replacement) {
+    console.log(`replaces wrapper:        ${plan.replacement.wrapper}`);
+    console.log(`replaces adapter:        ${plan.replacement.adapter}`);
+    console.log(`replacement reason:      ${plan.replacement.reason}`);
+  }
   console.log(`TreasuryPolicy:          ${plan.constants.treasuryPolicy}`);
   console.log(`TreasuryPolicy.owner:    ${plan.constants.owner}`);
   console.log(`USDC:                    ${plan.constants.usdc}`);
@@ -292,9 +308,21 @@ export async function main(argv = process.argv.slice(2)) {
   const rpc = await createCeremonyRpcContext({ manifest, phase: "bank-xcm-v2-deploy", write: args.commit });
   try {
     printCeremonyRpcPreflight(rpc);
-    const plan = await buildDeploymentPlan({ manifest, provider: rpc.provider, deployer: expectedDeployer, wrapperArtifact, adapterArtifact });
+    const plan = await buildDeploymentPlan({
+      manifest,
+      provider: rpc.provider,
+      deployer: expectedDeployer,
+      wrapperArtifact,
+      adapterArtifact,
+      replaceExisting: args.replaceExisting
+    });
     printPlan(plan, sourceCommit);
-    const bundle = { schemaVersion: 1, kind: "averray.bankXcmV2DeploymentPlan", sourceCommit, ...plan };
+    const bundle = {
+      schemaVersion: plan.replacement ? 2 : 1,
+      kind: "averray.bankXcmV2DeploymentPlan",
+      sourceCommit,
+      ...plan
+    };
     if (args.bundleOut) {
       writeFileSync(resolve(args.bundleOut), `${JSON.stringify(bundle, null, 2)}\n`, { flag: "wx" });
       console.log(`plan bundle written (create-only): ${resolve(args.bundleOut)}`);
@@ -309,7 +337,7 @@ export async function main(argv = process.argv.slice(2)) {
     if (BigInt(plan.funding.balanceWei) < BigInt(required)) {
       throw new Error(`deployer balance ${plan.funding.balanceWei} wei is below required ${required} wei (estimate + 20%).`);
     }
-    const confirmation = `DEPLOY BANK XCM V2 ${plan.wrapper.address} ${plan.adapter.address}`;
+    const confirmation = `${plan.replacement ? "DEPLOY BANK XCM V2.1" : "DEPLOY BANK XCM V2"} ${plan.wrapper.address} ${plan.adapter.address}`;
     console.log(`\nType exactly: ${confirmation}`);
     const prompt = createInterface({ input: process.stdin, output: process.stdout });
     const answer = await prompt.question("> ");

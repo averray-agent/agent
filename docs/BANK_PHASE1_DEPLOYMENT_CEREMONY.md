@@ -1,6 +1,6 @@
-# Bank phase 1: XcmWrapper v2 deployment ceremony
+# Bank phase 1: XcmWrapper v2.1 replacement ceremony
 
-Status: **prepared, not executed**. This packet deploys no contract, signs no
+Status: **replacement preparation; not executed**. This packet deploys no contract, signs no
 extrinsic, grants no role, changes no environment, and moves no asset. Claude
 gates the packet; Pascal separately authorizes and signs the ceremony.
 
@@ -34,26 +34,23 @@ authority from the deployer: both bind the live TreasuryPolicy, and wrapper
 configuration is owner-only. The script binds both CREATE predictions to this
 address and its pending nonce.
 
-### Read-only candidate observed while preparing this packet
+### Retired v2.0 candidate and incident
 
-At source commit `767d894fe8ef3263d7806165a3b02bce9cda8142` the pending
-deployer nonce was 1, producing this **provisional preview**:
+The nonce-1 pair below is the deployed v2.0 pair, not a v2.1 preview:
 
 | Contract | Predicted address | nonce | creation-code SHA-256 | ABI SHA-256 |
 |---|---|---:|---|---|
 | XcmWrapperV2 | `0xc846eE73e49A748e59C7Ac8f8742F542a552D24C` | 1 | `sha256:07b47ee875c6e610aff225c664146521d5a6d83363a5727f8ea3635e94ca2a11` | `sha256:2d4c1458b4016fd38ba77af4aaf78a64daabd60b1f1a7a72d7c17f4fc90516a3` |
 | HydrationUsdcAdapter | `0x5eaF58a3e2819A26B66822529aD92fcec107cc98` | 2 | `sha256:ab50c3f08862b942d20bf09d0deb7e15f8d52922e4c93b7004ba0b78716218d7` | `sha256:dbd3823b40f66873ddba6ac005a2d6a7f74d372af58090d65a42934468aea13c` |
 
-The preview is not an authorization to use those addresses. Re-run immediately
-before the ceremony. Any nonce, artifact hash, constructor, or predicted-address
-change invalidates every downstream preview and requires Claude to re-gate the
-fresh output.
+Its converted account holds the written-off 149,412 raw asset 22 from the failed
+dust cycle. The earlier identity-split 100,000 raw is also written off. Do not
+attempt recovery through an alternate identity or count either balance as Bank
+capital. Re-run the v2.1 preview immediately before deployment; every address,
+hash, and conversion below changes with the deployer nonce.
 
-The read-only estimate was 3.8152096 DOT and the 20% headroom requirement was
-4.57825152 DOT. The deployer held only 1.8360072 DOT. **Deployment is currently
-funding-blocked.** Fund only after a separate explicit authorization, then rerun
-the estimator; the commit path refuses a balance below the fresh estimate plus
-20%.
+The deployer was reported at 2.93 DOT for v2.1 planning. That is not a funding
+pass: the fresh estimator and its 20% headroom check remain authoritative.
 
 ## 1. Build and deploy locally paused
 
@@ -66,6 +63,7 @@ forge test
 node scripts/ops/deploy-bank-xcm-v2.mjs \
   --profile mainnet \
   --expected-deployer 0x9Ab8531FBb0948C542a31298FD61335f30064239 \
+  --replace-existing \
   --bundle-out /tmp/bank-xcm-v2-plan.json
 ```
 
@@ -79,6 +77,7 @@ After Pascal authorizes deployment, the only permitted commit form is:
 node scripts/ops/deploy-bank-xcm-v2.mjs \
   --profile mainnet \
   --expected-deployer 0x9Ab8531FBb0948C542a31298FD61335f30064239 \
+  --replace-existing \
   --source-commit FULL_40_CHARACTER_GATED_COMMIT \
   --signer-secret-ref 'op://mainnet-critical/admin-eoa-mainnet/credential' \
   --commit
@@ -165,7 +164,8 @@ encoded every call. It prints:
 - ordered `otherSignatories` from AccountId32 byte order;
 - the `utility.batchAll` SCALE, blake2 call hash, and first-leg `asMulti` SCALE;
 - a profile-bound Apps URL usable by Nova Spektr/Apps;
-- the four exact XCM messages and observer targets.
+- the four exact request messages, the owner-only recovery message, and observer
+  targets.
 
 Pascal chooses the two devices. Leg 2 must use a different signer and the
 `multisig.NewMultisig` height/index:
@@ -234,7 +234,7 @@ The full message bytes are emitted into the create-only bundle rather than
 copied by hand. They are invalid if either deployed address or the fee quote
 changes.
 
-Dry-run all four exact messages against current Asset Hub/Hydration runtimes in
+Dry-run all four request messages plus one parameterized recovery-home message against current Asset Hub/Hydration runtimes in
 a state-capable DryRunApi/Chopsticks rehearsal. The fork must stage only the
 ephemeral balances needed to exercise the exact wrapper origin; it must not
 change the bytes. A plain `Complete` is insufficient:
@@ -245,6 +245,7 @@ change the bytes. A plain `Complete` is insufficient:
 | `deposit_sell` | `Broadcast.Swapped`, filler `AAVE`, 22 → 1003 |
 | `withdraw_sell` | `Broadcast.Swapped`, filler `AAVE`, 1003 → 22 |
 | `withdraw_home` | a forwarded XCM toward Asset Hub para 1000, then asset 1337 deposited to the wrapper image |
+| `recovery_home` | a forwarded XCM toward Asset Hub para 1000, then asset 1337 deposited to the wrapper image; only the owner-only recovery selector accepts it |
 
 Start from
 `deployments/templates/mainnet-bank-xcm-v2-dry-run-evidence.json`. Preserve the
@@ -280,9 +281,14 @@ unpaused. The emergency rollback is one owner/pauser call:
 
 ## 6. Paired manifest evidence PR (D-03)
 
-The ceremony tooling PR may merge before deployment because it changes no
-contract source and records no nonexistent address. After both deploy receipts,
-fill the create-only evidence template:
+The v2.1 implementation and ceremony tooling merge **before** deployment so the
+deployed artifact's `sourceCommit` is a reachable commit on `main`. This PR pairs
+the contract change with the v2.0 incident/status update in
+`deployments/mainnet.json`; a normal production deploy still deploys no contract
+and enables no Bank flow. Do not use an unmerged branch or squash-source commit
+as provenance.
+
+After both deploy receipts, fill the create-only evidence template:
 
 `deployments/templates/mainnet-bank-xcm-v2-deployment-evidence.json`.
 
@@ -301,8 +307,9 @@ bytecode, derives runtime and ABI hashes, and creates these paired records:
 
 - `contracts.xcmWrapper` and `contracts.hydrationUsdcAdapter`;
 - `contractProvenance[address]` for both;
-- `deploymentBlocks.xcmWrapperV2` and `.hydrationUsdcAdapter`;
-- `deployers.xcmWrapperV2` and `.hydrationUsdcAdapter`;
+- preserved v2.0 history plus `deploymentBlocks.xcmWrapperV2_1` and
+  `.hydrationUsdcAdapterV2_1`;
+- `deployers.xcmWrapperV2_1` and `.hydrationUsdcAdapterV2_1`;
 - a `HYDRATION_USDC_V1` strategy entry with status
   `paused_pending_dust_proof`;
 - `bankXcmV2Deployment` with deploy, conversion, configuration, and dry-run
@@ -326,21 +333,64 @@ the deployed AAC is untouched.
    converted aUSDC, all adapter counters, and wrapper request state.
 2. Obtain separate authorization to place at most 150,000 raw USDC at the
    treasury owner. Approve only the adapter and only the capped amount.
-3. Multisig-call `stageTreasuryDeposit` with the exact preflighted
+3. Before signing each leg, call `ReviveApi_call` through the deployed
+   wrapper/adapter with the exact calldata and proposed outer weight/storage
+   limits. Require flags 0, the expected return value, and recorded
+   `weightRequired`/storage evidence. This applies independently to
+   `deposit_funding`, `deposit_sell`, `withdraw_sell`, `withdraw_home`, and the
+   owner-only `recovery_home` proof. Message-level DryRunApi evidence never
+   substitutes for this deployed-contract gate.
+
+   The read-only gate is the following command. Run it immediately before the
+   named leg, after the preceding leg's state and destination delta exist. Use
+   the same fresh fee/amount/nonce inputs that produced the gated message file:
+
+   ```sh
+   # The ceremony tools load this dependency only for Substrate runtime reads.
+   npm install --no-save --package-lock=false @polkadot/api @polkadot/util-crypto @polkadot/util
+
+   node scripts/ops/preflight-bank-xcm-v2-leg.mjs \
+     --profile mainnet \
+     --leg LEG_NAME \
+     --wrapper 0xDEPLOYED_WRAPPER \
+     --adapter 0xDEPLOYED_ADAPTER \
+     --converted-account 0xFRESH_CONVERTED_ACCOUNT_ID32 \
+     --dry-run-evidence /tmp/bank-xcm-v2-dry-run-evidence.json \
+     --deposit-assets 150000 --deposit-sell-amount FRESH_AMOUNT --deposit-fee FRESH_FEE \
+     --withdraw-shares FRESH_SHARES --withdraw-fee FRESH_FEE \
+     --home-amount FRESH_SHARES --home-fee FRESH_FEE \
+     --deposit-nonce 1 --withdraw-nonce 2 \
+     --recovery-amount FRESH_RECOVERY_AMOUNT --recovery-fee FRESH_FEE --recovery-nonce 1 \
+     --inner-ref-time DRY_RUN_QUOTED_REF_TIME \
+     --inner-proof-size DRY_RUN_QUOTED_PROOF_SIZE \
+     --ws wss://asset-hub-polkadot-rpc.n.dwellir.com \
+     --out /tmp/bank-xcm-v2-LEG_NAME-revive-preflight.json
+   ```
+
+   `LEG_NAME` is one of `deposit_funding`, `deposit_sell`, `withdraw_sell`,
+   `withdraw_home`, or `recovery_home`. The tool checks the EVM and Substrate
+   chain identities, live owner/operator/adapter/conversion bindings, pause
+   phase, all five message-evidence hashes, and the exact return id. It first
+   simulates under a review-only ceiling, derives 25% weight/storage headroom,
+   then repeats under those exact emitted limits. The evidence file is
+   create-only. A revert flag, wrong return id, missing runtime field, wrong
+   state, or second simulation failure is an abort; do not sign or broadcast.
+4. Multisig-call `stageTreasuryDeposit` with the exact preflighted
    `deposit_funding` bytes. Confirm custody path
    `owner → adapter → wrapper → XCM execute` and the converted asset-22 delta.
-4. Backend operator sends the exact `deposit_sell` follow-up only through the
+5. Backend operator sends the exact `deposit_sell` follow-up only through the
    dry-run guard. Confirm aUSDC ERC-20 actual delta; observer finalizes using
    that delta and adapter shares/assets reconcile.
-5. Multisig-call `stageTreasuryWithdraw` for the full dust shares using the exact
+6. Multisig-call `stageTreasuryWithdraw` for the full dust shares using the exact
    `withdraw_sell` bytes. Confirm aUSDC decreases and asset 22 increases.
-6. Backend operator sends exact `withdraw_home`. Confirm wrapper Asset-Hub USDC
+7. Backend operator sends exact `withdraw_home`. Confirm wrapper Asset-Hub USDC
    increases, observer finalizes, wrapper transfers only the observed amount to
    adapter, and adapter returns it only to the recorded treasury authority.
-7. Record any residual asset-22 operating float at the converted account; do not
+8. Record any residual asset-22 operating float at the converted account; do not
    call it missing capital. Reconcile `totalAssets`, `totalShares`, pending
    counters, recovery outstanding, and all request statuses.
-8. Exercise `setDispatchPaused(true)` and prove a new request refuses. Leave the
+9. Exercise `setDispatchPaused(true)`, dry-run and limit-simulate the fifth
+   recovery-home shape, and prove a new ordinary request refuses. Leave the
    wrapper paused after the gate unless a later activation packet says otherwise.
 
 One attempt per leg. Stop immediately on converted-account drift, missing
@@ -354,7 +404,7 @@ beneficiary, retry with a new nonce, front funds from an EOA, or increase the ca
 - two deployment receipts and paused-state/immutable reads;
 - fresh two-endpoint conversion evidence;
 - configuration first-leg hash/timepoint and `MultisigExecuted` inner `Ok`;
-- four exact messages, hashes, raw DryRunApi evidence, and asserted events;
+- all five exact messages, hashes, raw DryRunApi evidence, and asserted events;
 - arm multisig evidence (one call only), if separately authorized;
 - observer target reads and before/after deltas;
 - paired manifest diff plus D-03 provenance output;

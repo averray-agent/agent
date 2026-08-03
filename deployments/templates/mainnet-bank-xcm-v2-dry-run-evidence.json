@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "kind": "averray.bankXcmV2DryRunEvidence",
   "profile": "mainnet",
   "wrapper": "REPLACE_WITH_DEPLOYED_XCM_WRAPPER_V2_ADDRESS",
@@ -44,6 +44,16 @@
     {
       "label": "withdraw_home",
       "requestId": "REPLACE_FROM_EXACT_MESSAGE_BUNDLE",
+      "messageHash": "REPLACE_FROM_EXACT_MESSAGE_BUNDLE",
+      "passed": false,
+      "forwardedParaId": 1000,
+      "remoteEvent": "Assets.Deposited",
+      "assetId": 1337,
+      "rawEvidence": "REPLACE_WITH_DRY_RUN_OUTPUT_REFERENCE"
+    },
+    {
+      "label": "recovery_home",
+      "requestId": "REPLACE_FROM_EXACT_MESSAGE_BUNDLE_RECOVERY_ID",
       "messageHash": "REPLACE_FROM_EXACT_MESSAGE_BUNDLE",
       "passed": false,
       "forwardedParaId": 1000,

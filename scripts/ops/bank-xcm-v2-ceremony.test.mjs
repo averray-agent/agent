@@ -9,7 +9,9 @@ import {
   buildArmCalls,
   buildBankXcmV2Messages,
   buildConfigurationCalls,
+  buildRecoveryHomeMessage,
   compact,
+  previewRecoveryHomeId,
   truncateAccountId32,
   wrapperAccountId32
 } from "./bank-xcm-v2-ceremony-lib.mjs";
@@ -95,6 +97,34 @@ test("message builder emits exactly four v2 shapes bound to request topics", () 
   });
 });
 
+test("v2.1 recovery-home builder derives its topic and fixes the wrapper image beneficiary", () => {
+  const recovery = buildRecoveryHomeMessage({
+    wrapper: WRAPPER,
+    convertedAccountId32: CONVERTED,
+    amount: 120_000n,
+    fee: 1_402n,
+    nonce: 7n
+  });
+  assert.equal(recovery.recoveryId, previewRecoveryHomeId({
+    wrapper: WRAPPER,
+    convertedAccountId32: CONVERTED,
+    amount: 120_000n,
+    nonce: 7n
+  }));
+  assert.equal(recovery.destination, BANK_XCM_V2.hydrationDestination);
+  assert.equal(recovery.messageHash, keccak256(recovery.message));
+  assert.ok(recovery.message.endsWith(`2c${recovery.recoveryId.slice(2)}`));
+  assert.match(recovery.message, new RegExp(wrapperAccountId32(WRAPPER).slice(2), "iu"));
+  assert.equal(recovery.expected.forwardedParaId, 1000);
+});
+
+test("v2.1 recovery-home builder refuses zero amount, zero nonce, and fee overflow", () => {
+  const input = { wrapper: WRAPPER, convertedAccountId32: CONVERTED, amount: 120_000n, fee: 1_402n, nonce: 7n };
+  assert.throws(() => buildRecoveryHomeMessage({ ...input, amount: 0n }), /amount.*positive/u);
+  assert.throws(() => buildRecoveryHomeMessage({ ...input, nonce: 0n }), /nonce.*positive/u);
+  assert.throws(() => buildRecoveryHomeMessage({ ...input, fee: 120_001n }), /fee.*no greater/u);
+});
+
 test("message builder refuses a home amount that is not the Withdraw request shares", () => {
   assert.throws(
     () => buildBankXcmV2Messages({
@@ -168,6 +198,45 @@ test("deployment plan pins wrapper-first CREATE order, paused constructor, and a
   assert.equal(plan.adapter.constructorArgs[4], AAC);
 });
 
+test("v2.1 deployment replacement is explicit and records the pair it supersedes", async () => {
+  const deployer = "0x9Ab8531FBb0948C542a31298FD61335f30064239";
+  const existing = {
+    ...manifest,
+    contracts: { ...manifest.contracts, xcmWrapper: WRAPPER, hydrationUsdcAdapter: ADAPTER }
+  };
+  const wrapperArtifact = {
+    abi: [{ type: "constructor", inputs: [{ name: "policy_", type: "address" }, { name: "xcmPrecompile_", type: "address" }] }],
+    bytecode: { object: "0x60006000" }, deployedBytecode: { object: "0x6000" }
+  };
+  const adapterArtifact = {
+    abi: [{
+      type: "constructor",
+      inputs: [
+        { name: "policy_", type: "address" }, { name: "asset_", type: "address" },
+        { name: "strategyId_", type: "bytes32" }, { name: "xcmWrapper_", type: "address" },
+        { name: "agentAccountCore_", type: "address" }
+      ]
+    }],
+    bytecode: { object: "0x60006000" }, deployedBytecode: { object: "0x6000" }
+  };
+  const provider = {
+    getTransactionCount: async () => 9,
+    estimateGas: async () => 100n,
+    getFeeData: async () => ({ gasPrice: 2n, maxFeePerGas: null }),
+    getBalance: async () => 1_000n
+  };
+  await assert.rejects(
+    buildDeploymentPlan({ manifest: existing, provider, deployer, wrapperArtifact, adapterArtifact }),
+    /refusing a duplicate deployment plan/u
+  );
+  const plan = await buildDeploymentPlan({
+    manifest: existing, provider, deployer, wrapperArtifact, adapterArtifact, replaceExisting: true
+  });
+  assert.equal(plan.replacement.wrapper, getAddress(WRAPPER));
+  assert.equal(plan.replacement.adapter, getAddress(ADAPTER));
+  assert.notEqual(plan.wrapper.address, plan.replacement.wrapper);
+});
+
 test("paused configuration and arm packets are deliberately separate", () => {
   const configure = buildConfigurationCalls({ manifest, wrapper: WRAPPER, adapter: ADAPTER, convertedAccountId32: CONVERTED });
   const arm = buildArmCalls({ wrapper: WRAPPER });
@@ -180,7 +249,7 @@ test("paused configuration and arm packets are deliberately separate", () => {
   assert.equal(iface.decodeFunctionData("setDispatchPaused", arm[0].data)[0], false);
 });
 
-test("arm evidence fails closed unless all four exact hashes and assertions pass", () => {
+test("request-leg evidence fails closed unless all four exact hashes and assertions pass", () => {
   const built = bundle();
   const evidence = {
     kind: "averray.bankXcmV2DryRunEvidence",
@@ -232,6 +301,36 @@ test("arm evidence requires the forwarded-leg remote deposit event and raw outpu
   assert.throws(() => assertDryRunEvidence(evidence, built), /must reference the captured raw output/u);
 });
 
+test("v2.1 arm evidence requires the fifth recovery-home dry-run", () => {
+  const built = bundle();
+  const recovery = buildRecoveryHomeMessage({
+    wrapper: WRAPPER,
+    convertedAccountId32: CONVERTED,
+    amount: 100_000n,
+    fee: 1_402n,
+    nonce: 1n
+  });
+  const v21 = { ...built, messages: [...built.messages, recovery] };
+  const evidence = {
+    kind: "averray.bankXcmV2DryRunEvidence",
+    profile: "mainnet",
+    wrapper: built.wrapper,
+    convertedAccountId32: built.convertedAccountId32,
+    runtimeBlocks: { assetHub: 19_000_001, hydration: 8_000_001 },
+    legs: v21.messages.map((leg) => ({
+      label: leg.label,
+      passed: true,
+      requestId: leg.requestId,
+      messageHash: leg.messageHash,
+      rawEvidence: `/tmp/${leg.label}.json`,
+      ...leg.expected
+    }))
+  };
+  assert.equal(assertDryRunEvidence(evidence, v21), true);
+  evidence.legs.pop();
+  assert.throws(() => assertDryRunEvidence(evidence, v21), /exactly 5 legs/u);
+});
+
 test("manifest recorder produces the paired addresses, provenance, blocks, and paused strategy record", () => {
   const next = applyBankXcmV2Manifest(manifest, {
     sourceCommit: "a".repeat(40),
@@ -257,6 +356,62 @@ test("manifest recorder produces the paired addresses, provenance, blocks, and p
   assert.equal(next.deploymentBlocks.xcmWrapperV2, 19_000_001);
   assert.equal(next.strategies[0].status, "paused_pending_dust_proof");
   assert.equal(next.bankXcmV2Deployment.status, "deployed_paused");
+});
+
+test("v2.1 manifest replacement preserves v2.0 provenance and records retirement truth", () => {
+  const oldWrapper = "0xc846eE73e49A748e59C7Ac8f8742F542a552D24C";
+  const oldAdapter = "0x5eaF58a3e2819A26B66822529aD92fcec107cc98";
+  const existing = {
+    ...manifest,
+    contracts: { ...manifest.contracts, xcmWrapper: oldWrapper, hydrationUsdcAdapter: oldAdapter },
+    contractProvenance: {
+      [oldWrapper]: {
+        sourceCommit: "b".repeat(40),
+        abiHash: `sha256:${"01".repeat(32)}`,
+        runtimeCodeHash: `sha256:${"02".repeat(32)}`,
+        verifiedAt: "2026-08-03T12:00:00.000Z"
+      }
+    },
+    deploymentBlocks: { xcmWrapperV2: 19_009_586, hydrationUsdcAdapter: 19_009_588 },
+    deployers: { xcmWrapperV2: OPERATOR, hydrationUsdcAdapter: OPERATOR },
+    bankXcmV2Deployment: {
+      version: "2.0",
+      status: "v2_1_redeploy_required",
+      deployTxHashes: { wrapper: `0x${"10".repeat(32)}`, adapter: `0x${"20".repeat(32)}` },
+      convertedAccountId32: CONVERTED,
+      incident: { writeOffs: [{ assetId: 22, raw: "149412" }] }
+    }
+  };
+  const next = applyBankXcmV2Manifest(existing, {
+    sourceCommit: "c".repeat(40),
+    deployer: "0x9Ab8531FBb0948C542a31298FD61335f30064239",
+    verifiedAt: "2026-08-04T08:00:00.000Z",
+    replacementReason: "remote send legs must not require Asset-Hub-local XCM weighing",
+    wrapper: {
+      address: WRAPPER,
+      txHash: `0x${"31".repeat(32)}`,
+      blockNumber: 19_100_001,
+      abiHash: `sha256:${"32".repeat(32)}`,
+      runtimeCodeHash: `sha256:${"33".repeat(32)}`
+    },
+    adapter: {
+      address: ADAPTER,
+      txHash: `0x${"41".repeat(32)}`,
+      blockNumber: 19_100_002,
+      abiHash: `sha256:${"42".repeat(32)}`,
+      runtimeCodeHash: `sha256:${"43".repeat(32)}`
+    }
+  });
+  assert.equal(next.contracts.xcmWrapper, getAddress(WRAPPER));
+  assert.equal(next.bankXcmV2Deployment.version, "2.1");
+  assert.equal(next.deploymentBlocks.xcmWrapperV2, 19_009_586);
+  assert.equal(next.deploymentBlocks.xcmWrapperV2_1, 19_100_001);
+  assert.equal(next.deployers.xcmWrapperV2_1, getAddress("0x9Ab8531FBb0948C542a31298FD61335f30064239"));
+  assert.equal(next.contractProvenance[oldWrapper].sourceCommit, "b".repeat(40));
+  assert.equal(next.bankXcmDeploymentHistory.length, 1);
+  assert.equal(next.bankXcmDeploymentHistory[0].status, "retired_replaced");
+  assert.equal(next.bankXcmDeploymentHistory[0].incident.writeOffs[0].raw, "149412");
+  assert.deepEqual(next.bankXcmDeploymentHistory[0].retiredCapital, [{ assetId: 22, raw: "149412" }]);
 });
 
 test("manifest candidate refuses live runtime drift before recording provenance", async () => {
