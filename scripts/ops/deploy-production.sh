@@ -69,6 +69,13 @@ PRODUCT_PROOF_NODE_IMAGE=${PRODUCT_PROOF_NODE_IMAGE:-node:22-bookworm-slim}
 # D-03 provenance checks run in the same Node toolchain image as product
 # proof. The production host intentionally has no Node.js installation.
 CONTRACT_PROVENANCE_NODE_IMAGE=${CONTRACT_PROVENANCE_NODE_IMAGE:-$PRODUCT_PROOF_NODE_IMAGE}
+# D-03 Tier 3 compiles the candidate contract tree even though the production
+# host intentionally has no Foundry installation. Pin the OCI index digest so
+# both amd64 production and arm64 operator hosts resolve immutable platform
+# images. Resolved 2026-08-03: Foundry 1.5.1-stable, commit b0a9dd9c.
+# Refresh deliberately with:
+#   docker buildx imagetools inspect ghcr.io/foundry-rs/foundry:stable
+readonly CONTRACT_PROVENANCE_FOUNDRY_IMAGE=ghcr.io/foundry-rs/foundry@sha256:043752653d5be351c71709091b3db97c4421c907eb40ea294195e7f532aadf46
 INDEXER_DATABASE_SCHEMA=${INDEXER_DATABASE_SCHEMA:-}
 INDEXER_FRESH_SCHEMA=${INDEXER_FRESH_SCHEMA:-0}
 WAIT_FOR_READY=${WAIT_FOR_READY:-1}
@@ -479,26 +486,65 @@ verify_live_contract_provenance() {
   return 1
 }
 
+preflight_contract_foundry_runtime() {
+  local output=""
+  local status=0
+  set +e
+  output=$(docker run --rm \
+    --entrypoint forge \
+    "$CONTRACT_PROVENANCE_FOUNDRY_IMAGE" \
+    --version 2>&1)
+  status=$?
+  set -e
+
+  if [[ "$status" != "0" ]]; then
+    {
+      echo "D-03 Tier 3 environment error: digest-pinned Foundry runtime '$CONTRACT_PROVENANCE_FOUNDRY_IMAGE' is not runnable (exit $status); candidate build and comparison did not run."
+      printf '%s\n' "$output"
+      echo "Refusing production deploy. Restore the pinned Foundry image/runtime; do not skip the gate."
+    } >&2
+    return 127
+  fi
+
+  local version="${output%%$'\n'*}"
+  echo "D-03 Tier 3 runtime: using containerized $version from $CONTRACT_PROVENANCE_FOUNDRY_IMAGE (host forge is not required)."
+}
+
+run_contract_candidate_build() {
+  local build_root="$1"
+
+  docker run --rm \
+    --user "$(id -u):$(id -g)" \
+    -e HOME=/tmp/foundry-home \
+    --entrypoint forge \
+    -v "$APP_ROOT:/workspace:ro" \
+    -v "$build_root:/build" \
+    -w /workspace \
+    "$CONTRACT_PROVENANCE_FOUNDRY_IMAGE" \
+    build \
+    --root /workspace \
+    --out /build/out \
+    --cache-path /build/cache \
+    --skip test
+}
+
 check_compiled_contract_provenance() {
   local source_checker="$APP_ROOT/scripts/ops/check-contract-source-drift.mjs"
   if [[ ! -r "$source_checker" ]]; then
     echo "D-03 Tier 1: compiled-runtime checker is unreadable at $source_checker; refusing production deploy." >&2
     return 2
   fi
-  require_command forge
+  if ! preflight_contract_foundry_runtime; then
+    return 2
+  fi
 
   local build_root
   build_root=$(mktemp -d "${TMPDIR:-/tmp}/averray-contract-source.XXXXXX")
   local artifacts="$build_root/out"
-  local cache="$build_root/cache"
 
-  if ! forge build \
-    --root "$APP_ROOT" \
-    --out "$artifacts" \
-    --cache-path "$cache" \
-    --skip test; then
+  if ! run_contract_candidate_build "$build_root"; then
     rm -rf -- "$build_root"
-    echo "D-03 Tier 1: candidate contract build failed; refusing production deploy without writing a sticky drift marker." >&2
+    echo "D-03 Tier 3: containerized candidate contract build failed; refusing production deploy without writing a sticky drift marker." >&2
     return 2
   fi
 
@@ -515,6 +561,9 @@ check_compiled_contract_provenance() {
   rm -rf -- "$build_root"
 
   printf '%s\n' "$output"
+  if [[ "$status" == "0" ]]; then
+    echo "D-03 Tier 3: candidate build and immutable-masked provenance comparison passed."
+  fi
   return "$status"
 }
 

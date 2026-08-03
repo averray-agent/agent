@@ -1246,6 +1246,99 @@ test("deploy wrapper runs Tier 2 in the containerized Node toolchain when host n
   assert.match(invocations, /node scripts\/ops\/check-contract-provenance\.mjs --profile testnet/u);
 });
 
+test("deploy wrapper runs Tier 3 in the digest-pinned Foundry container when host forge is absent", async () => {
+  const fixture = await makeDeployFreezeFixture(
+    async (appRoot) => {
+      await mkdir(join(appRoot, "contracts"), { recursive: true });
+      await writeFile(
+        join(appRoot, "contracts/AgentAccountCore.sol"),
+        "// contract edit whose fake compiled runtime matches deployed provenance\n"
+      );
+    },
+    "contract source change"
+  );
+  const dockerLog = join(fixture.appRoot, "docker.log");
+
+  const run = runDeploy(fixture.appRoot, {
+    ...deployFreezeEnv(fixture),
+    PATH: `${fixture.fakeBin}:/usr/bin:/bin:/usr/sbin:/sbin`,
+    DEPLOY_OLD_SHA: fixture.baseSha,
+    DEPLOY_NEW_SHA: fixture.nextSha,
+    FAKE_DOCKER_LOG: dockerLog,
+    CONTRACT_PROVENANCE_FOUNDRY_IMAGE: "ghcr.io/foundry-rs/foundry:stable",
+  });
+
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(run.stdout, /D-03 Tier 3 runtime: using containerized forge Version: 1\.5\.1-stable/u);
+  assert.match(run.stdout, /host forge is not required/u);
+  assert.match(run.stdout, /D-03 Tier 3: candidate build and immutable-masked provenance comparison passed/u);
+
+  const invocations = await readFile(dockerLog, "utf8");
+  assert.match(
+    invocations,
+    /--entrypoint forge ghcr\.io\/foundry-rs\/foundry@sha256:043752653d5be351c71709091b3db97c4421c907eb40ea294195e7f532aadf46 --version/u
+  );
+  assert.doesNotMatch(invocations, /foundry:stable/u);
+  assert.match(invocations, /--entrypoint forge -v .*\/app:\/workspace:ro -v .*:\/build -w \/workspace/u);
+  assert.match(invocations, /--entrypoint forge .* build --root \/workspace --out \/build\/out --cache-path \/build\/cache --skip test/u);
+  assert.match(invocations, /node scripts\/ops\/check-contract-source-drift\.mjs --profile testnet --artifacts/u);
+});
+
+test("deploy wrapper fails closed when the digest-pinned Tier 3 Foundry runtime is unavailable", async () => {
+  const fixture = await makeDeployFreezeFixture(
+    async (appRoot) => {
+      await mkdir(join(appRoot, "contracts"), { recursive: true });
+      await writeFile(join(appRoot, "contracts/AgentAccountCore.sol"), "contract AgentAccountCore {}\n");
+    },
+    "contract source change"
+  );
+
+  const run = runDeploy(fixture.appRoot, {
+    ...deployFreezeEnv(fixture),
+    PATH: `${fixture.fakeBin}:/usr/bin:/bin:/usr/sbin:/sbin`,
+    DEPLOY_OLD_SHA: fixture.baseSha,
+    DEPLOY_NEW_SHA: fixture.nextSha,
+    FAKE_FOUNDRY_PREFLIGHT_STATUS: "127",
+  });
+
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /D-03 Tier 3 environment error/u);
+  assert.match(run.stderr, /not runnable \(exit 127\)/u);
+  assert.match(run.stderr, /candidate build and comparison did not run/u);
+  assert.doesNotMatch(run.stdout, /immutable-masked provenance comparison passed/u);
+  assert.equal(
+    existsSync(join(fixture.stateDir, "contract-surface.frozen-at.testnet")),
+    false,
+    "a missing Tier 3 runtime must fail closed without misclassifying an environment error as sticky drift"
+  );
+});
+
+test("deploy wrapper fails closed when the containerized Tier 3 candidate build fails", async () => {
+  const fixture = await makeDeployFreezeFixture(
+    async (appRoot) => {
+      await mkdir(join(appRoot, "contracts"), { recursive: true });
+      await writeFile(join(appRoot, "contracts/AgentAccountCore.sol"), "contract AgentAccountCore {}\n");
+    },
+    "contract source change"
+  );
+
+  const run = runDeploy(fixture.appRoot, {
+    ...deployFreezeEnv(fixture),
+    DEPLOY_OLD_SHA: fixture.baseSha,
+    DEPLOY_NEW_SHA: fixture.nextSha,
+    FAKE_FOUNDRY_BUILD_STATUS: "1",
+  });
+
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /D-03 Tier 3: containerized candidate contract build failed/u);
+  assert.doesNotMatch(run.stdout, /immutable-masked provenance comparison passed/u);
+  assert.equal(
+    existsSync(join(fixture.stateDir, "contract-surface.frozen-at.testnet")),
+    false,
+    "a candidate build failure must fail closed without writing a sticky drift marker"
+  );
+});
+
 test("deploy wrapper reports a missing containerized Node runtime as an environment error", async () => {
   const fixture = await makeDeployFreezeFixture(
     async (appRoot) => {
@@ -1672,7 +1765,7 @@ async function makeDeployFreezeFixture(applyChange, message) {
     '{"profile":"testnet","contracts":{},"contractProvenance":{},"knownUnshippedContractChanges":{}}\n'
   );
 
-  for (const command of ["npm", "flock", "forge"]) {
+  for (const command of ["npm", "flock"]) {
     await writeExecutable(join(fakeBin, command), "#!/usr/bin/env bash\nexit 0\n");
   }
   await writeExecutable(join(fakeBin, "docker"), [
@@ -1683,6 +1776,17 @@ async function makeDeployFreezeFixture(applyChange, message) {
     "  if [[ \"$status\" != \"0\" ]]; then echo 'node: command not found' >&2; exit \"$status\"; fi",
     "  echo 'v22.0.0'",
     "  exit 0",
+    "fi",
+    "if [[ \"$*\" == *\"--entrypoint forge\"* && \"$*\" == *\"--version\"* ]]; then",
+    "  status=\"${FAKE_FOUNDRY_PREFLIGHT_STATUS:-0}\"",
+    "  if [[ \"$status\" != \"0\" ]]; then echo 'forge: command not found' >&2; exit \"$status\"; fi",
+    "  echo 'forge Version: 1.5.1-stable'",
+    "  exit 0",
+    "fi",
+    "if [[ \"$*\" == *\"--entrypoint forge\"* && \"$*\" == *\" build \"* ]]; then",
+    "  status=\"${FAKE_FOUNDRY_BUILD_STATUS:-0}\"",
+    "  if [[ \"$status\" != \"0\" ]]; then echo 'fake forge build failed' >&2; fi",
+    "  exit \"$status\"",
     "fi",
     "if [[ \"$*\" == *\"check-contract-provenance.mjs\"* ]]; then",
     "  status=\"${FAKE_CONTRACT_LIVE_STATUS:-0}\"",

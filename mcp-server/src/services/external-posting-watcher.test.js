@@ -321,6 +321,14 @@ test("a fresh finalized head remains staged while watcher event pages are backlo
 });
 
 test("local external-posting e2e signs issued calldata, watches funding, and reaches settlement", async () => {
+  // Keep the full lifecycle close to the test clock. A fixed 2026-07-20
+  // fixture crossed the catalog's 14-day stale boundary on 2026-08-03 and
+  // made this otherwise local e2e fail solely as wall-clock time advanced.
+  const createdAtMs = Date.now() - (2 * 60 * 60 * 1000);
+  const createdAt = new Date(createdAtMs).toISOString();
+  const fundedAt = new Date(createdAtMs + (60 * 60 * 1000)).toISOString();
+  const observedAt = new Date(createdAtMs + (90 * 60 * 1000)).toISOString();
+  const finalizedAt = new Date(Date.parse(observedAt) - 30_000).toISOString();
   const stateStore = new MemoryStateStore();
   const eventBus = new EventBus({ eventStore: stateStore });
   const profiles = new Map([[WORKER, {
@@ -361,7 +369,7 @@ test("local external-posting e2e signs issued calldata, watches funding, and rea
     stateStore,
     platformService,
     config: postingConfig("open"),
-    now: () => new Date(CREATED_AT)
+    now: () => new Date(createdAt)
   });
   const verifier = new VerifierService(platformService, stateStore);
 
@@ -403,16 +411,16 @@ test("local external-posting e2e signs issued calldata, watches funding, and rea
     eventBus,
     {
       feedUrl: "http://indexer.local/escrow/job-creations",
-      now: () => new Date("2026-07-20T01:00:30.000Z"),
+      now: () => new Date(observedAt),
       fetchImpl: async () => ({
         ok: true,
         async json() {
           return {
-            items: [matchingCreation(draft)],
+            items: [matchingCreation(draft, { fundedAt })],
             nextCursor: "finalized-event-1234",
             meta: {
               finalizedBlockNumber: "1234",
-              finalizedBlockTimestamp: "2026-07-20T01:00:00.000Z",
+              finalizedBlockTimestamp: finalizedAt,
               caughtUp: true
             }
           };
