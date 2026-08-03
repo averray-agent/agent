@@ -24,8 +24,6 @@ import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
-import { findRawSecretHeuristics } from './env-template-secret-heuristics.mjs';
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const REPO_ROOT = join(__dirname, '..', '..');
@@ -91,6 +89,15 @@ const VAULT_TO_RUNTIME = {
   'mainnet-smoke': ['smoke'],
 };
 
+// Heuristics for "this looks like a raw secret pasted into the template".
+// Not exhaustive — caller should still review by eye.
+const RAW_SECRET_HEURISTICS = [
+  { name: 'hex private key (32+ bytes)', re: /=[\s]*0x[a-fA-F0-9]{60,}[\s]*$/m },
+  { name: 'JWT', re: /=[\s]*ey[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}/m },
+  { name: 'long base64-ish secret', re: /=[\s]*[A-Za-z0-9+/=]{60,}[\s]*$/m },
+  { name: 'API-key prefix', re: /=[\s]*(sk_live_|sk_test_|re_|pk_live_|ghp_|github_pat_)[A-Za-z0-9_-]{8,}/m },
+];
+
 const errors = [];
 const warnings = [];
 
@@ -136,20 +143,19 @@ for (const { runtime, path: relPath } of TEMPLATES) {
       continue;
     }
 
-    // Active KEY=value lines
-    const m = line.match(/^([A-Z][A-Z0-9_]*)\s*=\s*(.*)$/);
-    const varName = m?.[1];
-    const value = m?.[2];
-
-    // Heuristic: raw secret in plaintext. Public Substrate AccountId32 values
-    // are distinguished semantically by their key suffix and exact byte shape.
-    for (const name of findRawSecretHeuristics(line, { varName, value })) {
-      err(relPath, lineNo, `looks like a raw ${name} — should be an op:// reference, not a literal`);
+    // Heuristic: raw secret in plaintext
+    for (const { name, re } of RAW_SECRET_HEURISTICS) {
+      if (re.test(line)) {
+        err(relPath, lineNo, `looks like a raw ${name} — should be an op:// reference, not a literal`);
+      }
     }
 
+    // Active KEY=value lines
+    const m = line.match(/^([A-Z][A-Z0-9_]*)\s*=\s*(.*)$/);
     if (!m) {
       continue; // not a KEY=value line, skip
     }
+    const [, varName, value] = m;
 
     // If the value is an op:// reference, validate structure
     if (value.startsWith('op://')) {

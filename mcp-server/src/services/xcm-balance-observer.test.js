@@ -13,6 +13,8 @@ const AUSDC = "0x2ec4884088d84e5c2970a034732e5209b0acfa93";
 const HYD_SUBSTRATE = "wss://hydration-rpc.n.dwellir.com";
 const HYD_EVM = "https://rpc.hydradx.cloud";
 const POSTAGE = "15XbeapZyWWEZdDCLpxzNhryKj2MsE8rnFUW9cPydXfgSMAK";
+const MAINNET_ACCOUNT = "0x98f0033e26aa4ecf2899e6d09237d40d29fcb68e64d22a621520bde1123564ac";
+const MAINNET_ACCOUNT_SS58 = "14TXaUTyTRiZKGG1zGrzzfc7oUGq2pcEGKNoWXLtJL5TTJbZ";
 
 const fixture = JSON.parse(await readFile(
   new URL("./fixtures/hydration-bank-round-trip.json", import.meta.url),
@@ -36,6 +38,27 @@ test("VenueBalanceReader target binds Hydration aUSDC to truncate20(AccountId32)
   const normalized = normalizeVenueBalanceTarget(targetFor("aUsdc"));
   assert.equal(normalized.evmAccount, fixture.convertedH160);
   assert.equal(normalized.contract, fixture.aUsdcContract);
+});
+
+test("SS58 Hydration account normalizes to the proven AccountId32 and truncate20 address", () => {
+  const position = normalizeVenueBalanceTarget({
+    ledger: "erc20",
+    endpoint: HYD_EVM,
+    chainId: 222222,
+    account: MAINNET_ACCOUNT_SS58,
+    accountTransform: "hydration_truncate20",
+    contract: AUSDC
+  });
+  const float = normalizeVenueBalanceTarget({
+    ledger: "substrate_tokens",
+    endpoint: HYD_SUBSTRATE,
+    account: MAINNET_ACCOUNT_SS58,
+    assetId: 22
+  });
+
+  assert.equal(position.account, MAINNET_ACCOUNT);
+  assert.equal(float.account, MAINNET_ACCOUNT);
+  assert.equal(position.evmAccount, "0x98f0033e26aa4ecf2899e6d09237d40d29fcb68e");
 });
 
 test("enabled Substrate read dynamically loads @polkadot/api before querying Tokens.accounts", async () => {

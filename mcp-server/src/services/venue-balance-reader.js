@@ -1,3 +1,4 @@
+import { decodeAddress } from "@polkadot/util-crypto";
 import { Contract, JsonRpcProvider } from "ethers";
 
 import { ValidationError } from "../core/errors.js";
@@ -97,14 +98,15 @@ export function normalizeVenueBalanceTarget(target = {}) {
   const ledger = String(target.ledger ?? "").trim().toLowerCase();
   const endpoint = requireEndpoint(target.endpoint);
   if (ledger === "substrate_tokens") {
-    if (!ACCOUNT_ID32_RE.test(String(target.account ?? ""))) {
-      throw new ValidationError("substrate_tokens target.account must be a 32-byte AccountId.");
-    }
+    const account = normalizeAccountId32(
+      target.account,
+      "substrate_tokens target.account must be a 32-byte AccountId or SS58 address."
+    );
     const assetId = normalizeAssetId(target.assetId ?? target.asset);
     return {
       ledger,
       endpoint,
-      account: String(target.account).toLowerCase(),
+      account,
       assetId
     };
   }
@@ -129,12 +131,14 @@ export function normalizeVenueBalanceTarget(target = {}) {
     }
     const account = String(target.account ?? "");
     const accountTransform = String(target.accountTransform ?? "none").trim().toLowerCase();
+    let normalizedAccount = account;
     let evmAccount;
     if (accountTransform === "hydration_truncate20") {
-      if (!ACCOUNT_ID32_RE.test(account)) {
-        throw new ValidationError("hydration_truncate20 requires a 32-byte AccountId.");
-      }
-      evmAccount = `0x${account.slice(2, 42)}`.toLowerCase();
+      normalizedAccount = normalizeAccountId32(
+        account,
+        "hydration_truncate20 requires a 32-byte AccountId or SS58 address."
+      );
+      evmAccount = `0x${normalizedAccount.slice(2, 42)}`;
     } else if (accountTransform === "none" && ADDRESS_RE.test(account)) {
       evmAccount = account.toLowerCase();
     } else {
@@ -145,7 +149,7 @@ export function normalizeVenueBalanceTarget(target = {}) {
     return {
       ledger,
       endpoint,
-      account: account.toLowerCase(),
+      account: normalizedAccount.toLowerCase(),
       accountTransform,
       evmAccount,
       contract: String(target.contract ?? target.asset).toLowerCase(),
@@ -156,6 +160,22 @@ export function normalizeVenueBalanceTarget(target = {}) {
   throw new ValidationError(
     'balance target ledger must be "substrate_tokens", "substrate_system", or "erc20".'
   );
+}
+
+function normalizeAccountId32(raw, message) {
+  const account = String(raw ?? "");
+  if (ACCOUNT_ID32_RE.test(account)) return account.toLowerCase();
+  if (SS58_RE.test(account)) {
+    try {
+      const decoded = decodeAddress(account);
+      if (decoded.length === 32) {
+        return `0x${Buffer.from(decoded).toString("hex")}`;
+      }
+    } catch {
+      // Fall through to the ledger-specific validation error below.
+    }
+  }
+  throw new ValidationError(message);
 }
 
 function loadPolkadotApi() {

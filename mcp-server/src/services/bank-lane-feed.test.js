@@ -9,11 +9,13 @@ import {
   describeBalanceTarget,
   loadBankLaneFeedConfig
 } from "./bank-lane-feed.js";
+import { normalizeVenueBalanceTarget } from "./venue-balance-reader.js";
 
 const ACCOUNT = "0x98f0033e26aa4ecf2899e6d09237d40d29fcb68e64d22a621520bde1123564ac";
 const AUSDC = "0x2ec4884088d84e5c2970a034732e5209b0acfa93";
 const OTHER_AUSDC = "0x1111111111111111111111111111111111111111";
 const POSTAGE = "15XbeapZyWWEZdDCLpxzNhryKj2MsE8rnFUW9cPydXfgSMAK";
+const ACCOUNT_SS58 = "14TXaUTyTRiZKGG1zGrzzfc7oUGq2pcEGKNoWXLtJL5TTJbZ";
 const BASE = Date.parse("2026-08-03T14:00:00.000Z");
 
 function targets(positionContract = AUSDC) {
@@ -263,10 +265,20 @@ test("mainnet feed defaults off while retaining the deployed Bank targets for ex
   });
   const strategy = manifest.strategies.find((item) => item.id === "HYDRATION_USDC_V1");
 
+  assert.equal(env.BANK_LANE_FEED_HYDRATION_ACCOUNT_ID32, ACCOUNT_SS58);
   assert.equal(config.enabled, true);
+  assert.equal(config.targets.position.account, ACCOUNT_SS58);
   assert.equal(
-    config.targets.position.account,
+    normalizeVenueBalanceTarget(config.targets.position).account,
     manifest.bankXcmV2Deployment.convertedAccountId32
+  );
+  assert.equal(
+    normalizeVenueBalanceTarget(config.targets.float).account,
+    manifest.bankXcmV2Deployment.convertedAccountId32
+  );
+  assert.equal(
+    describeBalanceTarget(config.targets.position),
+    `erc20:${strategy.remote.aUsdcContract}.balanceOf(0x98f0033e26aa4ecf2899e6d09237d40d29fcb68e)`
   );
   assert.equal(config.targets.position.contract, strategy.remote.aUsdcContract);
   assert.equal(config.targets.float.assetId, String(strategy.remote.assetId));
