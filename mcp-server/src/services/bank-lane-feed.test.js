@@ -243,7 +243,7 @@ test("Bank feed config binds the three exact ledgers and stays inert when disabl
   );
 });
 
-test("mainnet feed configuration is pinned to the deployed Bank targets", async () => {
+test("mainnet feed defaults off while retaining the deployed Bank targets for explicit enablement", async () => {
   const [template, manifestRaw] = await Promise.all([
     readFile(new URL("../../../deploy/backend.mainnet.env.template", import.meta.url), "utf8"),
     readFile(new URL("../../../deployments/mainnet.json", import.meta.url), "utf8")
@@ -256,7 +256,11 @@ test("mainnet feed configuration is pinned to the deployed Bank targets", async 
       return [line.slice(0, separator), line.slice(separator + 1)];
     }));
   const manifest = JSON.parse(manifestRaw);
-  const config = loadBankLaneFeedConfig(env);
+  assert.equal(env.BANK_LANE_FEED_ENABLED, "false");
+  const config = loadBankLaneFeedConfig({
+    ...env,
+    BANK_LANE_FEED_ENABLED: "true"
+  });
   const strategy = manifest.strategies.find((item) => item.id === "HYDRATION_USDC_V1");
 
   assert.equal(config.enabled, true);
