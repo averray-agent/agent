@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "kind": "averray.bankXcmV2DeploymentEvidence",
+  "profile": "mainnet",
+  "sourceCommit": "89235c20498efcf659b41de8821bd4e14baecfc7",
+  "deployer": "0x9Ab8531FBb0948C542a31298FD61335f30064239",
+  "verifiedAt": "2026-08-03T12:26:40.095Z",
+  "wrapper": {
+    "address": "0xc846eE73e49A748e59C7Ac8f8742F542a552D24C",
+    "txHash": "0x75cdd54c7cd08e17df155a2947ad3f122db0dd34c05bea82c99bcae2aa89de27",
+    "blockNumber": 19009586
+  },
+  "adapter": {
+    "address": "0x5eaF58a3e2819A26B66822529aD92fcec107cc98",
+    "txHash": "0x01bf43ba2a72195c69e6454c0d20ae2c900a9bee5a15e6eace676d6f73303110",
+    "blockNumber": 19009588
+  },
+  "configurationMultisigExecTx": null,
+  "convertedAccountId32": "0x98f0033e26aa4ecf2899e6d09237d40d29fcb68e64d22a621520bde1123564ac",
+  "conversionEvidence": {
+    "artifact": "docs/evidence/mainnet-bank-xcm-v2-conversion-2026-08-03.json",
+    "endpointCount": 2
+  },
+  "dryRunEvidence": []
+}
