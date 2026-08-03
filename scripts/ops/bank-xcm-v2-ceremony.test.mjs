@@ -17,7 +17,15 @@ import {
 } from "./bank-xcm-v2-ceremony-lib.mjs";
 import { assertDryRunEvidence } from "./prepare-bank-xcm-v2-multisig.mjs";
 import { convertOnEndpoint } from "./capture-hydration-wrapper-origin.mjs";
-import { buildDeploymentPlan } from "./deploy-bank-xcm-v2.mjs";
+import {
+  REVIEWED_WRAPPER_V21_CREATION_CODE_HASH,
+  WRAPPER_V21_VERSION_SELECTOR,
+  assertReviewedWrapperV21Artifact,
+  assertSourceCheckout,
+  buildDeploymentPlan,
+  probeWrapperV21Selector,
+  rebuildFoundryArtifacts
+} from "./deploy-bank-xcm-v2.mjs";
 import { buildManifestCandidate } from "./record-bank-xcm-v2-deployment.mjs";
 
 const WRAPPER = "0x5991a2df15a8f6a256d3ec51e99254cd3fb576a9";
@@ -235,6 +243,70 @@ test("v2.1 deployment replacement is explicit and records the pair it supersedes
   assert.equal(plan.replacement.wrapper, getAddress(WRAPPER));
   assert.equal(plan.replacement.adapter, getAddress(ADAPTER));
   assert.notEqual(plan.wrapper.address, plan.replacement.wrapper);
+});
+
+test("deployment provenance refuses a mismatched HEAD or dirty checkout", () => {
+  const sourceCommit = "a".repeat(40);
+  assert.equal(assertSourceCheckout({ sourceCommit, headCommit: sourceCommit, porcelain: "" }), true);
+  assert.throws(
+    () => assertSourceCheckout({ sourceCommit, headCommit: "b".repeat(40), porcelain: "" }),
+    /does not match --source-commit/u
+  );
+  assert.throws(
+    () => assertSourceCheckout({ sourceCommit, headCommit: sourceCommit, porcelain: " M contracts\/XcmWrapperV2.sol\n" }),
+    /checkout is dirty/u
+  );
+});
+
+test("deployment rebuilds Foundry artifacts with a forced clean compile", () => {
+  let invocation;
+  const runner = (...args) => { invocation = args; };
+  assert.equal(rebuildFoundryArtifacts({ runner }), true);
+  assert.equal(invocation[0], "forge");
+  assert.deepEqual(invocation[1], ["build", "--skip", "test", "--force"]);
+  assert.equal(invocation[2].stdio, "inherit");
+});
+
+test("deployment artifact gate pins the reviewed v2.1 creation hash and recovery selector", () => {
+  const abi = [
+    "function dispatchRecoveryHome(uint256,uint64,bytes,bytes) returns(bytes32)",
+    "function previewRecoveryHomeId(uint256,uint64) view returns(bytes32)"
+  ];
+  const observed = assertReviewedWrapperV21Artifact({
+    abi,
+    evidence: { creationCodeHash: REVIEWED_WRAPPER_V21_CREATION_CODE_HASH }
+  });
+  assert.equal(observed.previewRecoveryHomeIdSelector, WRAPPER_V21_VERSION_SELECTOR);
+  assert.throws(
+    () => assertReviewedWrapperV21Artifact({ abi, evidence: { creationCodeHash: `sha256:${"00".repeat(32)}` } }),
+    /does not match reviewed v2.1/u
+  );
+  assert.throws(
+    () => assertReviewedWrapperV21Artifact({
+      abi: ["function dispatchRecoveryHome(uint256,uint64,bytes,bytes) returns(bytes32)"],
+      evidence: { creationCodeHash: REVIEWED_WRAPPER_V21_CREATION_CODE_HASH }
+    }),
+    /does not expose the reviewed v2.1/u
+  );
+});
+
+test("post-deploy gate probes the hard-coded v2.1 selector instead of trusting the artifact", async () => {
+  let request;
+  const response = `0x${"12".repeat(32)}`;
+  const observed = await probeWrapperV21Selector({
+    call: async (value) => { request = value; return response; }
+  }, WRAPPER);
+  assert.equal(request.to, getAddress(WRAPPER));
+  assert.equal(request.data.slice(0, 10), WRAPPER_V21_VERSION_SELECTOR);
+  assert.equal(observed.response, response);
+  await assert.rejects(
+    probeWrapperV21Selector({ call: async () => { throw new Error("execution reverted"); } }, WRAPPER),
+    /does not execute v2.1 selector/u
+  );
+  await assert.rejects(
+    probeWrapperV21Selector({ call: async () => `0x${"00".repeat(32)}` }, WRAPPER),
+    /invalid v2.1 selector response/u
+  );
 });
 
 test("paused configuration and arm packets are deliberately separate", () => {
