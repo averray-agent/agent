@@ -1,0 +1,1630 @@
+{
+  "schemaVersion": 1,
+  "kind": "averray.bankXcmV2DryRunRawEvidence",
+  "capturedAt": "2026-08-03T13:41:43.519Z",
+  "endpoints": {
+    "assetHub": "wss://asset-hub-polkadot-rpc.n.dwellir.com",
+    "hydration": "wss://hydration-rpc.n.dwellir.com",
+    "hydrationEvmObserver": "https://rpc.hydradx.cloud"
+  },
+  "runtimeBlocks": {
+    "assetHub": 19011799,
+    "hydration": 13443555
+  },
+  "observerTargets": {
+    "asset22": {
+      "endpoint": "wss://hydration-rpc.n.dwellir.com",
+      "reader": "Tokens.accounts",
+      "account": "0x98f0033e26aa4ecf2899e6d09237d40d29fcb68e64d22a621520bde1123564ac",
+      "assetId": 22,
+      "observedRaw": "0",
+      "asOfBlock": 13443561
+    },
+    "aUsdc": {
+      "endpoint": "https://rpc.hydradx.cloud",
+      "reader": "ERC20.balanceOf",
+      "contract": "0x2ec4884088D84E5C2970A034732E5209b0aCFA93",
+      "accountTransform": "truncate20",
+      "account": "0x98f0033E26AA4ecf2899e6D09237d40d29FCB68E",
+      "observedRaw": "0",
+      "asOfBlock": 13443561
+    }
+  },
+  "liveConfiguration": {
+    "dispatchPaused": true,
+    "hydrationAccountId32": "0x98f0033e26aa4ecf2899e6d09237d40d29fcb68e64d22a621520bde1123564ac",
+    "operator": "0x5a6836c6D4d293F6E5377E6c28054F4171915813",
+    "strategyAdapter": "0x5eaF58a3e2819A26B66822529aD92fcec107cc98"
+  },
+  "feeQuotes": {
+    "depositSell": {
+      "asOfBlock": 13443555,
+      "weight": {
+        "refTime": "16,768,481,536",
+        "proofSize": "161,328"
+      },
+      "feeRaw": "20201",
+      "raw": {
+        "weight": {
+          "Ok": {
+            "refTime": "16,768,481,536",
+            "proofSize": "161,328"
+          }
+        },
+        "fee": {
+          "Ok": "20,201"
+        }
+      }
+    },
+    "withdrawSell": {
+      "asOfBlock": 13443556,
+      "weight": {
+        "refTime": "16,768,481,536",
+        "proofSize": "161,328"
+      },
+      "feeRaw": "20201",
+      "raw": {
+        "weight": {
+          "Ok": {
+            "refTime": "16,768,481,536",
+            "proofSize": "161,328"
+          }
+        },
+        "fee": {
+          "Ok": "20,201"
+        }
+      }
+    },
+    "withdrawPlanningOnly": {
+      "asOfBlock": 13443555,
+      "weight": {
+        "refTime": "16,768,481,536",
+        "proofSize": "161,328"
+      },
+      "feeRaw": "20201",
+      "raw": {
+        "weight": {
+          "Ok": {
+            "refTime": "16,768,481,536",
+            "proofSize": "161,328"
+          }
+        },
+        "fee": {
+          "Ok": "20,201"
+        }
+      },
+      "usedInFinalMessage": false,
+      "reason": "Superseded after the preceding deposit advanced the sequential fork state."
+    },
+    "depositFundingRemote": {
+      "asOfBlock": 13443555,
+      "weight": {
+        "refTime": "500,000,000",
+        "proofSize": "0"
+      },
+      "feeRaw": "602",
+      "raw": {
+        "weight": {
+          "Ok": {
+            "refTime": "500,000,000",
+            "proofSize": "0"
+          }
+        },
+        "fee": {
+          "Ok": "602"
+        }
+      }
+    },
+    "withdrawHomeRemote": {
+      "asOfBlock": 19011799,
+      "weight": {
+        "refTime": "459,753,000",
+        "proofSize": "10,943"
+      },
+      "feeRaw": "677",
+      "raw": {
+        "weight": {
+          "Ok": {
+            "refTime": "459,753,000",
+            "proofSize": "10,943"
+          }
+        },
+        "fee": {
+          "Ok": "677"
+        }
+      }
+    },
+    "units": "raw asset-22 / Asset-Hub asset-1337 as applicable"
+  },
+  "ephemeralForkState": {
+    "reason": "State-capable rehearsal only; exact message bytes are unchanged and no transaction is signed or broadcast.",
+    "assetHub": {
+      "wrapperAsset1337Raw": "150000",
+      "wrapperNativeFreeRaw": "10000000000",
+      "liveWrapperNativeFreeRaw": "100000000",
+      "liveWrapperAsset1337Raw": "0",
+      "note": "Native fee headroom was staged ephemerally because the live wrapper image currently holds only 0.01 DOT; real dust execution must fund the wrapper fee balance first."
+    },
+    "hydration": {
+      "convertedAsset22Raw": "500000",
+      "convertedNativeRaw": "1000000000000000000",
+      "lifecycleStateAppliedOnlyBetweenDryRuns": true
+    }
+  },
+  "exactMessages": [
+    {
+      "label": "deposit_funding",
+      "chain": "asset_hub",
+      "destination": "0x050000",
+      "message": "0x051000040002043205e51400c22709002b010e00040002043205e51400c2270900010100c91f0813010300a10f043205e51400c2270900000d0102040001010098f0033e26aa4ecf2899e6d09237d40d29fcb68e64d22a621520bde1123564ac2cb609f4d875e0c6f4f4b1dddd90efd687215d1ac9ecd90d0de51b9304f57ecaac",
+      "requestId": "0xb609f4d875e0c6f4f4b1dddd90efd687215d1ac9ecd90d0de51b9304f57ecaac",
+      "messageHash": "0x0b8878cd3e2926ed648ff987b56c1bc729fdea663c874c3ea870ce2b97462462"
+    },
+    {
+      "label": "deposit_sell",
+      "chain": "hydration",
+      "destination": "0x05010100c91f",
+      "message": "0x05180004010300a10f043205e51400a63b010013010300a10f043205e51400a63b0100000601010700c817a80482841e00d0430016000000eb030000a086010000000000000000000000000000000000000000000000000000000000040416000000eb030000140d0102040001010098f0033e26aa4ecf2899e6d09237d40d29fcb68e64d22a621520bde1123564ac2cb609f4d875e0c6f4f4b1dddd90efd687215d1ac9ecd90d0de51b9304f57ecaac",
+      "requestId": "0xb609f4d875e0c6f4f4b1dddd90efd687215d1ac9ecd90d0de51b9304f57ecaac",
+      "messageHash": "0x989746a81b6f85dba58b47f8bdfddb2107478575d331a6f4dba2c3962a595573"
+    },
+    {
+      "label": "withdraw_sell",
+      "chain": "hydration",
+      "destination": "0x05010100c91f",
+      "message": "0x05180004010300a10f043205e51400a63b010013010300a10f043205e51400a63b0100000601010700c817a80482841e00d04300eb03000016000000a0860100000000000000000000000000000000000000000000000000000000000404eb03000016000000140d0102040001010098f0033e26aa4ecf2899e6d09237d40d29fcb68e64d22a621520bde1123564ac2cc3a120f46f9c29e16f49405cfef630ba8959eddb7de9de90f422ff3d03adf9fc",
+      "requestId": "0xc3a120f46f9c29e16f49405cfef630ba8959eddb7de9de90f422ff3d03adf9fc",
+      "messageHash": "0xffb8b0ed21a0b4f8124617d0797c246641e223676cd49fafc40c123e7ab1cabc"
+    },
+    {
+      "label": "withdraw_home",
+      "chain": "hydration",
+      "destination": "0x05010100c91f",
+      "message": "0x05140004010300a10f043205e51400821a060013010300a10f043205e51400821a0600001410010204010100a10f08130002043205e51400950a000d01020400010100c846ee73e49a748e59c7ac8f8742f542a552d24ceeeeeeeeeeeeeeeeeeeeeeee2cc3a120f46f9c29e16f49405cfef630ba8959eddb7de9de90f422ff3d03adf9fc",
+      "requestId": "0xc3a120f46f9c29e16f49405cfef630ba8959eddb7de9de90f422ff3d03adf9fc",
+      "messageHash": "0x40fff2e79862910a700ab69af95c51bb50b8b8b7958727c504f3f66e307bfbd8"
+    }
+  ],
+  "legs": {
+    "deposit_funding": {
+      "local": {
+        "Ok": {
+          "executionResult": {
+            "Ok": {
+              "actualWeight": {
+                "refTime": "596,068,000",
+                "proofSize": "12,221"
+              },
+              "paysFee": "Yes"
+            }
+          },
+          "emittedEvents": [
+            {
+              "method": "Withdrawn",
+              "section": "assets",
+              "index": "0x3219",
+              "data": {
+                "assetId": "1,337",
+                "who": "15XbeapZyWWEZdDCLpxzNhryKj2MsE8rnFUW9cPydXfgSMAK",
+                "amount": "150,000"
+              }
+            },
+            {
+              "method": "Deposited",
+              "section": "assets",
+              "index": "0x3218",
+              "data": {
+                "assetId": "1,337",
+                "who": "13cKp89Uh2yWgTG28JA1QEvPUMjEPKejqkjHKf9zqLiFKjH6",
+                "amount": "150,000"
+              }
+            },
+            {
+              "method": "Withdraw",
+              "section": "balances",
+              "index": "0x0a08",
+              "data": {
+                "who": "15XbeapZyWWEZdDCLpxzNhryKj2MsE8rnFUW9cPydXfgSMAK",
+                "amount": "305,450,000"
+              }
+            },
+            {
+              "method": "Deposit",
+              "section": "balances",
+              "index": "0x0a07",
+              "data": {
+                "who": "13UVJyLkAxdQn6zM3Gz49SmCLi8SZW3bdtm7DTY29ScavqW2",
+                "amount": "305,450,000"
+              }
+            },
+            {
+              "method": "XcmpMessageSent",
+              "section": "xcmpQueue",
+              "index": "0x1e00",
+              "data": {
+                "messageHash": "0xdf5730e226d01e989c6722a295d97c96877743ad912b8cd3c783f8cb244eb6a7"
+              }
+            },
+            {
+              "method": "Sent",
+              "section": "polkadotXcm",
+              "index": "0x1f01",
+              "data": {
+                "origin": {
+                  "parents": "0",
+                  "interior": {
+                    "X1": [
+                      {
+                        "AccountId32": {
+                          "network": "Polkadot",
+                          "id": "0xc846ee73e49a748e59c7ac8f8742f542a552d24ceeeeeeeeeeeeeeeeeeeeeeee"
+                        }
+                      }
+                    ]
+                  }
+                },
+                "destination": {
+                  "parents": "1",
+                  "interior": {
+                    "X1": [
+                      {
+                        "Parachain": "2,034"
+                      }
+                    ]
+                  }
+                },
+                "message": [],
+                "messageId": "0xb609f4d875e0c6f4f4b1dddd90efd687215d1ac9ecd90d0de51b9304f57ecaac"
+              }
+            },
+            {
+              "method": "Attempted",
+              "section": "polkadotXcm",
+              "index": "0x1f00",
+              "data": {
+                "outcome": {
+                  "Complete": {
+                    "used": {
+                      "refTime": "576,698,000",
+                      "proofSize": "10,736"
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "localXcm": {
+            "V5": [
+              {
+                "WithdrawAsset": [
+                  {
+                    "id": {
+                      "parents": "0",
+                      "interior": {
+                        "X2": [
+                          {
+                            "PalletInstance": "50"
+                          },
+                          {
+                            "GeneralIndex": "1,337"
+                          }
+                        ]
+                      }
+                    },
+                    "fun": {
+                      "Fungible": "150,000"
+                    }
+                  }
+                ]
+              },
+              {
+                "SetFeesMode": {
+                  "jitWithdraw": true
+                }
+              },
+              {
+                "DepositReserveAsset": {
+                  "assets": {
+                    "Definite": [
+                      {
+                        "id": {
+                          "parents": "0",
+                          "interior": {
+                            "X2": [
+                              {
+                                "PalletInstance": "50"
+                              },
+                              {
+                                "GeneralIndex": "1,337"
+                              }
+                            ]
+                          }
+                        },
+                        "fun": {
+                          "Fungible": "150,000"
+                        }
+                      }
+                    ]
+                  },
+                  "dest": {
+                    "parents": "1",
+                    "interior": {
+                      "X1": [
+                        {
+                          "Parachain": "2,034"
+                        }
+                      ]
+                    }
+                  },
+                  "xcm": [
+                    {
+                      "BuyExecution": {
+                        "fees": {
+                          "id": {
+                            "parents": "1",
+                            "interior": {
+                              "X3": [
+                                {
+                                  "Parachain": "1,000"
+                                },
+                                {
+                                  "PalletInstance": "50"
+                                },
+                                {
+                                  "GeneralIndex": "1,337"
+                                }
+                              ]
+                            }
+                          },
+                          "fun": {
+                            "Fungible": "150,000"
+                          }
+                        },
+                        "weightLimit": "Unlimited"
+                      }
+                    },
+                    {
+                      "DepositAsset": {
+                        "assets": {
+                          "Wild": {
+                            "AllCounted": "1"
+                          }
+                        },
+                        "beneficiary": {
+                          "parents": "0",
+                          "interior": {
+                            "X1": [
+                              {
+                                "AccountId32": {
+                                  "network": null,
+                                  "id": "0x98f0033e26aa4ecf2899e6d09237d40d29fcb68e64d22a621520bde1123564ac"
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "SetTopic": "0xb609f4d875e0c6f4f4b1dddd90efd687215d1ac9ecd90d0de51b9304f57ecaac"
+              }
+            ]
+          },
+          "forwardedXcms": [
+            [
+              {
+                "V5": {
+                  "parents": "1",
+                  "interior": {
+                    "X1": [
+                      {
+                        "Parachain": "2,034"
+                      }
+                    ]
+                  }
+                }
+              },
+              [
+                {
+                  "V5": [
+                    {
+                      "ReserveAssetDeposited": [
+                        {
+                          "id": {
+                            "parents": "1",
+                            "interior": {
+                              "X3": [
+                                {
+                                  "Parachain": "1,000"
+                                },
+                                {
+                                  "PalletInstance": "50"
+                                },
+                                {
+                                  "GeneralIndex": "1,337"
+                                }
+                              ]
+                            }
+                          },
+                          "fun": {
+                            "Fungible": "150,000"
+                          }
+                        }
+                      ]
+                    },
+                    "ClearOrigin",
+                    {
+                      "BuyExecution": {
+                        "fees": {
+                          "id": {
+                            "parents": "1",
+                            "interior": {
+                              "X3": [
+                                {
+                                  "Parachain": "1,000"
+                                },
+                                {
+                                  "PalletInstance": "50"
+                                },
+                                {
+                                  "GeneralIndex": "1,337"
+                                }
+                              ]
+                            }
+                          },
+                          "fun": {
+                            "Fungible": "150,000"
+                          }
+                        },
+                        "weightLimit": "Unlimited"
+                      }
+                    },
+                    {
+                      "DepositAsset": {
+                        "assets": {
+                          "Wild": {
+                            "AllCounted": "1"
+                          }
+                        },
+                        "beneficiary": {
+                          "parents": "0",
+                          "interior": {
+                            "X1": [
+                              {
+                                "AccountId32": {
+                                  "network": null,
+                                  "id": "0x98f0033e26aa4ecf2899e6d09237d40d29fcb68e64d22a621520bde1123564ac"
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "SetTopic": "0xb609f4d875e0c6f4f4b1dddd90efd687215d1ac9ecd90d0de51b9304f57ecaac"
+                    }
+                  ]
+                }
+              ]
+            ]
+          ]
+        }
+      },
+      "forwarded": {
+        "v5": [
+          {
+            "reserveAssetDeposited": [
+              {
+                "id": {
+                  "parents": 1,
+                  "interior": {
+                    "x3": [
+                      {
+                        "parachain": 1000
+                      },
+                      {
+                        "palletInstance": 50
+                      },
+                      {
+                        "generalIndex": 1337
+                      }
+                    ]
+                  }
+                },
+                "fun": {
+                  "fungible": 150000
+                }
+              }
+            ]
+          },
+          {
+            "clearOrigin": null
+          },
+          {
+            "buyExecution": {
+              "fees": {
+                "id": {
+                  "parents": 1,
+                  "interior": {
+                    "x3": [
+                      {
+                        "parachain": 1000
+                      },
+                      {
+                        "palletInstance": 50
+                      },
+                      {
+                        "generalIndex": 1337
+                      }
+                    ]
+                  }
+                },
+                "fun": {
+                  "fungible": 150000
+                }
+              },
+              "weightLimit": {
+                "unlimited": null
+              }
+            }
+          },
+          {
+            "depositAsset": {
+              "assets": {
+                "wild": {
+                  "allCounted": 1
+                }
+              },
+              "beneficiary": {
+                "parents": 0,
+                "interior": {
+                  "x1": [
+                    {
+                      "accountId32": {
+                        "network": null,
+                        "id": "0x98f0033e26aa4ecf2899e6d09237d40d29fcb68e64d22a621520bde1123564ac"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "setTopic": "0xb609f4d875e0c6f4f4b1dddd90efd687215d1ac9ecd90d0de51b9304f57ecaac"
+          }
+        ]
+      },
+      "remote": {
+        "Ok": {
+          "executionResult": {
+            "Complete": {
+              "used": {
+                "refTime": "500,000,000",
+                "proofSize": "0"
+              }
+            }
+          },
+          "emittedEvents": [
+            {
+              "method": "Deposited",
+              "section": "tokens",
+              "index": "0x4d0a",
+              "data": {
+                "currencyId": "22",
+                "who": "14TXaUTyTRiZKGG1zGrzzfc7oUGq2pcEGKNoWXLtJL5TTJbZ",
+                "amount": "149,398"
+              }
+            },
+            {
+              "method": "Deposited",
+              "section": "currencies",
+              "index": "0x4f02",
+              "data": {
+                "currencyId": "22",
+                "who": "14TXaUTyTRiZKGG1zGrzzfc7oUGq2pcEGKNoWXLtJL5TTJbZ",
+                "amount": "149,398"
+              }
+            },
+            {
+              "method": "Deposited",
+              "section": "tokens",
+              "index": "0x4d0a",
+              "data": {
+                "currencyId": "22",
+                "who": "13UVJyLnbVp9RBZYFwFGyDvVd1y27Tt8tkntv6Q7JVPhFsTB",
+                "amount": "602"
+              }
+            },
+            {
+              "method": "Deposited",
+              "section": "currencies",
+              "index": "0x4f02",
+              "data": {
+                "currencyId": "22",
+                "who": "13UVJyLnbVp9RBZYFwFGyDvVd1y27Tt8tkntv6Q7JVPhFsTB",
+                "amount": "602"
+              }
+            }
+          ],
+          "forwardedXcms": []
+        }
+      }
+    },
+    "deposit_sell": {
+      "dryRun": {
+        "Ok": {
+          "executionResult": {
+            "Complete": {
+              "used": {
+                "refTime": "16,768,481,536",
+                "proofSize": "161,328"
+              }
+            }
+          },
+          "emittedEvents": [
+            {
+              "method": "Withdrawn",
+              "section": "tokens",
+              "index": "0x4d08",
+              "data": {
+                "currencyId": "22",
+                "who": "14TXaUTyTRiZKGG1zGrzzfc7oUGq2pcEGKNoWXLtJL5TTJbZ",
+                "amount": "20,201"
+              }
+            },
+            {
+              "method": "Withdrawn",
+              "section": "currencies",
+              "index": "0x4f03",
+              "data": {
+                "currencyId": "22",
+                "who": "14TXaUTyTRiZKGG1zGrzzfc7oUGq2pcEGKNoWXLtJL5TTJbZ",
+                "amount": "20,201"
+              }
+            },
+            {
+              "method": "Endowed",
+              "section": "tokens",
+              "index": "0x4d00",
+              "data": {
+                "currencyId": "22",
+                "who": "13UVJyLnzJK7QHxrrjLxwr58Lds4GR6Z37LxLtYrDm3qa5Je",
+                "amount": "100,000"
+              }
+            },
+            {
+              "method": "Transfer",
+              "section": "tokens",
+              "index": "0x4d02",
+              "data": {
+                "currencyId": "22",
+                "from": "14TXaUTyTRiZKGG1zGrzzfc7oUGq2pcEGKNoWXLtJL5TTJbZ",
+                "to": "13UVJyLnzJK7QHxrrjLxwr58Lds4GR6Z37LxLtYrDm3qa5Je",
+                "amount": "100,000"
+              }
+            },
+            {
+              "method": "Transfer",
+              "section": "tokens",
+              "index": "0x4d02",
+              "data": {
+                "currencyId": "22",
+                "from": "13UVJyLnzJK7QHxrrjLxwr58Lds4GR6Z37LxLtYrDm3qa5Je",
+                "to": "12ZuLmUQJCotM4b84PGdWWbcW8FNJtU8osragXNCbNky9MW5",
+                "amount": "100,000"
+              }
+            },
+            {
+              "method": "Transferred",
+              "section": "currencies",
+              "index": "0x4f00",
+              "data": {
+                "currencyId": "22",
+                "from": "13UVJyLnzJK7QHxrrjLxwr58Lds4GR6Z37LxLtYrDm3qa5Je",
+                "to": "12ZuLmUQJCotM4b84PGdWWbcW8FNJtU8osragXNCbNky9MW5",
+                "amount": "100,000"
+              }
+            },
+            {
+              "method": "Log",
+              "section": "evm",
+              "index": "0x5a00",
+              "data": {
+                "log": {
+                  "address": "0x1b02e051683b5cfac5929c25e84adb26ecf87b38",
+                  "topics": [
+                    "0x804c9b842b2748a22bb64b345453a3de7ca54a6ca45ce00d415894979e22897a",
+                    "0x0000000000000000000000000000000000000000000000000000000100000016"
+                  ],
+                  "data": "0x00000000000000000000000000000000000000000011c5ca366fa0c78c495ce10000000000000000000000000000000000000000002c0b4368815e5aa38869510000000000000000000000000000000000000000002605f9fd12c21a20434a870000000000000000000000000000000000000000036e211fb57b7bdd78d7195d000000000000000000000000000000000000000003967c5c8f99f43377d168b7"
+                }
+              }
+            },
+            {
+              "method": "Log",
+              "section": "evm",
+              "index": "0x5a00",
+              "data": {
+                "log": {
+                  "address": "0x2ec4884088d84e5c2970a034732e5209b0acfa93",
+                  "topics": [
+                    "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+                    "0x0000000000000000000000000000000000000000000000000000000000000000",
+                    "0x0000000000000000000000006d6f646c726f7574657265780000000000000000"
+                  ],
+                  "data": "0x00000000000000000000000000000000000000000000000000000000000186a0"
+                }
+              }
+            },
+            {
+              "method": "Log",
+              "section": "evm",
+              "index": "0x5a00",
+              "data": {
+                "log": {
+                  "address": "0x2ec4884088d84e5c2970a034732e5209b0acfa93",
+                  "topics": [
+                    "0x458f5fa412d0f69b08dd84872b0215675cc67bc1d5b6fd93300a1c3878b86196",
+                    "0x0000000000000000000000006d6f646c726f7574657265780000000000000000",
+                    "0x0000000000000000000000006d6f646c726f7574657265780000000000000000"
+                  ],
+                  "data": "0x00000000000000000000000000000000000000000000000000000000000186a000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000036e211fb57b7bdd78d7195d"
+                }
+              }
+            },
+            {
+              "method": "Log",
+              "section": "evm",
+              "index": "0x5a00",
+              "data": {
+                "log": {
+                  "address": "0x1b02e051683b5cfac5929c25e84adb26ecf87b38",
+                  "topics": [
+                    "0x00058a56ea94653cdf4f152d227ace22d4c00ad99e2a43f58cb7d9e3feb295f2",
+                    "0x0000000000000000000000000000000000000000000000000000000100000016",
+                    "0x0000000000000000000000006d6f646c726f7574657265780000000000000000"
+                  ],
+                  "data": ""
+                }
+              }
+            },
+            {
+              "method": "Log",
+              "section": "evm",
+              "index": "0x5a00",
+              "data": {
+                "log": {
+                  "address": "0x1b02e051683b5cfac5929c25e84adb26ecf87b38",
+                  "topics": [
+                    "0x2b627736bca15cd5381dcf80b0bf11fd197d01a037c52b927a881a10fb73ba61",
+                    "0x0000000000000000000000000000000000000000000000000000000100000016",
+                    "0x0000000000000000000000006d6f646c726f7574657265780000000000000000",
+                    "0x0000000000000000000000000000000000000000000000000000000000000000"
+                  ],
+                  "data": "0x0000000000000000000000006d6f646c726f757465726578000000000000000000000000000000000000000000000000000000000000000000000000000186a0"
+                }
+              }
+            },
+            {
+              "method": "Swapped3",
+              "section": "broadcast",
+              "index": "0xcc00",
+              "data": {
+                "swapper": "14TXaUTyTRiZKGG1zGrzzfc7oUGq2pcEGKNoWXLtJL5TTJbZ",
+                "filler": "12ZuLmUQJCotM4b84PGdWWbcW8FNJtU8osragXNCbNky9MW5",
+                "fillerType": "AAVE",
+                "operation": "ExactIn",
+                "inputs": [
+                  {
+                    "asset": "22",
+                    "amount": "100,000"
+                  }
+                ],
+                "outputs": [
+                  {
+                    "asset": "1,003",
+                    "amount": "100,000"
+                  }
+                ],
+                "fees": [],
+                "operationStack": [
+                  {
+                    "Router": "10,449,848"
+                  }
+                ]
+              }
+            },
+            {
+              "method": "Log",
+              "section": "evm",
+              "index": "0x5a00",
+              "data": {
+                "log": {
+                  "address": "0x2ec4884088d84e5c2970a034732e5209b0acfa93",
+                  "topics": [
+                    "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+                    "0x0000000000000000000000006d6f646c726f7574657265780000000000000000",
+                    "0x00000000000000000000000098f0033e26aa4ecf2899e6d09237d40d29fcb68e"
+                  ],
+                  "data": "0x00000000000000000000000000000000000000000000000000000000000186a0"
+                }
+              }
+            },
+            {
+              "method": "Log",
+              "section": "evm",
+              "index": "0x5a00",
+              "data": {
+                "log": {
+                  "address": "0x1b02e051683b5cfac5929c25e84adb26ecf87b38",
+                  "topics": [
+                    "0x44c58d81365b66dd4b1a7f36c25aa97b8c71c361ee4937adc1a00000227db5dd",
+                    "0x0000000000000000000000000000000000000000000000000000000100000016",
+                    "0x0000000000000000000000006d6f646c726f7574657265780000000000000000"
+                  ],
+                  "data": ""
+                }
+              }
+            },
+            {
+              "method": "Log",
+              "section": "evm",
+              "index": "0x5a00",
+              "data": {
+                "log": {
+                  "address": "0x1b02e051683b5cfac5929c25e84adb26ecf87b38",
+                  "topics": [
+                    "0x00058a56ea94653cdf4f152d227ace22d4c00ad99e2a43f58cb7d9e3feb295f2",
+                    "0x0000000000000000000000000000000000000000000000000000000100000016",
+                    "0x00000000000000000000000098f0033e26aa4ecf2899e6d09237d40d29fcb68e"
+                  ],
+                  "data": ""
+                }
+              }
+            },
+            {
+              "method": "Log",
+              "section": "evm",
+              "index": "0x5a00",
+              "data": {
+                "log": {
+                  "address": "0x2ec4884088d84e5c2970a034732e5209b0acfa93",
+                  "topics": [
+                    "0x4beccb90f994c31aced7a23b5611020728a23d8ec5cddd1a3e9d97b96fda8666",
+                    "0x0000000000000000000000006d6f646c726f7574657265780000000000000000",
+                    "0x00000000000000000000000098f0033e26aa4ecf2899e6d09237d40d29fcb68e"
+                  ],
+                  "data": "0x0000000000000000000000000000000000000000000000000000000000016ff60000000000000000000000000000000000000000036e211fb57b7bdd78d7195d"
+                }
+              }
+            },
+            {
+              "method": "Executed",
+              "section": "router",
+              "index": "0x4300",
+              "data": {
+                "assetIn": "22",
+                "assetOut": "1,003",
+                "amountIn": "100,000",
+                "amountOut": "100,000",
+                "eventId": "10,449,848"
+              }
+            },
+            {
+              "method": "Deposited",
+              "section": "tokens",
+              "index": "0x4d0a",
+              "data": {
+                "currencyId": "22",
+                "who": "13UVJyLnbVp9RBZYFwFGyDvVd1y27Tt8tkntv6Q7JVPhFsTB",
+                "amount": "20,201"
+              }
+            },
+            {
+              "method": "Deposited",
+              "section": "currencies",
+              "index": "0x4f02",
+              "data": {
+                "currencyId": "22",
+                "who": "13UVJyLnbVp9RBZYFwFGyDvVd1y27Tt8tkntv6Q7JVPhFsTB",
+                "amount": "20,201"
+              }
+            }
+          ],
+          "forwardedXcms": []
+        }
+      },
+      "selectedEvent": {
+        "method": "Swapped3",
+        "section": "broadcast",
+        "index": "0xcc00",
+        "data": {
+          "swapper": "14TXaUTyTRiZKGG1zGrzzfc7oUGq2pcEGKNoWXLtJL5TTJbZ",
+          "filler": "12ZuLmUQJCotM4b84PGdWWbcW8FNJtU8osragXNCbNky9MW5",
+          "fillerType": "AAVE",
+          "operation": "ExactIn",
+          "inputs": [
+            {
+              "asset": "22",
+              "amount": "100,000"
+            }
+          ],
+          "outputs": [
+            {
+              "asset": "1,003",
+              "amount": "100,000"
+            }
+          ],
+          "fees": [],
+          "operationStack": [
+            {
+              "Router": "10,449,848"
+            }
+          ]
+        }
+      },
+      "ephemeralApply": {
+        "outcome": "applied_in_ephemeral_chopsticks_block",
+        "beforeBlock": 13443555,
+        "afterBlock": 13443556
+      }
+    },
+    "withdraw_sell": {
+      "dryRun": {
+        "Ok": {
+          "executionResult": {
+            "Complete": {
+              "used": {
+                "refTime": "16,768,481,536",
+                "proofSize": "161,328"
+              }
+            }
+          },
+          "emittedEvents": [
+            {
+              "method": "Withdrawn",
+              "section": "tokens",
+              "index": "0x4d08",
+              "data": {
+                "currencyId": "22",
+                "who": "14TXaUTyTRiZKGG1zGrzzfc7oUGq2pcEGKNoWXLtJL5TTJbZ",
+                "amount": "20,201"
+              }
+            },
+            {
+              "method": "Withdrawn",
+              "section": "currencies",
+              "index": "0x4f03",
+              "data": {
+                "currencyId": "22",
+                "who": "14TXaUTyTRiZKGG1zGrzzfc7oUGq2pcEGKNoWXLtJL5TTJbZ",
+                "amount": "20,201"
+              }
+            },
+            {
+              "method": "Log",
+              "section": "evm",
+              "index": "0x5a00",
+              "data": {
+                "log": {
+                  "address": "0x2ec4884088d84e5c2970a034732e5209b0acfa93",
+                  "topics": [
+                    "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+                    "0x00000000000000000000000098f0033e26aa4ecf2899e6d09237d40d29fcb68e",
+                    "0x0000000000000000000000006d6f646c726f7574657265780000000000000000"
+                  ],
+                  "data": "0x00000000000000000000000000000000000000000000000000000000000186a0"
+                }
+              }
+            },
+            {
+              "method": "Log",
+              "section": "evm",
+              "index": "0x5a00",
+              "data": {
+                "log": {
+                  "address": "0x1b02e051683b5cfac5929c25e84adb26ecf87b38",
+                  "topics": [
+                    "0x44c58d81365b66dd4b1a7f36c25aa97b8c71c361ee4937adc1a00000227db5dd",
+                    "0x0000000000000000000000000000000000000000000000000000000100000016",
+                    "0x00000000000000000000000098f0033e26aa4ecf2899e6d09237d40d29fcb68e"
+                  ],
+                  "data": ""
+                }
+              }
+            },
+            {
+              "method": "Log",
+              "section": "evm",
+              "index": "0x5a00",
+              "data": {
+                "log": {
+                  "address": "0x1b02e051683b5cfac5929c25e84adb26ecf87b38",
+                  "topics": [
+                    "0x00058a56ea94653cdf4f152d227ace22d4c00ad99e2a43f58cb7d9e3feb295f2",
+                    "0x0000000000000000000000000000000000000000000000000000000100000016",
+                    "0x0000000000000000000000006d6f646c726f7574657265780000000000000000"
+                  ],
+                  "data": ""
+                }
+              }
+            },
+            {
+              "method": "Log",
+              "section": "evm",
+              "index": "0x5a00",
+              "data": {
+                "log": {
+                  "address": "0x2ec4884088d84e5c2970a034732e5209b0acfa93",
+                  "topics": [
+                    "0x4beccb90f994c31aced7a23b5611020728a23d8ec5cddd1a3e9d97b96fda8666",
+                    "0x00000000000000000000000098f0033e26aa4ecf2899e6d09237d40d29fcb68e",
+                    "0x0000000000000000000000006d6f646c726f7574657265780000000000000000"
+                  ],
+                  "data": "0x0000000000000000000000000000000000000000000000000000000000016ff60000000000000000000000000000000000000000036e211ff1b4fc8da82b6d2b"
+                }
+              }
+            },
+            {
+              "method": "Endowed",
+              "section": "tokens",
+              "index": "0x4d00",
+              "data": {
+                "currencyId": "22",
+                "who": "13UVJyLnzJK7QHxrrjLxwr58Lds4GR6Z37LxLtYrDm3qa5Je",
+                "amount": "100,000"
+              }
+            },
+            {
+              "method": "Transfer",
+              "section": "tokens",
+              "index": "0x4d02",
+              "data": {
+                "currencyId": "22",
+                "from": "12ZuLmUQJCotM4b84PGdWWbcW8FNJtU8osragXNCbNky9MW5",
+                "to": "13UVJyLnzJK7QHxrrjLxwr58Lds4GR6Z37LxLtYrDm3qa5Je",
+                "amount": "100,000"
+              }
+            },
+            {
+              "method": "Transferred",
+              "section": "currencies",
+              "index": "0x4f00",
+              "data": {
+                "currencyId": "22",
+                "from": "12ZuLmUQJCotM4b84PGdWWbcW8FNJtU8osragXNCbNky9MW5",
+                "to": "13UVJyLnzJK7QHxrrjLxwr58Lds4GR6Z37LxLtYrDm3qa5Je",
+                "amount": "100,000"
+              }
+            },
+            {
+              "method": "Log",
+              "section": "evm",
+              "index": "0x5a00",
+              "data": {
+                "log": {
+                  "address": "0x1b02e051683b5cfac5929c25e84adb26ecf87b38",
+                  "topics": [
+                    "0x804c9b842b2748a22bb64b345453a3de7ca54a6ca45ce00d415894979e22897a",
+                    "0x0000000000000000000000000000000000000000000000000000000100000016"
+                  ],
+                  "data": "0x00000000000000000000000000000000000000000011c5ca534b6456b06170690000000000000000000000000000000000000000002c0b436b4a9196295e4f980000000000000000000000000000000000000000002605fa135c5bf64ef27cbd0000000000000000000000000000000000000000036e211ff1b4fc8da82b6d2b000000000000000000000000000000000000000003967c5d165e938ebf1c5424"
+                }
+              }
+            },
+            {
+              "method": "Log",
+              "section": "evm",
+              "index": "0x5a00",
+              "data": {
+                "log": {
+                  "address": "0x1b02e051683b5cfac5929c25e84adb26ecf87b38",
+                  "topics": [
+                    "0x44c58d81365b66dd4b1a7f36c25aa97b8c71c361ee4937adc1a00000227db5dd",
+                    "0x0000000000000000000000000000000000000000000000000000000100000016",
+                    "0x0000000000000000000000006d6f646c726f7574657265780000000000000000"
+                  ],
+                  "data": ""
+                }
+              }
+            },
+            {
+              "method": "Log",
+              "section": "evm",
+              "index": "0x5a00",
+              "data": {
+                "log": {
+                  "address": "0x2ec4884088d84e5c2970a034732e5209b0acfa93",
+                  "topics": [
+                    "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+                    "0x0000000000000000000000006d6f646c726f7574657265780000000000000000",
+                    "0x0000000000000000000000000000000000000000000000000000000000000000"
+                  ],
+                  "data": "0x00000000000000000000000000000000000000000000000000000000000186a0"
+                }
+              }
+            },
+            {
+              "method": "Log",
+              "section": "evm",
+              "index": "0x5a00",
+              "data": {
+                "log": {
+                  "address": "0x2ec4884088d84e5c2970a034732e5209b0acfa93",
+                  "topics": [
+                    "0x4cf25bc1d991c17529c25213d3cc0cda295eeaad5f13f361969b12ea48015f90",
+                    "0x0000000000000000000000006d6f646c726f7574657265780000000000000000",
+                    "0x0000000000000000000000006d6f646c726f7574657265780000000000000000"
+                  ],
+                  "data": "0x00000000000000000000000000000000000000000000000000000000000186a000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000036e211ff1b4fc8da82b6d2b"
+                }
+              }
+            },
+            {
+              "method": "Log",
+              "section": "evm",
+              "index": "0x5a00",
+              "data": {
+                "log": {
+                  "address": "0x1b02e051683b5cfac5929c25e84adb26ecf87b38",
+                  "topics": [
+                    "0x3115d1449a7b732c986cba18244e897a450f61e1bb8d589cd2e69e6c8924f9f7",
+                    "0x0000000000000000000000000000000000000000000000000000000100000016",
+                    "0x0000000000000000000000006d6f646c726f7574657265780000000000000000",
+                    "0x0000000000000000000000006d6f646c726f7574657265780000000000000000"
+                  ],
+                  "data": "0x00000000000000000000000000000000000000000000000000000000000186a0"
+                }
+              }
+            },
+            {
+              "method": "Swapped3",
+              "section": "broadcast",
+              "index": "0xcc00",
+              "data": {
+                "swapper": "14TXaUTyTRiZKGG1zGrzzfc7oUGq2pcEGKNoWXLtJL5TTJbZ",
+                "filler": "12ZuLmUQJCotM4b84PGdWWbcW8FNJtU8osragXNCbNky9MW5",
+                "fillerType": "AAVE",
+                "operation": "ExactIn",
+                "inputs": [
+                  {
+                    "asset": "1,003",
+                    "amount": "100,000"
+                  }
+                ],
+                "outputs": [
+                  {
+                    "asset": "22",
+                    "amount": "100,000"
+                  }
+                ],
+                "fees": [],
+                "operationStack": [
+                  {
+                    "Router": "10,449,850"
+                  }
+                ]
+              }
+            },
+            {
+              "method": "Transfer",
+              "section": "tokens",
+              "index": "0x4d02",
+              "data": {
+                "currencyId": "22",
+                "from": "13UVJyLnzJK7QHxrrjLxwr58Lds4GR6Z37LxLtYrDm3qa5Je",
+                "to": "14TXaUTyTRiZKGG1zGrzzfc7oUGq2pcEGKNoWXLtJL5TTJbZ",
+                "amount": "100,000"
+              }
+            },
+            {
+              "method": "Executed",
+              "section": "router",
+              "index": "0x4300",
+              "data": {
+                "assetIn": "1,003",
+                "assetOut": "22",
+                "amountIn": "100,000",
+                "amountOut": "100,000",
+                "eventId": "10,449,850"
+              }
+            },
+            {
+              "method": "Deposited",
+              "section": "tokens",
+              "index": "0x4d0a",
+              "data": {
+                "currencyId": "22",
+                "who": "13UVJyLnbVp9RBZYFwFGyDvVd1y27Tt8tkntv6Q7JVPhFsTB",
+                "amount": "20,201"
+              }
+            },
+            {
+              "method": "Deposited",
+              "section": "currencies",
+              "index": "0x4f02",
+              "data": {
+                "currencyId": "22",
+                "who": "13UVJyLnbVp9RBZYFwFGyDvVd1y27Tt8tkntv6Q7JVPhFsTB",
+                "amount": "20,201"
+              }
+            }
+          ],
+          "forwardedXcms": []
+        }
+      },
+      "selectedEvent": {
+        "method": "Swapped3",
+        "section": "broadcast",
+        "index": "0xcc00",
+        "data": {
+          "swapper": "14TXaUTyTRiZKGG1zGrzzfc7oUGq2pcEGKNoWXLtJL5TTJbZ",
+          "filler": "12ZuLmUQJCotM4b84PGdWWbcW8FNJtU8osragXNCbNky9MW5",
+          "fillerType": "AAVE",
+          "operation": "ExactIn",
+          "inputs": [
+            {
+              "asset": "1,003",
+              "amount": "100,000"
+            }
+          ],
+          "outputs": [
+            {
+              "asset": "22",
+              "amount": "100,000"
+            }
+          ],
+          "fees": [],
+          "operationStack": [
+            {
+              "Router": "10,449,850"
+            }
+          ]
+        }
+      },
+      "ephemeralApply": {
+        "outcome": "applied_in_ephemeral_chopsticks_block",
+        "beforeBlock": 13443556,
+        "afterBlock": 13443557
+      }
+    },
+    "withdraw_home": {
+      "local": {
+        "Ok": {
+          "executionResult": {
+            "Complete": {
+              "used": {
+                "refTime": "500,000,000",
+                "proofSize": "0"
+              }
+            }
+          },
+          "emittedEvents": [
+            {
+              "method": "Withdrawn",
+              "section": "tokens",
+              "index": "0x4d08",
+              "data": {
+                "currencyId": "22",
+                "who": "14TXaUTyTRiZKGG1zGrzzfc7oUGq2pcEGKNoWXLtJL5TTJbZ",
+                "amount": "100,000"
+              }
+            },
+            {
+              "method": "Withdrawn",
+              "section": "currencies",
+              "index": "0x4f03",
+              "data": {
+                "currencyId": "22",
+                "who": "14TXaUTyTRiZKGG1zGrzzfc7oUGq2pcEGKNoWXLtJL5TTJbZ",
+                "amount": "100,000"
+              }
+            },
+            {
+              "method": "XcmpMessageSent",
+              "section": "xcmpQueue",
+              "index": "0x6f00",
+              "data": {
+                "messageHash": "0x947d73a0b2d5009e2c236400550e6dcf64052e505b9366b253f9f19d68258271"
+              }
+            },
+            {
+              "method": "Deposited",
+              "section": "tokens",
+              "index": "0x4d0a",
+              "data": {
+                "currencyId": "22",
+                "who": "13UVJyLnbVp9RBZYFwFGyDvVd1y27Tt8tkntv6Q7JVPhFsTB",
+                "amount": "602"
+              }
+            },
+            {
+              "method": "Deposited",
+              "section": "currencies",
+              "index": "0x4f02",
+              "data": {
+                "currencyId": "22",
+                "who": "13UVJyLnbVp9RBZYFwFGyDvVd1y27Tt8tkntv6Q7JVPhFsTB",
+                "amount": "602"
+              }
+            }
+          ],
+          "forwardedXcms": [
+            [
+              {
+                "V5": {
+                  "parents": "1",
+                  "interior": {
+                    "X1": [
+                      {
+                        "Parachain": "1,000"
+                      }
+                    ]
+                  }
+                }
+              },
+              [
+                {
+                  "V5": [
+                    {
+                      "WithdrawAsset": [
+                        {
+                          "id": {
+                            "parents": "0",
+                            "interior": {
+                              "X2": [
+                                {
+                                  "PalletInstance": "50"
+                                },
+                                {
+                                  "GeneralIndex": "1,337"
+                                }
+                              ]
+                            }
+                          },
+                          "fun": {
+                            "Fungible": "99,398"
+                          }
+                        }
+                      ]
+                    },
+                    "ClearOrigin",
+                    {
+                      "BuyExecution": {
+                        "fees": {
+                          "id": {
+                            "parents": "0",
+                            "interior": {
+                              "X2": [
+                                {
+                                  "PalletInstance": "50"
+                                },
+                                {
+                                  "GeneralIndex": "1,337"
+                                }
+                              ]
+                            }
+                          },
+                          "fun": {
+                            "Fungible": "677"
+                          }
+                        },
+                        "weightLimit": "Unlimited"
+                      }
+                    },
+                    {
+                      "DepositAsset": {
+                        "assets": {
+                          "Wild": {
+                            "AllCounted": "1"
+                          }
+                        },
+                        "beneficiary": {
+                          "parents": "0",
+                          "interior": {
+                            "X1": [
+                              {
+                                "AccountId32": {
+                                  "network": null,
+                                  "id": "0xc846ee73e49a748e59c7ac8f8742f542a552d24ceeeeeeeeeeeeeeeeeeeeeeee"
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "SetTopic": "0xc3a120f46f9c29e16f49405cfef630ba8959eddb7de9de90f422ff3d03adf9fc"
+                    }
+                  ]
+                }
+              ]
+            ]
+          ]
+        }
+      },
+      "forwarded": {
+        "v5": [
+          {
+            "withdrawAsset": [
+              {
+                "id": {
+                  "parents": 0,
+                  "interior": {
+                    "x2": [
+                      {
+                        "palletInstance": 50
+                      },
+                      {
+                        "generalIndex": 1337
+                      }
+                    ]
+                  }
+                },
+                "fun": {
+                  "fungible": 99398
+                }
+              }
+            ]
+          },
+          {
+            "clearOrigin": null
+          },
+          {
+            "buyExecution": {
+              "fees": {
+                "id": {
+                  "parents": 0,
+                  "interior": {
+                    "x2": [
+                      {
+                        "palletInstance": 50
+                      },
+                      {
+                        "generalIndex": 1337
+                      }
+                    ]
+                  }
+                },
+                "fun": {
+                  "fungible": 677
+                }
+              },
+              "weightLimit": {
+                "unlimited": null
+              }
+            }
+          },
+          {
+            "depositAsset": {
+              "assets": {
+                "wild": {
+                  "allCounted": 1
+                }
+              },
+              "beneficiary": {
+                "parents": 0,
+                "interior": {
+                  "x1": [
+                    {
+                      "accountId32": {
+                        "network": null,
+                        "id": "0xc846ee73e49a748e59c7ac8f8742f542a552d24ceeeeeeeeeeeeeeeeeeeeeeee"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "setTopic": "0xc3a120f46f9c29e16f49405cfef630ba8959eddb7de9de90f422ff3d03adf9fc"
+          }
+        ]
+      },
+      "remote": {
+        "Ok": {
+          "executionResult": {
+            "Complete": {
+              "used": {
+                "refTime": "459,753,000",
+                "proofSize": "10,943"
+              }
+            }
+          },
+          "emittedEvents": [
+            {
+              "method": "Withdrawn",
+              "section": "assets",
+              "index": "0x3219",
+              "data": {
+                "assetId": "1,337",
+                "who": "13cKp89Uh2yWgTG28JA1QEvPUMjEPKejqkjHKf9zqLiFKjH6",
+                "amount": "99,398"
+              }
+            },
+            {
+              "method": "Withdraw",
+              "section": "balances",
+              "index": "0x0a08",
+              "data": {
+                "who": "163CRvzDQ8JHZfmufa86zA7BfDY7NToUSqmWbpDq5kwDYSmH",
+                "amount": "8,279,628"
+              }
+            },
+            {
+              "method": "Deposited",
+              "section": "assets",
+              "index": "0x3218",
+              "data": {
+                "assetId": "1,337",
+                "who": "163CRvzDQ8JHZfmufa86zA7BfDY7NToUSqmWbpDq5kwDYSmH",
+                "amount": "677"
+              }
+            },
+            {
+              "method": "SwapCreditExecuted",
+              "section": "assetConversion",
+              "index": "0x3704",
+              "data": {
+                "amountIn": "677",
+                "amountOut": "8,279,628",
+                "path": [
+                  [
+                    {
+                      "parents": "0",
+                      "interior": {
+                        "X2": [
+                          {
+                            "PalletInstance": "50"
+                          },
+                          {
+                            "GeneralIndex": "1,337"
+                          }
+                        ]
+                      }
+                    },
+                    "677"
+                  ],
+                  [
+                    {
+                      "parents": "1",
+                      "interior": "Here"
+                    },
+                    "8,279,628"
+                  ]
+                ]
+              }
+            },
+            {
+              "method": "Deposited",
+              "section": "assets",
+              "index": "0x3218",
+              "data": {
+                "assetId": "1,337",
+                "who": "15XbeapZyWWEZdDCLpxzNhryKj2MsE8rnFUW9cPydXfgSMAK",
+                "amount": "98,721"
+              }
+            },
+            {
+              "method": "Deposit",
+              "section": "balances",
+              "index": "0x0a07",
+              "data": {
+                "who": "13UVJyLkAxdQn6zM3Gz49SmCLi8SZW3bdtm7DTY29ScavqW2",
+                "amount": "8,279,628"
+              }
+            }
+          ],
+          "forwardedXcms": []
+        }
+      }
+    }
+  }
+}
