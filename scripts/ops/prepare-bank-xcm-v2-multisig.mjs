@@ -5,8 +5,8 @@
  *
  *   configure — converted account, backend operator, adapter binding, and
  *               strategySettler grant; wrapper remains paused.
- *   arm       — setDispatchPaused(false), emitted only after exact four-leg
- *               DryRunApi evidence is supplied and matches the messages.
+ *   arm       — setDispatchPaused(false), emitted only after the four request
+ *               messages plus recovery-home DryRunApi evidence are supplied.
  *
  * It never signs or submits. Hardware signing remains in Nova/Spektr/Apps.
  */
@@ -23,6 +23,7 @@ import {
   WRAPPER_ADMIN_ABI,
   buildArmCalls,
   buildBankXcmV2Messages,
+  buildRecoveryHomeMessage,
   buildConfigurationCalls,
   loadJson,
   truncateAccountId32,
@@ -55,6 +56,9 @@ export function parseArgs(argv) {
     withdrawFee: "21350",
     homeAmount: "100000",
     homeFee: "1402",
+    recoveryAmount: "100000",
+    recoveryFee: "1402",
+    recoveryNonce: "1",
     depositNonce: "1",
     withdrawNonce: "2"
   };
@@ -80,6 +84,9 @@ export function parseArgs(argv) {
     else if (token === "--withdraw-fee") args.withdrawFee = argv[++index];
     else if (token === "--home-amount") args.homeAmount = argv[++index];
     else if (token === "--home-fee") args.homeFee = argv[++index];
+    else if (token === "--recovery-amount") args.recoveryAmount = argv[++index];
+    else if (token === "--recovery-fee") args.recoveryFee = argv[++index];
+    else if (token === "--recovery-nonce") args.recoveryNonce = argv[++index];
     else if (token === "--deposit-nonce") args.depositNonce = argv[++index];
     else if (token === "--withdraw-nonce") args.withdrawNonce = argv[++index];
     else if (token === "--help" || token === "-h") args.help = true;
@@ -97,7 +104,11 @@ function usage() {
     "    --signer nova [--timepoint-height H --timepoint-index I]",
     "  [--predeploy-plan /tmp/plan.json]  # configure packet preview only",
     "",
-    "For --packet arm, --dry-run-evidence is mandatory and must bind all four",
+    "Message inputs: --deposit-assets/--deposit-sell-amount/--deposit-fee,",
+    "  --withdraw-shares/--withdraw-fee/--home-amount/--home-fee,",
+    "  --deposit-nonce/--withdraw-nonce, and",
+    "  --recovery-amount/--recovery-fee/--recovery-nonce.",
+    "For --packet arm, --dry-run-evidence is mandatory and must bind all five",
     "message hashes to successful forwarded/event assertions. No signing occurs."
   ].join("\n");
 }
@@ -136,8 +147,8 @@ export function assertDryRunEvidence(evidence, bundle) {
   if (String(evidence.wrapper).toLowerCase() !== bundle.wrapper.toLowerCase() || String(evidence.convertedAccountId32).toLowerCase() !== bundle.convertedAccountId32.toLowerCase()) {
     throw new Error("dry-run evidence wrapper/converted-account binding mismatch.");
   }
-  if (!Array.isArray(evidence.legs) || evidence.legs.length !== 4) {
-    throw new Error("dry-run evidence must contain exactly four legs.");
+  if (!Array.isArray(evidence.legs) || evidence.legs.length !== bundle.messages.length) {
+    throw new Error(`dry-run evidence must contain exactly ${bundle.messages.length} legs.`);
   }
   if (!Number.isInteger(evidence.runtimeBlocks?.assetHub) || evidence.runtimeBlocks.assetHub <= 0 || !Number.isInteger(evidence.runtimeBlocks?.hydration) || evidence.runtimeBlocks.hydration <= 0) {
     throw new Error("dry-run evidence requires positive Asset Hub and Hydration runtime blocks.");
@@ -249,12 +260,20 @@ export async function main(argv = process.argv.slice(2)) {
     depositNonce: BigInt(args.depositNonce),
     withdrawNonce: BigInt(args.withdrawNonce)
   });
+  const recovery = buildRecoveryHomeMessage({
+    wrapper,
+    convertedAccountId32: convertedAccount,
+    amount: BigInt(args.recoveryAmount),
+    fee: BigInt(args.recoveryFee),
+    nonce: BigInt(args.recoveryNonce)
+  });
+  const evidenceBundle = { ...messages, messages: [...messages.messages, recovery] };
   if (args.messagesOut) {
-    await writeFile(resolve(args.messagesOut), `${stringify({ schemaVersion: 1, kind: "averray.bankXcmV2Messages", profile: "mainnet", ...messages })}\n`, { flag: "wx" });
+    await writeFile(resolve(args.messagesOut), `${stringify({ schemaVersion: 2, kind: "averray.bankXcmV2Messages", profile: "mainnet", ...messages, recovery })}\n`, { flag: "wx" });
   }
   if (args.packet === "arm") {
     if (!args.dryRunEvidence) throw new Error("arm packet requires --dry-run-evidence.");
-    assertDryRunEvidence(loadJson(resolve(args.dryRunEvidence)), messages);
+    assertDryRunEvidence(loadJson(resolve(args.dryRunEvidence)), evidenceBundle);
   }
 
   const rpc = await createCeremonyRpcContext({ manifest, phase: `bank-xcm-v2-${args.packet}-owner-check`, write: false });
@@ -345,8 +364,8 @@ export async function main(argv = process.argv.slice(2)) {
   console.log(`asset 22:                ${BANK_XCM_V2.observerAssetEndpoint} Tokens.accounts(${convertedAccount}, 22)`);
   console.log(`aUSDC:                   ${BANK_XCM_V2.observerEvmEndpoint} ${BANK_XCM_V2.aUsdcContract}.balanceOf(${truncateAccountId32(convertedAccount)})`);
   console.log("");
-  console.log("## Exact four-leg message bundle");
-  for (const leg of messages.messages) {
+  console.log("## Exact v2.1 message bundle (four request legs + owner recovery)");
+  for (const leg of evidenceBundle.messages) {
     console.log(`${leg.label}:`);
     console.log(`  requestId:   ${leg.requestId}`);
     console.log(`  destination: ${leg.destination}`);
@@ -357,8 +376,8 @@ export async function main(argv = process.argv.slice(2)) {
   console.log("");
   console.log(args.packet === "configure"
     ? "STOP AFTER EXECUTION: wrapper must remain dispatchPaused=true; do not paste the arm packet."
-    : "ARM PRECONDITION PASSED: all four exact-message dry-run records matched. This tool still signed/submitted nothing.");
-  return { innerCalls, payload, messages, live };
+    : "ARM PRECONDITION PASSED: all five exact-message dry-run records matched. This tool still signed/submitted nothing.");
+  return { innerCalls, payload, messages, recovery, live };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

@@ -19,6 +19,7 @@ contract MockXcmPrecompileV2 {
     address public asset;
     bool public failExecute;
     bool public failSend;
+    bool public unweighable;
 
     error MockDispatchFailed();
 
@@ -32,6 +33,10 @@ contract MockXcmPrecompileV2 {
 
     function setFailSend(bool fail) external {
         failSend = fail;
+    }
+
+    function setUnweighable(bool value) external {
+        unweighable = value;
     }
 
     function execute(bytes calldata message, IXcmWrapper.Weight calldata) external {
@@ -48,7 +53,8 @@ contract MockXcmPrecompileV2 {
         lastMessageHash = keccak256(message);
     }
 
-    function weighMessage(bytes calldata message) external pure returns (IXcmWrapper.Weight memory) {
+    function weighMessage(bytes calldata message) external view returns (IXcmWrapper.Weight memory) {
+        if (unweighable) return IXcmWrapper.Weight({refTime: 0, proofSize: 0});
         return IXcmWrapper.Weight({refTime: uint64(message.length * 10), proofSize: uint64(message.length)});
     }
 }
@@ -198,6 +204,10 @@ abstract contract XcmWrapperV2Fixture is Test {
         return bytes32(bytes20(address(wrapper))) | bytes32(uint256(0xeeeeeeeeeeeeeeeeeeeeeeee));
     }
 
+    function _recoveryId(uint256 amount, uint64 nonce) internal view returns (bytes32) {
+        return wrapper.previewRecoveryHomeId(amount, nonce);
+    }
+
     function _compact(uint256 value) internal pure returns (bytes memory encoded) {
         if (value < 64) return abi.encodePacked(bytes1(uint8(value << 2)));
         if (value < 16_384) {
@@ -278,6 +288,20 @@ abstract contract XcmWrapperV2Fixture is Test {
         vm.prank(caller);
         (bool ok, bytes memory data) =
             address(wrapper).call(abi.encodeCall(wrapper.queueRequest, (context, destination, message, WEIGHT)));
+        _assertCustomError(ok, data, selector);
+    }
+
+    function _assertRecoveryReverts(
+        uint256 amount,
+        uint64 nonce,
+        bytes memory destination,
+        bytes memory message,
+        bytes4 selector,
+        address caller
+    ) internal {
+        vm.prank(caller);
+        (bool ok, bytes memory data) =
+            address(wrapper).call(abi.encodeCall(wrapper.dispatchRecoveryHome, (amount, nonce, destination, message)));
         _assertCustomError(ok, data, selector);
     }
 
@@ -464,7 +488,7 @@ contract XcmWrapperV2Test is XcmWrapperV2Fixture {
         _assertCustomError(ok, data, XcmWrapperV2.PayloadMismatch.selector);
     }
 
-    function testPayloadMutationsWrongAccountTopicTrailingAndFifthShapeRevert() public {
+    function testPayloadMutationsWrongAccountTopicTrailingAndUnreviewedRequestShapeRevert() public {
         IXcmWrapper.RequestContext memory context = _depositContext(150_000, 11);
         bytes32 requestId = wrapper.previewRequestId(context);
         bytes memory wrongAccount = _fundMessage(150_000, requestId);
@@ -676,6 +700,164 @@ contract XcmWrapperV2Test is XcmWrapperV2Fixture {
         assertEq(asset.balanceOf(address(adapter)), 0);
         assertEq(asset.balanceOf(address(wrapper)), 0);
         assertEq(uint256(wrapper.getRequest(requestId).status), uint256(IXcmWrapper.RequestStatus.Unknown));
+    }
+
+    function testOnlyLocalExecuteLegRequiresAssetHubWeighability() public {
+        IXcmWrapper.RequestContext memory deposit = _depositContext(150_000, 32);
+        bytes32 depositId = wrapper.previewRequestId(deposit);
+        bytes memory funding = _fundMessage(150_000, depositId);
+
+        precompile.setUnweighable(true);
+        _assertTreasuryDepositReverts(funding, 32, XcmWrapperV2.XcmPrecompileUnavailable.selector);
+        assertEq(precompile.executeCount(), 0);
+        assertEq(precompile.sendCount(), 0);
+
+        precompile.setUnweighable(false);
+        _requestDeposit(150_000, funding, 32);
+        _discardWrapperBalance(150_000);
+
+        // Hydration Transact messages are not locally weighable by Asset Hub.
+        // Both remote sell directions and the remote home message must still
+        // use the precompile's atomic `send` path successfully.
+        precompile.setUnweighable(true);
+        vm.prank(OPERATOR);
+        wrapper.queueRequest(deposit, HYDRATION_DESTINATION, _sellMessage(false, 30_000, 100_000, depositId), WEIGHT);
+        vm.prank(OPERATOR);
+        adapter.settleRequest(
+            depositId, IXcmWrapper.RequestStatus.Succeeded, 100_000, 100_000, bytes32("AUSDC"), bytes32(0)
+        );
+
+        IXcmWrapper.RequestContext memory withdraw = _withdrawContext(100_000, 33);
+        bytes32 withdrawId = wrapper.previewRequestId(withdraw);
+        _requestWithdraw(100_000, _sellMessage(true, 28_000, 100_000, withdrawId), 33);
+        vm.prank(OPERATOR);
+        wrapper.queueRequest(withdraw, HYDRATION_DESTINATION, _homeMessage(100_000, 1_000, withdrawId), WEIGHT);
+
+        assertEq(precompile.executeCount(), 1);
+        assertEq(precompile.sendCount(), 3);
+        assertEq(wrapper.requestDispatchBitmap(depositId), 3);
+        assertEq(wrapper.requestDispatchBitmap(withdrawId), 12);
+    }
+
+    function testOwnerOnlyPausedRecoveryHomeIsStrictAndIdempotent() public {
+        uint256 amount = 120_000;
+        uint64 nonce = 1;
+        bytes32 recoveryId = _recoveryId(amount, nonce);
+        bytes memory message = _homeMessage(amount, 1_000, recoveryId);
+
+        vm.prank(RECIPIENT);
+        wrapper.setDispatchPaused(true);
+
+        _assertRecoveryReverts(
+            amount, nonce, HYDRATION_DESTINATION, message, XcmWrapperV2.Unauthorized.selector, OPERATOR
+        );
+
+        precompile.setFailSend(true);
+        _assertRecoveryReverts(
+            amount, nonce, HYDRATION_DESTINATION, message, XcmWrapperV2.XcmDispatchFailed.selector, RECIPIENT
+        );
+        require(!wrapper.getRecoveryHomeLeg(recoveryId).dispatched, "FAILED_RECOVERY_RECORDED");
+        precompile.setFailSend(false);
+
+        vm.prank(RECIPIENT);
+        bytes32 returnedId = wrapper.dispatchRecoveryHome(amount, nonce, HYDRATION_DESTINATION, message);
+        require(returnedId == recoveryId, "RECOVERY_ID");
+        assertEq(precompile.sendCount(), 1);
+        XcmWrapperV2.LegRecord memory recoveryLeg = wrapper.getRecoveryHomeLeg(recoveryId);
+        require(recoveryLeg.destinationHash == keccak256(HYDRATION_DESTINATION), "RECOVERY_DESTINATION_HASH");
+        require(recoveryLeg.messageHash == keccak256(message), "RECOVERY_MESSAGE_HASH");
+        require(recoveryLeg.dispatched, "RECOVERY_NOT_RECORDED");
+
+        vm.prank(RECIPIENT);
+        wrapper.dispatchRecoveryHome(amount, nonce, HYDRATION_DESTINATION, message);
+        assertEq(precompile.sendCount(), 1);
+
+        bytes memory conflictingFee = _homeMessage(amount, 2_000, recoveryId);
+        _assertRecoveryReverts(
+            amount, nonce, HYDRATION_DESTINATION, conflictingFee, XcmWrapperV2.PayloadMismatch.selector, RECIPIENT
+        );
+
+        vm.prank(RECIPIENT);
+        wrapper.setDispatchPaused(false);
+        bytes32 nextId = _recoveryId(amount, 2);
+        _assertRecoveryReverts(
+            amount,
+            2,
+            HYDRATION_DESTINATION,
+            _homeMessage(amount, 1_000, nextId),
+            XcmWrapperV2.InvalidStatus.selector,
+            RECIPIENT
+        );
+    }
+
+    function testRecoveryHomeRejectsRedirectTopicDestinationAndNonCanonicalAmounts() public {
+        uint256 amount = 120_000;
+        uint64 nonce = 3;
+        bytes32 recoveryId = _recoveryId(amount, nonce);
+        bytes memory canonical = _homeMessage(amount, 1_000, recoveryId);
+
+        vm.prank(RECIPIENT);
+        wrapper.setDispatchPaused(true);
+
+        _assertRecoveryReverts(
+            amount, nonce, hex"05010100b91f", canonical, XcmWrapperV2.XcmContextMismatch.selector, RECIPIENT
+        );
+
+        bytes memory wrongBeneficiary = _homeMessage(amount, 1_000, recoveryId);
+        wrongBeneficiary[wrongBeneficiary.length - 65] ^= bytes1(uint8(1));
+        _assertRecoveryReverts(
+            amount, nonce, HYDRATION_DESTINATION, wrongBeneficiary, XcmWrapperV2.XcmContextMismatch.selector, RECIPIENT
+        );
+
+        bytes memory wrongTopic = _homeMessage(amount, 1_000, recoveryId);
+        wrongTopic[wrongTopic.length - 1] ^= bytes1(uint8(1));
+        _assertRecoveryReverts(
+            amount, nonce, HYDRATION_DESTINATION, wrongTopic, XcmWrapperV2.XcmContextMismatch.selector, RECIPIENT
+        );
+
+        bytes memory nonCanonical = _nonCanonicalMode3Compact(amount);
+        _assertRecoveryReverts(
+            amount,
+            nonce,
+            HYDRATION_DESTINATION,
+            _homeMessageWithCompacts(nonCanonical, _compact(amount), _compact(1_000), recoveryId),
+            XcmWrapperV2.XcmContextMismatch.selector,
+            RECIPIENT
+        );
+    }
+
+    function testRecoveryHomeRejectsZeroNestedFee() public {
+        uint256 amount = 120_000;
+        uint64 nonce = 4;
+        bytes32 recoveryId = _recoveryId(amount, nonce);
+        vm.prank(RECIPIENT);
+        wrapper.setDispatchPaused(true);
+
+        _assertRecoveryReverts(
+            amount,
+            nonce,
+            HYDRATION_DESTINATION,
+            _homeMessage(amount, 0, recoveryId),
+            XcmWrapperV2.XcmContextMismatch.selector,
+            RECIPIENT
+        );
+    }
+
+    function testRecoveryHomeRejectsNestedFeeAboveAmount() public {
+        uint256 amount = 120_000;
+        uint64 nonce = 5;
+        bytes32 recoveryId = _recoveryId(amount, nonce);
+        vm.prank(RECIPIENT);
+        wrapper.setDispatchPaused(true);
+
+        _assertRecoveryReverts(
+            amount,
+            nonce,
+            HYDRATION_DESTINATION,
+            _homeMessage(amount, amount + 1, recoveryId),
+            XcmWrapperV2.XcmContextMismatch.selector,
+            RECIPIENT
+        );
     }
 
     function testBareEoaStrategySettlerCannotStageOwnWalletCapital() public {

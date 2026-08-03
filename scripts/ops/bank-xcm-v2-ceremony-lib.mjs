@@ -26,6 +26,8 @@ export const BANK_XCM_V2 = Object.freeze({
   hydrationDestination: "0x05010100c91f"
 });
 
+export const BANK_XCM_V2_RECOVERY_DOMAIN = `0x${Buffer.from("HYDRATION_USDC_RECOVERY_V1", "utf8").toString("hex").padEnd(64, "0")}`;
+
 export const WRAPPER_ADMIN_ABI = Object.freeze([
   "function policy() view returns (address)",
   "function xcmPrecompile() view returns (address)",
@@ -150,6 +152,60 @@ export function previewRequestId(context) {
       context.nonce
     ]
   ));
+}
+
+export function previewRecoveryHomeId({ wrapper, convertedAccountId32, amount, nonce }) {
+  if (!isAddress(wrapper)) throw new Error("recovery wrapper must be an H160 address.");
+  assertBytes32(convertedAccountId32, "recovery convertedAccountId32");
+  const recoveryAmount = BigInt(amount);
+  const recoveryNonce = BigInt(nonce);
+  if (recoveryAmount <= 0n || recoveryNonce <= 0n || recoveryNonce > ((1n << 64n) - 1n)) {
+    throw new Error("recovery amount and uint64 nonce must be positive.");
+  }
+  return keccak256(AbiCoder.defaultAbiCoder().encode(
+    ["bytes32", "address", "bytes32", "uint256", "uint64"],
+    [BANK_XCM_V2_RECOVERY_DOMAIN, getAddress(wrapper), convertedAccountId32, recoveryAmount, recoveryNonce]
+  ));
+}
+
+export function buildRecoveryHomeMessage({ wrapper, convertedAccountId32, amount, fee, nonce }) {
+  const wrapperAddress = getAddress(wrapper);
+  const recoveryAmount = BigInt(amount);
+  const recoveryFee = BigInt(fee);
+  const recoveryId = previewRecoveryHomeId({
+    wrapper: wrapperAddress,
+    convertedAccountId32,
+    amount: recoveryAmount,
+    nonce
+  });
+  if (recoveryFee <= 0n || recoveryFee > recoveryAmount) {
+    throw new Error("recovery fee must be positive and no greater than the recovered amount.");
+  }
+  const wrapperAccount = hexBuffer(wrapperAccountId32(wrapperAddress), "wrapperAccountId32");
+  const message = concatHex(
+    hexBuffer("0x05140004010300a10f043205e51400", "recovery outer amount prefix"), compact(recoveryAmount),
+    hexBuffer("0x13010300a10f043205e51400", "recovery repeated amount prefix"), compact(recoveryAmount),
+    hexBuffer("0x001410010204010100a10f08130002043205e51400", "recovery reserve prefix"), compact(recoveryFee),
+    hexBuffer("0x000d01020400010100", "recovery beneficiary prefix"), wrapperAccount,
+    Buffer.from([0x2c]), hexBuffer(recoveryId, "recovery id")
+  );
+  return {
+    label: "recovery_home",
+    chain: "hydration",
+    destination: BANK_XCM_V2.hydrationDestination,
+    message,
+    requestId: recoveryId,
+    recoveryId,
+    amount: recoveryAmount,
+    fee: recoveryFee,
+    nonce: BigInt(nonce),
+    messageHash: keccak256(message),
+    expected: {
+      forwardedParaId: BANK_XCM_V2.assetHubParaId,
+      remoteEvent: "Assets.Deposited",
+      assetId: 1337
+    }
+  };
 }
 
 export function buildBankXcmV2Messages({
@@ -330,6 +386,10 @@ export function applyBankXcmV2Manifest(manifest, evidence) {
   const next = structuredClone(manifest);
   const wrapper = getAddress(evidence.wrapper.address);
   const adapter = getAddress(evidence.adapter.address);
+  const previousWrapper = isAddress(next.contracts?.xcmWrapper) ? getAddress(next.contracts.xcmWrapper) : null;
+  const previousAdapter = isAddress(next.contracts?.hydrationUsdcAdapter)
+    ? getAddress(next.contracts.hydrationUsdcAdapter)
+    : null;
   const verifiedAt = evidence.verifiedAt;
   const sourceCommit = String(evidence.sourceCommit ?? "").toLowerCase();
   if (!/^[0-9a-f]{40}$/u.test(sourceCommit)) throw new Error("sourceCommit must be a full 40-character commit.");
@@ -341,6 +401,19 @@ export function applyBankXcmV2Manifest(manifest, evidence) {
       throw new Error("deployment evidence has an invalid transaction or provenance hash.");
     }
   }
+  if (previousWrapper && previousAdapter && (previousWrapper !== wrapper || previousAdapter !== adapter)) {
+    next.bankXcmDeploymentHistory = [...(next.bankXcmDeploymentHistory ?? []), {
+      version: next.bankXcmV2Deployment?.version ?? "2.0",
+      status: "retired_replaced",
+      wrapper: previousWrapper,
+      adapter: previousAdapter,
+      deployTxHashes: next.bankXcmV2Deployment?.deployTxHashes ?? null,
+      convertedAccountId32: next.bankXcmV2Deployment?.convertedAccountId32 ?? null,
+      replacementReason: evidence.replacementReason ?? "superseded by a reviewed Bank wrapper deployment",
+      incident: next.bankXcmV2Deployment?.incident ?? null,
+      retiredCapital: evidence.retiredCapital ?? next.bankXcmV2Deployment?.incident?.writeOffs ?? []
+    }];
+  }
   next.contracts = { ...next.contracts, xcmWrapper: wrapper, hydrationUsdcAdapter: adapter };
   next.contractProvenance = {
     ...next.contractProvenance,
@@ -349,13 +422,13 @@ export function applyBankXcmV2Manifest(manifest, evidence) {
   };
   next.deploymentBlocks = {
     ...next.deploymentBlocks,
-    xcmWrapperV2: evidence.wrapper.blockNumber,
-    hydrationUsdcAdapter: evidence.adapter.blockNumber
+    [previousWrapper ? "xcmWrapperV2_1" : "xcmWrapperV2"]: evidence.wrapper.blockNumber,
+    [previousAdapter ? "hydrationUsdcAdapterV2_1" : "hydrationUsdcAdapter"]: evidence.adapter.blockNumber
   };
   next.deployers = {
     ...next.deployers,
-    xcmWrapperV2: getAddress(evidence.deployer),
-    hydrationUsdcAdapter: getAddress(evidence.deployer)
+    [previousWrapper ? "xcmWrapperV2_1" : "xcmWrapperV2"]: getAddress(evidence.deployer),
+    [previousAdapter ? "hydrationUsdcAdapterV2_1" : "hydrationUsdcAdapter"]: getAddress(evidence.deployer)
   };
   next.strategies = (next.strategies ?? []).filter((entry) => entry?.id !== BANK_XCM_V2.strategyLabel);
   next.strategies.push({
@@ -375,6 +448,7 @@ export function applyBankXcmV2Manifest(manifest, evidence) {
     }
   });
   next.bankXcmV2Deployment = {
+    version: previousWrapper ? "2.1" : "2.0",
     status: "deployed_paused",
     deployTxHashes: { wrapper: evidence.wrapper.txHash, adapter: evidence.adapter.txHash },
     configurationMultisigExecTx: evidence.configurationMultisigExecTx ?? null,

@@ -1,6 +1,7 @@
-# XcmWrapper v2 — Hydration USDC two-phase custody design
+# XcmWrapper v2.1 — Hydration USDC two-phase custody and recovery design
 
-Status: **design approved; implementation included in PR #911; no deployment**.
+Status: **v2.0 deployed, v2.1 replacement required after the first dust-cycle
+incident; v2.1 implementation under review and not deployed**.
 
 This is the contract decision required by `BANK_PHASE1_BUILD_PACKET.md` gate 4.
 It closes the four activation blockers recorded in
@@ -21,7 +22,9 @@ borrowing, leverage, and deployment are out of scope.
    need a new request model.
 3. Every signed leg has already passed the exact-message DryRunApi guard in
    `BankXcmFlowCoordinator`. Solidity then independently decodes the bytes and
-   accepts only one of the four shapes in this document.
+   accepts only one of the four request shapes in this document. The fifth
+   owner-only recovery-home shape is separately derived, recorded, and fixed to
+   the wrapper image.
 4. The wrapper is the Asset Hub XCM origin for every leg. The local funding leg
    is executed by the wrapper; remote legs are sent by the wrapper. No EOA fronts
    capital or acts from a second remote identity.
@@ -33,6 +36,23 @@ borrowing, leverage, and deployment are out of scope.
    symmetric 1:1 withdraw check: both returned assets and retired shares are
    capped by `context.shares`. Destination-state balance deltas remain
    settlement truth; XCM completion alone is never enough.
+7. Weighability is required only for `DepositFunding`, which Asset Hub executes
+   locally. Hydration `Transact` messages are sent remotely and cannot be
+   semantically weighed by Asset Hub; `send` success/revert is their atomic
+   precompile-liveness boundary.
+
+## v2.0 dust-cycle incident and disposition
+
+On 2026-08-03, the v2.0 funding leg placed 149,412 raw asset 22 at converted
+account `0x98f0033e26aa4ecf2899e6d09237d40d29fcb68e64d22a621520bde1123564ac`.
+The exact `DepositSell` message then failed a limit-aware `ReviveApi_call`
+inside the deployed wrapper with `XcmPrecompileUnavailable()` (`0x820c74ed`):
+Asset Hub's XCM precompile returned `0/0` when asked to weigh a Hydration
+`Transact` message. No sell signature was submitted. An earlier identity-split
+rehearsal balance of 100,000 raw remains at
+`0x089a0a57d001bacb8473161e007f0babc1768ceeeeeeeeeeeeeeeeeeeeeeeeeeee`.
+Pascal explicitly wrote off both balances; neither may be relabelled as strategy
+assets, operating float, or recoverable principal.
 
 ## Phase-1 treasury staging
 
@@ -82,8 +102,31 @@ operators and indexers.
 The local leg uses a canonical `Here` destination sentinel in the unchanged
 `destination` argument. It invokes the XCM precompile's
 `execute(bytes, Weight)` entry point. The three remote legs require their exact
-canonical destination and invoke `send(bytes,bytes)`. A caller cannot select
+canonical destination and invoke `send(bytes,bytes)` without calling
+`weighMessage` on Asset Hub. A caller cannot select
 `execute` versus `send`; the decoded allowlisted shape selects it.
+
+### Owner-only recovery-home shape
+
+While local dispatch is paused, `TreasuryPolicy.owner()` may call
+`dispatchRecoveryHome(amount, nonce, destination, message)`. The wrapper derives
+`recoveryId = keccak256(abi.encode("HYDRATION_USDC_RECOVERY_V1", wrapper,
+hydrationAccountId32, amount, nonce))`, requires the fixed Hydration destination,
+and strict-decodes the reserve-withdraw message. The amount is parameterized;
+the beneficiary is not—it must be `wrapper H160 || 0xEE × 12` on Asset Hub—and
+the final `SetTopic` must equal the derived recovery id. Exact replay is a no-op;
+same-id/different-message replay reverts. The backend operator cannot call this
+path or redirect its result. The nested remote execution fee must be positive
+and no greater than the recovered amount.
+
+Recovery is scoped to funds associated with an existing wrapper request. After
+the reserve-withdraw lands at the wrapper's Asset Hub image, the only custody
+exit is `releaseRecoveredAssetsToAdapter(requestId, assets)`: it requires that
+request to be `Failed` or `Cancelled` and caps cumulative release at the
+request's recorded deposit assets or withdraw shares. Funds recovered without
+a matching request would remain at the wrapper with no general sweep path. That
+constraint is intentional; operators must bind every recovery to a failed or
+cancelled request rather than creating unaccounted wrapper float.
 
 ### Adapter and custody handshake
 
@@ -169,24 +212,24 @@ balance-delta confirmation. The wrapper then credits only the observed returned
 amount to the treasury account. The backend operator cannot redirect, silently
 sweep, or relabel the float as a request settlement.
 
-## Payload allowlist v2
+## Payload allowlist v2.1
 
-`_validateXcmPayload` becomes a strict structural decoder, not a collection of
-permitted opcodes. The v2 allowlist is precisely the four rehearsal message
+`_validateXcmPayload` is a strict structural decoder, not a collection of
+permitted opcodes. The request allowlist is precisely the four rehearsal message
 shapes, amended only with `SetTopic(requestId)` and wrapper-owned beneficiaries
 in place of the rehearsal EOA beneficiaries. Those are new v2 bytes, not a claim
 that the rehearsal payloads themselves already had the final wrapper shape.
-Ceremony step 5 re-proves all four exact v2 messages through DryRunApi before any
-wrapper-origin signature or dispatch.
+Ceremony step 5 re-proves all four exact request messages plus the fifth recovery
+message through DryRunApi before any wrapper-origin signature or dispatch.
 
 The implementation commits and pins the exact v2 SCALE bytes used by contract
 tests. `hydration-bank-round-trip.json` remains immutable provenance for the
 rehearsal transactions, events, and balance deltas; it is not relabelled as a v2
 payload fixture.
 
-All four shapes require canonical SCALE encodings, the fixture instruction
+All five shapes require canonical SCALE encodings, the fixture instruction
 order and counts, no unparsed or trailing bytes, and a final declared
-`SetTopic(requestId)`. Nested XCM is decoded to its end; a valid-looking outer
+`SetTopic(requestId)` or `SetTopic(recoveryId)`. Nested XCM is decoded to its end; a valid-looking outer
 message cannot hide an extra inner instruction.
 
 | Shape | Fixed fields | Request-parameter fields |
@@ -195,6 +238,7 @@ message cannot hide an extra inner instruction.
 | `DepositSell` | remote `send` to `Sibling(2034)`; Hydration Router `sell`; filler `AAVE`; asset 22 in, asset 1003 out | sell amount is positive and no greater than `context.assets`; origin/deposit beneficiary remains the configured wrapper converted account; topic equals `requestId` |
 | `WithdrawSell` | remote `send` to `Sibling(2034)`; Hydration Router `sell`; filler `AAVE`; asset 1003 in, asset 22 out | input amount equals `context.shares`; origin/deposit beneficiary remains the configured wrapper converted account; topic equals `requestId` |
 | `WithdrawHome` | remote `send` to `Sibling(2034)`; fixture reserve-withdraw path targets Asset Hub `Parachain(1000)` and USDC asset 1337 | returned amount is positive and no greater than `context.shares` (the full aUSDC amount redeemed in this 1:1 USDC lane); Asset Hub beneficiary is the wrapper address, never caller-supplied; topic equals `requestId` |
+| `RecoveryHome` | owner-only while locally paused; remote `send` to `Sibling(2034)`; same reserve-withdraw path targets Asset Hub `Parachain(1000)` and USDC asset 1337 | positive owner-declared amount and nonce derive `recoveryId`; Asset Hub beneficiary is the wrapper image; topic equals `recoveryId`; exact replay only |
 
 The owner configures the one Hydration converted `AccountId32` used by all
 remote-account checks while the wrapper is paused. It is not derived in
@@ -207,7 +251,7 @@ a new reviewed contract version; the operator cannot configure them.
 Mutations that must revert include a different asset, para id, Router pallet or
 call, filler, direction, remote account, return beneficiary, request topic,
 instruction order/count, nested instruction, amount outside its context bound,
-non-canonical SCALE form, and trailing bytes. Supporting a fifth shape is a
+non-canonical SCALE form, and trailing bytes. Supporting a sixth shape is a
 contract change, not an environment switch.
 
 ## Roles and pause
@@ -215,7 +259,7 @@ contract change, not an environment switch.
 | Capability | Authority | Bounds |
 |---|---|---|
 | Configure the single backend operator, strategy adapter binding, and wrapper converted account | `TreasuryPolicy.owner()` — the treasury multisig | Configuration only while the wrapper is paused; no raw dispatch helper |
-| Queue/dispatch | configured backend operator | Existing `queueRequest` selector only; exact phase order; exact four decoded shapes; request must match an adapter record |
+| Queue/dispatch | configured backend operator | Existing `queueRequest` selector only; exact phase order; exact four request shapes; request must match an adapter record |
 | Finalize through ledger path | associated adapter, reached by the existing backend-authorized AAC settlement call | Existing bounds and idempotency; successful withdrawal requires real wrapper balance |
 | Emergency terminal/recovery actions | treasury multisig | Request-scoped; emitted; cannot alter a successful terminal record |
 | Pause | treasury multisig or `TreasuryPolicy.pauser()` | Blocks new staging/dispatch and successful finalization; failure/recovery paths remain available |
@@ -234,8 +278,9 @@ problems and both are mandatory:
 - `XcmDryRunDispatchGuard` proves the exact bytes against current runtimes and
   asserts the expected forwarded sibling or `Broadcast.Swapped{AAVE}` event
   before the signing callback can run.
-- `XcmWrapper` proves the signed calldata cannot dispatch anything outside the
-  reviewed four-shape grammar or redirect value.
+- `XcmWrapper` proves request calldata cannot dispatch outside the reviewed
+  four-shape grammar and the owner cannot dispatch recovery outside its single
+  fixed-beneficiary fifth shape.
 - `XcmBalanceObserverService` proves destination-state balance movement and
   supplies the actual delta.
 - `_validateSettlementBounds` caps that delta before a terminal record or
@@ -258,13 +303,14 @@ rehearsal provenance.
 The implementation test gate includes:
 
 1. the precompile `execute` entry point, two-leg request storage/state machine,
-   strict four-shape decoder, role/pause controls, and request-scoped custody;
+   strict four-request-shape decoder, strict owner-recovery decoder,
+   role/pause controls, and request-scoped custody;
 2. the owner-only treasury staging/pull/return path, without changing the
    wrapper's queue/finalize selectors;
 3. fixture tests replaying all four exact v2 messages and asserting the
    correct `execute`/`send` call, phase, destination, and hashes;
 4. mutation tests for every fixed/bound field and for unexpected instructions,
-   nested bytes, trailing bytes, wrong phase, conflicting replay, and a fifth
+   nested bytes, trailing bytes, wrong phase, conflicting replay, and a sixth
    message;
 5. custody tests proving treasury capital is pulled exactly once, a backend EOA
    strategy settler cannot stage or front funds, local execute failure rolls the
@@ -288,7 +334,8 @@ exact SCALE blobs and mutated derivatives.
 
 Deployment is a separate, multisig-gated packet. Its ordered plan is:
 
-1. deploy the adapter and wrapper locally paused, with TreasuryPolicy, USDC,
+1. deploy the wrapper and adapter, in that order, with the wrapper locally
+   paused and TreasuryPolicy, USDC,
    immutable future AAC binding, Hydration/Aave constants, strategy binding,
    and backend operator reviewed;
 2. construct the deployed wrapper's Asset Hub origin location and re-read
@@ -297,12 +344,15 @@ Deployment is a separate, multisig-gated packet. Its ordered plan is:
    `AccountId32`, and configure it through the treasury multisig while paused;
 4. configure the observer's asset-22 target at that AccountId32 and its aUSDC
    ERC-20 target at Hydration's chain-specific `truncate20(AccountId32)`;
-5. dry-run all four exact wrapper-origin messages and assert the expected
+5. dry-run all five exact wrapper-origin messages and assert the expected
    forwarded-XCM and `Broadcast.Swapped{AAVE}` evidence;
-6. approve the adapter from the treasury staging authority and run one complete
+6. after configuration/arming, run a limit-aware `ReviveApi_call` through the
+   deployed wrapper/adapter for each exact leg under the exact proposed outer
+   limits. A message-level dry-run alone is never signature authority;
+7. approve the adapter from the treasury staging authority and run one complete
    capped dust cycle through its owner-only staging path, confirming
    authority/adapter/wrapper custody and all four destination-state deltas;
-7. confirm the returned Asset Hub balance and ledger arithmetic, exercise the
+8. confirm the returned Asset Hub balance and ledger arithmetic, exercise the
    pause switch, and only then consider enabling a non-dust treasury limit.
 
 Any converted-account mismatch, dry-run mismatch, missing event, missing or
