@@ -12,6 +12,9 @@ const ACCOUNT = "0xaf39ad769a03cb535d9799e49459b033c1fab84ee23ffe5d0852f8d82f02a
 const AUSDC = "0x2ec4884088d84e5c2970a034732e5209b0acfa93";
 const HYD_SUBSTRATE = "wss://hydration-rpc.n.dwellir.com";
 const HYD_EVM = "https://rpc.hydradx.cloud";
+const POSTAGE = "15XbeapZyWWEZdDCLpxzNhryKj2MsE8rnFUW9cPydXfgSMAK";
+const MAINNET_ACCOUNT = "0x98f0033e26aa4ecf2899e6d09237d40d29fcb68e64d22a621520bde1123564ac";
+const MAINNET_ACCOUNT_SS58 = "14TXaUTyTRiZKGG1zGrzzfc7oUGq2pcEGKNoWXLtJL5TTJbZ";
 
 const fixture = JSON.parse(await readFile(
   new URL("./fixtures/hydration-bank-round-trip.json", import.meta.url),
@@ -35,6 +38,39 @@ test("VenueBalanceReader target binds Hydration aUSDC to truncate20(AccountId32)
   const normalized = normalizeVenueBalanceTarget(targetFor("aUsdc"));
   assert.equal(normalized.evmAccount, fixture.convertedH160);
   assert.equal(normalized.contract, fixture.aUsdcContract);
+});
+
+test("SS58 Hydration account normalizes to the proven AccountId32 and truncate20 address", () => {
+  const position = normalizeVenueBalanceTarget({
+    ledger: "erc20",
+    endpoint: HYD_EVM,
+    chainId: 222222,
+    account: MAINNET_ACCOUNT_SS58,
+    accountTransform: "hydration_truncate20",
+    contract: AUSDC
+  });
+  const float = normalizeVenueBalanceTarget({
+    ledger: "substrate_tokens",
+    endpoint: HYD_SUBSTRATE,
+    account: MAINNET_ACCOUNT_SS58,
+    assetId: 22
+  });
+
+  assert.equal(position.account, MAINNET_ACCOUNT);
+  assert.equal(float.account, MAINNET_ACCOUNT);
+  assert.equal(position.evmAccount, "0x98f0033e26aa4ecf2899e6d09237d40d29fcb68e");
+});
+
+test("SS58 AccountId32 normalization rejects an invalid checksum", () => {
+  assert.throws(
+    () => normalizeVenueBalanceTarget({
+      ledger: "substrate_tokens",
+      endpoint: HYD_SUBSTRATE,
+      account: `${MAINNET_ACCOUNT_SS58.slice(0, -1)}a`,
+      assetId: 22
+    }),
+    /must be a 32-byte AccountId or SS58 address/u
+  );
 });
 
 test("enabled Substrate read dynamically loads @polkadot/api before querying Tokens.accounts", async () => {
@@ -61,6 +97,57 @@ test("enabled Substrate read dynamically loads @polkadot/api before querying Tok
   assert.equal(typeof loadedModule.ApiPromise.create, "function");
   assert.equal(reading.raw, 149_380n);
   await reader.close();
+});
+
+test("postage read uses System.account free balance for the wrapper SS58 account", async () => {
+  let queried;
+  const reader = new VenueBalanceReader({
+    async polkadotApiLoader() { return {}; },
+    async substrateApiFactory() {
+      return {
+        query: {
+          system: {
+            async account(account) {
+              queried = account;
+              return { toJSON: () => ({ data: { free: "15100000000" } }) };
+            }
+          }
+        }
+      };
+    }
+  });
+  const reading = await reader.read({
+    ledger: "substrate_system",
+    endpoint: "wss://polkadot-asset-hub-rpc.polkadot.io",
+    account: POSTAGE
+  });
+
+  assert.equal(queried, POSTAGE);
+  assert.equal(reading.raw, 15_100_000_000n);
+});
+
+test("feed polling runs beside the observer without enabling XCM settlement", async () => {
+  let feedPolls = 0;
+  const observer = new XcmBalanceObserverService(
+    {
+      async listPendingXcmBalanceWatches() {
+        throw new Error("settlement observer must remain disabled");
+      }
+    },
+    undefined,
+    undefined,
+    undefined,
+    {
+      enabled: false,
+      bankLaneFeed: {
+        enabled: true,
+        async pollOnce() { feedPolls += 1; }
+      }
+    }
+  );
+
+  assert.deepEqual(await observer.pollOnce(), []);
+  assert.equal(feedPolls, 1);
 });
 
 test("round-trip fixtures replay all four destination-ledger balance deltas", async () => {

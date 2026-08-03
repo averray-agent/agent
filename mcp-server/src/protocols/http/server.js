@@ -27,6 +27,7 @@ import { createActivityRoutes } from "./activity-routes.js";
 import { createAccountRoutes } from "./account-routes.js";
 import { createAuthRoutes } from "./auth-routes.js";
 import { createBadgeRoutes, createListBadgeReceipts } from "./badge-routes.js";
+import { createBankLaneFeedRoutes } from "./bank-lane-feed-routes.js";
 import { createContentRoutes } from "./content-routes.js";
 import { createDisputeRoutes } from "./dispute-routes.js";
 import { createEventRoutes } from "./event-routes.js";
@@ -70,6 +71,7 @@ const {
   externalPostingService,
   externalPostingWatcher,
   posterReviewService,
+  bankLaneFeed,
   stateStore,
   contentRecoveryLog,
   gateway,
@@ -374,6 +376,11 @@ const handleUsdcLiquidityRoute = createUsdcLiquidityRoutes({
   authMiddleware,
   respond,
   usdcLiquidityStatusService,
+});
+
+const handleBankLaneFeedRoute = createBankLaneFeedRoutes({
+  bankLaneFeed,
+  respond,
 });
 
 const handleAdminJobsRoute = createAdminJobsRoutes({
@@ -728,6 +735,10 @@ const server = createServer(async (request, response) => {
     }
 
     if (await handleOperationalRoute({ request, response, pathname })) {
+      return;
+    }
+
+    if (await handleBankLaneFeedRoute({ request, response, pathname })) {
       return;
     }
 

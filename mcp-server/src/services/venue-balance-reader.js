@@ -1,10 +1,15 @@
+import { createHash } from "node:crypto";
+
+import { base58 } from "@scure/base";
 import { Contract, JsonRpcProvider } from "ethers";
 
 import { ValidationError } from "../core/errors.js";
 
 const ACCOUNT_ID32_RE = /^0x[a-fA-F0-9]{64}$/u;
 const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/u;
+const SS58_RE = /^[1-9A-HJ-NP-Za-km-z]{32,64}$/u;
 const ERC20_BALANCE_ABI = ["function balanceOf(address account) view returns (uint256)"];
+const SS58_HASH_PREFIX = Buffer.from("SS58PRE");
 
 /**
  * Reads a raw balance from a venue-defined (endpoint, account, asset) triple.
@@ -34,6 +39,17 @@ export class VenueBalanceReader {
       const json = record?.toJSON?.() ?? record;
       return {
         raw: BigInt(json?.free ?? 0),
+        asOf: new Date().toISOString(),
+        target: normalized
+      };
+    }
+
+    if (normalized.ledger === "substrate_system") {
+      const api = await this.getSubstrateApi(normalized.endpoint);
+      const record = await api.query.system.account(normalized.account);
+      const json = record?.toJSON?.() ?? record;
+      return {
+        raw: BigInt(json?.data?.free ?? json?.free ?? 0),
         asOf: new Date().toISOString(),
         target: normalized
       };
@@ -85,15 +101,30 @@ export function normalizeVenueBalanceTarget(target = {}) {
   const ledger = String(target.ledger ?? "").trim().toLowerCase();
   const endpoint = requireEndpoint(target.endpoint);
   if (ledger === "substrate_tokens") {
-    if (!ACCOUNT_ID32_RE.test(String(target.account ?? ""))) {
-      throw new ValidationError("substrate_tokens target.account must be a 32-byte AccountId.");
-    }
+    const account = normalizeAccountId32(
+      target.account,
+      "substrate_tokens target.account must be a 32-byte AccountId or SS58 address."
+    );
     const assetId = normalizeAssetId(target.assetId ?? target.asset);
     return {
       ledger,
       endpoint,
-      account: String(target.account).toLowerCase(),
+      account,
       assetId
+    };
+  }
+
+  if (ledger === "substrate_system") {
+    const account = String(target.account ?? "");
+    if (!ACCOUNT_ID32_RE.test(account) && !SS58_RE.test(account)) {
+      throw new ValidationError(
+        "substrate_system target.account must be a 32-byte AccountId or SS58 address."
+      );
+    }
+    return {
+      ledger,
+      endpoint,
+      account: ACCOUNT_ID32_RE.test(account) ? account.toLowerCase() : account
     };
   }
 
@@ -103,12 +134,14 @@ export function normalizeVenueBalanceTarget(target = {}) {
     }
     const account = String(target.account ?? "");
     const accountTransform = String(target.accountTransform ?? "none").trim().toLowerCase();
+    let normalizedAccount = account;
     let evmAccount;
     if (accountTransform === "hydration_truncate20") {
-      if (!ACCOUNT_ID32_RE.test(account)) {
-        throw new ValidationError("hydration_truncate20 requires a 32-byte AccountId.");
-      }
-      evmAccount = `0x${account.slice(2, 42)}`.toLowerCase();
+      normalizedAccount = normalizeAccountId32(
+        account,
+        "hydration_truncate20 requires a 32-byte AccountId or SS58 address."
+      );
+      evmAccount = `0x${normalizedAccount.slice(2, 42)}`;
     } else if (accountTransform === "none" && ADDRESS_RE.test(account)) {
       evmAccount = account.toLowerCase();
     } else {
@@ -119,7 +152,7 @@ export function normalizeVenueBalanceTarget(target = {}) {
     return {
       ledger,
       endpoint,
-      account: account.toLowerCase(),
+      account: normalizedAccount.toLowerCase(),
       accountTransform,
       evmAccount,
       contract: String(target.contract ?? target.asset).toLowerCase(),
@@ -127,7 +160,44 @@ export function normalizeVenueBalanceTarget(target = {}) {
     };
   }
 
-  throw new ValidationError('balance target ledger must be "substrate_tokens" or "erc20".');
+  throw new ValidationError(
+    'balance target ledger must be "substrate_tokens", "substrate_system", or "erc20".'
+  );
+}
+
+function normalizeAccountId32(raw, message) {
+  const account = String(raw ?? "");
+  if (ACCOUNT_ID32_RE.test(account)) return account.toLowerCase();
+  if (SS58_RE.test(account)) {
+    try {
+      return `0x${Buffer.from(decodeSs58AccountId32(account)).toString("hex")}`;
+    } catch {
+      // Fall through to the ledger-specific validation error below.
+    }
+  }
+  throw new ValidationError(message);
+}
+
+function decodeSs58AccountId32(account) {
+  const decoded = base58.decode(account);
+  const prefixLength = (decoded[0] & 0b0100_0000) === 0 ? 1 : 2;
+  const payloadEnd = decoded.length - 2;
+  if (
+    decoded.length !== prefixLength + 32 + 2
+    || (decoded[0] & 0b1000_0000) !== 0
+    || decoded[0] === 46
+    || decoded[0] === 47
+  ) {
+    throw new Error("invalid SS58 AccountId32 length or prefix");
+  }
+  const checksum = createHash("blake2b512")
+    .update(SS58_HASH_PREFIX)
+    .update(decoded.subarray(0, payloadEnd))
+    .digest();
+  if (decoded[payloadEnd] !== checksum[0] || decoded[payloadEnd + 1] !== checksum[1]) {
+    throw new Error("invalid SS58 checksum");
+  }
+  return decoded.subarray(prefixLength, payloadEnd);
 }
 
 function loadPolkadotApi() {

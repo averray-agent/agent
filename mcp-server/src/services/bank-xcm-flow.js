@@ -90,7 +90,12 @@ export class BankXcmFlowCoordinator {
       throw new ValidationError("Bank XCM flow requires queue and follow-up dispatch callbacks.");
     }
 
-    const watch = await this.balanceObserver.register({ requestId, ...observation });
+    const watch = await this.balanceObserver.register({
+      requestId,
+      ...observation,
+      kind: intent?.kind,
+      phase: "registered"
+    });
     this.publish("bank.allocation_intent_recorded", requestId, {
       intent,
       watch: summarizeWatch(watch)
@@ -100,6 +105,7 @@ export class BankXcmFlowCoordinator {
       { requestId, leg: messages[0].label ?? "message_1", payload: messages[0].payload, expected: messages[0].expected },
       (payload, evidence) => queueRequest({ requestId, intent, payload, evidence })
     );
+    await this.balanceObserver.setRequestPhase?.(requestId, "leg1-dispatched");
 
     if (typeof waitForFollowUpReady === "function") {
       await waitForFollowUpReady({ requestId, intent, first, watch });
@@ -109,6 +115,7 @@ export class BankXcmFlowCoordinator {
       { requestId, leg: messages[1].label ?? "message_2", payload: messages[1].payload, expected: messages[1].expected },
       (payload, evidence) => dispatchFollowUp({ requestId, intent, payload, evidence })
     );
+    await this.balanceObserver.setRequestPhase?.(requestId, "leg2-dispatched");
 
     this.publish("bank.xcm_two_message_dispatch_complete", requestId, {
       intent,
