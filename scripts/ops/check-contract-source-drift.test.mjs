@@ -172,7 +172,7 @@ test("known-unshipped entries require an explicit non-empty reason", () => {
   );
 });
 
-test("mainnet records deployed EscrowCore v2 and removes its unshipped allowlist", () => {
+test("mainnet records deployed EscrowCore v2 and pins the legacy v1 source divergence exactly", () => {
   const manifest = JSON.parse(
     readFileSync(
       new URL("../../deployments/mainnet.json", import.meta.url),
@@ -188,6 +188,15 @@ test("mainnet records deployed EscrowCore v2 and removes its unshipped allowlist
     contracts.find((contract) => contract.name === "escrowCore")?.address,
     "0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC"
   );
+  assert.deepEqual(allowlist.get("legacyEscrowCore"), [
+    {
+      sourceCommit: "775a826b0a33d0ec04dd19f0455e69402dc9bbcd",
+      maskedRuntimeCodeHash:
+        "sha256:64ec86a04369cbbd49a30e0dcf04cf785707a78fcd42f87c0c692f77a7372788",
+      reason:
+        "The source-controlled EscrowCore now targets active v2 at 0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC; legacy v1 at 0x9cCd1DbBB5C354CC6218e55D3cE924A4d631C035 remains deployed only for draining, so this exact v2 candidate runtime is intentionally unshipped to the legacy address.",
+    },
+  ]);
 });
 
 test("testnet pins EscrowCore v2 to one masked runtime and an explicit reason", () => {

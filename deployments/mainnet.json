@@ -68,6 +68,15 @@
       "verifiedAt": "2026-07-30T10:05:34.288Z"
     }
   },
+  "knownUnshippedContractChanges": {
+    "legacyEscrowCore": [
+      {
+        "sourceCommit": "775a826b0a33d0ec04dd19f0455e69402dc9bbcd",
+        "maskedRuntimeCodeHash": "sha256:64ec86a04369cbbd49a30e0dcf04cf785707a78fcd42f87c0c692f77a7372788",
+        "reason": "The source-controlled EscrowCore now targets active v2 at 0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC; legacy v1 at 0x9cCd1DbBB5C354CC6218e55D3cE924A4d631C035 remains deployed only for draining, so this exact v2 candidate runtime is intentionally unshipped to the legacy address."
+      }
+    ]
+  },
   "parameters": {
     "dailyOutflowCap": "115792089237316195423570985008687907853269984665640564039457584007913129639935",
     "borrowCap": "25000000",
