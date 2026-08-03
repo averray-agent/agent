@@ -2,19 +2,46 @@
 
 **Owner:** Codex (backend / observer lane)
 **Sequence:** after the dust cycle. Leg 2 produces the first calibration event — capture it.
-**Consumer contract:** `services/slack-operator/src/bank-feed.ts` in
-`depre-dev/averray-reference-agent` (PR #697) — authored and test-covered.
-Implement to it exactly; it is the interface, not a suggestion.
 **Status of the lane:** the wrapper is armed on mainnet. This is a
 definition-of-done item of the active activation, not a later phase.
 
 ---
 
+## Where this is implemented — and where it is NOT
+
+**IMPLEMENT HERE: `averray-agent/agent`**, in the `mcp-server` service, beside
+the observer that already performs these reads:
+
+- `mcp-server/src/services/xcm-balance-observer.js`
+- `mcp-server/src/services/venue-balance-reader.js`
+- `mcp-server/src/services/xcm-balance-observer.test.js`
+
+added by `c22571d` — *"feat(bank): add venue balance observer and dry-run
+guard"*, **`averray-agent/agent#910`**. Every `#910` in this document means that
+PR, in this repo.
+
+**DO NOT IMPLEMENT IN `depre-dev/averray-reference-agent`.** That repo holds the
+CONSUMER contract only, at `services/slack-operator/src/bank-feed.ts`
+(`depre-dev/averray-reference-agent#697`). Read it as the interface; implement
+to it exactly. It has no observer and must never grow one — putting chain reads
+there is precisely the "one reader of the chain; Hermes renders" boundary this
+packet exists to hold, broken by the packet itself.
+
+There is no reference-agent observer branch. There should not be.
+
+*(This section exists because the first version of this packet named the
+consumer contract's path without naming its repo, and left `#910` unqualified.
+Codex correctly refused to implement rather than put chain reads in the display
+repo — the refusal was the right call and the ambiguity was mine.)*
+
+---
+
 ## What to build
 
-A read-only endpoint exposing the Bank lane's data, derived from the #910
-observer's reads. Shaped like `/monitor/product-health`: **non-secret,
-internal-network, no auth**.
+A read-only endpoint exposing the Bank lane's data, derived from the reads the
+`mcp-server` observer already performs. Shaped like `/monitor/product-health`: **non-secret,
+internal-network, no auth** — served from `mcp-server`, on the same internal
+network Hermes can already reach.
 
 Hermes renders four facts from it — in-flight requests, the aToken position,
 the operating float, and the wrapper postage balance — and nothing else needs
@@ -138,4 +165,5 @@ render after the path has proven, at least once, that it can see funds.
   names the aToken address it proved.
 
 Once this lands, the Hermes rendering slice is mechanical: the view models and
-their tests already exist behind this seam.
+their tests already exist behind this seam, in
+`depre-dev/averray-reference-agent#697`.
