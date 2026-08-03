@@ -54,22 +54,31 @@ pass: the fresh estimator and its 20% headroom check remain authoritative.
 
 ## 1. Build and deploy locally paused
 
-Use a fresh checkout of the gated merge commit. Confirm that the two contract
-sources are unchanged from the reviewed implementation, then build:
+Use a fresh checkout of the gated merge commit. The deploy command now treats
+the source checkout as part of the safety boundary: `--source-commit` is
+required in preview and commit modes, must equal `git rev-parse HEAD`, and the
+worktree must be clean. It force-rebuilds Foundry artifacts inside the command;
+an existing `out/` is never trusted. Run the contract tests separately, then
+generate the preview:
 
 ```sh
-forge build --skip test
 forge test
 node scripts/ops/deploy-bank-xcm-v2.mjs \
   --profile mainnet \
   --expected-deployer 0x9Ab8531FBb0948C542a31298FD61335f30064239 \
+  --source-commit FULL_40_CHARACTER_GATED_COMMIT \
   --replace-existing \
   --bundle-out /tmp/bank-xcm-v2-plan.json
 ```
 
 The output includes the full creation calldata for both contracts, constructor
 arguments, byte counts, artifact hashes, estimates, pending nonce, and predicted
-CREATE addresses. The bundle is create-only. Review it before adding `--commit`.
+CREATE addresses. Before any signature, it must report the reviewed wrapper
+creation hash
+`sha256:2bb576e5c68f5ed74f3de6e8d69116ca4e3f0b2f25734e363a1835265caef058`
+and an ABI containing both `dispatchRecoveryHome` and
+`previewRecoveryHomeId(uint256,uint64)` (`0xdb46bee1`). The bundle is
+create-only. Review it before adding `--commit`.
 
 After Pascal authorizes deployment, the only permitted commit form is:
 
@@ -90,12 +99,20 @@ N then adapter nonce N+1, and verifies:
 - wrapper `policy`, default XCM precompile, bytecode, and predicted address;
 - wrapper `dispatchPaused == true`, `operator == address(0)`, and converted
   account is zero;
+- a raw post-deploy call to the hard-coded v2.1 selector `0xdb46bee1`
+  (`previewRecoveryHomeId`) succeeds and returns a non-zero `bytes32`; this is
+  intentionally independent of the just-built artifact, so a stale
+  checkout/artifact cannot verify itself;
 - adapter `policy`, USDC, strategy id, wrapper, and existing AAC immutables;
 - no role or configuration call was sent.
 
 Stop if either receipt is not successful or any postcondition differs. A first
 deployment followed by a failed second is an incident; do not retry with a new
 nonce or alternate constructor.
+
+The wrapper at `0x22E90B74ca73E86F13325Af6FdeA00Cd1da90943` was deployed from the
+stale pre-v2.1 ceremony checkout and is abandoned. Its 0.26 DOT postage is a
+recorded write-off; never configure, arm, or reuse it.
 
 ## 2. Fresh wrapper-origin conversion (two endpoints)
 
@@ -402,6 +419,8 @@ beneficiary, retry with a new nonce, front funds from an EOA, or increase the ca
 ## Handback checklist
 
 - two deployment receipts and paused-state/immutable reads;
+- enforced source commit/clean-tree proof, force-rebuild proof, reviewed
+  creation hash, and the successful independent `0xdb46bee1` selector probe;
 - fresh two-endpoint conversion evidence;
 - configuration first-leg hash/timepoint and `MultisigExecuted` inner `Ok`;
 - all five exact messages, hashes, raw DryRunApi evidence, and asserted events;

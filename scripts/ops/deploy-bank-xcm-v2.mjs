@@ -15,10 +15,13 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline/promises";
 import {
+  AbiCoder,
   Contract,
   ContractFactory,
+  Interface,
   Wallet,
   ZeroAddress,
+  concat,
   getAddress,
   getCreateAddress,
   isAddress
@@ -46,6 +49,10 @@ const repoRoot = resolve(here, "..", "..");
 const WRAPPER_ARTIFACT = resolve(repoRoot, "out/XcmWrapperV2.sol/XcmWrapperV2.json");
 const ADAPTER_ARTIFACT = resolve(repoRoot, "out/HydrationUsdcAdapter.sol/HydrationUsdcAdapter.json");
 const DEFAULT_EXPECTED_DEPLOYER = "0x9Ab8531FBb0948C542a31298FD61335f30064239";
+export const REVIEWED_WRAPPER_V21_CREATION_CODE_HASH = "sha256:2bb576e5c68f5ed74f3de6e8d69116ca4e3f0b2f25734e363a1835265caef058";
+export const WRAPPER_V21_VERSION_SELECTOR = "0xdb46bee1";
+const WRAPPER_V21_PROBE_AMOUNT = 100_000n;
+const WRAPPER_V21_PROBE_NONCE = 1n;
 
 export function parseArgs(argv) {
   const args = { profile: "mainnet", commit: false, replaceExisting: false };
@@ -67,20 +74,104 @@ export function parseArgs(argv) {
 function usage() {
   return [
     "Usage (read-only plan):",
-    "  forge build --skip test",
     "  node scripts/ops/deploy-bank-xcm-v2.mjs --profile mainnet \\",
-    `    --expected-deployer ${DEFAULT_EXPECTED_DEPLOYER} [--bundle-out /tmp/bank-xcm-v2-plan.json]`,
+    `    --expected-deployer ${DEFAULT_EXPECTED_DEPLOYER} --source-commit <full-40-char-commit> \\`,
+    "    [--bundle-out /tmp/bank-xcm-v2-plan.json]",
     "    [--replace-existing]  # required for the reviewed v2.1 replacement",
     "",
     "Commit (Pascal-authorized ceremony only): add --commit and",
-    "  --signer-secret-ref op://... --source-commit <full-40-char-commit>",
+    "  --signer-secret-ref op://...",
     "",
-    "This command only deploys. It never configures or unpauses the wrapper."
+    "The command refuses a dirty/mismatched checkout and force-rebuilds its",
+    "Foundry artifacts before planning or signing. It only deploys; it never",
+    "configures or unpauses the wrapper."
   ].join("\n");
 }
 
 function currentCommit() {
   return execFileSync("git", ["rev-parse", "HEAD"], { cwd: repoRoot, encoding: "utf8" }).trim();
+}
+
+function currentStatus() {
+  return execFileSync("git", ["status", "--porcelain", "--untracked-files=all"], {
+    cwd: repoRoot,
+    encoding: "utf8"
+  });
+}
+
+export function assertSourceCheckout({ sourceCommit, headCommit, porcelain }) {
+  const expected = String(sourceCommit ?? "").trim().toLowerCase();
+  const head = String(headCommit ?? "").trim().toLowerCase();
+  if (!/^[0-9a-f]{40}$/u.test(expected)) {
+    throw new Error("--source-commit must be a full 40-character commit.");
+  }
+  if (head !== expected) {
+    throw new Error(`checkout HEAD ${head || "<unknown>"} does not match --source-commit ${expected}; refusing provenance label drift.`);
+  }
+  if (String(porcelain ?? "").trim() !== "") {
+    throw new Error("checkout is dirty; refusing to build or deploy provenance from modified/untracked source.");
+  }
+  return true;
+}
+
+export function rebuildFoundryArtifacts({ runner = execFileSync } = {}) {
+  runner("forge", ["build", "--skip", "test", "--force"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    stdio: "inherit"
+  });
+  return true;
+}
+
+export function assertReviewedWrapperV21Artifact({ abi, evidence }) {
+  if (evidence?.creationCodeHash !== REVIEWED_WRAPPER_V21_CREATION_CODE_HASH) {
+    throw new Error(
+      `XcmWrapperV2 creation hash ${evidence?.creationCodeHash ?? "<missing>"} does not match reviewed v2.1 ${REVIEWED_WRAPPER_V21_CREATION_CODE_HASH}.`
+    );
+  }
+  let dispatch;
+  let preview;
+  try {
+    const iface = new Interface(abi);
+    dispatch = iface.getFunction("dispatchRecoveryHome(uint256,uint64,bytes,bytes)");
+    preview = iface.getFunction("previewRecoveryHomeId(uint256,uint64)");
+  } catch {
+    throw new Error("XcmWrapperV2 artifact ABI does not expose the reviewed v2.1 recovery surface/selector.");
+  }
+  if (!dispatch || !preview || preview.selector.toLowerCase() !== WRAPPER_V21_VERSION_SELECTOR) {
+    throw new Error("XcmWrapperV2 artifact ABI does not expose the reviewed v2.1 recovery surface/selector.");
+  }
+  return {
+    creationCodeHash: evidence.creationCodeHash,
+    dispatchRecoveryHomeSelector: dispatch.selector,
+    previewRecoveryHomeIdSelector: preview.selector
+  };
+}
+
+export async function probeWrapperV21Selector(provider, wrapperAddress) {
+  const args = AbiCoder.defaultAbiCoder().encode(
+    ["uint256", "uint64"],
+    [WRAPPER_V21_PROBE_AMOUNT, WRAPPER_V21_PROBE_NONCE]
+  );
+  const calldata = concat([WRAPPER_V21_VERSION_SELECTOR, args]);
+  let response;
+  try {
+    response = await provider.call({ to: getAddress(wrapperAddress), data: calldata });
+  } catch (error) {
+    throw new Error(
+      `deployed wrapper does not execute v2.1 selector ${WRAPPER_V21_VERSION_SELECTOR}: ${error?.shortMessage ?? error?.message ?? error}`
+    );
+  }
+  if (!/^0x[0-9a-fA-F]{64}$/u.test(response) || /^0x0{64}$/u.test(response)) {
+    throw new Error(`deployed wrapper returned invalid v2.1 selector response: ${response}.`);
+  }
+  return {
+    selector: WRAPPER_V21_VERSION_SELECTOR,
+    calldata,
+    response,
+    probeAmount: WRAPPER_V21_PROBE_AMOUNT.toString(),
+    probeNonce: WRAPPER_V21_PROBE_NONCE.toString()
+  };
 }
 
 function validateManifest(manifest, replaceExisting) {
@@ -253,6 +344,10 @@ async function verifyDeployment(provider, plan, receipts, { wrapperArtifact, ada
   if (!wrapperRuntime.matches || !adapterRuntime.matches) {
     throw new Error("deployed runtime does not match the reviewed Foundry artifacts outside declared immutable slots.");
   }
+  // This check deliberately does not derive from the just-built artifact. A
+  // stale checkout can produce a self-consistent artifact/runtime pair; the
+  // hard-coded v2.1 selector is the external version fact that catches it.
+  const versionProbe = await probeWrapperV21Selector(provider, plan.wrapper.address);
   const observed = {
     wrapper: {
       txHash: receipts.wrapper.hash,
@@ -262,7 +357,8 @@ async function verifyDeployment(provider, plan, receipts, { wrapperArtifact, ada
       dispatchPaused: await wrapper.dispatchPaused(),
       operator: getAddress(await wrapper.operator()),
       hydrationAccountId32: await wrapper.hydrationAccountId32(),
-      artifactRuntimeMatch: true
+      artifactRuntimeMatch: true,
+      versionProbe
     },
     adapter: {
       txHash: receipts.adapter.hash,
@@ -298,12 +394,21 @@ export async function main(argv = process.argv.slice(2)) {
     return;
   }
   if (args.profile !== "mainnet") throw new Error("Bank gate 4c supports --profile mainnet only.");
+  if (!args.sourceCommit) throw new Error("--source-commit is required for both preview and commit modes.");
+  const sourceCommit = String(args.sourceCommit).trim().toLowerCase();
+  assertSourceCheckout({ sourceCommit, headCommit: currentCommit(), porcelain: currentStatus() });
+  rebuildFoundryArtifacts();
+  // Re-check after the toolchain runs so a build hook or generated tracked
+  // output cannot make the eventual provenance differ from the reviewed tree.
+  assertSourceCheckout({ sourceCommit, headCommit: currentCommit(), porcelain: currentStatus() });
   const expectedDeployer = getAddress(args.expectedDeployer ?? DEFAULT_EXPECTED_DEPLOYER);
   const manifest = loadJson(resolve(repoRoot, "deployments/mainnet.json"));
   const wrapperArtifact = loadJson(WRAPPER_ARTIFACT);
   const adapterArtifact = loadJson(ADAPTER_ARTIFACT);
-  const sourceCommit = args.sourceCommit ?? currentCommit();
-  if (!/^[0-9a-f]{40}$/u.test(sourceCommit)) throw new Error("--source-commit must be a full 40-character commit.");
+  const reviewedArtifact = assertReviewedWrapperV21Artifact({
+    abi: wrapperArtifact.abi,
+    evidence: artifactEvidence(wrapperArtifact)
+  });
 
   const rpc = await createCeremonyRpcContext({ manifest, phase: "bank-xcm-v2-deploy", write: args.commit });
   try {
@@ -321,6 +426,9 @@ export async function main(argv = process.argv.slice(2)) {
       schemaVersion: plan.replacement ? 2 : 1,
       kind: "averray.bankXcmV2DeploymentPlan",
       sourceCommit,
+      sourceCheckoutVerified: true,
+      artifactsForceRebuilt: true,
+      reviewedArtifact,
       ...plan
     };
     if (args.bundleOut) {
