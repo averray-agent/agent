@@ -1,0 +1,253 @@
+{
+  "schemaVersion": 1,
+  "kind": "averray.bankXcmV2DryRunEvidence",
+  "profile": "mainnet",
+  "capturedAt": "2026-08-03T13:41:43.519Z",
+  "flowEnabled": false,
+  "signedOrBroadcastTransactions": 0,
+  "wrapper": "0xc846eE73e49A748e59C7Ac8f8742F542a552D24C",
+  "convertedAccountId32": "0x98f0033e26aa4ecf2899e6d09237d40d29fcb68e64d22a621520bde1123564ac",
+  "runtimeBlocks": {
+    "assetHub": 19011799,
+    "hydration": 13443555
+  },
+  "observerTargets": {
+    "asset22": {
+      "endpoint": "wss://hydration-rpc.n.dwellir.com",
+      "reader": "Tokens.accounts",
+      "account": "0x98f0033e26aa4ecf2899e6d09237d40d29fcb68e64d22a621520bde1123564ac",
+      "assetId": 22,
+      "observedRaw": "0",
+      "asOfBlock": 13443561
+    },
+    "aUsdc": {
+      "endpoint": "https://rpc.hydradx.cloud",
+      "reader": "ERC20.balanceOf",
+      "contract": "0x2ec4884088D84E5C2970A034732E5209b0aCFA93",
+      "accountTransform": "truncate20",
+      "account": "0x98f0033E26AA4ecf2899e6D09237d40d29FCB68E",
+      "observedRaw": "0",
+      "asOfBlock": 13443561
+    }
+  },
+  "liveConfiguration": {
+    "dispatchPaused": true,
+    "hydrationAccountId32": "0x98f0033e26aa4ecf2899e6d09237d40d29fcb68e64d22a621520bde1123564ac",
+    "operator": "0x5a6836c6D4d293F6E5377E6c28054F4171915813",
+    "strategyAdapter": "0x5eaF58a3e2819A26B66822529aD92fcec107cc98"
+  },
+  "feeQuotes": {
+    "depositSell": {
+      "asOfBlock": 13443555,
+      "weight": {
+        "refTime": "16,768,481,536",
+        "proofSize": "161,328"
+      },
+      "feeRaw": "20201",
+      "raw": {
+        "weight": {
+          "Ok": {
+            "refTime": "16,768,481,536",
+            "proofSize": "161,328"
+          }
+        },
+        "fee": {
+          "Ok": "20,201"
+        }
+      }
+    },
+    "withdrawSell": {
+      "asOfBlock": 13443556,
+      "weight": {
+        "refTime": "16,768,481,536",
+        "proofSize": "161,328"
+      },
+      "feeRaw": "20201",
+      "raw": {
+        "weight": {
+          "Ok": {
+            "refTime": "16,768,481,536",
+            "proofSize": "161,328"
+          }
+        },
+        "fee": {
+          "Ok": "20,201"
+        }
+      }
+    },
+    "withdrawPlanningOnly": {
+      "asOfBlock": 13443555,
+      "weight": {
+        "refTime": "16,768,481,536",
+        "proofSize": "161,328"
+      },
+      "feeRaw": "20201",
+      "raw": {
+        "weight": {
+          "Ok": {
+            "refTime": "16,768,481,536",
+            "proofSize": "161,328"
+          }
+        },
+        "fee": {
+          "Ok": "20,201"
+        }
+      },
+      "usedInFinalMessage": false,
+      "reason": "Superseded after the preceding deposit advanced the sequential fork state."
+    },
+    "depositFundingRemote": {
+      "asOfBlock": 13443555,
+      "weight": {
+        "refTime": "500,000,000",
+        "proofSize": "0"
+      },
+      "feeRaw": "602",
+      "raw": {
+        "weight": {
+          "Ok": {
+            "refTime": "500,000,000",
+            "proofSize": "0"
+          }
+        },
+        "fee": {
+          "Ok": "602"
+        }
+      }
+    },
+    "withdrawHomeRemote": {
+      "asOfBlock": 19011799,
+      "weight": {
+        "refTime": "459,753,000",
+        "proofSize": "10,943"
+      },
+      "feeRaw": "677",
+      "raw": {
+        "weight": {
+          "Ok": {
+            "refTime": "459,753,000",
+            "proofSize": "10,943"
+          }
+        },
+        "fee": {
+          "Ok": "677"
+        }
+      }
+    },
+    "units": "raw asset-22 / Asset-Hub asset-1337 as applicable"
+  },
+  "ephemeralForkState": {
+    "reason": "State-capable rehearsal only; exact message bytes are unchanged and no transaction is signed or broadcast.",
+    "assetHub": {
+      "wrapperAsset1337Raw": "150000",
+      "wrapperNativeFreeRaw": "10000000000",
+      "liveWrapperNativeFreeRaw": "100000000",
+      "liveWrapperAsset1337Raw": "0",
+      "note": "Native fee headroom was staged ephemerally because the live wrapper image currently holds only 0.01 DOT; real dust execution must fund the wrapper fee balance first."
+    },
+    "hydration": {
+      "convertedAsset22Raw": "500000",
+      "convertedNativeRaw": "1000000000000000000",
+      "lifecycleStateAppliedOnlyBetweenDryRuns": true
+    }
+  },
+  "messageParameters": {
+    "depositAssetsRaw": "150000",
+    "depositSellAmountRaw": "100000",
+    "depositFeeRaw": "20201",
+    "withdrawSharesRaw": "100000",
+    "withdrawFeeRaw": "20201",
+    "homeAmountRaw": "100000",
+    "homeFeeRaw": "677",
+    "depositNonce": "1",
+    "withdrawNonce": "2",
+    "armEmitterRequirement": "Use these exact amount/fee/nonce values; defaults produce different message hashes and will fail the evidence binding."
+  },
+  "exactMessages": [
+    {
+      "label": "deposit_funding",
+      "chain": "asset_hub",
+      "destination": "0x050000",
+      "message": "0x051000040002043205e51400c22709002b010e00040002043205e51400c2270900010100c91f0813010300a10f043205e51400c2270900000d0102040001010098f0033e26aa4ecf2899e6d09237d40d29fcb68e64d22a621520bde1123564ac2cb609f4d875e0c6f4f4b1dddd90efd687215d1ac9ecd90d0de51b9304f57ecaac",
+      "requestId": "0xb609f4d875e0c6f4f4b1dddd90efd687215d1ac9ecd90d0de51b9304f57ecaac",
+      "messageHash": "0x0b8878cd3e2926ed648ff987b56c1bc729fdea663c874c3ea870ce2b97462462"
+    },
+    {
+      "label": "deposit_sell",
+      "chain": "hydration",
+      "destination": "0x05010100c91f",
+      "message": "0x05180004010300a10f043205e51400a63b010013010300a10f043205e51400a63b0100000601010700c817a80482841e00d0430016000000eb030000a086010000000000000000000000000000000000000000000000000000000000040416000000eb030000140d0102040001010098f0033e26aa4ecf2899e6d09237d40d29fcb68e64d22a621520bde1123564ac2cb609f4d875e0c6f4f4b1dddd90efd687215d1ac9ecd90d0de51b9304f57ecaac",
+      "requestId": "0xb609f4d875e0c6f4f4b1dddd90efd687215d1ac9ecd90d0de51b9304f57ecaac",
+      "messageHash": "0x989746a81b6f85dba58b47f8bdfddb2107478575d331a6f4dba2c3962a595573"
+    },
+    {
+      "label": "withdraw_sell",
+      "chain": "hydration",
+      "destination": "0x05010100c91f",
+      "message": "0x05180004010300a10f043205e51400a63b010013010300a10f043205e51400a63b0100000601010700c817a80482841e00d04300eb03000016000000a0860100000000000000000000000000000000000000000000000000000000000404eb03000016000000140d0102040001010098f0033e26aa4ecf2899e6d09237d40d29fcb68e64d22a621520bde1123564ac2cc3a120f46f9c29e16f49405cfef630ba8959eddb7de9de90f422ff3d03adf9fc",
+      "requestId": "0xc3a120f46f9c29e16f49405cfef630ba8959eddb7de9de90f422ff3d03adf9fc",
+      "messageHash": "0xffb8b0ed21a0b4f8124617d0797c246641e223676cd49fafc40c123e7ab1cabc"
+    },
+    {
+      "label": "withdraw_home",
+      "chain": "hydration",
+      "destination": "0x05010100c91f",
+      "message": "0x05140004010300a10f043205e51400821a060013010300a10f043205e51400821a0600001410010204010100a10f08130002043205e51400950a000d01020400010100c846ee73e49a748e59c7ac8f8742f542a552d24ceeeeeeeeeeeeeeeeeeeeeeee2cc3a120f46f9c29e16f49405cfef630ba8959eddb7de9de90f422ff3d03adf9fc",
+      "requestId": "0xc3a120f46f9c29e16f49405cfef630ba8959eddb7de9de90f422ff3d03adf9fc",
+      "messageHash": "0x40fff2e79862910a700ab69af95c51bb50b8b8b7958727c504f3f66e307bfbd8"
+    }
+  ],
+  "legs": [
+    {
+      "label": "deposit_funding",
+      "requestId": "0xb609f4d875e0c6f4f4b1dddd90efd687215d1ac9ecd90d0de51b9304f57ecaac",
+      "messageHash": "0x0b8878cd3e2926ed648ff987b56c1bc729fdea663c874c3ea870ce2b97462462",
+      "passed": true,
+      "forwardedParaId": 2034,
+      "remoteEvent": "Tokens.Deposited",
+      "assetId": 22,
+      "depositedRaw": "149398",
+      "rawEvidence": "docs/evidence/mainnet-bank-xcm-v2-dry-runs-2026-08-03.raw.json#/legs/deposit_funding"
+    },
+    {
+      "label": "deposit_sell",
+      "requestId": "0xb609f4d875e0c6f4f4b1dddd90efd687215d1ac9ecd90d0de51b9304f57ecaac",
+      "messageHash": "0x989746a81b6f85dba58b47f8bdfddb2107478575d331a6f4dba2c3962a595573",
+      "passed": true,
+      "event": "Broadcast.Swapped",
+      "runtimeEvent": "Broadcast.Swapped3",
+      "fillerType": "AAVE",
+      "assetIn": 22,
+      "assetOut": 1003,
+      "amountInRaw": "100000",
+      "amountOutRaw": "100000",
+      "rawEvidence": "docs/evidence/mainnet-bank-xcm-v2-dry-runs-2026-08-03.raw.json#/legs/deposit_sell"
+    },
+    {
+      "label": "withdraw_sell",
+      "requestId": "0xc3a120f46f9c29e16f49405cfef630ba8959eddb7de9de90f422ff3d03adf9fc",
+      "messageHash": "0xffb8b0ed21a0b4f8124617d0797c246641e223676cd49fafc40c123e7ab1cabc",
+      "passed": true,
+      "event": "Broadcast.Swapped",
+      "runtimeEvent": "Broadcast.Swapped3",
+      "fillerType": "AAVE",
+      "assetIn": 1003,
+      "assetOut": 22,
+      "amountInRaw": "100000",
+      "amountOutRaw": "100000",
+      "rawEvidence": "docs/evidence/mainnet-bank-xcm-v2-dry-runs-2026-08-03.raw.json#/legs/withdraw_sell"
+    },
+    {
+      "label": "withdraw_home",
+      "requestId": "0xc3a120f46f9c29e16f49405cfef630ba8959eddb7de9de90f422ff3d03adf9fc",
+      "messageHash": "0x40fff2e79862910a700ab69af95c51bb50b8b8b7958727c504f3f66e307bfbd8",
+      "passed": true,
+      "forwardedParaId": 1000,
+      "remoteEvent": "Assets.Deposited",
+      "assetId": 1337,
+      "depositedRaw": "98721",
+      "beneficiaryAccountId32": "0xc846ee73e49a748e59c7ac8f8742f542a552d24ceeeeeeeeeeeeeeeeeeeeeeee",
+      "rawEvidence": "docs/evidence/mainnet-bank-xcm-v2-dry-runs-2026-08-03.raw.json#/legs/withdraw_home"
+    }
+  ]
+}
