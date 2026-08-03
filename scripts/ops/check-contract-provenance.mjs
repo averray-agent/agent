@@ -57,6 +57,8 @@ export const CONTRACT_ARTIFACTS = Object.freeze({
   discoveryRegistry: ["DiscoveryRegistry.sol", "DiscoveryRegistry"],
   escrowCore: ["EscrowCore.sol", "EscrowCore"],
   legacyEscrowCore: ["EscrowCore.sol", "EscrowCore"],
+  xcmWrapper: ["XcmWrapperV2.sol", "XcmWrapperV2"],
+  hydrationUsdcAdapter: ["HydrationUsdcAdapter.sol", "HydrationUsdcAdapter"],
 });
 
 function sha256(bytes) {
