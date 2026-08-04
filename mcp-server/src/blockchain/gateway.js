@@ -1842,6 +1842,21 @@ export class BlockchainGateway {
     });
   }
 
+  async getXcmRequestParameters(requestId) {
+    return this.withGatewayError("getXcmRequestParameters", async () => {
+      const contract = this.requireXcmWrapper("getXcmRequestParameters");
+      const normalizedRequestId = this.toRequestId(requestId);
+      const parameters = await contract.getRequestParameters(normalizedRequestId);
+      return {
+        requestId: normalizedRequestId,
+        sellAmountRaw: this.toRawString(parameters.sellAmount),
+        minimumOutputRaw: this.toRawString(parameters.minimumOutput),
+        maxFeePerLegRaw: this.toRawString(parameters.maxFeePerLeg),
+        dispatchDeadlineRaw: this.toRawString(parameters.dispatchDeadline)
+      };
+    });
+  }
+
   async getStrategyRequest(requestId) {
     return this.withGatewayError("getStrategyRequest", async () => {
       const normalizedRequestId = this.toRequestId(requestId);

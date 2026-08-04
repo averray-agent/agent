@@ -125,6 +125,80 @@ export function createAdminXcmRoutes({
       return true;
     }
 
+    if (request.method === "POST" && pathname === "/admin/xcm/watch/backfill") {
+      const auth = await authenticateAndLimit(request, url);
+      const payload = await readJsonBody(request);
+      const requestId = resolveRequestId(payload, url);
+      if (!requestId) throw new ValidationError("requestId is required.");
+      const mutation = createMutationContext({
+        auth,
+        buildMutationRequestHash,
+        payload,
+        requestId,
+        route: "/admin/xcm/watch/backfill"
+      });
+      const replay = await getIdempotentMutationReplay({
+        bucket: "admin_xcm_watch_backfill",
+        key: mutation.key,
+        requestHash: mutation.requestHash
+      });
+      if (replay) {
+        respond(response, replay.statusCode, replay.body);
+        return true;
+      }
+      const watch = await service.backfillBankXcmWatch(requestId, {
+        fromBlock: payload?.fromBlock,
+        toBlock: payload?.toBlock
+      });
+      await storeIdempotentMutationReceipt({
+        bucket: "admin_xcm_watch_backfill",
+        key: mutation.key,
+        requestHash: mutation.requestHash,
+        response: watch,
+        statusCode: 200
+      });
+      respond(response, 200, watch);
+      return true;
+    }
+
+    if (request.method === "POST" && pathname === "/admin/xcm/dispatch") {
+      const auth = await authenticateAndLimit(request, url);
+      const payload = await readJsonBody(request);
+      const requestId = resolveRequestId(payload, url);
+      if (!requestId) throw new ValidationError("requestId is required.");
+      const leg = String(payload?.leg ?? "").trim();
+      if (!leg) throw new ValidationError("leg is required.");
+      if (typeof payload?.idempotencyKey !== "string" || !payload.idempotencyKey.trim()) {
+        throw new ValidationError("idempotencyKey is required for Bank XCM dispatch.");
+      }
+      const mutation = createMutationContext({
+        auth,
+        buildMutationRequestHash,
+        payload: { requestId, leg, idempotencyKey: payload?.idempotencyKey },
+        requestId,
+        route: "/admin/xcm/dispatch"
+      });
+      const replay = await getIdempotentMutationReplay({
+        bucket: "admin_xcm_dispatch",
+        key: mutation.key,
+        requestHash: mutation.requestHash
+      });
+      if (replay) {
+        respond(response, replay.statusCode, replay.body);
+        return true;
+      }
+      const dispatched = await service.dispatchBankXcmLeg(requestId, leg);
+      await storeIdempotentMutationReceipt({
+        bucket: "admin_xcm_dispatch",
+        key: mutation.key,
+        requestHash: mutation.requestHash,
+        response: dispatched,
+        statusCode: 200
+      });
+      respond(response, 200, dispatched);
+      return true;
+    }
+
     return false;
   };
 }

@@ -1770,6 +1770,26 @@ test("getAdminStatus alarms when a chain event cannot arm its Bank watch", async
   assert.ok(status.anomalies.some((entry) => entry.code === "xcm_balance_watch_ingestion_failed"));
 });
 
+test("getAdminStatus exposes the Bank runtime pre-staging gate", async () => {
+  const service = makePlatformService();
+  service.bankXcmRuntime = {
+    async getStatus() {
+      return {
+        enabled: true,
+        wrapper: "0xecee778e11b238d2fc096e56460e7b98dc7b26b8",
+        observerRunning: false,
+        chainEventWatchEnabled: true,
+        readyForStaging: false
+      };
+    }
+  };
+
+  const status = await service.getAdminStatus();
+  assert.equal(status.bankXcmRuntime.enabled, true);
+  assert.equal(status.bankXcmRuntime.readyForStaging, false);
+  assert.ok(status.anomalies.some((entry) => entry.code === "bank_xcm_runtime_not_ready_for_staging"));
+});
+
 test("getAdminStatus reports XCM status read failures without failing the response", async () => {
   const service = makePlatformService();
   service.xcmSettlementWatcher = {

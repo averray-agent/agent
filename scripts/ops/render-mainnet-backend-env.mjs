@@ -85,6 +85,13 @@ export const LITERAL_OVERRIDES = {
   REDIS_NAMESPACE: "agent-platform-mainnet",
   INDEXER_STATUS_URL: "http://mainnet-indexer:42069/status",
 
+  // Bank v2.2 runtime activation is an explicit mainnet-only rollout. The
+  // dispatcher still refuses every leg without a chain-event watch and fresh
+  // exact-message preflights; enabling this flag does not make it autonomous.
+  BANK_XCM_FLOW_ENABLED: "true",
+  BANK_XCM_ASSET_HUB_SUBSTRATE_RPC_URL: "wss://asset-hub-polkadot-rpc.n.dwellir.com",
+  BANK_XCM_HYDRATION_SUBSTRATE_RPC_URL: "wss://hydration-rpc.n.dwellir.com",
+
   // ── BANK LANE OBSERVER FEED ─────────────────────────────────────────────
   //
   // These seven arrived by HAND-EDITING deploy/backend.mainnet.env.template,

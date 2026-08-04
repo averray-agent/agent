@@ -114,17 +114,7 @@ export class XcmBalanceObserverService {
     }
     const kind = Number(event.data?.kind);
     if (kind !== 0 && kind !== 1) throw new ValidationError("RequestQueued kind must be Deposit(0) or Withdraw(1).");
-    const plan = kind === 0
-      ? {
-          target: this.chainEventWatchConfig.depositTarget,
-          // The observed aUSDC delta is the capital that actually reached the
-          // venue. Funding margin and transport fees are not strategy assets.
-          settlement: { assets: "delta", shares: "delta" }
-        }
-      : {
-          target: this.chainEventWatchConfig.withdrawTarget,
-          settlement: { assets: "delta", shares: "requested_shares" }
-        };
+    const plan = this.buildChainEventPlan(kind);
     return this.register({
       requestId: event.data?.requestId,
       target: plan.target,
@@ -135,12 +125,64 @@ export class XcmBalanceObserverService {
       requestedAssetsRaw: event.data?.assetsRaw ?? event.data?.assets ?? 0,
       requestedSharesRaw: event.data?.sharesRaw ?? event.data?.shares ?? 0,
       startedAt: event.timestamp,
+      deadlineAt: deadlineFromChainEvent(event),
       registrationSource: "chain_event",
       wrapperAddress,
       sourceEventId: event.id,
       stagingTxHash: event.txHash,
       stagingBlockNumber: event.blockNumber
     });
+  }
+
+  async registerBackfillFromChainEvent(event = {}, baseline = {}) {
+    if (!this.chainEventWatchConfig) {
+      throw new ValidationError("Chain-event watch configuration is unavailable.");
+    }
+    if (event.topic !== "xcm.request_queued") {
+      throw new ValidationError("Only xcm.request_queued can backfill a balance watch.");
+    }
+    const wrapperAddress = normalizeEvmAddress(event.data?.wrapperAddress, "wrapperAddress");
+    if (wrapperAddress !== this.chainEventWatchConfig.expectedWrapper) {
+      throw new ValidationError("Backfilled RequestQueued event came from an unexpected wrapper generation.");
+    }
+    const kind = Number(event.data?.kind);
+    if (kind !== 0 && kind !== 1) throw new ValidationError("RequestQueued kind must be Deposit(0) or Withdraw(1).");
+    const plan = this.buildChainEventPlan(kind);
+    return this.register({
+      requestId: event.data?.requestId,
+      target: plan.target,
+      direction: "increase",
+      settlement: plan.settlement,
+      kind: kind === 0 ? "deposit" : "withdraw",
+      phase: "staged-on-chain-backfill",
+      requestedAssetsRaw: event.data?.assetsRaw ?? event.data?.assets ?? 0,
+      requestedSharesRaw: event.data?.sharesRaw ?? event.data?.shares ?? 0,
+      startedAt: event.timestamp,
+      deadlineAt: deadlineFromChainEvent(event),
+      registrationSource: "chain_event_backfill",
+      wrapperAddress,
+      sourceEventId: event.id,
+      stagingTxHash: event.txHash,
+      stagingBlockNumber: event.blockNumber,
+      baselineRaw: baseline.raw,
+      baselineAsOf: baseline.asOf,
+      baselineBlockNumber: normalizePositiveInteger(baseline.blockNumber, "baseline.blockNumber"),
+      baselineBlockHash: normalizeBlockHash(baseline.blockHash, "baseline.blockHash")
+    });
+  }
+
+  buildChainEventPlan(kind) {
+    return kind === 0
+      ? {
+          target: this.chainEventWatchConfig.depositTarget,
+          // The observed aUSDC delta is the capital that actually reached the
+          // venue. Funding margin and transport fees are not strategy assets.
+          settlement: { assets: "delta", shares: "delta" }
+        }
+      : {
+          target: this.chainEventWatchConfig.withdrawTarget,
+          settlement: { assets: "delta", shares: "requested_shares" }
+        };
   }
 
   async ingestChainEvent(event = {}) {
@@ -180,8 +222,11 @@ export class XcmBalanceObserverService {
 
   async register(input = {}) {
     const requestId = normalizeRequestId(input.requestId);
-    if (input.registrationSource === "chain_event_backfill" && input.baselineRaw === undefined) {
-      throw new ValidationError("Chain-event backfill requires an explicit chain-height-bound baselineRaw.");
+    if (input.registrationSource === "chain_event_backfill"
+      && (input.baselineRaw === undefined
+        || input.baselineBlockNumber === undefined
+        || input.baselineBlockHash === undefined)) {
+      throw new ValidationError("Chain-event backfill requires a chain-height-bound baseline value, block number, and block hash.");
     }
     const existing = await this.stateStore.getXcmBalanceWatch?.(requestId);
     if (existing) {
@@ -192,9 +237,19 @@ export class XcmBalanceObserverService {
     const target = normalizeVenueBalanceTarget(input.target);
     const reading = input.baselineRaw === undefined
       ? await this.balanceReader.read(target)
-      : { raw: normalizeRaw(input.baselineRaw, "baselineRaw"), asOf: new Date(this.now()).toISOString() };
+      : {
+          raw: normalizeRaw(input.baselineRaw, "baselineRaw"),
+          asOf: input.baselineAsOf === undefined
+            ? new Date(this.now()).toISOString()
+            : normalizeRequiredTimestamp(input.baselineAsOf, "baselineAsOf")
+        };
     const startedAtMs = normalizeTime(input.startedAt, this.now());
-    const timeoutMs = normalizePositiveInteger(input.timeoutMs ?? this.defaultTimeoutMs, "timeoutMs");
+    const deadlineAtMs = input.deadlineAt === undefined
+      ? startedAtMs + normalizePositiveInteger(input.timeoutMs ?? this.defaultTimeoutMs, "timeoutMs")
+      : normalizeTime(input.deadlineAt, this.now());
+    if (deadlineAtMs <= startedAtMs) {
+      throw new ValidationError("balance watch deadlineAt must be after startedAt.");
+    }
     const watch = await this.stateStore.upsertXcmBalanceWatch({
       requestId,
       status: "pending",
@@ -209,8 +264,12 @@ export class XcmBalanceObserverService {
       requestedAssetsRaw: normalizeRaw(input.requestedAssetsRaw ?? 0, "requestedAssetsRaw").toString(),
       requestedSharesRaw: normalizeRaw(input.requestedSharesRaw ?? 0, "requestedSharesRaw").toString(),
       startedAt: new Date(startedAtMs).toISOString(),
-      deadlineAt: new Date(startedAtMs + timeoutMs).toISOString(),
+      deadlineAt: new Date(deadlineAtMs).toISOString(),
       lastReadAt: reading.asOf,
+      baselineBlockNumber: input.baselineBlockNumber ?? undefined,
+      baselineBlockHash: input.baselineBlockHash === undefined
+        ? undefined
+        : normalizeBlockHash(input.baselineBlockHash, "baselineBlockHash"),
       attemptCount: 0,
       registrationSource: normalizeRegistrationSource(input.registrationSource),
       wrapperAddress: input.wrapperAddress === undefined
@@ -410,7 +469,11 @@ export class XcmBalanceObserverService {
         deadlineAt: item.deadlineAt,
         lastReadAt: item.lastReadAt,
         lastError: item.lastError,
-        observationState: item.lastError ? "unknown_stale" : "pending"
+        observationState: item.lastError ? "unknown_stale" : "pending",
+        registrationSource: item.registrationSource,
+        stagingBlockNumber: item.stagingBlockNumber,
+        baselineBlockNumber: item.baselineBlockNumber,
+        baselineBlockHash: item.baselineBlockHash
       }))
     };
   }
@@ -469,7 +532,9 @@ export class XcmBalanceObserverService {
         status: watch.status,
         registrationSource: watch.registrationSource,
         wrapperAddress: watch.wrapperAddress,
-        sourceEventId: watch.sourceEventId
+        sourceEventId: watch.sourceEventId,
+        baselineBlockNumber: watch.baselineBlockNumber,
+        baselineBlockHash: watch.baselineBlockHash
       }
     });
   }
@@ -560,6 +625,28 @@ function normalizePositiveInteger(raw, label) {
   return value;
 }
 
+function normalizeRequiredTimestamp(raw, label) {
+  const value = Date.parse(String(raw ?? ""));
+  if (!Number.isFinite(value)) throw new ValidationError(`${label} must be a valid timestamp.`);
+  return new Date(value).toISOString();
+}
+
+function normalizeBlockHash(raw, label) {
+  const value = String(raw ?? "").toLowerCase();
+  if (!/^0x[a-f0-9]{64}$/u.test(value)) throw new ValidationError(`${label} must be a 32-byte block hash.`);
+  return value;
+}
+
+function deadlineFromChainEvent(event) {
+  const raw = event.data?.dispatchDeadlineRaw ?? event.data?.dispatchDeadline;
+  if (raw === undefined) return undefined;
+  const seconds = normalizeRaw(raw, "dispatchDeadlineRaw");
+  if (seconds <= 0n || seconds > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new ValidationError("dispatchDeadlineRaw must be a positive safe unix timestamp.");
+  }
+  return new Date(Number(seconds) * 1_000).toISOString();
+}
+
 function assertEquivalentRegistration(existing, incoming) {
   const target = normalizeVenueBalanceTarget(incoming.target);
   const settlement = normalizeSettlementMapping(incoming.settlement);
@@ -575,6 +662,10 @@ function assertEquivalentRegistration(existing, incoming) {
       && existing.wrapperAddress !== normalizeEvmAddress(incoming.wrapperAddress, "wrapperAddress"))
     || (incoming.baselineRaw !== undefined
       && String(existing.baselineRaw) !== normalizeRaw(incoming.baselineRaw, "baselineRaw").toString())
+    || (incoming.baselineBlockNumber !== undefined
+      && Number(existing.baselineBlockNumber) !== normalizePositiveInteger(incoming.baselineBlockNumber, "baselineBlockNumber"))
+    || (incoming.baselineBlockHash !== undefined
+      && existing.baselineBlockHash !== normalizeBlockHash(incoming.baselineBlockHash, "baselineBlockHash"))
   ) {
     throw new ValidationError(`XCM balance watch ${existing.requestId} already exists with different bounds.`);
   }

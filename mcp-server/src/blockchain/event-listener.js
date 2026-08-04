@@ -321,8 +321,9 @@ export class EventListener {
         }
       }));
 
-    this.registerXcm("RequestQueued", "xcm.request_queued", async ({ args, payload }) =>
-      this.buildChainEvent({
+    this.registerXcm("RequestQueued", "xcm.request_queued", async ({ args, payload }) => {
+      const parameters = await this.gateway.getXcmRequestParameters(args.requestId);
+      return this.buildChainEvent({
         topic: "xcm.request_queued",
         args,
         payload,
@@ -340,9 +341,11 @@ export class EventListener {
           shares: args.shares.toString(),
           sharesRaw: args.shares.toString(),
           nonce: safeIntegerOrRaw(args.nonce),
-          nonceRaw: rawIntegerString(args.nonce)
+          nonceRaw: rawIntegerString(args.nonce),
+          dispatchDeadlineRaw: parameters.dispatchDeadlineRaw
         }
-      }));
+      });
+    });
 
     this.registerXcm("RequestParametersStored", "xcm.request_parameters_stored", async ({ args, payload }) => {
       const request = await this.gateway.getXcmRequest(args.requestId);
