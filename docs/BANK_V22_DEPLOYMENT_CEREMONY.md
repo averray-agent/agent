@@ -252,7 +252,7 @@ For the nonce-7 provisional wrapper only, that image is:
 If the actual wrapper differs, the deploy preview prints the replacement SS58.
 Never fund a provisional image after an address change.
 
-## 7. G2 close, runtime gate, and just-in-time ladder
+## 7. G2 close, runtime gate, arm, and just-in-time ladder
 
 G2 is complete only when the deploy receipts, selector response, two conversion
 reads, same-flow record/env diff, configure execution result, paused/configured
@@ -275,23 +275,71 @@ is false or unreadable, do not stage. Arm remains a separate one-call multisig
 ceremony and may run only while the request table is empty, allowance is zero,
 and the runtime gate above is green.
 
-`RequestQueued` does not exist until staging executes, so its per-request watch
-cannot literally predate the staging transaction. The enforceable ordering is:
+The former four-upfront G3 phase is retired. A paused wrapper cannot have a
+queued request, while both `queueRequest` and `dispatchLeg` require the wrapper
+to be armed. Separate `ReviveApi_call` simulations also do not persist a
+simulated unpause or request between calls. Requiring four deployed-contract
+preflights before arm was therefore impossible without reintroducing the fork
+evidence that v2.2 explicitly rejects.
 
-1. runtime and chain-event subscription green;
-2. standalone approval, then staging;
-3. confirm a pending watch sourced from that exact on-chain `RequestQueued`
-   event, with its staging tx/block, on-chain dispatch deadline, and a
-   destination-chain block/hash-bound baseline; and
-4. only then run the funding leg.
+The complete replacement order is:
 
-No dispatch is allowed without step 3. Each leg then performs its own fresh fee
-quote, exact-message dry-run, limit-aware `ReviveApi_call`, EVM gas estimate,
-watch check, and final request-state re-read in the same signing session. Pause
-on any failure.
+1. Verify the runtime gate above, then emit the arm packet only after the
+   generator verifies the complete G2
+   deployment evidence against fresh chain state: live runtime hashes and the
+   external v2.2 selector, configured operator/adapter/converted account,
+   policy role, zero queued-request events, zero adapter accounting and token
+   custody, zero treasury allowance, and the deployed backend reporting the
+   v2.2 pair with its Substrate event bridge and observer green.
+2. Sign the separately reviewed, single-call `setDispatchPaused(false)` arm
+   packet. Arming permits request staging; it does not authorize automated
+   dispatch, because no request watch exists yet.
+3. Approve the exact dust cap to the v2.2 adapter as a standalone multisig
+   transaction. Re-read the committed allowance before any dependent
+   simulation or staging signature.
+4. Stage the deposit with a non-zero `dispatchDeadline`, a multisig-capped
+   `maxFeePerLeg`, and enough headroom for the funding transfer fee.
+   `RequestQueued` does not exist until this transaction executes, so its
+   per-request watch cannot literally predate staging.
+5. Confirm the observer has a pending watch sourced from that exact on-chain
+   `RequestQueued` event, including its staging transaction/block, on-chain
+   deadline, and destination-chain block/hash-bound baseline.
+6. Immediately before **each** leg, the v2.2 dispatcher must, in one tight live
+   session, re-read the request and runtime state, obtain the fresh fee/remote
+   amount where applicable, dry-run the exact constructed message with its
+   expected event, run the exact `dispatchLeg` through `ReviveApi_call`, derive
+   outer limits from the measured result, obtain fresh `eth_estimateGas`, arm
+   the observer watch, and only then sign. Evidence must carry `liveState:true`
+   and capture-time block/timestamps.
+7. If any dry-run, live read, `ReviveApi_call`, gas estimate, watch, receipt, or
+destination assertion fails, stop and call `setDispatchPaused(true)` before
+diagnosis. Never carry a fee quote or outer limit into a later session.
 
-The admin backfill path exists only to recover a request staged while the
-runtime was historically off. It must locate exactly one `RequestQueued` log in
-a bounded block range and persist a destination-chain baseline tied to an
-explicit block number and block hash. It is not the normal cycle order and
+No dispatch is allowed without step 5. The admin backfill path exists only to
+recover a request staged while the runtime was historically off. It must locate
+exactly one authoritative Substrate `revive.ContractEmitted` `RequestQueued`
+event in a bounded block range and persist a destination-chain baseline tied to
+an explicit block number and block hash. It is not the normal cycle order and
 cannot accept a caller-supplied balance or message.
+
+The arm packet and every leg remain separate review/signing moments. No
+four-upfront evidence bundle is accepted, and no failure may be converted into
+a preview-only green result.
+
+For the first v2.2 dust request, the separately reviewed staging values are:
+
+- `assets = 150000` raw USDC;
+- `sellAmount = 100000`;
+- `maxFeePerLeg = 40000`;
+- `minimumOutput` from a fresh live Hydration Aave `22 -> 1003` quote; and
+- a non-zero absolute `dispatchDeadline`, regenerated with the quote if either
+  becomes stale.
+
+The 10,000-raw remainder above `sellAmount + maxFeePerLeg` is explicit
+transport headroom; it is not a fee prediction. Generate the approval and
+staging packets separately with
+`scripts/ops/prepare-bank-xcm-v22-staging-multisig.mjs`. Its approval is exact,
+never unlimited. A staged packet is not signable until the arm has executed,
+the treasury holds the full 150,000 raw, and that exact allowance has committed
+on chain. The evidence records any unmet prerequisite rather than disguising a
+preview as ready.

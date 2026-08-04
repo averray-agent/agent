@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "kind": "averray.bankXcmV22StagingQuote",
+  "profile": "mainnet",
+  "liveState": true,
+  "capturedAt": "2026-08-04T20:06:07.182Z",
+  "endpoint": "wss://hydration-rpc.n.dwellir.com",
+  "chain": "Hydration",
+  "blockNumber": 13462046,
+  "quoteAccountId32": "0x089a0a57d001bacb8473161e007f0babc1768ceeeeeeeeeeeeeeeeeeeeeeeeee",
+  "routerCall": "0x430016000000eb030000a086010000000000000000000000000001000000000000000000000000000000040416000000eb030000",
+  "quote": {
+    "runtimeEvent": "Swapped3",
+    "fillerType": "AAVE",
+    "assetIn": 22,
+    "assetOut": 1003,
+    "amountInRaw": "100000",
+    "amountOutRaw": "100000"
+  }
+}
