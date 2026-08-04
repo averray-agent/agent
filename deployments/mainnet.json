@@ -154,7 +154,7 @@
       "wrapper": "0x2AF394fA95f75D3ca1C786128f4dfA1eB0c9675D",
       "asset": "0x0000053900000000000000000000000001200000",
       "phase": "phase1_treasury_staging",
-      "status": "armed_dust_proof_in_progress",
+      "status": "retired_paused_dust_cycle_closed",
       "remote": {
         "paraId": 2034,
         "assetId": 22,
@@ -180,8 +180,7 @@
   },
   "bankXcmV2Deployment": {
     "version": "2.1",
-    "status": "retired_paused_release_pending_ceremony",
-    "targetStatusAfterReleaseExecution": "retired_paused",
+    "status": "retired_paused_released_closed",
     "deployTxHashes": {
       "wrapper": "0x5eeff954e5cc89b9fbab9bcfa1d49068dadb8b4d31b241cb88f8465245d4cbe1",
       "adapter": "0x3e56ffe3b3d60f1eb055dc4d6a383a13db82d16783cc3cc798898c1163b8fb2c"
@@ -202,7 +201,7 @@
       }
     ],
     "dustCycleEvidence": {
-      "status": "release_pending_ceremony_gate",
+      "status": "released_closed",
       "depositRequestId": "0xb609f4d875e0c6f4f4b1dddd90efd687215d1ac9ecd90d0de51b9304f57ecaac",
       "stageTreasuryDeposit": {
         "innerCallHash": "0x15d014b65260962a195b7513cee0d29953ea5167efa67041d5846d16af21e7a1",
@@ -218,7 +217,7 @@
         "settledSharesRaw": "0"
       },
       "reconciliation": {
-        "status": "final_amounts_release_pending_execution",
+        "status": "final_released_closed",
         "stagedRaw": "150000",
         "actualTreasuryReturnRaw": "130200",
         "leg1TransferFeeRaw": "525",
@@ -257,20 +256,27 @@
       },
       "releasePacket": {
         "artifact": "docs/evidence/mainnet-bank-xcm-v21-release-packet-2026-08-04.json",
-        "status": "unsigned_pending_gate",
+        "status": "executed",
         "observedArrivalRaw": "130200",
         "innerCallHash": "0xbeea91fe2bd6236b9642e6f29ea79081668b49aa5d4bb98d60c7f002cd7a120c",
         "callCount": 3,
         "includesV20PauseRider": true,
-        "containsUnpause": false
+        "containsUnpause": false,
+        "multisigTimepoint": "19050316-2",
+        "executionTx": "0x380e4c33e8d933860713ff4205395b6de0293583f9f92aac8be777b784152aa7",
+        "executionBlock": 19050332,
+        "executionResult": "Ok",
+        "actualTreasuryReturnRaw": "130200",
+        "requestRecoveryReleasedRaw": "130200",
+        "finalRawRecoverySlotResidueRaw": "19800",
+        "residueDisposition": "v2.1 accounting artifact, known-unrecoverable; never present as a receivable"
       }
     }
   },
   "bankXcmDeploymentHistory": [
     {
       "version": "2.0",
-      "status": "retired_paused_pending_rider_execution",
-      "targetStatusAfterRiderExecution": "retired_paused",
+      "status": "retired_paused",
       "wrapper": "0xc846eE73e49A748e59C7Ac8f8742F542a552D24C",
       "adapter": "0x5eaF58a3e2819A26B66822529aD92fcec107cc98",
       "deployTxHashes": {
@@ -279,6 +285,15 @@
       },
       "convertedAccountId32": "0x98f0033e26aa4ecf2899e6d09237d40d29fcb68e64d22a621520bde1123564ac",
       "replacementReason": "v2.1: remote send legs must not require Asset-Hub-local XCM weighing",
+      "pauseRider": {
+        "status": "executed",
+        "multisigTimepoint": "19050316-2",
+        "executionTx": "0x380e4c33e8d933860713ff4205395b6de0293583f9f92aac8be777b784152aa7",
+        "executionBlock": 19050332,
+        "innerCallHash": "0xbeea91fe2bd6236b9642e6f29ea79081668b49aa5d4bb98d60c7f002cd7a120c",
+        "executionResult": "Ok",
+        "dispatchPaused": true
+      },
       "incident": {
         "code": "remote_send_local_weighability",
         "observedAt": "2026-08-03T19:24:00.000Z",
@@ -325,7 +340,7 @@
     },
     {
       "version": "2.1",
-      "status": "retired_paused_release_pending_ceremony",
+      "status": "retired_paused_released_closed",
       "wrapper": "0x2AF394fA95f75D3ca1C786128f4dfA1eB0c9675D",
       "adapter": "0x7f02600eA185b5d9ecfB2B7ac97a6a502F89B81B",
       "deployTxHashes": {
@@ -333,7 +348,24 @@
         "adapter": "0x3e56ffe3b3d60f1eb055dc4d6a383a13db82d16783cc3cc798898c1163b8fb2c"
       },
       "convertedAccountId32": "0x85663dfdb243b1a11a90f0816e1f83ccdb99f8f4c4a25d432739218efd489736",
-      "replacementReason": "v2.2: dispatch-time fee pricing and observer-proven terminal accounting"
+      "replacementReason": "v2.2: dispatch-time fee pricing and observer-proven terminal accounting",
+      "releaseClosure": {
+        "status": "executed",
+        "multisigTimepoint": "19050316-2",
+        "executionTx": "0x380e4c33e8d933860713ff4205395b6de0293583f9f92aac8be777b784152aa7",
+        "executionBlock": 19050332,
+        "innerCallHash": "0xbeea91fe2bd6236b9642e6f29ea79081668b49aa5d4bb98d60c7f002cd7a120c",
+        "executionResult": "Ok",
+        "dispatchPaused": true,
+        "actualTreasuryReturnRaw": "130200",
+        "leg1TransferFeeRaw": "525",
+        "trappedWriteOff3Raw": "17932",
+        "recoveryReturnFeeRaw": "1343",
+        "equation": "150000 = 130200 + 525 + 17932 + 1343",
+        "unexplainedRaw": "0",
+        "finalRawRecoverySlotResidueRaw": "19800",
+        "residueDisposition": "v2.1 accounting artifact, known-unrecoverable; never present as a receivable"
+      }
     }
   ]
 }
