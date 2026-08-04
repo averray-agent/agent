@@ -19,10 +19,10 @@
     "reputationSbt": "0xA85AF867b5f573176f49F0D6A827F61A5Cee4e37",
     "discoveryRegistry": "0x47876D138e3a26c485A5f8acbAC7AEcA3c7e6C62",
     "escrowCore": "0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC",
-    "xcmWrapper": "0xc846eE73e49A748e59C7Ac8f8742F542a552D24C",
+    "xcmWrapper": "0x2AF394fA95f75D3ca1C786128f4dfA1eB0c9675D",
     "token": "0x0000053900000000000000000000000001200000",
     "legacyEscrowCore": "0x9cCd1DbBB5C354CC6218e55D3cE924A4d631C035",
-    "hydrationUsdcAdapter": "0x5eaF58a3e2819A26B66822529aD92fcec107cc98"
+    "hydrationUsdcAdapter": "0x7f02600eA185b5d9ecfB2B7ac97a6a502F89B81B"
   },
   "contractProvenance": {
     "0x226F14252A98BD2eA140271647De20132F09AF20": {
@@ -79,6 +79,18 @@
       "abiHash": "sha256:dbd3823b40f66873ddba6ac005a2d6a7f74d372af58090d65a42934468aea13c",
       "runtimeCodeHash": "sha256:541cfab4b886ad03ec1a29e2ca7edd45075f9c25ed2ad22b5035d9d7cba59d24",
       "verifiedAt": "2026-08-03T12:26:40.095Z"
+    },
+    "0x2AF394fA95f75D3ca1C786128f4dfA1eB0c9675D": {
+      "sourceCommit": "3dd574a97fe0e29d4dd7b7027e033a363070c078",
+      "abiHash": "sha256:7e193cac937eaf48cdcf2d3e9af4b7c01f4a599f0dd0de661b9c2c459e870c57",
+      "runtimeCodeHash": "sha256:420b21642732e40fa1034e97db5fef59b1b58bf22af20e64c8b2f323b3cf6cf5",
+      "verifiedAt": "2026-08-04T05:46:48.000Z"
+    },
+    "0x7f02600eA185b5d9ecfB2B7ac97a6a502F89B81B": {
+      "sourceCommit": "3dd574a97fe0e29d4dd7b7027e033a363070c078",
+      "abiHash": "sha256:dbd3823b40f66873ddba6ac005a2d6a7f74d372af58090d65a42934468aea13c",
+      "runtimeCodeHash": "sha256:071e79fd50afc2f9e5a7bab6b17490d02dd32cf815d0b28e55c305f678e06baa",
+      "verifiedAt": "2026-08-04T05:46:48.000Z"
     }
   },
   "knownUnshippedContractChanges": {
@@ -114,7 +126,9 @@
     "escrowCore": 18647902,
     "escrowCoreV2": 18809168,
     "xcmWrapperV2": 19009586,
-    "hydrationUsdcAdapter": 19009588
+    "hydrationUsdcAdapter": 19009588,
+    "xcmWrapperV2_1": 19038771,
+    "hydrationUsdcAdapterV2_1": 19038773
   },
   "runtime": {
     "auth": {
@@ -136,11 +150,11 @@
   "strategies": [
     {
       "id": "HYDRATION_USDC_V1",
-      "adapter": "0x5eaF58a3e2819A26B66822529aD92fcec107cc98",
-      "wrapper": "0xc846eE73e49A748e59C7Ac8f8742F542a552D24C",
+      "adapter": "0x7f02600eA185b5d9ecfB2B7ac97a6a502F89B81B",
+      "wrapper": "0x2AF394fA95f75D3ca1C786128f4dfA1eB0c9675D",
       "asset": "0x0000053900000000000000000000000001200000",
       "phase": "phase1_treasury_staging",
-      "status": "paused_pending_dust_proof",
+      "status": "armed_dust_proof_in_progress",
       "remote": {
         "paraId": 2034,
         "assetId": 22,
@@ -154,7 +168,9 @@
   "deployers": {
     "escrowCoreV2": "0x9Ab8531FBb0948C542a31298FD61335f30064239",
     "xcmWrapperV2": "0x9Ab8531FBb0948C542a31298FD61335f30064239",
-    "hydrationUsdcAdapter": "0x9Ab8531FBb0948C542a31298FD61335f30064239"
+    "hydrationUsdcAdapter": "0x9Ab8531FBb0948C542a31298FD61335f30064239",
+    "xcmWrapperV2_1": "0x9Ab8531FBb0948C542a31298FD61335f30064239",
+    "hydrationUsdcAdapterV2_1": "0x9Ab8531FBb0948C542a31298FD61335f30064239"
   },
   "escrowRedeployedAt": "2026-07-30T10:01:56.005Z",
   "escrowRedeployTxHashes": {
@@ -163,29 +179,73 @@
     "revokeOld": null
   },
   "bankXcmV2Deployment": {
-    "version": "2.0",
-    "status": "v2_1_redeploy_required",
+    "version": "2.1",
+    "status": "dust_proof_in_progress",
     "deployTxHashes": {
-      "wrapper": "0x75cdd54c7cd08e17df155a2947ad3f122db0dd34c05bea82c99bcae2aa89de27",
-      "adapter": "0x01bf43ba2a72195c69e6454c0d20ae2c900a9bee5a15e6eace676d6f73303110"
+      "wrapper": "0x5eeff954e5cc89b9fbab9bcfa1d49068dadb8b4d31b241cb88f8465245d4cbe1",
+      "adapter": "0x3e56ffe3b3d60f1eb055dc4d6a383a13db82d16783cc3cc798898c1163b8fb2c"
     },
     "configurationMultisigExecTx": null,
-    "convertedAccountId32": "0x98f0033e26aa4ecf2899e6d09237d40d29fcb68e64d22a621520bde1123564ac",
+    "convertedAccountId32": "0x85663dfdb243b1a11a90f0816e1f83ccdb99f8f4c4a25d432739218efd489736",
     "conversionEvidence": {
-      "artifact": "docs/evidence/mainnet-bank-xcm-v2-conversion-2026-08-03.json",
+      "artifact": "docs/evidence/mainnet-bank-xcm-v21-conversion-2026-08-04.json",
       "endpointCount": 2
     },
-    "dryRunEvidence": [],
-    "dustCycleEvidence": null,
-    "incident": {
-      "code": "remote_send_local_weighability",
-      "observedAt": "2026-08-03T19:24:00.000Z",
-      "requestId": "0xb609f4d875e0c6f4f4b1dddd90efd687215d1ac9ecd90d0de51b9304f57ecaac",
-      "requestDispatchBitmap": 1,
-      "revertSelector": "0x820c74ed",
-      "revert": "XcmPrecompileUnavailable()",
-      "accountingDisposition": "written_off_by_operator_decision",
-      "writeOffs": [
+    "dryRunEvidence": [
+      {
+        "artifact": "docs/evidence/mainnet-bank-xcm-v21-dry-runs-2026-08-04.json",
+        "status": "passed",
+        "legCount": 5,
+        "assetHubBlock": 19039690,
+        "hydrationBlock": 13453641
+      }
+    ],
+    "dustCycleEvidence": {
+      "status": "in_progress",
+      "depositRequestId": "0xb609f4d875e0c6f4f4b1dddd90efd687215d1ac9ecd90d0de51b9304f57ecaac",
+      "stageTreasuryDeposit": {
+        "innerCallHash": "0x15d014b65260962a195b7513cee0d29953ea5167efa67041d5846d16af21e7a1",
+        "multisigTimepoint": "19041165-3",
+        "remoteAsset22Raw": "149475"
+      }
+    }
+  },
+  "bankXcmDeploymentHistory": [
+    {
+      "version": "2.0",
+      "status": "retired_replaced",
+      "wrapper": "0xc846eE73e49A748e59C7Ac8f8742F542a552D24C",
+      "adapter": "0x5eaF58a3e2819A26B66822529aD92fcec107cc98",
+      "deployTxHashes": {
+        "wrapper": "0x75cdd54c7cd08e17df155a2947ad3f122db0dd34c05bea82c99bcae2aa89de27",
+        "adapter": "0x01bf43ba2a72195c69e6454c0d20ae2c900a9bee5a15e6eace676d6f73303110"
+      },
+      "convertedAccountId32": "0x98f0033e26aa4ecf2899e6d09237d40d29fcb68e64d22a621520bde1123564ac",
+      "replacementReason": "v2.1: remote send legs must not require Asset-Hub-local XCM weighing",
+      "incident": {
+        "code": "remote_send_local_weighability",
+        "observedAt": "2026-08-03T19:24:00.000Z",
+        "requestId": "0xb609f4d875e0c6f4f4b1dddd90efd687215d1ac9ecd90d0de51b9304f57ecaac",
+        "requestDispatchBitmap": 1,
+        "revertSelector": "0x820c74ed",
+        "revert": "XcmPrecompileUnavailable()",
+        "accountingDisposition": "written_off_by_operator_decision",
+        "writeOffs": [
+          {
+            "accountId32": "0x98f0033e26aa4ecf2899e6d09237d40d29fcb68e64d22a621520bde1123564ac",
+            "assetId": 22,
+            "raw": "149412",
+            "reason": "v2.0 deposit funding landed but the Hydration Transact send leg was structurally blocked"
+          },
+          {
+            "accountId32": "0x089a0a57d001bacb8473161e007f0babc1768ceeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "assetId": 22,
+            "raw": "100000",
+            "reason": "pre-wrapper identity-split rehearsal balance was not controllable by the converted origin"
+          }
+        ]
+      },
+      "retiredCapital": [
         {
           "accountId32": "0x98f0033e26aa4ecf2899e6d09237d40d29fcb68e64d22a621520bde1123564ac",
           "assetId": 22,
@@ -200,5 +260,5 @@
         }
       ]
     }
-  }
+  ]
 }

@@ -218,7 +218,7 @@ test("mainnet manifest covers every deployed source-controlled contract address"
   for (const name of ["xcmWrapper", "hydrationUsdcAdapter"]) {
     assert.equal(
       contracts.find((contract) => contract.name === name)?.provenance.sourceCommit,
-      "89235c20498efcf659b41de8821bd4e14baecfc7"
+      "3dd574a97fe0e29d4dd7b7027e033a363070c078"
     );
   }
 });

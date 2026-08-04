@@ -28,8 +28,9 @@
  *   • launch posture: INGESTION_PREFUND_ENABLED=false, USDC_LIQUIDITY_CHAIN=mainnet,
  *     BANK_LANE_FEED_ENABLED=true (mainnet-only; the testnet template has no
  *     Hydration position to read, so its targets stay blank and the flag off)
- *   • Bank lane observer targets are mainnet literals here, NOT hand-edits to the
- *     generated file — see the block in LITERAL_OVERRIDES for why
+ *   • Bank lane protocol endpoints remain mainnet literals; the active wrapper,
+ *     converted Hydration account, and wrapper postage account are derived from
+ *     deployments/mainnet.json so a wrapper rotation cannot leave the feed stale
  *   • KEEP: SIGNER_BACKEND=kms, JWT_BACKEND=kms, TOKEN_ADDRESS (USDC precompile),
  *     SUPPORTED_ASSETS_JSON, JWT_MAX_TTL_SECONDS (⚠ DEC-4 must drop to <=1h before launch)
  *
@@ -41,6 +42,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { encodeAddress } from "@polkadot/util-crypto";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = join(__dirname, "..", "..");
@@ -100,16 +102,11 @@ export const LITERAL_OVERRIDES = {
   // position, and its template keeps them blank with the flag off. That is
   // precisely what this table is for.
   //
-  // Judgement call worth flagging in review: the two account addresses could
-  // instead live in deployments/mainnet.json alongside the other per-deploy
-  // values. They sit here because the other five are external protocol and
-  // infrastructure constants — Hydration's own token and public endpoints,
-  // not outputs of our deploy ceremony — and splitting the group across two
-  // mechanisms is how half of it goes stale again.
+  // External protocol and infrastructure constants remain here. The active
+  // wrapper plus its two deployment-derived accounts are resolved below from
+  // deployments/mainnet.json; keeping them here made the v2.1 contract and the
+  // observer silently point at different generations.
   BANK_LANE_FEED_ENABLED: "true",
-  // The converted account, verified by independent base58 + blake2b decode
-  // against the 0xEE-padded EVM mapping — not copied from a dashboard.
-  BANK_LANE_FEED_HYDRATION_ACCOUNT_ID32: "14TXaUTyTRiZKGG1zGrzzfc7oUGq2pcEGKNoWXLtJL5TTJbZ",
   BANK_LANE_FEED_HYDRATION_EVM_RPC_URL: "https://rpc.hydradx.cloud",
   // aUSDC on Hydration's EVM ledger. The position is balanceOf() here, NOT
   // Tokens.accounts(…, 1003): AssetRegistry reports 1003 as assetType "Erc20",
@@ -118,9 +115,6 @@ export const LITERAL_OVERRIDES = {
   BANK_LANE_FEED_AUSDC_CONTRACT: "0x2ec4884088d84e5c2970a034732e5209b0acfa93",
   BANK_LANE_FEED_HYDRATION_SUBSTRATE_RPC_URL: "wss://hydration-rpc.n.dwellir.com",
   BANK_LANE_FEED_POSTAGE_SUBSTRATE_RPC_URL: "wss://polkadot-asset-hub-rpc.polkadot.io",
-  // Committed postage: DOT that can only ever be spent as XCM delivery fees,
-  // with no withdraw path. Watched so it cannot silently fall under its floor.
-  BANK_LANE_FEED_POSTAGE_ACCOUNT: "15XbeapZyWWEZdDCLpxzNhryKj2MsE8rnFUW9cPydXfgSMAK",
 };
 
 // KEY → reason. These keys must resolve from deployments/mainnet.json during
@@ -133,6 +127,9 @@ export const TODO_KEYS = {
   LEGACY_ESCROW_CORE_ADDRESS: "v1 drain address from deployments/mainnet.json, or empty after drain",
   REPUTATION_SBT_ADDRESS: "from deployments/mainnet.json (post-ceremony)",
   DISCOVERY_REGISTRY_ADDRESS: "from deployments/mainnet.json (post-ceremony)",
+  XCM_WRAPPER_ADDRESS: "active Bank wrapper from deployments/mainnet.json",
+  BANK_LANE_FEED_HYDRATION_ACCOUNT_ID32: "active Bank converted account from deployments/mainnet.json",
+  BANK_LANE_FEED_POSTAGE_ACCOUNT: "active Bank wrapper Asset Hub image from deployments/mainnet.json",
   AUTH_ADMIN_WALLETS: "mainnet admin wallet(s) — NEVER the testnet hot key nor the leaked 0xFd2E...6519",
   AUTH_VERIFIER_WALLETS: "mainnet verifier wallet(s) — mapped multisig / hardware EOA",
   USDC_LIQUIDITY_TREASURY_RESERVE_ACCOUNT: "mainnet treasury reserve account",
@@ -148,6 +145,7 @@ export const TODO_KEYS = {
 };
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/u;
+const ACCOUNT_ID32_RE = /^0x[0-9a-fA-F]{64}$/u;
 const SCHEMA_RE = /^[a-z_][a-z0-9_]{0,62}$/u;
 
 function requireAddress(value, label) {
@@ -155,6 +153,17 @@ function requireAddress(value, label) {
     throw new Error(`deployments/mainnet.json: ${label} must be a 20-byte EVM address`);
   }
   return value;
+}
+
+function requireAccountId32(value, label) {
+  if (typeof value !== "string" || !ACCOUNT_ID32_RE.test(value)) {
+    throw new Error(`deployments/mainnet.json: ${label} must be a 32-byte AccountId`);
+  }
+  return value.toLowerCase();
+}
+
+function wrapperAssetHubImage(wrapperAddress) {
+  return `0x${wrapperAddress.slice(2).toLowerCase()}${"ee".repeat(12)}`;
 }
 
 function requireBlock(value, label) {
@@ -178,6 +187,7 @@ export function buildManifestOverrides(manifest) {
   }
 
   const contracts = manifest.contracts ?? {};
+  const bankDeployment = manifest.bankXcmV2Deployment ?? {};
   const blocks = manifest.deploymentBlocks ?? {};
   const auth = manifest.runtime?.auth ?? {};
   const indexer = manifest.runtime?.indexer ?? {};
@@ -191,6 +201,11 @@ export function buildManifestOverrides(manifest) {
   const agentBlock = Number(blocks.agentAccountCore);
   const escrowBlock = Number(blocks.escrowCore);
   const sharedAccountEscrowStart = Math.min(agentBlock, escrowBlock);
+  const xcmWrapper = requireAddress(contracts.xcmWrapper, "contracts.xcmWrapper");
+  const convertedAccountId32 = requireAccountId32(
+    bankDeployment.convertedAccountId32,
+    "bankXcmV2Deployment.convertedAccountId32"
+  );
 
   return {
     TREASURY_POLICY_ADDRESS: requireAddress(contracts.treasuryPolicy, "contracts.treasuryPolicy"),
@@ -201,6 +216,9 @@ export function buildManifestOverrides(manifest) {
       : "",
     REPUTATION_SBT_ADDRESS: requireAddress(contracts.reputationSbt, "contracts.reputationSbt"),
     DISCOVERY_REGISTRY_ADDRESS: requireAddress(contracts.discoveryRegistry, "contracts.discoveryRegistry"),
+    XCM_WRAPPER_ADDRESS: xcmWrapper,
+    BANK_LANE_FEED_HYDRATION_ACCOUNT_ID32: encodeAddress(convertedAccountId32, 0),
+    BANK_LANE_FEED_POSTAGE_ACCOUNT: encodeAddress(wrapperAssetHubImage(xcmWrapper), 0),
     AUTH_ADMIN_WALLETS: requireWalletList(auth.adminWallets, "runtime.auth.adminWallets"),
     AUTH_VERIFIER_WALLETS: requireWalletList(auth.verifierWallets, "runtime.auth.verifierWallets"),
     USDC_LIQUIDITY_TREASURY_RESERVE_ACCOUNT: requireAddress(

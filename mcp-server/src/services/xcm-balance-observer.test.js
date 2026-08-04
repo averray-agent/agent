@@ -12,9 +12,9 @@ const ACCOUNT = "0xaf39ad769a03cb535d9799e49459b033c1fab84ee23ffe5d0852f8d82f02a
 const AUSDC = "0x2ec4884088d84e5c2970a034732e5209b0acfa93";
 const HYD_SUBSTRATE = "wss://hydration-rpc.n.dwellir.com";
 const HYD_EVM = "https://rpc.hydradx.cloud";
-const POSTAGE = "15XbeapZyWWEZdDCLpxzNhryKj2MsE8rnFUW9cPydXfgSMAK";
-const MAINNET_ACCOUNT = "0x98f0033e26aa4ecf2899e6d09237d40d29fcb68e64d22a621520bde1123564ac";
-const MAINNET_ACCOUNT_SS58 = "14TXaUTyTRiZKGG1zGrzzfc7oUGq2pcEGKNoWXLtJL5TTJbZ";
+const POSTAGE = "1yKNU414vYDyXYXL6pu845puajfeGTezD1rBiUYwp9UKBaZ";
+const MAINNET_ACCOUNT = "0x85663dfdb243b1a11a90f0816e1f83ccdb99f8f4c4a25d432739218efd489736";
+const MAINNET_ACCOUNT_SS58 = "141ujyV9aKBYqZncx6SYRWU2XQCxUcYiGYE8U7jprEKVUZNJ";
 
 const fixture = JSON.parse(await readFile(
   new URL("./fixtures/hydration-bank-round-trip.json", import.meta.url),
@@ -58,7 +58,7 @@ test("SS58 Hydration account normalizes to the proven AccountId32 and truncate20
 
   assert.equal(position.account, MAINNET_ACCOUNT);
   assert.equal(float.account, MAINNET_ACCOUNT);
-  assert.equal(position.evmAccount, "0x98f0033e26aa4ecf2899e6d09237d40d29fcb68e");
+  assert.equal(position.evmAccount, "0x85663dfdb243b1a11a90f0816e1f83ccdb99f8f4");
 });
 
 test("SS58 AccountId32 normalization rejects an invalid checksum", () => {
