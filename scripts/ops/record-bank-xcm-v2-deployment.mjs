@@ -2,11 +2,12 @@
 
 /**
  * Produce the paired deployments/mainnet.json candidate after deployment.
- * Default is stdout only; --out is create-only. It never mutates the live
- * manifest in place and never sends a transaction.
+ * Default is stdout only; --out is create-only. --write-manifest records the
+ * paired manifest and rendered env files in one fail-closed flow. It never
+ * sends a transaction.
  */
 
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,6 +21,7 @@ import {
 } from "./bank-xcm-v2-ceremony-lib.mjs";
 import { createCeremonyRpcContext, printCeremonyRpcPreflight } from "./ceremony-rpc.mjs";
 import { compareMaskedRuntime } from "./check-contract-provenance.mjs";
+import { generateAll } from "./render-mainnet-backend-env.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -30,6 +32,7 @@ export function parseArgs(argv) {
     if (token === "--profile") args.profile = argv[++index];
     else if (token === "--evidence") args.evidence = argv[++index];
     else if (token === "--out") args.out = argv[++index];
+    else if (token === "--write-manifest") args.writeManifest = true;
     else if (token === "--help" || token === "-h") args.help = true;
     else throw new Error(`Unknown argument: ${token}`);
   }
@@ -43,6 +46,14 @@ function requireEvidenceShape(evidence) {
   if (!/^2(?:\.[0-9]+)?$/u.test(String(evidence.version ?? ""))) {
     throw new Error("deployment evidence version must identify a v2 generation.");
   }
+  if (String(evidence.version) === "2.2") {
+    if (!/^0x[0-9a-f]{64}$/iu.test(String(evidence.convertedAccountId32 ?? ""))) {
+      throw new Error("v2.2 deployment evidence requires the fresh converted AccountId32.");
+    }
+    if (evidence.conversionEvidence?.endpointCount !== 2 || typeof evidence.conversionEvidence?.artifact !== "string") {
+      throw new Error("v2.2 deployment evidence requires a two-endpoint conversion artifact.");
+    }
+  }
   for (const key of ["wrapper", "adapter"]) {
     const entry = evidence[key];
     if (!entry || !entry.address || !entry.txHash || !Number.isInteger(entry.blockNumber)) {
@@ -55,6 +66,43 @@ function requireEvidenceShape(evidence) {
     throw new Error("deployment evidence verifiedAt must be an ISO-8601 UTC timestamp.");
   }
   return evidence;
+}
+
+export function artifactPathsForVersion(version) {
+  if (String(version) === "2.2") {
+    return {
+      wrapper: resolve(repoRoot, "out/XcmWrapperV22.sol/XcmWrapperV22.json"),
+      adapter: resolve(repoRoot, "out/HydrationUsdcAdapterV22.sol/HydrationUsdcAdapterV22.json")
+    };
+  }
+  return {
+    wrapper: resolve(repoRoot, "out/XcmWrapperV2.sol/XcmWrapperV2.json"),
+    adapter: resolve(repoRoot, "out/HydrationUsdcAdapter.sol/HydrationUsdcAdapter.json")
+  };
+}
+
+export function writeManifestAndRenderedEnv(candidate, { root = repoRoot } = {}) {
+  const manifestPath = resolve(root, "deployments/mainnet.json");
+  const renderedManifest = `${JSON.stringify(candidate, null, 2)}\n`;
+  // Render every dependent file in memory before the first write. A malformed
+  // candidate therefore cannot leave a half-repointed checkout.
+  const generated = generateAll((relativePath) => (
+    relativePath === "deployments/mainnet.json"
+      ? renderedManifest
+      : readFileSync(resolve(root, relativePath), "utf8")
+  ));
+  writeFileSync(manifestPath, renderedManifest);
+  for (const [relativePath, content] of Object.entries(generated)) {
+    writeFileSync(resolve(root, relativePath), content);
+  }
+  const recorded = JSON.parse(readFileSync(manifestPath, "utf8"));
+  if (
+    getAddress(recorded.contracts?.xcmWrapper) !== getAddress(candidate.contracts.xcmWrapper)
+    || getAddress(recorded.contracts?.hydrationUsdcAdapter) !== getAddress(candidate.contracts.hydrationUsdcAdapter)
+  ) {
+    throw new Error("paired manifest write did not persist the deployed Bank pair.");
+  }
+  return { manifestPath, generatedPaths: Object.keys(generated) };
 }
 
 function assertArtifactRuntime(label, artifact, liveCode) {
@@ -107,24 +155,30 @@ export async function buildManifestCandidate({ manifest, evidence, provider, wra
 export async function main(argv = process.argv.slice(2)) {
   const args = parseArgs(argv);
   if (args.help) {
-    console.log("Usage: node scripts/ops/record-bank-xcm-v2-deployment.mjs --profile mainnet --evidence /tmp/evidence.json [--out /tmp/mainnet.json]");
+    console.log("Usage: node scripts/ops/record-bank-xcm-v2-deployment.mjs --profile mainnet --evidence evidence.json [--out /tmp/mainnet.json | --write-manifest]");
     return;
   }
   if (args.profile !== "mainnet" || !args.evidence) throw new Error("--profile mainnet and --evidence are required.");
+  if (args.out && args.writeManifest) throw new Error("--out and --write-manifest are mutually exclusive.");
   const manifest = loadJson(resolve(repoRoot, "deployments/mainnet.json"));
   const evidence = loadJson(resolve(args.evidence));
   const checkoutCommit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repoRoot, encoding: "utf8" }).trim();
   if (String(evidence.sourceCommit).toLowerCase() !== checkoutCommit.toLowerCase()) {
     throw new Error(`deployment evidence sourceCommit ${evidence.sourceCommit} does not match checkout ${checkoutCommit}.`);
   }
-  const wrapperArtifact = loadJson(resolve(repoRoot, "out/XcmWrapperV2.sol/XcmWrapperV2.json"));
-  const adapterArtifact = loadJson(resolve(repoRoot, "out/HydrationUsdcAdapter.sol/HydrationUsdcAdapter.json"));
+  const artifactPaths = artifactPathsForVersion(evidence.version);
+  const wrapperArtifact = loadJson(artifactPaths.wrapper);
+  const adapterArtifact = loadJson(artifactPaths.adapter);
   const rpc = await createCeremonyRpcContext({ manifest, phase: "bank-xcm-v2-record", write: false });
   try {
     printCeremonyRpcPreflight(rpc);
     const candidate = await buildManifestCandidate({ manifest, evidence, provider: rpc.provider, wrapperArtifact, adapterArtifact });
     const rendered = `${JSON.stringify(candidate, null, 2)}\n`;
-    if (args.out) {
+    if (args.writeManifest) {
+      const written = writeManifestAndRenderedEnv(candidate);
+      console.log(`paired manifest recorded in place: ${written.manifestPath}`);
+      console.log(`dependent env render: ${written.generatedPaths.join(", ")}`);
+    } else if (args.out) {
       writeFileSync(resolve(args.out), rendered, { flag: "wx" });
       console.log(`paired manifest candidate written create-only to ${resolve(args.out)}`);
     } else {

@@ -15,16 +15,19 @@ import {
   truncateAccountId32,
   wrapperAccountId32
 } from "./bank-xcm-v2-ceremony-lib.mjs";
-import { assertDryRunEvidence } from "./prepare-bank-xcm-v2-multisig.mjs";
-import { convertOnEndpoint } from "./capture-hydration-wrapper-origin.mjs";
+import { assertDryRunEvidence, assertPacketGeneration } from "./prepare-bank-xcm-v2-multisig.mjs";
+import { captureConversionEvidence, convertOnEndpoint } from "./capture-hydration-wrapper-origin.mjs";
 import {
-  REVIEWED_WRAPPER_V21_CREATION_CODE_HASH,
-  WRAPPER_V21_VERSION_SELECTOR,
-  assertReviewedWrapperV21Artifact,
+  REVIEWED_ADAPTER_V22_CREATION_CODE_HASH,
+  REVIEWED_WRAPPER_V22_CREATION_CODE_HASH,
+  WRAPPER_V22_VERSION_SELECTOR,
+  assertReviewedV22Artifacts,
   assertManifestRecordsDeployment,
+  assertRecordedV22Candidate,
   assertSourceCheckout,
+  assertSourceCommitReachable,
   buildDeploymentPlan,
-  probeWrapperV21Selector,
+  probeWrapperV22Selector,
   rebuildFoundryArtifacts
 } from "./deploy-bank-xcm-v2.mjs";
 import { buildManifestCandidate } from "./record-bank-xcm-v2-deployment.mjs";
@@ -94,6 +97,43 @@ test("deploy run cannot exit green until its exact pair is recorded in the manif
       adapter: ADAPTER
     }),
     /is not recorded in deployments\/mainnet\.json/u
+  );
+});
+
+test("v2.2 green-exit gate requires the exact fourth candidate and keeps flow disabled", () => {
+  const previousManifest = {
+    bankXcmDeploymentHistory: [
+      { version: "2.0", wrapper: "0x1000000000000000000000000000000000000001" },
+      { version: "2.1-stale-artifact", wrapper: "0x1000000000000000000000000000000000000002" },
+      { version: "2.1", wrapper: "0x1000000000000000000000000000000000000003" }
+    ]
+  };
+  const recordedManifest = {
+    profile: "mainnet",
+    contracts: { xcmWrapper: WRAPPER, hydrationUsdcAdapter: ADAPTER },
+    bankXcmDeploymentHistory: [
+      ...previousManifest.bankXcmDeploymentHistory,
+      { version: "2.2", wrapper: WRAPPER, adapter: ADAPTER }
+    ]
+  };
+  const candidates = recordedManifest.bankXcmDeploymentHistory.map(({ version, wrapper }) => ({ version, wrapper }));
+  const env = `BANK_XCM_FLOW_ENABLED=false\nBANK_LANE_FEED_WRAPPER_CANDIDATES_JSON=${JSON.stringify(candidates)}\n`;
+  assert.equal(assertRecordedV22Candidate({
+    previousManifest,
+    recordedManifest,
+    backendEnv: env,
+    wrapper: WRAPPER,
+    adapter: ADAPTER
+  }), true);
+  assert.throws(
+    () => assertRecordedV22Candidate({
+      previousManifest,
+      recordedManifest,
+      backendEnv: env.replace("BANK_XCM_FLOW_ENABLED=false", "BANK_XCM_FLOW_ENABLED=true"),
+      wrapper: WRAPPER,
+      adapter: ADAPTER
+    }),
+    /unexpectedly enabled/u
   );
 });
 
@@ -232,7 +272,7 @@ test("deployment plan pins wrapper-first CREATE order, paused constructor, and a
   assert.equal(plan.adapter.constructorArgs[4], AAC);
 });
 
-test("v2.1 deployment replacement is explicit and records the pair it supersedes", async () => {
+test("v2.2 deployment replacement is explicit and records the pair it supersedes", async () => {
   const deployer = "0x9Ab8531FBb0948C542a31298FD61335f30064239";
   const existing = {
     ...manifest,
@@ -284,6 +324,20 @@ test("deployment provenance refuses a mismatched HEAD or dirty checkout", () => 
   );
 });
 
+test("deployment provenance refuses a source commit not reachable from origin/main", () => {
+  const sourceCommit = "a".repeat(40);
+  let invocation;
+  assert.equal(assertSourceCommitReachable({
+    sourceCommit,
+    runner: (...args) => { invocation = args; }
+  }), true);
+  assert.deepEqual(invocation[1], ["merge-base", "--is-ancestor", sourceCommit, "origin/main"]);
+  assert.throws(
+    () => assertSourceCommitReachable({ sourceCommit, runner: () => { throw new Error("exit 1"); } }),
+    /not reachable from origin\/main/u
+  );
+});
+
 test("deployment rebuilds Foundry artifacts with a forced clean compile", () => {
   let invocation;
   const runner = (...args) => { invocation = args; };
@@ -293,45 +347,51 @@ test("deployment rebuilds Foundry artifacts with a forced clean compile", () => 
   assert.equal(invocation[2].stdio, "inherit");
 });
 
-test("deployment artifact gate pins the reviewed v2.1 creation hash and recovery selector", () => {
+test("deployment artifact gate pins both reviewed v2.2 creation hashes and the external selector", () => {
   const abi = [
-    "function dispatchRecoveryHome(uint256,uint64,bytes,bytes) returns(bytes32)",
-    "function previewRecoveryHomeId(uint256,uint64) view returns(bytes32)"
+    "function dispatchLeg(bytes32,uint8,uint256)",
+    "function previewRecoveryHomeId(bytes32,uint256,uint64) view returns(bytes32)"
   ];
-  const observed = assertReviewedWrapperV21Artifact({
-    abi,
-    evidence: { creationCodeHash: REVIEWED_WRAPPER_V21_CREATION_CODE_HASH }
+  const observed = assertReviewedV22Artifacts({
+    wrapperAbi: abi,
+    wrapperEvidence: { creationCodeHash: REVIEWED_WRAPPER_V22_CREATION_CODE_HASH },
+    adapterEvidence: { creationCodeHash: REVIEWED_ADAPTER_V22_CREATION_CODE_HASH }
   });
-  assert.equal(observed.previewRecoveryHomeIdSelector, WRAPPER_V21_VERSION_SELECTOR);
+  assert.equal(observed.previewRecoveryHomeIdSelector, WRAPPER_V22_VERSION_SELECTOR);
   assert.throws(
-    () => assertReviewedWrapperV21Artifact({ abi, evidence: { creationCodeHash: `sha256:${"00".repeat(32)}` } }),
-    /does not match reviewed v2.1/u
+    () => assertReviewedV22Artifacts({
+      wrapperAbi: abi,
+      wrapperEvidence: { creationCodeHash: `sha256:${"00".repeat(32)}` },
+      adapterEvidence: { creationCodeHash: REVIEWED_ADAPTER_V22_CREATION_CODE_HASH }
+    }),
+    /does not match reviewed v2.2/u
   );
   assert.throws(
-    () => assertReviewedWrapperV21Artifact({
-      abi: ["function dispatchRecoveryHome(uint256,uint64,bytes,bytes) returns(bytes32)"],
-      evidence: { creationCodeHash: REVIEWED_WRAPPER_V21_CREATION_CODE_HASH }
+    () => assertReviewedV22Artifacts({
+      wrapperAbi: ["function dispatchLeg(bytes32,uint8,uint256)"],
+      wrapperEvidence: { creationCodeHash: REVIEWED_WRAPPER_V22_CREATION_CODE_HASH },
+      adapterEvidence: { creationCodeHash: REVIEWED_ADAPTER_V22_CREATION_CODE_HASH }
     }),
-    /does not expose the reviewed v2.1/u
+    /does not expose the reviewed v2.2/u
   );
 });
 
-test("post-deploy gate probes the hard-coded v2.1 selector instead of trusting the artifact", async () => {
+test("post-deploy gate probes the hard-coded v2.2 selector instead of trusting the artifact", async () => {
   let request;
   const response = `0x${"12".repeat(32)}`;
-  const observed = await probeWrapperV21Selector({
+  const observed = await probeWrapperV22Selector({
     call: async (value) => { request = value; return response; }
   }, WRAPPER);
   assert.equal(request.to, getAddress(WRAPPER));
-  assert.equal(request.data.slice(0, 10), WRAPPER_V21_VERSION_SELECTOR);
+  assert.equal(request.data.slice(0, 10), WRAPPER_V22_VERSION_SELECTOR);
   assert.equal(observed.response, response);
   await assert.rejects(
-    probeWrapperV21Selector({ call: async () => { throw new Error("execution reverted"); } }, WRAPPER),
-    /does not execute v2.1 selector/u
+    probeWrapperV22Selector({ call: async () => { throw new Error("execution reverted"); } }, WRAPPER),
+    /does not execute v2.2 selector/u
   );
   await assert.rejects(
-    probeWrapperV21Selector({ call: async () => `0x${"00".repeat(32)}` }, WRAPPER),
-    /invalid v2.1 selector response/u
+    probeWrapperV22Selector({ call: async () => `0x${"00".repeat(32)}` }, WRAPPER),
+    /invalid v2.2 selector response/u
   );
 });
 
@@ -345,6 +405,18 @@ test("paused configuration and arm packets are deliberately separate", () => {
   assert.match(arm[0].label, /setDispatchPaused\(false\)/u);
   const iface = new Interface(["function setDispatchPaused(bool)"]);
   assert.equal(iface.decodeFunctionData("setDispatchPaused", arm[0].data)[0], false);
+});
+
+test("G2 v2.2 emitter allows configure only and refuses every arm-material input", () => {
+  assert.equal(assertPacketGeneration({ generation: "2.2", packet: "configure" }), true);
+  assert.throws(
+    () => assertPacketGeneration({ generation: "2.2", packet: "arm" }),
+    /arm material is forbidden in G2/u
+  );
+  assert.throws(
+    () => assertPacketGeneration({ generation: "2.2", packet: "configure", dryRunEvidence: "/tmp/g3.json" }),
+    /emits no request messages or arm evidence/u
+  );
 });
 
 test("request-leg evidence fails closed unless all four exact hashes and assertions pass", () => {
@@ -623,5 +695,49 @@ test("two-endpoint conversion reader fails honest on missing runtime API and ret
       })
     }),
     /does not expose LocationToAccountApi/u
+  );
+});
+
+test("conversion capture requires two independent endpoints to agree", async () => {
+  const apiFactory = async (endpoint) => ({
+    rpc: { system: { chain: async () => "Hydration" } },
+    genesisHash: { toHex: () => `0x${"12".repeat(32)}` },
+    call: {
+      locationToAccountApi: {
+        convertLocation: async () => ({
+          isSome: true,
+          unwrap: () => ({ toHex: () => endpoint.includes("two") ? CONVERTED : CONVERTED })
+        })
+      }
+    },
+    disconnect: async () => {}
+  });
+  const evidence = await captureConversionEvidence({
+    wrapper: WRAPPER,
+    endpoints: ["wss://one.invalid", "wss://two.invalid"],
+    apiFactory
+  });
+  assert.equal(evidence.reads.length, 2);
+  assert.equal(evidence.convertedAccountId32, CONVERTED);
+
+  await assert.rejects(
+    captureConversionEvidence({
+      wrapper: WRAPPER,
+      endpoints: ["wss://one.invalid", "wss://two.invalid"],
+      apiFactory: async (endpoint) => ({
+        rpc: { system: { chain: async () => "Hydration" } },
+        genesisHash: { toHex: () => `0x${"12".repeat(32)}` },
+        call: {
+          locationToAccountApi: {
+            convertLocation: async () => ({
+              isSome: true,
+              unwrap: () => ({ toHex: () => endpoint.includes("two") ? `0x${"99".repeat(32)}` : CONVERTED })
+            })
+          }
+        },
+        disconnect: async () => {}
+      })
+    }),
+    /independent convert_location reads disagree/u
   );
 });
