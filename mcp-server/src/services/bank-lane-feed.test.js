@@ -196,10 +196,12 @@ test("terminal request exposes the honest reconciliation without presenting the 
     completedAt: new Date(BASE - 5 * 60_000).toISOString(),
     reconciliation: {
       stagedRaw: "150000",
+      actualTreasuryReturnRaw: "130200",
       leg1TransferFeeRaw: "525",
       trappedWriteOff3Raw: "17932",
-      remoteRecoverableRaw: "131543",
+      recoveryReturnFeeRaw: "1343",
       unexplainedRaw: "0",
+      finalRawRecoverySlotResidueRaw: "19800",
       artifactLabel: "v2.1 accounting artifact, known-unrecoverable",
       rawRecoveryAssetsOutstandingRaw: "150000"
     }
@@ -218,10 +220,12 @@ test("terminal request exposes the honest reconciliation without presenting the 
     status: "failed",
     reconciliation: {
       stagedRaw: "150000",
+      actualTreasuryReturnRaw: "130200",
       leg1TransferFeeRaw: "525",
       trappedWriteOff3Raw: "17932",
-      remoteRecoverableRaw: "131543",
+      recoveryReturnFeeRaw: "1343",
       unexplainedRaw: "0",
+      finalRawRecoverySlotResidueRaw: "19800",
       artifactLabel: "v2.1 accounting artifact, known-unrecoverable"
     }
   }]);
