@@ -117,9 +117,33 @@ export class XcmBalanceObserverService {
     const pending = await this.stateStore.listPendingXcmBalanceWatches?.(limit) ?? [];
     const results = [];
     for (const watch of pending) {
+      const scope = this.classifyWatchScope(watch);
+      if (scope === "foreign") continue;
+      if (scope === "unknown") {
+        results.push(await this.markUnknownScope(watch));
+        continue;
+      }
       results.push(await this.pollWatch(watch));
     }
     return results;
+  }
+
+  classifyWatchScope(watch) {
+    return this.bankLaneFeed?.enabled
+      && typeof this.bankLaneFeed.classifyRequestWatch === "function"
+      ? this.bankLaneFeed.classifyRequestWatch(watch)
+      : "current";
+  }
+
+  async markUnknownScope(watch) {
+    const updated = await this.stateStore.upsertXcmBalanceWatch({
+      ...watch,
+      phase: "scope-unknown",
+      lastTriedAt: new Date(this.now()).toISOString(),
+      lastError: "observer_target_scope_unknown"
+    });
+    this.publish("xcm.balance_watch_scope_unknown", updated);
+    return updated;
   }
 
   async pollWatch(watch) {
@@ -205,7 +229,8 @@ export class XcmBalanceObserverService {
   }
 
   async getStatus() {
-    const pending = await this.stateStore.listPendingXcmBalanceWatches?.(100) ?? [];
+    const allPending = await this.stateStore.listPendingXcmBalanceWatches?.(100) ?? [];
+    const pending = allPending.filter((watch) => this.classifyWatchScope(watch) !== "foreign");
     const nowMs = this.now();
     const oldestStartedMs = pending.reduce((oldest, item) => {
       const value = Date.parse(item.startedAt ?? "");

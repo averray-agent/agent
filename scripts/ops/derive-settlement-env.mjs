@@ -37,6 +37,9 @@ const discoveryRegistry = contracts.discoveryRegistry
 const xcmWrapper = contracts.xcmWrapper
   ? requireAddress(contracts.xcmWrapper, "contracts.xcmWrapper")
   : "";
+const hydrationUsdcAdapter = contracts.hydrationUsdcAdapter
+  ? requireAddress(contracts.hydrationUsdcAdapter, "contracts.hydrationUsdcAdapter")
+  : "";
 const usdc = requireAddress(contracts.token, "contracts.token");
 const canonicalUsdc = "0x0000053900000000000000000000000001200000";
 
@@ -64,6 +67,7 @@ const entries = {
   REPUTATION_SBT_ADDRESS: reputationSbt,
   DISCOVERY_REGISTRY_ADDRESS: discoveryRegistry,
   XCM_WRAPPER_ADDRESS: xcmWrapper,
+  HYDRATION_USDC_ADAPTER_ADDRESS: hydrationUsdcAdapter,
   SUPPORTED_ASSETS_JSON: supportedAssets,
   SUPPORTED_ASSETS: ""
 };

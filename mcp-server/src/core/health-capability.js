@@ -717,6 +717,11 @@ export function resolveHealthAddresses({
     token,
     agentAccountCore: firstPresent(contracts.agentAccountCore, env.AGENT_ACCOUNT_ADDRESS),
     escrowCore: firstPresent(contracts.escrowCore, env.ESCROW_CORE_ADDRESS),
+    xcmWrapper: firstPresent(contracts.xcmWrapper, env.XCM_WRAPPER_ADDRESS),
+    hydrationUsdcAdapter: firstPresent(
+      contracts.hydrationUsdcAdapter,
+      env.HYDRATION_USDC_ADAPTER_ADDRESS
+    ),
     settlementSigner: firstPresent(
       deploymentManifest?.verifier,
       env.SIGNER_ADDRESS,

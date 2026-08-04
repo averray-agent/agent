@@ -12,6 +12,7 @@ import {
 import { normalizeVenueBalanceTarget } from "./venue-balance-reader.js";
 
 const ACCOUNT = "0x85663dfdb243b1a11a90f0816e1f83ccdb99f8f4c4a25d432739218efd489736";
+const RETIRED_ACCOUNT = "0x98f0033e26aa4ecf2899e6d09237d40d29fcb68e64d22a621520bde1123564ac";
 const AUSDC = "0x2ec4884088d84e5c2970a034732e5209b0acfa93";
 const OTHER_AUSDC = "0x1111111111111111111111111111111111111111";
 const POSTAGE = "1yKNU414vYDyXYXL6pu845puajfeGTezD1rBiUYwp9UKBaZ";
@@ -178,6 +179,34 @@ test("request snapshot never silently truncates the pending table", async () => 
   }).pollOnce();
 
   assert.equal(feed.requests.items.length, 125);
+  assert.equal(feed.requests.lastError, null);
+});
+
+test("request snapshot excludes the retired v2.0 venue target without hiding unknown work", async () => {
+  const store = new MemoryStateStore();
+  const request = (requestId, target) => store.upsertXcmBalanceWatch({
+    requestId,
+    status: "pending",
+    target,
+    direction: "increase",
+    startedAt: new Date(BASE - 10_000).toISOString(),
+    deadlineAt: new Date(BASE + 60_000).toISOString()
+  });
+  await request(`0x${"10".repeat(32)}`, {
+    ...targets().position,
+    account: RETIRED_ACCOUNT
+  });
+  await request(`0x${"20".repeat(32)}`, targets().position);
+  await request(`0x${"30".repeat(32)}`, undefined);
+
+  const feed = await service(store, {
+    async read(target) { return { raw: "0", asOf: BASE, target }; }
+  }).pollOnce();
+
+  assert.deepEqual(feed.requests.items.map(({ id }) => id), [
+    `0x${"20".repeat(32)}`,
+    `0x${"30".repeat(32)}`
+  ]);
   assert.equal(feed.requests.lastError, null);
 });
 

@@ -21,6 +21,7 @@ import {
   REVIEWED_WRAPPER_V21_CREATION_CODE_HASH,
   WRAPPER_V21_VERSION_SELECTOR,
   assertReviewedWrapperV21Artifact,
+  assertManifestRecordsDeployment,
   assertSourceCheckout,
   buildDeploymentPlan,
   probeWrapperV21Selector,
@@ -69,6 +70,31 @@ function bundle() {
 test("wrapper identity uses the proven H160 + EE x12 image and observer truncate20", () => {
   assert.equal(wrapperAccountId32(WRAPPER), `${WRAPPER.toLowerCase()}${"ee".repeat(12)}`);
   assert.equal(truncateAccountId32(CONVERTED), getAddress(`0x${CONVERTED.slice(2, 42)}`));
+});
+
+test("deploy run cannot exit green until its exact pair is recorded in the manifest", () => {
+  assert.equal(assertManifestRecordsDeployment({
+    manifest: {
+      profile: "mainnet",
+      contracts: { xcmWrapper: WRAPPER, hydrationUsdcAdapter: ADAPTER }
+    },
+    wrapper: WRAPPER,
+    adapter: ADAPTER
+  }), true);
+  assert.throws(
+    () => assertManifestRecordsDeployment({
+      manifest: {
+        profile: "mainnet",
+        contracts: {
+          xcmWrapper: "0xc846eE73e49A748e59C7Ac8f8742F542a552D24C",
+          hydrationUsdcAdapter: "0x5eaF58a3e2819A26B66822529aD92fcec107cc98"
+        }
+      },
+      wrapper: WRAPPER,
+      adapter: ADAPTER
+    }),
+    /is not recorded in deployments\/mainnet\.json/u
+  );
 });
 
 test("message builder emits exactly four v2 shapes bound to request topics", () => {

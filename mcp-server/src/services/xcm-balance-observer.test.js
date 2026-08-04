@@ -150,6 +150,70 @@ test("feed polling runs beside the observer without enabling XCM settlement", as
   assert.equal(feedPolls, 1);
 });
 
+test("enabled observer polls only the current v2.1 target and fails unknown scope closed", async () => {
+  const store = new MemoryStateStore();
+  const now = Date.parse("2026-08-04T08:00:00.000Z");
+  const baseWatch = {
+    status: "pending",
+    direction: "increase",
+    baselineRaw: "0",
+    currentRaw: "0",
+    deltaRaw: "0",
+    settlement: { assets: "delta", shares: "delta" },
+    startedAt: new Date(now - 1_000).toISOString(),
+    deadlineAt: new Date(now + 60_000).toISOString(),
+    attemptCount: 0
+  };
+  const currentId = `0x${"41".repeat(32)}`;
+  const retiredId = `0x${"42".repeat(32)}`;
+  const unknownId = `0x${"43".repeat(32)}`;
+  await store.upsertXcmBalanceWatch({
+    ...baseWatch,
+    requestId: currentId,
+    target: { ...targetFor("aUsdc"), account: MAINNET_ACCOUNT }
+  });
+  await store.upsertXcmBalanceWatch({
+    ...baseWatch,
+    requestId: retiredId,
+    target: {
+      ...targetFor("aUsdc"),
+      account: "0x98f0033e26aa4ecf2899e6d09237d40d29fcb68e64d22a621520bde1123564ac"
+    }
+  });
+  await store.upsertXcmBalanceWatch({ ...baseWatch, requestId: unknownId });
+
+  const reads = [];
+  const bankLaneFeed = {
+    enabled: true,
+    classifyRequestWatch(watch) {
+      if (!watch.target) return "unknown";
+      return watch.target.account === MAINNET_ACCOUNT ? "current" : "foreign";
+    },
+    async pollOnce() {}
+  };
+  const observer = new XcmBalanceObserverService(
+    store,
+    {
+      async read(target) {
+        reads.push(target.account);
+        return { raw: 0n, asOf: new Date(now).toISOString(), target };
+      }
+    },
+    { async observeOutcome() {} },
+    undefined,
+    { enabled: true, bankLaneFeed, now: () => now }
+  );
+
+  await observer.pollOnce();
+  assert.deepEqual(reads, [MAINNET_ACCOUNT]);
+  assert.equal((await store.getXcmBalanceWatch(currentId)).attemptCount, 1);
+  assert.equal((await store.getXcmBalanceWatch(retiredId)).attemptCount, 0);
+  assert.equal((await store.getXcmBalanceWatch(unknownId)).lastError, "observer_target_scope_unknown");
+  const status = await observer.getStatus();
+  assert.equal(status.pendingCount, 2);
+  assert.equal(status.readErrorCount, 1);
+});
+
 test("round-trip fixtures replay all four destination-ledger balance deltas", async () => {
   let sequence = [];
   const outcomes = [];
