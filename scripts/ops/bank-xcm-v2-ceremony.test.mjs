@@ -431,6 +431,7 @@ test("v2.1 arm evidence requires the fifth recovery-home dry-run", () => {
 
 test("manifest recorder produces the paired addresses, provenance, blocks, and paused strategy record", () => {
   const next = applyBankXcmV2Manifest(manifest, {
+    version: "2.0",
     sourceCommit: "a".repeat(40),
     deployer: "0x9Ab8531FBb0948C542a31298FD61335f30064239",
     verifiedAt: "2026-08-03T12:00:00.000Z",
@@ -454,6 +455,7 @@ test("manifest recorder produces the paired addresses, provenance, blocks, and p
   assert.equal(next.deploymentBlocks.xcmWrapperV2, 19_000_001);
   assert.equal(next.strategies[0].status, "paused_pending_dust_proof");
   assert.equal(next.bankXcmV2Deployment.status, "deployed_paused");
+  assert.equal(next.bankXcmDeploymentHistory[0].wrapper, getAddress(WRAPPER));
 });
 
 test("v2.1 manifest replacement preserves v2.0 provenance and records retirement truth", () => {
@@ -481,6 +483,7 @@ test("v2.1 manifest replacement preserves v2.0 provenance and records retirement
     }
   };
   const next = applyBankXcmV2Manifest(existing, {
+    version: "2.1",
     sourceCommit: "c".repeat(40),
     deployer: "0x9Ab8531FBb0948C542a31298FD61335f30064239",
     verifiedAt: "2026-08-04T08:00:00.000Z",
@@ -506,10 +509,66 @@ test("v2.1 manifest replacement preserves v2.0 provenance and records retirement
   assert.equal(next.deploymentBlocks.xcmWrapperV2_1, 19_100_001);
   assert.equal(next.deployers.xcmWrapperV2_1, getAddress("0x9Ab8531FBb0948C542a31298FD61335f30064239"));
   assert.equal(next.contractProvenance[oldWrapper].sourceCommit, "b".repeat(40));
-  assert.equal(next.bankXcmDeploymentHistory.length, 1);
+  assert.equal(next.bankXcmDeploymentHistory.length, 2);
   assert.equal(next.bankXcmDeploymentHistory[0].status, "retired_replaced");
   assert.equal(next.bankXcmDeploymentHistory[0].incident.writeOffs[0].raw, "149412");
   assert.deepEqual(next.bankXcmDeploymentHistory[0].retiredCapital, [{ assetId: 22, raw: "149412" }]);
+  assert.equal(next.bankXcmDeploymentHistory[1].version, "2.1");
+  assert.equal(next.bankXcmDeploymentHistory[1].status, "deployed_paused");
+});
+
+test("v2.2 manifest replacement appends the new pair and emits generation-specific keys", () => {
+  const previous = applyBankXcmV2Manifest(manifest, {
+    version: "2.1",
+    sourceCommit: "a".repeat(40),
+    deployer: OPERATOR,
+    verifiedAt: "2026-08-04T08:00:00.000Z",
+    wrapper: {
+      address: WRAPPER,
+      txHash: `0x${"11".repeat(32)}`,
+      blockNumber: 19_100_001,
+      abiHash: `sha256:${"12".repeat(32)}`,
+      runtimeCodeHash: `sha256:${"13".repeat(32)}`
+    },
+    adapter: {
+      address: ADAPTER,
+      txHash: `0x${"21".repeat(32)}`,
+      blockNumber: 19_100_002,
+      abiHash: `sha256:${"22".repeat(32)}`,
+      runtimeCodeHash: `sha256:${"23".repeat(32)}`
+    }
+  });
+  const wrapperV22 = "0x2222222222222222222222222222222222222222";
+  const adapterV22 = "0x3333333333333333333333333333333333333333";
+  const next = applyBankXcmV2Manifest(previous, {
+    version: "2.2",
+    sourceCommit: "b".repeat(40),
+    deployer: OPERATOR,
+    verifiedAt: "2026-08-04T19:00:00.000Z",
+    replacementReason: "v2.2 dispatch-time fee pricing",
+    wrapper: {
+      address: wrapperV22,
+      txHash: `0x${"31".repeat(32)}`,
+      blockNumber: 19_200_001,
+      abiHash: `sha256:${"32".repeat(32)}`,
+      runtimeCodeHash: `sha256:${"33".repeat(32)}`
+    },
+    adapter: {
+      address: adapterV22,
+      txHash: `0x${"41".repeat(32)}`,
+      blockNumber: 19_200_002,
+      abiHash: `sha256:${"42".repeat(32)}`,
+      runtimeCodeHash: `sha256:${"43".repeat(32)}`
+    }
+  });
+
+  assert.deepEqual(next.bankXcmDeploymentHistory.map((entry) => entry.version), ["2.1", "2.2"]);
+  assert.equal(next.bankXcmDeploymentHistory[1].wrapper, getAddress(wrapperV22));
+  assert.equal(next.bankXcmV2Deployment.version, "2.2");
+  assert.equal(next.deploymentBlocks.xcmWrapperV2_2, 19_200_001);
+  assert.equal(next.deploymentBlocks.hydrationUsdcAdapterV2_2, 19_200_002);
+  assert.equal(next.deployers.xcmWrapperV2_2, getAddress(OPERATOR));
+  assert.equal(next.deployers.hydrationUsdcAdapterV2_2, getAddress(OPERATOR));
 });
 
 test("manifest candidate refuses live runtime drift before recording provenance", async () => {
@@ -518,6 +577,7 @@ test("manifest candidate refuses live runtime drift before recording provenance"
   const evidence = {
     kind: "averray.bankXcmV2DeploymentEvidence",
     profile: "mainnet",
+    version: "2.0",
     sourceCommit: "a".repeat(40),
     deployer: "0x9Ab8531FBb0948C542a31298FD61335f30064239",
     verifiedAt: "2026-08-03T12:00:00.000Z",

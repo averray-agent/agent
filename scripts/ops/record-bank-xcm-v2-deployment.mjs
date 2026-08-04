@@ -40,6 +40,9 @@ function requireEvidenceShape(evidence) {
   if (evidence?.kind !== "averray.bankXcmV2DeploymentEvidence" || evidence?.profile !== "mainnet") {
     throw new Error("deployment evidence kind/profile mismatch.");
   }
+  if (!/^2(?:\.[0-9]+)?$/u.test(String(evidence.version ?? ""))) {
+    throw new Error("deployment evidence version must identify a v2 generation.");
+  }
   for (const key of ["wrapper", "adapter"]) {
     const entry = evidence[key];
     if (!entry || !entry.address || !entry.txHash || !Number.isInteger(entry.blockNumber)) {

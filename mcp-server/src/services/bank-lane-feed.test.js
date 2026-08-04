@@ -7,6 +7,7 @@ import {
   BANK_LANE_FEED_STATE_SCOPE,
   BankLaneFeedService,
   describeBalanceTarget,
+  evaluateSoleArmedWrapper,
   loadBankLaneFeedConfig
 } from "./bank-lane-feed.js";
 import { normalizeVenueBalanceTarget } from "./venue-balance-reader.js";
@@ -17,7 +18,19 @@ const AUSDC = "0x2ec4884088d84e5c2970a034732e5209b0acfa93";
 const OTHER_AUSDC = "0x1111111111111111111111111111111111111111";
 const POSTAGE = "1yKNU414vYDyXYXL6pu845puajfeGTezD1rBiUYwp9UKBaZ";
 const ACCOUNT_SS58 = "141ujyV9aKBYqZncx6SYRWU2XQCxUcYiGYE8U7jprEKVUZNJ";
+const WRAPPER_V20 = "0xc846eE73e49A748e59C7Ac8f8742F542a552D24C";
+const WRAPPER_V21 = "0x2AF394fA95f75D3ca1C786128f4dfA1eB0c9675D";
 const BASE = Date.parse("2026-08-03T14:00:00.000Z");
+
+function subject(configuredWrapper = WRAPPER_V21) {
+  return {
+    configuredWrapper,
+    candidates: [
+      { version: "2.0", wrapper: WRAPPER_V20 },
+      { version: "2.1", wrapper: WRAPPER_V21 }
+    ]
+  };
+}
 
 function targets(positionContract = AUSDC) {
   return {
@@ -46,6 +59,12 @@ function targets(positionContract = AUSDC) {
 function service(store, reader, options = {}) {
   return new BankLaneFeedService(store, reader, {
     enabled: true,
+    subject: subject(),
+    subjectReader: {
+      async readDispatchPaused(wrapper) {
+        return wrapper.toLowerCase() !== WRAPPER_V21.toLowerCase();
+      }
+    },
     targets: targets(),
     now: () => BASE,
     ...options
@@ -302,6 +321,8 @@ test("Bank feed config binds the three exact ledgers and stays inert when disabl
   });
   const config = loadBankLaneFeedConfig({
     BANK_LANE_FEED_ENABLED: "true",
+    XCM_WRAPPER_ADDRESS: WRAPPER_V21,
+    BANK_LANE_FEED_WRAPPER_CANDIDATES_JSON: JSON.stringify(subject().candidates),
     BANK_LANE_FEED_HYDRATION_ACCOUNT_ID32: ACCOUNT,
     BANK_LANE_FEED_HYDRATION_EVM_RPC_URL: "https://rpc.hydradx.cloud",
     BANK_LANE_FEED_HYDRATION_EVM_CHAIN_ID: "222222",
@@ -318,10 +339,108 @@ test("Bank feed config binds the three exact ledgers and stays inert when disabl
   assert.equal(config.targets.float.assetId, "22");
   assert.equal(config.targets.postage.ledger, "substrate_system");
   assert.equal(config.targets.postage.account, POSTAGE);
+  assert.equal(config.subject.configuredWrapper, WRAPPER_V21);
+  assert.deepEqual(config.subject.candidates, subject().candidates);
   assert.throws(
-    () => loadBankLaneFeedConfig({ BANK_LANE_FEED_ENABLED: "true" }),
+    () => loadBankLaneFeedConfig({
+      BANK_LANE_FEED_ENABLED: "true",
+      XCM_WRAPPER_ADDRESS: WRAPPER_V21,
+      BANK_LANE_FEED_WRAPPER_CANDIDATES_JSON: JSON.stringify(subject().candidates)
+    }),
     /BANK_LANE_FEED_HYDRATION_ACCOUNT_ID32 is required/u
   );
+});
+
+test("sole-armed-wrapper subject reports the configured wrapper only from live paused bits", async () => {
+  const store = new MemoryStateStore();
+  const feed = await service(store, {
+    async read(target) { return { raw: "0", asOf: BASE, target }; }
+  }).pollOnce();
+
+  assert.deepEqual(feed.subject, {
+    configuredWrapper: WRAPPER_V21,
+    uniqueArmedWrapper: WRAPPER_V21,
+    matches: true,
+    status: "ok",
+    candidates: [
+      { version: "2.0", wrapper: WRAPPER_V20, dispatchPaused: true, lastError: null },
+      { version: "2.1", wrapper: WRAPPER_V21, dispatchPaused: false, lastError: null }
+    ],
+    readAtMs: BASE,
+    lastError: null
+  });
+});
+
+test("sole-armed-wrapper subject fails when env points at a recorded but retired wrapper", () => {
+  const result = evaluateSoleArmedWrapper({
+    configuredWrapper: WRAPPER_V20,
+    candidates: [
+      { version: "2.0", wrapper: WRAPPER_V20, dispatchPaused: true },
+      { version: "2.1", wrapper: WRAPPER_V21, dispatchPaused: false }
+    ],
+    readAtMs: BASE
+  });
+  assert.equal(result.status, "error");
+  assert.equal(result.matches, false);
+  assert.equal(result.uniqueArmedWrapper, WRAPPER_V21);
+  assert.equal(result.lastError, "configured_wrapper_not_unique_armed_wrapper");
+});
+
+test("sole-armed-wrapper subject fails on zero or multiple armed generations", () => {
+  const candidate = (wrapper, dispatchPaused) => ({ version: wrapper, wrapper, dispatchPaused });
+  const none = evaluateSoleArmedWrapper({
+    configuredWrapper: WRAPPER_V21,
+    candidates: [candidate(WRAPPER_V20, true), candidate(WRAPPER_V21, true)],
+    readAtMs: BASE
+  });
+  assert.equal(none.status, "error");
+  assert.equal(none.matches, false);
+  assert.equal(none.lastError, "no_armed_wrapper");
+
+  const multiple = evaluateSoleArmedWrapper({
+    configuredWrapper: WRAPPER_V21,
+    candidates: [candidate(WRAPPER_V20, false), candidate(WRAPPER_V21, false)],
+    readAtMs: BASE
+  });
+  assert.equal(multiple.status, "error");
+  assert.equal(multiple.matches, false);
+  assert.equal(multiple.lastError, "multiple_armed_wrappers");
+});
+
+test("sole-armed-wrapper subject is unknown rather than green when any paused bit is unreadable", () => {
+  const result = evaluateSoleArmedWrapper({
+    configuredWrapper: WRAPPER_V21,
+    candidates: [
+      { version: "2.0", wrapper: WRAPPER_V20, dispatchPaused: null, lastError: "rpc timeout" },
+      { version: "2.1", wrapper: WRAPPER_V21, dispatchPaused: false }
+    ],
+    readAtMs: BASE
+  });
+  assert.equal(result.status, "unknown");
+  assert.equal(result.matches, null);
+  assert.equal(result.uniqueArmedWrapper, null);
+  assert.equal(result.lastError, "wrapper_pause_state_unverified");
+});
+
+test("stored subject from a prior env generation is invalidated instead of reused", async () => {
+  const store = new MemoryStateStore();
+  await store.upsertServiceState(BANK_LANE_FEED_STATE_SCOPE, {
+    subject: evaluateSoleArmedWrapper({
+      configuredWrapper: WRAPPER_V20,
+      candidates: [
+        { version: "2.0", wrapper: WRAPPER_V20, dispatchPaused: false },
+        { version: "2.1", wrapper: WRAPPER_V21, dispatchPaused: true }
+      ],
+      readAtMs: BASE - 1_000
+    })
+  });
+  const current = await service(store, {
+    async read(target) { return { raw: "0", asOf: BASE, target }; }
+  }).getFeed();
+  assert.equal(current.subject.status, "unknown");
+  assert.equal(current.subject.matches, null);
+  assert.equal(current.subject.configuredWrapper, WRAPPER_V21);
+  assert.equal(current.subject.lastError, "subject_snapshot_missing_or_stale");
 });
 
 test("mainnet template ships the Bank feed ENABLED, with targets that match the deployment manifest", async () => {

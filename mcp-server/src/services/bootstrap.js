@@ -61,6 +61,7 @@ import { VenueBalanceReader } from "./venue-balance-reader.js";
 import { XcmBalanceObserverService } from "./xcm-balance-observer.js";
 import {
   BankLaneFeedService,
+  EvmWrapperPauseReader,
   loadBankLaneFeedConfig
 } from "./bank-lane-feed.js";
 import {
@@ -406,13 +407,17 @@ export async function createPlatformRuntime() {
     })
   );
   const venueBalanceReader = initStep("init-venue-balance-reader", logger, () => new VenueBalanceReader());
-  const bankLaneFeed = initStep("init-bank-lane-feed", logger, () =>
-    new BankLaneFeedService(
+  const bankLaneFeed = initStep("init-bank-lane-feed", logger, () => {
+    const config = loadBankLaneFeedConfig(process.env);
+    return new BankLaneFeedService(
       stateStore,
       venueBalanceReader,
-      loadBankLaneFeedConfig(process.env)
-    )
-  );
+      {
+        ...config,
+        subjectReader: new EvmWrapperPauseReader(gateway.provider)
+      }
+    );
+  });
   const bankXcmFlowRequested = parseBooleanEnv(process.env.BANK_XCM_FLOW_ENABLED);
   const bankUsdcAsset = gateway.config.supportedAssets?.find(
     (asset) => String(asset.symbol ?? "").toUpperCase() === "USDC"

@@ -129,6 +129,7 @@ export const TODO_KEYS = {
   DISCOVERY_REGISTRY_ADDRESS: "from deployments/mainnet.json (post-ceremony)",
   XCM_WRAPPER_ADDRESS: "active Bank wrapper from deployments/mainnet.json",
   HYDRATION_USDC_ADAPTER_ADDRESS: "active Bank adapter from deployments/mainnet.json",
+  BANK_LANE_FEED_WRAPPER_CANDIDATES_JSON: "append-only Bank wrapper history from deployments/mainnet.json",
   BANK_LANE_FEED_HYDRATION_ACCOUNT_ID32: "active Bank converted account from deployments/mainnet.json",
   BANK_LANE_FEED_POSTAGE_ACCOUNT: "active Bank wrapper Asset Hub image from deployments/mainnet.json",
   AUTH_ADMIN_WALLETS: "mainnet admin wallet(s) — NEVER the testnet hot key nor the leaked 0xFd2E...6519",
@@ -198,6 +199,36 @@ function requireWalletList(value, label) {
   return value.map((address, index) => requireAddress(address, `${label}[${index}]`)).join(",");
 }
 
+/**
+ * The env identifies which wrapper the backend is configured to use. This
+ * candidate list deliberately carries no armed/paused verdict: the observer
+ * must read dispatchPaused() from every recorded generation at runtime.
+ */
+export function buildBankWrapperCandidates(manifest, configuredWrapper) {
+  const history = manifest.bankXcmDeploymentHistory;
+  if (!Array.isArray(history) || history.length === 0) {
+    throw new Error("deployments/mainnet.json: bankXcmDeploymentHistory must be a non-empty append-only wrapper history");
+  }
+  const seen = new Set();
+  const candidates = history.map((entry, index) => {
+    const version = String(entry?.version ?? "").trim();
+    if (!version) {
+      throw new Error(`deployments/mainnet.json: bankXcmDeploymentHistory[${index}].version is required`);
+    }
+    const wrapper = requireAddress(entry?.wrapper, `bankXcmDeploymentHistory[${index}].wrapper`);
+    const key = wrapper.toLowerCase();
+    if (seen.has(key)) {
+      throw new Error(`deployments/mainnet.json: duplicate wrapper ${wrapper} in bankXcmDeploymentHistory`);
+    }
+    seen.add(key);
+    return { version, wrapper };
+  });
+  if (!seen.has(configuredWrapper.toLowerCase())) {
+    throw new Error("deployments/mainnet.json: contracts.xcmWrapper must be present in bankXcmDeploymentHistory");
+  }
+  return candidates;
+}
+
 /** Resolve every public runtime value from the committed mainnet manifest. */
 export function buildManifestOverrides(manifest) {
   if (!manifest || manifest.profile !== "mainnet") {
@@ -221,6 +252,7 @@ export function buildManifestOverrides(manifest) {
   const escrowBlock = Number(blocks.escrowCore);
   const sharedAccountEscrowStart = Math.min(agentBlock, escrowBlock);
   const xcmWrapper = requireAddress(contracts.xcmWrapper, "contracts.xcmWrapper");
+  const bankWrapperCandidates = buildBankWrapperCandidates(manifest, xcmWrapper);
   const convertedAccountId32 = requireAccountId32(
     bankDeployment.convertedAccountId32,
     "bankXcmV2Deployment.convertedAccountId32"
@@ -240,6 +272,7 @@ export function buildManifestOverrides(manifest) {
       contracts.hydrationUsdcAdapter,
       "contracts.hydrationUsdcAdapter"
     ),
+    BANK_LANE_FEED_WRAPPER_CANDIDATES_JSON: JSON.stringify(bankWrapperCandidates),
     BANK_LANE_FEED_HYDRATION_ACCOUNT_ID32: encodeAddress(convertedAccountId32, 0),
     BANK_LANE_FEED_POSTAGE_ACCOUNT: encodeAddress(wrapperAssetHubImage(xcmWrapper), 0),
     AUTH_ADMIN_WALLETS: requireWalletList(auth.adminWallets, "runtime.auth.adminWallets"),
