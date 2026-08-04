@@ -335,12 +335,12 @@ test("generateAll: the real transform yields the mainnet essentials", () => {
   assert.match(backend, /^FIRST_EXTERNAL_AGENT_ALERT_ENABLED=true$/mu);
   assert.match(backend, /^TREASURY_POLICY_ADDRESS=0x226F14252A98BD2eA140271647De20132F09AF20$/mu);
   assert.match(backend, /^AGENT_ACCOUNT_ADDRESS=0xB1350932bf85E7ffd0599E9a3CC7b55718D89E57$/mu);
-  assert.match(backend, /^XCM_WRAPPER_ADDRESS=0x2AF394fA95f75D3ca1C786128f4dfA1eB0c9675D$/mu);
+  assert.match(backend, /^XCM_WRAPPER_ADDRESS=0xEceE778e11B238D2fc096E56460e7B98DC7B26b8$/mu);
   assert.match(backend, /^BANK_XCM_FLOW_ENABLED=false$/mu);
-  assert.match(backend, /^HYDRATION_USDC_ADAPTER_ADDRESS=0x7f02600eA185b5d9ecfB2B7ac97a6a502F89B81B$/mu);
-  assert.match(backend, /^BANK_LANE_FEED_HYDRATION_ACCOUNT_ID32=141ujyV9aKBYqZncx6SYRWU2XQCxUcYiGYE8U7jprEKVUZNJ$/mu);
+  assert.match(backend, /^HYDRATION_USDC_ADAPTER_ADDRESS=0x631A09913B2403B18b2B659a1397916621b29b4c$/mu);
+  assert.match(backend, /^BANK_LANE_FEED_HYDRATION_ACCOUNT_ID32=12WiJGBSjqTBNqD7a7TN6mt47ZJd7f8SqyhTc2bYLFzcHYD9$/mu);
   assert.match(backend, /^BANK_LANE_FEED_WRAPPER_CANDIDATES_JSON=\[.+\]$/mu);
-  assert.match(backend, /^BANK_LANE_FEED_POSTAGE_ACCOUNT=1yKNU414vYDyXYXL6pu845puajfeGTezD1rBiUYwp9UKBaZ$/mu);
+  assert.match(backend, /^BANK_LANE_FEED_POSTAGE_ACCOUNT=16Mf98wAbYTVWaeHkD1SUdRPc5nmoLj9LyNtPtP1xvkF7Sxb$/mu);
   assert.match(
     backend,
     /^AUTH_ADMIN_WALLETS=0x01e6eed856e989201f4ff6346e18eab7e46c874c,0x9Ab8531FBb0948C542a31298FD61335f30064239,0xDeD3D610546DF151a6BB3D6ed119c3700ABC2146$/mu

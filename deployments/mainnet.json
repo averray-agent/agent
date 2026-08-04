@@ -19,10 +19,10 @@
     "reputationSbt": "0xA85AF867b5f573176f49F0D6A827F61A5Cee4e37",
     "discoveryRegistry": "0x47876D138e3a26c485A5f8acbAC7AEcA3c7e6C62",
     "escrowCore": "0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC",
-    "xcmWrapper": "0x2AF394fA95f75D3ca1C786128f4dfA1eB0c9675D",
+    "xcmWrapper": "0xEceE778e11B238D2fc096E56460e7B98DC7B26b8",
     "token": "0x0000053900000000000000000000000001200000",
     "legacyEscrowCore": "0x9cCd1DbBB5C354CC6218e55D3cE924A4d631C035",
-    "hydrationUsdcAdapter": "0x7f02600eA185b5d9ecfB2B7ac97a6a502F89B81B"
+    "hydrationUsdcAdapter": "0x631A09913B2403B18b2B659a1397916621b29b4c"
   },
   "contractProvenance": {
     "0x226F14252A98BD2eA140271647De20132F09AF20": {
@@ -91,6 +91,18 @@
       "abiHash": "sha256:dbd3823b40f66873ddba6ac005a2d6a7f74d372af58090d65a42934468aea13c",
       "runtimeCodeHash": "sha256:071e79fd50afc2f9e5a7bab6b17490d02dd32cf815d0b28e55c305f678e06baa",
       "verifiedAt": "2026-08-04T05:46:48.000Z"
+    },
+    "0xEceE778e11B238D2fc096E56460e7B98DC7B26b8": {
+      "sourceCommit": "870dda4937258e78d74253b30365f831a3d220ed",
+      "abiHash": "sha256:1a3837c645acb5500fd740c70617c8c1c8dbf9d80c7df0d0b17fab55bfcc666b",
+      "runtimeCodeHash": "sha256:8eab8c73700fead1ab080accc75dda55dc442c819100d64392e647f142885f8c",
+      "verifiedAt": "2026-08-04T18:55:13.886Z"
+    },
+    "0x631A09913B2403B18b2B659a1397916621b29b4c": {
+      "sourceCommit": "870dda4937258e78d74253b30365f831a3d220ed",
+      "abiHash": "sha256:938a8cf6e9ebeec2ec6c038ad610a0557a7e8179680f5acedc38c2c076156709",
+      "runtimeCodeHash": "sha256:cfc9d412814f4b6247e40b15165afc3e3b219f164e08cec44ef6f50a842ca3b5",
+      "verifiedAt": "2026-08-04T18:55:13.886Z"
     }
   },
   "knownUnshippedContractChanges": {
@@ -128,7 +140,9 @@
     "xcmWrapperV2": 19009586,
     "hydrationUsdcAdapter": 19009588,
     "xcmWrapperV2_1": 19038771,
-    "hydrationUsdcAdapterV2_1": 19038773
+    "hydrationUsdcAdapterV2_1": 19038773,
+    "xcmWrapperV2_2": 19061012,
+    "hydrationUsdcAdapterV2_2": 19061014
   },
   "runtime": {
     "auth": {
@@ -150,11 +164,11 @@
   "strategies": [
     {
       "id": "HYDRATION_USDC_V1",
-      "adapter": "0x7f02600eA185b5d9ecfB2B7ac97a6a502F89B81B",
-      "wrapper": "0x2AF394fA95f75D3ca1C786128f4dfA1eB0c9675D",
+      "adapter": "0x631A09913B2403B18b2B659a1397916621b29b4c",
+      "wrapper": "0xEceE778e11B238D2fc096E56460e7B98DC7B26b8",
       "asset": "0x0000053900000000000000000000000001200000",
       "phase": "phase1_treasury_staging",
-      "status": "retired_paused_dust_cycle_closed",
+      "status": "paused_pending_dust_proof",
       "remote": {
         "paraId": 2034,
         "assetId": 22,
@@ -170,7 +184,9 @@
     "xcmWrapperV2": "0x9Ab8531FBb0948C542a31298FD61335f30064239",
     "hydrationUsdcAdapter": "0x9Ab8531FBb0948C542a31298FD61335f30064239",
     "xcmWrapperV2_1": "0x9Ab8531FBb0948C542a31298FD61335f30064239",
-    "hydrationUsdcAdapterV2_1": "0x9Ab8531FBb0948C542a31298FD61335f30064239"
+    "hydrationUsdcAdapterV2_1": "0x9Ab8531FBb0948C542a31298FD61335f30064239",
+    "xcmWrapperV2_2": "0x9Ab8531FBb0948C542a31298FD61335f30064239",
+    "hydrationUsdcAdapterV2_2": "0x9Ab8531FBb0948C542a31298FD61335f30064239"
   },
   "escrowRedeployedAt": "2026-07-30T10:01:56.005Z",
   "escrowRedeployTxHashes": {
@@ -179,99 +195,25 @@
     "revokeOld": null
   },
   "bankXcmV2Deployment": {
-    "version": "2.1",
-    "status": "retired_paused_released_closed",
+    "version": "2.2",
+    "status": "deployed_paused",
     "deployTxHashes": {
-      "wrapper": "0x5eeff954e5cc89b9fbab9bcfa1d49068dadb8b4d31b241cb88f8465245d4cbe1",
-      "adapter": "0x3e56ffe3b3d60f1eb055dc4d6a383a13db82d16783cc3cc798898c1163b8fb2c"
+      "wrapper": "0x4e0132e6e8e47cd3ff584825ac77e412a18aed57636f95e1837c74b04b7a0d08",
+      "adapter": "0x695960272724178f49c3adffce309d0b4ac1bcb59c9d718824e46d1fca08f90b"
     },
     "configurationMultisigExecTx": null,
-    "convertedAccountId32": "0x85663dfdb243b1a11a90f0816e1f83ccdb99f8f4c4a25d432739218efd489736",
+    "convertedAccountId32": "0x42e55ecf123da7d3eba1c55998b3cbf8238c446367c981f1388acbc0626cf354",
     "conversionEvidence": {
-      "artifact": "docs/evidence/mainnet-bank-xcm-v21-conversion-2026-08-04.json",
-      "endpointCount": 2
-    },
-    "dryRunEvidence": [
-      {
-        "artifact": "docs/evidence/mainnet-bank-xcm-v21-dry-runs-2026-08-04.json",
-        "status": "passed",
-        "legCount": 5,
-        "assetHubBlock": 19039690,
-        "hydrationBlock": 13453641
-      }
-    ],
-    "dustCycleEvidence": {
-      "status": "released_closed",
-      "depositRequestId": "0xb609f4d875e0c6f4f4b1dddd90efd687215d1ac9ecd90d0de51b9304f57ecaac",
-      "stageTreasuryDeposit": {
-        "innerCallHash": "0x15d014b65260962a195b7513cee0d29953ea5167efa67041d5846d16af21e7a1",
-        "multisigTimepoint": "19041165-3",
-        "remoteAsset22Raw": "149475"
-      },
-      "depositSellFailure": {
-        "code": "XCM_TOO_EXPENSIVE_STALE_FEE",
-        "terminalizationTx": "0xc34167372042061433713b7caab8e04986391857357b5726e55d4ca0e1a97ba1",
-        "terminalizationBlock": 19048419,
-        "status": "Failed(3)",
-        "settledAssetsRaw": "0",
-        "settledSharesRaw": "0"
-      },
-      "reconciliation": {
-        "status": "final_released_closed",
-        "stagedRaw": "150000",
-        "actualTreasuryReturnRaw": "130200",
-        "leg1TransferFeeRaw": "525",
-        "trappedWriteOff3Raw": "17932",
-        "recoveryReturnFeeRaw": "1343",
-        "equation": "150000 = 130200 + 525 + 17932 + 1343",
-        "unexplainedRaw": "0",
-        "rawRecoveryAssetsOutstandingBeforeReleaseRaw": "150000",
-        "finalRawRecoverySlotResidueRaw": "19800",
-        "residueDisposition": "v2.1 accounting artifact, known-unrecoverable; never present as a receivable"
-      },
-      "writeOffs": [
-        {
-          "number": 3,
-          "kind": "xcm_trapped_fee_asset",
-          "amountRaw": "17932",
-          "trapHash": "0x430cf4ce3b1ad751b3e66ed76c48a9a421518219f99e7d0ef9507f718daf5e21",
-          "hydrationBlock": 13456243,
-          "disposition": "written_off_claimable_only_via_future_reviewed_shape"
-        }
+      "artifact": "docs/evidence/mainnet-bank-xcm-v22-conversion-2026-08-04.json",
+      "endpointCount": 2,
+      "endpoints": [
+        "https://rpc.kril.hydration.cloud",
+        "https://rpc-catfish-1.catfish.hydration.cloud"
       ],
-      "recoveryPacket": {
-        "artifact": "docs/evidence/mainnet-bank-xcm-v21-pause-recovery-packet-2026-08-04.json",
-        "status": "executed",
-        "freshRemoteBalanceRaw": "131543",
-        "baseFeeRaw": "696",
-        "embeddedFeeRaw": "1392",
-        "nonce": "1",
-        "messageHash": "0xc92c981487d8b473a60aa91f60c3f6ef8f1823ee8a6f951e5ea7f3979790f743",
-        "innerCallHash": "0x57815dc29457ccd1e9385d117cc28416096dc74919c88125e9b37da66617dd87",
-        "multisigTimepoint": "19049628-2",
-        "executionTx": "0xa3e17cddceeee1975f94839466e8134eeb1fbae7fed1236bfb200d2870442d54",
-        "executionBlock": 19049641,
-        "observedWrapperImageArrivalRaw": "130200",
-        "actualReturnFeeRaw": "1343"
-      },
-      "releasePacket": {
-        "artifact": "docs/evidence/mainnet-bank-xcm-v21-release-packet-2026-08-04.json",
-        "status": "executed",
-        "observedArrivalRaw": "130200",
-        "innerCallHash": "0xbeea91fe2bd6236b9642e6f29ea79081668b49aa5d4bb98d60c7f002cd7a120c",
-        "callCount": 3,
-        "includesV20PauseRider": true,
-        "containsUnpause": false,
-        "multisigTimepoint": "19050316-2",
-        "executionTx": "0x380e4c33e8d933860713ff4205395b6de0293583f9f92aac8be777b784152aa7",
-        "executionBlock": 19050332,
-        "executionResult": "Ok",
-        "actualTreasuryReturnRaw": "130200",
-        "requestRecoveryReleasedRaw": "130200",
-        "finalRawRecoverySlotResidueRaw": "19800",
-        "residueDisposition": "v2.1 accounting artifact, known-unrecoverable; never present as a receivable"
-      }
-    }
+      "capturedAt": "2026-08-04T18:55:13.886Z"
+    },
+    "dryRunEvidence": [],
+    "dustCycleEvidence": null
   },
   "bankXcmDeploymentHistory": [
     {
@@ -366,6 +308,18 @@
         "finalRawRecoverySlotResidueRaw": "19800",
         "residueDisposition": "v2.1 accounting artifact, known-unrecoverable; never present as a receivable"
       }
+    },
+    {
+      "version": "2.2",
+      "status": "deployed_paused",
+      "wrapper": "0xEceE778e11B238D2fc096E56460e7B98DC7B26b8",
+      "adapter": "0x631A09913B2403B18b2B659a1397916621b29b4c",
+      "deployTxHashes": {
+        "wrapper": "0x4e0132e6e8e47cd3ff584825ac77e412a18aed57636f95e1837c74b04b7a0d08",
+        "adapter": "0x695960272724178f49c3adffce309d0b4ac1bcb59c9d718824e46d1fca08f90b"
+      },
+      "convertedAccountId32": "0x42e55ecf123da7d3eba1c55998b3cbf8238c446367c981f1388acbc0626cf354",
+      "replacementReason": "v2.2: dispatch-time fee bounds, chain-derived watcher state, and request-scoped recovery accounting"
     }
   ]
 }
