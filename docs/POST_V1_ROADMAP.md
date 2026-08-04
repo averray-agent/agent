@@ -155,6 +155,19 @@ external-poster volume*, nothing else.
 
 ---
 
+## Agent-economy track — interop, identity, and delivery
+
+This track is deliberately multi-provider. It should interoperate with the agent-payment
+market without coupling Averray to any one wallet vendor or identity provider.
+
+| Gate | Item |
+|---|---|
+| post-G4 | **Agent-payment interop survey + poster ramp** — investigate the managed-wallet/x402 landscape (Cloudflare Wallets, Coinbase CDP/AgentKit, Privy, Crossmint, Skyfire, and peers), then design one gateway that lets externally-walleted agents fund job postings; compatibility with most, coupling to none. |
+| post-G4 | **Attested-identity waiver lever** — externally-attested agent identities earn richer waiver/tier treatment; anonymous zero-capital arrival stays untouched. |
+| first-send mechanism + beachhead C-rungs | **Delivery-back: return the done job to the address it came from** — completed OSS-bounty jobs post exactly one comment on their origin issue containing a summary, branch link, and signed settlement receipt, then open a PR citing the issue and receipt. One revision round stays in bounty scope. Averray never touches issues that did not fund it. Claude supplies the spec when either dependency unparks. |
+
+---
+
 ## Validation ladder (unbiased testing)
 
 The five-rung ladder from `project_postlaunch_validation`. Each rung tests a

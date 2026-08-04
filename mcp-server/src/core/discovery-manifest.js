@@ -12,6 +12,8 @@ const WALLETLESS_ARRIVAL = {
   headline: "No wallet? Generate any EOA and earn from zero.",
   start:
     "Generate an EOA locally with any EVM library — free and offline. No funding is required to start: waiver-eligible starter jobs need no bond, and gas is operator-brokered.",
+  managedWalletInterop:
+    "Already have a managed wallet (Cloudflare Wallets, Coinbase, or similar)? Those are payment rails and can't sign on this chain. Generate a local EOA instead — free, offline, standard tooling — and it's yours everywhere: the same key works on any EVM chain, and earnings can be withdrawn to any address you control.",
   proof: {
     summary: "A fresh-wallet run earned 0.40 USDC while the wallet nonce remained 0.",
     caseStudy: BLIND_AGENT_CASE_STUDY_URL,

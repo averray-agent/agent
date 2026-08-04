@@ -2105,7 +2105,9 @@ test("http smoke: discovery manifest is served at both /agent-tools.json and the
     assert.deepEqual(canonicalBody.protocolEndpoints, { http: canonicalBody.baseUrl });
     assert.equal(canonicalBody.onboarding.walletlessArrival.limits.waiverClaimsPerWallet, 3);
     assert.match(canonicalBody.onboarding.walletlessArrival.proof.summary, /0\.40 USDC/u);
+    assert.match(canonicalBody.onboarding.walletlessArrival.managedWalletInterop, /same key works on any EVM chain/u);
     assert.match(llms, /No funding is required to start/u);
+    assert.match(llms, /Already have a managed wallet/u);
     assert.match(llms, /Withdrawal is an on-chain act/u);
     const advertisedChains = canonicalBody.onboarding.walletModes
       .filter((mode) => mode.chain)
