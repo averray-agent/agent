@@ -354,7 +354,6 @@ export async function createPlatformRuntime() {
   const eventListener = initStep("init-event-listener", logger, () =>
     gateway.isEnabled() ? new EventListener(gateway, eventBus, stateStore) : undefined
   );
-  void eventListener?.start?.();
   const recurringScheduler = initStep("init-recurring-scheduler", logger, () =>
     new RecurringSchedulerService(platformService, eventBus, {
       enabled: parseBooleanEnv(process.env.RECURRING_SCHEDULER_ENABLED),
@@ -415,6 +414,9 @@ export async function createPlatformRuntime() {
     )
   );
   const bankXcmFlowRequested = parseBooleanEnv(process.env.BANK_XCM_FLOW_ENABLED);
+  const bankUsdcAsset = gateway.config.supportedAssets?.find(
+    (asset) => String(asset.symbol ?? "").toUpperCase() === "USDC"
+  );
   const xcmBalanceObserver = initStep("init-xcm-balance-observer", logger, () =>
     new XcmBalanceObserverService(
       stateStore,
@@ -422,12 +424,25 @@ export async function createPlatformRuntime() {
       xcmSettlementWatcher,
       eventBus,
       {
-        // Phase 1 remains staged until the gate-4 XcmWrapper ceremony. A
-        // config flag alone can never activate writes against a null wrapper.
+        // Unit 3 owns v2.2 deployment/env activation. A config flag alone can
+        // never activate observation against a null wrapper.
         enabled: bankXcmFlowRequested && gateway.hasXcmWrapper(),
         pollIntervalMs: parsePositiveInt(process.env.BANK_XCM_OBSERVER_POLL_MS, 15_000),
         defaultTimeoutMs: parsePositiveInt(process.env.BANK_XCM_OBSERVER_TIMEOUT_MS, 15 * 60_000),
         bankLaneFeed,
+        chainEventWatchConfig: bankXcmFlowRequested && gateway.hasXcmWrapper()
+          ? {
+              expectedWrapper: gateway.config.xcmWrapperAddress,
+              depositTarget: bankLaneFeed.targets?.position,
+              withdrawTarget: {
+                ledger: "erc20",
+                endpoint: gateway.config.rpcUrl,
+                chainId: gateway.config.chainId,
+                account: gateway.config.xcmWrapperAddress,
+                contract: bankUsdcAsset?.address
+              }
+            }
+          : undefined,
         logger
       }
     )
@@ -518,7 +533,10 @@ export async function createPlatformRuntime() {
   standardsSpecIngestionScheduler.start();
   openApiSpecIngestionScheduler.start();
   xcmSettlementWatcher.start();
+  // Watches subscribe before the chain listener starts. A RequestQueued event
+  // can therefore never race ahead of its observer baseline during startup.
   xcmBalanceObserver.start();
+  void eventListener?.start?.();
   externalPostingWatcher.start();
   xcmObservationRelay.start();
   upstreamStatusPoller.start();

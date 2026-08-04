@@ -22,6 +22,7 @@ export class XcmBalanceObserverService {
       pollIntervalMs = 15_000,
       defaultTimeoutMs = 15 * 60_000,
       bankLaneFeed = undefined,
+      chainEventWatchConfig = undefined,
       now = () => Date.now(),
       logger = console
     } = {}
@@ -34,16 +35,32 @@ export class XcmBalanceObserverService {
     this.pollIntervalMs = pollIntervalMs;
     this.defaultTimeoutMs = defaultTimeoutMs;
     this.bankLaneFeed = bankLaneFeed;
+    this.chainEventWatchConfig = chainEventWatchConfig
+      ? normalizeChainEventWatchConfig(chainEventWatchConfig)
+      : undefined;
     this.now = now;
     this.logger = logger;
     this.running = false;
     this.timer = undefined;
     this.pollPromise = undefined;
+    this.unsubscribeChainEvents = undefined;
+    this.chainEventTail = Promise.resolve();
+    this.chainEventIngestionError = undefined;
   }
 
   start() {
     if ((!this.enabled && !this.bankLaneFeed?.enabled) || this.running) return;
     this.running = true;
+    if (this.enabled && this.chainEventWatchConfig) {
+      this.unsubscribeChainEvents = this.eventBus?.subscribe?.(
+        { topics: ["xcm.request_queued", "xcm.request_leg_dispatched"] },
+        (event) => this.enqueueChainEvent(event)
+      );
+      if (!this.unsubscribeChainEvents) {
+        this.chainEventIngestionError = "xcm_request_event_subscription_unavailable";
+        this.logger.error?.({}, "xcm_balance_observer.chain_event_subscription_unavailable");
+      }
+    }
     void this.schedule();
   }
 
@@ -51,10 +68,121 @@ export class XcmBalanceObserverService {
     this.running = false;
     if (this.timer) clearTimeout(this.timer);
     this.timer = undefined;
+    this.unsubscribeChainEvents?.();
+    this.unsubscribeChainEvents = undefined;
+  }
+
+  enqueueChainEvent(event) {
+    const next = this.chainEventTail.then(async () => {
+      return this.ingestChainEvent(event);
+    });
+    this.chainEventTail = next.catch((error) => {
+      this.chainEventIngestionError = error?.message ?? String(error);
+      this.logger.error?.(
+        { eventId: event?.id, requestId: event?.data?.requestId, error: this.chainEventIngestionError },
+        "xcm_balance_observer.chain_event_ingestion_failed"
+      );
+      this.eventBus?.publish?.({
+        id: `xcm-watch-ingestion-failed-${event?.id ?? this.now()}`,
+        topic: "xcm.balance_watch_ingestion_failed",
+        correlationId: event?.data?.requestId,
+        timestamp: new Date(this.now()).toISOString(),
+        data: {
+          sourceEventId: event?.id,
+          requestId: event?.data?.requestId,
+          error: this.chainEventIngestionError
+        }
+      });
+    });
+    return next;
+  }
+
+  async flushChainEventIngestion() {
+    await this.chainEventTail;
+  }
+
+  async registerFromChainEvent(event = {}) {
+    if (!this.chainEventWatchConfig) {
+      throw new ValidationError("Chain-event watch configuration is unavailable.");
+    }
+    if (event.topic !== "xcm.request_queued") {
+      throw new ValidationError("Only xcm.request_queued can arm a balance watch.");
+    }
+    const wrapperAddress = normalizeEvmAddress(event.data?.wrapperAddress, "wrapperAddress");
+    if (wrapperAddress !== this.chainEventWatchConfig.expectedWrapper) {
+      throw new ValidationError("RequestQueued event came from an unexpected wrapper generation.");
+    }
+    const kind = Number(event.data?.kind);
+    if (kind !== 0 && kind !== 1) throw new ValidationError("RequestQueued kind must be Deposit(0) or Withdraw(1).");
+    const plan = kind === 0
+      ? {
+          target: this.chainEventWatchConfig.depositTarget,
+          // The observed aUSDC delta is the capital that actually reached the
+          // venue. Funding margin and transport fees are not strategy assets.
+          settlement: { assets: "delta", shares: "delta" }
+        }
+      : {
+          target: this.chainEventWatchConfig.withdrawTarget,
+          settlement: { assets: "delta", shares: "requested_shares" }
+        };
+    return this.register({
+      requestId: event.data?.requestId,
+      target: plan.target,
+      direction: "increase",
+      settlement: plan.settlement,
+      kind: kind === 0 ? "deposit" : "withdraw",
+      phase: "staged-on-chain",
+      requestedAssetsRaw: event.data?.assetsRaw ?? event.data?.assets ?? 0,
+      requestedSharesRaw: event.data?.sharesRaw ?? event.data?.shares ?? 0,
+      startedAt: event.timestamp,
+      registrationSource: "chain_event",
+      wrapperAddress,
+      sourceEventId: event.id,
+      stagingTxHash: event.txHash,
+      stagingBlockNumber: event.blockNumber
+    });
+  }
+
+  async ingestChainEvent(event = {}) {
+    if (event.topic === "xcm.request_queued") return this.registerFromChainEvent(event);
+    if (event.topic === "xcm.request_leg_dispatched") return this.recordDispatchFromChainEvent(event);
+    throw new ValidationError("Unsupported XCM observer chain event.");
+  }
+
+  async recordDispatchFromChainEvent(event = {}) {
+    const requestId = normalizeRequestId(event.data?.requestId);
+    const watch = await this.stateStore.getXcmBalanceWatch?.(requestId);
+    if (!watch || watch.status !== "pending") {
+      throw new ValidationError(`Dispatch event ${event.id ?? "unknown"} has no pending staged watch.`);
+    }
+    const wrapperAddress = normalizeEvmAddress(event.data?.wrapperAddress, "wrapperAddress");
+    if (watch.wrapperAddress !== wrapperAddress
+      || wrapperAddress !== this.chainEventWatchConfig?.expectedWrapper) {
+      throw new ValidationError("Dispatch event belongs to another wrapper generation.");
+    }
+    const leg = Number(event.data?.leg);
+    if (!Number.isInteger(leg) || leg < 0 || leg > 3) {
+      throw new ValidationError("Dispatch event leg must be in the v2.2 four-leg range.");
+    }
+    const updated = await this.stateStore.upsertXcmBalanceWatch({
+      ...watch,
+      phase: `leg-${leg}-dispatched-on-chain`,
+      dispatchBitmap: Number(watch.dispatchBitmap ?? 0) | (1 << leg),
+      lastDispatchEventId: event.id,
+      lastDispatchTxHash: event.txHash,
+      lastDispatchBlockNumber: event.blockNumber,
+      lastDispatchMessageHash: normalizeOptionalText(event.data?.messageHash),
+      lastDispatchFeeAmountRaw: normalizeRaw(event.data?.feeAmount ?? 0, "feeAmount").toString()
+    });
+    this.publish("xcm.balance_watch_dispatch_observed", updated);
+    return updated;
   }
 
   async register(input = {}) {
     const requestId = normalizeRequestId(input.requestId);
+    if (input.registrationSource === "chain_event_backfill" && input.baselineRaw === undefined) {
+      throw new ValidationError("Chain-event backfill requires an explicit chain-height-bound baselineRaw.");
+    }
     const existing = await this.stateStore.getXcmBalanceWatch?.(requestId);
     if (existing) {
       assertEquivalentRegistration(existing, input);
@@ -83,7 +211,14 @@ export class XcmBalanceObserverService {
       startedAt: new Date(startedAtMs).toISOString(),
       deadlineAt: new Date(startedAtMs + timeoutMs).toISOString(),
       lastReadAt: reading.asOf,
-      attemptCount: 0
+      attemptCount: 0,
+      registrationSource: normalizeRegistrationSource(input.registrationSource),
+      wrapperAddress: input.wrapperAddress === undefined
+        ? undefined
+        : normalizeEvmAddress(input.wrapperAddress, "wrapperAddress"),
+      sourceEventId: normalizeOptionalText(input.sourceEventId),
+      stagingTxHash: normalizeOptionalText(input.stagingTxHash),
+      stagingBlockNumber: input.stagingBlockNumber ?? undefined
     });
     this.publish("xcm.balance_watch_started", watch);
     return watch;
@@ -129,10 +264,27 @@ export class XcmBalanceObserverService {
   }
 
   classifyWatchScope(watch) {
+    if (watch?.registrationSource === "chain_event" || watch?.registrationSource === "chain_event_backfill") {
+      return this.classifyChainEventWatchScope(watch);
+    }
     return this.bankLaneFeed?.enabled
       && typeof this.bankLaneFeed.classifyRequestWatch === "function"
       ? this.bankLaneFeed.classifyRequestWatch(watch)
       : "current";
+  }
+
+  classifyChainEventWatchScope(watch) {
+    if (!this.chainEventWatchConfig) return "unknown";
+    try {
+      if (normalizeEvmAddress(watch.wrapperAddress, "watch.wrapperAddress")
+        !== this.chainEventWatchConfig.expectedWrapper) return "foreign";
+      const target = normalizeVenueBalanceTarget(watch.target);
+      if (sameTarget(target, this.chainEventWatchConfig.depositTarget)
+        || sameTarget(target, this.chainEventWatchConfig.withdrawTarget)) return "current";
+      return "foreign";
+    } catch {
+      return "unknown";
+    }
   }
 
   async markUnknownScope(watch) {
@@ -242,6 +394,8 @@ export class XcmBalanceObserverService {
       running: this.running,
       polling: Boolean(this.pollPromise),
       pendingCount: pending.length,
+      chainEventWatchEnabled: Boolean(this.chainEventWatchConfig),
+      chainEventIngestionError: this.chainEventIngestionError,
       readErrorCount: pending.filter((item) => Boolean(item.lastError)).length,
       overdueCount: pending.filter((item) => nowMs >= Date.parse(item.deadlineAt ?? "")).length,
       oldestPendingAgeMs: Number.isFinite(oldestStartedMs) ? Math.max(nowMs - oldestStartedMs, 0) : 0,
@@ -271,6 +425,27 @@ export class XcmBalanceObserverService {
     });
   }
 
+  async requireArmedWatch(requestId, { wrapperAddress = undefined } = {}) {
+    const normalizedId = normalizeRequestId(requestId);
+    const watch = await this.stateStore.getXcmBalanceWatch?.(normalizedId);
+    if (!watch || watch.status !== "pending") {
+      throw new ValidationError(`No pending chain-event observer watch exists for ${normalizedId}.`);
+    }
+    if (!["chain_event", "chain_event_backfill"].includes(watch.registrationSource)) {
+      throw new ValidationError(`Observer watch ${normalizedId} was not armed from chain truth.`);
+    }
+    if (wrapperAddress && watch.wrapperAddress !== normalizeEvmAddress(wrapperAddress, "wrapperAddress")) {
+      throw new ValidationError(`Observer watch ${normalizedId} belongs to another wrapper generation.`);
+    }
+    if (this.classifyWatchScope(watch) !== "current") {
+      throw new ValidationError(`Observer watch ${normalizedId} does not target the current Bank lane.`);
+    }
+    if (!Number.isFinite(Date.parse(watch.deadlineAt ?? "")) || this.now() >= Date.parse(watch.deadlineAt)) {
+      throw new ValidationError(`Observer watch ${normalizedId} is overdue and cannot authorize dispatch.`);
+    }
+    return watch;
+  }
+
   publish(topic, watch) {
     this.eventBus?.publish?.({
       id: `${topic}-${watch.requestId}-${this.now()}`,
@@ -291,7 +466,10 @@ export class XcmBalanceObserverService {
         deadlineAt: watch.deadlineAt,
         lastReadAt: watch.lastReadAt,
         lastError: watch.lastError,
-        status: watch.status
+        status: watch.status,
+        registrationSource: watch.registrationSource,
+        wrapperAddress: watch.wrapperAddress,
+        sourceEventId: watch.sourceEventId
       }
     });
   }
@@ -393,11 +571,44 @@ function assertEquivalentRegistration(existing, incoming) {
     || JSON.stringify(existing.settlement) !== JSON.stringify(settlement)
     || String(existing.requestedAssetsRaw ?? "0") !== requestedAssetsRaw
     || String(existing.requestedSharesRaw ?? "0") !== requestedSharesRaw
+    || (incoming.wrapperAddress !== undefined
+      && existing.wrapperAddress !== normalizeEvmAddress(incoming.wrapperAddress, "wrapperAddress"))
     || (incoming.baselineRaw !== undefined
       && String(existing.baselineRaw) !== normalizeRaw(incoming.baselineRaw, "baselineRaw").toString())
   ) {
     throw new ValidationError(`XCM balance watch ${existing.requestId} already exists with different bounds.`);
   }
+}
+
+function normalizeChainEventWatchConfig(raw = {}) {
+  return {
+    expectedWrapper: normalizeEvmAddress(raw.expectedWrapper, "chainEventWatchConfig.expectedWrapper"),
+    depositTarget: normalizeVenueBalanceTarget(raw.depositTarget),
+    withdrawTarget: normalizeVenueBalanceTarget(raw.withdrawTarget)
+  };
+}
+
+function normalizeEvmAddress(raw, label) {
+  const value = String(raw ?? "").toLowerCase();
+  if (!/^0x[a-f0-9]{40}$/u.test(value)) throw new ValidationError(`${label} must be an EVM address.`);
+  return value;
+}
+
+function normalizeRegistrationSource(raw) {
+  const value = String(raw ?? "manual").trim();
+  if (!["manual", "chain_event", "chain_event_backfill"].includes(value)) {
+    throw new ValidationError("balance watch registrationSource is unsupported.");
+  }
+  return value;
+}
+
+function normalizeOptionalText(raw) {
+  const value = String(raw ?? "").trim();
+  return value || undefined;
+}
+
+function sameTarget(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 export { FAILURE_BALANCE_TIMEOUT };

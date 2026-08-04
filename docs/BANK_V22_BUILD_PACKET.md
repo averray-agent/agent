@@ -77,6 +77,14 @@ what you construct. `PayloadMismatch` ceases to exist as a concept.
   request-bound amount as their own full fee budget and need no dispatch-time fee
   parameter. `deposit_sell` also receives a fresh dispatch-time fee; `deposit_funding`
   constructs its local execution weight directly.
+- Deposit staging carries explicit transport margin:
+  `sellAmount + maxFeePerLeg + fundingTransferFeeHeadroomRaw <= assets`. The roughly
+  525-raw fee observed during v2.1 is evidence, not a hardcoded constant; the current
+  headroom is captured and recorded by the dispatcher.
+- Withdraw-home guarantees the request's `minimumOutput`, not an exact remote sweep.
+  `actualOut - minimumOutput` plus fee surpluses remains visible as converted-account
+  asset-22 operating float. A future sweep may reclaim it; v2.2 must not label it lost
+  or silently coerce it to zero.
 - `dispatchDeadline` (optional per request, default off): after it passes, dispatch reverts
   and only terminalization + recovery remain. Belt to the fee-parameter suspenders; NOT the
   primary control (a deadline still races ceremony latency; the parameter doesn't).
