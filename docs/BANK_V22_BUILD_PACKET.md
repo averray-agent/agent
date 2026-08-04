@@ -70,11 +70,13 @@ what you construct. `PayloadMismatch` ceases to exist as a concept.
     quotes fresh ×2 and passes it (law 1); surplus returns via the shape's mandatory
     `RefundSurplus`/`DepositAsset` tail;
   - bitmap idempotence unchanged (a set bit is a no-op, never a revert-with-loss).
-- **Drift-proof-by-construction rule:** any leg whose withdrawn amount can serve as its own
-  fee budget with surplus-deposit (withdraw_sell, withdraw_home, recovery_home) MUST use
-  the full-balance-as-fee-budget shape — those legs then need no fee parameter and cannot
-  fail `TooExpensive` at any staleness. The fee parameter exists only where the shape
-  can't absorb it (deposit legs).
+- **Drift-proof-by-construction rule:** `withdraw_sell` uses the complete remote asset-22
+  operating float as its fee budget with surplus-deposit, but that float is only knowable
+  at dispatch. The operator therefore supplies the fresh-read float as `feeAmount`, capped
+  by the multisig-staged `maxFeePerLeg`. `withdraw_home` and `recovery_home` use their
+  request-bound amount as their own full fee budget and need no dispatch-time fee
+  parameter. `deposit_sell` also receives a fresh dispatch-time fee; `deposit_funding`
+  constructs its local execution weight directly.
 - `dispatchDeadline` (optional per request, default off): after it passes, dispatch reverts
   and only terminalization + recovery remain. Belt to the fee-parameter suspenders; NOT the
   primary control (a deadline still races ceremony latency; the parameter doesn't).
