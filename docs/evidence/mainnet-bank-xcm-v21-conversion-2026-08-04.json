@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "kind": "averray.hydrationLocationConversion",
+  "profile": "mainnet",
+  "wrapper": "0x2AF394fA95f75D3ca1C786128f4dfA1eB0c9675D",
+  "assetHubOriginAccountId32": "0x2af394fa95f75d3ca1c786128f4dfa1eb0c9675deeeeeeeeeeeeeeeeeeeeeeee",
+  "location": {
+    "V4": {
+      "parents": 1,
+      "interior": {
+        "X2": [
+          {
+            "Parachain": 1000
+          },
+          {
+            "AccountId32": {
+              "network": null,
+              "id": "0x2af394fa95f75d3ca1c786128f4dfa1eb0c9675deeeeeeeeeeeeeeeeeeeeeeee"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "reads": [
+    {
+      "endpoint": "wss://hydration-rpc.n.dwellir.com",
+      "chain": "Hydration",
+      "genesisHash": "0xafdc188f45c71dacbaa0b62e16a91f726c7b8699a9748cdf715459de6b7f366d",
+      "convertedAccountId32": "0x85663dfdb243b1a11a90f0816e1f83ccdb99f8f4c4a25d432739218efd489736",
+      "observedAt": "2026-08-04T06:08:11.013Z"
+    },
+    {
+      "endpoint": "wss://rpc.hydradx.cloud",
+      "chain": "Hydration",
+      "genesisHash": "0xafdc188f45c71dacbaa0b62e16a91f726c7b8699a9748cdf715459de6b7f366d",
+      "convertedAccountId32": "0x85663dfdb243b1a11a90f0816e1f83ccdb99f8f4c4a25d432739218efd489736",
+      "observedAt": "2026-08-04T06:08:14.541Z"
+    }
+  ],
+  "convertedAccountId32": "0x85663dfdb243b1a11a90f0816e1f83ccdb99f8f4c4a25d432739218efd489736"
+}

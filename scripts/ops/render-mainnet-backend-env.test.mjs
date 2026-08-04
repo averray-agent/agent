@@ -32,6 +32,10 @@ const MANIFEST = {
     escrowCore: "0x6666666666666666666666666666666666666666",
     reputationSbt: "0x7777777777777777777777777777777777777777",
     discoveryRegistry: "0x8888888888888888888888888888888888888888",
+    xcmWrapper: "0x2AF394fA95f75D3ca1C786128f4dfA1eB0c9675D",
+  },
+  bankXcmV2Deployment: {
+    convertedAccountId32: "0x85663dfdb243b1a11a90f0816e1f83ccdb99f8f4c4a25d432739218efd489736",
   },
   deploymentBlocks: {
     treasuryPolicy: 101,
@@ -124,6 +128,9 @@ test("buildManifestOverrides: resolves addresses, auth, blocks, and schema", () 
   assert.equal(overrides.PONDER_START_BLOCK_REPUTATION, "103");
   assert.equal(overrides.PONDER_START_BLOCK_REGISTRIES, "104");
   assert.equal(overrides.DATABASE_SCHEMA, MANIFEST.runtime.indexer.schema);
+  assert.equal(overrides.XCM_WRAPPER_ADDRESS, MANIFEST.contracts.xcmWrapper);
+  assert.equal(overrides.BANK_LANE_FEED_HYDRATION_ACCOUNT_ID32, "141ujyV9aKBYqZncx6SYRWU2XQCxUcYiGYE8U7jprEKVUZNJ");
+  assert.equal(overrides.BANK_LANE_FEED_POSTAGE_ACCOUNT, "1yKNU414vYDyXYXL6pu845puajfeGTezD1rBiUYwp9UKBaZ");
   assert.equal(overrides.LEGACY_ESCROW_CORE_ADDRESS, "");
   assert.equal(overrides.PONDER_LEGACY_ESCROW_CORE_ADDRESS, "");
 });
@@ -151,6 +158,25 @@ test("buildManifestOverrides: fails closed on incomplete runtime metadata", () =
       }),
     /deploymentBlocks\.treasuryPolicy/u
   );
+  assert.throws(
+    () => buildManifestOverrides({ ...MANIFEST, bankXcmV2Deployment: {} }),
+    /bankXcmV2Deployment\.convertedAccountId32/u
+  );
+});
+
+test("buildManifestOverrides: rejects malformed AccountId32 values anywhere in deployment history", () => {
+  const malformed = `0x${"aa".repeat(33)}`;
+  const historyShapes = [
+    { convertedAccountId32: malformed },
+    { incident: { writeOffs: [{ accountId32: malformed }] } },
+    { retiredCapital: [{ accountId32: malformed }] },
+  ];
+  for (const history of historyShapes) {
+    assert.throws(
+      () => buildManifestOverrides({ ...MANIFEST, bankXcmDeploymentHistory: [history] }),
+      /bankXcmDeploymentHistory\[0\].*must be a 32-byte AccountId/u
+    );
+  }
 });
 
 test("transformLine: op:// values are repointed; kept keys stay literal", () => {
@@ -243,6 +269,10 @@ test("generateAll: the real transform yields the mainnet essentials", () => {
   assert.match(backend, /^FIRST_EXTERNAL_AGENT_ALERT_ENABLED=true$/mu);
   assert.match(backend, /^TREASURY_POLICY_ADDRESS=0x226F14252A98BD2eA140271647De20132F09AF20$/mu);
   assert.match(backend, /^AGENT_ACCOUNT_ADDRESS=0xB1350932bf85E7ffd0599E9a3CC7b55718D89E57$/mu);
+  assert.match(backend, /^XCM_WRAPPER_ADDRESS=0x2AF394fA95f75D3ca1C786128f4dfA1eB0c9675D$/mu);
+  assert.match(backend, /^BANK_XCM_FLOW_ENABLED=false$/mu);
+  assert.match(backend, /^BANK_LANE_FEED_HYDRATION_ACCOUNT_ID32=141ujyV9aKBYqZncx6SYRWU2XQCxUcYiGYE8U7jprEKVUZNJ$/mu);
+  assert.match(backend, /^BANK_LANE_FEED_POSTAGE_ACCOUNT=1yKNU414vYDyXYXL6pu845puajfeGTezD1rBiUYwp9UKBaZ$/mu);
   assert.match(
     backend,
     /^AUTH_ADMIN_WALLETS=0x01e6eed856e989201f4ff6346e18eab7e46c874c,0x9Ab8531FBb0948C542a31298FD61335f30064239,0xDeD3D610546DF151a6BB3D6ed119c3700ABC2146$/mu

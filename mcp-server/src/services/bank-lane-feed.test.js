@@ -11,11 +11,11 @@ import {
 } from "./bank-lane-feed.js";
 import { normalizeVenueBalanceTarget } from "./venue-balance-reader.js";
 
-const ACCOUNT = "0x98f0033e26aa4ecf2899e6d09237d40d29fcb68e64d22a621520bde1123564ac";
+const ACCOUNT = "0x85663dfdb243b1a11a90f0816e1f83ccdb99f8f4c4a25d432739218efd489736";
 const AUSDC = "0x2ec4884088d84e5c2970a034732e5209b0acfa93";
 const OTHER_AUSDC = "0x1111111111111111111111111111111111111111";
-const POSTAGE = "15XbeapZyWWEZdDCLpxzNhryKj2MsE8rnFUW9cPydXfgSMAK";
-const ACCOUNT_SS58 = "14TXaUTyTRiZKGG1zGrzzfc7oUGq2pcEGKNoWXLtJL5TTJbZ";
+const POSTAGE = "1yKNU414vYDyXYXL6pu845puajfeGTezD1rBiUYwp9UKBaZ";
+const ACCOUNT_SS58 = "141ujyV9aKBYqZncx6SYRWU2XQCxUcYiGYE8U7jprEKVUZNJ";
 const BASE = Date.parse("2026-08-03T14:00:00.000Z");
 
 function targets(positionContract = AUSDC) {
@@ -94,7 +94,7 @@ test("Bank feed preserves raw decimal strings and each source's completion clock
     provenRaw: "900719925474099312345678",
     provenSource: feed.position.source
   });
-  assert.match(feed.position.source, /^erc20:0x2ec4884088d84e5c2970a034732e5209b0acfa93\.balanceOf\(0x98f0033e26aa4ecf2899e6d09237d40d29fcb68e\)$/u);
+  assert.match(feed.position.source, /^erc20:0x2ec4884088d84e5c2970a034732e5209b0acfa93\.balanceOf\(0x85663dfdb243b1a11a90f0816e1f83ccdb99f8f4\)$/u);
 });
 
 test("completed sections advance while one source remains stale", async () => {
@@ -282,9 +282,11 @@ test("mainnet template ships the Bank feed ENABLED, with targets that match the 
   );
   assert.equal(
     describeBalanceTarget(config.targets.position),
-    `erc20:${strategy.remote.aUsdcContract}.balanceOf(0x98f0033e26aa4ecf2899e6d09237d40d29fcb68e)`
+    `erc20:${strategy.remote.aUsdcContract}.balanceOf(0x85663dfdb243b1a11a90f0816e1f83ccdb99f8f4)`
   );
   assert.equal(config.targets.position.contract, strategy.remote.aUsdcContract);
   assert.equal(config.targets.float.assetId, String(strategy.remote.assetId));
   assert.equal(config.targets.postage.account, POSTAGE);
+  assert.equal(env.XCM_WRAPPER_ADDRESS, manifest.contracts.xcmWrapper);
+  assert.equal(env.BANK_XCM_FLOW_ENABLED, "false", "dust proof does not arm automated dispatch");
 });
