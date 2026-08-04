@@ -19,8 +19,8 @@ export const BANK_XCM_V2 = Object.freeze({
   observerEvmEndpoint: "https://rpc.hydradx.cloud",
   assetHubWs: "wss://polkadot-asset-hub-rpc.polkadot.io",
   hydrationConversionEndpoints: Object.freeze([
-    "wss://hydration-rpc.n.dwellir.com",
-    "wss://rpc.hydradx.cloud"
+    "https://rpc.kril.hydration.cloud",
+    "https://rpc-catfish-1.catfish.hydration.cloud"
   ]),
   localDestination: "0x050000",
   hydrationDestination: "0x05010100c91f"

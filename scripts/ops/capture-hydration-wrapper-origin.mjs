@@ -69,6 +69,31 @@ export async function convertOnEndpoint({ endpoint, location, apiFactory }) {
   }
 }
 
+export async function captureConversionEvidence({ wrapper, endpoints, apiFactory }) {
+  const wrapperAddress = getAddress(wrapper);
+  if (!Array.isArray(endpoints) || endpoints.length < 2 || new Set(endpoints).size < 2) {
+    throw new Error("two independent endpoints are required.");
+  }
+  const location = locationForWrapper(wrapperAddress);
+  const reads = [];
+  for (const endpoint of endpoints) {
+    reads.push(await convertOnEndpoint({ endpoint, location, apiFactory }));
+  }
+  const values = new Set(reads.map((entry) => entry.convertedAccountId32));
+  if (values.size !== 1) throw new Error(`independent convert_location reads disagree: ${JSON.stringify(reads)}.`);
+  return {
+    schemaVersion: 1,
+    kind: "averray.hydrationLocationConversion",
+    profile: "mainnet",
+    wrapper: wrapperAddress,
+    assetHubOriginAccountId32: wrapperAccountId32(wrapperAddress),
+    location,
+    reads,
+    capturedAt: new Date().toISOString(),
+    convertedAccountId32: reads[0].convertedAccountId32
+  };
+}
+
 export async function main(argv = process.argv.slice(2)) {
   const args = parseArgs(argv);
   if (args.help) {
@@ -78,23 +103,13 @@ export async function main(argv = process.argv.slice(2)) {
   if (!args.wrapper || !args.out) throw new Error("--wrapper and --out are required.");
   if (args.endpoints.length < 2 || new Set(args.endpoints).size < 2) throw new Error("two independent endpoints are required.");
   const wrapper = getAddress(args.wrapper);
-  const location = locationForWrapper(wrapper);
-  const { ApiPromise, WsProvider } = await import("@polkadot/api");
-  const apiFactory = (endpoint) => ApiPromise.create({ provider: new WsProvider(endpoint), noInitWarn: true, throwOnConnect: true });
-  const reads = [];
-  for (const endpoint of args.endpoints) reads.push(await convertOnEndpoint({ endpoint, location, apiFactory }));
-  const values = new Set(reads.map((entry) => entry.convertedAccountId32));
-  if (values.size !== 1) throw new Error(`independent convert_location reads disagree: ${JSON.stringify(reads)}.`);
-  const evidence = {
-    schemaVersion: 1,
-    kind: "averray.hydrationLocationConversion",
-    profile: "mainnet",
-    wrapper,
-    assetHubOriginAccountId32: wrapperAccountId32(wrapper),
-    location,
-    reads,
-    convertedAccountId32: reads[0].convertedAccountId32
-  };
+  const { ApiPromise, HttpProvider, WsProvider } = await import("@polkadot/api");
+  const apiFactory = (endpoint) => ApiPromise.create({
+    provider: endpoint.startsWith("https://") ? new HttpProvider(endpoint) : new WsProvider(endpoint),
+    noInitWarn: true,
+    throwOnConnect: true
+  });
+  const evidence = await captureConversionEvidence({ wrapper, endpoints: args.endpoints, apiFactory });
   await writeFile(resolve(args.out), `${JSON.stringify(evidence, null, 2)}\n`, { flag: "wx" });
   console.log(JSON.stringify(evidence, null, 2));
   console.log(`\nMATCH: both endpoints derived ${evidence.convertedAccountId32}; evidence written create-only to ${resolve(args.out)}.`);

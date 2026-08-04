@@ -47,6 +47,7 @@ const PACKETS = new Set(["configure", "arm"]);
 export function parseArgs(argv) {
   const args = {
     profile: "mainnet",
+    generation: "2.1",
     packet: "configure",
     ws: SUBSTRATE_PROFILE_CONFIG.mainnet.defaultWs,
     depositAssets: "150000",
@@ -65,6 +66,7 @@ export function parseArgs(argv) {
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
     if (token === "--profile") args.profile = argv[++index];
+    else if (token === "--generation") args.generation = argv[++index];
     else if (token === "--packet") args.packet = argv[++index];
     else if (token === "--wrapper") args.wrapper = argv[++index];
     else if (token === "--adapter") args.adapter = argv[++index];
@@ -73,6 +75,7 @@ export function parseArgs(argv) {
     else if (token === "--predeploy-plan") args.predeployPlan = argv[++index];
     else if (token === "--dry-run-evidence") args.dryRunEvidence = argv[++index];
     else if (token === "--messages-out") args.messagesOut = argv[++index];
+    else if (token === "--packet-out") args.packetOut = argv[++index];
     else if (token === "--signer") args.signer = argv[++index];
     else if (token === "--timepoint-height") args.timepointHeight = argv[++index];
     else if (token === "--timepoint-index") args.timepointIndex = argv[++index];
@@ -99,22 +102,35 @@ function usage() {
   return [
     "Usage:",
     "  node scripts/ops/prepare-bank-xcm-v2-multisig.mjs --profile mainnet \\",
-    "    --packet configure|arm --wrapper 0x... --adapter 0x... \\",
+    "    --generation 2.1|2.2 --packet configure|arm --wrapper 0x... --adapter 0x... \\",
     "    --converted-account 0x... --conversion-evidence evidence.json \\",
-    "    --signer nova [--timepoint-height H --timepoint-index I]",
+    "    --signer nova --packet-out docs/evidence/...json \\",
+    "    [--timepoint-height H --timepoint-index I]",
     "  [--predeploy-plan /tmp/plan.json]  # configure packet preview only",
     "",
     "Message inputs: --deposit-assets/--deposit-sell-amount/--deposit-fee,",
     "  --withdraw-shares/--withdraw-fee/--home-amount/--home-fee,",
     "  --deposit-nonce/--withdraw-nonce, and",
     "  --recovery-amount/--recovery-fee/--recovery-nonce.",
-    "For --packet arm, --dry-run-evidence is mandatory and must bind all five",
+    "Generation 2.2 emits configure only in G2; arm is a later G3 ceremony.",
+    "For v2.1 --packet arm, --dry-run-evidence is mandatory and must bind all five",
     "message hashes to successful forwarded/event assertions. No signing occurs."
   ].join("\n");
 }
 
 function stringify(value) {
   return JSON.stringify(value, (_key, entry) => typeof entry === "bigint" ? entry.toString() : entry, 2);
+}
+
+export function assertPacketGeneration({ generation, packet, messagesOut, dryRunEvidence }) {
+  if (!["2.1", "2.2"].includes(generation)) throw new Error("--generation must be 2.1 or 2.2.");
+  if (generation === "2.2" && packet !== "configure") {
+    throw new Error("v2.2 arm material is forbidden in G2; G3 live per-leg preflights must gate a separate ceremony.");
+  }
+  if (generation === "2.2" && (messagesOut || dryRunEvidence)) {
+    throw new Error("v2.2 G2 configure emits no request messages or arm evidence.");
+  }
+  return true;
 }
 
 function assertConversionEvidence(evidence, wrapper, convertedAccount) {
@@ -235,6 +251,10 @@ export async function main(argv = process.argv.slice(2)) {
     return;
   }
   if (args.profile !== "mainnet" || !PACKETS.has(args.packet)) throw new Error("profile must be mainnet and packet configure|arm.");
+  assertPacketGeneration(args);
+  if (args.generation === "2.2" && !args.packetOut) {
+    throw new Error("v2.2 G2 configure requires --packet-out so the unsigned SCALE and capture-time liveState are reviewable.");
+  }
   if (!args.wrapper || !args.adapter || !args.convertedAccount || !args.conversionEvidence || !args.signer) throw new Error("wrapper, adapter, converted account, conversion evidence, and signer are required.");
   if ((args.timepointHeight !== undefined) !== (args.timepointIndex !== undefined)) throw new Error("timepoint height/index must be supplied together.");
   const wrapper = getAddress(args.wrapper);
@@ -245,7 +265,7 @@ export async function main(argv = process.argv.slice(2)) {
   const ownerRecord = loadJson(resolve(repoRoot, "deployments/mainnet-multisig-owner.json"));
   const conversion = assertConversionEvidence(loadJson(resolve(args.conversionEvidence)), wrapper, convertedAccount);
   const signer = resolveProfileSigner({ ownerRecord, profile: "mainnet", signerLabel: args.signer });
-  const messages = buildBankXcmV2Messages({
+  const messages = args.generation === "2.1" ? buildBankXcmV2Messages({
     wrapper,
     convertedAccountId32: convertedAccount,
     asset: manifest.contracts.token,
@@ -259,15 +279,15 @@ export async function main(argv = process.argv.slice(2)) {
     homeFee: BigInt(args.homeFee),
     depositNonce: BigInt(args.depositNonce),
     withdrawNonce: BigInt(args.withdrawNonce)
-  });
-  const recovery = buildRecoveryHomeMessage({
+  }) : null;
+  const recovery = args.generation === "2.1" ? buildRecoveryHomeMessage({
     wrapper,
     convertedAccountId32: convertedAccount,
     amount: BigInt(args.recoveryAmount),
     fee: BigInt(args.recoveryFee),
     nonce: BigInt(args.recoveryNonce)
-  });
-  const evidenceBundle = { ...messages, messages: [...messages.messages, recovery] };
+  }) : null;
+  const evidenceBundle = messages ? { ...messages, messages: [...messages.messages, recovery] } : null;
   if (args.messagesOut) {
     await writeFile(resolve(args.messagesOut), `${stringify({ schemaVersion: 2, kind: "averray.bankXcmV2Messages", profile: "mainnet", ...messages, recovery })}\n`, { flag: "wx" });
   }
@@ -291,10 +311,17 @@ export async function main(argv = process.argv.slice(2)) {
       ) throw new Error("predeploy plan is not bound to the supplied predicted wrapper/adapter.");
       const policy = new Contract(getAddress(manifest.contracts.treasuryPolicy), POLICY_BANK_ABI, rpc.provider);
       const liveOwner = getAddress(await policy.owner());
-      live = { predeployPreview: true, liveOwner };
+      live = {
+        capturedAt: new Date().toISOString(),
+        assetHubBlockNumber: await rpc.provider.getBlockNumber(),
+        predeployPreview: true,
+        liveOwner
+      };
       authority = assertOwnerRecordAuthority({ ownerRecord, livePolicyOwner: liveOwner });
     } else {
       live = await assertLiveState({ provider: rpc.provider, manifest, wrapperAddress: wrapper, adapterAddress: adapter, convertedAccount, packet: args.packet });
+      live.capturedAt = new Date().toISOString();
+      live.assetHubBlockNumber = await rpc.provider.getBlockNumber();
       authority = assertOwnerRecordAuthority({ ownerRecord, livePolicyOwner: live.liveOwner });
     }
   } finally {
@@ -304,6 +331,11 @@ export async function main(argv = process.argv.slice(2)) {
   const innerCalls = args.packet === "configure"
     ? buildConfigurationCalls({ manifest, wrapper, adapter, convertedAccountId32: convertedAccount })
     : buildArmCalls({ wrapper });
+  if (args.generation === "2.2") {
+    if (innerCalls.length !== 4 || innerCalls.some((call) => call.data.toLowerCase().startsWith("0x1f59d6fb"))) {
+      throw new Error("v2.2 G2 packet must contain exactly four configuration calls and no unpause selector.");
+    }
+  }
   const timepoint = args.timepointHeight === undefined ? null : { height: Number(args.timepointHeight), index: Number(args.timepointIndex) };
   let api;
   let payload;
@@ -332,10 +364,11 @@ export async function main(argv = process.argv.slice(2)) {
   if (embedded.some((entry) => !entry.embedded)) throw new Error("SCALE payload did not embed every reviewed EVM calldata.");
 
   console.log("# bank-xcm-v2 multisig packet (READ-ONLY)");
+  console.log(`generation:              ${args.generation}`);
   console.log(`packet:                  ${args.packet}`);
   console.log(`wrapper:                 ${wrapper}`);
   console.log(`adapter:                 ${adapter}`);
-  console.log(`wrapper AH origin:       ${messages.wrapperAccountId32}`);
+  console.log(`wrapper AH origin:       ${wrapperAccountId32(wrapper)}`);
   console.log(`Hydration converted:     ${convertedAccount}`);
   console.log(`Hydration truncate20:    ${truncateAccountId32(convertedAccount)}`);
   console.log(`conversion endpoints:    ${conversion.endpoints.join(", ")} ✓`);
@@ -364,20 +397,52 @@ export async function main(argv = process.argv.slice(2)) {
   console.log(`asset 22:                ${BANK_XCM_V2.observerAssetEndpoint} Tokens.accounts(${convertedAccount}, 22)`);
   console.log(`aUSDC:                   ${BANK_XCM_V2.observerEvmEndpoint} ${BANK_XCM_V2.aUsdcContract}.balanceOf(${truncateAccountId32(convertedAccount)})`);
   console.log("");
-  console.log("## Exact v2.1 message bundle (four request legs + owner recovery)");
-  for (const leg of evidenceBundle.messages) {
-    console.log(`${leg.label}:`);
-    console.log(`  requestId:   ${leg.requestId}`);
-    console.log(`  destination: ${leg.destination}`);
-    console.log(`  messageHash: ${leg.messageHash}`);
-    console.log(`  message:     ${leg.message}`);
-    console.log(`  must prove:  ${JSON.stringify(leg.expected)}`);
+  if (evidenceBundle) {
+    console.log("## Exact v2.1 message bundle (four request legs + owner recovery)");
+    for (const leg of evidenceBundle.messages) {
+      console.log(`${leg.label}:`);
+      console.log(`  requestId:   ${leg.requestId}`);
+      console.log(`  destination: ${leg.destination}`);
+      console.log(`  messageHash: ${leg.messageHash}`);
+      console.log(`  message:     ${leg.message}`);
+      console.log(`  must prove:  ${JSON.stringify(leg.expected)}`);
+    }
+    console.log("");
   }
-  console.log("");
   console.log(args.packet === "configure"
-    ? "STOP AFTER EXECUTION: wrapper must remain dispatchPaused=true; do not paste the arm packet."
+    ? `STOP AFTER EXECUTION: v${args.generation} wrapper must remain dispatchPaused=true; no unpause call exists in this packet.`
     : "ARM PRECONDITION PASSED: all five exact-message dry-run records matched. This tool still signed/submitted nothing.");
-  return { innerCalls, payload, messages, recovery, live };
+  const packetEvidence = {
+    schemaVersion: 1,
+    kind: "averray.bankXcmV2MultisigPacket",
+    profile: "mainnet",
+    generation: args.generation,
+    packet: args.packet,
+    capturedAt: new Date().toISOString(),
+    wrapper,
+    adapter,
+    convertedAccountId32: convertedAccount,
+    conversion,
+    liveState: live,
+    signer: signer.me,
+    otherSignatories: signer.otherSignatories,
+    timepoint,
+    innerCalls,
+    innerCallHash: payload.outerCallHash,
+    innerCallScale: payload.outerCallHex,
+    asMultiScale: payload.asMultiHex,
+    substrate,
+    containsUnpause: innerCalls.some((call) => call.data.toLowerCase().startsWith("0x1f59d6fb")),
+    observerTargets: {
+      asset22: { endpoint: BANK_XCM_V2.observerAssetEndpoint, accountId32: convertedAccount, assetId: 22 },
+      aUsdc: { endpoint: BANK_XCM_V2.observerEvmEndpoint, contract: BANK_XCM_V2.aUsdcContract, account: truncateAccountId32(convertedAccount) }
+    }
+  };
+  if (args.packetOut) {
+    await writeFile(resolve(args.packetOut), `${stringify(packetEvidence)}\n`, { flag: "wx" });
+    console.log(`packet evidence written create-only: ${resolve(args.packetOut)}`);
+  }
+  return { innerCalls, payload, messages, recovery, live, packetEvidence };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
