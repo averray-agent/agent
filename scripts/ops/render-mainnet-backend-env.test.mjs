@@ -223,7 +223,7 @@ test("buildManifestOverrides: requires an append-only unique wrapper history con
   );
 });
 
-test("buildManifestOverrides: repoints the complete v2.2 pair without activating dispatch", () => {
+test("buildManifestOverrides: repoints the complete v2.2 pair independently of the runtime activation flag", () => {
   const wrapper = "0x1111111111111111111111111111111111111122";
   const adapter = "0x2222222222222222222222222222222222222233";
   const convertedAccountId32 = `0x${"33".repeat(32)}`;
@@ -336,7 +336,9 @@ test("generateAll: the real transform yields the mainnet essentials", () => {
   assert.match(backend, /^TREASURY_POLICY_ADDRESS=0x226F14252A98BD2eA140271647De20132F09AF20$/mu);
   assert.match(backend, /^AGENT_ACCOUNT_ADDRESS=0xB1350932bf85E7ffd0599E9a3CC7b55718D89E57$/mu);
   assert.match(backend, /^XCM_WRAPPER_ADDRESS=0xEceE778e11B238D2fc096E56460e7B98DC7B26b8$/mu);
-  assert.match(backend, /^BANK_XCM_FLOW_ENABLED=false$/mu);
+  assert.match(backend, /^BANK_XCM_FLOW_ENABLED=true$/mu);
+  assert.match(backend, /^BANK_XCM_ASSET_HUB_SUBSTRATE_RPC_URL=wss:\/\/asset-hub-polkadot-rpc\.n\.dwellir\.com$/mu);
+  assert.match(backend, /^BANK_XCM_HYDRATION_SUBSTRATE_RPC_URL=wss:\/\/hydration-rpc\.n\.dwellir\.com$/mu);
   assert.match(backend, /^HYDRATION_USDC_ADAPTER_ADDRESS=0x631A09913B2403B18b2B659a1397916621b29b4c$/mu);
   assert.match(backend, /^BANK_LANE_FEED_HYDRATION_ACCOUNT_ID32=12WiJGBSjqTBNqD7a7TN6mt47ZJd7f8SqyhTc2bYLFzcHYD9$/mu);
   assert.match(backend, /^BANK_LANE_FEED_WRAPPER_CANDIDATES_JSON=\[.+\]$/mu);

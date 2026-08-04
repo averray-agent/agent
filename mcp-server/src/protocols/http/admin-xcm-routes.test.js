@@ -56,6 +56,14 @@ function makeHarness(overrides = {}) {
       finalizeXcmRequest: async (requestId, outcome) => {
         calls.push(["finalizeXcmRequest", { requestId, outcome }]);
         return overrides.finalized ?? { requestId, ...outcome, finalized: true };
+      },
+      backfillBankXcmWatch: async (requestId, options) => {
+        calls.push(["backfillBankXcmWatch", { requestId, options }]);
+        return overrides.watch ?? { requestId, registrationSource: "chain_event_backfill" };
+      },
+      dispatchBankXcmLeg: async (requestId, leg) => {
+        calls.push(["dispatchBankXcmLeg", { requestId, leg }]);
+        return overrides.dispatched ?? { requestId, leg, result: { status: 1 } };
       }
     },
     storeIdempotentMutationReceipt: async (receipt) => {
@@ -215,4 +223,57 @@ test("POST /admin/xcm/finalize validates requestId before service side effects",
   );
   assert.ok(!calls.some(([name]) => name === "finalizeXcmRequest"));
   assert.ok(!calls.some(([name]) => name === "storeReceipt"));
+});
+
+test("POST /admin/xcm/watch/backfill imports only a bounded chain-event watch", async () => {
+  const { calls, response, route } = makeHarness({
+    payload: { requestId: REQUEST_ID, fromBlock: 19_064_043, toBlock: 19_064_043, idempotencyKey: "watch-1" }
+  });
+  const handled = await route({
+    request: { method: "POST" },
+    response,
+    url: new URL("http://localhost/admin/xcm/watch/backfill"),
+    pathname: "/admin/xcm/watch/backfill"
+  });
+
+  assert.equal(handled, true);
+  assert.equal(response.body.registrationSource, "chain_event_backfill");
+  assert.deepEqual(calls.find(([name]) => name === "backfillBankXcmWatch")?.[1], {
+    requestId: REQUEST_ID,
+    options: { fromBlock: 19_064_043, toBlock: 19_064_043 }
+  });
+});
+
+test("POST /admin/xcm/dispatch exposes only requestId and leg to the refusing dispatcher", async () => {
+  const { calls, response, route } = makeHarness({
+    payload: { requestId: REQUEST_ID, leg: "deposit_funding", idempotencyKey: "dispatch-1" }
+  });
+  const handled = await route({
+    request: { method: "POST" },
+    response,
+    url: new URL("http://localhost/admin/xcm/dispatch"),
+    pathname: "/admin/xcm/dispatch"
+  });
+
+  assert.equal(handled, true);
+  assert.deepEqual(calls.find(([name]) => name === "dispatchBankXcmLeg")?.[1], {
+    requestId: REQUEST_ID,
+    leg: "deposit_funding"
+  });
+  const hashed = calls.find(([name]) => name === "hash")?.[1]?.payload;
+  assert.deepEqual(Object.keys(hashed).sort(), ["idempotencyKey", "leg", "requestId"]);
+});
+
+test("POST /admin/xcm/dispatch refuses a signing attempt without idempotency", async () => {
+  const { calls, route } = makeHarness({ payload: { requestId: REQUEST_ID, leg: "deposit_funding" } });
+  await assert.rejects(
+    route({
+      request: { method: "POST" },
+      response: {},
+      url: new URL("http://localhost/admin/xcm/dispatch"),
+      pathname: "/admin/xcm/dispatch"
+    }),
+    /idempotencyKey is required/u
+  );
+  assert.ok(!calls.some(([name]) => name === "dispatchBankXcmLeg"));
 });

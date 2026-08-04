@@ -2,7 +2,8 @@
 
 Status: **unsigned preparation only**. This runbook implements G2 from
 `BANK_V22_BUILD_PACKET.md`. It does not authorize a deployment or a multisig
-signature. G3 live leg preflights and the arm ceremony remain separate.
+signature. Runtime activation, the arm ceremony, and just-in-time leg
+preflights remain separately gated.
 
 ## 1. Scope and hard stops
 
@@ -15,8 +16,8 @@ G2 has three state-changing moments, each separately gated:
 The deployer sends only the two CREATE transactions. The configure batch has
 exactly four calls and contains no `setDispatchPaused(false)`. The new pair must
 remain paused and `BANK_XCM_FLOW_ENABLED=false` throughout G2. Do not emit or
-sign arm material until G3 has produced four live, limit-aware per-leg
-preflights through the deployed contract.
+sign arm material until the post-G2 runtime activation and armed-empty gates in
+section 7 are both green.
 
 Stop before signing if any of these is true:
 
@@ -251,13 +252,46 @@ For the nonce-7 provisional wrapper only, that image is:
 If the actual wrapper differs, the deploy preview prints the replacement SS58.
 Never fund a provisional image after an address change.
 
-## 7. G2 close and G3 barrier
+## 7. G2 close, runtime gate, and just-in-time ladder
 
 G2 is complete only when the deploy receipts, selector response, two conversion
 reads, same-flow record/env diff, configure execution result, paused/configured
 live reads, and postage receipt are all captured. The evidence uses capture-time
 state; skeleton/default `liveState` values are forbidden.
 
-Then stop. G3 must independently run all four per-leg, limit-aware
-`ReviveApi_call` preflights through the deployed v2.2 wrapper on live state with
-fresh fee quotes. Only a separate gated arm packet may unpause it.
+Before any request is staged, deploy the runtime activation change while the
+wrapper remains paused and custody-empty. Its production environment must set
+`BANK_XCM_FLOW_ENABLED=true` and provide both Substrate RPC endpoints. Verify
+through `/admin/status` that `bankXcmRuntime` reports all of:
+
+- `enabled=true`;
+- the manifest-selected v2.2 wrapper and adapter;
+- `observerRunning=true`;
+- `chainEventWatchEnabled=true` with no ingestion error; and
+- `readyForStaging=true`.
+
+This is the standing **pre-staging runtime gate** for every cycle. If any field
+is false or unreadable, do not stage. Arm remains a separate one-call multisig
+ceremony and may run only while the request table is empty, allowance is zero,
+and the runtime gate above is green.
+
+`RequestQueued` does not exist until staging executes, so its per-request watch
+cannot literally predate the staging transaction. The enforceable ordering is:
+
+1. runtime and chain-event subscription green;
+2. standalone approval, then staging;
+3. confirm a pending watch sourced from that exact on-chain `RequestQueued`
+   event, with its staging tx/block, on-chain dispatch deadline, and a
+   destination-chain block/hash-bound baseline; and
+4. only then run the funding leg.
+
+No dispatch is allowed without step 3. Each leg then performs its own fresh fee
+quote, exact-message dry-run, limit-aware `ReviveApi_call`, EVM gas estimate,
+watch check, and final request-state re-read in the same signing session. Pause
+on any failure.
+
+The admin backfill path exists only to recover a request staged while the
+runtime was historically off. It must locate exactly one `RequestQueued` log in
+a bounded block range and persist a destination-chain baseline tied to an
+explicit block number and block hash. It is not the normal cycle order and
+cannot accept a caller-supplied balance or message.

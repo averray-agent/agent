@@ -59,6 +59,7 @@ import { XcmSettlementWatcherService } from "./xcm-settlement-watcher.js";
 import { XcmObservationRelayService } from "./xcm-observation-relay.js";
 import { VenueBalanceReader } from "./venue-balance-reader.js";
 import { XcmBalanceObserverService } from "./xcm-balance-observer.js";
+import { createBankXcmV22RuntimeServices } from "./bank-xcm-v22-runtime.js";
 import {
   BankLaneFeedService,
   EvmWrapperPauseReader,
@@ -452,6 +453,18 @@ export async function createPlatformRuntime() {
       }
     )
   );
+  const bankXcmV22Services = initStep("init-bank-xcm-v22-runtime", logger, () =>
+    createBankXcmV22RuntimeServices({
+      enabled: bankXcmFlowRequested && gateway.hasXcmWrapper(),
+      gateway,
+      balanceObserver: xcmBalanceObserver,
+      balanceReader: venueBalanceReader,
+      bankLaneFeed,
+      eventBus,
+      env: process.env,
+      logger
+    })
+  );
   const xcmObservationRelay = initStep("init-xcm-observation-relay", logger, () =>
     new XcmObservationRelayService(platformService, stateStore, eventBus, {
       enabled: process.env.XCM_OBSERVER_ENABLED === undefined
@@ -518,6 +531,8 @@ export async function createPlatformRuntime() {
   platformService.openApiSpecIngestionScheduler = openApiSpecIngestionScheduler;
   platformService.xcmSettlementWatcher = xcmSettlementWatcher;
   platformService.xcmBalanceObserver = xcmBalanceObserver;
+  platformService.bankXcmRuntime = bankXcmV22Services.runtime;
+  platformService.bankXcmDispatcher = bankXcmV22Services.dispatcher;
   platformService.externalPostingWatcher = externalPostingWatcher;
   platformService.xcmObservationRelay = xcmObservationRelay;
   platformService.upstreamStatusPoller = upstreamStatusPoller;
@@ -588,6 +603,8 @@ export async function createPlatformRuntime() {
     openApiSpecIngestionScheduler,
     xcmSettlementWatcher,
     xcmBalanceObserver,
+    bankXcmRuntime: bankXcmV22Services.runtime,
+    bankXcmDispatcher: bankXcmV22Services.dispatcher,
     bankLaneFeed,
     venueBalanceReader,
     xcmObservationRelay,

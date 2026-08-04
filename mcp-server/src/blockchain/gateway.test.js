@@ -1826,6 +1826,15 @@ test("async XCM request readers return display amounts and raw base-unit fields"
         createdAt: 10n,
         updatedAt: 12n
       };
+    },
+    async getRequestParameters(id) {
+      assert.equal(id, requestId);
+      return {
+        sellAmount: 100_000n,
+        minimumOutput: 95_000n,
+        maxFeePerLeg: 40_000n,
+        dispatchDeadline: 1_785_919_032n
+      };
     }
   };
   gateway.accountContract = {
@@ -1851,6 +1860,7 @@ test("async XCM request readers return display amounts and raw base-unit fields"
   };
 
   const xcmRequest = await gateway.getXcmRequest(requestId);
+  const parameters = await gateway.getXcmRequestParameters(requestId);
   const strategyRequest = await gateway.getStrategyRequest(requestId);
 
   assert.equal(xcmRequest.requestedAssets, 1.25);
@@ -1864,6 +1874,13 @@ test("async XCM request readers return display amounts and raw base-unit fields"
   assert.equal(xcmRequest.updatedAt, 12);
   assert.equal(xcmRequest.updatedAtRaw, "12");
   assert.equal(xcmRequest.settledAssets, 0.25);
+  assert.deepEqual(parameters, {
+    requestId,
+    sellAmountRaw: "100000",
+    minimumOutputRaw: "95000",
+    maxFeePerLegRaw: "40000",
+    dispatchDeadlineRaw: "1785919032"
+  });
   assert.equal(strategyRequest.requestedAssets, 1.25);
   assert.equal(strategyRequest.requestedAssetsRaw, "1250000");
   assert.equal(strategyRequest.settledShares, 0.1);

@@ -58,6 +58,7 @@ function makeListener({ gateway = {}, xcmRequest = {} } = {}) {
         failureCodeLabel: "",
         ...xcmRequest
       }),
+      getXcmRequestParameters: async () => ({ dispatchDeadlineRaw: "1785920400" }),
       ...gateway
     },
     {
@@ -109,6 +110,7 @@ test("EventListener preserves unsafe XCM queued nonce as raw string", async () =
   assert.equal(events[0].data.nonceRaw, unsafeNonce.toString());
   assert.equal(events[0].data.blockNumberRaw, "12345");
   assert.equal(events[0].data.wrapperAddress, XCM_CONTRACT_ADDRESS);
+  assert.equal(events[0].data.dispatchDeadlineRaw, "1785920400");
 });
 
 test("EventListener exposes v2.2 staged parameters and per-leg dispatch evidence", async () => {

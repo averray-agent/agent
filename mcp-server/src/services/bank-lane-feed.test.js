@@ -506,5 +506,10 @@ test("mainnet template ships the Bank feed ENABLED, with targets that match the 
   assert.equal(config.targets.float.assetId, String(strategy.remote.assetId));
   assert.equal(config.targets.postage.account, POSTAGE);
   assert.equal(env.XCM_WRAPPER_ADDRESS, manifest.contracts.xcmWrapper);
-  assert.equal(env.BANK_XCM_FLOW_ENABLED, "false", "dust proof does not arm automated dispatch");
+  assert.equal(env.BANK_XCM_FLOW_ENABLED, "true", "v2.2 runtime and event-bound observer are explicitly active");
+  assert.equal(
+    env.BANK_XCM_ASSET_HUB_SUBSTRATE_RPC_URL,
+    "wss://asset-hub-polkadot-rpc.n.dwellir.com"
+  );
+  assert.equal(env.BANK_XCM_HYDRATION_SUBSTRATE_RPC_URL, "wss://hydration-rpc.n.dwellir.com");
 });

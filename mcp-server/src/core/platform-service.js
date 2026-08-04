@@ -96,6 +96,8 @@ export class PlatformService {
     this.jobStaleSweeper = undefined;
     this.xcmSettlementWatcher = undefined;
     this.xcmBalanceObserver = undefined;
+    this.bankXcmRuntime = undefined;
+    this.bankXcmDispatcher = undefined;
     this.xcmObservationRelay = undefined;
     this.upstreamStatusPoller = undefined;
     this.bootstrapSelfReportScheduler = undefined;
@@ -599,10 +601,11 @@ export class PlatformService {
       Promise.resolve().then(() => collectHostDiagnostics()),
       resolveSiweAuthTelemetry(this.stateStore)
     ]);
-    const [xcmSettlementWatcher, xcmObservationRelay, xcmBalanceObserver] = await Promise.all([
+    const [xcmSettlementWatcher, xcmObservationRelay, xcmBalanceObserver, bankXcmRuntime] = await Promise.all([
       getXcmSettlementWatcherStatusSafely(this.xcmSettlementWatcher),
       getXcmObservationRelayStatusSafely(this.xcmObservationRelay),
-      getXcmBalanceObserverStatusSafely(this.xcmBalanceObserver)
+      getXcmBalanceObserverStatusSafely(this.xcmBalanceObserver),
+      getBankXcmRuntimeStatusSafely(this.bankXcmRuntime)
     ]);
     const recentEvents = this.eventBus?.replay?.({}, undefined)?.events ?? [];
     const activeStatuses = new Set(["claimed", "submitted", "disputed", "rejected"]);
@@ -702,6 +705,14 @@ export class PlatformService {
         }
       });
     }
+    if (bankXcmRuntime?.enabled && !bankXcmRuntime.readyForStaging) {
+      anomalies.push({
+        severity: "high",
+        code: "bank_xcm_runtime_not_ready_for_staging",
+        message: "Bank XCM staging is refused until the dispatcher runtime and chain-event observer are ready.",
+        details: bankXcmRuntime
+      });
+    }
     for (const template of scheduler.templates ?? []) {
       if (template.lastResult?.status === "failed" || template.lastResult?.status === "invalid_schedule") {
         anomalies.push({
@@ -781,7 +792,8 @@ export class PlatformService {
       bootstrapSelfReport,
       xcmSettlementWatcher,
       xcmObservationRelay,
-      xcmBalanceObserver
+      xcmBalanceObserver,
+      bankXcmRuntime
     };
   }
 
@@ -1571,6 +1583,20 @@ export class PlatformService {
     return this.xcmSettlementWatcher.observeOutcome(requestId, outcome);
   }
 
+  async backfillBankXcmWatch(requestId, options = {}) {
+    if (!this.bankXcmRuntime) {
+      throw new ValidationError("Bank v2.2 runtime is disabled; watch backfill is unavailable.");
+    }
+    return this.bankXcmRuntime.backfillStagedRequestWatch({ requestId, ...options });
+  }
+
+  async dispatchBankXcmLeg(requestId, leg) {
+    if (!this.bankXcmDispatcher) {
+      throw new ValidationError("Bank v2.2 runtime is disabled; dispatch is unavailable.");
+    }
+    return this.bankXcmDispatcher.dispatch({ requestId, leg });
+  }
+
   async ingestVerification(sessionId, verdict) {
     return this.verificationIngestionService.ingest(sessionId, verdict);
   }
@@ -1612,6 +1638,15 @@ export class PlatformService {
     return {
       providerOperations: sanitizeProviderOperations(providerOperations)
     };
+  }
+}
+
+async function getBankXcmRuntimeStatusSafely(runtime) {
+  if (!runtime) return { enabled: false, readyForStaging: false };
+  try {
+    return await runtime.getStatus();
+  } catch (error) {
+    return { enabled: true, readyForStaging: false, error: error?.message ?? "status_failed" };
   }
 }
 

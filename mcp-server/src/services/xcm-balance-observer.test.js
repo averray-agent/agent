@@ -189,7 +189,8 @@ test("RequestQueued chain event creates a staged-on-chain watch before dispatch"
       wrapperAddress: WRAPPER,
       kind: 0,
       assetsRaw: "150000",
-      sharesRaw: "0"
+      sharesRaw: "0",
+      dispatchDeadlineRaw: String(Date.parse("2026-08-04T11:00:00.000Z") / 1_000)
     }
   });
   await observer.flushChainEventIngestion();
@@ -218,6 +219,7 @@ test("RequestQueued chain event creates a staged-on-chain watch before dispatch"
   assert.equal(watch.baselineRaw, "100000");
   assert.equal(watch.sourceEventId, "staging-event-1");
   assert.equal(watch.stagingTxHash, "0xstage");
+  assert.equal(watch.deadlineAt, "2026-08-04T11:00:00.000Z");
   assert.deepEqual(watch.settlement, { assets: "delta", shares: "delta" });
 });
 
@@ -336,6 +338,9 @@ test("an overdue chain-event watch cannot authorize dispatch", async () => {
     wrapperAddress: WRAPPER,
     registrationSource: "chain_event_backfill",
     baselineRaw: "0",
+    baselineAsOf: "2026-08-04T10:00:00.000Z",
+    baselineBlockNumber: 42,
+    baselineBlockHash: `0x${"42".repeat(32)}`,
     startedAt: "2026-08-04T10:00:00.000Z"
   });
 
@@ -374,19 +379,24 @@ test("standing chain-event backfill requires and preserves an explicit baseline"
       wrapperAddress: WRAPPER,
       registrationSource: "chain_event_backfill"
     }),
-    /requires an explicit chain-height-bound baselineRaw/u
+    /requires a chain-height-bound baseline value, block number, and block hash/u
   );
   await observer.register({
     requestId: REQUEST_ID,
     target: targetFor("aUsdc"),
     direction: "increase",
     baselineRaw: "4242",
+    baselineAsOf: "2026-08-04T10:00:00.000Z",
+    baselineBlockNumber: 123,
+    baselineBlockHash: `0x${"12".repeat(32)}`,
     wrapperAddress: WRAPPER,
     sourceEventId: "manual-backfill:block-123",
     registrationSource: "chain_event_backfill"
   });
   const watch = await observer.requireArmedWatch(REQUEST_ID, { wrapperAddress: WRAPPER });
   assert.equal(watch.baselineRaw, "4242");
+  assert.equal(watch.baselineBlockNumber, 123);
+  assert.equal(watch.baselineBlockHash, `0x${"12".repeat(32)}`);
   assert.equal(watch.registrationSource, "chain_event_backfill");
 });
 
