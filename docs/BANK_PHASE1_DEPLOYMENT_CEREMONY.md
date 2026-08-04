@@ -441,6 +441,44 @@ from `149,475` to `131,543` raw. The observer created no request watch and no
 calibration record. The ceremony stopped without a retry or a following leg;
 do not treat the successful Asset Hub receipt as a successful Bank deposit.
 
+The failure is consistent with a perished `BuyExecution` quote: the encoded
+`17,932`-raw quote was about 3.5 hours old by destination execution. Hydration
+used only `300,000,000 / 0`, trapped the full fee asset, and consumed zero of
+that asset as execution fees. Fee quotes are therefore dispatch-time inputs,
+not durable ceremony artifacts. For every remote leg, rebuild the exact
+message with `fresh quote × 2` immediately before the wrapper preflight and
+broadcast; the message tail returns surplus. Never dispatch from an old
+otherwise-green dry-run bundle.
+
+Observer registration is also a pre-broadcast invariant, including manual
+ceremony sends while `BANK_XCM_FLOW_ENABLED=false`. Persist the balance watch,
+verify it appears in `/monitor/bank-feed`, and only then permit signing. The
+missing watch for this request was backfilled with baseline `0`, the real
+dispatch timestamp, and phase `leg2-dispatched`; it now ages in the board's
+request table.
+
+Trapped-asset claim ticket (write-off #3 for now):
+
+- trap hash: `0x430cf4ce3b1ad751b3e66ed76c48a9a421518219f99e7d0ef9507f718daf5e21`;
+- Hydration block: `13,456,243`;
+- descended origin: `parents=1`, `Parachain(1000)`,
+  `AccountId32(0x2af394fa95f75d3ca1c786128f4dfa1eb0c9675deeeeeeeeeeeeeeeeeeeeeeee)`;
+- exact V5 asset: `parents=1`, `Parachain(1000)`, `PalletInstance(50)`,
+  `GeneralIndex(1337)`, fungible amount `17,932`;
+- disposition: claimable later only if a narrowly reviewed claim shape earns
+  inclusion; no improvised claim transaction belongs in this ceremony.
+
+The deployed wrapper cannot retry this sell with changed fee bytes. The
+already-dispatched leg accepts only its recorded message hash; changed bytes
+revert `PayloadMismatch`, while identical bytes return the request id without
+sending again. A new deposit request requires a new local funding leg. Under
+v2.1, the permitted recovery is instead: terminalize the request as `Failed`
+with zero settlements, pause, use the owner-only request-associated
+`recovery_home` shape for the remaining remote asset, release the observed
+return through wrapper → adapter → recorded treasury, and only then consider
+a fresh staged request. The trapped `17,932` remains governed by the claim
+ticket above.
+
 ## Handback checklist
 
 - two deployment receipts and paused-state/immutable reads;
