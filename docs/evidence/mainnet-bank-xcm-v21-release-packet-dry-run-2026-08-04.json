@@ -1,0 +1,131 @@
+{
+  "ok": {
+    "executionResult": {
+      "ok": {
+        "actualWeight": {
+          "refTime": 3834887630,
+          "proofSize": 388888
+        },
+        "paysFee": "Yes"
+      }
+    },
+    "emittedEvents": [
+      {
+        "index": "0x3202",
+        "data": [
+          1337,
+          "1yKNU414vYDyXYXL6pu845puajfeGTezD1rBiUYwp9UKBaZ",
+          "13sXneHeBRdxksQbJNJPLuAUDH2wyvKdVbBYAyhvUhchNFwr",
+          130200
+        ]
+      },
+      {
+        "index": "0x5a00",
+        "data": [
+          "0x0000053900000000000000000000000001200000",
+          "0x000000000000000000000000000000000000000000000000000000000001fc98",
+          [
+            "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+            "0x0000000000000000000000002af394fa95f75d3ca1c786128f4dfa1eb0c9675d",
+            "0x0000000000000000000000007f02600ea185b5d9ecfb2b7ac97a6a502f89b81b"
+          ]
+        ]
+      },
+      {
+        "index": "0x5a00",
+        "data": [
+          "0x2af394fa95f75d3ca1c786128f4dfa1eb0c9675d",
+          "0x000000000000000000000000000000000000000000000000000000000001fc98",
+          [
+            "0xad88c41b5919e1b94cc95d2eed97b5c2f0944bee1580a42ddc6cf59140f773a7",
+            "0xb609f4d875e0c6f4f4b1dddd90efd687215d1ac9ecd90d0de51b9304f57ecaac",
+            "0x0000000000000000000000007f02600ea185b5d9ecfb2b7ac97a6a502f89b81b"
+          ]
+        ]
+      },
+      {
+        "index": "0x0a1b",
+        "data": [
+          {
+            "revive": "StorageDepositReserve"
+          },
+          "14LA8vJD8JeQYMRd5yhiw3hxD7CK5txhfL9GSNPjzLRKc3YK",
+          "1yKNU414vYDyXYXL6pu845puajfeGTezD1rBiUYwp9UKBaZ",
+          26400000
+        ]
+      },
+      {
+        "index": "0x2803",
+        "data": []
+      },
+      {
+        "index": "0x3202",
+        "data": [
+          1337,
+          "13sXneHeBRdxksQbJNJPLuAUDH2wyvKdVbBYAyhvUhchNFwr",
+          "14LA8vJD8JeQYMRd5yhiw3hxD7CK5txhfL9GSNPjzLRKc3YK",
+          130200
+        ]
+      },
+      {
+        "index": "0x5a00",
+        "data": [
+          "0x0000053900000000000000000000000001200000",
+          "0x000000000000000000000000000000000000000000000000000000000001fc98",
+          [
+            "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+            "0x0000000000000000000000007f02600ea185b5d9ecfb2b7ac97a6a502f89b81b",
+            "0x00000000000000000000000001e6eed856e989201f4ff6346e18eab7e46c874c"
+          ]
+        ]
+      },
+      {
+        "index": "0x5a00",
+        "data": [
+          "0x7f02600ea185b5d9ecfb2b7ac97a6a502f89b81b",
+          "0x000000000000000000000000000000000000000000000000000000000001fc980000000000000000000000000000000000000000000000000000000000004d58",
+          [
+            "0x1b11ed828c99942ec930f234fbf76852e28e337131b09e132d3c781b656926fb",
+            "0xb609f4d875e0c6f4f4b1dddd90efd687215d1ac9ecd90d0de51b9304f57ecaac",
+            "0x00000000000000000000000001e6eed856e989201f4ff6346e18eab7e46c874c"
+          ]
+        ]
+      },
+      {
+        "index": "0x2803",
+        "data": []
+      },
+      {
+        "index": "0x5a00",
+        "data": [
+          "0xc846ee73e49a748e59c7ac8f8742f542a552d24c",
+          "0x0000000000000000000000000000000000000000000000000000000000000001",
+          [
+            "0xf7721f10a3da602f9037bc243db6b7ccfcd622de6652ff6e84153d41d0584c54"
+          ]
+        ]
+      },
+      {
+        "index": "0x0a1b",
+        "data": [
+          {
+            "revive": "StorageDepositReserve"
+          },
+          "14LA8vJD8JeQYMRd5yhiw3hxD7CK5txhfL9GSNPjzLRKc3YK",
+          "15XbeapZyWWEZdDCLpxzNhryKj2MsE8rnFUW9cPydXfgSMAK",
+          26400000
+        ]
+      },
+      {
+        "index": "0x2803",
+        "data": []
+      },
+      {
+        "index": "0x2801",
+        "data": []
+      }
+    ],
+    "localXcm": null,
+    "forwardedXcms": []
+  }
+}

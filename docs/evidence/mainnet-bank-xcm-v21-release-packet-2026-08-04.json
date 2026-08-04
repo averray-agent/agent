@@ -1,0 +1,494 @@
+{
+  "schemaVersion": 1,
+  "kind": "averray.bankXcmV21ReleaseAndRetirePacket",
+  "capturedAt": "2026-08-04T12:26:18.279Z",
+  "signedOrBroadcastTransactions": 0,
+  "profile": "mainnet",
+  "executableOnlyAfterClaudeGate": true,
+  "requestId": "0xb609f4d875e0c6f4f4b1dddd90efd687215d1ac9ecd90d0de51b9304f57ecaac",
+  "recoveryExecutionEvidence": {
+    "blockNumber": 19049641,
+    "extrinsicIndex": 2,
+    "blockHash": "0x5c9fc180c7aa672afed2c2438295f15aa04078c011f0933e29b23f1d9a0a6e85",
+    "extrinsicHash": "0xa3e17cddceeee1975f94839466e8134eeb1fbae7fed1236bfb200d2870442d54",
+    "timepoint": {
+      "height": 19049628,
+      "index": 2
+    },
+    "callHash": "0x57815dc29457ccd1e9385d117cc28416096dc74919c88125e9b37da66617dd87",
+    "multisigExecuted": {
+      "section": "multisig",
+      "method": "MultisigExecuted",
+      "data": {
+        "approving": "121pEreu4kTNBiyG7K32Red672dgMhkra7cLTNwK8ebEYhyv",
+        "timepoint": {
+          "height": "19,049,628",
+          "index": "2"
+        },
+        "multisig": "14LA8vJD8JeQYMRd5yhiw3hxD7CK5txhfL9GSNPjzLRKc3YK",
+        "callHash": "0x57815dc29457ccd1e9385d117cc28416096dc74919c88125e9b37da66617dd87",
+        "result": "Ok"
+      }
+    },
+    "events": [
+      {
+        "section": "balances",
+        "method": "Withdraw",
+        "data": {
+          "who": "121pEreu4kTNBiyG7K32Red672dgMhkra7cLTNwK8ebEYhyv",
+          "amount": "91,308,417"
+        }
+      },
+      {
+        "section": "balances",
+        "method": "Unreserved",
+        "data": {
+          "who": "1mhf9yyYq3ArZAEysQQfWYNe2rgrDP6omrn6xiJBbwKqYZH",
+          "amount": "2,015,200,000"
+        }
+      },
+      {
+        "section": "revive",
+        "method": "ContractEmitted",
+        "data": {
+          "contract": "0x2af394fa95f75d3ca1c786128f4dfa1eb0c9675d",
+          "data": "0x0000000000000000000000000000000000000000000000000000000000000001",
+          "topics": [
+            "0xf7721f10a3da602f9037bc243db6b7ccfcd622de6652ff6e84153d41d0584c54"
+          ]
+        }
+      },
+      {
+        "section": "balances",
+        "method": "TransferAndHold",
+        "data": {
+          "reason": {
+            "Revive": "StorageDepositReserve"
+          },
+          "source": "14LA8vJD8JeQYMRd5yhiw3hxD7CK5txhfL9GSNPjzLRKc3YK",
+          "dest": "1yKNU414vYDyXYXL6pu845puajfeGTezD1rBiUYwp9UKBaZ",
+          "transferred": "26,400,000"
+        }
+      },
+      {
+        "section": "utility",
+        "method": "ItemCompleted",
+        "data": {}
+      },
+      {
+        "section": "balances",
+        "method": "Withdraw",
+        "data": {
+          "who": "1yKNU414vYDyXYXL6pu845puajfeGTezD1rBiUYwp9UKBaZ",
+          "amount": "308,400,000"
+        }
+      },
+      {
+        "section": "balances",
+        "method": "Deposit",
+        "data": {
+          "who": "13UVJyLkAxdQn6zM3Gz49SmCLi8SZW3bdtm7DTY29ScavqW2",
+          "amount": "308,400,000"
+        }
+      },
+      {
+        "section": "polkadotXcm",
+        "method": "FeesPaid",
+        "data": {
+          "paying": {
+            "parents": "0",
+            "interior": {
+              "X1": [
+                {
+                  "AccountId32": {
+                    "network": "Polkadot",
+                    "id": "0x2af394fa95f75d3ca1c786128f4dfa1eb0c9675deeeeeeeeeeeeeeeeeeeeeeee"
+                  }
+                }
+              ]
+            }
+          },
+          "fees": [
+            {
+              "id": {
+                "parents": "1",
+                "interior": "Here"
+              },
+              "fun": {
+                "Fungible": "308,400,000"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "section": "xcmpQueue",
+        "method": "XcmpMessageSent",
+        "data": {
+          "messageHash": "0x714c06bfd3a5ba572755fe0e186ac120cc30f79fd52ce4b798c8fb6e11be1049"
+        }
+      },
+      {
+        "section": "polkadotXcm",
+        "method": "Sent",
+        "data": {
+          "origin": {
+            "parents": "0",
+            "interior": {
+              "X1": [
+                {
+                  "AccountId32": {
+                    "network": "Polkadot",
+                    "id": "0x2af394fa95f75d3ca1c786128f4dfa1eb0c9675deeeeeeeeeeeeeeeeeeeeeeee"
+                  }
+                }
+              ]
+            }
+          },
+          "destination": {
+            "parents": "1",
+            "interior": {
+              "X1": [
+                {
+                  "Parachain": "2,034"
+                }
+              ]
+            }
+          },
+          "message": [
+            {
+              "WithdrawAsset": [
+                {
+                  "id": {
+                    "parents": "1",
+                    "interior": {
+                      "X3": [
+                        {
+                          "Parachain": "1,000"
+                        },
+                        {
+                          "PalletInstance": "50"
+                        },
+                        {
+                          "GeneralIndex": "1,337"
+                        }
+                      ]
+                    }
+                  },
+                  "fun": {
+                    "Fungible": "131,543"
+                  }
+                }
+              ]
+            },
+            {
+              "BuyExecution": {
+                "fees": {
+                  "id": {
+                    "parents": "1",
+                    "interior": {
+                      "X3": [
+                        {
+                          "Parachain": "1,000"
+                        },
+                        {
+                          "PalletInstance": "50"
+                        },
+                        {
+                          "GeneralIndex": "1,337"
+                        }
+                      ]
+                    }
+                  },
+                  "fun": {
+                    "Fungible": "131,543"
+                  }
+                },
+                "weightLimit": "Unlimited"
+              }
+            },
+            "RefundSurplus",
+            {
+              "InitiateReserveWithdraw": {
+                "assets": {
+                  "Wild": {
+                    "AllCounted": "1"
+                  }
+                },
+                "reserve": {
+                  "parents": "1",
+                  "interior": {
+                    "X1": [
+                      {
+                        "Parachain": "1,000"
+                      }
+                    ]
+                  }
+                },
+                "xcm": [
+                  {
+                    "BuyExecution": {
+                      "fees": {
+                        "id": {
+                          "parents": "0",
+                          "interior": {
+                            "X2": [
+                              {
+                                "PalletInstance": "50"
+                              },
+                              {
+                                "GeneralIndex": "1,337"
+                              }
+                            ]
+                          }
+                        },
+                        "fun": {
+                          "Fungible": "1,392"
+                        }
+                      },
+                      "weightLimit": "Unlimited"
+                    }
+                  },
+                  {
+                    "DepositAsset": {
+                      "assets": {
+                        "Wild": {
+                          "AllCounted": "1"
+                        }
+                      },
+                      "beneficiary": {
+                        "parents": "0",
+                        "interior": {
+                          "X1": [
+                            {
+                              "AccountId32": {
+                                "network": null,
+                                "id": "0x2af394fa95f75d3ca1c786128f4dfa1eb0c9675deeeeeeeeeeeeeeeeeeeeeeee"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "SetTopic": "0xc17e25a02084d4edb8b0ff0f1e03a85e96163b8a6a4a8f2f7b531c79e28171d1"
+            }
+          ],
+          "messageId": "0xc17e25a02084d4edb8b0ff0f1e03a85e96163b8a6a4a8f2f7b531c79e28171d1"
+        }
+      },
+      {
+        "section": "revive",
+        "method": "ContractEmitted",
+        "data": {
+          "contract": "0x2af394fa95f75d3ca1c786128f4dfa1eb0c9675d",
+          "data": "0x00000000000000000000000000000000000000000000000000000000000201d70000000000000000000000000000000000000000000000000000000000000001a546576486b2e9600be8fd61f3ebc78f42525153277bcc97f72e27fa8a623995c92c981487d8b473a60aa91f60c3f6ef8f1823ee8a6f951e5ea7f3979790f743",
+          "topics": [
+            "0xd44310e5f03b31ad8a70001f5bdfa47e59a02aed8a130fd63784ed143891000b",
+            "0xc17e25a02084d4edb8b0ff0f1e03a85e96163b8a6a4a8f2f7b531c79e28171d1"
+          ]
+        }
+      },
+      {
+        "section": "balances",
+        "method": "TransferAndHold",
+        "data": {
+          "reason": {
+            "Revive": "StorageDepositReserve"
+          },
+          "source": "14LA8vJD8JeQYMRd5yhiw3hxD7CK5txhfL9GSNPjzLRKc3YK",
+          "dest": "1yKNU414vYDyXYXL6pu845puajfeGTezD1rBiUYwp9UKBaZ",
+          "transferred": "79,200,000"
+        }
+      },
+      {
+        "section": "utility",
+        "method": "ItemCompleted",
+        "data": {}
+      },
+      {
+        "section": "utility",
+        "method": "BatchCompleted",
+        "data": {}
+      },
+      {
+        "section": "multisig",
+        "method": "MultisigExecuted",
+        "data": {
+          "approving": "121pEreu4kTNBiyG7K32Red672dgMhkra7cLTNwK8ebEYhyv",
+          "timepoint": {
+            "height": "19,049,628",
+            "index": "2"
+          },
+          "multisig": "14LA8vJD8JeQYMRd5yhiw3hxD7CK5txhfL9GSNPjzLRKc3YK",
+          "callHash": "0x57815dc29457ccd1e9385d117cc28416096dc74919c88125e9b37da66617dd87",
+          "result": "Ok"
+        }
+      },
+      {
+        "section": "balances",
+        "method": "Deposit",
+        "data": {
+          "who": "121pEreu4kTNBiyG7K32Red672dgMhkra7cLTNwK8ebEYhyv",
+          "amount": "35,846,790"
+        }
+      },
+      {
+        "section": "balances",
+        "method": "Deposit",
+        "data": {
+          "who": "13UVJyLkAxdQn6zM3Gz49SmCLi8SZW3bdtm7DTY29ScavqW2",
+          "amount": "55,461,627"
+        }
+      },
+      {
+        "section": "transactionPayment",
+        "method": "TransactionFeePaid",
+        "data": {
+          "who": "121pEreu4kTNBiyG7K32Red672dgMhkra7cLTNwK8ebEYhyv",
+          "actualFee": "55,461,627",
+          "tip": "0"
+        }
+      },
+      {
+        "section": "system",
+        "method": "ExtrinsicSuccess",
+        "data": {
+          "dispatchInfo": {
+            "weight": {
+              "refTime": "12,282,345,946",
+              "proofSize": "56,544"
+            },
+            "class": "Normal",
+            "paysFee": "Yes"
+          }
+        }
+      }
+    ]
+  },
+  "contracts": {
+    "wrapperV21": "0x2AF394fA95f75D3ca1C786128f4dfA1eB0c9675D",
+    "adapterV21": "0x7f02600eA185b5d9ecfB2B7ac97a6a502F89B81B",
+    "wrapperV20": "0xc846eE73e49A748e59C7Ac8f8742F542a552D24C",
+    "token": "0x0000053900000000000000000000000001200000",
+    "treasuryMultisig": "0x01E6eed856e989201F4FF6346E18EAb7e46C874C"
+  },
+  "prestate": {
+    "assetHubBlock": "19049853",
+    "hydrationBlock": "13457378",
+    "wrapperV21DispatchPaused": true,
+    "wrapperV20DispatchPaused": false,
+    "wrapperV21UsdcRaw": "130200",
+    "adapterV21UsdcRaw": "0",
+    "treasuryUsdcRaw": "0",
+    "hydrationConvertedAsset22Raw": "0",
+    "requestRecoveryReleasedRaw": "0",
+    "rawRecoveryAssetsOutstandingRaw": "150000",
+    "requiresRemoteRecovery": true
+  },
+  "calls": [
+    {
+      "label": "XcmWrapperV2(v2.1).releaseRecoveredAssetsToAdapter(requestId, 130200)",
+      "to": "0x2AF394fA95f75D3ca1C786128f4dfA1eB0c9675D",
+      "data": "0x1e0b011cb609f4d875e0c6f4f4b1dddd90efd687215d1ac9ecd90d0de51b9304f57ecaac000000000000000000000000000000000000000000000000000000000001fc98",
+      "decoded": {
+        "requestId": "0xb609f4d875e0c6f4f4b1dddd90efd687215d1ac9ecd90d0de51b9304f57ecaac",
+        "assetsRaw": "130200"
+      }
+    },
+    {
+      "label": "HydrationUsdcAdapter(v2.1).releaseRecoveredAssets(requestId, treasuryMultisig, 130200)",
+      "to": "0x7f02600eA185b5d9ecfB2B7ac97a6a502F89B81B",
+      "data": "0x0ff90b5bb609f4d875e0c6f4f4b1dddd90efd687215d1ac9ecd90d0de51b9304f57ecaac00000000000000000000000001e6eed856e989201f4ff6346e18eab7e46c874c000000000000000000000000000000000000000000000000000000000001fc98",
+      "decoded": {
+        "requestId": "0xb609f4d875e0c6f4f4b1dddd90efd687215d1ac9ecd90d0de51b9304f57ecaac",
+        "recipient": "0x01E6eed856e989201F4FF6346E18EAb7e46C874C",
+        "assetsRaw": "130200"
+      }
+    },
+    {
+      "label": "XcmWrapperV2(v2.0).setDispatchPaused(true) retirement rider",
+      "to": "0xc846eE73e49A748e59C7Ac8f8742F542a552D24C",
+      "data": "0x1f59d6fb0000000000000000000000000000000000000000000000000000000000000001",
+      "decoded": {
+        "paused": true
+      }
+    }
+  ],
+  "postconditions": {
+    "treasuryUsdcDeltaRaw": "130200",
+    "wrapperV21UsdcRaw": "0",
+    "adapterV21UsdcRaw": "0",
+    "requestRecoveryReleasedRaw": "130200",
+    "rawRecoveryAssetsOutstandingRaw": "19800",
+    "requiresRemoteRecovery": true,
+    "wrapperV21DispatchPaused": true,
+    "wrapperV20DispatchPaused": true,
+    "zeroArmedCondemnedWrapperGenerations": true
+  },
+  "finalReconciliation": {
+    "stagedRaw": "150000",
+    "actualTreasuryReturnRaw": "130200",
+    "leg1TransferFeeRaw": "525",
+    "trappedWriteOff3Raw": "17932",
+    "recoveryReturnFeeRaw": "1343",
+    "equation": "150000 = 130200 + 525 + 17932 + 1343",
+    "unexplainedRaw": "0",
+    "rawV21RecoverySlotBeforeRaw": "150000",
+    "finalRawV21RecoverySlotResidueRaw": "19800",
+    "residueTreatment": "v2.1 accounting artifact, known-unrecoverable; never present as a receivable"
+  },
+  "safePerCallLimits": {
+    "refTime": "14493883490",
+    "proofSize": "344460",
+    "storageDepositLimit": "1000000000"
+  },
+  "signer": {
+    "index": 2,
+    "label": "nova",
+    "address": "121pEreu4kTNBiyG7K32Red672dgMhkra7cLTNwK8ebEYhyv",
+    "accountId32": "0x2cdb40f6605cd3caad90b59816b657ea970c941d8372784faf024dd3c2dbab7e"
+  },
+  "otherSignatories": [
+    "1mhf9yyYq3ArZAEysQQfWYNe2rgrDP6omrn6xiJBbwKqYZH",
+    "16UCRMPz5njNdRvAEE3pkEjaqpjX8ayC1gh9yNtk5eGb14oc"
+  ],
+  "threshold": 2,
+  "timepoint": null,
+  "authority": {
+    "owner": "0x01E6eed856e989201F4FF6346E18EAb7e46C874C",
+    "accountId32": "0x93511e8deef3e7ec69cc1f18a573176da9870a0fb474ab2e0c18d88a5e74fd47",
+    "multisig": "14LA8vJD8JeQYMRd5yhiw3hxD7CK5txhfL9GSNPjzLRKc3YK"
+  },
+  "substrate": {
+    "chainName": "Polkadot Asset Hub",
+    "revivePalletIndex": 90,
+    "endpoint": "wss://asset-hub-polkadot-rpc.n.dwellir.com",
+    "appsUrl": "https://polkadot.js.org/apps/?rpc=wss%3A%2F%2Fasset-hub-polkadot-rpc.n.dwellir.com#/extrinsics"
+  },
+  "reviveCallScales": [
+    "0x5a012af394fa95f75d3ca1c786128f4dfa1eb0c9675d0007621ce75f033206150002286bee11011e0b011cb609f4d875e0c6f4f4b1dddd90efd687215d1ac9ecd90d0de51b9304f57ecaac000000000000000000000000000000000000000000000000000000000001fc98",
+    "0x5a017f02600ea185b5d9ecfb2b7ac97a6a502f89b81b0007621ce75f033206150002286bee91010ff90b5bb609f4d875e0c6f4f4b1dddd90efd687215d1ac9ecd90d0de51b9304f57ecaac00000000000000000000000001e6eed856e989201f4ff6346e18eab7e46c874c000000000000000000000000000000000000000000000000000000000001fc98",
+    "0x5a01c846ee73e49a748e59c7ac8f8742f542a552d24c0007621ce75f033206150002286bee901f59d6fb0000000000000000000000000000000000000000000000000000000000000001"
+  ],
+  "innerCallHash": "0xbeea91fe2bd6236b9642e6f29ea79081668b49aa5d4bb98d60c7f002cd7a120c",
+  "innerCallScale": "0x28020c5a012af394fa95f75d3ca1c786128f4dfa1eb0c9675d0007621ce75f033206150002286bee11011e0b011cb609f4d875e0c6f4f4b1dddd90efd687215d1ac9ecd90d0de51b9304f57ecaac000000000000000000000000000000000000000000000000000000000001fc985a017f02600ea185b5d9ecfb2b7ac97a6a502f89b81b0007621ce75f033206150002286bee91010ff90b5bb609f4d875e0c6f4f4b1dddd90efd687215d1ac9ecd90d0de51b9304f57ecaac00000000000000000000000001e6eed856e989201f4ff6346e18eab7e46c874c000000000000000000000000000000000000000000000000000000000001fc985a01c846ee73e49a748e59c7ac8f8742f542a552d24c0007621ce75f033206150002286bee901f59d6fb0000000000000000000000000000000000000000000000000000000000000001",
+  "firstLegAsMultiScale": "0x29010200082217aa0eee7d3de03f3760165818b225f3bfb5d2694ac6980eedba57f8dde772f1eb3c605e687b23900616feb6584fe22d3344c9304e106d3da69eeb856b83140028020c5a012af394fa95f75d3ca1c786128f4dfa1eb0c9675d0007621ce75f033206150002286bee11011e0b011cb609f4d875e0c6f4f4b1dddd90efd687215d1ac9ecd90d0de51b9304f57ecaac000000000000000000000000000000000000000000000000000000000001fc985a017f02600ea185b5d9ecfb2b7ac97a6a502f89b81b0007621ce75f033206150002286bee91010ff90b5bb609f4d875e0c6f4f4b1dddd90efd687215d1ac9ecd90d0de51b9304f57ecaac00000000000000000000000001e6eed856e989201f4ff6346e18eab7e46c874c000000000000000000000000000000000000000000000000000000000001fc985a01c846ee73e49a748e59c7ac8f8742f542a552d24c0007621ce75f033206150002286bee901f59d6fb00000000000000000000000000000000000000000000000000000000000000010726b385d20ad2544e00",
+  "dryRun": {
+    "passed": true,
+    "actualWeight": {
+      "refTime": 3834887630,
+      "proofSize": 388888
+    },
+    "rawPath": "docs/evidence/mainnet-bank-xcm-v21-release-packet-dry-run-2026-08-04.json",
+    "rawSha256": "dd127270cf6acc095072bd35e198cc3a453dba822914d55189e5f5b20ac9bd43"
+  },
+  "forbiddenCalls": [
+    "setDispatchPaused(false)"
+  ],
+  "noUnpauseCallAnywhere": true
+}

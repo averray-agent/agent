@@ -508,9 +508,12 @@ loss lines on-chain instead of leaving a misleading storage residue.
 
 The post-terminalization recovery packet re-read `131,543` raw at Hydration
 block `13,456,840`. With nonce `1` and a fresh remote Asset Hub execution quote
-of `696` raw multiplied by two, the embedded fee is `1,392` raw. Hydration
-forwarded to para 1000 and the Asset Hub DryRunApi deposited `130,306` raw asset
-1337 to wrapper image
+of `696` raw multiplied by two, the embedded fee was `1,392` raw. The recovery
+batch executed at timepoint `19,049,628-2`; the approving extrinsic was
+`0xa3e17cddceeee1975f94839466e8134eeb1fbae7fed1236bfb200d2870442d54`
+at block `19,049,641`, where `multisig.MultisigExecuted` recorded inner `Ok`.
+Hydration ended at zero asset 22 and the **observed**, authoritative Asset Hub
+wrapper-image balance was `130,200` raw asset 1337 at
 `0x2af394fa95f75d3ca1c786128f4dfa1eb0c9675deeeeeeeeeeeeeeeeeeeeeeee`.
 The exact recovery id is
 `0xc17e25a02084d4edb8b0ff0f1e03a85e96163b8a6a4a8f2f7b531c79e28171d1`
@@ -520,24 +523,36 @@ The exact two-call owner batch first pauses dispatch and then sends this
 request-associated recovery; its inner-call hash is
 `0x57815dc29457ccd1e9385d117cc28416096dc74919c88125e9b37da66617dd87`.
 It passed an exact-batch Asset Hub DryRunApi simulation and forwarded to
-Hydration. These bytes remain unsigned review material until the ceremony gate
-passes.
+Hydration.
 
-After the message lands, read the **actual** Asset Hub wrapper-image delta.
-Only then emit the separately approved release calls
-`releaseRecoveredAssetsToAdapter(requestId, actualArrivedRaw)` and
-`releaseRecoveredAssets(requestId, treasury, actualArrivedRaw)`. The current
-dry-run projects `130,306` returned and a `19,694` raw v2.1 slot residue; both
-are projections, while the observed arrival is authoritative. Whatever residue
-remains is labeled `v2.1 accounting artifact, known-unrecoverable`, never an
-asset or receivable.
+The final v2.1 owner packet is deliberately limited to three calls:
 
-Unpause plus fresh staging is a separate approval item. The next dust request
-must start from zero unexplained remote capital. Quote the `DepositSell`
-`BuyExecution` fee immediately before staging, embed `fresh quote × 2`, register
-and verify the observer watch before any signature, and keep staging → deployed-
-wrapper preflight → dispatch inside one tight operator window. A fee change or
-deadline breach cancels the attempt; it never causes an old payload to be sent.
+1. `XcmWrapperV2(v2.1).releaseRecoveredAssetsToAdapter(requestId, 130200)`;
+2. `HydrationUsdcAdapter(v2.1).releaseRecoveredAssets(requestId, treasury, 130200)`;
+3. `XcmWrapperV2(v2.0).setDispatchPaused(true)` as retired-generation hygiene.
+
+The exact inner-call hash is
+`0xbeea91fe2bd6236b9642e6f29ea79081668b49aa5d4bb98d60c7f002cd7a120c`.
+An exact three-call DryRunApi simulation passed against the live prestate:
+v2.1 paused, v2.0 armed, wrapper custody `130,200`, adapter/treasury custody
+zero, raw recovery slot `150,000`, and request release counter zero. The packet
+contains no `setDispatchPaused(false)` call.
+
+On execution, the treasury receives exactly `130,200` raw and the deployed
+adapter slot retains `19,800` raw. The final reconciliation is:
+
+- treasury return: `130,200` raw;
+- leg-1 reserve-transfer fee: `525` raw;
+- trapped fee asset, write-off #3: `17,932` raw;
+- recovery return fee: `1,343` raw;
+- `150,000 = 130,200 + 525 + 17,932 + 1,343`; unexplained `0`.
+
+The `19,800` slot residue is the final **v2.1 accounting artifact,
+known-unrecoverable**. It is never an asset or receivable. v2.1 remains paused
+permanently, and the rider leaves v2.0 paused as well: no condemned wrapper
+generation remains armed. There is **no unpause plan for v2.1**. The next
+dispatch-capable generation is v2.2 and must satisfy both fee-freshness and
+loss-bound terminal-accounting requirements before any new capital is staged.
 
 ## Handback checklist
 

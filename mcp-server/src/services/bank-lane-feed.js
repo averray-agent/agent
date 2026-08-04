@@ -265,10 +265,13 @@ function safeTerminalReconciliation(raw) {
   if (!raw || typeof raw !== "object") return undefined;
   const fields = [
     "stagedRaw",
+    "actualTreasuryReturnRaw",
     "leg1TransferFeeRaw",
     "trappedWriteOff3Raw",
+    "recoveryReturnFeeRaw",
     "remoteRecoverableRaw",
     "unexplainedRaw",
+    "finalRawRecoverySlotResidueRaw",
     "artifactLabel"
   ];
   const value = Object.fromEntries(fields
