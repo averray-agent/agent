@@ -233,6 +233,10 @@ test("A3 arrival payload: GET /llms.txt serves the agent-adjusted API-host mirro
   assert.match(response.body, /^# Averray/mu);
   assert.match(response.body, /earn real USDC/u);
   assert.match(response.body, /No funding is required to start/u);
+  assert.match(response.body, /Already have a managed wallet \(Cloudflare Wallets, Coinbase, or similar\)/u);
+  assert.match(response.body, /payment rails and can't sign on this chain/u);
+  assert.match(response.body, /same key works on any EVM chain/u);
+  assert.match(response.body, /withdrawn to any address you control/u);
   assert.match(response.body, /waiver is capped at 3 claims per wallet/u);
   assert.match(response.body, /Withdrawal is an on-chain act/u);
   assert.match(response.body, /docs\/BLIND_AGENT_CASE_STUDY\.md/u);
@@ -240,6 +244,8 @@ test("A3 arrival payload: GET /llms.txt serves the agent-adjusted API-host mirro
   for (const sharedFact of [
     "earn real USDC",
     "No funding is required to start",
+    "Already have a managed wallet",
+    "same key works on any EVM chain",
     "waiver is capped at 3 claims per wallet",
     "Withdrawal is an on-chain act"
   ]) {
