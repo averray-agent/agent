@@ -556,6 +556,12 @@ export async function createPlatformRuntime() {
   // Watches subscribe before the chain listener starts. A RequestQueued event
   // can therefore never race ahead of its observer baseline during startup.
   xcmBalanceObserver.start();
+  // Multisig-origin revive events are absent from eth_getLogs. Start the
+  // authoritative Asset Hub system.events bridge only after its observer is
+  // subscribed, and keep staging fail-closed until that bridge is live.
+  void bankXcmV22Services.runtime?.start?.().catch((error) => {
+    logger.error?.({ error: error?.message ?? String(error) }, "bank_xcm_v22_runtime.start_failed");
+  });
   void eventListener?.start?.();
   externalPostingWatcher.start();
   xcmObservationRelay.start();

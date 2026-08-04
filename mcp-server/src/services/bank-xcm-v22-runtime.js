@@ -68,6 +68,57 @@ export class BankXcmV22Runtime {
     this.wrapper = wrapperContract ?? new Contract(this.wrapperAddress, XCM_WRAPPER_ABI, gateway.provider);
     this.wrapperInterface = wrapperInterface ?? new Interface(XCM_WRAPPER_ABI);
     this.adapter = adapterContract ?? new Contract(this.adapterAddress, ADAPTER_V22_ABI, gateway.signer);
+    this.substrateEventWatchRunning = false;
+    this.substrateEventIngestionError = undefined;
+    this.substrateEventUnsubscribe = undefined;
+    this.substrateEventTail = Promise.resolve();
+  }
+
+  async start() {
+    if (this.substrateEventWatchRunning) return;
+    if (!this.eventBus?.publish) {
+      this.substrateEventIngestionError = "Bank v2.2 Substrate event watch requires the event bus.";
+      throw new ConfigError(this.substrateEventIngestionError);
+    }
+    try {
+      const api = await this.getAssetHubApi();
+      this.substrateEventUnsubscribe = await api.query.system.events((records) => {
+        this.enqueueSubstrateEvents(api, records);
+      });
+      this.substrateEventWatchRunning = true;
+      this.substrateEventIngestionError = undefined;
+    } catch (error) {
+      this.substrateEventWatchRunning = false;
+      this.substrateEventIngestionError = error?.message ?? String(error);
+      this.logger.error?.(
+        { error: this.substrateEventIngestionError },
+        "bank_xcm_v22_runtime.substrate_event_watch_start_failed"
+      );
+      throw error;
+    }
+  }
+
+  enqueueSubstrateEvents(api, records) {
+    const next = this.substrateEventTail.then(async () => {
+      const blockHash = records?.createdAtHash?.toHex?.();
+      if (!blockHash) {
+        throw new ValidationError("Asset Hub system.events subscription omitted its authoritative block hash.");
+      }
+      const events = await this.readRequestQueuedEventsAtHash(api, blockHash, records);
+      for (const event of events) this.eventBus.publish(event);
+    });
+    this.substrateEventTail = next.catch((error) => {
+      this.substrateEventIngestionError = error?.message ?? String(error);
+      this.logger.error?.(
+        { error: this.substrateEventIngestionError },
+        "bank_xcm_v22_runtime.substrate_event_ingestion_failed"
+      );
+    });
+    return this.substrateEventTail;
+  }
+
+  async flushSubstrateEventIngestion() {
+    await this.substrateEventTail;
   }
 
   createDispatcher() {
@@ -99,10 +150,14 @@ export class BankXcmV22Runtime {
       observerRunning: observer.running === true,
       chainEventWatchEnabled: observer.chainEventWatchEnabled === true,
       chainEventIngestionError: observer.chainEventIngestionError,
+      substrateEventWatchRunning: this.substrateEventWatchRunning,
+      substrateEventIngestionError: this.substrateEventIngestionError,
       readyForStaging: observer.enabled === true
         && observer.running === true
         && observer.chainEventWatchEnabled === true
-        && !observer.chainEventIngestionError,
+        && !observer.chainEventIngestionError
+        && this.substrateEventWatchRunning
+        && !this.substrateEventIngestionError,
     };
   }
 
@@ -332,54 +387,99 @@ export class BankXcmV22Runtime {
 
   /**
    * Standing import for a RequestQueued event missed while the runtime was off.
-   * The event is read from the configured wrapper and the baseline is captured
-   * at an explicit destination-chain block before a watch is persisted.
+   * Multisig-origin revive calls do not surface through eth_getLogs. The event
+   * is therefore read from authoritative Asset Hub system.events, and the
+   * baseline is captured at an explicit destination-chain block before a watch
+   * is persisted.
    */
   async backfillStagedRequestWatch({ requestId, fromBlock, toBlock = undefined } = {}) {
     const normalizedId = normalizeRequestId(requestId);
     const start = positiveBlock(fromBlock, "fromBlock");
+    const api = await this.getAssetHubApi();
     const end = toBlock === undefined
-      ? await this.gateway.provider.getBlockNumber()
+      ? (await api.rpc.chain.getHeader()).number.toNumber()
       : positiveBlock(toBlock, "toBlock");
     if (end < start || end - start > 5_000) {
       throw new ValidationError("Bank watch backfill range must be ordered and no wider than 5,000 blocks.");
     }
-    const logs = await this.wrapper.queryFilter(this.wrapper.filters.RequestQueued(normalizedId), start, end);
-    if (logs.length !== 1) {
-      throw new ValidationError(`Expected exactly one RequestQueued event for ${normalizedId}; found ${logs.length}.`);
+    const matches = [];
+    for (let blockNumber = start; blockNumber <= end; blockNumber += 1) {
+      const blockHash = (await api.rpc.chain.getBlockHash(blockNumber)).toHex();
+      const at = await api.at(blockHash);
+      const records = await at.query.system.events();
+      const events = await this.readRequestQueuedEventsAtHash(api, blockHash, records);
+      matches.push(...events.filter((event) => event.data.requestId === normalizedId));
     }
-    const log = logs[0];
-    const chainBlock = await this.gateway.provider.getBlock(log.blockNumber);
-    const parameters = await this.wrapper.getRequestParameters(normalizedId, { blockTag: log.blockNumber });
+    if (matches.length !== 1) {
+      throw new ValidationError(`Expected exactly one RequestQueued event for ${normalizedId}; found ${matches.length}.`);
+    }
+    const event = matches[0];
     const baseline = await this.readStampedBalance(
-      Number(log.args.kind) === 0 ? this.positionTarget : this.withdrawTarget()
+      Number(event.data.kind) === 0 ? this.positionTarget : this.withdrawTarget()
     );
-    const event = {
-      id: `xcm.request_queued-backfill-${log.transactionHash}-${log.index}`,
-      topic: "xcm.request_queued",
-      timestamp: new Date(Number(chainBlock.timestamp) * 1_000).toISOString(),
-      txHash: log.transactionHash,
-      blockNumber: log.blockNumber,
-      data: {
-        requestId: normalizedId,
-        wrapperAddress: this.wrapperAddress,
-        strategyId: log.args.strategyId,
-        kind: Number(log.args.kind),
-        account: log.args.account,
-        asset: log.args.asset,
-        recipient: log.args.recipient,
-        assetsRaw: log.args.assets.toString(),
-        sharesRaw: log.args.shares.toString(),
-        nonceRaw: log.args.nonce.toString(),
-        dispatchDeadlineRaw: parameters.dispatchDeadline.toString(),
-      },
-    };
     return this.balanceObserver.registerBackfillFromChainEvent(event, {
       raw: baseline.raw,
       asOf: baseline.asOf,
       blockNumber: baseline.blockNumber,
       blockHash: baseline.blockHash,
     });
+  }
+
+  async readRequestQueuedEventsAtHash(api, blockHash, records = undefined) {
+    const at = await api.at(blockHash);
+    const [header, signedBlock, timestamp, eventRecords] = await Promise.all([
+      api.rpc.chain.getHeader(blockHash),
+      api.rpc.chain.getBlock(blockHash),
+      at.query.timestamp.now(),
+      records === undefined ? at.query.system.events() : records,
+    ]);
+    const decoded = decodeWrapperReviveEvents(
+      eventRecords,
+      this.wrapperAddress,
+      this.wrapperInterface
+    );
+    const parametersByRequest = new Map(
+      decoded
+        .filter((entry) => entry.name === "RequestParametersStored")
+        .map((entry) => [entry.args.requestId.toLowerCase(), entry])
+    );
+    const blockNumber = header.number.toNumber();
+    const timestampIso = new Date(timestampSeconds(timestamp) * 1_000).toISOString();
+    return decoded
+      .filter((entry) => entry.name === "RequestQueued")
+      .map((entry) => {
+        const requestId = entry.args.requestId.toLowerCase();
+        const parameters = parametersByRequest.get(requestId);
+        if (!parameters || parameters.extrinsicIndex !== entry.extrinsicIndex) {
+          throw new ValidationError(
+            `RequestQueued ${requestId} has no same-extrinsic RequestParametersStored evidence.`
+          );
+        }
+        const extrinsic = signedBlock.block.extrinsics[entry.extrinsicIndex];
+        if (!extrinsic?.hash?.toHex) {
+          throw new ValidationError(`RequestQueued ${requestId} has no authoritative extrinsic hash.`);
+        }
+        return {
+          id: `xcm.request_queued-substrate-${blockHash}-${entry.eventIndex}`,
+          topic: "xcm.request_queued",
+          timestamp: timestampIso,
+          txHash: extrinsic.hash.toHex(),
+          blockNumber,
+          data: {
+            requestId,
+            wrapperAddress: this.wrapperAddress,
+            strategyId: entry.args.strategyId,
+            kind: Number(entry.args.kind),
+            account: entry.args.account,
+            asset: entry.args.asset,
+            recipient: entry.args.recipient,
+            assetsRaw: entry.args.assets.toString(),
+            sharesRaw: entry.args.shares.toString(),
+            nonceRaw: entry.args.nonce.toString(),
+            dispatchDeadlineRaw: parameters.args.dispatchDeadline.toString(),
+          },
+        };
+      });
   }
 
   async previewLeg(requestId, leg, feeAmount) {
@@ -524,6 +624,36 @@ function sameAddress(left, right) {
   } catch {
     return false;
   }
+}
+
+function decodeWrapperReviveEvents(records, wrapperAddress, wrapperInterface) {
+  const decoded = [];
+  for (const [eventIndex, record] of [...records].entries()) {
+    if (String(record?.event?.section) !== "revive"
+      || String(record?.event?.method) !== "ContractEmitted"
+      || record?.phase?.isApplyExtrinsic !== true) continue;
+    const [contract, data, topics] = record.event.data;
+    if (!sameAddress(contract?.toString?.(), wrapperAddress)) continue;
+    let parsed;
+    try {
+      parsed = wrapperInterface.parseLog({
+        data: data?.toHex?.() ?? String(data),
+        topics: [...topics].map((topic) => topic?.toHex?.() ?? String(topic)),
+      });
+    } catch {
+      // The wrapper emits events outside the Bank request lifecycle. Unknown
+      // topics are not watch evidence and must not poison the subscription.
+      continue;
+    }
+    if (!parsed || (parsed.name !== "RequestQueued" && parsed.name !== "RequestParametersStored")) continue;
+    decoded.push({
+      name: parsed.name,
+      args: parsed.args,
+      eventIndex,
+      extrinsicIndex: Number(record.phase.asApplyExtrinsic.toString()),
+    });
+  }
+  return decoded;
 }
 
 function siblingOrigin(paraId) {
