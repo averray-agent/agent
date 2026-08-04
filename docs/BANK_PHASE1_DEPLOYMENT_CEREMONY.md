@@ -416,6 +416,129 @@ delta, request/hash mismatch, custody mismatch, timeout/stuck Pending, unexpecte
 runtime metadata, or a recovery obligation. Do not alter payloads, redirect a
 beneficiary, retry with a new nonce, front funds from an EOA, or increase the cap.
 
+### 2026-08-04 v2.1 `deposit_sell` empirical record
+
+The first EVM-path XCM dispatch established that `ReviveApi_call` weight and
+EVM gas are separate gates. The original review ceiling
+`10,000,000,000 / 500,000` was itself too low. A read-only retry at
+`100,000,000,000 / 3,000,000` measured `11,728,066,855 / 285,862`; the
+measured-times-two envelope `23,456,133,710 / 571,724` passed again. Storage
+required was `79,200,000`, with `1,000,000,000` allowed. Asset Hub remained at
+`specVersion=2003002`, matching the earlier fork capture.
+
+For the exact transaction, `eth_estimateGas` returned `17,958`; the dispatched
+limit was `36,000`, and receipt `0x64f649b85de6c92e1e222f352552bca827b9fcdd34e30e02518fa0ed456a1081`
+used `17,885` gas at block `19,046,778`. At 800 Gwei, the operator paid
+`0.014308 DOT`. The wrapper bitmap advanced from funding-only (`1`) to both
+deposit legs dispatched (`3`).
+
+The destination execution did **not** pass the dust-cycle gate. Hydration block
+`13,456,243` emitted `messageQueue.Processed` for request
+`0xb609f4d875e0c6f4f4b1dddd90efd687215d1ac9ecd90d0de51b9304f57ecaac`
+with `success=false`, plus `polkadotXcm.AssetsTrapped` for `17,932` raw asset 22.
+No `Broadcast.Swapped{AAVE}` occurred and aUSDC remained zero. Asset 22 moved
+from `149,475` to `131,543` raw. The observer created no request watch and no
+calibration record. The ceremony stopped without a retry or a following leg;
+do not treat the successful Asset Hub receipt as a successful Bank deposit.
+
+The failure is consistent with a perished `BuyExecution` quote: the encoded
+`17,932`-raw quote was about 3.5 hours old by destination execution. Hydration
+used only `300,000,000 / 0`, trapped the full fee asset, and consumed zero of
+that asset as execution fees. Fee quotes are therefore dispatch-time inputs,
+not durable ceremony artifacts. For every remote leg, rebuild the exact
+message with `fresh quote × 2` immediately before the wrapper preflight and
+broadcast; the message tail returns surplus. Never dispatch from an old
+otherwise-green dry-run bundle.
+
+Observer registration is also a pre-broadcast invariant, including manual
+ceremony sends while `BANK_XCM_FLOW_ENABLED=false`. Persist the balance watch,
+verify it appears in `/monitor/bank-feed`, and only then permit signing. The
+missing watch for this request was backfilled with baseline `0`, the real
+dispatch timestamp, and phase `leg2-dispatched`; it now ages in the board's
+request table.
+
+Trapped-asset claim ticket (write-off #3 for now):
+
+- trap hash: `0x430cf4ce3b1ad751b3e66ed76c48a9a421518219f99e7d0ef9507f718daf5e21`;
+- Hydration block: `13,456,243`;
+- descended origin: `parents=1`, `Parachain(1000)`,
+  `AccountId32(0x2af394fa95f75d3ca1c786128f4dfa1eb0c9675deeeeeeeeeeeeeeeeeeeeeeee)`;
+- exact V5 asset: `parents=1`, `Parachain(1000)`, `PalletInstance(50)`,
+  `GeneralIndex(1337)`, fungible amount `17,932`;
+- disposition: claimable later only if a narrowly reviewed claim shape earns
+  inclusion; no improvised claim transaction belongs in this ceremony.
+
+The deployed wrapper cannot retry this sell with changed fee bytes. The
+already-dispatched leg accepts only its recorded message hash; changed bytes
+revert `PayloadMismatch`, while identical bytes return the request id without
+sending again. A new deposit request requires a new local funding leg. This is
+a structural fee-at-staging defect: the exact payload is pinned before the fee
+quote's lifetime is known, but the only safe retry needs different fee bytes.
+Before any real-money epoch, v2.2 must either parameterize the execution fee at
+dispatch while retaining the request-bound structural payload, or enforce an
+on-chain staging deadline after which dispatch is impossible. An off-chain
+stage-to-dispatch convention alone is not a sufficient real-money control.
+
+The v2.1 request was terminalized under the operator-approved presentation
+exception in transaction
+`0xc34167372042061433713b7caab8e04986391857357b5726e55d4ca0e1a97ba1`
+(Asset Hub block `19,048,419`). The adapter and wrapper both record
+`Failed(3)`, settled assets/shares are `0/0`, and no value moved during
+terminalization. On `settleRequest(Failed, 0, 0, ...)`, the deployed adapter
+unconditionally records
+`recoveryAssetsOutstanding = request.requestedAssets`, which is `150,000` for
+this request. That raw slot is a **v2.1 accounting artifact,
+known-unrecoverable**. It is never a receivable and must not be used by a feed,
+board, ledger, or operator decision. The complete recoverable-value
+reconciliation is:
+
+- staged principal: `150,000` raw;
+- leg-1 reserve-transfer fee: `525` raw;
+- trapped fee asset, write-off #3: `17,932` raw;
+- chain-observed recoverable balance: `131,543` raw;
+- unexplained remainder: `150,000 - 525 - 17,932 - 131,543 = 0`.
+
+Presenting `150,000` as recoverable would create a fictitious `18,457` raw
+receivable. The v2.1 exception therefore binds presentation to the five lines
+above while allowing the partial release path to return the balance the chain
+can actually produce. v2.2 requirement #2 remains mandatory before real
+capital: terminalization must bind the recovery-required amount to a fresh,
+observer-proven remote balance (capped by staged principal) and record named
+loss lines on-chain instead of leaving a misleading storage residue.
+
+The post-terminalization recovery packet re-read `131,543` raw at Hydration
+block `13,456,840`. With nonce `1` and a fresh remote Asset Hub execution quote
+of `696` raw multiplied by two, the embedded fee is `1,392` raw. Hydration
+forwarded to para 1000 and the Asset Hub DryRunApi deposited `130,306` raw asset
+1337 to wrapper image
+`0x2af394fa95f75d3ca1c786128f4dfa1eb0c9675deeeeeeeeeeeeeeeeeeeeeeee`.
+The exact recovery id is
+`0xc17e25a02084d4edb8b0ff0f1e03a85e96163b8a6a4a8f2f7b531c79e28171d1`
+and message hash is
+`0xc92c981487d8b473a60aa91f60c3f6ef8f1823ee8a6f951e5ea7f3979790f743`.
+The exact two-call owner batch first pauses dispatch and then sends this
+request-associated recovery; its inner-call hash is
+`0x57815dc29457ccd1e9385d117cc28416096dc74919c88125e9b37da66617dd87`.
+It passed an exact-batch Asset Hub DryRunApi simulation and forwarded to
+Hydration. These bytes remain unsigned review material until the ceremony gate
+passes.
+
+After the message lands, read the **actual** Asset Hub wrapper-image delta.
+Only then emit the separately approved release calls
+`releaseRecoveredAssetsToAdapter(requestId, actualArrivedRaw)` and
+`releaseRecoveredAssets(requestId, treasury, actualArrivedRaw)`. The current
+dry-run projects `130,306` returned and a `19,694` raw v2.1 slot residue; both
+are projections, while the observed arrival is authoritative. Whatever residue
+remains is labeled `v2.1 accounting artifact, known-unrecoverable`, never an
+asset or receivable.
+
+Unpause plus fresh staging is a separate approval item. The next dust request
+must start from zero unexplained remote capital. Quote the `DepositSell`
+`BuyExecution` fee immediately before staging, embed `fresh quote × 2`, register
+and verify the observer watch before any signature, and keep staging → deployed-
+wrapper preflight → dispatch inside one tight operator window. A fee change or
+deadline breach cancels the attempt; it never causes an old payload to be sent.
+
 ## Handback checklist
 
 - two deployment receipts and paused-state/immutable reads;

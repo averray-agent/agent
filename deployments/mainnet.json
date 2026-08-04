@@ -201,12 +201,53 @@
       }
     ],
     "dustCycleEvidence": {
-      "status": "in_progress",
+      "status": "recovery_pending_ceremony_gate",
       "depositRequestId": "0xb609f4d875e0c6f4f4b1dddd90efd687215d1ac9ecd90d0de51b9304f57ecaac",
       "stageTreasuryDeposit": {
         "innerCallHash": "0x15d014b65260962a195b7513cee0d29953ea5167efa67041d5846d16af21e7a1",
         "multisigTimepoint": "19041165-3",
         "remoteAsset22Raw": "149475"
+      },
+      "depositSellFailure": {
+        "code": "XCM_TOO_EXPENSIVE_STALE_FEE",
+        "terminalizationTx": "0xc34167372042061433713b7caab8e04986391857357b5726e55d4ca0e1a97ba1",
+        "terminalizationBlock": 19048419,
+        "status": "Failed(3)",
+        "settledAssetsRaw": "0",
+        "settledSharesRaw": "0"
+      },
+      "reconciliation": {
+        "stagedRaw": "150000",
+        "leg1TransferFeeRaw": "525",
+        "trappedWriteOff3Raw": "17932",
+        "remoteRecoverableRaw": "131543",
+        "unexplainedRaw": "0",
+        "rawRecoveryAssetsOutstandingRaw": "150000",
+        "rawRecoverySlotDisposition": "v2.1 accounting artifact, known-unrecoverable; never present as a receivable",
+        "projectedRecoveryReturnRaw": "130306",
+        "projectedReturnFeeRaw": "1237",
+        "projectedPostReleaseResidueRaw": "19694",
+        "projectedResidueDisposition": "v2.1 accounting artifact, known-unrecoverable; actual arrival controls the release"
+      },
+      "writeOffs": [
+        {
+          "number": 3,
+          "kind": "xcm_trapped_fee_asset",
+          "amountRaw": "17932",
+          "trapHash": "0x430cf4ce3b1ad751b3e66ed76c48a9a421518219f99e7d0ef9507f718daf5e21",
+          "hydrationBlock": 13456243,
+          "disposition": "written_off_claimable_only_via_future_reviewed_shape"
+        }
+      ],
+      "recoveryPacket": {
+        "artifact": "docs/evidence/mainnet-bank-xcm-v21-pause-recovery-packet-2026-08-04.json",
+        "status": "unsigned_pending_gate",
+        "freshRemoteBalanceRaw": "131543",
+        "baseFeeRaw": "696",
+        "embeddedFeeRaw": "1392",
+        "nonce": "1",
+        "messageHash": "0xc92c981487d8b473a60aa91f60c3f6ef8f1823ee8a6f951e5ea7f3979790f743",
+        "innerCallHash": "0x57815dc29457ccd1e9385d117cc28416096dc74919c88125e9b37da66617dd87"
       }
     }
   },

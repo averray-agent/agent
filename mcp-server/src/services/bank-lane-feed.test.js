@@ -86,7 +86,8 @@ test("Bank feed preserves raw decimal strings and each source's completion clock
     kind: "deposit",
     phase: "recovery-pending",
     ageSeconds: 125,
-    overdue: true
+    overdue: true,
+    status: "pending"
   }]);
   assert.equal(feed.requests.readAtMs, BASE);
   assert.equal(feed.requests.lastError, null);
@@ -180,6 +181,51 @@ test("request snapshot never silently truncates the pending table", async () => 
 
   assert.equal(feed.requests.items.length, 125);
   assert.equal(feed.requests.lastError, null);
+});
+
+test("terminal request exposes the honest reconciliation without presenting the v2.1 raw slot as a receivable", async () => {
+  const store = new MemoryStateStore();
+  const requestId = `0x${"42".repeat(32)}`;
+  await store.upsertXcmBalanceWatch({
+    requestId,
+    status: "failed",
+    kind: "deposit",
+    phase: "terminal",
+    startedAt: new Date(BASE - 30 * 60_000).toISOString(),
+    deadlineAt: new Date(BASE - 15 * 60_000).toISOString(),
+    completedAt: new Date(BASE - 5 * 60_000).toISOString(),
+    reconciliation: {
+      stagedRaw: "150000",
+      leg1TransferFeeRaw: "525",
+      trappedWriteOff3Raw: "17932",
+      remoteRecoverableRaw: "131543",
+      unexplainedRaw: "0",
+      artifactLabel: "v2.1 accounting artifact, known-unrecoverable",
+      rawRecoveryAssetsOutstandingRaw: "150000"
+    }
+  });
+
+  const feed = await service(store, {
+    async read(target) { return { raw: "0", asOf: BASE, target }; }
+  }).pollOnce();
+
+  assert.deepEqual(feed.requests.items, [{
+    id: requestId,
+    kind: "deposit",
+    phase: "terminal",
+    ageSeconds: 1800,
+    overdue: false,
+    status: "failed",
+    reconciliation: {
+      stagedRaw: "150000",
+      leg1TransferFeeRaw: "525",
+      trappedWriteOff3Raw: "17932",
+      remoteRecoverableRaw: "131543",
+      unexplainedRaw: "0",
+      artifactLabel: "v2.1 accounting artifact, known-unrecoverable"
+    }
+  }]);
+  assert.equal("rawRecoveryAssetsOutstandingRaw" in feed.requests.items[0].reconciliation, false);
 });
 
 test("request snapshot excludes the retired v2.0 venue target without hiding unknown work", async () => {
