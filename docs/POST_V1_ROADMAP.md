@@ -131,11 +131,23 @@ What makes it infrastructure, not a product page.
 
 | State | Item | Owner |
 |---|---|---|
-| live | `.well-known/agent-tools.json` manifest + directory-safe API mirror; MCP + HTTP advertised; discovery registry | — |
+| live | `.well-known/agent-tools.json` manifest + directory-safe API mirror; HTTP advertised; MCP withheld until its endpoint, auth, and docs are live | — |
 | next | **MCP registry listing** — Anthropic's MCP directory + community catalogues; where agents go when told "find a job platform" | Pascal + Codex |
 | next | Public `/tools` page — human-browsable "here's what agents can do" for operators evaluating integration | Codex |
 | next | Agent-profile resolution quality + more builder examples | Codex |
 | gated | A2A protocol endpoint — not re-added to public discovery until endpoint + auth + docs all exist | later |
+
+---
+
+## MCP track — SOON
+
+This is the next build slot after the v2.2 dust ladder closes. It must not preempt
+G3 or G4, but once that ladder is closed, nothing else waits ahead of it.
+
+| Gate | Item |
+|---|---|
+| immediately after v2.2 G3/G4 | **Front door: agent-facing MCP endpoint on the 2026-07-28 stateless spec** — the flagship discovery item exposes the public read surface and SIWE-gated worker actions as MCP tools over streamable HTTP. It is stateless, uses JWT bearer auth, and makes listings `ttlMs`-cacheable. The manifest re-adds `mcp` only at go-live. |
+| client-paced compatibility window | **Upgrade existing MCP surfaces to 2026-07-28** — upgrade `packages/averray-mcp` (operator/Hermes tools) and every other MCP server Averray runs. The operator-side upgrade lands when Hermes's client can speak the 2026-07-28 spec; until then, make the server dual-version-tolerant. |
 
 ---
 
