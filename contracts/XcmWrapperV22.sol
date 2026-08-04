@@ -37,7 +37,6 @@ contract XcmWrapperV22 is IXcmWrapperV22, ReentrancyGuard {
     mapping(bytes32 => address) public strategyAdapter;
     mapping(bytes32 => IXcmWrapper.RequestRecord) internal requests;
     mapping(bytes32 => RequestParameters) internal requestParameters;
-    mapping(bytes32 => address) public requestOperator;
     mapping(bytes32 => address) public requestAdapter;
     mapping(bytes32 => uint8) public requestDispatchBitmap;
     mapping(bytes32 => uint256) public requestRecoveryReleased;
@@ -206,7 +205,6 @@ contract XcmWrapperV22 is IXcmWrapperV22, ReentrancyGuard {
             updatedAt: uint64(block.timestamp)
         });
         requestParameters[requestId] = parameters;
-        requestOperator[requestId] = operator;
         requestAdapter[requestId] = adapter;
 
         emit RequestQueued(
@@ -237,7 +235,9 @@ contract XcmWrapperV22 is IXcmWrapperV22, ReentrancyGuard {
     {
         IXcmWrapper.RequestRecord storage record = requests[requestId];
         if (record.context.account == address(0)) revert UnknownRequest();
-        if (msg.sender != requestOperator[requestId]) revert Unauthorized();
+        // Authorization follows the live configured operator so rotating a key
+        // revokes its access to every pending request immediately.
+        if (msg.sender != operator) revert Unauthorized();
         _validateLeg(record.context.kind, leg);
 
         uint8 legIndex = uint8(leg);
@@ -448,14 +448,15 @@ contract XcmWrapperV22 is IXcmWrapperV22, ReentrancyGuard {
             message = _buildSell(false, feeAmount, parameters.sellAmount, parameters.minimumOutput, requestId);
             return (destination, message, maxWeight);
         }
-        if (feeAmount != 0) revert FeeAboveMaximum();
         if (leg == DispatchLeg.WithdrawSell) {
-            // The staged ceiling is the complete remote asset-22 operating
-            // float offered to BuyExecution; surplus is deposited back.
-            message =
-                _buildSell(true, parameters.maxFeePerLeg, parameters.sellAmount, parameters.minimumOutput, requestId);
+            // The complete remote asset-22 operating float is only knowable at
+            // dispatch. The operator supplies that fresh reading within the
+            // multisig-staged ceiling; every surplus is deposited back.
+            if (feeAmount == 0 || feeAmount > parameters.maxFeePerLeg) revert FeeAboveMaximum();
+            message = _buildSell(true, feeAmount, parameters.sellAmount, parameters.minimumOutput, requestId);
             return (destination, message, maxWeight);
         }
+        if (feeAmount != 0) revert FeeAboveMaximum();
         // The complete expected return is both the reserve-withdraw amount
         // and nested BuyExecution budget; the tail deposits every surplus.
         message = _buildHome(parameters.minimumOutput, parameters.minimumOutput, requestId);

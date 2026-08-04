@@ -21,9 +21,8 @@ interface IXcmWrapperV22 {
         uint256 sellAmount;
         /// @dev Router minimum output and the request-bound amount returned home.
         uint256 minimumOutput;
-        /// @dev DepositSell dispatch-time cap. On Withdraw this is the staged
-        ///      complete remote asset-22 operating float used as BuyExecution
-        ///      budget; every surplus is deposited back to the converted account.
+        /// @dev Upper bound on the fresh dispatch-time asset-22 budget supplied
+        ///      to DepositSell or WithdrawSell. WithdrawHome is self-budgeting.
         uint256 maxFeePerLeg;
         /// @dev Zero disables the deadline. A non-zero deadline blocks only
         ///      undispatched request legs, never terminalization or recovery.

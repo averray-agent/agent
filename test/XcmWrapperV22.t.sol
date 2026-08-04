@@ -302,10 +302,10 @@ contract XcmWrapperV22Test is XcmWrapperV22Fixture {
         );
 
         bytes32 withdrawId = _stageWithdraw(2, 100_000, 90_000, 28_000, 0);
-        (destination, message,) = wrapper.previewLegMessage(withdrawId, IXcmWrapperV22.DispatchLeg.WithdrawSell, 0);
+        (destination, message,) = wrapper.previewLegMessage(withdrawId, IXcmWrapperV22.DispatchLeg.WithdrawSell, 27_500);
         assertEq(destination, HYDRATION_DESTINATION);
-        assertEq(message, _sellMessage(true, 28_000, 100_000, 90_000, withdrawId));
-        _dispatch(withdrawId, IXcmWrapperV22.DispatchLeg.WithdrawSell, 0);
+        assertEq(message, _sellMessage(true, 27_500, 100_000, 90_000, withdrawId));
+        _dispatch(withdrawId, IXcmWrapperV22.DispatchLeg.WithdrawSell, 27_500);
 
         (destination, message,) = wrapper.previewLegMessage(withdrawId, IXcmWrapperV22.DispatchLeg.WithdrawHome, 0);
         assertEq(destination, HYDRATION_DESTINATION);
@@ -326,15 +326,29 @@ contract XcmWrapperV22Test is XcmWrapperV22Fixture {
         assertEq(adapter.totalShares(), 0);
     }
 
-    function testFullBalanceWithdrawLegsRejectOperatorFeeArgument() public {
+    function testWithdrawSellZeroFeeReverts() public {
         _seedShares(12);
         bytes32 requestId = _stageWithdraw(13, 100_000, 95_000, 25_000, 0);
 
         vm.prank(OPERATOR);
         vmx.expectRevert(XcmWrapperV22.FeeAboveMaximum.selector);
-        wrapper.dispatchLeg(requestId, IXcmWrapperV22.DispatchLeg.WithdrawSell, 1);
+        wrapper.dispatchLeg(requestId, IXcmWrapperV22.DispatchLeg.WithdrawSell, 0);
+    }
 
-        _dispatch(requestId, IXcmWrapperV22.DispatchLeg.WithdrawSell, 0);
+    function testWithdrawSellFeeAboveStagedMaximumReverts() public {
+        _seedShares(14);
+        bytes32 requestId = _stageWithdraw(15, 100_000, 95_000, 25_000, 0);
+
+        vm.prank(OPERATOR);
+        vmx.expectRevert(XcmWrapperV22.FeeAboveMaximum.selector);
+        wrapper.dispatchLeg(requestId, IXcmWrapperV22.DispatchLeg.WithdrawSell, 25_001);
+    }
+
+    function testWithdrawHomeRejectsOperatorFeeArgument() public {
+        _seedShares(16);
+        bytes32 requestId = _stageWithdraw(17, 100_000, 95_000, 25_000, 0);
+
+        _dispatch(requestId, IXcmWrapperV22.DispatchLeg.WithdrawSell, 24_000);
         vm.prank(OPERATOR);
         vmx.expectRevert(XcmWrapperV22.FeeAboveMaximum.selector);
         wrapper.dispatchLeg(requestId, IXcmWrapperV22.DispatchLeg.WithdrawHome, 1);
@@ -356,6 +370,25 @@ contract XcmWrapperV22Test is XcmWrapperV22Fixture {
         vmx.expectRevert(XcmWrapperV22.Unauthorized.selector);
         wrapper.dispatchLeg(requestId, IXcmWrapperV22.DispatchLeg.DepositFunding, 0);
         assertEq(precompile.executeCount(), 0);
+    }
+
+    function testOperatorRotationImmediatelyRevokesPendingRequestAccess() public {
+        bytes32 requestId = _stageDeposit(40, 150_000, 100_000, 95_000, 30_000, 0);
+
+        vm.prank(TREASURY);
+        wrapper.setDispatchPaused(true);
+        vm.prank(TREASURY);
+        wrapper.setOperator(OTHER);
+        vm.prank(TREASURY);
+        wrapper.setDispatchPaused(false);
+
+        vm.prank(OPERATOR);
+        vmx.expectRevert(XcmWrapperV22.Unauthorized.selector);
+        wrapper.dispatchLeg(requestId, IXcmWrapperV22.DispatchLeg.DepositFunding, 0);
+
+        vm.prank(OTHER);
+        wrapper.dispatchLeg(requestId, IXcmWrapperV22.DispatchLeg.DepositFunding, 0);
+        assertEq(precompile.executeCount(), 1);
     }
 
     function testLegReplayIsIdempotentAndDoesNotReprice() public {
@@ -537,7 +570,7 @@ contract HydrationUsdcAdapterV22TerminalTest is XcmWrapperV22Fixture {
     function testTerminalAccountingAlsoCapsFailedWithdraw() public {
         _seedShares(30);
         bytes32 requestId = _stageWithdraw(31, 100_000, 95_000, 25_000, 0);
-        _dispatch(requestId, IXcmWrapperV22.DispatchLeg.WithdrawSell, 0);
+        _dispatch(requestId, IXcmWrapperV22.DispatchLeg.WithdrawSell, 24_000);
         vm.prank(OPERATOR);
         adapter.settleRequest(
             requestId, IXcmWrapper.RequestStatus.Failed, 0, 0, 120_000, bytes32("REMOTE_READ"), bytes32("HOME_FAILED")
