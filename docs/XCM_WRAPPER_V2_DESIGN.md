@@ -50,7 +50,7 @@ inside the deployed wrapper with `XcmPrecompileUnavailable()` (`0x820c74ed`):
 Asset Hub's XCM precompile returned `0/0` when asked to weigh a Hydration
 `Transact` message. No sell signature was submitted. An earlier identity-split
 rehearsal balance of 100,000 raw remains at
-`0x089a0a57d001bacb8473161e007f0babc1768ceeeeeeeeeeeeeeeeeeeeeeeeeeee`.
+`0x089a0a57d001bacb8473161e007f0babc1768ceeeeeeeeeeeeeeeeeeeeeeeeee`.
 Pascal explicitly wrote off both balances; neither may be relabelled as strategy
 assets, operating float, or recoverable principal.
 

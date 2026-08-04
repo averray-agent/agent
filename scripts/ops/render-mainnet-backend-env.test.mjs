@@ -164,6 +164,21 @@ test("buildManifestOverrides: fails closed on incomplete runtime metadata", () =
   );
 });
 
+test("buildManifestOverrides: rejects malformed AccountId32 values anywhere in deployment history", () => {
+  const malformed = `0x${"aa".repeat(33)}`;
+  const historyShapes = [
+    { convertedAccountId32: malformed },
+    { incident: { writeOffs: [{ accountId32: malformed }] } },
+    { retiredCapital: [{ accountId32: malformed }] },
+  ];
+  for (const history of historyShapes) {
+    assert.throws(
+      () => buildManifestOverrides({ ...MANIFEST, bankXcmDeploymentHistory: [history] }),
+      /bankXcmDeploymentHistory\[0\].*must be a 32-byte AccountId/u
+    );
+  }
+});
+
 test("transformLine: op:// values are repointed; kept keys stay literal", () => {
   assert.equal(
     transformLine("METRICS_BEARER_TOKEN=op://prod-backend/metrics-bearer-token/password"),

@@ -166,6 +166,23 @@ function wrapperAssetHubImage(wrapperAddress) {
   return `0x${wrapperAddress.slice(2).toLowerCase()}${"ee".repeat(12)}`;
 }
 
+/** Fail closed on every current or historical AccountId32-shaped manifest field. */
+export function validateManifestAccountId32Fields(value, path = "deployments/mainnet.json") {
+  if (Array.isArray(value)) {
+    value.forEach((entry, index) => validateManifestAccountId32Fields(entry, `${path}[${index}]`));
+    return;
+  }
+  if (value === null || typeof value !== "object") return;
+  for (const [key, entry] of Object.entries(value)) {
+    const entryPath = `${path}.${key}`;
+    if (/accountId32$/iu.test(key)) {
+      requireAccountId32(entry, entryPath.replace(/^deployments\/mainnet\.json\./u, ""));
+    } else {
+      validateManifestAccountId32Fields(entry, entryPath);
+    }
+  }
+}
+
 function requireBlock(value, label) {
   if (!Number.isSafeInteger(value) || value <= 0) {
     throw new Error(`deployments/mainnet.json: ${label} must be a positive integer block number`);
@@ -185,6 +202,7 @@ export function buildManifestOverrides(manifest) {
   if (!manifest || manifest.profile !== "mainnet") {
     throw new Error("deployments/mainnet.json: profile must be mainnet");
   }
+  validateManifestAccountId32Fields(manifest);
 
   const contracts = manifest.contracts ?? {};
   const bankDeployment = manifest.bankXcmV2Deployment ?? {};

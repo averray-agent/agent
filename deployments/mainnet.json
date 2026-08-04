@@ -238,7 +238,7 @@
             "reason": "v2.0 deposit funding landed but the Hydration Transact send leg was structurally blocked"
           },
           {
-            "accountId32": "0x089a0a57d001bacb8473161e007f0babc1768ceeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "accountId32": "0x089a0a57d001bacb8473161e007f0babc1768ceeeeeeeeeeeeeeeeeeeeeeeeee",
             "assetId": 22,
             "raw": "100000",
             "reason": "pre-wrapper identity-split rehearsal balance was not controllable by the converted origin"
@@ -253,7 +253,7 @@
           "reason": "v2.0 deposit funding landed but the Hydration Transact send leg was structurally blocked"
         },
         {
-          "accountId32": "0x089a0a57d001bacb8473161e007f0babc1768ceeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "accountId32": "0x089a0a57d001bacb8473161e007f0babc1768ceeeeeeeeeeeeeeeeeeeeeeeeee",
           "assetId": 22,
           "raw": "100000",
           "reason": "pre-wrapper identity-split rehearsal balance was not controllable by the converted origin"
