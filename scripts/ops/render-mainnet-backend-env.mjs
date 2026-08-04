@@ -25,7 +25,11 @@
  *   • per-deploy values → deployments/mainnet.json: contract addresses, auth
  *     allowlists, Ponder start blocks, treasury reserve, and the DB schema
  *   • FAIL CLOSED if the manifest is absent or any required runtime value is invalid
- *   • launch posture: INGESTION_PREFUND_ENABLED=false, USDC_LIQUIDITY_CHAIN=mainnet
+ *   • launch posture: INGESTION_PREFUND_ENABLED=false, USDC_LIQUIDITY_CHAIN=mainnet,
+ *     BANK_LANE_FEED_ENABLED=true (mainnet-only; the testnet template has no
+ *     Hydration position to read, so its targets stay blank and the flag off)
+ *   • Bank lane observer targets are mainnet literals here, NOT hand-edits to the
+ *     generated file — see the block in LITERAL_OVERRIDES for why
  *   • KEEP: SIGNER_BACKEND=kms, JWT_BACKEND=kms, TOKEN_ADDRESS (USDC precompile),
  *     SUPPORTED_ASSETS_JSON, JWT_MAX_TTL_SECONDS (⚠ DEC-4 must drop to <=1h before launch)
  *
@@ -78,6 +82,45 @@ export const LITERAL_OVERRIDES = {
   REDIS_URL: "redis://mainnet-redis:6379",
   REDIS_NAMESPACE: "agent-platform-mainnet",
   INDEXER_STATUS_URL: "http://mainnet-indexer:42069/status",
+
+  // ── BANK LANE OBSERVER FEED ─────────────────────────────────────────────
+  //
+  // These seven arrived by HAND-EDITING deploy/backend.mainnet.env.template,
+  // which its own header forbids, and `--check` has been failing ever since.
+  // Nothing caught it: no CI job runs the check the header promises, and
+  // check-generated-output-clean.mjs only guards frontend/ and site/.
+  //
+  // The cost of leaving them there was not cosmetic. Regenerating this file —
+  // exactly what the header tells the next person to do — blanked all six
+  // targets while leaving the feature switched ON, which means every read
+  // fails and the ops board draws four "unreadable" rows on a money panel.
+  // A config regeneration nobody would connect to the symptom.
+  //
+  // They are mainnet-only by nature: the testnet deployment has no Hydration
+  // position, and its template keeps them blank with the flag off. That is
+  // precisely what this table is for.
+  //
+  // Judgement call worth flagging in review: the two account addresses could
+  // instead live in deployments/mainnet.json alongside the other per-deploy
+  // values. They sit here because the other five are external protocol and
+  // infrastructure constants — Hydration's own token and public endpoints,
+  // not outputs of our deploy ceremony — and splitting the group across two
+  // mechanisms is how half of it goes stale again.
+  BANK_LANE_FEED_ENABLED: "true",
+  // The converted account, verified by independent base58 + blake2b decode
+  // against the 0xEE-padded EVM mapping — not copied from a dashboard.
+  BANK_LANE_FEED_HYDRATION_ACCOUNT_ID32: "14TXaUTyTRiZKGG1zGrzzfc7oUGq2pcEGKNoWXLtJL5TTJbZ",
+  BANK_LANE_FEED_HYDRATION_EVM_RPC_URL: "https://rpc.hydradx.cloud",
+  // aUSDC on Hydration's EVM ledger. The position is balanceOf() here, NOT
+  // Tokens.accounts(…, 1003): AssetRegistry reports 1003 as assetType "Erc20",
+  // so the Substrate read is zero by design and would render as an empty
+  // position rather than an unread one.
+  BANK_LANE_FEED_AUSDC_CONTRACT: "0x2ec4884088d84e5c2970a034732e5209b0acfa93",
+  BANK_LANE_FEED_HYDRATION_SUBSTRATE_RPC_URL: "wss://hydration-rpc.n.dwellir.com",
+  BANK_LANE_FEED_POSTAGE_SUBSTRATE_RPC_URL: "wss://polkadot-asset-hub-rpc.polkadot.io",
+  // Committed postage: DOT that can only ever be spent as XCM delivery fees,
+  // with no withdraw path. Watched so it cannot silently fall under its floor.
+  BANK_LANE_FEED_POSTAGE_ACCOUNT: "15XbeapZyWWEZdDCLpxzNhryKj2MsE8rnFUW9cPydXfgSMAK",
 };
 
 // KEY → reason. These keys must resolve from deployments/mainnet.json during

@@ -245,7 +245,7 @@ test("Bank feed config binds the three exact ledgers and stays inert when disabl
   );
 });
 
-test("mainnet feed defaults off while retaining the deployed Bank targets for explicit enablement", async () => {
+test("mainnet template ships the Bank feed ENABLED, with targets that match the deployment manifest", async () => {
   const [template, manifestRaw] = await Promise.all([
     readFile(new URL("../../../deploy/backend.mainnet.env.template", import.meta.url), "utf8"),
     readFile(new URL("../../../deployments/mainnet.json", import.meta.url), "utf8")
@@ -258,11 +258,15 @@ test("mainnet feed defaults off while retaining the deployed Bank targets for ex
       return [line.slice(0, separator), line.slice(separator + 1)];
     }));
   const manifest = JSON.parse(manifestRaw);
-  assert.equal(env.BANK_LANE_FEED_ENABLED, "false");
-  const config = loadBankLaneFeedConfig({
-    ...env,
-    BANK_LANE_FEED_ENABLED: "true"
-  });
+  // The lane is on in the SHIPPED template as of #929. The template is the only
+  // control surface there is: render-vps-env.sh op-injects it straight into
+  // /run/agent-stack-mainnet/backend.env with no override layer, so "explicit
+  // enablement" is this line and nothing else.
+  assert.equal(env.BANK_LANE_FEED_ENABLED, "true");
+  // Loaded from the template AS-IS — deliberately no in-test override. This now
+  // asserts that the file an operator actually deploys produces a working
+  // config, rather than that it would if someone flipped a flag first.
+  const config = loadBankLaneFeedConfig(env);
   const strategy = manifest.strategies.find((item) => item.id === "HYDRATION_USDC_V1");
 
   assert.equal(env.BANK_LANE_FEED_HYDRATION_ACCOUNT_ID32, ACCOUNT_SS58);
