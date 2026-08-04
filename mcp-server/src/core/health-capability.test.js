@@ -316,8 +316,8 @@ const TEST_DEPLOYMENT = Object.freeze({
     token: "0x0000053900000000000000000000000001200000",
     agentAccountCore: "0x71B111d8c9DF84Be26cb9067D27dAd7A2d5E7e08",
     escrowCore: "0x70d661C3A5DdE64bB8cbFa0A5336470c1662eFCa",
-    xcmWrapper: "0x2AF394fA95f75D3ca1C786128f4dfA1eB0c9675D",
-    hydrationUsdcAdapter: "0x7f02600eA185b5d9ecfB2B7ac97a6a502F89B81B"
+    xcmWrapper: "0xEceE778e11B238D2fc096E56460e7B98DC7B26b8",
+    hydrationUsdcAdapter: "0x631A09913B2403B18b2B659a1397916621b29b4c"
   }
 });
 
@@ -327,8 +327,8 @@ test("resolveHealthAddresses exposes monitor addresses without logic-only Treasu
     token: "0x0000053900000000000000000000000001200000",
     agentAccountCore: "0x71B111d8c9DF84Be26cb9067D27dAd7A2d5E7e08",
     escrowCore: "0x70d661C3A5DdE64bB8cbFa0A5336470c1662eFCa",
-    xcmWrapper: "0x2AF394fA95f75D3ca1C786128f4dfA1eB0c9675D",
-    hydrationUsdcAdapter: "0x7f02600eA185b5d9ecfB2B7ac97a6a502F89B81B",
+    xcmWrapper: "0xEceE778e11B238D2fc096E56460e7B98DC7B26b8",
+    hydrationUsdcAdapter: "0x631A09913B2403B18b2B659a1397916621b29b4c",
     settlementSigner: "0x31ad432dFe083B998c69B6dB88A984ec5207ab7F",
     treasuryReserve: "0x6778F050eAc8313e4dbB176d7BAB44510E833ac8"
   });
@@ -341,8 +341,8 @@ test("resolveHealthAddresses falls back to runtime env when manifest is absent",
     env: {
       AGENT_ACCOUNT_ADDRESS: "0x510918E24DEbcA163F306923CA234319e72b22d5",
       ESCROW_CORE_ADDRESS: "0xfE841c2dc58E4389b1AB59E3e42F9EB12A694Bea",
-      XCM_WRAPPER_ADDRESS: "0x2AF394fA95f75D3ca1C786128f4dfA1eB0c9675D",
-      HYDRATION_USDC_ADAPTER_ADDRESS: "0x7f02600eA185b5d9ecfB2B7ac97a6a502F89B81B",
+      XCM_WRAPPER_ADDRESS: "0xEceE778e11B238D2fc096E56460e7B98DC7B26b8",
+      HYDRATION_USDC_ADAPTER_ADDRESS: "0x631A09913B2403B18b2B659a1397916621b29b4c",
       SIGNER_ADDRESS: "0x31ad432dFe083B998c69B6dB88A984ec5207ab7F",
       SUPPORTED_ASSETS_JSON: JSON.stringify([{
         symbol: "USDC",
@@ -356,8 +356,8 @@ test("resolveHealthAddresses falls back to runtime env when manifest is absent",
     token: "0x0000053900000000000000000000000001200000",
     agentAccountCore: "0x510918E24DEbcA163F306923CA234319e72b22d5",
     escrowCore: "0xfE841c2dc58E4389b1AB59E3e42F9EB12A694Bea",
-    xcmWrapper: "0x2AF394fA95f75D3ca1C786128f4dfA1eB0c9675D",
-    hydrationUsdcAdapter: "0x7f02600eA185b5d9ecfB2B7ac97a6a502F89B81B",
+    xcmWrapper: "0xEceE778e11B238D2fc096E56460e7B98DC7B26b8",
+    hydrationUsdcAdapter: "0x631A09913B2403B18b2B659a1397916621b29b4c",
     settlementSigner: "0x31ad432dFe083B998c69B6dB88A984ec5207ab7F",
     treasuryReserve: "0x1f8c4da4aaac79916350f1fabf1221309591b6f9"
   });

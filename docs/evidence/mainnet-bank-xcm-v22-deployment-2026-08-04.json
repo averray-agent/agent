@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "kind": "averray.bankXcmV2DeploymentEvidence",
+  "profile": "mainnet",
+  "version": "2.2",
+  "sourceCommit": "870dda4937258e78d74253b30365f831a3d220ed",
+  "deployer": "0x9Ab8531FBb0948C542a31298FD61335f30064239",
+  "verifiedAt": "2026-08-04T18:55:13.886Z",
+  "replacementReason": "v2.2: dispatch-time fee bounds, chain-derived watcher state, and request-scoped recovery accounting",
+  "convertedAccountId32": "0x42e55ecf123da7d3eba1c55998b3cbf8238c446367c981f1388acbc0626cf354",
+  "conversionEvidence": {
+    "artifact": "docs/evidence/mainnet-bank-xcm-v22-conversion-2026-08-04.json",
+    "endpointCount": 2,
+    "endpoints": [
+      "https://rpc.kril.hydration.cloud",
+      "https://rpc-catfish-1.catfish.hydration.cloud"
+    ],
+    "capturedAt": "2026-08-04T18:55:13.886Z"
+  },
+  "liveState": {
+    "capturedAt": "2026-08-04T18:55:13.886Z",
+    "assetHubBlockNumber": 19061017,
+    "wrapper": {
+      "txHash": "0x4e0132e6e8e47cd3ff584825ac77e412a18aed57636f95e1837c74b04b7a0d08",
+      "blockNumber": 19061012,
+      "policy": "0x226F14252A98BD2eA140271647De20132F09AF20",
+      "xcmPrecompile": "0x00000000000000000000000000000000000a0000",
+      "dispatchPaused": true,
+      "operator": "0x0000000000000000000000000000000000000000",
+      "hydrationAccountId32": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "artifactRuntimeMatch": true,
+      "abiHash": "sha256:1a3837c645acb5500fd740c70617c8c1c8dbf9d80c7df0d0b17fab55bfcc666b",
+      "runtimeCodeHash": "sha256:8eab8c73700fead1ab080accc75dda55dc442c819100d64392e647f142885f8c",
+      "versionProbe": {
+        "selector": "0x526a213a",
+        "calldata": "0x526a213a222222222222222222222222222222222222222222222222222222222222222200000000000000000000000000000000000000000000000000000000000186a00000000000000000000000000000000000000000000000000000000000000001",
+        "response": "0xd65bca68d4e7607eaf51e785abe3eac374c4f84bb16cdd5042d035cc3c50d029",
+        "probeRequestId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+        "probeAmount": "100000",
+        "probeNonce": "1"
+      }
+    },
+    "adapter": {
+      "txHash": "0x695960272724178f49c3adffce309d0b4ac1bcb59c9d718824e46d1fca08f90b",
+      "blockNumber": 19061014,
+      "policy": "0x226F14252A98BD2eA140271647De20132F09AF20",
+      "asset": "0x0000053900000000000000000000000001200000",
+      "strategyId": "0x485944524154494f4e5f555344435f5631000000000000000000000000000000",
+      "xcmWrapper": "0xEceE778e11B238D2fc096E56460e7B98DC7B26b8",
+      "agentAccountCore": "0xB1350932bf85E7ffd0599E9a3CC7b55718D89E57",
+      "artifactRuntimeMatch": true,
+      "abiHash": "sha256:938a8cf6e9ebeec2ec6c038ad610a0557a7e8179680f5acedc38c2c076156709",
+      "runtimeCodeHash": "sha256:cfc9d412814f4b6247e40b15165afc3e3b219f164e08cec44ef6f50a842ca3b5"
+    }
+  },
+  "wrapper": {
+    "address": "0xEceE778e11B238D2fc096E56460e7B98DC7B26b8",
+    "txHash": "0x4e0132e6e8e47cd3ff584825ac77e412a18aed57636f95e1837c74b04b7a0d08",
+    "blockNumber": 19061012,
+    "abiHash": "sha256:1a3837c645acb5500fd740c70617c8c1c8dbf9d80c7df0d0b17fab55bfcc666b",
+    "runtimeCodeHash": "sha256:8eab8c73700fead1ab080accc75dda55dc442c819100d64392e647f142885f8c"
+  },
+  "adapter": {
+    "address": "0x631A09913B2403B18b2B659a1397916621b29b4c",
+    "txHash": "0x695960272724178f49c3adffce309d0b4ac1bcb59c9d718824e46d1fca08f90b",
+    "blockNumber": 19061014,
+    "abiHash": "sha256:938a8cf6e9ebeec2ec6c038ad610a0557a7e8179680f5acedc38c2c076156709",
+    "runtimeCodeHash": "sha256:cfc9d412814f4b6247e40b15165afc3e3b219f164e08cec44ef6f50a842ca3b5"
+  }
+}
