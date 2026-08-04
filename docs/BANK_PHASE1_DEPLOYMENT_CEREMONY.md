@@ -416,6 +416,31 @@ delta, request/hash mismatch, custody mismatch, timeout/stuck Pending, unexpecte
 runtime metadata, or a recovery obligation. Do not alter payloads, redirect a
 beneficiary, retry with a new nonce, front funds from an EOA, or increase the cap.
 
+### 2026-08-04 v2.1 `deposit_sell` empirical record
+
+The first EVM-path XCM dispatch established that `ReviveApi_call` weight and
+EVM gas are separate gates. The original review ceiling
+`10,000,000,000 / 500,000` was itself too low. A read-only retry at
+`100,000,000,000 / 3,000,000` measured `11,728,066,855 / 285,862`; the
+measured-times-two envelope `23,456,133,710 / 571,724` passed again. Storage
+required was `79,200,000`, with `1,000,000,000` allowed. Asset Hub remained at
+`specVersion=2003002`, matching the earlier fork capture.
+
+For the exact transaction, `eth_estimateGas` returned `17,958`; the dispatched
+limit was `36,000`, and receipt `0x64f649b85de6c92e1e222f352552bca827b9fcdd34e30e02518fa0ed456a1081`
+used `17,885` gas at block `19,046,778`. At 800 Gwei, the operator paid
+`0.014308 DOT`. The wrapper bitmap advanced from funding-only (`1`) to both
+deposit legs dispatched (`3`).
+
+The destination execution did **not** pass the dust-cycle gate. Hydration block
+`13,456,243` emitted `messageQueue.Processed` for request
+`0xb609f4d875e0c6f4f4b1dddd90efd687215d1ac9ecd90d0de51b9304f57ecaac`
+with `success=false`, plus `polkadotXcm.AssetsTrapped` for `17,932` raw asset 22.
+No `Broadcast.Swapped{AAVE}` occurred and aUSDC remained zero. Asset 22 moved
+from `149,475` to `131,543` raw. The observer created no request watch and no
+calibration record. The ceremony stopped without a retry or a following leg;
+do not treat the successful Asset Hub receipt as a successful Bank deposit.
+
 ## Handback checklist
 
 - two deployment receipts and paused-state/immutable reads;
