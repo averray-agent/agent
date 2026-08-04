@@ -128,6 +128,7 @@ export const TODO_KEYS = {
   REPUTATION_SBT_ADDRESS: "from deployments/mainnet.json (post-ceremony)",
   DISCOVERY_REGISTRY_ADDRESS: "from deployments/mainnet.json (post-ceremony)",
   XCM_WRAPPER_ADDRESS: "active Bank wrapper from deployments/mainnet.json",
+  HYDRATION_USDC_ADAPTER_ADDRESS: "active Bank adapter from deployments/mainnet.json",
   BANK_LANE_FEED_HYDRATION_ACCOUNT_ID32: "active Bank converted account from deployments/mainnet.json",
   BANK_LANE_FEED_POSTAGE_ACCOUNT: "active Bank wrapper Asset Hub image from deployments/mainnet.json",
   AUTH_ADMIN_WALLETS: "mainnet admin wallet(s) — NEVER the testnet hot key nor the leaked 0xFd2E...6519",
@@ -235,6 +236,10 @@ export function buildManifestOverrides(manifest) {
     REPUTATION_SBT_ADDRESS: requireAddress(contracts.reputationSbt, "contracts.reputationSbt"),
     DISCOVERY_REGISTRY_ADDRESS: requireAddress(contracts.discoveryRegistry, "contracts.discoveryRegistry"),
     XCM_WRAPPER_ADDRESS: xcmWrapper,
+    HYDRATION_USDC_ADAPTER_ADDRESS: requireAddress(
+      contracts.hydrationUsdcAdapter,
+      "contracts.hydrationUsdcAdapter"
+    ),
     BANK_LANE_FEED_HYDRATION_ACCOUNT_ID32: encodeAddress(convertedAccountId32, 0),
     BANK_LANE_FEED_POSTAGE_ACCOUNT: encodeAddress(wrapperAssetHubImage(xcmWrapper), 0),
     AUTH_ADMIN_WALLETS: requireWalletList(auth.adminWallets, "runtime.auth.adminWallets"),

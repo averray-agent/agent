@@ -104,7 +104,15 @@ export class BankLaneFeedService {
       ) ?? [];
       const readAtMs = this.now();
       return {
-        items: pending.map((watch) => requestFromWatch(watch, readAtMs)),
+        // Request ids are scoped by wrapper on-chain, but the durable observer
+        // table predates that namespace and is keyed by request id alone. v2.0
+        // and v2.1 can therefore share an id. A valid watch aimed at another
+        // venue target is known-retired work and must not alarm on the active
+        // lane. Unknown/malformed targets remain visible (and overdue) rather
+        // than being silently classified as safe.
+        items: pending
+          .filter((watch) => this.classifyRequestWatch(watch) !== "foreign")
+          .map((watch) => requestFromWatch(watch, readAtMs)),
         readAtMs,
         lastError: null
       };
@@ -125,6 +133,10 @@ export class BankLaneFeedService {
       const calibration = nextCalibration({ previous: previous.calibration, position });
       await this.stateStore.upsertServiceState?.(this.stateScope, { position, calibration });
     });
+  }
+
+  classifyRequestWatch(watch) {
+    return classifyPositionWatch(watch, this.targets?.position);
   }
 
   async persistSection(name, value) {
@@ -240,6 +252,20 @@ function requestFromWatch(watch, nowMs) {
     // An unreadable deadline fails toward the alarm, not toward all-clear.
     overdue: invalidTiming || nowMs >= deadlineAtMs
   };
+}
+
+function classifyPositionWatch(watch, positionTarget) {
+  if (!watch?.target || !positionTarget) return "unknown";
+  try {
+    const target = normalizeVenueBalanceTarget(watch.target);
+    if (target.ledger !== "erc20") return "unknown";
+    return target.contract === positionTarget.contract
+      && target.evmAccount === positionTarget.evmAccount
+      ? "current"
+      : "foreign";
+  } catch {
+    return "unknown";
+  }
 }
 
 function inferRequestKind(direction) {

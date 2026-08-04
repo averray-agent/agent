@@ -194,6 +194,22 @@ function validateManifest(manifest, replaceExisting) {
   }
 }
 
+export function assertManifestRecordsDeployment({ manifest, wrapper, adapter }) {
+  const declaredWrapper = manifest?.contracts?.xcmWrapper;
+  const declaredAdapter = manifest?.contracts?.hydrationUsdcAdapter;
+  if (
+    !isAddress(declaredWrapper)
+    || !isAddress(declaredAdapter)
+    || getAddress(declaredWrapper) !== getAddress(wrapper)
+    || getAddress(declaredAdapter) !== getAddress(adapter)
+  ) {
+    throw new Error(
+      `deployed Bank pair ${getAddress(wrapper)} / ${getAddress(adapter)} is not recorded in deployments/${manifest?.profile ?? "<unknown>"}.json; refusing a green deploy run.`
+    );
+  }
+  return true;
+}
+
 export async function buildDeploymentPlan({ manifest, provider, deployer, wrapperArtifact, adapterArtifact, replaceExisting = false }) {
   validateManifest(manifest, replaceExisting);
   const expectedDeployer = getAddress(deployer);
@@ -470,6 +486,14 @@ export async function main(argv = process.argv.slice(2)) {
         { wrapper: wrapperReceipt, adapter: adapterReceipt },
         { wrapperArtifact, adapterArtifact }
       );
+      // A dispatch-only redeploy used to exit green while leaving every
+      // consumer on the retired generation. The CREATE addresses are known
+      // before signing, so the paired manifest update must land first.
+      assertManifestRecordsDeployment({
+        manifest,
+        wrapper: plan.wrapper.address,
+        adapter: plan.adapter.address
+      });
       console.log(`\nDEPLOYED PAUSED: ${JSON.stringify(observed, null, 2)}`);
       return { ...bundle, deployment: observed };
     } catch (error) {

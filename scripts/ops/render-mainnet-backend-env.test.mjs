@@ -33,8 +33,10 @@ const MANIFEST = {
     reputationSbt: "0x7777777777777777777777777777777777777777",
     discoveryRegistry: "0x8888888888888888888888888888888888888888",
     xcmWrapper: "0x2AF394fA95f75D3ca1C786128f4dfA1eB0c9675D",
+    hydrationUsdcAdapter: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
   },
   bankXcmV2Deployment: {
+    version: "2.1",
     convertedAccountId32: "0x85663dfdb243b1a11a90f0816e1f83ccdb99f8f4c4a25d432739218efd489736",
   },
   deploymentBlocks: {
@@ -126,9 +128,13 @@ test("buildManifestOverrides: resolves addresses, auth, blocks, and schema", () 
   assert.equal(overrides.PONDER_START_BLOCK_TREASURY, "101");
   assert.equal(overrides.PONDER_START_BLOCK_ESCROW, "102", "shared Agent/Escrow scan starts at the earlier deploy");
   assert.equal(overrides.PONDER_START_BLOCK_REPUTATION, "103");
+  assert.equal(overrides.XCM_WRAPPER_ADDRESS, MANIFEST.contracts.xcmWrapper);
+  assert.equal(
+    overrides.HYDRATION_USDC_ADAPTER_ADDRESS,
+    MANIFEST.contracts.hydrationUsdcAdapter
+  );
   assert.equal(overrides.PONDER_START_BLOCK_REGISTRIES, "104");
   assert.equal(overrides.DATABASE_SCHEMA, MANIFEST.runtime.indexer.schema);
-  assert.equal(overrides.XCM_WRAPPER_ADDRESS, MANIFEST.contracts.xcmWrapper);
   assert.equal(overrides.BANK_LANE_FEED_HYDRATION_ACCOUNT_ID32, "141ujyV9aKBYqZncx6SYRWU2XQCxUcYiGYE8U7jprEKVUZNJ");
   assert.equal(overrides.BANK_LANE_FEED_POSTAGE_ACCOUNT, "1yKNU414vYDyXYXL6pu845puajfeGTezD1rBiUYwp9UKBaZ");
   assert.equal(overrides.LEGACY_ESCROW_CORE_ADDRESS, "");
@@ -271,6 +277,7 @@ test("generateAll: the real transform yields the mainnet essentials", () => {
   assert.match(backend, /^AGENT_ACCOUNT_ADDRESS=0xB1350932bf85E7ffd0599E9a3CC7b55718D89E57$/mu);
   assert.match(backend, /^XCM_WRAPPER_ADDRESS=0x2AF394fA95f75D3ca1C786128f4dfA1eB0c9675D$/mu);
   assert.match(backend, /^BANK_XCM_FLOW_ENABLED=false$/mu);
+  assert.match(backend, /^HYDRATION_USDC_ADAPTER_ADDRESS=0x7f02600eA185b5d9ecfB2B7ac97a6a502F89B81B$/mu);
   assert.match(backend, /^BANK_LANE_FEED_HYDRATION_ACCOUNT_ID32=141ujyV9aKBYqZncx6SYRWU2XQCxUcYiGYE8U7jprEKVUZNJ$/mu);
   assert.match(backend, /^BANK_LANE_FEED_POSTAGE_ACCOUNT=1yKNU414vYDyXYXL6pu845puajfeGTezD1rBiUYwp9UKBaZ$/mu);
   assert.match(
