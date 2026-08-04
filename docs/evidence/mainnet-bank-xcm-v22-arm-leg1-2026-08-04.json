@@ -1,0 +1,200 @@
+{
+  "schemaVersion": 1,
+  "kind": "averray.bankXcmV2MultisigPacket",
+  "profile": "mainnet",
+  "generation": "2.2",
+  "packet": "arm",
+  "capturedAt": "2026-08-04T19:59:31.440Z",
+  "wrapper": "0xEceE778e11B238D2fc096E56460e7B98DC7B26b8",
+  "adapter": "0x631A09913B2403B18b2B659a1397916621b29b4c",
+  "convertedAccountId32": "0x42e55ecf123da7d3eba1c55998b3cbf8238c446367c981f1388acbc0626cf354",
+  "conversion": {
+    "endpoints": [
+      "https://rpc.kril.hydration.cloud",
+      "https://rpc-catfish-1.catfish.hydration.cloud"
+    ],
+    "convertedAccountId32": "0x42e55ecf123da7d3eba1c55998b3cbf8238c446367c981f1388acbc0626cf354"
+  },
+  "liveState": {
+    "capturedAt": "2026-08-04T19:59:28.464Z",
+    "assetHubBlockNumber": 19062881,
+    "liveOwner": "0x01E6eed856e989201F4FF6346E18EAb7e46C874C",
+    "policyPaused": false,
+    "paused": true,
+    "operator": "0x5a6836c6D4d293F6E5377E6c28054F4171915813",
+    "hydration": "0x42e55ecf123da7d3eba1c55998b3cbf8238c446367c981f1388acbc0626cf354",
+    "boundAdapter": "0x631A09913B2403B18b2B659a1397916621b29b4c",
+    "strategySettler": true,
+    "g2Verification": {
+      "deploymentEvidence": {
+        "kind": "averray.bankXcmV2DeploymentEvidence",
+        "version": "2.2",
+        "sourceCommit": "870dda4937258e78d74253b30365f831a3d220ed",
+        "verifiedAt": "2026-08-04T18:55:13.886Z",
+        "wrapperTxHash": "0x4e0132e6e8e47cd3ff584825ac77e412a18aed57636f95e1837c74b04b7a0d08",
+        "adapterTxHash": "0x695960272724178f49c3adffce309d0b4ac1bcb59c9d718824e46d1fca08f90b"
+      },
+      "deployment": {
+        "sourceCommit": "870dda4937258e78d74253b30365f831a3d220ed",
+        "deploymentVerifiedAt": "2026-08-04T18:55:13.886Z",
+        "runtimeHashes": {
+          "wrapper": "sha256:8eab8c73700fead1ab080accc75dda55dc442c819100d64392e647f142885f8c",
+          "adapter": "sha256:cfc9d412814f4b6247e40b15165afc3e3b219f164e08cec44ef6f50a842ca3b5"
+        },
+        "recordedVersionProbe": {
+          "selector": "0x526a213a",
+          "calldata": "0x526a213a222222222222222222222222222222222222222222222222222222222222222200000000000000000000000000000000000000000000000000000000000186a00000000000000000000000000000000000000000000000000000000000000001",
+          "response": "0xd65bca68d4e7607eaf51e785abe3eac374c4f84bb16cdd5042d035cc3c50d029",
+          "probeRequestId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+          "probeAmount": "100000",
+          "probeNonce": "1"
+        },
+        "freshVersionProbe": {
+          "selector": "0x526a213a",
+          "calldata": "0x526a213a222222222222222222222222222222222222222222222222222222222222222200000000000000000000000000000000000000000000000000000000000186a00000000000000000000000000000000000000000000000000000000000000001",
+          "response": "0xfb6ec59b526f7a2f7519e29636b2a8fee3e21eb940535732104815fa0ced723c",
+          "probeRequestId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+          "probeAmount": "100000",
+          "probeNonce": "1"
+        }
+      },
+      "configurePostState": {
+        "operator": "0x5a6836c6D4d293F6E5377E6c28054F4171915813",
+        "hydrationAccountId32": "0x42e55ecf123da7d3eba1c55998b3cbf8238c446367c981f1388acbc0626cf354",
+        "strategyAdapter": "0x631A09913B2403B18b2B659a1397916621b29b4c",
+        "strategySettler": true,
+        "dispatchPaused": true,
+        "policyPaused": false
+      },
+      "armedEmpty": {
+        "requestQueuedEventCount": 0,
+        "adapterTotalShares": "0",
+        "adapterTotalAssets": "0",
+        "adapterPendingDepositAssets": "0",
+        "adapterPendingWithdrawalShares": "0",
+        "adapterRemoteOperatingFloat": "0",
+        "wrapperTokenBalance": "0",
+        "adapterTokenBalance": "0",
+        "treasuryAllowanceToAdapter": "0",
+        "dispatchPaused": true,
+        "policyPaused": false,
+        "flowDisabled": true
+      },
+      "flow": {
+        "healthUrl": "https://api.averray.com/health",
+        "deployedSha": "86e07f6aa8419fe099d6181758aa07160fc630a3",
+        "chainId": 420420419,
+        "wrapper": "0xEceE778e11B238D2fc096E56460e7B98DC7B26b8",
+        "adapter": "0x631A09913B2403B18b2B659a1397916621b29b4c",
+        "xcmWrapperConfigured": true,
+        "xcmObserver": "staged",
+        "templateSetting": "BANK_XCM_FLOW_ENABLED=false"
+      }
+    }
+  },
+  "signer": {
+    "index": 2,
+    "label": "nova",
+    "address": "121pEreu4kTNBiyG7K32Red672dgMhkra7cLTNwK8ebEYhyv",
+    "accountId32": "0x2cdb40f6605cd3caad90b59816b657ea970c941d8372784faf024dd3c2dbab7e"
+  },
+  "otherSignatories": [
+    "1mhf9yyYq3ArZAEysQQfWYNe2rgrDP6omrn6xiJBbwKqYZH",
+    "16UCRMPz5njNdRvAEE3pkEjaqpjX8ayC1gh9yNtk5eGb14oc"
+  ],
+  "timepoint": null,
+  "innerCalls": [
+    {
+      "label": "XcmWrapperV2.setDispatchPaused(false)",
+      "to": "0xEceE778e11B238D2fc096E56460e7B98DC7B26b8",
+      "data": "0x1f59d6fb0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ],
+  "innerCallHash": "0xa36dfb88f7933de8c619cffb4bc2682e43a63cf0d78f9a52cc45733ad613a04e",
+  "innerCallScale": "0x5a01ecee778e11b238d2fc096e56460e7b98dc7b26b8000300286bee821a060002286bee901f59d6fb0000000000000000000000000000000000000000000000000000000000000000",
+  "asMultiScale": "0x29010200082217aa0eee7d3de03f3760165818b225f3bfb5d2694ac6980eedba57f8dde772f1eb3c605e687b23900616feb6584fe22d3344c9304e106d3da69eeb856b8314005a01ecee778e11b238d2fc096e56460e7b98dc7b26b8000300286bee821a060002286bee901f59d6fb000000000000000000000000000000000000000000000000000000000000000007008d380c01c2270900",
+  "substrate": {
+    "chainName": "Polkadot Asset Hub",
+    "genesisHash": "0x68d56f15f85d3136970ec16946040bc1752654e906147f7e43e9d539d7c3de2f",
+    "revivePalletIndex": 90
+  },
+  "containsUnpause": true,
+  "armBasis": {
+    "deploymentEvidence": {
+      "kind": "averray.bankXcmV2DeploymentEvidence",
+      "version": "2.2",
+      "sourceCommit": "870dda4937258e78d74253b30365f831a3d220ed",
+      "verifiedAt": "2026-08-04T18:55:13.886Z",
+      "wrapperTxHash": "0x4e0132e6e8e47cd3ff584825ac77e412a18aed57636f95e1837c74b04b7a0d08",
+      "adapterTxHash": "0x695960272724178f49c3adffce309d0b4ac1bcb59c9d718824e46d1fca08f90b"
+    },
+    "deployment": {
+      "sourceCommit": "870dda4937258e78d74253b30365f831a3d220ed",
+      "deploymentVerifiedAt": "2026-08-04T18:55:13.886Z",
+      "runtimeHashes": {
+        "wrapper": "sha256:8eab8c73700fead1ab080accc75dda55dc442c819100d64392e647f142885f8c",
+        "adapter": "sha256:cfc9d412814f4b6247e40b15165afc3e3b219f164e08cec44ef6f50a842ca3b5"
+      },
+      "recordedVersionProbe": {
+        "selector": "0x526a213a",
+        "calldata": "0x526a213a222222222222222222222222222222222222222222222222222222222222222200000000000000000000000000000000000000000000000000000000000186a00000000000000000000000000000000000000000000000000000000000000001",
+        "response": "0xd65bca68d4e7607eaf51e785abe3eac374c4f84bb16cdd5042d035cc3c50d029",
+        "probeRequestId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+        "probeAmount": "100000",
+        "probeNonce": "1"
+      },
+      "freshVersionProbe": {
+        "selector": "0x526a213a",
+        "calldata": "0x526a213a222222222222222222222222222222222222222222222222222222222222222200000000000000000000000000000000000000000000000000000000000186a00000000000000000000000000000000000000000000000000000000000000001",
+        "response": "0xfb6ec59b526f7a2f7519e29636b2a8fee3e21eb940535732104815fa0ced723c",
+        "probeRequestId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+        "probeAmount": "100000",
+        "probeNonce": "1"
+      }
+    },
+    "configurePostState": {
+      "operator": "0x5a6836c6D4d293F6E5377E6c28054F4171915813",
+      "hydrationAccountId32": "0x42e55ecf123da7d3eba1c55998b3cbf8238c446367c981f1388acbc0626cf354",
+      "strategyAdapter": "0x631A09913B2403B18b2B659a1397916621b29b4c",
+      "strategySettler": true,
+      "dispatchPaused": true,
+      "policyPaused": false
+    },
+    "armedEmpty": {
+      "requestQueuedEventCount": 0,
+      "adapterTotalShares": "0",
+      "adapterTotalAssets": "0",
+      "adapterPendingDepositAssets": "0",
+      "adapterPendingWithdrawalShares": "0",
+      "adapterRemoteOperatingFloat": "0",
+      "wrapperTokenBalance": "0",
+      "adapterTokenBalance": "0",
+      "treasuryAllowanceToAdapter": "0",
+      "dispatchPaused": true,
+      "policyPaused": false,
+      "flowDisabled": true
+    },
+    "flow": {
+      "healthUrl": "https://api.averray.com/health",
+      "deployedSha": "86e07f6aa8419fe099d6181758aa07160fc630a3",
+      "chainId": 420420419,
+      "wrapper": "0xEceE778e11B238D2fc096E56460e7B98DC7B26b8",
+      "adapter": "0x631A09913B2403B18b2B659a1397916621b29b4c",
+      "xcmWrapperConfigured": true,
+      "xcmObserver": "staged",
+      "templateSetting": "BANK_XCM_FLOW_ENABLED=false"
+    }
+  },
+  "observerTargets": {
+    "asset22": {
+      "endpoint": "wss://hydration-rpc.n.dwellir.com",
+      "accountId32": "0x42e55ecf123da7d3eba1c55998b3cbf8238c446367c981f1388acbc0626cf354",
+      "assetId": 22
+    },
+    "aUsdc": {
+      "endpoint": "https://rpc.hydradx.cloud",
+      "contract": "0x2ec4884088d84e5c2970a034732e5209b0acfa93",
+      "account": "0x42E55eCF123DA7d3EbA1C55998B3cBf8238C4463"
+    }
+  }
+}

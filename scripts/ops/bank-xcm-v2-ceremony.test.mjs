@@ -15,7 +15,13 @@ import {
   truncateAccountId32,
   wrapperAccountId32
 } from "./bank-xcm-v2-ceremony-lib.mjs";
-import { assertDryRunEvidence, assertPacketGeneration } from "./prepare-bank-xcm-v2-multisig.mjs";
+import {
+  assertDryRunEvidence,
+  assertPacketGeneration,
+  assertRuntimeFlowDisabled,
+  assertV22ArmedEmptyState,
+  assertV22DeploymentEvidence
+} from "./prepare-bank-xcm-v2-multisig.mjs";
 import { captureConversionEvidence, convertOnEndpoint } from "./capture-hydration-wrapper-origin.mjs";
 import {
   REVIEWED_ADAPTER_V22_CREATION_CODE_HASH,
@@ -31,6 +37,8 @@ import {
   rebuildFoundryArtifacts
 } from "./deploy-bank-xcm-v2.mjs";
 import { buildManifestCandidate } from "./record-bank-xcm-v2-deployment.mjs";
+import { extractAaveQuote } from "./capture-bank-xcm-v22-staging-quote.mjs";
+import { assertFreshV22StagingQuote, buildV22StagingCall } from "./prepare-bank-xcm-v22-staging-multisig.mjs";
 
 const WRAPPER = "0x5991a2df15a8f6a256d3ec51e99254cd3fb576a9";
 const ADAPTER = "0x1111111111111111111111111111111111111111";
@@ -407,16 +415,177 @@ test("paused configuration and arm packets are deliberately separate", () => {
   assert.equal(iface.decodeFunctionData("setDispatchPaused", arm[0].data)[0], false);
 });
 
-test("G2 v2.2 emitter allows configure only and refuses every arm-material input", () => {
+test("v2.2 arm emitter requires the G2 deployment bundle and refuses caller-built messages", () => {
   assert.equal(assertPacketGeneration({ generation: "2.2", packet: "configure" }), true);
   assert.throws(
     () => assertPacketGeneration({ generation: "2.2", packet: "arm" }),
-    /arm material is forbidden in G2/u
+    /requires --deployment-evidence/u
   );
+  assert.equal(assertPacketGeneration({
+    generation: "2.2",
+    packet: "arm",
+    deploymentEvidence: "/tmp/g2.json"
+  }), true);
   assert.throws(
     () => assertPacketGeneration({ generation: "2.2", packet: "configure", dryRunEvidence: "/tmp/g3.json" }),
-    /emits no request messages or arm evidence/u
+    /no caller-built request messages/u
   );
+});
+
+test("v2.2 arm deployment bundle is bound to both live runtime hashes and the external selector", () => {
+  const runtime = { wrapper: "sha256:wrapper", adapter: "sha256:adapter" };
+  const probe = { selector: "0x526a213a", response: `0x${"11".repeat(32)}` };
+  const evidence = {
+    kind: "averray.bankXcmV2DeploymentEvidence",
+    profile: "mainnet",
+    version: "2.2",
+    sourceCommit: "abc123",
+    verifiedAt: "2026-08-04T00:00:00.000Z",
+    wrapper: { address: WRAPPER, runtimeCodeHash: runtime.wrapper },
+    adapter: { address: ADAPTER, runtimeCodeHash: runtime.adapter },
+    liveState: {
+      wrapper: { artifactRuntimeMatch: true, versionProbe: probe },
+      adapter: { artifactRuntimeMatch: true }
+    }
+  };
+  assert.equal(assertV22DeploymentEvidence({
+    evidence,
+    wrapper: WRAPPER,
+    adapter: ADAPTER,
+    liveRuntime: runtime,
+    liveProbe: probe
+  }).sourceCommit, "abc123");
+  assert.throws(
+    () => assertV22DeploymentEvidence({
+      evidence,
+      wrapper: WRAPPER,
+      adapter: ADAPTER,
+      liveRuntime: { ...runtime, wrapper: "sha256:drift" },
+      liveProbe: probe
+    }),
+    /runtime hashes/u
+  );
+});
+
+test("v2.2 arm fresh-state gate refuses any request, custody, allowance, or enabled flow", () => {
+  const empty = {
+    requestQueuedEventCount: 0,
+    adapterTotalShares: "0",
+    adapterTotalAssets: "0",
+    adapterPendingDepositAssets: "0",
+    adapterPendingWithdrawalShares: "0",
+    adapterRemoteOperatingFloat: "0",
+    wrapperTokenBalance: "0",
+    adapterTokenBalance: "0",
+    treasuryAllowanceToAdapter: "0",
+    dispatchPaused: true,
+    policyPaused: false,
+    flowDisabled: true
+  };
+  assert.equal(assertV22ArmedEmptyState(empty), true);
+  assert.throws(() => assertV22ArmedEmptyState({ ...empty, requestQueuedEventCount: 1 }), /requestQueuedEventCount=0/u);
+  assert.throws(() => assertV22ArmedEmptyState({ ...empty, treasuryAllowanceToAdapter: "1" }), /treasuryAllowanceToAdapter=0/u);
+  assert.throws(() => assertV22ArmedEmptyState({ ...empty, flowDisabled: false }), /flow.*disabled/u);
+});
+
+test("v2.2 arm runtime gate requires the exact deployed pair and flow-disabled surfaces", () => {
+  const health = {
+    status: "ok",
+    deployedSha: "deadbeef",
+    auth: { chainId: 420420419 },
+    addresses: { xcmWrapper: WRAPPER, hydrationUsdcAdapter: ADAPTER },
+    components: { blockchain: { xcmWrapperConfigured: true } },
+    capabilityHealth: { xcmObserver: "staged" }
+  };
+  assert.equal(assertRuntimeFlowDisabled({
+    health,
+    wrapper: WRAPPER,
+    adapter: ADAPTER,
+    template: "BANK_XCM_FLOW_ENABLED=false\n"
+  }).xcmObserver, "staged");
+  assert.throws(
+    () => assertRuntimeFlowDisabled({
+      health,
+      wrapper: WRAPPER,
+      adapter: ADAPTER,
+      template: "BANK_XCM_FLOW_ENABLED=true\n"
+    }),
+    /does not keep.*false/u
+  );
+  assert.throws(
+    () => assertRuntimeFlowDisabled({
+      health: { ...health, capabilityHealth: { xcmObserver: "enabled" } },
+      wrapper: WRAPPER,
+      adapter: ADAPTER,
+      template: "BANK_XCM_FLOW_ENABLED=false\n"
+    }),
+    /does not prove/u
+  );
+});
+
+test("v2.2 staging quote requires fresh live Aave 22→1003 output for the exact sell amount", () => {
+  const quote = {
+    kind: "averray.bankXcmV22StagingQuote",
+    profile: "mainnet",
+    liveState: true,
+    chain: "Hydration",
+    capturedAt: "2026-08-04T20:00:00.000Z",
+    quote: { fillerType: "AAVE", assetIn: 22, assetOut: 1003, amountInRaw: "100000", amountOutRaw: "100000" }
+  };
+  assert.equal(assertFreshV22StagingQuote(quote, {
+    sellAmount: 100000n,
+    now: Date.parse("2026-08-04T20:05:00.000Z")
+  }), 100000n);
+  assert.throws(() => assertFreshV22StagingQuote(quote, {
+    sellAmount: 100000n,
+    now: Date.parse("2026-08-04T21:00:00.000Z")
+  }), /stale/u);
+  assert.throws(() => assertFreshV22StagingQuote({ ...quote, quote: { ...quote.quote, amountInRaw: "99999" } }, {
+    sellAmount: 100000n,
+    now: Date.parse("2026-08-04T20:05:00.000Z")
+  }), /exact sell amount/u);
+});
+
+test("v2.2 staging quote parser binds the substantive Broadcast.Swapped Aave event", () => {
+  const human = { Ok: { executionResult: { Ok: {} }, emittedEvents: [{
+    section: "broadcast",
+    method: "Swapped3",
+    data: {
+      fillerType: "AAVE",
+      inputs: [{ asset: "22", amount: "100,000" }],
+      outputs: [{ asset: "1,003", amount: "100,000" }]
+    }
+  }] } };
+  assert.equal(extractAaveQuote(human, 100000n).amountOutRaw, "100000");
+  assert.throws(() => extractAaveQuote({ ...human, Ok: { ...human.Ok, emittedEvents: [] } }, 100000n), /Swapped/u);
+});
+
+test("v2.2 approval is exact and staging binds 100k sell, 40k cap, quote, deadline, and transport margin", () => {
+  const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600);
+  const common = {
+    token: TOKEN,
+    wrapper: WRAPPER,
+    adapter: ADAPTER,
+    treasury: OWNER,
+    assets: 150000n,
+    sellAmount: 100000n,
+    minimumOutput: 100000n,
+    maxFeePerLeg: 40000n,
+    dispatchDeadline: deadline,
+    nonce: 1n
+  };
+  const approve = buildV22StagingCall({ packet: "approve", ...common });
+  const tokenIface = new Interface(["function approve(address,uint256)"]);
+  const decodedApprove = tokenIface.decodeFunctionData("approve", approve.data);
+  assert.equal(decodedApprove[0], getAddress(ADAPTER));
+  assert.equal(decodedApprove[1], 150000n);
+
+  const stage = buildV22StagingCall({ packet: "stage", ...common });
+  const adapterIface = new Interface(["function stageTreasuryDeposit(address,uint256,uint256,uint256,uint256,uint64,uint64)"]);
+  const decoded = adapterIface.decodeFunctionData("stageTreasuryDeposit", stage.data);
+  assert.deepEqual([...decoded], [getAddress(OWNER), 150000n, 100000n, 100000n, 40000n, deadline, 1n]);
+  assert.equal(stage.decoded.transportHeadroomRaw, "10000");
+  assert.throws(() => buildV22StagingCall({ packet: "stage", ...common, assets: 140000n }), /transport headroom/u);
 });
 
 test("request-leg evidence fails closed unless all four exact hashes and assertions pass", () => {

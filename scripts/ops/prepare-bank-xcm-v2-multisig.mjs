@@ -5,16 +5,17 @@
  *
  *   configure — converted account, backend operator, adapter binding, and
  *               strategySettler grant; wrapper remains paused.
- *   arm       — setDispatchPaused(false), emitted only after the four request
- *               messages plus recovery-home DryRunApi evidence are supplied.
+ *   arm       — setDispatchPaused(false), emitted for v2.2 only after the G2
+ *               bundle and a fresh configured-empty live-state proof pass.
  *
  * It never signs or submits. Hardware signing remains in Nova/Spektr/Apps.
  */
 
+import { readFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Contract, ZeroAddress, getAddress } from "ethers";
+import { Contract, Interface, ZeroAddress, getAddress } from "ethers";
 
 import {
   ADAPTER_ADMIN_ABI,
@@ -26,6 +27,7 @@ import {
   buildRecoveryHomeMessage,
   buildConfigurationCalls,
   loadJson,
+  sha256Hex,
   truncateAccountId32,
   wrapperAccountId32
 } from "./bank-xcm-v2-ceremony-lib.mjs";
@@ -39,10 +41,29 @@ import {
   verifyEvmCalldataEmbedded
 } from "./redeploy-escrowcore-wire-multisig.mjs";
 import { createCeremonyRpcContext, printCeremonyRpcPreflight } from "./ceremony-rpc.mjs";
+import { probeWrapperV22Selector } from "./deploy-bank-xcm-v2.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..", "..");
 const PACKETS = new Set(["configure", "arm"]);
+const V22_WRAPPER_STATE_ABI = Object.freeze([
+  ...WRAPPER_ADMIN_ABI,
+  "event RequestQueued(bytes32 indexed requestId,bytes32 indexed strategyId,uint8 indexed kind,address account,address asset,address recipient,uint256 assets,uint256 shares,uint64 nonce)"
+]);
+const V22_ADAPTER_STATE_ABI = Object.freeze([
+  ...ADAPTER_ADMIN_ABI,
+  "function totalShares() view returns (uint256)",
+  "function totalAssets() view returns (uint256)",
+  "function pendingDepositAssets() view returns (uint256)",
+  "function pendingWithdrawalShares() view returns (uint256)",
+  "function remoteOperatingFloat() view returns (uint256)"
+]);
+const ERC20_STATE_ABI = Object.freeze([
+  "function balanceOf(address) view returns (uint256)",
+  "function allowance(address,address) view returns (uint256)"
+]);
+const ZERO_BYTES32 = `0x${"00".repeat(32)}`;
+const REQUEST_QUEUED_TOPIC = new Interface(V22_WRAPPER_STATE_ABI).getEvent("RequestQueued").topicHash;
 
 export function parseArgs(argv) {
   const args = {
@@ -72,6 +93,7 @@ export function parseArgs(argv) {
     else if (token === "--adapter") args.adapter = argv[++index];
     else if (token === "--converted-account") args.convertedAccount = argv[++index];
     else if (token === "--conversion-evidence") args.conversionEvidence = argv[++index];
+    else if (token === "--deployment-evidence") args.deploymentEvidence = argv[++index];
     else if (token === "--predeploy-plan") args.predeployPlan = argv[++index];
     else if (token === "--dry-run-evidence") args.dryRunEvidence = argv[++index];
     else if (token === "--messages-out") args.messagesOut = argv[++index];
@@ -112,7 +134,8 @@ function usage() {
     "  --withdraw-shares/--withdraw-fee/--home-amount/--home-fee,",
     "  --deposit-nonce/--withdraw-nonce, and",
     "  --recovery-amount/--recovery-fee/--recovery-nonce.",
-    "Generation 2.2 emits configure only in G2; arm is a later G3 ceremony.",
+    "Generation 2.2 arm additionally requires --deployment-evidence. The emitter",
+    "revalidates its runtime hashes/probe and a fresh configured-empty chain state.",
     "For v2.1 --packet arm, --dry-run-evidence is mandatory and must bind all five",
     "message hashes to successful forwarded/event assertions. No signing occurs."
   ].join("\n");
@@ -122,15 +145,100 @@ function stringify(value) {
   return JSON.stringify(value, (_key, entry) => typeof entry === "bigint" ? entry.toString() : entry, 2);
 }
 
-export function assertPacketGeneration({ generation, packet, messagesOut, dryRunEvidence }) {
+export function assertPacketGeneration({ generation, packet, messagesOut, dryRunEvidence, deploymentEvidence }) {
   if (!["2.1", "2.2"].includes(generation)) throw new Error("--generation must be 2.1 or 2.2.");
-  if (generation === "2.2" && packet !== "configure") {
-    throw new Error("v2.2 arm material is forbidden in G2; G3 live per-leg preflights must gate a separate ceremony.");
-  }
   if (generation === "2.2" && (messagesOut || dryRunEvidence)) {
-    throw new Error("v2.2 G2 configure emits no request messages or arm evidence.");
+    throw new Error("v2.2 configure/arm emits no caller-built request messages or upfront per-leg evidence.");
+  }
+  if (generation === "2.2" && packet === "arm" && !deploymentEvidence) {
+    throw new Error("v2.2 arm requires --deployment-evidence plus a fresh configured-empty live-state proof.");
   }
   return true;
+}
+
+export function assertV22DeploymentEvidence({ evidence, wrapper, adapter, liveRuntime, liveProbe }) {
+  if (evidence?.kind !== "averray.bankXcmV2DeploymentEvidence" || evidence?.profile !== "mainnet" || evidence?.version !== "2.2") {
+    throw new Error("v2.2 arm deployment evidence kind/profile/version mismatch.");
+  }
+  if (getAddress(evidence.wrapper?.address) !== getAddress(wrapper) || getAddress(evidence.adapter?.address) !== getAddress(adapter)) {
+    throw new Error("v2.2 arm deployment evidence is not bound to the live pair.");
+  }
+  if (
+    evidence.liveState?.wrapper?.artifactRuntimeMatch !== true ||
+    evidence.liveState?.adapter?.artifactRuntimeMatch !== true ||
+    evidence.wrapper?.runtimeCodeHash !== liveRuntime.wrapper ||
+    evidence.adapter?.runtimeCodeHash !== liveRuntime.adapter
+  ) {
+    throw new Error("v2.2 arm live runtime hashes do not match the G2 deployment bundle.");
+  }
+  const recordedProbe = evidence.liveState?.wrapper?.versionProbe;
+  if (
+    recordedProbe?.selector !== "0x526a213a" ||
+    !/^0x[0-9a-f]{64}$/iu.test(recordedProbe?.response ?? "") ||
+    liveProbe?.selector !== "0x526a213a" ||
+    !/^0x[0-9a-f]{64}$/iu.test(liveProbe?.response ?? "")
+  ) {
+    throw new Error("v2.2 arm requires both recorded and fresh external selector proof.");
+  }
+  return {
+    sourceCommit: evidence.sourceCommit,
+    deploymentVerifiedAt: evidence.verifiedAt,
+    runtimeHashes: liveRuntime,
+    recordedVersionProbe: recordedProbe,
+    freshVersionProbe: liveProbe
+  };
+}
+
+export function assertV22ArmedEmptyState(snapshot) {
+  const zeroFields = [
+    "requestQueuedEventCount",
+    "adapterTotalShares",
+    "adapterTotalAssets",
+    "adapterPendingDepositAssets",
+    "adapterPendingWithdrawalShares",
+    "adapterRemoteOperatingFloat",
+    "wrapperTokenBalance",
+    "adapterTokenBalance",
+    "treasuryAllowanceToAdapter"
+  ];
+  for (const field of zeroFields) {
+    if (BigInt(snapshot?.[field] ?? -1) !== 0n) {
+      throw new Error(`v2.2 arm requires ${field}=0; observed ${snapshot?.[field] ?? "<missing>"}.`);
+    }
+  }
+  if (snapshot?.dispatchPaused !== true || snapshot?.policyPaused !== false) {
+    throw new Error("v2.2 arm requires policy live and wrapper locally paused.");
+  }
+  if (snapshot?.flowDisabled !== true) {
+    throw new Error("v2.2 arm requires the running backend flow to be provably disabled.");
+  }
+  return true;
+}
+
+export function assertRuntimeFlowDisabled({ health, wrapper, adapter, template }) {
+  if (!/^BANK_XCM_FLOW_ENABLED=false$/mu.test(template)) {
+    throw new Error("backend mainnet template does not keep BANK_XCM_FLOW_ENABLED=false.");
+  }
+  if (
+    health?.status !== "ok" ||
+    Number(health?.auth?.chainId) !== BANK_XCM_V2.chainId ||
+    getAddress(health?.addresses?.xcmWrapper) !== getAddress(wrapper) ||
+    getAddress(health?.addresses?.hydrationUsdcAdapter) !== getAddress(adapter) ||
+    health?.components?.blockchain?.xcmWrapperConfigured !== true ||
+    health?.capabilityHealth?.xcmObserver !== "staged"
+  ) {
+    throw new Error("public production health does not prove this pair loaded with the XCM flow staged/disabled.");
+  }
+  return {
+    healthUrl: "https://api.averray.com/health",
+    deployedSha: health.deployedSha,
+    chainId: Number(health.auth.chainId),
+    wrapper: getAddress(health.addresses.xcmWrapper),
+    adapter: getAddress(health.addresses.hydrationUsdcAdapter),
+    xcmWrapperConfigured: true,
+    xcmObserver: "staged",
+    templateSetting: "BANK_XCM_FLOW_ENABLED=false"
+  };
 }
 
 function assertConversionEvidence(evidence, wrapper, convertedAccount) {
@@ -193,27 +301,39 @@ export function assertDryRunEvidence(evidence, bundle) {
   return true;
 }
 
-async function assertLiveState({ provider, manifest, wrapperAddress, adapterAddress, convertedAccount, packet }) {
-  const wrapper = new Contract(wrapperAddress, WRAPPER_ADMIN_ABI, provider);
-  const adapter = new Contract(adapterAddress, ADAPTER_ADMIN_ABI, provider);
+async function assertLiveState({
+  provider,
+  manifest,
+  wrapperAddress,
+  adapterAddress,
+  convertedAccount,
+  packet,
+  generation,
+  deploymentEvidence,
+  fetchImpl = fetch
+}) {
+  const wrapper = new Contract(wrapperAddress, V22_WRAPPER_STATE_ABI, provider);
+  const adapter = new Contract(adapterAddress, V22_ADAPTER_STATE_ABI, provider);
   const policy = new Contract(getAddress(manifest.contracts.treasuryPolicy), POLICY_BANK_ABI, provider);
+  const blockNumber = await provider.getBlockNumber();
+  const at = { blockTag: blockNumber };
   const [code, adapterCode, liveOwner, policyPaused, wrapperPolicy, precompile, paused, operator, hydration, boundAdapter, strategySettler, adapterPolicy, adapterAsset, adapterStrategy, adapterWrapper, adapterAac] = await Promise.all([
-    provider.getCode(wrapperAddress),
-    provider.getCode(adapterAddress),
-    policy.owner(),
-    policy.paused(),
-    wrapper.policy(),
-    wrapper.xcmPrecompile(),
-    wrapper.dispatchPaused(),
-    wrapper.operator(),
-    wrapper.hydrationAccountId32(),
-    wrapper.strategyAdapter(BANK_XCM_V2.strategyId),
-    policy.strategySettler(getAddress(manifest.verifier)),
-    adapter.policy(),
-    adapter.asset(),
-    adapter.strategyId(),
-    adapter.xcmWrapper(),
-    adapter.agentAccountCore()
+    provider.getCode(wrapperAddress, blockNumber),
+    provider.getCode(adapterAddress, blockNumber),
+    policy.owner(at),
+    policy.paused(at),
+    wrapper.policy(at),
+    wrapper.xcmPrecompile(at),
+    wrapper.dispatchPaused(at),
+    wrapper.operator(at),
+    wrapper.hydrationAccountId32(at),
+    wrapper.strategyAdapter(BANK_XCM_V2.strategyId, at),
+    policy.strategySettler(getAddress(manifest.verifier), at),
+    adapter.policy(at),
+    adapter.asset(at),
+    adapter.strategyId(at),
+    adapter.xcmWrapper(at),
+    adapter.agentAccountCore(at)
   ]);
   if (code === "0x" || adapterCode === "0x") throw new Error("wrapper or adapter has no deployed bytecode.");
   if (getAddress(liveOwner) !== getAddress(manifest.owner) || getAddress(wrapperPolicy) !== getAddress(manifest.contracts.treasuryPolicy) || getAddress(precompile) !== getAddress(BANK_XCM_V2.xcmPrecompile)) {
@@ -241,7 +361,110 @@ async function assertLiveState({ provider, manifest, wrapperAddress, adapterAddr
   ) {
     throw new Error("arm packet requires the complete paused configuration to already be live.");
   }
-  return { liveOwner: getAddress(liveOwner), policyPaused, paused, operator: getAddress(operator), hydration, boundAdapter: getAddress(boundAdapter), strategySettler };
+  const result = {
+    capturedAt: new Date().toISOString(),
+    assetHubBlockNumber: blockNumber,
+    liveOwner: getAddress(liveOwner),
+    policyPaused,
+    paused,
+    operator: getAddress(operator),
+    hydration,
+    boundAdapter: getAddress(boundAdapter),
+    strategySettler
+  };
+  if (generation === "2.2" && packet === "arm") {
+    if (!deploymentEvidence) throw new Error("v2.2 arm deployment evidence was not loaded.");
+    const token = new Contract(getAddress(manifest.contracts.token), ERC20_STATE_ABI, provider);
+    const deployBlock = Number(deploymentEvidence.wrapper?.blockNumber);
+    if (!Number.isInteger(deployBlock) || deployBlock <= 0 || deployBlock > blockNumber) {
+      throw new Error("v2.2 deployment evidence has an invalid wrapper block.");
+    }
+    const [
+      requestLogs,
+      totalShares,
+      totalAssets,
+      pendingDepositAssets,
+      pendingWithdrawalShares,
+      remoteOperatingFloat,
+      wrapperTokenBalance,
+      adapterTokenBalance,
+      treasuryAllowance,
+      freshProbe,
+      healthResponse
+    ] = await Promise.all([
+      provider.getLogs({ address: wrapperAddress, topics: [REQUEST_QUEUED_TOPIC], fromBlock: deployBlock, toBlock: blockNumber }),
+      adapter.totalShares(at),
+      adapter.totalAssets(at),
+      adapter.pendingDepositAssets(at),
+      adapter.pendingWithdrawalShares(at),
+      adapter.remoteOperatingFloat(at),
+      token.balanceOf(wrapperAddress, at),
+      token.balanceOf(adapterAddress, at),
+      token.allowance(getAddress(manifest.owner), adapterAddress, at),
+      probeWrapperV22Selector(provider, wrapperAddress),
+      fetchImpl("https://api.averray.com/health")
+    ]);
+    if (!healthResponse?.ok) throw new Error(`public production health fetch failed (${healthResponse?.status ?? "no status"}).`);
+    const health = await healthResponse.json();
+    const flow = assertRuntimeFlowDisabled({
+      health,
+      wrapper: wrapperAddress,
+      adapter: adapterAddress,
+      template: readFileSync(resolve(repoRoot, "deploy/backend.mainnet.env.template"), "utf8")
+    });
+    const runtime = {
+      wrapper: sha256Hex(code),
+      adapter: sha256Hex(adapterCode)
+    };
+    const verifiedDeployment = assertV22DeploymentEvidence({
+      evidence: deploymentEvidence,
+      wrapper: wrapperAddress,
+      adapter: adapterAddress,
+      liveRuntime: runtime,
+      liveProbe: freshProbe
+    });
+    const empty = {
+      requestQueuedEventCount: requestLogs.length,
+      adapterTotalShares: totalShares.toString(),
+      adapterTotalAssets: totalAssets.toString(),
+      adapterPendingDepositAssets: pendingDepositAssets.toString(),
+      adapterPendingWithdrawalShares: pendingWithdrawalShares.toString(),
+      adapterRemoteOperatingFloat: remoteOperatingFloat.toString(),
+      wrapperTokenBalance: wrapperTokenBalance.toString(),
+      adapterTokenBalance: adapterTokenBalance.toString(),
+      treasuryAllowanceToAdapter: treasuryAllowance.toString(),
+      dispatchPaused: paused,
+      policyPaused,
+      flowDisabled: true
+    };
+    assertV22ArmedEmptyState(empty);
+    result.g2Verification = {
+      deploymentEvidence: argsafeEvidenceRef(deploymentEvidence),
+      deployment: verifiedDeployment,
+      configurePostState: {
+        operator: getAddress(operator),
+        hydrationAccountId32: hydration,
+        strategyAdapter: getAddress(boundAdapter),
+        strategySettler,
+        dispatchPaused: paused,
+        policyPaused
+      },
+      armedEmpty: empty,
+      flow
+    };
+  }
+  return result;
+}
+
+function argsafeEvidenceRef(evidence) {
+  return {
+    kind: evidence.kind,
+    version: evidence.version,
+    sourceCommit: evidence.sourceCommit,
+    verifiedAt: evidence.verifiedAt,
+    wrapperTxHash: evidence.wrapper?.txHash,
+    adapterTxHash: evidence.adapter?.txHash
+  };
 }
 
 export async function main(argv = process.argv.slice(2)) {
@@ -253,7 +476,7 @@ export async function main(argv = process.argv.slice(2)) {
   if (args.profile !== "mainnet" || !PACKETS.has(args.packet)) throw new Error("profile must be mainnet and packet configure|arm.");
   assertPacketGeneration(args);
   if (args.generation === "2.2" && !args.packetOut) {
-    throw new Error("v2.2 G2 configure requires --packet-out so the unsigned SCALE and capture-time liveState are reviewable.");
+    throw new Error("v2.2 configure/arm requires --packet-out so the unsigned SCALE and capture-time liveState are reviewable.");
   }
   if (!args.wrapper || !args.adapter || !args.convertedAccount || !args.conversionEvidence || !args.signer) throw new Error("wrapper, adapter, converted account, conversion evidence, and signer are required.");
   if ((args.timepointHeight !== undefined) !== (args.timepointIndex !== undefined)) throw new Error("timepoint height/index must be supplied together.");
@@ -263,6 +486,7 @@ export async function main(argv = process.argv.slice(2)) {
   if (!/^0x[0-9a-f]{64}$/u.test(convertedAccount)) throw new Error("--converted-account must be bytes32.");
   const manifest = loadJson(resolve(repoRoot, "deployments/mainnet.json"));
   const ownerRecord = loadJson(resolve(repoRoot, "deployments/mainnet-multisig-owner.json"));
+  const deploymentEvidence = args.deploymentEvidence ? loadJson(resolve(args.deploymentEvidence)) : null;
   const conversion = assertConversionEvidence(loadJson(resolve(args.conversionEvidence)), wrapper, convertedAccount);
   const signer = resolveProfileSigner({ ownerRecord, profile: "mainnet", signerLabel: args.signer });
   const messages = args.generation === "2.1" ? buildBankXcmV2Messages({
@@ -292,8 +516,10 @@ export async function main(argv = process.argv.slice(2)) {
     await writeFile(resolve(args.messagesOut), `${stringify({ schemaVersion: 2, kind: "averray.bankXcmV2Messages", profile: "mainnet", ...messages, recovery })}\n`, { flag: "wx" });
   }
   if (args.packet === "arm") {
-    if (!args.dryRunEvidence) throw new Error("arm packet requires --dry-run-evidence.");
-    assertDryRunEvidence(loadJson(resolve(args.dryRunEvidence)), evidenceBundle);
+    if (args.generation === "2.1") {
+      if (!args.dryRunEvidence) throw new Error("v2.1 arm packet requires --dry-run-evidence.");
+      assertDryRunEvidence(loadJson(resolve(args.dryRunEvidence)), evidenceBundle);
+    }
   }
 
   const rpc = await createCeremonyRpcContext({ manifest, phase: `bank-xcm-v2-${args.packet}-owner-check`, write: false });
@@ -319,9 +545,16 @@ export async function main(argv = process.argv.slice(2)) {
       };
       authority = assertOwnerRecordAuthority({ ownerRecord, livePolicyOwner: liveOwner });
     } else {
-      live = await assertLiveState({ provider: rpc.provider, manifest, wrapperAddress: wrapper, adapterAddress: adapter, convertedAccount, packet: args.packet });
-      live.capturedAt = new Date().toISOString();
-      live.assetHubBlockNumber = await rpc.provider.getBlockNumber();
+      live = await assertLiveState({
+        provider: rpc.provider,
+        manifest,
+        wrapperAddress: wrapper,
+        adapterAddress: adapter,
+        convertedAccount,
+        packet: args.packet,
+        generation: args.generation,
+        deploymentEvidence
+      });
       authority = assertOwnerRecordAuthority({ ownerRecord, livePolicyOwner: live.liveOwner });
     }
   } finally {
@@ -331,9 +564,14 @@ export async function main(argv = process.argv.slice(2)) {
   const innerCalls = args.packet === "configure"
     ? buildConfigurationCalls({ manifest, wrapper, adapter, convertedAccountId32: convertedAccount })
     : buildArmCalls({ wrapper });
-  if (args.generation === "2.2") {
+  if (args.generation === "2.2" && args.packet === "configure") {
     if (innerCalls.length !== 4 || innerCalls.some((call) => call.data.toLowerCase().startsWith("0x1f59d6fb"))) {
-      throw new Error("v2.2 G2 packet must contain exactly four configuration calls and no unpause selector.");
+      throw new Error("v2.2 G2 configure packet must contain exactly four configuration calls and no unpause selector.");
+    }
+  }
+  if (args.generation === "2.2" && args.packet === "arm") {
+    if (innerCalls.length !== 1 || !innerCalls[0].data.toLowerCase().startsWith("0x1f59d6fb")) {
+      throw new Error("v2.2 arm packet must contain exactly one setDispatchPaused(false) call.");
     }
   }
   const timepoint = args.timepointHeight === undefined ? null : { height: Number(args.timepointHeight), index: Number(args.timepointIndex) };
@@ -411,7 +649,9 @@ export async function main(argv = process.argv.slice(2)) {
   }
   console.log(args.packet === "configure"
     ? `STOP AFTER EXECUTION: v${args.generation} wrapper must remain dispatchPaused=true; no unpause call exists in this packet.`
-    : "ARM PRECONDITION PASSED: all five exact-message dry-run records matched. This tool still signed/submitted nothing.");
+    : args.generation === "2.2"
+      ? "ARM PRECONDITION PASSED: G2 runtime/probe/configuration and fresh armed-empty state matched. Per-leg gates now run just in time. This tool still signed/submitted nothing."
+      : "ARM PRECONDITION PASSED: all five exact-message dry-run records matched. This tool still signed/submitted nothing.");
   const packetEvidence = {
     schemaVersion: 1,
     kind: "averray.bankXcmV2MultisigPacket",
@@ -433,6 +673,7 @@ export async function main(argv = process.argv.slice(2)) {
     asMultiScale: payload.asMultiHex,
     substrate,
     containsUnpause: innerCalls.some((call) => call.data.toLowerCase().startsWith("0x1f59d6fb")),
+    armBasis: args.generation === "2.2" && args.packet === "arm" ? live.g2Verification : undefined,
     observerTargets: {
       asset22: { endpoint: BANK_XCM_V2.observerAssetEndpoint, accountId32: convertedAccount, assetId: 22 },
       aUsdc: { endpoint: BANK_XCM_V2.observerEvmEndpoint, contract: BANK_XCM_V2.aUsdcContract, account: truncateAccountId32(convertedAccount) }
