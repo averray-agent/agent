@@ -218,6 +218,31 @@ jobs:
       - name: Template matches manifest (settlement values)
         run: node scripts/ops/check-template-matches-manifest.mjs
 
+      # PR #929 follow-up. The mainnet env templates are GENERATED from the
+      # testnet ones by render-mainnet-backend-env.mjs, whose header has always
+      # claimed "CI runs `--check` and fails if this file is stale". Nothing
+      # ran it. The sibling checks above cover structure and settlement parity,
+      # and check-generated-output-clean.mjs guards only frontend/ and site/ —
+      # so a hand-edit to a file headed DO NOT hand-edit sat on main unnoticed
+      # until someone happened to run the generator.
+      #
+      # It is not cosmetic drift — but it is not silent either, and the honest
+      # reason for this step is WHERE the failure lands rather than whether it
+      # lands at all. The eight BANK_LANE_FEED_* values existed ONLY in the
+      # generated file, so a regeneration blanks six of them, and
+      # bank-lane-feed.test.js (which reads that template and cross-checks it
+      # against deployments/mainnet.json) then fails with
+      # "BANK_LANE_FEED_HYDRATION_ACCOUNT_ID32 is required".
+      #
+      # That sends the reader to the config loader for a problem that lives in
+      # a template generator. This step fails at the source and names both the
+      # stale file and the command that fixes it.
+      #
+      # One invocation covers everything the generator writes: both mainnet
+      # templates and the generated block of deploy/secrets-inventory.md.
+      - name: Mainnet env templates are freshly generated
+        run: node scripts/ops/render-mainnet-backend-env.mjs --check
+
       # Phase 2 PR 2.9: npm install-script supply-chain guard.
       # Scans package-lock.json for transitive deps with
       # `hasInstallScript: true` and fails if any are not in the
