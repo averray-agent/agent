@@ -4,6 +4,7 @@ import { normalizeVenueBalanceTarget } from "./venue-balance-reader.js";
 
 const DEFAULT_STATE_SCOPE = "bank-lane-feed";
 const ALL_PENDING_REQUESTS_LIMIT = Number.MAX_SAFE_INTEGER;
+const RECENT_TERMINAL_REQUESTS_LIMIT = 10;
 
 /**
  * Observer-owned snapshot behind GET /monitor/bank-feed.
@@ -99,9 +100,10 @@ export class BankLaneFeedService {
 
   async readRequests() {
     try {
-      const pending = await this.stateStore.listPendingXcmBalanceWatches?.(
-        ALL_PENDING_REQUESTS_LIMIT
-      ) ?? [];
+      const [pending, terminal] = await Promise.all([
+        this.stateStore.listPendingXcmBalanceWatches?.(ALL_PENDING_REQUESTS_LIMIT) ?? [],
+        this.stateStore.listRecentTerminalXcmBalanceWatches?.(RECENT_TERMINAL_REQUESTS_LIMIT) ?? []
+      ]);
       const readAtMs = this.now();
       return {
         // Request ids are scoped by wrapper on-chain, but the durable observer
@@ -110,7 +112,7 @@ export class BankLaneFeedService {
         // venue target is known-retired work and must not alarm on the active
         // lane. Unknown/malformed targets remain visible (and overdue) rather
         // than being silently classified as safe.
-        items: pending
+        items: [...pending, ...terminal]
           .filter((watch) => this.classifyRequestWatch(watch) !== "foreign")
           .map((watch) => requestFromWatch(watch, readAtMs)),
         readAtMs,
@@ -238,7 +240,8 @@ function requestFromWatch(watch, nowMs) {
     || !Number.isFinite(deadlineAtMs)
     || startedAtMs > nowMs
     || deadlineAtMs < startedAtMs;
-  return {
+  const terminal = watch?.status !== "pending";
+  const item = {
     id: String(watch?.requestId ?? "unknown-request"),
     kind: String(watch?.kind ?? inferRequestKind(watch?.direction)),
     phase: String(
@@ -250,8 +253,28 @@ function requestFromWatch(watch, nowMs) {
       ? Math.max(Math.floor((nowMs - startedAtMs) / 1000), 0)
       : 0,
     // An unreadable deadline fails toward the alarm, not toward all-clear.
-    overdue: invalidTiming || nowMs >= deadlineAtMs
+    overdue: terminal ? false : invalidTiming || nowMs >= deadlineAtMs,
+    status: String(watch?.status ?? "pending")
   };
+  const reconciliation = safeTerminalReconciliation(watch?.reconciliation);
+  if (terminal && reconciliation) item.reconciliation = reconciliation;
+  return item;
+}
+
+function safeTerminalReconciliation(raw) {
+  if (!raw || typeof raw !== "object") return undefined;
+  const fields = [
+    "stagedRaw",
+    "leg1TransferFeeRaw",
+    "trappedWriteOff3Raw",
+    "remoteRecoverableRaw",
+    "unexplainedRaw",
+    "artifactLabel"
+  ];
+  const value = Object.fromEntries(fields
+    .filter((field) => raw[field] !== undefined)
+    .map((field) => [field, String(raw[field])]));
+  return Object.keys(value).length > 0 ? value : undefined;
 }
 
 function classifyPositionWatch(watch, positionTarget) {
@@ -350,7 +373,17 @@ function normalizeRequests(raw) {
       && ageSeconds >= 0
       && typeof item?.overdue === "boolean";
     if (itemValid) {
-      return { id, kind, phase, ageSeconds, overdue: item.overdue };
+      const normalized = {
+        id,
+        kind,
+        phase,
+        ageSeconds,
+        overdue: item.overdue,
+        status: String(item?.status ?? (phase === "terminal" ? "unknown-terminal" : "pending"))
+      };
+      const reconciliation = safeTerminalReconciliation(item?.reconciliation);
+      if (phase === "terminal" && reconciliation) normalized.reconciliation = reconciliation;
+      return normalized;
     }
     invalid = true;
     return {

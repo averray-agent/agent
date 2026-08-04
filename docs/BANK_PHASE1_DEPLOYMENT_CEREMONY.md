@@ -479,12 +479,18 @@ dispatch while retaining the request-bound structural payload, or enforce an
 on-chain staging deadline after which dispatch is impossible. An off-chain
 stage-to-dispatch convention alone is not a sufficient real-money control.
 
-The proposed v2.1 recovery was stopped before terminalization because the
-deployed adapter cannot satisfy honest recovery accounting. On
-`settleRequest(Failed, 0, 0, ...)`, a funded Deposit unconditionally records
+The v2.1 request was terminalized under the operator-approved presentation
+exception in transaction
+`0xc34167372042061433713b7caab8e04986391857357b5726e55d4ca0e1a97ba1`
+(Asset Hub block `19,048,419`). The adapter and wrapper both record
+`Failed(3)`, settled assets/shares are `0/0`, and no value moved during
+terminalization. On `settleRequest(Failed, 0, 0, ...)`, the deployed adapter
+unconditionally records
 `recoveryAssetsOutstanding = request.requestedAssets`, which is `150,000` for
-this request. A fresh Hydration read at block `13,456,650` showed only `131,543`
-raw asset 22 at the converted account. The complete reconciliation is:
+this request. That raw slot is a **v2.1 accounting artifact,
+known-unrecoverable**. It is never a receivable and must not be used by a feed,
+board, ledger, or operator decision. The complete recoverable-value
+reconciliation is:
 
 - staged principal: `150,000` raw;
 - leg-1 reserve-transfer fee: `525` raw;
@@ -492,31 +498,42 @@ raw asset 22 at the converted account. The complete reconciliation is:
 - chain-observed recoverable balance: `131,543` raw;
 - unexplained remainder: `150,000 - 525 - 17,932 - 131,543 = 0`.
 
-Recording `150,000` as recoverable would instead create a fictitious `18,457`
-raw receivable. Accordingly, request
-`0xb609f4d875e0c6f4f4b1dddd90efd687215d1ac9ecd90d0de51b9304f57ecaac`
-remains honestly Pending and overdue; no `finalizeRequest` transaction was
-signed. v2.2 must let terminalization bind the recovery-required amount to a
-fresh, observer-proven remote balance (capped by staged principal) and record
-the difference as explicit named loss lines. Only then may the request be
-terminalized, paused, and recovered without lying in either contract or
-operator books.
+Presenting `150,000` as recoverable would create a fictitious `18,457` raw
+receivable. The v2.1 exception therefore binds presentation to the five lines
+above while allowing the partial release path to return the balance the chain
+can actually produce. v2.2 requirement #2 remains mandatory before real
+capital: terminalization must bind the recovery-required amount to a fresh,
+observer-proven remote balance (capped by staged principal) and record named
+loss lines on-chain instead of leaving a misleading storage residue.
 
-Read-only recovery preparation proved the request-associated return shape at
-the same block. With amount `131,543`, nonce `1`, and a fresh remote Asset Hub
-execution quote of `696` raw multiplied by two, the embedded fee is `1,392`
-raw. Hydration forwarded to para 1000 and the Asset Hub DryRunApi deposited
-`130,312` raw asset 1337 to wrapper image
+The post-terminalization recovery packet re-read `131,543` raw at Hydration
+block `13,456,840`. With nonce `1` and a fresh remote Asset Hub execution quote
+of `696` raw multiplied by two, the embedded fee is `1,392` raw. Hydration
+forwarded to para 1000 and the Asset Hub DryRunApi deposited `130,306` raw asset
+1337 to wrapper image
 `0x2af394fa95f75d3ca1c786128f4dfa1eb0c9675deeeeeeeeeeeeeeeeeeeeeeee`.
 The exact recovery id is
 `0xc17e25a02084d4edb8b0ff0f1e03a85e96163b8a6a4a8f2f7b531c79e28171d1`
 and message hash is
 `0xc92c981487d8b473a60aa91f60c3f6ef8f1823ee8a6f951e5ea7f3979790f743`.
-These bytes are review evidence, not executable ceremony material: the
-terminal accounting prerequisite has not passed.
+The exact two-call owner batch first pauses dispatch and then sends this
+request-associated recovery; its inner-call hash is
+`0x57815dc29457ccd1e9385d117cc28416096dc74919c88125e9b37da66617dd87`.
+It passed an exact-batch Asset Hub DryRunApi simulation and forwarded to
+Hydration. These bytes remain unsigned review material until the ceremony gate
+passes.
 
-After a recovery-capable successor closes this request, the next dust request
-must start from zero unreconciled remote capital. Quote the `DepositSell`
+After the message lands, read the **actual** Asset Hub wrapper-image delta.
+Only then emit the separately approved release calls
+`releaseRecoveredAssetsToAdapter(requestId, actualArrivedRaw)` and
+`releaseRecoveredAssets(requestId, treasury, actualArrivedRaw)`. The current
+dry-run projects `130,306` returned and a `19,694` raw v2.1 slot residue; both
+are projections, while the observed arrival is authoritative. Whatever residue
+remains is labeled `v2.1 accounting artifact, known-unrecoverable`, never an
+asset or receivable.
+
+Unpause plus fresh staging is a separate approval item. The next dust request
+must start from zero unexplained remote capital. Quote the `DepositSell`
 `BuyExecution` fee immediately before staging, embed `fresh quote × 2`, register
 and verify the observer watch before any signature, and keep staging → deployed-
 wrapper preflight → dispatch inside one tight operator window. A fee change or
