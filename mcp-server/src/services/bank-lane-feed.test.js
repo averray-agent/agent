@@ -12,22 +12,26 @@ import {
 } from "./bank-lane-feed.js";
 import { normalizeVenueBalanceTarget } from "./venue-balance-reader.js";
 
-const ACCOUNT = "0x85663dfdb243b1a11a90f0816e1f83ccdb99f8f4c4a25d432739218efd489736";
+const ACCOUNT = "0x42e55ecf123da7d3eba1c55998b3cbf8238c446367c981f1388acbc0626cf354";
 const RETIRED_ACCOUNT = "0x98f0033e26aa4ecf2899e6d09237d40d29fcb68e64d22a621520bde1123564ac";
 const AUSDC = "0x2ec4884088d84e5c2970a034732e5209b0acfa93";
 const OTHER_AUSDC = "0x1111111111111111111111111111111111111111";
-const POSTAGE = "1yKNU414vYDyXYXL6pu845puajfeGTezD1rBiUYwp9UKBaZ";
-const ACCOUNT_SS58 = "141ujyV9aKBYqZncx6SYRWU2XQCxUcYiGYE8U7jprEKVUZNJ";
+const POSTAGE = "16Mf98wAbYTVWaeHkD1SUdRPc5nmoLj9LyNtPtP1xvkF7Sxb";
+const ACCOUNT_SS58 = "12WiJGBSjqTBNqD7a7TN6mt47ZJd7f8SqyhTc2bYLFzcHYD9";
 const WRAPPER_V20 = "0xc846eE73e49A748e59C7Ac8f8742F542a552D24C";
+const WRAPPER_V21_STALE = "0x22E90B74ca73E86F13325Af6FdeA00Cd1da90943";
 const WRAPPER_V21 = "0x2AF394fA95f75D3ca1C786128f4dfA1eB0c9675D";
+const WRAPPER_V22 = "0xEceE778e11B238D2fc096E56460e7B98DC7B26b8";
 const BASE = Date.parse("2026-08-03T14:00:00.000Z");
 
-function subject(configuredWrapper = WRAPPER_V21) {
+function subject(configuredWrapper = WRAPPER_V22) {
   return {
     configuredWrapper,
     candidates: [
       { version: "2.0", wrapper: WRAPPER_V20 },
-      { version: "2.1", wrapper: WRAPPER_V21 }
+      { version: "2.1-stale-artifact", wrapper: WRAPPER_V21_STALE },
+      { version: "2.1", wrapper: WRAPPER_V21 },
+      { version: "2.2", wrapper: WRAPPER_V22 }
     ]
   };
 }
@@ -62,7 +66,7 @@ function service(store, reader, options = {}) {
     subject: subject(),
     subjectReader: {
       async readDispatchPaused(wrapper) {
-        return wrapper.toLowerCase() !== WRAPPER_V21.toLowerCase();
+        return wrapper.toLowerCase() !== WRAPPER_V22.toLowerCase();
       }
     },
     targets: targets(),
@@ -115,7 +119,7 @@ test("Bank feed preserves raw decimal strings and each source's completion clock
     provenRaw: "900719925474099312345678",
     provenSource: feed.position.source
   });
-  assert.match(feed.position.source, /^erc20:0x2ec4884088d84e5c2970a034732e5209b0acfa93\.balanceOf\(0x85663dfdb243b1a11a90f0816e1f83ccdb99f8f4\)$/u);
+  assert.match(feed.position.source, /^erc20:0x2ec4884088d84e5c2970a034732e5209b0acfa93\.balanceOf\(0x42e55ecf123da7d3eba1c55998b3cbf8238c4463\)$/u);
 });
 
 test("completed sections advance while one source remains stale", async () => {
@@ -321,7 +325,7 @@ test("Bank feed config binds the three exact ledgers and stays inert when disabl
   });
   const config = loadBankLaneFeedConfig({
     BANK_LANE_FEED_ENABLED: "true",
-    XCM_WRAPPER_ADDRESS: WRAPPER_V21,
+    XCM_WRAPPER_ADDRESS: WRAPPER_V22,
     BANK_LANE_FEED_WRAPPER_CANDIDATES_JSON: JSON.stringify(subject().candidates),
     BANK_LANE_FEED_HYDRATION_ACCOUNT_ID32: ACCOUNT,
     BANK_LANE_FEED_HYDRATION_EVM_RPC_URL: "https://rpc.hydradx.cloud",
@@ -339,12 +343,12 @@ test("Bank feed config binds the three exact ledgers and stays inert when disabl
   assert.equal(config.targets.float.assetId, "22");
   assert.equal(config.targets.postage.ledger, "substrate_system");
   assert.equal(config.targets.postage.account, POSTAGE);
-  assert.equal(config.subject.configuredWrapper, WRAPPER_V21);
+  assert.equal(config.subject.configuredWrapper, WRAPPER_V22);
   assert.deepEqual(config.subject.candidates, subject().candidates);
   assert.throws(
     () => loadBankLaneFeedConfig({
       BANK_LANE_FEED_ENABLED: "true",
-      XCM_WRAPPER_ADDRESS: WRAPPER_V21,
+      XCM_WRAPPER_ADDRESS: WRAPPER_V22,
       BANK_LANE_FEED_WRAPPER_CANDIDATES_JSON: JSON.stringify(subject().candidates)
     }),
     /BANK_LANE_FEED_HYDRATION_ACCOUNT_ID32 is required/u
@@ -358,13 +362,15 @@ test("sole-armed-wrapper subject reports the configured wrapper only from live p
   }).pollOnce();
 
   assert.deepEqual(feed.subject, {
-    configuredWrapper: WRAPPER_V21,
-    uniqueArmedWrapper: WRAPPER_V21,
+    configuredWrapper: WRAPPER_V22,
+    uniqueArmedWrapper: WRAPPER_V22,
     matches: true,
     status: "ok",
     candidates: [
       { version: "2.0", wrapper: WRAPPER_V20, dispatchPaused: true, lastError: null },
-      { version: "2.1", wrapper: WRAPPER_V21, dispatchPaused: false, lastError: null }
+      { version: "2.1-stale-artifact", wrapper: WRAPPER_V21_STALE, dispatchPaused: true, lastError: null },
+      { version: "2.1", wrapper: WRAPPER_V21, dispatchPaused: true, lastError: null },
+      { version: "2.2", wrapper: WRAPPER_V22, dispatchPaused: false, lastError: null }
     ],
     readAtMs: BASE,
     lastError: null
@@ -376,21 +382,28 @@ test("sole-armed-wrapper subject fails when env points at a recorded but retired
     configuredWrapper: WRAPPER_V20,
     candidates: [
       { version: "2.0", wrapper: WRAPPER_V20, dispatchPaused: true },
-      { version: "2.1", wrapper: WRAPPER_V21, dispatchPaused: false }
+      { version: "2.1-stale-artifact", wrapper: WRAPPER_V21_STALE, dispatchPaused: true },
+      { version: "2.1", wrapper: WRAPPER_V21, dispatchPaused: true },
+      { version: "2.2", wrapper: WRAPPER_V22, dispatchPaused: false }
     ],
     readAtMs: BASE
   });
   assert.equal(result.status, "error");
   assert.equal(result.matches, false);
-  assert.equal(result.uniqueArmedWrapper, WRAPPER_V21);
+  assert.equal(result.uniqueArmedWrapper, WRAPPER_V22);
   assert.equal(result.lastError, "configured_wrapper_not_unique_armed_wrapper");
 });
 
 test("sole-armed-wrapper subject fails on zero or multiple armed generations", () => {
   const candidate = (wrapper, dispatchPaused) => ({ version: wrapper, wrapper, dispatchPaused });
   const none = evaluateSoleArmedWrapper({
-    configuredWrapper: WRAPPER_V21,
-    candidates: [candidate(WRAPPER_V20, true), candidate(WRAPPER_V21, true)],
+    configuredWrapper: WRAPPER_V22,
+    candidates: [
+      candidate(WRAPPER_V20, true),
+      candidate(WRAPPER_V21_STALE, true),
+      candidate(WRAPPER_V21, true),
+      candidate(WRAPPER_V22, true)
+    ],
     readAtMs: BASE
   });
   assert.equal(none.status, "error");
@@ -398,8 +411,13 @@ test("sole-armed-wrapper subject fails on zero or multiple armed generations", (
   assert.equal(none.lastError, "no_armed_wrapper");
 
   const multiple = evaluateSoleArmedWrapper({
-    configuredWrapper: WRAPPER_V21,
-    candidates: [candidate(WRAPPER_V20, false), candidate(WRAPPER_V21, false)],
+    configuredWrapper: WRAPPER_V22,
+    candidates: [
+      candidate(WRAPPER_V20, false),
+      candidate(WRAPPER_V21_STALE, true),
+      candidate(WRAPPER_V21, true),
+      candidate(WRAPPER_V22, false)
+    ],
     readAtMs: BASE
   });
   assert.equal(multiple.status, "error");
@@ -409,10 +427,12 @@ test("sole-armed-wrapper subject fails on zero or multiple armed generations", (
 
 test("sole-armed-wrapper subject is unknown rather than green when any paused bit is unreadable", () => {
   const result = evaluateSoleArmedWrapper({
-    configuredWrapper: WRAPPER_V21,
+    configuredWrapper: WRAPPER_V22,
     candidates: [
       { version: "2.0", wrapper: WRAPPER_V20, dispatchPaused: null, lastError: "rpc timeout" },
-      { version: "2.1", wrapper: WRAPPER_V21, dispatchPaused: false }
+      { version: "2.1-stale-artifact", wrapper: WRAPPER_V21_STALE, dispatchPaused: true },
+      { version: "2.1", wrapper: WRAPPER_V21, dispatchPaused: true },
+      { version: "2.2", wrapper: WRAPPER_V22, dispatchPaused: false }
     ],
     readAtMs: BASE
   });
@@ -439,7 +459,7 @@ test("stored subject from a prior env generation is invalidated instead of reuse
   }).getFeed();
   assert.equal(current.subject.status, "unknown");
   assert.equal(current.subject.matches, null);
-  assert.equal(current.subject.configuredWrapper, WRAPPER_V21);
+  assert.equal(current.subject.configuredWrapper, WRAPPER_V22);
   assert.equal(current.subject.lastError, "subject_snapshot_missing_or_stale");
 });
 
@@ -480,7 +500,7 @@ test("mainnet template ships the Bank feed ENABLED, with targets that match the 
   );
   assert.equal(
     describeBalanceTarget(config.targets.position),
-    `erc20:${strategy.remote.aUsdcContract}.balanceOf(0x85663dfdb243b1a11a90f0816e1f83ccdb99f8f4)`
+    `erc20:${strategy.remote.aUsdcContract}.balanceOf(0x42e55ecf123da7d3eba1c55998b3cbf8238c4463)`
   );
   assert.equal(config.targets.position.contract, strategy.remote.aUsdcContract);
   assert.equal(config.targets.float.assetId, String(strategy.remote.assetId));

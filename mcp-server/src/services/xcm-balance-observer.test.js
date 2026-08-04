@@ -13,10 +13,10 @@ const ACCOUNT = "0xaf39ad769a03cb535d9799e49459b033c1fab84ee23ffe5d0852f8d82f02a
 const AUSDC = "0x2ec4884088d84e5c2970a034732e5209b0acfa93";
 const HYD_SUBSTRATE = "wss://hydration-rpc.n.dwellir.com";
 const HYD_EVM = "https://rpc.hydradx.cloud";
-const POSTAGE = "1yKNU414vYDyXYXL6pu845puajfeGTezD1rBiUYwp9UKBaZ";
-const MAINNET_ACCOUNT = "0x85663dfdb243b1a11a90f0816e1f83ccdb99f8f4c4a25d432739218efd489736";
-const MAINNET_ACCOUNT_SS58 = "141ujyV9aKBYqZncx6SYRWU2XQCxUcYiGYE8U7jprEKVUZNJ";
-const WRAPPER = "0x2af394fa95f75d3ca1c786128f4dfa1eb0c9675d";
+const POSTAGE = "16Mf98wAbYTVWaeHkD1SUdRPc5nmoLj9LyNtPtP1xvkF7Sxb";
+const MAINNET_ACCOUNT = "0x42e55ecf123da7d3eba1c55998b3cbf8238c446367c981f1388acbc0626cf354";
+const MAINNET_ACCOUNT_SS58 = "12WiJGBSjqTBNqD7a7TN6mt47ZJd7f8SqyhTc2bYLFzcHYD9";
+const WRAPPER = "0xecee778e11b238d2fc096e56460e7b98dc7b26b8";
 const USDC = "0x0000053900000000000000000000000001200000";
 
 const fixture = JSON.parse(await readFile(
@@ -61,7 +61,7 @@ test("SS58 Hydration account normalizes to the proven AccountId32 and truncate20
 
   assert.equal(position.account, MAINNET_ACCOUNT);
   assert.equal(float.account, MAINNET_ACCOUNT);
-  assert.equal(position.evmAccount, "0x85663dfdb243b1a11a90f0816e1f83ccdb99f8f4");
+  assert.equal(position.evmAccount, "0x42e55ecf123da7d3eba1c55998b3cbf8238c4463");
 });
 
 test("SS58 AccountId32 normalization rejects an invalid checksum", () => {
@@ -390,7 +390,7 @@ test("standing chain-event backfill requires and preserves an explicit baseline"
   assert.equal(watch.registrationSource, "chain_event_backfill");
 });
 
-test("enabled observer polls only the current v2.1 target and fails unknown scope closed", async () => {
+test("enabled observer polls only the current v2.2 target and fails unknown scope closed", async () => {
   const store = new MemoryStateStore();
   const now = Date.parse("2026-08-04T08:00:00.000Z");
   const baseWatch = {
