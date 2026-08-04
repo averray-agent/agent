@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 import { MemoryStateStore } from "../core/state-store.js";
+import { EventBus } from "../core/event-bus.js";
 import { XcmSettlementWatcherService } from "./xcm-settlement-watcher.js";
 import { XcmBalanceObserverService } from "./xcm-balance-observer.js";
 import { VenueBalanceReader, normalizeVenueBalanceTarget } from "./venue-balance-reader.js";
@@ -15,6 +16,8 @@ const HYD_EVM = "https://rpc.hydradx.cloud";
 const POSTAGE = "1yKNU414vYDyXYXL6pu845puajfeGTezD1rBiUYwp9UKBaZ";
 const MAINNET_ACCOUNT = "0x85663dfdb243b1a11a90f0816e1f83ccdb99f8f4c4a25d432739218efd489736";
 const MAINNET_ACCOUNT_SS58 = "141ujyV9aKBYqZncx6SYRWU2XQCxUcYiGYE8U7jprEKVUZNJ";
+const WRAPPER = "0x2af394fa95f75d3ca1c786128f4dfa1eb0c9675d";
+const USDC = "0x0000053900000000000000000000000001200000";
 
 const fixture = JSON.parse(await readFile(
   new URL("./fixtures/hydration-bank-round-trip.json", import.meta.url),
@@ -148,6 +151,243 @@ test("feed polling runs beside the observer without enabling XCM settlement", as
 
   assert.deepEqual(await observer.pollOnce(), []);
   assert.equal(feedPolls, 1);
+});
+
+test("RequestQueued chain event creates a staged-on-chain watch before dispatch", async () => {
+  const store = new MemoryStateStore();
+  const bus = new EventBus();
+  const observer = new XcmBalanceObserverService(
+    store,
+    { async read() { return { raw: 100_000n, asOf: "2026-08-04T10:00:00.000Z" }; } },
+    { async observeOutcome() {} },
+    bus,
+    {
+      enabled: true,
+      pollIntervalMs: 60_000,
+      now: () => Date.parse("2026-08-04T10:00:02.000Z"),
+      chainEventWatchConfig: {
+        expectedWrapper: WRAPPER,
+        depositTarget: targetFor("aUsdc"),
+        withdrawTarget: {
+          ledger: "erc20",
+          endpoint: "https://services.polkadothub-rpc.com/mainnet/",
+          account: WRAPPER,
+          contract: USDC
+        }
+      }
+    }
+  );
+  observer.start();
+  bus.publish({
+    id: "staging-event-1",
+    topic: "xcm.request_queued",
+    timestamp: "2026-08-04T10:00:00.000Z",
+    txHash: "0xstage",
+    blockNumber: 123,
+    data: {
+      requestId: REQUEST_ID,
+      wrapperAddress: WRAPPER,
+      kind: 0,
+      assetsRaw: "150000",
+      sharesRaw: "0"
+    }
+  });
+  await observer.flushChainEventIngestion();
+  bus.publish({
+    id: "dispatch-event-1",
+    topic: "xcm.request_leg_dispatched",
+    timestamp: "2026-08-04T10:00:01.000Z",
+    txHash: "0xdispatch",
+    blockNumber: 124,
+    data: {
+      requestId: REQUEST_ID,
+      wrapperAddress: WRAPPER,
+      leg: 0,
+      messageHash: `0x${"aa".repeat(32)}`,
+      feeAmount: "0"
+    }
+  });
+  await observer.flushChainEventIngestion();
+  const watch = await observer.requireArmedWatch(REQUEST_ID, { wrapperAddress: WRAPPER });
+  observer.stop();
+
+  assert.equal(watch.registrationSource, "chain_event");
+  assert.equal(watch.phase, "leg-0-dispatched-on-chain");
+  assert.equal(watch.dispatchBitmap, 1);
+  assert.equal(watch.lastDispatchTxHash, "0xdispatch");
+  assert.equal(watch.baselineRaw, "100000");
+  assert.equal(watch.sourceEventId, "staging-event-1");
+  assert.equal(watch.stagingTxHash, "0xstage");
+  assert.deepEqual(watch.settlement, { assets: "delta", shares: "delta" });
+});
+
+test("withdraw RequestQueued watches the wrapper-image USDC return, not the aUSDC position", async () => {
+  const store = new MemoryStateStore();
+  const bus = new EventBus();
+  let baselineTarget;
+  const withdrawTarget = {
+    ledger: "erc20",
+    endpoint: "https://services.polkadothub-rpc.com/mainnet/",
+    account: WRAPPER,
+    contract: USDC
+  };
+  const observer = new XcmBalanceObserverService(
+    store,
+    { async read(target) { baselineTarget = target; return { raw: 0n, asOf: "2026-08-04T10:00:00.000Z" }; } },
+    { async observeOutcome() {} },
+    bus,
+    {
+      enabled: true,
+      pollIntervalMs: 60_000,
+      now: () => Date.parse("2026-08-04T10:00:02.000Z"),
+      chainEventWatchConfig: {
+        expectedWrapper: WRAPPER,
+        depositTarget: targetFor("aUsdc"),
+        withdrawTarget
+      }
+    }
+  );
+  observer.start();
+  bus.publish({
+    id: "withdraw-staging-event",
+    topic: "xcm.request_queued",
+    timestamp: "2026-08-04T10:00:00.000Z",
+    data: { requestId: REQUEST_ID, wrapperAddress: WRAPPER, kind: 1, assetsRaw: "0", sharesRaw: "100000" }
+  });
+  await observer.flushChainEventIngestion();
+  const watch = await observer.requireArmedWatch(REQUEST_ID, { wrapperAddress: WRAPPER });
+  observer.stop();
+
+  assert.equal(baselineTarget.account, WRAPPER);
+  assert.equal(baselineTarget.contract, USDC);
+  assert.deepEqual(watch.settlement, { assets: "delta", shares: "requested_shares" });
+});
+
+test("chain-event ingestion failure is visible and cannot arm a dispatcher watch", async () => {
+  const store = new MemoryStateStore();
+  const bus = new EventBus();
+  const observer = new XcmBalanceObserverService(
+    store,
+    { async read() { throw new Error("hydration balance unavailable"); } },
+    { async observeOutcome() {} },
+    bus,
+    {
+      enabled: true,
+      pollIntervalMs: 60_000,
+      chainEventWatchConfig: {
+        expectedWrapper: WRAPPER,
+        depositTarget: targetFor("aUsdc"),
+        withdrawTarget: {
+          ledger: "erc20",
+          endpoint: "https://services.polkadothub-rpc.com/mainnet/",
+          account: WRAPPER,
+          contract: USDC
+        }
+      },
+      logger: { error() {}, warn() {} }
+    }
+  );
+  observer.start();
+  bus.publish({
+    id: "staging-event-failed",
+    topic: "xcm.request_queued",
+    timestamp: "2026-08-04T10:00:00.000Z",
+    data: { requestId: REQUEST_ID, wrapperAddress: WRAPPER, kind: 0, assetsRaw: "1", sharesRaw: "0" }
+  });
+  await observer.flushChainEventIngestion();
+  const status = await observer.getStatus();
+  observer.stop();
+
+  assert.match(status.chainEventIngestionError, /hydration balance unavailable/u);
+  await assert.rejects(
+    observer.requireArmedWatch(REQUEST_ID, { wrapperAddress: WRAPPER }),
+    /No pending chain-event observer watch/u
+  );
+});
+
+test("an overdue chain-event watch cannot authorize dispatch", async () => {
+  const store = new MemoryStateStore();
+  const observer = new XcmBalanceObserverService(
+    store,
+    { async read() { throw new Error("stored baseline must be used"); } },
+    { async observeOutcome() {} },
+    undefined,
+    {
+      enabled: true,
+      now: () => Date.parse("2026-08-04T10:16:00.000Z"),
+      chainEventWatchConfig: {
+        expectedWrapper: WRAPPER,
+        depositTarget: targetFor("aUsdc"),
+        withdrawTarget: {
+          ledger: "erc20",
+          endpoint: "https://services.polkadothub-rpc.com/mainnet/",
+          account: WRAPPER,
+          contract: USDC
+        }
+      }
+    }
+  );
+  await observer.register({
+    requestId: REQUEST_ID,
+    target: targetFor("aUsdc"),
+    direction: "increase",
+    settlement: { assets: "delta", shares: "delta" },
+    kind: "deposit",
+    wrapperAddress: WRAPPER,
+    registrationSource: "chain_event_backfill",
+    baselineRaw: "0",
+    startedAt: "2026-08-04T10:00:00.000Z"
+  });
+
+  await assert.rejects(
+    observer.requireArmedWatch(REQUEST_ID, { wrapperAddress: WRAPPER }),
+    /overdue and cannot authorize dispatch/u
+  );
+});
+
+test("standing chain-event backfill requires and preserves an explicit baseline", async () => {
+  const store = new MemoryStateStore();
+  const observer = new XcmBalanceObserverService(
+    store,
+    { async read() { throw new Error("backfill must not invent a current baseline"); } },
+    { async observeOutcome() {} },
+    undefined,
+    {
+      enabled: true,
+      chainEventWatchConfig: {
+        expectedWrapper: WRAPPER,
+        depositTarget: targetFor("aUsdc"),
+        withdrawTarget: {
+          ledger: "erc20",
+          endpoint: "https://services.polkadothub-rpc.com/mainnet/",
+          account: WRAPPER,
+          contract: USDC
+        }
+      }
+    }
+  );
+  await assert.rejects(
+    observer.register({
+      requestId: REQUEST_ID,
+      target: targetFor("aUsdc"),
+      direction: "increase",
+      wrapperAddress: WRAPPER,
+      registrationSource: "chain_event_backfill"
+    }),
+    /requires an explicit chain-height-bound baselineRaw/u
+  );
+  await observer.register({
+    requestId: REQUEST_ID,
+    target: targetFor("aUsdc"),
+    direction: "increase",
+    baselineRaw: "4242",
+    wrapperAddress: WRAPPER,
+    sourceEventId: "manual-backfill:block-123",
+    registrationSource: "chain_event_backfill"
+  });
+  const watch = await observer.requireArmedWatch(REQUEST_ID, { wrapperAddress: WRAPPER });
+  assert.equal(watch.baselineRaw, "4242");
+  assert.equal(watch.registrationSource, "chain_event_backfill");
 });
 
 test("enabled observer polls only the current v2.1 target and fails unknown scope closed", async () => {

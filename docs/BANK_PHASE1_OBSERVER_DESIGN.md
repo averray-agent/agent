@@ -1,6 +1,6 @@
 # Bank phase 1 observer and backend-dispatch boundary
 
-Status: **observer implemented; money-moving route deliberately staged**.
+Status: **v2.2 dispatcher and chain-event observer implemented; activation deliberately staged**.
 
 This note records the backend design built from `BANK_PHASE1_BUILD_PACKET.md`
 §3/§4 and the aToken ledger correction in PR #909. It also records the
@@ -20,7 +20,8 @@ target. Phase 1 uses:
 `hydration_truncate20` is an explicit target transform, not a generic account
 rule. A different venue must configure its own ledger/account mapping.
 
-`XcmBalanceObserverService` stores a durable watch before dispatch, polls the
+`XcmBalanceObserverService` projects a durable watch from the wrapper's
+on-chain `RequestQueued` event before any operator dispatch, polls the
 venue ledger, and turns only a positive balance delta into a terminal
 observation. It passes the actual delta to the existing
 `XcmSettlementWatcherService`, which preflights and calls
@@ -34,18 +35,48 @@ operational status includes pending count, overdue count, oldest age, target,
 deadline, last read, and last error, and `/admin/status` raises an anomaly for
 overdue watches.
 
-`XcmDryRunDispatchGuard` is the sole transition from prepared message to a
-signing callback. It requires successful exact-message execution plus the
-declared event/forwarded-destination evidence. The callback is never invoked on
-a missing `Broadcast.Swapped`, wrong sibling, or failed dry-run. The generic
-`BankXcmFlowCoordinator` records the allocation intent/watch, gates the
-queue/first dispatch, waits for the intermediate predicate, gates the second
-dispatch, then leaves the request pending until the balance observer finalizes
-it.
+The event listener starts only after this subscription is armed. A watch
+records the wrapper generation, staging transaction/block, event id, and
+balance baseline. A dispatcher may proceed only with a pending watch whose
+source is `chain_event` (or the standing `chain_event_backfill` import, which
+requires an explicit chain-height-bound baseline). An unreadable baseline or
+unavailable subscription is a visible ingestion error and cannot become an
+implicit permission to dispatch.
+
+`BankXcmV22Dispatcher` is the sole transition from an on-chain staged request
+to the operator signing callback. In one session it re-reads the request,
+pause/operator/bitmap/parameters; obtains the dispatch-time fee; dry-runs the
+exact constructed message with its required event; measures the exact wrapper
+call through live `ReviveApi_call`; doubles only those measured limits; obtains
+a fresh exact `eth_estimateGas` and doubles it; and proves the event-created
+watch is armed. It then re-reads the binding state immediately before signing,
+requires a successful receipt, and records actual `gasUsed`. Evidence not
+marked `liveState: true`, remembered limits, caller-supplied fees, and missing
+watches are all refusing conditions.
+
+DepositSell uses a fresh remote fee quote times two, capped by the
+multisig-staged `maxFeePerLeg`. WithdrawSell instead uses the freshly observed
+complete remote asset-22 operating float, also capped, and records that value
+through `recordRemoteOperatingFloat` before dispatch. WithdrawHome remains
+parameterless and request-self-budgeting.
 
 Activation requires both `BANK_XCM_FLOW_ENABLED=1` and a non-null
-`XCM_WRAPPER_ADDRESS`. Both deployed templates keep it false and the manifest's
-wrapper is currently null.
+`XCM_WRAPPER_ADDRESS`. Unit 2 adds no environment or manifest activation; that
+plumbing is the separately reviewed Unit 3.
+
+### Staging headroom and remote residue
+
+A deposit plan is refused unless staged assets cover
+`sellAmount + maxFeePerLeg + fundingTransferFeeHeadroomRaw`. The approximately
+525-raw funding transfer fee observed in the v2.1 dust cycle is evidence for
+the rule, not a universal constant: the dispatcher reads the current headroom
+input and records it in the evidence.
+
+WithdrawHome guarantees its staged minimum output, not an exact sweep of the
+converted account. `actualOut - minimumOutput`, plus prior fee surpluses, can
+remain as remote asset-22 operating float. That residue is an observable Bank
+float, not a lost or silently reconciled amount; it remains on the float tile.
+A general sweep is future work and is not synthesized by this dispatcher.
 
 ## Round-trip fixtures
 
@@ -60,9 +91,9 @@ round trip and replays their destination-state deltas:
 The fixture deliberately does not query `Tokens.accounts(account, 1003)`; that
 value is zero by design.
 
-## Activation blocker found at the contract boundary
+## Historical v2.0 boundary (resolved constructively in v2.2 source)
 
-The current source cannot yet carry the packet's two-message flow:
+The pre-v2.2 source could not carry the packet's two-message flow:
 
 1. `XcmWrapper.queueRequest` always calls `IXcmPrecompile.send(destination,
    message)` once. The proven funding leg is an Asset-Hub-local
@@ -85,15 +116,8 @@ The current source cannot yet carry the packet's two-message flow:
    `DepositReserveAsset`/`InitiateReserveWithdraw`, and the required two-leg
    shape.
 
-For these reasons this change does **not** hook the coordinator into the live
-account mutation route. Doing so would advertise an allocation path that
-cannot settle with the current contracts. Gate 4 needs a reviewed custody and
-dispatch decision first: either make the wrapper/adapter own and execute both
-legs under a derived wrapper origin, or define a distinct backend-driven
-transport/ledger contract whose funding source and remote origin are bound on
-chain. That is a contract deployment decision, not a backend callback detail.
-
-Once that decision lands, the activation work is narrow: supply the trusted
-Hydration message planner plus queue/follow-up callbacks to
-`BankXcmFlowCoordinator`, register its final watch, and flip the two activation
-inputs. No observer or settlement-ledger redesign is required.
+These were the v2.0 blockers that motivated the constructive v2.2 contracts.
+They are retained as provenance, not as current activation instructions.
+`XcmWrapperV22` constructs its own bounded legs and the adapter/wrapper custody
+handshake owns the staged capital. Unit 3 supplies deployed addresses and env
+plumbing; no observer or settlement-ledger redesign is required.

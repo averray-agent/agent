@@ -167,8 +167,16 @@ export const STRATEGY_ADAPTER_ABI = [
 export const XCM_WRAPPER_ABI = [
   "function weighMessage(bytes message) view returns ((uint64 refTime, uint64 proofSize))",
   "function getRequest(bytes32 requestId) view returns (((bytes32 strategyId, uint8 kind, address account, address asset, address recipient, uint256 assets, uint256 shares, uint64 nonce) context, address queuedBy, uint8 status, uint256 settledAssets, uint256 settledShares, bytes32 remoteRef, bytes32 failureCode, uint64 createdAt, uint64 updatedAt))",
+  "function getRequestParameters(bytes32 requestId) view returns ((uint256 sellAmount, uint256 minimumOutput, uint256 maxFeePerLeg, uint64 dispatchDeadline))",
+  "function requestDispatchBitmap(bytes32 requestId) view returns (uint8)",
+  "function dispatchPaused() view returns (bool)",
+  "function operator() view returns (address)",
+  "function previewLegMessage(bytes32 requestId, uint8 leg, uint256 feeAmount) view returns (bytes destination, bytes message, (uint64 refTime, uint64 proofSize) maxWeight)",
+  "function dispatchLeg(bytes32 requestId, uint8 leg, uint256 feeAmount)",
   "function finalizeRequest(bytes32 requestId, uint8 status, uint256 settledAssets, uint256 settledShares, bytes32 remoteRef, bytes32 failureCode)",
   "event RequestQueued(bytes32 indexed requestId, bytes32 indexed strategyId, uint8 indexed kind, address account, address asset, address recipient, uint256 assets, uint256 shares, uint64 nonce)",
+  "event RequestParametersStored(bytes32 indexed requestId, uint256 sellAmount, uint256 minimumOutput, uint256 maxFeePerLeg, uint64 dispatchDeadline)",
+  "event RequestLegDispatched(bytes32 indexed requestId, uint8 indexed leg, address indexed caller, bytes32 destinationHash, bytes32 messageHash, uint256 feeAmount)",
   "event RequestPayloadStored(bytes32 indexed requestId, bytes32 destinationHash, bytes32 messageHash, uint64 refTime, uint64 proofSize)",
   "event RequestDispatched(bytes32 indexed requestId, address indexed xcmPrecompile, bytes32 destinationHash, bytes32 messageHash)",
   "event RequestStatusUpdated(bytes32 indexed requestId, uint8 indexed status, uint256 settledAssets, uint256 settledShares, bytes32 remoteRef, bytes32 failureCode)"

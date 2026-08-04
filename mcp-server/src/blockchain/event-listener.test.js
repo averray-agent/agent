@@ -26,7 +26,9 @@ const XCM_EVENT_TOPICS = {
   RequestQueued: `0x${"01".repeat(32)}`,
   RequestPayloadStored: `0x${"02".repeat(32)}`,
   RequestDispatched: `0x${"03".repeat(32)}`,
-  RequestStatusUpdated: `0x${"04".repeat(32)}`
+  RequestStatusUpdated: `0x${"04".repeat(32)}`,
+  RequestParametersStored: `0x${"05".repeat(32)}`,
+  RequestLegDispatched: `0x${"06".repeat(32)}`
 };
 
 function makeListener({ gateway = {}, xcmRequest = {} } = {}) {
@@ -106,6 +108,34 @@ test("EventListener preserves unsafe XCM queued nonce as raw string", async () =
   assert.equal(events[0].data.nonce, unsafeNonce.toString());
   assert.equal(events[0].data.nonceRaw, unsafeNonce.toString());
   assert.equal(events[0].data.blockNumberRaw, "12345");
+  assert.equal(events[0].data.wrapperAddress, XCM_CONTRACT_ADDRESS);
+});
+
+test("EventListener exposes v2.2 staged parameters and per-leg dispatch evidence", async () => {
+  const { listener, events } = makeListener();
+  await listener.start();
+  await emit(listener, "RequestParametersStored", {
+    requestId: REQUEST_ID,
+    sellAmount: 100_000n,
+    minimumOutput: 95_000n,
+    maxFeePerLeg: 40_000n,
+    dispatchDeadline: 0n
+  });
+  await emit(listener, "RequestLegDispatched", {
+    requestId: REQUEST_ID,
+    leg: 1,
+    caller: ACCOUNT,
+    destinationHash: `0x${"cc".repeat(32)}`,
+    messageHash: `0x${"dd".repeat(32)}`,
+    feeAmount: 35_000n
+  }, { index: 1 });
+
+  assert.equal(events[0].topic, "xcm.request_parameters_stored");
+  assert.equal(events[0].data.maxFeePerLeg, "40000");
+  assert.equal(events[1].topic, "xcm.request_leg_dispatched");
+  assert.equal(events[1].data.leg, 1);
+  assert.equal(events[1].data.feeAmount, "35000");
+  assert.equal(events[1].data.wrapperAddress, XCM_CONTRACT_ADDRESS);
 });
 
 test("EventListener preserves unsafe XCM weight fields as raw strings", async () => {

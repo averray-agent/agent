@@ -673,6 +673,14 @@ export class PlatformService {
         details: xcmBalanceObserver.error
       });
     }
+    if (xcmBalanceObserver?.chainEventIngestionError) {
+      anomalies.push({
+        severity: "high",
+        code: "xcm_balance_watch_ingestion_failed",
+        message: "An on-chain Bank request event could not arm or update its balance watch.",
+        details: xcmBalanceObserver.chainEventIngestionError
+      });
+    }
     if (xcmBalanceObserver?.readErrorCount > 0) {
       anomalies.push({
         severity: "medium",

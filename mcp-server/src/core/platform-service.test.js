@@ -1751,6 +1751,25 @@ test("getAdminStatus alarms when a venue balance read is unknown/stale", async (
   assert.ok(status.anomalies.some((entry) => entry.code === "xcm_balance_observation_read_failed"));
 });
 
+test("getAdminStatus alarms when a chain event cannot arm its Bank watch", async () => {
+  const service = makePlatformService();
+  service.xcmBalanceObserver = {
+    async getStatus() {
+      return {
+        enabled: true,
+        running: true,
+        pendingCount: 0,
+        readErrorCount: 0,
+        overdueCount: 0,
+        chainEventIngestionError: "RequestQueued event came from an unexpected wrapper generation."
+      };
+    }
+  };
+
+  const status = await service.getAdminStatus();
+  assert.ok(status.anomalies.some((entry) => entry.code === "xcm_balance_watch_ingestion_failed"));
+});
+
 test("getAdminStatus reports XCM status read failures without failing the response", async () => {
   const service = makePlatformService();
   service.xcmSettlementWatcher = {

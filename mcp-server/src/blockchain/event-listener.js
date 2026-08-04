@@ -330,6 +330,7 @@ export class EventListener {
         wallets: [args.account],
         data: {
           requestId: args.requestId,
+          wrapperAddress: String(payload.log.address ?? this.gateway.xcmWrapperContract?.target ?? "").toLowerCase(),
           strategyId: args.strategyId,
           kind: Number(args.kind),
           asset: args.asset,
@@ -342,6 +343,45 @@ export class EventListener {
           nonceRaw: rawIntegerString(args.nonce)
         }
       }));
+
+    this.registerXcm("RequestParametersStored", "xcm.request_parameters_stored", async ({ args, payload }) => {
+      const request = await this.gateway.getXcmRequest(args.requestId);
+      return this.buildChainEvent({
+        topic: "xcm.request_parameters_stored",
+        args,
+        payload,
+        wallet: request.account,
+        wallets: [request.account],
+        data: {
+          requestId: args.requestId,
+          wrapperAddress: String(payload.log.address ?? this.gateway.xcmWrapperContract?.target ?? "").toLowerCase(),
+          sellAmount: args.sellAmount.toString(),
+          minimumOutput: args.minimumOutput.toString(),
+          maxFeePerLeg: args.maxFeePerLeg.toString(),
+          dispatchDeadline: rawIntegerString(args.dispatchDeadline)
+        }
+      });
+    });
+
+    this.registerXcm("RequestLegDispatched", "xcm.request_leg_dispatched", async ({ args, payload }) => {
+      const request = await this.gateway.getXcmRequest(args.requestId);
+      return this.buildChainEvent({
+        topic: "xcm.request_leg_dispatched",
+        args,
+        payload,
+        wallet: request.account,
+        wallets: [request.account],
+        data: {
+          requestId: args.requestId,
+          wrapperAddress: String(payload.log.address ?? this.gateway.xcmWrapperContract?.target ?? "").toLowerCase(),
+          leg: Number(args.leg),
+          caller: args.caller,
+          destinationHash: args.destinationHash,
+          messageHash: args.messageHash,
+          feeAmount: args.feeAmount.toString()
+        }
+      });
+    });
 
     this.registerXcm("RequestPayloadStored", "xcm.request_payload_stored", async ({ args, payload }) => {
       const request = await this.gateway.getXcmRequest(args.requestId);
