@@ -2,10 +2,11 @@
   "schemaVersion": 2,
   "kind": "averray.bankXcmV2DeploymentEvidence",
   "profile": "mainnet",
+  "version": "2.2",
   "sourceCommit": "REPLACE_WITH_FULL_40_CHARACTER_COMMIT",
   "deployer": "0x9Ab8531FBb0948C542a31298FD61335f30064239",
   "verifiedAt": "REPLACE_WITH_ISO_8601_TIMESTAMP",
-  "replacementReason": "v2.1: remote send legs must not require Asset-Hub-local XCM weighing",
+  "replacementReason": "v2.2: dispatch-time fee pricing and observer-proven terminal accounting",
   "wrapper": {
     "address": "REPLACE_WITH_XCM_WRAPPER_V2_ADDRESS",
     "txHash": "REPLACE_WITH_DEPLOY_TRANSACTION_HASH",

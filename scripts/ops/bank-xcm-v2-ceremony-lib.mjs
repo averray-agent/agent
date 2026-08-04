@@ -384,6 +384,10 @@ export function buildArmCalls({ wrapper }) {
 
 export function applyBankXcmV2Manifest(manifest, evidence) {
   const next = structuredClone(manifest);
+  const version = String(evidence.version ?? "").trim();
+  if (!/^2(?:\.[0-9]+)?$/u.test(version)) {
+    throw new Error("Bank XCM deployment evidence version must identify a v2 generation.");
+  }
   const wrapper = getAddress(evidence.wrapper.address);
   const adapter = getAddress(evidence.adapter.address);
   const previousWrapper = isAddress(next.contracts?.xcmWrapper) ? getAddress(next.contracts.xcmWrapper) : null;
@@ -401,34 +405,58 @@ export function applyBankXcmV2Manifest(manifest, evidence) {
       throw new Error("deployment evidence has an invalid transaction or provenance hash.");
     }
   }
+  const history = [...(next.bankXcmDeploymentHistory ?? [])];
   if (previousWrapper && previousAdapter && (previousWrapper !== wrapper || previousAdapter !== adapter)) {
-    next.bankXcmDeploymentHistory = [...(next.bankXcmDeploymentHistory ?? []), {
-      version: next.bankXcmV2Deployment?.version ?? "2.0",
-      status: "retired_replaced",
-      wrapper: previousWrapper,
-      adapter: previousAdapter,
-      deployTxHashes: next.bankXcmV2Deployment?.deployTxHashes ?? null,
-      convertedAccountId32: next.bankXcmV2Deployment?.convertedAccountId32 ?? null,
-      replacementReason: evidence.replacementReason ?? "superseded by a reviewed Bank wrapper deployment",
-      incident: next.bankXcmV2Deployment?.incident ?? null,
-      retiredCapital: evidence.retiredCapital ?? next.bankXcmV2Deployment?.incident?.writeOffs ?? []
-    }];
+    const previousRecorded = history.some((entry) => (
+      isAddress(entry?.wrapper) && getAddress(entry.wrapper) === previousWrapper
+    ));
+    if (!previousRecorded) {
+      history.push({
+        version: next.bankXcmV2Deployment?.version ?? "2.0",
+        status: "retired_replaced",
+        wrapper: previousWrapper,
+        adapter: previousAdapter,
+        deployTxHashes: next.bankXcmV2Deployment?.deployTxHashes ?? null,
+        ...(next.bankXcmV2Deployment?.convertedAccountId32
+          ? { convertedAccountId32: next.bankXcmV2Deployment.convertedAccountId32 }
+          : {}),
+        replacementReason: evidence.replacementReason ?? "superseded by a reviewed Bank wrapper deployment",
+        incident: next.bankXcmV2Deployment?.incident ?? null,
+        retiredCapital: evidence.retiredCapital ?? next.bankXcmV2Deployment?.incident?.writeOffs ?? []
+      });
+    }
   }
+  if (history.some((entry) => isAddress(entry?.wrapper) && getAddress(entry.wrapper) === wrapper)) {
+    throw new Error(`Bank XCM wrapper ${wrapper} is already present in append-only deployment history.`);
+  }
+  history.push({
+    version,
+    status: "deployed_paused",
+    wrapper,
+    adapter,
+    deployTxHashes: { wrapper: evidence.wrapper.txHash, adapter: evidence.adapter.txHash },
+    ...(evidence.convertedAccountId32 ? { convertedAccountId32: evidence.convertedAccountId32 } : {}),
+    replacementReason: evidence.replacementReason ?? null
+  });
+  next.bankXcmDeploymentHistory = history;
   next.contracts = { ...next.contracts, xcmWrapper: wrapper, hydrationUsdcAdapter: adapter };
   next.contractProvenance = {
     ...next.contractProvenance,
     [wrapper]: { sourceCommit, abiHash: evidence.wrapper.abiHash, runtimeCodeHash: evidence.wrapper.runtimeCodeHash, verifiedAt },
     [adapter]: { sourceCommit, abiHash: evidence.adapter.abiHash, runtimeCodeHash: evidence.adapter.runtimeCodeHash, verifiedAt }
   };
+  const generationSuffix = version === "2" || version === "2.0"
+    ? "V2"
+    : `V${version.replace(".", "_")}`;
   next.deploymentBlocks = {
     ...next.deploymentBlocks,
-    [previousWrapper ? "xcmWrapperV2_1" : "xcmWrapperV2"]: evidence.wrapper.blockNumber,
-    [previousAdapter ? "hydrationUsdcAdapterV2_1" : "hydrationUsdcAdapter"]: evidence.adapter.blockNumber
+    [`xcmWrapper${generationSuffix}`]: evidence.wrapper.blockNumber,
+    [generationSuffix === "V2" ? "hydrationUsdcAdapter" : `hydrationUsdcAdapter${generationSuffix}`]: evidence.adapter.blockNumber
   };
   next.deployers = {
     ...next.deployers,
-    [previousWrapper ? "xcmWrapperV2_1" : "xcmWrapperV2"]: getAddress(evidence.deployer),
-    [previousAdapter ? "hydrationUsdcAdapterV2_1" : "hydrationUsdcAdapter"]: getAddress(evidence.deployer)
+    [`xcmWrapper${generationSuffix}`]: getAddress(evidence.deployer),
+    [generationSuffix === "V2" ? "hydrationUsdcAdapter" : `hydrationUsdcAdapter${generationSuffix}`]: getAddress(evidence.deployer)
   };
   next.strategies = (next.strategies ?? []).filter((entry) => entry?.id !== BANK_XCM_V2.strategyLabel);
   next.strategies.push({
@@ -448,7 +476,7 @@ export function applyBankXcmV2Manifest(manifest, evidence) {
     }
   });
   next.bankXcmV2Deployment = {
-    version: previousWrapper ? "2.1" : "2.0",
+    version,
     status: "deployed_paused",
     deployTxHashes: { wrapper: evidence.wrapper.txHash, adapter: evidence.adapter.txHash },
     configurationMultisigExecTx: evidence.configurationMultisigExecTx ?? null,

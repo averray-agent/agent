@@ -316,6 +316,24 @@
           "reason": "pre-wrapper identity-split rehearsal balance was not controllable by the converted origin"
         }
       ]
+    },
+    {
+      "version": "2.1-stale-artifact",
+      "status": "abandoned_never_configured_paused",
+      "wrapper": "0x22E90B74ca73E86F13325Af6FdeA00Cd1da90943",
+      "replacementReason": "deployed from the stale pre-v2.1 ceremony checkout; never configure, arm, or reuse"
+    },
+    {
+      "version": "2.1",
+      "status": "retired_paused_release_pending_ceremony",
+      "wrapper": "0x2AF394fA95f75D3ca1C786128f4dfA1eB0c9675D",
+      "adapter": "0x7f02600eA185b5d9ecfB2B7ac97a6a502F89B81B",
+      "deployTxHashes": {
+        "wrapper": "0x5eeff954e5cc89b9fbab9bcfa1d49068dadb8b4d31b241cb88f8465245d4cbe1",
+        "adapter": "0x3e56ffe3b3d60f1eb055dc4d6a383a13db82d16783cc3cc798898c1163b8fb2c"
+      },
+      "convertedAccountId32": "0x85663dfdb243b1a11a90f0816e1f83ccdb99f8f4c4a25d432739218efd489736",
+      "replacementReason": "v2.2: dispatch-time fee pricing and observer-proven terminal accounting"
     }
   ]
 }
