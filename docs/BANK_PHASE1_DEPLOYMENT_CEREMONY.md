@@ -471,13 +471,56 @@ Trapped-asset claim ticket (write-off #3 for now):
 The deployed wrapper cannot retry this sell with changed fee bytes. The
 already-dispatched leg accepts only its recorded message hash; changed bytes
 revert `PayloadMismatch`, while identical bytes return the request id without
-sending again. A new deposit request requires a new local funding leg. Under
-v2.1, the permitted recovery is instead: terminalize the request as `Failed`
-with zero settlements, pause, use the owner-only request-associated
-`recovery_home` shape for the remaining remote asset, release the observed
-return through wrapper → adapter → recorded treasury, and only then consider
-a fresh staged request. The trapped `17,932` remains governed by the claim
-ticket above.
+sending again. A new deposit request requires a new local funding leg. This is
+a structural fee-at-staging defect: the exact payload is pinned before the fee
+quote's lifetime is known, but the only safe retry needs different fee bytes.
+Before any real-money epoch, v2.2 must either parameterize the execution fee at
+dispatch while retaining the request-bound structural payload, or enforce an
+on-chain staging deadline after which dispatch is impossible. An off-chain
+stage-to-dispatch convention alone is not a sufficient real-money control.
+
+The proposed v2.1 recovery was stopped before terminalization because the
+deployed adapter cannot satisfy honest recovery accounting. On
+`settleRequest(Failed, 0, 0, ...)`, a funded Deposit unconditionally records
+`recoveryAssetsOutstanding = request.requestedAssets`, which is `150,000` for
+this request. A fresh Hydration read at block `13,456,650` showed only `131,543`
+raw asset 22 at the converted account. The complete reconciliation is:
+
+- staged principal: `150,000` raw;
+- leg-1 reserve-transfer fee: `525` raw;
+- trapped fee asset, write-off #3: `17,932` raw;
+- chain-observed recoverable balance: `131,543` raw;
+- unexplained remainder: `150,000 - 525 - 17,932 - 131,543 = 0`.
+
+Recording `150,000` as recoverable would instead create a fictitious `18,457`
+raw receivable. Accordingly, request
+`0xb609f4d875e0c6f4f4b1dddd90efd687215d1ac9ecd90d0de51b9304f57ecaac`
+remains honestly Pending and overdue; no `finalizeRequest` transaction was
+signed. v2.2 must let terminalization bind the recovery-required amount to a
+fresh, observer-proven remote balance (capped by staged principal) and record
+the difference as explicit named loss lines. Only then may the request be
+terminalized, paused, and recovered without lying in either contract or
+operator books.
+
+Read-only recovery preparation proved the request-associated return shape at
+the same block. With amount `131,543`, nonce `1`, and a fresh remote Asset Hub
+execution quote of `696` raw multiplied by two, the embedded fee is `1,392`
+raw. Hydration forwarded to para 1000 and the Asset Hub DryRunApi deposited
+`130,312` raw asset 1337 to wrapper image
+`0x2af394fa95f75d3ca1c786128f4dfa1eb0c9675deeeeeeeeeeeeeeeeeeeeeeee`.
+The exact recovery id is
+`0xc17e25a02084d4edb8b0ff0f1e03a85e96163b8a6a4a8f2f7b531c79e28171d1`
+and message hash is
+`0xc92c981487d8b473a60aa91f60c3f6ef8f1823ee8a6f951e5ea7f3979790f743`.
+These bytes are review evidence, not executable ceremony material: the
+terminal accounting prerequisite has not passed.
+
+After a recovery-capable successor closes this request, the next dust request
+must start from zero unreconciled remote capital. Quote the `DepositSell`
+`BuyExecution` fee immediately before staging, embed `fresh quote × 2`, register
+and verify the observer watch before any signature, and keep staging → deployed-
+wrapper preflight → dispatch inside one tight operator window. A fee change or
+deadline breach cancels the attempt; it never causes an old payload to be sent.
 
 ## Handback checklist
 

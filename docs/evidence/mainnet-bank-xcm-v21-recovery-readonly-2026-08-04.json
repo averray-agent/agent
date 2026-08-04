@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 1,
+  "kind": "averray.bankXcmV21RecoveryReadOnlyPacket",
+  "capturedAt": "2026-08-04T11:17:43.336Z",
+  "signedOrBroadcastTransactions": 0,
+  "executable": false,
+  "blocker": "Deployed adapter would record recoveryAssetsOutstanding=requestedAssets=150000, not the chain-observed 131543; terminalization would violate the approved reconciliation condition.",
+  "endpoints": {
+    "hydrationReadAndLocalDryRun": "wss://hydration-rpc.n.dwellir.com",
+    "assetHubFeeAndRemoteDryRun": "wss://asset-hub-polkadot-rpc.n.dwellir.com"
+  },
+  "blocks": {
+    "hydration": "13456650",
+    "assetHub": "19047948"
+  },
+  "contracts": {
+    "wrapper": "0x2AF394fA95f75D3ca1C786128f4dfA1eB0c9675D",
+    "adapter": "0x7f02600eA185b5d9ecfB2B7ac97a6a502F89B81B"
+  },
+  "requestId": "0xb609f4d875e0c6f4f4b1dddd90efd687215d1ac9ecd90d0de51b9304f57ecaac",
+  "liveState": {
+    "endpoint": "https://services.polkadothub-rpc.com/mainnet/",
+    "block": "19048052",
+    "wrapper": {
+      "dispatchPaused": false,
+      "dispatchBitmap": "3",
+      "status": "Pending(1)",
+      "settledAssetsRaw": "0",
+      "settledSharesRaw": "0",
+      "contextAssetsRaw": "150000",
+      "recoveryReleasedRaw": "0"
+    },
+    "adapter": {
+      "status": "Pending(1)",
+      "settled": false,
+      "pendingDepositAssetsRaw": "150000",
+      "fundingReleased": true,
+      "requiresRemoteRecovery": false,
+      "recoveryAssetsOutstandingRaw": "0"
+    }
+  },
+  "reconciliation": {
+    "stagedRaw": "150000",
+    "leg1TransferFeeRaw": "525",
+    "trappedWriteOff3Raw": "17932",
+    "freshRemoteRecoverableRaw": "131543",
+    "equation": "150000 - 525 - 17932 = 131543",
+    "unexplainedRaw": "0"
+  },
+  "quote": {
+    "rule": "fresh remote Asset Hub execution quote x2, embedded in Hydration recovery bytes",
+    "baseFeeRaw": "696",
+    "multiplier": "2",
+    "embeddedFeeRaw": "1392",
+    "remoteWeight": {
+      "refTime": "459,753,000",
+      "proofSize": "10,943"
+    }
+  },
+  "recovery": {
+    "label": "recovery_home",
+    "chain": "hydration",
+    "destination": "0x05010100c91f",
+    "message": "0x05140004010300a10f043205e514005e07080013010300a10f043205e514005e070800001410010204010100a10f08130002043205e51400c115000d010204000101002af394fa95f75d3ca1c786128f4dfa1eb0c9675deeeeeeeeeeeeeeeeeeeeeeee2cc17e25a02084d4edb8b0ff0f1e03a85e96163b8a6a4a8f2f7b531c79e28171d1",
+    "requestId": "0xc17e25a02084d4edb8b0ff0f1e03a85e96163b8a6a4a8f2f7b531c79e28171d1",
+    "recoveryId": "0xc17e25a02084d4edb8b0ff0f1e03a85e96163b8a6a4a8f2f7b531c79e28171d1",
+    "amount": "131543",
+    "fee": "1392",
+    "nonce": "1",
+    "messageHash": "0xc92c981487d8b473a60aa91f60c3f6ef8f1823ee8a6f951e5ea7f3979790f743",
+    "expected": {
+      "forwardedParaId": 1000,
+      "remoteEvent": "Assets.Deposited",
+      "assetId": 1337
+    }
+  },
+  "dryRun": {
+    "hydrationComplete": true,
+    "forwardedToParaId": 1000,
+    "assetHubComplete": true,
+    "assetHubDeposit": {
+      "who": "1yKNU414vYDyXYXL6pu845puajfeGTezD1rBiUYwp9UKBaZ",
+      "assetId": "1337",
+      "amountRaw": "130312"
+    }
+  },
+  "intendedCalls": {
+    "finalizeFailedViaOperator": {
+      "to": "0x7f02600eA185b5d9ecfB2B7ac97a6a502F89B81B",
+      "value": "0",
+      "data": "0x43711a66b609f4d875e0c6f4f4b1dddd90efd687215d1ac9ecd90d0de51b9304f57ecaac0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003020d48518386754751424ab2cef27069b2e8a906bafbce9d48da5e6f8b13123264d5febe16cb945449c8bec5318fe99984b049047fa02b24e9fe06083d0a915",
+      "decoded": {
+        "requestId": "0xb609f4d875e0c6f4f4b1dddd90efd687215d1ac9ecd90d0de51b9304f57ecaac",
+        "status": "Failed(2)",
+        "settledAssets": "0",
+        "settledShares": "0",
+        "failureCode": "0x264d5febe16cb945449c8bec5318fe99984b049047fa02b24e9fe06083d0a915"
+      },
+      "blocked": true
+    },
+    "pauseViaOwner": {
+      "to": "0x2AF394fA95f75D3ca1C786128f4dfA1eB0c9675D",
+      "value": "0",
+      "data": "0x1f59d6fb0000000000000000000000000000000000000000000000000000000000000001",
+      "decoded": {
+        "dispatchPaused": true
+      }
+    },
+    "recoveryHomeViaOwner": {
+      "to": "0x2AF394fA95f75D3ca1C786128f4dfA1eB0c9675D",
+      "value": "0",
+      "data": "0x09c2dc5800000000000000000000000000000000000000000000000000000000000201d70000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000c0000000000000000000000000000000000000000000000000000000000000000605010100c91f0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008405140004010300a10f043205e514005e07080013010300a10f043205e514005e070800001410010204010100a10f08130002043205e51400c115000d010204000101002af394fa95f75d3ca1c786128f4dfa1eb0c9675deeeeeeeeeeeeeeeeeeeeeeee2cc17e25a02084d4edb8b0ff0f1e03a85e96163b8a6a4a8f2f7b531c79e28171d100000000000000000000000000000000000000000000000000000000",
+      "decoded": {
+        "amount": "131543",
+        "nonce": "1",
+        "destination": "0x05010100c91f",
+        "recoveryId": "0xc17e25a02084d4edb8b0ff0f1e03a85e96163b8a6a4a8f2f7b531c79e28171d1",
+        "messageHash": "0xc92c981487d8b473a60aa91f60c3f6ef8f1823ee8a6f951e5ea7f3979790f743",
+        "beneficiaryAccountId32": "0x2af394fa95f75d3ca1c786128f4dfa1eb0c9675deeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      "blockedUntilAccountingFix": true
+    }
+  }
+}
