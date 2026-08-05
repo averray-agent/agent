@@ -299,12 +299,38 @@ test("v2.2 dispatcher owns the leg expectation and caller input cannot weaken it
 
 test("v2.2 deposit staging margin includes the fresh funding-transfer fee headroom", async () => {
   const { instance } = dispatcher({
-    readLiveRequest: async () => liveRequest({ assets: "140524" })
+    readLiveRequest: async () => liveRequest({ bitmap: 0, assets: "140524" }),
+    dryRunMessage: async () => ({
+      liveState: true,
+      ok: true,
+      executionSucceeded: true,
+      calldata: "0xfunding",
+      forwardedParaIds: [2034],
+      events: [{ section: "Tokens", method: "Deposited", data: {} }]
+    })
   });
   await assert.rejects(
-    instance.dispatch({ requestId: REQUEST_ID, leg: "deposit_sell" }),
+    instance.dispatch({ requestId: REQUEST_ID, leg: "deposit_funding" }),
     /sellAmount \+ maxFeePerLeg \+ funding transfer fee headroom \(525\)/u
   );
+});
+
+test("v2.2 deposit sell at bitmap 1 does not replay the completed funding-margin dry-run", async () => {
+  let fundingFeeReads = 0;
+  const { instance, calls } = dispatcher({
+    readFundingTransferFee: async () => {
+      fundingFeeReads += 1;
+      throw new Error("completed funding leg cannot be simulated again");
+    }
+  });
+
+  const { evidence } = await instance.dispatch({ requestId: REQUEST_ID, leg: "deposit_sell" });
+
+  assert.equal(fundingFeeReads, 0);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].type, "sign");
+  assert.equal(calls[0].input.feeAmount, 34_000n);
+  assert.equal(evidence.fundingTransferFeeHeadroomRaw, undefined);
 });
 
 test("v2.2 deposit sell quotes fresh x2, requires the event watch, and records actual gas", async () => {
@@ -321,7 +347,7 @@ test("v2.2 deposit sell quotes fresh x2, requires the event watch, and records a
   assert.equal(calls[0].input.storageDepositLimit, 100n);
   assert.equal(calls[0].input.gasLimit, 36_000n);
   assert.equal(evidence.evm.gasUsed, "17800");
-  assert.equal(evidence.fundingTransferFeeHeadroomRaw, "525");
+  assert.equal(evidence.fundingTransferFeeHeadroomRaw, undefined);
 });
 
 test("v2.2 withdraw sell uses fresh remote float and records it before signing", async () => {
