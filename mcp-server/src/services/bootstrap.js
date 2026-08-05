@@ -418,21 +418,31 @@ export async function createPlatformRuntime() {
     })
   );
   const venueBalanceReader = initStep("init-venue-balance-reader", logger, () => new VenueBalanceReader());
+  const bankXcmFlowRequested = parseBooleanEnv(process.env.BANK_XCM_FLOW_ENABLED);
+  const bankUsdcAsset = gateway.config.supportedAssets?.find(
+    (asset) => String(asset.symbol ?? "").toUpperCase() === "USDC"
+  );
   const bankLaneFeed = initStep("init-bank-lane-feed", logger, () => {
     const config = loadBankLaneFeedConfig(process.env);
+    const withdrawTarget = bankXcmFlowRequested && gateway.hasXcmWrapper() && bankUsdcAsset?.address
+      ? {
+          ledger: "erc20",
+          endpoint: gateway.config.rpcUrl,
+          chainId: gateway.config.chainId,
+          account: gateway.config.xcmWrapperAddress,
+          contract: bankUsdcAsset.address
+        }
+      : undefined;
     return new BankLaneFeedService(
       stateStore,
       venueBalanceReader,
       {
         ...config,
+        requestTargets: [config.targets?.position, withdrawTarget].filter(Boolean),
         subjectReader: new EvmWrapperPauseReader(gateway.provider)
       }
     );
   });
-  const bankXcmFlowRequested = parseBooleanEnv(process.env.BANK_XCM_FLOW_ENABLED);
-  const bankUsdcAsset = gateway.config.supportedAssets?.find(
-    (asset) => String(asset.symbol ?? "").toUpperCase() === "USDC"
-  );
   const xcmBalanceObserver = initStep("init-xcm-balance-observer", logger, () =>
     new XcmBalanceObserverService(
       stateStore,
