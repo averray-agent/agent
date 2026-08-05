@@ -512,16 +512,32 @@ export class MemoryStateStore {
     return updated;
   }
 
-  async getXcmBalanceWatch(requestId) {
-    return cloneJsonRecord(this.xcmBalanceWatches.get(String(requestId ?? "").toLowerCase()));
+  async getXcmBalanceWatch(wrapperAddress, requestId) {
+    return cloneJsonRecord(this.xcmBalanceWatches.get(xcmBalanceWatchStorageId(wrapperAddress, requestId)));
   }
 
   async upsertXcmBalanceWatch(watch) {
-    const requestId = String(watch?.requestId ?? "").toLowerCase();
-    const existing = this.xcmBalanceWatches.get(requestId) ?? {};
-    const stored = cloneJsonRecord({ ...existing, ...watch, requestId });
-    this.xcmBalanceWatches.set(requestId, stored);
+    const identity = normalizeXcmBalanceWatchIdentity(watch?.wrapperAddress, watch?.requestId);
+    const storageId = xcmBalanceWatchStorageId(identity.wrapperAddress, identity.requestId);
+    const existing = this.xcmBalanceWatches.get(storageId) ?? {};
+    const stored = cloneJsonRecord({ ...existing, ...watch, ...identity });
+    this.xcmBalanceWatches.set(storageId, stored);
     return cloneJsonRecord(stored);
+  }
+
+  async migrateLegacyXcmBalanceWatch({ requestId, expectedTargetAccount, wrapperAddress, terminal }) {
+    const legacyId = normalizeXcmBalanceWatchRequestId(requestId);
+    const identity = normalizeXcmBalanceWatchIdentity(wrapperAddress, legacyId);
+    const storageId = xcmBalanceWatchStorageId(identity.wrapperAddress, identity.requestId);
+    const migrated = this.xcmBalanceWatches.get(storageId);
+    if (migrated) return { status: "already_migrated", watch: cloneJsonRecord(migrated) };
+    const legacy = this.xcmBalanceWatches.get(legacyId);
+    if (!legacy) return { status: "not_found" };
+    assertLegacyXcmWatchTarget(legacy, expectedTargetAccount);
+    const archived = cloneJsonRecord({ ...legacy, ...terminal, ...identity });
+    this.xcmBalanceWatches.delete(legacyId);
+    this.xcmBalanceWatches.set(storageId, archived);
+    return { status: "migrated", watch: cloneJsonRecord(archived) };
   }
 
   async listPendingXcmBalanceWatches(limit = 50) {
@@ -1205,54 +1221,86 @@ export class RedisStateStore {
     return updated;
   }
 
-  async getXcmBalanceWatch(requestId) {
+  async getXcmBalanceWatch(wrapperAddress, requestId) {
     await this.connect();
-    const normalized = String(requestId ?? "").toLowerCase();
-    const raw = await this.client.get(this.key("xcm-balance-watch", normalized));
+    const storageId = xcmBalanceWatchStorageId(wrapperAddress, requestId);
+    const raw = await this.client.get(this.key("xcm-balance-watch", storageId));
     return raw ? JSON.parse(raw) : undefined;
   }
 
   async upsertXcmBalanceWatch(watch) {
     await this.connect();
-    const requestId = String(watch?.requestId ?? "").toLowerCase();
-    const existing = await this.getXcmBalanceWatch(requestId);
-    const stored = { ...(existing ?? {}), ...watch, requestId };
-    await this.client.set(this.key("xcm-balance-watch", requestId), JSON.stringify(stored));
+    const identity = normalizeXcmBalanceWatchIdentity(watch?.wrapperAddress, watch?.requestId);
+    const storageId = xcmBalanceWatchStorageId(identity.wrapperAddress, identity.requestId);
+    const existing = await this.getXcmBalanceWatch(identity.wrapperAddress, identity.requestId);
+    const stored = { ...(existing ?? {}), ...watch, ...identity };
+    await this.client.set(this.key("xcm-balance-watch", storageId), JSON.stringify(stored));
     if (stored.status === "pending") {
       await this.client.zAdd(this.key("xcm-balance-watches", "pending"), {
         score: timestampScore(stored.startedAt),
-        value: requestId
+        value: storageId
       });
-      await this.client.zRem(this.key("xcm-balance-watches", "terminal"), requestId);
+      await this.client.zRem(this.key("xcm-balance-watches", "terminal"), storageId);
     } else {
-      await this.client.zRem(this.key("xcm-balance-watches", "pending"), requestId);
+      await this.client.zRem(this.key("xcm-balance-watches", "pending"), storageId);
       await this.client.zAdd(this.key("xcm-balance-watches", "terminal"), {
         score: timestampScore(stored.completedAt ?? stored.startedAt),
-        value: requestId
+        value: storageId
       });
     }
     return stored;
   }
 
+  async migrateLegacyXcmBalanceWatch({ requestId, expectedTargetAccount, wrapperAddress, terminal }) {
+    await this.connect();
+    const legacyId = normalizeXcmBalanceWatchRequestId(requestId);
+    const identity = normalizeXcmBalanceWatchIdentity(wrapperAddress, legacyId);
+    const storageId = xcmBalanceWatchStorageId(identity.wrapperAddress, identity.requestId);
+    const migrated = await this.getXcmBalanceWatch(identity.wrapperAddress, identity.requestId);
+    if (migrated) return { status: "already_migrated", watch: migrated };
+    const legacyKey = this.key("xcm-balance-watch", legacyId);
+    const raw = await this.client.get(legacyKey);
+    if (!raw) return { status: "not_found" };
+    const legacy = JSON.parse(raw);
+    assertLegacyXcmWatchTarget(legacy, expectedTargetAccount);
+    const archived = { ...legacy, ...terminal, ...identity };
+    await this.client.multi()
+      .set(this.key("xcm-balance-watch", storageId), JSON.stringify(archived))
+      .del(legacyKey)
+      .zRem(this.key("xcm-balance-watches", "pending"), legacyId)
+      .zRem(this.key("xcm-balance-watches", "terminal"), legacyId)
+      .zAdd(this.key("xcm-balance-watches", "terminal"), {
+        score: timestampScore(archived.completedAt ?? archived.startedAt),
+        value: storageId
+      })
+      .exec();
+    return { status: "migrated", watch: archived };
+  }
+
   async listPendingXcmBalanceWatches(limit = 50) {
     await this.connect();
     const { stop } = redisRangeFromLimitOffset(limit, 0);
-    const requestIds = await this.client.zRange(this.key("xcm-balance-watches", "pending"), 0, stop);
-    const records = await Promise.all(requestIds.map((requestId) => this.getXcmBalanceWatch(requestId)));
+    const storageIds = await this.client.zRange(this.key("xcm-balance-watches", "pending"), 0, stop);
+    const records = await Promise.all(storageIds.map((storageId) => this.getXcmBalanceWatchByStorageId(storageId)));
     return records.filter((entry) => entry?.status === "pending");
   }
 
   async listRecentTerminalXcmBalanceWatches(limit = 10) {
     await this.connect();
     const { stop } = redisRangeFromLimitOffset(limit, 0);
-    const requestIds = await this.client.zRange(
+    const storageIds = await this.client.zRange(
       this.key("xcm-balance-watches", "terminal"),
       0,
       stop,
       { REV: true }
     );
-    const records = await Promise.all(requestIds.map((requestId) => this.getXcmBalanceWatch(requestId)));
+    const records = await Promise.all(storageIds.map((storageId) => this.getXcmBalanceWatchByStorageId(storageId)));
     return records.filter((entry) => entry && entry.status !== "pending");
+  }
+
+  async getXcmBalanceWatchByStorageId(storageId) {
+    const raw = await this.client.get(this.key("xcm-balance-watch", String(storageId ?? "")));
+    return raw ? JSON.parse(raw) : undefined;
   }
 
   async getServiceState(scope) {
@@ -1477,4 +1525,38 @@ function normalizeSiweActivityLimit(value) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) return 100;
   return Math.min(Math.trunc(parsed), 1000);
+}
+
+function normalizeXcmBalanceWatchIdentity(wrapperAddress, requestId) {
+  const wrapper = String(wrapperAddress ?? "").toLowerCase();
+  if (!/^0x[a-f0-9]{40}$/u.test(wrapper)) {
+    throw new ExternalServiceError("XCM balance watch wrapperAddress must be a 20-byte address.");
+  }
+  return {
+    wrapperAddress: wrapper,
+    requestId: normalizeXcmBalanceWatchRequestId(requestId)
+  };
+}
+
+function normalizeXcmBalanceWatchRequestId(requestId) {
+  const normalized = String(requestId ?? "").toLowerCase();
+  if (!/^0x[a-f0-9]{64}$/u.test(normalized)) {
+    throw new ExternalServiceError("XCM balance watch requestId must be a 32-byte value.");
+  }
+  return normalized;
+}
+
+function xcmBalanceWatchStorageId(wrapperAddress, requestId) {
+  const identity = normalizeXcmBalanceWatchIdentity(wrapperAddress, requestId);
+  return `${identity.wrapperAddress}:${identity.requestId}`;
+}
+
+function assertLegacyXcmWatchTarget(watch, expectedTargetAccount) {
+  const expected = String(expectedTargetAccount ?? "").toLowerCase();
+  const actual = String(watch?.target?.account ?? "").toLowerCase();
+  if (!/^0x[a-f0-9]{64}$/u.test(expected) || actual !== expected) {
+    throw new ExternalServiceError(
+      "Legacy XCM balance watch did not match the audited generation target; refusing migration."
+    );
+  }
 }

@@ -357,6 +357,27 @@ test("MemoryStateStore service state round-trips and merges", async () => {
   assert.equal(loaded.lastObservedCount, 3);
 });
 
+test("MemoryStateStore scopes identical XCM request ids by wrapper generation", async () => {
+  const store = new MemoryStateStore();
+  const requestId = `0x${"61".repeat(32)}`;
+  const wrapperV21 = "0x2af394fa95f75d3ca1c786128f4dfa1eb0c9675d";
+  const wrapperV22 = "0xecee778e11b238d2fc096e56460e7b98dc7b26b8";
+  const base = {
+    requestId,
+    status: "pending",
+    direction: "increase",
+    startedAt: "2026-08-05T06:00:00.000Z",
+    deadlineAt: "2026-08-05T07:00:00.000Z"
+  };
+
+  await store.upsertXcmBalanceWatch({ ...base, wrapperAddress: wrapperV21, phase: "retired-generation" });
+  await store.upsertXcmBalanceWatch({ ...base, wrapperAddress: wrapperV22, phase: "active-generation" });
+
+  assert.equal((await store.getXcmBalanceWatch(wrapperV21, requestId)).phase, "retired-generation");
+  assert.equal((await store.getXcmBalanceWatch(wrapperV22, requestId)).phase, "active-generation");
+  assert.equal((await store.listPendingXcmBalanceWatches()).length, 2);
+});
+
 test("MemoryStateStore lists recent sessions in latest-first order", async () => {
   const store = new MemoryStateStore();
   await store.upsertSession({

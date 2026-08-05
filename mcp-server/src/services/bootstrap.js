@@ -1,5 +1,6 @@
 import { PlatformService } from "../core/platform-service.js";
 import { createStateStore } from "../core/state-store.js";
+import { migrateLegacyBankV21BalanceWatch } from "./bank-xcm-watch-migration.js";
 import { AccountOverlayStore } from "../core/account-overlay-store.js";
 import { PolicyService } from "../core/policy-service.js";
 import { BUILTIN_POLICIES } from "../core/builtin-policies.js";
@@ -262,6 +263,15 @@ export async function createPlatformRuntime() {
   }
   const pimlicoClient = initStep("init-pimlico-client", logger, () => new PimlicoClient());
   const stateStore = initStep("init-state-store", logger, () => createStateStore(process.env, { logger }));
+  try {
+    await migrateLegacyBankV21BalanceWatch(stateStore, { logger });
+  } catch (error) {
+    logger.error(
+      { step: "migrate-bank-xcm-watch-generation-scope", err: error instanceof Error ? error : new Error(String(error)) },
+      "bootstrap.init_failed"
+    );
+    throw error;
+  }
   const contentRecoveryLog = initStep("init-content-recovery-log", logger, () =>
     createContentRecoveryLog(process.env, { logger })
   );

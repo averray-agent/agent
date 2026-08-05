@@ -17,6 +17,7 @@ const POSTAGE = "16Mf98wAbYTVWaeHkD1SUdRPc5nmoLj9LyNtPtP1xvkF7Sxb";
 const MAINNET_ACCOUNT = "0x42e55ecf123da7d3eba1c55998b3cbf8238c446367c981f1388acbc0626cf354";
 const MAINNET_ACCOUNT_SS58 = "12WiJGBSjqTBNqD7a7TN6mt47ZJd7f8SqyhTc2bYLFzcHYD9";
 const WRAPPER = "0xecee778e11b238d2fc096e56460e7b98dc7b26b8";
+const RETIRED_WRAPPER = "0x2af394fa95f75d3ca1c786128f4dfa1eb0c9675d";
 const USDC = "0x0000053900000000000000000000000001200000";
 
 const fixture = JSON.parse(await readFile(
@@ -400,10 +401,75 @@ test("standing chain-event backfill requires and preserves an explicit baseline"
   assert.equal(watch.registrationSource, "chain_event_backfill");
 });
 
+test("same request id backfills idempotently and independently across wrapper generations", async () => {
+  const store = new MemoryStateStore();
+  const retiredAccount = "0x85663dfdb243b1a11a90f0816e1f83ccdb99f8f4c4a25d432739218efd489736";
+  const makeObserver = (wrapperAddress, account) => new XcmBalanceObserverService(
+    store,
+    { async read() { throw new Error("backfill must use its bound baseline"); } },
+    { async observeOutcome() {} },
+    undefined,
+    {
+      enabled: true,
+      chainEventWatchConfig: {
+        expectedWrapper: wrapperAddress,
+        depositTarget: { ...targetFor("aUsdc"), account },
+        withdrawTarget: {
+          ledger: "erc20",
+          endpoint: "https://services.polkadothub-rpc.com/mainnet/",
+          account: wrapperAddress,
+          contract: USDC
+        }
+      }
+    }
+  );
+  const eventFor = (wrapperAddress, suffix) => ({
+    id: `backfill-${suffix}`,
+    topic: "xcm.request_queued",
+    timestamp: "2026-08-05T06:00:00.000Z",
+    txHash: `0x${suffix.repeat(64).slice(0, 64)}`,
+    blockNumber: suffix === "a" ? 100 : 200,
+    data: {
+      requestId: REQUEST_ID,
+      wrapperAddress,
+      kind: 0,
+      assetsRaw: "150000",
+      sharesRaw: "0",
+      dispatchDeadlineRaw: String(Date.parse("2026-08-05T08:00:00.000Z") / 1_000)
+    }
+  });
+  const baselineFor = (raw, blockNumber, hex) => ({
+    raw,
+    asOf: "2026-08-05T06:00:00.000Z",
+    blockNumber,
+    blockHash: `0x${hex.repeat(64).slice(0, 64)}`
+  });
+  const retired = makeObserver(RETIRED_WRAPPER, retiredAccount);
+  const active = makeObserver(WRAPPER, MAINNET_ACCOUNT);
+  const retiredEvent = eventFor(RETIRED_WRAPPER, "a");
+  const activeEvent = eventFor(WRAPPER, "b");
+  const retiredBaseline = baselineFor("10", 100, "a");
+  const activeBaseline = baselineFor("20", 200, "b");
+
+  const retiredFirst = await retired.registerBackfillFromChainEvent(retiredEvent, retiredBaseline);
+  const activeFirst = await active.registerBackfillFromChainEvent(activeEvent, activeBaseline);
+  const retiredReplay = await retired.registerBackfillFromChainEvent(retiredEvent, retiredBaseline);
+  const activeReplay = await active.registerBackfillFromChainEvent(activeEvent, activeBaseline);
+
+  assert.equal(retiredFirst.wrapperAddress, RETIRED_WRAPPER);
+  assert.equal(activeFirst.wrapperAddress, WRAPPER);
+  assert.equal(retiredReplay.baselineRaw, "10");
+  assert.equal(activeReplay.baselineRaw, "20");
+  assert.equal((await store.getXcmBalanceWatch(RETIRED_WRAPPER, REQUEST_ID)).baselineBlockNumber, 100);
+  assert.equal((await store.getXcmBalanceWatch(WRAPPER, REQUEST_ID)).baselineBlockNumber, 200);
+  assert.equal((await store.listPendingXcmBalanceWatches()).length, 2);
+});
+
 test("enabled observer polls only the current v2.2 target and fails unknown scope closed", async () => {
   const store = new MemoryStateStore();
   const now = Date.parse("2026-08-04T08:00:00.000Z");
   const baseWatch = {
+    wrapperAddress: WRAPPER,
     status: "pending",
     direction: "increase",
     baselineRaw: "0",
@@ -456,9 +522,9 @@ test("enabled observer polls only the current v2.2 target and fails unknown scop
 
   await observer.pollOnce();
   assert.deepEqual(reads, [MAINNET_ACCOUNT]);
-  assert.equal((await store.getXcmBalanceWatch(currentId)).attemptCount, 1);
-  assert.equal((await store.getXcmBalanceWatch(retiredId)).attemptCount, 0);
-  assert.equal((await store.getXcmBalanceWatch(unknownId)).lastError, "observer_target_scope_unknown");
+  assert.equal((await store.getXcmBalanceWatch(WRAPPER, currentId)).attemptCount, 1);
+  assert.equal((await store.getXcmBalanceWatch(WRAPPER, retiredId)).attemptCount, 0);
+  assert.equal((await store.getXcmBalanceWatch(WRAPPER, unknownId)).lastError, "observer_target_scope_unknown");
   const status = await observer.getStatus();
   assert.equal(status.pendingCount, 2);
   assert.equal(status.readErrorCount, 1);
@@ -487,6 +553,7 @@ test("round-trip fixtures replay all four destination-ledger balance deltas", as
     sequence = [tx.beforeRaw, tx.afterRaw];
     await observer.register({
       requestId,
+      wrapperAddress: WRAPPER,
       target: targetFor(tx.target),
       direction: tx.direction,
       requestedAssetsRaw: tx.actualDeltaRaw,
@@ -494,7 +561,7 @@ test("round-trip fixtures replay all four destination-ledger balance deltas", as
       settlement: { assets: "delta", shares: "delta" }
     });
     await observer.pollOnce();
-    const stored = await store.getXcmBalanceWatch(requestId);
+    const stored = await store.getXcmBalanceWatch(WRAPPER, requestId);
     assert.equal(stored.status, "succeeded", tx.label);
     assert.equal(stored.deltaRaw, tx.actualDeltaRaw, tx.label);
     now += 1_000;
@@ -531,6 +598,7 @@ test("balance delta finalizes through the existing watcher and credits the strat
   );
   await observer.register({
     requestId: REQUEST_ID,
+    wrapperAddress: WRAPPER,
     target: targetFor("aUsdc"),
     direction: "increase",
     requestedAssetsRaw: "100000",
@@ -559,6 +627,7 @@ test("observer timeout records Failed instead of leaving a silent Pending", asyn
   );
   await observer.register({
     requestId: REQUEST_ID,
+    wrapperAddress: WRAPPER,
     target: targetFor("asset22"),
     direction: "increase",
     baselineRaw: "50"
@@ -567,7 +636,7 @@ test("observer timeout records Failed instead of leaving a silent Pending", asyn
   await observer.pollOnce();
 
   assert.equal(outcomes[0].status, "failed");
-  assert.equal((await store.getXcmBalanceWatch(REQUEST_ID)).status, "failed");
+  assert.equal((await store.getXcmBalanceWatch(WRAPPER, REQUEST_ID)).status, "failed");
   assert.equal((await observer.getStatus()).pendingCount, 0);
 });
 
@@ -589,6 +658,7 @@ test("dynamic import failure stays visible and times out as Failed", async () =>
   );
   await observer.register({
     requestId: REQUEST_ID,
+    wrapperAddress: WRAPPER,
     target: targetFor("asset22"),
     direction: "increase",
     baselineRaw: "0"
@@ -604,7 +674,7 @@ test("dynamic import failure stays visible and times out as Failed", async () =>
   now += 1_001;
   await observer.pollOnce();
   assert.equal(outcomes[0].status, "failed");
-  assert.equal((await store.getXcmBalanceWatch(REQUEST_ID)).status, "failed");
+  assert.equal((await store.getXcmBalanceWatch(WRAPPER, REQUEST_ID)).status, "failed");
 });
 
 test("terminal watch registration and polling are idempotent", async () => {
@@ -620,6 +690,7 @@ test("terminal watch registration and polling are idempotent", async () => {
   );
   const input = {
     requestId: REQUEST_ID,
+    wrapperAddress: WRAPPER,
     target: targetFor("aUsdc"),
     direction: "increase",
     requestedAssetsRaw: "7",
@@ -643,6 +714,7 @@ test("a request id cannot be replayed with different settlement bounds", async (
   );
   const input = {
     requestId: REQUEST_ID,
+    wrapperAddress: WRAPPER,
     target: targetFor("aUsdc"),
     direction: "increase",
     requestedAssetsRaw: "100000",
