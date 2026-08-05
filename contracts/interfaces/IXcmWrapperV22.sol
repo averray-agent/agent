@@ -21,8 +21,9 @@ interface IXcmWrapperV22 {
         uint256 sellAmount;
         /// @dev Router minimum output and the request-bound amount returned home.
         uint256 minimumOutput;
-        /// @dev Upper bound on the fresh dispatch-time asset-22 budget supplied
-        ///      to DepositSell or WithdrawSell. WithdrawHome is self-budgeting.
+        /// @dev Upper bound on every fresh dispatch-time fee supplied by the
+        ///      operator: DepositSell, WithdrawSell, WithdrawHome, and the
+        ///      request-bound recovery-home path.
         uint256 maxFeePerLeg;
         /// @dev Zero disables the deadline. A non-zero deadline blocks only
         ///      undispatched request legs, never terminalization or recovery.
@@ -81,17 +82,19 @@ interface IXcmWrapperV22 {
 
     function getRequestParameters(bytes32 requestId) external view returns (RequestParameters memory);
 
-    function previewRecoveryHomeId(bytes32 requestId, uint256 amount, uint64 nonce)
+    function previewRecoveryHomeId(bytes32 requestId, uint256 amount, uint256 homeExecutionFee, uint64 nonce)
         external
         view
         returns (bytes32 recoveryId);
 
-    function previewRecoveryHomeMessage(bytes32 requestId, uint256 amount, uint64 nonce)
+    function previewRecoveryHomeMessage(bytes32 requestId, uint256 amount, uint256 homeExecutionFee, uint64 nonce)
         external
         view
         returns (bytes memory destination, bytes memory message);
 
-    function dispatchRecoveryHome(bytes32 requestId, uint256 amount, uint64 nonce) external returns (bytes32 recoveryId);
+    function dispatchRecoveryHome(bytes32 requestId, uint256 amount, uint256 homeExecutionFee, uint64 nonce)
+        external
+        returns (bytes32 recoveryId);
 
     function releaseRecoveredAssetsToAdapter(bytes32 requestId, uint256 assets) external;
 }

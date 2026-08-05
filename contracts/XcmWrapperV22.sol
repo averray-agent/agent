@@ -25,7 +25,7 @@ contract XcmWrapperV22 is IXcmWrapperV22, ReentrancyGuard {
     address public constant DEFAULT_XCM_PRECOMPILE = 0x00000000000000000000000000000000000a0000;
     bytes internal constant LOCAL_HERE_DESTINATION = hex"050000";
     bytes internal constant HYDRATION_DESTINATION = hex"05010100c91f";
-    bytes32 internal constant RECOVERY_HOME_DOMAIN = bytes32("HYDRATION_USDC_RECOVERY_V22");
+    bytes32 internal constant RECOVERY_HOME_DOMAIN = bytes32("HYDRATION_USDC_RECOVERY_V221");
 
     TreasuryPolicy public immutable policy;
     address public immutable override xcmPrecompile;
@@ -75,6 +75,7 @@ contract XcmWrapperV22 is IXcmWrapperV22, ReentrancyGuard {
         bytes32 indexed requestId,
         bytes32 indexed recoveryId,
         uint256 amount,
+        uint256 homeExecutionFee,
         uint64 nonce,
         bytes32 destinationHash,
         bytes32 messageHash
@@ -351,29 +352,31 @@ contract XcmWrapperV22 is IXcmWrapperV22, ReentrancyGuard {
         return requestLegs[requestId][uint8(leg)];
     }
 
-    function previewRecoveryHomeId(bytes32 requestId, uint256 amount, uint64 nonce)
+    function previewRecoveryHomeId(bytes32 requestId, uint256 amount, uint256 homeExecutionFee, uint64 nonce)
         public
         view
         override
         returns (bytes32 recoveryId)
     {
         return keccak256(
-            abi.encode(RECOVERY_HOME_DOMAIN, address(this), requestId, hydrationAccountId32, amount, nonce)
+            abi.encode(
+                RECOVERY_HOME_DOMAIN, address(this), requestId, hydrationAccountId32, amount, homeExecutionFee, nonce
+            )
         );
     }
 
-    function previewRecoveryHomeMessage(bytes32 requestId, uint256 amount, uint64 nonce)
+    function previewRecoveryHomeMessage(bytes32 requestId, uint256 amount, uint256 homeExecutionFee, uint64 nonce)
         external
         view
         override
         returns (bytes memory destination, bytes memory message)
     {
-        _validateRecovery(requestId, amount, nonce);
-        bytes32 recoveryId = previewRecoveryHomeId(requestId, amount, nonce);
-        return (HYDRATION_DESTINATION, _buildHome(amount, amount, recoveryId));
+        _validateRecovery(requestId, amount, homeExecutionFee, nonce);
+        bytes32 recoveryId = previewRecoveryHomeId(requestId, amount, homeExecutionFee, nonce);
+        return (HYDRATION_DESTINATION, _buildHome(amount, homeExecutionFee, recoveryId));
     }
 
-    function dispatchRecoveryHome(bytes32 requestId, uint256 amount, uint64 nonce)
+    function dispatchRecoveryHome(bytes32 requestId, uint256 amount, uint256 homeExecutionFee, uint64 nonce)
         external
         override
         onlyOwner
@@ -381,19 +384,21 @@ contract XcmWrapperV22 is IXcmWrapperV22, ReentrancyGuard {
         returns (bytes32 recoveryId)
     {
         if (!dispatchPaused) revert InvalidStatus();
-        _validateRecovery(requestId, amount, nonce);
-        recoveryId = previewRecoveryHomeId(requestId, amount, nonce);
+        _validateRecovery(requestId, amount, homeExecutionFee, nonce);
+        recoveryId = previewRecoveryHomeId(requestId, amount, homeExecutionFee, nonce);
         LegRecord storage prior = recoveryHomeLegs[recoveryId];
         if (prior.dispatched) return recoveryId;
 
-        bytes memory message = _buildHome(amount, amount, recoveryId);
+        bytes memory message = _buildHome(amount, homeExecutionFee, recoveryId);
         _sendXcm(HYDRATION_DESTINATION, message);
         bytes32 destinationHash = keccak256(HYDRATION_DESTINATION);
         bytes32 messageHash = keccak256(message);
         recoveryHomeLegs[recoveryId] = LegRecord({
             destinationHash: destinationHash, messageHash: messageHash, refTime: 0, proofSize: 0, dispatched: true
         });
-        emit RecoveryHomeDispatched(requestId, recoveryId, amount, nonce, destinationHash, messageHash);
+        emit RecoveryHomeDispatched(
+            requestId, recoveryId, amount, homeExecutionFee, nonce, destinationHash, messageHash
+        );
     }
 
     function getRecoveryHomeLeg(bytes32 recoveryId) external view returns (LegRecord memory) {
@@ -456,10 +461,11 @@ contract XcmWrapperV22 is IXcmWrapperV22, ReentrancyGuard {
             message = _buildSell(true, feeAmount, parameters.sellAmount, parameters.minimumOutput, requestId);
             return (destination, message, maxWeight);
         }
-        if (feeAmount != 0) revert FeeAboveMaximum();
-        // The complete expected return is both the reserve-withdraw amount
-        // and nested BuyExecution budget; the tail deposits every surplus.
-        message = _buildHome(parameters.minimumOutput, parameters.minimumOutput, requestId);
+        // The nested Asset Hub execution budget is priced at dispatch. It is
+        // capped by the multisig-staged ceiling and must be strictly smaller
+        // than the gross Hydration withdrawal so the next hop can hold it.
+        _validateHomeExecutionFee(parameters.minimumOutput, feeAmount, parameters.maxFeePerLeg);
+        message = _buildHome(parameters.minimumOutput, feeAmount, requestId);
         return (destination, message, maxWeight);
     }
 
@@ -502,6 +508,10 @@ contract XcmWrapperV22 is IXcmWrapperV22, ReentrancyGuard {
     }
 
     function _buildHome(uint256 amount, uint256 feeBudget, bytes32 topic) internal view returns (bytes memory) {
+        // Cross-hop invariant: a downstream BuyExecution budget can never be
+        // the full upstream withdrawal. The dispatcher's live three-hop dry
+        // run proves the tighter feeBudget <= actual-arrival condition.
+        if (feeBudget == 0 || feeBudget >= amount) revert FeeAboveMaximum();
         bytes memory encodedAmount = _compact(amount);
         return abi.encodePacked(
             hex"05140004010300a10f043205e51400",
@@ -593,7 +603,10 @@ contract XcmWrapperV22 is IXcmWrapperV22, ReentrancyGuard {
         }
     }
 
-    function _validateRecovery(bytes32 requestId, uint256 amount, uint64 nonce) internal view {
+    function _validateRecovery(bytes32 requestId, uint256 amount, uint256 homeExecutionFee, uint64 nonce)
+        internal
+        view
+    {
         IXcmWrapper.RequestRecord storage record = requests[requestId];
         if (
             record.context.account == address(0) || amount == 0 || nonce == 0 || hydrationAccountId32 == bytes32(0)
@@ -605,6 +618,13 @@ contract XcmWrapperV22 is IXcmWrapperV22, ReentrancyGuard {
             : record.context.kind == IXcmWrapper.RequestKind.Withdraw ? record.context.shares : 0;
         uint256 outstanding = IXcmV22CustodyAdapter(requestAdapter[requestId]).recoveryAssetsOutstanding(requestId);
         if (amount > outstanding || requestRecoveryReleased[requestId] + amount > cap) revert InvalidRequest();
+        _validateHomeExecutionFee(amount, homeExecutionFee, requestParameters[requestId].maxFeePerLeg);
+    }
+
+    function _validateHomeExecutionFee(uint256 amount, uint256 homeExecutionFee, uint256 maximum) internal pure {
+        if (homeExecutionFee == 0 || homeExecutionFee > maximum || homeExecutionFee >= amount) {
+            revert FeeAboveMaximum();
+        }
     }
 
     function _validateSettlementBounds(

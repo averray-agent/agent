@@ -87,6 +87,13 @@ abstract contract XcmWrapperV22Fixture is Test {
     address internal constant FUTURE_AGENT_ACCOUNT_CORE = address(0xAAC);
     bytes32 internal constant STRATEGY_ID = bytes32("HYDRATION_USDC_V22");
     bytes32 internal constant HYDRATION_ACCOUNT = 0x85663dfdb243b1a11a90f0816e1f83ccdb99f8f4c4a25d432739218efd489736;
+    // Live Hydration -> Asset Hub quote captured on 2026-08-05. A 100,000-raw
+    // withdrawal paid 694 raw upstream, so 99,306 raw provably reached the
+    // nested Asset Hub hop in the exact-message dry-run.
+    uint256 internal constant LIVE_HOME_GROSS_RAW = 100_000;
+    uint256 internal constant LIVE_HOME_UPSTREAM_FEE_RAW = 694;
+    uint256 internal constant LIVE_HOME_ARRIVAL_RAW = LIVE_HOME_GROSS_RAW - LIVE_HOME_UPSTREAM_FEE_RAW;
+    uint256 internal constant LIVE_HOME_EXECUTION_FEE_RAW = 1_400;
     bytes internal constant LOCAL_DESTINATION = hex"050000";
     bytes internal constant HYDRATION_DESTINATION = hex"05010100c91f";
 
@@ -214,7 +221,7 @@ abstract contract XcmWrapperV22Fixture is Test {
         );
     }
 
-    function _homeMessage(uint256 amount, bytes32 topic) internal view returns (bytes memory) {
+    function _homeMessage(uint256 amount, uint256 feeBudget, bytes32 topic) internal view returns (bytes memory) {
         bytes memory encoded = _compact(amount);
         return abi.encodePacked(
             hex"05140004010300a10f043205e51400",
@@ -222,7 +229,7 @@ abstract contract XcmWrapperV22Fixture is Test {
             hex"13010300a10f043205e51400",
             encoded,
             hex"001410010204010100a10f08130002043205e51400",
-            encoded,
+            _compact(feeBudget),
             hex"000d01020400010100",
             _wrapperAccountId32(),
             hex"2c",
@@ -307,10 +314,11 @@ contract XcmWrapperV22Test is XcmWrapperV22Fixture {
         assertEq(message, _sellMessage(true, 27_500, 100_000, 90_000, withdrawId));
         _dispatch(withdrawId, IXcmWrapperV22.DispatchLeg.WithdrawSell, 27_500);
 
-        (destination, message,) = wrapper.previewLegMessage(withdrawId, IXcmWrapperV22.DispatchLeg.WithdrawHome, 0);
+        (destination, message,) =
+            wrapper.previewLegMessage(withdrawId, IXcmWrapperV22.DispatchLeg.WithdrawHome, LIVE_HOME_EXECUTION_FEE_RAW);
         assertEq(destination, HYDRATION_DESTINATION);
-        assertEq(message, _homeMessage(90_000, withdrawId));
-        _dispatch(withdrawId, IXcmWrapperV22.DispatchLeg.WithdrawHome, 0);
+        assertEq(message, _homeMessage(90_000, LIVE_HOME_EXECUTION_FEE_RAW, withdrawId));
+        _dispatch(withdrawId, IXcmWrapperV22.DispatchLeg.WithdrawHome, LIVE_HOME_EXECUTION_FEE_RAW);
 
         assertEq(wrapper.requestDispatchBitmap(depositId), 0x03);
         assertEq(wrapper.requestDispatchBitmap(withdrawId), 0x0c);
@@ -344,14 +352,63 @@ contract XcmWrapperV22Test is XcmWrapperV22Fixture {
         wrapper.dispatchLeg(requestId, IXcmWrapperV22.DispatchLeg.WithdrawSell, 25_001);
     }
 
-    function testWithdrawHomeRejectsOperatorFeeArgument() public {
+    function testWithdrawHomeZeroFeeReverts() public {
         _seedShares(16);
         bytes32 requestId = _stageWithdraw(17, 100_000, 95_000, 25_000, 0);
 
         _dispatch(requestId, IXcmWrapperV22.DispatchLeg.WithdrawSell, 24_000);
         vm.prank(OPERATOR);
         vmx.expectRevert(XcmWrapperV22.FeeAboveMaximum.selector);
-        wrapper.dispatchLeg(requestId, IXcmWrapperV22.DispatchLeg.WithdrawHome, 1);
+        wrapper.dispatchLeg(requestId, IXcmWrapperV22.DispatchLeg.WithdrawHome, 0);
+    }
+
+    function testWithdrawHomeFeeAboveStagedMaximumReverts() public {
+        _seedShares(18);
+        bytes32 requestId = _stageWithdraw(19, 100_000, 95_000, 25_000, 0);
+
+        _dispatch(requestId, IXcmWrapperV22.DispatchLeg.WithdrawSell, 24_000);
+        vm.prank(OPERATOR);
+        vmx.expectRevert(XcmWrapperV22.FeeAboveMaximum.selector);
+        wrapper.dispatchLeg(requestId, IXcmWrapperV22.DispatchLeg.WithdrawHome, 25_001);
+    }
+
+    function testCrossHopBudgetAtLiveQuotedArrivalMinusOneBuilds() public {
+        _seedShares(41);
+        bytes32 requestId = _stageWithdraw(42, LIVE_HOME_GROSS_RAW, LIVE_HOME_GROSS_RAW, LIVE_HOME_ARRIVAL_RAW, 0);
+        _dispatch(requestId, IXcmWrapperV22.DispatchLeg.WithdrawSell, 30_180);
+
+        uint256 budget = LIVE_HOME_ARRIVAL_RAW - 1;
+        (, bytes memory message,) =
+            wrapper.previewLegMessage(requestId, IXcmWrapperV22.DispatchLeg.WithdrawHome, budget);
+        assertEq(message, _homeMessage(LIVE_HOME_GROSS_RAW, budget, requestId));
+    }
+
+    function testCrossHopBudgetAtLiveQuotedArrivalBuilds() public {
+        _seedShares(45);
+        bytes32 requestId = _stageWithdraw(46, LIVE_HOME_GROSS_RAW, LIVE_HOME_GROSS_RAW, LIVE_HOME_ARRIVAL_RAW, 0);
+        _dispatch(requestId, IXcmWrapperV22.DispatchLeg.WithdrawSell, 30_180);
+
+        (, bytes memory message,) =
+            wrapper.previewLegMessage(requestId, IXcmWrapperV22.DispatchLeg.WithdrawHome, LIVE_HOME_ARRIVAL_RAW);
+        assertEq(message, _homeMessage(LIVE_HOME_GROSS_RAW, LIVE_HOME_ARRIVAL_RAW, requestId));
+    }
+
+    function testCrossHopBudgetAtLiveQuotedArrivalPlusOneReverts() public {
+        _seedShares(43);
+        bytes32 requestId = _stageWithdraw(44, LIVE_HOME_GROSS_RAW, LIVE_HOME_GROSS_RAW, LIVE_HOME_ARRIVAL_RAW, 0);
+        _dispatch(requestId, IXcmWrapperV22.DispatchLeg.WithdrawSell, 30_180);
+
+        vmx.expectRevert(XcmWrapperV22.FeeAboveMaximum.selector);
+        wrapper.previewLegMessage(requestId, IXcmWrapperV22.DispatchLeg.WithdrawHome, LIVE_HOME_ARRIVAL_RAW + 1);
+    }
+
+    function testWithdrawHomeFullGrossBudgetRevertsEvenWhenStagedCeilingAllowsIt() public {
+        _seedShares(47);
+        bytes32 requestId = _stageWithdraw(48, LIVE_HOME_GROSS_RAW, LIVE_HOME_GROSS_RAW, LIVE_HOME_GROSS_RAW, 0);
+        _dispatch(requestId, IXcmWrapperV22.DispatchLeg.WithdrawSell, 30_180);
+
+        vmx.expectRevert(XcmWrapperV22.FeeAboveMaximum.selector);
+        wrapper.previewLegMessage(requestId, IXcmWrapperV22.DispatchLeg.WithdrawHome, LIVE_HOME_GROSS_RAW);
     }
 
     function testDepositFeeAboveStagedMaximumReverts() public {
@@ -536,25 +593,26 @@ contract HydrationUsdcAdapterV22TerminalTest is XcmWrapperV22Fixture {
         assertFalse(adapter.requiresRemoteRecovery(requestId));
     }
 
-    function testRecoveryIsRequestBoundPausedOwnerOnlyAndFullBudget() public {
+    function testRecoveryIsRequestBoundPausedOwnerOnlyAndDispatchPriced() public {
         bytes32 requestId = _failedDeposit(24, 100_000);
         vm.prank(TREASURY);
         wrapper.setDispatchPaused(true);
-        bytes32 recoveryId = wrapper.previewRecoveryHomeId(requestId, 100_000, 1);
+        bytes32 recoveryId = wrapper.previewRecoveryHomeId(requestId, 100_000, LIVE_HOME_EXECUTION_FEE_RAW, 1);
 
-        (bytes memory destination, bytes memory message) = wrapper.previewRecoveryHomeMessage(requestId, 100_000, 1);
+        (bytes memory destination, bytes memory message) =
+            wrapper.previewRecoveryHomeMessage(requestId, 100_000, LIVE_HOME_EXECUTION_FEE_RAW, 1);
         assertEq(destination, HYDRATION_DESTINATION);
-        assertEq(message, _homeMessage(100_000, recoveryId));
+        assertEq(message, _homeMessage(100_000, LIVE_HOME_EXECUTION_FEE_RAW, recoveryId));
 
         vm.prank(OTHER);
         vmx.expectRevert(XcmWrapperV22.Unauthorized.selector);
-        wrapper.dispatchRecoveryHome(requestId, 100_000, 1);
+        wrapper.dispatchRecoveryHome(requestId, 100_000, LIVE_HOME_EXECUTION_FEE_RAW, 1);
 
         vm.prank(TREASURY);
-        wrapper.dispatchRecoveryHome(requestId, 100_000, 1);
+        wrapper.dispatchRecoveryHome(requestId, 100_000, LIVE_HOME_EXECUTION_FEE_RAW, 1);
         assertEq(precompile.sendCount(), 1);
         vm.prank(TREASURY);
-        wrapper.dispatchRecoveryHome(requestId, 100_000, 1);
+        wrapper.dispatchRecoveryHome(requestId, 100_000, LIVE_HOME_EXECUTION_FEE_RAW, 1);
         assertEq(precompile.sendCount(), 1);
 
         asset.mint(address(wrapper), 100_000);
@@ -565,6 +623,28 @@ contract HydrationUsdcAdapterV22TerminalTest is XcmWrapperV22Fixture {
         adapter.releaseRecoveredAssets(requestId, TREASURY, 100_000);
         assertEq(asset.balanceOf(TREASURY), before + 100_000);
         assertEq(adapter.recoveryAssetsOutstanding(requestId), 0);
+    }
+
+    function testRecoveryHomeRejectsZeroAndAboveStagedFee() public {
+        bytes32 requestId = _failedDeposit(25, 100_000);
+        vm.prank(TREASURY);
+        wrapper.setDispatchPaused(true);
+
+        vmx.expectRevert(XcmWrapperV22.FeeAboveMaximum.selector);
+        wrapper.previewRecoveryHomeMessage(requestId, 100_000, 0, 1);
+
+        vmx.expectRevert(XcmWrapperV22.FeeAboveMaximum.selector);
+        wrapper.previewRecoveryHomeMessage(requestId, 100_000, 30_001, 1);
+    }
+
+    function testRecoveryIdBindsDispatchTimeHomeFee() public {
+        bytes32 requestId = _failedDeposit(26, 100_000);
+        vm.prank(TREASURY);
+        wrapper.setDispatchPaused(true);
+
+        bytes32 first = wrapper.previewRecoveryHomeId(requestId, 100_000, 1_400, 1);
+        bytes32 repriced = wrapper.previewRecoveryHomeId(requestId, 100_000, 1_401, 1);
+        assertTrue(first != repriced);
     }
 
     function testTerminalAccountingAlsoCapsFailedWithdraw() public {
