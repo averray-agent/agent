@@ -7,6 +7,7 @@ import {
   BANK_XCM_V2,
   applyBankXcmV2Manifest,
   buildArmCalls,
+  buildSuccessionCalls,
   buildBankXcmV2Messages,
   buildConfigurationCalls,
   buildRecoveryHomeMessage,
@@ -19,21 +20,23 @@ import {
   assertDryRunEvidence,
   assertPacketGeneration,
   assertRuntimeFlowDisabled,
-  assertV22ArmedEmptyState,
-  assertV22DeploymentEvidence
+  assertV221ArmedEmptyState,
+  assertV221DeploymentEvidence,
+  assertV221LivePreflightEvidence,
+  assertV221SuccessionState
 } from "./prepare-bank-xcm-v2-multisig.mjs";
 import { captureConversionEvidence, convertOnEndpoint } from "./capture-hydration-wrapper-origin.mjs";
 import {
-  REVIEWED_ADAPTER_V22_CREATION_CODE_HASH,
-  REVIEWED_WRAPPER_V22_CREATION_CODE_HASH,
-  WRAPPER_V22_VERSION_SELECTOR,
-  assertReviewedV22Artifacts,
+  REVIEWED_ADAPTER_V221_CREATION_CODE_HASH,
+  REVIEWED_WRAPPER_V221_CREATION_CODE_HASH,
+  WRAPPER_V221_VERSION_SELECTOR,
+  assertReviewedV221Artifacts,
   assertManifestRecordsDeployment,
-  assertRecordedV22Candidate,
+  assertRecordedV221Candidate,
   assertSourceCheckout,
   assertSourceCommitReachable,
   buildDeploymentPlan,
-  probeWrapperV22Selector,
+  probeWrapperV221Selector,
   rebuildFoundryArtifacts
 } from "./deploy-bank-xcm-v2.mjs";
 import { buildManifestCandidate } from "./record-bank-xcm-v2-deployment.mjs";
@@ -112,12 +115,13 @@ test("deploy run cannot exit green until its exact pair is recorded in the manif
   );
 });
 
-test("v2.2 green-exit gate requires the exact fourth candidate and keeps flow disabled", () => {
+test("v2.2.1 green-exit gate requires the exact fifth candidate and keeps flow disabled", () => {
   const previousManifest = {
     bankXcmDeploymentHistory: [
       { version: "2.0", wrapper: "0x1000000000000000000000000000000000000001" },
       { version: "2.1-stale-artifact", wrapper: "0x1000000000000000000000000000000000000002" },
-      { version: "2.1", wrapper: "0x1000000000000000000000000000000000000003" }
+      { version: "2.1", wrapper: "0x1000000000000000000000000000000000000003" },
+      { version: "2.2", wrapper: "0x1000000000000000000000000000000000000004" }
     ]
   };
   const recordedManifest = {
@@ -125,12 +129,12 @@ test("v2.2 green-exit gate requires the exact fourth candidate and keeps flow di
     contracts: { xcmWrapper: WRAPPER, hydrationUsdcAdapter: ADAPTER },
     bankXcmDeploymentHistory: [
       ...previousManifest.bankXcmDeploymentHistory,
-      { version: "2.2", wrapper: WRAPPER, adapter: ADAPTER }
+      { version: "2.2.1", wrapper: WRAPPER, adapter: ADAPTER }
     ]
   };
   const candidates = recordedManifest.bankXcmDeploymentHistory.map(({ version, wrapper }) => ({ version, wrapper }));
   const env = `BANK_XCM_FLOW_ENABLED=false\nBANK_LANE_FEED_WRAPPER_CANDIDATES_JSON=${JSON.stringify(candidates)}\n`;
-  assert.equal(assertRecordedV22Candidate({
+  assert.equal(assertRecordedV221Candidate({
     previousManifest,
     recordedManifest,
     backendEnv: env,
@@ -138,7 +142,7 @@ test("v2.2 green-exit gate requires the exact fourth candidate and keeps flow di
     adapter: ADAPTER
   }), true);
   assert.throws(
-    () => assertRecordedV22Candidate({
+    () => assertRecordedV221Candidate({
       previousManifest,
       recordedManifest,
       backendEnv: env.replace("BANK_XCM_FLOW_ENABLED=false", "BANK_XCM_FLOW_ENABLED=true"),
@@ -359,57 +363,61 @@ test("deployment rebuilds Foundry artifacts with a forced clean compile", () => 
   assert.equal(invocation[2].stdio, "inherit");
 });
 
-test("deployment artifact gate pins both reviewed v2.2 creation hashes and the external selector", () => {
+test("deployment artifact gate pins both reviewed v2.2.1 creation hashes and the external selector", () => {
   const abi = [
     "function dispatchLeg(bytes32,uint8,uint256)",
-    "function previewRecoveryHomeId(bytes32,uint256,uint64) view returns(bytes32)"
+    "function previewRecoveryHomeId(bytes32,uint256,uint256,uint64) view returns(bytes32)"
   ];
-  const observed = assertReviewedV22Artifacts({
+  const observed = assertReviewedV221Artifacts({
     wrapperAbi: abi,
-    wrapperEvidence: { creationCodeHash: REVIEWED_WRAPPER_V22_CREATION_CODE_HASH },
-    adapterEvidence: { creationCodeHash: REVIEWED_ADAPTER_V22_CREATION_CODE_HASH }
+    wrapperEvidence: { creationCodeHash: REVIEWED_WRAPPER_V221_CREATION_CODE_HASH },
+    adapterEvidence: { creationCodeHash: REVIEWED_ADAPTER_V221_CREATION_CODE_HASH }
   });
-  assert.equal(observed.previewRecoveryHomeIdSelector, WRAPPER_V22_VERSION_SELECTOR);
+  assert.equal(observed.previewRecoveryHomeIdSelector, WRAPPER_V221_VERSION_SELECTOR);
   assert.throws(
-    () => assertReviewedV22Artifacts({
+    () => assertReviewedV221Artifacts({
       wrapperAbi: abi,
       wrapperEvidence: { creationCodeHash: `sha256:${"00".repeat(32)}` },
-      adapterEvidence: { creationCodeHash: REVIEWED_ADAPTER_V22_CREATION_CODE_HASH }
+      adapterEvidence: { creationCodeHash: REVIEWED_ADAPTER_V221_CREATION_CODE_HASH }
     }),
-    /does not match reviewed v2.2/u
+    /does not match reviewed v2.2.1/u
   );
   assert.throws(
-    () => assertReviewedV22Artifacts({
+    () => assertReviewedV221Artifacts({
       wrapperAbi: ["function dispatchLeg(bytes32,uint8,uint256)"],
-      wrapperEvidence: { creationCodeHash: REVIEWED_WRAPPER_V22_CREATION_CODE_HASH },
-      adapterEvidence: { creationCodeHash: REVIEWED_ADAPTER_V22_CREATION_CODE_HASH }
+      wrapperEvidence: { creationCodeHash: REVIEWED_WRAPPER_V221_CREATION_CODE_HASH },
+      adapterEvidence: { creationCodeHash: REVIEWED_ADAPTER_V221_CREATION_CODE_HASH }
     }),
-    /does not expose the reviewed v2.2/u
+    /does not expose the reviewed v2.2.1/u
   );
 });
 
-test("post-deploy gate probes the hard-coded v2.2 selector instead of trusting the artifact", async () => {
+test("post-deploy gate probes the hard-coded v2.2.1 selector instead of trusting the artifact", async () => {
   let request;
   const response = `0x${"12".repeat(32)}`;
-  const observed = await probeWrapperV22Selector({
+  const observed = await probeWrapperV221Selector({
     call: async (value) => { request = value; return response; }
   }, WRAPPER);
   assert.equal(request.to, getAddress(WRAPPER));
-  assert.equal(request.data.slice(0, 10), WRAPPER_V22_VERSION_SELECTOR);
+  assert.equal(request.data.slice(0, 10), WRAPPER_V221_VERSION_SELECTOR);
   assert.equal(observed.response, response);
   await assert.rejects(
-    probeWrapperV22Selector({ call: async () => { throw new Error("execution reverted"); } }, WRAPPER),
-    /does not execute v2.2 selector/u
+    probeWrapperV221Selector({ call: async () => { throw new Error("execution reverted"); } }, WRAPPER),
+    /does not execute v2.2.1 selector/u
   );
   await assert.rejects(
-    probeWrapperV22Selector({ call: async () => `0x${"00".repeat(32)}` }, WRAPPER),
-    /invalid v2.2 selector response/u
+    probeWrapperV221Selector({ call: async () => `0x${"00".repeat(32)}` }, WRAPPER),
+    /invalid v2.2.1 selector response/u
   );
 });
 
-test("paused configuration and arm packets are deliberately separate", () => {
+test("paused configuration and atomic succession packets are deliberately separate", () => {
   const configure = buildConfigurationCalls({ manifest, wrapper: WRAPPER, adapter: ADAPTER, convertedAccountId32: CONVERTED });
   const arm = buildArmCalls({ wrapper: WRAPPER });
+  const succession = buildSuccessionCalls({
+    previousWrapper: "0x1000000000000000000000000000000000000004",
+    wrapper: WRAPPER
+  });
   assert.equal(configure.length, 4);
   assert.equal(configure.some(({ label }) => /setDispatchPaused/u.test(label)), false);
   assert.match(configure[3].label, /setStrategySettler/u);
@@ -417,32 +425,37 @@ test("paused configuration and arm packets are deliberately separate", () => {
   assert.match(arm[0].label, /setDispatchPaused\(false\)/u);
   const iface = new Interface(["function setDispatchPaused(bool)"]);
   assert.equal(iface.decodeFunctionData("setDispatchPaused", arm[0].data)[0], false);
+  assert.equal(succession.length, 2);
+  assert.equal(iface.decodeFunctionData("setDispatchPaused", succession[0].data)[0], true);
+  assert.equal(iface.decodeFunctionData("setDispatchPaused", succession[1].data)[0], false);
 });
 
-test("v2.2 arm emitter requires the G2 deployment bundle and refuses caller-built messages", () => {
-  assert.equal(assertPacketGeneration({ generation: "2.2", packet: "configure" }), true);
+test("v2.2.1 arm emitter requires G2, prior generation, and four-leg evidence", () => {
+  assert.equal(assertPacketGeneration({ generation: "2.2.1", packet: "configure" }), true);
   assert.throws(
-    () => assertPacketGeneration({ generation: "2.2", packet: "arm" }),
-    /requires --deployment-evidence/u
+    () => assertPacketGeneration({ generation: "2.2.1", packet: "arm" }),
+    /requires --previous-wrapper.*--live-preflight-evidence/u
   );
   assert.equal(assertPacketGeneration({
-    generation: "2.2",
+    generation: "2.2.1",
     packet: "arm",
-    deploymentEvidence: "/tmp/g2.json"
+    deploymentEvidence: "/tmp/g2.json",
+    livePreflightEvidence: "/tmp/legs.json",
+    previousWrapper: "0x1000000000000000000000000000000000000004"
   }), true);
   assert.throws(
-    () => assertPacketGeneration({ generation: "2.2", packet: "configure", dryRunEvidence: "/tmp/g3.json" }),
+    () => assertPacketGeneration({ generation: "2.2.1", packet: "configure", dryRunEvidence: "/tmp/g3.json" }),
     /no caller-built request messages/u
   );
 });
 
-test("v2.2 arm deployment bundle is bound to both live runtime hashes and the external selector", () => {
+test("v2.2.1 arm deployment bundle is bound to both live runtime hashes and the external selector", () => {
   const runtime = { wrapper: "sha256:wrapper", adapter: "sha256:adapter" };
-  const probe = { selector: "0x526a213a", response: `0x${"11".repeat(32)}` };
+  const probe = { selector: "0x56112922", response: `0x${"11".repeat(32)}` };
   const evidence = {
     kind: "averray.bankXcmV2DeploymentEvidence",
     profile: "mainnet",
-    version: "2.2",
+    version: "2.2.1",
     sourceCommit: "abc123",
     verifiedAt: "2026-08-04T00:00:00.000Z",
     wrapper: { address: WRAPPER, runtimeCodeHash: runtime.wrapper },
@@ -452,7 +465,7 @@ test("v2.2 arm deployment bundle is bound to both live runtime hashes and the ex
       adapter: { artifactRuntimeMatch: true }
     }
   };
-  assert.equal(assertV22DeploymentEvidence({
+  assert.equal(assertV221DeploymentEvidence({
     evidence,
     wrapper: WRAPPER,
     adapter: ADAPTER,
@@ -460,7 +473,7 @@ test("v2.2 arm deployment bundle is bound to both live runtime hashes and the ex
     liveProbe: probe
   }).sourceCommit, "abc123");
   assert.throws(
-    () => assertV22DeploymentEvidence({
+    () => assertV221DeploymentEvidence({
       evidence,
       wrapper: WRAPPER,
       adapter: ADAPTER,
@@ -471,7 +484,7 @@ test("v2.2 arm deployment bundle is bound to both live runtime hashes and the ex
   );
 });
 
-test("v2.2 arm fresh-state gate refuses any request, custody, allowance, or enabled flow", () => {
+test("v2.2.1 arm fresh-state gate refuses any request, custody, allowance, or enabled flow", () => {
   const empty = {
     requestQueuedEventCount: 0,
     adapterTotalShares: "0",
@@ -486,10 +499,63 @@ test("v2.2 arm fresh-state gate refuses any request, custody, allowance, or enab
     policyPaused: false,
     flowDisabled: true
   };
-  assert.equal(assertV22ArmedEmptyState(empty), true);
-  assert.throws(() => assertV22ArmedEmptyState({ ...empty, requestQueuedEventCount: 1 }), /requestQueuedEventCount=0/u);
-  assert.throws(() => assertV22ArmedEmptyState({ ...empty, treasuryAllowanceToAdapter: "1" }), /treasuryAllowanceToAdapter=0/u);
-  assert.throws(() => assertV22ArmedEmptyState({ ...empty, flowDisabled: false }), /flow.*disabled/u);
+  assert.equal(assertV221ArmedEmptyState(empty), true);
+  assert.throws(() => assertV221ArmedEmptyState({ ...empty, requestQueuedEventCount: 1 }), /requestQueuedEventCount=0/u);
+  assert.throws(() => assertV221ArmedEmptyState({ ...empty, treasuryAllowanceToAdapter: "1" }), /treasuryAllowanceToAdapter=0/u);
+  assert.throws(() => assertV221ArmedEmptyState({ ...empty, flowDisabled: false }), /flow.*disabled/u);
+});
+
+test("v2.2.1 arm requires four live legs and a completed nested home execution", () => {
+  const legs = ["deposit_funding", "deposit_sell", "withdraw_sell", "withdraw_home"].map((leg) => ({
+    leg,
+    liveState: true,
+    result: "pass",
+    assetHubBlockNumber: 19_100_000,
+    revive: { success: true },
+    messageDryRun: { complete: true },
+    ...(leg === "withdraw_home" ? {
+      homeExecutionFeeRaw: "1400",
+      messageDryRun: { complete: true, forwardedParaId: 1000, assetHubExecutionComplete: true }
+    } : {})
+  }));
+  const evidence = {
+    kind: "averray.bankXcmV221LivePreflightBundle",
+    profile: "mainnet",
+    version: "2.2.1",
+    liveState: true,
+    wrapper: WRAPPER,
+    adapter: ADAPTER,
+    convertedAccountId32: CONVERTED,
+    capturedAt: "2026-08-05T00:00:00.000Z",
+    evidenceId: "g2-live-legs",
+    legs
+  };
+  assert.equal(assertV221LivePreflightEvidence({ evidence, wrapper: WRAPPER, adapter: ADAPTER, convertedAccount: CONVERTED }).legs.length, 4);
+  const broken = structuredClone(evidence);
+  broken.legs.find(({ leg }) => leg === "withdraw_home").messageDryRun.assetHubExecutionComplete = false;
+  assert.throws(
+    () => assertV221LivePreflightEvidence({ evidence: broken, wrapper: WRAPPER, adapter: ADAPTER, convertedAccount: CONVERTED }),
+    /completed Asset Hub execution/u
+  );
+});
+
+test("v2.2.1 succession refuses a paused predecessor or unpaused candidate", () => {
+  const previousWrapper = "0x1000000000000000000000000000000000000004";
+  const history = [{ version: "2.2", wrapper: previousWrapper }];
+  assert.equal(assertV221SuccessionState({
+    previousWrapper,
+    candidateWrapper: WRAPPER,
+    previousPaused: false,
+    candidatePaused: true,
+    history
+  }), true);
+  assert.throws(() => assertV221SuccessionState({
+    previousWrapper,
+    candidateWrapper: WRAPPER,
+    previousPaused: true,
+    candidatePaused: true,
+    history
+  }), /requires recorded v2.2 armed/u);
 });
 
 test("v2.2 arm runtime gate requires the exact deployed pair and flow-disabled surfaces", () => {
@@ -833,6 +899,42 @@ test("v2.2 manifest replacement appends the new pair and emits generation-specif
   assert.equal(next.deploymentBlocks.hydrationUsdcAdapterV2_2, 19_200_002);
   assert.equal(next.deployers.xcmWrapperV2_2, getAddress(OPERATOR));
   assert.equal(next.deployers.hydrationUsdcAdapterV2_2, getAddress(OPERATOR));
+});
+
+test("v2.2.1 manifest replacement uses three-part generation keys", () => {
+  const wrapperV221 = "0x4444444444444444444444444444444444444444";
+  const adapterV221 = "0x5555555555555555555555555555555555555555";
+  const prior = {
+    ...manifest,
+    contracts: { ...manifest.contracts, xcmWrapper: WRAPPER, hydrationUsdcAdapter: ADAPTER },
+    bankXcmDeploymentHistory: [{ version: "2.2", wrapper: WRAPPER, adapter: ADAPTER }],
+    bankXcmV2Deployment: { version: "2.2" }
+  };
+  const next = applyBankXcmV2Manifest(prior, {
+    version: "2.2.1",
+    sourceCommit: "c".repeat(40),
+    deployer: OPERATOR,
+    verifiedAt: "2026-08-05T19:00:00.000Z",
+    convertedAccountId32: CONVERTED,
+    wrapper: {
+      address: wrapperV221,
+      txHash: `0x${"51".repeat(32)}`,
+      blockNumber: 19_300_001,
+      abiHash: `sha256:${"52".repeat(32)}`,
+      runtimeCodeHash: `sha256:${"53".repeat(32)}`
+    },
+    adapter: {
+      address: adapterV221,
+      txHash: `0x${"61".repeat(32)}`,
+      blockNumber: 19_300_002,
+      abiHash: `sha256:${"62".repeat(32)}`,
+      runtimeCodeHash: `sha256:${"63".repeat(32)}`
+    }
+  });
+  assert.deepEqual(next.bankXcmDeploymentHistory.map((entry) => entry.version), ["2.2", "2.2.1"]);
+  assert.equal(next.deploymentBlocks.xcmWrapperV2_2_1, 19_300_001);
+  assert.equal(next.deploymentBlocks.hydrationUsdcAdapterV2_2_1, 19_300_002);
+  assert.equal(next.deployers.xcmWrapperV2_2_1, getAddress(OPERATOR));
 });
 
 test("manifest candidate refuses live runtime drift before recording provenance", async () => {

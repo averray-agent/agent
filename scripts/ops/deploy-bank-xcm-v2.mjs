@@ -59,9 +59,9 @@ const repoRoot = resolve(here, "..", "..");
 const WRAPPER_ARTIFACT = resolve(repoRoot, "out/XcmWrapperV22.sol/XcmWrapperV22.json");
 const ADAPTER_ARTIFACT = resolve(repoRoot, "out/HydrationUsdcAdapterV22.sol/HydrationUsdcAdapterV22.json");
 const DEFAULT_EXPECTED_DEPLOYER = "0x9Ab8531FBb0948C542a31298FD61335f30064239";
-export const REVIEWED_WRAPPER_V22_CREATION_CODE_HASH = "sha256:900a719c2fe6b41db8e3bc154177b044f6c9bc8e950387aff592a16f6214a086";
-export const REVIEWED_ADAPTER_V22_CREATION_CODE_HASH = "sha256:b1ce42c403163d7e06f4e12e4d6177f21634c1053eb0d6ef2cb60135c986dc99";
-export const WRAPPER_V22_VERSION_SELECTOR = "0x526a213a";
+export const REVIEWED_WRAPPER_V221_CREATION_CODE_HASH = "sha256:510252af64add49682fc6f5f6c3a91d798d15a58cae5dcc19907f5a0ce6d4891";
+export const REVIEWED_ADAPTER_V221_CREATION_CODE_HASH = "sha256:8d1b17faacdc1c2f01b7fdcfdd88a8c3f412c04ed578b32b9a184be1b94551d3";
+export const WRAPPER_V221_VERSION_SELECTOR = "0x56112922";
 const WRAPPER_V22_PROBE_REQUEST_ID = `0x${"22".repeat(32)}`;
 const WRAPPER_V22_PROBE_AMOUNT = 100_000n;
 const WRAPPER_V22_PROBE_NONCE = 1n;
@@ -90,8 +90,8 @@ function usage() {
     "Usage (read-only plan):",
     "  node scripts/ops/deploy-bank-xcm-v2.mjs --profile mainnet \\",
     `    --expected-deployer ${DEFAULT_EXPECTED_DEPLOYER} --source-commit <full-40-char-commit> \\`,
-    "    [--bundle-out /tmp/bank-xcm-v22-plan.json]",
-    "    [--replace-existing]  # required for the reviewed v2.2 replacement",
+    "    [--bundle-out /tmp/bank-xcm-v221-plan.json]",
+    "    [--replace-existing]  # required for the reviewed v2.2.1 succession",
     "",
     "Commit (Pascal-authorized ceremony only): add --commit and",
     "  --signer-secret-ref op://... --deployment-evidence-out docs/evidence/...json \\",
@@ -171,15 +171,15 @@ export function rebuildFoundryArtifacts({ runner = execFileSync } = {}) {
   return true;
 }
 
-export function assertReviewedV22Artifacts({ wrapperAbi, wrapperEvidence, adapterEvidence }) {
-  if (wrapperEvidence?.creationCodeHash !== REVIEWED_WRAPPER_V22_CREATION_CODE_HASH) {
+export function assertReviewedV221Artifacts({ wrapperAbi, wrapperEvidence, adapterEvidence }) {
+  if (wrapperEvidence?.creationCodeHash !== REVIEWED_WRAPPER_V221_CREATION_CODE_HASH) {
     throw new Error(
-      `XcmWrapperV22 creation hash ${wrapperEvidence?.creationCodeHash ?? "<missing>"} does not match reviewed v2.2 ${REVIEWED_WRAPPER_V22_CREATION_CODE_HASH}.`
+      `XcmWrapperV22 creation hash ${wrapperEvidence?.creationCodeHash ?? "<missing>"} does not match reviewed v2.2.1 ${REVIEWED_WRAPPER_V221_CREATION_CODE_HASH}.`
     );
   }
-  if (adapterEvidence?.creationCodeHash !== REVIEWED_ADAPTER_V22_CREATION_CODE_HASH) {
+  if (adapterEvidence?.creationCodeHash !== REVIEWED_ADAPTER_V221_CREATION_CODE_HASH) {
     throw new Error(
-      `HydrationUsdcAdapterV22 creation hash ${adapterEvidence?.creationCodeHash ?? "<missing>"} does not match reviewed v2.2 ${REVIEWED_ADAPTER_V22_CREATION_CODE_HASH}.`
+      `HydrationUsdcAdapterV22 creation hash ${adapterEvidence?.creationCodeHash ?? "<missing>"} does not match reviewed v2.2.1 ${REVIEWED_ADAPTER_V221_CREATION_CODE_HASH}.`
     );
   }
   let dispatch;
@@ -187,12 +187,12 @@ export function assertReviewedV22Artifacts({ wrapperAbi, wrapperEvidence, adapte
   try {
     const iface = new Interface(wrapperAbi);
     dispatch = iface.getFunction("dispatchLeg(bytes32,uint8,uint256)");
-    preview = iface.getFunction("previewRecoveryHomeId(bytes32,uint256,uint64)");
+    preview = iface.getFunction("previewRecoveryHomeId(bytes32,uint256,uint256,uint64)");
   } catch {
     throw new Error("XcmWrapperV22 artifact ABI does not expose the reviewed constructive dispatch/recovery surface.");
   }
-  if (!dispatch || !preview || preview.selector.toLowerCase() !== WRAPPER_V22_VERSION_SELECTOR) {
-    throw new Error("XcmWrapperV22 artifact ABI does not expose the reviewed v2.2 version selector.");
+  if (!dispatch || !preview || preview.selector.toLowerCase() !== WRAPPER_V221_VERSION_SELECTOR) {
+    throw new Error("XcmWrapperV22 artifact ABI does not expose the reviewed v2.2.1 version selector.");
   }
   return {
     wrapperCreationCodeHash: wrapperEvidence.creationCodeHash,
@@ -202,25 +202,25 @@ export function assertReviewedV22Artifacts({ wrapperAbi, wrapperEvidence, adapte
   };
 }
 
-export async function probeWrapperV22Selector(provider, wrapperAddress) {
+export async function probeWrapperV221Selector(provider, wrapperAddress) {
   const args = AbiCoder.defaultAbiCoder().encode(
-    ["bytes32", "uint256", "uint64"],
-    [WRAPPER_V22_PROBE_REQUEST_ID, WRAPPER_V22_PROBE_AMOUNT, WRAPPER_V22_PROBE_NONCE]
+    ["bytes32", "uint256", "uint256", "uint64"],
+    [WRAPPER_V22_PROBE_REQUEST_ID, WRAPPER_V22_PROBE_AMOUNT, 1n, WRAPPER_V22_PROBE_NONCE]
   );
-  const calldata = concat([WRAPPER_V22_VERSION_SELECTOR, args]);
+  const calldata = concat([WRAPPER_V221_VERSION_SELECTOR, args]);
   let response;
   try {
     response = await provider.call({ to: getAddress(wrapperAddress), data: calldata });
   } catch (error) {
     throw new Error(
-      `deployed wrapper does not execute v2.2 selector ${WRAPPER_V22_VERSION_SELECTOR}: ${error?.shortMessage ?? error?.message ?? error}`
+      `deployed wrapper does not execute v2.2.1 selector ${WRAPPER_V221_VERSION_SELECTOR}: ${error?.shortMessage ?? error?.message ?? error}`
     );
   }
   if (!/^0x[0-9a-fA-F]{64}$/u.test(response) || /^0x0{64}$/u.test(response)) {
-    throw new Error(`deployed wrapper returned invalid v2.2 selector response: ${response}.`);
+    throw new Error(`deployed wrapper returned invalid v2.2.1 selector response: ${response}.`);
   }
   return {
-    selector: WRAPPER_V22_VERSION_SELECTOR,
+    selector: WRAPPER_V221_VERSION_SELECTOR,
     calldata,
     response,
     probeRequestId: WRAPPER_V22_PROBE_REQUEST_ID,
@@ -265,22 +265,22 @@ export function assertManifestRecordsDeployment({ manifest, wrapper, adapter }) 
   return true;
 }
 
-export function assertRecordedV22Candidate({ previousManifest, recordedManifest, backendEnv, wrapper, adapter }) {
+export function assertRecordedV221Candidate({ previousManifest, recordedManifest, backendEnv, wrapper, adapter }) {
   assertManifestRecordsDeployment({ manifest: recordedManifest, wrapper, adapter });
   if ((recordedManifest.bankXcmDeploymentHistory?.length ?? 0) !== (previousManifest.bankXcmDeploymentHistory?.length ?? 0) + 1) {
-    throw new Error("paired manifest did not append exactly one v2.2 wrapper generation.");
+    throw new Error("paired manifest did not append exactly one v2.2.1 wrapper generation.");
   }
   const newest = recordedManifest.bankXcmDeploymentHistory.at(-1);
-  if (newest?.version !== "2.2" || !isAddress(newest?.wrapper) || getAddress(newest.wrapper) !== getAddress(wrapper)) {
-    throw new Error("paired manifest history does not end with the exact v2.2 wrapper.");
+  if (newest?.version !== "2.2.1" || !isAddress(newest?.wrapper) || getAddress(newest.wrapper) !== getAddress(wrapper)) {
+    throw new Error("paired manifest history does not end with the exact v2.2.1 wrapper.");
   }
   if (!String(backendEnv).includes("BANK_XCM_FLOW_ENABLED=false")) {
     throw new Error("paired env render unexpectedly enabled the Bank flow before G3.");
   }
   const candidatesLine = String(backendEnv).match(/^BANK_LANE_FEED_WRAPPER_CANDIDATES_JSON=(.+)$/mu)?.[1];
   const candidates = candidatesLine ? JSON.parse(candidatesLine) : [];
-  if (candidates.length !== 4 || !candidates.some((entry) => isAddress(entry?.wrapper) && getAddress(entry.wrapper) === getAddress(wrapper))) {
-    throw new Error("paired env render did not record v2.2 as the fourth wrapper candidate.");
+  if (candidates.length !== 5 || !candidates.some((entry) => isAddress(entry?.wrapper) && getAddress(entry.wrapper) === getAddress(wrapper))) {
+    throw new Error("paired env render did not record v2.2.1 as the fifth wrapper candidate.");
   }
   return true;
 }
@@ -319,7 +319,7 @@ export async function buildDeploymentPlan({ manifest, provider, deployer, wrappe
     replacement: replaceExisting ? {
       wrapper: getAddress(manifest.contracts.xcmWrapper),
       adapter: getAddress(manifest.contracts.hydrationUsdcAdapter),
-      reason: "v2.2: dispatch-time fee bounds, chain-derived watcher state, and request-scoped recovery accounting"
+      reason: "v2.2.1: dispatch-time nested home fee bound to every priced hop"
     } : null,
     constants: {
       treasuryPolicy: getAddress(manifest.contracts.treasuryPolicy),
@@ -381,7 +381,7 @@ export async function buildDeploymentPlan({ manifest, provider, deployer, wrappe
 }
 
 function printPlan(plan, sourceCommit) {
-  console.log("# Bank XCM v2.2 deploy-and-record ceremony (NO CONFIGURATION)");
+  console.log("# Bank XCM v2.2.1 deploy-and-record ceremony (NO CONFIGURATION)");
   console.log(`profile / chainId:       ${plan.profile} / ${plan.chainId}`);
   console.log(`source commit:           ${sourceCommit}`);
   console.log(`deployer:                ${plan.deployer}`);
@@ -452,8 +452,8 @@ async function verifyDeployment(provider, plan, receipts, { wrapperArtifact, ada
   }
   // This check deliberately does not derive from the just-built artifact. A
   // stale checkout can produce a self-consistent artifact/runtime pair; the
-  // hard-coded v2.2 selector is the external version fact that catches it.
-  const versionProbe = await probeWrapperV22Selector(provider, plan.wrapper.address);
+  // hard-coded v2.2.1 selector is the external version fact that catches it.
+  const versionProbe = await probeWrapperV221Selector(provider, plan.wrapper.address);
   const observed = {
     wrapper: {
       txHash: receipts.wrapper.hash,
@@ -503,7 +503,7 @@ export async function main(argv = process.argv.slice(2)) {
     console.log(usage());
     return;
   }
-  if (args.profile !== "mainnet") throw new Error("Bank v2.2 G2 supports --profile mainnet only.");
+  if (args.profile !== "mainnet") throw new Error("Bank v2.2.1 G2 supports --profile mainnet only.");
   if (!args.sourceCommit) throw new Error("--source-commit is required for both preview and commit modes.");
   const sourceCommit = String(args.sourceCommit).trim().toLowerCase();
   assertSourceCheckout({ sourceCommit, headCommit: currentCommit(), porcelain: currentStatus() });
@@ -517,7 +517,7 @@ export async function main(argv = process.argv.slice(2)) {
   const manifest = loadJson(resolve(repoRoot, "deployments/mainnet.json"));
   const wrapperArtifact = loadJson(WRAPPER_ARTIFACT);
   const adapterArtifact = loadJson(ADAPTER_ARTIFACT);
-  const reviewedArtifacts = assertReviewedV22Artifacts({
+  const reviewedArtifacts = assertReviewedV221Artifacts({
     wrapperAbi: wrapperArtifact.abi,
     wrapperEvidence: artifactEvidence(wrapperArtifact),
     adapterEvidence: artifactEvidence(adapterArtifact)
@@ -563,7 +563,7 @@ export async function main(argv = process.argv.slice(2)) {
     if (BigInt(plan.funding.balanceWei) < BigInt(required)) {
       throw new Error(`deployer balance ${plan.funding.balanceWei} wei is below required ${required} wei (estimate + 20%).`);
     }
-    const confirmation = `DEPLOY BANK XCM V2.2 AND RECORD ${plan.wrapper.address} ${plan.adapter.address}`;
+    const confirmation = `DEPLOY BANK XCM V2.2.1 AND RECORD ${plan.wrapper.address} ${plan.adapter.address}`;
     console.log(`\nType exactly: ${confirmation}`);
     const prompt = createInterface({ input: process.stdin, output: process.stdout });
     const answer = await prompt.question("> ");
@@ -605,7 +605,7 @@ export async function main(argv = process.argv.slice(2)) {
         schemaVersion: 1,
         kind: "averray.bankXcmV2DeploymentEvidence",
         profile: "mainnet",
-        version: "2.2",
+        version: "2.2.1",
         sourceCommit,
         deployer: expectedDeployer,
         verifiedAt: capturedAt,
@@ -650,7 +650,7 @@ export async function main(argv = process.argv.slice(2)) {
       const written = writeManifestAndRenderedEnv(candidate);
       const recordedManifest = loadJson(resolve(repoRoot, "deployments/mainnet.json"));
       const backendEnv = readFileSync(resolve(repoRoot, "deploy/backend.mainnet.env.template"), "utf8");
-      assertRecordedV22Candidate({
+      assertRecordedV221Candidate({
         previousManifest: manifest,
         recordedManifest,
         backendEnv,

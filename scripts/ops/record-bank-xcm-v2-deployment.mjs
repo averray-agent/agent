@@ -43,15 +43,15 @@ function requireEvidenceShape(evidence) {
   if (evidence?.kind !== "averray.bankXcmV2DeploymentEvidence" || evidence?.profile !== "mainnet") {
     throw new Error("deployment evidence kind/profile mismatch.");
   }
-  if (!/^2(?:\.[0-9]+)?$/u.test(String(evidence.version ?? ""))) {
+  if (!/^2(?:\.[0-9]+){0,2}$/u.test(String(evidence.version ?? ""))) {
     throw new Error("deployment evidence version must identify a v2 generation.");
   }
-  if (String(evidence.version) === "2.2") {
+  if (["2.2", "2.2.1"].includes(String(evidence.version))) {
     if (!/^0x[0-9a-f]{64}$/iu.test(String(evidence.convertedAccountId32 ?? ""))) {
-      throw new Error("v2.2 deployment evidence requires the fresh converted AccountId32.");
+      throw new Error("v2.2+ deployment evidence requires the fresh converted AccountId32.");
     }
     if (evidence.conversionEvidence?.endpointCount !== 2 || typeof evidence.conversionEvidence?.artifact !== "string") {
-      throw new Error("v2.2 deployment evidence requires a two-endpoint conversion artifact.");
+      throw new Error("v2.2+ deployment evidence requires a two-endpoint conversion artifact.");
     }
   }
   for (const key of ["wrapper", "adapter"]) {
@@ -69,7 +69,7 @@ function requireEvidenceShape(evidence) {
 }
 
 export function artifactPathsForVersion(version) {
-  if (String(version) === "2.2") {
+  if (["2.2", "2.2.1"].includes(String(version))) {
     return {
       wrapper: resolve(repoRoot, "out/XcmWrapperV22.sol/XcmWrapperV22.json"),
       adapter: resolve(repoRoot, "out/HydrationUsdcAdapterV22.sol/HydrationUsdcAdapterV22.json")
