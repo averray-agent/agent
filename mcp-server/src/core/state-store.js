@@ -463,15 +463,17 @@ export class MemoryStateStore {
     return this.externalJobDelistings.has(normalizeExternalJobId(jobId));
   }
 
-  async getXcmObservation(requestId) {
-    return this.xcmObservations.get(requestId);
+  async getXcmObservation(wrapperAddress, requestId) {
+    return cloneJsonRecord(this.xcmObservations.get(xcmRequestStorageId(wrapperAddress, requestId)));
   }
 
   async upsertXcmObservation(observation) {
-    const existing = this.xcmObservations.get(observation.requestId) ?? {};
-    const merged = mergeXcmObservationRecord(existing, observation);
-    this.xcmObservations.set(observation.requestId, merged);
-    return merged;
+    const identity = normalizeXcmRequestIdentity(observation?.wrapperAddress, observation?.requestId);
+    const storageId = xcmRequestStorageId(identity.wrapperAddress, identity.requestId);
+    const existing = this.xcmObservations.get(storageId) ?? {};
+    const merged = mergeXcmObservationRecord(existing, { ...observation, ...identity });
+    this.xcmObservations.set(storageId, merged);
+    return cloneJsonRecord(merged);
   }
 
   async listPendingXcmObservations(limit = 50) {
@@ -496,20 +498,37 @@ export class MemoryStateStore {
     return listEventLogFromRecords(this.eventLog, filter);
   }
 
-  async markXcmObservationProcessed(requestId, result = undefined) {
-    const current = this.xcmObservations.get(requestId);
+  async markXcmObservationProcessed(wrapperAddress, requestId, result = undefined) {
+    const storageId = xcmRequestStorageId(wrapperAddress, requestId);
+    const current = this.xcmObservations.get(storageId);
     const updated = markXcmObservationProcessedRecord(current, result);
     if (!updated) return undefined;
-    this.xcmObservations.set(requestId, updated);
-    return updated;
+    this.xcmObservations.set(storageId, updated);
+    return cloneJsonRecord(updated);
   }
 
-  async markXcmObservationFailed(requestId, error, retry = undefined) {
-    const current = this.xcmObservations.get(requestId);
+  async markXcmObservationFailed(wrapperAddress, requestId, error, retry = undefined) {
+    const storageId = xcmRequestStorageId(wrapperAddress, requestId);
+    const current = this.xcmObservations.get(storageId);
     const updated = markXcmObservationFailedRecord(current, error, retry);
     if (!updated) return undefined;
-    this.xcmObservations.set(requestId, updated);
-    return updated;
+    this.xcmObservations.set(storageId, updated);
+    return cloneJsonRecord(updated);
+  }
+
+  async migrateLegacyXcmObservation({ requestId, wrapperAddress, expected }) {
+    const legacyId = normalizeXcmRequestId(requestId);
+    const identity = normalizeXcmRequestIdentity(wrapperAddress, legacyId);
+    const storageId = xcmRequestStorageId(identity.wrapperAddress, identity.requestId);
+    const migrated = this.xcmObservations.get(storageId);
+    if (migrated) return { status: "already_migrated", observation: cloneJsonRecord(migrated) };
+    const legacy = this.xcmObservations.get(legacyId);
+    if (!legacy) return { status: "not_found" };
+    assertLegacyXcmObservation(legacy, expected);
+    const stored = cloneJsonRecord({ ...legacy, ...identity, migrationSource: "legacy_request_id_only" });
+    this.xcmObservations.delete(legacyId);
+    this.xcmObservations.set(storageId, stored);
+    return { status: "migrated", observation: cloneJsonRecord(stored) };
   }
 
   async getXcmBalanceWatch(wrapperAddress, requestId) {
@@ -1137,24 +1156,26 @@ export class RedisStateStore {
     return Boolean(await this.getExternalJobDelisting(jobId));
   }
 
-  async getXcmObservation(requestId) {
+  async getXcmObservation(wrapperAddress, requestId) {
     await this.connect();
-    const raw = await this.client.get(this.key("xcm-observation", requestId));
+    const raw = await this.client.get(this.key("xcm-observation", xcmRequestStorageId(wrapperAddress, requestId)));
     return raw ? JSON.parse(raw) : undefined;
   }
 
   async upsertXcmObservation(observation) {
     await this.connect();
-    const existing = await this.getXcmObservation(observation.requestId);
-    const merged = mergeXcmObservationRecord(existing, observation);
-    await this.client.set(this.key("xcm-observation", observation.requestId), JSON.stringify(merged));
+    const identity = normalizeXcmRequestIdentity(observation?.wrapperAddress, observation?.requestId);
+    const storageId = xcmRequestStorageId(identity.wrapperAddress, identity.requestId);
+    const existing = await this.getXcmObservation(identity.wrapperAddress, identity.requestId);
+    const merged = mergeXcmObservationRecord(existing, { ...observation, ...identity });
+    await this.client.set(this.key("xcm-observation", storageId), JSON.stringify(merged));
     if (!merged.processed) {
       await this.client.zAdd(this.key("xcm-observations", "pending"), {
         score: timestampScore(merged.observedAt),
-        value: observation.requestId
+        value: storageId
       });
     } else {
-      await this.client.zRem(this.key("xcm-observations", "pending"), observation.requestId);
+      await this.client.zRem(this.key("xcm-observations", "pending"), storageId);
     }
     return merged;
   }
@@ -1162,12 +1183,15 @@ export class RedisStateStore {
   async listPendingXcmObservations(limit = 50) {
     await this.connect();
     const { stop } = redisRangeFromLimitOffset(limit, 0);
-    const requestIds = await this.client.zRange(
+    const storageIds = await this.client.zRange(
       this.key("xcm-observations", "pending"),
       0,
       stop
     );
-    const entries = await Promise.all(requestIds.map((requestId) => this.getXcmObservation(requestId)));
+    const entries = await Promise.all(storageIds.map(async (storageId) => {
+      const raw = await this.client.get(this.key("xcm-observation", storageId));
+      return raw ? JSON.parse(raw) : undefined;
+    }));
     return entries.filter((entry) => entry && !entry.processed);
   }
 
@@ -1198,27 +1222,56 @@ export class RedisStateStore {
     return listEventLogFromRecords(records.filter(Boolean), filter);
   }
 
-  async markXcmObservationProcessed(requestId, result = undefined) {
+  async markXcmObservationProcessed(wrapperAddress, requestId, result = undefined) {
     await this.connect();
-    const current = await this.getXcmObservation(requestId);
+    const storageId = xcmRequestStorageId(wrapperAddress, requestId);
+    const current = await this.getXcmObservation(wrapperAddress, requestId);
     const updated = markXcmObservationProcessedRecord(current, result);
     if (!updated) return undefined;
-    await this.client.set(this.key("xcm-observation", requestId), JSON.stringify(updated));
-    await this.client.zRem(this.key("xcm-observations", "pending"), requestId);
+    await this.client.set(this.key("xcm-observation", storageId), JSON.stringify(updated));
+    await this.client.zRem(this.key("xcm-observations", "pending"), storageId);
     return updated;
   }
 
-  async markXcmObservationFailed(requestId, error, retry = undefined) {
+  async markXcmObservationFailed(wrapperAddress, requestId, error, retry = undefined) {
     await this.connect();
-    const current = await this.getXcmObservation(requestId);
+    const storageId = xcmRequestStorageId(wrapperAddress, requestId);
+    const current = await this.getXcmObservation(wrapperAddress, requestId);
     const updated = markXcmObservationFailedRecord(current, error, retry);
     if (!updated) return undefined;
-    await this.client.set(this.key("xcm-observation", requestId), JSON.stringify(updated));
+    await this.client.set(this.key("xcm-observation", storageId), JSON.stringify(updated));
     await this.client.zAdd(this.key("xcm-observations", "pending"), {
       score: timestampScore(updated.observedAt),
-      value: requestId
+      value: storageId
     });
     return updated;
+  }
+
+  async migrateLegacyXcmObservation({ requestId, wrapperAddress, expected }) {
+    await this.connect();
+    const legacyId = normalizeXcmRequestId(requestId);
+    const identity = normalizeXcmRequestIdentity(wrapperAddress, legacyId);
+    const storageId = xcmRequestStorageId(identity.wrapperAddress, identity.requestId);
+    const migrated = await this.getXcmObservation(identity.wrapperAddress, identity.requestId);
+    if (migrated) return { status: "already_migrated", observation: migrated };
+    const legacyKey = this.key("xcm-observation", legacyId);
+    const raw = await this.client.get(legacyKey);
+    if (!raw) return { status: "not_found" };
+    const legacy = JSON.parse(raw);
+    assertLegacyXcmObservation(legacy, expected);
+    const stored = { ...legacy, ...identity, migrationSource: "legacy_request_id_only" };
+    const transaction = this.client.multi()
+      .set(this.key("xcm-observation", storageId), JSON.stringify(stored))
+      .del(legacyKey)
+      .zRem(this.key("xcm-observations", "pending"), legacyId);
+    if (!stored.processed) {
+      transaction.zAdd(this.key("xcm-observations", "pending"), {
+        score: timestampScore(stored.observedAt),
+        value: storageId
+      });
+    }
+    await transaction.exec();
+    return { status: "migrated", observation: stored };
   }
 
   async getXcmBalanceWatch(wrapperAddress, requestId) {
@@ -1527,23 +1580,36 @@ function normalizeSiweActivityLimit(value) {
   return Math.min(Math.trunc(parsed), 1000);
 }
 
-function normalizeXcmBalanceWatchIdentity(wrapperAddress, requestId) {
+function normalizeXcmRequestIdentity(wrapperAddress, requestId) {
   const wrapper = String(wrapperAddress ?? "").toLowerCase();
   if (!/^0x[a-f0-9]{40}$/u.test(wrapper)) {
-    throw new ExternalServiceError("XCM balance watch wrapperAddress must be a 20-byte address.");
+    throw new ExternalServiceError("XCM wrapperAddress must be a 20-byte address.");
   }
   return {
     wrapperAddress: wrapper,
-    requestId: normalizeXcmBalanceWatchRequestId(requestId)
+    requestId: normalizeXcmRequestId(requestId)
   };
 }
 
-function normalizeXcmBalanceWatchRequestId(requestId) {
+function normalizeXcmRequestId(requestId) {
   const normalized = String(requestId ?? "").toLowerCase();
   if (!/^0x[a-f0-9]{64}$/u.test(normalized)) {
-    throw new ExternalServiceError("XCM balance watch requestId must be a 32-byte value.");
+    throw new ExternalServiceError("XCM requestId must be a 32-byte value.");
   }
   return normalized;
+}
+
+function xcmRequestStorageId(wrapperAddress, requestId) {
+  const identity = normalizeXcmRequestIdentity(wrapperAddress, requestId);
+  return `${identity.wrapperAddress}:${identity.requestId}`;
+}
+
+function normalizeXcmBalanceWatchIdentity(wrapperAddress, requestId) {
+  return normalizeXcmRequestIdentity(wrapperAddress, requestId);
+}
+
+function normalizeXcmBalanceWatchRequestId(requestId) {
+  return normalizeXcmRequestId(requestId);
 }
 
 function xcmBalanceWatchStorageId(wrapperAddress, requestId) {
@@ -1558,5 +1624,15 @@ function assertLegacyXcmWatchTarget(watch, expectedTargetAccount) {
     throw new ExternalServiceError(
       "Legacy XCM balance watch did not match the audited generation target; refusing migration."
     );
+  }
+}
+
+function assertLegacyXcmObservation(observation, expected = {}) {
+  for (const [field, value] of Object.entries(expected)) {
+    if (String(observation?.[field] ?? "") !== String(value)) {
+      throw new ExternalServiceError(
+        `Legacy XCM observation did not match audited ${field}; refusing migration.`
+      );
+    }
   }
 }

@@ -87,7 +87,7 @@ export class XcmObservationRelayService {
 
       for (const item of items) {
         const normalized = this.normalizeOutcomeItem(item);
-        await this.platformService.observeXcmOutcome(normalized.requestId, normalized);
+        const observed = await this.platformService.observeXcmOutcome(normalized.requestId, normalized);
         this.eventBus?.publish({
           id: `xcm-observer-relayed-${normalized.requestId}-${Date.now()}`,
           topic: "xcm.outcome_relayed",
@@ -95,6 +95,7 @@ export class XcmObservationRelayService {
           timestamp: new Date().toISOString(),
           data: {
             requestId: normalized.requestId,
+            wrapperAddress: observed.wrapperAddress,
             status: normalized.status,
             settledAssets: normalized.settledAssets,
             settledAssetsRaw: normalized.settledAssets,

@@ -3,11 +3,36 @@ import assert from "node:assert/strict";
 
 import { MemoryStateStore } from "../core/state-store.js";
 import { EventBus } from "../core/event-bus.js";
-import { XcmSettlementWatcherService } from "./xcm-settlement-watcher.js";
+import { XcmSettlementWatcherService as BaseXcmSettlementWatcherService } from "./xcm-settlement-watcher.js";
 import { ValidationError } from "../core/errors.js";
 
 const REQUEST_ID = "0x1111111111111111111111111111111111111111111111111111111111111111";
 const REQUEST_ID_2 = "0x2222222222222222222222222222222222222222222222222222222222222222";
+const WRAPPER = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+class XcmSettlementWatcherService extends BaseXcmSettlementWatcherService {
+  constructor(platformService, stateStore, eventBus, options = {}) {
+    super(platformService, stateStore, eventBus, { expectedWrapper: WRAPPER, ...options });
+  }
+}
+
+test("disabled watcher accepts an absent wrapper while malformed configured wrappers fail closed", () => {
+  const stateStore = new MemoryStateStore();
+  const platformService = { finalizeXcmRequest: async () => ({}) };
+  const absent = new BaseXcmSettlementWatcherService(platformService, stateStore, undefined, {
+    enabled: false,
+    expectedWrapper: null
+  });
+  assert.equal(absent.expectedWrapper, undefined);
+
+  assert.throws(
+    () => new BaseXcmSettlementWatcherService(platformService, stateStore, undefined, {
+      enabled: true,
+      expectedWrapper: "not-an-address"
+    }),
+    /wrapperAddress must be a 20-byte address/u
+  );
+});
 
 test("observeOutcome stores a pending observation and emits an event", async () => {
   const stateStore = new MemoryStateStore();
@@ -55,7 +80,9 @@ test("runPendingSettlements finalizes stored observations and marks them process
           settledVia: "agent_account",
           strategyRequest: {
             account: "0xabc",
-            statusLabel: "succeeded"
+            statusLabel: "succeeded",
+            settledAssetsRaw: outcome.settledAssets,
+            settledSharesRaw: outcome.settledShares
           }
         };
       }
@@ -72,7 +99,7 @@ test("runPendingSettlements finalizes stored observations and marks them process
   });
 
   const results = await watcher.runPendingSettlements();
-  const stored = await stateStore.getXcmObservation(REQUEST_ID);
+  const stored = await stateStore.getXcmObservation(WRAPPER, REQUEST_ID);
 
   assert.equal(results.length, 1);
   assert.equal(finalizedCalls.length, 1);
@@ -115,7 +142,9 @@ test("runPendingSettlements serializes concurrent triggers and drains queued obs
           settledVia: "agent_account",
           strategyRequest: {
             account: "0xabc",
-            statusLabel: outcome.status
+            statusLabel: outcome.status,
+            settledAssetsRaw: outcome.settledAssets,
+            settledSharesRaw: outcome.settledShares
           }
         };
       }
@@ -144,8 +173,8 @@ test("runPendingSettlements serializes concurrent triggers and drains queued obs
 
   releaseFirstFinalize();
   const [firstResults, concurrentResults] = await Promise.all([firstRun, concurrentRun]);
-  const storedFirst = await stateStore.getXcmObservation(REQUEST_ID);
-  const storedSecond = await stateStore.getXcmObservation(REQUEST_ID_2);
+  const storedFirst = await stateStore.getXcmObservation(WRAPPER, REQUEST_ID);
+  const storedSecond = await stateStore.getXcmObservation(WRAPPER, REQUEST_ID_2);
 
   assert.equal(finalizedCalls.length, 2);
   assert.equal(finalizedCalls[0][0], REQUEST_ID);
@@ -163,7 +192,7 @@ test("runPendingSettlements emits a request_finalize_failed event with correlati
   eventBus.subscribe({ topics: ["xcm.request_finalize_failed"] }, (event) => events.push(event));
   const watcher = new XcmSettlementWatcherService(
     {
-      finalizeXcmRequest: async () => {
+      finalizeXcmRequest: async (_requestId, outcome) => {
         throw new Error("downstream settle failed");
       }
     },
@@ -188,10 +217,15 @@ test("failed finalization retries with exponential backoff and then recovers", a
   let attempts = 0;
   const watcher = new XcmSettlementWatcherService(
     {
-      finalizeXcmRequest: async () => {
+      finalizeXcmRequest: async (_requestId, outcome) => {
         attempts += 1;
         if (attempts <= 2) throw new Error("adapter route unavailable");
-        return { settledVia: "strategy_adapter", statusLabel: "succeeded" };
+        return {
+          settledVia: "strategy_adapter",
+          statusLabel: "succeeded",
+          settledAssetsRaw: outcome.settledAssets,
+          settledSharesRaw: outcome.settledShares
+        };
       }
     },
     stateStore,
@@ -211,7 +245,7 @@ test("failed finalization retries with exponential backoff and then recovers", a
     settledShares: 100_000
   });
   await watcher.runPendingSettlements();
-  let stored = await stateStore.getXcmObservation(REQUEST_ID);
+  let stored = await stateStore.getXcmObservation(WRAPPER, REQUEST_ID);
   assert.equal(attempts, 1);
   assert.equal(stored.processed, false);
   assert.equal(stored.retryDelayMs, 15_000);
@@ -222,7 +256,7 @@ test("failed finalization retries with exponential backoff and then recovers", a
 
   nowMs += 15_000;
   await watcher.runPendingSettlements();
-  stored = await stateStore.getXcmObservation(REQUEST_ID);
+  stored = await stateStore.getXcmObservation(WRAPPER, REQUEST_ID);
   assert.equal(attempts, 2);
   assert.equal(stored.processed, false);
   assert.equal(stored.retryDelayMs, 30_000);
@@ -233,7 +267,7 @@ test("failed finalization retries with exponential backoff and then recovers", a
 
   nowMs += 30_000;
   await watcher.runPendingSettlements();
-  stored = await stateStore.getXcmObservation(REQUEST_ID);
+  stored = await stateStore.getXcmObservation(WRAPPER, REQUEST_ID);
   assert.equal(attempts, 3);
   assert.equal(stored.processed, true);
   assert.equal(stored.result.settledVia, "strategy_adapter");
@@ -358,7 +392,7 @@ test("observeOutcome rejects missing or non-terminal statuses before storing", a
     ValidationError
   );
 
-  assert.equal(await stateStore.getXcmObservation(REQUEST_ID), undefined);
+  assert.equal(await stateStore.getXcmObservation(WRAPPER, REQUEST_ID), undefined);
   assert.equal(events.length, 0);
 });
 
@@ -388,7 +422,7 @@ test("observeOutcome rejects failed observations without failureCode before stor
     /failed observations must include failureCode/u
   );
 
-  assert.equal(await stateStore.getXcmObservation(REQUEST_ID), undefined);
+  assert.equal(await stateStore.getXcmObservation(WRAPPER, REQUEST_ID), undefined);
   assert.equal(events.length, 0);
 });
 
@@ -427,7 +461,7 @@ test("observeOutcome rejects invalid observedAt before storing", async () => {
     ValidationError
   );
 
-  assert.equal(await stateStore.getXcmObservation(REQUEST_ID), undefined);
+  assert.equal(await stateStore.getXcmObservation(WRAPPER, REQUEST_ID), undefined);
 });
 
 test("runPendingSettlements keeps failed observations pending for retry", async () => {
@@ -452,7 +486,7 @@ test("runPendingSettlements keeps failed observations pending for retry", async 
   });
 
   const results = await watcher.runPendingSettlements();
-  const stored = await stateStore.getXcmObservation(REQUEST_ID);
+  const stored = await stateStore.getXcmObservation(WRAPPER, REQUEST_ID);
 
   assert.equal(results.length, 0);
   assert.equal(stored.processed, false);
@@ -474,7 +508,7 @@ test("observeOutcome does not requeue an equivalent processed observation", asyn
     settledAssets: 5,
     settledShares: 5
   });
-  await stateStore.markXcmObservationProcessed(REQUEST_ID, { settledVia: "agent_account" });
+  await stateStore.markXcmObservationProcessed(WRAPPER, REQUEST_ID, { settledVia: "agent_account" });
 
   const replayed = await watcher.observeOutcome(REQUEST_ID, {
     status: "succeeded",
@@ -511,7 +545,7 @@ test("observeOutcome ignores stale conflicting observations for the same request
     failureCode: "STALE_FAILURE",
     observedAt: "2026-05-14T11:59:59Z"
   });
-  const stored = await stateStore.getXcmObservation(REQUEST_ID);
+  const stored = await stateStore.getXcmObservation(WRAPPER, REQUEST_ID);
 
   assert.equal(replayed.status, "succeeded");
   assert.equal(stored.status, "succeeded");
@@ -535,7 +569,9 @@ test("observeOutcome does not reopen a processed request with a conflicting repl
           settledVia: "agent_account",
           strategyRequest: {
             account: "0xabc",
-            statusLabel: outcome.status
+            statusLabel: outcome.status,
+            settledAssetsRaw: outcome.settledAssets,
+            settledSharesRaw: outcome.settledShares
           }
         };
       }
@@ -558,7 +594,7 @@ test("observeOutcome does not reopen a processed request with a conflicting repl
     failureCode: "CONFLICTING_REPLAY",
     observedAt: "2026-05-14T12:01:00Z"
   });
-  const stored = await stateStore.getXcmObservation(REQUEST_ID);
+  const stored = await stateStore.getXcmObservation(WRAPPER, REQUEST_ID);
   const pending = await stateStore.listPendingXcmObservations(10);
 
   assert.equal(replayed.processed, true);
@@ -568,4 +604,34 @@ test("observeOutcome does not reopen a processed request with a conflicting repl
   assert.equal(pending.length, 0);
   assert.equal(observedEvents.length, 1);
   assert.equal(finalizedCalls.length, 1);
+});
+
+test("same request id from a foreign wrapper cannot suppress the current observation", async () => {
+  const stateStore = new MemoryStateStore();
+  const foreignWrapper = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+  await stateStore.upsertXcmObservation({
+    wrapperAddress: foreignWrapper,
+    requestId: REQUEST_ID,
+    status: "succeeded",
+    settledAssets: "100000",
+    settledShares: "100000",
+    processed: true
+  });
+  const watcher = new XcmSettlementWatcherService(
+    { finalizeXcmRequest: async () => ({}) },
+    stateStore,
+    undefined,
+    { enabled: false }
+  );
+
+  const current = await watcher.observeOutcome(REQUEST_ID, {
+    status: "succeeded",
+    settledAssets: "100000",
+    settledShares: "100000"
+  });
+
+  assert.equal(current.wrapperAddress, WRAPPER);
+  assert.equal(current.processed, false);
+  assert.equal((await stateStore.getXcmObservation(foreignWrapper, REQUEST_ID)).processed, true);
+  assert.equal((await stateStore.listPendingXcmObservations()).length, 1);
 });

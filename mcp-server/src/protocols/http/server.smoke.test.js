@@ -672,6 +672,7 @@ test("http smoke: admin XCM observation idempotency guards payload drift", { ski
     const requestId = `0x${"ab".repeat(32)}`;
     const payload = {
       requestId,
+      wrapperAddress: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       status: "succeeded",
       settledAssets: 5,
       settledShares: 5,
@@ -694,6 +695,7 @@ test("http smoke: admin XCM observation idempotency guards payload drift", { ski
       headers,
       body: JSON.stringify({
         status: "succeeded",
+        wrapperAddress: payload.wrapperAddress,
         settledAssets: 5,
         settledShares: 5,
         remoteRef: `0x${"12".repeat(32)}`,

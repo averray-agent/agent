@@ -61,7 +61,16 @@ export class XcmBalanceObserverService {
         this.logger.error?.({}, "xcm_balance_observer.chain_event_subscription_unavailable");
       }
     }
-    void this.schedule();
+    void this.resumeTerminalObservations().then(
+      () => this.schedule(),
+      (error) => {
+        this.logger.error?.(
+          { error: error?.message ?? String(error) },
+          "xcm_balance_observer.terminal_observation_resume_failed"
+        );
+        return this.schedule();
+      }
+    );
   }
 
   stop() {
@@ -321,6 +330,23 @@ export class XcmBalanceObserverService {
     return results;
   }
 
+  async resumeTerminalObservations(limit = 100) {
+    if (!this.enabled || typeof this.terminalSink?.observeOutcome !== "function") return [];
+    const terminal = await this.stateStore.listRecentTerminalXcmBalanceWatches?.(limit) ?? [];
+    const resumed = [];
+    for (const watch of terminal) {
+      if (this.classifyWatchScope(watch) !== "current" || !watch?.outcome) continue;
+      const observation = await this.stateStore.getXcmObservation?.(watch.wrapperAddress, watch.requestId);
+      if (observation) continue;
+      resumed.push(await this.terminalSink.observeOutcome(watch.requestId, {
+        ...watch.outcome,
+        wrapperAddress: watch.wrapperAddress,
+        source: `${watch.outcome.source ?? "balance_observer"}:terminal_resume`
+      }));
+    }
+    return resumed;
+  }
+
   classifyWatchScope(watch) {
     if (watch?.registrationSource === "chain_event" || watch?.registrationSource === "chain_event_backfill") {
       return this.classifyChainEventWatchScope(watch);
@@ -405,7 +431,10 @@ export class XcmBalanceObserverService {
       source: `balance_delta:${watch.target.ledger}`,
       observedAt: new Date(this.now()).toISOString()
     };
-    await this.terminalSink.observeOutcome(watch.requestId, outcome);
+    await this.terminalSink.observeOutcome(watch.requestId, {
+      ...outcome,
+      wrapperAddress: watch.wrapperAddress
+    });
     const terminal = await this.stateStore.upsertXcmBalanceWatch({
       ...watch,
       status: "succeeded",
@@ -426,7 +455,10 @@ export class XcmBalanceObserverService {
       source: `balance_timeout:${watch.target.ledger}`,
       observedAt: new Date(this.now()).toISOString()
     };
-    await this.terminalSink.observeOutcome(watch.requestId, outcome);
+    await this.terminalSink.observeOutcome(watch.requestId, {
+      ...outcome,
+      wrapperAddress: watch.wrapperAddress
+    });
     const terminal = await this.stateStore.upsertXcmBalanceWatch({
       ...watch,
       status: "failed",

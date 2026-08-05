@@ -1580,7 +1580,10 @@ export class PlatformService {
     if (!this.xcmSettlementWatcher) {
       throw new ValidationError("XCM outcome observation requires the settlement watcher.");
     }
-    return this.xcmSettlementWatcher.observeOutcome(requestId, outcome);
+    return this.xcmSettlementWatcher.observeOutcome(requestId, {
+      ...outcome,
+      wrapperAddress: outcome?.wrapperAddress ?? this.blockchainGateway?.config?.xcmWrapperAddress
+    });
   }
 
   async backfillBankXcmWatch(requestId, options = {}) {

@@ -318,6 +318,7 @@ test("observed balance stays pending-finalize on the board until chain settlemen
   });
 
   await store.upsertXcmObservation({
+    wrapperAddress: WRAPPER_V22,
     requestId,
     status: "succeeded",
     settledAssets: "100000",
@@ -329,6 +330,7 @@ test("observed balance stays pending-finalize on the board until chain settlemen
   assert.equal(queued.requests.items[0].status, "pending");
 
   await store.markXcmObservationFailed(
+    WRAPPER_V22,
     requestId,
     "finalizeXcmRequest reverted Unauthorized()",
     {
@@ -345,7 +347,16 @@ test("observed balance stays pending-finalize on the board until chain settlemen
   assert.equal(pending.requests.items[0].finalization.attemptCount, 1);
   assert.match(pending.requests.items[0].finalization.lastError, /Unauthorized/u);
 
-  await store.markXcmObservationProcessed(requestId, { settledVia: "strategy_adapter" });
+  await store.markXcmObservationProcessed(WRAPPER_V22, requestId, {
+    settledVia: "strategy_adapter",
+    chainSettlement: {
+      wrapperAddress: WRAPPER_V22,
+      requestId,
+      status: "succeeded",
+      settledAssetsRaw: "100000",
+      settledSharesRaw: "100000"
+    }
+  });
   const finalized = await bankFeed.pollOnce();
   assert.equal(finalized.requests.items[0].status, "succeeded");
   assert.equal(finalized.requests.items[0].phase, "terminal");
@@ -404,6 +415,81 @@ test("board scopes a colliding request id to the configured wrapper generation",
     wrapperAddress: WRAPPER_V22.toLowerCase(),
     phase: "active-generation"
   }]);
+});
+
+test("foreign-generation observation cannot satisfy or join the current request", async () => {
+  const store = new MemoryStateStore();
+  const requestId = `0x${"3a".repeat(32)}`;
+  await store.upsertXcmBalanceWatch({
+    requestId,
+    wrapperAddress: WRAPPER_V22,
+    status: "succeeded",
+    kind: "deposit",
+    phase: "terminal",
+    target: targets().position,
+    direction: "increase",
+    startedAt: new Date(BASE - 10_000).toISOString(),
+    deadlineAt: new Date(BASE + 60_000).toISOString(),
+    completedAt: new Date(BASE - 1_000).toISOString()
+  });
+  await store.upsertXcmObservation({
+    wrapperAddress: WRAPPER_V21,
+    requestId,
+    status: "succeeded",
+    settledAssets: "100000",
+    settledShares: "100000",
+    processed: true,
+    result: {
+      chainSettlement: {
+        wrapperAddress: WRAPPER_V21,
+        requestId,
+        status: "succeeded",
+        settledAssetsRaw: "100000",
+        settledSharesRaw: "100000"
+      }
+    }
+  });
+
+  const feed = await service(store, {
+    async read(target) { return { raw: "100000", asOf: BASE, target }; }
+  }).pollOnce();
+
+  assert.equal(feed.requests.items[0].wrapperAddress, WRAPPER_V22.toLowerCase());
+  assert.equal(feed.requests.items[0].status, "pending");
+  assert.equal(feed.requests.items[0].phase, "pending-finalize");
+});
+
+test("processed observation without matching chain-settlement proof stays pending-finalize", async () => {
+  const store = new MemoryStateStore();
+  const requestId = `0x${"3b".repeat(32)}`;
+  await store.upsertXcmBalanceWatch({
+    requestId,
+    wrapperAddress: WRAPPER_V22,
+    status: "succeeded",
+    kind: "deposit",
+    phase: "terminal",
+    target: targets().position,
+    direction: "increase",
+    startedAt: new Date(BASE - 10_000).toISOString(),
+    deadlineAt: new Date(BASE + 60_000).toISOString(),
+    completedAt: new Date(BASE - 1_000).toISOString()
+  });
+  await store.upsertXcmObservation({
+    wrapperAddress: WRAPPER_V22,
+    requestId,
+    status: "succeeded",
+    settledAssets: "100000",
+    settledShares: "100000",
+    processed: true,
+    result: { settledVia: "strategy_adapter" }
+  });
+
+  const feed = await service(store, {
+    async read(target) { return { raw: "100000", asOf: BASE, target }; }
+  }).pollOnce();
+
+  assert.equal(feed.requests.items[0].status, "pending");
+  assert.equal(feed.requests.items[0].phase, "pending-finalize");
 });
 
 test("request snapshot renders the active-generation withdraw target and rejects an unrelated same-wrapper target", async () => {

@@ -65,6 +65,7 @@ export function createAdminXcmRoutes({
         return true;
       }
       const observed = await service.observeXcmOutcome(requestId, {
+        wrapperAddress: payload?.wrapperAddress,
         status: payload?.status,
         settledAssets: payload?.settledAssets ?? 0,
         settledShares: payload?.settledShares ?? 0,

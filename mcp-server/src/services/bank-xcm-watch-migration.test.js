@@ -4,7 +4,9 @@ import assert from "node:assert/strict";
 import { MemoryStateStore, RedisStateStore } from "../core/state-store.js";
 import {
   BANK_XCM_V21_WATCH_MIGRATION,
-  migrateLegacyBankV21BalanceWatch
+  BANK_XCM_V22_OBSERVATION_MIGRATION,
+  migrateLegacyBankV21BalanceWatch,
+  migrateLegacyBankV22Observation
 } from "./bank-xcm-watch-migration.js";
 
 test("legacy v2.1 watch is archived terminal under its wrapper generation", async () => {
@@ -49,6 +51,47 @@ test("legacy watch migration refuses an unaudited target account", async () => {
   await assert.rejects(
     migrateLegacyBankV21BalanceWatch(store, { logger: { info() {} } }),
     /did not match the audited generation target/u
+  );
+});
+
+test("legacy v2.2 observation is stamped with its wrapper generation", async () => {
+  const store = new MemoryStateStore();
+  const migration = BANK_XCM_V22_OBSERVATION_MIGRATION;
+  store.xcmObservations.set(migration.requestId, {
+    requestId: migration.requestId,
+    status: "succeeded",
+    settledAssets: migration.settledAssets,
+    settledShares: migration.settledShares,
+    processed: true,
+    result: { settledVia: "strategy_adapter" }
+  });
+
+  const first = await migrateLegacyBankV22Observation(store, { logger: { info() {} } });
+  assert.equal(first.status, "migrated");
+  assert.equal(store.xcmObservations.has(migration.requestId), false);
+  const migrated = await store.getXcmObservation(migration.wrapperAddress, migration.requestId);
+  assert.equal(migrated.wrapperAddress, migration.wrapperAddress);
+  assert.equal(migrated.migrationSource, "legacy_request_id_only");
+  assert.equal(migrated.processed, true);
+
+  const replay = await migrateLegacyBankV22Observation(store, { logger: { info() {} } });
+  assert.equal(replay.status, "already_migrated");
+});
+
+test("legacy observation migration refuses a record that is not the audited v2.2 settlement", async () => {
+  const store = new MemoryStateStore();
+  const migration = BANK_XCM_V22_OBSERVATION_MIGRATION;
+  store.xcmObservations.set(migration.requestId, {
+    requestId: migration.requestId,
+    status: "succeeded",
+    settledAssets: "99999",
+    settledShares: migration.settledShares,
+    processed: true
+  });
+
+  await assert.rejects(
+    migrateLegacyBankV22Observation(store, { logger: { info() {} } }),
+    /did not match audited settledAssets/u
   );
 });
 
@@ -106,4 +149,58 @@ test("Redis migration atomically replaces the legacy index with a generation-sco
   assert.deepEqual((await store.listRecentTerminalXcmBalanceWatches()).map((watch) => (
     `${watch.wrapperAddress}:${watch.requestId}`
   )), [storageId]);
+});
+
+test("Redis observation migration removes the request-only record and stamps the audited generation", async () => {
+  const migration = BANK_XCM_V22_OBSERVATION_MIGRATION;
+  const values = new Map();
+  const sortedSets = new Map();
+  const client = {
+    async get(key) { return values.get(key) ?? null; },
+    async set(key, value) { values.set(key, value); },
+    async del(key) { return values.delete(key) ? 1 : 0; },
+    async zAdd(key, entry) {
+      const set = sortedSets.get(key) ?? new Map();
+      set.set(entry.value, entry.score);
+      sortedSets.set(key, set);
+    },
+    async zRem(key, value) { return sortedSets.get(key)?.delete(value) ? 1 : 0; },
+    multi() {
+      const transaction = {
+        set: (...args) => { void client.set(...args); return transaction; },
+        del: (...args) => { void client.del(...args); return transaction; },
+        zRem: (...args) => { void client.zRem(...args); return transaction; },
+        zAdd: (...args) => { void client.zAdd(...args); return transaction; },
+        async exec() { return []; }
+      };
+      return transaction;
+    }
+  };
+  const namespace = "agent-platform-mainnet";
+  const store = new RedisStateStore("redis://unused", namespace);
+  store.client = client;
+  store.connectionPromise = Promise.resolve();
+  const legacyKey = `${namespace}:xcm-observation:${migration.requestId}`;
+  const pendingKey = `${namespace}:xcm-observations:pending`;
+  values.set(legacyKey, JSON.stringify({
+    requestId: migration.requestId,
+    status: "succeeded",
+    settledAssets: migration.settledAssets,
+    settledShares: migration.settledShares,
+    processed: true,
+    result: { settledVia: "strategy_adapter" }
+  }));
+  // A stale pending membership must not survive migration of a processed fact.
+  sortedSets.set(pendingKey, new Map([[migration.requestId, 1]]));
+
+  const result = await migrateLegacyBankV22Observation(store, { logger: { info() {} } });
+  const storageId = `${migration.wrapperAddress}:${migration.requestId}`;
+  assert.equal(result.status, "migrated");
+  assert.equal(values.has(legacyKey), false);
+  assert.equal(sortedSets.get(pendingKey).has(migration.requestId), false);
+  const migrated = await store.getXcmObservation(migration.wrapperAddress, migration.requestId);
+  assert.equal(migrated.wrapperAddress, migration.wrapperAddress);
+  assert.equal(migrated.migrationSource, "legacy_request_id_only");
+  assert.equal(migrated.processed, true);
+  assert.equal(values.has(`${namespace}:xcm-observation:${storageId}`), true);
 });
