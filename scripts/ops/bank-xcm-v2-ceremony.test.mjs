@@ -38,7 +38,11 @@ import {
 } from "./deploy-bank-xcm-v2.mjs";
 import { buildManifestCandidate } from "./record-bank-xcm-v2-deployment.mjs";
 import { extractAaveQuote } from "./capture-bank-xcm-v22-staging-quote.mjs";
-import { assertFreshV22StagingQuote, buildV22StagingCall } from "./prepare-bank-xcm-v22-staging-multisig.mjs";
+import {
+  assertFreshV22StagingQuote,
+  assertUnusedV22StagingCandidate,
+  buildV22StagingCall
+} from "./prepare-bank-xcm-v22-staging-multisig.mjs";
 
 const WRAPPER = "0x5991a2df15a8f6a256d3ec51e99254cd3fb576a9";
 const ADAPTER = "0x1111111111111111111111111111111111111111";
@@ -586,6 +590,25 @@ test("v2.2 approval is exact and staging binds 100k sell, 40k cap, quote, deadli
   assert.deepEqual([...decoded], [getAddress(OWNER), 150000n, 100000n, 100000n, 40000n, deadline, 1n]);
   assert.equal(stage.decoded.transportHeadroomRaw, "10000");
   assert.throws(() => buildV22StagingCall({ packet: "stage", ...common, assets: 140000n }), /transport headroom/u);
+});
+
+test("v2.2 restaging gates the candidate request id instead of rejecting historical terminal requests", () => {
+  const requestId = `0x${"ab".repeat(32)}`;
+  assert.deepEqual(assertUnusedV22StagingCandidate({
+    requestId,
+    record: {
+      context: { account: "0x0000000000000000000000000000000000000000" },
+      status: 0
+    }
+  }), {
+    requestId,
+    status: 0,
+    account: "0x0000000000000000000000000000000000000000"
+  });
+  assert.throws(() => assertUnusedV22StagingCandidate({
+    requestId,
+    record: { context: { account: OWNER }, status: 4 }
+  }), /already occupied; increment --nonce/u);
 });
 
 test("request-leg evidence fails closed unless all four exact hashes and assertions pass", () => {

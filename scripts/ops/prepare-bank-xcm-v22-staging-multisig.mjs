@@ -17,7 +17,8 @@ import {
   BANK_XCM_V2,
   POLICY_BANK_ABI,
   WRAPPER_ADMIN_ABI,
-  loadJson
+  loadJson,
+  previewRequestId
 } from "./bank-xcm-v2-ceremony-lib.mjs";
 import { createCeremonyRpcContext, printCeremonyRpcPreflight } from "./ceremony-rpc.mjs";
 import {
@@ -45,9 +46,10 @@ const ADAPTER_V22_ABI = Object.freeze([
   "function pendingDepositAssets() view returns (uint256)",
   "function pendingWithdrawalShares() view returns (uint256)"
 ]);
-const REQUEST_QUEUED_TOPIC = new Interface([
-  "event RequestQueued(bytes32 indexed requestId,bytes32 indexed strategyId,uint8 indexed kind,address account,address asset,address recipient,uint256 assets,uint256 shares,uint64 nonce)"
-]).getEvent("RequestQueued").topicHash;
+const WRAPPER_STAGING_ABI = Object.freeze([
+  ...WRAPPER_ADMIN_ABI,
+  "function getRequest(bytes32 requestId) view returns (((bytes32 strategyId,uint8 kind,address account,address asset,address recipient,uint256 assets,uint256 shares,uint64 nonce) context,address queuedBy,uint8 status,uint256 settledAssets,uint256 settledShares,bytes32 remoteRef,bytes32 failureCode,uint64 createdAt,uint64 updatedAt))"
+]);
 
 function parseArgs(argv) {
   const args = {
@@ -146,6 +148,15 @@ export function buildV22StagingCall({ packet, token, wrapper, adapter, treasury,
   };
 }
 
+export function assertUnusedV22StagingCandidate({ requestId, record }) {
+  const status = Number(record?.status ?? record?.[2] ?? -1);
+  const account = record?.context?.account ?? record?.[0]?.account ?? record?.[0]?.[2];
+  if (status !== 0 || !account || getAddress(account) !== ZeroAddress) {
+    throw new Error(`staging candidate ${requestId} is already occupied; increment --nonce and regenerate.`);
+  }
+  return { requestId, status, account: ZeroAddress };
+}
+
 function assertArmEvidence(evidence, wrapper, adapter) {
   if (
     evidence?.kind !== "averray.bankXcmV2MultisigPacket" || evidence?.generation !== "2.2" ||
@@ -200,24 +211,34 @@ export async function main(argv = process.argv.slice(2)) {
     const blockNumber = await rpc.provider.getBlockNumber();
     const at = { blockTag: blockNumber };
     const policy = new Contract(manifest.contracts.treasuryPolicy, POLICY_BANK_ABI, rpc.provider);
-    const wrapper = new Contract(wrapperAddress, WRAPPER_ADMIN_ABI, rpc.provider);
+    const wrapper = new Contract(wrapperAddress, WRAPPER_STAGING_ABI, rpc.provider);
     const adapter = new Contract(adapterAddress, ADAPTER_V22_ABI, rpc.provider);
     const token = new Contract(manifest.contracts.token, TOKEN_ABI, rpc.provider);
-    const deployBlock = Number(manifest.deploymentBlocks?.xcmWrapperV2_2);
-    if (!Number.isInteger(deployBlock) || deployBlock <= 0 || deployBlock > blockNumber) throw new Error("manifest has no valid v2.2 wrapper deployment block.");
-    const [owner, policyPaused, dispatchPaused, operator, hydration, boundAdapter, settler, adapterWrapper, balance, allowance, totalShares, totalAssets, pendingDeposits, pendingWithdrawals, requestLogs] = await Promise.all([
+    const requestContext = {
+      strategyId: BANK_XCM_V2.strategyId,
+      kind: 0,
+      account: getAddress(manifest.owner),
+      asset: getAddress(manifest.contracts.token),
+      recipient: getAddress(manifest.owner),
+      assets: BigInt(args.assets),
+      shares: 0n,
+      nonce: BigInt(args.nonce)
+    };
+    const candidateRequestId = previewRequestId(requestContext);
+    const [owner, policyPaused, dispatchPaused, operator, hydration, boundAdapter, settler, adapterWrapper, balance, allowance, totalShares, totalAssets, pendingDeposits, pendingWithdrawals, candidateRecord] = await Promise.all([
       policy.owner(at), policy.paused(at), wrapper.dispatchPaused(at), wrapper.operator(at), wrapper.hydrationAccountId32(at),
       wrapper.strategyAdapter(BANK_XCM_V2.strategyId, at), policy.strategySettler(manifest.verifier, at), adapter.xcmWrapper(at),
       token.balanceOf(manifest.owner, at), token.allowance(manifest.owner, adapterAddress, at), adapter.totalShares(at), adapter.totalAssets(at),
       adapter.pendingDepositAssets(at), adapter.pendingWithdrawalShares(at),
-      rpc.provider.getLogs({ address: wrapperAddress, topics: [REQUEST_QUEUED_TOPIC], fromBlock: deployBlock, toBlock: blockNumber })
+      wrapper.getRequest(candidateRequestId, at)
     ]);
     assertOwnerRecordAuthority({ ownerRecord, livePolicyOwner: owner });
     if (policyPaused || getAddress(operator) !== getAddress(manifest.verifier) || String(hydration).toLowerCase() !== String(manifest.bankXcmDeploymentHistory.at(-1).convertedAccountId32).toLowerCase() || getAddress(boundAdapter) !== adapterAddress || getAddress(adapterWrapper) !== wrapperAddress || !settler) {
       throw new Error("v2.2 live configuration no longer matches the gated pair.");
     }
-    if (requestLogs.length !== 0 || [totalShares, totalAssets, pendingDeposits, pendingWithdrawals].some((value) => BigInt(value) !== 0n)) {
-      throw new Error("v2.2 staging preparation requires zero queued requests and empty adapter accounting.");
+    const candidate = assertUnusedV22StagingCandidate({ requestId: candidateRequestId, record: candidateRecord });
+    if ([totalShares, totalAssets, pendingDeposits, pendingWithdrawals].some((value) => BigInt(value) !== 0n)) {
+      throw new Error("v2.2 staging preparation requires empty adapter accounting.");
     }
     const required = BigInt(args.assets);
     const blockers = [];
@@ -227,7 +248,9 @@ export async function main(argv = process.argv.slice(2)) {
     live = {
       capturedAt: new Date().toISOString(), assetHubBlockNumber: blockNumber, policyPaused, dispatchPaused,
       operator: getAddress(operator), hydrationAccountId32: hydration, strategyAdapter: getAddress(boundAdapter), strategySettler: settler,
-      treasuryBalanceRaw: balance.toString(), treasuryAllowanceRaw: allowance.toString(), requestQueuedEventCount: 0, adapterAccountingEmpty: true,
+      treasuryBalanceRaw: balance.toString(), treasuryAllowanceRaw: allowance.toString(),
+      candidateRequestId: candidate.requestId, candidateRequestStatus: candidate.status,
+      candidateRequestAccount: candidate.account, adapterAccountingEmpty: true,
       signingBlockedUntil: blockers
     };
   } finally {

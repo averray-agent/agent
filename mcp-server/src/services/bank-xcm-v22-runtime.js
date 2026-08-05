@@ -12,6 +12,14 @@ const HIGH_STORAGE_DEPOSIT = 5_000_000_000n;
 const MIN_STORAGE_DEPOSIT = 1_000_000_000n;
 const ASSET_HUB_PARA_ID = 1000;
 const HYDRATION_PARA_ID = 2034;
+const NATIVE_DOT_DELIVERY_ASSET = Object.freeze({
+  V5: Object.freeze({ parents: 1, interior: "Here" }),
+});
+// Historical Asset Hub delivery was roughly 0.01-0.03 DOT per leg. Refuse
+// anything outside a five-times envelope so an asset-location or denomination
+// mistake cannot flow onward as a plausible quote.
+const MIN_NATIVE_DELIVERY_FEE_PLANCK = 20_000_000n;
+const MAX_NATIVE_DELIVERY_FEE_PLANCK = 1_500_000_000n;
 
 const ADAPTER_V22_ABI = Object.freeze([
   "function recordRemoteOperatingFloat(uint256 assets,uint64 asOf,bytes32 remoteRef)",
@@ -235,22 +243,79 @@ export class BankXcmV22Runtime {
   }
 
   async readFundingTransferFee({ requestId } = {}) {
-    const preview = await this.previewLeg(requestId, 0, 0n);
-    const api = await this.getAssetHubApi();
-    const [header, timestamp, fees] = await Promise.all([
-      api.rpc.chain.getHeader(),
-      api.query.timestamp.now(),
-      api.call.xcmPaymentApi.queryDeliveryFees(preview.destination, preview.message),
+    const encoded = this.encodeDispatch(requestId, 0, 0n);
+    const assetHub = await this.getAssetHubApi();
+    const hydration = await this.getHydrationApi();
+    const operatorAccount = (await assetHub.call.reviveApi.accountId(
+      await this.gateway.signer.getAddress()
+    )).toHex();
+    const runtimeCall = assetHub.tx.revive.call(
+      this.wrapperAddress,
+      0n,
+      HIGH_WEIGHT,
+      HIGH_STORAGE_DEPOSIT,
+      encoded
+    );
+    const [assetHubHeader, assetHubTimestamp, assetHubDryRun] = await Promise.all([
+      assetHub.rpc.chain.getHeader(),
+      assetHub.query.timestamp.now(),
+      assetHub.call.dryRunApi.dryRunCall({ system: { signed: operatorAccount } }, runtimeCall, 5),
     ]);
-    if (!fees?.isOk) throw new ValidationError("Asset Hub could not quote the funding delivery fee.");
-    const amount = extractSingleFungibleAmount(fees.asOk?.toJSON?.() ?? fees.asOk);
+    const hubJson = assetHubDryRun.toJSON();
+    assertDryRunCallComplete(hubJson, "Asset Hub funding wrapper call");
+    const forwarded = extractForwardedXcms(hubJson).filter((entry) => entry.paraId === HYDRATION_PARA_ID);
+    if (forwarded.length !== 1) {
+      throw new ValidationError("Funding dry-run must forward exactly one message to Hydration.");
+    }
+    const exact = forwarded[0];
+    const [hydrationHeader, hydrationTimestamp, deliveryFees, weight] = await Promise.all([
+      hydration.rpc.chain.getHeader(),
+      hydration.query.timestamp.now(),
+      assetHub.call.xcmPaymentApi.queryDeliveryFees(
+        exact.destination,
+        exact.message,
+        NATIVE_DOT_DELIVERY_ASSET
+      ),
+      hydration.call.xcmPaymentApi.queryXcmWeight(exact.message),
+    ]);
+    if (!deliveryFees?.isOk) {
+      throw new ValidationError("Asset Hub could not quote the exact forwarded message in native DOT.");
+    }
+    const nativeDeliveryFeePlanck = extractNativeDotDeliveryFee(
+      deliveryFees.asOk?.toJSON?.() ?? deliveryFees.asOk
+    );
+    assertNativeDeliveryFeePlausible(nativeDeliveryFeePlanck);
+    if (!weight?.isOk) {
+      throw new ValidationError("Hydration could not weigh the exact forwarded funding message.");
+    }
+    const remoteFeeAssetId = extractBuyExecutionFeeAssetId(exact.message);
+    const remoteFee = await hydration.call.xcmPaymentApi.queryWeightToAssetFee(
+      weight.asOk,
+      { V5: remoteFeeAssetId }
+    );
+    if (!remoteFee?.isOk) {
+      throw new ValidationError("Hydration could not quote funding execution in the transferred USDC asset.");
+    }
+    const fundingTransferFeeHeadroomRaw = BigInt(remoteFee.asOk.toString());
+    if (fundingTransferFeeHeadroomRaw <= 0n) {
+      throw new ValidationError("Hydration funding execution fee must be positive USDC raw units.");
+    }
     return {
       liveState: true,
-      amount: amount.toString(),
-      asOf: timestampSeconds(timestamp),
-      remoteRef: header.hash.toHex(),
-      blockNumber: header.number.toNumber(),
-      endpoint: this.assetHubSubstrateEndpoint,
+      // This is deliberately USDC-denominated staging headroom. The native
+      // delivery quote is a separate liveness/plausibility datum below.
+      amount: fundingTransferFeeHeadroomRaw.toString(),
+      asOf: timestampSeconds(hydrationTimestamp),
+      remoteRef: hydrationHeader.hash.toHex(),
+      blockNumber: hydrationHeader.number.toNumber(),
+      endpoint: this.hydrationSubstrateEndpoint,
+      nativeDeliveryFeePlanck: nativeDeliveryFeePlanck.toString(),
+      nativeDeliveryFeeAsset: "DOT",
+      nativeDeliveryFeeLocation: "parents=1/interior=Here",
+      deliveryAsOf: timestampSeconds(assetHubTimestamp),
+      deliveryRef: assetHubHeader.hash.toHex(),
+      deliveryBlockNumber: assetHubHeader.number.toNumber(),
+      deliveryEndpoint: this.assetHubSubstrateEndpoint,
     };
   }
 
@@ -668,7 +733,7 @@ function extractForwardedXcms(json = {}) {
       destination?.v5?.interior?.x1?.[0]?.parachain
       ?? destination?.V5?.interior?.X1?.[0]?.Parachain
     );
-    for (const message of messages ?? []) output.push({ paraId, message });
+    for (const message of messages ?? []) output.push({ paraId, destination, message });
   }
   return output;
 }
@@ -716,25 +781,41 @@ function extractWithdrawAssetId(api, message) {
   return id;
 }
 
-function extractSingleFungibleAmount(raw) {
-  const values = [];
-  walk(raw, (key, value) => {
-    if (String(key).toLowerCase() === "fungible" && /^\d+$/u.test(String(value))) {
-      values.push(BigInt(value));
-    }
-  });
-  if (values.length !== 1 || values[0] <= 0n) {
-    throw new ValidationError("XCM fee quote did not contain exactly one positive fungible amount.");
+function extractNativeDotDeliveryFee(raw) {
+  const assets = raw?.v5 ?? raw?.V5;
+  if (!Array.isArray(assets) || assets.length !== 1) {
+    throw new ValidationError("Native delivery quote must contain exactly one DOT asset.");
   }
-  return values[0];
+  const asset = assets[0];
+  const id = asset?.id;
+  const interior = id?.interior;
+  const isHere = interior === "Here"
+    || interior?.here === null
+    || interior?.Here === null;
+  const fungible = asset?.fun?.fungible ?? asset?.fun?.Fungible;
+  if (Number(id?.parents) !== 1 || !isHere || !/^\d+$/u.test(String(fungible))) {
+    throw new ValidationError("Native delivery quote did not return relay-chain DOT (parents=1, Here).");
+  }
+  const amount = BigInt(fungible);
+  if (amount <= 0n) throw new ValidationError("Native DOT delivery fee must be positive.");
+  return amount;
 }
 
-function walk(value, visit) {
-  if (!value || typeof value !== "object") return;
-  for (const [key, child] of Object.entries(value)) {
-    visit(key, child);
-    if (child && typeof child === "object") walk(child, visit);
+function assertNativeDeliveryFeePlausible(amount) {
+  if (amount < MIN_NATIVE_DELIVERY_FEE_PLANCK || amount > MAX_NATIVE_DELIVERY_FEE_PLANCK) {
+    throw new ValidationError(
+      `Native DOT delivery fee ${amount} Planck is outside the 0.002-0.15 DOT plausibility band.`
+    );
   }
+}
+
+function extractBuyExecutionFeeAssetId(message) {
+  const instructions = message?.v5 ?? message?.V5;
+  const buy = instructions?.find((instruction) => instruction.buyExecution ?? instruction.BuyExecution);
+  const fees = buy?.buyExecution?.fees ?? buy?.BuyExecution?.fees ?? buy?.BuyExecution?.Fees;
+  const id = fees?.id ?? fees?.Id;
+  if (!id) throw new ValidationError("Forwarded funding message has no BuyExecution fee asset.");
+  return id;
 }
 
 function timestampSeconds(codec) {

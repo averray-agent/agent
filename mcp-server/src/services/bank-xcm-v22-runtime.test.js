@@ -20,6 +20,13 @@ const STAGING_BLOCK = 19_064_055;
 const STRATEGY_ID = `0x${"77".repeat(32)}`;
 const ACCOUNT = "0x8888888888888888888888888888888888888888";
 const RECIPIENT = "0x9999999999999999999999999999999999999999";
+const HYDRATION_DESTINATION = {
+  v5: { parents: 1, interior: { x1: [{ parachain: 2034 }] } }
+};
+const HYDRATION_USDC_LOCATION = {
+  parents: 0,
+  interior: { x2: [{ palletInstance: 10 }, { generalIndex: 22 }] }
+};
 const wrapperInterface = new Interface(XCM_WRAPPER_ABI);
 
 function makeRuntime({ observer = undefined, records = undefined } = {}) {
@@ -271,6 +278,142 @@ test("Substrate event ingestion fails staging readiness honestly when block prov
   assert.equal(status.readyForStaging, false);
   assert.match(status.substrateEventIngestionError, /authoritative block hash/u);
 });
+
+test("funding quote passes the live three-argument delivery API and keeps DOT delivery separate from USDC headroom", async () => {
+  const fixture = makeFundingFeeRuntime();
+  const quote = await fixture.runtime.readFundingTransferFee({ requestId: REQUEST_ID });
+
+  assert.equal(fixture.deliveryArgs.length, 3);
+  assert.deepEqual(fixture.deliveryArgs[0], HYDRATION_DESTINATION);
+  assert.deepEqual(fixture.deliveryArgs[2], { V5: { parents: 1, interior: "Here" } });
+  assert.deepEqual(fixture.remoteFeeAsset, { V5: HYDRATION_USDC_LOCATION });
+  assert.equal(quote.amount, "565");
+  assert.equal(quote.nativeDeliveryFeePlanck, "305450000");
+  assert.equal(quote.nativeDeliveryFeeAsset, "DOT");
+  assert.equal(quote.endpoint, "wss://hydration-rpc.n.dwellir.com/");
+  assert.equal(quote.deliveryEndpoint, "wss://asset-hub-polkadot-rpc.n.dwellir.com/");
+});
+
+test("funding quote refuses implausible native delivery amounts on both sides of the denomination band", async () => {
+  await assert.rejects(
+    makeFundingFeeRuntime({ nativeDeliveryFeePlanck: "19999999" }).runtime.readFundingTransferFee({ requestId: REQUEST_ID }),
+    /outside the 0\.002-0\.15 DOT plausibility band/u
+  );
+  await assert.rejects(
+    makeFundingFeeRuntime({ nativeDeliveryFeePlanck: "1500000001" }).runtime.readFundingTransferFee({ requestId: REQUEST_ID }),
+    /outside the 0\.002-0\.15 DOT plausibility band/u
+  );
+});
+
+test("funding quote refuses a delivery quote denominated in anything except relay-native DOT", async () => {
+  await assert.rejects(
+    makeFundingFeeRuntime({ deliveryAsset: { parents: 0, interior: { here: null } } })
+      .runtime.readFundingTransferFee({ requestId: REQUEST_ID }),
+    /did not return relay-chain DOT/u
+  );
+});
+
+test("funding quote refuses unless the exact wrapper call forwards one message to Hydration", async () => {
+  await assert.rejects(
+    makeFundingFeeRuntime({ forwardedMessages: [] }).runtime.readFundingTransferFee({ requestId: REQUEST_ID }),
+    /forward exactly one message to Hydration/u
+  );
+  await assert.rejects(
+    makeFundingFeeRuntime({ forwardedMessages: [fundingMessage(), fundingMessage()] })
+      .runtime.readFundingTransferFee({ requestId: REQUEST_ID }),
+    /forward exactly one message to Hydration/u
+  );
+});
+
+function makeFundingFeeRuntime({
+  nativeDeliveryFeePlanck = "305450000",
+  remoteFeeRaw = "565",
+  deliveryAsset = { parents: 1, interior: { here: null } },
+  forwardedMessages = [fundingMessage()]
+} = {}) {
+  const { runtime } = makeRuntime();
+  const deliveryArgs = [];
+  let remoteFeeAsset;
+  const header = {
+    number: { toNumber: () => 19_084_561 },
+    hash: hexCodec(BLOCK_HASH)
+  };
+  const assetHub = {
+    rpc: { chain: { async getHeader() { return header; } } },
+    query: { timestamp: { async now() { return stringCodec("1785919056000"); } } },
+    tx: { revive: { call(...args) { return { kind: "revive.call", args }; } } },
+    call: {
+      reviveApi: { async accountId() { return hexCodec(`0x${"aa".repeat(32)}`); } },
+      dryRunApi: {
+        async dryRunCall() {
+          return {
+            toJSON() {
+              return {
+                ok: {
+                  executionResult: { ok: {} },
+                  forwardedXcms: forwardedMessages.length
+                    ? [[HYDRATION_DESTINATION, forwardedMessages]]
+                    : []
+                }
+              };
+            }
+          };
+        }
+      },
+      xcmPaymentApi: {
+        async queryDeliveryFees(...args) {
+          deliveryArgs.push(...args);
+          return {
+            isOk: true,
+            asOk: {
+              toJSON() {
+                return {
+                  v5: [{ id: deliveryAsset, fun: { fungible: nativeDeliveryFeePlanck } }]
+                };
+              }
+            }
+          };
+        }
+      }
+    }
+  };
+  const hydration = {
+    rpc: { chain: { async getHeader() { return header; } } },
+    query: { timestamp: { async now() { return stringCodec("1785919056000"); } } },
+    call: {
+      xcmPaymentApi: {
+        async queryXcmWeight() {
+          return { isOk: true, asOk: { refTime: "576300688", proofSize: "10736" } };
+        },
+        async queryWeightToAssetFee(_weight, asset) {
+          remoteFeeAsset = asset;
+          return { isOk: true, asOk: stringCodec(remoteFeeRaw) };
+        }
+      }
+    }
+  };
+  runtime.getAssetHubApi = async () => assetHub;
+  runtime.getHydrationApi = async () => hydration;
+  runtime.encodeDispatch = () => "0x1234";
+  return {
+    runtime,
+    deliveryArgs,
+    get remoteFeeAsset() { return remoteFeeAsset; }
+  };
+}
+
+function fundingMessage() {
+  return {
+    v5: [
+      {
+        buyExecution: {
+          fees: { id: HYDRATION_USDC_LOCATION, fun: { fungible: "150000" } },
+          weightLimit: "Unlimited"
+        }
+      }
+    ]
+  };
+}
 
 function requestQueuedRecords() {
   return [
