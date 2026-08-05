@@ -6,6 +6,9 @@ const V21_TERMINAL_TX = "0xc34167372042061433713b7caab8e04986391857357b5726e55d4
 const V21_TERMINAL_BLOCK = 19_048_419;
 const V21_TERMINAL_BLOCK_HASH = "0x0841027cf938961e3ed61df623981efce148cfe464496702baf565cb3582cc29";
 const V21_TERMINAL_AT = "2026-08-04T11:34:00.000Z";
+const V22_WRAPPER = "0xecee778e11b238d2fc096e56460e7b98dc7b26b8";
+const V22_SETTLED_ASSETS = "100000";
+const V22_SETTLED_SHARES = "100000";
 
 /**
  * One-time bridge from the request-id-only observer table to the wrapper-
@@ -57,10 +60,54 @@ export async function migrateLegacyBankV21BalanceWatch(stateStore, { logger = co
   return result;
 }
 
+/**
+ * The v2.2 deposit reused the deterministic treasury nonce-1 request id and
+ * produced the sole request-id-only observation in production. Move that
+ * already-settled fact under the v2.2 wrapper namespace. The v2.2.1 terminal
+ * balance watch can then resume its own observation without either generation
+ * suppressing the other.
+ */
+export async function migrateLegacyBankV22Observation(stateStore, { logger = console } = {}) {
+  if (typeof stateStore?.migrateLegacyXcmObservation !== "function") {
+    throw new Error("State store cannot perform the required generation-scoped XCM observation migration.");
+  }
+  const result = await stateStore.migrateLegacyXcmObservation({
+    requestId: V21_REQUEST_ID,
+    wrapperAddress: V22_WRAPPER,
+    expected: {
+      status: "succeeded",
+      settledAssets: V22_SETTLED_ASSETS,
+      settledShares: V22_SETTLED_SHARES,
+      processed: true
+    }
+  });
+  logger.info?.({
+    migration: "bank_xcm_v22_observation_generation_scope",
+    status: result.status,
+    requestId: V21_REQUEST_ID,
+    wrapperAddress: V22_WRAPPER
+  }, "bank_xcm_observation.migration");
+  return result;
+}
+
+export async function migrateLegacyBankXcmGenerationState(stateStore, options = {}) {
+  return {
+    watch: await migrateLegacyBankV21BalanceWatch(stateStore, options),
+    observation: await migrateLegacyBankV22Observation(stateStore, options)
+  };
+}
+
 export const BANK_XCM_V21_WATCH_MIGRATION = Object.freeze({
   requestId: V21_REQUEST_ID,
   wrapperAddress: V21_WRAPPER,
   targetAccount: V21_TARGET_ACCOUNT,
   terminalizationTxHash: V21_TERMINAL_TX,
   terminalizationBlockNumber: V21_TERMINAL_BLOCK,
+});
+
+export const BANK_XCM_V22_OBSERVATION_MIGRATION = Object.freeze({
+  requestId: V21_REQUEST_ID,
+  wrapperAddress: V22_WRAPPER,
+  settledAssets: V22_SETTLED_ASSETS,
+  settledShares: V22_SETTLED_SHARES
 });

@@ -15,6 +15,7 @@ export class XcmSettlementWatcherService {
       pollIntervalMs = 15_000,
       retryBaseMs = DEFAULT_RETRY_BASE_MS,
       retryMaxMs = DEFAULT_RETRY_MAX_MS,
+      expectedWrapper = undefined,
       now = () => Date.now(),
       logger = console
     } = {}
@@ -26,6 +27,9 @@ export class XcmSettlementWatcherService {
     this.pollIntervalMs = pollIntervalMs;
     this.retryBaseMs = retryBaseMs;
     this.retryMaxMs = retryMaxMs;
+    this.expectedWrapper = expectedWrapper === undefined
+      ? undefined
+      : normalizeWrapperAddress(expectedWrapper);
     this.now = now;
     this.logger = logger;
     this.running = false;
@@ -69,9 +73,14 @@ export class XcmSettlementWatcherService {
 
   async observeOutcome(requestId, outcome = {}) {
     const normalizedRequestId = this.requireRequestId(requestId);
+    const wrapperAddress = normalizeWrapperAddress(outcome.wrapperAddress ?? this.expectedWrapper);
+    if (this.expectedWrapper && wrapperAddress !== this.expectedWrapper) {
+      throw new ValidationError("XCM observation belongs to another wrapper generation.");
+    }
     const status = normalizeObservationStatus(outcome.status);
     const incoming = {
       requestId: normalizedRequestId,
+      wrapperAddress,
       status,
       settledAssets: normalizeObservationAmount(outcome.settledAssets, "settledAssets"),
       settledShares: normalizeObservationAmount(outcome.settledShares, "settledShares"),
@@ -81,7 +90,7 @@ export class XcmSettlementWatcherService {
       observedAt: normalizeObservationObservedAt(outcome.observedAt),
       processed: false
     };
-    const existing = await this.stateStore.getXcmObservation?.(normalizedRequestId);
+    const existing = await this.stateStore.getXcmObservation?.(wrapperAddress, normalizedRequestId);
     if (existing) {
       if (
         this.isEquivalentObservation(existing, incoming) ||
@@ -100,6 +109,7 @@ export class XcmSettlementWatcherService {
       timestamp: new Date().toISOString(),
       data: {
         requestId: normalizedRequestId,
+        wrapperAddress: observation.wrapperAddress,
         status: observation.status,
         settledAssets: observation.settledAssets,
         settledAssetsRaw: observation.settledAssets,
@@ -158,10 +168,12 @@ export class XcmSettlementWatcherService {
           );
         }
         const finalized = await this.platformService.finalizeXcmRequest(observation.requestId, observation);
-        await this.stateStore.markXcmObservationProcessed?.(observation.requestId, {
+        const chainSettlement = chainSettlementProof(finalized, observation);
+        await this.stateStore.markXcmObservationProcessed?.(observation.wrapperAddress, observation.requestId, {
           finalizedAt: new Date().toISOString(),
           settledVia: finalized?.settledVia,
           status: finalized?.strategyRequest?.statusLabel ?? finalized?.statusLabel ?? observation.status,
+          chainSettlement,
           ...(settlementPreflight ? { settlementPreflight } : {})
         });
         const finalizedWithPreflight = {
@@ -177,6 +189,7 @@ export class XcmSettlementWatcherService {
           timestamp: new Date().toISOString(),
           data: {
             requestId: observation.requestId,
+            wrapperAddress: observation.wrapperAddress,
             status: finalized?.strategyRequest?.statusLabel ?? finalized?.statusLabel ?? observation.status,
             settledAssets: observation.settledAssets,
             settledAssetsRaw: observation.settledAssets,
@@ -191,7 +204,12 @@ export class XcmSettlementWatcherService {
         results.push(finalizedWithPreflight);
       } catch (error) {
         const retry = this.retrySchedule(observation);
-        await this.stateStore.markXcmObservationFailed?.(observation.requestId, error, retry);
+        await this.stateStore.markXcmObservationFailed?.(
+          observation.wrapperAddress,
+          observation.requestId,
+          error,
+          retry
+        );
         this.eventBus?.publish({
           id: `xcm-auto-finalize-failed-${observation.requestId}-${Date.now()}`,
           topic: "xcm.request_finalize_failed",
@@ -199,6 +217,7 @@ export class XcmSettlementWatcherService {
           timestamp: new Date().toISOString(),
           data: {
             requestId: observation.requestId,
+            wrapperAddress: observation.wrapperAddress,
             message: error?.message ?? "unknown_error",
             nextAttemptAt: retry.nextAttemptAt,
             retryDelayMs: retry.retryDelayMs
@@ -269,6 +288,34 @@ export class XcmSettlementWatcherService {
       Number.isFinite(incomingObservedAt) &&
       incomingObservedAt <= existingObservedAt;
   }
+}
+
+function normalizeWrapperAddress(value) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (!/^0x[a-f0-9]{40}$/u.test(normalized)) {
+    throw new ValidationError("XCM observation wrapperAddress must be a 20-byte address.");
+  }
+  return normalized;
+}
+
+function chainSettlementProof(finalized, observation) {
+  const request = finalized?.strategyRequest ?? finalized?.adapterRequest ?? finalized;
+  const status = String(request?.statusLabel ?? finalized?.statusLabel ?? "").toLowerCase();
+  const settledAssetsRaw = String(request?.settledAssetsRaw ?? finalized?.settledAssetsRaw ?? "");
+  const settledSharesRaw = String(request?.settledSharesRaw ?? finalized?.settledSharesRaw ?? "");
+  if (status !== observation.status
+    || settledAssetsRaw !== observation.settledAssets
+    || settledSharesRaw !== observation.settledShares) {
+    throw new ValidationError("Chain settlement result does not match the observed XCM outcome.");
+  }
+  return {
+    wrapperAddress: observation.wrapperAddress,
+    requestId: observation.requestId,
+    status,
+    settledAssetsRaw,
+    settledSharesRaw,
+    confirmedAt: new Date().toISOString()
+  };
 }
 
 function normalizeObservationStatus(status) {

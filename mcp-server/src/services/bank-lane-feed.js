@@ -134,7 +134,7 @@ export class BankLaneFeedService {
       const currentWatches = [...pending, ...terminal]
         .filter((watch) => this.classifyRequestWatch(watch) !== "foreign");
       const observations = await Promise.all(currentWatches.map((watch) =>
-        this.stateStore.getXcmObservation?.(watch.requestId)
+        this.stateStore.getXcmObservation?.(watch.wrapperAddress, watch.requestId)
       ));
       return {
         // Request ids are scoped by wrapper on-chain and the durable observer
@@ -430,10 +430,11 @@ function requestFromWatch(watch, nowMs, observation = undefined) {
   // A balance terminal is only an observation. Until the settlement watcher
   // records the chain-side finalization, the board must not call it succeeded.
   // Historical manual recoveries carry their explicit reconciliation instead.
-  const finalizationPending = balanceTerminal
-    && !reconciliation
-    && (!observation || !observation.processed);
-  const finalizationErrored = finalizationPending && Boolean(observation?.lastError);
+  const chainSettlementConfirmed = observationConfirmsChainSettlement(watch, observation);
+  const finalizationPending = balanceTerminal && !reconciliation && !chainSettlementConfirmed;
+  const finalizationErrored = finalizationPending
+    && Boolean(observation?.lastError)
+    && !observation?.processed;
   const terminal = balanceTerminal && !finalizationPending;
   const item = {
     id: String(watch?.requestId ?? "unknown-request"),
@@ -470,10 +471,24 @@ function requestFromWatch(watch, nowMs, observation = undefined) {
       lastTriedAt: observation?.lastTriedAt ?? null,
       nextAttemptAt: observation?.nextAttemptAt ?? null
     };
+    if (observation?.processed && !chainSettlementConfirmed) {
+      item.finalization.chainConfirmation = "missing_or_mismatched";
+    }
   }
   if (!terminal && !finalizationPending && !invalidTiming) item.deadlineAtMs = deadlineAtMs;
   if (terminal && reconciliation) item.reconciliation = reconciliation;
   return item;
+}
+
+function observationConfirmsChainSettlement(watch, observation) {
+  if (!observation?.processed) return false;
+  const proof = observation?.result?.chainSettlement;
+  if (!proof || typeof proof !== "object") return false;
+  return sameAddress(proof.wrapperAddress, watch?.wrapperAddress)
+    && String(proof.requestId ?? "").toLowerCase() === String(watch?.requestId ?? "").toLowerCase()
+    && String(proof.status ?? "").toLowerCase() === String(watch?.status ?? "").toLowerCase()
+    && String(proof.settledAssetsRaw ?? "") === String(observation?.settledAssets ?? "")
+    && String(proof.settledSharesRaw ?? "") === String(observation?.settledShares ?? "");
 }
 
 function safeTerminalReconciliation(raw) {

@@ -1,6 +1,6 @@
 import { PlatformService } from "../core/platform-service.js";
 import { createStateStore } from "../core/state-store.js";
-import { migrateLegacyBankV21BalanceWatch } from "./bank-xcm-watch-migration.js";
+import { migrateLegacyBankXcmGenerationState } from "./bank-xcm-watch-migration.js";
 import { AccountOverlayStore } from "../core/account-overlay-store.js";
 import { PolicyService } from "../core/policy-service.js";
 import { BUILTIN_POLICIES } from "../core/builtin-policies.js";
@@ -264,10 +264,10 @@ export async function createPlatformRuntime() {
   const pimlicoClient = initStep("init-pimlico-client", logger, () => new PimlicoClient());
   const stateStore = initStep("init-state-store", logger, () => createStateStore(process.env, { logger }));
   try {
-    await migrateLegacyBankV21BalanceWatch(stateStore, { logger });
+    await migrateLegacyBankXcmGenerationState(stateStore, { logger });
   } catch (error) {
     logger.error(
-      { step: "migrate-bank-xcm-watch-generation-scope", err: error instanceof Error ? error : new Error(String(error)) },
+      { step: "migrate-bank-xcm-generation-scope", err: error instanceof Error ? error : new Error(String(error)) },
       "bootstrap.init_failed"
     );
     throw error;
@@ -414,6 +414,7 @@ export async function createPlatformRuntime() {
         ? gateway.isEnabled()
         : parseBooleanEnv(process.env.XCM_SETTLEMENT_WATCHER_ENABLED),
       pollIntervalMs: parsePositiveInt(process.env.XCM_SETTLEMENT_WATCHER_POLL_MS, 15_000),
+      expectedWrapper: gateway.config.xcmWrapperAddress,
       logger
     })
   );

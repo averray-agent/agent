@@ -198,8 +198,11 @@ test("MemoryStateStore funded jobs round-trip and list latest first", async () =
 
 test("MemoryStateStore xcm observations round-trip and clear from pending when processed", async () => {
   const store = new MemoryStateStore();
+  const wrapperAddress = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const requestId = "0x1111111111111111111111111111111111111111111111111111111111111111";
   await store.upsertXcmObservation({
-    requestId: "0x1111111111111111111111111111111111111111111111111111111111111111",
+    wrapperAddress,
+    requestId,
     status: "succeeded",
     settledAssets: 5,
     processed: false
@@ -210,7 +213,8 @@ test("MemoryStateStore xcm observations round-trip and clear from pending when p
   assert.equal(pending[0].settledAssets, 5);
 
   await store.markXcmObservationProcessed(
-    "0x1111111111111111111111111111111111111111111111111111111111111111",
+    wrapperAddress,
+    requestId,
     { settledVia: "agent_account" }
   );
 

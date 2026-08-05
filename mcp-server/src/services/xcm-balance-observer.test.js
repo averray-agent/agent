@@ -583,7 +583,12 @@ test("balance delta finalizes through the existing watcher and credits the strat
       return {
         requestId,
         settledVia: "agent_account",
-        strategyRequest: { account: "0x1111111111111111111111111111111111111111", statusLabel: "succeeded" }
+        strategyRequest: {
+          account: "0x1111111111111111111111111111111111111111",
+          statusLabel: "succeeded",
+          settledAssetsRaw: outcome.settledAssets,
+          settledSharesRaw: outcome.settledShares
+        }
       };
     }
   };
@@ -611,7 +616,7 @@ test("balance delta finalizes through the existing watcher and credits the strat
   assert.equal(finalized.length, 1);
   assert.equal(finalized[0].outcome.settledAssets, "100000");
   assert.equal(finalized[0].outcome.settledShares, "100000");
-  assert.equal((await store.getXcmObservation(REQUEST_ID)).processed, true);
+  assert.equal((await store.getXcmObservation(WRAPPER, REQUEST_ID)).processed, true);
 });
 
 test("observer timeout records Failed instead of leaving a silent Pending", async () => {
@@ -701,6 +706,52 @@ test("terminal watch registration and polling are idempotent", async () => {
   await observer.register(input);
   await observer.pollOnce();
   assert.equal(outcomes.length, 1);
+});
+
+test("terminal resume ignores a foreign-generation observation and requeues the current outcome", async () => {
+  const store = new MemoryStateStore();
+  const foreignWrapper = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+  await store.upsertXcmObservation({
+    wrapperAddress: foreignWrapper,
+    requestId: REQUEST_ID,
+    status: "succeeded",
+    settledAssets: "100000",
+    settledShares: "100000",
+    processed: true
+  });
+  await store.upsertXcmBalanceWatch({
+    requestId: REQUEST_ID,
+    wrapperAddress: WRAPPER,
+    status: "succeeded",
+    target: targetFor("aUsdc"),
+    direction: "increase",
+    settlement: { assets: "delta", shares: "delta" },
+    startedAt: "2026-08-05T12:00:00.000Z",
+    deadlineAt: "2026-08-05T13:00:00.000Z",
+    completedAt: "2026-08-05T12:05:00.000Z",
+    outcome: {
+      status: "succeeded",
+      settledAssets: "100000",
+      settledShares: "100000",
+      source: "balance_delta:erc20",
+      observedAt: "2026-08-05T12:05:00.000Z"
+    }
+  });
+  const outcomes = [];
+  const observer = new XcmBalanceObserverService(
+    store,
+    { async read() { throw new Error("not used"); } },
+    { async observeOutcome(requestId, outcome) { outcomes.push({ requestId, outcome }); } },
+    undefined,
+    { enabled: true }
+  );
+
+  const resumed = await observer.resumeTerminalObservations();
+
+  assert.equal(resumed.length, 1);
+  assert.equal(outcomes[0].requestId, REQUEST_ID);
+  assert.equal(outcomes[0].outcome.wrapperAddress, WRAPPER.toLowerCase());
+  assert.match(outcomes[0].outcome.source, /terminal_resume/u);
 });
 
 test("a request id cannot be replayed with different settlement bounds", async () => {
