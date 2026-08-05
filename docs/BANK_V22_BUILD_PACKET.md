@@ -15,6 +15,17 @@ them, impossible rather than avoided.
 > live in the contract. Off-chain conventions are documented as conventions and are not
 > accepted as real-money controls (v2.1 ceremony doc, "structural fee-at-staging defect").
 
+> **v2.2.1 amendment (2026-08-05).** v2.2 proved that the law applies to every hop,
+> not merely every top-level message. Its `withdraw_home` builder used
+> `minimumOutput` as both the Hydration withdrawal and the nested Asset Hub
+> `BuyExecution` budget. A live dry-run quoted 694 raw for the upstream hop, so only
+> 99,306 of 100,000 raw would arrive; the nested 100,000 budget failed
+> `NotHoldingFees`. No v2.2 home-family or recovery-family message may dispatch.
+> The 110,775 raw asset 22 and 1 raw aUSDC remain watched at the converted account.
+> After the request deadline, the request is terminalized with the observed amount and
+> closed with the named `PARKED_PENDING_GOVERNANCE_PATH` residue write-off. v2.2.1
+> changes only the fee law described below; every other v2.2 control carries forward.
+
 ## 1. The defect ledger (why each change exists — all proven live, all cited)
 
 | # | Defect | Live proof | v2.2 answer |
@@ -36,10 +47,13 @@ provenance guards; #931/#932 manifest single-source + repoint enforcement.
 
 ## 2. The five laws (normative; each maps to a section below)
 
-1. **Every cross-chain resource price is perishable.** Quote at dispatch time, over-provision
-   ×2, rely on surplus-return. Prices include: EVM gas (proven 99.6 % estimate accuracy, tx
-   `0x64f649b8…`), extrinsic weight envelopes, and remote `BuyExecution` fees. Weights are
-   deterministic meters, not prices — fresh-measured ×2 at dispatch, no staleness window.
+1. **Every cross-chain resource price is perishable, including nested hops.** Quote at
+   dispatch time, over-provision ×2, rely on surplus-return. Every hop's fee budget must be
+   no greater than the value provably arriving at that hop in the exact-message live
+   dry-run. Prices include: EVM gas (proven 99.6 % estimate accuracy, tx `0x64f649b8…`),
+   extrinsic weight envelopes, and every top-level or nested `BuyExecution` fee. Weights
+   are deterministic meters, not prices — fresh-measured ×2 at dispatch, no staleness
+   window.
 2. **A reading has an identity.** Every consumer read derives from the manifest single
    source; a redeploy repoints every consumer in the same change (exists — referenced).
 3. **Honest books at every layer the truth passes through.** No contract slot, feed field, or
@@ -73,10 +87,14 @@ what you construct. `PayloadMismatch` ceases to exist as a concept.
 - **Drift-proof-by-construction rule:** `withdraw_sell` uses the complete remote asset-22
   operating float as its fee budget with surplus-deposit, but that float is only knowable
   at dispatch. The operator therefore supplies the fresh-read float as `feeAmount`, capped
-  by the multisig-staged `maxFeePerLeg`. `withdraw_home` and `recovery_home` use their
-  request-bound amount as their own full fee budget and need no dispatch-time fee
-  parameter. `deposit_sell` also receives a fresh dispatch-time fee; `deposit_funding`
-  constructs its local execution weight directly.
+  by the multisig-staged `maxFeePerLeg`. In v2.2.1, `withdraw_home` and
+  `recovery_home` also take a dispatch-time `homeExecutionFee`, capped by the same
+  multisig-staged ceiling and bound into the constructed bytes (and recovery id). The
+  builder rejects zero, above-ceiling, and full-gross budgets; the dispatcher additionally
+  proves `homeExecutionFee <= amount arriving after the upstream Hydration fee` through
+  a three-hop live dry-run immediately before signing. `deposit_sell` also receives a
+  fresh dispatch-time fee; `deposit_funding` constructs its local execution weight
+  directly.
 - Deposit staging carries explicit transport margin:
   `sellAmount + maxFeePerLeg + fundingTransferFeeHeadroomRaw <= assets`. The roughly
   525-raw fee observed during v2.1 is evidence, not a hardcoded constant; the current
@@ -93,7 +111,8 @@ what you construct. `PayloadMismatch` ceases to exist as a concept.
   recovery `0xc92c9814…` families), adjusted only at the documented fee/amount slots.
 - Unchanged: recovery_home semantics (owner-only, paused-only, beneficiary hard-bound,
   nonce-scoped), pause gating, `_validateSettlementBounds`, operator/settler roles,
-  converted-account immutability post-configure.
+  converted-account immutability post-configure. The recovery id now also binds the
+  dispatch-time nested fee so repriced bytes cannot reuse a reviewed topic.
 
 ### 3.2 Adapter v2.2 — observer-proven terminal accounting
 
@@ -148,7 +167,9 @@ Board-side rendering is the board agent's lane; the backend exposes the two fact
   `maxFeePerLeg` reverts; non-operator dispatch reverts; terminal accounting with
   `observed < requested`, `observed = 0`, `observed > requested` (capped); residue
   write-off events; golden vectors vs v2.1 known-good bytes; constructive-shape fuzz
-  (no input reaches `IXcm.send` outside the four shapes + recovery).
+  (no input reaches `IXcm.send` outside the four shapes + recovery). v2.2.1 additionally
+  pins the live 100,000 − 694 = 99,306 cross-hop arrival fixture and tests fee budgets at
+  arrival − 1, arrival, and arrival + 1; the last must refuse.
 - **G2** Deploy ceremony (guarded per #926: source-commit reachable, forced build,
   creation-hash, selector probe) → paused, unconfigured → conversion evidence 2-endpoint →
   configure ceremony → **manifest + env repoint in the same change** (#931 pattern; CI
@@ -164,6 +185,11 @@ Board-side rendering is the board agent's lane; the backend exposes the two fact
   recovery code is minimally changed and live-proven on v2.1; a drill costs a real trap.
 - **Then and only then:** 10-USDC epoch 1 (threshold per the amended epoch policy,
   2026-08-02).
+
+v2.2.1 succession uses one atomic owner-multisig `utility.batchAll`: pause v2.2, then arm
+v2.2.1. No separate arm transaction is valid, and no interval may report zero or two armed
+generations. The full deposit → withdraw → pause dust ladder reruns from the beginning;
+proof never inherits across contract generations.
 
 ## 6. Economics and ceremony budget
 
