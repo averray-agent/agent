@@ -617,7 +617,7 @@ test("stored subject from a prior env generation is invalidated instead of reuse
   assert.equal(current.subject.lastError, "subject_snapshot_missing_or_stale");
 });
 
-test("mainnet template ships the Bank feed ENABLED, with targets that match the deployment manifest", async () => {
+test("post-enablement mainnet template ships the Bank runtime and feed enabled for the current generation", async () => {
   const [template, manifestRaw] = await Promise.all([
     readFile(new URL("../../../deploy/backend.mainnet.env.template", import.meta.url), "utf8"),
     readFile(new URL("../../../deployments/mainnet.json", import.meta.url), "utf8")
@@ -660,10 +660,13 @@ test("mainnet template ships the Bank feed ENABLED, with targets that match the 
   assert.equal(config.targets.float.assetId, String(strategy.remote.assetId));
   assert.equal(config.targets.postage.account, POSTAGE);
   assert.equal(env.XCM_WRAPPER_ADDRESS, manifest.contracts.xcmWrapper);
+  // This fixture reads the current rendered production state after the
+  // generation has earned its explicit runtime-enablement rung. Fresh
+  // generation append remains pinned separately to false by the recorder test.
   assert.equal(
     env.BANK_XCM_FLOW_ENABLED,
-    "false",
-    "a newly appended Bank generation must re-earn flow enablement through its own ladder"
+    "true",
+    "the current rendered generation must reflect its completed runtime-enablement rung"
   );
   assert.equal(
     env.BANK_XCM_ASSET_HUB_SUBSTRATE_RPC_URL,
