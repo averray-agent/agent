@@ -261,6 +261,81 @@ test("terminal request exposes the honest reconciliation without presenting the 
   assert.equal("rawRecoveryAssetsOutstandingRaw" in feed.requests.items[0].reconciliation, false);
 });
 
+test("observed balance stays pending-finalize on the board until chain settlement confirms", async () => {
+  const store = new MemoryStateStore();
+  const requestId = `0x${"43".repeat(32)}`;
+  await store.upsertXcmBalanceWatch({
+    requestId,
+    wrapperAddress: WRAPPER_V22,
+    status: "succeeded",
+    kind: "deposit",
+    phase: "terminal",
+    direction: "increase",
+    startedAt: new Date(BASE - 60_000).toISOString(),
+    deadlineAt: new Date(BASE + 60_000).toISOString(),
+    completedAt: new Date(BASE - 5_000).toISOString()
+  });
+  const bankFeed = service(store, {
+    async read(target) {
+      return { raw: target.ledger === "erc20" ? "100000" : "0", asOf: BASE, target };
+    }
+  });
+  const observed = await bankFeed.pollOnce();
+  assert.equal(observed.position.raw, "100000");
+  assert.equal(observed.calibration.provenRaw, "100000");
+  assert.deepEqual(observed.requests.items[0], {
+    id: requestId,
+    wrapperAddress: WRAPPER_V22.toLowerCase(),
+    kind: "deposit",
+    phase: "pending-finalize",
+    ageSeconds: 60,
+    overdue: false,
+    status: "pending",
+    observedOutcome: "succeeded",
+    finalization: {
+      status: "pending",
+      attemptCount: 0,
+      lastError: null,
+      lastTriedAt: null,
+      nextAttemptAt: null
+    }
+  });
+
+  await store.upsertXcmObservation({
+    requestId,
+    status: "succeeded",
+    settledAssets: "100000",
+    settledShares: "100000",
+    processed: false
+  });
+  const queued = await bankFeed.pollOnce();
+  assert.equal(queued.requests.items[0].phase, "pending-finalize");
+  assert.equal(queued.requests.items[0].status, "pending");
+
+  await store.markXcmObservationFailed(
+    requestId,
+    "finalizeXcmRequest reverted Unauthorized()",
+    {
+      lastTriedAt: new Date(BASE - 1_000).toISOString(),
+      nextAttemptAt: new Date(BASE + 14_000).toISOString(),
+      retryDelayMs: 15_000
+    }
+  );
+  const pending = await bankFeed.pollOnce();
+  assert.equal(pending.position.raw, "100000");
+  assert.equal(pending.calibration.provenRaw, "100000");
+  assert.equal(pending.requests.items[0].phase, "finalize-error");
+  assert.equal(pending.requests.items[0].status, "error");
+  assert.equal(pending.requests.items[0].finalization.attemptCount, 1);
+  assert.match(pending.requests.items[0].finalization.lastError, /Unauthorized/u);
+
+  await store.markXcmObservationProcessed(requestId, { settledVia: "strategy_adapter" });
+  const finalized = await bankFeed.pollOnce();
+  assert.equal(finalized.requests.items[0].status, "succeeded");
+  assert.equal(finalized.requests.items[0].phase, "terminal");
+  assert.equal("finalization" in finalized.requests.items[0], false);
+});
+
 test("request snapshot excludes the retired v2.0 venue target without hiding unknown work", async () => {
   const store = new MemoryStateStore();
   const request = (requestId, target) => store.upsertXcmBalanceWatch({

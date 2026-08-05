@@ -504,9 +504,9 @@ export class MemoryStateStore {
     return updated;
   }
 
-  async markXcmObservationFailed(requestId, error) {
+  async markXcmObservationFailed(requestId, error, retry = undefined) {
     const current = this.xcmObservations.get(requestId);
-    const updated = markXcmObservationFailedRecord(current, error);
+    const updated = markXcmObservationFailedRecord(current, error, retry);
     if (!updated) return undefined;
     this.xcmObservations.set(requestId, updated);
     return updated;
@@ -1208,10 +1208,10 @@ export class RedisStateStore {
     return updated;
   }
 
-  async markXcmObservationFailed(requestId, error) {
+  async markXcmObservationFailed(requestId, error, retry = undefined) {
     await this.connect();
     const current = await this.getXcmObservation(requestId);
-    const updated = markXcmObservationFailedRecord(current, error);
+    const updated = markXcmObservationFailedRecord(current, error, retry);
     if (!updated) return undefined;
     await this.client.set(this.key("xcm-observation", requestId), JSON.stringify(updated));
     await this.client.zAdd(this.key("xcm-observations", "pending"), {

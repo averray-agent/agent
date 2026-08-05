@@ -284,6 +284,10 @@ export function loadBlockchainConfig(env = process.env) {
     reputationSbtAddress: env.REPUTATION_SBT_ADDRESS ?? "",
     discoveryRegistryAddress: normalizeOptionalAddress(env.DISCOVERY_REGISTRY_ADDRESS, "DISCOVERY_REGISTRY_ADDRESS"),
     xcmWrapperAddress: normalizeOptionalAddress(env.XCM_WRAPPER_ADDRESS, "XCM_WRAPPER_ADDRESS"),
+    hydrationUsdcAdapterAddress: normalizeOptionalAddress(
+      env.HYDRATION_USDC_ADAPTER_ADDRESS,
+      "HYDRATION_USDC_ADAPTER_ADDRESS"
+    ),
     supportedAssets,
     gasFeeBufferBps: resolveGasFeeBufferBps(env)
   };

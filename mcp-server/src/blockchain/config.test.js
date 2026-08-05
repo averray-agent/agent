@@ -243,6 +243,16 @@ test("loadBlockchainConfig accepts optional XCM_WRAPPER_ADDRESS", () => {
   assert.equal(config.xcmWrapperAddress, "0x7777777777777777777777777777777777777777");
 });
 
+test("loadBlockchainConfig accepts the optional Hydration adapter settlement address", () => {
+  const config = loadBlockchainConfig({
+    ...baseEnv,
+    RPC_URL: "https://rpc.example",
+    HYDRATION_USDC_ADAPTER_ADDRESS: "0x631A09913B2403B18b2B659a1397916621b29b4c"
+  });
+
+  assert.equal(config.hydrationUsdcAdapterAddress, "0x631a09913b2403b18b2b659a1397916621b29b4c");
+});
+
 test("loadBlockchainConfig rejects malformed optional XCM_WRAPPER_ADDRESS", () => {
   assert.throws(
     () =>

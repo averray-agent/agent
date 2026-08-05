@@ -103,7 +103,9 @@ test("xcm observation transition helpers preserve retry/process semantics", () =
     processed: true,
     processedAt: "2026-01-02T00:00:00.000Z",
     result: { ok: true },
-    lastError: undefined
+    lastError: undefined,
+    nextAttemptAt: undefined,
+    retryDelayMs: undefined
   });
 
   assert.deepEqual(markXcmObservationFailedRecord(current, new Error("boom"), { now: "2026-01-03T00:00:00.000Z" }), {
@@ -112,7 +114,9 @@ test("xcm observation transition helpers preserve retry/process semantics", () =
     attemptCount: 2,
     processed: false,
     lastError: "boom",
-    lastTriedAt: "2026-01-03T00:00:00.000Z"
+    lastTriedAt: "2026-01-03T00:00:00.000Z",
+    nextAttemptAt: undefined,
+    retryDelayMs: undefined
   });
 });
 

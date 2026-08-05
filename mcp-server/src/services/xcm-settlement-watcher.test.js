@@ -182,6 +182,64 @@ test("runPendingSettlements emits a request_finalize_failed event with correlati
   assert.match(events[0].data.message, /downstream settle failed/u);
 });
 
+test("failed finalization retries with exponential backoff and then recovers", async () => {
+  const stateStore = new MemoryStateStore();
+  let nowMs = Date.parse("2026-08-05T13:18:41.000Z");
+  let attempts = 0;
+  const watcher = new XcmSettlementWatcherService(
+    {
+      finalizeXcmRequest: async () => {
+        attempts += 1;
+        if (attempts <= 2) throw new Error("adapter route unavailable");
+        return { settledVia: "strategy_adapter", statusLabel: "succeeded" };
+      }
+    },
+    stateStore,
+    undefined,
+    {
+      enabled: false,
+      retryBaseMs: 15_000,
+      retryMaxMs: 60_000,
+      now: () => nowMs,
+      logger: { warn: () => {} }
+    }
+  );
+
+  await watcher.observeOutcome(REQUEST_ID, {
+    status: "succeeded",
+    settledAssets: 100_000,
+    settledShares: 100_000
+  });
+  await watcher.runPendingSettlements();
+  let stored = await stateStore.getXcmObservation(REQUEST_ID);
+  assert.equal(attempts, 1);
+  assert.equal(stored.processed, false);
+  assert.equal(stored.retryDelayMs, 15_000);
+  assert.equal(stored.nextAttemptAt, "2026-08-05T13:18:56.000Z");
+
+  await watcher.runPendingSettlements();
+  assert.equal(attempts, 1, "a poll before nextAttemptAt must not repeat the same revert");
+
+  nowMs += 15_000;
+  await watcher.runPendingSettlements();
+  stored = await stateStore.getXcmObservation(REQUEST_ID);
+  assert.equal(attempts, 2);
+  assert.equal(stored.processed, false);
+  assert.equal(stored.retryDelayMs, 30_000);
+  assert.equal(stored.nextAttemptAt, "2026-08-05T13:19:26.000Z");
+
+  await watcher.runPendingSettlements();
+  assert.equal(attempts, 2, "the second identical revert must wait for the longer backoff");
+
+  nowMs += 30_000;
+  await watcher.runPendingSettlements();
+  stored = await stateStore.getXcmObservation(REQUEST_ID);
+  assert.equal(attempts, 3);
+  assert.equal(stored.processed, true);
+  assert.equal(stored.result.settledVia, "strategy_adapter");
+  assert.equal(stored.nextAttemptAt, undefined);
+});
+
 test("runPendingSettlements runs settlement preflight before finalizing observed outcomes", async () => {
   const stateStore = new MemoryStateStore();
   const eventBus = new EventBus();
