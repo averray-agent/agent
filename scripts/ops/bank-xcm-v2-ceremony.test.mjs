@@ -972,7 +972,7 @@ test("v2.2 manifest replacement appends the new pair and emits generation-specif
   assert.equal(next.deployers.hydrationUsdcAdapterV2_2, getAddress(OPERATOR));
 });
 
-test("v2.2.1 manifest replacement uses three-part generation keys", () => {
+test("fresh v2.2.1 generation append forces runtime flow false before its enablement rung", () => {
   const wrapperV221 = "0x4444444444444444444444444444444444444444";
   const adapterV221 = "0x5555555555555555555555555555555555555555";
   const prior = {
@@ -1003,6 +1003,8 @@ test("v2.2.1 manifest replacement uses three-part generation keys", () => {
     }
   });
   assert.deepEqual(next.bankXcmDeploymentHistory.map((entry) => entry.version), ["2.2", "2.2.1"]);
+  // Append-time safety is intentionally distinct from the current rendered
+  // post-enablement state asserted by bank-lane-feed.test.js.
   assert.equal(next.bankXcmDeploymentHistory[1].flowEnabled, false);
   assert.equal(next.bankXcmV2Deployment.flowEnabled, false);
   assert.equal(next.deploymentBlocks.xcmWrapperV2_2_1, 19_300_001);

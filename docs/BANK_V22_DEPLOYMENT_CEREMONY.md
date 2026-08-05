@@ -16,8 +16,9 @@ G2 has three state-changing moments, each separately gated:
 The deployer sends only the two CREATE transactions. The configure batch has
 exactly four calls and contains no `setDispatchPaused(false)`. The new pair must
 remain paused and `BANK_XCM_FLOW_ENABLED=false` throughout G2. Do not emit or
-sign arm material until the post-G2 runtime activation and armed-empty gates in
-section 7 are both green.
+sign arm material until the post-G2 verification bundle and armed-empty gates
+in section 7 are both green. Runtime activation follows the first staging
+ceremony and remains a separate pre-dispatch rung.
 
 Stop before signing if any of these is true:
 
@@ -252,16 +253,21 @@ For the nonce-7 provisional wrapper only, that image is:
 If the actual wrapper differs, the deploy preview prints the replacement SS58.
 Never fund a provisional image after an address change.
 
-## 7. G2 close, runtime gate, arm, and just-in-time ladder
+## 7. G2 close, arm, stage, runtime gate, and just-in-time ladder
 
 G2 is complete only when the deploy receipts, selector response, two conversion
 reads, same-flow record/env diff, configure execution result, paused/configured
 live reads, and postage receipt are all captured. The evidence uses capture-time
 state; skeleton/default `liveState` values are forbidden.
 
-Before any request is staged, deploy the runtime activation change while the
-wrapper remains paused and custody-empty. Its production environment must set
-`BANK_XCM_FLOW_ENABLED=true` and provide both Substrate RPC endpoints. Verify
+Every fresh generation is appended with `BANK_XCM_FLOW_ENABLED=false`; the
+recorder's forced-false invariant is not bypassed. After that generation is
+configured, armed through the reviewed arm or succession ceremony, and its
+first request is staged with custody confirmed, land a separate runtime
+activation change. Its production environment sets
+`BANK_XCM_FLOW_ENABLED=true` and provides both Substrate RPC endpoints. The
+flag does not arm a wrapper or authorize a signature. It only makes the
+observer and refusing dispatcher available. Before the first dispatch, verify
 through `/admin/status` that `bankXcmRuntime` reports all of:
 
 - `enabled=true`;
@@ -270,10 +276,13 @@ through `/admin/status` that `bankXcmRuntime` reports all of:
 - `chainEventWatchEnabled=true` with no ingestion error; and
 - `readyForStaging=true`.
 
-This is the standing **pre-staging runtime gate** for every cycle. If any field
-is false or unreadable, do not stage. Arm remains a separate one-call multisig
-ceremony and may run only while the request table is empty, allowance is zero,
-and the runtime gate above is green.
+This is the standing **runtime-enablement pre-dispatch gate** for the first
+cycle of every new generation. If any field is false or unreadable, do not
+dispatch. The first staged request must then be discovered from its exact
+on-chain `RequestQueued` event (or backfilled through the bounded Substrate
+lens when it was staged while runtime was off), with a generation-scoped,
+chain-height-bound baseline rendered on the board. Later requests on the same
+enabled generation follow the normal event-driven watch path.
 
 The former four-upfront G3 phase is retired. A paused wrapper cannot have a
 queued request, while both `queueRequest` and `dispatchLeg` require the wrapper
@@ -284,16 +293,17 @@ evidence that v2.2 explicitly rejects.
 
 The complete replacement order is:
 
-1. Verify the runtime gate above, then emit the arm packet only after the
-   generator verifies the complete G2
+1. Emit the arm or atomic succession packet only after the generator verifies
+   the complete G2
    deployment evidence against fresh chain state: live runtime hashes and the
    external v2.2 selector, configured operator/adapter/converted account,
    policy role, zero queued-request events, zero adapter accounting and token
-   custody, zero treasury allowance, and the deployed backend reporting the
-   v2.2 pair with its Substrate event bridge and observer green.
-2. Sign the separately reviewed, single-call `setDispatchPaused(false)` arm
-   packet. Arming permits request staging; it does not authorize automated
-   dispatch, because no request watch exists yet.
+   custody, zero treasury allowance, and the flow-disabled backend reporting
+   the candidate pair.
+2. Sign the separately reviewed arm packet. For a successor, atomically pause
+   the predecessor and arm the candidate. Arming permits request staging; it
+   does not authorize automated dispatch, because the runtime is still off and
+   no request watch exists yet.
 3. Approve the exact dust cap to the v2.2 adapter as a standalone multisig
    transaction. Re-read the committed allowance before any dependent
    simulation or staging signature.
@@ -301,9 +311,12 @@ The complete replacement order is:
    `maxFeePerLeg`, and enough headroom for the funding transfer fee.
    `RequestQueued` does not exist until this transaction executes, so its
    per-request watch cannot literally predate staging.
-5. Confirm the observer has a pending watch sourced from that exact on-chain
-   `RequestQueued` event, including its staging transaction/block, on-chain
-   deadline, and destination-chain block/hash-bound baseline.
+5. Land and deploy the explicit runtime-enablement change. Prove the runtime
+   fields above green, then confirm the observer has a pending,
+   generation-scoped watch sourced from that exact on-chain `RequestQueued`
+   event, including its staging transaction/block, on-chain deadline, and
+   destination-chain block/hash-bound baseline. The board must render it before
+   any dispatch.
 6. Immediately before **each** leg, the v2.2 dispatcher must, in one tight live
    session, re-read the request and runtime state, obtain the fresh fee/remote
    amount where applicable, dry-run the exact constructed message with its
