@@ -213,7 +213,7 @@
   "bankXcmV2Deployment": {
     "version": "2.2.1",
     "status": "deployed_paused",
-    "flowEnabled": false,
+    "flowEnabled": true,
     "deployTxHashes": {
       "wrapper": "0x44350eff7ca905ea3bf2f577641c44c2e97692b7034e15733889fa5159679984",
       "adapter": "0x2eb4a35bd310284b8a7a7093093a3f485466a180e2026931ddcab0c9c9aafc19"
@@ -341,7 +341,7 @@
     {
       "version": "2.2.1",
       "status": "deployed_paused",
-      "flowEnabled": false,
+      "flowEnabled": true,
       "wrapper": "0xF20b35A3f85EC864127B551ce8A64446fC0ed2Bc",
       "adapter": "0x96091d4477Fe37E79557276d63883bBbbdE73159",
       "deployTxHashes": {
