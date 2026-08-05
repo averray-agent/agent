@@ -40,7 +40,10 @@ import {
   probeWrapperV221Selector,
   rebuildFoundryArtifacts
 } from "./deploy-bank-xcm-v2.mjs";
-import { buildManifestCandidate } from "./record-bank-xcm-v2-deployment.mjs";
+import {
+  buildManifestCandidate,
+  forceBankXcmFlowDisabledForNewGeneration
+} from "./record-bank-xcm-v2-deployment.mjs";
 import { extractAaveQuote } from "./capture-bank-xcm-v22-staging-quote.mjs";
 import {
   assertFreshV22StagingQuote,
@@ -151,6 +154,25 @@ test("v2.2.1 green-exit gate requires the exact fifth candidate and keeps flow d
       adapter: ADAPTER
     }),
     /unexpectedly enabled/u
+  );
+});
+
+test("new Bank generation record forces predecessor flow true to false", () => {
+  const rendered = forceBankXcmFlowDisabledForNewGeneration([
+    "XCM_WRAPPER_ADDRESS=0x1000000000000000000000000000000000000001",
+    "BANK_XCM_FLOW_ENABLED=true",
+    "BANK_LANE_FEED_ENABLED=true",
+    ""
+  ].join("\n"));
+  assert.match(rendered, /^BANK_XCM_FLOW_ENABLED=false$/mu);
+  assert.doesNotMatch(rendered, /^BANK_XCM_FLOW_ENABLED=true$/mu);
+  assert.throws(
+    () => forceBankXcmFlowDisabledForNewGeneration("BANK_LANE_FEED_ENABLED=true\n"),
+    /exactly one BANK_XCM_FLOW_ENABLED setting; found 0/u
+  );
+  assert.throws(
+    () => forceBankXcmFlowDisabledForNewGeneration("BANK_XCM_FLOW_ENABLED=true\nBANK_XCM_FLOW_ENABLED=false\n"),
+    /exactly one BANK_XCM_FLOW_ENABLED setting; found 2/u
   );
 });
 
@@ -832,7 +854,9 @@ test("manifest recorder produces the paired addresses, provenance, blocks, and p
   assert.equal(next.deploymentBlocks.xcmWrapperV2, 19_000_001);
   assert.equal(next.strategies[0].status, "paused_pending_dust_proof");
   assert.equal(next.bankXcmV2Deployment.status, "deployed_paused");
+  assert.equal(next.bankXcmV2Deployment.flowEnabled, false);
   assert.equal(next.bankXcmDeploymentHistory[0].wrapper, getAddress(WRAPPER));
+  assert.equal(next.bankXcmDeploymentHistory[0].flowEnabled, false);
 });
 
 test("v2.1 manifest replacement preserves v2.0 provenance and records retirement truth", () => {
@@ -979,6 +1003,8 @@ test("v2.2.1 manifest replacement uses three-part generation keys", () => {
     }
   });
   assert.deepEqual(next.bankXcmDeploymentHistory.map((entry) => entry.version), ["2.2", "2.2.1"]);
+  assert.equal(next.bankXcmDeploymentHistory[1].flowEnabled, false);
+  assert.equal(next.bankXcmV2Deployment.flowEnabled, false);
   assert.equal(next.deploymentBlocks.xcmWrapperV2_2_1, 19_300_001);
   assert.equal(next.deploymentBlocks.hydrationUsdcAdapterV2_2_1, 19_300_002);
   assert.equal(next.deployers.xcmWrapperV2_2_1, getAddress(OPERATOR));

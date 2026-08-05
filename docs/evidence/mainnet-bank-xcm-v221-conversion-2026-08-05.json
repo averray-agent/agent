@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "kind": "averray.hydrationLocationConversion",
+  "profile": "mainnet",
+  "wrapper": "0xF20b35A3f85EC864127B551ce8A64446fC0ed2Bc",
+  "assetHubOriginAccountId32": "0xf20b35a3f85ec864127b551ce8a64446fc0ed2bceeeeeeeeeeeeeeeeeeeeeeee",
+  "location": {
+    "V4": {
+      "parents": 1,
+      "interior": {
+        "X2": [
+          {
+            "Parachain": 1000
+          },
+          {
+            "AccountId32": {
+              "network": null,
+              "id": "0xf20b35a3f85ec864127b551ce8a64446fc0ed2bceeeeeeeeeeeeeeeeeeeeeeee"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "reads": [
+    {
+      "endpoint": "https://rpc.kril.hydration.cloud",
+      "chain": "Hydration",
+      "genesisHash": "0xafdc188f45c71dacbaa0b62e16a91f726c7b8699a9748cdf715459de6b7f366d",
+      "convertedAccountId32": "0x48df881b65e682f05ac24dc8f668a8938225e973f6ebfce08cd5a3835491e7f3",
+      "observedAt": "2026-08-05T18:29:35.487Z"
+    },
+    {
+      "endpoint": "https://rpc-catfish-1.catfish.hydration.cloud",
+      "chain": "Hydration",
+      "genesisHash": "0xafdc188f45c71dacbaa0b62e16a91f726c7b8699a9748cdf715459de6b7f366d",
+      "convertedAccountId32": "0x48df881b65e682f05ac24dc8f668a8938225e973f6ebfce08cd5a3835491e7f3",
+      "observedAt": "2026-08-05T18:29:36.257Z"
+    }
+  ],
+  "capturedAt": "2026-08-05T18:29:36.257Z",
+  "convertedAccountId32": "0x48df881b65e682f05ac24dc8f668a8938225e973f6ebfce08cd5a3835491e7f3"
+}

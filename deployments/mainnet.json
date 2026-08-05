@@ -19,10 +19,10 @@
     "reputationSbt": "0xA85AF867b5f573176f49F0D6A827F61A5Cee4e37",
     "discoveryRegistry": "0x47876D138e3a26c485A5f8acbAC7AEcA3c7e6C62",
     "escrowCore": "0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC",
-    "xcmWrapper": "0xEceE778e11B238D2fc096E56460e7B98DC7B26b8",
+    "xcmWrapper": "0xF20b35A3f85EC864127B551ce8A64446fC0ed2Bc",
     "token": "0x0000053900000000000000000000000001200000",
     "legacyEscrowCore": "0x9cCd1DbBB5C354CC6218e55D3cE924A4d631C035",
-    "hydrationUsdcAdapter": "0x631A09913B2403B18b2B659a1397916621b29b4c"
+    "hydrationUsdcAdapter": "0x96091d4477Fe37E79557276d63883bBbbdE73159"
   },
   "contractProvenance": {
     "0x226F14252A98BD2eA140271647De20132F09AF20": {
@@ -103,6 +103,18 @@
       "abiHash": "sha256:938a8cf6e9ebeec2ec6c038ad610a0557a7e8179680f5acedc38c2c076156709",
       "runtimeCodeHash": "sha256:cfc9d412814f4b6247e40b15165afc3e3b219f164e08cec44ef6f50a842ca3b5",
       "verifiedAt": "2026-08-04T18:55:13.886Z"
+    },
+    "0xF20b35A3f85EC864127B551ce8A64446fC0ed2Bc": {
+      "sourceCommit": "464fd8c018c5735a7f1e495c9a2eeb17c378bb0d",
+      "abiHash": "sha256:abe3801f2f88c09eca5d433345a0233063e4bdd7afa8b51dc00ab80dc6bdd004",
+      "runtimeCodeHash": "sha256:6bfe856161cd742a2eaad227f43e6b722644c7cf0e62903287e762161c8d12f8",
+      "verifiedAt": "2026-08-05T18:29:36.257Z"
+    },
+    "0x96091d4477Fe37E79557276d63883bBbbdE73159": {
+      "sourceCommit": "464fd8c018c5735a7f1e495c9a2eeb17c378bb0d",
+      "abiHash": "sha256:938a8cf6e9ebeec2ec6c038ad610a0557a7e8179680f5acedc38c2c076156709",
+      "runtimeCodeHash": "sha256:65ef3000814c9a7956d096881dd27d68ab27038072c8f05342035dd53e506a3a",
+      "verifiedAt": "2026-08-05T18:29:36.257Z"
     }
   },
   "knownUnshippedContractChanges": {
@@ -142,7 +154,9 @@
     "xcmWrapperV2_1": 19038771,
     "hydrationUsdcAdapterV2_1": 19038773,
     "xcmWrapperV2_2": 19061012,
-    "hydrationUsdcAdapterV2_2": 19061014
+    "hydrationUsdcAdapterV2_2": 19061014,
+    "xcmWrapperV2_2_1": 19101467,
+    "hydrationUsdcAdapterV2_2_1": 19101470
   },
   "runtime": {
     "auth": {
@@ -164,8 +178,8 @@
   "strategies": [
     {
       "id": "HYDRATION_USDC_V1",
-      "adapter": "0x631A09913B2403B18b2B659a1397916621b29b4c",
-      "wrapper": "0xEceE778e11B238D2fc096E56460e7B98DC7B26b8",
+      "adapter": "0x96091d4477Fe37E79557276d63883bBbbdE73159",
+      "wrapper": "0xF20b35A3f85EC864127B551ce8A64446fC0ed2Bc",
       "asset": "0x0000053900000000000000000000000001200000",
       "phase": "phase1_treasury_staging",
       "status": "paused_pending_dust_proof",
@@ -186,7 +200,9 @@
     "xcmWrapperV2_1": "0x9Ab8531FBb0948C542a31298FD61335f30064239",
     "hydrationUsdcAdapterV2_1": "0x9Ab8531FBb0948C542a31298FD61335f30064239",
     "xcmWrapperV2_2": "0x9Ab8531FBb0948C542a31298FD61335f30064239",
-    "hydrationUsdcAdapterV2_2": "0x9Ab8531FBb0948C542a31298FD61335f30064239"
+    "hydrationUsdcAdapterV2_2": "0x9Ab8531FBb0948C542a31298FD61335f30064239",
+    "xcmWrapperV2_2_1": "0x9Ab8531FBb0948C542a31298FD61335f30064239",
+    "hydrationUsdcAdapterV2_2_1": "0x9Ab8531FBb0948C542a31298FD61335f30064239"
   },
   "escrowRedeployedAt": "2026-07-30T10:01:56.005Z",
   "escrowRedeployTxHashes": {
@@ -195,22 +211,23 @@
     "revokeOld": null
   },
   "bankXcmV2Deployment": {
-    "version": "2.2",
+    "version": "2.2.1",
     "status": "deployed_paused",
+    "flowEnabled": false,
     "deployTxHashes": {
-      "wrapper": "0x4e0132e6e8e47cd3ff584825ac77e412a18aed57636f95e1837c74b04b7a0d08",
-      "adapter": "0x695960272724178f49c3adffce309d0b4ac1bcb59c9d718824e46d1fca08f90b"
+      "wrapper": "0x44350eff7ca905ea3bf2f577641c44c2e97692b7034e15733889fa5159679984",
+      "adapter": "0x2eb4a35bd310284b8a7a7093093a3f485466a180e2026931ddcab0c9c9aafc19"
     },
     "configurationMultisigExecTx": null,
-    "convertedAccountId32": "0x42e55ecf123da7d3eba1c55998b3cbf8238c446367c981f1388acbc0626cf354",
+    "convertedAccountId32": "0x48df881b65e682f05ac24dc8f668a8938225e973f6ebfce08cd5a3835491e7f3",
     "conversionEvidence": {
-      "artifact": "docs/evidence/mainnet-bank-xcm-v22-conversion-2026-08-04.json",
+      "artifact": "docs/evidence/mainnet-bank-xcm-v221-conversion-2026-08-05.json",
       "endpointCount": 2,
       "endpoints": [
         "https://rpc.kril.hydration.cloud",
         "https://rpc-catfish-1.catfish.hydration.cloud"
       ],
-      "capturedAt": "2026-08-04T18:55:13.886Z"
+      "capturedAt": "2026-08-05T18:29:36.257Z"
     },
     "dryRunEvidence": [],
     "dustCycleEvidence": null
@@ -320,6 +337,19 @@
       },
       "convertedAccountId32": "0x42e55ecf123da7d3eba1c55998b3cbf8238c446367c981f1388acbc0626cf354",
       "replacementReason": "v2.2: dispatch-time fee bounds, chain-derived watcher state, and request-scoped recovery accounting"
+    },
+    {
+      "version": "2.2.1",
+      "status": "deployed_paused",
+      "flowEnabled": false,
+      "wrapper": "0xF20b35A3f85EC864127B551ce8A64446fC0ed2Bc",
+      "adapter": "0x96091d4477Fe37E79557276d63883bBbbdE73159",
+      "deployTxHashes": {
+        "wrapper": "0x44350eff7ca905ea3bf2f577641c44c2e97692b7034e15733889fa5159679984",
+        "adapter": "0x2eb4a35bd310284b8a7a7093093a3f485466a180e2026931ddcab0c9c9aafc19"
+      },
+      "convertedAccountId32": "0x48df881b65e682f05ac24dc8f668a8938225e973f6ebfce08cd5a3835491e7f3",
+      "replacementReason": "v2.2.1: dispatch-time nested home fee bound to every priced hop"
     }
   ]
 }
