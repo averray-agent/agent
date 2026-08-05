@@ -382,10 +382,31 @@ export function buildArmCalls({ wrapper }) {
   }];
 }
 
+export function buildSuccessionCalls({ previousWrapper, wrapper }) {
+  const previousWrapperAddress = getAddress(previousWrapper);
+  const wrapperAddress = getAddress(wrapper);
+  if (previousWrapperAddress === wrapperAddress) {
+    throw new Error("Bank wrapper succession requires two distinct generations.");
+  }
+  const wrapperIface = new Interface(WRAPPER_ADMIN_ABI);
+  return [
+    {
+      label: `XcmWrapperV22(${previousWrapperAddress}).setDispatchPaused(true)`,
+      to: previousWrapperAddress,
+      data: wrapperIface.encodeFunctionData("setDispatchPaused", [true])
+    },
+    {
+      label: `XcmWrapperV22(${wrapperAddress}).setDispatchPaused(false)`,
+      to: wrapperAddress,
+      data: wrapperIface.encodeFunctionData("setDispatchPaused", [false])
+    }
+  ];
+}
+
 export function applyBankXcmV2Manifest(manifest, evidence) {
   const next = structuredClone(manifest);
   const version = String(evidence.version ?? "").trim();
-  if (!/^2(?:\.[0-9]+)?$/u.test(version)) {
+  if (!/^2(?:\.[0-9]+){0,2}$/u.test(version)) {
     throw new Error("Bank XCM deployment evidence version must identify a v2 generation.");
   }
   const wrapper = getAddress(evidence.wrapper.address);
@@ -447,7 +468,7 @@ export function applyBankXcmV2Manifest(manifest, evidence) {
   };
   const generationSuffix = version === "2" || version === "2.0"
     ? "V2"
-    : `V${version.replace(".", "_")}`;
+    : `V${version.replaceAll(".", "_")}`;
   next.deploymentBlocks = {
     ...next.deploymentBlocks,
     [`xcmWrapper${generationSuffix}`]: evidence.wrapper.blockNumber,

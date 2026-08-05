@@ -5,8 +5,8 @@
  *
  *   configure — converted account, backend operator, adapter binding, and
  *               strategySettler grant; wrapper remains paused.
- *   arm       — setDispatchPaused(false), emitted for v2.2 only after the G2
- *               bundle and a fresh configured-empty live-state proof pass.
+ *   arm       — atomic v2.2 pause + v2.2.1 arm, emitted only after the G2
+ *               bundle, configured-empty state, and all live leg proofs pass.
  *
  * It never signs or submits. Hardware signing remains in Nova/Spektr/Apps.
  */
@@ -26,6 +26,7 @@ import {
   buildBankXcmV2Messages,
   buildRecoveryHomeMessage,
   buildConfigurationCalls,
+  buildSuccessionCalls,
   loadJson,
   sha256Hex,
   truncateAccountId32,
@@ -41,7 +42,7 @@ import {
   verifyEvmCalldataEmbedded
 } from "./redeploy-escrowcore-wire-multisig.mjs";
 import { createCeremonyRpcContext, printCeremonyRpcPreflight } from "./ceremony-rpc.mjs";
-import { probeWrapperV22Selector } from "./deploy-bank-xcm-v2.mjs";
+import { probeWrapperV221Selector } from "./deploy-bank-xcm-v2.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..", "..");
@@ -90,10 +91,12 @@ export function parseArgs(argv) {
     else if (token === "--generation") args.generation = argv[++index];
     else if (token === "--packet") args.packet = argv[++index];
     else if (token === "--wrapper") args.wrapper = argv[++index];
+    else if (token === "--previous-wrapper") args.previousWrapper = argv[++index];
     else if (token === "--adapter") args.adapter = argv[++index];
     else if (token === "--converted-account") args.convertedAccount = argv[++index];
     else if (token === "--conversion-evidence") args.conversionEvidence = argv[++index];
     else if (token === "--deployment-evidence") args.deploymentEvidence = argv[++index];
+    else if (token === "--live-preflight-evidence") args.livePreflightEvidence = argv[++index];
     else if (token === "--predeploy-plan") args.predeployPlan = argv[++index];
     else if (token === "--dry-run-evidence") args.dryRunEvidence = argv[++index];
     else if (token === "--messages-out") args.messagesOut = argv[++index];
@@ -124,7 +127,7 @@ function usage() {
   return [
     "Usage:",
     "  node scripts/ops/prepare-bank-xcm-v2-multisig.mjs --profile mainnet \\",
-    "    --generation 2.1|2.2 --packet configure|arm --wrapper 0x... --adapter 0x... \\",
+    "    --generation 2.1|2.2.1 --packet configure|arm --wrapper 0x... --adapter 0x... \\",
     "    --converted-account 0x... --conversion-evidence evidence.json \\",
     "    --signer nova --packet-out docs/evidence/...json \\",
     "    [--timepoint-height H --timepoint-index I]",
@@ -134,8 +137,9 @@ function usage() {
     "  --withdraw-shares/--withdraw-fee/--home-amount/--home-fee,",
     "  --deposit-nonce/--withdraw-nonce, and",
     "  --recovery-amount/--recovery-fee/--recovery-nonce.",
-    "Generation 2.2 arm additionally requires --deployment-evidence. The emitter",
-    "revalidates its runtime hashes/probe and a fresh configured-empty chain state.",
+    "Generation 2.2.1 arm additionally requires --previous-wrapper,",
+    "--deployment-evidence, and --live-preflight-evidence. The emitter revalidates",
+    "runtime hashes/probe, configured-empty state, and the four live leg proofs.",
     "For v2.1 --packet arm, --dry-run-evidence is mandatory and must bind all five",
     "message hashes to successful forwarded/event assertions. No signing occurs."
   ].join("\n");
@@ -145,23 +149,34 @@ function stringify(value) {
   return JSON.stringify(value, (_key, entry) => typeof entry === "bigint" ? entry.toString() : entry, 2);
 }
 
-export function assertPacketGeneration({ generation, packet, messagesOut, dryRunEvidence, deploymentEvidence }) {
-  if (!["2.1", "2.2"].includes(generation)) throw new Error("--generation must be 2.1 or 2.2.");
-  if (generation === "2.2" && (messagesOut || dryRunEvidence)) {
-    throw new Error("v2.2 configure/arm emits no caller-built request messages or upfront per-leg evidence.");
+export function assertPacketGeneration({
+  generation,
+  packet,
+  messagesOut,
+  dryRunEvidence,
+  deploymentEvidence,
+  livePreflightEvidence,
+  previousWrapper
+}) {
+  if (!["2.1", "2.2", "2.2.1"].includes(generation)) throw new Error("--generation must be 2.1, 2.2, or 2.2.1.");
+  if (["2.2", "2.2.1"].includes(generation) && (messagesOut || dryRunEvidence)) {
+    throw new Error("v2.2+ configure/arm emits no caller-built request messages.");
   }
   if (generation === "2.2" && packet === "arm" && !deploymentEvidence) {
     throw new Error("v2.2 arm requires --deployment-evidence plus a fresh configured-empty live-state proof.");
   }
+  if (generation === "2.2.1" && packet === "arm" && (!deploymentEvidence || !livePreflightEvidence || !previousWrapper)) {
+    throw new Error("v2.2.1 succession arm requires --previous-wrapper, --deployment-evidence, and --live-preflight-evidence.");
+  }
   return true;
 }
 
-export function assertV22DeploymentEvidence({ evidence, wrapper, adapter, liveRuntime, liveProbe }) {
-  if (evidence?.kind !== "averray.bankXcmV2DeploymentEvidence" || evidence?.profile !== "mainnet" || evidence?.version !== "2.2") {
-    throw new Error("v2.2 arm deployment evidence kind/profile/version mismatch.");
+export function assertV221DeploymentEvidence({ evidence, wrapper, adapter, liveRuntime, liveProbe }) {
+  if (evidence?.kind !== "averray.bankXcmV2DeploymentEvidence" || evidence?.profile !== "mainnet" || evidence?.version !== "2.2.1") {
+    throw new Error("v2.2.1 arm deployment evidence kind/profile/version mismatch.");
   }
   if (getAddress(evidence.wrapper?.address) !== getAddress(wrapper) || getAddress(evidence.adapter?.address) !== getAddress(adapter)) {
-    throw new Error("v2.2 arm deployment evidence is not bound to the live pair.");
+    throw new Error("v2.2.1 arm deployment evidence is not bound to the live pair.");
   }
   if (
     evidence.liveState?.wrapper?.artifactRuntimeMatch !== true ||
@@ -169,16 +184,16 @@ export function assertV22DeploymentEvidence({ evidence, wrapper, adapter, liveRu
     evidence.wrapper?.runtimeCodeHash !== liveRuntime.wrapper ||
     evidence.adapter?.runtimeCodeHash !== liveRuntime.adapter
   ) {
-    throw new Error("v2.2 arm live runtime hashes do not match the G2 deployment bundle.");
+    throw new Error("v2.2.1 arm live runtime hashes do not match the G2 deployment bundle.");
   }
   const recordedProbe = evidence.liveState?.wrapper?.versionProbe;
   if (
-    recordedProbe?.selector !== "0x526a213a" ||
+    recordedProbe?.selector !== "0x56112922" ||
     !/^0x[0-9a-f]{64}$/iu.test(recordedProbe?.response ?? "") ||
-    liveProbe?.selector !== "0x526a213a" ||
+    liveProbe?.selector !== "0x56112922" ||
     !/^0x[0-9a-f]{64}$/iu.test(liveProbe?.response ?? "")
   ) {
-    throw new Error("v2.2 arm requires both recorded and fresh external selector proof.");
+    throw new Error("v2.2.1 arm requires both recorded and fresh external selector proof.");
   }
   return {
     sourceCommit: evidence.sourceCommit,
@@ -189,7 +204,7 @@ export function assertV22DeploymentEvidence({ evidence, wrapper, adapter, liveRu
   };
 }
 
-export function assertV22ArmedEmptyState(snapshot) {
+export function assertV221ArmedEmptyState(snapshot) {
   const zeroFields = [
     "requestQueuedEventCount",
     "adapterTotalShares",
@@ -203,14 +218,72 @@ export function assertV22ArmedEmptyState(snapshot) {
   ];
   for (const field of zeroFields) {
     if (BigInt(snapshot?.[field] ?? -1) !== 0n) {
-      throw new Error(`v2.2 arm requires ${field}=0; observed ${snapshot?.[field] ?? "<missing>"}.`);
+      throw new Error(`v2.2.1 arm requires ${field}=0; observed ${snapshot?.[field] ?? "<missing>"}.`);
     }
   }
   if (snapshot?.dispatchPaused !== true || snapshot?.policyPaused !== false) {
-    throw new Error("v2.2 arm requires policy live and wrapper locally paused.");
+    throw new Error("v2.2.1 arm requires policy live and candidate wrapper locally paused.");
   }
   if (snapshot?.flowDisabled !== true) {
-    throw new Error("v2.2 arm requires the running backend flow to be provably disabled.");
+    throw new Error("v2.2.1 arm requires the running backend flow to be provably disabled.");
+  }
+  return true;
+}
+
+export function assertV221LivePreflightEvidence({ evidence, wrapper, adapter, convertedAccount }) {
+  if (
+    evidence?.kind !== "averray.bankXcmV221LivePreflightBundle" ||
+    evidence?.profile !== "mainnet" ||
+    evidence?.version !== "2.2.1" ||
+    evidence?.liveState !== true ||
+    getAddress(evidence?.wrapper) !== getAddress(wrapper) ||
+    getAddress(evidence?.adapter) !== getAddress(adapter) ||
+    String(evidence?.convertedAccountId32).toLowerCase() !== String(convertedAccount).toLowerCase()
+  ) {
+    throw new Error("v2.2.1 live preflight evidence identity/version binding mismatch.");
+  }
+  const expected = ["deposit_funding", "deposit_sell", "withdraw_sell", "withdraw_home"];
+  if (!Array.isArray(evidence.legs) || evidence.legs.length !== expected.length) {
+    throw new Error("v2.2.1 arm requires exactly four live per-leg preflights.");
+  }
+  for (const label of expected) {
+    const leg = evidence.legs.find((entry) => entry?.leg === label);
+    if (
+      leg?.liveState !== true ||
+      leg?.result !== "pass" ||
+      leg?.revive?.success !== true ||
+      leg?.messageDryRun?.complete !== true ||
+      !Number.isInteger(leg?.assetHubBlockNumber) ||
+      leg.assetHubBlockNumber <= 0
+    ) {
+      throw new Error(`v2.2.1 ${label} live Revive/message preflight is incomplete.`);
+    }
+    if (label === "withdraw_home") {
+      if (
+        BigInt(leg.homeExecutionFeeRaw ?? 0) <= 0n ||
+        leg.messageDryRun.forwardedParaId !== BANK_XCM_V2.assetHubParaId ||
+        leg.messageDryRun.assetHubExecutionComplete !== true
+      ) {
+        throw new Error("v2.2.1 withdraw_home must prove a positive dispatch-time nested fee and completed Asset Hub execution.");
+      }
+    }
+  }
+  return {
+    capturedAt: evidence.capturedAt,
+    evidenceId: evidence.evidenceId,
+    legs: expected
+  };
+}
+
+export function assertV221SuccessionState({ previousWrapper, candidateWrapper, previousPaused, candidatePaused, history }) {
+  if (getAddress(previousWrapper) === getAddress(candidateWrapper)) {
+    throw new Error("v2.2.1 succession requires distinct previous and candidate wrappers.");
+  }
+  const previous = history?.find((entry) => (
+    entry?.version === "2.2" && getAddress(entry?.wrapper) === getAddress(previousWrapper)
+  ));
+  if (!previous || previousPaused !== false || candidatePaused !== true) {
+    throw new Error("v2.2.1 succession requires recorded v2.2 armed and the v2.2.1 candidate paused.");
   }
   return true;
 }
@@ -310,6 +383,8 @@ async function assertLiveState({
   packet,
   generation,
   deploymentEvidence,
+  livePreflightEvidence,
+  previousWrapperAddress,
   fetchImpl = fetch
 }) {
   const wrapper = new Contract(wrapperAddress, V22_WRAPPER_STATE_ABI, provider);
@@ -372,8 +447,8 @@ async function assertLiveState({
     boundAdapter: getAddress(boundAdapter),
     strategySettler
   };
-  if (generation === "2.2" && packet === "arm") {
-    if (!deploymentEvidence) throw new Error("v2.2 arm deployment evidence was not loaded.");
+  if (["2.2", "2.2.1"].includes(generation) && packet === "arm") {
+    if (!deploymentEvidence) throw new Error(`${generation} arm deployment evidence was not loaded.`);
     const token = new Contract(getAddress(manifest.contracts.token), ERC20_STATE_ABI, provider);
     const deployBlock = Number(deploymentEvidence.wrapper?.blockNumber);
     if (!Number.isInteger(deployBlock) || deployBlock <= 0 || deployBlock > blockNumber) {
@@ -401,7 +476,7 @@ async function assertLiveState({
       token.balanceOf(wrapperAddress, at),
       token.balanceOf(adapterAddress, at),
       token.allowance(getAddress(manifest.owner), adapterAddress, at),
-      probeWrapperV22Selector(provider, wrapperAddress),
+      generation === "2.2.1" ? probeWrapperV221Selector(provider, wrapperAddress) : Promise.resolve(null),
       fetchImpl("https://api.averray.com/health")
     ]);
     if (!healthResponse?.ok) throw new Error(`public production health fetch failed (${healthResponse?.status ?? "no status"}).`);
@@ -416,13 +491,15 @@ async function assertLiveState({
       wrapper: sha256Hex(code),
       adapter: sha256Hex(adapterCode)
     };
-    const verifiedDeployment = assertV22DeploymentEvidence({
-      evidence: deploymentEvidence,
-      wrapper: wrapperAddress,
-      adapter: adapterAddress,
-      liveRuntime: runtime,
-      liveProbe: freshProbe
-    });
+    const verifiedDeployment = generation === "2.2.1"
+      ? assertV221DeploymentEvidence({
+        evidence: deploymentEvidence,
+        wrapper: wrapperAddress,
+        adapter: adapterAddress,
+        liveRuntime: runtime,
+        liveProbe: freshProbe
+      })
+      : { sourceCommit: deploymentEvidence.sourceCommit };
     const empty = {
       requestQueuedEventCount: requestLogs.length,
       adapterTotalShares: totalShares.toString(),
@@ -437,7 +514,35 @@ async function assertLiveState({
       policyPaused,
       flowDisabled: true
     };
-    assertV22ArmedEmptyState(empty);
+    if (generation === "2.2.1") assertV221ArmedEmptyState(empty);
+    let succession;
+    let preflights;
+    if (generation === "2.2.1") {
+      if (!previousWrapperAddress || !livePreflightEvidence) {
+        throw new Error("v2.2.1 succession evidence was not loaded.");
+      }
+      const previousWrapper = new Contract(previousWrapperAddress, WRAPPER_ADMIN_ABI, provider);
+      const previousPaused = await previousWrapper.dispatchPaused(at);
+      assertV221SuccessionState({
+        previousWrapper: previousWrapperAddress,
+        candidateWrapper: wrapperAddress,
+        previousPaused,
+        candidatePaused: paused,
+        history: manifest.bankXcmDeploymentHistory
+      });
+      succession = {
+        previousWrapper: previousWrapperAddress,
+        previousDispatchPaused: previousPaused,
+        candidateWrapper: wrapperAddress,
+        candidateDispatchPaused: paused
+      };
+      preflights = assertV221LivePreflightEvidence({
+        evidence: livePreflightEvidence,
+        wrapper: wrapperAddress,
+        adapter: adapterAddress,
+        convertedAccount
+      });
+    }
     result.g2Verification = {
       deploymentEvidence: argsafeEvidenceRef(deploymentEvidence),
       deployment: verifiedDeployment,
@@ -450,7 +555,9 @@ async function assertLiveState({
         policyPaused
       },
       armedEmpty: empty,
-      flow
+      flow,
+      succession,
+      livePreflights: preflights
     };
   }
   return result;
@@ -475,8 +582,8 @@ export async function main(argv = process.argv.slice(2)) {
   }
   if (args.profile !== "mainnet" || !PACKETS.has(args.packet)) throw new Error("profile must be mainnet and packet configure|arm.");
   assertPacketGeneration(args);
-  if (args.generation === "2.2" && !args.packetOut) {
-    throw new Error("v2.2 configure/arm requires --packet-out so the unsigned SCALE and capture-time liveState are reviewable.");
+  if (["2.2", "2.2.1"].includes(args.generation) && !args.packetOut) {
+    throw new Error("v2.2+ configure/arm requires --packet-out so the unsigned SCALE and capture-time liveState are reviewable.");
   }
   if (!args.wrapper || !args.adapter || !args.convertedAccount || !args.conversionEvidence || !args.signer) throw new Error("wrapper, adapter, converted account, conversion evidence, and signer are required.");
   if ((args.timepointHeight !== undefined) !== (args.timepointIndex !== undefined)) throw new Error("timepoint height/index must be supplied together.");
@@ -487,6 +594,8 @@ export async function main(argv = process.argv.slice(2)) {
   const manifest = loadJson(resolve(repoRoot, "deployments/mainnet.json"));
   const ownerRecord = loadJson(resolve(repoRoot, "deployments/mainnet-multisig-owner.json"));
   const deploymentEvidence = args.deploymentEvidence ? loadJson(resolve(args.deploymentEvidence)) : null;
+  const livePreflightEvidence = args.livePreflightEvidence ? loadJson(resolve(args.livePreflightEvidence)) : null;
+  const previousWrapper = args.previousWrapper ? getAddress(args.previousWrapper) : null;
   const conversion = assertConversionEvidence(loadJson(resolve(args.conversionEvidence)), wrapper, convertedAccount);
   const signer = resolveProfileSigner({ ownerRecord, profile: "mainnet", signerLabel: args.signer });
   const messages = args.generation === "2.1" ? buildBankXcmV2Messages({
@@ -553,7 +662,9 @@ export async function main(argv = process.argv.slice(2)) {
         convertedAccount,
         packet: args.packet,
         generation: args.generation,
-        deploymentEvidence
+        deploymentEvidence,
+        livePreflightEvidence,
+        previousWrapperAddress: previousWrapper
       });
       authority = assertOwnerRecordAuthority({ ownerRecord, livePolicyOwner: live.liveOwner });
     }
@@ -563,15 +674,31 @@ export async function main(argv = process.argv.slice(2)) {
 
   const innerCalls = args.packet === "configure"
     ? buildConfigurationCalls({ manifest, wrapper, adapter, convertedAccountId32: convertedAccount })
-    : buildArmCalls({ wrapper });
-  if (args.generation === "2.2" && args.packet === "configure") {
+    : args.generation === "2.2.1"
+      ? buildSuccessionCalls({ previousWrapper, wrapper })
+      : buildArmCalls({ wrapper });
+  if (["2.2", "2.2.1"].includes(args.generation) && args.packet === "configure") {
     if (innerCalls.length !== 4 || innerCalls.some((call) => call.data.toLowerCase().startsWith("0x1f59d6fb"))) {
-      throw new Error("v2.2 G2 configure packet must contain exactly four configuration calls and no unpause selector.");
+      throw new Error("v2.2+ G2 configure packet must contain exactly four configuration calls and no unpause selector.");
     }
   }
   if (args.generation === "2.2" && args.packet === "arm") {
     if (innerCalls.length !== 1 || !innerCalls[0].data.toLowerCase().startsWith("0x1f59d6fb")) {
       throw new Error("v2.2 arm packet must contain exactly one setDispatchPaused(false) call.");
+    }
+  }
+  if (args.generation === "2.2.1" && args.packet === "arm") {
+    const pauseIface = new Interface(WRAPPER_ADMIN_ABI);
+    const first = pauseIface.decodeFunctionData("setDispatchPaused", innerCalls[0].data)[0];
+    const second = pauseIface.decodeFunctionData("setDispatchPaused", innerCalls[1].data)[0];
+    if (
+      innerCalls.length !== 2 ||
+      getAddress(innerCalls[0].to) !== previousWrapper ||
+      first !== true ||
+      getAddress(innerCalls[1].to) !== wrapper ||
+      second !== false
+    ) {
+      throw new Error("v2.2.1 succession packet must atomically pause v2.2 then arm v2.2.1.");
     }
   }
   const timepoint = args.timepointHeight === undefined ? null : { height: Number(args.timepointHeight), index: Number(args.timepointIndex) };
@@ -649,7 +776,9 @@ export async function main(argv = process.argv.slice(2)) {
   }
   console.log(args.packet === "configure"
     ? `STOP AFTER EXECUTION: v${args.generation} wrapper must remain dispatchPaused=true; no unpause call exists in this packet.`
-    : args.generation === "2.2"
+    : args.generation === "2.2.1"
+      ? "SUCCESSION PRECONDITION PASSED: G2 provenance/configuration, four live leg proofs, and armed-v2.2/paused-v2.2.1 state matched. This tool still signed/submitted nothing."
+      : args.generation === "2.2"
       ? "ARM PRECONDITION PASSED: G2 runtime/probe/configuration and fresh armed-empty state matched. Per-leg gates now run just in time. This tool still signed/submitted nothing."
       : "ARM PRECONDITION PASSED: all five exact-message dry-run records matched. This tool still signed/submitted nothing.");
   const packetEvidence = {
@@ -673,7 +802,8 @@ export async function main(argv = process.argv.slice(2)) {
     asMultiScale: payload.asMultiHex,
     substrate,
     containsUnpause: innerCalls.some((call) => call.data.toLowerCase().startsWith("0x1f59d6fb")),
-    armBasis: args.generation === "2.2" && args.packet === "arm" ? live.g2Verification : undefined,
+    previousWrapper: args.generation === "2.2.1" && args.packet === "arm" ? previousWrapper : undefined,
+    armBasis: ["2.2", "2.2.1"].includes(args.generation) && args.packet === "arm" ? live.g2Verification : undefined,
     observerTargets: {
       asset22: { endpoint: BANK_XCM_V2.observerAssetEndpoint, accountId32: convertedAccount, assetId: 22 },
       aUsdc: { endpoint: BANK_XCM_V2.observerEvmEndpoint, contract: BANK_XCM_V2.aUsdcContract, account: truncateAccountId32(convertedAccount) }
