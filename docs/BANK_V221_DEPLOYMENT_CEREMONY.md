@@ -143,7 +143,7 @@ Use only the AccountId32/SS58 printed by the fresh final preview. Record source,
 tx hash, block, and a post-transfer `System.Account` read. Never fund a
 provisional image after a nonce change.
 
-## 7. Atomic succession packet and the live-proof hold
+## 7. Atomic succession packet and its emission basis
 
 The unsigned succession shape is fixed:
 
@@ -151,21 +151,41 @@ The unsigned succession shape is fixed:
    `setDispatchPaused(true)`;
 2. new v2.2.1 wrapper `setDispatchPaused(false)`.
 
-Both calls are inside one `utility.batchAll`/multisig payload. The emitter also
-requires the new pair's deployment bundle, configured-empty live state, old
-v2.2 still armed, flow disabled, and a four-leg live-preflight bundle. The
-`withdraw_home` record must include a positive dispatch-time nested fee,
-forwarding to Asset Hub para 1000, and `assetHubExecutionComplete=true`.
+Both calls are inside one `utility.batchAll`/multisig payload. The emitter
+requires all three of the following at capture time:
 
-There is a deliberate gate-order hold: a paused, empty wrapper cannot
-`queueRequest`, and therefore cannot produce request-bound
-`previewLegMessage`/`dispatchLeg` evidence. Fork or fabricated state is not live
-evidence. Consequently the emitter is prepared but must refuse to emit final
-succession SCALE until the reviewer resolves how that requested pre-arm
-four-leg evidence is to be produced without violating the empty/paused gate.
-Do not weaken the gate or silently fall back to the retired arm-first ordering.
+1. the v2.2.1 G2 verification bundle: live runtime hashes, external selector
+   probe, and configured-paused post-state;
+2. a chain-fresh armed-empty statement: no `RequestQueued` events, zero adapter
+   accounting/custody/allowance, the exact adapter/operator bindings, old v2.2
+   still armed, candidate paused, and the production flow disabled;
+3. one live, request-independent three-hop dry-run of the corrected v2.2.1 home
+   shape. The evidence must be byte-equal to the reviewed builder, use a
+   dispatch-priced nested fee strictly below the quoted amount arriving at the
+   Asset Hub hop, complete on Hydration, forward to para 1000, and prove the
+   final asset-1337 deposit to the candidate wrapper image on Asset Hub.
 
-The conditional command, after that evidence exists, is:
+The third proof uses a diagnostic `SetTopic` only; it creates no request and
+does not confer authority. The emitter reconstructs the message from the
+recorded amount, fee, topic, and candidate wrapper, then compares those bytes
+and their hash to the bytes passed to both dry-run hops. Fork or fabricated
+state is not accepted.
+
+The create-only evidence file uses
+`kind=averray.bankXcmV221RequestIndependentHomeProof`, `version=2.2.1`, and
+`requestIndependent=true`. It records both live block heights, the gross
+amount, upstream fees and quoted arrival, the quote timestamp, the builder
+topic/fee/message/hash, the identical dry-run message/hash, Hydration
+completion, forwarding to para 1000, and the final Asset Hub
+`Assets.Deposited` asset/account/amount. The validator requires
+`quotedArrivalRaw = grossAmountRaw - upstreamFeesRaw` and
+`0 < homeExecutionFeeRaw < quotedArrivalRaw`.
+
+Request-bound per-leg certification is deliberately **not** a pre-arm gate.
+After succession, every real dispatch still requires its just-in-time live
+preflight and fresh fee quote under the standing dispatcher rules.
+
+After the three emission-basis records exist, run:
 
 ```sh
 node scripts/ops/prepare-bank-xcm-v2-multisig.mjs \
@@ -178,10 +198,11 @@ node scripts/ops/prepare-bank-xcm-v2-multisig.mjs \
   --converted-account <CONVERTED_ACCOUNT_ID32> \
   --conversion-evidence <TWO_ENDPOINT_EVIDENCE> \
   --deployment-evidence <G2_DEPLOYMENT_EVIDENCE> \
-  --live-preflight-evidence <FOUR_LIVE_LEGS_EVIDENCE> \
+  --home-dry-run-evidence <REQUEST_INDEPENDENT_HOME_PROOF> \
   --signer nova \
   --packet-out /tmp/bank-v221-succession-leg1.json
 ```
 
 No signature is valid unless independent byte review confirms exactly the two
-pause transitions, in order, and the candidate's home dry-run completed.
+pause transitions, in order, and the candidate's live three-hop home proof
+completed. This packet never contains configuration, request, or capital calls.

@@ -6,7 +6,8 @@
  *   configure — converted account, backend operator, adapter binding, and
  *               strategySettler grant; wrapper remains paused.
  *   arm       — atomic v2.2 pause + v2.2.1 arm, emitted only after the G2
- *               bundle, configured-empty state, and all live leg proofs pass.
+ *               bundle, configured-empty state, and a live request-independent
+ *               v2.2.1 home-shape proof pass.
  *
  * It never signs or submits. Hardware signing remains in Nova/Spektr/Apps.
  */
@@ -25,6 +26,7 @@ import {
   buildArmCalls,
   buildBankXcmV2Messages,
   buildRecoveryHomeMessage,
+  buildV221HomeDiagnosticMessage,
   buildConfigurationCalls,
   buildSuccessionCalls,
   loadJson,
@@ -96,7 +98,7 @@ export function parseArgs(argv) {
     else if (token === "--converted-account") args.convertedAccount = argv[++index];
     else if (token === "--conversion-evidence") args.conversionEvidence = argv[++index];
     else if (token === "--deployment-evidence") args.deploymentEvidence = argv[++index];
-    else if (token === "--live-preflight-evidence") args.livePreflightEvidence = argv[++index];
+    else if (token === "--home-dry-run-evidence") args.homeDryRunEvidence = argv[++index];
     else if (token === "--predeploy-plan") args.predeployPlan = argv[++index];
     else if (token === "--dry-run-evidence") args.dryRunEvidence = argv[++index];
     else if (token === "--messages-out") args.messagesOut = argv[++index];
@@ -127,7 +129,7 @@ function usage() {
   return [
     "Usage:",
     "  node scripts/ops/prepare-bank-xcm-v2-multisig.mjs --profile mainnet \\",
-    "    --generation 2.1|2.2.1 --packet configure|arm --wrapper 0x... --adapter 0x... \\",
+    "    --generation 2.1|2.2|2.2.1 --packet configure|arm --wrapper 0x... --adapter 0x... \\",
     "    --converted-account 0x... --conversion-evidence evidence.json \\",
     "    --signer nova --packet-out docs/evidence/...json \\",
     "    [--timepoint-height H --timepoint-index I]",
@@ -138,8 +140,9 @@ function usage() {
     "  --deposit-nonce/--withdraw-nonce, and",
     "  --recovery-amount/--recovery-fee/--recovery-nonce.",
     "Generation 2.2.1 arm additionally requires --previous-wrapper,",
-    "--deployment-evidence, and --live-preflight-evidence. The emitter revalidates",
-    "runtime hashes/probe, configured-empty state, and the four live leg proofs.",
+    "--deployment-evidence, and --home-dry-run-evidence. The emitter revalidates",
+    "runtime hashes/probe, configured-empty state, and the exact live request-independent",
+    "three-hop v2.2.1 home proof. Request-bound leg proofs remain just-in-time.",
     "For v2.1 --packet arm, --dry-run-evidence is mandatory and must bind all five",
     "message hashes to successful forwarded/event assertions. No signing occurs."
   ].join("\n");
@@ -155,7 +158,7 @@ export function assertPacketGeneration({
   messagesOut,
   dryRunEvidence,
   deploymentEvidence,
-  livePreflightEvidence,
+  homeDryRunEvidence,
   previousWrapper
 }) {
   if (!["2.1", "2.2", "2.2.1"].includes(generation)) throw new Error("--generation must be 2.1, 2.2, or 2.2.1.");
@@ -165,8 +168,8 @@ export function assertPacketGeneration({
   if (generation === "2.2" && packet === "arm" && !deploymentEvidence) {
     throw new Error("v2.2 arm requires --deployment-evidence plus a fresh configured-empty live-state proof.");
   }
-  if (generation === "2.2.1" && packet === "arm" && (!deploymentEvidence || !livePreflightEvidence || !previousWrapper)) {
-    throw new Error("v2.2.1 succession arm requires --previous-wrapper, --deployment-evidence, and --live-preflight-evidence.");
+  if (generation === "2.2.1" && packet === "arm" && (!deploymentEvidence || !homeDryRunEvidence || !previousWrapper)) {
+    throw new Error("v2.2.1 succession arm requires --previous-wrapper, --deployment-evidence, and --home-dry-run-evidence.");
   }
   return true;
 }
@@ -230,48 +233,71 @@ export function assertV221ArmedEmptyState(snapshot) {
   return true;
 }
 
-export function assertV221LivePreflightEvidence({ evidence, wrapper, adapter, convertedAccount }) {
+export function assertV221HomeDryRunEvidence({ evidence, wrapper, adapter, convertedAccount }) {
   if (
-    evidence?.kind !== "averray.bankXcmV221LivePreflightBundle" ||
+    evidence?.kind !== "averray.bankXcmV221RequestIndependentHomeProof" ||
     evidence?.profile !== "mainnet" ||
     evidence?.version !== "2.2.1" ||
     evidence?.liveState !== true ||
+    evidence?.requestIndependent !== true ||
     getAddress(evidence?.wrapper) !== getAddress(wrapper) ||
     getAddress(evidence?.adapter) !== getAddress(adapter) ||
     String(evidence?.convertedAccountId32).toLowerCase() !== String(convertedAccount).toLowerCase()
   ) {
-    throw new Error("v2.2.1 live preflight evidence identity/version binding mismatch.");
+    throw new Error("v2.2.1 request-independent home proof identity/version binding mismatch.");
   }
-  const expected = ["deposit_funding", "deposit_sell", "withdraw_sell", "withdraw_home"];
-  if (!Array.isArray(evidence.legs) || evidence.legs.length !== expected.length) {
-    throw new Error("v2.2.1 arm requires exactly four live per-leg preflights.");
+  if (
+    !Number.isInteger(evidence?.runtimeBlocks?.assetHub) || evidence.runtimeBlocks.assetHub <= 0 ||
+    !Number.isInteger(evidence?.runtimeBlocks?.hydration) || evidence.runtimeBlocks.hydration <= 0 ||
+    !Number.isFinite(Date.parse(evidence?.capturedAt ?? "")) ||
+    !Number.isFinite(Date.parse(evidence?.pricing?.quoteCapturedAt ?? ""))
+  ) {
+    throw new Error("v2.2.1 home proof requires live capture times and positive blocks on both chains.");
   }
-  for (const label of expected) {
-    const leg = evidence.legs.find((entry) => entry?.leg === label);
-    if (
-      leg?.liveState !== true ||
-      leg?.result !== "pass" ||
-      leg?.revive?.success !== true ||
-      leg?.messageDryRun?.complete !== true ||
-      !Number.isInteger(leg?.assetHubBlockNumber) ||
-      leg.assetHubBlockNumber <= 0
-    ) {
-      throw new Error(`v2.2.1 ${label} live Revive/message preflight is incomplete.`);
-    }
-    if (label === "withdraw_home") {
-      if (
-        BigInt(leg.homeExecutionFeeRaw ?? 0) <= 0n ||
-        leg.messageDryRun.forwardedParaId !== BANK_XCM_V2.assetHubParaId ||
-        leg.messageDryRun.assetHubExecutionComplete !== true
-      ) {
-        throw new Error("v2.2.1 withdraw_home must prove a positive dispatch-time nested fee and completed Asset Hub execution.");
-      }
-    }
+  const grossAmount = BigInt(evidence?.pricing?.grossAmountRaw ?? -1);
+  const upstreamFees = BigInt(evidence?.pricing?.upstreamFeesRaw ?? -1);
+  const quotedArrival = BigInt(evidence?.pricing?.quotedArrivalRaw ?? -1);
+  const homeExecutionFee = BigInt(evidence?.builder?.homeExecutionFeeRaw ?? -1);
+  if (
+    grossAmount <= 0n || upstreamFees < 0n || quotedArrival <= 0n ||
+    quotedArrival !== grossAmount - upstreamFees ||
+    homeExecutionFee <= 0n || homeExecutionFee >= quotedArrival
+  ) {
+    throw new Error("v2.2.1 home proof requires 0 < dispatch-priced fee < quoted arrival and exact arrival reconciliation.");
+  }
+  const rebuilt = buildV221HomeDiagnosticMessage({
+    wrapper,
+    amount: grossAmount,
+    homeExecutionFee,
+    topic: evidence?.builder?.topic
+  });
+  if (
+    String(evidence?.builder?.message ?? "").toLowerCase() !== rebuilt.message.toLowerCase() ||
+    String(evidence?.dryRun?.message ?? "").toLowerCase() !== rebuilt.message.toLowerCase() ||
+    String(evidence?.builder?.messageHash ?? "").toLowerCase() !== rebuilt.messageHash.toLowerCase() ||
+    String(evidence?.dryRun?.messageHash ?? "").toLowerCase() !== rebuilt.messageHash.toLowerCase()
+  ) {
+    throw new Error("v2.2.1 home proof dry-run bytes are not byte-equal to the reviewed builder output.");
+  }
+  const deposit = evidence?.dryRun?.assetHubDeposit;
+  if (
+    evidence?.dryRun?.hydrationExecutionComplete !== true ||
+    evidence?.dryRun?.forwardedParaId !== BANK_XCM_V2.assetHubParaId ||
+    evidence?.dryRun?.assetHubExecutionComplete !== true ||
+    Number(deposit?.assetId) !== 1337 ||
+    String(deposit?.beneficiaryAccountId32).toLowerCase() !== wrapperAccountId32(wrapper).toLowerCase() ||
+    BigInt(deposit?.amountRaw ?? 0) <= 0n
+  ) {
+    throw new Error("v2.2.1 home proof must complete Hydration forwarding and the final Asset Hub wrapper-image deposit.");
   }
   return {
     capturedAt: evidence.capturedAt,
     evidenceId: evidence.evidenceId,
-    legs: expected
+    runtimeBlocks: evidence.runtimeBlocks,
+    messageHash: rebuilt.messageHash,
+    quotedArrivalRaw: quotedArrival.toString(),
+    homeExecutionFeeRaw: homeExecutionFee.toString(),
+    assetHubDepositRaw: BigInt(deposit.amountRaw).toString()
   };
 }
 
@@ -383,7 +409,7 @@ async function assertLiveState({
   packet,
   generation,
   deploymentEvidence,
-  livePreflightEvidence,
+  homeDryRunEvidence,
   previousWrapperAddress,
   fetchImpl = fetch
 }) {
@@ -516,9 +542,9 @@ async function assertLiveState({
     };
     if (generation === "2.2.1") assertV221ArmedEmptyState(empty);
     let succession;
-    let preflights;
+    let homeDryRun;
     if (generation === "2.2.1") {
-      if (!previousWrapperAddress || !livePreflightEvidence) {
+      if (!previousWrapperAddress || !homeDryRunEvidence) {
         throw new Error("v2.2.1 succession evidence was not loaded.");
       }
       const previousWrapper = new Contract(previousWrapperAddress, WRAPPER_ADMIN_ABI, provider);
@@ -536,8 +562,8 @@ async function assertLiveState({
         candidateWrapper: wrapperAddress,
         candidateDispatchPaused: paused
       };
-      preflights = assertV221LivePreflightEvidence({
-        evidence: livePreflightEvidence,
+      homeDryRun = assertV221HomeDryRunEvidence({
+        evidence: homeDryRunEvidence,
         wrapper: wrapperAddress,
         adapter: adapterAddress,
         convertedAccount
@@ -557,7 +583,7 @@ async function assertLiveState({
       armedEmpty: empty,
       flow,
       succession,
-      livePreflights: preflights
+      requestIndependentHomeProof: homeDryRun
     };
   }
   return result;
@@ -594,7 +620,7 @@ export async function main(argv = process.argv.slice(2)) {
   const manifest = loadJson(resolve(repoRoot, "deployments/mainnet.json"));
   const ownerRecord = loadJson(resolve(repoRoot, "deployments/mainnet-multisig-owner.json"));
   const deploymentEvidence = args.deploymentEvidence ? loadJson(resolve(args.deploymentEvidence)) : null;
-  const livePreflightEvidence = args.livePreflightEvidence ? loadJson(resolve(args.livePreflightEvidence)) : null;
+  const homeDryRunEvidence = args.homeDryRunEvidence ? loadJson(resolve(args.homeDryRunEvidence)) : null;
   const previousWrapper = args.previousWrapper ? getAddress(args.previousWrapper) : null;
   const conversion = assertConversionEvidence(loadJson(resolve(args.conversionEvidence)), wrapper, convertedAccount);
   const signer = resolveProfileSigner({ ownerRecord, profile: "mainnet", signerLabel: args.signer });
@@ -663,7 +689,7 @@ export async function main(argv = process.argv.slice(2)) {
         packet: args.packet,
         generation: args.generation,
         deploymentEvidence,
-        livePreflightEvidence,
+        homeDryRunEvidence,
         previousWrapperAddress: previousWrapper
       });
       authority = assertOwnerRecordAuthority({ ownerRecord, livePolicyOwner: live.liveOwner });
@@ -777,7 +803,7 @@ export async function main(argv = process.argv.slice(2)) {
   console.log(args.packet === "configure"
     ? `STOP AFTER EXECUTION: v${args.generation} wrapper must remain dispatchPaused=true; no unpause call exists in this packet.`
     : args.generation === "2.2.1"
-      ? "SUCCESSION PRECONDITION PASSED: G2 provenance/configuration, four live leg proofs, and armed-v2.2/paused-v2.2.1 state matched. This tool still signed/submitted nothing."
+      ? "SUCCESSION PRECONDITION PASSED: G2 provenance/configuration, armed-empty state, and the live request-independent three-hop home proof matched. Request-bound leg proofs remain JIT. This tool still signed/submitted nothing."
       : args.generation === "2.2"
       ? "ARM PRECONDITION PASSED: G2 runtime/probe/configuration and fresh armed-empty state matched. Per-leg gates now run just in time. This tool still signed/submitted nothing."
       : "ARM PRECONDITION PASSED: all five exact-message dry-run records matched. This tool still signed/submitted nothing.");
