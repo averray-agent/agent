@@ -24,6 +24,8 @@ import { compareMaskedRuntime } from "./check-contract-provenance.mjs";
 import { generateAll } from "./render-mainnet-backend-env.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const BACKEND_ENV_PATH = "deploy/backend.mainnet.env.template";
+const BANK_XCM_FLOW_LINE = /^BANK_XCM_FLOW_ENABLED=.*$/gmu;
 
 export function parseArgs(argv) {
   const args = { profile: "mainnet" };
@@ -81,6 +83,18 @@ export function artifactPathsForVersion(version) {
   };
 }
 
+export function forceBankXcmFlowDisabledForNewGeneration(renderedBackendEnv) {
+  const matches = String(renderedBackendEnv).match(BANK_XCM_FLOW_LINE) ?? [];
+  if (matches.length !== 1) {
+    throw new Error(
+      `paired Bank env render must contain exactly one BANK_XCM_FLOW_ENABLED setting; found ${matches.length}.`
+    );
+  }
+  // A new contract generation never inherits its predecessor's activation.
+  // It must re-earn the flow through its own configure/preflight/arm ladder.
+  return String(renderedBackendEnv).replace(BANK_XCM_FLOW_LINE, "BANK_XCM_FLOW_ENABLED=false");
+}
+
 export function writeManifestAndRenderedEnv(candidate, { root = repoRoot } = {}) {
   const manifestPath = resolve(root, "deployments/mainnet.json");
   const renderedManifest = `${JSON.stringify(candidate, null, 2)}\n`;
@@ -91,6 +105,7 @@ export function writeManifestAndRenderedEnv(candidate, { root = repoRoot } = {})
       ? renderedManifest
       : readFileSync(resolve(root, relativePath), "utf8")
   ));
+  generated[BACKEND_ENV_PATH] = forceBankXcmFlowDisabledForNewGeneration(generated[BACKEND_ENV_PATH]);
   writeFileSync(manifestPath, renderedManifest);
   for (const [relativePath, content] of Object.entries(generated)) {
     writeFileSync(resolve(root, relativePath), content);

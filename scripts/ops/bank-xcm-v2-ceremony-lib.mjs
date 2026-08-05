@@ -492,6 +492,7 @@ export function applyBankXcmV2Manifest(manifest, evidence) {
   history.push({
     version,
     status: "deployed_paused",
+    flowEnabled: false,
     wrapper,
     adapter,
     deployTxHashes: { wrapper: evidence.wrapper.txHash, adapter: evidence.adapter.txHash },
@@ -538,6 +539,7 @@ export function applyBankXcmV2Manifest(manifest, evidence) {
   next.bankXcmV2Deployment = {
     version,
     status: "deployed_paused",
+    flowEnabled: false,
     deployTxHashes: { wrapper: evidence.wrapper.txHash, adapter: evidence.adapter.txHash },
     configurationMultisigExecTx: evidence.configurationMultisigExecTx ?? null,
     convertedAccountId32: evidence.convertedAccountId32 ?? null,

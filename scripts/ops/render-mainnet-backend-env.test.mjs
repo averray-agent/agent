@@ -37,6 +37,7 @@ const MANIFEST = {
   },
   bankXcmV2Deployment: {
     version: "2.1",
+    flowEnabled: true,
     convertedAccountId32: "0x85663dfdb243b1a11a90f0816e1f83ccdb99f8f4c4a25d432739218efd489736",
   },
   bankXcmDeploymentHistory: [
@@ -143,6 +144,7 @@ test("buildManifestOverrides: resolves addresses, auth, blocks, and schema", () 
     overrides.HYDRATION_USDC_ADAPTER_ADDRESS,
     MANIFEST.contracts.hydrationUsdcAdapter
   );
+  assert.equal(overrides.BANK_XCM_FLOW_ENABLED, "true");
   assert.equal(overrides.PONDER_START_BLOCK_REGISTRIES, "104");
   assert.equal(overrides.DATABASE_SCHEMA, MANIFEST.runtime.indexer.schema);
   assert.equal(overrides.BANK_LANE_FEED_HYDRATION_ACCOUNT_ID32, "141ujyV9aKBYqZncx6SYRWU2XQCxUcYiGYE8U7jprEKVUZNJ");
@@ -180,7 +182,7 @@ test("buildManifestOverrides: fails closed on incomplete runtime metadata", () =
   );
   assert.throws(
     () => buildManifestOverrides({ ...MANIFEST, bankXcmV2Deployment: {} }),
-    /bankXcmV2Deployment\.convertedAccountId32/u
+    /bankXcmV2Deployment\.flowEnabled/u
   );
 });
 
@@ -223,14 +225,14 @@ test("buildManifestOverrides: requires an append-only unique wrapper history con
   );
 });
 
-test("buildManifestOverrides: repoints the complete v2.2 pair independently of the runtime activation flag", () => {
+test("buildManifestOverrides: repoints the complete v2.2 pair and derives its runtime activation flag", () => {
   const wrapper = "0x1111111111111111111111111111111111111122";
   const adapter = "0x2222222222222222222222222222222222222233";
   const convertedAccountId32 = `0x${"33".repeat(32)}`;
   const v22 = {
     ...MANIFEST,
     contracts: { ...MANIFEST.contracts, xcmWrapper: wrapper, hydrationUsdcAdapter: adapter },
-    bankXcmV2Deployment: { version: "2.2", convertedAccountId32 },
+    bankXcmV2Deployment: { version: "2.2", flowEnabled: false, convertedAccountId32 },
     bankXcmDeploymentHistory: [
       ...MANIFEST.bankXcmDeploymentHistory,
       { version: "2.2", wrapper }
@@ -239,6 +241,7 @@ test("buildManifestOverrides: repoints the complete v2.2 pair independently of t
   const overrides = buildManifestOverrides(v22);
   assert.equal(overrides.XCM_WRAPPER_ADDRESS, wrapper);
   assert.equal(overrides.HYDRATION_USDC_ADAPTER_ADDRESS, adapter);
+  assert.equal(overrides.BANK_XCM_FLOW_ENABLED, "false");
   assert.deepEqual(
     JSON.parse(overrides.BANK_LANE_FEED_WRAPPER_CANDIDATES_JSON),
     v22.bankXcmDeploymentHistory.map(({ version, wrapper: candidate }) => ({ version, wrapper: candidate }))
@@ -335,14 +338,14 @@ test("generateAll: the real transform yields the mainnet essentials", () => {
   assert.match(backend, /^FIRST_EXTERNAL_AGENT_ALERT_ENABLED=true$/mu);
   assert.match(backend, /^TREASURY_POLICY_ADDRESS=0x226F14252A98BD2eA140271647De20132F09AF20$/mu);
   assert.match(backend, /^AGENT_ACCOUNT_ADDRESS=0xB1350932bf85E7ffd0599E9a3CC7b55718D89E57$/mu);
-  assert.match(backend, /^XCM_WRAPPER_ADDRESS=0xEceE778e11B238D2fc096E56460e7B98DC7B26b8$/mu);
-  assert.match(backend, /^BANK_XCM_FLOW_ENABLED=true$/mu);
+  assert.match(backend, /^XCM_WRAPPER_ADDRESS=0xF20b35A3f85EC864127B551ce8A64446fC0ed2Bc$/mu);
+  assert.match(backend, /^BANK_XCM_FLOW_ENABLED=false$/mu);
   assert.match(backend, /^BANK_XCM_ASSET_HUB_SUBSTRATE_RPC_URL=wss:\/\/asset-hub-polkadot-rpc\.n\.dwellir\.com$/mu);
   assert.match(backend, /^BANK_XCM_HYDRATION_SUBSTRATE_RPC_URL=wss:\/\/hydration-rpc\.n\.dwellir\.com$/mu);
-  assert.match(backend, /^HYDRATION_USDC_ADAPTER_ADDRESS=0x631A09913B2403B18b2B659a1397916621b29b4c$/mu);
-  assert.match(backend, /^BANK_LANE_FEED_HYDRATION_ACCOUNT_ID32=12WiJGBSjqTBNqD7a7TN6mt47ZJd7f8SqyhTc2bYLFzcHYD9$/mu);
+  assert.match(backend, /^HYDRATION_USDC_ADAPTER_ADDRESS=0x96091d4477Fe37E79557276d63883bBbbdE73159$/mu);
+  assert.match(backend, /^BANK_LANE_FEED_HYDRATION_ACCOUNT_ID32=12eYrKzitqg8q8CiGCiAymMZeFH5wRnngxQ5uynmEp4WUYn4$/mu);
   assert.match(backend, /^BANK_LANE_FEED_WRAPPER_CANDIDATES_JSON=\[.+\]$/mu);
-  assert.match(backend, /^BANK_LANE_FEED_POSTAGE_ACCOUNT=16Mf98wAbYTVWaeHkD1SUdRPc5nmoLj9LyNtPtP1xvkF7Sxb$/mu);
+  assert.match(backend, /^BANK_LANE_FEED_POSTAGE_ACCOUNT=16UMvFEn69RefaRfq4egSzCJxN8Kdi3m2aBCYCsFH2p1T6cj$/mu);
   assert.match(
     backend,
     /^AUTH_ADMIN_WALLETS=0x01e6eed856e989201f4ff6346e18eab7e46c874c,0x9Ab8531FBb0948C542a31298FD61335f30064239,0xDeD3D610546DF151a6BB3D6ed119c3700ABC2146$/mu

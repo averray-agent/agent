@@ -17,8 +17,9 @@ const RETIRED_ACCOUNT = "0x98f0033e26aa4ecf2899e6d09237d40d29fcb68e64d22a621520b
 const AUSDC = "0x2ec4884088d84e5c2970a034732e5209b0acfa93";
 const USDC = "0x0000053900000000000000000000000001200000";
 const OTHER_AUSDC = "0x1111111111111111111111111111111111111111";
-const POSTAGE = "16Mf98wAbYTVWaeHkD1SUdRPc5nmoLj9LyNtPtP1xvkF7Sxb";
-const ACCOUNT_SS58 = "12WiJGBSjqTBNqD7a7TN6mt47ZJd7f8SqyhTc2bYLFzcHYD9";
+const POSTAGE = "16UMvFEn69RefaRfq4egSzCJxN8Kdi3m2aBCYCsFH2p1T6cj";
+const ACCOUNT_SS58 = "12eYrKzitqg8q8CiGCiAymMZeFH5wRnngxQ5uynmEp4WUYn4";
+const ACCOUNT_EVM = "0x48df881b65e682f05ac24dc8f668a8938225e973";
 const WRAPPER_V20 = "0xc846eE73e49A748e59C7Ac8f8742F542a552D24C";
 const WRAPPER_V21_STALE = "0x22E90B74ca73E86F13325Af6FdeA00Cd1da90943";
 const WRAPPER_V21 = "0x2AF394fA95f75D3ca1C786128f4dfA1eB0c9675D";
@@ -653,13 +654,17 @@ test("mainnet template ships the Bank feed ENABLED, with targets that match the 
   );
   assert.equal(
     describeBalanceTarget(config.targets.position),
-    `erc20:${strategy.remote.aUsdcContract}.balanceOf(0x42e55ecf123da7d3eba1c55998b3cbf8238c4463)`
+    `erc20:${strategy.remote.aUsdcContract}.balanceOf(${ACCOUNT_EVM})`
   );
   assert.equal(config.targets.position.contract, strategy.remote.aUsdcContract);
   assert.equal(config.targets.float.assetId, String(strategy.remote.assetId));
   assert.equal(config.targets.postage.account, POSTAGE);
   assert.equal(env.XCM_WRAPPER_ADDRESS, manifest.contracts.xcmWrapper);
-  assert.equal(env.BANK_XCM_FLOW_ENABLED, "true", "v2.2 runtime and event-bound observer are explicitly active");
+  assert.equal(
+    env.BANK_XCM_FLOW_ENABLED,
+    "false",
+    "a newly appended Bank generation must re-earn flow enablement through its own ladder"
+  );
   assert.equal(
     env.BANK_XCM_ASSET_HUB_SUBSTRATE_RPC_URL,
     "wss://asset-hub-polkadot-rpc.n.dwellir.com"

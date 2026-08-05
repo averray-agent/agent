@@ -85,10 +85,6 @@ export const LITERAL_OVERRIDES = {
   REDIS_NAMESPACE: "agent-platform-mainnet",
   INDEXER_STATUS_URL: "http://mainnet-indexer:42069/status",
 
-  // Bank v2.2 runtime activation is an explicit mainnet-only rollout. The
-  // dispatcher still refuses every leg without a chain-event watch and fresh
-  // exact-message preflights; enabling this flag does not make it autonomous.
-  BANK_XCM_FLOW_ENABLED: "true",
   BANK_XCM_ASSET_HUB_SUBSTRATE_RPC_URL: "wss://asset-hub-polkadot-rpc.n.dwellir.com",
   BANK_XCM_HYDRATION_SUBSTRATE_RPC_URL: "wss://hydration-rpc.n.dwellir.com",
 
@@ -136,6 +132,7 @@ export const TODO_KEYS = {
   DISCOVERY_REGISTRY_ADDRESS: "from deployments/mainnet.json (post-ceremony)",
   XCM_WRAPPER_ADDRESS: "active Bank wrapper from deployments/mainnet.json",
   HYDRATION_USDC_ADAPTER_ADDRESS: "active Bank adapter from deployments/mainnet.json",
+  BANK_XCM_FLOW_ENABLED: "explicit activation posture from deployments/mainnet.json",
   BANK_LANE_FEED_WRAPPER_CANDIDATES_JSON: "append-only Bank wrapper history from deployments/mainnet.json",
   BANK_LANE_FEED_HYDRATION_ACCOUNT_ID32: "active Bank converted account from deployments/mainnet.json",
   BANK_LANE_FEED_POSTAGE_ACCOUNT: "active Bank wrapper Asset Hub image from deployments/mainnet.json",
@@ -259,6 +256,9 @@ export function buildManifestOverrides(manifest) {
   const escrowBlock = Number(blocks.escrowCore);
   const sharedAccountEscrowStart = Math.min(agentBlock, escrowBlock);
   const xcmWrapper = requireAddress(contracts.xcmWrapper, "contracts.xcmWrapper");
+  if (typeof bankDeployment.flowEnabled !== "boolean") {
+    throw new Error("deployments/mainnet.json: bankXcmV2Deployment.flowEnabled must be a boolean");
+  }
   const bankWrapperCandidates = buildBankWrapperCandidates(manifest, xcmWrapper);
   const convertedAccountId32 = requireAccountId32(
     bankDeployment.convertedAccountId32,
@@ -279,6 +279,7 @@ export function buildManifestOverrides(manifest) {
       contracts.hydrationUsdcAdapter,
       "contracts.hydrationUsdcAdapter"
     ),
+    BANK_XCM_FLOW_ENABLED: String(bankDeployment.flowEnabled),
     BANK_LANE_FEED_WRAPPER_CANDIDATES_JSON: JSON.stringify(bankWrapperCandidates),
     BANK_LANE_FEED_HYDRATION_ACCOUNT_ID32: encodeAddress(convertedAccountId32, 0),
     BANK_LANE_FEED_POSTAGE_ACCOUNT: encodeAddress(wrapperAssetHubImage(xcmWrapper), 0),
