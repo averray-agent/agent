@@ -193,11 +193,11 @@ export class XcmBalanceObserverService {
 
   async recordDispatchFromChainEvent(event = {}) {
     const requestId = normalizeRequestId(event.data?.requestId);
-    const watch = await this.stateStore.getXcmBalanceWatch?.(requestId);
+    const wrapperAddress = normalizeEvmAddress(event.data?.wrapperAddress, "wrapperAddress");
+    const watch = await this.stateStore.getXcmBalanceWatch?.(wrapperAddress, requestId);
     if (!watch || watch.status !== "pending") {
       throw new ValidationError(`Dispatch event ${event.id ?? "unknown"} has no pending staged watch.`);
     }
-    const wrapperAddress = normalizeEvmAddress(event.data?.wrapperAddress, "wrapperAddress");
     if (watch.wrapperAddress !== wrapperAddress
       || wrapperAddress !== this.chainEventWatchConfig?.expectedWrapper) {
       throw new ValidationError("Dispatch event belongs to another wrapper generation.");
@@ -222,13 +222,14 @@ export class XcmBalanceObserverService {
 
   async register(input = {}) {
     const requestId = normalizeRequestId(input.requestId);
+    const wrapperAddress = normalizeEvmAddress(input.wrapperAddress, "wrapperAddress");
     if (input.registrationSource === "chain_event_backfill"
       && (input.baselineRaw === undefined
         || input.baselineBlockNumber === undefined
         || input.baselineBlockHash === undefined)) {
       throw new ValidationError("Chain-event backfill requires a chain-height-bound baseline value, block number, and block hash.");
     }
-    const existing = await this.stateStore.getXcmBalanceWatch?.(requestId);
+    const existing = await this.stateStore.getXcmBalanceWatch?.(wrapperAddress, requestId);
     if (existing) {
       assertEquivalentRegistration(existing, input);
       return existing;
@@ -272,9 +273,7 @@ export class XcmBalanceObserverService {
         : normalizeBlockHash(input.baselineBlockHash, "baselineBlockHash"),
       attemptCount: 0,
       registrationSource: normalizeRegistrationSource(input.registrationSource),
-      wrapperAddress: input.wrapperAddress === undefined
-        ? undefined
-        : normalizeEvmAddress(input.wrapperAddress, "wrapperAddress"),
+      wrapperAddress,
       sourceEventId: normalizeOptionalText(input.sourceEventId),
       stagingTxHash: normalizeOptionalText(input.stagingTxHash),
       stagingBlockNumber: input.stagingBlockNumber ?? undefined
@@ -460,6 +459,7 @@ export class XcmBalanceObserverService {
       oldestPendingAgeMs: Number.isFinite(oldestStartedMs) ? Math.max(nowMs - oldestStartedMs, 0) : 0,
       pending: pending.slice(0, 10).map((item) => ({
         requestId: item.requestId,
+        wrapperAddress: item.wrapperAddress,
         ledger: item.target?.ledger,
         account: item.target?.account,
         asset: item.target?.assetId ?? item.target?.contract,
@@ -478,9 +478,10 @@ export class XcmBalanceObserverService {
     };
   }
 
-  async setRequestPhase(requestId, phase) {
+  async setRequestPhase(requestId, phase, { wrapperAddress } = {}) {
     const normalizedId = normalizeRequestId(requestId);
-    const watch = await this.stateStore.getXcmBalanceWatch?.(normalizedId);
+    const normalizedWrapper = normalizeEvmAddress(wrapperAddress, "wrapperAddress");
+    const watch = await this.stateStore.getXcmBalanceWatch?.(normalizedWrapper, normalizedId);
     if (!watch || watch.status !== "pending") return watch;
     return this.stateStore.upsertXcmBalanceWatch({
       ...watch,
@@ -488,16 +489,17 @@ export class XcmBalanceObserverService {
     });
   }
 
-  async requireArmedWatch(requestId, { wrapperAddress = undefined } = {}) {
+  async requireArmedWatch(requestId, { wrapperAddress } = {}) {
     const normalizedId = normalizeRequestId(requestId);
-    const watch = await this.stateStore.getXcmBalanceWatch?.(normalizedId);
+    const normalizedWrapper = normalizeEvmAddress(wrapperAddress, "wrapperAddress");
+    const watch = await this.stateStore.getXcmBalanceWatch?.(normalizedWrapper, normalizedId);
     if (!watch || watch.status !== "pending") {
       throw new ValidationError(`No pending chain-event observer watch exists for ${normalizedId}.`);
     }
     if (!["chain_event", "chain_event_backfill"].includes(watch.registrationSource)) {
       throw new ValidationError(`Observer watch ${normalizedId} was not armed from chain truth.`);
     }
-    if (wrapperAddress && watch.wrapperAddress !== normalizeEvmAddress(wrapperAddress, "wrapperAddress")) {
+    if (watch.wrapperAddress !== normalizedWrapper) {
       throw new ValidationError(`Observer watch ${normalizedId} belongs to another wrapper generation.`);
     }
     if (this.classifyWatchScope(watch) !== "current") {
@@ -517,6 +519,7 @@ export class XcmBalanceObserverService {
       timestamp: new Date(this.now()).toISOString(),
       data: {
         requestId: watch.requestId,
+        wrapperAddress: watch.wrapperAddress,
         ledger: watch.target?.ledger,
         endpoint: watch.target?.endpoint,
         account: watch.target?.account,

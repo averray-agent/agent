@@ -128,12 +128,9 @@ export class BankLaneFeedService {
       ]);
       const readAtMs = this.now();
       return {
-        // Request ids are scoped by wrapper on-chain, but the durable observer
-        // table predates that namespace and is keyed by request id alone. v2.0
-        // and v2.1 can therefore share an id. A valid watch aimed at another
-        // venue target is known-retired work and must not alarm on the active
-        // lane. Unknown/malformed targets remain visible (and overdue) rather
-        // than being silently classified as safe.
+        // Request ids are scoped by wrapper on-chain and the durable observer
+        // preserves that same composite identity. Retired generations stay in
+        // history without colliding with the active request table.
         items: [...pending, ...terminal]
           .filter((watch) => this.classifyRequestWatch(watch) !== "foreign")
           .map((watch) => requestFromWatch(watch, readAtMs)),
@@ -186,6 +183,8 @@ export class BankLaneFeedService {
   }
 
   classifyRequestWatch(watch) {
+    if (watch?.wrapperAddress
+      && !sameAddress(watch.wrapperAddress, this.subject?.configuredWrapper)) return "foreign";
     return classifyPositionWatch(watch, this.targets?.position);
   }
 
@@ -420,6 +419,7 @@ function requestFromWatch(watch, nowMs) {
   const terminal = watch?.status !== "pending";
   const item = {
     id: String(watch?.requestId ?? "unknown-request"),
+    wrapperAddress: String(watch?.wrapperAddress ?? "unknown-wrapper"),
     kind: String(watch?.kind ?? inferRequestKind(watch?.direction)),
     phase: String(
       invalidTiming
@@ -545,16 +545,18 @@ function normalizeRequests(raw) {
   let invalid = !Array.isArray(raw.items) || !Number.isFinite(raw.readAtMs);
   const items = storedItems.map((item) => {
     const id = String(item?.id ?? "").trim();
+    const wrapperAddress = String(item?.wrapperAddress ?? "").toLowerCase();
     const kind = String(item?.kind ?? "").trim();
     const phase = String(item?.phase ?? "").trim();
     const ageSeconds = Number(item?.ageSeconds);
-    const itemValid = Boolean(id && kind && phase)
+    const itemValid = Boolean(id && /^0x[a-f0-9]{40}$/u.test(wrapperAddress) && kind && phase)
       && Number.isFinite(ageSeconds)
       && ageSeconds >= 0
       && typeof item?.overdue === "boolean";
     if (itemValid) {
       const normalized = {
         id,
+        wrapperAddress,
         kind,
         phase,
         ageSeconds,
@@ -568,6 +570,7 @@ function normalizeRequests(raw) {
     invalid = true;
     return {
       id: id || "unknown-request",
+      wrapperAddress: wrapperAddress || "unknown-wrapper",
       kind: kind || "unknown",
       phase: "snapshot-invalid",
       ageSeconds: Number.isFinite(ageSeconds) && ageSeconds >= 0 ? ageSeconds : 0,

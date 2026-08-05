@@ -79,6 +79,7 @@ test("Bank feed preserves raw decimal strings and each source's completion clock
   const store = new MemoryStateStore();
   await store.upsertXcmBalanceWatch({
     requestId: `0x${"12".repeat(32)}`,
+    wrapperAddress: WRAPPER_V22,
     status: "pending",
     kind: "deposit",
     phase: "recovery-pending",
@@ -106,6 +107,7 @@ test("Bank feed preserves raw decimal strings and each source's completion clock
   assert.notEqual(feed.position.readAtMs, feed.float.readAtMs);
   assert.deepEqual(feed.requests.items, [{
     id: `0x${"12".repeat(32)}`,
+    wrapperAddress: WRAPPER_V22.toLowerCase(),
     kind: "deposit",
     phase: "recovery-pending",
     ageSeconds: 125,
@@ -192,6 +194,7 @@ test("request snapshot never silently truncates the pending table", async () => 
   for (let index = 0; index < 125; index += 1) {
     await store.upsertXcmBalanceWatch({
       requestId: `0x${index.toString(16).padStart(64, "0")}`,
+      wrapperAddress: WRAPPER_V22,
       status: "pending",
       direction: "increase",
       startedAt: new Date(BASE - index * 1_000).toISOString(),
@@ -211,6 +214,7 @@ test("terminal request exposes the honest reconciliation without presenting the 
   const requestId = `0x${"42".repeat(32)}`;
   await store.upsertXcmBalanceWatch({
     requestId,
+    wrapperAddress: WRAPPER_V22,
     status: "failed",
     kind: "deposit",
     phase: "terminal",
@@ -236,6 +240,7 @@ test("terminal request exposes the honest reconciliation without presenting the 
 
   assert.deepEqual(feed.requests.items, [{
     id: requestId,
+    wrapperAddress: WRAPPER_V22.toLowerCase(),
     kind: "deposit",
     phase: "terminal",
     ageSeconds: 1800,
@@ -259,6 +264,7 @@ test("request snapshot excludes the retired v2.0 venue target without hiding unk
   const store = new MemoryStateStore();
   const request = (requestId, target) => store.upsertXcmBalanceWatch({
     requestId,
+    wrapperAddress: WRAPPER_V22,
     status: "pending",
     target,
     direction: "increase",
@@ -281,6 +287,31 @@ test("request snapshot excludes the retired v2.0 venue target without hiding unk
     `0x${"30".repeat(32)}`
   ]);
   assert.equal(feed.requests.lastError, null);
+});
+
+test("board scopes a colliding request id to the configured wrapper generation", async () => {
+  const store = new MemoryStateStore();
+  const requestId = `0x${"39".repeat(32)}`;
+  const base = {
+    requestId,
+    status: "pending",
+    target: targets().position,
+    direction: "increase",
+    startedAt: new Date(BASE - 10_000).toISOString(),
+    deadlineAt: new Date(BASE + 60_000).toISOString()
+  };
+  await store.upsertXcmBalanceWatch({ ...base, wrapperAddress: WRAPPER_V21, phase: "retired-generation" });
+  await store.upsertXcmBalanceWatch({ ...base, wrapperAddress: WRAPPER_V22, phase: "active-generation" });
+
+  const feed = await service(store, {
+    async read(target) { return { raw: "0", asOf: BASE, target }; }
+  }).pollOnce();
+
+  assert.deepEqual(feed.requests.items.map(({ id, wrapperAddress, phase }) => ({ id, wrapperAddress, phase })), [{
+    id: requestId,
+    wrapperAddress: WRAPPER_V22.toLowerCase(),
+    phase: "active-generation"
+  }]);
 });
 
 test("position calibration requires non-zero, survives restart, and invalidates on retarget", async () => {

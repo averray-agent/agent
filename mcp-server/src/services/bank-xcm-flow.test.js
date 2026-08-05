@@ -9,6 +9,7 @@ import {
 } from "./bank-xcm-flow.js";
 
 const REQUEST_ID = `0x${"44".repeat(32)}`;
+const FLOW_WRAPPER = "0xecee778e11b238d2fc096e56460e7b98dc7b26b8";
 const fixture = JSON.parse(await readFile(
   new URL("./fixtures/hydration-bank-round-trip.json", import.meta.url),
   "utf8"
@@ -66,17 +67,22 @@ test("two-message bank flow queues then dispatches only after both exact dry-run
     enabled: true,
     hasWrapper: () => true,
     balanceObserver: {
-      async requireArmedWatch(requestId) {
+      async requireArmedWatch(requestId, { wrapperAddress }) {
         assert.equal(requestId, REQUEST_ID);
+        assert.equal(wrapperAddress, FLOW_WRAPPER);
         order.push("watch");
         return { requestId, target: { ledger: "erc20" }, baselineRaw: "0", deadlineAt: "later" };
       },
-      async setRequestPhase(_requestId, phase) { order.push(`phase:${phase}`); }
+      async setRequestPhase(_requestId, phase, { wrapperAddress }) {
+        assert.equal(wrapperAddress, FLOW_WRAPPER);
+        order.push(`phase:${phase}`);
+      }
     },
     dryRunGuard: guard
   });
   const result = await coordinator.execute({
     requestId: REQUEST_ID,
+    wrapperAddress: FLOW_WRAPPER,
     intent: { kind: "deposit", assetsRaw: "100000" },
     observation: { target: { ledger: "erc20" }, direction: "increase" },
     messages: [
