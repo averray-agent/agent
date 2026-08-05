@@ -11,6 +11,7 @@ import {
   buildBankXcmV2Messages,
   buildConfigurationCalls,
   buildRecoveryHomeMessage,
+  buildV221HomeDiagnosticMessage,
   compact,
   previewRecoveryHomeId,
   truncateAccountId32,
@@ -22,7 +23,7 @@ import {
   assertRuntimeFlowDisabled,
   assertV221ArmedEmptyState,
   assertV221DeploymentEvidence,
-  assertV221LivePreflightEvidence,
+  assertV221HomeDryRunEvidence,
   assertV221SuccessionState
 } from "./prepare-bank-xcm-v2-multisig.mjs";
 import { captureConversionEvidence, convertOnEndpoint } from "./capture-hydration-wrapper-origin.mjs";
@@ -430,17 +431,17 @@ test("paused configuration and atomic succession packets are deliberately separa
   assert.equal(iface.decodeFunctionData("setDispatchPaused", succession[1].data)[0], false);
 });
 
-test("v2.2.1 arm emitter requires G2, prior generation, and four-leg evidence", () => {
+test("v2.2.1 arm emitter requires G2, prior generation, and request-independent home proof", () => {
   assert.equal(assertPacketGeneration({ generation: "2.2.1", packet: "configure" }), true);
   assert.throws(
     () => assertPacketGeneration({ generation: "2.2.1", packet: "arm" }),
-    /requires --previous-wrapper.*--live-preflight-evidence/u
+    /requires --previous-wrapper.*--home-dry-run-evidence/u
   );
   assert.equal(assertPacketGeneration({
     generation: "2.2.1",
     packet: "arm",
     deploymentEvidence: "/tmp/g2.json",
-    livePreflightEvidence: "/tmp/legs.json",
+    homeDryRunEvidence: "/tmp/home.json",
     previousWrapper: "0x1000000000000000000000000000000000000004"
   }), true);
   assert.throws(
@@ -505,37 +506,83 @@ test("v2.2.1 arm fresh-state gate refuses any request, custody, allowance, or en
   assert.throws(() => assertV221ArmedEmptyState({ ...empty, flowDisabled: false }), /flow.*disabled/u);
 });
 
-test("v2.2.1 arm requires four live legs and a completed nested home execution", () => {
-  const legs = ["deposit_funding", "deposit_sell", "withdraw_sell", "withdraw_home"].map((leg) => ({
-    leg,
-    liveState: true,
-    result: "pass",
-    assetHubBlockNumber: 19_100_000,
-    revive: { success: true },
-    messageDryRun: { complete: true },
-    ...(leg === "withdraw_home" ? {
-      homeExecutionFeeRaw: "1400",
-      messageDryRun: { complete: true, forwardedParaId: 1000, assetHubExecutionComplete: true }
-    } : {})
-  }));
+test("v2.2.1 request-independent home builder is byte-equal to the reviewed request-bound family", () => {
+  const requestBound = bundle().messages.find(({ label }) => label === "withdraw_home");
+  const diagnostic = buildV221HomeDiagnosticMessage({
+    wrapper: WRAPPER,
+    amount: 100_000n,
+    homeExecutionFee: 1_402n,
+    topic: requestBound.requestId
+  });
+  assert.equal(diagnostic.message, requestBound.message);
+  assert.equal(diagnostic.messageHash, requestBound.messageHash);
+});
+
+test("v2.2.1 arm requires byte-bound live three-hop home completion with fee below arrival", () => {
+  const built = buildV221HomeDiagnosticMessage({
+    wrapper: WRAPPER,
+    amount: 100_000n,
+    homeExecutionFee: 1_400n,
+    topic: `0x${"42".repeat(32)}`
+  });
   const evidence = {
-    kind: "averray.bankXcmV221LivePreflightBundle",
+    kind: "averray.bankXcmV221RequestIndependentHomeProof",
     profile: "mainnet",
     version: "2.2.1",
     liveState: true,
+    requestIndependent: true,
     wrapper: WRAPPER,
     adapter: ADAPTER,
     convertedAccountId32: CONVERTED,
     capturedAt: "2026-08-05T00:00:00.000Z",
-    evidenceId: "g2-live-legs",
-    legs
+    evidenceId: "g2-live-home",
+    runtimeBlocks: { assetHub: 19_100_000, hydration: 13_480_000 },
+    pricing: {
+      grossAmountRaw: "100000",
+      upstreamFeesRaw: "500",
+      quotedArrivalRaw: "99500",
+      quoteCapturedAt: "2026-08-05T00:00:00.000Z"
+    },
+    builder: {
+      topic: built.topic,
+      homeExecutionFeeRaw: "1400",
+      message: built.message,
+      messageHash: built.messageHash
+    },
+    dryRun: {
+      message: built.message,
+      messageHash: built.messageHash,
+      hydrationExecutionComplete: true,
+      forwardedParaId: 1000,
+      assetHubExecutionComplete: true,
+      assetHubDeposit: {
+        assetId: 1337,
+        beneficiaryAccountId32: wrapperAccountId32(WRAPPER),
+        amountRaw: "98100"
+      }
+    }
   };
-  assert.equal(assertV221LivePreflightEvidence({ evidence, wrapper: WRAPPER, adapter: ADAPTER, convertedAccount: CONVERTED }).legs.length, 4);
-  const broken = structuredClone(evidence);
-  broken.legs.find(({ leg }) => leg === "withdraw_home").messageDryRun.assetHubExecutionComplete = false;
+  assert.equal(
+    assertV221HomeDryRunEvidence({ evidence, wrapper: WRAPPER, adapter: ADAPTER, convertedAccount: CONVERTED }).messageHash,
+    built.messageHash
+  );
+  const byteDrift = structuredClone(evidence);
+  byteDrift.dryRun.message = `${built.message.slice(0, -2)}00`;
   assert.throws(
-    () => assertV221LivePreflightEvidence({ evidence: broken, wrapper: WRAPPER, adapter: ADAPTER, convertedAccount: CONVERTED }),
-    /completed Asset Hub execution/u
+    () => assertV221HomeDryRunEvidence({ evidence: byteDrift, wrapper: WRAPPER, adapter: ADAPTER, convertedAccount: CONVERTED }),
+    /not byte-equal/u
+  );
+  const feeAtArrival = structuredClone(evidence);
+  feeAtArrival.builder.homeExecutionFeeRaw = feeAtArrival.pricing.quotedArrivalRaw;
+  assert.throws(
+    () => assertV221HomeDryRunEvidence({ evidence: feeAtArrival, wrapper: WRAPPER, adapter: ADAPTER, convertedAccount: CONVERTED }),
+    /fee < quoted arrival/u
+  );
+  const noFinalDeposit = structuredClone(evidence);
+  noFinalDeposit.dryRun.assetHubExecutionComplete = false;
+  assert.throws(
+    () => assertV221HomeDryRunEvidence({ evidence: noFinalDeposit, wrapper: WRAPPER, adapter: ADAPTER, convertedAccount: CONVERTED }),
+    /final Asset Hub.*deposit/u
   );
 });
 

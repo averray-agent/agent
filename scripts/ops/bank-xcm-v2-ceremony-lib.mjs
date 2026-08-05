@@ -208,6 +208,45 @@ export function buildRecoveryHomeMessage({ wrapper, convertedAccountId32, amount
   };
 }
 
+/**
+ * Reproduce XcmWrapperV22._buildHome for a request-independent v2.2.1
+ * succession proof. The diagnostic topic has no authority or request meaning;
+ * it only binds the exact SetTopic bytes exercised by the live three-hop
+ * dry-run before the candidate is armed.
+ */
+export function buildV221HomeDiagnosticMessage({ wrapper, amount, homeExecutionFee, topic }) {
+  const wrapperAddress = getAddress(wrapper);
+  const homeAmount = BigInt(amount);
+  const nestedFee = BigInt(homeExecutionFee);
+  assertBytes32(topic, "v2.2.1 home diagnostic topic");
+  if (homeAmount <= 0n || nestedFee <= 0n || nestedFee >= homeAmount) {
+    throw new Error("v2.2.1 home diagnostic requires 0 < homeExecutionFee < amount.");
+  }
+  const message = concatHex(
+    hexBuffer("0x05140004010300a10f043205e51400", "home outer amount prefix"), compact(homeAmount),
+    hexBuffer("0x13010300a10f043205e51400", "home repeated amount prefix"), compact(homeAmount),
+    hexBuffer("0x001410010204010100a10f08130002043205e51400", "home reserve prefix"), compact(nestedFee),
+    hexBuffer("0x000d01020400010100", "home beneficiary prefix"),
+    hexBuffer(wrapperAccountId32(wrapperAddress), "wrapperAccountId32"),
+    Buffer.from([0x2c]),
+    hexBuffer(topic, "v2.2.1 home diagnostic topic")
+  );
+  return {
+    wrapper: wrapperAddress,
+    amount: homeAmount,
+    homeExecutionFee: nestedFee,
+    topic: topic.toLowerCase(),
+    message,
+    messageHash: keccak256(message),
+    expected: {
+      forwardedParaId: BANK_XCM_V2.assetHubParaId,
+      remoteEvent: "Assets.Deposited",
+      assetId: 1337,
+      beneficiaryAccountId32: wrapperAccountId32(wrapperAddress)
+    }
+  };
+}
+
 export function buildBankXcmV2Messages({
   wrapper,
   convertedAccountId32,
