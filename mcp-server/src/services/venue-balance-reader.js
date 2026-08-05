@@ -77,6 +77,19 @@ export class VenueBalanceReader {
     return pending;
   }
 
+  resetSubstrateApi(endpoint) {
+    const pending = this.substrateApis.get(endpoint);
+    if (!pending) return false;
+    this.substrateApis.delete(endpoint);
+    // A timed-out ApiPromise.create may resolve after the caller has already
+    // moved on. Close that late connection without awaiting the wedged promise,
+    // so the retry can create a genuinely fresh provider immediately.
+    void pending
+      .then((api) => api?.disconnect?.())
+      .catch(() => {});
+    return true;
+  }
+
   getEvmProvider(endpoint, chainId) {
     const key = `${endpoint}|${chainId ?? "auto"}`;
     let provider = this.evmProviders.get(key);

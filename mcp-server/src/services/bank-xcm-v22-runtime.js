@@ -20,6 +20,9 @@ const NATIVE_DOT_DELIVERY_ASSET = Object.freeze({
 // mistake cannot flow onward as a plausible quote.
 const MIN_NATIVE_DELIVERY_FEE_PLANCK = 20_000_000n;
 const MAX_NATIVE_DELIVERY_FEE_PLANCK = 1_500_000_000n;
+const EVENT_WATCH_CONNECT_TIMEOUT_MS = 30_000;
+const EVENT_WATCH_RETRY_BASE_MS = 5_000;
+const EVENT_WATCH_RETRY_MAX_MS = 60_000;
 
 const ADAPTER_V22_ABI = Object.freeze([
   "function recordRemoteOperatingFloat(uint256 assets,uint64 asOf,bytes32 remoteRef)",
@@ -47,6 +50,10 @@ export class BankXcmV22Runtime {
     wrapperContract = undefined,
     adapterContract = undefined,
     wrapperInterface = undefined,
+    eventWatchConnectTimeoutMs = EVENT_WATCH_CONNECT_TIMEOUT_MS,
+    eventWatchRetryBaseMs = EVENT_WATCH_RETRY_BASE_MS,
+    eventWatchRetryMaxMs = EVENT_WATCH_RETRY_MAX_MS,
+    eventWatchSleep = sleep,
   } = {}) {
     if (!gateway?.hasXcmWrapper?.() || !gateway?.provider || !gateway?.signer) {
       throw new ConfigError("Enabled Bank v2.2 runtime requires a configured wrapper and blockchain signer.");
@@ -76,33 +83,82 @@ export class BankXcmV22Runtime {
     this.wrapper = wrapperContract ?? new Contract(this.wrapperAddress, XCM_WRAPPER_ABI, gateway.provider);
     this.wrapperInterface = wrapperInterface ?? new Interface(XCM_WRAPPER_ABI);
     this.adapter = adapterContract ?? new Contract(this.adapterAddress, ADAPTER_V22_ABI, gateway.signer);
+    this.eventWatchConnectTimeoutMs = positiveInteger(
+      eventWatchConnectTimeoutMs,
+      "eventWatchConnectTimeoutMs"
+    );
+    this.eventWatchRetryBaseMs = positiveInteger(eventWatchRetryBaseMs, "eventWatchRetryBaseMs");
+    this.eventWatchRetryMaxMs = positiveInteger(eventWatchRetryMaxMs, "eventWatchRetryMaxMs");
+    if (this.eventWatchRetryMaxMs < this.eventWatchRetryBaseMs) {
+      throw new ConfigError("eventWatchRetryMaxMs must be at least eventWatchRetryBaseMs.");
+    }
+    if (typeof eventWatchSleep !== "function") {
+      throw new ConfigError("eventWatchSleep must be a function.");
+    }
+    this.eventWatchSleep = eventWatchSleep;
     this.substrateEventWatchRunning = false;
     this.substrateEventIngestionError = undefined;
     this.substrateEventUnsubscribe = undefined;
     this.substrateEventTail = Promise.resolve();
+    this.substrateEventStartPromise = undefined;
   }
 
-  async start() {
-    if (this.substrateEventWatchRunning) return;
+  start() {
+    if (this.substrateEventWatchRunning) return Promise.resolve();
+    if (this.substrateEventStartPromise) return this.substrateEventStartPromise;
     if (!this.eventBus?.publish) {
       this.substrateEventIngestionError = "Bank v2.2 Substrate event watch requires the event bus.";
-      throw new ConfigError(this.substrateEventIngestionError);
+      return Promise.reject(new ConfigError(this.substrateEventIngestionError));
     }
-    try {
-      const api = await this.getAssetHubApi();
-      this.substrateEventUnsubscribe = await api.query.system.events((records) => {
-        this.enqueueSubstrateEvents(api, records);
+    this.substrateEventStartPromise = this.startSubstrateEventWatchWithRetry()
+      .finally(() => {
+        this.substrateEventStartPromise = undefined;
       });
-      this.substrateEventWatchRunning = true;
-      this.substrateEventIngestionError = undefined;
-    } catch (error) {
-      this.substrateEventWatchRunning = false;
-      this.substrateEventIngestionError = error?.message ?? String(error);
-      this.logger.error?.(
-        { error: this.substrateEventIngestionError },
-        "bank_xcm_v22_runtime.substrate_event_watch_start_failed"
-      );
-      throw error;
+    return this.substrateEventStartPromise;
+  }
+
+  async startSubstrateEventWatchWithRetry() {
+    let attempt = 0;
+    while (!this.substrateEventWatchRunning) {
+      attempt += 1;
+      try {
+        const api = await withTimeout(
+          this.getAssetHubApi(),
+          this.eventWatchConnectTimeoutMs,
+          "Asset Hub Substrate API connection"
+        );
+        this.substrateEventUnsubscribe = await withTimeout(
+          api.query.system.events((records) => {
+            this.enqueueSubstrateEvents(api, records);
+          }),
+          this.eventWatchConnectTimeoutMs,
+          "Asset Hub system.events subscription"
+        );
+        this.substrateEventWatchRunning = true;
+        this.substrateEventIngestionError = undefined;
+        this.logger.info?.(
+          { attempt, endpoint: this.assetHubSubstrateEndpoint },
+          "bank_xcm_v22_runtime.substrate_event_watch_started"
+        );
+      } catch (error) {
+        this.substrateEventWatchRunning = false;
+        this.substrateEventIngestionError = error?.message ?? String(error);
+        this.balanceReader.resetSubstrateApi?.(this.assetHubSubstrateEndpoint);
+        const retryInMs = Math.min(
+          this.eventWatchRetryBaseMs * (2 ** Math.min(attempt - 1, 30)),
+          this.eventWatchRetryMaxMs
+        );
+        this.logger.error?.(
+          {
+            error: this.substrateEventIngestionError,
+            attempt,
+            retryInMs,
+            endpoint: this.assetHubSubstrateEndpoint,
+          },
+          "bank_xcm_v22_runtime.substrate_event_watch_start_failed"
+        );
+        await this.eventWatchSleep(retryInMs);
+      }
     }
   }
 
@@ -675,6 +731,34 @@ function requireText(raw, label) {
   const value = String(raw ?? "").trim();
   if (!value) throw new ConfigError(`${label} is required when BANK_XCM_FLOW_ENABLED=true.`);
   return value;
+}
+
+function positiveInteger(raw, label) {
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new ConfigError(`${label} must be a positive integer.`);
+  }
+  return value;
+}
+
+async function withTimeout(promise, timeoutMs, label) {
+  let timer;
+  try {
+    return await Promise.race([
+      Promise.resolve(promise),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(`${label} timed out after ${timeoutMs}ms.`));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function positiveBlock(raw, label) {

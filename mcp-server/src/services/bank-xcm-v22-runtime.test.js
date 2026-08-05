@@ -29,12 +29,25 @@ const HYDRATION_USDC_LOCATION = {
 };
 const wrapperInterface = new Interface(XCM_WRAPPER_ABI);
 
-function makeRuntime({ observer = undefined, records = undefined } = {}) {
+function makeRuntime({
+  observer = undefined,
+  records = undefined,
+  connectHangs = 0,
+  subscriptionFailures = 0,
+} = {}) {
   const calls = [];
   const published = [];
+  const retryDelays = [];
   let subscription;
+  let connectAttempts = 0;
+  let subscriptionAttempts = 0;
+  let resetAttempts = 0;
   const blockRecords = records ?? requestQueuedRecords();
   const eventsQuery = async (callback) => {
+    subscriptionAttempts += 1;
+    if (subscriptionAttempts <= subscriptionFailures) {
+      throw new Error("fixture system.events subscription failure");
+    }
     subscription = callback;
     return () => {};
   };
@@ -111,7 +124,17 @@ function makeRuntime({ observer = undefined, records = undefined } = {}) {
   const runtime = new BankXcmV22Runtime({
     gateway,
     balanceObserver,
-    balanceReader: { async getSubstrateApi() { return api; } },
+    balanceReader: {
+      async getSubstrateApi() {
+        connectAttempts += 1;
+        if (connectAttempts <= connectHangs) return new Promise(() => {});
+        return api;
+      },
+      resetSubstrateApi() {
+        resetAttempts += 1;
+        return true;
+      }
+    },
     bankLaneFeed: {
       targets: {
         position: {
@@ -135,7 +158,12 @@ function makeRuntime({ observer = undefined, records = undefined } = {}) {
     eventBus: { publish(event) { published.push(event); } },
     wrapperContract: wrapper,
     adapterContract: {},
-    wrapperInterface
+    wrapperInterface,
+    logger: { info() {}, error() {} },
+    eventWatchConnectTimeoutMs: 5,
+    eventWatchRetryBaseMs: 1,
+    eventWatchRetryMaxMs: 4,
+    async eventWatchSleep(ms) { retryDelays.push(ms); }
   });
   runtime.readStampedBalance = async () => ({
     raw: 0n,
@@ -148,7 +176,11 @@ function makeRuntime({ observer = undefined, records = undefined } = {}) {
     calls,
     published,
     api,
-    getSubscription: () => subscription
+    getSubscription: () => subscription,
+    getConnectAttempts: () => connectAttempts,
+    getSubscriptionAttempts: () => subscriptionAttempts,
+    getResetAttempts: () => resetAttempts,
+    retryDelays,
   };
 }
 
@@ -216,6 +248,29 @@ test("enabled runtime reports staging readiness only with both observer and Subs
     readyForStaging: true
   });
   assert.ok(runtime.createDispatcher());
+});
+
+test("Substrate event watch retries with backoff and recovers after the first subscription failure", async () => {
+  const fixture = makeRuntime({ subscriptionFailures: 1 });
+
+  await fixture.runtime.start();
+
+  assert.equal(fixture.getSubscriptionAttempts(), 2);
+  assert.equal(fixture.getResetAttempts(), 1);
+  assert.deepEqual(fixture.retryDelays, [1]);
+  assert.equal((await fixture.runtime.getStatus()).substrateEventWatchRunning, true);
+  assert.equal((await fixture.runtime.getStatus()).substrateEventIngestionError, undefined);
+});
+
+test("Substrate event watch bounds a wedged connection and retries with a fresh provider", async () => {
+  const fixture = makeRuntime({ connectHangs: 1 });
+
+  await fixture.runtime.start();
+
+  assert.equal(fixture.getConnectAttempts(), 2);
+  assert.equal(fixture.getResetAttempts(), 1);
+  assert.deepEqual(fixture.retryDelays, [1]);
+  assert.equal((await fixture.runtime.getStatus()).substrateEventWatchRunning, true);
 });
 
 test("staged-request backfill derives the event and block-bound baseline from chain truth", async () => {
