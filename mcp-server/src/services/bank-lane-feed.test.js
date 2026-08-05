@@ -15,6 +15,7 @@ import { normalizeVenueBalanceTarget } from "./venue-balance-reader.js";
 const ACCOUNT = "0x42e55ecf123da7d3eba1c55998b3cbf8238c446367c981f1388acbc0626cf354";
 const RETIRED_ACCOUNT = "0x98f0033e26aa4ecf2899e6d09237d40d29fcb68e64d22a621520bde1123564ac";
 const AUSDC = "0x2ec4884088d84e5c2970a034732e5209b0acfa93";
+const USDC = "0x0000053900000000000000000000000001200000";
 const OTHER_AUSDC = "0x1111111111111111111111111111111111111111";
 const POSTAGE = "16Mf98wAbYTVWaeHkD1SUdRPc5nmoLj9LyNtPtP1xvkF7Sxb";
 const ACCOUNT_SS58 = "12WiJGBSjqTBNqD7a7TN6mt47ZJd7f8SqyhTc2bYLFzcHYD9";
@@ -60,6 +61,19 @@ function targets(positionContract = AUSDC) {
   };
 }
 
+function requestTargets(positionContract = AUSDC) {
+  return [
+    targets(positionContract).position,
+    {
+      ledger: "erc20",
+      endpoint: "https://services.polkadothub-rpc.com/mainnet/",
+      chainId: 420420419,
+      account: WRAPPER_V22,
+      contract: USDC
+    }
+  ];
+}
+
 function service(store, reader, options = {}) {
   return new BankLaneFeedService(store, reader, {
     enabled: true,
@@ -70,6 +84,7 @@ function service(store, reader, options = {}) {
       }
     },
     targets: targets(),
+    requestTargets: requestTargets(),
     now: () => BASE,
     ...options
   });
@@ -387,6 +402,37 @@ test("board scopes a colliding request id to the configured wrapper generation",
     id: requestId,
     wrapperAddress: WRAPPER_V22.toLowerCase(),
     phase: "active-generation"
+  }]);
+});
+
+test("request snapshot renders the active-generation withdraw target and rejects an unrelated same-wrapper target", async () => {
+  const store = new MemoryStateStore();
+  const base = {
+    wrapperAddress: WRAPPER_V22,
+    status: "pending",
+    kind: "withdraw",
+    direction: "increase",
+    startedAt: new Date(BASE - 10_000).toISOString(),
+    deadlineAt: new Date(BASE + 60_000).toISOString()
+  };
+  await store.upsertXcmBalanceWatch({
+    ...base,
+    requestId: `0x${"40".repeat(32)}`,
+    target: requestTargets()[1]
+  });
+  await store.upsertXcmBalanceWatch({
+    ...base,
+    requestId: `0x${"41".repeat(32)}`,
+    target: { ...requestTargets()[1], account: "0x1111111111111111111111111111111111111111" }
+  });
+
+  const feed = await service(store, {
+    async read(target) { return { raw: "0", asOf: BASE, target }; }
+  }).pollOnce();
+
+  assert.deepEqual(feed.requests.items.map(({ id, kind }) => ({ id, kind })), [{
+    id: `0x${"40".repeat(32)}`,
+    kind: "withdraw"
   }]);
 });
 

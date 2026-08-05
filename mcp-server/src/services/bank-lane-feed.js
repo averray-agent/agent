@@ -37,6 +37,7 @@ export class BankLaneFeedService {
       subject = undefined,
       subjectReader = undefined,
       targets = undefined,
+      requestTargets = undefined,
       now = () => Date.now(),
       stateScope = DEFAULT_STATE_SCOPE
     } = {}
@@ -49,6 +50,9 @@ export class BankLaneFeedService {
     this.subject = enabled ? normalizeSubjectConfig(subject) : undefined;
     this.subjectReader = subjectReader;
     this.targets = enabled ? normalizeFeedTargets(targets) : undefined;
+    this.requestTargets = enabled
+      ? (requestTargets ?? [this.targets.position]).map((target) => normalizeVenueBalanceTarget(target))
+      : undefined;
     this.persistenceTail = Promise.resolve();
   }
 
@@ -190,7 +194,7 @@ export class BankLaneFeedService {
   classifyRequestWatch(watch) {
     if (watch?.wrapperAddress
       && !sameAddress(watch.wrapperAddress, this.subject?.configuredWrapper)) return "foreign";
-    return classifyPositionWatch(watch, this.targets?.position);
+    return classifyPositionWatch(watch, this.requestTargets);
   }
 
   async persistSection(name, value) {
@@ -491,13 +495,16 @@ function safeTerminalReconciliation(raw) {
   return Object.keys(value).length > 0 ? value : undefined;
 }
 
-function classifyPositionWatch(watch, positionTarget) {
-  if (!watch?.target || !positionTarget) return "unknown";
+function classifyPositionWatch(watch, positionTargets) {
+  if (!watch?.target || !positionTargets) return "unknown";
   try {
     const target = normalizeVenueBalanceTarget(watch.target);
     if (target.ledger !== "erc20") return "unknown";
-    return target.contract === positionTarget.contract
-      && target.evmAccount === positionTarget.evmAccount
+    const candidates = Array.isArray(positionTargets) ? positionTargets : [positionTargets];
+    return candidates.some((candidate) => {
+      const normalized = normalizeVenueBalanceTarget(candidate);
+      return target.contract === normalized.contract && target.evmAccount === normalized.evmAccount;
+    })
       ? "current"
       : "foreign";
   } catch {
