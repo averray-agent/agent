@@ -198,7 +198,12 @@ export class BankXcmV22Dispatcher {
   }
 
   async assertStagingMargin({ requestId, legIndex, live }) {
-    if (live.kind !== "deposit") return undefined;
+    // The funding-transfer margin is a precondition of DepositFunding only.
+    // Once bitmap bit 0 is set, custody has already moved to Hydration and
+    // replaying the funding dry-run cannot honestly reproduce the transfer.
+    // DepositSell owns separate live gates: bitmap=1, its JIT remote fee,
+    // exact-message dry-run, observer watch, and transaction simulation.
+    if (live.kind !== "deposit" || legIndex !== V22_LEGS.deposit_funding) return undefined;
     const headroomEvidence = normalizeLiveAmount(
       await this.readFundingTransferFee({ requestId, leg: legIndex }),
       "fundingTransferFeeHeadroomRaw"
