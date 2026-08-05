@@ -350,6 +350,52 @@ test("v2.2 deposit sell quotes fresh x2, requires the event watch, and records a
   assert.equal(evidence.fundingTransferFeeHeadroomRaw, undefined);
 });
 
+test("v2.2 deposit sell caps fresh x2 at the staged ceiling when protection remains at least 1.5x", async () => {
+  const { instance, calls } = dispatcher({
+    quoteRemoteFee: async () => ({
+      liveState: true,
+      amount: "20013",
+      asOf: 1_775_000_000,
+      remoteRef: `0x${"66".repeat(32)}`
+    })
+  });
+
+  const { evidence } = await instance.dispatch({ requestId: REQUEST_ID, leg: "deposit_sell" });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].type, "sign");
+  assert.equal(calls[0].input.feeAmount, 40_000n);
+  assert.equal(evidence.feeAmount, "40000");
+  assert.equal(evidence.feeSource, "fresh_remote_quote_capped");
+});
+
+test("v2.2 deposit sell refuses a staged ceiling below the fresh 1.5x fee floor", async () => {
+  let signed = 0;
+  const { instance } = dispatcher({
+    readLiveRequest: async () => liveRequest({
+      parameters: {
+        sellAmount: "100000",
+        minimumOutput: "95000",
+        maxFeePerLeg: "29999",
+        dispatchDeadline: "0"
+      }
+    }),
+    quoteRemoteFee: async () => ({
+      liveState: true,
+      amount: "20000",
+      asOf: 1_775_000_000,
+      remoteRef: `0x${"66".repeat(32)}`
+    }),
+    signAndDispatch: async () => { signed += 1; }
+  });
+
+  await assert.rejects(
+    instance.dispatch({ requestId: REQUEST_ID, leg: "deposit_sell" }),
+    /below the required 1\.5× quote floor/u
+  );
+  assert.equal(signed, 0);
+});
+
 test("v2.2 withdraw sell uses fresh remote float and records it before signing", async () => {
   const { instance, calls } = dispatcher({
     readLiveRequest: async () => liveRequest({

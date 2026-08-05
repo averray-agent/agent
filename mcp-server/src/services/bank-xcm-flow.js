@@ -168,11 +168,18 @@ export class BankXcmV22Dispatcher {
         "remoteFeeQuote"
       );
       const quote = positiveBigInt(quoteEvidence.amount, "remoteFeeQuote");
-      const feeAmount = quote * 2n;
-      assertAtMost(feeAmount, maximum, "fresh remote fee ×2 exceeds staged maxFeePerLeg");
+      const doubledQuote = quote * 2n;
+      const feeAmount = doubledQuote > maximum ? maximum : doubledQuote;
+      if (feeAmount * 2n < quote * 3n) {
+        throw new ValidationError(
+          "Fresh remote fee capped by maxFeePerLeg is below the required 1.5× quote floor."
+        );
+      }
       return {
         feeAmount,
-        feeSource: "fresh_remote_quote_x2",
+        feeSource: feeAmount === doubledQuote
+          ? "fresh_remote_quote_x2"
+          : "fresh_remote_quote_capped",
         remoteAsOf: quoteEvidence.asOf,
         remoteRef: quoteEvidence.remoteRef
       };

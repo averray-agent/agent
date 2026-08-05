@@ -137,7 +137,8 @@ what you construct. `PayloadMismatch` ceases to exist as a concept.
 The operator dispatch script refuses to sign unless, in one tight session: fresh
 `ReviveApi_call` measure through the deployed contract on live state → limits = measured
 ×2 (defaults and recorded outers are not accepted inputs — D-3); fresh `eth_estimateGas` →
-gas = estimate ×2; fresh remote fee quote → `feeAmount` = quote ×2 (≤ `maxFeePerLeg`);
+gas = estimate ×2; fresh remote fee quote → `feeAmount` =
+`min(quote ×2, maxFeePerLeg)`, refusing when the result is below `quote ×1.5`;
 observer watch confirmed armed (§4.2) — then sign, then assert receipt + record `gasUsed`.
 Gate evidence files carry `liveState: true` and capture-time re-reads (the
 `dispatchPaused:true` skeleton-carryover taught why); my gate rejects fork-derived

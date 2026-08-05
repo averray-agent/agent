@@ -54,10 +54,12 @@ requires a successful receipt, and records actual `gasUsed`. Evidence not
 marked `liveState: true`, remembered limits, caller-supplied fees, and missing
 watches are all refusing conditions.
 
-DepositSell uses a fresh remote fee quote times two, capped by the
-multisig-staged `maxFeePerLeg`. WithdrawSell instead uses the freshly observed
-complete remote asset-22 operating float, also capped, and records that value
-through `recordRemoteOperatingFloat` before dispatch. WithdrawHome remains
+DepositSell uses `min(fresh remote fee quote × 2, maxFeePerLeg)`, where the
+multisig-staged `maxFeePerLeg` is the authorization ceiling. The capped result
+must still be at least `fresh quote × 1.5`; otherwise dispatch refuses.
+WithdrawSell instead uses the freshly observed complete remote asset-22
+operating float, also capped, and records that value through
+`recordRemoteOperatingFloat` before dispatch. WithdrawHome remains
 parameterless and request-self-budgeting.
 
 Activation requires both `BANK_XCM_FLOW_ENABLED=1` and a non-null
