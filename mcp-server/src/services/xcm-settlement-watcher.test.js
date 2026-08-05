@@ -16,6 +16,24 @@ class XcmSettlementWatcherService extends BaseXcmSettlementWatcherService {
   }
 }
 
+test("disabled watcher accepts an absent wrapper while malformed configured wrappers fail closed", () => {
+  const stateStore = new MemoryStateStore();
+  const platformService = { finalizeXcmRequest: async () => ({}) };
+  const absent = new BaseXcmSettlementWatcherService(platformService, stateStore, undefined, {
+    enabled: false,
+    expectedWrapper: null
+  });
+  assert.equal(absent.expectedWrapper, undefined);
+
+  assert.throws(
+    () => new BaseXcmSettlementWatcherService(platformService, stateStore, undefined, {
+      enabled: true,
+      expectedWrapper: "not-an-address"
+    }),
+    /wrapperAddress must be a 20-byte address/u
+  );
+});
+
 test("observeOutcome stores a pending observation and emits an event", async () => {
   const stateStore = new MemoryStateStore();
   const eventBus = new EventBus();

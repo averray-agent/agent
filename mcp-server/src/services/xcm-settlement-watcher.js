@@ -27,9 +27,10 @@ export class XcmSettlementWatcherService {
     this.pollIntervalMs = pollIntervalMs;
     this.retryBaseMs = retryBaseMs;
     this.retryMaxMs = retryMaxMs;
-    this.expectedWrapper = expectedWrapper === undefined
-      ? undefined
-      : normalizeWrapperAddress(expectedWrapper);
+    const configuredExpectedWrapper = String(expectedWrapper ?? "").trim();
+    this.expectedWrapper = configuredExpectedWrapper
+      ? normalizeWrapperAddress(configuredExpectedWrapper)
+      : undefined;
     this.now = now;
     this.logger = logger;
     this.running = false;

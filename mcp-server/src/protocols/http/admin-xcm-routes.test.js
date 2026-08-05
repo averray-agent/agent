@@ -9,12 +9,14 @@ const AUTH = {
 };
 const REQUEST_ID = `0x${"ab".repeat(32)}`;
 const REMOTE_REF = `0x${"12".repeat(32)}`;
+const WRAPPER = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 function makeHarness(overrides = {}) {
   const calls = [];
   const response = {};
   const payload = overrides.payload ?? {
     requestId: REQUEST_ID,
+    wrapperAddress: WRAPPER,
     status: "succeeded",
     settledAssets: 5,
     settledShares: 3,
@@ -110,6 +112,7 @@ test("POST /admin/xcm/observe records an observation and stores idempotent recei
   assert.deepEqual(calls.find(([name]) => name === "observeXcmOutcome")?.[1], {
     requestId: REQUEST_ID,
     outcome: {
+      wrapperAddress: WRAPPER,
       status: "succeeded",
       settledAssets: 5,
       settledShares: 3,
@@ -145,6 +148,7 @@ test("POST /admin/xcm/observe uses query requestId and defaults settlement field
   assert.deepEqual(calls.find(([name]) => name === "observeXcmOutcome")?.[1], {
     requestId: REQUEST_ID,
     outcome: {
+      wrapperAddress: undefined,
       status: "failed",
       settledAssets: 0,
       settledShares: 0,
