@@ -75,7 +75,7 @@ function service(store, reader, options = {}) {
   });
 }
 
-test("Bank feed preserves raw decimal strings and each source's completion clock", async () => {
+test("Bank feed preserves raw decimal strings, source clocks, and the request deadline", async () => {
   const store = new MemoryStateStore();
   await store.upsertXcmBalanceWatch({
     requestId: `0x${"12".repeat(32)}`,
@@ -112,7 +112,8 @@ test("Bank feed preserves raw decimal strings and each source's completion clock
     phase: "recovery-pending",
     ageSeconds: 125,
     overdue: true,
-    status: "pending"
+    status: "pending",
+    deadlineAtMs: BASE - 1
   }]);
   assert.equal(feed.requests.readAtMs, BASE);
   assert.equal(feed.requests.lastError, null);

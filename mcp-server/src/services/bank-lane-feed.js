@@ -433,6 +433,7 @@ function requestFromWatch(watch, nowMs) {
     overdue: terminal ? false : invalidTiming || nowMs >= deadlineAtMs,
     status: String(watch?.status ?? "pending")
   };
+  if (!terminal && !invalidTiming) item.deadlineAtMs = deadlineAtMs;
   const reconciliation = safeTerminalReconciliation(watch?.reconciliation);
   if (terminal && reconciliation) item.reconciliation = reconciliation;
   return item;
@@ -549,9 +550,11 @@ function normalizeRequests(raw) {
     const kind = String(item?.kind ?? "").trim();
     const phase = String(item?.phase ?? "").trim();
     const ageSeconds = Number(item?.ageSeconds);
+    const deadlineAtMs = item?.deadlineAtMs;
     const itemValid = Boolean(id && /^0x[a-f0-9]{40}$/u.test(wrapperAddress) && kind && phase)
       && Number.isFinite(ageSeconds)
       && ageSeconds >= 0
+      && (deadlineAtMs === undefined || Number.isFinite(deadlineAtMs))
       && typeof item?.overdue === "boolean";
     if (itemValid) {
       const normalized = {
@@ -563,6 +566,7 @@ function normalizeRequests(raw) {
         overdue: item.overdue,
         status: String(item?.status ?? (phase === "terminal" ? "unknown-terminal" : "pending"))
       };
+      if (phase !== "terminal" && Number.isFinite(deadlineAtMs)) normalized.deadlineAtMs = deadlineAtMs;
       const reconciliation = safeTerminalReconciliation(item?.reconciliation);
       if (phase === "terminal" && reconciliation) normalized.reconciliation = reconciliation;
       return normalized;
