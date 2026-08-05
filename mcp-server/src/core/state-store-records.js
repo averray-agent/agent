@@ -60,18 +60,26 @@ export function markXcmObservationProcessedRecord(current, result = undefined, {
     processed: true,
     processedAt: now,
     result,
-    lastError: undefined
+    lastError: undefined,
+    nextAttemptAt: undefined,
+    retryDelayMs: undefined
   };
 }
 
-export function markXcmObservationFailedRecord(current, error, { now = new Date().toISOString() } = {}) {
+export function markXcmObservationFailedRecord(
+  current,
+  error,
+  { now = new Date().toISOString(), nextAttemptAt = undefined, retryDelayMs = undefined } = {}
+) {
   if (!current) return undefined;
   return {
     ...current,
     processed: false,
     attemptCount: Number(current.attemptCount ?? 0) + 1,
     lastError: error?.message ?? String(error ?? "unknown_error"),
-    lastTriedAt: now
+    lastTriedAt: now,
+    nextAttemptAt,
+    retryDelayMs
   };
 }
 

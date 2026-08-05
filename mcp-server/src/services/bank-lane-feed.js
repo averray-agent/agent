@@ -127,13 +127,18 @@ export class BankLaneFeedService {
         this.stateStore.listRecentTerminalXcmBalanceWatches?.(RECENT_TERMINAL_REQUESTS_LIMIT) ?? []
       ]);
       const readAtMs = this.now();
+      const currentWatches = [...pending, ...terminal]
+        .filter((watch) => this.classifyRequestWatch(watch) !== "foreign");
+      const observations = await Promise.all(currentWatches.map((watch) =>
+        this.stateStore.getXcmObservation?.(watch.requestId)
+      ));
       return {
         // Request ids are scoped by wrapper on-chain and the durable observer
         // preserves that same composite identity. Retired generations stay in
         // history without colliding with the active request table.
-        items: [...pending, ...terminal]
-          .filter((watch) => this.classifyRequestWatch(watch) !== "foreign")
-          .map((watch) => requestFromWatch(watch, readAtMs)),
+        items: currentWatches.map((watch, index) =>
+          requestFromWatch(watch, readAtMs, observations[index])
+        ),
         readAtMs,
         lastError: null
       };
@@ -409,32 +414,60 @@ function normalizeReadCompletion(raw, fallback) {
   return Number.isFinite(value) ? value : fallback;
 }
 
-function requestFromWatch(watch, nowMs) {
+function requestFromWatch(watch, nowMs, observation = undefined) {
   const startedAtMs = Date.parse(watch?.startedAt ?? "");
   const deadlineAtMs = Date.parse(watch?.deadlineAt ?? "");
   const invalidTiming = !Number.isFinite(startedAtMs)
     || !Number.isFinite(deadlineAtMs)
     || startedAtMs > nowMs
     || deadlineAtMs < startedAtMs;
-  const terminal = watch?.status !== "pending";
+  const reconciliation = safeTerminalReconciliation(watch?.reconciliation);
+  const balanceTerminal = watch?.status !== "pending";
+  // A balance terminal is only an observation. Until the settlement watcher
+  // records the chain-side finalization, the board must not call it succeeded.
+  // Historical manual recoveries carry their explicit reconciliation instead.
+  const finalizationPending = balanceTerminal
+    && !reconciliation
+    && (!observation || !observation.processed);
+  const finalizationErrored = finalizationPending && Boolean(observation?.lastError);
+  const terminal = balanceTerminal && !finalizationPending;
   const item = {
     id: String(watch?.requestId ?? "unknown-request"),
     wrapperAddress: String(watch?.wrapperAddress ?? "unknown-wrapper"),
     kind: String(watch?.kind ?? inferRequestKind(watch?.direction)),
     phase: String(
-      invalidTiming
-        ? "timing-unknown"
-        : watch?.phase ?? (watch?.lastError ? "recovery-pending" : "pending-finalize")
+      finalizationErrored
+        ? "finalize-error"
+        : finalizationPending
+          ? "pending-finalize"
+          : invalidTiming
+            ? "timing-unknown"
+            : watch?.phase ?? (watch?.lastError ? "recovery-pending" : "pending-finalize")
     ),
     ageSeconds: Number.isFinite(startedAtMs)
       ? Math.max(Math.floor((nowMs - startedAtMs) / 1000), 0)
       : 0,
     // An unreadable deadline fails toward the alarm, not toward all-clear.
-    overdue: terminal ? false : invalidTiming || nowMs >= deadlineAtMs,
-    status: String(watch?.status ?? "pending")
+    overdue: terminal || finalizationPending ? false : invalidTiming || nowMs >= deadlineAtMs,
+    status: finalizationErrored
+      ? "error"
+      : finalizationPending
+        ? "pending"
+        : String(watch?.status ?? "pending")
   };
-  if (!terminal && !invalidTiming) item.deadlineAtMs = deadlineAtMs;
-  const reconciliation = safeTerminalReconciliation(watch?.reconciliation);
+  if (finalizationPending) {
+    item.observedOutcome = String(watch?.status ?? observation?.status ?? "unknown");
+    item.finalization = {
+      status: finalizationErrored ? "error" : "pending",
+      attemptCount: Number(observation?.attemptCount ?? 0),
+      lastError: observation?.lastError
+        ? redactProviderError(observation.lastError) || "finalization_failed"
+        : null,
+      lastTriedAt: observation?.lastTriedAt ?? null,
+      nextAttemptAt: observation?.nextAttemptAt ?? null
+    };
+  }
+  if (!terminal && !finalizationPending && !invalidTiming) item.deadlineAtMs = deadlineAtMs;
   if (terminal && reconciliation) item.reconciliation = reconciliation;
   return item;
 }
@@ -567,6 +600,26 @@ function normalizeRequests(raw) {
         status: String(item?.status ?? (phase === "terminal" ? "unknown-terminal" : "pending"))
       };
       if (phase !== "terminal" && Number.isFinite(deadlineAtMs)) normalized.deadlineAtMs = deadlineAtMs;
+      if ((phase === "pending-finalize" || phase === "finalize-error")
+        && item?.finalization && typeof item.finalization === "object") {
+        normalized.observedOutcome = String(item?.observedOutcome ?? "unknown");
+        normalized.finalization = {
+          status: item.finalization.status === "error" ? "error" : "pending",
+          attemptCount: Number.isSafeInteger(item.finalization.attemptCount)
+            && item.finalization.attemptCount >= 0
+            ? item.finalization.attemptCount
+            : 0,
+          lastError: item.finalization.lastError
+            ? String(item.finalization.lastError)
+            : null,
+          lastTriedAt: item.finalization.lastTriedAt
+            ? String(item.finalization.lastTriedAt)
+            : null,
+          nextAttemptAt: item.finalization.nextAttemptAt
+            ? String(item.finalization.nextAttemptAt)
+            : null
+        };
+      }
       const reconciliation = safeTerminalReconciliation(item?.reconciliation);
       if (phase === "terminal" && reconciliation) normalized.reconciliation = reconciliation;
       return normalized;

@@ -2044,6 +2044,105 @@ test("finalizeXcmRequest preserves exact uint256 settlement amounts", async () =
   assert.equal(calls[0][3], 18446744073709551616n);
 });
 
+test("finalizeXcmRequest routes treasury-staged requests through the configured adapter", async () => {
+  const adapter = "0x631A09913B2403B18b2B659a1397916621b29b4c";
+  const treasury = "0x01E6eed856e989201F4FF6346E18EAb7e46C874C";
+  const gateway = new BlockchainGateway({
+    enabled: false,
+    supportedAssets: [USDC_TRUST_ASSET],
+    hydrationUsdcAdapterAddress: adapter
+  });
+  const requestId = `0x${"9d".repeat(32)}`;
+  const zero = `0x${"0".repeat(64)}`;
+  const adapterCalls = [];
+  let settled = false;
+  let wrapperDirectCalled = false;
+
+  gateway.signer = {};
+  gateway.getStrategyAdapterTotals = async () => ({ totalAssets: 0n, totalShares: 0n });
+  gateway.accountContract = {
+    async strategyRequests() {
+      return { account: "0x0000000000000000000000000000000000000000" };
+    }
+  };
+  gateway.xcmWrapperContract = {
+    async getRequest(id) {
+      assert.equal(id, requestId);
+      return {
+        context: {
+          strategyId: encodeBytes32String("HYDRATION_USDC_V1"),
+          kind: 0,
+          account: treasury,
+          asset: USDC_TRUST_ASSET.address,
+          recipient: treasury,
+          assets: 150_000n,
+          shares: 0n,
+          nonce: 2n
+        },
+        queuedBy: adapter,
+        status: settled ? 2 : 1,
+        settledAssets: settled ? 100_000n : 0n,
+        settledShares: settled ? 100_000n : 0n,
+        remoteRef: zero,
+        failureCode: zero,
+        createdAt: 10n,
+        updatedAt: 12n
+      };
+    },
+    async finalizeRequest() {
+      wrapperDirectCalled = true;
+      throw new Error("operator must not finalize the wrapper directly");
+    }
+  };
+  gateway.hydrationUsdcAdapterContract = {
+    async getAdapterRequest(id) {
+      assert.equal(id, requestId);
+      return {
+        kind: 0,
+        status: settled ? 2 : 1,
+        account: treasury,
+        requester: treasury,
+        recipient: treasury,
+        requestedAssets: 150_000n,
+        requestedShares: 0n,
+        settledAssets: settled ? 100_000n : 0n,
+        settledShares: settled ? 100_000n : 0n,
+        remoteRef: zero,
+        failureCode: zero,
+        settled
+      };
+    },
+    async settleRequest(...args) {
+      adapterCalls.push(args);
+      return {
+        async wait() {
+          settled = true;
+        }
+      };
+    }
+  };
+
+  const preflight = await gateway.preflightXcmSettlementOutcome(requestId, {
+    status: "succeeded",
+    settledAssets: "100000",
+    settledShares: "100000"
+  });
+  assert.equal(preflight.strategyBacked, false);
+  assert.equal(preflight.adapterBacked, true);
+
+  const result = await gateway.finalizeXcmRequest(requestId, {
+    status: "succeeded",
+    settledAssets: "100000",
+    settledShares: "100000"
+  });
+
+  assert.equal(wrapperDirectCalled, false);
+  assert.deepEqual(adapterCalls, [[requestId, 2, 100_000n, 100_000n, 0n, zero, zero]]);
+  assert.equal(result.settledVia, "strategy_adapter");
+  assert.equal(result.adapterRequest.settled, true);
+  assert.equal(result.statusLabel, "succeeded");
+});
+
 test("preflightXcmSettlementOutcome rejects strategy deposit ratios that the adapter would revert", async () => {
   const gateway = new BlockchainGateway({ enabled: false, supportedAssets: [USDC_TRUST_ASSET] });
   const requestId = `0x${"7".repeat(64)}`;

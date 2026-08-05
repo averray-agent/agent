@@ -2,19 +2,31 @@ import { ValidationError } from "../core/errors.js";
 
 const UINT256_MAX = (1n << 256n) - 1n;
 const TERMINAL_STATUSES = new Set(["succeeded", "failed", "cancelled"]);
+const DEFAULT_RETRY_BASE_MS = 15_000;
+const DEFAULT_RETRY_MAX_MS = 5 * 60_000;
 
 export class XcmSettlementWatcherService {
   constructor(
     platformService,
     stateStore,
     eventBus = undefined,
-    { enabled = false, pollIntervalMs = 15_000, logger = console } = {}
+    {
+      enabled = false,
+      pollIntervalMs = 15_000,
+      retryBaseMs = DEFAULT_RETRY_BASE_MS,
+      retryMaxMs = DEFAULT_RETRY_MAX_MS,
+      now = () => Date.now(),
+      logger = console
+    } = {}
   ) {
     this.platformService = platformService;
     this.stateStore = stateStore;
     this.eventBus = eventBus;
     this.enabled = enabled;
     this.pollIntervalMs = pollIntervalMs;
+    this.retryBaseMs = retryBaseMs;
+    this.retryMaxMs = retryMaxMs;
+    this.now = now;
     this.logger = logger;
     this.running = false;
     this.timer = undefined;
@@ -132,7 +144,8 @@ export class XcmSettlementWatcherService {
   }
 
   async runPendingSettlementBatch(limit) {
-    const pending = await this.stateStore.listPendingXcmObservations?.(limit) ?? [];
+    const pending = (await this.stateStore.listPendingXcmObservations?.(limit) ?? [])
+      .filter((observation) => this.retryIsDue(observation));
     const results = [];
 
     for (const observation of pending) {
@@ -177,7 +190,8 @@ export class XcmSettlementWatcherService {
         });
         results.push(finalizedWithPreflight);
       } catch (error) {
-        await this.stateStore.markXcmObservationFailed?.(observation.requestId, error);
+        const retry = this.retrySchedule(observation);
+        await this.stateStore.markXcmObservationFailed?.(observation.requestId, error, retry);
         this.eventBus?.publish({
           id: `xcm-auto-finalize-failed-${observation.requestId}-${Date.now()}`,
           topic: "xcm.request_finalize_failed",
@@ -185,14 +199,34 @@ export class XcmSettlementWatcherService {
           timestamp: new Date().toISOString(),
           data: {
             requestId: observation.requestId,
-            message: error?.message ?? "unknown_error"
+            message: error?.message ?? "unknown_error",
+            nextAttemptAt: retry.nextAttemptAt,
+            retryDelayMs: retry.retryDelayMs
           }
         });
-        this.logger.warn?.({ requestId: observation.requestId, err: error }, "xcm_settlement_watcher.finalize_failed");
+        this.logger.warn?.(
+          { requestId: observation.requestId, err: error, ...retry },
+          "xcm_settlement_watcher.finalize_failed"
+        );
       }
     }
 
     return results;
+  }
+
+  retryIsDue(observation) {
+    const nextAttemptMs = Date.parse(observation?.nextAttemptAt ?? "");
+    return !Number.isFinite(nextAttemptMs) || nextAttemptMs <= this.now();
+  }
+
+  retrySchedule(observation) {
+    const failedAttempts = Number(observation?.attemptCount ?? 0);
+    const exponent = Math.min(Math.max(failedAttempts, 0), 20);
+    const retryDelayMs = Math.min(this.retryMaxMs, this.retryBaseMs * (2 ** exponent));
+    return {
+      retryDelayMs,
+      nextAttemptAt: new Date(this.now() + retryDelayMs).toISOString()
+    };
   }
 
   async scheduleNextTick() {

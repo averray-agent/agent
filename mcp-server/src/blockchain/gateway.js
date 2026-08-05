@@ -16,6 +16,7 @@ import {
   ESCROW_CORE_ABI,
   ESCROW_CORE_LEGACY_ABI,
   ESCROW_CORE_V1_DRAIN_ABI,
+  HYDRATION_USDC_ADAPTER_V22_ABI,
   REPUTATION_SBT_ABI,
   STRATEGY_ADAPTER_ABI,
   TREASURY_POLICY_ABI,
@@ -133,6 +134,7 @@ export class BlockchainGateway {
       this.arbitratorDrainingEscrowContract = undefined;
       this.reputationContract = undefined;
       this.xcmWrapperContract = undefined;
+      this.hydrationUsdcAdapterContract = undefined;
       return;
     }
 
@@ -211,6 +213,13 @@ export class BlockchainGateway {
       ? new Contract(
           config.xcmWrapperAddress,
           XCM_WRAPPER_ABI,
+          this.signer ?? this.provider
+        )
+      : undefined;
+    this.hydrationUsdcAdapterContract = config.hydrationUsdcAdapterAddress
+      ? new Contract(
+          config.hydrationUsdcAdapterAddress,
+          HYDRATION_USDC_ADAPTER_V22_ABI,
           this.signer ?? this.provider
         )
       : undefined;
@@ -1894,10 +1903,49 @@ export class BlockchainGateway {
     });
   }
 
+  async getHydrationAdapterRequest(requestId, wrapperRequest = undefined) {
+    if (!this.hydrationUsdcAdapterContract || !this.config.hydrationUsdcAdapterAddress) {
+      return undefined;
+    }
+    const normalizedRequestId = this.toRequestId(requestId);
+    const liveWrapperRequest = wrapperRequest ?? await this.getXcmRequest(normalizedRequestId);
+    if (
+      String(liveWrapperRequest?.queuedBy ?? "").toLowerCase()
+        !== this.config.hydrationUsdcAdapterAddress.toLowerCase()
+    ) {
+      return undefined;
+    }
+    const record = await this.hydrationUsdcAdapterContract.getAdapterRequest(normalizedRequestId);
+    if (!record?.requester || record.requester === ZERO_ADDRESS) {
+      throw new NotFoundError(
+        `Hydration adapter request ${normalizedRequestId} not found.`,
+        "strategy_request_not_found"
+      );
+    }
+    return {
+      requestId: normalizedRequestId,
+      adapter: this.config.hydrationUsdcAdapterAddress,
+      account: record.account,
+      recipient: record.recipient,
+      kind: Number(record.kind),
+      kindLabel: REQUEST_KIND_LABELS[Number(record.kind)] ?? "unknown",
+      status: Number(record.status),
+      statusLabel: REQUEST_STATUS_LABELS[Number(record.status)] ?? "unknown",
+      requestedAssetsRaw: this.toRawString(record.requestedAssets),
+      requestedSharesRaw: this.toRawString(record.requestedShares),
+      settledAssetsRaw: this.toRawString(record.settledAssets),
+      settledSharesRaw: this.toRawString(record.settledShares),
+      remoteRef: this.normalizeOptionalBytes32(record.remoteRef),
+      failureCode: this.normalizeOptionalBytes32(record.failureCode),
+      settled: Boolean(record.settled)
+    };
+  }
+
   async finalizeXcmRequest(requestId, {
     status,
     settledAssets = 0,
     settledShares = 0,
+    observedRemoteBalanceRaw = 0,
     remoteRef = ZERO_BYTES32,
     failureCode = ZERO_BYTES32
   } = {}) {
@@ -1909,6 +1957,10 @@ export class BlockchainGateway {
       const normalizedFailureCode = this.toBytes32Value(failureCode, "failureCode");
       const normalizedSettledAssets = this.normalizeUint256(settledAssets, "settledAssets");
       const normalizedSettledShares = this.normalizeUint256(settledShares, "settledShares");
+      const normalizedObservedRemoteBalance = this.normalizeUint256(
+        observedRemoteBalanceRaw,
+        "observedRemoteBalanceRaw"
+      );
       let strategyRequest;
       try {
         strategyRequest = await this.getStrategyRequest(normalizedRequestId);
@@ -1917,9 +1969,14 @@ export class BlockchainGateway {
           throw error;
         }
       }
-      if (strategyRequest?.settled) {
+      const wrapperRequest = strategyRequest ? undefined : await this.getXcmRequest(normalizedRequestId);
+      const adapterRequest = strategyRequest
+        ? undefined
+        : await this.getHydrationAdapterRequest(normalizedRequestId, wrapperRequest);
+      const settlementRequest = strategyRequest ?? adapterRequest;
+      if (settlementRequest?.settled) {
         if (!this.strategySettlementMatches(
-          strategyRequest,
+          settlementRequest,
           normalizedStatus,
           normalizedSettledAssets,
           normalizedSettledShares,
@@ -1929,20 +1986,20 @@ export class BlockchainGateway {
           throw new ValidationError("Strategy XCM request is already settled with a different outcome.");
         }
         return {
-          ...(await this.getXcmRequest(normalizedRequestId)),
-          strategyRequest,
-          settledVia: "agent_account",
+          ...(wrapperRequest ?? await this.getXcmRequest(normalizedRequestId)),
+          ...(strategyRequest ? { strategyRequest } : { adapterRequest }),
+          settledVia: strategyRequest ? "agent_account" : "strategy_adapter",
           alreadySettled: true
         };
       }
       this.validateStrategySettlementOutcome(
-        strategyRequest,
+        settlementRequest,
         normalizedStatus,
         normalizedSettledAssets,
         normalizedSettledShares
       );
       const settlementPreflight = await this.preflightStrategySettlementRatio(
-        strategyRequest,
+        settlementRequest,
         normalizedStatus,
         normalizedSettledAssets,
         normalizedSettledShares
@@ -1957,7 +2014,17 @@ export class BlockchainGateway {
             normalizedRemoteRef,
             normalizedFailureCode
           )
-        : await this.requireXcmWrapper("finalizeXcmRequest").finalizeRequest(
+        : adapterRequest
+          ? await this.hydrationUsdcAdapterContract.settleRequest(
+              normalizedRequestId,
+              normalizedStatus,
+              normalizedSettledAssets,
+              normalizedSettledShares,
+              normalizedObservedRemoteBalance,
+              normalizedRemoteRef,
+              normalizedFailureCode
+            )
+          : await this.requireXcmWrapper("finalizeXcmRequest").finalizeRequest(
             normalizedRequestId,
             normalizedStatus,
             normalizedSettledAssets,
@@ -1968,9 +2035,16 @@ export class BlockchainGateway {
       await tx.wait();
       return {
         ...(await this.getXcmRequest(normalizedRequestId)),
-        strategyRequest: await this.getStrategyRequest(normalizedRequestId).catch(() => undefined),
+        ...(strategyRequest
+          ? { strategyRequest: await this.getStrategyRequest(normalizedRequestId).catch(() => undefined) }
+          : adapterRequest
+            ? {
+                adapterRequest: await this.getHydrationAdapterRequest(normalizedRequestId)
+                  .catch(() => undefined)
+              }
+            : {}),
         ...(settlementPreflight ? { settlementPreflight } : {}),
-        settledVia: strategyRequest ? "agent_account" : "xcm_wrapper",
+        settledVia: strategyRequest ? "agent_account" : adapterRequest ? "strategy_adapter" : "xcm_wrapper",
         alreadySettled: false
       };
     });
@@ -1994,14 +2068,19 @@ export class BlockchainGateway {
           throw error;
         }
       }
+      const wrapperRequest = strategyRequest ? undefined : await this.getXcmRequest(normalizedRequestId);
+      const adapterRequest = strategyRequest
+        ? undefined
+        : await this.getHydrationAdapterRequest(normalizedRequestId, wrapperRequest);
+      const settlementRequest = strategyRequest ?? adapterRequest;
       this.validateStrategySettlementOutcome(
-        strategyRequest,
+        settlementRequest,
         normalizedStatus,
         normalizedSettledAssets,
         normalizedSettledShares
       );
       const settlementPreflight = await this.preflightStrategySettlementRatio(
-        strategyRequest,
+        settlementRequest,
         normalizedStatus,
         normalizedSettledAssets,
         normalizedSettledShares
@@ -2010,6 +2089,7 @@ export class BlockchainGateway {
         requestId: normalizedRequestId,
         ok: true,
         strategyBacked: Boolean(strategyRequest),
+        adapterBacked: Boolean(adapterRequest),
         ...(settlementPreflight ? { settlementPreflight } : {})
       };
     });

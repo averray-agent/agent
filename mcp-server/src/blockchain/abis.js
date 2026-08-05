@@ -164,6 +164,12 @@ export const STRATEGY_ADAPTER_ABI = [
   "function riskLabel() view returns (string)"
 ];
 
+export const HYDRATION_USDC_ADAPTER_V22_ABI = [
+  ...STRATEGY_ADAPTER_ABI,
+  "function getAdapterRequest(bytes32 requestId) view returns ((uint8 kind, uint8 status, address account, address requester, address recipient, uint256 requestedAssets, uint256 requestedShares, uint256 settledAssets, uint256 settledShares, bytes32 remoteRef, bytes32 failureCode, bool settled))",
+  "function settleRequest(bytes32 requestId, uint8 status, uint256 settledAssets, uint256 settledShares, uint256 observedRemoteBalanceRaw, bytes32 remoteRef, bytes32 failureCode)"
+];
+
 export const XCM_WRAPPER_ABI = [
   "function weighMessage(bytes message) view returns ((uint64 refTime, uint64 proofSize))",
   "function getRequest(bytes32 requestId) view returns (((bytes32 strategyId, uint8 kind, address account, address asset, address recipient, uint256 assets, uint256 shares, uint64 nonce) context, address queuedBy, uint8 status, uint256 settledAssets, uint256 settledShares, bytes32 remoteRef, bytes32 failureCode, uint64 createdAt, uint64 updatedAt))",
