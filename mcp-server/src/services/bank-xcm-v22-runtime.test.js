@@ -4,6 +4,7 @@ import { Interface } from "ethers";
 
 import {
   BankXcmV22Runtime,
+  bindForwardedWireFrame,
   composeOnWire,
   createBankXcmV22RuntimeServices
 } from "./bank-xcm-v22-runtime.js";
@@ -39,6 +40,28 @@ const wrapperInterface = new Interface(XCM_WRAPPER_ABI);
 
 test("composeOnWire reproduces the live find-16 polkadotXcm.Sent transport frame byte-for-byte", () => {
   assert.equal(composeOnWire(FIND16_RAW_SENT_MESSAGE, FIND16_WRAPPER), FIND16_WIRE_MESSAGE);
+});
+
+test("forwarded wire binding accepts the already-framed runtime payload without framing it twice", () => {
+  assert.deepEqual(
+    bindForwardedWireFrame(FIND16_RAW_SENT_MESSAGE, FIND16_WIRE_MESSAGE, FIND16_WRAPPER),
+    {
+      rawWrapperMessage: FIND16_RAW_SENT_MESSAGE,
+      composedOnWireMessage: FIND16_WIRE_MESSAGE
+    }
+  );
+});
+
+test("forwarded wire binding refuses raw or mismatched runtime payloads", () => {
+  assert.throws(
+    () => bindForwardedWireFrame(FIND16_RAW_SENT_MESSAGE, FIND16_RAW_SENT_MESSAGE, FIND16_WRAPPER),
+    /does not match the wrapper preview frame/u
+  );
+  const mutated = `${FIND16_WIRE_MESSAGE.slice(0, -2)}00`;
+  assert.throws(
+    () => bindForwardedWireFrame(FIND16_RAW_SENT_MESSAGE, mutated, FIND16_WRAPPER),
+    /does not match the wrapper preview frame/u
+  );
 });
 
 test("find-16 raw wrapper bytes with sibling origin remain Incomplete@0 FailedToTransactAsset", async () => {
