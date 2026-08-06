@@ -195,13 +195,31 @@ and it needs **write on `mainnet-smoke`**. In the console the match is
 repository** (`git grep canary-ci-mainnet` → no hits): created by hand, never
 recorded.
 
-**This exposes a defect in `bootstrap-mainnet-vault.mjs`, not just in the calendar.**
-The bootstrap declares the rotation account as `averray-mainnet-admin-refresh-rw`
-with `reads: ["mainnet-backend"], writes: ["mainnet-backend"]` — but **the refresh
-chains live in `mainnet-smoke`, not `mainnet-backend`**. The deployed reality is
-correct and the committed design is wrong: re-running the bootstrap today would mint
-an account with write on the wrong vault, and the rotation would fail its own
-write-capability preflight.
+**CORRECTION (2026-08-06, same day): there is NO bootstrap defect — my first
+reading of this was wrong.** I claimed `bootstrap-mainnet-vault.mjs` declared the
+rotation account against the wrong vault. It does not. `MAINNET_REFRESH_RW_TOKEN`
+is a *different mechanism*, and its own docblock says so:
+
+> Optional 5th token — a READ+WRITE service account for the **per-consumer JWT
+> refresh-flow automation**. Only provision this if **DEC-4 sets
+> JWT_MAX_TTL_SECONDS <= 1h** (the refresh-flow migration).
+
+Its consumer is a VPS file rendered by `mainnet-sidecar-refresh-render`, so
+`mainnet-backend` is the correct vault *for that job*, and `planTokens()` defaults
+`withRefreshRw` to `false`. The account is therefore **correctly absent**: the ≤1h
+JWT TTL work it belongs to has not been built. Its absence is design, not drift, and
+re-running the bootstrap is safe.
+
+The CI refresh chains in `mainnet-smoke` are a separate, correctly-designed path
+rotated by the `OP_SERVICE_ACCOUNT_TOKEN_MAINNET_SMOKE` account — the trace above
+stands unchanged. **What survives as a real finding is narrower:** the account doing
+that rotation is undocumented in this repository, and the calendar does not track it.
+
+I asserted the defect from a name resemblance (`admin-refresh-rw` ≈ "refresh token
+rotation") without reading the declaration's own documentation six lines above it.
+Recording it here because a wrong claim in a packet becomes someone else's wasted
+change — and because this is the second time in one review that an unverified
+inference nearly became a reported defect.
 
 **Confidence:** the *role* is documented and evidenced; the *specific account* is a
 strong inference from name, vault scope and a same-morning access timestamp. One
