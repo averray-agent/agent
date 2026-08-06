@@ -7,8 +7,11 @@ const V21_TERMINAL_BLOCK = 19_048_419;
 const V21_TERMINAL_BLOCK_HASH = "0x0841027cf938961e3ed61df623981efce148cfe464496702baf565cb3582cc29";
 const V21_TERMINAL_AT = "2026-08-04T11:34:00.000Z";
 const V22_WRAPPER = "0xecee778e11b238d2fc096e56460e7b98dc7b26b8";
-const V22_SETTLED_ASSETS = "100000";
-const V22_SETTLED_SHARES = "100000";
+const V22_SETTLED_ASSETS = "0";
+const V22_SETTLED_SHARES = "0";
+const V22_FAILURE_CODE = "0x19f800d9f7e28210802138d60cda15ec94016cfb24f6a8c293a6cb83150c720d";
+const V22_OBSERVATION_SOURCE = "balance_timeout:erc20";
+const V22_SETTLED_VIA = "adapter_v22_expiry_cancel";
 
 /**
  * One-time bridge from the request-id-only observer table to the wrapper-
@@ -62,9 +65,11 @@ export async function migrateLegacyBankV21BalanceWatch(stateStore, { logger = co
 
 /**
  * The v2.2 deposit reused the deterministic treasury nonce-1 request id and
- * produced the sole request-id-only observation in production. Move that
- * already-settled fact under the v2.2 wrapper namespace. The v2.2.1 terminal
- * balance watch can then resume its own observation without either generation
+ * produced the sole request-id-only observation in production. It records the
+ * audited expiry cancellation (Failed 0/0 on the observer side, converged to
+ * Cancelled by the adapter), not the later manually settled deposit. Move that
+ * terminal fact under the v2.2 wrapper namespace. The v2.2.1 terminal balance
+ * watch can then resume its own observation without either generation
  * suppressing the other.
  */
 export async function migrateLegacyBankV22Observation(stateStore, { logger = console } = {}) {
@@ -75,10 +80,14 @@ export async function migrateLegacyBankV22Observation(stateStore, { logger = con
     requestId: V21_REQUEST_ID,
     wrapperAddress: V22_WRAPPER,
     expected: {
-      status: "succeeded",
+      status: "failed",
       settledAssets: V22_SETTLED_ASSETS,
       settledShares: V22_SETTLED_SHARES,
-      processed: true
+      failureCode: V22_FAILURE_CODE,
+      source: V22_OBSERVATION_SOURCE,
+      processed: true,
+      "result.status": "cancelled",
+      "result.settledVia": V22_SETTLED_VIA
     }
   });
   logger.info?.({
@@ -109,5 +118,8 @@ export const BANK_XCM_V22_OBSERVATION_MIGRATION = Object.freeze({
   requestId: V21_REQUEST_ID,
   wrapperAddress: V22_WRAPPER,
   settledAssets: V22_SETTLED_ASSETS,
-  settledShares: V22_SETTLED_SHARES
+  settledShares: V22_SETTLED_SHARES,
+  failureCode: V22_FAILURE_CODE,
+  source: V22_OBSERVATION_SOURCE,
+  settledVia: V22_SETTLED_VIA
 });

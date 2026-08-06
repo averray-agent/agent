@@ -1629,7 +1629,8 @@ function assertLegacyXcmWatchTarget(watch, expectedTargetAccount) {
 
 function assertLegacyXcmObservation(observation, expected = {}) {
   for (const [field, value] of Object.entries(expected)) {
-    if (String(observation?.[field] ?? "") !== String(value)) {
+    const actual = field.split(".").reduce((current, part) => current?.[part], observation);
+    if (String(actual ?? "") !== String(value)) {
       throw new ExternalServiceError(
         `Legacy XCM observation did not match audited ${field}; refusing migration.`
       );
