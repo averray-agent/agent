@@ -4,6 +4,7 @@ import { Interface } from "ethers";
 
 import {
   BankXcmV22Runtime,
+  composeOnWire,
   createBankXcmV22RuntimeServices
 } from "./bank-xcm-v22-runtime.js";
 import { XCM_WRAPPER_ABI } from "../blockchain/abis.js";
@@ -30,7 +31,34 @@ const HYDRATION_USDC_LOCATION = {
   parents: 0,
   interior: { x2: [{ palletInstance: 10 }, { generalIndex: 22 }] }
 };
+const FIND16_WRAPPER = "0xF20b35A3f85EC864127B551ce8A64446fC0ed2Bc";
+const FIND16_RAW_SENT_MESSAGE = "0x05180004010300a10f043205e514007636010013010300a10f043205e5140076360100000601010700c817a80482841e00d04300eb03000016000000a0860100000000000000000000000000a08601000000000000000000000000000404eb03000016000000140d0102040001010048df881b65e682f05ac24dc8f668a8938225e973f6ebfce08cd5a3835491e7f32c6e66ff78549d419a63766596aa9fb312f637b6e04f3639b34853021e077341db";
+const FIND16_WIRE_MESSAGE = "0x051c0b01010102f20b35a3f85ec864127b551ce8a64446fc0ed2bceeeeeeeeeeeeeeeeeeeeeeee0004010300a10f043205e514007636010013010300a10f043205e5140076360100000601010700c817a80482841e00d04300eb03000016000000a0860100000000000000000000000000a08601000000000000000000000000000404eb03000016000000140d0102040001010048df881b65e682f05ac24dc8f668a8938225e973f6ebfce08cd5a3835491e7f32c6e66ff78549d419a63766596aa9fb312f637b6e04f3639b34853021e077341db";
+const HOME_RAW_MESSAGE = "0x05140004010300a10f043205e51400821a060013010300a10f043205e51400821a0600001410010204010100a10f08130002043205e5140004000d01020400010100f20b35a3f85ec864127b551ce8a64446fc0ed2bceeeeeeeeeeeeeeeeeeeeeeee2c6e66ff78549d419a63766596aa9fb312f637b6e04f3639b34853021e077341db";
 const wrapperInterface = new Interface(XCM_WRAPPER_ABI);
+
+test("composeOnWire reproduces the live find-16 polkadotXcm.Sent transport frame byte-for-byte", () => {
+  assert.equal(composeOnWire(FIND16_RAW_SENT_MESSAGE, FIND16_WRAPPER), FIND16_WIRE_MESSAGE);
+});
+
+test("find-16 raw wrapper bytes with sibling origin remain Incomplete@0 FailedToTransactAsset", async () => {
+  const fixture = makeHomeFeeRuntime();
+  const raw = await fixture.runHydrationDryRun(HOME_RAW_MESSAGE);
+  assert.deepEqual(raw.toJSON(), {
+    ok: {
+      executionResult: {
+        incomplete: {
+          used: { refTime: 100000000, proofSize: 0 },
+          error: { index: 0, error: { failedToTransactAsset: null } }
+        }
+      },
+      emittedEvents: [],
+      forwardedXcms: []
+    }
+  });
+  const framed = await fixture.runHydrationDryRun(composeOnWire(HOME_RAW_MESSAGE, WRAPPER));
+  assert.ok(framed.toJSON().ok.executionResult.complete);
+});
 
 function makeRuntime({
   observer = undefined,
@@ -501,12 +529,17 @@ function makeHomeFeeRuntime({
     number: { toNumber: () => 19_121_365 },
     hash: hexCodec(BLOCK_HASH)
   };
-  const previewMessage = homeMessage(grossAmountRaw);
+  const previewMessage = HOME_RAW_MESSAGE;
+  const framedMessage = composeOnWire(previewMessage, WRAPPER);
   const forwardedMessage = homeArrivalMessage(forwardedArrivalRaw);
+  const convertedAccount = `0x${"ab".repeat(32)}`;
   const assetHub = {
     rpc: { chain: { async getHeader() { return header; } } },
     query: { timestamp: { async now() { return stringCodec("1786000000000"); } } },
-    createType(_name, message) { return { toJSON() { return message; } }; },
+    createType(name, message) {
+      if (name === "AccountId32") return { toHex() { return String(message); } };
+      return { toJSON() { return message; } };
+    },
     call: {
       xcmPaymentApi: {
         async queryXcmWeight(message) {
@@ -523,13 +556,18 @@ function makeHomeFeeRuntime({
   const hydration = {
     rpc: { chain: { async getHeader() { return header; } } },
     query: { timestamp: { async now() { return stringCodec("1786000000000"); } } },
-    createType(_name, message) { return { toJSON() { return message; } }; },
+    createType(name, message) {
+      if (name === "AccountId32") return { toHex() { return String(message); } };
+      if (message === previewMessage) return { toJSON() { return homeMessage(grossAmountRaw); } };
+      return { toJSON() { return message; } };
+    },
     call: {
       dryRunApi: {
         async dryRunXcm(origin, message) {
           hydrationDryRunCount += 1;
           assert.deepEqual(origin, { V5: { parents: 1, interior: { X1: [{ Parachain: 1000 }] } } });
-          assert.deepEqual(message, previewMessage);
+          if (message === previewMessage) return incompleteFind16DryRun();
+          assert.equal(message, framedMessage);
           return {
             toJSON() {
               return {
@@ -538,13 +576,20 @@ function makeHomeFeeRuntime({
                   forwardedXcms: [[ASSET_HUB_DESTINATION, [forwardedMessage]]]
                 }
               };
-            }
+            },
+            toHuman() {
+              return {
+                Ok: {
+                  emittedEvents: [{ section: "tokens", method: "Withdrawn", data: { who: convertedAccount, amount: grossAmountRaw } }]
+                }
+              };
+            },
           };
         }
       },
       xcmPaymentApi: {
         async queryXcmWeight(message) {
-          assert.deepEqual(message, previewMessage);
+          assert.equal(message, framedMessage);
           return { isOk: true, asOk: { refTime: "550000000", proofSize: "13000" } };
         },
         async queryWeightToAssetFee(_weight, asset) {
@@ -563,9 +608,35 @@ function makeHomeFeeRuntime({
   };
   return {
     runtime,
+    runHydrationDryRun(message) {
+      return hydration.call.dryRunApi.dryRunXcm(
+        { V5: { parents: 1, interior: { X1: [{ Parachain: 1000 }] } } },
+        message
+      );
+    },
     get hydrationFeeAsset() { return hydrationFeeAsset; },
     get assetHubFeeAsset() { return assetHubFeeAsset; },
     get hydrationDryRunCount() { return hydrationDryRunCount; }
+  };
+}
+
+function incompleteFind16DryRun() {
+  return {
+    toJSON() {
+      return {
+        ok: {
+          executionResult: {
+            incomplete: {
+              used: { refTime: 100000000, proofSize: 0 },
+              error: { index: 0, error: { failedToTransactAsset: null } }
+            }
+          },
+          emittedEvents: [],
+          forwardedXcms: []
+        }
+      };
+    },
+    toHuman() { return { Ok: { emittedEvents: [] } }; },
   };
 }
 
@@ -584,7 +655,7 @@ function homeArrivalMessage(amount) {
   return {
     v5: [
       {
-        reserveAssetDeposited: [{
+        withdrawAsset: [{
           id: HYDRATION_USDC_LOCATION,
           fun: { fungible: String(amount) }
         }]

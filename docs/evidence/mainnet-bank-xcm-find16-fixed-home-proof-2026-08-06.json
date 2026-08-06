@@ -1,0 +1,426 @@
+{
+  "schemaVersion": 1,
+  "kind": "averray.bankXcmFind16FixedHomeProof",
+  "capturedAt": "2026-08-06T07:21:47.083Z",
+  "signedOrBroadcastTransactions": 0,
+  "wrapper": "0xF20b35A3f85EC864127B551ce8A64446fC0ed2Bc",
+  "requestId": "0x6e66ff78549d419a63766596aa9fb312f637b6e04f3639b34853021e077341db",
+  "liveState": {
+    "bitmap": 4,
+    "requestStatus": 1,
+    "kind": 1
+  },
+  "endpoints": {
+    "assetHub": "wss://asset-hub-polkadot-rpc.n.dwellir.com/",
+    "hydration": "wss://hydration-rpc.n.dwellir.com/"
+  },
+  "blocks": {
+    "assetHub": {
+      "number": 19123567,
+      "hash": "0xb74ded55c270bd8d12ea09ecfeb98b396aed7e2f33321cf0938b44b2f2b4ad8a"
+    },
+    "hydration": {
+      "number": 13484580,
+      "hash": "0x83debb42796afdeb4fc350b2614a3b8ecc560fe02de8083ecc6949eee1286997"
+    }
+  },
+  "quote": {
+    "grossAmountRaw": "100000",
+    "upstreamFeeRaw": "704",
+    "quotedArrivalRaw": "99296",
+    "homeExecutionQuoteRaw": "700",
+    "selectedFeeRaw": "1400",
+    "feeSource": "fresh_home_quote_x2",
+    "maxFeePerLegRaw": "40000"
+  },
+  "stage1": {
+    "origin": {
+      "V5": {
+        "parents": 1,
+        "interior": {
+          "X1": [
+            {
+              "Parachain": 1000
+            }
+          ]
+        }
+      }
+    },
+    "rawWrapperMessage": "0x05140004010300a10f043205e51400821a060013010300a10f043205e51400821a0600001410010204010100a10f08130002043205e51400e115000d01020400010100f20b35a3f85ec864127b551ce8a64446fc0ed2bceeeeeeeeeeeeeeeeeeeeeeee2c6e66ff78549d419a63766596aa9fb312f637b6e04f3639b34853021e077341db",
+    "composedOnWireMessage": "0x05180b01010102f20b35a3f85ec864127b551ce8a64446fc0ed2bceeeeeeeeeeeeeeeeeeeeeeee0004010300a10f043205e51400821a060013010300a10f043205e51400821a0600001410010204010100a10f08130002043205e51400e115000d01020400010100f20b35a3f85ec864127b551ce8a64446fc0ed2bceeeeeeeeeeeeeeeeeeeeeeee2c6e66ff78549d419a63766596aa9fb312f637b6e04f3639b34853021e077341db",
+    "result": {
+      "ok": {
+        "executionResult": {
+          "complete": {
+            "used": {
+              "refTime": 600000000,
+              "proofSize": 0
+            }
+          }
+        },
+        "emittedEvents": [
+          {
+            "index": "0x4d08",
+            "data": [
+              22,
+              "12eYrKzitqg8q8CiGCiAymMZeFH5wRnngxQ5uynmEp4WUYn4",
+              100000
+            ]
+          },
+          {
+            "index": "0x0104",
+            "data": [
+              "12eYrKzitqg8q8CiGCiAymMZeFH5wRnngxQ5uynmEp4WUYn4"
+            ]
+          },
+          {
+            "index": "0x4d02",
+            "data": [
+              22,
+              "12eYrKzitqg8q8CiGCiAymMZeFH5wRnngxQ5uynmEp4WUYn4",
+              "13UVJyLnbVp9RBZYFwFGyDvVd1y27Tt8tkntv6Q7JVPhFsTB",
+              82
+            ]
+          },
+          {
+            "index": "0x4d01",
+            "data": [
+              22,
+              "12eYrKzitqg8q8CiGCiAymMZeFH5wRnngxQ5uynmEp4WUYn4",
+              82
+            ]
+          },
+          {
+            "index": "0x4f03",
+            "data": [
+              22,
+              "12eYrKzitqg8q8CiGCiAymMZeFH5wRnngxQ5uynmEp4WUYn4",
+              100000
+            ]
+          },
+          {
+            "index": "0x6f00",
+            "data": [
+              "0x5c02879fae6e375542839f9d9e9160a95b83794e1208d9be8d380bbadefb93c6"
+            ]
+          },
+          {
+            "index": "0x4d0a",
+            "data": [
+              22,
+              "13UVJyLnbVp9RBZYFwFGyDvVd1y27Tt8tkntv6Q7JVPhFsTB",
+              704
+            ]
+          },
+          {
+            "index": "0x4f02",
+            "data": [
+              22,
+              "13UVJyLnbVp9RBZYFwFGyDvVd1y27Tt8tkntv6Q7JVPhFsTB",
+              704
+            ]
+          }
+        ],
+        "forwardedXcms": [
+          [
+            {
+              "v5": {
+                "parents": 1,
+                "interior": {
+                  "x1": [
+                    {
+                      "parachain": 1000
+                    }
+                  ]
+                }
+              }
+            },
+            [
+              {
+                "v5": [
+                  {
+                    "withdrawAsset": [
+                      {
+                        "id": {
+                          "parents": 0,
+                          "interior": {
+                            "x2": [
+                              {
+                                "palletInstance": 50
+                              },
+                              {
+                                "generalIndex": 1337
+                              }
+                            ]
+                          }
+                        },
+                        "fun": {
+                          "fungible": 99296
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "clearOrigin": null
+                  },
+                  {
+                    "buyExecution": {
+                      "fees": {
+                        "id": {
+                          "parents": 0,
+                          "interior": {
+                            "x2": [
+                              {
+                                "palletInstance": 50
+                              },
+                              {
+                                "generalIndex": 1337
+                              }
+                            ]
+                          }
+                        },
+                        "fun": {
+                          "fungible": 1400
+                        }
+                      },
+                      "weightLimit": {
+                        "unlimited": null
+                      }
+                    }
+                  },
+                  {
+                    "depositAsset": {
+                      "assets": {
+                        "wild": {
+                          "allCounted": 1
+                        }
+                      },
+                      "beneficiary": {
+                        "parents": 0,
+                        "interior": {
+                          "x1": [
+                            {
+                              "accountId32": {
+                                "network": null,
+                                "id": "0xf20b35a3f85ec864127b551ce8a64446fc0ed2bceeeeeeeeeeeeeeeeeeeeeeee"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "setTopic": "0x6e66ff78549d419a63766596aa9fb312f637b6e04f3639b34853021e077341db"
+                  }
+                ]
+              }
+            ]
+          ]
+        ]
+      }
+    },
+    "withdrawal": {
+      "method": "Withdrawn",
+      "section": "tokens",
+      "index": "0x4d08",
+      "data": {
+        "currencyId": "22",
+        "who": "12eYrKzitqg8q8CiGCiAymMZeFH5wRnngxQ5uynmEp4WUYn4",
+        "amount": "100,000"
+      }
+    },
+    "forwardedParaId": 1000,
+    "forwardedMessage": {
+      "v5": [
+        {
+          "withdrawAsset": [
+            {
+              "id": {
+                "parents": 0,
+                "interior": {
+                  "x2": [
+                    {
+                      "palletInstance": 50
+                    },
+                    {
+                      "generalIndex": 1337
+                    }
+                  ]
+                }
+              },
+              "fun": {
+                "fungible": 99296
+              }
+            }
+          ]
+        },
+        {
+          "clearOrigin": null
+        },
+        {
+          "buyExecution": {
+            "fees": {
+              "id": {
+                "parents": 0,
+                "interior": {
+                  "x2": [
+                    {
+                      "palletInstance": 50
+                    },
+                    {
+                      "generalIndex": 1337
+                    }
+                  ]
+                }
+              },
+              "fun": {
+                "fungible": 1400
+              }
+            },
+            "weightLimit": {
+              "unlimited": null
+            }
+          }
+        },
+        {
+          "depositAsset": {
+            "assets": {
+              "wild": {
+                "allCounted": 1
+              }
+            },
+            "beneficiary": {
+              "parents": 0,
+              "interior": {
+                "x1": [
+                  {
+                    "accountId32": {
+                      "network": null,
+                      "id": "0xf20b35a3f85ec864127b551ce8a64446fc0ed2bceeeeeeeeeeeeeeeeeeeeeeee"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "setTopic": "0x6e66ff78549d419a63766596aa9fb312f637b6e04f3639b34853021e077341db"
+        }
+      ]
+    }
+  },
+  "stage2": {
+    "origin": {
+      "V5": {
+        "parents": 1,
+        "interior": {
+          "X1": [
+            {
+              "Parachain": 2034
+            }
+          ]
+        }
+      }
+    },
+    "result": {
+      "ok": {
+        "executionResult": {
+          "complete": {
+            "used": {
+              "refTime": 459753000,
+              "proofSize": 10943
+            }
+          }
+        },
+        "emittedEvents": [
+          {
+            "index": "0x3219",
+            "data": [
+              1337,
+              "13cKp89Uh2yWgTG28JA1QEvPUMjEPKejqkjHKf9zqLiFKjH6",
+              99296
+            ]
+          },
+          {
+            "index": "0x0a08",
+            "data": [
+              "163CRvzDQ8JHZfmufa86zA7BfDY7NToUSqmWbpDq5kwDYSmH",
+              8279628
+            ]
+          },
+          {
+            "index": "0x3218",
+            "data": [
+              1337,
+              "163CRvzDQ8JHZfmufa86zA7BfDY7NToUSqmWbpDq5kwDYSmH",
+              700
+            ]
+          },
+          {
+            "index": "0x3704",
+            "data": [
+              700,
+              8279628,
+              [
+                [
+                  {
+                    "parents": 0,
+                    "interior": {
+                      "x2": [
+                        {
+                          "palletInstance": 50
+                        },
+                        {
+                          "generalIndex": 1337
+                        }
+                      ]
+                    }
+                  },
+                  700
+                ],
+                [
+                  {
+                    "parents": 1,
+                    "interior": {
+                      "here": null
+                    }
+                  },
+                  8279628
+                ]
+              ]
+            ]
+          },
+          {
+            "index": "0x3218",
+            "data": [
+              1337,
+              "16UMvFEn69RefaRfq4egSzCJxN8Kdi3m2aBCYCsFH2p1T6cj",
+              98596
+            ]
+          },
+          {
+            "index": "0x0a07",
+            "data": [
+              "13UVJyLkAxdQn6zM3Gz49SmCLi8SZW3bdtm7DTY29ScavqW2",
+              8279628
+            ]
+          }
+        ],
+        "forwardedXcms": []
+      }
+    },
+    "deposit": {
+      "method": "Deposited",
+      "section": "assets",
+      "index": "0x3218",
+      "data": {
+        "assetId": "1,337",
+        "who": "16UMvFEn69RefaRfq4egSzCJxN8Kdi3m2aBCYCsFH2p1T6cj",
+        "amount": "98,596"
+      },
+      "amountRaw": "98596"
+    }
+  }
+}

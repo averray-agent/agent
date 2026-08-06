@@ -1,0 +1,494 @@
+{
+  "schemaVersion": 1,
+  "kind": "averray.bankXcmFind16WireGolden",
+  "capturedAt": "2026-08-06T07:14:51.217Z",
+  "endpoint": "wss://asset-hub-polkadot-rpc.n.dwellir.com/",
+  "blockNumber": 19122881,
+  "blockHash": "0x2694a10ec152ad8328927c2eefe3d041ec0cc5214b7fb07ba00d19e28137140d",
+  "evmTransactionHash": "0x4358e02e8a9cf179789ff205ebde127efd98d6500230fa9f74022ee1fc7d017d",
+  "requestId": "0x6e66ff78549d419a63766596aa9fb312f637b6e04f3639b34853021e077341db",
+  "expectedDescendedId": "0xf20b35a3f85ec864127b551ce8a64446fc0ed2bceeeeeeeeeeeeeeeeeeeeeeee",
+  "eventOrigin": {
+    "parents": 0,
+    "interior": {
+      "x1": [
+        {
+          "accountId32": {
+            "network": {
+              "polkadot": null
+            },
+            "id": "0xf20b35a3f85ec864127b551ce8a64446fc0ed2bceeeeeeeeeeeeeeeeeeeeeeee"
+          }
+        }
+      ]
+    }
+  },
+  "rawWrapperMessage": [
+    {
+      "withdrawAsset": [
+        {
+          "id": {
+            "parents": 1,
+            "interior": {
+              "x3": [
+                {
+                  "parachain": 1000
+                },
+                {
+                  "palletInstance": 50
+                },
+                {
+                  "generalIndex": 1337
+                }
+              ]
+            }
+          },
+          "fun": {
+            "fungible": 19869
+          }
+        }
+      ]
+    },
+    {
+      "buyExecution": {
+        "fees": {
+          "id": {
+            "parents": 1,
+            "interior": {
+              "x3": [
+                {
+                  "parachain": 1000
+                },
+                {
+                  "palletInstance": 50
+                },
+                {
+                  "generalIndex": 1337
+                }
+              ]
+            }
+          },
+          "fun": {
+            "fungible": 19869
+          }
+        },
+        "weightLimit": {
+          "unlimited": null
+        }
+      }
+    },
+    {
+      "transact": {
+        "originKind": "SovereignAccount",
+        "fallbackMaxWeight": {
+          "refTime": 20000000000,
+          "proofSize": 500000
+        },
+        "call": {
+          "encoded": "0x4300eb03000016000000a0860100000000000000000000000000a08601000000000000000000000000000404eb03000016000000"
+        }
+      }
+    },
+    {
+      "refundSurplus": null
+    },
+    {
+      "depositAsset": {
+        "assets": {
+          "wild": {
+            "allCounted": 1
+          }
+        },
+        "beneficiary": {
+          "parents": 0,
+          "interior": {
+            "x1": [
+              {
+                "accountId32": {
+                  "network": null,
+                  "id": "0x48df881b65e682f05ac24dc8f668a8938225e973f6ebfce08cd5a3835491e7f3"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "setTopic": "0x6e66ff78549d419a63766596aa9fb312f637b6e04f3639b34853021e077341db"
+    }
+  ],
+  "rawWrapperMessageHex": "0x05180004010300a10f043205e514007636010013010300a10f043205e5140076360100000601010700c817a80482841e00d04300eb03000016000000a0860100000000000000000000000000a08601000000000000000000000000000404eb03000016000000140d0102040001010048df881b65e682f05ac24dc8f668a8938225e973f6ebfce08cd5a3835491e7f32c6e66ff78549d419a63766596aa9fb312f637b6e04f3639b34853021e077341db",
+  "composedOnWireMessage": {
+    "v5": [
+      {
+        "descendOrigin": {
+          "x1": [
+            {
+              "accountId32": {
+                "network": {
+                  "polkadot": null
+                },
+                "id": "0xf20b35a3f85ec864127b551ce8a64446fc0ed2bceeeeeeeeeeeeeeeeeeeeeeee"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "withdrawAsset": [
+          {
+            "id": {
+              "parents": 1,
+              "interior": {
+                "x3": [
+                  {
+                    "parachain": 1000
+                  },
+                  {
+                    "palletInstance": 50
+                  },
+                  {
+                    "generalIndex": 1337
+                  }
+                ]
+              }
+            },
+            "fun": {
+              "fungible": 19869
+            }
+          }
+        ]
+      },
+      {
+        "buyExecution": {
+          "fees": {
+            "id": {
+              "parents": 1,
+              "interior": {
+                "x3": [
+                  {
+                    "parachain": 1000
+                  },
+                  {
+                    "palletInstance": 50
+                  },
+                  {
+                    "generalIndex": 1337
+                  }
+                ]
+              }
+            },
+            "fun": {
+              "fungible": 19869
+            }
+          },
+          "weightLimit": {
+            "unlimited": null
+          }
+        }
+      },
+      {
+        "transact": {
+          "originKind": "SovereignAccount",
+          "fallbackMaxWeight": {
+            "refTime": 20000000000,
+            "proofSize": 500000
+          },
+          "call": {
+            "encoded": "0x4300eb03000016000000a0860100000000000000000000000000a08601000000000000000000000000000404eb03000016000000"
+          }
+        }
+      },
+      {
+        "refundSurplus": null
+      },
+      {
+        "depositAsset": {
+          "assets": {
+            "wild": {
+              "allCounted": 1
+            }
+          },
+          "beneficiary": {
+            "parents": 0,
+            "interior": {
+              "x1": [
+                {
+                  "accountId32": {
+                    "network": null,
+                    "id": "0x48df881b65e682f05ac24dc8f668a8938225e973f6ebfce08cd5a3835491e7f3"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "setTopic": "0x6e66ff78549d419a63766596aa9fb312f637b6e04f3639b34853021e077341db"
+      }
+    ]
+  },
+  "composedOnWireMessageHex": "0x051c0b01010102f20b35a3f85ec864127b551ce8a64446fc0ed2bceeeeeeeeeeeeeeeeeeeeeeee0004010300a10f043205e514007636010013010300a10f043205e5140076360100000601010700c817a80482841e00d04300eb03000016000000a0860100000000000000000000000000a08601000000000000000000000000000404eb03000016000000140d0102040001010048df881b65e682f05ac24dc8f668a8938225e973f6ebfce08cd5a3835491e7f32c6e66ff78549d419a63766596aa9fb312f637b6e04f3639b34853021e077341db",
+  "instruction0": {
+    "descendOrigin": {
+      "x1": [
+        {
+          "accountId32": {
+            "network": {
+              "polkadot": null
+            },
+            "id": "0xf20b35a3f85ec864127b551ce8a64446fc0ed2bceeeeeeeeeeeeeeeeeeeeeeee"
+          }
+        }
+      ]
+    }
+  },
+  "descendedId": "0xf20b35a3f85ec864127b551ce8a64446fc0ed2bceeeeeeeeeeeeeeeeeeeeeeee",
+  "prefixMatches": true,
+  "sent": {
+    "extrinsicIndex": 2,
+    "extrinsicHash": "0x0e56fb71e0e5219e149c1ff7f0f1fa0e37d0849eb9c4152c85f04de3b29b703b",
+    "json": [
+      {
+        "parents": 0,
+        "interior": {
+          "x1": [
+            {
+              "accountId32": {
+                "network": {
+                  "polkadot": null
+                },
+                "id": "0xf20b35a3f85ec864127b551ce8a64446fc0ed2bceeeeeeeeeeeeeeeeeeeeeeee"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "parents": 1,
+        "interior": {
+          "x1": [
+            {
+              "parachain": 2034
+            }
+          ]
+        }
+      },
+      [
+        {
+          "withdrawAsset": [
+            {
+              "id": {
+                "parents": 1,
+                "interior": {
+                  "x3": [
+                    {
+                      "parachain": 1000
+                    },
+                    {
+                      "palletInstance": 50
+                    },
+                    {
+                      "generalIndex": 1337
+                    }
+                  ]
+                }
+              },
+              "fun": {
+                "fungible": 19869
+              }
+            }
+          ]
+        },
+        {
+          "buyExecution": {
+            "fees": {
+              "id": {
+                "parents": 1,
+                "interior": {
+                  "x3": [
+                    {
+                      "parachain": 1000
+                    },
+                    {
+                      "palletInstance": 50
+                    },
+                    {
+                      "generalIndex": 1337
+                    }
+                  ]
+                }
+              },
+              "fun": {
+                "fungible": 19869
+              }
+            },
+            "weightLimit": {
+              "unlimited": null
+            }
+          }
+        },
+        {
+          "transact": {
+            "originKind": "SovereignAccount",
+            "fallbackMaxWeight": {
+              "refTime": 20000000000,
+              "proofSize": 500000
+            },
+            "call": {
+              "encoded": "0x4300eb03000016000000a0860100000000000000000000000000a08601000000000000000000000000000404eb03000016000000"
+            }
+          }
+        },
+        {
+          "refundSurplus": null
+        },
+        {
+          "depositAsset": {
+            "assets": {
+              "wild": {
+                "allCounted": 1
+              }
+            },
+            "beneficiary": {
+              "parents": 0,
+              "interior": {
+                "x1": [
+                  {
+                    "accountId32": {
+                      "network": null,
+                      "id": "0x48df881b65e682f05ac24dc8f668a8938225e973f6ebfce08cd5a3835491e7f3"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "setTopic": "0x6e66ff78549d419a63766596aa9fb312f637b6e04f3639b34853021e077341db"
+        }
+      ],
+      "0x6e66ff78549d419a63766596aa9fb312f637b6e04f3639b34853021e077341db"
+    ],
+    "human": {
+      "origin": {
+        "parents": "0",
+        "interior": {
+          "X1": [
+            {
+              "AccountId32": {
+                "network": "Polkadot",
+                "id": "0xf20b35a3f85ec864127b551ce8a64446fc0ed2bceeeeeeeeeeeeeeeeeeeeeeee"
+              }
+            }
+          ]
+        }
+      },
+      "destination": {
+        "parents": "1",
+        "interior": {
+          "X1": [
+            {
+              "Parachain": "2,034"
+            }
+          ]
+        }
+      },
+      "message": [
+        {
+          "WithdrawAsset": [
+            {
+              "id": {
+                "parents": "1",
+                "interior": {
+                  "X3": [
+                    {
+                      "Parachain": "1,000"
+                    },
+                    {
+                      "PalletInstance": "50"
+                    },
+                    {
+                      "GeneralIndex": "1,337"
+                    }
+                  ]
+                }
+              },
+              "fun": {
+                "Fungible": "19,869"
+              }
+            }
+          ]
+        },
+        {
+          "BuyExecution": {
+            "fees": {
+              "id": {
+                "parents": "1",
+                "interior": {
+                  "X3": [
+                    {
+                      "Parachain": "1,000"
+                    },
+                    {
+                      "PalletInstance": "50"
+                    },
+                    {
+                      "GeneralIndex": "1,337"
+                    }
+                  ]
+                }
+              },
+              "fun": {
+                "Fungible": "19,869"
+              }
+            },
+            "weightLimit": "Unlimited"
+          }
+        },
+        {
+          "Transact": {
+            "originKind": "SovereignAccount",
+            "fallbackMaxWeight": {
+              "refTime": "20,000,000,000",
+              "proofSize": "500,000"
+            },
+            "call": {
+              "encoded": "0x4300eb03000016000000a0860100000000000000000000000000a08601000000000000000000000000000404eb03000016000000"
+            }
+          }
+        },
+        "RefundSurplus",
+        {
+          "DepositAsset": {
+            "assets": {
+              "Wild": {
+                "AllCounted": "1"
+              }
+            },
+            "beneficiary": {
+              "parents": "0",
+              "interior": {
+                "X1": [
+                  {
+                    "AccountId32": {
+                      "network": null,
+                      "id": "0x48df881b65e682f05ac24dc8f668a8938225e973f6ebfce08cd5a3835491e7f3"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "SetTopic": "0x6e66ff78549d419a63766596aa9fb312f637b6e04f3639b34853021e077341db"
+        }
+      ],
+      "messageId": "0x6e66ff78549d419a63766596aa9fb312f637b6e04f3639b34853021e077341db"
+    }
+  }
+}
