@@ -520,16 +520,18 @@ export class BankXcmV22Runtime {
     const forwardedParaIds = forwarded.map((entry) => entry.paraId).filter(Number.isInteger);
     const events = normalizeRuntimeEvents(assetHubDryRun.toHuman());
     const wireFrames = [];
+    const fundingDeposits = [];
     const homeDeposits = [];
 
     for (const item of forwarded.filter((entry) => entry.paraId === HYDRATION_PARA_ID)) {
       const rawWrapperMessage = assetHub.createType("XcmVersionedXcm", preview.message).toHex();
       const forwardedWireMessage = assetHub.createType("XcmVersionedXcm", item.message).toHex();
-      const wireFrame = bindForwardedWireFrame(
+      const wireFrame = resolveForwardedWireFrame({
+        leg,
         rawWrapperMessage,
         forwardedWireMessage,
-        this.wrapperAddress
-      );
+        wrapperAddress: this.wrapperAddress,
+      });
       const wireMessage = wireFrame.composedOnWireMessage;
       const hydrationDryRun = await hydration.call.dryRunApi.dryRunXcm(
         siblingOrigin(ASSET_HUB_PARA_ID),
@@ -539,6 +541,13 @@ export class BankXcmV22Runtime {
       assertDryRunXcmComplete(hydrationJson, "Hydration exact message");
       const hydrationEvents = normalizeRuntimeEvents(hydrationDryRun.toHuman());
       events.push(...hydrationEvents);
+      if (Number(leg) === 0) {
+        fundingDeposits.push(assertConvertedAccountDeposit(
+          hydration,
+          hydrationEvents,
+          this.floatTarget.account
+        ));
+      }
       if (Number(leg) === 3) {
         assertConvertedAccountWithdrawal(
           hydration,
@@ -580,6 +589,7 @@ export class BankXcmV22Runtime {
       forwardedParaIds: [...new Set(forwardedParaIds)],
       events,
       wireFrames,
+      fundingDeposits,
       homeDeposits,
       assetHubBlockNumber: assetHubHeader.number.toNumber(),
       assetHubEndpoint: this.assetHubSubstrateEndpoint,
@@ -1022,6 +1032,55 @@ export function bindForwardedWireFrame(rawWrapperMessage, forwardedWireMessage, 
     rawWrapperMessage: raw,
     composedOnWireMessage: forwarded,
   };
+}
+
+/**
+ * DepositFunding executes DepositReserveAsset locally. Asset Hub's executor
+ * constructs the forwarded reserve message, so the runtime-returned bytes are
+ * the wire truth and are consumed unchanged. The other three legs call
+ * IXcm.send; only those verbatim-send paths are bound to DescendOrigin + the
+ * wrapper preview by the live find-16/17 transport proof.
+ */
+export function resolveForwardedWireFrame({
+  leg,
+  rawWrapperMessage,
+  forwardedWireMessage,
+  wrapperAddress,
+} = {}) {
+  const legIndex = Number(leg);
+  if (!Number.isInteger(legIndex) || legIndex < 0 || legIndex > 3) {
+    throw new ValidationError("Bank XCM wire-frame resolution requires a v2.2 leg index.");
+  }
+  if (legIndex === 0) {
+    return {
+      rawWrapperMessage: hexlify(getBytes(rawWrapperMessage)),
+      composedOnWireMessage: hexlify(getBytes(forwardedWireMessage)),
+      frameSource: "runtime_transformed_local_execute",
+    };
+  }
+  return {
+    ...bindForwardedWireFrame(rawWrapperMessage, forwardedWireMessage, wrapperAddress),
+    frameSource: "composed_send_frame",
+  };
+}
+
+export function assertConvertedAccountDeposit(api, events, expectedAccountId32) {
+  const expected = String(expectedAccountId32).toLowerCase();
+  for (const event of events) {
+    if (String(event.section).toLowerCase() !== "tokens"
+      || String(event.method).toLowerCase() !== "deposited") continue;
+    const assetId = Number(String(event?.data?.currencyId ?? event?.data?.assetId ?? "").replaceAll(",", ""));
+    const who = event?.data?.who;
+    const amount = String(event?.data?.amount ?? event?.data?.balance ?? "").replaceAll(",", "");
+    if (assetId !== 22 || !who || !/^\d+$/u.test(amount) || BigInt(amount) <= 0n) continue;
+    try {
+      if (api.createType("AccountId32", who).toHex().toLowerCase() !== expected) continue;
+    } catch {
+      continue;
+    }
+    return { assetId, who, amountRaw: amount };
+  }
+  throw new ValidationError("Hydration funding dry-run did not deposit asset 22 to the configured converted account.");
 }
 
 function assertConvertedAccountWithdrawal(api, events, expectedAccountId32, label) {
