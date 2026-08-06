@@ -118,6 +118,78 @@ credential must at minimum warn. Also confirm whether
 2026-08-06 listing, so either that account is consumed elsewhere or it was never
 provisioned; both are worth knowing.
 
+## Measured against the 1Password admin console, 2026-08-06
+
+The operator read the console (**Developer → Service accounts**). It reports
+**19 service accounts**. The calendar tracks **5**. The full state:
+
+| account | token expiry | last accessed | in the calendar? |
+|---|---|---|---|
+| `op-token-prod-vps-backend` | **EXPIRED ~1 month ago** | 2026-06-30 | yes — as `2026-09-30` ✅ |
+| `prod-vps-indexer` | **EXPIRED ~1 month ago** | 2026-06-30 | no |
+| `prod-smoke-tests` | **EXPIRED ~1 month ago** | 2026-05-13 | no |
+| `op-token-prod-ci-deploy` | **EXPIRED ~1 month ago** | 2026-06-30 | yes — as `2026-09-30` ✅ |
+| `op-token-prod-ci-deploy` (dup) | **EXPIRED ~1 month ago** | never | no |
+| `canary-ci-prod-backend` | in ~1 month | 2026-06-30 | yes — as `2026-09-11` |
+| `prod-vps-backend` | **doesn't expire** | 2026-08-04 | no |
+| `prod-vps-indexer` (dup) | **doesn't expire** | 2026-08-04 | no |
+| `prod-smoke-tests` (dup) | **doesn't expire** | 2026-07-27 | no |
+| `prod-smoke-deploy` | **doesn't expire** | never | no |
+| `op-token-prod-ci-deploy` ×3 (dups) | **doesn't expire** | 2026-08-06 / 2026-06-30 / never | partially |
+| `pkuriger@averray.com` | doesn't expire | 2026-06-30 | n/a (human) |
+| `averray-mainnet-ci-deploy` | in ~2 months | 2026-07-08 | **no** |
+| `averray-mainnet-vps-backend` | in ~2 months | **2026-08-06** | **no** |
+| `averray-mainnet-vps-indexer` | in ~2 months | **2026-08-06** | **no** |
+| `averray-mainnet-smoke-tests` | in ~2 months | 2026-07-27 | **no** |
+| `canary-ci-mainnet-smoke` | in ~3 months | **2026-08-06** | **no** |
+
+### What this proves
+
+1. **The calendar reports ✅ on already-dead credentials.** `op-token-prod-vps-backend`
+   and `op-token-prod-ci-deploy` expired roughly a month ago; the calendar declares
+   both `2026-09-30` and the check prints `expires in 55 days`. This is no longer a
+   hypothetical drift risk — it is live, and in the one direction that reads green
+   past the end.
+2. **The 90-day policy was never applied to the live prod tokens.** Six accounts —
+   including the ones actually in use (`prod-vps-backend`, `prod-vps-indexer`,
+   last accessed 2026-08-04) — read **doesn't expire**. `bootstrap-mainnet-vault.mjs`
+   hardcodes `--expires-in 90d`, and `docs/SECRETS.md` step 1 says "mint a new token
+   … (90-day expiry)", but the prod set does not follow it. A non-expiring token is
+   valid forever once leaked, which is the risk the policy existed to bound.
+3. **Nothing is currently broken, by luck rather than design.** Every expired account
+   was last accessed 2026-05/06; the live consumers are on the non-expiring
+   duplicates. An expired token that nothing calls causes no outage — but the state
+   is indistinguishable, from the calendar, from a healthy one.
+4. **Name collisions make the calendar ambiguous.** Five accounts are named
+   `op-token-prod-ci-deploy` and three `prod-smoke-tests`, in different states
+   (expired / non-expiring / never used). A calendar entry keyed on that name cannot
+   identify which account it tracks. **Entries must carry the account's unique
+   identity, not a display name that repeats five times.**
+5. **The mainnet five exist and are live** — `averray-mainnet-vps-backend`,
+   `-vps-indexer` and `canary-ci-mainnet-smoke` were all accessed on 2026-08-06 —
+   and none is tracked. Their real horizon is ~2 months (≈2026-10-06 to 10-23),
+   consistent with the 2026-07-25 token-file mtimes.
+6. **`averray-mainnet-admin-refresh-rw` does not appear in the console at all**,
+   matching the absent `/etc/agent-stack-mainnet/op-refresh.env` on the VPS. The
+   bootstrap defines it as the read+write account for refresh-token rotation, and
+   mainnet refresh chains demonstrably rotate — so **some other identity is
+   performing those writes**. Resolve which before assuming the documented topology
+   is the deployed one; this is a question, not yet a defect.
+
+### Consequences for this packet
+
+- Add an identity field (1Password account UUID, or the console URL) to every
+  service-account entry. A name that repeats five times is not a key.
+- The five mainnet accounts get entries (finding 5).
+- The `expires_at` on the two provably-expired entries must be corrected to the real
+  state, not merely re-dated forward.
+- Whether the live prod tokens *should* be non-expiring is an **operator policy
+  decision, not a packet decision** — record what is true today (`doesn't expire`,
+  which the schema must be able to express distinctly from `never` used for
+  "no expiry concept"), and route the policy question separately.
+- **Deleting or revoking the expired/duplicate accounts is operator-only** and is
+  explicitly NOT part of this packet.
+
 ## Fix contract
 
 ### 1. Schema — `docs/SECRETS_CALENDAR.yml`
