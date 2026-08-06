@@ -55,6 +55,7 @@ import { createPublicMetadataRoutes } from "./public-metadata-routes.js";
 import { createSchemaRoutes } from "./schema-routes.js";
 import { createSessionRoutes } from "./session-routes.js";
 import { createShareRoutes } from "./share-routes.js";
+import { createTransparencyRoutes } from "./transparency-routes.js";
 import { createUsdcLiquidityRoutes } from "./usdc-liquidity-routes.js";
 import { createVerifierRoutes } from "./verifier-routes.js";
 import { createXcmRequestRoutes } from "./xcm-request-routes.js";
@@ -72,6 +73,7 @@ const {
   externalPostingWatcher,
   posterReviewService,
   bankLaneFeed,
+  transparencyService,
   stateStore,
   contentRecoveryLog,
   gateway,
@@ -381,6 +383,12 @@ const handleUsdcLiquidityRoute = createUsdcLiquidityRoutes({
 const handleBankLaneFeedRoute = createBankLaneFeedRoutes({
   bankLaneFeed,
   respond,
+});
+
+const handleTransparencyRoute = createTransparencyRoutes({
+  authMiddleware,
+  respond,
+  transparencyService,
 });
 
 const handleAdminJobsRoute = createAdminJobsRoutes({
@@ -821,6 +829,10 @@ const server = createServer(async (request, response) => {
     }
 
     if (await handleXcmRequestRoute({ request, response, url, pathname })) {
+      return;
+    }
+
+    if (await handleTransparencyRoute({ request, response, url, pathname })) {
       return;
     }
 
