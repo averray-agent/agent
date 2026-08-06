@@ -190,6 +190,32 @@ function liveRequest(overrides = {}) {
   };
 }
 
+function liveHomeQuote(overrides = {}) {
+  return {
+    liveState: true,
+    amount: "1400",
+    quotedArrival: "94000",
+    upstreamFee: "1000",
+    asOf: 1_775_000_000,
+    remoteRef: `0x${"88".repeat(32)}`,
+    quoteSession: {
+      hydration: {
+        asOf: 1_775_000_000,
+        blockNumber: 1,
+        blockHash: `0x${"91".repeat(32)}`,
+        endpoint: "wss://hydration.example"
+      },
+      assetHub: {
+        asOf: 1_775_000_001,
+        blockNumber: 2,
+        blockHash: `0x${"92".repeat(32)}`,
+        endpoint: "wss://asset-hub.example"
+      }
+    },
+    ...overrides
+  };
+}
+
 function dispatcher(overrides = {}) {
   const calls = [];
   const instance = new BankXcmV22Dispatcher({
@@ -197,6 +223,7 @@ function dispatcher(overrides = {}) {
     expectedWrapper: WRAPPER,
     readLiveRequest: async () => liveRequest(),
     quoteRemoteFee: async () => ({ liveState: true, amount: "17000", asOf: 1_775_000_000 }),
+    quoteHomeExecutionFee: async () => liveHomeQuote(),
     readRemoteOperatingFloat: async () => ({
       liveState: true,
       assets: "100000",
@@ -275,6 +302,34 @@ test("v2.2 dispatcher refuses a request snapshot or fee quote not marked live", 
   await assert.rejects(
     staleQuote.instance.dispatch({ requestId: REQUEST_ID, leg: "deposit_sell" }),
     /remoteFeeQuote evidence is not marked liveState:true/u
+  );
+});
+
+test("v2.2 home pricing refuses evidence without both live chain stamps", async () => {
+  const { instance } = dispatcher({
+    readLiveRequest: async () => liveRequest({
+      kind: "withdraw",
+      bitmap: 4,
+      assets: "0",
+      parameters: {
+        sellAmount: "100000",
+        minimumOutput: "95000",
+        maxFeePerLeg: "40000",
+        dispatchDeadline: "0"
+      }
+    }),
+    quoteHomeExecutionFee: async () => ({
+      liveState: true,
+      amount: "1400",
+      quotedArrival: "94000",
+      upstreamFee: "1000",
+      asOf: 1_775_000_000
+    })
+  });
+
+  await assert.rejects(
+    instance.dispatch({ requestId: REQUEST_ID, leg: "withdraw_home" }),
+    /live hydration quote-session stamp/u
   );
 });
 
@@ -428,7 +483,7 @@ test("v2.2 withdraw sell uses fresh remote float and records it before signing",
   assert.equal(evidence.feeSource, "fresh_remote_operating_float");
 });
 
-test("v2.2 funding and home legs enforce their chain destinations with zero dispatch fee", async () => {
+test("v2.2 funding stays fee-independent while home uses the fresh dispatch-priced quote", async () => {
   const funding = dispatcher({
     readLiveRequest: async () => liveRequest({ bitmap: 0 }),
     dryRunMessage: async () => ({
@@ -464,8 +519,144 @@ test("v2.2 funding and home legs enforce their chain destinations with zero disp
       events: [{ section: "Assets", method: "Deposited", data: {} }]
     })
   });
-  await home.instance.dispatch({ requestId: REQUEST_ID, leg: "withdraw_home" });
-  assert.equal(home.calls[0].input.feeAmount, 0n);
+  const { evidence } = await home.instance.dispatch({ requestId: REQUEST_ID, leg: "withdraw_home" });
+  assert.equal(home.calls[0].input.feeAmount, 2_800n);
+  assert.equal(evidence.feeSource, "fresh_home_quote_x2");
+  assert.equal(evidence.quotedArrivalRaw, "94000");
+  assert.equal(evidence.upstreamFeeRaw, "1000");
+  assert.equal(evidence.homeQuoteSession.hydration.blockNumber, 1);
+  assert.equal(evidence.homeQuoteSession.assetHub.blockNumber, 2);
+});
+
+test("v2.2 home quote caps at the staged ceiling when the exact 1.5x floor still holds", async () => {
+  const { instance, calls } = dispatcher({
+    readLiveRequest: async () => liveRequest({
+      kind: "withdraw",
+      bitmap: 4,
+      assets: "0",
+      parameters: {
+        sellAmount: "100000",
+        minimumOutput: "95000",
+        maxFeePerLeg: "40000",
+        dispatchDeadline: "0"
+      }
+    }),
+    quoteHomeExecutionFee: async () => liveHomeQuote({
+      amount: "26666",
+      quotedArrival: "90000",
+      upstreamFee: "5000"
+    }),
+    dryRunMessage: async () => ({
+      liveState: true,
+      ok: true,
+      executionSucceeded: true,
+      calldata: "0xhome",
+      forwardedParaIds: [1000],
+      events: [{ section: "Assets", method: "Deposited", data: {} }]
+    })
+  });
+
+  const { evidence } = await instance.dispatch({ requestId: REQUEST_ID, leg: "withdraw_home" });
+  assert.equal(calls[0].input.feeAmount, 40_000n);
+  assert.equal(evidence.feeSource, "fresh_home_quote_capped");
+});
+
+test("v2.2 home quote refuses immediately below the 1.5x floor", async () => {
+  let signed = 0;
+  const { instance } = dispatcher({
+    readLiveRequest: async () => liveRequest({
+      kind: "withdraw",
+      bitmap: 4,
+      assets: "0",
+      parameters: {
+        sellAmount: "100000",
+        minimumOutput: "95000",
+        maxFeePerLeg: "40000",
+        dispatchDeadline: "0"
+      }
+    }),
+    quoteHomeExecutionFee: async () => liveHomeQuote({
+      amount: "26667",
+      quotedArrival: "90000",
+      upstreamFee: "5000"
+    }),
+    signAndDispatch: async () => { signed += 1; }
+  });
+
+  await assert.rejects(
+    instance.dispatch({ requestId: REQUEST_ID, leg: "withdraw_home" }),
+    /below the required 1\.5× quote floor/u
+  );
+  assert.equal(signed, 0);
+});
+
+test("v2.2 home quote requires fee strictly below the same-session arrival boundary", async () => {
+  const makeHome = (quotedArrival) => dispatcher({
+    readLiveRequest: async () => liveRequest({
+      kind: "withdraw",
+      bitmap: 4,
+      assets: "0",
+      parameters: {
+        sellAmount: "100000",
+        minimumOutput: "95000",
+        maxFeePerLeg: "40000",
+        dispatchDeadline: "0"
+      }
+    }),
+    quoteHomeExecutionFee: async () => liveHomeQuote({
+      amount: "1000",
+      quotedArrival,
+      upstreamFee: "5000"
+    }),
+    dryRunMessage: async () => ({
+      liveState: true,
+      ok: true,
+      executionSucceeded: true,
+      calldata: "0xhome",
+      forwardedParaIds: [1000],
+      events: [{ section: "Assets", method: "Deposited", data: {} }]
+    })
+  });
+
+  await assert.rejects(
+    makeHome("2000").instance.dispatch({ requestId: REQUEST_ID, leg: "withdraw_home" }),
+    /strictly below the same-session quoted arrival/u
+  );
+  const pass = makeHome("2001");
+  await pass.instance.dispatch({ requestId: REQUEST_ID, leg: "withdraw_home" });
+  assert.equal(pass.calls[0].input.feeAmount, 2_000n);
+});
+
+test("v2.2 home dispatch still refuses without the final Asset Hub deposit proof", async () => {
+  let signed = 0;
+  const { instance } = dispatcher({
+    readLiveRequest: async () => liveRequest({
+      kind: "withdraw",
+      bitmap: 4,
+      assets: "0",
+      parameters: {
+        sellAmount: "100000",
+        minimumOutput: "95000",
+        maxFeePerLeg: "40000",
+        dispatchDeadline: "0"
+      }
+    }),
+    dryRunMessage: async () => ({
+      liveState: true,
+      ok: true,
+      executionSucceeded: true,
+      calldata: "0xhome",
+      forwardedParaIds: [1000],
+      events: []
+    }),
+    signAndDispatch: async () => { signed += 1; }
+  });
+
+  await assert.rejects(
+    instance.dispatch({ requestId: REQUEST_ID, leg: "withdraw_home" }),
+    /Assets\.Deposited/u
+  );
+  assert.equal(signed, 0);
 });
 
 test("v2.2 dispatcher refuses when a chain-event watch is absent", async () => {
