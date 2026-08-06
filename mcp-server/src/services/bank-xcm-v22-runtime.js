@@ -191,6 +191,7 @@ export class BankXcmV22Runtime {
       expectedWrapper: this.wrapperAddress,
       readLiveRequest: (input) => this.readLiveRequest(input),
       quoteRemoteFee: (input) => this.quoteRemoteFee(input),
+      quoteHomeExecutionFee: (input) => this.quoteHomeExecutionFee(input),
       readRemoteOperatingFloat: (input) => this.readRemoteOperatingFloat(input),
       readFundingTransferFee: (input) => this.readFundingTransferFee(input),
       dryRunMessage: (input) => this.dryRunMessage(input),
@@ -283,6 +284,120 @@ export class BankXcmV22Runtime {
       remoteRef: header.hash.toHex(),
       blockNumber: header.number.toNumber(),
       endpoint: this.hydrationSubstrateEndpoint,
+    };
+  }
+
+  /**
+   * Price the downstream Asset Hub execution budget and the upstream
+   * Hydration delivery in one live session. The provisional one-raw nested
+   * budget only obtains the wrapper-built message; the selected fee is spliced
+   * into fresh bytes later and the standing three-hop dry-run must still prove
+   * the final Asset Hub deposit before signing.
+   */
+  async quoteHomeExecutionFee({ requestId, leg } = {}) {
+    if (Number(leg) !== 3) {
+      throw new ValidationError("Home execution fee quote is only valid for withdraw_home.");
+    }
+    const preview = await this.previewLeg(requestId, leg, 1n);
+    const [assetHub, hydration] = await Promise.all([
+      this.getAssetHubApi(),
+      this.getHydrationApi(),
+    ]);
+    const [
+      assetHubHeader,
+      assetHubTimestamp,
+      hydrationHeader,
+      hydrationTimestamp,
+      hydrationWeight,
+      hydrationDryRun,
+    ] = await Promise.all([
+      assetHub.rpc.chain.getHeader(),
+      assetHub.query.timestamp.now(),
+      hydration.rpc.chain.getHeader(),
+      hydration.query.timestamp.now(),
+      hydration.call.xcmPaymentApi.queryXcmWeight(preview.message),
+      hydration.call.dryRunApi.dryRunXcm(
+        siblingOrigin(ASSET_HUB_PARA_ID),
+        preview.message
+      ),
+    ]);
+    if (!hydrationWeight?.isOk) {
+      throw new ValidationError("Hydration could not weigh the exact withdraw-home message.");
+    }
+    const hydrationFeeAssetId = extractWithdrawAssetId(hydration, preview.message);
+    const hydrationFee = await hydration.call.xcmPaymentApi.queryWeightToAssetFee(
+      hydrationWeight.asOk,
+      { V5: hydrationFeeAssetId }
+    );
+    if (!hydrationFee?.isOk) {
+      throw new ValidationError("Hydration could not quote the exact withdraw-home delivery.");
+    }
+    const upstreamFee = positiveBigInt(
+      hydrationFee.asOk.toString(),
+      "Hydration withdraw-home fee"
+    );
+    const grossAmount = extractWithdrawFungibleAmount(hydration, preview.message);
+    if (upstreamFee >= grossAmount) {
+      throw new ValidationError("Hydration withdraw-home fee consumes the full staged amount.");
+    }
+    const computedArrival = grossAmount - upstreamFee;
+
+    const hydrationJson = hydrationDryRun.toJSON();
+    assertDryRunXcmComplete(hydrationJson, "Hydration home quote message");
+    const homeward = extractForwardedXcms(hydrationJson)
+      .filter((entry) => entry.paraId === ASSET_HUB_PARA_ID);
+    if (homeward.length !== 1) {
+      throw new ValidationError("Home fee quote must forward exactly one message to Asset Hub.");
+    }
+    const exactHome = homeward[0];
+    const quotedArrival = extractArrivingFungibleAmount(assetHub, exactHome.message);
+    if (quotedArrival !== computedArrival) {
+      throw new ValidationError(
+        "Hydration quoted arrival does not reconcile to gross amount minus the fresh upstream fee."
+      );
+    }
+
+    const assetHubWeight = await assetHub.call.xcmPaymentApi.queryXcmWeight(exactHome.message);
+    if (!assetHubWeight?.isOk) {
+      throw new ValidationError("Asset Hub could not weigh the exact forwarded home message.");
+    }
+    const assetHubFeeAssetId = extractBuyExecutionFeeAssetId(exactHome.message);
+    const assetHubFee = await assetHub.call.xcmPaymentApi.queryWeightToAssetFee(
+      assetHubWeight.asOk,
+      { V5: assetHubFeeAssetId }
+    );
+    if (!assetHubFee?.isOk) {
+      throw new ValidationError("Asset Hub could not quote the exact forwarded home execution.");
+    }
+    const homeExecutionFee = positiveBigInt(
+      assetHubFee.asOk.toString(),
+      "Asset Hub home execution fee"
+    );
+    return {
+      liveState: true,
+      amount: homeExecutionFee.toString(),
+      quotedArrival: quotedArrival.toString(),
+      upstreamFee: upstreamFee.toString(),
+      grossAmount: grossAmount.toString(),
+      asOf: timestampSeconds(assetHubTimestamp),
+      remoteRef: assetHubHeader.hash.toHex(),
+      quoteSession: {
+        hydration: {
+          asOf: timestampSeconds(hydrationTimestamp),
+          blockNumber: hydrationHeader.number.toNumber(),
+          blockHash: hydrationHeader.hash.toHex(),
+          endpoint: this.hydrationSubstrateEndpoint,
+          upstreamFeeRaw: upstreamFee.toString(),
+          quotedArrivalRaw: quotedArrival.toString(),
+        },
+        assetHub: {
+          asOf: timestampSeconds(assetHubTimestamp),
+          blockNumber: assetHubHeader.number.toNumber(),
+          blockHash: assetHubHeader.hash.toHex(),
+          endpoint: this.assetHubSubstrateEndpoint,
+          homeExecutionQuoteRaw: homeExecutionFee.toString(),
+        },
+      },
     };
   }
 
@@ -863,6 +978,50 @@ function extractWithdrawAssetId(api, message) {
   const id = assets?.[0]?.id;
   if (!id) throw new ValidationError("Exact Bank XCM message has no withdraw fee asset.");
   return id;
+}
+
+function extractWithdrawFungibleAmount(api, message) {
+  const decoded = api.createType("XcmVersionedXcm", message).toJSON();
+  const instructions = decoded?.v5 ?? decoded?.V5;
+  const withdraw = instructions?.find((instruction) => instruction.withdrawAsset ?? instruction.WithdrawAsset);
+  const assets = withdraw?.withdrawAsset ?? withdraw?.WithdrawAsset;
+  return extractFungibleAmount(assets, "WithdrawAsset");
+}
+
+function extractArrivingFungibleAmount(api, message) {
+  const decoded = api.createType("XcmVersionedXcm", message).toJSON();
+  const instructions = decoded?.v5 ?? decoded?.V5;
+  const arrival = instructions?.find((instruction) => (
+    instruction.reserveAssetDeposited
+    ?? instruction.ReserveAssetDeposited
+    ?? instruction.receiveTeleportedAsset
+    ?? instruction.ReceiveTeleportedAsset
+  ));
+  const assets = arrival?.reserveAssetDeposited
+    ?? arrival?.ReserveAssetDeposited
+    ?? arrival?.receiveTeleportedAsset
+    ?? arrival?.ReceiveTeleportedAsset;
+  return extractFungibleAmount(assets, "reserve arrival");
+}
+
+function extractFungibleAmount(assets, label) {
+  const raw = assets?.[0]?.fun?.fungible ?? assets?.[0]?.fun?.Fungible;
+  if (!/^\d+$/u.test(String(raw))) {
+    throw new ValidationError(`Exact Bank XCM message has no fungible ${label} amount.`);
+  }
+  const amount = BigInt(raw);
+  if (amount <= 0n) throw new ValidationError(`Exact Bank XCM ${label} amount must be positive.`);
+  return amount;
+}
+
+function positiveBigInt(raw, label) {
+  try {
+    const value = BigInt(raw);
+    if (value <= 0n) throw new Error();
+    return value;
+  } catch {
+    throw new ValidationError(`${label} must be a positive integer.`);
+  }
 }
 
 function extractNativeDotDeliveryFee(raw) {

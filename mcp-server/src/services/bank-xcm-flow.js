@@ -21,6 +21,7 @@ export class BankXcmV22Dispatcher {
     expectedWrapper,
     readLiveRequest,
     quoteRemoteFee,
+    quoteHomeExecutionFee,
     readRemoteOperatingFloat,
     readFundingTransferFee,
     dryRunMessage,
@@ -36,6 +37,7 @@ export class BankXcmV22Dispatcher {
     this.expectedWrapper = normalizeAddress(expectedWrapper, "expectedWrapper");
     this.readLiveRequest = requireCallback(readLiveRequest, "readLiveRequest");
     this.quoteRemoteFee = requireCallback(quoteRemoteFee, "quoteRemoteFee");
+    this.quoteHomeExecutionFee = requireCallback(quoteHomeExecutionFee, "quoteHomeExecutionFee");
     this.readRemoteOperatingFloat = requireCallback(readRemoteOperatingFloat, "readRemoteOperatingFloat");
     this.readFundingTransferFee = requireCallback(readFundingTransferFee, "readFundingTransferFee");
     this.dryRunMessage = requireCallback(dryRunMessage, "dryRunMessage");
@@ -139,6 +141,9 @@ export class BankXcmV22Dispatcher {
       feeSource: feeEvidence.feeSource,
       remoteAsOf: feeEvidence.remoteAsOf,
       remoteRef: feeEvidence.remoteRef,
+      quotedArrivalRaw: feeEvidence.quotedArrivalRaw?.toString(),
+      upstreamFeeRaw: feeEvidence.upstreamFeeRaw?.toString(),
+      homeQuoteSession: feeEvidence.homeQuoteSession,
       fundingTransferFeeHeadroomRaw: fundingTransferFeeHeadroomRaw?.toString(),
       observerWatch: summarizeWatch(watch),
       dryRun: preview,
@@ -199,6 +204,37 @@ export class BankXcmV22Dispatcher {
         feeSource: "fresh_remote_operating_float",
         remoteAsOf: observed.asOf,
         remoteRef: observed.remoteRef
+      };
+    }
+    if (legIndex === V22_LEGS.withdraw_home) {
+      const quoteEvidence = normalizeLiveHomeFeeQuote(
+        await this.quoteHomeExecutionFee({ requestId, leg: legIndex }),
+        "homeExecutionFeeQuote"
+      );
+      const quote = positiveBigInt(quoteEvidence.amount, "homeExecutionFeeQuote");
+      const quotedArrival = positiveBigInt(quoteEvidence.quotedArrival, "homeQuotedArrival");
+      const doubledQuote = quote * 2n;
+      const feeAmount = doubledQuote > maximum ? maximum : doubledQuote;
+      if (feeAmount * 2n < quote * 3n) {
+        throw new ValidationError(
+          "Fresh home execution fee capped by maxFeePerLeg is below the required 1.5× quote floor."
+        );
+      }
+      if (feeAmount >= quotedArrival) {
+        throw new ValidationError(
+          "Fresh home execution fee must be strictly below the same-session quoted arrival."
+        );
+      }
+      return {
+        feeAmount,
+        feeSource: feeAmount === doubledQuote
+          ? "fresh_home_quote_x2"
+          : "fresh_home_quote_capped",
+        remoteAsOf: quoteEvidence.asOf,
+        remoteRef: quoteEvidence.remoteRef,
+        quotedArrivalRaw: quotedArrival,
+        upstreamFeeRaw: nonNegativeBigInt(quoteEvidence.upstreamFee, "homeUpstreamFee"),
+        homeQuoteSession: quoteEvidence.quoteSession
       };
     }
     return { feeAmount: 0n, feeSource: "dispatch_independent" };
@@ -511,6 +547,29 @@ function normalizeLiveAmount(raw, label) {
     amount: raw.amount,
     asOf: raw.asOf,
     remoteRef: raw.remoteRef
+  };
+}
+
+function normalizeLiveHomeFeeQuote(raw, label) {
+  const normalized = normalizeLiveAmount(raw, label);
+  if (raw.quotedArrival === undefined) {
+    throw new ValidationError(`${label} evidence requires quotedArrival.`);
+  }
+  if (raw.upstreamFee === undefined) {
+    throw new ValidationError(`${label} evidence requires upstreamFee.`);
+  }
+  for (const chain of ["hydration", "assetHub"]) {
+    const stamp = raw.quoteSession?.[chain];
+    if (!stamp?.asOf || !Number.isSafeInteger(Number(stamp.blockNumber)) || Number(stamp.blockNumber) <= 0
+      || !/^0x[a-fA-F0-9]{64}$/u.test(String(stamp.blockHash ?? "")) || !stamp.endpoint) {
+      throw new ValidationError(`${label} evidence requires a live ${chain} quote-session stamp.`);
+    }
+  }
+  return {
+    ...normalized,
+    quotedArrival: raw.quotedArrival,
+    upstreamFee: raw.upstreamFee,
+    quoteSession: raw.quoteSession
   };
 }
 

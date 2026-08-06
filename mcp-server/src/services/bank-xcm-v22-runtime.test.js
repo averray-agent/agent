@@ -23,6 +23,9 @@ const RECIPIENT = "0x9999999999999999999999999999999999999999";
 const HYDRATION_DESTINATION = {
   v5: { parents: 1, interior: { x1: [{ parachain: 2034 }] } }
 };
+const ASSET_HUB_DESTINATION = {
+  v5: { parents: 1, interior: { x1: [{ parachain: 1000 }] } }
+};
 const HYDRATION_USDC_LOCATION = {
   parents: 0,
   interior: { x2: [{ palletInstance: 10 }, { generalIndex: 22 }] }
@@ -380,6 +383,33 @@ test("funding quote refuses unless the exact wrapper call forwards one message t
   );
 });
 
+test("withdraw-home quote binds Asset Hub execution pricing to the same-session Hydration arrival", async () => {
+  const fixture = makeHomeFeeRuntime();
+  const quote = await fixture.runtime.quoteHomeExecutionFee({
+    requestId: REQUEST_ID,
+    leg: 3
+  });
+
+  assert.equal(quote.amount, "1400");
+  assert.equal(quote.grossAmount, "100000");
+  assert.equal(quote.upstreamFee, "2000");
+  assert.equal(quote.quotedArrival, "98000");
+  assert.equal(quote.quoteSession.hydration.upstreamFeeRaw, "2000");
+  assert.equal(quote.quoteSession.hydration.quotedArrivalRaw, "98000");
+  assert.equal(quote.quoteSession.assetHub.homeExecutionQuoteRaw, "1400");
+  assert.deepEqual(fixture.hydrationFeeAsset, { V5: HYDRATION_USDC_LOCATION });
+  assert.deepEqual(fixture.assetHubFeeAsset, { V5: HYDRATION_USDC_LOCATION });
+  assert.equal(fixture.hydrationDryRunCount, 1);
+});
+
+test("withdraw-home quote refuses when the forwarded arrival disagrees with the fresh Hydration fee", async () => {
+  const fixture = makeHomeFeeRuntime({ forwardedArrivalRaw: "97999" });
+  await assert.rejects(
+    fixture.runtime.quoteHomeExecutionFee({ requestId: REQUEST_ID, leg: 3 }),
+    /does not reconcile to gross amount minus the fresh upstream fee/u
+  );
+});
+
 function makeFundingFeeRuntime({
   nativeDeliveryFeePlanck = "305450000",
   remoteFeeRaw = "565",
@@ -454,6 +484,121 @@ function makeFundingFeeRuntime({
     runtime,
     deliveryArgs,
     get remoteFeeAsset() { return remoteFeeAsset; }
+  };
+}
+
+function makeHomeFeeRuntime({
+  grossAmountRaw = "100000",
+  upstreamFeeRaw = "2000",
+  forwardedArrivalRaw = "98000",
+  homeExecutionFeeRaw = "1400"
+} = {}) {
+  const { runtime } = makeRuntime();
+  let hydrationFeeAsset;
+  let assetHubFeeAsset;
+  let hydrationDryRunCount = 0;
+  const header = {
+    number: { toNumber: () => 19_121_365 },
+    hash: hexCodec(BLOCK_HASH)
+  };
+  const previewMessage = homeMessage(grossAmountRaw);
+  const forwardedMessage = homeArrivalMessage(forwardedArrivalRaw);
+  const assetHub = {
+    rpc: { chain: { async getHeader() { return header; } } },
+    query: { timestamp: { async now() { return stringCodec("1786000000000"); } } },
+    createType(_name, message) { return { toJSON() { return message; } }; },
+    call: {
+      xcmPaymentApi: {
+        async queryXcmWeight(message) {
+          assert.deepEqual(message, forwardedMessage);
+          return { isOk: true, asOk: { refTime: "500000000", proofSize: "12000" } };
+        },
+        async queryWeightToAssetFee(_weight, asset) {
+          assetHubFeeAsset = asset;
+          return { isOk: true, asOk: stringCodec(homeExecutionFeeRaw) };
+        }
+      }
+    }
+  };
+  const hydration = {
+    rpc: { chain: { async getHeader() { return header; } } },
+    query: { timestamp: { async now() { return stringCodec("1786000000000"); } } },
+    createType(_name, message) { return { toJSON() { return message; } }; },
+    call: {
+      dryRunApi: {
+        async dryRunXcm(origin, message) {
+          hydrationDryRunCount += 1;
+          assert.deepEqual(origin, { V5: { parents: 1, interior: { X1: [{ Parachain: 1000 }] } } });
+          assert.deepEqual(message, previewMessage);
+          return {
+            toJSON() {
+              return {
+                ok: {
+                  executionResult: { complete: {} },
+                  forwardedXcms: [[ASSET_HUB_DESTINATION, [forwardedMessage]]]
+                }
+              };
+            }
+          };
+        }
+      },
+      xcmPaymentApi: {
+        async queryXcmWeight(message) {
+          assert.deepEqual(message, previewMessage);
+          return { isOk: true, asOk: { refTime: "550000000", proofSize: "13000" } };
+        },
+        async queryWeightToAssetFee(_weight, asset) {
+          hydrationFeeAsset = asset;
+          return { isOk: true, asOk: stringCodec(upstreamFeeRaw) };
+        }
+      }
+    }
+  };
+  runtime.getAssetHubApi = async () => assetHub;
+  runtime.getHydrationApi = async () => hydration;
+  runtime.previewLeg = async (_requestId, leg, feeAmount) => {
+    assert.equal(leg, 3);
+    assert.equal(feeAmount, 1n);
+    return { destination: HYDRATION_DESTINATION, message: previewMessage };
+  };
+  return {
+    runtime,
+    get hydrationFeeAsset() { return hydrationFeeAsset; },
+    get assetHubFeeAsset() { return assetHubFeeAsset; },
+    get hydrationDryRunCount() { return hydrationDryRunCount; }
+  };
+}
+
+function homeMessage(amount) {
+  return {
+    v5: [{
+      withdrawAsset: [{
+        id: HYDRATION_USDC_LOCATION,
+        fun: { fungible: String(amount) }
+      }]
+    }]
+  };
+}
+
+function homeArrivalMessage(amount) {
+  return {
+    v5: [
+      {
+        reserveAssetDeposited: [{
+          id: HYDRATION_USDC_LOCATION,
+          fun: { fungible: String(amount) }
+        }]
+      },
+      {
+        buyExecution: {
+          fees: {
+            id: HYDRATION_USDC_LOCATION,
+            fun: { fungible: "1" }
+          },
+          weightLimit: "Unlimited"
+        }
+      }
+    ]
   };
 }
 
