@@ -10,6 +10,7 @@ const BLIND_AGENT_CASE_STUDY_PR = "https://github.com/averray-agent/agent/pull/9
 const ROOT_ENDPOINTS = [
   "/health",
   "/metrics",
+  "/mcp",
   "/agent-tools.json",
   "/llms.txt",
   "/onboarding",

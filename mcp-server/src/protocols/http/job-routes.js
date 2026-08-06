@@ -8,6 +8,7 @@ export function createJobRoutes({
   ensureSessionOwnership,
   externalPostingService,
   posterOnboardingService,
+  protocol = "http",
   rateLimitConfig,
   readJsonBody,
   respond,
@@ -141,7 +142,7 @@ export function createJobRoutes({
       const idempotencyKey = typeof payload?.idempotencyKey === "string" && payload.idempotencyKey.trim()
         ? payload.idempotencyKey.trim()
         : (url.searchParams.get("idempotencyKey") ?? `${auth.wallet}:${jobId}`);
-      respond(response, 200, await service.claimJob(auth.wallet, jobId, "http", idempotencyKey));
+      respond(response, 200, await service.claimJob(auth.wallet, jobId, protocol, idempotencyKey));
       return true;
     }
 
@@ -185,7 +186,7 @@ export function createJobRoutes({
         throw new ValidationError("evidence exceeds 16 KiB. Submit long payloads via evidenceURI once supported.");
       }
       await ensureSessionOwnership(sessionId, auth.wallet);
-      respond(response, 200, await service.submitWork(sessionId, "http", submission));
+      respond(response, 200, await service.submitWork(sessionId, protocol, submission));
       return true;
     }
 

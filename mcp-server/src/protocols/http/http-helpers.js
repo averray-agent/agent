@@ -135,6 +135,7 @@ export function metricPathLabel(pathname) {
     "/",
     "/health",
     "/metrics",
+    "/mcp",
     "/agent-tools.json",
     "/.well-known/agent-tools.json",
     "/llms.txt",
