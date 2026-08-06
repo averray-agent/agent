@@ -295,34 +295,57 @@ function normalizeFeedTargets(targets = {}) {
 }
 
 export function evaluateSoleArmedWrapper({ configuredWrapper, candidates, readAtMs }) {
-  const normalized = normalizeSubjectConfig({ configuredWrapper, candidates });
+  // Runtime observations are allowed to report that the configured wrapper is
+  // missing. Static configuration remains strict in normalizeSubjectConfig;
+  // this evaluator must turn observed drift into an honest subject state
+  // instead of throwing away the feed snapshot.
+  const normalized = normalizeSubjectDefinition(
+    { configuredWrapper, candidates },
+    { requireConfiguredCandidate: false }
+  );
   const observations = candidates.map((candidate, index) => ({
     ...normalized.candidates[index],
     dispatchPaused: typeof candidate?.dispatchPaused === "boolean" ? candidate.dispatchPaused : null,
     lastError: candidate?.lastError ? String(candidate.lastError) : null
   }));
+  const configuredCandidate = observations.find((candidate) => (
+    sameAddress(candidate.wrapper, normalized.configuredWrapper)
+  ));
   const unreadable = observations.filter((candidate) => candidate.dispatchPaused === null);
   const armed = observations.filter((candidate) => candidate.dispatchPaused === false);
   let status;
   let matches;
   let uniqueArmedWrapper = null;
+  let reason = null;
   let lastError = null;
-  if (unreadable.length > 0) {
-    status = "unknown";
-    matches = null;
-    lastError = "wrapper_pause_state_unverified";
-  } else if (armed.length === 0) {
+  if (!configuredCandidate || configuredCandidate.lastError) {
     status = "error";
     matches = false;
+    reason = "no_armed_wrapper";
     lastError = "no_armed_wrapper";
+  } else if (unreadable.length > 0) {
+    status = "unknown";
+    matches = null;
+    reason = "wrapper_pause_state_unverified";
+    lastError = "wrapper_pause_state_unverified";
+  } else if (armed.length === 0) {
+    // The configured generation is readable and deliberately paused. With no
+    // other armed generation, zero-armed is the expected consequence rather
+    // than a missing-wrapper failure. It is verified, but not green: callers
+    // receive a distinct paused state and reason.
+    status = "paused";
+    matches = true;
+    reason = "administratively_paused";
   } else if (armed.length > 1) {
     status = "error";
     matches = false;
+    reason = "multiple_armed_wrappers";
     lastError = "multiple_armed_wrappers";
   } else {
     uniqueArmedWrapper = armed[0].wrapper;
     matches = sameAddress(uniqueArmedWrapper, normalized.configuredWrapper);
     status = matches ? "ok" : "error";
+    reason = matches ? null : "configured_wrapper_not_unique_armed_wrapper";
     lastError = matches ? null : "configured_wrapper_not_unique_armed_wrapper";
   }
   return {
@@ -330,6 +353,7 @@ export function evaluateSoleArmedWrapper({ configuredWrapper, candidates, readAt
     uniqueArmedWrapper,
     matches,
     status,
+    reason,
     candidates: observations,
     readAtMs: Number.isFinite(readAtMs) ? readAtMs : null,
     lastError
@@ -337,6 +361,10 @@ export function evaluateSoleArmedWrapper({ configuredWrapper, candidates, readAt
 }
 
 function normalizeSubjectConfig(subject = {}) {
+  return normalizeSubjectDefinition(subject, { requireConfiguredCandidate: true });
+}
+
+function normalizeSubjectDefinition(subject = {}, { requireConfiguredCandidate }) {
   const configuredWrapper = requireAddressValue(subject.configuredWrapper, "subject.configuredWrapper");
   if (!Array.isArray(subject.candidates) || subject.candidates.length === 0) {
     throw new ValidationError("subject.candidates must contain the append-only wrapper history.");
@@ -351,7 +379,7 @@ function normalizeSubjectConfig(subject = {}) {
     seen.add(key);
     return { version, wrapper };
   });
-  if (!seen.has(configuredWrapper.toLowerCase())) {
+  if (requireConfiguredCandidate && !seen.has(configuredWrapper.toLowerCase())) {
     throw new ValidationError("subject.configuredWrapper must be present in subject.candidates.");
   }
   return { configuredWrapper, candidates };
@@ -386,6 +414,7 @@ function unreadSubject(subject, lastError) {
     uniqueArmedWrapper: null,
     matches: null,
     status: "unknown",
+    reason: lastError,
     candidates: subject.candidates.map((candidate) => ({
       ...candidate,
       dispatchPaused: null,
@@ -686,6 +715,7 @@ function disabledFeed() {
       uniqueArmedWrapper: null,
       matches: null,
       status: "unknown",
+      reason: lastError,
       candidates: [],
       readAtMs: null,
       lastError

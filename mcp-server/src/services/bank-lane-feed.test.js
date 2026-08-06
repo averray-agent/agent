@@ -606,6 +606,7 @@ test("sole-armed-wrapper subject reports the configured wrapper only from live p
     uniqueArmedWrapper: WRAPPER_V22,
     matches: true,
     status: "ok",
+    reason: null,
     candidates: [
       { version: "2.0", wrapper: WRAPPER_V20, dispatchPaused: true, lastError: null },
       { version: "2.1-stale-artifact", wrapper: WRAPPER_V21_STALE, dispatchPaused: true, lastError: null },
@@ -629,14 +630,15 @@ test("sole-armed-wrapper subject fails when env points at a recorded but retired
     readAtMs: BASE
   });
   assert.equal(result.status, "error");
+  assert.equal(result.reason, "configured_wrapper_not_unique_armed_wrapper");
   assert.equal(result.matches, false);
   assert.equal(result.uniqueArmedWrapper, WRAPPER_V22);
   assert.equal(result.lastError, "configured_wrapper_not_unique_armed_wrapper");
 });
 
-test("sole-armed-wrapper subject fails on zero or multiple armed generations", () => {
+test("sole-armed-wrapper subject reports the configured fully-paused generation as administratively paused", () => {
   const candidate = (wrapper, dispatchPaused) => ({ version: wrapper, wrapper, dispatchPaused });
-  const none = evaluateSoleArmedWrapper({
+  const paused = evaluateSoleArmedWrapper({
     configuredWrapper: WRAPPER_V22,
     candidates: [
       candidate(WRAPPER_V20, true),
@@ -646,9 +648,31 @@ test("sole-armed-wrapper subject fails on zero or multiple armed generations", (
     ],
     readAtMs: BASE
   });
-  assert.equal(none.status, "error");
-  assert.equal(none.matches, false);
-  assert.equal(none.lastError, "no_armed_wrapper");
+  assert.equal(paused.status, "paused");
+  assert.equal(paused.matches, true);
+  assert.equal(paused.uniqueArmedWrapper, null);
+  assert.equal(paused.reason, "administratively_paused");
+  assert.equal(paused.lastError, null);
+});
+
+test("sole-armed-wrapper subject keeps configured-missing as no_armed_wrapper error", () => {
+  const result = evaluateSoleArmedWrapper({
+    configuredWrapper: WRAPPER_V22,
+    candidates: [
+      { version: "2.0", wrapper: WRAPPER_V20, dispatchPaused: true },
+      { version: "2.1", wrapper: WRAPPER_V21, dispatchPaused: true }
+    ],
+    readAtMs: BASE
+  });
+  assert.equal(result.status, "error");
+  assert.equal(result.matches, false);
+  assert.equal(result.uniqueArmedWrapper, null);
+  assert.equal(result.reason, "no_armed_wrapper");
+  assert.equal(result.lastError, "no_armed_wrapper");
+});
+
+test("sole-armed-wrapper subject keeps multiple armed generations as an error", () => {
+  const candidate = (wrapper, dispatchPaused) => ({ version: wrapper, wrapper, dispatchPaused });
 
   const multiple = evaluateSoleArmedWrapper({
     configuredWrapper: WRAPPER_V22,
@@ -662,7 +686,28 @@ test("sole-armed-wrapper subject fails on zero or multiple armed generations", (
   });
   assert.equal(multiple.status, "error");
   assert.equal(multiple.matches, false);
+  assert.equal(multiple.reason, "multiple_armed_wrappers");
   assert.equal(multiple.lastError, "multiple_armed_wrappers");
+});
+
+test("sole-armed-wrapper subject keeps a configured-candidate read error out of paused", () => {
+  const result = evaluateSoleArmedWrapper({
+    configuredWrapper: WRAPPER_V22,
+    candidates: [
+      { version: "2.0", wrapper: WRAPPER_V20, dispatchPaused: true },
+      {
+        version: "2.2",
+        wrapper: WRAPPER_V22,
+        dispatchPaused: null,
+        lastError: "rpc timeout"
+      }
+    ],
+    readAtMs: BASE
+  });
+  assert.equal(result.status, "error");
+  assert.equal(result.matches, false);
+  assert.equal(result.reason, "no_armed_wrapper");
+  assert.equal(result.lastError, "no_armed_wrapper");
 });
 
 test("sole-armed-wrapper subject is unknown rather than green when any paused bit is unreadable", () => {
@@ -677,6 +722,7 @@ test("sole-armed-wrapper subject is unknown rather than green when any paused bi
     readAtMs: BASE
   });
   assert.equal(result.status, "unknown");
+  assert.equal(result.reason, "wrapper_pause_state_unverified");
   assert.equal(result.matches, null);
   assert.equal(result.uniqueArmedWrapper, null);
   assert.equal(result.lastError, "wrapper_pause_state_unverified");
