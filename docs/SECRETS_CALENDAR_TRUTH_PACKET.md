@@ -170,11 +170,44 @@ The operator read the console (**Developer → Service accounts**). It reports
    and none is tracked. Their real horizon is ~2 months (≈2026-10-06 to 10-23),
    consistent with the 2026-07-25 token-file mtimes.
 6. **`averray-mainnet-admin-refresh-rw` does not appear in the console at all**,
-   matching the absent `/etc/agent-stack-mainnet/op-refresh.env` on the VPS. The
-   bootstrap defines it as the read+write account for refresh-token rotation, and
-   mainnet refresh chains demonstrably rotate — so **some other identity is
-   performing those writes**. Resolve which before assuming the documented topology
-   is the deployed one; this is a question, not yet a defect.
+   matching the absent `/etc/agent-stack-mainnet/op-refresh.env` on the VPS —
+   **traced below.**
+
+### Traced: who actually writes the rotated refresh tokens
+
+The chain, from the workflows down:
+
+- `hosted-worker-canary.yml:236` and `deploy-production.yml:481` set
+  `ADMIN_REFRESH_TOKEN_OP: op://mainnet-smoke/admin-refresh-token-*` and
+  authenticate with the GitHub secret **`OP_SERVICE_ACCOUNT_TOKEN_MAINNET_SMOKE`**
+  (repo secret, last set **2026-07-27T10:17:33Z** — the cutover).
+- `scripts/ops/get-admin-refresh-token.mjs` performs a real write through
+  `writeOpSecret` / `persistAndVerifySecret`, including a **"write-capability
+  preflight"** before consuming the token.
+- `docs/WORKER_CANARY.md:94` describes that secret's account as a
+  "**mainnet-smoke-only service account with read/write permission**, used to
+  rotate only `admin-refresh-token-worker-canary`."
+
+So the writer is whatever account backs `OP_SERVICE_ACCOUNT_TOKEN_MAINNET_SMOKE`,
+and it needs **write on `mainnet-smoke`**. In the console the match is
+**`canary-ci-mainnet-smoke`** — expiry ~3 months, last accessed **2026-08-06
+08:46**, i.e. it is the account doing this today. It **appears nowhere in this
+repository** (`git grep canary-ci-mainnet` → no hits): created by hand, never
+recorded.
+
+**This exposes a defect in `bootstrap-mainnet-vault.mjs`, not just in the calendar.**
+The bootstrap declares the rotation account as `averray-mainnet-admin-refresh-rw`
+with `reads: ["mainnet-backend"], writes: ["mainnet-backend"]` — but **the refresh
+chains live in `mainnet-smoke`, not `mainnet-backend`**. The deployed reality is
+correct and the committed design is wrong: re-running the bootstrap today would mint
+an account with write on the wrong vault, and the rotation would fail its own
+write-capability preflight.
+
+**Confidence:** the *role* is documented and evidenced; the *specific account* is a
+strong inference from name, vault scope and a same-morning access timestamp. One
+click confirms it — open `canary-ci-mainnet-smoke` in the console and check that its
+single vault is `mainnet-smoke` with write. **Route the bootstrap correction as its
+own change**; this packet only records the finding.
 
 ### Consequences for this packet
 
