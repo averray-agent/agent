@@ -6,6 +6,11 @@ import { dirname, resolve } from "node:path";
 import { Wallet } from "ethers";
 
 import { signToken } from "../../auth/jwt.js";
+import {
+  LEGACY_MCP_VERSION,
+  MODERN_MCP_VERSION,
+  SUPPORTED_MCP_VERSIONS
+} from "../mcp/handler.js";
 
 // Smoke-level integration tests for the HTTP adapter. These start the real
 // server in a child process with a deterministic env, then exercise the
@@ -2082,29 +2087,88 @@ test("http smoke: production /metrics fails closed when token is missing", { ski
 
 test("http smoke: discovery manifest is served at both /agent-tools.json and the RFC 8615 .well-known path", { skip: !RUN }, async () => {
   await runWithServerEnv({ AUTH_CHAIN_ID: "420420419" }, async (base) => {
-    const [canonical, wellKnown, healthResponse, llmsResponse] = await Promise.all([
+    const [
+      canonical,
+      wellKnown,
+      healthResponse,
+      llmsResponse,
+      modernDiscoverResponse,
+      legacyInitializeResponse
+    ] = await Promise.all([
       fetch(`${base}/agent-tools.json`),
       fetch(`${base}/.well-known/agent-tools.json`),
       fetch(`${base}/health`),
-      fetch(`${base}/llms.txt`)
+      fetch(`${base}/llms.txt`),
+      fetch(`${base}/mcp`, {
+        method: "POST",
+        headers: {
+          accept: "application/json, text/event-stream",
+          "content-type": "application/json",
+          "MCP-Protocol-Version": MODERN_MCP_VERSION,
+          "Mcp-Method": "server/discover"
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: "modern-discover",
+          method: "server/discover",
+          params: {
+            _meta: {
+              "io.modelcontextprotocol/protocolVersion": MODERN_MCP_VERSION,
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/clientInfo": {
+                name: "manifest-honesty-smoke",
+                version: "1.0.0"
+              }
+            }
+          }
+        })
+      }),
+      fetch(`${base}/mcp`, {
+        method: "POST",
+        headers: {
+          accept: "application/json, text/event-stream",
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: "legacy-initialize",
+          method: "initialize",
+          params: {
+            protocolVersion: LEGACY_MCP_VERSION,
+            capabilities: {},
+            clientInfo: { name: "manifest-honesty-smoke", version: "1.0.0" }
+          }
+        })
+      })
     ]);
     assert.equal(canonical.status, 200);
     assert.equal(wellKnown.status, 200);
     assert.equal(healthResponse.status, 200);
     assert.equal(llmsResponse.status, 200);
+    assert.equal(modernDiscoverResponse.status, 200);
+    assert.equal(legacyInitializeResponse.status, 200);
     assert.match(canonical.headers.get("content-type") ?? "", /application\/json/);
     assert.match(wellKnown.headers.get("content-type") ?? "", /application\/json/);
     assert.match(llmsResponse.headers.get("content-type") ?? "", /text\/plain/);
-    const [canonicalBody, wellKnownBody, health] = await Promise.all([
+    const [canonicalBody, wellKnownBody, health, modernDiscover, legacyInitialize] = await Promise.all([
       canonical.json(),
       wellKnown.json(),
-      healthResponse.json()
+      healthResponse.json(),
+      modernDiscoverResponse.json(),
+      legacyInitializeResponse.json()
     ]);
     const llms = await llmsResponse.text();
     assert.deepEqual(canonicalBody, wellKnownBody, "well-known alias must return the same manifest");
     assert.equal(typeof canonicalBody.name, "string");
-    assert.deepEqual(canonicalBody.protocols, ["http"]);
-    assert.deepEqual(canonicalBody.protocolEndpoints, { http: canonicalBody.baseUrl });
+    assert.deepEqual(canonicalBody.protocols, ["http", "mcp"]);
+    assert.deepEqual(canonicalBody.protocolEndpoints, {
+      http: canonicalBody.baseUrl,
+      mcp: `${canonicalBody.baseUrl}/mcp`
+    });
+    assert.deepEqual(modernDiscover.result.supportedVersions, [...SUPPORTED_MCP_VERSIONS]);
+    assert.equal(modernDiscover.result._meta["io.modelcontextprotocol/serverInfo"].name, "averray-agent-platform");
+    assert.equal(legacyInitialize.result.protocolVersion, LEGACY_MCP_VERSION);
+    assert.ok(legacyInitializeResponse.headers.get("mcp-session-id"));
     assert.equal(canonicalBody.onboarding.walletlessArrival.limits.waiverClaimsPerWallet, 3);
     assert.match(canonicalBody.onboarding.walletlessArrival.proof.summary, /0\.40 USDC/u);
     assert.match(canonicalBody.onboarding.walletlessArrival.managedWalletInterop, /same key works on any EVM chain/u);

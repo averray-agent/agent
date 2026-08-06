@@ -437,7 +437,7 @@ const buildBaseManifest = (network) => ({
   version: "0.4.0",
   description:
     "Agent-native work and identity infrastructure on Polkadot: public job discovery, verifier-checked execution, non-transferable reputation badges, and machine-readable trust surfaces. Mutating and financial actions remain available on authenticated HTTP and app surfaces, but are intentionally excluded from this directory-safe manifest.",
-  protocols: ["http"],
+  protocols: ["http", "mcp"],
   discoveryMode: "directory-safe",
   onboarding: {
     walletlessArrival: WALLETLESS_ARRIVAL,
@@ -535,7 +535,8 @@ export function buildDiscoveryManifest({
   manifest.profile = profile;
   manifest.executionSurfaces.operatorApp = operatorAppUrl;
   manifest.protocolEndpoints = {
-    http: baseUrl
+    http: baseUrl,
+    mcp: `${baseUrl}/mcp`
   };
   manifest.schemas.jobSchemasIndex = `${baseUrl}/schemas/jobs`;
   manifest.schemas.jobSchemaPathTemplate = `${baseUrl}/schemas/jobs/<name>.json`;
