@@ -523,8 +523,14 @@ export class BankXcmV22Runtime {
     const homeDeposits = [];
 
     for (const item of forwarded.filter((entry) => entry.paraId === HYDRATION_PARA_ID)) {
-      const rawWrapperMessage = assetHub.createType("XcmVersionedXcm", item.message).toHex();
-      const wireMessage = composeOnWire(rawWrapperMessage, this.wrapperAddress);
+      const rawWrapperMessage = assetHub.createType("XcmVersionedXcm", preview.message).toHex();
+      const forwardedWireMessage = assetHub.createType("XcmVersionedXcm", item.message).toHex();
+      const wireFrame = bindForwardedWireFrame(
+        rawWrapperMessage,
+        forwardedWireMessage,
+        this.wrapperAddress
+      );
+      const wireMessage = wireFrame.composedOnWireMessage;
       const hydrationDryRun = await hydration.call.dryRunApi.dryRunXcm(
         siblingOrigin(ASSET_HUB_PARA_ID),
         wireMessage
@@ -548,8 +554,7 @@ export class BankXcmV22Runtime {
       forwardedParaIds.push(...homeward.map((entry) => entry.paraId).filter(Number.isInteger));
       wireFrames.push({
         origin: siblingOrigin(ASSET_HUB_PARA_ID),
-        rawWrapperMessage,
-        composedOnWireMessage: wireMessage,
+        ...wireFrame,
       });
       for (const home of homeward.filter((entry) => entry.paraId === ASSET_HUB_PARA_ID)) {
         const homeDryRun = await assetHub.call.dryRunApi.dryRunXcm(
@@ -997,6 +1002,26 @@ export function composeOnWire(rawWrapperMessage, wrapperAddress) {
     ...descendOrigin,
     ...raw.slice(2),
   ]));
+}
+
+/**
+ * Bind the wrapper preview to the message Asset Hub says it will put on the
+ * wire. DryRunApi.dryRun_call reports forwarded_xcms after transport framing,
+ * so framing that value again would create a second DescendOrigin. Recompute
+ * the expected frame from the contract preview, require byte equality, and
+ * simulate the runtime-returned wire bytes unchanged.
+ */
+export function bindForwardedWireFrame(rawWrapperMessage, forwardedWireMessage, wrapperAddress) {
+  const raw = hexlify(getBytes(rawWrapperMessage));
+  const forwarded = hexlify(getBytes(forwardedWireMessage));
+  const expected = composeOnWire(raw, wrapperAddress);
+  if (forwarded.toLowerCase() !== expected.toLowerCase()) {
+    throw new ValidationError("Bank XCM forwarded wire message does not match the wrapper preview frame.");
+  }
+  return {
+    rawWrapperMessage: raw,
+    composedOnWireMessage: forwarded,
+  };
 }
 
 function assertConvertedAccountWithdrawal(api, events, expectedAccountId32, label) {
