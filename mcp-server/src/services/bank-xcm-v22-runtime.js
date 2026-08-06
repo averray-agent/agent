@@ -1,4 +1,4 @@
-import { Contract, Interface, getAddress } from "ethers";
+import { Contract, Interface, getAddress, getBytes, hexlify } from "ethers";
 
 import { ConfigError, ValidationError } from "../core/errors.js";
 import { XCM_WRAPPER_ABI } from "../blockchain/abis.js";
@@ -303,6 +303,7 @@ export class BankXcmV22Runtime {
       this.getAssetHubApi(),
       this.getHydrationApi(),
     ]);
+    const wireMessage = composeOnWire(preview.message, this.wrapperAddress);
     const [
       assetHubHeader,
       assetHubTimestamp,
@@ -315,10 +316,10 @@ export class BankXcmV22Runtime {
       assetHub.query.timestamp.now(),
       hydration.rpc.chain.getHeader(),
       hydration.query.timestamp.now(),
-      hydration.call.xcmPaymentApi.queryXcmWeight(preview.message),
+      hydration.call.xcmPaymentApi.queryXcmWeight(wireMessage),
       hydration.call.dryRunApi.dryRunXcm(
         siblingOrigin(ASSET_HUB_PARA_ID),
-        preview.message
+        wireMessage
       ),
     ]);
     if (!hydrationWeight?.isOk) {
@@ -344,6 +345,12 @@ export class BankXcmV22Runtime {
 
     const hydrationJson = hydrationDryRun.toJSON();
     assertDryRunXcmComplete(hydrationJson, "Hydration home quote message");
+    assertConvertedAccountWithdrawal(
+      hydration,
+      normalizeRuntimeEvents(hydrationDryRun.toHuman()),
+      this.floatTarget.account,
+      "Hydration home quote message"
+    );
     const homeward = extractForwardedXcms(hydrationJson)
       .filter((entry) => entry.paraId === ASSET_HUB_PARA_ID);
     if (homeward.length !== 1) {
@@ -512,24 +519,47 @@ export class BankXcmV22Runtime {
     const forwarded = extractForwardedXcms(hubJson);
     const forwardedParaIds = forwarded.map((entry) => entry.paraId).filter(Number.isInteger);
     const events = normalizeRuntimeEvents(assetHubDryRun.toHuman());
+    const wireFrames = [];
+    const homeDeposits = [];
 
     for (const item of forwarded.filter((entry) => entry.paraId === HYDRATION_PARA_ID)) {
+      const rawWrapperMessage = assetHub.createType("XcmVersionedXcm", item.message).toHex();
+      const wireMessage = composeOnWire(rawWrapperMessage, this.wrapperAddress);
       const hydrationDryRun = await hydration.call.dryRunApi.dryRunXcm(
         siblingOrigin(ASSET_HUB_PARA_ID),
-        item.message
+        wireMessage
       );
       const hydrationJson = hydrationDryRun.toJSON();
       assertDryRunXcmComplete(hydrationJson, "Hydration exact message");
-      events.push(...normalizeRuntimeEvents(hydrationDryRun.toHuman()));
+      const hydrationEvents = normalizeRuntimeEvents(hydrationDryRun.toHuman());
+      events.push(...hydrationEvents);
+      if (Number(leg) === 3) {
+        assertConvertedAccountWithdrawal(
+          hydration,
+          hydrationEvents,
+          this.floatTarget.account,
+          "Hydration withdraw-home exact message"
+        );
+      }
       const homeward = extractForwardedXcms(hydrationJson);
+      if (Number(leg) === 3 && homeward.filter((entry) => entry.paraId === ASSET_HUB_PARA_ID).length !== 1) {
+        throw new ValidationError("Withdraw-home dry-run must forward exactly one message to Asset Hub.");
+      }
       forwardedParaIds.push(...homeward.map((entry) => entry.paraId).filter(Number.isInteger));
+      wireFrames.push({
+        origin: siblingOrigin(ASSET_HUB_PARA_ID),
+        rawWrapperMessage,
+        composedOnWireMessage: wireMessage,
+      });
       for (const home of homeward.filter((entry) => entry.paraId === ASSET_HUB_PARA_ID)) {
         const homeDryRun = await assetHub.call.dryRunApi.dryRunXcm(
           siblingOrigin(HYDRATION_PARA_ID),
           home.message
         );
         assertDryRunXcmComplete(homeDryRun.toJSON(), "Asset Hub home message");
-        events.push(...normalizeRuntimeEvents(homeDryRun.toHuman()));
+        const homeEvents = normalizeRuntimeEvents(homeDryRun.toHuman());
+        events.push(...homeEvents);
+        homeDeposits.push(assertAssetHubHomeDeposit(assetHub, homeEvents, this.wrapperAddress));
       }
     }
 
@@ -544,6 +574,8 @@ export class BankXcmV22Runtime {
       maxWeight: preview.maxWeight,
       forwardedParaIds: [...new Set(forwardedParaIds)],
       events,
+      wireFrames,
+      homeDeposits,
       assetHubBlockNumber: assetHubHeader.number.toNumber(),
       assetHubEndpoint: this.assetHubSubstrateEndpoint,
       hydrationEndpoint: this.hydrationSubstrateEndpoint,
@@ -924,6 +956,84 @@ function siblingOrigin(paraId) {
   return { V5: { parents: 1, interior: { X1: [{ Parachain: paraId }] } } };
 }
 
+/**
+ * Compose the transport frame Asset Hub puts on the wire for a contract-origin
+ * XCM send. `polkadotXcm.Sent` records the contract image as a separate origin
+ * and the wrapper-built payload without the prefix; Hydration receives the
+ * V5 payload with DescendOrigin prepended. Keep this byte-level and pure so a
+ * live Sent vector can pin the exact framing independently of runtime codecs.
+ */
+export function composeOnWire(rawWrapperMessage, wrapperAddress) {
+  const raw = getBytes(rawWrapperMessage);
+  if (raw.length < 3 || raw[0] !== 5) {
+    throw new ValidationError("Bank XCM wire composition requires a non-empty V5 message.");
+  }
+  const compactCount = raw[1];
+  if ((compactCount & 0x03) !== 0) {
+    throw new ValidationError("Bank XCM wire composition requires a canonical one-byte instruction count.");
+  }
+  const instructionCount = compactCount >>> 2;
+  if (instructionCount <= 0 || instructionCount >= 63) {
+    throw new ValidationError("Bank XCM wire composition instruction count is outside the supported V5 range.");
+  }
+  if (raw[2] === 0x0b) {
+    throw new ValidationError("Bank XCM wire message is already framed with DescendOrigin.");
+  }
+  const wrapper = getBytes(getAddress(wrapperAddress));
+  const accountId32 = new Uint8Array(32);
+  accountId32.set(wrapper);
+  accountId32.fill(0xee, wrapper.length);
+  const descendOrigin = Uint8Array.from([
+    0x0b, // Instruction::DescendOrigin
+    0x01, // Junctions::X1
+    0x01, // Junction::AccountId32
+    0x01, // Some(NetworkId)
+    0x02, // NetworkId::Polkadot
+    ...accountId32,
+  ]);
+  return hexlify(Uint8Array.from([
+    0x05,
+    (instructionCount + 1) << 2,
+    ...descendOrigin,
+    ...raw.slice(2),
+  ]));
+}
+
+function assertConvertedAccountWithdrawal(api, events, expectedAccountId32, label) {
+  const expected = String(expectedAccountId32).toLowerCase();
+  const matched = events.some((event) => {
+    if (!/^(tokens|currencies)$/iu.test(String(event.section)) || !/^withdrawn$/iu.test(String(event.method))) return false;
+    const who = event?.data?.who;
+    if (!who) return false;
+    try {
+      return api.createType("AccountId32", who).toHex().toLowerCase() === expected;
+    } catch {
+      return false;
+    }
+  });
+  if (!matched) {
+    throw new ValidationError(`${label} did not withdraw from the configured converted account.`);
+  }
+}
+
+function assertAssetHubHomeDeposit(api, events, wrapperAddress) {
+  const expectedAccount = `${getAddress(wrapperAddress).toLowerCase()}${"ee".repeat(12)}`;
+  for (const event of events) {
+    if (String(event.section).toLowerCase() !== "assets" || String(event.method).toLowerCase() !== "deposited") continue;
+    const assetId = Number(String(event?.data?.assetId ?? event?.data?.id ?? "").replaceAll(",", ""));
+    const who = event?.data?.who;
+    const amount = String(event?.data?.amount ?? event?.data?.balance ?? "").replaceAll(",", "");
+    if (assetId !== 1337 || !who || !/^\d+$/u.test(amount)) continue;
+    try {
+      if (api.createType("AccountId32", who).toHex().toLowerCase() !== expectedAccount) continue;
+    } catch {
+      continue;
+    }
+    return { assetId, who, amountRaw: amount };
+  }
+  throw new ValidationError("Asset Hub home dry-run did not deposit asset 1337 to the wrapper image.");
+}
+
 function extractForwardedXcms(json = {}) {
   const groups = json?.ok?.forwardedXcms ?? json?.Ok?.forwardedXcms ?? [];
   const output = [];
@@ -996,11 +1106,15 @@ function extractArrivingFungibleAmount(api, message) {
     ?? instruction.ReserveAssetDeposited
     ?? instruction.receiveTeleportedAsset
     ?? instruction.ReceiveTeleportedAsset
+    ?? instruction.withdrawAsset
+    ?? instruction.WithdrawAsset
   ));
   const assets = arrival?.reserveAssetDeposited
     ?? arrival?.ReserveAssetDeposited
     ?? arrival?.receiveTeleportedAsset
-    ?? arrival?.ReceiveTeleportedAsset;
+    ?? arrival?.ReceiveTeleportedAsset
+    ?? arrival?.withdrawAsset
+    ?? arrival?.WithdrawAsset;
   return extractFungibleAmount(assets, "reserve arrival");
 }
 
