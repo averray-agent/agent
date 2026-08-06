@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { Interface } from "ethers";
+import { Interface, getBytes } from "ethers";
 
 import {
   BankXcmV22Runtime,
+  assertConvertedAccountDeposit,
   bindForwardedWireFrame,
   composeOnWire,
-  createBankXcmV22RuntimeServices
+  createBankXcmV22RuntimeServices,
+  resolveForwardedWireFrame
 } from "./bank-xcm-v22-runtime.js";
 import { XCM_WRAPPER_ABI } from "../blockchain/abis.js";
 
@@ -35,6 +37,11 @@ const HYDRATION_USDC_LOCATION = {
 const FIND16_WRAPPER = "0xF20b35A3f85EC864127B551ce8A64446fC0ed2Bc";
 const FIND16_RAW_SENT_MESSAGE = "0x05180004010300a10f043205e514007636010013010300a10f043205e5140076360100000601010700c817a80482841e00d04300eb03000016000000a0860100000000000000000000000000a08601000000000000000000000000000404eb03000016000000140d0102040001010048df881b65e682f05ac24dc8f668a8938225e973f6ebfce08cd5a3835491e7f32c6e66ff78549d419a63766596aa9fb312f637b6e04f3639b34853021e077341db";
 const FIND16_WIRE_MESSAGE = "0x051c0b01010102f20b35a3f85ec864127b551ce8a64446fc0ed2bceeeeeeeeeeeeeeeeeeeeeeee0004010300a10f043205e514007636010013010300a10f043205e5140076360100000601010700c817a80482841e00d04300eb03000016000000a0860100000000000000000000000000a08601000000000000000000000000000404eb03000016000000140d0102040001010048df881b65e682f05ac24dc8f668a8938225e973f6ebfce08cd5a3835491e7f32c6e66ff78549d419a63766596aa9fb312f637b6e04f3639b34853021e077341db";
+// Find #20, live Asset Hub DryRunApi at block 19,134,646. The local
+// DepositReserveAsset executor transforms the wrapper preview into this
+// shorter forwarded reserve message; it is not a verbatim IXcm.send frame.
+const FIND20_FUNDING_RAW_PREVIEW = "0x051000040002043205e51400426765022b010e00040002043205e5140042676502010100c91f0813010300a10f043205e5140042676502000d0102040001010048df881b65e682f05ac24dc8f668a8938225e973f6ebfce08cd5a3835491e7f32ceaa4d5007c8154d390bbab0557a8c03d1c59c1a1b4faca8c761902241b087767";
+const FIND20_FUNDING_FORWARDED_MESSAGE = "0x05140104010300a10f043205e51400426765020a13010300a10f043205e5140042676502000d0102040001010048df881b65e682f05ac24dc8f668a8938225e973f6ebfce08cd5a3835491e7f32ceaa4d5007c8154d390bbab0557a8c03d1c59c1a1b4faca8c761902241b087767";
 const HOME_RAW_MESSAGE = "0x05140004010300a10f043205e51400821a060013010300a10f043205e51400821a0600001410010204010100a10f08130002043205e5140004000d01020400010100f20b35a3f85ec864127b551ce8a64446fc0ed2bceeeeeeeeeeeeeeeeeeeeeeee2c6e66ff78549d419a63766596aa9fb312f637b6e04f3639b34853021e077341db";
 const wrapperInterface = new Interface(XCM_WRAPPER_ABI);
 
@@ -61,6 +68,75 @@ test("forwarded wire binding refuses raw or mismatched runtime payloads", () => 
   assert.throws(
     () => bindForwardedWireFrame(FIND16_RAW_SENT_MESSAGE, mutated, FIND16_WRAPPER),
     /does not match the wrapper preview frame/u
+  );
+});
+
+test("find-20 funding consumes the runtime-transformed 110-byte message unchanged", () => {
+  assert.equal(getBytes(FIND20_FUNDING_FORWARDED_MESSAGE).length, 110);
+  assert.deepEqual(
+    resolveForwardedWireFrame({
+      leg: 0,
+      rawWrapperMessage: FIND20_FUNDING_RAW_PREVIEW,
+      forwardedWireMessage: FIND20_FUNDING_FORWARDED_MESSAGE,
+      wrapperAddress: FIND16_WRAPPER,
+    }),
+    {
+      rawWrapperMessage: FIND20_FUNDING_RAW_PREVIEW,
+      composedOnWireMessage: FIND20_FUNDING_FORWARDED_MESSAGE,
+      frameSource: "runtime_transformed_local_execute",
+    }
+  );
+});
+
+test("find-20 funding wire refuses the send-leg DescendOrigin binding", () => {
+  assert.throws(
+    () => bindForwardedWireFrame(
+      FIND20_FUNDING_RAW_PREVIEW,
+      FIND20_FUNDING_FORWARDED_MESSAGE,
+      FIND16_WRAPPER
+    ),
+    /does not match the wrapper preview frame/u
+  );
+});
+
+for (const [leg, name] of [[1, "deposit_sell"], [2, "withdraw_sell"], [3, "withdraw_home"]]) {
+  test(`find-16/17 ${name} remains bound to the composed transport frame`, () => {
+    assert.deepEqual(
+      resolveForwardedWireFrame({
+        leg,
+        rawWrapperMessage: FIND16_RAW_SENT_MESSAGE,
+        forwardedWireMessage: FIND16_WIRE_MESSAGE,
+        wrapperAddress: FIND16_WRAPPER,
+      }),
+      {
+        rawWrapperMessage: FIND16_RAW_SENT_MESSAGE,
+        composedOnWireMessage: FIND16_WIRE_MESSAGE,
+        frameSource: "composed_send_frame",
+      }
+    );
+  });
+}
+
+test("funding dry-run evidence binds asset 22, converted account, and amount", () => {
+  const converted = `0x${"48".repeat(32)}`;
+  const api = {
+    createType(type, who) {
+      assert.equal(type, "AccountId32");
+      return { toHex: () => who === "converted" ? converted : `0x${"99".repeat(32)}` };
+    }
+  };
+  const events = [
+    { section: "Tokens", method: "Deposited", data: { currencyId: "22", who: "other", amount: "580" } },
+    { section: "Tokens", method: "Deposited", data: { currencyId: "22", who: "converted", amount: "10,049,420" } },
+  ];
+  assert.deepEqual(assertConvertedAccountDeposit(api, events, converted), {
+    assetId: 22,
+    who: "converted",
+    amountRaw: "10049420",
+  });
+  assert.throws(
+    () => assertConvertedAccountDeposit(api, [events[0]], converted),
+    /did not deposit asset 22 to the configured converted account/u
   );
 });
 
