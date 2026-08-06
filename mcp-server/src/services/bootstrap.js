@@ -66,6 +66,7 @@ import {
   EvmWrapperPauseReader,
   loadBankLaneFeedConfig
 } from "./bank-lane-feed.js";
+import { TransparencyService } from "./transparency-service.js";
 import {
   UpstreamStatusPollerService,
   loadUpstreamStatusPollerConfig
@@ -444,6 +445,15 @@ export async function createPlatformRuntime() {
       }
     );
   });
+  const transparencyService = initStep("init-transparency-service", logger, () =>
+    new TransparencyService({
+      bankLaneFeed,
+      gateway,
+      platformService,
+      stateStore,
+      venueBalanceReader
+    })
+  );
   const xcmBalanceObserver = initStep("init-xcm-balance-observer", logger, () =>
     new XcmBalanceObserverService(
       stateStore,
@@ -633,6 +643,7 @@ export async function createPlatformRuntime() {
     bankXcmRuntime: bankXcmV22Services.runtime,
     bankXcmDispatcher: bankXcmV22Services.dispatcher,
     bankLaneFeed,
+    transparencyService,
     venueBalanceReader,
     xcmObservationRelay,
     upstreamStatusPoller,
