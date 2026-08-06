@@ -73,6 +73,51 @@ warnings for whoever implements this:
 2. `AWS_USE_ROLES_ANYWHERE=true` on `agent-mainnet-backend` — this path is live,
    so the Oct 12 date is load-bearing for mainnet KMS JWT signing.
 
+## Third defect: the entire MAINNET service-account set is untracked
+
+The calendar tracks five `op-token-prod-*` entries. The 2026-07-27 mainnet cutover
+introduced a **parallel set**, defined in `scripts/ops/bootstrap-mainnet-vault.mjs`
+and minted with the same hardcoded `--expires-in 90d` (line 155, asserted by
+`bootstrap-mainnet-vault.test.mjs`):
+
+| service account | reads |
+|---|---|
+| `averray-mainnet-ci-deploy` | `mainnet-ci`, `mainnet-ci-external` |
+| `averray-mainnet-vps-backend` | `mainnet-backend`, `mainnet-backend-external`, `mainnet-observability` |
+| `averray-mainnet-vps-indexer` | `mainnet-indexer` |
+| `averray-mainnet-smoke-tests` | `mainnet-smoke` |
+| `averray-mainnet-admin-refresh-rw` | `mainnet-backend` (read **+ write**) |
+
+**Not one of them appears in `docs/SECRETS_CALENDAR.yml`.** They are live: the
+bootstrap declares their consumers (`service: "mainnet-sidecar-render"`), and the
+token files exist on the VPS. Measured 2026-08-06:
+
+```
+2026-07-25 16:38  /etc/agent-stack-mainnet/op-backend.env   OP_SERVICE_ACCOUNT_TOKEN   ← mainnet, UNTRACKED
+2026-07-25 16:38  /etc/agent-stack-mainnet/op-indexer.env   OP_SERVICE_ACCOUNT_TOKEN   ← mainnet, UNTRACKED
+2026-06-30 11:13  /etc/agent-stack/op-backend.env           OP_SERVICE_ACCOUNT_TOKEN   ← the tracked prod set
+2026-06-30 11:36  /etc/agent-stack/op-indexer.env           OP_SERVICE_ACCOUNT_TOKEN
+```
+
+File mtime is when the token was written, so at the 90-day policy the mainnet pair
+lands ≈ **2026-10-23** with nothing watching it. When `averray-mainnet-vps-backend`
+expires, the mainnet backend cannot render its runtime secrets.
+
+**And the same arithmetic quietly indicts a tracked entry.** The prod pair was
+written 2026-06-30; +90d is ≈ **2026-09-28**. The calendar declares
+**2026-09-30** — optimistic by about two days, i.e. it reads green *after* the real
+expiry. That is precisely the drift `verified_at` exists to expose, and it is the
+dangerous direction.
+
+**Required:** add all five mainnet accounts as `kind: hard-expiry`. Use the real
+date if read from the admin console; otherwise `expires_at: "TBD"`, which the new
+check surfaces as "real expiry unknown — measure it". An untracked mainnet
+credential must at minimum warn. Also confirm whether
+`/etc/agent-stack-mainnet/op-refresh.env` (the declared consumer for
+`averray-mainnet-admin-refresh-rw`) exists — it was **not** present in the
+2026-08-06 listing, so either that account is consumed elsewhere or it was never
+provisioned; both are worth knowing.
+
 ## Fix contract
 
 ### 1. Schema — `docs/SECRETS_CALENDAR.yml`
@@ -226,11 +271,13 @@ ones that encode the defect:
 The five `op-token-prod-*` real expiries can only be read from 1Password, which no
 agent here can reach (service-account auth does not propagate to our shells). Pascal:
 
-```
-op service-account list
-```
+**`op service-account list` does not exist** — the CLI exposes only
+`op service-account create` and `... ratelimit` (verified against the live CLI,
+2026-08-06). Service-account expiries are readable only in the web admin:
 
-That prints each service account's creation/expiry. Send the dates and Codex sets
+> **1Password.com → Developer → Service accounts →** select each account.
+
+Read the expiry for all ten (five `prod`, five `mainnet`). Send the dates and Codex sets
 `expires_at` + `verified_at` + `verified_by: "op service-account list, <date>"`.
 Until then those five stay `hard-expiry` with a target date and **no**
 `verified_at`, which the new check surfaces as "unverified" — the honest state,
