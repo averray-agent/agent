@@ -54,16 +54,18 @@ test("legacy watch migration refuses an unaudited target account", async () => {
   );
 });
 
-test("legacy v2.2 observation is stamped with its wrapper generation", async () => {
+test("production-shaped v2.2 expiry-cancel observation is stamped with its wrapper generation", async () => {
   const store = new MemoryStateStore();
   const migration = BANK_XCM_V22_OBSERVATION_MIGRATION;
   store.xcmObservations.set(migration.requestId, {
     requestId: migration.requestId,
-    status: "succeeded",
+    status: "failed",
     settledAssets: migration.settledAssets,
     settledShares: migration.settledShares,
+    failureCode: migration.failureCode,
+    source: migration.source,
     processed: true,
-    result: { settledVia: "strategy_adapter" }
+    result: { status: "cancelled", settledVia: migration.settledVia }
   });
 
   const first = await migrateLegacyBankV22Observation(store, { logger: { info() {} } });
@@ -78,20 +80,40 @@ test("legacy v2.2 observation is stamped with its wrapper generation", async () 
   assert.equal(replay.status, "already_migrated");
 });
 
-test("legacy observation migration refuses a record that is not the audited v2.2 settlement", async () => {
+test("legacy observation migration refuses the optimistic settlement shape that failed in production", async () => {
   const store = new MemoryStateStore();
   const migration = BANK_XCM_V22_OBSERVATION_MIGRATION;
   store.xcmObservations.set(migration.requestId, {
     requestId: migration.requestId,
     status: "succeeded",
-    settledAssets: "99999",
-    settledShares: migration.settledShares,
+    settledAssets: "100000",
+    settledShares: "100000",
     processed: true
   });
 
   await assert.rejects(
     migrateLegacyBankV22Observation(store, { logger: { info() {} } }),
-    /did not match audited settledAssets/u
+    /did not match audited status/u
+  );
+});
+
+test("legacy observation migration refuses drift in the audited cancellation result", async () => {
+  const store = new MemoryStateStore();
+  const migration = BANK_XCM_V22_OBSERVATION_MIGRATION;
+  store.xcmObservations.set(migration.requestId, {
+    requestId: migration.requestId,
+    status: "failed",
+    settledAssets: migration.settledAssets,
+    settledShares: migration.settledShares,
+    failureCode: migration.failureCode,
+    source: migration.source,
+    processed: true,
+    result: { status: "succeeded", settledVia: migration.settledVia }
+  });
+
+  await assert.rejects(
+    migrateLegacyBankV22Observation(store, { logger: { info() {} } }),
+    /did not match audited result\.status/u
   );
 });
 
@@ -184,11 +206,13 @@ test("Redis observation migration removes the request-only record and stamps the
   const pendingKey = `${namespace}:xcm-observations:pending`;
   values.set(legacyKey, JSON.stringify({
     requestId: migration.requestId,
-    status: "succeeded",
+    status: "failed",
     settledAssets: migration.settledAssets,
     settledShares: migration.settledShares,
+    failureCode: migration.failureCode,
+    source: migration.source,
     processed: true,
-    result: { settledVia: "strategy_adapter" }
+    result: { status: "cancelled", settledVia: migration.settledVia }
   }));
   // A stale pending membership must not survive migration of a processed fact.
   sortedSets.set(pendingKey, new Map([[migration.requestId, 1]]));
