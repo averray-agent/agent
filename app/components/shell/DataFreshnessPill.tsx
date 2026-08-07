@@ -71,11 +71,14 @@ const STATE_TITLE: Record<FreshnessState, string> = {
 export function DataFreshnessPill({
   state,
   meta,
+  label,
   className,
 }: {
   state: FreshnessState;
   /** Optional override for the hover title — defaults are usually enough. */
   meta?: string;
+  /** Optional tile-scoped label; tone and state vocabulary stay shared. */
+  label?: string;
   className?: string;
 }) {
   const s = STATE_CLS[state];
@@ -91,7 +94,7 @@ export function DataFreshnessPill({
       title={meta ?? STATE_TITLE[state]}
     >
       <span className={cn("h-1.5 w-1.5 rounded-full", s.dot)} />
-      {STATE_LABEL[state]}
+      {label ?? STATE_LABEL[state]}
     </span>
   );
 }
