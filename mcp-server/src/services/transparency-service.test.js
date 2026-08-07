@@ -183,7 +183,7 @@ function harness(overrides = {}) {
           requestId: id,
           queuedBy: "0x631A09913B2403b18b2b659a1397916621b29b4c",
           statusLabel: "succeeded",
-          settledSharesRaw: "10000000"
+          settledSharesRaw: overrides.settledSharesRaw ?? "10000000"
         };
       },
       async getHydrationAdapterRequest(id) {
@@ -327,6 +327,59 @@ test("position economics are real-read subtractions and preserve signed growth/n
   assert.equal(result.netVsCommitted.raw, -19_628n);
   assert.match(result.growth.source, /Broadcast\.Swapped/u);
   assert.doesNotMatch(result.growth.source, /adapter.*book/iu);
+});
+
+test("rebasing deposit corroboration accepts live +1 accrual without restoring equality", async () => {
+  const payload = await harness({
+    settledSharesRaw: "10000001",
+    calibration: {
+      provenRaw: "10000001",
+      provenAtMs: NOW - 60_000,
+      provenSource: `erc20:${AUSDC}.balanceOf(${CONVERTED.slice(0, 42)})`
+    },
+    positionReading: {
+      raw: "10000844",
+      source: `erc20:${AUSDC}.balanceOf(${CONVERTED.slice(0, 42)})`,
+      readAtMs: NOW,
+      lastError: null
+    }
+  }).getSnapshot();
+
+  assert.equal(payload.treasury.position.deposited.value, "10");
+  assert.equal(payload.treasury.position.growth.value, "0.000844");
+  assert.match(payload.treasury.position.deposited.proof, /settledShares 10000001/u);
+});
+
+test("rebasing deposit corroboration refuses settledShares below the swap output", async () => {
+  const payload = await harness({ settledSharesRaw: "9999999" }).getSnapshot();
+  assert.equal(payload.treasury.position.deposited.status, "unknown");
+  assert.equal(payload.treasury.position.growth.status, "unknown");
+  assert.match(payload.treasury.position.deposited.proof, /below the authoritative Broadcast\.Swapped deposit/u);
+});
+
+test("rebasing deposit corroboration refuses excess beyond the explicit two-bps bound", async () => {
+  const payload = await harness({ settledSharesRaw: "10002001" }).getSnapshot();
+  assert.equal(payload.treasury.position.deposited.status, "unknown");
+  assert.equal(payload.treasury.position.netVsCommitted.status, "unknown");
+  assert.match(payload.treasury.position.deposited.proof, /exceeds the 2-bps rebase corroboration bound/u);
+});
+
+test("rebasing deposit corroboration applies the same monotonic bound to calibration", async (t) => {
+  const calibration = (provenRaw) => ({
+    provenRaw,
+    provenAtMs: NOW - 60_000,
+    provenSource: `erc20:${AUSDC}.balanceOf(${CONVERTED.slice(0, 42)})`
+  });
+  await t.test("refuses a calibration below the swap output", async () => {
+    const payload = await harness({ calibration: calibration("9999999") }).getSnapshot();
+    assert.equal(payload.treasury.position.deposited.status, "unknown");
+    assert.match(payload.treasury.position.deposited.proof, /below the authoritative Broadcast\.Swapped deposit/u);
+  });
+  await t.test("refuses calibration excess beyond two bps", async () => {
+    const payload = await harness({ calibration: calibration("10002001") }).getSnapshot();
+    assert.equal(payload.treasury.position.deposited.status, "unknown");
+    assert.match(payload.treasury.position.deposited.proof, /exceeds the 2-bps rebase corroboration bound/u);
+  });
 });
 
 test("missing deposited evidence makes growth and net unknown without adapter-book fallback", async () => {
