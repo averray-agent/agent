@@ -5,6 +5,8 @@ import { createJobRoutes } from "../http/job-routes.js";
 import { readJsonBody, respond } from "../http/http-helpers.js";
 import {
   createMcpToolExecutor,
+  createMcpTools,
+  DEFAULT_MCP_MAX_REQUEST_BODY_BYTES,
   MCP_TOOLS,
   MCP_WELCOME_TOKEN_BUDGET
 } from "./tools.js";
@@ -69,6 +71,10 @@ test("getPlatformCapabilities defaults to a bounded welcome and preserves the fu
   assert.equal(welcome.tools.surface, "mcp");
   assert.deepEqual(welcome.tools.names, MCP_TOOLS.map(({ name }) => name));
   assert.match(welcome.freshWallet, /only from starter jobs marked onboardingWaiverEligible/u);
+  assert.deepEqual(welcome.requestLimit, {
+    maxBodyBytes: DEFAULT_MCP_MAX_REQUEST_BODY_BYTES,
+    scope: "full request: JSON-RPC envelope + _meta"
+  });
   assert.deepEqual(welcome.fullDetail.call.arguments, { detail: "full" });
 
   // A conservative three UTF-8 bytes per token keeps the fixture below the
@@ -78,6 +84,28 @@ test("getPlatformCapabilities defaults to a bounded welcome and preserves the fu
     conservativeTokenEstimate <= MCP_WELCOME_TOKEN_BUDGET,
     `welcome estimated at ${conservativeTokenEstimate} tokens; budget is ${MCP_WELCOME_TOKEN_BUDGET}`
   );
+});
+
+test("request-heavy tools and the welcome advertise the configured complete-body limit", async () => {
+  const maxRequestBodyBytes = 32 * 1024;
+  const tools = createMcpTools({ maxRequestBodyBytes });
+  const execute = createMcpToolExecutor({
+    handleAuthRoute: async () => false,
+    handleJobRoute: async () => false,
+    handlePublicMetadataRoute: makePublicRoute({ discoveryUrl: "https://example.test/agent-tools.json" }),
+    maxRequestBodyBytes,
+    tools
+  });
+  const request = { headers: {}, socket: { remoteAddress: "127.0.0.1" } };
+  const welcome = await execute("getPlatformCapabilities", {}, { request });
+  const byName = Object.fromEntries(tools.map((entry) => [entry.name, entry]));
+
+  assert.equal(welcome.requestLimit.maxBodyBytes, maxRequestBodyBytes);
+  assert.match(welcome.requestLimit.scope, /full request: JSON-RPC envelope \+ _meta/u);
+  for (const name of ["validateJobSubmission", "submitWork"]) {
+    assert.match(byName[name].description, new RegExp(String(maxRequestBodyBytes), "u"), name);
+    assert.match(byName[name].description, /envelope and _meta/u, name);
+  }
 });
 
 test("every tool advertised by the MCP welcome resolves through this surface", async () => {

@@ -52,7 +52,8 @@ export function createMcpRoute({
   rateLimitConfig,
   readJsonBody,
   respond,
-  serverInfo = MCP_SERVER_INFO
+  serverInfo = MCP_SERVER_INFO,
+  tools = MCP_TOOLS
 }) {
   const legacySessions = new Map();
 
@@ -108,7 +109,8 @@ export function createMcpRoute({
         request,
         respond,
         response,
-        serverInfo
+        serverInfo,
+        tools
       });
       return true;
     }
@@ -126,7 +128,8 @@ export function createMcpRoute({
         request,
         respond,
         response,
-        serverInfo
+        serverInfo,
+        tools
       });
       return true;
     }
@@ -221,7 +224,8 @@ async function handleLegacyRequest({
   request,
   respond,
   response,
-  serverInfo
+  serverInfo,
+  tools
 }) {
   const sessionId = request.headers?.["mcp-session-id"];
   const session = legacySessions.get(sessionId);
@@ -273,7 +277,8 @@ async function handleLegacyRequest({
     request,
     respond,
     response,
-    serverInfo
+    serverInfo,
+    tools
   });
 }
 
@@ -288,7 +293,8 @@ async function handleModernRequest({
   request,
   respond,
   response,
-  serverInfo
+  serverInfo,
+  tools
 }) {
   const bodyVersion = meta[PROTOCOL_VERSION_META_KEY];
   const headerVersion = request.headers?.["mcp-protocol-version"];
@@ -363,7 +369,8 @@ async function handleModernRequest({
     request,
     respond,
     response,
-    serverInfo
+    serverInfo,
+    tools
   });
 }
 
@@ -378,7 +385,8 @@ async function dispatchRequest({
   request,
   respond,
   response,
-  serverInfo
+  serverInfo,
+  tools
 }) {
   if (!Object.hasOwn(message, "id")) {
     sendError(response, respond, 400, null, -32600, "This MCP method requires a JSON-RPC id.");
@@ -402,7 +410,7 @@ async function dispatchRequest({
     return;
   }
   if (message.method === "tools/list") {
-    const result = { tools: MCP_TOOLS };
+    const result = { tools };
     if (era === "modern") {
       Object.assign(result, {
         resultType: "complete",
@@ -418,7 +426,7 @@ async function dispatchRequest({
   }
   if (message.method === "tools/call") {
     const toolName = message.params?.name;
-    const toolDefinition = typeof toolName === "string" ? getMcpTool(toolName) : undefined;
+    const toolDefinition = typeof toolName === "string" ? getMcpTool(toolName, tools) : undefined;
     if (!toolDefinition) {
       sendError(response, respond, 400, message.id, -32602, `Unknown tool: ${String(toolName ?? "")}`);
       return;
