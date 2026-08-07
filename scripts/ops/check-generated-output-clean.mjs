@@ -1,23 +1,54 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+import { buildProductionDiscoveryManifestContent } from "./discovery-manifest-file.mjs";
 
 const GENERATED_PREFIXES = ["frontend/", "site/"];
 const BYPASS_TAG = "[allow-generated]";
+const VERIFIED_COMMITTED_GENERATORS = new Map([
+  ["site/.well-known/agent-tools.json", buildProductionDiscoveryManifestContent]
+]);
 
 function main() {
   const options = parseArgs(process.argv.slice(2));
   const repoRoot = git(["rev-parse", "--show-toplevel"]).trim();
   const mode = resolveMode(options);
 
-  if (process.env.ALLOW_GENERATED_EDIT === "1") {
-    console.log("check-generated-output-clean: bypassed by ALLOW_GENERATED_EDIT=1");
+  const changedFiles = listChangedFiles(mode, repoRoot);
+  const allGeneratedFiles = changedFiles.filter(isGeneratedPath);
+  const invalidVerifiedFiles = allGeneratedFiles.filter((file) => {
+    const buildExpected = VERIFIED_COMMITTED_GENERATORS.get(file);
+    if (!buildExpected) return false;
+    const current = readFileSync(join(repoRoot, file), "utf8");
+    return current !== buildExpected();
+  });
+  if (invalidVerifiedFiles.length > 0) {
+    console.error("check-generated-output-clean: committed generated source mirror drifted");
+    console.error("");
+    for (const file of invalidVerifiedFiles) {
+      console.error(`  ${file}`);
+    }
+    console.error("");
+    console.error("These committed mirrors may change only when byte-identical to their source generator.");
+    console.error("Run `npm run sync:discovery-manifest`, then stage the regenerated copy.");
+    process.exit(1);
+  }
+
+  const generatedFiles = allGeneratedFiles.filter(
+    (file) => !VERIFIED_COMMITTED_GENERATORS.has(file)
+  );
+  if (generatedFiles.length === 0) {
+    const suffix = allGeneratedFiles.length > 0
+      ? " (committed generated mirrors match their source generator)"
+      : "";
+    console.log(`check-generated-output-clean: ok${suffix}`);
     return;
   }
 
-  const changedFiles = listChangedFiles(mode, repoRoot);
-  const generatedFiles = changedFiles.filter(isGeneratedPath);
-  if (generatedFiles.length === 0) {
-    console.log("check-generated-output-clean: ok");
+  if (process.env.ALLOW_GENERATED_EDIT === "1") {
+    console.log("check-generated-output-clean: bypassed by ALLOW_GENERATED_EDIT=1");
     return;
   }
 
@@ -129,8 +160,9 @@ function printHelp() {
   node scripts/ops/check-generated-output-clean.mjs --range <base..head>
   node scripts/ops/check-generated-output-clean.mjs --last-commit
 
-Rejects committed changes under frontend/ and site/ unless ALLOW_GENERATED_EDIT=1
-is set or the checked commit range contains ${BYPASS_TAG}.`);
+Rejects committed changes under frontend/ and site/ unless they are a registered,
+byte-identical source mirror, ALLOW_GENERATED_EDIT=1 is set, or the checked commit
+range contains ${BYPASS_TAG}.`);
 }
 
 main();
