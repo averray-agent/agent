@@ -21,6 +21,10 @@ export interface TransparencyPayload {
       subject: TransparencyField<number>;
     };
   };
+  /** The chain head the reader was looking at when this snapshot was built. */
+  chain: {
+    head: TransparencyField<number>;
+  };
   flow: {
     jobsSettled: {
       last24h: TransparencyField<number>;
