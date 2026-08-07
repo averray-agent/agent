@@ -7,8 +7,13 @@ on:
     types: [completed]
   workflow_dispatch:
     inputs:
+      components:
+        description: Comma-separated components to force even when this SHA is already deployed (backend,frontend,indexer,site,caddy). Leave auto for normal change detection.
+        required: false
+        default: auto
+        type: string
       run_indexer:
-        description: Force indexer deploy for operational recovery.
+        description: Legacy indexer-only override. Leave auto when components is explicit.
         required: false
         default: auto
         type: choice
@@ -199,6 +204,7 @@ jobs:
       #   BOOTSTRAP_SELF_REPORT_* literal config values.
       # Operator action after this PR merges + one green deploy:
       #   gh secret delete RESEND_API_KEY BOOTSTRAP_SELF_REPORT_TO BOOTSTRAP_SELF_REPORT_FROM -R averray-agent/agent
+      DEPLOY_COMPONENTS: ${{ github.event_name == 'workflow_dispatch' && inputs.components || 'auto' }}
       DEPLOY_RUN_INDEXER: ${{ github.event_name == 'workflow_dispatch' && inputs.run_indexer || 'auto' }}
       DEPLOY_WAIT_FOR_READY: ${{ github.event_name == 'workflow_dispatch' && inputs.wait_for_ready || '1' }}
       DEPLOY_HEALTH_STABILITY_SEC: ${{ github.event_name == 'workflow_dispatch' && inputs.health_stability_sec || '0' }}
@@ -561,15 +567,29 @@ jobs:
             exit 1
           fi
 
+          component_toggles="$(
+            node scripts/ops/resolve-deploy-components.mjs "$DEPLOY_COMPONENTS" "$DEPLOY_RUN_INDEXER"
+          )"
+          run_backend="$(jq -r '.backend' <<<"$component_toggles")"
+          run_frontend="$(jq -r '.frontend' <<<"$component_toggles")"
+          run_indexer="$(jq -r '.indexer' <<<"$component_toggles")"
+          run_site="$(jq -r '.site' <<<"$component_toggles")"
+          run_caddy="$(jq -r '.caddy' <<<"$component_toggles")"
+          echo "Resolved deploy components: $component_toggles"
+
           remote_env=$(
-            printf 'APP_BASIC_AUTH_USER=%q APP_BASIC_AUTH_PASSWORD_HASH=%q APP_PUBLIC_SHELL=%q APP_ALLOW_PROTECTED_SHELL=%q ADMIN_JWT=%q AVERRAY_TOKEN=%q RUN_INDEXER=%q WAIT_FOR_READY=%q HEALTH_STABILITY_SEC=%q INDEXER_LOG_TAIL=%q SMOKE_CHECK_INDEXER=%q BOOTSTRAP_SELF_REPORT_SEND_NOW=%q SMOKE_CHECK_BOOTSTRAP_INSTRUMENTATION=%q SMOKE_CHECK_BOOTSTRAP_SELF_REPORT_SENT=%q SMOKE_CHECK_PRODUCT_PROOF_GATE=%q PRODUCT_PROOF_REQUIRE_WORKER_LOOP=%q PRODUCT_PROOF_REWARD_ASSET=%q INDEXER_DATABASE_SCHEMA=%q INDEXER_FRESH_SCHEMA=%q DEPLOY_ALLOW_CONTRACT_SURFACE_DRIFT=%q DEPLOY_VERIFY_CONTRACT_SOURCE=%q DEPLOY_ACTOR=%q ' \
+            printf 'APP_BASIC_AUTH_USER=%q APP_BASIC_AUTH_PASSWORD_HASH=%q APP_PUBLIC_SHELL=%q APP_ALLOW_PROTECTED_SHELL=%q ADMIN_JWT=%q AVERRAY_TOKEN=%q RUN_BACKEND=%q RUN_FRONTEND=%q RUN_INDEXER=%q RUN_SITE=%q RUN_CADDY=%q WAIT_FOR_READY=%q HEALTH_STABILITY_SEC=%q INDEXER_LOG_TAIL=%q SMOKE_CHECK_INDEXER=%q BOOTSTRAP_SELF_REPORT_SEND_NOW=%q SMOKE_CHECK_BOOTSTRAP_INSTRUMENTATION=%q SMOKE_CHECK_BOOTSTRAP_SELF_REPORT_SENT=%q SMOKE_CHECK_PRODUCT_PROOF_GATE=%q PRODUCT_PROOF_REQUIRE_WORKER_LOOP=%q PRODUCT_PROOF_REWARD_ASSET=%q INDEXER_DATABASE_SCHEMA=%q INDEXER_FRESH_SCHEMA=%q DEPLOY_ALLOW_CONTRACT_SURFACE_DRIFT=%q DEPLOY_VERIFY_CONTRACT_SOURCE=%q DEPLOY_ACTOR=%q ' \
               "$APP_BASIC_AUTH_USER_OP" \
               "$APP_BASIC_AUTH_PASSWORD_HASH_OP" \
               "$APP_PUBLIC_SHELL" \
               "$APP_ALLOW_PROTECTED_SHELL" \
               "$deploy_admin_jwt" \
               "$deploy_averray_token" \
-              "$DEPLOY_RUN_INDEXER" \
+              "$run_backend" \
+              "$run_frontend" \
+              "$run_indexer" \
+              "$run_site" \
+              "$run_caddy" \
               "$DEPLOY_WAIT_FOR_READY" \
               "$DEPLOY_HEALTH_STABILITY_SEC" \
               "$DEPLOY_INDEXER_LOG_TAIL" \

@@ -3,30 +3,26 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  buildDiscoveryManifest,
-  POLKADOT_HUB_MAINNET_CHAIN_ID
-} from "../../mcp-server/src/core/discovery-manifest.js";
+import { buildProductionDiscoveryManifestContent } from "./discovery-manifest-file.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const repoRoot = path.resolve(__dirname, "../..");
-const checkOnly = process.argv.includes("--check");
+const defaultRepoRoot = path.resolve(__dirname, "../..");
+const { checkOnly, repoRoot } = parseArgs(process.argv.slice(2));
 
 const committedTargets = [
   "discovery/agent-tools.json",
-  "discovery/.well-known/agent-tools.json"
+  "discovery/.well-known/agent-tools.json",
+  "site/.well-known/agent-tools.json"
 ];
-const generatedTargets = ["site/.well-known/agent-tools.json"];
-const targets = checkOnly ? committedTargets : [...committedTargets, ...generatedTargets];
 
-// The discovery/ copies are the committed production canonical. The site/
-// mirror is deploy output: regenerate it on sync, but do not require it to be
-// committed. All copies pin mainnet; live API stacks derive from AUTH_CHAIN_ID.
-const content = `${JSON.stringify(buildDiscoveryManifest({ chainId: POLKADOT_HUB_MAINNET_CHAIN_ID }), null, 2)}\n`;
+// All committed copies are production mirrors of the same function the API
+// serves. Pin the baked files to the production base URL and mainnet; live API
+// stacks still derive their chain from AUTH_CHAIN_ID.
+const content = buildProductionDiscoveryManifestContent();
 let drifted = false;
 
-for (const target of targets) {
+for (const target of committedTargets) {
   const file = path.join(repoRoot, target);
   const current = await readFile(file, "utf8").catch(() => "");
   if (current === content) {
@@ -45,4 +41,25 @@ if (checkOnly && drifted) {
   process.exitCode = 1;
 } else if (checkOnly) {
   console.log("Discovery manifests are in sync.");
+}
+
+function parseArgs(args) {
+  let checkOnly = false;
+  let repoRoot = defaultRepoRoot;
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--check") {
+      checkOnly = true;
+      continue;
+    }
+    if (arg === "--repo-root") {
+      const value = args[index + 1];
+      if (!value) throw new Error("--repo-root requires a path.");
+      repoRoot = path.resolve(value);
+      index += 1;
+      continue;
+    }
+    throw new Error(`Unknown argument: ${arg}`);
+  }
+  return { checkOnly, repoRoot };
 }

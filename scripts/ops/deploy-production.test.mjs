@@ -571,6 +571,42 @@ test("post-deploy site serve check fails closed when served bytes differ from th
   assert.match(run.stderr, /does not match the freshly built site\/index\.html/u);
 });
 
+test("a forced site dispatch rebuilds even when OLD_SHA equals NEW_SHA", async () => {
+  const { appRoot, stackRoot, fakeBin, stateDir, deployLog, nextSha } =
+    await makeSiteFixture();
+
+  const run = runDeploy(appRoot, {
+    PATH: `${fakeBin}:${process.env.PATH}`,
+    STACK_ROOT: stackRoot,
+    COMPOSE_FILE: join(stackRoot, "docker-compose.yml"),
+    DEPLOY_LOCK_FILE: join(appRoot, "deploy.lock"),
+    DEPLOY_STATE_DIR: stateDir,
+    DEPLOY_OLD_SHA: nextSha,
+    DEPLOY_NEW_SHA: nextSha,
+    DEPLOY_LOG: deployLog,
+    FAKE_SERVED_DIR: join(appRoot, "site"),
+    RUN_BACKEND: "0",
+    RUN_INDEXER: "0",
+    RUN_FRONTEND: "0",
+    RUN_SITE: "1",
+    RUN_CADDY: "0",
+    RUN_SMOKE: "0"
+  });
+
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(run.stdout, /No new commits/u);
+  assert.match(run.stdout, /reason: forced by RUN_SITE=1/u);
+  assert.match(await readFile(deployLog, "utf8"), /run build:site/u);
+});
+
+test("site source detection includes the discovery manifest generator", async () => {
+  const deployScript = await readFile(DEPLOY_SCRIPT, "utf8");
+  assert.match(
+    deployScript,
+    /SITE_SOURCE_PATTERN=.*mcp-server\/src\/core\/discovery-manifest\\\.js/u
+  );
+});
+
 test("frontend staleness detector seeds on first deploy and skips while frontend/ matches it", async () => {
   const { appRoot, stackRoot, fakeBin, stateDir, deployLog, baseSha, nextSha, root } =
     await makeFrontendFixture();

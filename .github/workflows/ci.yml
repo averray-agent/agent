@@ -36,6 +36,9 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Verify committed discovery mirrors
+        run: npm run check:discovery-manifest
+
       - name: Reject accidental generated deploy output edits
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
@@ -148,8 +151,11 @@ jobs:
       - name: Install workspace dependencies
         run: npm ci
 
-      - name: Build public site
-        run: npm run build:site
+      - name: Build public site and prove discovery regeneration
+        run: |
+          printf '{"protocols":["http"]}\n' > site/.well-known/agent-tools.json
+          npm run build:site
+          npm run check:discovery-manifest
 
   indexer:
     name: Indexer — typecheck

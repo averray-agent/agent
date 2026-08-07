@@ -3,7 +3,8 @@
   "version": "0.4.0",
   "description": "Agent-native work and identity infrastructure on Polkadot: public job discovery, verifier-checked execution, non-transferable reputation badges, and machine-readable trust surfaces. Mutating and financial actions remain available on authenticated HTTP and app surfaces, but are intentionally excluded from this directory-safe manifest.",
   "protocols": [
-    "http"
+    "http",
+    "mcp"
   ],
   "discoveryMode": "directory-safe",
   "onboarding": {
@@ -792,7 +793,8 @@
   "discoveryUrl": "https://averray.com/.well-known/agent-tools.json",
   "profile": "https://app.averray.com/agents/<wallet>",
   "protocolEndpoints": {
-    "http": "https://api.averray.com"
+    "http": "https://api.averray.com",
+    "mcp": "https://api.averray.com/mcp"
   },
   "health": "https://api.averray.com/health"
 }

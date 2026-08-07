@@ -72,3 +72,31 @@ test("production deploy exposes and uploads its running-system change result", a
     "workflow_run consumers need a durable bridge because job outputs are not in that event payload",
   );
 });
+
+test("production deploy maps a manual component list to forced RUN toggles", async () => {
+  const workflow = await readFile(workflowPath, "utf8");
+
+  assert.match(
+    workflow,
+    /components:[\s\S]{0,300}default: auto[\s\S]{0,120}type: string/u,
+    "workflow_dispatch must expose a comma-separated component selector"
+  );
+  assert.match(
+    workflow,
+    /DEPLOY_COMPONENTS:\s*\$\{\{\s*github\.event_name\s*==\s*'workflow_dispatch'\s*&&\s*inputs\.components\s*\|\|\s*'auto'\s*\}\}/u,
+    "automatic deploys must retain auto component detection"
+  );
+  assert.match(
+    workflow,
+    /node scripts\/ops\/resolve-deploy-components\.mjs "\$DEPLOY_COMPONENTS" "\$DEPLOY_RUN_INDEXER"/u,
+    "manual selections must be validated before reaching the VPS"
+  );
+  assert.match(
+    workflow,
+    /RUN_BACKEND=%q RUN_FRONTEND=%q RUN_INDEXER=%q RUN_SITE=%q RUN_CADDY=%q/u,
+    "every component toggle must cross the SSH boundary explicitly"
+  );
+  for (const variable of ["run_backend", "run_frontend", "run_indexer", "run_site", "run_caddy"]) {
+    assert.match(workflow, new RegExp(`"\\$${variable}"`, "u"), `${variable} must be forwarded`);
+  }
+});

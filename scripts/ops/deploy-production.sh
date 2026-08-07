@@ -47,6 +47,7 @@ RUN_INDEXER=${RUN_INDEXER:-auto}
 RUN_SITE=${RUN_SITE:-auto}
 RUN_CADDY=${RUN_CADDY:-auto}
 RUN_SMOKE=${RUN_SMOKE:-1}
+SITE_SOURCE_PATTERN='^(marketing/|site/|mcp-server/src/core/discovery-manifest\.js|scripts/sync-marketing-site\.mjs|scripts/ops/discovery-manifest-file\.mjs|package(-lock)?\.json)'
 # Runtime outcome, not intent: apply_caddy sets this only after a changed
 # configuration is installed and the Caddy restart succeeds.
 CADDY_RESTARTED=0
@@ -2122,14 +2123,34 @@ deploy() {
   # deploy range matched the site path gate. Rebuilding every deploy
   # (~45s in the docker runner) makes any such revert self-heal on the
   # next deploy; RUN_SITE=0 stays as the escape hatch for an urgent
-  # deploy while the marketing build itself is broken.
+  # deploy while the marketing build itself is broken. The source pattern is
+  # retained for an auditable build reason, not as a gate; it includes the
+  # discovery-manifest source now that build:site consumes that function.
+  local site_build_reason=""
   case "$RUN_SITE" in
     0|false|no)
       echo "Skipping public site build (RUN_SITE=$RUN_SITE) — served-site hash verification is also skipped; www.averray.com is NOT checked by this deploy"
       ;;
-    1|true|yes|auto)
+    1|true|yes)
       run_site=1
-      echo "Building public site (always rebuilt; path gate removed after the 2026-06-28 stash regression)"
+      site_build_reason="forced by RUN_SITE=$RUN_SITE"
+      ;;
+    auto)
+      run_site=1
+      if component_changed_matches site "$SITE_SOURCE_PATTERN"; then
+        site_build_reason="site source path changed"
+      else
+        site_build_reason="automatic safety rebuild; path gate removed after the 2026-06-28 stash regression"
+      fi
+      ;;
+    *)
+      echo "Invalid deploy toggle: $RUN_SITE" >&2
+      exit 1
+      ;;
+  esac
+
+  if [[ "$run_site" == "1" ]]; then
+      echo "Building public site (reason: $site_build_reason)"
       local site_hash_before site_hash_after
       site_hash_before=$(site_content_hash)
       build_site
@@ -2141,12 +2162,7 @@ deploy() {
         echo "Public site rebuild was byte-identical (${site_hash_after:0:8}); not a running-system change."
       fi
       mark_component_deployed site
-      ;;
-    *)
-      echo "Invalid deploy toggle: $RUN_SITE" >&2
-      exit 1
-      ;;
-  esac
+  fi
 
   # Phase 2 PR 2.7d.2: always run apply_caddy unless explicitly
   # disabled (RUN_CADDY=0). The old path-based `should_run caddy`
