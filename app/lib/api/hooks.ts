@@ -2,13 +2,17 @@
 
 import useSWR, { type SWRConfiguration } from "swr";
 import { swrFetcher, ApiError } from "./client";
+import { shouldRetryApiError } from "./retry-policy.js";
 import type { TransparencyPayload } from "./transparency-types";
 
 /**
  * Generic hook for public or authed GET endpoints.
  *
- * 401 responses do NOT auto-retry; the sign-in guard in the authed layout
- * watches for ApiError status 401 and bounces to /sign-in.
+ * Auth-locked responses do NOT auto-retry — a 401 has no session and a 403
+ * has no capability, and neither becomes true by asking again. The sign-in
+ * guard in the authed layout watches for ApiError status 401 and bounces to
+ * /sign-in; a 403 leaves the surface rendered as locked (see feed-presence).
+ * See ./retry-policy.js for why retrying these is not merely wasteful.
  */
 export function useApi<T = unknown>(
   path: string | null,
@@ -16,7 +20,7 @@ export function useApi<T = unknown>(
 ) {
   return useSWR<T, ApiError>(path, swrFetcher, {
     revalidateOnFocus: false,
-    shouldRetryOnError: (err) => err.status !== 401,
+    shouldRetryOnError: shouldRetryApiError,
     ...config,
   });
 }
