@@ -1453,3 +1453,165 @@ section.section { scroll-margin-top: 100px; }
    attribution rather than a call to action. */
 .footer__chain { display: inline-flex; align-items: center; gap: 7px; }
 .footer__chain img { width: 15px; height: 15px; opacity: 0.85; display: block; }
+
+/* ==========================================
+   12. THE PUBLIC RECORD (/transparency)
+   Reuses the console treatment from the hero for anything that is machine
+   output, and the paper card for anything that is a reading. Every figure
+   is mono and tabular so columns of digits line up and a stepped value is
+   visible as a change of glyph, not a change of width.
+   ========================================== */
+.band {
+  position: relative; overflow: hidden;
+  margin-top: 28px; padding: 22px 26px 20px;
+  border-radius: var(--card-radius);
+  background: var(--avy-dark); color: #f5f3ee;
+  box-shadow: var(--shadow-hero);
+}
+.band::before {
+  content: ""; position: absolute; inset: 0;
+  background-image:
+    linear-gradient(rgba(155, 215, 181, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(155, 215, 181, 0.06) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(circle at 40% 40%, black 20%, transparent 78%);
+  -webkit-mask-image: radial-gradient(circle at 40% 40%, black 20%, transparent 78%);
+  pointer-events: none;
+}
+.band > * { position: relative; z-index: 1; }
+.band__top { display: flex; justify-content: space-between; align-items: baseline; gap: 20px; flex-wrap: wrap; }
+.band__right { text-align: right; }
+.band__label {
+  font-family: var(--font-display); font-size: 10.5px; font-weight: 800;
+  letter-spacing: var(--tracking-eyebrow); text-transform: uppercase;
+  color: rgba(245, 243, 238, 0.55);
+}
+.band__height {
+  margin: 4px 0 0;
+  font-family: var(--font-mono); font-size: clamp(2rem, 4.4vw, 3.1rem);
+  font-weight: 500; letter-spacing: -0.02em; font-variant-numeric: tabular-nums;
+}
+.band__live {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-family: var(--font-display); font-size: 10.5px; font-weight: 800;
+  letter-spacing: var(--tracking-eyebrow); text-transform: uppercase; color: #8ee0b4;
+}
+.band__live i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.band__live[data-reader-state="live"] i { animation: record-pulse 2.4s var(--ease) infinite; }
+.band__live[data-reader-state="connecting"] { color: rgba(245, 243, 238, 0.55); }
+.band__live[data-reader-state="stalled"] { color: #f0c08a; }
+@keyframes record-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+.band__since { margin: 4px 0 0; font-family: var(--font-mono); font-size: 12px; color: rgba(245, 243, 238, 0.5); }
+.band__law { margin: 14px 0 0; max-width: 78ch; font-size: 12.5px; line-height: 1.55; color: rgba(245, 243, 238, 0.62); }
+.band__law b { color: rgba(245, 243, 238, 0.92); font-weight: 600; }
+
+.record-lede { margin: 52px 0 26px; max-width: 62ch; }
+.record-title {
+  margin: 10px 0 14px;
+  font-family: var(--font-display); font-weight: 700;
+  font-size: clamp(2rem, 3.6vw, 3rem); line-height: 1.08;
+  letter-spacing: -0.03em; text-wrap: balance;
+}
+.record-sub { margin: 0; font-size: 17px; line-height: 1.6; color: var(--avy-muted); }
+.record-section { margin-top: 40px; }
+.record-head { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; margin-bottom: 14px; flex-wrap: wrap; }
+.record-head h2 { margin: 0; font-family: var(--font-display); font-size: 19px; font-weight: 700; letter-spacing: -0.01em; }
+.record-aside { margin: 12px 0 0; max-width: 74ch; font-size: 13.5px; line-height: 1.6; color: var(--avy-muted); }
+
+.record-grid { display: grid; gap: 14px; }
+.record-grid--2 { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+.record-grid--3 { grid-template-columns: repeat(auto-fit, minmax(248px, 1fr)); }
+.record-grid--4 { grid-template-columns: repeat(auto-fit, minmax(212px, 1fr)); }
+
+.read {
+  position: relative; overflow: hidden;
+  padding: 17px 18px 15px;
+  border: 1px solid var(--avy-line);
+  border-radius: var(--card-radius);
+  background: var(--avy-paper-solid);
+}
+.read::after {
+  content: ""; position: absolute; left: 0; bottom: 0; height: 3px; width: 38%;
+  background: var(--avy-accent); opacity: 0.85;
+}
+.read--flat::after { display: none; }
+.read.is-stale::after { background: var(--avy-warn); }
+.read.is-unknown::after { background: var(--avy-line); }
+.read__label {
+  font-family: var(--font-display); font-size: 10.5px; font-weight: 800;
+  letter-spacing: 0.11em; text-transform: uppercase; color: var(--avy-muted);
+}
+.read__value {
+  margin: 7px 0 0;
+  font-family: var(--font-mono); font-size: 26px; font-weight: 500;
+  letter-spacing: -0.02em; font-variant-numeric: tabular-nums;
+  border-radius: 3px; transition: background-color 900ms var(--ease);
+}
+.read__value--sm { font-size: 21px; }
+.read__value--addr { font-size: 14px; word-break: break-all; }
+.read__value.stepped { background-color: var(--avy-accent-soft); }
+.read__unit { font-family: var(--font-body); font-size: 11.5px; font-weight: 600; color: var(--avy-muted); margin-left: 5px; }
+.read__pos { color: var(--avy-accent); }
+.read__neg { color: var(--avy-warn); }
+.read__src {
+  margin: 11px 0 0; padding-top: 10px;
+  border-top: 1px dashed var(--avy-line-soft);
+  font-family: var(--font-mono); font-size: 11px; line-height: 1.5;
+  color: var(--avy-muted); word-break: break-word;
+}
+.read__foot {
+  display: flex; justify-content: space-between; gap: 12px; margin-top: 6px;
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--avy-muted); opacity: 0.85;
+}
+/* An unreadable figure must not look like a small one. */
+.is-unknown .read__value,
+.is-unknown [data-value] { color: var(--avy-muted); font-size: 15px; font-style: italic; }
+.is-unknown .read__value--addr { font-size: 13px; }
+
+.panel { padding: 20px; border: 1px solid var(--avy-line); border-radius: var(--card-radius); background: var(--avy-paper-solid); }
+.panel__prose { margin: 0 0 16px; max-width: 74ch; font-size: 13.5px; line-height: 1.6; color: var(--avy-muted); }
+.panel__inner {
+  display: grid; gap: 1px;
+  grid-template-columns: repeat(auto-fit, minmax(196px, 1fr));
+  background: var(--avy-line-soft);
+  border: 1px solid var(--avy-line-soft); border-radius: var(--radius); overflow: hidden;
+}
+.panel__inner + .panel__inner { margin-top: 16px; }
+.cell { background: var(--avy-paper-solid); padding: 14px 15px; }
+.cell--warn { background: var(--avy-warn-soft); }
+.panel__note { margin-top: 16px; padding: 14px 15px; border-left: 3px solid var(--avy-warn); background: var(--avy-warn-soft); border-radius: 0 var(--radius) var(--radius) 0; }
+.panel__note-text { margin: 6px 0 0; font-size: 13px; line-height: 1.6; color: var(--avy-ink); }
+
+.comp { display: flex; height: 10px; border-radius: var(--radius-pill); overflow: hidden; gap: 2px; margin: 4px 0 14px; }
+.comp span { display: block; min-width: 3px; }
+.comp__platform { background: var(--avy-muted); }
+.comp__ingested { background: var(--avy-accent); }
+.comp__external { background: var(--avy-blue); }
+.comp__unclassified { background: var(--avy-line); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 22px; font-family: var(--font-mono); font-size: 11.5px; color: var(--avy-muted); }
+.legend > div { display: flex; align-items: center; gap: 8px; }
+.legend i { width: 9px; height: 9px; border-radius: 2px; flex: none; }
+.legend b { color: var(--avy-ink); font-weight: 500; font-variant-numeric: tabular-nums; }
+
+.log {
+  padding: 16px 20px 18px; border-radius: var(--card-radius);
+  background: var(--avy-dark); color: rgba(245, 243, 238, 0.86);
+  font-family: var(--font-mono); font-size: 12.5px; line-height: 1.9;
+}
+.log__label {
+  display: block; margin-bottom: 10px;
+  font-family: var(--font-display); font-size: 10.5px; font-weight: 800;
+  letter-spacing: var(--tracking-eyebrow); text-transform: uppercase;
+  color: rgba(245, 243, 238, 0.45);
+}
+.log__line { white-space: pre-wrap; word-break: break-word; }
+.log__dim { color: rgba(245, 243, 238, 0.45); }
+
+.laws { margin-top: 34px; display: grid; gap: 9px; max-width: 88ch; }
+.laws p { margin: 0; font-size: 13px; line-height: 1.6; color: var(--avy-muted); }
+.laws b { color: var(--avy-ink); font-weight: 600; }
+
+@media (prefers-reduced-motion: reduce) {
+  .band__live i { animation: none; }
+  .read__value { transition: none; }
+}
