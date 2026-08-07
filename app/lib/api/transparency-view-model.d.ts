@@ -13,6 +13,8 @@ export function transparencyPageFreshness(payload: TransparencyPayload | null | 
 export function worstTransparencyFreshness(fields: Array<TransparencyField<unknown>>): FreshnessState;
 export function transparencyFreshnessSentence(fields: Array<TransparencyField<unknown>>, label?: string): string;
 export function transparencyCompositionSentence(composition: TransparencyPayload["flow"]["composition24h"]): string;
+export function transparencyFlowUnreadSentence(usdcPaid: TransparencyPayload["flow"]["usdcPaid"]): string | null;
+export function transparencyGenerationSummary(generation: TransparencyPayload["treasury"]["generation"]): string;
 export function transparencyReadChanged(
   previous: Pick<TransparencyField<unknown>, "value" | "readAtMs" | "status"> | null | undefined,
   current: Pick<TransparencyField<unknown>, "value" | "readAtMs" | "status"> | null | undefined
