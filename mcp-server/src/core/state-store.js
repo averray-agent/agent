@@ -20,6 +20,13 @@ import {
 
 const DEFAULT_EVENT_LOG_RETENTION = 5_000;
 const DEFAULT_SIWE_AUTH_WALLET_RETENTION = 1_000;
+const BANK_V22_LEG_DISPATCH_TOPIC = "bank.v22_leg_dispatched";
+const BANK_V22_LEGS = new Set([
+  "deposit_funding",
+  "deposit_sell",
+  "withdraw_sell",
+  "withdraw_home"
+]);
 
 const RELEASE_CLAIM_LOCK_SCRIPT = `
 if redis.call("get", KEYS[1]) == ARGV[1] then
@@ -86,6 +93,7 @@ export class MemoryStateStore {
     this.fundedJobs = new Map();
     this.capabilityGrants = new Map();
     this.eventLog = [];
+    this.bankXcmLegDispatchEvidence = new Map();
     this.accountOverlays = new Map();
     this.policyProposals = new Map();
     this.siweAuthActivity = new Map();
@@ -483,6 +491,9 @@ export class MemoryStateStore {
   }
 
   async appendEventLog(event) {
+    if (event?.topic === BANK_V22_LEG_DISPATCH_TOPIC) {
+      await this.recordBankXcmLegDispatchEvidence(event);
+    }
     const existingIndex = this.eventLog.findIndex((entry) => entry.id === event.id);
     if (existingIndex >= 0) {
       this.eventLog.splice(existingIndex, 1);
@@ -492,6 +503,33 @@ export class MemoryStateStore {
       this.eventLog.splice(0, this.eventLog.length - DEFAULT_EVENT_LOG_RETENTION);
     }
     return event;
+  }
+
+  async recordBankXcmLegDispatchEvidence(event) {
+    const normalized = normalizeBankXcmLegDispatchEvidence(event);
+    this.bankXcmLegDispatchEvidence.set(
+      bankXcmLegDispatchStorageId(
+        normalized.data.wrapper,
+        normalized.data.requestId,
+        normalized.data.leg
+      ),
+      normalized
+    );
+    return cloneJsonRecord(normalized);
+  }
+
+  async getBankXcmLegDispatchEvidence(wrapperAddress, requestId, leg) {
+    return cloneJsonRecord(this.bankXcmLegDispatchEvidence.get(
+      bankXcmLegDispatchStorageId(wrapperAddress, requestId, leg)
+    ));
+  }
+
+  async getLatestBankXcmLegDispatchEvidence(wrapperAddress, leg) {
+    const identity = normalizeBankXcmLegIdentity(wrapperAddress, leg);
+    const candidates = [...this.bankXcmLegDispatchEvidence.values()]
+      .filter((event) => event.data.wrapper === identity.wrapperAddress && event.data.leg === identity.leg)
+      .sort(compareBankXcmLegDispatchEvidence);
+    return cloneJsonRecord(candidates.at(-1));
   }
 
   async listEventLog(filter = {}) {
@@ -1197,6 +1235,9 @@ export class RedisStateStore {
 
   async appendEventLog(event) {
     await this.connect();
+    if (event?.topic === BANK_V22_LEG_DISPATCH_TOPIC) {
+      await this.recordBankXcmLegDispatchEvidence(event);
+    }
     const id = String(event?.id ?? "");
     if (!id) return event;
     const score = timestampScore(event?.timestamp ?? "");
@@ -1210,6 +1251,44 @@ export class RedisStateStore {
       await this.client.del(staleIds.map((staleId) => this.key("event-log", staleId)));
     }
     return event;
+  }
+
+  async recordBankXcmLegDispatchEvidence(event) {
+    await this.connect();
+    const normalized = normalizeBankXcmLegDispatchEvidence(event);
+    const { wrapper, requestId, leg, blockNumber } = normalized.data;
+    const storageId = bankXcmLegDispatchStorageId(wrapper, requestId, leg);
+    await this.client.multi()
+      .set(this.key("bank-xcm-leg-dispatch", storageId), JSON.stringify(normalized))
+      .zAdd(this.key("bank-xcm-leg-dispatch", bankXcmLegDispatchIndexId(wrapper, leg)), {
+        score: blockNumber,
+        value: storageId
+      })
+      .exec();
+    return normalized;
+  }
+
+  async getBankXcmLegDispatchEvidence(wrapperAddress, requestId, leg) {
+    await this.connect();
+    const raw = await this.client.get(this.key(
+      "bank-xcm-leg-dispatch",
+      bankXcmLegDispatchStorageId(wrapperAddress, requestId, leg)
+    ));
+    return raw ? JSON.parse(raw) : undefined;
+  }
+
+  async getLatestBankXcmLegDispatchEvidence(wrapperAddress, leg) {
+    await this.connect();
+    const identity = normalizeBankXcmLegIdentity(wrapperAddress, leg);
+    const [storageId] = await this.client.zRange(
+      this.key("bank-xcm-leg-dispatch", bankXcmLegDispatchIndexId(identity.wrapperAddress, identity.leg)),
+      0,
+      0,
+      { REV: true }
+    );
+    if (!storageId) return undefined;
+    const raw = await this.client.get(this.key("bank-xcm-leg-dispatch", storageId));
+    return raw ? JSON.parse(raw) : undefined;
   }
 
   async listEventLog(filter = {}) {
@@ -1581,14 +1660,18 @@ function normalizeSiweActivityLimit(value) {
 }
 
 function normalizeXcmRequestIdentity(wrapperAddress, requestId) {
+  return {
+    wrapperAddress: normalizeXcmWrapperAddress(wrapperAddress),
+    requestId: normalizeXcmRequestId(requestId)
+  };
+}
+
+function normalizeXcmWrapperAddress(wrapperAddress) {
   const wrapper = String(wrapperAddress ?? "").toLowerCase();
   if (!/^0x[a-f0-9]{40}$/u.test(wrapper)) {
     throw new ExternalServiceError("XCM wrapperAddress must be a 20-byte address.");
   }
-  return {
-    wrapperAddress: wrapper,
-    requestId: normalizeXcmRequestId(requestId)
-  };
+  return wrapper;
 }
 
 function normalizeXcmRequestId(requestId) {
@@ -1602,6 +1685,75 @@ function normalizeXcmRequestId(requestId) {
 function xcmRequestStorageId(wrapperAddress, requestId) {
   const identity = normalizeXcmRequestIdentity(wrapperAddress, requestId);
   return `${identity.wrapperAddress}:${identity.requestId}`;
+}
+
+function normalizeBankXcmLegIdentity(wrapperAddress, leg) {
+  const wrapper = normalizeXcmWrapperAddress(wrapperAddress);
+  const normalizedLeg = String(leg ?? "").trim();
+  if (!BANK_V22_LEGS.has(normalizedLeg)) {
+    throw new ExternalServiceError(`Unsupported bank v2.2 dispatch leg: ${normalizedLeg || "missing"}.`);
+  }
+  return { wrapperAddress: wrapper, leg: normalizedLeg };
+}
+
+function normalizeBankXcmLegDispatchEvidence(event) {
+  if (event?.topic !== BANK_V22_LEG_DISPATCH_TOPIC) {
+    throw new ExternalServiceError(`Bank dispatch evidence must use topic ${BANK_V22_LEG_DISPATCH_TOPIC}.`);
+  }
+  const data = event?.data && typeof event.data === "object" ? event.data : {};
+  const identity = normalizeXcmRequestIdentity(data.wrapper, data.requestId ?? event.correlationId);
+  const { leg } = normalizeBankXcmLegIdentity(identity.wrapperAddress, data.leg);
+  const txHash = String(data.txHash ?? event.txHash ?? "").toLowerCase();
+  if (!/^0x[a-f0-9]{64}$/u.test(txHash)) {
+    throw new ExternalServiceError("Bank dispatch evidence requires a 32-byte transaction hash.");
+  }
+  const blockNumber = Number(data.blockNumber ?? event.blockNumber);
+  if (!Number.isSafeInteger(blockNumber) || blockNumber <= 0) {
+    throw new ExternalServiceError("Bank dispatch evidence requires a positive block number.");
+  }
+  const hasDryRunEvents = Array.isArray(data.dryRun?.events);
+  const hasRemoteExecutionEvent = data.remoteExecution?.event
+    && typeof data.remoteExecution.event === "object";
+  if (!hasDryRunEvents && !hasRemoteExecutionEvent) {
+    throw new ExternalServiceError(
+      "Bank dispatch evidence requires exact-message dry-run events or a chain-observed remote execution event."
+    );
+  }
+  const timestamp = new Date(event.timestamp ?? data.capturedAt ?? "");
+  if (!Number.isFinite(timestamp.getTime())) {
+    throw new ExternalServiceError("Bank dispatch evidence requires a valid capture timestamp.");
+  }
+  return cloneJsonRecord({
+    ...event,
+    topic: BANK_V22_LEG_DISPATCH_TOPIC,
+    correlationId: identity.requestId,
+    timestamp: timestamp.toISOString(),
+    data: {
+      ...data,
+      wrapper: identity.wrapperAddress,
+      requestId: identity.requestId,
+      leg,
+      txHash,
+      blockNumber
+    }
+  });
+}
+
+function bankXcmLegDispatchStorageId(wrapperAddress, requestId, leg) {
+  const identity = normalizeXcmRequestIdentity(wrapperAddress, requestId);
+  const normalizedLeg = normalizeBankXcmLegIdentity(identity.wrapperAddress, leg).leg;
+  return `${identity.wrapperAddress}:${identity.requestId}:${normalizedLeg}`;
+}
+
+function bankXcmLegDispatchIndexId(wrapperAddress, leg) {
+  const identity = normalizeBankXcmLegIdentity(wrapperAddress, leg);
+  return `${identity.wrapperAddress}:${identity.leg}:all`;
+}
+
+function compareBankXcmLegDispatchEvidence(left, right) {
+  const blockDelta = Number(left?.data?.blockNumber ?? 0) - Number(right?.data?.blockNumber ?? 0);
+  if (blockDelta !== 0) return blockDelta;
+  return String(left?.timestamp ?? "").localeCompare(String(right?.timestamp ?? ""));
 }
 
 function normalizeXcmBalanceWatchIdentity(wrapperAddress, requestId) {

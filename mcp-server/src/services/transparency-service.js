@@ -492,9 +492,17 @@ export class TransparencyService {
     const unavailable = (label, proof) => unknownPositionReading(label, configuredWrapper, this.now(), proof);
     let deposit;
     try {
-      const result = await this.stateStore.listEventLog({ topics: ["bank.v22_leg_dispatched"], limit: 500 });
-      deposit = findLatestDepositSwap(result?.events, configuredWrapper);
-      if (!deposit) throw new Error("no current-generation deposit_sell Broadcast.Swapped event in durable event log");
+      if (typeof this.stateStore.getLatestBankXcmLegDispatchEvidence !== "function") {
+        throw new Error("generation-keyed bank dispatch evidence reader is unavailable");
+      }
+      const event = await this.stateStore.getLatestBankXcmLegDispatchEvidence(
+        configuredWrapper,
+        "deposit_sell"
+      );
+      deposit = findLatestDepositSwap(event ? [event] : [], configuredWrapper);
+      if (!deposit) {
+        throw new Error("no current-generation deposit_sell Broadcast.Swapped evidence in generation-keyed store");
+      }
       const calibrationRaw = calibrationMatches(calibration, positionExpected)
         ? parseUnsignedRaw(calibration.provenRaw)
         : null;
@@ -527,8 +535,8 @@ export class TransparencyService {
     const deposited = {
       raw: deposit.raw,
       readAtMs: this.now(),
-      source: `Broadcast.Swapped{AAVE, asset 22 -> aUSDC 1003} + finalized observed ERC20 delta | wrapper ${configuredWrapper}`,
-      proof: `tx ${deposit.txHash} block ${deposit.blockNumber} event ${deposit.timestamp} request ${deposit.requestId}; finalized settledShares ${wrapperRequest.settledSharesRaw}; aUSDC calibration ${calibration.provenRaw} @ ${calibration.provenAtMs}`
+      source: `${deposit.eventSource} + finalized observed ERC20 delta | wrapper ${configuredWrapper}`,
+      proof: `${deposit.eventProof}; tx ${deposit.txHash} block ${deposit.blockNumber} event ${deposit.timestamp} request ${deposit.requestId}; finalized settledShares ${wrapperRequest.settledSharesRaw}; aUSDC calibration ${calibration.provenRaw} @ ${calibration.provenAtMs}`
     };
     try {
       const adapterRequest = await this.gateway.getHydrationAdapterRequest(deposit.requestId, wrapperRequest);
@@ -744,9 +752,14 @@ function findLatestDepositSwap(events, configuredWrapper) {
   for (const event of [...(events ?? [])].reverse()) {
     const evidence = event?.data ?? {};
     if (evidence.leg !== "deposit_sell" || !sameAddress(evidence.wrapper, configuredWrapper)) continue;
-    const swap = (evidence.dryRun?.events ?? []).find((candidate) =>
+    const remoteSwap = evidence.remoteExecution?.event;
+    const candidates = [
+      ...(remoteSwap ? [{ ...remoteSwap, evidenceKind: "remote_execution" }] : []),
+      ...(evidence.dryRun?.events ?? []).map((candidate) => ({ ...candidate, evidenceKind: "dry_run" }))
+    ];
+    const swap = candidates.find((candidate) =>
       String(candidate?.section ?? "").toLowerCase() === "broadcast"
-      && String(candidate?.method ?? "").toLowerCase() === "swapped"
+      && ["swapped", "swapped3"].includes(String(candidate?.method ?? "").toLowerCase())
       && String(candidate?.data?.fillerType ?? "").toUpperCase() === "AAVE"
       && Number(candidate?.data?.assetIn) === 22
       && Number(candidate?.data?.assetOut) === 1003
@@ -764,7 +777,20 @@ function findLatestDepositSwap(events, configuredWrapper) {
       || !Number.isSafeInteger(blockNumber)
       || blockNumber <= 0
     ) continue;
-    return { raw, requestId, txHash, blockNumber, timestamp: event.timestamp ?? evidence.capturedAt ?? "unknown" };
+    const remote = swap.evidenceKind === "remote_execution" ? evidence.remoteExecution : undefined;
+    return {
+      raw,
+      requestId,
+      txHash,
+      blockNumber,
+      timestamp: event.timestamp ?? evidence.capturedAt ?? "unknown",
+      eventSource: remote
+        ? "Hydration system.events Broadcast.Swapped3{AAVE, asset 22 -> aUSDC 1003}"
+        : "exact-message dry-run Broadcast.Swapped{AAVE, asset 22 -> aUSDC 1003}",
+      eventProof: remote
+        ? `hydration block ${remote.blockNumber} ${remote.blockHash} event ${remote.eventIndex}`
+        : "dispatch evidence exact-message dry-run"
+    };
   }
   return null;
 }

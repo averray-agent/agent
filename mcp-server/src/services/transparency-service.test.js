@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -20,8 +21,12 @@ const TREASURY_ID = "0x93511e8deef3e7ec69cc1f18a573176da9870a0fb474ab2e0c18d88a5
 const CONVERTED = "0x48df881b65e682f05ac24dc8f668a8938225e973f6ebfce08cd5a3835491e7f3";
 const AUSDC = "0x2ec4884088d84e5c2970a034732e5209b0acfa93";
 const NOW = Date.parse("2026-08-06T12:00:00.000Z");
-const DEPOSIT_REQUEST = `0x${"ab".repeat(32)}`;
-const DEPOSIT_TX = `0x${"cd".repeat(32)}`;
+const DEPOSIT_REQUEST = "0xeaa4d5007c8154d390bbab0557a8c03d1c59c1a1b4faca8c761902241b087767";
+const DEPOSIT_TX = "0x43a1cff204eb087872bdc7f5fa55ef74261cafd90863caee4720961b00e7d1af";
+const LIVE_DEPOSIT_BACKFILL = JSON.parse(readFileSync(
+  new URL("./fixtures/mainnet-bank-v221-10usdc-deposit-swap.json", import.meta.url),
+  "utf8"
+));
 
 function settlementReceipt(seed, workerAmountRaw) {
   return {
@@ -105,7 +110,7 @@ function harness(overrides = {}) {
     account: CONVERTED,
     assetId: 22
   };
-  const service = new TransparencyService({
+  const options = {
     now: () => NOW,
     stateStore: {
       async listRecentSessions(limit, offset) {
@@ -120,20 +125,21 @@ function harness(overrides = {}) {
           : "manual"
         };
       },
-      async listEventLog() {
-        if (overrides.missingDepositEvent) return { events: [], gap: false };
-        return {
-          events: [{
+      async getLatestBankXcmLegDispatchEvidence(wrapper, leg) {
+        assert.equal(wrapper, WRAPPER);
+        assert.equal(leg, "deposit_sell");
+        if (overrides.missingDepositEvent) return undefined;
+        return overrides.depositEvent ?? {
             id: "bank-deposit-sell",
             topic: "bank.v22_leg_dispatched",
             correlationId: DEPOSIT_REQUEST,
-            timestamp: "2026-08-06T10:30:00.000Z",
+            timestamp: "2026-08-06T14:15:58.745Z",
             data: {
               requestId: DEPOSIT_REQUEST,
               wrapper: WRAPPER,
               leg: "deposit_sell",
               txHash: DEPOSIT_TX,
-              blockNumber: 19_100_000,
+              blockNumber: 19_135_461,
               dryRun: {
                 events: [{
                   section: "Broadcast",
@@ -148,8 +154,6 @@ function harness(overrides = {}) {
                 }]
               }
             }
-          }],
-          gap: false
         };
       }
     },
@@ -239,9 +243,12 @@ function harness(overrides = {}) {
           }
         };
       }
-    },
-    treasuryIdentity: { nativeAccountId32: TREASURY_ID, evmLens: TREASURY }
-  });
+    }
+  };
+  if (!overrides.usePackagedTreasuryIdentity) {
+    options.treasuryIdentity = { nativeAccountId32: TREASURY_ID, evmLens: TREASURY };
+  }
+  const service = new TransparencyService(options);
   return service;
 }
 
@@ -311,6 +318,38 @@ test("transparency payload composes flow, escrow, and generation-bound treasury 
   assert.equal(payload.treasury.generation.state.value, "ok");
   assert.match(payload.treasury.lines.hydrationPosition.total.source, new RegExp(WRAPPER, "iu"));
   assert.match(payload.treasury.lines.assetHubMultisig.balance.proof, new RegExp(TREASURY_ID, "iu"));
+});
+
+test("mainnet treasury native AccountId32 resolves from the packaged custody record", async () => {
+  const payload = await harness({ usePackagedTreasuryIdentity: true }).getSnapshot();
+
+  assert.equal(payload.treasury.lines.assetHubMultisig.nativeAccountId32.value, TREASURY_ID);
+  assert.equal(payload.treasury.lines.assetHubMultisig.evmLens.value, TREASURY);
+  assert.match(payload.treasury.lines.assetHubMultisig.balance.proof, new RegExp(TREASURY_ID, "iu"));
+});
+
+test("live v2.2.1 deposit backfill resolves from the chain-observed Swapped3 event", async () => {
+  const payload = await harness({
+    depositEvent: LIVE_DEPOSIT_BACKFILL.event,
+    settledSharesRaw: "10000001",
+    positionReading: {
+      raw: "10000844",
+      source: "erc20:0x2ec4884088d84e5c2970a034732e5209b0acfa93.balanceOf(0x48df881b65e682f05ac24dc8f668a8938225e973)",
+      readAtMs: NOW,
+      lastError: null
+    },
+    calibration: {
+      provenRaw: "10000001",
+      provenAtMs: NOW - 60_000,
+      provenSource: "erc20:0x2ec4884088d84e5c2970a034732e5209b0acfa93.balanceOf(0x48df881b65e682f05ac24dc8f668a8938225e973)"
+    }
+  }).getSnapshot();
+
+  assert.equal(payload.treasury.position.deposited.value, "10");
+  assert.equal(payload.treasury.position.growth.value, "0.000844");
+  assert.match(payload.treasury.position.deposited.source, /Hydration system\.events Broadcast\.Swapped3/u);
+  assert.match(payload.treasury.position.deposited.proof, /hydration block 13488842/u);
+  assert.match(payload.treasury.position.deposited.proof, /0xb9faf57d0a029ab/u);
 });
 
 test("position economics are real-read subtractions and preserve signed growth/net", () => {
