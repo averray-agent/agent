@@ -247,8 +247,8 @@ test("expired claim on a lazy-funded mainnet job stays blocked when the reward b
 
 test("retry exhaustion takes precedence over funding-pending in the reason", () => {
   const attempts = [
-    { sessionId: "job-fund:0x1", status: "expired", claimedAt: "2026-05-01T10:00:00.000Z" },
-    { sessionId: "job-fund:0x2", status: "expired", claimedAt: "2026-05-01T10:05:00.000Z" }
+    { sessionId: "job-fund:0x1", status: "rejected", submittedAt: "2026-05-01T10:00:00.000Z" },
+    { sessionId: "job-fund:0x2", status: "rejected", submittedAt: "2026-05-01T10:05:00.000Z" }
   ];
   const status = summarizeJobClaimState({
     job: { ...OPEN_JOB, retryLimit: 2, funding: { source: "ingestion_prefund", state: "pending" } },
@@ -284,30 +284,35 @@ test("countClaimAttempts counts a session that reached submitted even if an earl
   assert.equal(countClaimAttempts(sessions), 1);
 });
 
-test("countClaimAttempts still counts normal claims, no-show expiries, and rejections", () => {
-  assert.equal(countClaimAttempts([{ sessionId: "a", claimedAt: "t", status: "claimed" }]), 1);
-  assert.equal(countClaimAttempts([{ sessionId: "b", claimedAt: "t", status: "expired" }]), 1);
+test("countClaimAttempts ignores leases and no-show expiries but counts delivered submissions", () => {
+  assert.equal(countClaimAttempts([{ sessionId: "a", claimedAt: "t", status: "claimed" }]), 0);
+  assert.equal(countClaimAttempts([{ sessionId: "b", claimedAt: "t", status: "expired" }]), 0);
   assert.equal(
     countClaimAttempts([{ sessionId: "c", claimedAt: "t", status: "rejected", submittedAt: "t2" }]),
     1
   );
 });
 
-test("countClaimAttempts counts an infra-failed claim once it reaches a terminal state (retry budget must exhaust)", () => {
-  // While the claim is still live (non-terminal), an infra-failed submit is skipped
-  // so the worker can re-submit on the same claim (preserves the original guard)...
+test("countClaimAttempts charges a terminal submit-revert loop but not its live recoverable lease", () => {
   assert.equal(
     countClaimAttempts([{ sessionId: "live", claimedAt: "t", status: "claimed", submitFailedAt: "t2" }]),
     0
   );
-  // ...but once it expires / times out without a successful re-submit, it MUST count —
-  // otherwise a job whose submit always reverts could be claimed forever.
   assert.equal(
     countClaimAttempts([{ sessionId: "exp", claimedAt: "t", status: "expired", submitFailedAt: "t2" }]),
     1
   );
   assert.equal(
     countClaimAttempts([{ sessionId: "to", claimedAt: "t", status: "timed_out", submitFailedAt: "t2" }]),
+    1
+  );
+  assert.equal(
+    countClaimAttempts([{
+      sessionId: "delivered-timeout",
+      claimedAt: "t",
+      status: "timed_out",
+      statusHistory: [{ from: "claimed", to: "submitted", at: "t2" }]
+    }]),
     1
   );
 });

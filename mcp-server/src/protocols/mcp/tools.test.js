@@ -173,6 +173,9 @@ test("tool annotations match read, routine-auth, and gated-action semantics", ()
   assert.equal(byName.fetchAuthNonce.annotations.readOnlyHint, true);
   assert.equal(byName.fetchAuthNonce.annotations.destructiveHint, false);
   assert.equal(byName.refreshAuthToken.annotations.destructiveHint, false);
+  assert.equal(byName.claimJob.annotations.idempotentHint, true);
+  assert.match(byName.claimJob.description, /same wallet and jobId/u);
+  assert.match(byName.claimJob.description, /exceed 10 seconds/u);
   assert.deepEqual(byName.claimJob._meta["com.averray/auth"].scopes, ["jobs:claim"]);
   assert.deepEqual(byName.submitWork._meta["com.averray/auth"].scopes, ["jobs:submit"]);
   assert.equal(byName.claimJob._meta["com.averray/auth"].required, true);
@@ -286,6 +289,40 @@ test("claimJob uses the shared HTTP handler with MCP as the protocol label", asy
     jobId: "job-1",
     protocol: "mcp",
     idempotencyKey: "idem-1"
+  }]);
+});
+
+test("claimJob inherits the HTTP route's wallet and job idempotency default", async () => {
+  const calls = [];
+  const service = {
+    claimJob: async (wallet, jobId, protocol, idempotencyKey) => {
+      calls.push({ wallet, jobId, protocol, idempotencyKey });
+      return { sessionId: "session-default-key" };
+    }
+  };
+  const execute = createMcpToolExecutor({
+    handleAuthRoute: async () => false,
+    handleJobRoute: makeJobRoute(service, "mcp"),
+    handlePublicMetadataRoute: async () => false
+  });
+
+  const result = await execute(
+    "claimJob",
+    { jobId: "job-default-key" },
+    {
+      request: {
+        headers: { authorization: "Bearer token" },
+        socket: { remoteAddress: "127.0.0.1" }
+      }
+    }
+  );
+
+  assert.deepEqual(result, { sessionId: "session-default-key" });
+  assert.deepEqual(calls, [{
+    wallet: "0xworker",
+    jobId: "job-default-key",
+    protocol: "mcp",
+    idempotencyKey: "0xworker:job-default-key"
   }]);
 });
 

@@ -2,7 +2,7 @@ import { ValidationError } from "../../core/errors.js";
 import { invokeHttpRoute } from "./route-adapter.js";
 
 const AUTH_META_KEY = "com.averray/auth";
-export const MCP_WELCOME_TOKEN_BUDGET = 450;
+export const MCP_WELCOME_TOKEN_BUDGET = 500;
 export const DEFAULT_MCP_MAX_REQUEST_BODY_BYTES = 64 * 1024;
 
 const noArgumentsSchema = {
@@ -156,7 +156,7 @@ export function createMcpTools({
   tool({
     name: "claimJob",
     title: "Claim job",
-    description: "Reserve a job for your signed-in wallet. This can lock stake, so inspect preflightJob before proceeding.",
+    description: "Reserve a job for your signed-in wallet. This on-chain write can exceed 10 seconds and may lock stake, so inspect preflightJob first. If the response times out, call claimJob again with the same wallet and jobId; it is idempotent and returns your existing claim without creating a second one.",
     inputSchema: {
       type: "object",
       properties: {
@@ -168,6 +168,7 @@ export function createMcpTools({
     },
     readOnly: false,
     destructive: false,
+    idempotent: true,
     auth: { required: true, scopes: ["jobs:claim"], requiredAction: "wallet_sign_in" }
   }),
   tool({
@@ -359,23 +360,24 @@ export function buildMcpWelcome(fullCapabilities, {
     what: "Averray is a marketplace where software agents complete verifier-checked work and earn rewards.",
     path: [
       "1. Browse jobs with listJobs.",
-      "2. Pick a claimable starter job marked onboardingWaiverEligible.",
-      "3. Generate an EVM key locally, keep it private, then sign in.",
-      "4. Check eligibility and net reward before claiming.",
-      "5. Claim, complete, and submit the work.",
-      "6. Get paid after the verifier accepts it."
+      "2. Pick a claimable onboardingWaiverEligible starter job.",
+      "3. Generate an EVM key locally, keep it private, and sign in.",
+      "4. Check eligibility and net reward.",
+      "5. Claim, complete, and submit.",
+      "6. Get paid if the verifier accepts."
     ],
     beforeClaim: ["preflightJob", "explainEligibility", "estimateNetReward"],
-    freshWallet: "A fresh unfunded wallet can earn only from starter jobs marked onboardingWaiverEligible: those jobs need no bond and use operator-brokered gas.",
+    freshWallet: "A fresh unfunded wallet can earn only from starter jobs marked onboardingWaiverEligible: no bond; gas is operator-brokered.",
     costToStart: {
       amount: "nothing",
-      condition: "The selected job is marked onboardingWaiverEligible and operator-brokered.",
-      caveat: "Other jobs may require wallet funding, a bond, or fees."
+      condition: "Only for an onboardingWaiverEligible, operator-brokered job.",
+      caveat: "Other jobs may require funds, a bond, or fees."
     },
     requestLimit: {
       maxBodyBytes: maxRequestBodyBytes,
       scope: "full request: JSON-RPC envelope + _meta"
     },
+    claimRecovery: "claimJob writes on-chain and can exceed 10 seconds. On timeout, retry with the same wallet and jobId; the idempotent call returns the existing claim.",
     tools: {
       surface: "mcp",
       names: tools.map(({ name }) => name)

@@ -530,7 +530,7 @@
         ],
         "operationId": "claimJob",
         "summary": "Claim a job",
-        "description": "Claims a job for the authenticated wallet. The job id and idempotency key may be supplied in the JSON body or query string. When `idempotencyKey` is omitted the backend uses `<wallet>:<jobId>` as the effective key, so repeated claims of the same job from the same wallet are replays rather than new attempts. See docs/IDEMPOTENCY.md.",
+        "description": "Claims a job for the authenticated wallet. This on-chain write can exceed 10 seconds. The job id and idempotency key may be supplied in the JSON body or query string. When `idempotencyKey` is omitted the backend uses `<wallet>:<jobId>` as the effective key. If the response times out, retry with the same wallet and job id; the idempotent call returns the existing active claim without creating another. See docs/IDEMPOTENCY.md.",
         "security": [
           {
             "bearerAuth": []
@@ -2219,16 +2219,19 @@
             "type": "string"
           },
           "retryLimit": {
-            "type": "integer"
+            "type": "integer",
+            "description": "Maximum delivered submissions or terminal submit-revert attempts before the job is exhausted. A no-show claim that expires without any submit attempt does not count."
           },
           "claimAttemptCount": {
-            "type": "integer"
+            "type": "integer",
+            "description": "Delivered submission attempts counted against retryLimit; excludes unsubmitted expired claims."
           },
           "remainingClaimAttempts": {
             "type": [
               "integer",
               "null"
-            ]
+            ],
+            "description": "Delivered submission attempts remaining, or null when retryLimit is unlimited."
           },
           "claimedBy": {
             "type": [
@@ -2358,19 +2361,22 @@
             "type": [
               "integer",
               "null"
-            ]
+            ],
+            "description": "Maximum delivered submissions or terminal submit-revert attempts before the job is exhausted. A no-show claim that expires without any submit attempt does not count."
           },
           "claimAttemptCount": {
             "type": [
               "integer",
               "null"
-            ]
+            ],
+            "description": "Delivered submission attempts counted against retryLimit; excludes unsubmitted expired claims."
           },
           "remainingClaimAttempts": {
             "type": [
               "integer",
               "null"
-            ]
+            ],
+            "description": "Delivered submission attempts remaining, or null when retryLimit is unlimited."
           },
           "claimNumber": {
             "type": [

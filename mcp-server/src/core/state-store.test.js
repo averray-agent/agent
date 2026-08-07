@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { createStateStore, MemoryStateStore } from "./state-store.js";
+import { createStateStore, MemoryStateStore, RedisStateStore } from "./state-store.js";
 import { ExternalServiceError } from "./errors.js";
 
 function silentLogger() {
@@ -452,4 +452,47 @@ test("MemoryStateStore lists recent sessions in latest-first order", async () =>
 
   const sessions = await store.listRecentSessions(2);
   assert.deepEqual(sessions.map((entry) => entry.sessionId), ["session-2", "session-1"]);
+});
+
+test("MemoryStateStore never indexes sessions under a missing idempotency key", async () => {
+  const store = new MemoryStateStore();
+  await store.upsertSession({
+    sessionId: "session-without-key-1",
+    wallet: "0xaaa",
+    jobId: "job-without-key-1",
+    status: "claimed"
+  });
+  await store.upsertSession({
+    sessionId: "session-without-key-2",
+    wallet: "0xbbb",
+    jobId: "job-without-key-2",
+    status: "claimed"
+  });
+
+  assert.equal(await store.findSessionByIdempotencyKey(undefined), undefined);
+  assert.equal(await store.findSessionByIdempotencyKey(""), undefined);
+  assert.equal((await store.getSession("session-without-key-1")).jobId, "job-without-key-1");
+  assert.equal((await store.getSession("session-without-key-2")).jobId, "job-without-key-2");
+});
+
+test("RedisStateStore never writes or reads a missing idempotency-key index", async () => {
+  const store = new RedisStateStore("redis://unused", "test");
+  const writtenKeys = [];
+  store.connect = async () => {};
+  store.client = {
+    set: async (key) => writtenKeys.push(key),
+    zAdd: async () => {}
+  };
+
+  await store.upsertSession({
+    sessionId: "redis-session-without-key",
+    wallet: "0xaaa",
+    jobId: "redis-job-without-key",
+    status: "claimed"
+  });
+
+  assert.equal(writtenKeys.some((key) => key.startsWith("test:idempotency:")), false);
+  store.connect = async () => assert.fail("missing-key lookup must return before connecting");
+  assert.equal(await store.findSessionByIdempotencyKey(undefined), undefined);
+  assert.equal(await store.findSessionByIdempotencyKey("  "), undefined);
 });

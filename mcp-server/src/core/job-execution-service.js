@@ -151,6 +151,18 @@ export class JobExecutionService {
     const refreshedActiveJobSession = activeJobSession
       ? await this.materializeExpiredClaim(activeJobSession, job)
       : undefined;
+    // Natural idempotency for the arrival path: a caller may lose the response
+    // after the claim commits and retry with a new transport/request id (or a new
+    // explicit idempotency key). The durable wallet+job claim is authoritative.
+    // Return it before allocating another session id or checking retry budget so
+    // the caller can always discover the outcome without a second chain write.
+    if (
+      refreshedActiveJobSession &&
+      !this.isTerminalSession(refreshedActiveJobSession) &&
+      walletsEqual(refreshedActiveJobSession.wallet, wallet)
+    ) {
+      return refreshedActiveJobSession;
+    }
     const jobSessions = await this.listJobSessions(jobId);
     const claimAttemptCount = countClaimAttempts(jobSessions);
     if (this.isRetryExhausted(job, claimAttemptCount)) {
@@ -776,6 +788,12 @@ function summarizeClaimEconomics(economics) {
   return Object.fromEntries(
     CLAIM_ECONOMICS_INVARIANT_FIELDS.map((field) => [field, economics?.[field]])
   );
+}
+
+function walletsEqual(left, right) {
+  return typeof left === "string"
+    && typeof right === "string"
+    && left.toLowerCase() === right.toLowerCase();
 }
 
 function claimEconomicsDifferences(prediction, authoritative) {
